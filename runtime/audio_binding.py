@@ -145,7 +145,7 @@ def _load(path):
         ("moy_aud_set_rate", [i], None),
         ("moy_aud_rate", [], i),
         ("moy_aud_render", [p, i], None),
-        ("moy_aud_stats", [C.POINTER(u32 * 12)], None),
+        ("moy_aud_stats", [C.POINTER(u32 * 13)], None),
         ("moy_aud_dump", [u32, p, i], i),
         ("moy_aud_stats_reset_max", [], None),
         ("moy_aud_trace_on", [i], None),
@@ -284,7 +284,7 @@ class Module:
         return (st, (why.value or b"").decode())
 
     def stats(self, reset=False):
-        v = (self._C.c_uint32 * 12)()
+        v = (self._C.c_uint32 * 13)()
         self._d.moy_aud_stats(self._C.byref(v))
         if reset:
             self._d.moy_aud_stats_reset_max()

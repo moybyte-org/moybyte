@@ -31,11 +31,11 @@
 
 #include "moy_aud.h"
 
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_* (mpconfigboard.h)
 #endif
 
-#if defined(ESP_PLATFORM) && defined(MOY_AUDIO_I2S_BCK)
+#if MOY_AUD_BOARD && defined(MOY_AUDIO_I2S_BCK)
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
@@ -78,6 +78,10 @@ void moy_aud_lock(void) {
     if (s_mutex != NULL) {
         xSemaphoreTake(s_mutex, portMAX_DELAY);
     }
+}
+
+int moy_aud_trylock(void) {
+    return s_mutex == NULL || xSemaphoreTake(s_mutex, 0) == pdTRUE;
 }
 
 void moy_aud_unlock(void) {
@@ -281,10 +285,14 @@ static int s_state = MOY_AUD_OUT_ABSENT;
 void moy_aud_lock(void) {
 }
 
+int moy_aud_trylock(void) {
+    return 1;
+}
+
 void moy_aud_unlock(void) {
 }
 
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
 #include "esp_timer.h"
 uint64_t moy_aud_now_us(void) {
     return (uint64_t)esp_timer_get_time();
@@ -306,7 +314,7 @@ uint64_t moy_aud_now_us(void) {
 // which plays a compiled cart's stream as it mixes it; a board without pins
 // has nothing that would.
 int moy_aud_out_plays(void) {
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
     return 0;
 #else
     return 1;
@@ -344,7 +352,7 @@ static void fixed(char *out, size_t cap, uint32_t num, uint32_t den, int places)
 }
 
 size_t moy_aud_out_probe(char *buf, size_t cap) {
-    static uint32_t last_w, w0;
+    static uint32_t last_w, w0, st0_rendered, st0_written;
     static uint64_t last_t, t0;
     moy_aud_stats_t st;
     moy_aud_stats(&st);
@@ -356,9 +364,11 @@ size_t moy_aud_out_probe(char *buf, size_t cap) {
         return 0;
     }
     if (last_t == 0u || t0 == 0u) {
-        // The first sample after sound starts is the base of both windows.
+        // The first sample after sound starts is the base of every window.
         last_w = w0 = st.written;
         last_t = t0 = now;
+        st0_rendered = st.rendered_out;
+        st0_written = st.written;
         return 0;
     }
     uint32_t rate = (uint32_t)moy_aud_rate();
@@ -368,7 +378,7 @@ size_t moy_aud_out_probe(char *buf, size_t cap) {
     char ratio[16], cum[16], seam[16];
     fixed(ratio, sizeof ratio, eff, rate, 3);
     fixed(cum, sizeof cum, ceff, rate, 4);
-    fixed(seam, sizeof seam, st.rendered, st.written, 4);
+    fixed(seam, sizeof seam, st.rendered_out - st0_rendered, st.written - st0_written, 4);
     last_w = st.written;
     last_t = now;
     uint32_t sc[4];

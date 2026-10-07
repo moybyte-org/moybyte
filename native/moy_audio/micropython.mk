@@ -5,7 +5,7 @@
 #     under the desktop VM and is compared sample by sample against libmoy
 #     (tests/test_audio_parity.py) and traced (tests/test_semantic_traces.py).
 #   * the webassembly runner -- firmware/web_runner/build.sh stages this
-#     directory and its siblings. Without ESP_PLATFORM moy_aud_out.c has no
+#     directory and its siblings. Without a board's headers moy_aud_out.c has no
 #     speaker: the page pulls render() once a frame.
 
 MOY_AUDIO_MOD_DIR := $(USERMOD_DIR)

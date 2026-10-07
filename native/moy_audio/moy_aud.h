@@ -32,6 +32,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
+// board is recognised by the header it has.
+#if defined(__has_include)
+#if __has_include("esp_heap_caps.h")
+#define MOY_AUD_BOARD 1
+#endif
+#endif
+#ifndef MOY_AUD_BOARD
+#define MOY_AUD_BOARD 0
+#endif
+
 #define MOY_AUD_SESSIONS 4u     // sessions at once: cart runs, the editor, the wallpaper
 #define MOY_AUD_CLIPS 32u       // sample clips loaded at once
 #define MOY_AUD_SAMPLE_VOICES 4 // per session, one per channel
@@ -100,8 +111,9 @@ void moy_aud_render(int16_t *out, int n);
 // session, whose state the feeder is advancing.
 int moy_aud_dump(uint32_t s, int16_t *out, int n);
 
-// What the mix and the output have done since boot. The seam is rendered
-// against written: a ratio above 1 is mixer time that never reached the speaker.
+// What the mix and the output have done since boot. The seam is rendered_out
+// against written: a ratio above 1 is mixer time that never reached the
+// speaker (a frame rendered by anything but the feeder, or a block it dropped).
 typedef struct {
     uint32_t rendered;          // frames moy_aud_render mixed
     uint32_t written;           // frames the output accepted (the feeder task)
@@ -115,6 +127,7 @@ typedef struct {
     uint32_t bank_parse_us_max; // the longest parse, outside the lock
     uint32_t hush_at;           // `rendered` when the last hush came
     uint32_t loud_at;           // `rendered` at the end of the last chunk with a non-zero sample
+    uint32_t rendered_out;      // `rendered` as the feeder's last write completed
 } moy_aud_stats_t;
 
 void moy_aud_stats(moy_aud_stats_t *st);
@@ -162,6 +175,7 @@ size_t moy_aud_out_probe(char *buf, size_t cap);
 // the clock, whether anything plays a compiled cart's stream, the shallow ring
 // that stream asks for, and what the output counts into moy_aud_stats.
 void moy_aud_lock(void);
+int moy_aud_trylock(void);      // 1: taken without waiting
 void moy_aud_unlock(void);
 uint64_t moy_aud_now_us(void);
 int moy_aud_out_plays(void);

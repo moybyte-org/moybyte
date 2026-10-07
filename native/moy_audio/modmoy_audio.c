@@ -17,10 +17,7 @@
 #include "moy_aud.h"
 #include "moy_audio.h"
 
-#if defined(ESP_PLATFORM)
-#include "py/mpconfig.h"
-#endif
-#if defined(ESP_PLATFORM) && MOY_AUDIO_CODEC_ES8311
+#if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
 #include "moy_codec_es8311.h"
 #endif
 
@@ -250,22 +247,22 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_out_obj, mod_out);
 
 // stats(reset_max=False) -> (rendered, written, underruns, verbs, trig,
 // trig_us_last, trig_us_max, lock_wait_us_max, lock_hold_us_max,
-// bank_parse_us_max, hush_at, loud_at).
+// bank_parse_us_max, hush_at, loud_at, rendered_out).
 static mp_obj_t mod_stats(size_t n_args, const mp_obj_t *a) {
     moy_aud_stats_t st;
     moy_aud_stats(&st);
     if (n_args > 0 && mp_obj_is_true(a[0])) {
         moy_aud_stats_reset_max();
     }
-    uint32_t v[12] = {st.rendered, st.written, st.underruns, st.verbs, st.trig,
+    uint32_t v[13] = {st.rendered, st.written, st.underruns, st.verbs, st.trig,
                       st.trig_us_last, st.trig_us_max, st.lock_wait_us_max,
                       st.lock_hold_us_max, st.bank_parse_us_max, st.hush_at,
-                      st.loud_at};
-    mp_obj_t t[12];
-    for (int i = 0; i < 12; i++) {
+                      st.loud_at, st.rendered_out};
+    mp_obj_t t[13];
+    for (int i = 0; i < 13; i++) {
         t[i] = mp_obj_new_int_from_uint(v[i]);
     }
-    return mp_obj_new_tuple(12, t);
+    return mp_obj_new_tuple(13, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_stats_obj, 0, 1, mod_stats);
 
@@ -300,7 +297,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_trace_obj, 0, 1, mod_trace);
 
 // codec() -> (chip_id, mismatches) on a board with a codec, else None.
 static mp_obj_t mod_codec(void) {
-#if defined(ESP_PLATFORM) && MOY_AUDIO_CODEC_ES8311
+#if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
     uint16_t id = 0;
     int bad = -1;
     moy_es8311_check(&id, &bad);

@@ -15,7 +15,7 @@
 #include "moy_audio_snd.h"
 #include "moy_htab.h"
 
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
 #include "esp_heap_caps.h"
 #endif
 
@@ -64,7 +64,7 @@ static aud_t A = {.rate = 22050, .console = 7};
 // -- memory: PSRAM on a board, the C heap elsewhere ----------------------------
 
 static void *aud_alloc(size_t n) {
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (p == NULL) {
         p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
@@ -77,7 +77,7 @@ static void *aud_alloc(size_t n) {
 
 static void aud_release(void *p, size_t n) {
     (void)n;
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
     heap_caps_free(p);
 #else
     free(p);
@@ -565,11 +565,13 @@ void moy_aud_render(int16_t *out, int n) {
     if (n <= 0) {
         return;
     }
-    uint64_t t0 = moy_aud_now_us();
-    moy_aud_lock();
-    uint64_t wait = moy_aud_now_us() - t0;
-    if (wait > A.st.lock_wait_us_max) {
-        A.st.lock_wait_us_max = (uint32_t)wait;
+    if (!moy_aud_trylock()) {           // held: time how long for
+        uint64_t t0 = moy_aud_now_us();
+        moy_aud_lock();
+        uint64_t wait = moy_aud_now_us() - t0;
+        if (wait > A.st.lock_wait_us_max) {
+            A.st.lock_wait_us_max = (uint32_t)wait;
+        }
     }
     aud_sess_t *r = A.focus;
     if (r != NULL) {
@@ -616,8 +618,11 @@ int moy_aud_dump(uint32_t s, int16_t *out, int n) {
 }
 
 void moy_aud_count_out(uint32_t written, uint32_t underruns) {
+    moy_aud_lock();
     A.st.written += written;
     A.st.underruns += underruns;
+    A.st.rendered_out = A.st.rendered;
+    moy_aud_unlock();
 }
 
 void moy_aud_stats(moy_aud_stats_t *st) {

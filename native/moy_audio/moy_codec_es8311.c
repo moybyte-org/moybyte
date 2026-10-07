@@ -4,12 +4,13 @@
 // Waveshare's demo's).
 
 #include "moy_codec_es8311.h"
+#include "moy_aud.h"            // MOY_AUD_BOARD
 
-#ifdef ESP_PLATFORM
+#if MOY_AUD_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_CODEC_ES8311
 #endif
 
-#if defined(ESP_PLATFORM) && MOY_AUDIO_CODEC_ES8311
+#if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
 
 #include <stddef.h>
 
@@ -31,11 +32,13 @@ static int rd(uint8_t dev, uint8_t reg, uint8_t *v) {
 }
 
 // What the sequence leaves in each register it sets, in the order it writes
-// them: the clock tree for 256 fs (pre-divider 1, multiplier 1, ADC and DAC
-// dividers 1, single speed, LRCK 256, the 0x10 oversampling), the serial port
-// as a 16-bit I2S slave, then the power-up, DAC on, output to the driver, the
-// equaliser bypassed, 0 dB, unmuted.
+// them: the I2C noise filter and the references (esp_codec_dev's open), the
+// clock tree for 256 fs (pre-divider 1, multiplier 1, ADC and DAC dividers 1,
+// single speed, LRCK 256, the 0x10 oversampling), the serial port as a 16-bit
+// I2S slave, then the power-up, DAC on, output to the driver, the equaliser
+// bypassed, 0 dB, unmuted.
 static const uint8_t SEQ[][2] = {
+    {0x44, 0x08}, {0x0B, 0x00}, {0x0C, 0x00}, {0x10, 0x1F}, {0x11, 0x7F},
     {0x01, 0x3F}, {0x02, 0x00}, {0x05, 0x00}, {0x03, 0x10}, {0x04, 0x10},
     {0x07, 0x00}, {0x08, 0xFF}, {0x06, 0x03},
     {0x09, 0x0C}, {0x0A, 0x0C},
@@ -66,8 +69,10 @@ const char *moy_es8311_init(int rate) {
     }
     vTaskDelay(pdMS_TO_TICKS(20));
     wr(dev, 0x00, 0x00);
-    wr(dev, 0x00, 0x80);                                // power on, slave
     for (size_t i = 0; i < sizeof(SEQ) / sizeof(SEQ[0]); i++) {
+        if (SEQ[i][0] == 0x01) {
+            wr(dev, 0x00, 0x80);                        // power on, slave
+        }
         if (wr(dev, SEQ[i][0], SEQ[i][1]) != MOY_BUS_OK) {
             return "an ES8311 register write failed";
         }
