@@ -8,7 +8,9 @@
 
 #include "moy_crash.h"
 
-#if defined(ESP_PLATFORM)
+// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
+// board is known by its headers.
+#if __has_include("esp_attr.h")
 #include "esp_attr.h"
 #define MOY_CRASH_IRAM IRAM_ATTR
 #else
