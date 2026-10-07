@@ -243,13 +243,15 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   VFS shadowing rule (the internal store root is `/moy/carts`) are the
   Waveshare README's.
 - **A TF card is the P4 boards' cart store when one mounts**
-  (`device/card_store.py` over `p4_desktop.p4_card`: LDO4 poke, SDMMC slot 0,
-  `vfs.mount` once at boot; FAT32 and exFAT, the latter being
-  `MICROPY_FATFS_EXFAT` in each `mpconfigboard.h`). The store is
+  (`device/card_store.py` over `p4_desktop.p4_card`: LDO4 poke, then
+  `moy_sd.mmc` bringing SDMMC slot 0 up once, never torn down (slot 1 is
+  ESP-Hosted's), then the store's card volume `moy_store.card` with its read
+  cache; FAT32 and exFAT, the latter being `MICROPY_FATFS_EXFAT` in each
+  `mpconfigboard.h`). The store is
   `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a dead
   one or a filesystem the build cannot read all boot on the internal store with
-  one line, and `card_store.STATUS` is the verdict. `machine.SDCard` builds
-  without touching the card, so an EMPTY slot surfaces as `vfs.mount`'s EBUSY.
+  one line, and `card_store.STATUS` is the verdict. An EMPTY slot surfaces as
+  `moy_sd.mmc`'s `card_init` error, named the way a failed mount is.
   The OTA directory and the BLE bond store stay internal. Never format or erase
   a card from the console.
 - **A compiled cart's blit565 frame skips the game canvas**
