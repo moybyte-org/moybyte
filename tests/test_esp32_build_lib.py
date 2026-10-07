@@ -1374,6 +1374,7 @@ def _config_board(tmp_path):
 
 
 def _config_guard(bd, out, **env):
+    env.setdefault("BOARD_DIR", str(bd))
     r = sh("moybyte_native_config_guard '%s'" % out, REPO_ROOT=str(ROOT),
            SCRIPT_DIR=str(bd), BUILD_PYTHON=sys.executable, **env)
     assert r.returncode == 0, r.stderr
@@ -1413,3 +1414,16 @@ def test_a_changed_impl_hook_starts_genhdr_afresh(tmp_path):
     assert _config_guard(bd, out, MOY_SPINE_IMPL="py") is False
     (out / "genhdr").mkdir()
     assert _config_guard(bd, out, MOY_SPINE_IMPL="py", CI="1") is True  # not a hook
+
+
+def test_a_changed_board_header_starts_genhdr_afresh(tmp_path):
+    """mpconfigboard.h turning a port module off (MICROPY_PY_BLUETOOTH 0) left
+    `undefined reference to mp_module_bluetooth` until genhdr was deleted."""
+    bd, out = _config_board(tmp_path)
+    hdr = bd / "mpconfigboard.h"
+    hdr.write_text("#define MICROPY_PY_BLUETOOTH (1)\n", encoding="utf-8")
+    _config_guard(bd, out)
+    (out / "genhdr").mkdir(exist_ok=True)
+    assert _config_guard(bd, out) is True
+    hdr.write_text("#define MICROPY_PY_BLUETOOTH (0)\n", encoding="utf-8")
+    assert _config_guard(bd, out) is False

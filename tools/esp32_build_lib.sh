@@ -586,6 +586,11 @@ moybyte_native_config() {
   {
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" list-native "${SCRIPT_DIR}"
     env | { grep -E '^MOY_([A-Z]+_IMPL|INDEX_BENCH)=' || true; } | sort
+    # The board's own switches (MICROPY_PY_BLUETOOTH, MOY_NET_*) decide which
+    # modules a source registers, as surely as a take or a deny does.
+    if [ -n "${BOARD_DIR:-}" ] && [ -f "${BOARD_DIR}/mpconfigboard.h" ]; then
+      cksum < "${BOARD_DIR}/mpconfigboard.h" | cut -d' ' -f1
+    fi
   } | tr '\n' ' '
 }
 
