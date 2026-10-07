@@ -93,9 +93,9 @@ NATIVE = {
     # compiles everywhere unless MOY_INDEX_IMPL=py, the spine only when
     # MOY_SPINE_IMPL=c (hooks in tools/moy_index_spike.py). moy_kernel, the
     # kernel's entry, crash record and recovery floor, is TAKEN by every
-    # console and denied by the Zero (each board.toml says why). moy_glass,
+    # board, the Zero's floor serial only (each board.toml says why). moy_glass,
     # moy_input and moy_net, sprint 3's kernel modules, stage on every console
-    # and compile to nothing until their passes fill them; the Zero takes
+    # (moy_input compiles to nothing until its pass fills it); the Zero takes
     # moy_net alone.
     #
     # The same shared usermods, plus this board's own panel backend -- and
@@ -133,14 +133,14 @@ NATIVE = {
                    "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
                    "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
-    # running on it. `moy_web` is the only shared C module it compiles in by
-    # default (moy_index, moy_spine and moy_net stage and compile to nothing,
-    # above), and
+    # running on it. Besides the store, the kernel's entry (a serial-only
+    # floor) and moy_net, the links its webhost serves, `moy_web` is the
+    # shared C module it compiles in, and
     # it is the module that justifies the board having an image at all -- the
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web", "moy_index", "moy_store", "moy_spine", "moy_net"},
+    "zero": {"moy_web", "moy_index", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
             "moy_input", "moy_net"},
@@ -165,18 +165,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
-                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
                        "native_build", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "native_build",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "native_build",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -185,7 +185,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-             "audio_binding", "lua_binding", "gfx_binding", "glass_binding",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding",
              "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -193,7 +193,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "native_build", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 

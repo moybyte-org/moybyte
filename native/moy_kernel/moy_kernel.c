@@ -21,7 +21,8 @@
 // feeder and the bus are untouched when the floor brings them up. Every choice
 // on it (RETRY, SAFE, REPL) is a restart with that choice armed, for the same
 // reason. The board's panel module gives it four entry points
-// (MOY_KERNEL_PANEL(init|fb|present|backlight)), the board names its input in
+// (MOY_KERNEL_PANEL(init|fb|present|backlight)) -- a board with no panel names
+// none and its floor is serial only -- the board names its input in
 // mpconfigboard.h, and serial works on every board: `retry`, `safe`, `repl`,
 // `state`, with `KERNEL recovery ...` printed every few seconds.
 //
@@ -113,17 +114,16 @@
 #error "moy_kernel keeps its crash record in RTC memory, which this chip lacks"
 #endif
 
-#ifndef MOY_KERNEL_PANEL
-#error "moy_kernel: the board names its panel's kernel entry points (MOY_KERNEL_PANEL) in mpconfigboard.h"
-#endif
-
 #define MP_TASK_PRIORITY (ESP_TASK_PRIO_MIN + 1)        // main.c's
 
-// The panel module's four entry points.
+#ifdef MOY_KERNEL_PANEL
+// The panel module's four entry points. A board with no panel (the headless
+// Zero) names none, and its floor is serial only.
 int MOY_KERNEL_PANEL(init)(void);
 uint16_t *MOY_KERNEL_PANEL(fb)(void);
 int MOY_KERNEL_PANEL(present)(void);
 void MOY_KERNEL_PANEL(backlight)(int on);
+#endif
 
 // The port's, extern without a header (the second by
 // patches/esp32_native_code_free.patch, whose header half is not on a P4).
@@ -558,12 +558,14 @@ static void k_draw(k_floor_t *k) {
     if (k->fb == NULL) {
         return;
     }
+    #ifdef MOY_KERNEL_PANEL
     moy_recovery_render(k->fb, &k->g, &k->v);
     k->crc = moy_crash_crc32(0, k->fb, (size_t)k->g.fb_w * k->g.fb_h * 2);
     int e = MOY_KERNEL_PANEL(present)();
     if (e != 0) {
         k_printf("KERNEL recovery present err=0x%x\r\n", e);
     }
+    #endif
 }
 
 static void k_report(const k_floor_t *k) {
@@ -611,12 +613,15 @@ static void moy_kernel_recovery(int why) {
         "SERIAL: retry / safe / repl";
         #endif
     k.why = why;
+    #ifdef MOY_KERNEL_PANEL
     moy_rgeom_init(&k.g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
                    MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
+    #endif
     moy_recovery_view(&k.v, why, moy_kernel_last_crash(), MOY_FW_LABEL, hint);
     #if defined(MOY_KERNEL_IDLE_SAFE_MS)
     k.v.sel = 1;
     #endif
+    #ifdef MOY_KERNEL_PANEL
     int e = MOY_KERNEL_PANEL(init)();
     if (e == 0) {
         k.fb = MOY_KERNEL_PANEL(fb)();
@@ -625,6 +630,7 @@ static void moy_kernel_recovery(int why) {
     }
     k_draw(&k);
     MOY_KERNEL_PANEL(backlight)(1);
+    #endif
     k_report(&k);
 
     #if defined(MOY_KERNEL_BUTTON_GPIO)

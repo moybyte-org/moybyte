@@ -38,7 +38,7 @@ except Exception:  # noqa: BLE001 -- host / CPython
 try:                       # the request parser and response writer (pure)
     from moy_net import http_response, parse_request
 except ImportError:        # host: the runtime package
-    from runtime.moy_net import http_response, parse_request
+    from runtime.net_binding import http_response, parse_request
 
 # PORT 80, the one a browser assumes (owner decision, 2026-08-29 -- it was 8080
 # from the start, as a bare constant with no argument behind it).

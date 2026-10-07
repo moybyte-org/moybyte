@@ -31,7 +31,7 @@ if MODULES not in sys.path:
     sys.path.insert(0, MODULES)
 
 import moy_webserver as web  # noqa: E402  (the DEVICE transport core)
-from runtime import moy_net  # noqa: E402  (its parser and writer)
+from runtime import net_binding as moy_net  # noqa: E402  (its parser and writer)
 
 
 # ---------------------------------------------------------------------------

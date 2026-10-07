@@ -369,15 +369,15 @@ def test_every_board_decides_the_wasm_engine(board):
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_board_decides_the_kernel_entry(board):
     """Taking native/moy_kernel hands app_main to the kernel
-    (docs/kernel_spine_2026-10.md §8): every console takes it, and the Zero
-    keeps the port's entry, each in writing."""
+    (docs/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
+    with a serial-only floor (docs/kernel_survival_2026-10.md section 6.5)."""
     takes = board_config.native_takes(BOARDS[board])
     denies = board_config.native_denials(BOARDS[board])
     assert "moy_kernel" in takes or "moy_kernel" in denies, (
         "%s/board.toml neither takes nor denies moy_kernel" % board)
     staged = "moy_kernel" in board_config.native_modules(BOARDS[board], ROOT)
-    assert staged == (board in CONSOLE_BOARDS), (
-        "%s: the kernel is the entry on every console board" % board)
+    assert staged == (board in CONSOLE_BOARDS or "zero" in board), (
+        "%s: the kernel is the entry on every ESP32 board" % board)
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))

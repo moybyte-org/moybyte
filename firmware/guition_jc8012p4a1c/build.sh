@@ -61,7 +61,6 @@ moybyte_patch_esp_hosted_bump esp32p4
 
 # 2d) Un-static esp_native_code_free_all (#66) -- shared with every board.
 moybyte_patch_native_code_free
-moybyte_patch_espnow_ring_race
 
 # The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
 # host sent during the bootloader, instead of leaving it in the FIFO for a

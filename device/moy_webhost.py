@@ -138,7 +138,7 @@ from moy_webserver import WebServer, FileResponse, ChunkedResponse, BlobResponse
 try:
     from moy_net import http_response, query_param
 except ImportError:        # host: the runtime package
-    from runtime.moy_net import http_response, query_param
+    from runtime.net_binding import http_response, query_param
 
 # The tree's one clock shim (runtime/ticks.py), staged to every board and
 # importable on the host -- so the closing grace window below is testable

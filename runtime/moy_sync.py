@@ -154,7 +154,7 @@ except ImportError:  # host / CPython: the runtime package
 try:
     from moy_net import decode_batch, encode_batch
 except ImportError:  # pragma: no cover - host package lane
-    from runtime.moy_net import decode_batch, encode_batch
+    from runtime.net_binding import decode_batch, encode_batch
 try:
     from moy_store_base import store_path
 except ImportError:  # host / CPython: the runtime package

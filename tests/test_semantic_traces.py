@@ -96,7 +96,7 @@ CrashGuard.
 EXTENDED 2026-10-07 (#224, sprint 3's carve, before the survival set
 crosses): five more, one per twin -- input (runtime/moy_input.py), the glass
 (native/moy_glass under device_canvas, since sprint 3's pass 1), the frame loop
-(runtime/frame_loop.py), the links (runtime/moy_net.py, runtime/moy_sync.py
+(runtime/frame_loop.py), the links (native/moy_net, runtime/moy_sync.py
 and device/moy_ota_health.py) and audio sessions (runtime/audio_session.py).
 Each is pinned on every VM and over the native spine; the section above the
 drivers says what each logs.
@@ -1643,7 +1643,13 @@ import sys
 sys.path.insert(0, @RUNTIME@)
 sys.path.insert(0, @DEVICE@)
 
-import moy_net
+try:
+    import moy_net
+except ImportError:                         # CPython: the C over ctypes
+    sys.path.insert(0, @REPO@)
+    from runtime import net_binding
+    net_binding.install()
+    import moy_net
 import moy_sync
 import moy_ota_health
 from moy_ota_health import SlotHealth

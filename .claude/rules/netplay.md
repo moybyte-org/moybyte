@@ -44,11 +44,9 @@ belongs here is only what a coder must not undo:
   are 10% duty + passive now; only the user-facing picker scans continuously.
   If a radio symptom appears only while the loop RUNS, suspect the scan first
   (`device/ble_keyboard.py` has the numbers).
-- **modespnow's ring race is patched in every board build**
-  (`patches/esp32_espnow_ring_race.patch`): the upstream reader raises
-  `buffer error` on a healthy ring when it catches a record mid-write, and
-  the ring then really is desynced. `_recover()` re-applies the PHY rate (an
-  active() cycle silently resets it to 1M) and counts itself in stats().
+- **The link's receive ring is the kernel's** (`native/moy_net/moy_link.c`,
+  `moy_net.Link`); the port's espnow module is out of the console images.
+  `docs/netplay_v1.md` has why and what `_recover()` still does.
 - **The tuning recipe is ORDER-SENSITIVE and the ack LIES.** `rxbuf` before
   `active(True)`, the rate after. Both facts cost a session to learn; the module
   header carries each one beside the number that taught it.

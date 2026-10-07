@@ -95,3 +95,8 @@
 // index already reaches every slot, and it runs no cart -- the lever was
 // measured on the console boards' cart frame (#77), which this board has not
 // got.
+
+// The kernel's recovery floor (native/moy_kernel): no panel, so it is serial
+// only, and a floor nobody answers takes SAFE after this long -- the board's
+// only interface is its USB port, and it must never wait there forever.
+#define MOY_KERNEL_IDLE_SAFE_MS             (30000)

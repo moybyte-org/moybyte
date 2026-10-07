@@ -9,12 +9,14 @@
 #define MICROPY_HW_MCU_NAME "ESP32P4"
 #endif
 
-// ON since 2026-08-24 (the espnow-on-p4 track, docs/espnow_p4_2026-08.md):
-// the esp_now_* symbols modespnow.c needs come from native/moy_c6 -- thin
-// wrappers over ESP-Hosted's custom RPC to the C6, where the real radio is.
-// Against a slave with no shim, esp_now_init() times out and raises: the
-// module exists, the radio politely does not.
-#define MICROPY_PY_ESPNOW                (1)
+// The radio link is the kernel's (native/moy_net/moy_link.c, moy_net.Link):
+// it holds esp_now's one receive callback, so the port's espnow module is out
+// of the image and Python cannot take the callback from it. The esp_now_*
+// symbols it calls come from native/p4/moy_c6 -- thin wrappers over
+// ESP-Hosted's custom RPC to the C6, where the real radio is. Against a slave
+// with no shim, esp_now_init() times out and the link reports it down.
+#define MICROPY_PY_ESPNOW                (0)
+#define MOY_NET_LINK                     (1)
 
 #define MICROPY_HW_ENABLE_SDCARD            (1)
 

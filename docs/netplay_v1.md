@@ -118,12 +118,14 @@ lying for a month.
   in BEFORE `active(True)` — reconfiguring the ring live desyncs it until a full
   activation cycle — and `RATE_54M` after. At the 526-byte default, 64 of 200
   messages arrived while `send(sync=True)` answered True for every one.
-- **`patches/esp32_espnow_ring_race.patch` ships on every board.** Upstream
-  commits a record in three ring puts while its reader waits only for the
-  header, so a busy drain catching one mid-write raises `buffer error` on a
-  healthy ring that is then really desynced. About once a second under load;
-  zero across a 60 s soak after. `_recover()` re-applies the PHY rate, which an
-  activation cycle silently resets to 1 Mbps, and counts itself in `stats()`.
+- **The receive ring is the kernel's** (`native/moy_net/moy_link.c`, since
+  2026-10-07). The port's modespnow committed a record in three ring puts while
+  its reader waited only for the header, so a busy drain catching one
+  mid-write raised `buffer error` on a healthy ring that was then really
+  desynced (about once a second under load). The kernel's callback latches a
+  whole record under a spinlock and the frame takes whole records.
+  `_recover()` re-applies the PHY rate, which an activation cycle resets to
+  1 Mbps, and counts itself in `stats()`.
 - **Most of a radio board's packet loss was its own BLE keyboard hunting.**
   `gap_scan(5000, 30000, 30000)` is interval == window: continuous, 5 s on and 5
   s off forever with no keyboard connected. At an idle desk the P4 got 19.2/s of

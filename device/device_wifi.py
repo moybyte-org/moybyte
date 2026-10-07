@@ -30,7 +30,7 @@ from device_util import _diag_note
 try:
     from moy_net import wifi_password, wifi_remember
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_net import wifi_password, wifi_remember
+    from runtime.net_binding import wifi_password, wifi_remember
 
 
 class DeviceWifi:

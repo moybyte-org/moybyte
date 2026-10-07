@@ -78,7 +78,6 @@ moybyte_patch_esp_hosted_bump esp32p4
 #     (MICROPY_EMIT_RV32=1), so edit->PLAY sessions would hit the same cliff,
 #     just later (bigger internal pool).
 moybyte_patch_native_code_free
-moybyte_patch_espnow_ring_race
 
 # 2e) REPR_C -- applied 2026-08-24, and NOT for the S3's reason. This stood as
 #     "DECLINED, an open question" for a week because the only argument was

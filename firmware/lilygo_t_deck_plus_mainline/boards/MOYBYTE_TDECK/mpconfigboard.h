@@ -153,3 +153,10 @@
 // The banded present (native/moy_glass/moy_present.h): this panel module's
 // kernel transport (kwait/kkick/kship) under the kernel's frame state machine.
 #define MOY_GLASS_BANDED                    (1)
+
+// The radio link is the kernel's (native/moy_net/moy_link.c, moy_net.Link): it
+// holds esp_now's one receive callback, so the port's espnow module is out of
+// the image and Python cannot take the callback from it, and a soft reset
+// (which would deinit the port's) leaves the link and its ring up.
+#define MICROPY_PY_ESPNOW                   (0)
+#define MOY_NET_LINK                        (1)

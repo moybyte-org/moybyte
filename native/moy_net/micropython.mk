@@ -1,6 +1,8 @@
-# moy_net: the links: WiFi, the ESP-NOW link, the HTTP core, the webhost, the
-# sync RPC and the updater (docs/kernel_survival_2026-10.md section 6). Its
-# Python twin is runtime/moy_net.py.
-#
-# The unix and webassembly ports' twin of micropython.cmake; it adds nothing
-# until the crossing gives the module its sources.
+# moy_net for the unix and webassembly ports: the twin of micropython.cmake.
+# Its JSON scanner is native/moy_spine/moy_json.c, which moy_store compiles.
+
+MOY_NET_DIR := $(USERMOD_DIR)
+
+SRC_USERMOD_C += $(MOY_NET_DIR)/modmoy_net.c
+SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_http.c $(MOY_NET_DIR)/moy_sync.c $(MOY_NET_DIR)/moy_wifi.c $(MOY_NET_DIR)/moy_link.c
+CFLAGS_USERMOD += -I$(MOY_NET_DIR) -I$(MOY_NET_DIR)/../moy_spine

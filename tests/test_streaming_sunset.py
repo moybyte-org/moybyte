@@ -118,9 +118,9 @@ def test_device_webserver_is_transport_core_only():
         assert dead not in src, dead
     for alive in ("class WebServer", "def handle_http"):
         assert alive in src, alive
-    # The parser and the response writer are the links twin's (moy_net).
-    net = _read("runtime", "moy_net.py")
-    for alive in ("def parse_request", "def http_response"):
+    # The parser and the response writer are the links' native moy_net.
+    net = _read("native", "moy_net", "modmoy_net.c")
+    for alive in ("MP_QSTR_parse_request", "MP_QSTR_http_response"):
         assert alive in net, alive
 
 

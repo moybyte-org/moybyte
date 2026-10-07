@@ -1,4 +1,5 @@
 # Map (grep -n a name to jump there):
+#   PeerTable             the peers, rows of kind PEER keyed by MAC
 #   Peer                  another console we can hear
 #   EspNowNet             the cart-facing net.* backend over the radio
 #   EspNowLink            discovery, pairing and frame dispatch
@@ -20,10 +21,10 @@ that wants the radio registers here; it does not open its own.
 THE TUNING RECIPE IS MEASURED, and every line of it cost something to learn
 (T-Deck <-> Guition on glass, 2026-08-20):
 
-  * `rxbuf` BEFORE `active(True)`, never after. Reconfiguring the ring on a LIVE
-    radio permanently desyncs it -- every subsequent `recv()` raises
-    `ValueError: ESPNow.recv(): buffer error`, including with nothing in flight,
-    until a full active(False)/active(True) cycle.
+  * `rxbuf` BEFORE `active(True)`: the kernel sizes its ring at start and keeps
+    it, so a size given while the link is up waits for the next start. (The
+    port's module, which this replaced, desynced for good when its ring was
+    reconfigured live.)
   * `rxbuf=32768` and not the default 526 (~two frames). At the default, 64 of
     200 messages arrived while `send(sync=True)` returned True for all 200 -- the
     link-layer ack is NOT delivery, and Espressif documents that dropped packets
@@ -53,10 +54,13 @@ comfortable -- and it keeps the radio off the same core as the panel flush.
 Board-agnostic by construction: every hardware handle is created inside a guarded
 method, so this module imports on CPython and its protocol half is exercised by
 tests/test_espnow_link.py against a fake radio. Staged on all three console
-boards. The P4's `espnow` module is not the SoC's (it has no radio): it is
-stock modespnow.c over the moy_c6 shim -- seventeen esp_now_* wrappers riding
-ESP-Hosted's custom RPC to the C6 (docs/history/espnow_p4_2026-08.md, which also
-records the morning this same header said that was impossible). One rule that
+boards. The radio itself is the kernel's `moy_net.Link` (native/moy_net/
+moy_link.c): it holds the callback slot and the receive ring below the VM, so a
+soft reset or a VM stop leaves both up, and the port's `espnow` module is out of
+the console images. On the P4s its esp_now_* calls go through the moy_c6 shim --
+seventeen wrappers riding ESP-Hosted's custom RPC to the C6
+(docs/history/espnow_p4_2026-08.md, which also records the morning this same
+header said that was impossible). One rule that
 is load-bearing there and mere hygiene on the S3s: wlan.active(True) BEFORE
 the radio, because the C6's radio starts with the host's WLAN.
 """
@@ -72,10 +76,6 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.players import NetService
 try:
-    from moy_net import PeerTable
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_net import PeerTable
-try:
     from cart_api import CART_BUTTONS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS
@@ -88,6 +88,62 @@ PEER_TTL_MS = 2000     # a peer unheard this long has walked away
 DRAIN_MAX = 24         # messages per frame -- a bound, not a target
 START_TRIES = 12       # invites before the host gives up (~5s at BEACON_MS)
 
+
+
+class PeerTable:
+    """The radio link's peers: MAC -> peer object, each a row of kind PEER.
+    Reads like the dict it replaces (get, [], del, pop, values, keys, len,
+    in, == a dict)."""
+
+    def __init__(self):
+        try:
+            from moy_spine import KIND_PEER, Table
+        except ImportError:                 # host: the runtime package
+            from runtime.moy_spine import KIND_PEER, Table
+        self._t = Table(KIND_PEER, "peer")
+        self._by_mac = {}
+
+    def handle(self, mac):
+        """The peer's row handle, or 0."""
+        return self._by_mac.get(mac, 0)
+
+    def get(self, mac, default=None):
+        h = self._by_mac.get(mac)
+        return default if h is None else self._t.get(h)
+
+    def __getitem__(self, mac):
+        return self._t.get(self._by_mac[mac])
+
+    def __setitem__(self, mac, peer):
+        h = self._by_mac.get(mac)
+        if h is None:
+            self._by_mac[mac] = self._t.new(peer)
+        else:
+            self._t.put(h, peer)
+
+    def __delitem__(self, mac):
+        self._t.release(self._by_mac.pop(mac))
+
+    def pop(self, mac, default=None):
+        h = self._by_mac.pop(mac, None)
+        return default if h is None else self._t.release(h)
+
+    def __contains__(self, mac):
+        return mac in self._by_mac
+
+    def __len__(self):
+        return len(self._by_mac)
+
+    def keys(self):
+        return list(self._by_mac.keys())
+
+    def values(self):
+        return [self._t.get(h) for h in self._by_mac.values()]
+
+    def __eq__(self, other):
+        if isinstance(other, PeerTable):
+            other = dict((m, other[m]) for m in other.keys())
+        return dict((m, self[m]) for m in self.keys()) == other
 
 class Peer:
     """Another console we can hear. `cart` is what it is sitting on, which is how
@@ -201,9 +257,9 @@ class EspNowLink:
             except Exception:  # noqa: BLE001 -- a port without pm still links
                 self._pm_was = None
             if self.radio is None:
-                import espnow
-                self.radio = espnow.ESPNow()
-                self._rate = getattr(espnow, "RATE_54M", None)
+                import moy_net
+                self.radio = moy_net.Link()
+                self._rate = getattr(moy_net, "RATE_54M", None)
             # ORDER IS LOAD-BEARING: rxbuf before active(), never after.
             try:
                 self.radio.config(rxbuf=RXBUF)

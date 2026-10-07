@@ -125,6 +125,13 @@ ctypes compositor so the host stops having a second raster. The board has the
 real one; this is the adapter that exists only because CPython isn't one."""
 
 [[modules.shared.deny]]
+file = "net_binding.py"
+kind = "host-only"
+why  = """
+`moy_net` for CPython: compiles native/moy_net and dlopens it through ctypes.
+Here `moy_net` is a compiled-in usermod (native/.staged/moy_net)."""
+
+[[modules.shared.deny]]
 file = "glass_binding.py"
 kind = "host-only"
 why  = """

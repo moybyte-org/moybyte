@@ -809,16 +809,6 @@ def test_the_native_code_free_patch_skips_an_already_patched_tree(tmp_path):
     assert "moybyte_native_code_free" in f.read_text(encoding="utf-8")
 
 
-def test_the_espnow_ring_patch_skips_an_already_patched_tree(tmp_path):
-    p = tmp_path / "ports" / "esp32"
-    p.mkdir(parents=True)
-    (p / "modespnow.c").write_text("/* Moybyte espnow_ring_race */\n",
-                                   encoding="utf-8")
-    r = sh("moybyte_patch_espnow_ring_race",
-           MPY_DIR=str(tmp_path), REPO_ROOT=str(ROOT))
-    assert r.returncode == 0 and r.stdout.strip() == ""
-
-
 # -- the OTA identity stamp -----------------------------------------------------
 
 

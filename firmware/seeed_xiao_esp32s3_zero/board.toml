@@ -91,13 +91,12 @@ every import of every staged module resolves on this target, which is precisely
 the failure an allowlist has and a denylist does not."""
 
 [[modules.shared.group]]
-files = ["moy_sync.py", "moy_fs.py", "moy_net.py"]
+files = ["moy_sync.py", "moy_fs.py"]
 why = """
 The 3.4 sync RPC itself: the batch format, the per-file last-writer-wins apply,
 the two roots (carts and the #108 files layer), and the small filesystem
-helpers every one of them writes through. moy_net.py is the links twin's pure
-half: the batch codec and the HTTP parser and response writer the webserver
-and the GPIO routes use. This is the board's reason to exist
+helpers every one of them writes through; the batch codec and the HTTP
+parser and response writer under them are the native `moy_net`. This is the board's reason to exist
 -- `moy_webhost` is a transport in front of these two files."""
 
 [[modules.shared.group]]
@@ -296,8 +295,9 @@ siblings' DENYLIST shape -- because `native/` really does default to yes: a new
 shared C module is a capability every board that has the hardware should get,
 and every denial below is the same sentence with different nouns.
 
-What crosses and compiles is ONE module, `moy_web`, and it is the module that
-justifies this board having an image at all: the browser console rides the
+What crosses is the store (`moy_store`, `moy_index`), the kernel's entry
+(`moy_kernel`), the links (`moy_net`) and `moy_web`, the module that justifies
+this board having an image at all: the browser console rides the
 firmware (a 627,373 B .incbin of the gzipped bundle) so the page a board serves
 cannot drift behind the board serving it. Until 2026-08-29 this board had no
 image, so `moy_webhost`'s baked half was structurally unreachable here and the
@@ -391,12 +391,15 @@ in the browser console it serves, whose compiled tier is the browser's own
 WebAssembly engine running a cart's main.wasm (native/moy_wasm_web) -- so the
 runtime would be flash spent in both OTA slots for code nothing calls."""
 
-[[native.shared.deny]]
+[[native.shared.take]]
 module = "moy_kernel"
 why = """
-The kernel's entry, crash record and recovery floor are a console's: this board
-has no panel for the floor to draw on, and it keeps the port's own app_main
-until the kernel is the entry on every target (docs/kernel_spine_2026-10.md §8)."""
+The kernel's entry, crash record and recovery floor (docs/kernel_spine_2026-10.md
+§6-§8): the kernel is the entry on every target (docs/kernel_survival_2026-10.md
+section 6.5). This board has no panel, so its floor is serial only -- `retry`,
+`safe`, `repl`, `state` -- and with nobody at the serial it takes SAFE after
+MOY_KERNEL_IDLE_SAFE_MS (mpconfigboard.h). main.py proves the boot as soon as the
+VM reaches it, so a Ctrl-C at any point lands at the REPL, as before."""
 
 [[native.shared.deny]]
 module = "moy_glass"
@@ -415,8 +418,9 @@ browser takes is the browser's."""
 module = "moy_net"
 why = """
 The links (docs/kernel_survival_2026-10.md section 6): the webhost and the sync
-RPC this board serves are what the module is for. It compiles to nothing until
-sprint 3's links pass gives it its sources."""
+RPC this board serves are what the module is for. It is the batch codec and
+the HTTP parser and response writer the webserver, the sync stack and the GPIO
+routes import; its JSON scanner is moy_store's, which this board takes."""
 
 [[native.shared.deny]]
 module = "moy_png"

@@ -51,11 +51,17 @@ moybyte_setup_idf esp32s3 \
   "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/esp-idf"
 
 # ---------------------------------------------------------------------------
-# 2) The patch ladder -- EMPTY, and that is this board's shortest description.
-#    Every shared patch is per-board and OPT-IN, and a board that does not call
-#    one declines it HERE IN WRITING (`# DECLINED <fn> <reason>` -- board.toml's
-#    `[[deny]] why=` in the one file that is not board.toml). Silence is neither,
-#    and `tests/test_board_routing.py` fails a build.sh that is silent.
+# 2) The patch ladder -- ONE patch, and that is this board's shortest
+#    description. Every shared patch is per-board and OPT-IN, and a board that
+#    does not call one declines it HERE IN WRITING (`# DECLINED <fn> <reason>`
+#    -- board.toml's `[[deny]] why=` in the one file that is not board.toml).
+#    Silence is neither, and `tests/test_board_routing.py` fails a build.sh
+#    that is silent.
+#
+# Un-static esp_native_code_free_all: the kernel's VM service (native/
+# moy_kernel, the entry here as on every board) frees the native-code arena in
+# its teardown, which links against the port's function.
+moybyte_patch_native_code_free
 #
 # DECLINED moybyte_patch_repr_c -- unboxed 30-bit floats (#66). The lever is a
 #    CART INTERPRETER tax: REPR_A boxes every float RESULT in 16 bytes of heap,
@@ -96,13 +102,6 @@ moybyte_setup_idf esp32s3 \
 #    half agrees -- this board has run 80MHz octal PSRAM unpatched since
 #    2026-08-25 on stock MicroPython, which carries no such patch at all.
 #    These two move together: take the 120MHz profile and take this with it.
-#
-# DECLINED moybyte_patch_native_code_free -- reclaims the @micropython.native
-#    exec arena after a cart compile misses. Nothing here compiles a cart.
-#
-# DECLINED moybyte_patch_espnow_ring_race -- a torn-read race in modespnow's
-#    recv ring (#7). modespnow is not in this image: no netplay, no cart net.*
-#    inbox, and no second console to pair with.
 #
 # DECLINED moybyte_patch_gc_split_reserve -- caps split-heap growth so PSRAM
 #    stays available to the C side (#66). What needs that PSRAM on a console is

@@ -86,10 +86,10 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the BLE HID central | `device/ble_keyboard.py` over `bluetooth`; `native/p4/moy_ble_hid/` | `+native/moy_input/moy_ble_hid.c` over the NimBLE host, on every console | 2 |
 | the browser's event decode | `runtime/web_input.py` | the web build's `moy_input` import | 2 |
 | the audio session, the six verbs, the bank push, the master level | `device/device_audio.py`, `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/` grows its session and verb face; the codec in `+native/moy_audio/moy_codec_es8311.c` | 2 |
-| WiFi, the radio under the spine's lease | `device/device_wifi.py` over `network` (`runtime/moy_net.py`) | `+native/moy_net/moy_wifi.c` | 2 |
-| ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `+native/moy_net/moy_link.c` | 2 |
-| the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `+native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
-| the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `+native/moy_net/moy_sync.c` | 2 |
+| WiFi, the radio under the spine's lease | `device/device_wifi.py` over `network` | `native/moy_net/moy_wifi.c` | 2 |
+| ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `native/moy_net/moy_link.c` | 2 |
+| the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
+| the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c` | 2 |
 | the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | `device/moy_ota.py`'s updater half (`device/moy_http.py`), `device/moy_c6_update.py`, `device/cart_net.py` | `+native/moy_net/moy_ota.c`, `+native/moy_net/moy_c6_update.c` | 2 |
 | the web-console switch | `runtime/web_console.py` (its screen: §13, question 8) | `+native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | `modules/zero_host.py`, `modules/zero_gpio.py`, `modules/zero_setup.py` | the same `moy_net`, with the Zero's GPIO allowlist as a board table | 2 |
@@ -191,9 +191,11 @@ made here, not promised.
    both arguments, the pointer's place/down/fresh/click as fields of the
    table. `runtime/audio_session.py`: a session per owner carrying its bank,
    the six verbs on a session, `focus` naming the audible one.
-   `runtime/moy_net.py`: the WiFi state machine, the link's peer table of kind
+   The links' twin: the WiFi credential rules, the link's peer table of kind
    PEER, the HTTP request parser and response writers as pure functions, the
-   sync batch codec.
+   sync batch codec; the first and the last three are `native/moy_net`'s since
+   pass 2 (`runtime/net_binding.py` on CPython), the peer table
+   `device/moy_espnow.py`'s.
 8. **The survival traces** join `tests/test_semantic_traces.py` before anything
    crosses: an input trace (a scripted event stream → the merged state, both
    masks for players 0 and 1, and the pointer, per frame), a glass trace (a
@@ -613,7 +615,7 @@ baseline already; the C central's own statics are not, and §8 counts them.
 | gate | host | on glass |
 |---|---|---|
 | one table, every tier | the input trace on both object models, both masks for players 0 and 1; `test_tdeck_keymap` (both modes agree, every key), `test_ble_keyboard` (report decode) over ctypes; a fuzz of the HID report decoder | `cart_runs_and_exits`, `home_shelf_fling`, `idle_blank_and_wake` on every console, driven through the kernel's injected source |
-| the drivers call no Python | `+tests/test_no_vm_calls_in_drivers.py`: the task and ISR sources of `native/moy_input/` contain no call into the VM (`mp_call_function*`, `mp_sched_schedule`, no `mp_obj_t`) | the image stages no Python driver: `py __import__("moybyte.input")` fails on every console |
+| the drivers call no Python | `tests/test_no_vm_calls_in_drivers.py`: the task and ISR sources of `native/moy_input/` contain no call into the VM (`mp_call_function*`, `mp_sched_schedule`, no `mp_obj_t`) | the image stages no Python driver: `py __import__("moybyte.input")` fails on every console |
 | the T-Deck's drivers are the kernel's | — | the keyboard smoke's A/B on glass; `I2CSTAT` maxima unchanged with the poller task; raw-mode hold-to-move in a game and clean typing in the editor; the trackball's four directions and click |
 | the drivers outlive the VM | — | `tools/board.py BOARD reboot --soft` with a bonded BLE keyboard and, on the T-Deck, the trackball: after the soft reset the keyboard types and the ball rolls with no re-pair and no re-init line; then `kstop 100` (§7.5) on the T-Deck with the poller task and the keyboard alive — the spike the plan's §11 owes before sprint 4 relies on stops |
 | the share holds | — | §9's internal-SRAM items, with the poller task's stack and the latches in the link-map delta |
@@ -721,7 +723,7 @@ and which caught a 37% loss once that every per-side clock had certified.
 |---|---|---|
 | the synth is unchanged | `tests/test_audio_parity.py` bit-identical across the binding and the desktop MicroPython; the session trace (two sessions, one focused, the muted one's verbs leave the render unchanged) | the T-Deck's self-dump of a seed cart's music equals the host's render; the AUDIORATE line over thirty seconds of music with a cart running reads a cumulative ratio of 1.000 and `seam=` at 1.0000, on the T-Deck and both P4s |
 | the P4s make sound | — | the ES8311's registers read back as the sequence wrote them after init; then the two instruments above; the seed carts' sounds and the Music tab's preview, owner-heard once |
-| the feed calls no Python | `+tests/test_no_vm_calls_in_drivers.py` over the feeder's sources | a Lua cart's sfx reaches the mixer through the drain with one binding call per queued op, counted by the session trace on the desktop MicroPython |
+| the feed calls no Python | `tests/test_no_vm_calls_in_drivers.py` over the feeder's sources | a Lua cart's sfx reaches the mixer through the drain with one binding call per queued op, counted by the session trace on the desktop MicroPython |
 | a stop silences | — | `hush` from the dev channel while music plays: silence within one block, `seam=` unchanged after |
 | the lazy start holds | — | internal free and largest at the idle desk before the first session unchanged from the pass before (§9) |
 
@@ -729,14 +731,14 @@ and which caught a 37% loss once that every per-side clock had certified.
 
 ### 6.1 The radios
 
-- **WiFi.** `+native/moy_net/moy_wifi.c` is the driver's life: init once,
+- **WiFi.** `native/moy_net/moy_wifi.c` is the driver's life: init once,
   scan, connect with the saved credentials, autoconnect at boot, the
   `wifi.json` store through `moy_fs`, power down and up as the spine's lease
   mask asks. The lease is sprint 2's and stays where it is; the driver only
   answers it. The internal-SRAM facts `device/cart_net.py` records — the
   receive buffers the driver takes on first start and keeps, the TLS working
   set a download needs — are the kernel's to report, not to hide.
-- **ESP-NOW.** `+native/moy_net/moy_link.c` is `device/moy_espnow.py`'s
+- **ESP-NOW.** `native/moy_net/moy_link.c` is `device/moy_espnow.py`'s
   discovery, pairing and the two-console link over the esp_now API — on-die on
   the S3s, through `native/p4/moy_c6/`'s shim on the P4s, which already
   implements that API. The receive ring is the kernel's, in PSRAM, fed from the
@@ -747,7 +749,7 @@ and which caught a 37% loss once that every per-side clock had certified.
 
 ### 6.2 The HTTP core, the webhost and the sync RPC
 
-`+native/moy_net/moy_http.c` is `device/moy_webserver.py` over BSD sockets:
+`native/moy_net/moy_http.c` is `device/moy_webserver.py` over BSD sockets:
 the request parser, the sized, chunked, file and blob responses, the
 non-blocking listener polled once per frame. It builds on lwip and on POSIX
 alike, so the host runs it under the fuzzers. `+native/moy_net/moy_webhost.c`
@@ -849,7 +851,7 @@ added to the board's component list.
 | the wire is unchanged | the HTTP parser and the sync codec fuzzed under ASan and UBSan; a batch round-trips against the browser's; the manifest verifier against `tools/ota_sign.py`'s vectors and the tamper cases; the links trace | `web_console_is_baked_into_the_image`, `wifi_status_is_readable`, `wifi_is_off_at_rest` on every console; the Zero re-provisioned and paired from Chrome (`tools/web.py shot`) and its suite green |
 | an update still updates | the OTA state machine on a canned manifest | a beta pushed over WiFi to each console through the unstable channel (the `release` skill) and confirmed; an image armed to never confirm rolls back on one S3 and one P4; the C6 updated on both P4s; the floor's `update` word takes a card image |
 | the link links | the peer table and the pairing state machine as pure functions | two consoles paired through `link`, a cart beamed, and a 200-message burst delivered whole at the link's set rate — the acceptance `device/moy_espnow.py` records for its ring size — with the figures to #7 |
-| the drivers call no Python | `+tests/test_no_vm_calls_in_drivers.py` over the WiFi callback, the link's receive path and the HTTP poll | the image stages none of §6.7's modules |
+| the drivers call no Python | `tests/test_no_vm_calls_in_drivers.py` over the WiFi callback, the link's receive path and the HTTP poll | the image stages none of §6.7's modules |
 | the volumes are the kernel's | `tests/test_store_on_vfs.py` over the owned littlefs through the kernel's VFS type; the power-cut matrix re-run | commit, reboot, intact on every console and the Zero; ten store commits under a running cart on both S3s with the feeder's `tx_errs` at zero and `display_underruns_are_zero` on both P4s, the longest frame recorded to #224 |
 | the Zero fits | — | its headroom above the floor after this pass, with the per-pass budget of §9 |
 

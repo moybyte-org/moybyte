@@ -312,9 +312,10 @@ the build fails when the pinned `MPY_TAG`'s `mp_task` call list differs from
 `native/moy_kernel/mp_task_calls.txt`, the one the copy was reviewed against,
 and `tests/test_mp_task_calls.py` holds the copy to that record.
 
-The four consoles take the entry in `board.toml` as they take `moy_wasm`. The
-Zero keeps the port's entry until sprint 3 makes the kernel the entry on every
-target. The browser and the host have no entry: the web runner's worker and
+The four consoles and the Zero take the entry in `board.toml` as they take
+`moy_wasm`; the Zero's floor has no panel and is serial only, and its
+`main.py` proves the boot as the VM reaches it (sprint 3's links pass,
+2026-10-07). The browser and the host have no entry: the web runner's worker and
 CPython call the bindings, and `moy_crash.c` and `moy_recovery.c` build on the
 host for the tests only. The three, the entry and the binding are one directory,
 `native/moy_kernel/`, so a board takes or denies one module.

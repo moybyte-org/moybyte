@@ -50,8 +50,9 @@ _SHARED = {
     f[:-3] for f in os.listdir(_RUNTIME_DIR)
     if f.endswith(".py") and f != "__init__.py"
 }
-# Shared modules the build stages under a DIFFERENT bare name.
-_RENAMED = {"moy_font": "font"}
+# Shared modules the build stages under a DIFFERENT bare name, and native
+# modules whose host face is a ctypes binding under runtime/.
+_RENAMED = {"moy_font": "font", "moy_net": "net_binding"}
 
 
 class _AliasLoader(importlib.abc.Loader):

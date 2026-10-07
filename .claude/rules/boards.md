@@ -294,7 +294,8 @@ stages 1–6 all absent. Its README is the authority; what bites:
   `CARTS_Z`), inflated one cart at a time into an EMPTY store on first boot —
   gated on emptiness, not #47's version compare, because its store is the
   record (the only copy of a browser-made cart), where a console's is a cache.
-- Its patch ladder is empty and says so (`# DECLINED <fn>`). Do not give it the
+- Its patch ladder is one patch, the kernel entry's `moybyte_patch_native_code_free`,
+  and every other one says why not (`# DECLINED <fn>`). Do not give it the
   #169 retune without the 120 MHz profile; the spike suite refuses the pairing.
 - USB-Serial/JTAG since 2026-08-30: opens like the console S3s, reaches the ROM
   loader through esptool's default reset and leaves it with `--after

@@ -90,6 +90,13 @@ why  = """
 ctypes over libmoy's wasm import table and WAMR built for Linux, fetched and
 compiled on demand -- no compiler, git or cmake on a board."""
 [[modules.shared.deny]]
+file = "net_binding.py"
+kind = "host-only"
+why  = """
+`moy_net` for CPython: compiles native/moy_net and dlopens it through ctypes.
+The browser's moy_net is compiled in."""
+
+[[modules.shared.deny]]
 file = "glass_binding.py"
 kind = "host-only"
 why  = """
