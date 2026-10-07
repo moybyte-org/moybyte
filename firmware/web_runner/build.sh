@@ -202,6 +202,13 @@ PYEOF
   cp -r "${REPO_ROOT}/native/moy_spine" \
         "${USERMODS_DIR}/moy_spine"
 
+  # Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2): the
+  # glass, input and the links. Each compiles to nothing until its pass gives
+  # it sources; they stage here now so no pass edits this list.
+  for m in moy_glass moy_input moy_net; do
+    cp -r "${REPO_ROOT}/native/${m}" "${USERMODS_DIR}/${m}"
+  done
+
   # moy_wasm_web usermod: the browser's compiled-cart ENGINE -- the session
   # surface the boards' WAMR engine implements, over the page's own
   # WebAssembly engine (the cart is a sibling module the worker instantiates;

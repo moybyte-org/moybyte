@@ -43,7 +43,14 @@ SLOTS = 1 << SLOT_BITS
 ID_MAX = 15
 JSON_DEPTH = 32
 
-KIND_APP = 1
+KIND_APP = 1           # the kinds, one per client table (moy_htab.h)
+KIND_BUF = 2
+KIND_CANVAS = 3
+KIND_SURF = 4
+KIND_OWNER = 5
+KIND_SRC = 6
+KIND_PEER = 7
+KIND_AUDIO = 8
 
 _SLOT_MASK = SLOTS - 1
 _KIND_MASK = 0xF

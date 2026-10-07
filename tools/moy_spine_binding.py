@@ -122,7 +122,9 @@ def binding(sanitize=False):
     m = types.ModuleType("moy_spine_c")
     m.__dict__.update(
         SLOT_BITS=8, KIND_SHIFT=8, GEN_SHIFT=12, GEN_MAX=(1 << 18) - 1,
-        SLOTS=256, ID_MAX=15, KIND_APP=1, STAYED=0, PUSHED=1, RETURNED=2,
+        SLOTS=256, ID_MAX=15, KIND_APP=1, KIND_BUF=2, KIND_CANVAS=3,
+        KIND_SURF=4, KIND_OWNER=5, KIND_SRC=6, KIND_PEER=7, KIND_AUDIO=8,
+        STAYED=0, PUSHED=1, RETURNED=2,
         ROOT="launcher", EDITOR="menu", ROUTE_HOME=0, ROUTE_EDITOR=1,
         ROUTE_APP=2, ROUTE_WINDOW=3, LEASE_TAGS=LEASE_TAGS, IMPL="c")
 

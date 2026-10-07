@@ -93,7 +93,10 @@ NATIVE = {
     # compiles everywhere unless MOY_INDEX_IMPL=py, the spine only when
     # MOY_SPINE_IMPL=c (hooks in tools/moy_index_spike.py). moy_kernel, the
     # kernel's entry, crash record and recovery floor, is TAKEN by every
-    # console and denied by the Zero (each board.toml says why).
+    # console and denied by the Zero (each board.toml says why). moy_glass,
+    # moy_input and moy_net, sprint 3's kernel modules, stage on every console
+    # and compile to nothing until their passes fill them; the Zero takes
+    # moy_net alone.
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -103,7 +106,7 @@ NATIVE = {
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
                        "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                       "moy_spine", "moy_kernel"},
+                       "moy_spine", "moy_kernel", "moy_glass", "moy_input", "moy_net"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush along with moy_audio. moy_sd brings its TF card up on
     # SDMMC slot 0 under the store's card volume.
@@ -112,7 +115,7 @@ NATIVE = {
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
-           "moy_sd"},
+           "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # four P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
@@ -121,24 +124,26 @@ NATIVE = {
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                   "moy_spine", "moy_kernel", "moy_sd"},
+                   "moy_spine", "moy_kernel", "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml); moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
                    "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
-                   "moy_sd"},
+                   "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. `moy_web` is the only shared C module it compiles in by
-    # default (moy_index and moy_spine stage and compile to nothing, above), and
+    # default (moy_index, moy_spine and moy_net stage and compile to nothing,
+    # above), and
     # it is the module that justifies the board having an image at all -- the
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web", "moy_index", "moy_store", "moy_spine"},
+    "zero": {"moy_web", "moy_index", "moy_store", "moy_spine", "moy_net"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
-            "jsffi", "moy_index", "moy_store", "moy_spine"},
+            "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
+            "moy_input", "moy_net"},
 }
 
 # Host-only modules that must NEVER reach a given target: staging one is the

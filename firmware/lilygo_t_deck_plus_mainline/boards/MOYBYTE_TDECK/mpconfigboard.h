@@ -136,3 +136,10 @@
 #define MOY_KERNEL_PANEL_SWAP               (1)
 #define MOY_KERNEL_BUTTON_GPIO              (0)
 #define MOY_KERNEL_BUTTON_NAME              "CLICK"
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the keyboard (0x55)
+// and the GT911 touch.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
+#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
+#define MOY_BUS_I2C_HZ                      (400000)

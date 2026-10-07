@@ -897,3 +897,16 @@ def test_every_console_board_imports_its_frozen_modules_first():
                                    else vars(__builtins__),
                                    __import__=_import, print=lambda *a: None)})
         assert fake_sys.path == [".frozen", "", "/lib"], (d.name, fake_sys.path)
+
+
+# Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2 item 6):
+# every board decides each in writing, and every console takes all three.
+@pytest.mark.parametrize("board", sorted(BOARDS))
+@pytest.mark.parametrize("module", ("moy_glass", "moy_input", "moy_net"))
+def test_every_board_decides_the_survival_modules(board, module):
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert module in takes or module in denies, (
+        "%s/board.toml neither takes nor denies %s" % (board, module))
+    if board in CONSOLE_BOARDS:
+        assert module in takes, "%s does not take %s" % (board, module)

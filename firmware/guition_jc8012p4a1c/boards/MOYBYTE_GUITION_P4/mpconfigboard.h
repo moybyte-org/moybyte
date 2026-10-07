@@ -109,3 +109,10 @@
 #define MOY_KERNEL_PANEL_ROT                (270)
 #define MOY_KERNEL_PANEL_SWAP               (0)
 #define MOY_KERNEL_IDLE_SAFE_MS             (30000)
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GSL3680 touch
+// and the ES8311/ES7210 codecs.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
+#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
+#define MOY_BUS_I2C_HZ                      (400000)

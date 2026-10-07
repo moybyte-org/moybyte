@@ -327,6 +327,30 @@ app_main. Every console takes it; what is this board's is in mpconfigboard.h --
 the panel module's four entry points the floor draws through, and serial as
 its only input, so with none for 30 s it starts SAFE."""
 
+[[native.shared.take]]
+module = "moy_glass"
+why = """
+The glass's native home (docs/kernel_survival_2026-10.md section 3): canvas
+rows, the buffer table, the pool and present. It compiles to nothing until pass
+1 of sprint 3 gives it its sources; it is taken now so that pass changes no
+build list. Every console takes it."""
+
+[[native.shared.take]]
+module = "moy_input"
+why = """
+Input's native home (docs/kernel_survival_2026-10.md section 4): the merged
+table, its sources and the drivers below them. It compiles to nothing until
+pass 2 of sprint 3 gives it its sources; every console takes it."""
+
+[[native.shared.take]]
+module = "moy_net"
+why = """
+The links' native home (docs/kernel_survival_2026-10.md section 6): WiFi, the
+link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
+nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
+takes it."""
+
+
 [native.p4]
 source   = "native/p4"
 why = """

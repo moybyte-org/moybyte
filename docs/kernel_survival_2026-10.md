@@ -177,7 +177,7 @@ made here, not promised.
    modules that compile to nothing, so a pass adds bodies to directories every
    build already knows. Two small pieces of real C land here because two
    passes need them on day one: the kernel's I2C bus object
-   (`+native/moy_kernel/moy_bus.c`: one master bus per board define, devices
+   (`native/moy_kernel/moy_bus.c`: one master bus per board define, devices
    added by address) and the handle kinds of §3.1 in `native/moy_spine/moy_htab.h`.
 7. **The twins take the native call shapes.** `+runtime/moy_glass.py`: tables
    of kind CANVAS, BUF, SURF and OWNER over `moy_spine.Table`, the pool keyed

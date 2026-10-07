@@ -103,3 +103,9 @@
 #define MOY_KERNEL_TOUCH_SDA                MICROPY_HW_I2C0_SDA
 #define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
 #define MOY_KERNEL_TOUCH_ADDR               (0x3B)
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the AXS15231 touch.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
+#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
+#define MOY_BUS_I2C_HZ                      (400000)

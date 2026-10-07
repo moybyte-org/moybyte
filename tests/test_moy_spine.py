@@ -64,6 +64,24 @@ def test_a_handle_is_kind_slot_and_generation(sp):
     assert sp.GEN_SHIFT == moy_index.SLOT_BITS and sp.GEN_MAX == moy_index.GEN_MAX
 
 
+# The kinds of moy_htab.h, one per client table: sprint 3's carve added all
+# but APP (docs/kernel_survival_2026-10.md section 3.1).
+KINDS = {"APP": 1, "BUF": 2, "CANVAS": 3, "SURF": 4, "OWNER": 5, "SRC": 6,
+         "PEER": 7, "AUDIO": 8}
+
+
+def test_the_kinds_are_the_headers(sp):
+    for name, kind in KINDS.items():
+        assert getattr(sp, "KIND_" + name) == kind, name
+    try:
+        src = open(__file__.rsplit("/", 2)[0]
+                   + "/native/moy_spine/moy_htab.h").read()
+    except (NameError, OSError):     # a VM run: no __file__, no tree beside it
+        return
+    for name, kind in KINDS.items():
+        assert "MOY_KIND_%s = %d," % (name, kind) in src, name
+
+
 def test_a_released_or_foreign_handle_is_refused_loudly(sp):
     t, u = sp.Table(1, "app"), sp.Table(2, "buf")
     h = t.new("x")

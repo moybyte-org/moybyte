@@ -93,3 +93,10 @@
 #define MOY_KERNEL_PANEL_SWAP               (0)
 #define MOY_KERNEL_BUTTON_GPIO              (35)
 #define MOY_KERNEL_BUTTON_NAME              "BOOT"
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GT911 touch
+// and the ES8311/ES7210 codecs.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     (7)
+#define MOY_BUS_I2C_SCL                     (8)
+#define MOY_BUS_I2C_HZ                      (400000)

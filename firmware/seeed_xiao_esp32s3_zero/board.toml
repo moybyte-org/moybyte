@@ -394,6 +394,26 @@ has no panel for the floor to draw on, and it keeps the port's own app_main
 until the kernel is the entry on every target (docs/kernel_spine_2026-10.md §8)."""
 
 [[native.shared.deny]]
+module = "moy_glass"
+why = """
+The glass's canvas rows, buffer table and present (docs/kernel_survival_2026-10.md
+section 3): this board has no panel to present to."""
+
+[[native.shared.deny]]
+module = "moy_input"
+why = """
+The merged input table and its drivers (docs/kernel_survival_2026-10.md section
+4): this board has no keyboard, touch or pointer of its own; the input a paired
+browser takes is the browser's."""
+
+[[native.shared.take]]
+module = "moy_net"
+why = """
+The links (docs/kernel_survival_2026-10.md section 6): the webhost and the sync
+RPC this board serves are what the module is for. It compiles to nothing until
+sprint 3's links pass gives it its sources."""
+
+[[native.shared.deny]]
 module = "moy_png"
 why = """
 The cover reader (SPEC.md 3.6): a cart's cover.png decoded into a shelf's

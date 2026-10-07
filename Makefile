@@ -241,8 +241,11 @@ UNIX_MP_NATIVE := native
 # store trace reach the native one with the path emptied. moy_spine is the
 # kernel's spine, native, built as the twin UNIX_MP_SPINE names the same way
 # (tests/test_moy_spine_twins.py, and the spine trace); it holds the handle
-# table moy_index shares, so the two are built together.
-UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store
+# table moy_index shares, so the two are built together. moy_glass, moy_input
+# and moy_net are sprint 3's kernel modules, listed before they compile anything
+# (docs/kernel_survival_2026-10.md section 2).
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
+    moy_glass moy_input moy_net
 UNIX_MP_INDEX ?= c
 UNIX_MP_SPINE ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)

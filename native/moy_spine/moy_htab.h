@@ -36,8 +36,14 @@
 // The kinds, one per client table. A later sprint adds its own here.
 enum {
     MOY_KIND_NONE = 0,
-    MOY_KIND_APP = 1,
-    MOY_KIND_BUF = 2,
+    MOY_KIND_APP = 1,       // the registered system apps (moy_route)
+    MOY_KIND_BUF = 2,       // off-heap buffers: layers, bakes, scratches, the pool
+    MOY_KIND_CANVAS = 3,    // canvases: a buffer, its size, clip, camera, palette
+    MOY_KIND_SURF = 4,      // the surface table (docs/surface_model_v1.md)
+    MOY_KIND_OWNER = 5,     // lifetimes that hold loans: a run, a window, an app
+    MOY_KIND_SRC = 6,       // input sources: keyboards, touch, the browser, net slots
+    MOY_KIND_PEER = 7,      // the radio link's peers
+    MOY_KIND_AUDIO = 8,     // audio sessions, one per owner
 };
 
 enum {
