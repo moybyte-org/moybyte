@@ -1,8 +1,10 @@
 # Surface model v1 — the presentation contract for every backend
 
-**Status: v1.2 LOCKED (2026-08-12) — v1.1 plus the STAGE-4 AMENDMENT (§13),
-which retires the web annex, and the 2026-08-27 FOLD (§14), which absorbs the
-archived predecessor and changes no part of the model.** Written, then put
+**Status: v1.3 LOCKED (2026-10-07) — v1.1 plus the STAGE-4 AMENDMENT (§13),
+which retires the web annex, the 2026-08-27 FOLD (§14), which absorbs the
+archived predecessor and changes no part of the model, and the 2026-10-07
+KERNEL AMENDMENT (§15), which moves the Surface's home and its mint into the
+native kernel and changes no law.** Written, then put
 through the parallel adversarial architecture + perf review passes
 (verdicts: **LOCK AFTER FIXES** / **PERF CASE STANDS WITH FIXES**); all twenty
 findings are folded into this revision — **§12 is the finding-by-finding
@@ -54,22 +56,24 @@ The verdict, from the evidence accumulated across every target:
 
 ## 2. The Surface object
 
-Lives in a **new leaf module** (`runtime/surface.py`), imported by
-`wm_windowed.py` and the web serve glue only — **never by `wm.py` or
-`console.py`**, which the S3 build freezes verbatim (`build.sh` stages
-`runtime/` wholesale; the only denylisted shell file is `wm_windowed.py`).
-This is what makes §5.1's "the S3 executes no new code" true by construction.
+Lives in the **native kernel** (§15, 2026-10-07): a row in a kernel handle
+table of kind SURF, reached by every tier through the kernel's binding and by
+no Python object of its own. The Python leaf that first held it
+(`runtime/surface.py`, from 2026-07 to the kernel's glass pass) is deleted by
+that pass; `docs/kernel_survival_2026-10.md` §3.3 is the crossing.
 
-```python
-class Surface:
-    sid          # stable identity, minted from the WM REGISTRY key
+    sid          # stable identity, minted from the WM REGISTRY key; the row's key
     domain       # "system" | "game" (the existing begin_surface domain)
     w, h         # CONTENT size — the surface's local coordinate space
     x, y, scale, z   # PLACEMENT — WM-owned; content code never reads or writes it
-    content_gen  # stamped from the WM's ONE monotonic counter when content changes
+    content_gen  # stamped from the kernel's ONE monotonic counter when content changes
     place_gen    # stamped from the same counter on move/resize/restack/show/hide
     animating    # this surface repaints without any bump while true (§3 class B)
-```
+
+A producer holds a handle, not the row (the kernel doc's §4.3): a handle to a
+surface the WM has dropped is refused loudly, which is a different mechanism
+from the content gens below and must not be confused with them — the handle's
+generation is the table slot's, the content gen is the mint's.
 
 **sid rules (the make-group lesson).** sids are minted from the WM's registry
 keys, **never from content kinds** — the shipped `key == win.kind` comparison
@@ -81,9 +85,9 @@ id `"launcher"` today (`launcher_layer.py` vs `wm_windowed.py`) — one sid,
 two contents across a world flip is exactly the aliasing §3 forbids.
 
 **Gen minting (no per-object counters, ever).** Both gens are stamped from
-**one monotonic per-WM counter** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
+**one monotonic counter, the kernel's** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
 increments, never restarts), which §2's L3 cites as prior art and which this
-rule generalizes. Rationale: surfaces are destroyed wholesale in the real code
+rule generalizes; one counter per console, whichever WM is up. Rationale: surfaces are destroyed wholesale in the real code
 (`on_relayout` does `_wins.clear()`; every world flip rebuilds all windows)
 while per-client caches (`SurfaceDelta._last`) persist per connection. A
 per-object counter restarting at 0 can collide with a client's stored gen and
@@ -111,11 +115,10 @@ payload-shape tests are re-baselined knowingly (§9).
   signal change: gen bumps, the declared `animating` class, and the pointer
   leg. Inferring "static" from draw streams is FORBIDDEN (§8: Fold-2, web
   scroll-as-blit).
-- **L3 — gens come from one monotonic per-WM mint** (§2 above), compared `!=`
-  per consumer against its own last-seen. Never a boolean a consumer clears:
-  N consumers (P4 compositor, each web client's `WsClientState`, the L8
-  harness) must not coordinate. Prior art: `atlas_gen`, `ws._cover_gen`,
-  `sheet.gen`.
+- **L3 — gens come from one monotonic mint, the kernel's** (§2 above),
+  compared `!=` per consumer against its own last-seen. Never a boolean a
+  consumer clears: N consumers (the kernel's compositors, the L8 harness) must
+  not coordinate. Prior art: `atlas_gen`, `ws._cover_gen`, `sheet.gen`.
 - **L4 — surfaces record and draw in LOCAL space.** The WM owns the transform
   to the root canvas / the wire (#175's `view` bracket, generalized). Content
   code positioned in desktop coordinates is a bug. The wire-compat
@@ -124,12 +127,13 @@ payload-shape tests are re-baselined knowingly (§9).
 - **L5 — compositing strategy is backend-owned.** The shared layer decides
   *whether* a surface changed; the backend decides *how* the glass catches up.
 - **L6 — the degenerate tier pays ~nothing, and here is the arithmetic.** On
-  the S3: no Surface objects exist (§2 leaf module is not staged there); the
-  only executed shape is the already-shipped no-op probe pattern
-  (`begin_surface` is a `getattr(..., None)` probe per stack layer, live
-  since Stage 9), and producer signals ride the **existing** `ws._dirty`
-  writes unmodified (§3). ESTIMATED added cost: zero new per-draw work; ≤10
-  event-driven probe/no-op calls per frame ≈ single-digit µs.
+  the S3 the surface table is the kernel's and costs no Python object; the
+  **existing** `ws._dirty` writes stay as they are (§3), and the frame gate
+  folds them into ONE kernel call per painted frame, none per write.
+  ESTIMATED added cost: zero new per-draw work; one C call on a dirty frame
+  ≈ single-digit µs. (Before §15 the arithmetic was the same number by another
+  route: no Surface objects on the S3 and a no-op `begin_surface` probe per
+  stack layer.)
 - **L7 — no retained widget tree, no per-widget damage.** Litigated; §8.
 - **L8 — staleness AND silent disablement must both be testable.** Two
   directions, per tier:
@@ -167,11 +171,12 @@ that absorbed only the `_dirty` leg would freeze live wallpapers, the music
 playhead, OTA progress, and every paint stroke — the review's top finding.
 
 **Class A — explicit gen bumps.** The signal rides the **existing**
-`ws._dirty = True` writes, *observed by the surface layer, not rewritten*: an
-un-attributed dirty is a **global epoch bump** (all visible surfaces count as
-changed — safe, never wrong, merely unprofitable). Per-surface attribution is
-**opt-in per site**, added only where audited, via a no-op-probed verb (the
-`begin_surface` pattern) so shared `*_layer.py` code stays S3-safe. The audit
+`ws._dirty = True` writes, *observed, not rewritten*: an un-attributed dirty
+is a **global epoch bump** — the frame gate folds the flag into one
+`moy_surface_epoch()` call (§15), and all visible surfaces count as changed —
+safe, never wrong, merely unprofitable. Per-surface attribution is **opt-in
+per site**, added only where audited, as a `touch` on the surface's kernel
+handle, so shared `*_layer.py` code stays S3-safe. The audit
 is a named Phase A deliverable — there are **~179 raw `_dirty = True` sites
 across 22 files** (grep-verified; ui_damage §0.2.7 counted the same), several
 firing from async contexts (wifi scan, bluetooth, OTA `download_step`) where
@@ -268,15 +273,16 @@ remain opaque rects; chrome bands may exceed them.
 
 `FullscreenStackWM` only. Surfaces degenerate to: one app surface + bar + the
 game composite (`composite_game`/`viewport`). Strategy: memoized stack (#66)
-+ full repaint under the gate. **No Surface objects exist here** (§2 leaf
-module is not staged); producer signals ride the unmodified `_dirty` writes;
-L6 shows the ≤single-digit-µs arithmetic. Hardware constraints bounding any
-future change: single `tx_color` full-screen flush; SD/display shared SPI
-host; the I2C poller thread (#69). This annex exists mostly to say: **do
-nothing here.** Phase A's gate for this tier is "the per-frame executed path
-is provably unchanged" — grep-tests pin the no-op shapes; note the frozen
-*source* of shared files may still drift textually (comments, unrelated
-edits), so the gate is on executed shape, not file bytes.
++ full repaint under the gate. **No Python Surface object exists here**: the
+rows are the kernel's (§15), producer signals ride the unmodified `_dirty`
+writes folded once per painted frame, and L6 shows the ≤single-digit-µs
+arithmetic. Hardware constraints bounding any future change: the banded
+flush fed from core 0 (`native/moy_flush/moy_flush.h`); the SD/display shared
+SPI host on the T-Deck; the I2C poller (#69). This annex exists mostly to
+say: **do nothing here.** The gate for this tier is "the per-frame executed
+path is provably unchanged": each S3's on-glass suite and the perf roster
+within noise, not file bytes — the frozen *source* of shared files may still
+drift textually (comments, unrelated edits).
 
 **A compiled cart's frame reaches the flush from the cart's own memory and
 adds nothing to the contract.** The game composite on a banded board is a
@@ -551,8 +557,9 @@ pinning the field's absence.
 
 ## 9. Phasing and gates
 
-- **Phase A — name it (refactor + audit).** `runtime/surface.py` (leaf, not
-  staged to S3); gens from the per-WM mint; Class A = observed `_dirty`
+- **Phase A — name it (refactor + audit).** The surface registry (built as
+  the Python leaf `runtime/surface.py`, the kernel's table since §15); gens
+  from the one mint; Class A = observed `_dirty`
   epoch + opt-in attribution; Class B registration seeded from the
   `_animating`/`_content_static` lists; the **producer audit** (the ~179-site
   list + the Class C handler inventory) is a named deliverable. Gates: host
@@ -660,16 +667,17 @@ discipline. A backend still implements §4 and invents no new invalidation
 mechanism; the wasm head complies as an ordinary raster tier, which is the
 point — it stopped being a special case.
 
-**One thing this amendment deliberately does NOT do: delete `runtime/surface.py`.**
+**This amendment kept `runtime/surface.py` (2026-08-12), and §15 moves it.**
 The registry (`Surface`/`SurfaceSet`, the monotonic mint, the epoch, the
 prefix-scoped sync) was reached only through `wm_windowed`'s
 `if not self._recording: return` guards, and nothing sets `_recording` any
-more — so on every shipping tier that code is now inert. It stays because it is
-Phase A/C groundwork for the raster tiers, which this stage does not touch;
-what died is its recording DRIVER, not the model. Stated here so the next
-reader finds the answer instead of discovering an unreachable branch and having
-to guess whether it was an oversight. Wiring it on raster, or deleting it, is
-Phase C's call to make with evidence.
+more — so on every shipping tier that code is inert from this stage on. It
+stayed because it was Phase A/C groundwork for the raster tiers, which this
+stage did not touch; what died was its recording DRIVER, not the model. The
+evidence Phase C wanted arrived as the kernel: the raster tiers' compositors
+cross to C and consume the gens there, so §15 gives the registry to the
+kernel and the glass pass of `docs/kernel_survival_2026-10.md` deletes the
+Python leaf.
 
 **What replaced the L8 stream-hash gate.** §5.4's accounting proved "every
 surface stream that changed was covered by a moved gen" — a pixel-less
@@ -777,3 +785,46 @@ defect of this architecture, not an accident — which is why L3 forbids
 consumer-cleared booleans, L8 demands the silent-disable direction be
 testable, and §7 deletes each absorbed field with a grep-test instead of
 leaving it beside the model as a seventh mechanism.
+
+## 15. Amendment: the Surface's home is the kernel (2026-10-07)
+
+`docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and
+`docs/kernel_survival_2026-10.md` §3.3 is the crossing that executes it. The
+model does not change; what moves is where the §2 object lives and through
+what a producer signals.
+
+**What moves.** The surface record, the registry, the one monotonic mint, the
+set-level epoch and the prefix-scoped sync are the kernel's: a handle table of
+kind SURF (the kernel doc's §4.3), rows allocated in PSRAM, reached from
+Python, Lua and wasm through the kernel's bindings. A producer signals through
+the row's handle — `touch` for an attributed Class A change, `move` for
+placement, `animating` for Class B, `epoch` for the un-attributed case — and a
+consumer reads `content_gen` folded with the epoch and compares it `!=`
+against its own last-seen. The Python leaf `runtime/surface.py` is deleted by
+the glass pass; the WM mints sids from its registry keys as before and holds
+handles instead of objects.
+
+**Why now.** Two reasons, both the kernel's. The compositors cross to C in the
+same pass, and §4's per-buffer N-deep last-seen is theirs to keep — the P4's
+streak and sig fields fold in C, which is what §7's ledger already says. And
+from sprint 4 a Lua or wasm cart runs with no VM on the S3 boards: L9 still
+holds for it — content-dirty exactly on the frames it renders — and there is
+no Python left to say so, so the producer signal has to be a kernel call.
+
+**What does not change.** §1's model and §2's laws, L1 to L10; the three
+producer classes of §3; the compositor contract of §4, `end_frame` included;
+the annexes; and §8's graveyard, LVGL included — the kernel is code of our
+own, built for the host as much as for the boards, and carries no widget tree
+(L7); a backend still implements §4 and invents no invalidation mechanism
+(L10). The §8 ruling against per-object
+generation counters stands and is not touched by handles: a handle's
+generation is the table slot's and refuses a stale handle; a content gen is the
+mint's and is compared, never validated. L6's arithmetic holds on the S3
+because the `_dirty` writes are untouched and the frame gate folds them into
+one kernel call per painted frame. L8's two directions read the kernel's gens
+and counters on every tier.
+
+**Until sprint 7**, `runtime/console.py`'s frame gate and `wm_windowed`'s
+content freeze (§14.1) stay Python over the kernel's table; the window
+managers' sprint re-expresses the predicate in C, which is the row §7 reserved
+for it.
