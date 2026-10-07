@@ -250,7 +250,7 @@ Record and gates: #206, #207, #208.
 
 - **ONE `PERF` line, one producer, every board.** `runtime/perf_line.py` holds
   the field table, the formatter AND the parser, measured by
-  `device_boot.PerfSampler` on `FrameLoop.account` and written only under PERF
+  `frame_loop.PerfSampler` on `FrameLoop.account` and written only under PERF
   DIAG, like every periodic line (kid mode writes none). **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
   `/`, because both readers split on whitespace and an inner `=` reads as a field.
