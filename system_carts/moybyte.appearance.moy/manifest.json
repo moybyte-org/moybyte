@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Appearance",
   "id": "moybyte.appearance",
   "runtime": "python",
@@ -21,7 +21,6 @@
       "input",
       "appearance"
     ],
-    "safe_to_share": false,
     "config": {},
     "edit": []
   }

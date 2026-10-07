@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 11,
+  "version": 12,
   "title": "Tiny Runner",
   "id": "moybyte.tiny_runner",
   "fps": "free",
@@ -15,7 +15,6 @@
       "graphics",
       "input"
     ],
-    "safe_to_share": true,
     "config": {
       "speed": 130,
       "jump": 220,

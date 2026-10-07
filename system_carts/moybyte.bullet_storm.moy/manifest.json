@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 8,
+  "version": 9,
   "title": "Bullet Storm",
   "id": "moybyte.bullet_storm",
   "runtime": "lua",
@@ -22,7 +22,6 @@
       "audio"
     ],
     "age_mode": "cards",
-    "safe_to_share": true,
     "config": {
       "storm": 5,
       "ship_speed": 160,

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 6,
+  "version": 7,
   "title": "Ocean Desktop",
   "id": "moybyte.ocean_desktop",
   "runtime": "python",
@@ -14,7 +14,6 @@
       "graphics",
       "input"
     ],
-    "safe_to_share": true,
     "config": {
       "bubble_count": 60,
       "rise_speed": 25,

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 14,
+  "version": 15,
   "title": "Sakura",
   "id": "moybyte.sakura",
   "runtime": "python",
@@ -19,7 +19,6 @@
       "input"
     ],
     "age_mode": "cards",
-    "safe_to_share": true,
     "config": {
       "petal_count": 120,
       "fall_speed": 30,

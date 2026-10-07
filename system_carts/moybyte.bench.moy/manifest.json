@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 17,
+  "version": 18,
   "title": "Bench",
   "id": "moybyte.bench",
   "fps": "free",
@@ -21,7 +21,6 @@
       "input",
       "audio"
     ],
-    "safe_to_share": true,
     "config": {
       "frames": 400
     },

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Space Desktop",
   "id": "moybyte.space_desktop",
   "runtime": "python",
@@ -15,7 +15,6 @@
       "input"
     ],
     "age_mode": "cards",
-    "safe_to_share": true,
     "config": {
       "star_count": 80,
       "star_speed": 30,

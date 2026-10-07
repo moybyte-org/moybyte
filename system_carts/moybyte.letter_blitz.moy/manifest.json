@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 19,
+  "version": 20,
   "title": "Letter Blitz",
   "id": "moybyte.letter_blitz",
   "fps": "free",
@@ -20,7 +20,6 @@
       "input",
       "audio"
     ],
-    "safe_to_share": true,
     "config": {
       "letters_unlocked": 6,
       "tank_count": 4,

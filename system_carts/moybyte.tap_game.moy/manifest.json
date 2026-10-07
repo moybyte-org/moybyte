@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 9,
+  "version": 10,
   "title": "Tap Game",
   "id": "moybyte.tap_game",
   "runtime": "python",
@@ -20,7 +20,6 @@
       "input",
       "audio"
     ],
-    "safe_to_share": true,
     "config": {},
     "edit": []
   }

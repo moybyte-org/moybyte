@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Pin Light",
   "id": "moybyte.pin_light",
   "runtime": "python",
@@ -15,7 +15,6 @@
       "input",
       "pins"
     ],
-    "safe_to_share": true,
     "config": {
       "pin": 21
     },

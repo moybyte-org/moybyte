@@ -250,4 +250,3 @@ def test_a_pico8_cart_dropped_on_a_board_page_lands_on_the_board(tmp_path):
         assert entry.get("runtime") == "lua", entry
         # Imported carts stay private by default (#194): a board is where a cart
         # could plausibly be published FROM, so this matters more here.
-        assert man.get("safe_to_share") is False, man

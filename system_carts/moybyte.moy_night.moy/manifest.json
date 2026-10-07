@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Moy Night",
   "id": "moybyte.moy_night",
   "runtime": "python",
@@ -15,7 +15,6 @@
       "input"
     ],
     "age_mode": "cards",
-    "safe_to_share": true,
     "config": {
       "stars": 70,
       "accent": "yellow",

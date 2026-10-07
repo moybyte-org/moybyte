@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Notes",
   "id": "moybyte.notes",
   "runtime": "python",
@@ -22,7 +22,6 @@
       "prefs",
       "editor"
     ],
-    "safe_to_share": true,
     "config": {},
     "edit": []
   }

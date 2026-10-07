@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 18,
+  "version": 19,
   "title": "Brick Siege",
   "id": "moybyte.brick_siege",
   "fps": "free",
@@ -20,7 +20,6 @@
       "audio",
       "multiplayer"
     ],
-    "safe_to_share": true,
     "config": {
       "enemies": 6,
       "autoplay": 0

@@ -56,8 +56,7 @@ The emitted cart is only as faithful as doubles-instead-of-16.16-fixed-point
 allows (fine for most carts; Celeste Classic community ports do the same).
 LICENSING NOTE: PICO-8 BBS carts default to CC BY-NC-SA 4.0 -- ported carts are
 dev/test material unless the license says otherwise; keep them out of
-system_carts/ and ship an attribution note next to the cart. The manifest says
-so too (`safe_to_share: false`), so a host's share paths never have to infer it.
+system_carts/ and ship an attribution note next to the cart.
 
 THIS FILE RUNS ON MICROPYTHON, and that is a CONSTRAINT rather than an
 observation: a console can port a dropped cart in the browser (or on a board) by
@@ -4652,11 +4651,6 @@ def build_manifest(title, icon=None, fps=30, sources=None, mouse=False):
         # buttons; one that turns p8's mouse on reads the pointer too, and
         # saying so is what stops the web view hiding the thing it needs.
         "input": ["buttons", "touch"] if mouse else ["buttons"],
-        # A ported cart is SOMEBODY ELSE'S cart. PICO-8 BBS carts default to
-        # CC BY-NC-SA 4.0 (module header), so playing and studying one is fine
-        # and republishing it is not -- stated in the manifest so a host's share
-        # paths read the answer instead of inferring it from `ported_from`.
-        "safe_to_share": False,
         "ported_from": "pico-8",
         # SPEC.md 2.2: the cart's own 64-entry table -- PICO-8's sixteen, then
         # its sixteen SECRET colours at 16-31 (pal(c, 128 + i) in the shim
@@ -4678,7 +4672,7 @@ def build_manifest(title, icon=None, fps=30, sources=None, mouse=False):
 # the same cart ported on two tiers differs by field order alone, which is both
 # an unreadable diff and the end of any byte-for-byte check between them.
 MANIFEST_KEYS = ("format", "title", "version", "main", "sources", "fps", "canvas",
-                 "input", "safe_to_share", "ported_from", "palette", "icon")
+                 "input", "ported_from", "palette", "icon")
 
 # PICO-8's palette (its base sixteen are SPEC.md 2's 0-15 byte for byte) and
 # its secret sixteen, as the manifest ships them: then the base sixteen twice.

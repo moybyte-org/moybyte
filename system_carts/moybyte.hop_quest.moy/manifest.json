@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 15,
+  "version": 16,
   "title": "Hop Quest",
   "id": "moybyte.hop_quest",
   "runtime": "python",
@@ -15,7 +15,6 @@
       "graphics",
       "input"
     ],
-    "safe_to_share": true,
     "config": {
       "speed": 90,
       "jump": 230,

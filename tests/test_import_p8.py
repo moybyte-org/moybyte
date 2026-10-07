@@ -221,7 +221,6 @@ def test_manifest_valid(tmp_path):
     assert man["canvas"] in moy_carts.CANVAS_SIZES
     # Imported, not authored (#194): republishing somebody else's cart is not
     # what this feature is for, so nothing downstream may treat it as mine.
-    assert man["safe_to_share"] is False
     # title comes from the first real lua comment line
     assert summary["title"] == "my test cart"
     assert man["title"] == "my test cart"

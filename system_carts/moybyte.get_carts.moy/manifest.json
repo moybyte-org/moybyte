@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 2,
+  "version": 3,
   "title": "Get Carts",
   "id": "moybyte.get_carts",
   "runtime": "python",
@@ -26,7 +26,6 @@
       "input",
       "getcarts"
     ],
-    "safe_to_share": false,
     "config": {},
     "edit": []
   }

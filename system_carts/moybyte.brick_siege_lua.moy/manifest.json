@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 10,
+  "version": 11,
   "title": "Brick Siege Lua",
   "id": "moybyte.brick_siege_lua",
   "fps": "free",
@@ -20,7 +20,6 @@
       "audio",
       "multiplayer"
     ],
-    "safe_to_share": true,
     "config": {
       "enemies": 6,
       "autoplay": 0

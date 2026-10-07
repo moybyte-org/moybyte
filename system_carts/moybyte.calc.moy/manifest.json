@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Calc",
   "id": "moybyte.calc",
   "runtime": "python",
@@ -21,7 +21,6 @@
       "input",
       "calc"
     ],
-    "safe_to_share": false,
     "config": {},
     "edit": []
   }

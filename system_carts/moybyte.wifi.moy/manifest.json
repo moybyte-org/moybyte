@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "WiFi",
   "id": "moybyte.wifi",
   "runtime": "python",
@@ -19,7 +19,6 @@
       "input",
       "network"
     ],
-    "safe_to_share": false,
     "config": {},
     "edit": []
   }

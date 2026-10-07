@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Files",
   "id": "moybyte.files",
   "runtime": "python",
@@ -21,7 +21,6 @@
       "input",
       "files"
     ],
-    "safe_to_share": false,
     "config": {},
     "edit": []
   }

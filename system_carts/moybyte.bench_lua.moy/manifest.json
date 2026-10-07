@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Bench Lua",
   "id": "moybyte.bench_lua",
   "fps": "free",
@@ -21,7 +21,6 @@
       "input",
       "audio"
     ],
-    "safe_to_share": true,
     "config": {
       "frames": 400
     },

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Star Catcher",
   "id": "moybyte.star_catcher",
   "fps": "free",
@@ -15,7 +15,6 @@
       "graphics",
       "input"
     ],
-    "safe_to_share": true,
     "config": {
       "star_count": 5,
       "fall_speed": 70,

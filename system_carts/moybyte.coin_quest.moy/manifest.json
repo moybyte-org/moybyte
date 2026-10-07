@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Coin Quest",
   "id": "moybyte.coin_quest",
   "runtime": "python",
@@ -15,7 +15,6 @@
       "input",
       "audio"
     ],
-    "safe_to_share": true,
     "config": {},
     "edit": [],
     "assets": {

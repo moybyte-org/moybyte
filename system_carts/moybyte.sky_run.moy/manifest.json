@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Sky Run",
   "id": "moybyte.sky_run",
   "runtime": "python",
@@ -16,7 +16,6 @@
       "input",
       "audio"
     ],
-    "safe_to_share": true,
     "config": {
       "speed": 130,
       "hero": 0,

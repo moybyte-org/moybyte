@@ -52,8 +52,7 @@ What a run writes into the `.moy` FOLDER:
                                 own tilemap format, so the Map editor opens it.
   header/   -> manifest.json    title (from a `__lua__` comment line, else the
    filename                     filename), "runtime": lua, the 128x128 p8 canvas
-                                + the view(128, 120) zoom hint, and
-                                safe_to_share false (BBS carts are CC BY-NC-SA).
+                                + the view(128, 120) zoom hint.
 
 DEFERRED (intentionally, noted rather than guessed):
   __label__      the cart's label image; nothing shows it.

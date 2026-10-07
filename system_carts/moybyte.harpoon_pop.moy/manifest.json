@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 11,
+  "version": 12,
   "title": "Harpoon Pop",
   "id": "moybyte.harpoon_pop",
   "fps": "free",
@@ -16,7 +16,6 @@
       "input",
       "multiplayer"
     ],
-    "safe_to_share": true,
     "config": {
       "start_bubbles": 2,
       "bubble_speed": 100,

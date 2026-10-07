@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 13,
+  "version": 14,
   "title": "Pixel Pet",
   "id": "moybyte.pixel_pet",
   "fps": "free",
@@ -20,7 +20,6 @@
       "graphics",
       "input"
     ],
-    "safe_to_share": true,
     "config": {
       "pet": 0,
       "decay": 4,
