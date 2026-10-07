@@ -492,15 +492,14 @@ queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
 
 [[modules.device.group]]
-files = ["dsi_panel.py", "p4_canvas.py", "p4_desktop.py", "card_store.py"]
+files = ["p4_canvas.py", "p4_desktop.py", "card_store.py"]
 why = """
 The P4 silicon tier's Python half (2026-09-06, promoted out of THIS board's
-p4_display.py / moy_runtime.py the day the Guition P4 became their second
-consumer): the DSI compositor over native/p4/moy_dsi (triple-buffer rotation,
-deferred present, fences -- tests/test_p4_display.py executes it) and the
-SYSTEM canvas with the PPA composite hooks the windowed WM probes for. This
-board's p4_display.py adds only its backlight; its moy_runtime.py constructs
-the canvas at this glass's size. `card_store.py` is the cart store on a card
+moy_runtime.py the day the Guition P4 became its second consumer): the
+SYSTEM canvas with the PPA composite hooks the windowed WM probes for, and the
+desk's boot. This board's compositor is the kernel's moy_glass.DsiCompositor
+(native/moy_glass), constructed by its moy_runtime.py. `card_store.py` is the
+cart store on a card
 that has a bus of its own (tests/test_card_store.py executes it): the TF card
 when one mounts, the internal flash when not."""
 

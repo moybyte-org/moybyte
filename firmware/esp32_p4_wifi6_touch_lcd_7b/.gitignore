@@ -9,6 +9,5 @@ modules/*
 !modules/boot.py
 !modules/main.py
 !modules/moybyte_shell.py
-!modules/p4_display.py
 !modules/p4_input.py
 !modules/moy_runtime.py

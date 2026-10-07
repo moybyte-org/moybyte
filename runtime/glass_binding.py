@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   Buf                          a BUF row and its view (buf() makes one)
+#   owner                        an OWNER row: a lifetime that holds loans
+#   Canvas                       a CANVAS row: pixels, draw state, colour table
+#   surface                      the surface table's verbs
+#   DsiCompositor                the Waveshare's present, over a dsi and a ppa
+#   RotatedCompositor            the Guition P4's rotated present
+#   rotate_rect                  a landscape rect -> the portrait rect it lands on
 """The glass (native/moy_glass) on CPython, by ctypes: the module `moy_glass`
 as the boards and the browser import it, name for name, over the same C built
 for the host (`moy_glass_host.c` holds its allocators).
@@ -22,8 +30,8 @@ _GLASS = os.path.join(native_build.ROOT, "native", "moy_glass")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")
-_SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_glass.c",
-            "moy_htab.h", "moy_htab.c")
+_SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
+            "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c")
 
 ROLE_LAYER, ROLE_BAKE, ROLE_SCRATCH, ROLE_CACHE, ROLE_PAINT, ROLE_POOL = range(1, 7)
 ORIGIN_HEAP, ORIGIN_POOL, ORIGIN_ALLOC = 0, 1, 2
@@ -411,3 +419,561 @@ def kernel_epoch():
 
 def kernel_bump():
     _lib().moy_surface_kernel_bump()
+
+
+# -- present: the DSI compositor (native/moy_glass/moy_present.h) ----------------
+#
+# The same C state machine the boards' moy_glass.DsiCompositor drives, with its
+# transport the two modules passed in (a test's moy_dsi and moy_ppa doubles):
+# the face below is the MP binding's, name for name.
+
+_ticks_us = None    # a test's clock; None reads time.perf_counter_ns
+
+# overlap_stats()'s fields, in order, on every DSI compositor: the PERF line
+# labels both P4s' tuples with them. A slot a path does not have is None.
+OVERLAP_FIELDS = ("deferred", "obsolete", "fences", "fence_us",
+                  "game_n", "game_us", "timeouts")
+
+
+def _now_us():
+    if _ticks_us is not None:
+        return _ticks_us() & 0xFFFFFFFF
+    import time
+    return (time.perf_counter_ns() // 1000) & 0xFFFFFFFF
+
+
+_SHOW = ctypes.CFUNCTYPE(None, _P, ctypes.c_int)
+_VOID = ctypes.CFUNCTYPE(None, _P)
+_BOOL = ctypes.CFUNCTYPE(ctypes.c_bool, _P)
+_TICKS = ctypes.CFUNCTYPE(ctypes.c_uint32, _P)
+
+
+class _DsiOps(ctypes.Structure):
+    _fields_ = [("show", _SHOW), ("msync", _VOID), ("ppa_sync", _VOID),
+                ("ppa_done", _BOOL), ("ticks_us", _TICKS), ("ctx", _P)]
+
+
+class _Dsi(ctypes.Structure):
+    _fields_ = ([("ops", ctypes.POINTER(_DsiOps)), ("nfbs", ctypes.c_uint8),
+                 ("back", ctypes.c_uint8), ("composite_pending", ctypes.c_bool),
+                 ("pending", ctypes.c_int8), ("npend", ctypes.c_uint8),
+                 ("nbusy", ctypes.c_uint8), ("pend", ctypes.c_uint8 * 4),
+                 ("kind", ctypes.c_uint8 * 4), ("busy", ctypes.c_uint8 * 4)]
+                + [(n, ctypes.c_uint32) for n in ("deferred", "obsolete", "fences",
+                                                  "fence_us", "game_n", "game_us")])
+
+
+def _dsi_lib():
+    lib = _lib()
+    if not getattr(lib, "_dsi_sigs", False):
+        lib.moy_dsi_init.argtypes = [ctypes.POINTER(_Dsi), ctypes.POINTER(_DsiOps),
+                                     ctypes.c_int]
+        lib.moy_dsi_present.argtypes = [ctypes.POINTER(_Dsi), ctypes.c_bool]
+        lib.moy_dsi_present_pending.argtypes = [ctypes.POINTER(_Dsi)]
+        lib.moy_dsi_fence.argtypes = [ctypes.POINTER(_Dsi)]
+        for f in (lib.moy_dsi_init, lib.moy_dsi_present,
+                  lib.moy_dsi_present_pending, lib.moy_dsi_fence):
+            f.restype = None
+        lib._dsi_sigs = True
+    return lib
+
+
+class DsiCompositor:
+    """moy_glass.DsiCompositor on CPython: the backend contract plus the
+    deferred present, over `dsi` and `ppa`."""
+
+    def __init__(self, dsi, ppa=None):
+        self._dsi = dsi
+        self._ppa = ppa
+        self._stamp_pending = None
+        dsi.backlight(False)        # dark until the first composed frame
+        dsi.init()
+        self._w = dsi.WIDTH
+        self._h = dsi.HEIGHT
+        try:
+            import moy_gfx
+            self._gfx = moy_gfx
+        except ImportError:
+            self._gfx = None
+        n = dsi.nfbs() if hasattr(dsi, "nfbs") else 1
+        self._fbs = [dsi.fb(i) for i in range(n)] if n > 1 else [dsi.fb()]
+        if self._gfx is not None:
+            for f in self._fbs:
+                self._gfx.fill(f, self._w * self._h, 0)
+
+        def show(_ctx, i):
+            dsi.show(i)
+
+        def msync(_ctx):
+            dsi.flush()
+
+        def ppa_sync(_ctx):
+            if ppa is not None:
+                ppa.sync()
+
+        def ppa_done(_ctx):
+            done = getattr(ppa, "done", None) if ppa is not None else None
+            return True if done is None else bool(done())
+
+        self._cb = (_SHOW(show), _VOID(msync), _VOID(ppa_sync), _BOOL(ppa_done),
+                    _TICKS(lambda _ctx: _now_us()))
+        self._ops = _DsiOps(*self._cb, None)
+        self._d = _Dsi()
+        _dsi_lib().moy_dsi_init(ctypes.byref(self._d), ctypes.byref(self._ops), n)
+
+    @property
+    def _composite_pending(self):
+        return self._d.composite_pending
+
+    @_composite_pending.setter
+    def _composite_pending(self, on):
+        self._d.composite_pending = bool(on)
+
+    @property
+    def _back(self):
+        return self._d.back
+
+    @property
+    def _pending(self):
+        return None if self._d.pending < 0 else self._d.pending
+
+    @property
+    def _pend3(self):
+        d = self._d
+        return [(d.pend[i], "stamp" if d.kind[i] else "game") for i in range(d.npend)]
+
+    @property
+    def _busy3(self):
+        d = self._d
+        return [d.busy[i] for i in range(d.nbusy)]
+
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._fbs[self._d.back]
+
+    back_buffer = framebuffer
+
+    def gfx(self):
+        return self._gfx
+
+    def flush(self):
+        kicked = False
+        st = self._stamp_pending
+        if st is not None:
+            self._stamp_pending = None
+            try:
+                self._ppa.blit_async(*(tuple(st[:8]) + (1,)))
+                kicked = True
+            except Exception:  # noqa: BLE001 -- refusal -> draw it on the CPU
+                print("Moybyte P4 stamp kick failed -> CPU")
+                if self._gfx is not None:
+                    try:
+                        self._gfx.blit565(*(tuple(st[:8]) + (-1,)))
+                    except Exception:  # noqa: BLE001 -- worst case: one stale frame
+                        pass
+        _dsi_lib().moy_dsi_present(ctypes.byref(self._d), kicked)
+
+    def present_pending(self):
+        _dsi_lib().moy_dsi_present_pending(ctypes.byref(self._d))
+
+    def sync(self):
+        _dsi_lib().moy_dsi_fence(ctypes.byref(self._d))
+
+    def snap_fence(self):
+        self._ppa.snap_wait()
+
+    def frame_fence(self):
+        self._ppa.snap_wait()
+        self._ppa.sync()
+
+    def overlap_stats(self):
+        try:
+            timeouts = self._ppa.stats()[2]
+        except Exception:  # noqa: BLE001 -- no PPA
+            timeouts = 0
+        d = self._d
+        return (d.deferred, d.obsolete, d.fences, d.fence_us, d.game_n,
+                d.game_us, timeouts)
+
+    def underruns(self):
+        try:
+            return self._dsi.underruns()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def set_backlight(self, on=True):
+        self._dsi.backlight(bool(on))
+
+
+# -- present: the rotated DSI compositor (native/moy_glass/moy_present.h) --------
+
+class _Rect(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_int16), ("y", ctypes.c_int16),
+                ("w", ctypes.c_int16), ("h", ctypes.c_int16)]
+
+
+_I32 = ctypes.c_int32
+_ROT_SHOW = ctypes.CFUNCTYPE(None, _P, ctypes.c_int)
+_ROT_REFRESH = ctypes.CFUNCTYPE(_I32, _P)
+_ROT_WAIT = ctypes.CFUNCTYPE(None, _P, ctypes.c_int)
+_ROT_ROTATE = ctypes.CFUNCTYPE(ctypes.c_int, _P, ctypes.c_bool, ctypes.c_bool,
+                               *([ctypes.c_int] * 13))
+_ROT_SCALE = ctypes.CFUNCTYPE(ctypes.c_int, _P, ctypes.c_bool, ctypes.c_bool,
+                              *([ctypes.c_int] * 10), ctypes.POINTER(ctypes.c_int16))
+_ROT_BOUNCE = ctypes.CFUNCTYPE(ctypes.c_int, _P, *([ctypes.c_int] * 13), ctypes.c_bool)
+_ROT_SCRATCH = ctypes.CFUNCTYPE(None, _P, _Z)
+
+
+class _RotOps(ctypes.Structure):
+    _fields_ = [("show", _ROT_SHOW), ("refreshes", _ROT_REFRESH), ("ppa_sync", _VOID),
+                ("ppa_done", _BOOL), ("ppa_wait", _ROT_WAIT), ("snap_wait", _VOID),
+                ("rotate", _ROT_ROTATE), ("rotate_scale", _ROT_SCALE),
+                ("bounce", _ROT_BOUNCE), ("paint", _VOID), ("quiet", _BOOL),
+                ("scratch", _ROT_SCRATCH), ("ticks_us", _TICKS), ("ctx", _P)]
+
+
+class _RotGame(ctypes.Structure):
+    _fields_ = ([(n, ctypes.c_int) for n in ("sw", "sh", "ox", "oy", "scale")]
+                + [("direct", ctypes.c_bool), ("frame", ctypes.c_bool)]
+                + [(n, ctypes.c_int16) for n in ("bx", "by", "bw", "bh")]
+                + [("rows", ctypes.c_int), ("npatch", ctypes.c_int),
+                   ("patches", ctypes.c_int16 * 24)])
+
+
+class _RotStamp(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_int) for n in ("dw", "dh", "x", "y", "sw", "sh")]
+
+
+_ROT_METERS = ("vsync_waits", "full_n", "full_us", "rect_n", "rect_us", "copies",
+               "grown", "dmg_n", "dmg_rects", "dmg_declined", "bounced", "stamp_n",
+               "refused", "def_n", "pres_n", "late_n", "fences", "fence_us",
+               "wait_n", "wait_us")
+
+
+class _Rot(ctypes.Structure):
+    _fields_ = ([("ops", ctypes.POINTER(_RotOps))]
+                + [(n, ctypes.c_int) for n in ("pw", "ph", "w", "h", "angle", "strip_h")]
+                + [("seq", _I32 * 3), ("rseq", _I32 * 3), ("shows", _I32)]
+                + [(n, ctypes.c_int) for n in ("front", "back", "pi", "pending", "keep")]
+                + [(n, ctypes.c_bool) for n in ("async_", "bounce", "has_game",
+                                                "has_stamp")]
+                + [("bounce_min_px", _I32)]
+                + [("stale_full", ctypes.c_bool * 3), ("nstale", ctypes.c_uint8 * 3),
+                   ("stale", (_Rect * 8) * 3), ("ndamage", ctypes.c_int),
+                   ("damage", _Rect * 32), ("game", _RotGame), ("stamp", _RotStamp)]
+                + [(n, ctypes.c_uint32) for n in _ROT_METERS])
+
+
+def _rot_lib():
+    lib = _lib()
+    if not getattr(lib, "_rot_sigs", False):
+        R = ctypes.POINTER(_Rot)
+        for name, args in (("moy_rot_init", [R, ctypes.POINTER(_RotOps), ctypes.c_int,
+                                              ctypes.c_int, ctypes.c_int, ctypes.c_bool,
+                                              ctypes.c_bool]),
+                           ("moy_rot_set_angle", [R, ctypes.c_int]),
+                           ("moy_rot_note_damage", [R] + [ctypes.c_int] * 4),
+                           ("moy_rot_flush", [R]), ("moy_rot_present_pending", [R]),
+                           ("moy_rot_fence", [R])):
+            f = getattr(lib, name)
+            f.argtypes = args
+            f.restype = None
+        lib.moy_rot_on_glass.argtypes = [R]
+        lib.moy_rot_on_glass.restype = ctypes.c_int
+        for name in ("moy_rot_rect", "moy_unrot_rect"):
+            f = getattr(lib, name)
+            f.argtypes = [ctypes.c_int] * 7
+            f.restype = _Rect
+        lib._rot_sigs = True
+    return lib
+
+
+def rotate_rect(x, y, w, h, angle, lw, lh):
+    if angle not in (90, 270):
+        raise ValueError("angle 90 or 270")
+    r = _rot_lib().moy_rot_rect(x, y, w, h, angle, lw, lh)
+    return (r.x, r.y, r.w, r.h)
+
+
+def unrotate_rect(px, py, pw, ph, angle, lw, lh):
+    if angle not in (90, 270):
+        raise ValueError("angle 90 or 270")
+    r = _rot_lib().moy_unrot_rect(px, py, pw, ph, angle, lw, lh)
+    return (r.x, r.y, r.w, r.h)
+
+
+class RotatedCompositor:
+    """moy_glass.RotatedCompositor on CPython: the landscape desk over a
+    portrait `dsi`, rotated on `ppa`."""
+
+    retained_frames = 2
+    rotated = True
+    STALE_LIMIT = 6         # more distinct stale rects than this: a full rotate
+
+    def __init__(self, dsi, ppa, angle=90):
+        rotate_rect(0, 0, 1, 1, angle, 2, 2)
+        dsi.backlight(False)
+        dsi.init()
+        if not ppa.init():
+            raise OSError("moy_ppa init failed: a portrait panel needs the rotate")
+        self._dsi = dsi
+        self._ppa = ppa
+        self._pw = dsi.WIDTH
+        self._ph = dsi.HEIGHT
+        self._w = self._ph
+        self._h = self._pw
+        try:
+            import moy_gfx
+            self._gfx = moy_gfx
+        except ImportError:
+            self._gfx = None
+        self._fbs = [dsi.fb(0), dsi.fb(1), dsi.fb(2)]
+        self._held = [buf(self._w * self._h * 2, ROLE_PAINT) for _ in range(2)]
+        self._paints = [b.view for b in self._held]
+        if self._gfx is not None:
+            for f in self._fbs:
+                self._gfx.fill(f, self._pw * self._ph, 0)
+            for f in self._paints:
+                self._gfx.fill(f, self._w * self._h, 0)
+        self._scratch = None
+        self._scratch_n = 0
+        self._game = None
+        self._stamp = None
+        self._composite_pending = False   # the Waveshare's flag; inert here
+        bufs = self._bufs
+
+        def rotate(_c, nb, wb, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle):
+            try:
+                ppa.rotate(bufs(dst), dw, dh, dx, dy, bufs(src), sw, sh, sx, sy, w, h,
+                           angle, nb, wb)
+            except OSError:
+                if not nb:
+                    raise
+                return -1
+            return 0
+
+        def rotate_scale(_c, nb, wb, dst, dw, dh, dx, dy, src, sw, sh, scale, angle,
+                         blk):
+            extra = (blk[0], blk[1], blk[2], blk[3]) if blk else ()
+            try:
+                ppa.rotate_scale(bufs(dst), dw, dh, dx, dy, bufs(src), sw, sh, scale,
+                                 angle, nb, wb, *extra)
+            except OSError:
+                if not nb:
+                    raise
+                return -1
+            return 0
+
+        def bounce(_c, fb, pw, ph, fx, fy, paint, w, h, sx, sy, bw, bh, angle, nb):
+            return ppa.rotate_bounce(bufs(fb), pw, ph, fx, fy, bufs(paint), w, h, sx,
+                                     sy, bw, bh, angle, nb)
+
+        def refreshes(_c):
+            return dsi.refreshes()
+
+        def scratch(_c, n):
+            if self._scratch is None or self._scratch_n < n:
+                b = buf(n, ROLE_PAINT)
+                self._held.append(b)
+                self._scratch = b.view
+                self._scratch_n = n
+
+        rb = getattr(ppa, "rotate_bounce", None)
+        self._cb = dict(
+            show=_ROT_SHOW(lambda _c, n: dsi.show(n)),
+            refreshes=(_ROT_REFRESH(refreshes) if hasattr(dsi, "refreshes")
+                       else ctypes.cast(None, _ROT_REFRESH)),
+            ppa_sync=_VOID(lambda _c: ppa.sync()),
+            ppa_done=_BOOL(lambda _c: bool(ppa.done())),
+            ppa_wait=_ROT_WAIT(lambda _c, k: ppa.wait(k)),
+            snap_wait=_VOID(lambda _c: ppa.snap_wait()),
+            rotate=_ROT_ROTATE(rotate), rotate_scale=_ROT_SCALE(rotate_scale),
+            bounce=(_ROT_BOUNCE(bounce) if rb is not None
+                    else ctypes.cast(None, _ROT_BOUNCE)),
+            paint=_VOID(lambda _c: self._game[0]()),
+            quiet=_BOOL(lambda _c: bool(self._game[1]())),
+            scratch=_ROT_SCRATCH(scratch),
+            ticks_us=_TICKS(lambda _c: _now_us()))
+        self._ops = _RotOps(**self._cb)
+        self._r = _Rot()
+        _rot_lib().moy_rot_init(ctypes.byref(self._r), ctypes.byref(self._ops),
+                                self._pw, self._ph, angle, hasattr(ppa, "wait"),
+                                rb is not None)
+
+    def _bufs(self, i):
+        if i < 3:
+            return self._fbs[i]
+        if i < 5:
+            return self._paints[i - 3]
+        if i == MOY_ROT_SCRATCH:
+            return self._scratch
+        if i == MOY_ROT_GAME:
+            return self._game[2]
+        if i == MOY_ROT_PIC:
+            return self._game[3]
+        return self._stamp[0 if i == MOY_ROT_STAMP_DST else 1]
+
+    # -- the contract -------------------------------------------------------
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._paints[self._r.pi]
+
+    back_buffer = framebuffer
+
+    def gfx(self):
+        return self._gfx
+
+    @property
+    def angle(self):
+        return self._r.angle
+
+    @property
+    def BOUNCE_MIN_PX(self):
+        return self._r.bounce_min_px
+
+    @BOUNCE_MIN_PX.setter
+    def BOUNCE_MIN_PX(self, n):
+        self._r.bounce_min_px = int(n)
+
+    @property
+    def strip_h(self):
+        return self._r.strip_h
+
+    @strip_h.setter
+    def strip_h(self, h):
+        self._r.strip_h = int(h)
+
+    def set_angle(self, angle):
+        rotate_rect(0, 0, 1, 1, angle, self._w, self._h)
+        _rot_lib().moy_rot_set_angle(ctypes.byref(self._r), angle)
+
+    def mark_game(self, src, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None):
+        g = self._r.game
+        g.sw, g.sh, g.ox, g.oy, g.scale = int(sw), int(sh), int(ox), int(oy), int(scale)
+        g.direct = bool(direct)
+        g.frame = frame is not None
+        pic = None
+        if frame is not None:
+            bx, by, bw, bh, pic, rows, pr, npatch = frame
+            g.bx, g.by, g.bw, g.bh, g.rows = bx, by, bw, bh, rows
+            g.npatch = min(int(npatch), 4)
+            for k in range(6 * g.npatch):
+                g.patches[k] = pr[k]
+        self._game = (paint, quiet, src, pic)
+        self._r.has_game = True
+
+    @property
+    def _stamp_pending(self):
+        return self._stamp_tuple if self._r.has_stamp else None
+
+    @_stamp_pending.setter
+    def _stamp_pending(self, st):
+        if st is None:
+            self._r.has_stamp = False
+            return
+        dst, dw, dh, x, y, src, sw, sh = st
+        self._stamp_tuple = st
+        self._stamp = (dst, src)
+        s = self._r.stamp
+        s.dw, s.dh, s.x, s.y, s.sw, s.sh = dw, dh, x, y, sw, sh
+        self._r.has_stamp = True
+
+    def note_damage(self, x, y, w, h):
+        _rot_lib().moy_rot_note_damage(ctypes.byref(self._r), int(x), int(y), int(w),
+                                       int(h))
+
+    def flush(self):
+        _rot_lib().moy_rot_flush(ctypes.byref(self._r))
+        self._game = self._game if self._r.has_game else None
+
+    def present_pending(self):
+        _rot_lib().moy_rot_present_pending(ctypes.byref(self._r))
+
+    def sync(self):
+        _rot_lib().moy_rot_fence(ctypes.byref(self._r))
+
+    def snap_fence(self):
+        self._ppa.snap_wait()
+
+    def frame_fence(self):
+        if self._r.has_game and self._r.game.frame:
+            self._r.has_game = False
+        self._ppa.snap_wait()
+        self._ppa.sync()
+
+    # -- meters -----------------------------------------------------------------
+    def _m(self, *names):
+        return tuple(getattr(self._r, n) for n in names)
+
+    def async_stats(self):
+        return self._m("def_n", "pres_n", "late_n", "wait_us", "stamp_n", "refused",
+                       "bounced")
+
+    def rotate_stats(self):
+        return self._m("full_n", "full_us", "rect_n", "rect_us", "copies")
+
+    def damage_stats(self):
+        return self._m("dmg_n", "dmg_rects", "dmg_declined", "grown")
+
+    def overlap_stats(self):
+        try:
+            timeouts = self._ppa.stats()[2]
+        except Exception:  # noqa: BLE001
+            timeouts = 0
+        r = self._r
+        return (r.def_n, None, r.fences, r.fence_us, r.wait_n, r.wait_us, timeouts)
+
+    def underruns(self):
+        try:
+            return self._dsi.underruns()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def set_backlight(self, on=True):
+        self._dsi.backlight(bool(on))
+
+    # -- what the tests read ---------------------------------------------------
+    @property
+    def _pending(self):
+        return None if self._r.pending < 0 else self._r.pending
+
+    @property
+    def _keep(self):
+        return self._r.keep
+
+    @property
+    def _stale(self):
+        r = self._r
+        return [None if r.stale_full[i] else
+                [(q.x, q.y, q.w, q.h) for q in r.stale[i][:r.nstale[i]]]
+                for i in range(3)]
+
+    @property
+    def _bounced(self):
+        return self._r.bounced
+
+    @property
+    def _bounce(self):
+        return True if self._r.bounce else None
+
+    @property
+    def _async(self):
+        return self._r.async_
+
+    @_async.setter
+    def _async(self, on):
+        self._r.async_ = bool(on)
+
+    @property
+    def _vsync_waits(self):
+        return self._r.vsync_waits
+
+    def _on_glass(self):
+        return _rot_lib().moy_rot_on_glass(ctypes.byref(self._r))
+
+
+MOY_ROT_SCRATCH, MOY_ROT_GAME, MOY_ROT_PIC, MOY_ROT_STAMP_DST = 5, 6, 7, 8

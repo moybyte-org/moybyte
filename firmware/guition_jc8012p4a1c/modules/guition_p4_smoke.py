@@ -13,7 +13,8 @@ def panel(hold_s=4):
     the cost of a full-screen native fill. Separates "panel path broken" from
     "framebuffer path broken" from "console broken"."""
     import moy_dsi
-    from guition_p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
+    from moy_runtime import P4Compositor
 
     comp = P4Compositor()
     w, h = comp.size()

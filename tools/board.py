@@ -629,7 +629,7 @@ def words(raw, little_endian):
 
 def unrotate(px, pw, ph, angle):
     """A portrait scan buffer (pw x ph) back to the landscape picture the
-    console painted, inverting `device/dsi_panel.rotate_rect` pixel by pixel.
+    console painted, inverting the rotated compositor's `moy_rot_rect` (native/moy_glass) pixel by pixel.
     Returns (words, w, h)."""
     lw, lh = ph, pw
     out = array("H", bytes(2 * lw * lh))

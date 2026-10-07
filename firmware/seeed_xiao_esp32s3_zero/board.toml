@@ -177,7 +177,7 @@ every piece of it. This board drives four files of it, which is the smallest
 device set in the fleet and is the honest measure of what a headless board is:
 a socket, an HTTP/WS transport, a store host and an updater.
 
-The absences are the whole console: no `device_canvas`/`banded_panel` (nothing
+The absences are the whole console: no `device_canvas` (nothing
 to draw on), no `device_boot`/`device_api` (no FrameLoop, no cart namespace),
 no touch or input driver (no touch, no keyboard, no trackball), no
 `device_audio`, no `moy_espnow` (no second console to pair with), no

@@ -914,18 +914,76 @@ static int moy_axs_fb_index(size_t n_args, const mp_obj_t *a) {
     return (int)n;
 }
 
-static mp_obj_t moy_axs_kick(size_t n_args, const mp_obj_t *a) {
-    moy_axs_require();
-    int n = moy_axs_fb_index(n_args, a);
+// ---- the transport the kernel's banded present drives (native/moy_glass) ---
+// MOY_KERNEL_PANEL(kwait/kkick/kship/knfbs): the verbs below with no raise, an
+// error returned instead, called from the VM's task (the drain releases the
+// GIL). kick/show/drain are the MP face of the same three.
+
+int moy_axs_knfbs(void) {
+    return s_nfbs;
+}
+
+uint8_t *moy_axs_kfbn(int n) {
+    return (n >= 0 && n < s_nfbs) ? s_fbs[n] : NULL;
+}
+
+bool moy_axs_kwait(void) {
+    return !s_dev_up ? true : moy_flush_drain();
+}
+
+// Begin shipping framebuffer n and return. The FEEDER runs the SPI, so an
+// error surfaces one frame late: the finished frame's is returned before this
+// one is handed over; a feeder still holding the last frame refuses the kick.
+int moy_axs_kkick(int n) {
+    if (!s_dev_up) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (n < 0 || n >= s_nfbs) {
+        return ESP_ERR_INVALID_ARG;
+    }
     moy_flush_drain();
-    moy_axs_require_idle();
-    // The FEEDER runs the SPI, so an error surfaces one frame late: raise the
-    // finished frame's before handing this one over.
-    moy_axs_check(moy_flush_take_err(), "flush");
+    if (moy_flush.frame_busy) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t e = moy_flush_take_err();
+    if (e != ESP_OK) {
+        return e;
+    }
     moy_axs_decide_window();
     // s_win_h is what the engine slices into bands -- the same ceil() that
     // produced s_win_bands, which fold_test still walks.
     moy_flush_kick(s_fbs[n], s_win_h);
+    return ESP_OK;
+}
+
+// Ship framebuffer n and wait it out: this frame's own error, or a timeout.
+int moy_axs_kship(int n) {
+    if (!s_dev_up) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (n < 0 || n >= s_nfbs) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    moy_flush_drain();
+    if (moy_flush.frame_busy) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    (void)moy_flush_take_err();     // show reports its OWN frame's errors
+    moy_axs_decide_window();
+    moy_flush_kick(s_fbs[n], s_win_h);
+    bool ok = moy_flush_drain();
+    esp_err_t e = moy_flush_take_err();
+    return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
+}
+
+static mp_obj_t moy_axs_kick(size_t n_args, const mp_obj_t *a) {
+    moy_axs_require();
+    int n = moy_axs_fb_index(n_args, a);
+    int e = moy_axs_kkick(n);
+    if (e == ESP_ERR_INVALID_STATE) {
+        moy_axs_require_idle();
+    }
+    moy_axs_check(e, "flush");
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_kick_obj, 0, 1, moy_axs_kick);
@@ -960,16 +1018,14 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_pending_obj, moy_axs_pending);
 static mp_obj_t moy_axs_show(size_t n_args, const mp_obj_t *a) {
     moy_axs_require();
     int n = moy_axs_fb_index(n_args, a);
-    moy_flush_drain();
-    moy_axs_require_idle();
-    (void)moy_flush_take_err();     // show reports its OWN frame's errors
-    moy_axs_decide_window();
-    moy_flush_kick(s_fbs[n], s_win_h);
-    bool ok = moy_flush_drain();
-    moy_axs_check(moy_flush_take_err(), "flush");
-    if (!ok) {
+    int e = moy_axs_kship(n);
+    if (e == ESP_ERR_INVALID_STATE) {
+        moy_axs_require_idle();
+    }
+    if (e == ESP_ERR_TIMEOUT) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_axs: flush timed out"));
     }
+    moy_axs_check(e, "flush");
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_show_obj, 0, 1, moy_axs_show);

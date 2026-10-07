@@ -10,8 +10,8 @@ the REPL; both are driven from moybyte_shell.MODE or by hand:
 
 import time
 
-from guition_panel import GuitionCompositor
 import moy_axs
+import moy_glass
 
 
 def panel(frames=6):
@@ -30,7 +30,7 @@ def panel(frames=6):
                                        expected at 40MHz x 4 lines)
     """
     print("Moybyte panel: init")
-    comp = GuitionCompositor(nfbs=2)
+    comp = moy_glass.BandedCompositor(moy_axs, nfbs=2)
     w, h = comp.size()
     print("Moybyte panel: %dx%d nfbs=%d gfx=%s"
           % (w, h, moy_axs.nfbs(), comp.has_gfx()))
@@ -70,7 +70,7 @@ def touch(secs=60):
     import axs_touch
     from axs_touch import Touch
 
-    comp = GuitionCompositor(nfbs=2)
+    comp = moy_glass.BandedCompositor(moy_axs, nfbs=2)
     gfx = comp.gfx()
     w, h = comp.size()
     touch = Touch(w, h)

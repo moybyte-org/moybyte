@@ -13,7 +13,7 @@ blit_game/blit_cover, the WM already computes the viewport, and this file
 only constructs the pieces.
 
 Input is the P4's shape (touch-only, no poller thread, no keyboard modes),
-the panel is this board's own (`guition_panel.GuitionCompositor` over
+the panel is this board's own (`moy_glass.BandedCompositor` over
 `moy_axs`), the store is a TF card when one is in the slot and internal flash
 when not. Everything else -- the boot order, the service set, the frame loop
 -- is the shared spine (`device/desktop_spine.py`).
@@ -98,10 +98,15 @@ def run_desktop(fps_cap=60):
     carts on the card or internal flash. The REPL stays alive under the
     desktop (#201's console arrangement), so Ctrl-C interrupts and the dev
     channel takes complete lines."""
-    from guition_panel import GuitionCompositor, set_backlight
+    import moy_axs
+    import moy_glass
     from guition_input import make_input, make_touch
 
-    comp = GuitionCompositor(nfbs=2)
+    # The kernel's banded compositor over moy_axs's transport: the band copy
+    # rotates the landscape frame onto this panel, and the game window ships
+    # the game rect alone (moy_axs's notes).
+    comp = moy_glass.BandedCompositor(moy_axs, nfbs=2)
+    set_backlight = comp.set_backlight
     gfx = comp.gfx()
     print("Moybyte Guition display up (%dx%d, gfx=%s)"
           % (comp.size()[0], comp.size()[1], "native" if gfx else "NONE"))

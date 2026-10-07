@@ -4,5 +4,5 @@
 MOY_GLASS_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_GLASS_DIR)/modmoy_glass.c
-SRC_USERMOD_LIB_C += $(MOY_GLASS_DIR)/moy_glass.c
+SRC_USERMOD_LIB_C += $(MOY_GLASS_DIR)/moy_glass.c $(MOY_GLASS_DIR)/moy_present_banded.c $(MOY_GLASS_DIR)/moy_present_dsi.c $(MOY_GLASS_DIR)/moy_present_rot.c
 CFLAGS_USERMOD += -I$(MOY_GLASS_DIR) -I$(MOY_GLASS_DIR)/../moy_spine -DMOY_GLASS=1

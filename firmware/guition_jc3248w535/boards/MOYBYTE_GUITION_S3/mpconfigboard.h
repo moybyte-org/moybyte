@@ -115,3 +115,7 @@
 // PSRAM share (docs/native_kernel_2026-09.md §6.1). One 320x240 layer: a
 // scroll cart's 384,000-byte world is freed at exit and allocated again.
 #define MOY_GLASS_POOL_BYTES                (160 * 1024)
+
+// The banded present (native/moy_glass/moy_present.h): this panel module's
+// kernel transport (kwait/kkick/kship) under the kernel's frame state machine.
+#define MOY_GLASS_BANDED                    (1)

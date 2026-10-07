@@ -3,19 +3,22 @@ JC8012P4A1C (ESP32-P4 + C6, 10.1" 800x1280 MIPI-DSI, GSL3680 touch).
 
 The Waveshare 7B's backend (#58) on the second ESP32-P4 board, and the port
 that moved the P4 silicon tier out of that board's tree (2026-09-06): the DSI
-compositor (`device/dsi_panel.py`), the SYSTEM canvas with its PPA composite
-hooks (`device/p4_canvas.py`) and the four C modules (`native/p4/`) are TAKEN,
+compositor (the kernel's, `native/moy_glass`), the SYSTEM canvas with its PPA
+composite hooks (`device/p4_canvas.py`) and the four C modules (`native/p4/`)
+are TAKEN,
 so what this file owns is exactly what this glass decides --
 
   * the SYSTEM canvas is 1280x800 LANDSCAPE on portrait-native glass (owner
     call 2026-09-06). The P4's DSI scans the framebuffer continuously, so the
-    rotation is the compositor's: `device/dsi_panel.RotatedCompositor` paints
-    a persistent landscape buffer and rotates it onto the panel with the PPA
-    -- the whole frame when chrome painted, one rect on a quiet game frame.
-    Its header carries the design; the README the measured costs.
+    rotation is the compositor's: the kernel's `moy_glass.RotatedCompositor`
+    (`native/moy_glass/moy_present_rot.c`, whose header carries the design;
+    the README the measured costs) paints a persistent landscape buffer and
+    rotates it onto the panel with the PPA -- the whole frame when chrome
+    painted, one rect on a quiet game frame.
   * the touch driver is the GSL3680 (`guition_p4_input.py` over the shared
     `device/gsl3680.py`, firmware upload at boot) instead of a GT911.
-  * the backlight is GPIO23 active-high (`guition_p4_display.py`).
+  * the backlight is GPIO23 active-high (the `MOY_DSI_BL_*` defines
+    `moy_glass.backlight` drives), and up is ROTATION below.
 
 Everything else -- the 320x240 GAME canvas, the windowed WM, the BLE keyboard
 over the C6, OTA on the internal VFS, the dev channel, the frame loop -- is the
@@ -55,6 +58,21 @@ CARTS_ROOT = "/moy/carts"
 OTA_UPDATE_DIR = "/moy/update"
 
 
+# Which way is up: 270 counter-clockwise (the PPA's convention); 90 turns the
+# desk the other way, live as `py comp.set_angle(90)`.
+ROTATION = 270
+
+
+def P4Compositor():
+    """The kernel's rotated DSI compositor over this glass: the landscape desk
+    rotated onto the portrait panel on the PPA, dark until the first composed
+    frame."""
+    import moy_dsi
+    import moy_glass
+    import moy_ppa
+    return moy_glass.RotatedCompositor(moy_dsi, moy_ppa, angle=ROTATION)
+
+
 def run_touch_calibrate():
     """Touch calibration aid: corner + center targets on the glass, every
     GSL3680 sample printed to serial as raw + mapped coords + the live knob
@@ -68,7 +86,7 @@ def run_touch_calibrate():
     once mapped == tapped everywhere, bake the winners into that file. The
     body is `device/p4_desktop.run_touch_calibrate`, shared with the
     Waveshare."""
-    from guition_p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from guition_p4_input import Touch
     from p4_desktop import run_touch_calibrate as _calibrate
 
@@ -84,7 +102,7 @@ def run_ppa_smoke(scale=2, iters=60):
 
         import moy_runtime; moy_runtime.run_ppa_smoke()
     """
-    from guition_p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from p4_canvas import run_ppa_smoke as _smoke
     _smoke(P4Compositor(), set_backlight, scale=scale, iters=iters,
            game_w=GAME_W, game_h=GAME_H)
@@ -114,7 +132,7 @@ def run_desktop(fps_cap=60):
     copies of it, differing in fifty lines of which all but five were this
     board's name in a print string. What is left here is what this glass
     decides -- its compositor, its touch, its constants."""
-    from guition_p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from guition_p4_input import Touch
     from p4_desktop import run_desktop as _run_desktop
 

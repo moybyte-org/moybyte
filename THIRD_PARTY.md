@@ -442,7 +442,7 @@ example's generated concept images (`references/`) are not taken.
 ### 3.4 Board pin assignments — LilyGO T-Deck
 
 `docs/boards/lilygo_t_deck_plus.md` and the constants derived from it in
-`firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` /
+`firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` /
 `tdeck_display.py`. (It first landed in the `.moyproj` SDK, deleted
 2026-07-31; the board doc is the surviving citation.)
 

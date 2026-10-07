@@ -153,7 +153,7 @@ reading, because `flush()` now returns with the frame still going out.
 | bars appear with wrong colours | red/blue swapped = the BGR bit; washed out = a gamma command was rejected |
 | rows sheared diagonally | stride — a `WIDTH`/`row_bytes` mistake |
 | a seam every 48 rows | the flush banding — a continuation band sent a command |
-| flicker or tearing | the ping-pong, or the #66 flush overlap refilling a bounce slot under a live DMA. `ASYNC_FLUSH = False` in `tdeck_panel.py` is the one-flag revert that tells the two apart; `TDeckCompositor(nfbs=1)` disables both |
+| flicker or tearing | the ping-pong, or the #66 flush overlap refilling a bounce slot under a live DMA. `ASYNC_FLUSH = False` in `modules/moy_runtime.py` is the one-flag revert that tells the two apart; `BandedCompositor(moy_lcd, nfbs=1)` disables both |
 | `flush timed out` | `on_color_trans_done` never fired — the completion fence, not the panel |
 
 #### `MODE = "touch"` (stage 2)
@@ -450,7 +450,7 @@ boards/MOYBYTE_TDECK/   out-of-tree board definition + the OTA partition table
 board.toml              WHICH modules cross, and why (tools/board_config.py)
 native/moy_lcd/         the ST7789 SPI panel backend (this board's moy_dsi)
 native/.staged/         shared native modules, copied from the repo-root native/ (gitignored)
-modules/                board-authored: boot/main/moybyte_shell/tdeck_panel/tdeck_smoke
+modules/                board-authored: boot/main/moybyte_shell/tdeck_smoke
                         + everything board.toml stages (gitignored)
 build.sh                clone -> patch -> stage -> freeze -> build -> collect
 ```
@@ -468,10 +468,11 @@ The board-authored modules, and what each is for:
   imports from the shared device tier, and the console itself is staged from
   `runtime/` with the device `make_api` and store injected into
   `console.Workstation`.
-- `tdeck_panel.py` + `native/moy_lcd/` — the panel: `TDeckCompositor` is the
-  ping-pong with the `ASYNC_FLUSH`/`LAYER_COPY_ASYNC` levers and the
-  `bounce_stats`/`pump_last_us` meters, and `moy_lcd` owns the ST7789, the
-  banded flush and the `kick`/`pump`/`drain` protocol (below).
+- `native/moy_lcd/` under the kernel's `moy_glass.BandedCompositor` — the
+  panel: the compositor is the ping-pong in C (`native/moy_glass/moy_present.h`)
+  with the `bounce_stats`/`pump_last_us` meters, the `ASYNC_FLUSH`/
+  `LAYER_COPY_ASYNC` levers are `moy_runtime.py`'s, and `moy_lcd` owns the
+  ST7789, the banded flush and the `kick`/`drain` protocol (below).
 
 ### `board.toml` — where the module list lives
 
@@ -627,28 +628,21 @@ The consequence that outlives the lever: any cart whose backdrop is a colour
 clock sets its price, and no amount of overlap machinery can hide it — the CPU
 is the thing waiting.
 
-### `modules/tdeck_panel.py` — the compositor
+### The compositor
 
-`TDeckCompositor` implements the same small interface `DeviceCanvas.__init__`
-and `moy_runtime.run_desktop` already call — `size` / `framebuffer` /
-`back_buffer` / `gfx` / `flush` / `sync` — the one `p4_display.P4Compositor`
-also implements, plus the one the diag layer probes for with `getattr`
-(`bounce_stats`). No new seam is invented (`docs/backend_contract_v1.md` L8:
-strategy stays the backend's).
-
-**Since 2026-08-21 it is a SUBCLASS** of `device/banded_panel.py`'s
-`BandedCompositor`, shared with the Guition (#206 item 1) — the Python twin of
-the `native/moy_flush` split one tier down, and promoted for the same reason:
-`d9aa73e` moved this board's band feed onto that board's core-0 feeder, which
-retired the soft pump timer and the draw-op pokes that were the last real
-difference between the two files. The base owns the ping-pong, the
-drain-swap-kick overlap and the meter forwarding; what is left in
-`tdeck_panel.py` is the `moy_lcd` import (kept here so the staging-closure
-check can see this board's C dependency), `WIDTH`/`HEIGHT`, the two revert
-flags, `sd_bracket` and the module-level `set_backlight()`. Where the deleted
-fork's compositor owned the bounce buffers, the completion counter and the
-pacing arithmetic in Python, all of that is C, so a band never crosses the
-boundary.
+The kernel's `moy_glass.BandedCompositor` (`native/moy_glass/moy_present.h`,
+sprint 3's glass pass) implements the small interface `DeviceCanvas.__init__`
+and `moy_runtime.run_desktop` call — `size` / `framebuffer` / `back_buffer` /
+`gfx` / `flush` / `sync` — plus the one the diag layer probes for with
+`getattr` (`bounce_stats`). No new seam is invented
+(`docs/backend_contract_v1.md` L8: strategy stays the backend's). Its frame
+state machine is C over `moy_lcd`'s kernel transport (`moy_lcd_kwait`/`kkick`/
+`kship`), the same one the Guition runs over `moy_axs`: the ping-pong, the
+drain-swap-kick overlap and the meter forwarding. What is this board's is in
+`moy_runtime.py` — the two revert flags — and in `moy_lcd`, whose `sd_guard`
+the compositor forwards as `sd_bracket`. Where the deleted fork's compositor
+owned the bounce buffers, the completion counter and the pacing arithmetic in
+Python, all of that is C, so a band never crosses the boundary.
 
 **`ASYNC_FLUSH = False` is the one-flag fallback.** It restores the blocking
 `moy_lcd.show()` path byte-for-byte, and it is how a tear, a glitch or a hang
@@ -705,8 +699,8 @@ with an A/B rather than inherited.
 | cache geometry (#63) | 32KB icache / 64KB dcache / 32B line | **same** | pure win, already proven on this board; costs 48KB internal SRAM |
 | flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **on** (`bec713e`), with the temperature retune | it was the last cart-side gap — Brick Siege's whole `bg=` difference was a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature, so it ships WITH `CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR` and the vendor-gate patch that keeps that option from aborting this board's boot; the five flags move together or not at all (`sdkconfig.board` says which) |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
-| async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `tdeck_panel.py` reverts it |
-| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `tdeck_panel.LAYER_COPY_ASYNC = True`, assigned onto `device_canvas` by `run_desktop` before the first canvas — the flag lives in the compositor module because that is where the fork keeps it (`moy_compositor.SRAM_BOUNCE_FLUSH`) and `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and the Bench carts' scroll phase (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
+| async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `moy_runtime.py` reverts it |
+| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `LAYER_COPY_ASYNC = True` in `moy_runtime.py`, assigned onto `device_canvas` by `run_desktop` before the first canvas, because `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and the Bench carts' scroll phase (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---

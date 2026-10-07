@@ -97,15 +97,14 @@ ISR, whose body is the engine's `moy_flush_band_done_from_isr` -- static
 inline, so the callback keeps its IRAM placement. The device runs
 `SPI_DEVICE_NO_RETURN_RESULT`: a band's queue slot frees as the ISR starts
 it and no result is ever filed, so a band that completes late cannot leave
-anything behind. `modules/guition_panel.py` is the
-compositor over it -- since 2026-08-21 a thin SUBCLASS of the shared
-`device/banded_panel.py` (`FoldingCompositor` over `BandedCompositor`, #206
-item 1), the Python twin of the `moy_flush` split above. What is left in this
-file is the `moy_axs` import, WIDTH/HEIGHT, the `ASYNC_FLUSH` revert flag and
-the module-level `set_backlight()` -- the `*_fold` verbs sit on the shared
-folding rung, which both S3 boards take, and what is this board's alone is the
-game WINDOW; there is no `sd_bracket` here, because nothing else is known
-to share this QSPI host. Init sequence provenance: ESPHome's AXS15231 model plus
+anything behind. The compositor over it is the kernel's
+`moy_glass.BandedCompositor` (`native/moy_glass/moy_present.h`, sprint 3's
+glass pass), the frame state machine in C over this module's transport entries
+(`moy_axs_kwait`/`kkick`/`kship`, named through `MOY_KERNEL_PANEL`); the
+T-Deck runs the same one over `moy_lcd`. The `*_fold` verbs are this module's
+and the compositor forwards them; what is this board's alone is the game
+WINDOW, and there is no `sd_bracket` here, because nothing else is known to
+share this QSPI host. Init sequence provenance: ESPHome's AXS15231 model plus
 its generated DCS tail -- the exact sequence the owner's ESPHome build runs on
 this exact glass.
 
@@ -220,7 +219,7 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     #202; cross-session diffs need a fresh-boot same-shape session (the
     ledger's rule).
 * 2026-08-18 -- port authored (stage 0 skeleton through stage 6 code):
-  moy_axs + guition_panel + axs_touch + run_desktop; `make test` green with
+  moy_axs + its compositor + axs_touch + run_desktop; `make test` green with
   the board in the staging-closure/board-toml suites.
 * 2026-08-19 (the morning after, owner's eyes on the glass) -- three hardware
   verdicts and the LANDSCAPE flip:

@@ -133,6 +133,9 @@ NOT_OURS = (
     # the rows. The kernel plans and the surface model name them to say what
     # crossed.
     "runtime/surface.py", "runtime/moy_glass.py",
+    # ...and the compositors' Python it crossed into native/moy_glass.
+    "device/banded_panel.py", "modules/tdeck_panel.py", "modules/guition_panel.py",
+    "modules/p4_display.py", "device/dsi_panel.py", "modules/guition_p4_display.py",
 )
 
 

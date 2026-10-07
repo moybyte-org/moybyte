@@ -198,3 +198,18 @@ def test_device_canvas_defines_no_python_twin_of_the_glass():
                  "MAP_AUTO_CACHE", "_MaskedRegion", "malloc_dma", "set_pump",
                  r"set_buf\("):
         assert not re.search(gone, src), gone
+
+
+def test_a_canvas_attribute_map_is_never_left_near_full():
+    """MicroPython grows an attribute map only when it is FULL, and every
+    method call misses the instance map before it reaches the class: a canvas
+    whose map sits full probes the whole map per verb (the T-Deck's circ went
+    82 -> 107 us/op at 71 of 73 slots). _room keeps it at most 4/5 full."""
+    from runtime import host_canvas
+    import device_canvas as dc
+    for cv in (host_canvas.make_canvas(64, 32),
+               host_canvas.make_system_canvas(64, 32),
+               host_canvas.make_canvas(64, 32).new_layer(8, 8)):
+        n = len(cv.__dict__)
+        size = next(s for s in dc._MAP_SIZES if s >= n)
+        assert n * 5 <= size * 4, (type(cv).__name__, n, size)

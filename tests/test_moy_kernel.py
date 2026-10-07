@@ -303,7 +303,7 @@ def test_each_consoles_floor_is_pinned(lib, board):
 
 @pytest.mark.parametrize("rot", [90, 180, 270])
 def test_a_rotation_is_the_ppa_s_counter_clockwise_turn(lib, rot):
-    """device/dsi_panel.rotate_rect's convention, pixel for pixel: 90 maps the
+    """The rotated compositor's convention (moy_rot_rect), pixel for pixel: 90 maps the
     logical (x, y) to (y, w-1-x), 270 to (h-1-y, x), 180 to (w-1-x, h-1-y)."""
     w, h = 320, 200
     lines = ["ROTATE %d" % rot]

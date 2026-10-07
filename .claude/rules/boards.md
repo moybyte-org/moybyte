@@ -100,8 +100,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   raster (numbers in #66) — and is the only build whose serial dev channel
   works; the fork's `MOYBYTE_REPL=jtag` mode, with its three bugs fixed, printed
   but never took input on identical config and symbols. A recorded verdict, not
-  a TODO. LVGL went with it: `native/moy_lcd` + `modules/tdeck_panel.py` is the
-  only panel driver, and what was never board-specific lives at the root
+  a TODO. LVGL went with it: `native/moy_lcd` under the kernel's banded compositor
+  (`native/moy_glass`) is the only panel driver, and what was never board-specific lives at the root
   (`native/`, `patches/`, `device/`). The MicroPython console is the only
   firmware; the Arduino smoke firmware and the LVGL `.moyproj` boot path are in
   git history.
@@ -195,8 +195,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   into Python. A compiled cart's frame folds straight from the cart's memory
   (blit's palette or blit565's byte swap resolved per band), so no canvas holds
   it. The game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
-  keeps the bezels. `tdeck_panel.py`'s header and `moy_fold.h` are the
-  authority.
+  keeps the bezels. `moy_fold.h` is the authority.
 - **The panel rules live in `native/moy_lcd`'s C**: DMA only from internal
   SRAM, only the first band carries a command (what "a full-screen flush must
   be a single `tx_color`" meant), and a band fits one SPI DMA transaction — a
@@ -232,8 +231,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 - **`native/p4/` is the shared P4 silicon tier (2026-09-06)**: `moy_dsi`
   (parameterized by the board's `MOY_DSI_PANEL_*` define), `moy_ppa`,
   `moy_ble_hid`, `moy_c6`, declared by a P4 board as a second `[native.p4]`
-  source — never seen by the S3 scan — plus `device/dsi_panel.py` (the
-  compositor; the board injects its backlight), `device/p4_canvas.py` and
+  source — never seen by the S3 scan — plus the kernel's DSI compositors
+  (`native/moy_glass/moy_present.h`: `moy_glass.DsiCompositor` and
+  `RotatedCompositor`, over the modules each board passes in), `device/p4_canvas.py` and
   `device/p4_desktop.py` over `device/desktop_spine.py`. The two P4 patches
   are `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
   `moybyte_patch_p4_dsi_underrun`. Status and numbers: #58, #202.
@@ -271,10 +271,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   on; a destination the CPU never writes skips the writeback (`rotate`'s `wb`
   flag). Full paints stay blocking so chrome never races the DMA.
 - **The Guition P4's desk is LANDSCAPE on PORTRAIT glass**
-  (`device/dsi_panel.RotatedCompositor`, owner call 2026-09-06, pinned by
-  `tests/test_p4_display.py`): one persistent landscape buffer the PPA rotates
+  (`moy_glass.RotatedCompositor`, `native/moy_glass/moy_present_rot.c`, owner
+  call 2026-09-06, pinned by `tests/test_p4_display.py`): one persistent landscape buffer the PPA rotates
   onto the panel, with per-buffer stale rects so a ping-pong buffer is never
-  shown behind. Up is `guition_p4_display.ROTATION` (90/270), live as
+  shown behind. Up is the board runtime's `ROTATION` (90/270), live as
   `py comp.set_angle(270)`. Its GSL3680 touch is RAM-loaded
   (`device/gsl3680.py` uploads `modules/gsl_fw_jc8012.py` after every reset);
   its serial is the P4's own USB-Serial/JTAG (the S3 rules, and esptool needs

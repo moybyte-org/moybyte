@@ -11,8 +11,9 @@ variant baked into `boards/MOYBYTE_GUITION_P4`) + our native modules via
 **This port is a VARIANT of the Waveshare P4's**, and what it added to the tree
 is mostly what it took OUT of that board's directory: the P4-silicon C modules
 became the shared `native/p4/` tier (`moy_dsi` parameterized by a panel
-define, `moy_ppa`, `moy_ble_hid`, `moy_c6`), the DSI compositor became
-`device/dsi_panel.py`, the PPA system canvas `device/p4_canvas.py`, and the
+define, `moy_ppa`, `moy_ble_hid`, `moy_c6`), the DSI compositor became shared
+(the kernel's `native/moy_glass` since sprint 3's glass pass), the PPA system
+canvas `device/p4_canvas.py`, and the
 two P4 patches moved to `patches/p4_*.patch` behind two shared build-lib
 functions. This directory owns what this glass decides: the panel define, the
 backlight, the touch driver + its firmware, and the rotated (landscape) desk.
@@ -23,8 +24,8 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 - **The console runs LANDSCAPE, 1280×800, on glass that scans PORTRAIT** (owner
   call 2026-09-06: "we want it landscape"). The P4's DSI scans the PSRAM
   framebuffer continuously — there is no per-frame flush to fold a rotation
-  into — so the rotation is the compositor's: `device/dsi_panel.py`'s
-  `RotatedCompositor` paints a persistent 1280×800 landscape buffer and
+  into — so the rotation is the compositor's: the kernel's
+  `moy_glass.RotatedCompositor` (`native/moy_glass/moy_present_rot.c`) paints a persistent 1280×800 landscape buffer and
   rotates it onto the panel with the PPA. Two costs, and the design is about
   paying the small one as often as possible:
   - a FULL frame (any chrome paint) is a whole-buffer rotate, 2MB in and 2MB
@@ -189,7 +190,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 
 - `board.toml` — the declaration: `[native.shared]` + **`[native.p4]`** (the
   silicon tier, a second native source — `tools/board_config.py
-  native_sources`), the device allowlist (adds `dsi_panel`, `p4_canvas`,
+  native_sources`), the device allowlist (adds `p4_canvas`,
   `gsl3680`; `gt911` crosses for its HeldPoint only), `[flash]`/`[serial]`
   with the USB-Serial/JTAG facts.
 - `boards/MOYBYTE_GUITION_P4/` — `mpconfigboard.cmake` (the C6_WIFI fragments,
@@ -198,10 +199,9 @@ plus the P4 extras `bt`/`union`/`cache`.
   256KB, DSI ISR in IRAM, hosted mempool in PSRAM, the WIFI_RMT set, rollback;
   16MB flash + this board's partition CSV), `partitions-moybyte-guition-p4.csv`.
 - `modules/` (tracked): `boot.py`/`main.py`/`moybyte_shell.py` (the Guition
-  S3's MODE-string shell), `guition_p4_display.py` (backlight + the shared
-  compositor), `guition_p4_input.py` (pins, knobs, the shared GSL3680 driver),
+  S3's MODE-string shell), `guition_p4_input.py` (pins, knobs, the shared GSL3680 driver),
   `gsl_fw_jc8012.py` (the touch firmware — generated, but checked in: it is a
-  panel fact), `guition_p4_smoke.py`, `moy_runtime.py` (`run_desktop` — this
+  panel fact), `guition_p4_smoke.py`, `moy_runtime.py` (`ROTATION` and the compositor it builds; `run_desktop` — this
   glass's arguments to `device/p4_desktop.py`, the P4 tier's body over the
   shared boot spine `device/desktop_spine.py`). Everything else in `modules/` is
   staged at build and gitignored.
@@ -294,4 +294,4 @@ for the C6/audio pins, which agree with the BSP.
 4. The factory slave's two 5s RPC timeouts per boot (the section above); the
    shimmed slave image is the fix for 3 and 4 at once.
 5. BLE keyboard (unverified: nothing paired), audio (#82, same codec as the
-   Waveshare), backlight PWM (one line in `guition_p4_display.py` when wanted).
+   Waveshare), backlight PWM (`moy_dsi`'s backlight entry, when wanted).

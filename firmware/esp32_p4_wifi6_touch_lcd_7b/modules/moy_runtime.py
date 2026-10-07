@@ -81,7 +81,7 @@ def run_touch_calibrate():
     (etc.), re-run, and once mapped == tapped everywhere, bake the winners into
     p4_input.py. The body is `device/p4_desktop.run_touch_calibrate`, shared
     with the Guition P4."""
-    from p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from p4_input import Touch
     from p4_desktop import run_touch_calibrate as _calibrate
     import p4_input
@@ -91,6 +91,16 @@ def run_touch_calibrate():
                % (p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
 
 
+def P4Compositor():
+    """The kernel's DSI compositor over this glass: moy_dsi's three scan
+    buffers and the PPA's fences (native/moy_glass/moy_present.h), dark until
+    the first composed frame."""
+    import moy_dsi
+    import moy_glass
+    import moy_ppa
+    return moy_glass.DsiCompositor(moy_dsi, moy_ppa)
+
+
 def run_ppa_smoke(scale=2, iters=60):
     """A/B the PPA vs the CPU composite on this board's glass -- the body is
     device/p4_canvas.run_ppa_smoke (one copy for both P4 boards); this hands
@@ -98,7 +108,7 @@ def run_ppa_smoke(scale=2, iters=60):
 
         import moy_runtime; moy_runtime.run_ppa_smoke()
     """
-    from p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from p4_canvas import run_ppa_smoke as _smoke
     _smoke(P4Compositor(), set_backlight, scale=scale, iters=iters,
            game_w=GAME_W, game_h=GAME_H)
@@ -129,7 +139,7 @@ def run_desktop(fps_cap=60):
     tier had two copies of it, differing in fifty lines of which all but five
     were the board's own name in a print string. What is left here is what
     this glass decides -- its compositor, its touch, its constants."""
-    from p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from p4_input import Touch
     from p4_desktop import run_desktop as _run_desktop
 

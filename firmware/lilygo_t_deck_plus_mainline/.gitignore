@@ -14,7 +14,6 @@ modules/*
 !modules/boot.py
 !modules/main.py
 !modules/moybyte_shell.py
-!modules/tdeck_panel.py
 !modules/tdeck_smoke.py
 !modules/moy_runtime.py
 !modules/tdeck_input.py

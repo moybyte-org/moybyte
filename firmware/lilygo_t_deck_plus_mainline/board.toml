@@ -9,8 +9,8 @@
 #  exactly the presentation tier (`wm_windowed.py` and its halves), an
 #  asserted invariant.
 #
-#  The panel path here is `native/moy_lcd` plus the board-authored
-#  `modules/tdeck_panel.py` -- the fork's LVGL trio (`tdeck_display.py`,
+#  The panel path here is `native/moy_lcd` under the kernel's banded
+#  compositor (`native/moy_glass`) -- the fork's LVGL trio (`tdeck_display.py`,
 #  `moy_compositor.py`, `moy_canvas.py`) died with it.
 #
 #  Read `README.md` in this directory first. The hardware-learned constraints
@@ -473,23 +473,6 @@ The memory census the spine marks its boot steps into: inert unless the flash
 root holds `/mem_census` (written by `tools/mem_census.py`), which arms the
 boot trace and the import timer. The spine imports it, so every board that
 takes the spine takes it."""
-
-[[modules.device.group]]
-files = ["banded_panel.py"]
-why = """
-STAGE 1 (panel). `BandedCompositor` -- the compositor body this board's
-`modules/tdeck_panel.py` subclasses, and the Guition's `guition_panel.py`
-subclasses too. The Python twin of `native/moy_flush`: the transport stays
-per-board (esp_lcd/SPI here, raw QSPI there), the frame machine over it does
-not. Promoted out of this directory 2026-08-21 on Phase C's second-consumer
-rule (#206 item 1) -- it became shareable the day `d9aa73e` moved this board's
-band feed off its VM-core pump timer and onto the Guition's core-0 feeder.
-
-What stays in `tdeck_panel.py` is what is this board's: the `moy_lcd` import,
-WIDTH/HEIGHT, the ASYNC_FLUSH and LAYER_COPY_ASYNC revert flags, `sd_bracket`
-(no other board shares its panel bus with an SD card) and the module-level
-`set_backlight`. The GAME FOLD is `FoldingCompositor` in the same shared file
-since 2026-09, over `native/moy_flush/moy_fold`."""
 
 [[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_input.py", "gt911.py"]

@@ -6,7 +6,7 @@
 #  + a MIPI-DSI touch panel), so its board file is the Waveshare's with the
 #  panel, the touch part and the flash size changed. What the two share as
 #  DATA rather than as copies is the whole point of the port:
-#  `[native.p4]` (the P4 silicon tier), `device/dsi_panel.py`,
+#  `[native.p4]` (the P4 silicon tier), the kernel's DSI compositors,
 #  `device/p4_canvas.py`, and the device allowlist below.
 #
 #  Read `README.md` in this directory before touching the board: it holds
@@ -449,14 +449,13 @@ queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
 
 [[modules.device.group]]
-files = ["dsi_panel.py", "p4_canvas.py", "p4_desktop.py", "card_store.py"]
+files = ["p4_canvas.py", "p4_desktop.py", "card_store.py"]
 why = """
 The P4 silicon tier's Python half (2026-09-06, promoted out of the Waveshare's
-p4_display.py / moy_runtime.py the day this board became their second
-consumer): the DSI compositor over native/p4/moy_dsi (triple-buffer rotation,
-deferred present, fences) and the SYSTEM canvas with the PPA composite hooks
-the windowed WM probes for. This board's guition_p4_display.py adds only its
-backlight; its moy_runtime.py constructs the canvas at this glass's size.
+moy_runtime.py the day this board became its second consumer): the SYSTEM
+canvas with the PPA composite hooks the windowed WM probes for, and the desk's
+boot. This board's compositor is the kernel's moy_glass.RotatedCompositor
+(native/moy_glass), constructed by its moy_runtime.py at this glass's angle.
 `card_store.py` is the cart store on a card that has a bus of its own
 (tests/test_card_store.py executes it): the TF card when one mounts, the
 internal flash when not."""

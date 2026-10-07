@@ -27,7 +27,7 @@ own board-dir README and in the sections below.
 | `board.toml` (modules + native, denials with whys) | copy + edit | solved (#161) |
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
-| input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
+| input drivers | one copy each | `device/gt911.py`, `native/moy_flush`, `native/moy_glass`'s banded compositor |
 | **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `frame_loop.FrameLoop`, and every console board rides it |
 | `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
@@ -79,7 +79,8 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     a P4 board as a SECOND native source (`[native.p4]`) rather than denied by
     every S3 board — `native/p4/` carries no `micropython.cmake` of its own,
     so the shared scan never sees it. Two Python halves followed:
-    `device/dsi_panel.py` (the compositor, backlight injected),
+    the compositor (shared Python then; the kernel's `native/moy_glass`
+    since sprint 3's glass pass),
     `device/p4_canvas.py` (the PPA system canvas + the PPA smoke) and
     `device/p4_desktop.py` (the P4 tier over the shared boot spine
     `device/desktop_spine.py`, which all four console boards take since
@@ -132,32 +133,19 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     consumer is what made it shareable, exactly as Phase C's rule says — the
     trigger was not a third board but the two boards CONVERGING.
 
-  * **The panel compositor (Python)**: `device/banded_panel.py`, promoted the
-    same day and for the same reason (#206 item 1). It is the twin of the C
-    split one tier up — the frame machine shared, the transport not. What #206
-    listed as the genuine per-board difference was "the T-Deck's soft pump
-    timer and draw-op pokes"; `d9aa73e` retired those, and the two files were
-    left with twelve identical methods and two constructors differing by an
-    import, so the extraction is a consequence of the feeder port rather than
-    a fresh judgement call. `BandedCompositor` owns the backend contract, the
-    drain-swap-kick overlap, the ping-pong and the meters; each board's
-    subclass imports its native module (**in its own `__init__`, so
-    `tests/test_staging_closure.py` can still see which board depends on which
-    C module**), passes it in, and adds only what is its own — geometry, the
-    `ASYNC_FLUSH` revert flag, the module-level `set_backlight()`, the
-    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's game window.
-    Note what did NOT move: `set_backlight()` as a module function exists for
-    callers holding no compositor, so routing it through the class would undo
-    its reason to exist, and two two-line copies are cheaper than the
-    indirection. Nor did `fold_supported` become a base-class probe — a board
-    without the lever must carry no such attribute at all, which is how a board
-    says it lacks one. **2026-09 amendment:** the T-Deck took the fold too, so
-    the verbs sit on a `FoldingCompositor` rung BETWEEN the base and the two
-    boards — a subclass and not four more base methods, precisely so that
-    absence stays available to the next banded board that cannot synthesize.
-    Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
-    44.7 → 44.8 (Brick Siege medians of three 6.6 s samples, fresh boot),
-    `idle=0 gaps=0` on both, suites 9/9 and 10/10.
+  * **The panel compositor**: promoted the same day and for the same reason
+    (#206 item 1) as a shared Python body, and since sprint 3's glass pass
+    (2026-10-07) the kernel's `moy_glass.BandedCompositor`, its frame state
+    machine in C (`native/moy_glass/moy_present.h`). It owns the backend
+    contract, the drain-swap-kick overlap, the ping-pong and the meters; each
+    board passes its native module in and keeps only what is its own --
+    geometry, the `ASYNC_FLUSH` revert flag, the T-Deck's `LAYER_COPY_ASYNC`,
+    the Guition's game window -- and the fold and SD-guard verbs are the panel
+    module's, which the compositor forwards only where the module has them: a
+    board without the lever carries no such attribute at all, which is how a
+    board says it lacks one. Measured on glass when the fold went shared:
+    T-Deck 58.1 → 58.7 fps, Guition 44.7 → 44.8 (Brick Siege medians of three
+    6.6 s samples, fresh boot), `idle=0 gaps=0` on both, suites 9/9 and 10/10.
 
 **Phase D — the port checklist** (below). A checklist, not a generator —
 three data points before any codegen. Drafted from the T-Deck mainline port
@@ -217,12 +205,13 @@ the next one:
 **Stage 1 — panel.** The board's compositor (implementing
 `docs/surface_model_v1.md` §4 — size/framebuffer/gfx/flush/sync) over its
 native panel module. A board that PUSHES frames writes neither half from
-scratch: **subclass `device/banded_panel.py`'s `BandedCompositor`** (allowlist
-it in `[modules.device]`) and give it a native module exporting the
-`init`/`fb`/`nfbs`/`kick`/`drain`/`show`/`stats`/`pump_stats`/`backlight` verb
-set, which is `native/moy_flush` plus three transport hooks. The subclass
-should be an import, a flag and this board's own levers; if it grows a second
-copy of the ping-pong or the meters, something is being re-discovered. Smoke: colour bars + checker, printed flush µs. The
+scratch: **build the kernel's `moy_glass.BandedCompositor`** over a native
+module exporting the `init`/`fb`/`nfbs`/`kick`/`drain`/`show`/`stats`/
+`pump_stats`/`backlight` verb set and the kernel entries `kwait`/`kkick`/
+`kship`/`kbacklight` (named by `MOY_KERNEL_PANEL`, with `MOY_GLASS_BANDED` in
+`mpconfigboard.h`), which is `native/moy_flush` plus three transport hooks. If
+the board grows a second copy of the ping-pong or the meters, something is
+being re-discovered. Smoke: colour bars + checker, printed flush µs. The
 MADCTL / byte-order / rotation table in the T-Deck README's stage-1 section is
 the debug map. Decide the panel driver's share-or-stand-alone question ON THIS
 GLASS (moy_lcd's band/bounce machinery vs. a new io layer) — and note the

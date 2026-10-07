@@ -2,7 +2,8 @@
 
 The Waveshare 7B (#58) and the Guition 10.1" (#220) run the same console on
 the same silicon over the same shared tier -- `native/p4/` (moy_dsi, moy_ppa,
-moy_ble_hid, moy_c6), `device/dsi_panel.py`, `device/p4_canvas.py` -- and the
+moy_ble_hid, moy_c6), the kernel's DSI compositors (`native/moy_glass`),
+`device/p4_canvas.py` -- and the
 boot itself is every console board's (`device/desktop_spine.py`). What is the
 P4 tier's, and lives here once for both boards:
 

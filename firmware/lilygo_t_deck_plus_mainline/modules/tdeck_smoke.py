@@ -25,8 +25,8 @@ Two rules every smoke here follows.
 
 import time
 
+import moy_glass
 import moy_lcd
-from tdeck_panel import TDeckCompositor
 
 # MOY64 palette indices used by the smoke screens. Spelled out rather than
 # imported from `console.NAMES`: a bring-up program that pulls in the whole
@@ -48,7 +48,7 @@ def _canvas(nfbs=2):
     Returns (compositor, canvas). The caller lights the backlight once it has
     composed a frame -- a fresh ST7789's GRAM is noise and must never be lit.
     """
-    comp = TDeckCompositor(nfbs=nfbs)
+    comp = moy_glass.BandedCompositor(moy_lcd, nfbs=nfbs)
     from device_canvas import DeviceCanvas
     canvas = DeviceCanvas(comp)
     return comp, canvas
@@ -88,7 +88,7 @@ def panel(frames=6):
                                        the real per-frame panel cost
     """
     print("Moybyte panel: init")
-    comp = TDeckCompositor(nfbs=2)
+    comp = moy_glass.BandedCompositor(moy_lcd, nfbs=2)
     w, h = comp.size()
     print("Moybyte panel: %dx%d nfbs=%d madctl=0x%02x gfx=%s"
           % (w, h, moy_lcd.nfbs(), moy_lcd.madctl(), comp.has_gfx()))

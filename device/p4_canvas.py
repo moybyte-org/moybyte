@@ -36,11 +36,11 @@ The two-domain seam (#39) as it runs on both P4 boards:
 
 try:
     from device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
-                               _ST_N_FILL, _ST_N_TEXT)
+                               _ST_N_FILL, _ST_N_TEXT, _room)
     from device_util import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host package lane
     from device.device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
-                                      _ST_N_FILL, _ST_N_TEXT)
+                                      _ST_N_FILL, _ST_N_TEXT, _room)
     from device.device_util import _ticks_ms, _ticks_diff
 
 
@@ -122,6 +122,7 @@ class P4SystemCanvas(SystemCanvas):
         self._fr = None
         self._fr_patches = [0] * 24       # six numbers a patch, four at most
         self._paint_frame_fn = self._paint_frame
+        _room(self)                       # device_canvas._MAP_SIZES says why
 
     def cls(self, c=0):
         # Counted, because a clear is the one whole-surface write the native

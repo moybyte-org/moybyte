@@ -53,11 +53,11 @@ def _device_backend_src():
 
 
 def _panel_src():
-    """This board's panel backend: its compositor SUBCLASS plus its native
-    driver. The shared body is `device/banded_panel.py`, executed by
-    tests/test_banded_panel.py."""
+    """This board's panel backend: the boot that builds the kernel's banded
+    compositor over it, and its native driver. The compositor's frame state
+    machine is executed by tests/test_banded_panel.py."""
     return (
-        (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8"),
+        (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8"),
         (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(encoding="utf-8"),
     )
 
@@ -327,8 +327,8 @@ def test_the_band_feed_runs_on_the_core0_feeder_task():
     assert "moy_flush_band_done_from_isr" in c, (
         "the done-ISR's counting/wake half is the engine's, static inline so "
         "the callback keeps its own IRAM placement")
-    # The Python compositor no longer feeds anything: no timer, no poke export.
-    assert "self.pump_if_pending" not in py
+    # Nothing on the VM side feeds the flush: no timer, no poke export.
+    assert "pump_if_pending" not in py
     assert "machine import Timer" not in py
 
 
@@ -405,9 +405,14 @@ def test_the_guition_transport_cannot_leak_a_queue_slot_or_leave_cs_low():
         < end.index("spi_device_release_bus("), "close CS before the bus goes"
     qb = body("esp_err_t moy_axs_queue_band")
     assert "err == ESP_OK && last" in qb and "s_cs_open = false" in qb
-    for verb in ("kick", "show", "set_madctl", "set_rot", "cmd_py", "fold_test"):
+    for verb in ("set_madctl", "set_rot", "cmd_py", "fold_test"):
         vb = body("mp_obj_t moy_axs_" + verb)
         assert vb.index("moy_flush_drain()") < vb.index("moy_axs_require_idle()"), verb
+    # The kernel transport the banded compositor drives: the same idle rule.
+    for entry in ("kkick", "kship"):
+        head = src.index("int moy_axs_%s(int n) {" % entry)
+        kb = src[head:src.index("\n}\n", head)]
+        assert kb.index("moy_flush_drain()") < kb.index("moy_flush.frame_busy"), entry
     # The proof hook the on-glass suite drives, one constant per failure path.
     for k in ("FAULT_DROP", "FAULT_QERR", "FAULT_HDR", "FAULT_LATE"):
         assert "MP_QSTR_" + k in src, k
@@ -437,35 +442,24 @@ def test_async_layer_copy_wired():
 def test_the_mainline_tdeck_arms_the_async_layer_copy_before_its_canvas():
     """#54 St.2 on the mainline port, where the flag has to come from elsewhere.
 
-    `device_canvas.py` reads `LAYER_COPY_ASYNC` from `moy_compositor`, which the
-    mainline build does not stage (its compositor is `tdeck_panel` over the C
-    `moy_lcd`), so the import guard resolves it False. That file is STAGED from
-    the shared `device/` tree and is not this board's to edit, so the flag is declared in
-    `tdeck_panel` -- the module that plays `moy_compositor`'s part there, and the
-    module that owns the fact the lever rests on -- and `run_desktop` assigns it
-    across.
+    `device_canvas.py` is STAGED from the shared `device/` tree and is not this
+    board's to edit, so the flag is declared in the board's runtime beside
+    ASYNC_FLUSH and `run_desktop` assigns it across.
 
     The thing worth pinning is the ORDER. `DeviceCanvas.__init__` latches
     `_async_ok` from the module global, so an assignment that drifts BELOW the
     construction reaches nothing at all: the lever would be off, the flag would
-    read True, and no diag line would contradict either. That is a silent
-    failure with a green grep, which is exactly the shape a test is for.
-
-    Only the two TRACKED board files are read -- the mainline's `modules/` is
-    gitignored apart from its board-authored files, so a fresh checkout has no
-    staged `device_canvas.py` to look at.
+    read True, and no diag line would contradict either.
     """
     mainline = _REPO / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
-    panel = (mainline / "tdeck_panel.py").read_text(encoding="utf-8")
     runtime = (mainline / "moy_runtime.py").read_text(encoding="utf-8")
 
-    # Declared in the compositor module, as a plain module constant, so the
-    # revert is one flag exactly like ASYNC_FLUSH beside it.
-    assert "\nLAYER_COPY_ASYNC = True\n" in panel
-    assert "\nASYNC_FLUSH = True\n" in panel
+    # Plain module constants, so each revert is one flag.
+    assert "\nLAYER_COPY_ASYNC = True\n" in runtime
+    assert "\nASYNC_FLUSH = True\n" in runtime
 
-    # ... and applied onto the staged module, never edited into it.
-    assign = "device_canvas.LAYER_COPY_ASYNC = tdeck_panel.LAYER_COPY_ASYNC"
+    # ... applied onto the staged module, never edited into it.
+    assign = "device_canvas.LAYER_COPY_ASYNC = LAYER_COPY_ASYNC"
     assert assign in runtime
     assert "import device_canvas" in runtime
 

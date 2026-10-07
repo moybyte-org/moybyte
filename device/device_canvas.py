@@ -397,6 +397,28 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 
 # #75: immutable templates the per-frame reset_state restores the pal tables from
 # IN PLACE (no per-frame bytearray allocation; 0 == identity map / all-opaque).
+# MicroPython's map sizes (py/map.c's hash_allocation_sizes), the part a
+# canvas's attributes span. A map grows only once it is FULL, and a lookup
+# that misses it -- every method call, since a method lives on the class --
+# probes until it meets an empty slot: the whole map, when it is full. A
+# canvas holds some seventy attributes, so whether its verbs cost a few probes
+# or seventy depends on where that count sits against these sizes (measured on
+# the T-Deck's Bench: circ 82 -> 107 us/op at 71 of 73 slots).
+_MAP_SIZES = (17, 23, 29, 37, 47, 59, 73, 97, 127, 167, 223, 293)
+
+
+def _room(obj):
+    """Leave `obj`'s attribute map at most four-fifths full: past that, add
+    spare attributes until the map grows to its next size."""
+    n = len(obj.__dict__)
+    for s in _MAP_SIZES:
+        if s >= n:
+            if n * 5 > s * 4:
+                for i in range(s + 1 - n):
+                    setattr(obj, "_room%d" % i, None)
+            return
+
+
 _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
 
@@ -640,6 +662,7 @@ class DeviceCanvas:
         self._ppa_fill = getattr(self, "ppa_fill", None)
         self.reset_state()
         self._install_draw_gates()
+        _room(self)
 
     def sync_back(self):
         """Re-point the draw target at the compositor's current BACK buffer (#40

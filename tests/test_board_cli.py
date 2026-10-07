@@ -745,10 +745,10 @@ def test_shot_of_the_game_canvas_crops_its_view(clock, device_modules, tmp_path)
 
 @pytest.mark.parametrize("angle", [90, 270])
 def test_a_portrait_scan_buffer_turns_back_to_landscape(angle):
-    """The inverse of `device/dsi_panel.rotate_rect`, pixel by pixel: rotate
+    """The inverse of the rotated compositor's rect rotation, pixel by pixel: rotate
     a landscape picture onto portrait glass the way the PPA does, and the
     shot's unrotate hands back the landscape."""
-    from device.dsi_panel import rotate_rect
+    from runtime.glass_binding import rotate_rect
     lw, lh = 7, 5
     land = array("H", range(1, lw * lh + 1))
     pw, ph = lh, lw

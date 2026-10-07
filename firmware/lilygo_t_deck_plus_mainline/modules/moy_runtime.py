@@ -8,8 +8,8 @@ left here is the part that is genuinely this board's hardware.
 
 This port replaced the lvgl_micropython fork build of the same glass (deleted
 2026-08-17). What structurally changed with it: the panel machine is
-`native/moy_lcd`, one C module that also owns the SPI host, with
-`tdeck_panel.TDeckCompositor` the thin ping-pong over its kick/pump/drain
+`native/moy_lcd`, one C module that also owns the SPI host, with the
+kernel's `moy_glass.BandedCompositor` the ping-pong over its kick/drain
 split (the fork's Python `moy_compositor` + `lcd_bus` banding died with it,
 strategy retained -- `flush()` queues the first bands and returns, the rest
 are fed while this loop renders the next frame, `comp.sync()` is a real
@@ -39,6 +39,24 @@ from device_diag import (_diag_flush, _diag_hitch,
                          _diag_pump, HITCH_MS)
 
 _census("imports")
+
+# --- the panel's two revert flags -----------------------------------------------
+#
+# THE FLUSH OVERLAP: True ships each frame from the core-0 feeder while the
+# next one renders (kick, then the drain at the next present). False is the
+# serialized fallback -- every present ships and waits -- the one-flag test
+# for a torn, glitched or hung panel, in one reflash.
+ASYNC_FLUSH = True
+
+# THE ASYNC LAYER COPY (#54 Stage 2 / #63), applied to device_canvas by
+# run_desktop. The copy is a GDMA PSRAM->PSRAM blit, which starved the SPI
+# FIFO into garbage bands while the panel DMA read PSRAM (2026-07-03); since
+# the SRAM-bounce flush (#66) moy_lcd's DMA reads only the internal bounce
+# slots, so the copy is safe here. It arms only for a screen-wide layer
+# restored at (0, 0) -- sakura, letter_blitz and hop_quest on the shipped
+# roster. TO REVERT: False, one reflash; independent of ASYNC_FLUSH, so a
+# torn or stale frame can be pinned on one by flipping it alone.
+LAYER_COPY_ASYNC = True
 
 # --- the serial dev channel ---------------------------------------------------
 #
@@ -178,23 +196,22 @@ def run_desktop(fps_cap=60):
     offline ring records; the input trio and its poller thread are
     `tdeck_input.TDeckInput`'s.
     """
-    import tdeck_panel
-    from tdeck_panel import TDeckCompositor, set_backlight
+    import moy_glass
+    import moy_lcd
     from moybyte.input import InputState
 
     # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
     # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
     # construction below or it reaches nothing. It is an assignment rather than
     # an edit because `device_canvas.py` is staged from the shared `device/`
-    # tree and is not this board's to change; the flag lives in the compositor
-    # module (`tdeck_panel`) because the fact it rests on is the compositor's.
-    # Read the block beside the constant for why the 2026-07-03 verdict against
-    # this lever does not apply to `moy_lcd`, and for which carts it can and
-    # cannot move.
+    # tree and is not this board's to change; LAYER_COPY_ASYNC above says why
+    # this panel can take it.
     import device_canvas
-    device_canvas.LAYER_COPY_ASYNC = tdeck_panel.LAYER_COPY_ASYNC
+    device_canvas.LAYER_COPY_ASYNC = LAYER_COPY_ASYNC
 
-    comp = TDeckCompositor(nfbs=2)
+    # The kernel's banded compositor over moy_lcd's transport.
+    comp = moy_glass.BandedCompositor(moy_lcd, nfbs=2, async_flush=ASYNC_FLUSH)
+    set_backlight = comp.set_backlight
     canvas = DeviceCanvas(comp)
     _census("panel")
     try:

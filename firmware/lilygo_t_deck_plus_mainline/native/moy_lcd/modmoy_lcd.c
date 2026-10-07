@@ -668,15 +668,38 @@ static int moy_lcd_fb_index(size_t n_args, const mp_obj_t *a) {
     return (int)n;
 }
 
-// kick(n=0): begin shipping framebuffer n; returns immediately. The caller owns
-// the ping-pong -- n must be the buffer it has STOPPED drawing into.
-static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
-    moy_lcd_require();
-    int n = moy_lcd_fb_index(n_args, a);
+// ---- the transport the kernel's banded present drives (native/moy_glass) ---
+// MOY_KERNEL_PANEL(kwait/kkick/kship/knfbs): the verbs below with no raise, an
+// error returned instead, called from the VM's task (the drain releases the
+// GIL). kick/show/drain are the MP face of the same three.
+
+int moy_lcd_knfbs(void) {
+    return s_nfbs;
+}
+
+uint8_t *moy_lcd_kfbn(int n) {
+    return (n >= 0 && n < s_nfbs) ? s_fbs[n] : NULL;
+}
+
+bool moy_lcd_kwait(void) {
+    return s_panel == NULL ? true : moy_flush_drain();
+}
+
+// Begin shipping framebuffer n and return: the buffer the caller has STOPPED
+// drawing into. The FEEDER runs the SPI, so an error surfaces one frame late:
+// the finished frame's is returned before this one is handed over.
+int moy_lcd_kkick(int n) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (n < 0 || n >= s_nfbs) {
+        return ESP_ERR_INVALID_ARG;
+    }
     moy_flush_drain();              // defensive: kick without a flush() before it
-    // The FEEDER runs the SPI, so an error surfaces one frame late: raise the
-    // finished frame's before handing this one over.
-    moy_lcd_check(moy_flush_take_err(), "tx_color");
+    esp_err_t e = moy_flush_take_err();
+    if (e != ESP_OK) {
+        return e;
+    }
     // The fold's one-shot latch, consumed with the feeder IDLE (the drain above
     // is what makes that true) so a band can never read a half-set arm.
     moy_fold_consume();
@@ -684,6 +707,32 @@ static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
     if (s_sd_guard) {
         moy_flush_drain();          // SD session live: no overlap (see the guard)
     }
+    return ESP_OK;
+}
+
+// Ship framebuffer n and wait it out: this frame's own error, or a timeout.
+int moy_lcd_kship(int n) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (n < 0 || n >= s_nfbs) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    moy_flush_drain();
+    (void)moy_flush_take_err();     // show reports its OWN frame's errors
+    moy_fold_consume();
+    moy_flush_kick(s_fbs[n], MOY_LCD_H);
+    bool ok = moy_flush_drain();
+    esp_err_t e = moy_flush_take_err();
+    return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
+}
+
+// kick(n=0): begin shipping framebuffer n; returns immediately. The caller owns
+// the ping-pong -- n must be the buffer it has STOPPED drawing into.
+static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
+    moy_lcd_require();
+    int n = moy_lcd_fb_index(n_args, a);
+    moy_lcd_check(moy_lcd_kkick(n), "tx_color");
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_kick_obj, 0, 1, moy_lcd_kick);
@@ -741,15 +790,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_pending_obj, moy_lcd_pending);
 static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
     moy_lcd_require();
     int n = moy_lcd_fb_index(n_args, a);
-    moy_flush_drain();
-    (void)moy_flush_take_err();     // show reports its OWN frame's errors
-    moy_fold_consume();
-    moy_flush_kick(s_fbs[n], MOY_LCD_H);
-    bool ok = moy_flush_drain();
-    moy_lcd_check(moy_flush_take_err(), "tx_color");
-    if (!ok) {
+    int e = moy_lcd_kship(n);
+    if (e == ESP_ERR_TIMEOUT) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_lcd: flush timed out"));
     }
+    moy_lcd_check(e, "tx_color");
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_show_obj, 0, 1, moy_lcd_show);

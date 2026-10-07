@@ -189,12 +189,12 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     `device/boot_shell.py`. `s.MODE = "panel"` flips to the DSI hardware test
     pattern. Ctrl-C in the desktop loop drops to the REPL (no native-takeover
     USB starvation on this board).
-  - `p4_display.py` — this board's backlight (GPIO32 active-low, the
-    `MOY_DSI_BL_*` defines `moy_dsi.backlight` drives) bound to the
-    shared `device/dsi_panel.py` `P4Compositor` (promoted 2026-09-06): the compositor shim over `moy_dsi`
-    (size/framebuffer/back_buffer/gfx/flush/sync; single-buffered, flush =
-    cache msync) + the active-low GPIO32 backlight (held dark until the first
-    composed frame).
+  - `moy_runtime.py` builds the compositor: the kernel's
+    `moy_glass.DsiCompositor` over `moy_dsi` and `moy_ppa`
+    (`native/moy_glass/moy_present.h`: the triple-buffer rotation, the
+    deferred present and its fences), held dark until the first composed
+    frame; the backlight (GPIO32 active-low, the `MOY_DSI_BL_*` defines) is
+    `moy_glass.backlight`, the panel entry the recovery floor lights it with.
   - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
     1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
     lands mirrored).

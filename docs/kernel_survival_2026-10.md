@@ -76,8 +76,8 @@ suite run every pass, `tools/preflight.sh` before the report).
 |---|---|---|---|
 | canvas rows, the off-heap buffer table, the pool, lending and bakes | `device/device_canvas.py`, `_LayerComp`, `_LAYER_POOL`, `_LENT_BAKES` (`runtime/moy_glass.py`) | `native/moy_glass/moy_canvas.h`, `native/moy_glass/moy_buf.h` | 1 |
 | the surface table and the mint | `runtime/surface.py` (`runtime/moy_glass.py`) | `native/moy_glass/moy_surface.h` | 1 |
-| the banded compositor, the fold | `device/banded_panel.py`, `modules/tdeck_panel.py`, `modules/guition_panel.py` | `+native/moy_glass/moy_present_banded.c` over `native/moy_flush/` and each board's panel module | 1 |
-| the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `+native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
+| the banded compositor, the fold | `device/banded_panel.py`, `modules/tdeck_panel.py`, `modules/guition_panel.py` | `native/moy_glass/moy_present_banded.c` over `native/moy_flush/` and each board's panel module | 1 |
+| the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
 | the palette | `runtime/palette.py` | the canvas's table in `moy_canvas.h` | 1 |
 | the host and browser rasters | `runtime/host_canvas.py`, `runtime/gfx_binding.py`, `firmware/web_runner/web_canvas.py` | the same `moy_glass` built for ctypes and for the web build | 1 |
 | the merged input state, sources, the pointer | `device/moybyte/input.py`'s `InputState`, `runtime/input.py`, `Pointer` and `pointer_state` (`runtime/moy_input.py`) | `+native/moy_input/moy_input.h` | 2 |
@@ -363,13 +363,13 @@ the board owns the transport.
     int moy_glass_present_pending(void);             // the loop's pre-frame hook; a no-op on a banded board
     int moy_glass_end_frame(void);                   // §4's end_frame: the last write of the frame
 
-- **Banded (T-Deck, Guition S3).** `+native/moy_glass/moy_present_banded.c`
+- **Banded (T-Deck, Guition S3).** `native/moy_glass/moy_present_banded.c`
   is `BandedCompositor` and `FoldingCompositor` over `moy_flush` and
   `moy_fold`: the ping-pong, the drain-swap-kick flush, the game fold's arming
   from `blit_game`, the Guition's game-window sub-rect, the T-Deck's async
   layer copy. The two board panel modules (`moy_lcd`, `moy_axs`) keep the
   transport hooks they have.
-- **DSI (Waveshare P4).** `+native/moy_glass/moy_present_dsi.c` is
+- **DSI (Waveshare P4).** `native/moy_glass/moy_present_dsi.c` is
   `P4Compositor`: the three scan buffers `moy_dsi` owns, the deferred show,
   the fences the overlap counters meter, the PPA composite hooks `blit_game`
   and `blit_cover`.

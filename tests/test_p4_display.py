@@ -1,17 +1,13 @@
-"""`P4Compositor`, EXECUTED (`device/dsi_panel.py`, bound through
-`firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py`).
+"""The P4s' compositors, EXECUTED: the Waveshare's -- the kernel's DSI
+engine (`native/moy_glass/moy_present.h`) through the host binding
+(`runtime/glass_binding.py`) -- and the Guition's rotated one
+(`moy_glass.RotatedCompositor`, the same host binding).
 
-The P4's compositor is the async-overlap lever (#58) -- the deferred composite,
+The Waveshare's is the async-overlap lever (#58) -- the deferred composite,
 the drag stamp-defer, the triple-framebuffer rotation and the fences that hold
 them together. `tests/test_banded_panel.py` is the sibling for the two S3
-boards; this is the same argument for the board whose panel SCANS.
-
-`p4_display` is ordinary Python with every hardware module imported lazily, so
-it loads from its path against the stubs below and runs exactly as it does on
-glass. It is loaded BY PATH rather than through the board's `modules/`
-directory: that directory is gitignored staging, so a fresh checkout has only
-the six tracked files in it and the `from ticks import ...` ladder's second rung
-(`runtime.ticks`) is what resolves here.
+boards; this is the same argument for the boards whose panel SCANS. Both run
+against the stubbed `moy_dsi`/`moy_ppa` below exactly as they do on glass.
 """
 
 import contextlib
@@ -27,6 +23,15 @@ P4_MODULES = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 DEVICE = ROOT / "device"
 
 from runtime import device_boot                                    # noqa: E402
+from runtime import glass_binding                                  # noqa: E402
+
+# The Guition P4's compositor -- the kernel's rotated engine through the host
+# binding -- and the names the tests below read beside it.
+ROTATED = types.SimpleNamespace(
+    RotatedCompositor=glass_binding.RotatedCompositor,
+    rotate_rect=glass_binding.rotate_rect,
+    unrotate_rect=glass_binding.unrotate_rect,
+    OVERLAP_FIELDS=glass_binding.OVERLAP_FIELDS)
 from runtime.dev_channel import _remote_state                      # noqa: E402
 
 
@@ -161,37 +166,23 @@ class FakeWS:
 
 @contextlib.contextmanager
 def p4_display(dsi, ppa, gfx=None):
-    """Load `p4_display` fresh against stubbed native modules."""
-    keys = ("p4_display", "dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx")
-    saved = {k: sys.modules.get(k) for k in keys}
-    sys.modules["moy_dsi"] = dsi
-    sys.modules["moy_ppa"] = ppa
+    """The Waveshare's compositor -- the kernel's DSI engine through the host
+    binding (`runtime/glass_binding.py`) -- over stubbed native modules, as a
+    module with the board runtime's one name, `P4Compositor()`."""
+    saved = sys.modules.get("moy_gfx")
     if gfx is None:
         sys.modules.pop("moy_gfx", None)
     else:
         sys.modules["moy_gfx"] = gfx
-    # The compositor BODY is device/dsi_panel.py (one copy for both P4 boards
-    # since 2026-09-06); the board file binds its backlight to it. Load the
-    # body first under the flat device name the board file imports, then the
-    # board file, so `mod.P4Compositor()` is exactly what the board constructs.
-    dspec = importlib.util.spec_from_file_location(
-        "dsi_panel", DEVICE / "dsi_panel.py")
-    dmod = importlib.util.module_from_spec(dspec)
-    sys.modules["dsi_panel"] = dmod
-    spec = importlib.util.spec_from_file_location(
-        "p4_display", P4_MODULES / "p4_display.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["p4_display"] = mod
     try:
-        dspec.loader.exec_module(dmod)
-        spec.loader.exec_module(mod)
-        yield mod
+        yield types.SimpleNamespace(
+            P4Compositor=lambda: glass_binding.DsiCompositor(dsi, ppa),
+            set_backlight=dsi.backlight)
     finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
+        if saved is None:
+            sys.modules.pop("moy_gfx", None)
+        else:
+            sys.modules["moy_gfx"] = saved
 
 
 class StepTicks:
@@ -219,11 +210,8 @@ class StepTicks:
 def stepped(monkeypatch):
     def install(mod, step=1000):
         clock = StepTicks(step)
-        # The fences read the clock through dsi_panel's globals (the body),
-        # whichever board file `mod` is.
-        target = sys.modules.get("dsi_panel", mod)
-        monkeypatch.setattr(target, "_ticks_us", clock.us)
-        monkeypatch.setattr(target, "_ticks_diff", StepTicks.diff)
+        # Both engines read the clock through the host binding.
+        monkeypatch.setattr(glass_binding, "_ticks_us", clock.us)
         return clock
     return install
 
@@ -521,7 +509,7 @@ def test_state_reports_ppa_as_None_on_a_board_with_no_overlap():
 
 # -- the ROTATED compositor: a landscape desk on portrait glass -----------------
 #
-# device/dsi_panel.RotatedCompositor (the Guition P4, 2026-09-06). Executed
+# The rotated compositor (the Guition P4, 2026-09-06). Executed
 # against the same doubles: a portrait FakeDsi, a FakePpa that RECORDS every
 # rotate so the tests can say which buffer got which rect, at what angle.
 
@@ -585,19 +573,18 @@ class RotatingPpa(FakePpa):
 @contextlib.contextmanager
 def rotated(angle=90):
     dsi, ppa = PortraitDsi(3), RotatingPpa()
-    keys = ("dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
+    keys = ("moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
     saved = {k: sys.modules.get(k) for k in keys}
     sys.modules["moy_dsi"] = dsi
     sys.modules["moy_ppa"] = ppa
     sys.modules["moy_gfx"] = FakeGfx()
     sys.modules.pop("moy_alloc", None)          # -> the bytearray fallback
-    spec = importlib.util.spec_from_file_location("dsi_panel", DEVICE / "dsi_panel.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dsi_panel"] = mod
+    mod = ROTATED
     try:
-        spec.loader.exec_module(mod)
         lit = []
-        comp = mod.RotatedCompositor(lit.append, angle=angle)
+        light = dsi.backlight
+        dsi.backlight = lambda on: (lit.append(bool(on)), light(on))
+        comp = mod.RotatedCompositor(dsi, ppa, angle=angle)
         comp.strip_h = 0                          # the strip has its own test
         yield mod, comp, dsi, ppa, lit
     finally:
@@ -627,7 +614,7 @@ def game(comp, ox=100, oy=50, quiet=True, direct=True, painted=None):
 
 
 def test_rotate_rect_maps_the_landscape_corners_onto_portrait_glass():
-    from device.dsi_panel import rotate_rect
+    from runtime.glass_binding import rotate_rect
     lw, lh = 1280, 800
     # 90 CCW: landscape top-left -> portrait bottom-left, top-right -> top-left.
     assert rotate_rect(0, 0, 1, 1, 90, lw, lh) == (0, 1279, 1, 1)
@@ -1024,7 +1011,7 @@ def test_a_ppa_without_wait_keeps_the_blocking_direct_frame():
 
 
 def test_unrotate_rect_inverts_rotate_rect():
-    from device.dsi_panel import rotate_rect, unrotate_rect
+    from runtime.glass_binding import rotate_rect, unrotate_rect
     lw, lh = 1280, 800
     for angle in (90, 270):
         for r in ((0, 0, 1, 1), (100, 50, 640, 480), (1279, 799, 1, 1), (0, 0, lw, lh)):
@@ -1388,7 +1375,7 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
 #
 # `runtime/perf_line.py` labels the ppa= slots ONCE for every board and
 # `tools/p4_perf.py` parses every board with one table, so the two compositors
-# in `device/dsi_panel.py` must answer the same question in each slot. The
+# must answer the same question in each slot. The
 # rotated one used to answer with its rotate meters -- rect frames under
 # `deferred`, copies under `obsolete`, full frames under `fences` -- so the
 # Guition P4 printed one counter under two labels and its rect-frame count
@@ -1397,12 +1384,12 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
 
 
 def _slot(comp, name):
-    from device.dsi_panel import OVERLAP_FIELDS
+    from runtime.glass_binding import OVERLAP_FIELDS
     return comp.overlap_stats()[OVERLAP_FIELDS.index(name)]
 
 
 def test_both_compositors_report_the_same_overlap_field_set():
-    from device.dsi_panel import OVERLAP_FIELDS
+    from runtime.glass_binding import OVERLAP_FIELDS
     assert OVERLAP_FIELDS == ("deferred", "obsolete", "fences", "fence_us",
                               "game_n", "game_us", "timeouts")
     _dsi, _ppa, ctx = build()
@@ -1493,18 +1480,15 @@ class RefreshingDsi(PortraitDsi):
 @contextlib.contextmanager
 def refreshing_rotated(angle=90):
     dsi, ppa = RefreshingDsi(3), RotatingPpa()
-    keys = ("dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
+    keys = ("moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
     saved = {k: sys.modules.get(k) for k in keys}
     sys.modules["moy_dsi"] = dsi
     sys.modules["moy_ppa"] = ppa
     sys.modules["moy_gfx"] = FakeGfx()
     sys.modules.pop("moy_alloc", None)
-    spec = importlib.util.spec_from_file_location("dsi_panel", DEVICE / "dsi_panel.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dsi_panel"] = mod
+    mod = ROTATED
     try:
-        spec.loader.exec_module(mod)
-        comp = mod.RotatedCompositor(lambda on: None, angle=angle)
+        comp = mod.RotatedCompositor(dsi, ppa, angle=angle)
         comp.strip_h = 0
         yield mod, comp, dsi, ppa
     finally:

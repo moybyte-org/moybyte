@@ -145,8 +145,8 @@ def test_the_arm_is_consumed_with_the_feeder_idle():
     for path in (GUITION / "native" / "moy_axs" / "modmoy_axs.c",
                  TDECK / "native" / "moy_lcd" / "modmoy_lcd.c"):
         src = path.read_text(encoding="utf-8")
-        for verb in ("kick", "show"):
-            head = src.index("static mp_obj_t moy_%s_%s("
+        for verb in ("kkick", "kship"):
+            head = src.index("int moy_%s_%s(int n) {"
                              % ("axs" if "axs" in path.name else "lcd", verb))
             body = src[head:src.index("\n}\n", head)]
             assert "moy_flush_drain()" in body, (path.name, verb)
@@ -205,22 +205,6 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
         present = src[at:]
         present = present[:present.index("\n\n")]
         assert "sync_back()" in present, path
-
-
-def test_a_banded_board_without_the_lever_carries_no_fold_attribute():
-    """`FoldingCompositor` is a SUBCLASS and not four methods on the shared
-    base, because `blit_game`, `_diag_pump` and the dev channel's `state` all
-    probe these names with getattr: a board that cannot synthesize bands must
-    have NO fold attribute, since a `fold_count` of 0 inherited from a base is
-    indistinguishable from a fold that never fires."""
-    base = (DEVICE / "banded_panel.py").read_text(encoding="utf-8")
-    _prose, _, body = base.partition("class BandedCompositor")
-    head, _, folding = body.partition("class FoldingCompositor")
-    assert folding, "FoldingCompositor is where the fold lives"
-    for name in ("fold_supported", "fold_count", "arm_scale_fold",
-                 "disarm_scale_fold", "fold_fence"):
-        assert name not in head, "%s leaked onto BandedCompositor" % name
-        assert name in folding, name
 
 
 # -- the twin verbs: two panel modules, one body ------------------------------
