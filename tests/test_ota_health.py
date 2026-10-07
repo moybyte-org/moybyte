@@ -23,6 +23,7 @@ into the boot after the rollback, so that second failure gets reported too.
 import json
 from pathlib import Path
 
+import moy_ota_health  # the health half: its thresholds and marker
 from board_source import runtime_text
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -96,7 +97,7 @@ def test_an_image_that_never_paints_is_never_confirmed(tmp_path):
     exactly the image it exists to catch.
     """
     mod, u = _updater(tmp_path)
-    for _ in range(mod.HEALTHY_LOOPS * 10):
+    for _ in range(moy_ota_health.HEALTHY_LOOPS * 10):
         assert u.confirm_when_healthy(0) is False
     assert u.marked == 0
 
@@ -105,10 +106,10 @@ def test_the_confirm_waits_for_the_loop_to_keep_running(tmp_path):
     # One painted frame is not enough on its own either: an image that draws
     # once and dies is still a broken image.
     mod, u = _updater(tmp_path)
-    for i in range(mod.HEALTHY_LOOPS - 1):
-        assert u.confirm_when_healthy(mod.HEALTHY_PAINTS) is False, "at loop %d" % i
+    for i in range(moy_ota_health.HEALTHY_LOOPS - 1):
+        assert u.confirm_when_healthy(moy_ota_health.HEALTHY_PAINTS) is False, "at loop %d" % i
     assert u.marked == 0
-    assert u.confirm_when_healthy(mod.HEALTHY_PAINTS) is True
+    assert u.confirm_when_healthy(moy_ota_health.HEALTHY_PAINTS) is True
     assert u.marked == 1
     assert u.confirmed is True
 
@@ -122,8 +123,8 @@ def test_a_quiet_desktop_still_confirms(tmp_path):
     at when it lands.
     """
     mod, u = _updater(tmp_path)
-    assert mod.HEALTHY_PAINTS == 1
-    fired = [u.confirm_when_healthy(1) for _ in range(mod.HEALTHY_LOOPS)]
+    assert moy_ota_health.HEALTHY_PAINTS == 1
+    fired = [u.confirm_when_healthy(1) for _ in range(moy_ota_health.HEALTHY_LOOPS)]
     assert fired[-1] is True
 
 
@@ -131,7 +132,7 @@ def test_the_confirm_fires_exactly_once(tmp_path):
     # It runs every frame forever after, so a second mark_app_valid (or a second
     # SD touch to clear the marker) would be a permanent per-frame cost.
     mod, u = _updater(tmp_path)
-    fired = [u.confirm_when_healthy(9999) for _ in range(mod.HEALTHY_LOOPS + 200)]
+    fired = [u.confirm_when_healthy(9999) for _ in range(moy_ota_health.HEALTHY_LOOPS + 200)]
     assert fired.count(True) == 1
     assert u.marked == 1
 
@@ -140,7 +141,7 @@ def test_a_board_that_boots_slowly_still_confirms(tmp_path):
     # The counters are monotonic loop iterations, not wall clock, so a slow board
     # simply takes longer to get there -- it is never disqualified for being slow.
     mod, u = _updater(tmp_path)
-    fired = [u.confirm_when_healthy(1) for _ in range(mod.HEALTHY_LOOPS)]
+    fired = [u.confirm_when_healthy(1) for _ in range(moy_ota_health.HEALTHY_LOOPS)]
     assert fired.count(True) == 1
 
 
@@ -162,14 +163,14 @@ def test_a_headless_board_that_never_serves_is_never_confirmed(tmp_path):
     exactly the image the bootloader should take back.
     """
     mod, u = _updater(tmp_path)
-    for _ in range(mod.HEALTHY_SERVES * 10):
+    for _ in range(moy_ota_health.HEALTHY_SERVES * 10):
         assert u.confirm_when_serving(False) is False
     assert u.marked == 0
 
 
 def test_the_headless_confirm_waits_for_the_loop_to_keep_running(tmp_path):
     mod, u = _updater(tmp_path)
-    for i in range(mod.HEALTHY_SERVES - 1):
+    for i in range(moy_ota_health.HEALTHY_SERVES - 1):
         assert u.confirm_when_serving(True) is False, "at loop %d" % i
     assert u.marked == 0
     assert u.confirm_when_serving(True) is True
@@ -181,10 +182,10 @@ def test_a_host_that_comes_up_and_falls_over_starts_the_count_again(tmp_path):
     window has not demonstrated the thing being certified, and letting it resume
     its count would confirm an image that serves in bursts."""
     mod, u = _updater(tmp_path)
-    for _ in range(mod.HEALTHY_SERVES - 1):
+    for _ in range(moy_ota_health.HEALTHY_SERVES - 1):
         u.confirm_when_serving(True)
     assert u.confirm_when_serving(False) is False
-    for i in range(mod.HEALTHY_SERVES - 1):
+    for i in range(moy_ota_health.HEALTHY_SERVES - 1):
         assert u.confirm_when_serving(True) is False, "at loop %d" % i
     assert u.confirm_when_serving(True) is True
 
@@ -194,16 +195,16 @@ def test_the_headless_confirm_fires_once_and_retires_the_marker(tmp_path):
     `_confirm()`, so the marker's lifetime -- read at boot, cleared at the
     CONFIRM -- is identical on a board with no screen."""
     mod, u = _updater(tmp_path)
-    (tmp_path / "update" / mod.PENDING_NAME).write_text(
+    (tmp_path / "update" / moy_ota_health.PENDING_NAME).write_text(
         json.dumps({"slot": "ota_0", "version": 4, "label": "0.7"}),
         encoding="utf-8")
     assert u.boot_check()[0] == "ok"
-    assert (tmp_path / "update" / mod.PENDING_NAME).exists()
+    assert (tmp_path / "update" / moy_ota_health.PENDING_NAME).exists()
     fired = [u.confirm_when_serving(True)
-             for _ in range(mod.HEALTHY_SERVES * 2)]
+             for _ in range(moy_ota_health.HEALTHY_SERVES * 2)]
     assert fired.count(True) == 1
     assert u.marked == 1
-    assert not (tmp_path / "update" / mod.PENDING_NAME).exists()
+    assert not (tmp_path / "update" / moy_ota_health.PENDING_NAME).exists()
 
 
 def test_the_two_confirm_gates_are_not_the_same_gate(tmp_path):
@@ -214,7 +215,7 @@ def test_the_two_confirm_gates_are_not_the_same_gate(tmp_path):
     mod, u = _updater(tmp_path)
     # The frame gate still refuses a board that paints nothing, however long it
     # runs -- adding the second gate must not have widened the first.
-    for _ in range(mod.HEALTHY_LOOPS * 2):
+    for _ in range(moy_ota_health.HEALTHY_LOOPS * 2):
         assert u.confirm_when_healthy(0) is False
     assert u.marked == 0
 
@@ -359,8 +360,8 @@ def test_the_marker_survives_the_report_and_dies_at_the_confirm(tmp_path):
     # A run that DOES reach the confirm clears it, so the next ordinary boot
     # reports nothing.
     u2._running_label = lambda: "ota_1"
-    for _ in range(mod.HEALTHY_LOOPS):
-        u2.confirm_when_healthy(mod.HEALTHY_PAINTS)
+    for _ in range(moy_ota_health.HEALTHY_LOOPS):
+        u2.confirm_when_healthy(moy_ota_health.HEALTHY_PAINTS)
     assert not Path(u2._pending_path()).exists()
     assert u2.boot_check() is None
 
@@ -377,7 +378,7 @@ def test_an_ordinary_boot_never_touches_the_card(tmp_path):
     u._with_sd = lambda fn: (touched.append(1), fn())[1]
     assert u.boot_check() is None
     touched.clear()
-    for _ in range(mod.HEALTHY_LOOPS):
+    for _ in range(moy_ota_health.HEALTHY_LOOPS):
         u.confirm_when_healthy(1)
     assert u.confirmed is True
     assert touched == [], "the confirm opened an SD session for nothing"
@@ -388,7 +389,7 @@ def test_a_boot_that_did_see_a_marker_clears_it(tmp_path):
     u._part = _FakePart("ota_1")
     u.finish()
     assert u.boot_check()[0] == "rolled_back"
-    for _ in range(mod.HEALTHY_LOOPS):
+    for _ in range(moy_ota_health.HEALTHY_LOOPS):
         u.confirm_when_healthy(1)
     assert not Path(u._pending_path()).exists()
 

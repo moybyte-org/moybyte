@@ -521,18 +521,21 @@ module's own rule: the C6's radio starts with the host's WLAN, so
 link.start()'s wlan.active(True) is load-bearing here, not ceremony."""
 
 [[modules.device.group]]
-files = ["moy_ota.py"]
+files = ["moy_ota.py", "moy_ota_health.py", "moy_http.py"]
 why = """
 The OTA updater (#53). Board-agnostic: its update directory is a constructor
 argument (run_desktop passes a path on the internal VFS: a card can be pulled
 out, and the update directory holds the device's own image) and its board identity comes from the generated `_ota_build.py`. Verified
-end to end on this board's glass 2026-08-02."""
+end to end on this board's glass 2026-08-02.
+The updater's two halves are their own files: moy_ota_health.py, the boot
+verdict and the rollback confirm the frame loop drives, and moy_http.py, the
+streaming HTTP(S) client the updater and Get Carts fetch through."""
 
 [[modules.device.group]]
 files = ["cart_net.py"]
 why = """
 Get Carts' network (#124): the app's transport for indexes and carts, over
-moy_ota's HTTP client and its wait for the link."""
+moy_http's client and moy_ota's wait for the link."""
 
 [[modules.device.group]]
 files = ["moy_c6_update.py"]

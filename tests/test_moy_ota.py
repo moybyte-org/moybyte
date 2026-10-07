@@ -75,6 +75,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 # The scripted-network doubles are already written once, for the redirect tests.
 from test_ota_manifest import CSP, _FakeNet, _response  # noqa: E402
 from test_ota_signing import TEST_KEYS, sign_with_test_key  # noqa: E402
+import moy_ota_health  # noqa: E402  (the health half: its thresholds and marker)
 
 
 def _fresh():
@@ -745,7 +746,7 @@ def test_the_loop_threshold_is_a_real_wait_not_a_formality(board):
     would confirm inside the boot itself; the constant is ~2-4s of frames on
     either board -- long enough that an ordinary crash lands inside it, short
     enough that nobody power-cycles first."""
-    assert board.mod.HEALTHY_LOOPS >= 60
+    assert moy_ota_health.HEALTHY_LOOPS >= 60
     for _ in range(30):
         assert board.u.confirm_when_healthy(5) is False
     assert board.esp.marked == 0
@@ -757,9 +758,9 @@ def test_the_paint_threshold_is_exactly_one(board):
     higher threshold rolls back every update that lands while nobody is poking
     at the console -- and one painted frame is already the whole of what #56
     was missing."""
-    assert board.mod.HEALTHY_PAINTS == 1
+    assert moy_ota_health.HEALTHY_PAINTS == 1
     fired = [board.u.confirm_when_healthy(1)
-             for _ in range(board.mod.HEALTHY_LOOPS)]
+             for _ in range(moy_ota_health.HEALTHY_LOOPS)]
     assert fired.count(True) == 1
     assert board.esp.marked == 1
 
@@ -1344,7 +1345,7 @@ def test_an_online_update_from_the_manifest_to_the_next_boot(board, monkeypatch)
     esp2 = _Esp32(running="ota_1", other="ota_0", card=board.card)
     _install_esp32(monkeypatch, esp2)
     assert nxt.boot_check()[0] == "ok"
-    fired = [nxt.confirm_when_healthy(1) for _ in range(m.HEALTHY_LOOPS)]
+    fired = [nxt.confirm_when_healthy(1) for _ in range(moy_ota_health.HEALTHY_LOOPS)]
     assert fired.count(True) == 1
     assert esp2.marked == 1
     assert not Path(nxt._pending_path()).exists()
@@ -1586,7 +1587,7 @@ def test_the_update_screen_streams_into_the_slot_and_installs_by_activating(
     uu._update_pointer(160, 120, True)   # a tap: install
     assert uu._upd_phase == "done", uu._upd_msg
     assert esp.other.booted is True
-    assert (tmp_path / "update" / mod.PENDING_NAME).exists(), \
+    assert (tmp_path / "update" / moy_ota_health.PENDING_NAME).exists(), \
         "no pending marker: a rollback would be silent"
 
 

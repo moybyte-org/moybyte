@@ -1,6 +1,8 @@
 ---
 paths:
   - "device/moy_ota.py"
+  - "device/moy_ota_health.py"
+  - "device/moy_http.py"
   - "device/moy_c6_update.py"
   - "runtime/update_ui.py"
   - "tools/ota_*.py"
@@ -38,7 +40,8 @@ paths:
     size, and `inisetup` formats only a first sector that reads all 0xFF, else
     "filesystem appears to be corrupted" on every boot. `board_flash.py` reads
     the board's table first and does this when the store moved.
-  - **The rollback confirm fires from the FRAME LOOP**, not the boot path:
+  - **The rollback confirm fires from the FRAME LOOP**, not the boot path
+    (`device/moy_ota_health.py`, the updater's base class):
     `confirm_when_healthy(ws._frames_drawn)` needs `HEALTHY_PAINTS` frames on the
     glass AND `HEALTHY_LOOPS` iterations survived. Confirming where the desktop is
     merely CONSTRUCTED certifies an image that never drew a pixel (#56). **The

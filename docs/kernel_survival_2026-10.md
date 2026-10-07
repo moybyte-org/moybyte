@@ -90,11 +90,11 @@ suite run every pass, `tools/preflight.sh` before the report).
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `+native/moy_net/moy_link.c` | 2 |
 | the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `+native/moy_net/moy_http.c`, `+native/moy_net/moy_webhost.c` | 2 |
 | the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `+native/moy_net/moy_sync.c` | 2 |
-| the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | `device/moy_ota.py`'s updater half (`+device/moy_http.py`), `device/moy_c6_update.py`, `device/cart_net.py` | `+native/moy_net/moy_ota.c`, `+native/moy_net/moy_c6_update.c` | 2 |
+| the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | `device/moy_ota.py`'s updater half (`device/moy_http.py`), `device/moy_c6_update.py`, `device/cart_net.py` | `+native/moy_net/moy_ota.c`, `+native/moy_net/moy_c6_update.c` | 2 |
 | the web-console switch | `runtime/web_console.py` (its screen: §13, question 8) | `+native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | `modules/zero_host.py`, `modules/zero_gpio.py`, `modules/zero_setup.py` | the same `moy_net`, with the Zero's GPIO allowlist as a board table | 2 |
 | the internal flash volumes | `moy_vol`'s borrowed littlefs backend (sprint 1b) | `native/moy_store/moy_vol.c` owns the instance, with a VFS type of the kernel's for Python | 2 |
-| the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `+device/moy_ota_health.py` | `+native/moy_kernel/moy_loop.c`, `+native/moy_kernel/moy_idle.c`, `+native/moy_kernel/moy_perf.c` | 3 |
+| the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `+native/moy_kernel/moy_loop.c`, `+native/moy_kernel/moy_idle.c`, `+native/moy_kernel/moy_perf.c` | 3 |
 | the dev channel's reader and kernel words, the diag ring | `runtime/dev_channel.py`, `device/device_diag.py`, `device/moybyte_diag.py`, `device/device_util.py`; `native/moy_serial/` | `+native/moy_kernel/moy_devch.c`, `+native/moy_kernel/moy_diag.c` | 3 |
 | the boot order | `device/desktop_spine.py`'s boot half, `runtime/device_boot.py`'s `DeviceBoot` (its splash: §13, question 9) | `+native/moy_kernel/moy_boot.c` | 3 |
 | the board glue | each console's `moy_runtime.py` and the provider modules the carve makes; `device/p4_desktop.py`'s present wiring; `device/boot_shell.py` | per-board defines in `mpconfigboard.h` and `board.toml` | 3 |
@@ -165,9 +165,9 @@ made here, not promised.
    `IdleBlank`, `OtaHealth`, `PerfSampler`, `StageMeters`, `poll_webhost`,
    `poll_link`, `apply_touch` — moves to `runtime/frame_loop.py`.
    `DeviceBoot` keeps the splash and the runtime probe.
-5. **`device/moy_ota.py` splits** into `+device/moy_ota_health.py` (the boot
+5. **`device/moy_ota.py` splits** into `device/moy_ota_health.py` (the boot
    verdict and the confirm after painted frames: the loop's) and the updater
-   over `+device/moy_http.py` (the streaming client with redirects, which
+   over `device/moy_http.py` (the streaming client with redirects, which
    `device/cart_net.py` already reads through). Two passes, two files.
 6. **The build registrations and the native stubs.** `native/moy_glass/`,
    `native/moy_input/`, `native/moy_net/` and the kernel's new files are added
@@ -920,7 +920,7 @@ sprint 4's gate is zero console and app upcalls on a VM-free cart.
 
 The pump is `FramePump` in C: the clamped dt, the cadence debt, the
 sleep-overshoot slack against the 10 ms FreeRTOS tick, the published slot the
-stage budgets are cut from. OTA health is `+device/moy_ota_health.py`'s two
+stage budgets are cut from. OTA health is `device/moy_ota_health.py`'s two
 halves: the verdict read on the boot path before anything can overwrite it,
 and the confirm fired from the loop after real painted frames; the verdict is
 read by `runtime/console_notices.py`'s banner as a kernel flag.
@@ -1004,7 +1004,7 @@ leaves the kernel's drivers alive, which this sprint can run and the plan's
 `runtime/frame_loop.py` (the carve's file, in full), `device/desktop_spine.py`'s
 boot half, `device/device_diag.py`, `device/device_util.py`,
 `device/moybyte_diag.py`, `runtime/console_perf.py`, `runtime/perf_hud.py`,
-`runtime/dev_channel.py` down to the registrations, `+device/moy_ota_health.py`,
+`runtime/dev_channel.py` down to the registrations, `device/moy_ota_health.py`,
 each console's `moy_runtime.py` and the carve's provider modules,
 `device/p4_desktop.py`'s present wiring, `device/boot_shell.py` and the smokes,
 `firmware/web_runner/web_boot.py`'s `step_frame_json`.

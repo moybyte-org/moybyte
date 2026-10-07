@@ -1,5 +1,6 @@
 """The network Get Carts fetches through on a board (#124):
-`runtime/cart_index.py`'s transport, over the OTA's streaming HTTP(S) client.
+`runtime/cart_index.py`'s transport, over the streaming HTTP(S) client
+(device/moy_http.py) the OTA updater fetches through.
 
 Two verbs, the shape the host's urllib transport has too (runtime/host_app.py):
 
@@ -21,6 +22,7 @@ checked against the index's sha256, and what it installs runs sandboxed or
 is a signed module.
 """
 
+import moy_http
 import moy_ota
 
 AGENT = "moybyte-carts"
@@ -97,7 +99,7 @@ class CartNet:
         return self.autoconnect(self.wifi)
 
     def open(self, url):
-        sock, code, clen, rest = moy_ota.http_open(url, agent=AGENT, log=_log)
+        sock, code, clen, rest = moy_http.http_open(url, agent=AGENT, log=_log)
         return _Response(sock, code, clen, rest)
 
     def out_of_memory(self):

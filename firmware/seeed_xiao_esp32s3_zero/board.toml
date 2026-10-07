@@ -199,7 +199,7 @@ subclass rather than an edit, because the other boards spend their GPIOs on a
 panel and would be handing out the pins their own screen is drawn through."""
 
 [[modules.device.group]]
-files = ["moy_ota.py"]
+files = ["moy_ota.py", "moy_ota_health.py", "moy_http.py"]
 why = """
 The OTA updater (#53), wired for this board 2026-08-29. Board-agnostic by
 construction: the staging directory is a constructor argument (the internal
@@ -207,7 +207,10 @@ VFS here -- there is no SD slot) and the identity comes from the generated
 `_ota_build.py`. What is NOT board-agnostic is the rollback confirm, and this
 board is why `confirm_when_serving` exists beside `confirm_when_healthy`:
 every other board certifies a new image by counting frames it painted, and
-this one paints none. See zero_host.serve()."""
+this one paints none. See zero_host.serve().
+The updater's two halves are their own files: moy_ota_health.py, the boot
+verdict and the rollback confirm the frame loop drives, and moy_http.py, the
+streaming HTTP(S) client the updater and Get Carts fetch through."""
 
 # ---------------------------------------------------------------------------
 

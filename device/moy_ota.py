@@ -2,13 +2,10 @@
 #   wait_online                      report the link, dialling saved credentials first
 #   -- manifest signing              verify_sig's key and rules
 #   OtaUpdater                       stepwise OTA install into the inactive slot
-#   OtaUpdater.boot_check            read the last install's marker
 #   OtaUpdater.begin                 open the image and the target slot
 #   OtaUpdater.check_online          fetch and parse a channel's manifest
 #   OtaUpdater.download_step         stream a slice to the card
 #   OtaUpdater.download_finish       verify size and sha256
-#   -- the streaming HTTP(S) client  parse_url, http_open, http_open_once, verify_sig
-#   http_open                        http_open_once plus redirects
 #   verify_sig                       does a signature sign the payload
 """OTA firmware updater for the device (#53): flash a new app image from SD.
 
@@ -49,43 +46,15 @@ download, install and rollback -- ran on glass on BOTH boards 2026-08-02
 WiFi/LCD-DMA coexistence #38 had flagged.
 """
 
+from moy_http import _ms, _ms_since, http_open, http_open_once, parse_url
+from moy_ota_health import SlotHealth
+
 UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its own
                              # (OtaUpdater(update_dir=...), which every path here reads
                              # off the instance rather than this module constant)
 BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
 IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
 
-# What counts as proof that the update worked (confirm_when_healthy). The
-# rollback net can only revert an image that never SAID it was fine, so what that
-# claim is worth is decided entirely by where it is made -- and "the desktop
-# object was constructed" is worth very little. Two conditions, because either
-# alone is satisfied by a board nobody would call healthy:
-#
-#   HEALTHY_PAINTS -- frames that reached the GLASS. This is the one that catches
-#       #56, where every boot print appeared and the panel stayed dark. It is 1
-#       and cannot be more: the console repaints only when something changes, so
-#       an idle desktop paints once and then sits there for as long as you like.
-#       (Measured on the P4: 1 painted frame in the first 6 seconds. A threshold
-#       of 120 painted frames -- the obvious first guess -- would have left every
-#       board on a quiet desktop unconfirmed, i.e. rolled every update back.)
-#   HEALTHY_LOOPS -- iterations of the frame loop survived after that. ~2-4s of
-#       input polling, timers and compositing on either board; long enough that a
-#       crash in the ordinary run of things lands inside it, short enough that
-#       nobody power-cycles before it.
-#   HEALTHY_SERVES -- the HEADLESS twin of the pair above (the Zero, 2026-08-29).
-#       That board paints nothing ever, so a paint threshold there is not a weak
-#       gate, it is an unreachable one: every update would roll back. What plays
-#       the part of "something reached the glass" is the only externally visible
-#       thing this board does -- its store host is up and listening on a joined
-#       network -- and the part of HEALTHY_LOOPS is played by surviving this many
-#       poll iterations afterwards. 300 rather than 120 because that loop's duty
-#       cycle is a 10ms sleep, so 120 would be ~1.2s; 300 is ~3s, inside the same
-#       "a crash in the ordinary run of things lands here" window the frame-loop
-#       number was chosen for.
-HEALTHY_PAINTS = 1
-HEALTHY_LOOPS = 120
-HEALTHY_SERVES = 300
-PENDING_NAME = "pending.json"   # written into update_dir at finish(), read at boot
 # How long wait_online() waits for the link AFTER the autoconnect attempt. See
 # its docstring: a saved network on the P4 came up 1.5s after connect() had
 # already given up and returned False.
@@ -258,31 +227,7 @@ DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) 
                                  # (~100KB/s), 16K is ~4x. Matches the install step's 32K.
 
 
-def _ms():
-    """A start stamp for _ms_since. ticks_ms on the device, monotonic on the host
-    -- moy_ota is imported by the host tests, so every device call in here needs a
-    CPython answer too."""
-    import time
-
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return time.monotonic()
-
-
-def _ms_since(start):
-    """Elapsed ms since a _ms() stamp, wrap-safe on the device (ticks_ms rolls at
-    2**30). The two branches are self-consistent: an int start came from ticks_ms,
-    a float one from monotonic."""
-    import time
-
-    try:
-        return time.ticks_diff(time.ticks_ms(), start)
-    except AttributeError:
-        return int((time.monotonic() - start) * 1000)
-
-
-class OtaUpdater:
+class OtaUpdater(SlotHealth):
     """Firmware into the inactive app slot, a step per frame: from a copied .bin,
     or streamed off the wire.
 
@@ -298,8 +243,7 @@ class OtaUpdater:
         # file-sink download lands: the card on a T-Deck that has one, the
         # internal VFS elsewhere. Every path in here reads THIS, never the module
         # constant, so two boards' updaters cannot look at each other's directory.
-        self.update_dir = update_dir or UPDATE_DIR
-        self._with_sd = with_sd
+        SlotHealth.__init__(self, with_sd, update_dir or UPDATE_DIR)
         self._wifi = wifi         # injected wifi service (DeviceWifi); None -> no online update
         self._go_online = go_online  # callable: best-effort connect from saved creds
         self._buf = bytearray(BLOCK)
@@ -312,10 +256,6 @@ class OtaUpdater:
         self.path = None          # the image being installed
         self.error = None         # last error string (shown by the console)
         self.absent = False       # the channel simply has nothing for this board yet
-        self.confirmed = False   # has confirm_when_healthy already fired this boot?
-        self._pending_seen = False   # boot_check found a marker -> the confirm clears it
-        self._loops = 0           # frame-loop iterations it has been called from
-        self.boot_verdict = None  # ("ok"|"rolled_back", text) from the previous install
         # WiFi download (Phase 3) state:
         self._sock = None         # open HTTP(S) socket while a download streams
         self._dl_f = None         # open SD file the download writes to
@@ -341,18 +281,6 @@ class OtaUpdater:
             return self._running_label() in ("ota_0", "ota_1")
         except Exception:
             return False
-
-    def _running_label(self):
-        import esp32
-
-        return esp32.Partition(esp32.Partition.RUNNING).info()[4]
-
-    def slot(self):
-        """The running partition label (ota_0 / ota_1 / factory) for display."""
-        try:
-            return self._running_label()
-        except Exception:
-            return "?"
 
     def version(self):
         """The running firmware version (compared against the online manifest)."""
@@ -390,94 +318,7 @@ class OtaUpdater:
         service is injected. The console shows the UPDATE ONLINE row only then."""
         return self.available() and self._wifi is not None
 
-    def mark_valid(self):
-        """Confirm the running image is healthy so the bootloader cancels its pending
-        rollback. The raw verb -- callers want confirm_when_healthy, which decides
-        WHEN this is honest. No-op (swallowed) when the image was already marked
-        valid or this isn't an OTA build."""
-        try:
-            import esp32
-
-            esp32.Partition.mark_app_valid_cancel_rollback()
-            return True
-        except Exception:
-            return False
-
-    def confirm_when_healthy(self, frames_drawn):
-        """The rollback confirm, deferred until the console has actually RUN.
-
-        Marking the image valid where the desktop is CONSTRUCTED confirms firmware
-        that has never drawn a pixel -- and a live board showing a black screen is
-        exactly the failure this project has already shipped once (#56: every boot
-        print appeared, the panel stayed dark). Rollback cannot save a board from a
-        fault the firmware promised in advance would not happen.
-
-        So the frame loop calls this every iteration with ws._frames_drawn, and the
-        confirm waits for both halves of "it works": something reached the glass
-        (HEALTHY_PAINTS) and the loop kept running afterwards (HEALTHY_LOOPS, which
-        this counts itself -- one call per iteration is exactly what the loop makes
-        it). An image that comes up mute, or comes up and then dies, is never
-        confirmed, so the next reset reverts it. Returns True the one frame it
-        confirms."""
-        if self.confirmed:
-            return False
-        self._loops += 1
-        if frames_drawn < HEALTHY_PAINTS or self._loops < HEALTHY_LOOPS:
-            return False
-        return self._confirm()
-
-    def confirm_when_serving(self, serving):
-        """The same confirm, for a board with no glass (the Zero, #41).
-
-        `confirm_when_healthy` asks two questions -- did anything reach the
-        display, and did the loop keep running -- and on a headless board the
-        first one has no answer. Answering it with a constant would certify
-        every image unconditionally; leaving it at zero would roll every image
-        back. So the caller supplies the evidence its own hardware can give:
-        `serving` is True while the store host is up and listening on a joined
-        network, which is the only thing about this board a human outside it
-        could ever observe. The loop half is unchanged in spirit and counted
-        here, one call per poll iteration (HEALTHY_SERVES).
-
-        Deliberately NOT a `frames_drawn=1` call into the method above: that
-        would put a lie in the argument list, and the next reader would have to
-        work out that a board with no panel was claiming a painted frame.
-        Returns True the one iteration it confirms."""
-        if self.confirmed:
-            return False
-        if not serving:
-            # Not a countdown pause: an image whose host never comes up is
-            # exactly the image the bootloader should take back, so the counter
-            # only advances while the thing being certified is working.
-            self._loops = 0
-            return False
-        self._loops += 1
-        if self._loops < HEALTHY_SERVES:
-            return False
-        return self._confirm()
-
-    def _confirm(self):
-        """Mark the running image valid and retire the pending marker. Both
-        confirm gates above end here, so "what confirming DOES" is one body and
-        only "when is it honest" differs per board."""
-        self.confirmed = True
-        ok = self.mark_valid()
-        # The pending marker is cleared HERE and not where it was read, so that an
-        # image which boots, reports its verdict and then dies still has a marker
-        # on the boot after the rollback -- otherwise that second failure would be
-        # the silent one. Only when boot_check actually SAW one, though: on the
-        # T-Deck this is an SD session on the bus the panel shares, and an
-        # ordinary boot (no update pending, which is nearly all of them) should
-        # not pay for a delete that can only fail.
-        if self._pending_seen:
-            self._pending_seen = False
-            self._clear_pending()
-        return ok
-
     # -- did the last update actually take? ----------------------------------
-
-    def _pending_path(self):
-        return self.update_dir + "/" + PENDING_NAME
 
     def _arm_pending(self, slot):
         """Record, just before the reboot, which slot the bootloader was pointed at.
@@ -510,55 +351,6 @@ class OtaUpdater:
         except Exception as exc:
             _log("could not record the pending update:", _short(exc))
             return False
-
-    def _clear_pending(self):
-        def _rm():
-            import os
-
-            try:
-                os.remove(self._pending_path())
-            except OSError:
-                pass
-
-        try:
-            self._with_sd(_rm)
-        except Exception:
-            pass
-
-    def boot_check(self):
-        """Read the marker the previous install left and say what became of it.
-
-        Returns None on an ordinary boot, else ("ok", text) when the slot we were
-        pointed at is the one now running, or ("rolled_back", text) when it isn't --
-        which means the bootloader gave up on the new image and put the old one
-        back. The marker is deliberately NOT deleted here (see
-        confirm_when_healthy). Also caches the verdict on `boot_verdict` for the
-        update screen."""
-        def _read():
-            import json
-
-            try:
-                f = open(self._pending_path(), "r")
-            except OSError:
-                return None
-            try:
-                return json.load(f)
-            finally:
-                f.close()
-
-        try:
-            rec = self._with_sd(_read)
-        except Exception:
-            return None               # no SD / torn file: no verdict, same as before
-        if not isinstance(rec, dict):
-            return None
-        self._pending_seen = True
-        was = rec.get("label") or ("v%s" % rec.get("version", "?"))
-        if rec.get("slot") == self.slot():
-            self.boot_verdict = ("ok", "%s -> %s" % (was, self.version_label()))
-        else:
-            self.boot_verdict = ("rolled_back", "put %s back" % self.version_label())
-        return self.boot_verdict
 
     # -- discovery -----------------------------------------------------------
 
@@ -1178,17 +970,17 @@ class OtaUpdater:
                 except Exception:
                     pass
 
-    # -- the streaming HTTP(S) client is the module's (below); Get Carts
+    # -- the streaming HTTP(S) client is device/moy_http.py's; Get Carts
     #    (device/cart_net.py) rides the same one --
 
     def _parse_url(self, url):
         return parse_url(url)
 
     def _http_open(self, url, hops=4):
-        return http_open(url, hops)
+        return http_open(url, hops, AGENT, _log)
 
     def _http_open_once(self, url):
-        return http_open_once(url)
+        return http_open_once(url, AGENT, _log)
 
     def _http_get_text(self, url, limit=8192):
         """Fetch a small text resource (the manifest) fully into RAM."""
@@ -1254,131 +1046,7 @@ def _log(*a):
         pass
 
 
-# -- the streaming HTTP(S) client (no urequests: it buffers the whole body) ------
-
 AGENT = "moybyte-ota"
-
-
-def parse_url(url):
-    if url.startswith("https://"):
-        scheme, rest, port = "https", url[8:], 443
-    elif url.startswith("http://"):
-        scheme, rest, port = "http", url[7:], 80
-    else:
-        raise ValueError("bad url")
-    slash = rest.find("/")
-    if slash < 0:
-        hostport, path = rest, "/"
-    else:
-        hostport, path = rest[:slash], rest[slash:]
-    if ":" in hostport:
-        host, p = hostport.split(":", 1)
-        port = int(p)
-    else:
-        host = hostport
-    return scheme, host, port, path
-
-
-def http_open(url, hops=4, agent=AGENT, log=None):
-    """`http_open_once` + redirect following, which is what makes the
-    GitHub-hosted channels (DEFAULT_CHANNEL_URLS) reachable: a release
-    download is a 302 to the objects.githubusercontent.com CDN, and the
-    manifest beside it redirects the same way. Returns the FINAL response as
-    (sock, status, content_length, leftover_body_bytes); the body is the
-    socket's to read. `agent` is the User-Agent, `log` the trace's sink."""
-    log = log or _log
-    seen = 0
-    while True:
-        sock, code, clen, rest, loc = http_open_once(url, agent, log)
-        if code not in (301, 302, 303, 307, 308) or not loc or seen >= hops:
-            return sock, code, clen, rest
-        try:
-            sock.close()
-        except Exception:
-            pass
-        seen += 1
-        # A relative Location is legal; resolve it against the current host.
-        if loc.startswith("/"):
-            scheme, host, port, _ = parse_url(url)
-            dflt = 443 if scheme == "https" else 80
-            loc = "%s://%s%s%s" % (scheme, host,
-                                   "" if port == dflt else ":%d" % port, loc)
-        log("redirect %d -> %s" % (code, loc))
-        url = loc
-
-
-def http_open_once(url, agent=AGENT, log=None):
-    """Connect + send GET + read the response headers. Returns
-    (sock, status_code, content_length, leftover_body_bytes, location)."""
-    import socket
-
-    log = log or _log
-    scheme, host, port, path = parse_url(url)
-    log("http_open %s host=%s port=%d path=%s" % (scheme, host, port, path))
-    ai = socket.getaddrinfo(host, port)[0]
-    log("getaddrinfo ->", ai[-1])
-    sock = socket.socket(ai[0], ai[1], ai[2])
-    sock.settimeout(15)
-    sock.connect(ai[-1])
-    log("connected")
-    if scheme == "https":
-        import ssl
-
-        sock = ssl.wrap_socket(sock, server_hostname=host)
-        log("tls wrapped")
-    req = ("GET %s HTTP/1.0\r\nHost: %s\r\n"
-           "User-Agent: %s\r\nConnection: close\r\n\r\n" % (path, host, agent))
-    sock.write(req.encode())
-    log("request sent, reading headers")
-
-    # Byte-wise on purpose: a chunked read would swallow the first of the
-    # body, and this runs twice per update, not per frame.
-    #
-    # The cap is 16K because GitHub's headers are not small. Its release
-    # redirect measured 5147 bytes on 2026-08-02 -- 3626 of them a single
-    # Content-Security-Policy header, with the Location we need at byte 95.
-    # Under the old 4096 cap that worked only because Location happened to
-    # come FIRST; reorder those two headers and the redirect vanishes with
-    # no error to show for it. A bytearray + a tail check rather than
-    # `hdr += b` and `in`, both of which are O(n^2) over 5K of header.
-    t0 = _ms()
-    hdr = bytearray()
-    while hdr[-4:] != b"\r\n\r\n":
-        b = sock.read(1)
-        if not b:
-            break
-        hdr += b
-        if len(hdr) > 16384:
-            log("WARNING: header block over 16K, giving up on the rest")
-            break
-    head, _, rest = bytes(hdr).partition(b"\r\n\r\n")
-    lines = head.split(b"\r\n")
-    code = 0
-    if lines and b" " in lines[0]:
-        try:
-            code = int(lines[0].split(b" ")[1])
-        except Exception:
-            code = 0
-    clen = 0
-    loc = None
-    for ln in lines[1:]:
-        low = ln.lower()
-        if low.startswith(b"content-length:"):
-            try:
-                clen = int(ln.split(b":", 1)[1].strip())
-            except Exception:
-                clen = 0
-        elif low.startswith(b"location:"):
-            try:
-                loc = ln.split(b":", 1)[1].strip().decode()
-            except Exception:
-                loc = None
-    # The header SIZE and the time to read it, because both are guesses until a
-    # board reports them: GitHub's redirect measured 5147 bytes from the host,
-    # and this reads it one byte at a time through TLS.
-    log("http status=%d content-length=%d hdr=%dB in %dms loc=%s"
-         % (code, clen, len(hdr), _ms_since(t0), loc))
-    return sock, code, clen, rest, loc
 
 
 def verify_sig(payload, sig, keys=None):
