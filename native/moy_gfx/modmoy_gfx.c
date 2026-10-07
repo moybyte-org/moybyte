@@ -519,6 +519,16 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_async_obj, 5, 5,
                                            moy_gfx_copy_async);
 #endif // MOY_GFX_HAS_ASYNC_COPY
 
+// The kernel's teardown (native/moy_glass): no async copy still writes a
+// buffer the VM is about to free. True when none is in flight.
+bool moy_gfx_k_copy_wait(void) {
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
+    return moy_gfx_copy_wait() == mp_const_true;
+    #else
+    return true;
+    #endif
+}
+
 // Moybyte #66: synchronous byte copy between buffer-protocol objects at byte
 // offsets -- copy(dst, dst_off, src, src_off, nbytes). The SRAM-bounce flush
 // pump copies 30KB bands PSRAM->internal per call; MicroPython's memoryview

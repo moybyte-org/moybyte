@@ -1743,3 +1743,27 @@ def test_a_short_swipe_falls_through_to_the_extras():
     _ws, ch = make(extra={"swipe": lambda ws, parts, line: seen.append(line)})
     ch.run(_ws, "swipe 1 2")
     assert seen == ["swipe 1 2"] and ch._swipe is None
+
+
+def test_kstop_hands_the_kernel_its_count_and_leaves_the_console(monkeypatch,
+                                                                 capsys):
+    """`kstop N` is the kernel's teardown guard (#224): the kernel runs N soft
+    resets, so the word hands it N and the console leaves by SystemExit, the
+    exit the VM service turns into a soft reset."""
+    import sys
+    import types
+    asked = []
+
+    def kstop(n):
+        asked.append(n)
+        raise SystemExit
+
+    monkeypatch.setitem(sys.modules, "moy_kernel", types.SimpleNamespace(kstop=kstop))
+    ws, ch = make()
+    try:
+        ch.run(ws, "kstop 3")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the console stayed")
+    assert asked == [3] and "REMOTE kstop 3" in capsys.readouterr().out

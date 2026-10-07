@@ -142,6 +142,8 @@ int moy_owner_get(uint32_t h, moy_owner_row_t **row);
 int moy_owner_reclaim(uint32_t h, uint32_t roles);
 // Every loan returned, then the row. OK or STALE.
 int moy_owner_end(uint32_t h);
+// End every lifetime (the VM stopped: nothing is left to hand a loan back).
+void moy_glass_end_owners(void);
 
 // The BUF table's walk: live rows in slot order, for the census and the trace.
 uint32_t moy_buf_slots(void);

@@ -764,6 +764,51 @@ static time_t platform_mbedtls_time(time_t *timer) {
 }
 #endif
 
+// The glass's teardown (native/moy_glass, docs/native_kernel_2026-09.md §4.4's
+// glass rows): before the sweep, nothing the kernel's present started still
+// reads a buffer the VM is about to free; after it, the lifetimes the VM held
+// are ended. Weak, so an image without the glass links.
+__attribute__((weak)) void moy_glass_vm_stop(void) {
+}
+
+__attribute__((weak)) void moy_glass_vm_swept(void) {
+}
+
+// kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
+// N times with the kernel's drivers alive, each one's heaps printed before the
+// teardown and after it. Test-only: the dev channel's word, never a kid's.
+static int s_kstop_n;
+static int s_kstop_left;
+
+void moy_kernel_kstop(int n) {
+    s_kstop_n = n > 0 ? n : 0;
+    s_kstop_left = s_kstop_n > 0 ? s_kstop_n - 1 : 0;
+}
+
+bool moy_kernel_kstop_next(void) {
+    if (s_kstop_left <= 0) {
+        return false;
+    }
+    s_kstop_left--;
+    return true;
+}
+
+static void moy_kernel_kstop_line(const char *when) {
+    if (s_kstop_n <= 0) {
+        return;
+    }
+    printf("KSTOP %d/%d %s psram=%u/%u int=%u/%u/%u dma=%u/%u/%u\n",
+           s_kstop_n - s_kstop_left, s_kstop_n, when,
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+}
+
 static void moy_vm_task(void *pvParameter) {
     volatile uint32_t sp = (uint32_t)esp_cpu_get_sp();
     #if MICROPY_PY_THREAD
@@ -859,6 +904,8 @@ soft_reset:
 soft_reset_exit:
 
     moy_kernel_rest();
+    moy_kernel_kstop_line("before");
+    moy_glass_vm_stop();
 
     #if MICROPY_BLUETOOTH_NIMBLE
     mp_bluetooth_deinit();
@@ -889,6 +936,7 @@ soft_reset_exit:
     #endif
 
     gc_sweep_all();
+    moy_glass_vm_swept();
 
     // Free any native code pointers that point to iRAM.
     esp_native_code_free_all();
@@ -911,6 +959,10 @@ soft_reset_exit:
     #endif
 
     mp_deinit();
+    moy_kernel_kstop_line("after");
+    if (s_kstop_left <= 0) {
+        s_kstop_n = 0;
+    }
     fflush(stdout);
 
     goto soft_reset;

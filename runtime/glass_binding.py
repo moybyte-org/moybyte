@@ -942,6 +942,10 @@ class RotatedCompositor:
         return None if self._r.pending < 0 else self._r.pending
 
     @property
+    def _front(self):
+        return self._r.front
+
+    @property
     def _keep(self):
         return self._r.keep
 

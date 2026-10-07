@@ -1973,6 +1973,21 @@ class DevChannel:
                 return
             moy_kernel.test(parts[1] if len(parts) > 1 else "vm_start")
             return
+        if cmd == "kstop":
+            # DEV, the kernel's teardown guard (#224, docs/kernel_survival_2026-10.md
+            # §7.5): `kstop N` runs the VM service's soft reset N times with the
+            # kernel's drivers alive, the console booting between, and prints a
+            # KSTOP line of the heaps before and after each teardown.
+            try:
+                import moy_kernel
+                kstop = moy_kernel.kstop
+            except (ImportError, AttributeError):
+                print("REMOTE kstop: no kernel on this board")
+                return
+            n = int(parts[1]) if len(parts) > 1 else 1
+            print("REMOTE kstop %d" % n)
+            kstop(n)
+            return
         if cmd == "kstale":
             # DEV, the spine's handle gate (#224): see stale_handle_probe.
             print(stale_handle_probe(ws))

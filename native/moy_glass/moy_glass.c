@@ -389,6 +389,15 @@ void moy_glass_stats(moy_glass_stats_t *out) {
     }
 }
 
+void moy_glass_end_owners(void) {
+    for (uint32_t s = 0; G.owners && s < moy_htab_slots(G.owners); s++) {
+        uint32_t h = moy_htab_at(G.owners, s);
+        if (h != 0u) {
+            moy_owner_end(h);
+        }
+    }
+}
+
 // -- canvases -------------------------------------------------------------------
 
 int moy_canvas_new(uint32_t *h, uint16_t w, uint16_t h_px, uint32_t caps,

@@ -1140,6 +1140,13 @@ static mp_obj_t moy_ppa_sync(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_sync_obj, moy_ppa_sync);
 
+// The kernel's teardown (native/moy_glass): no snapshot and no transaction
+// still reads or writes a buffer the VM is about to free.
+void moy_ppa_k_sync(void) {
+    snap_wait_inner();
+    ppa_wait(0);
+}
+
 // stats() -> (submitted, done, timeouts). timeouts must stay 0.
 static mp_obj_t moy_ppa_stats(void) {
     mp_obj_t t[3] = {

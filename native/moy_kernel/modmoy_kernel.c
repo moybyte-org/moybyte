@@ -7,6 +7,7 @@
 //   moy_kernel.feed()              the console's frame: feeds the task watchdog (#160)
 //   moy_kernel.rest()              the frame loop ended: nothing feeds it now
 //   moy_kernel.watchdog([reset])   (armed, timeout_ms, max_gap_ms, frames)
+//   moy_kernel.kstop(n)            DEV: n soft resets of the VM, heaps printed
 //
 //   moy_crash.arm(role, id)        the ledger's OPEN id (None clears), into RTC
 //   moy_crash.last()               the last record this board made, or None
@@ -23,8 +24,19 @@
 
 static mp_obj_t mod_boot_ok(void) {
     moy_kernel_boot_ok();
+    if (moy_kernel_kstop_next()) {
+        mp_raise_type(&mp_type_SystemExit);     // kstop: the next reset
+    }
     return mp_const_none;
 }
+
+// kstop(n): leave the console now, and again each time it proves itself,
+// until n soft resets have run.
+static mp_obj_t mod_kstop(mp_obj_t n) {
+    moy_kernel_kstop(mp_obj_get_int(n));
+    mp_raise_type(&mp_type_SystemExit);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_kstop_obj, mod_kstop);
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_boot_ok_obj, mod_boot_ok);
 
 static mp_obj_t mod_boot_failed(mp_obj_t what) {
@@ -82,6 +94,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_watchdog_obj, 0, 1, mod_watchdog)
 static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_kernel) },
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kstop), MP_ROM_PTR(&mod_kstop_obj) },
     { MP_ROM_QSTR(MP_QSTR_boot_failed), MP_ROM_PTR(&mod_boot_failed_obj) },
     { MP_ROM_QSTR(MP_QSTR_mode), MP_ROM_PTR(&mod_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_test), MP_ROM_PTR(&mod_test_obj) },

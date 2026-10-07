@@ -129,9 +129,10 @@ payload-shape tests are re-baselined knowingly (§9).
 - **L6 — the degenerate tier pays ~nothing, and here is the arithmetic.** On
   the S3 the surface table is the kernel's and costs no Python object; the
   **existing** `ws._dirty` writes stay as they are (§3), and the frame gate
-  folds them into ONE kernel call per painted frame, none per write.
-  ESTIMATED added cost: zero new per-draw work; one C call on a dirty frame
-  ≈ single-digit µs. (Before §15 the arithmetic was the same number by another
+  folds them into ONE kernel call per painted frame, none per write, and
+  reads the kernel's own epoch once a frame (§15's leg). ESTIMATED added
+  cost: zero new per-draw work; one C call on a dirty frame and one on every
+  frame, each ≈ single-digit µs. (Before §15 the arithmetic was the same number by another
   route: no Surface objects on the S3 and a no-op `begin_surface` probe per
   stack layer.)
 - **L7 — no retained widget tree, no per-widget damage.** Litigated; §8.

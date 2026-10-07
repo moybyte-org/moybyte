@@ -921,6 +921,15 @@ static void banded_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR__lcd:
             dest[0] = c->panel;
             return;
+        case MP_QSTR__fbs:
+            dest[0] = mp_obj_new_list(c->b.nfbs, c->fbs);
+            return;
+        case MP_QSTR__w:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(c->w);
+            return;
+        case MP_QSTR__h:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(c->h);
+            return;
         case MP_QSTR__back:
             dest[0] = MP_OBJ_NEW_SMALL_INT(c->b.back);
             return;
@@ -1264,6 +1273,12 @@ static void dsi_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR__fbs:
             dest[0] = c->fbs;
             return;
+        case MP_QSTR__w:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(c->w);
+            return;
+        case MP_QSTR__h:
+            dest[0] = MP_OBJ_NEW_SMALL_INT(c->h);
+            return;
         case MP_QSTR__back:
             dest[0] = MP_OBJ_NEW_SMALL_INT(c->d.back);
             return;
@@ -1558,8 +1573,15 @@ static mp_obj_t rot_set_angle(mp_obj_t self_in, mp_obj_t angle_in) {
 static MP_DEFINE_CONST_FUN_OBJ_2(rot_set_angle_obj, rot_set_angle);
 
 // mark_game(src, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None)
-static mp_obj_t rot_mark_game(size_t n_args, const mp_obj_t *a) {
+// mark_game(game, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None)
+static mp_obj_t rot_mark_game(size_t n_args, const mp_obj_t *a, mp_map_t *kw) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    mp_obj_t frame = n_args > 10 ? a[10] : mp_const_none;
+    mp_map_elem_t *kf = kw ? mp_map_lookup(kw, MP_OBJ_NEW_QSTR(MP_QSTR_frame),
+                                           MP_MAP_LOOKUP) : NULL;
+    if (kf != NULL) {
+        frame = kf->value;
+    }
     moy_rot_game_t *g = &c->r.game;
     g->sw = mp_obj_get_int(a[2]);
     g->sh = mp_obj_get_int(a[3]);
@@ -1571,11 +1593,11 @@ static mp_obj_t rot_mark_game(size_t n_args, const mp_obj_t *a) {
     g->direct = mp_obj_is_true(a[9]);
     c->bufs[MOY_ROT_GAME] = a[1];
     c->bufs[MOY_ROT_PIC] = mp_const_none;
-    g->frame = n_args > 10 && a[10] != mp_const_none;
+    g->frame = frame != mp_const_none;
     if (g->frame) {
         size_t n;
         mp_obj_t *f;
-        mp_obj_get_array(a[10], &n, &f);
+        mp_obj_get_array(frame, &n, &f);
         if (n < 8) {
             mp_raise_ValueError(MP_ERROR_TEXT("frame"));
         }
@@ -1595,7 +1617,7 @@ static mp_obj_t rot_mark_game(size_t n_args, const mp_obj_t *a) {
     c->r.has_game = true;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_mark_game_obj, 10, 11, rot_mark_game);
+static MP_DEFINE_CONST_FUN_OBJ_KW(rot_mark_game_obj, 10, rot_mark_game);
 
 static mp_obj_t rot_note_damage(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -1759,6 +1781,24 @@ static void rot_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_rotated:
             dest[0] = mp_const_true;
             return;
+        case MP_QSTR__fbs:          // the portrait scan buffers
+            dest[0] = mp_obj_new_list(3, &c->bufs[MOY_ROT_FB0]);
+            return;
+        case MP_QSTR__front:
+            dest[0] = I(c->r.front);
+            return;
+        case MP_QSTR__w:
+            dest[0] = I(c->r.w);
+            return;
+        case MP_QSTR__h:
+            dest[0] = I(c->r.h);
+            return;
+        case MP_QSTR__pw:
+            dest[0] = I(c->r.pw);
+            return;
+        case MP_QSTR__ph:
+            dest[0] = I(c->r.ph);
+            return;
         case MP_QSTR_retained_frames:
             dest[0] = I(2);
             return;
@@ -1810,6 +1850,41 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     );
 
 #undef I
+
+// -- the VM's teardown (moy_kernel.c's soft-reset exit) -----------------------------
+
+#ifdef MOY_GLASS_BOARD
+#if MOY_GLASS_BANDED
+#include "moy_fold.h"
+#endif
+
+bool moy_gfx_k_copy_wait(void);
+__attribute__((weak)) void moy_ppa_k_sync(void);    // the P4s' PPA
+
+// Before the sweep: the feeder drained, the fold's snapshot landed and its
+// latches cleared, the async layer copy waited out -- nothing the kernel's
+// present started still reads a buffer the sweep frees. The next present
+// after the restart is the kernel's own; nothing of the old VM's is held.
+void moy_glass_vm_stop(void) {
+    #if MOY_GLASS_BANDED
+    MOY_KERNEL_PANEL(wait)();
+    moy_fold_fence();
+    moy_fold_reset();
+    #endif
+    if (moy_ppa_k_sync != NULL) {
+        moy_ppa_k_sync();
+    }
+    moy_gfx_k_copy_wait();
+}
+
+// After the sweep: every Buf and Canvas the VM held was finalised (its row
+// given back); the lifetimes it named are ended.
+void moy_glass_vm_swept(void) {
+    if (moy_glass_ready()) {
+        moy_glass_end_owners();
+    }
+}
+#endif
 
 // -- the module -----------------------------------------------------------------
 

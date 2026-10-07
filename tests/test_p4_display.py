@@ -1839,3 +1839,13 @@ def test_a_frames_view_and_patches_are_source_blocks_on_both_scalers():
     for body in (_ppa_verb_body("rotate_scale"),
                  src[src.index("static mp_obj_t srm_blit("):]):
         assert ".block_offset_x = (uint32_t)blk[0]" in body
+
+
+def test_the_rotated_compositor_hands_the_screenshot_its_scan_buffer():
+    """tools/board.py's shot reads `_fbs[_front]` at the panel's portrait
+    geometry (`_pw`×`_ph`) and turns it back by `angle`: those are the face's."""
+    with rotated() as (_mod, comp, dsi, _ppa, _lit):
+        step(comp)
+        assert len(comp._fbs) == 3 and 0 <= comp._front < 3
+        assert (comp._pw, comp._ph) == (dsi.WIDTH, dsi.HEIGHT)
+        assert (comp._w, comp._h) == (comp._ph, comp._pw) == comp.size()

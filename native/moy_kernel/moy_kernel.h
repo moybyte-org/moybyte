@@ -40,4 +40,9 @@ bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms, uint32_t *f
 void moy_kernel_test_restart(int test);
 void moy_kernel_test_crash(bool abort_not_fault);
 
+// kstop: N soft resets of the VM service, counted (the dev channel's word).
+void moy_kernel_kstop(int n);
+// The console proved itself again: true while kstop has a reset left to run.
+bool moy_kernel_kstop_next(void);
+
 #endif // MOY_KERNEL_H
