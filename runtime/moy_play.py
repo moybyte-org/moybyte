@@ -14,6 +14,10 @@ so this is what it finds.
                    images with (native/moy_store/moy_img.c): (w, h, bytes) or
                    None. Host only; it needs the desktop MicroPython's tree,
                    whose inflater the boards compile.
+  Files(cart)      a cart's written files by the C store
+                   (native/moy_store/moy_files.c), with files_key,
+                   files_path_of, files_folder and files_live: the parity
+                   suite's view of it beside runtime/cart_files.py. Host only.
 """
 
 from __future__ import annotations
@@ -208,3 +212,96 @@ def image_decode(text, cap=1 << 20):
     if rc != 0:
         return None
     return w.value, h.value, out.raw[:w.value * h.value]
+
+
+_FILES = [None]
+
+
+def _files_lib():
+    if _FILES[0] is None:
+        path = native_build.build(
+            "moy_files", os.path.join(_STORE, "moy_store_host.c"),
+            ("moy_files.h", "moy_files.c", "moy_vol.h", "moy_vol.c"),
+            _CACHE, libmoy_dir=(_STORE,))
+        if path is None:
+            raise ImportError("moy_files: no C compiler for the host build")
+        d = ctypes.CDLL(path)
+        _C, _S, _P = ctypes.c_char_p, ctypes.c_size_t, ctypes.c_void_p
+        for name, args, res in (
+                ("moy_files_key", [_C, _S, _C, _S], _S),
+                ("moy_files_path_of", [_C, _S, _C, _S], ctypes.c_int),
+                ("moy_files_folder", [_C, _C, _S], ctypes.c_int),
+                ("moy_files_open", [_C], _P),
+                ("moy_files_close", [_P], None),
+                ("moy_files_where", [_P, _C, _S, _C, _S], ctypes.c_int),
+                ("moy_files_write", [_P, _C, _S, _C, _U32], ctypes.c_int32),
+                ("moy_files_erase", [_P, _C, _S], ctypes.c_int32),
+                ("moy_files_name", [_P, _C, _S, _U32, _C, _U32], ctypes.c_int32),
+                ("moy_store_host_live", [], ctypes.c_long)):
+            f = getattr(d, name)
+            f.argtypes = args
+            f.restype = res
+        _FILES[0] = d
+    return _FILES[0]
+
+
+def files_key(path):
+    """The key a written path (bytes) is kept under, by the C
+    (native/moy_store/moy_files.c). Host only."""
+    out = ctypes.create_string_buffer(3 * len(path) + 2)
+    n = _files_lib().moy_files_key(path, len(path), out, len(out))
+    return out.value.decode() if n else None
+
+
+def files_path_of(name):
+    """A key back to its path (bytes), or None. Host only."""
+    raw = name.encode()
+    out = ctypes.create_string_buffer(len(raw) + 1)
+    n = _files_lib().moy_files_path_of(raw, len(raw), out, len(out))
+    return None if n < 0 else out.raw[:n]
+
+
+def files_folder(cart_path):
+    """The folder the cart at `cart_path` keeps its written files in. Host only."""
+    out = ctypes.create_string_buffer(1024)
+    if _files_lib().moy_files_folder(cart_path.encode(), out, len(out)) != 0:
+        return None
+    return out.value.decode()
+
+
+class Files:
+    """A cart's written files by the C store (moy_files.h), the shape of
+    runtime/cart_files.py's CartFiles: where, write, erase, name. Host only."""
+
+    def __init__(self, cart_path):
+        self._d = d = _files_lib()
+        self._f = d.moy_files_open(cart_path.encode())
+        if not self._f:
+            raise MemoryError("moy_files_open")
+
+    def where(self, path):
+        out = ctypes.create_string_buffer(1024)
+        if not self._d.moy_files_where(self._f, path, len(path), out, len(out)):
+            return None
+        return out.value.decode()
+
+    def write(self, path, data):
+        return self._d.moy_files_write(self._f, path, len(path), bytes(data), len(data))
+
+    def erase(self, path):
+        return self._d.moy_files_erase(self._f, path, len(path))
+
+    def name(self, prefix, index):
+        out = ctypes.create_string_buffer(512)
+        n = self._d.moy_files_name(self._f, prefix, len(prefix), index, out, len(out))
+        return None if n < 0 else out.raw[:n]
+
+    def close(self):
+        if self._f:
+            self._d.moy_files_close(self._f)
+            self._f = None
+
+
+def files_live():
+    """The bytes the C store holds now: 0 once every session closed."""
+    return _files_lib().moy_store_host_live()
