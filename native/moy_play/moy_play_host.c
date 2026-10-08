@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "moy_json.h"
 #include "moy_play.h"
 #include "moy_rt.h"
 
@@ -30,17 +29,7 @@ typedef struct {
 
 static int one(void *ctx, const moy_cat_entry_t *e) {
     census_t *c = ctx;
-    char rt[32] = "";
-    if (e->runtime.v == NULL) {
-        snprintf(rt, sizeof(rt), "%s", e->spec ? "lua" : "python");
-    } else if (*e->runtime.v == '"' && moy_json_strlen(e->runtime.v, e->runtime.e) < sizeof(rt)) {
-        rt[moy_json_str(e->runtime.v, e->runtime.e, rt)] = 0;
-    } else {
-        snprintf(rt, sizeof(rt), "?");
-    }
-    uint8_t why = 0;
-    bool free_ = moy_play_vm_free(e, &why);
-    snprintf(c->out, c->n, "%s %s %s", rt, free_ ? "free" : "vm", moy_play_why_name(why));
+    moy_play_census_line(e, c->out, c->n);
     return 0;
 }
 

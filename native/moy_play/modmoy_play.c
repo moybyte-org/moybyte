@@ -9,12 +9,21 @@
 //     misses, tick_cost, draw_frame, tick_frame, late, probing
 //   MAX_CATCHUP, MAX_DIV  the model's integer bounds (the CPython module
 //                         adds its real-valued constants)
+//   census(path)      the VM-free rule (moy_play_vm_free) over the cart folder
+//                     at `path`, as the store's C reads its catalogue entry:
+//                     (runtime, vm_free, why), or None when it is no cart.
+//                     This image's runtime map has a "lua" row where moycore is
+//                     built (MOY_WITH_LUA) and a "wasm" row where the engine is
+//                     (MOY_WASM).
 
 #include <string.h>
 
 #include "py/obj.h"
 #include "py/runtime.h"
 
+#include "moy_cat.h"
+#include "moy_play.h"
+#include "moy_rt.h"
 #include "moy_tick.h"
 
 typedef struct {
@@ -127,9 +136,59 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &tick_locals
     );
 
+// -- the runtime map's rows and the census ------------------------------------
+
+#ifdef MOY_WITH_LUA
+static const moy_rt_ops_t RT_LUA = { "lua", false };
+#endif
+#if defined(MOY_WASM) && MOY_WASM
+static const moy_rt_ops_t RT_WASM = { "wasm", false };
+#endif
+
+static void rows_once(void) {
+    static bool done;
+    if (done) {
+        return;
+    }
+    done = true;
+    #ifdef MOY_WITH_LUA
+    moy_rt_add(&RT_LUA);
+    #endif
+    #if defined(MOY_WASM) && MOY_WASM
+    moy_rt_add(&RT_WASM);
+    #endif
+}
+
+static int census_one(void *ctx, const moy_cat_entry_t *e) {
+    moy_play_census_line(e, (char *)ctx, 96);
+    return 0;
+}
+
+static mp_obj_t mod_census(mp_obj_t path_obj) {
+    char line[96] = "";
+    rows_once();
+    if (moy_cat_entry(mp_obj_str_get_str(path_obj), census_one, NULL, line) != 0
+        || line[0] == 0) {
+        return mp_const_none;
+    }
+    char *a = strchr(line, ' ');
+    char *b = a ? strchr(a + 1, ' ') : NULL;
+    if (b == NULL) {
+        return mp_const_none;
+    }
+    mp_obj_t t[3] = {
+        mp_obj_new_str(line, (size_t)(a - line)),
+        mp_obj_new_bool(strncmp(a + 1, "free", 4) == 0),
+        mp_obj_new_str(b + 1, strlen(b + 1)),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_census_obj, mod_census);
+
 static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_play) },
     { MP_ROM_QSTR(MP_QSTR_Tick), MP_ROM_PTR(&tick_type) },
+    { MP_ROM_QSTR(MP_QSTR_census), MP_ROM_PTR(&mod_census_obj) },
     { MP_ROM_QSTR(MP_QSTR_MAX_CATCHUP), MP_ROM_INT(MOY_TICK_MAX_CATCHUP) },
     { MP_ROM_QSTR(MP_QSTR_MAX_DIV), MP_ROM_INT(MOY_TICK_MAX_DIV) },
 };

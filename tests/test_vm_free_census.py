@@ -112,3 +112,31 @@ def test_the_tool_prints_one_line_a_cart(capsys, tmp_path):
     out = capsys.readouterr().out.split("\n")
     assert out[0].split() == ["moybyte.sakura_lua.moy", "lua", "free", "free"]
     assert out[1] == "1 carts, 1 VM-free"
+
+
+def test_every_run_reports_the_census_verdict_for_its_cart(tmp_path):
+    """The Player decides each run's verdict with the same rule over the same
+    entry (player._verdict, moy_play.census), and `state` reports it beside
+    the frame's upcalls: every seed game a kid launches from the shelf agrees
+    with the census of its folder."""
+    from runtime.dev_channel import _remote_state
+    from ws_helpers import build_ws
+
+    ws = build_ws(tmp_path)
+    assert _remote_state(ws)["run"] is None
+    games = [(i, c) for i, c in enumerate(ws.launcher.items)
+             if c.get("type", "game") == "game" and c.get("path")]
+    assert any(c["runtime"] == "lua" for _, c in games if "runtime" in c)
+    seen = 0
+    for i, cart in games:
+        ws.launcher.sel = i
+        ws.open()
+        want = moy_play.census(cart["path"])
+        run = _remote_state(ws)["run"]
+        assert run == {"runtime": want[0], "vm_free": want[1], "why": want[2]}, \
+            (cart["title"], run, want)
+        if os.path.basename(cart["path"].rstrip("/")) in SEED_FREE:
+            assert run["vm_free"] is True, cart["title"]
+            seen += 1
+        ws.exit()
+    assert seen >= 3, "the shelf no longer carries the VM-free seed games"

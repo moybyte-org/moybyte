@@ -325,6 +325,11 @@ def test_a_lua_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua")
 
 
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
+    on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title)
+
+
 def test_draw_gates_are_installed(board):
     on_glass.draw_gates_are_installed(board)
 

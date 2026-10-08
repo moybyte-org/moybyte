@@ -70,8 +70,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
 try:
     from moy_play import Tick as TickScheduler     # the kernel's tick model
+    import moy_play as _moy_play
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_play import Tick as TickScheduler
+    from runtime import moy_play as _moy_play
 
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
@@ -185,6 +187,21 @@ try:
     import moy_loop as _loop
 except ImportError:                     # host CPython: the host drives its frames
     _loop = None
+
+
+def _verdict(cart):
+    """(runtime, vm_free, why) of a run's cart by the kernel's VM-free rule
+    (moy_play.census over its folder, docs/kernel_cartpath_2026-10.md §2): the
+    verdict `state` reports for the run in front and the census pins. None for
+    a cart with no folder, or an image whose module has no rule."""
+    path = cart.get("path") if cart is not None else None
+    census = getattr(_moy_play, "census", None)
+    if not path or census is None:
+        return None
+    try:
+        return census(path)
+    except Exception:  # noqa: BLE001 -- a meter must never block a run
+        return None
 
 
 def _safe_len(obj):
@@ -566,6 +583,7 @@ class Player:
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
+        self.verdict = None           # the run's (runtime, vm_free, why): _verdict
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
@@ -1106,6 +1124,7 @@ class Player:
         _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
         h0 = _hs()
         cart = self._begin_run(ws, project, t0)
+        self.verdict = _verdict(cart)
         err = self._gate_spec(ws, cart)
         if err is not None:
             return self._refuse(err)

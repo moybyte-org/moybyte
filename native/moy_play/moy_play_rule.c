@@ -1,5 +1,6 @@
 // The VM-free rule (moy_play.h has it in words).
 
+#include <stdio.h>
 #include <string.h>
 
 #include "moy_json.h"
@@ -91,4 +92,18 @@ bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why) {
         *why = w;
     }
     return w == MOY_PLAY_FREE;
+}
+
+int moy_play_census_line(const moy_cat_entry_t *e, char *out, size_t n) {
+    char rt[32] = "";
+    if (e->runtime.v == NULL) {
+        snprintf(rt, sizeof(rt), "%s", e->spec ? "lua" : "python");
+    } else if (*e->runtime.v == '"' && moy_json_strlen(e->runtime.v, e->runtime.e) < sizeof(rt)) {
+        rt[moy_json_str(e->runtime.v, e->runtime.e, rt)] = 0;
+    } else {
+        snprintf(rt, sizeof(rt), "?");
+    }
+    uint8_t why = 0;
+    bool free_ = moy_play_vm_free(e, &why);
+    return snprintf(out, n, "%s %s %s", rt, free_ ? "free" : "vm", moy_play_why_name(why));
 }

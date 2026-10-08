@@ -46,5 +46,9 @@ bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why);
 // The reason's word, for `info`, `state` and the census: "free", "broken",
 // "runtime", "absent", "type", "permission".
 const char *moy_play_why_name(uint8_t why);
+// The census's line for an entry: "<runtime> <free|vm> <why>", the runtime
+// with the store's default ("lua" for a spec cart that names none, "python"
+// otherwise, "?" for one that is no string). snprintf's answer.
+int moy_play_census_line(const moy_cat_entry_t *e, char *out, size_t n);
 
 #endif // MOY_PLAY_H

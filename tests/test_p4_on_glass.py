@@ -673,6 +673,12 @@ def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
 
 
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
+    on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title, door="shell",
+                                               clear=3)
+
+
 # -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
 # BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.

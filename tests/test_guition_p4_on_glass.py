@@ -395,6 +395,12 @@ def test_a_lua_cart_runs_and_exits(board):
                                  door="shell", clear=3)
 
 
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
+    on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title, door="shell",
+                                               clear=3)
+
+
 def test_a_quiet_game_frame_rotates_one_rect(board):
     """The whole point of the rotated compositor: a running game pays ONE
     scale+rotate of the game canvas per frame, not a whole-frame rotate. Run

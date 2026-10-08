@@ -449,6 +449,46 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
         assert st["stack"][-1] == "launcher", st["stack"]
 
 
+# The VM-free seed games the zero-crossing check runs: Bullet Storm asks for a
+# colour by name and composites a layer every frame (col, draw_layer), Sakura
+# Lua composites the static layer whose restore rides the DMA engine.
+VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"))
+
+
+def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0):
+    """The cart path's first checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    a seed game the kernel's rule runs with no VM reads that verdict from
+    `state`, and its frames make no APP, SERVICE or REFUSED upcall (DRIVER is a
+    harness's, zero on a board) with the VM still up and the console's frame
+    upcall still driving the Player. `state` reads the last finished frame, so
+    each read is a different frame of the run. `door` and `clear` are
+    cart_runs_and_exits's."""
+    import time
+    for _ in range(clear):
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
+    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.0)
+    try:
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free"}, \
+            st["run"]
+        for _ in range(5):
+            time.sleep(0.2)
+            ups = board.state()["upcalls"]
+            assert ups[1:] == [0, 0, 0, 0], \
+                "a frame of %s crossed into Python: %r" % (title, ups)
+    finally:
+        if door == "quit":
+            board.cmd("py ws.input.cart_quit = True", wait_for="PY")
+        else:
+            board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(1.5)
+
+
 def idle_blank_and_wake(board):
     """The idle blank (shared IdleBlank + shared power verb): blank on silence,
     wake on the next serial command, `power off` outranking its own arrival.

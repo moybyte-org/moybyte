@@ -4,5 +4,6 @@
 MOY_PLAY_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_PLAY_DIR)/modmoy_play.c
-SRC_USERMOD_LIB_C += $(MOY_PLAY_DIR)/moy_tick.c
-CFLAGS_USERMOD += -I$(MOY_PLAY_DIR)
+SRC_USERMOD_LIB_C += $(MOY_PLAY_DIR)/moy_tick.c $(MOY_PLAY_DIR)/moy_rt.c \
+    $(MOY_PLAY_DIR)/moy_play_rule.c
+CFLAGS_USERMOD += -I$(MOY_PLAY_DIR) -I$(MOY_PLAY_DIR)/../moy_store -I$(MOY_PLAY_DIR)/../moy_spine

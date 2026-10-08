@@ -895,6 +895,13 @@ def _remote_state(ws):
         st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
                        bool(pl.sched.steady)] if pl.tick_ms else None)
         st["uncap"] = bool(pl.sched.uncapped) if pl.tick_ms else None
+        # The run's VM-free verdict (docs/kernel_cartpath_2026-10.md §2), the
+        # kernel's rule over the cart's catalogue entry: what the census pins
+        # and the zero-upcall gate reads beside the frame's upcalls. None with
+        # no cart in front, or no rule in the image.
+        v = pl.verdict if st.get("cart") else None
+        st["run"] = (None if v is None else
+                     {"runtime": v[0], "vm_free": bool(v[1]), "why": v[2]})
     except Exception as exc:  # noqa: BLE001
         st["tick_err"] = str(exc)
     try:
