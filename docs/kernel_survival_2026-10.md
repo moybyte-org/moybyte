@@ -665,9 +665,11 @@ channel, its DMA ring, the mutex and the feeder task start at the first focus
 of a session, never at boot (the perf review's point: their internal memory is
 paid with the first cart today and stays paid then). Nothing of audio runs
 at boot: the codec's address goes on the kernel's I2C bus (`moy_bus_add`) at
-the first start, on the bus the touch driver brought up. `device/moycore_glue.py`'s
-drain calls the run's session, one kernel call per queued op, in the queue's
-order (`runtime/lua_ext.py`'s `drain_audio`). The console's level is the
+the first start, on the bus the touch driver brought up. A Lua or compiled
+cart's queued audio plays into the run's session one kernel call per op, in
+the queue's order: from the kernel's Player (`native/moy_play/moy_play.c`) on
+a VM tier, from `runtime/lua_ext.py`'s `drain_audio` where a run ticks
+through Python. The console's level is the
 settings row: the boot reads it into the kernel and `vol` writes both. The
 AUDIORATE line is formatted by the kernel (`moy_aud_out_probe`) and printed by
 the PERF sampler while PERF DIAG is on, as every periodic line is. The host
