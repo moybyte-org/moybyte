@@ -46,15 +46,30 @@ typedef struct {
     uint32_t n[MOY_ST_COUNT], total[MOY_ST_COUNT], seen[MOY_ST_COUNT];
     uint32_t slot_ms;
     uint32_t t;
+    uint32_t mask;              // the stages marked this frame
     bool skip;
 } meters_t;
 
 // What the loop allocates once from its tier (PSRAM on a board: kernel data
 // is PSRAM by rule) -- the meters and the PERF window.
+// The LOOP window: each stage's microseconds summed over the PERF period, the
+// stages that ran in it, the frames, their work and their sleep.
+typedef struct {
+    uint32_t sum[MOY_ST_COUNT];
+    uint32_t mask, n, frame_ms, sleep_ms;
+} window_t;
+
+#define DIAG_HITCH 1u
+#define DIAG_LOOP 2u
+
 typedef struct {
     meters_t m;
     moy_perf_t perf;
+    window_t w;
     char line[MOY_PERF_LINE_MAX];
+    // The last HITCH and LOOP lines, for a board that rings them as well.
+    char hitch[MOY_PERF_LINE_MAX], loop[MOY_PERF_LINE_MAX];
+    uint8_t pending;
 } heavy_t;
 
 static struct {
@@ -134,6 +149,7 @@ static void meters_start(meters_t *m, uint32_t slot_ms) {
         rebudget(m, slot_ms);
     }
     m->skip = false;
+    m->mask = 0;
     m->t = now_us();
 }
 
@@ -148,6 +164,7 @@ static void mark(int i) {
     uint32_t t = now_us();
     uint32_t us = t - m->t;
     m->t = t;
+    m->mask |= 1u << i;
     m->last[i] = us;
     if (us > m->max[i]) {
         m->max[i] = us;
@@ -469,6 +486,92 @@ int moy_loop_service(uint32_t which) {
     return up(MOY_UP_SERVICE, which, NULL, MOY_UPC_SERVICE);
 }
 
+// -- HITCH and LOOP (docs/kernel_survival_2026-10.md §7.3) ----------------------------
+//
+// Under PERF DIAG, from the stage meters: HITCH names every stage of one frame
+// whose work (`ms`) ran past MOY_LOOP_HITCH_MS, LOOP the average frame of the
+// PERF period by stage. Both cover the stages inside the frame's work (inputs to
+// tail); the pacing sleep is LOOP's `sleep`, and `other` is the work no stage
+// holds. A stage with no op on this tier was never metered and prints `-`.
+
+static size_t put_ms(char *out, size_t cap, const char *name, bool have, uint32_t us) {
+    if (!have) {
+        return (size_t)snprintf(out, cap, " %s=-", name);
+    }
+    uint32_t t = (us + 50u) / 100u;             // tenths of a millisecond
+    return (size_t)snprintf(out, cap, " %s=%u.%u", name, (unsigned)(t / 10u),
+                            (unsigned)(t % 10u));
+}
+
+static void diag_frame(uint32_t elapsed, uint32_t sleep) {
+    if (!L.measuring || L.heavy->m.skip) {
+        return;
+    }
+    heavy_t *h = L.heavy;
+    meters_t *m = &h->m;
+    window_t *w = &h->w;
+    for (int i = 0; i <= MOY_ST_TAIL; i++) {
+        if (m->mask & (1u << i)) {
+            w->sum[i] += m->last[i];
+        }
+    }
+    w->mask |= m->mask;
+    w->n++;
+    w->frame_ms += elapsed;
+    w->sleep_ms += sleep;
+    if (elapsed < MOY_LOOP_HITCH_MS) {
+        return;
+    }
+    size_t cap = sizeof(h->hitch);
+    size_t n = (size_t)snprintf(h->hitch, cap, "HITCH ms=%u", (unsigned)elapsed);
+    for (int i = 0; i <= MOY_ST_TAIL && n < cap; i++) {
+        n += put_ms(h->hitch + n, cap - n, STAGES[i].name, (m->mask >> i) & 1u, m->last[i]);
+    }
+    h->pending |= DIAG_HITCH;
+    moy_loop_say("%s", h->hitch);
+}
+
+static void diag_window(bool emit) {
+    heavy_t *h = L.heavy;
+    window_t *w = &h->w;
+    if (emit && w->n) {
+        size_t cap = sizeof(h->loop);
+        uint32_t staged = 0;
+        size_t n = (size_t)snprintf(h->loop, cap, "LOOP n=%u", (unsigned)w->n);
+        n += put_ms(h->loop + n, cap - n, "ms", true, w->frame_ms * 1000u / w->n);
+        for (int i = 0; i <= MOY_ST_TAIL && n < cap; i++) {
+            bool have = (w->mask >> i) & 1u;
+            staged += have ? w->sum[i] / w->n : 0u;
+            n += put_ms(h->loop + n, cap - n, STAGES[i].name, have, w->sum[i] / w->n);
+        }
+        uint32_t frame_us = w->frame_ms * 1000u / w->n;
+        if (n < cap) {
+            n += put_ms(h->loop + n, cap - n, "sleep", true, w->sleep_ms * 1000u / w->n);
+        }
+        if (n < cap) {
+            put_ms(h->loop + n, cap - n, "other", true, frame_us > staged ? frame_us - staged : 0u);
+        }
+        h->pending |= DIAG_LOOP;
+        moy_loop_say("%s", h->loop);
+    }
+    memset(w, 0, sizeof(*w));
+}
+
+int moy_loop_diag_take(char *hitch, char *loop, size_t cap) {
+    if (L.heavy == NULL || cap == 0) {
+        return 0;
+    }
+    int got = L.heavy->pending;
+    if (got & DIAG_HITCH) {
+        snprintf(hitch, cap, "%s", L.heavy->hitch);
+    }
+    if (got & DIAG_LOOP) {
+        snprintf(loop, cap, "%s", L.heavy->loop);
+    }
+    L.heavy->pending = 0;
+    return got;
+}
+
 // -- the PERF window ------------------------------------------------------------------
 
 moy_perf_values_t *moy_loop_perf_console(void) {
@@ -505,8 +608,10 @@ static void account(uint32_t elapsed) {
         } else {
             moy_loop_say("%s", L.heavy->line);
         }
+        diag_window(true);
     } else {
         moy_perf_skip(p, L.drawn);
+        diag_window(false);
     }
     moy_perf_close(p, now_ms(), L.drawn);
 }
@@ -633,6 +738,7 @@ int moy_loop_step(void) {
     uint32_t elapsed = now_ms() - now;
     uint32_t sleep = moy_loop_pace(elapsed);
     mark(MOY_ST_PACE);
+    diag_frame(elapsed, sleep);
     account(elapsed);
     if (ops->account != NULL) {
         ops->account(now, elapsed, sleep);

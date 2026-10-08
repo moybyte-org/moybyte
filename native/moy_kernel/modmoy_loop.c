@@ -373,6 +373,20 @@ static mp_obj_t loop_last(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(loop_last_obj, loop_last);
 
+// diag_take() -> (hitch, loop): the HITCH and LOOP lines the kernel said
+// since the last call, each None when there was none. A board that rings its
+// diag lines takes them; the period is seconds, so this allocates rarely.
+static mp_obj_t loop_diag_take(void) {
+    char hitch[MOY_PERF_LINE_MAX], loop[MOY_PERF_LINE_MAX];     // the stack: no .bss
+    int got = moy_loop_diag_take(hitch, loop, sizeof(hitch));
+    mp_obj_t t[2] = {
+        (got & 1) ? mp_obj_new_str(hitch, strlen(hitch)) : mp_const_none,
+        (got & 2) ? mp_obj_new_str(loop, strlen(loop)) : mp_const_none,
+    };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(loop_diag_take_obj, loop_diag_take);
+
 // frame_at() -> the board's clock (ms, the port's ticks) at the top of the
 // frame a word runs in: what a tool times the drawn-frame counter against.
 static mp_obj_t loop_frame_at(void) {
@@ -631,6 +645,7 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_register), MP_ROM_PTR(&loop_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_unregister), MP_ROM_PTR(&loop_unregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&loop_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_diag_take), MP_ROM_PTR(&loop_diag_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_drive), MP_ROM_PTR(&loop_drive_obj) },
     { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&loop_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_upcalls), MP_ROM_PTR(&loop_upcalls_obj) },

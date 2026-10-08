@@ -188,15 +188,16 @@ def test_the_input_task_is_kicked_once_a_frame_and_the_gil_patch_is_gone():
     assert "Moybyte #69 GIL" not in build and "MP_THREAD_GIL_EXIT" not in build
 
 
-def test_hitch_logger_wired():
-    """The HITCH line's format is executed in tests/test_device_diag.py; this
-    board's loop must still CALL it with every stage, and must not write the
-    diag ring to SD at 5s during play."""
+def test_hitch_and_loop_are_the_kernels():
+    """HITCH and LOOP are formatted in C from the stage meters
+    (native/moy_kernel/moy_loop.c, executed in tests/test_moy_loop.py); this
+    board rings the kernel's lines, keeps no Python copy, and must not write
+    the diag ring to SD at 5s during play."""
     runtime = _device_backend_src()
-    # The frame's elapsed is the kernel's (moy_loop.last()); the stages it
-    # runs in C are its meters', so the line names the ones Python still owns.
-    assert "_diag_hitch(diag, ws, comp, elapsed," in runtime
-    assert "last = moy_loop.last()" in runtime
+    device_diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
+    assert "moy_loop.diag_take()" in runtime and "diag.ring_only(" in runtime
+    assert "_diag_hitch" not in runtime and "_diag_loop" not in runtime
+    assert "def _diag_hitch(" not in device_diag and "def _diag_loop(" not in device_diag
     # the diag->SD write (measured 80-120ms) must NOT run at 5s during play
     assert "20000 if ws.cart is not None else 5000" in runtime
 

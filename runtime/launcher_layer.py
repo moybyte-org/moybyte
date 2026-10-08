@@ -1159,8 +1159,8 @@ class LauncherHomeLayer:
         # pixels are identical, and on the RAW canvas _surf is None (zero cost).
         _surf = getattr(cv, "begin_surface", None)
         # perf_capture (#66 instrument-before-cutting): time the home frame's
-        # three sections so a launcher HITCH names its eater (the device diag
-        # appends ws._pf_home to the HITCH line -- wallpaper vs grid vs bar).
+        # three sections so a slow launcher frame names its eater (PERF's
+        # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
         ws.wallpaper.draw(dt)
         _t1 = _ticks_ms() if _t0 is not None else None

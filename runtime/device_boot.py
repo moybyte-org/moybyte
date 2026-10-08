@@ -41,8 +41,8 @@ beside it. The nineteen steps sort into three kinds --
                             (keyboard + trackball + GT911 vs BLE HID + touch); the SD/panel bus gate; the
                             presentation tier install (WindowedWM); the P4's
                             serial dev channel, drag/swipe scripts and idle
-                            screen blank; the T-Deck's diag ring and HITCH/LOOP
-                            accounting; the P4's
+                            screen blank; the T-Deck's diag ring (HITCH and
+                            LOOP are the kernel's); the P4's
                             `present_pending` async-PPA overlap; the T-Deck's
                             `comp.sync()` idle-band drain. None of those is a
                             missing feature on the other board -- each is a

@@ -387,6 +387,10 @@ def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
     on_glass.board_words_are_the_kernels(board)
 
 
+def test_loop_is_the_kernels_line_with_every_stage(board):
+    on_glass.loop_line_is_the_kernels(board)
+
+
 # LAST in the file: twenty soft resets end on a freshly started VM.
 def test_twenty_soft_resets_leave_psram_flat(board):
     on_glass.soft_resets_leave_psram_flat(board, n=20)

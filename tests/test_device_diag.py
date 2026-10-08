@@ -232,168 +232,6 @@ def test_a_failing_flush_reports_zero_ms_and_never_reaches_the_frame_loop(dd):
     assert diag.flushed == [wrapper]               # it was attempted, then ate it
 
 
-# == _diag_hitch ===============================================================
-
-
-def hitch_ws(**kw):
-    base = dict(
-        perf_sample=lambda: ("cart", 30, 5.0, 9.0),
-        perf_breakdown=lambda: (1.5, 2.5, 3.5, 4.5),
-        perf_breakdown_raw=lambda: (1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
-        canvas=Obj(_lcopy_trips=7),
-    )
-    base.update(kw)
-    return Obj(**base)
-
-
-def hitch(dd, diag, ws, comp=Obj(pump_last_us=2500), **kw):
-    args = dict(elapsed=150, kbd_ms=11, inp_ms=12, sb_ms=13, ws_ms=140,
-                diag_ms=14, sd_ms=15, web_ms=16)
-    args.update(kw)
-    return dd._diag_hitch(diag, ws, comp, args["elapsed"], args["kbd_ms"],
-                          args["inp_ms"], args["sb_ms"], args["ws_ms"],
-                          args["diag_ms"], args["sd_ms"], args["web_ms"],
-                          *([args["hi_ms"], args["hp_ms"]]
-                            if "hi_ms" in args else []))
-
-
-def test_the_hitch_line_names_every_loop_stage_from_its_own_argument(dd):
-    """Every value distinct, so a transposed pair cannot pass by coincidence.
-    `frame=` carries a `ms` suffix the other stages do not."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws())
-    f = diag.one("HITCH")
-    assert f["frame"] == "150ms"
-    assert (f["kbd"], f["inp"], f["sb"], f["ws"]) == ("11", "12", "13", "140")
-    assert (f["diag"], f["sdflush"], f["web"]) == ("14", "15", "16")
-
-
-def test_the_hitch_pump_is_microseconds_and_the_trip_count_is_the_canvass(dd):
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(), comp=Obj(pump_last_us=2500))
-    f = diag.one("HITCH")
-    assert f["pump"] == "2.5"
-    assert f["lw"] == "7"
-
-
-def test_a_board_with_no_flush_meters_reports_the_never_measured_sentinel(dd):
-    """`lw=-1` is "this canvas has no async layer copy", which is NOT the same
-    as zero trips -- the #208 doctrine, and the reason the default is -1."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(canvas=None), comp=Obj())
-    f = diag.one("HITCH")
-    assert f["pump"] == "0.0"
-    assert f["lw"] == "-1"
-
-
-def test_the_hitch_raw_split_is_the_unsmoothed_frame_and_drops_its_sixth(dd):
-    """`perf_breakdown_raw` returns (upd, cart, audio, chrome, flush, draw);
-    the line prints five of them under the names logic/render/audio/chrome/
-    flush. The trailing `draw` is deliberately not on the line."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws())
-    raw = diag.one("HITCH")["raw"]
-    assert raw == {"_bare": [], "logic": "1.0", "render": "2.0",
-                   "audio": "3.0", "chrome": "4.0", "flush": "5.0"}
-
-
-def test_a_console_with_no_raw_split_falls_back_to_the_EMA_line(dd):
-    """The v2 shape: `flush=` off perf_sample()[2] and an `ema(...)` of
-    perf_breakdown's logic/render/chrome -- index 2 (audio) is skipped, so a
-    naive b[0..2] would read render into chrome."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(perf_breakdown_raw=None))
-    f = diag.one("HITCH")
-    assert "raw" not in f
-    assert f["flush"] == "5.0"                     # perf_sample()[2]
-    assert f["ema"] == {"_bare": [], "logic": "1.5", "render": "2.5",
-                        "chrome": "4.5"}
-
-
-def test_the_ema_line_says_minus_one_when_there_is_no_sample_to_read(dd):
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(perf_breakdown_raw=None, perf_sample=lambda: None))
-    assert diag.one("HITCH")["flush"] == "-1.0"
-
-
-def test_the_ws_lump_is_split_into_handle_input_pointer_and_frame(dd):
-    """#183: `frm` is the REMAINDER -- ws minus hi minus hp -- which is the
-    whole point (a 37s stall read ws=37156 with raw() summing to 20ms)."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(), hi_ms=30, hp_ms=20)
-    assert diag.one("HITCH")["ws"] == {"_bare": [], "hi": "30", "hp": "20",
-                                       "frm": "90"}
-
-
-def test_a_caller_that_measured_no_phases_gets_no_ws_split_at_all(dd):
-    """hi_ms defaults to -1 = "not measured". Printing hi=-1 hp=-1 frm=142
-    would be three numbers that are not true."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws())                    # the two defaults
-    f = diag.one("HITCH")
-    assert f["ws"] == "140"                        # still the plain lump
-    assert not isinstance(f["ws"], dict)
-
-
-def test_the_pointer_split_rides_only_a_frame_that_spent_time_in_the_pointer(dd):
-    """#184: hp( ) is the split of hp=, so hp_ms must be positive for it to
-    mean anything -- and the probe must have something to report."""
-    probe = lambda: (9.5, 1.5, 4.5, "wm", "home", 3)
-
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(perf_pointer=probe), hi_ms=30, hp_ms=20)
-    assert diag.one("HITCH")["hp"] == {
-        "_bare": [], "tot": "9.5", "pre": "1.5", "worst": "4.5@wm",
-        "claim": "home", "n": "3"}
-
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(perf_pointer=probe), hi_ms=30, hp_ms=0)
-    f = diag.one("HITCH")
-    assert "hp" not in f                           # no group of its own...
-    assert f["ws"]["hp"] == "0"                    # ...only the stage inside ws(
-
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(perf_pointer=lambda: None), hi_ms=30, hp_ms=20)
-    f = diag.one("HITCH")
-    assert "hp" not in f
-    assert f["ws"]["hp"] == "20"
-
-
-def test_a_launcher_hitch_carries_the_home_split_and_a_cart_one_does_not(dd):
-    """DRAWBRK/CHROMEBRK are cart-gated, so `_pf_home` is the ONE split a
-    launcher hitch gets. It is None while a cart runs."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(_pf_home=(21, 22, 23)))
-    assert diag.one("HITCH")["home"] == {"_bare": [], "wp": "21", "grid": "22",
-                                         "bar": "23"}
-
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws())
-    assert "home" not in diag.one("HITCH")
-
-
-def test_the_three_optional_groups_keep_their_order_on_the_line(dd):
-    """ws( ) then hp( ) then home( ): hp splits the hp= inside ws(, so it reads
-    as a drill-down; home is the frame's other anatomy and comes last."""
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(_pf_home=(21, 22, 23),
-                             perf_pointer=lambda: (9.5, 1.5, 4.5, "wm", "h", 3)),
-          hi_ms=30, hp_ms=20)
-    msg = diag.line("HITCH")
-    assert msg.index(" ws(") < msg.index(" hp(") < msg.index(" home(")
-
-
-def test_a_hitch_on_a_broken_console_stays_silent_instead_of_raising(dd):
-    """This runs from `FrameLoop.account`, after the frame is already late.
-    A diagnostic that throws there turns a slow frame into a dead console."""
-    def boom():
-        raise RuntimeError("perf gone")
-
-    diag = FakeDiag()
-    hitch(dd, diag, hitch_ws(perf_sample=boom))
-    assert diag.lines == []
-
-
 # == _diag_drawbrk =============================================================
 
 
@@ -499,92 +337,6 @@ def test_a_canvas_with_no_gates_still_prints_the_whole_line(dd):
     diag = FakeDiag()
     dd._diag_draw2(diag, Obj(canvas=canvas(), perf_sample=lambda: ("c",)))
     assert diag.one("DRAW2")["gated"] == {"_bare": [], "fill": "0", "text": "0"}
-
-
-# == _diag_loop ================================================================
-#
-# acc is [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp] in ms
-# (moy_runtime.run_desktop's _account); the docstring here still names the
-# pre-#183 ten-element shape.
-
-
-def acc_of(n=2, frame=40, kbd=2, inp=4, sb=6, ws=20, web=8, diag=10, sd=12,
-           sleep=0, hi=6, hp=4):
-    return [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp]
-
-
-def test_every_loop_stage_is_a_MEAN_over_the_window_not_a_total(dd):
-    """n= is the frame count and every other field divides by it; a lost
-    divisor turns a 2ms stage into a window total nobody would question."""
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(), acc_of(n=2))
-    f = diag.one("LOOP")
-    assert f["n"] == "2"
-    assert (f["frame"], f["kbd"], f["inp"], f["sb"]) == ("20.0", "1.0", "2.0",
-                                                         "3.0")
-    assert (f["ws"], f["web"], f["diag"], f["sd"]) == ("10.0", "4.0", "5.0",
-                                                       "6.0")
-
-
-def test_the_loop_line_splits_ws_the_same_way_the_hitch_line_does(dd):
-    """frm is the remainder ws - hi - hp, averaged; the same #183 split."""
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(), acc_of(n=2, ws=20, hi=6, hp=4))
-    assert diag.one("LOOP")["_paren"] == {"_bare": [], "hi": "3.0",
-                                          "hp": "2.0", "frm": "5.0"}
-
-
-def test_other_is_the_frame_left_over_after_every_named_stage(dd):
-    """The number the 2026-07-29 hunt needed: ~4.6ms per frame going somewhere
-    no counter watched. Driven with sleep=0 so it pins the seven work terms
-    regardless of how the sleep term below is resolved."""
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(), acc_of(n=1, frame=100, kbd=1, inp=2, sb=3,
-                                      ws=20, web=4, diag=5, sd=6, sleep=0))
-    assert diag.one("LOOP")["other"] == "59.0"     # 100 - (1+2+3+20+4+5+6)
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "device/device_diag.py:400 -- `stages` includes acc[9] (the pacing sleep) "
-    "while acc[1] (`frame`) is accumulated BEFORE the sleep and excludes it "
-    "(moy_runtime._account, and frame_loop.FrameLoop.step measures elapsed "
-    "before pace()). So `other` = unaccounted work MINUS deliberate idle, and "
-    "reads NEGATIVE on any paced loop -- the ordinary desk. The line's own "
-    "commit message says sleep is 'carried separately so a paced loop cannot "
-    "read as a slow one'. #208 says report, do not fix."))
-def test_the_pacing_sleep_is_carried_beside_other_and_not_subtracted_from_it(dd):
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(), acc_of(n=1, frame=10, kbd=1, inp=1, sb=1, ws=2,
-                                      web=1, diag=1, sd=1, sleep=6))
-    f = diag.one("LOOP")
-    assert f["sleep"] == "6.0"
-    assert f["other"] == "2.0"                     # 10 - (1+1+1+2+1+1+1)
-
-
-def test_the_draw_divisor_is_printed_beside_the_numbers_it_redefines(dd):
-    """#217: at div=2 a cart draws every second tick, so a rate read against
-    another run's is only comparable beside it. #66's last full-roster T-Deck
-    session could not be compared with a later run because no log said which
-    way the old toggle sat. `-` while nothing is paced, never a frozen 0."""
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(player=Obj(tick_ms=33, sched=Obj(div=2))), acc_of())
-    assert diag.one("LOOP")["div"] == "2"
-
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(player=Obj(tick_ms=0, sched=Obj(div=2))), acc_of())
-    dd._diag_loop(diag, Obj(), acc_of())
-    assert [fields(m)["div"] for _t, m in diag.lines] == ["-", "-"]
-
-
-def test_an_empty_window_prints_nothing_rather_than_dividing_by_zero(dd):
-    """Same equivalent-mutant shape as HOMEBRK: weakening `acc[0] <= 0` only
-    moves the silence from a return to a ZeroDivisionError inside the blanket
-    except. The guard says the intent out loud."""
-    diag = FakeDiag()
-    dd._diag_loop(diag, Obj(), acc_of(n=0))
-    dd._diag_loop(diag, Obj(), [])
-    dd._diag_loop(None, Obj(), acc_of())
-    assert diag.lines == []
 
 
 def esp32_with(*regions):
@@ -760,16 +512,14 @@ def test_no_diag_line_can_break_the_frame_it_is_measuring(dd):
     diag = FakeDiag()
     running = dict(perf_sample=lambda: ("c",))
     calls = (
-        ("HITCH", lambda: hitch(dd, diag, Exploding())),
         ("DRAWBRK", lambda: dd._diag_drawbrk(
             diag, Obj(perf_breakdown=raises, **running))),
         ("DRAW2", lambda: dd._diag_draw2(
             diag, Obj(canvas=Obj(gate_counts=raises), **running))),
-        ("LOOP", lambda: dd._diag_loop(diag, Obj(), [1, 2])),
         ("WEBHOST", lambda: dd._diag_webhost(diag, Obj(webhost=Exploding()))),
         ("I2CSTAT", lambda: dd._diag_i2cstat(diag, Exploding(), Exploding())),
     )
     for _name, call in calls:
         call()                                     # must not raise
-    assert len(calls) == 6
+    assert len(calls) == 4
     assert diag.lines == []

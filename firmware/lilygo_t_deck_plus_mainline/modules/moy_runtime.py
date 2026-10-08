@@ -34,9 +34,8 @@ from carts_data import CARTS_Z as CARTS
 from device_util import _ticks_ms, _ticks_diff, _diag_log
 from tdeck_input import TDeckInput
 from device_canvas import DeviceCanvas
-from device_diag import (_diag_flush, _diag_hitch,
-                         _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
-                         _diag_pump, HITCH_MS)
+from device_diag import (_diag_flush, _diag_drawbrk, _diag_draw2, _diag_i2cstat,
+                         _diag_webhost, _diag_pump)
 
 _census("imports")
 
@@ -265,33 +264,16 @@ def run_desktop(fps_cap=60):
     serial = d.serial
 
     # The offline diag ring's per-frame Python: this board's own, run inside
-    # the frame upcall (never an upcall of its own). The frame's numbers are
-    # the kernel's -- the last frame's work and sleep (`moy_loop.last()`),
-    # the stages in its meters -- so LOOP splits the frame into its work, the
-    # console's share and the sleep, and HITCH names the frame that spiked.
+    # the frame upcall (never an upcall of its own). HITCH and LOOP are the
+    # kernel's lines (native/moy_kernel/moy_loop.c), said on serial as they
+    # happen; the diag tick takes the last of each into the ring too.
     import moy_loop
     _diag_at = [_ticks_ms() + 3000]
     _flush_at = [_ticks_ms() + 5000]
     _prev_cart_err = [None]
     _cart_prev = [False]
-    # [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp] ms per frame,
-    # averaged and zeroed every diag tick. The stages the kernel runs in C
-    # (kbd, inp, sb, web) are its meters' now and read None here.
-    _acc = [0] * 12
-    _t = {"diag": 0, "sd": 0}
 
     def _after_frame(drew):
-        last = moy_loop.last()
-        elapsed = last >> 16
-        sleep_ms = last & 0xFFFF
-        if diag is not None and elapsed >= HITCH_MS:
-            _diag_hitch(diag, ws, comp, elapsed, -1, -1, -1, -1,
-                        _t["diag"], _t["sd"], -1)
-        _acc[0] += 1
-        _acc[1] += elapsed
-        _acc[7] += _t["diag"]
-        _acc[8] += _t["sd"]
-        _acc[9] += sleep_ms
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
         if store.traced and drew:
@@ -306,7 +288,6 @@ def run_desktop(fps_cap=60):
             elif _ce is None:
                 _prev_cart_err[0] = None
         _tnow = _ticks_ms()
-        _t["diag"] = 0
         _live = bool(getattr(ws, "diag_live", False))
         if diag is not None and _ticks_diff(_tnow, _diag_at[0]) >= 0:
             _diag_at[0] = _tnow + 3000
@@ -320,27 +301,26 @@ def run_desktop(fps_cap=60):
             if _live:
                 _diag_drawbrk(diag, ws)
                 _diag_draw2(diag, ws)
-                _diag_loop(diag, ws, _acc)
+                for _line in moy_loop.diag_take():
+                    if _line is not None:
+                        _tag, _sp, _msg = _line.partition(" ")
+                        diag.ring_only(_tag, _msg)
                 _diag_pump(diag, comp)
                 _diag_i2cstat(diag, keyboard, tdin.touch)
                 _diag_webhost(diag, ws)
                 if serial is not None:
                     serial.report(diag)
-            for _i in range(12):
-                _acc[_i] = 0
-            _t["diag"] = _ticks_diff(_ticks_ms(), _tnow)
         # #68 kid mode: the periodic diag->SD write costs 80-120ms and IS a
         # felt stutter during play, so it needs PERF DIAG *and* DIAG SD LOG.
         # The cart-exit and crash flushes stay unconditional.
         _cart_now = ws.cart is not None
-        _t["sd"] = 0
         if diag is not None and _cart_prev[0] and not _cart_now:
-            _t["sd"] = _diag_flush(diag, ws)   # cart exited: persist the ring
+            _diag_flush(diag, ws)              # cart exited: persist the ring
         _cart_prev[0] = _cart_now
         if (diag is not None and _live and getattr(ws, "diag_sd", False)
                 and _ticks_diff(_tnow, _flush_at[0]) >= 0):
             _flush_at[0] = _tnow + (20000 if ws.cart is not None else 5000)
-            _t["sd"] = _diag_flush(diag, ws)
+            _diag_flush(diag, ws)
 
     # The trackball is this board's arrow keys; its input task reads the
     # keyboard and the GT911 while the frame paces (kicked at the tail, #69).

@@ -2,10 +2,11 @@
 
 Pure logging functions (#43/#63/#66/#68/#69), every one of them called by the
 T-Deck's run_desktop between frames when perf capture is on: _diag_flush (ring
--> SD), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 (the draw-cost
-splits), _diag_loop (the average frame by stage), _diag_pump (bounce-feed
-pacing), _diag_i2cstat (#69 kbd/touch I2C latency) and _diag_webhost (the web
-console's socket). The T-Deck is the only board that stages this module.
+-> SD), _diag_drawbrk / _diag_draw2 (the draw-cost splits), _diag_pump
+(bounce-feed pacing), _diag_i2cstat (#69 kbd/touch I2C latency) and
+_diag_webhost (the web console's socket). HITCH and LOOP are the kernel's
+(native/moy_kernel/moy_loop.c). The T-Deck is the only board that stages this
+module.
 
 Every one takes its inputs explicitly (diag / ws / comp / keyboard / touch) and
 logs via the passed `diag` handle -- no shared class state -- so they import
@@ -37,74 +38,6 @@ def _diag_flush(diag, ws):
 
 # The PERF sample is not a diag helper (#206 item 2): it is the kernel's
 # (native/moy_kernel/moy_perf.c), in the one format every board emits.
-
-
-HITCH_MS = 80
-
-
-def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
-                diag_ms, sd_ms, web_ms, hi_ms=-1, hp_ms=-1):
-    """Log a HITCH line (#66): one frame blew past HITCH_MS. Names every measured
-    loop stage: kbd (I2C keyboard poll), inp (trackball + touch + pointer), sb
-    (canvas.sync_back = buffer repoint + GDMA layer kick, unmeasured until v3),
-    ws (input handlers + ws.frame), diag sample, diag SD write, web poll. v3
-    prints the RAW phase split of the hitch frame itself (the v2 EMAs hid which
-    phase a single 150ms spike lived in: alpha=0.15 moves an EMA only 15% of the
-    spike), plus pump= (the bounce-flush band feeding, ms this frame) and lw=
-    (cumulative copy_wait trips). If nothing named sums to the spike, the pause
-    is an implicit GC collect (alloc-triggered, invisible to stage timers)."""
-    try:
-        s = ws.perf_sample()
-        raw = None
-        get_raw = getattr(ws, "perf_breakdown_raw", None)
-        if get_raw is not None:
-            raw = get_raw()
-        pump_ms = getattr(comp, "pump_last_us", 0) / 1000.0
-        trips = getattr(getattr(ws, "canvas", None), "_lcopy_trips", -1)
-        # Launcher-frame section split (#66 instrument-before-cutting): the
-        # home layer stashes (wallpaper, shelf grid, bar) ms under perf_capture
-        # -- DRAWBRK is cart-gated, so this is the one split a launcher hitch
-        # gets.
-        home = getattr(ws, "_pf_home", None)
-        home_s = (" home(wp=%d grid=%d bar=%d)" % home) if home else ""
-        # ws= lumps handle_input + handle_pointer + ws.frame, which is one lump too
-        # coarse for #183: a 37s stall showed ws=37156 with raw(...) summing to 20ms,
-        # so "somewhere in the ws step" was as far as it could be narrowed. Split the
-        # three (the loop already measures them) -- ws(hi/hp/frm) says which.
-        ws_s = " ws(hi=%d hp=%d frm=%d)" % (hi_ms, hp_ms, ws_ms - hi_ms - hp_ms) \
-            if hi_ms >= 0 else ""
-        # #184: hp= is itself one lump, and a 1.7-1.9s pointer stall lives inside
-        # it with no named stage -- the same shape ws= had before #183. Split it
-        # on the spike frame: pre = pointer bookkeeping before the routing walk,
-        # worst@id = the dearest single layer.handle_pointer in the walk, claim =
-        # the layer that consumed the tap, n = layers visited. If tot is far
-        # BELOW hp=, the time is outside handle_pointer's body altogether.
-        hp_s = ""
-        pp = getattr(ws, "perf_pointer", None)
-        if pp is not None and hp_ms > 0:
-            q = pp()
-            if q is not None:
-                hp_s = (" hp(tot=%.1f pre=%.1f worst=%.1f@%s claim=%s n=%d)"
-                        % (q[0], q[1], q[2], q[3], q[4], q[5]))
-        if raw is not None:
-            diag.log("HITCH",
-                     "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
-                     "web=%d pump=%.1f lw=%d raw(logic=%.1f render=%.1f "
-                     "audio=%.1f chrome=%.1f flush=%.1f)%s%s"
-                     % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
-                        web_ms, pump_ms, trips,
-                        raw[0], raw[1], raw[2], raw[3], raw[4],
-                        ws_s + hp_s, home_s))
-        else:
-            b = ws.perf_breakdown()
-            diag.log("HITCH",
-                     "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
-                     "web=%d flush=%.1f ema(logic=%.1f render=%.1f chrome=%.1f)"
-                     % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
-                        web_ms, (s[2] if s is not None else -1.0),
-                        b[0], b[1], b[3]))
-    except Exception:
-        pass
 
 
 def _diag_drawbrk(diag, ws):
@@ -175,45 +108,6 @@ def _diag_draw2(diag, ws):
                     (getattr(cv, "_t_text_us", 0) + gt) / 1000.0,
                     (getattr(cv, "_t_fill_us", 0) + gf) / 1000.0,
                     nf, nt))
-    except Exception:
-        pass
-
-
-def _diag_loop(diag, ws, acc):
-    """Log a LOOP line: the AVERAGE frame, split by loop stage, over the diag window.
-
-    HITCH already names these stages -- but only for frames past HITCH_MS, so a
-    steady-state cost that never spikes is invisible to it. The 2026-07-29 fps hunt
-    needed exactly that: Sky Run's DRAWBRK summed to 12ms and flush to 3ms, yet the
-    frame was 19.6ms (51fps), so ~4.6ms per frame was going somewhere no counter
-    watched. `other` is that number -- frame minus every measured stage. `sleep` is
-    the frame-pacing wait, which is deliberate idle, not lost time (if sleep is
-    large the loop is capped, not slow).
-
-    `acc` is the loop's accumulator list (see moy_runtime.run_desktop):
-    [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep] in ms; reset by the caller."""
-    if diag is None or not acc or acc[0] <= 0:
-        return
-    try:
-        n = acc[0]
-        stages = acc[2] + acc[3] + acc[4] + acc[5] + acc[6] + acc[7] + acc[8] + acc[9]
-        # div= is the tick model's draw divisor (#217). It belongs on every
-        # measurement line because it changes what fps MEANS -- at div=2 the
-        # cart draws every second tick, so a rate read against another run's
-        # is only comparable beside it. `-` while no game is paced: a frozen
-        # number there would look like a lever that died. A setting that
-        # silently redefines a metric has to be printed beside it.
-        pl = getattr(ws, "player", None)
-        div = pl.sched.div if (pl is not None and getattr(pl, "tick_ms", 0)) else None
-        diag.log("LOOP",
-                 "div=%s " % ("-" if div is None else div) +
-                 "n=%d frame=%.1f kbd=%.1f inp=%.1f sb=%.1f ws=%.1f "
-                 "(hi=%.1f hp=%.1f frm=%.1f) web=%.1f diag=%.1f sd=%.1f "
-                 "sleep=%.1f other=%.1f"
-                 % (n, acc[1] / n, acc[2] / n, acc[3] / n, acc[4] / n, acc[5] / n,
-                    acc[10] / n, acc[11] / n, (acc[5] - acc[10] - acc[11]) / n,
-                    acc[6] / n, acc[7] / n, acc[8] / n, acc[9] / n,
-                    (acc[1] - stages) / n))
     except Exception:
         pass
 

@@ -537,6 +537,29 @@ def board_words_are_the_kernels(board):
         board.pyexec("chan.run = chan._run0", strict=True)
 
 
+LOOP_STAGES = ["inputs", "dev", "idle", "pointer", "present", "frame",
+               "backlight", "pump_tail", "tail"]
+
+
+def loop_line_is_the_kernels(board):
+    """Under PERF DIAG the kernel says LOOP every PERF period
+    (native/moy_kernel/moy_loop.c): the average frame by stage, every stage
+    this board runs in C with a number -- never -1, never absent."""
+    was = board.state()["diag"]
+    board.cmd("diag 1", wait_for="REMOTE diag")
+    try:
+        line = board.wait_line("LOOP n=", 12.0)
+    finally:
+        if not was:
+            board.cmd("diag 0", wait_for="REMOTE diag")
+    assert line is not None, "no LOOP line under PERF DIAG"
+    f = dict(t.split("=", 1) for t in line.split("LOOP ", 1)[1].split())
+    assert [k for k in f if k in LOOP_STAGES] == LOOP_STAGES, line
+    missing = [s for s in LOOP_STAGES if f[s] == "-" or float(f[s]) < 0]
+    assert not missing, (missing, line)
+    return line
+
+
 def _kstop_after(line):
     """`KSTOP i/n after psram=FREE/LARGEST int=... dma=...` -> (i, free, largest)."""
     head, rest = line.split("KSTOP ", 1)[1].split(" ", 1)

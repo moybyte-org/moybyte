@@ -3535,7 +3535,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             # frame, never under "capture just went off": a frame whose writer
             # did not fire would otherwise report the previous writer's value
             # (launcher frames once carried the last cart frame's logic/render
-            # in every HITCH line).
+            # in every line that read them).
             self._pf_upd = 0    # cart _update(dt) (game LOGIC); 0 off the cart path
             self._pf_cart = 0   # cart _draw() (RENDERING)
             self._pf_audio = 0  # audio.tick(dt) (mixer feed)

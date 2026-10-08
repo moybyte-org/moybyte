@@ -546,3 +546,56 @@ def test_the_sample_carries_the_consoles_half_and_its_own(loop):
     assert v["cart"] == "Star_Catcher"
     assert v["draw"] == 4.0 and v["tick"] == (30.0, 1.0)
     assert v["fps"][0] > 0
+
+
+# -- HITCH and LOOP -----------------------------------------------------------------------
+
+DIAG_STAGES = STAGES[:STAGES.index("tail") + 1]
+
+
+def _fields(line):
+    return dict(t.split("=", 1) for t in line.split()[1:])
+
+
+def test_a_frame_past_the_hitch_threshold_names_every_stage(loop):
+    """HITCH is the kernel's (moy_loop.c): every stage inside the frame's work,
+    by the meters, in ms -- never -1 for a stage that moved into C."""
+    L.capture(True)
+    frame(1000)
+    L.diag_take()
+    loop.cost_us = 95000
+    log = frame(1100)[1]
+    hitch, _ = L.diag_take()
+    assert hitch is not None and "say[HITCH" in log, log
+    f = _fields(hitch)
+    assert int(f["ms"]) >= 80
+    assert list(f)[1:] == list(DIAG_STAGES)
+    assert all(f[s] != "-" and float(f[s]) >= 0 for s in DIAG_STAGES)
+    assert float(f["frame"]) >= 90.0
+    loop.cost_us = 1000
+    frame(1300)
+    assert L.diag_take() == (None, None)
+
+
+def test_no_hitch_or_loop_while_the_diag_is_off(loop):
+    loop.cost_us = 95000
+    logs = " ".join(frame(1000 + 200 * i)[1] for i in range(30))
+    assert "HITCH" not in logs and "LOOP" not in logs
+    assert L.diag_take() == (None, None)
+
+
+def test_loop_is_the_periods_average_frame_by_stage(loop):
+    L.capture(True)
+    loop.cost_us = 10000
+    logs = []
+    for i in range(60):
+        logs.append(frame(1000 + 60 * i)[1])
+    _, line = L.diag_take()
+    assert line is not None and any("say[LOOP" in g for g in logs), logs
+    f = _fields(line)
+    assert int(f["n"]) > 0
+    for s in DIAG_STAGES:
+        assert f[s] != "-", (s, line)
+    assert list(f)[:2] == ["n", "ms"] and list(f)[2:-2] == list(DIAG_STAGES)
+    assert 9.5 <= float(f["frame"]) <= 11.0, line
+    assert float(f["sleep"]) >= 0 and float(f["other"]) >= 0

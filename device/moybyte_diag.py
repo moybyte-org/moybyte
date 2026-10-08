@@ -247,6 +247,17 @@ def log(tag, msg):
         pass
 
 
+def ring_only(tag, msg):
+    """One line into the RAM ring alone: a line the kernel already said on
+    serial (HITCH, LOOP), kept for the SD log. Guarded like log()."""
+    if not ENABLED:
+        return
+    try:
+        _ring.add(_ticks_ms(), _as_str(tag, "?"), _as_str(msg, "<unprintable>"))
+    except Exception:
+        pass
+
+
 def logp(tag, msg):
     """Back-compat alias for log(): both persist to the ring AND echo live now, so
     logp is just log. Kept as a name because the call sites that route the existing

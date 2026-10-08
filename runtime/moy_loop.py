@@ -325,6 +325,14 @@ def last():
     return min(e.value, 0x3FFF) * 65536 + min(sl.value, 0xFFFF)
 
 
+def diag_take():
+    hitch = ctypes.create_string_buffer(320)
+    loop = ctypes.create_string_buffer(320)
+    got = _lib().moy_loop_diag_take(hitch, loop, 320)
+    return (hitch.value.decode() if got & 1 else None,
+            loop.value.decode() if got & 2 else None)
+
+
 def frame_at():
     return _lib().moy_loop_frame_at()
 

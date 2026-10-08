@@ -169,6 +169,13 @@ int moy_loop_run(void);
 
 // A dev-channel line no kernel word took, to the console's words (counted
 // CONSOLE); a kernel service's Python half (counted SERVICE).
+// A frame whose work ran this long is a HITCH line (under PERF DIAG).
+#define MOY_LOOP_HITCH_MS 80u
+// The HITCH and LOOP lines said since the last call, into `hitch` and `loop`
+// (each `cap` bytes): bit 1 a HITCH, bit 2 a LOOP. For a board that keeps a
+// ring of its diag lines beside serial.
+int moy_loop_diag_take(char *hitch, char *loop, size_t cap);
+
 // A kernel word ends the loop the way an upcall would (`kstop`: EXIT), from
 // the frame's dev stage.
 void moy_loop_end(int why);
