@@ -63,12 +63,12 @@ enough. Nothing has to be configured, which is fortunate, because MicroPython
 1.28 exposes no binding for `esp_netif_dhcps_option` at all: neither the DNS
 offer flag nor RFC 8910's option 114 (`ESP_NETIF_CAPTIVEPORTAL_URI`, which the
 IDF does implement) can be reached from Python. Option 114 would be the honest
-modern answer and it needs a C module; this does not.
+modern answer; the responder needs nothing configured.
 
 What it costs, stated so the next person can weigh a reversal back:
 
-  * `dns_reply` + `DnsRedirect` + the redirect branch, ~90 lines with their
-    prose, all of it host-tested except the socket.
+  * the kernel's responder (native/moy_net/moy_dns.c, fuzzed and
+    host-tested) + `DnsRedirect` + the redirect branch.
   * A SECOND listening socket in the one path that configures the board. So it
     is strictly optional at every step: a bind that fails prints one line and
     setup continues exactly as it did before, a datagram that does not parse is
@@ -89,8 +89,8 @@ here" -- and it is also what a person typing a half-remembered address gets.
 
 import json
 
+import moy_net
 from moy_net import http_response
-from moy_webserver import WebServer
 
 try:
     from ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
@@ -108,13 +108,6 @@ AP_IP = "192.168.4.1"
 
 # The captive portal's responder (see the module docstring for why it exists).
 DNS_PORT = 53
-# Datagrams answered per poll() before the form's socket gets a turn again. A
-# phone that has just joined asks for a handful of names at once; more than
-# this in one iteration is a flood, and the form is the thing that matters.
-DNS_PER_POLL = 8
-# Longest query we will look at. A DNS query over UDP is 512 bytes by RFC 1035
-# and a real one is ~40; anything larger is not a phone asking a question.
-DNS_MAX_QUERY = 512
 
 # How long after answering the form before the board resets. The response has
 # to reach the phone first (the transport closes the conn as it returns, but
@@ -126,7 +119,7 @@ REBOOT_MS = 1200
 # one rather than making the person's connection stutter twice.
 SCAN_CACHE_MS = 10000
 
-# Hostname characters. It becomes `network.hostname()`, i.e. the mDNS label the
+# Hostname characters. It becomes the kernel's mDNS name, i.e. the label the
 # whole point of this board is being findable by, so it takes what a DNS label
 # takes and nothing else.
 _NAME_OK = "abcdefghijklmnopqrstuvwxyz0123456789-"
@@ -294,8 +287,8 @@ def scan_json(nets):
 #
 # Two pieces, and the module docstring carries the decision and its cost. The
 # HTTP half is `_redirect` plus one branch in `handle_http`; the DNS half is
-# the pure `dns_reply` (everything that can be wrong about a packet) and
-# `DnsRedirect` (the socket, which is the only part a host test cannot have).
+# the kernel's responder (moy_dns.c: the packet rules and the socket) behind
+# `dns_reply` and `DnsRedirect`.
 
 
 def _redirect(url):
@@ -318,163 +311,50 @@ def _redirect(url):
     return head.encode("utf-8") + body.encode("utf-8")
 
 
-def _ip_bytes(ip):
-    """A dotted-quad -> its four bytes, or None if it is not one."""
-    parts = str(ip or "").split(".")
-    if len(parts) != 4:
-        return None
-    out = bytearray(4)
-    for i in range(4):
-        try:
-            v = int(parts[i])
-        except ValueError:
-            return None
-        if v < 0 or v > 255:
-            return None
-        out[i] = v
-    return bytes(out)
-
-
 def dns_reply(query, ip):
-    """One DNS query datagram -> the datagram to answer it with, or None.
-
-    Answers EVERY name with `ip`, which is the whole trick: the phone's
-    connectivity probe then resolves to this board and reaches the form.
-
-    The refusals are the interesting half, because this parses attacker-shaped
-    input on the one board a person cannot see:
-
-      * a REPLY (QR=1) is never answered -- two responders on one AP would
-        otherwise trade packets forever;
-      * a compression pointer inside the QUESTION is illegal (RFC 1035 4.1.2),
-        and the reply echoes the question verbatim, so following one is the
-        only way this could be made to emit something it did not read;
-      * anything that is not exactly one standard IN question, or is truncated
-        anywhere, is dropped rather than guessed at.
-
-    A question we will not ANSWER is still ANSWERED -- with NOERROR and zero
-    records, never NXDOMAIN. A phone asks AAAA before A, and NXDOMAIN would
-    tell it the name does not exist at all rather than "not over IPv6 here",
-    which is a probe that never falls back and a form that never opens.
-
-    TTL 0: nothing this board says about a name may outlive the phone's stay
-    on this AP. See the module docstring.
-    """
-    if not query or len(query) < 17 or len(query) > DNS_MAX_QUERY:
+    """One DNS query datagram -> the datagram to answer it with, or None: the
+    kernel's (native/moy_net/moy_dns.c, whose header has the refusals and
+    why every name is answered with `ip`, TTL 0)."""
+    if not query:
         return None
-    flags = query[2]
-    if flags & 0x80:                       # QR=1: this is somebody's answer
-        return None
-    if (flags >> 3) & 0x0F:                # not a standard QUERY (opcode != 0)
-        return None
-    if (query[4] << 8 | query[5]) != 1:    # exactly one question, or not ours
-        return None
-    i = 12
-    n = len(query)
-    while i < n:
-        length = query[i]
-        if length == 0:                    # the root label ends the name
-            i += 1
-            break
-        if length & 0xC0:                  # a pointer/reserved length: refuse
-            return None
-        i += length + 1
-    else:
-        return None                        # ran off the end mid-name
-    if i + 4 > n:                          # QTYPE/QCLASS truncated
-        return None
-    qtype = query[i] << 8 | query[i + 1]
-    qclass = query[i + 2] << 8 | query[i + 3]
-    end = i + 4
-    addr = _ip_bytes(ip)
-    answer = qtype == 1 and qclass == 1 and addr is not None
-    out = bytearray(query[:end])           # header + the question, verbatim
-    out[2] = 0x84 | (flags & 0x01)         # QR=1, AA=1, RD echoed back
-    out[3] = 0x00                          # RA=0, RCODE=0 (NOERROR)
-    out[6] = 0
-    out[7] = 1 if answer else 0            # ANCOUNT
-    out[8] = 0
-    out[9] = 0                             # NSCOUNT
-    out[10] = 0
-    out[11] = 0                            # ARCOUNT
-    if answer:
-        out += b"\xc0\x0c"                 # NAME: a pointer to the question's
-        out += b"\x00\x01\x00\x01"         # TYPE A, CLASS IN
-        out += b"\x00\x00\x00\x00"         # TTL 0
-        out += b"\x00\x04"                 # RDLENGTH
-        out += addr
-    return bytes(out)
+    return moy_net.dns_reply(bytes(query), ip)
 
 
 class DnsRedirect:
-    """The responder on :53, and nothing else. Optional at every step.
-
-    `start()` returning False is a supported outcome: the form is still served
-    and the address is still printed on serial and named on the done page, so
-    a board that cannot bind :53 is a board that works the way it did before
-    2026-08-29. Nothing here may raise into the setup loop.
-
-    Binding 0.0.0.0 also listens on STA, which during setup is ACTIVE but
-    never connected (it exists for `scan`), so there is no second network for
-    this to answer on.
-    """
+    """The responder on :53 (the kernel's, moy_dns.c), and nothing else.
+    Optional at every step: `start()` returning False is a supported outcome
+    -- the form is still served and the address is still printed -- and
+    nothing here may raise into the setup loop."""
 
     def __init__(self, ip, port=DNS_PORT):
         self.ip = ip
         self.port = port
-        self.sock = None
         self.answered = 0
+        self.up = False
+
+    @property
+    def bound_port(self):
+        return moy_net.dns_port() if self.up else 0
 
     def start(self):
-        try:
-            import usocket as socket
-        except ImportError:                # host / CPython
-            import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            try:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            except Exception:              # noqa: BLE001 -- not every port has it
-                pass
-            s.bind(("0.0.0.0", self.port))
-            s.setblocking(False)
-            self.sock = s
-            return True
-        except Exception as exc:           # noqa: BLE001 -- :53 busy / no perms
-            print("ZERO SETUP no captive portal (dns:", exc, ") -- the form is "
-                  "still at http://%s/" % self.ip)
-            self.sock = None
-            return False
+        self.up = bool(moy_net.dns_start(self.ip, self.port))
+        if not self.up:
+            print("ZERO SETUP no captive portal (dns: port %s refused) -- the "
+                  "form is still at http://%s/" % (self.port, self.ip))
+        return self.up
 
     def poll(self):
-        """Answer up to DNS_PER_POLL pending queries. Returns how many."""
-        if self.sock is None:
+        """Answer up to the kernel's per-poll share of queries. Returns how many."""
+        if not self.up:
             return 0
-        served = 0
-        for _ in range(DNS_PER_POLL):
-            try:
-                data, addr = self.sock.recvfrom(DNS_MAX_QUERY)
-            except Exception:              # noqa: BLE001 -- EAGAIN: none left
-                break
-            if not data:
-                break
-            try:
-                reply = dns_reply(data, self.ip)
-                if reply is not None:
-                    self.sock.sendto(reply, addr)
-                    served += 1
-            except Exception as exc:       # noqa: BLE001 -- one bad datagram
-                print("ZERO SETUP dns:", exc)   # must not end the setup loop
+        served = moy_net.dns_poll()
         self.answered += served
         return served
 
     def stop(self):
-        if self.sock is not None:
-            try:
-                self.sock.close()
-            except Exception:              # noqa: BLE001
-                pass
-        self.sock = None
+        if self.up:
+            moy_net.dns_stop()
+        self.up = False
 
 
 # The page. One file, no fetches but /scan, no fonts, no frameworks -- it is
@@ -595,8 +475,9 @@ def page(ap_name, error=None, name=DEFAULT_NAME):
         name)
 
 
-class SetupServer(WebServer):
-    """The setup form over the same transport everything else here rides.
+class SetupServer:
+    """The setup form over the kernel's webhost, which parks every request
+    (`defer` "*") for `poll()` to answer here.
 
     `save(clean)` and `scan()` are injected: the persistence and the radio are
     the two things a host test cannot have, and everything between them --
@@ -604,7 +485,8 @@ class SetupServer(WebServer):
     """
 
     def __init__(self, ap_name, save, scan, port=SETUP_PORT, ip=AP_IP):
-        WebServer.__init__(self, port=port)
+        self.port = port
+        self.serving = False
         self.ap_name = ap_name
         self.ap_ip = ip              # where every unserved GET is sent
         self._save = save
@@ -634,6 +516,39 @@ class SetupServer(WebServer):
             # who typed the address with a path on the end.
             return _redirect("http://%s/" % self.ap_ip)
         return None                  # a POST we do not serve -> 404
+
+    def start(self, ip=None):
+        """Bind the kernel's listener with every path parked for this object."""
+        try:
+            moy_net.web_start(self.port, "/", None, None, None, ("*",))
+        except OSError as exc:
+            print("ZERO SETUP port %d: %s" % (self.port, exc))
+            return False
+        self.serving = True
+        return True
+
+    def poll(self):
+        """One kernel poll, then the parked request answered here."""
+        if not self.serving:
+            return False
+        did = moy_net.web_poll()
+        req = moy_net.web_take()
+        if req is not None:
+            did = True
+            try:
+                resp = self.handle_http(req[0], req[1], req[2])
+            except Exception as exc:      # noqa: BLE001 -- never fail the request
+                print("ZERO SETUP %s: %s" % (type(exc).__name__, exc))
+                resp = http_response(500, '{"error":"server"}')
+            moy_net.web_answer(resp or http_response(
+                404, "not found", "text/plain; charset=utf-8"))
+        return did
+
+    def stop(self):
+        if self.serving:
+            moy_net.web_stop()
+            moy_net.web_events()
+        self.serving = False
 
     def scan_cached(self):
         now = ticks_ms()
@@ -703,31 +618,25 @@ def _write_json(path, doc):
         f.write(json.dumps(doc))
 
 
+def _scan():
+    """What the station sees, in the port's WLAN.scan shape scan_json reads."""
+    return [(ssid.encode(), b"", 0, rssi, auth, False)
+            for ssid, rssi, auth in moy_net.wifi_scan()]
+
+
 def run(wifi_store, zero_store, port=SETUP_PORT, sleep_ms=10):
     """Host the setup AP and serve the form until it is filled in. Never
-    returns: a good POST resets the board into STA."""
+    returns: a good POST resets the board into STA. The access point is the
+    kernel's WiFi driver's provisioning mode, the station beside it up for
+    the form's scans and never connecting."""
     import machine
-    import network
     import time
 
-    ap = network.WLAN(network.AP_IF)
-    ap.active(True)
-    ssid = ap_ssid(ap.config("mac"))
-    try:
-        ap.config(essid=ssid, authmode=network.AUTH_OPEN)
-    except Exception as exc:         # noqa: BLE001 -- older port: essid only
-        print("ZERO SETUP ap config:", exc)
-        ap.config(essid=ssid)
-    # STA active but NOT connecting: this is what /scan reads. Bringing it up
-    # beside the AP is supported on the S3 (the two share one radio and the AP
-    # follows the STA's channel), and a scan is the only thing it is asked for.
-    sta = network.WLAN(network.STA_IF)
-    sta.active(True)
-
-    ip = ap.ifconfig()[0]
+    ssid = ap_ssid(moy_net.wifi_ap_mac())
+    ip = moy_net.wifi_ap(ssid) or AP_IP
     srv = SetupServer(ssid,
                       lambda clean: save_setup(clean, wifi_store, zero_store),
-                      sta.scan, port=port, ip=ip)
+                      _scan, port=port, ip=ip)
     if not srv.start(ip):
         raise OSError("setup port %d busy" % port)
     # The portal, second and optional: the form is the thing that must come up.
@@ -741,6 +650,6 @@ def run(wifi_store, zero_store, port=SETUP_PORT, sleep_ms=10):
         if srv.due():
             srv.stop()
             dns.stop()
-            ap.active(False)
+            moy_net.wifi_off()
             machine.reset()
         time.sleep_ms(sleep_ms)

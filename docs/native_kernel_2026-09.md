@@ -223,7 +223,7 @@ sprints that follow it:
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
 | the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py`, `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
-| radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `device/moy_webserver.py`, `runtime/moy_sync.py` | 3 |
+| radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `moy_webserver.py` (deleted by sprint 3's links pass), `runtime/moy_sync.py` | 3 |
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `runtime/system_menu_ui.py`, `runtime/netplay.py`, the achievements/notify path | 4 |
 | the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`'s `ArtworkService` (the rest of the file is Paint, an app), `runtime/wallpaper.py` | 5 |
@@ -257,7 +257,7 @@ console needs while no Python app runs is OS.
   the owner decides it.
 - The Zero takes the store modules (`runtime/moy_carts.py` and its siblings),
   `runtime/moy_fs.py`, `runtime/moy_journal.py`, `runtime/moy_sync.py`,
-  `runtime/ticks.py`, `device/moy_webhost.py`, `device/moy_webserver.py` and
+  `runtime/ticks.py`, `device/moy_webhost.py` and
   `device/moy_ota.py` (`firmware/seeed_xiao_esp32s3_zero/board.toml` is the
   authority), so a crossing of any of them is a Zero link gate.
 
@@ -280,7 +280,7 @@ console needs while no Python app runs is OS.
 | `device/moy_espnow.py` | radios and links | 3 | the board's one ESP-NOW owner; netplay's lockstep over it is the cart path's |
 | `device/moy_ota.py` | frame tail | 3 | the firmware's identity and the updaters' Settings face over `native/moy_net/moy_ota.c` (crossed 2026-10-07, with its HTTP(S) client, `moy_http.py`); OTA health is `device/moy_ota_health.py`. The Zero takes it |
 | `device/moy_webhost.py` | radios and links | 3 | the webhost; the Zero takes it |
-| `device/moy_webserver.py` | radios and links | 3 | the socket and HTTP core under the webhost; the Zero takes it |
+| `moy_webserver.py` | radios and links | 3 | deleted 2026-10-08: the socket and HTTP core are `native/moy_net`'s, the Zero's setup form included |
 | `device/moybyte_diag.py` | frame tail | 3 | offline log capture to SD for the T-Deck, where the loop starves USB serial |
 | `device/moybyte_sd.py` | storage | 1b | the T-Deck's SD gate on the SPI host the panel owns; a per-op teardown hangs the board with no panic |
 | `device/moycore_glue.py` | split | 3 + 4 | the audio drain half crosses with audio; the input refresh and the frame around `tick()` cross with the cart path |
@@ -418,11 +418,11 @@ console needs while no Python app runs is OS.
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py` | glass | 3 | this board's backlight and the shared DSI compositor |
 | `firmware/guition_jc3248w535/modules/guition_panel.py` | glass | 3 | the Guition S3's thin subclass over `device/banded_panel.py` |
 | `firmware/guition_jc8012p4a1c/modules/guition_p4_display.py` | glass | 3 | this board's backlight and the rotated DSI compositor |
-| `firmware/seeed_xiao_esp32s3_zero/modules/zero_host.py` | radios and links | open | the Zero runs no app and no cart, so the memory goal does not reach it, yet everything it does is the OS's by §2.2's rule and every link gate counts it. Question: do the Zero's own Python modules (`zero_host.py`, `zero_gpio.py`, `zero_setup.py` and the entry stubs) cross in 3 with the webhost they drive, or stay Python as the one board with nothing to free? |
+| `firmware/seeed_xiao_esp32s3_zero/modules/zero_host.py` | radios and links | open | the Zero runs no app and no cart, so the memory goal does not reach it, yet everything it does is the OS's by §2.2's rule and every link gate counts it. Answered (`docs/kernel_survival_2026-10.md` §6.5): the links crossed in 3; the boot order, the seed, the OTA driver and the setup form stay with the board glue |
 | each console board's `boot.py`, `main.py` and `moybyte_shell.py` | bring-up | open | entry stubs and boot-mode declarations on the T-Deck, Waveshare P4, Guition S3 and Guition P4; see `device/boot_shell.py` |
 | the bring-up smokes `tdeck_smoke.py`, `guition_smoke.py` and `guition_p4_smoke.py` | bring-up | open | per-subsystem REPL smokes; see `device/boot_shell.py` |
 | each console board's `moy_runtime.py` | frame tail | 3 | board glue: builds the board's drivers and hands them to the spine, and dissolves into the kernel's per-board configuration as they cross; the T-Deck's also holds the SD gate wrapper, storage's |
-| the Zero's `zero_gpio.py` and `zero_setup.py` | radios and links | open | the allowlisted GPIO endpoint and the first-run access point; follow `zero_host.py` |
+| the Zero's `zero_gpio.py` (deleted 2026-10-08) and `zero_setup.py` | radios and links | 3 | the allowlisted GPIO endpoint is `native/moy_net/moy_gpio.c`; the first-run access point, its portal and transport are `moy_net`'s, the form stays |
 | the Zero's `boot.py` and `main.py` | radios and links | open | the entry stubs; `main.py` auto-boots the store host, guarded so a failure falls to the REPL; follow `zero_host.py` |
 
 **The browser tier (`firmware/web_runner/`)**

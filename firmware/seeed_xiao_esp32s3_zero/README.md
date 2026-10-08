@@ -252,6 +252,13 @@ repo's two: `dev` → beta/`unstable`, `master` → stable.
 
 ## First-run setup, with no cable (`zero_setup.py`, #41)
 
+The radio is the kernel's WiFi driver (`native/moy_net/moy_wifi.c`): the
+station, the access point beside it (its provisioning mode) and the mDNS name
+are C, and so are the setup form's HTTP transport (the kernel's webhost, every
+path parked for `zero_setup`'s `SetupServer`) and the portal's DNS responder.
+What stays Python is the form itself: the page, the parse, the validation and
+the two files it writes.
+
 A board that cannot join anything does **not** print and give up — it becomes
 its own network for as long as it takes to be told about a real one:
 
@@ -278,16 +285,14 @@ setup that needs no printed key and no instructions.
 
 **It is a captive portal since 2026-08-29, reversing this port's own recorded
 decline** (the argument, its price and what would reverse it back live in
-`zero_setup.py`'s docstring, which quotes the decline verbatim). `DnsRedirect`
-answers every name on :53 with the AP's address and every unserved `GET` is a
+`zero_setup.py`'s docstring, which quotes the decline verbatim). The kernel's
+responder (`native/moy_net/moy_dns.c`) answers every name on :53 with the AP's address and every unserved `GET` is a
 302 to `http://192.168.4.1/`, so a phone's connectivity probe reaches this board
 and gets an answer it did not expect — which is what makes both platforms open
 the form without anybody typing an address. It works because ESP-IDF's SoftAP
 DHCP already hands out the AP's own address as the DNS server
 (`CONFIG_LWIP_DHCPS_ADD_DNS`, `y` in this board's generated sdkconfig), so
-nothing has to be configured for the queries to arrive — which is fortunate,
-since MicroPython exposes no `esp_netif_dhcps_option` binding at all, RFC 8910's
-option 114 included. **The portal is optional at every step**: a responder that
+nothing has to be configured for the queries to arrive. **The portal is optional at every step**: a responder that
 cannot bind :53 prints one line and setup serves exactly as it did before, and
 answers carry TTL 0 so nothing this board says about a name outlives the phone's
 stay on the AP.
@@ -318,7 +323,7 @@ docstring, which this board's host is an instance of. What is true *here*:
   browser has to load the page before it can ask for anything, and the page has
   to know a board is here before it knows to ask.
 
-## Pins (`zero_gpio.py`, #9)
+## Pins (`native/moy_net/moy_gpio.c`, #9)
 
 The other half of "the browser is the console, this board is what a browser is
 not". A cart running in the browser calls `pin_write` / `pin_read`; the page
@@ -342,10 +347,10 @@ are the ones the board is running on: `26–37` (flash + octal PSRAM), `19/20`
 (the USB device this board is reached through), `43/44` (`D6`/`D7`, UART0,
 where MicroPython keeps the REPL that is the recovery path), `0/45/46`
 (boot-mode and VDD_SPI strapping) and `3` (`D2`, JTAG-source strapping — the
-one *exposed* pad held back, on the strict reading; `zero_gpio.PINS` carries
-the argument for re-admitting it).
+one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
+`boards/MOYBYTE_ZERO/mpconfigboard.h` carries the argument for re-admitting it).
 
-Two behaviours worth knowing, both in `pin_factory`'s docstring: **a read never
+Two behaviours worth knowing, both in `moy_gpio.c`'s header: **a read never
 reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
 leaves the LED lit — the other way round, reading a light turns it off), which
 means a written pin stays an output until reboot; and **an input is pulled up**,
@@ -364,6 +369,7 @@ partition table, the console arrangement, WiFi with this sdkconfig, the OTA
 endpoints on real flash, and the rollback confirm.
 
 Host tests cover the rest: `tests/test_zero_setup.py`, `tests/test_zero_gpio.py`
+(the kernel's /gpio route and portal over `runtime/net_binding.py`)
 and `tests/test_zero_update.py` (140-odd cases over the parsing, the refusals,
 the persisted shapes, the captive portal's packets, the browser-side queue, the
 update state machine and one whole first run end to end), plus
@@ -458,7 +464,7 @@ below used to hold:
   has yet called `pin_write` from a running cart, so `gpio_link` + the worker's
   pump remain host-checked. The wire shape between the two ends is pinned by a
   test that runs a real batch out of the browser queue and into
-  `zero_gpio.handle`, and `Pin Light` (`system_carts/moybyte.pin_light.moy`) is the cart
+  the kernel's /gpio route, and `Pin Light` (`system_carts/moybyte.pin_light.moy`) is the cart
   that closes it — step 5 below.
 
 **The reboot-into-STA leg LEFT this list on 2026-08-29**, and it is worth
@@ -566,7 +572,7 @@ curl -s -X POST http://<ip>/gpio \
 *Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
 that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
 *Fail:* the opposite, in which case this board differs from the one this was
-measured on and `zero_gpio.PINS`' note about pin 21 needs correcting. Note
+measured on and `MOY_NET_GPIO_PINS`' note about pin 21 needs correcting. Note
 `pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
 a read never reconfigures a pin.
 

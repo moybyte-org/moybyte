@@ -116,3 +116,11 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
 # starts raising ValueError; the getter is unaffected.
 CONFIG_PM_ENABLE=
+
+# --- TLS in PSRAM -----------------------------------------------------------
+# mbedtls allocates through the IDF's own hook: with the default, every block
+# under SPIRAM_MALLOC_ALWAYSINTERNAL is internal SRAM. External puts all of
+# mbedtls's state in PSRAM, as on every console (the kernel's updater over
+# HTTPS, native/moy_net/moy_ota.c); what stays internal is the hardware
+# AES/SHA's DMA bounce.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

@@ -190,14 +190,13 @@ freeze it whole because they all construct an InputState. This board never
 does -- its inputs arrive as HTTP requests."""
 
 [[modules.device.group]]
-files = ["moy_webserver.py", "moy_webhost.py"]
+files = ["moy_webhost.py"]
 why = """
-The socket/HTTP/WebSocket transport core plus the "serve the wasm console from
-this board" handler. On the console boards these are one Settings row; here
-they ARE the board. `moy_webhost`'s SECURITY docstring is the authority on the
-pin gate, and `zero_host.ZeroHost` subclasses WebHost to add /gpio -- a
-subclass rather than an edit, because the other boards spend their GPIOs on a
-panel and would be handing out the pins their own screen is drawn through."""
+The Settings contract over the kernel's webhost (native/moy_net): the store,
+the sync apply, /gpio over this board's pin table and the setup form's
+transport are C. On the console boards it is one Settings row; here it IS the
+board. native/moy_net/moy_webhost.c's header is the authority on the pin
+gate."""
 
 [[modules.device.group]]
 files = ["moy_ota.py", "moy_ota_health.py"]

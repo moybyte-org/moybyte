@@ -7,6 +7,7 @@
 #include "py/objarray.h"
 #include "py/objlist.h"
 #include "py/objstr.h"
+#include "py/mperrno.h"
 #include "py/runtime.h"
 
 #include "moy_json.h"
@@ -31,6 +32,39 @@ static mp_obj_t text_of(const char *s, size_t n) {
         }
     }
     return mp_obj_new_str_from_vstr(&v);
+}
+
+// "a.b.c.d" in network order, 0 for None or anything else.
+static uint32_t ip_of(mp_obj_t o) {
+    if (o == mp_const_none) {
+        return 0;
+    }
+    const char *s = mp_obj_str_get_str(o);
+    uint32_t ip = 0;
+    for (int i = 0; i < 4; i++) {
+        uint32_t v = 0;
+        int d = 0;
+        while (*s >= '0' && *s <= '9' && d < 3) {
+            v = v * 10u + (uint32_t)(*s++ - '0');
+            d++;
+        }
+        if (d == 0 || v > 255 || (i < 3 && *s++ != '.')) {
+            return 0;
+        }
+        ip |= v << (8 * i);
+    }
+    return *s == '\0' ? ip : 0;
+}
+
+static mp_obj_t ip_text(uint32_t ip) {
+    if (ip == 0) {
+        return mp_const_none;
+    }
+    char b[16];
+    int n = snprintf(b, sizeof(b), "%u.%u.%u.%u", (unsigned)(ip & 0xff),
+                     (unsigned)((ip >> 8) & 0xff), (unsigned)((ip >> 16) & 0xff),
+                     (unsigned)(ip >> 24));
+    return mp_obj_new_str(b, (size_t)n);
 }
 
 static mp_obj_t mod_parse_request(mp_obj_t raw) {
@@ -385,6 +419,31 @@ static mp_obj_t mod_wifi_forget(mp_obj_t ssid) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_forget_obj, mod_wifi_forget);
 
+// wifi_ap(ssid) -> the access point's address; OSError on a refusal.
+static mp_obj_t mod_wifi_ap(mp_obj_t ssid) {
+    uint32_t ip = 0;
+    int e = moy_wifi_ap(mp_obj_str_get_str(ssid), &ip);
+    if (e != 0) {
+        mp_raise_OSError(MP_EIO);
+    }
+    return ip_text(ip);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_ap_obj, mod_wifi_ap);
+
+static mp_obj_t mod_wifi_ap_mac(void) {
+    uint8_t mac[6];
+    if (moy_wifi_ap_mac(mac) != 0) {
+        mp_raise_OSError(MP_EIO);
+    }
+    return mp_obj_new_bytes(mac, 6);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_ap_mac_obj, mod_wifi_ap_mac);
+
+static mp_obj_t mod_wifi_mdns(mp_obj_t host) {
+    return mp_obj_new_bool(moy_wifi_mdns(mp_obj_str_get_str(host)) == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_mdns_obj, mod_wifi_mdns);
+
 static mp_obj_t mod_wifi_disconnect(void) {
     moy_wifi_disconnect();
     return mp_const_none;
@@ -563,39 +622,6 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 6, mod_web_star
 
 // -- the web-console switch -----------------------------------------------------
 
-// "a.b.c.d" in network order, 0 for None or anything else.
-static uint32_t ip_of(mp_obj_t o) {
-    if (o == mp_const_none) {
-        return 0;
-    }
-    const char *s = mp_obj_str_get_str(o);
-    uint32_t ip = 0;
-    for (int i = 0; i < 4; i++) {
-        uint32_t v = 0;
-        int d = 0;
-        while (*s >= '0' && *s <= '9' && d < 3) {
-            v = v * 10u + (uint32_t)(*s++ - '0');
-            d++;
-        }
-        if (d == 0 || v > 255 || (i < 3 && *s++ != '.')) {
-            return 0;
-        }
-        ip |= v << (8 * i);
-    }
-    return *s == '\0' ? ip : 0;
-}
-
-static mp_obj_t ip_text(uint32_t ip) {
-    if (ip == 0) {
-        return mp_const_none;
-    }
-    char b[16];
-    int n = snprintf(b, sizeof(b), "%u.%u.%u.%u", (unsigned)(ip & 0xff),
-                     (unsigned)((ip >> 8) & 0xff), (unsigned)((ip >> 16) & 0xff),
-                     (unsigned)(ip >> 24));
-    return mp_obj_new_str(b, (size_t)n);
-}
-
 // wc_on(port, carts, files, kinds, pin, defer, ip): never waits; OSError when
 // the configuration itself is refused.
 static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
@@ -641,6 +667,39 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_wc_state_obj, mod_wc_state);
 
 // wc_phase(port) -> the switch's state when it is on `port`, else 0 (OFF):
 // the frame's question, answered without an allocation.
+// dns_start(ip, port) -> whether the portal's responder bound; dns_poll() ->
+// answered; dns_port() -> the bound port; dns_reply(query, ip) -> the answer.
+static mp_obj_t mod_dns_start(mp_obj_t ip, mp_obj_t port) {
+    mp_int_t p = mp_obj_get_int(port);
+    return mp_obj_new_bool(p >= 0 && p <= 65535 && moy_dns_start(ip_of(ip), (uint16_t)p) == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_dns_start_obj, mod_dns_start);
+
+static mp_obj_t mod_dns_port(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_dns_port());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_dns_port_obj, mod_dns_port);
+
+static mp_obj_t mod_dns_reply(mp_obj_t query, mp_obj_t ip) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(query, &b, MP_BUFFER_READ);
+    uint8_t out[MOY_DNS_QUERY_MAX + 16];
+    size_t n = moy_dns_reply(b.buf, b.len, ip_of(ip), out, sizeof(out));
+    return n ? mp_obj_new_bytes(out, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_dns_reply_obj, mod_dns_reply);
+
+static mp_obj_t mod_dns_poll(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_dns_poll());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_dns_poll_obj, mod_dns_poll);
+
+static mp_obj_t mod_dns_stop(void) {
+    moy_dns_stop();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_dns_stop_obj, mod_dns_stop);
+
 static mp_obj_t mod_wc_phase(mp_obj_t port) {
     moy_wc_state_t st;
     moy_wc_state(&st);
@@ -1060,6 +1119,11 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_wc_poll), MP_ROM_PTR(&mod_wc_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_state), MP_ROM_PTR(&mod_wc_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_phase), MP_ROM_PTR(&mod_wc_phase_obj)},
+    {MP_ROM_QSTR(MP_QSTR_dns_start), MP_ROM_PTR(&mod_dns_start_obj)},
+    {MP_ROM_QSTR(MP_QSTR_dns_port), MP_ROM_PTR(&mod_dns_port_obj)},
+    {MP_ROM_QSTR(MP_QSTR_dns_reply), MP_ROM_PTR(&mod_dns_reply_obj)},
+    {MP_ROM_QSTR(MP_QSTR_dns_poll), MP_ROM_PTR(&mod_dns_poll_obj)},
+    {MP_ROM_QSTR(MP_QSTR_dns_stop), MP_ROM_PTR(&mod_dns_stop_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_set_pin), MP_ROM_PTR(&mod_wc_set_pin_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_park), MP_ROM_PTR(&mod_wc_park_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_url), MP_ROM_PTR(&mod_wc_url_obj)},
@@ -1090,6 +1154,9 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_wifi_connect), MP_ROM_PTR(&mod_wifi_connect_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_disconnect), MP_ROM_PTR(&mod_wifi_disconnect_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_forget), MP_ROM_PTR(&mod_wifi_forget_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_ap), MP_ROM_PTR(&mod_wifi_ap_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_ap_mac), MP_ROM_PTR(&mod_wifi_ap_mac_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wifi_mdns), MP_ROM_PTR(&mod_wifi_mdns_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_status), MP_ROM_PTR(&mod_wifi_status_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_scan), MP_ROM_PTR(&mod_wifi_scan_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_mac), MP_ROM_PTR(&mod_wifi_mac_obj)},

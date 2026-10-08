@@ -4,7 +4,8 @@
 //   GET  /sync                                 open: {"sync":1}, "a board lives here"
 //   GET  /carts.json, /files.json              pin (?pin=): the store, streamed
 //   POST /sync                                 pin (the body's): a batch applied
-//   anything in the configured `defer`         parked for the VM (/run, /update, /gpio)
+//   GET, POST /gpio                            pin: the board's pins, where it has a table (moy_gpio.c)
+//   anything in the configured `defer`         parked for the VM (/run, /update; "*": every path)
 //
 // THE PIN GATES EVERYTHING that reveals or changes what is on the board (owner
 // call 2026-08-25): a GET carries it as `?pin=`, a POST /sync in its body. A
@@ -764,9 +765,11 @@ static void walk(out_t *o, walk_t *w, size_t pn, size_t rn, int depth,
     list_free(&l, ix);
 }
 
+// "*" in the list is every path: a host the VM answers whole (the Zero's
+// setup form).
 static int in_list(const char *list, const char *s, size_t n) {
     for (const char *k = list; *k; k += strlen(k) + 1u) {
-        if (strlen(k) == n && memcmp(k, s, n) == 0) {
+        if ((k[0] == '*' && k[1] == '\0') || (strlen(k) == n && memcmp(k, s, n) == 0)) {
             return 1;
         }
     }
@@ -943,6 +946,14 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
     }
     if (post && path_is(t, pn, "/sync")) {
         sync_post(o, b, bn);
+        return 1;
+    }
+    const uint8_t *gpins;
+    if (moy_gpio_pins != NULL && moy_gpio_pins(&gpins) > 0 && path_is(t, pn, "/gpio")
+        && (post || path_is(m, mn, "GET"))) {
+        char doc[512];
+        int status = moy_gpio_request(post, t, tn, b, bn, W->pin, doc, sizeof(doc));
+        json(o, status, doc);
         return 1;
     }
     if (!path_is(m, mn, "GET")) {

@@ -8,6 +8,7 @@
 //      -I native/moy_net -I native/moy_spine native/moy_net/fuzz_net.c \
 //      native/moy_net/moy_http.c native/moy_net/moy_sync.c \
 //      native/moy_net/moy_link.c native/moy_net/moy_ota.c \
+//      native/moy_net/moy_gpio.c native/moy_net/moy_dns.c \
 //      native/moy_spine/moy_json.c -o fuzz_net
 //   ./fuzz_net SEED ROUNDS
 
@@ -72,6 +73,54 @@ int moy_slot_boot(char *label, size_t cap) {
 void moy_slot_abort(void) {
 }
 
+int moy_udp_listen(uint16_t port) {
+    (void)port;
+    return -98;
+}
+
+uint16_t moy_udp_port(int fd) {
+    (void)fd;
+    return 0;
+}
+
+int moy_udp_recv(int fd, void *buf, size_t cap, uint8_t from[MOY_UDP_ADDR]) {
+    (void)fd, (void)buf, (void)cap, (void)from;
+    return 0;
+}
+
+int moy_udp_send(int fd, const void *buf, size_t n, const uint8_t to[MOY_UDP_ADDR]) {
+    (void)fd, (void)buf, (void)n, (void)to;
+    return -1;
+}
+
+void moy_http_close(int fd) {
+    (void)fd;
+}
+
+// The Zero's pins, for the /gpio route: three of them, levels kept.
+static const uint8_t PINS[3] = {1, 2, 21};
+static int levels[64];
+
+int moy_gpio_pins(const uint8_t **pins) {
+    *pins = PINS;
+    return 3;
+}
+
+int moy_gpio_drive(int pin, int level) {
+    if (pin != 1 && pin != 2 && pin != 21) {
+        abort();                    // a pin off the allowlist was driven
+    }
+    levels[pin] = level;
+    return 0;
+}
+
+int moy_gpio_sense(int pin) {
+    if (pin != 1 && pin != 2 && pin != 21) {
+        abort();
+    }
+    return levels[pin];
+}
+
 static uint32_t rng = 1;
 
 static uint32_t rnd(void) {
@@ -102,6 +151,9 @@ static const char *SEEDS[] = {
     "{\"board\": \"tdeck\", \"channel\": \"stable\", \"version\": 7, \"size\": \"12\", "
     "\"sha256\": \"AB\", \"sig\": \"0f\", \"c6\": {\"version\": 1.5, \"size\": null}}",
     "https://h:8443/a/b.json",
+    "{\"v\": 1, \"pin\": \"1\", \"ops\": [{\"p\": 21, \"mode\": \"out\", \"v\": 0}, "
+    "{\"p\": 2, \"mode\": \"read\"}, {\"p\": 43, \"mode\": \"out\", \"v\": 1}]}",
+    "\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01",
 };
 
 static const char ALPHA[] = "GETPOS /?&=:\r\n\"{}[],0123456789vrootpsin-Content-Length\\u\xc3\xa9\xff";
@@ -231,6 +283,17 @@ static void one(const char *src, size_t n) {
     jr = moy_ota_judge_c6(buf, n, (int)(rnd() & 1), NULL, 0, why, sizeof(why));
     CHECK(jr == MOY_OTA_OK || jr == MOY_OTA_ERR);
     CHECK(moy_ota_verify(buf, n, buf, n < 600 ? n : 600, NULL, 0) == 0);
+    char gdoc[512];
+    int gs = moy_gpio_request((int)(rnd() & 1), "/gpio?pin=1", 11, buf, n,
+                              (rnd() & 1) ? "1" : NULL, gdoc, sizeof(gdoc));
+    CHECK(gs == 200 || gs == 400 || gs == 403);
+    CHECK(strlen(gdoc) < sizeof(gdoc));
+    uint8_t dns[MOY_DNS_QUERY_MAX + 16];
+    size_t dn = moy_dns_reply((const uint8_t *)buf, n, 0x0104a8c0u, dns, sizeof(dns));
+    CHECK(dn == 0 || (dn >= 17 && dn <= n + 16));
+    if (dn) {
+        CHECK(memcmp(dns, buf, 2) == 0 && (dns[2] & 0x80));
+    }
     free(buf);
 }
 

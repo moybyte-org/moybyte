@@ -83,7 +83,10 @@ EXFAT_SRAM = 568
 # And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
 # to its state, which is PSRAM), 4 bytes of .bss by the object's size,
 # 2026-10-07.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4
+# And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
+# its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
+# .bss by the objects' sizes, 2026-10-08.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

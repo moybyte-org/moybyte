@@ -11,9 +11,10 @@ runtime/web_view.py and runtime/web_view_page.py themselves.
 
 The plan's lane ledger pins each deletion with a grep-test so a revert or
 cargo-cult reintroduction fails loudly instead of resurrecting a seam the
-architecture buried. What SURVIVES by decision: moy_webserver's HTTP transport
-core, and runtime/web_input.py -- the browser event decode, which is
-transport-shaped rather than raster-shaped.
+architecture buried. What SURVIVES by decision: an HTTP transport (since 2026-10
+the kernel's, native/moy_net, with device/moy_webserver.py deleted), and
+runtime/web_input.py -- the browser event decode, which is transport-shaped
+rather than raster-shaped.
 
 THE WEBSOCKET HALF WENT IN 2026-09, and it is pinned here as an absence for the
 same reason everything else on this page is. It survived the sunset itself on
@@ -108,16 +109,8 @@ def test_device_webview_controller_is_gone():
     assert "web_hook" not in runtime_src
 
 
-def test_device_webserver_is_transport_core_only():
-    # Load-bearing patterns, not prose (the module header narrates the sunset).
-    src = _read("device", "moy_webserver.py")
-    for dead in ("_wv.TeeCanvas", "_wv.DrawRecorder", "_wv.ServedState",
-                 "_wv.SurfaceDelta", "_wv.WsClientState", "def _push_frame",
-                 "def recording_wanted", "def stream_mode", "def begin_frame",
-                 "PAGE_HTML,", "self.recorder", "self.provider"):
-        assert dead not in src, dead
-    for alive in ("class WebServer", "def handle_http"):
-        assert alive in src, alive
+def test_the_transport_is_the_kernels_and_the_python_one_is_gone():
+    assert not os.path.exists(os.path.join(ROOT, "device", "moy_webserver.py"))
     # The parser and the response writer are the links' native moy_net.
     net = _read("native", "moy_net", "modmoy_net.c")
     for alive in ("MP_QSTR_parse_request", "MP_QSTR_http_response"):
@@ -128,13 +121,9 @@ def test_the_websocket_half_is_gone_with_its_framing_leaf():
     """The 2026-09 deletion (see this module's docstring): the RPC it was kept
     for speaks plain HTTP, so nothing in the tree ever opened it."""
     assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view_ws.py"))
-    # Load-bearing patterns, not prose: the module header narrates this
-    # deletion too, so a bare "web_view_ws" would fail on the sentence that
-    # records it.
-    src = _read("device", "moy_webserver.py")
-    for dead in ("class _WSConn", "def _upgrade_ws", "def _service_ws",
-                 "def send_text", "def connected", "on_text=", "self.on_text",
-                 "import web_view_ws", "WS_OP_TEXT =", "WS_IDLE_MS ="):
+    src = _read("device", "moy_webhost.py")
+    for dead in ("class _WSConn", "def _upgrade_ws", "import web_view_ws",
+                 "WS_OP_TEXT =", "WS_IDLE_MS ="):
         assert dead not in src, dead
 
 

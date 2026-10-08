@@ -203,7 +203,7 @@ the wasm head — see `docs/history/moycore_plan_2026-08.md` §3.2. The motivati
 kept because the windowing argument it makes is what `wm_windowed` went on to
 implement.)*
 
-`moy_webserver.py` plus the shared recording stack mirrored the **single physical
+The since-deleted `moy_webserver.py` plus the shared recording stack mirrored the **single physical
 screen** — whatever `DeviceCanvas` currently shows, recorded as a draw-command
 stream and replayed in the browser. That was a remote *mirror*, not a window manager: there is exactly one
 thing to look at, matching exactly what the device's own panel shows. A layered

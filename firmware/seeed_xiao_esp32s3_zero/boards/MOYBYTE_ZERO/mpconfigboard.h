@@ -62,7 +62,7 @@
 #define MICROPY_PY_BLUETOOTH                (0)
 
 // UART0 REPL stays ON (the generic S3 board's default): D6/D7 are GPIO43/44,
-// they are broken out on this board's header, and `zero_gpio.PINS` holds them
+// they are broken out on this board's header, and MOY_NET_GPIO_PINS holds them
 // back from the GPIO allowlist precisely BECAUSE they are the recovery console
 // for an image whose USB has wedged. Turning it off would delete that path.
 #define MICROPY_HW_ENABLE_UART_REPL         (1)
@@ -71,7 +71,7 @@
 // prints SDA/SCL. Nothing on this board is on I2C -- there is no panel, no
 // touch controller and no keyboard -- so this only decides where a bare
 // `machine.I2C(0)` lands if a kid wires a sensor to the labelled pads. (Both
-// pins are also in zero_gpio's digital allowlist; defining a default bus
+// pins are also in MOY_NET_GPIO_PINS, the digital allowlist; defining a default bus
 // claims nothing until something constructs one.)
 #define MICROPY_HW_I2C0_SDA                 (5)
 #define MICROPY_HW_I2C0_SCL                 (6)
@@ -100,3 +100,28 @@
 // only, and a floor nobody answers takes SAFE after this long -- the board's
 // only interface is its USB port, and it must never wait there forever.
 #define MOY_KERNEL_IDLE_SAFE_MS             (30000)
+
+// The WiFi driver is the kernel's (native/moy_net/moy_wifi.c): the station
+// that serves, the first-run setup access point beside it, and the mDNS name
+// (`<name>.local`) a headless board is found by. Python never constructs the
+// port's network.WLAN on this board.
+#define MOY_NET_WIFI                        (1)
+#define MOY_NET_MDNS                        (1)
+
+// THE /gpio ALLOWLIST (native/moy_net/moy_gpio.c): the pins a browser's cart may
+// drive or read, by GPIO number. It is the security model -- a pin outside it
+// is refused and never touched -- because the failure modes are not
+// survivable the way a 400 is.
+//     D0=1   D1=2   D2=3*  D3=4   D4=5(SDA)  D5=6(SCL)
+//     D6=43* D7=44* D8=7(SCK)  D9=8(MISO)  D10=9(MOSI)      * excluded, below
+// 21 is not on a pad: it is the board's user LED (active LOW), the one
+// hello-world that needs no wiring. EXCLUDED, each a pin some other list would
+// hand out:
+//   3 (D2)         strapping (the JTAG source at reset): the strict call, the
+//                  one exposed pad held back;
+//   43, 44 (D6/D7) UART0 TX/RX, the REPL that recovers a wedged USB image;
+//   19, 20         the native USB pair this board is reached through;
+//   0, 45, 46      boot-mode and VDD_SPI strapping (0 low at reset is the ROM
+//                  loader);
+//   26..37         SPI flash and the octal PSRAM: driving one stops the machine.
+#define MOY_NET_GPIO_PINS                   {1, 2, 4, 5, 6, 7, 8, 9, 21}

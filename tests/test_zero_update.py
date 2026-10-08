@@ -444,7 +444,8 @@ def host(tmp_path):
     carts.mkdir()
     web = tmp_path / "web"
     web.mkdir()
-    h = zero_host.zero_host_class()(str(carts), str(web), pin="1234")
+    from moy_webhost import WebHost
+    h = WebHost(str(carts), pin="1234")
     h.update = zero_host.ZeroUpdate(_FakeOta(MANIFEST))
     return h
 

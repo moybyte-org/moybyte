@@ -29,7 +29,7 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
     python serve.py ... --carts D --one-link  # ...over a board's LINK: one
                                             # connection at a time, each send
                                             # held to the board's budget
-                                            # (moy_webserver.WEB_SEND_TIMEOUT),
+                                            # (moy_net.h's MOY_HTTP_SEND_MS),
                                             # so a request waits behind the
                                             # one being served and a client
                                             # that stops reading is cut off,
@@ -115,9 +115,10 @@ else:
     sys.path.insert(0, os.path.join(_repo, "device"))   # flat sibling imports
     import moy_webhost                                  # noqa: E402
     from runtime.net_binding import query_param as _query    # noqa: E402
-    from moy_webserver import WEB_SEND_TIMEOUT          # noqa: E402
-    # The twin's piece of a body over `--one-link`. A board's is 1 KB
-    # (moy_webserver's CHUNK); this is bigger only so a loopback link moves a
+    # A board's send budget: native/moy_net/moy_net.h's MOY_HTTP_SEND_MS.
+    WEB_SEND_TIMEOUT = 2.0
+    # The twin's piece of a body over `--one-link`. A board's is the kernel
+    # webhost's chunk; this is bigger only so a loopback link moves a
     # big store at a rate a test can wait for -- the budget per piece, which is
     # what cuts a client off, is the board's own.
     _LINK_CHUNK = 65536

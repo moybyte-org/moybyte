@@ -19,6 +19,8 @@ target_sources(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_webhost.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ota.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_webconsole.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_gpio.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_dns.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_net.c)
 
 target_include_directories(usermod_moy_net INTERFACE

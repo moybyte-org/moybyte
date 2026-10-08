@@ -372,7 +372,7 @@ def test_a_datagram_that_is_not_a_plain_question_is_dropped(bad, why):
 def test_the_responder_answers_over_a_real_socket_and_lets_go_of_it():
     dns = zero_setup.DnsRedirect("192.168.4.1", port=0)
     assert dns.start() is True
-    port = dns.sock.getsockname()[1]
+    port = dns.bound_port
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client.settimeout(3)
     try:
@@ -389,7 +389,7 @@ def test_the_responder_answers_over_a_real_socket_and_lets_go_of_it():
     finally:                              # socket
         client.close()
         dns.stop()
-    assert dns.sock is None
+    assert dns.up is False
     assert dns.poll() == 0                # a stopped responder is inert
 
 
@@ -476,17 +476,12 @@ class _FakeSTA:
         self.log.append("sta connect")      # it saves and reboots instead
 
 
-class _FakeNetwork:
-    AP_IF = 1
-    STA_IF = 0
-    AUTH_OPEN = 0
-
-    def __init__(self, ap, sta):
-        self._ap = ap
-        self._sta = sta
-
-    def WLAN(self, iface):
-        return self._ap if iface == self.AP_IF else self._sta
+def _free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 class _FakeMachine:
@@ -578,7 +573,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
     def _send(request):
         c = socket.socket()
         c.settimeout(5)
-        c.connect(("127.0.0.1", made[0].sock.getsockname()[1]))
+        c.connect(("127.0.0.1", made[0].port))
         c.sendall(request.encode("utf-8"))
         clients.append(c)
 
@@ -630,6 +625,18 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
 
     ap = _FakeAP(log)
     sta = _FakeSTA(log)
+    net = zero_setup.moy_net
+
+    def _ap_up(ssid):
+        ap.active(True)
+        ap.configured.update({"essid": ssid, "authmode": 0})
+        sta.active(True)
+        return ap.ifconfig()[0]
+
+    monkeypatch.setattr(net, "wifi_ap_mac", lambda: ap.MAC, raising=False)
+    monkeypatch.setattr(net, "wifi_ap", _ap_up, raising=False)
+    monkeypatch.setattr(net, "wifi_scan", lambda: [("home", -41, 3)], raising=False)
+    monkeypatch.setattr(net, "wifi_off", lambda: ap.active(False), raising=False)
     monkeypatch.setattr(zero_setup, "SetupServer", _SpyServer)
     monkeypatch.setattr(zero_setup, "DnsRedirect", _SpyDns)
     assert zero_setup.REBOOT_MS >= 500, (
@@ -639,11 +646,10 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
     # 1.2s would buy nothing.
     monkeypatch.setattr(zero_setup, "REBOOT_MS", 0)
     monkeypatch.setitem(sys.modules, "machine", _FakeMachine(log, _on_reset))
-    monkeypatch.setitem(sys.modules, "network", _FakeNetwork(ap, sta))
     monkeypatch.setitem(sys.modules, "time", _FakeTime(_on_sleep))
     try:
         with pytest.raises(_Rebooted):
-            zero_setup.run(str(wifi), str(zero), port=0)
+            zero_setup.run(str(wifi), str(zero), port=_free_port())
     finally:
         for c in clients:
             c.close()
@@ -667,7 +673,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
 
     assert log == ["ap up", "sta up", "dns start 192.168.4.1",
                    "server stop", "dns stop", "ap down", "reset"]
-    assert made[0].sock is None
+    assert made[0].serving is False
     assert _SpyDns.polls >= len(steps), "the portal is not pumped by the loop"
 
 
@@ -727,7 +733,7 @@ def test_a_boot_that_joins_serves_and_never_hosts_the_ap(monkeypatch):
                         lambda **kw: kw.get("hostname") and "192.168.1.9")
     monkeypatch.setattr(zero_host, "identity",
                         lambda: {"name": "attic", "pin": "4242"})
-    monkeypatch.setattr(zero_host, "zero_host_class", lambda: _Host)
+    monkeypatch.setattr(zero_host, "host_class", lambda: _Host)
     monkeypatch.setattr(zero_setup, "run", lambda *a, **k: ran.append(a))
     with pytest.raises(_Stop) as exc:
         zero_host.serve()

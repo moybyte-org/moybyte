@@ -1786,6 +1786,13 @@ say("wc park", moy_net.wc_state()[1])
 moy_net.wc_park(False)
 moy_net.wc_off()
 say("wc off", moy_net.wc_state()[0])
+
+# -- the setup portal's DNS (native/moy_net/moy_dns.c) -------------------------
+Q = b"\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00"
+for qtype in (b"\x00\x01", b"\x00\x1c"):
+    r = moy_net.dns_reply(Q + qtype + b"\x00\x01", "192.168.4.1")
+    say("dns", len(r), r[2], r[7], r[-4:] == b"\xc0\xa8\x04\x01")
+say("dns drop", moy_net.dns_reply(b"\xab\xcd\x81" + Q[3:] + b"\x00\x01\x00\x01", "1.2.3.4"))
 print("DRIVER_DONE")
 '''
 
@@ -1823,6 +1830,9 @@ dl manifest has no url
 wc join 1 True
 wc park True
 wc off 0
+dns 45 133 1 True
+dns 29 133 0 False
+dns drop None
 """
 
 SESSION_DRIVER = r'''import sys

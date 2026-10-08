@@ -43,7 +43,7 @@ from runtime import moy_qr                                     # noqa: E402
 
 
 # What a board's connection screen encodes since the 2026-08-29 move to port 80
-# (moy_webserver.DEFAULT_PORT): 30 bytes, a 25-module version 2.
+# (moy_webhost.DEFAULT_PORT): 30 bytes, a 25-module version 2.
 PAIRED_URL = "http://192.168.1.151/?pin=4821"
 
 # The same address on an EXPLICIT port -- 35 bytes, a 29-module version 3. It is

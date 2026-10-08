@@ -180,6 +180,109 @@ void moy_http_close(int fd) {
         close(fd);
     }
 }
+
+int moy_udp_listen(uint16_t port) {
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -errno;
+    }
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+        int e = errno;
+        close(fd);
+        return -(e ? e : 1);
+    }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    return fd;
+}
+
+uint16_t moy_udp_port(int fd) {
+    struct sockaddr_in a;
+    socklen_t len = sizeof(a);
+    if (getsockname(fd, (struct sockaddr *)&a, &len) != 0) {
+        return 0;
+    }
+    return ntohs(a.sin_port);
+}
+
+int moy_udp_recv(int fd, void *buf, size_t cap, uint8_t from[MOY_UDP_ADDR]) {
+    struct sockaddr_in a;
+    socklen_t len = sizeof(a);
+    ssize_t k = recvfrom(fd, buf, cap, 0, (struct sockaddr *)&a, &len);
+    if (k <= 0) {
+        return 0;
+    }
+    memcpy(from, &a, sizeof(a) < MOY_UDP_ADDR ? sizeof(a) : MOY_UDP_ADDR);
+    return (int)k;
+}
+
+int moy_udp_send(int fd, const void *buf, size_t n, const uint8_t to[MOY_UDP_ADDR]) {
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    memcpy(&a, to, sizeof(a) < MOY_UDP_ADDR ? sizeof(a) : MOY_UDP_ADDR);
+    return sendto(fd, buf, n, 0, (struct sockaddr *)&a, sizeof(a)) == (ssize_t)n ? 0 : -1;
+}
+#endif
+
+// -- the board's pins (the Zero: MOY_NET_GPIO_PINS in its mpconfigboard.h) ----------
+
+#if defined(ESP_PLATFORM) && defined(MOY_NET_GPIO_PINS)
+#include "driver/gpio.h"
+
+static const uint8_t s_gpio_pins[] = MOY_NET_GPIO_PINS;
+#define GPIO_N ((int)sizeof(s_gpio_pins))
+static uint8_t s_gpio_mode[GPIO_N];     // 0 untouched, 1 input, 2 output
+
+static int gpio_slot(int pin) {
+    for (int i = 0; i < GPIO_N; i++) {
+        if (s_gpio_pins[i] == pin) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int moy_gpio_pins(const uint8_t **pins) {
+    *pins = s_gpio_pins;
+    return GPIO_N;
+}
+
+int moy_gpio_drive(int pin, int level) {
+    int i = gpio_slot(pin);
+    if (i < 0) {
+        return -1;
+    }
+    if (s_gpio_mode[i] != 2) {
+        gpio_reset_pin((gpio_num_t)pin);
+        // Input too, so a read of a driven pin answers its level without
+        // reconfiguring it.
+        if (gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT_OUTPUT) != ESP_OK) {
+            return -1;
+        }
+        s_gpio_mode[i] = 2;
+    }
+    return gpio_set_level((gpio_num_t)pin, level ? 1 : 0) == ESP_OK ? 0 : -1;
+}
+
+int moy_gpio_sense(int pin) {
+    int i = gpio_slot(pin);
+    if (i < 0) {
+        return -1;
+    }
+    if (s_gpio_mode[i] == 0) {
+        gpio_reset_pin((gpio_num_t)pin);
+        gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
+        gpio_set_pull_mode((gpio_num_t)pin, GPIO_PULLUP_ONLY);
+        s_gpio_mode[i] = 1;
+    }
+    return gpio_get_level((gpio_num_t)pin) ? 1 : 0;
+}
 #endif
 
 // -- the client's connection and the slot -------------------------------------------

@@ -88,11 +88,11 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the audio session, the six verbs, the bank push, the master level | `device_audio.py` (deleted), `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/moy_aud.h` (sessions and the mix), `native/moy_audio/moy_aud_out.c` (the speaker), the codec in `native/moy_audio/moy_codec_es8311.c` | 2 |
 | WiFi, the radio under the spine's lease | `device/device_wifi.py` (the service over `kernel_wlan`; the Zero's station stays the port's) | `native/moy_net/moy_wifi.c` | 2 |
 | ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `native/moy_net/moy_link.c` | 2 |
-| the HTTP core and the webhost | `device/moy_webserver.py`, `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `native/moy_net/moy_net_port.c`, `native/moy_net/moy_webhost.c` | 2 |
+| the HTTP core and the webhost | `moy_webserver.py` (deleted), `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `native/moy_net/moy_net_port.c`, `native/moy_net/moy_webhost.c` | 2 |
 | the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c`, `native/moy_net/moy_sync_apply.c` | 2 |
 | the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | crossed (`device/moy_ota.py`'s updater half; deleted: `moy_http.py`, `moy_c6_update.py`, `cart_net.py`) | `native/moy_net/moy_ota.c`, its platform in `native/moy_net/moy_net_port.c`; the C6's sink in `native/p4/moy_c6/modmoy_c6.c` | 2 |
 | the web-console switch | crossed (the switch half of `runtime/web_console.py` and `device/moy_webhost.py`; the pin, the router's park and the themed screen stay, §6.4) | `native/moy_net/moy_webconsole.c` | 2 |
-| the Zero's host | `modules/zero_host.py`, `modules/zero_gpio.py`, `modules/zero_setup.py` | the same `moy_net`, with the Zero's GPIO allowlist as a board table | 2 |
+| the Zero's host | crossed: `zero_gpio.py` deleted; the radio, the setup AP, mDNS, the portal's DNS and the setup form's transport out of `modules/zero_host.py` and `modules/zero_setup.py`, which keep the form, the seed and the OTA's headless driver (§6.5) | the same `moy_net` (`moy_wifi.c`, `moy_dns.c`, `moy_gpio.c` over the board's `MOY_NET_GPIO_PINS` table) | 2 |
 | the internal flash volumes | `moy_vol`'s borrowed littlefs backend (sprint 1b) | `native/moy_store/moy_vol.c` owns the instance, with a VFS type of the kernel's for Python | 2 |
 | the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `+native/moy_kernel/moy_loop.c`, `+native/moy_kernel/moy_idle.c`, `+native/moy_kernel/moy_perf.c` | 3 |
 | the dev channel's reader and kernel words, the diag ring | `runtime/dev_channel.py`, `device/device_diag.py`, `device/moybyte_diag.py`, `device/device_util.py`; `native/moy_serial/` | `+native/moy_kernel/moy_devch.c`, `+native/moy_kernel/moy_diag.c` | 3 |
@@ -819,14 +819,20 @@ the loop task that runs with no VM (§7).
 
 ### 6.5 The Zero
 
-The Zero's modules cross (the plan's open placement, §10): one C webhost
-serves five boards, the Zero's GPIO verbs become a board allowlist table, its
-first-run access point is `moy_wifi`'s provisioning mode, and `zero_host.py`
-dissolves as each console's `moy_runtime.py` does. The Zero takes `moy_kernel`
-in this pass too — the spine doc deferred it to the sprint that makes the
-kernel the entry on every target, and this is it; its floor is serial-only,
-since it has no panel. It keeps the port's REPL as its console. What this
-costs its image is §9's business every pass, not only this one.
+The Zero's links crossed (2026-10-08): one C webhost serves five boards, and on
+the Zero it also answers `/gpio` (`native/moy_net/moy_gpio.c`) over the board's
+allowlist table (`MOY_NET_GPIO_PINS` in its `mpconfigboard.h`, whose comment is
+the security argument). Its radio is the kernel's WiFi driver
+(`MOY_NET_WIFI`): the station, the first-run access point as the driver's
+provisioning mode, and the mDNS name; the setup form rides the kernel webhost
+with every path parked for the VM, and the captive portal's DNS responder is
+`native/moy_net/moy_dns.c`. What stays Python is what a console's
+`moy_runtime.py` holds and dissolves with it (§7): the boot's order
+(`zero_host.serve`), the first-boot seed, the OTA's headless driver
+(`ZeroUpdate`) and the setup form's page and validation. The Zero takes
+`moy_kernel`; its floor is serial-only, since it has no panel. It keeps the
+port's REPL as its console. What this costs its image is §9's business every
+pass, not only this one.
 
 ### 6.6 The internal flash volumes
 
@@ -850,11 +856,13 @@ write's duration; the gate holds the feeder's errors at zero through it.
 ### 6.7 What Python is deleted
 
 Deleted with the updater's crossing (2026-10-07): `cart_net.py`,
-`moy_http.py`, `moy_c6_update.py` and the updater half of `device/moy_ota.py`.
-To go: `device/device_wifi.py`, `device/moy_espnow.py`,
-`device/moy_webserver.py`, `device/moy_webhost.py`, `runtime/moy_sync.py`,
-the switch half of `runtime/web_console.py` (crossed; the rest is §6.4's), the three `*_link.py` files of the web runner, and
-the Zero's `zero_host.py`, `zero_gpio.py` and `zero_setup.py`.
+`moy_http.py`, `moy_c6_update.py` and the updater half of `device/moy_ota.py`;
+with the Zero's: `moy_webserver.py` and `zero_gpio.py`. Crossed and kept for
+what is not a link: the switch half of `runtime/web_console.py` (§6.4) and the
+radio and transport halves of the Zero's `zero_host.py` and `zero_setup.py`
+(§6.5). To go: `device/device_wifi.py`, `device/moy_espnow.py`,
+`device/moy_webhost.py`, `runtime/moy_sync.py`, and the three `*_link.py`
+files of the web runner.
 `runtime/host_api.py`'s service fakes shrink to what the host's harness still
 stands in for.
 

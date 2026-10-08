@@ -40,7 +40,7 @@ _WEB = os.path.join(native_build.ROOT, "native", "moy_web")
 _SHIM = os.path.join(_NET, "moy_net_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_net")
 _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_apply.c",
-            "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_json.h", "moy_json.c", "moy_vol.h",
+            "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
             "moy_journal.h", "moy_journal.c", "moy_store_host.c",
             "moy_web_blob.h")
@@ -171,6 +171,11 @@ _SIGS = (
     ("moy_httpc_close", [_I], None),
     ("moy_net_vm_stop", [], None),
     ("moy_wc_on", [ctypes.c_void_p, ctypes.c_uint32], _I),
+    ("moy_dns_reply", [ctypes.c_void_p, _Z, ctypes.c_uint32, ctypes.c_void_p, _Z], _Z),
+    ("moy_dns_start", [ctypes.c_uint32, ctypes.c_uint16], _I),
+    ("moy_dns_port", [], ctypes.c_uint16),
+    ("moy_dns_poll", [], _I),
+    ("moy_dns_stop", [], None),
     ("moy_wc_off", [_P], None),
     ("moy_wc_poll", [], _I),
     ("moy_wc_state", [ctypes.c_void_p], None),
@@ -415,6 +420,30 @@ def wc_phase(port):
     st = _WcState()
     _lib().moy_wc_state(ctypes.byref(st))
     return st.state if st.port == port else 0
+
+
+def dns_reply(query, ip):
+    """The portal's answer to one query datagram, or None to drop it."""
+    q = bytes(query)
+    out = ctypes.create_string_buffer(600)
+    n = _lib().moy_dns_reply(q, len(q), _ip_of(ip) if ip else 0, out, 600)
+    return out.raw[:n] if n else None
+
+
+def dns_start(ip, port):
+    return 0 <= port <= 65535 and _lib().moy_dns_start(_ip_of(ip), port) == 0
+
+
+def dns_port():
+    return _lib().moy_dns_port()
+
+
+def dns_poll():
+    return _lib().moy_dns_poll()
+
+
+def dns_stop():
+    _lib().moy_dns_stop()
 
 
 def wc_set_pin(pin):
@@ -726,6 +755,25 @@ def _slot_reset(cap=4 << 20):
 def _link(ip=None):
     """The host's stand-in for the kernel's link: its address, or None (down)."""
     ctypes.c_uint32.in_dll(_lib(), "moy_net_host_link_ip").value = _ip_of(ip) if ip else 0
+
+
+def _pins(pins=()):
+    """The host's pin table: the allowlist the /gpio route serves, every pin
+    untouched again."""
+    d = _lib()
+    arr = (ctypes.c_uint8 * 16).in_dll(d, "moy_net_host_pins")
+    for i, p in enumerate(pins):
+        arr[i] = p
+    ctypes.c_int.in_dll(d, "moy_net_host_npins").value = len(pins)
+    for name in ("moy_net_host_level", "moy_net_host_mode"):
+        ctypes.memset(ctypes.addressof((ctypes.c_int * 64).in_dll(d, name)), 0, 64 * 4)
+
+
+def _pin_state(pin):
+    """(mode, level) of a host pin: 0 untouched, 1 input, 2 output."""
+    d = _lib()
+    return ((ctypes.c_int * 64).in_dll(d, "moy_net_host_mode")[pin],
+            (ctypes.c_int * 64).in_dll(d, "moy_net_host_level")[pin])
 
 
 def _c6(enabled=True, fail_at=None, version=-1):

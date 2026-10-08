@@ -682,9 +682,12 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
                  "moy_files.py", "moy_file_ops.py",   # split-off modules
                  "moy_journal.py",                    # the store of record
                  "ticks.py",                          # the transport's clock leaf
-                 "moy_webserver.py", "moy_webhost.py",
+                 "moy_webhost.py",
                  "moy_ota.py"):                       # #53, wired 2026-08-29
         assert name in staged, "the Zero no longer stages %s" % name
+    # The transport is the kernel's (native/moy_net): the setup form, the
+    # store host and /gpio over its webhost.
+    assert "moy_webserver.py" not in staged
     for name in ("console.py", "wm.py", "wm_windowed.py", "device_canvas.py",
                  "launcher_layer.py", "editors.py",
                  "cart_api.py", "device_boot.py", "blocks.py"):

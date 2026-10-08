@@ -106,3 +106,35 @@ int moy_net_link(uint32_t *ip) {
     *ip = moy_net_host_link_ip;
     return *ip != 0;
 }
+
+// The board's pins, standing in for the Zero's: a table a test sets, the
+// levels driven, and an input that reads its pull-up.
+uint8_t moy_net_host_pins[16];
+int moy_net_host_npins;
+int moy_net_host_level[64];
+int moy_net_host_mode[64];              // 0 untouched, 1 input, 2 output
+
+int moy_gpio_pins(const uint8_t **pins) {
+    *pins = moy_net_host_pins;
+    return moy_net_host_npins;
+}
+
+int moy_gpio_drive(int pin, int level) {
+    if (pin < 0 || pin >= 64) {
+        return -1;
+    }
+    moy_net_host_mode[pin] = 2;
+    moy_net_host_level[pin] = level;
+    return 0;
+}
+
+int moy_gpio_sense(int pin) {
+    if (pin < 0 || pin >= 64) {
+        return -1;
+    }
+    if (moy_net_host_mode[pin] == 0) {
+        moy_net_host_mode[pin] = 1;
+        moy_net_host_level[pin] = 1;    // the pull-up
+    }
+    return moy_net_host_level[pin];
+}

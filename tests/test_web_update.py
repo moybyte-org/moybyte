@@ -219,11 +219,17 @@ def _parked(ws, host):
     that made a browser-driven install impossible: the update screen is not up,
     so nothing would have advanced it."""
     import socket
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    host.port = s.getsockname()[1]
-    s.close()
-    host.start(ip="127.0.0.1")
+    for attempt in range(5):            # a free port can be taken before the bind
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        host.port = s.getsockname()[1]
+        s.close()
+        try:
+            host.start(ip="127.0.0.1")
+            break
+        except OSError:
+            if attempt == 4:
+                raise
     assert host.serving
     ws.webhost = host
     ws.web.park()

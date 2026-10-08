@@ -10,4 +10,3 @@ modules/*
 !modules/main.py
 !modules/zero_host.py
 !modules/zero_setup.py
-!modules/zero_gpio.py

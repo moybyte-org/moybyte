@@ -146,9 +146,9 @@ nor those docs will warn you about:
   frame tail with no Python, one-shot serving, the bundle, the pulls and the
   sync apply in C, and a soft reset leaves it serving. `device/moy_webhost.py`
   is its Settings contract and answers the routes the VM owns (`/run`,
-  `/update`, the Zero's `/gpio`), which the C parks for the poll to take.
-  `device/moy_webserver.py` is the Zero's setup access point's transport alone
-  until the Zero's modules cross. The streaming web
+  `/update`), which the C parks for the poll to take; the Zero's `/gpio` is
+  the C's own route over its pin table, and its setup form rides the same
+  webhost with every path parked. The streaming web
   view — the frame push, `device_webview.py`, the recording `TeeCanvas`, stream
   mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py`
   and its VM recipe — was DELETED in the 2026-08 sunset (owner decision,

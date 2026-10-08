@@ -2,7 +2,7 @@
 runtime/net_binding.py: the WiFi credential rules, the HTTP head parser and the
 sync batch's envelope, and the C under the sanitizers. The radio link's peer
 table is device/moy_espnow.py's. (The parser's transport use is pinned by
-tests/test_moy_webserver.py.)"""
+tests/test_moy_webhost.py.)"""
 
 import json
 import os
@@ -98,6 +98,7 @@ def test_the_fuzz_walk_holds_under_the_sanitizers(tmp_path):
          os.path.join(NET, "fuzz_net.c"), os.path.join(NET, "moy_http.c"),
          os.path.join(NET, "moy_sync.c"),
          os.path.join(NET, "moy_link.c"), os.path.join(NET, "moy_ota.c"),
+         os.path.join(NET, "moy_gpio.c"), os.path.join(NET, "moy_dns.c"),
          os.path.join(SPINE, "moy_json.c"), "-o", exe],
         capture_output=True, text=True)
     assert build.returncode == 0, build.stderr

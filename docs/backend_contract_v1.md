@@ -94,7 +94,7 @@ kept the previous screen. Same family: a region that stops being written while
 N buffers rotate.
 
 **A third instance already shipped**, on a seam v1.0 did not cover at all:
-`moy_webserver.py`'s missing `effective_input_kinds` re-export dead-ended the
+the since-deleted `moy_webserver.py`'s missing `effective_input_kinds` re-export dead-ended the
 T-Deck web view from 2026-07-21 to 2026-08-01 and presented to the owner as
 *"T-Deck WiFi is broken."* See §8.
 

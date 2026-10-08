@@ -7,8 +7,8 @@ on its own flash, served and SYNCED over WiFi, and its PINS (#9). It is
 deliberately the smallest possible host of the 3.4 sync RPC:
 
     boot -> join WiFi (creds in /moy/wifi.json, the console's own shape)
-         -> WebHost(/moy/carts) + /gpio             [the SAME class the boards
-         -> poll() forever                           inject, one endpoint more]
+         -> WebHost(/moy/carts)                      [the SAME class the boards
+         -> poll() forever                           inject; /gpio is the C's]
 
     ...no joinable network
          -> zero_setup.run()  the SoftAP + form a first boot is configured
@@ -24,9 +24,11 @@ The bundle comes from THIS IMAGE (native/moy_web, the same .incbin every other
 board carries), so the console this board serves is the one its firmware was
 built with and changes only when it is reflashed.
 
-`POST /gpio` is the second half of the same idea (zero_gpio): the cart in the
-browser calls `pin_write`, the page batches it here, and this board -- which
-has the pins -- does the driving.
+`POST /gpio` is the second half of the same idea: the cart in the browser
+calls `pin_write`, the page batches it here, and this board -- which has the
+pins -- does the driving. The route is the kernel webhost's
+(native/moy_net/moy_gpio.c) over this board's allowlist table
+(MOY_NET_GPIO_PINS in its mpconfigboard.h).
 
 `GET/POST /update` is the third (ZeroUpdate, below). The ROUTES are
 `moy_webhost`'s now, on every board (2026-08-29); what is this board's own is
@@ -48,11 +50,9 @@ import os
 import time
 
 try:
-    import network
+    import moy_net
 except ImportError:                  # host: this module is import-only there
-    network = None
-
-import zero_gpio
+    moy_net = None
 
 ROOT = "/moy"
 CARTS_DIR = ROOT + "/carts"
@@ -235,28 +235,31 @@ def seed_carts(root=CARTS_DIR):
 
 
 def connect(wait_ms=15000, hostname=None):
-    """Join the first known network that answers. Returns the STA IP or None.
-    The wait is per-network and generous for the same reason moy_ota's
+    """Join the first known network that answers, over the kernel's WiFi
+    driver, and answer to `hostname`.local. Returns the STA IP or None. The
+    wait is per-network and generous for the same reason moy_ota's
     ensure_online waits: cold association routinely outlives a short poll."""
-    try:
-        network.hostname(hostname or HOSTNAME)
-    except Exception:                    # noqa: BLE001 -- older port: no mDNS
-        pass
-    sta = network.WLAN(network.STA_IF)
-    sta.active(True)
-    if sta.isconnected():
-        return sta.ifconfig()[0]
+    moy_net.wifi_on()
+    st = moy_net.wifi_status()
+    if st[2] and st[4]:
+        moy_net.wifi_mdns(hostname or HOSTNAME)
+        return st[4]
     for net in _networks():
         try:
-            sta.connect(net["ssid"], net.get("password") or net.get("key") or "")
+            moy_net.wifi_connect(net["ssid"],
+                                 net.get("password") or net.get("key") or "")
         except OSError:
             continue
         for _ in range(wait_ms // 250):
-            if sta.isconnected():
-                print("ZERO wifi:", net["ssid"], sta.ifconfig()[0])
-                return sta.ifconfig()[0]
+            st = moy_net.wifi_status()
+            if st[2] and st[4]:
+                print("ZERO wifi:", net["ssid"], st[4])
+                if not moy_net.wifi_mdns(hostname or HOSTNAME):
+                    print("ZERO mDNS unavailable")
+                return st[4]
             time.sleep_ms(250)
         print("ZERO wifi: no answer from", net["ssid"])
+    moy_net.wifi_disconnect()
     return None
 
 
@@ -316,13 +319,10 @@ class _ZeroWifi:
 
     def status(self):
         """(connected, ssid, ip) -- the shape moy_ota.wifi_online() indexes."""
-        try:
-            sta = network.WLAN(network.STA_IF)
-            if not sta.isconnected():
-                return (False, None, None)
-            return (True, sta.config("essid"), sta.ifconfig()[0])
-        except Exception:                # noqa: BLE001 -- a radio mid-reassoc
+        st = moy_net.wifi_status()
+        if not st[2]:
             return (False, None, None)
+        return (True, st[3], st[4])
 
 
 class ZeroUpdate:
@@ -658,7 +658,7 @@ class ZeroUpdate:
                              staged=self.staged)
 
 
-def _frozen_or_pushed(names=("zero_host", "zero_gpio", "zero_setup",
+def _frozen_or_pushed(names=("zero_host", "zero_setup",
                              "moy_webhost", "moy_sync", "moy_carts")):
     """Which of the image's own modules a PUSHED copy is shadowing.
 
@@ -678,49 +678,12 @@ def _frozen_or_pushed(names=("zero_host", "zero_gpio", "zero_setup",
     return out
 
 
-def zero_host_class():
-    """`WebHost` + this board's /gpio, built on first use.
-
-    A function because the subclass cannot exist before its base is imported,
-    and `moy_webhost` is imported inside `serve()` on purpose -- importing this
-    module must stay free of everything that only works on the board.
-    """
+def host_class():
+    """The store host: the boards' own `WebHost`, whose kernel answers /gpio
+    over this board's pin table. Imported here, not at the top: importing this
+    module must stay free of everything that only works on the board."""
     from moy_webhost import WebHost
-
-    class ZeroHost(WebHost):
-        """The shared store host plus THIS board's pins.
-
-        A subclass and not an edit to `moy_webhost`, because /gpio is not a
-        console-board endpoint: the other three boards spend their GPIOs on a
-        panel, a touch controller and an SD card, and would be handing out the
-        pins their own screen is drawn through. The Zero has a spare header and
-        no screen, which is the whole difference.
-        """
-
-        # /gpio is answered here, so the kernel's router parks it for us.
-        DEFER = WebHost.DEFER + ("/gpio",)
-
-        def __init__(self, *a, **kw):
-            WebHost.__init__(self, *a, **kw)
-            self._pins = None       # built on the first /gpio, not at boot: a
-                                    # board nobody wires anything to should not
-                                    # import machine.Pin to find that out
-
-        def handle_http(self, method, path, body):
-            # `path` is the request TARGET; /gpio's GET reads its pin off the
-            # query exactly as carts.json does, so the whole target goes down.
-            bare = path.split("?", 1)[0]
-            if bare == "/gpio":
-                if self._pins is None:
-                    self._pins = zero_gpio.pin_factory()
-                return zero_gpio.handle(method, body, pin=self.pin,
-                                        get_pin=self._pins, query=path)
-            # /update is the BASE class's since 2026-08-29 -- every board
-            # answers it, and the only thing that differed was the backend
-            # behind it, which is what `self.update` already is.
-            return WebHost.handle_http(self, method, path, body)
-
-    return ZeroHost
+    return WebHost
 
 
 def make_updater(me):
@@ -770,7 +733,7 @@ def serve():
         import zero_setup
         zero_setup.run(WIFI_STORE, ZERO_STORE)
         return
-    host = zero_host_class()(CARTS_DIR, pin=me.get("pin"))
+    host = host_class()(CARTS_DIR, pin=me.get("pin"))
     ota, task = make_updater(me)
     host.update = task
     if task is not None:

@@ -299,6 +299,41 @@ size_t moy_wc_url(char *out, size_t cap, int paired);
 // The kernel's link where the image has one: whether it holds an address.
 int moy_net_link(uint32_t *ip);
 
+// -- the Zero's pins (moy_gpio.c) and the setup portal (moy_dns.c) ------------------
+
+// /gpio: a response document into `out` and its HTTP status. The webhost
+// routes it where the board has a pin table.
+int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
+                     size_t bn, const char *pin, char *out, size_t cap);
+// The board's pins (moy_net_port.c where mpconfigboard.h names
+// MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
+// a read (0 or 1, or -1).
+int moy_gpio_pins(const uint8_t **pins) __attribute__((weak));
+int moy_gpio_drive(int pin, int level) __attribute__((weak));
+int moy_gpio_sense(int pin) __attribute__((weak));
+
+#define MOY_DNS_PORT 53
+#define MOY_DNS_QUERY_MAX 512          // RFC 1035's UDP size; a real query is ~40 bytes
+#define MOY_DNS_PER_POLL 8             // answered per poll before the form's turn
+
+// The reply to one query datagram, answering every A question with `ip`
+// (network order): its length in `out`, or 0 to drop it.
+size_t moy_dns_reply(const uint8_t *q, size_t n, uint32_t ip, uint8_t *out,
+                     size_t cap);
+int moy_dns_start(uint32_t ip, uint16_t port);   // 0, or the bind's errno
+uint16_t moy_dns_port(void);           // the bound port (0: an ephemeral one), 0 when off
+int moy_dns_poll(void);                // the queries answered
+void moy_dns_stop(void);
+
+// UDP on the platform (moy_net_port.c): a non-blocking socket bound on every
+// interface, or -errno; a datagram and its sender (MOY_UDP_ADDR bytes) or 0
+// when none waits; a reply to a sender, 0 or -1.
+#define MOY_UDP_ADDR 16
+int moy_udp_listen(uint16_t port);
+uint16_t moy_udp_port(int fd);
+int moy_udp_recv(int fd, void *buf, size_t cap, uint8_t from[MOY_UDP_ADDR]);
+int moy_udp_send(int fd, const void *buf, size_t n, const uint8_t to[MOY_UDP_ADDR]);
+
 // -- the WiFi credential rules --------------------------------------------------
 
 // Whether a connect uses the stored password: when the one given is empty and
@@ -369,6 +404,11 @@ void moy_wifi_state(moy_wifi_state_t *out);
 // forget it when it is `ssid`.
 int moy_wifi_connect_kept(void);
 void moy_wifi_forget_kept(const char *ssid);
+// The provisioning access point beside the station (open; its address in
+// `*ip`), its MAC, and the mDNS name the board answers to: 0 or an ESP error.
+int moy_wifi_ap(const char *ssid, uint32_t *ip);
+int moy_wifi_ap_mac(uint8_t mac[6]);
+int moy_wifi_mdns(const char *host);
 // A blocking scan into `out`: the count, or -1 when the radio is down.
 int moy_wifi_scan(moy_wifi_ap_t *out, int max);
 int moy_wifi_mac(uint8_t mac[6]);

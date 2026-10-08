@@ -10,7 +10,8 @@ what converges here is the shipped machinery, not a model of it.
 
 The transport is the wire shape itself: take_json -> parse_batch -> apply_ops,
 with a drop being an unanswered batch (ack False). What this deliberately does
-NOT model is the socket -- moy_webserver has its own suite, and the on-glass
+NOT model is the socket -- the kernel webhost has its own suite
+(tests/test_moy_webhost.py), and the on-glass
 suites drive the real one.
 """
 

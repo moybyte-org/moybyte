@@ -15,6 +15,12 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
+#if __has_include("mdns.h") && defined(MOY_NET_MDNS) && MOY_NET_MDNS
+#include "mdns.h"
+#define HAVE_MDNS 1
+#else
+#define HAVE_MDNS 0
+#endif
 
 // The driver's life (docs/kernel_survival_2026-10.md section 6.1): one
 // station, brought up the first time a holder of the spine's lease asks and
@@ -221,6 +227,73 @@ static void keep_now(void) {
         nvs_commit(h);
     }
     nvs_close(h);
+}
+
+// The provisioning access point (the Zero's first run): open, beside the
+// station, which stays up for the setup form's scans. Its address in `*ip`
+// (network order); 0, or an ESP error.
+static esp_netif_t *s_ap;
+
+int moy_wifi_ap(const char *ssid, uint32_t *ip) {
+    int e = driver();
+    if (e != ESP_OK) {
+        return e;
+    }
+    if (s_ap == NULL) {
+        s_ap = esp_netif_create_default_wifi_ap();
+    }
+    e = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (e != ESP_OK) {
+        return e;
+    }
+    wifi_config_t c;
+    memset(&c, 0, sizeof(c));
+    size_t n = strlen(ssid);
+    if (n == 0 || n > sizeof(c.ap.ssid)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(c.ap.ssid, ssid, n);
+    c.ap.ssid_len = (uint8_t)n;
+    c.ap.authmode = WIFI_AUTH_OPEN;
+    c.ap.max_connection = 4;
+    c.ap.channel = 1;
+    e = esp_wifi_set_config(WIFI_IF_AP, &c);
+    if (e == ESP_OK) {
+        e = moy_wifi_on();
+    }
+    esp_netif_ip_info_t info;
+    *ip = 0;
+    if (e == ESP_OK && esp_netif_get_ip_info(s_ap, &info) == ESP_OK) {
+        *ip = info.ip.addr;
+    }
+    return e;
+}
+
+int moy_wifi_ap_mac(uint8_t mac[6]) {
+    int e = driver();
+    return e != ESP_OK ? e : esp_wifi_get_mac(WIFI_IF_AP, mac);
+}
+
+// The name the board answers to on the network (`<host>.local`), with its
+// web console as an http service, where the board takes the responder
+// (MOY_NET_MDNS: the headless Zero, found by name). 0, an ESP error, or
+// ESP_ERR_NOT_SUPPORTED in an image without it.
+int moy_wifi_mdns(const char *host) {
+    #if HAVE_MDNS
+    static uint8_t up;
+    if (!up) {
+        esp_err_t e = mdns_init();
+        if (e != ESP_OK) {
+            return e;
+        }
+        mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+        up = 1;
+    }
+    return mdns_hostname_set(host);
+    #else
+    (void)host;
+    return ESP_ERR_NOT_SUPPORTED;
+    #endif
 }
 
 int moy_net_link(uint32_t *ip) {

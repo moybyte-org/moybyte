@@ -3,7 +3,7 @@ resolve to the canonical runtime/ source, never a build-staged copy.
 
 Several test files put the firmware staging tree
 (device) on sys.path to import the
-AUTHORED device modules (moy_webserver, device canvas parity, diag, ...). That
+AUTHORED device modules (moy_webhost, device canvas parity, diag, ...). That
 same directory also holds BUILD-STAGED copies of the shared runtime/ sources
 (console.py, editors.py, web_view.py, web_view_page.py, ... -- gitignored,
 re-staged by every firmware build), and both the device modules and the shared
@@ -15,7 +15,7 @@ decided by pytest's collection order.
 
 This bit for real (2026-07-10): a runtime/web_view_page.py fix made its
 page-source guard (test_browser_page_sends_neutral_pan_on_arrow_release) pass
-alone but fail in every full-suite run, because test_moy_webserver.py's
+alone but fail in every full-suite run, because a since-deleted suite's
 collection had already cached the pre-fix staged page under the bare
 `web_view_page` name, and runtime/web_view.py's bare-first import picked it up.
 
@@ -129,7 +129,7 @@ def _no_local_build_stamp(monkeypatch):
 
     THIRD door (2026-08-03): the finder exclusion above only stops THIS conftest
     from resolving `_ota_build` -- a test file that puts the firmware modules/
-    dir on sys.path itself (test_moy_webserver does, at import time, for the
+    dir on sys.path itself (a suite that does so at import time, for the
     whole process) re-opens it, and under xdist whichever test execs moy_ota.py
     on that worker afterwards reads the machine's last build stamp again
     (spotted as version_label()=='v2' from a stale bisect build). sys.modules
