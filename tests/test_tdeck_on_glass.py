@@ -89,7 +89,11 @@ EXFAT_SRAM = 568
 # And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
 # the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
 # of .bss by the object's size, 2026-10-08.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4
+# And the frame's (native/moy_kernel: the loop's, the reader's and the
+# ladder's statics and the VM-side stage table; the meters, the PERF window
+# and the line buffer are PSRAM), 392 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's dev image on a fresh boot.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

@@ -412,6 +412,10 @@ void moy_loop_upcalls(uint32_t frame[MOY_UPC_CLASSES], uint32_t total[MOY_UPC_CL
     }
 }
 
+uint32_t moy_loop_frame_at(void) {
+    return L.last;
+}
+
 uint32_t moy_loop_frames(void) {
     return L.frames;
 }

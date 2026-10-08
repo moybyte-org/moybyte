@@ -82,6 +82,7 @@ _SIGS = (
     ("moy_loop_arm_health", [_B], None),
     ("moy_loop_frames", [], _U32),
     ("moy_loop_drawn", [], _U32),
+    ("moy_loop_frame_at", [], _U32),
     ("moy_loop_last", [ctypes.POINTER(_U32), ctypes.POINTER(_U32)], None),
     ("moy_loop_idle", [], ctypes.POINTER(_Idle)),
     ("moy_idle_set", [ctypes.POINTER(_Idle), _I, _U32], None),
@@ -286,6 +287,10 @@ def last():
     e, sl = _U32(), _U32()
     _lib().moy_loop_last(ctypes.byref(e), ctypes.byref(sl))
     return min(e.value, 0x3FFF) * 65536 + min(sl.value, 0xFFFF)
+
+
+def frame_at():
+    return _lib().moy_loop_frame_at()
 
 
 def drawn():

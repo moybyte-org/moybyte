@@ -83,9 +83,7 @@
 //               arm, band copy+queue, tail wait. Returns in us.
 //     pump()    a kept no-op since the feeder (2026-08-21) -- the band feed no
 //               longer needs the VM core at all. The verb survives for
-//               verb-set parity with moy_axs; nothing in the tree calls it
-//               (tdeck_panel no longer sets pump_if_pending, so DeviceCanvas's
-//               probe finds nothing and moy_gfx's set_pump is never armed).
+//               verb-set parity with moy_axs; nothing in the tree calls it.
 //     drain()   wait the feeder's frame out (GIL released); the fence verb.
 //               Called at the top of the next flush (where most of it has
 //               already happened behind the render) and before any SD op --

@@ -31,6 +31,7 @@
 #include "py/gc.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
+#include "py/smallint.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
 
@@ -328,6 +329,13 @@ static mp_obj_t loop_last(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(loop_last_obj, loop_last);
 
+// frame_at() -> the board's clock (ms, the port's ticks) at the top of the
+// frame a word runs in: what a tool times the drawn-frame counter against.
+static mp_obj_t loop_frame_at(void) {
+    return mp_obj_new_int_from_uint(moy_loop_frame_at() & (MICROPY_PY_TIME_TICKS_PERIOD - 1));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(loop_frame_at_obj, loop_frame_at);
+
 static mp_obj_t loop_drawn(void) {
     return mp_obj_new_int_from_uint(moy_loop_drawn());
 }
@@ -596,6 +604,7 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frames), MP_ROM_PTR(&loop_frames_obj) },
     { MP_ROM_QSTR(MP_QSTR_drawn), MP_ROM_PTR(&loop_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_last), MP_ROM_PTR(&loop_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_at), MP_ROM_PTR(&loop_frame_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_idle), MP_ROM_PTR(&loop_idle_obj) },
     { MP_ROM_QSTR(MP_QSTR_power), MP_ROM_PTR(&loop_power_obj) },
     { MP_ROM_QSTR(MP_QSTR_idle_state), MP_ROM_PTR(&loop_idle_state_obj) },

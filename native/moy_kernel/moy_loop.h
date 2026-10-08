@@ -209,6 +209,7 @@ moy_idle_t *moy_loop_idle(void);
 void moy_loop_count(int cls);
 void moy_loop_upcalls(uint32_t frame[MOY_UPC_CLASSES], uint32_t total[MOY_UPC_CLASSES]);
 uint32_t moy_loop_frames(void);         // loop iterations
+uint32_t moy_loop_frame_at(void);       // the clock (ms) at the top of this frame
 // The last finished frame's work (ms, the pacing sleep excluded) and sleep.
 void moy_loop_last(uint32_t *elapsed, uint32_t *sleep);
 uint32_t moy_loop_drawn(void);          // the console's frames drawn, last answer

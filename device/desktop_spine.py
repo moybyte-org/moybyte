@@ -134,6 +134,11 @@ class Desktop:
             def words(line):
                 return serial.word(ws, line)
 
+        if serial is not None:
+            # `pump.last` in the `py` scope: the clock at the top of the frame a
+            # word runs in, which tools/p4_perf.py times the drawn-frame
+            # counter against (the kernel's loop keeps it now).
+            serial.env["pump"] = _FrameClock(moy_loop)
         service = make_service(ws, moy_loop)
         moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
         moy_loop.fps(self.fps_cap)
@@ -145,6 +150,17 @@ class Desktop:
         upd = getattr(ws, "updater", None)
         moy_loop.health(upd is not None and not getattr(upd, "confirmed", True))
         return self
+
+
+class _FrameClock:
+    """`pump.last` for the tools: the kernel loop's frame-top clock."""
+
+    def __init__(self, loop):
+        self._loop = loop
+
+    @property
+    def last(self):
+        return self._loop.frame_at()
 
 
 def make_service(ws, loop):
