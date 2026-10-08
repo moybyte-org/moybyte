@@ -96,7 +96,11 @@ TF_CARD_SRAM = 844
 # their buffers (native/moy_alloc), net of first light, the board's
 # dev-channel words and the kernel's HITCH and LOOP lines: 312 bytes of idle
 # internal heap measured 2026-10-08 against dev 326a147f, fresh boots.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312
+# And the cart path's statics (native/moy_play: the run's pointer, whose state
+# is PSRAM, and the binding's two root pointers; native/moycore: the frame's
+# split, which replaced the binding's own), 16 bytes of internal heap by the
+# heap's total against dev 502be7fd, fresh boots, 2026-10-08.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
@@ -677,6 +681,15 @@ def test_a_cart_runs_and_exits(board):
 def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
     on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title, door="shell",
                                                clear=3)
+
+
+# The compiled half of the same check: the blit fixture's frames run in the
+# kernel's Player on the engine's thread, and neither its frames nor its run's
+# books since launch hold an APP, SERVICE or REFUSED crossing.
+def test_a_compiled_frame_makes_no_crossing(board, wasm_carts):
+    title = wasm_carts["blit"]
+    on_glass.a_vm_free_frame_makes_no_crossing(board, title.lower(), title,
+                                               door="shell", clear=3, runtime="wasm")
 
 
 # -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------

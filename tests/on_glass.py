@@ -455,13 +455,16 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
 VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"))
 
 
-def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0):
+def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
+                                      runtime="lua"):
     """The cart path's first checkpoint (docs/kernel_cartpath_2026-10.md §6):
     a seed game the kernel's rule runs with no VM reads that verdict from
     `state`, its frames run in the kernel's Player, and they make no APP,
     SERVICE or REFUSED upcall (DRIVER is a harness's, zero on a board) with
     the VM still up and the console's frame upcall still driving the Player:
-    neither in a frame nor in the run's own books since its launch. `state` reads the last finished frame, so
+    neither in a frame nor in the run's own books since its launch. `runtime`
+    is the cart's: "lua" for the seeds, "wasm" for a compiled cart, whose
+    frames run on its engine's thread and ask the VM's task for nothing. `state` reads the last finished frame, so
     each read is a different frame of the run. `door` and `clear` are
     cart_runs_and_exits's."""
     import time
@@ -475,7 +478,7 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0):
         st = board.state()
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
-        assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free"}, \
+        assert st["run"] == {"runtime": runtime, "vm_free": True, "why": "free"}, \
             st["run"]
         for _ in range(5):
             time.sleep(0.2)

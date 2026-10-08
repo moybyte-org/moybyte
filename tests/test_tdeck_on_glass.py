@@ -100,7 +100,11 @@ EXFAT_SRAM = 568
 # the logo and when), the board's dev-channel words and the kernel's HITCH and
 # LOOP lines (their window is PSRAM), 260 bytes of idle internal heap measured
 # 2026-10-08 against the same tree before them, fresh boots.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260
+# And the cart path's statics (native/moy_play: the run's pointer, whose state
+# is PSRAM, and the binding's two root pointers; native/moycore: the frame's
+# split, which replaced the binding's own), 8 bytes of internal heap by the
+# heap's total against dev 502be7fd, fresh boots, 2026-10-08.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260 + 8
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
@@ -328,6 +332,15 @@ def test_a_lua_cart_runs_and_exits(board):
 @pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
 def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
     on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title)
+
+
+# The compiled half of the same check: the blit fixture's frames run in the
+# kernel's Player on the engine's thread, and neither its frames nor its run's
+# books since launch hold an APP, SERVICE or REFUSED crossing.
+def test_a_compiled_frame_makes_no_crossing(board, wasm_carts):
+    title = wasm_carts["blit"]
+    on_glass.a_vm_free_frame_makes_no_crossing(board, title.lower(), title,
+                                               runtime="wasm")
 
 
 def test_draw_gates_are_installed(board):
