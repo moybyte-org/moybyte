@@ -86,7 +86,11 @@ TF_CARD_SRAM = 756
 # ladder's statics and the VM-side stage table; the meters, the PERF window
 # and the line buffer are PSRAM), 432 bytes of idle internal heap measured
 # 2026-10-08 against the same tree's dev image on a fresh boot.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432
+# Less what moy_alloc's registry gave back, its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), net of first light, the board's
+# dev-channel words and the kernel's HITCH and LOOP lines: 348 bytes of idle
+# internal heap measured 2026-10-08 against dev 326a147f, fresh boots.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 

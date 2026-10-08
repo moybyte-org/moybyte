@@ -92,7 +92,11 @@ TF_CARD_SRAM = 844
 # ladder's statics and the VM-side stage table; the meters, the PERF window
 # and the line buffer are PSRAM), 756 bytes of idle internal heap measured
 # 2026-10-08 against the same tree's dev image on a fresh boot.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756
+# Less what moy_alloc's registry gave back, its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), net of first light, the board's
+# dev-channel words and the kernel's HITCH and LOOP lines: 312 bytes of idle
+# internal heap measured 2026-10-08 against dev 326a147f, fresh boots.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
