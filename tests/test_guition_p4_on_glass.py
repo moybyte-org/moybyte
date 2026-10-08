@@ -79,7 +79,10 @@ TF_CARD_SRAM = 756
 # And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
 # its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
 # .bss by the objects' sizes, 2026-10-08.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8
+# And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
+# the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
+# of .bss by the object's size, 2026-10-08.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
@@ -297,6 +300,10 @@ def test_wifi_status_is_readable(board):
 
 def test_the_kernel_verifies_a_signed_manifest(board):
     on_glass.the_kernel_verifies_a_signed_manifest(board)
+
+
+def test_the_internal_volume_is_the_kernels(board):
+    on_glass.the_internal_volume_is_the_kernels(board)
 
 
 def test_wifi_is_off_at_rest(board):

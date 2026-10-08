@@ -922,6 +922,9 @@ __attribute__((weak)) void moy_glass_vm_swept(void) {
 __attribute__((weak)) void moy_net_vm_stop(void) {
 }
 
+// The kernel's internal volume, where the image has it (native/moy_store).
+extern bool moy_kvol_vm_mount(void) __attribute__((weak));
+
 // kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
 // N times with the kernel's drivers alive, each one's heaps printed before the
 // teardown and after it. Test-only: the dev channel's word, never a kid's.
@@ -1030,8 +1033,12 @@ soft_reset:
     machine_i2s_init0();
     #endif
 
-    // run boot-up scripts
-    pyexec_frozen_module("_boot.py", false);
+    // run boot-up scripts. MOY: the internal flash volume is the kernel's
+    // (native/moy_store/moy_kvfs.c), mounted at "/" here; the port's _boot.py,
+    // which would mount a VfsLfs2 of its own over it, runs only where it is not.
+    if (moy_kvol_vm_mount == NULL || !moy_kvol_vm_mount()) {
+        pyexec_frozen_module("_boot.py", false);
+    }
     int ret = pyexec_file_if_exists("boot.py");
 
     #if MICROPY_HW_ENABLE_USBDEV

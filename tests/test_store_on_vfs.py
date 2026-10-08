@@ -25,7 +25,11 @@ model, and pins:
     holds that same shelf.
 
 The same scan and writes run on littlefs, a board's internal flash and the
-store a board falls back to with no card, over a plain RAM device.
+store a board falls back to with no card, over a plain RAM device -- and on
+the kernel's own littlefs instance (native/moy_store/moy_kvfs.c) through its
+VFS type, KVfs, over the unix port's RAM medium, whose image is then read back
+by VfsLfs2: the instance the kernel owns writes the format the port's reads.
+The VFS verbs themselves are held to VfsLfs2's, call for call, below.
 """
 
 import json
@@ -137,6 +141,9 @@ def shelf(cat, root):
 if @FS@ == "fat":
     vfs.VfsFat.mkfs(Plain())
     vfs.mount(moy_store.card(@SECTORS@, moy_sd), "/sd")
+elif @FS@ == "kvfs":
+    moy_store.kvol_load(None)
+    vfs.mount(moy_store.KVfs(), "/sd")
 else:
     bd = Ram(@SECTORS@ // 8)
     vfs.VfsLfs2.mkfs(bd)
@@ -156,6 +163,10 @@ print("HANDED", handed, hits, stale)
 vfs.umount("/sd")
 if @FS@ == "fat":
     vfs.mount(vfs.VfsFat(Plain()), "/sd")
+elif @FS@ == "kvfs":
+    bd = Ram(4096)
+    bd.data[:] = moy_store.kvol_image()
+    vfs.mount(vfs.VfsLfs2(bd), "/sd")
 else:
     vfs.mount(vfs.VfsLfs2(bd), "/sd")
 print("REMOUNT", shelf(moy_catalogue, root))
@@ -214,7 +225,7 @@ def test_a_cache_that_skips_the_drop_is_caught(tmp_path):
         out.stdout[-2000:]
 
 
-@pytest.mark.parametrize("fs", ["fat", "lfs"])
+@pytest.mark.parametrize("fs", ["fat", "lfs", "kvfs"])
 def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
                                                                    fs):
     exe = require_unix_mp(
@@ -251,3 +262,121 @@ def test_the_scan_and_the_stores_writes_on_the_boards_file_systems(tmp_path,
         handed, hits, stale = map(int, lines["HANDED"].split())
         assert stale == 0
         assert hits > handed / 2, (handed, hits)
+
+
+# -- KVfs's verbs against VfsLfs2's --------------------------------------------
+
+VERBS = '''
+import os, vfs, moy_store
+
+
+class Ram:
+    def __init__(self, n, size=4096):
+        self.size = size
+        self.data = bytearray(n * size)
+
+    def readblocks(self, block, buf, off=0):
+        a = block * self.size + off
+        buf[:] = memoryview(self.data)[a:a + len(buf)]
+
+    def writeblocks(self, block, buf, off=None):
+        a = block * self.size + (off or 0)
+        memoryview(self.data)[a:a + len(buf)] = buf
+
+    def ioctl(self, op, arg):
+        if op == 4:
+            return len(self.data) // self.size
+        return self.size if op == 5 else 0
+
+
+def run(m):
+    out = []
+
+    def t(name, fn):
+        try:
+            out.append((name, fn()))
+        except OSError as e:
+            out.append((name, "OSError", e.errno))
+        except ValueError:
+            out.append((name, "ValueError"))
+
+    t("mkdir", lambda: os.mkdir(m + "/d"))
+    t("mkdir again", lambda: os.mkdir(m + "/d"))
+    t("write", lambda: open(m + "/d/a.txt", "w").write("one\\ntwo\\n" * 100))
+    t("read", lambda: open(m + "/d/a.txt").read()[:9])
+    t("readline", lambda: open(m + "/d/a.txt").readline())
+    t("bin", lambda: open(m + "/d/b.bin", "wb").write(bytes(range(256))))
+
+    def seeking():
+        with open(m + "/d/b.bin", "r+b") as f:
+            f.seek(10)
+            f.write(b"XY")
+            f.seek(-3, 2)
+            tail = f.read()
+            return f.tell(), tail
+    t("seek", seeking)
+    t("bytes", lambda: open(m + "/d/b.bin", "rb").read()[8:14])
+    t("append", lambda: open(m + "/d/b.bin", "ab").write(b"Z"))
+    t("excl", lambda: open(m + "/d/b.bin", "x"))
+    t("missing", lambda: open(m + "/d/none.txt"))
+    t("mode", lambda: open(m + "/d/a.txt", "rw"))
+    t("list", lambda: sorted(os.listdir(m + "/d")))
+    t("ilistdir", lambda: sorted(e[:2] + (e[3],) for e in os.ilistdir(m + "/d")))
+    t("stat", lambda: os.stat(m + "/d/b.bin")[:7])
+    t("mtime", lambda: os.stat(m + "/d/b.bin")[8] > 0)
+    t("stat dir", lambda: os.stat(m + "/d")[0])
+    t("rename", lambda: os.rename(m + "/d/b.bin", m + "/d/c.bin"))
+    t("rename missing", lambda: os.rename(m + "/d/b.bin", m + "/d/e.bin"))
+    t("rmdir full", lambda: os.rmdir(m + "/d"))
+    t("chdir", lambda: os.chdir(m + "/d"))
+    t("cwd", lambda: os.getcwd())
+    t("relative", lambda: open("a.txt").read()[:3])
+    t("chdir up", lambda: os.chdir("..//d/./../d"))
+    t("cwd 2", lambda: os.getcwd())
+    t("chdir bad", lambda: os.chdir(m + "/nope"))
+    t("chdir root", lambda: os.chdir("/"))
+    t("remove", lambda: [os.remove(m + "/d/" + n) for n in sorted(os.listdir(m + "/d"))])
+    t("rmdir", lambda: os.rmdir(m + "/d"))
+    t("remove missing", lambda: os.remove(m + "/d"))
+    t("statvfs", lambda: os.statvfs(m)[:3] + (os.statvfs(m)[9],))
+    f = open(m + "/closed.txt", "w")
+    f.close()
+    t("closed", lambda: f.write("x"))
+    t("import", lambda: __import__("kvmod").X)
+    return out
+
+
+open("/tmp/kvmod_src.py", "w")
+moy_store.kvol_load(None)
+vfs.mount(moy_store.KVfs(), "/kv")
+bd = Ram(4096)
+vfs.VfsLfs2.mkfs(bd)
+vfs.mount(vfs.VfsLfs2(bd), "/ref")
+for m in ("/kv", "/ref"):
+    with open(m + "/kvmod.py", "w") as f:
+        f.write("X = 42\\n")
+import sys
+sys.path.insert(0, "/kv")
+a = run("/kv")
+sys.modules.pop("kvmod", None)
+sys.path[0] = "/ref"
+b = run("/ref")
+print("KV", repr([x for x in a]).replace("/kv", "@"))
+print("REF", repr([x for x in b]).replace("/ref", "@"))
+'''
+
+
+def test_kvfs_answers_every_verb_as_vfslfs2_does(tmp_path):
+    """The kernel's VFS type, call for call against the port's own littlefs
+    VFS on the same operations: results, errnos, the working folder's
+    normalisation, a closed file, an import through it."""
+    exe = require_unix_mp(board_model=True, why="the kernel's littlefs VFS type")
+    script = tmp_path / "verbs.py"
+    script.write_text(VERBS)
+    out = subprocess.run([exe, "-X", "heapsize=64m", str(script)],
+                         capture_output=True, text=True, timeout=120)
+    lines = dict(ln.split(" ", 1) for ln in out.stdout.splitlines()
+                 if ln.startswith(("KV ", "REF ")))
+    assert out.returncode == 0 and "KV" in lines, out.stdout + out.stderr
+    assert lines["KV"] == lines["REF"]
+    assert "('mtime', True)" in lines["KV"]

@@ -18,7 +18,8 @@ Python twins, the reference the C is held to.
 | `moy_arena.h` | a store call's scratch, freed at once |
 | `moy_seed.h`, `moy_seed.c` | the seed: a packed roster blob inflated (the image's uzlib) into PSRAM and written as `moybyte.<slug>.moy`; a re-seed keeps the kid's saves and config in place and publishes the manifest last, so a cut seed reads as the older version, or as none |
 | `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, and the whole-folder verbs (remove, copy) |
-| `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table borrow (VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), every call under `nlr_push`, scratch and the marker cache in PSRAM on a board |
+| `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table resolve (the kernel's own `lfs2_t` under a `KVfs`, VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), every call under `nlr_push`, scratch and the marker cache in PSRAM on a board |
+| `moy_kvfs.c` | the internal flash volume, the kernel's: its `lfs2_t` over the "vfs" partition (a RAM medium on the unix port, for the host's tests) and `KVfs`, the VFS type each VM's start mounts at `/` |
 | `moy_store_host.c` | the host's imports over malloc and POSIX, for the ctypes binding |
 | `fuzz_fs.c` | the power-cut matrix (`--matrix`) and the seeded fuzz over oofatfs on a RAM card behind the read cache (every hit compared with the card) and littlefs2 on a RAM flash, under ASan and UBSan |
 | `host/py/mpconfig.h` | the FAT settings oofatfs reads, for the host builds |

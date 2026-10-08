@@ -59,9 +59,9 @@ internal flash's in sprint 3. The store does not change when it is.**
 | target | volumes | borrowed | owned below the VM |
 |---|---|---|---|
 | T-Deck | card, FAT/exFAT, `moy_sd` attached to the panel's SPI2 | `VfsFat` over `_NativeSDBlockDev` (Python, with its sector cache) | slice 8: the kernel's `FATFS` over a C block device, `moy_sd`'s attach and the cache in C |
-| Guition S3 | card on SPI3; with no card, littlefs `/moy` | `VfsFat` over `machine.SDCard`; `VfsLfs2` | slice 8: the kernel's card driver on SPI3, initialised once and never torn down, with the cache this board never had; sprint 3: the kernel's `lfs2_t` |
+| Guition S3 | card on SPI3; with no card, littlefs `/moy` | `VfsFat` over `machine.SDCard`; `VfsLfs2` | slice 8: the kernel's card driver on SPI3, initialised once and never torn down, with the cache this board never had; sprint 3: the kernel's `lfs2_t` (`native/moy_store/moy_kvfs.c`, landed 2026-10-08) |
 | Waveshare P4, Guition P4 | card on SDMMC slot 0; internal littlefs `/moy` | as the Guition S3 | slice 8: the card, with the cache; the internal littlefs when a P4 stops its VM (§10 question 5 of the kernel doc) |
-| Zero | internal littlefs | `VfsLfs2` | when the kernel is its entry (sprint 3) |
+| Zero | internal littlefs | `VfsLfs2` | the kernel's `lfs2_t` (`native/moy_store/moy_kvfs.c`, 2026-10-08) |
 | browser · host | MEMFS under `VfsPosix` · the disk | POSIX on the same paths | — |
 
 **The card volume is 1b's last slice** (owner, 2026-10-06), taken from

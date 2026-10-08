@@ -201,12 +201,28 @@ typedef struct {
 extern const mp_obj_type_t mp_type_vfs_lfs2;
 #endif
 
+// The kernel's internal volume (moy_kvfs.c), where the image has one.
+extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
+extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
+                           uint32_t *bsize) __attribute__((weak));
+
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
     const char *r = path;
     mp_vfs_mount_t *m = mp_vfs_lookup_path(path, &r);
     if (m == MP_VFS_NONE || m == MP_VFS_ROOT) {
         return MP_ENODEV;
     }
+    #if MICROPY_VFS_LFS2
+    if (moy_kvfs_lfs != NULL) {
+        void *k = moy_kvfs_lfs(m->obj);
+        if (k != NULL) {
+            v->kind = MOY_VOL_KIND_LFS2;
+            v->fs = k;
+            *rest = r;
+            return 0;
+        }
+    }
+    #endif
     const mp_obj_type_t *t = mp_obj_get_type(m->obj);
     #if MICROPY_VFS_FAT
     if (t == &mp_fat_vfs_type) {
@@ -1219,7 +1235,67 @@ MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_stats_obj);
 #endif
 
+// The kernel's internal volume's VFS type (moy_kvfs.c), where it compiles.
+#if MICROPY_VFS_LFS2 && ((defined(__has_include) && __has_include("esp_partition.h")) \
+    || (defined(__unix__) && !defined(__EMSCRIPTEN__)))
+#define MOY_STORE_KVFS 1
+extern const mp_obj_type_t moy_kvfs_type;
+#if !(defined(__has_include) && __has_include("esp_partition.h"))
+// The unix port's medium, for the host's tests: the RAM image as bytes, and a
+// new one loaded (None: formatted).
+int moy_kvol_ram_load(const uint8_t *img, size_t n);
+const uint8_t *moy_kvol_ram(size_t *n);
+
+static mp_obj_t mod_kvol_image(void) {
+    size_t n;
+    const uint8_t *p = moy_kvol_ram(&n);
+    return p ? mp_obj_new_bytes(p, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_kvol_image_obj, mod_kvol_image);
+
+static mp_obj_t mod_kvol_load(mp_obj_t img) {
+    int rc;
+    if (img == mp_const_none) {
+        rc = moy_kvol_ram_load(NULL, 0);
+    } else {
+        mp_buffer_info_t b;
+        mp_get_buffer_raise(img, &b, MP_BUFFER_READ);
+        rc = moy_kvol_ram_load(b.buf, b.len);
+    }
+    if (rc != 0) {
+        mp_raise_OSError(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_kvol_load_obj, mod_kvol_load);
+#define MOY_STORE_KVOL_RAM 1
+#endif
+#endif
+
+// kvol() -> (mounted, the mount's errno, blocks, block size) of the kernel's
+// internal volume, or None in an image without one.
+static mp_obj_t mod_kvol(void) {
+    if (moy_kvol_state == NULL) {
+        return mp_const_none;
+    }
+    int mounted, err;
+    uint32_t blocks, bsize;
+    moy_kvol_state(&mounted, &err, &blocks, &bsize);
+    mp_obj_t t[4] = {mp_obj_new_bool(mounted), MP_OBJ_NEW_SMALL_INT(err),
+                     mp_obj_new_int_from_uint(blocks), mp_obj_new_int_from_uint(bsize)};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_kvol_obj, mod_kvol);
+
 static const mp_rom_map_elem_t moy_store_globals_table[] = {
+    {MP_ROM_QSTR(MP_QSTR_kvol), MP_ROM_PTR(&mod_kvol_obj)},
+    #if defined(MOY_STORE_KVFS)
+    {MP_ROM_QSTR(MP_QSTR_KVfs), MP_ROM_PTR(&moy_kvfs_type)},
+    #endif
+    #if defined(MOY_STORE_KVOL_RAM)
+    {MP_ROM_QSTR(MP_QSTR_kvol_image), MP_ROM_PTR(&mod_kvol_image_obj)},
+    {MP_ROM_QSTR(MP_QSTR_kvol_load), MP_ROM_PTR(&mod_kvol_load_obj)},
+    #endif
     #if MICROPY_VFS_FAT
     { MP_ROM_QSTR(MP_QSTR_card), MP_ROM_PTR(&moy_store_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_card_stats), MP_ROM_PTR(&moy_store_card_stats_obj) },

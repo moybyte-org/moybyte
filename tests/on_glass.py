@@ -133,6 +133,23 @@ def the_kernel_verifies_a_signed_manifest(board):
     assert judge({k: v for k, v in m.items() if k != "sig"}) == "unsigned update"
 
 
+def the_internal_volume_is_the_kernels(board):
+    """The internal flash is the kernel's littlefs instance
+    (native/moy_store/moy_kvfs.c), mounted at "/" by the VM's start as a KVfs
+    -- not a VfsLfs2 the port's _boot.py made -- and the store's C resolves it
+    there: a file the C writes reads back through Python."""
+    mounts = board.pyval("[(type(m[0]).__name__, m[1]) "
+                         "for m in __import__('vfs').mount()]", strict=True)
+    assert ("KVfs", "/") in [tuple(m) for m in mounts], mounts
+    mounted, err, blocks, bsize = board.pyval("__import__('moy_store').kvol()",
+                                              strict=True)
+    assert mounted and err == 0 and bsize == 4096 and blocks > 0
+    assert board.pyval("(__import__('moy_store').write('/.kvol_probe', 'k'), "
+                       "open('/.kvol_probe').read(), "
+                       "__import__('os').remove('/.kvol_probe'))[1]",
+                       strict=True) == "k"
+
+
 def wifi_is_off_at_rest(board):
     """The radio is a LEASE (2026-09-07): a console that is not serving the
     web, updating, in the WIFI panel, running a network cart or in a match

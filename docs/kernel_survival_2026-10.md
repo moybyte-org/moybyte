@@ -93,7 +93,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | crossed (`device/moy_ota.py`'s updater half; deleted: `moy_http.py`, `moy_c6_update.py`, `cart_net.py`) | `native/moy_net/moy_ota.c`, its platform in `native/moy_net/moy_net_port.c`; the C6's sink in `native/p4/moy_c6/modmoy_c6.c` | 2 |
 | the web-console switch | crossed (the switch half of `runtime/web_console.py` and `device/moy_webhost.py`; the pin, the router's park and the themed screen stay, §6.4) | `native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | crossed: `zero_gpio.py` deleted; the radio, the setup AP, mDNS, the portal's DNS and the setup form's transport out of `modules/zero_host.py` and `modules/zero_setup.py`, which keep the form, the seed and the OTA's headless driver (§6.5) | the same `moy_net` (`moy_wifi.c`, `moy_dns.c`, `moy_gpio.c` over the board's `MOY_NET_GPIO_PINS` table) | 2 |
-| the internal flash volumes | `moy_vol`'s borrowed littlefs backend (sprint 1b) | `native/moy_store/moy_vol.c` owns the instance, with a VFS type of the kernel's for Python | 2 |
+| the internal flash volumes | crossed (the borrowed `VfsLfs2` and the port's _boot.py mount) | `native/moy_store/moy_kvfs.c`: the kernel's `lfs2_t` and `KVfs`, its VFS type for Python; `moy_vol` resolves "/" to it | 2 |
 | the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `+native/moy_kernel/moy_loop.c`, `+native/moy_kernel/moy_idle.c`, `+native/moy_kernel/moy_perf.c` | 3 |
 | the dev channel's reader and kernel words, the diag ring | `runtime/dev_channel.py`, `device/device_diag.py`, `device/moybyte_diag.py`, `device/device_util.py`; `native/moy_serial/` | `+native/moy_kernel/moy_devch.c`, `+native/moy_kernel/moy_diag.c` | 3 |
 | the boot order | `device/desktop_spine.py`'s boot half, `runtime/device_boot.py`'s `DeviceBoot` (its splash: §13, question 9) | `+native/moy_kernel/moy_boot.c` | 3 |
@@ -839,19 +839,30 @@ pass, not only this one.
 Sprint 1b borrowed the littlefs instance from the mount table under nlr, and
 its design records why `VfsLfs2` cannot wrap a kernel-owned one: its callbacks
 call the block device's methods and its working directory is a gc buffer. So
-this pass has `native/moy_store/moy_vol.c` own the instance — the kernel's
-`lfs2_t` with C callbacks over `esp_partition`, mounted at start — and gives
-Python a VFS type of the kernel's over it, modelled on the port's own
-littlefs VFS: mount and umount, open with the file object's read, write, seek
-and close, `ilistdir`, `mkdir` and `rmdir`, `remove` and `rename`, `stat` and
-`statvfs`, `chdir` and `getcwd`. What lives there is the kernel's to keep
-across a VM teardown: the system documents on a no-card board, the staged
-update, the BLE bonds, the Zero's whole store, the embedded floor's read-only
-built-ins when sprint 4 needs them; a compiled cart's file calls on these
-volumes go through the owned instance with no VM gate (the wasm session's row
-of the plan's §4.4). An internal-flash write stalls flash-resident code on both
-cores while the cache is off, so the feeder's band pump is paused for the
-write's duration; the gate holds the feeder's errors at zero through it.
+`native/moy_store/moy_kvfs.c` owns the instance -- the kernel's `lfs2_t` with
+C callbacks over the "vfs" partition, its config and caches in kernel memory,
+mounted at the kernel's first ask -- and gives Python a VFS type of the
+kernel's over it, `KVfs`, modelled on the port's own littlefs VFS: mount and
+umount, open with the file object's read, write, seek and close, `ilistdir`,
+`mkdir` and `rmdir`, `remove` and `rename`, `stat` and `statvfs`, `chdir` and
+`getcwd`, and the same on-disk shape (4 KB blocks, 32-byte reads and
+programs, each file's mtime as attribute 1), so a store written by either
+reads whole on the other. The VM's start mounts a `KVfs` at "/" in place of
+the port's _boot.py, after unlinking whatever the last VM left open in the
+instance; a partition the kernel cannot mount is the port's again, _boot.py
+and its inisetup included, since the kernel never formats. `moy_vol` resolves
+"/" to the kernel's instance, never a borrowed one. On the unix port the same
+type runs over a RAM medium, and `tests/test_store_on_vfs.py` holds it to
+`VfsLfs2` call for call and reads its image back through `VfsLfs2`.
+
+What lives there is the kernel's to keep across a VM teardown: the system
+documents on a no-card board, the staged update, the BLE bonds, the Zero's
+whole store, the embedded floor's read-only built-ins when sprint 4 needs
+them; a compiled cart's file calls on these volumes go through the owned
+instance with no VM gate (the wasm session's row of the plan's §4.4). An
+internal-flash write stalls flash-resident code on both cores while the cache
+is off, the panel feeder's included, which is why §6.9's gate commits to the
+store under a running cart and reads the feeder's errors.
 
 ### 6.7 What Python is deleted
 

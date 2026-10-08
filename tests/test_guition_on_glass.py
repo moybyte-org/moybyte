@@ -73,7 +73,10 @@ EXFAT_SRAM = 640
 # And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
 # its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
 # .bss by the objects' sizes, 2026-10-08.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8
+# And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
+# the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
+# of .bss by the object's size, 2026-10-08.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on
@@ -342,6 +345,10 @@ def test_wifi_status_is_readable(board):
 
 def test_the_kernel_verifies_a_signed_manifest(board):
     on_glass.the_kernel_verifies_a_signed_manifest(board)
+
+
+def test_the_internal_volume_is_the_kernels(board):
+    on_glass.the_internal_volume_is_the_kernels(board)
 
 
 def test_draw_gates_are_installed(board):
