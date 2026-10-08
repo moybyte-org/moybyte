@@ -47,7 +47,7 @@ path), and re-measuring on 2026-08-07 reversed two of the three; adopting `spr`
 also deleted the RGB565 tile atlas, which handed back 64 KB of S3 internal SRAM
 and removed a ~100ms first-use bake nobody had attributed. What `moy_gfx` still
 owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`,
-`copy_async`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`,
+the layer restore (`layer_*`), `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`,
 `draw_ctx` — which the spec's raster has no counterpart for.
 **`native/moy_gfx/libmoy/UPSTREAM.md` is the authority on which verbs cross and
 why** (it carries the before/after table, the dates, and the warning about which

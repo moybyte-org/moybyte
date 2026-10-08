@@ -396,12 +396,20 @@ Two verbs serve the pool and nothing else:
 internal SRAM and a different allocator profile, and per-board verdicts do not
 transfer.
 
-## Superset verbs are not bound here
+## Superset verbs, and which of them are C
 
-`make_layer`/`draw_layer`/`image`, scenes and `view()` are
-moybyte's, not the spec's, and they stay Python-side: registered trampolines
-and the int-handle prelude in `runtime/lua_ext.py`. A layer is the console's
-object (an off-heap canvas lent to the run), not a second console in C.
+`make_layer`/`image` and scenes are moybyte's, not the spec's, and their
+making stays Python-side: registered trampolines and the int-handle prelude in
+`runtime/lua_ext.py`, called when a cart makes a layer, an image or a scene. A
+layer is the console's object (an off-heap canvas lent to the run), not a
+second console in C.
+
+What a frame calls is C (docs/kernel_cartpath_2026-10.md §2), so a frame makes
+no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration
+loops skip by `lua_ext.NATIVE_NAMES`), and `draw_layer`, the prelude's wrapper
+over `__layer_blit`, which copies through the screen canvas's layer restore
+(`moycore.layer_restore`, moy_gfx's `mg_lr_*`, whose predicted copy rides the
+GDMA engine) or through libmoy's `moy_blit_window` where a host has none.
 
 What a cart draws INTO a layer is the exception, and it is libmoy's verb table
 again rather than a copy of it (#225): `moycore_layers.h` gives the prelude

@@ -48,6 +48,8 @@
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
 #endif
 #include "moycore_layers.h"
+#include "moycore_superset.h"
+#include "moy_gfx_kernels.h"     /* the layer restore draw_layer takes */
 
 typedef struct {
     moycore_run_t  hc;          /* the console, shared with moyhost_wasm.c */
@@ -221,6 +223,7 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, int indexed,
         lua_close(r->L); free(r->shadow); free(r); CUR = NULL; moycore_run_cur = NULL; return NULL;
     }
     moycore_layers_open(r->L, &r->layers, &r->hc.con);
+    moycore_superset_open(r->L);
     return r;
 }
 
@@ -232,6 +235,26 @@ int hl_layer_bind(host_lua *r, void *pix, int nbytes, int w, int h)
 {
     if (r->idx || nbytes < 0) return 1;
     return moycore_layers_park(&r->layers, pix, (size_t)nbytes, w, h);
+}
+
+/* draw_layer through the screen canvas's layer restore (its `_lrs`, the
+ * kernels' mg_lr_* state), as the boards' does, over the host's engine, which
+ * refuses: the copy is synchronous and a prediction a test kicked is taken by
+ * the same rule. NULL is libmoy's plain copy. The run's free forgets it. */
+static void hl_blit(void *st, moy_canvas *dst, const moy_canvas *src,
+                    int cam_x, int cam_y, int edited)
+{
+    mg_lr_blit((mg_lrestore_t *)st, &mg_copy_none, (uint16_t *)dst->pix,
+               (size_t)dst->w * (size_t)dst->h, dst->w, dst->h,
+               (const uint16_t *)src->pix, (size_t)src->w * (size_t)src->h,
+               src->w, src->h, cam_x, cam_y, edited != 0);
+}
+
+void hl_layer_restore(host_lua *r, void *state)
+{
+    if (r->layers.blit_state) mg_lr_forget((mg_lrestore_t *)r->layers.blit_state, &mg_copy_none);
+    r->layers.blit = state && !r->idx ? hl_blit : NULL;
+    r->layers.blit_state = state && !r->idx ? state : NULL;
 }
 
 /* The sheet, flags and map: moycore_run.h's, which says why each is
@@ -398,6 +421,7 @@ void hl_free(host_lua *r)
     if (r) { free(r->p8mem); free(r->p8rom); }
     if (!r) return;
     if (r->L) lua_close(r->L);
+    hl_layer_restore(r, NULL);
     if (CUR == r) CUR = NULL;
     moycore_run_close(&r->hc);
     free(r->shadow);

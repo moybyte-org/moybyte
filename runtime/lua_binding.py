@@ -47,6 +47,7 @@ _NATIVE = os.path.join(_ROOT, "native")
 _LIBMOY = native_build.LIBMOY                        # the raster + moy.h
 _BINDING_DIR = os.path.join(_NATIVE, "moycore", "libmoy")   # libmoy's Lua binding
 _MOYCORE = os.path.join(_NATIVE, "moycore")          # the layer glue the boards run
+_MOY_GFX = os.path.join(_NATIVE, "moy_gfx")          # the layer restore's kernels
 _LUA = os.path.join(_NATIVE, "moy_lua", "lua")       # the vendored VM
 _SHIM = os.path.join(_HERE, "moyhost_lua.c")
 _CACHE = os.path.join(_ROOT, ".build", "host_lua")
@@ -93,10 +94,11 @@ def build(verbose=False):
     if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
         return None
     names = (list(_RASTER) + ["moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c",
-                               "moycore_layers.h"] + lua)
+                               "moycore_layers.h", "moycore_superset.h",
+                               "moy_gfx_kernels.h", "moy_gfx_kernels.c"] + lua)
     return native_build.build(
         "moyhost_lua", _SHIM, names, _CACHE, cflags=_CFLAGS,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE),
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX),
         # Lua's own math (pow/fmod/floor) -- a no-op against glibc >= 2.34,
         # which folded libm into libc, and required everywhere older.
         link_flags=["-lm"], verbose=verbose)
@@ -151,6 +153,8 @@ def _lib():
             d.hl_register.argtypes = [_P, _C, _I]
             d.hl_layer_bind.argtypes = [_P, _P, _I, _I, _I]
             d.hl_layer_bind.restype = _I
+            d.hl_layer_restore.argtypes = [_P, _P]
+            d.hl_layer_restore.restype = None
             d.hl_set_dispatch.argtypes = [_P, _P]
             d.hl_free.argtypes = [_P]
             _LIB[0] = d
@@ -292,6 +296,16 @@ class HostLuaRun:
         if not hasattr(self, "_layer_refs"):
             self._layer_refs = []
         self._layer_refs.append(ref)
+
+    def layer_restore(self, state):
+        """draw_layer through the screen canvas's layer restore state (its
+        `_lrs`), or None for libmoy's plain copy. The run keeps it exported
+        until it closes or is handed another."""
+        ref = None
+        if state is not None:
+            ref = (ctypes.c_char * len(state)).from_buffer(state)
+        self._d.hl_layer_restore(self._r, ctypes.cast(ref, _P) if ref is not None else None)
+        self._lrs_ref = ref
 
     def _dispatch(self, idx, argc, kinds, iargs, sargs, out, sout):
         """C -> Python. 0 nil, 1 the int in out, 2 the string, 3 the boolean."""

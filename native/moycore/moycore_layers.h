@@ -15,6 +15,11 @@
  * (camera, clip, pal, palt, fillp) is its own and outlives the frame, and
  * nothing per call crosses into Python -- sspr's ten arguments included.
  *
+ * draw_layer is native too (__layer_blit): the window copy into the screen,
+ * through the host's blit when it has one (the boards' layer restore, whose
+ * predicted copy rides the DMA engine) and libmoy's moy_blit_window when it
+ * does not, so a frame that composites a layer makes no crossing.
+ *
  * The buffer reaches the VM in two steps, because only Python holds it and
  * only Lua code may allocate on the VM: the host's bind (moycore.layer_bind,
  * hl_layer_bind), which the __layer_new trampoline calls, PARKS it here, and
@@ -39,10 +44,20 @@
 
 #define MOYCORE_LAYER_MT "moybyte.layer"
 
+/* draw_layer's copy: the window of `src` at (cam_x, cam_y) into the screen.
+ * NULL is libmoy's moy_blit_window; a board hands the kernel's layer restore
+ * (moy_gfx's mg_lr_blit over the screen canvas's state), whose predicted copy
+ * rides its DMA engine. */
+typedef void (*moycore_layer_blit_fn)(void *state, moy_canvas *dst,
+                                      const moy_canvas *src, int cam_x, int cam_y,
+                                      int edited);
+
 typedef struct {
     moy_console *con;            /* whose canvas a layer method swaps */
     moy_pixel   *pix;            /* parked by the bind, taken by the canvas */
     int          w, h;
+    moycore_layer_blit_fn blit;  /* the host's, or NULL */
+    void        *blit_state;
 } moycore_layers;
 
 /* Park a layer's buffer for the next __layer_canvas. 0 on success; nonzero
@@ -119,13 +134,35 @@ static int moycore_layers_verb(lua_State *L)
     return 1;
 }
 
-/* Install __layer_canvas and __layer_verb, which the prelude captures and
- * clears before the cart runs. `ls` must outlive the VM. */
+/* __layer_blit(canvas, cam_x, cam_y, edited): draw_layer, with no crossing.
+ * The camera is truncated as the Python tier's int() does, so a scrolling
+ * cart's fractional camera lands on the same row on every tier. */
+static int moycore_layers_blit(lua_State *L)
+{
+    moycore_layers *ls = (moycore_layers *)lua_touserdata(L, lua_upvalueindex(1));
+    const moy_canvas *src = (const moy_canvas *)luaL_checkudata(L, 1, MOYCORE_LAYER_MT);
+    lua_Number cx = luaL_optnumber(L, 2, 0), cy = luaL_optnumber(L, 3, 0);
+    int edited = lua_toboolean(L, 4);
+    if (!(cx == cx) || !(cy == cy) || cx > (lua_Number)1e9f || cx < (lua_Number)-1e9f
+        || cy > (lua_Number)1e9f || cy < (lua_Number)-1e9f)
+        return luaL_error(L, "draw_layer: the camera is not a number");
+    if (ls->blit)
+        ls->blit(ls->blit_state, ls->con->canvas, src, (int)cx, (int)cy, edited);
+    else
+        moy_blit_window(ls->con->canvas, src, (int)cx, (int)cy);
+    return 0;
+}
+
+/* Install __layer_canvas, __layer_verb and __layer_blit, which the prelude
+ * captures and clears before the cart runs. `ls` must outlive the VM, and a
+ * host sets its blit after this. */
 static void moycore_layers_open(lua_State *L, moycore_layers *ls,
                                 moy_console *con)
 {
     ls->con = con;
     ls->pix = NULL;
+    ls->blit = NULL;
+    ls->blit_state = NULL;
     luaL_newmetatable(L, MOYCORE_LAYER_MT);
     lua_pop(L, 1);
     lua_pushlightuserdata(L, ls);
@@ -134,6 +171,9 @@ static void moycore_layers_open(lua_State *L, moycore_layers *ls,
     lua_pushlightuserdata(L, ls);
     lua_pushcclosure(L, moycore_layers_verb, 1);
     lua_setglobal(L, "__layer_verb");
+    lua_pushlightuserdata(L, ls);
+    lua_pushcclosure(L, moycore_layers_blit, 1);
+    lua_setglobal(L, "__layer_blit");
 }
 
 #endif

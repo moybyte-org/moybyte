@@ -59,8 +59,8 @@
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
 // WHILE the cart's _update executes. Guarded so this file stays VM-neutral: the
-// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h and simply
-// doesn't export copy_async/copy_wait -- Python falls back to the sync path.
+// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h, and its
+// layer restore refuses the engine and copies synchronously.
 #if defined(__has_include)
 #if __has_include("esp_async_memcpy.h")
 #include "esp_async_memcpy.h"
@@ -445,10 +445,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_spr_gate_obj, 5, 5,
 
 #ifdef MOY_GFX_HAS_ASYNC_COPY
 // --- GDMA async copy (#54 Stage 2 / #63) -------------------------------------
-// copy_async(dst, dst_off_px, src, src_off_px, npix) -> True if the DMA copy
-// started (False -> caller must do the sync copy). copy_wait() blocks until the
-// in-flight copy completes. One copy in flight at a time (the layer restore);
-// the driver is installed lazily on first use and kept for the session.
+// The layer restore's engine (lr_start/lr_wait below): one copy in flight at a
+// time, the driver installed lazily on its first use and kept for the session.
 static async_memcpy_handle_t moy_gfx_mcp = NULL;
 static volatile int moy_gfx_copy_busy = 0;
 
@@ -475,49 +473,133 @@ static mp_obj_t moy_gfx_copy_wait(void) {
     }
     return mp_const_true;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_copy_wait_obj, moy_gfx_copy_wait);
 
-static mp_obj_t moy_gfx_copy_async(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
+#endif // MOY_GFX_HAS_ASYNC_COPY
+
+// --- the layer restore's engine and verbs (moy_gfx_kernels.h, mg_lr_*) -------
+// The GDMA pair above as the restore's engine, and nothing where the image has
+// no GDMA: the restore then latches synchronous at its first kick.
+static bool lr_start(uint16_t *dst, const uint16_t *src, size_t npix) {
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
     if (moy_gfx_mcp == NULL) {
         async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
         cfg.backlog = 4;
-        cfg.dma_burst_size = 64;        // widest AHB burst: best PSRAM throughput
+        cfg.dma_burst_size = 64;
         if (esp_async_memcpy_install(&cfg, &moy_gfx_mcp) != ESP_OK) {
             moy_gfx_mcp = NULL;
-            return mp_const_false;      // caller falls back to the sync copy
+            return false;
         }
     }
-    if (moy_gfx_copy_busy) {            // defensive: never queue a second copy
-        if (moy_gfx_copy_wait() == mp_const_false) {
-            return mp_const_false;      // prior copy stuck: refuse, caller goes sync
-        }
-    }
-    size_t dcap, scap;
-    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
-    mp_int_t dst_off = mp_obj_get_int(a[1]);
-    const uint16_t *src = moy_gfx_buf_r(a[2], &scap);
-    mp_int_t src_off = mp_obj_get_int(a[3]);
-    mp_int_t npix = mp_obj_get_int(a[4]);
-    if (dst_off < 0 || src_off < 0 || npix <= 0
-        || (size_t)(dst_off + npix) > dcap
-        || (size_t)(src_off + npix) > scap) {
-        return mp_const_false;
+    if (moy_gfx_copy_busy && moy_gfx_copy_wait() == mp_const_false) {
+        return false;
     }
     moy_gfx_copy_busy = 1;
-    esp_err_t err = esp_async_memcpy(moy_gfx_mcp, dst + dst_off,
-                                     (void *)(src + src_off),
-                                     (size_t)npix * 2u,
-                                     moy_gfx_copy_done_cb, NULL);
-    if (err != ESP_OK) {
+    if (esp_async_memcpy(moy_gfx_mcp, dst, (void *)src, npix * 2u,
+                         moy_gfx_copy_done_cb, NULL) != ESP_OK) {
         moy_gfx_copy_busy = 0;
-        return mp_const_false;          // e.g. alignment refusal -> sync fallback
+        return false;
     }
-    return mp_const_true;
+    return true;
+    #else
+    (void)dst; (void)src; (void)npix;
+    return false;
+    #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_async_obj, 5, 5,
-                                           moy_gfx_copy_async);
-#endif // MOY_GFX_HAS_ASYNC_COPY
+
+static bool lr_wait(void) {
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
+    return moy_gfx_copy_wait() == mp_const_true;
+    #else
+    return true;
+    #endif
+}
+
+static uint32_t lr_now(void) {
+    return (uint32_t)mp_hal_ticks_us();
+}
+
+static const mg_copy_engine_t LR_ENGINE = { lr_start, lr_wait, lr_now };
+
+static mg_lrestore_t *lr_of(mp_obj_t o) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(o, &bi, MP_BUFFER_RW);
+    if (bi.len < MG_LR_SIZE || ((uintptr_t)bi.buf & 3u) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("layer restore: short or unaligned state"));
+    }
+    return (mg_lrestore_t *)bi.buf;
+}
+
+// layer_init(state, async_ok): a canvas's restore state, zeroed.
+static mp_obj_t moy_gfx_layer_init(mp_obj_t st, mp_obj_t on) {
+    mg_lr_init(lr_of(st), mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_layer_init_obj, moy_gfx_layer_init);
+
+// layer_kick(state, back) -> True while a predicted copy is in flight: the
+// frame's start (sync_back).
+static mp_obj_t moy_gfx_layer_kick(mp_obj_t st, mp_obj_t buf) {
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(buf, &cap);
+    return mp_obj_new_bool(mg_lr_kick(lr_of(st), &LR_ENGINE, dst, cap));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_layer_kick_obj, moy_gfx_layer_kick);
+
+// layer_drain(state[, forget]): a copy in flight waited out; `forget` also
+// drops the prediction, whose layer is going.
+static mp_obj_t moy_gfx_layer_drain(size_t n_args, const mp_obj_t *a) {
+    mg_lrestore_t *s = lr_of(a[0]);
+    if (n_args > 1 && mp_obj_is_true(a[1])) {
+        mg_lr_forget(s, &LR_ENGINE);
+    } else {
+        mg_lr_drain(s, &LR_ENGINE);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_drain_obj, 1, 2, moy_gfx_layer_drain);
+
+// layer_blit(state, dst, dw, dh, src, src_w, src_h, cam_x, cam_y, edited):
+// draw_layer.
+static mp_obj_t moy_gfx_layer_blit(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    mg_lrestore_t *s = lr_of(a[0]);
+    uint16_t *dst = moy_gfx_buf_w(a[1], &dcap);
+    const uint16_t *src = moy_gfx_buf_r(a[4], &scap);
+    mg_lr_blit(s, &LR_ENGINE, dst, dcap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+               src, scap, mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+               mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_is_true(a[9]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_blit_obj, 10, 10, moy_gfx_layer_blit);
+
+// layer_meter(state[, zero]) -> (us, trips, async_ok); `zero` zeroes the time.
+static mp_obj_t moy_gfx_layer_meter(size_t n_args, const mp_obj_t *a) {
+    mg_lrestore_t *s = lr_of(a[0]);
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(s->us), mp_obj_new_int_from_uint(s->trips),
+                      mp_obj_new_bool(s->async_ok) };
+    if (n_args > 1 && mp_obj_is_true(a[1])) {
+        s->us = 0;
+    }
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_meter_obj, 1, 2, moy_gfx_layer_meter);
+
+// The C door a Lua run's native draw_layer takes (moy_gfx_capi.h).
+void moy_gfx_k_layer_blit(void *st, uint16_t *dst, size_t dcap, int dw, int dh,
+                          const uint16_t *src, size_t scap, int sw, int sh,
+                          int cam_x, int cam_y, bool edited) {
+    mg_lr_blit((mg_lrestore_t *)st, &LR_ENGINE, dst, dcap, dw, dh, src, scap, sw, sh,
+               cam_x, cam_y, edited);
+}
+
+size_t moy_gfx_k_layer_size(void) {
+    return MG_LR_SIZE;
+}
+
+void moy_gfx_k_layer_forget(void *st) {
+    mg_lr_forget((mg_lrestore_t *)st, &LR_ENGINE);
+}
 
 // The kernel's teardown (native/moy_glass): no async copy still writes a
 // buffer the VM is about to free. True when none is in flight.
@@ -1909,10 +1991,6 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_draw_ctx), MP_ROM_PTR(&moy_gfx_make_draw_ctx_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_draw_gate), MP_ROM_PTR(&moy_gfx_make_draw_gate_obj) },
-    #ifdef MOY_GFX_HAS_ASYNC_COPY
-    { MP_ROM_QSTR(MP_QSTR_copy_async), MP_ROM_PTR(&moy_gfx_copy_async_obj) },
-    { MP_ROM_QSTR(MP_QSTR_copy_wait), MP_ROM_PTR(&moy_gfx_copy_wait_obj) },
-    #endif
     { MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_spans), MP_ROM_PTR(&moy_gfx_fill_spans_obj) },
     { MP_ROM_QSTR(MP_QSTR_tri),        MP_ROM_PTR(&moy_gfx_tri_obj) },
@@ -1923,6 +2001,12 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_window), MP_ROM_PTR(&moy_gfx_blit_window_obj) },
+    { MP_ROM_QSTR(MP_QSTR_LR_SIZE),    MP_ROM_INT(MG_LR_SIZE) },
+    { MP_ROM_QSTR(MP_QSTR_layer_init), MP_ROM_PTR(&moy_gfx_layer_init_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_kick), MP_ROM_PTR(&moy_gfx_layer_kick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_drain), MP_ROM_PTR(&moy_gfx_layer_drain_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_blit), MP_ROM_PTR(&moy_gfx_layer_blit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_meter), MP_ROM_PTR(&moy_gfx_layer_meter_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },

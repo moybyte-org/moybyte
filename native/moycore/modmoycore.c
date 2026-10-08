@@ -67,6 +67,8 @@
 
 #include "moy.h"
 #include "moycore_layers.h"
+#include "moycore_superset.h"
+#include "../moy_gfx/moy_gfx_capi.h"   // the layer restore draw_layer takes
 #include "moycore_run.h"
 #include "../moy_kernel/moy_loop.h"     // the crossings, counted by class
 
@@ -942,6 +944,47 @@ static mp_obj_t mod_layer_bind(mp_obj_t buf_obj, mp_obj_t w_obj, mp_obj_t h_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_layer_bind_obj, mod_layer_bind);
 
+// The screen canvas's layer restore (moy_gfx's mg_lr_*), which a native
+// draw_layer takes: its predicted copy is the canvas's, kicked by its
+// sync_back, so the two lanes share one prediction.
+static void layer_blit(void *st, moy_canvas *dst, const moy_canvas *src,
+                       int cam_x, int cam_y, int edited)
+{
+    moy_gfx_k_layer_blit(st, (uint16_t *)dst->pix, (size_t)dst->w * (size_t)dst->h,
+                         dst->w, dst->h, (const uint16_t *)src->pix,
+                         (size_t)src->w * (size_t)src->h, src->w, src->h,
+                         cam_x, cam_y, edited != 0);
+}
+
+static void layer_restore_drop(void)
+{
+    if (RUN.layers.blit_state) moy_gfx_k_layer_forget(RUN.layers.blit_state);
+    RUN.layers.blit = NULL;
+    RUN.layers.blit_state = NULL;
+    MP_STATE_VM(moycore_lr) = MP_OBJ_NULL;
+}
+
+// layer_restore(state) -- draw_layer through the screen canvas's restore
+// state (its `_lrs`), or None for libmoy's plain copy. After run_begin; the
+// run's close forgets the prediction, whose layer the run frees.
+static mp_obj_t mod_layer_restore(mp_obj_t st)
+{
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
+                                MP_ERROR_TEXT("moycore: no run"));
+    layer_restore_drop();
+    if (st != mp_const_none) {
+        size_t len = 0;
+        void *p = buf_w(st, &len);
+        if (len < moy_gfx_k_layer_size() || ((uintptr_t)p & 3u) != 0)
+            mp_raise_ValueError(MP_ERROR_TEXT("layer_restore: not a restore state"));
+        MP_STATE_VM(moycore_lr) = st;
+        RUN.layers.blit = layer_blit;
+        RUN.layers.blit_state = p;
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_layer_restore_obj, mod_layer_restore);
+
 // -- the per-verb profiler ---------------------------------------------------
 //
 // WHY IT EXISTS. A Lua/p8 cart draws through libmoy's own C verbs straight into
@@ -1784,6 +1827,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     lua_setglobal(RUN.L, "__moy_map_flags");
     // The layer glue's two natives, captured and cleared by the prelude.
     moycore_layers_open(RUN.L, &RUN.layers, &RUN.c.con);
+    moycore_superset_open(RUN.L);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded above from the cart's file. The
     // shim's __moy_map_flags(gff) overwrites it at cart boot, which is what a
@@ -3003,6 +3047,7 @@ static mp_obj_t mod_close(void)
 #endif
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
+    layer_restore_drop();        // the prediction may name a layer the run frees
 #if MOYCORE_POOL
     // AFTER lua_close, never before: until it returns, the chunks still hold
     // live Lua objects. Nothing may survive a run -- a cart that churned its
@@ -3308,6 +3353,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_restore), MP_ROM_PTR(&mod_layer_restore_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_gc),          MP_ROM_PTR(&mod_gc_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
@@ -3359,6 +3405,7 @@ MP_REGISTER_MODULE(MP_QSTR_moycore, moycore_user_cmodule);
 // the Lua closures reference them only by INDEX, which the collector cannot
 // see. Cleared at close().
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_lr);
 // The compiled cart's open data file (`read`), held between its reads.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_file);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_wasm_gate);

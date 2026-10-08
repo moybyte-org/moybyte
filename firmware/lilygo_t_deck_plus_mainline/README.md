@@ -877,10 +877,11 @@ so flipping one at a time attributes any glass symptom.
 DRAW2 layer=N.NNms batch=N.NNms map=N.NNms text=N.NNms fill=N.NNms gated(fill=N text=N)
 ```
 
-Two readings say it has gone wrong rather than flat. **`lw=` in `HITCH`** counts
-`copy_wait` trips: the bounded spin in `moy_gfx_copy_wait` gave up before the
-GDMA said done; pixels stay correct (the sync `blit_window` rewrites the same
-bytes), so a climbing `lw=` is the copy finishing later than the cart's
+Two readings say it has gone wrong rather than flat. **The layer restore's
+trips** (`moy_gfx.layer_meter(canvas._lrs)[1]`) count the bounded spin in
+`moy_gfx_copy_wait` giving up before the GDMA said done; pixels stay correct
+(the sync copy rewrites the same bytes), so a climbing count is the copy
+finishing later than the cart's
 `_update`, i.e. the overlap paid for and not collected. **`PUMP idle=`/`gaps=`
 rising on a layer cart** is the other: the GDMA copy is a full-throttle
 PSRAM↔PSRAM blit in the same window as the pump's band memcpys, so if `idle`

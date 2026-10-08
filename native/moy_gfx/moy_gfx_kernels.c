@@ -369,3 +369,108 @@ void mg_text(uint16_t *dst, size_t dcap, int dw,
                 font, nglyphs, first, scale, cam_x, cam_y,
                 cx0, cy0, cx1, cy1);
 }
+
+/* ---- the layer restore (moy_gfx_kernels.h has the contract) ------------ */
+
+static bool none_start(uint16_t *dst, const uint16_t *src, size_t npix)
+{
+    (void)dst; (void)src; (void)npix;
+    return false;
+}
+
+static bool now_start(uint16_t *dst, const uint16_t *src, size_t npix)
+{
+    memcpy(dst, src, npix * 2u);
+    return true;
+}
+
+static bool done_wait(void)
+{
+    return true;
+}
+
+const mg_copy_engine_t mg_copy_none = { none_start, done_wait, NULL };
+const mg_copy_engine_t mg_copy_now = { now_start, done_wait, NULL };
+
+void mg_lr_init(mg_lrestore_t *s, bool async_ok)
+{
+    memset(s, 0, sizeof(*s));
+    s->async_ok = async_ok ? 1 : 0;
+}
+
+void mg_lr_drain(mg_lrestore_t *s, const mg_copy_engine_t *e)
+{
+    if (s->fl_src == NULL) return;
+    s->fl_src = NULL;
+    if (!e->wait()) s->trips++;
+}
+
+void mg_lr_forget(mg_lrestore_t *s, const mg_copy_engine_t *e)
+{
+    mg_lr_drain(s, e);
+    s->src = NULL;
+}
+
+bool mg_lr_kick(mg_lrestore_t *s, const mg_copy_engine_t *e, uint16_t *dst, size_t dcap)
+{
+    mg_lr_drain(s, e);           /* last frame's copy never consumed */
+    const uint16_t *src = s->src;
+    if (src == NULL) return false;
+    s->src = NULL;
+    if ((size_t)s->npix > dcap) return false;
+    /* The prediction is a whole-screen window of a screen-wide layer, so its
+     * rows are contiguous: npix pixels from row cam_y. */
+    if (e->start(dst, src + (size_t)s->cam_y * (size_t)s->sw, (size_t)s->npix)) {
+        s->fl_src = src;
+        s->fl_cam_y = s->cam_y;
+        return true;
+    }
+    s->async_ok = 0;             /* the driver refused: synchronous from now on */
+    return false;
+}
+
+static void lr_arm(mg_lrestore_t *s, const uint16_t *src, size_t scap, int sw,
+                   int dw, int dh, int cam_x, int cam_y)
+{
+    if (!s->async_ok || cam_x != 0 || sw != dw) return;
+    if ((size_t)(cam_y + dh) * (size_t)dw > scap) return;
+    s->src = src;
+    s->sw = sw;
+    s->cam_y = cam_y;
+    s->npix = dw * dh;
+}
+
+void mg_lr_blit(mg_lrestore_t *s, const mg_copy_engine_t *e,
+                uint16_t *dst, size_t dcap, int dw, int dh,
+                const uint16_t *src, size_t scap, int sw, int sh,
+                int cam_x, int cam_y, bool edited)
+{
+    uint32_t t0 = e->now_us ? e->now_us() : 0;
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+    if ((size_t)sw * (size_t)sh < scap) scap = (size_t)sw * (size_t)sh;
+    if ((size_t)sh > scap / (size_t)sw) sh = (int)(scap / (size_t)sw);
+    int mx = sw - dw, my = sh - dh;
+    if (cam_x > mx) cam_x = mx;
+    if (cam_x < 0) cam_x = 0;
+    if (cam_y > my) cam_y = my;
+    if (cam_y < 0) cam_y = 0;
+    if (s->fl_src != NULL) {
+        const uint16_t *fl = s->fl_src;
+        int fl_y = s->fl_cam_y;
+        bool hit = false;
+        s->fl_src = NULL;
+        if (!e->wait()) {
+            s->trips++;          /* the copy may still land: the sync copy writes the same bytes */
+        } else {
+            hit = !edited && fl == src && fl_y == cam_y && cam_x == 0 && sw == dw;
+        }
+        if (hit) {
+            if (e->now_us) s->us += e->now_us() - t0;
+            lr_arm(s, src, scap, sw, dw, dh, cam_x, cam_y);
+            return;
+        }
+    }
+    mg_blit_window(dst, dcap, dw, dh, src, scap, sw, cam_x, cam_y);
+    if (e->now_us) s->us += e->now_us() - t0;
+    lr_arm(s, src, scap, sw, dw, dh, cam_x, cam_y);
+}

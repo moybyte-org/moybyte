@@ -31,7 +31,7 @@ the verbs whose GEOMETRY the spec defines route through libmoy:
 | | |
 |---|---|
 | **libmoy's** | `tri`, `sspr`, `tline`, `circ`, `circb`, `line`, `print`, `blit_map`, `blit_batch` |
-| **no counterpart** | `fill`, `fill_rect`, `blit565_scale`, `copy_async`, `copy_wait`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`, `draw_ctx` |
+| **no counterpart** | `fill`, `fill_rect`, `blit565_scale`, the layer restore (`layer_*`), `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`, `draw_ctx` |
 
 The third row is moybyte's compositor, not the spec's raster: async DMA, the
 scroll blit, the window composite, the draw-context gate. `fill`/`fill_rect`

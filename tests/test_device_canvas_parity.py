@@ -281,6 +281,34 @@ class _FakeGfx:
             for col in range(cw):
                 d[d0 + col] = s[s0 + col]
 
+    # The layer restore (mg_lr_*) with no copy engine -- the synchronous lane
+    # every tier without DMA takes: the clamp, then blit_window.
+    LR_SIZE = 64
+
+    @staticmethod
+    def layer_init(state, async_ok):
+        pass
+
+    @staticmethod
+    def layer_kick(state, back):
+        return False
+
+    @staticmethod
+    def layer_drain(state, forget=False):
+        pass
+
+    @staticmethod
+    def layer_meter(state, zero=False):
+        return 0, 0, False
+
+    @classmethod
+    def layer_blit(cls, state, dst, dw, dh, src, sw, sh, cam_x, cam_y, edited):
+        if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
+            return
+        cam_x = max(0, min(cam_x, sw - dw))
+        cam_y = max(0, min(cam_y, sh - dh))
+        cls.blit_window(dst, dw, dh, memoryview(src)[:sw * sh * 2], sw, cam_x, cam_y)
+
     @staticmethod
     def blit_indices(dst, dw, dh, dx, dy, indices, iw, ih, pal565):
         # #63 Fold 3: place an iw x ih palette-INDEX bitmap at (dx, dy), converting each

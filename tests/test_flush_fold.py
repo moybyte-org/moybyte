@@ -190,7 +190,7 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
     assert body.index("comp.fold_fence()") < body.index("if snap(")
     assert '"snap_scale_fold", None' in body
     assert "_snap_live = True" in body
-    sync = dc[dc.index("def sync_back"):dc.index("def _drain_lcopy")]
+    sync = dc[dc.index("def sync_back"):dc.index("def _t_layer_us")]
     assert sync.index("_snap_live") < sync.index("snap_fence()") \
         < sync.index("back_buffer()")
     from board_source import runtime_text

@@ -19,9 +19,9 @@ TWO C PREFIXES, AND THE DIFFERENCE MATTERS. `mg_*` is
 shim and compiled into the MicroPython usermod. `hg_*` is `moyhost_gfx.c`, and
 after the extraction it holds only what is genuinely host-side: the libmoy
 bridge verbs (whose marshalling differs from the usermod's because ctypes and
-MicroPython hand over arguments differently) and the async-copy refusal. A new
-compositor loop belongs in the kernels file, where it gets an `mg_` name and
-both tiers get it at once.
+MicroPython hand over arguments differently) and the layer restore's engine,
+which refuses. A new compositor loop belongs in the kernels file, where it
+gets an `mg_` name and both tiers get it at once.
 
 BUFFERS. The native module takes MicroPython buffer objects and derives their
 capacity through `moy_gfx_buf_w`; ctypes hands over a bare pointer, so capacity
@@ -96,8 +96,13 @@ _SIGS = (
     ("mg_shape", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
                   _I, _I, _I, _I, _I, _I], None),
     # ...and the host-side rest.
-    ("hg_copy_async", [_P, _Z, _I, _P, _Z, _I, _I], _I),
-    ("hg_copy_wait", [], _I),
+    ("hg_lr_size", [], _Z),
+    ("hg_lr_engine", [_I], None),
+    ("hg_lr_init", [_P, _I], None),
+    ("hg_lr_kick", [_P, _P, _Z], _I),
+    ("hg_lr_drain", [_P, _I], None),
+    ("hg_lr_blit", [_P, _P, _Z, _I, _I, _P, _Z, _I, _I, _I, _I, _I], None),
+    ("hg_lr_meter", [_P, _P, _I], None),
     ("hg_blit_batch", [_P, _Z, _I, _I, _P, _I, _P, _Z, _I, _I, _P, _P,
                        _I, _I, _I, _I, _I, _I, _I, _I], None),
     ("hg_blit_map", [_P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
@@ -140,6 +145,8 @@ def _lib():
                 fn = getattr(d, name)
                 fn.argtypes = args
                 fn.restype = res
+            if d.hg_lr_size() > LR_SIZE:
+                raise RuntimeError("gfx_binding: LR_SIZE is short of mg_lrestore_t")
             _LIB[0] = d
     return _LIB[0] or None
 
@@ -256,14 +263,50 @@ def blit_window(dst, dw, dh, src, src_w, sx, sy):
                           int(sx), int(sy))
 
 
-def copy_async(dst, dst_off, src, src_off, npix):
-    """Always False on the host: no GDMA, so the caller takes its sync path --
-    the same branch a board takes when its DMA driver declines."""
-    return False
+# The layer restore (moy_gfx_kernels.h's mg_lr_*): the state a canvas keeps,
+# in bytes. Larger than the host's struct, which _lib() checks; the native
+# module's own is the board's size.
+LR_SIZE = 64
 
 
-def copy_wait():
-    return True
+def layer_init(state, async_ok):
+    arr, _ = _buf(state)
+    _lib().hg_lr_init(ctypes.cast(arr, _P), 1 if async_ok else 0)
+
+
+def layer_kick(state, back):
+    sarr, _ = _buf(state)
+    darr, dcap = _buf(back)
+    return bool(_lib().hg_lr_kick(ctypes.cast(sarr, _P), ctypes.cast(darr, _P), dcap))
+
+
+def layer_drain(state, forget=False):
+    arr, _ = _buf(state)
+    _lib().hg_lr_drain(ctypes.cast(arr, _P), 1 if forget else 0)
+
+
+def layer_blit(state, dst, dw, dh, src, src_w, src_h, cam_x, cam_y, edited):
+    sarr, _ = _buf(state)
+    darr, dcap = _buf(dst)
+    rarr, scap = _rbuf(src)
+    _lib().hg_lr_blit(ctypes.cast(sarr, _P), ctypes.cast(darr, _P), dcap, int(dw),
+                      int(dh), ctypes.cast(rarr, _P), scap, int(src_w), int(src_h),
+                      int(cam_x), int(cam_y), 1 if edited else 0)
+
+
+def layer_engine(now):
+    """The host's copy engine: NONE (False, the default: every copy refused, as
+    on a tier with no DMA) or NOW (True: the copy lands as it starts), which a
+    test drives the predicted path with. Host only."""
+    _lib().hg_lr_engine(1 if now else 0)
+
+
+def layer_meter(state, zero=False):
+    """(us, trips, async_ok) of a canvas's restore; `zero` zeroes the time."""
+    arr, _ = _buf(state)
+    out = (ctypes.c_uint32 * 3)()
+    _lib().hg_lr_meter(ctypes.cast(arr, _P), out, 1 if zero else 0)
+    return out[0], out[1], bool(out[2])
 
 
 def _quads(items):

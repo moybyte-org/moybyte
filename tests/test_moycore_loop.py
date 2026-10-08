@@ -286,6 +286,11 @@ print("OBJ", moycore.load(((
     "end\n", "@obj"),)))
 moycore.tick(0.03125)
 print("OBJCALLS", calls)
+# draw_layer is the run's own: the layer, smaller than the screen, landed at
+# its top-left with no call into Python.
+_lb = LAYERS[0]._canvas._buf
+print("OBJBLIT", bytes(fb[0:18]) == bytes(_lb[0:18]),
+      bytes(fb[W * 2 * 4:W * 2 * 4 + 18]) == bytes(_lb[9 * 2 * 4:9 * 2 * 5]))
 print("OBJGLOBALS", moycore.get_global("N"), moycore.get_global("MISS"))
 # L:cls and the tile spr are libmoy's own verbs against the layer's buffer, not
 # calls into Python: the layer holds colour 3 where the sprite is not, and the
@@ -760,11 +765,12 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["OBJ"][1] == "None", \
         "the prelude did not define make_layer/image for the cart: %s" % out
     assert ("OBJCALLS [('new', 9, 5), "
-            "('spr', <_Img object>, 1, 2), "
-            "('draw', (9, 5), 5, 6)]" in out.replace(
+            "('spr', <_Img object>, 1, 2)]" in out.replace(
                 out[out.index("<_Img"):out.index(">", out.index("<_Img")) + 1],
                 "<_Img object>")), \
         "layer/image handles did not reach the Python objects: %s" % out
+    assert by["OBJBLIT"][1:] == ["True", "True"], \
+        "the native draw_layer did not composite the layer: %s" % out
     assert by["OBJGLOBALS"][1:] == ["3", "None"], \
         "the table library or the missing-image nil regressed: %s" % out
     # The layer's own drawing is libmoy's (#225): cls and the tile sprite

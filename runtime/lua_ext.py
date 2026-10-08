@@ -312,6 +312,29 @@ NOT_REGISTRABLE = frozenset((
     "open_editor",                         # an editor handle: prelude + handles
 ))
 
+# The superset names a Lua run answers in C (native/moycore/moycore_superset.h),
+# so a frame that calls them makes no crossing: registering the namespace's
+# Python over them would shadow the C with a trampoline.
+NATIVE_NAMES = frozenset(("col", "mouse"))
+
+
+def layer_restore(bind, canvas, run):
+    """Hand a Lua run the screen canvas's layer restore state (device_canvas's
+    `_lrs`) through the run's `bind`: its native draw_layer then shares the
+    canvas's prediction, which the canvas's sync_back kicks while `_lrs_run`
+    names the run. A canvas with no state leaves the run on libmoy's copy."""
+    lr = getattr(canvas, "_lrs", None)
+    bind(lr)
+    if lr is not None:
+        canvas._lrs_run = run
+
+
+def layer_restore_end(canvas, run):
+    """The run is over: its canvas stops kicking for it."""
+    if getattr(canvas, "_lrs_run", None) is run:
+        canvas._lrs_run = None
+
+
 # What a Lua cart's layer answers: every drawing verb, and the draw STATE that
 # scopes it -- libmoy's own LAYER_VERBS (native/moycore/libmoy/moy_lua.c), the
 # set moy-spec's players give a layer, and tests/test_lua_layers.py holds the
@@ -340,9 +363,9 @@ PRELUDE_HANDLES = """
 do
   local layer_new, layer_spr_img = __layer_new, __layer_spr_img
   local layer_canvas, layer_verb = __layer_canvas, __layer_verb
-  local draw_layer_h, image_h = __draw_layer, __image_handle
+  local layer_blit, image_h = __layer_blit, __image_handle
   __layer_new, __layer_spr_img, __layer_canvas = nil, nil, nil
-  __layer_verb, __draw_layer, __image_handle = nil, nil, nil
+  __layer_verb, __layer_blit, __image_handle = nil, nil, nil
   local setmt, type = setmetatable, type
   -- The methods every layer shares (LAYER_VERBS in runtime/lua_ext.py): the
   -- screen's own verbs, run against the layer's canvas `__c`. Each one sets
@@ -366,7 +389,7 @@ do
     return setmt({ __id = id, __c = layer_canvas(), W = w, H = h }, Layer)
   end
   function draw_layer(l, cx, cy)
-    draw_layer_h(l.__id, cx or 0, cy or 0, l.__e)
+    layer_blit(l.__c, cx or 0, cy or 0, l.__e)
     l.__e = nil
   end
   local cache = {}
@@ -772,15 +795,6 @@ def install_handles(ns, reg, bind):
     def _layer_spr_img(lid, ih, x, y):
         layers[int(lid)].spr(images[int(ih)], int(x), int(y))
 
-    def _draw_layer(lid, cx, cy, edited=None):
-        lay = layers[int(lid)]
-        if edited:
-            # libmoy drew into it behind the canvas's back: a copy predicted
-            # from its old pixels must not be taken (device_canvas
-            # blit_window_from).
-            lay._canvas._edited = True
-        draw_layer(lay, cx, cy)
-
     def _image_handle(name):
         img = image(name) if image is not None else None
         if img is None:
@@ -790,7 +804,6 @@ def install_handles(ns, reg, bind):
 
     reg("__layer_new", _layer_new)
     reg("__layer_spr_img", _layer_spr_img)
-    reg("__draw_layer", _draw_layer)
     reg("__image_handle", _image_handle)
 
     # The placement half (#214). `scene` and friends are absent from a

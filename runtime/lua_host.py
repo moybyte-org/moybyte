@@ -32,7 +32,8 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 from runtime.ticks import _since_ms
 from runtime.moy_input import pointer_state
 from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                             LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                             LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                             install_handles, layer_restore, layer_restore_end,
                              snap_slots, audio_ops, snap_shared, sync_view,
                              drain_audio)
 
@@ -104,7 +105,7 @@ class MoycoreHostRun:
         if reg is not None:
             for name in ns:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
-                        and callable(ns[name])):
+                        and name not in NATIVE_NAMES and callable(ns[name])):
                     reg(name, ns[name])
             # The object-valued verbs, through the shared int-handle glue --
             # the same module and the same prelude the boards run. Without it
@@ -112,9 +113,11 @@ class MoycoreHostRun:
             # the cart gets nil back: sakura_lua died on `lay:spr(...)`.
             self._layers, self._images = install_handles(
                 ns, reg, self._run.layer_bind)
+            layer_restore(self._run.layer_restore, canvas, self)
             err = self._run.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 self._run.close()
+                layer_restore_end(canvas, self)
                 raise RuntimeError(err)
             # A namespace may carry ONE more prelude of its own -- today the
             # text console's, which binds `print`/`input` over the registered
@@ -126,6 +129,7 @@ class MoycoreHostRun:
                 err = self._run.exec(extra, "prelude")
                 if err:
                     self._run.close()
+                    layer_restore_end(canvas, self)
                     raise RuntimeError(err)
         # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): a
         # port's generated half is its own file and must run BEFORE main.lua,
@@ -134,6 +138,7 @@ class MoycoreHostRun:
         err = self._run.load(cart_chunks(ns, src))
         if err:
             self._run.close()
+            layer_restore_end(canvas, self)
             raise RuntimeError(err)
         self._ns = ns
         self._ws = ws
@@ -221,6 +226,7 @@ class MoycoreHostRun:
         self.update = None
         self.draw = None
         self._run.close()
+        layer_restore_end(self._ws.canvas, self)
 
 
 # (What to register on top of libmoy's table -- everything in the cart

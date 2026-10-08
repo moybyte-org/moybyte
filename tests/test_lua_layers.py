@@ -236,47 +236,37 @@ def test_a_raising_verb_gives_the_screen_its_canvas_back():
 
 
 def test_a_layer_drawn_by_libmoy_refuses_a_predicted_copy():
-    """device_canvas's async layer restore (#54 Stage 2) kicks a copy of the
-    layer at frame start and takes it at draw_layer unless the layer changed
-    in between. libmoy's writes are invisible to that check, so the Lua glue
-    marks the layer (`_edited`) and the sync copy runs instead."""
+    """The layer restore (#54 Stage 2, the kernels' mg_lr_*) kicks a copy of
+    the layer at the screen canvas's sync_back and the native draw_layer takes
+    it unless the layer changed in between. A layer verb marks the layer
+    (`__e`), so a layer libmoy drew into since is copied again."""
+    from runtime import gfx_binding
+
     r = _Run(64, 48)
+    screen = r.canvas
+    gfx_binding.layer_engine(True)          # the copy lands as it starts
     try:
-        # Drawn once and composited once, which consumes its mark.
+        gfx_binding.layer_init(screen._lrs, True)
+        r.run.layer_restore(screen._lrs)
+        screen._lrs_run = r
+        # Drawn once and composited once, which consumes its mark and arms
+        # the prediction.
         r.lua("L = make_layer(64, 48)\nL:cls(5)\ndraw_layer(L, 0, 0)\n")
         lay = r.layers[0]._canvas
-        screen = r.canvas
-
-        class _Gfx:
-            """The real kernel, with an async copy that 'finished' long ago."""
-
-            def __init__(self, real):
-                self._real = real
-
-            def copy_wait(self):
-                return True
-
-            def __getattr__(self, name):
-                return getattr(self._real, name)
-
-        screen._gfx = _Gfx(screen._gfx)
-        screen._async_ok = True
-
-        def predicted():
-            screen._lcopy = (lay, 0, screen.w * screen.h)
-
-        # Unmarked: the predicted copy is taken and nothing is blitted here.
-        r.lua("cls(0)")
-        predicted()
+        # Unmarked: the kick paints the layer, and draw_layer takes it, so a
+        # screen poisoned after the kick stays poisoned.
+        screen.sync_back()
+        r.lua("rect(0, 0, 64, 1, 9)")
         r.lua("draw_layer(L, 0, 0)")
-        assert not any(r.word(screen._buf, 64, x, 0) == r.word(lay._buf, 64, x, 0)
-                       for x in range(64)), "control: the sync path ran anyway"
-        # Drawn by libmoy since: marked, so the sync copy runs.
-        r.lua("cls(0) L:rect(0, 0, 64, 48, 6)")
-        predicted()
+        assert r.word(screen._buf, 64, 0, 0) != r.word(lay._buf, 64, 0, 0), \
+            "control: the predicted copy was not taken"
+        # Drawn by libmoy since the kick: marked, so the sync copy runs.
+        screen.sync_back()
+        r.lua("L:rect(0, 0, 64, 48, 6)")
         r.lua("draw_layer(L, 0, 0)")
         assert bytes(screen._buf) == bytes(lay._buf), \
             "the copy predicted from the layer's old pixels was taken"
-        assert not getattr(lay, "_edited", False), "the mark was not consumed"
     finally:
+        gfx_binding.layer_engine(False)
+        screen._lrs_run = None
         r.close()

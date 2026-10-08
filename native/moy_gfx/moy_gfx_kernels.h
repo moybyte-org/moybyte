@@ -40,6 +40,7 @@
 #ifndef MOY_GFX_KERNELS_H
 #define MOY_GFX_KERNELS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -318,5 +319,71 @@ void mg_text(uint16_t *dst, size_t dcap, int dw,
              const uint8_t *s, size_t slen, int x, int y, int col,
              const uint8_t *font, int nglyphs, int first, int scale,
              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
+/* THE LAYER RESTORE (#54 Stage 2): draw_layer's per-frame window copy, with
+ * the predicted copy that rides a DMA engine while the cart's update runs.
+ * One body for every caller: a canvas's blit_window_from and sync_back
+ * (device_canvas.py, through the usermod or the host's ctypes) and a Lua
+ * run's native draw_layer (native/moycore), so the two cannot disagree about
+ * when a predicted copy is a hit.
+ *
+ * The state is PER DESTINATION CANVAS and the caller's to place
+ * (MG_LR_SIZE bytes, zeroed; a canvas keeps it in a bytearray): the
+ * prediction of next frame's restore, the copy in flight, whether the engine
+ * may be used at all, and the meters. The engine is the caller's too: a board
+ * hands its GDMA pair, the host one that refuses, which puts it on the
+ * synchronous path a board takes when its driver declines.
+ *
+ * A prediction is armed only when the copy is ONE contiguous run covering the
+ * whole destination (cam_x 0, the layer exactly as wide, the window inside
+ * it), and kicked by mg_lr_kick at the frame's start into the new back
+ * buffer. The next mg_lr_blit waits it out and takes it as the restore when
+ * nothing moved -- same layer, same cam_y, not edited since -- and otherwise
+ * copies synchronously over whatever the predicted copy painted. A layer the
+ * prediction names must outlive it: mg_lr_forget before it is freed. */
+typedef struct {
+    bool (*start)(uint16_t *dst, const uint16_t *src, size_t npix);  /* started? */
+    bool (*wait)(void);          /* false: the bounded wait tripped */
+    uint32_t (*now_us)(void);    /* the meter's clock, or NULL */
+} mg_copy_engine_t;
+
+typedef struct {
+    const uint16_t *src;         /* the prediction: the layer, NULL when none */
+    int sw;
+    int cam_y;
+    int npix;
+    const uint16_t *fl_src;      /* the copy in flight, NULL when none */
+    int fl_cam_y;
+    uint8_t async_ok;            /* the engine may be used; latches off on a refusal */
+    uint32_t trips;              /* waits that tripped (#66 diagnostics) */
+    uint32_t us;                 /* time inside mg_lr_blit since the meter was zeroed */
+} mg_lrestore_t;
+
+#define MG_LR_SIZE sizeof(mg_lrestore_t)
+
+/* Two engines every tier has: NONE refuses every copy (an image with no DMA,
+ * the host), so the restore latches synchronous at its first kick; NOW copies
+ * at once on the calling thread, which the host's tests drive the predicted
+ * path with. */
+extern const mg_copy_engine_t mg_copy_none;
+extern const mg_copy_engine_t mg_copy_now;
+
+/* A zeroed state, with the engine allowed or not. */
+void mg_lr_init(mg_lrestore_t *s, bool async_ok);
+/* The frame's start, `dst` the back buffer it will draw into: a copy still in
+ * flight is waited out, and the prediction, if any, is started. True when a
+ * copy is now in flight (its layer must live until it is taken or drained). */
+bool mg_lr_kick(mg_lrestore_t *s, const mg_copy_engine_t *e, uint16_t *dst, size_t dcap);
+/* A copy in flight is waited out (a frame that does not draw the layer). */
+void mg_lr_drain(mg_lrestore_t *s, const mg_copy_engine_t *e);
+/* ...and the prediction dropped: its layer is about to go. */
+void mg_lr_forget(mg_lrestore_t *s, const mg_copy_engine_t *e);
+/* draw_layer: the dw x dh window of the sw x sh layer at (cam_x, cam_y), each
+ * axis clamped into [0, max(0, layer - screen)] (SPEC.md 6), into dst.
+ * `edited`: the layer's pixels moved since it was last drawn. */
+void mg_lr_blit(mg_lrestore_t *s, const mg_copy_engine_t *e,
+                uint16_t *dst, size_t dcap, int dw, int dh,
+                const uint16_t *src, size_t scap, int sw, int sh,
+                int cam_x, int cam_y, bool edited);
 
 #endif /* MOY_GFX_KERNELS_H */

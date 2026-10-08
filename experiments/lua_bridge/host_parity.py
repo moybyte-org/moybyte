@@ -247,6 +247,13 @@ do
     rec("spr|" .. enc(tile) .. "|" .. enc(x) .. "|" .. enc(y) .. "|"
         .. enc(ck or -1))
   end
+  -- draw_layer is the run's own C (the prelude's, over __layer_blit), so it
+  -- is recorded here, in front of the composite it still makes.
+  local draw_layer0 = draw_layer
+  function draw_layer(l, cx, cy)
+    rec("draw_layer|" .. enc(l.__id) .. "|" .. enc(cx or 0) .. "|" .. enc(cy or 0))
+    return draw_layer0(l, cx, cy)
+  end
   local CFG = __CFG
   function cfg(k, d)
     local v = CFG[k]

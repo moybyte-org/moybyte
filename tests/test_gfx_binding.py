@@ -216,6 +216,18 @@ blit_window(buf, 16, 8, big, 0, 0, 0)
 blit_window(buf, 16, 8, big, 32, 17, 2)
 blit_window(buf, 16, 8, big, 32, 4, 9)
 blit_window(buf, 16, 8, big, 32, 2, -1)
+# -- the layer restore: its clamp and its copy (both engines refuse here) ----
+layer_init(lr, True)
+layer_blit(lr, buf, 16, 8, big, 32, 16, 4, 2, False)
+layer_blit(lr, buf, 16, 8, big, 32, 16, -5, 30, False)
+layer_blit(lr, buf, 16, 8, big, 32, 16, 40, 3, False)
+layer_blit(lr, buf, 16, 8, big, 16, 32, 0, 3, True)
+layer_kick(lr, buf)
+layer_blit(lr, buf, 16, 8, big, 16, 32, 0, 3, False)
+layer_blit(lr, buf, 16, 8, big, 16, 32, 0, 99, False)
+layer_drain(lr, False)
+layer_drain(lr, True)
+layer_meter(lr, False)
 # -- blit_indices: the icap row guard, and an index past the palette --------
 blit_indices(buf, 16, 8, 1, 0, idx, 5, 9, pal565)
 blit_indices(buf, 16, 8, 0, 0, idx, 5, 4, pal8)
@@ -401,11 +413,13 @@ idx8 = bytearray([6, 7, 8, 9, 8, 0, 8, 63, 7, 8, 5, 8, 8, 8, 1, 8])
 # as many as the buffer actually holds (one here, not the 249 it claims).
 no_quads = array.array("h", [0, 0, 0, 0])
 over_quads = array.array("h", [999, 0, 0, 0, 5, 1, 1, 0])
+# The layer restore's state: room for either side's struct.
+lr = bytearray(64)
 """
 
 _FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
-                  "no_quads", "over_quads")
+                  "no_quads", "over_quads", "lr")
 
 
 def _fixtures():
@@ -500,10 +514,8 @@ def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
         assert callable(getattr(g, name, None)), name
 
 
-# copy_async/copy_wait are the refusal pair -- they move no pixels, so an op
-# script entry for them would compare two unchanged framebuffers. They have
-# test_the_async_pair_refuses_so_callers_take_the_sync_path instead.
-_NO_PIXELS = frozenset(("copy_async", "copy_wait"))
+# Every verb the canvas calls is in the op script.
+_NO_PIXELS = frozenset()
 
 
 def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
@@ -608,13 +620,53 @@ def test_blit_window_keeps_the_screen_stride_when_the_source_runs_out():
             (src_w, src_h, sx, sy)
 
 
-def test_the_async_pair_refuses_so_callers_take_the_sync_path():
-    """Not a stub for its own sake: returning False puts device_canvas on the
-    same branch a board takes when its DMA driver declines the copy, so the
-    host exercises a path the device also has."""
-    buf = _blank()
-    assert g.copy_async(buf, 0, buf, 0, 4) is False
-    assert g.copy_wait() is True
+def test_the_layer_restore_takes_a_predicted_copy_only_when_nothing_moved():
+    """The kernels' mg_lr_* (#54 Stage 2), driven with the NOW engine, whose
+    copy lands as it starts: a kick paints the predicted window, a draw of the
+    same layer at the same cam_y takes it, and an edited layer, a moved camera
+    or a forgotten prediction copies again. The default engine refuses, which
+    latches the restore synchronous: the branch a board takes when its DMA
+    driver declines the copy."""
+    W2, H2 = 4, 2
+    layer = bytearray(W2 * 6 * 2)
+    for i in range(len(layer)):
+        layer[i] = (i * 13 + 1) & 0xFF
+    row = W2 * 2
+
+    def window(y):
+        return bytes(layer[y * row:(y + H2) * row])
+
+    lr = bytearray(g.LR_SIZE)
+    screen = bytearray(W2 * H2 * 2)
+    g.layer_engine(True)
+    try:
+        g.layer_init(lr, True)
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, False)
+        assert bytes(screen) == window(1)
+        assert g.layer_kick(lr, screen) is True       # predicted, and in flight
+        screen[:] = b"\xee" * len(screen)            # poisoned after the kick
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, False)
+        assert bytes(screen) == b"\xee" * len(screen), "the hit copied again"
+        # Edited since the kick: copied.
+        g.layer_kick(lr, screen)
+        screen[:] = b"\xee" * len(screen)
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, True)
+        assert bytes(screen) == window(1)
+        # The camera moved: copied, from the new row.
+        g.layer_kick(lr, screen)
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 3, False)
+        assert bytes(screen) == window(3)
+        # Forgotten: nothing in flight, nothing predicted.
+        g.layer_drain(lr, True)
+        assert g.layer_kick(lr, screen) is False
+        assert g.layer_meter(lr)[1:] == (0, True)
+    finally:
+        g.layer_engine(False)
+    # The refusing engine latches the restore synchronous at its first kick.
+    g.layer_init(lr, True)
+    g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, False)
+    assert g.layer_kick(lr, screen) is False
+    assert g.layer_meter(lr)[2] is False
 
 
 DRIVER = r'''
@@ -643,6 +695,11 @@ def fill_rect(*a): moy_gfx.fill_rect(*a); _shot()
 def fill_spans(*a): moy_gfx.fill_spans(*a); _shot()
 def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
 def blit_window(*a): moy_gfx.blit_window(*a); _shot()
+def layer_init(*a): moy_gfx.layer_init(*a); _shot()
+def layer_blit(*a): moy_gfx.layer_blit(*a); _shot()
+def layer_kick(*a): moy_gfx.layer_kick(*a); _shot()
+def layer_drain(*a): moy_gfx.layer_drain(*a); _shot()
+def layer_meter(*a): moy_gfx.layer_meter(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()
 def blit565_scale(*a): moy_gfx.blit565_scale(*a); _shot()
 def text(*a): moy_gfx.text(*a); _shot()

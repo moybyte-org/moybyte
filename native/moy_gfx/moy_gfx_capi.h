@@ -102,3 +102,13 @@ void moy_gfx_capi_tri(moy_gfx_draw_ctx_t *c, int x1, int y1, int x2, int y2,
                       int x3, int y3, int ci);
 void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
                         int x, int y, int ci);
+
+// The layer restore (moy_gfx_kernels.h's mg_lr_*) over this image's copy
+// engine: a Lua run's native draw_layer, against the state its screen canvas
+// keeps (`state`, moy_gfx_k_layer_size() bytes: the canvas's `_lrs`). forget
+// before a layer the state may predict is freed.
+size_t moy_gfx_k_layer_size(void);
+void moy_gfx_k_layer_blit(void *state, uint16_t *dst, size_t dcap, int dw, int dh,
+                          const uint16_t *src, size_t scap, int sw, int sh,
+                          int cam_x, int cam_y, bool edited);
+void moy_gfx_k_layer_forget(void *state);

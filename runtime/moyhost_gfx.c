@@ -22,12 +22,12 @@
  * moy_canvas -- via the SHARED mg_canvas/mg_clip helpers -- and calls the
  * spec's own raster.
  *
- * (2) The ASYNC pair, which is deliberately a refusal. On the boards
- * copy_async is ESP-IDF GDMA; there is no host equivalent, and pretending
- * otherwise would mean a second code path to keep honest. Returning 0 puts the
- * caller on its synchronous fallback -- the same branch a board takes when its
- * DMA driver declines the copy -- so the host exercises a path the device also
- * has.
+ * (2) The LAYER RESTORE's engine, which is deliberately a refusal. On the
+ * boards it is ESP-IDF GDMA; there is no host equivalent, and pretending
+ * otherwise would mean a second code path to keep honest. The refusal puts the
+ * restore (mg_lr_*, the kernels') on its synchronous path -- the same branch a
+ * board takes when its DMA driver declines the copy -- so the host exercises a
+ * path the device also has.
  *
  * BUFFERS. ctypes hands over a bare pointer, so the capacity the native module
  * derives from a MicroPython buffer object arrives here as an explicit
@@ -41,19 +41,52 @@
 #include "moy.h"                 /* built RGB565 here -- see the note above */
 #include "moy_gfx_kernels.h"     /* the shared compositor + the libmoy bridge */
 
-/* ---- the async pair, which refuses ------------------------------------ */
+/* ---- the layer restore, over an engine that refuses ------------------- */
 
-int hg_copy_async(uint16_t *dst, size_t dcap, int dst_off,
-                  const uint16_t *src, size_t scap, int src_off, int npix)
+/* The engine: NONE, or NOW while a test drives the predicted path. */
+static const mg_copy_engine_t *HG_ENGINE = &mg_copy_none;
+
+void hg_lr_engine(int now)
 {
-    (void)dst; (void)dcap; (void)dst_off;
-    (void)src; (void)scap; (void)src_off; (void)npix;
-    return 0;       /* no GDMA here: caller takes its synchronous path */
+    HG_ENGINE = now ? &mg_copy_now : &mg_copy_none;
 }
 
-int hg_copy_wait(void)
+size_t hg_lr_size(void)
 {
-    return 1;       /* nothing was ever in flight */
+    return MG_LR_SIZE;
+}
+
+void hg_lr_init(void *s, int async_ok)
+{
+    mg_lr_init((mg_lrestore_t *)s, async_ok != 0);
+}
+
+int hg_lr_kick(void *s, uint16_t *dst, size_t dcap)
+{
+    return mg_lr_kick((mg_lrestore_t *)s, HG_ENGINE, dst, dcap);
+}
+
+void hg_lr_drain(void *s, int forget)
+{
+    if (forget) mg_lr_forget((mg_lrestore_t *)s, HG_ENGINE);
+    else mg_lr_drain((mg_lrestore_t *)s, HG_ENGINE);
+}
+
+void hg_lr_blit(void *s, uint16_t *dst, size_t dcap, int dw, int dh,
+                const uint16_t *src, size_t scap, int sw, int sh, int cam_x,
+                int cam_y, int edited)
+{
+    mg_lr_blit((mg_lrestore_t *)s, HG_ENGINE, dst, dcap, dw, dh, src, scap, sw, sh,
+               cam_x, cam_y, edited != 0);
+}
+
+void hg_lr_meter(const void *s, uint32_t out[3], int zero)
+{
+    mg_lrestore_t *r = (mg_lrestore_t *)s;
+    out[0] = r->us;
+    out[1] = r->trips;
+    out[2] = r->async_ok;
+    if (zero) r->us = 0;
 }
 
 /* ---- the libmoy bridge ------------------------------------------------ */

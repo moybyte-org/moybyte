@@ -56,13 +56,15 @@ from array import array
 
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                         install_handles, layer_restore, layer_restore_end,
                          snap_slots, audio_ops, snap_shared, sync_view,
                          drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                                 LIBMOY_VERBS, NOT_REGISTRABLE,
-                                 install_handles, snap_slots, audio_ops,
+                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                                 install_handles, layer_restore,
+                                 layer_restore_end, snap_slots, audio_ops,
                                  snap_shared, sync_view, drain_audio, cfg_blob)
 
 try:
@@ -248,7 +250,7 @@ class MoycoreRun:
         try:
             for name in ns:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
-                        and callable(ns[name])):
+                        and name not in NATIVE_NAMES and callable(ns[name])):
                     _moycore.register(name, ns[name])
             # The object-valued verbs and their Lua wrappers -- the same two
             # halves moy_lua uses, from the same source. Without this a cart
@@ -257,6 +259,8 @@ class MoycoreRun:
             # what sakura_lua/brick_siege/ray did before this landed.
             self._layers, self._images = install_handles(
                 ns, _moycore.register, _moycore.layer_bind)
+            if hasattr(_moycore, "layer_restore"):
+                layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)
@@ -270,6 +274,7 @@ class MoycoreRun:
                     raise RuntimeError(err)
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
             _moycore.close()
+            layer_restore_end(canvas, self)
             raise
         # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): main
         # keeps the "@cart" name, so a runtime error in it renders `cart:12:`
@@ -280,6 +285,7 @@ class MoycoreRun:
         if err:
             try:
                 _moycore.close()
+                layer_restore_end(canvas, self)
             finally:
                 raise RuntimeError(err)
 
@@ -466,6 +472,7 @@ class MoycoreRun:
             self._images = None
             if _moycore is not None:
                 _moycore.close()
+            layer_restore_end(self.ws.canvas, self)
 
 
 # -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------

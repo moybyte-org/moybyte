@@ -15,7 +15,7 @@ performance-critical + native-coupled unit on the device.
 DeviceCanvas implements the indexed v0.4 canvas API (cls/pset/line/rect/circ/spr/
 map/print + the #54 scroll layers + the #63 sprite-batch/spr-gate) against the
 compositor's RGB565 framebuffer. The hot verbs go through the native moy_gfx kernel
-(fill/fill_rect/blit565/blit_map/blit_batch/blit_indices/circ/line/text/copy_async);
+(fill/fill_rect/blit565/blit_map/blit_batch/blit_indices/circ/line/text/layer_blit);
 framebuf is the text/line + no-moy_gfx fallback; the glass (moy_glass) gives
 _LayerComp its off-GC-heap DMA buffer as a BUF row and every canvas its CANVAS
 row. Also here: Image (indexed sprite, re-exported from
@@ -524,14 +524,15 @@ class DeviceCanvas:
         # buffer that's being DMA'd (tear).
         # In single-buffer mode framebuffer() never moves, so sync_back is a
         # cheap no-op.
-        # Async layer copy (#54 Stage 2): prediction + in-flight state. Armed by
-        # blit_window_from when the copy shape is ONE contiguous memcpy (cam_x==0,
-        # layer exactly screen-wide, full-height coverage -- sakura's shape);
-        # kicked by sync_back at frame start; consumed (copy_wait) by the next
-        # blit_window_from. _async_ok latches False on the first driver refusal
-        # (old firmware / no gdma / bad alignment) so we never retry per frame.
+        # The layer restore (#54 Stage 2): draw_layer's window copy and the
+        # predicted copy that rides the GDMA engine while the cart's update
+        # runs -- the kernel's mg_lr_* (native/moy_gfx/moy_gfx_kernels.h), over
+        # this state, which a Lua run's native draw_layer shares (moycore's
+        # layer_restore). Armed by blit_window_from when the copy is ONE
+        # contiguous run (cam_x 0, the layer exactly screen-wide -- sakura's
+        # shape), kicked by sync_back, taken by the next blit_window_from.
         #
-        # LAYER_COPY_ASYNC is now DEFAULT ON (tied 1:1 to moy_compositor.SRAM_BOUNCE_
+        # LAYER_COPY_ASYNC is DEFAULT ON (tied 1:1 to moy_compositor.SRAM_BOUNCE_
         # FLUSH, see the module-level comment above): it was hardware-verdict FALSE
         # on 2026-07-03 because the copy is a second GDMA engine doing a full-
         # throttle PSRAM->PSRAM blit that, run against a panel DMA reading PSRAM
@@ -539,11 +540,10 @@ class DeviceCanvas:
         # one cart using layers). The #66 SRAM-bounce flush removed the contention
         # target -- the panel now only ever reads internal SRAM -- so the async copy
         # (layer= 7ms -> 0.04ms on Sakura) is safe again and shipped as the default.
-        self._lcopy_pred = None
-        self._lcopy = None
-        self._lcopy_trips = 0     # copy_wait timeouts (#66 HITCH v3 diagnostics)
-        self._async_ok = (LAYER_COPY_ASYNC and self._gfx is not None
-                          and hasattr(self._gfx, "copy_async"))
+        self._lrs = bytearray(self._gfx.LR_SIZE)
+        self._gfx.layer_init(self._lrs, LAYER_COPY_ASYNC)
+        self._lrs_layer = None     # the layer the prediction names: pinned while it does
+        self._lrs_run = None       # a Lua run whose native draw_layer shares the state
         # Pending sprite batch (Fold 1 -> #63 spr_gate): 1x1 sheet-tile blits queue
         # into ONE flat array('h') instead of a list of tuples -- layout
         # [next, colorkey, scale, token, (tile x y flip)*N], items from index 4.
@@ -685,8 +685,10 @@ class DeviceCanvas:
         ALSO the async layer-copy kick point (#54 Stage 2): this runs BEFORE the
         cart's _update, so a predicted draw_layer background restore started here
         runs on the GDMA engine WHILE the kid's Python logic executes -- by the
-        time _draw calls draw_layer, the ~7ms copy is already done (copy_wait
-        returns immediately). Prediction armed by blit_window_from (below).
+        time _draw calls draw_layer, the ~7ms copy is already done (its wait
+        returns at once). The prediction is armed by the last draw_layer: this
+        canvas's blit_window_from, or a Lua run's native one over the same
+        state, whose glue sets `_lrs_layer` for the run.
 
         ALSO THE SNAPSHOT FENCE (moy_fold.h): a folded frame's copy of the game
         canvas rides the GDMA engine, and this canvas -- the one whose
@@ -706,38 +708,18 @@ class DeviceCanvas:
             # DRAW2 timing gate, synced once per frame (console.py flips _prof by
             # direct attribute store, so there is no setter to hook).
             self._gate_state[_ST_PROF] = 1 if self._prof else 0
-        if self._lcopy is not None:
-            self._drain_lcopy()           # last frame's copy never consumed: drain
-        pred = self._lcopy_pred
-        if pred is not None:
-            self._lcopy_pred = None
-            layer, cam_y, npix = pred
-            try:
-                if self._gfx.copy_async(self._buf, 0, layer._buf,
-                                        cam_y * self.w, npix):
-                    self._lcopy = pred    # in flight; consumed by blit_window_from
-                else:
-                    self._async_ok = False    # driver refused -> stay sync from now on
-            except Exception:  # noqa: BLE001 -- any C-side surprise -> sync path
-                self._async_ok = False
+        if self._lrs_layer is not None or self._lrs_run is not None:
+            if not self._gfx.layer_kick(self._lrs, self._buf):
+                self._lrs_layer = None     # no copy in flight names it: unpinned
 
-    def _drain_lcopy(self):
-        # Complete an in-flight async layer restore that nothing consumed -- the
-        # frame changed shape (cart exit, screen switch). Cheap; never raises.
-        self._lcopy = None
-        try:
-            if self._gfx.copy_wait() is False:
-                self._lcopy_trips += 1    # tripped: count it (#66 diagnostics)
-        except Exception:  # noqa: BLE001
-            self._async_ok = False
+    @property
+    def _t_layer_us(self):
+        # #63 DRAW2: the restore's time since the meter was zeroed, both lanes'.
+        return self._gfx.layer_meter(self._lrs)[0]
 
-    # -- draw state (camera / clip / pal / palt, #11) ------------------------
-    # Mirror runtime/canvas.py exactly so a .moy draws the same pixels host-side
-    # and on-device: camera offsets all coords, clip bounds the write region (passed
-    # to the moy_gfx kernel for blits / intersected for fills), pal remaps draw
-    # indices (applied in _col, so every primitive inherits it), palt marks sprite
-    # indices transparent. _palgen bumps on a pal/palt change so the per-sprite RGB
-    # cache (which bakes pal+palt in) knows to re-bake.
+    @_t_layer_us.setter
+    def _t_layer_us(self, v):
+        self._gfx.layer_meter(self._lrs, True)
 
     def reset_state(self):
         # Draw any queued sprites FIRST: they were spr_tile()'d under the current
@@ -1183,9 +1165,9 @@ class DeviceCanvas:
     def cls(self, c=0):
         # Full-surface reset: ignores camera/clip (like TIC-80) but honours pal.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
-        if self._lcopy is not None:    # #54 St.2: a predicted layer restore is in
-            self._drain_lcopy()        # flight for a frame that ISN'T drawing the
-                                       # layer (screen switch) -- drain, don't race
+        self._gfx.layer_drain(self._lrs)   # #54 St.2: a predicted restore in flight
+                                          # for a frame that ISN'T drawing the layer
+                                          # (screen switch) -- drain, don't race
         col = self._col(c)
         # A whole-surface clear is the biggest single fill the console issues, so
         # it is the first thing to hand to the DMA engine (#155).
@@ -2188,17 +2170,16 @@ class DeviceCanvas:
         bakes -- goes back, a layer to the pool and the rest freed (#63 leak
         fix), and any in-flight async layer copy is drained first. Callers
         probe via getattr."""
-        if self._lcopy is not None:
-            self._drain_lcopy()
-        self._lcopy_pred = None
+        self._gfx.layer_drain(self._lrs, True)
+        self._lrs_layer = None
         _owner_done(owner)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         # Copy the visible self.w x self.h window of `layer` into the framebuffer at
-        # (cam_x, cam_y): native moy_gfx.blit_window (one flat per-row memcpy, ~7ms for
-        # a full frame) when present, else a memoryview row-copy fallback (no framebuf,
-        # so it also runs under the host parity test). Overwrites -- it's the background,
-        # drawn first each frame, erasing last frame's sprites for free.
+        # (cam_x, cam_y): the kernel's layer restore (one flat per-row memcpy, ~7ms
+        # for a full frame, or the copy predicted at sync_back). Overwrites --
+        # it's the background, drawn first each frame, erasing last frame's
+        # sprites for free.
         # SPEC.md 6: each axis of the camera clamps into [0, max(0, layer - screen)],
         # so the window never leaves the layer; on an axis where the layer is smaller
         # than the screen the camera is 0 and the screen past the layer keeps what it
@@ -2209,78 +2190,16 @@ class DeviceCanvas:
         self.flush_batch()
         _dirty = getattr(layer, "_batch_arr", None)
         _dirty = _dirty is not None and _dirty[0] > 4    # layer edited THIS frame
-        if getattr(layer, "_edited", False):
-            # Drawn by a raster this canvas does not see -- a Lua cart's libmoy
-            # verbs (runtime/lua_ext.py's _draw_layer sets it): edited too.
-            layer._edited = False
-            _dirty = True
         _fb = getattr(layer, "flush_batch", None)
         if _fb is not None:
             _fb()
-        cam_x = int(cam_x)
-        cam_y = int(cam_y)
-        mx = layer.w - self.w
-        my = layer.h - self.h
-        if cam_x > mx:
-            cam_x = mx
-        if cam_x < 0:
-            cam_x = 0
-        if cam_y > my:
-            cam_y = my
-        if cam_y < 0:
-            cam_y = 0
-        # Async layer copy (#54 Stage 2): if sync_back predicted THIS restore and
-        # kicked it on the GDMA engine at frame start, the ~7ms copy overlapped the
-        # cart's _update -- just wait out the tail (usually ~0) and we're done.
-        # A mispredicted in-flight copy is harmless: it painted a full-screen
-        # background that the sync path below fully overwrites. A layer that was
-        # EDITED this frame is a forced miss (the pre-kicked copy read stale
-        # pixels), so live layer edits stay exact at the cost of that frame's
-        # overlap.
-        pend = self._lcopy
-        if pend is not None:
-            self._lcopy = None
-            _t0 = _ticks_us()
-            _ok = True
-            try:
-                _ok = self._gfx.copy_wait()
-            except Exception:  # noqa: BLE001
-                self._async_ok = False
-            if _ok is False:
-                # copy_wait TRIPPED (#66): the GDMA copy hadn't finished within
-                # the bounded spin. Count it and force the miss path -- the sync
-                # blit below rewrites the same region, so pixels stay correct
-                # even if the late copy still lands (same source bytes).
-                self._lcopy_trips += 1
-                hit = False
-            else:
-                hit = (not _dirty and pend[0] is layer and pend[1] == cam_y
-                       and cam_x == 0 and layer.w == self.w)
-            self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
-            if hit:
-                self._arm_layer_pred(layer, cam_x, cam_y)
-                return
-        _t0 = _ticks_us()                       # #63 DRAW2: time the native window-copy
-        self._gfx.blit_window(self._buf, self.w, self.h,
-                              layer._buf, layer.w, cam_x, cam_y)
-        self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
-        self._arm_layer_pred(layer, cam_x, cam_y)
-
-    def _arm_layer_pred(self, layer, cam_x, cam_y):
-        # Arm next frame's async restore (#54 Stage 2) -- ONLY when the copy shape
-        # is a single contiguous memcpy covering the whole screen: cam_x==0, the
-        # layer exactly screen-wide, and cam_y + screen height inside the layer
-        # (a misprediction then just paints a background the sync path repaints).
-        # Scroll carts with WIDER layers (Sky Run) keep the sync blit_window; the
-        # static full-screen shape (sakura) is the one that wins the overlap.
-        if not self._async_ok or cam_x != 0 or layer.w != self.w:
-            return
-        lbuf = getattr(layer, "_buf", None)
-        if lbuf is None:
-            return
-        if (cam_y + self.h) * self.w * 2 > len(lbuf):
-            return
-        self._lcopy_pred = (layer, cam_y, self.w * self.h)
+        # The restore (native/moy_gfx/moy_gfx_kernels.h, mg_lr_blit): the clamp,
+        # the predicted copy taken when nothing moved -- same layer, same cam_y,
+        # not edited this frame -- and the synchronous copy otherwise, which
+        # writes over whatever a mispredicted copy painted.
+        self._gfx.layer_blit(self._lrs, self._buf, self.w, self.h, layer._buf,
+                             layer.w, layer.h, int(cam_x), int(cam_y), _dirty)
+        self._lrs_layer = layer
 
     def blit_strip(self, layer, dst_x=0, dst_y=0):
         # Copy ALL of `layer` (its full layer.w x layer.h RGB565 buffer) into the

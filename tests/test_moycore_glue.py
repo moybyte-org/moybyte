@@ -855,6 +855,17 @@ def test_the_object_valued_verbs_are_never_registry_entries(w):
     assert not (set(w.core.registered) & NOT_REGISTRABLE)
 
 
+def test_the_native_superset_names_are_never_trampolines(w):
+    """col and mouse are the run's C (moycore_superset.h): a trampoline
+    registered over them would put a crossing back into every frame that
+    calls them, which is what the cart path's zero-upcall gate counts."""
+    from runtime.lua_ext import NATIVE_NAMES
+
+    w.run()
+    assert NATIVE_NAMES >= {"col", "mouse"}
+    assert not (set(w.core.registered) & NATIVE_NAMES)
+
+
 def test_non_callable_namespace_entries_are_skipped(w):
     ns = make_ns(SOME_CONSTANT=7, some_table={"a": 1})
     w.run(ns=ns)
@@ -937,7 +948,7 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     # mark, an image's id. And the two layer natives are the RUNTIME's own C
     # (moycore_layers.h), installed by run_begin and hl_new, never registered.
     fields = {"__id", "__img", "__c", "__e", "__index"}
-    natives = {"__layer_canvas", "__layer_verb"}
+    natives = {"__layer_canvas", "__layer_verb", "__layer_blit"}
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
     gated = {n for n in wanted if n.startswith("__ed_")}
     assert gated, "the editor handles vanished from the prelude"
@@ -965,13 +976,8 @@ def test_a_layer_made_through_a_handle_is_pinned_by_the_run(w):
     assert (lay.w, lay.h) == (64, 32)
     # Its pixels went to the run, which draws into them with libmoy's verbs.
     assert ("layer_bind", 64, 32) in w.core.calls
-    reg["__draw_layer"](lid, 8, 9)
-    assert ("draw_layer", lay, 8, 9) in w.ns["_log"]
-    assert not getattr(lay._canvas, "_edited", False)
-    # A layer libmoy drew into reaches draw_layer marked, so the console takes
-    # no copy it predicted from the old pixels.
-    reg["__draw_layer"](lid, 8, 9, True)
-    assert lay._canvas._edited is True
+    # draw_layer is the run's own (moycore's __layer_blit): no handle for it.
+    assert "__draw_layer" not in reg
     # By TYPE, not by value: `64.0 == 64`, so a comparison alone cannot see
     # the coercion being dropped.
     assert isinstance(lay.w, int) and isinstance(lay.h, int), (lay.w, lay.h)
