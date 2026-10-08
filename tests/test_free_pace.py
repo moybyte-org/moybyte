@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from runtime.player import Player, FREE_DT_MAX
-from runtime.tick_model import TickScheduler
+from runtime.moy_play import Tick as TickScheduler
 from tools import gen_device_carts
 
 ROOT = Path(__file__).resolve().parent.parent

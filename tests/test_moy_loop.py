@@ -92,8 +92,8 @@ def test_a_frame_is_the_invariant_order(loop):
 def test_every_frame_makes_exactly_three_console_upcalls_and_no_other(loop):
     for i in range(20):
         frame(1000 + 50 * i)
-        assert L.upcalls()[0] == (3, 0, 0, 0)
-    assert L.upcalls()[1] == (60, 0, 0, 0)
+        assert L.upcalls()[0] == (3, 0, 0, 0, 0)
+    assert L.upcalls()[1] == (60, 0, 0, 0, 0)
 
 
 def test_a_service_is_called_up_only_while_it_is_live(loop):
@@ -104,19 +104,32 @@ def test_a_service_is_called_up_only_while_it_is_live(loop):
     frame(1050)
     frame(1100)
     assert loop.service_bits == [L.SVC_LINK, L.SVC_LINK]
-    assert L.upcalls()[0] == (3, 0, 0, 1)
+    assert L.upcalls()[0] == (3, 0, 0, 1, 0)
     loop.keep = 0                       # the match ended: the bit goes
     frame(1150)
     frame(1200)
     assert loop.service_bits == [L.SVC_LINK] * 3
-    assert L.upcalls()[0] == (3, 0, 0, 0)
+    assert L.upcalls()[0] == (3, 0, 0, 0, 0)
 
 
 def test_a_dev_line_is_one_more_console_upcall_on_the_frame_it_lands(loop):
     L.trace_feed(b"state\n")
     frame(1000)
     assert loop.lines == ["state"]
-    assert L.upcalls()[0] == (4, 0, 0, 0)
+    assert L.upcalls()[0] == (4, 0, 0, 0, 0)
+
+
+def test_an_upcall_with_no_vm_is_refused_and_counted(loop):
+    frame(1000)
+    t0 = L.upcalls()[1]
+    L.vm(False)
+    try:
+        assert L.word("state") == -3            # ABSENT
+        assert loop.lines == []
+    finally:
+        L.vm(True)
+    t1 = L.upcalls()[1]
+    assert t1[4] == t0[4] + 1 and t1[:4] == t0[:4]
 
 
 def test_quit_returns_before_the_frame_runs(loop):

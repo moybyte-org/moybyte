@@ -32,7 +32,7 @@ DIM, SAVER, BLANK = 1, 2, 3
 SVC_WEB, SVC_LINK, SVC_UPDATE, SVC_HEALTHY = 1, 2, 4, 8
 _UP_INPUT, _UP_POINTER, _UP_FRAME, _UP_WORD, _UP_SERVICE = range(5)
 _RAISED, _INTERRUPTED, _ABSENT, _EXIT = -1, -2, -3, -4
-_CLASSES = 4
+_CLASSES = 5
 _STAGES = 11
 
 _U32 = ctypes.c_uint32
@@ -71,6 +71,7 @@ _SIGS = (
     ("moy_loop_services", [], _U32),
     ("moy_devch_unread", [ctypes.c_char_p, ctypes.c_size_t], None),
     ("moy_loop_set_vm", [_B], None),
+    ("moy_loop_word", [ctypes.c_char_p], _I),
     ("moy_loop_set_capture", [_B], None),
     ("moy_loop_capture", [], _B),
     ("moy_loop_meter", [_I, ctypes.POINTER(_Meter)], _B),
@@ -238,6 +239,17 @@ def drive(handle_input, handle_pointer, frame, dt):
 
 def step():
     return _lib().moy_loop_step()
+
+
+def vm(up):
+    """Whether a VM runs: the host's never stops, so only a test clears it."""
+    _lib().moy_loop_set_vm(bool(up))
+
+
+def word(line):
+    """A dev-channel line to the console's words, as the kernel's channel
+    hands one up: its value, or a MOY_UP_* failure."""
+    return _lib().moy_loop_word(line.encode())
 
 
 def run():

@@ -1584,28 +1584,28 @@ if DONE == [None]:
 '''
 
 LOOP_TRACE = """\
-frame 0 0 inputs pointer:click present hi hp frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0 idle 0
-frame 1 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=49 up 3/0/0/0 idle 0
-frame 2 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=48 up 3/0/0/0 idle 0
-frame 3 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=47 up 3/0/0/0 idle 0
-frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew feed sleep=46 up 4/0/0/0 idle 0
-frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0 idle 0
-frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0 idle 0
-frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0 idle 0
-frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0 idle 0
-frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
-frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
-frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
-frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
-frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 2
-frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 2
-frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 2
-frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0 idle 2
-frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 3
-frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 0
-frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 0
+frame 0 0 inputs pointer:click present hi hp frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0/0 idle 0
+frame 1 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=49 up 3/0/0/0/0 idle 0
+frame 2 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=48 up 3/0/0/0/0 idle 0
+frame 3 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=47 up 3/0/0/0/0 idle 0
+frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew feed sleep=46 up 4/0/0/0/0 idle 0
+frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0/0 idle 0
+frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0/0 idle 0
+frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0/0 idle 0
+frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0 idle 0
+frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
+frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
+frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
+frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
+frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 2
+frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 2
+frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 2
+frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0 idle 2
+frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 3
+frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 0
+frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 0
 meters inputs:20:0 dev:20:0 idle:20:0 pointer:20:0 present:20:0 frame:20:0 backlight:20:0 pump_tail:20:0 tail:20:None pace:20:0 account:20:0
-upcalls 61/0/0/0
+upcalls 61/0/0/0/0
 unregistered 3
 """
 
@@ -1908,11 +1908,91 @@ call 0 8 -1 0
 call 0 9 6 0
 """
 
+# -- the tick model (#224, sprint 4: native/moy_play/moy_tick.c) -----------------
+#
+# The scheduler that paces a cart, driven through scripted loops -- a light
+# scene, two late windows, a heavy scene, the probes back down, stalls, a
+# tick-bound loop, the uncap and FREE switches, a thirty cart -- with its
+# answers summed per stretch. The model is C in single precision on every
+# tier, so each VM's log is the board's.
+
+TICK_DRIVER = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+
+import moy_play
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def run(name, t, frames, D, T, cost, stall_every=0, stall=0.7):
+    # A board loop: a drawing frame costs D ms, a tick-only one T ms; every
+    # `stall_every`-th frame stalls. Integer milliseconds, so the dt each VM
+    # hands the model is the same float.
+    n = d = 0
+    for f in range(frames):
+        ms = D if t.draw else T
+        if stall_every and f % stall_every == stall_every - 1:
+            ms = stall
+        t.plan(ms / 1000)
+        if t.n:
+            t.note_tick(cost / 1000)
+        n += t.n
+        d += t.draw
+    say(name, "n", n, "drew", d, "div", t.div, "ticks", t.ticks, "draws", t.draws,
+        "misses", t.misses, "probing", t.probing)
+
+
+t = moy_play.Tick()
+say("idle", t.rate, t.div, t.n, t.draw, t.ticks)
+t.start(60)
+say("start", t.rate, t.tick_ms, t.div)
+run("light", t, 300, 10, 2, 1)
+run("late", t, 300, 25, 8, 1)
+run("late2", t, 300, 25, 8, 1)
+run("heavy", t, 400, 45, 3, 1)
+run("cheap", t, 800, 10, 2, 1)
+run("cheaper", t, 3000, 8, 2, 1)
+run("stalls", t, 600, 12, 2, 1, stall_every=40, stall=700)
+run("tickbound", t, 600, 20, 30, 20)
+t.uncap_mode(True)
+run("uncapped", t, 200, 10, 2, 1)
+t.uncap_mode(False)
+t.steady_mode(False)
+run("free", t, 300, 40, 3, 1)
+t.start(45)
+say("thirty", t.rate, t.tick_ms, t.div, t.uncapped)
+run("thirty", t, 400, 33, 33, 1)
+run("thirty_slow", t, 400, 50, 10, 1)
+say("fits", t.fits(1), t.fits(2), t.fits(4))
+print("DRIVER_DONE")
+'''
+
+TICK_TRACE = """idle 0 1 0 False 0
+start 60 16 1
+light n 68 drew 68 div 1 ticks 68 draws 68 misses 0 probing False
+late n 396 drew 247 div 2 ticks 464 draws 315 misses 0 probing False
+late2 n 335 drew 188 div 2 ticks 799 draws 503 misses 0 probing False
+heavy n 1080 drew 400 div 2 ticks 1879 draws 903 misses 0 probing False
+cheap n 127 drew 63 div 2 ticks 2006 draws 966 misses 0 probing False
+cheaper n 547 drew 522 div 1 ticks 2553 draws 1488 misses 0 probing False
+stalls n 268 drew 223 div 1 ticks 2821 draws 1711 misses 15 probing False
+tickbound n 601 drew 600 div 1 ticks 3422 draws 2311 misses 610 probing False
+uncapped n 121 drew 200 div 1 ticks 3543 draws 2511 misses 610 probing False
+free n 253 drew 89 div 3 ticks 3796 draws 2600 misses 610 probing False
+thirty 30 33 1 False
+thirty n 396 drew 396 div 1 ticks 396 draws 396 misses 0 probing False
+thirty_slow n 600 drew 400 div 1 ticks 996 draws 796 misses 0 probing False
+fits False False False
+"""
+
 SURVIVAL = {"input": (INPUT_DRIVER, INPUT_TRACE),
             "glass": (GLASS_DRIVER, GLASS_TRACE),
             "loop": (LOOP_DRIVER, LOOP_TRACE),
             "links": (LINKS_DRIVER, LINKS_TRACE),
-            "session": (SESSION_DRIVER, SESSION_TRACE)}
+            "session": (SESSION_DRIVER, SESSION_TRACE),
+            "tick": (TICK_DRIVER, TICK_TRACE)}
 
 
 def _survival_trace(name, exe, tmp_path, tag, prelude=""):

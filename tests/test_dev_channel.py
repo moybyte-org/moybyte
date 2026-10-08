@@ -146,7 +146,7 @@ def test_state_reports_every_frame_stage_and_the_ladder_from_the_kernel(monkeypa
     assert st["stages"]["tail"]["budget_us"] is None
     assert st["psave"] == [False, 300]
     assert st["idle"]["blank"] == 300
-    assert st["upcalls"] == [3, 0, 0, 0]
+    assert st["upcalls"] == [3, 0, 0, 0, 0]
 
 
 def test_state_reports_no_stages_at_all_where_no_kernel_loop_runs(monkeypatch):

@@ -62,14 +62,14 @@ part that remains Python and why.
 | file | lands in | deleted | stays, and why |
 |---|---|---|---|
 | `runtime/player.py` | `+native/moy_play/moy_play.c` | the run's lifecycle, the frame (key edges, ticks, draw, audio pull, the periodic pmem flush, `quit()`), the crash capture, the hold-to-exit gesture, pacing, the run's diag lines; the error, fit and newer-console panels once the chrome lands (§6 step 2) | the **Python runtime**: compile, auto-native, the code cache, the namespace `make_api` builds, a traceback's cart line. It is the runtime map's Python row (§3.3). The file keeps its name |
-| `runtime/tick_model.py` | `+native/moy_play/moy_tick.c` | all of it | — |
+| `runtime/tick_model.py` | `native/moy_play/moy_tick.c` | all of it | — |
 | `device/moycore_glue.py` | `+native/moycore/moycore_run.c` and the map's Lua and wasm rows | all of it: `MoycoreRun`'s refresh, drain and persist; `WasmRun`, `CartFrame`, `aot_path`, `wasm_head`, `missing_imports`, the fit check, the module's signature check, `reserve_p8_memory`, `make_runtimes` | — |
 | `native/moycore/modmoycore.c` | **split**: `+native/moycore/moycore_run.c` (no `py/` include: the console over kernel buffers, the snapshot, the audio queue into the run's session, pmem, the layer and image seams, the wasm session's requests through the kernel's volume) and `modmoycore.c` (the binding) | `read_on_vm`, `files_on_vm` and the root pointers they read | the binding, for a Lua run that keeps the VM (§2): `register()`'s trampolines live only there |
 | `runtime/lua_ext.py` | the C name table and the handles prelude as Lua source (`+native/moycore/prelude.lua`, compiled into the image) | the snapshot, view and audio seams, `install_handles`, `PRELUDE_HANDLES`, the deny lists | the registrations a VM-kept Lua run needs: `open_editor` and `PRELUDE_EDITOR`, `wifi`, the console verbs, the pins, the app roles |
 | `runtime/lua_host.py`, `runtime/wasm_host.py` | the host's ctypes binding of `moy_play` | both | — |
 | `runtime/device_boot.py`'s runtime probe and map | the runtime map | that half | its boot screen is sprint 3's |
 | `runtime/cart_files.py` | `native/moy_store/` (the cart's written files over `moy_fs`'s crash-safe write) | all of it | — |
-| `runtime/moyimg.py`'s decoder and `runtime/moy_image.py`'s `Image` | `+native/moy_store/moy_img.c`, a C port of the moyimg codec (none exists in C: `moy_cat.c` only gathers a cart's `.moyimg` files), and an IMAGE handle (§3.1) | the Python decode on the run path | the codec's Python stays the reference the port's parity test reads, and the encoder Paint uses; `Image` stays a Python wrapper over the handle for Python carts; the wallpaper sidecar is sprint 5's |
+| `runtime/moyimg.py`'s decoder and `runtime/moy_image.py`'s `Image` | `native/moy_store/moy_img.c`, a C port of the moyimg codec (none exists in C: `moy_cat.c` only gathers a cart's `.moyimg` files), and an IMAGE handle (§3.1) | the Python decode on the run path | the codec's Python stays the reference the port's parity test reads, and the encoder Paint uses; `Image` stays a Python wrapper over the handle for Python carts; the wallpaper sidecar is sprint 5's |
 | the scene world (`runtime/widgets.py`'s scenes, the `.moyscene` parse) | `moy_play.c`'s scene rows | the run path's parse and placement | the Scene tab's editing, an app |
 | `runtime/netplay.py` | `+native/moy_play/moy_match.c` | all of it | — |
 | `runtime/players.py` | `PlayerRouter`: `moy_input`'s player slots; `NetService`: `moy_match.c` | all of it | `LoopbackNet` becomes the C binding's loopback, for the host tests |
@@ -289,7 +289,7 @@ with radios up is too small to hold two task stacks at once (#224).
 loop's classes are CONSOLE, APP, DRIVER, SERVICE and a new **REFUSED**: an
 upcall attempted with no VM or nothing registered, which `up()` answers ABSENT
 today without counting. The `mp_call_*` sites reachable from `moy_loop` and
-`moy_play` are listed by file and function in `+native/moy_play/upcall_sites.txt`,
+`moy_play` are listed by file and function in `native/moy_play/upcall_sites.txt`,
 and a test holds the tree's sites to that list as `tests/test_mp_task_calls.py`
 holds the `mp_task` copy to its record: a new site fails it until it is
 counted and listed.

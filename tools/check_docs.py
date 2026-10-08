@@ -139,6 +139,10 @@ NOT_OURS = (
     # The Python frame loop, deleted by sprint 3's frame-tail pass (2026-10-08)
     # when native/moy_kernel/moy_loop.c took the frame.
     "runtime/frame_loop.py",
+    # The Python tick model, deleted by sprint 4's step 1 when
+    # native/moy_play/moy_tick.c took it. The kernel plans name it to say what
+    # crossed.
+    "runtime/tick_model.py",
 )
 
 

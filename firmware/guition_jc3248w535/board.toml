@@ -114,6 +114,13 @@ why  = """
 ctypes. Here `moy_input` is a compiled-in usermod (native/.staged/moy_input)."""
 
 [[modules.shared.deny]]
+file = "moy_play.py"
+kind = "host-only"
+why  = """
+`moy_play` for CPython: compiles native/moy_play's Player and dlopens it
+through ctypes. Here `moy_play` is the compiled-in `moy_play` usermod (native/.staged/moy_play)."""
+
+[[modules.shared.deny]]
 file = "moy_loop.py"
 kind = "host-only"
 why  = """
@@ -340,6 +347,13 @@ ships on every console board or on none, so this board takes it. It is the
 floor board for memory, and the on-glass suite's wasm checks are the gate on
 it. The run stack's size and placement are this board's MOY_WASM_* settings in
 mpconfigboard.h, with the measurement that chose them."""
+
+[[native.shared.take]]
+module = "moy_play"
+why = """
+The kernel's Player (docs/kernel_cartpath_2026-10.md): the tick model, the
+runtime map and the VM-free rule, and the module `moy_play`. Every console
+takes it."""
 
 [[native.shared.take]]
 module = "moy_kernel"

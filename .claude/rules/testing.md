@@ -47,7 +47,7 @@ paths:
     them; the inline tests hold them.
   - **What the Player still adds over `run_cart` is TIME**: run_cart calls
     update once per frame at a fixed 1/30, while the Player's scheduler
-    (`runtime/tick_model.py`, #217) places a cart's declared rate on the host's
+    (`native/moy_play/moy_tick.c`, #217) places a cart's declared rate on the host's
     clock, with catch-up, a draw divisor and a press-edge latch per logic tick.
     That is why the pacing tests live here (`tests/test_tick_model.py` and the
     btnp pins in `tests/test_import_p8.py`) and are worth keeping.

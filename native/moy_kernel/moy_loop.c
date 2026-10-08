@@ -449,10 +449,9 @@ uint32_t moy_loop_drawn(void) {
 // -- upcalls ------------------------------------------------------------------------
 
 static int up(int which, uint32_t arg, const char *line, int cls) {
-    if (!L.vm || L.up == NULL) {
-        return MOY_UP_ABSENT;
-    }
-    if (which <= MOY_UP_FRAME && !(L.registered & (1u << which))) {
+    if (!L.vm || L.up == NULL
+        || (which <= MOY_UP_FRAME && !(L.registered & (1u << which)))) {
+        moy_loop_count(MOY_UPC_REFUSED);
         return MOY_UP_ABSENT;
     }
     moy_loop_count(cls);

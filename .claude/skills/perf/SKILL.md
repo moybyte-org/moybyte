@@ -109,7 +109,7 @@ at install so an unarmed frame carries no wrapper.
   `gc.mem_alloc()` walks the whole heap -- tens of ms a call on a T-Deck --
   so take it over a window of seconds, never per frame.
 - **FRAMESKIP and `FPS_GOVERNOR` are deleted**; the tick model (#217,
-  `runtime/tick_model.py`) is the one scheduler.
+  `native/moy_play/moy_tick.c`) is the one scheduler.
 - The launcher's live wallpaper defeats the redraw-on-change gate, so the tile
   grid re-renders at wallpaper rate: #66 sizes it, #73's per-surface
   compositing is the architectural fix.

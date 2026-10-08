@@ -63,6 +63,7 @@
 
 #include "moy.h"
 #include "moycore_layers.h"
+#include "../moy_kernel/moy_loop.h"     // the crossings, counted by class
 
 // The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
 // build, absent on the host/unix/wasm ones, which then use plain realloc.
@@ -882,6 +883,7 @@ static char g_pyerr[192];
 static bool call_py(mp_obj_t fn, size_t n, const mp_obj_t *args, mp_obj_t *ret)
 {
     nlr_buf_t nlr;
+    moy_loop_count(MOY_UPC_APP);
     if (nlr_push(&nlr) == 0) {
         *ret = mp_call_function_n_kw(fn, n, 0, args);
         nlr_pop();
@@ -2515,12 +2517,19 @@ static void read_on_vm(void *arg)
     g_wread = NULL;
 }
 
+// The session's read, run on the VM's task: one SERVICE crossing.
+static void read_asked(void *arg)
+{
+    moy_loop_count(MOY_UPC_SERVICE);
+    read_on_vm(arg);
+}
+
 static uint32_t hw_read(void *user, const char *name, uint32_t offset,
                         uint8_t *dst, uint32_t len)
 {
     wread_t q = { name, NULL, offset, dst, len, 0 };
     (void)user;
-    if (moy_wasm_on_vm(read_on_vm, &q) != 0) return 0;
+    if (moy_wasm_on_vm(read_asked, &q) != 0) return 0;
     return q.got;
 }
 
@@ -2559,6 +2568,7 @@ static void files_on_vm(void *arg)
     wfiles_t *q = (wfiles_t *)arg;
     mp_obj_t files = MP_STATE_VM(moycore_wasm_files);
     nlr_buf_t nlr;
+    moy_loop_count(MOY_UPC_SERVICE);
     q->r = q->op == FOP_WRITE ? MOY_WASM_FAILED : -1;
     if (files == MP_OBJ_NULL || files == mp_const_none) return;
     if (nlr_push(&nlr) == 0) {
@@ -2638,6 +2648,7 @@ static void cfg_on_vm(void *arg)
 {
     wcfg_t *q = (wcfg_t *)arg;
     nlr_buf_t nlr;
+    moy_loop_count(MOY_UPC_SERVICE);
     q->val = NULL;
     if (nlr_push(&nlr) == 0) {
         q->val = h_cfg(NULL, q->key);

@@ -626,7 +626,7 @@ def the_frame_is_the_kernels(board):
     board.state()
     time.sleep(0.5)
     st = board.state()
-    assert st["upcalls"] == [3, 0, 0, 0], st["upcalls"]
+    assert st["upcalls"] == [3, 0, 0, 0, 0], st["upcalls"]
     assert sorted(st["stages"]) == sorted(KERNEL_STAGES), st["stages"]
     assert board.pyval("__import__('moy_loop').frames() > 0", strict=True)
 

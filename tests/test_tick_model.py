@@ -1,16 +1,17 @@
 """The tick model (#217): one scheduler in the Player for a cart's logic and
 its draw. Logic at the cart's declared rate, never reduced; draw on an integer
 divisor chosen from what draw frames cost; STEADY / FREE is how long the
-divisor remembers. `runtime/tick_model.py` is pure arithmetic on an injected
-dt, so the first half walks exact trajectories; the second half drives the
+divisor remembers. The model (`native/moy_play/moy_tick.c`, `moy_play.Tick`)
+is pure arithmetic on an injected dt, so the first half walks exact
+trajectories; the second half drives the
 real Player through `ws.frame`."""
 
 import time
 
 import pytest
 
-from runtime import tick_model
-from runtime.tick_model import TickScheduler, MAX_CATCHUP, MAX_DIV
+from runtime import moy_play as tick_model
+from runtime.moy_play import Tick as TickScheduler, MAX_CATCHUP, MAX_DIV
 from ws_helpers import build_ws as _ws
 
 
@@ -335,7 +336,11 @@ def test_a_step_up_needs_two_late_windows_in_a_row():
     runs two ticks every other cycle -- half a tick late) is not yet a scene,
     and the second one in a row is."""
     s = _sched(60)
-    _loop(s, 2 * W, D=0.010, T=0.002)         # warm-up + one clean window
+    # Warm-up + one clean window, and a frame or two into the next, so each
+    # late window below closes inside its own late stretch: the model sums
+    # its window in single precision, and a stretch that ends exactly on a
+    # window's edge leaves which frame closes it to rounding.
+    _loop(s, 2 * W + 0.05, D=0.010, T=0.002)
     assert s.div == 1
     _loop(s, W, D=0.025, T=0.0075, tick_cost=0.001)
     assert s.div == 1, "one late window is not yet a scene"
@@ -412,7 +417,7 @@ def test_the_first_window_teaches_nothing_and_the_costs_are_slow_averages():
         s.plan(0.002)
     d1 = s.draw_frame
     s.plan(0.700)                            # a stall is one sample in eight too
-    assert abs(s.draw_frame - (d1 + (0.7 - d1) * tick_model.ALPHA)) < 1e-9
+    assert abs(s.draw_frame - (d1 + (0.7 - d1) * tick_model.ALPHA)) < 1e-6
 
 
 def test_switching_steady_live_keeps_n_and_the_costs():

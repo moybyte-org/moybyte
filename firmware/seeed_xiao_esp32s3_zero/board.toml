@@ -315,6 +315,12 @@ Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""
 
 [[native.shared.deny]]
+module = "moy_play"
+why = """
+The kernel's Player (docs/kernel_cartpath_2026-10.md). This board runs no
+carts: the browser it serves plays them."""
+
+[[native.shared.deny]]
 module = "moy_gfx"
 why = """
 The RGB565 draw kernel (fill/fill_rect/blit565/spr_batch and the #167 tri/sspr/

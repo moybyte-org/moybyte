@@ -1,0 +1,28 @@
+# Every call into Python (mp_call_*, mp_sched_schedule) in the trees the run
+# path lives in: native/moy_kernel, native/moy_play, native/moycore,
+# native/moy_wasm, native/moy_store, native/moy_net, native/moy_input
+# (docs/kernel_cartpath_2026-10.md §4). tests/test_upcall_sites.py holds the
+# tree to this list: a site added, moved or removed fails it until its row is
+# written here, with the class it is counted under or why it is no crossing of
+# its own.
+#
+# A row: file, enclosing function, sites in it, then what it is.
+#   counted CLASS   a crossing moy_loop counts (CONSOLE APP DRIVER SERVICE)
+#   inside FN       part of the crossing FN counts
+#   binding         Python called this C; it calls back within that call
+#   vm              the VM's own start, on the VM's task with no loop running
+
+native/moy_kernel/modmoy_loop.c  vm_up  4  counted CONSOLE SERVICE: the loop's dispatcher, counted by moy_loop.c's up()
+native/moycore/modmoycore.c  call_py  1  counted APP: a Lua cart's trampoline into a name a VM-kept run registered
+native/moycore/modmoycore.c  read_on_vm  1  inside read_asked: a wasm cart's read on the VM's task, through the storage gate
+native/moycore/modmoycore.c  wasm_read_now  1  inside read_asked: the cart's file opened by the VM
+native/moycore/modmoycore.c  files_call  1  inside files_on_vm: a wasm cart's written-file call, counted SERVICE there
+native/moy_wasm/modmoy_wasm.c  read_module  1  binding: a module's bytes read for the Python glue's open
+native/moy_wasm/modmoy_wasm.c  verify_module  1  binding: the module's signature, checked for the Python glue's open
+native/moy_store/modmoy_store.c  int_or  1  binding: a store verb's argument
+native/moy_store/modmoy_store.c  mod_seed  2  binding: the seed's progress callback and an entry's int
+native/moy_store/moy_card.c  io  1  binding: the card's block device, a Python driver under the store's verbs
+native/moy_store/moy_kvfs.c  moy_kvol_vm_mount  1  vm: internal flash mounted at a VM's start
+native/moy_net/modmoy_net.c  loads  1  binding: a sync batch's JSON decoded for the Python caller
+native/moy_input/modmoy_input.c  attr_or  1  binding: the pointer a Python cart reads, from its own input object
+native/moy_input/modmoy_input.c  input_pointer_state  1  binding: the same

@@ -860,7 +860,9 @@ def _remote_state(ws):
         # stage this board has no hook for and for a whole tier with no shared
         # frame loop -- never 0, which is what a broken meter reads as.
         st["stages"] = _stage_report()
-        st["upcalls"] = None if _loop is None else list(_loop.upcalls()[0])
+        ups = None if _loop is None else _loop.upcalls()
+        st["upcalls"] = None if ups is None else list(ups[0])
+        st["upcall_totals"] = None if ups is None else list(ups[1])
     except Exception as exc:  # noqa: BLE001
         st["stages_err"] = str(exc)
     try:

@@ -69,9 +69,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
 try:
-    from tick_model import TickScheduler
+    from moy_play import Tick as TickScheduler     # the kernel's tick model
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.tick_model import TickScheduler
+    from runtime.moy_play import Tick as TickScheduler
 
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
@@ -624,6 +624,7 @@ class Player:
         # tick period while a GAME is paced and 0 otherwise -- a flat attribute,
         # told to the kernel's loop (moy_loop.tick) where it paces frames.
         self.sched = TickScheduler()
+        self._tick_dt = 1.0 / 30
         self.tick_ms = 0
         self._n_ticks = 1             # frame_plan's answer, run by tick()
         self._keyp_latch = 0          # a keyp edge waiting for a logic tick
@@ -1590,8 +1591,11 @@ class Player:
             rate = 30
         ws = self.ws
         self.sched.start(rate, getattr(ws, "steady", True))
-        self.sched.uncapped = bool(getattr(ws, "_uncap", False))
+        self.sched.uncap_mode(bool(getattr(ws, "_uncap", False)))
         self.tick_ms = self.sched.tick_ms
+        # The dt a cart's tick is handed, in this VM's own float: the model
+        # paces in C's single precision, the cart reads the exact period.
+        self._tick_dt = 1.0 / self.sched.rate
         if _loop is not None:
             _loop.tick(self.tick_ms)
         self._keyp_latch = 0
@@ -1879,7 +1883,7 @@ class Player:
                 if np is not None:
                     self._run_ticks(0 if stalled else 1, dt, render)
                 elif self.tick_ms:
-                    self._run_ticks(self._n_ticks, self.sched.period, render)
+                    self._run_ticks(self._n_ticks, self._tick_dt, render)
                 else:
                     self._run_ticks(1, self._loop_dt(dt), render)
                 _tm = _ticks_us() if _perf else 0

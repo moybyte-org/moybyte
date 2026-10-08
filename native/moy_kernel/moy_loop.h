@@ -30,7 +30,9 @@
 // stack's three and the console's dev words; APP an app's hooks; DRIVER a
 // tier's harness; SERVICE a kernel service calling Python (the webhost's
 // Python routes, the link's netplay drain) -- zero on a frame where nothing
-// asked for it, which is the gate.
+// asked for it, which is the gate. REFUSED is an upcall attempted while no VM
+// runs or nothing is registered for it: answered ABSENT, and counted, so a
+// path that still reaches for Python shows on a run that has none.
 
 #ifndef MOY_LOOP_H
 #define MOY_LOOP_H
@@ -66,7 +68,8 @@ enum {
     MOY_UPC_APP = 1,
     MOY_UPC_DRIVER = 2,
     MOY_UPC_SERVICE = 3,
-    MOY_UPC_CLASSES = 4,
+    MOY_UPC_REFUSED = 4,
+    MOY_UPC_CLASSES = 5,
 };
 
 // What an upcall answers: >= 0 is its value (the frame's: the console's

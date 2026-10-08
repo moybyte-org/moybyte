@@ -106,7 +106,7 @@ NATIVE = {
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
                        "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                       "moy_spine", "moy_kernel", "moy_glass", "moy_input",
+                       "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
                        "moy_net"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
@@ -115,7 +115,7 @@ NATIVE = {
     # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_c6", "moy_prof", "moy_wasm",
-           "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
+           "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
            "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # four P4 modules are the SILICON tier (native/p4, a second board.toml
@@ -125,14 +125,14 @@ NATIVE = {
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_c6", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                   "moy_spine", "moy_kernel", "moy_sd", "moy_glass", "moy_input",
+                   "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
                    "moy_net"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml); moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
-                   "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel",
+                   "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
                    "moy_sd", "moy_glass", "moy_input", "moy_net"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. Besides the store, the kernel's entry (a serial-only
@@ -145,7 +145,7 @@ NATIVE = {
     "zero": {"moy_web", "moy_index", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
-            "moy_input", "moy_net", "moy_kernel"},
+            "moy_input", "moy_net", "moy_kernel", "moy_play"},
 }
 
 # A usermod that registers more than its own name: moy_kernel is the kernel's
@@ -179,18 +179,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
-                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
                        "native_build", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "native_build",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -199,7 +199,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
              "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -207,7 +207,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 

@@ -9,7 +9,7 @@
 //                      dev words, truthy when the line asked for the REPL
 //   unregister()       the upcalls dropped
 //   step(), run()      one frame / until QUIT, INTERRUPT or STOPPED
-//   upcalls()          ((console, app, driver, service) of the last frame,
+//   upcalls()          ((console, app, driver, service, refused) of the last frame,
 //                       the same in total)
 //   tick(ms), capture([on]), meters(), meters_reset(), pump(), lit(on),
 //   health(on), frames(), drawn()
@@ -231,7 +231,7 @@ static mp_obj_t loop_run(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(loop_run_obj, loop_run);
 
-static mp_obj_t tuple4(const uint32_t v[MOY_UPC_CLASSES]) {
+static mp_obj_t tuple_classes(const uint32_t v[MOY_UPC_CLASSES]) {
     mp_obj_t t[MOY_UPC_CLASSES];
     for (int i = 0; i < MOY_UPC_CLASSES; i++) {
         t[i] = mp_obj_new_int_from_uint(v[i]);
@@ -242,7 +242,7 @@ static mp_obj_t tuple4(const uint32_t v[MOY_UPC_CLASSES]) {
 static mp_obj_t loop_upcalls(void) {
     uint32_t f[MOY_UPC_CLASSES], t[MOY_UPC_CLASSES];
     moy_loop_upcalls(f, t);
-    mp_obj_t r[2] = {tuple4(f), tuple4(t)};
+    mp_obj_t r[2] = {tuple_classes(f), tuple_classes(t)};
     return mp_obj_new_tuple(2, r);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(loop_upcalls_obj, loop_upcalls);
