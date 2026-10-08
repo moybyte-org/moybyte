@@ -46,6 +46,8 @@ enum {
     MOY_KIND_PEER = 7,      // the radio link's peers
     MOY_KIND_AUDIO = 8,     // audio sessions, one per owner
     MOY_KIND_CLIP = 9,      // the sample voice's clips (native/moy_audio)
+    MOY_KIND_IMAGE = 10,    // a run's decoded pictures (native/moy_play)
+    MOY_KIND_ACTOR = 11,    // a run's scene actors (native/moy_play)
 };
 
 enum {

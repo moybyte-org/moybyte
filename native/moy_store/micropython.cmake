@@ -13,6 +13,7 @@ target_sources(usermod_moy_store INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_seed.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_journal.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_pack.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_img.c
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine/moy_json.c)
 target_include_directories(usermod_moy_store INTERFACE ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine)
