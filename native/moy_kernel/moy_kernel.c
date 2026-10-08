@@ -961,6 +961,8 @@ bool moy_kernel_plain_web(void) {
 }
 
 extern bool moy_kvol_vm_mount(void) __attribute__((weak));
+// moy_alloc's registry: the buffers the swept VM's views named.
+extern void moy_alloc_vm_swept(void) __attribute__((weak));
 
 // kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
 // N times with the kernel's drivers alive, each one's heaps printed before the
@@ -1168,6 +1170,9 @@ soft_reset_exit:
 
     gc_sweep_all();
     moy_glass_vm_swept();
+    if (moy_alloc_vm_swept != NULL) {
+        moy_alloc_vm_swept();
+    }
 
     // Free any native code pointers that point to iRAM.
     esp_native_code_free_all();

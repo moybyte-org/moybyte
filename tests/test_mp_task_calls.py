@@ -77,6 +77,23 @@ def test_the_kernels_copy_is_the_record_plus_its_own_calls():
     assert "moy_kernel_pins_deinit();" in src
 
 
+def test_the_teardown_gives_the_vms_off_heap_buffers_back():
+    """moy_alloc's registry outlives the VM, and the views that named its
+    buffers do not: after the sweep the teardown frees every buffer still
+    live. Without it a soft reset stranded what a VM held at its end (on the
+    Guition S3 a cover's bytes and its decode scratch, 46,456 B of PSRAM a
+    cycle) and a few dozen `kstop` cycles ran the boot out of memory. The
+    on-glass half is each console suite's `kstop 20`."""
+    with open(KERNEL) as f:
+        calls = g.call_list(f.read(), ("moy_vm_task",))
+    i = calls.index
+    assert i("call gc_sweep_all") < i("call moy_alloc_vm_swept") < i("call mp_deinit")
+    with open(os.path.join(ROOT, "native", "moy_alloc", "modmoy_alloc.c")) as f:
+        alloc = f.read()
+    body = alloc.split("void moy_alloc_vm_swept(void) {", 1)[1].split("\n}\n", 1)[0]
+    assert "heap_caps_free(node->ptr);" in body and "moy_buf_live = node->next;" in body
+
+
 def test_comments_strings_and_formatting_are_not_changes():
     src = _main_c("v1.29.0")
     noisy = (src.replace("gc_sweep_all();", "gc_sweep_all( /* foo(); */ );  // bar();")

@@ -371,3 +371,8 @@ def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
 
 def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
     on_glass.wasm_low_water_with_radios_up(board, wasm)
+
+
+# LAST in the file: twenty soft resets end on a freshly started VM.
+def test_twenty_soft_resets_leave_psram_flat(board):
+    on_glass.soft_resets_leave_psram_flat(board, n=20)

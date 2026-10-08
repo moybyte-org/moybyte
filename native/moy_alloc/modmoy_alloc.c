@@ -159,6 +159,23 @@ static mp_obj_t moy_alloc_free(mp_obj_t view_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_alloc_free_obj, moy_alloc_free);
 
+// The VM's teardown, after its sweep (native/moy_kernel/moy_kernel.c): every
+// view that named a registry buffer died with the heap, so every buffer still
+// live is unreachable and goes back now. A cover's bytes and its decode scratch
+// are what a soft reset used to strand, 46,456 B of PSRAM a cycle.
+void moy_alloc_vm_swept(void) {
+#if MOY_HAVE_HEAP_CAPS
+    while (moy_buf_live != NULL) {
+        moy_buf_node_t *node = moy_buf_live;
+        moy_buf_live = node->next;
+        heap_caps_free(node->ptr);
+        heap_caps_free(node);
+    }
+    moy_buf_count = 0;
+    moy_buf_bytes = 0;
+#endif
+}
+
 // stats() -> (live_buffers, live_bytes) for the MEMX diag line.
 static mp_obj_t moy_alloc_stats(void) {
 #if MOY_HAVE_HEAP_CAPS

@@ -508,6 +508,43 @@ def idle_timeout_restored(board):
     assert board.state()["psave"][1] == 300
 
 
+def _kstop_after(line):
+    """`KSTOP i/n after psram=FREE/LARGEST int=... dma=...` -> (i, free, largest)."""
+    head, rest = line.split("KSTOP ", 1)[1].split(" ", 1)
+    free, largest = rest.split("psram=", 1)[1].split(" ", 1)[0].split("/")
+    return int(head.split("/")[0]), int(free), int(largest)
+
+
+def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
+    """`kstop N`: N soft resets of the VM with the kernel's drivers alive
+    (docs/kernel_survival_2026-10.md section 7.5). With the VM down, PSRAM free
+    and its largest block are the same after every cycle: whatever a VM left
+    behind would compound into a boot that runs out (the Guition S3 stranded
+    a cover's bytes and its decode scratch, 46,456 B a cycle, until the
+    teardown gave moy_alloc's registry back). The first cycle is the
+    baseline: it is the one that creates the kernel's loop task."""
+    import time
+    board.cmd("kstop %d" % n, wait_for="REMOTE kstop")
+    after = []
+    end = time.time() + n * per_cycle
+    while len(after) < n and time.time() < end:
+        line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
+        if line is not None and " after " in line:
+            after.append(_kstop_after(line))
+    assert len(after) == n, "only %d of %d soft resets came back" % (len(after), n)
+    base = after[0][1:]
+    drift = [a for a in after if a[1:] != base]
+    assert not drift, "PSRAM (free, largest) after cycle 1 %s, then %s" % (base, drift)
+    end = time.time() + 120.0
+    while True:                            # the last VM up to its desk
+        try:
+            if board.state()["stack"]:
+                break
+        except RuntimeError:
+            pass
+        assert time.time() < end, "the console never came back after kstop"
+
+
 def mem_reports_the_heap(board):
     line = board.cmd("mem", wait_for="REMOTE mem")
     assert line is not None and "live=" in line and "free=" in line, line
