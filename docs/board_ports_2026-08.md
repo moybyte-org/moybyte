@@ -28,8 +28,8 @@ own board-dir README and in the sections below.
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
 | input drivers | one copy each | `native/moy_input` (the touch controllers, the T-Deck keyboard and trackball, selected by a board's `MOY_INPUT_*` defines), `native/moy_flush`, `native/moy_glass`'s banded compositor |
-| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `frame_loop.FrameLoop`, and every console board rides it |
-| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is the kernel's (`native/moy_kernel/moy_loop.c`, #224), and every console board hands its console to it |
+| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | main.py returns; the kernel runs the loop |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
 | CI legs + cache keys | one include-row per board | derived from the board list |
 | test tables (NATIVE/HOST_ONLY/WIRING…) | one row per board | deliberate tripwires — keep |
@@ -236,9 +236,9 @@ the board's I2S pins (and a codec, `MOY_AUDIO_CODEC_*`) in `mpconfigboard.h`
 
 **Stage 6 — the console.** run_desktop = construct compositor/canvas/inputs,
 `DeviceBoot` → `wire_workstation_core` → services (`ws.updater`/`ws.webhost`)
-→ `IdleBlank` + `DevChannel` (+ board extras via its `extra`/`env` hooks) →
-the board's `poll_inputs`/`present`/`tail`/`account` hooks + the shared
-`frame_loop.FrameLoop`. Exit criteria, all three: the desktop on glass;
+→ `DevChannel` (+ board extras via its `extra`/`env` hooks) → `Desktop.run`,
+which binds the board's input hardware into the kernel's input stage and
+hands the console to the kernel's loop (`native/moy_kernel/moy_loop.c`). Exit criteria, all three: the desktop on glass;
 `make test` green; **the board's on-glass suite exists and passes**. OTA
 needs no extra step: the board id is in board.toml and the manifest publisher
 follows the CI matrix row.
@@ -250,9 +250,9 @@ each of these by copying, and a fourth would pay again):
   subclasses it and adds only its own native module and levers. A lever the
   board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
   by a zero.
-- **The PERF line** is `runtime/perf_line.py` (the field table, formatter and
-  parser in one module) measured by `frame_loop.PerfSampler` on the
-  `FrameLoop.account` hook. A board emits the SAME field set as every other
+- **The PERF line** is the kernel's (`native/moy_kernel/moy_perf.c` writes
+  it from the loop's account stage; `runtime/perf_line.py` is its field table
+  and parser). A board emits the SAME field set as every other
   board and prints `-` for what it cannot measure. Do not add a board-shaped
   variant: three of them existed under one name, and the odd one out was
   silently unreadable by `tools/p4_perf.py` for as long as it existed.

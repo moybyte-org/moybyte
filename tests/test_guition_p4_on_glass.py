@@ -426,6 +426,10 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
+
+
 def test_no_display_underruns(board):
     """The scan-out kept up for the whole tour: the 800x1280@60Hz DPI stream
     is ~123MB/s of PSRAM reads, more than the Waveshare's, and PSRAM at 200MHz

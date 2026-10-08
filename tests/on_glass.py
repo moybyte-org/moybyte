@@ -451,6 +451,26 @@ def mem_reports_the_heap(board):
     assert line is not None and "live=" in line and "free=" in line, line
 
 
+KERNEL_STAGES = ["inputs", "dev", "idle", "pointer", "present", "frame",
+                 "backlight", "pump_tail", "tail", "pace", "account"]
+
+
+def the_frame_is_the_kernels(board):
+    """The frame is native/moy_kernel/moy_loop.c's and Python is what it calls
+    up into: a quiet frame makes exactly the three console upcalls
+    (handle_input, handle_pointer, frame) and no service upcall. `state` reads
+    the last FINISHED frame's count -- the frame before the one whose dev
+    stage runs the word -- so the first `state` is only there to make the
+    frame before the second one quiet."""
+    import time
+    board.state()
+    time.sleep(0.5)
+    st = board.state()
+    assert st["upcalls"] == [3, 0, 0, 0], st["upcalls"]
+    assert sorted(st["stages"]) == sorted(KERNEL_STAGES), st["stages"]
+    assert board.pyval("__import__('moy_loop').frames() > 0", strict=True)
+
+
 def perf_line_is_the_one_format(board):
     """The PERF line, on real glass, in the one shape every board emits
     (#206 item 2).

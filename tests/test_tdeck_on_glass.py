@@ -335,6 +335,10 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
+
+
 def test_perf_line_is_the_one_format(board):
     """#206 item 2. This board has no windowed WM and no PPA, so those columns
     must read `-`: absence, never a 0 that a dead meter would also print."""

@@ -369,6 +369,10 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
+
+
 def test_no_display_underruns(board):
     on_glass.display_underruns_are_zero(board)
 
@@ -551,14 +555,12 @@ def test_the_rollback_confirm_comes_from_the_frame_loop(board):
     2026-08-02: 15/15, both directions, banner and verdict correct each time.
     Not re-run here because one install is ~2min and leaves the board on the
     other slot, which every later test would inherit."""
-    ota = "__import__('moy_ota_health')"     # the updater's health half
+    # The kernel's loop makes it (native/moy_kernel/moy_loop.c, its two
+    # thresholds pinned in tests/test_moy_loop.py) and its service upcall
+    # tells the updater; the loop has run at least that many frames since.
     assert board.pyval("ws.updater.confirmed") is True
-    loops = board.pyval("ws.updater._loops")
-    assert loops >= board.pyval("%s.HEALTHY_LOOPS" % ota), \
-        "confirmed after %s loop iterations -- not from the frame loop" % loops
-    # A paint threshold above 1 would be unreachable: the console repaints only
-    # when something changes, so an untouched desktop paints once and stops.
-    assert board.pyval("%s.HEALTHY_PAINTS" % ota) == 1
+    frames = board.pyval("__import__('moy_loop').frames()")
+    assert frames >= 120, "confirmed after %s loop frames" % frames
     assert board.pyval("ws._frames_drawn") >= 1
 
 

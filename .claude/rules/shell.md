@@ -237,9 +237,10 @@ body and nothing executable guarded it.**
   (`runtime/moy_input.py`'s `InputTable`) over two vocabularies — the boards'
   fifteen names, the host's first eight of the same order — and a mask's bit
   order is the caller's (`button_masks(order, player)`), never the vocabulary's.
-- **Storage READS take the SD gate too, not just writes.** `poll_webhost` runs at
-  the frame tail after `kick()`, so a frame that painted leaves the feeder shipping
-  bands, and an sdspi transaction there is the documented panic.
+- **Storage READS take the SD gate too, not just writes.** The webhost's poll
+  runs at the frame tail after `kick()` (the kernel loop's service upcall), so
+  a frame that painted leaves the feeder shipping bands, and an sdspi
+  transaction there is the documented panic.
 - **The browser gets carts, not their history** — the undo journal crosses the wire
   in neither direction; the receiving side writes its own (`pmem` does cross).
 
@@ -248,10 +249,11 @@ body and nothing executable guarded it.**
 
 Record and gates: #206, #207, #208.
 
-- **ONE `PERF` line, one producer, every board.** `runtime/perf_line.py` holds
-  the field table, the formatter AND the parser, measured by
-  `frame_loop.PerfSampler` on `FrameLoop.account` and written only under PERF
-  DIAG, like every periodic line (kid mode writes none). **A field a board cannot
+- **ONE `PERF` line, one producer, every board.** The kernel writes it
+  (`native/moy_kernel/moy_perf.c`, from its loop's account stage, the
+  console pushing its half with `ws.perf_push` when a sample is due) and
+  `runtime/perf_line.py` holds the field table and the parser; it is written
+  only under PERF DIAG, like every periodic line (kid mode writes none). **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
   `/`, because both readers split on whitespace and an inner `=` reads as a field.
   `tools/p4_perf.py` requires `--board`: it used to default to the P4's dtr/rts

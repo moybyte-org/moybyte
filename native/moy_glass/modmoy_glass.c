@@ -1895,6 +1895,12 @@ void moy_glass_vm_swept(void) {
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_loop_comp);
 
+#if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+#define LOOP_BANDED(c) mp_obj_is_type((c), &glass_banded_type)
+#else
+#define LOOP_BANDED(c) false
+#endif
+
 static mp_obj_t glass_loop_bind(mp_obj_t comp) {
     MP_STATE_VM(moy_glass_loop_comp) = comp;
     return mp_const_none;
@@ -1927,9 +1933,13 @@ void moy_glass_loop_fence(void) {
     if (c == MP_OBJ_NULL) {
         return;
     }
-    if (mp_obj_is_type(c, &glass_banded_type)) {
+    #if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+    if (LOOP_BANDED(c)) {
         moy_banded_fence(&((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->b);
-    } else if (mp_obj_is_type(c, &glass_dsi_type)) {
+        return;
+    }
+    #endif
+    if (mp_obj_is_type(c, &glass_dsi_type)) {
         moy_dsi_fence(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(c))->d);
     } else if (mp_obj_is_type(c, &glass_rot_type)) {
         moy_rot_fence(&((glass_rot_obj_t *)MP_OBJ_TO_PTR(c))->r);
@@ -1939,9 +1949,13 @@ void moy_glass_loop_fence(void) {
 // A frame that drew nothing: a banded panel's queued bands drained.
 void moy_glass_loop_idle(void) {
     mp_obj_t c = loop_comp();
-    if (c != MP_OBJ_NULL && mp_obj_is_type(c, &glass_banded_type)) {
+    #if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+    if (c != MP_OBJ_NULL && LOOP_BANDED(c)) {
         moy_banded_fence(&((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->b);
     }
+    #else
+    (void)c;
+    #endif
 }
 
 // The light on or off; a level between is the dim rung's, which a binary
@@ -1952,11 +1966,13 @@ bool moy_glass_loop_light(int level) {
         return false;
     }
     bool on = level > 0;
-    if (mp_obj_is_type(c, &glass_banded_type)) {
+    #if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+    if (LOOP_BANDED(c)) {
         banded_light(((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->panel, on);
-    } else {
-        mp_call_function_1(mp_load_attr(c, MP_QSTR_set_backlight), mp_obj_new_bool(on));
+        return false;
     }
+    #endif
+    mp_call_function_1(mp_load_attr(c, MP_QSTR_set_backlight), mp_obj_new_bool(on));
     return false;
 }
 

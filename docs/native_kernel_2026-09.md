@@ -222,7 +222,7 @@ sprints that follow it:
 | audio: the I2S feed and the sfx/music semantics the glue drains | `device_audio.py` (deleted by sprint 3's audio pass), `device/moycore_glue.py`'s audio half | 3 |
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
-| the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py`, `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
+| the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py` (deleted by sprint 3's frame-tail pass: `native/moy_kernel/moy_loop.c`), `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
 | radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `moy_webserver.py` (deleted by sprint 3's links pass), `runtime/moy_sync.py` | 3 |
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `runtime/system_menu_ui.py`, `runtime/netplay.py`, the achievements/notify path | 4 |
@@ -837,8 +837,11 @@ board stands against each value, are #224's.
   layer, which bounds the pool sprint 3 makes the kernel's. Internal SRAM: the
   kernel costs **at most 4 KiB net** against sprint 0's baseline (§4.6: free,
   largest block and low-water, all-internal and DMA-capable, WiFi and BLE up)
-  while the VM runs, and **nothing net** while it is stopped, when the VM task's
-  stack is back. Kernel data is PSRAM by rule, and the T-Deck's DMA-capable
+  while the VM runs, and **no more than the loop task's stack net** while it is
+  stopped, when the VM task's stack is back (`moy_loop_task`, which drives the
+  kernel's frame while no VM runs, exists only then: it is created when the
+  VM's teardown opens the window and deletes itself when the next VM is up,
+  docs/kernel_survival_2026-10.md §7.1). Kernel data is PSRAM by rule, and the T-Deck's DMA-capable
   low-water with both radios up is the tightest figure on either board.
 - **Image headroom floors**, the OTA-slot headroom `build.sh` prints with the
   browser console baked in, at every sprint's gate:

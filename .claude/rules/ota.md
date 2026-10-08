@@ -72,7 +72,7 @@ paths:
     install slice by slice (`zero_host.ZeroUpdate`), and a board WITH GLASS
     HANDS THE GLASS BACK (`moy_webhost.ConsoleUpdate` — wasm mode off, then
     `update_ui.open_update_online()`), so no browser-driven install exists, no
-    chunk work reaches `poll_webhost`, and the T-Deck's frame-tail SD gate is
+    chunk work reaches the webhost's poll, and the T-Deck's frame-tail SD gate is
     never in the picture. `screen` in the status document is that hardware
     claim, said to the page. The Zero's README states the trigger decision.
   - **`finish()` writes `pending.json` naming the slot it pointed the bootloader

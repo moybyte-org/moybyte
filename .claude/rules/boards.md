@@ -60,11 +60,13 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   Waveshare P4, the `recv_baud` its payload crosses at) for `P4Board` and
   `tools/push_cart.py`. No tool restates them, and the CI matrix is one row a
   board.
-- **The frame loop is shared** (`frame_loop.FrameLoop`, #202 Phase B): inputs
-  → dev channel → idle tick → pointer → present → frame → backlight gate →
-  pump.tail → tail → pace, once, pinned by order tests in
-  `tests/test_device_boot.py`. A board's `run_desktop` supplies hooks and its
-  hardware. Every touch driver's no-news contract (hold / stale-mark / bound)
+- **The frame loop is the kernel's** (`native/moy_kernel/moy_loop.c`,
+  #224): inputs → dev channel → idle ladder → pointer → present → the three
+  console upcalls → backlight gate → pump tail → tail → pace → account, once,
+  pinned by `tests/test_moy_loop.py` and the loop trace. A board's
+  `run_desktop` builds its hardware and hands the console over
+  (`Desktop.run` registers the upcalls and returns); the VM service runs the
+  loop as its task's outermost frame. Every touch driver's no-news contract (hold / stale-mark / bound)
   and mapping is one copy in `native/moy_input/moy_touch.c`.
 - **Never reset ONE patched file in a board's `.build/micropython` by hand.**
   `moybyte_patch_native_code_free` patches the esp32 port's `main.c` and

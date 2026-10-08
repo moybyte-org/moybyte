@@ -335,6 +335,10 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
+
+
 def test_wifi_is_off_at_rest(board):
     on_glass.wifi_is_off_at_rest(board)
 
