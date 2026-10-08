@@ -46,12 +46,14 @@ there and times the halves for `tick_split`. `wasm_table()` is the table's
 names, which the Player holds a module's imports to before it opens one
 (`device/moycore_glue.missing_imports`).
 
-Every host callback the table reaches from that thread is a C read or write
-against the console except the ones that need the VM -- `read`, the cart's own
-folder through the VFS; `cfg`, the config dict; and the cart's written files
-(moy-spec SPEC.md §16.12: `write`, `erase`, `list` and `read`'s written copy),
-which `wasm_open` hands it as `runtime/cart_files.py`'s store -- and those run
-on the MicroPython task through `moy_wasm_on_vm` while it waits on the call.
+Every host callback the table reaches from that thread is C, and none calls
+Python. The cart's files -- `read` on its own folder and its written files
+(moy-spec SPEC.md §16.12: `write`, `erase`, `list` and `read`'s written copy)
+-- are `native/moy_store/moy_files.h` over the kernel's volume, run on the
+MicroPython task through `moy_wasm_on_vm` while it waits on the call, each op
+inside the board's bus gate (`moy_vol_gate_enter`; on the T-Deck the panel's
+`sd_guard`). In the browser a write and an erase are logged for the page's
+keeper, which `files_kept` drains into the worker's OPFS commits.
 
 A cart's `par` items run on the engine's lanes: moycore hands the binding
 `moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the

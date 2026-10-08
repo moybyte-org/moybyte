@@ -237,21 +237,14 @@ def mem():
 ''',
     # The real moycore for everything a desktop build has, and for the compiled
     # run what a board's C does: open the console (a Lua VM holding no cart
-    # stands in for the engine), hand over ONE re-aimed frame view, and serve a
-    # store read through the board's gate every few ticks -- Doom streams its
-    # WAD at about eleven reads a second.
+    # stands in for the engine) and hand over ONE re-aimed frame view. The
+    # cart's store reads are C (moycore's files, over moy_files) and never
+    # reach Python.
     "moycore_shim.py": '''
 _frame = bytearray(320 * 240)
 _view = memoryview(_frame)
 _state = [False]
 _real = [None]
-_gate = [None]
-_ticks = [0]
-READ_EVERY = 3
-
-
-def _read_now():
-    return None
 
 
 def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
@@ -260,21 +253,13 @@ def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
                               pmem, cfg, flags, True)
 
 
-def wasm_open(module, head, pages, sha, path, swapped, gate=None,
-              allow_unsigned=False, interp=False, writable=None, files=None):
-    _gate[0] = gate
+def wasm_open(module, head, pages, sha, path, swapped, allow_unsigned=False,
+              interp=False, writable=None):
     return None
 
 
 def tick(dt, draw=True):
-    err = _real[0].tick(dt, draw)
-    g = _gate[0]
-    if g is not None:
-        n = _ticks[0] + 1
-        _ticks[0] = n
-        if n % READ_EVERY == 0:
-            g(_read_now)
-    return err
+    return _real[0].tick(dt, draw)
 
 
 def take_frames(on, palette=True):

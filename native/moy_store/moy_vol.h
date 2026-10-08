@@ -74,6 +74,7 @@ enum {
     MOY_VOL_READ = 1,
     MOY_VOL_WRITE = 2,          // created, or truncated
     MOY_VOL_APPEND = 3,         // created, or written at its end
+    MOY_VOL_HELD = 0x10,        // or'd in: the file outlives the call (below)
 };
 
 typedef struct moy_vol_file moy_vol_file_t;
@@ -93,8 +94,26 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
 int moy_vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got);
 int moy_vol_write(moy_vol_file_t *f, const void *buf, size_t n);
 int moy_vol_size(moy_vol_file_t *f, uint32_t *n);
+int moy_vol_seek(moy_vol_file_t *f, uint32_t at);   // the next read's offset
 int moy_vol_close(moy_vol_file_t *f);           // frees f; the first error wins
 void moy_vol_unwind(void);                      // close every file still open
+// A file opened with MOY_VOL_HELD is its opener's: made from moy_store_keep and
+// off the list moy_vol_unwind walks, so a raised call elsewhere leaves it, and
+// only its own moy_vol_close closes it. A compiled cart's session holds the
+// file it streams this way (moy_files.h).
+
+// The board's bus rule around an op on a card: on the T-Deck the card shares
+// the panel's SPI host, and the panel's driver registers a gate that drains
+// the flush and holds the next one off while `on` (moy_lcd's sd_guard, which
+// nests). NULL, the default, where a card has a bus of its own.
+// moy_vol_gate_enter takes the gate when `path` is on a FAT volume and a gate
+// is registered, and answers whether it did; moy_vol_gate_leave takes that
+// answer. A caller that touches the card from C brackets every op with the
+// two, as the Python store's session does.
+typedef void (*moy_vol_gate_fn)(int on);
+void moy_vol_set_gate(moy_vol_gate_fn fn);
+int moy_vol_gate_enter(const char *path);
+void moy_vol_gate_leave(int entered);
 
 int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st);
 int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,

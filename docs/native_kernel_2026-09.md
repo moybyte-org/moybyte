@@ -80,8 +80,7 @@ sprint 0 set (§6.1).
 (`device/desktop_spine.py`) builds the store, the `Workstation`, the WM and the
 frame loop in it; apps are Layer instances in it; Python carts run in it. Lua and
 compiled carts run in C, but the loop around them, the drivers they read, the
-audio they feed and the storage gate a compiled cart's `read` calls
-(`read_on_vm`, `native/moycore/modmoycore.c`) are Python. The C side — linear
+audio they feed and the storage gate around a store op are Python. The C side — linear
 memory, the Lua VM, the panel buffers, the layer pool, `moybuf` payloads — draws
 on the same PSRAM through `heap_caps`.
 

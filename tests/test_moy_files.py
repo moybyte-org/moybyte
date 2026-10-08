@@ -90,6 +90,14 @@ def _script(files):
             i += 1
     got.append(files.write(b"\x00\xff", b"bin"))
     got.append(files.name(b"\x00", 0))
+    for path, offset, n in ((b"save", 0, 64), (b"save", 6, 3), (b"save", 0, 0),
+                            (b"save", 4, 0), (b"save", 11, 4), (b"save", 99, 0),
+                            (b"Save", 1, 2), (b"nothing", 0, 4), (b"empty", 0, 0)):
+        got.append(files.read(path, offset, n))
+    got.append(files.write(b"save", b"third"))
+    got.append(files.read(b"save", 0, 64))
+    got.append(files.erase(b"save"))
+    got.append(files.read(b"save", 0, 64))
     return got
 
 
@@ -110,6 +118,30 @@ def test_a_session_writes_reads_and_lists_as_the_reference(tmp_path):
     c.close()
     assert _snapshot(py_root) == _snapshot(c_root)
     assert moy_play.files_live() == 0, "a closed session left memory held"
+
+
+def test_a_read_of_the_cart_s_own_folder_streams_through_one_held_file(tmp_path):
+    """read on the cart's folder: its bytes from an offset, how many remain
+    with a length of 0, 0 past the end or for a file that is not there --
+    and a file read in chunks is the file."""
+    _lib_or_skip()
+    cart = _store(tmp_path)
+    blob = bytes(range(256)) * 40
+    with open(os.path.join(cart, "data.bin"), "wb") as f:
+        f.write(blob)
+    c = moy_play.Files(cart)
+    assert c.shipped("data.bin", 0, 0) == len(blob)
+    assert c.shipped("data.bin", 100, 0) == len(blob) - 100
+    assert c.shipped("data.bin", len(blob), 0) == 0
+    assert c.shipped("data.bin", len(blob) + 5, 8) == b""
+    got = b"".join(c.shipped("data.bin", o, 777) for o in range(0, len(blob), 777))
+    assert got == blob
+    assert c.shipped("levels/1", 0, 16) == b"one"
+    assert c.shipped("data.bin", 5, 3) == blob[5:8]   # back to the first, reopened
+    assert c.shipped("missing", 0, 16) == b"" and c.shipped("missing", 0, 0) == 0
+    assert c.shipped("levels", 0, 16) == b""          # a folder reads nothing
+    c.close()
+    assert moy_play.files_live() == 0, "the held file outlived its session"
 
 
 def test_opening_finishes_what_a_power_loss_left(tmp_path):

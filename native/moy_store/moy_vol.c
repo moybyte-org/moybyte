@@ -18,6 +18,7 @@ extern __typeof__(f_open) f_open __attribute__((weak));
 extern __typeof__(f_read) f_read __attribute__((weak));
 extern __typeof__(f_write) f_write __attribute__((weak));
 extern __typeof__(f_close) f_close __attribute__((weak));
+extern __typeof__(f_lseek) f_lseek __attribute__((weak));
 extern __typeof__(f_stat) f_stat __attribute__((weak));
 extern __typeof__(f_opendir) f_opendir __attribute__((weak));
 extern __typeof__(f_readdir) f_readdir __attribute__((weak));
@@ -116,7 +117,9 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
     }
     #endif
     moy_store_tick();
-    moy_vol_file_t *f = moy_store_alloc(bytes);
+    int held = mode & MOY_VOL_HELD;
+    mode &= ~MOY_VOL_HELD;
+    moy_vol_file_t *f = held ? moy_store_keep(bytes) : moy_store_alloc(bytes);
     if (f == NULL) {
         return MOY_ENOMEM;
     }
@@ -168,8 +171,10 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
         moy_store_free(f, bytes);
         return rc;
     }
-    f->next = open_files;
-    open_files = f;
+    if (!held) {
+        f->next = open_files;
+        open_files = f;
+    }
     *out = f;
     return 0;
 }
@@ -292,6 +297,29 @@ int moy_vol_size(moy_vol_file_t *f, uint32_t *n) {
     }
 }
 
+int moy_vol_seek(moy_vol_file_t *f, uint32_t at) {
+    switch (f->kind) {
+        #if MOY_VOL_FAT
+        case MOY_VOL_KIND_FAT:
+            return fat_err(FF(f_lseek)(&f->u.fil, (FSIZE_t)at));
+        #endif
+        #if MOY_VOL_LFS2
+        case MOY_VOL_KIND_LFS2: {
+            lfs2_soff_t r = lfs2_file_seek((lfs2_t *)f->fs, &f->u.lf, (lfs2_soff_t)at,
+                                           LFS2_SEEK_SET);
+            return r < 0 ? lfs_err((int)r) : 0;
+        }
+        #endif
+        #if MOY_VOL_POSIX
+        case MOY_VOL_KIND_POSIX:
+            errno = 0;
+            return lseek(f->u.fd, (off_t)at, SEEK_SET) < 0 ? px_err() : 0;
+        #endif
+        default:
+            return MOY_EBADF;
+    }
+}
+
 int moy_vol_close(moy_vol_file_t *f) {
     int rc = MOY_EBADF;
     unlink_open(f);
@@ -317,6 +345,28 @@ int moy_vol_close(moy_vol_file_t *f) {
     }
     moy_store_free(f, f->bytes);
     return rc;
+}
+
+static moy_vol_gate_fn gate;
+
+void moy_vol_set_gate(moy_vol_gate_fn fn) {
+    gate = fn;
+}
+
+int moy_vol_gate_enter(const char *path) {
+    moy_vol_t v;
+    const char *r;
+    if (gate == NULL || moy_vol_at(path, &v, &r) != 0 || v.kind != MOY_VOL_KIND_FAT) {
+        return 0;
+    }
+    gate(1);
+    return 1;
+}
+
+void moy_vol_gate_leave(int entered) {
+    if (entered && gate != NULL) {
+        gate(0);
+    }
 }
 
 void moy_vol_unwind(void) {

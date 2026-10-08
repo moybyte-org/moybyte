@@ -155,6 +155,7 @@
 // It brings the FreeRTOS headers, the traceISR_EXIT_TO_SCHEDULER guard the
 // yield needs, and the state this file's verbs report on.
 #include "moy_flush.h"
+#include "moy_vol.h"      // the store's bus gate, which this panel's rule is
 #include "moy_fold.h"     // the GAME FOLD: the latch, the fence, the gather
 
 // ---- board facts (device/tdeck_*.py)
@@ -271,6 +272,7 @@ static uint8_t s_madctl;
 // session running unserialized against the feeder -- the panic above, with
 // nothing to point at it.
 static volatile int s_sd_guard;
+static void moy_lcd_sd_gate(int on);
 
 // THE BOARD'S HALF of the engine (moy_flush.h): the ST7789/esp_lcd transport,
 // which is the one thing Phase C said the two S3 panels can never share. All
@@ -528,6 +530,7 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, args);
+    moy_vol_set_gate(moy_lcd_sd_gate);
 
     if (s_panel != NULL) {
         // Already up -- a second compositor, or a SOFT RESET, which wipes the
@@ -744,8 +747,10 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_kick_obj, 0, 1, moy_lcd_kick)
 // Nesting-safe: the bracket lifts on the OUTERMOST close. Turning it on also
 // drains, so a frame already in the feeder's hands cannot straddle the session
 // start.
-static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
-    if (mp_obj_is_true(on_in)) {
+// The same body is the store's bus gate (moy_vol_set_gate), which a store
+// op made in C -- a compiled cart's files -- takes around its card access.
+static void moy_lcd_sd_gate(int on) {
+    if (on) {
         s_sd_guard++;
         if (s_panel != NULL) {
             moy_flush_drain();
@@ -753,6 +758,10 @@ static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
     } else if (s_sd_guard > 0) {
         s_sd_guard--;
     }
+}
+
+static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
+    moy_lcd_sd_gate(mp_obj_is_true(on_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_sd_guard_obj, moy_lcd_sd_guard);

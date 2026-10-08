@@ -14,9 +14,6 @@
 
 native/moy_kernel/modmoy_loop.c  vm_up  4  counted CONSOLE SERVICE: the loop's dispatcher, counted by moy_loop.c's up()
 native/moycore/modmoycore.c  call_py  1  counted APP: a Lua cart's trampoline into a name a VM-kept run registered
-native/moycore/modmoycore.c  read_on_vm  1  inside read_asked: a wasm cart's read on the VM's task, through the storage gate
-native/moycore/modmoycore.c  wasm_read_now  1  inside read_asked: the cart's file opened by the VM
-native/moycore/modmoycore.c  files_call  1  inside files_on_vm: a wasm cart's written-file call, counted SERVICE there
 native/moy_wasm/modmoy_wasm.c  read_module  1  binding: a module's bytes read for the Python glue's open
 native/moy_wasm/modmoy_wasm.c  verify_module  1  binding: the module's signature, checked for the Python glue's open
 native/moy_store/modmoy_store.c  int_or  1  binding: a store verb's argument

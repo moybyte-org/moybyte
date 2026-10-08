@@ -16,8 +16,9 @@
 // hook call, and before teardown (unbind). The MicroPython task blocks in
 // moy_wasm_session_open/call/close while the thread works -- and while it
 // waits it serves moy_wasm_on_vm requests, which is how an import that needs
-// the VM (a file read through the VFS, a config lookup in a dict) gets it
-// without the thread ever touching MicroPython.
+// the VM's task (a cart's file op, C over the volume the VM's mount table
+// resolves, on a stack an internal-flash write may run on) gets it without
+// the thread ever touching MicroPython.
 //
 // The browser's engine calls the same five on the VM's own thread, which is
 // the page's one thread: moy_wasm_on_vm runs its request at once, and there

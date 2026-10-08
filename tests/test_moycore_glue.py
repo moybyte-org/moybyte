@@ -1816,23 +1816,17 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
-        (_v, module, head, pages, sha, cdir, swapped, gate,
-         allow_unsigned, interp, writable, files) = world.core.calls[1]
+        (_v, module, head, pages, sha, cdir, swapped,
+         allow_unsigned, interp, writable) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
-        # the cart's reads take the store's gate, as every store access does
-        assert gate is ws._with_sd
         # a console that never turned Unknown sources on loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
-        # the cart declares no writable paths; its files are kept beside the
-        # store, under the same gate
+        # the cart declares no writable paths; its files are moycore's C
         assert writable is None
-        assert files.dir == os.path.dirname(cart["path"]).rsplit("/", 1)[0] \
-            + "/written/" + os.path.basename(cart["path"])[:-4]
-        assert files.gate is ws._with_sd
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1846,21 +1840,17 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
 
 def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
     """The manifest's "writable" entries go to wasm_open as one string, NUL
-    between them, which moycore hands libmoy's binding as its list; the
-    store is the cart's, beside the carts store, with the page's keeper when
-    the console has one (moy-spec SPEC.md 16.12)."""
+    between them, which moycore hands libmoy's binding as its list (moy-spec
+    SPEC.md 16.12); the store is moycore's C, so nothing of it crosses."""
     cart, _main = _compiled(tmp_path)
     cart["writable"] = ["saves/", "options.cfg"]
     world = _wasm_world()
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
-        keep = object()
-        ws.cart_keep = keep
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert call[10] == "saves/\0options.cfg"
-        assert call[11].keep is keep and call[11].id == "hello"
+        assert len(call) == 10 and call[9] == "saves/\0options.cfg"
     finally:
         world.close()
 
@@ -1877,7 +1867,7 @@ def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
             ws.unknown_sources = on
             world.mod.WasmRun(ws, make_ns(), None)
             assert world.core.calls[1][0] == "wasm_open"
-            assert world.core.calls[1][8] is on
+            assert world.core.calls[1][7] is on
         finally:
             world.close()
 
@@ -1901,9 +1891,9 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 2
         assert opens[0][1] == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
-        assert opens[0][9] is False            # AOT, tried first
+        assert opens[0][8] is False            # AOT, tried first
         assert opens[1][1] == main             # the retry is main.wasm itself
-        assert opens[1][9] is True              # on the interpreter
+        assert opens[1][8] is True              # on the interpreter
         assert world.core.closes == 0
     finally:
         world.close()
@@ -1924,7 +1914,7 @@ def test_a_cart_with_no_module_for_this_chip_runs_on_the_interpreter(tmp_path):
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         assert opens[0][1] == main
-        assert opens[0][9] is True
+        assert opens[0][8] is True
         assert "run_begin" in world.core.verbs()
     finally:
         world.close()
@@ -1952,8 +1942,8 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         assert not run.interp and run.interp_cause is None
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
-        (_v, module, head, pages, sha, _cdir, _sw, _gate, _unknown, interp,
-         _writable, _files) = opens[0]
+        (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
+         _writable) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:
@@ -2005,7 +1995,7 @@ def test_a_module_this_firmware_cannot_link_reads_as_the_firmware(tmp_path):
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert run.interp and run.interp_cause == "firmware"
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
-        assert [o[9] for o in opens] == [False, True]
+        assert [o[8] for o in opens] == [False, True]
         assert opens[1][1] == main
     finally:
         world.close()

@@ -190,7 +190,7 @@ static int bset_add(bset_t *s, const uint8_t *b, size_t n) {
     }
     if (s->n == s->cap) {
         uint32_t cap = s->cap ? s->cap * 2u : 16u;
-        uint8_t **v = moy_store_alloc(cap * sizeof(uint8_t *));
+        uint8_t **v = moy_store_keep(cap * sizeof(uint8_t *));
         if (v == NULL) {
             return -1;
         }
@@ -201,7 +201,7 @@ static int bset_add(bset_t *s, const uint8_t *b, size_t n) {
         s->v = v;
         s->cap = cap;
     }
-    uint8_t *e = moy_store_alloc(n + 2);
+    uint8_t *e = moy_store_keep(n + 2);
     if (e == NULL) {
         return -1;
     }
@@ -242,6 +242,9 @@ struct moy_files {
     bset_t shipped;                     // the cart folder's own, walked once
     bset_t names;                       // shipped and written, built on demand
     uint8_t walked, listed, made;
+    moy_vol_file_t *held;               // the file the last read opened
+    uint32_t held_size;                 // its size, read once at its open
+    char held_path[FULL];
 };
 
 static int vol(const char *path, moy_vol_t *v, const char **rest) {
@@ -389,10 +392,20 @@ moy_files_t *moy_files_open(const char *cart_path) {
     return f;
 }
 
+// The held file closed: a write or an erase may replace what it reads.
+static void forget(moy_files_t *f) {
+    if (f->held != NULL) {
+        moy_vol_close(f->held);
+        f->held = NULL;
+    }
+    f->held_path[0] = 0;
+}
+
 void moy_files_close(moy_files_t *f) {
     if (f == NULL) {
         return;
     }
+    forget(f);
     bset_free(&f->written);
     bset_free(&f->shipped);
     bset_free(&f->names);
@@ -406,6 +419,66 @@ int moy_files_where(moy_files_t *f, const uint8_t *path, size_t n, char *out, si
     }
     int w = snprintf(out, cap, "%s/%s", f->dir, k);
     return w < 0 || (size_t)w >= cap ? 0 : 1;
+}
+
+// read's contract on the file at `full`, through the held file: its bytes from
+// `offset`, at most `len`, or with `len` 0 how many remain. -1 when the file
+// will not open; a failed read reads 0.
+static int32_t held_read(moy_files_t *f, const char *full, uint32_t offset, uint8_t *dst,
+                         uint32_t len) {
+    if (f->held == NULL || strcmp(f->held_path, full) != 0) {
+        moy_vol_t v;
+        const char *r;
+        forget(f);
+        size_t n = strlen(full);
+        if (n >= sizeof(f->held_path) || vol(full, &v, &r) != 0
+            || moy_vol_open(&v, r, MOY_VOL_READ | MOY_VOL_HELD, &f->held) != 0) {
+            f->held = NULL;
+            return -1;
+        }
+        // The size is read once, here: on a FAT card it is the directory
+        // entry's, so a cart streaming its data file in chunks pays one open.
+        if (moy_vol_size(f->held, &f->held_size) != 0) {
+            forget(f);
+            return -1;
+        }
+        memcpy(f->held_path, full, n + 1);
+    }
+    if (f->held_size <= offset) {
+        return 0;
+    }
+    uint32_t left = f->held_size - offset;
+    if (len == 0) {
+        return left > INT32_MAX ? INT32_MAX : (int32_t)left;
+    }
+    size_t got = 0;
+    if (moy_vol_seek(f->held, offset) != 0
+        || moy_vol_read(f->held, dst, len < left ? len : left, &got) != 0) {
+        forget(f);
+        return 0;
+    }
+    return (int32_t)got;
+}
+
+int32_t moy_files_read(moy_files_t *f, const char *name, uint32_t offset, uint8_t *dst,
+                       uint32_t len) {
+    char full[FULL];
+    int w = snprintf(full, sizeof(full), "%s/%s", f->cart, name);
+    if (w < 0 || (size_t)w >= sizeof(full)) {
+        return 0;
+    }
+    int32_t r = held_read(f, full, offset, dst, len);
+    return r < 0 ? 0 : r;
+}
+
+int32_t moy_files_read_written(moy_files_t *f, const uint8_t *path, size_t n, uint32_t offset,
+                               uint8_t *dst, uint32_t len) {
+    char full[FULL];
+    if (!moy_files_where(f, path, n, full, sizeof(full))) {
+        return -1;
+    }
+    int32_t r = held_read(f, full, offset, dst, len);
+    return r < 0 ? 0 : r;
 }
 
 // The folder made, with its two parents: 0, or MOY_ENOSPC when it is not there
@@ -448,6 +521,7 @@ int32_t moy_files_write(moy_files_t *f, const uint8_t *path, size_t n,
         || join(done, sizeof(done), f->dir, k, kn, DONE) != 0) {
         return MOY_FILES_FAILED;
     }
+    forget(f);
     int rc = ensure(f);
     if (rc != 0) {
         return answer(rc);
@@ -491,6 +565,7 @@ int32_t moy_files_erase(moy_files_t *f, const uint8_t *path, size_t n) {
         return -1;
     }
     size_t kn = moy_files_key(path, n, k, sizeof(k));
+    forget(f);
     if (kn == 0 || join(base, sizeof(base), f->dir, k, kn, "") != 0
         || fs_remove(base) != 0) {
         return -1;

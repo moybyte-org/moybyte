@@ -407,9 +407,11 @@ def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
 
 # The compiled half of the same check: the blit fixture's frames run in the
 # kernel's Player on the engine's thread, and neither its frames nor its run's
-# books since launch hold an APP, SERVICE or REFUSED crossing.
-def test_a_compiled_frame_makes_no_crossing(board, wasm_carts):
-    title = wasm_carts["blit"]
+# books since launch hold an APP, SERVICE or REFUSED crossing; the hello
+# fixture reads its greeting from its own folder at _init, in C.
+@pytest.mark.parametrize("which", ("blit", "hello"))
+def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
+    title = wasm_carts[which]
     on_glass.a_vm_free_frame_makes_no_crossing(board, title.lower(), title,
                                                door="shell", clear=3, runtime="wasm")
 

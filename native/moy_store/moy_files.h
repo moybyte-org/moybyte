@@ -16,6 +16,10 @@
 // is closed, then over "<key>". Opening a cart's files finishes what a power
 // loss left: a "~done" replaces its file, a "~part" goes.
 //
+// ONE HELD FILE: a read opens the file it reads and keeps it open (moy_vol's
+// MOY_VOL_HELD), so a cart streaming its data file in chunks opens it once;
+// a write, an erase and the close let it go.
+//
 // ONE WRITER: the cart's session is the only thing that writes the folder, so
 // what is written is read once at the open and kept; `where` and `name` touch
 // the volume only for the cart's own folder's listing, once.
@@ -59,6 +63,14 @@ int moy_files_where(moy_files_t *f, const uint8_t *path, size_t n, char *out, si
 // or MOY_FILES_FAILED.
 int32_t moy_files_write(moy_files_t *f, const uint8_t *path, size_t n,
                         const uint8_t *data, uint32_t len);
+// read (SPEC.md 16.12) on `name` in the cart's own folder: its bytes from
+// `offset`, at most `len` of them into `dst`, or with `len` 0 how many remain;
+// 0 when it is absent or unreadable.
+int32_t moy_files_read(moy_files_t *f, const char *name, uint32_t offset, uint8_t *dst,
+                       uint32_t len);
+// The same on the written copy of `path`: -1 when there is none.
+int32_t moy_files_read_written(moy_files_t *f, const uint8_t *path, size_t n, uint32_t offset,
+                               uint8_t *dst, uint32_t len);
 // Remove the written copy: 0, or -1 when there is none.
 int32_t moy_files_erase(moy_files_t *f, const uint8_t *path, size_t n);
 // The `index`-th path, in bytewise order, of the cart's files that begin with

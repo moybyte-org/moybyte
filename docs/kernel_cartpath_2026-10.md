@@ -133,12 +133,12 @@ verb is libmoy's C or the run's native rows, and the prelude is Lua compiled
 from the image.
 
 **A wasm cart with no VM** runs on its session thread as it does today. The
-session's requests that went to the VM's task go to the kernel's volume:
-reads on the asking thread inside the volume's fence; writes to an
-internal-flash volume handed to the service task, because the session's
-stack is PSRAM (`native/moy_wasm/moy_wasm_footprint.h`) and an internal-flash
-write disables the cache. `moy_vol` asserts that an internal-flash write runs
-on an internal stack.
+session's file requests are C over the kernel's volume
+(`native/moy_store/moy_files.h`), run on the VM service task through
+`moy_wasm_on_vm` while it waits on the call, each inside the board's bus gate
+(`moy_vol_gate_enter`): the session's stack is PSRAM
+(`native/moy_wasm/moy_wasm_footprint.h`) and an internal-flash write disables
+the cache, and the service task needs no fence against itself.
 
 **A Python cart keeps the VM**, under the same C Player: the map's Python row
 turns open, tick and draw into APP upcalls into the namespace the Python

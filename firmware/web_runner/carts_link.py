@@ -45,6 +45,11 @@ except ImportError:  # pragma: no cover
 
 SPOOL = "/moy/net"
 
+try:
+    import moycore as _moycore
+except ImportError:  # pragma: no cover -- a build without the module
+    _moycore = None
+
 
 class CartsLink:
     """The queue to the worker and the answers coming back, by request id."""
@@ -56,6 +61,7 @@ class CartsLink:
         self._jobs = []
         self._live = {}
         self._next = 1
+        self.files = False          # moycore logs a compiled cart's writes
 
     def _id(self):
         n = self._next
@@ -67,6 +73,10 @@ class CartsLink:
 
     def poll_json(self):
         """What the worker should start or stop, or "" -- asked by its pump."""
+        if self.files:
+            # A compiled cart's writes and erases, made in moycore's C.
+            for op, cart, key in _moycore.files_kept():
+                self._jobs.append({"op": op, "cart": cart, "key": key})
         if not self._jobs:
             return ""
         jobs, self._jobs = self._jobs, []
@@ -83,6 +93,8 @@ class CartsLink:
         room = ev.get("room")
         if isinstance(room, list) and len(room) == 2:
             self.room = (room[0], room[1])
+            if self.files and room[0] is not None and room[1] is not None:
+                _moycore.files_room(room[0], room[1])
         who = self._live.get(ev.get("id"))
         if who is not None:
             who.hear(ev)
@@ -220,6 +232,12 @@ class WebCartKeep:
 
     def __init__(self, link):
         self.link = link
+        # A compiled cart's written files are moycore's C, which logs each
+        # write and erase for the pump to hand over (`poll_json`) and refuses
+        # a write past the room the page last reported.
+        if _moycore is not None and hasattr(_moycore, "files_keep"):
+            _moycore.files_keep(True)
+            link.files = True
 
     def commit(self, folder, stage, record, done):
         rid = self.link._id()
@@ -247,24 +265,14 @@ class WebCartKeep:
             return None
         return max(0, room[1] - room[0]), 1
 
-    # -- a compiled cart's written files (runtime/cart_files.py) ---------------
-    # The console writes the VFS; the worker makes each file durable in OPFS
-    # (moy_store's commitWritten) in the order they were written, and drops
-    # one, or with `key` None every file a removed cart wrote.
-
-    def wrote(self, cart, key):
-        self.link.queue({"op": "wput", "cart": cart, "key": key})
+    # -- a compiled cart's written files ----------------------------------------
+    # The console writes the VFS (moycore's C, whose log the pump drains); the
+    # worker makes each file durable in OPFS (moy_store's commitWritten) in the
+    # order they were written, and drops one, or with `key` None every file a
+    # removed cart wrote (runtime/cart_index.py's remove).
 
     def erased(self, cart, key):
         self.link.queue({"op": "wdel", "cart": cart, "key": key})
-
-    def fits(self, n):
-        """Whether the browser has room for `n` more bytes, as it last said;
-        True when it has not said."""
-        room = self.link.room
-        if room is None or room[0] is None or room[1] is None:
-            return True
-        return room[1] - room[0] >= n
 
 
 class _Pick:

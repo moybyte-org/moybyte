@@ -237,6 +237,8 @@ def _files_lib():
                 ("moy_files_write", [_P, _C, _S, _C, _U32], ctypes.c_int32),
                 ("moy_files_erase", [_P, _C, _S], ctypes.c_int32),
                 ("moy_files_name", [_P, _C, _S, _U32, _C, _U32], ctypes.c_int32),
+                ("moy_files_read", [_P, _C, _U32, _C, _U32], ctypes.c_int32),
+                ("moy_files_read_written", [_P, _C, _S, _U32, _C, _U32], ctypes.c_int32),
                 ("moy_store_host_live", [], ctypes.c_long)):
             f = getattr(d, name)
             f.argtypes = args
@@ -271,7 +273,8 @@ def files_folder(cart_path):
 
 class Files:
     """A cart's written files by the C store (moy_files.h), the shape of
-    runtime/cart_files.py's CartFiles: where, write, erase, name. Host only."""
+    runtime/cart_files.py's CartFiles: where, read, write, erase, name, and
+    `shipped`, a read of the cart's own folder. Host only."""
 
     def __init__(self, cart_path):
         self._d = d = _files_lib()
@@ -284,6 +287,22 @@ class Files:
         if not self._d.moy_files_where(self._f, path, len(path), out, len(out)):
             return None
         return out.value.decode()
+
+    def read(self, path, offset, n):
+        """CartFiles.read: bytes, with `n` 0 how many remain, None with no
+        written copy."""
+        out = ctypes.create_string_buffer(max(n, 1))
+        r = self._d.moy_files_read_written(self._f, path, len(path), offset, out, n)
+        if r < 0:
+            return None
+        return r if n == 0 else out.raw[:r]
+
+    def shipped(self, name, offset, n):
+        """read on `name` in the cart's own folder: bytes, or with `n` 0 how
+        many remain."""
+        out = ctypes.create_string_buffer(max(n, 1))
+        r = self._d.moy_files_read(self._f, name.encode(), offset, out, n)
+        return r if n == 0 else out.raw[:r]
 
     def write(self, path, data):
         return self._d.moy_files_write(self._f, path, len(path), bytes(data), len(data))

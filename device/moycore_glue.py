@@ -79,11 +79,6 @@ except ImportError:                      # host tests importing the device modul
     from runtime.moy_input import pointer_state
 
 try:
-    import cart_files as _cart_files
-except ImportError:                      # host tests importing the device module
-    from runtime import cart_files as _cart_files
-
-try:
     import moycore as _moycore
 except ImportError:                      # a build without the module
     _moycore = None
@@ -959,27 +954,21 @@ class WasmRun(MoycoreRun):
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, False)
         self.snap[_moycore.SNAP_PLAYERS] = 1
-        # Every `read` the cart makes runs inside the store's gate, as every
-        # other store access does: on the T-Deck it drains the panel's flush
-        # first, because the card shares the panel's SPI bus. The owner's
-        # Unknown sources setting, as it stands at this load, decides whether
-        # an AOT module with no signature may load; the engine checks
-        # everything else either way. The engine raises MemoryError when it
-        # cannot hold the module file, and a run left open here would refuse
-        # every later cart's run_begin.
-        gate = getattr(ws, "_with_sd", None)
+        # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
+        # moycore's C over the kernel's volume, inside the board's bus gate
+        # (native/moy_store/moy_files.h). The owner's Unknown sources
+        # setting, as it stands at this load, decides whether an AOT module
+        # with no signature may load; the engine checks everything else
+        # either way. The engine raises MemoryError when it cannot hold the
+        # module file, and a run left open here would refuse every later
+        # cart's run_begin.
         unknown_sources = bool(getattr(ws, "unknown_sources", False))
-        # The cart's written files (moy-spec SPEC.md 16.12), kept beside the
-        # carts store under the same gate; in the browser the page's keeper
-        # makes each write durable in OPFS (runtime/cart_files.py).
         writable = cart.get("writable") or ()
-        files = _cart_files.CartFiles(path, gate, getattr(ws, "cart_keep", None))
         joined = "\0".join(writable) if writable else None
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, gate, unknown_sources, interp,
-                                      joined, files)
+                                      swapped, unknown_sources, interp, joined)
 
         try:
             if has_module:

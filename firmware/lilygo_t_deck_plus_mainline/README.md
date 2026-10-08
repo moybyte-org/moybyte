@@ -632,7 +632,11 @@ state machine is C over `moy_lcd`'s kernel transport (`moy_lcd_kwait`/`kkick`/
 `kship`), the same one the Guition runs over `moy_axs`: the ping-pong, the
 drain-swap-kick overlap and the meter forwarding. What is this board's is in
 `moy_runtime.py` — the two revert flags — and in `moy_lcd`, whose `sd_guard`
-the compositor forwards as `sd_bracket`. Where the deleted fork's compositor
+the compositor forwards as `sd_bracket`, and which `moy_lcd.init` also
+registers as the store's bus gate (`moy_vol_set_gate`,
+`native/moy_store/moy_vol.h`), so a card op made in C — a compiled cart's
+files — drains the flush and holds the next one off as the Python session
+does. Where the deleted fork's compositor
 owned the bounce buffers, the completion counter and the pacing arithmetic in
 Python, all of that is C, so a band never crosses the boundary.
 
