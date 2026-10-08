@@ -3,7 +3,8 @@
 WHAT THIS IS. Every ~2s while Settings -> PERF DIAG is on, each board puts one
 line on serial naming what its frame cost; with it off (kid mode, the default)
 there is no line at all, and whatever reads one turns the diag on for its
-measurement and puts it back (`frame_loop.PerfSampler` says why).
+measurement and puts it back. The writer is the kernel's
+(native/moy_kernel/moy_perf.c); this file is the reader.
 `tools/p4_perf.py --diag` reads the line for #66's per-phase numbers (its
 default, the shipping fps, reads the same `_frames_drawn` counter with the diag
 off), so the line is a CONTRACT -- and until 2026-08-28 it was three contracts
@@ -42,15 +43,19 @@ launcher's frame split is `home=wp/grid/bar` and not the P4's old trailing
 ` home(wp=.. grid=.. bar=..)`, whose inner `=` signs a tokeniser reads as
 fields of their own.
 
-Pure: no imports, no state, host and MicroPython alike. It is the writer AND
-the reader -- `parse_perf` is what `tools/p4_perf.py` uses -- so the two halves
-of the contract cannot drift apart.
+Pure: no imports, no state, host and MicroPython alike. It is the READER --
+`parse_perf` is what `tools/p4_perf.py` uses -- and FIELDS below is the
+writer's table too: moy_perf.c's field table names the same fields in the same
+order with the same units, and tests/test_device_boot.py holds every line the
+C writes to this parser, so the two halves of the contract cannot drift
+apart.
 """
 
 ABSENT = "-"
 
 # (name, printf spec, unit suffix). Order IS the line's order. A spec with more
-# than one conversion takes a tuple and renders `/`-joined.
+# than one conversion is a compound, `/`-joined. moy_perf.c's FIELDS is this
+# table in C.
 FIELDS = (
     ("cart", "%s", ""),                 # slugged title, `-` at the launcher
     ("fps", "%d/%d", ""),               # frames DRAWN / frames LOOPED, per second
@@ -77,19 +82,11 @@ FIELDS = (
 
 _NAMES = tuple(n for n, _s, _u in FIELDS)
 
-# What format_perf walks: each field's ` name=` head and its conversions, cut
-# once here. The line is built from these pieces and joined once, because a
-# board under PERF DIAG prints it every two seconds, and every intermediate
-# string is garbage the collector has to come back for.
-_PARTS = tuple((n, " " + n + "=", s, tuple(s.split("/"))) for n, s, _u in FIELDS)
-
-FAILED = "PERF sample failed: %s: %s"
-
-
 def slug(name):
-    """A cart title as ONE token. The line is tokenised on whitespace by both
-    readers, so `cart=Brick Siege` would arrive as a field `cart=Brick` and a
-    stray word -- and `Siege` looks like nothing at all."""
+    """A cart title as ONE token, as the writer slugs it (moy_perf.c): the
+    line is tokenised on whitespace by both readers, so `cart=Brick Siege`
+    would arrive as a field `cart=Brick` and a stray word. A reader matching
+    a title against the line slugs it the same way."""
     out = name
     if not isinstance(out, str):          # str() of a str is a copy on device
         try:
@@ -99,42 +96,6 @@ def slug(name):
     for bad in (" ", "\t", "\n", "\r"):
         out = out.replace(bad, "_")
     return out or "?"
-
-
-def format_perf(values):
-    """One PERF line from a dict of field values.
-
-    A field that is missing OR None renders `-`; there is deliberately no way
-    to say "absent" with a number. Everything else renders through its declared
-    spec, so a board cannot pick its own precision."""
-    out = ["PERF"]
-    for name, head, spec, convs in _PARTS:
-        out.append(head)
-        v = values.get(name)
-        if v is None:
-            out.append(ABSENT)
-        elif name == "cart":
-            out.append(slug(v))
-        elif len(convs) == 1:
-            out.append(spec % v)
-        else:
-            _render(out, convs, v)
-    return "".join(out)
-
-
-def _render(out, convs, v):
-    """A compound spec renders component-wise, `/`-joined, so one absent
-    component is `-` while its siblings keep their numbers."""
-    n = len(convs)
-    if len(v) < n:
-        n = len(v)
-    i = 0
-    while i < n:
-        if i:
-            out.append("/")
-        c = v[i]
-        out.append(ABSENT if c is None else convs[i] % c)
-        i += 1
 
 
 def parse_perf(line):

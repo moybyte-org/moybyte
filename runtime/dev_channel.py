@@ -5,7 +5,6 @@
 #   heapcaps_line      the HEAPCAPS line: what each heap holds
 #   DevChannel         the serial line commands: one class, every board
 #   DevChannel.run     the command table, after the registered words
-#   DevChannel.poll    drain the bytes a frame may take
 #   DevChannel.report  the per-tick diag line
 """The serial DEV CHANNEL: drive a running console over the board's serial line.
 
@@ -19,28 +18,19 @@ vocabularies, is how `swipe` ends up meaning different things. Both boards
 construct `DevChannel` now; the on-glass suites are the wire-compat pin.
 
 WHY A CHANNEL AND NOT A REPL. The console owns the loop and never returns to
-the REPL, so there is nothing to type at. This reads stdin a byte at a time
-between frames and runs whole lines as commands, which is also what makes a
-board scriptable: `tools/p4_autotest.py` and tests/test_p4_on_glass.py are built
-on exactly this shape.
+the REPL, so there is nothing to type at. The kernel's loop reads the serial
+line between frames and runs whole lines as commands, which is also what
+makes a board scriptable: `tools/p4_autotest.py` and tests/test_p4_on_glass.py
+are built on exactly this shape. The reader takes bytes off the stdin ring
+from C, never a readline, so line noise costs a bounded slice of a frame; an
+over-long partial line is dropped, and so is a line that is not UTF-8; and it
+COUNTS what it swallowed (`rx=` on the SERIAL line), so "something is
+injecting into stdin" is a number rather than a mystery hang.
 
-It NEVER calls readline: one byte at a time off `sys.stdin.buffer`, only after
-poll(0) says MP_STREAM_POLL_RD, accumulating to a newline and decoding the
-whole line. A byte read is a byte consumed, so line noise costs a bounded few
-bytes per frame and can never park the loop; an over-long partial line is
-dropped, and so is a line that is not UTF-8. NOT the text `sys.stdin`: its
-read(1) is a CHARACTER, so a byte of 0x80 or above waits inside the read for
-the rest of a UTF-8 sequence that line noise never sends -- on the T-Deck a
-USB line-state request that reached stdin during the bootloader held the first
-frame for 29 s, until the host wrote again. And it COUNTS what it swallowed
-(`rx=`), so "something is injecting into stdin" is a number rather than a
-mystery hang -- which is the diagnostic that proved RX dead on this board for
-weeks (rx stuck at 1 while a host write was accepted and discarded).
-
-BOARD BITS ARE INJECTED, not imported: `set_backlight` and an `idle`
-(frame_loop.IdleBlank). Both may be None, and the commands that need them say
-so rather than raising -- a board without a backlight hook should decline `bl`,
-not traceback into the frame loop.
+THE READER IS THE KERNEL'S (native/moy_kernel/moy_devch.c): it takes the
+bytes, runs the kernel's own words (`power`, `bl`, `quit`) and hands every
+other line to `run` here through the loop's word upcall. The gestures `tap`,
+`swipe` and `drag` play from C too; the words below find what they aim at.
 
 ONE COMMAND LEAVES THE LINE DISCIPLINE: `recv`. Everything above is a line, and
 a line is the wrong shape for a cartridge -- a 124KB main.lua base64'd into
@@ -105,6 +95,10 @@ try:                       # device: the console's stdin read from C, and its ra
     import moy_serial as _moy_serial
 except ImportError:        # host CPython, the unix port: `_fill`'s own loop
     _moy_serial = None
+try:                       # a VM: the kernel's frame loop (native/moy_kernel)
+    import moy_loop as _loop
+except ImportError:        # host CPython: the host drives its own frames
+    _loop = None
 try:                       # device: the kernel's task watchdog, which a long
     from moy_kernel import feed as _kernel_feed   # upload outlasts unfed
 except ImportError:        # host, and a board without the kernel
@@ -691,6 +685,23 @@ def _moy_notes(folders, ws):
     return notes
 
 
+def _stage_report():
+    """#210's per-stage meters from the kernel's loop: {stage: {budget_us,
+    avg_us, last_us, max_us, misses, n}} in the loop's order, every measured
+    field None for a stage never sampled (PERF DIAG off, or a stage this
+    board has no op for), and None for a tier whose frames are not the
+    kernel's."""
+    if _loop is None:
+        return None
+    out = {}
+    m = _loop.meters()
+    for name in _loop.stages():
+        b, avg, last, mx, misses, n = m[name]
+        out[name] = {"budget_us": b, "avg_us": avg, "last_us": last,
+                     "max_us": mx, "misses": misses, "n": n}
+    return out
+
+
 def _remote_state(ws):
     """One-line JSON snapshot for the `state` command -- the assertion source an
     on-glass harness reads instead of pixels. Every field best-effort: a broken
@@ -716,8 +727,12 @@ def _remote_state(ws):
         st["unknown_sources"] = bool(getattr(ws, "unknown_sources", False))
         # Idle screen blank: the harness has to be able to tell a blanked panel
         # from a hung one -- they look identical from the host end.
-        st["psave"] = [bool(getattr(ws, "_psave_asleep", False)),
-                       int(getattr(ws, "_psave_ms", 0) or 0) // 1000]
+        # The kernel's ladder (native/moy_kernel/moy_idle.c): [asleep, the
+        # blank rung's seconds], and the whole ladder beside it.
+        idle = _loop.idle() if _loop is not None else None
+        st["psave"] = None if idle is None else [idle[0] >= 3, idle[3]]
+        st["idle"] = None if idle is None else {
+            "state": idle[0], "dim": idle[1], "saver": idle[2], "blank": idle[3]}
         # Expensive-event counters (ws.note_cost): cache builds + storage
         # reads. A cache that is silently missing shows up here as a count that
         # tracks the frame count.
@@ -844,8 +859,8 @@ def _remote_state(ws):
         # None) and `diag 1` is what arms it. None is also the answer for a
         # stage this board has no hook for and for a whole tier with no shared
         # frame loop -- never 0, which is what a broken meter reads as.
-        sm = getattr(ws, "stage_meters", None)
-        st["stages"] = sm.report() if sm is not None else None
+        st["stages"] = _stage_report()
+        st["upcalls"] = None if _loop is None else list(_loop.upcalls()[0])
     except Exception as exc:  # noqa: BLE001
         st["stages_err"] = str(exc)
     try:
@@ -959,8 +974,8 @@ class DevChannel:
     `moy` lines from devch_links.py, each a WORDS table this class's `words`
     holds; `run` keeps the rest.
 
-    BOARD BITS ARE INJECTED: `set_backlight`, `idle` (an IdleBlank), `env`
-    (extra names for `py` -- comp/game/boot/pump on the P4), and `extra`, a
+    BOARD BITS ARE INJECTED: `env` (extra names for `py` -- comp/game/boot
+    on the boards), and `extra`, a
     {name: handler(ws, parts, line)} dict of board-only commands (the P4's
     `bt`/`union`/`cache`). Extras dispatch AFTER the built-ins and cannot
     shadow them -- one vocabulary is the point.
@@ -971,23 +986,12 @@ class DevChannel:
     identically-behaved `crisp` extra is now shadowed dead.
     """
 
-    def __init__(self, ws, pointer, set_backlight=None, idle=None,
-                 extra=None, env=None):
+    def __init__(self, ws, pointer, extra=None, env=None):
         self.pointer = pointer
-        # The gestures' source in the input table, made by the first gesture:
-        # a scripted sample reaches the pointer through the frame's merge, the
-        # way a finger's does.
         self._ws = ws
-        self.src = None
-        self.click = False
-        self.quit = False       # `quit` asked for the REPL; run_desktop returns
-        self.buf = bytearray()  # the line so far, as bytes
-        self.rx = 0             # bytes swallowed -- the "is something injecting?" number
-        self.lines = 0          # complete commands dispatched
-        self.dropped = 0        # over-long partial lines thrown away
+        self.quit = False       # `quit` asked for the REPL; the loop ends
         self.raw = 0            # bytes taken by `recv`, around the line reader
-        self.idle = idle        # an IdleBlank, for `power`; may be None
-        self.set_backlight = set_backlight   # board's panel light; may be None
+        self.rx = 0             # bytes `recv` and `moy-put` read off the stream
         self.extra = extra or {}             # board-only commands
         # The word table each subsystem registers into (devch_input,
         # devch_audio, devch_links); `run` dispatches through it first.
@@ -995,10 +999,6 @@ class DevChannel:
         for mod in (devch_input, devch_audio, devch_links):
             self.words.update(mod.WORDS)
         self.env = env or {}                 # extra names in the `py` scope
-        self._drag = None       # `drag` playback state
-        self._swipe = None      # `swipe` playback state
-        self._tap = None        # a `tap` waiting for its release sample
-        self.armed = False
         self._poll = None
         self._stdin = None
         self._rawin = None      # sys.stdin.buffer: the same ring, 8 bits wide
@@ -1014,157 +1014,37 @@ class DevChannel:
             self._poll = select.poll()
             # POLLIN and nothing else. A bare register() defaults to RD|WR, and
             # mphalport.c grants POLL_WR unconditionally -- so a bare
-            # registration is truthy on EVERY call, forever, which looks exactly
-            # like "poll reports stdin always-ready".
+            # registration is truthy on EVERY call, forever.
             self._poll.register(self._stdin, select.POLLIN)
-            # The line reader polls every loop frame, and `recv` and
-            # `moy-put` poll once PER BYTE where there is no moy_serial, so
-            # the allocating `poll()` -- a fresh list of fresh tuples every
-            # call -- would be garbage on every frame of every cart, and
-            # megabytes of it per cart. ipoll reuses one tuple and allocates
-            # nothing after the first call.
+            # `recv` and `moy-put` poll once PER BYTE where there is no
+            # moy_serial; ipoll reuses one tuple and allocates nothing after
+            # the first call.
             self._ipoll = getattr(self._poll, "ipoll", None) or self._poll.poll
-            self.armed = True
-        except Exception as exc:  # noqa: BLE001 -- the channel is optional sugar
-            print("Moybyte serial channel unavailable:", exc)
+        except Exception:  # noqa: BLE001 -- the stream-takers decline without one
+            pass
 
-    def poll(self, ws):
-        """Drain up to SERIAL_BYTES_PER_FRAME bytes and run any complete lines.
+    def word(self, ws, line):
+        """One line the kernel's reader handed over (the loop's word upcall):
+        a `moy-put`'s next line while one streams, else a command. Answers
+        True when the line asked for the REPL. Never raises -- a word that
+        fails says so on the line and the loop goes on."""
+        try:
+            if self._put is not None:
+                self._moy_put_line(ws, line)
+            else:
+                self.run(ws, line)
+        except Exception as exc:  # noqa: BLE001 -- never kill the loop
+            print("REMOTE ERR %s: %s" % (type(exc).__name__, exc))
+        if _loop is not None:
+            # A put streaming its lines through the reader takes them faster.
+            _loop.devch_budget(MOY_PUT_BYTES_PER_FRAME if self._put is not None
+                               else SERIAL_BYTES_PER_FRAME)
+        return self.quit
 
-        Returns True when a command ran (the caller treats that as activity).
-        The drain is BOUNDED so that a stuck byte source costs a fixed slice of
-        one frame rather than the frame.
-        """
-        if not self.armed:
-            return False
-        self.click = False
-        ran = False
-        ipoll = self._ipoll
-        raw = self._rawin
-        budget = (MOY_PUT_BYTES_PER_FRAME if self._put is not None
-                  else SERIAL_BYTES_PER_FRAME)
-        for _ in range(budget):
-            ready = False
-            for _ev in ipoll(0):
-                ready = True
-            if not ready:
-                break
-            try:
-                got = raw.read(1) if raw is not None else self._stdin.read(1)
-            except UnicodeError:
-                # A text stdin (no 8-bit one beside it) meeting a byte that is
-                # not text costs the line it lands in, never the channel.
-                self.dropped += 1
-                self.buf = bytearray()
-                continue
-            except Exception:  # noqa: BLE001 -- a dead stdin disarms the channel
-                self.armed = False
-                return ran
-            if not got:
-                break
-            if not isinstance(got, (bytes, bytearray)):
-                got = got.encode()
-            self.rx += 1
-            c = got[0]
-            if c == 10 or c == 13:
-                try:
-                    line = bytes(self.buf).decode().strip()
-                except UnicodeError:
-                    # Bytes that are not text -- line noise, or what a UART
-                    # rate switch left on the line -- cost the line they land
-                    # in, never the channel.
-                    self.dropped += 1
-                    line = ""
-                self.buf = bytearray()
-                if line:
-                    self.lines += 1
-                    ran = True
-                    try:
-                        if self._put is not None:
-                            self._moy_put_line(ws, line)
-                        else:
-                            self.run(ws, line)
-                    except Exception as exc:  # noqa: BLE001 -- never kill the loop
-                        print("REMOTE ERR %s: %s" % (type(exc).__name__, exc))
-            else:
-                self.buf += got
-                if len(self.buf) > SERIAL_LINE_MAX:
-                    # Not a command -- a byte source with no newline in it. Drop
-                    # the partial rather than growing a buffer forever.
-                    self.dropped += 1
-                    self.buf = bytearray()
-        if self.lines == 0 and self.rx >= SERIAL_NOISE_LIMIT:
-            # Kilobytes in, not one command out. That is a byte SOURCE (UART0's
-            # ISR shares this ring buffer -- a floating U0RXD reads exactly like
-            # this), and chewing it costs a slice of every frame forever. Stop,
-            # once, out loud: a named condition beats a permanent slow desktop.
-            self.armed = False
-            print("Moybyte serial channel DISARMED: %d bytes arrived and not one "
-                  "complete command. Something is injecting into stdin -- most "
-                  "likely UART0 (U0RXD/GPIO44 floats on the expansion header) "
-                  "feeding the same ring buffer. Rebuild with "
-                  "MICROPY_HW_ENABLE_UART_REPL (0) to take its ISR off it."
-                  % self.rx)
-        return self._scripts() or ran
-
-    def point(self, x, y, down, edge=False):
-        """One scripted pointer sample into the channel's source; the next
-        frame's merge applies it. `fresh` is always True: the kinetic-scroll
-        velocity estimator reads every scripted sample as measured."""
-        src = self.src
-        if src is None:
-            src = self.src = self._ws.input.source("devch")
-        src.point(x, y, down, edge, True)
-
-    def _scripts(self):
-        """Advance the tap/swipe/drag playbacks: one pointer sample per frame,
-        into the channel's source in the input table, whose merge prefers a
-        source that is down, so a scripted sample outranks a touch driver
-        reporting no finger. Returns True while one is active, which the
-        caller counts as activity."""
-        ran = False
-        tap = self._tap
-        if tap is not None:
-            if tap[2]:
-                tap[2] = False          # the frame the press is merged in
-            else:
-                self.point(tap[0], tap[1], False)
-                self._tap = None
-            ran = True
-        if self._drag is not None:
-            s = self._drag
-            i = s["i"]
-            if i >= s["n"]:
-                self.point(s["cx"], s["cy"], False)
-                self._drag = None
-                print("REMOTE drag done")
-            else:
-                # Triangle wave around the grab point: continuous movement so
-                # the drag stays engaged and every frame is dirty.
-                t = i % 40
-                tri = t if t < 20 else 40 - t          # 0..20..0
-                off = 0 if i == 0 else (tri - 10) * s["step"]
-                self.point(s["cx"] + off, s["cy"], True, i == 0)   # frame 0 arms the drag
-                s["i"] = i + 1
-            ran = True
-        if self._swipe is not None:
-            s = self._swipe
-            i = s["i"]
-            n = s["n"]
-            if i > n:
-                self._swipe = None
-                print("REMOTE swipe done")
-            else:
-                # i==0 press edge at the start, i in 1..n-1 held interpolation,
-                # i==n the release sample at the end point (down=False so the
-                # gesture machines see a real release, fling velocity intact).
-                f = min(i, n - 1) / (n - 1)
-                x = s["x0"] + int((s["x1"] - s["x0"]) * f)
-                y = s["y0"] + int((s["y1"] - s["y0"]) * f)
-                self.point(x, y, i < n, i == 0)
-                s["i"] = i + 1
-            ran = True
-        return ran
+    @property
+    def armed(self):
+        """The kernel's line reader is armed (native/moy_kernel/moy_devch.c)."""
+        return _loop is None or _loop.devch_stats()[3]
 
     def _verbs(self, parts):
         """`verbs on|off|reset` and bare `verbs` -- the Lua/p8 tier's per-verb
@@ -1349,9 +1229,9 @@ class DevChannel:
         into stdin that are not commands -- UART0's ISR shares this ring buffer,
         so a floating U0RXD (GPIO44, on the expansion header) reads exactly like
         this. That is a fact, printed, instead of a hang to be puzzled over."""
-        _diag_log("SERIAL", "rx=%d lines=%d dropped=%d partial=%d raw=%d"
-                  % (self.rx, self.lines, self.dropped, len(self.buf),
-                     self.raw), diag)
+        st = _loop.devch_stats() if _loop is not None else (0, 0, 0, False)
+        _diag_log("SERIAL", "rx=%d lines=%d dropped=%d raw=%d"
+                  % (st[0], st[1], st[2], self.raw), diag)
 
     def _recv(self, line, parts, ws=None):
         """`recv <nbytes> <window> [rate=<baud>] <path>`: nbytes RAW off stdin
@@ -1470,13 +1350,10 @@ class DevChannel:
         import hashlib
         buf = bytearray(window)
         mv = memoryview(buf)
-        # The line reader dispatched this command the instant it saw the
-        # newline, so its partial buffer is empty here by construction -- but a
-        # byte it DID swallow is a byte the payload would never see, so take
-        # them first. They came off the TEXT stream, which maps CR to LF, so
-        # anything real in here is already corrupt; the hash is what says so.
-        pending = bytes(self.buf)
-        self.buf = bytearray()
+        # The kernel's line reader dispatched this command the instant it saw
+        # the newline and reads nothing past it, so the payload's first byte
+        # is the stream's next.
+        pending = b""
         got = 0
         err = None
         rate = 0                # the payload rate the board is at, 0 = console
@@ -1773,7 +1650,8 @@ class DevChannel:
                             self._moy_put_line(ws, text)
                         if self._put is None:
                             # Whatever followed the `.` is the line reader's.
-                            self.buf += blk[j + 1:k]
+                            if _loop is not None and j + 1 < k:
+                                _loop.devch_unread(blk[j + 1:k])
                             return
                 elif n < SERIAL_LINE_MAX:
                     line[n] = c
@@ -1896,7 +1774,6 @@ class DevChannel:
                 ws.set_diag_live(on, persist=False)
             except Exception:  # noqa: BLE001 -- older console: flag only
                 ws.diag_live = on
-            ws.perf_capture = on
             ws.show_fps = on
             ws._dirty = True
             print("REMOTE diag %s" % ("on" if on else "off"))
@@ -2019,47 +1896,6 @@ class DevChannel:
             gc.collect()
             print("REMOTE mem live=%dk free=%dk"
                   % (gc.mem_alloc() // 1024, gc.mem_free() // 1024))
-            return
-        if cmd == "bl":
-            on = not (len(parts) == 2 and parts[1] == "0")
-            if self.set_backlight is None:
-                print("REMOTE bl: no backlight control on this board")
-                return
-            self.set_backlight(on)
-            # Keep IdleBlank's model honest, or `power` reports asleep=True over
-            # a lit panel and the next idle tick declines to blank it.
-            if self.idle is not None:
-                if on:
-                    self.idle.wake(_ticks_ms())
-                else:
-                    self.idle.asleep = True
-            print("REMOTE bl %s" % ("on" if on else "off"))
-            return
-        if cmd == "power":
-            # Act on the IdleBlank DIRECTLY rather than parking a request for the
-            # loop to apply. The deferred version reported the value it had not
-            # applied yet, so `power 0` answered "timeout=8s" -- twice, in two
-            # different shapes, before the plumbing itself was the bug.
-            idle = self.idle
-            if idle is None:
-                print("REMOTE power: no idle blank on this build")
-                return
-            if len(parts) == 2 and parts[1] == "off":
-                idle.blank()
-                print("REMOTE power off")
-                return
-            if len(parts) == 2 and parts[1] == "on":
-                idle.wake(_ticks_ms())
-                ws._psave_asleep = False
-                ws._dirty = True
-            elif len(parts) == 2:
-                idle.timeout_ms = int(parts[1]) * 1000
-                # Mirror onto the ws so `state`'s psave field reports the LIVE
-                # timeout, not the boot default.
-                ws._psave_ms = idle.timeout_ms
-                idle.wake(_ticks_ms())
-            print("REMOTE power timeout=%ds asleep=%s"
-                  % (idle.timeout_ms // 1000, idle.asleep))
             return
         if cmd == "open":
             # Deterministic app open (no tile-hunting), so a drag/scroll can be

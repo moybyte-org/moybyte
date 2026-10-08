@@ -25,6 +25,7 @@ This suite never opens a serial port and never needs a board or a display.
 """
 
 import ast
+import re
 import os
 import subprocess
 import sys
@@ -148,6 +149,15 @@ def _dev_channel_commands():
                     and isinstance(node.value, ast.Dict)):
                 cmds.update(k.value for k in node.value.keys
                             if isinstance(k, ast.Constant))
+
+    # The kernel's own words (native/moy_kernel/moy_devch.c's KERNEL_WORDS,
+    # and the `quit` its reader answers before any table).
+    devch = (ROOT / "native" / "moy_kernel" / "moy_devch.c").read_text(encoding="utf-8")
+    table = devch[devch.index("KERNEL_WORDS[] = {"):]
+    table = table[:table.index("};")]
+    cmds.update(re.findall(r'\{"([a-z][a-z0-9_-]*)", w_', table))
+    if 'strcmp(argv[0], "quit") == 0' in devch:
+        cmds.add("quit")
 
     # Board-only handlers, from the `extra=` each board's runtime passes.
     for runtime in sorted(ROOT.glob("firmware/*/modules/moy_runtime.py")):

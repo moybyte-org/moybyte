@@ -40,16 +40,22 @@ def _staged():
 def _device_backend_src():
     """The device backend's source, as the greps below mean it: the board's
     `moy_runtime` and every spine it delegates to, `device_api` (the device
-    re-export home of make_api), the one `cart_api` body, `device_boot` and
-    `frame_loop` -- read through `_staged()` on purpose, which asserts the
-    spine really is staged onto this board."""
+    re-export home of make_api), the one `cart_api` body and `device_boot`
+    -- read through `_staged()` on purpose, which asserts the spine really is
+    staged onto this board -- and the kernel's frame (native/moy_kernel's
+    loop and its VM-side stages, moy_input's input stage)."""
     return "\n".join((
         runtime_text(ROOT / "modules" / "moy_runtime.py"),
         (DEVICE / "device_api.py").read_text(encoding="utf-8"),
         Path("runtime/cart_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
-        _staged()["frame_loop.py"].read_text(encoding="utf-8"),
-    ))
+    ) + _kernel_frame())
+
+
+def _kernel_frame():
+    return tuple((NATIVE / rel).read_text(encoding="utf-8") for rel in (
+        "moy_kernel/moy_loop.c", "moy_kernel/moy_loop_board.c",
+        "moy_input/modmoy_input.c"))
 
 
 def _panel_src():
@@ -73,8 +79,9 @@ def _flush_src():
 
 def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     """The updater is CONSTRUCTED by this board (its SD gate is this board's
-    alone); the boot verdict and the rollback confirm are the spine's OtaHealth,
-    executed in tests/test_ota_health.py and tests/test_device_boot.py."""
+    alone); the boot verdict is the spine's (`report_update`) and the rollback
+    confirm the kernel loop's, executed in tests/test_ota_health.py,
+    tests/test_device_boot.py and tests/test_moy_loop.py."""
     runtime = _device_backend_src()
 
     assert "import moy_ota" in runtime
@@ -125,19 +132,20 @@ def test_micropython_native_sd_shares_display_spi_host():
 def test_micropython_touch_and_idle_cursor():
     """The kernel's GT911 driver is constructed by run_desktop's input module,
     its sample written before the merge and the frame's sample applied to the
-    shared pointer after it, and the pointer ticks in the SHARED FrameLoop. The
+    shared pointer after it, and the pointer ticks in the kernel's loop. The
     driver is executed in tests/test_tdeck_input.py, the merge and
     apply_pointer in tests/test_device_boot.py, the Pointer's auto-hide in
-    tests/test_desktop_shell.py."""
+    tests/test_desktop_shell.py, the stage order in tests/test_moy_loop.py."""
     runtime = _device_backend_src()
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
-    boot_spine = Path("runtime/frame_loop.py").read_text(encoding="utf-8")
+    stage = (NATIVE / "moy_input" / "modmoy_input.c").read_text(encoding="utf-8")
+    stage = stage[stage.index("void moy_input_loop_inputs("):]
 
     assert "self.touch = moy_input.touch(w, h)" in runtime
-    assert runtime.index("touch.poll()") < runtime.index("inp.begin_frame()") \
-        < runtime.index("inp.apply_pointer(pointer)")
-    assert "pointer.tick(now)" in boot_spine
-    assert "loop = FrameLoop(" in runtime
+    assert stage.index("moy_touchdev_poll(") < stage.index("moy_input_begin_frame(") \
+        < stage.index("moy_input_ptr_apply(")
+    assert "moy_input_ptr_tick(p, now_ms())" in stage
+    assert "return d.run(ball=tdin.ball, kick_at_tail=True" in runtime
     # Touch calibration bring-up mode (serial-only, flush-once): a rung of the
     # board's MODES ladder, reached as `s.MODE = "touch"; s.main()`.
     assert '"touch"' in shell and "MODES = (" in shell
@@ -172,7 +180,9 @@ def test_the_input_task_is_kicked_once_a_frame_and_the_gil_patch_is_gone():
     runtime = _device_backend_src()
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     header = (ROOT / "boards" / "MOYBYTE_TDECK" / "mpconfigboard.h").read_text()
-    assert "moy_input.kick()" in runtime
+    assert "kick_at_tail=True" in runtime
+    tail = runtime[runtime.index("void moy_input_loop_tail(void) {"):]
+    assert "if (s_kick_tail) {\n        moy_input_board_kick();" in tail[:200]
     assert "inp = moy_input.kernel()" in runtime
     assert "#define MOY_INPUT_TASK " in header
     assert "Moybyte #69 GIL" not in build and "MP_THREAD_GIL_EXIT" not in build
@@ -183,7 +193,10 @@ def test_hitch_logger_wired():
     board's loop must still CALL it with every stage, and must not write the
     diag ring to SD at 5s during play."""
     runtime = _device_backend_src()
-    assert '_diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],' in runtime
+    # The frame's elapsed is the kernel's (moy_loop.last()); the stages it
+    # runs in C are its meters', so the line names the ones Python still owns.
+    assert "_diag_hitch(diag, ws, comp, elapsed," in runtime
+    assert "last = moy_loop.last()" in runtime
     # the diag->SD write (measured 80-120ms) must NOT run at 5s during play
     assert "20000 if ws.cart is not None else 5000" in runtime
 
@@ -201,14 +214,12 @@ def test_micropython_offline_diag_wiring():
     assert "_diag_flush(diag, ws)" in runtime
     assert "_diag_perf_sample(" not in runtime
     assert "def _diag_perf_sample(" not in device_diag
-    assert 'diag.ring("PERF", line[5:])' in runtime
     assert "_diag_drawbrk(diag, ws)" in runtime
     assert "_diag_draw2(diag, ws)" in runtime
     assert "_diag_pump(diag, comp)" in runtime
     assert "_diag_i2cstat(diag, keyboard, tdin.touch)" in runtime
     # Existing diagnostics routed through diag (printed AND persisted): the
-    # frame-error trace and the in-cart crash.
-    assert '_diag_log("frame error", exc, diag)' in runtime
+    # in-cart crash.
     assert '_diag_log("cart error", _ce, diag)' in runtime
 
 
@@ -252,17 +263,25 @@ def test_both_boards_service_the_web_console_every_frame():
     that board served and this one never did -- so this asserts it for BOTH,
     not for whichever one someone remembers.
     """
-    # The drain is ONE helper (frame_loop.poll_webhost); each board's frame
-    # tail must still CALL it -- the failure this pins was exactly a tail that
-    # stopped calling. That the helper actually polls, only while the host is
-    # SERVING, and never breaks the frame when the transfer dies, is executed
-    # in test_device_boot.py.
+    # The drain is the kernel loop's service upcall: the board's stages say
+    # the webhost is live whenever the web console is not OFF or its socket
+    # is still listening (moy_loop_board.c), and the spine's service polls
+    # it. That a live service is called up every frame and none otherwise is
+    # executed in tests/test_moy_loop.py.
+    board = (NATIVE / "moy_kernel" / "moy_loop_board.c").read_text(encoding="utf-8")
+    svc = board[board.index("static uint32_t b_services(void) {"):]
+    assert "wc.state != MOY_WC_OFF || web.listening" in svc
+    assert "s_ops.services = b_services;" in board
+    spine = (DEVICE / "desktop_spine.py").read_text(encoding="utf-8")
+    service = spine[spine.index("def make_service("):]
+    assert "wh.poll()" in service.split("return service")[0]
     for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
         src = runtime_text(_REPO / rel)
-        assert "poll_webhost(ws)" in src, (
-            "%s never polls ws.webhost -- a bound listener with no accept() "
-            "times out instead of refusing, which reads as a dead server" % rel)
+        assert "make_service(ws, moy_loop)" in src, (
+            "%s never registers the services' Python half -- a bound listener "
+            "with no accept() times out instead of refusing, which reads as a "
+            "dead server" % rel)
 
 
 # -- the panel and the flush engine ---------------------------------------------

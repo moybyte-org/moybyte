@@ -11,7 +11,7 @@ speaker ran dry each time (#158 has the numbers). None of it was the cart's:
 every byte was the console's frame.
 
 So this boots the REAL T-Deck desktop -- `moy_runtime.run_desktop`, the shared
-boot spine, the FrameLoop, the Workstation, the Player, `moycore_glue`'s
+boot spine, the kernel's frame loop (`moy_loop`), the Workstation, the Player, `moycore_glue`'s
 WasmRun with its CartFrame hand-off -- on the desktop MicroPython built in the
 BOARDS' model (32-bit words, REPR_C, single floats, threads under one GIL: see
 `make unix-micropython`), with its hardware replaced underneath by fakes that
@@ -375,8 +375,14 @@ def measure(loop):
     print("RESULT " + json.dumps(info))
 
 
-class _Measured(Exception):
-    pass
+class _Loop:
+    """The kernel's loop as the measurement drives it: one step a frame over
+    the console the board's run_desktop handed it."""
+
+    def __init__(self, desktop):
+        import moy_loop
+        self.ws = desktop.ws
+        self.step = moy_loop.step
 
 
 def main():
@@ -391,7 +397,6 @@ def main():
         import moybyte_sd
         moybyte_sd._live_mounted = True      # the card attached at boot
         import device_boot
-        import frame_loop
         import moy_runtime
 
         def _load(self, boot, store):
@@ -400,20 +405,9 @@ def main():
             self.on_sd = True                # the T-Deck's store is its card
             return carts, root, None
 
-        def _nosleep(ms):
-            return None
-
-        def _run(self):
-            measure(self)
-            raise _Measured()
-
         moy_runtime._Storage.load = _load
         moy_runtime.POWER_SAVE_MS = 0
-        frame_loop._sleep_ms = _nosleep     # the loop's pacing; nothing else
-        frame_loop.FrameLoop.run = _run
-        moy_runtime.run_desktop()
-    except _Measured:
-        pass
+        measure(_Loop(moy_runtime.run_desktop()))
     except BaseException as exc:             # noqa -- say it, then end the run
         sys.print_exception(exc)
     DONE.release()

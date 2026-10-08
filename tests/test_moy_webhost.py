@@ -1823,26 +1823,15 @@ def test_the_frame_loop_keeps_polling_a_host_that_is_saying_goodbye():
     """The half that makes the window real. `serving` goes false at once so the
     row and the glass follow the tap; the socket outlives it by a few seconds
     purely to answer. Polling only on `serving` would leave nobody to answer,
-    which is the bug the window exists to fix."""
-    from runtime import frame_loop
-
-    class Host:
-        serving = False
-        closing = "off"
-        polled = 0
-
-        def poll(self):
-            Host.polled += 1
-
-    class Ws:
-        webhost = Host()
-
-    frame_loop.poll_webhost(Ws())
-    assert Host.polled == 1
-
-    Ws.webhost.closing = None
-    frame_loop.poll_webhost(Ws())
-    assert Host.polled == 1, "a host that is neither serving nor closing is idle"
+    which is the bug the window exists to fix: the kernel loop's service bit
+    for the webhost is up while the switch is not OFF OR the socket still
+    listens (its goodbye window)."""
+    board = (ROOT / "native" / "moy_kernel" / "moy_loop_board.c").read_text(
+        encoding="utf-8")
+    svc = board[board.index("static uint32_t b_services(void) {"):]
+    svc = svc[:svc.index("\n}\n")]
+    assert "if (wc.state != MOY_WC_OFF || web.listening) {" in svc
+    assert "bits |= MOY_SVC_WEB;" in svc
 
 
 def test_turning_the_row_off_still_stops_a_host_that_cannot_take_a_reason():

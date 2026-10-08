@@ -453,38 +453,6 @@ def test_a_manifest_with_a_junk_version_is_not_newer(board):
 
 
 
-# == how long "healthy" takes ==================================================
-#
-# `tests/test_ota_health.py` owns the confirm's SHAPE, and does it entirely
-# through the two constants -- which is correct for the shape and leaves the
-# VALUES unpinned: HEALTHY_LOOPS could be 1 and every one of those tests would
-# still pass. These two are about the numbers.
-
-def test_the_loop_threshold_is_a_real_wait_not_a_formality(board):
-    """The confirm cancels the rollback, so it is the last moment the board can
-    be saved from an image that comes up and then dies. A handful of iterations
-    would confirm inside the boot itself; the constant is ~2-4s of frames on
-    either board -- long enough that an ordinary crash lands inside it, short
-    enough that nobody power-cycles first."""
-    assert moy_ota_health.HEALTHY_LOOPS >= 60
-    for _ in range(30):
-        assert board.u.confirm_when_healthy(5) is False
-    assert board.esp.marked == 0
-
-
-def test_the_paint_threshold_is_exactly_one(board):
-    """MEASURED on the P4: an idle desktop had drawn ONE frame six seconds
-    after boot, because the console repaints only when something changes. Any
-    higher threshold rolls back every update that lands while nobody is poking
-    at the console -- and one painted frame is already the whole of what #56
-    was missing."""
-    assert moy_ota_health.HEALTHY_PAINTS == 1
-    fired = [board.u.confirm_when_healthy(1)
-             for _ in range(moy_ota_health.HEALTHY_LOOPS)]
-    assert fired.count(True) == 1
-    assert board.esp.marked == 1
-
-
 # == where the manifest comes from =============================================
 
 
@@ -989,9 +957,10 @@ def test_an_online_update_from_the_manifest_to_the_next_boot(board, monkeypatch)
     esp2 = _Esp32(running="ota_1")
     _install_esp32(monkeypatch, esp2)
     assert nxt.boot_check()[0] == "ok"
-    fired = [nxt.confirm_when_healthy(1) for _ in range(moy_ota_health.HEALTHY_LOOPS)]
-    assert fired.count(True) == 1
-    assert esp2.marked == 1
+    # The kernel's loop marks the slot valid after painted frames
+    # (tests/test_moy_loop.py); its service upcall then retires the marker.
+    assert nxt.confirmed_by_kernel() is True
+    assert nxt.boot_check() is None
 
 
 def _screen_over(tmp_path, board, srv, blob):

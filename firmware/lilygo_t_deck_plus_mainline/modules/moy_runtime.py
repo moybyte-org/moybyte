@@ -2,8 +2,9 @@
 
 The `run_desktop` that had the least to invent: the shared boot spine
 (`device/desktop_spine.py` over `runtime/device_boot.py`) owns the splash,
-the cart seed/scan, the Lua probe, the service wiring, the OTA verdict and
-the frame loop, and the shared `console.Workstation` owns every pixel. What is
+the cart seed/scan, the Lua probe, the service wiring and the OTA verdict,
+the kernel owns the frame (native/moy_kernel/moy_loop.c), and the shared
+`console.Workstation` owns every pixel. What is
 left here is the part that is genuinely this board's hardware.
 
 This port replaced the lvgl_micropython fork build of the same glass (deleted
@@ -76,10 +77,10 @@ LAYER_COPY_ASYNC = True
 # one without it).
 SERIAL_CMDS = True
 
-# Idle screen blank (shared with the P4 via frame_loop.IdleBlank). Overridable
-# before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`) and at
-# runtime over the dev channel (`power <secs>`, `power off`). Same 5 minutes the
-# P4 ships, so the two boards behave alike unless a board has a reason not to.
+# The idle ladder's blank rung (the kernel's, native/moy_kernel/moy_idle.c).
+# Overridable before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS =
+# ...`) and at runtime over the dev channel (`power <secs>`, `power off`). The
+# same 5 minutes every console ships unless a board has a reason not to.
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 
 # #183: print a phase bracket around every SD session. This board has no REPL to
@@ -250,26 +251,6 @@ def run_desktop(fps_cap=60):
             except Exception:  # noqa: BLE001
                 pass
 
-    def _perf_emit(line):
-        """TWO SINKS, ONE LINE (#206 item 2).
-
-        PRINTED like every other board -- until 2026-08-28 this board's samples
-        went only through the diag ring, whose `Moybyte <uptime> ` stamp made
-        `tools/p4_perf.py` (which filters on `PERF `) drop every one of them, so
-        the board whose fps needed measuring was invisible to the tool that
-        measures it. And through the ring as well, uptime-stamped, because this
-        board's serial RX was dead for months and the SD log is why anything was
-        known about it at all -- the ring is what survives a hang.
-
-        Ringed WITHOUT the live echo: `diag.log` would print it a second time.
-        """
-        print(line)
-        if diag is not None:
-            try:
-                diag.ring("PERF", line[5:])
-            except Exception:  # noqa: BLE001 -- a diag never breaks a frame
-                pass
-
     d = build_desktop("Moybyte", "tdeck", comp, canvas, set_backlight, inp,
                       inputs=lambda: tdin.build(canvas.w, canvas.h),
                       keyboard=keyboard, seed_carts=CARTS,
@@ -277,67 +258,45 @@ def run_desktop(fps_cap=60):
                       load_carts=store.load, with_sd=store.session,
                       before_slim=_before_slim, after_services=_after_services,
                       ble_keyboard=tdin.ble_keyboard,
-                      serial=SERIAL_CMDS, perf_emit=_perf_emit,
+                      serial=SERIAL_CMDS,
                       log=lambda tag, msg: _diag_log(tag, msg, diag),
                       fps_cap=fps_cap)
     ws = d.ws
-    pointer = d.pointer
     serial = d.serial
-    perf_account = d.perf.account
 
-    # Per-frame phase costs the diag lines read. Mutable containers because the
-    # hooks below are CLOSURES over this scope (the FrameLoop owns the order,
-    # this board owns the hardware inside each hook -- #202 Phase B).
+    # The offline diag ring's per-frame Python: this board's own, run inside
+    # the frame upcall (never an upcall of its own). The frame's numbers are
+    # the kernel's -- the last frame's work and sleep (`moy_loop.last()`),
+    # the stages in its meters -- so LOOP splits the frame into its work, the
+    # console's share and the sleep, and HITCH names the frame that spiked.
+    import moy_loop
     _diag_at = [_ticks_ms() + 3000]
     _flush_at = [_ticks_ms() + 5000]
     _prev_cart_err = [None]
     _cart_prev = [False]
     # [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep, hi, hp] ms per frame,
-    # averaged and zeroed every diag tick. HITCH only fires on SPIKES, so a
-    # steady per-frame cost that never crosses HITCH_MS is invisible without it.
+    # averaged and zeroed every diag tick. The stages the kernel runs in C
+    # (kbd, inp, sb, web) are its meters' now and read None here.
     _acc = [0] * 12
-    _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
+    _t = {"diag": 0, "sd": 0}
 
-    def _present():
-        _t0 = _ticks_ms()
-        canvas.sync_back()      # re-point at the compositor's new BACK buffer
-        _t["sb"] = _ticks_diff(_ticks_ms(), _t0)
-
-    def _frame_error(exc):
-        _diag_log("frame error", exc, diag)
-        print("Moybyte frame error:", exc)
-        _diag_flush(diag, ws)
-        import gc
-        gc.collect()
-
-    def _tail(now):
-        loop = d.loop
-        # One pass of the kernel's input task (#69) a frame, kicked after
-        # present so the keyboard's and the GT911's reads run while this frame
-        # paces, and the next frame's merge takes what they staged.
-        moy_input.kick()
+    def _after_frame(drew):
+        last = moy_loop.last()
+        elapsed = last >> 16
+        sleep_ms = last & 0xFFFF
+        if diag is not None and elapsed >= HITCH_MS:
+            _diag_hitch(diag, ws, comp, elapsed, -1, -1, -1, -1,
+                        _t["diag"], _t["sd"], -1)
+        _acc[0] += 1
+        _acc[1] += elapsed
+        _acc[7] += _t["diag"]
+        _acc[8] += _t["sd"]
+        _acc[9] += sleep_ms
         # #183: close the SD bracket. A DRAWN frame here means the first panel
         # flush after the SD session completed, so the bus survived it.
-        if store.traced and loop.drew:
+        if store.traced and drew:
             store.traced = False
             print("SD = panel ok")
-
-        # THE IDLE-BAND DRAIN (#40/#66). The overlapped flush RETURNS with bands
-        # still queued, and `console.frame()`'s redraw gate returns BEFORE
-        # comp.flush() on a frame that changes nothing. Under the 2ms pump
-        # timer this drain was LOAD-BEARING (the timer's constructor was
-        # allowed to fail, and without it the bottom of the screen sat stale
-        # until the next repaint); since moy_lcd's core-0 feeder (2026-08-21)
-        # the flush always completes without VM-side help, so this is now a
-        # cheap fence -- one volatile read once the feeder is idle -- kept so
-        # an idle console still GUARANTEES nothing is in flight before
-        # whatever comes next (SD, sleep, serial py snippets).
-        if not loop.drew:
-            try:
-                comp.sync()
-            except Exception:  # noqa: BLE001 -- an idle tidy-up must never throw
-                pass
-
         if diag is not None:
             _ce = getattr(ws, "cart_error", None)
             if _ce is not None and _ce != _prev_cart_err[0]:
@@ -346,52 +305,30 @@ def run_desktop(fps_cap=60):
                 _diag_flush(diag, ws)
             elif _ce is None:
                 _prev_cart_err[0] = None
-
         _tnow = _ticks_ms()
         _t["diag"] = 0
         _live = bool(getattr(ws, "diag_live", False))
         if diag is not None and _ticks_diff(_tnow, _diag_at[0]) >= 0:
             _diag_at[0] = _tnow + 3000
-            if ws.perf_capture != _live:
-                ws.perf_capture = _live     # capture follows Settings -> PERF DIAG
             try:
                 diag.ECHO_LIVE = _live
             except Exception:  # noqa: BLE001
                 pass
-            # The PERF sample rides the shared FrameLoop.account hook with the
-            # other boards (#206 item 2), on their 2s cadence.
-            #
             # Every line this tick writes is PERF DIAG's (owner call
-            # 2026-09-30): in kid mode nothing periodic is formatted, printed or
-            # ringed, because each is garbage the collector stops the frame
-            # for. The window still closes every tick, so the first LOOP line
-            # after the diag comes on is three seconds of its own.
+            # 2026-09-30): in kid mode nothing periodic is formatted, printed
+            # or ringed. The window still closes every tick.
             if _live:
                 _diag_drawbrk(diag, ws)
-                # DRAWBRK says how much of the frame is `render`; this says
-                # WHICH native op render is: `layer=` is the draw_layer window
-                # copy (what the async layer copy is meant to take to ~0 on a
-                # full-screen-layer cart), `fill=` is the cls bucket (what a
-                # colour `background()` costs -- a 153,600 B PSRAM write, Brick
-                # Siege's whole `bg=`).
                 _diag_draw2(diag, ws)
                 _diag_loop(diag, ws, _acc)
-                # #66 lever 4: the bounce-feed pacing of the flush overlap --
-                # the ONE line that says whether a disappointing fps is the bus
-                # or the feeder. Prints nothing unless comp.bounce_flush, so a
-                # serialized build is silent rather than lying.
                 _diag_pump(diag, comp)
                 _diag_i2cstat(diag, keyboard, tdin.touch)
-                # The web console's SOCKET state: "serving but nobody
-                # connected" and "never started" look identical from the
-                # outside without it.
                 _diag_webhost(diag, ws)
                 if serial is not None:
                     serial.report(diag)
             for _i in range(12):
                 _acc[_i] = 0
             _t["diag"] = _ticks_diff(_ticks_ms(), _tnow)
-
         # #68 kid mode: the periodic diag->SD write costs 80-120ms and IS a
         # felt stutter during play, so it needs PERF DIAG *and* DIAG SD LOG.
         # The cart-exit and crash flushes stay unconditional.
@@ -405,33 +342,6 @@ def run_desktop(fps_cap=60):
             _flush_at[0] = _tnow + (20000 if ws.cart is not None else 5000)
             _t["sd"] = _diag_flush(diag, ws)
 
-        # The shared tail: the web console (timed, so `web=` in LOOP/HITCH
-        # answers "is the transfer what stalled this frame") then the radio.
-        _t["web"] = d.tail(now)
-
-    def _account(now, elapsed, sleep_ms):
-        loop = d.loop
-        perf_account(now, elapsed, sleep_ms)
-        if diag is not None and elapsed >= HITCH_MS:
-            _diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],
-                        loop.t_ws, _t["diag"], _t["sd"], _t["web"],
-                        loop.t_hi, loop.t_hp)
-        # Accumulated BEFORE the sleep, so `frame` is work and `sleep` is
-        # carried separately -- a paced loop must not read as a slow one.
-        _acc[0] += 1
-        _acc[1] += elapsed
-        _acc[2] += _t["kbd"]
-        _acc[3] += _t["inp"]
-        _acc[4] += _t["sb"]
-        _acc[5] += loop.t_ws
-        _acc[6] += _t["web"]
-        _acc[7] += _t["diag"]
-        _acc[8] += _t["sd"]
-        _acc[9] += sleep_ms
-        _acc[10] += loop.t_hi
-        _acc[11] += loop.t_hp
-
-    # Every input source on this board is TDeckInput.poll, timed into _t for
-    # the diag lines.
-    return d.run(lambda now: tdin.poll(now, ws, pointer, _t), present=_present, tail=_tail,
-                 account=_account, frame_error=_frame_error)
+    # The trackball is this board's arrow keys; its input task reads the
+    # keyboard and the GT911 while the frame paces (kicked at the tail, #69).
+    return d.run(ball=tdin.ball, kick_at_tail=True, after_frame=_after_frame)

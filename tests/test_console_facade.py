@@ -113,8 +113,6 @@ FORWARDS = {
 GETATTR_ABSENT = {
     "ble_keyboard": "the BLE keyboard driver, injected only on a board that has "
                     "one; settings_layer gates its whole panel on the probe",
-    "_psave_asleep": "device_boot's idle-blank state, written only on glass",
-    "_psave_ms": "the idle-blank timeout the dev channel's `psave` reports",
     # The PERF line's wm columns (#206 item 2). ABSENCE IS THE ANSWER here, not
     # a defaulted probe: wm_windowed stamps these under perf_capture, so a board
     # that does not stage it never has them and a board with the deep meters off

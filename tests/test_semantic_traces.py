@@ -1464,8 +1464,7 @@ kernel 1
 LOOP_DRIVER = r'''import sys
 sys.path.insert(0, @RUNTIME@)
 
-import frame_loop
-from frame_loop import FrameLoop, IdleBlank, STAGE_ORDER
+import moy_loop
 
 try:
     import _thread
@@ -1477,100 +1476,59 @@ def say(*a):
     print("T", " ".join(str(x) for x in a))
 
 
+# The kernel's loop (native/moy_kernel/moy_loop.c) on its trace tier: a fake
+# clock, scripted inputs, a byte queue for the dev channel, and every stage the
+# loop drives logged as a token. 20 fps (a 50 ms slot), a light that dims, and
+# the ladder's three rungs at 1, 2 and 3 seconds; a frame is 250 ms.
+moy_loop.trace_init(20, True, 1000)
+moy_loop.idle(moy_loop.DIM, 1)
+moy_loop.idle(moy_loop.SAVER, 2)
+moy_loop.idle(moy_loop.BLANK, 3)
+moy_loop.capture(True)
+DRAWN = [0]
+
+
+def handle_input():
+    moy_loop.trace_note("hi")
+
+
+def handle_pointer():
+    moy_loop.trace_note("hp")
+
+
+def frame(dt):
+    moy_loop.trace_note("frame:%d" % int(dt * 1000 + 0.5))
+    DRAWN[0] += 1
+    return DRAWN[0]
+
+
+def words(line):
+    # The console's words: `tap` starts a gesture the kernel plays.
+    parts = line.split()
+    if parts[0] == "tap":
+        moy_loop.tap(int(parts[1]), int(parts[2]))
+    moy_loop.trace_note("word:" + parts[0])
+    return False
+
+
+moy_loop.register(handle_input, handle_pointer, frame, words)
+
+# Input on frames 0-2 and a touch on frame 18; a serial tap on frame 4.
+ACTIVE = (0, 1, 2, 18)
 CLOCK = [1000]
-frame_loop._ticks_ms = lambda: CLOCK[0]
-frame_loop._ticks_us = lambda: CLOCK[0] * 1000
-frame_loop._ticks_diff = lambda a, b: a - b
-frame_loop._sleep_ms = lambda ms: None
-CALLS = []
-UP = [0]
-LIT = []
-
-
-class Comp:
-    def sync(self):
-        CALLS.append("fence")
-
-
-class Pump:
-    frame_ms = 50
-    slot = 50
-
-    def begin(self):
-        CALLS.append("begin")
-        return CLOCK[0], 0.05
-
-    def tail(self, ws):
-        CALLS.append("pump_tail")
-
-    def pace(self, ws, elapsed):
-        CALLS.append("pace")
-        return 0
-
-
-class WS:
-    comp = Comp()
-    _frames_drawn = 0
-    perf_capture = True
-    _dirty = False
-    _psave_asleep = False
-
-    def handle_input(self):
-        UP[0] += 1
-
-    def handle_pointer(self):
-        UP[0] += 1
-
-    def frame(self, dt):
-        UP[0] += 1
-        self._frames_drawn += 1
-
-
-class Pointer:
-    click = False
-    down = False
-
-    def tick(self, now):
-        CALLS.append("pointer")
-
-
-class Meters(frame_loop.StageMeters):
-    def mark(self, i):
-        CALLS.append("|" + STAGE_ORDER[i])
-        frame_loop.StageMeters.mark(self, i)
-
-
-# Input on frames 0-2 and a touch on frame 16; the blank comes after 300ms.
-ACTIVE = (0, 1, 2, 16)
-F = [0]
-
-
-def poll_inputs(now):
-    CALLS.append("inputs")
-    a = F[0] in ACTIVE
-    return a, a
-
-
-ws = WS()
-idle = IdleBlank(LIT.append, 300)
-pointer = Pointer()
-loop = FrameLoop(ws, Pump(), pointer, poll_inputs, idle=idle,
-                 present=lambda: CALLS.append("present"),
-                 tail=lambda now: CALLS.append("tail"),
-                 account=lambda now, e, s: CALLS.append("account"),
-                 set_backlight=LIT.append, lit=False)
-loop.meters = Meters(ws, 50)
 
 
 def one(f):
-    F[0] = f
-    del CALLS[:]
-    UP[0] = 0
-    loop.step()
-    say("frame", f, " ".join(CALLS), "upcalls", UP[0],
-        "asleep", int(idle.asleep), "click", int(pointer.click),
-        "lit", ",".join(str(int(x)) for x in LIT))
-    CLOCK[0] += 50
+    moy_loop.trace_clock(CLOCK[0])
+    a = f in ACTIVE
+    moy_loop.trace_input(a, a)
+    if f == 4:
+        moy_loop.trace_feed(b"tap 10 20\n")
+    r = moy_loop.step()
+    up = moy_loop.upcalls()[0]
+    say("frame", f, r, moy_loop.trace_log(), "up", "/".join(str(x) for x in up),
+        "idle", moy_loop.idle()[0])
+    CLOCK[0] += 250
 
 
 for f in range(10):
@@ -1614,31 +1572,41 @@ if _thread is not None:
     wait_for_rest()
 else:
     rest()
+
+# Every stage was metered once a frame; the tail has no deadline.
+m = moy_loop.meters()
+say("meters", " ".join("%s:%d:%s" % (n, m[n][5], m[n][4]) for n in moy_loop.stages()))
+say("upcalls", "/".join(str(x) for x in moy_loop.upcalls()[1]))
+moy_loop.unregister()
+say("unregistered", moy_loop.step())
 if DONE == [None]:
     print("DRIVER_DONE")
 '''
 
 LOOP_TRACE = """\
-frame 0 begin inputs |inputs |idle pointer |pointer present |present |frame fence |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 1 lit 1
-frame 1 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 1 lit 1
-frame 2 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 1 lit 1
-frame 3 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
-frame 4 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
-frame 5 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
-frame 6 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
-frame 7 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1
-frame 8 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 9 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 10 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 11 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 12 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 13 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 14 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 15 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 1 click 0 lit 1,0
-frame 16 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
-frame 17 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
-frame 18 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
-frame 19 begin inputs |inputs |idle pointer |pointer present |present |frame |backlight pump_tail |pump_tail tail |tail pace |pace account |account upcalls 3 asleep 0 click 0 lit 1,0,1
+frame 0 0 inputs pointer:click present hi hp frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0 idle 0
+frame 1 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=49 up 3/0/0/0 idle 0
+frame 2 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=48 up 3/0/0/0 idle 0
+frame 3 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=47 up 3/0/0/0 idle 0
+frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew feed sleep=46 up 4/0/0/0 idle 0
+frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0 idle 0
+frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0 idle 0
+frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0 idle 0
+frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] feed sleep=42 up 3/0/0/0 idle 0
+frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
+frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
+frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
+frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 1
+frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 2
+frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 2
+frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 2
+frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] feed sleep=42 up 3/0/0/0 idle 2
+frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 3
+frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 0
+frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0 idle 0
+meters inputs:20:0 dev:20:0 idle:20:0 pointer:20:0 present:20:0 frame:20:0 backlight:20:0 pump_tail:20:0 tail:20:None pace:20:0 account:20:0
+upcalls 61/0/0/0
+unregistered 3
 """
 
 LINKS_DRIVER = r'''import os
@@ -1734,10 +1702,9 @@ for running, staged in (("ota_1", "ota_1"), ("ota_0", "ota_1"), ("ota_0", None))
         pending(staged)
     h = Health(running)
     say("boot", running, staged, h.boot_check())
-    ladder = []
-    for i in range(moy_ota_health.HEALTHY_LOOPS + 2):
-        if h.confirm_when_healthy(0 if i < 3 else 1):
-            ladder.append(i)
+    # The console's confirm is the kernel loop's (moy_loop.c marks the slot
+    # valid); its service upcall retires the marker, once.
+    ladder = [h.confirmed_by_kernel(), h.confirmed_by_kernel()]
     say("confirm", ladder, "valid", h.valid, "marker",
         int(moy_ota_health.PENDING_NAME in os.listdir(upd)))
 h = Health("ota_0")
@@ -1803,11 +1770,11 @@ rows hop.moy/big.lua=10 hop.moy/main.py=24 hop.moy/main.py.bak=46 hop.moy/manife
 refuse (None, None, None) (None, None, None) (None, None, None)
 files files 1
 boot ota_1 ota_1 ('ok', '0.8 -> 0.9')
-confirm [119] valid 1 marker 0
+confirm [True, False] valid 0 marker 0
 boot ota_0 ota_1 ('rolled_back', 'put 0.9 back')
-confirm [119] valid 1 marker 0
+confirm [True, False] valid 0 marker 0
 boot ota_0 None None
-confirm [119] valid 1 marker 0
+confirm [True, False] valid 0 marker 0
 serving [307] valid 1
 canon b'moybyte-ota-v2\\ntdeck\\nunstable\\n1785665581\\n4292512\\nab01010101010101010101010101010101010101010101010101010101010101'
 canon6 b'moybyte-c6-v1\\ntdeck\\n2\\n9\\ncd'

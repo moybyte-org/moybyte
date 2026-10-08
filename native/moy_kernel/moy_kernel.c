@@ -104,7 +104,14 @@
 
 #include "moy_crash.h"
 #include "moy_kernel.h"
+#include "moy_loop.h"
 #include "moy_recovery.h"
+
+void moy_loop_board_vm_start(void);
+void moy_loop_board_vm_stop(void);
+int moy_loop_board_run(void);
+bool moy_loop_board_ended(int r);
+void moy_loop_board_window(void);
 
 #if __has_include("moy_fw_label.gen.h")
 #include "moy_fw_label.gen.h"
@@ -923,6 +930,36 @@ __attribute__((weak)) void moy_net_vm_stop(void) {
 }
 
 // The kernel's internal volume, where the image has it (native/moy_store).
+// The kernel's PLAIN web-console screen (docs/kernel_survival_2026-10.md §13
+// answer 8): while no VM runs and the web console serves, the address to open,
+// drawn through the floor's raster into the panel's framebuffer 0. The themed
+// screen is the console's while its VM runs. Answers whether it drew.
+bool moy_kernel_plain_web(void) {
+    #if defined(MOY_KERNEL_PANEL) && defined(MOY_NET_WIFI) && MOY_NET_WIFI
+    moy_wc_state_t wc;
+    moy_wc_state(&wc);
+    if (wc.state != MOY_WC_SERVING) {
+        return false;
+    }
+    uint16_t *fb = MOY_KERNEL_PANEL(fb)();
+    if (fb == NULL) {
+        return false;
+    }
+    moy_rgeom_t g;              // on the loop task's stack: no internal statics
+    moy_rview_t v;
+    char url[96];
+    size_t n = moy_wc_url(url, sizeof(url), 1);
+    url[n < sizeof(url) ? n : sizeof(url) - 1] = 0;
+    moy_rgeom_init(&g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
+                   MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
+    moy_web_screen_view(&v, url, NULL, MOY_FW_LABEL);
+    moy_recovery_render_plain(fb, &g, "MOYBYTE WEB CONSOLE", &v);
+    return MOY_KERNEL_PANEL(present)() == 0;
+    #else
+    return false;
+    #endif
+}
+
 extern bool moy_kvol_vm_mount(void) __attribute__((weak));
 
 // kstop N (docs/kernel_survival_2026-10.md §7.5): the VM service's soft reset,
@@ -1024,6 +1061,8 @@ soft_reset:
     mp_init();
     // MOY: the kernel modules' cached VM objects were the last heap's.
     moy_kernel_vm_fresh();
+    // MOY: the frame's stages are the board's, and upcalls may register.
+    moy_loop_board_vm_start();
     mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_lib));
     readline_init0();
 
@@ -1055,6 +1094,14 @@ soft_reset:
         s_proven = false;
         if (ret != 0 && d.test != MOY_TEST_VM_START) {
             int ret = pyexec_file_if_exists("main.py");
+            // MOY: the console's boot registered its upcalls and returned;
+            // the kernel's loop is this task's outermost frame from here, and
+            // a SystemExit reaching an upcall is the soft reset main.py's own
+            // would have been.
+            if (!(ret & PYEXEC_FORCED_EXIT) && (moy_loop_registered() & 7u) == 7u
+                && moy_loop_board_ended(moy_loop_board_run())) {
+                ret |= PYEXEC_FORCED_EXIT;
+            }
             if (ret & PYEXEC_FORCED_EXIT) {
                 goto soft_reset_exit;
             }
@@ -1081,10 +1128,15 @@ soft_reset:
 
 soft_reset_exit:
 
+    // MOY: no upcall from here on; the loop holds none of this VM's objects.
+    moy_loop_board_vm_stop();
     moy_kernel_rest();
     moy_kernel_kstop_line("before");
     moy_glass_vm_stop();
     moy_net_vm_stop();
+    // MOY: the glass is fenced; the kernel's loop task drives the frames
+    // until the next VM is up.
+    moy_loop_board_window();
 
     #if MICROPY_BLUETOOTH_NIMBLE
     mp_bluetooth_deinit();

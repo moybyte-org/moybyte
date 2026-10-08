@@ -752,8 +752,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.update_ui = UpdateUI(self, NAMES, _err_text)
         # WASM MODE (#197): the pin, the paired url, the connection screen and
         # the parked flag, all on one object (web_console.py). The webhost above
-        # stays a flat Workstation attribute -- `poll_webhost` reads it at every
-        # frame tail on all three boards -- and this reads it through `self`.
+        # stays a flat Workstation attribute -- the kernel loop's service upcall
+        # polls it at the frame tail while it serves -- and this reads it
+        # through `self`.
         self.web = WebConsole(self, NAMES)
         # The shelf's cover + icon pipeline (#209 landing C, cover_cache.py): the
         # bounded caches, the per-frame build budget, the idle warmers and the

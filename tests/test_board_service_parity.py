@@ -804,13 +804,22 @@ Via = collections.namedtuple("Via", "path func")
 # ratchet below deletes it the day the target starts making the call itself.
 Lazy = collections.namedtuple("Lazy", "path func why")
 
+# The call is the KERNEL's: the wiring binds the service's object into the
+# kernel loop's input stage (moy_input.loop_bind), whose C polls it every
+# frame (native/moy_input/modmoy_input.c, moy_input_loop_inputs). Checked on
+# both halves: the spine binds it, and the stage makes the call.
+Kernel = collections.namedtuple("Kernel", "kw c_call")
+
+_KBD = Kernel("ble", "moy_hid_frame(")
+_SERVICE = "device/desktop_spine.py"
+
 LIFECYCLE = {
     "tdeck": {
         # The spine's guarded start() -- TDeckKeyboard has none (the C3 is on
         # I2C0 and answers from __init__), so on this board the call is the
         # getattr saying no.
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
+        ("keyboard", "poll"): Kernel(None, "moy_input_board_kick();"),
         ("ble_keyboard", "start"): Lazy(
             "runtime/settings_layer.py", "open_bluetooth",
             "auto_start=False on purpose -- scanning is what makes BLE "
@@ -818,31 +827,31 @@ LIFECYCLE = {
             "comes up when a kid opens the picker. The touch-only boards start "
             "theirs at boot because a paired keyboard is their only way out of "
             "a cart"),
-        ("ble_keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
+        ("ble_keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
+        ("link", "poll"): Via(_SERVICE, "make_service"),
     },
     "p4": {
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
+        ("keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
+        ("link", "poll"): Via(_SERVICE, "make_service"),
     },
     "guition": {
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
+        ("keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
+        ("link", "poll"): Via(_SERVICE, "make_service"),
     },
     "guition_p4": {
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/frame_loop.py", "poll_webhost"),
+        ("keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/frame_loop.py", "poll_link"),
+        ("link", "poll"): Via(_SERVICE, "make_service"),
     },
 }
 
@@ -1092,7 +1101,7 @@ def test_every_driven_service_declares_its_lifecycle(target):
 @pytest.mark.parametrize("target", sorted(TARGETS))
 def test_every_lifecycle_absence_carries_a_reason(target):
     for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
-        if value is HERE or isinstance(value, Via):
+        if value is HERE or isinstance(value, (Via, Kernel)):
             continue
         why = value.why if isinstance(value, Lazy) else value
         assert isinstance(why, str) and why.strip(), (
@@ -1117,6 +1126,17 @@ def test_the_target_drives_exactly_what_the_lifecycle_says(target):
                 "%s calls %s.poll() on its BOOT PATH, not from a frame hook -- "
                 "it runs once and then never again" % (target, service))
             continue
+        if isinstance(value, Kernel):
+            spine = (ROOT / _SERVICE).read_text(encoding="utf-8")
+            run = spine[spine.index("    def run(self"):spine.index("def make_service(")]
+            assert "moy_input.loop_bind(" in run, target
+            if value.kw is not None:
+                assert "%s=%s" % (value.kw, value.kw) in run, (target, value)
+            stage = (ROOT / "native" / "moy_input" / "modmoy_input.c").read_text(
+                encoding="utf-8")
+            stage = stage[stage.index("void moy_input_loop_inputs("):]
+            assert value.c_call in stage[:stage.index("\n}\n")], (target, value)
+            continue
         if isinstance(value, (Via, Lazy)):
             assert (service, verb) in _module_handles(value.path).verbs(
                 value.func), (
@@ -1136,7 +1156,7 @@ def test_no_lifecycle_excuse_has_gone_stale():
     stale = []
     for target in sorted(TARGETS):
         for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
-            if value is HERE or isinstance(value, Via):
+            if value is HERE or isinstance(value, (Via, Kernel)):
                 continue
             if _driven_here(target, service, verb)[0]:
                 stale.append("%s/%s/%s" % (target, service, verb))
@@ -1149,10 +1169,11 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
     """The concrete regressions, kept as their own assertion so a refactor of
     the machinery cannot lose them: the T-Deck polls its BLE keyboard EVERY
     FRAME, and something really does start it."""
-    found, per_frame = _driven_here("tdeck", "ble_keyboard", "poll")
-    assert found and per_frame, (
-        "the T-Deck stopped polling ws.ble_keyboard from its frame hook -- a "
-        "paired keyboard cannot produce a keypress (#26)")
+    assert LIFECYCLE["tdeck"][("ble_keyboard", "poll")] == _KBD
+    spine = (ROOT / _SERVICE).read_text(encoding="utf-8")
+    assert 'getattr(ws, "ble_keyboard", None)' in spine, (
+        "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
+        "stage -- a paired keyboard cannot produce a keypress (#26)")
     start = LIFECYCLE["tdeck"][("ble_keyboard", "start")]
     assert ("ble_keyboard", "start") in _module_handles(start.path).verbs(
         start.func), (

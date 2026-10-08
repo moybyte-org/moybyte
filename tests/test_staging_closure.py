@@ -106,7 +106,8 @@ NATIVE = {
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
                        "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                       "moy_spine", "moy_kernel", "moy_glass", "moy_input", "moy_net"},
+                       "moy_spine", "moy_kernel", "moy_glass", "moy_input",
+                       "moy_net"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
     # SDMMC slot 0 under the store's card volume.
@@ -124,7 +125,8 @@ NATIVE = {
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_c6", "moy_prof",
                    "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
-                   "moy_spine", "moy_kernel", "moy_sd", "moy_glass", "moy_input", "moy_net"},
+                   "moy_spine", "moy_kernel", "moy_sd", "moy_glass", "moy_input",
+                   "moy_net"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml); moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
@@ -146,6 +148,18 @@ NATIVE = {
             "moy_input", "moy_net"},
 }
 
+# A usermod that registers more than its own name: moy_kernel is the kernel's
+# entry and its frame loop, the module `moy_loop`.
+USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop"}}
+
+
+def _native_modules(target):
+    out = set()
+    for usermod in NATIVE[target]:
+        out |= USERMOD_MODULES.get(usermod, {usermod})
+    return out
+
+
 # Host-only modules that must NEVER reach a given target: staging one is the
 # mirror-image bug, a module that imports fine and then cannot work. Per target
 # and not global, because `host_api` is genuinely the WEB head's cart API
@@ -165,18 +179,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
-                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
                        "native_build", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "native_build",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "native_build",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
                    "native_build", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -185,7 +199,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop",
              "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -193,7 +207,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "net_binding", "moy_input", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "native_build", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 
@@ -452,7 +466,7 @@ DEFAULT_MIN_MODULES = 40
 def _unresolved(target):
     """[(module, path, missing-alternatives)] for `target`, gaps included."""
     mods = frozen_set(target)
-    available = set(mods) | MICROPYTHON_BUILTINS | NATIVE[target]
+    available = set(mods) | MICROPYTHON_BUILTINS | _native_modules(target)
     # Imports the board has DECLARED unreachable (board.toml's
     # [[modules.shared.lazy]]), all of them the Zero's: `moy_carts.save_blocks`
     # reaches the block compiler, and `moy_carts.decode_cover`/`encode_cover`

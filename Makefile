@@ -245,7 +245,7 @@ UNIX_MP_NATIVE := native
 # and moy_net are sprint 3's kernel modules, listed before they compile anything
 # (docs/kernel_survival_2026-10.md section 2).
 UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
-    moy_glass moy_input moy_net
+    moy_glass moy_input moy_net moy_kernel
 UNIX_MP_INDEX ?= c
 UNIX_MP_SPINE ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)

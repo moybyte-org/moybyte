@@ -104,6 +104,13 @@ why  = """
 ctypes. Here `moy_input` is a compiled-in usermod (native/.staged/moy_input)."""
 
 [[modules.shared.deny]]
+file = "moy_loop.py"
+kind = "host-only"
+why  = """
+`moy_loop` for CPython: compiles native/moy_kernel's frame loop and dlopens it
+through ctypes. Here `moy_loop` is compiled in with the browser's kernel modules."""
+
+[[modules.shared.deny]]
 file = "glass_binding.py"
 kind = "host-only"
 why  = """

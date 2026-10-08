@@ -179,6 +179,12 @@ try:
     from editor_handle import EditorHandle
 except ImportError:                     # host: the runtime package
     from runtime.editor_handle import EditorHandle
+# The kernel's frame loop (native/moy_kernel), on a tier whose frames are the
+# kernel's: the Player tells it the cadence a paced game runs at.
+try:
+    import moy_loop as _loop
+except ImportError:                     # host CPython: the host drives its frames
+    _loop = None
 
 
 def _safe_len(obj):
@@ -615,8 +621,8 @@ class Player:
         self._slow_logic_next = 0
         self._native_fail = None      # reason for bytecode fallback, when auto-native fails
         # The tick model (#217): one scheduler per run. `tick_ms` is the cart's
-        # tick period while a GAME is paced and 0 otherwise -- a flat attribute
-        # because frame_loop's frame_slot_ms reads it every loop iteration.
+        # tick period while a GAME is paced and 0 otherwise -- a flat attribute,
+        # told to the kernel's loop (moy_loop.tick) where it paces frames.
         self.sched = TickScheduler()
         self.tick_ms = 0
         self._n_ticks = 1             # frame_plan's answer, run by tick()
@@ -905,9 +911,8 @@ class Player:
         shell's must not carry the run's -- and these are also the two moments
         the pacing slot the budgets are cut from changes, because frame_slot_ms
         follows the open cart's tick."""
-        sm = getattr(self.ws, "stage_meters", None)
-        if sm is not None:
-            sm.reset()
+        if _loop is not None:
+            _loop.meters_reset()
 
     def sram_report(self):
         """#211: the internal-SRAM headroom the cart RUN had, or None.
@@ -1587,6 +1592,8 @@ class Player:
         self.sched.start(rate, getattr(ws, "steady", True))
         self.sched.uncapped = bool(getattr(ws, "_uncap", False))
         self.tick_ms = self.sched.tick_ms
+        if _loop is not None:
+            _loop.tick(self.tick_ms)
         self._keyp_latch = 0
         inp = ws.input
         self._tick_edges = getattr(inp, "tick_edges", None)
@@ -1603,6 +1610,8 @@ class Player:
 
     def _disarm_pacing(self):
         self.tick_ms = 0
+        if _loop is not None:
+            _loop.tick(0)
         self._free = False
         self._n_ticks = 1
         self._tick_edges = None

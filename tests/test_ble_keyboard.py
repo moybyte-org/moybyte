@@ -437,6 +437,6 @@ def test_the_frame_half_polls_before_the_merge():
     """The central runs no Python (tests/test_no_vm_calls_in_drivers.py holds
     its sources); its frame half takes the reports into the source before the
     merge, or the table answers a frame late."""
-    spine = (ROOT / "device" / "desktop_spine.py").read_text()
-    body = spine[spine.index("    def poll_inputs("):spine.index("    def present(")]
-    assert body.index("keyboard.poll()") < body.index("inp.begin_frame()")
+    stage = (ROOT / "native" / "moy_input" / "modmoy_input.c").read_text()
+    body = stage[stage.index("void moy_input_loop_inputs("):]
+    assert body.index("moy_hid_frame(b->h);") < body.index("moy_input_begin_frame(t);")

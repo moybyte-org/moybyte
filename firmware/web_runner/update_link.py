@@ -46,8 +46,8 @@ THE TWO BOARD SHAPES (`screen` in the status document, moy_webhost):
     flash one chunk per painted frame OF ITS UPDATE SCREEN, and while a browser
     is driving, that board's glass is parked on the WEB CONSOLE connection
     screen -- so an install driven from here would sit at 0% forever unless
-    the chunk work moved into `poll_webhost`, which on the T-Deck is the frame
-    tail where an sdspi transaction is the documented panic.
+    the chunk work moved into the webhost's poll, which on the T-Deck is the
+    frame tail where an sdspi transaction is the documented panic.
 
 NO UNATTENDED INSTALL, on either shape. Every request here is a tap.
 """

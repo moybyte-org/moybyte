@@ -88,7 +88,7 @@ def tf_card():
     return moy_store.card(sectors)
 
 
-# Idle screen blank -- the shared IdleBlank, the shared 5 minutes.
+# The idle ladder's blank rung (the kernel's) -- the shared 5 minutes.
 POWER_SAVE_MS = 300000         # 0 disables
 
 
@@ -125,17 +125,4 @@ def run_desktop(fps_cap=60):
                                               CARTS_ROOT, OTA_UPDATE_DIR),
                       extras={"bt": bt_command(keyboard)}, fps_cap=fps_cap)
 
-    def _tail(now):
-        # The idle-band drain, the T-Deck's #40/#66 lesson which this board's
-        # overlapped flush shares exactly: a quiet frame returns before
-        # comp.flush(), leaving the previous frame's tail bands to the 2ms
-        # pump timer -- whose constructor is allowed to fail. When THIS frame
-        # did not draw, drain; no-op when it did.
-        if not d.loop.drew:
-            try:
-                comp.sync()
-            except Exception:  # noqa: BLE001 -- an idle tidy-up must never throw
-                pass
-        d.tail(now)
-
-    return d.run(tail=_tail)
+    return d.run()

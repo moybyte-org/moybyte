@@ -50,6 +50,14 @@ void moy_recovery_view(moy_rview_t *v, int why, const moy_crash_rec_t *rec,
 
 void moy_recovery_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t *v);
 
+// The kernel's plain screen: a titled bar, the lines and the hint, no choices.
+void moy_recovery_render_plain(uint16_t *fb, const moy_rgeom_t *g, const char *title,
+                               const moy_rview_t *v);
+// What the plain web-console screen says: the address to open, the pin, the
+// firmware.
+void moy_web_screen_view(moy_rview_t *v, const char *url, const char *pin,
+                         const char *label);
+
 // The choice under a logical point, or -1.
 int moy_recovery_hit(const moy_rgeom_t *g, int x, int y);
 

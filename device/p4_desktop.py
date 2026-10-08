@@ -17,8 +17,8 @@ P4 tier's, and lives here once for both boards:
   * the cart store is the TF card when one mounts and the board's internal
     flash when not (`device/card_store.py`), the slot being SDMMC slot 0 on
     LDO channel 4 on both boards;
-  * the deferred present (#58 composite-overlap) runs before the canvases
-    re-point, and the PPA's overlap counters ride the PERF line;
+  * the deferred present (#58 composite-overlap) is the kernel loop's present
+    stage, and the PPA's overlap counters ride its PERF line;
   * three dev-channel extras: `bt` (the keyboard), `union` and `cache` (the
     windowed WM's two A/B levers).
 
@@ -113,20 +113,10 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                       c6_updater=wire_links.c6_updater_class(),
                       extras={"bt": bt_command(keyboard, comp),
                               "union": _union_cmd, "cache": _cache_cmd},
-                      overlap=comp.overlap_stats, fps_cap=fps_cap)
-    game = d.game
-    sys_canvas = d.sys_canvas
-
-    def _present():
-        # Present the PREVIOUS quiet game frame now (its async composite has
-        # been DMAing through the input poll): wait the DMA, switch scan-out
-        # to it, free the other buffer. No-op unless the last frame deferred.
-        # Must precede sync_back, which re-points at the freed buffer.
-        comp.present_pending()
-        game.sync_back()           # off-screen: contract no-op
-        sys_canvas.sync_back()     # double-buffer: re-point at the new BACK fb
-
-    return d.run(present=_present)
+                      fps_cap=fps_cap)
+    # The deferred present (#58 composite-overlap) is the kernel's stage
+    # (moy_glass's present_pending, before the canvases re-point).
+    return d.run()
 
 
 def run_touch_calibrate(name, compositor, set_backlight, touch_cls, knobs):

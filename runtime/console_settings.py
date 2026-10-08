@@ -7,6 +7,11 @@ persists through `prefs`. What the settings MEAN at boot (`load_system`'s
 apply cascade) stays on the kernel.
 """
 
+try:                        # a VM: the kernel's frame loop (native/moy_kernel)
+    import moy_loop as _loop
+except ImportError:         # host CPython: the host drives its own frames
+    _loop = None
+
 
 class SettingsToggles:
 
@@ -27,9 +32,12 @@ class SettingsToggles:
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
-        The device loop (moy_runtime.run_desktop) reads self.diag_live each cycle,
-        so the change takes effect within a frame -- no reboot."""
+        On a tier whose frames are the kernel's, the capture meters and the
+        PERF line follow it at the next frame -- no reboot."""
         self._set_toggle("diag_live", bool(on), persist)
+        if _loop is not None:
+            self.perf_capture = bool(on)
+            _loop.capture(bool(on))
 
     def set_diag_sd(self, on, persist=True):
         """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and

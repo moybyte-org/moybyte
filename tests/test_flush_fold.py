@@ -181,7 +181,7 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
 
     THE SECOND RULE (2026-09-08): the snapshot is a DMA still reading the LIVE
     canvas after blit_game returns, so the sys canvas must `snap_fence` before
-    the cart's next write -- in `sync_back`, which both boards' present()
+    the cart's next write -- in `sync_back`, which both boards' first upcall
     hooks run before every Player tick, and BEFORE it re-points the draw
     target. The lever is probed by the snapshot verb's absence, never by a
     flag a base class could inherit."""
@@ -196,15 +196,14 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
     from board_source import runtime_text
     for path in (GUITION / "modules" / "moy_runtime.py",
                  TDECK / "modules" / "moy_runtime.py"):
-        # The board's own present hook where it has one (the T-Deck times
-        # its sync_back); the spine's `present` method where it does not.
+        # The canvases re-point in the console's first upcall of every
+        # frame (the spine's handle_input), after the kernel's present stage
+        # and before the Player's tick.
         src = runtime_text(path)
-        at = src.find("def _present(")
-        if at < 0:
-            at = src.index("def present(")
+        at = src.index("        def handle_input():")
         present = src[at:]
-        present = present[:present.index("\n\n")]
-        assert "sync_back()" in present, path
+        present = present[:present.index("ws.handle_input()")]
+        assert "sys_canvas.sync_back()" in present, path
 
 
 # -- the twin verbs: two panel modules, one body ------------------------------

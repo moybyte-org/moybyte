@@ -136,6 +136,9 @@ NOT_OURS = (
     # ...and the compositors' Python it crossed into native/moy_glass.
     "device/banded_panel.py", "modules/tdeck_panel.py", "modules/guition_panel.py",
     "modules/p4_display.py", "device/dsi_panel.py", "modules/guition_p4_display.py",
+    # The Python frame loop, deleted by sprint 3's frame-tail pass (2026-10-08)
+    # when native/moy_kernel/moy_loop.c took the frame.
+    "runtime/frame_loop.py",
 )
 
 

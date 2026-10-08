@@ -1338,6 +1338,9 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_ble_obj);
 void moy_input_vm_fresh(void) {
     MP_STATE_VM(moy_input_kernel_obj) = MP_OBJ_NULL;
     MP_STATE_VM(moy_input_ble_obj) = MP_OBJ_NULL;
+    for (int i = 0; i < 4; i++) {
+        MP_STATE_VM(moy_input_loop_objs)[i] = MP_OBJ_NULL;
+    }
 }
 
 static mp_obj_t input_kick(void) {
@@ -1350,6 +1353,160 @@ static mp_obj_t input_task_stack_free(void) {
     return mp_obj_new_int_from_uint(moy_input_board_stack_free());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_task_stack_free_obj, input_task_stack_free);
+
+// -- the kernel's frame (native/moy_kernel/moy_loop.c) ---------------------------------
+//
+// loop_bind(pointer, touch=None, ble=None, ball=None, kick_at_tail=False): the
+// objects the loop's input stage reads, held as root pointers for the VM's
+// life (the kernel keeps no VM object: docs/native_kernel_2026-09.md §4.3).
+// The stage is one C pass a frame: the input task's kick (at the head, or at
+// the tail where the board's task reads while the frame paces), the BLE
+// keyboard's reports and its mouse, the touch's sample, the merge, the
+// trackball, the pointer's sample. The trackball's pulses are the console's
+// to spend (a caret's arrows, else the cursor): nav() hands them over, once.
+
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_loop_objs[4]);
+
+#define LOOP_PTR 0
+#define LOOP_TOUCH 1
+#define LOOP_BLE 2
+#define LOOP_BALL 3
+
+static bool s_kick_tail;
+static int32_t s_nav[2];
+static uint32_t s_devch_src;
+static bool s_devch;
+
+static mp_obj_t input_loop_bind(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
+    enum { ARG_pointer, ARG_touch, ARG_ble, ARG_ball, ARG_kick_at_tail };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_pointer, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_touch, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_ble, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_ball, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_kick_at_tail, MP_ARG_BOOL, {.u_bool = false} },
+    };
+    mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, a);
+    if (!mp_obj_is_type(a[ARG_pointer].u_obj, &input_pointer_type)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("loop_bind: not a Pointer"));
+    }
+    mp_obj_t *o = MP_STATE_VM(moy_input_loop_objs);
+    o[LOOP_PTR] = a[ARG_pointer].u_obj;
+    o[LOOP_TOUCH] = mp_obj_is_type(a[ARG_touch].u_obj, &input_touch_type) ? a[ARG_touch].u_obj : MP_OBJ_NULL;
+    o[LOOP_BLE] = mp_obj_is_type(a[ARG_ble].u_obj, &input_ble_type) ? a[ARG_ble].u_obj : MP_OBJ_NULL;
+    o[LOOP_BALL] = mp_obj_is_type(a[ARG_ball].u_obj, &input_ball_type) ? a[ARG_ball].u_obj : MP_OBJ_NULL;
+    s_kick_tail = a[ARG_kick_at_tail].u_bool;
+    s_nav[0] = s_nav[1] = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(input_loop_bind_obj, 1, input_loop_bind);
+
+// nav() -> the trackball's pulses this frame as one small int pair packed
+// (dx * 4096 + dy, each biased by 2048), 0 when it did not move: the
+// console's hook reads it with no allocation and spends it once.
+static mp_obj_t input_nav(void) {
+    int32_t dx = s_nav[0], dy = s_nav[1];
+    s_nav[0] = s_nav[1] = 0;
+    if (!dx && !dy) {
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
+    return MP_OBJ_NEW_SMALL_INT((dx + 2048) * 4096 + (dy + 2048));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_nav_obj, input_nav);
+
+void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
+    (void)now_unused;
+    *click = false;
+    *active = false;
+    mp_obj_t *o = MP_STATE_VM(moy_input_loop_objs);
+    if (o[LOOP_PTR] == MP_OBJ_NULL) {
+        return;
+    }
+    moy_input_ptr_t *p = &((input_pointer_obj_t *)MP_OBJ_TO_PTR(o[LOOP_PTR]))->p;
+    moy_input_t *t = moy_input_kernel();
+    uint32_t now = now_ms();
+    if (!s_kick_tail) {
+        moy_input_board_kick();
+    }
+    if (o[LOOP_BLE] != MP_OBJ_NULL) {
+        input_ble_obj_t *b = MP_OBJ_TO_PTR(o[LOOP_BLE]);
+        moy_hid_frame(b->h);
+        int32_t dx, dy;
+        uint8_t buttons;
+        if (moy_hid_take_mouse(b->h, &dx, &dy, &buttons)) {
+            if (dx || dy) {
+                moy_input_ptr_move(p, dx, dy, now);
+            }
+            p->hovers = true;
+            bool left = (buttons & 1) != 0;
+            moy_input_point(b->h->table, b->h->src, p->x, p->y, left, left && !b->left, true);
+            b->left = left;
+        } else {
+            b->left = false;
+        }
+    }
+    if (o[LOOP_TOUCH] != MP_OBJ_NULL) {
+        input_touch_obj_t *tc = MP_OBJ_TO_PTR(o[LOOP_TOUCH]);
+        moy_touch_pt_t pt;
+        moy_touchdev_poll(tc->d, now, &pt);
+        moy_input_point(t, tc->src, pt.x, pt.y, pt.down, pt.edge, tc->d->held.fresh);
+    }
+    moy_input_begin_frame(t);
+    bool ball_click = false;
+    if (o[LOOP_BALL] != MP_OBJ_NULL) {
+        input_ball_obj_t *bo = MP_OBJ_TO_PTR(o[LOOP_BALL]);
+        uint32_t c[4];
+        bool down;
+        moy_ball_t *bb;
+        moy_input_board_ball(&bb, &down);
+        moy_ball_take(bo->b, c);
+        ball_click = down && !bo->prev;
+        bo->prev = down;
+        s_nav[0] += (int32_t)c[3] - (int32_t)c[2];      // right - left
+        s_nav[1] += (int32_t)c[1] - (int32_t)c[0];      // down - up
+    }
+    int f = moy_input_ptr_apply(t, p, now);
+    uint32_t h, pr;
+    moy_input_masks(t, MOY_INPUT_UNION, &h, &pr);
+    *click = ball_click || (f & MOY_INPUT_P_CLICK) != 0;
+    *active = (f & MOY_INPUT_P_HELD) != 0 || h != 0 || moy_input_last_key(t) != 0
+              || s_nav[0] || s_nav[1] || *click;
+}
+
+void moy_input_loop_pointer(uint32_t now_unused, bool click, bool swallow) {
+    (void)now_unused;
+    mp_obj_t ptr = MP_STATE_VM(moy_input_loop_objs)[LOOP_PTR];
+    if (ptr == MP_OBJ_NULL) {
+        return;
+    }
+    moy_input_ptr_t *p = &((input_pointer_obj_t *)MP_OBJ_TO_PTR(ptr))->p;
+    if (swallow) {
+        p->down = false;
+    }
+    p->click = click;
+    moy_input_ptr_tick(p, now_ms());
+}
+
+// A dev-channel gesture's sample into the channel's own source.
+void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge) {
+    moy_input_t *t = moy_input_kernel();
+    if (t == NULL) {
+        return;
+    }
+    if (!s_devch && moy_input_source(t, "devch", 0, &s_devch_src) == MOY_INPUT_OK) {
+        s_devch = true;
+    }
+    if (s_devch) {
+        moy_input_point(t, s_devch_src, x, y, down, edge, true);
+    }
+}
+
+void moy_input_loop_tail(void) {
+    if (s_kick_tail) {
+        moy_input_board_kick();
+    }
+}
 
 // -- the module ----------------------------------------------------------------------
 
@@ -1369,6 +1526,8 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_kick), MP_ROM_PTR(&input_kick_obj) },
     { MP_ROM_QSTR(MP_QSTR_ble), MP_ROM_PTR(&input_ble_obj) },
     { MP_ROM_QSTR(MP_QSTR_task_stack_free), MP_ROM_PTR(&input_task_stack_free_obj) },
+    { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&input_loop_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_nav), MP_ROM_PTR(&input_nav_obj) },
     { MP_ROM_QSTR(MP_QSTR_SOURCES), MP_ROM_INT(MOY_INPUT_SOURCES) },
     { MP_ROM_QSTR(MP_QSTR_PLAYERS), MP_ROM_INT(MOY_INPUT_PLAYERS) },
     { MP_ROM_QSTR(MP_QSTR_UNION), MP_ROM_INT(MOY_INPUT_UNION) },

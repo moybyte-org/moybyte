@@ -1,13 +1,23 @@
 """The dev channel's input words: `tap`, `swipe` and `drag`
-(runtime/dev_channel.py reads the line; this file says what the words do).
+(runtime/dev_channel.py holds the console's words; this file says what these
+do).
 
 Each word is `word(chan, ws, parts, line)` in WORDS, the table DevChannel
 dispatches through; a word that returns False was not this one's after all,
-and the line goes on to the channel's own table. A gesture plays back a
-sample a frame in DevChannel._scripts. Every sample goes into the channel's own source
-in the input table (`DevChannel.point`), so the frame's merge hands it to the
-pointer exactly as it hands over a finger's.
+and the line goes on to the channel's own table. What a word finds is the
+console's -- a named button, the top window's title strip -- and the gesture
+it starts is the kernel's (native/moy_kernel/moy_devch.c): a sample a frame
+into the channel's own source in the input table, so the frame's merge hands
+it to the pointer exactly as it hands over a finger's.
 """
+
+try:                        # a VM: the kernel's module
+    import moy_loop as _loop
+except ImportError:         # host CPython: the ctypes binding
+    try:
+        from runtime import moy_loop as _loop
+    except ImportError:     # a tier whose frames are not the kernel's yet
+        _loop = None
 
 
 def tap(chan, ws, parts, line):
@@ -24,8 +34,10 @@ def tap(chan, ws, parts, line):
     if r is None:
         print("REMOTE ? %s" % line)
         return
-    chan.point(r[0], r[1], True, True)
-    chan._tap = [r[0], r[1], True]   # released by the frame after the press is merged
+    if _loop is None:
+        print("REMOTE tap: no kernel loop on this tier")
+        return
+    _loop.tap(r[0], r[1])            # released by the frame after the press is merged
     print("REMOTE tap %d %d" % r)
 
 
@@ -36,18 +48,17 @@ def swipe(chan, ws, parts, line):
     # the glass, so the harness can exercise scroll/drag/fling on any
     # surface. Playback is per-frame in _scripts().
     try:
-        chan._swipe = {"i": 0,
-                       "x0": int(parts[1]), "y0": int(parts[2]),
-                       "x1": int(parts[3]), "y1": int(parts[4]),
-                       "n": max(2, int(parts[5]))
-                       if len(parts) > 5 else 20}
-        print("REMOTE swipe %d,%d -> %d,%d frames=%d"
-              % (chan._swipe["x0"], chan._swipe["y0"],
-                 chan._swipe["x1"], chan._swipe["y1"],
-                 chan._swipe["n"]))
+        x0, y0, x1, y1 = (int(parts[1]), int(parts[2]), int(parts[3]),
+                          int(parts[4]))
+        n = max(2, int(parts[5])) if len(parts) > 5 else 20
     except ValueError:
-        chan._swipe = None
         print("REMOTE swipe ? %s" % line)
+        return
+    if _loop is None:
+        print("REMOTE swipe: no kernel loop on this tier")
+        return
+    _loop.swipe(x0, y0, x1, y1, n)
+    print("REMOTE swipe %d,%d -> %d,%d frames=%d" % (x0, y0, x1, y1, n))
 
 
 def drag(chan, ws, parts, line):
@@ -71,11 +82,14 @@ def drag(chan, ws, parts, line):
             step = max(1, int(parts[2]))  # px/frame amplitude scale
         except ValueError:
             pass
-    chan._drag = {"i": 0, "n": n, "step": step,
-                  "cx": win.x + 30,
-                  "cy": win.y + max(6, win.title_h // 2)}
+    cx = win.x + 30
+    cy = win.y + max(6, win.title_h // 2)
+    if _loop is None:
+        print("REMOTE drag: no kernel loop on this tier")
+        return
+    _loop.drag(cx, cy, n, step)
     print("REMOTE drag win=%s cx=%d cy=%d frames=%d step=%d"
-          % (order[-1], chan._drag["cx"], chan._drag["cy"], n, step))
+          % (order[-1], cx, cy, n, step))
 
 
 WORDS = {"tap": tap, "swipe": swipe, "drag": drag}

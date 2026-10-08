@@ -694,21 +694,17 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
 
 # -- the loop and the wire ----------------------------------------------------
 
-def test_frame_slot_ms_is_the_carts_tick_and_a_paced_game_never_sleeps():
-    from runtime import frame_loop
-
-    class Paced:
-        def __init__(self, tick_ms):
-            self.player = type("P", (), {"tick_ms": tick_ms})()
-
-    assert frame_loop.frame_slot_ms(Paced(33), 16) == 33
-    assert frame_loop.frame_slot_ms(Paced(16), 16) == 16
-    assert frame_loop.frame_slot_ms(Paced(0), 16) == 16
-    assert frame_loop.frame_slot_ms(object(), 16) == 16
-    pump = frame_loop.FramePump(boot=None, fps_cap=60)
-    assert pump.pace(Paced(33), 4) == 0 and pump.slot == 33
-    assert pump.pace(Paced(33), 50) == 0 and pump.debt == 0
-    assert pump.pace(Paced(0), 4) == 12
+def test_the_carts_tick_is_the_slot_and_a_paced_game_never_sleeps():
+    """The Player tells the kernel's loop the cadence a paced game runs at
+    (moy_loop.tick); the loop measures a frame against it and never sleeps a
+    paced frame (tests/test_moy_loop.py has the pump's whole arithmetic)."""
+    from runtime import moy_loop
+    moy_loop.trace_init(60, True, 1000)
+    moy_loop.tick(33)
+    assert moy_loop.pace(4) == 0 and moy_loop.pump()[1] == 33
+    assert moy_loop.pace(50) == 0 and moy_loop.pump()[2] == 0
+    moy_loop.tick(0)
+    assert moy_loop.pace(4) == 12
 
 
 def test_the_state_snapshot_carries_the_tick_model(tmp_path):
@@ -735,7 +731,8 @@ def test_skip_and_gov_decline_and_name_the_knob(tmp_path, capsys):
 
 
 def test_the_perf_line_carries_the_tick_and_the_misses():
-    from runtime.perf_line import format_perf, parse_perf
+    from runtime.moy_loop import perf_format as format_perf
+    from runtime.perf_line import parse_perf
     line = format_perf({"tick": (60, 2), "miss": 3})
     assert " tick=60/2 miss=3 " in line
     assert " tick=- miss=- " in format_perf({})

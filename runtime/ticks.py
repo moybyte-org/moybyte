@@ -50,7 +50,7 @@ def _since_ms(start):
 
 def _sleep_ms(ms):
     # The trio's sleeping sibling: MicroPython's sleep_ms, host-shimmed the
-    # same way (frame_loop's pace step, the input poller's period).
+    # same way.
     try:
         time.sleep_ms(ms)
     except AttributeError:

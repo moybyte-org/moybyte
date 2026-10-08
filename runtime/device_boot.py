@@ -1,8 +1,9 @@
 # Map (grep -n a name to jump there):
 #   DeviceBoot                        the boot sequence's shared steps and its screen
+#   report_update                     the OTA verdict, on the boot path
 #   boot_ok                           the first frame proved the boot to the kernel
-"""The device boot spine -- ONE implementation, both boards (#161). Its frame
-half is runtime/frame_loop.py.
+"""The device boot spine -- ONE implementation, both boards (#161). The frame
+it hands over to is the kernel's (native/moy_kernel/moy_loop.c).
 
 WHY THIS EXISTS. Each board used to author its own `run_desktop` boot
 sequence, and the shape of that arrangement's bugs is always the same: a step
@@ -220,6 +221,26 @@ class DeviceBoot(BootCarts):
         self.say("first frame in %dms" % _ticks_diff(_ticks_ms(), self._first_at))
         boot_ok(ws)
         return True
+
+
+def report_update(ws, log):
+    """The OTA verdict, read on the boot path before anything can overwrite
+    the evidence (#53): said on the boot's line and on the desktop. The
+    rollback CONFIRM is not made here -- reaching the boot path proves only
+    that the desktop was CONSTRUCTED (#56); the kernel's loop makes it after
+    painted frames."""
+    upd = getattr(ws, "updater", None)
+    if upd is None:
+        return None
+    try:
+        verdict = upd.boot_check()
+        if verdict:
+            log("last update %s (%s)" % verdict)
+            ws.announce_update()   # and say so on the desktop, not just here
+        return verdict
+    except Exception as exc:  # noqa: BLE001 -- never block the desktop
+        log("boot_check failed: %s" % (exc,))
+        return None
 
 
 def boot_ok(ws, kernel=None):

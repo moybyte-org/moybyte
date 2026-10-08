@@ -35,10 +35,8 @@ def _diag_flush(diag, ws):
     return _ticks_diff(_ticks_ms(), t0)
 
 
-# The PERF sample is not a diag helper (#206 item 2): it rides
-# frame_loop.PerfSampler on the shared FrameLoop.account hook, in the one
-# format every board emits. This board still PERSISTS it -- run_desktop's emit
-# rings the finished line -- but it no longer composes a second one.
+# The PERF sample is not a diag helper (#206 item 2): it is the kernel's
+# (native/moy_kernel/moy_perf.c), in the one format every board emits.
 
 
 HITCH_MS = 80

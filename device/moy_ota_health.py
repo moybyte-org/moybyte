@@ -1,26 +1,28 @@
 # Map (grep -n a name to jump there):
 #   SlotHealth                       did the update work: the verdict and the confirm
 #   SlotHealth.boot_check            read the last install's marker
-#   SlotHealth.confirm_when_healthy  the rollback confirm, after painted frames
-#   SlotHealth.confirm_when_serving  the same, for a board with no glass
+#   SlotHealth.confirmed_by_kernel   the kernel's loop confirmed: retire the marker
+#   SlotHealth.confirm_when_serving  the confirm, for a board with no glass
 """The OTA's health half (#53): did the last update take, and is the running
 image good enough to keep.
 
-The boot reads the verdict the previous install left (`boot_check`), and the
-frame loop confirms the running image once it has proved itself
-(`confirm_when_healthy`, or `confirm_when_serving` on the Zero) -- after which
-the bootloader no longer rolls it back. That is the frame loop's business, not
-the updater's, so it is its own file: device/moy_ota.py's `OtaUpdater` writes
-images into the inactive slot and takes this class as its base, and the
-kernel's native loop replaces this file (docs/kernel_survival_2026-10.md
-section 7.2).
+The boot reads the verdict the previous install left (`boot_check`), under
+the store's session, before anything can overwrite it. The confirm is the
+kernel's on a console: its frame loop (native/moy_kernel/moy_loop.c) marks
+the image valid once it has proved itself -- HEALTHY_PAINTS frames reached the
+glass and HEALTHY_LOOPS iterations survived after them, the two numbers below
+-- and its service upcall then calls `confirmed_by_kernel`, which retires the
+pending marker inside the store's session. The Zero, which takes no loop,
+confirms here (`confirm_when_serving`). device/moy_ota.py's `OtaUpdater`
+writes images into the inactive slot and takes this class as its base.
 
 `with_sd(fn)` runs fn() inside the board's store session, as the updater's
 does; the pending marker lives in `update_dir`. The running build's label
 (`version_label`) is the updater's, which is why boot_check reads it off self.
 """
 
-# What counts as proof that the update worked (confirm_when_healthy). The
+# What counts as proof that the update worked (moy_loop.c's HEALTHY_PAINTS and
+# HEALTHY_LOOPS are these; the Zero's HEALTHY_SERVES is read here). The
 # rollback net can only revert an image that never SAID it was fine, so what that
 # claim is worth is decided entirely by where it is made -- and "the desktop
 # object was constructed" is worth very little. Two conditions, because either
@@ -59,9 +61,9 @@ class SlotHealth:
     def __init__(self, with_sd, update_dir):
         self.update_dir = update_dir
         self._with_sd = with_sd
-        self.confirmed = False   # has confirm_when_healthy already fired this boot?
+        self.confirmed = False   # has the confirm already fired this boot?
         self._pending_seen = False   # boot_check found a marker -> the confirm clears it
-        self._loops = 0           # frame-loop iterations it has been called from
+        self._loops = 0           # serving polls survived (the Zero's confirm)
         self.boot_verdict = None  # ("ok"|"rolled_back", text) from the previous install
 
     def _running_label(self):
@@ -78,7 +80,7 @@ class SlotHealth:
 
     def mark_valid(self):
         """Confirm the running image is healthy so the bootloader cancels its pending
-        rollback. The raw verb -- callers want confirm_when_healthy, which decides
+        rollback. The raw verb -- callers want confirm_when_serving, which decides
         WHEN this is honest. No-op (swallowed) when the image was already marked
         valid or this isn't an OTA build."""
         try:
@@ -89,33 +91,22 @@ class SlotHealth:
         except Exception:
             return False
 
-    def confirm_when_healthy(self, frames_drawn):
-        """The rollback confirm, deferred until the console has actually RUN.
-
-        Marking the image valid where the desktop is CONSTRUCTED confirms firmware
-        that has never drawn a pixel -- and a live board showing a black screen is
-        exactly the failure this project has already shipped once (#56: every boot
-        print appeared, the panel stayed dark). Rollback cannot save a board from a
-        fault the firmware promised in advance would not happen.
-
-        So the frame loop calls this every iteration with ws._frames_drawn, and the
-        confirm waits for both halves of "it works": something reached the glass
-        (HEALTHY_PAINTS) and the loop kept running afterwards (HEALTHY_LOOPS, which
-        this counts itself -- one call per iteration is exactly what the loop makes
-        it). An image that comes up mute, or comes up and then dies, is never
-        confirmed, so the next reset reverts it. Returns True the one frame it
-        confirms."""
+    def confirmed_by_kernel(self):
+        """The kernel's loop marked the running image valid (the console
+        painted and kept looping): this boot is confirmed, and the pending
+        marker the install left is retired. Once."""
         if self.confirmed:
             return False
-        self._loops += 1
-        if frames_drawn < HEALTHY_PAINTS or self._loops < HEALTHY_LOOPS:
-            return False
-        return self._confirm()
+        self.confirmed = True
+        if self._pending_seen:
+            self._pending_seen = False
+            self._clear_pending()
+        return True
 
     def confirm_when_serving(self, serving):
         """The same confirm, for a board with no glass (the Zero, #41).
 
-        `confirm_when_healthy` asks two questions -- did anything reach the
+        The kernel's confirm asks two questions -- did anything reach the
         display, and did the loop keep running -- and on a headless board the
         first one has no answer. Answering it with a constant would certify
         every image unconditionally; leaving it at zero would roll every image
@@ -184,7 +175,7 @@ class SlotHealth:
         pointed at is the one now running, or ("rolled_back", text) when it isn't --
         which means the bootloader gave up on the new image and put the old one
         back. The marker is deliberately NOT deleted here (see
-        confirm_when_healthy). Also caches the verdict on `boot_verdict` for the
+        confirmed_by_kernel). Also caches the verdict on `boot_verdict` for the
         update screen."""
         def _read():
             import json

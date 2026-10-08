@@ -114,6 +114,13 @@ why  = """
 ctypes. Here `moy_input` is a compiled-in usermod (native/.staged/moy_input)."""
 
 [[modules.shared.deny]]
+file = "moy_loop.py"
+kind = "host-only"
+why  = """
+`moy_loop` for CPython: compiles native/moy_kernel's frame loop and dlopens it
+through ctypes. Here `moy_loop` is part of the compiled-in `moy_kernel` usermod (native/.staged/moy_kernel)."""
+
+[[modules.shared.deny]]
 file = "glass_binding.py"
 kind = "host-only"
 why  = """
@@ -395,9 +402,9 @@ smokes and the keep-the-REPL guards now land once instead of four times."""
 files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
 why = """
 The console desktop's boot spine: ONE `build_desktop` (the boot order and the
-service set every console board wires) and ONE frame loop over it, with the
-touch-only tier's frame hooks as defaults. The four boards' `run_desktop`s
-carried the same imports, the same IdleBlank/FramePump/FrameLoop construction,
+service set every console board wires) and ONE hand-over of the console to
+the kernel's frame loop. The four boards' `run_desktop`s
+carried the same imports, the same frame-loop construction,
 the same `ws.*` service assignments and the same hook names in fifty-four
 byte-identical lines each; a board now passes its hardware -- compositor,
 canvas, inputs, keyboard, store, constants -- and takes the rest.

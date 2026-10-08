@@ -94,8 +94,8 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the web-console switch | crossed (the switch half of `runtime/web_console.py` and `device/moy_webhost.py`; the pin, the router's park and the themed screen stay, §6.4) | `native/moy_net/moy_webconsole.c` | 2 |
 | the Zero's host | crossed: `zero_gpio.py` deleted; the radio, the setup AP, mDNS, the portal's DNS and the setup form's transport out of `modules/zero_host.py` and `modules/zero_setup.py`, which keep the form, the seed and the OTA's headless driver (§6.5) | the same `moy_net` (`moy_wifi.c`, `moy_dns.c`, `moy_gpio.c` over the board's `MOY_NET_GPIO_PINS` table) | 2 |
 | the internal flash volumes | crossed (the borrowed `VfsLfs2` and the port's _boot.py mount) | `native/moy_store/moy_kvfs.c`: the kernel's `lfs2_t` and `KVfs`, its VFS type for Python; `moy_vol` resolves "/" to it | 2 |
-| the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `+native/moy_kernel/moy_loop.c`, `+native/moy_kernel/moy_idle.c`, `+native/moy_kernel/moy_perf.c` | 3 |
-| the dev channel's reader and kernel words, the diag ring | `runtime/dev_channel.py`, `device/device_diag.py`, `device/moybyte_diag.py`, `device/device_util.py`; `native/moy_serial/` | `+native/moy_kernel/moy_devch.c`, `+native/moy_kernel/moy_diag.c` | 3 |
+| the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `native/moy_kernel/moy_loop.c`, `native/moy_kernel/moy_idle.c`, `native/moy_kernel/moy_perf.c` | 3 |
+| the dev channel's reader and kernel words, the diag ring | `runtime/dev_channel.py`, `device/device_diag.py`, `device/moybyte_diag.py`, `device/device_util.py`; `native/moy_serial/` | `native/moy_kernel/moy_devch.c`, `+native/moy_kernel/moy_diag.c` | 3 |
 | the boot order | `device/desktop_spine.py`'s boot half, `runtime/device_boot.py`'s `DeviceBoot` (its splash: §13, question 9) | `+native/moy_kernel/moy_boot.c` | 3 |
 | the board glue | each console's `moy_runtime.py` and the provider modules the carve makes; `device/p4_desktop.py`'s present wiring; `device/boot_shell.py` | per-board defines in `mpconfigboard.h` and `board.toml` | 3 |
 | the browser's and the host's drivers of the loop | `firmware/web_runner/web_boot.py`'s `step_frame_json`, `runtime/host_app.py` | JS and CPython call `moy_loop_step` | 3 |
@@ -907,7 +907,7 @@ added to the board's component list.
 
 ### 7.1 The loop
 
-`+native/moy_kernel/moy_loop.c` is `FrameLoop.step` in C, in the order that
+`native/moy_kernel/moy_loop.c` is `FrameLoop.step` in C, in the order that
 class's docstring guards: the pump's head, every input source, the dev channel,
 the idle ladder (after every input, so the waking touch is swallowed), the
 pointer, `present_pending`, the three upcalls (`handle_input`,
@@ -975,7 +975,7 @@ halves: the verdict read on the boot path before anything can overwrite it,
 and the confirm fired from the loop after real painted frames; the verdict is
 read by `runtime/console_notices.py`'s banner as a kernel flag.
 
-`+native/moy_kernel/moy_idle.c` is `IdleBlank` with the three behaviours its
+`native/moy_kernel/moy_idle.c` is `IdleBlank` with the three behaviours its
 docstring lists kept — the wake tap swallowed, the kernel epoch moved on wake
 so the Python gate repaints (§3.3), an explicit blank outranking activity —
 generalised into a ladder whose rungs are settings rows, runtime-settable as
@@ -994,7 +994,7 @@ are §13's question 1; the ladder carries the hooks for all of them.
 
 ### 7.3 PERF, the HUD, serial and diag
 
-`+native/moy_kernel/moy_perf.c` is `PerfSampler` and `PerfMeters`: one field
+`native/moy_kernel/moy_perf.c` is `PerfSampler` and `PerfMeters`: one field
 set from one accounting path, the compositor's overlap counters read raw, a
 lever the board lacks printed as `-`, nothing formatted while PERF DIAG is off.
 `runtime/perf_line.py` keeps its parser for the host tools and loses its
@@ -1003,7 +1003,7 @@ formatter; `perf_line_is_the_one_format` holds the C formatter to the parser.
 frame-time breakdown are the kernel's draw after the upcall and before
 `end_frame`, through the system canvas.
 
-`+native/moy_kernel/moy_devch.c` is the dev channel's reader (over
+`native/moy_kernel/moy_devch.c` is the dev channel's reader (over
 `native/moy_serial/`) and word table. The words that act on kernel state —
 `state`'s kernel fields, `heapcaps`, `mem`, `bl`, `vol`, `power`, `diag`,
 `uncap`, `crisp`, `web`, `link`, `shot`, `hush`, `kstop`, the `k*` test words,

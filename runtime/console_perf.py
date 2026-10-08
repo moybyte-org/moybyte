@@ -54,12 +54,6 @@ class PerfMeters:
         # numbers into the offline diag log without painting the HUD on screen.
         # Default False -> host behaviour is byte-identical (no extra ticks calls).
         self.perf_capture = False     # measure flush/draw without drawing the HUD
-        # The frame loop's per-stage deadline meters (#210,
-        # frame_loop.StageMeters): stamped here by FrameLoop on the boards, and
-        # None on every tier that runs its own loop (the host simulator, the
-        # wasm head), which is why the `state` blob reads it through a probe.
-        # Reset per run by the Player, dumped by the dev channel's `state`.
-        self.stage_meters = None
         self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
         self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
         # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
@@ -219,6 +213,56 @@ class PerfMeters:
         cart = self.cart
         name = cart.get("title") or cart.get("path") or "?"
         return (name, self._fps, self._flush_ms, self._draw_ms)
+
+    def perf_push(self, loop):
+        """The console's half of the PERF line into the kernel's sampler
+        (native/moy_kernel/moy_perf.c), on the frame a sample is due: the
+        cart, the phase EMAs, the windowed WM's and the launcher's splits,
+        the lockstep rate and the tick model. The kernel adds what it counts
+        itself (fps, busy, gc, the compositor's overlap) and writes the line.
+
+        The windowed WM's meters are TAKEN: only a frame that drew that layer
+        this window may answer, so a fullscreen cart never inherits the
+        desktop's last number. `net` is spent by its one reader, here. The
+        tick model's misses are this window's, against a baseline that
+        belongs to the scheduler that counted them (a new run counts from 0)."""
+        ws = self
+        cart = self.cart
+        loop.perf_cart(cart.get("title") if cart else None)
+        loop.perf("draw", self._draw_ms)
+        loop.perf("flush", self._flush_ms)
+        loop.perf("logic", self._upd_ms)
+        loop.perf("render", self._cart_ms)
+        loop.perf("chrome", self._chrome_ms)
+        v = getattr(ws, "_pf_wm_restore", None)
+        if v is not None:
+            ws._pf_wm_restore = None
+        loop.perf("wmr", v)
+        v = getattr(ws, "_pf_wm_windows", None)
+        if v is not None:
+            ws._pf_wm_windows = None
+        loop.perf("wmw", v)
+        v = getattr(ws, "_pf_wm_stamp", None)
+        if v is not None:
+            ws._pf_wm_stamp = None
+        loop.perf("wms", v)
+        loop.perf("home", getattr(ws, "_pf_home", None))
+        loop.perf("net", self.perf_net())
+        pl = self.player
+        if pl is None or not pl.tick_ms:
+            self._perf_sched = None
+            self._perf_miss = 0
+            loop.perf("tick", None)
+            loop.perf("miss", None)
+            return
+        sc = pl.sched
+        if sc is not getattr(self, "_perf_sched", None):
+            self._perf_sched = sc
+            self._perf_miss = 0
+        miss = sc.misses - self._perf_miss
+        self._perf_miss = sc.misses
+        loop.perf("tick", (sc.rate, sc.div))
+        loop.perf("miss", miss)
 
     def perf_net(self):
         """The PERF line's `net=` witness: the #65 lockstep tick rate in ticks/s,

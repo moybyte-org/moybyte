@@ -1886,11 +1886,114 @@ void moy_glass_vm_swept(void) {
 }
 #endif
 
+// -- the kernel's frame (native/moy_kernel/moy_loop.c) ------------------------------
+//
+// loop_bind(comp): the compositor the loop's stages drive -- present_pending
+// before the console's upcalls, the fence before first light and on a frame
+// that drew nothing, the panel light, the overlap counters PERF reads. A root
+// pointer for the VM's life, like every VM object the kernel reaches.
+
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_loop_comp);
+
+static mp_obj_t glass_loop_bind(mp_obj_t comp) {
+    MP_STATE_VM(moy_glass_loop_comp) = comp;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(glass_loop_bind_obj, glass_loop_bind);
+
+void moy_glass_loop_clear(void) {
+    MP_STATE_VM(moy_glass_loop_comp) = MP_OBJ_NULL;
+}
+
+static mp_obj_t loop_comp(void) {
+    mp_obj_t c = MP_STATE_VM(moy_glass_loop_comp);
+    return c == mp_const_none ? MP_OBJ_NULL : c;
+}
+
+void moy_glass_loop_present(void) {
+    mp_obj_t c = loop_comp();
+    if (c == MP_OBJ_NULL) {
+        return;
+    }
+    if (mp_obj_is_type(c, &glass_dsi_type)) {
+        moy_dsi_present_pending(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(c))->d);
+    } else if (mp_obj_is_type(c, &glass_rot_type)) {
+        moy_rot_present_pending(&((glass_rot_obj_t *)MP_OBJ_TO_PTR(c))->r);
+    }
+}
+
+void moy_glass_loop_fence(void) {
+    mp_obj_t c = loop_comp();
+    if (c == MP_OBJ_NULL) {
+        return;
+    }
+    if (mp_obj_is_type(c, &glass_banded_type)) {
+        moy_banded_fence(&((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->b);
+    } else if (mp_obj_is_type(c, &glass_dsi_type)) {
+        moy_dsi_fence(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(c))->d);
+    } else if (mp_obj_is_type(c, &glass_rot_type)) {
+        moy_rot_fence(&((glass_rot_obj_t *)MP_OBJ_TO_PTR(c))->r);
+    }
+}
+
+// A frame that drew nothing: a banded panel's queued bands drained.
+void moy_glass_loop_idle(void) {
+    mp_obj_t c = loop_comp();
+    if (c != MP_OBJ_NULL && mp_obj_is_type(c, &glass_banded_type)) {
+        moy_banded_fence(&((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->b);
+    }
+}
+
+// The light on or off; a level between is the dim rung's, which a binary
+// light shows as on. Answers false: no compositor here dims.
+bool moy_glass_loop_light(int level) {
+    mp_obj_t c = loop_comp();
+    if (c == MP_OBJ_NULL) {
+        return false;
+    }
+    bool on = level > 0;
+    if (mp_obj_is_type(c, &glass_banded_type)) {
+        banded_light(((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->panel, on);
+    } else {
+        mp_call_function_1(mp_load_attr(c, MP_QSTR_set_backlight), mp_obj_new_bool(on));
+    }
+    return false;
+}
+
+// The DSI compositors' overlap counters (moy_present.h's order); false on a
+// compositor that has none. `has` a bit per slot measured.
+bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
+    mp_obj_t c = loop_comp();
+    if (c == MP_OBJ_NULL) {
+        return false;
+    }
+    mp_obj_t t;
+    if (mp_obj_is_type(c, &glass_dsi_type)) {
+        t = dsi_overlap_stats(c);
+    } else if (mp_obj_is_type(c, &glass_rot_type)) {
+        t = rot_overlap_stats(c);
+    } else {
+        return false;
+    }
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_tuple_get(t, &n, &items);
+    *has = 0;
+    for (size_t i = 0; i < n && i < 7; i++) {
+        if (items[i] != mp_const_none) {
+            v[i] = (uint32_t)mp_obj_get_int_truncated(items[i]);
+            *has |= (uint8_t)(1u << i);
+        }
+    }
+    return true;
+}
+
 // -- the module -----------------------------------------------------------------
 
 static const mp_rom_map_elem_t glass_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_glass) },
     { MP_ROM_QSTR(MP_QSTR_buf), MP_ROM_PTR(&glass_buf_obj) },
+    { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&glass_loop_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_Canvas), MP_ROM_PTR(&glass_canvas_type) },
     { MP_ROM_QSTR(MP_QSTR_owner), MP_ROM_PTR(&glass_owner_obj) },
     { MP_ROM_QSTR(MP_QSTR_reclaim), MP_ROM_PTR(&glass_reclaim_obj) },

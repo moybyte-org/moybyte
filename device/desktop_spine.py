@@ -4,8 +4,9 @@ Four boards boot the same console, and the ORDER they boot it in is the
 payload -- the boot splash before the store, the store before the Workstation,
 the service wiring in `wire_workstation_core`'s one order, the windowed WM
 after the boot loads, the OTA verdict before anything can overwrite it, the
-frame loop last. `build_desktop` is that order written once; `Desktop.run` is
-the frame loop constructed once. What a board supplies is its HARDWARE, as
+kernel's frame loop last. `build_desktop` is that order written once;
+`Desktop.run` hands the console to the kernel's loop
+(native/moy_kernel/moy_loop.c) and returns. What a board supplies is its HARDWARE, as
 arguments and hooks:
 
   name / link_id       the serial prefix on every line, the ESP-NOW board id
@@ -37,19 +38,16 @@ arguments and hooks:
   c6_updater           the companion radio's updater class, where there is one
   extras / serial      the dev channel's board-only commands, and whether the
                        channel is built at all
-  overlap / perf_emit  the PERF sampler's compositor counters and its sink
   log(tag, msg)        the boot's line sink; None prints with the board's name
 
-Every hook the loop runs each frame -- poll_inputs / present / tail /
-account / frame_error -- has a default here for the touch-only tier, and a
-board with more hardware passes its own closures to `run()`, reading what it
-needs off the returned `Desktop`.
+The frame's stages are the kernel's C; what a board passes to `run()` is
+which input hardware its stage reads (the T-Deck's trackball, its input task
+kicked at the frame's tail) and a per-frame Python hook of its own.
 """
 
 from console import Workstation, wire_workstation_core
-from device_boot import DeviceBoot
-from frame_loop import (FrameLoop, FramePump, IdleBlank, OtaHealth,
-                        PerfSampler, poll_link, poll_webhost)
+from device_boot import DeviceBoot, report_update
+from chrome import _cursor_delta
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp, _owner_h
 import moy_input
@@ -59,81 +57,119 @@ from mem_census import mark as _census
 
 
 class Desktop:
-    """What `build_desktop` assembled. The board's frame hooks read it, and
-    `run()` is the shared frame loop over them."""
+    """What `build_desktop` assembled, and `run()`, which hands it to the
+    kernel's frame loop (native/moy_kernel/moy_loop.c)."""
 
     def __init__(self, name):
         self.name = name
-        self.loop = None          # the FrameLoop, set by run() before its first frame
-        self._click_active = [False, False]   # poll_inputs' answer, reused
 
-    # -- the touch-only tier's frame hooks --------------------------------
+    def run(self, ball=None, kick_at_tail=False, after_frame=None):
+        """Hand the console to the kernel's loop and return this Desktop: the loop's stages
+        are bound (the input stage over this console's pointer and drivers,
+        the glass over its compositor), and the three console upcalls, the
+        console's dev words and the services' Python half are registered as
+        root pointers. The VM service runs the loop once main.py returns, as
+        this task's outermost frame (docs/kernel_survival_2026-10.md 7.1).
 
-    def poll_inputs(self, now):
-        """One pass of the kernel's input drivers, the keyboard's async
-        reports and the touch's sample (each before begin_frame, so the table
-        gets clean edges), the merge, then the frame's pointer sample into the
-        pointer. Returns (click, active) for the loop's idle blank."""
-        moy_input.kick()
-        keyboard = self.keyboard
-        if keyboard is not None:
-            try:
-                keyboard.poll()
-                keyboard.apply_mouse(self.pointer)     # a boot mouse, where one is paired
-            except Exception as exc:  # noqa: BLE001 -- a keyboard must fail touch-only
-                print("%s keyboard poll failed:" % self.name, exc)
-        touch = self.touch
-        if touch is not None:
-            touch.poll()
-        inp = self.inp
-        inp.begin_frame()
-        f = inp.apply_pointer(self.pointer)
-        out = self._click_active
-        out[0] = bool(f & moy_input.P_CLICK)
-        out[1] = bool(f & moy_input.P_HELD) or inp.any_held() or bool(inp.last_key)
-        return out
-
-    def present(self):
-        """Re-point both canvases at the compositor's new BACK buffer."""
-        game = self.game
-        if game is not self.sys_canvas:
-            game.sync_back()       # off-screen: contract no-op
-        self.sys_canvas.sync_back()
-
-    def tail(self, now):
-        """The per-frame services, at the frame TAIL: the web console, then
-        the radio. Returns the webhost's elapsed ms."""
+        What each upcall carries beyond the console's own entry is the Python
+        half of a stage the kernel cannot do for a VM object: the canvases
+        re-pointed at the compositor's new back buffer (handle_input, after
+        the kernel's present_pending), the trackball's pulses spent on a caret
+        or the cursor (handle_input, the T-Deck), the boot's first-frame
+        report and the console's PERF half (frame). `after_frame(drew)` is a
+        board's per-frame Python inside the frame upcall (the T-Deck's offline
+        diag), never an upcall of its own."""
+        import moy_glass
+        import moy_loop
         ws = self.ws
-        web = poll_webhost(ws)
-        poll_link(ws)
-        return web
+        boot = self.boot
+        game = self.game
+        sys_canvas = self.sys_canvas
+        pointer = self.pointer
+        nav = moy_input.nav if ball is not None else None
+        ble = self.keyboard if self.keyboard is not None and hasattr(
+            self.keyboard, "apply_mouse") else getattr(ws, "ble_keyboard", None)
+        moy_input.loop_bind(pointer, touch=self.touch, ble=ble, ball=ball,
+                            kick_at_tail=kick_at_tail)
+        moy_glass.loop_bind(self.comp)
+        cursor = _cursor_delta
 
-    def frame_error(self, exc):
-        print("%s frame error:" % self.name, exc)
-        try:
-            import sys
-            sys.print_exception(exc)
-        except Exception:  # noqa: BLE001
-            pass
-        import gc
-        gc.collect()
+        def handle_input():
+            if game is not sys_canvas:
+                game.sync_back()        # off-screen: contract no-op
+            sys_canvas.sync_back()
+            if nav is not None:
+                n = nav()
+                if n:
+                    dx = n // 4096 - 2048
+                    dy = n % 4096 - 2048
+                    if not ws.nav(dx, dy):
+                        pointer.move(cursor(dx), cursor(dy))
+            ws.handle_input()
 
-    def run(self, poll_inputs=None, present=None, tail=None, account=None,
-            frame_error=None):
-        """The shared frame loop over this desktop, until Ctrl-C or `quit`."""
-        loop = FrameLoop(self.ws, self.pump, self.pointer,
-                         poll_inputs or self.poll_inputs,
-                         idle=self.idle, serial=self.serial,
-                         present=present or self.present,
-                         tail=tail or self.tail,
-                         account=account or self.perf.account,
-                         frame_error=frame_error or self.frame_error,
-                         set_backlight=self.set_backlight, lit=self.boot.lit)
-        self.loop = loop
-        if loop.run() == "quit":
-            print("%s desktop: serial quit -> REPL" % self.name)
-            return "quit"
-        return None
+        drawn = [0]
+
+        def frame(dt):
+            ws.frame(dt)
+            n = ws._frames_drawn
+            if not boot.done:
+                boot.first_frame(ws)
+            if ws.perf_capture and moy_loop.perf_due():
+                ws.perf_push(moy_loop)
+            if after_frame is not None:
+                after_frame(n != drawn[0])
+            drawn[0] = n
+            return n
+
+        serial = self.serial
+        words = None
+        if serial is not None:
+            def words(line):
+                return serial.word(ws, line)
+
+        service = make_service(ws, moy_loop)
+        moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
+        moy_loop.fps(self.fps_cap)
+        moy_loop.lit(boot.lit)
+        moy_loop.capture(ws.perf_capture)
+        moy_loop.idle(moy_loop.BLANK, (self.power_save_ms or 0) // 1000)
+        upd = getattr(ws, "updater", None)
+        moy_loop.health(upd is not None and not getattr(upd, "confirmed", True))
+        print("%s desktop running (Ctrl-C for REPL)" % self.name)
+        return self
+
+
+def make_service(ws, loop):
+    """The services' Python half, one upcall a frame while any is live (the
+    kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
+    says goodbye, the link's netplay drain while a match runs, and the OTA
+    confirm's pending marker, once. Answers the bits it still wants."""
+    def service(bits):
+        keep = 0
+        if bits & SVC_WEB:
+            wh = getattr(ws, "webhost", None)
+            if wh is not None:
+                try:
+                    wh.poll()
+                except Exception as exc:  # noqa: BLE001 -- never break a frame
+                    print("WEB ERR %s: %s" % (type(exc).__name__, exc))
+        if bits & SVC_LINK:
+            lk = getattr(ws, "link", None)
+            if lk is not None and lk.active:
+                lk.poll(ws)
+                keep |= SVC_LINK
+        if bits & SVC_HEALTHY:
+            upd = getattr(ws, "updater", None)
+            if upd is not None:
+                try:
+                    upd.confirmed_by_kernel()
+                except Exception as exc:  # noqa: BLE001
+                    print("Moybyte OTA: confirm failed: %s" % (exc,))
+        return keep
+    return service
+
+
+SVC_WEB, SVC_LINK, SVC_UPDATE, SVC_HEALTHY = 1, 2, 4, 8
 
 
 def bt_command(keyboard, comp=None):
@@ -171,8 +207,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   store_root=None, ota_dir=None, load_carts=None, with_sd=None,
                   before_slim=None, after_services=None,
                   ble_keyboard=None, wm=None, c6_updater=None, extras=None,
-                  serial=True, overlap=None, perf_emit=print, log=None,
-                  fps_cap=60):
+                  serial=True, log=None, fps_cap=60):
     """Boot the shared console on a board (the module docstring is the
     contract). Returns the Desktop; the caller's `run()` is the loop."""
     board_log = log
@@ -190,7 +225,6 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # stays dark until a frame has composed (#45), so the splash is what
     # makes a slow boot legible on the glass and on the wire.
     boot = DeviceBoot(sys_canvas, comp, set_backlight, name)
-    idle = IdleBlank(set_backlight, power_save_ms)
     boot.note("starting")
     if game_wh is None:
         game = sys_canvas
@@ -275,17 +309,14 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     except Exception as exc:  # noqa: BLE001 -- the console boots regardless
         log("boot", "web console adopt failed: %s" % exc)
 
-    ws._psave_ms = power_save_ms   # `state` reports the LIVE timeout
     serial_ch = None
     if serial:
         try:
             from dev_channel import DevChannel
             # env: what the `py` probe reaches beyond ws/wm/pointer. `touch`
             # is the board's live driver, so a finger on the glass and
-            # `py touch.flip_x = True` calibrate without a REPL; `pump`
-            # joins right after it is created.
-            serial_ch = DevChannel(ws, pointer, set_backlight=set_backlight,
-                                   idle=idle, extra=extras,
+            # `py touch.flip_x = True` calibrate without a REPL.
+            serial_ch = DevChannel(ws, pointer, extra=extras,
                                    env={"comp": comp, "game": game,
                                         "boot": boot, "touch": touch})
             log("boot", "serial dev channel %s"
@@ -299,21 +330,15 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     gc.collect()
     # The OTA verdict before anything can overwrite the evidence (#53). The
     # rollback CONFIRM is not made here: reaching this line proves the desktop
-    # was CONSTRUCTED, not that a pixel reached the glass (#56). FramePump.tail
-    # fires it from the loop once frames are really going out.
-    ota = OtaHealth(ws, log=lambda m: log("OTA", m))
-    ota.boot_check()
-    print("%s desktop running (Ctrl-C for REPL)" % name)
+    # was CONSTRUCTED, not that a pixel reached the glass (#56). The kernel's
+    # loop fires it once frames are really going out.
+    report_update(ws, lambda m: log("OTA", m))
     _census("ota check")
     boot.start_frames(ws)
     _census("frames")
-    pump = FramePump(boot, ota, fps_cap)
-    if serial_ch is not None:
-        serial_ch.env["pump"] = pump
     # The METERS and the PERF line both follow Settings -> PERF DIAG (#68 kid
-    # mode); the sampler re-syncs them live.
+    # mode).
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    perf = PerfSampler(ws, overlap=overlap, emit=perf_emit)
 
     d.comp = comp
     d.sys_canvas = sys_canvas
@@ -325,11 +350,10 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     d.pointer = pointer
     d.set_backlight = set_backlight
     d.boot = boot
-    d.idle = idle
     d.ws = ws
     d.carts_root = carts_root
     d.serial = serial_ch
-    d.pump = pump
-    d.perf = perf
+    d.power_save_ms = power_save_ms
+    d.fps_cap = fps_cap
     _census("spine done")
     return d

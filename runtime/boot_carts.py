@@ -8,7 +8,7 @@ arrives as an argument -- `moy_catalogue`, the store's interface -- so nothing
 here imports a board module or the store's implementation, and the step is a
 fake in tests/test_device_boot.py. The split is the native kernel's line
 (docs/native_kernel_2026-09.md, sprint 1b): this file crosses with the store;
-frame_loop.py and device_boot.py's runtime probe cross later.
+device_boot.py's runtime probe crosses later.
 """
 
 try:

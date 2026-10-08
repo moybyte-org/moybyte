@@ -370,3 +370,31 @@ def _write_png(path, fb, w, h, rot, swap):
     with open(path, "wb") as f:
         f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", fw, fh, 8, 2, 0, 0, 0))
                 + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+# ---- the plain web-console screen (no VM) ----------------------------------------
+
+def _plain(lib, board, url):
+    g = geom(lib, *CONSOLES[board])
+    v = View()
+    lib.moy_web_screen_view(ctypes.byref(v), url, None, b"1.2.3-test")
+    fb = (ctypes.c_uint16 * (g.fb_w * g.fb_h))()
+    lib.moy_recovery_render_plain(fb, ctypes.byref(g), b"MOYBYTE WEB CONSOLE",
+                                  ctypes.byref(v))
+    return v, zlib.crc32(bytes(fb))
+
+
+@pytest.mark.parametrize("board", sorted(CONSOLES))
+def test_the_plain_web_screen_says_where_to_go(lib, board):
+    """What the kernel draws while no VM runs and the web console serves
+    (docs/kernel_survival_2026-10.md section 13, answer 8): the address,
+    the firmware, no choices -- and the address is what the pixels carry."""
+    v, crc = _plain(lib, board, b"http://192.168.1.7/?pin=1234")
+    lines = [v.line[i].value.decode() for i in range(v.nlines)]
+    assert lines == ["OPEN THIS IN A BROWSER:", "http://192.168.1.7/?pin=1234",
+                     "FW 1.2.3-test"]
+    assert v.hint == b"THE CONSOLE IS RESTARTING"
+    _v, other = _plain(lib, board, b"http://10.0.0.2/?pin=9999")
+    assert other != crc
+    floor, _fb = render(lib, board, lines, v.hint.decode(), 0)
+    assert floor != crc, "the plain screen draws no choices"

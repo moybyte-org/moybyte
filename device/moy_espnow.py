@@ -80,6 +80,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS
 
+# The kernel's frame loop (native/moy_kernel): a running link is a live
+# service, polled from the frame's tail by the loop's service upcall.
+try:
+    import moy_loop as _loop
+except ImportError:  # pragma: no cover - host CPython: the host polls it
+    _loop = None
+
 BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 
 RXBUF = 32768          # see the header: 526 loses 68%, 8192 loses 3.5%, this loses none
@@ -279,6 +286,8 @@ class EspNowLink:
                 pass
             self.active = True
             self.error = None
+            if _loop is not None:
+                _loop.services(_loop.services() | _loop.SVC_LINK)
         except Exception as exc:  # noqa: BLE001 -- no radio -> no link, not a dead console
             self.error = str(exc)
             self.active = False

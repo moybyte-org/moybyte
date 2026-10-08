@@ -147,12 +147,47 @@ void moy_recovery_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t *
     text(fb, g, l.margin, l.hint_y, v->hint, cols, C_DIM);
 }
 
+// The kernel's PLAIN screen: the bar with its title, the lines, the hint,
+// and no choices -- what the kernel shows on its own while no VM runs (the
+// web console's address, docs/kernel_survival_2026-10.md §13 answer 8).
+void moy_recovery_render_plain(uint16_t *fb, const moy_rgeom_t *g, const char *title,
+                               const moy_rview_t *v) {
+    layout_t l;
+    layout(g, &l);
+    int c = l.cell, cols = (g->w - 2 * l.margin) / c;
+    fill(fb, g, 0, 0, g->w, g->h, C_BG);
+    fill(fb, g, 0, 0, g->w, 2 * c, C_BAR);
+    text(fb, g, l.margin, c / 2, title, cols, C_TEXT);
+    int max = (l.hint_y - c - l.line_y) / l.line_step;
+    int n = v->nlines < max ? v->nlines : max;
+    for (int i = 0; i < n; i++) {
+        text(fb, g, l.margin, l.line_y + i * l.line_step, v->line[i], cols,
+             i == 0 ? C_TEXT : C_DIM);
+    }
+    text(fb, g, l.margin, l.hint_y, v->hint, cols, C_DIM);
+}
+
 // ---- what it says -----------------------------------------------------------
 
 static void add(moy_rview_t *v, const char *s) {
     if (v->nlines < MOY_RV_LINES) {
         moy_crash_strcpy(v->line[v->nlines++], MOY_RV_COLS, s);
     }
+}
+
+void moy_web_screen_view(moy_rview_t *v, const char *url, const char *pin,
+                         const char *label) {
+    char b[MOY_RV_COLS + 16];
+    memset(v, 0, sizeof(*v));
+    add(v, "OPEN THIS IN A BROWSER:");
+    add(v, url != NULL && url[0] ? url : "(waiting for an address)");
+    if (pin != NULL && pin[0]) {
+        snprintf(b, sizeof(b), "PIN %s", pin);
+        add(v, b);
+    }
+    snprintf(b, sizeof(b), "FW %s", label ? label : "?");
+    add(v, b);
+    moy_crash_strcpy(v->hint, MOY_RV_COLS, "THE CONSOLE IS RESTARTING");
 }
 
 void moy_recovery_view(moy_rview_t *v, int why, const moy_crash_rec_t *rec,

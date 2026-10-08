@@ -260,38 +260,12 @@ def test_the_merge_is_reached_only_through_begin_frame():
 
 # -- the frame loops read AFTER the merge -----------------------------------
 
-BOARD_RUNTIMES = {
-    "guition": "firmware/guition_jc3248w535/modules/moy_runtime.py",
-    "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
-    "tdeck": "firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
-    "guition_p4": "firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
-}
-
-# Everything that WRITES an InputSource inside a board's _poll_inputs. The
-# trackball's `ball.poll()` is deliberately absent: it feeds the pointer and
-# ws.nav, never a button, so it legitimately runs after the merge.
-SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "ble.poll()")
-
-
 def _code_lines(src, start_at, stop_at):
     """The CODE of one block: docstrings and comments stripped, because the
-    thing being measured is what runs, and the boards' input hooks'
-    docstrings say the words `inp.begin_frame()` before the call does.
-
-    A board with its own input hardware writes `_poll_inputs` in its module
-    or its input module's `poll` (the T-Deck's TDeckInput); the touch-only
-    tier's body is the spine's `poll_inputs` method, and a board that has no
-    closure of its own is read there."""
-    if start_at == "def _poll_inputs(" and start_at not in src:
-        # The T-Deck's sources are its input module's (TDeckInput.poll).
-        start_at = ("def poll(self, now, ws, pointer, t):"
-                    if "class TDeckInput" in src else "def poll_inputs(")
+    thing being measured is what runs."""
     body = src[src.index(start_at):]
-    # A body that ends its file ends at the next file runtime_text joins.
-    ends = [i for i in (body.find(stop_at, len(start_at)),
-                        body.find("\n# ---- ", len(start_at))) if i >= 0]
-    assert ends, start_at
-    body = body[:min(ends)]
+    end = body.find(stop_at, len(start_at))
+    body = body if end < 0 else body[:end]
     out = []
     quoted = False
     for ln in body.splitlines():
@@ -304,47 +278,38 @@ def _code_lines(src, start_at, stop_at):
     return out
 
 
-def _line_of(lines, needle, board):
+def _line_of(lines, needle, where):
     hits = [i for i, ln in enumerate(lines) if needle in ln]
-    assert hits, (board, needle)
+    assert hits, (where, needle)
     return hits[0]
 
 
-@pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
-def test_every_board_writes_every_source_before_begin_frame(board):
+def _input_stage():
+    """The kernel loop's input stage (native/moy_input/modmoy_input.c's
+    moy_input_loop_inputs): ONE body every console board runs, its sources
+    the ones the board bound (moy_input.loop_bind)."""
+    src = (ROOT / "native" / "moy_input" / "modmoy_input.c").read_text(encoding="utf-8")
+    body = src[src.index("void moy_input_loop_inputs("):]
+    return body[:body.index("\n}\n")]
+
+
+def test_every_source_is_written_before_begin_frame():
     """The consumer half of the contract: with the union derived once per
-    frame, a source written AFTER the merge is read one frame late -- silently,
-    and only on that board."""
-    src = runtime_text(BOARD_RUNTIMES[board])
-    lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
-    merge = _line_of(lines, "inp.begin_frame()", board)
-    seen = 0
-    for writer in SOURCE_WRITERS:
-        if any(writer in ln for ln in lines):
-            seen += 1
-            assert _line_of(lines, writer, board) < merge, (board, writer)
-    assert seen, board
+    frame, a source written AFTER the merge is read one frame late --
+    silently. Every console board runs this one stage."""
+    body = _input_stage()
+    merge = body.index("moy_input_begin_frame(t);")
+    for writer in ("moy_hid_frame(", "moy_touchdev_poll(", "moy_input_point("):
+        assert body.index(writer) < merge, writer
 
 
-# The one shipped consumer that reads the union as a bare attribute. `active`
-# holds the backlight on (frame_loop.IdleBlank), so a stale read here blanks
-# the screen under a held button -- on glass, with no host test failing. It is
-# safe only because it runs AFTER inp.begin_frame().
-ACTIVE_READ = "inp.any_held()"
-
-
-@pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
-def test_a_board_that_reads_the_union_for_its_idle_check_reads_it_after_the_merge(board):
-    src = runtime_text(BOARD_RUNTIMES[board])
-    lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
-    if not any(ACTIVE_READ in ln for ln in lines):
-        # The T-Deck spells its `active` differently (trackball counts + the
-        # streamed last_key, which a held raw-matrix key sets every frame), so
-        # it reads no union at all. Recorded, not required.
-        assert board == "tdeck", board
-        return
-    merge = _line_of(lines, "inp.begin_frame()", board)
-    assert _line_of(lines, ACTIVE_READ, board) > merge, board
+def test_the_idle_check_reads_the_union_after_the_merge():
+    # `active` holds the backlight on (the kernel's idle ladder), so a stale
+    # read here blanks the screen under a held button.
+    body = _input_stage()
+    merge = body.index("moy_input_begin_frame(t);")
+    assert body.index("moy_input_masks(t, MOY_INPUT_UNION") > merge
+    assert body.index("moy_input_last_key(t)") > merge
 
 
 def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
