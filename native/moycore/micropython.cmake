@@ -16,6 +16,7 @@ add_library(usermod_moycore INTERFACE)
 target_sources(usermod_moycore INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoycore.c
     ${CMAKE_CURRENT_LIST_DIR}/moycore_run.c
+    ${CMAKE_CURRENT_LIST_DIR}/moycore_lua.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_binding.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_p8_binding.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_wasm.c

@@ -65,6 +65,12 @@ extern moycore_run_t *moycore_run_cur;
 uint32_t moycore_run_now_ms(void);
 // The tick begins: time() counts from here.
 void moycore_run_tick_begin(void);
+// A monotonic microsecond clock, for the frame's halves.
+uint32_t moycore_run_now_us(void);
+// The last frame's two halves, _update and _draw, in microseconds: set by the
+// runtime that ran it, read by the Player's logic/render split.
+void moycore_run_set_split(uint32_t update_us, uint32_t draw_us);
+void moycore_run_split(uint32_t *update_us, uint32_t *draw_us);
 
 // `c` made the run the callbacks read, its console over the caller's snapshot
 // and audio queue, with libmoy's host callbacks installed. The canvas is the

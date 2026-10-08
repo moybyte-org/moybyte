@@ -40,6 +40,28 @@ void moycore_run_tick_begin(void) {
     g_tick_ms = moycore_run_now_ms();
 }
 
+uint32_t moycore_run_now_us(void) {
+#ifdef MOYCORE_RUN_ESP
+    return (uint32_t)esp_timer_get_time();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000000u + (uint64_t)(ts.tv_nsec / 1000));
+#endif
+}
+
+static uint32_t g_split[2];
+
+void moycore_run_set_split(uint32_t update_us, uint32_t draw_us) {
+    g_split[0] = update_us;
+    g_split[1] = draw_us;
+}
+
+void moycore_run_split(uint32_t *update_us, uint32_t *draw_us) {
+    *update_us = g_split[0];
+    *draw_us = g_split[1];
+}
+
 #define CUR moycore_run_cur
 
 static int h_btn(void *u, moy_button b, int p) {

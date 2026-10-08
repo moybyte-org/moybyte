@@ -11,7 +11,7 @@ the S3 owes a frame every 33ms. The allocator and `%d` WERE the frame.
 So:
 
   * `l_alloc` carves 1..256-byte requests out of PSRAM chunks through eight
-    size-class free lists (`native/moycore/modmoycore.c`), and
+    size-class free lists (`native/moycore/moycore_lua.c`), and
   * `tostringbuff` converts integers -- and integral floats, which this VM
     already prints without a fraction -- by hand
     (`native/moy_lua/lua/lobject.c`, MODIFICATIONS.md item 3).

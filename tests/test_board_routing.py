@@ -884,9 +884,11 @@ def test_one_lua_runtime_wired():
         cmake.split("# ")[-1], "the VM target must export no module"
 
     mod = (NATIVE / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    vm = (NATIVE / "moycore" / "moycore_lua.c").read_text(encoding="utf-8")
     assert "MP_REGISTER_MODULE(MP_QSTR_moycore" in mod
     assert "MP_REGISTER_ROOT_POINTER" in mod       # gc-rooted callables list
-    assert "moy_lua_open" in mod and "moy_lua_update" in mod   # libmoy's loop
+    assert "moy_lua_open" in vm and "moy_lua_update" in vm     # libmoy's loop
+    assert "py/" not in vm, "the VM half includes nothing of MicroPython"
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
     # The BOARDS reach it through the shared boot spine -- runtime/device_boot.py
@@ -919,7 +921,10 @@ def test_moycore_hardware_learned_constraints_pinned():
     nlr guard, a build-time VM option -- so they are greps, and they moved with
     the code rather than being retired with it.
     """
-    mod = (NATIVE / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    # The binding and the VM it binds (moycore_lua.c: the allocator, the
+    # open, the p8 helpers), read as one source.
+    mod = "\n".join((NATIVE / "moycore" / name).read_text(encoding="utf-8")
+                     for name in ("moycore_lua.c", "modmoycore.c"))
     lua_dir = NATIVE / "moy_lua" / "lua"
     # 1) lua_Alloc is internal-SRAM-first with a headroom floor and a PSRAM
     #    fallback (all-PSRAM measured ~2x slower on the S3's 120MHz-OCT bus),

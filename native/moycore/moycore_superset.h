@@ -31,7 +31,7 @@ static const char *const MOYCORE_COL_NAMES[16] = {
     "pink", "peach",
 };
 
-static int moycore_col(lua_State *L)
+static inline int moycore_col(lua_State *L)
 {
     int t = lua_type(L, 1);
     if (t == LUA_TSTRING) {
@@ -65,7 +65,7 @@ static int moycore_col(lua_State *L)
     return luaL_error(L, "col: not a colour");
 }
 
-static int moycore_mouse(lua_State *L)
+static inline int moycore_mouse(lua_State *L)
 {
     const moycore_run_t *c = moycore_run_cur;
     int st = (c && c->snap) ? c->snap[SNAP_TOUCH_DOWN] : 0;
@@ -79,7 +79,7 @@ static int moycore_mouse(lua_State *L)
     return 7;
 }
 
-static void moycore_superset_open(lua_State *L)
+static inline void moycore_superset_open(lua_State *L)
 {
     lua_pushcfunction(L, moycore_col);
     lua_setglobal(L, "col");

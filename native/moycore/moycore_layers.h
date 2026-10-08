@@ -62,7 +62,7 @@ typedef struct {
 
 /* Park a layer's buffer for the next __layer_canvas. 0 on success; nonzero
  * when the buffer cannot hold w x h pixels. Touches no Lua state. */
-static int moycore_layers_park(moycore_layers *ls, void *pix, size_t nbytes,
+static inline int moycore_layers_park(moycore_layers *ls, void *pix, size_t nbytes,
                                int w, int h)
 {
     if (!pix || w <= 0 || h <= 0
@@ -78,7 +78,7 @@ static int moycore_layers_park(moycore_layers *ls, void *pix, size_t nbytes,
  * a layer is composited onto the screen verbatim, so it must encode colours
  * the way the screen does (and that includes a cart's SPEC.md 3.1 palette,
  * which the console's layer carries too). */
-static int moycore_layers_canvas(lua_State *L)
+static inline int moycore_layers_canvas(lua_State *L)
 {
     moycore_layers *ls = (moycore_layers *)lua_touserdata(L, lua_upvalueindex(1));
     moy_canvas *c;
@@ -99,7 +99,7 @@ static int moycore_layers_canvas(lua_State *L)
  * The verb takes self's stack slot, so it sees exactly the arguments it
  * always does. Protected, so an error cannot leave the screen's verbs drawing
  * into the layer: the canvas is put back first and the error re-raised. */
-static int moycore_layers_call(lua_State *L)
+static inline int moycore_layers_call(lua_State *L)
 {
     moycore_layers *ls = (moycore_layers *)lua_touserdata(L, lua_upvalueindex(1));
     moy_canvas *c = NULL, *save;
@@ -125,7 +125,7 @@ static int moycore_layers_call(lua_State *L)
 }
 
 /* __layer_verb(fn) -> the layer method that runs `fn` against the layer. */
-static int moycore_layers_verb(lua_State *L)
+static inline int moycore_layers_verb(lua_State *L)
 {
     luaL_checktype(L, 1, LUA_TFUNCTION);
     lua_pushvalue(L, lua_upvalueindex(1));
@@ -137,7 +137,7 @@ static int moycore_layers_verb(lua_State *L)
 /* __layer_blit(canvas, cam_x, cam_y, edited): draw_layer, with no crossing.
  * The camera is truncated as the Python tier's int() does, so a scrolling
  * cart's fractional camera lands on the same row on every tier. */
-static int moycore_layers_blit(lua_State *L)
+static inline int moycore_layers_blit(lua_State *L)
 {
     moycore_layers *ls = (moycore_layers *)lua_touserdata(L, lua_upvalueindex(1));
     const moy_canvas *src = (const moy_canvas *)luaL_checkudata(L, 1, MOYCORE_LAYER_MT);
@@ -156,7 +156,7 @@ static int moycore_layers_blit(lua_State *L)
 /* Install __layer_canvas, __layer_verb and __layer_blit, which the prelude
  * captures and clears before the cart runs. `ls` must outlive the VM, and a
  * host sets its blit after this. */
-static void moycore_layers_open(lua_State *L, moycore_layers *ls,
+static inline void moycore_layers_open(lua_State *L, moycore_layers *ls,
                                 moy_console *con)
 {
     ls->con = con;
