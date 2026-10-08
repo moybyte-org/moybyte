@@ -96,7 +96,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the internal flash volumes | crossed (the borrowed `VfsLfs2` and the port's _boot.py mount) | `native/moy_store/moy_kvfs.c`: the kernel's `lfs2_t` and `KVfs`, its VFS type for Python; `moy_vol` resolves "/" to it | 2 |
 | the loop, the pump, idle, OTA health, PERF, the HUD, stage meters, the tail polls | `runtime/device_boot.py`'s frame half (`runtime/frame_loop.py`), `runtime/console_perf.py`, `runtime/perf_hud.py`, `runtime/perf_line.py`'s formatter, `device/moy_ota_health.py` | `native/moy_kernel/moy_loop.c`, `native/moy_kernel/moy_idle.c`, `native/moy_kernel/moy_perf.c` | 3 |
 | the dev channel's reader and kernel words, the diag ring | `runtime/dev_channel.py`, `device/device_diag.py`, `device/moybyte_diag.py`, `device/device_util.py`; `native/moy_serial/` | `native/moy_kernel/moy_devch.c`, `+native/moy_kernel/moy_diag.c` | 3 |
-| the boot order | `device/desktop_spine.py`'s boot half, `runtime/device_boot.py`'s `DeviceBoot` (its splash: §13, question 9) | `+native/moy_kernel/moy_boot.c` | 3 |
+| the boot order | `device/desktop_spine.py`'s boot half, `runtime/device_boot.py`'s `DeviceBoot` (its splash: §13, question 9) | `native/moy_kernel/moy_boot.c` (first light: the logo before any VM) | 3 |
 | the board glue | each console's `moy_runtime.py` and the provider modules the carve makes; `device/p4_desktop.py`'s present wiring; `device/boot_shell.py` | per-board defines in `mpconfigboard.h` and `board.toml` | 3 |
 | the browser's and the host's drivers of the loop | `firmware/web_runner/web_boot.py`'s `step_frame_json`, `runtime/host_app.py` | JS and CPython call `moy_loop_step` | 3 |
 
@@ -1024,8 +1024,9 @@ plus the PUMP, HITCH and LOOP lines `device/device_diag.py` formats.
 
 ### 7.4 The boot order
 
-`+native/moy_kernel/moy_boot.c` is `build_desktop`'s order: the splash (whose
-drawer is §13's question 9), the store (C), the runtime probe (Python until
+`native/moy_kernel/moy_boot.c` is the kernel's first light: the logo drawn
+and lit before any VM (§13's question 9). `build_desktop`'s order is to follow
+it there: the splash, the store (C), the runtime probe (Python until
 sprint 4), the Workstation and the window manager (Python until sprint 7), the
 services wired as kernel handles the Python side reads, the OTA verdict, the
 loop. `mem_census.mark` stays on the path with its names. The boot is timed at
