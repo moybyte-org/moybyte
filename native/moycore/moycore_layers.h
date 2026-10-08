@@ -20,17 +20,17 @@
  * predicted copy rides the DMA engine) and libmoy's moy_blit_window when it
  * does not, so a frame that composites a layer makes no crossing.
  *
- * The buffer reaches the VM in two steps, because only Python holds it and
- * only Lua code may allocate on the VM: the host's bind (moycore.layer_bind,
- * hl_layer_bind), which the __layer_new trampoline calls, PARKS it here, and
- * __layer_canvas() -- the next thing the prelude's make_layer calls -- builds
- * the canvas over it as a userdata the layer's table holds. An allocation
- * failing inside the trampoline would unwind through the host frames under
- * it; failing in __layer_canvas it is an ordinary Lua error.
+ * The buffer reaches the VM in two steps, because only Lua code may allocate
+ * on the VM: __layer_new PARKS it here, and __layer_canvas() -- the next
+ * thing the prelude's make_layer calls -- builds the canvas over it as a
+ * userdata the layer's table holds. On the boards and in the browser
+ * __layer_new is moycore_lua.c's C, which allocates the pixels as the run's
+ * own; on the host it is a trampoline into the console's make_layer, which
+ * parks the console's buffer through the host's bind (hl_layer_bind).
  *
- * The userdata never owns the pixels. The prelude's handle registry pins the
- * console's layer object for the run, and the run's VM -- with every canvas
- * in it -- is closed before the console reclaims the buffers.
+ * The userdata never owns the pixels. Their owner -- the run, or the
+ * console's layer object pinned by the prelude's handle registry -- keeps
+ * them until the run's VM, with every canvas in it, is closed.
  */
 #ifndef MOYCORE_LAYERS_H
 #define MOYCORE_LAYERS_H

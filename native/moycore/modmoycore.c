@@ -282,6 +282,21 @@ static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 
+// image_put(name, text) -- a paint image's .moyimg text for the run's
+// image(name), copied into C (moycore_lua.h); the cart's layers and images
+// are then the run's own, and __layer_new, __layer_spr_img and
+// __image_handle never cross into Python. Before the load.
+static mp_obj_t mod_image_put(mp_obj_t name_obj, mp_obj_t text_obj)
+{
+    size_t n = 0;
+    const char *text = mp_obj_str_get_data(text_obj, &n);
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: no run"));
+    if (moycore_lua_image_put(mp_obj_str_get_str(name_obj), text, n) != 0)
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moycore: image_put"));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_image_put_obj, mod_image_put);
+
 // layer_bind(buf, w, h) -- park a cart layer's RGB565 buffer for the prelude's
 // make_layer, which builds its canvas next (moycore_layers.h). Called from the
 // __layer_new trampoline, so the VM is mid-call: this touches no Lua state.
@@ -2639,6 +2654,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_image_put),   MP_ROM_PTR(&mod_image_put_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_restore), MP_ROM_PTR(&mod_layer_restore_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_gc),          MP_ROM_PTR(&mod_gc_obj) },

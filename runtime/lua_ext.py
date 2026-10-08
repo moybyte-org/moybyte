@@ -762,7 +762,7 @@ def rows_blob(rows, ident):
     return ",".join(parts) + ","
 
 
-def install_handles(ns, reg, bind):
+def install_handles(ns, reg, bind, native=False):
     """Register the int-handle half of PRELUDE_HANDLES; return the registries.
 
     The object-valued API entries (layers, paint images, the placement rows of
@@ -778,6 +778,11 @@ def install_handles(ns, reg, bind):
     libmoy verbs then draw into them (LAYER_VERBS). Those two are the only
     things that differ between the runtimes. `bind` is REQUIRED because a run
     without it would make layers its cart can never draw into.
+
+    `native` is true for a runtime that answers __layer_new, __layer_spr_img
+    and __image_handle in C (moycore on the boards and in the browser:
+    native/moycore/moycore_lua.c), where the run owns its layers' pixels and
+    its paint images; those three are then not registered over the C.
     """
     layers = []
     images = []
@@ -802,9 +807,10 @@ def install_handles(ns, reg, bind):
         images.append(img)
         return len(images) - 1
 
-    reg("__layer_new", _layer_new)
-    reg("__layer_spr_img", _layer_spr_img)
-    reg("__image_handle", _image_handle)
+    if not native:
+        reg("__layer_new", _layer_new)
+        reg("__layer_spr_img", _layer_spr_img)
+        reg("__image_handle", _image_handle)
 
     # The placement half (#214). `scene` and friends are absent from a
     # make_layer/probe namespace, so every one of these degrades to "no actors"

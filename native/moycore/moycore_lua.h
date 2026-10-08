@@ -77,6 +77,11 @@ void moycore_lua_close(void);
 // Defined by the binding (modmoycore.c), where a compiled cart's session is.
 int moycore_frame(float dt, int draw, char *err, size_t n);
 
+// A paint image's .moyimg text, copied, for the run's image(name) (decoded
+// at its first call, moycore_lua.c's __image_handle): 0, or -1 when the run
+// holds its 256 or there is no memory. The run's close frees them.
+int moycore_lua_image_put(const char *name, const char *text, size_t n);
+
 // The p8 machine's buffers (65536 and 0x4300 bytes), or NULLs: no machine.
 void moycore_lua_p8_memory(uint8_t *mem, uint8_t *rom);
 

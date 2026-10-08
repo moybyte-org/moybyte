@@ -14,6 +14,7 @@
 #include "moycore_lua.h"
 #include "moycore_run.h"
 #include "moycore_superset.h"
+#include "../moy_store/moy_img.h"
 
 moycore_run moycore_RUN;
 #define RUN moycore_RUN
@@ -815,6 +816,215 @@ static void put_err(char *err, size_t n, const char *msg)
     }
 }
 
+
+// -- the cart's layers and paint images, in C (docs/kernel_cartpath_2026-10.md §2) --
+//
+// __layer_new, __layer_spr_img and __image_handle, which the handles prelude
+// (runtime/lua_ext.py's PRELUDE_HANDLES) captures: a layer's pixels and a
+// paint image's indices are the run's, allocated here (PSRAM on a board) and
+// freed by moycore_lua_close after the VM, so neither crosses into Python.
+// A paint image is decoded from its .moyimg text (moy_img.h) at its first
+// image(name); the texts are the cart's, handed over before the load
+// (moycore_lua_image_put). A run holds at most MOYCORE_IMAGES of them (§9
+// decision 5): past that, image() fails loudly.
+
+#define MOYCORE_IMAGES 256
+
+typedef struct {
+    char    *name;               // NUL-terminated
+    char    *text;               // the .moyimg, `n` bytes
+    size_t   n;
+    uint8_t *pix;                // w*h indices once decoded; NULL before
+    uint32_t w, h;
+    int      bad;                // decoded once and found not a picture
+} mc_image_t;
+
+typedef struct {
+    moy_pixel *pix;
+    int w, h;
+} mc_layer_t;
+
+static mc_image_t g_img[MOYCORE_IMAGES];
+static int g_nimg;
+static mc_layer_t *g_lay;
+static int g_nlay, g_caplay;
+
+static void *media_alloc(size_t n)
+{
+#ifdef MOYCORE_PSRAM
+    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
+#endif
+    return calloc(1, n);
+}
+
+static void media_free(void *p)
+{
+#ifdef MOYCORE_PSRAM
+    heap_caps_free(p);
+#else
+    free(p);
+#endif
+}
+
+int moycore_lua_image_put(const char *name, const char *text, size_t n)
+{
+    size_t nn = strlen(name);
+    mc_image_t *im;
+    if (g_nimg >= MOYCORE_IMAGES) return -1;
+    im = &g_img[g_nimg];
+    memset(im, 0, sizeof(*im));
+    im->name = (char *)media_alloc(nn + 1);
+    im->text = (char *)media_alloc(n ? n : 1);
+    if (!im->name || !im->text) {
+        media_free(im->name);
+        media_free(im->text);
+        im->name = im->text = NULL;
+        return -1;
+    }
+    memcpy(im->name, name, nn + 1);
+    memcpy(im->text, text, n);
+    im->n = n;
+    g_nimg++;
+    return 0;
+}
+
+static void media_release(void)
+{
+    for (int i = 0; i < g_nimg; i++) {
+        media_free(g_img[i].name);
+        media_free(g_img[i].text);
+        media_free(g_img[i].pix);
+    }
+    memset(g_img, 0, sizeof(g_img));
+    g_nimg = 0;
+    for (int i = 0; i < g_nlay; i++) media_free(g_lay[i].pix);
+    media_free(g_lay);
+    g_lay = NULL;
+    g_nlay = g_caplay = 0;
+}
+
+// __image_handle(name) -> the image's handle, or -1: no such image, or not a
+// picture.
+static int l_image_handle(lua_State *L)
+{
+    const char *name = luaL_checkstring(L, 1);
+    for (int i = 0; i < g_nimg; i++) {
+        mc_image_t *im = &g_img[i];
+        if (strcmp(im->name, name) != 0) continue;
+        if (im->pix) {
+            lua_pushinteger(L, i);
+            return 1;
+        }
+        if (!im->bad) {
+            uint32_t w = 0, h = 0;
+            void *work = NULL;
+            if (moy_img_head(im->text, im->n, &w, &h) == MOY_IMG_OK
+                && (size_t)w * (size_t)h < ((size_t)1 << 26)) {
+                size_t cap = (size_t)w * (size_t)h + 1;
+                im->pix = (uint8_t *)media_alloc(cap);
+                work = media_alloc(moy_img_work_size());
+                if (!im->pix || !work) {
+                    media_free(work);
+                    media_free(im->pix);
+                    im->pix = NULL;
+                    return luaL_error(L, "image: out of memory for \"%s\"", name);
+                }
+                if (moy_img_decode(im->text, im->n, im->pix, cap, &im->w, &im->h, work)
+                    != MOY_IMG_OK) {
+                    media_free(im->pix);
+                    im->pix = NULL;
+                }
+                media_free(work);
+            }
+            if (!im->pix) im->bad = 1;
+        }
+        if (im->pix) {
+            lua_pushinteger(L, i);
+            return 1;
+        }
+        break;
+    }
+    lua_pushinteger(L, -1);
+    return 1;
+}
+
+// __layer_new(w, h) -> the layer's handle, its pixels parked for the
+// prelude's __layer_canvas, which make_layer calls next.
+static int l_layer_new(lua_State *L)
+{
+    lua_Integer w = luaL_checkinteger(L, 1), h = luaL_checkinteger(L, 2);
+    moy_pixel *pix;
+    if (w <= 0 || h <= 0 || w > 4096 || h > 4096)
+        return luaL_error(L, "make_layer: bad size %dx%d", (int)w, (int)h);
+    if (g_nlay == g_caplay) {
+        int cap = g_caplay ? g_caplay * 2 : 8;
+        mc_layer_t *t = (mc_layer_t *)media_alloc((size_t)cap * sizeof(*t));
+        if (!t) return luaL_error(L, "make_layer: out of memory");
+        if (g_lay) memcpy(t, g_lay, (size_t)g_nlay * sizeof(*t));
+        media_free(g_lay);
+        g_lay = t;
+        g_caplay = cap;
+    }
+    pix = (moy_pixel *)media_alloc((size_t)w * (size_t)h * sizeof(moy_pixel));
+    if (!pix) return luaL_error(L, "make_layer: out of memory for %dx%d", (int)w, (int)h);
+    g_lay[g_nlay].pix = pix;
+    g_lay[g_nlay].w = (int)w;
+    g_lay[g_nlay].h = (int)h;
+    moycore_layers_park(&RUN.layers, pix, (size_t)w * (size_t)h * sizeof(moy_pixel),
+                        (int)w, (int)h);
+    lua_pushinteger(L, g_nlay++);
+    return 1;
+}
+
+static lua_Integer trunc_arg(lua_State *L, int i)
+{
+    lua_Number v = luaL_optnumber(L, i, 0);
+    if (!(v == v) || v > (lua_Number)1e9f || v < (lua_Number)-1e9f)
+        return luaL_error(L, "spr: the position is not a number");
+    return (lua_Integer)v;           // toward zero, as int()
+}
+
+// __layer_spr_img(layer, image, x, y): the paint image placed opaquely on the
+// layer at (x, y), clipped to it -- the console canvas's paint-image path
+// (an identity palette, no camera: the layer's own draw state is libmoy's).
+static int l_layer_spr_img(lua_State *L)
+{
+    lua_Integer li = luaL_checkinteger(L, 1), ii = luaL_checkinteger(L, 2);
+    lua_Integer x = trunc_arg(L, 3), y = trunc_arg(L, 4);
+    if (li < 0 || li >= g_nlay || ii < 0 || ii >= g_nimg || !g_img[ii].pix) return 0;
+    const mc_layer_t *ly = &g_lay[li];
+    const mc_image_t *im = &g_img[ii];
+    for (uint32_t row = 0; row < im->h; row++) {
+        lua_Integer ty = y + (lua_Integer)row;
+        if (ty < 0 || ty >= ly->h) continue;
+        const uint8_t *src = im->pix + (size_t)row * im->w;
+        moy_pixel *dst = ly->pix + (size_t)ty * (size_t)ly->w;
+        for (uint32_t col = 0; col < im->w; col++) {
+            lua_Integer tx = x + (lua_Integer)col;
+            if (tx < 0 || tx >= ly->w) continue;
+            uint8_t p = src[col];
+            if (p >= MOY_PALETTE) continue;          // past the palette: skipped
+#ifdef MOY_PIXEL_RGB565
+            dst[tx] = RUN.c.canvas.wire[p];
+#else
+            dst[tx] = (moy_pixel)p;
+#endif
+        }
+    }
+    return 0;
+}
+
+static void media_open(lua_State *L)
+{
+    lua_pushcfunction(L, l_image_handle);
+    lua_setglobal(L, "__image_handle");
+    lua_pushcfunction(L, l_layer_new);
+    lua_setglobal(L, "__layer_new");
+    lua_pushcfunction(L, l_layer_spr_img);
+    lua_setglobal(L, "__layer_spr_img");
+}
+
 int moycore_lua_open(char *err, size_t n)
 {
     RUN.L = lua_newstate(l_alloc, NULL);
@@ -841,6 +1051,7 @@ int moycore_lua_open(char *err, size_t n)
     // The layer glue's two natives, captured and cleared by the prelude.
     moycore_layers_open(RUN.L, &RUN.layers, &RUN.c.con);
     moycore_superset_open(RUN.L);
+    media_open(RUN.L);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded from the cart's file. The shim's
     // __moy_map_flags(gff) overwrites it at cart boot, which is what a p8
@@ -942,6 +1153,7 @@ void moycore_lua_close(void)
 {
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
+    media_release();                 // after the VM: its canvases point at the layers
 #if MOYCORE_POOL
     // AFTER lua_close, never before: until it returns, the chunks still hold
     // live Lua objects. Nothing may survive a run -- a cart that churned its

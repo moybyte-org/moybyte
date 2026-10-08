@@ -84,7 +84,7 @@ def test_the_base_namespace_keyset_is_pinned():
         "textmode", "quit", "view", "cfg", "col",
         "sfx", "beep", "music", "music_stop", "sound_stop", "volume",
         "rnd", "flr", "Image", "image",
-        "_moy_cfg",
+        "_moy_cfg", "_moy_images",
     }
 
 

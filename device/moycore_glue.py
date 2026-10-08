@@ -263,8 +263,18 @@ class MoycoreRun:
             # calling make_layer() gets "unsupported value" back from the
             # trampoline and the whole run falls to the old runtime, which is
             # what sakura_lua/brick_siege/ray did before this landed.
+            # The layers and paint images are the run's own in C where the
+            # binding has them (image_put): the cart's .moyimg texts go over
+            # once, here, and nothing of a layer or an image crosses after.
+            native = hasattr(_moycore, "image_put")
+            if native:
+                imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
+                for name in (imgs or ()):
+                    blob = imgs[name]
+                    if isinstance(blob, (str, bytes)):
+                        _moycore.image_put(name, blob)
             self._layers, self._images = install_handles(
-                ns, _moycore.register, _moycore.layer_bind)
+                ns, _moycore.register, _moycore.layer_bind, native)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")

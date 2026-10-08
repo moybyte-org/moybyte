@@ -614,6 +614,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # feature was dead. Not registered as a verb -- the glue registers only
         # callables, and a dict is not one.
         "_moy_cfg": config,
+        # The cart's paint images as their .moyimg texts, for a C tier that
+        # decodes them itself (moycore's image_put; not a verb, like _moy_cfg).
+        "_moy_images": images,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
