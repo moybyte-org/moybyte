@@ -79,14 +79,31 @@ static int kv_read(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off, 
     return esp_partition_read(k->part, b * c->block_size + off, buf, n) == ESP_OK ? 0 : LFS2_ERR_IO;
 }
 
+// THE FEEDER PAUSES FOR A WRITE. An internal-flash program or erase turns the
+// cache off on both cores, so a panel feeder mid-frame on core 0 would stall
+// with bands half-queued. The write runs on the task that kicks frames, so
+// waiting out the frame in flight first leaves the feeder idle on its
+// semaphore for the write's whole span: the next frame is kicked only after
+// it. moy_flush is the S3 boards' (weak: a P4 has no feeder; its DSI DMA
+// scans without the cache).
+bool moy_flush_kdrain(void) __attribute__((weak));
+
+static void kv_quiet(void) {
+    if (moy_flush_kdrain != NULL) {
+        moy_flush_kdrain();
+    }
+}
+
 static int kv_prog(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off,
                    const void *buf, lfs2_size_t n) {
     const kvol_t *k = c->context;
+    kv_quiet();
     return esp_partition_write(k->part, b * c->block_size + off, buf, n) == ESP_OK ? 0 : LFS2_ERR_IO;
 }
 
 static int kv_erase(const struct lfs2_config *c, lfs2_block_t b) {
     const kvol_t *k = c->context;
+    kv_quiet();
     return esp_partition_erase_range(k->part, b * c->block_size, c->block_size) == ESP_OK
            ? 0 : LFS2_ERR_IO;
 }

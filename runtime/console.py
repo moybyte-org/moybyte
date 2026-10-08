@@ -939,6 +939,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # component owns the RENDERING + the compiled-cart cache; the CHOICE
         # (`ws.look.wallpaper_id`) and the picker verbs are the look's.
         self.wallpaper = Wallpaper(self, NAMES)
+        # The idle ladder's SAVER rung (idle_ladder.py): the screen it shows
+        # while the kernel's ladder sits there, None otherwise.
+        self._saver = None
         # Expensive-event counters (2026-07-26). See note_cost.
         self.costs = {}
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
@@ -1361,6 +1364,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def web_console_url(self):
         """`web.url()` -- the dev channel's `web` and the tests."""
         return self.web.url()
+
+    def saver_state(self, on):
+        """The kernel's ladder entered or left its SAVER rung. Never over a
+        running cart: the game keeps the glass."""
+        if on and not self.wm.top_is_player():
+            try:
+                from idle_ladder import Saver
+            except ImportError:  # host: the runtime package
+                from runtime.idle_ladder import Saver
+            self._saver = Saver(self)
+        else:
+            self._saver = None
+            self._dirty = True
 
     def park_web_console(self):
         """`web.park()` -- the layers.py contract comment and the tests."""
@@ -3445,6 +3461,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 return
         elif self.player.tick_ms:
             self.player.park()
+        # The kernel's idle ladder is on its SAVER rung (idle_ladder.Saver): the
+        # saver owns the glass until the ladder wakes, which moves the kernel
+        # epoch so the gate below repaints what it covered.
+        saver = self._saver
+        if saver is not None:
+            if saver.frame(dt):
+                self._flush_batches()
+                self.comp.flush()
+                self._frames_drawn += 1
+            return
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
         # host window simply retains the last frame, so an idle UI costs ~0 and the

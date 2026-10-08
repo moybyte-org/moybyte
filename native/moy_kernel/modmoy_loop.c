@@ -349,6 +349,18 @@ static mp_obj_t loop_idle(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(loop_idle_obj, 0, 2, loop_idle);
 
+// idle_state() -> the ladder's rung now, a small int (no allocation: the
+// console's frame reads it every frame).
+static mp_obj_t loop_idle_state(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_loop_idle()->state);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(loop_idle_state_obj, loop_idle_state);
+
+static mp_obj_t loop_idle_can_dim(void) {
+    return mp_obj_new_bool(moy_loop_idle()->can_dim);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(loop_idle_can_dim_obj, loop_idle_can_dim);
+
 static mp_obj_t loop_power(mp_obj_t on) {
     if (mp_obj_is_true(on)) {
         moy_idle_wake(moy_loop_idle());
@@ -586,6 +598,8 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_last), MP_ROM_PTR(&loop_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_idle), MP_ROM_PTR(&loop_idle_obj) },
     { MP_ROM_QSTR(MP_QSTR_power), MP_ROM_PTR(&loop_power_obj) },
+    { MP_ROM_QSTR(MP_QSTR_idle_state), MP_ROM_PTR(&loop_idle_state_obj) },
+    { MP_ROM_QSTR(MP_QSTR_idle_can_dim), MP_ROM_PTR(&loop_idle_can_dim_obj) },
     { MP_ROM_QSTR(MP_QSTR_perf_due), MP_ROM_PTR(&loop_perf_due_obj) },
     { MP_ROM_QSTR(MP_QSTR_perf), MP_ROM_PTR(&loop_perf_obj) },
     { MP_ROM_QSTR(MP_QSTR_perf_cart), MP_ROM_PTR(&loop_perf_cart_obj) },

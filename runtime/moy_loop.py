@@ -300,6 +300,14 @@ def idle(rung=None, secs=None):
     return (d.contents.state, get(d, DIM), get(d, SAVER), get(d, BLANK))
 
 
+def idle_state():
+    return _lib().moy_loop_idle().contents.state
+
+
+def idle_can_dim():
+    return bool(_lib().moy_loop_idle().contents.can_dim)
+
+
 def power(on):
     d = _lib().moy_loop_idle()
     if on:

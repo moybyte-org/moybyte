@@ -48,6 +48,7 @@ kicked at the frame's tail) and a per-frame Python hook of its own.
 from console import Workstation, wire_workstation_core
 from device_boot import DeviceBoot, report_update
 from chrome import _cursor_delta
+from idle_ladder import IdleLadder
 from device_api import make_api
 from device_canvas import DeviceCanvas, _LayerComp, _owner_h
 import moy_input
@@ -108,8 +109,14 @@ class Desktop:
             ws.handle_input()
 
         drawn = [0]
+        rung = [0]
+        idle_state = moy_loop.idle_state
 
         def frame(dt):
+            st = idle_state()
+            if st != rung[0]:
+                rung[0] = st
+                ws.saver_state(st == moy_loop.SAVER)
             ws.frame(dt)
             n = ws._frames_drawn
             if not boot.done:
@@ -132,10 +139,11 @@ class Desktop:
         moy_loop.fps(self.fps_cap)
         moy_loop.lit(boot.lit)
         moy_loop.capture(ws.perf_capture)
-        moy_loop.idle(moy_loop.BLANK, (self.power_save_ms or 0) // 1000)
+        # The idle ladder's rungs: the system store's, the board's blank rung
+        # the default (Settings rows over the kernel's ladder, idle_ladder.py).
+        ws.idle_ladder = IdleLadder(ws, moy_loop, (self.power_save_ms or 0) // 1000)
         upd = getattr(ws, "updater", None)
         moy_loop.health(upd is not None and not getattr(upd, "confirmed", True))
-        print("%s desktop running (Ctrl-C for REPL)" % self.name)
         return self
 
 
@@ -333,6 +341,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # was CONSTRUCTED, not that a pixel reached the glass (#56). The kernel's
     # loop fires it once frames are really going out.
     report_update(ws, lambda m: log("OTA", m))
+    print("%s desktop running (Ctrl-C for REPL)" % name)
     _census("ota check")
     boot.start_frames(ws)
     _census("frames")

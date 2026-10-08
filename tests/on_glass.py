@@ -312,6 +312,41 @@ def display_underruns_are_zero(board):
     assert n == 0, n
 
 
+def internal_flash_commits_under_a_cart(board, title="Star Catcher", n=10):
+    """Ten commits to the kernel's internal volume under a running cart
+    (docs/kernel_survival_2026-10.md section 6.9): a flash write turns the
+    cache off on both cores, so the panel feeder pauses for it (moy_kvfs.c
+    waits the frame in flight out first) -- on a banded panel the feeder's
+    timeouts and errors stay where they were; on a DSI panel the scan-out
+    never underruns. Returns the longest commit, ms."""
+    import time
+    st0 = board.state()
+    pump0 = st0.get("pump")
+    board.cmd("run %s" % title, wait_for="REMOTE run")
+    board.drain(3.0)
+    longest = 0
+    try:
+        for i in range(n):
+            t = board.pyval(
+                "(lambda t0: (open('/kv_commit.bin','wb').write(bytes(4096)), "
+                "__import__('time').ticks_diff(__import__('time').ticks_ms(), t0))[1])"
+                "(__import__('time').ticks_ms())", strict=True)
+            longest = max(longest, t)
+            board.drain(0.2)
+        assert board.state()["cart"] is not None, "the cart did not survive the commits"
+        pump1 = board.state().get("pump")
+        if pump0 is not None:
+            # (pump, idle, idle_n, feed, bands, blocked, timeouts, errs, stopfails)
+            assert pump1[6] == pump0[6] and pump1[7] == pump0[7], (pump0, pump1)
+        else:
+            display_underruns_are_zero(board)
+    finally:
+        board.pyval("__import__('os').remove('/kv_commit.bin')")
+        board.leave_cart()
+        time.sleep(0.5)
+    return longest
+
+
 def cart_store_follows_the_card(board):
     """One store per boot, and it is the card's when the card mounted: a board
     that says `mounted` keeps its carts and the system documents beside them on
@@ -436,6 +471,33 @@ def idle_blank_and_wake(board):
     board.cmd("power off", wait_for="REMOTE power")
     board.drain(1.0)
     assert board.state()["psave"][0] is True, "`power off` did not blank"
+
+
+def idle_saver_and_wake(board):
+    """The ladder's SAVER rung (the kernel's, native/moy_kernel/moy_idle.c):
+    after its seconds of silence the console shows the saver -- a cover cycle
+    fullscreen, the desk's wallpaper on a desk -- and the input that wakes it
+    is swallowed and moves the kernel epoch, so the console repaints every
+    buffer the saver held (`_frames_drawn` advances by at least the backend's
+    RETAINED_FRAMES) and comes back on the stack it left."""
+    stack = board.state()["stack"]
+    board.cmd("power blank 0", wait_for="REMOTE power")
+    board.cmd("power saver 2", wait_for="REMOTE power")
+    board.drain(4.0)                       # say nothing: silence is the stimulus
+    st = board.state()                     # read before this line's wake
+    try:
+        assert st["idle"]["state"] == 2, st["idle"]
+        board.drain(1.0)
+        after = board.state()
+        assert after["idle"]["state"] == 0, after["idle"]
+        assert after["stack"] == stack
+        retained = board.pyval("getattr(ws.sys_canvas or ws.canvas, "
+                               "'RETAINED_FRAMES', 1)", strict=True)
+        assert board.pyval("ws._saver is None", strict=True) is True
+        assert after["frames"] >= st["frames"] + retained, (st["frames"], after["frames"])
+    finally:
+        board.cmd("power saver 0", wait_for="REMOTE power")
+        board.cmd("power blank 300", wait_for="REMOTE power")
 
 
 def idle_timeout_restored(board):

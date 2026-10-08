@@ -111,6 +111,9 @@ FORWARDS = {
 # Each must STAY absent -- an entry whose name has appeared is a stale
 # exemption, so the test refuses that too.
 GETATTR_ABSENT = {
+    "idle_ladder": "the kernel idle ladder's Settings rows (idle_ladder.py), "
+                   "set only where the kernel's loop drives the frames; "
+                   "settings_layer gates the rows on the probe",
     "ble_keyboard": "the BLE keyboard driver, injected only on a board that has "
                     "one; settings_layer gates its whole panel on the probe",
     # The PERF line's wm columns (#206 item 2). ABSENCE IS THE ANSWER here, not

@@ -270,6 +270,7 @@ class SettingsLayer:
         self._rows_onl = False
         self._rows_web = False
         self._rows_c6 = False
+        self._rows_idle = None
         self._rows_tog = None
         # _toggle_rows' own memo: the registry block, plus the gate answer it
         # was built from held in a PREALLOCATED list compared element-wise --
@@ -1037,11 +1038,12 @@ class SettingsLayer:
         onl = ws._online_update_available()
         web = getattr(ws, "webhost", None) is not None
         c6u = getattr(ws, "c6_updater", None) is not None
+        idle = getattr(ws, "idle_ladder", None)
         tog = self._toggle_rows()
         if (self._rows_cache is not None and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
                 and web == self._rows_web and c6u == self._rows_c6
-                and tog is self._rows_tog):
+                and tog is self._rows_tog and idle is self._rows_idle):
             return self._rows_cache
         # The registry block sits directly after EDIT ICONS, which is where the
         # hand-spliced FRAMESKIP/PERF DIAG rows were: same order, same indices,
@@ -1052,6 +1054,11 @@ class SettingsLayer:
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
+        if idle is not None:
+            # The kernel's idle ladder (idle_ladder.py): DIM, SAVER and SCREEN
+            # OFF as seconds of no input, OFF a value -- on a tier whose frames
+            # are the kernel's, so every other tier's rows and pixels stay.
+            rows = rows + idle.rows()
         if crash_available():
             rows = rows + (("crash", "LAST CRASH", "crash"),)
         if web:
@@ -1080,6 +1087,7 @@ class SettingsLayer:
         self._rows_onl = onl
         self._rows_web = web
         self._rows_c6 = c6u
+        self._rows_idle = idle
         self._rows_tog = tog
         self._rows_cache = rows
         return rows
@@ -1140,6 +1148,9 @@ class SettingsLayer:
             return
         if kind == "crash":                     # LAST CRASH: any step/tap opens the record
             self.open_crash()
+            return
+        if kind == "idle":                      # the idle ladder's rungs: OFF, 30S .. 30M
+            ws.idle_ladder.step(key, d)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -1649,6 +1660,9 @@ class SettingsLayer:
         elif kind == "mock-name":
             cv.print(str(ws.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,
                      NAMES["peach"], 1)
+        elif kind == "idle":               # the idle ladder: OFF / 30S / 5M
+            v = ws.idle_ladder.label(key)
+            cv.print(v, vx, y + 5, NAMES["dark_grey"] if v == "OFF" else th["play"], 1)
         elif kind == "channel":            # OTA update channel: STABLE / BETA (#53)
             beta = ws._ota_channel() == "unstable"
             cv.print("BETA" if beta else "STABLE", vx, y + 5,
@@ -1687,7 +1701,7 @@ class SettingsLayer:
         # Mark not-yet-functional rows clearly (wifi + font + channel +
         # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
-                        "diag", "webhost", "crash"):
+                        "diag", "webhost", "crash", "idle"):
             # A second label line inside the SAME row rect (one font row below
             # the title), so it is the row kind again with its own text_dy. Its
             # grey is a frozen literal, not `ink_dim` -- off-token on every

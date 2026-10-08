@@ -369,6 +369,15 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_the_saver_comes_and_its_wake_repaints(board):
+    on_glass.idle_saver_and_wake(board)
+
+
+def test_internal_flash_commits_under_a_running_cart(board):
+    ms = on_glass.internal_flash_commits_under_a_cart(board)
+    print("\nlongest internal-flash commit under a cart: %d ms" % ms)
+
+
 def test_the_frame_is_the_kernels(board):
     on_glass.the_frame_is_the_kernels(board)
 

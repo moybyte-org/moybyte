@@ -919,10 +919,11 @@ caught under nlr and printed as the board prints it today; whether it counts
 against an app is the ledger's rule (sprint 2), which this sprint does not
 change.
 
-    int  moy_loop_step(void);                         // one frame; returns QUIT when the channel asked for the REPL
-    int  moy_loop_run(void);                          // until QUIT or a VM teardown
-    int  moy_loop_upcall(int which, mp_obj_t fn);     // register one of the three; refused while no VM runs
-    uint32_t moy_loop_upcalls(uint32_t *console, uint32_t *app, uint32_t *driver);   // per frame, by class
+    void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap);  // a tier's stages, every one optional
+    int  moy_loop_step(void);                         // one frame: OK, QUIT, INTERRUPT, STOPPED or EXIT
+    int  moy_loop_run(void);                          // until one of the four
+    void moy_loop_set_upcall(moy_loop_up_fn fn);      // the binding's dispatcher over its registrations
+    void moy_loop_upcalls(uint32_t frame[4], uint32_t total[4]);   // CONSOLE, APP, DRIVER, SERVICE
 
 **Who runs it, and how it is safe (2026-10-07).** The plan's §4.4 rules out a
 kernel that runs inside the VM's task, and a VM cannot tear itself down with
