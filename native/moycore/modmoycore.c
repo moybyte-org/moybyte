@@ -86,9 +86,6 @@
 
 #define RUN moycore_RUN
 
-// The profilers' hooks into a Lua run (defined beside mod_tick).
-static const moycore_lua_hooks_t HOOKS;
-
 // -- helpers -----------------------------------------------------------------
 
 static void *buf_w(mp_obj_t o, size_t *len)
@@ -1147,7 +1144,6 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     g_prof_on = 0;               // a new VM: the old wrappers went with the old one
     g_prof_n = 0;
     lprof_forget();              // ...and the old one's hook died with it
-    moycore_lua_set_hooks(&HOOKS);
     RUN.open = 1;
     return mp_const_none;
 }
@@ -2184,29 +2180,28 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_presented_obj, 0, 2,
 // running when the tick ended; the counters bracket the cart's OWN halves and
 // nothing else, and a frame that errors out is not counted at all -- half a
 // tick would move the ratio without being a tick.
-static uint32_t g_hk_pc0, g_hk_pe0, g_hk_pc1, g_hk_pe1;
-
-static void hk_frame_begin(void)
+// `s`: the counters at _update's start (cycles, events), then at its end.
+static void hk_frame_begin(uint32_t *s)
 {
     if (g_lp_on) g_lp_t0 = PROF_NOW();
-    if (g_pm_on) pm_read(&g_hk_pc0, &g_hk_pe0);
+    if (g_pm_on) pm_read(&s[0], &s[1]);
 }
 
-static void hk_frame_mid(void)
+static void hk_frame_mid(uint32_t *s)
 {
-    if (g_pm_on) pm_read(&g_hk_pc1, &g_hk_pe1);
+    if (g_pm_on) pm_read(&s[2], &s[3]);
 }
 
-static void hk_frame_end(int drew)
+static void hk_frame_end(int drew, uint32_t *s)
 {
     if (g_pm_on) {
         uint32_t pc2 = 0, pe2 = 0;
         pm_read(&pc2, &pe2);
-        g_pm_cyc[PM_UPD]  += (uint64_t)(uint32_t)(g_hk_pc1 - g_hk_pc0);
-        g_pm_evt[PM_UPD]  += (uint64_t)(uint32_t)(g_hk_pe1 - g_hk_pe0);
+        g_pm_cyc[PM_UPD]  += (uint64_t)(uint32_t)(s[2] - s[0]);
+        g_pm_evt[PM_UPD]  += (uint64_t)(uint32_t)(s[3] - s[1]);
         if (drew) {
-            g_pm_cyc[PM_DRAW] += (uint64_t)(uint32_t)(pc2 - g_hk_pc1);
-            g_pm_evt[PM_DRAW] += (uint64_t)(uint32_t)(pe2 - g_hk_pe1);
+            g_pm_cyc[PM_DRAW] += (uint64_t)(uint32_t)(pc2 - s[2]);
+            g_pm_evt[PM_DRAW] += (uint64_t)(uint32_t)(pe2 - s[3]);
         }
         g_pm_frames++;
     }
@@ -2230,7 +2225,7 @@ static void hk_load_end(lua_State *L)
     if (g_lp_arm) lprof_install(L, g_lp_arm_iv, g_lp_arm_lo, g_lp_arm_hi);
 }
 
-static const moycore_lua_hooks_t HOOKS = {
+const moycore_lua_hooks_t moycore_lua_hooks = {
     hk_load_begin, hk_load_end, hk_frame_begin, hk_frame_mid, hk_frame_end,
 };
 

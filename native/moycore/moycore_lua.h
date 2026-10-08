@@ -9,8 +9,8 @@
 //
 // What stays in modmoycore.c is the binding: the buffers Python hands over,
 // register()'s trampolines into Python, and the profilers' surfaces. The
-// profilers reach a frame through HOOKS the binding installs; with none
-// installed a frame is exactly the cart's two halves.
+// profilers reach a load and a frame through the binding's hooks
+// (moycore_lua_hooks), which do nothing while no profiler is armed.
 //
 // One run at a time: `moycore_RUN` is it.
 
@@ -42,16 +42,18 @@ typedef struct {
 
 extern moycore_run moycore_RUN;
 
-// What the profilers do around a load and a frame. Any member may be NULL.
+// What the profilers do around a load and a frame: the binding's table
+// (modmoycore.c), constant, so it costs no RAM. A frame's three hooks share
+// `s`, four words on the frame's stack.
 typedef struct {
     void (*load_begin)(lua_State *L);   // before the first chunk
     void (*load_end)(lua_State *L);     // after the last, before _init
-    void (*frame_begin)(void);          // before _update
-    void (*frame_mid)(void);            // between _update and _draw
-    void (*frame_end)(int drew);        // after the frame, when it raised nothing
+    void (*frame_begin)(uint32_t *s);   // before _update
+    void (*frame_mid)(uint32_t *s);     // between _update and _draw
+    void (*frame_end)(int drew, uint32_t *s);   // after the frame, when it raised nothing
 } moycore_lua_hooks_t;
 
-void moycore_lua_set_hooks(const moycore_lua_hooks_t *h);
+extern const moycore_lua_hooks_t moycore_lua_hooks;
 
 // The VM opened over moycore_RUN.c, whose console the caller has built: 0, or
 // -1 with the reason in `err`.

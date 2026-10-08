@@ -18,15 +18,7 @@
 moycore_run moycore_RUN;
 #define RUN moycore_RUN
 
-static const moycore_lua_hooks_t *g_hooks;
-
-void moycore_lua_set_hooks(const moycore_lua_hooks_t *h) {
-    g_hooks = h;
-}
-
-#define HOOK(name, ...) do { \
-        if (g_hooks != NULL && g_hooks->name != NULL) g_hooks->name(__VA_ARGS__); \
-    } while (0)
+#define HOOK(name, ...) moycore_lua_hooks.name(__VA_ARGS__)
 
 // The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
 // build, absent on the host/unix/wasm ones, which then use plain realloc.
@@ -930,18 +922,19 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n)
     // The hooks bracket the cart's OWN halves and nothing else: a frame that
     // errors out never reaches frame_end, because half a tick would move the
     // profilers' ratios without being a tick.
-    HOOK(frame_begin);
+    uint32_t pm[4];
+    HOOK(frame_begin, pm);
     uint32_t t0 = moycore_run_now_us();
     if (moy_lua_update(RUN.L, dt, err, n) != 0) {
         return -1;
     }
     uint32_t t1 = moycore_run_now_us();
-    HOOK(frame_mid);
+    HOOK(frame_mid, pm);
     if (draw && moy_lua_draw(RUN.L, err, n) != 0) {
         return -1;
     }
     moycore_run_set_split(t1 - t0, draw ? moycore_run_now_us() - t1 : 0);
-    HOOK(frame_end, draw);
+    HOOK(frame_end, draw, pm);
     return 0;
 }
 
