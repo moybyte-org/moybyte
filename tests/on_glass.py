@@ -560,6 +560,9 @@ def loop_line_is_the_kernels(board):
     return line
 
 
+KSTOP_JITTER = 64
+
+
 def _kstop_after(line):
     """`KSTOP i/n after psram=FREE/LARGEST int=... dma=...` -> (i, free, largest)."""
     head, rest = line.split("KSTOP ", 1)[1].split(" ", 1)
@@ -570,11 +573,15 @@ def _kstop_after(line):
 def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N`: N soft resets of the VM with the kernel's drivers alive
     (docs/kernel_survival_2026-10.md section 7.5). With the VM down, PSRAM free
-    and its largest block are the same after every cycle: whatever a VM left
+    and its largest block hold flat across the cycles: whatever a VM left
     behind would compound into a boot that runs out (the Guition S3 stranded
     a cover's bytes and its decode scratch, 46,456 B a cycle, until the
-    teardown gave moy_alloc's registry back). The first cycle is the
-    baseline: it is the one that creates the kernel's loop task."""
+    teardown gave moy_alloc's registry back). The baseline is the SECOND
+    cycle: the first one's teardown still holds a 153,600 B buffer the
+    session before it left (every console, 2026-10-08), which the next VM
+    gives back. From there the largest block is the
+    same to the byte and free never falls more than KSTOP_JITTER below it (the
+    Guition S3 reads 8 B higher every fourth cycle)."""
     import time
     board.cmd("kstop %d" % n, wait_for="REMOTE kstop")
     after = []
@@ -584,9 +591,11 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
         if line is not None and " after " in line:
             after.append(_kstop_after(line))
     assert len(after) == n, "only %d of %d soft resets came back" % (len(after), n)
-    base = after[0][1:]
-    drift = [a for a in after if a[1:] != base]
-    assert not drift, "PSRAM (free, largest) after cycle 1 %s, then %s" % (base, drift)
+    free0, largest0 = after[1][1:]
+    drift = [a for a in after[1:]
+             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+    assert not drift, "PSRAM (free, largest) after cycle 2 %s, then %s" % (
+        (free0, largest0), drift)
     end = time.time() + 120.0
     while True:                            # the last VM up to its desk
         try:
