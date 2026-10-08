@@ -203,9 +203,9 @@ PYEOF
         "${USERMODS_DIR}/moy_spine"
 
   # Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2): the
-  # glass, input and the links. Each compiles to nothing until its pass gives
-  # it sources; they stage here now so no pass edits this list.
-  for m in moy_glass moy_input moy_net; do
+  # glass, input, the links and the kernel's frame (moy_kernel's portable
+  # half: the module `moy_loop`, whose driver tier the worker's frame steps).
+  for m in moy_glass moy_input moy_net moy_kernel; do
     cp -r "${REPO_ROOT}/native/${m}" "${USERMODS_DIR}/${m}"
   done
 

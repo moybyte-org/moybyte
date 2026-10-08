@@ -82,7 +82,11 @@ TF_CARD_SRAM = 756
 # And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
 # the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
 # of .bss by the object's size, 2026-10-08.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4
+# And the frame's (native/moy_kernel: the loop's, the reader's and the
+# ladder's statics and the VM-side stage table; the meters, the PERF window
+# and the line buffer are PSRAM), 432 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's dev image on a fresh boot.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 

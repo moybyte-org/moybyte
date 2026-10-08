@@ -956,10 +956,14 @@ VM is stopped (sprint 4) the VM task's stack returns, as the plan's §4.4 has
 it, and `moy_loop_task`'s stack is the cost in its place — smaller than the
 stack it replaces, so §6.1's "nothing net while stopped" holds with that task
 counted and is read as "no more than the loop task's stack net while
-stopped", measured at the gate. In the browser the worker calls
-`moy_loop_step` where it calls `step_frame_json` today; on the host
-`runtime/host_app.py` calls it through ctypes. Three tiers, one function, the
-plan's §4.2.
+stopped", measured at the gate. In the browser and on the host the
+frame is `runtime/host_api.py`'s `ConsoleDriver.frame`, under the worker's
+`step_frame_json` and `runtime/host_app.py`: the harness feeds the input and
+owns the clock, and each frame is one `moy_loop_step` of the loop's driver
+tier (`moy_loop.drive`: no stages but the clock, the console's three upcalls,
+an upcall's exception handed back to the harness) -- the module compiled into
+the browser's build, ctypes on CPython. Three tiers, one function, the plan's
+§4.2.
 
 **Upcalls are counted by class.** Console upcalls are the three draw-stack
 entries; app upcalls are an app's hooks; driver upcalls are a tier's harness

@@ -114,6 +114,7 @@ _SIGS = (
     ("moy_loop_host_log", [], ctypes.c_char_p),
     ("moy_loop_host_clear", [], None),
     ("moy_loop_host_note", [ctypes.c_char_p], None),
+    ("moy_loop_driver_step", [_U32], _I),
 )
 
 _LIB = [None]
@@ -151,10 +152,24 @@ def _report(exc, which):
     traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stdout)
 
 
+# The driver tier's pending exception: handed back to its harness by drive().
+_EXC = [None]
+_DRIVING = [False]
+
+
 def _dispatch(which, arg, line):
     fn = _UPS[which] if 0 <= which < 5 else None
     if fn is None:
         return _ABSENT
+    if _DRIVING[0]:
+        if _EXC[0] is not None:
+            return _ABSENT
+        try:
+            r = fn(arg / 1000000.0) if which == _UP_FRAME else fn()
+        except BaseException as exc:  # noqa: BLE001 -- the harness gets it back
+            _EXC[0] = exc
+            return _RAISED
+        return r if isinstance(r, int) and r > 0 else 0
     try:
         if which == _UP_FRAME:
             r = fn(arg / 1000000.0)
@@ -198,6 +213,27 @@ def register(handle_input, handle_pointer, frame, words=None, service=None):
 def unregister():
     _UPS[:] = [None] * 5
     _lib().moy_loop_set_registered(0)
+
+
+def drive(handle_input, handle_pointer, frame, dt):
+    """One frame of a harness that owns the clock and the input (the host's
+    and the browser's ConsoleDriver): the loop over no stages but the clock,
+    the three upcalls this harness's, and an exception one of them raised
+    raised here, as a direct call would."""
+    _UPS[:] = [handle_input, handle_pointer, frame, None, None]
+    _lib().moy_loop_set_upcall(_UP_CB)
+    _set_registered()
+    _EXC[0] = None
+    _DRIVING[0] = True
+    try:
+        r = _lib().moy_loop_driver_step(int(dt * 1000000 + 0.5) if dt > 0 else 0)
+    finally:
+        _DRIVING[0] = False
+    exc = _EXC[0]
+    if exc is not None:
+        _EXC[0] = None
+        raise exc
+    return r
 
 
 def step():

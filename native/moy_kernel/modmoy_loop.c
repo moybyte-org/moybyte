@@ -39,6 +39,11 @@
 #include "moy_loop.h"
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_loop_up[5]);
+// The driver tier hands an upcall's exception back to its harness: kept here
+// until the step returns, and every later upcall of that step skipped.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_loop_exc);
+
+static bool s_driving;
 
 #define UPS (MP_STATE_VM(moy_loop_up))
 
@@ -53,6 +58,7 @@ void moy_loop_host_feed(const uint8_t *bytes, size_t n) __attribute__((weak));
 const char *moy_loop_host_log(void) __attribute__((weak));
 void moy_loop_host_clear(void) __attribute__((weak));
 void moy_loop_host_note(const char *token) __attribute__((weak));
+int moy_loop_driver_step(uint32_t dt_us) __attribute__((weak));
 
 static void need_trace(void) {
     if (moy_loop_host_init == NULL) {
@@ -88,6 +94,9 @@ static int vm_up(int which, uint32_t arg, const char *line) {
     if (fn == MP_OBJ_NULL || fn == mp_const_none) {
         return MOY_UP_ABSENT;
     }
+    if (s_driving && MP_STATE_VM(moy_loop_exc) != MP_OBJ_NULL) {
+        return MOY_UP_ABSENT;
+    }
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t r;
@@ -115,6 +124,10 @@ static int vm_up(int which, uint32_t arg, const char *line) {
         return v < 0 ? 0 : v;
     }
     mp_obj_t exc = MP_OBJ_FROM_PTR(nlr.ret_val);
+    if (s_driving) {
+        MP_STATE_VM(moy_loop_exc) = exc;
+        return MOY_UP_RAISED;
+    }
     if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(mp_obj_get_type(exc)),
                                 MP_OBJ_FROM_PTR(&mp_type_KeyboardInterrupt))) {
         return MOY_UP_INTERRUPTED;
@@ -142,6 +155,7 @@ void moy_loop_vm_clear(void) {
     for (int i = 0; i < MOY_UP_COUNT; i++) {
         UPS[i] = MP_OBJ_NULL;
     }
+    MP_STATE_VM(moy_loop_exc) = MP_OBJ_NULL;
     moy_loop_set_registered(0);
 }
 
@@ -176,6 +190,36 @@ static mp_obj_t loop_unregister(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(loop_unregister_obj, loop_unregister);
+
+// drive(handle_input, handle_pointer, frame, dt): one frame of a harness that
+// owns the clock and the input (the host's and the browser's ConsoleDriver):
+// the loop over no stages but the clock, the three upcalls this harness's,
+// and an exception one of them raised raised here, as a direct call would.
+static mp_obj_t loop_drive(size_t n_args, const mp_obj_t *a) {
+    if (moy_loop_driver_step == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no driver tier in this image"));
+    }
+    for (int i = 0; i < 3; i++) {
+        UPS[i] = a[i];
+    }
+    UPS[MOY_UP_WORD] = MP_OBJ_NULL;
+    UPS[MOY_UP_SERVICE] = MP_OBJ_NULL;
+    moy_loop_set_upcall(vm_up);
+    set_registered();
+    mp_float_t dt = mp_obj_get_float(a[3]);
+    uint32_t us = dt > 0 ? (uint32_t)(dt * (mp_float_t)1000000 + (mp_float_t)0.5) : 0;
+    MP_STATE_VM(moy_loop_exc) = MP_OBJ_NULL;
+    s_driving = true;
+    int r = moy_loop_driver_step(us);
+    s_driving = false;
+    mp_obj_t exc = MP_STATE_VM(moy_loop_exc);
+    if (exc != MP_OBJ_NULL) {
+        MP_STATE_VM(moy_loop_exc) = MP_OBJ_NULL;
+        nlr_raise(exc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(loop_drive_obj, 4, 4, loop_drive);
 
 static mp_obj_t loop_step(void) {
     return MP_OBJ_NEW_SMALL_INT(moy_loop_step());
@@ -587,6 +631,7 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_register), MP_ROM_PTR(&loop_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_unregister), MP_ROM_PTR(&loop_unregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&loop_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_drive), MP_ROM_PTR(&loop_drive_obj) },
     { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&loop_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_upcalls), MP_ROM_PTR(&loop_upcalls_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick), MP_ROM_PTR(&loop_tick_obj) },

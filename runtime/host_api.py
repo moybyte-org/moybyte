@@ -13,6 +13,10 @@ portable Python: no pygame, no sockets, no threading (#151: the web runner
 freezes this module under MicroPython-WASM).
 """
 
+try:                                    # a VM: the kernel's frame loop
+    import moy_loop as _loop
+except ImportError:                     # CPython: its ctypes binding
+    from runtime import moy_loop as _loop
 try:                                    # staged/frozen flat namespace (web runner)
     from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
                           _decode_moyimg, make_api)
@@ -343,9 +347,13 @@ class ConsoleDriver:
         self._key_prev = nxt
         self.pointer.down = self._down
         self.pointer.click = self._click
-        self.ws.handle_input()
-        self.ws.handle_pointer()
-        self.ws.frame(dt)
+        # The frame is the kernel's (native/moy_kernel/moy_loop.c) on this
+        # tier too: one loop step over no stages but the clock, calling up
+        # into the console's three entries in its order. This harness owns the
+        # input (above) and the clock, so the frame keeps the dt it was given.
+        ws = self.ws
+        _loop.drive(ws.handle_input, ws.handle_pointer,
+                    lambda _dt: (ws.frame(dt), ws._frames_drawn)[1], dt)
         for name in self._pending:
             if name not in self._held_ext:     # never release an explicit hold()
                 self.input.set_held(name, False)

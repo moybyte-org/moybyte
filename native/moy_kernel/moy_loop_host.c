@@ -208,3 +208,43 @@ void moy_loop_host_clear(void) {
 void moy_loop_host_note(const char *token) {
     tok(token);
 }
+
+// ---- the driver tier ------------------------------------------------------------
+//
+// The host's and the browser's frame: their harness (runtime/host_api.py's
+// ConsoleDriver, under host_app and the browser's worker) feeds the input and
+// owns the clock, and each of its frames is one moy_loop_step over stages that
+// are all absent but the clock -- the order, the three console upcalls, the
+// ladder and the meters are the kernel's, as they are on a board.
+
+static uint64_t s_drv_us;
+
+static uint32_t d_ms(void) {
+    return (uint32_t)(s_drv_us / 1000u);
+}
+
+static uint32_t d_us(void) {
+    return (uint32_t)s_drv_us;
+}
+
+static const moy_loop_ops_t DRIVER_OPS = {
+    .ticks_ms = d_ms,
+    .ticks_us = d_us,
+};
+
+bool moy_loop_driver_on(void) {
+    return moy_loop_ops() == &DRIVER_OPS;
+}
+
+void moy_loop_driver_init(int fps_cap) {
+    moy_loop_init(&DRIVER_OPS, fps_cap);
+    moy_idle_init(moy_loop_idle(), false, d_ms());
+}
+
+int moy_loop_driver_step(uint32_t dt_us) {
+    if (!moy_loop_driver_on()) {
+        moy_loop_driver_init(60);
+    }
+    s_drv_us += dt_us;
+    return moy_loop_step();
+}

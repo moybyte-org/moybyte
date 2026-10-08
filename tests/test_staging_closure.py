@@ -145,7 +145,7 @@ NATIVE = {
     "zero": {"moy_web", "moy_index", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
-            "moy_input", "moy_net"},
+            "moy_input", "moy_net", "moy_kernel"},
 }
 
 # A usermod that registers more than its own name: moy_kernel is the kernel's

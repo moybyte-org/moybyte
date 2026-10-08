@@ -29,4 +29,10 @@ void moy_loop_host_clear(void);
 // A token of the driver's own, in order with the loop's.
 void moy_loop_host_note(const char *token);
 
+// The driver tier: a harness that owns the clock and the input steps the
+// loop once a frame over no stages but the clock, advancing it by dt.
+void moy_loop_driver_init(int fps_cap);
+bool moy_loop_driver_on(void);
+int moy_loop_driver_step(uint32_t dt_us);
+
 #endif // MOY_LOOP_HOST_H
