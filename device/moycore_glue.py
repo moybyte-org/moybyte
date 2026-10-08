@@ -58,12 +58,12 @@ try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                          LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
                          snap_slots, audio_ops, snap_shared, sync_view,
-                         drain_audio)
+                         drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE,
                                  install_handles, snap_slots, audio_ops,
-                                 snap_shared, sync_view, drain_audio)
+                                 snap_shared, sync_view, drain_audio, cfg_blob)
 
 try:
     from moy_input import pointer_state
@@ -195,7 +195,7 @@ class MoycoreRun:
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
-        self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
+        self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
 
         pmem = getattr(ws, "pmem", None)
@@ -223,7 +223,7 @@ class MoycoreRun:
             except Exception:  # noqa: BLE001 -- no table: libmoy uses the spec palette
                 wire = None
 
-        cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
         # The PICO-8 machine's memory (moy-spec libmoy moy_p8.c), from THIS
         # heap and handed over like the framebuffer -- not from the ESP heap,
         # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
@@ -858,7 +858,7 @@ class WasmRun(MoycoreRun):
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
-        self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
+        self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
         pmem = getattr(ws, "pmem", None)
         cells = getattr(pmem, "cells", None) if pmem is not None else None
@@ -870,7 +870,7 @@ class WasmRun(MoycoreRun):
         if wire is None:
             wire = device_canvas._PAL565_WIRE_BUF
         swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
-        cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
         self._layers = self._images = None
         _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,

@@ -159,6 +159,27 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms):
         s[idx[7]] = since_ms(start)
 
 
+def cfg_blob(cfg):
+    """A config dict as the "key\\0value\\0" table the cart's cfg() reads
+    (native/moycore/moycore_run.c): a string without its quotes, a boolean as
+    1/0, a number as config.json spells it; a list, a dict or None is no
+    value. One table, built here for every tier."""
+    out = bytearray()
+    for k, v in sorted((cfg or {}).items()):
+        if isinstance(v, bool):
+            text = "1" if v else "0"
+        elif isinstance(v, int):
+            text = "%d" % v
+        elif isinstance(v, float):
+            text = "%.7g" % v
+        elif isinstance(v, str):
+            text = v
+        else:
+            continue                   # a list/dict/None is not a value
+        out += str(k).encode() + b"\0" + text.encode() + b"\0"
+    return bytes(out)
+
+
 def sync_view(ws, view, last):
     """Apply the cart's view() to the console; returns the view now in force.
 

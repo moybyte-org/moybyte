@@ -39,6 +39,7 @@ import ctypes
 import os
 
 from . import native_build
+from .lua_ext import cfg_blob
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
@@ -91,7 +92,7 @@ def build(verbose=False):
     lua = _lua_names()
     if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
         return None
-    names = (list(_RASTER) + ["moy_lua.c", "moy_p8.c", "moyhost_console.h",
+    names = (list(_RASTER) + ["moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c",
                                "moycore_layers.h"] + lua)
     return native_build.build(
         "moyhost_lua", _SHIM, names, _CACHE, cflags=_CFLAGS,
@@ -154,27 +155,6 @@ def _lib():
             d.hl_free.argtypes = [_P]
             _LIB[0] = d
     return _LIB[0] or None
-
-
-def cfg_blob(cfg):
-    """A config dict as the "key\\0value\\0" table moyhost_console.h's h_cfg
-    reads: a string without its quotes, a boolean as 1/0, a number as
-    config.json spells it -- modmoycore.c's h_cfg rules, so a cart reads the
-    same text on the host as on a board."""
-    out = bytearray()
-    for k, v in sorted((cfg or {}).items()):
-        if isinstance(v, bool):
-            text = "1" if v else "0"
-        elif isinstance(v, int):
-            text = "%d" % v
-        elif isinstance(v, float):
-            text = "%.7g" % v
-        elif isinstance(v, str):
-            text = v
-        else:
-            continue                   # a list/dict/None is not a value
-        out += str(k).encode() + b"\0" + text.encode() + b"\0"
-    return bytes(out)
 
 
 SNAP_LEN = 14

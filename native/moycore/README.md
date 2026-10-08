@@ -7,14 +7,19 @@ frame instead of hundreds.
 **The engine is not written here.** `libmoy/moy_lua.c` is moy-spec's own Lua
 binding — all 38 SPEC.md verbs as C functions against a `moy_console` — and
 `moy.h` exports `moy_lua_open`/`init`/`update`/`draw`. This module is the HOST
-half: what a *moybyte* console is made of.
+half: what a *moybyte* console is made of. The console itself -- the pieces
+below but the canvas, with libmoy's host callbacks -- is `moycore_run.c`,
+which includes nothing of a VM: `modmoycore.c` binds it to buffers Python
+owns, and the host's two ctypes shims (`runtime/moyhost_lua.c`,
+`runtime/moyhost_wasm.c`) run the same file.
 
 | piece | how |
 |---|---|
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |
 | input, time, pointer | a SNAPSHOT array the frame loop refreshes before the tick — `btn()` sixty times a frame costs zero crossings |
-| audio | a command QUEUE the host drains after the tick, order preserved |
+| audio | a command QUEUE (int32) the host drains after the tick, order preserved |
 | pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
+| config | a C table of `key\0value\0` pairs COPIED in at `run_begin` (`lua_ext.cfg_blob`), so a compiled cart's session reads it on its own thread with no VM asked |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 
 ## The compiled cart (`run_begin(..., vm=False)` + `wasm_open`)

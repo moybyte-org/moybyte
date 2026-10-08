@@ -2,7 +2,7 @@
 
 The host runs a `"runtime": "wasm"` cart through the same C the boards run:
 libmoy's wasm binding (`native/moycore/libmoy/moy_wasm.c`, vendored) over the
-console the Lua shim uses too (`runtime/moyhost_console.h`), and WAMR -- the
+console the Lua shim and the boards use too (`native/moycore/moycore_run.c`), and WAMR -- the
 fork the boards vendor, at the commit `native/moy_wasm/wamr_pin.h` names, built
 for Linux. There is no wasmtime tier and no second engine; this is
 `lua_binding.py`'s twin.
@@ -36,7 +36,7 @@ import subprocess
 import sys
 
 from . import native_build
-from .lua_binding import cfg_blob
+from .lua_ext import cfg_blob
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
@@ -191,7 +191,7 @@ def build(verbose=False):
     if got is None:
         return None
     inc, lib = got
-    names = list(_RASTER) + ["moy_wasm.c", "moy_wasm.h", "moyhost_console.h",
+    names = list(_RASTER) + ["moy_wasm.c", "moy_wasm.h", "moycore_run.h", "moycore_run.c",
                              "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h"]
     cflags = native_build.BASE_CFLAGS + [
         "-DMOY_WASM=1", "-DMOY_PIXEL_RGB565=1", "-isystem", inc,
@@ -199,7 +199,8 @@ def build(verbose=False):
         "-DMOYHOST_WAMR_PIN=%s" % pin()]
     path = native_build.build(
         "moyhost_wasm", _SHIM, names, _CACHE, cflags=cflags,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE, _ENGINE_DIR, _AUDIO_DIR),
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE, _ENGINE_DIR, _AUDIO_DIR,
+                    os.path.dirname(_BINDING_DIR)),
         link_flags=[lib, "-lm", "-lpthread", "-ldl"], verbose=verbose)
     if path is None:
         _WHY[0] = "no C compiler"

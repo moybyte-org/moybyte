@@ -22,6 +22,7 @@
 MOYCORE_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD += $(MOYCORE_MOD_DIR)/modmoycore.c
+SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/moycore_run.c
 SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy_binding.c
 SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy_p8_binding.c
 # The wasm import table: compiled for a JavaScript embedder in the web runner,

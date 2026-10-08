@@ -56,6 +56,9 @@ from tools.wasm_module import format_version
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
 C_SRC = ROOT / "native" / "moycore" / "modmoycore.c"
+# The console half's ABI -- the snapshot's slots and the audio queue's ops --
+# lives in moycore_run.h, the one copy every tier compiles.
+RUN_H = ROOT / "native" / "moycore" / "moycore_run.h"
 # The second ABI this file's parser is pointed at: the native draw gates and
 # the shape kernel, whose enums device/device_canvas.py mirrors by hand.
 GFX_SRC = ROOT / "native" / "moy_gfx" / "modmoy_gfx.c"
@@ -93,9 +96,9 @@ def _c_enum(first, path=None):
     raise AssertionError("no enum containing %s in %s" % (first, path or C_SRC))
 
 
-def _c_define(name):
-    m = re.search(r"^#define\s+%s\s+(\d+)" % name, _c_text(), flags=re.M)
-    assert m, "%s is not #defined in %s" % (name, C_SRC)
+def _c_define(name, path=None):
+    m = re.search(r"^#define\s+%s\s+(\d+)" % name, _c_text(path), flags=re.M)
+    assert m, "%s is not #defined in %s" % (name, path or C_SRC)
     return int(m.group(1))
 
 
@@ -124,10 +127,10 @@ def _c_run_begin_fields():
     return tuple(p.strip() for p in m.group(1).replace("//", " ").split(","))
 
 
-C_CONSTS = dict(_c_enum("SNAP_BTN"))
-C_CONSTS.update(_c_enum("AQ_SFX"))
-C_CONSTS["AQ_SLOTS"] = _c_define("AQ_SLOTS")
-C_CONSTS["AQ_MAX"] = _c_define("AQ_MAX")
+C_CONSTS = dict(_c_enum("SNAP_BTN", RUN_H))
+C_CONSTS.update(_c_enum("AQ_SFX", RUN_H))
+C_CONSTS["AQ_SLOTS"] = _c_define("AQ_SLOTS", RUN_H)
+C_CONSTS["AQ_MAX"] = _c_define("AQ_MAX", RUN_H)
 C_NAMES = _c_module_names()
 RB_ARITY = _c_run_begin_arity()
 RB_FIELDS = _c_run_begin_fields()
@@ -721,9 +724,12 @@ def test_a_workstation_with_no_project_at_all_still_starts(w):
 
 
 def test_the_cart_config_crosses_from_the_namespace(w):
+    """As the C table the cart's cfg() reads: copied in, so nothing of the
+    VM's is held by the run."""
+    from runtime.lua_ext import cfg_blob
     ns = make_ns()
     w.run(ns=ns)
-    assert w.core.rb("cfg") is ns["_moy_cfg"]
+    assert w.core.rb("cfg") == (cfg_blob(ns["_moy_cfg"]) or None)
 
 
 def test_the_snapshot_array_is_sized_from_the_c_layout(w):
@@ -736,10 +742,10 @@ def test_the_snapshot_array_is_sized_from_the_c_layout(w):
 
 def test_the_audio_queue_mirrors_the_c_cap_rather_than_merely_being_big(w):
     """`AUDIO_MAX` is a copy of the C's `AQ_MAX`; the queue is one header slot
-    plus `AQ_SLOTS` int16 per command."""
+    plus `AQ_SLOTS` int32 per command."""
     run = w.run()
     assert run.AUDIO_MAX == C_CONSTS["AQ_MAX"]
-    assert run.aq.typecode == "h"
+    assert run.aq.typecode == "i"
     assert len(run.aq) == 1 + C_CONSTS["AQ_SLOTS"] * C_CONSTS["AQ_MAX"]
     assert len(run.aq) >= 1 + C_CONSTS["AQ_SLOTS"]     # the C's own floor
     assert w.core.rb("audio_q") is run.aq

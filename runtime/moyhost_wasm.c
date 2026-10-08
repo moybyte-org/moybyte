@@ -6,8 +6,8 @@
  *
  * A "runtime": "wasm" cart on the host runs through the SAME C the boards run:
  * libmoy's wasm binding (native/moycore/libmoy/moy_wasm.c, the import table as
- * WAMR native symbols) over the console in moyhost_console.h -- the host half
- * moyhost_lua.c uses too -- and WAMR itself, built for Linux from the fork the
+ * WAMR native symbols) over the console in native/moycore/moycore_run.c --
+ * the one moyhost_lua.c and the boards use too -- and WAMR itself, built for Linux from the fork the
  * boards vendor, at the commit native/moy_wasm/wamr_pin.h names
  * (runtime/wasm_binding.py fetches and builds it). There is no second engine:
  * a host and a device that disagree about what a verb does is the disease the
@@ -36,7 +36,11 @@
 #include "moy_audio.h"
 #include "moy_wasm.h"
 #include "moy_wasm_footprint.h"
-#include "moyhost_console.h"
+#include "moycore_run.h"
+
+#ifndef MOY_PIXEL_RGB565
+#error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
+#endif
 
 #ifndef MOY_WASM
 #error "moyhost_wasm.c is the wasm build -- compile with -DMOY_WASM=1"
@@ -47,7 +51,7 @@
 #define HW_PATH_MAX 1024
 
 typedef struct {
-    hc_console  hc;          /* the console, shared with moyhost_lua.c */
+    moycore_run_t  hc;          /* the console, shared with moyhost_lua.c */
     char        dir[HW_PATH_MAX];   /* the cart's folder: `read`'s only root */
     uint8_t    *bytes;       /* the module file, held while it is loaded */
     wasm_module_t module;
@@ -238,31 +242,31 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     if (!r) return NULL;
     moy_canvas_init(&r->hc.canvas, (moy_pixel *)pix, w, h);
     if (wire) moy_canvas_wire(&r->hc.canvas, wire);
-    hc_open(&r->hc, snap, aq, aq_cap);
+    moycore_run_open(&r->hc, snap, aq, aq_cap);
     r->hc.con.host.layer_new = hw_layer_new;
     r->hc.con.host.layer_free = hw_layer_free;
-    r->hc.con.rng = (uint32_t)hc_now_ms() | 1u;
+    r->hc.con.rng = (uint32_t)moycore_run_now_ms() | 1u;
     r->w.read = hw_read;
     r->w.read_user = r;
     r->w.wire_swapped = wire_swapped ? 1 : 0;
     moy_stream_init(&r->pcm, r->pcm_ring, MOY_WASM_SND_DEPTH, MOY_WASM_SND_RATE);
     r->w.snd = hw_snd;
     r->w.snd_user = r;
-    HC = &r->hc;
+    moycore_run_cur = &r->hc;
     return r;
 }
 
 void hw_set_sheet(host_wasm *r, uint8_t *pix, int nbytes)
-{ hc_set_sheet(&r->hc, pix, nbytes); }
+{ moycore_run_set_sheet(&r->hc, pix, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hw_set_map(host_wasm *r, uint8_t *cells, int nbytes, int w, int h)
-{ hc_set_map(&r->hc, cells, nbytes, w, h); }
+{ moycore_run_set_map(&r->hc, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
 
 void hw_set_flags(host_wasm *r, const uint8_t *flags, int nbytes)
-{ hc_set_flags(&r->hc, flags, nbytes); }
+{ moycore_run_set_flags(&r->hc, flags, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hw_set_cfg(host_wasm *r, const char *blob, int len)
-{ hc_set_cfg(&r->hc, blob, len); }
+{ moycore_run_set_cfg(&r->hc, blob, len > 0 ? (size_t)len : 0); }
 
 /* Load the cart's module from `dir`/`main`, check it against moy-spec SPEC.md 16's
  * shape and the manifest's `pages` BEFORE its memory exists, instantiate it
@@ -323,7 +327,7 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         put_err(err, errlen, "exec env", NULL);
         return 1;
     }
-    HC = &r->hc;
+    moycore_run_cur = &r->hc;
     if (moy_wasm_open(&r->w, &r->hc.con, r->env) != 0) {
         put_err(err, errlen, "refused", "a hook is missing");
         return 1;
@@ -349,8 +353,8 @@ int hw_init(host_wasm *r, char *err, int errlen)
         put_err(err, errlen, "the cart is not running", NULL);
         return 1;
     }
-    HC = &r->hc;
-    g_tick_ms = hc_now_ms();
+    moycore_run_cur = &r->hc;
+    moycore_run_tick_begin();
     if (moy_wasm_init(&r->w, err, (size_t)errlen)) return trapped(r);
     return 0;
 }
@@ -363,8 +367,8 @@ int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen)
         put_err(err, errlen, "the cart is not running", NULL);
         return 1;
     }
-    HC = &r->hc;
-    g_tick_ms = hc_now_ms();              /* h_time counts from here */
+    moycore_run_cur = &r->hc;
+    moycore_run_tick_begin();              /* h_time counts from here */
     moy_reset_state(&r->hc.canvas);
     if (moy_wasm_update(&r->w, dt, err, (size_t)errlen)) return trapped(r);
     if (draw && !r->w.quitting && moy_wasm_draw(&r->w, err, (size_t)errlen))
@@ -393,13 +397,13 @@ void hw_retarget(host_wasm *r, void *pix)
 { r->hc.canvas.pix = (moy_pixel *)pix; }
 
 int hw_pmem_image(host_wasm *r, int32_t *out, int n)
-{ return hc_pmem_image(&r->hc, out, n); }
+{ return moycore_run_pmem_image(&r->hc, out, n); }
 
 void hw_pmem_load(host_wasm *r, const int32_t *in, int n)
-{ hc_pmem_load(&r->hc, in, n); }
+{ moycore_run_pmem_load(&r->hc, in, n); }
 
 int hw_get_view(host_wasm *r, int *w, int *h)
-{ return hc_get_view(&r->hc, w, h); }
+{ return moycore_run_view(&r->hc, w, h); }
 
 void hw_free(host_wasm *r)
 {
@@ -410,6 +414,6 @@ void hw_free(host_wasm *r)
     if (r->module) wasm_runtime_unload(r->module);
     free(r->bytes);
     free(r->writable);
-    hc_close(&r->hc);
+    moycore_run_close(&r->hc);
     free(r);
 }

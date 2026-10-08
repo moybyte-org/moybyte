@@ -965,7 +965,7 @@ def test_moycore_hardware_learned_constraints_pinned():
     #    fixed constant, so leaving it zero gave every run of every cart the
     #    same sequence -- invisible under the old runtime, whose prelude
     #    shadowed rnd with Lua's per-state math.random.
-    assert "RUN.con.rng    = (uint32_t)mp_hal_ticks_us()" in mod
+    assert "RUN.c.con.rng    = (uint32_t)mp_hal_ticks_us()" in mod
     # 7) the p8 shim's masked map walk came across with the cart (#66 M0):
     #    4.5ms of celeste's S3 render, and the shim nil-guards the names, so
     #    losing them costs performance silently.

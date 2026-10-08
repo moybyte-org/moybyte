@@ -11,9 +11,9 @@
  * the same vendored Lua, built the same way.
  *
  * The console and its snapshot-in/queue-out host callbacks are
- * moyhost_console.h's -- modmoycore.c's host half with the MicroPython
- * removed, one copy shared with the wasm shim (moyhost_wasm.c), because a
- * host and a device that disagree about what a verb does is the disease. What
+ * native/moycore/moycore_run.c's -- the one copy the boards' modmoycore.c
+ * and the wasm shim (moyhost_wasm.c) run too, because a host and a device
+ * that disagree about what a verb does is the disease. What
  * differs from the board is only how the host talks to it: plain C
  * signatures ctypes can call, and buffers the caller owns.
  *
@@ -23,7 +23,7 @@
  * computes it over two, and the two cannot share a library -- so a shim that
  * was compiled the other way would write half-width rows of raw indices into a
  * 565 framebuffer and there is nothing at runtime that would say so. The #error
- * in moyhost_console.h is that check, moved to compile time.
+ * below is that check, moved to compile time.
  *
  * A canvas that is STILL INDEXED is bridged rather than refused (`indexed=1`):
  * libmoy draws into a private 565 shadow whose wire table is the IDENTITY, so a
@@ -42,11 +42,15 @@
 #include "lauxlib.h"
 
 #include "moy.h"
-#include "moyhost_console.h"
+#include "moycore_run.h"
+
+#ifndef MOY_PIXEL_RGB565
+#error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
+#endif
 #include "moycore_layers.h"
 
 typedef struct {
-    hc_console  hc;          /* the console, shared with moyhost_wasm.c */
+    moycore_run_t  hc;          /* the console, shared with moyhost_wasm.c */
     lua_State  *L;
     int         has_sheet, has_map;
     moy_p8      p8;          /* the PICO-8 machine (libmoy moy_p8.c), opened
@@ -208,13 +212,13 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, int indexed,
         moy_canvas_init(&r->hc.canvas, (moy_pixel *)pix, w, h);
         if (wire) moy_canvas_wire(&r->hc.canvas, wire);
     }
-    hc_open(&r->hc, snap, aq, aq_cap);
+    moycore_run_open(&r->hc, snap, aq, aq_cap);
     r->L = luaL_newstate();
     if (!r->L) { free(r->shadow); free(r); return NULL; }
     CUR = r;
-    HC = &r->hc;
+    moycore_run_cur = &r->hc;
     if (moy_lua_open(r->L, &r->hc.con) != 0) {
-        lua_close(r->L); free(r->shadow); free(r); CUR = NULL; HC = NULL; return NULL;
+        lua_close(r->L); free(r->shadow); free(r); CUR = NULL; moycore_run_cur = NULL; return NULL;
     }
     moycore_layers_open(r->L, &r->layers, &r->hc.con);
     return r;
@@ -230,22 +234,22 @@ int hl_layer_bind(host_lua *r, void *pix, int nbytes, int w, int h)
     return moycore_layers_park(&r->layers, pix, (size_t)nbytes, w, h);
 }
 
-/* The sheet, flags and map: moyhost_console.h's, which says why each is
+/* The sheet, flags and map: moycore_run.h's, which says why each is
  * checked or copied. Call hl_set_flags BEFORE hl_load, which is where the p8
  * machine copies the table into 0x3000. */
 void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
-{ hc_set_sheet(&r->hc, pix, nbytes); }
+{ moycore_run_set_sheet(&r->hc, pix, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hl_set_flags(host_lua *r, const uint8_t *flags, int nbytes)
-{ hc_set_flags(&r->hc, flags, nbytes); }
+{ moycore_run_set_flags(&r->hc, flags, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)
-{ hc_set_map(&r->hc, cells, nbytes, w, h); }
+{ moycore_run_set_map(&r->hc, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
 
 /* The cart's config.json as "key\0value\0" pairs (lua_binding.cfg_blob), so
  * `cfg("speed", 3)` answers here what it answers on a board. */
 void hl_set_cfg(host_lua *r, const char *blob, int len)
-{ hc_set_cfg(&r->hc, blob, len); }
+{ moycore_run_set_cfg(&r->hc, blob, len > 0 ? (size_t)len : 0); }
 
 /* Point the run at another buffer of the SAME size -- a compositor that
  * ping-pongs. The bridged case swaps the index buffer and keeps the shadow,
@@ -263,7 +267,7 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
     CUR = r;
-    HC = &r->hc;
+    moycore_run_cur = &r->hc;
     if (luaL_loadbufferx(r->L, src, (size_t)len, name, "t") != LUA_OK
         || lua_pcall(r->L, 0, 0, 0) != LUA_OK) {
         const char *m = lua_tostring(r->L, -1);
@@ -307,7 +311,7 @@ int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,
         if (rc) break;
     }
     if (rc == 0) {
-        g_tick_ms = hc_now_ms();          /* _init may call time(), below */
+        moycore_run_tick_begin();          /* _init may call time(), below */
         rc = moy_lua_init(r->L, err, (size_t)errlen);
     }
     hl_narrow(r);
@@ -320,8 +324,8 @@ int hl_tick(host_lua *r, float dt, int draw, char *err, int errlen)
 {
     int rc;
     CUR = r;
-    HC = &r->hc;
-    g_tick_ms = hc_now_ms();              /* h_time counts from here */
+    moycore_run_cur = &r->hc;
+    moycore_run_tick_begin();              /* h_time counts from here */
     moy_reset_state(&r->hc.canvas);
     hl_widen(r);
     /* ONE exit, so a cart that draws and THEN errors still lands its pixels --
@@ -333,10 +337,10 @@ int hl_tick(host_lua *r, float dt, int draw, char *err, int errlen)
 }
 
 int hl_pmem_image(host_lua *r, int32_t *out, int n)
-{ return hc_pmem_image(&r->hc, out, n); }
+{ return moycore_run_pmem_image(&r->hc, out, n); }
 
 void hl_pmem_load(host_lua *r, const int32_t *in, int n)
-{ hc_pmem_load(&r->hc, in, n); }
+{ moycore_run_pmem_load(&r->hc, in, n); }
 
 /* Read a cart global as a double; returns 0 when absent or not a number, 1
  * otherwise. Numbers only: the parity suites compare counters and positions,
@@ -387,7 +391,7 @@ int hl_heap_peak_bytes(host_lua *r)
 
 /* What the cart last declared with view(), or 0 when it has not. */
 int hl_get_view(host_lua *r, int *w, int *h)
-{ return hc_get_view(&r->hc, w, h); }
+{ return moycore_run_view(&r->hc, w, h); }
 
 void hl_free(host_lua *r)
 {
@@ -395,7 +399,7 @@ void hl_free(host_lua *r)
     if (!r) return;
     if (r->L) lua_close(r->L);
     if (CUR == r) CUR = NULL;
-    hc_close(&r->hc);
+    moycore_run_close(&r->hc);
     free(r->shadow);
     free(r);
 }

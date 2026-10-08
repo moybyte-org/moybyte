@@ -143,6 +143,9 @@ NOT_OURS = (
     # native/moy_play/moy_tick.c took it. The kernel plans name it to say what
     # crossed.
     "runtime/tick_model.py",
+    # ...and the host's copy of the console half, which became
+    # native/moycore/moycore_run.c, the one the boards run too.
+    "runtime/moyhost_console.h",
 )
 
 

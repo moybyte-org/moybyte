@@ -51,7 +51,7 @@ from array import array
 W, H = 96, 64
 fb = bytearray(W * H * 2)
 snap = array("i", bytearray(4 * moycore.SNAP_LEN))
-aq = array("h", bytearray(2 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
+aq = array("i", bytearray(4 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
 pm = array("i", bytearray(4 * 256))
 sheet = bytearray(128 * 256)
 for i in range(len(sheet)):
@@ -73,7 +73,7 @@ function _draw()
 end
 """
 
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, {"k": "v"}, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, b"k\0v\0", None, True)
 print("START", moycore.load(((SRC, "@cart"),)))
 for f in range(4):
     snap[moycore.SNAP_TIME_MS] = f * 32
@@ -553,8 +553,9 @@ CFG = ("function _update(dt)\n"
        "  M = cfg('missing', 42)\n"
        "end\n"
        "function _draw() end\n")
+from lua_ext import cfg_blob
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None,
-                  {"n": 6, "f": 1.5, "s": "hello", "b": True}, None, True)
+                  cfg_blob({"n": 6, "f": 1.5, "s": "hello", "b": True}), None, True)
 print("CFGSTART", moycore.load(((CFG, "@cfg"),)))
 print("CFGTICK", moycore.tick(0.03125))
 print("CFGN", moycore.get_global("N"), moycore.get_global("T"))
@@ -578,7 +579,7 @@ from array import array
 W, H = 32, 32
 fb = bytearray(W * H * 2)
 snap = array("i", bytearray(4 * moycore.SNAP_LEN))
-aq = array("h", bytearray(2 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
+aq = array("i", bytearray(4 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
 BIN = "\x1bLua\x54\x00 not a real chunk"
 
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)

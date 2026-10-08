@@ -97,7 +97,7 @@ from array import array
 W, H = 64, 48
 fb = bytearray(W * H * 2)
 snap = array("i", bytearray(4 * moycore.SNAP_LEN))
-aq = array("h", bytearray(2 * (1 + 4 * 32)))
+aq = array("i", bytearray(4 * (1 + 4 * 32)))
 
 
 def begin():

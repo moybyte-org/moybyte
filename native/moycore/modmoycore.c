@@ -22,6 +22,10 @@
 //     wire table, explicitly so the device's byte order stays out of the cart
 //     contract -- so the cart draws straight into the buffer the compositor is
 //     about to present.
+// The console itself -- the snapshot, the queue, pmem, the config table and
+// the tile flags, with libmoy's host callbacks -- is moycore_run.c, which no
+// VM touches; this file binds it to the buffers Python hands run_begin.
+//
 //   * Input, time and the pointer arrive through a SNAPSHOT the frame loop
 //     refreshes before the tick, not through callbacks into Python. A cart
 //     polling btn() 60 times a frame must not cost 60 crossings.
@@ -45,7 +49,7 @@
 // deletion commit records what that cost).
 
 #include <stdint.h>
-#include <stdio.h>          // snprintf, for h_cfg's numeric config values
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,6 +67,7 @@
 
 #include "moy.h"
 #include "moycore_layers.h"
+#include "moycore_run.h"
 #include "../moy_kernel/moy_loop.h"     // the crossings, counted by class
 
 // The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
@@ -170,240 +175,18 @@ static inline void census_sub(const void *p, size_t n)
     census_sub_region(mc_region(p), n);
 }
 
-// The snapshot the host refreshes before every tick. Plain int32 slots in a
-// buffer Python owns, so a cart's btn()/time()/touch() are array reads on this
-// side of the wall and one array write on the other.
-enum {
-    SNAP_BTN = 0,        // held bitmask, player 0 (moy_button bit positions)
-    SNAP_BTNP,           // pressed-this-tick bitmask, player 0
-    SNAP_BTN_P1,         // ...and player 1, for the two-player forms
-    SNAP_BTNP_P1,
-    SNAP_PLAYERS,        // always >= 1
-    SNAP_TIME_MS,        // since the cart started
-    SNAP_TOUCH_X,
-    SNAP_TOUCH_Y,
-    SNAP_TOUCH_DOWN,     // 0 = no pointer at all (touch() reads nil)
-    SNAP_TOUCH_MS,       // how long the current press has lasted
-    SNAP_KEY,            // last typed code, or 0
-    SNAP_KEY_DOWN,       // bitmap-free: the code currently held, or 0
-    SNAP_TEXTMODE,       // written BY the cart (textmode)
-    SNAP_QUIT,           // written BY the cart (quit)
-    SNAP_LEN,
-};
-
-// The audio queue. One int16 op code plus three int16 args, appended by the
-// cart and drained by the host after the tick. Deliberately fixed and small: a
-// frame that asks for more sound than this is not a frame anybody wanted.
-enum { AQ_SFX = 0, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME };
-#define AQ_SLOTS 4
-#define AQ_MAX   32
-
+// The console the cart runs against -- its snapshot in, its audio queue out,
+// pmem, the config and the tile flags -- is moycore_run.c's, the one copy the
+// host shims run too. This file binds it to buffers Python owns.
 typedef struct {
     lua_State  *L;               // the cart's VM; NULL for a compiled cart
     int         wasm;            // a compiled cart's session is open
-    moy_console con;
-    moy_canvas  canvas;
-    moy_sheet   sheet;
-    moy_map     map;
-    int32_t    *snap;            // Python-owned array("i"), SNAP_LEN entries
-    int32_t     pmem[256];
-    int         pmem_dirty;
-    int16_t    *aq;              // Python-owned array("h"): [n, (op,a,b,c)*]
-    size_t      aq_cap;
-    mp_obj_t    cfg;             // the cart's config dict, or MP_OBJ_NULL
+    moycore_run_t c;             // the console (moycore_run.h)
     moycore_layers layers;       // the cart's layers' canvases (moycore_layers.h)
     int         open;
 } moycore_run;
 
 static moycore_run RUN;
-
-// -- the host callbacks ------------------------------------------------------
-// Every one of these is a read or a write against the snapshot/queue above.
-// None of them re-enters Python: that is the entire point of the module.
-
-static int h_btn(void *user, moy_button b, int player)
-{
-    (void)user;
-    if (!RUN.snap) return 0;
-    int32_t mask = RUN.snap[player > 0 ? SNAP_BTN_P1 : SNAP_BTN];
-    return (mask >> (int)b) & 1;
-}
-
-static int h_btnp(void *user, moy_button b, int player)
-{
-    (void)user;
-    if (!RUN.snap) return 0;
-    int32_t mask = RUN.snap[player > 0 ? SNAP_BTNP_P1 : SNAP_BTNP];
-    return (mask >> (int)b) & 1;
-}
-
-static int h_players(void *user)
-{
-    (void)user;
-    int n = RUN.snap ? (int)RUN.snap[SNAP_PLAYERS] : 1;
-    return n < 1 ? 1 : n;
-}
-
-// The frame's base time, stamped when the tick begins. See h_time_ms.
-static uint32_t g_tick_ms;
-
-// time() -- the snapshot's base PLUS the milliseconds elapsed inside this tick.
-//
-// The base alone was the whole answer once, and it was wrong in a way no test
-// could see: input is deliberately FROZEN for a frame (a cart polling btn() 60
-// times must get one consistent answer), and time got bundled in with it. But a
-// frozen clock is not a clock. Anything that measures its own work inside a
-// frame reads zero, forever.
-//
-// Bench Lua is exactly that program: it grows a batch until the batch costs at
-// least TARGET_MS, measured with time(). Against a frozen clock the cost is
-// always 0, so it doubles the batch every frame and never stops -- on glass, a
-// purple screen and "cls k=32768" climbing. The cart was fine.
-//
-// The base still comes from the host, so the console keeps authority over what
-// "since the cart started" means (and over anything that would reset it); C
-// only adds the part the host cannot see. No crossing either way -- this is a
-// hardware counter read.
-static uint32_t h_time_ms(void *user)
-{
-    uint32_t base;
-    (void)user;
-    base = RUN.snap ? (uint32_t)RUN.snap[SNAP_TIME_MS] : 0;
-    return base + ((uint32_t)mp_hal_ticks_ms() - g_tick_ms);
-}
-
-static int32_t h_pmem_get(void *user, int slot)
-{
-    (void)user;
-    if (slot < 0 || slot > 255) return 0;
-    return RUN.pmem[slot];
-}
-
-static void h_pmem_set(void *user, int slot, int32_t value)
-{
-    (void)user;
-    if (slot < 0 || slot > 255) return;
-    if (RUN.pmem[slot] != value) {
-        RUN.pmem[slot] = value;
-        RUN.pmem_dirty = 1;
-    }
-}
-
-static void aq_push(int op, int a, int b, int c)
-{
-    if (!RUN.aq || RUN.aq_cap < 1 + AQ_SLOTS) return;
-    int n = RUN.aq[0];
-    if (n < 0) n = 0;
-    if ((size_t)(1 + (n + 1) * AQ_SLOTS) > RUN.aq_cap || n >= AQ_MAX) return;
-    int16_t *p = RUN.aq + 1 + n * AQ_SLOTS;
-    p[0] = (int16_t)op; p[1] = (int16_t)a; p[2] = (int16_t)b; p[3] = (int16_t)c;
-    RUN.aq[0] = (int16_t)(n + 1);
-}
-
-static void h_sfx(void *user, int n, int chan) { (void)user; aq_push(AQ_SFX, n, chan, 0); }
-static void h_music(void *user, int t, int loop) { (void)user; aq_push(AQ_MUSIC, t, loop, 0); }
-static void h_music_stop(void *user) { (void)user; aq_push(AQ_MUSIC_STOP, 0, 0, 0); }
-static void h_sound_stop(void *user, int chan) { (void)user; aq_push(AQ_SOUND_STOP, chan, 0, 0); }
-static void h_volume(void *user, int level) { (void)user; aq_push(AQ_VOLUME, level, 0, 0); }
-
-static void h_beep(void *user, float freq_hz, float dur_s)
-{
-    (void)user;
-    // Milliseconds and whole hertz: the queue is int16 and a beep's precision
-    // beyond that is inaudible. dur is clamped to the int16 ceiling (~32s),
-    // which is longer than any beep anybody meant.
-    int ms = (int)(dur_s * 1000.0f);
-    if (ms < 0) ms = 0;
-    if (ms > 32000) ms = 32000;
-    int hz = (int)freq_hz;
-    if (hz < 0) hz = 0;
-    if (hz > 32000) hz = 32000;
-    aq_push(AQ_BEEP, hz, ms, 0);
-}
-
-/* The pointer slot is FLAGS, not a level: it is the only one h_touch has and
- * touch() must answer three things out of it. Mirrors runtime/widgets.py's
- * P_LIVE / P_HELD / P_CLICK -- 0 is "no pointer", which reads as nil. */
-static int h_touch(void *user, int out_xyth[4])
-{
-    int st;
-    (void)user;
-    if (!RUN.snap || !(st = RUN.snap[SNAP_TOUCH_DOWN])) return 0;
-    out_xyth[0] = RUN.snap[SNAP_TOUCH_X];
-    out_xyth[1] = RUN.snap[SNAP_TOUCH_Y];
-    out_xyth[2] = (st & 4) != 0;                 /* tapped: the press edge */
-    out_xyth[3] = (st & 2) != 0;                 /* held */
-    return 1;
-}
-
-static int h_key(void *user, int code)
-{
-    (void)user;
-    if (!RUN.snap) return 0;
-    if (code < 0) return RUN.snap[SNAP_KEY];          // the last typed code
-    return RUN.snap[SNAP_KEY_DOWN] == code;
-}
-
-static int h_keyp(void *user, int code)
-{
-    (void)user;
-    if (!RUN.snap) return 0;
-    if (code < 0) return RUN.snap[SNAP_KEY];
-    return RUN.snap[SNAP_KEY] == code;
-}
-
-static void h_textmode(void *user, int on)
-{
-    (void)user;
-    if (RUN.snap) RUN.snap[SNAP_TEXTMODE] = on ? 1 : 0;
-}
-
-static void h_quit(void *user)
-{
-    (void)user;
-    if (RUN.snap) RUN.snap[SNAP_QUIT] = 1;
-}
-
-static const char *h_cfg(void *user, const char *key)
-{
-    (void)user;
-    if (RUN.cfg == MP_OBJ_NULL || key == NULL) return NULL;
-    mp_obj_t k = mp_obj_new_str(key, strlen(key));
-    mp_map_elem_t *e = mp_map_lookup(mp_obj_dict_get_map(RUN.cfg), k,
-                                     MP_MAP_LOOKUP);
-    if (e == NULL || e->value == MP_OBJ_NULL) return NULL;
-    // The dict owns the string; libmoy only reads it during the call.
-    if (mp_obj_is_str(e->value)) return mp_obj_str_get_str(e->value);
-    // A NUMBER has to cross too, and the seam is `const char *` -- it cannot
-    // express type. libmoy's `l_cfg` is written for exactly that: it converts a
-    // whole-string number back to a Lua number, so `cfg("n", 0)` reaches the
-    // cart AS a number and a genuine string stays a string. Refusing to render
-    // one here broke the agreement from this side: config.json is JSON and the
-    // shipped carts tune with numbers (`{"enemies": 6, "autoplay": 0}`), so
-    // every numeric value read as the caller's default on every board, silently
-    // -- there is no error path, a default IS the answer. Found 2026-09-11
-    // chasing why a `perf` toggle did nothing.
-    //
-    // Static because the return is borrowed and read before the next call; the
-    // console is single-threaded and libmoy copies what it needs immediately.
-    static char num[24];
-    if (mp_obj_is_bool(e->value)) {            // JSON true/false -> 1/0
-        num[0] = (char)(mp_obj_is_true(e->value) ? '1' : '0');
-        num[1] = '\0';
-        return num;
-    }
-    if (mp_obj_is_int(e->value)) {
-        mp_int_t v = mp_obj_get_int(e->value);
-        (void)snprintf(num, sizeof(num), "%ld", (long)v);
-        return num;
-    }
-    if (mp_obj_is_float(e->value)) {
-        (void)snprintf(num, sizeof(num), "%.7g",
-                       (double)mp_obj_get_float(e->value));
-        return num;
-    }
-    return NULL;                               // a list/dict/None is not a value
-}
 
 // -- helpers -----------------------------------------------------------------
 
@@ -1010,7 +793,6 @@ static int l_tramp(lua_State *L)
 
 // MOY_FLAGS wide: libmoy's own fget/fset/map(..., layers) read the console's
 // flag table (SPEC.md 3.5), and this is that table here.
-static uint8_t g_map_flags[MOY_FLAGS];
 
 // The PICO-8 machine (libmoy moy_p8.c): 64KB of memory and a ROM snapshot,
 // reseeded per run by moy_p8_open. The buffers are PYTHON-OWNED bytearrays
@@ -1064,15 +846,15 @@ static int l_map_flags(lua_State *L)
 {
     size_t len = 0, n, i;
     const char *s;
-    memset(g_map_flags, 0, sizeof(g_map_flags));
+    memset(RUN.c.flags, 0, sizeof(RUN.c.flags));
     s = (lua_type(L, 1) == LUA_TSTRING) ? lua_tolstring(L, 1, &len) : NULL;
     if (s == NULL) { lua_pushboolean(L, 0); return 1; }
     n = len / 2;
-    if (n > sizeof(g_map_flags)) n = sizeof(g_map_flags);
+    if (n > sizeof(RUN.c.flags)) n = sizeof(RUN.c.flags);
     for (i = 0; i < n; i++) {
         int hi = mc_unhex((unsigned char)s[2 * i]);
         int lo = mc_unhex((unsigned char)s[2 * i + 1]);
-        if (hi >= 0 && lo >= 0) g_map_flags[i] = (uint8_t)((hi << 4) | lo);
+        if (hi >= 0 && lo >= 0) RUN.c.flags[i] = (uint8_t)((hi << 4) | lo);
     }
     lua_pushboolean(L, 1);
     return 1;
@@ -1088,7 +870,7 @@ static int l_map_masked(lua_State *L)
     int v[7], i, cx, cy;
     int celx, cely, sx, sy, cw, ch, mask, mw, mh;
     const uint8_t *cells;
-    if (!RUN.con.sheet || !RUN.con.map || lua_gettop(L) != 7) {
+    if (!RUN.c.con.sheet || !RUN.c.con.map || lua_gettop(L) != 7) {
         lua_pushboolean(L, 0);
         return 1;
     }
@@ -1098,9 +880,9 @@ static int l_map_masked(lua_State *L)
     }
     celx = v[0]; cely = v[1]; sx = v[2]; sy = v[3];
     cw = v[4]; ch = v[5]; mask = v[6];
-    cells = RUN.con.map->cells;
-    mw = RUN.con.map->w;
-    mh = RUN.con.map->h;
+    cells = RUN.c.con.map->cells;
+    mw = RUN.c.con.map->w;
+    mh = RUN.c.con.map->h;
     for (cy = 0; cy < ch; cy++) {
         int my = cely + cy;
         const uint8_t *row;
@@ -1112,8 +894,8 @@ static int l_map_masked(lua_State *L)
             if (mx < 0 || mx >= mw) continue;
             id = (int)row[mx] - 1;
             if (id <= 0) continue;            // empty, or p8's never-drawn 0
-            if (mask != 0 && (g_map_flags[id] & mask) == 0) continue;
-            moy_spr(RUN.con.canvas, RUN.con.sheet, id,
+            if (mask != 0 && (RUN.c.flags[id] & mask) == 0) continue;
+            moy_spr(RUN.c.con.canvas, RUN.c.con.sheet, id,
                     sx + cx * 8, py, 0, 1, 0);
         }
     }
@@ -1898,52 +1680,57 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     int w = mp_obj_get_int(a[1]), h = mp_obj_get_int(a[2]);
     if (w <= 0 || h <= 0 || fblen < (size_t)w * (size_t)h * sizeof(moy_pixel))
         mp_raise_ValueError(MP_ERROR_TEXT("run_begin: framebuffer too small"));
-    moy_canvas_init(&RUN.canvas, fb, w, h);
+    moy_canvas_init(&RUN.c.canvas, fb, w, h);
 #ifdef MOY_PIXEL_RGB565
     if (a[3] != mp_const_none) {
         size_t wlen = 0;
         const uint16_t *wire = (const uint16_t *)buf_r(a[3], &wlen);
         if (wlen < MOY_PALETTE * 2)
             mp_raise_ValueError(MP_ERROR_TEXT("run_begin: wire table too small"));
-        moy_canvas_wire(&RUN.canvas, wire);
+        moy_canvas_wire(&RUN.c.canvas, wire);
     }
 #endif
 
     if (a[4] != mp_const_none) {
         size_t slen = 0;
-        RUN.sheet.pix = (uint8_t *)buf_r(a[4], &slen);
+        RUN.c.sheet.pix = (uint8_t *)buf_r(a[4], &slen);
         if (slen < (size_t)MOY_SHEET_W * MOY_SHEET_H)
             mp_raise_ValueError(MP_ERROR_TEXT("run_begin: sheet too small"));
     }
     if (a[5] != mp_const_none) {
         size_t mlen = 0;
-        RUN.map.cells = (uint8_t *)buf_r(a[5], &mlen);
-        RUN.map.w = mp_obj_get_int(a[6]);
-        RUN.map.h = mp_obj_get_int(a[7]);
-        if (RUN.map.w < 0 || RUN.map.h < 0
-            || (size_t)RUN.map.w * (size_t)RUN.map.h > mlen)
+        RUN.c.map.cells = (uint8_t *)buf_r(a[5], &mlen);
+        RUN.c.map.w = mp_obj_get_int(a[6]);
+        RUN.c.map.h = mp_obj_get_int(a[7]);
+        if (RUN.c.map.w < 0 || RUN.c.map.h < 0
+            || (size_t)RUN.c.map.w * (size_t)RUN.c.map.h > mlen)
             mp_raise_ValueError(MP_ERROR_TEXT("run_begin: map too small"));
     }
 
     size_t snlen = 0;
-    RUN.snap = (int32_t *)buf_w(a[8], &snlen);
+    RUN.c.snap = (int32_t *)buf_w(a[8], &snlen);
     if (snlen < SNAP_LEN * sizeof(int32_t))
         mp_raise_ValueError(MP_ERROR_TEXT("run_begin: snapshot too small"));
     size_t aqlen = 0;
-    RUN.aq = (int16_t *)buf_w(a[9], &aqlen);
-    RUN.aq_cap = aqlen / sizeof(int16_t);
-    if (RUN.aq_cap < 1 + AQ_SLOTS)
+    int32_t *aq = (int32_t *)buf_w(a[9], &aqlen);
+    if (aqlen / sizeof(int32_t) < 1 + AQ_SLOTS)
         mp_raise_ValueError(MP_ERROR_TEXT("run_begin: audio queue too small"));
-    RUN.aq[0] = 0;
+    moycore_run_open(&RUN.c, RUN.c.snap, aq, (int)(aqlen / sizeof(int32_t)));
 
     if (a[10] != mp_const_none) {                 // pmem image in, 256 int32
         size_t plen = 0;
         const int32_t *p = (const int32_t *)buf_r(a[10], &plen);
         size_t n = plen / sizeof(int32_t);
         if (n > 256) n = 256;
-        memcpy(RUN.pmem, p, n * sizeof(int32_t));
+        moycore_run_pmem_load(&RUN.c, p, (int)n);
     }
-    RUN.cfg = (a[11] == mp_const_none) ? MP_OBJ_NULL : a[11];
+    // The config table, copied: "key\0value\0" pairs (lua_ext.cfg_blob).
+    if (a[11] != mp_const_none) {
+        size_t clen = 0;
+        const char *blob = (const char *)buf_r(a[11], &clen);
+        if (moycore_run_set_cfg(&RUN.c, blob, clen) != 0)
+            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moycore: no room for the config"));
+    }
 
     // SPEC.md 3.5 tile flags, COPIED rather than borrowed -- the one buffer
     // here that is not the caller's. The sheet, the map and the framebuffer
@@ -1952,17 +1739,16 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     // (fset, the p8 shim's __moy_map_flags, a poke to 0x3000) and it must
     // survive a caller that passes a plain immutable `bytes`. A short blob
     // leaves the rest zero, exactly as a short flags.moyflags does.
-    memset(g_map_flags, 0, sizeof(g_map_flags));
+    memset(RUN.c.flags, 0, sizeof(RUN.c.flags));
     if (a[12] != mp_const_none) {
         size_t flen = 0;
         const uint8_t *fp = buf_r(a[12], &flen);
-        if (flen > sizeof(g_map_flags)) flen = sizeof(g_map_flags);
-        memcpy(g_map_flags, fp, flen);
+        if (flen > sizeof(RUN.c.flags)) flen = sizeof(RUN.c.flags);
+        memcpy(RUN.c.flags, fp, flen);
     }
 
-    RUN.con.canvas = &RUN.canvas;
-    RUN.con.sheet  = RUN.sheet.pix ? &RUN.sheet : NULL;
-    RUN.con.map    = RUN.map.cells ? &RUN.map : NULL;
+    RUN.c.con.sheet  = RUN.c.sheet.pix ? &RUN.c.sheet : NULL;
+    RUN.c.con.map    = RUN.c.map.cells ? &RUN.c.map : NULL;
     // SEED IT. libmoy's rnd is xorshift32 over con->rng and treats 0 as "use
     // the golden-ratio constant" -- correct, deterministic, and therefore the
     // SAME sequence on every run of every cart. moy_lua never showed this
@@ -1971,20 +1757,8 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     // same way twice. SPEC.md 9 fixes rnd's range and explicitly not its
     // sequence (no conformance scene may call it), so the seed is a host
     // quality choice and this is the quality we want.
-    RUN.con.rng    = (uint32_t)mp_hal_ticks_us();
-    if (RUN.con.rng == 0) RUN.con.rng = 1;
-    moy_host *hs = &RUN.con.host;
-    hs->user = NULL;
-    hs->btn = h_btn;  hs->btnp = h_btnp;  hs->players = h_players;
-    hs->time_ms = h_time_ms;
-    hs->pmem_get = h_pmem_get;  hs->pmem_set = h_pmem_set;
-    hs->sfx = h_sfx;  hs->music = h_music;  hs->beep = h_beep;
-    hs->music_stop = h_music_stop;  hs->sound_stop = h_sound_stop;
-    hs->volume = h_volume;
-    hs->touch = h_touch;  hs->key = h_key;  hs->keyp = h_keyp;
-    hs->textmode = h_textmode;  hs->quit = h_quit;
-    hs->cfg = h_cfg;
-    RUN.con.flags = g_map_flags;
+    RUN.c.con.rng    = (uint32_t)mp_hal_ticks_us();
+    if (RUN.c.con.rng == 0) RUN.c.con.rng = 1;
 
     if (!vm) {
         // A compiled cart: the console and nothing on it until wasm_open().
@@ -1994,7 +1768,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     RUN.L = lua_newstate(l_alloc, NULL);
     if (RUN.L == NULL) mp_raise_msg(&mp_type_MemoryError,
                                     MP_ERROR_TEXT("moycore: no VM"));
-    if (moy_lua_open(RUN.L, &RUN.con) != 0) {
+    if (moy_lua_open(RUN.L, &RUN.c.con) != 0) {
         lua_close(RUN.L); RUN.L = NULL;
 #if MOYCORE_POOL
         pool_release();              // a run that never opened still owns chunks
@@ -2009,17 +1783,17 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     lua_pushcfunction(RUN.L, l_map_flags);
     lua_setglobal(RUN.L, "__moy_map_flags");
     // The layer glue's two natives, captured and cleared by the prelude.
-    moycore_layers_open(RUN.L, &RUN.layers, &RUN.con);
+    moycore_layers_open(RUN.L, &RUN.layers, &RUN.c.con);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded above from the cart's file. The
     // shim's __moy_map_flags(gff) overwrites it at cart boot, which is what a
     // p8 import wants -- its flags ride in the shim, not in a sidecar.
-    RUN.con.flags = g_map_flags;
+    RUN.c.con.flags = RUN.c.flags;
     // The PICO-8 machine, opened for every run that registered its buffers
     // (p8_memory): the shim probes for it, a moy cart never sees the globals
     // it does not ask for. No buffers means no machine and the shim's sparse
     // table -- never a failed run.
-    if (g_p8mem) moy_p8_open(RUN.L, &RUN.con, &g_p8, g_p8mem, g_p8rom);
+    if (g_p8mem) moy_p8_open(RUN.L, &RUN.c.con, &g_p8, g_p8mem, g_p8rom);
 
     g_prof_on = 0;               // a new VM: the old wrappers went with the old one
     g_prof_n = 0;
@@ -2113,7 +1887,7 @@ static mp_obj_t mod_load(mp_obj_t chunks_obj)
     // _init runs here, before any tick has stamped the frame base, and it may
     // call time(). Stamp it now so the elapsed term starts from zero instead
     // of from whatever the counter last held.
-    g_tick_ms = (uint32_t)mp_hal_ticks_ms();
+    moycore_run_tick_begin();
     if (moy_lua_init(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     // The parse burst is over, and it is the run's high-water mark: a 130KB
@@ -2639,31 +2413,12 @@ static int32_t hw_list(void *user, const char *prefix, uint32_t index, uint8_t *
     return files_ask(&q);
 }
 
-typedef struct {
-    const char *key;
-    const char *val;
-} wcfg_t;
-
-static void cfg_on_vm(void *arg)
-{
-    wcfg_t *q = (wcfg_t *)arg;
-    nlr_buf_t nlr;
-    moy_loop_count(MOY_UPC_SERVICE);
-    q->val = NULL;
-    if (nlr_push(&nlr) == 0) {
-        q->val = h_cfg(NULL, q->key);
-        nlr_pop();
-    }
-}
-
-// The dict owns the string, or h_cfg's static buffer does; the binding copies
-// it before the next call.
+// The cart's config, read on the engine's thread: the table is C's, copied in
+// at run_begin and freed only after the session ends, so no VM is asked.
 static const char *hw_cfg(void *user, const char *key)
 {
-    wcfg_t q = { key, NULL };
     (void)user;
-    if (moy_wasm_on_vm(cfg_on_vm, &q) != 0) return NULL;
-    return q.val;
+    return moycore_run_cfg(&RUN.c, key);
 }
 
 // A layer's pixels: PSRAM, the run's own, released by moy_wasm_close.
@@ -2718,7 +2473,7 @@ static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
 {
     (void)user;
 #if MOY_WASM
-    if (moy_wasm_open(&WR->w, &RUN.con, env) != 0) {
+    if (moy_wasm_open(&WR->w, &RUN.c.con, env) != 0) {
         snprintf(err, errlen, "a hook is missing");
         return 1;
     }
@@ -2726,7 +2481,7 @@ static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
     // The binding the page's adapters call the table with.
     (void)err;
     (void)errlen;
-    moy_wasm_bind(&WR->w, &RUN.con);
+    moy_wasm_bind(&WR->w, &RUN.c.con);
     env->binding = &WR->w;
 #endif
     return 0;
@@ -2814,8 +2569,8 @@ static void wasm_trapped(void)
 {
     WR->dead = 1;
     WR->w.kept = NULL;
-    moy_reset_state(&RUN.canvas);
-    moy_cls(&RUN.canvas, 0);
+    moy_reset_state(&RUN.c.canvas);
+    moy_cls(&RUN.c.canvas, 0);
 }
 
 static int wasm_begin(const char *path, const char *sha, const char *dir,
@@ -2860,9 +2615,9 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
     if (moy_audio_snd_open()) WR->w.snd = wo_snd;
 #endif
     snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
-    RUN.con.host.cfg = hw_cfg;
-    RUN.con.host.layer_new = hw_layer_new;
-    RUN.con.host.layer_free = hw_layer_free;
+    RUN.c.con.host.cfg = hw_cfg;
+    RUN.c.con.host.layer_new = hw_layer_new;
+    RUN.c.con.host.layer_free = hw_layer_free;
     // The linear memory the manifest declares, which the engine reads the
     // module into so the memory can take the block back; a declaration past
     // any board's PSRAM holds nothing and is refused at the check.
@@ -2873,7 +2628,7 @@ static int wasm_begin(const char *path, const char *sha, const char *dir,
         return 1;
     }
     RUN.wasm = 1;
-    g_tick_ms = (uint32_t)mp_hal_ticks_ms();
+    moycore_run_tick_begin();
     if (moy_wasm_session_call(WCALL_INIT, 0.0f, err, errlen) != 0) {
         wasm_trapped();
         return 1;
@@ -3049,7 +2804,7 @@ static mp_obj_t mod_frame(mp_obj_t lut_out)
     const moy_pixel *lut = NULL;
     const uint8_t *px = (RUN.wasm && WR) ? moy_wasm_frame(&WR->w, &lut) : NULL;
     if (!px) return mp_const_none;
-    size_t n = (size_t)RUN.canvas.w * (size_t)RUN.canvas.h;
+    size_t n = (size_t)RUN.c.canvas.w * (size_t)RUN.c.canvas.h;
     if (lut) {
         size_t len = 0;
         uint8_t *out = (uint8_t *)buf_w(lut_out, &len);
@@ -3119,7 +2874,7 @@ static mp_obj_t mod_frame_presented(size_t n_args, const mp_obj_t *a)
         size_t len = 0;
         size_t off = n_args > 1 ? (size_t)mp_obj_get_int(a[1]) : 0;
         const uint8_t *b = (const uint8_t *)buf_r(a[0], &len);
-        size_t need = (size_t)RUN.canvas.w * (size_t)RUN.canvas.h;
+        size_t need = (size_t)RUN.c.canvas.w * (size_t)RUN.c.canvas.h;
         if (WR && WR->w.frame_565) need *= 2;
         if (off > len || len - off < need)
             mp_raise_ValueError(MP_ERROR_TEXT("frame_presented: copy too small"));
@@ -3142,9 +2897,9 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
     char err[192];
     uint32_t t0, t1;
     int draw = n_args < 2 || mp_obj_is_true(args[1]);
-    moy_reset_state(&RUN.canvas);
+    moy_reset_state(&RUN.c.canvas);
     float dt = (float)mp_obj_get_float(args[0]);
-    g_tick_ms = (uint32_t)mp_hal_ticks_ms();   // h_time_ms counts from here
+    moycore_run_tick_begin();   // h_time_ms counts from here
     if (!RUN.L) {
         // A compiled cart: its two hooks on the engine's thread.
 #if MOYCORE_WASM
@@ -3223,10 +2978,7 @@ static mp_obj_t mod_pmem_image(mp_obj_t out)
     int32_t *p = (int32_t *)buf_w(out, &len);
     size_t n = len / sizeof(int32_t);
     if (n > 256) n = 256;
-    memcpy(p, RUN.pmem, n * sizeof(int32_t));
-    int d = RUN.pmem_dirty;
-    RUN.pmem_dirty = 0;
-    return mp_obj_new_bool(d);
+    return mp_obj_new_bool(moycore_run_pmem_image(&RUN.c, p, (int)n));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_image_obj, mod_pmem_image);
 
@@ -3237,9 +2989,9 @@ static mp_obj_t mod_retarget(mp_obj_t fb_obj)
     if (!RUN.open) return mp_const_none;
     size_t len = 0;
     moy_pixel *fb = (moy_pixel *)buf_w(fb_obj, &len);
-    if (len < (size_t)RUN.canvas.w * (size_t)RUN.canvas.h * sizeof(moy_pixel))
+    if (len < (size_t)RUN.c.canvas.w * (size_t)RUN.c.canvas.h * sizeof(moy_pixel))
         mp_raise_ValueError(MP_ERROR_TEXT("retarget: framebuffer too small"));
-    RUN.canvas.pix = fb;
+    RUN.c.canvas.pix = fb;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_retarget_obj, mod_retarget);
@@ -3261,9 +3013,9 @@ static mp_obj_t mod_close(void)
     g_prof_on = 0;               // the wrappers died with the VM
     g_prof_n = 0;
     lprof_forget();              // the hook went with it; the table is ours
-    RUN.snap = NULL;
-    RUN.aq = NULL;
-    RUN.cfg = MP_OBJ_NULL;
+    moycore_run_close(&RUN.c);
+    RUN.c.snap = NULL;
+    RUN.c.aq = NULL;
     MP_STATE_VM(moycore_calls) = MP_OBJ_NULL;   // un-root: the gc may reclaim
     return mp_const_none;
 }
@@ -3317,18 +3069,18 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_obj, mod_get_global);
 // allocation.
 static mp_obj_t mod_view(void)
 {
-    if (!RUN.open || RUN.con.view_w <= 0) return mp_const_none;
+    if (!RUN.open || RUN.c.con.view_w <= 0) return mp_const_none;
     mp_obj_t last = MP_STATE_VM(moycore_view);
     if (last != MP_OBJ_NULL) {
         mp_obj_tuple_t *lt = MP_OBJ_TO_PTR(last);
-        if (MP_OBJ_SMALL_INT_VALUE(lt->items[0]) == RUN.con.view_w
-            && MP_OBJ_SMALL_INT_VALUE(lt->items[1]) == RUN.con.view_h) {
+        if (MP_OBJ_SMALL_INT_VALUE(lt->items[0]) == RUN.c.con.view_w
+            && MP_OBJ_SMALL_INT_VALUE(lt->items[1]) == RUN.c.con.view_h) {
             return last;
         }
     }
     mp_obj_t t[2];
-    t[0] = MP_OBJ_NEW_SMALL_INT(RUN.con.view_w);
-    t[1] = MP_OBJ_NEW_SMALL_INT(RUN.con.view_h);
+    t[0] = MP_OBJ_NEW_SMALL_INT(RUN.c.con.view_w);
+    t[1] = MP_OBJ_NEW_SMALL_INT(RUN.c.con.view_h);
     last = mp_obj_new_tuple(2, t);
     MP_STATE_VM(moycore_view) = last;
     return last;
