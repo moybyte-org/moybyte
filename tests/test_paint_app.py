@@ -346,7 +346,9 @@ def _lending(monkeypatch, art):
     from runtime.host_canvas import install
 
     install()
-    dc = _sys.modules["device_canvas"]
+    import importlib
+    # The live module when one is loaded; otherwise this import makes it so.
+    dc = importlib.import_module("device_canvas")
     aw = _sys.modules[type(art).__module__]
     dc._owner_done("wallpaper_bg")     # an earlier test's backdrop: its own lifetime
     loans = _Loans()
