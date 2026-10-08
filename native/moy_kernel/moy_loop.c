@@ -455,6 +455,12 @@ static int take_end(void) {
     return e;
 }
 
+void moy_loop_end(int why) {
+    if (!L.end) {
+        L.end = why;
+    }
+}
+
 int moy_loop_word(const char *line) {
     return up(MOY_UP_WORD, 0, line, MOY_UPC_CONSOLE);
 }

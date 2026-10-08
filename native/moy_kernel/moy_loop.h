@@ -169,6 +169,9 @@ int moy_loop_run(void);
 
 // A dev-channel line no kernel word took, to the console's words (counted
 // CONSOLE); a kernel service's Python half (counted SERVICE).
+// A kernel word ends the loop the way an upcall would (`kstop`: EXIT), from
+// the frame's dev stage.
+void moy_loop_end(int why);
 int moy_loop_word(const char *line);
 int moy_loop_service(uint32_t which);
 void moy_loop_say(const char *fmt, ...);

@@ -58,6 +58,11 @@ void moy_recovery_render_plain(uint16_t *fb, const moy_rgeom_t *g, const char *t
 void moy_web_screen_view(moy_rview_t *v, const char *url, const char *pin,
                          const char *label);
 
+// A filled rect in logical coordinates, clipped, turned onto the framebuffer
+// (the raster every kernel screen draws with).
+void moy_recovery_fill(uint16_t *fb, const moy_rgeom_t *g, int x, int y, int w, int h,
+                       uint16_t c);
+
 // The choice under a logical point, or -1.
 int moy_recovery_hit(const moy_rgeom_t *g, int x, int y);
 

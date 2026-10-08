@@ -508,6 +508,35 @@ def idle_timeout_restored(board):
     assert board.state()["psave"][1] == 300
 
 
+def the_kernel_lit_the_logo(board):
+    """First light (native/moy_kernel/moy_boot.h): before any VM, the kernel
+    brought the panel up, drew the boot logo and lit the glass, and says when
+    (ms after power-on). The picture is held to the Python boot screen's on
+    the host (tests/test_moy_kernel.py)."""
+    ms = board.pyval("__import__('moy_kernel').lit()", strict=True)
+    print("\nfirst light at %s ms" % ms)
+    assert isinstance(ms, int) and ms > 0, ms
+    return ms
+
+
+def board_words_are_the_kernels(board):
+    """`heapcaps`, `mem` and `hush` are the kernel's words (moy_loop_board.c):
+    with every console word but `py` answering `REMOTE console <line>` for the
+    call, they still answer themselves."""
+    stub = ("chan._run0 = chan.run; chan.run = lambda ws, line: chan._run0(ws, line) "
+            "if line.startswith('py ') else print('REMOTE console ' + line)")
+    assert board.pyexec(stub, strict=True)
+    try:
+        hc = board.cmd("heapcaps", wait_for="HEAPCAPS", retry=False)
+        assert hc is not None and " gc=" in hc and "gc=-/-/-" not in hc, hc
+        mem = board.cmd("mem", wait_for="REMOTE mem", retry=False)
+        assert mem is not None and "live=" in mem, mem
+        hush = board.cmd("hush", wait_for="REMOTE hush", retry=False)
+        assert hush is not None, hush
+    finally:
+        board.pyexec("chan.run = chan._run0", strict=True)
+
+
 def _kstop_after(line):
     """`KSTOP i/n after psram=FREE/LARGEST int=... dma=...` -> (i, free, largest)."""
     head, rest = line.split("KSTOP ", 1)[1].split(" ", 1)

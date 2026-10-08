@@ -104,6 +104,11 @@ static void fill(uint16_t *fb, const moy_rgeom_t *g, int x, int y, int w, int h,
     }
 }
 
+void moy_recovery_fill(uint16_t *fb, const moy_rgeom_t *g, int x, int y, int w, int h,
+                       uint16_t c) {
+    fill(fb, g, x, y, w, h, c);
+}
+
 // Text from (x, y), at most `cols` glyphs.
 static void text(uint16_t *fb, const moy_rgeom_t *g, int x, int y, const char *s,
                  int cols, uint16_t c) {

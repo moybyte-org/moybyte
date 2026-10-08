@@ -72,7 +72,8 @@ class View(ctypes.Structure):
 def _lib():
     so = native_build.build(
         "moy_kernel_host", os.path.join(KERNEL, "moy_recovery.c"),
-        ["moy_crash.c", "moy_crash.h", "moy_recovery.h", "moy_data.c", "moy.h"],
+        ["moy_crash.c", "moy_crash.h", "moy_recovery.h", "moy_boot.c", "moy_boot.h",
+         "moy_data.c", "moy.h"],
         os.path.join(ROOT, ".build", "host_kernel"),
         cflags=native_build.BASE_CFLAGS + ["-Wall", "-Werror"],
         libmoy_dir=[KERNEL, LIBMOY])
@@ -398,3 +399,32 @@ def test_the_plain_web_screen_says_where_to_go(lib, board):
     assert other != crc
     floor, _fb = render(lib, board, lines, v.hint.decode(), 0)
     assert floor != crc, "the plain screen draws no choices"
+
+
+# ---- the first light ----------------------------------------------------------
+
+@pytest.mark.parametrize("board", sorted(CONSOLES))
+def test_the_kernels_logo_is_the_boot_screens_picture(lib, board):
+    """The kernel lights the glass with the logo before any VM (moy_boot.c),
+    and the themed boot screen follows: the two are one picture, or the
+    machine appears to start twice. The C raster against console.draw_splash
+    on the host canvas, word for word, on every console's logical screen."""
+    from runtime import console, host_canvas
+    w, h = CONSOLES[board][:2]
+    g = Geom()
+    lib.moy_rgeom_init(ctypes.byref(g), w, h, 0, 0)
+    fb = (u16 * (w * h))()
+    lib.moy_boot_logo_render(fb, ctypes.byref(g))
+    cv = host_canvas.make_system_canvas(w, h)
+    console.draw_splash(cv)
+    cv.flush_batch()
+    import device_canvas
+    words = memoryview(cv._buf).cast("H")
+    if device_canvas.PAL565_WIRE is not device_canvas.PAL565:
+        words = [((v >> 8) | (v << 8)) & 0xFFFF for v in words]
+    want = list(words)
+    got = list(fb)
+    assert len(set(got)) >= 5
+    bad = [i for i in range(w * h) if got[i] != want[i]]
+    assert not bad, "%d pixels differ, first at (%d, %d): C %04x, Python %04x" % (
+        len(bad), bad[0] % w, bad[0] // w, got[bad[0]], want[bad[0]])

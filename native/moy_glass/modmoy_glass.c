@@ -1061,6 +1061,13 @@ static uint32_t dsi_ticks(void *ctx) {
     return (uint32_t)mp_hal_ticks_us();
 }
 
+// The kernel's first light (native/moy_kernel/moy_boot.h); none off a board.
+extern bool moy_boot_lit(void) __attribute__((weak));
+
+static bool glass_kernel_lit(void) {
+    return moy_boot_lit != NULL && moy_boot_lit();
+}
+
 static mp_obj_t dsi_make_new(const mp_obj_type_t *type, size_t n_args,
                              size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 1, 2, false);
@@ -1069,8 +1076,11 @@ static mp_obj_t dsi_make_new(const mp_obj_type_t *type, size_t n_args,
     c->dsi = dsi;
     c->ppa = n_args > 1 ? args[1] : mp_const_none;
     c->stamp = mp_const_none;
-    // Dark until the first composed frame: a fresh panel scans noise.
-    mp_call_function_1(mp_load_attr(dsi, MP_QSTR_backlight), mp_const_false);
+    // Dark until the first composed frame: a fresh panel scans noise. One the
+    // kernel lit with the logo (moy_boot.h) scans the logo and stays lit.
+    if (!glass_kernel_lit()) {
+        mp_call_function_1(mp_load_attr(dsi, MP_QSTR_backlight), mp_const_false);
+    }
     dsi_call0(dsi, MP_QSTR_init);
     c->w = mp_obj_get_int(mp_load_attr(dsi, MP_QSTR_WIDTH));
     c->h = mp_obj_get_int(mp_load_attr(dsi, MP_QSTR_HEIGHT));
@@ -1485,7 +1495,9 @@ static mp_obj_t rot_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     for (int i = 0; i < 10; i++) {
         c->bufs[i] = mp_const_none;
     }
-    mp_call_function_1(mp_load_attr(dsi, MP_QSTR_backlight), mp_const_false);
+    if (!glass_kernel_lit()) {
+        mp_call_function_1(mp_load_attr(dsi, MP_QSTR_backlight), mp_const_false);
+    }
     dsi_call0(dsi, MP_QSTR_init);
     if (!mp_obj_is_true(dsi_call0(ppa, MP_QSTR_init))) {
         mp_raise_msg(&mp_type_OSError,

@@ -103,10 +103,12 @@ class DeviceBoot(BootCarts):
         self.comp = comp
         self.set_backlight = set_backlight
         self.label = label
-        # The panel boots DARK on both boards (#45) so the ST7789's power-on
-        # GRAM noise / an uninitialised DSI framebuffer never reaches the glass.
-        # `lit` says a composed splash frame has already turned it on, which is
-        # also what tells the caller not to re-arm the logo (see start_frames).
+        # The glass is never lit over power-on GRAM noise or an uninitialised
+        # DSI framebuffer (#45): on a console the kernel lit it with this same
+        # logo before the VM (native/moy_kernel/moy_boot.h), and elsewhere it
+        # stays dark until the first splash frame. `lit` says a composed
+        # splash frame has turned it on, which is also what tells the caller
+        # not to re-arm the logo (see start_frames).
         self.lit = False
         self.done = False           # the desktop owns the glass; stop painting
         self._first_at = 0

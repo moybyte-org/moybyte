@@ -654,9 +654,14 @@ static esp_err_t moy_axs_bringup(int nfbs, int pclk_hz, const char **what) {
     return ESP_OK;
 }
 
+// The kernel brings the panel up with the console compositor's framebuffer
+// count (BandedCompositor's nfbs=2): at first light, before any VM, the
+// console's init then takes the panel as it is, the logo still showing.
+#define MOY_AXS_KERNEL_FBS 2
+
 int moy_axs_kinit(void) {
     const char *what = "";
-    return s_dev_up ? ESP_OK : moy_axs_bringup(1, MOY_AXS_PCLK_HZ, &what);
+    return s_dev_up ? ESP_OK : moy_axs_bringup(MOY_AXS_KERNEL_FBS, MOY_AXS_PCLK_HZ, &what);
 }
 
 uint16_t *moy_axs_kfb(void) {

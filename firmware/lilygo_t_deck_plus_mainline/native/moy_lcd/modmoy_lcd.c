@@ -486,9 +486,14 @@ static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
     return ESP_OK;
 }
 
+// The kernel brings the panel up with the console compositor's framebuffer
+// count (BandedCompositor's nfbs=2): at first light, before any VM, the
+// console's init then takes the panel as it is, the logo still showing.
+#define MOY_LCD_KERNEL_FBS 2
+
 int moy_lcd_kinit(void) {
     const char *what = "";
-    return s_panel != NULL ? ESP_OK : moy_lcd_bringup(1, MOY_LCD_PCLK_HZ, &what);
+    return s_panel != NULL ? ESP_OK : moy_lcd_bringup(MOY_LCD_KERNEL_FBS, MOY_LCD_PCLK_HZ, &what);
 }
 
 uint16_t *moy_lcd_kfb(void) {

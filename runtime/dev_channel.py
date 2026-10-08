@@ -1922,7 +1922,7 @@ class DevChannel:
             return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]
-            env = {"ws": ws, "wm": ws.wm, "pointer": self.pointer}
+            env = {"ws": ws, "wm": ws.wm, "pointer": self.pointer, "chan": self}
             env.update(self.env)
             try:
                 try:

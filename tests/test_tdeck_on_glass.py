@@ -96,7 +96,10 @@ EXFAT_SRAM = 568
 # Less what moy_alloc's registry gave back: its nodes moved to PSRAM beside
 # their buffers (native/moy_alloc), 352 bytes of idle internal heap measured
 # 2026-10-08 against the same tree's image before the move, fresh boots.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352
+# And first light's (native/moy_kernel/moy_kernel.c: whether the kernel lit
+# the logo and when), 8 bytes of idle internal heap measured 2026-10-08
+# against the same tree before it, fresh boots.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 8
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
@@ -374,6 +377,14 @@ def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
 
 def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
     on_glass.wasm_low_water_with_radios_up(board, wasm)
+
+
+def test_the_kernel_lit_the_logo_before_any_vm(board):
+    on_glass.the_kernel_lit_the_logo(board)
+
+
+def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
+    on_glass.board_words_are_the_kernels(board)
 
 
 # LAST in the file: twenty soft resets end on a freshly started VM.

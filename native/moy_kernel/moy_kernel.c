@@ -102,6 +102,7 @@
 #include "modespnow.h"
 #endif
 
+#include "moy_boot.h"
 #include "moy_crash.h"
 #include "moy_kernel.h"
 #include "moy_loop.h"
@@ -960,6 +961,43 @@ bool moy_kernel_plain_web(void) {
     #endif
 }
 
+// First light (moy_boot.h): before the first VM, the panel up, the logo in
+// framebuffer 0 and the glass lit. A board with no panel has none.
+static bool s_lit;
+static uint32_t s_lit_ms;
+
+bool moy_boot_lit(void) {
+    return s_lit;
+}
+
+uint32_t moy_kernel_lit_ms(void) {
+    return s_lit ? s_lit_ms : 0;
+}
+
+static void moy_kernel_first_light(void) {
+    #ifdef MOY_KERNEL_PANEL
+    int e = MOY_KERNEL_PANEL(init)();
+    uint16_t *fb = e == 0 ? MOY_KERNEL_PANEL(fb)() : NULL;
+    if (fb == NULL) {
+        k_printf("KERNEL first light: panel err=0x%x\r\n", e);
+        return;
+    }
+    moy_rgeom_t g;
+    moy_rgeom_init(&g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
+                   MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
+    moy_boot_logo_render(fb, &g);
+    e = MOY_KERNEL_PANEL(present)();
+    if (e != 0) {
+        k_printf("KERNEL first light: present err=0x%x\r\n", e);
+        return;
+    }
+    MOY_KERNEL_PANEL(backlight)(1);
+    s_lit = true;
+    s_lit_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    k_printf("KERNEL first light at %u ms\r\n", (unsigned)s_lit_ms);
+    #endif
+}
+
 extern bool moy_kvol_vm_mount(void) __attribute__((weak));
 // moy_alloc's registry: the buffers the swept VM's views named.
 extern void moy_alloc_vm_swept(void) __attribute__((weak));
@@ -1055,6 +1093,8 @@ static void moy_vm_task(void *pvParameter) {
         printf("mp_task_heap allocation failed!\n");
         moy_kernel_recovery(MOY_WHY_HEAP);
     }
+    // MOY: the glass lit with the logo before any VM.
+    moy_kernel_first_light();
 
 soft_reset:
     // initialise the stack pointer for the main thread

@@ -37,6 +37,7 @@
 #define MOY_LOOP_ESP 0
 #endif
 
+#include "moy_devch.h"
 #include "moy_loop.h"
 
 // The modules' loop entries (weak: an image without the module has none).
@@ -197,6 +198,114 @@ static uint32_t b_services(void) {
     return bits;
 }
 
+#if MOY_LOOP_ESP
+// -- the board's words (docs/kernel_survival_2026-10.md §7.3) ---------------------
+//
+// The words that read or act on kernel state, answered in C before any
+// console word. The host and the browser keep runtime/dev_channel.py's
+// copies, which say `-` for what a host cannot read.
+
+#include "py/gc.h"
+
+void moy_aud_hush(void) __attribute__((weak));
+
+static const uint32_t HEAP_CAPS[3] = {
+    MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA,
+};
+static const char *const HEAP_NAMES[3] = {"psram", "sram", "dma"};
+
+// HEAPCAPS psram=T/F/L/W sram=T/F/L/W dma=T/F/L/W gc=H/V/A: per heap_caps
+// set its total, free, largest free block and low-water; the GC heap's bytes
+// its areas hold and its areas (read before the collect), and the bytes live
+// after it. A set with no region is `-`; with no VM the gc is `-/-/-`.
+static bool w_heapcaps(int argc, char **argv, const char *line) {
+    (void)argc; (void)argv; (void)line;
+    char out[200];
+    int n = snprintf(out, sizeof(out), "HEAPCAPS");
+    for (int i = 0; i < 3; i++) {
+        size_t tot = heap_caps_get_total_size(HEAP_CAPS[i]);
+        if (tot == 0) {
+            n += snprintf(out + n, sizeof(out) - n, " %s=-", HEAP_NAMES[i]);
+            continue;
+        }
+        n += snprintf(out + n, sizeof(out) - n, " %s=%u/%u/%u/%u", HEAP_NAMES[i],
+                      (unsigned)tot, (unsigned)heap_caps_get_free_size(HEAP_CAPS[i]),
+                      (unsigned)heap_caps_get_largest_free_block(HEAP_CAPS[i]),
+                      (unsigned)heap_caps_get_minimum_free_size(HEAP_CAPS[i]));
+    }
+    if (moy_loop_vm()) {
+        size_t areas = 0, held = 0;
+        for (mp_state_mem_area_t *a = &MP_STATE_MEM(area); a != NULL;) {
+            areas++;
+            held += (size_t)(a->gc_pool_end
+                             - (a == &MP_STATE_MEM(area) ? a->gc_alloc_table_start : (byte *)a));
+            #if MICROPY_GC_SPLIT_HEAP
+            a = a->next;
+            #else
+            a = NULL;
+            #endif
+        }
+        gc_collect();
+        gc_info_t info;
+        gc_info(&info);
+        snprintf(out + n, sizeof(out) - n, " gc=%u/%u/%u", (unsigned)held,
+                 (unsigned)info.used, (unsigned)areas);
+    } else {
+        snprintf(out + n, sizeof(out) - n, " gc=-/-/-");
+    }
+    moy_loop_say("%s", out);
+    return true;
+}
+
+// mem: the GC heap after a collect.
+static bool w_mem(int argc, char **argv, const char *line) {
+    (void)argc; (void)argv; (void)line;
+    if (!moy_loop_vm()) {
+        moy_loop_say("REMOTE mem: no VM");
+        return true;
+    }
+    gc_collect();
+    gc_info_t info;
+    gc_info(&info);
+    moy_loop_say("REMOTE mem live=%uk free=%uk", (unsigned)(info.used / 1024),
+                 (unsigned)(info.free / 1024));
+    return true;
+}
+
+// kstop N (§7.5): the VM service's soft reset N times, the console booting
+// between, a KSTOP line of the heaps before and after each teardown. DEV.
+static bool w_kstop(int argc, char **argv, const char *line) {
+    (void)line;
+    int n = argc > 1 ? atoi(argv[1]) : 1;
+    if (n < 1) {
+        n = 1;
+    }
+    moy_loop_say("REMOTE kstop %d", n);
+    moy_kernel_kstop(n);
+    moy_loop_end(MOY_LOOP_EXIT);
+    return true;
+}
+
+// hush: every audio session silent from the next block; nothing is closed.
+static bool w_hush(int argc, char **argv, const char *line) {
+    (void)argc; (void)argv; (void)line;
+    if (moy_aud_hush == NULL) {
+        moy_loop_say("REMOTE hush: no audio on this board");
+        return true;
+    }
+    moy_aud_hush();
+    moy_loop_say("REMOTE hush");
+    return true;
+}
+
+static const moy_devch_word_t BOARD_WORDS[] = {
+    {"heapcaps", w_heapcaps},
+    {"mem", w_mem},
+    {"kstop", w_kstop},
+    {"hush", w_hush},
+};
+#endif
+
 static moy_loop_ops_t s_ops;
 
 // A fresh VM is up: the loop's stages are the board's again.
@@ -231,6 +340,9 @@ void moy_loop_board_vm_start(void) {
     s_ops.alloc = b_alloc;
     s_ops.services = b_services;
     moy_loop_init(&s_ops, 60);
+    #if MOY_LOOP_ESP
+    moy_devch_words(BOARD_WORDS, (int)(sizeof(BOARD_WORDS) / sizeof(BOARD_WORDS[0])));
+    #endif
     moy_idle_t *d = moy_loop_idle();
     d->can_dim = false;
     moy_loop_set_vm(true);
