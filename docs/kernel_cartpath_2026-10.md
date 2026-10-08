@@ -6,8 +6,8 @@ the C interfaces of the Player, the tick model, the runtime map and the in-cart
 chrome, the VM's stop and start around a cart step by step, which carts run
 with no VM, the order one agent lands it in, and the gate. The kernel's
 language is C (owner, 2026-10-06). Status lives in #224, which also holds
-the sprint's measurements; per-cart fps belongs to #66, P4 figures to #58. Revised 2026-10-08 after an adversarial review; §5 and §9 carry
-what it changed.
+the sprint's measurements; per-cart fps belongs to #66, P4 figures to #58. Revised 2026-10-08 after an adversarial review; §5 carries what it
+changed, and §9 the owner's decisions on its questions.
 
 **What it stands on.** Sprint 2 gave the kernel the entry, the handle tables,
 the route tables, the crash record and the recovery floor
@@ -84,7 +84,7 @@ part that remains Python and why.
 | `runtime/cart_api.py`, `device/device_api.py`, `runtime/cart_verbs.py` | — | — | **stay**: the Python cart's namespace, one body on every tier, thinning as its services are C (the plan's open placement, answered) |
 
 The shipped apps stay Python, per the plan's §3: the launcher (decided by the
-return budget, §9 question 1), Settings, Files, Paint, the editors. Python
+`need` policy, §9 decision 1), Settings, Files, Paint, the editors. Python
 carts stay Python and keep the VM.
 
 ## 2. Which carts run with no VM
@@ -157,7 +157,7 @@ the Player's handle is that row's. Every layer, image, scratch and audio
 session it takes is a row it owns and goes when it ends. Two new kinds in
 `native/moy_spine/moy_htab.h`: **IMAGE** (10) and **ACTOR** (11). A kinded
 table holds at most 256 rows, so a run has at most 256 live images and 256
-live actors where a Python cart's scene world has no cap (§9 question 7).
+live actors where a Python cart's scene world has no cap (§9 decision 5).
 
 Errors extend `MOY_HTAB_*` as `moy_route.h`'s do:
 
@@ -236,8 +236,8 @@ after the run's draw and before `end_frame`, the HUD's place (sprint 3's §7.3).
 The error, fit and newer-console panels take their words from one string
 table in C (§6 step 5 is #143's pass over it). Over a run the menu's rows are
 today's — RESTART CART, DELETE CART (the store's delete), SETTINGS, ABOUT,
-REBOOT — and SETTINGS ends the run with a route into Settings; whether an EDIT
-row joins them is §9 question 4. The shell hands its own rows (SEARCH) when it
+REBOOT — and SETTINGS ends the run with a route into Settings; no EDIT row
+joins them (§9 decision 1). The shell hands its own rows (SEARCH) when it
 opens the menu.
 
 ### 3.6 Netplay
@@ -302,9 +302,8 @@ only when the run needs the memory (owner, 2026-10-08)**: a VM-free cart
 whose fit check fails with the VM up, which today means a compiled cart the
 size of Doom on the S3s. Every other run keeps the VM, so an ordinary exit
 returns to a launcher that is still running, as it does today. Stopping for
-every VM-free cart is a later option, a policy value `always` beside the
-default `need`, enabled only if a measured return start meets the owner's
-budget (§9 question 1): a return start rebuilds the shell. The zero-upcall
+every VM-free cart, a policy value `always` beside `need`, stays off (§9
+decision 1): a return start rebuilds the shell. The zero-upcall
 gate does not depend on the policy, because a VM-free run makes no upcall
 whether or not the VM is down.
 
@@ -369,7 +368,7 @@ A Ctrl-C (0x03) ends the run (why SERIAL) and starts the VM, so
    crash's text, file and line.
 2. A crash with no VM paints the error panel and waits there. A compiled cart,
    the one that stops the VM under the `need` policy, has no source and no
-   EDIT, which is today's panel; a Lua cart under `always` is §9 question 3.
+   EDIT, which is today's panel.
 3. The task jumps to `soft_reset:` and starts the VM: the first area,
    `gc_init`, `mp_init`, the kernel's flash volume mounted, `main.py`.
 4. `main.py` asks the kernel how it started: a new call beside
@@ -400,7 +399,7 @@ Python words, the webhost's Python routes, the `Achievements` object with its
 `_played` and `_seen_views` counters (the play-five and toolbox badges), the
 `Clipboard` (#132), and a toast whose deadline had not run out. Today these
 die only at a reboot; under `need` they die when a big compiled cart returns,
-under `always` at every return. Which of them persist is §9 question 5.
+and none of them is carried over (§9 decision 2).
 
 ### 5.5 The return, measured
 
@@ -513,9 +512,8 @@ Each item fails with its bug present.
 ### 8.1 Python carts and the error panel
 
 A Python cart's crash throws the kid into the Editor on the line, as today,
-and so does a Lua cart's with the VM up. A compiled cart's crash paints the
-panel, as today. Only a Lua cart crashing with the VM stopped, which happens
-under `always` alone, meets a different screen (§9 question 3).
+and so does a Lua cart's, whose VM stays up under `need`. A compiled cart's
+crash paints the panel, as today, whether or not its run stopped the VM.
 
 ### 8.2 The runaway watchdog (#212's rider)
 
@@ -535,44 +533,30 @@ Today only a user app or a wallpaper arms the record (`moy_kstate_arm` keeps
 those two roles), so a game that faults or hangs the board leaves a record
 that names no cart. `moy_play_launch` arms a new GAME role with the cart's id
 before the runtime opens, and a clean end disarms it, so every fault and hang
-in a run names its cart. Whether a game also spends strikes is §9 question 2.
+in a run names its cart. A game spends no strikes (§9 decision 3).
 
-## 9. Open questions for the owner
+## 9. The owner's decisions (2026-10-08)
 
-1. **The return budget**, which decides whether the `always` option is ever
-   enabled (the stop itself is decided: `need`, owner, 2026-10-08). A return start is a boot without the store: #224's
-   census put the boot's non-store part at about 4.5 s on the T-Deck and
-   3.7 s on the Guition S3 (imports about 1.3 s, the Workstation about 0.4 s,
-   the wiring about 1.1 s), against today's exit to the launcher's frame of
-   350–440 ms and 240–290 ms (census item 5). Recommendation: the launcher's
-   first frame within 1 s of the exit, worst of five after the session, on
-   both S3s; a Python launcher that misses it after §5.5's levers is the
-   plan's §3 trigger for the native launcher, designed on its own.
-2. **Do games earn crash strikes?** A user app turned off after its strikes
-   is refused at launch; a game today is never refused. Recommendation: games
-   are named in the record but spend no strikes — the kid's own game must
-   always reopen to be fixed — and a cart that resets the board three times
-   running gets a notice at the launcher, not a refusal.
-3. **The crash screen differing by VM state.** Under `always`, a Lua cart
-   crashing with the VM stopped shows the panel and waits, where with the VM
-   up it goes straight to the Editor. Recommendation: under `always`, the
-   panel's EDIT starts the VM into the Editor on the line, so the two differ by
-   one tap and the start's pause happens after the kid chose.
-4. **An EDIT row in the in-game menu.** It would open the Editor on the
-   running cart from inside it, which today takes an exit and a picker.
-   Recommendation: not in sprint 4; the menu keeps today's rows.
-5. **Session state lost at a stopped return**: the play-five and toolbox
-   progress, the clipboard (#132), a toast mid-deadline. Recommendation: the
-   two badge counters move to settings rows; the clipboard's text (bounded)
-   moves to a kernel PSRAM record that lives until reboot, its pixels are
-   dropped; a toast is the kernel's and finishes over the run.
-6. **No REPL during a stopped run.** Serial reads `state` and `run`; anything
-   else needs a VM. Recommendation: Ctrl-C ends the run and starts the VM
-   (§5.3), which is all the tools need.
-7. **The 256-actor cap.** A VM-free run holds at most 256 live actors and 256
-   live images; a Python cart has no cap. Recommendation: accept it and
-   document it in the cart API's limits through moy-spec; no seed cart is near
-   it, and a cart past it fails loudly (FULL) rather than drawing wrong.
+1. **The VM stops only when a cart needs the memory** (policy `need`). The
+   `always` policy stays off, so its return budget, its crash screen for a Lua
+   cart with the VM stopped, and an EDIT row in the in-game menu are not built.
+   A return start is a boot without the store: #224's census holds its parts
+   against today's exit to the launcher. The plan's §3 trigger for the native
+   launcher is unchanged.
+2. **Session state lost at a stopped return is accepted**: the Clipboard
+   (#132), the play-five and toolbox badge counters, a toast mid-deadline. It
+   happens only at a `need` stop and is handled when that code is C; no
+   settings row or kernel record carries any of it over.
+3. **Games earn no crash strikes, and are named in the crash record**:
+   `moy_play_launch` arms the cart's id before the runtime opens and a clean end
+   disarms it (§8.3). The kid's own game always reopens to be fixed.
+4. **Ctrl-C during a stopped run ends the run and starts the VM** (§5.3). There
+   is no REPL while it is down; serial reads `state` and `run`, and the tools
+   reach a VM through the interrupt.
+5. **A VM-free run holds at most 256 live actors and 256 live images**; a
+   Python cart has no cap. A cart past it fails loudly (FULL) rather than
+   drawing wrong, and the limit is documented in the cart API's limits through
+   moy-spec.
 
 ## 10. Claims this sprint falsifies
 
