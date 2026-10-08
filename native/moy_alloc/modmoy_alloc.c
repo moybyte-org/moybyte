@@ -102,8 +102,12 @@ static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     if (buf == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));
     }
-    moy_buf_node_t *node = heap_caps_malloc(sizeof(moy_buf_node_t),
-                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    // The node is PSRAM like its buffer: a desk holds dozens, and in internal
+    // SRAM each one's 16 B came off the front of the largest free block.
+    moy_buf_node_t *node = heap_caps_malloc(sizeof(moy_buf_node_t), MALLOC_CAP_SPIRAM);
+    if (node == NULL) {
+        node = heap_caps_malloc(sizeof(moy_buf_node_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
     if (node == NULL) {
         heap_caps_free(buf);
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));

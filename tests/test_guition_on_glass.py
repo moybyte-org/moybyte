@@ -80,7 +80,10 @@ EXFAT_SRAM = 640
 # ladder's statics and the VM-side stage table; the meters, the PERF window
 # and the line buffer are PSRAM), 488 bytes of idle internal heap measured
 # 2026-10-08 against the same tree's dev image on a fresh boot.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488
+# Less what moy_alloc's registry gave back: its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), 580 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's image before the move, fresh boots.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

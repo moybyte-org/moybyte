@@ -93,7 +93,10 @@ EXFAT_SRAM = 568
 # ladder's statics and the VM-side stage table; the meters, the PERF window
 # and the line buffer are PSRAM), 392 bytes of idle internal heap measured
 # 2026-10-08 against the same tree's dev image on a fresh boot.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392
+# Less what moy_alloc's registry gave back: its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), 352 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's image before the move, fresh boots.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352
 WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
