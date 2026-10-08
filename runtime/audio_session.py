@@ -88,6 +88,9 @@ class AudioSession:
             self._push()
             if focus:
                 na.focus(self.h)
+            listeners = getattr(bank, "sessions", None)
+            if listeners is not None:
+                listeners.append(self)
 
     def _push(self):
         b = self.bank
@@ -97,8 +100,11 @@ class AudioSession:
 
     def _sync(self):
         b = self.bank
-        if b is not self._pushed or b.rev != self._rev:
-            self._push()
+        if self.h and (b is not self._pushed or b.rev != self._rev):
+            try:
+                self._push()
+            except ValueError:
+                self._gone()
 
     def _gone(self):
         """A newer open for this owner closed this session (on a host, another
@@ -178,6 +184,9 @@ class AudioSession:
                 self._gone()
 
     def close(self):
+        listeners = getattr(self.bank, "sessions", None)
+        if listeners is not None and self in listeners:
+            listeners.remove(self)
         if self.h:
             try:
                 self._na.close(self.h)

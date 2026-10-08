@@ -2241,8 +2241,25 @@ static const moycore_lua_hooks_t HOOKS = {
 // _update and -- unless `draw` is false -- _draw. A logic-only tick is the
 // Player's scheduler (#217) skipping _draw on a tick its divisor does not
 // draw, which SPEC.md 5 sanctions; TICK_DRAW in the module table is how the
-// glue knows this build takes the flag. The host refreshed the snapshot before
-// calling and drains the audio queue after.
+// glue knows this build takes the flag. The caller refreshed the snapshot
+// before calling and plays the audio queue after -- the kernel's Player
+// (moy_play.c), which calls moycore_frame itself, or the glue's own _update.
+
+int moycore_frame(float dt, int draw, char *err, size_t n)
+{
+    moy_reset_state(&RUN.c.canvas);
+    moycore_run_tick_begin();   // h_time_ms counts from here
+    if (!RUN.L) {
+        // A compiled cart: its two hooks on the engine's thread.
+#if MOYCORE_WASM
+        return wasm_tick_c(dt, draw, err, n) != 0 ? -1 : 0;
+#else
+        (void)dt; (void)draw; (void)err; (void)n;
+        return 0;
+#endif
+    }
+    return moycore_lua_tick(dt, draw, err, n);
+}
 
 static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 {
@@ -2250,20 +2267,7 @@ static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
                                 MP_ERROR_TEXT("moycore: no run"));
     char err[192];
     int draw = n_args < 2 || mp_obj_is_true(args[1]);
-    moy_reset_state(&RUN.c.canvas);
-    float dt = (float)mp_obj_get_float(args[0]);
-    moycore_run_tick_begin();   // h_time_ms counts from here
-    if (!RUN.L) {
-        // A compiled cart: its two hooks on the engine's thread.
-#if MOYCORE_WASM
-        if (wasm_tick_c(dt, draw, err, sizeof(err)) != 0)
-            return mp_obj_new_str(err, strlen(err));
-        return mp_const_none;
-#else
-        return mp_const_none;
-#endif
-    }
-    if (moycore_lua_tick(dt, draw, err, sizeof(err)) != 0)
+    if (moycore_frame((float)mp_obj_get_float(args[0]), draw, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     return mp_const_none;
 }

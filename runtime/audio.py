@@ -238,16 +238,21 @@ class AudioBank:
         self.sfx = list(sfx or [])
         self.music = list(music or [])
         # Revision counter, bumped by touch() on every edit. The Music editor
-        # mutates this bank IN PLACE and the running cart hears the result, which
-        # works for free on the host (one object, one engine) but not on a device
-        # or the web runner, where the synth is libmoy holding its own parsed
-        # copy. Those backends compare rev before a trigger and re-push the bank
-        # when it moved -- an int compare per sfx() rather than a re-parse.
+        # mutates this bank IN PLACE and the running cart hears the result, but
+        # the synth is the kernel's (native/moy_audio), holding its own parsed
+        # copy per session. A session compares rev before a verb it plays and
+        # re-pushes the bank when it moved, and touch() pushes to every session
+        # open over this bank, because a Lua or compiled cart's verbs play in C
+        # and never reach the Python session at all.
         self.rev = 0
+        self.sessions = []
 
     def touch(self):
-        """Mark the bank edited (see `rev`)."""
+        """Mark the bank edited (see `rev`), and push it to every session
+        open over it."""
         self.rev += 1
+        for s in self.sessions:
+            s._sync()
 
     def get_sfx(self, n):
         if 0 <= n < len(self.sfx):

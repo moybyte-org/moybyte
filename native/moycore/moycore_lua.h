@@ -69,6 +69,12 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n);
 // The VM closed and the pool given back. Safe with no VM.
 void moycore_lua_close(void);
 
+// One frame of the open run, whichever its runtime: the draw state reset,
+// time()'s base stamped, then the Lua frame above or a compiled cart's two
+// hooks on its engine's thread. 0, or -1 with the cart's error in `err`.
+// Defined by the binding (modmoycore.c), where a compiled cart's session is.
+int moycore_frame(float dt, int draw, char *err, size_t n);
+
 // The p8 machine's buffers (65536 and 0x4300 bytes), or NULLs: no machine.
 void moycore_lua_p8_memory(uint8_t *mem, uint8_t *rom);
 

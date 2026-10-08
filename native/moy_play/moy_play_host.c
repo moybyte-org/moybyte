@@ -7,8 +7,8 @@
 #include "moy_play.h"
 #include "moy_rt.h"
 
-static const moy_rt_ops_t LUA = { "lua", false };
-static const moy_rt_ops_t WASM = { "wasm", false };
+static const moy_rt_ops_t LUA = { "lua", NULL, NULL, false };
+static const moy_rt_ops_t WASM = { "wasm", NULL, NULL, false };
 
 // The host's rows: which of the two runtimes this image takes.
 void moy_play_host_runtimes(int lua, int wasm) {

@@ -15,6 +15,18 @@
 //                     This image's runtime map has a "lua" row where moycore is
 //                     built (MOY_WITH_LUA) and a "wasm" row where the engine is
 //                     (MOY_WASM).
+//
+// The Player (moy_play.h), the VM's alone -- on CPython the host's runs are
+// runtime/lua_host.py's and runtime/wasm_host.py's:
+//
+//   launch(path, paced) -> run   the cart's verdict and its runtime's row
+//   bind(run, input, audio, tick) its input table, audio session, Tick
+//   open(run)                    the row's check that its runtime is open
+//   frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW
+//   end(run[, why]), info([run]), current(), stack()
+//
+// The map's "python" row is registered with the Lua and wasm ones: a VM is
+// what imports this module.
 
 #include <string.h>
 
@@ -25,6 +37,7 @@
 #include "moy_play.h"
 #include "moy_rt.h"
 #include "moy_tick.h"
+#include "moy_input.h"
 
 typedef struct {
     mp_obj_base_t base;
@@ -138,13 +151,6 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- the runtime map's rows and the census ------------------------------------
 
-#ifdef MOY_WITH_LUA
-static const moy_rt_ops_t RT_LUA = { "lua", false };
-#endif
-#if defined(MOY_WASM) && MOY_WASM
-static const moy_rt_ops_t RT_WASM = { "wasm", false };
-#endif
-
 static void rows_once(void) {
     static bool done;
     if (done) {
@@ -152,11 +158,16 @@ static void rows_once(void) {
     }
     done = true;
     #ifdef MOY_WITH_LUA
-    moy_rt_add(&RT_LUA);
+    bool lua = true;
+    #else
+    bool lua = false;
     #endif
     #if defined(MOY_WASM) && MOY_WASM
-    moy_rt_add(&RT_WASM);
+    bool wasm = true;
+    #else
+    bool wasm = false;
     #endif
+    moy_play_rows(lua, wasm, true);
 }
 
 static int census_one(void *ctx, const moy_cat_entry_t *e) {
@@ -185,10 +196,186 @@ static mp_obj_t mod_census(mp_obj_t path_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_census_obj, mod_census);
 
+// -- the Player -----------------------------------------------------------------
+
+// The objects a bound run reads from C: the input table and the tick model.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_play_input_obj);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_play_tick_obj);
+
+extern moy_input_t *moy_input_table_of(mp_obj_t o);
+
+static uint32_t run_arg(mp_obj_t o) {
+    return (uint32_t)mp_obj_get_int_truncated(o);
+}
+
+static mp_obj_t raise_rc(int rc) {
+    static const char *const WHAT[] = {
+        "ok", "stale run", "full", "no memory", "no such cart", "runtime not in this image",
+        "newer", "does not fit", "raised", "ended", "needs the VM",
+    };
+    mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("moy_play: %s"),
+                      rc >= 0 && rc <= MOY_PLAY_NEEDS_VM ? WHAT[rc] : "?");
+}
+
+// launch(path, paced) -> the run's handle; RuntimeError when the cart will
+// not read or its runtime is not in this image.
+static mp_obj_t mod_launch(mp_obj_t path_obj, mp_obj_t paced_obj) {
+    rows_once();
+    uint32_t run = 0;
+    int rc = moy_play_launch(mp_obj_str_get_str(path_obj), NULL,
+                             mp_obj_is_true(paced_obj) ? MOY_PLAY_PACED : 0u, &run);
+    if (rc != MOY_PLAY_OK) {
+        raise_rc(rc);
+    }
+    MP_STATE_VM(moy_play_input_obj) = MP_OBJ_NULL;
+    MP_STATE_VM(moy_play_tick_obj) = MP_OBJ_NULL;
+    return mp_obj_new_int_from_uint(run);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_launch_obj, mod_launch);
+
+// bind(run, input, audio, tick) -- the run's input table (an InputTable or a
+// HostInputTable), its audio session's handle (0: silent) and the Tick a
+// paced run notes its costs into (None: not paced). TypeError for an input
+// that is no table.
+static mp_obj_t mod_bind(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_input_t *in = moy_input_table_of(a[1]);
+    if (in == NULL) {
+        mp_raise_TypeError(MP_ERROR_TEXT("bind: not an input table"));
+    }
+    moy_tick_t *t = NULL;
+    if (a[3] != mp_const_none) {
+        if (!mp_obj_is_type(a[3], &tick_type)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("bind: not a Tick"));
+        }
+        t = T(a[3]);
+    }
+    int rc = moy_play_bind(run_arg(a[0]), in, (uint32_t)mp_obj_get_int_truncated(a[2]), t);
+    if (rc != MOY_PLAY_OK) {
+        raise_rc(rc);
+    }
+    MP_STATE_VM(moy_play_input_obj) = a[1];
+    MP_STATE_VM(moy_play_tick_obj) = a[3] == mp_const_none ? MP_OBJ_NULL : a[3];
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_bind_obj, 4, 4, mod_bind);
+
+// open(run) -- the row's check that its runtime is open; RuntimeError naming
+// what it found otherwise.
+static mp_obj_t mod_open(mp_obj_t run_obj) {
+    uint32_t run = run_arg(run_obj);
+    int rc = moy_play_open(run);
+    if (rc == MOY_PLAY_RAISED) {
+        moy_play_info_t info;
+        moy_play_info(run, &info);
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), info.error);
+    }
+    if (rc != MOY_PLAY_OK) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_open_obj, mod_open);
+
+// frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW bits. The
+// pointer is the console's, in the cart's coordinates. A cart that raised
+// raises RuntimeError with its own text, which is how the Player has always
+// captured a Lua cart's crash.
+static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    uint32_t run = run_arg(a[0]);
+    moy_play_in_t in = {
+        (int32_t)mp_obj_get_int(a[4]), (int32_t)mp_obj_get_int(a[5]),
+        (int32_t)mp_obj_get_int(a[6]),
+    };
+    moy_play_input(run, &in);
+    uint32_t out = 0;
+    mp_int_t n = mp_obj_get_int(a[1]);
+    int rc = moy_play_frame(run, (uint8_t)(n < 0 ? 0 : n > 255 ? 255 : n),
+                            (float)mp_obj_get_float(a[2]), mp_obj_is_true(a[3]), &out);
+    if (rc == MOY_PLAY_RAISED) {
+        moy_play_info_t info;
+        moy_play_info(run, &info);
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), info.error);
+    }
+    if (rc != MOY_PLAY_OK) {
+        raise_rc(rc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 7, 7, mod_frame);
+
+// end(run[, why]) -- the run's books closed; a stale handle is a no-op.
+static mp_obj_t mod_end(size_t n_args, const mp_obj_t *a) {
+    moy_play_end(run_arg(a[0]), n_args > 1 ? mp_obj_get_int(a[1]) : MOY_PLAY_END_QUIT);
+    MP_STATE_VM(moy_play_input_obj) = MP_OBJ_NULL;
+    MP_STATE_VM(moy_play_tick_obj) = MP_OBJ_NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_end_obj, 1, 2, mod_end);
+
+static mp_obj_t stack_obj(uint32_t v) {
+    return v == MOY_PLAY_NO_STACK ? mp_const_none : mp_obj_new_int_from_uint(v);
+}
+
+// info([run]) -> (runtime, vm_free, why, frames, ticks, upcalls, ended,
+// error, stack_open, stack_frame), the live run's or the last one's; None when
+// there is none. `upcalls` is a tuple by class: CONSOLE, APP, DRIVER,
+// SERVICE, REFUSED; the two stack readings are moy_play.stack()'s, taken
+// after the open and after the last frame, None off a board.
+static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
+    uint32_t run = n_args > 0 ? run_arg(a[0]) : moy_play_last();
+    moy_play_info_t i;
+    if (moy_play_info(run, &i) != MOY_PLAY_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t up[MOY_PLAY_UPC];
+    for (int k = 0; k < MOY_PLAY_UPC; k++) {
+        up[k] = mp_obj_new_int_from_uint(i.upcalls[k]);
+    }
+    const char *why = moy_play_why_name(i.why);
+    mp_obj_t t[10] = {
+        mp_obj_new_str(i.runtime, strlen(i.runtime)),
+        mp_obj_new_bool(i.vm_free),
+        mp_obj_new_str(why, strlen(why)),
+        mp_obj_new_int_from_uint(i.frames),
+        mp_obj_new_int_from_uint(i.ticks),
+        mp_obj_new_tuple(MOY_PLAY_UPC, up),
+        mp_obj_new_bool(i.ended),
+        i.raised ? mp_obj_new_str(i.error, strlen(i.error)) : mp_const_none,
+        stack_obj(i.stack_open),
+        stack_obj(i.stack_frame),
+    };
+    return mp_obj_new_tuple(10, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_info_obj, 0, 1, mod_info);
+
+// stack() -> the calling task's stack high-water mark in bytes (the least
+// it has had free since it started), or None off a board.
+static mp_obj_t mod_stack(void) {
+    return stack_obj(moy_play_stack_free());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_stack_obj, mod_stack);
+
+static mp_obj_t mod_current(void) {
+    return mp_obj_new_int_from_uint(moy_play_current());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_current_obj, mod_current);
+
 static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_play) },
     { MP_ROM_QSTR(MP_QSTR_Tick), MP_ROM_PTR(&tick_type) },
     { MP_ROM_QSTR(MP_QSTR_census), MP_ROM_PTR(&mod_census_obj) },
+    { MP_ROM_QSTR(MP_QSTR_launch), MP_ROM_PTR(&mod_launch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bind), MP_ROM_PTR(&mod_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&mod_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&mod_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&mod_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&mod_current_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_PTR(&mod_stack_obj) },
+    { MP_ROM_QSTR(MP_QSTR_QUIT), MP_ROM_INT(MOY_PLAY_QUIT) },
+    { MP_ROM_QSTR(MP_QSTR_VIEW), MP_ROM_INT(MOY_PLAY_VIEW) },
     { MP_ROM_QSTR(MP_QSTR_MAX_CATCHUP), MP_ROM_INT(MOY_TICK_MAX_CATCHUP) },
     { MP_ROM_QSTR(MP_QSTR_MAX_DIV), MP_ROM_INT(MOY_TICK_MAX_DIV) },
 };

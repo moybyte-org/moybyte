@@ -569,6 +569,9 @@ class Player:
     back on Workstation as forwarding properties, so every reader of ws.cart_error/
     ws._update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
+    _play = None                      # the run's frame in C: _bind_play
+    stack_pre = None                  # the task's stack mark before the open: start
+
     def __init__(self, ws, NAMES):
         self.ws = ws
         self.NAMES = NAMES
@@ -616,6 +619,7 @@ class Player:
                                       # handle a ws.runtimes factory returned, Lua or
                                       # wasm; _close_lua() on exit so the cart's whole
                                       # heap dies with its run
+        self._play = None             # the run's frame in C (moy_play), or None: _bind_play
         self._lua_split = None        # its frame_split, bound ONCE per run: _run_ticks
                                       # asks after every tick
         self._sram_run = None         # #211: the Lua allocator's headroom report for the
@@ -773,6 +777,7 @@ class Player:
         lua = self._lua
         self._lua = None
         self._lua_split = None
+        self._play = None
         if lua is not None:
             try:
                 lua.close()
@@ -1189,11 +1194,17 @@ class Player:
         t_api = _ticks_diff(_ticks_ms(), t2)
         src = project.cart["src"]
         _rt = project.cart.get("runtime", "python")
+        # The driving task's stack high-water mark before the runtime opens,
+        # beside the Player's own readings after the open and the frames
+        # (moy_play.info): what the cart path costs the S3s' stacks.
+        _st = getattr(_moy_play, "stack", None)
+        self.stack_pre = _st() if _st is not None else None
         if _rt != "python":
             ok = self._start_runtime(_rt, ns, src, t0, h0,
                                      (t_reclaim, t_audio, t_api))
             if ok:
                 self._arm_pacing(cart)
+                self._bind_play(cart)
             return ok
         code, t_compile_native, _ckey, _csig = self._compile_python(project, src, ns)
         try:
@@ -1622,6 +1633,22 @@ class Player:
         self._tick_edges = getattr(inp, "tick_edges", None)
         self._keep_edges = getattr(inp, "keep_edges", None)
 
+    def _bind_play(self, cart):
+        """Give a runtime cart's frame to the kernel's Player (native/moy_play)
+        when its run offers it (`play_begin`): every tick of a frame then runs
+        in C -- the press edges, the snapshot, the cart, its audio -- and
+        `_run_ticks` makes one call. A lockstep match keeps its own clock and
+        the Python seam until the match is the kernel's."""
+        self._play = None
+        begin = getattr(self._lua, "play_begin", None)
+        if begin is None or self._netplay is not None:
+            return
+        try:
+            self._play = begin(cart.get("path"), self.sched, bool(self.tick_ms))
+        except Exception as exc:  # noqa: BLE001 -- the Python frame still runs it
+            print("PLAY:", exc)
+            self._play = None
+
     def _loop_dt(self, dt):
         """The dt an UNPACED tick gets: the loop's own for a tool/app, and for
         a `"fps": "free"` game the same CLAMPED at FREE_DT_MAX -- a stall (a
@@ -1684,6 +1711,12 @@ class Player:
         """`n` logic ticks of `dt`. Each takes the latched press edges, and the
         last carries this frame's draw for a runtime whose tick fuses _update
         and _draw (the Lua tier)."""
+        play = self._play
+        if play is not None:
+            self._keyp_latch = 0
+            if n:
+                play(n, dt, draw)
+            return
         upd = self._update
         lua = self._lua
         fs = self._lua_split

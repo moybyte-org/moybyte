@@ -7,10 +7,18 @@
 #define MOY_RT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct {
     const char *name;           // the manifest's "runtime"
-    bool vm;                    // its ops call into the VM
+    // The run's runtime opened: 0, or -1 with the reason in `err`. While the
+    // VM is up the binding has built the console and the runtime over its
+    // buffers, and the row's open checks that it did.
+    int (*open)(char *err, size_t n);
+    // One tick: _update, then _draw unless `draw` is 0, back to back in C,
+    // which is why the two are one op. 0, or -1 with the cart's error in `err`.
+    int (*frame)(float dt, int draw, char *err, size_t n);
+    bool vm;                    // its ops call into the VM; NULL ops then
 } moy_rt_ops_t;
 
 #define MOY_RT_ROWS 4

@@ -265,6 +265,26 @@ def test_a_cart_volume_turns_its_session_down_never_past_the_console():
 
 
 @requires_synth
+def test_an_edited_bank_reaches_the_kernel_with_no_verb_through_python():
+    """A Lua or compiled cart's sfx() plays in C straight into its session
+    (native/moy_play), so the Music editor's in-place edit during a playtest
+    cannot wait for the next Python verb to re-push the bank: touch() pushes
+    it to every session open over the bank, and a closed one leaves the list."""
+    from runtime import audio_session
+    bank = audio.AudioBank.default()
+    sess = audio_session.AudioSession(bank, "cart")
+    pushed = []
+    real = sess._push
+    sess._push = lambda: (pushed.append(bank.rev), real())
+    bank.touch()
+    assert pushed == [bank.rev] and sess._rev == bank.rev
+    sess.close()
+    assert sess not in bank.sessions
+    bank.touch()
+    assert pushed == [bank.rev - 1]
+
+
+@requires_synth
 def test_the_pump_pulls_the_rate_a_frame_stands_for():
     from runtime import audio_session
     pump = audio_session.PcmPump(8000)

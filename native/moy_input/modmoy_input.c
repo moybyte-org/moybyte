@@ -483,6 +483,17 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &host_locals
     );
 
+// The C table under a Python input table (an InputTable or a
+// HostInputTable, never a subclass), or NULL when `o` is neither or its
+// table was released: what the Player's binding reads a run's input from.
+moy_input_t *moy_input_table_of(mp_obj_t o) {
+    const mp_obj_type_t *type = mp_obj_get_type(o);
+    if (type != &input_table_type && type != &host_table_type) {
+        return NULL;
+    }
+    return ((input_table_obj_t *)MP_OBJ_TO_PTR(o))->t;
+}
+
 // The drivers' table, one wrapper for the VM's life.
 static mp_obj_t input_kernel(void) {
     mp_obj_t o = MP_STATE_VM(moy_input_kernel_obj);

@@ -61,7 +61,7 @@ part that remains Python and why.
 
 | file | lands in | deleted | stays, and why |
 |---|---|---|---|
-| `runtime/player.py` | `+native/moy_play/moy_play.c` | the run's lifecycle, the frame (key edges, ticks, draw, audio pull, the periodic pmem flush, `quit()`), the crash capture, the hold-to-exit gesture, pacing, the run's diag lines; the error, fit and newer-console panels once the chrome lands (§6 step 2) | the **Python runtime**: compile, auto-native, the code cache, the namespace `make_api` builds, a traceback's cart line. It is the runtime map's Python row (§3.3). The file keeps its name |
+| `runtime/player.py` | `native/moy_play/moy_play.c` | the run's lifecycle, the frame (key edges, ticks, draw, audio pull, the periodic pmem flush, `quit()`), the crash capture, the hold-to-exit gesture, pacing, the run's diag lines; the error, fit and newer-console panels once the chrome lands (§6 step 2) | the **Python runtime**: compile, auto-native, the code cache, the namespace `make_api` builds, a traceback's cart line. It is the runtime map's Python row (§3.3). The file keeps its name |
 | `runtime/tick_model.py` | `native/moy_play/moy_tick.c` | all of it | — |
 | `device/moycore_glue.py` | `native/moycore/moycore_run.c` and the map's Lua and wasm rows | all of it: `MoycoreRun`'s refresh, drain and persist; `WasmRun`, `CartFrame`, `aot_path`, `wasm_head`, `missing_imports`, the fit check, the module's signature check, `reserve_p8_memory`, `make_runtimes` | — |
 | `native/moycore/modmoycore.c` | **split**: `native/moycore/moycore_run.c` (no `py/` include: the console over kernel buffers, the snapshot, the audio queue into the run's session, pmem, the layer and image seams, the wasm session's requests through the kernel's volume) and `modmoycore.c` (the binding) | `read_on_vm`, `files_on_vm` and the root pointers they read | the binding, for a Lua run that keeps the VM (§2): `register()`'s trampolines live only there |
@@ -195,15 +195,15 @@ outlived its run is STALE.
     typedef struct {
         const char *name;                     // the manifest's "runtime"
         int  (*open)(moy_run_row_t *r, const moy_cart_t *c, char *err, size_t n);
-        int  (*init)(moy_run_row_t *r);
-        int  (*tick)(moy_run_row_t *r, float dt);
-        int  (*draw)(moy_run_row_t *r);
+        int  (*frame)(moy_run_row_t *r, float dt, bool draw);   // _update, then _draw
         void (*close)(moy_run_row_t *r);     // idempotent, safe from any state
         int  (*fit)(const moy_cat_entry_t *e, moy_fit_t *need, moy_fit_t *have);   // NULL: none
         bool vm;                              // its ops call into the VM
     } moy_rt_ops_t;
     const moy_rt_ops_t *moy_rt_get(const char *name);    // NULL: not in this image
 
+A tick and its draw are one op because both C runtimes run `_update` and
+`_draw` back to back (moycore's frame); a logic-only tick passes `draw` false.
 The Lua and wasm rows are C. The Python row is registered by the MicroPython
 binding when a VM starts and withdrawn at its stop, its ops counted APP
 upcalls. A runtime an image lacks is an absent row and the runtime-missing

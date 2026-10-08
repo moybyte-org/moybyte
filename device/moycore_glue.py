@@ -12,23 +12,29 @@
 #   make_runtimes         every runtime this image has
 """The host half of moycore (stage 2): what the frame loop does around tick().
 
-`LuaCartRun` next door registers ~40 Python closures as Lua globals and the
-cart calls back into Python hundreds of times a frame. `MoycoreRun` registers
-nothing: libmoy's own binding installs the whole verb table as C functions, and
-this class does the three things that cannot live in C --
+`MoycoreRun` registers nothing per verb: libmoy's own binding installs the
+whole verb table as C functions. Around the tick there are three jobs --
 
-  * REFRESH the input snapshot before the tick. Buttons, time, the pointer and
-    the last typed key are written into one `array("i")`; the cart's btn() is
-    then an array read on the C side of the wall, however many times it asks.
-  * DRAIN the audio queue after it: one call into the kernel's session per
-    queued command, in the queue's order (lua_ext.drain_audio).
-  * PERSIST pmem at boundaries. The C side owns 256 int32 slots with a dirty
-    flag, which is the shape the device already deferred to (#66) -- RAM during
-    play, written at exit, crash capture, workspace swap and the periodic
-    frame-boundary save.
+  * REFRESH the input snapshot before the tick: buttons, time, the pointer and
+    the last typed key in one `array("i")`, so the cart's btn() is an array
+    read on the C side of the wall, however many times it asks.
+  * PLAY the audio queue after it, into the run's kernel session, in the
+    queue's order.
+  * PERSIST pmem at boundaries.
+
+The first two are the kernel's Player's (native/moy_play/moy_play.c) once
+`play_begin` hands it the run: `play_frame` is then one call a frame, and
+only the pointer, the framebuffer swap, quit and the view stay here. A run
+the Player does not take (a lockstep match, an input that is no kernel
+table) ticks through `_update`, which does both in Python (lua_ext's
+snap_shared and drain_audio). PERSIST is here either way: the C side owns
+256 int32 slots with a dirty flag, which is the shape the device already
+deferred to (#66) -- RAM during play, written at exit, crash capture,
+workspace swap and the periodic frame-boundary save.
 
 Everything else the shell needs from a run -- `init`/`update`/`draw`/`close` --
-has the same shape `LuaCartRun` exposes, so `Player` needs no branch.
+has the shape every runtime exposes, so `Player` needs no branch beyond
+asking for `play_begin`.
 
 EVERY Lua cart runs here. moybyte's superset verbs (scenes,
 flags, the batch forms) are not in libmoy's table, so they are REGISTERED on
@@ -86,6 +92,11 @@ try:
     import moy_wasm as _moy_wasm         # the compiled cart's engine
 except ImportError:                      # a build without it: no wasm runtime
     _moy_wasm = None
+
+try:
+    import moy_play as _moy_play         # the kernel's Player: the run's frame
+except ImportError:                      # host tests: CPython's has no Player
+    _moy_play = None
 
 # The cart's clock: ms since the Player's stamp, which snap_shared writes into
 # the snapshot's time slot -- the base libmoy's time() adds the milliseconds
@@ -440,6 +451,65 @@ class MoycoreRun:
     def _last_buf(self):
         return self._buf
 
+    # -- the frame in C (native/moy_play) -------------------------------------
+
+    _run = 0
+
+    def play_begin(self, path, tick, paced):
+        """Hand this run's frame to the kernel's Player: `moy_play.launch`
+        reads the cart's verdict and its runtime's row, `bind` gives it the
+        console's input table, the cart's audio session and the Tick a paced
+        run notes its costs into, `open` checks the runtime the constructor
+        opened. Returns `play_frame`, which the Player calls in place of its
+        per-tick `update`; None where there is no Player in the image, no
+        cart folder, or an input that is no kernel table -- the run then
+        ticks through `update` as before."""
+        launch = getattr(_moy_play, "launch", None)
+        if launch is None or not path:
+            return None
+        try:
+            run = launch(path, bool(paced))
+        except RuntimeError as exc:
+            print("PLAY launch:", exc)
+            return None
+        try:
+            au = getattr(self.ws, "audio", None)
+            _moy_play.bind(run, self.ws.input, int(getattr(au, "h", 0) or 0),
+                           tick if paced else None)
+            _moy_play.open(run)
+        except (RuntimeError, TypeError) as exc:
+            print("PLAY bind:", exc)
+            _moy_play.end(run)
+            return None
+        self._run = run
+        return self.play_frame
+
+    def play_frame(self, n, dt, draw):
+        """`n` ticks of `dt` in C, the last drawing when `draw`: the snapshot
+        from the input table, the cart's frame, its audio into the session.
+        What stays here is what the console knows and C does not yet: the
+        framebuffer a swapping tier re-points, the pointer in the cart's
+        coordinates, the quit flag the Player honours and the view the WM
+        composites from."""
+        ws = self.ws
+        inp = ws.input
+        buf = ws.canvas._buf
+        if buf is not self._buf:
+            _moycore.retarget(buf)
+            self._buf = buf
+        out = self._touch_out
+        try:
+            pointer_state(inp, out)
+            x, y, st = int(out[0]), int(out[1]), int(out[2])
+        except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
+            x = y = st = 0
+        bits = _moy_play.frame(self._run, n, dt, draw, x, y, st)
+        if bits:
+            if bits & _moy_play.QUIT:
+                inp.cart_quit = True
+            if bits & _moy_play.VIEW:
+                self._sync_view()
+
     # -- exit ---------------------------------------------------------------
 
     def flush_pmem(self):
@@ -463,6 +533,9 @@ class MoycoreRun:
         return True
 
     def close(self):
+        if self._run:
+            _moy_play.end(self._run)
+            self._run = 0
         try:
             self.flush_pmem()
         finally:

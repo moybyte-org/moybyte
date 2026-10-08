@@ -902,6 +902,21 @@ def _remote_state(ws):
         v = pl.verdict if st.get("cart") else None
         st["run"] = (None if v is None else
                      {"runtime": v[0], "vm_free": bool(v[1]), "why": v[2]})
+        # The run's frame in the kernel's Player (native/moy_play): its
+        # frames and ticks there, and the upcalls by class since its launch
+        # (CONSOLE, APP, DRIVER, SERVICE, REFUSED). None while the run ticks
+        # through Python, or with no cart in front.
+        info = None
+        if st.get("cart") and getattr(pl, "_play", None) is not None:
+            import moy_play
+            info = moy_play.info()
+        st["play"] = (None if info is None else
+                      {"runtime": info[0], "frames": info[3], "ticks": info[4],
+                       "upcalls": list(info[5]),
+                       # the task's stack high-water mark in bytes: before the
+                       # runtime opened, after the Player's open, after the
+                       # last frame (None off a board)
+                       "stack": [pl.stack_pre, info[8], info[9]]})
     except Exception as exc:  # noqa: BLE001
         st["tick_err"] = str(exc)
     try:

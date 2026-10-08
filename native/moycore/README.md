@@ -9,15 +9,19 @@ binding — all 38 SPEC.md verbs as C functions against a `moy_console` — and
 `moy.h` exports `moy_lua_open`/`init`/`update`/`draw`. This module is the HOST
 half: what a *moybyte* console is made of. The console itself -- the pieces
 below but the canvas, with libmoy's host callbacks -- is `moycore_run.c`,
-which includes nothing of a VM: `modmoycore.c` binds it to buffers Python
-owns, and the host's two ctypes shims (`runtime/moyhost_lua.c`,
-`runtime/moyhost_wasm.c`) run the same file.
+and the cart's Lua VM -- its allocator and pool, open, load, frame and close
+-- is `moycore_lua.c`; neither includes anything of MicroPython.
+`modmoycore.c` binds them to buffers Python owns, and the host's two ctypes
+shims (`runtime/moyhost_lua.c`, `runtime/moyhost_wasm.c`) run the console's
+file. On a VM tier a run's frame is the kernel's Player's
+(`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and
+plays the queue.
 
 | piece | how |
 |---|---|
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |
-| input, time, pointer | a SNAPSHOT array the frame loop refreshes before the tick — `btn()` sixty times a frame costs zero crossings |
-| audio | a command QUEUE (int32) the host drains after the tick, order preserved |
+| input, time, pointer | a SNAPSHOT array filled before each tick -- by the Player from the input table and the pointer the console publishes, by the host's shim from its own input -- so `btn()` sixty times a frame costs zero crossings |
+| audio | a command QUEUE (int32) played after each tick in its order -- by the Player straight into the run's audio session |
 | pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
 | config | a C table of `key\0value\0` pairs COPIED in at `run_begin` (`lua_ext.cfg_blob`), so a compiled cart's session reads it on its own thread with no VM asked |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
