@@ -787,9 +787,6 @@ _FROZEN_HATCH = {
     "update_ui.py": (1,
         "one line per update PHASE, inked by what is happening (downloading / "
         "done / failed) -- a status colour, not a state of the widget"),
-    "system_menu_ui.py": (1,
-        "the popup's section HEADER: its dark-chrome grey is a literal, and "
-        "only the light branch reads a role"),
     "storybook_app.py": (1,
         "a deck row is cream paper with black ink -- frozen off-token, the "
         "case the hatch is documented for"),
@@ -919,9 +916,8 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
         "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
         "settings_layer.py": 6,         # the rows, the wifi list, the notes
         "storybook_app.py": 1,          # the + NEW row
-        "system_menu_ui.py": 1,         # the popup's rows
     }, named
-    assert sum(named.values()) == 12
+    assert sum(named.values()) == 11
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():
@@ -994,7 +990,7 @@ def test_the_second_skin_reaches_the_kinds_that_moved():
 # row is never rendered at rest. Every other state below IS netted by a golden
 # (verified by mutation: `row_menu` REST turns all ten golden rows red).
 _PRE_207_TRIPLES = {
-    ("row_menu", ui.REST):  # settings_layer._draw_settings_row, system_menu_ui
+    ("row_menu", ui.REST):  # settings_layer._draw_settings_row, the system menu (moy_chrome)
         lambda th: (None, th["chrome_ink_dim"], None),
     ("row_menu", ui.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),

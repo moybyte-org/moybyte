@@ -613,6 +613,17 @@ class P4Board:
         st = self.state()
         if not st.get("cart"):
             return
+        if st.get("front"):
+            # A run the kernel drives (native/moy_play's front): its `state`
+            # is the kernel's, which knows no desk, and the console's frame is
+            # not running to take `ws.exit()`. The kernel's `end` closes it
+            # the way the hold does; a windowed tier gets its desk back.
+            self.cmd("end", wait_for="REMOTE")
+            st = self._settle(lambda s: not s.get("cart"), settle)
+            if st.get("desk") is False:
+                self.pyexec("ws.open_desk()")
+                self._settle(lambda s: s.get("desk"), settle)
+            return
         had_desk = st.get("desk")
         self.pyexec("ws.exit()")
         # The close lands over a few frames, so poll the stack rather than

@@ -30,6 +30,9 @@
 #if __has_include("esp_ota_ops.h")
 #define MOY_LOOP_ESP 1
 #include "py/ringbuf.h"
+#include "shared/runtime/interrupt_char.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "moy_kernel.h"
@@ -45,6 +48,7 @@ void moy_input_loop_inputs(uint32_t now, bool *click, bool *active) __attribute_
 void moy_input_loop_pointer(uint32_t now, bool click, bool swallow) __attribute__((weak));
 void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge) __attribute__((weak));
 void moy_input_loop_tail(void) __attribute__((weak));
+void moy_match_kernel_poll(uint32_t now) __attribute__((weak));
 void moy_glass_loop_present(void) __attribute__((weak));
 void moy_glass_loop_fence(void) __attribute__((weak));
 void moy_glass_loop_idle(void) __attribute__((weak));
@@ -65,7 +69,21 @@ static uint32_t b_us(void) {
     return (uint32_t)mp_hal_ticks_us();
 }
 
+bool moy_play_front_live(void) __attribute__((weak));
+
 static void b_sleep(uint32_t ms) {
+    #if MOY_LOOP_ESP
+    // A run in the kernel's front runs no Python while it paces: the port's
+    // delay would run the scheduler's callbacks and raise a pending Ctrl-C
+    // from inside the sleep, where the front's next frame takes it instead.
+    if (moy_play_front_live != NULL && moy_play_front_live()) {
+        if (ms > 0) {
+            TickType_t t = pdMS_TO_TICKS(ms);
+            vTaskDelay(t > 0 ? t : 1);
+        }
+        return;
+    }
+    #endif
     mp_hal_delay_ms(ms);
 }
 
@@ -117,9 +135,13 @@ static void b_repaint(void) {
 }
 
 static void b_tail(uint32_t now, bool drew) {
-    (void)now;
     if (moy_input_loop_tail != NULL) {
         moy_input_loop_tail();
+    }
+    // The radio link's drain and beacon (moy_play's moy_match), in C: a
+    // match's protocol makes no crossing.
+    if (moy_match_kernel_poll != NULL) {
+        moy_match_kernel_poll(now);
     }
     // The idle-band drain: the overlapped flush returns with bands queued,
     // and a frame the console's gate skipped never reaches the flush that
@@ -361,8 +383,15 @@ void moy_loop_board_vm_stop(void) {
 }
 
 // The console registered its upcalls: run its frames until the dev channel
-// asks for the REPL, a Ctrl-C arrives, or the upcalls go.
+// asks for the REPL, a Ctrl-C arrives, or the upcalls go. The interrupt
+// character is armed for the loop's whole life: pyexec arms it only while
+// main.py runs, and the loop runs after main.py returned. The serial ISR then
+// takes a 0x03 as a scheduled KeyboardInterrupt (a run in the kernel's front
+// ends with why SERIAL first), and `recv` disarms it for its payload.
 int moy_loop_board_run(void) {
+    #if MOY_LOOP_ESP && MICROPY_KBD_EXCEPTION
+    mp_hal_set_interrupt_char(3);       // Ctrl-C
+    #endif
     for (;;) {
         nlr_buf_t nlr;
         int r;
@@ -381,6 +410,9 @@ int moy_loop_board_run(void) {
             }
         }
         #if MOY_LOOP_ESP
+        #if MICROPY_KBD_EXCEPTION
+        mp_hal_set_interrupt_char(-1);
+        #endif
         moy_kernel_rest();      // a loop that ended is not a hang
         #endif
         return r;

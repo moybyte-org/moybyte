@@ -1123,6 +1123,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._play_bezel(sc, ox, oy, scale, src)
         self._blit_game(sc, gc, ox, oy, scale, src=src)
 
+    def play_viewport(self):
+        """The play world's fullscreen game rect, (ox, oy, scale): what a run
+        the kernel drives in front composes (native/moy_play's front). None in
+        the desk world and for a cart-declared view, which the console
+        composes."""
+        if self._order or self._view_src() is not None:
+            return None
+        return FullscreenStackWM.viewport(self)
+
     def _play_bezel(self, sc, ox, oy, scale, src):
         """The play world's letterbox bezel, at most once a frame.
 

@@ -222,9 +222,9 @@ sprints that follow it:
 | the glass: canvas ownership, present, compositors | `device/device_canvas.py`, `device/dsi_panel.py`, `device/p4_canvas.py` | 3 |
 | storage: the SD gate, the store of record and its journal | the boards' `with_sd`, `runtime/moy_journal.py` | 1b and 3 |
 | the frame tail: loop, pump, idle blank, OTA health, PERF, serial | `runtime/frame_loop.py` (deleted by sprint 3's frame-tail pass: `native/moy_kernel/moy_loop.c`), `runtime/perf_line.py`, `runtime/dev_channel.py`, `device/moy_ota.py` | 3 |
-| radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `device/moy_espnow.py`, `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `moy_webserver.py` (deleted by sprint 3's links pass), `runtime/moy_sync.py` | 3 |
+| radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `moy_espnow.py` (deleted by sprint 4: `native/moy_play/moy_match.c`), `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `moy_webserver.py` (deleted by sprint 3's links pass), `runtime/moy_sync.py` | 3 |
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
-| the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `runtime/system_menu_ui.py`, `runtime/netplay.py`, the achievements/notify path | 4 |
+| the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `system_menu_ui.py` and `netplay.py` (deleted by sprint 4: `native/moy_play/moy_chrome.c`, `native/moy_play/moy_match.c`), the notify path | 4 |
 | the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`'s `ArtworkService` (the rest of the file is Paint, an app), `runtime/wallpaper.py` | 5 |
 | the toolkit's core | `runtime/ui.py` | 6 |
 | the window managers | `runtime/wm_windowed.py`, `runtime/wm_desk.py`, `runtime/wm_chrome.py`, the rest of `runtime/console.py` | 7 |
@@ -276,7 +276,7 @@ console needs while no Python app runs is OS.
 | `device/device_wifi.py` | radios and links | 3 | the radio driver; the lease that gates it (`wifi_hold` / `wifi_release`) is the spine's, in `runtime/console_spine.py` over `runtime/moy_spine.py` |
 | `device/dsi_panel.py` | glass | 3 | the shared P4 DSI compositor, rotated variant included |
 | `moy_c6_update.py` | radios and links | 3 | deleted 2026-10-07: the C6's image streams into the radio through `native/moy_net/moy_ota.c`'s C6 sink; `device/moy_ota.py`'s `C6Updater` is Settings → UPGRADE C6 RADIO's face |
-| `device/moy_espnow.py` | radios and links | 3 | the board's one ESP-NOW owner; netplay's lockstep over it is the cart path's |
+| `moy_espnow.py` | cart path | 4 | deleted by sprint 4 step 2: the link's protocol and its lockstep are `native/moy_play/moy_match.c`, polled from the loop's tail; `runtime/players.py` is the console's view |
 | `device/moy_ota.py` | frame tail | 3 | the firmware's identity and the updaters' Settings face over `native/moy_net/moy_ota.c` (crossed 2026-10-07, with its HTTP(S) client, `moy_http.py`); OTA health is `device/moy_ota_health.py`. The Zero takes it |
 | `device/moy_webhost.py` | radios and links | 3 | the webhost; the Zero takes it |
 | `moy_webserver.py` | radios and links | 3 | deleted 2026-10-08: the socket and HTTP core are `native/moy_net`'s, the Zero's setup form included |
@@ -373,7 +373,7 @@ console needs while no Python app runs is OS.
 | `runtime/moyimg.py` | store | 1b | the moyimg codec and the content stamp the store's sidecars are keyed on, split from `runtime/moy_image.py`; the Zero takes it |
 | `runtime/music_editor_ui.py` | app | — | the Editor's Music tab |
 | `runtime/native_build.py` | host-only | — | builds the host's ctypes bindings; the kernel's host binding (§4.2) builds through it from the first crossing |
-| `runtime/netplay.py` | cart path | 4 | lockstep: inputs, never state |
+| `netplay.py` | cart path | 4 | deleted by sprint 4 step 2: lockstep (inputs, never state) is `native/moy_play/moy_match.c` |
 | `runtime/op_history.py` | app | — | the in-RAM undo core every editor and Desk Lab app shares |
 | `runtime/paint_layer.py` | app | — | the sprite and icon paint editor, and EDIT ICONS |
 | `runtime/palette.py` | glass | 3 | the MOY64 table the canvas converts through; the native canvas owns it |
@@ -389,7 +389,7 @@ console needs while no Python app runs is OS.
 | `runtime/storybook_app.py` | app | — | Storybook |
 | `runtime/surface.py` | glass | 3 | the Surface and its dirty protocol, kernel-owned after the `surface_model_v1.md` amendment (§8) |
 | `runtime/system_api.py` | roles | 5 | the user-app permission filter over the roles |
-| `runtime/system_menu_ui.py` | cart path | 4 | the ≡ system menu over a cart |
+| `system_menu_ui.py` | cart path | 4 | deleted by sprint 4 step 2: the menu's drawing is `native/moy_play/moy_chrome.c`, its rows and actions `runtime/console_notices.py`'s |
 | `runtime/system_store.py` | spine | 2 | `system.json`'s owner, the settings store |
 | `runtime/text_console.py` | app | — | a script's screen; a Python script is itself the app |
 | `runtime/text_modes.py` | app | — | the editor mode table |
@@ -570,7 +570,7 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | GPIO IRQs (T-Deck trackball, the GT911 INT gate) | the kernel's IRAM ISRs (`native/moy_input/moy_input_task.c`); a Python `Pin.irq` handler is held in the `machine_pin_irq_handler` root | the kernel's sweep (`moy_kernel_pins_deinit`, in place of `machine_pins_deinit`) removes only the pins with a Python handler; a kernel GPIO ISR survives | the same | 0 (the rule); 3 (landed, input pass) |
 | the input task (T-Deck) | `native/moy_input/moy_input_task.c`'s core-0 task, one pass per frame's kick | no VM call in it; it survives | kept | 3 (landed, input pass) |
 | the BLE keyboard | the kernel's central (`native/moy_input/moy_ble_task.c`): NimBLE's host task runs only C, and the console images carry no `bluetooth` module | the kernel owns the host; the soft reset does not touch it | kept | 3 (landed, input pass) |
-| ESP-NOW | `native/moy_net/moy_link.c` holds esp_now's one receive callback, which latches each frame into the kernel's ring in PSRAM; `device/moy_espnow.py` drains it through `moy_net.Link` per frame | nothing: the port's `espnow` module is out of the console images, so the link and its ring stay up | the same | 3 (landed, pass 2), 4 (lockstep) |
+| ESP-NOW | `native/moy_net/moy_link.c` holds esp_now's one receive callback, which latches each frame into the kernel's ring in PSRAM; the link's protocol (`native/moy_play/moy_match.c`) drains it from the loop's tail | nothing: the port's `espnow` module is out of the console images, so the link and its ring stay up | the same | 3 (landed, pass 2), 4 (lockstep) |
 | the legacy I2S feed | `device_audio.py`'s `i2s.irq`, taken only when the core-1 task failed to start | the object's finaliser, at the sweep | the same | 3 (deleted, 2026-10-07: no Python feeds a speaker) |
 | `machine.Timer`, `micropython.schedule`, UART, socket callbacks, dupterm | no user in `runtime/`, `device/` or a board's modules | `machine_timer_deinit_all`, `machine_uart_deinit_all`, `socket_events_deinit` | kept | — |
 | the console's RX ISR | `usb_serial_jtag.c` wakes `mp_main_task_handle` on every packet | the VM's task never dies | the handle moves to the kernel's task before the VM's task is deleted, or a byte from the host notifies a freed task | 0 |

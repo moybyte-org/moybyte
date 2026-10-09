@@ -156,8 +156,8 @@ static mp_obj_t rec_dict(const moy_crash_rec_t *r) {
 
 static mp_obj_t mod_arm(mp_obj_t role, mp_obj_t id) {
     mp_int_t r = mp_obj_get_int(role);
-    if (r != MOY_ROLE_APP && r != MOY_ROLE_WALLPAPER) {
-        mp_raise_ValueError(MP_ERROR_TEXT("role: 1 (app) or 2 (wallpaper)"));
+    if (r != MOY_ROLE_APP && r != MOY_ROLE_WALLPAPER && r != MOY_ROLE_GAME) {
+        mp_raise_ValueError(MP_ERROR_TEXT("role: 1 (app), 2 (wallpaper) or 3 (game)"));
     }
     moy_kernel_arm((int)r, id == mp_const_none ? NULL : mp_obj_str_get_str(id));
     return mp_const_none;
@@ -192,6 +192,7 @@ static const mp_rom_map_elem_t moy_crash_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_panic), MP_ROM_PTR(&mod_panic_obj) },
     { MP_ROM_QSTR(MP_QSTR_APP), MP_ROM_INT(MOY_ROLE_APP) },
     { MP_ROM_QSTR(MP_QSTR_WALLPAPER), MP_ROM_INT(MOY_ROLE_WALLPAPER) },
+    { MP_ROM_QSTR(MP_QSTR_GAME), MP_ROM_INT(MOY_ROLE_GAME) },
 };
 static MP_DEFINE_CONST_DICT(moy_crash_globals, moy_crash_globals_table);
 

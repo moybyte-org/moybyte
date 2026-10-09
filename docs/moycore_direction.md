@@ -10,10 +10,14 @@ the rows still open, and the gates that can still kill a claim. Numbers live in
 
 ## 1. What the engine IS now
 
-A Lua cart's whole frame runs inside libmoy: `moycore.tick(dt)` calls `_update`
-and `_draw` back to back with no return to Python. MicroPython is the shell and
-is not the engine. There is exactly **one** Lua runtime on every tier — boards,
-browser, host — and `import moy_lua` is meant to fail.
+A Lua cart's whole frame runs inside libmoy: moycore's frame calls `_update`
+and `_draw` back to back with no return to Python, and the kernel's Player
+(`native/moy_play/moy_play.c`) is what calls it. MicroPython is neither the
+engine nor the cart's loop: a VM-free Lua run (`docs/kernel_cartpath_2026-10.md`
+§2) is the kernel loop's foreground on the boards — its input, ticks, chrome
+and present in C, no upcall from launch to exit — and the VM stays up only
+for the shell around it. There is exactly **one** Lua runtime on every tier —
+boards, browser, host — and `import moy_lua` is meant to fail.
 
 The ladder that got there, one line each, because none of it is direction any
 more: stage 0 host-embedded audio `ff69071` (2026-08-11) · the cheap M0 levers
@@ -98,19 +102,18 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   three (`make_layer`/`draw_layer`/`image`) ride int handles plus a Lua prelude
   because a trampoline marshals scalars and tuples. A cart needing a
   Python-backed verb does not need a second engine.
-  **What a cart DRAWS into a layer is libmoy's (#225, 2026-10-04).** The layer
-  object stays the console's — an off-heap canvas, lent to the run and
-  composited by `draw_layer`'s blit — while each layer method is the screen's
-  libmoy verb with the console's canvas pointed at the layer's buffer for one
-  call (`native/moycore/moycore_layers.h`, the shape of libmoy's own layer
-  method and of the wasm binding's `target`). That gives a layer SPEC.md 6's
-  whole verb set with no trampoline per verb, which could not have carried
-  `sspr` and `tline` anyway (more arguments than either bridge passes). It was
-  forced by conformance — moy-spec `403680a`'s five `layer_*` scenes — not by a
-  hot cart, and it is not a second console in C: the canvas is the screen's
-  `moy_canvas`, the verbs are the screen's. **What would reopen the layer
-  OBJECT in C:** a Lua cart that composites many layers per frame, since
-  `draw_layer` is still one trampoline a call.
+  **What a cart DRAWS into a layer is libmoy's (#225, 2026-10-04).** Each
+  layer method is the screen's libmoy verb with the console's canvas pointed
+  at the layer's buffer for one call (`native/moycore/moycore_layers.h`, the
+  shape of libmoy's own layer method and of the wasm binding's `target`).
+  That gives a layer SPEC.md 6's whole verb set with no trampoline per verb,
+  which could not have carried `sspr` and `tline` anyway (more arguments than
+  either bridge passes). It was forced by conformance — moy-spec `403680a`'s
+  five `layer_*` scenes — not by a hot cart, and it is not a second console in
+  C: the canvas is the screen's `moy_canvas`, the verbs are the screen's. On
+  the boards and in the browser the layer's pixels, its `draw_layer` blit and
+  a paint image are the run's own C (#224, `bc88eb2`), so a layer cart makes
+  no crossing; the host keeps the console's layer object behind a trampoline.
 - **Registration is a DENY list, not an allow list** — what is stable and
   enumerable is what libmoy OWNS. One definition, `runtime/lua_ext.py`, imported
   by every runtime including the host's; an allow list silently drops any verb

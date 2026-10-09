@@ -101,7 +101,7 @@ existing `make_api`, returning the small number of privileged callables a system
 This section is **evidence, not proposal.** §2.1 says the privileged API "can't be
 designed in the abstract — the extraction reveals it." The 2026-07-05 refactor did that
 extraction: it pulled four chrome surfaces out of `Workstation` into self-contained UI
-classes (`perf_hud.py`, `update_ui.py`, `system_menu_ui.py`, `achievements_ui.py`), and
+classes (`perf_hud.py`, `update_ui.py`, the system menu's, `achievements_ui.py`), and
 each class's docstring records a **"Dependency profile (the facade lens)"** — the exact
 `ws.*` it touches, split into *shared / non-privileged* vs *privileged*. The list below
 is those profiles consolidated (plus a pre-extraction profiling of the surfaces still in
@@ -116,7 +116,7 @@ persistence layer, which is NOT part of `make_system_api`):
 |---|---|---|
 | Perf HUD | `perf_hud.py` (stage 5) | **none** — read-only frame-timing (`perf_snapshot`) |
 | OTA update | `update_ui.py` (stage 6) | **`ota`** — the updater handle (check/download/install/reset) |
-| System menu | `system_menu_ui.py` (stage 7) | **`reboot`**, **`del_cart`**, **`restart_cart`**, **`open_settings`**, open-about |
+| System menu | `console_notices.py`'s `SystemMenuUI` (stage 7; its drawing is `native/moy_play/moy_chrome.c`) | **`reboot`**, **`del_cart`**, **`restart_cart`**, **`open_settings`**, open-about |
 | Achievements/eggs | `achievements_ui.py` (stage 8) | **none** — shared `ws.ach` + persistence via the shared `_with_sd` |
 | Settings | *(still in Workstation)* | **`toggle_webhost`**, **`set_diag_live`**, **`set_font_scale`**, **`persist_system`** + delegates into ota/theme/achievements (**the aggregator — its API is the union of the others**) |
 | Theme | *(still in Workstation)* | **`wallpaper.select`/`cycle`**, **`icons.edit`/`save`** (repaints system chrome) |

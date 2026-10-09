@@ -134,12 +134,11 @@ typedef struct {
 } moy_loop_ops_t;
 
 // The services a frame's tail calls up into while they are live: the
-// webhost's Python routes while it serves or says goodbye, the link's
-// netplay drain while a match runs, the OTA confirm's marker once. One
-// upcall a frame carries every bit; none while no bit is set.
+// webhost's Python routes while it serves or says goodbye, the OTA confirm's
+// marker once. One upcall a frame carries every bit; none while no bit is
+// set. (The radio link's drain is C, moy_match: no bit.)
 enum {
     MOY_SVC_WEB = 1u << 0,
-    MOY_SVC_LINK = 1u << 1,
     MOY_SVC_UPDATE = 1u << 2,
     MOY_SVC_HEALTHY = 1u << 3,
     MOY_SVC_DIAG = 1u << 4,
@@ -185,6 +184,8 @@ void moy_loop_end(int why);
 int moy_loop_word(const char *line);
 int moy_loop_service(uint32_t which);
 void moy_loop_say(const char *fmt, ...);
+// A whole line as it is, however long (moy_loop_say formats into 384 bytes).
+void moy_loop_say_line(const char *line);
 void *moy_loop_alloc(size_t n);
 
 // -- what the console tells the loop ------------------------------------------

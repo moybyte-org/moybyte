@@ -924,6 +924,13 @@ __attribute__((weak)) void moy_glass_vm_stop(void) {
 __attribute__((weak)) void moy_glass_vm_swept(void) {
 }
 
+// The cart path's teardown (native/moy_play, native/moycore): a run the
+// console never closed -- a Ctrl-C that reached the REPL mid-run, a
+// SystemExit -- ends with the VM, or the next VM's first run is refused as
+// already open. Weak, so an image without the Player links.
+__attribute__((weak)) void moy_play_vm_stop(void) {
+}
+
 // The links' teardown (native/moy_net/moy_ota.h): the client's connections and
 // an update still streaming are closed with the VM that opened them. Weak, so
 // an image without moy_net links.
@@ -1174,6 +1181,7 @@ soft_reset_exit:
     moy_loop_board_vm_stop();
     moy_kernel_rest();
     moy_kernel_kstop_line("before");
+    moy_play_vm_stop();
     moy_glass_vm_stop();
     moy_net_vm_stop();
     // MOY: the glass is fenced; the kernel's loop task drives the frames

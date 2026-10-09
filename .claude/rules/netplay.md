@@ -1,7 +1,7 @@
 ---
 paths:
-  - "runtime/netplay.py"
-  - "device/moy_espnow.py"
+  - "native/moy_play/moy_match*"
+  - "runtime/players.py"
   - "native/moy_c6/**"
   - "docs/netplay_v1.md"
 ---
@@ -19,11 +19,14 @@ four on-glass bugs no host test caught) and
 `docs/history/espnow_p4_2026-08.md` (the C6-shim track, phases A-G). What
 belongs here is only what a coder must not undo:
 
-- **`runtime/netplay.py`** is the deterministic core and an import-free leaf like
-  `players.py` (the button order arrives as a constructor argument, so `cart_api`
-  stays its one author). **`device/moy_espnow.py`** owns ESP-NOW's single global
-  recv slot for the whole firmware and dispatches by frame type; anything else
-  that ever wants the radio registers there rather than opening its own.
+- **`native/moy_play/moy_match.c`** is the deterministic core and the link's
+  protocol in C -- the session, the tape, the handshake -- and the kernel's one
+  instance owns the radio's receive ring (`native/moy_net/moy_link.c` holds
+  ESP-NOW's single recv slot), polled from the loop's tail with no crossing;
+  anything else that ever wants the radio goes through it rather than opening
+  its own. `runtime/players.py` is the console's view: the radio's bring-up,
+  the session's player slots, a Python cart's random stream, the actions the
+  link leaves (the button order arrives from `cart_api`, its one author).
 - **The payload is INPUTS, never state**, and that is a measurement rather than a
   taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
   frame desyncs the two sims for good, and silently. Do not "improve" either one.

@@ -93,6 +93,8 @@ class Desktop:
         moy_input.loop_bind(pointer, touch=self.touch, ble=ble, ball=ball,
                             kick_at_tail=kick_at_tail)
         moy_glass.loop_bind(self.comp)
+        if hasattr(moy_glass, "front"):
+            ws.front_bind = _front_binder(ws, self.comp, game, sys_canvas, moy_glass)
         cursor = _cursor_delta
 
         def handle_input():
@@ -152,6 +154,27 @@ class Desktop:
         return self
 
 
+def _front_binder(ws, comp, game, sys_canvas, glass):
+    """`ws.front_bind`: give the kernel's Player this compositor as the ends
+    of a run in the loop's foreground (moy_glass.front), answering whether it
+    took. A banded board whose game canvas IS the panel presents it as is; a
+    DSI board scales the game canvas into the play world's rect, which the
+    desk world (a window's run) and a cart-declared view leave to the
+    console."""
+    if game is sys_canvas:
+        return lambda: glass.front(comp)
+
+    def bind():
+        vp = getattr(ws.wm, "play_viewport", None)
+        g = vp() if vp is not None else None
+        if g is None:
+            return False
+        ox, oy, scale = g
+        smooth = bool(getattr(type(sys_canvas), "_smooth", True))
+        return glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+    return bind
+
+
 class _FrameClock:
     """`pump.last` for the tools: the kernel loop's frame-top clock."""
 
@@ -166,8 +189,7 @@ class _FrameClock:
 def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
-    says goodbye, the link's netplay drain while a match runs, and the OTA
-    confirm's pending marker, once. Answers the bits it still wants."""
+    says goodbye, and the OTA confirm's pending marker, once. Answers the bits it still wants."""
     def service(bits):
         keep = 0
         if bits & SVC_WEB:
@@ -177,11 +199,6 @@ def make_service(ws, loop):
                     wh.poll()
                 except Exception as exc:  # noqa: BLE001 -- never break a frame
                     print("WEB ERR %s: %s" % (type(exc).__name__, exc))
-        if bits & SVC_LINK:
-            lk = getattr(ws, "link", None)
-            if lk is not None and lk.active:
-                lk.poll(ws)
-                keep |= SVC_LINK
         if bits & SVC_HEALTHY:
             upd = getattr(ws, "updater", None)
             if upd is not None:
@@ -193,7 +210,7 @@ def make_service(ws, loop):
     return service
 
 
-SVC_WEB, SVC_LINK, SVC_UPDATE, SVC_HEALTHY = 1, 2, 4, 8
+SVC_WEB, SVC_UPDATE, SVC_HEALTHY = 1, 4, 8
 
 
 def bt_command(keyboard, comp=None):

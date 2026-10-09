@@ -143,7 +143,7 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
     # starts the radio; pm=PM_NONE costs power and a console on its shelf has
     # nobody to talk to).
     try:
-        from moy_espnow import make_link
+        from players import make_link
         ws.link = make_link(board=link_id,
                             name=ws.system.get("name", link_id))
         ws.net = ws.link.net

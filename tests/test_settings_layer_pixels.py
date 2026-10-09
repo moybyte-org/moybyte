@@ -423,7 +423,7 @@ def test_the_hand_rolled_row_idiom_is_gone(tmp_path):
     pixel hash cannot see, because a hand-rolled copy that happens to be
     byte-identical to `ui.row` is exactly what this phase exists to delete."""
     import re
-    group = ("settings_layer.py", "system_menu_ui.py", "achievements_ui.py",
+    group = ("settings_layer.py", "achievements_ui.py",
              "update_ui.py")
     pat = re.compile(
         r"cv\.rect\([^\n]*\bth\[[\"'](?:hilite|selection)[\"']\][^\n]*\)\s*\n"

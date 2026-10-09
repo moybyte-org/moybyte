@@ -158,14 +158,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.history_router import HistoryRouter
 
-# The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
-# builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
-# and toggle_sysmenu() stay on Workstation (tested ws. surface + device). Same
-# bare-or-package fallback as the editors above.
+# The ≡ system menu's rows and actions (#52); its drawing is the kernel's chrome
+# (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
+# and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 try:
-    from system_menu_ui import SystemMenuUI
+    from console_notices import SystemMenuUI
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.system_menu_ui import SystemMenuUI
+    from runtime.console_notices import SystemMenuUI
 
 # The Easter-egg subsystem + achievement/egg drawing (#21): the 3 hidden eggs +
 # their state + _draw_egg/_draw_confetti/_draw_achievements. The achievement
@@ -692,15 +691,21 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # queued, a read may be one round trip stale), so a native backend is a
         # strict improvement and no cart has to know which it got.
         self.gpio = None
-        # #65 Phase 2: the live two-console LOCKSTEP session (netplay.LockstepSession),
-        # set by a transport once two consoles have agreed on a cart and a seed, and
-        # torn down with the run. None = solo, and every cart behaves as it always has.
+        # #65 Phase 2: the live two-console LOCKSTEP session (players.LockstepSession,
+        # a view of the kernel's moy_match), set by the link once two consoles have
+        # agreed on a cart and a seed, and torn down with the run. None = solo, and
+        # every cart behaves as it always has.
         self.netplay = None
-        # The RADIO that forms those sessions (device/moy_espnow.EspNowLink), injected
-        # by run_desktop on the boards that have one. None on the host, the P4 and the
-        # browser -- and absence is the whole interface: nothing here probes for a
-        # radio, it is simply never armed.
+        # The RADIO that forms those sessions (players.EspNowLink over the kernel's
+        # link), injected by run_desktop on the boards that have one. None on the
+        # host and the browser -- and absence is the whole interface: nothing here
+        # probes for a radio, it is simply never armed. The kernel's loop polls the
+        # link in C; the console's frame takes what it left for the console.
         self.link = None
+        # The board's front (device/desktop_spine.py): hands the kernel's Player
+        # the compositor a VM-free game's run is the loop's foreground on. None
+        # on the host and the browser, which keep the console's frame.
+        self.front_bind = None
         self.carts_store = None     # injected: cart store module (moy_carts API)
         # The cart-runtime seam (#67, docs/wasm_tier_plan_2026-09.md): a
         # manifest's "runtime" name -> factory(ns, src) returning a running cart
@@ -1037,8 +1042,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # open. `_about` is a tiny dismissible info modal the About row pops.
         self.sysmenu = Popup()
         self._about = False
-        # The ≡ dropdown / system menu's UI (#52, extracted from this class -- see
-        # system_menu_ui.py): the row builder + per-item actions + drawing.
+        # The ≡ dropdown / system menu's UI (#52, console_notices.SystemMenuUI):
+        # the row builder + per-item actions; the drawing is the kernel's chrome.
         # toggle_sysmenu() + the sysmenu Popup + _about flag stay here (tested ws.
         # surface); the menu just delegates item-building/drawing to this.
         self.menu_ui = SystemMenuUI(self, NAMES)
@@ -1494,8 +1499,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
         if open. Rebuilds the item list so the cart group reflects the current state.
-        The rows + their action callbacks + the drawing live on self.menu_ui
-        (system_menu_ui.py); this stays here as the tested ws. entry point."""
+        The rows + their action callbacks live on self.menu_ui
+        (console_notices.SystemMenuUI); this stays here as the tested ws. entry point."""
         self._dirty = True             # overlay open/close repaints (#44)
         # Anchor the dropdown under the ≡ button's NEW right-zone position (Stage 4
         # moved ≡ off the left edge): right-align the panel to the button so it hangs
@@ -3420,6 +3425,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # which follows Settings -> PERF DIAG on device. perf_hud alone keeps
         # the LIGHT set (frame total, flush, fps): watching the fps chip must
         # not cost milliseconds.
+        lk = self.link
+        if lk is not None and getattr(lk, "_m", None) is not None:
+            lk.sync(self)             # the session the link formed, the cart it asked for
         if dt > 0:
             self._since_draw += dt
             # The loop tick in ms for the input phase (which runs BEFORE frame()

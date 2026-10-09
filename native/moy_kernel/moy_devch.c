@@ -196,6 +196,59 @@ static bool parse_u32(const char *s, uint32_t *out) {
     return true;
 }
 
+// -- the run's words (native/moy_play: weak, so an image without the Player
+// hands them to the console) ---------------------------------------------------
+
+bool moy_play_front_live(void) __attribute__((weak));
+bool moy_play_front_end(int why) __attribute__((weak));
+size_t moy_play_state_json(char *out, size_t n) __attribute__((weak));
+
+static bool front(void) {
+    return moy_play_front_live != NULL && moy_play_front_live();
+}
+
+// `state` while a run is in front is the kernel's: the console's frame is not
+// running, and asking it would be a crossing in the very run being measured.
+static bool w_state(int argc, char **argv, const char *line) {
+    (void)argc;
+    (void)argv;
+    (void)line;
+    if (!front() || moy_play_state_json == NULL) {
+        return false;
+    }
+    static char buf[1024];
+    memcpy(buf, "STATE ", 6);
+    buf[6] = 0;
+    moy_play_state_json(buf + 6, sizeof(buf) - 6);
+    moy_loop_say_line(buf);
+    return true;
+}
+
+// `end`: the run in front ends (the console's next frame takes its route).
+static bool w_end(int argc, char **argv, const char *line) {
+    (void)argc;
+    (void)argv;
+    (void)line;
+    if (!front() || moy_play_front_end == NULL) {
+        return false;
+    }
+    moy_play_front_end(2);              // MOY_PLAY_END_MENU
+    moy_loop_say("REMOTE end");
+    return true;
+}
+
+// `run NAME` with a run in front: the run ends first, then the console's
+// words open NAME as they always do.
+static bool w_run(int argc, char **argv, const char *line) {
+    (void)argc;
+    (void)argv;
+    (void)line;
+    if (front() && moy_play_front_end != NULL) {
+        moy_play_front_end(2);
+    }
+    return false;
+}
+
 static const char *const RUNG_WORDS[MOY_IDLE_RUNGS] = {NULL, "dim", "saver", "blank", "sleep"};
 
 static void say_power(void) {
@@ -268,6 +321,9 @@ static bool w_bl(int argc, char **argv, const char *line) {
 static const moy_devch_word_t KERNEL_WORDS[] = {
     {"power", w_power},
     {"bl", w_bl},
+    {"state", w_state},
+    {"end", w_end},
+    {"run", w_run},
 };
 
 int moy_devch_kernel_words(const moy_devch_word_t **out) {

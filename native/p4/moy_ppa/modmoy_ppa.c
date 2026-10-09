@@ -219,29 +219,10 @@ static void srm_block(size_t n_args, const mp_obj_t *args, size_t i,
 //   scaled block must land inside it (no clip). The source is the whole
 //   picture, or its (bx, by, bw, bh) block: a compiled cart's view of its
 //   frame, or a rect the console painted over one, read where it sits.
-static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t mode) {
-    if (s_srm == NULL) {
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
-    }
-    mp_buffer_info_t dst, src;
-    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
-    mp_int_t dw = mp_obj_get_int(args[1]);
-    mp_int_t dh = mp_obj_get_int(args[2]);
-    mp_int_t dx = mp_obj_get_int(args[3]);
-    mp_int_t dy = mp_obj_get_int(args[4]);
-    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
-    mp_int_t sw = mp_obj_get_int(args[6]);
-    mp_int_t sh = mp_obj_get_int(args[7]);
-    mp_int_t scale = mp_obj_get_int(args[8]);
-    if (scale < 1) {
-        scale = 1;
-    }
-    mp_int_t blk[4];
-    srm_block(n_args, args, 9, sw, sh, blk);
-    if ((mp_int_t)src.len < sw * sh * 2) {
-        mp_raise_ValueError(MP_ERROR_TEXT("source picture"));
-    }
-
+// The scale itself, shared by the binding and the kernel's C callers.
+static esp_err_t srm_do(void *dbuf, size_t dlen, mp_int_t dw, mp_int_t dh, mp_int_t dx,
+                        mp_int_t dy, const void *sbuf, mp_int_t sw, mp_int_t sh,
+                        mp_int_t scale, const mp_int_t blk[4], ppa_trans_mode_t mode) {
     // The out picture is the ROWS the scaled block lands on, not the whole
     // framebuffer -- the same scoping rotate()/rotate_scale() do. The driver's
     // own invalidate is ALREADY row-scoped (ppa_srm.c syncs an "out_buffer
@@ -256,14 +237,14 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
     // number of lines (an RGB565 width that is a multiple of 32px), so a
     // picture that does not qualify keeps the whole buffer.
     mp_int_t ow = blk[2] * scale, oh = blk[3] * scale;
-    uint8_t *out = (uint8_t *)dst.buf;
-    size_t out_len = dst.len;
+    uint8_t *out = (uint8_t *)dbuf;
+    size_t out_len = dlen;
     mp_int_t out_h = dh, out_y = dy;
     if (dw > 0 && dh > 0 && dx >= 0 && dy >= 0
             && dx + ow <= dw && dy + oh <= dh
-            && (mp_int_t)dst.len >= dw * dh * 2
-            && ((uintptr_t)dst.buf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
-        out = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2u;
+            && (mp_int_t)dlen >= dw * dh * 2
+            && ((uintptr_t)dbuf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
+        out = (uint8_t *)dbuf + (size_t)dy * (size_t)dw * 2u;
         out_len = (size_t)oh * (size_t)dw * 2u;
         out_h = oh;
         out_y = 0;
@@ -271,7 +252,7 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
 
     ppa_srm_oper_config_t op = {
         .in = {
-            .buffer = src.buf,
+            .buffer = sbuf,
             .pic_w = (uint32_t)sw,
             .pic_h = (uint32_t)sh,
             .block_w = (uint32_t)blk[2],
@@ -316,6 +297,49 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
     esp_err_t err = ppa_submit_srm(&op);
     if (err != ESP_OK) {
         s_submitted--;   // no transaction queued -> no done callback will fire
+    }
+    return err;
+}
+
+// The kernel's scale (a run in the loop's foreground, native/moy_play): the
+// whole `src` picture, `scale` times, into `dst` at (dx, dy), blocking and
+// bilinear (the PPA's scaler). 0, or the driver's error; -1 before init.
+int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src,
+                    int sw, int sh, int scale) {
+    if (s_srm == NULL) {
+        return -1;
+    }
+    mp_int_t blk[4] = {0, 0, sw, sh};
+    return (int)srm_do(dst, (size_t)dw * (size_t)dh * 2u, dw, dh, dx, dy, src, sw, sh,
+                       scale < 1 ? 1 : scale, blk, PPA_TRANS_MODE_BLOCKING);
+}
+
+static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t mode) {
+    if (s_srm == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
+    }
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]);
+    mp_int_t dy = mp_obj_get_int(args[4]);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(args[6]);
+    mp_int_t sh = mp_obj_get_int(args[7]);
+    mp_int_t scale = mp_obj_get_int(args[8]);
+    if (scale < 1) {
+        scale = 1;
+    }
+    mp_int_t blk[4];
+    srm_block(n_args, args, 9, sw, sh, blk);
+    if ((mp_int_t)src.len < sw * sh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("source picture"));
+    }
+
+    esp_err_t err = srm_do(dst.buf, dst.len, dw, dh, dx, dy, src.buf, sw, sh, scale, blk,
+                           mode);
+    if (err != ESP_OK) {
         mp_raise_msg_varg(&mp_type_OSError,
                           MP_ERROR_TEXT("ppa srm failed: %d"), (int)err);
     }

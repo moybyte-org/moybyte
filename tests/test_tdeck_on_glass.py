@@ -334,6 +334,11 @@ def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
     on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title)
 
 
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_front_run_makes_no_crossing(board, spec, title):
+    on_glass.a_front_run_makes_no_crossing(board, spec, title)
+
+
 # The compiled half of the same check: the blit fixture's frames run in the
 # kernel's Player on the engine's thread, and neither its frames nor its run's
 # books since launch hold an APP, SERVICE or REFUSED crossing; the hello
@@ -410,6 +415,10 @@ def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
 
 def test_loop_is_the_kernels_line_with_every_stage(board):
     on_glass.loop_line_is_the_kernels(board)
+
+
+def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
+    on_glass.a_ctrl_c_ends_a_front_run(board)
 
 
 # LAST in the file: twenty soft resets end on a freshly started VM.

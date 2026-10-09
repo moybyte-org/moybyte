@@ -15,12 +15,15 @@ and the measurement that settled it. Trackers **#65**, **#7**, **#99**.
 
 ## 1. The bodies
 
-`runtime/netplay.py` is the deterministic core — tick clock, input tape,
-`advance()` — an import-free leaf like `players.py` that takes its button order
-as an argument. `device/moy_espnow.py` owns the radio for the whole console:
-ESP-NOW has one firmware-wide receive slot and no second subscriber, so this
-module holds it and dispatches by frame type; anything else wanting the radio
-registers there. `runtime/player.py` adopts a session, feeds it and lets go.
+`native/moy_play/moy_match.c` is the deterministic core — tick clock, input
+tape, `advance()` — and the link's protocol, in C (#224, sprint 4): the kernel's
+one instance owns the radio's receive ring for the whole console (ESP-NOW has
+one firmware-wide receive slot, held by `native/moy_net/moy_link.c`), dispatches
+by frame type and is polled from the loop's tail with no crossing into Python.
+`runtime/players.py` is the console's view of it: the radio's bring-up, the
+session's player slots, the cart it asks the console to open.
+`runtime/player.py` adopts a session, feeds it and lets go; a Lua run's
+lockstep frame is the kernel Player's (`moy_play_lockstep`).
 
 ## 2. Lockstep: what crosses the air, and when a console may simulate
 
@@ -84,9 +87,9 @@ START used to deadlock both consoles for good.
 ## 3. Nothing waits forever — every death has one exit
 
 A frozen screen with no explanation is what this removes. Every way a match can
-end funnels through **`moy_espnow._lost_match(ws, why)`** — print, drop the
-session on BOTH sides (the link's and the console's `ws.netplay`), re-run the
-cart solo. Its callers are the fall-behind death, a host whose invite is never
+end funnels through **one exit in `native/moy_play/moy_match.c`** (`lost`) —
+print, end the session (the console's `ws.netplay` is a view of it and goes
+with it), and ask the console to re-run the cart solo. Its callers are the fall-behind death, a host whose invite is never
 answered, and an inbound T_BYE. Clearing only the link's reference left
 `ws.netplay` pointing at a corpse, and the re-run re-entered `Player.start`,
 whose adoption of `ws.netplay` is how a match forms at all — so the "solo" game
@@ -149,8 +152,8 @@ take it cannot join a match.
 **Board scope is all three consoles**; the browser has no radio and is out. The
 S3 pair talks to its own silicon. The P4 has none of its own and reaches the C6
 over ESP-Hosted 2.12.12's custom RPC through `native/moy_c6` — seventeen
-`esp_now_*` wrappers plus the rate lever, under a stock `modespnow.c` and an
-unchanged `device/moy_espnow.py` — against a shimmed C6 slave the console
+`esp_now_*` wrappers plus the rate lever, under the same link protocol the S3s
+run — against a shimmed C6 slave the console
 flashes itself over SDIO. One rule is load-bearing there: `WLAN.active(True)`
 before the radio, because the C6's radio starts with the host's WLAN. Its send
 began as a synchronous RPC costing **10.2 ms blocked on the VM core per send**

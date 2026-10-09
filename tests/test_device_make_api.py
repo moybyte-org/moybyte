@@ -74,7 +74,7 @@ def _load_moy_runtime():
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "scene_editor_ui",
                  "music_editor_ui",
-                 "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
+                 "perf_hud", "update_ui", "achievements_ui",
                  "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "launcher_layer", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)

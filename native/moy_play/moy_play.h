@@ -11,6 +11,12 @@
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed.
 //
+// THE CRASH RECORD (docs/kernel_cartpath_2026-10.md §8.3). `launch` arms the
+// record's GAME role with a game's id (its folder's stem) before the runtime
+// opens, and `end` clears it: a fault or a hang inside a run names its cart,
+// and a game earns no strikes (no ledger counts the role). The board's kernel
+// is what arms it (moy_kernel_arm); an image without one arms nothing.
+//
 // THE PLAYER (moy_play.c). One run at a time, named by a handle that is
 // refused (STALE) once it ended. `launch`, before the runtime loads, reads
 // the cart's catalogue entry for its runtime and verdict, takes that
@@ -26,9 +32,10 @@
 // the run's upcalls by class since its launch, kept with its info for `state`,
 // and ends its OWNER row, returning any loan the runtime's close left.
 //
-// While the VM is up the console's frame upcall still drives the Player, the
-// binding builds the run's console over Python's buffers before `open`, and
-// closes it after `end`.
+// The binding builds the run's console over Python's buffers before `open`,
+// and closes it after `end`. A VM-free Lua run on a board whose compositor
+// gives the kernel a front is the loop's foreground (below); every other run
+// is driven by the console's frame upcall.
 
 #ifndef MOY_PLAY_H
 #define MOY_PLAY_H
@@ -62,6 +69,8 @@ enum {
 };
 
 bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why);
+// Rule 2 alone: the entry is a game, with the store's default.
+bool moy_play_is_game(const moy_cat_entry_t *e);
 
 // -- the Player ------------------------------------------------------------------
 
@@ -78,6 +87,7 @@ enum {                                          // why a run ended
 
 // libmoy's seven buttons are the input table's first seven bits.
 #define MOY_PLAY_BUTTON_MASK 0x7Fu
+#define MOY_PLAY_HOME_BIT 7             // moy_input's `home`, after the seven
 // A run handle's low byte: generation << 8 | this.
 #define MOY_PLAY_TAG 0x5Au
 #define MOY_PLAY_UPC 5          // MOY_UPC_CLASSES, the loop's crossing classes
@@ -101,6 +111,9 @@ typedef struct {
     bool vm_free;
     bool raised;
     bool ended;
+    bool game;                  // the manifest's type, with the store's default
+    char title[48];             // the manifest's title, "" when it names none
+    char id[24];                // the folder's stem: what the crash record names
 } moy_play_info_t;
 
 int  moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32_t *run);
@@ -121,6 +134,59 @@ uint32_t moy_play_current(void);       // the live run, or 0
 #define MOY_PLAY_NO_STACK 0xFFFFFFFFu
 uint32_t moy_play_stack_free(void);
 uint32_t moy_play_last(void);          // the last run launched, live or ended
+// A LOCKSTEP MATCH (moy_match.h) over the run, when the kernel's link has a
+// live session: the frame's inputs are drained from the ring, and one advance
+// runs when the session's tick is due or a stall retries (the newest packet
+// is resent between ticks). `*ticks` is 1 when this frame simulates: the
+// snapshot then reads the session's two global players, and libmoy's random
+// stream starts from the frame's seed. False: no match, the run is solo.
+bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks);
+#define MOY_PLAY_LOCK_MS 16u            // a stall's retry and a resend: at most this often
+// The seed a matched run's console starts from (its _init draws from it):
+// true while the kernel's link has a live session.
+bool moy_play_lock_seed(uint32_t *seed);
+// THE KERNEL RUN AS THE LOOP'S FOREGROUND (docs/kernel_cartpath_2026-10.md
+// §4). While a run is in front the loop's frame stage calls
+// moy_play_front_frame and makes no console upcall: the run's input (the
+// hold-to-exit gesture, the pointer), its ticks (the tick model's plan, or
+// the match's lockstep), the chrome over it (the pill, the banner, the toast:
+// moy_chrome's raster) and the board's present are all C. A board's
+// compositor gives the front its two ends (moy_front_ops_t); an image whose
+// board gives none keeps the console's foreground, which drives the same
+// Player through its frame upcall.
+//
+// The front hands the frame back to the console -- the run still live --
+// when the run needs it: the cart declared a view the board's present does
+// not compose, it raised (the console's next frame reports it), or the link
+// asked for a cart. It ENDS the run, freezing its books, when the run is
+// over: the hold (END_HOLD), quit() (END_QUIT), a Ctrl-C (END_SERIAL), the
+// dev channel's `end` (END_MENU). The console's next frame takes the route.
+typedef struct {
+    // The run's canvas this frame: its pixels and size (a banded board's
+    // back buffer, which the cart draws straight into).
+    uint16_t *(*canvas)(void *ctx, int *w, int *h);
+    void (*present)(void *ctx, bool drew);
+    // A panel point into the run's canvas; false when outside it.
+    bool (*map)(void *ctx, int32_t *x, int32_t *y);
+    void *ctx;
+} moy_front_ops_t;
+#define MOY_PLAY_HOLD_MS 700u           // the hold-to-exit gesture
+#define MOY_PLAY_FREE_DT 0.1f           // a free-running cart's dt clamp
+void moy_play_front_ops(const moy_front_ops_t *ops);
+// Take the loop's foreground for the live run: OK, NORT where the board has
+// no front or the run's canvas is not the one its present composes.
+int moy_play_front(uint32_t run);
+bool moy_play_front_live(void);
+// One loop frame of the run in front, `dt_us` since the last: 1 drew, 0 did
+// not, -1 the front gave the frame back (the run ended, or needs the console).
+int moy_play_front_frame(uint32_t now, uint32_t dt_us);
+// End the run in front (the dev channel's `end`, a Ctrl-C): false with none.
+bool moy_play_front_end(int why);
+// `state` while a run is in front: the kernel's JSON object (the shell's
+// screen is the run's), or "null" with none in front. The bytes written.
+size_t moy_play_state_json(char *out, size_t n);
+// A Ctrl-C is waiting for the VM (the board's: weak, none elsewhere).
+bool moy_play_interrupt_pending(void) __attribute__((weak));
 // The map's rows this image has: lua and wasm where moycore and its engine
 // are built, python where a VM registers it.
 void moy_play_rows(bool lua, bool wasm, bool python);

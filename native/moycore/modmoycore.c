@@ -88,6 +88,9 @@
 
 // -- helpers -----------------------------------------------------------------
 
+// The kernel's Player, where the image has it (weak: moycore stands alone).
+bool moy_play_lock_seed(uint32_t *seed) __attribute__((weak));
+
 static void *buf_w(mp_obj_t o, size_t *len)
 {
     mp_buffer_info_t bi;
@@ -1159,6 +1162,12 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     // quality choice and this is the quality we want.
     RUN.c.con.rng    = (uint32_t)mp_hal_ticks_us();
     if (RUN.c.con.rng == 0) RUN.c.con.rng = 1;
+    // ...unless a lockstep match is live: then both consoles' _init draw from
+    // the match's seed (native/moy_play/moy_match.h).
+    uint32_t lock_seed;
+    if (moy_play_lock_seed != NULL && moy_play_lock_seed(&lock_seed)) {
+        RUN.c.con.rng = lock_seed;
+    }
 
     if (!vm) {
         // A compiled cart: the console and nothing on it until wasm_open().
@@ -2391,6 +2400,13 @@ static mp_obj_t mod_close(void)
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
+
+// The VM is going (native/moy_kernel's soft reset): a run still open closes
+// with it, while its objects are still the VM's.
+void moycore_vm_stop(void)
+{
+    if (RUN.open) mod_close();
+}
 
 // get_global_len(name) -- a table global's length (Lua's #t), or None: the
 // size of a cart's world, the cheapest true thing to ask about a table.

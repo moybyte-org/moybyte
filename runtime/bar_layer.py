@@ -103,6 +103,15 @@ try:
 except ImportError:                     # host: the runtime package
     from runtime.widgets import _in
 
+try:
+    import chrome_ops as _ch
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import chrome_ops as _ch
+try:
+    import chrome_ops as _ch
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import chrome_ops as _ch
+
 
 
 def _edit_kind(cart):
@@ -414,123 +423,65 @@ class BarLayer:
 
     def _render_cart_bar(self, cv, key):
         """Render the bar's pixels onto `cv` (the offscreen strip, or any canvas)
-        for `key[0]` (`where`). Factored out of _draw_top_bar_cart so the SAME
-        drawing serves both the cache build and the (test/fallback) direct path,
-        which is what makes the cached strip pixel-identical to a direct render.
-        `key` carries the already-computed has_edit (index 2) so the icon choice
-        can't drift from the key."""
+        for `key[0]` (`where`). The pieces are the kernel's strip
+        (native/moy_play/moy_chrome.c: the crash bar, the band, the right zone,
+        a tool's title), the one body every bar draws with; the lent left zone
+        is its app's. Factored out of _draw_top_bar_cart so the SAME drawing
+        serves the cache build and the direct path. `key` carries the already
+        computed has_edit (index 2) so the icon choice can't drift from it."""
         ws = self.ws
         where = key[0]
-        has_edit = key[2]
+        mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
         if where == "desktop":
-            # The running-cart CRASH chrome: the Player's own top bar, drawn only on a
-            # crash (Stage 5 retired the #71 pause frame -- never during play), never a
-            # "zone" (no draw_zone call below this branch's `return`, which is exactly
-            # what keeps the zoned-bar dispatch off the play frame -- see the Stage-4
-            # guardrail test, now driven through the crash state).
-            th = ws.theme_colors
-            cv.rect(0, 0, cv.w, _STATUS_H, th["bar"])
-            cv.rect(0, _STATUS_H - 1, cv.w, 1, th["bar_edge"])       # shelf edge line
-            # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
-            # schema open the cards menu (pencil = EDIT); the rest jump straight to code
-            # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
-            # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
-            # IconSheet slot) so it never goes blank on a device with an older saved theme.
-            ws._glyph("menu", _SYSMENU_BTN, th["chrome_ink"], cv)
-            ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
-            if has_edit is not None:            # a compiled cart has neither
-                ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
-            ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
-            ws._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
-            ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
-            ws._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
-            # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
-            cv.print(self._clock_text(), _BAR_CLOCK[0], 3, th["chrome_ink_dim"], 1)
-            ws._icon(ws._wifi_icon_kind(), _BAR_WIFI[0], _BAR_WIFI[1], cv)
-            ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
+            # The running-cart CRASH chrome: drawn only on a crash, never a
+            # "zone" (no draw_zone below this return, which keeps the zoned-bar
+            # dispatch off the play frame -- the Stage-4 guardrail).
+            has_edit = key[2]
+            edit = -1 if has_edit is None else (1 if has_edit else 0)
+            _ch.replay(mp.chrome_strip_crash(cv.w, edit, self._clock_text(),
+                                             ws._wifi_icon_kind()), cv, ws)
             return
         if where in ("tool", "app"):
-            # Part 4: the minimal TOOL bar. A tool/app runs WITH a bar so it's EXITABLE
-            # (games stay fullscreen-bar-hidden). It draws on the fixed 320x240 GAME canvas
-            # like the running cart. RIGHT zone = the OS status cluster + the context-X (the
-            # X exits the tool -- handle_bar_tap("tool") routes it); LEFT zone = the tool's
-            # TITLE only, NO tab ladder (a tool isn't an editor with tabs). No owner.draw_zone
-            # call here, so the play-frame guardrail (draw_zone never during a Player) holds.
-            th = ws.theme_colors
-            # Both metrics go through the `where` helpers rather than the game
-            # constants, which is a NO-OP for the fixed case (_bar_h/_zone_rect
-            # return exactly _STATUS_H / _ZONE_LEFT_GAME while _zone_is_game is
-            # True) and is what lets a RESPONSIVE app cart's strip scale (#181).
+            # Part 4: a TOOL/APP runs WITH a minimal bar so it's EXITABLE: the
+            # OS status cluster + the context-X on the right, its TITLE alone
+            # on the left (no tab ladder, no draw_zone: the play-frame
+            # guardrail holds).
             bar_h = self._bar_h(where)
             zone = self._zone_rect(where)
-            cv.rect(0, 0, cv.w, bar_h, th["bar"])
-            cv.rect(0, bar_h - 1, cv.w, 1, th["bar_edge"])           # shelf edge line
-            self._render_right_zone(cv, where)                       # clock/wifi/batt/≡ + X
+            _ch.replay(mp.chrome_strip_band(cv.w, bar_h, False), cv, ws)
+            self._render_right_zone(cv, where, mp)
             title = (ws.cart.get("title") if ws.cart else "") or ""
-            maxc = zone[2] // 8                                      # 8px cells in the lent rect
-            if maxc > 0:
-                # 0 on the fixed cluster, whose bar is _STATUS_H whatever the
-                # layout says; the responsive-app-cart case (#181) re-centres.
-                dy = 0 if self._zone_is_game(where) else ws.layout.bar_text_dy
-                cv.print(title[:maxc], zone[0], 3 + dy, th["chrome_ink_dim"], 1)
+            dy = 0 if self._zone_is_game(where) else ws.layout.bar_text_dy
+            _ch.replay(mp.chrome_strip_title(title, zone[0], zone[2], dy), cv, ws)
             return
-        # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
-        # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
-        # Inside a WINDOW (the windowed WM, #73) the right zone is SUPPRESSED: the
-        # desktop's full-width bar is the one OS bar, and the window's WM title strip
-        # carries min/max/close -- so an app window's bar is purely its toolbar (the
-        # tab ladder / title), never a copied taskbar.
+        # The zoned bar (Stage 4): the band (a window's light toolbar under a
+        # light theme), the OS-owned RIGHT zone -- suppressed inside a window
+        # (#73), whose WM title strip carries min/max/close -- then the active
+        # app's LENT left zone.
         bar_h = self._bar_h(where)
-        if self.zone_band_light(where):
-            # Phase 3 (visual identity v1): inside a WM window under a light
-            # theme the bar row is the app's TOOLBAR on the warm surface (the
-            # mockup's in-window tab band); the OS/desktop bar stays black.
-            th = ws.theme_colors
-            cv.rect(0, 0, cv.w, bar_h, th["surface"])
-            cv.rect(0, bar_h - 1, cv.w, 1, th["border"])
-        else:
-            th = ws.theme_colors
-            cv.rect(0, 0, cv.w, bar_h, th["bar"])
-            cv.rect(0, bar_h - 1, cv.w, 1, th["bar_edge"])           # shelf edge line
+        _ch.replay(mp.chrome_strip_band(cv.w, bar_h, self.zone_band_light(where)), cv, ws)
         if not self._in_window(where):
-            self._render_right_zone(cv, where)
+            self._render_right_zone(cv, where, mp)
         owner = self._zone_owner(where)
         if owner is not None:
             owner.draw_zone(cv, self._zone_rect(where))
 
-    def _render_right_zone(self, cv, where):
-        """The OS-owned right zone (Stage 4): clock, wifi, batt, the ≡ system-menu
-        toggle (moved off the left edge -- the macOS-menu-bar model keeps every OS
-        control on one side), and -- Stage 5 -- the context X (tap to EXIT the active
-        app back toward the launcher root). Two geometries: the fixed game-canvas
-        cluster (cards/paint/map, mirrors the crash bar's right cluster) or the
-        responsive Layout-driven one (home/settings/code/blocks). The launcher IS the
-        back-stack root, so it draws NO X (spec Section 9) -- only where != "home"."""
+    def _render_right_zone(self, cv, where, mp=None):
+        """The OS-owned right zone: clock, wifi, batt, the ≡ toggle and -- not on
+        the launcher root or the desk, which never exit -- the context X. The
+        fixed game-canvas cluster, or the responsive Layout's rects at its
+        chrome scale (#203)."""
         ws = self.ws
-        # The launcher root never exits -> no X; neither does the DESK (#105:
-        # it is the make world's FLOOR -- the PLAY icon is the way out).
+        if mp is None:
+            mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
         show_x = where not in ("home", "desk")
-        th = ws.theme_colors
-        if self._zone_is_game(where):
-            cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, th["chrome_ink_dim"], 1)
-            ws._icon(ws._wifi_icon_kind(), _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
-            ws._icon("batt", _ZONE_BATT[0], _ZONE_BATT[1], cv)
-            ws._glyph("menu", _ZONE_GEAR, th["chrome_ink"], cv)
-            if show_x:                    # context X (Stage 5): tap to exit the app
-                ws._icon("close", _ZONE_CONTEXT_X[0], _ZONE_CONTEXT_X[1], cv)
-        else:
-            # The responsive arm is the ONLY one that follows the chrome scale
-            # (#203): the branch above draws the fixed 320x240 game-canvas cluster,
-            # whose rects are frozen module constants.
-            lay = ws.layout
-            cs = lay.cs
-            cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
-                     th["chrome_ink_dim"], 1)
-            ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv, cs)
-            ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv, cs)
-            ws._glyph("menu", lay.sysmenu_btn, th["chrome_ink"], cv, cs)
-            if show_x:                    # context X (Stage 5): tap to exit the app
-                ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv, cs)
+        lay = None
+        if not self._zone_is_game(where):
+            L = ws.layout
+            lay = (L.clock_x, L.bar_text_dy, L.cs, L.wifi_btn, L.batt_btn,
+                   L.sysmenu_btn, L.context_x_btn)
+        _ch.replay(mp.chrome_strip_right(lay, self._clock_text(), ws._wifi_icon_kind(),
+                                         show_x), cv, ws)
 
     def redraw_clock(self, where):
         """Repaint JUST the clock cell of an already-drawn bar (#155).

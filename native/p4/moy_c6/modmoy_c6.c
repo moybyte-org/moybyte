@@ -5,8 +5,9 @@
 // MicroPython's stock modespnow.c calls, as thin wrappers over ESP-Hosted's
 // custom-RPC seam to the C6 (protocol: espnow_shim_proto.h, ONE body with the
 // slave; plan + verdicts: docs/espnow_p4_2026-08.md). Everything above this
-// file is stock: modespnow.c owns the Python API and its rxbuf ring,
-// device/moy_espnow.py owns discovery/pairing/lockstep and runs unchanged.
+// file is stock: modespnow.c owns the Python API, and the kernel's link
+// (native/moy_net/moy_link.c, native/moy_play/moy_match.c) the ring,
+// discovery, pairing and lockstep, the same as on the S3s.
 //
 // Division of labour, decided:
 //   * The PEER TABLE lives HERE, mirrored to the slave fire-and-forget. Every
@@ -17,7 +18,7 @@
 //   * INIT/DEINIT/PING are synchronous handshakes (semaphore + timeout): a
 //     console with a stock C6 -- no shim on the slave -- gets a TIMEOUT, so
 //     esp_now_init() fails cleanly, modespnow raises OSError, and
-//     moy_espnow.start() degrades to "no radio", never a crash. That is the
+//     the link's start degrades to "no radio", never a crash. That is the
 //     same soft-fail rule the S3 boards live by.
 //   * SEND is fire-and-forget with an error-only ACK. The real delivery
 //     report is SEND_STATUS (the radio's own send callback, forwarded); an
@@ -84,7 +85,7 @@ static int32_t s_last_err;
 // VM: esp_now_send() is a memcpy + xQueueSend and returns in microseconds.
 // One queue, one consumer, so espnow's send ORDER is preserved; a full queue
 // answers ESP_ERR_ESPNOW_NO_MEM, which is espnow's own backpressure word for
-// "TX buffers exhausted" (modespnow raises OSError; moy_espnow counts a drop).
+// "TX buffers exhausted" (the sender counts a drop).
 
 #define MOYC6_TX_QUEUE_LEN  (12)
 

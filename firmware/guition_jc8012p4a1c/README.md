@@ -287,8 +287,8 @@ for the C6/audio pins, which agree with the BSP.
 
 1. ~~Touch calibration~~ — done on glass, 2026-09-06 (above).
 2. ~~Orientation~~ — landscape, 270 up, owner-verified on the desk.
-3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): `moy_espnow`
-   fails into an inactive link by design. The Waveshare's `c6_slave/` image is
+3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): the radio link
+   (`runtime/players.py`'s `EspNowLink`) fails into an inactive link by design. The Waveshare's `c6_slave/` image is
    the same chip and the same SDIO; flashing it here is Phase D of
    `docs/history/espnow_p4_2026-08.md` on this board, and the publisher does
    not stage a `c6` block in this board's manifest yet.

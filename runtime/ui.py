@@ -1034,9 +1034,10 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # `settings_layer._draw_settings_row` (no field when unselected, a fixed label
 # pad, a right-hand value + a trailing icon), `files_app._draw_rows` (panel/
 # title field, dim/accent edge, a truncated name), `storybook_app._draw_rows`
-# (an off-token field, a vertically centred label), `system_menu_ui` (hilite on
-# the selected row only) and `achievements_ui._draw_achievements` (a leading
-# glyph, a locked/dim look that IS `disabled`). `cell` answers
+# (an off-token field, a vertically centred label), the system menu's rows
+# (hilite on the selected row only, drawn by `moy_chrome`'s C) and
+# `achievements_ui._draw_achievements` (a leading glyph, a locked/dim look
+# that IS `disabled`). `cell` answers
 # `file_widgets.FileGridView.draw` (thumbnail + centred caption),
 # `appearance_app._draw_wall_card` (art + a filled caption BAND) and
 # `cards_layer._draw_choice_icons` / `_draw_bg_thumbs` (frame-only cells whose
@@ -1509,6 +1510,12 @@ def dialog(cv, rect, ring=None, fill=None):
             i += 1
 
 
+def dialog_rings():
+    """How many rings the active skin draws around a dialog (`dialog`'s edge
+    count): what the kernel's chrome draws its menu and ABOUT box with."""
+    return _METRICS["dialog"][DLG_EDGE]
+
+
 def text_field(cv, rect, text, placeholder="", colors=None, fs=None):
     """The modal prompts' text-entry field: black field, light-grey ring, cream
     text or a dim placeholder, and the yellow caret bar after the text.
@@ -1922,3 +1929,4 @@ class DragTap:
         if press is None or was_drag or caught:
             return None
         return press
+

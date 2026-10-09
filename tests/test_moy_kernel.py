@@ -25,7 +25,7 @@ u8, u16, u32 = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32
 
 # moy_crash.h's enums.
 CRASH_FAULT, CRASH_ABORT, CRASH_VM = 1, 2, 7
-ROLE_APP, ROLE_WALLPAPER = 1, 2
+ROLE_APP, ROLE_WALLPAPER, ROLE_GAME = 1, 2, 3
 BOOT_START, BOOT_SAFE, BOOT_REPL, BOOT_RECOVERY = 1, 2, 3, 4
 WHY_VM_START, WHY_BOOT_LOOP, WHY_HEAP = 1, 2, 3
 TEST_VM_START, TEST_HEAP = 1, 2
@@ -53,7 +53,7 @@ class Rec(ctypes.Structure):
 class KState(ctypes.Structure):
     _fields_ = [("magic", u32), ("boot", u32), ("unproven", u8), ("next", u8),
                 ("reason", u8), ("test", u8), ("open_app", ctypes.c_char * 24),
-                ("open_wallpaper", ctypes.c_char * 24)]
+                ("open_wallpaper", ctypes.c_char * 24), ("open_game", ctypes.c_char * 24)]
 
 
 class Decision(ctypes.Structure):
@@ -109,7 +109,7 @@ def _record(**kw):
 # ---- the record -----------------------------------------------------------------
 
 def test_the_record_is_128_bytes_and_its_crc_is_zlibs(lib):
-    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 60
+    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 84
     r = _record()
     lib.moy_crash_seal(ctypes.byref(r))
     assert (r.magic, r.version, r.size) == (0x4D4F5943, 1, 128)
@@ -239,6 +239,24 @@ def test_a_crash_names_the_app_before_the_wallpaper(lib):
     assert out.value == b"a-much-longer-app-id-th"
     lib.moy_kstate_arm(ctypes.byref(st), ROLE_APP, None)
     assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == ROLE_WALLPAPER
+
+
+def test_a_crash_names_a_game_between_the_app_and_the_wallpaper(lib):
+    st = _state(lib)
+    out = ctypes.c_char_p()
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_WALLPAPER, b"aurora")
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"moybyte.brick_siege_lua")
+    assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == ROLE_GAME
+    assert out.value == b"moybyte.brick_siege_lua"
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_APP, b"paint")
+    assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == ROLE_APP
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_APP, None)
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"")
+    assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == ROLE_WALLPAPER
+    # the next boot's state carries no OPEN id of the last boot's
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"sky_run")
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert st.open_game == b""
 
 
 # ---- the recovery screen ----------------------------------------------------------

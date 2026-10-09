@@ -114,6 +114,19 @@ void moy_input_tick_edges(moy_input_t *t)
     if (K[HK_TICK_EDGES]) ((void (*)(moy_input_t *))K[HK_TICK_EDGES])(t);
 }
 
+// The two a run in the kernel's front reads. The host's Player has no front
+// (no compositor gives one), so nothing calls them here.
+void moy_input_keep_edges(moy_input_t *t)
+{
+    (void)t;
+}
+
+void moy_input_sample(const moy_input_t *t, moy_input_sample_t *out)
+{
+    (void)t;
+    memset(out, 0, sizeof(*out));
+}
+
 #define AUD(i, T, ...) (K[i] ? ((T)K[i])(__VA_ARGS__) : MOY_AUD_STALE)
 int moy_aud_sfx(uint32_t s, int n, int chan)
 { return AUD(HK_SFX, int (*)(uint32_t, int, int), s, n, chan); }

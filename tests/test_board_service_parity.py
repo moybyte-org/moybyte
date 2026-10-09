@@ -811,6 +811,14 @@ Lazy = collections.namedtuple("Lazy", "path func why")
 Kernel = collections.namedtuple("Kernel", "kw c_call")
 
 _KBD = Kernel("ble", "moy_hid_frame(")
+
+# The call is the kernel loop's TAIL (native/moy_kernel/moy_loop_board.c's
+# b_tail), with no binding at all: the radio link's protocol is C
+# (native/moy_play/moy_match.c), polled every frame with no crossing.
+Tail = collections.namedtuple("Tail", "path func c_call")
+
+_LINK_POLL = Tail("native/moy_kernel/moy_loop_board.c", "static void b_tail(",
+                  "moy_match_kernel_poll(now);")
 _SERVICE = "device/desktop_spine.py"
 
 LIFECYCLE = {
@@ -830,28 +838,28 @@ LIFECYCLE = {
         ("ble_keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via(_SERVICE, "make_service"),
+        ("link", "poll"): _LINK_POLL,
     },
     "p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via(_SERVICE, "make_service"),
+        ("link", "poll"): _LINK_POLL,
     },
     "guition": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via(_SERVICE, "make_service"),
+        ("link", "poll"): _LINK_POLL,
     },
     "guition_p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via(_SERVICE, "make_service"),
+        ("link", "poll"): _LINK_POLL,
     },
 }
 
@@ -1101,7 +1109,7 @@ def test_every_driven_service_declares_its_lifecycle(target):
 @pytest.mark.parametrize("target", sorted(TARGETS))
 def test_every_lifecycle_absence_carries_a_reason(target):
     for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
-        if value is HERE or isinstance(value, (Via, Kernel)):
+        if value is HERE or isinstance(value, (Via, Kernel, Tail)):
             continue
         why = value.why if isinstance(value, Lazy) else value
         assert isinstance(why, str) and why.strip(), (
@@ -1125,6 +1133,11 @@ def test_the_target_drives_exactly_what_the_lifecycle_says(target):
             assert verb != "poll" or per_frame, (
                 "%s calls %s.poll() on its BOOT PATH, not from a frame hook -- "
                 "it runs once and then never again" % (target, service))
+            continue
+        if isinstance(value, Tail):
+            body = (ROOT / value.path).read_text(encoding="utf-8")
+            body = body[body.index(value.func):]
+            assert value.c_call in body[:body.index("\n}\n")], (target, value)
             continue
         if isinstance(value, Kernel):
             spine = (ROOT / _SERVICE).read_text(encoding="utf-8")

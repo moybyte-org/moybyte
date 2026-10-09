@@ -86,6 +86,10 @@ static uint8_t verdict(const moy_cat_entry_t *e) {
     return MOY_PLAY_FREE;
 }
 
+bool moy_play_is_game(const moy_cat_entry_t *e) {
+    return e->broken == NULL && (e->type.v == NULL ? e->spec != 0 : str_is(e->type, "game"));
+}
+
 bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why) {
     uint8_t w = verdict(e);
     if (why != NULL) {

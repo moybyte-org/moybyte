@@ -1,8 +1,8 @@
 """native/moy_net's wire half (docs/kernel_survival_2026-10.md section 6) over
 runtime/net_binding.py: the WiFi credential rules, the HTTP head parser and the
 sync batch's envelope, and the C under the sanitizers. The radio link's peer
-table is device/moy_espnow.py's. (The parser's transport use is pinned by
-tests/test_moy_webhost.py.)"""
+table is the kernel's (native/moy_play/moy_match.c, tests/test_espnow_link.py).
+(The parser's transport use is pinned by tests/test_moy_webhost.py.)"""
 
 import json
 import os
@@ -11,7 +11,6 @@ import subprocess
 
 import pytest
 
-from device.moy_espnow import PeerTable
 from runtime import moy_spine
 from runtime import net_binding as moy_net
 
@@ -33,21 +32,6 @@ def test_a_blank_password_the_radio_did_not_verify_is_never_remembered():
     assert moy_net.wifi_remember(False, "pw", None)         # nothing stored
     assert not moy_net.wifi_remember(False, "", "old")      # blank, unverified
     assert not moy_net.wifi_remember(False, "old", "old")   # nothing new
-
-
-def test_the_peer_table_reads_like_the_dict_it_replaced():
-    t = PeerTable()
-    assert t == {} and len(t) == 0 and t.get(b"a") is None
-    t[b"a"] = "Ann"
-    t[b"b"] = "Bo"
-    h = t.handle(b"a")
-    assert (h >> moy_spine.KIND_SHIFT) & 0xF == moy_spine.KIND_PEER
-    assert t[b"a"] == "Ann" and b"b" in t and len(t) == 2
-    assert sorted(t.values()) == ["Ann", "Bo"] and sorted(t.keys()) == [b"a", b"b"]
-    t[b"a"] = "Ann2"                                  # same row, new value
-    assert t.handle(b"a") == h and t == {b"a": "Ann2", b"b": "Bo"}
-    del t[b"a"]
-    assert t.pop(b"b") == "Bo" and t.pop(b"b", 7) == 7 and t == {}
 
 
 def test_the_batch_codec_round_trips_both_shapes():

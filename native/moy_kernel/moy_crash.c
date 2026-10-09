@@ -81,6 +81,7 @@ const char *moy_crash_role_name(int role) {
     switch (role) {
         case MOY_ROLE_APP: return "app";
         case MOY_ROLE_WALLPAPER: return "wallpaper";
+        case MOY_ROLE_GAME: return "game";
         default: return "none";
     }
 }
@@ -94,6 +95,7 @@ void moy_kstate_open(moy_kstate_t *st) {
         st->boot++;
         memset(st->open_app, 0, sizeof(st->open_app));
         memset(st->open_wallpaper, 0, sizeof(st->open_wallpaper));
+        memset(st->open_game, 0, sizeof(st->open_game));
         return;
     }
     memset(st, 0, sizeof(*st));
@@ -137,6 +139,8 @@ void moy_kstate_arm(moy_kstate_t *st, int role, const char *id) {
         moy_crash_strcpy(st->open_app, MOY_CRASH_ID_LEN, id);
     } else if (role == MOY_ROLE_WALLPAPER) {
         moy_crash_strcpy(st->open_wallpaper, MOY_CRASH_ID_LEN, id);
+    } else if (role == MOY_ROLE_GAME) {
+        moy_crash_strcpy(st->open_game, MOY_CRASH_ID_LEN, id);
     }
 }
 
@@ -144,6 +148,10 @@ MOY_CRASH_IRAM int moy_kstate_open_id(const moy_kstate_t *st, const char **id) {
     if (st->open_app[0] != '\0') {
         *id = st->open_app;
         return MOY_ROLE_APP;
+    }
+    if (st->open_game[0] != '\0') {
+        *id = st->open_game;
+        return MOY_ROLE_GAME;
     }
     if (st->open_wallpaper[0] != '\0') {
         *id = st->open_wallpaper;

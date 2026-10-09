@@ -99,16 +99,16 @@ def test_every_frame_makes_exactly_three_console_upcalls_and_no_other(loop):
 def test_a_service_is_called_up_only_while_it_is_live(loop):
     frame(1000)
     assert loop.service_bits == []
-    L.services(L.SVC_LINK)
-    loop.keep = L.SVC_LINK
+    L.services(L.SVC_WEB)
+    loop.keep = L.SVC_WEB
     frame(1050)
     frame(1100)
-    assert loop.service_bits == [L.SVC_LINK, L.SVC_LINK]
+    assert loop.service_bits == [L.SVC_WEB, L.SVC_WEB]
     assert L.upcalls()[0] == (3, 0, 0, 1, 0)
-    loop.keep = 0                       # the match ended: the bit goes
+    loop.keep = 0                       # the webhost said goodbye: the bit goes
     frame(1150)
     frame(1200)
-    assert loop.service_bits == [L.SVC_LINK] * 3
+    assert loop.service_bits == [L.SVC_WEB] * 3
     assert L.upcalls()[0] == (3, 0, 0, 0, 0)
 
 

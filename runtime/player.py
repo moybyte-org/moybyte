@@ -53,17 +53,20 @@ test load).
 """
 
 try:
-    from code_layer import _CODE_LH
+    import chrome_ops as _ch
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import _CODE_LH
+    from runtime import chrome_ops as _ch
+try:
+    import chrome_ops as _ch
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import chrome_ops as _ch
 
 # #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
-# from cart_api (its one author) and is handed to the session, so netplay.py can
-# stay the import-free leaf players.py is.
+# from cart_api (its one author) and is handed to the session.
 try:
-    from netplay import mask_of as _netplay_mask
+    from players import mask_of as _netplay_mask
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.netplay import mask_of as _netplay_mask
+    from runtime.players import mask_of as _netplay_mask
 try:
     from cart_api import CART_BUTTONS as _NET_BUTTONS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -505,32 +508,6 @@ def _lua_cart_where(text, cart):
     return where
 
 
-def _wrap(text, cols):
-    """Word-wrap `text` into a list of lines no wider than `cols` chars. A single
-    word longer than `cols` is hard-split so it still fits the panel."""
-    if cols < 1:
-        cols = 1
-    out = []
-    for para in str(text).split("\n"):
-        line = ""
-        for word in para.split(" "):
-            while len(word) > cols:                 # hard-split an over-long token
-                if line:
-                    out.append(line)
-                    line = ""
-                out.append(word[:cols])
-                word = word[cols:]
-            if not line:
-                line = word
-            elif len(line) + 1 + len(word) <= cols:
-                line = line + " " + word
-            else:
-                out.append(line)
-                line = word
-        out.append(line)
-    return out
-
-
 # The Player's EXIT gesture (Stage 5 of docs/history/shell_ux_technical_plan_v1.md, spec
 # Section 9): the #71 pause machinery is GONE. A running GAME owns the full 320x240
 # with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a single
@@ -586,6 +563,7 @@ class Player:
                                       # (SPEC.md 4), or None for main/no crash
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self.verdict = None           # the run's (runtime, vm_free, why): _verdict
+        self._front = False           # the run is the kernel loop's foreground
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
@@ -801,6 +779,7 @@ class Player:
         PLACE breaks the globals for every retained function ref; the layer
         reclaim + collect leave a compact heap for the next build. Idempotent;
         safe on the crash path (the error panel reads cart_error, never ns)."""
+        self._front = False
         # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
         # (ws.project still points at this run's Project here -- both exit call
         # sites run release_world ahead of replacing/slimming it).
@@ -1205,6 +1184,7 @@ class Player:
             if ok:
                 self._arm_pacing(cart)
                 self._bind_play(run)
+                self._front = self._take_front()
             elif run:
                 _moy_play.end(run, _moy_play.END_CRASH)
             return ok
@@ -1639,11 +1619,11 @@ class Player:
         """Launch a runtime cart's run in the kernel's Player (native/moy_play)
         BEFORE its runtime loads, so the load and _init are in the run's books
         (its upcalls by class since the launch): the run's handle, or 0 where
-        the image has no Player, the cart no folder, or a lockstep match keeps
-        its own clock and the Python seam."""
+        the image has no Player or the cart no folder. A lockstep match's
+        frame is the Player's too (moy_play_lockstep)."""
         launch = getattr(_moy_play, "launch", None)
         path = cart.get("path") if cart else None
-        if launch is None or not path or self._netplay is not None:
+        if launch is None or not path:
             return 0
         paced = not self._is_tool and cart.get("fps") != "free"
         try:
@@ -1671,6 +1651,45 @@ class Player:
         except Exception as exc:  # noqa: BLE001 -- the Python frame still runs it
             print("PLAY:", exc)
             self._play = None
+
+    def _take_front(self):
+        """Hand a VM-free game's frame to the kernel (moy_play_front): from the
+        next loop frame its input, ticks, chrome and present are C and the
+        loop makes no console upcall until the run ends or needs the console
+        (docs/kernel_cartpath_2026-10.md §4). Where the board's compositor
+        gives no front (`ws.front_bind`), or this canvas is not the one it
+        composes, the console's frame keeps driving the same Player."""
+        if self._play is None or self._is_tool or not (self.verdict and self.verdict[1]):
+            return False
+        bind = getattr(self.ws, "front_bind", None)
+        take = getattr(_moy_play, "front", None)
+        if bind is None or take is None:
+            return False
+        try:
+            return bool(bind()) and bool(take(_moy_play.current()))
+        except Exception as exc:  # noqa: BLE001 -- the console's frame still runs it
+            print("PLAY front:", exc)
+            return False
+
+    def _resume_from_front(self, ws):
+        """The console's first frame after the kernel's front gave it back:
+        True when the run ENDED there (the hold, quit(), `end`, a Ctrl-C),
+        whose route this takes; False when it is live and needs the console
+        (a view it composes, an error it reports, a cart the link asked for).
+        While the kernel still has the front -- a console frame in the same
+        loop frame that took it, as a link's re-run does -- the frame is not
+        the console's: True, and the run stays the kernel's."""
+        if _moy_play.front_live():
+            return True
+        self._front = False
+        self._home_holding = False
+        self._home_held_since = 0
+        info = _moy_play.info()
+        if info is None or not info[6]:
+            return False
+        ws._reset_canvas_state()
+        ws._exit_to_caller()
+        return True
 
     def _loop_dt(self, dt):
         """The dt an UNPACED tick gets: the loop's own for a tool/app, and for
@@ -1908,6 +1927,8 @@ class Player:
         _draw and every chrome draw are skipped -- the game canvas keeps the last
         rendered frame's pixels and nothing composites or flushes this frame."""
         ws = self.ws
+        if self._front and self._resume_from_front(ws):
+            return
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
             self._tick_keys(ws)
@@ -2040,6 +2061,18 @@ class Player:
         # looks like on hardware that cannot extrapolate safely.
         stalled = False
         np = self._netplay
+        if np is not None and self._play is not None:
+            # A run in the kernel's Player: its lockstep is C -- the drain, the
+            # due tick or the stall's retry, the advance, the resend between
+            # ticks (moy_play_lockstep).
+            run = _moy_play.current()
+            if not run:
+                # The run ended in the kernel's front (the hold, `end`):
+                # nothing simulates, and this frame's Player takes the route.
+                return np.dt, True, np
+            n = _moy_play.lockstep(run)
+            if n is not None:
+                return np.dt, n == 0, np
         if np is not None:
             # Drain the radio BEFORE deciding whether this tick can
             # advance: the boards drain in the frame TAIL, so without
@@ -2272,65 +2305,33 @@ class Player:
         return n if n is not None and n == self.cart_error else None
 
     def _draw_error_panel(self, cv=None):
-        # A friendly on-canvas crash report (the device never reaches serial, so
-        # this is the ONLY error surface). Drawn with the indexed API only: a red
-        # box + a short title + the exception text, word-wrapped and truncated to
-        # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
-        # A notice is the same panel in calmer colours under its own title:
-        # nothing went wrong, the cart is bigger than this console, needs a
-        # newer one, or is not signed.
-        # `cv` defaults to the GAME canvas (a crashed running cart); the system-
-        # domain cards tab passes ws.sys_canvas so its defensive fallback stays
-        # visible on a distinct system canvas (#39 step 3).
+        """The on-canvas crash report (the device never reaches serial, so it
+        is the ONLY error surface), or a notice in calmer colours under its
+        own title: a cart this console cannot hold, needs a newer one for, or
+        will not trust. The kernel's one body (moy_chrome_panel), replayed
+        through `cv` -- the GAME canvas for a crashed run; the cards tab passes
+        the system canvas for its malformed-card panel (#39 step 3)."""
         if cv is None:
             cv = self.ws.canvas
-        NAMES = self.NAMES
-        # Sized against the surface, not 320x240: a cart-declared small canvas
-        # (SPEC.md 1/3.1) still gets a panel that fits (chunky once upscaled,
-        # but readable and inside the raster).
-        w = min(292, cv.w - 12)
-        h = min(132, cv.h - 16)
-        x = (cv.w - w) // 2
-        y = min(40, (cv.h - h) // 2)
         notice = self.notice is not None
-        edge = NAMES["orange"] if notice else NAMES["red"]
-        cv.rect(x, y, w, h, NAMES["dark_blue"] if notice else NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, edge)
-        cv.rect(x, y, w, 14, edge)
-        cv.print(self._notice_title if notice else "Your game stopped.", x + 6, y + 4,
-                 NAMES["black"] if notice else NAMES["white"], 1)
-        cols = (w - 16) // 8                       # 8px monospace cells
-        lines = _wrap(self.cart_error or "Unknown error", cols)
-        max_rows = (h - 30) // _CODE_LH
-        ink = NAMES["white"] if notice else NAMES["peach"]
-        for i in range(min(len(lines), max_rows)):
-            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, ink, 1)
-        # A compiled cart's trap has no source line behind it and no EDIT
-        # action, so the panel points at the way out instead.
-        hint = ("TAP HOME TO LEAVE" if _compiled(self.ws.cart)
-                else "TAP CODE TO SEE WHY")
-        cv.print(hint, x + 8, y + h - 12, NAMES["yellow"], 1)
+        mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
+        _ch.replay(mp.chrome_panel(cv.w, cv.h, notice, self._notice_title,
+                                   self.cart_error or "Unknown error",
+                                   _compiled(self.ws.cart)), cv, self.ws)
 
     def _draw_hold_progress(self):
-        """The TRANSIENT hold-to-exit affordance (Stage 5, spec Section 12): a small
-        pill near the top that fills as BACKSPACE is held toward _HOLD_EXIT_MS. Drawn
-        ONLY while the hold is in flight -- handle_input clears _home_holding on release
-        or exit, so it appears on the first held frame and vanishes on release, like a
-        toast; it is NEVER a persistent per-frame overlay on the play frame. Indexed-API
-        only (host == device). The label sits above a thin progress bar so neither
-        obscures the other."""
+        """The TRANSIENT hold-to-exit pill (spec Section 12), filling as
+        BACKSPACE is held toward _HOLD_EXIT_MS: drawn only while the hold is in
+        flight. The kernel's one body (moy_chrome_pill), which a run the kernel
+        drives draws over its own frames."""
         cv = self.ws.canvas
-        NAMES = self.NAMES
-        w, h = min(128, cv.w - 8), 16    # fits a cart-declared small canvas too
-        x = (cv.w - w) // 2
-        y = 6
-        cv.rect(x, y, w, h, NAMES["black"])
-        cv.rectb(x, y, w, h, NAMES["light_grey"])
-        label = "HOLD TO EXIT"
-        cv.print(label, x + (w - len(label) * 8) // 2, y + 2, NAMES["white"], 1)
-        fill = int((w - 4) * self._hold_frac())
-        if fill > 0:
-            cv.rect(x + 2, y + h - 4, fill, 2, NAMES["yellow"])
+        held = 0
+        if self._home_holding:
+            held = _ticks_diff(_ticks_ms(), self._home_held_since)
+            if held < 0:
+                held = 0
+        mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
+        _ch.replay(mp.chrome_pill(cv.w, cv.h, held, _HOLD_EXIT_MS), cv, self.ws)
 
     def _hold_frac(self):
         """0..1 progress of the current BACKSPACE hold toward _HOLD_EXIT_MS (0 when no

@@ -87,7 +87,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | the browser's event decode | `runtime/web_input.py` | the web build's `moy_input` import | 2 |
 | the audio session, the six verbs, the bank push, the master level | `device_audio.py` (deleted), `runtime/audio.py`'s `AudioEngine`, `_SilentAudio`, `runtime/host_api.py`'s `FakeAudio`, `web_boot.py`'s `_RunnerAudio`, `device/moycore_glue.py`'s drain (`runtime/audio_session.py`) | `native/moy_audio/moy_aud.h` (sessions and the mix), `native/moy_audio/moy_aud_out.c` (the speaker), the codec in `native/moy_audio/moy_codec_es8311.c` | 2 |
 | WiFi, the radio under the spine's lease | `device/device_wifi.py` (the service over `kernel_wlan`; the Zero's station stays the port's) | `native/moy_net/moy_wifi.c` | 2 |
-| ESP-NOW's owner | `device/moy_espnow.py` over `espnow`; `native/p4/moy_c6/` | `native/moy_net/moy_link.c` | 2 |
+| ESP-NOW's owner | the port's `espnow` (deleted); `native/p4/moy_c6/` | `native/moy_net/moy_link.c` (the ring), `native/moy_play/moy_match.c` (the protocol, sprint 4) | 2 |
 | the HTTP core and the webhost | `moy_webserver.py` (deleted), `device/moy_webhost.py`; `native/moy_web/` | `native/moy_net/moy_http.c`, `native/moy_net/moy_net_port.c`, `native/moy_net/moy_webhost.c` | 2 |
 | the sync RPC, both halves | `runtime/moy_sync.py`, `firmware/web_runner/carts_link.py`, `firmware/web_runner/update_link.py`, `firmware/web_runner/gpio_link.py` | `native/moy_net/moy_sync.c`, `native/moy_net/moy_sync_apply.c` | 2 |
 | the updater, its HTTP(S) client, the C6 updater, Get Carts' transport | crossed (`device/moy_ota.py`'s updater half; deleted: `moy_http.py`, `moy_c6_update.py`, `cart_net.py`) | `native/moy_net/moy_ota.c`, its platform in `native/moy_net/moy_net_port.c`; the C6's sink in `native/p4/moy_c6/modmoy_c6.c` | 2 |
@@ -195,7 +195,7 @@ made here, not promised.
    PEER, the HTTP request parser and response writers as pure functions, the
    sync batch codec; the first and the last three are `native/moy_net`'s since
    pass 2 (`runtime/net_binding.py` on CPython), the peer table
-   `device/moy_espnow.py`'s.
+   `native/moy_play/moy_match.c`'s since sprint 4.
 8. **The survival traces** join `tests/test_semantic_traces.py` before anything
    crosses: an input trace (a scripted event stream → the merged state, both
    masks for players 0 and 1, and the pointer, per frame), a glass trace (a
@@ -753,8 +753,9 @@ and which caught a 37% loss once that every per-side clock had certified.
   answers it. The internal-SRAM facts `device/wire_links.py` records — the
   receive buffers the driver takes on first start and keeps, the TLS working
   set a download needs — are the kernel's to report, not to hide.
-- **ESP-NOW.** `native/moy_net/moy_link.c` is `device/moy_espnow.py`'s
-  discovery, pairing and the two-console link over the esp_now API — on-die on
+- **ESP-NOW.** `native/moy_net/moy_link.c` is the radio under the link's
+  discovery, pairing and two-console protocol (`native/moy_play/moy_match.c`)
+  over the esp_now API — on-die on
   the S3s, through `native/p4/moy_c6/`'s shim on the P4s, which already
   implements that API. The receive ring is the kernel's, in PSRAM, fed from the
   WiFi task's callback through an internal latch like an input source's, so a
@@ -873,7 +874,7 @@ Deleted with the updater's crossing (2026-10-07): `cart_net.py`,
 with the Zero's: `moy_webserver.py` and `zero_gpio.py`. Crossed and kept for
 what is not a link: the switch half of `runtime/web_console.py` (§6.4) and the
 radio and transport halves of the Zero's `zero_host.py` and `zero_setup.py`
-(§6.5). To go: `device/device_wifi.py`, `device/moy_espnow.py`,
+(§6.5). To go: `device/device_wifi.py`,
 `device/moy_webhost.py`, `runtime/moy_sync.py`, and the three `*_link.py`
 files of the web runner.
 `runtime/host_api.py`'s service fakes shrink to what the host's harness still
@@ -900,7 +901,7 @@ added to the board's component list.
 |---|---|---|
 | the wire is unchanged | the HTTP parser and the sync codec fuzzed under ASan and UBSan; a batch round-trips against the browser's; the manifest verifier against `tools/ota_sign.py`'s vectors and the tamper cases; the links trace | `web_console_is_baked_into_the_image`, `wifi_status_is_readable`, `wifi_is_off_at_rest` on every console; the Zero re-provisioned and paired from Chrome (`tools/web.py shot`) and its suite green |
 | an update still updates | the OTA state machine on a canned manifest | a beta pushed over WiFi to each console through the unstable channel (the `release` skill) and confirmed; an image armed to never confirm rolls back on one S3 and one P4; the C6 updated on both P4s; the floor's `update` word takes a card image |
-| the link links | the peer table and the pairing state machine as pure functions | two consoles paired through `link`, a cart beamed, and a 200-message burst delivered whole at the link's set rate — the acceptance `device/moy_espnow.py` records for its ring size — with the figures to #7 |
+| the link links | the peer table and the pairing state machine as pure functions | two consoles paired through `link`, a cart beamed, and a 200-message burst delivered whole at the link's set rate — the acceptance `runtime/players.py` records for its ring size (`RXBUF`) — with the figures to #7 |
 | the drivers call no Python | `tests/test_no_vm_calls_in_drivers.py` over the WiFi callback, the link's receive path and the HTTP poll | the image stages none of §6.7's modules |
 | the volumes are the kernel's | `tests/test_store_on_vfs.py` over the owned littlefs through the kernel's VFS type; the power-cut matrix re-run | commit, reboot, intact on every console and the Zero; ten store commits under a running cart on both S3s with the feeder's `tx_errs` at zero and `display_underruns_are_zero` on both P4s, the longest frame recorded to #224 |
 | the Zero fits | — | its headroom above the floor after this pass, with the per-pass budget of §9 |

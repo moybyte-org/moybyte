@@ -84,6 +84,7 @@ static struct {
     // the frame
     bool lit, capture, health_armed, measuring;
     uint32_t frames, drawn, started_at;
+    uint32_t front_drawn;           // frames a kernel run in front drew
     uint32_t services, once;
     uint32_t last_elapsed, last_sleep;
     int end;                    // an upcall asked the loop to end (MOY_LOOP_*)
@@ -114,6 +115,14 @@ void moy_loop_say(const char *fmt, ...) {
         L.ops->say(buf);
     } else {
         printf("%s\n", buf);
+    }
+}
+
+void moy_loop_say_line(const char *line) {
+    if (L.ops != NULL && L.ops->say != NULL) {
+        L.ops->say(line);
+    } else {
+        printf("%s\n", line);
     }
 }
 
@@ -306,6 +315,7 @@ void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap) {
     L.last = now_ms();
     L.frames = 0;
     L.drawn = 0;
+    L.front_drawn = 0;
     L.first_done = false;
     L.started_at = L.last;
     L.health_loops = 0;
@@ -617,6 +627,11 @@ static void account(uint32_t elapsed) {
 
 // -- the frame -----------------------------------------------------------------------
 
+// The kernel's run in front (native/moy_play's moy_play.h): weak, so an image
+// without the Player (the Zero) has none, and the frame is always the console's.
+bool moy_play_front_live(void) __attribute__((weak));
+int moy_play_front_frame(uint32_t now, uint32_t dt_us) __attribute__((weak));
+
 int moy_loop_step(void) {
     const moy_loop_ops_t *ops = L.ops;
     if (ops == NULL || !L.vm || L.up == NULL || (L.registered & 7u) != 7u) {
@@ -673,14 +688,29 @@ int moy_loop_step(void) {
         mark(MOY_ST_PRESENT);
     }
     uint32_t before = L.drawn;
-    up(MOY_UP_INPUT, 0, NULL, MOY_UPC_CONSOLE);
-    if (!L.end) {
-        up(MOY_UP_POINTER, 0, NULL, MOY_UPC_CONSOLE);
+    // A kernel run in front owns the frame and makes no upcall; when it gives
+    // the frame back (its run ended, or needs the console), the console's
+    // three upcalls run in this same frame and take the route.
+    int front = -1;
+    if (moy_play_front_live != NULL && moy_play_front_live()) {
+        front = moy_play_front_frame(now, dt * 1000u);
+        if (front > 0) {
+            L.drawn++;
+            L.front_drawn++;
+        }
     }
-    if (!L.end) {
-        int r = up(MOY_UP_FRAME, dt * 1000u, NULL, MOY_UPC_CONSOLE);
-        if (r >= 0) {
-            L.drawn = (uint32_t)r;
+    if (front < 0) {
+        up(MOY_UP_INPUT, 0, NULL, MOY_UPC_CONSOLE);
+        if (!L.end) {
+            up(MOY_UP_POINTER, 0, NULL, MOY_UPC_CONSOLE);
+        }
+        if (!L.end) {
+            int r = up(MOY_UP_FRAME, dt * 1000u, NULL, MOY_UPC_CONSOLE);
+            if (r >= 0) {
+                // The console counts its own frames; the runs it handed the
+                // front to drew the rest.
+                L.drawn = (uint32_t)r + L.front_drawn;
+            }
         }
     }
     if (L.end) {

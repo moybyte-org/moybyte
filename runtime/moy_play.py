@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   Tick              the tick model
+#   census            the VM-free rule over a cart folder
+#   Files             a cart's written files by the C store
+#   launch            the Player: launch, bind, open, frame, end, info, lockstep
+#   front_ops         the run in the kernel loop's front, on the host
+#   Match             the radio link and its lockstep session
+#   chrome_pill       the chrome's pieces: pill, panel, toast, banner, strip, menu
 """The kernel's Player (native/moy_play) on CPython, by ctypes: the module
 `moy_play` as the boards and the desktop MicroPython import it, name for name
 (native/moy_play/modmoy_play.c has the list). A VM's `import moy_play` is the
@@ -18,6 +26,10 @@ so this is what it finds.
                    (native/moy_store/moy_files.c), with files_key,
                    files_path_of, files_folder and files_live: the parity
                    suite's view of it beside runtime/cart_files.py. Host only.
+  front_ops(buf, w, h), front_frame, front_end, state_json
+                   the kernel loop's half of a run in front (a board's loop
+                   calls the C), over a buffer standing in for a compositor.
+                   Host only.
 """
 
 from __future__ import annotations
@@ -402,9 +414,23 @@ def end(run, why=END_QUIT):
     del _BOUND[:]
 
 
+def lockstep(run):
+    """1 the frame simulates, 0 it stalls or waits, None: no match. The host
+    has no kernel link, so a host run is always solo."""
+    d, _ = _play()
+    f = d.moy_play_lockstep
+    f.argtypes = [_U32, _U32, ctypes.POINTER(_U8)]
+    f.restype = _B
+    t = _U8(0)
+    import time
+    if not f(int(run), int(time.monotonic() * 1000) & 0xFFFFFFFF, ctypes.byref(t)):
+        return None
+    return t.value
+
+
 def info(run=None):
     """(runtime, vm_free, why, frames, ticks, upcalls, ended, error, stack_open,
-    stack_frame), or None for a handle that names no run."""
+    stack_frame, end_why), or None for a handle that names no run."""
     d, lb = _play()
     i = lb.PlayInfo()
     if d.hl_play_info(d.hl_play_last() if run is None else int(run), ctypes.byref(i)) != 0:
@@ -413,4 +439,622 @@ def info(run=None):
           None if i.stack_frame == 0xFFFFFFFF else i.stack_frame)
     return (i.runtime.decode(), bool(i.vm_free), _WHY[i.why] if i.why < len(_WHY) else "?",
             i.frames, i.ticks, tuple(i.upcalls), bool(i.ended),
-            i.error.decode("utf-8", "replace") if i.raised else None) + st
+            i.error.decode("utf-8", "replace") if i.raised else None) + st + (i.end_why,)
+
+
+def current():
+    """The live run's handle, or 0."""
+    d, _ = _play()
+    d.moy_play_current.restype = _U32
+    return int(d.moy_play_current())
+
+
+def front(run):
+    """moy_play_front: True when the run took the kernel loop's foreground.
+    The host has no compositor to give it one; `front_ops` stands a buffer in
+    for one, and without it the run is refused (NORT) and the console's frame
+    drives it."""
+    d, _ = _play()
+    d.moy_play_front.argtypes = [_U32]
+    return d.moy_play_front(int(run)) == 0
+
+
+def front_live():
+    d, _ = _play()
+    d.moy_play_front_live.restype = ctypes.c_bool
+    return bool(d.moy_play_front_live())
+
+
+# The kernel loop's half of a run in front, on the host (no VM module has
+# these: on a board the loop calls them). Host only.
+
+_FCANVAS = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
+                            ctypes.POINTER(ctypes.c_int))
+_FPRESENT = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_bool)
+_FMAP = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32),
+                         ctypes.POINTER(ctypes.c_int32))
+
+
+class _FrontOps(ctypes.Structure):
+    """moy_front_ops_t (native/moy_play/moy_play.h)."""
+    _fields_ = [("canvas", _FCANVAS), ("present", _FPRESENT), ("map", _FMAP),
+                ("ctx", ctypes.c_void_p)]
+
+
+_FRONT = []
+
+
+def front_ops(buf, w, h, presents=None):
+    """Stand a compositor in for the front: the run draws into `buf` (a
+    ctypes array of w*h uint16), and each present appends whether the frame
+    drew to `presents`. None withdraws."""
+    d, _ = _play()
+    d.moy_play_front_ops.argtypes = [ctypes.c_void_p]
+    if buf is None:
+        d.moy_play_front_ops(None)
+        del _FRONT[:]
+        return True
+
+    def canvas(ctx, pw, ph):
+        pw[0], ph[0] = w, h
+        return ctypes.addressof(buf)
+
+    def present(ctx, drew):
+        if presents is not None:
+            presents.append(bool(drew))
+
+    def map_(ctx, x, y):
+        return 0 <= x[0] < w and 0 <= y[0] < h
+
+    cbs = (_FCANVAS(canvas), _FPRESENT(present), _FMAP(map_))
+    ops = _FrontOps(cbs[0], cbs[1], cbs[2], None)
+    _FRONT[:] = [buf, cbs, ops]
+    d.moy_play_front_ops(ctypes.byref(ops))
+    return True
+
+
+def front_frame(now_ms, dt_us):
+    """One kernel loop frame of the run in front: 1 drew, 0 did not, -1 the
+    front gave the frame back."""
+    d, _ = _play()
+    d.moy_play_front_frame.argtypes = [_U32, _U32]
+    return d.moy_play_front_frame(int(now_ms) & 0xFFFFFFFF, int(dt_us))
+
+
+def front_end(why):
+    d, _ = _play()
+    d.moy_play_front_end.argtypes = [ctypes.c_int]
+    d.moy_play_front_end.restype = ctypes.c_bool
+    return bool(d.moy_play_front_end(int(why)))
+
+
+def state_json():
+    """The kernel's `state` answer while a run is in front, as text."""
+    d, _ = _play()
+    out = ctypes.create_string_buffer(1024)
+    d.moy_play_state_json.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+    d.moy_play_state_json.restype = ctypes.c_size_t
+    n = d.moy_play_state_json(out, len(out))
+    return out.raw[:n].decode()
+
+
+# -- the radio link and its lockstep session (native/moy_play/moy_match.h) -----
+#
+# `Match(io, name, board, entropy)` is one C instance: the host's tests run two
+# consoles in one process, where a board has the kernel's one (its
+# `moy_play.Match()` takes no io: native/moy_net's ring is its transport).
+# `io` is the transport: send(mac, payload) -> bool, recv() -> (mac, msg) or
+# None (raising on a radio error), add_peer(mac), recover() -> bool, say(line).
+
+_M_TAPE = 256
+_M_CART = 121
+_M_CFG = 101
+_M_FRAME = 250
+
+
+class _Peer(ctypes.Structure):
+    _fields_ = [("mac", _U8 * 6), ("name", ctypes.c_char * 24),
+                ("board", ctypes.c_char * 16), ("cart", ctypes.c_char * _M_CART),
+                ("state", _U8), ("seen", _U32), ("used", _B)]
+
+
+_I32, _F32 = ctypes.c_int32, ctypes.c_float
+
+
+class _Lockstep(ctypes.Structure):
+    _fields_ = [("live", _B), ("index", ctypes.c_int), ("peer", ctypes.c_int),
+                ("seed", _U32), ("session", _U8), ("tick_ms", _U32),
+                ("has_next", _B), ("next_ms", _U32), ("delay", ctypes.c_int),
+                ("redundancy", ctypes.c_int), ("frame", _I32), ("stalls", _U32),
+                ("stall_ticks", _U32), ("packets_in", _U32), ("packets_out", _U32),
+                ("waiting", _B), ("dead", _B), ("last_peer_frame", _I32),
+                ("peer_need", _I32), ("has_sent", _B), ("last_sent", _I32),
+                ("stall_mark", _U32), ("mine_f", _I32 * _M_TAPE),
+                ("theirs_f", _I32 * _M_TAPE), ("mine_m", _U8 * _M_TAPE),
+                ("theirs_m", _U8 * _M_TAPE), ("arr_f", _I32 * 64), ("arr_t", _U32 * 64),
+                ("has_ema", _B), ("m_ema", _F32), ("win_mark", _I32),
+                ("win_stalls", _U32), ("tps_f", _I32), ("has_tps", _B), ("tps_ms", _U32),
+                ("held", _U8 * 2), ("prev", _U8 * 2), ("pressed", _U8 * 2),
+                ("frame_seed", _U32), ("config", ctypes.c_char * _M_CFG)]
+
+
+class _MatchS(ctypes.Structure):
+    _fields_ = [("io", ctypes.c_void_p), ("active", _B), ("mac", _U8 * 6),
+                ("name", ctypes.c_char * 24), ("board", ctypes.c_char * 16),
+                ("cart", ctypes.c_char * _M_CART), ("cfg", ctypes.c_char * _M_CFG),
+                ("state", _U8), ("peers", _Peer * 8), ("s", _Lockstep),
+                ("session_id", _U8), ("start_frame", _U8 * _M_FRAME),
+                ("start_len", _U16), ("start_peer", _U8 * 6), ("start_tries", _U32),
+                ("beaconed", _B), ("beacon_at", _U32), ("rx", _U32), ("tx", _U32),
+                ("drops", _U32), ("recovers", _U32), ("rng", _U32), ("defer_n", _U8),
+                ("defer_mac", (_U8 * 6) * 8), ("defer_len", _U8 * 8),
+                ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
+                ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
+                ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
+                ("error", ctypes.c_char * 48)]
+
+
+_SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
+                         ctypes.POINTER(_U8), ctypes.c_size_t)
+_RECV = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
+                         ctypes.POINTER(_U8), _U32)
+_ADD = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8))
+_RECOVER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+_SAY = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_char_p)
+
+
+class _Io(ctypes.Structure):
+    _fields_ = [("send", _SEND), ("recv", _RECV), ("add_peer", _ADD),
+                ("recover", _RECOVER), ("say", _SAY), ("ctx", ctypes.c_void_p)]
+
+
+_MSIGS = (
+    ("moy_match_init", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p,
+                        ctypes.c_char_p, _U32], None),
+    ("moy_match_start", [ctypes.c_void_p, ctypes.c_char_p], None),
+    ("moy_match_stop", [ctypes.c_void_p], None),
+    ("moy_match_announce", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int], None),
+    ("moy_match_set_config", [ctypes.c_void_p, ctypes.c_char_p], None),
+    ("moy_match_offer_seeded", [ctypes.c_void_p, ctypes.c_char_p, _U32, _B, _U32],
+     ctypes.c_int),
+    ("moy_match_poll", [ctypes.c_void_p, _U32], ctypes.c_int),
+    ("moy_match_drain_input", [ctypes.c_void_p, _U32, ctypes.c_int], ctypes.c_int),
+    ("moy_match_end", [ctypes.c_void_p], None),
+    ("moy_match_broadcast", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], _B),
+    ("moy_match_send_msg", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_take_msg", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_action", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_dispatch", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
+                            ctypes.c_size_t, _U32], None),
+    ("moy_match_candidate", [ctypes.c_void_p, ctypes.c_char_p, _U32], ctypes.c_void_p),
+    ("moy_lockstep_begin", [ctypes.c_void_p, ctypes.c_int, _U32, _U8, ctypes.c_char_p],
+     ctypes.c_int),
+    ("moy_lockstep_close", [ctypes.c_void_p], None),
+    ("moy_lockstep_pending", [ctypes.c_void_p, _U32], _B),
+    ("moy_lockstep_due", [ctypes.c_void_p, _U32], _B),
+    ("moy_lockstep_advance", [ctypes.c_void_p, _U8, _U32, _B], ctypes.c_int),
+    ("moy_lockstep_resend", [ctypes.c_void_p], None),
+    ("moy_lockstep_packet", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t, _U32, _B],
+     ctypes.c_int),
+    ("moy_lockstep_seed_of", [_U32, _I32], _U32),
+    ("moy_lockstep_tps", [ctypes.c_void_p, _U32], _U32),
+    ("moy_lockstep_expand", [ctypes.c_void_p, _U32], _I32),
+    ("moy_match_size", [], ctypes.c_size_t),
+    ("moy_match_offset_s", [], ctypes.c_size_t),
+)
+_MREADY = [False]
+
+
+def _mlib():
+    d, _ = _play()
+    if not _MREADY[0]:
+        for name, args, res in _MSIGS:
+            f = getattr(d, name)
+            f.argtypes = args
+            f.restype = res
+        if d.moy_match_size() != ctypes.sizeof(_MatchS) \
+                or d.moy_match_offset_s() != _MatchS.s.offset:
+            raise RuntimeError("moy_play: moy_match_t's layout moved; mirror it here")
+        _MREADY[0] = True
+    return d
+
+
+def seed_of(seed, frame):
+    """The seed lockstep frame `frame` starts from (moy_lockstep_seed_of)."""
+    return _mlib().moy_lockstep_seed_of(int(seed) & 0xFFFFFFFF, int(frame))
+
+
+_LINK_FIELDS = ("active", "state", "rx", "tx", "drops", "recovers", "session_id",
+                "start_tries", "start_len", "inbox_drops")
+
+
+class Match:
+    """One link and its session over the C (moy_match.h). Attributes read the
+    instance live: the link's (`active`, `state`, `rx`, `tx`, `drops`,
+    `recovers`, `error`, `cart`, `mac`, `session_id`, ...) and the session's
+    (`live`, `index`, `frame`, `delay`, `waiting`, `dead`, `stalls`, ...)."""
+
+    def __init__(self, io=None, name="", board="", entropy=0):
+        if io is None:
+            raise RuntimeError("moy_play.Match: the host has no kernel link")
+        d = _mlib()
+        self._d = d
+        self._m = _MatchS()
+        self._io_obj = io
+        self._io = _Io(_SEND(self._send), _RECV(self._recv), _ADD(self._add),
+                       _RECOVER(self._recover), _SAY(self._say), None)
+        self._p = ctypes.cast(ctypes.byref(self._m), ctypes.c_void_p)
+        d.moy_match_init(self._p, ctypes.cast(ctypes.byref(self._io), ctypes.c_void_p),
+                         str(name).encode(), str(board).encode(),
+                         int(entropy) & 0xFFFFFFFF)
+
+    # -- the transport's trampolines --
+    def _send(self, _ctx, mac, data, n):
+        try:
+            ok = self._io_obj.send(bytes(mac[:6]), bytes(data[:n]))
+        except Exception:  # noqa: BLE001 -- a radio hiccup is a counted drop
+            return -1
+        return 0 if ok is not False else -1
+
+    def _recv(self, _ctx, mac, data, cap):
+        try:
+            got = self._io_obj.recv()
+        except Exception:  # noqa: BLE001 -- the documented desynced ring
+            return -2
+        if got is None:
+            return -1
+        src, msg = got
+        msg = bytes(msg)[:cap]
+        for i in range(6):
+            mac[i] = src[i]
+        for i in range(len(msg)):
+            data[i] = msg[i]
+        return len(msg)
+
+    def _add(self, _ctx, mac):
+        try:
+            self._io_obj.add_peer(bytes(mac[:6]))
+        except Exception:  # noqa: BLE001 -- already known is fine
+            pass
+        return 0
+
+    def _recover(self, _ctx):
+        rec = getattr(self._io_obj, "recover", None)
+        try:
+            return 0 if rec is None or rec() is not False else -1
+        except Exception:  # noqa: BLE001
+            return -1
+
+    def _say(self, _ctx, line):
+        say = getattr(self._io_obj, "say", None)
+        text = line.decode("utf-8", "replace")
+        if say is not None:
+            say(text)
+        else:
+            print(text)
+
+    # -- the instance --
+    def __getattr__(self, name):
+        m = self.__dict__.get("_m")
+        if m is None:
+            raise AttributeError(name)
+        if name in _LINK_FIELDS:
+            return getattr(m, name)
+        if name in ("cart", "name", "board", "error", "cfg"):
+            return getattr(m, name).decode("utf-8", "replace")
+        if name == "mac":
+            return bytes(m.mac)
+        s = m.s
+        if name == "config":
+            c = s.config.decode("utf-8", "replace")
+            return c or None
+        if name == "m_ema":
+            return s.m_ema if s.has_ema else None
+        if name == "next_ms":
+            return s.next_ms if s.has_next else None
+        if name == "last_sent":
+            return s.last_sent if s.has_sent else None
+        if name == "tps_ms":
+            return s.tps_ms if s.has_tps else None
+        if name in ("held", "pressed"):
+            return tuple(getattr(s, name))
+        return getattr(s, name)
+
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+        m = self._m
+        if name == "state":                 # white box: the tests' setters
+            m.state = int(value)
+            return
+        if name == "cart":
+            m.cart = (value or "").encode()[:_M_CART - 1]
+            return
+        s = m.s
+        if name == "m_ema":
+            s.has_ema = value is not None
+            s.m_ema = 0.0 if value is None else float(value)
+        elif name == "next_ms":
+            s.has_next = value is not None
+            s.next_ms = 0 if value is None else int(value) & 0xFFFFFFFF
+        elif name in ("delay", "redundancy", "tick_ms", "frame", "stalls"):
+            setattr(s, name, int(value))
+        else:
+            raise AttributeError(name)
+
+    def arrival(self, f, t):
+        """White-box: stamp frame `f`'s first arrival at `t` (the phase controller's ring)."""
+        s = self._m.s
+        s.arr_f[f & 63] = f
+        s.arr_t[f & 63] = int(t) & 0xFFFFFFFF
+
+    def start(self, mac):
+        self._d.moy_match_start(self._p, bytes(mac)[:6].ljust(6, b"\0"))
+
+    def stop(self):
+        self._d.moy_match_stop(self._p)
+
+    def announce(self, cart, state):
+        self._d.moy_match_announce(self._p, (cart or "").encode(), int(state))
+
+    def set_config(self, cfg):
+        self._d.moy_match_set_config(self._p, None if cfg is None else cfg.encode())
+
+    def offer(self, cart, now, seed=None):
+        return bool(self._d.moy_match_offer_seeded(
+            self._p, (cart or "").encode(), int(now) & 0xFFFFFFFF, seed is not None,
+            0 if seed is None else int(seed) & 0xFFFFFFFF))
+
+    def poll(self, now):
+        return self._d.moy_match_poll(self._p, int(now) & 0xFFFFFFFF)
+
+    def drain(self, now, budget):
+        return self._d.moy_match_drain_input(self._p, int(now) & 0xFFFFFFFF, int(budget))
+
+    def end(self):
+        self._d.moy_match_end(self._p)
+
+    def broadcast(self, payload):
+        payload = bytes(payload)
+        return bool(self._d.moy_match_broadcast(self._p, payload, len(payload)))
+
+    def send_msg(self, body):
+        body = bytes(body)
+        return self._d.moy_match_send_msg(self._p, body, len(body))
+
+    def take_msg(self):
+        buf = ctypes.create_string_buffer(_M_FRAME)
+        n = self._d.moy_match_take_msg(self._p, buf, _M_FRAME)
+        return None if n < 0 else buf.raw[:n]
+
+    def action(self):
+        buf = ctypes.create_string_buffer(_M_CART)
+        a = self._d.moy_match_action(self._p, buf, _M_CART)
+        return buf.value.decode("utf-8", "replace") if a else None
+
+    def dispatch(self, mac, msg, now):
+        msg = bytes(msg)
+        self._d.moy_match_dispatch(self._p, bytes(mac)[:6], msg, len(msg),
+                                   int(now) & 0xFFFFFFFF)
+
+    def peers(self):
+        """[(mac, name, board, cart, state, seen)] of every peer row."""
+        out = []
+        for p in self._m.peers:
+            if p.used:
+                out.append((bytes(p.mac), p.name.decode("utf-8", "replace"),
+                            p.board.decode("utf-8", "replace"),
+                            p.cart.decode("utf-8", "replace"), p.state, p.seen))
+        return out
+
+    def candidate(self, cart, now):
+        r = self._d.moy_match_candidate(self._p, (cart or "").encode(), int(now) & 0xFFFFFFFF)
+        if not r:
+            return None
+        p = _Peer.from_address(r)
+        return (bytes(p.mac), p.name.decode(), p.board.decode(), p.cart.decode(),
+                p.state, p.seen)
+
+    def begin(self, index, seed, session, cfg):
+        return self._d.moy_lockstep_begin(self._p, int(index), int(seed) & 0xFFFFFFFF,
+                                          int(session) & 0xFF,
+                                          None if cfg is None else cfg.encode()) == 0
+
+    def close(self):
+        self._d.moy_lockstep_close(self._p)
+
+    def pending(self, now):
+        return bool(self._d.moy_lockstep_pending(self._p, int(now) & 0xFFFFFFFF))
+
+    def due(self, now):
+        return bool(self._d.moy_lockstep_due(self._p, int(now) & 0xFFFFFFFF))
+
+    def advance(self, held, now=None):
+        return self._d.moy_lockstep_advance(self._p, int(held) & 0xFF,
+                                            0 if now is None else int(now) & 0xFFFFFFFF,
+                                            now is not None)
+
+    def resend(self):
+        self._d.moy_lockstep_resend(self._p)
+
+    def packet(self, data, now=None):
+        data = bytes(data)
+        return bool(self._d.moy_lockstep_packet(
+            self._p, data, len(data), 0 if now is None else int(now) & 0xFFFFFFFF,
+            now is not None))
+
+    def tps(self, now):
+        return self._d.moy_lockstep_tps(self._p, int(now) & 0xFFFFFFFF)
+
+    def expand(self, f16):
+        return self._d.moy_lockstep_expand(self._p, int(f16) & 0xFFFF)
+
+
+# -- the chrome (native/moy_play/moy_chrome.h) -----------------------------------
+#
+# Each piece is a list of (op, c, scale, x, y, w, h, text) the shell replays
+# through its canvas (runtime/chrome.py's `replay`); the kernel rasterises the
+# same list for a frame it draws with no VM.
+
+CH_RECT, CH_RECTB, CH_TEXT, CH_GLYPH, CH_ICON = 1, 2, 3, 4, 5
+INKS = 26
+MENU_ITEM, MENU_HEADER, MENU_SEP = 0, 1, 2
+
+
+class _ChOp(ctypes.Structure):
+    _fields_ = [("op", _U8), ("c", _U8), ("scale", _U8), ("pad", _U8),
+                ("x", ctypes.c_int16), ("y", ctypes.c_int16), ("w", ctypes.c_int16),
+                ("h", ctypes.c_int16), ("s", _U16), ("n", _U16)]
+
+
+class _ChList(ctypes.Structure):
+    _fields_ = [("n", _U16), ("tn", _U16), ("full", _B), ("op", _ChOp * 128),
+                ("text", ctypes.c_char * 1536)]
+
+
+class _ChLay(ctypes.Structure):
+    _fields_ = [("clock_x", ctypes.c_int16), ("text_dy", ctypes.c_int16),
+                ("cs", ctypes.c_int16), ("wifi", ctypes.c_int16 * 4),
+                ("batt", ctypes.c_int16 * 4), ("menu", ctypes.c_int16 * 4),
+                ("close", ctypes.c_int16 * 4)]
+
+
+_CP, _CI, _CS = ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p
+_CSIGS = (
+    ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B, _CI], None),
+    ("moy_chrome_clear", [_CP], None),
+    ("moy_chrome_pill", [_CP, _CI, _CI, _U32, _U32], None),
+    ("moy_chrome_panel", [_CP, _CI, _CI, _B, _CS, _CS, _B], None),
+    ("moy_chrome_toast", [_CP, _CS, _CS], None),
+    ("moy_chrome_banner", [_CP, _CI, _CI, _CI, _CS, _CS, _B], None),
+    ("moy_chrome_strip_crash", [_CP, _CI, _CI, _CS, _CS], None),
+    ("moy_chrome_strip_band", [_CP, _CI, _CI, _B], None),
+    ("moy_chrome_strip_right", [_CP, _CP, _CS, _CS, _B], None),
+    ("moy_chrome_strip_title", [_CP, _CS, _CI, _CI, _CI], None),
+    ("moy_chrome_menu", [_CP, _CP, _CP, _CI, _CI, _CI, _CI, _CI, _CI, _CI, _CI], None),
+    ("moy_chrome_about", [_CP, _CI, _CI, _CI, _CS], None),
+    ("moy_chrome_glyph_put", [_CS, ctypes.POINTER(_U16)], _CI),
+    ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
+    ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
+    ("moy_chrome_toast_arm", [_CS, _CS, _U32], None),
+    ("moy_chrome_overlay", [_CP, _U32, _CI, _CI, _CI, _CI, _CI, _U32, _U32], _B),
+)
+_CREADY = [False]
+
+
+def _clib():
+    d, _ = _play()
+    if not _CREADY[0]:
+        for name, args, res in _CSIGS:
+            f = getattr(d, name)
+            f.argtypes = args
+            f.restype = res
+        _CREADY[0] = True
+    return d
+
+
+def _b(s):
+    return (s or "").encode("utf-8", "replace") if not isinstance(s, bytes) else s
+
+
+def _ops(lst):
+    out = []
+    raw = lst.text
+    for i in range(lst.n):
+        o = lst.op[i]
+        t = raw[o.s:o.s + o.n].decode("utf-8", "replace") if o.n else ""
+        out.append((o.op, o.c, o.scale, o.x, o.y, o.w, o.h, t))
+    return out
+
+
+def _chrome(name, *args, raster=None):
+    d = _clib()
+    lst = _ChList()
+    p = ctypes.cast(ctypes.byref(lst), ctypes.c_void_p)
+    getattr(d, name)(p, *args)
+    if raster is not None:
+        buf, w, h, pal, fs = raster
+        pb = (_U16 * 64)(*pal)
+        d.moy_chrome_raster(p, ctypes.cast(buf, ctypes.c_void_p), w, h,
+                            ctypes.cast(pb, ctypes.c_void_p), fs)
+    return _ops(lst)
+
+
+def chrome_inks(inks, bar_light, rings):
+    arr = (ctypes.c_int16 * INKS)(*[(-1 if v is None else int(v)) for v in inks])
+    _clib().moy_chrome_set_inks(arr, bool(bar_light), int(rings))
+
+
+def chrome_pill(cw, ch, held_ms, hold_ms, raster=None):
+    return _chrome("moy_chrome_pill", int(cw), int(ch), int(held_ms), int(hold_ms),
+                   raster=raster)
+
+
+def chrome_panel(cw, ch, notice, title, text, compiled, raster=None):
+    return _chrome("moy_chrome_panel", int(cw), int(ch), bool(notice), _b(title),
+                   _b(text), bool(compiled), raster=raster)
+
+
+def chrome_toast(title, glyph, raster=None):
+    return _chrome("moy_chrome_toast", _b(title), _b(glyph), raster=raster)
+
+
+def chrome_banner(lw, fs, status_h, title, sub, ok, raster=None):
+    return _chrome("moy_chrome_banner", int(lw), int(fs), int(status_h), _b(title),
+                   _b(sub), bool(ok), raster=raster)
+
+
+def chrome_strip_crash(cw, edit, clock, wifi):
+    return _chrome("moy_chrome_strip_crash", int(cw), int(edit), _b(clock), _b(wifi))
+
+
+def chrome_strip_band(cw, bar_h, light):
+    return _chrome("moy_chrome_strip_band", int(cw), int(bar_h), bool(light))
+
+
+def chrome_strip_right(lay, clock, wifi, show_x):
+    """`lay` None: the fixed game-canvas cluster; else (clock_x, text_dy, cs,
+    wifi_rect, batt_rect, menu_rect, close_rect)."""
+    lp = None
+    if lay is not None:
+        lp = _ChLay()
+        lp.clock_x, lp.text_dy, lp.cs = int(lay[0]), int(lay[1]), int(lay[2])
+        for k, r in zip(("wifi", "batt", "menu", "close"), lay[3:7]):
+            a = getattr(lp, k)
+            for i in range(4):
+                a[i] = int(r[i])
+        lp = ctypes.cast(ctypes.byref(lp), ctypes.c_void_p)
+    return _chrome("moy_chrome_strip_right", lp, _b(clock), _b(wifi), bool(show_x))
+
+
+def chrome_strip_title(title, zx, zw, dy):
+    return _chrome("moy_chrome_strip_title", _b(title), int(zx), int(zw), int(dy))
+
+
+def chrome_menu(rows, sel, x, y, w, h, fs, cs):
+    """`rows`: [(kind, label)] with kind MENU_ITEM, MENU_HEADER or MENU_SEP."""
+    n = len(rows)
+    kinds = (_U8 * max(n, 1))(*[int(r[0]) for r in rows])
+    keep = [_b(r[1] if len(r) > 1 else "") for r in rows]
+    labels = (ctypes.c_char_p * max(n, 1))(*keep)
+    return _chrome("moy_chrome_menu", ctypes.cast(kinds, ctypes.c_void_p),
+                   ctypes.cast(labels, ctypes.c_void_p), n, int(sel), int(x), int(y),
+                   int(w), int(h), int(fs), int(cs))
+
+
+def chrome_about(cw, ch, fs, ver):
+    return _chrome("moy_chrome_about", int(cw), int(ch), int(fs), _b(ver))
+
+
+def chrome_glyph(kind, rows):
+    arr = (_U16 * 12)(*[int(r) & 0xFFF for r in rows])
+    return _clib().moy_chrome_glyph_put(_b(kind), arr) == 0
+
+
+def chrome_notice(title, sub, ok, until_ms):
+    _clib().moy_chrome_notice(_b(title), _b(sub), bool(ok), int(until_ms) & 0xFFFFFFFF)
+
+
+def chrome_toast_arm(title, glyph, until_ms):
+    _clib().moy_chrome_toast_arm(_b(title), _b(glyph), int(until_ms) & 0xFFFFFFFF)

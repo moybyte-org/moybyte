@@ -306,7 +306,7 @@ def test_kstale_fails_loudly_when_a_dead_handle_is_served(capsys):
 
 
 class FakeLink:
-    """`ws.link` (device/moy_espnow.py's Link) narrowed to what `link` drives."""
+    """`ws.link` (runtime/players.py's EspNowLink) narrowed to what `link` drives."""
 
     def __init__(self):
         self.active = False

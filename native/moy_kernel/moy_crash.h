@@ -45,8 +45,11 @@ enum {
     MOY_CRASH_KINDS
 };
 
-// The strike ledger's two roles (runtime/crash_guard.py's KEY, WALLPAPER_KEY).
-enum { MOY_ROLE_NONE = 0, MOY_ROLE_APP, MOY_ROLE_WALLPAPER };
+// What a record's id names: the strike ledger's two roles
+// (runtime/crash_guard.py's KEY, WALLPAPER_KEY), and a game the kernel's
+// Player armed at its launch (docs/kernel_cartpath_2026-10.md §8.3). A game
+// is named and earns no strikes: no ledger counts it.
+enum { MOY_ROLE_NONE = 0, MOY_ROLE_APP, MOY_ROLE_WALLPAPER, MOY_ROLE_GAME };
 
 #define MOY_CRASH_ID_LEN    24
 #define MOY_CRASH_TASK_LEN  16
@@ -104,6 +107,7 @@ typedef struct {
     uint8_t test;                    // MOY_TEST_*, consumed by the next decide
     char open_app[MOY_CRASH_ID_LEN];
     char open_wallpaper[MOY_CRASH_ID_LEN];
+    char open_game[MOY_CRASH_ID_LEN];
 } moy_kstate_t;
 
 typedef struct {
@@ -131,8 +135,8 @@ moy_boot_decision_t moy_boot_decide(moy_kstate_t *st);
 // The console painted its first frame: the boot-loop count starts over.
 void moy_boot_proven(moy_kstate_t *st);
 
-// The ledger's OPEN id for `role` (NULL or "" clears it), and which one a
-// crash names: the app's when one is open, else the wallpaper's.
+// The OPEN id for `role` (NULL or "" clears it), and which one a crash names:
+// the app's when one is open, else the game's, else the wallpaper's.
 void moy_kstate_arm(moy_kstate_t *st, int role, const char *id);
 int moy_kstate_open_id(const moy_kstate_t *st, const char **id);
 

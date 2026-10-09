@@ -71,10 +71,10 @@ part that remains Python and why.
 | `runtime/cart_files.py` | `native/moy_store/moy_files.c` (the cart's written files over `moy_fs`'s crash-safe write) | the run path | the reference `tests/test_moy_files.py` holds the C to, and the store's `remove` that Get Carts' REMOVE calls |
 | `runtime/moyimg.py`'s decoder and `runtime/moy_image.py`'s `Image` | `native/moy_store/moy_img.c`, a C port of the moyimg codec (none exists in C: `moy_cat.c` only gathers a cart's `.moyimg` files), and an IMAGE handle (§3.1) | the Python decode on the run path | the codec's Python stays the reference the port's parity test reads, and the encoder Paint uses; `Image` stays a Python wrapper over the handle for Python carts; the wallpaper sidecar is sprint 5's |
 | the scene world (`runtime/widgets.py`'s scenes, the `.moyscene` parse) | `native/moycore/moycore_scene.h`: the parse and `draw_scene` in C, the live world as Lua tables in the run's state | the run path's parse and placement | the Scene tab's editing, an app; a Python cart's world |
-| `runtime/netplay.py` | `+native/moy_play/moy_match.c` | all of it | — |
+| `netplay.py` (deleted) | `native/moy_play/moy_match.c` | all of it (step 2) | — |
 | `runtime/players.py` | `PlayerRouter`: `moy_input`'s player slots; `NetService`: `moy_match.c` | all of it | `LoopbackNet` becomes the C binding's loopback, for the host tests |
-| `device/moy_espnow.py` | `moy_match.c`: beacons, the peer table, offer, join, start, the match's end and its config | all of it (the radio is `native/moy_net/moy_link.c` since sprint 3) | the launcher's peer line reads the kernel's table |
-| `runtime/system_menu_ui.py` | `+native/moy_play/moy_chrome.c` | all of it | the launcher hands the menu its rows (SEARCH), so there is one menu over a cart and over the shell |
+| `moy_espnow.py` (deleted) | `moy_match.c`: beacons, the peer table, offer, join, start, the match's end and its config | all of it (the radio is `native/moy_net/moy_link.c` since sprint 3) | the launcher's peer line reads the kernel's table |
+| `system_menu_ui.py` (deleted) | `native/moy_play/moy_chrome.c` | the drawing (step 2; the rows and actions are `runtime/console_notices.py`'s) | the launcher hands the menu its rows (SEARCH), so there is one menu over a cart and over the shell |
 | `runtime/console_notices.py` | `moy_chrome.c`: the notice banner, the toast and their deadlines | the queue and the two draws | the `Achievements` wiring: badges are awarded at launch, before any stop, and post their toast to the kernel |
 | `runtime/achievements_ui.py` | — | — | **stays**: the eggs fire on the launcher and in Settings, which are apps (this corrects the plan's §2.2.1 row) |
 | `runtime/console.py`'s cart bar, tool bar and their taps, `settle_cart_frame`, `_sync_cart_text_mode` | `moy_chrome.c`'s strip; `moy_input`'s keyboard mode | those methods | the shell's own top bar calls the same C strip, so the strip has one body until the window managers cross |
@@ -248,8 +248,8 @@ opens the menu.
     void moy_lockstep_resend(uint32_t run);
     int  moy_lockstep_packet(const uint8_t *data, size_t n, uint32_t now_ms);
 
-`moy_match.c` is `device/moy_espnow.py`'s protocol and `runtime/netplay.py`'s
-session over `moy_link`'s ring: inputs, never state; a missing input stalls,
+`moy_match.c` is the link's protocol and the lockstep session over
+`moy_link`'s ring: inputs, never state; a missing input stalls,
 never extrapolates (`docs/netplay_v1.md`). The pre-tick drain is a read of the
 ring in the frame, not a SERVICE upcall. A match's config overrides the run's
 config in the run's row, never on the card.
