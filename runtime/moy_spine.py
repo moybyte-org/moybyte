@@ -363,6 +363,29 @@ class Leases:
                 if self._mask & (1 << i)]
 
 
+_KERNEL = []
+
+
+def kernel(fresh):
+    """(apps, back, returns, leases): the console's tables as the kernel's own
+    (docs/kernel_cartpath_2026-10.md section 5.4) -- one set per process, made
+    at the first call and kept, so a VM stop leaves them for the next VM. The
+    registry is cleared at every call (the console registers its apps at each
+    start); `fresh` also puts the back-stack, the return records and the
+    leases back as they are made, which every start but a return start asks
+    for."""
+    if not _KERNEL:
+        apps = AppRegistry()
+        _KERNEL.extend((apps, BackStack(), Returns(apps), Leases()))
+    apps, back, returns, leases = _KERNEL
+    apps.__init__()
+    if fresh:
+        back.__init__()
+        returns.__init__(apps)
+        leases.__init__()
+    return tuple(_KERNEL)
+
+
 def _key(k):
     if not isinstance(k, str):
         raise TypeError("a settings key is a str")

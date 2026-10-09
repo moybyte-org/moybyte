@@ -294,17 +294,44 @@ static bool w_mem(int argc, char **argv, const char *line) {
     return true;
 }
 
-// kstop N (§7.5): the VM service's soft reset N times, the console booting
-// between, a KSTOP line of the heaps before and after each teardown. DEV.
+// kstop N [stop] (§7.5): the VM service's soft reset N times, the console
+// booting between, a KSTOP line of the heaps before and after each teardown.
+// `stop`: each a real stop and start instead (docs/kernel_cartpath_2026-10.md
+// section 5), with a third line while the VM is down. DEV.
 static bool w_kstop(int argc, char **argv, const char *line) {
     (void)line;
     int n = argc > 1 ? atoi(argv[1]) : 1;
     if (n < 1) {
         n = 1;
     }
-    moy_loop_say("REMOTE kstop %d", n);
-    moy_kernel_kstop(n);
+    bool stop = argc > 2 && strcmp(argv[2], "stop") == 0;
+    moy_loop_say("REMOTE kstop %d%s", n, stop ? " stop" : "");
+    if (stop) {
+        moy_kernel_kstop_stop(n);
+    } else {
+        moy_kernel_kstop(n);
+    }
     moy_loop_end(MOY_LOOP_EXIT);
+    return true;
+}
+
+// vmstop [force|need]: DEV. `force` makes the stop verdict's fit check read as
+// failing (native/moy_play/moy_play_stop.c), so a board where a cart fits can
+// still be made to stop the VM for it; `need` is the policy as it ships. Bare:
+// which is in force.
+void moy_play_stop_force(bool on) __attribute__((weak));
+bool moy_play_stop_forced(void) __attribute__((weak));
+
+static bool w_vmstop(int argc, char **argv, const char *line) {
+    (void)line;
+    if (moy_play_stop_force == NULL) {
+        moy_loop_say("REMOTE vmstop: absent");
+        return true;
+    }
+    if (argc > 1) {
+        moy_play_stop_force(strcmp(argv[1], "force") == 0);
+    }
+    moy_loop_say("REMOTE vmstop %s", moy_play_stop_forced() ? "force" : "need");
     return true;
 }
 
@@ -324,6 +351,7 @@ static const moy_devch_word_t BOARD_WORDS[] = {
     {"heapcaps", w_heapcaps},
     {"mem", w_mem},
     {"kstop", w_kstop},
+    {"vmstop", w_vmstop},
     {"hush", w_hush},
 };
 #endif
@@ -457,7 +485,9 @@ static void loop_task(void *arg) {
 }
 
 void moy_loop_board_window(void) {
-    if (s_task_up) {
+    // A stop's window is the VM task's own: it drives the kernel's frame
+    // itself until the next VM (moy_loop_board_down).
+    if (s_task_up || moy_kernel_stop_pending()) {
         return;
     }
     s_window = true;
@@ -482,11 +512,73 @@ uint32_t moy_loop_board_window_frames(void) {
     return s_window_frames;
 }
 
+// -- the VM stopped (docs/kernel_cartpath_2026-10.md section 5.3) -------------
+//
+// The stages the VM service task drives while no VM runs: the kernel's input
+// table, the dev channel over the stdin ring, the tail's services, the
+// watchdog, and a line out through the C library's stdout (no GIL, no VM's
+// stream). The interrupt character is the kernel's: 0x03 off the ring ends
+// the run in front with why SERIAL, which starts the next VM. No present: the
+// run in front presents its own frames.
+
+bool moy_play_front_end(int why) __attribute__((weak));
+
+static bool s_serial;               // a Ctrl-C came while the VM was down
+
+static int d_getc(void) {
+    int c = b_getc();
+    while (c == 3) {
+        s_serial = true;
+        if (moy_play_front_end != NULL) {
+            moy_play_front_end(5);          // MOY_PLAY_END_SERIAL
+        }
+        c = b_getc();
+    }
+    return c;
+}
+
+// Whether a Ctrl-C came since the VM went down (the stopped run's end reads it).
+bool moy_loop_board_serial(void) {
+    return s_serial;
+}
+
+static void d_sleep(uint32_t ms) {
+    if (ms > 0) {
+        TickType_t t = pdMS_TO_TICKS(ms);
+        vTaskDelay(t > 0 ? t : 1);
+    }
+}
+
+static void d_say(const char *line) {
+    moy_kernel_say(line);
+}
+
+static moy_loop_ops_t s_down;
+
+void moy_loop_board_down(void) {
+    s_serial = false;
+    memset(&s_down, 0, sizeof(s_down));
+    s_down.ticks_ms = b_ms;
+    s_down.ticks_us = b_us;
+    s_down.sleep_ms = d_sleep;
+    s_down.inputs = moy_input_loop_inputs != NULL ? b_inputs : NULL;
+    s_down.getc = d_getc;
+    s_down.feed = b_feed;
+    s_down.tail = b_tail;
+    s_down.say = d_say;
+    s_down.point = b_point;
+    s_down.alloc = b_alloc;
+    #if MICROPY_KBD_EXCEPTION
+    mp_hal_set_interrupt_char(-1);
+    #endif
+    moy_loop_set_ops(&s_down);
+}
+
 // The loop ended: say why, and answer whether the VM resets now (a
 // SystemExit reached an upcall: `kstop`'s cycle). A Ctrl-C is a developer
 // asking for the REPL, which proves this start as the first frame would have.
 bool moy_loop_board_ended(int r) {
-    if (r == MOY_LOOP_EXIT) {
+    if (r == MOY_LOOP_EXIT || r == MOY_LOOP_STOP) {
         return true;
     }
     if (r == MOY_LOOP_QUIT) {

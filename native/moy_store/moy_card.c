@@ -106,13 +106,34 @@ static mp_obj_t card_count(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(card_count_obj, card_count);
 
+// How the running VM started (native/moy_kernel): weak, so an image without
+// the kernel (the host, the unix port) never returns.
+extern int moy_kernel_start(void) __attribute__((weak));
+
+// The card's FATFS while it is mounted, or NULL: what the store resolves
+// "/sd" to while no VM runs (modmoy_store.c's moy_vol_at), and what the next
+// VM mounts again.
+void *moy_store_card_fatfs(void) {
+    if (card_p == NULL || card.vfs == NULL || card.vfs->fatfs.fs_type == 0) {
+        return NULL;
+    }
+    return &card.vfs->fatfs;
+}
+
 // card(sectors, driver=None) -> the volume, a VfsFat to vfs.mount: the store's
 // FATFS mounted over the card. A second call drops the cache and mounts the
-// same instance again (a card may have changed).
+// same instance again (a card may have changed) -- except at a RETURN start
+// (docs/kernel_cartpath_2026-10.md section 5.4): the volume the kernel held
+// open through the VM's stop is handed over as it is, the card untouched,
+// because a failed remount on the Guition S3 stays failed until a reboot.
 static mp_obj_t mod_card(size_t n_args, const mp_obj_t *args) {
     uint32_t sectors = (uint32_t)mp_obj_get_int(args[0]);
     need_card();
     MP_STATE_VM(moy_store_card_driver) = n_args > 1 ? args[1] : mp_const_none;
+    if (moy_kernel_start != NULL && moy_kernel_start() == 1 && n_args < 2
+        && moy_store_card_fatfs() != NULL && card.sectors == sectors) {
+        return MP_OBJ_FROM_PTR(card.vfs);
+    }
     if (card.vfs == NULL) {
         card.vfs = moy_store_raw_alloc(sizeof(fs_user_mount_t));
         card.cache.slots = moy_store_raw_alloc((size_t)SLOTS * SECTOR);

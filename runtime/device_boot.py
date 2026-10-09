@@ -111,6 +111,9 @@ class DeviceBoot(BootCarts):
         # not to re-arm the logo (see start_frames).
         self.lit = False
         self.done = False           # the desktop owns the glass; stop painting
+        # A return start (the VM back after a stop, native/moy_kernel): the
+        # glass is lit and shows the run that just ended, so no splash.
+        self.quiet = False
         self._first_at = 0
 
     # -- the screen ----------------------------------------------------------
@@ -145,6 +148,8 @@ class DeviceBoot(BootCarts):
             return
         if frac is None:
             self.say("boot: " + msg)
+        if self.quiet:
+            return
         try:
             self.canvas.sync_back()
             draw_splash(self.canvas, frac=frac, status=msg)

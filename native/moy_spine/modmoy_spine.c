@@ -14,8 +14,12 @@
 // MALLOC_CAP_SPIRAM unless it is latency-bound), malloc elsewhere. What a
 // component hands Python is a small int, a str or a list of them; a kind is an
 // interned str (a qstr, made once per kind), so top(), has() and index() on the
-// frame path allocate nothing. Each object frees its C state in __del__, so the
-// collector reclaims what the Python twin's garbage would.
+// frame path allocate nothing. An object a constructor made frees its C state in
+// __del__, so the collector reclaims what the Python twin's garbage would. The
+// console's registry, back-stack, return records and leases are not those:
+// kernel() hands it views of the kernel's own tables (moy_route.h's
+// moy_spine_kernel), whose finalisers free nothing, so a VM stop's sweep leaves
+// the routes and the leases for the next VM.
 //
 // A handle is an int; one outside 1 .. 2**30 - 1 names no row. A Table keeps its
 // rows' objects in a gc array beside the C table (a row of the C table is empty:
@@ -309,6 +313,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 typedef struct {
     mp_obj_base_t base;
     moy_apps_t *a;
+    bool own;               // false: a view of the kernel's table
 } apps_obj_t;
 
 static const mp_obj_type_t apps_type;
@@ -325,6 +330,7 @@ static mp_obj_t apps_make_new(const mp_obj_type_t *type, size_t n_args,
     if (o->a == NULL) {
         no_memory();
     }
+    o->own = true;
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -454,7 +460,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(apps_count_obj, apps_count);
 
 static mp_obj_t apps_del(mp_obj_t self_in) {
     apps_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    moy_apps_free(self->a);
+    if (self->own) {
+        moy_apps_free(self->a);
+    }
     self->a = NULL;
     return mp_const_none;
 }
@@ -486,6 +494,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 typedef struct {
     mp_obj_base_t base;
     moy_back_t *b;
+    bool own;
 } back_obj_t;
 
 static moy_back_t *back_of(mp_obj_t self) {
@@ -500,6 +509,7 @@ static mp_obj_t back_make_new(const mp_obj_type_t *type, size_t n_args,
     if (o->b == NULL) {
         no_memory();
     }
+    o->own = true;
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -567,7 +577,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(back_kinds_obj, back_kinds);
 
 static mp_obj_t back_del(mp_obj_t self_in) {
     back_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    moy_back_free(self->b);
+    if (self->own) {
+        moy_back_free(self->b);
+    }
     self->b = NULL;
     return mp_const_none;
 }
@@ -598,6 +610,7 @@ typedef struct {
     mp_obj_base_t base;
     moy_returns_t *r;
     mp_obj_t apps;          // the registry it reads, kept alive with it
+    bool own;
 } returns_obj_t;
 
 static moy_returns_t *returns_of(mp_obj_t self) {
@@ -616,6 +629,7 @@ static mp_obj_t returns_make_new(const mp_obj_type_t *type, size_t n_args,
     if (o->r == NULL) {
         no_memory();
     }
+    o->own = true;
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -671,7 +685,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(returns_take_back_obj, returns_take_back);
 
 static mp_obj_t returns_del(mp_obj_t self_in) {
     returns_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    moy_returns_free(self->r);
+    if (self->own) {
+        moy_returns_free(self->r);
+    }
     self->r = NULL;
     return mp_const_none;
 }
@@ -700,6 +716,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 typedef struct {
     mp_obj_base_t base;
     moy_leases_t *l;
+    bool own;
 } leases_obj_t;
 
 static moy_leases_t *leases_of(mp_obj_t self) {
@@ -714,6 +731,7 @@ static mp_obj_t leases_make_new(const mp_obj_type_t *type, size_t n_args,
     if (o->l == NULL) {
         no_memory();
     }
+    o->own = true;
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -775,7 +793,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(leases_holders_obj, leases_holders);
 
 static mp_obj_t leases_del(mp_obj_t self_in) {
     leases_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    moy_leases_free(self->l);
+    if (self->own) {
+        moy_leases_free(self->l);
+    }
     self->l = NULL;
     return mp_const_none;
 }
@@ -1350,6 +1370,43 @@ static mp_obj_t mod_set_mirror(mp_obj_t hook) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_mirror_obj, mod_set_mirror);
 
+// kernel(fresh) -> (apps, back, returns, leases): views of the kernel's own
+// tables (moy_route.h's moy_spine_kernel), made at the first call and never
+// freed, so a VM stop leaves them for the next VM. The views own nothing: their
+// finalisers free no table. The registry is cleared at every call (the console
+// registers its apps at each start); `fresh` also puts the back-stack, the
+// return records and the leases back as they are made, which every start but a
+// return start asks for.
+static mp_obj_t mod_kernel(mp_obj_t fresh) {
+    const moy_spine_kernel_t *k = moy_spine_kernel(&spine_mem);
+    if (k == NULL) {
+        no_memory();
+    }
+    moy_apps_clear(k->apps);
+    if (mp_obj_is_true(fresh)) {
+        moy_back_reset(k->back);
+        moy_returns_reset(k->returns);
+        moy_leases_reset(k->leases);
+    }
+    apps_obj_t *a = mp_obj_malloc_with_finaliser(apps_obj_t, &apps_type);
+    a->a = k->apps;
+    a->own = false;
+    back_obj_t *b = mp_obj_malloc_with_finaliser(back_obj_t, &back_type);
+    b->b = k->back;
+    b->own = false;
+    returns_obj_t *r = mp_obj_malloc_with_finaliser(returns_obj_t, &returns_type);
+    r->r = k->returns;
+    r->apps = MP_OBJ_FROM_PTR(a);
+    r->own = false;
+    leases_obj_t *l = mp_obj_malloc_with_finaliser(leases_obj_t, &leases_type);
+    l->l = k->leases;
+    l->own = false;
+    mp_obj_t t[4] = { MP_OBJ_FROM_PTR(a), MP_OBJ_FROM_PTR(b), MP_OBJ_FROM_PTR(r),
+                      MP_OBJ_FROM_PTR(l) };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_kernel_obj, mod_kernel);
+
 // -- the module --------------------------------------------------------------------
 
 static const mp_rom_obj_tuple_t lease_tags_tuple = {
@@ -1373,6 +1430,7 @@ static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_StaleHandle), MP_ROM_PTR(&stale_type) },
     { MP_ROM_QSTR(MP_QSTR_CrashGuard), MP_ROM_PTR(&guard_type) },
     { MP_ROM_QSTR(MP_QSTR_set_mirror), MP_ROM_PTR(&mod_set_mirror_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&mod_kernel_obj) },
     { MP_ROM_QSTR(MP_QSTR_SLOT_BITS), MP_ROM_INT(8) },
     { MP_ROM_QSTR(MP_QSTR_KIND_SHIFT), MP_ROM_INT(MOY_HTAB_KIND_SHIFT) },
     { MP_ROM_QSTR(MP_QSTR_GEN_SHIFT), MP_ROM_INT(MOY_HTAB_GEN_SHIFT) },

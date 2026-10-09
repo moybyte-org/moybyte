@@ -421,6 +421,24 @@ def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
     on_glass.a_ctrl_c_ends_a_front_run(board)
 
 
+# The VM stop (docs/kernel_cartpath_2026-10.md section 5): the kernel stops the
+# VM and starts it again with no cart, the route and the lease set before each
+# stop read back after it, PSRAM flat while it is down; Doom runs with no VM
+# (its fit forced to fail: it fits a fresh T-Deck), `state` says so, and its
+# end -- the dev channel's `end`, or a Ctrl-C -- brings a VM back. Each ends on
+# a freshly started VM, as the soft resets below do.
+def test_vm_stops_leave_psram_flat_and_the_routes_read_back(board):
+    on_glass.vm_stops_leave_psram_flat(board, n=5)
+
+
+def test_doom_runs_with_the_vm_down(board):
+    on_glass.doom_runs_with_the_vm_down(board)
+
+
+def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
+    on_glass.doom_runs_with_the_vm_down(board, ctrl_c=True)
+
+
 # LAST in the file: twenty soft resets end on a freshly started VM.
 def test_twenty_soft_resets_leave_psram_flat(board):
     on_glass.soft_resets_leave_psram_flat(board, n=20)

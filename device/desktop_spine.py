@@ -242,6 +242,15 @@ def bt_command(keyboard, comp=None):
     return _bt_cmd
 
 
+def _kernel():
+    """The kernel's binding (native/moy_kernel), or None off a board."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return None
+    return moy_kernel
+
+
 def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   keyboard, seed_carts, power_save_ms,
                   game_wh=None, font_scale=1, panel_diagonal_in=None,
@@ -266,6 +275,15 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # stays dark until a frame has composed (#45), so the splash is what
     # makes a slow boot legible on the glass and on the wire.
     boot = DeviceBoot(sys_canvas, comp, set_backlight, name)
+    # A RETURN start (docs/kernel_cartpath_2026-10.md 5.4): the VM is back
+    # after the kernel stopped it for a run. No splash and no OTA verdict; the
+    # launcher lands where the resume record left it.
+    kernel = _kernel()
+    returning = kernel is not None and getattr(kernel, "start", None) is not None \
+        and kernel.start() == "return"
+    if returning:
+        boot.quiet = True
+        boot.lit = True
     boot.note("starting")
     if game_wh is None:
         game = sys_canvas
@@ -373,7 +391,13 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # rollback CONFIRM is not made here: reaching this line proves the desktop
     # was CONSTRUCTED, not that a pixel reached the glass (#56). The kernel's
     # loop fires it once frames are really going out.
-    report_update(ws, lambda m: log("OTA", m))
+    if returning:
+        rec = kernel.resume()
+        if rec:
+            ws.resume_launcher(rec)
+        log("boot", "return start")
+    else:
+        report_update(ws, lambda m: log("OTA", m))
     print("%s desktop running (Ctrl-C for REPL)" % name)
     _census("ota check")
     boot.start_frames(ws)

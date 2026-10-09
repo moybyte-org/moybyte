@@ -373,6 +373,10 @@ uint32_t moy_loop_registered(void) {
     return L.registered;
 }
 
+void moy_loop_set_ops(const moy_loop_ops_t *ops) {
+    L.ops = ops ? ops : &NO_OPS;
+}
+
 void moy_loop_set_vm(bool up) {
     L.vm = up;
     if (!up) {
@@ -634,7 +638,8 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) __attribute__((weak));
 
 int moy_loop_step(void) {
     const moy_loop_ops_t *ops = L.ops;
-    if (ops == NULL || !L.vm || L.up == NULL || (L.registered & 7u) != 7u) {
+    if (ops == NULL || (L.vm && (L.up == NULL || (L.registered & 7u) != 7u))
+        || (!L.vm && ops == &NO_OPS)) {
         return MOY_LOOP_STOPPED;
     }
     memset(L.up_frame, 0, sizeof(L.up_frame));
@@ -747,7 +752,14 @@ int moy_loop_step(void) {
         }
     }
     mark(MOY_ST_PUMP_TAIL);
-    uint32_t svc = L.services | L.once | (ops->services != NULL ? ops->services() : 0u);
+    // A service's half is Python: with no VM there is none to want, and what
+    // the last VM asked for went with it.
+    if (!L.vm) {
+        L.services = 0;
+        L.once = 0;
+    }
+    uint32_t svc = !L.vm ? 0u
+                   : L.services | L.once | (ops->services != NULL ? ops->services() : 0u);
     if (ops->tail != NULL || svc) {
         if (ops->tail != NULL) {
             ops->tail(now, drew);

@@ -519,8 +519,9 @@ void hl_free(host_lua *r)
  * Python's. */
 void hl_play_rows(int wasm) { moy_play_rows(true, wasm != 0, true); }
 
-int hl_play_launch(const char *cart, int paced, uint32_t *run)
-{ return moy_play_launch(cart, NULL, paced ? MOY_PLAY_PACED : 0u, run); }
+/* `flags`: bit 0 paced, then moy_play.h's MOY_PLAY_HOME and _UNSIGNED. */
+int hl_play_launch(const char *cart, int flags, uint32_t *run)
+{ return moy_play_launch(cart, NULL, (uint32_t)flags, run); }
 
 int hl_play_bind(uint32_t run, moy_input_t *in, uint32_t audio, moy_tick_t *tick)
 { return moy_play_bind(run, in, audio, tick); }

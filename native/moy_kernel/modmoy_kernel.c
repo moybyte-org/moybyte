@@ -9,6 +9,10 @@
 //   moy_kernel.watchdog([reset])   (armed, timeout_ms, max_gap_ms, frames)
 //   moy_kernel.kstop(n)            DEV: n soft resets of the VM, heaps printed
 //   moy_kernel.lit()               ms after power-on the kernel lit the logo, or None
+//   moy_kernel.start()             'boot', or 'return' after a VM stop
+//   moy_kernel.stop()              the loop ends at this frame and the VM stops
+//                                  for the run the Player launched
+//   moy_kernel.resume([text])      the resume record: set it, or read it (None)
 //
 //   moy_crash.arm(role, id)        the ledger's OPEN id (None clears), into RTC
 //   moy_crash.last()               the last record this board made, or None
@@ -45,6 +49,31 @@ static mp_obj_t mod_lit(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_lit_obj, mod_lit);
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_boot_ok_obj, mod_boot_ok);
+
+static mp_obj_t mod_start(void) {
+    return MP_OBJ_NEW_QSTR(moy_kernel_start() == MOY_START_RETURN ? MP_QSTR_return
+                                                                 : MP_QSTR_boot);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_start_obj, mod_start);
+
+static mp_obj_t mod_stop(void) {
+    moy_kernel_stop(MOY_STOP_RUN);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_stop_obj, mod_stop);
+
+static mp_obj_t mod_resume(size_t n_args, const mp_obj_t *args) {
+    if (n_args > 0) {
+        size_t n;
+        const char *t = mp_obj_str_get_data(args[0], &n);
+        moy_kernel_resume_set(t, n);
+        return mp_const_none;
+    }
+    const char *t;
+    size_t n = moy_kernel_resume(&t);
+    return t == NULL ? mp_const_none : mp_obj_new_str(t, n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_resume_obj, 0, 1, mod_resume);
 
 static mp_obj_t mod_boot_failed(mp_obj_t what) {
     moy_kernel_boot_failed(mp_obj_str_get_str(what));
@@ -103,6 +132,9 @@ static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
     { MP_ROM_QSTR(MP_QSTR_kstop), MP_ROM_PTR(&mod_kstop_obj) },
     { MP_ROM_QSTR(MP_QSTR_lit), MP_ROM_PTR(&mod_lit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&mod_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mod_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_resume), MP_ROM_PTR(&mod_resume_obj) },
     { MP_ROM_QSTR(MP_QSTR_boot_failed), MP_ROM_PTR(&mod_boot_failed_obj) },
     { MP_ROM_QSTR(MP_QSTR_mode), MP_ROM_PTR(&mod_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_test), MP_ROM_PTR(&mod_test_obj) },

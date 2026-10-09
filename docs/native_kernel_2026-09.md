@@ -573,7 +573,7 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | ESP-NOW | `native/moy_net/moy_link.c` holds esp_now's one receive callback, which latches each frame into the kernel's ring in PSRAM; the link's protocol (`native/moy_play/moy_match.c`) drains it from the loop's tail | nothing: the port's `espnow` module is out of the console images, so the link and its ring stay up | the same | 3 (landed, pass 2), 4 (lockstep) |
 | the legacy I2S feed | `device_audio.py`'s `i2s.irq`, taken only when the core-1 task failed to start | the object's finaliser, at the sweep | the same | 3 (deleted, 2026-10-07: no Python feeds a speaker) |
 | `machine.Timer`, `micropython.schedule`, UART, socket callbacks, dupterm | no user in `runtime/`, `device/` or a board's modules | `machine_timer_deinit_all`, `machine_uart_deinit_all`, `socket_events_deinit` | kept | — |
-| the console's RX ISR | `usb_serial_jtag.c` wakes `mp_main_task_handle` on every packet | the VM's task never dies | the handle moves to the kernel's task before the VM's task is deleted, or a byte from the host notifies a freed task | 0 |
+| the console's RX ISR | `usb_serial_jtag.c` wakes `mp_main_task_handle` on every packet | the VM's task never dies | the same: the VM's task is not deleted by a stop (it drives the kernel's frame while no VM runs), so the handle stays its own | 0; 4 (landed, step 3) |
 | the console's input ring | the RX ISR moves bytes into the port's stdin ring only while it has room, and only the VM reads the ring; the ISR also schedules a `KeyboardInterrupt` on `mp_interrupt_char` | the VM drains it | while the VM is down the kernel drains the ring and re-polls the USB FIFO every window, and sets `mp_interrupt_char` to -1 — a host writing through a stop otherwise stalls the console's input for good (found by the spike, 2026-10-05) | 0 |
 | the wasm session's task | `native/moy_wasm/modmoy_wasm.c`'s `g_sess` asks the VM's task to run `vm_fn` for a cart's `read` and file calls, through `moycore_wasm_gate` | nothing ends the session | moycore's `close()` (`wasm_end`) first | 1b (the card's volume), 3 (the internal volumes), 4 |
 | ***C state that survives `mp_deinit`*** | | | | |
@@ -589,10 +589,10 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | driver buffers | the panel framebuffers (`s_fbs` in `moy_lcd`/`moy_axs`), the flush bounce slots, the audio bank and PCM ring, the SD bounce, `moy_prof`'s ring | C-owned, allocated once | kept: the kernel's | — |
 | ***Port state only the soft reset handles*** | | | | |
 | the native-code arena | `esp_native_code_free_all`, in `MALLOC_CAP_EXEC` (internal) memory; extern by `patches/esp32_native_code_free.patch` for `moy_gfx.native_code_free_all` | freed after the sweep | the same | 0 |
-| the first heap area | `mp_task` allocates it before `soft_reset:` | reused, never freed | freed with the VM, allocated at start | 0 |
-| the VM's task | `mp_task` never returns; `mp_thread_init` binds thread 0 to it | lives forever | created at start, deleted at stop (its stack goes back to internal SRAM, §4.6); `mp_thread_init` at every start | 0 |
-| mounts and SD | `mp_init` empties the mount table; the internal flash is the kernel's littlefs instance (`native/moy_store/moy_kvfs.c`, 2026-10-08), a `KVfs` each VM's start mounts at "/" (`docs/kernel_survival_2026-10.md` §6.6). Guition S3: the store's card volume over `moy_sd.open` (`moy_runtime.tf_card`, mounted by `device/card_store.py`; the bus is never torn down). T-Deck: `moy_sd` stays attached (`init` is idempotent) | remounted | the same until the gate is native; a failed Guition remount stays failed until a reboot (its README) | 1b (the card), 3 (internal flash) |
-| WiFi and its leases | the port never deinitialises the WLAN driver; the lease table (`runtime/moy_spine.py`'s `Leases`) is Python | the radio left as it was | refused while a lease is held | 2 |
+| the first heap area | `mp_task` allocates it before `soft_reset:` | reused, never freed | freed with the VM, allocated at start | 0; 4 (landed, step 3) |
+| the VM's task | `mp_task` never returns; `mp_thread_init` binds thread 0 to it | lives forever | lives: after `mp_deinit` it drives the kernel's frame with no VM until the stop's run ends, then starts the next VM where the soft reset does (`docs/kernel_cartpath_2026-10.md` §4) | 0; 4 (landed, step 3) |
+| mounts and SD | `mp_init` empties the mount table; the internal flash is the kernel's littlefs instance (`native/moy_store/moy_kvfs.c`, 2026-10-08), a `KVfs` each VM's start mounts at "/" (`docs/kernel_survival_2026-10.md` §6.6). Guition S3: the store's card volume over `moy_sd.open` (`moy_runtime.tf_card`, mounted by `device/card_store.py`; the bus is never torn down). T-Deck: `moy_sd` stays attached (`init` is idempotent) | remounted | the card's FATFS stays open through the stop (PSRAM, `native/moy_store/moy_card.c`) and the store resolves `/sd` and `/` to the kernel's two volumes while no VM runs; a RETURN start's `moy_store.card` hands the open volume over with no bus traffic, because a failed Guition remount stays failed until a reboot (its README) | 1b (the card), 3 (internal flash), 4 (landed, step 3) |
+| WiFi and its leases | the port never deinitialises the WLAN driver; the lease table is a kernel singleton the console's `Leases` views (`native/moy_spine/moy_route.h`'s `moy_spine_kernel`) | the radio left as it was | refused while a Python owner holds a lease; the kernel's own holders (the link, a cart's run) do not refuse | 2; 4 (landed, step 3) |
 | an OTA write | `device/moy_ota.py` streams into the inactive slot | — | refused while it runs | 2 |
 | ***Native tasks*** | | | | |
 | the flush feeder, the audio core-1 task, `moy_prof`'s timer; P4: `moy_c6`'s TX task, `moy_ble_hid`'s queue | `native/moy_flush/`, `native/moy_audio/`, `native/moy_prof/`, `native/p4/` | no VM calls; they survive | kept; the audio task silences the cart's sound | 3 |
@@ -603,7 +603,9 @@ the fold disarmed, async copies waited); the port's deinit list, with the
 pin-wide sweep replaced by the Python-handler one; `gc_sweep_all`, whose
 finalisers close files, sockets, I2S and SD; the `moy_alloc` registry freed; the
 native-code arena freed; `mp_deinit`; the root section zeroed; the first area
-freed; `mp_main_task_handle` handed to the kernel's task; the VM's task deleted.
+freed; the stdin ring and the interrupt character taken by the kernel. The VM's
+task is not deleted: it runs the kernel's frame until the stop's run ends
+(`docs/kernel_cartpath_2026-10.md` §5).
 
 **Embed, not fork (owner, 2026-10-05).** MicroPython
 becomes a service the kernel starts and stops on a task of its own, inside the
@@ -837,11 +839,9 @@ board stands against each value, are #224's.
   layer, which bounds the pool sprint 3 makes the kernel's. Internal SRAM: the
   kernel costs **at most 4 KiB net** against sprint 0's baseline (§4.6: free,
   largest block and low-water, all-internal and DMA-capable, WiFi and BLE up)
-  while the VM runs, and **no more than the loop task's stack net** while it is
-  stopped, when the VM task's stack is back (`moy_loop_task`, which drives the
-  kernel's frame while no VM runs, exists only then: it is created when the
-  VM's teardown opens the window and deletes itself when the next VM is up,
-  docs/kernel_survival_2026-10.md §7.1). Kernel data is PSRAM by rule, and the T-Deck's DMA-capable
+  while the VM runs, and **nothing net** while it is stopped: the VM's task,
+  not deleted, drives the kernel's frame with no VM and no second task's
+  stack is alive (docs/kernel_cartpath_2026-10.md §4). Kernel data is PSRAM by rule, and the T-Deck's DMA-capable
   low-water with both radios up is the tightest figure on either board.
 - **Image headroom floors**, the OTA-slot headroom `build.sh` prints with the
   browser console baked in, at every sprint's gate:

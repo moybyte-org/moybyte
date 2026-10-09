@@ -2382,7 +2382,10 @@ static mp_obj_t mod_retarget(mp_obj_t fb_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_retarget_obj, mod_retarget);
 
-static mp_obj_t mod_close(void)
+// The run closed, from C: what close() does, which a run the kernel opened
+// with no VM (moycore_wasm_open_c) ends with too. Writes the module's root
+// pointers to nothing, which with no VM is the zeroed root section's value.
+void moycore_close_c(void)
 {
 #if MOYCORE_WASM
     wasm_end();                  // the session first: it draws on the console
@@ -2397,15 +2400,72 @@ static mp_obj_t mod_close(void)
     RUN.c.snap = NULL;
     RUN.c.aq = NULL;
     MP_STATE_VM(moycore_calls) = MP_OBJ_NULL;   // un-root: the gc may reclaim
+}
+
+static mp_obj_t mod_close(void)
+{
+    moycore_close_c();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
+
+// A compiled cart's run opened from C, with no VM (docs/kernel_cartpath_2026-10.md
+// section 5.2, the load after the stop): run_begin's console over the
+// caller's buffers, then wasm_open's session -- the same two steps the binding
+// takes, every buffer the caller's for the run's life. 0, or non-zero with the
+// refusal or the trap in `err` (the run is then open: moycore_close_c closes
+// it). A run already open, or no engine in the build, refuses.
+int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
+{
+#if MOYCORE_WASM
+    if (RUN.open) {
+        snprintf(err, n, "moycore: a run is already open");
+        return 1;
+    }
+    memset(&RUN, 0, sizeof(RUN));
+    moycore_lua_meters_reset();
+    moy_canvas_init(&RUN.c.canvas, (moy_pixel *)o->fb, o->w, o->h);
+#ifdef MOY_PIXEL_RGB565
+    if (o->wire != NULL) moy_canvas_wire(&RUN.c.canvas, o->wire);
+#endif
+    RUN.c.snap = o->snap;
+    moycore_run_open(&RUN.c, o->snap, o->aq, o->aq_cap);
+    if (o->pmem != NULL) moycore_run_pmem_load(&RUN.c, o->pmem, 256);
+    if (o->cfg != NULL && moycore_run_set_cfg(&RUN.c, o->cfg, o->cfg_len) != 0) {
+        snprintf(err, n, "out of memory: no room for the config");
+        moycore_run_close(&RUN.c);
+        return 1;
+    }
+    memset(RUN.c.flags, 0, sizeof(RUN.c.flags));
+    RUN.c.con.sheet = NULL;
+    RUN.c.con.map = NULL;
+    RUN.c.con.rng = (uint32_t)mp_hal_ticks_us();
+    if (RUN.c.con.rng == 0) RUN.c.con.rng = 1;
+    uint32_t lock_seed;
+    if (moy_play_lock_seed != NULL && moy_play_lock_seed(&lock_seed)) {
+        RUN.c.con.rng = lock_seed;
+    }
+    RUN.open = 1;
+    g_whead = o->head;
+    g_whead_len = o->head_len;
+    g_wpages = o->pages;
+    int rc = wasm_begin(o->module, o->sha, o->dir, o->writable, o->writable_len,
+                        o->swapped, o->allow_unsigned, o->interp, err, n);
+    g_whead = NULL;
+    g_whead_len = 0;
+    return rc;
+#else
+    (void)o;
+    snprintf(err, n, "moycore: this build has no wasm engine");
+    return 1;
+#endif
+}
 
 // The VM is going (native/moy_kernel's soft reset): a run still open closes
 // with it, while its objects are still the VM's.
 void moycore_vm_stop(void)
 {
-    if (RUN.open) mod_close();
+    if (RUN.open) moycore_close_c();
 }
 
 // get_global_len(name) -- a table global's length (Lua's #t), or None: the

@@ -487,7 +487,11 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0):
         assert st.get("cart") == title, st.get("cart")
         assert st.get("front") is True, "%s is not the loop's foreground: %r" % (
             title, {k: st.get(k) for k in ("screen", "cart", "run", "play")})
-        assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free"}, st["run"]
+        # VM-free, and it keeps the VM: under the `need` policy a Lua cart has
+        # no footprint whose fit could fail, and a P4 has no stop at all
+        # (docs/kernel_cartpath_2026-10.md section 5).
+        assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free",
+                             "stop": KEEPS, "vm_down": False}, st["run"]
         f0, t0 = st["play"]["frames"], st["play"]["ticks"]
         for _ in range(5):
             time.sleep(0.2)
@@ -597,8 +601,8 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
         st = board.state()
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
-        assert st["run"] == {"runtime": runtime, "vm_free": True, "why": "free"}, \
-            st["run"]
+        assert st["run"] == {"runtime": runtime, "vm_free": True, "why": "free",
+                             "stop": KEEPS, "vm_down": False}, st["run"]
         for _ in range(5):
             time.sleep(0.2)
             ups = board.state()["upcalls"]
@@ -743,6 +747,20 @@ def loop_line_is_the_kernels(board):
 KSTOP_JITTER = 64
 
 
+class _Keeps(str):
+    """The stop verdict of a run that keeps the VM on a console: it fits with
+    the VM up (the T-Deck's `need` policy), or the board has no stop (a P4's
+    lever is ABSENT)."""
+
+    def __eq__(self, other):
+        return other in ("fits", "lever")
+
+    __hash__ = str.__hash__
+
+
+KEEPS = _Keeps("fits|lever")
+
+
 def _kstop_after(line):
     """`KSTOP i/n after psram=FREE/LARGEST int=... dma=...` -> (i, free, largest)."""
     head, rest = line.split("KSTOP ", 1)[1].split(" ", 1)
@@ -784,6 +802,96 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
         except RuntimeError:
             pass
         assert time.time() < end, "the console never came back after kstop"
+
+
+def _desk_back(board, timeout=120.0):
+    """Wait until the console answers `state` at its launcher again."""
+    import time
+    end = time.time() + timeout
+    while True:
+        try:
+            st = board.state()
+            if st.get("stack") == ["launcher"]:
+                return st
+        except RuntimeError:
+            pass
+        assert time.time() < end, "the console never came back"
+
+
+def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
+    """`kstop N stop`: N real stops and starts of the VM with no cart
+    (docs/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
+    lease on the kernel's tables before the stop and reads them back with the
+    VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
+    then -- the first heap area freed with the VM -- hold flat from the second
+    cycle, the largest block to the byte and free within KSTOP_JITTER."""
+    import time
+    board.cmd("kstop %d stop" % n, wait_for="REMOTE kstop")
+    down = []
+    end = time.time() + n * per_cycle
+    while len(down) < n and time.time() < end:
+        line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
+        if line is not None and " down " in line:
+            assert "route=kstop lease=dev" in line, line
+            down.append(_kstop_after(line.replace(" down ", " after ")))
+    assert len(down) == n, "only %d of %d stops came back" % (len(down), n)
+    free0, largest0 = down[min(1, n - 1)][1:]
+    drift = [a for a in down[1:]
+             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+    assert not drift, "PSRAM (free, largest) down after cycle 2 %s, then %s" % (
+        (free0, largest0), drift)
+    _desk_back(board)
+    return down
+
+
+def _stop_psram(line):
+    """`STOP 1/1 down psram=FREE/LARGEST ...` -> (free, largest)."""
+    free, largest = line.split("psram=", 1)[1].split(" ", 1)[0].split("/")
+    return int(free), int(largest)
+
+
+def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False):
+    """The kernel stops the VM for a cart whose fit check fails with the VM up
+    (the `need` policy), runs it with no VM -- `state` is the kernel's and says
+    so -- and starts the VM again when it ends: the dev channel's `end`, or a
+    Ctrl-C. `vmstop force` makes the fit read as failing where the cart fits
+    (it fits a fresh T-Deck). Returns each cycle's PSRAM (free, largest) after
+    the stop and before the load."""
+    import time
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    psram = []
+    try:
+        for _ in range(cycles):
+            line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
+            assert line is not None and title in line, line
+            line = board.wait_line("STOP 1/1 down", 60)
+            assert line is not None, "the VM never stopped"
+            psram.append(_stop_psram(line))
+            assert board.wait_line("STOP running", 60) is not None, "the run never started"
+            st = board.state()
+            assert st.get("front") is True and st.get("vm") is False, st
+            assert st["run"]["vm_down"] is True and st["run"]["stop"] == "stops", st
+            f0 = st["frames"]
+            time.sleep(2.0)
+            st = board.state()
+            assert st["frames"] > f0 and st["vm"] is False, st
+            assert st["play"]["upcalls"][:4] == [0, 0, 0, 0] and st["play"]["upcalls"][4] == 0, st
+            if ctrl_c:
+                board.ser.write(b"\x03")
+                board.ser.flush()
+            else:
+                board.cmd("end", wait_for="REMOTE end")
+            assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+            _desk_back(board)
+            info = board.pyval("__import__('moy_play').info()", strict=True)
+            assert info[12] is True and info[10] == (5 if ctrl_c else 2), info
+    finally:
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+    return psram
 
 
 def mem_reports_the_heap(board):

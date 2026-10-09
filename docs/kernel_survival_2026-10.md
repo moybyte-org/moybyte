@@ -923,7 +923,7 @@ against an app is the ledger's rule (sprint 2), which this sprint does not
 change.
 
     void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap);  // a tier's stages, every one optional
-    int  moy_loop_step(void);                         // one frame: OK, QUIT, INTERRUPT, STOPPED or EXIT
+    int  moy_loop_step(void);                         // one frame: OK, QUIT, INTERRUPT, STOPPED, EXIT or STOP
     int  moy_loop_run(void);                          // until one of the four
     void moy_loop_set_upcall(moy_loop_up_fn fn);      // the binding's dispatcher over its registrations
     void moy_loop_upcalls(uint32_t frame[4], uint32_t total[4]);   // CONSOLE, APP, DRIVER, SERVICE
@@ -946,20 +946,21 @@ its own frames under a loop. So:
   state is one static struct, so the task that calls `step` can change between
   any two frames.
 - A small kernel task, `moy_loop_task`, internal stack sized at the gate and
-  pinned to the VM's core, drives the loop while no VM runs: across a soft
-  reset's window today (the glass keeps presenting while the VM restarts) and
-  through sprint 4's stops. Both tasks that may drive the loop have internal
-  stacks, so an internal-flash write from the loop needs no deferral.
+  pinned to the VM's core, drives the kernel's frame across a soft reset's
+  window (the glass keeps presenting while the VM restarts). A VM STOP is not
+  that window: the VM service task itself, not deleted, steps the loop with no
+  VM until the stop's run ends (`docs/kernel_cartpath_2026-10.md` §4 and §5),
+  and `moy_loop_task` is not created. Both tasks that may drive the loop have
+  internal stacks, so an internal-flash write from the loop needs no deferral.
 - The loop trace drives its last ten frames from a second thread (§2 item
   8), which is the host's form of the same property.
 
-**The consequence for the plan's §6.1 (2026-10-07).** While the VM runs the
-loop adds no task, so the kernel's internal cost is unchanged by it. While the
-VM is stopped (sprint 4) the VM task's stack returns, as the plan's §4.4 has
-it, and `moy_loop_task`'s stack is the cost in its place — smaller than the
-stack it replaces, so §6.1's "nothing net while stopped" holds with that task
-counted and is read as "no more than the loop task's stack net while
-stopped", measured at the gate. In the browser and on the host the
+**The consequence for the plan's §6.1.** While the VM runs the loop adds no
+task, so the kernel's internal cost is unchanged by it. While the VM is
+stopped the VM task's stack stays, driving the kernel's frame
+(`docs/kernel_cartpath_2026-10.md` §4), and no second task's stack is alive,
+so the kernel holds no more internal SRAM stopped than running. In the
+browser and on the host the
 frame is `runtime/host_api.py`'s `ConsoleDriver.frame`, under the worker's
 `step_frame_json` and `runtime/host_app.py`: the harness feeds the input and
 owns the clock, and each frame is one `moy_loop_step` of the loop's driver
@@ -1044,19 +1045,22 @@ ladder are answered in §10.
 
 ### 7.5 `kstop`, the test-only teardown
 
-There is no VM stop on dev until sprint 4 (the spine doc's §8), and sprint 0's
-spike is not in the tree. What exists is the VM service's soft reset, which
-runs the whole teardown list of §4.3 and starts a VM again. `kstop N` is that,
+`kstop N` is the VM service's soft reset, which runs the whole teardown list
+of §4.3 and starts a VM again,
 N times, counted: a dev word the kernel answers by running the service's
 soft reset cycle with the kernel's drivers alive and printing `heapcaps`
 before and after. It lands in pass 1 (the glass is what the first cycles must
 survive), when the panel holds its last frame across each window as it does
 through a Ctrl-D today; from pass 3 `moy_loop_task` drives the loop across the
 window and the glass keeps presenting. It is test-only, not in the vocabulary
-a kid can reach. It is not sprint 4's stop — no VM task is deleted — and
-sprint 4's gates stay sprint 4's; it is the executable guard that a teardown
-leaves the kernel's drivers alive, which this sprint can run and the plan's
-§11 asked for.
+a kid can reach, and the executable guard that a teardown leaves the
+kernel's drivers alive, which the plan's §11 asked for. `kstop N stop` is the
+VM STOP instead (`docs/kernel_cartpath_2026-10.md` §5): each cycle frees the
+first heap area and zeroes the root section after `mp_deinit`, steps the
+kernel's frame with no VM, and prints a third line, `KSTOP i/n down`, with
+the heaps read then and the route and the lease set on the kernel's tables
+before the stop read back (`route=kstop lease=dev`); the start after it is a
+RETURN start.
 
 ### 7.6 What Python is deleted
 

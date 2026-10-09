@@ -368,10 +368,18 @@ def _rc(rc):
         raise RuntimeError("moy_play: %s" % (_WHAT[rc] if 0 <= rc < len(_WHAT) else "?"))
 
 
-def launch(path, paced):
+# The stop verdict's words (moy_play.h's MOY_PLAY_STOPS and KEEP_*), in order.
+STOP_WHYS = ("stops", "rule", "lever", "fits", "route", "lease", "ota", "front", "big")
+# launch()'s flags beyond `paced` (moy_play.h).
+HOME = 2
+UNSIGNED = 4
+
+
+def launch(path, paced, flags=0):
     d, _ = _play()
     run = _U32(0)
-    _rc(d.hl_play_launch(str(path).encode(), 1 if paced else 0, ctypes.byref(run)))
+    _rc(d.hl_play_launch(str(path).encode(), (1 if paced else 0) | int(flags),
+                         ctypes.byref(run)))
     return run.value
 
 
@@ -430,7 +438,9 @@ def lockstep(run):
 
 def info(run=None):
     """(runtime, vm_free, why, frames, ticks, upcalls, ended, error, stack_open,
-    stack_frame, end_why), or None for a handle that names no run."""
+    stack_frame, end_why, stop, vm_down), or None for a handle that names no
+    run. `stop` is the launch's stop verdict ("stops", or the clause that kept
+    the VM: STOP_WHYS)."""
     d, lb = _play()
     i = lb.PlayInfo()
     if d.hl_play_info(d.hl_play_last() if run is None else int(run), ctypes.byref(i)) != 0:
@@ -439,7 +449,9 @@ def info(run=None):
           None if i.stack_frame == 0xFFFFFFFF else i.stack_frame)
     return (i.runtime.decode(), bool(i.vm_free), _WHY[i.why] if i.why < len(_WHY) else "?",
             i.frames, i.ticks, tuple(i.upcalls), bool(i.ended),
-            i.error.decode("utf-8", "replace") if i.raised else None) + st + (i.end_why,)
+            i.error.decode("utf-8", "replace") if i.raised else None) + st + (
+                i.end_why, STOP_WHYS[i.stop_why] if i.stop_why < len(STOP_WHYS) else "?",
+                bool(i.vm_down))
 
 
 def current():

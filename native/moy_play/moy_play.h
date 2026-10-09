@@ -78,7 +78,40 @@ bool moy_play_is_game(const moy_cat_entry_t *e);
 
 struct moy_input;                               // moy_input.h
 
-enum { MOY_PLAY_PACED = 1u };                   // launch flags: on the tick model
+// Launch flags: on the tick model; the run's route is HOME (the launcher
+// started it, and its exit lands there); the owner's Unknown sources setting
+// (an unsigned compiled module may load).
+enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
+
+// THE STOP VERDICT (docs/kernel_cartpath_2026-10.md section 5.1): whether the
+// launch stops the VM for the run, and when it does not, the first clause
+// that kept it. The policy is `need`: a VM-free run stops the VM only when
+// its fit check fails with the VM up.
+enum {
+    MOY_PLAY_STOPS = 0,         // the VM stops; the load follows the stop
+    MOY_PLAY_KEEP_RULE = 1,     // the cart fails the VM-free rule
+    MOY_PLAY_KEEP_LEVER = 2,    // the board has no stop (the P4s: ABSENCE)
+    MOY_PLAY_KEEP_FITS = 3,     // it fits with the VM up, or has no fit to check
+    MOY_PLAY_KEEP_ROUTE = 4,    // its route is not HOME
+    MOY_PLAY_KEEP_LEASE = 5,    // a Python owner holds a WiFi lease
+    MOY_PLAY_KEEP_OTA = 6,      // an update is being written
+    MOY_PLAY_KEEP_FRONT = 7,    // the board's kernel present cannot show its canvas
+    MOY_PLAY_KEEP_BIG = 8,      // it would not fit with the VM stopped either: the
+                                // fit notice, with the VM up
+    MOY_PLAY_STOP_WHYS = 9,
+};
+const char *moy_play_stop_name(uint8_t why);
+// The board's half of the verdict (native/moy_play/moy_play_stop.c, a board
+// with the stop): every clause but the rule's. Weak: an image without it
+// keeps the VM (KEEP_LEVER).
+uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags)
+    __attribute__((weak));
+// The live run's folder and launch flags (the stopped run's load reads them).
+const char *moy_play_path(void);
+uint32_t moy_play_flags(void);
+// The live run runs with the VM down: its info says so, and the front takes
+// a compiled cart, whose frame the kernel's present shows from the canvas.
+void moy_play_set_down(uint32_t run);
 enum { MOY_PLAY_QUIT = 1u, MOY_PLAY_VIEW = 2u };    // what a frame reports
 enum {                                          // why a run ended
     MOY_PLAY_END_HOLD = 0, MOY_PLAY_END_QUIT = 1, MOY_PLAY_END_MENU = 2,
@@ -108,6 +141,8 @@ typedef struct {
     uint32_t stack_open, stack_frame;
     uint8_t why;                // MOY_PLAY_FREE, or the rule's clause
     uint8_t end_why;
+    uint8_t stop_why;           // MOY_PLAY_STOPS, or the clause that kept the VM
+    bool vm_down;               // the run ran with the VM stopped
     bool vm_free;
     bool raised;
     bool ended;

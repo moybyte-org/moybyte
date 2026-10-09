@@ -460,6 +460,32 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_spine import AppRegistry, Leases, Returns
 
 
+def _kernel_tables():
+    """(apps, back, returns, leases) as views of the kernel's own tables where
+    the console runs on a kernel (a board: `moy_kernel` is in the image), so a
+    VM stop leaves its routes and leases for the next VM
+    (docs/kernel_cartpath_2026-10.md section 5.4); None elsewhere, where each
+    console owns its own. A return start keeps them as they were; every other
+    start puts them back as they are made."""
+    try:
+        import moy_kernel
+        import moy_spine
+    except ImportError:
+        return None
+    kernel = getattr(moy_spine, "kernel", None)
+    if kernel is None:
+        return None
+    start = getattr(moy_kernel, "start", None)
+    returning = start is not None and start() == "return"
+    tables = kernel(not returning)
+    if returning:
+        # The route the stop recorded: a run that stopped the VM was HOME's
+        # (moy_play_launch refuses any other), so its exit is the launcher.
+        tables[1].goto("launcher")
+        tables[2].spend()
+    return tables
+
+
 _SPLASH_IMG = None
 
 
@@ -619,6 +645,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (#39) + -- from Stage 6b/6c -- the process back-stack `screen` projects onto and
         # the memoized layer stack. Built here (before anything reads/writes screen or
         # composites) with a `ws` back-ref to the console's canvases + layer instances.
+        self._kernel_tables = _kernel_tables()
+        # The launcher's RUN in progress (open()): the run's route is HOME,
+        # which the Player hands the kernel's stop verdict.
+        self._home_launch = False
         self.wm = FullscreenStackWM(self)
         # windowed_chrome is a PROPERTY (world-aware, two-worlds #105): it is
         # True only while the windowed WM's DESK (the make world) is open --
@@ -672,7 +702,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # LEASE (console_spine's wifi_hold/wifi_release): the tags holding it,
         # and the last one out powers it down.
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
-        self.leases = Leases()
+        kt = self._kernel_tables
+        self.leases = kt[3] if kt is not None else Leases()
         # Multiplayer message service (#65): the transport-neutral net.* seam (a
         # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
@@ -853,8 +884,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The registered system apps (filled by _init_apps) and the return
         # records: a run's caller kind, popped by _exit_to_caller / exit(), and
         # the app an app-to-app jump left, popped by _go_home_or_back.
-        self.apps = AppRegistry()
-        self.returns = Returns(self.apps)
+        kt = self._kernel_tables
+        self.apps = kt[0] if kt is not None else AppRegistry()
+        self.returns = kt[2] if kt is not None else Returns(self.apps)
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
         # (The active menu sub-view -- "cards"|"code"|"paint"|"map"|"blocks"|"music"|
@@ -2028,7 +2060,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             # Editor's Config tab, which shows the break and offers the file.
             self.open_in_editor(selected)
             return
-        self._open_workspace()
+        # The run's route is HOME (the launcher is its caller): what lets the
+        # kernel stop the VM for it (docs/kernel_cartpath_2026-10.md 5.1).
+        self._home_launch = True
+        try:
+            self._open_workspace()
+        finally:
+            self._home_launch = False
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
     def run_script(self, kind, name):
@@ -2217,6 +2255,41 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # report as a no-match AFTER it had already started on the glass.
         it = items[pick]
         return it.get("title") or it.get("path", "").rsplit("/", 1)[-1] or "cart"
+
+    # -- the resume record (docs/kernel_cartpath_2026-10.md 5.4) --------------
+
+    def resume_record(self):
+        """The launcher's place as the resume record's text: the selection,
+        the shelf's scroll, the search and the selected cart's folder (the
+        selection is found by it again, in case the shelf moved)."""
+        import json
+        lw = self.launcher
+        sel = lw.selected() or {}
+        return json.dumps({"sel": int(lw.sel), "scroll": int(lw._scroll),
+                           "search": self.search_query, "path": sel.get("path")})
+
+    def resume_launcher(self, text):
+        """Land the launcher where the resume record left it. A record that
+        will not read changes nothing."""
+        import json
+        try:
+            rec = json.loads(text)
+            q = rec.get("search") or ""
+            if q:
+                self.set_search_query(q)
+            items = self.launcher.items or []
+            sel = int(rec.get("sel", 0))
+            path = rec.get("path")
+            if path:
+                for i in range(len(items)):
+                    if items[i].get("path") == path:
+                        sel = i
+                        break
+            self.launcher.sel = max(0, min(sel, len(items) - 1))
+            self.launcher._scroll = max(0, int(rec.get("scroll", 0)))
+            self._dirty = True
+        except (ValueError, TypeError, AttributeError) as exc:
+            print("Moybyte resume: %s" % exc)
 
     # -- the desk (two-worlds #105: the windowed tier's MAKE world) ----------
 

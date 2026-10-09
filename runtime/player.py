@@ -564,6 +564,7 @@ class Player:
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self.verdict = None           # the run's (runtime, vm_free, why): _verdict
         self._front = False           # the run is the kernel loop's foreground
+        self._stopping = False        # the kernel stops the VM for the run
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
@@ -1179,6 +1180,8 @@ class Player:
         self.stack_pre = _st() if _st is not None else None
         if _rt != "python":
             run = self._launch_play(cart)
+            if run and self._stop_for(run, cart):
+                return True
             ok = self._start_runtime(_rt, ns, src, t0, h0,
                                      (t_reclaim, t_audio, t_api))
             if ok:
@@ -1626,11 +1629,51 @@ class Player:
         if launch is None or not path:
             return 0
         paced = not self._is_tool and cart.get("fps") != "free"
+        ws = self.ws
+        # What the kernel's stop verdict reads beside the catalogue entry:
+        # the run's route is HOME (the home shelf started it), and the owner's
+        # Unknown sources setting, which the load after a stop applies.
+        flags = 0
+        if getattr(ws, "_home_launch", False) and not self._is_tool:
+            flags |= getattr(_moy_play, "HOME", 0)
+        if getattr(ws, "unknown_sources", False):
+            flags |= getattr(_moy_play, "UNSIGNED", 0)
         try:
-            return launch(path, paced)
+            return launch(path, paced, flags) if flags else launch(path, paced)
         except RuntimeError as exc:
             print("PLAY launch:", exc)
             return 0
+
+    def _stop_for(self, run, cart):
+        """True when the kernel decided at the launch to stop the VM for the
+        run (docs/kernel_cartpath_2026-10.md 5.2, the `need` policy: a VM-free
+        cart that does not fit with the VM up): nothing of the cart loads here.
+        The shelf's place goes to the resume record, and the loop ends at
+        this frame; the kernel loads and runs the cart with no VM and starts
+        the next VM, which lands on the shelf where it was left."""
+        info_of = getattr(_moy_play, "info", None)
+        info = info_of(run) if info_of is not None else None
+        if info is None or len(info) < 13 or info[11] != "stops":
+            return False
+        try:
+            import moy_kernel
+        except ImportError:
+            return False
+        stop = getattr(moy_kernel, "stop", None)
+        if stop is None:
+            return False
+        ws = self.ws
+        rec = getattr(ws, "resume_record", None)
+        resume = getattr(moy_kernel, "resume", None)
+        if rec is not None and resume is not None:
+            try:
+                resume(rec())
+            except Exception as exc:  # noqa: BLE001 -- a lost place is not a lost run
+                print("PLAY resume:", exc)
+        print("PLAY stop: %s runs with the VM down" % (cart.get("title") or "cart"))
+        self._stopping = True
+        stop()
+        return True
 
     def _bind_play(self, run):
         """Give the launched run's frame to the kernel's Player when its
@@ -1927,6 +1970,8 @@ class Player:
         _draw and every chrome draw are skipped -- the game canvas keeps the last
         rendered frame's pixels and nothing composites or flushes this frame."""
         ws = self.ws
+        if self._stopping:
+            return                     # the VM stops at this frame's end
         if self._front and self._resume_from_front(ws):
             return
         _perf = ws.perf_hud or ws.perf_capture

@@ -137,6 +137,14 @@
 #define MOY_KERNEL_BUTTON_GPIO              (0)
 #define MOY_KERNEL_BUTTON_NAME              "CLICK"
 
+// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The kernel stops the VM for a VM-free game whose fit check fails with the VM
+// up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
+// the panel's own framebuffers (moy_lcd's kernel entry points above), and
+// starts the VM again after it (native/moy_play/moy_play_stop.c). A board
+// without it keeps the VM for every run.
+#define MOY_VM_STOP                         (1)
+
 // The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the keyboard (0x55)
 // and the GT911 touch.
 #define MOY_BUS_I2C_PORT                    (0)

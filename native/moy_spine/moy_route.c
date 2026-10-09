@@ -53,6 +53,17 @@ void moy_apps_free(moy_apps_t *a) {
     a->mem->release(a, sizeof(moy_apps_t));
 }
 
+void moy_apps_clear(moy_apps_t *a) {
+    for (uint32_t s = 0, n = moy_htab_slots(a->t); s < n; s++) {
+        if (moy_htab_live(a->t, s)) {
+            moy_app_t *app = moy_htab_row(a->t, s);
+            a->mem->release(app->title, app->title_len + 1u);
+            app->title = NULL;
+            moy_htab_release(a->t, moy_htab_handle(a->t, s));
+        }
+    }
+}
+
 uint32_t moy_apps_find(const moy_apps_t *a, const char *id, size_t id_len) {
     for (uint32_t s = 0, n = moy_htab_slots(a->t); s < n; s++) {
         if (moy_htab_live(a->t, s)
@@ -144,6 +155,12 @@ moy_back_t *moy_back_new(const moy_htab_mem_t *mem) {
     return b;
 }
 
+void moy_back_reset(moy_back_t *b) {
+    memset(b->k, 0, sizeof b->k);
+    kind_set(&b->k[0], MOY_ROOT, sizeof MOY_ROOT - 1u);
+    b->depth = 1u;
+}
+
 void moy_back_free(moy_back_t *b) {
     if (b != NULL) {
         b->mem->release(b, sizeof(moy_back_t));
@@ -231,6 +248,11 @@ moy_returns_t *moy_returns_new(const moy_htab_mem_t *mem,
     return r;
 }
 
+void moy_returns_reset(moy_returns_t *r) {
+    memset(&r->caller, 0, sizeof r->caller);
+    memset(&r->back, 0, sizeof r->back);
+}
+
 void moy_returns_free(moy_returns_t *r) {
     if (r != NULL) {
         r->mem->release(r, sizeof(moy_returns_t));
@@ -311,6 +333,10 @@ moy_leases_t *moy_leases_new(const moy_htab_mem_t *mem) {
     return l;
 }
 
+void moy_leases_reset(moy_leases_t *l) {
+    l->mask = 0;
+}
+
 void moy_leases_free(moy_leases_t *l) {
     if (l != NULL) {
         l->mem->release(l, sizeof(moy_leases_t));
@@ -354,4 +380,33 @@ int moy_leases_release(moy_leases_t *l, const char *tag, size_t n,
 
 uint32_t moy_leases_mask(const moy_leases_t *l) {
     return l->mask;
+}
+
+// -- the kernel's own tables ---------------------------------------------------
+
+static moy_spine_kernel_t s_kernel;
+static int s_kernel_made;
+
+const moy_spine_kernel_t *moy_spine_kernel(const moy_htab_mem_t *mem) {
+    if (s_kernel_made) {
+        return &s_kernel;
+    }
+    if (mem == NULL) {
+        return NULL;
+    }
+    moy_spine_kernel_t k;
+    k.apps = moy_apps_new(mem);
+    k.back = moy_back_new(mem);
+    k.returns = k.apps != NULL ? moy_returns_new(mem, k.apps) : NULL;
+    k.leases = moy_leases_new(mem);
+    if (k.apps == NULL || k.back == NULL || k.returns == NULL || k.leases == NULL) {
+        moy_returns_free(k.returns);
+        moy_apps_free(k.apps);
+        moy_back_free(k.back);
+        moy_leases_free(k.leases);
+        return NULL;
+    }
+    s_kernel = k;
+    s_kernel_made = 1;
+    return &s_kernel;
 }

@@ -126,6 +126,7 @@ typedef struct {
     bool reseed;                    // a lockstep frame starts: seed libmoy first
     bool lock_any;                  // the match's last send: lock_at is set
     uint32_t lock_at;
+    char path[192];                 // the cart's folder
 } run_t;
 
 // The run's state, allocated at the first launch from the kernel's allocator
@@ -140,7 +141,17 @@ static run_t *live(uint32_t run) {
 typedef struct {
     moy_play_info_t *info;
     bool seen;
+    const char *path;
+    uint32_t flags;
 } launch_ctx_t;
+
+static const char *const STOP_NAMES[MOY_PLAY_STOP_WHYS] = {
+    "stops", "rule", "lever", "fits", "route", "lease", "ota", "front", "big",
+};
+
+const char *moy_play_stop_name(uint8_t why) {
+    return why < MOY_PLAY_STOP_WHYS ? STOP_NAMES[why] : "?";
+}
 
 static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
     launch_ctx_t *c = ctx;
@@ -176,6 +187,15 @@ static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
     }
     memcpy(c->info->id, e->folder, fn);
     c->info->id[fn] = 0;
+    // Whether the VM stops for it: decided here, from the entry, before
+    // anything of the cart loads (section 5.2's step 1).
+    if (!c->info->vm_free || !c->info->game) {
+        c->info->stop_why = MOY_PLAY_KEEP_RULE;
+    } else if (moy_play_stop_verdict == NULL) {
+        c->info->stop_why = MOY_PLAY_KEEP_LEVER;
+    } else {
+        c->info->stop_why = moy_play_stop_verdict(e, c->path, c->flags);
+    }
     c->seen = true;
     return 0;
 }
@@ -193,7 +213,7 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
         moy_play_end(R.h, MOY_PLAY_END_QUIT);
     }
     memset(&R.info, 0, sizeof(R.info));
-    launch_ctx_t c = { &R.info, false };
+    launch_ctx_t c = { &R.info, false, cart, flags };
     if (moy_cat_entry(cart, entry_seen, NULL, &c) != 0 || !c.seen) {
         return MOY_PLAY_NOCART;
     }
@@ -208,6 +228,7 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.audio = 0;
     R.tick = NULL;
     R.flags = flags;
+    snprintf(R.path, sizeof(R.path), "%s", cart);
     R.start_ms = moycore_run_now_ms();
     R.ptr[0] = R.ptr[1] = R.ptr[2] = 0;
     R.view = 0;
@@ -492,6 +513,21 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
     return true;
 }
 
+const char *moy_play_path(void) {
+    return g_run != NULL && R.h != 0u ? R.path : NULL;
+}
+
+uint32_t moy_play_flags(void) {
+    return g_run != NULL ? R.flags : 0u;
+}
+
+void moy_play_set_down(uint32_t run) {
+    run_t *r = live(run);
+    if (r != NULL) {
+        r->info.vm_down = true;
+    }
+}
+
 uint32_t moy_play_current(void) {
     return g_run != NULL ? R.h : 0u;
 }
@@ -514,6 +550,10 @@ int moy_play_info(uint32_t run, moy_play_info_t *out) {
     }
     return MOY_PLAY_OK;
 }
+
+// Whether a VM runs (moy_loop.c): weak, for a build of the Player without
+// the loop (the host's), where one always does.
+extern __typeof__(moy_loop_vm) moy_loop_vm __attribute__((weak));
 
 // -- the run in front ------------------------------------------------------------
 
@@ -541,8 +581,10 @@ int moy_play_front(uint32_t run) {
     }
     // A Lua run: its frame is the console's canvas. A compiled cart's frame
     // is its own memory, which the console's present composes (CartFrame).
+    // A run with the VM down is the exception: the kernel's present shows
+    // its canvas, which the cart's blits write (no frame hand-off is taken).
     if (F.ops == NULL || r->rt->vm || r->in == NULL || r->view || r->info.raised
-            || strcmp(r->rt->name, "lua") != 0 || moycore_RUN.wasm) {
+            || (!r->info.vm_down && (strcmp(r->rt->name, "lua") != 0 || moycore_RUN.wasm))) {
         return MOY_PLAY_NORT;
     }
     int w = 0, h = 0;
@@ -714,13 +756,16 @@ size_t moy_play_state_json(char *o, size_t n) {
     for (int k = 0; k < MOY_UPC_CLASSES; k++) {
         since[k] = total[k] - R.upc0[k];
     }
-    PUT("{\"screen\": \"desktop\", \"front\": true, \"vm\": true, \"cart\": ");
+    PUT("{\"screen\": \"desktop\", \"front\": true, \"vm\": %s, \"cart\": ",
+        moy_loop_vm == NULL || moy_loop_vm() ? "true" : "false");
     PUTS(i->title);
     PUT(", \"cart_error\": null, \"notice\": null, \"frames\": %u, \"run\": "
         "{\"runtime\": ", (unsigned)i->frames);
     PUTS(i->runtime);
-    PUT(", \"vm_free\": %s, \"why\": \"%s\"}, \"play\": {\"runtime\": ",
-        i->vm_free ? "true" : "false", moy_play_why_name(i->why));
+    PUT(", \"vm_free\": %s, \"why\": \"%s\", \"stop\": \"%s\", \"vm_down\": %s}, "
+        "\"play\": {\"runtime\": ",
+        i->vm_free ? "true" : "false", moy_play_why_name(i->why),
+        moy_play_stop_name(i->stop_why), i->vm_down ? "true" : "false");
     PUTS(i->runtime);
     PUT(", \"frames\": %u, \"ticks\": %u, \"upcalls\": ", (unsigned)i->frames,
         (unsigned)i->ticks);

@@ -62,7 +62,8 @@ class FullscreenStackWM:
         # source-of-truth != dispatch, so "one router at all times" holds (plan Section 6).
         # The spine owns it; every navigation goes through `goto` here, so the WM sees
         # each change it has to rebuild for.
-        self.stack = BackStack()
+        kt = getattr(ws, "_kernel_tables", None)
+        self.stack = kt[1] if kt is not None else BackStack()
         # Content-change generation (Stage 6c): bumped whenever the top-of-stack kind
         # actually changes, so the memoized layer stack knows to rebuild. (menu_view tab
         # switches bump it via EditorApp.tab; overlay-gate changes are caught separately

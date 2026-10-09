@@ -133,6 +133,12 @@ def test_every_run_reports_the_census_verdict_for_its_cart(tmp_path):
         ws.open()
         want = moy_play.census(cart["path"])
         run = _remote_state(ws)["run"]
+        # Where the Player has the run, its stop verdict too: no seed game
+        # stops the VM (the host has no stop; on a board the `need` policy
+        # keeps it for every seed, which fits).
+        stop = {k: run.pop(k) for k in ("stop", "vm_down") if k in run}
+        assert stop in ({}, {"stop": "lever", "vm_down": False},
+                        {"stop": "rule", "vm_down": False}), (cart["title"], stop)
         assert run == {"runtime": want[0], "vm_free": want[1], "why": want[2]}, \
             (cart["title"], run, want)
         if os.path.basename(cart["path"].rstrip("/")) in SEED_FREE:

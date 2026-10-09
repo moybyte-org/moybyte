@@ -49,8 +49,9 @@ enum {
     MOY_LOOP_OK = 0,
     MOY_LOOP_QUIT = 1,          // the dev channel asked for the REPL
     MOY_LOOP_INTERRUPT = 2,     // a Ctrl-C reached an upcall
-    MOY_LOOP_STOPPED = 3,       // no VM, or no upcalls registered
+    MOY_LOOP_STOPPED = 3,       // no stages, or a VM with no upcalls registered
     MOY_LOOP_EXIT = 4,          // a SystemExit reached an upcall: the VM's soft reset
+    MOY_LOOP_STOP = 5,          // the kernel stops the VM (moy_kernel_stop)
 };
 
 // The upcalls the loop makes, and their classes.
@@ -152,6 +153,9 @@ typedef int (*moy_loop_up_fn)(int which, uint32_t arg, const char *line);
 // -- the tier's side ----------------------------------------------------------
 
 void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap);
+// The stages swapped, nothing else: the counts, the meters and the idle
+// ladder go on (a board's VM-down stages while its VM is stopped).
+void moy_loop_set_ops(const moy_loop_ops_t *ops);
 const moy_loop_ops_t *moy_loop_ops(void);
 // A tier gave the loop its stages (moy_loop_init with an ops table).
 bool moy_loop_has_ops(void);
@@ -166,6 +170,10 @@ uint32_t moy_loop_registered(void);
 void moy_loop_set_vm(bool up);
 bool moy_loop_vm(void);
 
+// One frame. With a VM, it runs only while the three console upcalls are
+// registered (STOPPED otherwise). With none, every stage runs and each
+// upcall the frame would make is refused and counted REFUSED: the kernel's
+// run in front is the frame (docs/kernel_cartpath_2026-10.md section 4).
 int moy_loop_step(void);
 int moy_loop_run(void);
 

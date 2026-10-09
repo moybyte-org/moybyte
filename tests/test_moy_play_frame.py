@@ -138,8 +138,11 @@ def test_the_player_drives_a_lua_frame_from_the_input_table(tmp_path):
 def test_a_run_closes_its_books_and_refuses_its_handle_after(tmp_path):
     by = _run(tmp_path)
     info1 = eval(by["INFO1"])
-    runtime, vm_free, why, frames, ticks, upcalls, ended, error, so, sf, _end_why = info1
+    (runtime, vm_free, why, frames, ticks, upcalls, ended, error, so, sf, _end_why,
+     stop, vm_down) = info1
     assert (runtime, vm_free, why) == ("lua", True, "free")
+    # The VM-free rule holds, and the unix port has no VM stop (no board hook).
+    assert (stop, vm_down) == ("lever", False), info1
     assert ended and "boom" in error, info1
     assert frames == 8 and ticks == 8, info1
     assert upcalls == (0, 0, 0, 0, 0), "a frame crossed into Python: %r" % (upcalls,)

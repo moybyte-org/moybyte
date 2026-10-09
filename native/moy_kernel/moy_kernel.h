@@ -5,6 +5,7 @@
 #define MOY_KERNEL_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "moy_crash.h"
 
@@ -46,5 +47,30 @@ uint32_t moy_kernel_lit_ms(void);
 void moy_kernel_kstop(int n);
 // The console proved itself again: true while kstop has a reset left to run.
 bool moy_kernel_kstop_next(void);
+
+// THE VM STOP (docs/kernel_cartpath_2026-10.md section 5). moy_kernel_stop
+// makes the next teardown a stop -- MOY_STOP_RUN for the run the Player
+// launched, MOY_STOP_KSTOP for `kstop N stop` -- and ends the loop with
+// MOY_LOOP_STOP at the frame's end. How the running VM started: BOOT (power-on,
+// a soft reset) or RETURN (after a stop: the kernel's tables and the resume
+// record are as the stopped VM left them).
+enum { MOY_STOP_NONE = 0, MOY_STOP_KSTOP = 1, MOY_STOP_RUN = 2 };
+enum { MOY_START_BOOT = 0, MOY_START_RETURN = 1 };
+void moy_kernel_stop(int why);
+int moy_kernel_stop_pending(void);
+int moy_kernel_start(void);
+// `kstop N stop`: N real stops and starts with no cart, each with a route and
+// a lease set on the kernel's tables before it and read back after.
+void moy_kernel_kstop_stop(int n);
+// The resume record: what the launcher writes before a stop and reads at the
+// return start (its place on the shelf), PSRAM, never flash.
+#define MOY_KERNEL_RESUME_MAX 256
+void moy_kernel_resume_set(const char *text, size_t n);
+size_t moy_kernel_resume(const char **text);
+// A line out through the kernel's serial path, with no VM's stream.
+void moy_kernel_say(const char *line);
+// One line of the heaps: `tag 1/1 when psram=FREE/LARGEST int=... dma=...`
+// and `extra` (the gate's PSRAM reading after a stop is "STOP 1/1 down").
+void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
 
 #endif // MOY_KERNEL_H

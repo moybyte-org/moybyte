@@ -19,7 +19,8 @@
 // The Player (moy_play.h), the VM's alone -- on CPython the host's runs are
 // runtime/lua_host.py's and runtime/wasm_host.py's:
 //
-//   launch(path, paced) -> run   the cart's verdict and its runtime's row
+//   launch(path, paced[, flags]) -> run   the cart's verdict and its runtime's
+//                                row; flags HOME, UNSIGNED feed the stop verdict
 //   bind(run, input, audio, tick) its input table, audio session, Tick
 //   open(run)                    the row's check that its runtime is open
 //   frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW
@@ -61,11 +62,18 @@ bool moy_play_interrupt_pending(void) {
 // rows returned.
 void moycore_vm_stop(void) __attribute__((weak));
 
+// A stop for the run (moy_kernel_stop): the run is the kernel's from here,
+// launched and not loaded, and it is not ended.
+int moy_kernel_stop_pending(void) __attribute__((weak));
+
 void moy_play_vm_stop(void) {
     if (moycore_vm_stop != NULL) {
         moycore_vm_stop();
     }
     uint32_t run = moy_play_current();
+    if (run != 0u && moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() == 2) {
+        return;                         // MOY_STOP_RUN
+    }
     if (run != 0u) {
         moy_play_end(run, MOY_PLAY_END_SERIAL);
     }
@@ -249,13 +257,17 @@ static mp_obj_t raise_rc(int rc) {
                       rc >= 0 && rc <= MOY_PLAY_NEEDS_VM ? WHAT[rc] : "?");
 }
 
-// launch(path, paced) -> the run's handle; RuntimeError when the cart will
-// not read or its runtime is not in this image.
-static mp_obj_t mod_launch(mp_obj_t path_obj, mp_obj_t paced_obj) {
+// launch(path, paced[, flags]) -> the run's handle; RuntimeError when the
+// cart will not read or its runtime is not in this image. `flags`: HOME,
+// UNSIGNED (moy_play.h), which the stop verdict reads.
+static mp_obj_t mod_launch(size_t n_args, const mp_obj_t *a) {
     rows_once();
     uint32_t run = 0;
-    int rc = moy_play_launch(mp_obj_str_get_str(path_obj), NULL,
-                             mp_obj_is_true(paced_obj) ? MOY_PLAY_PACED : 0u, &run);
+    uint32_t flags = mp_obj_is_true(a[1]) ? MOY_PLAY_PACED : 0u;
+    if (n_args > 2) {
+        flags |= (uint32_t)mp_obj_get_int(a[2]) & (MOY_PLAY_HOME | MOY_PLAY_UNSIGNED);
+    }
+    int rc = moy_play_launch(mp_obj_str_get_str(a[0]), NULL, flags, &run);
     if (rc != MOY_PLAY_OK) {
         raise_rc(rc);
     }
@@ -263,7 +275,7 @@ static mp_obj_t mod_launch(mp_obj_t path_obj, mp_obj_t paced_obj) {
     MP_STATE_VM(moy_play_tick_obj) = MP_OBJ_NULL;
     return mp_obj_new_int_from_uint(run);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_launch_obj, mod_launch);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_launch_obj, 2, 3, mod_launch);
 
 // bind(run, input, audio, tick) -- the run's input table (an InputTable or a
 // HostInputTable), its audio session's handle (0: silent) and the Tick a
@@ -351,7 +363,9 @@ static mp_obj_t stack_obj(uint32_t v) {
 }
 
 // info([run]) -> (runtime, vm_free, why, frames, ticks, upcalls, ended,
-// error, stack_open, stack_frame), the live run's or the last one's; None when
+// error, stack_open, stack_frame, end_why, stop, vm_down), the live run's or
+// the last one's (`stop`: the launch's stop verdict, "stops" or the clause
+// that kept the VM; `vm_down`: it ran with the VM stopped); None when
 // there is none. `upcalls` is a tuple by class: CONSOLE, APP, DRIVER,
 // SERVICE, REFUSED; the two stack readings are moy_play.stack()'s, taken
 // after the open and after the last frame, None off a board.
@@ -366,7 +380,8 @@ static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
         up[k] = mp_obj_new_int_from_uint(i.upcalls[k]);
     }
     const char *why = moy_play_why_name(i.why);
-    mp_obj_t t[11] = {
+    const char *stop = moy_play_stop_name(i.stop_why);
+    mp_obj_t t[13] = {
         mp_obj_new_str(i.runtime, strlen(i.runtime)),
         mp_obj_new_bool(i.vm_free),
         mp_obj_new_str(why, strlen(why)),
@@ -378,8 +393,10 @@ static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
         stack_obj(i.stack_open),
         stack_obj(i.stack_frame),
         MP_OBJ_NEW_SMALL_INT(i.end_why),
+        mp_obj_new_str(stop, strlen(stop)),
+        mp_obj_new_bool(i.vm_down),
     };
-    return mp_obj_new_tuple(11, t);
+    return mp_obj_new_tuple(13, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_info_obj, 0, 1, mod_info);
 
@@ -447,6 +464,8 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_END_SERIAL), MP_ROM_INT(MOY_PLAY_END_SERIAL) },
     { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_PTR(&mod_stack_obj) },
     { MP_ROM_QSTR(MP_QSTR_QUIT), MP_ROM_INT(MOY_PLAY_QUIT) },
+    { MP_ROM_QSTR(MP_QSTR_HOME), MP_ROM_INT(MOY_PLAY_HOME) },
+    { MP_ROM_QSTR(MP_QSTR_UNSIGNED), MP_ROM_INT(MOY_PLAY_UNSIGNED) },
     { MP_ROM_QSTR(MP_QSTR_VIEW), MP_ROM_INT(MOY_PLAY_VIEW) },
     { MP_ROM_QSTR(MP_QSTR_END_QUIT), MP_ROM_INT(MOY_PLAY_END_QUIT) },
     { MP_ROM_QSTR(MP_QSTR_END_CRASH), MP_ROM_INT(MOY_PLAY_END_CRASH) },

@@ -90,6 +90,11 @@ _SIGS = (
     ("moy_leases_hold", [_P, _PCHAR, _SIZE, _PU32], c.c_int),
     ("moy_leases_release", [_P, _PCHAR, _SIZE, _PU32], c.c_int),
     ("moy_leases_mask", [_P], _U32),
+    ("moy_apps_clear", [_P], None),
+    ("moy_back_reset", [_P], None),
+    ("moy_returns_reset", [_P], None),
+    ("moy_leases_reset", [_P], None),
+    ("moy_spine_kernel", [_P], c.POINTER(_P * 4)),
     ("moy_settings_new", [_P], _P),
     ("moy_settings_free", [_P], None),
     ("moy_settings_validate", [_PCHAR, _SIZE], c.c_int),
@@ -516,8 +521,37 @@ def binding(sanitize=False):
             lib.moy_settings_dump(self._p, buf, n)
             return buf.raw[:n].decode()
 
+    def view(cls, p, **extra):
+        # A view of a kernel table: its finaliser frees nothing.
+        o = cls.__new__(cls)
+        o._p = p
+        o.__dict__.update(extra)
+        return o
+
+    class _View:
+        def __del__(self):
+            pass
+
+    def kernel(fresh):
+        k = lib.moy_spine_kernel(mem)
+        if not k:
+            nomem("kernel tables")
+        apps_p, back_p, returns_p, leases_p = k.contents
+        lib.moy_apps_clear(apps_p)
+        if fresh:
+            lib.moy_back_reset(back_p)
+            lib.moy_returns_reset(returns_p)
+            lib.moy_leases_reset(leases_p)
+        apps = type("AppRegistry", (_View, AppRegistry), {})
+        back = type("BackStack", (_View, BackStack), {})
+        rets = type("Returns", (_View, Returns), {})
+        leas = type("Leases", (_View, Leases), {})
+        a = view(apps, apps_p)
+        return (a, view(back, back_p), view(rets, returns_p, _apps=a), view(leas, leases_p))
+
     for cls in (Table, AppRegistry, BackStack, Returns, Leases, Settings):
         m.__dict__[cls.__name__] = cls
+    m.kernel = kernel
     return m
 
 

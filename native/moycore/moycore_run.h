@@ -96,4 +96,31 @@ int moycore_run_view(const moycore_run_t *c, int *w, int *h);
 // The config freed; `c` is no longer the current run.
 void moycore_run_close(moycore_run_t *c);
 
+// A compiled cart's run opened and closed from C with no VM (modmoycore.c, the
+// boards' binding: docs/kernel_cartpath_2026-10.md section 5.2). Every
+// pointer is the caller's and outlives the run.
+typedef struct {
+    uint16_t *fb;                // the canvas, w x h words
+    int w, h;
+    const uint16_t *wire;        // the palette's 64 panel words, or NULL
+    int32_t *snap;               // SNAP_LEN slots
+    int32_t *aq;                 // the audio queue, aq_cap int32s
+    int aq_cap;
+    const int32_t *pmem;         // 256 cells in, or NULL
+    const char *cfg;             // "key\0value\0" pairs, or NULL
+    size_t cfg_len;
+    const char *module;          // the module file to load
+    const uint8_t *head;         // main.wasm's head (to its memory section)
+    size_t head_len;
+    uint32_t pages;              // the manifest's "memory"
+    const char *sha;             // main.wasm's sha256 an AOT key must name, or NULL
+    const char *dir;             // the cart's folder
+    const char *writable;        // the manifest's "writable", NUL-joined, or NULL
+    size_t writable_len;
+    int swapped, allow_unsigned, interp;
+} moycore_open_c_t;
+
+int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);
+void moycore_close_c(void);
+
 #endif // MOYCORE_RUN_H

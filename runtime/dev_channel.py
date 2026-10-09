@@ -910,6 +910,12 @@ def _remote_state(ws):
         if st.get("cart") and getattr(pl, "_play", None) is not None:
             import moy_play
             info = moy_play.info()
+        # The launch's stop verdict and whether the run had the VM down
+        # (docs/kernel_cartpath_2026-10.md section 5), where the Player has
+        # the run.
+        if st["run"] is not None and info is not None and len(info) > 12:
+            st["run"]["stop"] = info[11]
+            st["run"]["vm_down"] = bool(info[12])
         st["play"] = (None if info is None else
                       {"runtime": info[0], "frames": info[3], "ticks": info[4],
                        "upcalls": list(info[5]),

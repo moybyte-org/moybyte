@@ -206,7 +206,46 @@ extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
 extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
                            uint32_t *bsize) __attribute__((weak));
 
+// While no VM runs (its mount table is gone: docs/kernel_cartpath_2026-10.md
+// section 5.3) the kernel's own volumes answer: the card's FATFS at /sd, held
+// open across the stop (moy_card.c), and the internal flash's littlefs at /.
+void *moy_store_card_fatfs(void);
+#if MICROPY_VFS_LFS2
+extern lfs2_t *moy_kvol_lfs(void) __attribute__((weak));
+#endif
+
+static int vol_at_kernel(const char *path, moy_vol_t *v, const char **rest) {
+    if (path[0] != '/') {
+        return MP_ENODEV;
+    }
+    #if MICROPY_VFS_FAT
+    if (strncmp(path, "/sd", 3) == 0 && (path[3] == '/' || path[3] == 0)) {
+        void *fs = moy_store_card_fatfs();
+        if (fs == NULL) {
+            return MP_ENODEV;
+        }
+        v->kind = MOY_VOL_KIND_FAT;
+        v->fs = fs;
+        *rest = path[3] ? path + 3 : "/";
+        return 0;
+    }
+    #endif
+    #if MICROPY_VFS_LFS2
+    lfs2_t *k = moy_kvol_lfs != NULL ? moy_kvol_lfs() : NULL;
+    if (k != NULL) {
+        v->kind = MOY_VOL_KIND_LFS2;
+        v->fs = k;
+        *rest = path;
+        return 0;
+    }
+    #endif
+    return MP_ENODEV;
+}
+
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
+    if (MP_STATE_VM(vfs_mount_table) == NULL) {
+        return vol_at_kernel(path, v, rest);
+    }
     const char *r = path;
     mp_vfs_mount_t *m = mp_vfs_lookup_path(path, &r);
     if (m == MP_VFS_NONE || m == MP_VFS_ROOT) {

@@ -63,7 +63,9 @@ def test_the_player_hands_a_vm_free_game_to_the_front(front):
     assert mp.front_live()
     st = json.loads(mp.state_json())
     assert st["front"] is True and st["cart"] == "Bullet Storm"
-    assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free"}
+    # The host has no VM stop: the verdict is the lever's absence.
+    assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free",
+                         "stop": "lever", "vm_down": False}
     # A console frame while the kernel has the front (one in the same loop
     # frame that took it, as a link's re-run does) leaves the run alone.
     ws.frame(1 / 30)

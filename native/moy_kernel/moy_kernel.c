@@ -9,14 +9,16 @@
 //
 // THE VM SERVICE is mp_task (ports/esp32/main.c at the pinned MPY_TAG), copied:
 // the same prelude, init, boot scripts, REPL loop and soft-reset list, in the
-// same order, with five changes marked MOY below. It decides the boot first
+// same order, with the changes marked MOY below. It decides the boot first
 // (moy_boot_decide), it lands on the recovery floor when the first heap area is
 // not there, when the console's boot ends before boot_ok() it records the
 // failure and restarts into the floor instead of falling to the REPL, and its
 // pin sweep removes only the ISRs a Python handler holds, so the kernel's own
 // (input's trackball and touch gate) outlive a soft reset, and each VM start
 // clears the VM objects the kernel's modules cached in root pointers, which
-// the last heap held. The copy's call list is pinned: mp_task_calls.txt is what it was reviewed
+// the last heap held. After mp_deinit a VM STOP (moy_kernel_vm_down,
+// docs/kernel_cartpath_2026-10.md section 5) frees the first area and runs the
+// kernel's frame on this task with no VM before the next start. The copy's call list is pinned: mp_task_calls.txt is what it was reviewed
 // against, and tools/mp_task_calls.py fails the build when the tag's differs.
 //
 // THE FLOOR always draws on a boot no VM has run in: a failure inside a running
@@ -79,6 +81,7 @@
 #include "py/runtime.h"
 #include "py/gc.h"
 #include "py/mphal.h"
+#include "py/mpthread.h"
 #include "py/ringbuf.h"
 #include "extmod/modmachine.h"
 #include "shared/readline/readline.h"
@@ -107,12 +110,25 @@
 #include "moy_kernel.h"
 #include "moy_loop.h"
 #include "moy_recovery.h"
+#include "../moy_spine/moy_route.h"
+
+// The kernel's own route tables (moy_route.h), where the image has the spine:
+// the Zero, which routes nothing, has none.
+extern __typeof__(moy_spine_kernel) moy_spine_kernel __attribute__((weak));
+extern __typeof__(moy_returns_run) moy_returns_run __attribute__((weak));
+extern __typeof__(moy_returns_caller) moy_returns_caller __attribute__((weak));
+extern __typeof__(moy_leases_hold) moy_leases_hold __attribute__((weak));
+extern __typeof__(moy_leases_release) moy_leases_release __attribute__((weak));
+extern __typeof__(moy_leases_mask) moy_leases_mask __attribute__((weak));
+// The run a stop was for, with no VM (native/moy_play's moy_play_stop.c).
+void moy_play_stopped_run(void) __attribute__((weak));
 
 void moy_loop_board_vm_start(void);
 void moy_loop_board_vm_stop(void);
 int moy_loop_board_run(void);
 bool moy_loop_board_ended(int r);
 void moy_loop_board_window(void);
+void moy_loop_board_down(void);
 
 #if __has_include("moy_fw_label.gen.h")
 #include "moy_fw_label.gen.h"
@@ -1014,10 +1030,115 @@ extern void moy_alloc_vm_swept(void) __attribute__((weak));
 // teardown and after it. Test-only: the dev channel's word, never a kid's.
 static int s_kstop_n;
 static int s_kstop_left;
+static bool s_kstop_stop;           // `kstop N stop`: each cycle a real stop and start
+
+// -- the VM stop (docs/kernel_cartpath_2026-10.md section 5) --------------------
+//
+// A stop is the soft reset's teardown and then more: after mp_deinit the root
+// section is zeroed (no stale root marks the reused first area), the first
+// heap area is freed, the stdin ring and the interrupt character are the
+// kernel's, and this task -- not deleted, its watchdog subscription as it was
+// -- drives the kernel's frame until the stop's run ends (moy_play_stopped_run).
+// Then the first area is allocated again and the next VM starts where the
+// soft reset's does, as a RETURN start: the console's tables the kernel holds
+// (the back-stack, the return records, the leases) and the resume record are
+// as the stopped VM left them.
+static volatile int s_stop;
+static int s_start = MOY_START_BOOT;
+
+// The resume record (section 5.4): a fixed-size kernel struct in PSRAM, kept
+// until the next reboot and never written to flash.
+typedef struct {
+    uint16_t n;
+    char text[MOY_KERNEL_RESUME_MAX];
+} resume_t;
+static resume_t *s_resume;
+
+void moy_kernel_stop(int why) {
+    s_stop = why;
+    moy_loop_end(MOY_LOOP_STOP);
+}
+
+int moy_kernel_stop_pending(void) {
+    return s_stop;
+}
+
+int moy_kernel_start(void) {
+    return s_start;
+}
+
+void moy_kernel_resume_set(const char *text, size_t n) {
+    if (s_resume == NULL) {
+        s_resume = heap_caps_calloc(1, sizeof(resume_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_resume == NULL) {
+            return;
+        }
+    }
+    if (n > MOY_KERNEL_RESUME_MAX) {
+        n = MOY_KERNEL_RESUME_MAX;
+    }
+    memcpy(s_resume->text, text, n);
+    s_resume->n = (uint16_t)n;
+}
+
+size_t moy_kernel_resume(const char **text) {
+    if (s_resume == NULL || s_resume->n == 0) {
+        *text = NULL;
+        return 0;
+    }
+    *text = s_resume->text;
+    return s_resume->n;
+}
+
+// A line out through the kernel's serial path, with no VM's stream.
+void moy_kernel_say(const char *line) {
+    k_out(line);
+    k_out("\r\n");
+}
+
+// kstop's mark: a route and a lease on the kernel's tables before the stop,
+// read back after it (section 5.6's row).
+static void moy_kernel_kstop_mark(void) {
+    const moy_spine_kernel_t *k = moy_spine_kernel != NULL ? moy_spine_kernel(NULL) : NULL;
+    if (k == NULL) {
+        return;
+    }
+    uint32_t mask;
+    moy_returns_run(k->returns, "kstop", 5);
+    moy_leases_hold(k->leases, "dev", 3, &mask);
+}
+
+// What the mark reads after the stop, cleared: "route=kstop lease=dev" when
+// both survived it.
+static void moy_kernel_kstop_readback(char *out, size_t n) {
+    const moy_spine_kernel_t *k = moy_spine_kernel != NULL ? moy_spine_kernel(NULL) : NULL;
+    if (k == NULL) {
+        snprintf(out, n, "route=- lease=-");
+        return;
+    }
+    const moy_kind_t *c = moy_returns_caller(k->returns);
+    bool route = c != NULL && moy_kind_is(c, "kstop", 5);
+    // "dev" is the lease table's seventh tag (moy_route.c).
+    bool lease = (moy_leases_mask(k->leases) & (1u << 6)) != 0;
+    snprintf(out, n, "route=%s lease=%s", route ? "kstop" : "lost", lease ? "dev" : "lost");
+    uint32_t mask;
+    moy_returns_run(k->returns, NULL, 0);
+    moy_leases_release(k->leases, "dev", 3, &mask);
+}
 
 void moy_kernel_kstop(int n) {
     s_kstop_n = n > 0 ? n : 0;
     s_kstop_left = s_kstop_n > 0 ? s_kstop_n - 1 : 0;
+    s_kstop_stop = false;
+}
+
+void moy_kernel_kstop_stop(int n) {
+    moy_kernel_kstop(n);
+    if (s_kstop_n > 0) {
+        s_kstop_stop = true;
+        moy_kernel_kstop_mark();
+        s_stop = MOY_STOP_KSTOP;
+    }
 }
 
 bool moy_kernel_kstop_next(void) {
@@ -1025,15 +1146,33 @@ bool moy_kernel_kstop_next(void) {
         return false;
     }
     s_kstop_left--;
+    if (s_kstop_stop) {
+        moy_kernel_kstop_mark();
+        s_stop = MOY_STOP_KSTOP;
+    }
     return true;
+}
+
+static void moy_kernel_heaps_line(const char *tag, int i, int n, const char *when,
+                                  const char *extra);
+
+void moy_kernel_heaps(const char *tag, const char *when, const char *extra) {
+    moy_kernel_heaps_line(tag, 1, 1, when, extra);
 }
 
 static void moy_kernel_kstop_line(const char *when) {
     if (s_kstop_n <= 0) {
         return;
     }
-    printf("KSTOP %d/%d %s psram=%u/%u int=%u/%u/%u dma=%u/%u/%u\n",
-           s_kstop_n - s_kstop_left, s_kstop_n, when,
+    moy_kernel_heaps_line("KSTOP", s_kstop_n - s_kstop_left, s_kstop_n, when, "");
+}
+
+// The heaps, one line: `tag i/n when psram=FREE/LARGEST int=... dma=...` and
+// `extra` after them.
+static void moy_kernel_heaps_line(const char *tag, int i, int n, const char *when,
+                                  const char *extra) {
+    printf("%s %d/%d %s psram=%u/%u int=%u/%u/%u dma=%u/%u/%u%s%s\n",
+           tag, i, n, when,
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -1041,7 +1180,9 @@ static void moy_kernel_kstop_line(const char *when) {
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
-           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+           *extra ? " " : "", extra);
+    fflush(stdout);
 }
 
 // A kernel module that caches a VM object in a root pointer forgets it at
@@ -1063,6 +1204,53 @@ static void moy_kernel_pins_deinit(void) {
             gpio_isr_handler_remove(i);
         }
     }
+}
+
+// The VM is gone (after mp_deinit). A soft reset starts the next one as a
+// BOOT start. A stop (s_stop) is the rest of section 5.2's step 4 and the
+// window: the root section zeroed, the first area freed, the kernel's frame
+// with no VM for the stop's run, then the first area again and a RETURN
+// start. Never returns without a first area: one that will not come back is
+// the recovery floor's, as at power-on.
+static void moy_kernel_vm_down(void **heap) {
+    int why = s_stop;
+    if (why == MOY_STOP_NONE) {
+        s_start = MOY_START_BOOT;
+        return;
+    }
+    size_t lo = offsetof(mp_state_ctx_t, thread.dict_locals);
+    size_t hi = offsetof(mp_state_ctx_t, vm.qstr_last_chunk);
+    memset((uint8_t *)&mp_state_ctx + lo, 0, hi - lo);
+    MP_PLAT_FREE_HEAP(*heap);
+    *heap = NULL;
+    #if MICROPY_KBD_EXCEPTION
+    mp_hal_set_interrupt_char(-1);
+    #endif
+    moy_loop_board_down();
+    // The GIL as a VM's task holds it: what the kernel's frame calls releases
+    // and retakes it around its waits (the flush's drain, a cart session's
+    // calls) as it does with a VM.
+    MP_THREAD_GIL_ENTER();
+    if (why == MOY_STOP_KSTOP) {
+        char rb[48];
+        moy_kernel_kstop_readback(rb, sizeof(rb));
+        // A few of the kernel's frames with no VM: the input stage, the dev
+        // channel and the tail run; the console's upcalls are refused.
+        for (int i = 0; i < 8; i++) {
+            moy_loop_step();
+        }
+        moy_kernel_heaps_line("KSTOP", s_kstop_n - s_kstop_left, s_kstop_n, "down", rb);
+    } else if (moy_play_stopped_run != NULL) {
+        moy_play_stopped_run();
+    }
+    MP_THREAD_GIL_EXIT();
+    s_stop = MOY_STOP_NONE;
+    *heap = MP_PLAT_ALLOC_HEAP(MICROPY_GC_INITIAL_HEAP_SIZE);
+    if (*heap == NULL) {
+        printf("mp_task_heap allocation failed!\n");
+        moy_kernel_recovery(MOY_WHY_HEAP);
+    }
+    s_start = MOY_START_RETURN;
 }
 
 static void moy_vm_task(void *pvParameter) {
@@ -1245,6 +1433,8 @@ soft_reset_exit:
 
     mp_deinit();
     moy_kernel_kstop_line("after");
+    // MOY: a stop runs the kernel with no VM before the next start.
+    moy_kernel_vm_down(&mp_task_heap);
     if (s_kstop_left <= 0) {
         s_kstop_n = 0;
     }

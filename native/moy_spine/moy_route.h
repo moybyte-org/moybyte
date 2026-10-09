@@ -60,6 +60,10 @@ typedef struct moy_apps moy_apps_t;
 
 moy_apps_t *moy_apps_new(const moy_htab_mem_t *mem);    // or NULL
 void moy_apps_free(moy_apps_t *a);                      // NULL is a no-op
+// Every app unregistered and its title freed: the registry as moy_apps_new
+// made it, at the same address (a kernel singleton the console re-registers
+// at each VM start).
+void moy_apps_clear(moy_apps_t *a);
 
 // OK with the app's handle in `h`; BAD, DUP, FULL or NOMEM. The apps are
 // numbered in registration order and never unregister.
@@ -89,6 +93,7 @@ typedef struct moy_back moy_back_t;
 
 moy_back_t *moy_back_new(const moy_htab_mem_t *mem);    // launcher at the root
 void moy_back_free(moy_back_t *b);
+void moy_back_reset(moy_back_t *b);                     // the launcher alone
 
 // OK with MOY_GOTO_* in `answer`; BAD or FULL (a push at MOY_BACK_DEPTH).
 int moy_back_goto(moy_back_t *b, const char *kind, size_t n, int *answer);
@@ -118,6 +123,7 @@ typedef struct moy_returns moy_returns_t;
 moy_returns_t *moy_returns_new(const moy_htab_mem_t *mem,
                                const moy_apps_t *apps);
 void moy_returns_free(moy_returns_t *r);
+void moy_returns_reset(moy_returns_t *r);               // no caller, no back
 
 // The kind a starting run returns to; `kind` NULL records none (home). BAD.
 int moy_returns_run(moy_returns_t *r, const char *kind, size_t n);
@@ -141,6 +147,7 @@ typedef struct moy_leases moy_leases_t;
 
 moy_leases_t *moy_leases_new(const moy_htab_mem_t *mem);
 void moy_leases_free(moy_leases_t *l);
+void moy_leases_reset(moy_leases_t *l);                 // nothing held
 
 const char *moy_lease_tag(uint32_t i);                  // NULL past the table
 uint32_t moy_lease_bit(const char *tag, size_t n);      // 0: no such tag
@@ -150,5 +157,22 @@ int moy_leases_hold(moy_leases_t *l, const char *tag, size_t n, uint32_t *mask);
 int moy_leases_release(moy_leases_t *l, const char *tag, size_t n,
                        uint32_t *mask);
 uint32_t moy_leases_mask(const moy_leases_t *l);
+
+// -- the kernel's own tables --------------------------------------------------
+
+// The console's registry, back-stack, return records and leases as kernel
+// singletons (docs/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
+// the first call that passes one, and never freed, so a VM stop's sweep leaves
+// them and a return start reads them. The VM's objects are views of these
+// (modmoy_spine.c's kernel()). NULL `mem` answers them only once made: NULL
+// before.
+typedef struct {
+    moy_apps_t *apps;
+    moy_back_t *back;
+    moy_returns_t *returns;
+    moy_leases_t *leases;
+} moy_spine_kernel_t;
+
+const moy_spine_kernel_t *moy_spine_kernel(const moy_htab_mem_t *mem);
 
 #endif // MOY_ROUTE_H

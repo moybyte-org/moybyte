@@ -1426,12 +1426,35 @@ static mp_obj_t input_nav(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_nav_obj, input_nav);
 
+// While the VM is stopped (docs/kernel_cartpath_2026-10.md section 5.3) the
+// loop's objects went with it: the kernel's table alone, its board drivers
+// kicked and its frame begun, which is every source a stopped run reads (the
+// keys and the buttons the board's input task writes into it).
+bool moy_loop_vm(void) __attribute__((weak));
+
+static void loop_inputs_down(bool *active) {
+    moy_input_t *t = moy_input_kernel();
+    if (t == NULL) {
+        return;
+    }
+    if (!s_kick_tail) {
+        moy_input_board_kick();
+    }
+    moy_input_begin_frame(t);
+    uint32_t h, pr;
+    moy_input_masks(t, MOY_INPUT_UNION, &h, &pr);
+    *active = h != 0 || moy_input_last_key(t) != 0;
+}
+
 void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
     (void)now_unused;
     *click = false;
     *active = false;
     mp_obj_t *o = MP_STATE_VM(moy_input_loop_objs);
     if (o[LOOP_PTR] == MP_OBJ_NULL) {
+        if (moy_loop_vm != NULL && !moy_loop_vm()) {
+            loop_inputs_down(active);
+        }
         return;
     }
     moy_input_ptr_t *p = &((input_pointer_obj_t *)MP_OBJ_TO_PTR(o[LOOP_PTR]))->p;

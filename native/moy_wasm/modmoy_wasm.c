@@ -56,6 +56,14 @@
 #include "moy_wasm_key.h"
 #include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
+#include "../moy_store/moy_vol.h"
+
+// A VM runs (native/moy_kernel's loop): weak, so an image without the kernel
+// always has one.
+bool moy_loop_vm(void) __attribute__((weak));
+// The kernel's RSA check (native/moy_net/moy_ota.h), where the image has it.
+int moy_ota_verify(const void *payload, size_t n, const char *sig_hex, size_t sig_n,
+                   const void *keys, int nkeys) __attribute__((weak));
 
 // -- per-board settings (mpconfigboard.h) -------------------------------------
 
@@ -430,6 +438,56 @@ static void release(run_t *r)
 // read into a block of its own size leaves a hole the linear memory cannot
 // use and the free PSRAM around it in two pieces. Freed after the load, a
 // block the linear memory's size is where the linear memory goes.
+// The same read with no VM (a run the kernel started after stopping it,
+// docs/kernel_cartpath_2026-10.md section 5.2): the kernel's volume, inside the
+// board's bus gate. 0, or an errno with nothing held.
+static int read_module_c(const char *path, uint32_t hold, uint8_t **out, uint32_t *out_len)
+{
+    moy_vol_t v;
+    const char *rest;
+    moy_vol_file_t *f = NULL;
+    int gated = moy_vol_gate_enter(path);
+    int e = moy_vol_at(path, &v, &rest);
+    if (e == 0) {
+        e = moy_vol_open(&v, rest, MOY_VOL_READ, &f);
+    }
+    uint32_t size = 0;
+    if (e == 0) {
+        e = moy_vol_size(f, &size);
+    }
+    uint8_t *buf = NULL;
+    if (e == 0 && (size == 0 || size > MOY_WASM_FILE_MAX)) {
+        e = MOY_EFBIG;
+    }
+    if (e == 0) {
+        buf = heap_caps_malloc((size_t)moy_wasm_file_block(hold, (uint64_t)size), PSRAM_CAPS);
+        if (!buf) {
+            buf = heap_caps_malloc((size_t)size, PSRAM_CAPS);
+        }
+        e = buf ? 0 : MOY_ENOMEM;
+    }
+    for (uint32_t at = 0; e == 0 && at < size;) {
+        size_t got = 0;
+        e = moy_vol_read(f, buf + at, size - at < 65536 ? size - at : 65536, &got);
+        if (e == 0 && got == 0) {
+            e = MOY_EIO;
+        }
+        at += (uint32_t)got;
+    }
+    if (f != NULL) {
+        int ce = moy_vol_close(f);
+        e = e ? e : ce;
+    }
+    moy_vol_gate_leave(gated);
+    if (e != 0) {
+        heap_caps_free(buf);
+        return e;
+    }
+    *out = buf;
+    *out_len = size;
+    return 0;
+}
+
 static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *out_len)
 {
     mp_obj_t args[2] = { path, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
@@ -508,6 +566,24 @@ static const char *verify_module(const uint8_t *file, uint32_t len, bool unsigne
         text[tl++] = hex[digest[i] & 15];
     }
     const char *why = "bad signature";
+    if (moy_ota_verify != NULL) {
+        char *sig = heap_caps_malloc(2 * k, PSRAM_CAPS);
+        if (sig == NULL) {
+            why = "the signature could not be checked";
+        } else {
+            const uint8_t *sp = lp - k;
+            for (uint32_t i = 0; i < k; i++) {
+                sig[2 * i] = hex[sp[i] >> 4];
+                sig[2 * i + 1] = hex[sp[i] & 15];
+            }
+            if (moy_ota_verify(text, (size_t)tl, sig, 2 * k, NULL, 0)) {
+                why = NULL;
+            }
+            heap_caps_free(sig);
+        }
+        *module_len = n;
+        return why;
+    }
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         vstr_t sig;
@@ -1072,13 +1148,22 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         memcpy(s->want_sha, want_sha, 65);
     }
     g_sess = s;
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        read_module(mp_obj_new_str(path, strlen(path)), memory, &s->file, &s->file_len);
-        nlr_pop();
+    if (moy_loop_vm != NULL && !moy_loop_vm()) {
+        int e = read_module_c(path, memory, &s->file, &s->file_len);
+        if (e != 0) {
+            sess_free(s);
+            snprintf(err, errlen, "the module file would not read (errno %d)", e);
+            return 1;
+        }
     } else {
-        sess_free(s);
-        nlr_jump(nlr.ret_val);
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            read_module(mp_obj_new_str(path, strlen(path)), memory, &s->file, &s->file_len);
+            nlr_pop();
+        } else {
+            sess_free(s);
+            nlr_jump(nlr.ret_val);
+        }
     }
     // main.wasm carries no signature and needs none: the interpreter is the
     // sandbox (moy_wasm_key.h). Everything else -- AOT modules -- still goes

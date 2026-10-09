@@ -296,8 +296,12 @@ counted and listed.
 
 ## 5. Stopping and starting the VM
 
-The VM stops on the S3 boards, behind a board.toml lever (`vm_stop`) the P4s
-lack (ABSENCE, never 0; the plan's §10 question 5 is unchanged). **It stops
+The VM stops on the S3 boards, behind a board lever (`MOY_VM_STOP` in the
+board's `mpconfigboard.h`, beside the panel's kernel entry points the stopped
+run presents through) the P4s lack (ABSENCE, never 0; the plan's §10
+question 5 is unchanged). The stop and its run are
+`native/moy_play/moy_play_stop.c`; `vmstop force` (a dev word) makes the fit
+check read as failing, so a board where a cart fits can be made to stop. **It stops
 only when the run needs the memory (owner, 2026-10-08)**: a VM-free cart
 whose fit check fails with the VM up, which today means a compiled cart the
 size of Doom on the S3s. Every other run keeps the VM, so an ordinary exit
@@ -317,6 +321,9 @@ The run keeps the VM when any of these holds, and `info` names which:
 
 - the cart fails §2's rule;
 - the policy is `need` and the fit check passes with the VM up;
+- the cart would not fit with the VM stopped either (its footprint is over
+  free PSRAM, or its block over the largest one, with every byte of the VM's
+  heap added back): the fit notice, with the VM up;
 - the run's route is not HOME (the Editor's PLAY, a run an app started, a
   desk window): returning to a Python app's state is sprint 5's
   `open()`-after-stop contract;

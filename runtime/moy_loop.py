@@ -27,7 +27,7 @@ _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_loop")
 _SHIM = os.path.join(_KERNEL, "moy_loop.c")
 
-OK, QUIT, INTERRUPT, STOPPED, EXIT = 0, 1, 2, 3, 4
+OK, QUIT, INTERRUPT, STOPPED, EXIT, STOP = 0, 1, 2, 3, 4, 5
 DIM, SAVER, BLANK = 1, 2, 3
 SVC_WEB, SVC_UPDATE, SVC_HEALTHY = 1, 4, 8
 _UP_INPUT, _UP_POINTER, _UP_FRAME, _UP_WORD, _UP_SERVICE = range(5)

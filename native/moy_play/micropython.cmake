@@ -18,8 +18,11 @@ target_sources(usermod_moy_play INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_match.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_match_kernel.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_chrome.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_play_stop.c
 )
 
+# moy_play_stop.c is the stop's run (a board with MOY_VM_STOP; empty on any
+# other), over the kernel's present, moycore's C open and the store's volume.
 # The catalogue entry the rule reads is the store's (moy_cat.h, moy_json.h).
 # The frame drives moycore's runs over the input table and the loop's crossing
 # counts (moycore_lua.h, moy_input.h, moy_loop.h); the audio sessions are
