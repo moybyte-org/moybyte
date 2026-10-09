@@ -82,6 +82,21 @@ int moycore_frame(float dt, int draw, char *err, size_t n);
 // holds its 256 or there is no memory. The run's close frees them.
 int moycore_lua_image_put(const char *name, const char *text, size_t n);
 
+// A scene's .moyscene text, copied, for the run's scene verbs
+// (moycore_scene.h), in the order the cart's scenes are kept, the first the
+// default active one: 0, or -1 past MOYCORE_SCENES or with no memory. Put
+// again by name, it replaces. The run's close frees them.
+// Layer `i`'s pixels and size, as the cart made it (its handle): 0, or -1
+// for no such layer. What a harness reads a layer's drawing through.
+int moycore_lua_layer(int i, moy_pixel **pix, int *w, int *h);
+
+// The run's OWNER row (native/moy_glass/moy_buf.h), set by the kernel's
+// Player at its launch: the run's layer and image pixels are BUF rows on loan
+// to it. 0 (and the close) leaves them plain allocations.
+void moycore_lua_owner(uint32_t owner);
+
+int moycore_lua_scene_put(const char *name, const char *text, size_t n);
+
 // The p8 machine's buffers (65536 and 0x4300 bytes), or NULLs: no machine.
 void moycore_lua_p8_memory(uint8_t *mem, uint8_t *rom);
 

@@ -24,6 +24,7 @@
 //   open(run)                    the row's check that its runtime is open
 //   frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW
 //   end(run[, why]), info([run]), current(), stack()
+//   QUIT, VIEW (a frame's bits); END_QUIT, END_CRASH (an end's why)
 //
 // The map's "python" row is registered with the Lua and wasm ones: a VM is
 // what imports this module.
@@ -376,6 +377,8 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_PTR(&mod_stack_obj) },
     { MP_ROM_QSTR(MP_QSTR_QUIT), MP_ROM_INT(MOY_PLAY_QUIT) },
     { MP_ROM_QSTR(MP_QSTR_VIEW), MP_ROM_INT(MOY_PLAY_VIEW) },
+    { MP_ROM_QSTR(MP_QSTR_END_QUIT), MP_ROM_INT(MOY_PLAY_END_QUIT) },
+    { MP_ROM_QSTR(MP_QSTR_END_CRASH), MP_ROM_INT(MOY_PLAY_END_CRASH) },
     { MP_ROM_QSTR(MP_QSTR_MAX_CATCHUP), MP_ROM_INT(MOY_TICK_MAX_CATCHUP) },
     { MP_ROM_QSTR(MP_QSTR_MAX_DIV), MP_ROM_INT(MOY_TICK_MAX_DIV) },
 };

@@ -194,7 +194,7 @@ def test_a_cart_may_be_several_scripts_and_each_one_is_its_own_chunk(tmp_path):
     # arms and where the host tier opens the PICO-8 machine, so a chunk run
     # outside it lands on the wrong side of both.
     root_dir = pathlib.Path(__file__).resolve().parent.parent
-    for rel in ("device/moycore_glue.py", "runtime/lua_host.py"):
+    for rel in ("device/moycore_glue.py",):
         body = (root_dir / rel).read_text(encoding="utf-8")
         assert "cart_chunks(ns, src)" in body, rel
         assert 'load(src, "@cart")' not in body, \

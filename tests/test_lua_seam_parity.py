@@ -134,7 +134,7 @@ def test_the_two_glues_hold_no_private_copy_of_the_seam():
     from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
-    for rel in ("device/moycore_glue.py", "runtime/lua_host.py"):
+    for rel in ("device/moycore_glue.py", "runtime/wasm_host.py"):
         src = (root / rel).read_text(encoding="utf-8")
         for name in ("drain_audio", "snap_shared", "sync_view"):
             assert name in src, "%s stopped using the shared %s" % (rel, name)

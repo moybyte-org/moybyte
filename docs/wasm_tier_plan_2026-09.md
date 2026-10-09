@@ -41,8 +41,8 @@ the decisions below record what they changed.
   Lua (2026-09-30); until then SPEC.md §15 named `"wasm"` the reference
   console's vendor runtime.
 - **One engine, one import table, every tier.** The host runs the same C
-  binding over WAMR through ctypes, exactly as `runtime/lua_host.py` runs
-  Lua, because a host and a device that disagree about what a verb does is
+  binding over WAMR through ctypes, exactly as the host runs Lua through
+  the boards' own glue and C (`runtime/moycore.py`), because a host and a device that disagree about what a verb does is
   the disease that deleted lupa. There is no wasmtime tier; the spike's host
   runner stays an oracle inside `experiments/wasm_aot/doom/`. The browser
   adapts the same C thunks in JavaScript: its own engine runs the cart's

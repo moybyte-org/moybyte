@@ -166,9 +166,11 @@ The compile-and-cache helper the three bindings above share: subprocess to a C
 compiler, hash-keyed .so cache. No compiler on a board."""
 
 [[modules.shared.deny]]
-file = "lua_host.py"
+file = "moycore.py"
 kind = "host-only"
-why  = "The host's Lua cart runner. The device's is `moycore`, driven by moycore_glue.py."
+why  = """
+`moycore` for CPython: the module surface `moycore_glue.py` drives, by ctypes
+over `lua_binding`. Here `moycore` is the compiled-in usermod (native/.staged/moycore)."""
 
 
 [[modules.shared.deny]]
@@ -459,8 +461,9 @@ why = """
 The drawing backend and the cart namespace: DeviceCanvas (the raster every tier
 now runs, RGB565 with the palette resolved at draw time), `device_api` (the
 device home of THE make_api -- one body in the shared cart_api.py since
-2026-08-17, re-exported here), moycore's host half (input snapshot in, audio
-queue out, pmem at the #66 boundaries), and the leaf ticks helpers
+2026-08-17, re-exported here), moycore's glue (the run's buffers and asset
+texts handed to the C, its frame the kernel's Player's, pmem at the #66
+boundaries), and the leaf ticks helpers
 device_canvas imports."""
 
 [[modules.device.group]]

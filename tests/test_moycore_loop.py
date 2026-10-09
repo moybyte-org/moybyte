@@ -244,34 +244,14 @@ moycore.tick(0.03125)
 print("EXTCALLS", seen, moycore.get_global("L"))
 moycore.close()
 
-# OBJECT-valued verbs ride the shared prelude, not the trampoline. This is the
-# real runtime/lua_ext.py, imported and executed -- not a transcription of it.
+# OBJECT-valued verbs ride the shared prelude over the run's own C: a layer's
+# pixels and a paint image are moycore_lua.c's, with no call into Python. This
+# is the real runtime/lua_ext.py, imported and executed.
 from lua_ext import PRELUDE_HANDLES, install_handles
 
-class _Canvas:
-    def __init__(self, w, h):
-        self.w, self.h = w, h
-        self._buf = bytearray(w * h * 2)
-
-class _Layer:
-    def __init__(self, w, h):
-        self.wh = (w, h)
-        self._canvas = _Canvas(w, h)
-    def spr(self, *a):
-        calls.append(("spr",) + a)
-
-class _Img:
-    pass
-
-calls = []
-_img = _Img()
-LAYERS = []
-NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)),
-                                  LAYERS.append(_Layer(w, h)), LAYERS[-1])[2],
-      "draw_layer": lambda l, x, y: calls.append(("draw", l.wh, x, y)),
-      "image": lambda n: _img if n == "bg" else None}
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
-install_handles(NS, moycore.register, moycore.layer_bind)
+moycore.image_put("bg", @BG@)            # 2x2, every pixel index 8
+install_handles({}, moycore.register)
 print("PRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
 print("OBJ", moycore.load(((
     "function _init()\n"
@@ -282,31 +262,29 @@ print("OBJ", moycore.load(((
     "end\n"
     "function _update(dt) end\n"
     "function _draw()\n"
-    "  L:cls(3) L:spr(B, 1, 2) L:spr(9, 1, 2, -1, 2, 1) draw_layer(L, 5, 6)\n"
+    "  cls(0) L:cls(3) L:spr(B, 1, 2) L:spr(9, 4, 0) draw_layer(L, 0, 0)\n"
     "end\n", "@obj"),)))
 moycore.tick(0.03125)
-print("OBJCALLS", calls)
-# draw_layer is the run's own: the layer, smaller than the screen, landed at
-# its top-left with no call into Python.
-_lb = LAYERS[0]._canvas._buf
-print("OBJBLIT", bytes(fb[0:18]) == bytes(_lb[0:18]),
-      bytes(fb[W * 2 * 4:W * 2 * 4 + 18]) == bytes(_lb[9 * 2 * 4:9 * 2 * 5]))
+
+def _word(x, y):
+    return fb[2 * (y * W + x)] | (fb[2 * (y * W + x) + 1] << 8)
+
+_p00, _p12, _p20, _p90 = _word(0, 0), _word(1, 2), _word(2, 3), _word(9, 0)
 print("OBJGLOBALS", moycore.get_global("N"), moycore.get_global("MISS"))
-# L:cls and the tile spr are libmoy's own verbs against the layer's buffer, not
-# calls into Python: the layer holds colour 3 where the sprite is not, and the
-# sprite where it is. The screen's cls(3) is the word colour 3 is.
-_lay = LAYERS[0]
 moycore.exec("cls(3)", "@screen3")
-_w3 = fb[0] | (fb[1] << 8)
-_lw = [(_lay._canvas._buf[2 * i] | (_lay._canvas._buf[2 * i + 1] << 8))
-       for i in range(9 * 5)]
-print("OBJPIX", _w3 != 0, _lw[0] == _w3, _lw[8] == _w3,
-      sum(1 for v in _lw if v != _w3) > 0)
+_w3 = _word(0, 0)
+moycore.exec("cls(8)", "@screen8")
+_w8 = _word(0, 0)
+moycore.exec("cls(0)", "@screen0")
+_w0 = _word(0, 0)
+# The layer's cls, the image placed on it, and the layer composited at the
+# screen's top-left; past its 9 columns the screen's own cls(0).
+print("OBJPIX", _p00 == _w3, _p12 == _w8, _p20 == _w8, _p90 == _w0, _w3 != _w8)
 moycore.close()
 
-# The placement API (#85/#109) over the SAME shared Scenes the Python tier
-# binds -- widgets.py imports here unchanged, so this is the real world object
-# and the real prelude, not a transcription of either (#214).
+# The placement API (#85/#109): the scene texts go to the run (scene_put),
+# which parses and draws them in C (moycore_scene.h) under the real prelude;
+# the shared Scenes keeps the order the glue hands them over in (#214).
 from widgets import Scenes
 
 SCN = ('[{"tag": "player", "tile": 1, "x": 100, "y": 100, "flip": 0},'
@@ -315,18 +293,18 @@ SCN = ('[{"tag": "player", "tile": 1, "x": 100, "y": 100, "flip": 0},'
        ' {"tag": "coin", "tile": 2, "x": 200, "y": 8, "flip": 0}]')
 _scenes = Scenes({"main": SCN, "two": '[{"tag": "boss", "tile": 9}]'},
                  ["main", "two"])
-_world = _scenes.world()
-_drawn = []
-PNS = {"scene": _scenes.scene, "load_scene": _scenes.load_scene,
-       "actors": _world.actors, "touching": _world.touching,
-       "move_actor": _world.move, "move_actor_to": _world.move_to,
-       "remove_actor": _world.remove,
-       "draw_scene": lambda: _drawn.append(
-           [(a.tag, a.tile, a.x, a.y, a.flip, a.flags)
-            for a in _world.actors()])}
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
-moycore.register("draw_scene", PNS["draw_scene"])
-install_handles(PNS, moycore.register, moycore.layer_bind)
+for _n in _scenes.names:
+    moycore.scene_put(_n, _scenes.raw(_n))
+install_handles({}, moycore.register)
+print("PREC", moycore.exec(
+    "local draw = __draw_scene\n"
+    "__draw_scene = function(rows)\n"
+    "  local r = rows[1]\n"
+    "  DRAWN = #rows .. '|' .. r.tag .. '|' .. r.tile .. '|' .. r.x .. '|'"
+    " .. r.y .. '|' .. r.flip .. '|' .. tostring(r.flags.hidden)\n"
+    "  return draw(rows)\n"
+    "end\n", "record"))
 print("PPRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
 print("PLACE", moycore.load(((
     "function _init()\n"
@@ -361,7 +339,7 @@ print("PNAMED", moycore.get_global("TWO"), moycore.get_global("MISS"))
 print("PWORLD", moycore.get_global("A"), moycore.get_global("C"),
       moycore.get_global("T0"), moycore.get_global("PX"),
       moycore.get_global("PY"), moycore.get_global("LEFT"))
-print("PDRAWN", _drawn)
+print("PDRAWN", moycore.get_global("DRAWN"))
 moycore.close()
 
 # time() must ADVANCE INSIDE a tick. Input is frozen for the frame on purpose;
@@ -619,7 +597,9 @@ def _run():
         why="Without it nothing checks that a Lua cart's whole frame runs in "
             "C -- the claim every later stage rests on -- nor the three "
             "regressions moycore shipped with.")
-    src = DRIVER.replace("@RUNTIME@", os.path.join(ROOT, "runtime"))
+    from runtime.moyimg import encode_moyimg
+    src = DRIVER.replace("@RUNTIME@", os.path.join(ROOT, "runtime")).replace(
+        "@BG@", repr(encode_moyimg(2, 2, bytes((8, 8, 8, 8)))))
     p = subprocess.run([exe, "-c", src], capture_output=True, text=True,
                        timeout=180)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -764,19 +744,12 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["PRE"][1] == "None", out
     assert by["OBJ"][1] == "None", \
         "the prelude did not define make_layer/image for the cart: %s" % out
-    assert ("OBJCALLS [('new', 9, 5), "
-            "('spr', <_Img object>, 1, 2)]" in out.replace(
-                out[out.index("<_Img"):out.index(">", out.index("<_Img")) + 1],
-                "<_Img object>")), \
-        "layer/image handles did not reach the Python objects: %s" % out
-    assert by["OBJBLIT"][1:] == ["True", "True"], \
-        "the native draw_layer did not composite the layer: %s" % out
     assert by["OBJGLOBALS"][1:] == ["3", "None"], \
         "the table library or the missing-image nil regressed: %s" % out
-    # The layer's own drawing is libmoy's (#225): cls and the tile sprite
-    # reached the layer's pixels without one call into Python.
-    assert by["OBJPIX"][1:] == ["True", "True", "True", "True"], \
-        "libmoy did not draw into the layer's buffer: %s" % out
+    # The layer, its image and its composite are libmoy's and moycore_lua.c's
+    # own (#225, #224): the pixels landed with no call into Python.
+    assert by["OBJPIX"][1:] == ["True"] * 5, \
+        "the run's own layer or image did not draw: %s" % out
 
     # The placement API (#214). scene() reached Lua as NIL until the rows got a
     # route across the boundary, so `ipairs(scene())` was "value expected" on
@@ -786,17 +759,18 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
         "the prelude did not define the placement verbs for the cart: %s" % out
     assert by["PROWS"][1:] == ["3", "1", "104", "100", "2", "1"], \
         "a scene row lost a field crossing into Lua: %s" % out
-    # A tag or a say holding the blob's separator must survive it, and a false
-    # flag must arrive false rather than vanish.
+    # A say holding a comma survives the C parse, and a false flag arrives
+    # false rather than vanishing.
     assert by["PFLAGS"][1:] == ["1", "200", "1"], \
         "a scene flag did not survive the crossing: %s" % out
     assert by["PNAMED"][1:] == ["1", "0"], \
         "scene(name) or the missing-scene empty list regressed: %s" % out
-    # move_actor truncates toward zero exactly as Python's int() does, and the
-    # coins removed in Lua are gone from the Python world.
+    # move_actor truncates toward zero exactly as Python's int() does, and
+    # draw_scene draws the live world the cart changed, in C.
+    assert by["PREC"][1] == "None", out
     assert by["PWORLD"][1:] == ["3", "2", "1", "96", "104", "1"], out
-    assert ("PDRAWN [[('hero', 1, 96, 104, 0, {'hidden': True})]]" in out), \
-        "the mutations did not reach the Python actor draw_scene draws: %s" % out
+    assert "PDRAWN 1|hero|1|96|104|0|true" in out, \
+        "draw_scene did not draw the live world the cart changed: %s" % out
 
     # time() reads the host's frame base AND advances within the tick. The
     # snapshot freezes INPUT for a frame deliberately; freezing the clock with

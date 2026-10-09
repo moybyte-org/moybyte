@@ -404,11 +404,13 @@ transfer.
 
 ## Superset verbs, and which of them are C
 
-`make_layer`/`image` and scenes are moybyte's, not the spec's, and their
-making stays Python-side: registered trampolines and the int-handle prelude in
-`runtime/lua_ext.py`, called when a cart makes a layer, an image or a scene. A
-layer is the console's object (an off-heap canvas lent to the run), not a
-second console in C.
+`make_layer`/`image` and scenes are moybyte's, not the spec's. On the boards
+and in the browser a layer's pixels and a paint image are the run's own C
+(`moycore_lua.c`); the host still makes them through registered trampolines
+and the int-handle prelude in `runtime/lua_ext.py`. Scenes are C on both Lua
+hosts (`moycore_scene.h`): the cart's `.moyscene` texts go to the run before
+the load (`scene_put`), are parsed there into Lua row tables, and
+`draw_scene` draws the live rows, so no scene verb crosses.
 
 What a frame calls is C (docs/kernel_cartpath_2026-10.md §2), so a frame makes
 no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration

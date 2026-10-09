@@ -63,13 +63,13 @@ from array import array
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                          LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
-                         install_handles, layer_restore, layer_restore_end,
+                         install_handles, put_scenes, layer_restore, layer_restore_end,
                          snap_slots, audio_ops, snap_shared, sync_view,
                          drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
-                                 install_handles, layer_restore,
+                                 install_handles, put_scenes, layer_restore,
                                  layer_restore_end, snap_slots, audio_ops,
                                  snap_shared, sync_view, drain_audio, cfg_blob)
 
@@ -80,8 +80,11 @@ except ImportError:                      # host tests importing the device modul
 
 try:
     import moycore as _moycore
-except ImportError:                      # a build without the module
-    _moycore = None
+except ImportError:
+    try:                                 # the host: its ctypes binding
+        import runtime.moycore as _moycore
+    except ImportError:                  # a build without the module
+        _moycore = None
 
 try:
     import moy_wasm as _moy_wasm         # the compiled cart's engine
@@ -90,8 +93,11 @@ except ImportError:                      # a build without it: no wasm runtime
 
 try:
     import moy_play as _moy_play         # the kernel's Player: the run's frame
-except ImportError:                      # host tests: CPython's has no Player
-    _moy_play = None
+except ImportError:
+    try:                                 # the host: its ctypes binding
+        import runtime.moy_play as _moy_play
+    except ImportError:
+        _moy_play = None
 
 # The cart's clock: ms since the Player's stamp, which snap_shared writes into
 # the snapshot's time slot -- the base libmoy's time() adds the milliseconds
@@ -258,30 +264,25 @@ class MoycoreRun:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
                         and name not in NATIVE_NAMES and callable(ns[name])):
                     _moycore.register(name, ns[name])
-            # The object-valued verbs and their Lua wrappers -- the same two
-            # halves moy_lua uses, from the same source. Without this a cart
-            # calling make_layer() gets "unsupported value" back from the
-            # trampoline and the whole run falls to the old runtime, which is
-            # what sakura_lua/brick_siege/ray did before this landed.
-            # The layers and paint images are the run's own in C where the
-            # binding has them (image_put): the cart's .moyimg texts go over
-            # once, here, and nothing of a layer or an image crosses after.
-            native = hasattr(_moycore, "image_put")
-            if native:
-                imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
-                for name in (imgs or ()):
-                    blob = imgs[name]
-                    if isinstance(blob, (str, bytes)):
-                        _moycore.image_put(name, blob)
-            self._layers, self._images = install_handles(
-                ns, _moycore.register, _moycore.layer_bind, native)
+            # The object-valued verbs are the prelude's Lua over the run's C:
+            # the layers, paint images and scenes are the run's own
+            # (moycore_lua.c, moycore_scene.h), their texts handed over once,
+            # here, so nothing of them crosses after. Only the editor handle
+            # stays a Python registry (lua_ext.install_handles).
+            imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
+            for name in (imgs or ()):
+                blob = imgs[name]
+                if isinstance(blob, (str, bytes)):
+                    _moycore.image_put(name, blob)
+            put_scenes(ns, _moycore.scene_put)
+            self._pins = install_handles(ns, _moycore.register)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)
             # The namespace's OWN prelude, if it brought one (the text console's
-            # `print`/`input` binding -- see runtime/lua_host.py's twin of this).
+            # `print`/`input` binding -- runtime/text_console.py's).
             # A string, so the registration loop above skipped it.
             extra = ns.get("_moy_prelude")
             if extra:
@@ -460,33 +461,26 @@ class MoycoreRun:
 
     _run = 0
 
-    def play_begin(self, path, tick, paced):
-        """Hand this run's frame to the kernel's Player: `moy_play.launch`
-        reads the cart's verdict and its runtime's row, `bind` gives it the
-        console's input table, the cart's audio session and the Tick a paced
-        run notes its costs into, `open` checks the runtime the constructor
-        opened. Returns `play_frame`, which the Player calls in place of its
-        per-tick `update`; None where there is no Player in the image, no
-        cart folder, or an input that is no kernel table -- the run then
-        ticks through `update` as before."""
-        launch = getattr(_moy_play, "launch", None)
-        if launch is None or not path:
+    def play_begin(self, run, tick):
+        """Hand this run's frame to the kernel's Player, which launched `run`
+        before this runtime loaded (the Player's _launch_play): `bind` gives
+        it the console's input table, the cart's audio session and the Tick a
+        paced run notes its costs into (None: unpaced), `open` checks the
+        runtime the constructor opened. Returns `play_frame`, which the Player
+        calls in place of its per-tick `update`; None where there is no Player
+        in the image or an input that is no kernel table -- the run then
+        ticks through `update` as before. Either way the run is this one's
+        from here, ended at its close: its loans live as long as the runtime."""
+        if _moy_play is None or not run:
             return None
-        try:
-            run = launch(path, bool(paced))
-        except RuntimeError as exc:
-            print("PLAY launch:", exc)
-            return None
+        self._run = run
         try:
             au = getattr(self.ws, "audio", None)
-            _moy_play.bind(run, self.ws.input, int(getattr(au, "h", 0) or 0),
-                           tick if paced else None)
+            _moy_play.bind(run, self.ws.input, int(getattr(au, "h", 0) or 0), tick)
             _moy_play.open(run)
         except (RuntimeError, TypeError) as exc:
             print("PLAY bind:", exc)
-            _moy_play.end(run)
             return None
-        self._run = run
         return self.play_frame
 
     def play_frame(self, n, dt, draw):
@@ -537,20 +531,40 @@ class MoycoreRun:
                 break
         return True
 
+    # -- probes: what a harness asks the run's state (the parity suites) ------
+
+    def get_global(self, name):
+        """A cart global as a number or a string, or None."""
+        return _moycore.get_global(name) if _moycore is not None else None
+
+    def get_global_len(self, name):
+        """The length of a table global, or None (a module that cannot say)."""
+        f = getattr(_moycore, "get_global_len", None)
+        return f(name) if f is not None else None
+
+    def exec(self, src, name="probe"):
+        """Run a chunk in the cart's state: None, or the error text."""
+        return _moycore.exec(src, name)
+
     def close(self):
-        if self._run:
-            _moy_play.end(self._run)
-            self._run = 0
+        # The hooks go with the state: the Player and its tests read
+        # `update is None` as "this run is over".
+        self.update = None
+        self.draw = None
         try:
             self.flush_pmem()
         finally:
             # Drop the handle registries: they are what PIN the run's layers
             # and images, and a layer is a full-canvas allocation.
-            self._layers = None
-            self._images = None
+            self._pins = None
             if _moycore is not None:
                 _moycore.close()
             layer_restore_end(self.ws.canvas, self)
+            # After the runtime's close: the run's end returns whatever of its
+            # loans the close left (native/moy_play).
+            if self._run:
+                _moy_play.end(self._run)
+                self._run = 0
 
 
 # -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------
@@ -956,7 +970,7 @@ class WasmRun(MoycoreRun):
             wire = device_canvas._PAL565_WIRE_BUF
         swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
         cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
-        self._layers = self._images = None
+        self._pins = None
         _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),

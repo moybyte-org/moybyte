@@ -66,11 +66,11 @@ part that remains Python and why.
 | `device/moycore_glue.py` | `native/moycore/moycore_run.c` and the map's Lua and wasm rows | all of it: `MoycoreRun`'s refresh, drain and persist; `WasmRun`, `CartFrame`, `aot_path`, `wasm_head`, `missing_imports`, the fit check, the module's signature check, `reserve_p8_memory`, `make_runtimes` | — |
 | `native/moycore/modmoycore.c` | **split**: `native/moycore/moycore_run.c` (no `py/` include: the console over kernel buffers, the snapshot, the audio queue into the run's session, pmem, the layer and image seams, the wasm session's requests through the kernel's volume) and `modmoycore.c` (the binding) | `read_on_vm`, `files_on_vm` and the root pointers they read | the binding, for a Lua run that keeps the VM (§2): `register()`'s trampolines live only there |
 | `runtime/lua_ext.py` | the C name table and the handles prelude as Lua source (`+native/moycore/prelude.lua`, compiled into the image) | the snapshot, view and audio seams, `install_handles`, `PRELUDE_HANDLES`, the deny lists | the registrations a VM-kept Lua run needs: `open_editor` and `PRELUDE_EDITOR`, `wifi`, the console verbs, the pins, the app roles |
-| `runtime/lua_host.py`, `runtime/wasm_host.py` | the host's ctypes binding of `moy_play` | both | — |
+| `runtime/lua_host.py`, `runtime/wasm_host.py` | the host's ctypes binding of `moycore_lua.c` and `moy_play` (`runtime/lua_binding.py`, with `runtime/moyhost_wasm.c` in the same library), driven for a Lua cart by `device/moycore_glue.py` over `runtime/moycore.py` | `lua_host.py` | `wasm_host.py`: the host's compiled-cart runtime (its engine is host policy), its frames the Player's |
 | `runtime/device_boot.py`'s runtime probe and map | the runtime map | that half | its boot screen is sprint 3's |
-| `runtime/cart_files.py` | `native/moy_store/` (the cart's written files over `moy_fs`'s crash-safe write) | all of it | — |
+| `runtime/cart_files.py` | `native/moy_store/moy_files.c` (the cart's written files over `moy_fs`'s crash-safe write) | the run path | the reference `tests/test_moy_files.py` holds the C to, and the store's `remove` that Get Carts' REMOVE calls |
 | `runtime/moyimg.py`'s decoder and `runtime/moy_image.py`'s `Image` | `native/moy_store/moy_img.c`, a C port of the moyimg codec (none exists in C: `moy_cat.c` only gathers a cart's `.moyimg` files), and an IMAGE handle (§3.1) | the Python decode on the run path | the codec's Python stays the reference the port's parity test reads, and the encoder Paint uses; `Image` stays a Python wrapper over the handle for Python carts; the wallpaper sidecar is sprint 5's |
-| the scene world (`runtime/widgets.py`'s scenes, the `.moyscene` parse) | `moy_play.c`'s scene rows | the run path's parse and placement | the Scene tab's editing, an app |
+| the scene world (`runtime/widgets.py`'s scenes, the `.moyscene` parse) | `native/moycore/moycore_scene.h`: the parse and `draw_scene` in C, the live world as Lua tables in the run's state | the run path's parse and placement | the Scene tab's editing, an app; a Python cart's world |
 | `runtime/netplay.py` | `+native/moy_play/moy_match.c` | all of it | — |
 | `runtime/players.py` | `PlayerRouter`: `moy_input`'s player slots; `NetService`: `moy_match.c` | all of it | `LoopbackNet` becomes the C binding's loopback, for the host tests |
 | `device/moy_espnow.py` | `moy_match.c`: beacons, the peer table, offer, join, start, the match's end and its config | all of it (the radio is `native/moy_net/moy_link.c` since sprint 3) | the launcher's peer line reads the kernel's table |
@@ -120,7 +120,7 @@ grants beside it):
 |---|---|---|
 | `make_layer`, `draw_layer` | native | libmoy's core verbs, with the Display seam supplied by `moycore_run.c`; a layer is a BUF row the run owns |
 | `image`, `Image` | native | an IMAGE handle over the cart's image, decoded by the C port of moyimg |
-| `scene`, `load_scene`, `actors`, `touching`, `move_actor`, `move_actor_to`, `remove_actor`, `draw_scene` | native | the scene world as rows in the run's arena, actors by ACTOR handle (§3.1's cap); the prelude's wrappers stay Lua |
+| `scene`, `load_scene`, `actors`, `touching`, `move_actor`, `move_actor_to`, `remove_actor`, `draw_scene` | native | the scene texts handed to the run before the load and parsed in C; the live world is the prelude's Lua tables in the run's state, at most 256 actors (§9 decision 5); `draw_scene` is C over them |
 | `mouse`, `col`, `W`, `H` | native | the pointer snapshot; numbers set as globals at open |
 | `net`, `on_net` | native | `moy_match.c`'s message queue, behind `multiplayer`; `on_net` is a Lua function the run calls between ticks |
 | `wifi`, `pin_write`, `pin_read` | keeps the VM | behind `network` and `pins` |

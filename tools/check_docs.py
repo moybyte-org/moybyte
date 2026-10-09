@@ -133,6 +133,10 @@ NOT_OURS = (
     # the rows. The kernel plans and the surface model name them to say what
     # crossed.
     "runtime/surface.py", "runtime/moy_glass.py",
+    # The host's Lua twin, deleted by sprint 4's host pass (2026-10-09) when
+    # the host's Lua carts moved onto the boards' glue over runtime/moycore.py;
+    # the cart-path plan names it to say what crossed.
+    "runtime/lua_host.py",
     # ...and the compositors' Python it crossed into native/moy_glass.
     "device/banded_panel.py", "modules/tdeck_panel.py", "modules/guition_panel.py",
     "modules/p4_display.py", "device/dsi_panel.py", "modules/guition_p4_display.py",

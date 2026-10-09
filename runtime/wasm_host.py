@@ -2,19 +2,19 @@
 
 `WasmHostRun(ws, ns, src)` runs the cart through `runtime/wasm_binding` --
 libmoy's wasm import table over WAMR built for Linux at the boards' pin, on
-the console the Lua shim uses too -- so the host is not a different program
-from the device (docs/wasm_tier_plan_2026-09.md: one engine, one import table,
-every tier; there is no wasmtime tier). It is `lua_host.MoycoreHostRun`'s
-twin and shares its frame: the snapshot in, the tick, quit, view and the audio
-queue out are the same body, so only construction is written here.
+moycore_run.c's console -- so the host is not a different program from the
+device (docs/wasm_tier_plan_2026-09.md: one engine, one import table, every
+tier; there is no wasmtime tier). Its frame is lua_ext's seam -- the snapshot
+in, the tick, quit, view and the audio queue out -- as the boards' glue runs
+it for a run the kernel's Player does not take.
 
 A trap surfaces as a normal Python exception out of `update()`, which is what
 the Player's crash path already takes; the run never calls the cart again and
 its canvas holds no partial frame. A compiled cart has no source line to throw
 the kid at, so the Player opens the error panel with no EDIT action.
 
-No compiler, no WAMR, no wasm carts on the host -- the rule `lua_host` states
-for Lua, and the Player says so through the runtime-missing panel exactly as a
+No compiler, no WAMR, no wasm carts on the host -- the rule the host's Lua
+binding states, and the Player says so through the runtime-missing panel exactly as a
 device build without the module does.
 
 A cart bigger than the host's configured limit (`MEMORY_LIMIT`) gets the
@@ -22,7 +22,11 @@ notice a board with too little free PSRAM gives it, by the boards' own
 footprint arithmetic (`WasmHostRuntime`).
 
 The cart's written files (moy-spec SPEC.md 16.12) are kept beside the carts
-store, `written/<cart>/`, by runtime/cart_files.py, as every tier keeps them.
+store, `written/<cart>/`, by native/moy_store/moy_files.c, as on a board.
+
+Its frames are the kernel's Player's (native/moy_play), launched before the
+load as a Lua run's are: `play_begin` binds the launched run and the Player
+calls `play_frame`.
 
 The cart's `snd` stream is the run's; while it runs, the console's pull of
 the mix adds it to every block (`audio_session.PcmPump.stream`), so it drains
@@ -32,13 +36,15 @@ Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
 try:
-    from runtime.lua_host import MoycoreHostRun
-    from runtime.lua_ext import snap_slots, audio_ops
-    from runtime.cart_files import CartFiles
+    from runtime.lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared,
+                                 sync_view, drain_audio)
+    from runtime.moy_input import pointer_state
+    from runtime.ticks import _since_ms
 except ImportError:                                  # pragma: no cover
-    from lua_host import MoycoreHostRun
-    from lua_ext import snap_slots, audio_ops
-    from cart_files import CartFiles
+    from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared,
+                         sync_view, drain_audio)
+    from moy_input import pointer_state
+    from ticks import _since_ms
 
 
 # What the host gives a compiled cart: the most any console board has, the
@@ -126,8 +132,9 @@ class WasmHostRuntime:
         return MEMORY_LIMIT, MEMORY_LIMIT
 
 
-class WasmHostRun(MoycoreHostRun):
-    """A compiled cart run on the host. Same shape as MoycoreHostRun."""
+class WasmHostRun:
+    """A compiled cart run on the host: the shape every runtime exposes --
+    `init`/`update`/`draw`/`close` -- as the boards' glue's runs have it."""
 
     def __init__(self, ws, ns, src):
         del src                          # a compiled cart has no source text
@@ -146,7 +153,7 @@ class WasmHostRun(MoycoreHostRun):
             tilemap=getattr(project, "tilemap", None),
             wire=getattr(canvas, "_wire", None), wire_swapped=_wire_swapped(),
             flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"),
-            files=CartFiles(cart["path"]), writable=cart.get("writable"))
+            files=cart["path"], writable=cart.get("writable"))
         self._ns = ns
         self._ws = ws
         self._layers = self._images = None
@@ -182,7 +189,85 @@ class WasmHostRun(MoycoreHostRun):
         if buf is not self._buf:
             self._run.retarget(buf)
             self._buf = buf
-        super()._update(dt)
+        from runtime.wasm_binding import SNAP_BTN, SNAP_BTNP, SNAP_QUIT
+        s = self._run.snap
+        inp = self._ws.input
+        # MOY_BUTTONS: the order is lua_ext's, never restated here.
+        masks = getattr(inp, "button_masks", None)
+        if masks is not None:
+            held, pressed = masks(MOY_BUTTONS)
+        else:
+            held = pressed = 0
+            for i, name in enumerate(MOY_BUTTONS):
+                try:
+                    if inp.held(name):
+                        held |= 1 << i
+                    if inp.pressed(name):
+                        pressed |= 1 << i
+                except Exception:  # noqa: BLE001
+                    pass
+        s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
+        err = self._run.tick(dt, self.draw_next)
+        # quit() sets SNAP_QUIT; the Player honours cart_quit after the tick.
+        if s[SNAP_QUIT]:
+            s[SNAP_QUIT] = 0
+            inp.cart_quit = True
+        self._sync_view()
+        drain_audio(getattr(self._ws, "audio", None), self._aq_ops,
+                    self._run.audio())
+        if err:
+            raise RuntimeError(err)
+
+    def _sync_view(self):
+        self._view = sync_view(self._ws, self._run.view(), self._view)
+
+    # -- the frame in C (native/moy_play) -------------------------------------
+
+    _prun = 0
+
+    def play_begin(self, run, tick):
+        """Hand this run's frame to the kernel's Player, which launched `run`
+        before the load: the console's input table, the cart's audio session
+        and the Tick a paced run notes into (None: unpaced). Returns
+        `play_frame`, or None for an input that is no kernel table (the run
+        then ticks through `update`). The run is this one's from here, ended
+        at its close."""
+        from runtime import moy_play
+        self._prun = run
+        try:
+            au = getattr(self._ws, "audio", None)
+            moy_play.bind(run, self._ws.input, int(getattr(au, "h", 0) or 0), tick)
+            moy_play.open(run)
+        except (RuntimeError, TypeError) as exc:
+            print("PLAY bind:", exc)
+            return None
+        return self.play_frame
+
+    def play_frame(self, n, dt, draw):
+        """`n` ticks of `dt` in C, the last drawing when `draw`."""
+        from runtime import moy_play
+        ws = self._ws
+        inp = ws.input
+        buf = ws.canvas._buf
+        if buf is not self._buf:
+            self._run.retarget(buf)
+            self._buf = buf
+        out = self._touch_out
+        try:
+            pointer_state(inp, out)
+            x, y, st = int(out[0]), int(out[1]), int(out[2])
+        except Exception:  # noqa: BLE001 -- no pointer this frame
+            x = y = st = 0
+        bits = moy_play.frame(self._prun, n, dt, draw, x, y, st)
+        if bits:
+            if bits & moy_play.QUIT:
+                inp.cart_quit = True
+            if bits & moy_play.VIEW:
+                self._sync_view()
+
+    def _draw_noop(self):
+        return None
 
     def flush_pmem(self):
         """The run's pmem image into the console's Pmem, if it moved."""
@@ -217,4 +302,12 @@ class WasmHostRun(MoycoreHostRun):
         try:
             self.flush_pmem()
         finally:
-            super().close()
+            # The hooks go with the state: the Player reads `update is None`
+            # as "this run is over".
+            self.update = None
+            self.draw = None
+            self._run.close()
+            if self._prun:
+                from runtime import moy_play
+                moy_play.end(self._prun)
+                self._prun = 0

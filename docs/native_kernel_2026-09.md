@@ -347,9 +347,9 @@ console needs while no Python app runs is OS.
 | `runtime/launcher_layer.py` | app | — | the launcher stays Python unless the return-budget measurement fails (§3); `EditorPickerLayer` rides in it |
 | `runtime/layers.py` | split | 7, rest stays | the `Layer` protocol stays as the apps' base; the draw-only overlays and the object-surface adapters go with the WMs |
 | `runtime/layout_base.py` | toolkit | 6 | the baseline predicate every `*Layout` derives from, the apps' layouts included |
-| `runtime/lua_binding.py` | host-only | — | the host's ctypes binding of libmoy's Lua |
+| `runtime/lua_binding.py` | host-only | — | the host's ctypes binding of `moycore_lua.c` and the kernel's Player |
 | `runtime/lua_ext.py` | cart path | 4 | the Lua superset's shared glue: the per-name rulings of §2.3 are made here |
-| `runtime/lua_host.py` | host-only | — | the host twin of `device/moycore_glue.py`; follows it in 4 |
+| `runtime/moycore.py` | host-only | — | `moycore` on CPython: the host's Lua runs through `device/moycore_glue.py` itself (sprint 4) |
 | `runtime/map_editor_ui.py` | app | — | the Editor's Map tab |
 | `runtime/moy_carts.py` | store | 1b | the `.moy` store, read and written by path; its callers reach a cart through `runtime/moy_catalogue.py`; the Zero takes it |
 | `runtime/moy_catalogue.py` | store | 1b | the store's interface: carts by handle (§4.3), the native store's call shapes and errors written over the Python store; every caller of the catalogue, a whole-cart load, create, duplicate and delete goes through it |
@@ -444,9 +444,10 @@ A Lua cart runs with no VM only if every name it can call is native. Moybyte
 registers EVERY non-libmoy name in the cart's namespace as a trampoline into
 Python (SOURCE: `runtime/lua_ext.py`, `docs/moycore_direction.md` §3 — a deny
 list, not an allow list): `wifi`, `net`, `on_net` (a callback into the cart),
-`pin_write`, `pin_read`, `draw_scene`, the editor trampolines, and the
-object-valued set that rides a prelude over handles (`make_layer`,
-`draw_layer`, `image`/`Image`, the scene and actor verbs). Netplay's lockstep
+`pin_write`, `pin_read`, the editor trampolines, and the object-valued set
+that rides a prelude over handles (`make_layer`, `draw_layer`,
+`image`/`Image`); the scene and actor verbs are the prelude's Lua over the
+run's C (`native/moycore/moycore_scene.h`). Netplay's lockstep
 runs in Python every frame a netplay cart runs.
 
 The layer verbs have a native home already: libmoy installs `make_layer` and

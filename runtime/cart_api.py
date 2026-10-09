@@ -674,6 +674,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # through the native spr entry when the canvas has one. The world resets
         # per run via scenes.reset() (Player.start).
         _world = scenes.world()
+        # The scene texts themselves, for a Lua run that parses and draws
+        # them in C (lua_ext.put_scenes; not a verb, like _moy_cfg).
+        ns["_moy_scenes"] = scenes
         ns["actors"] = _world.actors
         ns["touching"] = _world.touching
         ns["move_actor"] = _world.move

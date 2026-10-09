@@ -2,14 +2,17 @@
  * which hides them. Must precede every include. */
 #define _POSIX_C_SOURCE 200809L
 
-/* The host's WASM shim (docs/wasm_tier_plan_2026-09.md, phase 3).
+/* The host's WASM shim (docs/wasm_tier_plan_2026-09.md, phase 3), built into
+ * the host's Lua library (runtime/lua_binding.py) wherever WAMR builds.
  *
  * A "runtime": "wasm" cart on the host runs through the SAME C the boards run:
  * libmoy's wasm binding (native/moycore/libmoy/moy_wasm.c, the import table as
- * WAMR native symbols) over the console in native/moycore/moycore_run.c --
- * the one moyhost_lua.c and the boards use too -- and WAMR itself, built for Linux from the fork the
+ * WAMR native symbols) over moycore_RUN's console (native/moycore/
+ * moycore_run.c), whose frames are the kernel's Player's (moy_play.c's wasm
+ * row) as a Lua run's are, and WAMR itself, built for Linux from the fork the
  * boards vendor, at the commit native/moy_wasm/wamr_pin.h names
- * (runtime/wasm_binding.py fetches and builds it). There is no second engine:
+ * (runtime/wasm_binding.py fetches and builds it). The cart's written files
+ * are native/moy_store/moy_files.c's, as on a board. There is no second engine:
  * a host and a device that disagree about what a verb does is the disease the
  * Lua shim was written to end, and this is its twin.
  *
@@ -37,6 +40,8 @@
 #include "moy_wasm.h"
 #include "moy_wasm_footprint.h"
 #include "moycore_run.h"
+#include "moycore_lua.h"
+#include "moy_files.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -51,7 +56,6 @@
 #define HW_PATH_MAX 1024
 
 typedef struct {
-    moycore_run_t  hc;          /* the console, shared with moyhost_lua.c */
     char        dir[HW_PATH_MAX];   /* the cart's folder: `read`'s only root */
     uint8_t    *bytes;       /* the module file, held while it is loaded */
     wasm_module_t module;
@@ -62,12 +66,34 @@ typedef struct {
     int         dead;        /* trapped: never called again */
     moy_stream  pcm;         /* the cart's `snd` */
     int16_t     pcm_ring[MOY_WASM_SND_DEPTH];
-    int32_t   (*files)(int op, const char *path, uint32_t arg, uint8_t *buf,
-                       uint32_t len);   /* the cart's written files */
+    moy_files_t *files;      /* the cart's written files (moy_files.h) */
     char       *writable;    /* the manifest's "writable", libmoy's form */
 } host_wasm;
 
 static int g_runtime;        /* 1 once WAMR is up and the table registered */
+
+/* The shared run (moyhost_lua.c): claim it, and the frame hook the Player's
+ * wasm row reaches through moycore_frame. */
+void hl_claim(void (*release)(void));
+extern int (*hl_wasm_tick)(float dt, int draw, char *err, size_t n);
+static host_wasm *G_LIVE_W;
+int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen);
+
+/* The live run's console goes; the run object stays its owner's to free. */
+static void hw_release_live(void)
+{
+    moycore_run_close(&moycore_RUN.c);
+    memset(&moycore_RUN, 0, sizeof(moycore_RUN));
+    moycore_run_cur = NULL;
+    hl_wasm_tick = NULL;
+    G_LIVE_W = NULL;
+}
+
+static int hw_tick_live(float dt, int draw, char *err, size_t n)
+{
+    if (!G_LIVE_W) return 0;
+    return hw_tick(G_LIVE_W, dt, draw, err, (int)n) != 0 ? -1 : 0;
+}
 /* The table's registration storage: WAMR sorts it in place and points at it
  * until the runtime is destroyed, which on the host is never. */
 static NativeSymbol *g_natives;
@@ -174,46 +200,45 @@ int hw_runtime(void)
     return 1;
 }
 
-/* The cart's written files (moy-spec SPEC.md 16.12). The binding holds every
- * path to the manifest's "writable" entries; the store is Python's
- * (runtime/cart_files.py), reached through one callback that takes the
- * operation, as the boards' moycore reaches it on the VM task. */
-enum { HW_FILE_READ, HW_FILE_WRITE, HW_FILE_ERASE, HW_FILE_LIST };
-
+/* The cart's written files (moy-spec SPEC.md 16.12): moy_files' C over the
+ * host's volume, as a board's moycore reaches it. The binding holds every path
+ * to the manifest's "writable" entries. */
 static int32_t hw_written(void *u, const char *path, uint32_t offset, uint8_t *dst,
                           uint32_t len)
 {
     host_wasm *r = (host_wasm *)u;
-    return r->files ? r->files(HW_FILE_READ, path, offset, dst, len) : -1;
+    return r->files ? moy_files_read_written(r->files, (const uint8_t *)path, strlen(path),
+                                             offset, dst, len) : -1;
 }
 
 static int32_t hw_write(void *u, const char *path, const uint8_t *data, uint32_t len)
 {
     host_wasm *r = (host_wasm *)u;
-    return r->files ? r->files(HW_FILE_WRITE, path, 0, (uint8_t *)data, len)
+    return r->files ? moy_files_write(r->files, (const uint8_t *)path, strlen(path), data, len)
                     : MOY_WASM_FAILED;
 }
 
 static int32_t hw_erase(void *u, const char *path)
 {
     host_wasm *r = (host_wasm *)u;
-    return r->files ? r->files(HW_FILE_ERASE, path, 0, NULL, 0) : -1;
+    return r->files ? moy_files_erase(r->files, (const uint8_t *)path, strlen(path)) : -1;
 }
 
 static int32_t hw_list(void *u, const char *prefix, uint32_t index, uint8_t *dst,
                        uint32_t len)
 {
     host_wasm *r = (host_wasm *)u;
-    return r->files ? r->files(HW_FILE_LIST, prefix, index, dst, len) : -1;
+    return r->files ? moy_files_name(r->files, (const uint8_t *)prefix, strlen(prefix),
+                                     index, dst, len) : -1;
 }
 
-/* The store and the manifest's "writable" entries joined by NULs (`len`
- * bytes), before hw_load. */
-void hw_set_files(host_wasm *r,
-                  int32_t (*fn)(int, const char *, uint32_t, uint8_t *, uint32_t),
-                  const char *writable, int len)
+/* The cart at `cart_path`'s written files and the manifest's "writable"
+ * entries joined by NULs (`len` bytes), before hw_load. 0, or 1 when the
+ * store will not open a session. */
+int hw_set_files(host_wasm *r, const char *cart_path, const char *writable, int len)
 {
-    r->files = fn;
+    if (r->files) moy_files_close(r->files);
+    r->files = moy_files_open(cart_path);
     free(r->writable);
     r->writable = NULL;
     if (writable && len > 0 && (r->writable = (char *)calloc((size_t)len + 2, 1)) != NULL)
@@ -224,6 +249,7 @@ void hw_set_files(host_wasm *r,
     r->w.erase = hw_erase;
     r->w.list = hw_list;
     r->w.files_user = r;
+    return r->files == NULL;
 }
 
 /* `nbytes` is the caller's buffer size, CHECKED: ctypes hands over a bare
@@ -240,33 +266,39 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     if (!hw_runtime()) return NULL;
     r = (host_wasm *)calloc(1, sizeof(host_wasm));
     if (!r) return NULL;
-    moy_canvas_init(&r->hc.canvas, (moy_pixel *)pix, w, h);
-    if (wire) moy_canvas_wire(&r->hc.canvas, wire);
-    moycore_run_open(&r->hc, snap, aq, aq_cap);
-    r->hc.con.host.layer_new = hw_layer_new;
-    r->hc.con.host.layer_free = hw_layer_free;
-    r->hc.con.rng = (uint32_t)moycore_run_now_ms() | 1u;
+    hl_claim(hw_release_live);             /* one run at a time: this one */
+    memset(&moycore_RUN, 0, sizeof(moycore_RUN));
+    moy_canvas_init(&moycore_RUN.c.canvas, (moy_pixel *)pix, w, h);
+    if (wire) moy_canvas_wire(&moycore_RUN.c.canvas, wire);
+    moycore_run_open(&moycore_RUN.c, snap, aq, aq_cap);
+    moycore_RUN.c.con.host.layer_new = hw_layer_new;
+    moycore_RUN.c.con.host.layer_free = hw_layer_free;
+    moycore_RUN.c.con.rng = (uint32_t)moycore_run_now_ms() | 1u;
     r->w.read = hw_read;
     r->w.read_user = r;
     r->w.wire_swapped = wire_swapped ? 1 : 0;
     moy_stream_init(&r->pcm, r->pcm_ring, MOY_WASM_SND_DEPTH, MOY_WASM_SND_RATE);
     r->w.snd = hw_snd;
     r->w.snd_user = r;
-    moycore_run_cur = &r->hc;
+    moycore_run_cur = &moycore_RUN.c;
+    moycore_RUN.open = 1;
+    moycore_RUN.wasm = 1;
+    G_LIVE_W = r;
+    hl_wasm_tick = hw_tick_live;
     return r;
 }
 
 void hw_set_sheet(host_wasm *r, uint8_t *pix, int nbytes)
-{ moycore_run_set_sheet(&r->hc, pix, nbytes > 0 ? (size_t)nbytes : 0); }
+{ (void)r; moycore_run_set_sheet(&moycore_RUN.c, pix, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hw_set_map(host_wasm *r, uint8_t *cells, int nbytes, int w, int h)
-{ moycore_run_set_map(&r->hc, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
+{ (void)r; moycore_run_set_map(&moycore_RUN.c, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
 
 void hw_set_flags(host_wasm *r, const uint8_t *flags, int nbytes)
-{ moycore_run_set_flags(&r->hc, flags, nbytes > 0 ? (size_t)nbytes : 0); }
+{ (void)r; moycore_run_set_flags(&moycore_RUN.c, flags, nbytes > 0 ? (size_t)nbytes : 0); }
 
 void hw_set_cfg(host_wasm *r, const char *blob, int len)
-{ moycore_run_set_cfg(&r->hc, blob, len > 0 ? (size_t)len : 0); }
+{ (void)r; moycore_run_set_cfg(&moycore_RUN.c, blob, len > 0 ? (size_t)len : 0); }
 
 /* Load the cart's module from `dir`/`main`, check it against moy-spec SPEC.md 16's
  * shape and the manifest's `pages` BEFORE its memory exists, instantiate it
@@ -327,8 +359,8 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         put_err(err, errlen, "exec env", NULL);
         return 1;
     }
-    moycore_run_cur = &r->hc;
-    if (moy_wasm_open(&r->w, &r->hc.con, r->env) != 0) {
+    moycore_run_cur = &moycore_RUN.c;
+    if (moy_wasm_open(&r->w, &moycore_RUN.c.con, r->env) != 0) {
         put_err(err, errlen, "refused", "a hook is missing");
         return 1;
     }
@@ -342,18 +374,18 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
 static int trapped(host_wasm *r)
 {
     r->dead = 1;
-    moy_reset_state(&r->hc.canvas);
-    moy_cls(&r->hc.canvas, 0);
+    moy_reset_state(&moycore_RUN.c.canvas);
+    moy_cls(&moycore_RUN.c.canvas, 0);
     return 1;
 }
 
 int hw_init(host_wasm *r, char *err, int errlen)
 {
-    if (!r->bound || r->dead) {
+    if (!r->bound || r->dead || r != G_LIVE_W) {
         put_err(err, errlen, "the cart is not running", NULL);
         return 1;
     }
-    moycore_run_cur = &r->hc;
+    moycore_run_cur = &moycore_RUN.c;
     moycore_run_tick_begin();
     if (moy_wasm_init(&r->w, err, (size_t)errlen)) return trapped(r);
     return 0;
@@ -363,13 +395,13 @@ int hw_init(host_wasm *r, char *err, int errlen)
  * or the cart called quit(), which ends it where it stands. */
 int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen)
 {
-    if (!r->bound || r->dead) {
+    if (!r->bound || r->dead || r != G_LIVE_W) {
         put_err(err, errlen, "the cart is not running", NULL);
         return 1;
     }
-    moycore_run_cur = &r->hc;
+    moycore_run_cur = &moycore_RUN.c;
     moycore_run_tick_begin();              /* h_time counts from here */
-    moy_reset_state(&r->hc.canvas);
+    moy_reset_state(&moycore_RUN.c.canvas);
     if (moy_wasm_update(&r->w, dt, err, (size_t)errlen)) return trapped(r);
     if (draw && !r->w.quitting && moy_wasm_draw(&r->w, err, (size_t)errlen))
         return trapped(r);
@@ -394,26 +426,27 @@ void hw_snd_counts(host_wasm *r, uint32_t *out)
 }
 
 void hw_retarget(host_wasm *r, void *pix)
-{ r->hc.canvas.pix = (moy_pixel *)pix; }
+{ if (r == G_LIVE_W) moycore_RUN.c.canvas.pix = (moy_pixel *)pix; }
 
 int hw_pmem_image(host_wasm *r, int32_t *out, int n)
-{ return moycore_run_pmem_image(&r->hc, out, n); }
+{ return r == G_LIVE_W ? moycore_run_pmem_image(&moycore_RUN.c, out, n) : 0; }
 
 void hw_pmem_load(host_wasm *r, const int32_t *in, int n)
-{ moycore_run_pmem_load(&r->hc, in, n); }
+{ if (r == G_LIVE_W) moycore_run_pmem_load(&moycore_RUN.c, in, n); }
 
 int hw_get_view(host_wasm *r, int *w, int *h)
-{ return moycore_run_view(&r->hc, w, h); }
+{ return r == G_LIVE_W ? moycore_run_view(&moycore_RUN.c, w, h) : 0; }
 
 void hw_free(host_wasm *r)
 {
     if (!r) return;
+    if (r == G_LIVE_W) hl_claim(NULL);     /* releases this one */
     moy_wasm_close(&r->w);
     if (r->env) wasm_runtime_destroy_exec_env(r->env);
     if (r->inst) wasm_runtime_deinstantiate(r->inst);
     if (r->module) wasm_runtime_unload(r->module);
     free(r->bytes);
     free(r->writable);
-    moycore_run_close(&r->hc);
+    if (r->files) moy_files_close(r->files);
     free(r);
 }

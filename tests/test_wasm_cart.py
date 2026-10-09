@@ -258,20 +258,25 @@ CLOCK = """
 
 
 def test_a_compiled_carts_time_is_the_players_cart_clock(tmp_path):
-    """time() through the Player is milliseconds since the Player stamped the
-    run, as on a board (lua_ext.snap_shared fills the snapshot's clock on
-    both). It read 0 plus the tick's own milliseconds until the host filled
-    it, and Doom's game clock never left its first tic."""
+    """time() through the Player is milliseconds since the kernel's Player
+    launched the run (moy_play.c fills the snapshot's clock), as on a board:
+    it moves with the wall clock between frames. It read 0 plus the tick's
+    own milliseconds until the host filled it, and Doom's game clock never
+    left its first tic."""
+    import time as _time
     _binding_or_skip()
-    from runtime.ticks import _ticks_diff
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Clock", CLOCK, 1)))
     open_cart(ws, "Clock")
     assert ws.player.cart_error is None, ws.player.cart_error
-    ws.input.cart_start_ms = _ticks_diff(ws.input.cart_start_ms, 5000)
+    assert ws.player._play is not None, "the run's frame is not the kernel's Player's"
+    ws.frame(_DT)
+    t0 = _pmem(ws)[0]
+    _time.sleep(0.2)
     ws.frame(_DT)
     assert ws.player.cart_error is None, ws.player.cart_error
-    assert 5000 <= _pmem(ws)[0] < 6000, _pmem(ws)[0]
+    t1 = _pmem(ws)[0]
+    assert 150 <= t1 - t0 < 2000, (t0, t1)
 
 
 TRAP_IN_DRAW = """

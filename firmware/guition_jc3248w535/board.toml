@@ -162,9 +162,11 @@ The compile-and-cache helper the host bindings share: subprocess to a C
 compiler, hash-keyed .so cache. No compiler on a board."""
 
 [[modules.shared.deny]]
-file = "lua_host.py"
+file = "moycore.py"
 kind = "host-only"
-why  = "The host's Lua cart runner. The device's is `moycore`, driven by moycore_glue.py."
+why  = """
+`moycore` for CPython: the module surface `moycore_glue.py` drives, by ctypes
+over `lua_binding`. Here `moycore` is the compiled-in usermod (native/.staged/moycore)."""
 
 
 [[modules.shared.deny]]
@@ -460,7 +462,8 @@ leaf helpers. The AXS15231 touch driver is the kernel's (native/moy_input)."""
 files = ["device_api.py", "moycore_glue.py"]
 why = """
 STAGE 6 (console). The cart namespace's device home: `device_api` re-exports
-THE make_api (one body in the shared cart_api.py) and moycore's host half."""
+THE make_api (one body in the shared cart_api.py) and moycore's glue, whose
+runs the kernel's Player frames."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

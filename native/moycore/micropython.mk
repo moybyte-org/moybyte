@@ -39,6 +39,9 @@ SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy/moy_wasm.c
 CFLAGS_USERMOD += -I$(MOYCORE_MOD_DIR) \
 	-I$(MOYCORE_MOD_DIR)/../moy_gfx/libmoy \
 	-I$(MOYCORE_MOD_DIR)/../moy_lua/lua \
+	-I$(MOYCORE_MOD_DIR)/../moy_spine \
+	-I$(MOYCORE_MOD_DIR)/../moy_store \
+	-I$(MOYCORE_MOD_DIR)/../moy_glass \
 	-DMOY_PIXEL_RGB565=1 -DMOY_WITH_LUA=1
 
 # NB: libmoy/moy_lua.c is NOT listed above -- libmoy_binding.c includes it, so

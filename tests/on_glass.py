@@ -469,16 +469,22 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
     is the cart's: "lua" for the seeds, "wasm" for a compiled cart, whose
     frames run on its engine's thread and whose file requests are C on the
     VM's task (moycore's files): no SERVICE or REFUSED crossing from before
-    the launch, its load included, to the end of the check. `state` reads the last finished frame, so
+    the launch, its load included, to the end of the check; and for both, no
+    APP crossing either, since the Player launches the run before its
+    runtime loads. `state` reads the last finished frame, so
     each read is a different frame of the run. `door` and `clear` are
     cart_runs_and_exits's."""
     import time
     for _ in range(clear):
         board.cmd("py ws.exit()", wait_for="PY")
         board.drain(0.5)
-    # SERVICE and REFUSED from before the launch: a cart's load -- a compiled
-    # cart's _init reading its own files -- is in them too.
-    before = board.state()["upcall_totals"][3:]
+    # APP, SERVICE and REFUSED from before the launch: a cart's load -- a
+    # Lua cart's _init reading its scene, a compiled cart's reading its own
+    # files -- is in them too, and in the run's own books.
+    def crossings():
+        t = board.state()["upcall_totals"]
+        return [t[1]] + t[3:]
+    before = crossings()
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     board.drain(2.0)
@@ -498,9 +504,9 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
         play = board.state()["play"]
         assert play is not None, "%s ticks through Python, not moy_play" % title
         assert play["frames"] > 0 and play["upcalls"][1:] == [0, 0, 0, 0], play
-        after = board.state()["upcall_totals"][3:]
+        after = crossings()
         assert after == before, \
-            "%s's launch or load crossed into Python: SERVICE, REFUSED %r -> %r" % (
+            "%s's launch or load crossed into Python: APP, SERVICE, REFUSED %r -> %r" % (
                 title, before, after)
     finally:
         if door == "quit":

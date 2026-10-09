@@ -20,6 +20,7 @@ that board printed before the change.
 """
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -401,7 +402,10 @@ def test_the_seed_progress_bar_is_wired_into_the_store_call(monkeypatch):
 # -- the cart runtimes --------------------------------------------------------
 
 
-def test_a_build_without_moycore_says_absent_rather_than_failing(capsys):
+def test_a_build_without_moycore_says_absent_rather_than_failing(capsys, monkeypatch):
+    # The host has its moycore (runtime/moycore.py); a board built without
+    # the native modules has none, which is this.
+    monkeypatch.setitem(sys.modules, "moycore_glue", None)
     boot, _, _ = _boot()
     # No `moycore_glue` on the host: exactly the shape of a board built without
     # the native modules, where a `runtime: lua` or `runtime: wasm` cart opens
@@ -412,7 +416,8 @@ def test_a_build_without_moycore_says_absent_rather_than_failing(capsys):
     assert "Moybyte wasm runtime ABSENT" in out
 
 
-def test_the_runtime_status_can_be_routed_to_a_boards_own_log():
+def test_the_runtime_status_can_be_routed_to_a_boards_own_log(monkeypatch):
+    monkeypatch.setitem(sys.modules, "moycore_glue", None)
     boot, _, _ = _boot()
     lines = []
     boot.runtimes(FakeWs(), log=lines.append)

@@ -67,11 +67,11 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 `build_workstation()`. The browser's boot is web_boot.py."""
 
 [[modules.shared.deny]]
-file = "lua_host.py"
+file = "moycore.py"
 kind = "host-only"
 why  = """
-The host's Lua cart runner over runtime/lua_binding, a ctypes build of the
-boards' Lua. The browser runs moycore, compiled in as a usermod."""
+`moycore` for CPython: the module surface `moycore_glue.py` drives, by ctypes
+over `lua_binding`. Here `moycore` is the compiled-in usermod (native/.staged/moycore)."""
 
 
 [[modules.shared.deny]]
@@ -194,8 +194,8 @@ sandbox does not have and web_boot never constructs."""
 [[modules.device.group]]
 files = ["moycore_glue.py", "device_canvas.py", "device_util.py"]
 why = """
-moycore_glue -- the host half of moycore: input snapshot in, audio queue out,
-pmem at the #66 boundaries. Board-agnostic by construction (it talks to ws and
+moycore_glue -- moycore's glue: the run's buffers and asset texts handed to
+the C, its frame the kernel's Player's, pmem at the #66 boundaries. Board-agnostic by construction (it talks to ws and
 to the module, never to a panel), which is why the browser needs no twin.
 device_canvas -- THE RASTER (moycore stage 4): the browser runs the boards'
 own canvas class over web_canvas.WebCompositor. device_util -- the ticks

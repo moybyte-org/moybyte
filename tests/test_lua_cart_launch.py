@@ -20,8 +20,8 @@ def _need_lua():
     """Skip unless the host lua binding BUILT. It used to be
     `importorskip("lupa")`; the host has no second Lua VM any more, so what can
     be missing is a compiler rather than a package."""
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
 
@@ -127,13 +127,14 @@ def test_lua_error_routes_to_the_cart_panel(tmp_path):
 
 
 def test_a_lua_carts_time_is_the_players_cart_clock(tmp_path):
-    """time() through the Player is milliseconds since the Player stamped the
-    run, as a Python cart's is: the host fills the snapshot's clock the way
-    the boards do (lua_ext.snap_shared). It read 0 plus the tick's own
-    milliseconds until the host filled it."""
+    """time() through the Player is milliseconds since the kernel's Player
+    launched the run (moy_play.c's snapshot), as on a board: it moves with the
+    wall clock between frames. It read 0 plus the tick's own milliseconds
+    until the host filled the snapshot's clock."""
+    import time as _time
     _need_lua()
     from runtime import moy_carts
-    from runtime.ticks import _ticks_diff
+    from runtime import moycore
     ws = _ws(tmp_path)
     cart = moy_carts.create("Clock Lua", str(tmp_path / "carts"),
                             src="function _update(dt) pmem(0, time()) end\n",
@@ -141,10 +142,19 @@ def test_a_lua_carts_time_is_the_players_cart_clock(tmp_path):
     ws.launcher.items.append(cart)
     _open(ws, "Clock Lua")
     assert ws.player.cart_error is None
-    ws.input.cart_start_ms = _ticks_diff(ws.input.cart_start_ms, 5000)
-    ws.frame(1 / 30)
-    assert ws.player.cart_error is None
-    assert 5000 <= ws.player._lua._run.pmem()[1][0] < 6000
+    assert ws.player._play is not None, "the run's frame is not the kernel's Player's"
+    img = [0] * 256
+
+    def clock():
+        ws.frame(1 / 30)
+        assert ws.player.cart_error is None
+        moycore.pmem_image(img)
+        return img[0]
+
+    t0 = clock()
+    _time.sleep(0.2)
+    t1 = clock()
+    assert 150 <= t1 - t0 < 2000, (t0, t1)
 
 
 def test_lua_crash_line_is_the_deepest_frame(tmp_path):
@@ -223,14 +233,14 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
     these carts. So the assertion that matters is the negative one: the run is
     a MoycoreHostRun, not a fallback.
     """
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built")
     ws = _ws(tmp_path)
     _open(ws, "Bullet Storm")
     assert ws.player.cart_error is None
-    assert type(ws.player._lua).__name__ == "MoycoreHostRun", \
-        "the cart is not on MoycoreHostRun -- the handle glue did not take"
+    assert type(ws.player._lua).__name__ == "MoycoreRun", \
+        "the cart is not on the glue's MoycoreRun"
     for _ in range(300):
         ws.frame(1 / 60)
         assert ws.player.cart_error is None

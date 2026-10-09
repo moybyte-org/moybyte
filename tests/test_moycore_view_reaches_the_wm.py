@@ -12,10 +12,10 @@ its trampoline removed the only thing that had been setting the field.
 
 import pytest
 
-from runtime import lua_host
+from runtime import lua_binding
 
 
-@pytest.mark.skipif(not lua_host._moycore_available(),
+@pytest.mark.skipif(not lua_binding.HostLuaRun.available(),
                     reason="no C compiler for the host lua binding")
 def test_a_declared_view_reaches_the_console(tmp_path):
     from runtime import host_app
@@ -26,7 +26,7 @@ def test_a_declared_view_reaches_the_console(tmp_path):
                              "function _update(dt) end\n"
                              "function _draw() cls(0) end\n")
     try:
-        assert isinstance(run, lua_host.MoycoreHostRun)
+        assert type(run).__name__ == "MoycoreRun"
         # Declared in _init, so it must be applied before the first frame --
         # the WM reads this on the frame the cart starts.
         assert getattr(ws.input, "game_view", None) == (128, 120)
@@ -39,7 +39,7 @@ def test_a_declared_view_reaches_the_console(tmp_path):
         run.close()
 
 
-@pytest.mark.skipif(not lua_host._moycore_available(),
+@pytest.mark.skipif(not lua_binding.HostLuaRun.available(),
                     reason="no C compiler for the host lua binding")
 def test_a_view_changed_mid_run_follows(tmp_path):
     """SPEC.md 6: view chooses the region at runtime, so a cart may change it."""

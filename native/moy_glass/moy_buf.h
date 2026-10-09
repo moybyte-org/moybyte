@@ -44,7 +44,7 @@ enum {
 // What a buffer is for.
 enum {
     MOY_ROLE_LAYER = 1,         // a canvas's pixels: a layer, a window, a run canvas
-    MOY_ROLE_BAKE = 2,          // an image's RGB565 bake
+    MOY_ROLE_BAKE = 2,          // an image's pixels: its RGB565 bake, a run's decoded picture
     MOY_ROLE_SCRATCH = 3,       // the view crop, the fold's snapshot
     MOY_ROLE_CACHE = 4,         // the bar's strip, the map cache
     MOY_ROLE_PAINT = 5,         // a compositor's own paint buffers

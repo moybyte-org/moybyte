@@ -135,8 +135,8 @@ to whoever called it.
     silently drops any moybyte verb nobody remembered to add — and it did.
     Object-valued verbs (`make_layer`/`draw_layer`/`image`, and the #85/#109
     placement family since #214) can never be registry entries: a trampoline
-    marshals scalars and a Layer comes back nil, so they ride int handles plus a
-    Lua prelude. **If you add a runtime, import that module; if
+    marshals scalars and a Layer comes back nil, so they ride a Lua prelude over
+    int handles or the run's own C (the scenes, `moycore_scene.h`). **If you add a runtime, import that module; if
     you add an object-valued verb, it goes there, not in a verb list.** It was two
     copies once, which is why layer carts crashed on the host and merely fell back
     on device.

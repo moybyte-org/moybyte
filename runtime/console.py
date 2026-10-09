@@ -705,8 +705,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The cart-runtime seam (#67, docs/wasm_tier_plan_2026-09.md): a
         # manifest's "runtime" name -> factory(ns, src) returning a running cart
         # handle (.init/.update/.draw callables + .close()). build_workstation
-        # maps "lua" and "wasm" to runtime/lua_host's and runtime/wasm_host's
-        # runs; the device maps moycore_glue's. A runtime this build lacks is an
+        # maps "lua" to moycore_glue's run (over runtime/moycore.py) and "wasm"
+        # to runtime/wasm_host's; the device maps moycore_glue's. A runtime this build lacks is an
         # ABSENT KEY, and a cart naming it opens the error panel.
         self.runtimes = {}
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None

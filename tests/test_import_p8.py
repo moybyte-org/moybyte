@@ -747,8 +747,8 @@ def test_the_filename_title_is_the_same_on_every_tier(tmp_path):
 def _need_lua():
     """Skip unless the host Lua binding BUILT (a C compiler, not a package --
     the host runs the BOARDS' Lua now; see runtime/lua_host.py's header)."""
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
 

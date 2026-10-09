@@ -12,6 +12,7 @@ deliberately importable with no board and no console (its device_util import
 falls back to a self-contained shim), which is what makes this testable at all.
 """
 
+import sys
 import hashlib
 import json
 import types
@@ -1160,9 +1161,10 @@ def test_a_window_with_no_frames_says_so_instead_of_dividing_by_it():
     assert verbs_line(0, 10, [("spr", 5, 5)]) == "VERBS frames=0"
 
 
-def test_verbs_declines_on_a_board_with_no_moycore(capsys):
+def test_verbs_declines_on_a_board_with_no_moycore(capsys, monkeypatch):
     """Every board freezes this channel; only the ones with the Lua tier can
     answer. The decline is a line, not an ImportError into the loop."""
+    monkeypatch.setitem(sys.modules, "moycore", None)
     ws, ch = make()
     ch.run(ws, "verbs")
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
@@ -1312,9 +1314,10 @@ def test_the_luaprof_line_survives_a_window_with_no_frames():
     assert "smp=0" in luaprof_line((1000000, 0, 1024, (0,) * 10, (), ()), None)
 
 
-def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys):
+def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys, monkeypatch):
     """Same shape as `verbs`: a decline is a line, not an ImportError thrown
     into the frame loop."""
+    monkeypatch.setitem(sys.modules, "moycore", None)
     ws, ch = make()
     ch.run(ws, "luaprof")
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]

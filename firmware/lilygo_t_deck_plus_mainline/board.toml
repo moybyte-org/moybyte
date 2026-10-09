@@ -192,11 +192,11 @@ a C compiler, a hash-keyed .so cache under .build/. There is no compiler on a
 board, and nothing to compile if there were."""
 
 [[modules.shared.deny]]
-file = "lua_host.py"
+file = "moycore.py"
 kind = "host-only"
 why  = """
-The host's Lua cart runner, over `lua_binding`. The device's runtime is
-`moycore` (a usermod) driven by `moycore_glue.py`."""
+`moycore` for CPython: the module surface `moycore_glue.py` drives, by ctypes
+over `lua_binding`. Here `moycore` is the compiled-in usermod (native/.staged/moycore)."""
 
 
 [[modules.shared.deny]]
@@ -531,8 +531,10 @@ files = ["device_api.py", "moycore_glue.py"]
 why = """
 STAGE 6 (console). The cart NAMESPACE's device home: `device_api` re-exports
 THE `make_api` (one body in the shared cart_api.py since 2026-08-17, so a cart
-cannot mean two things on any tier) and moycore's host half -- input snapshot
-in, audio queue out, pmem persisted at the #66 boundaries."""
+cannot mean two things on any tier) and moycore's glue -- the run's buffers
+and asset texts handed to the C, the run handed to the kernel's Player
+(native/moy_play), which takes its frame, pmem persisted at the #66
+boundaries. The host runs the same file over runtime/moycore.py."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

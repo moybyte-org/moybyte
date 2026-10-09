@@ -131,7 +131,7 @@ def test_every_snapshot_filler_sources_the_order_from_lua_ext():
     plumbing, because a future copy would pass those tests on the day it was
     written and diverge later, which is precisely what happened.
     """
-    for rel in ("runtime/lua_host.py",
+    for rel in ("runtime/wasm_host.py",
                 "device/"
                 "moycore_glue.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")

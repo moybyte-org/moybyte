@@ -214,8 +214,8 @@ def test_a_crash_in_another_script_opens_that_script_on_that_line(tmp_path):
     """The whole point, end to end on the real Player: a cart whose generated
     half raises lands the kid IN the generated half, on the line, not on
     main.lua's line N -- which is somebody else's line N."""
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
     d = _write_cart(
@@ -244,8 +244,8 @@ def test_a_crash_in_another_script_opens_that_script_on_that_line(tmp_path):
 def test_a_crash_marker_never_lands_on_the_wrong_file(tmp_path):
     """Switching away from the crashed file must not carry its red line onto
     another file's line N."""
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
     d = _write_cart(
@@ -416,8 +416,8 @@ def test_a_script_added_here_actually_runs(tmp_path):
     """The claim the door rests on: the new file is a real chunk of the cart,
     so a global it defines is reachable from main. If `sources` had not been
     rewritten, this would fail as a nil call at the first tick."""
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
     d = _write_cart(tmp_path / "carts", "grow.moy",

@@ -324,3 +324,93 @@ class Files:
 def files_live():
     """The bytes the C store holds now: 0 once every session closed."""
     return _files_lib().moy_store_host_live()
+
+
+# -- the Player (native/moy_play/moy_play.h), name for name with modmoy_play.c --
+#
+# In the host's Lua library (runtime/lua_binding.py), beside moycore_lua.c, as
+# on a board: a run's frame is the Lua run's. The handle is an int; a bad one
+# is RuntimeError("moy_play: ..."), as the module raises.
+
+QUIT, VIEW = 1, 2
+END_HOLD, END_QUIT, END_MENU, END_CRASH, END_LINK, END_SERIAL = range(6)
+_WHAT = ("ok", "stale run", "full", "no memory", "no such cart",
+         "runtime not in this image", "newer", "does not fit", "raised", "ended",
+         "needs the VM")
+_WHY = ("free", "broken", "runtime", "absent", "type", "permission")
+
+
+def _play():
+    try:
+        from . import lua_binding
+    except ImportError:
+        import lua_binding                  # type: ignore[no-redef]
+    d = lua_binding.play_lib()
+    if d is None:
+        raise RuntimeError("moy_play: no host Player (a C compiler builds it)")
+    return d, lua_binding
+
+
+def _rc(rc):
+    if rc != 0:
+        raise RuntimeError("moy_play: %s" % (_WHAT[rc] if 0 <= rc < len(_WHAT) else "?"))
+
+
+def launch(path, paced):
+    d, _ = _play()
+    run = _U32(0)
+    _rc(d.hl_play_launch(str(path).encode(), 1 if paced else 0, ctypes.byref(run)))
+    return run.value
+
+
+def bind(run, inp, audio, tick):
+    """The run's input table (an InputTable: its C table), its audio
+    session's handle and the Tick a paced run notes into (None: unpaced)."""
+    d, _ = _play()
+    t = getattr(inp, "_t", None)
+    if not t:
+        raise TypeError("bind: not an input table")
+    tp = None if tick is None else ctypes.cast(ctypes.byref(tick._t), ctypes.c_void_p)
+    _rc(d.hl_play_bind(int(run), t, int(audio or 0), tp))
+    _BOUND[:] = [inp, tick]
+
+
+_BOUND = []
+
+
+def open(run):  # noqa: A001 -- the module's verb
+    d, _ = _play()
+    _rc(d.hl_play_open(int(run)))
+
+
+def frame(run, ticks, dt, render, x, y, touch):
+    d, lb = _play()
+    out = _U32(0)
+    rc = d.hl_play_frame(int(run), int(ticks), float(dt), 1 if render else 0,
+                         int(x), int(y), int(touch), ctypes.byref(out))
+    if rc == 8:                             # MOY_PLAY_RAISED: the cart's own text
+        i = lb.PlayInfo()
+        d.hl_play_info(int(run), ctypes.byref(i))
+        raise RuntimeError(i.error.decode("utf-8", "replace"))
+    _rc(rc)
+    return out.value
+
+
+def end(run, why=END_QUIT):
+    d, _ = _play()
+    d.hl_play_end(int(run), int(why))
+    del _BOUND[:]
+
+
+def info(run=None):
+    """(runtime, vm_free, why, frames, ticks, upcalls, ended, error, stack_open,
+    stack_frame), or None for a handle that names no run."""
+    d, lb = _play()
+    i = lb.PlayInfo()
+    if d.hl_play_info(d.hl_play_last() if run is None else int(run), ctypes.byref(i)) != 0:
+        return None
+    st = (None if i.stack_open == 0xFFFFFFFF else i.stack_open,
+          None if i.stack_frame == 0xFFFFFFFF else i.stack_frame)
+    return (i.runtime.decode(), bool(i.vm_free), _WHY[i.why] if i.why < len(_WHY) else "?",
+            i.frames, i.ticks, tuple(i.upcalls), bool(i.ended),
+            i.error.decode("utf-8", "replace") if i.raised else None) + st

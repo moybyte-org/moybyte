@@ -297,6 +297,20 @@ static mp_obj_t mod_image_put(mp_obj_t name_obj, mp_obj_t text_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_image_put_obj, mod_image_put);
 
+// scene_put(name, text) -- a scene's .moyscene text for the run's scene verbs
+// (moycore_scene.h): the scenes are parsed and drawn in C, so no scene row
+// crosses into Python. Before the load, in the cart's scene order.
+static mp_obj_t mod_scene_put(mp_obj_t name_obj, mp_obj_t text_obj)
+{
+    size_t n = 0;
+    const char *text = mp_obj_str_get_data(text_obj, &n);
+    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: no run"));
+    if (moycore_lua_scene_put(mp_obj_str_get_str(name_obj), text, n) != 0)
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moycore: scene_put"));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_scene_put_obj, mod_scene_put);
+
 // layer_bind(buf, w, h) -- park a cart layer's RGB565 buffer for the prelude's
 // make_layer, which builds its canvas next (moycore_layers.h). Called from the
 // __layer_new trampoline, so the VM is mid-call: this touches no Lua state.
@@ -2378,6 +2392,20 @@ static mp_obj_t mod_close(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
 
+// get_global_len(name) -- a table global's length (Lua's #t), or None: the
+// size of a cart's world, the cheapest true thing to ask about a table.
+static mp_obj_t mod_get_global_len(mp_obj_t name_obj)
+{
+    if (!RUN.L) return mp_const_none;
+    lua_getglobal(RUN.L, mp_obj_str_get_str(name_obj));
+    mp_obj_t out = mp_const_none;
+    if (lua_type(RUN.L, -1) == LUA_TTABLE)
+        out = mp_obj_new_int((mp_int_t)lua_rawlen(RUN.L, -1));
+    lua_pop(RUN.L, 1);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_len_obj, mod_get_global_len);
+
 // get_global(name) -- read a cart global. The parity suites compare a Lua
 // cart's state against its Python twin's, which needs a way in; libmoy's
 // binding owns the VM but not the host's curiosity about it.
@@ -2655,6 +2683,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_image_put),   MP_ROM_PTR(&mod_image_put_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scene_put),   MP_ROM_PTR(&mod_scene_put_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_restore), MP_ROM_PTR(&mod_layer_restore_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_gc),          MP_ROM_PTR(&mod_gc_obj) },
@@ -2667,6 +2696,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
 #endif
     { MP_ROM_QSTR(MP_QSTR_pool_check), MP_ROM_PTR(&mod_pool_check_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_global_len), MP_ROM_PTR(&mod_get_global_len_obj) },
     { MP_ROM_QSTR(MP_QSTR_view),        MP_ROM_PTR(&mod_view_obj) },
     // The snapshot layout, exported so the Python side cannot drift from it.
     { MP_ROM_QSTR(MP_QSTR_SNAP_LEN),    MP_ROM_INT(SNAP_LEN) },

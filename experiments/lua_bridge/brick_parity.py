@@ -15,8 +15,8 @@ after EVERY frame compares
     the map is game state and a one-cell divergence in what a bullet crumbled
     would otherwise hide until it changed a collision.
 
-THE LUA SIDE IS THE SHIPPED VM. main.lua runs under runtime/lua_host's
-MoycoreHostRun -- libmoy's binding over the vendored Lua 5.4 both boards
+THE LUA SIDE IS THE SHIPPED VM. main.lua runs under device/moycore_glue.py's
+MoycoreRun -- libmoy's binding over the vendored Lua 5.4 both boards
 compile, LUA_32BITS and all -- and the fake API reaches it the way the console's
 does: the namespace is registered on top of libmoy's table, and this harness's
 prelude rides the namespace's `_moy_prelude` hook. mget/mset and btn/btnp are
@@ -83,7 +83,7 @@ if _ROOT not in sys.path:
 
 from runtime import palette                      # noqa: E402
 from runtime.editors_sheet import TileMap         # noqa: E402
-from runtime.lua_host import MoycoreHostRun       # noqa: E402
+from parity_wire import lua_run       # noqa: E402
 from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
                          check_prng_twins, ENC_LUA, FakeWs, FLOAT_TOL)
 
@@ -314,7 +314,7 @@ class PyCart:
 
 # --- Lua side ------------------------------------------------------------------
 
-# The harness prelude, run by MoycoreHostRun AFTER libmoy's table and the
+# The harness prelude, run by the glue's MoycoreRun AFTER libmoy's table and the
 # shared handle prelude, BEFORE the cart: the recording shadows of the draw
 # verbs (each with the defaults the Python fake applies, so a call the cart
 # makes with fewer arguments records the same tuple on both sides), the PRNG,
@@ -366,7 +366,7 @@ def _cfg_lua(config):
 
 
 class LuaCart:
-    """Run main.lua under MoycoreHostRun with the same fake API."""
+    """Run main.lua under the glue's MoycoreRun with the same fake API."""
 
     def __init__(self, console):
         self.console = console
@@ -385,7 +385,7 @@ class LuaCart:
                               + "__SEED = %d\n" % SEED + PRELUDE)
         with open(os.path.join(LUA_CART_DIR, "main.lua")) as fh:
             src = fh.read()
-        self.run = MoycoreHostRun(FakeWs(self.console, self.console.tilemap),
+        self.run = lua_run(FakeWs(self.console, self.console.tilemap),
                                   ns, src)
 
     def tick(self, dt):

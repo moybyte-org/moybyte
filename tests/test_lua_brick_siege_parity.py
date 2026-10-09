@@ -32,8 +32,8 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
 def _need_lua():
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
 

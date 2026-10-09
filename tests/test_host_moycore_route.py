@@ -14,7 +14,7 @@ pin that the route is taken, by asking the carts rather than the gate.
 
 import pytest
 
-from runtime import lua_host
+from runtime import lua_binding
 
 import canvas_probe as probe  # pixel-width-agnostic "it drew" probes
 
@@ -29,10 +29,10 @@ def test_a_superset_cart_is_not_routed_away_any_more():
     for src in ("function _draw() cls(1) spr(2, 8, 8) end",
                 "function _draw() draw_layer(l, 0, 0) end",
                 "if view ~= nil then view(128, 120) end"):
-        assert lua_host.moycore_supports(src) is True, src
+        assert lua_binding.HostLuaRun.available(), src
 
 
-@pytest.mark.skipif(not lua_host._moycore_available(),
+@pytest.mark.skipif(not lua_binding.HostLuaRun.available(),
                     reason="no C compiler for the host lua binding")
 def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
     """The net the route test above did not have: run the SHIPPED carts.
@@ -57,7 +57,7 @@ def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
                                if c["title"] == title)
         ws.open()                       # the real launch path, so the project
         assert ws.player.cart_error is None, title   # (and its sheet) is live
-        assert type(ws.player._lua).__name__ == "MoycoreHostRun", \
+        assert type(ws.player._lua).__name__ == "MoycoreRun", \
             "%s fell back off moycore" % title
         for _ in range(5):
             ws.frame(1 / 60)
@@ -65,7 +65,7 @@ def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
         ws._exit_to_caller()
 
 
-@pytest.mark.skipif(not lua_host._moycore_available(),
+@pytest.mark.skipif(not lua_binding.HostLuaRun.available(),
                     reason="no C compiler for the host lua binding")
 def test_a_cart_with_no_sheet_or_map_does_not_take_the_process_down():
     """A brand-new project draws NOTHING, and that has to be survivable.
@@ -79,7 +79,7 @@ def test_a_cart_with_no_sheet_or_map_does_not_take_the_process_down():
     every SHIPPED cart has a sheet and so proves nothing about this path.
     """
     from runtime.lua_binding import HostLuaRun
-    buf = bytearray(64 * 64)
+    buf = bytearray(64 * 64 * 2)
     run = HostLuaRun(buf, 64, 64)                    # no sheet, no map
     try:
         assert run.load([("function _update(dt) end\n"
@@ -95,7 +95,7 @@ def test_a_cart_with_no_sheet_or_map_does_not_take_the_process_down():
         run.close()
 
 
-@pytest.mark.skipif(not lua_host._moycore_available(),
+@pytest.mark.skipif(not lua_binding.HostLuaRun.available(),
                     reason="no C compiler for the host lua binding")
 def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     """End to end through build_workstation: the run object must BE the
@@ -110,7 +110,7 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
            "function _draw() cls(0) rect(0, 0, n * 3, 5, 8) end\n")
     run = ws.runtimes["lua"](ns, src)
     try:
-        assert isinstance(run, lua_host.MoycoreHostRun), \
+        assert type(run).__name__ == "MoycoreRun", \
             "the cart did not run on the boards' Lua"
         before = probe.painted_pixels(ws.canvas)
         run.update(1 / 30.0)

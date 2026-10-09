@@ -473,8 +473,7 @@ def _lua_cart_at(text, chunk="cart"):
 
 def _lua_cart_line(text, chunk="cart"):
     """Best-effort: the 1-based cart line inside a Lua error text (#67 Phase 5).
-    Both backends load the cart chunk as "@cart" (lua_host loadstring /
-    device_api moy_lua.exec), so a load or raise position renders `cart:12:`;
+    Every tier loads the cart chunk as "@cart" (moycore's load), so a load or raise position renders `cart:12:`;
     a plain-named chunk renders `[string "cart"]:12:` -- both parsed. The FIRST
     position in the text is the raise point (any traceback frames come after
     it), the deepest-frame rule the Python parser applies.
@@ -1200,11 +1199,14 @@ class Player:
         _st = getattr(_moy_play, "stack", None)
         self.stack_pre = _st() if _st is not None else None
         if _rt != "python":
+            run = self._launch_play(cart)
             ok = self._start_runtime(_rt, ns, src, t0, h0,
                                      (t_reclaim, t_audio, t_api))
             if ok:
                 self._arm_pacing(cart)
-                self._bind_play(cart)
+                self._bind_play(run)
+            elif run:
+                _moy_play.end(run, _moy_play.END_CRASH)
             return ok
         code, t_compile_native, _ckey, _csig = self._compile_python(project, src, ns)
         try:
@@ -1633,18 +1635,39 @@ class Player:
         self._tick_edges = getattr(inp, "tick_edges", None)
         self._keep_edges = getattr(inp, "keep_edges", None)
 
-    def _bind_play(self, cart):
-        """Give a runtime cart's frame to the kernel's Player (native/moy_play)
-        when its run offers it (`play_begin`): every tick of a frame then runs
-        in C -- the press edges, the snapshot, the cart, its audio -- and
-        `_run_ticks` makes one call. A lockstep match keeps its own clock and
-        the Python seam until the match is the kernel's."""
+    def _launch_play(self, cart):
+        """Launch a runtime cart's run in the kernel's Player (native/moy_play)
+        BEFORE its runtime loads, so the load and _init are in the run's books
+        (its upcalls by class since the launch): the run's handle, or 0 where
+        the image has no Player, the cart no folder, or a lockstep match keeps
+        its own clock and the Python seam."""
+        launch = getattr(_moy_play, "launch", None)
+        path = cart.get("path") if cart else None
+        if launch is None or not path or self._netplay is not None:
+            return 0
+        paced = not self._is_tool and cart.get("fps") != "free"
+        try:
+            return launch(path, paced)
+        except RuntimeError as exc:
+            print("PLAY launch:", exc)
+            return 0
+
+    def _bind_play(self, run):
+        """Give the launched run's frame to the kernel's Player when its
+        runtime offers it (`play_begin`): every tick of a frame then runs in C
+        -- the press edges, the snapshot, the cart, its audio -- and
+        `_run_ticks` makes one call. A runtime that offers it holds the run
+        and ends it at its close (its loans go with it), taken or not; one
+        that does not is ended here, and its frames tick through Python."""
         self._play = None
+        if not run:
+            return
         begin = getattr(self._lua, "play_begin", None)
-        if begin is None or self._netplay is not None:
+        if begin is None:
+            _moy_play.end(run)
             return
         try:
-            self._play = begin(cart.get("path"), self.sched, bool(self.tick_ms))
+            self._play = begin(run, self.sched if self.tick_ms else None)
         except Exception as exc:  # noqa: BLE001 -- the Python frame still runs it
             print("PLAY:", exc)
             self._play = None
@@ -1758,9 +1781,8 @@ class Player:
     def _start_runtime(self, runtime, ns, src, t0, h0, t_pre):
         """Start a cart on a runtime other than the console's Python: `"lua"`
         (#67) or `"wasm"` (docs/wasm_tier_plan_2026-09.md), through the factory
-        `ws.runtimes` maps it to -- runtime/lua_host.MoycoreHostRun or
-        runtime/wasm_host.WasmHostRun on the host, moycore_glue's runs on the
-        device. The cart gets the SAME make_api namespace a Python cart got
+        `ws.runtimes` maps it to -- moycore_glue's runs on every tier, and
+        runtime/wasm_host.WasmHostRun for a compiled cart on the host. The cart gets the SAME make_api namespace a Python cart got
         (a Lua factory registers those callables as the cart's globals; a wasm
         one reads its config and pmem from it), so permission gating, pmem,
         audio and quit() semantics are identical by construction. No
@@ -1957,7 +1979,7 @@ class Player:
                     if _fs is not None:
                         _sp = _fs()
                         if _sp is not None:
-                            # frame_split keeps its ms contract (lua_host twins it);
+                            # frame_split keeps its ms contract (the glue's);
                             # this side is us, so convert rather than widening it.
                             # The draw half is the last tick's; the rest of the
                             # bracket is every logic tick this frame ran.

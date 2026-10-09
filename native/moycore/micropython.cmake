@@ -26,6 +26,9 @@ target_include_directories(usermod_moycore INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx/libmoy
     ${CMAKE_CURRENT_LIST_DIR}/../moy_lua/lua
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_spine
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_store
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_glass
 )
 
 # MOY_PIXEL_RGB565 changes sizeof(moy_pixel) and therefore moy_canvas's layout,

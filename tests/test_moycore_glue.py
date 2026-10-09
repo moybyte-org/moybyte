@@ -179,9 +179,15 @@ class FakeMoycore(types.ModuleType):
                      "active", "view", "set_sram_floor", "alloc_stats",
                      "get_global", "wasm_open", "take_frames", "frame",
                      "frame_settle", "frame_presented", "frame_kept",
-                     "layer_bind"):
+                     "layer_bind", "scene_put", "image_put"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
+
+    def _image_put(self, name, text):
+        self._log("image_put", name, text)
+
+    def _scene_put(self, name, text):
+        self._log("scene_put", name, text)
 
     def _log(self, verb, *args):
         self.calls.append((verb,) + args)
@@ -542,7 +548,8 @@ class World:
     exercise the first one's board.
     """
 
-    NAMES = ("moycore", "ticks", "device_canvas", "lua_ext", "moy_wasm")
+    NAMES = ("moycore", "runtime.moycore", "ticks", "device_canvas", "lua_ext",
+             "moy_wasm")
 
     def __init__(self, moycore=True, flat_ticks=True, flat_lua_ext=True,
                  wire_fallback=b"\1" * 128, wasm_chip=None):
@@ -562,6 +569,7 @@ class World:
             sys.modules["moycore"] = self.core
         else:
             sys.modules["moycore"] = None      # PEP 328: raises ImportError
+            sys.modules["runtime.moycore"] = None   # ...and the host's binding
         if flat_ticks:
             tk = types.ModuleType("ticks")
             tk._since_ms = self.clock.since_ms
@@ -829,11 +837,11 @@ def test_a_moybyte_verb_nobody_remembered_is_registered_anyway(w):
     w.run(ns=ns)
     assert "brand_new_verb_2026" in w.core.registered
     assert w.core.registered["brand_new_verb_2026"] is ns["brand_new_verb_2026"]
-    for shared in ("draw_scene", "text"):
-        assert shared in w.core.registered
-    # ...and scene() is not one of them: it answers with a LIST of rows, so it
-    # rides the handle glue instead (#214).
+    assert "text" in w.core.registered
+    # ...and the placement verbs are not among them: they are the prelude's
+    # Lua over the run's C (#214, moycore_scene.h).
     assert "scene" not in w.core.registered
+    assert "draw_scene" not in w.core.registered
 
 
 def test_libmoys_own_verbs_are_never_shadowed_by_a_trampoline(w):
@@ -945,15 +953,38 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
 
     w.run()
     # Fields and a metamethod, not handles: a layer's id, canvas and edited
-    # mark, an image's id. And the two layer natives are the RUNTIME's own C
-    # (moycore_layers.h), installed by run_begin and hl_new, never registered.
+    # mark, an image's id. And the layer and scene natives are the RUNTIME's
+    # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
+    # hl_new, never registered.
     fields = {"__id", "__img", "__c", "__e", "__index"}
-    natives = {"__layer_canvas", "__layer_verb", "__layer_blit"}
+    natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
+               "__layer_new", "__layer_spr_img", "__image_handle",
+               "__scene_names", "__scene_rows", "__draw_scene"}
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
     gated = {n for n in wanted if n.startswith("__ed_")}
     assert gated, "the editor handles vanished from the prelude"
     got = {n for n in w.core.registered if n.startswith("__")}
     assert wanted - gated == got, "an UNGATED handle is missing"
+
+
+def test_the_scene_texts_go_to_the_run_in_order_before_the_prelude(w):
+    """The run parses and draws the scenes in C (moycore_scene.h), so the
+    texts -- the live Scenes object's, unsaved Editor placement included --
+    go over once, in the cart's order (the first is the default active one),
+    and the placement verbs are never trampolines."""
+    from runtime.widgets import Scenes
+
+    sc = Scenes({"one": "[]", "two": "[{}]"}, ["two", "one"])
+    sc.put("one", '[{"tag": "live"}]')
+    w.run(ns=make_ns(_moy_scenes=sc))
+    puts = [c for c in w.core.calls if c[0] == "scene_put"]
+    assert puts == [("scene_put", "two", "[{}]"),
+                    ("scene_put", "one", '[{"tag": "live"}]')]
+    verbs = w.core.verbs()
+    assert verbs.index("scene_put") < verbs.index("exec")
+    for name in ("scene", "load_scene", "actors", "touching", "move_actor",
+                 "move_actor_to", "remove_actor", "draw_scene"):
+        assert name not in w.core.registered, name
 
 
 def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
@@ -964,38 +995,16 @@ def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
     assert wanted <= {n for n in w.core.registered if n.startswith("__")}
 
 
-def test_a_layer_made_through_a_handle_is_pinned_by_the_run(w):
-    run = w.run()
-    reg = w.core.registered
-    # Every argument arrives as a Lua NUMBER -- the boards build LUA_32BITS and
-    # a tile index reaching the sheet as 7.0 is a TypeError, so the handle half
-    # is where the coercion has to happen.
-    lid = reg["__layer_new"](64.0, 32.0)
-    assert lid == 0
-    lay = run._layers[0]
-    assert (lay.w, lay.h) == (64, 32)
-    # Its pixels went to the run, which draws into them with libmoy's verbs.
-    assert ("layer_bind", 64, 32) in w.core.calls
-    # draw_layer is the run's own (moycore's __layer_blit): no handle for it.
-    assert "__draw_layer" not in reg
-    # By TYPE, not by value: `64.0 == 64`, so a comparison alone cannot see
-    # the coercion being dropped.
-    assert isinstance(lay.w, int) and isinstance(lay.h, int), (lay.w, lay.h)
-
-
-def test_an_image_handle_indexes_the_runs_own_registry(w):
-    run = w.run()
-    h = w.core.registered["__image_handle"]("bg")
-    assert h == 0 and run._images[0] == ("img", "bg")
-    lid = w.core.registered["__layer_new"](8, 8)
-    w.core.registered["__layer_spr_img"](float(lid), float(h), 1.0, 2.0)
-    assert ("layer.spr", run._layers[0], ("img", "bg"), 1, 2) in w.ns["_log"]
-
-
-def test_a_missing_image_answers_a_negative_handle_and_pins_nothing(w):
-    run = w.run()
-    assert w.core.registered["__image_handle"]("missing") == -1
-    assert run._images == []
+def test_the_paint_images_go_to_the_run_before_the_prelude(w):
+    """A layer's pixels and a paint image are the run's C (moycore_lua.c):
+    the .moyimg texts go over once, and no layer or image handle is a
+    trampoline."""
+    w.run(ns=make_ns(_moy_images={"bg": "text-of-bg"}))
+    assert ("image_put", "bg", "text-of-bg") in w.core.calls
+    verbs = w.core.verbs()
+    assert verbs.index("image_put") < verbs.index("exec")
+    for name in ("__layer_new", "__layer_spr_img", "__image_handle"):
+        assert name not in w.core.registered, name
 
 
 # -- a bad verb must not strand the VM -----------------------------------------
@@ -1588,15 +1597,13 @@ def test_closing_persists_pmem_and_then_closes_the_vm(w):
     assert len(pmem.written) == 256
 
 
-def test_closing_drops_the_handle_registries_that_pin_the_layers(w):
-    """They are what PIN the run's layers and images, and a layer is a
-    full-canvas allocation."""
-    run = w.run()
-    w.core.registered["__layer_new"](320, 240)
-    w.core.registered["__image_handle"]("bg")
-    assert run._layers and run._images
+def test_closing_drops_the_registry_that_pins_the_editors(w):
+    run = w.run(ns=make_ns(open_editor=lambda name=None, mode=None: object()))
+    assert run._pins == []
+    w.core.registered["__ed_open"]("notes", "")
+    assert len(run._pins) == 1
     run.close()
-    assert run._layers is None and run._images is None
+    assert run._pins is None
 
 
 def test_closing_a_run_whose_module_went_away_is_still_a_clean_exit(w):
@@ -1609,7 +1616,7 @@ def test_closing_a_run_whose_module_went_away_is_still_a_clean_exit(w):
     assert run.flush_pmem() is False
     run.close()
     assert w.core.closes == 0
-    assert run._layers is None
+    assert run._pins is None
 
 
 def test_a_failing_pmem_write_still_closes_the_vm(w):

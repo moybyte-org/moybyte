@@ -2,102 +2,287 @@
  * which hides them. Must precede every include. */
 #define _POSIX_C_SOURCE 200809L
 
-/* The host's libmoy LUA shim (moycore plan rung 4).
+/* The host's Lua run and the kernel's Player, by ctypes
+ * (runtime/lua_binding.py; docs/kernel_cartpath_2026-10.md §1).
  *
- * The host sim used to run Lua carts through lupa -- a second Lua embedding
- * with second semantics (64-bit doubles where both boards build LUA_32BITS) --
- * until this shim replaced it (lupa deleted 2026-08-14). CPython gets the
- * SAME program the boards run: libmoy's binding of the spec verb table, over
- * the same vendored Lua, built the same way.
+ * CPython gets the program the boards run, not a twin of it: the cart's VM is
+ * native/moycore/moycore_lua.c over moycore_run.c's console -- the allocator,
+ * the layers and paint images in C, the scenes (moycore_scene.h), the native
+ * superset -- and its frames are native/moy_play/moy_play.c's: the launch
+ * from the cart's catalogue entry, the snapshot from the input table, the
+ * audio into the run's session, the upcall books. What differs from a board is
+ * only how the host talks to it: plain C signatures ctypes can call, buffers
+ * the caller owns, and these seams:
  *
- * The console and its snapshot-in/queue-out host callbacks are
- * native/moycore/moycore_run.c's -- the one copy the boards' modmoycore.c
- * and the wasm shim (moyhost_wasm.c) run too, because a host and a device
- * that disagree about what a verb does is the disease. What
- * differs from the board is only how the host talks to it: plain C
- * signatures ctypes can call, and buffers the caller owns.
+ *   - the kernel's stateful modules are the host's OTHER ctypes libraries
+ *     (runtime/moy_loop.py's upcall counters, runtime/moy_input.py's input
+ *     tables, runtime/audio_binding.py's sessions), so the Player's calls
+ *     forward to the function pointers hl_kernel hands over: one copy of each
+ *     state, the one the rest of the host reads. Unset, a counter counts
+ *     nothing and a session is STALE (silence);
+ *   - the glass has no shared state here: moy_glass_ready answers 0, and a
+ *     run's pixels are plain allocations, as on a board with no owner;
+ *   - a paint image decodes through the Python codec (runtime/moyimg.py,
+ *     the reference moy_img.c is pinned to), handed over as hl_img_decoder:
+ *     the C inflater's sources live in the desktop MicroPython's tree, which a
+ *     plain host has not got;
+ *   - register()'s verbs call back into Python through one dispatch, and each
+ *     call is counted APP, as modmoycore.c's trampoline counts it.
  *
- * THE PIXEL FORMAT IS RGB565, as it is on both boards (moycore's micropython.mk
- * sets the same -DMOY_PIXEL_RGB565=1). A libmoy built for indices computes
- * y*w+x over ONE byte per pixel; the same source built for direct colour
- * computes it over two, and the two cannot share a library -- so a shim that
- * was compiled the other way would write half-width rows of raw indices into a
- * 565 framebuffer and there is nothing at runtime that would say so. The #error
- * below is that check, moved to compile time.
- *
- * A canvas that is STILL INDEXED is bridged rather than refused (`indexed=1`):
- * libmoy draws into a private 565 shadow whose wire table is the IDENTITY, so a
- * "colour word" is literally the palette index, and the two buffers differ only
- * in width -- widen in, narrow out, per frame, losslessly. That exists for the
- * host's transition to the boards' canvas class (#161) and nothing else: when
- * `runtime/host_app.py` hands over a DeviceCanvas, delete the bridge and the
- * `indexed` argument with it.
+ * ONE RUN AT A TIME, as on a board: moycore_RUN is it. A new hl_new closes the
+ * run before it, and every call through a handle that is not the live one is
+ * refused.
  */
 
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "lua.h"
 #include "lauxlib.h"
 
 #include "moy.h"
 #include "moycore_run.h"
+#include "moycore_lua.h"
+#include "moycore_layers.h"
+#include "moy_gfx_kernels.h"     /* the layer restore draw_layer takes */
+#include "moy_play.h"
+#include "moy_loop.h"
+#include "moy_input.h"
+#include "moy_aud.h"
+#include "moy_buf.h"
+#include "moy_img.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
 #endif
-#include "moycore_layers.h"
-#include "moycore_superset.h"
-#include "moy_gfx_kernels.h"     /* the layer restore draw_layer takes */
+
+/* -- the kernel's modules, forwarded ------------------------------------------ */
+
+enum {
+    HK_COUNT = 0, HK_UPCALLS, HK_MASKS, HK_PLAYERS, HK_LAST_KEY, HK_TICK_EDGES,
+    HK_SFX, HK_BEEP, HK_MUSIC, HK_MUSIC_STOP, HK_STOP, HK_LEVEL, HK_N,
+};
+static void *K[HK_N];
+
+/* Hand over one of the host libraries' functions (NULL: unset). */
+void hl_kernel(int which, void *fn)
+{
+    if (which >= 0 && which < HK_N) K[which] = fn;
+}
+
+void moy_loop_count(int cls)
+{
+    if (K[HK_COUNT]) ((void (*)(int))K[HK_COUNT])(cls);
+}
+
+void moy_loop_upcalls(uint32_t frame[MOY_UPC_CLASSES], uint32_t total[MOY_UPC_CLASSES])
+{
+    if (K[HK_UPCALLS]) {
+        ((void (*)(uint32_t *, uint32_t *))K[HK_UPCALLS])(frame, total);
+        return;
+    }
+    memset(frame, 0, MOY_UPC_CLASSES * sizeof(uint32_t));
+    memset(total, 0, MOY_UPC_CLASSES * sizeof(uint32_t));
+}
+
+void *moy_loop_alloc(size_t n)
+{
+    return calloc(1, n);
+}
+
+void moy_input_masks(const moy_input_t *t, uint8_t player, uint32_t *held, uint32_t *pressed)
+{
+    *held = *pressed = 0;
+    if (K[HK_MASKS])
+        ((void (*)(const moy_input_t *, uint8_t, uint32_t *, uint32_t *))K[HK_MASKS])(
+            t, player, held, pressed);
+}
+
+uint8_t moy_input_players(const moy_input_t *t, uint8_t *out)
+{
+    return K[HK_PLAYERS] ? ((uint8_t (*)(const moy_input_t *, uint8_t *))K[HK_PLAYERS])(t, out)
+                         : 1;
+}
+
+int32_t moy_input_last_key(const moy_input_t *t)
+{
+    return K[HK_LAST_KEY] ? ((int32_t (*)(const moy_input_t *))K[HK_LAST_KEY])(t) : 0;
+}
+
+void moy_input_tick_edges(moy_input_t *t)
+{
+    if (K[HK_TICK_EDGES]) ((void (*)(moy_input_t *))K[HK_TICK_EDGES])(t);
+}
+
+#define AUD(i, T, ...) (K[i] ? ((T)K[i])(__VA_ARGS__) : MOY_AUD_STALE)
+int moy_aud_sfx(uint32_t s, int n, int chan)
+{ return AUD(HK_SFX, int (*)(uint32_t, int, int), s, n, chan); }
+int moy_aud_beep(uint32_t s, float f, float d)
+{ return AUD(HK_BEEP, int (*)(uint32_t, float, float), s, f, d); }
+int moy_aud_music(uint32_t s, int track, int loop)
+{ return AUD(HK_MUSIC, int (*)(uint32_t, int, int), s, track, loop); }
+int moy_aud_music_stop(uint32_t s)
+{ return AUD(HK_MUSIC_STOP, int (*)(uint32_t), s); }
+int moy_aud_stop(uint32_t s, int chan)
+{ return AUD(HK_STOP, int (*)(uint32_t, int), s, chan); }
+int moy_aud_level(uint32_t s, int level)
+{ return AUD(HK_LEVEL, int (*)(uint32_t, int), s, level); }
+
+/* The glass: none shared on the host (the header says why). */
+int moy_glass_ready(void) { return 0; }
+int moy_owner_new(uint32_t *h, const char *tag, uint8_t cls)
+{ (void)tag; (void)cls; *h = 0; return MOY_GLASS_STALE; }
+int moy_owner_end(uint32_t h) { (void)h; return MOY_GLASS_STALE; }
+int moy_buf_new(uint32_t *h, size_t n, uint8_t role, uint32_t owner)
+{ (void)n; (void)role; (void)owner; *h = 0; return MOY_GLASS_STALE; }
+int moy_buf_get(uint32_t h, moy_buf_row_t **row) { (void)h; *row = NULL; return MOY_GLASS_STALE; }
+int moy_buf_release(uint32_t h) { (void)h; return MOY_GLASS_STALE; }
+
+/* -- the paint images' codec, Python's ------------------------------------------ */
+
+/* decode(text, n, pix, cap, &w, &h): 0 with the size (and, when `pix` is not
+ * NULL, the indices), -1 for no picture, -2 for a buffer too small. */
+typedef int (*hl_img_fn)(const char *text, size_t n, uint8_t *pix, size_t cap,
+                         uint32_t *w, uint32_t *h);
+static hl_img_fn IMG;
+
+void hl_img_decoder(hl_img_fn fn) { IMG = fn; }
+
+size_t moy_img_work_size(void) { return 1; }
+
+int moy_img_head(const char *text, size_t n, uint32_t *w, uint32_t *h)
+{
+    return IMG && IMG(text, n, NULL, 0, w, h) == 0 ? MOY_IMG_OK : MOY_IMG_NOT;
+}
+
+int moy_img_decode(const char *text, size_t n, uint8_t *pix, size_t cap,
+                   uint32_t *w, uint32_t *h, void *work)
+{
+    (void)work;
+    if (!IMG) return MOY_IMG_NOT;
+    int rc = IMG(text, n, pix, cap, w, h);
+    return rc == 0 ? MOY_IMG_OK : rc == -2 ? MOY_IMG_ROOM : MOY_IMG_NOT;
+}
+
+/* -- the binding's half of moycore (modmoycore.c's, on a board) --------------- */
+
+static void hk_load(lua_State *L) { (void)L; }
+static void hk_frame(uint32_t *s) { (void)s; }
+static void hk_frame_end(int drew, uint32_t *s) { (void)drew; (void)s; }
+const moycore_lua_hooks_t moycore_lua_hooks = {
+    hk_load, hk_load, hk_frame, hk_frame, hk_frame_end,
+};
+
+/* A compiled cart's frame, where the library has WAMR (moyhost_wasm.c). */
+int (*hl_wasm_tick)(float dt, int draw, char *err, size_t n);
+
+int moycore_frame(float dt, int draw, char *err, size_t n)
+{
+    moy_reset_state(&moycore_RUN.c.canvas);
+    moycore_run_tick_begin();
+    if (!moycore_RUN.L)
+        return hl_wasm_tick ? hl_wasm_tick(dt, draw, err, n) : 0;
+    return moycore_lua_tick(dt, draw, err, n);
+}
+
+/* -- the run ------------------------------------------------------------------- */
 
 typedef struct {
-    moycore_run_t  hc;          /* the console, shared with moyhost_wasm.c */
-    lua_State  *L;
-    int         has_sheet, has_map;
-    moy_p8      p8;          /* the PICO-8 machine (libmoy moy_p8.c), opened
-                                at hl_load so it seeds from the assets */
-    uint8_t    *p8mem, *p8rom;
-    uint8_t    *idx;         /* the transitional INDEX buffer, or NULL when the
-                                caller's canvas is already RGB565 */
-    moy_pixel  *shadow;      /* the 565 buffer libmoy draws into when it is */
-    int         npix;
-    moycore_layers layers;   /* the cart's layers' canvases, the boards' body */
+    uint32_t gen;               /* this handle's run; the live one is G_GEN */
 } host_lua;
 
-static host_lua *CUR;        /* the run hl_tramp and hl_set_dispatch serve */
+static uint32_t G_GEN;
+static host_lua *G_LIVE;
+static uint8_t *G_P8MEM, *G_P8ROM;
 
-/* -- extension verbs -------------------------------------------------------
+#define RUN moycore_RUN
+#define LIVE(r) ((r) != NULL && (r) == G_LIVE)
+
+static void close_live(void)
+{
+    if (G_LIVE == NULL) return;
+    moycore_lua_close();
+    if (RUN.layers.blit_state)
+        mg_lr_forget((mg_lrestore_t *)RUN.layers.blit_state, &mg_copy_none);
+    moycore_run_close(&RUN.c);
+    memset(&RUN, 0, sizeof(RUN));
+    moycore_run_cur = NULL;
+    G_LIVE = NULL;
+}
+
+/* The run is one at a time across both runtimes: a run claims it, ending the
+ * live one first (a Lua run's close, or a compiled run's `release`). */
+static void (*G_RELEASE)(void);
+
+void hl_claim(void (*release)(void))
+{
+    void (*f)(void) = G_RELEASE;
+    close_live();
+    G_RELEASE = NULL;
+    if (f) f();
+    G_RELEASE = release;
+}
+
+/* The console over the caller's RGB565 framebuffer (`wire`: the 64-entry
+ * index -> panel word table, NULL for libmoy's canonical palette), its
+ * snapshot and audio queue. The VM opens at hl_open, once the sheet, map,
+ * flags and config are set: the p8 machine seeds from them as it opens.
+ * NULL for a buffer short of w x h pixels. */
+host_lua *hl_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
+                 int32_t *snap, int32_t *aq, int aq_cap)
+{
+    host_lua *r;
+    if (w <= 0 || h <= 0 || (long)w * (long)h > (long)(nbytes / (int)sizeof(moy_pixel)))
+        return NULL;
+    r = (host_lua *)calloc(1, sizeof(host_lua));
+    if (!r) return NULL;
+    hl_claim(NULL);
+    memset(&RUN, 0, sizeof(RUN));
+    moycore_lua_meters_reset();
+    moy_canvas_init(&RUN.c.canvas, (moy_pixel *)pix, w, h);
+    if (wire) moy_canvas_wire(&RUN.c.canvas, wire);
+    moycore_run_open(&RUN.c, snap, aq, aq_cap);
+    RUN.c.con.rng = (uint32_t)moycore_run_now_us() | 1u;
+    RUN.open = 1;
+    r->gen = ++G_GEN;
+    G_LIVE = r;
+    return r;
+}
+
+int hl_open(host_lua *r, char *err, int errlen)
+{
+    if (!LIVE(r)) return 1;
+    if (!G_P8MEM) G_P8MEM = (uint8_t *)malloc(MOY_P8_MEM);
+    if (!G_P8ROM) G_P8ROM = (uint8_t *)malloc(MOY_P8_ROM);
+    moycore_lua_p8_memory(G_P8MEM && G_P8ROM ? G_P8MEM : NULL, G_P8ROM);
+    return moycore_lua_open(err, errlen > 0 ? (size_t)errlen : 0) != 0;
+}
+
+/* The sheet, flags and map: moycore_run.h's, which says why each is checked
+ * or copied. Before hl_open. */
+void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
+{ if (LIVE(r)) moycore_run_set_sheet(&RUN.c, pix, nbytes > 0 ? (size_t)nbytes : 0); }
+
+void hl_set_flags(host_lua *r, const uint8_t *flags, int nbytes)
+{ if (LIVE(r)) moycore_run_set_flags(&RUN.c, flags, nbytes > 0 ? (size_t)nbytes : 0); }
+
+void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)
+{ if (LIVE(r)) moycore_run_set_map(&RUN.c, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
+
+void hl_set_cfg(host_lua *r, const char *blob, int len)
+{ if (LIVE(r)) moycore_run_set_cfg(&RUN.c, blob, len > 0 ? (size_t)len : 0); }
+
+/* Point the run at another buffer of the same size: a compositor that
+ * ping-pongs. */
+void hl_retarget(host_lua *r, void *pix)
+{ if (LIVE(r)) RUN.c.canvas.pix = (moy_pixel *)pix; }
+
+/* -- register()'s verbs: one dispatch back into Python ------------------------
  *
- * The superset (make_layer/draw_layer/image/view/background) is not libmoy's,
- * and is not reimplemented here either: it is registered on top of libmoy's
- * table as a trampoline back into Python. Same correction as the device glue
- * -- a cart needing a Python-backed verb needs one engine that can hold one,
- * not a second engine.
- *
- * The contract is what moycore's l_tramp already had, because a host and a
- * device that disagree about what an argument IS is the same disease as one
- * that disagree about what a verb does: up to eight arguments, each an
- * integer, a string, a boolean or nil, each WHERE THE CART PUT IT, and an
- * integer, a string, a boolean or nothing back. Objects still never cross --
- * layers, images and actors travel as int handles, which is what the prelude's
- * wrappers speak, and a whole scene crosses as one encoded string.
- *
- * It used to be an int vector plus "the first string", with a boolean landing
- * as 0 and every later string dropped: __actor_flag(id, "hidden", true) would
- * have arrived as ("hidden", id, 0). Nothing mixed the kinds until the
- * placement verbs did, which is why that survived this long; every existing
- * verb (all ints, or the lone string of image("bg")) sees what it always saw. */
-/* Arguments past eight are DROPPED, and a Python verb missing a parameter
- * raises, which hl_tramp reads as nil: the call simply does nothing. The
- * prelude's wrappers stay well inside it (the widest is __actor_set at five),
- * and a layer's drawing verbs do not come through here at all -- they are
- * libmoy's own, retargeted (moycore_layers.h). */
+ * Up to eight arguments, each an integer, a string, a boolean or nil, WHERE
+ * THE CART PUT IT, and an integer, a string, a boolean or nothing back:
+ * modmoycore.c's trampoline marshals the same kinds. Objects never cross. */
 #define HL_MAX_IARGS 8
-
-/* Argument i: HL_NUM takes iargs[i], HL_STR sargs[i], HL_BOOL iargs[i] != 0,
- * HL_NIL nothing. Result: 0 nothing, 1 the integer in *out, 2 the *out bytes
- * at *sout, 3 the boolean *out != 0. */
 #define HL_NUM  0
 #define HL_STR  1
 #define HL_BOOL 2
@@ -136,6 +321,7 @@ static int hl_tramp(lua_State *L)
         ic++;
     }
     if (CUR_DISPATCH == NULL) return 0;
+    moy_loop_count(MOY_UPC_APP);
     int out = 0;
     const char *sout = NULL;
     int has = CUR_DISPATCH(idx, ic, kinds, iargs, sargs, &out, &sout);
@@ -150,97 +336,43 @@ static int hl_tramp(lua_State *L)
 
 void hl_set_dispatch(host_lua *r, hl_dispatch_fn fn) { (void)r; CUR_DISPATCH = fn; }
 
-/* Register `name` as a Lua global calling back with `idx`. After hl_new and
- * BEFORE hl_load: a cart captures its globals into locals as it executes. */
+/* `name` as a Lua global calling back with `idx`. After hl_open and before
+ * hl_load: a cart captures its globals into locals as it executes. */
 void hl_register(host_lua *r, const char *name, int idx)
 {
-    lua_pushinteger(r->L, idx);
-    lua_pushcclosure(r->L, hl_tramp, 1);
-    lua_setglobal(r->L, name);
+    if (!LIVE(r) || !RUN.L) return;
+    lua_pushinteger(RUN.L, idx);
+    lua_pushcclosure(RUN.L, hl_tramp, 1);
+    lua_setglobal(RUN.L, name);
 }
 
-/* -- the indexed bridge (transitional; see the header note) ----------------
- *
- * With an identity wire table every word libmoy stores is `store[pal[i]]`,
- * i.e. the remapped INDEX -- the exact byte the indexed build would have
- * written, and the exact byte `runtime/canvas.py` holds. So the two buffers are
- * the same picture at two widths and the conversion is a widen and a narrow
- * with no palette in it: nothing can be lost, and no reverse lookup can pick
- * the wrong index when two palette entries share a colour. */
-static void hl_widen(host_lua *r)
-{
-    int i;
-    if (!r->idx) return;
-    for (i = 0; i < r->npix; i++) r->shadow[i] = r->idx[i];
-}
+/* A paint image's and a scene's text, for the run's C (moycore_lua.h). */
+int hl_image_put(host_lua *r, const char *name, const char *text, int n)
+{ return !LIVE(r) || n < 0 || moycore_lua_image_put(name, text, (size_t)n) != 0; }
 
-static void hl_narrow(host_lua *r)
-{
-    int i;
-    if (!r->idx) return;
-    /* & 63 for the same reason the indexed canvas masks: SPEC.md 2 has 64
-     * colours, so a wider word cannot be a legal index. */
-    for (i = 0; i < r->npix; i++) r->idx[i] = (uint8_t)(r->shadow[i] & 63);
-}
+int hl_scene_put(host_lua *r, const char *name, const char *text, int n)
+{ return !LIVE(r) || n < 0 || moycore_lua_scene_put(name, text, (size_t)n) != 0; }
 
-/* `nbytes` is the caller's buffer size, and it is CHECKED rather than trusted:
- * ctypes hands over a bare pointer, so a w/h that outruns the allocation is a
- * heap overwrite with no Python-side trace. NULL back is the answer, which the
- * binding turns into an ordinary exception.
- *
- * `wire` is the 64-entry index -> 16-bit word table (the boards pass their
- * canvas's, byte-swapped or not); NULL means libmoy's canonical RGB565 of the
- * SPEC.md 2.2 palette. Ignored when `indexed`, which owns its table. */
-host_lua *hl_new(void *pix, int nbytes, int w, int h, int indexed,
-                 const uint16_t *wire, int32_t *snap, int32_t *aq, int aq_cap)
-{
-    host_lua *r;
-    long npix = (long)w * (long)h;
-    int bpp = indexed ? 1 : (int)sizeof(moy_pixel);
-    if (w <= 0 || h <= 0 || npix > (long)(nbytes / bpp)) return NULL;
-    r = (host_lua *)calloc(1, sizeof(host_lua));
-    if (!r) return NULL;
-    r->npix = (int)npix;
-    if (indexed) {
-        int i;
-        uint16_t ident[MOY_PALETTE];
-        r->idx = (uint8_t *)pix;
-        r->shadow = (moy_pixel *)calloc((size_t)npix, sizeof(moy_pixel));
-        if (!r->shadow) { free(r); return NULL; }
-        moy_canvas_init(&r->hc.canvas, r->shadow, w, h);
-        for (i = 0; i < MOY_PALETTE; i++) ident[i] = (uint16_t)i;
-        moy_canvas_wire(&r->hc.canvas, ident);
-    } else {
-        moy_canvas_init(&r->hc.canvas, (moy_pixel *)pix, w, h);
-        if (wire) moy_canvas_wire(&r->hc.canvas, wire);
-    }
-    moycore_run_open(&r->hc, snap, aq, aq_cap);
-    r->L = luaL_newstate();
-    if (!r->L) { free(r->shadow); free(r); return NULL; }
-    CUR = r;
-    moycore_run_cur = &r->hc;
-    if (moy_lua_open(r->L, &r->hc.con) != 0) {
-        lua_close(r->L); free(r->shadow); free(r); CUR = NULL; moycore_run_cur = NULL; return NULL;
-    }
-    moycore_layers_open(r->L, &r->layers, &r->hc.con);
-    moycore_superset_open(r->L);
-    return r;
-}
-
-/* Park a cart layer's RGB565 buffer for the prelude's make_layer, which builds
- * its canvas next (native/moycore/moycore_layers.h). 0 on success; nonzero for
- * a buffer short of w x h pixels, and on the indexed bridge, whose one shadow
- * is the screen's. */
+/* Park a layer's buffer for the prelude's next __layer_canvas (a runtime
+ * whose layers are Python's). */
 int hl_layer_bind(host_lua *r, void *pix, int nbytes, int w, int h)
 {
-    if (r->idx || nbytes < 0) return 1;
-    return moycore_layers_park(&r->layers, pix, (size_t)nbytes, w, h);
+    if (!LIVE(r) || nbytes < 0) return 1;
+    return moycore_layers_park(&RUN.layers, pix, (size_t)nbytes, w, h);
+}
+
+/* Layer `i`'s pixels and size (moycore_lua_layer): 0, or 1 for none. */
+int hl_layer_pixels(host_lua *r, int i, void **pix, int *w, int *h)
+{
+    moy_pixel *p = NULL;
+    if (!LIVE(r) || moycore_lua_layer(i, &p, w, h) != 0) return 1;
+    *pix = p;
+    return 0;
 }
 
 /* draw_layer through the screen canvas's layer restore (its `_lrs`, the
  * kernels' mg_lr_* state), as the boards' does, over the host's engine, which
- * refuses: the copy is synchronous and a prediction a test kicked is taken by
- * the same rule. NULL is libmoy's plain copy. The run's free forgets it. */
+ * refuses: the copy is synchronous. NULL is libmoy's plain copy. */
 static void hl_blit(void *st, moy_canvas *dst, const moy_canvas *src,
                     int cam_x, int cam_y, int edited)
 {
@@ -252,178 +384,154 @@ static void hl_blit(void *st, moy_canvas *dst, const moy_canvas *src,
 
 void hl_layer_restore(host_lua *r, void *state)
 {
-    if (r->layers.blit_state) mg_lr_forget((mg_lrestore_t *)r->layers.blit_state, &mg_copy_none);
-    r->layers.blit = state && !r->idx ? hl_blit : NULL;
-    r->layers.blit_state = state && !r->idx ? state : NULL;
+    if (!LIVE(r)) return;
+    if (RUN.layers.blit_state)
+        mg_lr_forget((mg_lrestore_t *)RUN.layers.blit_state, &mg_copy_none);
+    RUN.layers.blit = state ? hl_blit : NULL;
+    RUN.layers.blit_state = state;
 }
 
-/* The sheet, flags and map: moycore_run.h's, which says why each is
- * checked or copied. Call hl_set_flags BEFORE hl_load, which is where the p8
- * machine copies the table into 0x3000. */
-void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
-{ moycore_run_set_sheet(&r->hc, pix, nbytes > 0 ? (size_t)nbytes : 0); }
-
-void hl_set_flags(host_lua *r, const uint8_t *flags, int nbytes)
-{ moycore_run_set_flags(&r->hc, flags, nbytes > 0 ? (size_t)nbytes : 0); }
-
-void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)
-{ moycore_run_set_map(&r->hc, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
-
-/* The cart's config.json as "key\0value\0" pairs (lua_binding.cfg_blob), so
- * `cfg("speed", 3)` answers here what it answers on a board. */
-void hl_set_cfg(host_lua *r, const char *blob, int len)
-{ moycore_run_set_cfg(&r->hc, blob, len > 0 ? (size_t)len : 0); }
-
-/* Point the run at another buffer of the SAME size -- a compositor that
- * ping-pongs. The bridged case swaps the index buffer and keeps the shadow,
- * which is the whole reason this is not a bare assignment any more. */
-void hl_retarget(host_lua *r, void *pix)
-{
-    if (r->idx) r->idx = (uint8_t *)pix;
-    else        r->hc.canvas.pix = (moy_pixel *)pix;
-}
-
-/* Run one chunk. 0 on success; the message lands in err. Text only ("t"):
- * a binary chunk is unverified bytecode, refused here exactly as moycore's
- * run_chunk refuses it on a board (native/moycore/modmoycore.c says why). */
+/* One chunk as TEXT (moycore_lua_exec). 0, or 1 with the message in err. */
 int hl_exec(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
-    CUR = r;
-    moycore_run_cur = &r->hc;
-    if (luaL_loadbufferx(r->L, src, (size_t)len, name, "t") != LUA_OK
-        || lua_pcall(r->L, 0, 0, 0) != LUA_OK) {
-        const char *m = lua_tostring(r->L, -1);
-        if (err && errlen > 0) { strncpy(err, m ? m : "load failed", errlen - 1); err[errlen - 1] = 0; }
+    if (!LIVE(r) || !RUN.L) {
+        if (err && errlen > 0) { strncpy(err, "no run", errlen - 1); err[errlen - 1] = 0; }
         return 1;
     }
-    return 0;
+    return moycore_lua_exec(src, (size_t)len, name, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
-/* Run the cart's chunks in order, then _init. 0 on success; the message lands
- * in err.
- *
- * A LIST, because SPEC.md 4 lets a cart be several scripts and the whole list
- * has to sit inside THIS call rather than be dribbled in through hl_exec. Two
- * things bracket the cart and both would be on the wrong side otherwise: the
- * p8 machine is opened below, and a shim chunk run before that resolves its
- * verbs to the slow Lua fallbacks instead of the C ones; and hl_widen covers
- * the chunks, which are allowed to draw.
- *
- * hl_exec stays for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
- * after hl_register and before any of this: moybyte's object-valued verbs
- * reach Lua as int-handle functions plus wrappers, because this dispatch
- * marshals ints and strings and a Layer is neither. */
+/* The cart's chunks in order, then _init (modmoycore.c's load). */
 int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,
             int n, char *err, int errlen)
 {
-    /* The PICO-8 machine: opened here rather than in hl_new because it seeds
-     * memory from the sheet and map, which hl_set_sheet/hl_set_map supply in
-     * between. Lazily allocated, freed with the run; no memory, no machine. */
-    if (!r->p8mem) r->p8mem = (uint8_t *)malloc(MOY_P8_MEM);
-    if (!r->p8rom) r->p8rom = (uint8_t *)malloc(MOY_P8_ROM);
-    if (r->p8mem) moy_p8_open(r->L, &r->hc.con, &r->p8, r->p8mem, r->p8rom);
-    int rc = 0, i;
-    /* The chunks and _init are all allowed to draw (a title screen a cart never
-     * repaints is the standing case), so they get the same bridge a frame gets
-     * -- and the same single exit, so a chunk that draws and then errors still
-     * lands what it drew. */
-    hl_widen(r);
-    for (i = 0; i < n; i++) {
-        rc = hl_exec(r, srcs[i], lens[i], names[i], err, errlen);
-        if (rc) break;
-    }
-    if (rc == 0) {
-        moycore_run_tick_begin();          /* _init may call time(), below */
-        rc = moy_lua_init(r->L, err, (size_t)errlen);
-    }
-    hl_narrow(r);
-    return rc;
+    if (!LIVE(r) || !RUN.L) return hl_exec(r, "", 0, "", err, errlen);
+    moycore_lua_load_begin();
+    for (int i = 0; i < n; i++)
+        if (hl_exec(r, srcs[i], lens[i], names[i], err, errlen)) return 1;
+    return moycore_lua_load_finish(err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
-/* `draw` 0 is a logic-only tick: the Player's scheduler (#217) skips _draw on
- * the ticks its divisor does not draw, which SPEC.md 5 sanctions. */
+/* One frame (moycore_frame); `draw` 0 is a logic-only tick. */
 int hl_tick(host_lua *r, float dt, int draw, char *err, int errlen)
 {
-    int rc;
-    CUR = r;
-    moycore_run_cur = &r->hc;
-    moycore_run_tick_begin();              /* h_time counts from here */
-    moy_reset_state(&r->hc.canvas);
-    hl_widen(r);
-    /* ONE exit, so a cart that draws and THEN errors still lands its pixels --
-     * the crash-to-code panel is drawn over the frame the cart died on. */
-    rc = moy_lua_update(r->L, dt, err, (size_t)errlen);
-    if (rc == 0 && draw) rc = moy_lua_draw(r->L, err, (size_t)errlen);
-    hl_narrow(r);
-    return rc;
+    if (!LIVE(r)) return hl_exec(r, "", 0, "", err, errlen);
+    return moycore_frame(dt, draw, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
 int hl_pmem_image(host_lua *r, int32_t *out, int n)
-{ return moycore_run_pmem_image(&r->hc, out, n); }
+{ return LIVE(r) ? moycore_run_pmem_image(&RUN.c, out, n) : 0; }
 
 void hl_pmem_load(host_lua *r, const int32_t *in, int n)
-{ moycore_run_pmem_load(&r->hc, in, n); }
+{ if (LIVE(r)) moycore_run_pmem_load(&RUN.c, in, n); }
 
-/* Read a cart global as a double; returns 0 when absent or not a number, 1
- * otherwise. Numbers only: the parity suites compare counters and positions,
- * and a richer marshalling here would be a second contract to keep. An
- * INTEGER goes through lua_tointeger: under LUA_32BITS lua_Number is a float,
- * so lua_tonumber on an integer above 2^24 would round it, and a double holds
- * every int32 exactly. */
+/* A cart global as a double: 1, or 0 when absent or not a number. An integer
+ * goes through lua_tointeger, which a double holds exactly. */
 int hl_get_global_num(host_lua *r, const char *name, double *out)
 {
-    lua_getglobal(r->L, name);
+    if (!LIVE(r) || !RUN.L) return 0;
+    lua_getglobal(RUN.L, name);
     int ok = 0;
-    if (lua_type(r->L, -1) == LUA_TNUMBER) {
-        if (lua_isinteger(r->L, -1)) *out = (double)lua_tointeger(r->L, -1);
-        else *out = (double)lua_tonumber(r->L, -1);
+    if (lua_type(RUN.L, -1) == LUA_TNUMBER) {
+        if (lua_isinteger(RUN.L, -1)) *out = (double)lua_tointeger(RUN.L, -1);
+        else *out = (double)lua_tonumber(RUN.L, -1);
         ok = 1;
     }
-    lua_pop(r->L, 1);
+    lua_pop(RUN.L, 1);
     return ok;
 }
 
-/* The length of a table global (Lua's #t), or -1 when it is not a table. The
- * parity suites assert on cart-world SIZES -- 120 petals, one player -- which
- * is the cheapest true thing to ask about a table without marshalling it. */
-int hl_get_global_len(host_lua *r, const char *name)
+/* A string global's bytes into `out` (at most cap): its length, or -1 when it
+ * is no string. */
+int hl_get_global_str(host_lua *r, const char *name, char *out, int cap)
 {
-    lua_getglobal(r->L, name);
+    if (!LIVE(r) || !RUN.L) return -1;
+    lua_getglobal(RUN.L, name);
     int n = -1;
-    if (lua_type(r->L, -1) == LUA_TTABLE) n = (int)lua_rawlen(r->L, -1);
-    lua_pop(r->L, 1);
+    if (lua_type(RUN.L, -1) == LUA_TSTRING) {
+        size_t len = 0;
+        const char *s = lua_tolstring(RUN.L, -1, &len);
+        n = (int)len;
+        if (out && cap > 0) memcpy(out, s, len < (size_t)cap ? len : (size_t)cap);
+    }
+    lua_pop(RUN.L, 1);
     return n;
 }
 
-/* The Lua heap in bytes -- what SPEC.md 1.1's "Cart heap" row budgets. Taken
- * after a full collect so it is live data rather than uncollected garbage:
- * the floor has to cover what a cart KEEPS, and a host may collect whenever. */
-int hl_heap_bytes(host_lua *r)
+/* The length of a table global (Lua's #t), or -1 when it is not a table. */
+int hl_get_global_len(host_lua *r, const char *name)
 {
-    lua_gc(r->L, LUA_GCCOLLECT, 0);
-    return lua_gc(r->L, LUA_GCCOUNT, 0) * 1024 + lua_gc(r->L, LUA_GCCOUNTB, 0);
+    if (!LIVE(r) || !RUN.L) return -1;
+    lua_getglobal(RUN.L, name);
+    int n = -1;
+    if (lua_type(RUN.L, -1) == LUA_TTABLE) n = (int)lua_rawlen(RUN.L, -1);
+    lua_pop(RUN.L, 1);
+    return n;
 }
 
-/* The same WITHOUT collecting: what the heap actually reaches mid-play, which
- * is the number that decides whether a host must reserve headroom. */
+/* The Lua heap in bytes after a full collect: what a cart KEEPS. */
+int hl_heap_bytes(host_lua *r)
+{
+    if (!LIVE(r) || !RUN.L) return 0;
+    lua_gc(RUN.L, LUA_GCCOLLECT, 0);
+    return lua_gc(RUN.L, LUA_GCCOUNT, 0) * 1024 + lua_gc(RUN.L, LUA_GCCOUNTB, 0);
+}
+
+/* The same without collecting: what the heap reaches mid-play. */
 int hl_heap_peak_bytes(host_lua *r)
 {
-    return lua_gc(r->L, LUA_GCCOUNT, 0) * 1024 + lua_gc(r->L, LUA_GCCOUNTB, 0);
+    if (!LIVE(r) || !RUN.L) return 0;
+    return lua_gc(RUN.L, LUA_GCCOUNT, 0) * 1024 + lua_gc(RUN.L, LUA_GCCOUNTB, 0);
 }
 
 /* What the cart last declared with view(), or 0 when it has not. */
 int hl_get_view(host_lua *r, int *w, int *h)
-{ return moycore_run_view(&r->hc, w, h); }
+{ return LIVE(r) ? moycore_run_view(&RUN.c, w, h) : 0; }
+
+/* The frame's two halves in microseconds. */
+void hl_split(uint32_t *update_us, uint32_t *draw_us)
+{ moycore_run_split(update_us, draw_us); }
 
 void hl_free(host_lua *r)
 {
-    if (r) { free(r->p8mem); free(r->p8rom); }
-    if (!r) return;
-    if (r->L) lua_close(r->L);
-    hl_layer_restore(r, NULL);
-    if (CUR == r) CUR = NULL;
-    moycore_run_close(&r->hc);
-    free(r->shadow);
+    if (r == NULL) return;
+    if (LIVE(r)) close_live();
     free(r);
 }
+
+/* -- the kernel's Player (moy_play.h) ------------------------------------------- */
+
+/* The map's rows the host has: Lua, a compiled cart's where WAMR built, and
+ * Python's. */
+void hl_play_rows(int wasm) { moy_play_rows(true, wasm != 0, true); }
+
+int hl_play_launch(const char *cart, int paced, uint32_t *run)
+{ return moy_play_launch(cart, NULL, paced ? MOY_PLAY_PACED : 0u, run); }
+
+int hl_play_bind(uint32_t run, moy_input_t *in, uint32_t audio, moy_tick_t *tick)
+{ return moy_play_bind(run, in, audio, tick); }
+
+int hl_play_open(uint32_t run) { return moy_play_open(run); }
+
+/* The run's ticks; the pointer the console published first. `out` gets
+ * MOY_PLAY_QUIT and MOY_PLAY_VIEW. */
+int hl_play_frame(uint32_t run, int ticks, float dt, int render, int x, int y, int touch,
+                  uint32_t *out)
+{
+    moy_play_in_t in = { x, y, touch };
+    int rc = moy_play_input(run, &in);
+    if (rc != MOY_PLAY_OK) {
+        *out = 0;
+        return rc;
+    }
+    return moy_play_frame(run, (uint8_t)ticks, dt, render != 0, out);
+}
+
+int hl_play_end(uint32_t run, int why) { return moy_play_end(run, why); }
+
+int hl_play_info(uint32_t run, moy_play_info_t *out) { return moy_play_info(run, out); }
+
+uint32_t hl_play_last(void) { return moy_play_last(); }
+
+size_t hl_play_info_size(void) { return sizeof(moy_play_info_t); }

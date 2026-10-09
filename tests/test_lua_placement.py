@@ -1,39 +1,43 @@
 """The placement API from a Lua cart (#214) -- the same calls, the same rows.
 
-`scene()` used to arrive as nil: every binding marshalled scalars, and a scene
-row is an object with `.tag`/`.tile`/`.x`/`.y`/`.flip`/`.flags`. So the whole
-`#85`/`#109` family -- scene / load_scene / actors / touching / move_actor /
-move_actor_to / remove_actor -- was Python-only in practice, against a document
-that promises every call is valid verbatim in both languages.
-
-It now rides `runtime/lua_ext.py`'s handle glue like the layer and image verbs
-before it: a whole scene crosses as ONE encoded string, the prelude decodes it
-into plain Lua tables, and `__id` is each row's handle back to its Actor.
+`scene`, `load_scene`, `actors`, `touching`, `move_actor`, `move_actor_to`,
+`remove_actor` and `draw_scene` are, for a Lua cart, the handles prelude's Lua
+(runtime/lua_ext.py) over the run's C (native/moycore/moycore_scene.h): the
+scene texts are handed to the run before the load, parsed in C into plain row
+tables, and the live world is those tables, drawn by C. Nothing crosses into
+Python.
 
 What each check is really watching for:
 
-  * the ROWS: every documented field reaches Lua with the value the Python row
-    has, including a tag with the separator character in it and a `flags` table.
-  * IDENTITY round-trips: move/remove/tag/flag reach the SAME Actor object the
-    Python side holds, which is the only thing that makes `draw_scene` -- the
-    one verb that reads the actors back Python-side -- draw what the cart did.
+  * the ROWS: every documented field reaches Lua with the value
+    widgets.Scenes' row has, including an awkward tag and a `flags` table.
+  * the WORLD follows widgets.SceneWorld's rules: copies of the active scene's
+    rows made at first use, a fresh snapshot each call, int() moves.
   * the SNAPSHOT contract: `actors(tag)` is a fresh sequence over shared rows,
     so a for-each may `remove_actor` mid-loop without skipping anyone.
-  * the EDGES: an empty scene, a missing scene, a missing name in `load_scene`,
-    and an actor removed twice.
-  * the TWINS agree: the Python cart and the Lua cart, both through the real
-    glue, leave the world identical after the same scripted frames.
+  * the EDGES: an empty scene, a missing scene, a missing name in
+    `load_scene`, an actor removed twice, and the 256-actor cap.
+  * the PIXELS: the C draw_scene paints what cart_api's Python draw_scene
+    paints, scale, rotation styles and say bubble included.
+  * the TWINS agree: the Python cart and the Lua cart leave the world
+    identical after the same scripted frames.
 
 Skipped without a C compiler, like the other host-lua suites.
 """
 
+import ast
 import contextlib
+import math
+import struct
 
 import pytest
 
-from runtime import lua_binding as lb
-from runtime.lua_ext import PRELUDE_HANDLES, install_handles
+from runtime import host_canvas, lua_binding as lb
+from runtime.editors_sheet import SpriteSheet
+from runtime.lua_ext import PRELUDE_HANDLES
 from runtime.widgets import Scenes
+
+host_canvas.install()
 
 pytestmark = pytest.mark.skipif(
     not lb.HostLuaRun.available(),
@@ -50,41 +54,72 @@ TWINS = ('[{"tag": "player", "tile": 1, "x": 0, "y": 0, "flip": 0},'
          ' {"tag": "coin", "tile": 2, "x": 10, "y": 5, "flip": 0},'
          ' {"tag": "coin", "tile": 2, "x": 30, "y": 15, "flip": 0},'
          ' {"tag": "coin", "tile": 2, "x": 60, "y": 30, "flip": 0}]')
-# A tag carrying BOTH characters the blob escapes. Nothing stops the Scene
-# editor's tag field holding a comma, and an unescaped one would silently shift
-# every field of every row after it.
-ODD = '[{"tag": "a,b\\\\c", "tile": 0, "x": 0, "y": 0, "flip": 0}]'
+# A tag carrying a comma, a backslash and a JSON escape, and rows Python's
+# parse turns into ints (a float, a bool) or drops (not an object).
+ODD = ('[{"tag": "a,b\\\\c\\u00e9", "tile": 2.9, "x": true, "y": -3.5,'
+       ' "flip": 0}, 7, "row", {"tile": 3}]')
+
+# Each frame draw_scene draws is recorded as a Python literal, read back with
+# ast.literal_eval: (tag, tile, x, y, flip, flags) per live actor.
+RECORD = r"""
+do
+  local draw = __draw_scene
+  local function lit(v)
+    if type(v) == "boolean" then return v and "True" or "False" end
+    if type(v) == "string" then return string.format("%q", v) end
+    return tostring(v)
+  end
+  function __lit_rows(rows)
+    local out = {}
+    for i = 1, #rows do
+      local r, fl = rows[i], {}
+      for k, v in pairs(r.flags) do fl[#fl + 1] = lit(k) .. ": " .. lit(v) end
+      out[i] = "(" .. lit(r.tag) .. ", " .. lit(r.tile) .. ", " .. lit(r.x) .. ", "
+               .. lit(r.y) .. ", " .. lit(r.flip) .. ", {" .. table.concat(fl, ", ") .. "})"
+    end
+    return "[" .. table.concat(out, ", ") .. "]"
+  end
+  DRAWN = {}
+  __draw_scene = function(rows)
+    DRAWN[#DRAWN + 1] = __lit_rows(rows)
+    return draw(rows)
+  end
+end
+"""
 
 
 class Run:
-    """One Lua cart over a real Scenes world, wired as the Player wires it."""
+    """One Lua cart over the run's C scenes, wired as the glue wires it."""
 
-    def __init__(self, blobs, names):
+    def __init__(self, blobs, names, canvas=None, sheet=None):
         self.scenes = Scenes(blobs, names)
-        self.world = self.scenes.world()
-        self.drawn = []
-        self.ns = {
-            "scene": self.scenes.scene,
-            "load_scene": self.scenes.load_scene,
-            "actors": self.world.actors,
-            "touching": self.world.touching,
-            "move_actor": self.world.move,
-            "move_actor_to": self.world.move_to,
-            "remove_actor": self.world.remove,
-            "draw_scene": self._draw_scene,
-        }
-        self.buf = bytearray(96 * 64 * 2)
-        self.run = lb.HostLuaRun(self.buf, 96, 64)
-        self.run.register("draw_scene", self.ns["draw_scene"])
-        install_handles(self.ns, self.run.register, self.run.layer_bind)
+        self.canvas = canvas or host_canvas.make_canvas(96, 64)
+        self.run = lb.HostLuaRun(self.canvas._buf, self.canvas.w, self.canvas.h,
+                                 sheet, wire=self.canvas._wire)
+        for name in self.scenes.names:
+            self.run.scene_put(name, self.scenes.raw(name))
+        assert self.run.exec(RECORD, "record") is None
         assert self.run.exec(PRELUDE_HANDLES, "prelude") is None
 
-    def _draw_scene(self):
-        self.drawn.append(self.state())
+    def text(self, expr):
+        """A Lua string expression's value."""
+        assert self.run.exec("local s = %s\n__T = {s:byte(1, -1)}" % expr,
+                             "probe") is None
+        n = self.run.get_global_len("__T")
+        out = []
+        for i in range(1, n + 1):
+            assert self.run.exec("__B = __T[%d]" % i, "probe") is None
+            out.append(self.run.get_global("__B"))
+        return bytes(out).decode("utf-8")
+
+    @property
+    def drawn(self):
+        n = self.run.get_global_len("DRAWN")
+        return [ast.literal_eval(self.text("DRAWN[%d]" % (i + 1)))
+                for i in range(n)]
 
     def state(self):
-        return [(a.tag, a.tile, a.x, a.y, a.flip, dict(a.flags))
-                for a in self.world.actors()]
+        return ast.literal_eval(self.text("__lit_rows(actors())"))
 
     def get(self, name):
         return self.run.get_global(name)
@@ -130,14 +165,15 @@ def test_a_scene_row_carries_every_documented_field():
         assert r.get("EMPTYFLAGS") == 1, "a row with no flags gets an empty table"
 
 
-def test_a_tag_holding_the_separator_survives_the_blob():
+def test_awkward_rows_parse_as_the_python_scenes_parse_them():
     with run_cart("""
-      local s = scene("odd")
-      OK = (s[1].tag == "a,b\\\\c") and 1 or 0
-      N = #s
+      ODD = scene("odd")
     """) as r:
-        assert r.get("N") == 1
-        assert r.get("OK") == 1, "the blob's escaping lost a comma or a backslash"
+        got = ast.literal_eval(r.text("__lit_rows(ODD)"))
+        py = [(a.tag, a.tile, a.x, a.y, a.flip, dict(a.flags))
+              for a in Scenes({"odd": ODD}, ["odd"]).scene()]
+        assert got == py
+        assert got[0][0] == "a,b\\c\u00e9"
 
 
 def test_scene_by_name_and_load_scene_move_the_active_one():
@@ -206,7 +242,7 @@ def test_touching_matches_the_python_rule():
       move_actor(p, 12, 0)
       APART = touching(p, near) and 1 or 0
     """) as r:
-        w = r.world
+        w = Scenes({"main": MAIN}, ["main"]).world()
         p = w.actors("player")[0]
         near, far = w.actors("coin")[0], w.actors("coin")[1]
         assert r.get("PAIR") == 1 and w.touching(p, near) is True
@@ -217,7 +253,7 @@ def test_touching_matches_the_python_rule():
         assert r.get("APART") == 0, "12px apart ends the 8x8 box overlap"
 
 
-def test_every_mutation_reaches_the_python_actor():
+def test_every_mutation_reaches_the_drawn_world():
     with run_cart("""
       local p = actors("player")[1]
       move_actor(p, -3, 4)
@@ -246,7 +282,7 @@ def test_every_mutation_reaches_the_python_actor():
         assert r.state() == [("coin", 2, 200, 8, 0, {})]
 
 
-def test_a_deleted_flag_is_deleted_python_side_too():
+def test_a_deleted_flag_is_gone_from_the_drawn_world():
     with run_cart("""
       local c = actors("coin")[1]
       c.flags.size = nil
@@ -352,3 +388,106 @@ def test_the_on_glass_fixture_cart_runs_under_the_real_player(tmp_path):
         ws.frame(1 / 30)
     assert ws.player.cart_error is None
     assert run.get_global("score") == 1
+
+
+def _sheet():
+    s = SpriteSheet(16, 32)
+    v = 0
+    for i in range(len(s.pix)):
+        v = (v * 1103515245 + 12345) & 0x7FFFFFFF
+        s.pix[i] = (v >> 16) & 15
+    return s
+
+
+# Every branch of cart_api's draw_scene: as placed, flipped, scaled, hidden by
+# a truthy flag and drawn past a falsy one, the three rotation styles at
+# several headings, and the say bubble cut to ten characters, above the actor
+# and, near the top edge, below it.
+LOOKS = ('['
+         '{"tag": "a", "tile": 3, "x": 2, "y": 30, "flip": 0},'
+         '{"tag": "a", "tile": 4, "x": 12, "y": 30, "flip": 1},'
+         '{"tag": "a", "tile": 5, "x": 22, "y": 30, "flip": 0, "flags": {"size": 200}},'
+         '{"tag": "a", "tile": 6, "x": 40, "y": 30, "flip": 0, "flags": {"size": 50}},'
+         '{"tag": "a", "tile": 7, "x": 50, "y": 30, "flip": 0, "flags": {"hidden": true}},'
+         '{"tag": "a", "tile": 8, "x": 60, "y": 30, "flip": 0, "flags": {"hidden": 0}},'
+         '{"tag": "a", "tile": 9, "x": 2, "y": 44, "flip": 0, "flags": {"dir": 90}},'
+         '{"tag": "a", "tile": 9, "x": 14, "y": 44, "flip": 0, "flags": {"dir": 135}},'
+         '{"tag": "a", "tile": 9, "x": 28, "y": 44, "flip": 0, "flags": {"dir": 180}},'
+         '{"tag": "a", "tile": 9, "x": 40, "y": 44, "flip": 0, "flags": {"dir": -30, "size": 200}},'
+         '{"tag": "a", "tile": 10, "x": 62, "y": 44, "flip": 0,'
+         ' "flags": {"dir": 270, "rot": "leftright"}},'
+         '{"tag": "a", "tile": 10, "x": 72, "y": 44, "flip": 1,'
+         ' "flags": {"dir": 270, "rot": "none"}},'
+         '{"tag": "a", "tile": 11, "x": 4, "y": 2, "flip": 0, "flags": {"say": "hello there!"}},'
+         '{"tag": "a", "tile": 11, "x": 60, "y": 16, "flip": 0, "flags": {"say": 42}}'
+         ']')
+
+
+def _f(x):
+    return struct.unpack("f", struct.pack("f", x))[0]
+
+
+def _rotate_f32(pix, w, h, deg, transparent):
+    """widgets.rotate_indices as the boards' MicroPython runs it: every float
+    single precision, which is what the C rotates in."""
+    a = _f(_f(deg) * _f(math.pi / 180))
+    ca, sa = _f(math.cos(a)), _f(math.sin(a))
+    ow = int(_f(_f(abs(_f(w * ca)) + abs(_f(h * sa))) + 0.5)) or 1
+    oh = int(_f(_f(abs(_f(w * sa)) + abs(_f(h * ca))) + 0.5)) or 1
+    out = [-1] * (ow * oh)
+    ocx, ocy = _f((ow - 1) * 0.5), _f((oh - 1) * 0.5)
+    icx, icy = _f((w - 1) * 0.5), _f((h - 1) * 0.5)
+    for oy in range(oh):
+        ry = _f(oy - ocy)
+        for ox in range(ow):
+            rx = _f(ox - ocx)
+            sx = _f(_f(_f(ca * rx) + _f(sa * ry)) + icx)
+            sy = _f(_f(_f(-sa * rx) + _f(ca * ry)) + icy)
+            ix, iy = int(_f(sx + 0.5)), int(_f(sy + 0.5))
+            if 0 <= ix < w and 0 <= iy < h:
+                out[oy * ow + ox] = pix[iy * w + ix]
+    return out, ow, oh
+
+
+@pytest.mark.parametrize("cam", [(0, 0), (3, -2)])
+def test_the_c_draw_scene_paints_what_the_python_one_paints(cam, monkeypatch):
+    from runtime import cart_api, widgets
+    from ws_helpers import StubInput
+
+    monkeypatch.setattr(widgets, "rotate_indices", _rotate_f32)
+
+    sheet = _sheet()
+    r = Run({"looks": LOOKS}, ["looks"], host_canvas.make_canvas(96, 64), sheet)
+    try:
+        err = r.run.load([("function _draw() cls(1) camera(%d, %d) draw_scene() end"
+                           % cam, "@cart")])
+        assert err is None, err
+        assert r.run.tick(1 / 30.0) is None
+        lua_px = bytes(r.canvas._buf)
+    finally:
+        r.run.close()
+    ref = host_canvas.make_canvas(96, 64)
+    ns = cart_api.make_api(ref, StubInput(), {}, sheet=sheet,
+                           scenes=Scenes({"looks": LOOKS}, ["looks"]))
+    ref.cls(1)
+    ref.camera(*cam)
+    ns["draw_scene"]()
+    ref.flush_batch()
+    py_px = bytes(ref._buf)
+    diff = [i // 2 for i in range(0, len(py_px), 2) if py_px[i:i + 2] != lua_px[i:i + 2]]
+    assert not diff, "%d pixels differ, first at %s" % (
+        len(diff), [(i % 96, i // 96) for i in diff[:6]])
+    assert len(set(lua_px[i:i + 2] for i in range(0, len(lua_px), 2))) > 4
+
+
+def test_a_run_holds_at_most_256_live_actors():
+    big = "[" + ",".join('{"tag": "t", "tile": 1, "x": %d, "y": 0}' % i
+                         for i in range(257)) + "]"
+    r = Run({"big": big}, ["big"])
+    try:
+        assert r.run.load([("N = #scene()", "@cart")]) is None
+        assert r.get("N") == 257, "the read-only rows have no cap"
+        err = r.run.exec("actors()", "probe")
+        assert err and "256" in err
+    finally:
+        r.run.close()

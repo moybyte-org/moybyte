@@ -27,13 +27,14 @@ ONE WRITER: the cart's session is the only thing that writes the folder, so
 what is written is read once when the session opens and kept, and `where`
 and `list` never touch the store after that.
 
-THE TIERS: the boards' and the browser's moycore call this on the
-MicroPython task (native/moycore/modmoycore.c, through moy_wasm_on_vm) and the
-host's binding through ctypes (runtime/wasm_binding.py). `gate(fn)` runs fn
-inside the store's session -- the T-Deck's SD gate. In the browser the VFS is
-memory and OPFS is the store of record: `keep` is the page's keeper
-(firmware/web_runner/carts_link.py's WebCartKeep), which a write and an erase
-hand to the worker to make durable there, as an install's files are.
+THE TIERS: a run's requests are native/moy_store/moy_files.c's on every
+tier -- the boards' and the browser's moycore on the MicroPython task
+(native/moycore/modmoycore.c, through moy_wasm_on_vm), the host's run by
+ctypes (runtime/moyhost_wasm.c). This module is the reference
+tests/test_moy_files.py holds that C to, rule for rule, and the store's half:
+`remove` and `cart_id`, which Get Carts' REMOVE calls. `gate(fn)` runs fn
+inside the store's session -- the T-Deck's SD gate. In the browser `keep` is
+the page's keeper (firmware/web_runner/carts_link.py's WebCartKeep).
 
 Paths cross as bytes, so every path the rule allows is kept as it is.
 MicroPython-safe: os only, no os.path.

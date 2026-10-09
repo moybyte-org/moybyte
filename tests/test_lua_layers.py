@@ -37,7 +37,7 @@ from runtime import host_canvas
 from runtime import lua_binding as lb
 from runtime.cart_api import make_api
 from runtime.input import InputState
-from runtime.lua_ext import LAYER_VERBS, PRELUDE_HANDLES, install_handles
+from runtime.lua_ext import LAYER_VERBS, PRELUDE_HANDLES
 
 import test_spec_conformance as spec
 
@@ -72,9 +72,9 @@ class _Ws:
 
 def _lua_frame(scene):
     """Run one conformance cart's main.lua for one frame, the way the host's
-    Player does (runtime/lua_host.MoycoreHostRun over make_api), and return
-    the index framebuffer."""
-    from runtime.lua_host import MoycoreHostRun
+    Player does (device/moycore_glue.py's MoycoreRun over make_api), and
+    return the index framebuffer."""
+    import moycore_glue                 # device/, on host_canvas's path
 
     sheet, tilemap, flags = spec._build_assets(scene)
     canvas = host_canvas.make_canvas(spec.W, spec.H)
@@ -90,7 +90,7 @@ def _lua_frame(scene):
     with open(os.path.join(spec.HERE, "carts", scene + ".moy",
                            "main.lua")) as fh:
         src = fh.read()
-    run = MoycoreHostRun(ws, ns, src)
+    run = moycore_glue.MoycoreRun(ws, ns, src)
     try:
         run.update(1 / 30)
     finally:
@@ -126,8 +126,6 @@ class _Run:
         self.ns = make_api(self.canvas, InputState(), {})
         self.run = lb.HostLuaRun(self.canvas._buf, w, h,
                                  wire=self.canvas._wire)
-        self.layers, _ = install_handles(self.ns, self.run.register,
-                                         self.run.layer_bind)
         assert self.run.exec(PRELUDE_HANDLES, "prelude") is None
 
     def lua(self, src):
@@ -161,7 +159,7 @@ def test_a_layers_draw_state_is_its_own_and_outlives_the_frame():
               "L:rect(4, 2, 1, 1, 8)\n"
               "rect(0, 0, 1, 1, 8)\n"
               "CX, CY = L:camera()\n")
-        lay = r.layers[0]._canvas
+        lay = r.run.layer(0)
         assert r.word(lay._buf, 32, 0, 0) == nine, "the layer lost its camera or pal"
         assert r.word(r.canvas._buf, 64, 0, 0) == eight, "the screen took the layer's state"
         assert (r.run.get_global("CX"), r.run.get_global("CY")) == (4, 2)
@@ -185,7 +183,7 @@ def test_every_layer_verb_draws_into_the_layer_not_the_screen():
               "L:map(0, 0, 1, 1, 0, 40) L:tline(0, 47, 10, 47, 0, 0)\n"
               "L:clip(0, 0, 4, 4) L:palt(0, false) L:clip()\n"
               "P = L:pix(1, 1)\n")
-        lay = r.layers[0]._canvas
+        lay = r.run.layer(0)
         screen = bytes(r.canvas._buf)
         black = r.colour(0)
         assert all(r.word(screen, 64, x, y) == black
@@ -252,7 +250,7 @@ def test_a_layer_drawn_by_libmoy_refuses_a_predicted_copy():
         # Drawn once and composited once, which consumes its mark and arms
         # the prediction.
         r.lua("L = make_layer(64, 48)\nL:cls(5)\ndraw_layer(L, 0, 0)\n")
-        lay = r.layers[0]._canvas
+        lay = r.run.layer(0)
         # Unmarked: the kick paints the layer, and draw_layer takes it, so a
         # screen poisoned after the kick stays poisoned.
         screen.sync_back()

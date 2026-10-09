@@ -14,7 +14,9 @@
 #include "moycore_lua.h"
 #include "moycore_run.h"
 #include "moycore_superset.h"
-#include "../moy_store/moy_img.h"
+#include "moycore_scene.h"
+#include "moy_img.h"
+#include "moy_buf.h"
 
 moycore_run moycore_RUN;
 #define RUN moycore_RUN
@@ -817,37 +819,47 @@ static void put_err(char *err, size_t n, const char *msg)
 }
 
 
-// -- the cart's layers and paint images, in C (docs/kernel_cartpath_2026-10.md §2) --
+// -- the cart's layers, paint images and scenes, in C (docs/kernel_cartpath_2026-10.md §2) --
 //
 // __layer_new, __layer_spr_img and __image_handle, which the handles prelude
-// (runtime/lua_ext.py's PRELUDE_HANDLES) captures: a layer's pixels and a
-// paint image's indices are the run's, allocated here (PSRAM on a board) and
-// freed by moycore_lua_close after the VM, so neither crosses into Python.
-// A paint image is decoded from its .moyimg text (moy_img.h) at its first
-// image(name); the texts are the cart's, handed over before the load
-// (moycore_lua_image_put). A run holds at most MOYCORE_IMAGES of them (§9
-// decision 5): past that, image() fails loudly.
-
-#define MOYCORE_IMAGES 256
+// (runtime/lua_ext.py's PRELUDE_HANDLES) captures, and the scene natives
+// (moycore_scene.h): a layer's pixels and a paint image's indices are the
+// run's, so none of them crosses into Python.
+//
+// THE RUN OWNS THEM. The kernel's Player mints an OWNER row for the run at its
+// launch (moycore_lua_owner), and every pixel buffer here is a BUF row on loan
+// to it (native/moy_glass/moy_buf.h): counted as cart memory, and returned
+// with the run if anything outlives the close. Without an owner (a run the
+// Player did not launch, an image with no glass) the buffers are plain
+// allocations, PSRAM on a board. A paint image is an IMAGE row
+// (native/moy_spine/moy_htab.h), and its handle is the cart's `__img`: the
+// row holds the .moyimg text, handed over before the load
+// (moycore_lua_image_put), and the indices, decoded at its first
+// image(name). A run holds at most 256 of them (§9 decision 5): past that,
+// image() fails loudly. Every table here lives in PSRAM on a board, freed by
+// moycore_lua_close after the VM.
 
 typedef struct {
     char    *name;               // NUL-terminated
     char    *text;               // the .moyimg, `n` bytes
     size_t   n;
     uint8_t *pix;                // w*h indices once decoded; NULL before
+    uint32_t buf;                // pix's BUF row, 0 when it is a plain allocation
     uint32_t w, h;
     int      bad;                // decoded once and found not a picture
 } mc_image_t;
 
 typedef struct {
     moy_pixel *pix;
+    uint32_t buf;
     int w, h;
 } mc_layer_t;
 
-static mc_image_t g_img[MOYCORE_IMAGES];
-static int g_nimg;
+static moy_htab_t *g_imgs;            // IMAGE rows of mc_image_t
 static mc_layer_t *g_lay;
 static int g_nlay, g_caplay;
+static moycore_scenes_t *g_scenes;    // the cart's .moyscene texts (moycore_scene.h)
+static uint32_t g_owner;              // the run's OWNER row, or 0
 
 static void *media_alloc(size_t n)
 {
@@ -867,83 +879,147 @@ static void media_free(void *p)
 #endif
 }
 
+static void tab_release(void *p, size_t n)
+{
+    (void)n;
+    media_free(p);
+}
+
+static const moy_htab_mem_t g_tab_mem = { media_alloc, tab_release };
+
+void moycore_lua_owner(uint32_t owner)
+{
+    g_owner = owner;
+}
+
+// `n` zeroed pixel bytes for the run: a BUF row on loan to its owner, or a
+// plain allocation (`*buf` 0) without one or when the glass refuses.
+static void *px_alloc(size_t n, uint8_t role, uint32_t *buf)
+{
+    *buf = 0;
+    if (g_owner != 0u && moy_glass_ready()) {
+        uint32_t h;
+        moy_buf_row_t *r;
+        if (moy_buf_new(&h, n, role, g_owner) == MOY_GLASS_OK
+            && moy_buf_get(h, &r) == MOY_GLASS_OK && r->px != NULL) {
+            memset(r->px, 0, n);       // a pooled row holds its last pixels
+            *buf = h;
+            return r->px;
+        }
+    }
+    return media_alloc(n);              // no owner, a dead one, or the glass refused
+}
+
+static void px_free(void *p, uint32_t buf)
+{
+    if (buf != 0u) {
+        moy_buf_release(buf);          // STALE once the owner ended: nothing left
+    } else {
+        media_free(p);
+    }
+}
+
 int moycore_lua_image_put(const char *name, const char *text, size_t n)
 {
     size_t nn = strlen(name);
+    uint32_t h;
+    void *row;
     mc_image_t *im;
-    if (g_nimg >= MOYCORE_IMAGES) return -1;
-    im = &g_img[g_nimg];
-    memset(im, 0, sizeof(*im));
+    if (g_imgs == NULL) {
+        g_imgs = moy_htab_new(&g_tab_mem, MOY_KIND_IMAGE, MOY_HTAB_SLOTS, sizeof(mc_image_t));
+        if (g_imgs == NULL) return -1;
+    }
+    if (moy_htab_add(g_imgs, &h, &row) != MOY_HTAB_OK) return -1;
+    im = (mc_image_t *)row;
     im->name = (char *)media_alloc(nn + 1);
     im->text = (char *)media_alloc(n ? n : 1);
     if (!im->name || !im->text) {
         media_free(im->name);
         media_free(im->text);
-        im->name = im->text = NULL;
+        moy_htab_release(g_imgs, h);
         return -1;
     }
     memcpy(im->name, name, nn + 1);
     memcpy(im->text, text, n);
     im->n = n;
-    g_nimg++;
     return 0;
+}
+
+int moycore_lua_scene_put(const char *name, const char *text, size_t n)
+{
+    if (g_scenes == NULL) return -1;
+    return moycore_scenes_put(g_scenes, name, text, n, media_alloc, media_free);
 }
 
 static void media_release(void)
 {
-    for (int i = 0; i < g_nimg; i++) {
-        media_free(g_img[i].name);
-        media_free(g_img[i].text);
-        media_free(g_img[i].pix);
+    if (g_scenes != NULL) {
+        moycore_scenes_release(g_scenes, media_free);
+        media_free(g_scenes);
+        g_scenes = NULL;
     }
-    memset(g_img, 0, sizeof(g_img));
-    g_nimg = 0;
-    for (int i = 0; i < g_nlay; i++) media_free(g_lay[i].pix);
+    if (g_imgs != NULL) {
+        for (uint32_t s = 0; s < moy_htab_slots(g_imgs); s++) {
+            if (!moy_htab_live(g_imgs, s)) continue;
+            mc_image_t *im = (mc_image_t *)moy_htab_row(g_imgs, s);
+            media_free(im->name);
+            media_free(im->text);
+            px_free(im->pix, im->buf);
+        }
+        moy_htab_free(g_imgs);
+        g_imgs = NULL;
+    }
+    for (int i = 0; i < g_nlay; i++) px_free(g_lay[i].pix, g_lay[i].buf);
     media_free(g_lay);
     g_lay = NULL;
     g_nlay = g_caplay = 0;
 }
 
-// __image_handle(name) -> the image's handle, or -1: no such image, or not a
-// picture.
+static mc_image_t *image_row(lua_Integer h)
+{
+    void *row;
+    if (g_imgs == NULL || h <= 0 || h > 0x3fffffff
+        || moy_htab_get(g_imgs, (uint32_t)h, &row) != MOY_HTAB_OK)
+        return NULL;
+    return (mc_image_t *)row;
+}
+
+// __image_handle(name) -> the image's IMAGE handle, or -1: no such image, or
+// not a picture.
 static int l_image_handle(lua_State *L)
 {
     const char *name = luaL_checkstring(L, 1);
-    for (int i = 0; i < g_nimg; i++) {
-        mc_image_t *im = &g_img[i];
+    for (uint32_t s = 0; g_imgs != NULL && s < moy_htab_slots(g_imgs); s++) {
+        if (!moy_htab_live(g_imgs, s)) continue;
+        mc_image_t *im = (mc_image_t *)moy_htab_row(g_imgs, s);
         if (strcmp(im->name, name) != 0) continue;
-        if (im->pix) {
-            lua_pushinteger(L, i);
-            return 1;
-        }
-        if (!im->bad) {
+        if (!im->pix && !im->bad) {
             uint32_t w = 0, h = 0;
             void *work = NULL;
             if (moy_img_head(im->text, im->n, &w, &h) == MOY_IMG_OK
                 && (size_t)w * (size_t)h < ((size_t)1 << 26)) {
                 size_t cap = (size_t)w * (size_t)h + 1;
-                im->pix = (uint8_t *)media_alloc(cap);
+                im->pix = (uint8_t *)px_alloc(cap, MOY_ROLE_BAKE, &im->buf);
                 work = media_alloc(moy_img_work_size());
                 if (!im->pix || !work) {
                     media_free(work);
-                    media_free(im->pix);
+                    px_free(im->pix, im->buf);
                     im->pix = NULL;
+                    im->buf = 0;
                     return luaL_error(L, "image: out of memory for \"%s\"", name);
                 }
                 if (moy_img_decode(im->text, im->n, im->pix, cap, &im->w, &im->h, work)
                     != MOY_IMG_OK) {
-                    media_free(im->pix);
+                    px_free(im->pix, im->buf);
                     im->pix = NULL;
+                    im->buf = 0;
                 }
                 media_free(work);
             }
             if (!im->pix) im->bad = 1;
         }
-        if (im->pix) {
-            lua_pushinteger(L, i);
-            return 1;
-        }
-        break;
+        lua_pushinteger(L, im->pix ? (lua_Integer)moy_htab_handle(g_imgs, s) : -1);
+        return 1;
     }
     lua_pushinteger(L, -1);
     return 1;
@@ -955,6 +1031,7 @@ static int l_layer_new(lua_State *L)
 {
     lua_Integer w = luaL_checkinteger(L, 1), h = luaL_checkinteger(L, 2);
     moy_pixel *pix;
+    uint32_t buf;
     if (w <= 0 || h <= 0 || w > 4096 || h > 4096)
         return luaL_error(L, "make_layer: bad size %dx%d", (int)w, (int)h);
     if (g_nlay == g_caplay) {
@@ -966,15 +1043,25 @@ static int l_layer_new(lua_State *L)
         g_lay = t;
         g_caplay = cap;
     }
-    pix = (moy_pixel *)media_alloc((size_t)w * (size_t)h * sizeof(moy_pixel));
+    pix = (moy_pixel *)px_alloc((size_t)w * (size_t)h * sizeof(moy_pixel), MOY_ROLE_LAYER, &buf);
     if (!pix) return luaL_error(L, "make_layer: out of memory for %dx%d", (int)w, (int)h);
     g_lay[g_nlay].pix = pix;
+    g_lay[g_nlay].buf = buf;
     g_lay[g_nlay].w = (int)w;
     g_lay[g_nlay].h = (int)h;
     moycore_layers_park(&RUN.layers, pix, (size_t)w * (size_t)h * sizeof(moy_pixel),
                         (int)w, (int)h);
     lua_pushinteger(L, g_nlay++);
     return 1;
+}
+
+int moycore_lua_layer(int i, moy_pixel **pix, int *w, int *h)
+{
+    if (i < 0 || i >= g_nlay) return -1;
+    *pix = g_lay[i].pix;
+    *w = g_lay[i].w;
+    *h = g_lay[i].h;
+    return 0;
 }
 
 static lua_Integer trunc_arg(lua_State *L, int i)
@@ -992,9 +1079,9 @@ static int l_layer_spr_img(lua_State *L)
 {
     lua_Integer li = luaL_checkinteger(L, 1), ii = luaL_checkinteger(L, 2);
     lua_Integer x = trunc_arg(L, 3), y = trunc_arg(L, 4);
-    if (li < 0 || li >= g_nlay || ii < 0 || ii >= g_nimg || !g_img[ii].pix) return 0;
+    const mc_image_t *im = image_row(ii);
+    if (li < 0 || li >= g_nlay || im == NULL || !im->pix) return 0;
     const mc_layer_t *ly = &g_lay[li];
-    const mc_image_t *im = &g_img[ii];
     for (uint32_t row = 0; row < im->h; row++) {
         lua_Integer ty = y + (lua_Integer)row;
         if (ty < 0 || ty >= ly->h) continue;
@@ -1023,6 +1110,8 @@ static void media_open(lua_State *L)
     lua_setglobal(L, "__layer_new");
     lua_pushcfunction(L, l_layer_spr_img);
     lua_setglobal(L, "__layer_spr_img");
+    if (g_scenes == NULL) g_scenes = (moycore_scenes_t *)media_alloc(sizeof(*g_scenes));
+    moycore_scene_open(L, g_scenes);
 }
 
 int moycore_lua_open(char *err, size_t n)

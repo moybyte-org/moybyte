@@ -40,7 +40,7 @@ end
 @pytest.mark.skipif(not lb.HostLuaRun.available(),
                     reason="no C compiler for the host lua binding")
 def test_a_cart_runs_in_the_same_c_the_boards_run():
-    buf = bytearray(96 * 64)
+    buf = bytearray(96 * 64 * 2)
     r = lb.HostLuaRun(buf, 96, 64)
     try:
         assert r.load([(CART, "@cart")]) is None
@@ -68,7 +68,7 @@ def test_a_cart_runs_in_the_same_c_the_boards_run():
 def test_a_cart_error_is_text_with_its_line():
     """What crash-to-code needs: the chunkname and line, not a traceback the
     Player would have to parse out of an exception."""
-    r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+    r = lb.HostLuaRun(bytearray(32 * 32 * 2), 32, 32)
     try:
         assert r.load([("function _update(dt) error('boom') end", "@cart")]) is None
         err = r.tick(1 / 30.0)
@@ -83,14 +83,14 @@ def test_the_sandbox_is_the_same_ceiling_the_boards_have():
     """SPEC.md 4.1 is a ceiling, not a suggestion, and the reason it holds is
     that the excluded stdlibs are not compiled in at all -- so this is checking
     the build, not a registration list."""
-    r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+    r = lb.HostLuaRun(bytearray(32 * 32 * 2), 32, 32)
     try:
         r.load([("function _update(dt) end", "@cart")])
         # coroutine is NOT on this list: SPEC.md 4.1 admits it.
         for name in ("io", "os", "debug", "package", "require",
                      "dofile", "loadstring", "collectgarbage"):
             probe = "function _update(dt) local x = %s.anything end" % name
-            r2 = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+            r2 = lb.HostLuaRun(bytearray(32 * 32 * 2), 32, 32)
             try:
                 err = r2.load([(probe, "@probe")]) or r2.tick(1 / 30.0)
                 assert err is not None, "%s is reachable from a cart" % name
@@ -112,13 +112,13 @@ def test_a_cart_is_lua_text_never_precompiled_bytecode():
     for chunks in ([(b"\x1bLua\x54\x00 not a real chunk", "@cart")],
                    [("function _update(dt) end", "@shim"),
                     (b"\x1bLua\x54\x00 not a real chunk", "@cart")]):
-        r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+        r = lb.HostLuaRun(bytearray(32 * 32 * 2), 32, 32)
         try:
             err = r.load(chunks)
             assert err is not None and "attempt to load a binary chunk" in err, err
         finally:
             r.close()
-    r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
+    r = lb.HostLuaRun(bytearray(32 * 32 * 2), 32, 32)
     try:
         assert r.exec(b"\x1bLua\x54\x00 not a real chunk") is not None
         assert r.load([("function _update(dt) X = 1 end", "@cart")]) is None
@@ -150,7 +150,7 @@ def test_touch_reaches_a_lua_cart_and_decodes_its_flags():
     the edge with the finger already lifted, which is what the last state here
     pins and what `letter blitz` scores with.
     """
-    buf = bytearray(96 * 64)
+    buf = bytearray(96 * 64 * 2)
     r = lb.HostLuaRun(buf, 96, 64)
     try:
         assert r.load([(TOUCH_CART, "@cart")]) is None
@@ -189,7 +189,7 @@ def test_a_lua_cart_can_end_itself():
     because hold-BACKSPACE cannot reach one. Found on glass: a probe cart
     called quit() 3,940 times and kept running.
     """
-    buf = bytearray(32 * 32)
+    buf = bytearray(32 * 32 * 2)
     r = lb.HostLuaRun(buf, 32, 32)
     try:
         assert r.load([(QUIT_CART, "@cart")]) is None

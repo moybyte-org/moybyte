@@ -12,6 +12,7 @@
 #include "moy_tick.h"
 #include "moycore_lua.h"
 #include "moycore_run.h"
+#include "moy_buf.h"
 
 // The calling task's stack, on a board: FreeRTOS's high-water mark.
 #if defined(__has_include)
@@ -31,8 +32,12 @@ uint32_t moy_play_stack_free(void) {
 }
 
 // The audio sessions, where the image takes moy_audio (the Guition S3, with no
-// speaker, does not): a run there is silent, its queue dropped.
-#if defined(__has_include)
+// speaker, does not): a run there is silent, its queue dropped. The host's
+// build (runtime/moycore.py) has them, its sources side by side.
+#if defined(MOY_PLAY_HOST)
+#include "moy_aud.h"
+#define MOY_PLAY_AUDIO 1
+#elif defined(__has_include)
 #if __has_include("../moy_audio/moy_aud.h")
 #include "../moy_audio/moy_aud.h"
 #define MOY_PLAY_AUDIO 1
@@ -100,6 +105,7 @@ typedef struct {
     uint32_t start_ms;
     int32_t ptr[3];                 // x, y, the touch() flags
     uint32_t upc0[MOY_UPC_CLASSES];
+    uint32_t owner;                 // the run's OWNER row (moy_buf.h), or 0
     int view;                       // what the cart had declared last frame
     int view_w, view_h;
 } run_t;
@@ -169,6 +175,13 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.ptr[0] = R.ptr[1] = R.ptr[2] = 0;
     R.view = 0;
     R.info.stack_open = R.info.stack_frame = MOY_PLAY_NO_STACK;
+    // The run's lifetime in the glass: what its runtime loads -- a Lua run's
+    // layer and image pixels -- is on loan to it and goes with it.
+    R.owner = 0;
+    if (moy_glass_ready() && moy_owner_new(&R.owner, "run", MOY_CLASS_CART) != MOY_GLASS_OK) {
+        R.owner = 0;
+    }
+    moycore_lua_owner(R.owner);
     uint32_t frame[MOY_UPC_CLASSES];
     moy_loop_upcalls(frame, R.upc0);
     *run = R.h;
@@ -348,6 +361,11 @@ int moy_play_end(uint32_t run, int why) {
         r->info.upcalls[i] = total[i] - r->upc0[i];
     }
     r->h = 0;
+    if (r->owner != 0u) {
+        moy_owner_end(r->owner);        // any loan the runtime's close left
+        r->owner = 0;
+    }
+    moycore_lua_owner(0);
     return MOY_PLAY_OK;
 }
 

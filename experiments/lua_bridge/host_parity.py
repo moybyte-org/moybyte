@@ -7,8 +7,8 @@ parsed by the shared `widgets.Scenes` -- recording every draw call each side
 makes (spr / make_layer / layer spr / draw_layer) through a minimal fake API,
 then compares the two streams and the final petal state.
 
-THE LUA SIDE IS THE SHIPPED VM: main.lua runs under runtime/lua_host's
-MoycoreHostRun (libmoy's binding over the vendored Lua 5.4 both boards
+THE LUA SIDE IS THE SHIPPED VM: main.lua runs under device/moycore_glue.py's
+MoycoreRun (libmoy's binding over the vendored Lua 5.4 both boards
 compile, LUA_32BITS and all), with the fake API registered the way the
 console's is. The object-valued verbs -- make_layer, image, scene -- reach the
 cart through the SAME int-handle glue and Lua prelude the boards run
@@ -59,7 +59,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from runtime.widgets import Scenes                             # noqa: E402
-from runtime.lua_host import MoycoreHostRun                     # noqa: E402
+from parity_wire import lua_run                     # noqa: E402
 from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
                          check_prng_twins, ENC_LUA, FakeWs, FLOAT_TOL)
 
@@ -184,6 +184,7 @@ class FakeConsole:
 
         return {
             "scene": self.scenes.scene,
+            "_moy_scenes": self.scenes,
             "W": 320, "H": 240,
             "cfg": lambda k, d=None: self.config.get(k, d),
             "rnd": self.lcg.rnd,
@@ -247,6 +248,30 @@ do
     rec("spr|" .. enc(tile) .. "|" .. enc(x) .. "|" .. enc(y) .. "|"
         .. enc(ck or -1))
   end
+  -- make_layer, image and a layer's image placement are the run's own C
+  -- (moycore_lua.c), so they are recorded here, in front of the C, in the
+  -- Python fake's words: a layer by its order, an image as "img:<name>".
+  local make_layer0, image0 = make_layer, image
+  local nlay = 0
+  function make_layer(w, h)
+    local l = make_layer0(w, h)
+    rec("make_layer|" .. enc(w) .. "|" .. enc(h))
+    local id, spr0 = nlay, l.spr
+    nlay = nlay + 1
+    l.spr = function(self, img, x, y, ...)
+      if type(img) == "table" then
+        rec("layer_spr|" .. enc(id) .. "|" .. enc(img.__rec) .. "|" .. enc(x)
+            .. "|" .. enc(y))
+      end
+      return spr0(self, img, x, y, ...)
+    end
+    return l
+  end
+  function image(name)
+    local t = image0(name)
+    if t ~= nil then t.__rec = "img:" .. name end
+    return t
+  end
   -- draw_layer is the run's own C (the prelude's, over __layer_blit), so it
   -- is recorded here, in front of the composite it still makes.
   local draw_layer0 = draw_layer
@@ -283,7 +308,7 @@ def _cfg_lua(config):
 
 
 class LuaCart:
-    """Run main.lua under MoycoreHostRun with the same fake API."""
+    """Run main.lua under the glue's MoycoreRun with the same fake API."""
 
     def __init__(self, console):
         self.console = console
@@ -294,11 +319,14 @@ class LuaCart:
 
     def init(self):
         ns = self.console.ns()
+        # The cart's own paint image, which the run decodes in C.
+        with open(os.path.join(LUA_CART_DIR, "images", "bg.moyimg")) as fh:
+            ns["_moy_images"] = {"bg": fh.read()}
         ns["_moy_prelude"] = (_cfg_lua(self.console.config)
                               + "__SEED = %d\n" % SEED + PRELUDE)
         with open(os.path.join(LUA_CART_DIR, "main.lua")) as fh:
             src = fh.read()
-        self.run = MoycoreHostRun(FakeWs(self.console), ns, src)
+        self.run = lua_run(FakeWs(self.console), ns, src)
 
     def tick(self, dt):
         self.run.update(dt)            # _update then _draw, in the C loop

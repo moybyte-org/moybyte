@@ -326,39 +326,24 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
     ws.make_game_canvas = host_canvas.make_canvas
-    # ONE Lua runtime on the host, and it is the boards' (#67 rung 4 / plan 6.9):
-    # runtime/lua_binding -- libmoy's own binding over the same vendored 5.4 the
-    # firmware compiles, LUA_32BITS and all. A "lua" cart with no native module
-    # available opens the Player's runtime-missing panel, exactly as a device
-    # build without it does. The same rule for "wasm": runtime/wasm_binding is
-    # libmoy's import table over WAMR built for Linux at the boards' pin, and
-    # no compiler (or no WAMR) is an absent key.
-    #
-    # lupa is GONE (2026-08-14). It survived as the fallback for carts using
-    # moybyte's superset, and then as the fallback for a host with no C
-    # compiler; the first reason died when lua_ext's handle glue put the
-    # superset ON moycore, and the second is not a reason this project accepts
-    # -- the host already REQUIRES a compiler for audio, where "no compiler"
-    # means silence rather than a second synth (§3.1). Two Lua engines to spare
-    # a compiler is the same trade, and it was refused there.
+    # ONE Lua runtime on the host, and it is the boards': device/moycore_glue.py
+    # over runtime/moycore.py, the C a board runs (moycore_lua.c) and the
+    # kernel's Player (moy_play.c) by ctypes. A "lua" cart with no binding opens
+    # the Player's runtime-missing panel, exactly as a device build without the
+    # module does. A "wasm" cart runs on runtime/wasm_binding: libmoy's import
+    # table over WAMR built for Linux at the boards' pin; no compiler (or no
+    # WAMR) is an absent key.
+    host_canvas.install()
+    import moycore_glue                 # device/, on the path host_canvas puts it
     try:
-        from runtime.lua_host import MoycoreHostRun, moycore_supports
         from runtime import wasm_host
     except ImportError:  # pragma: no cover
-        from lua_host import MoycoreHostRun, moycore_supports
         import wasm_host
 
-    def _make_lua(ns, src, _ws=ws):
-        # No fallback and no silent decline. A decline used to be swallowed, and
-        # that is how moycore came to run none of the seed carts while every
-        # test stayed green: make_layer's Layer would not marshal, the load
-        # raised, lupa quietly took the cart, and the only observable difference
-        # was a cart running on the runtime we were trying to retire.
-        return MoycoreHostRun(_ws, ns, src)
-
     runtimes = {}
-    if moycore_supports(""):
-        runtimes["lua"] = _make_lua
+    lua = moycore_glue.make_moycore_runtime(ws)
+    if lua is not None:
+        runtimes["lua"] = lua
     if wasm_host.available():
         runtimes["wasm"] = wasm_host.WasmHostRuntime(ws)
     # The shared service wiring (console.wire_workstation_core -- one canonical

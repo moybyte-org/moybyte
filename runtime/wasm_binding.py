@@ -2,10 +2,12 @@
 
 The host runs a `"runtime": "wasm"` cart through the same C the boards run:
 libmoy's wasm binding (`native/moycore/libmoy/moy_wasm.c`, vendored) over the
-console the Lua shim and the boards use too (`native/moycore/moycore_run.c`), and WAMR -- the
-fork the boards vendor, at the commit `native/moy_wasm/wamr_pin.h` names, built
-for Linux. There is no wasmtime tier and no second engine; this is
-`lua_binding.py`'s twin.
+run's console (`native/moycore/moycore_run.c`), framed by the kernel's Player
+like a Lua run, and WAMR -- the fork the boards vendor, at the commit
+`native/moy_wasm/wamr_pin.h` names, built for Linux. There is no wasmtime tier
+and no second engine: the shim (`runtime/moyhost_wasm.c`) is compiled into
+`lua_binding.py`'s library wherever WAMR builds, and this module is its
+compiled-cart half.
 
 WAMR IS FETCHED, NOT VENDORED, for the host: the boards compile an AOT-only
 ESP-IDF subset of it (`native/moy_wasm/wamr/`), and a Linux build needs the
@@ -45,8 +47,6 @@ _BINDING_DIR = os.path.join(_ROOT, "native", "moycore", "libmoy")   # moy_wasm.c
 _ENGINE_DIR = os.path.join(_ROOT, "native", "moy_wasm")   # moy_wasm_footprint.h
 _AUDIO_DIR = os.path.join(_ROOT, "native", "moy_audio", "libmoy")   # moy_stream
 _PIN_H = os.path.join(_ENGINE_DIR, "wamr_pin.h")
-_SHIM = os.path.join(_HERE, "moyhost_wasm.c")
-_CACHE = os.path.join(_ROOT, ".build", "host_wasm")
 WAMR_DIR = os.path.join(_ROOT, ".build", "host_wamr")
 WAMR_REPO = "https://github.com/moybyte-org/wasm-micro-runtime.git"
 
@@ -183,62 +183,22 @@ def wamr(verbose=False):
 
 
 def build(verbose=False):
-    """Compile (or reuse) the cached .so; None when a piece is absent."""
+    """The host library a compiled cart runs in: runtime/lua_binding's, built
+    with WAMR (moyhost_wasm.c beside the Lua run and the kernel's Player).
+    Its path, or None with the reason in why_unavailable()."""
     if not os.path.isfile(os.path.join(_BINDING_DIR, "moy_wasm.c")):
         _WHY[0] = "no vendored moy_wasm.c"
         return None
-    got = wamr(verbose)
-    if got is None:
+    if wamr(verbose) is None:
         return None
-    inc, lib = got
-    names = list(_RASTER) + ["moy_wasm.c", "moy_wasm.h", "moycore_run.h", "moycore_run.c",
-                             "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h"]
-    cflags = native_build.BASE_CFLAGS + [
-        "-DMOY_WASM=1", "-DMOY_PIXEL_RGB565=1", "-isystem", inc,
-        # The pin rides the cache key: a moved pin is another runtime.
-        "-DMOYHOST_WAMR_PIN=%s" % pin()]
-    path = native_build.build(
-        "moyhost_wasm", _SHIM, names, _CACHE, cflags=cflags,
-        libmoy_dir=(_LIBMOY, _BINDING_DIR, _HERE, _ENGINE_DIR, _AUDIO_DIR,
-                    os.path.dirname(_BINDING_DIR)),
-        link_flags=[lib, "-lm", "-lpthread", "-ldl"], verbose=verbose)
+    from . import lua_binding
+    path = lua_binding.build(verbose)
     if path is None:
         _WHY[0] = "no C compiler"
     return path
 
 
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
-
-# The cart's written files (moyhost_wasm.c's hw_set_files): (op, path, arg,
-# buf, len) -> i32, op 0 a written copy's read, 1 write, 2 erase, 3 list.
-_FILES_FN = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int, ctypes.c_char_p,
-                             ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
-_FILE_READ, _FILE_WRITE, _FILE_ERASE, _FILE_LIST = range(4)
-
-
-def _files_fn(files):
-    """The C callback over `files` (runtime/cart_files.py's CartFiles)."""
-    def call(op, path, arg, buf, n):
-        try:
-            if op == _FILE_READ:
-                got = files.read(path, arg, n)
-                if got is None or isinstance(got, int):
-                    return -1 if got is None else got
-                ctypes.memmove(buf, got, len(got))
-                return len(got)
-            if op == _FILE_WRITE:
-                return files.write(path, ctypes.string_at(buf, n) if n else b"")
-            if op == _FILE_ERASE:
-                return files.erase(path)
-            name = files.name(path, arg)
-            if name is None:
-                return -1
-            ctypes.memmove(buf, name, min(len(name), n))
-            return len(name)
-        except Exception:          # noqa: BLE001 -- a store failure is an answer
-            return -3 if op == _FILE_WRITE else -1
-    return _FILES_FN(call)
-
 
 class _NativeSymbol(ctypes.Structure):
     """WAMR's NativeSymbol: one row of the import table."""
@@ -256,7 +216,12 @@ def _lib():
         if path is None:
             _LIB[0] = False
         else:
-            d = ctypes.CDLL(path)
+            from . import lua_binding
+            d = lua_binding._lib()
+            if d is None or not hasattr(d, "hw_runtime"):
+                _WHY[0] = "the host library has no compiled-cart run"
+                _LIB[0] = False
+                return None
             # Every function gets its argtypes: one left on the default int
             # conversion truncates a 64-bit pointer, which is a segfault with
             # no traceback rather than a TypeError.
@@ -269,8 +234,8 @@ def _lib():
             d.hw_set_map.argtypes = [_P, _P, _I, _I, _I]
             d.hw_set_flags.argtypes = [_P, _P, _I]
             d.hw_set_cfg.argtypes = [_P, _P, _I]
-            d.hw_set_files.argtypes = [_P, _FILES_FN, _P, _I]
-            d.hw_set_files.restype = None
+            d.hw_set_files.argtypes = [_P, _C, _P, _I]
+            d.hw_set_files.restype = _I
             d.hw_load.argtypes = [_P, _C, _C, _I, _P, _I]
             d.hw_load.restype = _I
             d.hw_init.argtypes = [_P, _P, _I]
@@ -414,13 +379,14 @@ class HostWasmRun:
         blob = cfg_blob(cfg)
         if blob:
             d.hw_set_cfg(self._r, ctypes.c_char_p(blob), len(blob))
-        # The cart's written files and its "writable" entries, NUL-joined.
-        self._files_fn = None
+        # The cart's written files (moy_files.c, by the cart's folder `files`)
+        # and its "writable" entries, NUL-joined.
         if files is not None:
-            self._files_fn = _files_fn(files)
             joined = b"\0".join(e.encode("utf-8") for e in (writable or ()))
-            d.hw_set_files(self._r, self._files_fn, ctypes.c_char_p(joined) if joined else None,
-                           len(joined))
+            if d.hw_set_files(self._r, os.fsencode(files),
+                              ctypes.c_char_p(joined) if joined else None, len(joined)):
+                self.close()
+                raise MemoryError("host wasm: the store opened no files session")
         err = ctypes.create_string_buffer(256)
         if d.hw_load(self._r, os.fsencode(cart_dir), os.fsencode(main),
                      int(pages or 0), ctypes.cast(err, _P), 256):

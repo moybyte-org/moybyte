@@ -312,9 +312,11 @@ def test_the_hud_is_the_frames_and_what_the_verbs_would_draw(tmp_path, jet):
     again by the console's own rect and print over the frame without it, the
     line read back off the strip makes the two frames byte-identical: the
     HUD the cart draws into its frame is the one the verbs used to draw."""
+    # One run at a time, as on a board: each console plays its frames before
+    # the next launches.
     on = _ws(tmp_path / "on", jet, hud=True, shading="phong")
-    off = _ws(tmp_path / "off", jet, hud=False, shading="phong")
     _frames(on, 4)
+    off = _ws(tmp_path / "off", jet, hud=False, shading="phong")
     _frames(off, 4)
     a, b = bytes(on.sys_canvas._buf), bytes(off.sys_canvas._buf)
     row = 2 * W

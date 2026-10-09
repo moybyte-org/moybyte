@@ -66,8 +66,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # denies it by name, correctly. The console's two verbs therefore register
 # under reserved names and this prelude binds them over the top, in the same
 # window PRELUDE_HANDLES uses: after registration, before the cart loads. Both
-# Lua glues (runtime/lua_host.py, device/moycore_glue.py) exec whatever
-# `_moy_prelude` the namespace carries, so this is one string, not two.
+# Lua glue (device/moycore_glue.py, the host's too) execs whatever
+# `_moy_prelude` the namespace carries.
 LUA_PRELUDE = """
 do
   local say, ask = __moy_say, __moy_ask

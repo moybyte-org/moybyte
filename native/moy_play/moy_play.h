@@ -12,8 +12,10 @@
 // it failed.
 //
 // THE PLAYER (moy_play.c). One run at a time, named by a handle that is
-// refused (STALE) once it ended. `launch` reads the cart's catalogue entry
-// for its runtime and verdict and takes that runtime's row from the map;
+// refused (STALE) once it ended. `launch`, before the runtime loads, reads
+// the cart's catalogue entry for its runtime and verdict, takes that
+// runtime's row from the map and mints the run's OWNER row in the glass
+// (moy_buf.h), which a Lua run's layer and image pixels are loans to;
 // `bind` gives the run its input table, its audio session and the tick model
 // a paced run notes its costs into; `open` asks the row whether its runtime
 // is open. `frame` runs the ticks the tick model planned: each takes the
@@ -21,7 +23,8 @@
 // the input table and the pointer `input` published, runs the row's tick,
 // notes its update half, and plays the audio it queued straight into the
 // session; a quit() ends the frame where it stands. `end` closes the books:
-// the run's upcalls by class since its launch, kept with its info for `state`.
+// the run's upcalls by class since its launch, kept with its info for `state`,
+// and ends its OWNER row, returning any loan the runtime's close left.
 //
 // While the VM is up the console's frame upcall still drives the Player, the
 // binding builds the run's console over Python's buffers before `open`, and
