@@ -801,7 +801,7 @@ the host already needs. Sprint 3's carve had landed whole by then
 | **1b — the store** | the store's index, catalogue build, cover bookkeeping, seed and project loading; the journal; last, the card volume the kernel owns, with the read cache on every console board's card (the SD gate for the card, owner, 2026-10-06; `docs/kernel_store_2026-10.md` slice 8) | the parity tests across bindings; the heap after boot within §6.1's bound; Doom loads on a fresh Guition S3 over five boots |
 | **3 — the survival set** | input (touch, keyboards, BLE HID below `bluetooth`); audio (I2S feed and the sfx/music semantics); the glass (canvas ownership, present, compositors); the storage gate for the internal flash volumes (the card's is 1b's); the frame tail (loop, pump, idle blank, OTA health, PERF, serial); radios, the webhost and the sync RPC | the native loop drives the frame on every tier with Python as an upcall (§4.2); each board's on-glass suite unchanged; `surface_model_v1.md`'s amendment (§8) landed first |
 | **4 — the cart path** | the Player's loop and tick model, the runtime map, moycore's glue, the in-cart chrome (strip, system menu, error and fit panels, toasts), netplay lockstep, the Lua superset rulings (§2.3) | a Lua and a wasm cart run launch to exit with **zero Python upcalls** on every tier and **with the VM stopped** on the S3s; cart-available PSRAM at or above §6.1's threshold; Doom loads on a T-Deck after a scripted session and on a fresh Guition S3; the cart census of VM-free carts; exit-to-launcher time against the return budget decides the launcher (§3) |
-| **5 — the ABI** (scope: §10 question 8) | the roles redesigned import-shaped (§2.1); `ctx.shell` closed; the Python binding thin; the wasm import adapter; the `open()`-after-stop contract | `docs/app_api_v1.md` rewritten in place; `tests/test_app_context.py` and the traces cover every role; a wasm module reaches a role through an import; every shipped app restores after a stop |
+| **5 — the ABI** (scope: §10 question 8) | the roles redesigned import-shaped (§2.1); `ctx.shell` closed; the Python binding thin; the wasm import adapter (`docs/kernel_appabi_2026-10.md`) | `docs/app_api_v1.md` rewritten in place; `tests/test_app_context.py` and the traces cover every role; a wasm module reaches a role through an import; only the launcher's launches stop the VM |
 | **6 — the toolkit** (scope: §10 question 8) | `runtime/ui.py`'s core and one text path for every runtime | pixel goldens identical on every row that exercises the toolkit; an A/B of widget-heavy frames on an S3 and a P4; a wasm app draws a button and a scroll list |
 | **7 — the window managers** (scope: §10 question 8) | the WMs' state, policy and chrome; the rest of `runtime/console.py` | the P4 desk's on-glass suites unchanged; an A/B of chrome frames on an S3 with the dev channel's timing; `runtime/console.py` is gone |
 
@@ -979,14 +979,16 @@ makes it false, not annotated:
      runs VM-free.
 
    **Decided (owner, 2026-10-10): a middle path.** Sprint 5 runs in full (the
-   roles import-shaped, `ctx.shell` closed, the wasm import adapter, the
-   `open()`-after-stop contract). Sprint 6 runs data-driven: themes, strings and
-   layout are data over C widget primitives, so most UI changes stay data edits.
-   Sprint 7, the window managers and the rest of `runtime/console.py`, stays
-   Python while the shell's UI is still changing. The decision rests on sprint
-   4's gate (#224): Doom loads after the scripted session with the VM up, so the
-   memory motive for sprints 5-7 was largely met, and the parts that change
-   most are the ones sprint 7 would move.
+   roles import-shaped, `ctx.shell` closed, the wasm import adapter). Sprint 6
+   runs data-driven: themes, strings and layout are data over C widget
+   primitives, so most UI changes stay data edits. Sprint 7, the window
+   managers and the rest of `runtime/console.py`, stays Python while the
+   shell's UI is still changing. The decision rests on sprint 4's gate (#224):
+   Doom loads after the scripted session with the VM up, so the memory motive
+   for sprints 5-7 was largely met, and the parts that change most are the
+   ones sprint 7 would move. For the same reason no `open()`-after-stop
+   contract is built: a launch from any surface but the launcher keeps the VM
+   (owner, 2026-10-10; `docs/kernel_appabi_2026-10.md` §5, §12).
 
 ## 11. What can kill it
 

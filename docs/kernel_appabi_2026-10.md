@@ -4,10 +4,10 @@
 is to build, set down ahead of the code: the roles an app is handed, reshaped so a
 role call carries numbers, handles and byte spans only; where each role's verbs
 are served; how thin the Python binding gets; how a compiled module reaches a
-role through an import; what an app does so it comes back after the kernel
-stopped the VM; the order the steps land in, and the gate. Status and the
-sprint's measurements are #224's. Revised 2026-10-10 after an adversarial
-review; §12 holds the owner's questions it raised.
+role through an import; which launches may stop the VM; the order the steps
+land in, and the gate. Status and the sprint's measurements are #224's.
+Revised 2026-10-10 after an adversarial review, and again after the owner's
+answers to the questions it raised (§12), which the sections below build.
 
 **The scope (owner, 2026-10-10; the plan's §10 question 8).** Sprint 5 runs in
 full. Sprint 6 runs data-driven, in a doc of its own. Sprint 7 does not run:
@@ -82,7 +82,7 @@ test, and `ROLES` is read from it.
 
 - **C**: the state is the kernel's and resident: the settings rows, the
   glass, a kernel row this sprint adds, the lease table, the engine's sizing,
-  and the user-files layer if question 4 says so. Each verb is its own C
+  and the user-files layer (§12 answer 4). Each verb is its own C
   function in `+native/moy_app/` taking the grant handle; there is no by-name
   dispatcher.
 - **shell**: the state is the Python console's, which stays Python: the
@@ -129,13 +129,18 @@ are Python callables bound in the binding, as today.
 
 **The grant.** Every caller of a role holds a grant: a loan on an OWNER row
 (sprint 3's lifetimes, `docs/kernel_survival_2026-10.md`), carrying the app's
-id, its role mask, its files kind, its prefs namespace and its surface row. A
-shipped app's grant is keyed by its id and idempotent: a start re-registering
+key, its role mask, its files kind, its prefs namespace and its surface row.
+**A grant is keyed by the cart's `id`** (#162, moy-spec's SPEC.md §3.1): the
+manifest's `<author>.<name>` when it has one, else the cart's folder less
+`.moy`, which is what the spec keys a host's records by; a path-less built-in
+(`runtime/boot_carts.py`) has neither and is keyed by its title's slug. A
+renamed cart keeps its prefs namespace and its strikes. A shipped app's grant
+is keyed by its registered id and idempotent: a start re-registering
 the app finds the row it had, so a stop leaves the count where it was. A user
 app's grant is its run's, and goes with the run. The grant policy is C's
-whole: the permission-to-role map, the file kinds, `manifest_error`, the slug
-an app's id and prefs namespace are made from (ASCII letters and digits, the
-C rule; CPython's Unicode `isalpha()` no longer decides it), and `app_id_for`.
+whole: the permission-to-role map, the file kinds, `manifest_error`, and
+`app_id_for`, the key above (the built-in's slug is ASCII letters and digits,
+the C rule; CPython's Unicode `isalpha()` no longer decides it).
 Every role call takes the grant first, so no verb takes the calling app as an
 argument.
 
@@ -159,7 +164,9 @@ or a blob is written into a caller's buffer and returns its length, with a
 `*_size` verb beside it for blobs; a list is a count plus a packed buffer of
 ids; numbers are `int32`, as moy-spec's binding marshals them. A cart is its
 folder (or a built-in's title where it has none), a document `(kind, name)`, an
-app its registered id. The `persist` arguments are not in the ABI (question 7).
+app its registered id. `persist` is not in the ABI: no app passes it, and
+only the shell's own calls (boot restore, cycling) reach the look's
+`persist=False` path, past the role.
 
 ### 2.4 The roles, reshaped
 
@@ -170,7 +177,7 @@ app its registered id. The `persist` arguments are not in the ABI (question 7).
 | `surface` | `glyph` | Python-only | the toolkit's icon callable, until sprint 6 |
 | `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)`, `skin(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
 | `theme` | `set(name, variant)`, `set_variant(v)`, `set_skin(name)` | shell | the look coordinates caches, the skin and the wallpaper |
-| `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C, or shell (question 4) | history ops cross as bytes. A **session** is mount and readiness only (§2.6) |
+| `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (§12 answer 4); history ops cross as bytes. A **session** is mount and readiness only (§2.6) |
 | `carts` | `ids(out)`, `title(cart, buf)`, `slug`, `can_journal`, `load_deck`, `images`, `encode_image`, `save_deck`, `save_code`, `save_image`, `rescan` (the old `hydrate` and `apply`) | shell | the live list is the shell's; the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`) |
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
 | `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default |
@@ -178,7 +185,7 @@ app its registered id. The `persist` arguments are not in the ABI (question 7).
 | `wallpaper` | `current(buf)`, `fills(out)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)` | shell | `current` is the look's live `wallpaper_id`, which differs from the settings row after a boot fallback that does not persist (`runtime/appearance.py`); `preview` is a Python callable on the frame path |
 | `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file and its preview sidecar (`runtime/moy_image.py`'s, the plan's §2.2.1 row) |
 | `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open drawing, its settings rows; `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the drawing through `files`; Paint's `NEEDS` gains `files` |
-| `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM with a fixed cap (question 6); the code editor's lane keeps its calls |
+| `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD and keeps the old text. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
 | `install` | `hold()`, `release()` | C | the lease table |
 | `install` | `fit(...)`, `memory(&free,&block)`, `chip(buf)`, `runtimes(out)` | C | the engine's sizing |
 | `install` | `home(buf)`, `can_pick()`, `pick(name, size, host) -> request`, `poll`, `close`, `root(buf)`, `writable()`, `begin()`, `end()`, `rescan()`, `free(&bytes,&block)`, `find(folder) -> cart` | shell | |
@@ -239,10 +246,12 @@ Python:** the shell servers; the app objects and their hooks, which the Python
 WMs call; `register_app` and the bar contract; the look; the wallpaper renderer;
 `ui` and the ungated cart globals built on it.
 
-**Where the C runs.** The C rows read the spine's tables. The four consoles run
-the spine in C; the CPython host and the browser build run
-`runtime/moy_spine.py`, the twin (`docs/kernel_spine_2026-10.md`). A C-served
-verb on the host needs the C spine there: question 5.
+**Where the C runs.** The C rows read the spine's tables, so the spine is C on
+every tier before the grant lands (§12 answer 5): the four consoles run it in
+C already; the CPython host takes it through `tools/moy_spine_binding.py` and
+the browser build links `native/moy_spine/`, and the twin
+(`docs/kernel_spine_2026-10.md`) moves under `tests/` as the differential
+oracle the binding is fuzzed against.
 
 ## 4. The wasm import adapter
 
@@ -269,7 +278,7 @@ because an internal-flash write disables the cache
   `clipboard.text`) runs on the session thread under the row's seqlock, which
   its writer bumps around each write.
 
-Step 11's gate prices the hop per call on each S3.
+Step 9's gate prices the hop per call on each S3.
 
 **The grant and "no name".** A compiled app is a `type: "app"` cart with
 `"runtime": "wasm"` that declares the role extension, launched by the Player
@@ -293,8 +302,11 @@ changes, for a compiled app only:
 A compiled app that imports a shell row keeps the VM, and `why` names the
 import. A Lua or Python app is unaffected: neither runs with no VM.
 
-**Out of scope**: a compiled app as a registered, windowed Layer, with its
-lifecycle as exports and its input as an event queue (question 8).
+**Cart-shaped** (§12 answer 8): a compiled app runs as a compiled cart does,
+fullscreen, its loop the cart's. A compiled app as a registered, windowed
+Layer, with a window's surface, size and focus events, its lifecycle as
+exports and its input as an event queue, is sprint 6's, beside the toolkit's C
+primitives.
 
 ### 4.2 What moy-spec has to change
 
@@ -303,7 +315,7 @@ and nothing else. libmoy enforces it twice (`native/moycore/libmoy/moy_wasm.c`,
 vendored, never edited here): `moy_wasm_check` refuses another module, and
 `moy_wasm_check_bytes` types every import against the one table
 (`row_named`, `row_type_is`). So no conforming host can link a role import,
-ours included. The change (question 1):
+ours included. The change, opened as a proposal (§12 answer 1):
 
 - **The rule.** A compiled cart may also import from a module named by a
   vendor extension its manifest declares (§10's `vendor.feature` names: the
@@ -323,57 +335,33 @@ The role table stays vendor space, moybyte's (`docs/app_api_v1.md`). How a host
 binds an import — natives, adapters, the grant, the hop — is PORTING.md
 territory and never enters the spec.
 
-## 5. The `open()`-after-stop contract
-
-### 5.1 What sprint 4 left
+## 5. Which launches stop the VM
 
 After a stopped run, the start builds a fresh Workstation and WM, follows the
 route held in the kernel, and lands the launcher on its resume record
-(`native/moy_kernel/moy_kernel.h`). It covers one route: the stop is refused
-whenever the run's route is not HOME (`docs/kernel_cartpath_2026-10.md` §5.1),
-because a run started from anywhere else returns to a live Python object, and
-after a stop there is none. Under the `need` policy a stop happens only for a
-VM-free cart whose fit fails with the VM up, and sprint 4's gate has Doom
-loading after the scripted session with the VM up (#224), so the case is rare
-today. What the contract buys is that a stop is never refused for where the
-run came from, which matters as soon as carts or sessions grow past what fits
-with the VM up. Whether to build it now is question 2.
+(`native/moy_kernel/moy_kernel.h`; `docs/kernel_cartpath_2026-10.md` §5.4).
+That is the one surface a return start rebuilds, and this sprint keeps it so
+(§12 answer 2): **no app gains a way to come back after a stop.** There is no
+`place()`, no `open(place)` and no place table; the launcher's resume record
+stays the kernel's and the launcher's alone.
 
-### 5.2 The contract
-
-1. **The kinds.** The set of surfaces is the back-stack's kinds, derived from
-   them and held by a test: the launcher, the Editor's picker (`picker`) and
-   the Editor (`menu`, the common chain is launcher, picker, menu, run), the
-   six registered apps, `settings`, `update` and `webconsole`. A kind that does
-   not implement `place()` refuses the stop, with reason "place".
-2. **A place.** `place()` answers text naming where the person is, in ids: the
-   mode, the selection, the scroll, the open document as `(kind, name)`, the
-   cart as its folder. Never an object or a document's body.
-3. **Before every launch, on every tier**, the console calls `commit()` and then
-   `place()` on each kind on the back-stack and the return chain, and stores
-   each in the **place table**: a spine table, in `runtime/moy_spine.py` and
-   `native/moy_spine/` alike, one row per back-stack kind, 256 bytes each (the
-   resume record's size; the launcher's record becomes its row), in PSRAM,
-   never written to flash, cleared by `go_home`. A place over 256 bytes is
-   refused, not truncated, and counted; a `commit()` or `place()` that fails or
-   raises keeps the VM up for this run, with reason "place".
-4. **`open(place=None)`.** With no place an app opens at its root, as every
-   launch does today. With one, it lands where the place says, re-reading what
-   it names. A place naming something gone (a cart deleted through the webhost
-   while the VM was down) lands at that part's root (question 3).
-5. **The return start** re-registers the apps, rebuilds the back-stack's
-   surfaces bottom to top with `open(place)`, and executes the recorded route.
-   A return with the VM up is unchanged: the live object is there and `open` is
-   not called.
-6. **The refusal narrows** to a desk-window route and to item 1's reason, "place". The
-   S3 boards deny `runtime/wm_windowed.py`, and no board with the desk has the
-   stop lever.
-
-What each place holds is each surface's own; question 3 asks what a restored
-app keeps. Notes and the other user apps are runs themselves, and one run never
-sits under another. Lost at a stopped return, by sprint 4's §9 decision 2: the
-achievements counters and a toast mid-deadline; the clipboard too, unless
-question 6 keeps it.
+1. **A launch from the launcher** may stop the VM, by sprint 4's rules: under
+   the `need` policy only a VM-free cart that does not fit beside the VM
+   (`docs/kernel_cartpath_2026-10.md` §5), and Doom loads after the scripted
+   session with the VM up (#224). A compiled app joins the
+   VM-free carts when every import it makes is C-served (§4.1).
+2. **A launch from any other surface keeps the VM**, and `info` names the
+   reason **"place"**: the Editor's PLAY, a run an app started (Storybook's and
+   Get Carts' PLAY, Files' RUN), a desk window. The reason is sprint 4's
+   "route" refusal under the name the owner's answer gives it; the rule is
+   unchanged.
+3. **What a stopped return keeps** is kernel state (sprint 4's §5.4 list), and
+   this sprint adds two rows to it: the clipboard, a C role (§2.4), and the
+   grants of the shipped apps, which the return start re-registers onto the
+   rows they had, so `kstop N stop` reads the grant count flat. A user app's
+   grant is its run's and ends with it. Still lost at a stopped return, by
+   sprint 4's §9 decision 2: the achievements counters and a toast
+   mid-deadline.
 
 ## 6. `wallpaper.py` and `appearance.py`
 
@@ -409,17 +397,16 @@ go through Paint's registered app.
 | `runtime/app_context.py`: `Damage`, `Surface`, `Theme`, `_StoreRole`, `_RawFiles`, `Files`, `_RawCarts`, `Carts`, `Nav`, `Prefs`, `Notify`, `WallpaperRole`, `Installer` | the role table; C rows in `+native/moy_app/moy_app.c`; shell and Python-only rows on the Workstation's registered servers | every class; `ROLES`, `NO_STORE`, `AppContext` stay |
 | `runtime/system_api.py`: `_ROLE_FOR`, `granted_roles`, `NEVER_GRANTED`, `FILE_KINDS`, `DEFAULT_FILE_KIND`, `ScopedFiles`, `manifest_error`, `slug`, `app_id_for` | the grant in C | those; `make_system_api`, `wants_layout`, `is_text_app` stay |
 | `runtime/file_widgets.py`: `FileGridView` | the `files` role | its Workstation reads |
-| `runtime/moy_files.py`, `runtime/moy_file_ops.py` | C in `native/moy_store` (question 4) | both, if so |
+| `runtime/moy_files.py`, `runtime/moy_file_ops.py` | C in `native/moy_store`, a module the Zero denies (§12 answer 4) | both |
+| `runtime/moy_spine.py` | the C spine on the host (ctypes) and in the browser | moves under `tests/` as the oracle (§12 answer 5) |
 | `runtime/widgets.py`: `Clipboard` | a kernel row | the class |
 | `runtime/artwork.py`: `ArtworkService` | Paint's own model; the role is `current` and `follow` | the role's object form |
 | `runtime/appearance.py`: `set_theme` | writes the live token table, then recaches | nothing |
 | `runtime/wm_windowed.py`: `_LayoutCtx.install`; the fullscreen relayout | write the grants' surface rows | nothing |
 | `runtime/wallpaper.py` | the copy and sidecar rows go to C | the sidecar's Python half (`runtime/moy_image.py`'s) |
 | `runtime/console.py`, `runtime/console_spine.py`: `app_context`, the app registration | make the grants; register the servers | `AppContext`'s Workstation reach |
-| `runtime/console.py`: `resume_record`, `resume_launcher` | the launcher's `place` and `open(place)` | both |
-| `device/desktop_spine.py`: the return start | restore the back-stack from the place table | the launcher-only branch |
-| the six apps, `runtime/editor_app.py`, `runtime/launcher_layer.py`, the picker, Settings, the update and web-console screens | `place()` and `open(place)`; callers on the new shapes | `self._shell`, callback sessions, cart dicts from roles |
-| `native/moy_kernel/moy_kernel.h`: the resume record | the spine's place table | the record |
+| the six apps, `runtime/editor_app.py`, `runtime/launcher_layer.py` | callers on the new shapes | `self._shell`, callback sessions, cart dicts from roles |
+| `native/moy_play/moy_play_stop.c`, `runtime/moy_play.py`: the stop's "route" refusal | the reason "place" (§5) | nothing |
 | `native/moy_play/moy_play_rule.c` | the compiled app's clauses (§4.1) | nothing |
 
 ## 8. The pass order
@@ -437,41 +424,38 @@ code it pins lands (`tests/test_semantic_traces.py`, on both object models).
    drawn frame; the ratchet holding `docs/app_api_v1.md`'s table to the rows.
    No behaviour moves.
 2. **`ctx.shell` closed** (§2.7); `nav.app` deleted; the doc's `size` and
-   `notice` corrected.
-3. **The place table in the spine**, twin and C, with its read-back in
-   `kstop N stop`. Only if question 2 says build it, as are 4 and its gate row.
-4. **The place contract** (§5): `place()` and `open(place)` on every kind,
-   places written before every launch, the return start restoring the chain,
-   the refusal narrowed, the failures refusing the stop. Written in ids against
-   today's roles, so the ABI steps do not reopen it.
-5. **The C spine on the host and the browser**, if question 5 says so; the twin
-   kept under `tests/` as the differential oracle.
-6. **`+native/moy_app/`, the grant and the first C rows**: the module in its
+   `notice` corrected; `persist` out of the roles' verbs (§2.3); the stop's
+   "route" refusal named "place" (§5).
+3. **The C spine on the host and the browser** (§3): the CPython host and the
+   browser build run `native/moy_spine/`; `runtime/moy_spine.py` moves under
+   `tests/` as the differential oracle.
+4. **`+native/moy_app/`, the grant and the first C rows**: the module in its
    three bindings (denied on the Zero, which runs no apps); the grant as an
-   OWNER loan with its policy in C; `prefs`, `damage`, `clipboard`; their
-   Python classes deleted; a parity test across the bindings
-   (`tests/test_gfx_binding.py`'s pattern); the Bench role row.
-7. **Surface and theme**: the per-grant surface row written by
+   OWNER loan with its policy in C, keyed by the cart's `id` (§2.2); `prefs`,
+   `damage`, `clipboard` (its 4 KiB row); their Python classes deleted; a
+   parity test across the bindings (`tests/test_gfx_binding.py`'s pattern);
+   the Bench role row.
+5. **Surface and theme**: the per-grant surface row written by
    `_LayoutCtx.install` and the relayout, the canvas handle, the live token
    table and its generation; the five `pointer()` sites on the row. Goldens
    byte-identical, the desk's two-window golden included.
-8. **The shell servers for Python callers**: `carts`, `nav`, `notify`,
+6. **The shell servers for Python callers**: `carts`, `nav`, `notify`,
    `wallpaper`, `theme.set*`, `install`, `artwork` as `current`/`follow`,
    `ArtworkService` under Paint with `files` in Paint's `NEEDS`; sessions as
    `begin`/`end` with the gate per op; the raw views deleted; `system_api.py`
    and `app_context.py` reduced to their shims.
-9. **The user-files layer in C** (question 4): `runtime/moy_files.py` and
-   `runtime/moy_file_ops.py` crossed and deleted, history ops as bytes, the
-   codecs. If the answer is no, `files` stays shell-served over them and this
-   step does not run.
-10. **The ROLE upcall**: the argument-carrying door, its class in the counted
-    totals and `upcall_sites.txt`, `NEEDS_VM`.
-11. **The wasm import adapter** (§4), once moy-spec has the rule and libmoy is
-    re-vendored (`make vendor-libmoy`): the natives on the host, the boards and
-    the browser, the hop and the seqlock, the load-time grant check, the
-    verdict's new clauses, the fixture modules, an author's header from the
-    table.
-12. **The sprint's end**: `docs/app_api_v1.md` read whole against the code, the
+7. **The user-files layer in C** (§12 answer 4): `runtime/moy_files.py` and
+   `runtime/moy_file_ops.py` crossed into `native/moy_store` and deleted,
+   history ops as bytes, the codecs; the Zero denies the module; `files`
+   becomes C-served.
+8. **The ROLE upcall**: the argument-carrying door, its class in the counted
+   totals and `upcall_sites.txt`, `NEEDS_VM`.
+9. **The wasm import adapter** (§4), once moy-spec carries the proposal's
+   rule and libmoy is re-vendored (`make vendor-libmoy`): the natives on the
+   host, the boards and the browser, the hop and the seqlock, the load-time
+   grant check, the verdict's new clauses, the fixture modules, an author's
+   header from the table.
+10. **The sprint's end**: `docs/app_api_v1.md` read whole against the code, the
     gate on all five boards, the figures into #224 and #66.
 
 ## 9. The gate
@@ -488,7 +472,10 @@ against that bug before it goes green.
 | the desk | a golden with two app windows of different sizes | a console-wide surface row read from the wrong window |
 | the bus | a test leaks a session and asserts the panel still flushes, on the host's gate model and in the T-Deck's suite | a session holding the bus gate |
 | a wasm module reaches a role through an import | a fixture importing `prefs` and `theme` rows sets, reads and draws a token on the host's WAMR, in the browser suite and in the T-Deck's and the P4's suites, with zero upcalls of every class; the same module one permission short is refused at load naming the import; one importing a shell row keeps the VM with the import as `why`; the hop's µs per call on each S3 recorded in #224 | no adapter; a grant not enforced; a C row routed through Python; a write or a shell row run on the session thread; a verdict that ignores an import |
-| every shipped app restores after a stop (question 2) | each kind that can sit under a run (the launcher, the picker, the Editor, Storybook, Get Carts with a canned catalogue and no network, Files): driven to a place, a launch, then on the host the Workstation rebuilt over the same store and spine tables, and on the S3s a real stop (`vmstop force`) from Storybook's PLAY, Get Carts' PLAY, the Editor's PLAY and Files' RUN, the restored frame equal to the frame before the launch and the chain intact. Every other kind: `place` → `open(place)` → `place` round-trips. A place naming a deleted cart; a place at the maximum length of every name; one over it refused and counted; a raising `place()` keeping the VM up | a kind without a place; `open(place)` at the root; a chain lost below the top; an edit not committed; a truncated place; a stale place that raises |
+| only the launcher's launches stop the VM (§5) | on the S3s, `vmstop force` from the launcher stops and returns to the resume record; from Storybook's PLAY, Get Carts' PLAY, the Editor's PLAY and Files' RUN the run keeps the VM and `info` reads "place" | a stop from a surface no return start rebuilds |
+| the clipboard survives a stop | text put before `kstop 1 stop` reads back after it; a put over 4 KiB answers BAD and keeps the old text | a clipboard in the GC heap; a truncated put |
+| grants keyed by `id` | a cart renamed (its title, then its folder with an `id` in the manifest) keeps its prefs; two carts with one title and different `id`s keep apart | a grant keyed by the title's slug |
+| the C spine everywhere | the host's ctypes spine and the browser's linked one pass the spine's suite and the differential fuzz against the twin under `tests/` | a host that still runs the twin; a twin that drifts unseen |
 | grants do not leak | `kstop N stop` reads the grant count flat | a grant re-made at every start |
 | user apps unchanged | `tests/test_user_apps.py`: one cart opened twice, a permission apart; Notes on every console | a grant widened or narrowed by the move to C |
 | the standing meters | all five boards passing; the roster uncapped on each S3; Bench, µs per op; `KERNEL_SRAM` with the launcher up, beside internal SRAM free and its low-water (radios on), inside the plan's §6.1 share; each image's headroom over its floor (the Zero: 256 KiB); time from reboot to first light and to `state`; the return start's parts | what every sprint's gate guards against |
@@ -499,8 +486,8 @@ against that bug before it goes green.
   WMs keep `ws._dirty`; both fold at the one point the frame gate folds today,
   so there is one mechanism (`docs/surface_model_v1.md` §8). A test damages
   through the role and asserts the repaint.
-- **The spec rule is moy-spec's to accept.** Steps 1 to 10 stand without it;
-  step 11 waits for it.
+- **The spec rule is moy-spec's to accept.** Steps 1 to 8 stand without it;
+  step 9 waits for it.
 - **Theming lands beside this.** Sprint 5 moves no pixels, so a restyling
   theming phase does not share a step with it; the token generation is
   `look_gen`, so whichever lands second adopts the other's.
@@ -511,7 +498,8 @@ against that bug before it goes green.
   none is per-frame, and building one is store work no role needs.
 - Python callers reach shell verbs directly; only a compiled app uses ROLE.
 - `glyph`, `install.net` and `install.keep` are Python-only rows.
-- The place table is the spine's, so the host has it without the C spine.
+- No surface but the launcher comes back after a stop (§5); the stop's
+  refusal for any other route is "place".
 
 ## 12. The owner's answers (2026-10-10)
 
@@ -519,8 +507,9 @@ against that bug before it goes green.
    vendor-extension import rule, `(module, name, type)` extension tables in
    libmoy's checks, and `moy check` reporting declared extension imports.
 2. **No place contract.** Under `need` a stop is rare, so a launch from any
-   surface but the launcher keeps the VM (the refusal reason is "place"), and
-   §5's contract, the place table and steps 3 and 4 of §8 are not built.
+   surface but the launcher keeps the VM (the refusal reason is "place"). The
+   reviewed design's place contract (`place()`, `open(place)`, a place table
+   in the spine) and its two steps are not built; §5 states the rule.
 3. Moot with answer 2.
 4. **User files cross to C** (`moy_files.py`, `moy_file_ops.py` into
    `native/moy_store`) as their own step; the Zero denies the module.
@@ -541,12 +530,12 @@ Each is corrected in its own file, in the step named:
 
 | claim | lives in | step |
 |---|---|---|
-| the role table, `ctx.shell`, `batch(fn)`'s raw view, `surface.size`, `notify.notice` | `docs/app_api_v1.md`, `runtime/app_context.py`'s header | 1, 2, 8 |
-| the spine's tables have no place table; the resume record is the launcher's alone | `docs/kernel_spine_2026-10.md`, `native/moy_kernel/moy_kernel.h` | 3 |
-| a stop is refused for any route but HOME | `docs/kernel_cartpath_2026-10.md` §5.1 | 4 |
-| the CPython host and the browser run the spine's twin | `docs/kernel_spine_2026-10.md` | 5 |
-| the clipboard is lost at a stopped return | `docs/kernel_cartpath_2026-10.md` §5.4, §9 | 6 |
-| `ArtworkService` is a role service; `runtime/wallpaper.py`, `runtime/appearance.py` and `runtime/chrome.py`'s token tables cross | `docs/native_kernel_2026-09.md` §2.2.1 | 7, 8 |
-| the user-files layer stays Python | `docs/kernel_store_2026-10.md` | 9 |
-| a VM-free cart is a game with the native permission set | `native/moy_play/moy_play.h`, `docs/kernel_cartpath_2026-10.md` §2 | 11 |
-| a compiled cart imports only from `"moy"` | moy-spec's SPEC.md §16.2 and libmoy's checks | 11 (moy-spec first) |
+| the role table, `ctx.shell`, `batch(fn)`'s raw view, `surface.size`, `notify.notice` | `docs/app_api_v1.md`, `runtime/app_context.py`'s header | 1, 2, 6 |
+| the stop's refusal for a route but HOME is "route" | `docs/kernel_cartpath_2026-10.md` §5.1, `runtime/moy_play.py`'s `STOP_WHYS` | 2 |
+| the CPython host and the browser run the spine's twin | `docs/kernel_spine_2026-10.md` | 3 |
+| a user app's prefs and strikes are keyed by its title's slug | `runtime/system_api.py`, `docs/app_api_v1.md` | 4 |
+| the clipboard is lost at a stopped return | `docs/kernel_cartpath_2026-10.md` §5.4, §9 | 4 |
+| `ArtworkService` is a role service; `runtime/wallpaper.py`, `runtime/appearance.py` and `runtime/chrome.py`'s token tables cross | `docs/native_kernel_2026-09.md` §2.2.1 | 5, 6 |
+| the user-files layer stays Python | `docs/kernel_store_2026-10.md` | 7 |
+| a VM-free cart is a game with the native permission set | `native/moy_play/moy_play.h`, `docs/kernel_cartpath_2026-10.md` §2 | 9 |
+| a compiled cart imports only from `"moy"` | moy-spec's SPEC.md §16.2 and libmoy's checks | 9 (moy-spec first) |
