@@ -151,8 +151,6 @@ def test_the_doc_table_lists_exactly_the_rows():
     verbs = _verbs()
     assert list(doc) == list(verbs), "the doc's roles are not the table's"
     for role, vs in verbs.items():
-        if role == "shell":
-            continue
         assert doc[role] == vs, "docs/app_api_v1.md's %s verbs drift: %s vs %s" % (
             role, doc[role], vs)
 
@@ -184,7 +182,7 @@ def _count_rows(ws, app):
     ctx = app.ctx
     for r in _rows():
         obj = getattr(ctx, r["role"], None)
-        if obj is None or r["role"] == "shell":
+        if obj is None:
             continue
         real = getattr(obj, r["verb"])
         key = r["role"] + "." + r["verb"]

@@ -243,10 +243,10 @@ class AppearanceAppLayer:
         self.sel = max(0, min(int(index), len(items) - 1))
         item = items[self.sel]
         if self.mode == "themes":
-            self._theme.set(item[0], persist=True)
+            self._theme.set(item[0])
             self.status = (item[0] + " " + self._theme.variant()).upper()
         else:
-            self._wall.select(self._wall_id(item), persist=True)
+            self._wall.select(self._wall_id(item))
             self.status = self._wall_title(item).upper()
         self._damage.all()
 
@@ -285,7 +285,7 @@ class AppearanceAppLayer:
         return out
 
     def _set_variant(self, variant):
-        self._theme.set_variant(variant, persist=True)
+        self._theme.set_variant(variant)
         self.status = (self._theme.name() + " " + variant).upper()
         self._damage.all()
 

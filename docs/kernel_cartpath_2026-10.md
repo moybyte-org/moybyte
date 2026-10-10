@@ -325,7 +325,7 @@ The run keeps the VM when any of these holds, and `info` names which:
   free PSRAM, or its block over the largest one, with every byte of the VM's
   heap added back): the fit notice, with the VM up;
 - the run's route is not HOME (the Editor's PLAY, a run an app started, a
-  desk window): a return start rebuilds the launcher alone, and no other
+  desk window), reason "place": a return start rebuilds the launcher alone, and no other
   surface comes back after a stop (owner, 2026-10-10;
   `docs/kernel_appabi_2026-10.md` §5);
 - a WiFi lease is held by a Python owner (the kernel's own holders, the link

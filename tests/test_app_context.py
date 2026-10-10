@@ -387,10 +387,10 @@ def test_the_no_store_sentinel_renders_as_words(tmp_path):
 def test_prefs_namespace_defaults_to_the_app_id(tmp_path):
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("prefs",))
-    ctx.prefs.set("scroll", 7, persist=False)
+    ctx.prefs.set("scroll", 7)
     assert ws.system.get("demo_scroll") == 7
     assert ctx.prefs.get("scroll") == 7
-    ctx.prefs.clear("scroll", persist=False)
+    ctx.prefs.clear("scroll")
     assert ws.system.text("demo_scroll") is None
     assert ctx.prefs.get("scroll", "fallback") == "fallback"
 
@@ -673,11 +673,14 @@ def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     assert _system_json(ws)["theme_variant"] == "light"
 
 
-def test_set_variant_without_persist_leaves_the_stored_choice_alone(tmp_path):
+def test_the_shells_unpersisted_variant_leaves_the_stored_choice_alone(tmp_path):
+    """`persist` is not in the app ABI: an app's set_variant always persists,
+    and only the shell's own calls (boot restore, cycling) take the look's
+    `persist=False` path."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
     theme.set_variant("light")
-    theme.set_variant("dark", persist=False)
+    ws.look.set_theme_variant("dark", persist=False)
     assert theme.variant() == "dark" and theme.light() is False
     assert _system_json(ws)["theme_variant"] == "light"
 
@@ -704,10 +707,8 @@ def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):
     ws = _ws(tmp_path)
     nav = ws.app_context("demo", ("nav",)).nav
     assert ws.screen == "launcher"
-    assert nav.app("no_such_app") is None
     assert nav.open_app("no_such_app") is False
     assert ws.screen == "launcher"
-    assert nav.app("calc") is ws._apps_by_id["calc"]
     assert nav.open_app("calc") is True
     assert ws.screen == "calc"
 
@@ -896,7 +897,7 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
 MIGRATED = ("calc_app", "appearance_app", "storybook_app",
-            "files_app", "artwork", "app_shell", "getcarts_app")
+            "files_app", "artwork", "app_shell", "getcarts_app", "file_widgets")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)
@@ -915,37 +916,13 @@ def test_no_migrated_module_reaches_the_workstation(mod):
             "%s:%d still reaches through ws" % (mod, line_no)
 
 
-# `ctx.shell` is the un-narrowed Workstation and exists for ONE reason: the
-# shared FileGridView widget still duck-types on ws.carts_store / ws.carts_root /
-# ws._with_sd. This set may only SHRINK -- giving that widget the files role is
-# what deletes the escape hatch, and Phase 7 must never grant it to a cart.
-SHELL_CONSUMERS = {"PaintAppLayer", "FilesAppLayer"}
-
-
-def test_the_shell_escape_hatch_has_a_pinned_consumer_list():
-    have = set()
+def test_no_role_hands_out_the_console():
+    """The roles are the whole line between an app and the console: none of
+    them is the Workstation (the escape hatch `ctx.shell` was, until the file
+    grid took the files role), so an app reaches the shell only through a
+    role. The modules' own reach is the test above's."""
+    assert "shell" not in _ac.ROLES
     for mod, cls in APP_TARGETS:
-        if "shell" in _declared(mod, cls):
-            have.add(cls)
-    assert have <= SHELL_CONSUMERS, \
-        "new ctx.shell consumer(s) %s -- use a role, or argue in app_api_v1.md" % (
-            sorted(have - SHELL_CONSUMERS),)
-    assert have == SHELL_CONSUMERS, (
-        "ctx.shell consumers shrank to %s -- update SHELL_CONSUMERS (good news)"
-        % sorted(have))
-
-
-def test_the_only_shell_use_is_constructing_the_file_grid():
-    """Pins WHY the hatch is open. Every `ctx.shell` reference in an app module
-    must be handing the raw Workstation to FileGridView; anything else is a
-    reach-in wearing the hatch's clothes."""
-    for mod, _cls in APP_TARGETS:
+        assert "shell" not in _declared(mod, cls), cls
         src = (RUNTIME / (mod + ".py")).read_text(encoding="utf-8")
-        for line_no, line in enumerate(src.splitlines(), 1):
-            if "ctx.shell" not in line and "self._shell" not in line:
-                continue
-            ok = ("FileGridView(" in line
-                  or "self._shell = ctx.shell" in line
-                  or line.strip().startswith("#"))
-            assert ok, "%s:%d uses the shell hatch for something else: %s" % (
-                mod, line_no, line.strip())
+        assert "ctx.shell" not in src, mod

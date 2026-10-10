@@ -43,18 +43,20 @@ TOUCH = _Ptr(visible=False)              # touch places the pointer HIDDEN
 CURSOR = _Ptr(visible=True)              # trackball / mouse
 
 
-class _FakeWS:
-    carts_store = None
-    carts_root = None
+class _NoFiles:
+    """A `files` role with no store behind it (app_context.Files' answers)."""
 
-    def _with_sd(self, fn):
-        return fn()
+    def list(self, kind):
+        return (None, "NO STORAGE")
+
+    def load(self, kind, name):
+        return (None, "NO STORAGE")
 
 
 def _grid(fs=1, rect=(0, 0, 320, 200), kind="sprites"):
     """A grid over `kind` -- deliberately NOT "drawings", so no thumbnail decode
     (and therefore no store) is reachable and every tile draws the placeholder."""
-    g = FileGridView(_FakeWS(), kind)
+    g = FileGridView(_NoFiles(), kind)
     g.names = NAMES
     g.set_rect(rect, fs)
     return g

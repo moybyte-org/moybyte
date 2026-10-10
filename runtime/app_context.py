@@ -50,7 +50,9 @@ cart's manifest permissions rather than on a class constant.
     ctx.artwork     the ArtworkService capability handle (Paint's model)
     ctx.clipboard   the system cut/copy/paste buffer (#132)
     ctx.install     carts from outside: the network, its lease, the store (#124)
-    ctx.shell       THE ESCAPE HATCH -- see below
+
+No role hands out the console itself: an app reaches the shell only through
+the roles above (`tests/test_app_context.py` holds it).
 
 `ctx.files` and `ctx.carts` are deliberately two roles and not one. Apps use
 the first almost exclusively (a document is a user file); only Storybook
@@ -66,13 +68,6 @@ Storybook hand
 their CodeEditor). The
 same blind spot hid Storybook's `getattr(self.ws, "artwork", None)`. When a
 count says zero and the feature ships, suspect the grep.
-
-`ctx.shell` is the un-narrowed `Workstation`, and it exists for exactly one
-reason: shared WIDGETS (`file_widgets.FileGridView`) still duck-type on
-`ws.carts_store` / `ws.carts_root` / `ws._with_sd`. It is a declared NEED like
-any other, so the four apps that still pass it are counted rather than hidden,
-and it is the one role `make_system_api` will never grant. Reaching through it
-for anything a real role covers is the bug this module exists to remove.
 
 ## Conventions that are not negotiable
 
@@ -116,7 +111,7 @@ NO_STORE = _NoStore()
 # The complete role vocabulary. `AppContext` refuses an unknown NEED, so a typo
 # in a NEEDS tuple fails at construction instead of at the first draw.
 ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-         "notify", "wallpaper", "artwork", "clipboard", "install", "shell")
+         "notify", "wallpaper", "artwork", "clipboard", "install")
 
 
 # -- damage ------------------------------------------------------------------
@@ -233,17 +228,17 @@ class Theme:
     # module an app imports directly, exactly as `ui` is imported directly.
     # `skin.names()` is the same shape of thing and travels the same way.
 
-    def set(self, name, persist=True, variant=None):
-        self.__ws.look.set_theme(name, persist=persist, variant=variant)
+    def set(self, name, variant=None):
+        self.__ws.look.set_theme(name, variant=variant)
 
-    def set_variant(self, variant, persist=True):
-        self.__ws.look.set_theme_variant(variant, persist=persist)
+    def set_variant(self, variant):
+        self.__ws.look.set_theme_variant(variant)
 
-    def set_skin(self, name, persist=True):
+    def set_skin(self, name):
         """Install a widget skin and remember it. `ws.look` owns the install
         because the skin is process-wide state in `ui` and its name is a
         persisted setting -- exactly like the theme."""
-        self.__ws.look.set_skin(name, persist=persist)
+        self.__ws.look.set_skin(name)
 
 
 # -- the storage roles' shared machinery -------------------------------------
@@ -656,7 +651,7 @@ class Carts(_StoreRole):
 class Nav:
     """Where the console goes next.
 
-    `app()`/`open_app()` are the APP-TO-APP seam. `docs/app_api_v1.md` listed
+    `open_app()` is the APP-TO-APP seam. `docs/app_api_v1.md` listed
     app-to-app as an explicit v1 NON-GOAL and it shipped anyway -- `files_app`
     reached the notebook app's `open_named(...)` across five sites, because
     "open this doc" is a real product need and there was no seam for it.
@@ -666,18 +661,12 @@ class Nav:
     def __init__(self, ws):
         self.__ws = ws
 
-    def app(self, app_id):
-        """The registered app layer for `app_id`, or None when this build does
-        not carry it."""
-        return self.__ws._apps_by_id.get(app_id)
-
-    def open_app(self, app, cart=None):
-        """Spawn a registered app (an id string or the layer itself). False
-        when no cart carries that app's identity."""
-        if isinstance(app, str):
-            app = self.__ws._apps_by_id.get(app)
-            if app is None:
-                return False
+    def open_app(self, app_id, cart=None):
+        """Spawn the registered app `app_id`. False when this build does not
+        carry it or no cart carries its identity."""
+        app = self.__ws._apps_by_id.get(app_id)
+        if app is None:
+            return False
         return bool(self.__ws.open_app(app, cart))
 
     def is_system_app(self, cart):
@@ -794,11 +783,11 @@ class Prefs:
     def get(self, key, default=None):
         return self.__ws.system.get(self._prefix + key, default)
 
-    def set(self, key, value, persist=True):
-        self.__ws.system.set(self._prefix + key, value, persist)
+    def set(self, key, value):
+        self.__ws.system.set(self._prefix + key, value)
 
-    def clear(self, key, persist=True):
-        self.__ws.system.delete(self._prefix + key, persist)
+    def clear(self, key):
+        self.__ws.system.delete(self._prefix + key)
 
 
 # -- notifications -----------------------------------------------------------
@@ -851,8 +840,8 @@ class WallpaperRole(_StoreRole):
     def cart_by_id(self, wp_id):
         return self._shell().look.wp_cart_by_id(wp_id)
 
-    def select(self, wp_id, persist=True):
-        self._shell().look.select_wallpaper(wp_id, persist=persist)
+    def select(self, wp_id):
+        self._shell().look.select_wallpaper(wp_id)
 
     def preview(self, cv, rect, dt):
         """Composite the live backdrop into `rect` -- the Appearance preview."""
@@ -1059,5 +1048,3 @@ class AppContext:
             self.clipboard = getattr(ws, "clipboard", None)
         if "install" in needs:
             self.install = Installer(ws)
-        if "shell" in needs:
-            self.shell = ws

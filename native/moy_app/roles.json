@@ -57,7 +57,6 @@
     {"role": "carts", "verb": "images", "server": "python", "grant": "never", "wasm": null},
     {"role": "carts", "verb": "save_image", "server": "python", "grant": "never", "wasm": null},
     {"role": "carts", "verb": "encode_image", "server": "python", "grant": "never", "wasm": null},
-    {"role": "nav", "verb": "app", "server": "python", "grant": "launch", "wasm": null},
     {"role": "nav", "verb": "open_app", "server": "python", "grant": "launch", "wasm": null},
     {"role": "nav", "verb": "is_system_app", "server": "python", "grant": "launch", "wasm": null},
     {"role": "nav", "verb": "projects", "server": "python", "grant": "launch", "wasm": null},
@@ -114,7 +113,6 @@
     {"role": "install", "verb": "free", "server": "python", "grant": "never", "wasm": null},
     {"role": "install", "verb": "find", "server": "python", "grant": "never", "wasm": null},
     {"role": "install", "verb": "net", "server": "python", "grant": "never", "wasm": null},
-    {"role": "install", "verb": "keep", "server": "python", "grant": "never", "wasm": null},
-    {"role": "shell", "verb": "workstation", "server": "python", "grant": "never", "wasm": null}
+    {"role": "install", "verb": "keep", "server": "python", "grant": "never", "wasm": null}
   ]
 }

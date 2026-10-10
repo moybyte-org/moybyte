@@ -428,9 +428,9 @@ class PaintAppLayer:
     TOOL_ICONS = ("edit", "paint", "eraser", "fill", "picker",
                   "line", "rect_tool", "circle", "spray", "move")
     # The shell roles this app uses (runtime/app_context.py). The DOCUMENT model
-    # lives on the ArtworkService (ctx.artwork), which is why this app declares
-    # no storage role at all; `shell` is only the FileGridView duck-type.
-    NEEDS = ("surface", "theme", "damage", "artwork", "shell")
+    # lives on the ArtworkService (ctx.artwork); `files` is the drawings grid's
+    # (FileGridView lists and loads through it).
+    NEEDS = ("surface", "theme", "damage", "artwork", "files")
 
     def __init__(self, ctx, names):
         self.ctx = ctx
@@ -473,7 +473,7 @@ class PaintAppLayer:
         self._rng_state = 0x5EED123
         # Autosave (#108): drawings persist on an idle debounce -- a kid never
         # presses save. Marks set _unsaved; draw(dt) flushes after AUTOSAVE_S.
-        self.grid = FileGridView(ctx.shell, "drawings")
+        self.grid = FileGridView(ctx.files, "drawings")
         self._unsaved = False
         self._idle = 0.0
 
@@ -1361,7 +1361,7 @@ class ArtworkService:
         if wp_id is None:
             self.last_error = "NO WALLPAPER"
             return False
-        self._wall.select(wp_id, persist=True)
+        self._wall.select(wp_id)
         self.last_error = ""
         return True
 

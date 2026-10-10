@@ -2076,7 +2076,7 @@ def _count(obj, role):
     tally, kept on the instance so the class and every other holder are
     untouched."""
     for r, verb in ROWS:
-        if r != role or (role == "shell"):
+        if r != role:
             continue
         real = getattr(obj, verb)
 
@@ -2103,12 +2103,10 @@ def _n(v):
 
 
 def roles_trace(ws):
-    roles = [r for r in ROLES if r != "shell"]
-    ctx = ws.app_context("tracer", roles + ["shell"], prefs_ns="tracer")
+    ctx = ws.app_context("tracer", ROLES, prefs_ns="tracer")
     say("roles", " ".join(sorted(k for k in ROLES if hasattr(ctx, k))))
-    for role in roles:
+    for role in ROLES:
         _count(getattr(ctx, role), role)
-    CALLED["shell.workstation"] = 1 if ctx.shell is ws else 0
 
     # -- damage
     ws._dirty = False
@@ -2202,8 +2200,7 @@ def roles_trace(ws):
 
     # -- nav
     nv = ctx.nav
-    say("nav", nv.app("calc") is not None, nv.app("nope"), nv.is_system_app(cart),
-        cart in nv.projects())
+    say("nav", nv.is_system_app(cart), cart in nv.projects())
     say("open_app", nv.open_app("calc"), nv.open_app("nope"), ws.wm.top_kind())
     ws.go_home()
     say("edit", nv.edit(cart, "code"), ws.wm.top_kind())
@@ -2382,7 +2379,7 @@ def _roles_trace_board(exe, tmp_path):
 
 
 ROLES_TRACE = """\
-roles artwork carts clipboard damage files install nav notify prefs shell surface theme wallpaper
+roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
 damage True True
 surface True 1 1 False True
 glyph drawn
@@ -2417,7 +2414,7 @@ carts 1 True
 deck [None,None] [None,None] ['{"pages": []}',None]
 code [['ok',''],None]
 cart image {} None [None,None] [2,2,b4]
-nav True None False True
+nav False True
 open_app True False calc
 edit True menu
 edit_file True desktop

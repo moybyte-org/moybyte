@@ -119,7 +119,7 @@ def test_every_role_is_either_grantable_or_named_ungrantable():
 
 
 def test_the_dangerous_roles_are_not_grantable():
-    for role in ("shell", "carts", "wallpaper", "artwork"):
+    for role in ("carts", "wallpaper", "artwork"):
         assert role in system_api.NEVER_GRANTED
         assert role not in system_api._ROLE_FOR.values()
 

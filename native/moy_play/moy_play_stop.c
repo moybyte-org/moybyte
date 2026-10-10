@@ -200,7 +200,7 @@ static uint64_t vm_heap_bytes(void) {
 uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags,
                               uint32_t fit[5]) {
     if (!(flags & MOY_PLAY_HOME)) {
-        return MOY_PLAY_KEEP_ROUTE;
+        return MOY_PLAY_KEEP_PLACE;
     }
     const moy_spine_kernel_t *k = moy_spine_kernel(NULL);
     if (k != NULL) {

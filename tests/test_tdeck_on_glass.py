@@ -451,6 +451,10 @@ def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
     on_glass.doom_runs_with_the_vm_down(board, ctrl_c=True)
 
 
+def test_a_run_off_the_shelf_keeps_the_vm_for_its_place(board):
+    on_glass.a_run_off_the_shelf_keeps_the_vm_for_its_place(board)
+
+
 def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
     on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
 

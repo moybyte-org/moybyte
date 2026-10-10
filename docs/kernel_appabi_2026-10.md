@@ -353,9 +353,8 @@ stays the kernel's and the launcher's alone.
    VM-free carts when every import it makes is C-served (§4.1).
 2. **A launch from any other surface keeps the VM**, and `info` names the
    reason **"place"**: the Editor's PLAY, a run an app started (Storybook's and
-   Get Carts' PLAY, Files' RUN), a desk window. The reason is sprint 4's
-   "route" refusal under the name the owner's answer gives it; the rule is
-   unchanged.
+   Get Carts' PLAY, Files' RUN), a desk window. The rule is sprint 4's
+   (`docs/kernel_cartpath_2026-10.md` §5.1).
 3. **What a stopped return keeps** is kernel state (sprint 4's §5.4 list), and
    this sprint adds two rows to it: the clipboard, a C role (§2.4), and the
    grants of the shipped apps, which the return start re-registers onto the

@@ -369,7 +369,7 @@ def _rc(rc):
 
 
 # The stop verdict's words (moy_play.h's MOY_PLAY_STOPS and KEEP_*), in order.
-STOP_WHYS = ("stops", "rule", "lever", "fits", "route", "lease", "ota", "front", "big")
+STOP_WHYS = ("stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big")
 # launch()'s flags beyond `paced` (moy_play.h).
 HOME = 2
 UNSIGNED = 4

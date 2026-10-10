@@ -942,6 +942,44 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
     return psram
 
 
+def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
+    """Only the launcher comes back after a stop (docs/kernel_appabi_2026-10.md
+    section 5): the same cart `vmstop force` stops the VM for from the shelf,
+    started the way Storybook's and Get Carts' PLAY start it (a workspace and
+    a run whose caller is a live Python surface), keeps the VM, and the run
+    names the reason "place"."""
+    import time
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    try:
+        assert board.pyexec(
+            "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
+            "ws._open_workspace(c)\n"
+            "ws.run(ws.project, ws.launcher_layer)" % title), board.last_error
+        st = None
+        for _ in range(20):
+            time.sleep(0.5)
+            st = board.state()
+            if st.get("run"):
+                break
+        assert st["run"]["stop"] == "place" and st["run"]["vm_down"] is False, st
+        assert st.get("vm") is not False, st
+        # A run with the VM up is the console's to end (the kernel's `end`
+        # answers only a run in its front with the VM down).
+        assert board.pyexec("ws.exit()"), board.last_error
+        for _ in range(30):
+            time.sleep(0.5)
+            st = board.state()
+            if st.get("stack") == ["launcher"]:
+                break
+        assert st.get("stack") == ["launcher"], st
+    finally:
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
 def a_stuck_run_with_the_vm_down_is_ended(board):
     """The stuck compiled fixture with the VM stopped (`vmstop force`): the
     runaway watch ends its frame on the VM service task's run, the board says

@@ -77,8 +77,8 @@ class FileGridView:
     ("sel", name) on a first tap, ("page", +/-1) on the page chips, None
     outside -- an open-flow embedder treats sel and pick alike."""
 
-    def __init__(self, ws, kind="drawings"):
-        self.ws = ws
+    def __init__(self, files, kind="drawings"):
+        self.files = files         # the embedder's `files` role (app_context)
         self.kind = kind
         self.names = ()
         self.sel = -1
@@ -138,14 +138,8 @@ class FileGridView:
         selection survives BY NAME -- newest-first reorders (a copy, a save)
         must never silently move the highlight to a different item."""
         keep = self.sel_name()
-        ws = self.ws
-        names = ()
-        if ws.carts_store is not None and ws.carts_root is not None:
-            try:
-                names = tuple(ws._with_sd(
-                    lambda: ws.carts_store.list_files(self.kind, ws.carts_root)))
-            except Exception:  # noqa: BLE001 -- degrade to an empty gallery
-                names = ()
+        listed, _err = self.files.list(self.kind)
+        names = tuple(listed) if listed else ()
         self.names = names
         live = set(names)
         for key in list(self._thumbs):
@@ -175,7 +169,7 @@ class FileGridView:
 
     def select(self, name):
         """Point the selection at `name` (or clear it with None); the page
-        follows. The embedders' one way to move the highlight from code."""
+        follows it. The embedders' one way to move the highlight from code."""
         self.sel = self.names.index(name) if name in self.names else -1
         if self.sel >= 0:
             self.page = self.sel // self._per_page()
@@ -184,11 +178,9 @@ class FileGridView:
         key = (name, w, h)
         if key in self._thumbs:
             return self._thumbs[key]
-        ws = self.ws
         bmp = None
         try:
-            blob = ws._with_sd(
-                lambda: ws.carts_store.load_file(self.kind, name, ws.carts_root))
+            blob, _err = self.files.load(self.kind, name)
             data = decode_moyimg(blob) if blob else None
             if data is not None:
                 bmp = Bitmap(w, h, cover_indices(data[2], data[0], data[1], w, h))

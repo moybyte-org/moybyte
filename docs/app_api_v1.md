@@ -88,14 +88,13 @@ roles it declared:
 | `ctx.theme` | the live panel-theme tokens and the verbs that change the look | `colors()`, `light()`, `name()`, `variant()`, `skin()`, `set()`, `set_variant()`, `set_skin()` |
 | `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps | `readable()`, `ready()`, `batch()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, projects' decks, code and images | `readable()`, `ready()`, `batch()`, `all()`, `can_journal()`, `slug()`, `hydrate()`, `apply()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
-| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `app()`, `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()` |
+| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()` |
 | `ctx.prefs` | per-app settings on `system.json`, namespaced per app | `get()`, `set()`, `clear()` |
 | `ctx.notify` | achievement events | `achieve()` |
 | `ctx.wallpaper` | the desktop-backdrop capability (Appearance and Paint only) | `current()`, `carts()`, `fills()`, `id_for()`, `cart_by_id()`, `select()`, `preview()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | the ArtworkService itself (Paint's document model) | `attach()`, `doc_name()`, `editable()`, `is_paint_app()`, `load()`, `new_doc()`, `open_named()`, `resend()`, `save()`, `set_wallpaper()`, `sync_wallpaper()`, `targets()`, `thumbnail()`, `usage()`, `why_read_only()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132) | `put_text()`, `text()` |
 | `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `session()`, `rescan()`, `free()`, `find()`, `net()`, `keep()` |
-| `ctx.shell` | the escape hatch -- see below | `ws` |
 
 Read that module for the signatures. The verbs column is the role table's
 (`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
@@ -121,11 +120,10 @@ Four things about the roles are load-bearing:
   Several verbs in one storage session go through `batch(fn)`, whose `fn` gets a
   raw view of the same verbs.
 
-**`ctx.shell` is the un-narrowed Workstation, and it is open for one reason:**
-the shared `file_widgets.FileGridView` still duck-types on `ws.carts_store` /
-`ws.carts_root` / `ws._with_sd`. Two apps declare it to construct that widget,
-its consumer list is pinned so it can only shrink, and it is the one role a user
-app will never be granted. Giving the widget the files role closes it.
+**No role hands out the console.** An app reaches the shell only through the
+roles above; the shared `file_widgets.FileGridView` lists and loads through the
+`files` role its embedder passes it. `tests/test_app_context.py` fails an app
+module that names the Workstation.
 
 ## Lifecycle: `close()` is the LEAVING hook
 

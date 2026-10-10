@@ -82,10 +82,6 @@ same choice went the other way for moycore's verb table, for the opposite
 reason: there, what is enumerable is what libmoy OWNS, and a missed name is a
 lost feature rather than a granted capability.)
 
-  * `shell` -- the un-narrowed `Workstation`. It exists for four shipped apps
-    that construct `file_widgets.FileGridView`, its consumer list can only
-    shrink, and handing it to a cart would make every other line of this module
-    decoration.
   * `carts` -- the CART store. A cart that can author carts can write
     executable content, i.e. escalate itself; this is the single most important
     entry in the list and it is why `ctx.files` and `ctx.carts` were split into
@@ -104,7 +100,7 @@ lost feature rather than a granted capability.)
     and a cart still never touches the buffer -- the handle's `cut`/`copy`/
     `paste` are the only things that read it.
   * Firmware update and reboot are not roles at all -- they live on
-    `ws.updater` / `machine`, reachable only through `shell`.
+    `ws.updater` / `machine`, and no role hands out the console.
 
 ## UNGATED: `ui`, `theme()`, `screen()`, `bar_h()`
 
@@ -175,7 +171,7 @@ def is_text_app(cart):
 # Roles a cart is never handed, whatever its manifest says. Enforced by
 # `_ROLE_FOR` being an allowlist; named here so the refusal is READABLE and so
 # `tests/test_user_apps.py` can pin it against `app_context.ROLES`.
-NEVER_GRANTED = ("shell", "carts", "install", "wallpaper", "artwork",
+NEVER_GRANTED = ("carts", "install", "wallpaper", "artwork",
                  "damage", "surface", "notify")
 
 

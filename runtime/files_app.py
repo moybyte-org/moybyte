@@ -127,7 +127,7 @@ class FilesAppLayer(ListShellApp):
     # the text page, a project in the Editor) --
     # app_api_v1 called that a v1 non-goal and it shipped anyway, because it is
     # a real product need; `shell` is only the FileGridView duck-type.
-    NEEDS = ("surface", "theme", "damage", "files", "nav", "artwork", "shell")
+    NEEDS = ("surface", "theme", "damage", "files", "nav", "artwork")
 
     GRID_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
     DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # the kinds the router opens
@@ -146,14 +146,13 @@ class FilesAppLayer(ListShellApp):
         self._store = ctx.files       # ListShellApp's storage role
         self._nav = ctx.nav
         self._art = ctx.artwork
-        self._shell = ctx.shell       # FileGridView's duck-type only
         self.names = names
         cv = ctx.surface.canvas()
         self.layout = FilesLayout(cv.w, cv.h, self._surf.font_scale(),
                                   self._surf.windowed(),
                                   self._surf.chrome_scale())
         self.mode = "kinds"           # kinds | grid | projects | trash | rename | game
-        self.grid = FileGridView(ctx.shell, "drawings")
+        self.grid = FileGridView(ctx.files, "drawings")
         self.counts = {}
         self.trash = ()
         self.status = "MY FILES"
@@ -203,7 +202,7 @@ class FilesAppLayer(ListShellApp):
 
     def _enter_kind(self, kind):
         if self.grid.kind != kind:
-            self.grid = FileGridView(self._shell, kind)
+            self.grid = FileGridView(self._store, kind)
         self.grid.refresh()
         self.grid.select(None)
         self.mode = "grid"
