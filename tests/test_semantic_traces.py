@@ -2104,12 +2104,15 @@ def _count(obj, role):
 
 
 def _c_called(app, before):
-    """The C rows called since `before` (an earlier `app.counts()`)."""
+    """The C rows called since `before` (an earlier `app.counts()`), and the
+    rows the binding serves in Python, which it counts itself."""
     import moy_app
     now = app.counts()
     for i, name in enumerate(moy_app.rows()):
         if now[i] > before[i]:
             CALLED[name] = CALLED.get(name, 0) + now[i] - before[i]
+    for name, n in app.served().items():
+        CALLED[name] = CALLED.get(name, 0) + n
 
 
 def _n(v):
@@ -2144,19 +2147,25 @@ def roles_trace(ws):
     # -- surface
     s = ctx.surface
     cv = s.canvas()
-    say("surface", cv is ws.sys_canvas, s.font_scale(), s.chrome_scale(),
-        s.windowed(), s.pointer() is ws.pointer)
+    say("surface", cv is ws.sys_canvas, s.size() == (cv.w, cv.h), s.font_scale(),
+        s.chrome_scale(), s.windowed(), s.bar_h() == ws.app_bar_h())
+    ptr, pt = ws.pointer, s.pointer()
+    say("pointer", ptr is not None, pt is None if ptr is None else
+        tuple(pt) == (ptr.x, ptr.y, bool(ptr.down), bool(ptr.click),
+                      bool(ptr.visible)))
     s.glyph("x", (0, 0, 16, 16), 7, cv)
     say("glyph drawn")
 
     # -- theme
     t = ctx.theme
     th = t.colors()
-    say("theme", t.name(), t.variant(), t.skin(), t.light(), th is ws.theme_colors,
-        len(th) > 10)
+    say("theme", t.name(), t.variant(), t.skin(), t.light(), th == ws.theme_colors,
+        len(th) > 10, t.token(0) == th["panel"], t.colors() is th)
+    gen = t.gen()
     t.set("forest")
     t.set_variant("light")
-    say("theme set", t.name(), t.variant(), t.light(), t.colors() is ws.theme_colors)
+    say("theme set", t.name(), t.variant(), t.light(), t.colors() == ws.theme_colors,
+        t.gen() > gen)
     t.set_skin(t.skin())
     t.set("night", variant="dark")
     say("theme back", t.name(), t.variant(), t.light())
@@ -2409,10 +2418,11 @@ def _roles_trace_board(exe, tmp_path):
 ROLES_TRACE = """\
 roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
 damage 1 2 0
-surface True 1 1 False True
+surface True True 1 1 False True
+pointer True True
 glyph drawn
-theme night dark default False True True
-theme set forest light True True
+theme night dark default False True True True True
+theme set forest light True True True
 theme back night dark False
 prefs absent None 5
 prefs set [1,'two'] [1,'two']

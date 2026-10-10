@@ -1,6 +1,6 @@
 # Map (grep -n a name to jump there):
-#   Surface        the system canvas an app draws on, and its state
-#   Theme          the live panel-theme tokens and the verbs that change them
+#   SurfaceServer  surface's Python-only row: the toolkit's glyph callable
+#   ThemeServer    theme's Python rows: the verbs that change the look
 #   _StoreRole     what Files, Carts and WallpaperRole share
 #   _RawFiles      the user-files verbs with no session and no error mapping
 #   Files          the user-files store (`files/<kind>/` beside the carts)
@@ -37,8 +37,9 @@ cart's manifest permissions rather than on a class constant.
 ## The roles
 
     ctx.damage      the whole-system-surface invalidation flag (C)
-    ctx.surface     the system canvas, its font scale, chrome mode, pointer
-    ctx.theme       the live token set + the theme/variant verbs
+    ctx.surface     the canvas the app draws on, its size, scales, window, bar,
+                    pointer (C, but glyph)
+    ctx.theme       the live token set (C) + the theme/variant/skin verbs
     ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode
@@ -59,8 +60,11 @@ table, keyed by the app's id, carrying its role mask, its files kind and its
 prefs namespace (docs/kernel_appabi_2026-10.md section 2.2). The roles marked
 (C) above are native/moy_app's role objects over that grant -- each method a C
 row of `native/moy_app/roles.json`, the state the kernel's (the damage flags,
-the settings rows, the clipboard's 4 KiB of text) -- and the rest are this
-module's classes until their steps cross them. A shipped app's grant is
+the grant's surface row, the live token table, the settings rows, the
+clipboard's 4 KiB of text) -- and the rest are this module's classes until
+their steps cross them. A row the table serves in Python (`surface.glyph`,
+`theme.set*`) is the server the console registers for its role
+(`SurfaceServer`, `ThemeServer`). A shipped app's grant is
 idempotent by its id, so a start re-registering the app finds the row it had;
 a user app's (`run=True`) is its run's, ended when the run ends
 (`AppContext.end`).
@@ -124,90 +128,36 @@ ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
          "notify", "wallpaper", "artwork", "clipboard", "install")
 
 
-# -- surface -----------------------------------------------------------------
+# -- the servers of surface's and theme's Python rows --------------------------
 
-class Surface:
-    """The system canvas an app draws on, and the state its geometry depends
-    on. Every verb is live: a canvas promote/degrade (#39) or a world flip
-    (#105) is picked up on the next call, so nothing here can go stale."""
+class SurfaceServer:
+    """`surface.glyph`, the role's Python-only row (native/moy_app/roles.json):
+    the toolkit's icon callable, which moy_app's Surface calls with the app's
+    arguments. Every other surface verb is the grant's C surface row, which
+    the console writes (`Workstation._surface_write`)."""
 
     def __init__(self, ws):
         self.__ws = ws
 
-    def canvas(self):
-        """The SYSTEM canvas (#39) -- a distinct SystemCanvas where the tier
-        has one, else the game canvas itself."""
-        return self.__ws.sys_canvas
-
-    def font_scale(self):
-        """The EFFECTIVE system font scale (1 on a shared 320x240 canvas whose
-        framebuf text cannot scale, regardless of the setting)."""
-        return self.__ws.look.effective_font_scale()
-
-    def chrome_scale(self):
-        """The scale the OS chrome around this app is laid out at (#203) -- the
-        font scale, or the board's tap-target floor when that is larger. An app
-        needs it to know how tall the bar band above it is; its own text stays on
-        `font_scale`."""
-        return self.__ws.look.effective_chrome_scale()
-
-    def windowed(self):
-        """True while the app is a WINDOW on the desk (#105): the WM's title
-        strip carries the close, so the app's own layout reserves no bar band."""
-        return self.__ws.windowed_chrome
-
-    def pointer(self):
-        """The live `Pointer` (x/y/down/click/visible) or None.
-
-        `handle_pointer(px, py, click)` carries no press state, so a
-        drag-based app could not be written on the declared API at all -- which
-        is why four shipped apps reach for `ws.pointer` today. This is that
-        seam."""
-        return self.__ws.pointer
-
     def glyph(self, kind, rect, c, cv=None):
-        """Draw a centred `chrome._GLYPHS` icon. Pass this bound method as
+        """Draw a centred `chrome._GLYPHS` icon. Pass `ctx.surface.glyph` as
         `glyph_draw=` to `ui.chip` -- the icon vocabulary bridge."""
         self.__ws._glyph(kind, rect, c, cv)
 
 
-# -- theme -------------------------------------------------------------------
+class ThemeServer:
+    """`theme.set`, `set_variant` and `set_skin`: the look coordinates its
+    caches, the skin and the wallpaper, so the verbs that change it are the
+    look's (docs/visual_identity_v1.md Section 4.3). The reads are the C token
+    table the look writes at every switch (`Appearance.publish`).
 
-class Theme:
-    """The live panel-theme tokens and the verbs that change them
-    (docs/visual_identity_v1.md Section 4.3)."""
+    A theme PICKER wants the OTHER themes' tokens too. That is not a role:
+    `chrome.THEMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
+    module an app imports directly, exactly as `ui` is imported directly.
+    `skin.names()` is the same shape of thing and travels the same way."""
 
     def __init__(self, ws):
         self.__ws = ws
-
-    def colors(self):
-        """The live token dict. HOIST IT: `th = ctx.theme.colors()` once per
-        draw, never per widget."""
-        return self.__ws.theme_colors
-
-    def light(self):
-        """True when the live theme's tool surface is LIGHT -- THE gate every
-        surface's light branch reads."""
-        return self.__ws.look.light_chrome()
-
-    def name(self):
-        return self.__ws.look.theme_name
-
-    def variant(self):
-        return self.__ws.look.theme_variant
-
-    def skin(self):
-        """The installed WIDGET skin's name (`runtime/skin.py`) -- the third
-        axis of the look, beside the theme family and its dark/light variant.
-
-        The active value is a role read, like `name()`; the CATALOG is not
-        (see below)."""
-        return self.__ws.look.skin_name
-
-    # A theme PICKER wants the OTHER themes' tokens too. That is not a role:
-    # `chrome.THEMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
-    # module an app imports directly, exactly as `ui` is imported directly.
-    # `skin.names()` is the same shape of thing and travels the same way.
 
     def set(self, name, variant=None):
         self.__ws.look.set_theme(name, variant=variant)
@@ -981,9 +931,11 @@ class AppContext:
         if "damage" in needs:
             self.damage = _moy_app.Damage(app, self.grant)
         if "surface" in needs:
-            self.surface = Surface(ws)
+            self.surface = _moy_app.Surface(app, self.grant)
+            # The new grant's surface row, from what the shell shows now.
+            ws._surface_write()
         if "theme" in needs:
-            self.theme = Theme(ws)
+            self.theme = _moy_app.Theme(app, self.grant)
         if "files" in needs:
             self.files = Files(ws)
         if "carts" in needs:

@@ -2,14 +2,16 @@
 tests/test_moy_app.py holds native/moy_app's bindings to (the ctypes one on
 CPython, the native module on the desktop MicroPython).
 
-This is what `runtime/app_context.py`'s `Damage` and `Prefs`,
-`runtime/widgets.py`'s `Clipboard` and `runtime/system_api.py`'s grant policy
-did before sprint 5 step 4 moved them to C, reshaped only where the design
-moved the line (docs/kernel_appabi_2026-10.md section 2): a grant table keyed
-by the app's id, the role mask checked on every call, the damage flags the
-frame gate takes, a clipboard of at most CLIP_MAX bytes of text, and the key a
-cart's grant is made under (its id, else its title's slug, ASCII only). It runs
-on CPython and on MicroPython alike, and nothing in the runtime imports it.
+This is what `runtime/app_context.py`'s `Damage`, `Surface`, `Theme` and
+`Prefs`, `runtime/widgets.py`'s `Clipboard` and `runtime/system_api.py`'s grant
+policy did before sprint 5 steps 4 and 5 moved them to C, reshaped only where
+the design moved the line (docs/kernel_appabi_2026-10.md section 2): a grant
+table keyed by the app's id, the role mask checked on every call, the damage
+flags the frame gate takes, each grant's surface row and the pointer it is
+offset from, the live token table under its generation, a clipboard of at most
+CLIP_MAX bytes of text, and the key a cart's grant is made under (its id, else
+its title's slug, ASCII only). It runs on CPython and on MicroPython alike, and
+nothing in the runtime imports it.
 """
 
 import json
@@ -20,9 +22,22 @@ ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
           "notify", "wallpaper", "artwork", "clipboard", "install")
-_ROWS = ("damage.all", "damage.again", "prefs.get", "prefs.set",
+_ROWS = ("damage.all", "damage.again",
+         "surface.canvas", "surface.size", "surface.font_scale",
+         "surface.chrome_scale", "surface.windowed", "surface.bar_h",
+         "surface.pointer",
+         "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
+         "theme.variant", "theme.skin",
+         "prefs.get", "prefs.set",
          "prefs.clear", "clipboard.put_text", "clipboard.text",
          "clipboard.kind", "clipboard.seq")
+_TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
+           "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
+           "ink_dim", "border", "selection", "selection_ink", "focus", "play",
+           "author", "danger", "surface_light", "bar", "bar_edge", "bar_light",
+           "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive")
+_FLAGS = ("surface_light", "bar_light")
+NAME_MAX = 31
 _KINDS = ("docs", "drawings", "sprites", "music")
 _PERMS = (("appearance", "theme"), ("files", "files"), ("launch", "nav"),
           ("prefs", "prefs"), ("clipboard", "clipboard"))
@@ -46,6 +61,20 @@ def perms():
     return _PERMS
 
 
+def tokens():
+    return _TOKENS
+
+
+class Pointer(tuple):
+    """surface.pointer()'s answer: five numbers, by name as by index."""
+
+    x = property(lambda self: self[0])
+    y = property(lambda self: self[1])
+    down = property(lambda self: self[2])
+    click = property(lambda self: self[3])
+    visible = property(lambda self: self[4])
+
+
 class App:
     def __init__(self, settings):
         self._rows = settings
@@ -55,6 +84,16 @@ class App:
         self._clip = None
         self._seq = 0
         self._counts = [0] * len(_ROWS)
+        self._surf = {}             # handle -> (canvas row, w, h, ox, oy, bar_h, fs, cs, win)
+        self._canvases = [None] * SLOTS
+        self._ptr = None
+        self._servers = {}
+        self._served = {}
+        self._tokens = {}
+        self._names = ["", "", ""]  # theme, variant, skin
+        self._tgen = 0
+        self._colors = None
+        self._colors_gen = 0
 
     def grant(self, app_id, roles, kind=None, ns=None, run=False, owner=0):
         if not isinstance(app_id, str):
@@ -78,6 +117,7 @@ class App:
             if not any((h & 0xFF) == slot for h in self._grants):
                 h = self._gen[slot] << 12 | 12 << 8 | slot
                 self._grants[h] = [app_id, bool(run), set(mask), kind, ns]
+                self._surf[h] = (0, 0, 0, 0, 0, 0, 0, 0, False)
                 return h
         raise OSError(_ENOSPC, "the grant table is full")
 
@@ -98,6 +138,47 @@ class App:
 
     def damage_drop(self):
         self._damage &= ~_ALL
+
+    def surface_write(self, canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0):
+        row = getattr(canvas, "_crow", None)
+        ch = getattr(row, "h", 0) if row is not None else 0
+        for g, grant in self._grants.items():
+            if "surface" in grant[2]:
+                self._surf[g] = (ch, w, h, ox, oy, bar_h, fs, cs, bool(windowed))
+                self._canvases[g & 0xFF] = canvas
+
+    def bind_pointer(self, p):
+        self._ptr = p
+        return p is not None
+
+    def theme_write(self, name, variant, colors):
+        tok = {}
+        for k, v in colors.items():
+            if k not in _TOKENS:
+                raise ValueError("a token outside the vocabulary")
+            tok[k] = int(v)
+        if len(name.encode()) > NAME_MAX or len(variant.encode()) > NAME_MAX:
+            raise ValueError("an argument the role refuses")
+        self._tokens = tok
+        self._names[0], self._names[1] = name, variant
+        self._tgen += 1
+
+    def theme_write_skin(self, skin):
+        if len(skin.encode()) > NAME_MAX:
+            raise ValueError("an argument the role refuses")
+        self._names[2] = skin
+        self._tgen += 1
+
+    def serve(self, role, server):
+        self._servers[role] = server
+
+    def served(self):
+        return dict(self._served)
+
+    def _serve(self, role, verb):
+        key = role + "." + verb
+        self._served[key] = self._served.get(key, 0) + 1
+        return getattr(self._servers[role], verb)
 
     def counts(self):
         return tuple(self._counts)
@@ -128,6 +209,93 @@ class Damage(_Role):
     def again(self):
         self._app._hold(self._g, "damage", "damage.again")
         self._app._damage |= _AGAIN
+
+
+class Surface(_Role):
+    def _row(self, row):
+        self._app._hold(self._g, "surface", row)
+        return self._app._surf[self._g]
+
+    def canvas(self):
+        self._row("surface.canvas")
+        return self._app._canvases[self._g & 0xFF]
+
+    def size(self):
+        r = self._row("surface.size")
+        return (r[1], r[2])
+
+    def font_scale(self):
+        return self._row("surface.font_scale")[6]
+
+    def chrome_scale(self):
+        return self._row("surface.chrome_scale")[7]
+
+    def windowed(self):
+        return self._row("surface.windowed")[8]
+
+    def bar_h(self):
+        return self._row("surface.bar_h")[5]
+
+    def pointer(self):
+        r = self._row("surface.pointer")
+        p = self._app._ptr
+        if p is None:
+            return None
+        return Pointer((p.x - r[3], p.y - r[4], bool(p.down), bool(p.click),
+                        bool(p.visible)))
+
+    def glyph(self, *a, **kw):
+        return self._app._serve("surface", "glyph")(*a, **kw)
+
+
+class Theme(_Role):
+    def colors(self):
+        app = self._app
+        app._hold(self._g, "theme", "theme.colors")
+        if app._colors is None or app._colors_gen != app._tgen:
+            d = {}
+            for k in _TOKENS:
+                if k in app._tokens:
+                    v = app._tokens[k]
+                    d[k] = bool(v) if k in _FLAGS else v
+            app._colors, app._colors_gen = d, app._tgen
+        return app._colors
+
+    def token(self, role):
+        self._app._hold(self._g, "theme", "theme.token")
+        role = int(role)
+        if not 0 <= role < len(_TOKENS):
+            raise ValueError("an argument the role refuses")
+        return self._app._tokens.get(_TOKENS[role])
+
+    def gen(self):
+        self._app._hold(self._g, "theme", "theme.gen")
+        return self._app._tgen
+
+    def light(self):
+        self._app._hold(self._g, "theme", "theme.light")
+        return bool(self._app._tokens.get("surface_light", 0))
+
+    def name(self):
+        self._app._hold(self._g, "theme", "theme.name")
+        return self._app._names[0]
+
+    def variant(self):
+        self._app._hold(self._g, "theme", "theme.variant")
+        return self._app._names[1]
+
+    def skin(self):
+        self._app._hold(self._g, "theme", "theme.skin")
+        return self._app._names[2]
+
+    def set(self, *a, **kw):
+        return self._app._serve("theme", "set")(*a, **kw)
+
+    def set_variant(self, *a, **kw):
+        return self._app._serve("theme", "set_variant")(*a, **kw)
+
+    def set_skin(self, *a, **kw):
+        return self._app._serve("theme", "set_skin")(*a, **kw)
 
 
 class Prefs(_Role):

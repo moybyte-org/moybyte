@@ -84,8 +84,8 @@ roles it declared:
 | role | what it is | verbs |
 |---|---|---|
 | `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
-| `ctx.surface` | the system canvas the app draws on, its scales, the desk's window flag, the live pointer, the chrome glyph painter | `canvas()`, `font_scale()`, `chrome_scale()`, `windowed()`, `pointer()`, `glyph()` |
-| `ctx.theme` | the live panel-theme tokens and the verbs that change the look | `colors()`, `light()`, `name()`, `variant()`, `skin()`, `set()`, `set_variant()`, `set_skin()` |
+| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the host strip's rows (`bar_h()`, what a user app's ungated `bar_h()` reads), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`); and the chrome glyph painter | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `pointer()`, `glyph()` |
+| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's, variant's and skin's names; and the verbs that change the look | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `skin()`, `set()`, `set_variant()`, `set_skin()` |
 | `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps | `readable()`, `ready()`, `batch()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, projects' decks, code and images | `readable()`, `ready()`, `batch()`, `all()`, `can_journal()`, `slug()`, `hydrate()`, `apply()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()` |
@@ -99,8 +99,11 @@ roles it declared:
 Read that module for the signatures. The verbs column is the role table's
 (`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
 Every context holds a **grant**, a row of native/moy_app's grant table keyed by
-the app's id; `damage`, `prefs` and `clipboard` are native/moy_app's role
-objects over it, each method a C row (the table's `server` column says which).
+the app's id; `damage`, `surface`, `theme`, `prefs` and `clipboard` are
+native/moy_app's role objects over it, each method a C row but for the rows
+the table serves in Python (`surface.glyph`, `theme.set*`), which call the
+server the console registers for the role (the table's `server` column says
+which).
 Four things about the roles are load-bearing:
 
 - **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the

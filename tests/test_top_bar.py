@@ -140,7 +140,7 @@ def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     ws.make_api = host_app.make_api
     ws.carts_store = moy_carts
     ws.carts_root = carts_dir
-    ws.pointer = console.Pointer(320, 240)
+    ws.set_pointer(console.Pointer(320, 240))
     ws.load_system()
     assert ws.look.icon_sheet is None              # never wired
     ws.frame(1 / 30)                          # launcher bar renders (glyph fallback)

@@ -234,10 +234,10 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
 
-_ROLE_CLASSES = ("Surface", "Theme", "Files", "Carts", "Nav",
+_ROLE_CLASSES = ("Files", "Carts", "Nav",
                  "Notify", "WallpaperRole", "_RawFiles", "_RawCarts")
 # The C roles' types (native/moy_app's, Python classes on the host binding).
-_C_ROLE_CLASSES = ("Damage", "Prefs", "Clipboard")
+_C_ROLE_CLASSES = ("Damage", "Surface", "Theme", "Prefs", "Clipboard")
 
 
 def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
@@ -785,16 +785,18 @@ def test_the_ungated_verbs_answer_for_every_app_cart(tmp_path):
     strip rather than raise."""
     ws = _ws(tmp_path)
     canvas = ws.sys_canvas
-    ns = _api.make_system_api(ws.app_context, {"title": "Plain"},
-                              canvas=canvas, bar_h=lambda: 18)
+    ns = _api.make_system_api(ws.app_context, {"title": "Plain"}, canvas=canvas)
     assert ns["ui"] is not None
     assert ns["screen"]() is canvas
-    assert ns["bar_h"]() == 18
-    assert ns["theme"]() is ws.theme_colors
+    # The grant's surface row's bar: the host strip's rows, what the shell
+    # draws, whichever the strip is now.
+    assert ns["bar_h"]() == ws.app_bar_h() > 0
+    assert ns["theme"]() == ws.theme_colors
     ws.look.set_theme("berry")
-    assert ns["theme"]() is ws.theme_colors      # live tokens, never a snapshot
+    assert ns["theme"]() == ws.theme_colors      # live tokens, never a snapshot
+    assert ns["theme"]() is ns["theme"]()        # one dict per generation
     bare = _api.make_system_api(ws.app_context, {"title": "Plain"})
-    assert bare["screen"]() is None and bare["bar_h"]() == 0
+    assert bare["screen"]() is None and bare["bar_h"]() == ws.app_bar_h()
 
 
 def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
@@ -815,7 +817,7 @@ def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
         assert ws.look.theme_name == name
     ns["set_theme"]("berry")
     assert ws.look.theme_name == "berry"
-    assert ns["theme"]() is ws.theme_colors
+    assert ns["theme"]() == ws.theme_colors
     assert _system_json(ws)["theme"] == "berry"
 
 

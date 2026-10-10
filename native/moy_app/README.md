@@ -8,9 +8,9 @@ role table (one row per verb, its `server` saying where it is served), and
 | file | what it is |
 |---|---|
 | `roles.json` | the role table: role, verb, server (`python`, `shell` or `c`), the permission that grants it, its wasm import type |
-| `moy_app.h`, `moy_app.c` | the state (`moy_appabi_t`): the grant table (kind GRANT, rows keyed by the app's id, SHIPPED idempotent by id, RUN ended with its run), the damage flags, the clipboard's 4 KiB of text, the per-row counters, prefs written into a settings store; the policy (permission to role, the files kinds, the two-kinds refusal, the key a cart's grant is made under); the C rows |
-| `modmoy_app.c` | the MicroPython binding, module `moy_app`: `App(settings)`, `kernel(fresh)`, the role types `Damage`, `Prefs`, `Clipboard` over a grant, and the policy |
-| `micropython.cmake`, `micropython.mk` | the boards', and the desktop's and browser's, builds; it reads `native/moy_spine`'s headers and links beside it |
+| `moy_app.h`, `moy_app.c` | the state (`moy_appabi_t`): the grant table (kind GRANT, rows keyed by the app's id, SHIPPED idempotent by id, RUN ended with its run, each with the surface row the shell writes), the damage flags, the live token table under its generation (the theme's vocabulary, `moy_app_token_name`), the pointer the surface rows read (a `moy_input_ptr_t` the console binds, let go when the VM ends), the clipboard's 4 KiB of text, the per-row counters, prefs written into a settings store; the policy (permission to role, the files kinds, the two-kinds refusal, the key a cart's grant is made under); the C rows |
+| `modmoy_app.c` | the MicroPython binding, module `moy_app`: `App(settings)`, `kernel(fresh)`, the shell's writes (`surface_write`, `bind_pointer`, `theme_write`, `serve`), the role types `Damage`, `Surface`, `Theme`, `Prefs`, `Clipboard` over a grant, and the policy. A row served in Python calls the server the console registered for its role, counted in `served()` |
+| `micropython.cmake`, `micropython.mk` | the boards', and the desktop's and browser's, builds; it reads `native/moy_spine`'s headers and links beside it, and `native/moy_input`'s pointer type |
 
 The state is the kernel's on a board (`moy_app_kernel`, from the spine's
 allocator, so PSRAM): made once, never freed, its prefs the kernel's settings

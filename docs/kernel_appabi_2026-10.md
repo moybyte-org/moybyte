@@ -516,6 +516,18 @@ against that bug before it goes green.
   a hop to the VM. The damage flags fold at the frame gate's existing fold, one
   mechanism. Each C row counts its calls in C, the counter the trace's coverage
   and the budgets read; a size query (no buffer) that succeeds is not a call.
+- Step 5 (2026-10-10): the console writes every surface grant's row from what
+  it shows at each change (`Workstation._surface_write`: a relayout, a layout
+  context's install with the window's origin, the canvas promote and degrade,
+  a responsive app cart's canvas, a new grant), and `tests/test_roles.py`
+  fails a read whose row is not the shell's at that moment. The canvas object
+  a row answers is the binding's, per grant slot, beside the row's CANVAS
+  handle. The pointer row reads the console's `moy_input_ptr_t` live, bound by
+  `set_pointer` and let go when the VM ends (`moy_app_vm_stop`). `theme.colors`
+  is a C row answering the generation the binding's dict is keyed on. A user
+  app's context holds `surface` for the ungated `bar_h()`. The rows served in
+  Python call the server the console registers per role (`app.serve`) and are
+  counted in the binding (`app.served()`).
 
 ## 12. The owner's answers (2026-10-10)
 

@@ -1084,14 +1084,14 @@ def _lic_open(ws, app):
     assert app.phase == "licence"
 
 
-def _lic_drag(app, x, y0, dy, steps=8, dt_ms=16.0):
+def _lic_drag(ws, app, x, y0, dy, steps=8, dt_ms=16.0):
     """Press at (x, y0) over the licence box, drag by `dy` over `steps`
     samples `dt_ms` apart (so the release carries a real velocity), release
     at the end -- `ui.DragTap`'s press/move/release shape, fed the way `_tap`
     already drives this app's buttons (straight into `handle_pointer`, the
     pointer's own `.down` set alongside it)."""
     app._lic_frame_dt_ms = dt_ms
-    ptr = app._surf.pointer()
+    ptr = ws.pointer
     ptr.down = True
     app.handle_pointer(x, y0, True)                # press edge
     for i in range(1, steps + 1):
@@ -1109,7 +1109,7 @@ def test_a_drag_scrolls_the_licence_text(tmp_path):
     assert app.lic[2] == 0
     area = app.layout.lic_area()
     x, y0 = area[0] + area[2] // 2, area[1] + area[3] // 2
-    _lic_drag(app, x, y0, -3 * app.layout.line_h * 4)   # finger moves UP
+    _lic_drag(ws, app, x, y0, -3 * app.layout.line_h * 4)   # finger moves UP
     assert app.lic[2] > 0, "a drag must move the pixel offset, not a page"
     assert app.phase == "licence"                       # still on the screen
 
@@ -1122,7 +1122,7 @@ def test_a_tap_on_the_licence_text_does_nothing(tmp_path):
     _lic_open(ws, app)
     area = app.layout.lic_area()
     x, y = area[0] + area[2] // 2, area[1] + area[3] // 2
-    ptr = app._surf.pointer()
+    ptr = ws.pointer
     ptr.down = True
     app.handle_pointer(x, y, True)      # press
     ptr.down = False
@@ -1153,10 +1153,10 @@ def test_the_licence_scroll_clamps_at_both_ends(tmp_path):
     _lic_open(ws, app)
     area = app.layout.lic_area()
     x, y0 = area[0] + area[2] // 2, area[1] + area[3] // 2
-    _lic_drag(app, x, y0, -100000)                  # way past the last line
+    _lic_drag(ws, app, x, y0, -100000)                  # way past the last line
     max_off = len(app.lic[1]) * app.layout.line_h - area[3]
     assert app.lic[2] == max_off
-    _lic_drag(app, x, y0, 100000)                   # way past the top
+    _lic_drag(ws, app, x, y0, 100000)                   # way past the top
     assert app.lic[2] == 0
 
 

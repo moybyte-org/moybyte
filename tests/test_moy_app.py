@@ -1,7 +1,8 @@
 """native/moy_app, the app ABI's kernel half, against the Python it replaced.
 
-One script drives the grants, the policy and the C rows -- damage, prefs and
-the clipboard -- and logs every answer; it runs over three implementations and
+One script drives the grants, the policy and the C rows -- damage, the surface
+rows over a pointer, the token table, prefs and the clipboard -- and logs every
+answer; it runs over three implementations and
 the logs must be equal line for line (tests/test_gfx_binding.py's pattern):
 
   * the oracle, tests/app_twin.py over tests/spine_twin.py's Settings: what
@@ -29,7 +30,37 @@ import spine_twin                                 # noqa: E402
 from unix_mp import require_unix_mp               # noqa: E402
 
 SCRIPT = r'''
-def run(sp, ap, say):
+class _Row:
+    h = 0x3005
+
+
+class _Canvas:
+    _crow = _Row()
+
+
+class _Plain:
+    pass
+
+
+class _Servers:
+    def __init__(self, say):
+        self.say = say
+
+    def glyph(self, kind, rect, c, cv=None):
+        self.say("glyph", kind, rect, c, cv)
+
+    def set(self, name, variant=None):
+        self.say("set", name, variant)
+
+    def set_variant(self, v):
+        self.say("set_variant", v)
+
+    def set_skin(self, name):
+        self.say("set_skin", name)
+        return 7
+
+
+def run(sp, ap, say, mi):
     saved = []
     rows = sp.Settings(saved.append)
     app = ap.App(rows)
@@ -93,10 +124,79 @@ def run(sp, ap, say):
     other = app.grant("files", ("clipboard",))
     say("shared", len(ap.Clipboard(app, other).text()))
 
+    # -- the surface rows
+    sg = app.grant("paint", ("surface", "theme"))
+    s = ap.Surface(app, sg)
+    say("unwritten", s.canvas(), s.size(), s.font_scale(), s.chrome_scale(),
+        s.windowed(), s.bar_h(), s.pointer())
+    cv = _Canvas()
+    say("write", app.surface_write(cv, 320, 240, 2, 3, True, 18, 10, 20))
+    say("surface", s.canvas() is cv, s.size(), s.font_scale(), s.chrome_scale(),
+        s.windowed(), s.bar_h())
+    late = app.grant("late", ("surface",))
+    say("late", ap.Surface(app, late).canvas(), ap.Surface(app, late).size())
+    plain = _Plain()
+    app.surface_write(plain, 800, 480, 1, 1, False, 0)
+    say("plain", ap.Surface(app, late).canvas() is plain, s.canvas() is plain,
+        s.size(), s.windowed(), ap.Surface(app, g).__class__ is ap.Surface)
+    app.surface_write(cv, 320, 240, 2, 3, True, 18, 10, 20)
+    ptr = mi.Pointer(320, 240)
+    ptr.place(50, 60)
+    ptr.down = True
+    say("bind", app.bind_pointer(ptr))
+    pt = s.pointer()
+    say("pointer", tuple(pt), pt.down, pt.click, pt.visible, pt.x, pt.y)
+    ptr.down = False
+    ptr.place(11, 25)
+    say("live", tuple(s.pointer()))
+    say("unbind", app.bind_pointer(None), s.pointer())
+    srv = _Servers(say)
+    app.serve("surface", srv)
+    app.serve("theme", srv)
+    s.glyph("close", (1, 2, 3, 4), 7)
+    s.glyph("play", (0, 0, 8, 8), 9, cv=None)
+
+    # -- the theme rows
+    t = ap.Theme(app, sg)
+    say("blank", t.colors(), t.gen(), t.light(), t.name(), t.variant(), t.skin(),
+        t.token(0))
+    app.theme_write("night", "dark", {"panel": 60, "edge": 13, "surface_light": False})
+    d = t.colors()
+    say("theme", sorted(d.items()), t.colors() is d, t.gen(), t.light(), t.name(),
+        t.variant(), t.token(0), t.token(1), t.token(9), t.token(20))
+    app.theme_write_skin("outline")
+    say("skin", t.skin(), t.gen(), t.colors() is d, t.colors() == d)
+    app.theme_write("machine", "light", {"surface_light": True, "panel": 1,
+                                         "bar_light": True})
+    say("light", t.light(), sorted(t.colors().items()), t.name(), t.variant())
+    for bad in ({"nope": 1}, ):
+        try:
+            app.theme_write("x", "dark", bad)
+            say("wrote", bad)
+        except ValueError:
+            say("refused token")
+    try:
+        app.theme_write("y" * 40, "dark", {})
+        say("wrote long")
+    except ValueError:
+        say("refused name")
+    try:
+        t.token(99)
+        say("token 99")
+    except ValueError:
+        say("refused role")
+    say("kept", t.name(), t.gen())
+    t.set("berry", variant="light")
+    t.set_variant("dark")
+    say("served", t.set_skin("outline"), sorted(app.served().items()))
+    say("tokens", list(ap.tokens()))
+
     # -- denied and stale
     n = app.grant("nav_only", ("nav",))
     for mk, call in ((ap.Prefs, lambda o: o.get("k")),
                      (ap.Clipboard, lambda o: o.text()),
+                     (ap.Surface, lambda o: o.canvas()),
+                     (ap.Theme, lambda o: o.colors()),
                      (ap.Damage, lambda o: o.all())):
         try:
             call(mk(app, n))
@@ -126,6 +226,7 @@ def run(sp, ap, say):
 '''
 
 VM_MAIN = r'''
+import moy_input
 import moy_spine
 import moy_app
 LOG = []
@@ -135,7 +236,7 @@ def say(*a):
     print("L", " ".join(repr(x) if not isinstance(x, str) else x for x in a))
 
 
-run(moy_spine, moy_app, say)
+run(moy_spine, moy_app, say, moy_input)
 print("DONE")
 '''
 
@@ -146,9 +247,10 @@ def _log(sp, ap):
     def say(*a):
         out.append(" ".join(repr(x) if not isinstance(x, str) else x for x in a))
 
+    from runtime import moy_input
     ns = {}
     exec(SCRIPT, ns)
-    ns["run"](sp, ap, say)
+    ns["run"](sp, ap, say, moy_input)
     return out
 
 
@@ -168,7 +270,7 @@ def test_the_host_binding_is_the_oracle():
 
 def test_the_native_module_is_the_oracle(tmp_path):
     exe = require_unix_mp(
-        "moy_app", "moy_spine", board_model=True,
+        "moy_app", "moy_spine", "moy_input", board_model=True,
         why="native/moy_app as the boards compile it, against the Python it "
             "replaced.")
     script = tmp_path / "app_parity.py"

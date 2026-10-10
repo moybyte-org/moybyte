@@ -98,6 +98,8 @@ lost feature rather than a granted capability.)
   * `damage` / `surface` -- the shell's invalidation epoch and its live canvas
     plumbing. A cart repaints because the Player ticked it; a cart that could
     dirty the shell every frame would defeat the redraw gate on every tier.
+    A cart's context holds `surface` for the ungated `bar_h()` alone, and no
+    other surface verb has a name in its namespace.
   * `notify` -- not refused on principle, just not mapped yet. A grant with no
     consumer is a capability granted for nothing. `clipboard` sat here for the
     same reason until the editor handle became its consumer; it is mapped now,
@@ -124,8 +126,9 @@ because they are not capabilities -- they are how an app draws.
     happened. READING the theme is not a privilege; CHANGING it is
     (`"appearance"`).
   * `bar_h()` is the height of the exitable strip the HOST paints over the top
-    of the app's surface (`docs/app_api_v1.md` "the bar contract"). An app draws
-    below it. This is published because the alternative is what the seed carts
+    of the app's surface (`docs/app_api_v1.md` "the bar contract"): the
+    grant's surface row's `bar_h`, the value the shipped apps' `ctx.surface`
+    reads. An app draws below it. This is published because the alternative is what the seed carts
     actually did: hardcode 18 and get it wrong at font scale 2, which is a
     documented defect in several of them.
 
@@ -259,7 +262,7 @@ class ScopedFiles:
 
 # -- the factory -------------------------------------------------------------
 
-def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
+def make_system_api(ctx_factory, cart, canvas=None,
                     editor=None, request=None, keep=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
@@ -272,9 +275,7 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
     `canvas` is the surface the cart draws on -- the fixed game canvas by
     default, the system canvas for a responsive app (see `Player.start`). It is
     passed rather than read off `ctx.surface`, because `ctx.surface.canvas()` is
-    always the SYSTEM canvas and a fixed app draws on the game one. `bar_h` is a
-    zero-argument callable for the host strip's height, for the same reason: it
-    is chrome geometry, not a shell role.
+    always the SYSTEM canvas and a fixed app draws on the game one.
 
     `editor` is the shell's editor-handle factory (`Player._open_cart_editor`)
     and `request` is the `(kind, name, mode)` the console was asked to open --
@@ -286,10 +287,11 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
     handed the context so the run can end its grant when it ends."""
     perms = cart.get("permissions") if cart else None
     roles, kind = _moy_app.policy(perms)
-    # `theme` is always needed: `theme()` is ungated. Requesting it twice is
-    # harmless (AppContext just attaches the role), but keep the tuple clean so
-    # a test can read the grant back off it.
-    needs = roles if "theme" in roles else roles + ("theme",)
+    # `theme` and `surface` are always held: `theme()` and `bar_h()` are
+    # ungated reads of their rows. Requesting one twice is harmless (AppContext
+    # just attaches the role), but keep the tuple clean so a test can read the
+    # grant back off it.
+    needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
     ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind)
@@ -314,12 +316,7 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
 
     ns["screen"] = _screen
 
-    def _bar_h():
-        """Rows at the top of the surface the HOST's exitable strip owns. Draw
-        below it; taps inside it never reach `handle_pointer`."""
-        return bar_h() if bar_h is not None else 0
-
-    ns["bar_h"] = _bar_h
+    ns["bar_h"] = ctx.surface.bar_h     # the strip's rows; draw below them
 
     # -- GATED ----------------------------------------------------------------
     if "files" in roles:

@@ -37,7 +37,7 @@ def _ws_with_cart(edit, cfg, sheet=None):
     ws = console.Workstation(host_app._NullComp(), canvas, inp, [])
     ws.make_api = host_app.make_api
     ws.carts_store = host_app.moy_carts
-    ws.pointer = console.Pointer(host_app.WIDTH, host_app.HEIGHT)
+    ws.set_pointer(console.Pointer(host_app.WIDTH, host_app.HEIGHT))
     inp.pointer = ws.pointer
     ws.cart = {"title": "T", "type": "app", "src": "", "cfg": dict(cfg),
                "edit": edit, "path": None}

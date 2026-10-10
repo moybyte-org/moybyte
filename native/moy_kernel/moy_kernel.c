@@ -123,8 +123,10 @@ extern __typeof__(moy_leases_release) moy_leases_release __attribute__((weak));
 extern __typeof__(moy_leases_mask) moy_leases_mask __attribute__((weak));
 // The run a stop was for, with no VM (native/moy_play's moy_play_stop.c).
 void moy_play_stopped_run(void) __attribute__((weak));
-// The app ABI's live grants (native/moy_app), where the image has it.
+// The app ABI's live grants (native/moy_app), where the image has it, and
+// its letting go of what the ending VM's heap held.
 uint32_t moy_app_kernel_grants(void) __attribute__((weak));
+void moy_app_vm_stop(void) __attribute__((weak));
 
 void moy_loop_board_vm_start(void);
 void moy_loop_board_vm_stop(void);
@@ -1550,6 +1552,9 @@ soft_reset_exit:
     moy_play_vm_stop();
     moy_glass_vm_stop();
     moy_net_vm_stop();
+    if (moy_app_vm_stop != NULL) {
+        moy_app_vm_stop();
+    }
     // MOY: the glass is fenced; the kernel's loop task drives the frames
     // until the next VM is up.
     moy_loop_board_window();

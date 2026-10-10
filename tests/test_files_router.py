@@ -296,14 +296,14 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
 
 # -- scrolling the roots ------------------------------------------------------
 
-def _drag(app, x, y0, y1, steps=6):
+def _drag(ws, app, x, y0, y1, steps=6):
     """A finger drag over the app, sample by sample -- a scroll is made of
     samples that are not clicks, so it can only be driven this way."""
-    app._surf.pointer().down = True
+    ws.pointer.down = True
     app.handle_pointer(x, y0, True)
     for k in range(1, steps + 1):
         app.handle_pointer(x, y0 + (y1 - y0) * k // steps, False)
-    app._surf.pointer().down = False
+    ws.pointer.down = False
     app.handle_pointer(x, y1, False)
 
 
@@ -316,12 +316,12 @@ def _key(ws, app, name):
     ws.input.begin_frame()
 
 
-def _tap_row_rect(app, row):
+def _tap_row_rect(ws, app, row):
     r = app.layout.row_rect(row)
     x, y = r[0] + r[2] // 2, r[1] + r[3] // 2
-    app._surf.pointer().down = True
+    ws.pointer.down = True
     app.handle_pointer(x, y, True)
-    app._surf.pointer().down = False
+    ws.pointer.down = False
     app.handle_pointer(x, y, False)
 
 
@@ -333,16 +333,16 @@ def test_the_projects_root_scrolls_by_drag_and_clamps(tmp_path):
     assert len(app._rows) > lay.list_rows, "the seeded store overflows one screen"
     last = len(app._rows) - lay.list_rows
 
-    _drag(app, 160, lay.list_y + 150, lay.list_y + 10)
+    _drag(ws, app, 160, lay.list_y + 150, lay.list_y + 10)
     assert app.top == 7                       # 140px / a 20px row
     assert app.top <= app.sel < app.top + lay.list_rows   # dragged along
 
     for _ in range(9):                        # past the end
-        _drag(app, 160, lay.list_y + 170, lay.list_y + 10)
+        _drag(ws, app, 160, lay.list_y + 170, lay.list_y + 10)
     assert app.top == last
 
     for _ in range(9):                        # and back past the start
-        _drag(app, 160, lay.list_y + 10, lay.list_y + 170)
+        _drag(ws, app, 160, lay.list_y + 10, lay.list_y + 170)
     assert app.top == 0
 
 
@@ -351,9 +351,9 @@ def test_a_drag_never_opens_the_row_it_let_go_of(tmp_path):
     app = _open_files(ws)
     app._enter_rows(files_app.PROJECTS)
     lay = app.layout
-    _drag(app, 160, lay.list_y + 150, lay.list_y + 10)
+    _drag(ws, app, 160, lay.list_y + 150, lay.list_y + 10)
     assert ws.wm.top_kind() == "files"         # scrolled, not opened
-    _tap_row_rect(app, 1)                      # a clean tap still does open
+    _tap_row_rect(ws, app, 1)                      # a clean tap still does open
     assert ws.wm.top_kind() == "menu"
 
 

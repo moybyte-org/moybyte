@@ -14,6 +14,13 @@ struct moy_app {
     uint32_t clip_seq;
     uint32_t clip_len;
     char *clip;                 // MOY_APP_CLIP_MAX bytes
+    const moy_input_ptr_t *ptr; // the pointer the surface rows read, or NULL
+    uint32_t theme_gen;         // bumped by every write of the look
+    int32_t tokens[MOY_APP_TOKENS];
+    uint8_t name_len, variant_len, skin_len;
+    char name[MOY_APP_NAME_MAX + 1];
+    char variant[MOY_APP_NAME_MAX + 1];
+    char skin[MOY_APP_NAME_MAX + 1];
     uint32_t counts[MOY_ROW_N];
 };
 
@@ -23,9 +30,26 @@ static const char *const ROLE_NAMES[MOY_ROLE_N] = {
 };
 
 static const char *const ROW_NAMES[MOY_ROW_N] = {
-    "damage.all", "damage.again", "prefs.get", "prefs.set", "prefs.clear",
+    "damage.all", "damage.again",
+    "surface.canvas", "surface.size", "surface.font_scale", "surface.chrome_scale",
+    "surface.windowed", "surface.bar_h", "surface.pointer",
+    "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
+    "theme.variant", "theme.skin",
+    "prefs.get", "prefs.set", "prefs.clear",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
 };
+
+// The token vocabulary: the base keys, the semantic roles, the bar's and the
+// chrome's (docs/theming_2026-09.md section 4.1), in role-id order.
+static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
+    "panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
+    "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim",
+    "border", "selection", "selection_ink", "focus", "play", "author", "danger",
+    "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink",
+    "chrome_ink_dim", "title_active", "title_inactive",
+};
+#define TOKEN_SURFACE_LIGHT 20
+#define TOKEN_BAR_LIGHT 23
 
 static const char *const KIND_NAMES[MOY_APP_KINDS] = {
     "docs", "drawings", "sprites", "music",
@@ -51,6 +75,9 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     memset(a, 0, sizeof(*a));
     a->mem = mem;
     a->prefs = prefs;
+    for (uint32_t i = 0; i < MOY_APP_TOKENS; i++) {
+        a->tokens[i] = MOY_TOKEN_ABSENT;
+    }
     a->grants = moy_htab_new(mem, MOY_KIND_GRANT, MOY_GRANT_SLOTS, sizeof(moy_grant_t));
     a->clip = mem->alloc(MOY_APP_CLIP_MAX);
     if (a->grants == NULL || a->clip == NULL) {
@@ -83,6 +110,12 @@ moy_appabi_t *moy_app_kernel(const moy_htab_mem_t *mem) {
     }
     s_kernel = moy_app_new(mem, k->settings);
     return s_kernel;
+}
+
+void moy_app_vm_stop(void) {
+    if (s_kernel != NULL) {
+        s_kernel->ptr = NULL;
+    }
 }
 
 uint32_t moy_app_kernel_grants(void) {
@@ -345,6 +378,227 @@ uint32_t moy_app_damage_take(moy_appabi_t *a) {
 
 void moy_app_damage_drop(moy_appabi_t *a) {
     a->damage &= ~(uint32_t)MOY_DAMAGE_ALL;
+}
+
+// -- surface ----------------------------------------------------------------------------
+
+uint32_t moy_app_surface_write(moy_appabi_t *a, const moy_app_surface_t *s) {
+    uint32_t mask = 0u;
+    for (uint32_t slot = 0; slot < moy_htab_slots(a->grants); slot++) {
+        uint32_t at = moy_htab_at(a->grants, slot);
+        moy_grant_t *r = at != 0u ? grant_row(a, at) : NULL;
+        if (r != NULL && (r->roles & (1u << MOY_ROLE_SURFACE)) != 0u) {
+            r->surf = *s;
+            mask |= 1u << (at & 0xffu);
+        }
+    }
+    return mask;
+}
+
+int moy_app_surface_set(moy_appabi_t *a, uint32_t g, const moy_app_surface_t *s) {
+    moy_grant_t *r = grant_row(a, g);
+    if (r == NULL) {
+        return MOY_APP_STALE;
+    }
+    r->surf = *s;
+    return MOY_APP_OK;
+}
+
+void moy_app_pointer_bind(moy_appabi_t *a, const moy_input_ptr_t *p) {
+    a->ptr = p;
+}
+
+// The surface row of grant `g`, counted as `row`, or NULL and `*rc` says why.
+static const moy_app_surface_t *surf_of(moy_appabi_t *a, uint32_t g, int row, int *rc) {
+    a->counts[row]++;
+    const moy_grant_t *r = holding(a, g, MOY_ROLE_SURFACE, rc);
+    return r != NULL ? &r->surf : NULL;
+}
+
+int moy_app_surface_canvas(moy_appabi_t *a, uint32_t g, uint32_t *canvas) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_CANVAS, &rc);
+    if (s != NULL) {
+        *canvas = s->canvas;
+    }
+    return rc;
+}
+
+int moy_app_surface_size(moy_appabi_t *a, uint32_t g, int32_t *w, int32_t *h) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_SIZE, &rc);
+    if (s != NULL) {
+        *w = s->w;
+        *h = s->h;
+    }
+    return rc;
+}
+
+int32_t moy_app_surface_font_scale(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_FONT_SCALE, &rc);
+    return s != NULL ? (int32_t)s->font_scale : -rc;
+}
+
+int32_t moy_app_surface_chrome_scale(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_CHROME_SCALE, &rc);
+    return s != NULL ? (int32_t)s->chrome_scale : -rc;
+}
+
+int32_t moy_app_surface_windowed(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_WINDOWED, &rc);
+    return s != NULL ? (int32_t)s->windowed : -rc;
+}
+
+int32_t moy_app_surface_bar_h(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_BAR_H, &rc);
+    return s != NULL ? s->bar_h : -rc;
+}
+
+int moy_app_surface_pointer(moy_appabi_t *a, uint32_t g, int32_t out[5]) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_POINTER, &rc);
+    if (s == NULL) {
+        return rc;
+    }
+    const moy_input_ptr_t *p = a->ptr;
+    if (p == NULL) {
+        return MOY_APP_ABSENT;
+    }
+    out[0] = p->x - s->ox;
+    out[1] = p->y - s->oy;
+    out[2] = p->down ? 1 : 0;
+    out[3] = p->click ? 1 : 0;
+    out[4] = p->visible ? 1 : 0;
+    return MOY_APP_OK;
+}
+
+// -- theme -------------------------------------------------------------------------------
+
+const char *moy_app_token_name(int role) {
+    return role >= 0 && role < (int)MOY_APP_TOKENS ? TOKEN_NAMES[role] : NULL;
+}
+
+int moy_app_token_flag(int role) {
+    return role == TOKEN_SURFACE_LIGHT || role == TOKEN_BAR_LIGHT;
+}
+
+int moy_app_token_of(const char *name, size_t n) {
+    for (int i = 0; i < (int)MOY_APP_TOKENS; i++) {
+        if (strlen(TOKEN_NAMES[i]) == n && memcmp(TOKEN_NAMES[i], name, n) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void put_name(char *dst, uint8_t *len, const char *src, size_t n) {
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+    *len = (uint8_t)n;
+}
+
+int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
+                        const char *variant, size_t vn,
+                        const int32_t tokens[MOY_APP_TOKENS]) {
+    if (n > MOY_APP_NAME_MAX || vn > MOY_APP_NAME_MAX) {
+        return MOY_APP_BAD;
+    }
+    put_name(a->name, &a->name_len, name, n);
+    put_name(a->variant, &a->variant_len, variant, vn);
+    memcpy(a->tokens, tokens, sizeof(a->tokens));
+    a->theme_gen++;
+    return MOY_APP_OK;
+}
+
+int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n) {
+    if (n > MOY_APP_NAME_MAX) {
+        return MOY_APP_BAD;
+    }
+    put_name(a->skin, &a->skin_len, skin, n);
+    a->theme_gen++;
+    return MOY_APP_OK;
+}
+
+uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]) {
+    memcpy(tokens, a->tokens, sizeof(a->tokens));
+    return a->theme_gen;
+}
+
+int moy_app_theme_colors(moy_appabi_t *a, uint32_t g, uint32_t *gen) {
+    int rc;
+    a->counts[MOY_ROW_THEME_COLORS]++;
+    if (holding(a, g, MOY_ROLE_THEME, &rc) != NULL) {
+        *gen = a->theme_gen;
+    }
+    return rc;
+}
+
+int moy_app_theme_token(moy_appabi_t *a, uint32_t g, int role, int32_t *v) {
+    int rc;
+    a->counts[MOY_ROW_THEME_TOKEN]++;
+    if (holding(a, g, MOY_ROLE_THEME, &rc) == NULL) {
+        return rc;
+    }
+    if (role < 0 || role >= (int)MOY_APP_TOKENS) {
+        return MOY_APP_BAD;
+    }
+    if (a->tokens[role] == MOY_TOKEN_ABSENT) {
+        return MOY_APP_ABSENT;
+    }
+    *v = a->tokens[role];
+    return MOY_APP_OK;
+}
+
+int32_t moy_app_theme_gen(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    a->counts[MOY_ROW_THEME_GEN]++;
+    if (holding(a, g, MOY_ROLE_THEME, &rc) == NULL) {
+        return -rc;
+    }
+    return (int32_t)(a->theme_gen & 0x7fffffffu);
+}
+
+int32_t moy_app_theme_light(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    a->counts[MOY_ROW_THEME_LIGHT]++;
+    if (holding(a, g, MOY_ROLE_THEME, &rc) == NULL) {
+        return -rc;
+    }
+    int32_t v = a->tokens[TOKEN_SURFACE_LIGHT];
+    return v != MOY_TOKEN_ABSENT && v != 0 ? 1 : 0;
+}
+
+// A name row: the text and its length, counted unless it is a size query
+// that succeeds.
+static int name_row(moy_appabi_t *a, uint32_t g, int row, const char *text,
+                    size_t n, char *out, size_t cap, size_t *len) {
+    int rc;
+    if (holding(a, g, MOY_ROLE_THEME, &rc) == NULL) {
+        a->counts[row]++;
+        return rc;
+    }
+    a->counts[row] += out != NULL;
+    if (out != NULL) {
+        memcpy(out, text, n < cap ? n : cap);
+    }
+    *len = n;
+    return MOY_APP_OK;
+}
+
+int moy_app_theme_name(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len) {
+    return name_row(a, g, MOY_ROW_THEME_NAME, a->name, a->name_len, out, cap, len);
+}
+
+int moy_app_theme_variant(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len) {
+    return name_row(a, g, MOY_ROW_THEME_VARIANT, a->variant, a->variant_len, out, cap, len);
+}
+
+int moy_app_theme_skin(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len) {
+    return name_row(a, g, MOY_ROW_THEME_SKIN, a->skin, a->skin_len, out, cap, len);
 }
 
 // -- prefs ------------------------------------------------------------------------------

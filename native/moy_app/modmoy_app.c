@@ -7,11 +7,23 @@
 //                        are the kernel's settings; `fresh` ends RUN grants
 //   app.grant(id, roles, kind=None, ns=None, run=False) -> handle
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
-//   Damage(app, g), Prefs(app, g), Clipboard(app, g)   the C roles
+//   app.surface_write(canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0)
+//   app.bind_pointer(pointer), app.theme_write(name, variant, colors),
+//   app.theme_write_skin(skin), app.serve(role, server)   the shell's writes
+//   app.served()         {"role.verb": calls} of the rows served in Python
+//   Damage(app, g), Surface(app, g), Theme(app, g), Prefs(app, g),
+//   Clipboard(app, g)    the C roles
+//   tokens()             the token vocabulary, in role-id order
 //   policy(perms), manifest_error(perms), id_for(id, title)   the grant policy
 //
-// A role object's methods are the table's C rows and nothing else: no
-// attribute is a property, and each call is the C function and its counter.
+// A role object's methods are the table's rows and nothing else: no attribute
+// is a property, and each call of a C row is the C function and its counter. A
+// row the table serves elsewhere (surface.glyph, theme.set*) calls the server
+// the console registered for the role (app.serve), with the same arguments.
+// What Python keeps as objects stays objects: surface.canvas() is the canvas
+// the shell wrote into the grant's row, surface.pointer() a named tuple of the
+// row's five numbers, theme.colors() a dict built from the token table at its
+// generation and handed out until the generation moves.
 // What a verb answers in the ABI's codes becomes what the Python roles
 // answered: prefs.get the caller's default for ABSENT, clipboard.kind "text"
 // or None, clipboard.put_text False for text over CLIP_MAX (the old text kept). A refused call raises: ValueError for STALE, DENIED and BAD,
@@ -74,7 +86,13 @@ typedef struct {
     mp_obj_base_t base;
     moy_appabi_t *a;
     mp_obj_t rows;          // the Settings prefs write into, kept alive
+    mp_obj_t pointer;       // the Pointer the rows are bound to, kept alive
+    mp_obj_t servers;       // {role: the console's server for its other rows}
+    mp_obj_t served;        // {role: {verb: calls}}: those rows' counters
+    mp_obj_t colors;        // the colour dict of generation colors_gen, or NULL
+    uint32_t colors_gen;
     bool own;               // false: a view of the kernel's
+    mp_obj_t canvases[MOY_GRANT_SLOTS];     // per grant slot: the canvas object
 } app_obj_t;
 
 static const mp_obj_type_t app_type;
@@ -84,6 +102,18 @@ static moy_appabi_t *app_of(mp_obj_t o) {
         mp_raise_TypeError(MP_ERROR_TEXT("an App"));
     }
     return ((app_obj_t *)MP_OBJ_TO_PTR(o))->a;
+}
+
+static void app_init(app_obj_t *o) {
+    o->rows = mp_const_none;
+    o->pointer = mp_const_none;
+    o->servers = mp_obj_new_dict(0);
+    o->served = mp_obj_new_dict(0);
+    o->colors = MP_OBJ_NULL;
+    o->colors_gen = 0u;
+    for (size_t i = 0; i < MOY_GRANT_SLOTS; i++) {
+        o->canvases[i] = mp_const_none;
+    }
 }
 
 static mp_obj_t app_make_new(const mp_obj_type_t *type, size_t n_args,
@@ -97,6 +127,7 @@ static mp_obj_t app_make_new(const mp_obj_type_t *type, size_t n_args,
         }
     }
     app_obj_t *o = mp_obj_malloc_with_finaliser(app_obj_t, type);
+    app_init(o);
     o->rows = args[0];
     o->own = true;
     o->a = moy_app_new(moy_spine_mem(), rows);
@@ -212,7 +243,144 @@ static mp_obj_t app_counts(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(app_counts_obj, app_counts);
 
+// The CANVAS row a canvas object draws through (device_canvas.py's `_crow`),
+// or 0 for one with none.
+static uint32_t canvas_handle(mp_obj_t cv) {
+    mp_obj_t dest[2];
+    mp_load_method_maybe(cv, MP_QSTR__crow, dest);
+    if (dest[0] == MP_OBJ_NULL || dest[1] != MP_OBJ_NULL) {
+        return 0u;
+    }
+    mp_obj_t h[2];
+    mp_load_method_maybe(dest[0], MP_QSTR_h, h);
+    if (h[0] == MP_OBJ_NULL || h[1] != MP_OBJ_NULL || !mp_obj_is_int(h[0])) {
+        return 0u;
+    }
+    return (uint32_t)mp_obj_get_int_truncated(h[0]);
+}
+
+// surface_write(canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0): the surface
+// row of every grant holding the role, and the canvas object each answers.
+static mp_obj_t app_surface_write(size_t n_args, const mp_obj_t *args) {
+    app_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    app_of(args[0]);
+    moy_app_surface_t s;
+    memset(&s, 0, sizeof(s));
+    s.canvas = canvas_handle(args[1]);
+    s.w = (int32_t)mp_obj_get_int(args[2]);
+    s.h = (int32_t)mp_obj_get_int(args[3]);
+    s.font_scale = (uint8_t)mp_obj_get_int(args[4]);
+    s.chrome_scale = (uint8_t)mp_obj_get_int(args[5]);
+    s.windowed = mp_obj_is_true(args[6]) ? 1u : 0u;
+    s.bar_h = (int32_t)mp_obj_get_int(args[7]);
+    s.ox = n_args > 8 ? (int32_t)mp_obj_get_int(args[8]) : 0;
+    s.oy = n_args > 9 ? (int32_t)mp_obj_get_int(args[9]) : 0;
+    uint32_t mask = moy_app_surface_write(self->a, &s);
+    for (size_t i = 0; i < MOY_GRANT_SLOTS; i++) {
+        if (mask & (1u << i)) {
+            self->canvases[i] = args[1];
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_surface_write_obj, 8, 10, app_surface_write);
+
+// The cursor of a moy_input.Pointer, where the image has native/moy_input.
+moy_input_ptr_t *moy_input_pointer_ptr(mp_obj_t o) __attribute__((weak));
+
+static mp_obj_t app_bind_pointer(mp_obj_t self_in, mp_obj_t p) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    app_of(self_in);
+    const moy_input_ptr_t *c = NULL;
+    if (p != mp_const_none && moy_input_pointer_ptr != NULL) {
+        c = moy_input_pointer_ptr(p);
+    }
+    self->pointer = c != NULL ? p : mp_const_none;
+    moy_app_pointer_bind(self->a, c);
+    return mp_obj_new_bool(c != NULL);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(app_bind_pointer_obj, app_bind_pointer);
+
+// theme_write(name, variant, colors): the live token table from the look's
+// dict; a key outside the vocabulary is refused (ValueError).
+static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    moy_appabi_t *a = app_of(args[0]);
+    size_t n, vn;
+    const char *name = str_of(args[1], &n);
+    const char *variant = str_of(args[2], &vn);
+    int32_t tokens[MOY_APP_TOKENS];
+    for (size_t i = 0; i < MOY_APP_TOKENS; i++) {
+        tokens[i] = MOY_TOKEN_ABSENT;
+    }
+    mp_map_t *map = mp_obj_dict_get_map(args[3]);
+    for (size_t i = 0; i < map->alloc; i++) {
+        if (!mp_map_slot_is_filled(map, i)) {
+            continue;
+        }
+        size_t kn;
+        const char *k = str_of(map->table[i].key, &kn);
+        int role = moy_app_token_of(k, kn);
+        if (role < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("a token outside the vocabulary"));
+        }
+        tokens[role] = (int32_t)mp_obj_get_int(map->table[i].value);
+    }
+    check(moy_app_theme_write(a, name, n, variant, vn, tokens));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_theme_write_obj, 4, 4, app_theme_write);
+
+static mp_obj_t app_theme_write_skin(mp_obj_t self, mp_obj_t skin) {
+    size_t n;
+    const char *s = str_of(skin, &n);
+    check(moy_app_theme_write_skin(app_of(self), s, n));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(app_theme_write_skin_obj, app_theme_write_skin);
+
+static mp_obj_t app_serve(mp_obj_t self_in, mp_obj_t role, mp_obj_t server) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    app_of(self_in);
+    mp_obj_dict_store(self->servers, role, server);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(app_serve_obj, app_serve);
+
+// served() -> {"role.verb": calls}: the counters of the rows served in Python.
+static mp_obj_t app_served(mp_obj_t self_in) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    app_of(self_in);
+    mp_obj_t out = mp_obj_new_dict(0);
+    mp_map_t *roles = mp_obj_dict_get_map(self->served);
+    for (size_t i = 0; i < roles->alloc; i++) {
+        if (!mp_map_slot_is_filled(roles, i)) {
+            continue;
+        }
+        mp_map_t *verbs = mp_obj_dict_get_map(roles->table[i].value);
+        for (size_t j = 0; j < verbs->alloc; j++) {
+            if (!mp_map_slot_is_filled(verbs, j)) {
+                continue;
+            }
+            vstr_t v;
+            vstr_init(&v, 24);
+            vstr_add_str(&v, qstr_str(MP_OBJ_QSTR_VALUE(roles->table[i].key)));
+            vstr_add_byte(&v, '.');
+            vstr_add_str(&v, qstr_str(MP_OBJ_QSTR_VALUE(verbs->table[j].key)));
+            mp_obj_dict_store(out, mp_obj_new_str_from_vstr(&v), verbs->table[j].value);
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_served_obj, app_served);
+
 static const mp_rom_map_elem_t app_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_served), MP_ROM_PTR(&app_served_obj) },
+    { MP_ROM_QSTR(MP_QSTR_surface_write), MP_ROM_PTR(&app_surface_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bind_pointer), MP_ROM_PTR(&app_bind_pointer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_write), MP_ROM_PTR(&app_theme_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_write_skin), MP_ROM_PTR(&app_theme_write_skin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&app_serve_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant), MP_ROM_PTR(&app_grant_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&app_count_obj) },
@@ -238,9 +406,11 @@ static mp_obj_t mod_kernel(mp_obj_t fresh) {
     if (mp_obj_is_true(fresh)) {
         moy_app_fresh(a);
     }
+    // The pointer the last VM bound lived in its heap.
+    moy_app_pointer_bind(a, NULL);
     app_obj_t *o = mp_obj_malloc_with_finaliser(app_obj_t, &app_type);
+    app_init(o);
     o->a = a;
-    o->rows = mp_const_none;
     o->own = false;
     return MP_OBJ_FROM_PTR(o);
 }
@@ -298,6 +468,267 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     damage_type, MP_QSTR_Damage, MP_TYPE_FLAG_NONE,
     make_new, role_make_new,
     locals_dict, &damage_locals
+    );
+
+// The server the console registered for a role's other rows, its verb called
+// with the role call's arguments.
+static mp_obj_t serve_call(mp_obj_t self, qstr role, qstr verb, size_t n_args,
+                           const mp_obj_t *args, mp_map_t *kw) {
+    role_obj_t *o = MP_OBJ_TO_PTR(self);
+    app_obj_t *app = MP_OBJ_TO_PTR(o->app);
+    mp_map_elem_t *e = mp_map_lookup(mp_obj_dict_get_map(app->servers),
+                                     MP_OBJ_NEW_QSTR(role), MP_MAP_LOOKUP);
+    if (e == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("no server for the role"));
+    }
+    // The row's counter: no allocation once the row has been called.
+    mp_map_elem_t *r = mp_map_lookup(mp_obj_dict_get_map(app->served),
+                                     MP_OBJ_NEW_QSTR(role), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+    if (r->value == MP_OBJ_NULL) {
+        r->value = mp_obj_new_dict(0);
+    }
+    mp_map_elem_t *c = mp_map_lookup(mp_obj_dict_get_map(r->value),
+                                     MP_OBJ_NEW_QSTR(verb), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+    c->value = MP_OBJ_NEW_SMALL_INT(c->value == MP_OBJ_NULL ? 1
+                                    : MP_OBJ_SMALL_INT_VALUE(c->value) + 1);
+    mp_obj_t fn = mp_load_attr(e->value, verb);
+    size_t n_kw = kw == NULL ? 0u : kw->used;
+    if (n_kw == 0u) {
+        return mp_call_function_n_kw(fn, n_args, 0, args);
+    }
+    // A builtin's keyword map is a fixed table, every entry filled.
+    mp_obj_t all[8];
+    if (n_args + 2u * n_kw > MP_ARRAY_SIZE(all)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("too many arguments"));
+    }
+    memcpy(all, args, n_args * sizeof(mp_obj_t));
+    for (size_t i = 0; i < n_kw; i++) {
+        all[n_args + 2u * i] = kw->table[i].key;
+        all[n_args + 2u * i + 1u] = kw->table[i].value;
+    }
+    return mp_call_function_n_kw(fn, n_args, n_kw, all);
+}
+
+// surface
+
+static mp_obj_t surface_canvas(mp_obj_t self) {
+    uint32_t g, h;
+    moy_appabi_t *a = role_app(self, &g);
+    check(moy_app_surface_canvas(a, g, &h));
+    app_obj_t *app = MP_OBJ_TO_PTR(((role_obj_t *)MP_OBJ_TO_PTR(self))->app);
+    return app->canvases[g & 0xffu];
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_canvas_obj, surface_canvas);
+
+static mp_obj_t surface_size(mp_obj_t self) {
+    uint32_t g;
+    int32_t w, h;
+    moy_appabi_t *a = role_app(self, &g);
+    check(moy_app_surface_size(a, g, &w, &h));
+    mp_obj_t items[2] = { MP_OBJ_NEW_SMALL_INT(w), MP_OBJ_NEW_SMALL_INT(h) };
+    return mp_obj_new_tuple(2, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_size_obj, surface_size);
+
+static mp_obj_t scalar(int32_t v) {
+    if (v < 0) {
+        raise_rc(-v);
+    }
+    return MP_OBJ_NEW_SMALL_INT(v);
+}
+
+static mp_obj_t surface_font_scale(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    return scalar(moy_app_surface_font_scale(a, g));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_font_scale_obj, surface_font_scale);
+
+static mp_obj_t surface_chrome_scale(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    return scalar(moy_app_surface_chrome_scale(a, g));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_chrome_scale_obj, surface_chrome_scale);
+
+static mp_obj_t surface_windowed(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    return mp_obj_new_bool(MP_OBJ_SMALL_INT_VALUE(scalar(moy_app_surface_windowed(a, g))));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_windowed_obj, surface_windowed);
+
+static mp_obj_t surface_bar_h(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    return scalar(moy_app_surface_bar_h(a, g));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_bar_h_obj, surface_bar_h);
+
+static const qstr POINTER_FIELDS[5] = {
+    MP_QSTR_x, MP_QSTR_y, MP_QSTR_down, MP_QSTR_click, MP_QSTR_visible,
+};
+
+static mp_obj_t surface_pointer(mp_obj_t self) {
+    uint32_t g;
+    int32_t v[5];
+    moy_appabi_t *a = role_app(self, &g);
+    int rc = moy_app_surface_pointer(a, g, v);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    mp_obj_t items[5] = {
+        MP_OBJ_NEW_SMALL_INT(v[0]), MP_OBJ_NEW_SMALL_INT(v[1]),
+        mp_obj_new_bool(v[2]), mp_obj_new_bool(v[3]), mp_obj_new_bool(v[4]),
+    };
+    return mp_obj_new_attrtuple(POINTER_FIELDS, 5, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_pointer_obj, surface_pointer);
+
+static mp_obj_t surface_glyph(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
+    return serve_call(args[0], MP_QSTR_surface, MP_QSTR_glyph, n_args - 1, args + 1, kw);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(surface_glyph_obj, 1, surface_glyph);
+
+static const mp_rom_map_elem_t surface_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_canvas), MP_ROM_PTR(&surface_canvas_obj) },
+    { MP_ROM_QSTR(MP_QSTR_size), MP_ROM_PTR(&surface_size_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font_scale), MP_ROM_PTR(&surface_font_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chrome_scale), MP_ROM_PTR(&surface_chrome_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_windowed), MP_ROM_PTR(&surface_windowed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bar_h), MP_ROM_PTR(&surface_bar_h_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pointer), MP_ROM_PTR(&surface_pointer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&surface_glyph_obj) },
+};
+static MP_DEFINE_CONST_DICT(surface_locals, surface_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    surface_type, MP_QSTR_Surface, MP_TYPE_FLAG_NONE,
+    make_new, role_make_new,
+    locals_dict, &surface_locals
+    );
+
+// theme
+
+// The colour dict of the token table's generation `gen`, rebuilt only when it
+// moves: what the look's dict holds, flags as bools.
+static mp_obj_t colors_at(app_obj_t *app, uint32_t gen) {
+    if (app->colors != MP_OBJ_NULL && app->colors_gen == gen) {
+        return app->colors;
+    }
+    int32_t tok[MOY_APP_TOKENS];
+    gen = moy_app_theme_read(app->a, tok);
+    mp_obj_t d = mp_obj_new_dict(MOY_APP_TOKENS);
+    for (int i = 0; i < (int)MOY_APP_TOKENS; i++) {
+        if (tok[i] == MOY_TOKEN_ABSENT) {
+            continue;
+        }
+        const char *k = moy_app_token_name(i);
+        mp_obj_t key = MP_OBJ_NEW_QSTR(qstr_from_str(k));
+        mp_obj_t v = moy_app_token_flag(i) ? mp_obj_new_bool(tok[i])
+                                           : MP_OBJ_NEW_SMALL_INT(tok[i]);
+        mp_obj_dict_store(d, key, v);
+    }
+    app->colors = d;
+    app->colors_gen = gen;
+    return d;
+}
+
+static mp_obj_t theme_colors(mp_obj_t self) {
+    uint32_t g, gen;
+    moy_appabi_t *a = role_app(self, &g);
+    check(moy_app_theme_colors(a, g, &gen));
+    return colors_at(MP_OBJ_TO_PTR(((role_obj_t *)MP_OBJ_TO_PTR(self))->app), gen);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(theme_colors_obj, theme_colors);
+
+static mp_obj_t theme_token(mp_obj_t self, mp_obj_t role) {
+    uint32_t g;
+    int32_t v;
+    moy_appabi_t *a = role_app(self, &g);
+    int rc = moy_app_theme_token(a, g, (int)mp_obj_get_int(role), &v);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    return MP_OBJ_NEW_SMALL_INT(v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(theme_token_obj, theme_token);
+
+static mp_obj_t theme_gen(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    return scalar(moy_app_theme_gen(a, g));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(theme_gen_obj, theme_gen);
+
+static mp_obj_t theme_light(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    return mp_obj_new_bool(MP_OBJ_SMALL_INT_VALUE(scalar(moy_app_theme_light(a, g))));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(theme_light_obj, theme_light);
+
+typedef int (*name_fn_t)(moy_appabi_t *, uint32_t, char *, size_t, size_t *);
+
+static mp_obj_t name_read(mp_obj_t self, name_fn_t fn) {
+    uint32_t g;
+    char buf[MOY_APP_NAME_MAX + 1];
+    size_t n = 0;
+    moy_appabi_t *a = role_app(self, &g);
+    check(fn(a, g, buf, sizeof(buf), &n));
+    return mp_obj_new_str(buf, n);
+}
+
+static mp_obj_t theme_name(mp_obj_t self) {
+    return name_read(self, moy_app_theme_name);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(theme_name_obj, theme_name);
+
+static mp_obj_t theme_variant(mp_obj_t self) {
+    return name_read(self, moy_app_theme_variant);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(theme_variant_obj, theme_variant);
+
+static mp_obj_t theme_skin(mp_obj_t self) {
+    return name_read(self, moy_app_theme_skin);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(theme_skin_obj, theme_skin);
+
+static mp_obj_t theme_set(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
+    return serve_call(args[0], MP_QSTR_theme, MP_QSTR_set, n_args - 1, args + 1, kw);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(theme_set_obj, 1, theme_set);
+
+static mp_obj_t theme_set_variant(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
+    return serve_call(args[0], MP_QSTR_theme, MP_QSTR_set_variant, n_args - 1, args + 1, kw);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(theme_set_variant_obj, 1, theme_set_variant);
+
+static mp_obj_t theme_set_skin(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
+    return serve_call(args[0], MP_QSTR_theme, MP_QSTR_set_skin, n_args - 1, args + 1, kw);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(theme_set_skin_obj, 1, theme_set_skin);
+
+static const mp_rom_map_elem_t theme_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&theme_colors_obj) },
+    { MP_ROM_QSTR(MP_QSTR_token), MP_ROM_PTR(&theme_token_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&theme_gen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_light), MP_ROM_PTR(&theme_light_obj) },
+    { MP_ROM_QSTR(MP_QSTR_name), MP_ROM_PTR(&theme_name_obj) },
+    { MP_ROM_QSTR(MP_QSTR_variant), MP_ROM_PTR(&theme_variant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_skin), MP_ROM_PTR(&theme_skin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&theme_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_variant), MP_ROM_PTR(&theme_set_variant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_skin), MP_ROM_PTR(&theme_set_skin_obj) },
+};
+static MP_DEFINE_CONST_DICT(theme_locals, theme_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    theme_type, MP_QSTR_Theme, MP_TYPE_FLAG_NONE,
+    make_new, role_make_new,
+    locals_dict, &theme_locals
     );
 
 // prefs
@@ -497,7 +928,7 @@ static mp_obj_t mod_id_for(mp_obj_t id, mp_obj_t title) {
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_id_for_obj, mod_id_for);
 
 static mp_obj_t names_tuple(const char *(*name)(int), int n) {
-    mp_obj_t items[16];         // the most names a table has: roles (12), rows, kinds
+    mp_obj_t items[32];         // the most names a table has: roles, rows, kinds, tokens
     for (int i = 0; i < n; i++) {
         const char *s = name(i);
         items[i] = mp_obj_new_str(s, strlen(s));
@@ -531,6 +962,11 @@ static mp_obj_t mod_perms(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_perms_obj, mod_perms);
 
+static mp_obj_t mod_tokens(void) {
+    return names_tuple(moy_app_token_name, MOY_APP_TOKENS);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_tokens_obj, mod_tokens);
+
 static const char *kind_name(int k) {
     return moy_app_kind_name(k);
 }
@@ -547,6 +983,8 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_App), MP_ROM_PTR(&app_type) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&mod_kernel_obj) },
     { MP_ROM_QSTR(MP_QSTR_Damage), MP_ROM_PTR(&damage_type) },
+    { MP_ROM_QSTR(MP_QSTR_Surface), MP_ROM_PTR(&surface_type) },
+    { MP_ROM_QSTR(MP_QSTR_Theme), MP_ROM_PTR(&theme_type) },
     { MP_ROM_QSTR(MP_QSTR_Prefs), MP_ROM_PTR(&prefs_type) },
     { MP_ROM_QSTR(MP_QSTR_Clipboard), MP_ROM_PTR(&clip_type) },
     { MP_ROM_QSTR(MP_QSTR_policy), MP_ROM_PTR(&mod_policy_obj) },
@@ -556,6 +994,7 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rows), MP_ROM_PTR(&mod_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_perms), MP_ROM_PTR(&mod_perms_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&mod_tokens_obj) },
     { MP_ROM_QSTR(MP_QSTR_CLIP_MAX), MP_ROM_INT(MOY_APP_CLIP_MAX) },
     { MP_ROM_QSTR(MP_QSTR_SLOTS), MP_ROM_INT(MOY_GRANT_SLOTS) },
 };

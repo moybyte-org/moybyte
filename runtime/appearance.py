@@ -425,6 +425,7 @@ class Appearance:
         # REBOUND, never mutated in place: the launcher's statics keys fold
         # id(ws.theme_colors), so the new dict IS the invalidation.
         ws.theme_colors = theme_colors(name, self.theme_variant)
+        self.publish()
         # The launcher grids read the accent for their selection ring/pill.
         ws.launcher.theme = ws.theme_colors
         if getattr(ws, "picker", None) is not None:
@@ -467,6 +468,7 @@ class Appearance:
         itself on the next pick instead of re-failing every boot."""
         ws = self.ws
         self.skin_name = _skin.use(name)
+        self.publish()
         # Same two invalidations a theme change needs: the cached top-bar strip
         # paints widget pixels and its key does not fold the skin, and every
         # other surface repaints from the damage epoch.
@@ -477,6 +479,17 @@ class Appearance:
             ws.system.set("skin", self.skin_name)
 
     # -- the per-draw gate ---------------------------------------------------
+
+    def publish(self):
+        """Write the live look into the app ABI's token table (native/moy_app):
+        the theme's name, its variant, every token of `ws.theme_colors` and
+        the skin, under a new generation -- what `ctx.theme`'s rows answer and
+        its colour dict is rebuilt from. The console calls it once its app
+        state exists; every switch after that comes through here."""
+        abi = getattr(self.ws, "app_abi", None)
+        if abi is not None:
+            abi.theme_write(self.theme_name, self.theme_variant, self.ws.theme_colors)
+            abi.theme_write_skin(self.skin_name)
 
     def light_chrome(self):
         """True when the live theme's tool surface is LIGHT (visual identity v1

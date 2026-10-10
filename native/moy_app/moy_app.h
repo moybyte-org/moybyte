@@ -4,8 +4,9 @@
 // the two equal.
 //
 // A moy_appabi_t is the state the C rows read: the grant table (kind GRANT, rows
-// keyed by the cart's id), the settings rows prefs writes into, the damage
-// flags and the clipboard. On a board it is the kernel's (moy_app_kernel: made
+// keyed by the cart's id, each with its surface row), the settings rows prefs
+// writes into, the damage flags, the live token table, the pointer it is bound
+// to and the clipboard. On a board it is the kernel's (moy_app_kernel: made
 // once, never freed, so a VM stop leaves it and a return start reads it, its
 // rows moy_spine_kernel's); elsewhere each console owns one.
 //
@@ -16,6 +17,12 @@
 // grant is a user app's run's and ends with it (moy_app_end), or at the next
 // fresh start. Every role verb takes the grant first and answers DENIED for a
 // role it does not hold, STALE for a grant that ended.
+//
+// The shell writes what the surface and theme rows answer: each grant's surface
+// row (moy_app_surface_write, at every change of the canvas an app draws on,
+// its scales, its window or its bar), the live token table (moy_app_theme_write,
+// at every switch of the look) and the pointer (moy_app_pointer_bind, the
+// console's moy_input_ptr_t, read live).
 //
 // The policy is C's: the permission each role is granted by, the files kinds,
 // the manifest refusal and the key a cart's grant is made under.
@@ -29,6 +36,7 @@
 #include <stdint.h>
 
 #include "moy_htab.h"
+#include "moy_input.h"
 #include "moy_settings.h"
 
 enum {
@@ -55,6 +63,12 @@ enum {
 // The C rows, in roles.json's order: what moy_app_count counts.
 enum {
     MOY_ROW_DAMAGE_ALL = 0, MOY_ROW_DAMAGE_AGAIN,
+    MOY_ROW_SURFACE_CANVAS, MOY_ROW_SURFACE_SIZE, MOY_ROW_SURFACE_FONT_SCALE,
+    MOY_ROW_SURFACE_CHROME_SCALE, MOY_ROW_SURFACE_WINDOWED, MOY_ROW_SURFACE_BAR_H,
+    MOY_ROW_SURFACE_POINTER,
+    MOY_ROW_THEME_COLORS, MOY_ROW_THEME_TOKEN, MOY_ROW_THEME_GEN,
+    MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
+    MOY_ROW_THEME_SKIN,
     MOY_ROW_PREFS_GET, MOY_ROW_PREFS_SET, MOY_ROW_PREFS_CLEAR,
     MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
     MOY_ROW_CLIPBOARD_SEQ,
@@ -66,12 +80,26 @@ enum {
 #define MOY_APP_KEY_MAX 127u    // a namespaced prefs key's bytes
 #define MOY_APP_CLIP_MAX 4096u  // the clipboard's text, in bytes (configuration)
 #define MOY_APP_KINDS 4u        // the files kinds a permission may name
+#define MOY_APP_NAME_MAX 31u    // a theme's, a variant's and a skin's name bytes
+#define MOY_APP_TOKENS 28u      // the token vocabulary's roles
+#define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
 
 enum { MOY_GRANT_SHIPPED = 0, MOY_GRANT_RUN = 1 };
 enum { MOY_DAMAGE_ALL = 1u, MOY_DAMAGE_AGAIN = 2u };
 enum { MOY_CLIP_EMPTY = 0, MOY_CLIP_TEXT = 1 };
 
 typedef struct moy_app moy_appabi_t;
+
+// What an app's surface row holds: where it draws, at what size and scales,
+// whether it is a window on the desk, the host strip's rows over it, and its
+// origin on the glass (what the pointer is offset by).
+typedef struct {
+    uint32_t canvas;            // the CANVAS row it draws on (native/moy_glass), or 0
+    int32_t w, h;
+    int32_t ox, oy;
+    int32_t bar_h;
+    uint8_t font_scale, chrome_scale, windowed;
+} moy_app_surface_t;
 
 typedef struct {
     uint8_t id_len, ns_len, cls;
@@ -80,6 +108,7 @@ typedef struct {
     uint32_t owner;             // an OWNER handle the grant names, or 0
     char id[MOY_APP_ID_MAX + 1];
     char ns[MOY_APP_ID_MAX + 1];
+    moy_app_surface_t surf;     // written by the shell, zero until then
 } moy_grant_t;
 
 // A console's own state over `prefs` (NULL: prefs answer ABSENT), or NULL.
@@ -91,6 +120,9 @@ moy_appabi_t *moy_app_kernel(const moy_htab_mem_t *mem);
 // What a fresh start puts back: every RUN grant ended, damage and the
 // clipboard cleared. SHIPPED grants stay for their apps' next registration.
 void moy_app_fresh(moy_appabi_t *a);
+// The VM ended (native/moy_kernel, before its heap goes): the kernel's state
+// lets go of the pointer it was bound to, which lived in that heap.
+void moy_app_vm_stop(void);
 
 // -- the grants -----------------------------------------------------------------
 
@@ -153,6 +185,62 @@ int moy_app_damage_all(moy_appabi_t *a, uint32_t g);
 int moy_app_damage_again(moy_appabi_t *a, uint32_t g);
 uint32_t moy_app_damage_take(moy_appabi_t *a);     // MOY_DAMAGE_* bits, cleared
 void moy_app_damage_drop(moy_appabi_t *a);
+
+// -- surface ------------------------------------------------------------------------
+
+// The shell's writes. surface_write: `s` into the row of every live grant that
+// holds the surface role; the mask of the slots written (a grant's slot is its
+// handle's low byte). surface_set: one grant's, OK or STALE.
+// pointer_bind: the pointer the rows read, live, or NULL for none.
+uint32_t moy_app_surface_write(moy_appabi_t *a, const moy_app_surface_t *s);
+int moy_app_surface_set(moy_appabi_t *a, uint32_t g, const moy_app_surface_t *s);
+void moy_app_pointer_bind(moy_appabi_t *a, const moy_input_ptr_t *p);
+
+// The rows, each the grant's own surface row. canvas: the CANVAS handle (0
+// for a canvas that has none). size: its width and height. The scalar rows
+// answer the value, or the code negated. pointer: x and y in the surface's
+// coordinates, then down, click and visible as 0/1; ABSENT with no pointer.
+int moy_app_surface_canvas(moy_appabi_t *a, uint32_t g, uint32_t *canvas);
+int moy_app_surface_size(moy_appabi_t *a, uint32_t g, int32_t *w, int32_t *h);
+int32_t moy_app_surface_font_scale(moy_appabi_t *a, uint32_t g);
+int32_t moy_app_surface_chrome_scale(moy_appabi_t *a, uint32_t g);
+int32_t moy_app_surface_windowed(moy_appabi_t *a, uint32_t g);
+int32_t moy_app_surface_bar_h(moy_appabi_t *a, uint32_t g);
+int moy_app_surface_pointer(moy_appabi_t *a, uint32_t g, int32_t out[5]);
+
+// -- theme ----------------------------------------------------------------------------
+
+// The token vocabulary (docs/theming_2026-09.md section 4.1): role ids 0 ..
+// MOY_APP_TOKENS - 1, their names, and which are flags (true/false) rather
+// than MOY64 indices. token_of: the id of a name, or -1.
+const char *moy_app_token_name(int role);
+int moy_app_token_flag(int role);
+int moy_app_token_of(const char *name, size_t n);
+
+// The look's writes: the live theme (its name, its variant and every token,
+// MOY_TOKEN_ABSENT for a role it does not set) and the skin. Each bumps the
+// generation. OK, or BAD for a name over MOY_APP_NAME_MAX bytes.
+int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
+                        const char *variant, size_t vn,
+                        const int32_t tokens[MOY_APP_TOKENS]);
+int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n);
+// The table whole and its generation, uncounted: what a binding builds its
+// colours from.
+uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]);
+
+// The rows. colors: the generation a binding's colour dict is keyed on (it
+// rebuilds the dict from moy_app_theme_read when it moves). token: one role's
+// value, BAD for an unknown role, ABSENT for one the theme does not set. gen
+// and light (the surface_light flag) answer the value or the code negated.
+// name, variant, skin: OK and the length (copied up to cap; no buffer: the
+// size alone, counted only when it fails).
+int moy_app_theme_colors(moy_appabi_t *a, uint32_t g, uint32_t *gen);
+int moy_app_theme_token(moy_appabi_t *a, uint32_t g, int role, int32_t *v);
+int32_t moy_app_theme_gen(moy_appabi_t *a, uint32_t g);
+int32_t moy_app_theme_light(moy_appabi_t *a, uint32_t g);
+int moy_app_theme_name(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len);
+int moy_app_theme_variant(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len);
+int moy_app_theme_skin(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len);
 
 // -- prefs ---------------------------------------------------------------------------
 

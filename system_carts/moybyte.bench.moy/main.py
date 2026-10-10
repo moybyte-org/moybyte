@@ -226,11 +226,13 @@ ROLE_REPS = 5
 
 
 def _role_row():
-    """The app ABI's role row (docs/kernel_appabi_2026-10.md section 9): a
-    role read -- the clipboard's `seq()`, a C row over a grant -- against the
-    attribute hop it replaced (`seq` was a plain attribute), each the best
-    batch's microseconds per read, loop included in both. None where the
-    image has no `moy_app` or no microsecond clock."""
+    """The app ABI's role row (docs/kernel_appabi_2026-10.md section 9): two
+    role reads -- the clipboard's `seq()`, a C row over a grant, and
+    `theme.colors()`, the frame path's commonest, a C row and the dict of its
+    generation -- against the attribute hop each replaced (`seq` and the token
+    dict were plain attributes), each the best batch's microseconds per read,
+    loop included in all three. None where the image has no `moy_app` or no
+    microsecond clock."""
     try:
         m = __import__("moy_app")
         t = __import__("time")
@@ -249,14 +251,17 @@ def _role_row():
         def diff(a, b):
             return a - b
     app = m.App(None)
-    clip = m.Clipboard(app, app.grant("moybyte.bench", ("clipboard",)))
+    g = app.grant("moybyte.bench", ("clipboard", "theme"))
+    clip = m.Clipboard(app, g)
+    theme = m.Theme(app, g)
+    app.theme_write("night", "dark", {"panel": 60, "surface_light": False})
 
     class _Hop:
         pass
 
     hop = _Hop()
     hop.seq = 0
-    best_r = best_h = None
+    best_r = best_c = best_h = None
     for _ in range(ROLE_REPS):
         i = 0
         t0 = us()
@@ -267,12 +272,19 @@ def _role_row():
         i = 0
         t0 = us()
         while i < ROLE_N:
+            theme.colors()
+            i += 1
+        c = diff(us(), t0)
+        i = 0
+        t0 = us()
+        while i < ROLE_N:
             hop.seq
             i += 1
         h = diff(us(), t0)
         best_r = r if best_r is None or r < best_r else best_r
+        best_c = c if best_c is None or c < best_c else best_c
         best_h = h if best_h is None or h < best_h else best_h
-    return (best_r / ROLE_N, best_h / ROLE_N)
+    return (best_r / ROLE_N, best_c / ROLE_N, best_h / ROLE_N)
 
 
 def _init():
@@ -758,7 +770,7 @@ def _report():
         ro = state.get("role")
         if ro is not None:
             line1b += ("  " if line1b else "") + "ROLE " + _f1(ro[0]) + "/" \
-                + _f1(ro[1]) + "us"
+                + _f1(ro[1]) + "/" + _f1(ro[2]) + "us"
         if line1b:
             print(line1b, 8, y, 14)
             y += 10

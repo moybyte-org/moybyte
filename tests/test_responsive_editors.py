@@ -65,7 +65,7 @@ def _ws_distinct_320(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
     ws._relayout()
-    ws.pointer = host_app.console.Pointer(320, 240)
+    ws.set_pointer(host_app.console.Pointer(320, 240))
     ws.input.pointer = ws.pointer
     return _open_first_cart(ws)
 

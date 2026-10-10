@@ -295,7 +295,7 @@ console needs while no Python app runs is OS.
 | `runtime/app_context.py` | roles | 5 | `ROLES` is the ABI's source |
 | `runtime/app_decls.py` | spine | 2 | the app registry's frozen declaration, generated from the manifests by `tools/gen_device_carts.py`; the manifests stay the source |
 | `runtime/app_shell.py` | app | — | the list shell Files, Storybook and Get Carts share |
-| `runtime/appearance.py` | roles | 5 | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons, the state behind the Theme and Wallpaper roles |
+| `runtime/appearance.py` | roles | 5, stays | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons. It stays Python, the coordinator, and writes what the theme role's C rows answer, the live token table (`docs/kernel_appabi_2026-10.md` §6) |
 | `runtime/appearance_app.py` | app | — | Appearance |
 | `runtime/artwork.py` | split | 5, rest stays | `ArtworkService` is a role service (5); `PaintDocument`, `PaintAppLayout` and `PaintAppLayer`, the Paint app, stay Python |
 | `runtime/audio.py` | split | 3, rest stays | `AudioEngine` crossed with audio (deleted 2026-10-07); the bank model (`SFX`, `MusicTrack`, `AudioBank`) is the music editor's data and stays |
@@ -311,7 +311,7 @@ console needs while no Python app runs is OS.
 | `runtime/cart_index.py` | app | — | Get Carts' engine: the index, the per-console plan and `Install`; it writes through the store |
 | `runtime/cart_manager.py` | store | 1b | the shelf's roster: scan, new, duplicate, delete, favorites and recents |
 | `runtime/cart_verbs.py` | cart path | open | the cart API's names as one tuple, read by the code editor's highlighter and the block compiler; follows `runtime/cart_api.py` |
-| `runtime/chrome.py` | split | 5 + 6 + 7, rest stays | token tables, `theme_colors` and the default bar icons → 5; colour names, the glyph vocabulary and scaled-text helpers → 6; `Layout` → 7 with the bar it positions; `CodeLayout` stays with the Editor |
+| `runtime/chrome.py` | split | 5 + 6 + 7, rest stays | the live token table crossed (5: native/moy_app's, which the look writes), and `THEMES`, `theme_colors` and the default bar icons stay data the look reads (`docs/kernel_appabi_2026-10.md` §6); colour names, the glyph vocabulary and scaled-text helpers → 6; `Layout` → 7 with the bar it positions; `CodeLayout` stays with the Editor |
 | `runtime/code_layer.py` | app | — | the Editor's Code tab |
 | `runtime/console.py` | split | 2 + 7 | the spine's half is `runtime/console_spine.py` (2); the layer stack, frame, pointer, composite and the rest → 7, where the file is deleted; `wire_workstation_core` loses a line as each service crosses |
 | `runtime/console_spine.py` | spine | 2 | the run and exit verbs, app registration and resolution, the WiFi lease and the settings wiring, over `native/moy_spine`; its Python side (the app objects, the surfaces a route lands on, the radio glue) stays until each subject's sprint (`docs/kernel_spine_2026-10.md`) |

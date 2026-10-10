@@ -428,11 +428,18 @@ def _wire_param_map():
     Derived rather than restated so that adding a parameter that lands on `ws`
     is seen here immediately. `ws.can_manage` mentions two parameters (it
     defaults from carts_root), so a same-name match wins over a sole mention.
+    A service the Workstation takes through its setter (`ws.set_pointer(p)`)
+    lands on `ws.pointer` the same way.
     """
     fn = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
     params = {a.arg for a in fn.args.args}
     out = {}
     for n in ast.walk(fn):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and _is_ws_attr(n.func) and n.func.attr.startswith("set_")
+                and len(n.args) == 1 and isinstance(n.args[0], ast.Name)
+                and n.args[0].id in params):
+            out[n.func.attr[4:]] = n.args[0].id
         if not isinstance(n, ast.Assign):
             continue
         for t in n.targets:

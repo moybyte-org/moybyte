@@ -718,6 +718,15 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &pointer_locals
     );
 
+// The cursor a Pointer holds, or NULL for another object: what native/moy_app
+// binds its surface rows to.
+moy_input_ptr_t *moy_input_pointer_ptr(mp_obj_t o) {
+    if (!mp_obj_is_type(o, &input_pointer_type)) {
+        return NULL;
+    }
+    return &((input_pointer_obj_t *)MP_OBJ_TO_PTR(o))->p;
+}
+
 // apply_pointer(pointer) -> P_HELD | P_CLICK: the frame's sample into it.
 static mp_obj_t table_apply_pointer(mp_obj_t self_in, mp_obj_t ptr) {
     if (!mp_obj_is_type(ptr, &input_pointer_type)) {

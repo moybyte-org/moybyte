@@ -1494,7 +1494,6 @@ class Player:
         # anything (no permission maps to it, native/moy_app's policy).
         if self._app_id is not None or self._script:
             ns.update(make_system_api(ws.app_context, cart, ws.canvas,
-                                      ws.app_bar_h,
                                       editor=self._open_cart_editor,
                                       request=ws.take_text_request(),
                                       keep=self._keep_grant))

@@ -321,9 +321,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # Phase 6). An app no longer holds `ws`; it holds an AppContext carrying only
 # the roles its NEEDS tuple declares -- see runtime/app_context.py.
 try:
-    from app_context import AppContext
+    from app_context import AppContext, SurfaceServer, ThemeServer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_context import AppContext
+    from runtime.app_context import AppContext, SurfaceServer, ThemeServer
 import moy_app as _moy_app
 
 # Crash isolation for content the shell runs on the kid's behalf (#160,
@@ -747,6 +747,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.app_abi = _app_abi(self.system)
         self._damage_take = self.app_abi.damage_take
         self._damage_drop = self.app_abi.damage_drop
+        # The servers of the roles' Python rows, and the live token table the
+        # look writes at every switch. The surface rows' pointer is bound by
+        # `set_pointer`; until then they answer none.
+        self.app_abi.serve("surface", SurfaceServer(self))
+        self.app_abi.serve("theme", ThemeServer(self))
+        self.look.publish()
         # The system clipboard (#132): the one buffer every editor writes
         # through (the code tab, a cart's editor handle), so copy in one app
         # pastes in another; the code tab's lane over a grant of its own.
@@ -1403,10 +1409,37 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         chrome instead of hardcoding 18 and breaking at font scale 2."""
         return self.bar_layer._bar_h("tool")
 
+    def set_pointer(self, pointer):
+        """The console's pointer (a `moy_input.Pointer`, or None): what
+        `ws.pointer` names and the app ABI's surface rows read, live. Every
+        assignment comes through here, so `ctx.surface.pointer()` never reads a
+        cursor the console dropped."""
+        self.pointer = pointer
+        self.app_abi.bind_pointer(pointer)
+
+    def _surface_write(self, ox=0, oy=0):
+        """Write what an app's surface shows NOW into every surface grant's row
+        (native/moy_app): the system canvas, its size, the effective scales,
+        the world's window flag, the host strip's rows and the origin the
+        pointer is offset by. Called wherever one of them changes -- a
+        relayout, a layout context's install (wm_windowed), the canvas promote
+        and degrade, a responsive app cart's canvas, a new grant -- so a row
+        always answers what the shell would."""
+        abi = getattr(self, "app_abi", None)
+        if abi is None:
+            return
+        cv = self.sys_canvas
+        look = self.look
+        bar = self.app_bar_h() if getattr(self, "bar_layer", None) is not None else 0
+        abi.surface_write(cv, cv.w, cv.h, look.effective_font_scale(),
+                          look.effective_chrome_scale(), self.windowed_chrome,
+                          bar, ox, oy)
+
     def _relayout(self):
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
+        self._surface_write()             # what the apps' relayouts read
         w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
         cs = self.look.effective_chrome_scale()
         self.layout = Layout(w, h, fs, cs)
@@ -1427,6 +1460,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             _relay = getattr(_app, "relayout", None)
             if _relay is not None:
                 _relay(w, h, fs, cs)
+        self._surface_write()             # the new layout's bar
         # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
         # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
@@ -3355,6 +3389,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._run_canvas_shared = self._sys_canvas is None
         if self._run_canvas_shared:
             self._sys_canvas = stock    # promote: the boot canvas is the glass
+            self._surface_write()
         self.canvas = small
         return True
 
@@ -3399,6 +3434,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._run_canvas_shared = False
         self.canvas = sc
         self.app_full_canvas = True
+        self._surface_write()             # the strip is the responsive one now
         return True
 
     def release_run_canvas(self):
@@ -3409,6 +3445,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.app_full_canvas = False
         stock = self._run_canvas_stock
         if stock is None:
+            self._surface_write()
             return
         if self.canvas is self._run_canvas:
             self.canvas = stock
@@ -3416,6 +3453,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._sys_canvas = None     # back to the shared-canvas degradation
         self._run_canvas = self._run_canvas_stock = None
         self._run_canvas_shared = False
+        self._surface_write()
 
     # -- redraw-on-change (#44 step 1) ---------------------------------------
 
@@ -4084,7 +4122,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         before_slim(ws)
     ws.carts.slim()   # #66 live-set diet: heavy payloads reload from the store
     if pointer is not None:
-        ws.pointer = pointer
+        ws.set_pointer(pointer)
         if inp is not None:
             inp.pointer = pointer   # touch-driven carts read it via the api touch()
     # Multiplayer (#65): attach the PlayerRouter to the InputState so btn(name,

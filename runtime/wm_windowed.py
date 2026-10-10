@@ -129,7 +129,10 @@ class _LayoutCtx:
         ctx.storybook_layout = ctx.app_layouts.get("storybook")
         return ctx
 
-    def install(self, ws):
+    def install(self, ws, origin=(0, 0)):
+        """Swap this context in, and write it into every surface grant's row
+        (native/moy_app) with `origin`, where the window's content sits on the
+        glass: an app reads its own row, which is the installing window's."""
         ws._sys_canvas = self.sys_canvas
         ws.layout = self.layout
         ws.code_layout = self.code_layout
@@ -145,6 +148,7 @@ class _LayoutCtx:
                 _app.layout = _lay
         ws.launcher.set_layout(self.layout)
         ws.picker.set_layout(self.layout)
+        ws._surface_write(origin[0], origin[1])
 
 
 class _Win:
@@ -398,8 +402,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if layout is not None:
             self._root_ctx.app_layouts[app.id] = layout
 
-    def _install(self, ctx):
-        ctx.install(self.ws)
+    def _install(self, ctx, win=None):
+        if win is None:
+            ctx.install(self.ws)
+        else:
+            cx, cy, _cw, _ch = win.content_rect()
+            ctx.install(self.ws, (cx, cy))
 
     def _make_ctx(self, buf):
         """Build the layout set for a window buffer: run the console's own
@@ -558,7 +566,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         content = self._content_for(win.kind)
         if content is None:
             return
-        self._install(win.ctx)
+        self._install(win.ctx, win)
         try:
             content.draw(0)
             win._buf_stale = False
@@ -1458,8 +1466,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if cx < 0 or cy < 0 or cx + cw > root.w or cy + ch > root.h:
             return False
         ws = self.ws
-        self._install(win.ctx)
+        self._install(win.ctx, win)
         ws._sys_canvas = root                 # ...but paint on the framebuffer
+        ws._surface_write(cx, cy)
         sv(cx, cy, cw, ch)
         try:
             self._content_for(win.kind).draw(dt)
@@ -1580,7 +1589,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 # Live: render the focused app into its buffer at the window's
                 # layout.
                 self._win_touched = True
-                self._install(win.ctx)
+                self._install(win.ctx, win)
                 try:
                     self._content_for(win.kind).draw(dt)
                 finally:
@@ -1751,7 +1760,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if content is None:
             return False
         if win.ctx is not None:
-            self._install(win.ctx)
+            self._install(win.ctx, win)
             try:
                 return bool(content.handle_input(i))
             finally:
@@ -1918,7 +1927,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if p.down:
             self._content_gesture = True    # scrolling INSIDE a window: the desk
                                             # is static -> _BackdropLayer caches
-        self._install(win.ctx)
+        self._install(win.ctx, win)
         try:
             content.handle_pointer(lx, ly, click)
         finally:

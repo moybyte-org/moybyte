@@ -105,7 +105,7 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     ws.make_api = host_app.make_api
     ws.carts_store = moy_carts
     ws.carts_root = carts_dir
-    ws.pointer = console.Pointer(320, 240)
+    ws.set_pointer(console.Pointer(320, 240))
     ws.load_system()
     assert ws.look.wallpaper_carts() == []                     # none installed
     assert ws.look.wallpaper_id.startswith("fill:")            # fell back to a solid fill

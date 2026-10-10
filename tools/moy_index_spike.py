@@ -94,6 +94,7 @@ sys.path.insert(0, ROOT)
 NATIVE = os.path.join(ROOT, "native", "moy_index")
 NATIVE_SPINE = os.path.join(ROOT, "native", "moy_spine")
 NATIVE_APP = os.path.join(ROOT, "native", "moy_app")
+NATIVE_INPUT = os.path.join(ROOT, "native", "moy_input")
 CACHE = os.path.join(ROOT, ".build", "host_index")
 OUT = os.path.join(ROOT, ".build", "moy_index_spike")
 WEB_DIR = os.path.join(ROOT, "firmware", "web_runner")
@@ -155,10 +156,10 @@ INDEX = Component(
 # reads the spine's tables and settings rows, so its ctypes binding
 # (tools/moy_app_binding.py) loads this same library.
 SPINE = Component(
-    "spine", [NATIVE_SPINE, NATIVE_APP], "moy_spine_host.c",
+    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
      "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
-     "moy_json.h", "moy_json.c", "moy_app.h", "moy_app.c"],
+     "moy_json.h", "moy_json.c", "moy_app.h", "moy_app.c", "moy_input.h"],
     ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
                       "moy_ledger.c", "moy_json.c"]),
     r"\((mod)?moy_(spine|route|settings|ledger|htab)\.c\.obj\)$"

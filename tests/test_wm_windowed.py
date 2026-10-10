@@ -1974,3 +1974,44 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_fli
     # A root that changed size re-mints it and releases the old one.
     ws.wm._root_canvas.w -= 0                       # unchanged: the same layer
     assert ws.wm._ensure_backdrop() is cache
+
+
+# -- two app windows of different sizes (#224, sprint 5) ------------------------
+
+# The desk with Calc and Files open as windows of two sizes, each frame hashed
+# the way tests/test_shell_goldens.py hashes a surface, once with Files on top
+# and once after Calc is reopened above it. Each app lays itself out and draws
+# from its OWN grant's surface row (native/moy_app), which the WM writes as it
+# installs each window's layout context: a row the console shared, or one read
+# from the last window installed, lays an app out at the other window's size.
+TWO_WINDOWS = (
+    "72672824a44ad246b1d71495c25cc09e2bc1795844b12f59665c6e743d804b0f",
+    "5ad6b167e6b80f47a28acf31eb5f2b61f75b89ccc21f3782a5f322ec8b914f76",
+)
+
+
+def test_two_app_windows_of_different_sizes_match_their_golden(tmp_path):
+    from test_shell_goldens import _quiesce as _still, _render
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _still(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(5):
+        drv.frame(1 / 30)
+    calc = ws.wm._wins["calc"]
+    calc.x, calc.y = 24, 48
+    ws.wm._resize_window(calc, 360, 300)
+    ws.open_app(ws._apps_by_id["files"])
+    for _ in range(5):
+        drv.frame(1 / 30)
+    files = ws.wm._wins["files"]
+    assert (calc.w, calc.h) != (files.w, files.h)
+    got = [_render(ws, "two windows", "desk")]
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(5):
+        drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "calc"
+    got.append(_render(ws, "two windows, calc on top", "desk"))
+    assert tuple(got) == TWO_WINDOWS

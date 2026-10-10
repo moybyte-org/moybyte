@@ -66,7 +66,8 @@ def test_roles_is_the_tables_roles_in_order():
 
 # What AppContext builds for each role, where the role is an object of its own:
 # native/moy_app's role types for the C roles, this tier's classes for the rest.
-_CLASSES = {"damage": moy_app.Damage, "surface": _ac.Surface, "theme": _ac.Theme,
+_CLASSES = {"damage": moy_app.Damage, "surface": moy_app.Surface,
+            "theme": moy_app.Theme,
             "files": _ac.Files, "carts": _ac.Carts, "nav": _ac.Nav,
             "prefs": moy_app.Prefs, "notify": _ac.Notify,
             "wallpaper": _ac.WallpaperRole, "install": _ac.Installer,
@@ -222,3 +223,120 @@ def test_each_apps_drawn_frame_keeps_its_role_budget(tmp_path, kind):
             if v > BUDGETS[kind].get(k, 0)}
     assert not over, "%s's frame exceeds its role budget (per frame, cap): %s" % (
         kind, over)
+
+
+# -- the rows the shell writes -------------------------------------------------
+#
+# surface's and theme's C rows answer what the shell WROTE (the grant's surface
+# row, the look's token table), not what it shows now, so every change the
+# shell makes has to reach them: a writer missed is an app laid out for a
+# canvas, a scale or a window it is no longer in. These drive the changes the
+# shell makes -- every app opened and drawn, a font-scale step, a theme
+# switch, two desk windows of two sizes, a maximize, taps inside a window --
+# and fail on any read whose row is not what the shell shows at that moment.
+
+def _checked_rows(monkeypatch, ws):
+    bad = []
+    S = moy_app.Surface
+
+    def wrap(name, live, same=lambda a, b: a == b):
+        real = getattr(S, name)
+
+        def checked(self, *a, **kw):
+            v = real(self, *a, **kw)
+            if self._app is ws.app_abi:
+                want = live()
+                if not same(v, want):
+                    bad.append((name, v, want))
+            return v
+
+        monkeypatch.setattr(S, name, checked)
+
+    wrap("canvas", lambda: ws.sys_canvas, lambda a, b: a is b)
+    wrap("size", lambda: (ws.sys_canvas.w, ws.sys_canvas.h))
+    wrap("font_scale", lambda: ws.look.effective_font_scale())
+    wrap("chrome_scale", lambda: ws.look.effective_chrome_scale())
+    wrap("windowed", lambda: ws.windowed_chrome)
+    wrap("bar_h", lambda: ws.app_bar_h())
+    wrap("pointer", lambda: ws.pointer,
+         lambda a, p: (a is None) == (p is None) and (
+             a is None or (a.down, a.click, a.visible)
+             == (bool(p.down), bool(p.click), bool(p.visible))))
+    T = moy_app.Theme
+    real_colors = T.colors
+
+    def colors(self):
+        v = real_colors(self)
+        if self._app is ws.app_abi and v != ws.theme_colors:
+            bad.append(("colors", ws.look.theme_name))
+        return v
+
+    monkeypatch.setattr(T, "colors", colors)
+    return bad
+
+
+def test_the_surface_and_theme_rows_follow_the_fullscreen_shell(tmp_path, monkeypatch):
+    ws = build_ws(tmp_path)
+    bad = _checked_rows(monkeypatch, ws)
+    for kind in sorted(BUDGETS):
+        assert ws.open_app(ws._apps_by_id[kind]), kind
+        for _ in range(3):
+            ws._dirty = True
+            ws.frame(1 / 30.0)
+        ws.look.set_theme("berry", variant="light")
+        ws.look.cycle_font_scale(1)
+        for _ in range(2):
+            ws._dirty = True
+            ws.frame(1 / 30.0)
+        ws.look.set_theme("night", variant="dark")
+        ws.exit()
+    assert not bad, bad[:5]
+
+
+def test_the_surface_and_theme_rows_follow_the_desk(tmp_path, monkeypatch):
+    from ws_helpers import build_desktop_ws
+    from runtime import host_app
+    ws = build_desktop_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    bad = _checked_rows(monkeypatch, ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(4):
+        drv.frame(1 / 30)
+    calc = ws.wm._wins["calc"]
+    ws.wm._resize_window(calc, 360, 300)
+    ws.open_app(ws._apps_by_id["files"])
+    for _ in range(4):
+        drv.frame(1 / 30)
+    files = ws.wm._wins["files"]
+    assert (calc.w, calc.h) != (files.w, files.h)
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(3):
+        drv.frame(1 / 30)
+    cx, cy, cw, ch = calc.content_rect()
+    drv.touch(cx + cw // 2, cy + ch // 2)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    ws.wm._toggle_max(files)
+    ws.look.cycle_font_scale(1)
+    ws.look.set_theme("forest")
+    for _ in range(4):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert not bad, bad[:5]
+
+
+def test_the_token_vocabulary_is_every_themes_keys():
+    """The live token table holds a theme as role ids (native/moy_app's
+    vocabulary); a token a theme sets with no role id would be refused by the
+    look's write, so the vocabulary is exactly the keys every theme and variant
+    resolves to."""
+    from runtime import chrome
+    keys = set()
+    for name, _t in chrome.THEMES:
+        for variant in chrome.THEME_VARIANTS:
+            keys |= set(chrome.theme_colors(name, variant))
+    assert set(moy_app.tokens()) == keys
+    assert len(moy_app.tokens()) == len(keys)
