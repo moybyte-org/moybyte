@@ -104,6 +104,15 @@
 #define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
 #define MOY_KERNEL_TOUCH_ADDR               (0x3B)
 
+// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The kernel stops the VM for a VM-free game whose fit check fails with the VM
+// up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
+// the panel's own framebuffer (moy_axs's kernel entry points above), and
+// starts the VM again after it, mounting the card's open volume with no bus
+// traffic (native/moy_play/moy_play_stop.c). A board without it keeps the VM
+// for every run.
+#define MOY_VM_STOP                         (1)
+
 // The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the AXS15231 touch.
 #define MOY_BUS_I2C_PORT                    (0)
 #define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA

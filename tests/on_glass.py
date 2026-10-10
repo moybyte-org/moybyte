@@ -465,7 +465,7 @@ VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
 
 
-def a_front_run_makes_no_crossing(board, spec, title, clear=0):
+def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
     """The cart path's second checkpoint (docs/kernel_cartpath_2026-10.md §6):
     a VM-free seed game is the kernel loop's foreground -- its input, ticks,
     chrome and present in C -- so from its launch to its exit the run's own
@@ -473,7 +473,10 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0):
     REFUSED), with the VM up. `state` and `end` are the kernel's words while
     it runs, so reading it and leaving it cross nothing either; the books
     frozen at the end are read back once the console has the frame again.
-    `clear` is cart_runs_and_exits's."""
+    `clear` is cart_runs_and_exits's. `front` False: a board whose
+    compositor gives the kernel no front (the Guition P4's rotated one), where
+    the console's frame drives the same Player -- its CONSOLE crossing a
+    frame is the only one, and the run is left by the shell."""
     import time
     for _ in range(clear):
         board.cmd("py ws.exit()", wait_for="PY")
@@ -485,28 +488,37 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0):
     try:
         st = board.state()
         assert st.get("cart") == title, st.get("cart")
-        assert st.get("front") is True, "%s is not the loop's foreground: %r" % (
-            title, {k: st.get(k) for k in ("screen", "cart", "run", "play")})
+        assert bool(st.get("front")) is front, "%s: front %r, expected %r: %r" % (
+            title, st.get("front"), front,
+            {k: st.get(k) for k in ("screen", "cart", "run", "play")})
         # VM-free, and it keeps the VM: under the `need` policy a Lua cart has
         # no footprint whose fit could fail, and a P4 has no stop at all
         # (docs/kernel_cartpath_2026-10.md section 5).
-        assert st["run"] == {"runtime": "lua", "vm_free": True, "why": "free",
-                             "stop": KEEPS, "vm_down": False}, st["run"]
+        run = dict(st["run"])
+        assert run.pop("fit", None) is None, st["run"]
+        assert run == {"runtime": "lua", "vm_free": True, "why": "free",
+                       "stop": KEEPS if front else NO_FRONT, "vm_down": False}, st["run"]
         f0, t0 = st["play"]["frames"], st["play"]["ticks"]
         for _ in range(5):
             time.sleep(0.2)
             st = board.state()
-            assert st["upcalls"] == [0, 0, 0, 0, 0], \
+            frame_up = st["upcalls"] if front else [0] + list(st["upcalls"][1:])
+            assert frame_up == [0, 0, 0, 0, 0], \
                 "a frame of %s crossed into Python: %r" % (title, st["upcalls"])
-            assert st["play"]["upcalls"] == [0, 0, 0, 0, 0], st["play"]
+            run_up = st["play"]["upcalls"] if front else [0] + list(st["play"]["upcalls"][1:])
+            assert run_up == [0, 0, 0, 0, 0], st["play"]
         assert st["play"]["frames"] > f0, "%s is not drawing" % title
         assert st["play"]["ticks"] > t0, "%s draws but never ticks" % title
-        board.cmd("end", wait_for="REMOTE end")
+        if front:
+            board.cmd("end", wait_for="REMOTE end")
+        else:
+            board.leave_cart()
         ended = True
         board.drain(1.5)
         info = board.pyval("__import__('moy_play').info()")
         assert info[6] is True, "the run did not end: %r" % (info,)
-        assert list(info[5]) == [0, 0, 0, 0, 0], \
+        books = list(info[5]) if front else [0] + list(info[5][1:])
+        assert books == [0, 0, 0, 0, 0], \
             "%s crossed into Python from launch to exit: %r" % (title, info[5])
         st = board.state()
         assert not st.get("cart") and not st.get("front"), st.get("screen")
@@ -516,14 +528,17 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0):
             board.drain(1.5)
 
 
-def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=0):
+def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=0,
+                              front=True):
     """A Ctrl-C reaches the VM past a run in the kernel's front
     (docs/kernel_cartpath_2026-10.md §9 decision 4): the run ends with why
     SERIAL and the console's next upcall raises the interrupt, so the REPL
     comes up as it does with no run in front -- which is what `board.py
     reboot --soft` and every interrupting tool rely on. The soft reset after it
     closes the run the console never closed, so the next VM runs the cart
-    again."""
+    again. `front` False: a board with no kernel front, where the console's
+    frame is the one the Ctrl-C interrupts; the same REPL, and the cart runs
+    again after the soft reset."""
     import time
     for _ in range(clear):
         board.cmd("py ws.exit()", wait_for="PY")
@@ -532,7 +547,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
     assert line is not None and "no cart match" not in line, line
     board.drain(2.0)
     st = board.state()
-    assert st.get("front") is True and st.get("cart") == title, st.get("screen")
+    assert bool(st.get("front")) is front and st.get("cart") == title, st.get("screen")
     board.ser.write(b"\r\x03")
     # (The prompt itself ends no line: the loop's own last words are the tell.)
     assert board.wait_line("interrupted -> REPL", timeout=5.0) is not None, \
@@ -549,8 +564,9 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
         except RuntimeError:
             pass
         assert time.time() < end, "the console never came back after the Ctrl-C"
-    assert why is not None and why.split("END WHY ", 1)[1].strip() == "5", \
-        "the run did not end with why SERIAL: %r" % (why,)
+    if front:
+        assert why is not None and why.split("END WHY ", 1)[1].strip() == "5", \
+            "the run did not end with why SERIAL: %r" % (why,)
     # The soft reset closed the run the console never closed: the next VM's
     # first Lua run opens (it was refused as "a run is already open").
     for _ in range(clear):
@@ -560,7 +576,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
     board.drain(2.0)
     st = board.state()
     try:
-        assert st.get("front") is True and not st.get("cart_error"), \
+        assert bool(st.get("front")) is front and not st.get("cart_error"), \
             "%s did not run again after the soft reset: %r" % (title, st.get("cart_error"))
     finally:
         board.cmd("end" if st.get("front") else "py ws.exit()", wait_for="REMOTE")
@@ -755,16 +771,20 @@ KSTOP_JITTER = 64
 
 class _Keeps(str):
     """The stop verdict of a run that keeps the VM on a console: it fits with
-    the VM up (the T-Deck's `need` policy), or the board has no stop (a P4's
-    lever is ABSENT)."""
+    the VM up (the S3s' `need` policy), the board has no stop (a P4's lever
+    is ABSENT), or the board's kernel present cannot show its canvas (a
+    320x240 cart on the Guition S3's 480x320 panel)."""
 
     def __eq__(self, other):
-        return other in ("fits", "lever")
+        return other in self.split("|")
 
     __hash__ = str.__hash__
 
 
-KEEPS = _Keeps("fits|lever")
+KEEPS = _Keeps("fits|lever|front")
+# A board with no kernel front for the run: no stop lever (the P4s), or a
+# present that cannot show the canvas.
+NO_FRONT = _Keeps("front|lever")
 
 
 def _kstop_after(line):
@@ -878,8 +898,11 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
         for _ in range(cycles):
             if hold_link:
                 assert board.pyexec("ws.wifi_hold('link')"), board.last_error
-            line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
-            assert line is not None and title in line, line
+            # Written raw and waited for by the stop's own line: the stop can
+            # print in the same burst as the run's echo, which `cmd` reads
+            # past.
+            board.ser.write(("run %s\r\n" % title.lower()).encode())
+            board.ser.flush()
             line = board.wait_line("STOP 1/1 down", 60)
             assert line is not None, "the VM never stopped"
             psram.append(_stop_psram(line))

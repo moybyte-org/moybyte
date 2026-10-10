@@ -527,6 +527,17 @@ def test_loop_is_the_kernels_line_with_every_stage(board):
     on_glass.loop_line_is_the_kernels(board)
 
 
+# The rotated compositor gives the kernel no front: the console's frame
+# drives the same C Player, and its CONSOLE crossing is the only one.
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_front_run_makes_no_crossing(board, spec, title):
+    on_glass.a_front_run_makes_no_crossing(board, spec, title, clear=3, front=False)
+
+
+def test_a_ctrl_c_ends_a_front_run_and_reaches_the_repl(board):
+    on_glass.a_ctrl_c_ends_a_front_run(board, clear=3, front=False)
+
+
 # LAST in the file: twenty soft resets end on a freshly started VM.
 def test_twenty_soft_resets_leave_psram_flat(board):
     on_glass.soft_resets_leave_psram_flat(board, n=20)

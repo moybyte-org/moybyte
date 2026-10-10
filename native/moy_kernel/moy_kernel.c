@@ -1319,7 +1319,10 @@ static void moy_kernel_heaps_line(const char *tag, int i, int n, const char *whe
     if (s_walk_on && (strcmp(when, "down") == 0 || strcmp(when, "ended") == 0)) {
         moy_kernel_heapwalk(tag);
     }
-    printf("%s %d/%d %s psram=%u/%u int=%u/%u/%u dma=%u/%u/%u%s%s\n",
+    // The kernel's own serial path, as `say`'s: a printf straight after the
+    // VM's teardown was lost on the Guition S3's USB serial now and then,
+    // and this line is the stop's reading.
+    k_printf("%s %d/%d %s psram=%u/%u int=%u/%u/%u dma=%u/%u/%u%s%s\r\n",
            tag, i, n, when,
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),

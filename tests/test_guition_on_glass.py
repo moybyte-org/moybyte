@@ -249,19 +249,11 @@ def test_the_jet_showcase_holds_its_floor_at_full_width(board):
                                  shading="phong")
 
 
-# Doom, built by the recipe (experiments/wasm_aot/doom/): its load needs the
-# linear memory's block, the pool and the text at once, more PSRAM than this
-# board -- the floor board -- has free in its 3 MB cart-runtime reserve with
-# the shell resident, even on a fresh boot, so its fit check refuses it. The
-# cart is not installed here, and this skips, saying so, until the reserve or
-# the cart changes.
-DOOM_SHORT = ("Doom does not fit this board's 3 MB cart-runtime reserve with "
-              "the shell resident: its fit check refuses it (measured "
-              "2026-09-26; experiments/wasm_aot/doom/README.md)")
-
-
+# Doom, built by the recipe (experiments/wasm_aot/doom/): its frames held to
+# the host's. It fits this board with the VM up (#224 holds the fit figures);
+# a launch whose fit check fails stops the VM for it (the checks below).
 def test_doom_frames_match_the_host(board):
-    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR, short=DOOM_SHORT)
+    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR)
 
 
 def test_state_snapshot_has_the_fullscreen_tier_shape(board):
@@ -569,6 +561,39 @@ def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
 
 def test_loop_is_the_kernels_line_with_every_stage(board):
     on_glass.loop_line_is_the_kernels(board)
+
+
+# A VM-free seed game's 320x240 canvas is not the 480x320 panel the kernel's
+# present shows, so the console's frame drives the same C Player: its CONSOLE
+# crossing is the only one, and a Ctrl-C reaches the REPL.
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_front_run_makes_no_crossing(board, spec, title):
+    on_glass.a_front_run_makes_no_crossing(board, spec, title, front=False)
+
+
+def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
+    on_glass.a_ctrl_c_ends_a_front_run(board, front=False)
+
+
+# The VM stop (docs/kernel_cartpath_2026-10.md section 5): the kernel stops the
+# VM and starts it again with no cart, the routes and the lease read back and
+# PSRAM flat while it is down; Doom runs with no VM (its fit forced to fail),
+# its end -- the dev channel's `end`, or a Ctrl-C -- brings a VM back over the
+# card's open volume; and a stopped run whose frame never ends is ended.
+def test_vm_stops_leave_psram_flat_and_the_routes_read_back(board):
+    on_glass.vm_stops_leave_psram_flat(board, n=5)
+
+
+def test_doom_runs_with_the_vm_down(board):
+    on_glass.doom_runs_with_the_vm_down(board, hold_link=True)
+
+
+def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
+    on_glass.doom_runs_with_the_vm_down(board, ctrl_c=True)
+
+
+def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
+    on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
 
 
 # LAST in the file: twenty soft resets end on a freshly started VM.
