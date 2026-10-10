@@ -513,60 +513,27 @@ against that bug before it goes green.
 - `glyph`, `install.net` and `install.keep` are Python-only rows.
 - The place table is the spine's, so the host has it without the C spine.
 
-## 12. Owner questions
+## 12. The owner's answers (2026-10-10)
 
-1. **The moy-spec change** (§4.2): the vendor-extension import rule, libmoy's
-   checks taking `(module, name, type)` extension tables, and `moy check`
-   reporting declared extension imports untyped with a portability warning.
-   Without it no host, ours included, links a role import. **Recommendation:
-   open the proposal.**
-2. **Whether to build the place contract now, and how much.** Facts: under
-   `need` the VM stops only for a VM-free cart that does not fit with the VM
-   up; sprint 4's gate has Doom loading after the session with the VM up
-   (#224), and §10 question 8 records the memory motive as largely met. What
-   it buys is a stop never refused for where the run came from. Cost: a
-   spine table, a `place`/`open(place)` pair on eleven kinds, and the
-   restore gate. Options: all kinds (steps 3–4); only the run callers
-   (launcher, picker, Editor, Storybook, Get Carts, Files), the rest refusing
-   the stop with reason "place"; or none, keeping §5.1's refusal.
-   **Recommendation: the run callers only.** They are the routes a big cart is
-   launched from, and the refusal keeps the rest correct.
-3. **What a restored app keeps.** Calc's place holds its entry but loses
-   `acc` and `op` unless the place carries them; a place whose target is gone
-   lands at that part's root with no word to the person. **Recommendation:**
-   places carry all of an app's in-memory state that fits 256 bytes (Calc's
-   included), and a gone target shows the app's ordinary status line naming
-   what is missing.
-4. **The user-files layer in C** (step 9). Facts: `runtime/moy_files.py` and
-   `runtime/moy_file_ops.py` are about 880 lines, stayed Python after 1b by
-   decision, carry the history ops (which become bytes) and the codecs; the
-   Zero takes them as store code. In C they let a compiled app save a document
-   with no VM; kept Python, `files` is shell-served and such an app keeps the
-   VM. **Recommendation: cross them**, in `native/moy_store` (which every image
-   links), with step 9 skipped if not.
-5. **The C spine on the host and the browser** (step 5). Facts: it retires
-   the twin, which is the differential oracle of `tests/test_moy_spine_twins.py`
-   and `tests/test_ledger_twin.py`, and touches 18 modules that import it; it
-   flips the web build's `MOY_SPINE_IMPL` default (`firmware/web_runner/build.sh`),
-   a rebuild at the pinned emscripten and a re-bake into every image. Without
-   it a C row has a C server on a board and none on the host.
-   **Recommendation: yes, before step 6**, keeping the twin under `tests/` as
-   the oracle.
-6. **The clipboard across a stop.** As a kernel row it survives a stop, which
-   sprint 4's §9 decision 2 accepted losing; its cap is configuration (text
-   only, as `Clipboard` holds today). **Recommendation: yes, with a 4 KiB cap**
-   in PSRAM; longer text is refused with the editor's existing status.
-7. **Dropping `persist` from the ABI.** No app passes `persist=False`; the
-   shell's own calls do and keep it. **Recommendation: drop it**; an app's
-   change always persists.
-8. **A compiled app is cart-shaped.** Fixed canvas, `_init`/`_update`/`_draw`,
-   the C strip; a windowed, Layer-shaped compiled app waits for the wasm
-   tier's first app. **Recommendation: agree.**
-9. **Grants keyed by the title slug.** A user app's id and prefs namespace are
-   its title's slug (`app_id_for`), so renaming the cart loses its prefs and
-   crash strikes. Options: keep, or key by a manifest id (#162's namespaced
-   ids). **Recommendation: keep the slug for sprint 5** and move to #162's id
-   when it lands, as one store change.
+1. **The moy-spec change** (§4.2) is opened as a proposal: the
+   vendor-extension import rule, `(module, name, type)` extension tables in
+   libmoy's checks, and `moy check` reporting declared extension imports.
+2. **No place contract.** Under `need` a stop is rare, so a launch from any
+   surface but the launcher keeps the VM (the refusal reason is "place"), and
+   §5's contract, the place table and steps 3 and 4 of §8 are not built.
+3. Moot with answer 2.
+4. **User files cross to C** (`moy_files.py`, `moy_file_ops.py` into
+   `native/moy_store`) as their own step; the Zero denies the module.
+5. **The C spine on the host and in the browser**, before the grant step, with
+   `runtime/moy_spine.py` kept under `tests/` as the differential oracle.
+6. Not a decision: the clipboard is a C role, so it survives a stop as kernel
+   state does; its buffer is bounded at 4 KiB of text in PSRAM.
+7. **`persist` leaves the app ABI**; only the shell's own calls use it.
+8. **A compiled app is cart-shaped in sprint 5**; a windowed compiled app (a
+   window's surface, size and focus events) is sprint 6's, alongside the
+   toolkit's C primitives.
+9. **Grants are keyed by the cart's `id`** (#162, SPEC.md §3.1), not the
+   title slug, so a renamed cart keeps its prefs and strikes.
 
 ## 13. Claims this sprint falsifies
 
