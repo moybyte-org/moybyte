@@ -18,6 +18,8 @@ native/moy_wasm/modmoy_wasm.c  read_module  1  binding: a module's bytes read fo
 native/moy_wasm/modmoy_wasm.c  verify_module  1  binding: the module's signature, checked for the Python glue's open
 native/moy_store/modmoy_store.c  int_or  1  binding: a store verb's argument
 native/moy_store/modmoy_store.c  mod_seed  2  binding: the seed's progress callback and an entry's int
+native/moy_store/modmoy_ufiles.c  json_call  1  binding: a sidecar's records decoded and an op batch encoded, for the Python caller
+native/moy_store/modmoy_ufiles.c  pixels  1  binding: a cart's list of indices made bytes, for the Python caller
 native/moy_store/moy_card.c  io  1  binding: the card's block device, a Python driver under the store's verbs
 native/moy_store/moy_kvfs.c  moy_kvol_vm_mount  1  vm: internal flash mounted at a VM's start
 native/moy_net/modmoy_net.c  loads  1  binding: a sync batch's JSON decoded for the Python caller

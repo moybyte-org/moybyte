@@ -31,8 +31,16 @@ _ROWS = ("damage.all", "damage.again",
          "surface.pointer",
          "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
          "theme.variant", "theme.skin",
+         "files.readable", "files.ready", "files.begin", "files.end", "files.list",
+         "files.count", "files.load", "files.save", "files.delete",
+         "files.duplicate", "files.rename", "files.new_name", "files.trash_list",
+         "files.restore", "files.empty_trash", "files.history", "files.history_ops",
+         "files.history_commit", "files.encode_image", "files.decode_image",
+         "files.decode_cover", "files.encode_cover", "files.sig", "files.stamp",
+         "files.encode_text", "files.decode_text", "files.provenance",
          "prefs.get", "prefs.set",
-         "prefs.clear", "artwork.current", "artwork.follow", "clipboard.put_text", "clipboard.text",
+         "prefs.clear", "wallpaper.load_copy", "wallpaper.save_copy",
+         "artwork.current", "artwork.follow", "clipboard.put_text", "clipboard.text",
          "clipboard.kind", "clipboard.seq")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
@@ -98,6 +106,20 @@ class App:
         self._tgen = 0
         self._colors = None
         self._colors_gen = 0
+        self._store = (None, False, False, None)    # root, readable, writable, no_store
+        self._sessions = 0
+        self._copy_gen = 0
+
+    def store_bind(self, root, readable, writable, no_store):
+        readable = root is not None and bool(readable)
+        self._store = (root, readable, readable and bool(writable), no_store)
+
+    def files_end_all(self):
+        n, self._sessions = self._sessions, 0
+        return n
+
+    def copy_gen(self):
+        return self._copy_gen
 
     def grant(self, app_id, roles, kind=None, ns=None, run=False, owner=0):
         if not isinstance(app_id, str):
@@ -450,19 +472,169 @@ class Artwork(_Role):
         return True
 
 
+# The user-files rows: the grant and the kind it was made for checked, the row
+# counted, the store's readiness checked, then the layer's verb over the bound
+# root -- the layer itself being native/moy_store's, which
+# tests/test_userfiles_parity.py holds to the Python it replaced.
+
+def _layer():
+    import moy_ufiles
+    return moy_ufiles
+
+
+class Files(_Role):
+    def _row(self, row, kind=None, need="read"):
+        """(True, None) when the row may run, else (False, its `err`)."""
+        app = self._app
+        g = app._hold(self._g, "files", "files." + row)
+        if kind is not None and g[3] is not None and kind != g[3]:
+            raise ValueError("a role the grant does not hold")
+        root, readable, writable, no_store = app._store
+        if root is None or (need == "read" and not readable) or (
+                need == "write" and not writable):
+            return (False, no_store)
+        return (True, None)
+
+    def _op(self, row, kind, need, fn, *args):
+        ok, why = self._row(row, kind, need)
+        if not ok:
+            return (None, why)
+        try:
+            return (fn(*(args + (self._app._store[0],))), None)
+        except ValueError:
+            return (None, "a refused argument")
+        except MemoryError:
+            return (None, "memory allocation failed")
+        except OSError as e:
+            return (None, str(e))
+
+    def readable(self):
+        self._row("readable", need=None)
+        return self._app._store[1]
+
+    def ready(self):
+        self._row("ready", need=None)
+        return self._app._store[2]
+
+    def begin(self):
+        ok, why = self._row("begin", need="write")
+        if not ok:
+            return (None, why)
+        self._app._sessions += 1
+        return (True, None)
+
+    def end(self):
+        self._app._hold(self._g, "files", "files.end")
+        if self._app._sessions:
+            self._app._sessions -= 1
+
+    def list(self, kind):
+        return self._op("list", kind, "read", _layer().list_files, kind)
+
+    def count(self, kind):
+        return self._op("count", kind, "read", _layer().count_files, kind)
+
+    def load(self, kind, name):
+        return self._op("load", kind, "read", _layer().load_file, kind, name)
+
+    def save(self, kind, name, blob):
+        return self._op("save", kind, "write", _layer().save_file, kind, name, blob)
+
+    def delete(self, kind, name):
+        return self._op("delete", kind, "write", _layer().delete_file, kind, name)
+
+    def duplicate(self, kind, name):
+        return self._op("duplicate", kind, "write", _layer().duplicate_file, kind, name)
+
+    def rename(self, kind, name, new):
+        return self._op("rename", kind, "write", _layer().rename_file, kind, name, new)
+
+    def new_name(self, kind, title=None):
+        uf = _layer()
+        if title:
+            return self._op("new_name", kind, "read", uf.free_file_name, kind, title)
+        return self._op("new_name", kind, "read", uf.new_file_name, kind)
+
+    def trash_list(self):
+        return self._op("trash_list", None, "read", _layer().trash_list)
+
+    def restore(self, kind, name):
+        return self._op("restore", kind, "write", _layer().restore_file, kind, name)
+
+    def empty_trash(self):
+        return self._op("empty_trash", None, "write", _layer().empty_trash)
+
+    def history(self, kind, name):
+        return self._op("history", kind, "read", _layer().load_history, kind, name)
+
+    def history_ops(self, kind, name):
+        return self._op("history_ops", kind, "read", _layer().history_ops, kind, name)
+
+    def history_commit(self, kind, name, ops, keyframe=None):
+        uf = _layer()
+        return self._op("history_commit", kind, "write",
+                        lambda k, n, root: uf.history_commit(k, n, ops, keyframe, root),
+                        kind, name)
+
+    # -- the codecs: their value, or None with no layer bound
+
+    def _codec(self, row):
+        return self._row(row, need="layer")[0]
+
+    def encode_image(self, w, h, indices):
+        if not self._codec("encode_image"):
+            return None
+        return _layer().encode_image(w, h, indices)
+
+    def decode_image(self, blob):
+        if not blob:
+            self._app._hold(self._g, "files")
+            return None
+        return _layer().decode_image(blob) if self._codec("decode_image") else None
+
+    def decode_cover(self, blob):
+        if not blob:
+            self._app._hold(self._g, "files")
+            return None
+        return _layer().decode_cover(blob) if self._codec("decode_cover") else None
+
+    def encode_cover(self, indices):
+        return _layer().encode_cover(indices) if self._codec("encode_cover") else None
+
+    def sig(self, blob):
+        return _layer().content_sig(blob or "") if self._codec("sig") else None
+
+    def stamp(self, blob, kind, name, sig):
+        if not isinstance(blob, str):
+            self._app._hold(self._g, "files")
+            return blob
+        return _layer().stamp_provenance(blob, kind, name, sig) if self._codec("stamp") else blob
+
+    def encode_text(self, body):
+        return str(body) if self._codec("encode_text") else None
+
+    def decode_text(self, blob):
+        if not self._codec("decode_text") or not isinstance(blob, str) or not blob:
+            return []
+        return blob.split("\n")
+
+    def provenance(self, blob):
+        if not isinstance(blob, str) or not blob:
+            self._app._hold(self._g, "files")
+            return (None, None)
+        if not self._codec("provenance"):
+            return (None, None)
+        return _layer().read_provenance(blob)
+
+
 # The roles every row of which the console serves (roles.json's "shell" rows).
 _SERVED = {
-    "files": ("readable ready begin end list count load save delete duplicate "
-              "rename new_name trash_list restore empty_trash history history_ops "
-              "history_commit encode_image decode_image decode_cover encode_cover "
-              "sig stamp encode_text decode_text provenance"),
     "carts": ("readable ready begin end all can_journal slug create journal rescan "
               "hydrate load_deck save_deck save_code images save_image encode_image"),
     "nav": ("open_app is_system_app projects edit open_image open_text edit_file "
             "play run_script text_mode"),
     "notify": "achieve",
-    "wallpaper": ("current carts fills id_for title select preview thumbnail "
-                  "load_copy save_copy"),
+    "wallpaper": "current carts fills id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
                 "writable op rescan free find net keep"),
 }
@@ -477,9 +649,39 @@ def _served_role(role):
                 {v: row(v) for v in _SERVED[role].split()})
 
 
-Files = _served_role("files")
 Carts = _served_role("carts")
 Nav = _served_role("nav")
 Notify = _served_role("notify")
-Wallpaper = _served_role("wallpaper")
 Install = _served_role("install")
+
+
+class Wallpaper(_served_role("wallpaper")):
+    """The rows served in Python, and the copy's, over the layer."""
+
+    def _copy(self, row, write):
+        app = self._app
+        app._hold(self._g, "wallpaper", "wallpaper." + row)
+        root, readable, writable, no_store = app._store
+        if root is None or not (writable if write else readable):
+            return no_store
+        return None
+
+    def load_copy(self):
+        why = self._copy("load_copy", False)
+        if why is not None:
+            return (None, why)
+        try:
+            return (_layer().load_copy(self._app._store[0]), None)
+        except OSError as e:
+            return (None, str(e))
+
+    def save_copy(self, blob):
+        why = self._copy("save_copy", True)
+        if why is not None:
+            return (None, why)
+        try:
+            _layer().save_copy(blob, self._app._store[0])
+        except OSError as e:
+            return (None, str(e))
+        self._app._copy_gen += 1
+        return (None, None)

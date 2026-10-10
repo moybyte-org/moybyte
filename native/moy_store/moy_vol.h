@@ -79,9 +79,13 @@ enum {
 
 typedef struct moy_vol_file moy_vol_file_t;
 
+// `mtime` is seconds since 1970 where the medium keeps one (FAT's stamp,
+// littlefs's attribute 1 in nanoseconds, POSIX's st_mtime), else 0: what
+// os.stat()[8] reads, for ordering a listing newest first.
 typedef struct {
     uint8_t is_dir;
     uint32_t size;
+    int64_t mtime;
 } moy_vol_stat_t;
 
 // One entry of a listing: its name (`len` bytes, NUL-terminated), whether it

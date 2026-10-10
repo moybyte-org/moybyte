@@ -21,6 +21,13 @@ struct moy_app {
     char name[MOY_APP_NAME_MAX + 1];
     char variant[MOY_APP_NAME_MAX + 1];
     char skin[MOY_APP_NAME_MAX + 1];
+    const moy_uf_ops_t *uf;     // the user-files layer the store rows reach, or NULL
+    uint8_t readable, writable;
+    int gated;                  // the gate a store row holds now, -1 for none
+    int why;                    // the errno value of the last IO answer
+    uint32_t sessions;          // files sessions open
+    uint32_t copy_gen;
+    char root[MOY_APP_ROOT_MAX + 1];
     uint32_t counts[MOY_ROW_N];
 };
 
@@ -35,7 +42,15 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "surface.windowed", "surface.bar_h", "surface.pointer",
     "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
     "theme.variant", "theme.skin",
+    "files.readable", "files.ready", "files.begin", "files.end", "files.list",
+    "files.count", "files.load", "files.save", "files.delete", "files.duplicate",
+    "files.rename", "files.new_name", "files.trash_list", "files.restore",
+    "files.empty_trash", "files.history", "files.history_ops",
+    "files.history_commit", "files.encode_image", "files.decode_image",
+    "files.decode_cover", "files.encode_cover", "files.sig", "files.stamp",
+    "files.encode_text", "files.decode_text", "files.provenance",
     "prefs.get", "prefs.set", "prefs.clear",
+    "wallpaper.load_copy", "wallpaper.save_copy",
     "artwork.current", "artwork.follow",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
 };
@@ -76,6 +91,7 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     memset(a, 0, sizeof(*a));
     a->mem = mem;
     a->prefs = prefs;
+    a->gated = -1;
     for (uint32_t i = 0; i < MOY_APP_TOKENS; i++) {
         a->tokens[i] = MOY_TOKEN_ABSENT;
     }
@@ -135,6 +151,7 @@ void moy_app_fresh(moy_appabi_t *a) {
     a->damage = 0u;
     a->clip_kind = MOY_CLIP_EMPTY;
     a->clip_len = 0u;
+    a->sessions = 0u;
 }
 
 // -- the grants ----------------------------------------------------------------------
@@ -870,6 +887,434 @@ int moy_app_artwork_follow(moy_appabi_t *a, uint32_t g, const char *kind, size_t
     }
     moy_settings_flush(a->prefs);
     return MOY_APP_OK;
+}
+
+// -- the user-files store -----------------------------------------------------------------
+
+int moy_app_store_bind(moy_appabi_t *a, const moy_uf_ops_t *ops, const char *root,
+                       size_t n, int readable, int writable) {
+    if (n > MOY_APP_ROOT_MAX || (n > 0u && memchr(root, 0, n) != NULL)) {
+        return MOY_APP_BAD;
+    }
+    memcpy(a->root, root, n);
+    a->root[n] = 0;
+    a->uf = n > 0u ? ops : NULL;
+    a->readable = a->uf != NULL && readable;
+    a->writable = a->readable && writable;
+    return MOY_APP_OK;
+}
+
+void moy_app_store_unwind(moy_appabi_t *a) {
+    if (a->gated >= 0 && a->uf != NULL) {
+        a->uf->gate_leave(a->gated);
+    }
+    a->gated = -1;
+}
+
+int moy_app_why(const moy_appabi_t *a) {
+    return a->why;
+}
+
+void moy_app_buf_free(moy_appabi_t *a, moy_buf_t *b) {
+    if (b->p != NULL && a->uf != NULL) {
+        a->uf->buf_free(b);
+    }
+    b->p = NULL;
+    b->n = 0;
+}
+
+uint32_t moy_app_files_end_all(moy_appabi_t *a) {
+    uint32_t n = a->sessions;
+    a->sessions = 0u;
+    return n;
+}
+
+uint32_t moy_app_copy_gen(const moy_appabi_t *a) {
+    return a->copy_gen;
+}
+
+// A layer code as the ABI's.
+static int uf_rc(moy_appabi_t *a, int rc) {
+    if (rc == 0) {
+        return MOY_APP_OK;
+    }
+    if (rc == MOY_UF_NONE) {
+        return MOY_APP_ABSENT;
+    }
+    if (rc == MOY_UF_BAD) {
+        return MOY_APP_BAD;
+    }
+    if (rc == MOY_ENOMEM) {
+        return MOY_APP_NOMEM;
+    }
+    a->why = rc;
+    return MOY_APP_IO;
+}
+
+enum { NEED_LAYER = 0, NEED_READ = 1, NEED_WRITE = 2 };
+
+// The grant of a files row, counted: NULL and `*rc` when it cannot run. A
+// kind the grant was not made for is DENIED; `need` is what the store must do.
+static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
+                                    const char *kind, int need, int *rc) {
+    a->counts[row]++;
+    const moy_grant_t *gr = holding(a, g, MOY_ROLE_FILES, rc);
+    if (gr == NULL) {
+        return NULL;
+    }
+    if (kind != NULL && gr->kind >= 0 && strcmp(kind, KIND_NAMES[(int)gr->kind]) != 0) {
+        *rc = MOY_APP_DENIED;
+        return NULL;
+    }
+    if (a->uf == NULL) {
+        *rc = need == NEED_LAYER ? MOY_APP_ABSENT : MOY_APP_NOSTORE;
+        return NULL;
+    }
+    if ((need == NEED_READ && !a->readable) || (need == NEED_WRITE && !a->writable)) {
+        *rc = MOY_APP_NOSTORE;
+        return NULL;
+    }
+    return gr;
+}
+
+// The gate around one store op.
+static void gate_on(moy_appabi_t *a) {
+    a->gated = a->uf->gate_enter(a->root);
+}
+
+static int gate_off(moy_appabi_t *a, int rc) {
+    a->uf->gate_leave(a->gated);
+    a->gated = -1;
+    return uf_rc(a, rc);
+}
+
+int32_t moy_app_files_readable(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    a->counts[MOY_ROW_FILES_READABLE]++;
+    if (holding(a, g, MOY_ROLE_FILES, &rc) == NULL) {
+        return -rc;
+    }
+    return a->readable;
+}
+
+int32_t moy_app_files_ready(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    a->counts[MOY_ROW_FILES_READY]++;
+    if (holding(a, g, MOY_ROLE_FILES, &rc) == NULL) {
+        return -rc;
+    }
+    return a->writable;
+}
+
+int moy_app_files_begin(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    if (files_row(a, g, MOY_ROW_FILES_BEGIN, NULL, NEED_WRITE, &rc) == NULL) {
+        return rc;
+    }
+    a->sessions++;
+    return MOY_APP_OK;
+}
+
+int moy_app_files_end(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    a->counts[MOY_ROW_FILES_END]++;
+    if (holding(a, g, MOY_ROLE_FILES, &rc) == NULL) {
+        return rc;
+    }
+    if (a->sessions > 0u) {
+        a->sessions--;
+    }
+    return MOY_APP_OK;
+}
+
+int moy_app_files_list(moy_appabi_t *a, uint32_t g, const char *kind,
+                       moy_buf_t *out, uint32_t *count) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    *count = 0;
+    if (files_row(a, g, MOY_ROW_FILES_LIST, kind, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->list(a->root, kind, out, count));
+}
+
+int moy_app_files_count(moy_appabi_t *a, uint32_t g, const char *kind, uint32_t *n) {
+    int rc;
+    *n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_COUNT, kind, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->count(a->root, kind, n));
+}
+
+int moy_app_files_load(moy_appabi_t *a, uint32_t g, const char *kind,
+                       const char *name, moy_buf_t *out, int *binary) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    *binary = 0;
+    if (files_row(a, g, MOY_ROW_FILES_LOAD, kind, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->load(a->root, kind, name, out, binary));
+}
+
+int moy_app_files_save(moy_appabi_t *a, uint32_t g, const char *kind,
+                       const char *name, const char *data, size_t n, char *name_out) {
+    int rc;
+    name_out[0] = 0;
+    if (files_row(a, g, MOY_ROW_FILES_SAVE, kind, NEED_WRITE, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->save(a->root, kind, name, data, n, name_out));
+}
+
+typedef int (*named_fn)(const char *, const char *, const char *, char *);
+
+static int named(moy_appabi_t *a, uint32_t g, int row, named_fn fn, const char *kind,
+                 const char *name, char *name_out) {
+    int rc;
+    name_out[0] = 0;
+    if (files_row(a, g, row, kind, NEED_WRITE, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, fn(a->root, kind, name, name_out));
+}
+
+int moy_app_files_delete(moy_appabi_t *a, uint32_t g, const char *kind,
+                         const char *name, char *name_out) {
+    return named(a, g, MOY_ROW_FILES_DELETE, a->uf != NULL ? a->uf->del : NULL, kind,
+                 name, name_out);
+}
+
+int moy_app_files_duplicate(moy_appabi_t *a, uint32_t g, const char *kind,
+                            const char *name, char *name_out) {
+    return named(a, g, MOY_ROW_FILES_DUPLICATE, a->uf != NULL ? a->uf->duplicate : NULL,
+                 kind, name, name_out);
+}
+
+int moy_app_files_restore(moy_appabi_t *a, uint32_t g, const char *kind,
+                          const char *name, char *name_out) {
+    return named(a, g, MOY_ROW_FILES_RESTORE, a->uf != NULL ? a->uf->restore : NULL,
+                 kind, name, name_out);
+}
+
+int moy_app_files_rename(moy_appabi_t *a, uint32_t g, const char *kind,
+                         const char *name, const char *title, char *name_out) {
+    int rc;
+    name_out[0] = 0;
+    if (files_row(a, g, MOY_ROW_FILES_RENAME, kind, NEED_WRITE, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->rename(a->root, kind, name, title, name_out));
+}
+
+int moy_app_files_new_name(moy_appabi_t *a, uint32_t g, const char *kind,
+                           const char *title, char *name_out) {
+    int rc;
+    name_out[0] = 0;
+    if (files_row(a, g, MOY_ROW_FILES_NEW_NAME, kind, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    rc = title != NULL && *title ? a->uf->free_name(a->root, kind, title, name_out)
+         : a->uf->new_name(a->root, kind, NULL, name_out);
+    return gate_off(a, rc);
+}
+
+int moy_app_files_trash_list(moy_appabi_t *a, uint32_t g, moy_buf_t *out,
+                             uint32_t *count) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    *count = 0;
+    if (files_row(a, g, MOY_ROW_FILES_TRASH_LIST, NULL, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->trash_list(a->root, out, count));
+}
+
+int moy_app_files_empty_trash(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    if (files_row(a, g, MOY_ROW_FILES_EMPTY_TRASH, NULL, NEED_WRITE, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->prune_trash(a->root, 0u));
+}
+
+int moy_app_files_history(moy_appabi_t *a, uint32_t g, const char *kind,
+                          const char *name, moy_buf_t *out) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_HISTORY, kind, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->history(a->root, kind, name, out));
+}
+
+int moy_app_files_history_ops(moy_appabi_t *a, uint32_t g, const char *kind,
+                              const char *name, moy_buf_t *out) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_HISTORY_OPS, kind, NEED_READ, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->history_ops(a->root, kind, name, out));
+}
+
+int moy_app_files_history_commit(moy_appabi_t *a, uint32_t g, const char *kind,
+                                 const char *name, const char *ops, size_t ops_n,
+                                 const char *kf, size_t kf_n, int *prune_err) {
+    int rc;
+    *prune_err = 0;
+    if (files_row(a, g, MOY_ROW_FILES_HISTORY_COMMIT, kind, NEED_WRITE, &rc) == NULL) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->history_commit(a->root, kind, name, ops, ops_n, kf, kf_n,
+                                             prune_err));
+}
+
+int moy_app_files_encode_image(moy_appabi_t *a, uint32_t g, uint32_t w, uint32_t h,
+                               const uint8_t *pix, size_t n, moy_buf_t *out) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_ENCODE_IMAGE, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    return uf_rc(a, a->uf->encode_image(w, h, pix, n, out));
+}
+
+int moy_app_files_decode_image(moy_appabi_t *a, uint32_t g, const char *text,
+                               size_t n, moy_buf_t *pix, uint32_t *w, uint32_t *h) {
+    int rc;
+    pix->p = NULL;
+    pix->n = 0;
+    *w = *h = 0;
+    if (files_row(a, g, MOY_ROW_FILES_DECODE_IMAGE, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    return uf_rc(a, a->uf->decode_image(text, n, pix, w, h));
+}
+
+int moy_app_files_decode_cover(moy_appabi_t *a, uint32_t g, const uint8_t *data,
+                               size_t n, moy_buf_t *pix) {
+    int rc;
+    pix->p = NULL;
+    pix->n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_DECODE_COVER, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    return uf_rc(a, a->uf->decode_cover(data, n, pix));
+}
+
+int moy_app_files_encode_cover(moy_appabi_t *a, uint32_t g, const uint8_t *pix,
+                               size_t n, moy_buf_t *out) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_ENCODE_COVER, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    return uf_rc(a, a->uf->encode_cover(pix, n, out));
+}
+
+int moy_app_files_sig(moy_appabi_t *a, uint32_t g, const char *text, size_t n,
+                      uint32_t *sig) {
+    int rc;
+    *sig = 0;
+    if (files_row(a, g, MOY_ROW_FILES_SIG, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    *sig = a->uf->sig(text, n);
+    return MOY_APP_OK;
+}
+
+int moy_app_files_stamp(moy_appabi_t *a, uint32_t g, const char *blob, size_t n,
+                        const char *kind, const char *name, uint32_t sig,
+                        moy_buf_t *out) {
+    int rc;
+    out->p = NULL;
+    out->n = 0;
+    if (files_row(a, g, MOY_ROW_FILES_STAMP, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    return uf_rc(a, a->uf->stamp(blob, n, kind, name, sig, out));
+}
+
+int moy_app_files_encode_text(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    return files_row(a, g, MOY_ROW_FILES_ENCODE_TEXT, NULL, NEED_LAYER, &rc) != NULL
+           ? MOY_APP_OK : rc;
+}
+
+int moy_app_files_decode_text(moy_appabi_t *a, uint32_t g) {
+    int rc;
+    return files_row(a, g, MOY_ROW_FILES_DECODE_TEXT, NULL, NEED_LAYER, &rc) != NULL
+           ? MOY_APP_OK : rc;
+}
+
+int moy_app_files_provenance(moy_appabi_t *a, uint32_t g, const char *blob, size_t n,
+                             moy_buf_t *src, int64_t *sig) {
+    int rc;
+    src->p = NULL;
+    src->n = 0;
+    *sig = 0;
+    if (files_row(a, g, MOY_ROW_FILES_PROVENANCE, NULL, NEED_LAYER, &rc) == NULL) {
+        return rc;
+    }
+    return uf_rc(a, a->uf->provenance(blob, n, src, sig));
+}
+
+// -- wallpaper ------------------------------------------------------------------------------
+
+static int wallpaper_row(moy_appabi_t *a, uint32_t g, int row, int write) {
+    int rc;
+    a->counts[row]++;
+    if (holding(a, g, MOY_ROLE_WALLPAPER, &rc) == NULL) {
+        return rc;
+    }
+    return a->uf == NULL || !(write ? a->writable : a->readable) ? MOY_APP_NOSTORE
+           : MOY_APP_OK;
+}
+
+int moy_app_wallpaper_load_copy(moy_appabi_t *a, uint32_t g, moy_buf_t *out) {
+    out->p = NULL;
+    out->n = 0;
+    int rc = wallpaper_row(a, g, MOY_ROW_WALLPAPER_LOAD_COPY, 0);
+    if (rc != MOY_APP_OK) {
+        return rc;
+    }
+    gate_on(a);
+    return gate_off(a, a->uf->copy_load(a->root, out));
+}
+
+int moy_app_wallpaper_save_copy(moy_appabi_t *a, uint32_t g, const char *data,
+                                size_t n) {
+    int rc = wallpaper_row(a, g, MOY_ROW_WALLPAPER_SAVE_COPY, 1);
+    if (rc != MOY_APP_OK) {
+        return rc;
+    }
+    gate_on(a);
+    rc = gate_off(a, a->uf->copy_save(a->root, data, n));
+    if (rc == MOY_APP_OK) {
+        a->copy_gen++;
+    }
+    return rc;
 }
 
 // -- the rows served in Python ------------------------------------------------------------

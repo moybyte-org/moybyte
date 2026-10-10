@@ -467,9 +467,22 @@ void moy_vol_leave(moy_vol_here_t *h) {
     h->name_cap = 0;
 }
 
+#if MOY_VOL_FAT
+// Days from 1970-01-01 to a civil date (H. Hinnant's days_from_civil).
+static int64_t days_from_civil(int y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    int era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (153u * (m > 2 ? m - 3 : m + 9) + 2u) / 5u + d - 1u;
+    unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return (int64_t)era * 146097 + (int64_t)doe - 719468;
+}
+#endif
+
 int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
     st->is_dir = 0;
     st->size = 0;
+    st->mtime = 0;
     switch (v->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT: {
@@ -484,6 +497,12 @@ int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
             }
             st->is_dir = (fno.fattrib & AM_DIR) != 0;
             st->size = (uint32_t)fno.fsize;
+            unsigned mo = (fno.fdate >> 5) & 0x0f, dd = fno.fdate & 0x1f;
+            if (mo >= 1 && mo <= 12 && dd >= 1) {
+                st->mtime = days_from_civil(1980 + ((fno.fdate >> 9) & 0x7f), mo, dd) * 86400
+                            + ((fno.ftime >> 11) & 0x1f) * 3600 + ((fno.ftime >> 5) & 0x3f) * 60
+                            + 2 * (fno.ftime & 0x1f);
+            }
             return 0;
         }
         #endif
@@ -496,6 +515,14 @@ int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
             }
             st->is_dir = info.type == LFS2_TYPE_DIR;
             st->size = info.size;
+            uint8_t b[8];
+            if (lfs2_getattr((lfs2_t *)v->fs, path, 1, b, sizeof b) == (lfs2_ssize_t)sizeof b) {
+                uint64_t ns = 0;
+                for (size_t i = sizeof b; i > 0; --i) {
+                    ns = ns << 8 | b[i - 1];
+                }
+                st->mtime = (int64_t)(ns / 1000000000u);
+            }
             return 0;
         }
         #endif
@@ -508,6 +535,7 @@ int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
             }
             st->is_dir = S_ISDIR(s.st_mode) != 0;
             st->size = (uint32_t)s.st_size;
+            st->mtime = (int64_t)s.st_mtime;
             return 0;
         }
         #endif

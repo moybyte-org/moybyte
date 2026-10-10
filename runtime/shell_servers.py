@@ -2,8 +2,7 @@
 #   SurfaceServer    surface.glyph, the toolkit's icon callable
 #   ThemeServer      theme.set*, the verbs that change the look
 #   _Store           the (value, err) storage wrappers the storage servers share
-#   _Session         the readiness pair and the session of files and carts
-#   FilesServer      the user-files store (`files/<kind>/` beside the carts)
+#   _Session         the readiness pair and the session of the cart store
 #   CartsServer      the cart store: projects, not documents
 #   NavServer        where the console goes next
 #   NotifyServer     achievement events
@@ -13,12 +12,14 @@
 """The console's servers for the app ABI's rows it serves (native/moy_app/
 roles.json's "shell" rows, docs/kernel_appabi_2026-10.md section 2.1): the
 verbs whose state is the Python console's -- the look, the live cart list, the
-wallpaper cart, the achievements, the routes, Get Carts' transport -- and, until
-the user-files layer crosses to C, the files store.
+wallpaper cart, the achievements, the routes, Get Carts' transport. The files
+role and the wallpaper's copy are C over the user-files layer
+(native/moy_store/moy_ufiles.h) the console binds (`StoreHandle.bind`), and
+none of theirs is here.
 
 The Workstation builds one of each and registers it per role
 (`app.serve(role, server)`, `serve_all`); an app's role object (native/
-moy_app's `Files`, `Carts`, ...) checks the grant, counts the call and calls
+moy_app's `Carts`, `Nav`, ...) checks the grant, counts the call and calls
 `server.<verb>(grant, *args)`. So every verb here takes the calling grant
 first, and the few that need the caller read it from the grant
 (`nav.play` returns to the grant's app). A compiled app reaches the same
@@ -119,8 +120,8 @@ class _Store:
 
 
 class _Session(_Store):
-    """The readiness pair and the session of a role an app walks the store
-    with (`files`, `carts`)."""
+    """The readiness pair and the session of the role an app walks the cart
+    store with (`carts`; the files role's are C, the same rules)."""
 
     def readable(self, g):
         """A store exists to READ from."""
@@ -141,142 +142,6 @@ class _Session(_Store):
 
     def end(self, g):
         self._h.end()
-
-
-# -- the user-files store (#108) --------------------------------------------------
-
-class FilesServer(_Session):
-    """The USER-FILES store: `files/<kind>/` beside the carts dir, with a
-    restorable trash, auto-naming and the op-history sidecars. The codecs are
-    pure functions and answer their value, not a pair."""
-
-    def list(self, g, kind):
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.list_files(kind, ws.carts_root))
-
-    def count(self, g, kind):
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.count_files(kind, ws.carts_root))
-
-    def load(self, g, kind, name):
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.load_file(kind, name, ws.carts_root))
-
-    def save(self, g, kind, name, blob):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.save_file(kind, name, blob,
-                                                            ws.carts_root))
-
-    def delete(self, g, kind, name):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.delete_file(kind, name,
-                                                              ws.carts_root))
-
-    def duplicate(self, g, kind, name):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.duplicate_file(kind, name,
-                                                                 ws.carts_root))
-
-    def rename(self, g, kind, name, new):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.rename_file(kind, name, new,
-                                                              ws.carts_root))
-
-    def new_name(self, g, kind, title=None):
-        """A free name for a NEW item: with a `title`, that title slugged the
-        kind's way and unique-ified (a typed `todo.txt` stays `todo.txt`);
-        without one, the kind's auto-name."""
-        ws = self._ws
-
-        def _name():
-            if title:
-                return ws.carts_store.free_file_name(kind, title, ws.carts_root)
-            return ws.carts_store.new_file_name(kind, ws.carts_root)
-        return self._read(_name)
-
-    def trash_list(self, g):
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.trash_list(ws.carts_root))
-
-    def restore(self, g, kind, name):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.restore_file(kind, name,
-                                                               ws.carts_root))
-
-    def empty_trash(self, g):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.empty_trash(ws.carts_root))
-
-    def history(self, g, kind, name):
-        """The raw sidecar records. To SEED an undo stack use `history_ops`."""
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.load_history(kind, name,
-                                                              ws.carts_root))
-
-    def history_ops(self, g, kind, name):
-        """The ops after the sidecar's last keyframe: an op_history.History
-        seed (moy_carts.ops_since_keyframe, the one reader of that window)."""
-        ws = self._ws
-        store = ws.carts_store
-        return self._read(lambda: store.ops_since_keyframe(
-            store.load_history(kind, name, ws.carts_root)))
-
-    def history_commit(self, g, kind, name, ops, keyframe=None):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.history_commit(
-            kind, name, ops, keyframe=keyframe, root=ws.carts_root))
-
-    # -- the image codec, the cover and the provenance stamps
-
-    def encode_image(self, g, w, h, indices):
-        store = self._codec()
-        return store.encode_moyimg(w, h, indices) if store is not None else None
-
-    def decode_image(self, g, blob):
-        store = self._codec()
-        return store.decode_moyimg(blob) if (store is not None and blob) else None
-
-    def decode_cover(self, g, blob):
-        """A cart's cover (SPEC.md 3.6) as 128 x 128 indices in the console
-        palette, or None."""
-        store = self._codec()
-        return store.decode_cover(blob) if (store is not None and blob) else None
-
-    def encode_cover(self, g, indices):
-        store = self._codec()
-        return store.encode_cover(indices) if store is not None else None
-
-    def sig(self, g, blob):
-        """The content signature a copy is stamped with."""
-        store = self._codec()
-        return store.content_sig(blob) if store is not None else None
-
-    def stamp(self, g, blob, kind, name, sig):
-        """`blob` stamped with where it was copied FROM and that source's sig.
-        No store passes the blob through, as `stamp_provenance` does a blob it
-        cannot parse: a None would be the drawing lost."""
-        store = self._codec()
-        if store is None:
-            return blob
-        return store.stamp_provenance(blob, kind, name, sig)
-
-    # -- the document codec (#181): a document is plain Markdown
-
-    def encode_text(self, g, body):
-        store = self._codec()
-        return store.encode_text(body) if store is not None else None
-
-    def decode_text(self, g, blob):
-        """The doc body as a list of LINES ([] on anything malformed)."""
-        store = self._codec()
-        return store.decode_text(blob) if (store is not None and blob) else []
-
-    def provenance(self, g, blob):
-        """`(src_key, sig)` off a stamped copy, or `(None, None)`."""
-        store = self._codec()
-        if store is None or not blob:
-            return (None, None)
-        return store.read_provenance(blob)
 
 
 # -- the cart store ------------------------------------------------------------
@@ -461,11 +326,11 @@ class NotifyServer:
 # -- the desktop backdrop ----------------------------------------------------------
 
 class WallpaperServer(_Store):
-    """The desktop backdrop (#28): the look's choice, the wallpaper carts, the
-    built-in fills, and the backdrop's backing copy (the legacy
-    `artwork.moyimg`, which Paint's and Files' WALL write). The copy's decoded
-    picture is the backdrop's own (Paint's model draws My Art from it), so a
-    new copy drops it here and the thumbnail is that same decode's."""
+    """The desktop backdrop (#28): the look's choice, the wallpaper carts and
+    the built-in fills. Its backing copy (`artwork.moyimg`, which Paint's and
+    Files' WALL write) is the role's C rows; the copy's decoded picture is
+    the backdrop's own (Paint's model draws My Art from it), keyed on the copy's
+    generation (`app.copy_gen`), and the thumbnail is that same decode's."""
 
     def current(self, g):
         """The active wallpaper id (a cart slug or `fill:<color>`): the
@@ -500,18 +365,6 @@ class WallpaperServer(_Store):
         decode, scaled once per size."""
         art = getattr(self._ws, "artwork", None)
         return art.thumbnail(w, h) if art is not None else None
-
-    def load_copy(self, g):
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.load_artwork(ws.carts_root))
-
-    def save_copy(self, g, blob):
-        ws = self._ws
-        got = self._write(lambda: ws.carts_store.save_artwork(blob, ws.carts_root))
-        art = getattr(ws, "artwork", None)
-        if got[1] is None and art is not None:
-            art.copy_changed()
-        return got
 
 
 # -- the cart installer --------------------------------------------------------------
@@ -642,7 +495,6 @@ def serve_all(ws):
     app = ws.app_abi
     app.serve("surface", SurfaceServer(ws))
     app.serve("theme", ThemeServer(ws))
-    app.serve("files", FilesServer(ws))
     app.serve("carts", CartsServer(ws))
     app.serve("nav", NavServer(ws))
     app.serve("notify", NotifyServer(ws))

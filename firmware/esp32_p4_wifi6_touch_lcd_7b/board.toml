@@ -380,8 +380,9 @@ takes it."""
 module = "moy_app"
 why = """
 The app ABI's kernel half (docs/kernel_appabi_2026-10.md): the grants, the
-grant policy and the roles served in C, and the module `moy_app`. Every console
-takes it."""
+grant policy and the roles served in C, and the module `moy_app`; and the
+user-files layer the files role is served over (native/moy_store/moy_ufiles.h,
+the module `moy_ufiles`). Every console takes it."""
 
 [[native.shared.take]]
 module = "moy_kernel"

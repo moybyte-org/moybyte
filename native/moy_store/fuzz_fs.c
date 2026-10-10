@@ -31,6 +31,7 @@
 #include "moy_load.h"
 #include "moy_pack.h"
 #include "moy_seed.h"
+#include "moy_ufiles.h"
 
 #define CHECK(c) do { \
         if (!(c)) { \
@@ -443,6 +444,8 @@ static void run_cat(const uint8_t *data, size_t size) {
 #define DEST "/carts/a.moy/.journal/0001.snap"
 #define DEST_HERE "/carts/a.moy/0001.snap"
 
+#define NCASES 16
+
 static char v1[3000], v2[3000];
 static size_t n1, n2;
 
@@ -502,6 +505,75 @@ static int seed_once(const char *src, size_t n, int version) {
     return rc;
 }
 
+// -- the user-files layer -----------------------------------------------------------------
+//
+// A store under /sd/carts, so its files root is /sd/files and its marker /sd's
+// (moy_ufiles.h): the item docs/a holds v1, with a sidecar of two records.
+
+#define UF_ROOT "/sd/carts"
+#define UF_ITEM "/sd/files/docs/a.md"
+#define UF_TRASHED "/sd/files/trash/docs/a.md"
+
+static void uf_before(void) {
+    char name[MOY_UF_NAME_MAX + 1];
+    int err;
+    CHECK(moy_uf_save(UF_ROOT, "docs", "a", v1, n1, name) == 0);
+    CHECK(moy_uf_history_commit(UF_ROOT, "docs", "a", "[1]", 3, "{\"k\": 1}", 8, &err) == 0);
+}
+
+static void uf_sequence(void) {
+    char name[MOY_UF_NAME_MAX + 1];
+    int err;
+    switch (scase) {
+        case 12:
+            moy_uf_save(UF_ROOT, "docs", "a", v2, n2, name);
+            break;
+        case 13:
+            moy_uf_history_commit(UF_ROOT, "docs", "a", "[[2]]", 5, NULL, 0, &err);
+            break;
+        case 14:
+            moy_uf_rename(UF_ROOT, "docs", "a", "b", name);
+            break;
+        default:
+            moy_uf_delete(UF_ROOT, "docs", "a", name);
+            break;
+    }
+}
+
+// The item reads whole at one of its names, v1 (or v2, case 12), its sidecar
+// parses to the records before the cut or those and the one appended, and the
+// layer goes on: a save lands.
+static void uf_verify(void) {
+    moy_fs_root("/sd");
+    moy_buf_t b;
+    int binary, found = 0;
+    for (int i = 0; i < 3; i++) {
+        static const char *const where[] = { "a", "b", NULL };
+        int rc = where[i] != NULL ? moy_uf_load(UF_ROOT, "docs", where[i], &b, &binary)
+                                  : moy_fs_read(UF_TRASHED, NULL, &b);
+        if (rc == 0) {
+            CHECK(same(&b, v1, n1) || (scase == 12 && same(&b, v2, n2)));
+            moy_buf_free(&b);
+            found++;
+        } else {
+            CHECK(rc == MOY_UF_NONE || where[i] == NULL);
+        }
+    }
+    CHECK(found >= 1);
+    CHECK(moy_uf_history(UF_ROOT, "docs", "a", &b) == 0);
+    CHECK(moy_json_valid(b.p, b.n) == MOY_JSON_OK);
+    moy_buf_free(&b);
+    if (scase == 13) {
+        CHECK(moy_uf_history_ops(UF_ROOT, "docs", "a", &b) == 0);
+        CHECK(strcmp(b.p, "[1]") == 0 || strcmp(b.p, "[1, [2]]") == 0);
+        moy_buf_free(&b);
+    }
+    char name[MOY_UF_NAME_MAX + 1];
+    CHECK(moy_uf_save(UF_ROOT, "docs", "c", v2, n2, name) == 0);
+    CHECK(moy_uf_load(UF_ROOT, "docs", "c", &b, &binary) == 0 && same(&b, v2, n2));
+    moy_buf_free(&b);
+}
+
 // The state before the sequence: the folders, and v1 published at A and B.
 static void before(int with_v1) {
     format();
@@ -534,6 +606,9 @@ static void before(int with_v1) {
         CHECK(moy_fs_write(SEED_DIR "/pmem.json", "[7]", 3) == 0);
         CHECK(moy_fs_write(SEED_DIR "/config.json", "{\"kid\": 1}", 10) == 0);
     }
+    if (scase >= 12) {
+        uf_before();
+    }
     unmount_cold();
 }
 
@@ -544,9 +619,18 @@ static void before(int with_v1) {
 //   6  publish v2, then claim it into its own folder
 //   7  seed the cart (v2) where there is none
 //   8  seed v2 over the seeded v1, a kid's saves and config in it
+//   9  a commit, published and journaled       10  undo over a journal
+//   11 adopt a staged cart
+//   12 a user file saved over (moy_ufiles.h)   13 a segment appended to its sidecar
+//   14 the user file renamed                   15 the user file to the trash
 static void sequence(void) {
     if (scase != 1) {
         moy_fs_root(ROOT);
+    }
+    if (scase >= 12) {
+        moy_fs_root("/sd");
+        uf_sequence();
+        return;
     }
     switch (scase) {
         case 7: case 8:
@@ -595,7 +679,9 @@ static void verify(int had_v1) {
         moy_fs_root(ROOT);
     }
     moy_buf_t b;
-    if (scase == 11) {
+    if (scase >= 12) {
+        uf_verify();
+    } else if (scase == 11) {
         // The cart is the old one or the new one whole, or the old one aside
         // where cart_index.recover puts it back.
         if (moy_fs_read_file(FILE_A, (size_t)-1, &b) == 0) {
@@ -728,7 +814,7 @@ static long matrix(void) {
                                        {0, 300} };
     long cuts = 0;
     for (medium = 0; medium < 2; medium++) {
-        for (scase = 0; scase < 12; scase++) {
+        for (scase = 0; scase < NCASES; scase++) {
             for (size_t s = 0; s < sizeof sizes / sizeof sizes[0]; s++) {
                 n1 = sizes[s][0];
                 n2 = sizes[s][1];
@@ -755,7 +841,7 @@ static void run(const uint8_t *data, size_t size) {
     size_t i = 0;
 #define NEXT() (i < size ? data[i++] : 0u)
     medium = NEXT() & 1u;
-    scase = NEXT() % 12u;
+    scase = NEXT() % NCASES;
     n1 = ((size_t)NEXT() << 4) % sizeof v1;
     n2 = ((size_t)NEXT() << 4) % sizeof v2;
     unsigned s1 = NEXT(), s2 = NEXT(), same_head = NEXT() & 1u;

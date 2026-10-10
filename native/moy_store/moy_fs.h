@@ -46,8 +46,12 @@ int moy_fs_read_vol(const moy_vol_t *v, const char *rest, size_t cap,
 int moy_fs_write(const char *path, const void *data, size_t n);
 int moy_fs_write_bytes(const char *path, const void *data, size_t n);
 int moy_fs_exists(const char *path);
+int moy_fs_stat(const char *path, moy_vol_stat_t *st);
 int moy_fs_mkdir(const char *path);
 int moy_fs_remove(const char *path);
+// os.rename: `dst` must not exist (EEXIST where it does, as on FAT); EXDEV
+// across volumes.
+int moy_fs_rename(const char *src, const char *dst);
 
 // The crash-safe write and its readers.
 int moy_fs_publish(const char *path, const char *data, size_t n);

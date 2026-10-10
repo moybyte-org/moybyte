@@ -314,6 +314,13 @@ int moy_fs_exists(const char *path) {
     return resolve(path, &v, &rest) == 0 && moy_vol_stat(&v, rest, &st) == 0;
 }
 
+int moy_fs_stat(const char *path, moy_vol_stat_t *st) {
+    moy_vol_t v;
+    const char *rest;
+    int rc = resolve(path, &v, &rest);
+    return rc ? rc : moy_vol_stat(&v, rest, st);
+}
+
 int moy_fs_mkdir(const char *path) {
     moy_vol_t v;
     const char *rest;
@@ -343,6 +350,10 @@ static int rename2(const char *src, const char *dst, int replace) {
         return MOY_EXDEV;
     }
     return replace ? moy_vol_replace(&a, ra, rb) : moy_vol_rename(&a, ra, rb);
+}
+
+int moy_fs_rename(const char *src, const char *dst) {
+    return rename2(src, dst, 0);
 }
 
 int moy_fs_write_bytes(const char *path, const void *data, size_t n) {

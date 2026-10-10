@@ -2209,8 +2209,9 @@ def roles_trace(ws):
                                        keyframe=None)))
     say("history read", _n(f.history("drawings", "pic")),
         _n(f.history_ops("drawings", "pic")))
-    say("session", _n(f.begin()), ws.store.open, _n(f.count("drawings")), f.end(),
-        ws.store.open)
+    say("session", _n(f.begin()), _n(f.count("drawings")), f.end(),
+        ws.app_abi.files_end_all(), _n(f.begin()), _n(f.begin()),
+        ws.app_abi.files_end_all())
 
     # -- carts
     c = ctx.carts
@@ -2460,7 +2461,7 @@ stamp int drawings/src True [None,None]
 drawing ['pic',None]
 history [None,None]
 history read [[{ops:[['dot',1,1]],t:'seg'}],None] [[['dot',1,1]],None]
-session [True,None] 1 [1,None] None 0
+session [True,None] [1,None] None 0 [True,None] [True,None] 2
 carts ready True True True a_b_c
 carts session [True,None] None
 create True None

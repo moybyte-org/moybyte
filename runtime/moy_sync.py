@@ -80,8 +80,8 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     shared sheet) -- system state, not the kid's work, and wifi.json is a
     secret. The pull skips non-directories at the root for the same reason;
     `apply_ops` refuses single-segment file paths outright.
-  * In the files root, anything whose first segment is not one of
-    moy_carts.FILE_KINDS -- which is how `files/.history/` and `files/trash/`
+  * In the files root, anything whose first segment is not one of the
+    user-files kinds (moy_store_base.FILE_KIND_NAMES) -- which is how `files/.history/` and `files/trash/`
     stay home, in BOTH directions, with no second skip list to keep in step.
     `.history` is the files layer's journal-equivalent (#111 op sidecars), so
     it stays for the same reason journal/ does: each side keeps its own undo
@@ -290,8 +290,12 @@ def _moy_carts():
 
 
 def file_kinds():
-    """The names a files-root path may start with -- moy_carts.FILE_KINDS, never
-    a second copy of it, so a kind added there reaches the wire by default.
+    """The names a files-root path may start with: the user-files layer's
+    kinds as the on-card layout names them (moy_store_base.FILE_KIND_NAMES,
+    which tests/test_userfiles_parity.py holds to native/moy_store's registry),
+    so a kind added there reaches the wire by default. The layout and not the
+    layer, because the Zero serves and takes these folders without carrying
+    the layer.
 
     This ONE allowlist is also what keeps `files/.history/` and `files/trash/`
     home in both directions: neither is a kind, so no walker descends into them
@@ -299,11 +303,11 @@ def file_kinds():
     module to ask, which every caller reads as "refuse", never as "allow".
     """
     mc = _moy_carts()
-    return None if mc is None else mc.FILE_KINDS
+    return None if mc is None else mc.FILE_KIND_NAMES
 
 
 def files_root(carts_root):
-    """The user-files root beside `carts_root` (moy_carts' own sibling rule), or
+    """The user-files root beside `carts_root` (the store's own sibling rule), or
     None when the store module is missing."""
     mc = _moy_carts()
     return None if mc is None else mc.files_root(carts_root)
@@ -335,7 +339,7 @@ class Root:
                it rather than misapply its paths.
       path     (carts_root) -> where this store lives. Carts IS carts_root; the
                files root is its sibling.
-      kinds    the first path segment must be a `moy_carts.FILE_KINDS` name --
+      kinds    the first path segment must be a user-files kind (`file_kinds`) --
                which is also what keeps `.history`/`trash` home, in both
                directions, with no second skip list.
       site_keep_journal

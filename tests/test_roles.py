@@ -102,7 +102,7 @@ def test_the_shell_rows_are_the_servers_methods():
     import inspect
     from runtime import shell_servers as ss
     servers = {"surface": ss.SurfaceServer, "theme": ss.ThemeServer,
-               "files": ss.FilesServer, "carts": ss.CartsServer,
+               "carts": ss.CartsServer,
                "nav": ss.NavServer, "notify": ss.NotifyServer,
                "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
     shell = {}

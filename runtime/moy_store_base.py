@@ -7,9 +7,9 @@ manifest canvas-field codec, the rows of a sprite sheet a launcher icon is cut
 from (`icon_rows`, which the shelf's scan and the sheet codec both read) and
 the directory primitives `moy_fs` lacks: a folder's listing, what it proves
 absent, and a scan's walk into a folder (`_enter`/`_leave`).
-`moy_carts` (the store core), `moy_seed`, `moy_files` and `moy_file_ops` all
-import from here and never from each other's callers, so any of them can be
-imported first. `moy_carts` re-exports every name under its old spelling.
+`moy_carts` (the store core) and `moy_seed` import from here and never from
+each other's callers, so either can be imported first. `moy_carts` re-exports
+every name under its old spelling.
 """
 
 try:
@@ -163,6 +163,19 @@ def _sibling_path(root, name):
     `root`, so it is tied to no single cart."""
     parent = root.rsplit("/", 1)[0]
     return (parent + "/" + name) if parent else name
+
+
+# The user-files layer's root and kinds, as the sync names them: the layer is
+# native/moy_store/moy_ufiles.h's (module `moy_ufiles`), and the Zero, which
+# denies it, still serves and takes `files/<kind>/` by path.
+# tests/test_userfiles_parity.py holds these to the C.
+FILES_DIR = "files"
+FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings")
+
+
+def files_root(root):
+    """The user-files root, beside the carts folder."""
+    return _sibling_path(root, FILES_DIR)
 
 
 # A cart is a folder whose name ends in CART_EXT. Its path is composed here and

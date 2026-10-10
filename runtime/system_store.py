@@ -97,6 +97,20 @@ class StoreHandle:
         to report -- it is a build that has nowhere to put one."""
         return self.ready() and bool(self.ws.can_manage)
 
+    def bind(self):
+        """Hand the store to the app ABI's C rows (the files role, the
+        wallpaper's copy): the carts root and whether it reads and writes, as
+        `ready`/`writable` answer now. The console binds it where it wires the
+        store, and again wherever the root or `can_manage` changes."""
+        ws = self.ws
+        try:
+            from app_context import NO_STORE
+        except ImportError:  # pragma: no cover - host package lane
+            from runtime.app_context import NO_STORE
+        ready = self.ready()
+        ws.app_abi.store_bind(ws.carts_root if ready else None, ready,
+                              self.writable(), NO_STORE)
+
     def call(self, fn):
         """Run `fn()` as ONE store op. On the T-Deck the op takes the bus gate
         (the card shares the panel's SPI host: the flush drains first and the
@@ -104,10 +118,11 @@ class StoreHandle:
         flash-backed boards it is a passthrough."""
         return self.ws._with_sd(fn)
 
-    # A role's session (`files.begin`/`end`, docs/kernel_appabi_2026-10.md
+    # A role's session (`carts.begin`/`end`, docs/kernel_appabi_2026-10.md
     # section 2.6) is bookkeeping and nothing else: it holds no gate, because
     # every op takes the gate around itself (`call`). The console ends any
-    # left open at the frame's end and at a run's end (`end_all`).
+    # left open at the frame's end and at a run's end (`end_all`); the files
+    # role's sessions are the C rows' own, ended there too.
     open = 0
 
     def begin(self):
@@ -118,10 +133,11 @@ class StoreHandle:
             self.open -= 1
 
     def end_all(self):
-        """End every session left open; how many there were."""
+        """End every session left open, the files role's included; how many
+        there were."""
         n = self.open
         self.open = 0
-        return n
+        return n + self.ws.app_abi.files_end_all()
 
 
 class SystemStore:

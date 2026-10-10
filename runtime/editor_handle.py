@@ -181,8 +181,9 @@ class EditorHandle:
     taps X never loses a note."""
 
     def __init__(self, files, kind, name, mode, canvas, theme,
-                 clip=None, host=None):
+                 clip=None, host=None, images=None):
         self._files = files          # the (kind, name)-taking Files role
+        self._images = images or files   # the role a note's embedded drawings load through
         self._canvas = canvas
         self._theme = theme          # () -> the live token dict
         self._host = host            # the shell, for the keyboard-focus flip
@@ -704,7 +705,7 @@ class EditorHandle:
         img = self._img.get(name, 0)
         if img != 0:
             return img
-        blob, err = self._files.load(_IMAGE_KIND, name)
+        blob, err = self._images.load(_IMAGE_KIND, name)
         got = None
         if err is None and blob:
             dec = decode_moyimg(blob)

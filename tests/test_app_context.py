@@ -249,6 +249,7 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
     assert shell_servers.NO_STORE is _ac.NO_STORE
     ws = _ws(tmp_path)
     ws.carts_store = None
+    ws.store.bind()
     _v, err = ws.app_context("demo", ("files",)).files.load("docs", "x")
     assert ws.files_app._persist((None, err)) is False
     assert ws.files_app.status == "CAN'T SAVE HERE"
@@ -346,6 +347,7 @@ def test_storage_verbs_report_no_store_instead_of_raising(tmp_path):
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("files", "carts"))
     ws.carts_store = None
+    ws.store.bind()
     assert ctx.files.ready() is False
     for res in (ctx.files.load("docs", "x"),
                 ctx.files.save("docs", "x", "y"),
@@ -360,23 +362,18 @@ def test_storage_verbs_report_no_store_instead_of_raising(tmp_path):
 
 
 def test_a_failing_store_surfaces_as_err_text_not_an_exception(tmp_path):
+    """A medium that refuses the write: the user-files root is a FILE, so the
+    kind's folder cannot be made and the publish fails. The failure is the
+    pair's text, never NO_STORE and never a raise; a load of nothing there is
+    no value and no failure."""
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("files",))
-
-    class _Boom:
-        @staticmethod
-        def load_file(kind, name, root):
-            raise OSError("disk on fire")
-
-        @staticmethod
-        def save_file(kind, name, blob, root):
-            raise OSError("disk on fire")
-
-    ws.carts_store = _Boom()
-    value, err = ctx.files.load("docs", "x")
-    assert value is None and "disk on fire" in str(err) and err is not _ac.NO_STORE
+    with open(_store.files_root(ws.carts_root), "w") as f:
+        f.write("not a folder")
     value, err = ctx.files.save("docs", "x", "y")
-    assert value is None and "disk on fire" in str(err)
+    assert value is None and err and err is not _ac.NO_STORE
+    assert "Errno" in str(err)
+    assert ctx.files.load("docs", "x") == (None, None)
 
 
 def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
@@ -386,6 +383,7 @@ def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
     ws = _ws(tmp_path)
     app = ws.files_app
     ws.carts_store = None
+    ws.store.bind()
     assert app._persist((None, _ac.NO_STORE)) is False
     assert app.status == "CAN'T SAVE HERE"
     assert app._save_failed is True
@@ -403,6 +401,7 @@ def test_the_no_store_sentinel_renders_as_words(tmp_path):
     assert str(_ac.NO_STORE) == "NO STORAGE"
     ws = _ws(tmp_path)
     ws.carts_store = None
+    ws.store.bind()
     _v, err = ws.app_context("demo", ("files",)).files.save("docs", "x", "y")
     assert "%s" % (err,) == "NO STORAGE"
 
@@ -543,6 +542,7 @@ def test_empty_trash_is_a_WRITE_and_a_read_only_store_keeps_the_trash(tmp_path):
     files.save("docs", "note", _store.encode_text("hi"))
     files.delete("docs", "note")
     ws.can_manage = False
+    ws.store.bind()
     assert files.readable() is True and files.ready() is False
     assert files.empty_trash() == (None, _ac.NO_STORE)
     assert os.listdir(_trash_dir(ws, "docs")) == ["note" + _kind_ext("docs")]
@@ -560,9 +560,11 @@ def test_stamp_passes_the_blob_through_when_there_is_no_store(tmp_path):
     ws, files = _files(tmp_path)
     blob = _store.encode_moyimg(1, 1, bytearray([0]))
     ws.carts_store = None
+    ws.store.bind()
     assert files.sig(blob) is None                  # the siblings' degradation
     assert files.stamp(blob, "drawings", "kite", 7) == blob
     ws.carts_store = _store
+    ws.store.bind()
     stamped = files.stamp(blob, "drawings", "kite", files.sig(blob))
     assert stamped != blob and "drawings/kite" in stamped
 
@@ -575,30 +577,32 @@ def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
     files.save("docs", "note", _store.encode_text("hi"))
     outside = (files.count("docs"), files.list("docs"), files.count("nope"))
     assert files.begin() == (True, None)
-    assert ws.store.open == 1
     inside = (files.count("docs"), files.list("docs"), files.count("nope"))
     files.end()
-    assert ws.store.open == 0
+    assert ws.app_abi.files_end_all() == 0, "end closed the session"
     assert inside == outside
-    assert inside[2][0] is None and "nope" in str(inside[2][1])
+    assert inside[2][0] is None and inside[2][1]
     files.begin()
     files.begin()
     ws._dirty = True
     ws.frame(1 / 30.0)
-    assert ws.store.open == 0, "a frame left the sessions open"
+    assert ws.app_abi.files_end_all() == 0, "a frame left the sessions open"
     files.begin()
     ws.player._end_grant()
-    assert ws.store.open == 0, "a run's end left a session open"
+    assert ws.app_abi.files_end_all() == 0, "a run's end left a session open"
 
 
 def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
     """The bus rule (docs/kernel_appabi_2026-10.md section 2.6): on the
     T-Deck the card shares the panel's SPI host, and the gate that drains the
     flush is held only around one store op. This is the host's model of it: a
-    gate held while `_with_sd` runs an op, and a present that cannot flush
-    while it is held. A session leaked across frames must present every frame
-    and never be held at a present."""
+    gate held while `_with_sd` runs a cart-store op (the files rows take the
+    kernel's gate, moy_vol_gate_enter, which the T-Deck's suite holds them to
+    and the host has none of), and a present that cannot flush while it is
+    held. A session of either role leaked across frames must present every
+    frame and never be held at a present."""
     ws, files = _files(tmp_path)
+    carts = ws.app_context("demo2", ("carts",)).carts
     gate = [0]
     held_at_present = []
 
@@ -618,14 +622,16 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
 
     ws.comp.flush = flush
     files.begin()                                  # never ended
+    carts.begin()                                  # never ended
     files.save("docs", "leak", _store.encode_text("x"))
+    assert carts.load_deck({"path": str(tmp_path / "nope.moy")}) == (None, None)
     before = ws._frames_drawn
     for _ in range(4):
         ws._dirty = True
         ws.frame(1 / 30.0)
     assert ws._frames_drawn - before == 4, "the panel stopped presenting"
     assert held_at_present and set(held_at_present) == {0}, held_at_present
-    assert ws.store.open == 0
+    assert ws.app_abi.files_end_all() == 0 and ws.store.open == 0
 
 
 def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
@@ -645,6 +651,7 @@ def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
     assert files.decode_text(files.encode_text("")) == []
     assert files.decode_text("") == [] and files.decode_text(None) == []
     ws.carts_store = None
+    ws.store.bind()
     assert files.decode_text(blob) == []                 # no store, no codec
 
 
@@ -688,6 +695,7 @@ def test_save_deck_writes_the_deck_into_the_carts_own_folder(tmp_path):
         assert fh.read() == deck
     assert carts.load_deck(cart) == (deck, None)
     ws.can_manage = False
+    ws.store.bind()
     assert carts.save_deck(cart, "{}") == (None, _ac.NO_STORE)
     with open(path) as fh:
         assert fh.read() == deck                          # the refusal wrote nothing
@@ -820,6 +828,7 @@ def test_the_scoped_handle_degrades_to_NO_STORE_rather_than_raising(tmp_path):
     ws, files = _files(tmp_path)
     scoped = _api.ScopedFiles(files, "docs")
     ws.carts_store = None
+    ws.store.bind()
     assert scoped.ready() is False
     assert scoped.save_text("note", "hi") == (None, _ac.NO_STORE)
     assert scoped.load_text("note") == ("", _ac.NO_STORE)

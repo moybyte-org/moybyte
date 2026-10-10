@@ -31,15 +31,11 @@ mentions a capability provably cannot use it.
 A cart runs `exec` in a plain namespace with the real builtins: it can
 `import`, walk `gc.get_objects()`, or reach an attribute on anything it was
 handed. The role objects are native/moy_app's, which hold a grant and the
-console's app ABI state, and `ScopedFiles` holds its unscoped role in a
-name-mangled slot, so the obvious reach-through --
-`files._files.save("drawings", ...)` -- fails. That is a SPEED BUMP: it turns an accident
-into a deliberate act, and it makes the honest API the easy one. It is not
-containment, and two things say so plainly. A cart that goes looking will find
-a path, and **on the boards it does not even bump**: MicroPython implements no
-name mangling (measured on this repo's unix build -- `self.__x` stays the
-literal attribute `__x`, readable from outside), so the mangling is a host-side
-speed bump on device-side code.
+console's app ABI state, and a grant made with a files kind reaches that kind
+alone: the C answers any other DENIED, so `files._files.save("drawings", ...)`
+from an app granted `files:docs` is refused wherever the role object is
+reached from. That is the files role, not containment: a cart that goes
+looking through `gc` or its imports will find the console's own objects.
 
 What the permission filter actually buys, then, is not confinement but
 LEGIBILITY: a manifest states what an app is for, the shell hands it exactly
@@ -174,13 +170,9 @@ class ScopedFiles:
     The role itself takes `(kind, name)` on every verb, which would let an app
     granted `"files:docs"` read the kid's drawings by passing another kind.
     This binds the kind at construction and never takes it as an argument, so
-    no ARGUMENT reaches another kind: every published verb spells one kind, the
-    granted one.
-
-    The unscoped role is held name-mangled (`self.__files`) so the one-hop
-    reach-through does not work by accident -- but see the module docstring:
-    that is a speed bump on the host and nothing at all on MicroPython, which
-    does not mangle. The scope is honest, not enforced.
+    every published verb spells one kind, the granted one; the grant itself
+    reaches no other (native/moy_app checks the kind on every row), so the
+    role it holds refuses another kind however it is reached.
 
     Same `(value, err)` contract as the role -- nothing here raises."""
 
@@ -263,6 +255,11 @@ class ScopedFiles:
 
 # -- the factory -------------------------------------------------------------
 
+# The id of the grant a run reaches the document the console was asked to
+# open through, when that document is not of the run's own kind.
+_DOC_GRANT = "moybyte.document"
+
+
 def make_system_api(ctx_factory, cart, canvas=None,
                     editor=None, request=None, keep=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
@@ -328,7 +325,16 @@ def make_system_api(ctx_factory, cart, canvas=None,
             # kind it was granted; with none it picks up whatever document the
             # console was already asked to open, which may be another kind
             # because a PERSON chose that file in Files.
+            # The grant reaches its own kind alone (native/moy_app checks it on
+            # every row), so the document a person chose elsewhere is reached
+            # through a grant of its own, made for that one request and ended
+            # with the run's.
             files = ctx.files
+            doc_files = files
+            if request and request[0] != kind:
+                doc = ctx_factory(_DOC_GRANT, ("files",), app_id, run=True)
+                ctx.adopt(doc)
+                doc_files = doc.files
             clip = getattr(ctx, "clipboard", None)
 
             def _open_editor(name=None, mode=None):
@@ -337,7 +343,7 @@ def make_system_api(ctx_factory, cart, canvas=None,
                     if not request:
                         return None
                     r_kind, r_name, r_mode = request
-                    return editor(files, r_kind, r_name, mode or r_mode,
+                    return editor(doc_files, r_kind, r_name, mode or r_mode,
                                   canvas, clip)
                 return editor(files, kind, str(name), mode, canvas, clip)
 

@@ -184,13 +184,13 @@ only the shell's own calls (boot restore, cycling) reach the look's
 | `surface` | `glyph` | Python-only | the toolkit's icon callable, until sprint 6 |
 | `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)`, `skin(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
 | `theme` | `set(name, variant)`, `set_variant(v)`, `set_skin(name)` | shell | the look coordinates caches, the skin and the wallpaper |
-| `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (§12 answer 4); history ops cross as bytes. A **session** is readiness only (§2.6). Served by the console's `FilesServer` until step 7 crosses it |
+| `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (`moy_ufiles.h`, §12 answer 4), reached through the verb table the console binds with the store; history ops cross as JSON bytes. A **session** is readiness only (§2.6). A grant made with a files kind reaches that kind alone |
 | `carts` | the table's rows: the store's readiness and session, the live list, a new cart, its undo journal, a rescan (the old `apply`), its deck, code and images | shell | the live list is the shell's; a cart crosses the Python binding as the list's own dict, and the ROLE door names it by its folder; `create` and `journal` are Storybook's new story and graduation, `rescan` adopts a fresh scan (the old `apply`); the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`). Never granted, so no import shape |
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
 | `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default. On a board the rows are the kernel's (`moy_spine_kernel`'s, viewed by `moy_spine.kernel_settings`), and a write flushes through the rows' own saver (`moy_settings_flush`), which the console's store registers while its VM runs; a write made with no VM stays dirty in the rows, and the next start flushes them before it reads the file |
 | `notify` | `achieve(kind, key)` | shell | the `Achievements` object is the console's |
 | `wallpaper` | `current(buf)`, `fills(out)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)`, `thumbnail(w, h)` | shell | `current` is the look's live `wallpaper_id`, which differs from the settings row after a boot fallback that does not persist (`runtime/appearance.py`); `preview` is a Python callable on the frame path; `thumbnail` is My Art's card, the backdrop's own decode scaled (§6) |
-| `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file and its preview sidecar (`runtime/moy_image.py`'s, the plan's §2.2.1 row); served by the console until step 7, with the user-files layer whose store it is; a write drops the backdrop's decode |
+| `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file, with the user-files layer whose store it is; a write moves the copy's generation, which the backdrop's decode is keyed on |
 | `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open picture, its settings rows `paint_doc_kind` and `paint_doc` (JSON strings, no kind row the drawings kind); `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the picture through `files` |
 | `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD (the Python binding's False) and keeps the old text, and the code editor keeps that copy as its own until another lands. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
 | `install` | `hold()`, `release()`, `fit(...)`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick(name, size, host)`, `root()`, `writable()`, `rescan()`, `free()`, `find(folder)` | shell | the lease's radio bring-up and the engine objects are the console's; the role is never granted, so no compiled app imports a row and none is C (§11, step 6) |
@@ -417,7 +417,7 @@ T-Deck.
 | `runtime/artwork.py`: `ArtworkService` | Paint's own model; the role is `current` and `follow` | the role's object form |
 | `runtime/appearance.py`: `set_theme` | writes the live token table, then recaches | nothing |
 | `runtime/wm_windowed.py`: `_LayoutCtx.install`; the fullscreen relayout | write the grants' surface rows | nothing |
-| `runtime/wallpaper.py` | the copy and sidecar rows go to C | the sidecar's Python half (`runtime/moy_image.py`'s) |
+| `runtime/wallpaper.py` | the copy rows go to C | nothing: the preview sidecar is the renderer's (§11, step 7) |
 | `runtime/console.py`, `runtime/console_spine.py`: `app_context`, the app registration | make the grants; register the servers | `AppContext`'s Workstation reach |
 | the six apps, `runtime/editor_app.py`, `runtime/launcher_layer.py` | callers on the new shapes | `self._shell`, callback sessions, cart dicts from roles |
 | `native/moy_play/moy_play_stop.c`, `runtime/moy_play.py`: the stop's "route" refusal | the reason "place" (§5) | nothing |
@@ -549,6 +549,32 @@ against that bug before it goes green.
   `wallpaper` for the copy verbs it already ran through the ArtworkService:
   writing a project's image is writing a cart, and the grant now says so.
 
+- Step 7 (2026-10-10): the user-files layer is `native/moy_store/moy_ufiles.c`,
+  built with native/moy_app (so the Zero, which denies it, carries none) with
+  its module `moy_ufiles`, whose names `moy_carts` resolves at their use; the
+  host loads it as a library of its own (`tools/moy_ufiles_binding.py`), built
+  at first use from the MicroPython tree's uzlib. moy_app reaches it through a
+  verb table the console binds with the store (`moy_app_store_bind`: the table,
+  the root, readable, writable), pushed at the wiring rather than read per call,
+  so the spine's host library links no store. A text or blob answer is a
+  buffer the layer allocated (`moy_app_buf_free`), a name 256 bytes at most, a
+  list NUL-separated names. History ops cross as JSON text and the layer
+  writes each record as CPython's json.dumps does (`moy_json_canon`), so every
+  tier's sidecars are one byte form. The grant's kind is checked in C: the
+  editor handle reaches a document a person chose of another kind through a RUN
+  grant of its own (`moybyte.document`, ended with the run's), and a note's
+  embedded drawings load through the shell's (`moybyte.embeds`). Where the C
+  reads otherwise than the Python did: an item, a duplicate's source and the
+  copy go through the recovering read, so a save a power cut tore reads whole
+  (the matrix cuts the layer's writes); a title's letters and digits are
+  ASCII's; a picture compresses with the boards' LZ77 on every tier. A
+  `save_copy` moves a generation the backdrop's decode is keyed on
+  (`app.copy_gen`), which replaced the server's call into Paint's model. The
+  sync names the files root and kinds from the on-card layout
+  (`moy_store_base`), held to the C by a test, so the Zero syncs user files
+  without the layer. The wallpaper's preview sidecar stays the renderer's: no
+  row reads it and the renderer is Python (§6).
+
 ## 12. The owner's answers (2026-10-10)
 
 1. **The moy-spec change** (§4.2) is opened as a proposal: the
@@ -559,8 +585,8 @@ against that bug before it goes green.
    reviewed design's place contract (`place()`, `open(place)`, a place table
    in the spine) and its two steps are not built; §5 states the rule.
 3. Moot with answer 2.
-4. **User files cross to C** (`moy_files.py`, `moy_file_ops.py` into
-   `native/moy_store`) as their own step; the Zero denies the module.
+4. **User files cross to C** (`runtime/moy_files.py`,
+   `runtime/moy_file_ops.py` into `native/moy_store`) as their own step; the Zero denies the module.
 5. **The C spine on the host and in the browser**, before the grant step, with
    `runtime/moy_spine.py` kept under `tests/` as the differential oracle.
 6. Not a decision: the clipboard is a C role, so it survives a stop as kernel

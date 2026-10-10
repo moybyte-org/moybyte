@@ -742,6 +742,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # stop leaves it; this console's own elsewhere.
         self.app_abi = _app_abi(self.system)
         self._damage_take = self.app_abi.damage_take
+        self._files_end_all = self.app_abi.files_end_all
         self._damage_drop = self.app_abi.damage_drop
         # The servers of the roles' shell rows (runtime/shell_servers.py), and
         # the live token table the look writes at every switch. The surface
@@ -3606,12 +3607,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # which follows Settings -> PERF DIAG on device. perf_hud alone keeps
         # the LIGHT set (frame total, flush, fps): watching the fps chip must
         # not cost milliseconds.
-        # A store session a role opened and left open (`files.begin`) ends
-        # here, at the next frame: it holds no gate, so this is bookkeeping,
-        # never a flush held off (runtime/shell_servers.py).
+        # A store session a role opened and left open (`files.begin`, the C
+        # row's count; `carts.begin`, the handle's) ends here, at the next
+        # frame: it holds no gate, so this is bookkeeping, never a flush held
+        # off (docs/kernel_appabi_2026-10.md section 2.6).
         st = self.store
         if st.open:
             st.end_all()
+        else:
+            self._files_end_all()
         lk = self.link
         if lk is not None and getattr(lk, "_m", None) is not None:
             lk.sync(self)             # the session the link formed, the cart it asked for
@@ -4117,6 +4121,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     ws.carts_store = store
     ws.carts_root = carts_root
     ws.can_manage = (carts_root is not None) if can_manage is None else can_manage
+    ws.store.bind()
     ws.wifi = wifi
     if before_slim is not None:
         before_slim(ws)

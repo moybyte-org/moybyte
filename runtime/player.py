@@ -515,6 +515,11 @@ _CODE_CACHE = {}
 # (the tick model's rule for paced carts, kept for the unpaced ones).
 FREE_DT_MAX = 0.1
 
+# The kind a document's embedded pictures are (`![[name]]`): the shell reads
+# them through a grant of its own for it (`Player._embeds`).
+_EMBED_KIND = "drawings"
+
+
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
@@ -570,6 +575,7 @@ class Player:
                                       # steady frame costs one tuple compare
         self._app_id = None           # the crash guard's key for this run (#160), or None
         self._app_ctx = None          # a user app's or script's context: its run grant
+        self._embed_ctx = None        # the shell's drawings grant, for a note's embeds
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._lua = None              # #67: the running runtime cart's state -- the
@@ -623,9 +629,19 @@ class Player:
         Handed to `make_system_api` as its `editor` factory, so a cart reaches
         it only through the `open_editor` its manifest earned."""
         ed = EditorHandle(files, kind, name, mode, canvas, self._theme_colors,
-                          clip=clip, host=self.ws)
+                          clip=clip, host=self.ws, images=self._embeds())
         self._editors.append(ed)
         return ed
+
+    def _embeds(self):
+        """The drawings a document embeds, read by the shell behind the
+        handle: a grant of the console's own for the drawings kind, since the
+        cart's reaches its own kind alone."""
+        ctx = self._embed_ctx
+        if ctx is None:
+            ctx = self._embed_ctx = self.ws.app_context(
+                "moybyte.embeds", ("files",), None, False, _EMBED_KIND)
+        return ctx.files
 
     def _theme_colors(self):
         # The flat kernel token dict every shell surface reads per draw.

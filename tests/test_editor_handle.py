@@ -295,6 +295,7 @@ def test_a_read_only_store_keeps_the_text_and_reports_the_failure(tmp_path):
     ed = _handle(ws, "stuck")
     ed.set_text("still here")
     ws.can_manage = False
+    ws.store.bind()                            # the C rows read the store's state as bound
     ok, why = ed.save()
     assert ok is False and why
     assert ed.text() == "still here"           # editing is untouched

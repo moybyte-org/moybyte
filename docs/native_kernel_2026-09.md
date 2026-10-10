@@ -353,8 +353,8 @@ console needs while no Python app runs is OS.
 | `runtime/map_editor_ui.py` | app | — | the Editor's Map tab |
 | `runtime/moy_carts.py` | store | 1b | the `.moy` store, read and written by path; its callers reach a cart through `runtime/moy_catalogue.py`; the Zero takes it |
 | `runtime/moy_catalogue.py` | store | 1b | the store's interface: carts by handle (§4.3), the native store's call shapes and errors written over the Python store; every caller of the catalogue, a whole-cart load, create, duplicate and delete goes through it |
-| `runtime/moy_file_ops.py` | store | 1b | a user file's life: history sidecars, rename, trash, restore; the Zero takes it |
-| `runtime/moy_files.py` | store | 1b | the user-files layer under the Files app and role; the Zero takes it |
+| `runtime/moy_file_ops.py` | store | 5 | a user file's life: history sidecars, rename, trash, restore; C in `native/moy_store/moy_ufiles.c` (sprint 5 step 7), built with `native/moy_app`, which the Zero denies |
+| `runtime/moy_files.py` | store | 5 | the user-files layer under the Files app and role; C in `native/moy_store/moy_ufiles.c` with the file above |
 | `runtime/moy_fs.py` | store | 1b | the crash-safe write primitive every store module stands on, so it goes first; the Zero takes it |
 | `runtime/moy_image.py` | split | 4 + 5 | `Image`, the `image` verb's object and a kernel handle (§2.3) → 4; the wallpaper-preview sidecar → 5; the codec is `runtime/moyimg.py` |
 | `runtime/moy_index.py` | store | 1a | the store's index: a row per cart folder named by a handle, slot and generation, checked on every use; no I/O. Sprint 1a's language spike (§5, §6) wrote it as a C twin, `native/moy_index/moy_index.c` |

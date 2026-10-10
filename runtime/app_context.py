@@ -145,7 +145,18 @@ class AppContext:
         if "install" in needs:
             self.install = _moy_app.Install(app, self.grant)
 
+    def copy_gen(self):
+        """The wallpaper copy's generation (`wallpaper.save_copy` moves it):
+        what a decode of the copy is keyed on (runtime/artwork.py)."""
+        return self._app.copy_gen()
+
+    def adopt(self, other):
+        """End `other` (a context made for this one's run) when this one ends."""
+        self._also = getattr(self, "_also", ()) + (other,)
+
     def end(self):
-        """End this context's grant: a user app's run is over. Its role
-        objects answer a grant that ended from here on."""
+        """End this context's grant, and those it adopted: a user app's run
+        is over. Its role objects answer a grant that ended from here on."""
         self._app.end(self.grant)
+        for other in getattr(self, "_also", ()):
+            other.end()

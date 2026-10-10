@@ -44,8 +44,11 @@
 #   moyimg           the moyimg codec
 #   moy_journal      the per-project undo journal
 #   moy_seed         seeding, the packed roster, the retired-seed sweep
-#   moy_files        the #108 user-files layer
-#   moy_file_ops     per-file history sidecars, the trash, provenance
+#   moy_ufiles       the #108 user-files layer, its sidecars, the trash and
+#                    provenance: native/moy_store/moy_ufiles.h, reached by name
+#                    (`moy_carts.list_files`) through the module's __getattr__
+#                    below, never imported here, so a board without it (the
+#                    Zero) loads this module
 
 import gc
 import json
@@ -68,7 +71,8 @@ if _store is not None and not hasattr(_store, "catalogue"):
     _store = None
 
 try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
+    from moy_store_base import (FILE_KIND_NAMES, files_root, CARTS_DIR,
+                                CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
                                 _sibling_path, slug, ensure_dirs, _is_dir,
@@ -79,7 +83,8 @@ try:
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
                                 is_cart_id)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
+    from runtime.moy_store_base import (FILE_KIND_NAMES, files_root,
+                                        CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
                                         TILE_FLAGS, SCENES_DIR, SCENE_EXT,
                                         _normalize_canvas, _canvas_str,
@@ -2136,26 +2141,6 @@ try:
         RETIRED, RETIRED_GEN, RETIRED_VER_NAME, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,
         embedded_floor)
-    from moy_files import (
-        FILES_DIR, TRASH_DIR, TRASH_KEEP, DOC_EXT, SCRIPT_EXTS, VAULT_EXTS,
-        script_ext, vault_ext, _ext_from, _item_ext, _whole_exts, _split_item,
-        _slug_item, FILE_KINDS, _kind_spec, PROJECT_KIND, PROJECT_ORDER,
-        PROJECT_SUBDIRS, _PROJECT_SKIP_EXT, project_kind, project_folder,
-        project_dir, project_file_path, list_project_files, load_project_file,
-        save_project_file, files_root, file_kind_dir, file_path,
-        _ensure_kind_dir, _mtime, _kind_entries, _ends_any, list_files,
-        count_files, load_file, _unique_name, new_file_name, free_file_name,
-        save_file)
-    from moy_file_ops import (
-        HISTORY_DIR, HISTORY_EXT, HISTORY_KEEP, _history_dir, _history_path,
-        _history_trash_dir, _history_trash_path, _ensure_history_dir,
-        _ensure_history_trash_dir, _sidecar_move, _sidecar_copy, history_path,
-        load_history, _last_keyframe, ops_since_keyframe,
-        history_write_keyframe, history_append_segment, history_prune_fails,
-        history_commit, prune_history, clear_history, rename_file, _copytree,
-        duplicate_file, _trash_dir, _trash_path, delete_file, trash_list,
-        restore_file, _remove_trash_entry, prune_trash, empty_trash,
-        content_sig, stamp_provenance, read_provenance)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_seed import (
         _cart_version, _RESEED_PRESERVE, seed_builtins,
@@ -2163,23 +2148,20 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         RETIRED, RETIRED_GEN, RETIRED_VER_NAME, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,
         embedded_floor)
-    from runtime.moy_files import (
-        FILES_DIR, TRASH_DIR, TRASH_KEEP, DOC_EXT, SCRIPT_EXTS, VAULT_EXTS,
-        script_ext, vault_ext, _ext_from, _item_ext, _whole_exts, _split_item,
-        _slug_item, FILE_KINDS, _kind_spec, PROJECT_KIND, PROJECT_ORDER,
-        PROJECT_SUBDIRS, _PROJECT_SKIP_EXT, project_kind, project_folder,
-        project_dir, project_file_path, list_project_files, load_project_file,
-        save_project_file, files_root, file_kind_dir, file_path,
-        _ensure_kind_dir, _mtime, _kind_entries, _ends_any, list_files,
-        count_files, load_file, _unique_name, new_file_name, free_file_name,
-        save_file)
-    from runtime.moy_file_ops import (
-        HISTORY_DIR, HISTORY_EXT, HISTORY_KEEP, _history_dir, _history_path,
-        _history_trash_dir, _history_trash_path, _ensure_history_dir,
-        _ensure_history_trash_dir, _sidecar_move, _sidecar_copy, history_path,
-        load_history, _last_keyframe, ops_since_keyframe,
-        history_write_keyframe, history_append_segment, history_prune_fails,
-        history_commit, prune_history, clear_history, rename_file, _copytree,
-        duplicate_file, _trash_dir, _trash_path, delete_file, trash_list,
-        restore_file, _remove_trash_entry, prune_trash, empty_trash,
-        content_sig, stamp_provenance, read_provenance)
+
+
+# The user-files layer's names, `moy_carts.list_files` as before, served by
+# the native layer (native/moy_store/moy_ufiles.h). A name is resolved at its
+# use, so neither this module's import nor a tool that never touches a user file
+# builds or needs the layer; FILE_KINDS is the registry read afresh. Where the
+# image has no layer the names are absent (AttributeError), as any other is.
+def __getattr__(name):
+    try:
+        import moy_ufiles as uf
+    except ImportError:                  # a board without the layer (the Zero)
+        uf = None
+    if uf is None:
+        raise AttributeError(name)
+    if name == "FILE_KINDS":
+        return uf.kinds()
+    return getattr(uf, name)

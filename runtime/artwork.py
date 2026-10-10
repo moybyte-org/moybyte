@@ -1077,6 +1077,10 @@ class ArtworkService:
         self._wall_canvas = None       # ...and the canvas its bake is lent by
         self._thumb_bitmap = None
         self._thumb_key = None
+        # The copy's generation (the wallpaper role's save_copy bumps it, from
+        # any app): the decode above is the copy of the generation last seen.
+        self._copy_gen = getattr(ctx, "copy_gen", None)
+        self._copy_seen = None
         self._read_only = False        # the open picture is show-only
         self._why = ""
 
@@ -1309,26 +1313,39 @@ class ArtworkService:
         slot and make it the active desktop backdrop."""
         ok = self.copies.set_wallpaper(name or self._open_drawing())
         self.last_error = self.copies.last_error
+        self._copy_check()          # the replaced screen's loans go now
         return ok
 
     def copy_changed(self):
         """The wallpaper copy was written (the wallpaper role's `save_copy`,
-        from any app): the backdrop's decode, its loans and the thumbnail go,
-        read again at the next draw."""
+        from any app, which moves the copy's generation): the backdrop's
+        decode, its loans and the thumbnail go, read again at the next draw."""
         self._wall_decoded = None
         self._drop_wall_bitmap()
         self._thumb_bitmap = None
         self._thumb_key = None
+
+    def _copy_check(self):
+        """Drop the copy's decode when its generation moved since it was read."""
+        cg = self._copy_gen
+        if cg is not None:
+            gen = cg()
+            if gen != self._copy_seen:
+                if self._copy_seen is not None:
+                    self.copy_changed()
+                self._copy_seen = gen
 
     def owns_wallpaper(self, wp_id):
         return wp_id is not None and wp_id == self.copies.wallpaper_id()
 
     def _wall_data(self):
         """The wallpaper copy's decoded (w, h, indices), cached in RAM after
-        the first read; invalidated by copy_changed. A clean miss caches as
+        the first read; invalidated by copy_changed when the copy's generation
+        has moved since (one integer read a call). A clean miss caches as
         False so an absent/oversize copy never costs a per-frame SD read
         (draw_wallpaper runs every drawn frame); read ERRORS stay uncached --
         a transient SD hiccup should not hide the wallpaper for the session."""
+        self._copy_check()
         if self._wall_decoded is not None:
             return self._wall_decoded or None
         if not self._ready():

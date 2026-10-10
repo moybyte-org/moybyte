@@ -16,6 +16,7 @@ The handle VALUES are in the log too: a grant is a kind-12 handle
 (moy_htab.h's MOY_KIND_GRANT), slot and generation, as the oracle mints them.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -69,7 +70,7 @@ class _Servers:
         return row
 
 
-def run(sp, ap, say, mi):
+def run(sp, ap, say, mi, root):
     saved = []
     rows = sp.Settings(saved.append)
     app = ap.App(rows)
@@ -204,10 +205,9 @@ def run(sp, ap, say, mi):
     every = app.grant("tracer", ("files", "carts", "nav", "notify", "wallpaper",
                                  "install", "artwork"))
     srv2 = _Servers(say, ap, app)
-    for role in ("files", "carts", "nav", "notify", "wallpaper", "install"):
+    for role in ("carts", "nav", "notify", "wallpaper", "install"):
         app.serve(role, srv2)
-    say("files", ap.Files(app, every).load("docs", "a"),
-        ap.Files(app, every).begin(), ap.Carts(app, every).journal("c", "m", "s", grad=1))
+    say("carts", ap.Carts(app, every).journal("c", "m", "s", grad=1))
     say("nav", ap.Nav(app, every).play("cart"), ap.Notify(app, every).achieve("open"),
         ap.Wallpaper(app, every).thumbnail(4, 3), ap.Install(app, every).op(None))
     try:
@@ -216,6 +216,56 @@ def run(sp, ap, say, mi):
     except ValueError as e:
         say("files denied", str(e))
     say("served", sorted(app.served().items()))
+
+    # -- files: C rows over the user-files store the console binds
+    f = ap.Files(app, every)
+    say("unbound", f.readable(), f.ready(), f.begin(), f.load("docs", "a"),
+        f.sig("abc"), f.encode_text("t"), f.decode_text("a"))
+    app.store_bind(root, True, False, "NOSTORE")
+    say("read only", f.readable(), f.ready(), f.begin(), f.save("docs", "a", "x"),
+        f.list("docs"), f.count("docs"))
+    app.store_bind(root, True, True, "NOSTORE")
+    say("files", f.begin(), f.begin(), f.save("docs", "My Note", "hello"),
+        f.list("docs"), f.load("docs", "my_note"), f.load("docs", "nope"),
+        f.count("docs"), app.files_end_all(), app.files_end_all())
+    f.begin()
+    f.end()
+    say("names", f.new_name("docs"), f.new_name("docs", "todo.txt"),
+        f.rename("docs", "my_note", "Renamed"), f.duplicate("docs", "renamed"))
+    h = f.history("docs", "renamed")
+    say("history", f.history_commit("docs", "renamed", [{"i": 1}], keyframe={"d": 2}),
+        [sorted(r.items()) for r in f.history("docs", "renamed")[0]], h,
+        f.history_ops("docs", "renamed"), f.history_commit("docs", "renamed", []))
+    say("trash", f.delete("docs", "renamed"), f.trash_list(), f.restore("docs", "renamed"),
+        f.empty_trash(), f.trash_list(), f.delete("docs", "nope")[1] is not None)
+    say("codecs", f.decode_image(f.encode_image(2, 1, b"\x01\x02")), f.sig("abc"),
+        f.stamp('{"a": 1}', "docs", "n", 7), f.provenance(f.stamp("{}", "docs", "n", 9)),
+        f.stamp("[1]", "docs", "n", 9), f.encode_text("t"), f.decode_text("a\nb"),
+        f.decode_text(""), f.decode_image("no"), f.decode_image(""), f.provenance("x"))
+    cov = f.decode_cover(f.encode_cover(bytes(range(64)) * 256))
+    say("cover", cov[0], cov[1], cov[2] == bytes(range(64)) * 256, f.decode_cover(b"no"))
+    try:
+        f.encode_image(2, 2, b"abc")
+        say("encoded")
+    except ValueError as e:
+        say("bad size", str(e))
+    say("refused", f.list("selfies"), f.load("project:", "x"), f.save("recordings", "a", "b"))
+    notes = app.grant("local.notes2", ("files",), kind="docs", run=True)
+    scoped = ap.Files(app, notes)
+    say("scoped", scoped.list("docs"), scoped.save("docs", "note", "n"))
+    try:
+        scoped.list("drawings")
+        say("scoped allowed")
+    except ValueError as e:
+        say("scoped denied", str(e))
+    app.end(notes)
+    wp = ap.Wallpaper(app, every)
+    say("copy", app.copy_gen(), wp.load_copy(), wp.save_copy("pic"), wp.load_copy(),
+        app.copy_gen())
+    app.store_bind(root, True, False, "NOSTORE")
+    say("copy ro", wp.save_copy("x"), app.copy_gen(), wp.load_copy())
+    app.store_bind(None, False, False, None)
+    say("unbound again", f.list("docs"), wp.load_copy(), f.sig("x"))
 
     # -- artwork: Paint's open picture, its rows
     art = ap.Artwork(app, every)
@@ -287,12 +337,13 @@ def say(*a):
     print("L", " ".join(repr(x) if not isinstance(x, str) else x for x in a))
 
 
-run(moy_spine, moy_app, say, moy_input)
+run(moy_spine, moy_app, say, moy_input, ROOT)
 print("DONE")
 '''
 
 
 def _log(sp, ap):
+    import tempfile
     out = []
 
     def say(*a):
@@ -301,7 +352,8 @@ def _log(sp, ap):
     from runtime import moy_input
     ns = {}
     exec(SCRIPT, ns)
-    ns["run"](sp, ap, say, moy_input)
+    with tempfile.TemporaryDirectory() as t:
+        ns["run"](sp, ap, say, moy_input, os.path.join(t, "sd", "carts"))
     return out
 
 
@@ -325,7 +377,7 @@ def test_the_native_module_is_the_oracle(tmp_path):
         why="native/moy_app as the boards compile it, against the Python it "
             "replaced.")
     script = tmp_path / "app_parity.py"
-    script.write_text(SCRIPT + VM_MAIN)
+    script.write_text(SCRIPT + "ROOT = %r\n" % str(tmp_path / "sd" / "carts") + VM_MAIN)
     proc = subprocess.run([exe, str(script)], capture_output=True, text=True,
                           timeout=60)
     lines = proc.stdout.splitlines()

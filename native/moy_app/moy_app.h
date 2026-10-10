@@ -38,6 +38,7 @@
 #include "moy_htab.h"
 #include "moy_input.h"
 #include "moy_settings.h"
+#include "moy_ufiles.h"
 
 enum {
     MOY_APP_OK = 0,
@@ -69,7 +70,18 @@ enum {
     MOY_ROW_THEME_COLORS, MOY_ROW_THEME_TOKEN, MOY_ROW_THEME_GEN,
     MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
     MOY_ROW_THEME_SKIN,
+    MOY_ROW_FILES_READABLE, MOY_ROW_FILES_READY, MOY_ROW_FILES_BEGIN,
+    MOY_ROW_FILES_END, MOY_ROW_FILES_LIST, MOY_ROW_FILES_COUNT, MOY_ROW_FILES_LOAD,
+    MOY_ROW_FILES_SAVE, MOY_ROW_FILES_DELETE, MOY_ROW_FILES_DUPLICATE,
+    MOY_ROW_FILES_RENAME, MOY_ROW_FILES_NEW_NAME, MOY_ROW_FILES_TRASH_LIST,
+    MOY_ROW_FILES_RESTORE, MOY_ROW_FILES_EMPTY_TRASH, MOY_ROW_FILES_HISTORY,
+    MOY_ROW_FILES_HISTORY_OPS, MOY_ROW_FILES_HISTORY_COMMIT,
+    MOY_ROW_FILES_ENCODE_IMAGE, MOY_ROW_FILES_DECODE_IMAGE,
+    MOY_ROW_FILES_DECODE_COVER, MOY_ROW_FILES_ENCODE_COVER, MOY_ROW_FILES_SIG,
+    MOY_ROW_FILES_STAMP, MOY_ROW_FILES_ENCODE_TEXT, MOY_ROW_FILES_DECODE_TEXT,
+    MOY_ROW_FILES_PROVENANCE,
     MOY_ROW_PREFS_GET, MOY_ROW_PREFS_SET, MOY_ROW_PREFS_CLEAR,
+    MOY_ROW_WALLPAPER_LOAD_COPY, MOY_ROW_WALLPAPER_SAVE_COPY,
     MOY_ROW_ARTWORK_CURRENT, MOY_ROW_ARTWORK_FOLLOW,
     MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
     MOY_ROW_CLIPBOARD_SEQ,
@@ -86,6 +98,7 @@ enum {
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
 #define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
 #define MOY_APP_ARTWORK_NS "paint"  // the namespace Paint's open picture is kept in
+#define MOY_APP_ROOT_MAX 191u   // the carts folder's path, in bytes
 
 enum { MOY_GRANT_SHIPPED = 0, MOY_GRANT_RUN = 1 };
 enum { MOY_DAMAGE_ALL = 1u, MOY_DAMAGE_AGAIN = 2u };
@@ -273,6 +286,110 @@ int moy_app_artwork_current(moy_appabi_t *a, uint32_t g, char *kind, size_t kcap
                             size_t *klen, char *name, size_t ncap, size_t *nlen);
 int moy_app_artwork_follow(moy_appabi_t *a, uint32_t g, const char *kind, size_t kn,
                            const char *old, size_t on, const char *nw, size_t nn);
+
+// -- the user-files store ------------------------------------------------------------
+
+// The store the files and wallpaper rows reach (native/moy_store/moy_ufiles.h):
+// the console binds the layer's verb table, the carts folder and whether the
+// store reads and writes, at its build and at every change; NULL `ops` binds
+// none. OK, or BAD for a root over MOY_APP_ROOT_MAX bytes. Every store row takes
+// the board's bus gate around its own op (moy_vol_gate_enter), never across
+// two.
+int moy_app_store_bind(moy_appabi_t *a, const moy_uf_ops_t *ops, const char *root,
+                       size_t n, int readable, int writable);
+// A row that raised inside the store (a binding's exception path): the gate it
+// held is left.
+void moy_app_store_unwind(moy_appabi_t *a);
+// The errno value of the last store row that answered IO.
+int moy_app_why(const moy_appabi_t *a);
+// An answer a store row wrote into a moy_buf_t, freed by the layer it came from.
+void moy_app_buf_free(moy_appabi_t *a, moy_buf_t *b);
+// Sessions left open, ended: how many (the console's, at each frame's start and
+// a run's end).
+uint32_t moy_app_files_end_all(moy_appabi_t *a);
+// Bumped by every save_copy that landed: what the backdrop's decode is keyed on.
+uint32_t moy_app_copy_gen(const moy_appabi_t *a);
+
+// -- files ---------------------------------------------------------------------------
+
+// The user-files layer over the bound store (moy_ufiles.h has each verb's
+// rules). A grant made with a files kind reaches that kind alone: another
+// answers DENIED. A read answers NOSTORE with no store to read, a write with
+// none to write; a store that failed answers IO (moy_app_why), nothing there
+// ABSENT, a refused argument BAD. Names come back NUL-terminated in `name_out`
+// (MOY_UF_NAME_MAX + 1); lists as names, each NUL-terminated, in a buffer
+// (moy_app_buf_free). readable and ready answer 1 or 0, or the code negated.
+// begin opens a session (NOSTORE with no store to write): readiness and nothing
+// more, since every row takes the gate around its own op; end closes one.
+int32_t moy_app_files_readable(moy_appabi_t *a, uint32_t g);
+int32_t moy_app_files_ready(moy_appabi_t *a, uint32_t g);
+int moy_app_files_begin(moy_appabi_t *a, uint32_t g);
+int moy_app_files_end(moy_appabi_t *a, uint32_t g);
+int moy_app_files_list(moy_appabi_t *a, uint32_t g, const char *kind,
+                       moy_buf_t *out, uint32_t *count);
+int moy_app_files_count(moy_appabi_t *a, uint32_t g, const char *kind, uint32_t *n);
+int moy_app_files_load(moy_appabi_t *a, uint32_t g, const char *kind,
+                       const char *name, moy_buf_t *out, int *binary);
+int moy_app_files_save(moy_appabi_t *a, uint32_t g, const char *kind,
+                       const char *name, const char *data, size_t n, char *name_out);
+int moy_app_files_delete(moy_appabi_t *a, uint32_t g, const char *kind,
+                         const char *name, char *name_out);
+int moy_app_files_duplicate(moy_appabi_t *a, uint32_t g, const char *kind,
+                            const char *name, char *name_out);
+int moy_app_files_rename(moy_appabi_t *a, uint32_t g, const char *kind,
+                         const char *name, const char *title, char *name_out);
+// `title` NULL: the kind's auto-name; else that title slugged and made unique.
+int moy_app_files_new_name(moy_appabi_t *a, uint32_t g, const char *kind,
+                           const char *title, char *name_out);
+// Kind and name, each NUL-terminated, `*count` pairs, newest first.
+int moy_app_files_trash_list(moy_appabi_t *a, uint32_t g, moy_buf_t *out,
+                             uint32_t *count);
+int moy_app_files_restore(moy_appabi_t *a, uint32_t g, const char *kind,
+                          const char *name, char *name_out);
+int moy_app_files_empty_trash(moy_appabi_t *a, uint32_t g);
+// The sidecar's records, and the ops after its last keyframe: JSON arrays.
+int moy_app_files_history(moy_appabi_t *a, uint32_t g, const char *kind,
+                          const char *name, moy_buf_t *out);
+int moy_app_files_history_ops(moy_appabi_t *a, uint32_t g, const char *kind,
+                              const char *name, moy_buf_t *out);
+// The keyframe and the op batch as JSON text (NULL for none); a prune that
+// failed is `*prune_err` (an errno value, or MOY_UF_BAD) and not the row's
+// failure.
+int moy_app_files_history_commit(moy_appabi_t *a, uint32_t g, const char *kind,
+                                 const char *name, const char *ops, size_t ops_n,
+                                 const char *kf, size_t kf_n, int *prune_err);
+// The codecs: no store needed, only the layer (ABSENT with none bound, and for
+// a blob that is not one).
+int moy_app_files_encode_image(moy_appabi_t *a, uint32_t g, uint32_t w, uint32_t h,
+                               const uint8_t *pix, size_t n, moy_buf_t *out);
+int moy_app_files_decode_image(moy_appabi_t *a, uint32_t g, const char *text,
+                               size_t n, moy_buf_t *pix, uint32_t *w, uint32_t *h);
+int moy_app_files_decode_cover(moy_appabi_t *a, uint32_t g, const uint8_t *data,
+                               size_t n, moy_buf_t *pix);
+int moy_app_files_encode_cover(moy_appabi_t *a, uint32_t g, const uint8_t *pix,
+                               size_t n, moy_buf_t *out);
+int moy_app_files_sig(moy_appabi_t *a, uint32_t g, const char *text, size_t n,
+                      uint32_t *sig);
+// ABSENT: not a JSON object, which passes through as it was.
+int moy_app_files_stamp(moy_appabi_t *a, uint32_t g, const char *blob, size_t n,
+                        const char *kind, const char *name, uint32_t sig,
+                        moy_buf_t *out);
+// A document is its own text: encode_text and decode_text answer OK, and the
+// text crosses as it is (a binding splits decode_text's into lines).
+int moy_app_files_encode_text(moy_appabi_t *a, uint32_t g);
+int moy_app_files_decode_text(moy_appabi_t *a, uint32_t g);
+// OK, src and sig; ABSENT with no stamp.
+int moy_app_files_provenance(moy_appabi_t *a, uint32_t g, const char *blob, size_t n,
+                             moy_buf_t *src, int64_t *sig);
+
+// -- wallpaper -----------------------------------------------------------------------
+
+// The backdrop's backing picture, `artwork.moyimg` beside the carts folder:
+// load_copy its text (ABSENT: never saved), save_copy a write that bumps
+// moy_app_copy_gen.
+int moy_app_wallpaper_load_copy(moy_appabi_t *a, uint32_t g, moy_buf_t *out);
+int moy_app_wallpaper_save_copy(moy_appabi_t *a, uint32_t g, const char *data,
+                                size_t n);
 
 // -- the rows served in Python ------------------------------------------------------
 

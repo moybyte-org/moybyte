@@ -154,12 +154,17 @@ INDEX = Component(
     "index or store", "", "c")
 # The spine's host library carries native/moy_app too: the app ABI's state
 # reads the spine's tables and settings rows, so its ctypes binding
-# (tools/moy_app_binding.py) loads this same library.
+# (tools/moy_app_binding.py) loads this same library. The user-files layer its
+# files rows reach is native/moy_store's, a library of its own the console
+# hands moy_app by its verb table (tools/moy_ufiles_binding.py): only its
+# headers are read here.
+NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
-    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT], "moy_spine_host.c",
+    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
      "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
-     "moy_json.h", "moy_json.c", "moy_app.h", "moy_app.c", "moy_input.h"],
+     "moy_json.h", "moy_json.c", "moy_app.h", "moy_app.c", "moy_input.h",
+     "moy_ufiles.h", "moy_fs.h", "moy_vol.h"],
     ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
                       "moy_ledger.c", "moy_json.c"]),
     r"\((mod)?moy_(spine|route|settings|ledger|htab)\.c\.obj\)$"
@@ -171,19 +176,18 @@ SPINE = Component(
 # driver is the power-cut matrix's, over the oofatfs and littlefs2 sources of
 # the desktop MicroPython's tree (`make unix-micropython`).
 MPY = os.path.join(ROOT, ".build", "unix_micropython", "micropython")
-NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 FS = Component(
     "fs", [NATIVE_STORE, os.path.join(NATIVE_STORE, "host"), NATIVE_SPINE, MPY,
            os.path.join(MPY, "lib", "oofatfs"), os.path.join(MPY, "lib", "littlefs"),
-           os.path.join(MPY, "lib", "uzlib")],
+           os.path.join(MPY, "lib", "uzlib"), os.path.join(ROOT, "native", "moy_png")],
     "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
                          "moy_arena.h", "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_json.h",
                          "moy_json.c"],
     ("fuzz_fs.c", ["moy_cache.c", "moy_vol.c", "moy_fs.c", "moy_cat.c", "moy_seed.c", "moy_journal.c",
                    "moy_pack.c",
-                   "moy_json.c",
+                   "moy_json.c", "moy_ufiles.c", "moy_img.c", "moy_png.c",
                    "ff.c", "ffunicode.c", "lfs2.c", "lfs2_util.c", "tinflate.c",
-                   "adler32.c", "crc32.c"]),
+                   "adler32.c", "crc32.c", "lz77.c", "header.c"]),
     r"\((mod)?moy_(store|vol|fs)\.c\.obj\)$|/(mod)?moy_(store|vol|fs)\.c\.obj$",
     ["tests/test_moy_store.py"], "store", "fs-", "c",
     cflags=['-DFFCONF_H="lib/oofatfs/ffconf.h"', "-DMOY_VOL_FAT=1",

@@ -9,13 +9,16 @@
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
 //   app.surface_write(canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0)
 //   app.bind_pointer(pointer), app.theme_write(name, variant, colors),
-//   app.theme_write_skin(skin), app.serve(role, server)   the shell's writes
+//   app.theme_write_skin(skin), app.serve(role, server),
+//   app.store_bind(root, readable, writable, no_store)   the shell's writes
+//   app.files_end_all(), app.copy_gen()   the store's sessions and copy
 //   app.served()         {"role.verb": calls} of the rows served in Python
 //   app.grant_id(h)      the id a grant was made for
-//   Damage(app, g), Surface(app, g), Theme(app, g), Prefs(app, g),
-//   Artwork(app, g), Clipboard(app, g)    the roles with C rows
-//   Files, Carts, Nav, Notify, Wallpaper, Install (app, g)   the roles served
-//                        in Python, every row the console's
+//   Damage(app, g), Surface(app, g), Theme(app, g), Files(app, g),
+//   Prefs(app, g), Artwork(app, g), Clipboard(app, g)    the roles with C rows
+//   Carts, Nav, Notify, Wallpaper, Install (app, g)   the roles served in
+//                        Python, every row the console's but the wallpaper's
+//                        copy
 //   tokens()             the token vocabulary, in role-id order
 //   policy(perms), manifest_error(perms), id_for(id, title)   the grant policy
 //
@@ -30,8 +33,10 @@
 // generation and handed out until the generation moves.
 // What a verb answers in the ABI's codes becomes what the Python roles
 // answered: prefs.get the caller's default for ABSENT, clipboard.kind "text"
-// or None, clipboard.put_text False for text over CLIP_MAX (the old text kept). A refused call raises: ValueError for STALE, DENIED and BAD,
-// MemoryError for NOMEM, OSError(ENOSPC) for a full grant table.
+// or None, clipboard.put_text False for text over CLIP_MAX (the old text
+// kept), a storage row `(value, err)`. A refused call raises: ValueError for
+// STALE, DENIED and BAD, MemoryError for NOMEM, OSError(ENOSPC) for a full
+// grant table; a storage row answers its store's failures as `err`.
 
 #include <string.h>
 
@@ -93,6 +98,7 @@ typedef struct {
     mp_obj_t pointer;       // the Pointer the rows are bound to, kept alive
     mp_obj_t servers;       // {role: the console's server for its other rows}
     mp_obj_t served;        // {role: {verb: calls}}: those rows' counters
+    mp_obj_t no_store;      // the `err` a storage row answers with no store
     mp_obj_t colors;        // the colour dict of generation colors_gen, or NULL
     uint32_t colors_gen;
     bool own;               // false: a view of the kernel's
@@ -113,6 +119,7 @@ static void app_init(app_obj_t *o) {
     o->pointer = mp_const_none;
     o->servers = mp_obj_new_dict(0);
     o->served = mp_obj_new_dict(0);
+    o->no_store = mp_const_none;
     o->colors = MP_OBJ_NULL;
     o->colors_gen = 0u;
     for (size_t i = 0; i < MOY_GRANT_SLOTS; i++) {
@@ -386,7 +393,36 @@ static mp_obj_t app_served(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(app_served_obj, app_served);
 
+// store_bind(root, readable, writable, no_store): the user-files store the files
+// and wallpaper rows reach (root None: none), and the `err` they answer with
+// no store. The layer is this image's (moy_ufiles.h).
+static mp_obj_t app_store_bind(size_t n_args, const mp_obj_t *args) {
+    app_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    size_t n = 0;
+    const char *root = args[1] == mp_const_none ? "" : str_of(args[1], &n);
+    check(moy_app_store_bind(self->a, n ? &moy_uf_ops : NULL, root, n,
+                             mp_obj_is_true(args[2]), mp_obj_is_true(args[3])));
+    self->no_store = args[4];
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_store_bind_obj, 5, 5, app_store_bind);
+
+// files_end_all() -> the files sessions left open, ended.
+static mp_obj_t app_files_end_all(mp_obj_t self) {
+    return mp_obj_new_int_from_uint(moy_app_files_end_all(app_of(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_files_end_all_obj, app_files_end_all);
+
+// copy_gen() -> bumped by every wallpaper.save_copy that landed.
+static mp_obj_t app_copy_gen(mp_obj_t self) {
+    return mp_obj_new_int_from_uint(moy_app_copy_gen(app_of(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_copy_gen_obj, app_copy_gen);
+
 static const mp_rom_map_elem_t app_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_store_bind), MP_ROM_PTR(&app_store_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_files_end_all), MP_ROM_PTR(&app_files_end_all_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_gen), MP_ROM_PTR(&app_copy_gen_obj) },
     { MP_ROM_QSTR(MP_QSTR_served), MP_ROM_PTR(&app_served_obj) },
     { MP_ROM_QSTR(MP_QSTR_surface_write), MP_ROM_PTR(&app_surface_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_bind_pointer), MP_ROM_PTR(&app_bind_pointer_obj) },
@@ -882,38 +918,563 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- the roles served in Python -------------------------------------------------------------
 //
-// Every row of these roles is the console's (roles.json's "shell" server): the
-// binding checks the grant, counts the row and calls the registered server.
+// Every row of these roles but the files role's and the wallpaper's copy is the
+// console's (roles.json's "shell" server): the binding checks the grant, counts
+// the row and calls the registered server.
+
+// -- the storage rows ---------------------------------------------------------------------
+//
+// The files rows and the wallpaper's copy are C over the user-files layer the
+// console binds (app.store_bind). They answer what the Python roles answered:
+// `(value, err)`, `err` None, the console's NO_STORE, or the failure's text
+// (an OSError's for IO), and never raise for the store. A row that raises
+// inside the store (a borrowed volume's block device can) leaves the gate it
+// held and frees the store's scratch before the exception goes on.
+
+void moy_store_unwind(void);
+
+typedef struct {
+    app_obj_t *app;
+    moy_appabi_t *a;
+    uint32_t g;
+} store_t;
+
+static void store_of(mp_obj_t self, store_t *st) {
+    role_obj_t *o = MP_OBJ_TO_PTR(self);
+    st->app = MP_OBJ_TO_PTR(o->app);
+    st->a = st->app->a;
+    st->g = o->g;
+}
+
+#define STORE_BEGIN(st) { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
+#define STORE_END(st) nlr_pop(); } else { moy_app_store_unwind((st).a); \
+        moy_store_unwind(); nlr_jump(nlr_.ret_val); } }
+
+static mp_obj_t pair(mp_obj_t v, mp_obj_t err) {
+    mp_obj_t t[2] = { v, err };
+    return mp_obj_new_tuple(2, t);
+}
+
+// The `err` of a code; a grant problem raises.
+static mp_obj_t err_of(store_t *st, int rc) {
+    switch (rc) {
+        case MOY_APP_NOSTORE:
+            return st->app->no_store;
+        case MOY_APP_IO: {
+            mp_obj_t e = mp_obj_new_exception_arg1(&mp_type_OSError,
+                                                   MP_OBJ_NEW_SMALL_INT(moy_app_why(st->a)));
+            return mp_obj_str_make_new(&mp_type_str, 1, 0, &e);
+        }
+        case MOY_APP_BAD:
+            return mp_obj_new_str("a refused argument", 18);
+        case MOY_APP_NOMEM:
+            return mp_obj_new_str("memory allocation failed", 24);
+        default:
+            raise_rc(rc);
+    }
+}
+
+// A layer buffer as a str (`text`) or bytes, freed either way.
+static mp_obj_t take(store_t *st, moy_buf_t *b, int text) {
+    mp_obj_t o;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        o = text ? mp_obj_new_str(b->p, b->n) : mp_obj_new_bytes((const byte *)b->p, b->n);
+        nlr_pop();
+    } else {
+        moy_app_buf_free(st->a, b);
+        nlr_jump(nlr.ret_val);
+    }
+    moy_app_buf_free(st->a, b);
+    return o;
+}
+
+// A JSON answer as its value.
+static mp_obj_t take_json(store_t *st, moy_buf_t *b) {
+    return json_call(MP_QSTR_loads, take(st, b, 1));
+}
+
+// Names, each NUL-terminated, as a list (`pairs`: of (kind, name) tuples).
+static mp_obj_t take_names(store_t *st, moy_buf_t *b, uint32_t count, int pairs) {
+    mp_obj_t text = take(st, b, 0);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(text, &bi, MP_BUFFER_READ);
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    const char *p = bi.buf, *end = p + bi.len;
+    for (uint32_t i = 0; i < count && p < end; i++) {
+        size_t n = strlen(p);
+        mp_obj_t name = mp_obj_new_str(p, n);
+        p += n + 1u;
+        if (pairs) {
+            size_t m = strlen(p);
+            mp_obj_t t[2] = { name, mp_obj_new_str(p, m) };
+            p += m + 1u;
+            name = mp_obj_new_tuple(2, t);
+        }
+        mp_obj_list_append(list, name);
+    }
+    return list;
+}
+
+static const char *cstr(mp_obj_t o) {
+    if (!mp_obj_is_str(o)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("a str"));
+    }
+    return mp_obj_str_get_str(o);
+}
 
 // files
 
-SERVED(files, FILES, readable)
-SERVED(files, FILES, ready)
-SERVED(files, FILES, begin)
-SERVED(files, FILES, end)
-SERVED(files, FILES, list)
-SERVED(files, FILES, count)
-SERVED(files, FILES, load)
-SERVED(files, FILES, save)
-SERVED(files, FILES, delete)
-SERVED(files, FILES, duplicate)
-SERVED(files, FILES, rename)
-SERVED(files, FILES, new_name)
-SERVED(files, FILES, trash_list)
-SERVED(files, FILES, restore)
-SERVED(files, FILES, empty_trash)
-SERVED(files, FILES, history)
-SERVED(files, FILES, history_ops)
-SERVED(files, FILES, history_commit)
-SERVED(files, FILES, encode_image)
-SERVED(files, FILES, decode_image)
-SERVED(files, FILES, decode_cover)
-SERVED(files, FILES, encode_cover)
-SERVED(files, FILES, sig)
-SERVED(files, FILES, stamp)
-SERVED(files, FILES, encode_text)
-SERVED(files, FILES, decode_text)
-SERVED(files, FILES, provenance)
+static mp_obj_t files_readable(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    int32_t v = moy_app_files_readable(st.a, st.g);
+    if (v < 0) {
+        raise_rc((int)-v);
+    }
+    return mp_obj_new_bool(v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(files_readable_obj, files_readable);
+
+static mp_obj_t files_ready(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    int32_t v = moy_app_files_ready(st.a, st.g);
+    if (v < 0) {
+        raise_rc((int)-v);
+    }
+    return mp_obj_new_bool(v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(files_ready_obj, files_ready);
+
+static mp_obj_t files_begin(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    int rc = moy_app_files_begin(st.a, st.g);
+    return rc == MOY_APP_OK ? pair(mp_const_true, mp_const_none)
+           : pair(mp_const_none, err_of(&st, rc));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(files_begin_obj, files_begin);
+
+static mp_obj_t files_end(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    check(moy_app_files_end(st.a, st.g));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(files_end_obj, files_end);
+
+static mp_obj_t files_list(mp_obj_t self, mp_obj_t kind) {
+    store_t st;
+    store_of(self, &st);
+    const char *k = cstr(kind);
+    moy_buf_t b = { NULL, 0 };
+    uint32_t n = 0;
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_list(st.a, st.g, k, &b, &n);
+    STORE_END(st)
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    return pair(take_names(&st, &b, n, 0), mp_const_none);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_list_obj, files_list);
+
+static mp_obj_t files_count(mp_obj_t self, mp_obj_t kind) {
+    store_t st;
+    store_of(self, &st);
+    const char *k = cstr(kind);
+    uint32_t n = 0;
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_count(st.a, st.g, k, &n);
+    STORE_END(st)
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    return pair(mp_obj_new_int_from_uint(n), mp_const_none);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_count_obj, files_count);
+
+static mp_obj_t files_load(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
+    store_t st;
+    store_of(self, &st);
+    const char *k = cstr(kind), *nm = cstr(name);
+    moy_buf_t b = { NULL, 0 };
+    int binary = 0, rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_load(st.a, st.g, k, nm, &b, &binary);
+    STORE_END(st)
+    if (rc == MOY_APP_ABSENT) {
+        return pair(mp_const_none, mp_const_none);
+    }
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    return pair(take(&st, &b, !binary), mp_const_none);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(files_load_obj, files_load);
+
+static mp_obj_t named_answer(store_t *st, int rc, const char *name) {
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(st, rc));
+    }
+    return pair(mp_obj_new_str(name, strlen(name)), mp_const_none);
+}
+
+static mp_obj_t files_save(size_t n_args, const mp_obj_t *args) {
+    store_t st;
+    store_of(args[0], &st);
+    const char *k = cstr(args[1]), *nm = cstr(args[2]);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(args[3], &bi, MP_BUFFER_READ);
+    char out[MOY_UF_NAME_MAX + 1];
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_save(st.a, st.g, k, nm, bi.buf, bi.len, out);
+    STORE_END(st)
+    return named_answer(&st, rc, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(files_save_obj, 4, 4, files_save);
+
+typedef int (*name_row_fn)(moy_appabi_t *, uint32_t, const char *, const char *, char *);
+
+static mp_obj_t name_row(mp_obj_t self, mp_obj_t kind, mp_obj_t name, name_row_fn fn) {
+    store_t st;
+    store_of(self, &st);
+    const char *k = cstr(kind), *nm = cstr(name);
+    char out[MOY_UF_NAME_MAX + 1];
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = fn(st.a, st.g, k, nm, out);
+    STORE_END(st)
+    return named_answer(&st, rc, out);
+}
+
+static mp_obj_t files_delete(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
+    return name_row(self, kind, name, moy_app_files_delete);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(files_delete_obj, files_delete);
+
+static mp_obj_t files_duplicate(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
+    return name_row(self, kind, name, moy_app_files_duplicate);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(files_duplicate_obj, files_duplicate);
+
+static mp_obj_t files_restore(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
+    return name_row(self, kind, name, moy_app_files_restore);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(files_restore_obj, files_restore);
+
+static mp_obj_t files_rename(size_t n_args, const mp_obj_t *args) {
+    store_t st;
+    store_of(args[0], &st);
+    const char *k = cstr(args[1]), *nm = cstr(args[2]), *t = cstr(args[3]);
+    char out[MOY_UF_NAME_MAX + 1];
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_rename(st.a, st.g, k, nm, t, out);
+    STORE_END(st)
+    return named_answer(&st, rc, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(files_rename_obj, 4, 4, files_rename);
+
+// new_name(kind, title=None)
+static mp_obj_t files_new_name(size_t n_args, const mp_obj_t *args) {
+    store_t st;
+    store_of(args[0], &st);
+    const char *k = cstr(args[1]);
+    const char *t = n_args > 2 && mp_obj_is_true(args[2]) ? cstr(args[2]) : NULL;
+    char out[MOY_UF_NAME_MAX + 1];
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_new_name(st.a, st.g, k, t, out);
+    STORE_END(st)
+    return named_answer(&st, rc, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(files_new_name_obj, 2, 3, files_new_name);
+
+static mp_obj_t files_trash_list(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    moy_buf_t b = { NULL, 0 };
+    uint32_t n = 0;
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_trash_list(st.a, st.g, &b, &n);
+    STORE_END(st)
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    return pair(take_names(&st, &b, n, 1), mp_const_none);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(files_trash_list_obj, files_trash_list);
+
+static mp_obj_t files_empty_trash(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_empty_trash(st.a, st.g);
+    STORE_END(st)
+    return pair(mp_const_none, rc == MOY_APP_OK ? mp_const_none : err_of(&st, rc));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(files_empty_trash_obj, files_empty_trash);
+
+typedef int (*json_row_fn)(moy_appabi_t *, uint32_t, const char *, const char *, moy_buf_t *);
+
+static mp_obj_t json_row(mp_obj_t self, mp_obj_t kind, mp_obj_t name, json_row_fn fn) {
+    store_t st;
+    store_of(self, &st);
+    const char *k = cstr(kind), *nm = cstr(name);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = fn(st.a, st.g, k, nm, &b);
+    STORE_END(st)
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    return pair(take_json(&st, &b), mp_const_none);
+}
+
+static mp_obj_t files_history(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
+    return json_row(self, kind, name, moy_app_files_history);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(files_history_obj, files_history);
+
+static mp_obj_t files_history_ops(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
+    return json_row(self, kind, name, moy_app_files_history_ops);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(files_history_ops_obj, files_history_ops);
+
+// history_commit(kind, name, ops, keyframe=None) -> (prune failure or None, err)
+static mp_obj_t files_history_commit(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_kind, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_name, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_ops, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_keyframe, MP_ARG_OBJ, { .u_obj = mp_const_none } },
+    };
+    mp_arg_val_t v[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1u, args + 1, kw, MP_ARRAY_SIZE(allowed), allowed, v);
+    store_t st;
+    store_of(args[0], &st);
+    const char *k = cstr(v[0].u_obj), *nm = cstr(v[1].u_obj);
+    const char *ops = NULL, *kf = NULL;
+    size_t on = 0, kn = 0;
+    mp_obj_t ops_text = mp_const_none, kf_text = mp_const_none;
+    if (mp_obj_is_true(v[2].u_obj)) {
+        mp_obj_t lst = mp_obj_new_list(0, NULL);
+        mp_obj_t it = mp_getiter(v[2].u_obj, NULL), x;
+        while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            mp_obj_list_append(lst, x);
+        }
+        ops_text = json_call(MP_QSTR_dumps, lst);
+        ops = mp_obj_str_get_data(ops_text, &on);
+    }
+    if (v[3].u_obj != mp_const_none) {
+        kf_text = json_call(MP_QSTR_dumps, v[3].u_obj);
+        kf = mp_obj_str_get_data(kf_text, &kn);
+    }
+    int prune_err = 0, rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_files_history_commit(st.a, st.g, k, nm, ops, on, kf, kn, &prune_err);
+    STORE_END(st)
+    (void)ops_text;
+    (void)kf_text;
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    if (prune_err == 0) {
+        return pair(mp_const_none, mp_const_none);
+    }
+    if (prune_err == MOY_UF_BAD) {
+        return pair(mp_obj_new_str("a refused argument", 18), mp_const_none);
+    }
+    mp_obj_t e = mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(prune_err));
+    return pair(mp_obj_str_make_new(&mp_type_str, 1, 0, &e), mp_const_none);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(files_history_commit_obj, 4, files_history_commit);
+
+// -- the codecs: their value, or None
+
+static mp_obj_t files_encode_image(size_t n_args, const mp_obj_t *args) {
+    store_t st;
+    store_of(args[0], &st);
+    mp_int_t w = mp_obj_get_int(args[1]), h = mp_obj_get_int(args[2]);
+    mp_buffer_info_t bi;
+    mp_obj_t pix = args[3];
+    if (!mp_get_buffer(pix, &bi, MP_BUFFER_READ)) {
+        pix = mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_bytes),
+                                 mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_bytearray), pix));
+        mp_get_buffer_raise(pix, &bi, MP_BUFFER_READ);
+    }
+    if (w <= 0 || h <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bad artwork size"));
+    }
+    moy_buf_t b = { NULL, 0 };
+    int rc = moy_app_files_encode_image(st.a, st.g, (uint32_t)w, (uint32_t)h, bi.buf, bi.len, &b);
+    if (rc == MOY_APP_BAD) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bad artwork size"));
+    }
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    return take(&st, &b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(files_encode_image_obj, 4, 4, files_encode_image);
+
+static mp_obj_t files_decode_image(mp_obj_t self, mp_obj_t blob) {
+    store_t st;
+    store_of(self, &st);
+    if (!mp_obj_is_true(blob)) {
+        check(moy_app_holds(st.a, st.g, MOY_ROLE_FILES));
+        return mp_const_none;
+    }
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(blob, &bi, MP_BUFFER_READ);
+    moy_buf_t b = { NULL, 0 };
+    uint32_t w = 0, h = 0;
+    int rc = moy_app_files_decode_image(st.a, st.g, bi.buf, bi.len, &b, &w, &h);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(w), mp_obj_new_int_from_uint(h),
+                      take(&st, &b, 0) };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_decode_image_obj, files_decode_image);
+
+static mp_obj_t files_decode_cover(mp_obj_t self, mp_obj_t blob) {
+    store_t st;
+    store_of(self, &st);
+    if (!mp_obj_is_true(blob)) {
+        check(moy_app_holds(st.a, st.g, MOY_ROLE_FILES));
+        return mp_const_none;
+    }
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(blob, &bi, MP_BUFFER_READ);
+    moy_buf_t b = { NULL, 0 };
+    int rc = moy_app_files_decode_cover(st.a, st.g, bi.buf, bi.len, &b);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    mp_obj_t t[3] = { MP_OBJ_NEW_SMALL_INT(MOY_UF_COVER_SIDE),
+                      MP_OBJ_NEW_SMALL_INT(MOY_UF_COVER_SIDE), take(&st, &b, 0) };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_decode_cover_obj, files_decode_cover);
+
+static mp_obj_t files_encode_cover(mp_obj_t self, mp_obj_t pix) {
+    store_t st;
+    store_of(self, &st);
+    mp_buffer_info_t bi;
+    if (!mp_get_buffer(pix, &bi, MP_BUFFER_READ)) {
+        pix = mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_bytes),
+                                 mp_call_function_1(MP_OBJ_FROM_PTR(&mp_type_bytearray), pix));
+        mp_get_buffer_raise(pix, &bi, MP_BUFFER_READ);
+    }
+    moy_buf_t b = { NULL, 0 };
+    int rc = moy_app_files_encode_cover(st.a, st.g, bi.buf, bi.len, &b);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    return take(&st, &b, 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_encode_cover_obj, files_encode_cover);
+
+static mp_obj_t files_sig(mp_obj_t self, mp_obj_t blob) {
+    store_t st;
+    store_of(self, &st);
+    size_t n = 0;
+    const char *p = mp_obj_is_true(blob) ? str_of(blob, &n) : "";
+    uint32_t sig = 0;
+    int rc = moy_app_files_sig(st.a, st.g, p, n, &sig);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    return mp_obj_new_int_from_uint(sig);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_sig_obj, files_sig);
+
+// stamp(blob, kind, name, sig) -> the blob stamped, or the blob as it was.
+static mp_obj_t files_stamp(size_t n_args, const mp_obj_t *args) {
+    store_t st;
+    store_of(args[0], &st);
+    mp_obj_t blob = args[1];
+    if (!mp_obj_is_str(blob)) {
+        check(moy_app_holds(st.a, st.g, MOY_ROLE_FILES));
+        return blob;
+    }
+    size_t n;
+    const char *p = mp_obj_str_get_data(blob, &n);
+    const char *k = cstr(args[2]), *nm = cstr(args[3]);
+    uint32_t sig = (uint32_t)(mp_obj_get_int_truncated(args[4]) & 0xFFFFFFFF);
+    moy_buf_t b = { NULL, 0 };
+    int rc = moy_app_files_stamp(st.a, st.g, p, n, k, nm, sig, &b);
+    if (rc == MOY_APP_ABSENT) {
+        return blob;
+    }
+    check(rc);
+    return take(&st, &b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(files_stamp_obj, 5, 5, files_stamp);
+
+static mp_obj_t files_encode_text(mp_obj_t self, mp_obj_t body) {
+    store_t st;
+    store_of(self, &st);
+    int rc = moy_app_files_encode_text(st.a, st.g);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    return mp_obj_str_make_new(&mp_type_str, 1, 0, &body);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_encode_text_obj, files_encode_text);
+
+// decode_text(blob) -> the document's lines, [] for no text.
+static mp_obj_t files_decode_text(mp_obj_t self, mp_obj_t blob) {
+    store_t st;
+    store_of(self, &st);
+    int rc = moy_app_files_decode_text(st.a, st.g);
+    if (rc != MOY_APP_ABSENT) {
+        check(rc);
+    }
+    if (rc != MOY_APP_OK || !mp_obj_is_str(blob) || !mp_obj_is_true(blob)) {
+        return mp_obj_new_list(0, NULL);
+    }
+    mp_obj_t a[2] = { blob, mp_obj_new_str("\n", 1) };
+    return mp_obj_str_split(2, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_decode_text_obj, files_decode_text);
+
+static mp_obj_t files_provenance(mp_obj_t self, mp_obj_t blob) {
+    store_t st;
+    store_of(self, &st);
+    mp_obj_t none2 = pair(mp_const_none, mp_const_none);
+    if (!mp_obj_is_str(blob) || !mp_obj_is_true(blob)) {
+        check(moy_app_holds(st.a, st.g, MOY_ROLE_FILES));
+        return none2;
+    }
+    size_t n;
+    const char *p = mp_obj_str_get_data(blob, &n);
+    moy_buf_t b = { NULL, 0 };
+    int64_t sig = 0;
+    int rc = moy_app_files_provenance(st.a, st.g, p, n, &b, &sig);
+    if (rc == MOY_APP_ABSENT) {
+        return none2;
+    }
+    check(rc);
+    return pair(take(&st, &b, 1), mp_obj_new_int_from_ll(sig));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(files_provenance_obj, files_provenance);
 
 static const mp_rom_map_elem_t files_locals_table[] = {
     ROW(files, readable)
@@ -1033,8 +1594,38 @@ SERVED(wallpaper, WALLPAPER, title)
 SERVED(wallpaper, WALLPAPER, select)
 SERVED(wallpaper, WALLPAPER, preview)
 SERVED(wallpaper, WALLPAPER, thumbnail)
-SERVED(wallpaper, WALLPAPER, load_copy)
-SERVED(wallpaper, WALLPAPER, save_copy)
+
+// load_copy() -> (text or None, err); save_copy(text) -> (None, err): C rows.
+static mp_obj_t wallpaper_load_copy(mp_obj_t self) {
+    store_t st;
+    store_of(self, &st);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_wallpaper_load_copy(st.a, st.g, &b);
+    STORE_END(st)
+    if (rc == MOY_APP_ABSENT) {
+        return pair(mp_const_none, mp_const_none);
+    }
+    if (rc != MOY_APP_OK) {
+        return pair(mp_const_none, err_of(&st, rc));
+    }
+    return pair(take(&st, &b, 1), mp_const_none);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(wallpaper_load_copy_obj, wallpaper_load_copy);
+
+static mp_obj_t wallpaper_save_copy(mp_obj_t self, mp_obj_t text) {
+    store_t st;
+    store_of(self, &st);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(text, &bi, MP_BUFFER_READ);
+    int rc = 0;
+    STORE_BEGIN(st)
+    rc = moy_app_wallpaper_save_copy(st.a, st.g, bi.buf, bi.len);
+    STORE_END(st)
+    return pair(mp_const_none, rc == MOY_APP_OK ? mp_const_none : err_of(&st, rc));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(wallpaper_save_copy_obj, wallpaper_save_copy);
 
 static const mp_rom_map_elem_t wallpaper_locals_table[] = {
     ROW(wallpaper, current)
@@ -1208,8 +1799,11 @@ static mp_obj_t mod_id_for(mp_obj_t id, mp_obj_t title) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_id_for_obj, mod_id_for);
 
+// The most names a table has: roles, rows, kinds, tokens.
+#define NAMES_MAX (MOY_ROW_N > MOY_APP_TOKENS ? MOY_ROW_N : MOY_APP_TOKENS)
+
 static mp_obj_t names_tuple(const char *(*name)(int), int n) {
-    mp_obj_t items[32];         // the most names a table has: roles, rows, kinds, tokens
+    mp_obj_t items[NAMES_MAX];
     for (int i = 0; i < n; i++) {
         const char *s = name(i);
         items[i] = mp_obj_new_str(s, strlen(s));

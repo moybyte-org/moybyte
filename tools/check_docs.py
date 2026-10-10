@@ -151,6 +151,10 @@ NOT_OURS = (
     # ...and the host's copy of the console half, which became
     # native/moycore/moycore_run.c, the one the boards run too.
     "runtime/moyhost_console.h",
+    # The user-files layer, deleted by sprint 5's step 7 when
+    # native/moy_store/moy_ufiles.c took it; the kernel plans and the tests'
+    # golden name them to say what crossed.
+    "runtime/moy_files.py", "runtime/moy_file_ops.py",
 )
 
 

@@ -149,8 +149,10 @@ NATIVE = {
 }
 
 # A usermod that registers more than its own name: moy_kernel is the kernel's
-# entry and its frame loop, the module `moy_loop`.
-USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop"}}
+# entry and its frame loop, the module `moy_loop`; moy_app builds the
+# user-files layer it serves the files role over, the module `moy_ufiles`.
+USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop"},
+                   "moy_app": {"moy_app", "moy_ufiles"}}
 
 
 def _native_modules(target):
@@ -693,7 +695,6 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
                  "moy_carts.py", "moyimg.py",         # #108 files sync
                  "moy_store_base.py", "moy_seed.py",  # ...and the store's own
-                 "moy_files.py", "moy_file_ops.py",   # split-off modules
                  "moy_journal.py",                    # the store of record
                  "ticks.py",                          # the transport's clock leaf
                  "moy_webhost.py",

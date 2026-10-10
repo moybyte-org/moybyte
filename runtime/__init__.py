@@ -51,6 +51,21 @@ def _native_app():
 
 moy_app = _native_app()
 
+
+def _native_ufiles():
+    """The user-files layer (native/moy_store/moy_ufiles.h) over ctypes,
+    registered as `moy_ufiles` like the boards' module. Its library is built at
+    the first verb a caller uses (tools/moy_ufiles_binding.py)."""
+    if "moy_ufiles" in _sys.modules:
+        return _sys.modules["moy_ufiles"]
+    from tools import moy_ufiles_binding
+    mod = moy_ufiles_binding.binding()
+    _sys.modules["moy_ufiles"] = mod
+    return mod
+
+
+moy_ufiles = _native_ufiles()
+
 from . import palette  # noqa: E402
 from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
 from .input import InputState  # noqa: E402

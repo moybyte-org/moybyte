@@ -110,9 +110,10 @@ ctypes, and a fuzz driver. Each crossing deletes the twin it replaces; CPython
 the Python Player. `project_store`'s commit verbs, which ask the block compiler
 and Storybook (apps) and now publish and journal through C. The cover cache's
 decodes, LRU, jobs and frame budget: presentation memory, crossing with the
-layer pool in sprint 3. The user-files layer (`runtime/moy_files.py`,
-`runtime/moy_file_ops.py`) and `runtime/cart_files.py`, rebased onto the C
-`moy_vol` and `moy_fs` (`cart_files` crosses when sprint 4 needs it). The
+layer pool in sprint 3. `runtime/cart_files.py`, rebased onto the C `moy_vol`
+and `moy_fs` (it crosses when sprint 4 needs it). The user-files layer stayed
+Python here and crossed in sprint 5 (`native/moy_store/moy_ufiles.h`,
+`docs/kernel_appabi_2026-10.md` §8 step 7). The
 shelf's roster (`runtime/cart_manager.py`). The sync wire and the webhost
 (sprint 3). The embedded floor, a no-card board's read-only built-ins (sprint 4
 if a VM-free cart needs it). The sibling stores (wifi, achievements, the shared

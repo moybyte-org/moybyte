@@ -1,3 +1,8 @@
+# Map (grep -n a name to jump there):
+#   _Buf             moy_fs.h's buffer: an answer the user-files layer allocated
+#   _raise           the ABI's codes as the exceptions the roles raise
+#   binding          the module: App, kernel, the role types, the policy
+#   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
 native/moy_app builds, as Python loads it by ctypes from the spine's host
 library (tools/moy_index_spike.py's SPINE, which carries native/moy_app). The
@@ -36,9 +41,11 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 12, 25, 4, 28
-DOC_MAX = 255
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 12, 54, 4, 28
 NAME_MAX = 31
+UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
+NONE_UF, BAD_UF = -1, -2
+DOC_MAX = 255
 TOKEN_ABSENT = -(1 << 31)
 CLIP_MAX = 4096
 SLOTS = 32
@@ -49,6 +56,11 @@ _ENOSPC = 28
 # The role table: the served roles' rows are its own.
 with open(os.path.join(HERE, "..", "native", "moy_app", "roles.json")) as _f:
     _TABLE = json.load(_f)["rows"]
+
+
+class _Buf(c.Structure):
+    """moy_fs.h's moy_buf_t: an answer the user-files layer allocated."""
+    _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
 
 
 # surface.pointer()'s answer: the row's five numbers, by name as by index.
@@ -130,6 +142,46 @@ _SIGS = (
     ("moy_app_artwork_follow", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE, _PCHAR, _SIZE],
      c.c_int),
     ("moy_app_holds", [_P, _U32, c.c_int], c.c_int),
+    ("moy_app_store_bind", [_P, _P, _PCHAR, _SIZE, c.c_int, c.c_int], c.c_int),
+    ("moy_app_why", [_P], c.c_int),
+    ("moy_app_buf_free", [_P, c.POINTER(_Buf)], None),
+    ("moy_app_files_end_all", [_P], _U32),
+    ("moy_app_copy_gen", [_P], _U32),
+    ("moy_app_files_readable", [_P, _U32], c.c_int32),
+    ("moy_app_files_ready", [_P, _U32], c.c_int32),
+    ("moy_app_files_begin", [_P, _U32], c.c_int),
+    ("moy_app_files_end", [_P, _U32], c.c_int),
+    ("moy_app_files_list", [_P, _U32, _PCHAR, c.POINTER(_Buf), _PU32], c.c_int),
+    ("moy_app_files_count", [_P, _U32, _PCHAR, _PU32], c.c_int),
+    ("moy_app_files_load", [_P, _U32, _PCHAR, _PCHAR, c.POINTER(_Buf),
+                            c.POINTER(c.c_int)], c.c_int),
+    ("moy_app_files_save", [_P, _U32, _PCHAR, _PCHAR, _PCHAR, _SIZE, _PCHAR], c.c_int),
+    ("moy_app_files_delete", [_P, _U32, _PCHAR, _PCHAR, _PCHAR], c.c_int),
+    ("moy_app_files_duplicate", [_P, _U32, _PCHAR, _PCHAR, _PCHAR], c.c_int),
+    ("moy_app_files_restore", [_P, _U32, _PCHAR, _PCHAR, _PCHAR], c.c_int),
+    ("moy_app_files_rename", [_P, _U32, _PCHAR, _PCHAR, _PCHAR, _PCHAR], c.c_int),
+    ("moy_app_files_new_name", [_P, _U32, _PCHAR, _PCHAR, _PCHAR], c.c_int),
+    ("moy_app_files_trash_list", [_P, _U32, c.POINTER(_Buf), _PU32], c.c_int),
+    ("moy_app_files_empty_trash", [_P, _U32], c.c_int),
+    ("moy_app_files_history", [_P, _U32, _PCHAR, _PCHAR, c.POINTER(_Buf)], c.c_int),
+    ("moy_app_files_history_ops", [_P, _U32, _PCHAR, _PCHAR, c.POINTER(_Buf)], c.c_int),
+    ("moy_app_files_history_commit", [_P, _U32, _PCHAR, _PCHAR, _PCHAR, _SIZE, _PCHAR,
+                                      _SIZE, c.POINTER(c.c_int)], c.c_int),
+    ("moy_app_files_encode_image", [_P, _U32, _U32, _U32, _PCHAR, _SIZE,
+                                    c.POINTER(_Buf)], c.c_int),
+    ("moy_app_files_decode_image", [_P, _U32, _PCHAR, _SIZE, c.POINTER(_Buf), _PU32,
+                                    _PU32], c.c_int),
+    ("moy_app_files_decode_cover", [_P, _U32, _PCHAR, _SIZE, c.POINTER(_Buf)], c.c_int),
+    ("moy_app_files_encode_cover", [_P, _U32, _PCHAR, _SIZE, c.POINTER(_Buf)], c.c_int),
+    ("moy_app_files_sig", [_P, _U32, _PCHAR, _SIZE, _PU32], c.c_int),
+    ("moy_app_files_stamp", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _PCHAR, _U32,
+                             c.POINTER(_Buf)], c.c_int),
+    ("moy_app_files_encode_text", [_P, _U32], c.c_int),
+    ("moy_app_files_decode_text", [_P, _U32], c.c_int),
+    ("moy_app_files_provenance", [_P, _U32, _PCHAR, _SIZE, c.POINTER(_Buf),
+                                  c.POINTER(c.c_int64)], c.c_int),
+    ("moy_app_wallpaper_load_copy", [_P, _U32, c.POINTER(_Buf)], c.c_int),
+    ("moy_app_wallpaper_save_copy", [_P, _U32, _PCHAR, _SIZE], c.c_int),
     ("moy_app_grant_get", [_P, _U32, c.POINTER(c.c_void_p)], c.c_int),
     ("moy_app_count", [_P, c.c_int], _U32),
     ("moy_app_row_name", [c.c_int], _PCHAR),
@@ -215,6 +267,7 @@ def binding(sanitize=False):
             self._init()
 
         def _init(self):
+            self._no_store = None
             self._canvases = [None] * SLOTS
             self._pointer = None
             self._servers = {}
@@ -295,6 +348,48 @@ def binding(sanitize=False):
 
         def serve(self, role, server):
             self._servers[role] = server
+
+        def store_bind(self, root, readable, writable, no_store):
+            """The user-files store the files and wallpaper rows reach (root
+            None: none), and the `err` they answer with no store. The layer is
+            native/moy_store's (tools/moy_ufiles_binding.py), built at the
+            first bind of a root."""
+            self._no_store = no_store
+            if root is None:
+                _check(lib.moy_app_store_bind(self._p, None, b"", 0, 0, 0))
+                return
+            import moy_ufiles_binding
+            rb = _str(str(root))
+            parent = str(root).rsplit("/", 1)[0]
+            moy_ufiles_binding.library().moy_fs_root((parent or str(root)).encode())
+            _check(lib.moy_app_store_bind(self._p, moy_ufiles_binding.ops(), rb, len(rb),
+                                          1 if readable else 0, 1 if writable else 0))
+
+        def files_end_all(self):
+            return lib.moy_app_files_end_all(self._p)
+
+        def copy_gen(self):
+            return lib.moy_app_copy_gen(self._p)
+
+        def _err(self, rc):
+            """The `err` of a storage row's code; a grant problem raises."""
+            if rc == NOSTORE:
+                return self._no_store
+            if rc == IO:
+                e = lib.moy_app_why(self._p)
+                return str(OSError(e, os.strerror(e)))
+            if rc == BAD:
+                return "a refused argument"
+            if rc == NOMEM:
+                return "memory allocation failed"
+            _raise(rc)
+
+        def _take(self, buf, text=True):
+            try:
+                raw = c.string_at(buf.p, buf.n) if buf.p else b""
+            finally:
+                lib.moy_app_buf_free(self._p, c.byref(buf))
+            return raw.decode("utf-8", "surrogateescape") if text else raw
 
         def served(self):
             return dict(self._served)
@@ -507,6 +602,217 @@ def binding(sanitize=False):
                 _raise(-s)
             return s
 
+    def _names(raw, count, pairs):
+        parts = raw.split("\0")
+        if pairs:
+            return [(parts[2 * i], parts[2 * i + 1]) for i in range(count)]
+        return parts[:count]
+
+    class Files(_Role):
+        """The user-files layer's rows (native/moy_store/moy_ufiles.h), C over
+        the store the console bound: `(value, err)` as the Python role
+        answered, the codecs their value."""
+
+        def _a(self):
+            return self._app._p
+
+        def readable(self):
+            return bool(_scalar(lib.moy_app_files_readable(self._a(), self._g)))
+
+        def ready(self):
+            return bool(_scalar(lib.moy_app_files_ready(self._a(), self._g)))
+
+        def begin(self):
+            rc = lib.moy_app_files_begin(self._a(), self._g)
+            return (True, None) if rc == OK else (None, self._app._err(rc))
+
+        def end(self):
+            _check(lib.moy_app_files_end(self._a(), self._g))
+
+        def list(self, kind):
+            buf, n = _Buf(), c.c_uint32()
+            rc = lib.moy_app_files_list(self._a(), self._g, _str(kind), c.byref(buf),
+                                        c.byref(n))
+            if rc != OK:
+                return (None, self._app._err(rc))
+            return (_names(self._app._take(buf), n.value, False), None)
+
+        def count(self, kind):
+            n = c.c_uint32()
+            rc = lib.moy_app_files_count(self._a(), self._g, _str(kind), c.byref(n))
+            return (n.value, None) if rc == OK else (None, self._app._err(rc))
+
+        def load(self, kind, name):
+            buf, binary = _Buf(), c.c_int()
+            rc = lib.moy_app_files_load(self._a(), self._g, _str(kind), _str(name),
+                                        c.byref(buf), c.byref(binary))
+            if rc == ABSENT:
+                return (None, None)
+            if rc != OK:
+                return (None, self._app._err(rc))
+            return (self._app._take(buf, not binary.value), None)
+
+        def _named(self, fn, *args):
+            out = c.create_string_buffer(UF_NAME_MAX + 1)
+            rc = fn(self._a(), self._g, *args, out)
+            if rc != OK:
+                return (None, self._app._err(rc))
+            return (out.value.decode("utf-8", "surrogateescape"), None)
+
+        def save(self, kind, name, blob):
+            b = blob if isinstance(blob, bytes) else _str(str(blob))
+            return self._named(lib.moy_app_files_save, _str(kind), _str(name), b, len(b))
+
+        def delete(self, kind, name):
+            return self._named(lib.moy_app_files_delete, _str(kind), _str(name))
+
+        def duplicate(self, kind, name):
+            return self._named(lib.moy_app_files_duplicate, _str(kind), _str(name))
+
+        def restore(self, kind, name):
+            return self._named(lib.moy_app_files_restore, _str(kind), _str(name))
+
+        def rename(self, kind, name, new):
+            return self._named(lib.moy_app_files_rename, _str(kind), _str(name),
+                               _str(str(new)))
+
+        def new_name(self, kind, title=None):
+            return self._named(lib.moy_app_files_new_name, _str(kind),
+                               _str(str(title)) if title else None)
+
+        def trash_list(self):
+            buf, n = _Buf(), c.c_uint32()
+            rc = lib.moy_app_files_trash_list(self._a(), self._g, c.byref(buf), c.byref(n))
+            if rc != OK:
+                return (None, self._app._err(rc))
+            return (_names(self._app._take(buf), n.value, True), None)
+
+        def empty_trash(self):
+            rc = lib.moy_app_files_empty_trash(self._a(), self._g)
+            return (None, None if rc == OK else self._app._err(rc))
+
+        def _json(self, fn, kind, name):
+            buf = _Buf()
+            rc = fn(self._a(), self._g, _str(kind), _str(name), c.byref(buf))
+            if rc != OK:
+                return (None, self._app._err(rc))
+            return (json.loads(self._app._take(buf)), None)
+
+        def history(self, kind, name):
+            return self._json(lib.moy_app_files_history, kind, name)
+
+        def history_ops(self, kind, name):
+            return self._json(lib.moy_app_files_history_ops, kind, name)
+
+        def history_commit(self, kind, name, ops, keyframe=None):
+            o = json.dumps(list(ops)).encode() if ops else None
+            k = json.dumps(keyframe).encode() if keyframe is not None else None
+            err = c.c_int()
+            rc = lib.moy_app_files_history_commit(self._a(), self._g, _str(kind),
+                                                  _str(name), o, len(o or b""), k,
+                                                  len(k or b""), c.byref(err))
+            if rc != OK:
+                return (None, self._app._err(rc))
+            if err.value == 0:
+                return (None, None)
+            if err.value == BAD_UF:
+                return ("a refused argument", None)
+            return (str(OSError(err.value, os.strerror(err.value))), None)
+
+        # -- the codecs: their value, or None
+
+        def _codec(self, rc, buf, text):
+            if rc == ABSENT:
+                return None
+            _check(rc)
+            return self._app._take(buf, text)
+
+        def encode_image(self, w, h, indices):
+            pix = indices if isinstance(indices, bytes) else bytes(bytearray(indices))
+            if int(w) <= 0 or int(h) <= 0:
+                raise ValueError("bad artwork size")
+            buf = _Buf()
+            rc = lib.moy_app_files_encode_image(self._a(), self._g, int(w), int(h), pix,
+                                                len(pix), c.byref(buf))
+            if rc == BAD:
+                raise ValueError("bad artwork size")
+            return self._codec(rc, buf, True)
+
+        def decode_image(self, blob):
+            if not blob:
+                _check(lib.moy_app_holds(self._a(), self._g, role_names.index("files")))
+                return None
+            raw = blob if isinstance(blob, bytes) else _str(blob)
+            buf, w, h = _Buf(), c.c_uint32(), c.c_uint32()
+            rc = lib.moy_app_files_decode_image(self._a(), self._g, raw, len(raw),
+                                                c.byref(buf), c.byref(w), c.byref(h))
+            got = self._codec(rc, buf, False)
+            return None if got is None else (w.value, h.value, got)
+
+        def decode_cover(self, blob):
+            if not blob:
+                _check(lib.moy_app_holds(self._a(), self._g, role_names.index("files")))
+                return None
+            raw = bytes(blob)
+            buf = _Buf()
+            rc = lib.moy_app_files_decode_cover(self._a(), self._g, raw, len(raw),
+                                                c.byref(buf))
+            got = self._codec(rc, buf, False)
+            return None if got is None else (128, 128, got)
+
+        def encode_cover(self, indices):
+            pix = bytes(bytearray(indices))
+            buf = _Buf()
+            rc = lib.moy_app_files_encode_cover(self._a(), self._g, pix, len(pix),
+                                                c.byref(buf))
+            return self._codec(rc, buf, False)
+
+        def sig(self, blob):
+            raw = _str(blob) if blob else b""
+            v = c.c_uint32()
+            rc = lib.moy_app_files_sig(self._a(), self._g, raw, len(raw), c.byref(v))
+            if rc == ABSENT:
+                return None
+            _check(rc)
+            return v.value
+
+        def stamp(self, blob, kind, name, sig):
+            if not isinstance(blob, str):
+                _check(lib.moy_app_holds(self._a(), self._g, role_names.index("files")))
+                return blob
+            raw = _str(blob)
+            buf = _Buf()
+            rc = lib.moy_app_files_stamp(self._a(), self._g, raw, len(raw), _str(kind),
+                                         _str(name), int(sig) & 0xFFFFFFFF, c.byref(buf))
+            got = self._codec(rc, buf, True)
+            return blob if got is None else got
+
+        def encode_text(self, body):
+            rc = lib.moy_app_files_encode_text(self._a(), self._g)
+            if rc == ABSENT:
+                return None
+            _check(rc)
+            return str(body)
+
+        def decode_text(self, blob):
+            rc = lib.moy_app_files_decode_text(self._a(), self._g)
+            if rc != ABSENT:
+                _check(rc)
+            if rc != OK or not isinstance(blob, str) or not blob:
+                return []
+            return blob.split("\n")
+
+        def provenance(self, blob):
+            if not isinstance(blob, str) or not blob:
+                _check(lib.moy_app_holds(self._a(), self._g, role_names.index("files")))
+                return (None, None)
+            raw = _str(blob)
+            buf, sig = _Buf(), c.c_int64()
+            rc = lib.moy_app_files_provenance(self._a(), self._g, raw, len(raw),
+                                              c.byref(buf), c.byref(sig))
+            src = self._codec(rc, buf, True)
+            return (None, None) if src is None else (src, sig.value)
+
     def _served_role(role):
         """A role whose rows are all served in Python: one method per row of
         the table, each the grant checked, the row counted and the server
@@ -516,12 +822,28 @@ def binding(sanitize=False):
                 return self._app._serve(self._g, role, verb)(self._g, *a, **kw)
             call.__name__ = verb
             return call
-        verbs = [r["verb"] for r in _TABLE if r["role"] == role]
+        verbs = [r["verb"] for r in _TABLE if r["role"] == role and r["server"] != "c"]
         return type(role.capitalize(), (_Role,), {v: row(v) for v in verbs})
 
-    Files, Carts, Nav, Notify, Wallpaper, Install = (
-        _served_role(r) for r in ("files", "carts", "nav", "notify", "wallpaper",
-                                  "install"))
+    Carts, Nav, Notify, Install = (
+        _served_role(r) for r in ("carts", "nav", "notify", "install"))
+
+    class Wallpaper(_served_role("wallpaper")):
+        """The wallpaper's rows served in Python, and its copy's, in C."""
+
+        def load_copy(self):
+            buf = _Buf()
+            rc = lib.moy_app_wallpaper_load_copy(self._app._p, self._g, c.byref(buf))
+            if rc == ABSENT:
+                return (None, None)
+            if rc != OK:
+                return (None, self._app._err(rc))
+            return (self._app._take(buf), None)
+
+        def save_copy(self, blob):
+            b = _str(str(blob))
+            rc = lib.moy_app_wallpaper_save_copy(self._app._p, self._g, b, len(b))
+            return (None, None if rc == OK else self._app._err(rc))
 
     def _policy(perms):
         p = _Policy()

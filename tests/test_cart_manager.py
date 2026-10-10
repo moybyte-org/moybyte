@@ -179,7 +179,9 @@ def test_one_store_handle_backs_prefs_carts_and_the_app_roles(tmp_path):
     assert ctx.carts.readable() is True
     assert ctx.files.ready() is True
     ws.can_manage = False
-    assert ctx.files.ready() is False          # reads THROUGH ws, per call
+    assert ctx.carts.ready() is False          # reads THROUGH ws, per call
+    ws.store.bind()                            # the files rows' C, as the handle binds it
+    assert ctx.files.ready() is False
     assert ws.store.writable() is False
 
 

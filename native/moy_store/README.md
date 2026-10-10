@@ -14,6 +14,7 @@ Python twins, the reference the C is held to.
 | `moy_journal.h`, `moy_journal.c` | the journal: `journal.jsonl` appended one json.dumps line a commit, the snapshot first (a claimed publish backup where the stamp matches), the cursor map last; undo and redo by file scope; compaction to 64 entries and 512 KiB; #136's list, snapshot and restore; the graduation rider's manifest write |
 | `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (the browser's `zipStore`/`unzip` codec; stored entries written, stored and deflated read), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
 | `moy_files.h`, `moy_files.c` | a compiled cart's written files (SPEC.md 16.12), `runtime/cart_files.py` in C rule for rule over `moy_vol`: the key a path is kept under and back, the cart's folder beside the store, the write whole or not at all (`~part`, `~done`), the recovery at open, erase and the listing; the held file a read streams through; `tests/test_moy_files.py` holds it to the Python. A compiled cart's run calls it (moycore's files, `native/moycore/README.md`) |
+| `moy_ufiles.h`, `moy_ufiles.c` | the #108 user-files layer (`files/<kind>/` beside the carts folder, a project's folder as a kind, the vault's whole-name rule, naming, the restorable trash, the #111 op-history sidecars, provenance) and its codecs (a picture's moyimg-v1 written through the image's LZ77 compressor at a 4 KiB window, a cover written indexed and read through `native/moy_png`), with the wallpaper's backing copy; the reference was `runtime/moy_files.py` and `runtime/moy_file_ops.py`, and `tests/test_userfiles_parity.py` holds both bindings to the bytes they wrote. Built with `native/moy_app` (its module `moy_ufiles` is `modmoy_ufiles.c`), whose files rows reach it through its verb table, so the Zero, which denies moy_app, carries none of it |
 | `moy_card.c` | the card volume, owned: the store's FATFS (a VfsFat object in PSRAM) over a NATIVE block device with the read cache (`moy_cache.c`), mounted for Python at `/sd` (`moy_store.card`), its sectors from `moy_sd_card_io` on a board (SPI on the S3s, SDMMC on the P4s) or a Python driver on the host; `card_stats` is the tests' check and fault switch |
 | `moy_cache.h`, `moy_cache.c` | the card's 32-sector read cache with no VM on either side: one-sector reads from the last 32 (clock eviction), every write dropping what it covers before it is issued; under `moy_card.c` on every board and under `fuzz_fs.c`'s RAM card at every cut |
 | `moy_arena.h` | a store call's scratch, freed at once |
@@ -32,7 +33,7 @@ claim across folders declines, so the journal writes its own copy (littlefs
 2.11 cut between the two commits of a cross-folder rename drops the source
 folder's other entries).
 
-The nets: `tests/test_moy_store.py` (the matrix and the fuzz, the C over POSIX
+The nets: `tests/test_moy_store.py` (the matrix and the fuzz, the user-files layer's writes among the cut ones, the C over POSIX
 against the twin through ctypes, the desktop MicroPython against CPython),
 `tests/test_store_native.py` (the shelf and moy_json on the desktop MicroPython
 against CPython over every cart and generated ones) and

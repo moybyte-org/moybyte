@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 
 from runtime import moy_carts  # noqa: E402
-from runtime import moy_file_ops
 
 import pytest  # noqa: E402
 
@@ -131,7 +130,7 @@ def test_empty_trash_and_count_prune(tmp_path):
         name = "p" + str(i)
         moy_carts.save_file("drawings", name, name, root)
         moy_carts.delete_file("drawings", name, root)
-        p = moy_carts._trash_path("drawings", name, root)
+        p = moy_carts.trash_path("drawings", name, root)
         os.utime(p, (1000 + i, 1000 + i))
     moy_carts.prune_trash(root, keep=2)
     assert moy_carts.trash_list(root) == [("drawings", "p4"), ("drawings", "p3")]
@@ -269,9 +268,9 @@ def test_history_sidecar_create_append_and_load(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "castle", "PIXELS", root)
     assert moy_carts.load_history("drawings", "castle", root) == []   # none yet
-    moy_carts.history_write_keyframe("drawings", "castle", {"w": 2}, root)
-    moy_carts.history_append_segment("drawings", "castle", [["s", 0, 0, 5]], root)
-    moy_carts.history_append_segment("drawings", "castle", [], root)   # empty -> no-op
+    moy_carts.history_commit("drawings", "castle", [], keyframe={"w": 2}, root=root)
+    moy_carts.history_commit("drawings", "castle", [["s", 0, 0, 5]], root=root)
+    moy_carts.history_commit("drawings", "castle", [], root=root)    # empty -> no-op
     recs = moy_carts.load_history("drawings", "castle", root)
     assert [r["t"] for r in recs] == ["kf", "seg"]
     assert recs[0]["doc"] == {"w": 2}
@@ -296,9 +295,9 @@ def test_history_commit_writes_keyframe_then_segment(tmp_path):
 def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "art", "X", root)
-    moy_carts.history_write_keyframe("drawings", "art", {"v": 1}, root)
+    moy_carts.history_commit("drawings", "art", [], keyframe={"v": 1}, root=root)
     for i in range(5):
-        moy_carts.history_append_segment("drawings", "art", [["s", i]], root)
+        moy_carts.history_commit("drawings", "art", [["s", i]], root=root)
     dropped = moy_carts.prune_history("drawings", "art", root, keep=2)
     assert dropped == 3                              # 1 kf + 5 seg -> 1 kf + 2 seg
     recs = moy_carts.load_history("drawings", "art", root)
@@ -306,24 +305,36 @@ def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
     assert [r["ops"] for r in recs[1:]] == [[["s", 3]], [["s", 4]]]  # the newest two
 
 
-def test_ops_since_keyframe_is_the_one_sidecar_window():
+def _sidecar(root, recs, name="story"):
+    """A sidecar holding `recs`, one json.dumps line each."""
+    path = moy_carts.history_path("docs", name, root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+    return path
+
+
+def test_history_ops_is_the_one_sidecar_window(tmp_path):
     """The ONE reader every undo-seeding surface goes through (the editor
     handle, the Files role's history_ops): everything after the LAST keyframe,
     in order."""
+    root = _root(tmp_path)
     kf = {"t": "kf", "doc": "X"}
     seg = lambda *ops: {"t": "seg", "ops": list(ops)}
-    assert moy_carts.ops_since_keyframe([]) == []
-    assert moy_carts.ops_since_keyframe(None) == []
-    assert moy_carts.ops_since_keyframe([seg(1), seg(2, 3)]) == [1, 2, 3]   # no kf yet
-    assert moy_carts.ops_since_keyframe([seg(1), kf, seg(2), seg(3)]) == [2, 3]
-    assert moy_carts.ops_since_keyframe([seg(1), kf, seg(2), kf]) == []
-    assert moy_carts.ops_since_keyframe([seg(1), {"t": "seg"}]) == [1]      # ops-less seg
+    assert moy_carts.history_ops("docs", "story", root) == []          # no sidecar
+    for recs, want in (([], []), ([seg(1), seg(2, 3)], [1, 2, 3]),    # no kf yet
+                       ([seg(1), kf, seg(2), seg(3)], [2, 3]),
+                       ([seg(1), kf, seg(2), kf], []),
+                       ([seg(1), {"t": "seg"}], [1])):                # ops-less seg
+        _sidecar(root, recs)
+        assert moy_carts.history_ops("docs", "story", root) == want, recs
 
 
 def test_history_load_drops_a_torn_last_line(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "art", "X", root)
-    moy_carts.history_write_keyframe("drawings", "art", {"v": 1}, root)
+    moy_carts.history_commit("drawings", "art", [], keyframe={"v": 1}, root=root)
     with open(moy_carts.history_path("drawings", "art", root), "a") as f:
         f.write('{"t":"seg","ops":[[1,2  ')            # a torn append (power loss)
     recs = moy_carts.load_history("drawings", "art", root)
@@ -333,7 +344,7 @@ def test_history_load_drops_a_torn_last_line(tmp_path):
 def test_history_sidecar_follows_rename(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "drawing_1", "a", root)
-    moy_carts.history_append_segment("drawings", "drawing_1", [["s", 1]], root)
+    moy_carts.history_commit("drawings", "drawing_1", [["s", 1]], root=root)
     assert moy_carts.rename_file("drawings", "drawing_1", "Castle", root) == "castle"
     assert moy_carts.load_history("drawings", "drawing_1", root) == []      # moved away
     assert moy_carts.load_history("drawings", "castle", root)[0]["ops"] == [["s", 1]]
@@ -342,7 +353,7 @@ def test_history_sidecar_follows_rename(tmp_path):
 def test_history_sidecar_copies_on_duplicate(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "cat", "MEOW", root)
-    moy_carts.history_append_segment("drawings", "cat", [["s", 7]], root)
+    moy_carts.history_commit("drawings", "cat", [["s", 7]], root=root)
     assert moy_carts.duplicate_file("drawings", "cat", root) == "cat_2"
     # Both the source and the copy carry the history (a copy is a real copy).
     assert moy_carts.load_history("drawings", "cat", root)[0]["ops"] == [["s", 7]]
@@ -352,7 +363,7 @@ def test_history_sidecar_copies_on_duplicate(tmp_path):
 def test_history_sidecar_rides_trash_and_restore(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "cat", "MEOW", root)
-    moy_carts.history_append_segment("drawings", "cat", [["s", 3]], root)
+    moy_carts.history_commit("drawings", "cat", [["s", 3]], root=root)
     moy_carts.delete_file("drawings", "cat", root)
     assert moy_carts.load_history("drawings", "cat", root) == []            # gone from live
     moy_carts.restore_file("drawings", "cat", root)
@@ -362,19 +373,19 @@ def test_history_sidecar_rides_trash_and_restore(tmp_path):
 def test_history_sidecar_dropped_when_trash_is_emptied(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "cat", "MEOW", root)
-    moy_carts.history_append_segment("drawings", "cat", [["s", 3]], root)
+    moy_carts.history_commit("drawings", "cat", [["s", 3]], root=root)
     moy_carts.delete_file("drawings", "cat", root)
     moy_carts.empty_trash(root)
     # The trashed sidecar is gone with the trashed file.
     assert not os.path.exists(
-        moy_carts._history_trash_path("drawings", "cat", root))
+        moy_carts.history_trash_path("drawings", "cat", root))
 
 
 def test_history_dir_is_hidden_from_listing_and_is_not_a_kind(tmp_path):
     import pytest
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "art", "X", root)
-    moy_carts.history_append_segment("drawings", "art", [["s", 1]], root)
+    moy_carts.history_commit("drawings", "art", [["s", 1]], root=root)
     # The .history sibling never appears as a kind item or in the trash listing,
     # and is not itself a valid kind (list/save against it are loud errors).
     assert moy_carts.list_files("drawings", root) == ["art"]
@@ -385,45 +396,38 @@ def test_history_dir_is_hidden_from_listing_and_is_not_a_kind(tmp_path):
         moy_carts.list_files(".history", root)
 
 
-def test_a_failed_prune_does_not_fail_the_commit(tmp_path, monkeypatch):
+def test_a_failed_prune_does_not_fail_the_commit(tmp_path):
     """The append IS the commit. Failing it for a housekeeping error made the
     app skip mark_keyframe() for a keyframe already on disk, so every later
-    flush wrote another one."""
+    flush wrote another one. The prune here cannot publish: the sidecar's
+    backup is a folder."""
     root = _root(tmp_path)
     moy_carts.save_file("docs", "story", "TEXT", root)
+    path = _sidecar(root, [{"t": "seg", "ops": [i]} for i in range(40)])
+    os.makedirs(path + ".bak")
     before = moy_carts.history_prune_fails()
-
-    def boom(*a, **k):
-        raise OSError(28, "no space")
-
-    monkeypatch.setattr(moy_file_ops, "prune_history", boom)   # history_commit's own module
     err = moy_carts.history_commit("docs", "story", [["ins", 0, "hi"]],
                                    keyframe={"body": ""}, root=root)
 
     # The records landed, the failure is reported rather than raised, and it
     # is counted -- a swallowed error nothing can read is not an improvement.
-    assert [r["t"] for r in moy_carts.load_history("docs", "story", root)] \
+    assert [r["t"] for r in moy_carts.load_history("docs", "story", root)][-2:] \
         == ["kf", "seg"]
-    assert err is not None and "no space" in err
+    assert err is not None and "Errno" in err
     assert moy_carts.history_prune_fails() == before + 1
 
 
 def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
-    """What makes the prune skippable: ops_since_keyframe reads only after the
+    """What makes the prune skippable: history_ops reads only after the
     last keyframe, so records the prune failed to drop change nothing."""
     root = _root(tmp_path)
     moy_carts.save_file("docs", "story", "TEXT", root)
     recs = [{"t": "seg", "ops": [["old", 1]]},
             {"t": "kf", "doc": {"body": "base"}},
             {"t": "seg", "ops": [["new", 2]]}]
-    path = moy_carts.history_path("docs", "story", root)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        for r in recs:
-            f.write(json.dumps(r) + "\n")
-    assert moy_carts.ops_since_keyframe(recs) == [["new", 2]]
-    on_disk = moy_carts.load_history("docs", "story", root)
-    assert moy_carts.ops_since_keyframe(on_disk) == [["new", 2]]
+    _sidecar(root, recs)
+    assert moy_carts.load_history("docs", "story", root) == recs
+    assert moy_carts.history_ops("docs", "story", root) == [["new", 2]]
 
 
 # ---------------------------------------------------------------------------

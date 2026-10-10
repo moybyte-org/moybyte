@@ -82,9 +82,10 @@ to whoever called it.
   on-device testing.)
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
-- **`runtime/moy_carts.py` is the `.moy` store** (and the #108 user-files layer
-  beside it, and the per-project undo journal). The file lists its verbs; the
-  decisions behind it:
+- **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo
+  journal; the #108 user-files layer beside it is native/moy_store's
+  `moy_ufiles`, which `moy_carts` names reach and the files role's C rows
+  serve). The file lists its verbs; the decisions behind it:
   - **A CART is reached by handle, through `runtime/moy_catalogue.py`** -- the
     shelf's scan, a whole-cart load, create, duplicate and delete -- and every
     cart dict it returns carries its index handle as `"h"`. A path names a FILE
