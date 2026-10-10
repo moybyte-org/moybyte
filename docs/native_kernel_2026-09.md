@@ -978,6 +978,16 @@ makes it false, not annotated:
      wasm apps need them. The app world stays Python, and only the cart path
      runs VM-free.
 
+   **Decided (owner, 2026-10-10): a middle path.** Sprint 5 runs in full (the
+   roles import-shaped, `ctx.shell` closed, the wasm import adapter, the
+   `open()`-after-stop contract). Sprint 6 runs data-driven: themes, strings and
+   layout are data over C widget primitives, so most UI changes stay data edits.
+   Sprint 7, the window managers and the rest of `runtime/console.py`, stays
+   Python while the shell's UI is still changing. The decision rests on sprint
+   4's gate (#224): Doom loads after the scripted session with the VM up, so the
+   memory motive for sprints 5-7 was largely met, and the parts that change
+   most are the ones sprint 7 would move.
+
 ## 11. What can kill it
 
 - **A stop failing with a real peripheral alive.** Sprint 0's spike passed on
