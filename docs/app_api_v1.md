@@ -102,7 +102,8 @@ Every context holds a **grant**, a row of native/moy_app's grant table keyed by
 the app's id, and every role is native/moy_app's role object over it: a C row
 reads the kernel's state, and a shell row checks the grant and calls the server
 the console registers for the role (`runtime/shell_servers.py`) with the grant
-first (the table's `server` column says which).
+first (the table's `server` column says which). The rows with a `wasm` type
+are what a compiled app imports ("A compiled user app" below).
 Four things about the roles are load-bearing:
 
 - **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the
@@ -211,10 +212,9 @@ console constructs and registers it in a loop (there is no per-app line in
 bundle's roster. `tests/test_app_registry.py` fails if any of them grows a
 hand-written app name back.
 
-Staging needs no entry either — since #161 a board declares what it DENIES in
-its `board.toml`, so a new `runtime/` module reaches every target by default and
-keeping it off one is a written decision. (This section used to say "both
-firmware `build.sh` module lists", which stopped being true when that landed.)
+Staging needs no entry either: a board declares what it DENIES in its
+`board.toml` (#161), so a new `runtime/` module reaches every target by default
+and keeping it off one is a written decision.
 
 The five lists this replaced were not merely tedious: **four of the five failed
 silently, and on device only.** Forgetting `CART_ORDER` meant the identity cart
@@ -312,7 +312,7 @@ calculator or a notepad, fixed is the right answer.
 `system_carts/moybyte.notes.moy` is the worked example: a notepad that types, saves into
 the kid's documents (the same `docs` kind Files browses -- open one
 there and it is really the same file), lists what it saved and remembers which
-note was open. **200 lines of cart, no shell code, no registration, no
+note was open. **One script of under 400 lines, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
 and re-runs on the device.
 
@@ -320,7 +320,7 @@ and re-runs on the device.
     system_carts/moybyte.notes.moy/main.py         _init / _update / _draw
     system_carts/moybyte.notes.moy/sprites.moygfx  one 8x8 tile: its launcher icon
 
-Compare the shipped path in the checklist below: a Layer class, a `NEEDS` tuple,
+Compare the shipped path in the checklist above: a Layer class, a `NEEDS` tuple,
 an `app` block, a regenerated `app_decls.py` and a firmware build.
 
 ### Crash isolation: three strikes (#160)
@@ -330,7 +330,8 @@ crash-to-code since 2026-07-23. What it cannot catch is a cart that does not
 raise -- a hang, an OOM, a native fault -- and if the thing that died runs
 itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id in
 `system.json` BEFORE the cart's code is compiled and clears it after three
-painted frames; three unhealed opens and the console stops running it, landing
+painted frames (a compiled app whose frames the kernel's Player drew clears it
+at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
 the next tap on the ordinary error panel whose top bar carries EDIT/CODE. The
 cart stays in the picker, because editing it is how it gets fixed.
 
@@ -349,7 +350,7 @@ it boots without those writes is in `runtime/crash_guard.py`.
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
 anyway: `files_app` reached straight into the notebook app's layer across five
 sites, because "open this doc in the text app" is a real product need and there
-was no seam for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam --
+was no seam for it. `ctx.nav.open_app(id)` is the seam --
 resolution is by REGISTERED ID, so no app holds a reference to another app's
 class and a build without the target degrades to a status line. IPC beyond
 "open that, pointed here" is still out.
