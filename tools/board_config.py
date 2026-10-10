@@ -361,10 +361,6 @@ def staged_modules(board_dir, root=ROOT):
     # `import moy_index` reaches the extensible builtin the module registers.
     if os.environ.get("MOY_INDEX_IMPL", "c") == "c":
         out.pop("moy_index.py", None)
-    # The same for the kernel's spine (MOY_SPINE_IMPL, sprint 2): `import
-    # moy_spine` reaches the extensible builtin native/moy_spine registers.
-    if os.environ.get("MOY_SPINE_IMPL") == "c":
-        out.pop("moy_spine.py", None)
     return out
 
 

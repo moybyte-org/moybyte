@@ -30,7 +30,7 @@ import subprocess
 import pytest
 
 import vm_suite
-from runtime import moy_spine
+import spine_twin as moy_spine    # the oracle (tests/spine_twin.py)
 from tools import moy_index_spike, moy_spine_binding
 from unix_mp import find_unix_mp, require_unix_mp
 
@@ -219,7 +219,7 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
     """Tens of thousands of calls in a seeded order across every component,
     with kinds that repeat, handles live, released and forged, tables filled to
     the brim and drained, and text the store refuses: the native twin answers
-    each exactly as runtime/moy_spine.py does."""
+    each exactly as the oracle, tests/spine_twin.py, does."""
     rnd = random.Random(1)
     nat = NATIVE[name]
     ref = moy_spine
@@ -571,3 +571,15 @@ def test_kernel_data_is_allocated_from_psram():
     outside = ALLOC_CALLS.findall(binding.replace(alloc, " "))
     # spine_alloc / spine_release off the board (calloc, free), the rows array
     assert sorted(outside) == ["calloc", "free", "m_new0"], outside
+
+
+def test_the_cpython_host_runs_the_c_spine():
+    """The host's console runs the C spine as every image does: the `runtime`
+    package registers native/moy_spine's ctypes binding as `moy_spine`, and
+    the Python twin is only the suites' oracle (tests/spine_twin.py)."""
+    import sys
+    import runtime
+    from runtime import console_spine  # noqa: F401  (imports the spine)
+    assert sys.modules["moy_spine"] is runtime.moy_spine
+    assert runtime.moy_spine.IMPL == "c"
+    assert runtime.moy_spine is not moy_spine     # this file's oracle

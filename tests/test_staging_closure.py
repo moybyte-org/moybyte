@@ -90,8 +90,8 @@ MICROPYTHON_BUILTINS = {
 NATIVE = {
     # moy_index, the store's native index, and moy_spine, the kernel's spine
     # (the handle table moy_index shares), stage on every target: the index
-    # compiles everywhere unless MOY_INDEX_IMPL=py, the spine only when
-    # MOY_SPINE_IMPL=c (hooks in tools/moy_index_spike.py). moy_kernel, the
+    # compiles everywhere unless MOY_INDEX_IMPL=py (tools/moy_index_spike.py),
+    # the spine everywhere. moy_kernel, the
     # kernel's entry, crash record and recovery floor, is TAKEN by every
     # board, the Zero's floor serial only (each board.toml says why). moy_glass,
     # moy_input and moy_net, sprint 3's kernel modules, stage on every console

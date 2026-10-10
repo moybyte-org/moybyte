@@ -1,6 +1,8 @@
-"""runtime/moy_spine.py's interface over the C twin's host library, by ctypes:
-the `moy_spine` module native/moy_spine builds, as Python can load it on the
-host (tests/test_moy_spine.py's BINDINGS, the random walk of
+"""The kernel's spine on the CPython host: the `moy_spine` module native/moy_spine
+builds, as Python loads its host library by ctypes. The runtime package
+registers it as `moy_spine` (runtime/__init__.py), so the host's console runs
+the C spine as every image does; the suites hold it to the Python oracle,
+tests/spine_twin.py (tests/test_moy_spine.py's BINDINGS, the random walk of
 tests/test_moy_spine_twins.py).
 
 `binding()` returns a module-like object with the Python twin's names -- Table,

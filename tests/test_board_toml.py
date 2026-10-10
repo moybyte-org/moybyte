@@ -394,39 +394,49 @@ def test_every_console_takes_the_player_and_the_zero_denies_it(board):
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
-def test_every_console_takes_the_native_spine_and_the_zero_declares_no_twin(board):
-    """The spine is native on every console and its Python twin is not frozen
-    there (docs/kernel_spine_2026-10.md); the Zero has no console to route and
-    declares no twin. The build exports the declaration as the hook."""
-    want = {"MOY_SPINE_IMPL": "c"} if board in CONSOLE_BOARDS else {}
-    assert board_config.impls(BOARDS[board]) == want
+def test_every_image_links_the_native_spine_and_no_board_names_a_twin(board):
+    """The spine is native on every image (docs/kernel_spine_2026-10.md): no
+    board declares a twin hook for it, and no image freezes a Python spine
+    (the twin is the suites' oracle, tests/spine_twin.py)."""
+    assert "MOY_SPINE_IMPL" not in board_config.impls(BOARDS[board])
+    assert "moy_spine.py" not in board_config.staged_modules(BOARDS[board], root=ROOT)
+    assert not (ROOT / "runtime" / "moy_spine.py").exists()
 
 
 def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):
     (tmp_path / "board.toml").write_text(
-        '[native]\n[native.impl]\nspine = "rust"\nwhy = "no"\n', encoding="utf-8")
+        '[native]\n[native.impl]\nindex = "rust"\nwhy = "no"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="py or c"):
         board_config.impls(tmp_path)
 
 
-def test_a_console_build_drops_the_python_spine_twin_and_the_environment_wins(tmp_path):
-    """The lib exports the board's twin before anything reads the hook, and a
-    build that sets MOY_SPINE_IMPL itself keeps its own."""
+def test_a_build_exports_a_boards_twin_and_the_environment_wins(tmp_path):
+    """The lib exports the board's [native.impl] hooks before anything reads
+    them, and a build that sets a hook itself keeps its own: a board naming
+    the index's Python twin freezes runtime/moy_index.py, and the
+    environment's `c` takes it out again."""
+    bd = tmp_path / "board"
+    bd.mkdir()
+    toml = (TDECK / "board.toml").read_text(encoding="utf-8")
+    (bd / "board.toml").write_text(
+        toml + '\n[native.impl]\nindex = "py"\nwhy = "the twin, for the test"\n',
+        encoding="utf-8")
+
     def frozen(**env):
         script = (
             "set -euo pipefail\nsource tools/esp32_build_lib.sh\n"
             "BUILD_PYTHON='%s' REPO_ROOT='%s' SCRIPT_DIR='%s'\n"
             "moybyte_board_impls\n"
-            "echo \"hook=${MOY_SPINE_IMPL:-}\"\n"
-            "'%s' tools/board_config.py list '%s' | grep -c '^moy_spine.py$' || true\n"
-            % (sys.executable, ROOT, TDECK, sys.executable, TDECK))
+            "echo \"hook=${MOY_INDEX_IMPL:-}\"\n"
+            "'%s' tools/board_config.py list '%s' | grep -c '^moy_index.py$' || true\n"
+            % (sys.executable, ROOT, bd, sys.executable, bd))
         e = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), **env}
         out = subprocess.run(["bash", "-c", script], cwd=str(ROOT), env=e,
                              capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
         return out.stdout.split()
-    assert frozen() == ["hook=c", "0"]                  # no Python twin frozen
-    assert frozen(MOY_SPINE_IMPL="py") == ["hook=py", "1"]
+    assert frozen() == ["hook=py", "1"]                 # the board's twin, frozen
+    assert frozen(MOY_INDEX_IMPL="c") == ["hook=c", "0"]
 
 
 def test_a_module_both_taken_and_denied_is_refused(tmp_path):

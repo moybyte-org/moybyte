@@ -429,7 +429,8 @@ def stale_handle_probe(ws):
     how every one was answered. A refusal is a `StaleHandle` that names its
     table and the handle, so `kstale ok` means the spine said so out loud four
     times and still serves the live handle. `impl` is where the spine runs:
-    `native` is native/moy_spine, `python` is runtime/moy_spine.py."""
+    `native` is native/moy_spine, which every tier runs; `python` is the
+    suites' oracle, tests/spine_twin.py."""
     try:
         import moy_spine as sp
     except ImportError:        # host / test -- the runtime package

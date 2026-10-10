@@ -80,7 +80,7 @@ and the unlisted root's no-op each turn it red. The same log is pinned over the
 native index (sprint 1a's twin, native/moy_index) on both object models.
 
 EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
-trace, the SPINE's (runtime/moy_spine.py, and the strike ledger in
+trace, the SPINE's (its Python oracle tests/spine_twin.py, and the strike ledger in
 runtime/crash_guard.py). One session of handle tables (a foreign, released,
 forged and non-int handle each refused), the app registry, the back-stack and
 the return routes, the WiFi leases, the settings rows (the setter that
@@ -880,11 +880,23 @@ sys.modules["moy_index"] = moy_index
 '''
 
 
-def _store_trace(exe, tmp_path, tag, prelude=""):
+# Run ahead of a driver on the legs that pin the INTERFACE, it puts the spine's
+# Python oracle (tests/spine_twin.py) under every import of moy_spine: no tier
+# runs that twin any more (every image, the desktop MicroPython and the
+# CPython host run native/moy_spine), so a leg that means the interface says
+# so. NATIVE_SPINE below is the legs over the C.
+TWIN_SPINE = """import sys
+sys.path.insert(0, %r)
+import spine_twin
+sys.modules["moy_spine"] = spine_twin
+""" % str(ROOT / "tests")
+
+
+def _store_trace(exe, tmp_path, tag, prelude=None):
     root = tmp_path / tag
     root.mkdir()
     script = tmp_path / ("store_%s.py" % tag)
-    script.write_text(prelude + STORE_DRIVER.replace(
+    script.write_text((TWIN_SPINE if prelude is None else prelude) + STORE_DRIVER.replace(
         "@RUNTIME@", repr(str(ROOT / "runtime"))).replace("@ROOT@", repr(str(root))))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
@@ -1173,9 +1185,9 @@ keys ['app_guard', 'wallpaper_guard'] ['open', 'proven', 'strikes']
 """
 
 
-def _spine_trace(exe, tmp_path, tag, prelude=""):
+def _spine_trace(exe, tmp_path, tag, prelude=None):
     script = tmp_path / ("spine_%s.py" % tag)
-    script.write_text(prelude + SPINE_DRIVER.replace(
+    script.write_text((TWIN_SPINE if prelude is None else prelude) + SPINE_DRIVER.replace(
         "@RUNTIME@", repr(str(ROOT / "runtime"))))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
@@ -1187,7 +1199,7 @@ def _spine_trace(exe, tmp_path, tag, prelude=""):
 
 # Run ahead of SPINE_DRIVER, it puts the NATIVE spine under every import of
 # moy_spine: the extensible builtin, reached with the path emptied and then
-# registered so runtime/moy_spine.py never loads (modmoy_spine.c's header).
+# registered so no Python twin loads (modmoy_spine.c's header).
 NATIVE_SPINE = r'''import sys
 _path = sys.path[:]
 sys.path[:] = []
@@ -1995,7 +2007,7 @@ SURVIVAL = {"input": (INPUT_DRIVER, INPUT_TRACE),
             "tick": (TICK_DRIVER, TICK_TRACE)}
 
 
-def _survival_trace(name, exe, tmp_path, tag, prelude=""):
+def _survival_trace(name, exe, tmp_path, tag, prelude=None):
     driver = SURVIVAL[name][0]
     work = tmp_path / ("%s_%s" % (name, tag))
     stage = work / "stage"
@@ -2010,7 +2022,7 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=""):
                          ("@STAGE@", stage), ("@ROOT@", store), ("@REPO@", ROOT)):
         driver = driver.replace(token, repr(str(value)))
     script = work / "driver.py"
-    script.write_text(prelude + driver)
+    script.write_text((TWIN_SPINE if prelude is None else prelude) + driver)
     out = subprocess.run([exe, str(script)], capture_output=True, text=True,
                          timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout

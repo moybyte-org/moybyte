@@ -7,7 +7,7 @@ the same "is there a writable store?" guard around it.
 
 ## The rows are the store, and `set` is the only way in
 
-`ws.system` is `prefs.rows`, the spine's `Settings` (`runtime/moy_spine.py`):
+`ws.system` is `prefs.rows`, the spine's `Settings` (native/moy_spine):
 one row per key holding the value's JSON text. It is the most-aliased object in
 the shell -- the launcher reads `favorites` on every home paint,
 `app_context.Prefs` reads and writes it namespaced, the crash guard keeps its

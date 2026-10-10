@@ -320,7 +320,7 @@ moybyte_patch_psram_retune() {
 
 # The native twins this board takes (board.toml [native.impl]), exported as the
 # MOY_*_IMPL hooks the module fragments and `board_config.py stage` read -- the
-# build's environment wins, so `MOY_SPINE_IMPL=py` still builds the other twin.
+# build's environment wins, so `MOY_INDEX_IMPL=py` still builds the other twin.
 # Called first by moybyte_stage_native, ahead of everything that reads a hook.
 # Reads BUILD_PYTHON SCRIPT_DIR.
 moybyte_board_impls() {

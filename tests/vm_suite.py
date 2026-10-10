@@ -87,6 +87,10 @@ print("RESULT", passed, failed)
 '''
 
 
+# A module whose Python twin is a suite's oracle rather than a runtime file.
+TWINS = {"moy_spine": os.path.join(HERE, "spine_twin.py")}
+
+
 def run(exe, tmp_path, module, test_file, native, arg, skip=(), extra=()):
     """`test_file` on `exe`, over module `module` (a top-level name): (passed,
     failed, output). The `runtime` package's `module` re-exports the top-level
@@ -103,7 +107,7 @@ def run(exe, tmp_path, module, test_file, native, arg, skip=(), extra=()):
             (d / (name + ".py")).write_text(f.read())
         (d / "runtime" / (name + ".py")).write_text("from %s import *\n" % name)
     if not native:
-        with open(os.path.join(ROOT, "runtime", module + ".py")) as f:
+        with open(TWINS.get(module) or os.path.join(ROOT, "runtime", module + ".py")) as f:
             (d / (module + ".py")).write_text(f.read())
     script = d / "run.py"
     script.write_text(VM_RUNNER.replace("@DIR@", repr(str(d)))

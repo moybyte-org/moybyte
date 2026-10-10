@@ -195,10 +195,8 @@ PYEOF
   cp -r "${REPO_ROOT}/native/moy_store" \
         "${USERMODS_DIR}/moy_store"
 
-  # moy_spine usermod: the kernel's spine, native, and the handle table
-  # moy_index shares (so it stages beside it). Its fragment compiles the C twin
-  # only when MOY_SPINE_IMPL names it, and board_config's stage below then
-  # leaves runtime/moy_spine.py out; unset, it adds nothing.
+  # moy_spine usermod: the kernel's spine, native here as on every image, and
+  # the handle table moy_index shares (so it stages beside it).
   cp -r "${REPO_ROOT}/native/moy_spine" \
         "${USERMODS_DIR}/moy_spine"
 
@@ -412,20 +410,16 @@ EOF
   make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)" >/dev/null
   # MicroPython keeps a source's generated qstr and module entries until that
   # source is preprocessed again, so a build that drops a usermod source
-  # (MOY_INDEX_IMPL or MOY_SPINE_IMPL back to py) would link a module table naming code it no
+  # (MOY_INDEX_IMPL back to py) would link a module table naming code it no
   # longer has. A changed hook starts the generated headers afresh.
   INDEX_STAMP="${PORT_DIR}/build-moybyte/moy_index_impl"
   INDEX_HOOK="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
-  SPINE_STAMP="${PORT_DIR}/build-moybyte/moy_spine_impl"
-  SPINE_HOOK="${MOY_SPINE_IMPL:-py}"
-  if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ] \
-     || [ "$(cat "${SPINE_STAMP}" 2>/dev/null || echo py)" != "${SPINE_HOOK}" ]; then
+  if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ]; then
     rm -rf "${PORT_DIR}/build-moybyte/genhdr"
   fi
   make -C "${PORT_DIR}" VARIANT=moybyte USER_C_MODULES="${USERMODS_DIR}" \
     FROZEN_MANIFEST="${BUILD_DIR}/frozen_manifest.py" -j"$(nproc)" >/dev/null
   echo "${INDEX_HOOK}" > "${INDEX_STAMP}"
-  echo "${SPINE_HOOK}" > "${SPINE_STAMP}"
 fi
 
 # ---------------------------------------------------------------------------

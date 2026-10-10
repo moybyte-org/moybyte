@@ -1,9 +1,9 @@
-"""The kernel spine's interface (runtime/moy_spine.py), pinned once for every
-binding: the Python twin and the C twin (native/moy_spine,
-docs/kernel_spine_2026-10.md), each test unchanged.
+"""The kernel spine's interface, pinned once for every binding: the C spine
+(native/moy_spine, docs/kernel_spine_2026-10.md) and its Python oracle
+(tests/spine_twin.py), each test unchanged.
 
-`BINDINGS` names each implementation by its module: the Python twin, and the C
-twin over the host's C ABI through ctypes (tools/moy_spine_binding.py).
+`BINDINGS` names each implementation by its module: the Python oracle, and the
+C spine over the host's C ABI through ctypes (tools/moy_spine_binding.py).
 tests/test_moy_spine_twins.py runs this same file on the boards' VM over the
 native module. The semantic trace in tests/test_semantic_traces.py replays one
 session of this interface on every VM and pins the handle VALUES; this file
@@ -31,15 +31,18 @@ import json
 
 import pytest
 
-from runtime import moy_spine
-
-BINDINGS = {"python": moy_spine}
-
 try:
     from tools import moy_spine_binding
 except ImportError:         # the VM's run of this file has no tools/
     moy_spine_binding = None
-if moy_spine_binding is not None:
+if moy_spine_binding is None:
+    # On a VM `runtime.moy_spine` is the one under test, native or the oracle
+    # (tests/vm_suite.py puts it there).
+    from runtime import moy_spine
+    BINDINGS = {"vm": moy_spine}
+else:
+    import spine_twin
+    BINDINGS = {"python": spine_twin}
     BINDINGS.update(moy_spine_binding.host_bindings())
 
 
@@ -548,3 +551,4 @@ def test_a_write_through_the_setter_reaches_the_card_with_no_persist_call(tmp_pa
     assert "steady" not in moy_carts.load_system(ws.carts_root)     # deferred...
     ws.system.set("name", "Zed")
     assert moy_carts.load_system(ws.carts_root)["steady"] is False   # ...not lost
+

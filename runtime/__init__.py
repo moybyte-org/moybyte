@@ -10,10 +10,34 @@ There is no host canvas CLASS to export any more: the raster is the boards' own
 (`make_canvas` / `make_system_canvas`).
 """
 
-from . import palette
-from .editors import CodeEditor, PaintEditor, SpriteSheet
-from .input import InputState
-from .moy_image import Image
+import sys as _sys
+
+
+def _native_spine():
+    """The kernel's spine is C on every tier (docs/kernel_spine_2026-10.md):
+    on the CPython host it is native/moy_spine's host library over ctypes
+    (`tools/moy_spine_binding.py`), registered as `moy_spine` and
+    `runtime.moy_spine` before anything imports either name. Its Python twin
+    is the suites' oracle (tests/spine_twin.py), never the host's."""
+    if "moy_spine" in _sys.modules:
+        mod = _sys.modules["moy_spine"]
+    else:
+        from tools import moy_spine_binding
+        mod = moy_spine_binding.binding()
+        if mod is None:
+            raise ImportError("the host's spine needs a C compiler "
+                              "(native/moy_spine over ctypes)")
+        _sys.modules["moy_spine"] = mod
+    _sys.modules["runtime.moy_spine"] = mod
+    return mod
+
+
+moy_spine = _native_spine()
+
+from . import palette  # noqa: E402
+from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
+from .input import InputState  # noqa: E402
+from .moy_image import Image  # noqa: E402
 
 __all__ = [
     "Image",

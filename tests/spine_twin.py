@@ -1,5 +1,9 @@
-"""The kernel's spine: the interface the native module `moy_spine` exposes,
-call for call, and its Python twin (docs/kernel_spine_2026-10.md).
+"""The kernel's spine in Python: the differential ORACLE for the native module
+`moy_spine` (native/moy_spine), call for call (docs/kernel_spine_2026-10.md).
+No image and no host runs it: every tier runs the C spine, the CPython host
+through `tools/moy_spine_binding.py`. The suites run this twin beside the C
+and hold the two to one log (tests/test_moy_spine.py, the random walk of
+tests/test_moy_spine_twins.py, the spine trace in tests/test_semantic_traces.py).
 
 Six components, each holding numbers and strings only -- no runtime's
 object outlives a call into one (docs/native_kernel_2026-09.md section 4.3):

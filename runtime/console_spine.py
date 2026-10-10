@@ -2,7 +2,7 @@
 the run and exit verbs, app registration and resolution, the WiFi lease and
 the settings wiring, as a mixin over `self`.
 
-The state these verbs keep lives in `runtime/moy_spine.py`'s components --
+The state these verbs keep lives in the spine's components (native/moy_spine) --
 `self.apps` (AppRegistry), `self.wm.stack` (BackStack), `self.returns`
 (Returns), `self.leases` (Leases) and `self.prefs.rows` (Settings) -- which
 hold ids, kinds and JSON text, never a Python object. What stays here is the

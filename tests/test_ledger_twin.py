@@ -106,6 +106,14 @@ def _run(exe, tmp_path, tag, prelude=""):
     return lines
 
 
+# CPython's leg: the Python ledger over the spine's Python oracle's rows.
+TWIN = """import sys
+sys.path.insert(0, %r)
+import spine_twin
+sys.modules["moy_spine"] = spine_twin
+""" % str(ROOT / "tests")
+
+
 NATIVE = r'''import sys
 _path = sys.path[:]
 sys.path[:] = []
@@ -121,7 +129,7 @@ def test_the_native_ledger_writes_what_the_python_one_does(tmp_path):
         "moy_spine",
         why="The native strike ledger against the Python one: the same answers "
             "and the same bytes in the settings store, call for call.")
-    want = _run(sys.executable, tmp_path, "cpython")
+    want = _run(sys.executable, tmp_path, "cpython", TWIN)
     got = _run(exe, tmp_path, "native", NATIVE)
     assert len(want) == len(got)
     for i, (a, b) in enumerate(zip(want, got)):

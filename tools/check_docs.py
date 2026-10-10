@@ -120,6 +120,7 @@ NOT_OURS = (
     "dist/", ".build/",
     "ports/celeste.moy",     # gitignored: CC BY-NC-SA, never committed
     "p8_lua_port.py",        # lives in the moy-spec repo, not here
+    "runtime/moy_spine.py",  # the spine's twin, now the oracle tests/spine_twin.py (#224)
     # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset), and
     # the recording stack that outlived it by a day (stage 4: the wasm head
     # rasterizes, so the recorder + the page's JS replayer went too). The plan,

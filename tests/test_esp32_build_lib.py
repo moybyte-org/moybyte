@@ -1408,12 +1408,12 @@ def test_a_changed_impl_hook_starts_genhdr_afresh(tmp_path):
     _config_guard(bd, out)
     (out / "genhdr").mkdir()
     assert _config_guard(bd, out) is True
-    assert _config_guard(bd, out, MOY_SPINE_IMPL="c") is False
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="c") is False
     (out / "genhdr").mkdir()
-    assert _config_guard(bd, out, MOY_SPINE_IMPL="c") is True
-    assert _config_guard(bd, out, MOY_SPINE_IMPL="py") is False
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="c") is True
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="py") is False
     (out / "genhdr").mkdir()
-    assert _config_guard(bd, out, MOY_SPINE_IMPL="py", CI="1") is True  # not a hook
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="py", CI="1") is True  # not a hook
 
 
 def test_a_changed_board_header_starts_genhdr_afresh(tmp_path):

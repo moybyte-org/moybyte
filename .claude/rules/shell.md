@@ -21,7 +21,7 @@ to whoever called it.
   shared draw toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
   (`carts_store`/`wifi`/`updater`); the spawn/exit verbs, app registration and
   the WiFi lease are `runtime/console_spine.py`'s, over the spine's components
-  in `runtime/moy_spine.py` (ids and kinds, never objects); everything
+  in `native/moy_spine` (ids and kinds, never objects); everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
 - **The 2026-07 shell split** — `project.py` / `player.py` / `editor_app.py` /

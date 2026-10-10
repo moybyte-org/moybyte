@@ -1,14 +1,13 @@
 # moy_spine — the kernel's spine, native
 
 The data half of the spine `docs/kernel_spine_2026-10.md` designs, in C:
-`runtime/moy_spine.py` defines the interface and is the reference, call for call,
-and `tests/test_moy_spine.py` pins it for every binding. It is built the three
-ways `native/moy_index/` is (see its README), under its own hook
-`MOY_SPINE_IMPL=py|c`: every console's board.toml declares `c` (`[native.impl]`)
-and freezes no Python twin, while the host, the browser build and the Zero run
-`runtime/moy_spine.py`;
-`tools/moy_index_spike.py --component spine` runs its host suite, sanitizers and
-image sizes.
+`tests/spine_twin.py` is its Python oracle, call for call, and
+`tests/test_moy_spine.py` pins both. It is built the three ways
+`native/moy_index/` is (see its README), with no hook: every image, the
+desktop MicroPython and the CPython host (`tools/moy_spine_binding.py`, which
+the `runtime` package registers as `moy_spine`) run it;
+`tools/moy_index_spike.py --component spine` runs its host suite and
+sanitizers.
 
 | file | what it is |
 |---|---|
@@ -17,7 +16,7 @@ image sizes.
 | `moy_settings.h`, `moy_settings.c` | system.json as rows of JSON text, and the count of changes since it was last clean |
 | `moy_json.h`, `moy_json.c` | the kernel's JSON scanner, one body for the settings store and the cart store (manifests, journal lines, the seed roster): spans walked in place, CPython's json.loads as the reference, and json.dumps's text for a span. `native/moy_store`'s fragment compiles it, since every image links the store |
 | `moy_ledger.h`, `moy_ledger.c` | the strike ledger's slot (`runtime/crash_guard.py`) as text in, text out: the edits `CrashGuard` makes, written as `json.dumps` would write them |
-| `modmoy_spine.c` | the MicroPython binding: the module `moy_spine`, registered extensible so a `moy_spine.py` on the path wins. `Settings.set` encodes a value, marks the store dirty and calls the save hook |
+| `modmoy_spine.c` | the MicroPython binding: the module `moy_spine`, registered extensible so a Python module of that name on the path wins (how a suite runs the oracle on a VM). `Settings.set` encodes a value, marks the store dirty and calls the save hook |
 | `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`tools/moy_spine_binding.py`) |
 | `fuzz_spine.c` | every component against a model with allocation failure injected, and the scanner on raw and corrupted text: libFuzzer or a seeded driver |
 

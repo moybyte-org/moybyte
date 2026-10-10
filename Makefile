@@ -239,16 +239,15 @@ UNIX_MP_NATIVE := native
 # has the hook): it registers extensible, so a run with runtime/ on its path
 # still imports runtime/moy_index.py, and tests/test_moy_index_twins.py and the
 # store trace reach the native one with the path emptied. moy_spine is the
-# kernel's spine, native, built as the twin UNIX_MP_SPINE names the same way
-# (tests/test_moy_spine_twins.py, and the spine trace); it holds the handle
-# table moy_index shares, so the two are built together. moy_glass, moy_input
+# kernel's spine, native as on every image (its Python oracle is
+# tests/spine_twin.py); it holds the handle table moy_index shares, so the two
+# are built together. moy_glass, moy_input
 # and moy_net are sprint 3's kernel modules, listed before they compile anything
 # (docs/kernel_survival_2026-10.md section 2). moy_play is sprint 4's Player
 # (docs/kernel_cartpath_2026-10.md).
 UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
     moy_glass moy_input moy_net moy_kernel moy_play
 UNIX_MP_INDEX ?= c
-UNIX_MP_SPINE ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
 .PHONY: unix-micropython
@@ -284,9 +283,6 @@ unix-micropython:
 	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_index_impl; \
 	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo c)" != "$(UNIX_MP_INDEX)" ]; then \
 	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
-	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_spine_impl; \
-	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo none)" != "$(UNIX_MP_SPINE)" ]; then \
-	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
 	  f=$(UNIX_MP_SRC)/ports/unix/$$b/frozen_content.c; \
 	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
 	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi; done
@@ -294,20 +290,18 @@ unix-micropython:
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
 	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
-	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_SPINE_IMPL=$(UNIX_MP_SPINE) \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
-	@echo "$(UNIX_MP_SPINE)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_spine_impl
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 MICROPY_PY_BTREE=0 \
 	    MICROPY_FORCE_32BIT=1 MICROPY_PY_THREAD_GIL=1 BUILD=build-moybyte-board \
 	    CFLAGS_EXTRA="$(UNIX_MP_R32_CFLAGS)" \
-	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) MOY_SPINE_IMPL=$(UNIX_MP_SPINE) \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
 	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_index_impl && \
-	  echo "$(UNIX_MP_SPINE)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_spine_impl && \
 	  echo "...and in the boards' object model (32-bit, REPR_C, one GIL): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \

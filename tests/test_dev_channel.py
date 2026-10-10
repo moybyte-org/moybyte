@@ -282,7 +282,7 @@ def test_kstale_hands_the_spine_four_dead_handles_and_all_are_refused(capsys):
     ch.run(ws, "kstale")
     line = [ln for ln in capsys.readouterr().out.splitlines()
             if ln.startswith("REMOTE kstale")][0]
-    assert line.startswith("REMOTE kstale ok impl=python "), line
+    assert line.startswith("REMOTE kstale ok impl=native "), line
     for name in ("released", "forged", "kind", "zero"):
         assert "%s=stale app handle " % name in line, line
 

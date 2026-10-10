@@ -9,14 +9,15 @@ gate's tests and the internal-SRAM cost. The kernel's language is C (owner,
 
 **The carve it builds on** (dev, 2026-10-06): the spine's half of
 `runtime/console.py` is `runtime/console_spine.py`; the components it drives
-are `runtime/moy_spine.py`, the Python twin of the native module, call for
-call; `tests/test_moy_spine.py` pins the rules and the spine trace in
+were `runtime/moy_spine.py`, the Python twin of the native module, call for
+call, which is now the suites' oracle, `tests/spine_twin.py`;
+`tests/test_moy_spine.py` pins the rules and the spine trace in
 `tests/test_semantic_traces.py` pins the values on every VM. The crossing
-swaps each twin for its binding under those tests unchanged.
+swapped each twin for its binding under those tests unchanged.
 
 ## 1. What crosses, and where it lands
 
-| component | Python twin (the interface) | C module |
+| component | Python twin (the oracle) | C module |
 |---|---|---|
 | handle tables | `moy_spine.Table` | `native/moy_spine/moy_htab.h` |
 | app registry, back-stack, return records | `moy_spine.AppRegistry`, `BackStack`, `Returns` | `native/moy_spine/moy_route.h` |
@@ -30,20 +31,20 @@ swaps each twin for its binding under those tests unchanged.
 
 `native/moy_spine/` builds three ways, as `native/moy_index/` does: a
 MicroPython usermod registered extensible (a `moy_spine.py` on the path wins,
-so a build that leaves the native module out runs the twin), a host library
-for ctypes, and a fuzz driver. Each crossing deletes the twin it replaces in the
+which is how a suite runs the oracle on a VM), a host library for ctypes, and
+a fuzz driver. Each crossing deletes the twin it replaces in the
 same change (`docs/native_kernel_2026-09.md` §4.2).
 
-**Where the native spine is the default** (2026-10-06): the four consoles. Each
-board.toml declares `[native.impl] spine = "c"`, `tools/esp32_build_lib.sh`
-exports it as `MOY_SPINE_IMPL`, and the image freezes no `moy_spine.py`. The
-desktop MicroPython the traces run on builds it too (`UNIX_MP_SPINE`, default
-`c`). The CPython host runs the Python twin, which is also the interface the
-tests pin; the browser build keeps it until sprint 3's frame-tail pass takes the
-C spine into the browser's wasm, the kernel's modules having entered that build
-with the glass (2026-10-07: `native/moy_glass` compiles into it, and the bundle
-is rebuilt at the pinned emscripten and re-baked into every image); the Zero has
-no console to route.
+**Where the native spine runs: everywhere** (owner, 2026-10-10;
+`docs/kernel_appabi_2026-10.md` §12 answer 5). Every image links it with no
+hook to take it out (the four consoles since 2026-10-06, the browser build
+and the Zero since sprint 5), and so does the desktop MicroPython the traces
+run on. The CPython host loads its host library by ctypes
+(`tools/moy_spine_binding.py`), which the `runtime` package registers as
+`moy_spine` before anything imports it. The Python twin moved under `tests/`
+as the oracle the suites hold the C to: `tests/test_moy_spine.py` runs both,
+the random walk of `tests/test_moy_spine_twins.py` compares them call for
+call, and the traces' interface legs run it.
 
 **What stays Python after sprint 2**, by decision: the app OBJECTS and the
 surfaces a route lands on (`console_spine.py`'s side of each verb); the radio

@@ -21,9 +21,9 @@
 and the numbers the kernel's language was decided on (#224; the decision is
 docs/native_kernel_2026-09.md section 5, C). Sprint 2 generalised it to a second
 component, the kernel's spine (native/moy_spine, docs/kernel_spine_2026-10.md):
-`--component spine` runs `host`, `sanitize` and `sizes` for it, with its own
-hook, host library, fuzz driver and tests; `bench` and `ci-time` stay the
-index's.
+`--component spine` runs `host` and `sanitize` for it, with its own host
+library, fuzz driver and tests; `sizes`, `bench` and `ci-time` stay the
+index's, because the spine has no Python twin an image could take instead.
 
     tools/moy_index_spike.py host     [--impl c]      the suite over ctypes and on the
                                                       desktop MicroPython, the store trace
@@ -36,8 +36,8 @@ index's.
                                                       with the store's sprint-0 readings
     tools/moy_index_spike.py ci-time  [--impl c]      what the twin's tests cost a CI run
 
-    tools/moy_index_spike.py --component spine host|sanitize|sizes ...
-                                                      the same three for the spine
+    tools/moy_index_spike.py --component spine host|sanitize ...
+                                                      the same two for the spine
 
 Results land as JSON in .build/moy_index_spike/ as well as on stdout. `sizes`
 and `bench` build in THIS tree, so run them from a worktree; `sizes` leaves the
@@ -56,13 +56,11 @@ desktop MicroPython, the browser) read it, tools/board_config.py drops the
 Python twin from a twin's frozen set, and `make unix-micropython` builds the
 twin its UNIX_MP_INDEX names (default `c`).
 
-MOY_SPINE_IMPL is the spine's hook, the same shape (the consoles' board.toml
-declares `c`, `[native.impl]`; the browser build and the Zero leave it `py`): `py` keeps
-runtime/moy_spine.py frozen, `c` builds native/moy_spine (modmoy_spine.c over
-moy_route.c, moy_settings.c and moy_ledger.c) and leaves the Python file out, and UNIX_MP_SPINE
-(default `c`) is `make unix-micropython`'s. moy_htab.c, the handle table both
-components take their slots from, is built when either hook is `c`.
-runtime/moy_index.py stays the host's: CPython's simulator, tools and tests
+The spine has no hook: native/moy_spine (modmoy_spine.c over moy_route.c,
+moy_settings.c and moy_ledger.c, and moy_htab.c, the handle table both
+components take their slots from) is in every image, the desktop MicroPython
+and the CPython host (over ctypes), and its Python twin is the suites' oracle,
+tests/spine_twin.py. runtime/moy_index.py stays the host's: CPython's simulator, tools and tests
 import it, and it is the reference every binding is pinned against.
 
 MOY_INDEX_BENCH=1 adds the `moy_index_bench` module (bench_moy_index.c) to a
@@ -728,6 +726,8 @@ def cmd_sizes(a):
     firmware/web_runner/dist (none, in a worktree made --no-web), so a delta is
     the board's own native code and nothing of the bundle."""
     comp = COMPONENTS[a.component]
+    if comp is SPINE:
+        raise SystemExit("the spine has no Python twin an image takes: no `sizes`")
     impl = impl_of(a.impl, comp)
     if impl == "py":
         raise SystemExit("`sizes` compares the twin with py: --impl c")
