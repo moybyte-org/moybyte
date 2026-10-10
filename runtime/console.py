@@ -33,16 +33,17 @@ free apart from the shared editor cores below.
 
 import time
 
-from editors import CodeEditor, _SheetSprite
+# The cores the shell itself needs, from their own modules: importing the
+# `editors` umbrella would pull every editor core into a start that may never
+# open the Editor.
+try:
+    from editors_code import CodeEditor
+    from editors_sheet import _SheetSprite
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors_code import CodeEditor
+    from runtime.editors_sheet import _SheetSprite
 # (the #111 op-history core is history_router.py's import now, not this file's --
 # #209 landing E took the code tab's History and its typing-burst codec with it)
-# The block editor's UI layer (issue #29 Part 2): the structured-outline screen
-# + BlockLayout (its responsive geometry, #39 step 2). The geometry constants
-# and menu sentinels that tests still reach as `console.X` ride along and are
-# re-exported; the rest of that module's constants are its own. See
-# block_editor_ui.py's module docstring for why it takes NAMES/_err_text/
-# _clamp_scroll as constructor args instead of importing them back from here (a
-# real circular import: this module builds the one BlockEditorUI instance a
 # The glass (native/moy_glass): the frame gate folds a dirty frame into the
 # surface table's epoch and reads the kernel's own epoch as a dirty leg
 # (docs/surface_model_v1.md §15). The host reaches the same C by ctypes.
@@ -51,50 +52,93 @@ try:
 except ImportError:  # pragma: no cover - host: the ctypes binding
     from runtime import glass_binding as _glass
 
-# Workstation holds). Same bare-or-package fallback as the _blocks_mod import
-# just below (host tests that load console.py directly without the
-# runtime/host_app.py aliasing, or one that hand-registers editors/audio/blocks/
-# console like tests/test_device_make_api.py's _load_moy_runtime).
-try:
-    from block_editor_ui import (BlockEditorUI, BlockLayout, _BLK_W, _BLK_ROWS,
-                                 _BLK_AREA, _BLK_ADD, _BLK_CODE, _BLK_MENU,
-                                 _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _NEW_VAR_ITEM,
-                                 _NEW_VAR_LABEL, _NEW_LIST_ITEM, _NEW_LIST_LABEL,
-                                 _NUM_LITERAL_ITEM, _NUM_LITERAL_LABEL)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.block_editor_ui import (BlockEditorUI, BlockLayout, _BLK_W, _BLK_ROWS,
-                                         _BLK_AREA, _BLK_ADD, _BLK_CODE, _BLK_MENU,
-                                         _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _NEW_VAR_ITEM,
-                                         _NEW_VAR_LABEL, _NEW_LIST_ITEM,
-                                         _NEW_LIST_LABEL, _NUM_LITERAL_ITEM,
-                                         _NUM_LITERAL_LABEL)
+# THE EDITOR SURFACES ARE IMPORTED AT THEIR FIRST USE (docs/kernel_cartpath_2026-10.md
+# section 5.5): the block, map, scene and music editors' UIs and the sprite/icon
+# PAINT surface (paint_layer.py, one renderer for the cart sheet and the system
+# icon sheet) are modules a start that never opens the Editor does not load.
+# Each is a Workstation property (`block_ui`, `map_ui`, `scene_ui`, `music_ui`,
+# `paint_layer`, `theme_layer`) that imports its module and builds the one
+# instance when something first reads it; `built(attr)` answers without
+# building. Each module stays the single source of its geometry constants; the
+# names tests reach as `console.X` resolve through the module's __getattr__
+# below. block_editor_ui.py's docstring says why the UIs take NAMES/_err_text/
+# _clamp_scroll as constructor args instead of importing them back from here.
+_LAZY_MODULES = {
+    "block_editor_ui": ("BlockEditorUI", "BlockLayout", "_BLK_W", "_BLK_ROWS",
+                        "_BLK_AREA", "_BLK_ADD", "_BLK_CODE", "_BLK_MENU",
+                        "_BLK_MENU_ROW_H", "_BLK_MENU_ROWS", "_NEW_VAR_ITEM",
+                        "_NEW_VAR_LABEL", "_NEW_LIST_ITEM", "_NEW_LIST_LABEL",
+                        "_NUM_LITERAL_ITEM", "_NUM_LITERAL_LABEL"),
+    "map_editor_ui": ("MapEditorUI", "_MV_X0", "_MV_Y0", "_MV_ZOOMS", "_MAP_ZOOM",
+                      "_MAP_SIZE", "_TP_X0", "_TP_Y0", "_TP_CELL", "_TP_SKY",
+                      "_PAN_RT", "_PAN_DN", "_MAP_ERASE"),
+    "scene_editor_ui": ("SceneEditorUI",),
+    "music_editor_ui": ("MusicEditorUI", "_MU_VIEW", "_MU_PLAY", "_mu_pad_rect"),
+    "paint_layer": ("PaintLayer", "ThemeLayer", "_PG_X0", "_PG_Y0", "_PG_SPAN",
+                    "_SW_X0", "_SW_Y0", "_SW", "_SW_COLS", "_PAINT_SIZE",
+                    "_PAINT_CLOSE", "_PAINT_GET", "_PAINT_PUT"),
+}
 
-# The map (tilemap) editor's UI layer (issue #32): the panned view + tile
-# palette + pan/zoom + gesture handling, plus the geometry constants tests reach
-# as `console.X`, with the same bare-or-package fallback as the block editor.
-try:
-    from map_editor_ui import (MapEditorUI, _MV_X0, _MV_Y0, _MV_ZOOMS, _MAP_ZOOM,
-                               _MAP_SIZE, _TP_X0, _TP_Y0, _TP_CELL, _TP_SKY, _PAN_RT,
-                               _PAN_DN, _MAP_ERASE)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.map_editor_ui import (MapEditorUI, _MV_X0, _MV_Y0, _MV_ZOOMS,
-                                       _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0, _TP_CELL,
-                                       _TP_SKY, _PAN_RT, _PAN_DN, _MAP_ERASE)
 
-# The scene placement editor's UI layer (#85 Stage 2, its own module from birth
-# -- the map editor's extraction shape): the WYSIWYG placed-actor editor.
-try:
-    from scene_editor_ui import SceneEditorUI
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.scene_editor_ui import SceneEditorUI
+def _lazy_module(name):
+    try:
+        return __import__(name)
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        return getattr(__import__("runtime." + name), name)
 
-# The music/sound editor's UI layer (issue #50): the tracker-style step editor
-# + preview, plus the two geometry names tests reach as `console.X`.
-try:
-    from music_editor_ui import (MusicEditorUI, _MU_VIEW, _MU_PLAY, _mu_pad_rect)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.music_editor_ui import (MusicEditorUI, _MU_VIEW, _MU_PLAY,
-                                         _mu_pad_rect)
+
+def __getattr__(name):
+    for mod, names in _LAZY_MODULES.items():
+        if name in names:
+            return getattr(_lazy_module(mod), name)
+    raise AttributeError(name)
+
+
+def _build_block_ui(ws):
+    ui = _lazy_module("block_editor_ui").BlockEditorUI(ws, NAMES, _err_text,
+                                                       _clamp_scroll)
+    ui.relayout(ws.sys_canvas.w, ws.sys_canvas.h, ws.look.effective_font_scale(),
+                ws.look.effective_chrome_scale())
+    return ui
+
+
+def _build_map_ui(ws):
+    return _lazy_module("map_editor_ui").MapEditorUI(ws, NAMES)
+
+
+def _build_scene_ui(ws):
+    return _lazy_module("scene_editor_ui").SceneEditorUI(ws, NAMES)
+
+
+def _build_music_ui(ws):
+    return _lazy_module("music_editor_ui").MusicEditorUI(ws, NAMES)
+
+
+def _build_paint_layer(ws):
+    return _lazy_module("paint_layer").PaintLayer(ws, NAMES)
+
+
+def _build_theme_layer(ws):
+    return _lazy_module("paint_layer").ThemeLayer(ws, ws.paint_layer, NAMES)
+
+
+def _first_use(attr, build):
+    """A Workstation property over `_<attr>`: built by `build(ws)` when first
+    read, assignable like the attribute it replaces."""
+    slot = "_" + attr
+
+    def get(self):
+        obj = getattr(self, slot)
+        if obj is None:
+            obj = build(self)
+            setattr(self, slot, obj)
+        return obj
+
+    def put(self, obj):
+        setattr(self, slot, obj)
+
+    return property(get, put)
+
 
 # The perf HUD's rendering layer (#43/#44): the bottom-right FPS chip + optional
 # frame-time breakdown + its tap target. The perf *query* API
@@ -214,23 +258,6 @@ try:
     from cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cards_layer import (CardsLayer, _CARD_Y0, _CARD_H, _CARD_VIEW_BOTTOM)
-
-# The sprite/icon PAINT editor surface (#4/#30 -- see paint_layer.py). ONE
-# renderer serves both the cart sprite sheet (menu_view=="paint") and the system
-# icon sheet (menu_view=="theme", EDIT ICONS), keyed on ws._editing_icons.
-# paint_layer.py is the single source of the paint geometry constants; the ones
-# tests reach as console._X are imported back here. The SHEETS + ws.paint handle
-# + save persistence stay on Workstation; PaintLayer reads them + dispatches
-# GET/PUT/CLOSE to ws (SAVE removed with the button, #111 -- CLOSE + every other
-# exit path hard-commit instead).
-try:
-    from paint_layer import (PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_SPAN, _SW_X0,
-                             _SW_Y0, _SW, _SW_COLS, _PAINT_SIZE, _PAINT_CLOSE,
-                             _PAINT_GET, _PAINT_PUT)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.paint_layer import (PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_SPAN,
-                                     _SW_X0, _SW_Y0, _SW, _SW_COLS, _PAINT_SIZE,
-                                     _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 
 # The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing, owning NO config -- it reads ws state
@@ -564,6 +591,14 @@ def draw_splash(cv, frac=None, status=None):
 
 
 class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
+    # The editor surfaces, built at their first use (_LAZY_MODULES above).
+    block_ui = _first_use("block_ui", _build_block_ui)
+    map_ui = _first_use("map_ui", _build_map_ui)
+    scene_ui = _first_use("scene_ui", _build_scene_ui)
+    music_ui = _first_use("music_ui", _build_music_ui)
+    paint_layer = _first_use("paint_layer", _build_paint_layer)
+    theme_layer = _first_use("theme_layer", _build_theme_layer)
+
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1, panel_diagonal_in=None):
         # Built in five ordered stages (each a method so the constructor reads
@@ -666,14 +701,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                                       self.look.effective_font_scale(),
                                       self.look.effective_chrome_scale())
         # The block editor's UI (issue #29 Part 2, extracted from this class -- see
-        # block_editor_ui.py): one instance, built once here and delegated to from
-        # handle_input/handle_pointer/frame's menu_view == "blocks" branches plus
-        # set_menu_view/_relayout/_leave_menu/go_home/open. NAMES/_err_text/
-        # _clamp_scroll are injected (see that module's docstring for why).
-        self.block_ui = BlockEditorUI(self, NAMES, _err_text, _clamp_scroll)
-        self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
-                               self.look.effective_font_scale(),
-                               self.look.effective_chrome_scale())
+        # block_editor_ui.py): one instance, built at its first use (`block_ui`)
+        # and delegated to from handle_input/handle_pointer/frame's menu_view ==
+        # "blocks" branches plus set_menu_view/_relayout/_leave_menu/go_home/open.
+        self._block_ui = None
 
     def _init_components(self, input, carts):
         """Injected-service attach points + the shell processes (Project/Player/
@@ -923,17 +954,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # map_editor_ui.py): one instance, delegated to from handle_input/
         # handle_pointer/frame's menu_view == "map" branches plus set_menu_view/
         # _open_map/open/go_home.
-        self.map_ui = MapEditorUI(self, NAMES)
+        self._map_ui = None             # built at its first use
         # The scene placement editor's UI (#85 Stage 2 -- see scene_editor_ui.py):
         # one instance, delegated to from the "scene" content layer plus
         # set_menu_view/_open_scene/open/go_home, the exact map_ui lifecycle.
-        self.scene_ui = SceneEditorUI(self, NAMES)
+        self._scene_ui = None             # built at its first use
         # Block editor (#29 Part 2) state now lives on self.block_ui (built above).
         # The music/sound editor's UI (#50, extracted from this class -- see
         # music_editor_ui.py): one instance, delegated to from handle_input/
         # handle_pointer/frame's menu_view == "music" branches plus set_menu_view/
         # _open_music/open (NOT go_home -- see music_editor_ui.py's docstring).
-        self.music_ui = MusicEditorUI(self, NAMES)
+        self._music_ui = None             # built at its first use
         # The perf HUD's rendering (#43/#44, extracted from this class -- see
         # perf_hud.py): the FPS chip + frame-time breakdown drawn in frame() and
         # the tap target hit-tested in handle_pointer. Named perf_ui (NOT
@@ -1119,8 +1150,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # and the icon sheet ("theme"), keyed on ws._editing_icons. It reads ws.paint /
         # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme content is ThemeLayer
         # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
-        self.paint_layer = PaintLayer(self, NAMES)
-        self.theme_layer = ThemeLayer(self, self.paint_layer, NAMES)
+        self._paint_layer = None      # built at its first use, as theme_layer
+        self._theme_layer = None
         # The Settings app (#28/#39/#53): the aggregator screen. Owns the row list +
         # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
         # dispatches every mutation to ws setters (it owns NO config).
@@ -1159,8 +1190,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             "code": self.code_layer,
             "blocks": _BlocksLayer(self),
             "music": _MusicLayer(self),
-            "theme": self.theme_layer,
-            "paint": self.paint_layer,
             "map": _MapLayer(self),
             "scene": _SceneLayer(self),
             "cards": self.cards_layer,
@@ -1199,8 +1228,22 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         registry lookup: the stack is a data structure it reads, not a second router."""
         kind = self.wm.top_kind()
         if kind == "menu":
-            return self._content_layers.get(self.menu_view) or self._content_layers["cards"]
-        return self._content_layers.get(kind) or self._content_layers["launcher"]
+            return self.layer_of(self.menu_view) or self._content_layers["cards"]
+        return self.layer_of(kind) or self._content_layers["launcher"]
+
+    def built(self, attr):
+        """The editor surface `attr` names (`block_ui`, `map_ui`, ...) when it
+        has been built, else None: what a reset or a check reads without
+        building one."""
+        return getattr(self, "_" + attr, None)
+
+    def layer_of(self, key):
+        """The content layer for router key `key`, None for none. The paint and
+        theme surfaces join the table at their first use."""
+        layer = self._content_layers.get(key)
+        if layer is None and key in ("paint", "theme"):
+            layer = self._content_layers[key] = getattr(self, key + "_layer")
+        return layer
 
     @property
     def windowed_chrome(self):
@@ -1346,13 +1389,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.layout = Layout(w, h, fs, cs)
         self.launcher.set_layout(self.layout)
         self._relayout_code()             # editor layouts reflow too (#39 step 2)
-        self.block_ui.relayout(w, h, fs, cs)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
-        # guarded, since _relayout is first called before _build_layers registers them.
-        for _lyr in ("paint_layer", "map_ui", "scene_ui", "music_ui", "cards_layer"):
-            _obj = getattr(self, _lyr, None)
+        # an editor surface not built yet takes the live one when it is, and
+        # cards_layer is guarded because _relayout is first called before
+        # _build_layers registers it.
+        for _lyr in ("block_ui", "paint_layer", "map_ui", "scene_ui", "music_ui"):
+            _obj = self.built(_lyr)
             if _obj is not None:
                 _obj.relayout(w, h, fs, cs)
+        _obj = getattr(self, "cards_layer", None)
+        if _obj is not None:
+            _obj.relayout(w, h, fs, cs)
         for _app, _t in getattr(self, "_apps", ()):   # registered system apps
             _relay = getattr(_app, "relayout", None)
             if _relay is not None:
@@ -1953,10 +2000,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.code_file = None         # a new cart opens on ITS main file, never on
                                       # the name the last one was left showing
         self.paint = None
-        self.map_ui.reset()
-        self.scene_ui.reset()
-        self.music_ui.reset()
-        self.block_ui.reset()
+        for _ui in ("map_ui", "scene_ui", "music_ui", "block_ui"):
+            _ui = self.built(_ui)        # one never built is fresh already
+            if _ui is not None:
+                _ui.reset()
         self.cart_error = None
         self.save_status = None
         self.sheet = self._build_sheet()
@@ -2632,9 +2679,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._editing_icons = False    # never carry the theme-editing flag home
         if self.settings_layer.wifi_view:
             self.settings_layer.close_wifi()   # its radio lease ends with the visit
-        self.map_ui.reset()
-        self.scene_ui.reset()
-        self.block_ui.reset()
+        for _ui in ("map_ui", "scene_ui", "block_ui"):
+            _ui = self.built(_ui)        # one never built is fresh already
+            if _ui is not None:
+                _ui.reset()
         self.wm.goto("launcher")       # Stage 6e: pop back to the launcher root
         self.cart = None
         # #66 fragmentation fix: ns = None alone kept the world alive through

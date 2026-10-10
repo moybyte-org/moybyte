@@ -77,9 +77,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
                                 THEMES, THEME_VARIANTS)
 try:
-    from editors import IconSheet
+    from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import IconSheet
+    from runtime.editors_sheet import IconSheet
 # The skin CATALOG. This module is the OWNER the ratchet in tests/test_skin.py
 # names (`_SKIN_OWNERS`): the one place `skin.use` is called, and the only
 # module besides the picker allowed to import it at all.

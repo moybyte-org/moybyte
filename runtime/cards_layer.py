@@ -53,9 +53,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                      BASE_H as _BASE_H)
 
 try:
-    from editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+    from editors_base import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+    from runtime.editors_base import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
 
 try:
     from widgets import arm_prompt as _arm_prompt

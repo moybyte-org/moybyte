@@ -33,9 +33,11 @@ bare-or-package fallback as those modules.
 from array import array
 
 try:
-    from editors import CodeEditor, IconSheet
+    from editors_code import CodeEditor
+    from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import CodeEditor, IconSheet
+    from runtime.editors_code import CodeEditor
+    from runtime.editors_sheet import IconSheet
 
 try:
     from widgets import _Blit, _in, _err_text

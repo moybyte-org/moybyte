@@ -119,7 +119,10 @@ class PaintDocument:
         self.action_live = False
         if seed and self.W == 512 and self.H == 300:
             self.seed_desktop()
-        self.rebuild_thumb()
+            self.rebuild_thumb()
+        else:
+            # Blank paper's thumbnail is blank paper: no per-pixel walk.
+            self.thumb[:] = bytes((self.PAPER,)) * len(self.thumb)
 
     def load(self, data):
         if data is None or data[0] < 1 or data[1] < 1:
@@ -439,7 +442,11 @@ class PaintAppLayer:
         self.names = names
         cv = ctx.surface.canvas()
         desktop = cv.w >= 640 and cv.h >= 400
-        self.doc = PaintDocument(512, 300) if desktop else PaintDocument()
+        # The document is built at the app's first use of it (`doc`), not at
+        # the console's start: a quarter-screen of indices and its thumbnail
+        # that a session which never opens Paint does not pay for.
+        self._doc = None
+        self._doc_size = (512, 300) if desktop else (320, 240)
         self._starter_pending = desktop
         self.layout = PaintAppLayout(cv.w, cv.h, self._surf.font_scale(),
                                      self._surf.windowed(),
@@ -469,6 +476,17 @@ class PaintAppLayer:
         self.grid = FileGridView(ctx.shell, "drawings")
         self._unsaved = False
         self._idle = 0.0
+
+    @property
+    def doc(self):
+        d = self._doc
+        if d is None:
+            d = self._doc = PaintDocument(*self._doc_size)
+        return d
+
+    @doc.setter
+    def doc(self, d):
+        self._doc = d
 
     def relayout(self, w, h, fs, cs=None):
         self.layout = PaintAppLayout(w, h, fs, self._surf.windowed(), cs)

@@ -281,7 +281,8 @@ class PlayInfo(ctypes.Structure):
                 ("stop_why", ctypes.c_uint8), ("vm_down", ctypes.c_bool),
                 ("vm_free", ctypes.c_bool), ("raised", ctypes.c_bool),
                 ("ended", ctypes.c_bool), ("game", ctypes.c_bool),
-                ("title", ctypes.c_char * 48), ("id", ctypes.c_char * 24)]
+                ("title", ctypes.c_char * 48), ("id", ctypes.c_char * 24),
+                ("fit", _U32 * 5)]
 
 
 class HostLuaRun:

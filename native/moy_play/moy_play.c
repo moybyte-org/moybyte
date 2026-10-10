@@ -194,7 +194,7 @@ static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
     } else if (moy_play_stop_verdict == NULL) {
         c->info->stop_why = MOY_PLAY_KEEP_LEVER;
     } else {
-        c->info->stop_why = moy_play_stop_verdict(e, c->path, c->flags);
+        c->info->stop_why = moy_play_stop_verdict(e, c->path, c->flags, c->info->fit);
     }
     c->seen = true;
     return 0;
@@ -565,6 +565,18 @@ static struct {
     uint32_t since;
     moy_chrome_list_t *overlay;
 } F;
+
+void moy_play_reserve(void *(*alloc)(size_t n)) {
+    if (g_run == NULL) {
+        g_run = alloc(sizeof(run_t));
+        if (g_run != NULL) {
+            memset(g_run, 0, sizeof(run_t));
+        }
+    }
+    if (F.overlay == NULL) {
+        F.overlay = alloc(sizeof(moy_chrome_list_t));
+    }
+}
 
 void moy_play_front_ops(const moy_front_ops_t *ops) {
     F.ops = ops;

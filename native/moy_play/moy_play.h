@@ -103,9 +103,10 @@ enum {
 const char *moy_play_stop_name(uint8_t why);
 // The board's half of the verdict (native/moy_play/moy_play_stop.c, a board
 // with the stop): every clause but the rule's. Weak: an image without it
-// keeps the VM (KEEP_LEVER).
-uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags)
-    __attribute__((weak));
+// keeps the VM (KEEP_LEVER). `fit` gets the fit check's reading with the VM
+// up when the verdict reached it (moy_play_info_t's `fit`).
+uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags,
+                              uint32_t fit[5]) __attribute__((weak));
 // The live run's folder and launch flags (the stopped run's load reads them).
 const char *moy_play_path(void);
 uint32_t moy_play_flags(void);
@@ -149,8 +150,18 @@ typedef struct {
     bool game;                  // the manifest's type, with the store's default
     char title[48];             // the manifest's title, "" when it names none
     char id[24];                // the folder's stem: what the crash record names
+    // The verdict's fit check, the VM up: the compiled cart's footprint (total,
+    // block), PSRAM free and its largest block then, and the VM's heap bytes a
+    // stop would give back. All 0: the verdict did not reach the fit.
+    uint32_t fit[5];
 } moy_play_info_t;
 
+// The Player's row and the front's chrome list, made by `alloc` ahead of the
+// first launch: a board's kernel makes them before the VM's first area, so
+// neither a launch with the VM up nor a stopped run allocates anything that
+// outlives it inside the free run a stop leaves. Otherwise the first launch
+// and the first front make them.
+void moy_play_reserve(void *(*alloc)(size_t n));
 int  moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32_t *run);
 int  moy_play_bind(uint32_t run, struct moy_input *in, uint32_t audio, moy_tick_t *tick);
 int  moy_play_open(uint32_t run);

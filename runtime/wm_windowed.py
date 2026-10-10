@@ -700,8 +700,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         otherwise -- same resolution ws._content_layer() does for the stack top."""
         ws = self.ws
         if kind == "menu":
-            return ws._content_layers.get(ws.menu_view) or ws._content_layers["cards"]
-        return ws._content_layers.get(kind)
+            return ws.layer_of(ws.menu_view) or ws._content_layers["cards"]
+        return ws.layer_of(kind)
 
     # -- the memoized stacks (parent memo, windowed shape) ---------------------
 

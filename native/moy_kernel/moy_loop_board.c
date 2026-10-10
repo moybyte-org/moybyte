@@ -335,6 +335,23 @@ static bool w_vmstop(int argc, char **argv, const char *line) {
     return true;
 }
 
+// heapwalk [stop [all]|off]: DEV. PSRAM's large used and free blocks by
+// address, now; `stop` walks again at each stop's down point and its run's
+// end, `all` with every used block (moy_kernel_heapwalk).
+static bool w_heapwalk(int argc, char **argv, const char *line) {
+    (void)line;
+    if (argc > 1) {
+        bool on = strcmp(argv[1], "stop") == 0;
+        bool all = on && argc > 2 && strcmp(argv[2], "all") == 0;
+        moy_kernel_heapwalk_at_stop(on, all);
+        moy_loop_say("REMOTE heapwalk at stop %s", on ? (all ? "all" : "on") : "off");
+        return true;
+    }
+    moy_kernel_heapwalk("now");
+    moy_loop_say("REMOTE heapwalk");
+    return true;
+}
+
 // hush: every audio session silent from the next block; nothing is closed.
 static bool w_hush(int argc, char **argv, const char *line) {
     (void)argc; (void)argv; (void)line;
@@ -352,6 +369,7 @@ static const moy_devch_word_t BOARD_WORDS[] = {
     {"mem", w_mem},
     {"kstop", w_kstop},
     {"vmstop", w_vmstop},
+    {"heapwalk", w_heapwalk},
     {"hush", w_hush},
 };
 #endif

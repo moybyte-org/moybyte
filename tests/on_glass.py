@@ -601,8 +601,14 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
         st = board.state()
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
-        assert st["run"] == {"runtime": runtime, "vm_free": True, "why": "free",
-                             "stop": KEEPS, "vm_down": False}, st["run"]
+        # `fit`: the verdict's fit check with the VM up, a compiled cart's on
+        # a board with the stop (it fits here), None everywhere else.
+        run = dict(st["run"])
+        fit = run.pop("fit", None)
+        assert run == {"runtime": runtime, "vm_free": True, "why": "free",
+                       "stop": KEEPS, "vm_down": False}, st["run"]
+        assert fit is None or (len(fit) == 5 and fit[0] <= fit[2]
+                               and fit[1] <= fit[3]), st["run"]
         for _ in range(5):
             time.sleep(0.2)
             ups = board.state()["upcalls"]
@@ -850,13 +856,17 @@ def _stop_psram(line):
     return int(free), int(largest)
 
 
-def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False):
+def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
+                               hold_link=False):
     """The kernel stops the VM for a cart whose fit check fails with the VM up
     (the `need` policy), runs it with no VM -- `state` is the kernel's and says
     so -- and starts the VM again when it ends: the dev channel's `end`, or a
     Ctrl-C. `vmstop force` makes the fit read as failing where the cart fits
-    (it fits a fresh T-Deck). Returns each cycle's PSRAM (free, largest) after
-    the stop and before the load."""
+    (it fits a fresh T-Deck). The return start reads its kind and every part
+    of its time from the kernel's stamps. `hold_link`: the link's radio lease
+    is held at the launch, as a match's run holds it, and the return start
+    lets it go. Returns each cycle's PSRAM (free, largest) after the stop and
+    before the load."""
     import time
     titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
     if title not in titles:
@@ -866,6 +876,8 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False):
     psram = []
     try:
         for _ in range(cycles):
+            if hold_link:
+                assert board.pyexec("ws.wifi_hold('link')"), board.last_error
             line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
             assert line is not None and title in line, line
             line = board.wait_line("STOP 1/1 down", 60)
@@ -886,9 +898,22 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False):
             else:
                 board.cmd("end", wait_for="REMOTE end")
             assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
-            _desk_back(board)
+            back = _desk_back(board)
             info = board.pyval("__import__('moy_play').info()", strict=True)
             assert info[12] is True and info[10] == (5 if ctrl_c else 2), info
+            # The first frame's stamp lands with boot_ok, a frame or two after
+            # the console first answers.
+            start = back.get("start")
+            for _ in range(10):
+                if start and start.get("first_frame") is not None:
+                    break
+                time.sleep(0.5)
+                start = board.state().get("start")
+            assert start["kind"] == "return", start
+            assert all(start[k] is not None and start[k] >= 0 for k in
+                       ("total", "vm", "imports", "workstation", "wiring",
+                        "first_frame")), start
+            assert back.get("wifi_held") == [], back.get("wifi_held")
     finally:
         board.cmd("vmstop need", wait_for="REMOTE vmstop")
     return psram

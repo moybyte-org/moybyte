@@ -251,6 +251,14 @@ def _kernel():
     return moy_kernel
 
 
+def _stamp(kernel, part):
+    """One of the console's parts of the start, stamped by the kernel
+    (moy_kernel.h's MOY_STAMP_*); nothing on an image without the stamps."""
+    stamp = getattr(kernel, "stamp", None)
+    if stamp is not None:
+        stamp(part)
+
+
 def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   keyboard, seed_carts, power_save_ms,
                   game_wh=None, font_scale=1, panel_diagonal_in=None,
@@ -265,6 +273,8 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         def log(tag, msg):
             print("%s %s: %s" % (name, tag, msg))
     _census("spine")
+    kernel = _kernel()
+    _stamp(kernel, 2)               # MOY_STAMP_IMPORTS: the console's build begins
     d = Desktop(name)
     gfx = comp.gfx()
     import moy_carts
@@ -278,7 +288,6 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # A RETURN start (docs/kernel_cartpath_2026-10.md 5.4): the VM is back
     # after the kernel stopped it for a run. No splash and no OTA verdict; the
     # launcher lands where the resume record left it.
-    kernel = _kernel()
     returning = kernel is not None and getattr(kernel, "start", None) is not None \
         and kernel.start() == "return"
     if returning:
@@ -310,6 +319,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                      sys_canvas=sys_canvas, font_scale=font_scale,
                      panel_diagonal_in=panel_diagonal_in)
     _census("workstation")
+    _stamp(kernel, 3)               # MOY_STAMP_WS
     # The chrome strip a quiet frame rotates beside the game rect on a
     # rotated compositor: the TALLEST bar the layout can draw.
     if getattr(comp, "rotated", False):
@@ -392,6 +402,9 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # was CONSTRUCTED, not that a pixel reached the glass (#56). The kernel's
     # loop fires it once frames are really going out.
     if returning:
+        # The stopped run ended in the kernel: its radio leases, which the
+        # kernel's table kept through the stop, go as a plain exit's do.
+        ws.player.release_radio()
         rec = kernel.resume()
         if rec:
             ws.resume_launcher(rec)
@@ -422,4 +435,5 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     d.power_save_ms = power_save_ms
     d.fps_cap = fps_cap
     _census("spine done")
+    _stamp(kernel, 4)               # MOY_STAMP_WIRED
     return d

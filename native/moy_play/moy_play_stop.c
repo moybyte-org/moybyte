@@ -85,6 +85,7 @@
 void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
 void moy_kernel_say(const char *line);
 void moy_kernel_feed(void);
+void moy_kernel_stamp(int part);
 bool moy_loop_board_serial(void);
 // The updater's state (native/moy_net), where the image has it.
 typedef struct {
@@ -196,7 +197,8 @@ static uint64_t vm_heap_bytes(void) {
     return held;
 }
 
-uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags) {
+uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags,
+                              uint32_t fit[5]) {
     if (!(flags & MOY_PLAY_HOME)) {
         return MOY_PLAY_KEEP_ROUTE;
     }
@@ -227,12 +229,17 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     footprint(&m, &total, &block);
     size_t free_ = heap_caps_get_free_size(PSRAM_CAPS);
     size_t largest = heap_caps_get_largest_free_block(PSRAM_CAPS);
+    uint64_t held = vm_heap_bytes();
+    fit[0] = (uint32_t)total;
+    fit[1] = (uint32_t)block;
+    fit[2] = (uint32_t)free_;
+    fit[3] = (uint32_t)largest;
+    fit[4] = (uint32_t)held;
     if (!s_force && total <= free_ && block <= largest) {
         return MOY_PLAY_KEEP_FITS;
     }
     // What the stop gives back is at most the VM's heap: a cart that would
     // not fit even with all of it is the fit notice, with the VM up.
-    uint64_t held = vm_heap_bytes();
     if (total > free_ + held || block > largest + held) {
         return MOY_PLAY_KEEP_BIG;
     }
@@ -774,6 +781,8 @@ void moy_play_stopped_run(void) {
                        S->err, notice);
         }
     }
+    // The exit's first moment, which the return start is measured from.
+    moy_kernel_stamp(0);                // MOY_STAMP_EXIT
     pmem_save(cart);
     moycore_close_c();
     #ifdef STOP_AUDIO

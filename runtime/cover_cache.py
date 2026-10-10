@@ -64,9 +64,9 @@ collaborators follow.
 """
 
 try:
-    from editors import SpriteSheet
+    from editors_sheet import SpriteSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
 try:
     from ticks import _ticks_ms, _ticks_diff

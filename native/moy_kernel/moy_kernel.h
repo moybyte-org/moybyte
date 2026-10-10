@@ -6,6 +6,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "moy_crash.h"
 
@@ -72,5 +73,24 @@ void moy_kernel_say(const char *line);
 // One line of the heaps: `tag 1/1 when psram=FREE/LARGEST int=... dma=...`
 // and `extra` (the gate's PSRAM reading after a stop is "STOP 1/1 down").
 void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
+// DEV: PSRAM's large blocks by address (`HEAPWALK tag used|free ADDR SIZE`),
+// now, or (`at_stop`) before every heaps line read at a stop's down point and
+// at its run's end; `all` lists every used block, not only the large.
+void moy_kernel_heapwalk(const char *tag);
+void moy_kernel_heapwalk_at_stop(bool on, bool all);
+
+// THE START'S STAMPS (docs/kernel_cartpath_2026-10.md section 5.5): ms after
+// power-on of each part of a VM's start. EXIT is the last VM's end -- the
+// stopped run's end at a RETURN start, the teardown's first moment at a soft
+// reset, 0 at power-on -- and clears the rest; VM is the next VM's mp_init;
+// IMPORTS, WS and WIRED are the console's (desktop_spine: its build begins,
+// the Workstation is built, the wiring is done); FRAME is boot_ok, the first
+// frame the new VM drew (the first after each VM only). 0: not reached.
+enum {
+    MOY_STAMP_EXIT = 0, MOY_STAMP_VM = 1, MOY_STAMP_IMPORTS = 2, MOY_STAMP_WS = 3,
+    MOY_STAMP_WIRED = 4, MOY_STAMP_FRAME = 5, MOY_STAMPS = 6,
+};
+void moy_kernel_stamp(int part);
+const uint32_t *moy_kernel_stamps(void);
 
 #endif // MOY_KERNEL_H

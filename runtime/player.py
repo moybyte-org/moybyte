@@ -767,6 +767,33 @@ class Player:
             # heap it describes is gone.
             self._sram_run = _moycore_sram()
 
+    def release_radio(self):
+        """The run's radio leases go: the link's (its radio stopped) and the
+        run's own. A run's teardown calls it, and so does a RETURN start
+        (docs/kernel_cartpath_2026-10.md section 5.4), whose run ended in the
+        kernel with no VM to run this teardown: the leases are the kernel's
+        table, which the stop keeps."""
+        # Nobody to talk to, and power save back on. UNLESS a session is already arranged for the run about to
+        # start -- which is not a hypothetical: the way a match forms is that the
+        # peer's invite arrives while this console is already playing, sets
+        # ws.netplay, and re-runs the cart from frame zero. The dying run tears
+        # down here on the way through, and stopping the radio then killed the
+        # very session that triggered the restart. On glass that read as the host
+        # stalling at frame 0 forever while the guest played on alone, with
+        # nothing logged anywhere (#65, 2026-08-22). release_world has already
+        # cleared ws.netplay if the session belonged to THIS run, so what
+        # survives here belongs to the next one.
+        _link = getattr(self.ws, "link", None)
+        if _link is not None and self.ws.netplay is None:
+            try:
+                _link.stop()
+            except Exception:  # noqa: BLE001 -- teardown must never block an exit
+                pass
+            self.ws.wifi_release("link")
+        # ...and the run's own lease. Nothing else holds the WiFi at a plain
+        # exit, so this is where a console goes back to radio-off.
+        self.ws.wifi_release("cart")
+
     def release_world(self):
         """Drop the dead run's WORLD at EXIT, not at the next start (#66 the
         repeat-run fragmentation fix, glass-fingerprinted 2026-07-10): the ns
@@ -863,27 +890,8 @@ class Player:
             self.ws.input.netplay_live = False
         except Exception:  # noqa: BLE001
             pass
-        # ...and the radio goes down with it: nobody to talk to, and power save
-        # back on. UNLESS a session is already arranged for the run about to
-        # start -- which is not a hypothetical: the way a match forms is that the
-        # peer's invite arrives while this console is already playing, sets
-        # ws.netplay, and re-runs the cart from frame zero. The dying run tears
-        # down here on the way through, and stopping the radio then killed the
-        # very session that triggered the restart. On glass that read as the host
-        # stalling at frame 0 forever while the guest played on alone, with
-        # nothing logged anywhere (#65, 2026-08-22). The clause above has already
-        # cleared ws.netplay if the session belonged to THIS run, so what
-        # survives here belongs to the next one.
-        _link = getattr(self.ws, "link", None)
-        if _link is not None and self.ws.netplay is None:
-            try:
-                _link.stop()
-            except Exception:  # noqa: BLE001 -- teardown must never block an exit
-                pass
-            self.ws.wifi_release("link")
-        # ...and the run's own lease. Nothing else holds the WiFi at a plain
-        # exit, so this is where a console goes back to radio-off.
-        self.ws.wifi_release("cart")
+        # ...and the radio goes down with it.
+        self.release_radio()
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
         ws = self.ws
         rl = getattr(ws.canvas, "reclaim_layers", None)
@@ -1112,6 +1120,16 @@ class Player:
         err = self._gate_spec(ws, cart)
         if err is not None:
             return self._refuse(err)
+        _rt = project.cart.get("runtime", "python")
+        run = 0
+        if _rt != "python":
+            # The kernel decides the stop from the catalogue entry before
+            # anything of the run is built here (docs/kernel_cartpath_2026-10.md
+            # section 5.2): an audio session or a buffer made with the VM up
+            # would sit inside the free run the stop is about to widen.
+            run = self._launch_play(cart)
+            if run and self._stop_for(run, cart):
+                return True
         t_reclaim, t_audio = self._prepare_world(ws, project, cart, t0)
         wifi, net, gpio, console = self._grant_services(ws, project, cart)
         # #65 Phase 2: a linked two-console match. THIS is the moment a solo run
@@ -1172,16 +1190,12 @@ class Player:
         ns = self._build_namespace(ws, project, cart, wifi, net, gpio, console)
         t_api = _ticks_diff(_ticks_ms(), t2)
         src = project.cart["src"]
-        _rt = project.cart.get("runtime", "python")
         # The driving task's stack high-water mark before the runtime opens,
         # beside the Player's own readings after the open and the frames
         # (moy_play.info): what the cart path costs the S3s' stacks.
         _st = getattr(_moy_play, "stack", None)
         self.stack_pre = _st() if _st is not None else None
         if _rt != "python":
-            run = self._launch_play(cart)
-            if run and self._stop_for(run, cart):
-                return True
             ok = self._start_runtime(_rt, ns, src, t0, h0,
                                      (t_reclaim, t_audio, t_api))
             if ok:

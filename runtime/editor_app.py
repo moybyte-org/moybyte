@@ -42,13 +42,14 @@ so the device freezes it (same pattern as project.py/player.py). It stays a leaf
 NAMES/_in aren't needed (it reaches the toolkit through `ws`), and CodeEditor/
 PaintEditor are imported from the shared editor cores (the same bare-or-package
 fallback console.py uses: bare names on the device / once host_app has aliased them,
-`runtime.X` when a test loads this module directly).
+`runtime.X` when a test loads this module directly) -- PaintEditor at the paint
+tab's first build, so the shell's start does not load the paint/map cores.
 """
 
 try:
-    from editors import CodeEditor, PaintEditor
+    from editors_code import CodeEditor
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import CodeEditor, PaintEditor
+    from runtime.editors_code import CodeEditor
 
 try:
     from bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
@@ -325,6 +326,10 @@ class EditorApp:
                     ws.code_err_row = None
         elif view == "paint":
             if ws.paint is None and ws.sheet is not None:
+                try:
+                    from editors_paint_map import PaintEditor
+                except ImportError:  # pragma: no cover - host fallback
+                    from runtime.editors_paint_map import PaintEditor
                 ws.paint = PaintEditor(ws.sheet)
         elif view == "map":
             # Mirror the paint branch: build the MapEditor over the cart's TileMap

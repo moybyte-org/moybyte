@@ -807,6 +807,13 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["crash_err"] = str(exc)
     try:
+        # How this VM started and what each part of it took, from the
+        # kernel's stamps (docs/kernel_cartpath_2026-10.md section 5.5).
+        # None on a tier without them.
+        st["start"] = kernel_start()
+    except Exception as exc:  # noqa: BLE001
+        st["start_err"] = str(exc)
+    try:
         # The #7 radio. A board with no link reports None -- never a zeroed
         # tuple, because a board that HAS one and is simply not paired must be
         # distinguishable from a board that can never pair. (The scale-fold
@@ -916,6 +923,9 @@ def _remote_state(ws):
         if st["run"] is not None and info is not None and len(info) > 12:
             st["run"]["stop"] = info[11]
             st["run"]["vm_down"] = bool(info[12])
+            # the verdict's fit check with the VM up: (need, need_block,
+            # free, largest, vm_heap) bytes, None where it reached none
+            st["run"]["fit"] = list(info[13]) if len(info) > 13 and info[13] else None
         st["play"] = (None if info is None else
                       {"runtime": info[0], "frames": info[3], "ticks": info[4],
                        "upcalls": list(info[5]),
@@ -937,6 +947,35 @@ def _remote_state(ws):
         st["sram_err"] = str(exc)
     return st
 
+
+
+START_PARTS = ("vm", "imports", "workstation", "wiring", "first_frame")
+
+
+def start_parts(kind, stamps):
+    """The start's parts from the kernel's six stamps (ms after power-on:
+    exit, vm, imports, ws, wired, frame; None where not reached): {"kind",
+    "total", and each of START_PARTS} in ms, a part None when either of its
+    ends is missing. `exit` is 0 at power-on, so a boot's total is from it."""
+    out = {"kind": kind}
+    for k, name in enumerate(START_PARTS):
+        a, b = stamps[k], stamps[k + 1]
+        out[name] = None if a is None or b is None else b - a
+    first, last = stamps[0], stamps[-1]
+    out["total"] = None if first is None or last is None else last - first
+    return out
+
+
+def kernel_start():
+    """start_parts() for the running VM, or None without the kernel's stamps."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return None
+    stamps = getattr(moy_kernel, "stamps", None)
+    if stamps is None:
+        return None
+    return start_parts(moy_kernel.start(), stamps())
 
 class DevChannel:
     """Line commands over USB-CDC stdin, read one byte at a time.

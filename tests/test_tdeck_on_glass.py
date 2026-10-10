@@ -432,7 +432,7 @@ def test_vm_stops_leave_psram_flat_and_the_routes_read_back(board):
 
 
 def test_doom_runs_with_the_vm_down(board):
-    on_glass.doom_runs_with_the_vm_down(board)
+    on_glass.doom_runs_with_the_vm_down(board, hold_link=True)
 
 
 def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):

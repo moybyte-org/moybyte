@@ -13,6 +13,11 @@
 //   moy_kernel.stop()              the loop ends at this frame and the VM stops
 //                                  for the run the Player launched
 //   moy_kernel.resume([text])      the resume record: set it, or read it (None)
+//   moy_kernel.stamp(part)         the console's part of the start: 2 IMPORTS,
+//                                  3 WS, 4 WIRED (moy_kernel.h's MOY_STAMP_*)
+//   moy_kernel.stamps()            the start's six stamps, ms after power-on
+//                                  (None: not reached): exit, vm, imports, ws,
+//                                  wired, frame
 //
 //   moy_crash.arm(role, id)        the ledger's OPEN id (None clears), into RTC
 //   moy_crash.last()               the last record this board made, or None
@@ -75,6 +80,25 @@ static mp_obj_t mod_resume(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_resume_obj, 0, 1, mod_resume);
 
+static mp_obj_t mod_stamp(mp_obj_t part) {
+    int k = mp_obj_get_int(part);
+    if (k > MOY_STAMP_VM && k < MOY_STAMP_FRAME) {
+        moy_kernel_stamp(k);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_stamp_obj, mod_stamp);
+
+static mp_obj_t mod_stamps(void) {
+    const uint32_t *s = moy_kernel_stamps();
+    mp_obj_t t[MOY_STAMPS];
+    for (int k = 0; k < MOY_STAMPS; k++) {
+        t[k] = s[k] || k == MOY_STAMP_EXIT ? mp_obj_new_int_from_uint(s[k]) : mp_const_none;
+    }
+    return mp_obj_new_tuple(MOY_STAMPS, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_stamps_obj, mod_stamps);
+
 static mp_obj_t mod_boot_failed(mp_obj_t what) {
     moy_kernel_boot_failed(mp_obj_str_get_str(what));
     return mp_const_none;
@@ -135,6 +159,8 @@ static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&mod_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mod_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_resume), MP_ROM_PTR(&mod_resume_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stamp), MP_ROM_PTR(&mod_stamp_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stamps), MP_ROM_PTR(&mod_stamps_obj) },
     { MP_ROM_QSTR(MP_QSTR_boot_failed), MP_ROM_PTR(&mod_boot_failed_obj) },
     { MP_ROM_QSTR(MP_QSTR_mode), MP_ROM_PTR(&mod_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_test), MP_ROM_PTR(&mod_test_obj) },

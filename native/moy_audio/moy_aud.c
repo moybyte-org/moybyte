@@ -656,6 +656,15 @@ size_t moy_aud_trace_read(int32_t *rows, size_t max) {
 
 // -- a compiled cart's stream (moy_audio_snd.h) ------------------------------------
 
+// The stream's ring, made ahead of the first compiled cart (the kernel calls
+// it before the VM's first area, so a stopped run's ring is not left inside
+// the free run the stop gave it).
+void moy_aud_reserve(void) {
+    if (A.pcm_ring == NULL) {
+        A.pcm_ring = aud_alloc(MOY_AUDIO_SND_DEPTH * sizeof(int16_t));
+    }
+}
+
 int moy_audio_snd_open(void) {
     size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
     if (!moy_aud_out_plays()) {

@@ -438,9 +438,10 @@ def lockstep(run):
 
 def info(run=None):
     """(runtime, vm_free, why, frames, ticks, upcalls, ended, error, stack_open,
-    stack_frame, end_why, stop, vm_down), or None for a handle that names no
-    run. `stop` is the launch's stop verdict ("stops", or the clause that kept
-    the VM: STOP_WHYS)."""
+    stack_frame, end_why, stop, vm_down, fit), or None for a handle that names
+    no run. `stop` is the launch's stop verdict ("stops", or the clause that
+    kept the VM: STOP_WHYS); `fit` the verdict's fit check with the VM up
+    (need, need_block, free, largest, vm_heap), None where it reached none."""
     d, lb = _play()
     i = lb.PlayInfo()
     if d.hl_play_info(d.hl_play_last() if run is None else int(run), ctypes.byref(i)) != 0:
@@ -451,7 +452,7 @@ def info(run=None):
             i.frames, i.ticks, tuple(i.upcalls), bool(i.ended),
             i.error.decode("utf-8", "replace") if i.raised else None) + st + (
                 i.end_why, STOP_WHYS[i.stop_why] if i.stop_why < len(STOP_WHYS) else "?",
-                bool(i.vm_down))
+                bool(i.vm_down), tuple(i.fit) if i.fit[0] else None)
 
 
 def current():

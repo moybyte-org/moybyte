@@ -1685,3 +1685,17 @@ def test_kstop_hands_the_kernel_its_count_and_leaves_the_console(monkeypatch,
     else:
         raise AssertionError("the console stayed")
     assert asked == [3] and "REMOTE kstop 3" in capsys.readouterr().out
+
+
+def test_start_parts_split_the_kernels_stamps():
+    """`state`'s `start` (docs/kernel_cartpath_2026-10.md section 5.5): each
+    part is the gap between two of the kernel's stamps, the total from the
+    last VM's end; a part with a missing end is None, never 0."""
+    from runtime.dev_channel import start_parts
+    got = start_parts("return", (1000, 1150, 2200, 3500, 4500, 4650))
+    assert got == {"kind": "return", "vm": 150, "imports": 1050,
+                   "workstation": 1300, "wiring": 1000, "first_frame": 150,
+                   "total": 3650}
+    got = start_parts("boot", (0, 430, 1300, None, None, None))
+    assert got["vm"] == 430 and got["imports"] == 870
+    assert got["workstation"] is None and got["total"] is None

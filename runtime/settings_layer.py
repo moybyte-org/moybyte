@@ -41,9 +41,9 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime.crash_guard import crash_available, crash_lines, last_crash
 
 try:
-    from editors import TextEntry, TE_COMMIT, TE_CANCEL
+    from editors_base import TextEntry, TE_COMMIT, TE_CANCEL
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import TextEntry, TE_COMMIT, TE_CANCEL
+    from runtime.editors_base import TextEntry, TE_COMMIT, TE_CANCEL
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 

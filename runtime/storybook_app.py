@@ -34,9 +34,11 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 import json
 
 try:
-    from editors import CodeEditor, KeyEdge
+    from editors_code import CodeEditor
+    from editors_base import KeyEdge
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.editors import CodeEditor, KeyEdge
+    from runtime.editors_code import CodeEditor
+    from runtime.editors_base import KeyEdge
 
 try:
     from widgets import ConfirmTap

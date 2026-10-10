@@ -363,9 +363,11 @@ static mp_obj_t stack_obj(uint32_t v) {
 }
 
 // info([run]) -> (runtime, vm_free, why, frames, ticks, upcalls, ended,
-// error, stack_open, stack_frame, end_why, stop, vm_down), the live run's or
-// the last one's (`stop`: the launch's stop verdict, "stops" or the clause
-// that kept the VM; `vm_down`: it ran with the VM stopped); None when
+// error, stack_open, stack_frame, end_why, stop, vm_down, fit), the live run's
+// or the last one's (`stop`: the launch's stop verdict, "stops" or the clause
+// that kept the VM; `vm_down`: it ran with the VM stopped; `fit`: the
+// verdict's fit check with the VM up -- (need, need_block, free, largest,
+// vm_heap) bytes -- or None when it did not reach one); None when
 // there is none. `upcalls` is a tuple by class: CONSOLE, APP, DRIVER,
 // SERVICE, REFUSED; the two stack readings are moy_play.stack()'s, taken
 // after the open and after the last frame, None off a board.
@@ -381,7 +383,15 @@ static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
     }
     const char *why = moy_play_why_name(i.why);
     const char *stop = moy_play_stop_name(i.stop_why);
-    mp_obj_t t[13] = {
+    mp_obj_t fit = mp_const_none;
+    if (i.fit[0] != 0u) {
+        mp_obj_t f[5];
+        for (int k = 0; k < 5; k++) {
+            f[k] = mp_obj_new_int_from_uint(i.fit[k]);
+        }
+        fit = mp_obj_new_tuple(5, f);
+    }
+    mp_obj_t t[14] = {
         mp_obj_new_str(i.runtime, strlen(i.runtime)),
         mp_obj_new_bool(i.vm_free),
         mp_obj_new_str(why, strlen(why)),
@@ -395,8 +405,9 @@ static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
         MP_OBJ_NEW_SMALL_INT(i.end_why),
         mp_obj_new_str(stop, strlen(stop)),
         mp_obj_new_bool(i.vm_down),
+        fit,
     };
-    return mp_obj_new_tuple(13, t);
+    return mp_obj_new_tuple(14, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_info_obj, 0, 1, mod_info);
 

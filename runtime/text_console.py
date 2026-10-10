@@ -51,9 +51,11 @@ script it starts.
 """
 
 try:
-    from editors import CodeEditor, KeyEdge
+    from editors_code import CodeEditor
+    from editors_base import KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import CodeEditor, KeyEdge
+    from runtime.editors_code import CodeEditor
+    from runtime.editors_base import KeyEdge
 
 try:
     from code_layer import symbols_for, draw_symbol_keys

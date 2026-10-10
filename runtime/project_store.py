@@ -35,9 +35,9 @@ test loads this module directly.
 import json
 
 try:
-    from editors import SpriteSheet, TileMap
+    from editors_sheet import SpriteSheet, TileMap
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import SpriteSheet, TileMap
+    from runtime.editors_sheet import SpriteSheet, TileMap
 try:
     from audio import AudioBank
 except ImportError:  # pragma: no cover - host fallback when not yet aliased

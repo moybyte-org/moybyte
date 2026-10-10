@@ -19,6 +19,16 @@ from . import audio as _audio
 from . import blocks as _blocks
 from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
+# ...and the cores the shell imports from their own modules (console.py,
+# chrome.py, code_layer.py: the umbrella stays out of the shell's start).
+from . import editors_base as _editors_base
+from . import editors_code as _editors_code
+from . import editors_sheet as _editors_sheet
+from . import editors_paint_map as _editors_paint_map
+sys.modules.setdefault("editors_base", _editors_base)
+sys.modules.setdefault("editors_code", _editors_code)
+sys.modules.setdefault("editors_sheet", _editors_sheet)
+sys.modules.setdefault("editors_paint_map", _editors_paint_map)
 sys.modules.setdefault("audio", _audio)
 sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
 # block_editor_ui.py / map_editor_ui.py / music_editor_ui.py are the block/map/

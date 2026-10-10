@@ -23,9 +23,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
-    from editors import TextEntry
+    from editors_base import TextEntry
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import TextEntry
+    from runtime.editors_base import TextEntry
 
 try:
     from file_widgets import FileGridView

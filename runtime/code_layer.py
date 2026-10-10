@@ -36,7 +36,8 @@ highlight memo _hl_cache). ws.nav (the trackball-caret handler, called by both t
 the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
 injected.
 """
-from editors import CodeEditor, KeyEdge
+from editors_code import CodeEditor
+from editors_base import KeyEdge
 
 try:
     import ui as _ui

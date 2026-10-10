@@ -41,9 +41,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
 
 try:
-    from editors import TE_COMMIT, TE_CANCEL
+    from editors_base import TE_COMMIT, TE_CANCEL
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import TE_COMMIT, TE_CANCEL
+    from runtime.editors_base import TE_COMMIT, TE_CANCEL
 
 
 class ListShellLayout:

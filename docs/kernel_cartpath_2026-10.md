@@ -339,7 +339,14 @@ The run keeps the VM when any of these holds, and `info` names which:
    arms the crash record, and answers. Nothing of the cart is loaded yet:
    buffers made before the stop would sit inside the free run the stop is
    about to widen, and the census saw a few tens of KB of new buffers cost the
-   T-Deck's largest block hundreds of KB (#224).
+   T-Deck's largest block hundreds of KB (#224). The Python Player launches
+   the run before it builds anything of its own (the audio session, the
+   namespace), and what the kernel keeps for runs -- the Player's row, the
+   front's chrome list, the compiled cart's stream ring, the resume record --
+   is made before the VM's first area (`moy_kernel_reserve`), below every
+   area a VM will hold. The `heapwalk` dev word lists PSRAM's blocks by
+   address, at the stop's down point and its run's end with `heapwalk stop
+   all`.
 2. Before it returns, the launcher writes its place — shelf, selection,
    scroll, search — to its resume record (§5.4), and the badges the launch
    earned post their toast.
@@ -410,13 +417,27 @@ and none of them is carried over (§9 decision 2).
 
 ### 5.5 The return, measured
 
-The kernel stamps the exit's first moment and the first console frame the new
-VM draws, and `state` reads the difference with its parts: VM start, imports,
-the Workstation, the wiring, the first frame. The gate takes it on both S3s,
-five runs fresh and five after the census's session. Two Python levers are
-taken before it is measured (§6 step 4): the launcher's import chain stops
-pulling the editors, and the apps are constructed at their first open rather
-than at boot.
+The kernel stamps each VM start (`moy_kernel.h`'s `MOY_STAMP_*`, ms after
+power-on): the last VM's end -- the stopped run's end at a return start, the
+teardown's first moment at a soft reset, power-on at a boot -- the next VM's
+`mp_init`, the console's build beginning, the Workstation built, the wiring
+done (`device/desktop_spine.py` stamps those three) and the first frame
+(`boot_ok`). `state` reads them as `start`: the kind and the parts VM start,
+imports, the Workstation (the store's scan included), the wiring, the first
+frame, and their total. The gate takes it on both S3s, five runs fresh and
+five after the census's session; #224 holds the figures. The `on-glass`
+suites hold a return start to every part being read.
+
+Two Python levers are taken before it is measured (§6 step 4,
+2026-10-10). The shell's import chain stops pulling the editors: the
+block, map, scene and music editors' UIs and the paint surface are
+`Workstation` properties built at their first use (`runtime/console.py`'s
+`_LAZY_MODULES`), and the shell's modules import the editor cores they use
+from their own modules rather than the `editors` umbrella. And the apps'
+cost at a start is Paint's document, which `PaintAppLayer` builds at its
+first use: the six apps are still constructed and registered at the start,
+because the others each construct in a few milliseconds (#224) and the
+registry's identity, relayout and window wiring read the live objects.
 
 ### 5.6 The stop inventory rows that must hold
 
@@ -510,7 +531,7 @@ Each item fails with its bug present.
 | the kernel stops the VM when, and only when, the run needs it | `state` reads the VM down through Doom on both S3s and up through every seed Lua cart; `kstop N stop` flat with the routes and leases read back | a refusal that should not fire, a stop nobody needed, a stop that soft-resets instead, a sweep that frees kernel state |
 | cart-available PSRAM | free and largest block right after the stop and before the load, worst of five boots fresh and after the census's session (`tools/mem_census.py`), both S3s, within 64 KiB (configuration: the run's table and chrome rows) of the `kstop N stop` no-cart baseline on the same boot, and at or above the plan's §6.1 values | memory the stop does not return, a buffer made before the stop splitting the free run |
 | Doom | loads and plays on a T-Deck after the scripted session and on a fresh Guition S3, five boots each, and 20 launch/exit cycles on each with its fit passing on the largest block every time | the same, measured by the cart the plan's §1.1 is written for |
-| the VM-free census | every seed cart and every `make -C libmoy p8-carts` cart with its runtime and `moy_play_vm_free`'s verdict and reason, pinned; on each S3 the run's `info` agrees | a rule that drifts, a permission spelled wrong, a cart that silently keeps the VM |
+| the VM-free census | every seed cart and every `make -C libmoy p8-carts` cart with its runtime and `moy_play_vm_free`'s verdict and reason, pinned; on each S3 the run's `info` agrees (`tools/vm_free_census.py --board`, which also holds every VM-free run's books to the zero-upcall row) | a rule that drifts, a permission spelled wrong, a cart that silently keeps the VM |
 | exit to the launcher | §5.5's stamp: under `need`, a non-stopping exit within noise of dev's; a stopping exit against the owner's budget | a slow return, a lost resume record |
 | the standing meters | the four-board pass; both S3s' uncapped roster; Bench's µs per op, each console; `KERNEL_SRAM` at the launcher with the VM up, and internal free and low-water with a VM-free Lua run in front reported beside it (moycore's allocator takes internal SRAM above its floor, so that figure is the run's, not the kernel's); every image above its floor, the Zero's above 256 KiB; reboot to first light and to `state` per console | the regressions every sprint guards |
 

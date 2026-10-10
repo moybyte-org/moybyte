@@ -420,6 +420,7 @@ int moy_kernel_mode(void) {
 }
 
 void moy_kernel_boot_ok(void) {
+    moy_kernel_stamp(MOY_STAMP_FRAME);
     s_proven = true;
     moy_boot_proven(&s_kst);
 }
@@ -947,6 +948,18 @@ __attribute__((weak)) void moy_glass_vm_swept(void) {
 __attribute__((weak)) void moy_play_vm_stop(void) {
 }
 
+// The Player's own row (native/moy_play), made before the VM's first area:
+// `alloc` is the kernel's PSRAM allocator. Weak, so an image without the
+// Player links.
+__attribute__((weak)) void moy_play_reserve(void *(*alloc)(size_t n)) {
+    (void)alloc;
+}
+
+// The compiled cart's audio stream ring (native/moy_audio). Weak, so an image
+// without the audio module links.
+__attribute__((weak)) void moy_aud_reserve(void) {
+}
+
 // The links' teardown (native/moy_net/moy_ota.h): the client's connections and
 // an update still streaming are closed with the VM that opened them. Weak, so
 // an image without moy_net links.
@@ -1067,12 +1080,41 @@ int moy_kernel_start(void) {
     return s_start;
 }
 
+// The start's stamps (moy_kernel.h): internal RAM, a reboot's to clear.
+static uint32_t s_stamps[MOY_STAMPS];
+
+void moy_kernel_stamp(int part) {
+    if (part < 0 || part >= MOY_STAMPS) {
+        return;
+    }
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (part == MOY_STAMP_EXIT) {
+        memset(s_stamps, 0, sizeof(s_stamps));
+    } else if (part == MOY_STAMP_FRAME && s_stamps[MOY_STAMP_FRAME] != 0u) {
+        return;
+    }
+    s_stamps[part] = now ? now : 1u;
+}
+
+const uint32_t *moy_kernel_stamps(void) {
+    return s_stamps;
+}
+
+static void *kernel_psram(size_t n) {
+    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static void moy_kernel_reserve(void) {
+    if (s_resume == NULL) {
+        s_resume = kernel_psram(sizeof(resume_t));
+    }
+    moy_play_reserve(kernel_psram);
+    moy_aud_reserve();
+}
+
 void moy_kernel_resume_set(const char *text, size_t n) {
     if (s_resume == NULL) {
-        s_resume = heap_caps_calloc(1, sizeof(resume_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s_resume == NULL) {
-            return;
-        }
+        return;
     }
     if (n > MOY_KERNEL_RESUME_MAX) {
         n = MOY_KERNEL_RESUME_MAX;
@@ -1169,8 +1211,69 @@ static void moy_kernel_kstop_line(const char *when) {
 
 // The heaps, one line: `tag i/n when psram=FREE/LARGEST int=... dma=...` and
 // `extra` after them.
+// THE PSRAM WALK (`heapwalk`, a dev word): every used block of at least
+// WALK_USED bytes (every used block at all, `all`) and every free one of at
+// least WALK_FREE, by address, so what splits the free run is named by where
+// it sits. Gathered under the heap's lock into a static table, printed after
+// it; past WALK_MAX rows the rest are counted as small.
+#define WALK_MAX 96
+#define WALK_USED 2048u
+#define WALK_FREE (128u * 1024u)
+typedef struct {
+    uint32_t n, skipped_used, skipped_bytes;
+    struct { uintptr_t at; uint32_t size; bool used; } b[WALK_MAX];
+} walk_t;
+static walk_t *s_walk;
+static bool s_walk_on;
+static uint32_t s_walk_used = WALK_USED;
+
+static bool walk_block(walker_heap_into_t heap, walker_block_info_t blk, void *user) {
+    (void)heap;
+    walk_t *w = user;
+    if ((blk.used && blk.size < s_walk_used) || (!blk.used && blk.size < WALK_FREE)
+        || w->n >= WALK_MAX) {
+        if (blk.used) {
+            w->skipped_used++;
+            w->skipped_bytes += (uint32_t)blk.size;
+        }
+        return true;
+    }
+    w->b[w->n].at = (uintptr_t)blk.ptr;
+    w->b[w->n].size = (uint32_t)blk.size;
+    w->b[w->n].used = blk.used;
+    w->n++;
+    return true;
+}
+
+void moy_kernel_heapwalk(const char *tag) {
+    if (s_walk == NULL) {
+        s_walk = heap_caps_malloc(sizeof(walk_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (s_walk == NULL) {
+            printf("HEAPWALK %s: no memory\n", tag);
+            return;
+        }
+    }
+    memset(s_walk, 0, sizeof(walk_t));
+    heap_caps_walk(MALLOC_CAP_SPIRAM, walk_block, s_walk);
+    for (uint32_t k = 0; k < s_walk->n; k++) {
+        printf("HEAPWALK %s %s 0x%08x %u\n", tag, s_walk->b[k].used ? "used" : "free",
+               (unsigned)s_walk->b[k].at, (unsigned)s_walk->b[k].size);
+    }
+    printf("HEAPWALK %s small used=%u bytes=%u\n", tag, (unsigned)s_walk->skipped_used,
+           (unsigned)s_walk->skipped_bytes);
+    fflush(stdout);
+}
+
+void moy_kernel_heapwalk_at_stop(bool on, bool all) {
+    s_walk_on = on;
+    s_walk_used = all ? 1u : WALK_USED;
+}
+
 static void moy_kernel_heaps_line(const char *tag, int i, int n, const char *when,
                                   const char *extra) {
+    if (s_walk_on && (strcmp(when, "down") == 0 || strcmp(when, "ended") == 0)) {
+        moy_kernel_heapwalk(tag);
+    }
     printf("%s %d/%d %s psram=%u/%u int=%u/%u/%u dma=%u/%u/%u%s%s\n",
            tag, i, n, when,
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -1281,6 +1384,12 @@ static void moy_vm_task(void *pvParameter) {
     // MOY: the boot decision; the floor in place of a start.
     moy_boot_decision_t d = moy_kernel_decide();
 
+    // MOY: what the kernel keeps for a run is made before the VM's first area,
+    // below every area a VM will hold: a table made at a launch, with the VM's
+    // areas in place, would sit inside the free run the VM's stop leaves and
+    // split it (docs/kernel_cartpath_2026-10.md section 5.2).
+    moy_kernel_reserve();
+
     // MOY: a missing first area lands on the floor instead of restarting.
     void *mp_task_heap = d.test == MOY_TEST_HEAP ? NULL
                          : MP_PLAT_ALLOC_HEAP(MICROPY_GC_INITIAL_HEAP_SIZE);
@@ -1296,6 +1405,7 @@ soft_reset:
     mp_cstack_init_with_top((void *)sp, MICROPY_TASK_STACK_SIZE);
     gc_init(mp_task_heap, mp_task_heap + MICROPY_GC_INITIAL_HEAP_SIZE);
     mp_init();
+    moy_kernel_stamp(MOY_STAMP_VM);
     // MOY: the kernel modules' cached VM objects were the last heap's.
     moy_kernel_vm_fresh();
     // MOY: the frame's stages are the board's, and upcalls may register.
@@ -1365,6 +1475,8 @@ soft_reset:
 
 soft_reset_exit:
 
+    // MOY: the last VM's end (a stop's run stamps its own end again).
+    moy_kernel_stamp(MOY_STAMP_EXIT);
     // MOY: no upcall from here on; the loop holds none of this VM's objects.
     moy_loop_board_vm_stop();
     moy_kernel_rest();

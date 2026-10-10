@@ -136,9 +136,10 @@ def test_every_run_reports_the_census_verdict_for_its_cart(tmp_path):
         # Where the Player has the run, its stop verdict too: no seed game
         # stops the VM (the host has no stop; on a board the `need` policy
         # keeps it for every seed, which fits).
-        stop = {k: run.pop(k) for k in ("stop", "vm_down") if k in run}
-        assert stop in ({}, {"stop": "lever", "vm_down": False},
-                        {"stop": "rule", "vm_down": False}), (cart["title"], stop)
+        stop = {k: run.pop(k) for k in ("stop", "vm_down", "fit") if k in run}
+        assert stop in ({}, {"stop": "lever", "vm_down": False, "fit": None},
+                        {"stop": "rule", "vm_down": False, "fit": None}), \
+            (cart["title"], stop)
         assert run == {"runtime": want[0], "vm_free": want[1], "why": want[2]}, \
             (cart["title"], run, want)
         if os.path.basename(cart["path"].rstrip("/")) in SEED_FREE:
@@ -146,3 +147,25 @@ def test_every_run_reports_the_census_verdict_for_its_cart(tmp_path):
             seen += 1
         ws.exit()
     assert seen >= 3, "the shelf no longer carries the VM-free seed games"
+
+
+def test_the_glass_census_judges_verdict_and_crossings():
+    """tools/vm_free_census.py --board's judgement: the run's verdict must be
+    the host's, a VM-free run's books from launch to the exit's request hold
+    no APP, SERVICE or REFUSED crossing, and no CONSOLE one when the kernel
+    drove it, and the run then ends."""
+    from tools.vm_free_census import judge
+    want = ("lua", True, "free")
+    run = {"runtime": "lua", "vm_free": True, "why": "free"}
+    assert judge(want, run, [0, 0, 0, 0, 0], True, True) == []
+    assert judge(want, run, [40, 0, 0, 0, 0], True, False) == []
+    assert judge(want, run, [40, 0, 0, 0, 0], True, True) == [
+        "40 console crossings in a kernel-driven run"]
+    assert judge(want, run, [0, 1, 0, 2, 3], True, False) == [
+        "1 app crossings", "2 service crossings", "3 refused crossings"]
+    assert judge(want, run, [0, 0, 0, 0, 0], False, True) == ["the run did not end"]
+    assert judge(want, run, None, True, False) == ["no run in the kernel's Player"]
+    assert judge(want, None, None, True, False)[0].startswith("verdict")
+    assert judge(("python", False, "runtime"),
+                 {"runtime": "python", "vm_free": False, "why": "runtime"},
+                 None, True, False) == []
