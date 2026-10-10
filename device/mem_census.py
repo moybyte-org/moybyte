@@ -142,6 +142,15 @@ def _hook_imports():
         import builtins
     except ImportError:
         return
+    # A board's kernel times them in C (moy_kernel.time_imports): one C
+    # frame a level, where this hook's Python frame a level once left an
+    # armed start 88 bytes of the VM task's stack.
+    try:
+        import moy_kernel
+        builtins.__import__ = moy_kernel.time_imports(IMPORTS)
+        return
+    except (ImportError, AttributeError):
+        pass
     orig = builtins.__import__
     depth = [0]
     seen = set()

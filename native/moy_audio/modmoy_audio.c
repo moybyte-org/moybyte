@@ -55,6 +55,7 @@ static mp_obj_t mod_open(size_t n_args, const mp_obj_t *a) {
         text = mp_obj_str_get_data(a[1], &n);
     }
     check(moy_aud_open(&h, (uint32_t)mp_obj_get_int(a[0]), text, n));
+    moy_aud_vm_owned(h);
     return mp_obj_new_int_from_uint(h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_open_obj, 1, 2, mod_open);

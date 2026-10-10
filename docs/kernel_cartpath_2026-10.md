@@ -344,7 +344,11 @@ The run keeps the VM when any of these holds, and `info` names which:
    namespace), and what the kernel keeps for runs -- the Player's row, the
    front's chrome list, the compiled cart's stream ring, the resume record --
    is made before the VM's first area (`moy_kernel_reserve`), below every
-   area a VM will hold. The `heapwalk` dev word lists PSRAM's blocks by
+   area a VM will hold. So is the kernel's small-block pool
+   (`moy_kernel.h`): the store, the glass, the mixer, the spine, the loop,
+   input and the net layer take every block of at most a kilobyte from it,
+   so nothing they keep past a call lands among the VM's areas, and the
+   audio sessions a VM opened close when it ends. The `heapwalk` dev word lists PSRAM's blocks by
    address, at the stop's down point and its run's end with `heapwalk stop
    all`.
 2. Before it returns, the launcher writes its place — shelf, selection,

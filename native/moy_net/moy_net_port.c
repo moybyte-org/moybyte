@@ -39,12 +39,24 @@ void moy_net_sleep_ms(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms ? ms : 1));
 }
 
+// The kernel's small-block pool (moy_kernel.h), where the image has it: the
+// decoded keys live for the board's life, made at the first check.
+void *moy_kpool_alloc(size_t n) __attribute__((weak));
+bool moy_kpool_free(void *p) __attribute__((weak));
+
 void *moy_net_alloc(size_t n) {
+    void *q = moy_kpool_alloc != NULL ? moy_kpool_alloc(n) : NULL;
+    if (q != NULL) {
+        return q;
+    }
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
     return p != NULL ? p : heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
 }
 
 void moy_net_free(void *p) {
+    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
+        return;
+    }
     heap_caps_free(p);
 }
 #elif MOY_NET_POSIX

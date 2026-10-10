@@ -51,11 +51,21 @@
 
 // -- the allocator -------------------------------------------------------------
 
+// The kernel's small-block pool (moy_kernel.h), where the image has it.
+void *moy_kpool_alloc(size_t n) __attribute__((weak));
+bool moy_kpool_free(void *p) __attribute__((weak));
+
 #ifdef MOY_SPINE_BOARD
 // PSRAM, zeroed. A board with no PSRAM at all takes the default heap; one whose
 // PSRAM is merely full refuses, rather than spend internal SRAM.
 static void *spine_alloc(size_t n) {
     n = n ? n : 1u;
+    if (moy_kpool_alloc != NULL) {
+        void *q = moy_kpool_alloc(n);
+        if (q != NULL) {
+            return q;
+        }
+    }
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
         p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
@@ -65,6 +75,9 @@ static void *spine_alloc(size_t n) {
 
 static void spine_release(void *p, size_t n) {
     (void)n;
+    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
+        return;
+    }
     heap_caps_free(p);
 }
 #else

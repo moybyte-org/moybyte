@@ -69,6 +69,11 @@ int moy_aud_focus(uint32_t s);
 uint32_t moy_aud_focused(void);
 // Voices silenced, bank and state freed; a focused session leaves the mix.
 int moy_aud_close(uint32_t s);
+// A VM's sessions end with it: the binding marks each it opens, and the
+// kernel closes them all when a VM ends (a soft reset or a stop), so none is
+// left inside the free run a stop gives the next run. The count closed.
+int moy_aud_vm_owned(uint32_t s);
+int moy_aud_close_vm(void);
 
 // SPEC.md 8.2, one entry per verb, addressed to a session.
 int moy_aud_sfx(uint32_t s, int n, int chan);          // chan < 0: libmoy's round-robin

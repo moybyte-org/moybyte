@@ -93,4 +93,21 @@ enum {
 void moy_kernel_stamp(int part);
 const uint32_t *moy_kernel_stamps(void);
 
+// THE KERNEL'S SMALL-BLOCK POOL (moy_kernel.c). A kernel table or string that
+// outlives the call that made it -- a store marker, a glass or audio table's
+// rows, a spine table's growth -- made while a VM is up would land among the
+// VM's heap areas, and a VM stop would find it splitting the free run it gives
+// the next cart (#224). The store, the glass, the audio mixer and the spine
+// take every block of at most MOY_KPOOL_MAX bytes from this pool, made before
+// the VM's first area and below every area a VM holds; a larger block, or one
+// the full pool cannot take, comes from PSRAM as before.
+#define MOY_KPOOL_BYTES (64u * 1024u)
+#define MOY_KPOOL_MAX 1024u
+// A zeroed block from the pool, or NULL: too big, the pool full, or no pool.
+void *moy_kpool_alloc(size_t n);
+// Frees `p` when it is the pool's: false when it is not.
+bool moy_kpool_free(void *p);
+// (bytes in use at the high water, allocations the pool could not take)
+void moy_kpool_stats(size_t *high, uint32_t *misses);
+
 #endif // MOY_KERNEL_H

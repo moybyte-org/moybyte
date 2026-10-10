@@ -7,6 +7,7 @@
 // the lock. What the feeder reads -- the focused row's synth and sample voices,
 // the console level, the stream -- changes only under the lock.
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,6 +28,7 @@ typedef struct {
 
 typedef struct {
     uint32_t owner;
+    bool vm;                    // a VM opened it (moy_aud_vm_owned): it ends with the VM
     int level;                  // the session's own, 0..7
     moy_bank *bank;
     moy_audio *a;
@@ -62,8 +64,20 @@ static aud_t A = {.rate = 22050, .console = 7};
 
 // -- memory: PSRAM on a board, the C heap elsewhere ----------------------------
 
+#if MOY_AUD_BOARD
+// The kernel's small-block pool (moy_kernel.h), where the image has it.
+void *moy_kpool_alloc(size_t n) __attribute__((weak));
+bool moy_kpool_free(void *p) __attribute__((weak));
+#endif
+
 static void *aud_alloc(size_t n) {
 #if MOY_AUD_BOARD
+    if (moy_kpool_alloc != NULL) {
+        void *q = moy_kpool_alloc(n);
+        if (q != NULL) {
+            return q;
+        }
+    }
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (p == NULL) {
         p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
@@ -77,6 +91,9 @@ static void *aud_alloc(size_t n) {
 static void aud_release(void *p, size_t n) {
     (void)n;
 #if MOY_AUD_BOARD
+    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
+        return;
+    }
     heap_caps_free(p);
 #else
     free(p);
@@ -286,6 +303,30 @@ int moy_aud_close(uint32_t s) {
     aud_release(r->bank, sizeof(moy_bank));
     moy_htab_release(A.sess, s);
     return MOY_AUD_OK;
+}
+
+int moy_aud_vm_owned(uint32_t s) {
+    aud_sess_t *r = sess_of(s);
+    if (r == NULL) {
+        return MOY_AUD_STALE;
+    }
+    r->vm = true;
+    return MOY_AUD_OK;
+}
+
+int moy_aud_close_vm(void) {
+    int n = 0;
+    if (A.sess == NULL) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < moy_htab_slots(A.sess); i++) {
+        uint32_t h = moy_htab_at(A.sess, i);
+        if (h && ((aud_sess_t *)moy_htab_row(A.sess, i))->vm) {
+            moy_aud_close(h);
+            n++;
+        }
+    }
+    return n;
 }
 
 // One verb on a live session, under the lock.

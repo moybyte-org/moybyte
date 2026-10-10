@@ -82,11 +82,21 @@ static uint32_t vocab(const moy_input_t *t) {
 }
 
 #ifdef MOY_INPUT_BOARD
+// The kernel's small-block pool (moy_kernel.h), where the image has it.
+void *moy_kpool_alloc(size_t n) __attribute__((weak));
+bool moy_kpool_free(void *p) __attribute__((weak));
 static void *tab_alloc(size_t n) {
+    void *q = moy_kpool_alloc != NULL ? moy_kpool_alloc(n) : NULL;
+    if (q != NULL) {
+        return q;
+    }
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
     return p ? p : heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
 }
 static void tab_free(void *p) {
+    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
+        return;
+    }
     heap_caps_free(p);
 }
 static void *front_alloc(void) {

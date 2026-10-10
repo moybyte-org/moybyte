@@ -57,6 +57,7 @@
 #include "esp_cpu.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "multi_heap.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
 #include "esp_system.h"
@@ -1104,9 +1105,53 @@ static void *kernel_psram(size_t n) {
     return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
+// The small-block pool (moy_kernel.h).
+static uint8_t *s_kpool;
+static multi_heap_handle_t s_kpool_heap;
+static portMUX_TYPE s_kpool_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_kpool_misses;
+
+void *moy_kpool_alloc(size_t n) {
+    if (s_kpool_heap == NULL || n > MOY_KPOOL_MAX) {
+        return NULL;
+    }
+    void *p = multi_heap_malloc(s_kpool_heap, n ? n : 1u);
+    if (p == NULL) {
+        s_kpool_misses++;
+        return NULL;
+    }
+    memset(p, 0, n);
+    return p;
+}
+
+bool moy_kpool_free(void *p) {
+    if (s_kpool == NULL || (uint8_t *)p < s_kpool || (uint8_t *)p >= s_kpool + MOY_KPOOL_BYTES) {
+        return false;
+    }
+    multi_heap_free(s_kpool_heap, p);
+    return true;
+}
+
+void moy_kpool_stats(size_t *high, uint32_t *misses) {
+    *high = 0;
+    *misses = s_kpool_misses;
+    if (s_kpool_heap != NULL) {
+        multi_heap_info_t i;
+        multi_heap_get_info(s_kpool_heap, &i);
+        *high = MOY_KPOOL_BYTES - i.minimum_free_bytes;
+    }
+}
+
 static void moy_kernel_reserve(void) {
     if (s_resume == NULL) {
         s_resume = kernel_psram(sizeof(resume_t));
+    }
+    if (s_kpool == NULL) {
+        s_kpool = heap_caps_malloc(MOY_KPOOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_kpool_heap = s_kpool != NULL ? multi_heap_register(s_kpool, MOY_KPOOL_BYTES) : NULL;
+        if (s_kpool_heap != NULL) {
+            multi_heap_set_lock(s_kpool_heap, &s_kpool_mux);
+        }
     }
     moy_play_reserve(kernel_psram);
     moy_aud_reserve();
@@ -1315,7 +1360,16 @@ static void moy_kernel_pins_deinit(void) {
 // with no VM for the stop's run, then the first area again and a RETURN
 // start. Never returns without a first area: one that will not come back is
 // the recovery floor's, as at power-on.
+// The audio sessions the VM opened (moy_aud.h's moy_aud_close_vm): weak, for
+// an image without moy_audio.
+int moy_aud_close_vm(void) __attribute__((weak));
+
 static void moy_kernel_vm_down(void **heap) {
+    // Whatever the VM opened in the mixer ends with it, before any walk of
+    // what the stop gives back.
+    if (moy_aud_close_vm != NULL) {
+        moy_aud_close_vm();
+    }
     int why = s_stop;
     if (why == MOY_STOP_NONE) {
         s_start = MOY_START_BOOT;

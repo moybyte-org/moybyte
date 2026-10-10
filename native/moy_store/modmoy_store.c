@@ -69,8 +69,20 @@ typedef struct blk {
 static blk_t *scratch;
 static size_t mem_now, mem_high;
 
+#if MOY_STORE_PSRAM
+// The kernel's small-block pool (moy_kernel.h), where the image has it.
+void *moy_kpool_alloc(size_t n) __attribute__((weak));
+bool moy_kpool_free(void *p) __attribute__((weak));
+#endif
+
 static void *raw_alloc(size_t n) {
     #if MOY_STORE_PSRAM
+    if (moy_kpool_alloc != NULL) {
+        void *q = moy_kpool_alloc(n);
+        if (q != NULL) {
+            return q;
+        }
+    }
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
         p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
@@ -88,6 +100,9 @@ void *moy_store_raw_alloc(size_t n) {
 
 static void raw_free(void *p) {
     #if MOY_STORE_PSRAM
+    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
+        return;
+    }
     heap_caps_free(p);
     #else
     free(p);

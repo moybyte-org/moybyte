@@ -196,8 +196,17 @@ static void b_point(int32_t x, int32_t y, bool down, bool edge) {
     }
 }
 
+// The kernel's small-block pool (moy_kernel.h): the loop's tables live for
+// the board's life, made whenever they are first wanted.
+void *moy_kpool_alloc(size_t n) __attribute__((weak));
+bool moy_kpool_free(void *p) __attribute__((weak));
+
 static void *b_alloc(size_t n) {
     #if MOY_LOOP_ESP
+    void *q = moy_kpool_alloc != NULL ? moy_kpool_alloc(n) : NULL;
+    if (q != NULL) {
+        return q;
+    }
     void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
     return p != NULL ? p : heap_caps_malloc(n, MALLOC_CAP_8BIT);
     #else

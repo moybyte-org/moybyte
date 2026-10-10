@@ -18,6 +18,11 @@
 //   moy_kernel.stamps()            the start's six stamps, ms after power-on
 //                                  (None: not reached): exit, vm, imports, ws,
 //                                  wired, frame
+//   moy_kernel.kpool()             (high-water bytes, misses) of the kernel's
+//                                  small-block pool (moy_kernel.h)
+//   moy_kernel.time_imports(rows)  DEV: the memory census's import timer
+//                                  (device/mem_census.py), installed as
+//                                  builtins.__import__ by the census
 //
 //   moy_crash.arm(role, id)        the ledger's OPEN id (None clears), into RTC
 //   moy_crash.last()               the last record this board made, or None
@@ -26,6 +31,8 @@
 
 #include "py/runtime.h"
 #include "py/objstr.h"
+#include "py/builtin.h"
+#include "py/mphal.h"
 
 #include "moy_crash.h"
 #include "moy_kernel.h"
@@ -151,7 +158,77 @@ static mp_obj_t mod_watchdog(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_watchdog_obj, 0, 1, mod_watchdog);
 
+// THE CENSUS'S IMPORT TIMER. Every module's first import, timed inclusive of
+// what it imports, as (name, depth, us) rows appended to the census's list
+// when it finishes. It is C so that each import level it wraps costs this
+// frame and nothing more: a Python hook added a bytecode frame per level, and
+// an armed start's imports, eight deep, left 88 bytes of the VM task's stack
+// (#224). A name already in sys.modules, or timed once (a built-in module
+// never enters sys.modules), goes straight through. The rows and the seen
+// names are one root pointer, so a VM stop's root sweep drops them with the
+// VM; the census installs the timer again at the next start.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_kernel_imports);
+static int s_import_depth;
+
+static void import_row(mp_obj_t rows, mp_obj_t name, int depth, uint32_t t0) {
+    mp_obj_t t[3] = {
+        name, MP_OBJ_NEW_SMALL_INT(depth),
+        mp_obj_new_int_from_uint(mp_hal_ticks_us() - t0),
+    };
+    mp_obj_list_append(rows, mp_obj_new_tuple(3, t));
+}
+
+static mp_obj_t mod_timed_import(size_t n_args, const mp_obj_t *args) {
+    mp_obj_t st = MP_STATE_VM(moy_kernel_imports);
+    if (st == MP_OBJ_NULL || st == mp_const_none) {
+        return mp_builtin___import__(n_args, args);
+    }
+    mp_obj_t *it;
+    mp_obj_get_array_fixed_n(st, 2, &it);
+    mp_map_t *seen = mp_obj_dict_get_map(it[1]);
+    if (mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map, args[0], MP_MAP_LOOKUP) != NULL
+        || mp_map_lookup(seen, args[0], MP_MAP_LOOKUP) != NULL) {
+        return mp_builtin___import__(n_args, args);
+    }
+    mp_obj_dict_store(it[1], args[0], mp_const_true);
+    int depth = s_import_depth++;
+    uint32_t t0 = mp_hal_ticks_us();
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t m = mp_builtin___import__(n_args, args);
+        nlr_pop();
+        s_import_depth = depth;
+        import_row(it[0], args[0], depth, t0);
+        return m;
+    }
+    s_import_depth = depth;
+    import_row(it[0], args[0], depth, t0);
+    nlr_jump(nlr.ret_val);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_timed_import_obj, 1, 5, mod_timed_import);
+
+// time_imports(rows) -> the timer to install as builtins.__import__; `rows`
+// the list it appends to.
+static mp_obj_t mod_time_imports(mp_obj_t rows) {
+    mp_obj_t t[2] = { rows, mp_obj_new_dict(0) };
+    MP_STATE_VM(moy_kernel_imports) = mp_obj_new_tuple(2, t);
+    s_import_depth = 0;
+    return MP_OBJ_FROM_PTR(&mod_timed_import_obj);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_time_imports_obj, mod_time_imports);
+
+static mp_obj_t mod_kpool(void) {
+    size_t high;
+    uint32_t misses;
+    moy_kpool_stats(&high, &misses);
+    mp_obj_t t[2] = { mp_obj_new_int_from_uint(high), mp_obj_new_int_from_uint(misses) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_kpool_obj, mod_kpool);
+
 static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_kpool), MP_ROM_PTR(&mod_kpool_obj) },
+    { MP_ROM_QSTR(MP_QSTR_time_imports), MP_ROM_PTR(&mod_time_imports_obj) },
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_kernel) },
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
     { MP_ROM_QSTR(MP_QSTR_kstop), MP_ROM_PTR(&mod_kstop_obj) },
