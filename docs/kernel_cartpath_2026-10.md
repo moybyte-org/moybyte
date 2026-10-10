@@ -286,7 +286,9 @@ returned it; the S3s' gain is PSRAM, and the T-Deck's largest internal block
 with radios up is too small to hold two task stacks at once (#224).
 
 **Every crossing into Python is counted, and so is every refused one.** The
-loop's classes are CONSOLE, APP, DRIVER, SERVICE and a new **REFUSED**: an
+loop's classes are CONSOLE, APP, DRIVER, SERVICE, ROLE (a compiled app's call
+of a role row the Python console serves, `docs/kernel_appabi_2026-10.md` §2.1)
+and a new **REFUSED**: an
 upcall attempted with no VM or nothing registered, which `up()` answers ABSENT
 today without counting. The `mp_call_*` sites reachable from `moy_loop` and
 `moy_play` are listed by file and function in `native/moy_play/upcall_sites.txt`,
@@ -534,7 +536,7 @@ Each item fails with its bug present.
 
 | item | how | the bug it catches |
 |---|---|---|
-| zero Python upcalls, launch to exit, every tier | the run's totals by class at launch and exit: CONSOLE, APP, SERVICE and REFUSED unchanged (DRIVER is the host's and browser's harness, zero on a board), for each VM-free census cart, in the host goldens, the browser suites and each console's suite; `upcall_sites.txt`'s test | any trampoline, a chrome draw left in Python, a drain through Python, an upcall refused while stopped, a new uncounted call site |
+| zero Python upcalls, launch to exit, every tier | the run's totals by class at launch and exit: CONSOLE, APP, SERVICE, REFUSED and ROLE unchanged (DRIVER is the host's and browser's harness, zero on a board), for each VM-free census cart, in the host goldens, the browser suites and each console's suite; `upcall_sites.txt`'s test | any trampoline, a chrome draw left in Python, a drain through Python, an upcall refused while stopped, a new uncounted call site |
 | the kernel stops the VM when, and only when, the run needs it | `state` reads the VM down through Doom on both S3s and up through every seed Lua cart; `kstop N stop` flat with the routes and leases read back | a refusal that should not fire, a stop nobody needed, a stop that soft-resets instead, a sweep that frees kernel state |
 | cart-available PSRAM | free and largest block right after the stop and before the load, worst of five boots fresh and after the census's session (`tools/mem_census.py`), both S3s, within 64 KiB (configuration: the run's table and chrome rows) of the `kstop N stop` no-cart baseline on the same boot, and at or above the plan's §6.1 values | memory the stop does not return, a buffer made before the stop splitting the free run |
 | Doom | loads and plays on a T-Deck after the scripted session and on a fresh Guition S3, five boots each, and 20 launch/exit cycles on each with its fit passing on the largest block every time | the same, measured by the cart the plan's §1.1 is written for |

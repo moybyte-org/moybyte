@@ -157,13 +157,14 @@ def test_the_glass_census_judges_verdict_and_crossings():
     from tools.vm_free_census import judge
     want = ("lua", True, "free")
     run = {"runtime": "lua", "vm_free": True, "why": "free"}
-    assert judge(want, run, [0, 0, 0, 0, 0], True, True) == []
-    assert judge(want, run, [40, 0, 0, 0, 0], True, False) == []
-    assert judge(want, run, [40, 0, 0, 0, 0], True, True) == [
+    assert judge(want, run, [0, 0, 0, 0, 0, 0], True, True) == []
+    assert judge(want, run, [40, 0, 0, 0, 0, 0], True, False) == []
+    assert judge(want, run, [40, 0, 0, 0, 0, 0], True, True) == [
         "40 console crossings in a kernel-driven run"]
-    assert judge(want, run, [0, 1, 0, 2, 3], True, False) == [
-        "1 app crossings", "2 service crossings", "3 refused crossings"]
-    assert judge(want, run, [0, 0, 0, 0, 0], False, True) == ["the run did not end"]
+    assert judge(want, run, [0, 1, 0, 2, 3, 4], True, False) == [
+        "1 app crossings", "2 service crossings", "3 refused crossings",
+        "4 role crossings"]
+    assert judge(want, run, [0, 0, 0, 0, 0, 0], False, True) == ["the run did not end"]
     assert judge(want, run, None, True, False) == ["no run in the kernel's Player"]
     assert judge(want, None, None, True, False)[0].startswith("verdict")
     assert judge(("python", False, "runtime"),

@@ -73,6 +73,22 @@ def test_every_row_says_what_it_is():
             assert re.search(r"\b%s\s*\(" % host, src), (f, fun, host)
 
 
+def test_every_counted_row_names_a_class_the_loop_counts():
+    """A `counted` row's classes are moy_loop.h's MOY_UPC_* (REFUSED is no
+    crossing of its own), so a class renamed or a door added without its
+    class fails here."""
+    src = open(os.path.join(ROOT, "native", "moy_kernel", "moy_loop.h")).read()
+    classes = set(re.findall(r"\bMOY_UPC_([A-Z]+) = \d+", src)) - {"CLASSES", "REFUSED"}
+    assert "ROLE" in classes, classes
+    seen = set()
+    for (f, fun), (n, what) in read_record().items():
+        if what.startswith("counted "):
+            for cls in what[len("counted "):].split(":")[0].split():
+                assert cls in classes, (f, fun, cls)
+                seen.add(cls)
+    assert "ROLE" in seen, "the ROLE door's site is not in the record"
+
+
 def test_the_scanner_finds_a_site_it_was_not_told_of(tmp_path):
     d = tmp_path / "native" / "moy_play"
     d.mkdir(parents=True)

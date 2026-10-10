@@ -7,7 +7,8 @@ CPython has no such module, so this is what it finds.
 The loop is C on every tier; what this file adds is the upcall dispatcher a
 VM's binding has in C: the registered callables are kept here, an exception
 an upcall raises is reported and survived, and a KeyboardInterrupt ends the
-loop (INTERRUPT). The trace tier (moy_loop_host.c) is the stage ops the host
+loop (INTERRUPT); the ROLE door's dispatcher (`role(fn)`) is kept the same
+way, its answer copied into the caller's buffer. The trace tier (moy_loop_host.c) is the stage ops the host
 drives it with.
 """
 
@@ -32,7 +33,8 @@ DIM, SAVER, BLANK = 1, 2, 3
 SVC_WEB, SVC_UPDATE, SVC_HEALTHY = 1, 4, 8
 _UP_INPUT, _UP_POINTER, _UP_FRAME, _UP_WORD, _UP_SERVICE = range(5)
 _RAISED, _INTERRUPTED, _ABSENT, _EXIT = -1, -2, -3, -4
-_CLASSES = 5
+_CLASSES = 6
+_ROLE_FULL, _ROLE_IO = -2, -6
 _STAGES = 11
 
 _U32 = ctypes.c_uint32
@@ -41,6 +43,7 @@ _B = ctypes.c_bool
 _I = ctypes.c_int
 _P = ctypes.c_void_p
 _UP_FN = ctypes.CFUNCTYPE(_I, _I, _U32, ctypes.c_char_p)
+_ROLE_FN = ctypes.CFUNCTYPE(_I32, _U32, _U32, _P, ctypes.c_size_t, _P, ctypes.c_size_t)
 
 
 class _Meter(ctypes.Structure):
@@ -60,7 +63,10 @@ class _Idle(ctypes.Structure):
 
 _SIGS = (
     ("moy_loop_set_upcall", [_UP_FN], None),
+    ("moy_loop_set_role", [_ROLE_FN], None),
+    ("moy_loop_role", [_U32, _U32, _P, ctypes.c_size_t, _P, ctypes.c_size_t], _I32),
     ("moy_loop_set_registered", [_U32], None),
+    ("moy_loop_end", [_I], None),
     ("moy_loop_registered", [], _U32),
     ("moy_loop_step", [], _I),
     ("moy_loop_run", [], _I),
@@ -213,7 +219,53 @@ def register(handle_input, handle_pointer, frame, words=None, service=None):
 
 def unregister():
     _UPS[:] = [None] * 5
+    _ROLE[0] = None
+    _lib().moy_loop_set_role(_ROLE_FN())
     _lib().moy_loop_set_registered(0)
+
+
+# The ROLE door's dispatcher: fn(grant, row, args) -> an int, or the text or
+# bytes the door copies into the caller's buffer.
+_ROLE = [None]
+
+
+def _role_dispatch(grant, row, arg, n, ans, cap):
+    fn = _ROLE[0]
+    if fn is None:
+        return -9
+    try:
+        r = fn(grant, row, ctypes.string_at(arg, n) if n else b"")
+    except KeyboardInterrupt:
+        _lib().moy_loop_end(INTERRUPT)
+        return _ROLE_IO
+    except SystemExit:
+        _lib().moy_loop_end(EXIT)
+        return _ROLE_IO
+    except Exception as exc:  # noqa: BLE001 -- a raise answers IO, reported
+        _report(exc, _UP_SERVICE)
+        return _ROLE_IO
+    if r is None or r is False:
+        return 0
+    if r is True:
+        return 1
+    if isinstance(r, int):
+        return max(-(1 << 31), min(r, (1 << 31) - 1))
+    b = r.encode("utf-8") if isinstance(r, str) else bytes(r)
+    if len(b) > cap:
+        return _ROLE_FULL
+    if b:
+        ctypes.memmove(ans, b, len(b))
+    return len(b)
+
+
+_ROLE_CB = _ROLE_FN(_role_dispatch)
+
+
+def role(fn):
+    """The ROLE door's dispatcher (None: none), as modmoy_loop.c's."""
+    _ROLE[0] = fn
+    _lib().moy_loop_set_role(_ROLE_CB if fn is not None else _ROLE_FN())
+
 
 
 def drive(handle_input, handle_pointer, frame, dt):

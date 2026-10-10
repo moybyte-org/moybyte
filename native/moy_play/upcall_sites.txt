@@ -7,12 +7,13 @@
 # its own.
 #
 # A row: file, enclosing function, sites in it, then what it is.
-#   counted CLASS   a crossing moy_loop counts (CONSOLE APP DRIVER SERVICE)
+#   counted CLASS   a crossing moy_loop counts (CONSOLE APP DRIVER SERVICE ROLE)
 #   inside FN       part of the crossing FN counts
 #   binding         Python called this C; it calls back within that call
 #   vm              the VM's own start, on the VM's task with no loop running
 
 native/moy_kernel/modmoy_loop.c  vm_up  4  counted CONSOLE SERVICE: the loop's dispatcher, counted by moy_loop.c's up(); a VM-up run launched within the boot's first HEALTHY_LOOPS frames counts one SERVICE, the OTA-healthy confirm (moy_loop.c's once bit), once a boot
+native/moy_kernel/modmoy_loop.c  vm_role  1  counted ROLE: the ROLE door's dispatcher (moy_loop_role), a compiled app's call of a role row the Python console serves, one per call, on the VM's task
 native/moycore/modmoycore.c  call_py  1  counted APP: a Lua cart's trampoline into a name a VM-kept run registered
 native/moy_wasm/modmoy_wasm.c  read_module  1  binding: a module's bytes read for the Python glue's open
 native/moy_wasm/modmoy_wasm.c  verify_module  1  binding: the module's signature, checked for the Python glue's open

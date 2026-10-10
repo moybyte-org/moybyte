@@ -575,6 +575,22 @@ against that bug before it goes green.
   without the layer. The wallpaper's preview sidecar stays the renderer's: no
   row reads it and the renderer is Python (§6).
 
+- Step 8 (2026-10-10): the ROLE door is `moy_app_role`, one entry for every
+  table row by its index in `roles.json`, its arguments packed as fields (a
+  little-endian `uint32` length and the bytes; a number a 4-byte field). A C
+  row runs in C there, so the hop step 9 adds is one shape for C and shell
+  rows alike; a files row's blob, which the user-files layer allocated, is
+  copied into the caller's buffer and freed with `moy_app_buf_free`, and an
+  answer longer than the buffer is FULL. A shell row is checked for its role in
+  C, then crosses through the door the console binds (`moy_app_door_bind`) to
+  the kernel's `moy_loop_role`, counted ROLE (the sixth class, after REFUSED,
+  so the five before it keep their places) or REFUSED with NEEDS_VM while no VM
+  runs; a raise answers IO. The Python half is `RoleDoor`
+  (`runtime/shell_servers.py`), registered by `serve_all` with `moy_loop.role`;
+  it decodes the fields per row (`DOOR_ARGS`) and names a cart by its folder.
+  Rows whose shape is an object (`surface.canvas`, `theme.colors`, `glyph`,
+  `preview`) or a codec over pixels answer BAD at the door.
+
 ## 12. The owner's answers (2026-10-10)
 
 1. **The moy-spec change** (§4.2) is opened as a proposal: the

@@ -18,6 +18,8 @@
 #include "moycore_run.h"
 #include "moy_buf.h"
 
+_Static_assert(MOY_PLAY_UPC == MOY_UPC_CLASSES, "a run's books carry every crossing class");
+
 // The calling task's stack, on a board: FreeRTOS's high-water mark.
 #if defined(__has_include)
 #if __has_include("esp_heap_caps.h")
@@ -938,8 +940,10 @@ static int jstr(char *o, size_t n, const char *v) {
 
 static void ups(char *o, size_t n, size_t *pat, const uint32_t *u) {
     size_t at = *pat;
-    PUT("[%u, %u, %u, %u, %u]", (unsigned)u[0], (unsigned)u[1], (unsigned)u[2],
-        (unsigned)u[3], (unsigned)u[4]);
+    for (int k = 0; k < MOY_UPC_CLASSES; k++) {
+        PUT("%s%u", k ? ", " : "[", (unsigned)u[k]);
+    }
+    PUT("]");
     *pat = at;
 }
 

@@ -54,7 +54,7 @@ def census(paths, lua=True, wasm=True):
     return rows
 
 
-UPCALL_CLASSES = ("console", "app", "driver", "service", "refused")
+UPCALL_CLASSES = ("console", "app", "driver", "service", "refused", "role")
 
 
 def judge(want, run, books, ended, front):
@@ -75,7 +75,7 @@ def judge(want, run, books, ended, front):
         else:
             if front and books[0]:
                 bad.append("%d console crossings in a kernel-driven run" % books[0])
-            for k in (1, 3, 4):
+            for k in (1, 3, 4, 5):
                 if books[k]:
                     bad.append("%d %s crossings" % (books[k], UPCALL_CLASSES[k]))
         if not ended:

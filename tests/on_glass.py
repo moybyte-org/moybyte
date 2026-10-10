@@ -523,10 +523,10 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
             time.sleep(0.2)
             st = board.state()
             frame_up = st["upcalls"] if front else [0] + list(st["upcalls"][1:])
-            assert frame_up == [0, 0, 0, 0, 0], \
+            assert frame_up == [0, 0, 0, 0, 0, 0], \
                 "a frame of %s crossed into Python: %r" % (title, st["upcalls"])
             run_up = st["play"]["upcalls"] if front else [0] + list(st["play"]["upcalls"][1:])
-            assert run_up == [0, 0, 0, 0, 0], st["play"]
+            assert run_up == [0, 0, 0, 0, 0, 0], st["play"]
         assert st["play"]["frames"] > f0, "%s is not drawing" % title
         assert st["play"]["ticks"] > t0, "%s draws but never ticks" % title
         if front:
@@ -538,7 +538,7 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
         info = board.pyval("__import__('moy_play').info()")
         assert info[6] is True, "the run did not end: %r" % (info,)
         books = list(info[5]) if front else [0] + list(info[5][1:])
-        assert books == [0, 0, 0, 0, 0], \
+        assert books == [0, 0, 0, 0, 0, 0], \
             "%s crossed into Python from launch to exit: %r" % (title, info[5])
         st = board.state()
         assert not st.get("cart") and not st.get("front"), st.get("screen")
@@ -648,19 +648,19 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
         for _ in range(5):
             time.sleep(0.2)
             ups = board.state()["upcalls"]
-            assert ups[1:] == [0, 0, 0, 0], \
+            assert ups[1:] == [0, 0, 0, 0, 0], \
                 "a frame of %s crossed into Python: %r" % (title, ups)
         if st.get("front"):
             # The kernel's front: a crossing of any class, the console's frame
             # included, is a failure (a_front_run_makes_no_crossing pins it).
             st = board.state()
-            assert st["play"]["upcalls"] == [0, 0, 0, 0, 0], st["play"]
+            assert st["play"]["upcalls"] == [0, 0, 0, 0, 0, 0], st["play"]
             return
         # The run's frame is the kernel's Player's (native/moy_play), and its
         # books from launch to now hold no crossing but the console's own.
         play = board.state()["play"]
         assert play is not None, "%s ticks through Python, not moy_play" % title
-        assert play["frames"] > 0 and play["upcalls"][1:] == [0, 0, 0, 0], play
+        assert play["frames"] > 0 and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
         after = crossings()
         assert after == before, \
             "%s's launch or load crossed into Python: APP, SERVICE, REFUSED %r -> %r" % (
@@ -944,7 +944,7 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
             time.sleep(2.0)
             st = board.state()
             assert st["frames"] > f0 and st["vm"] is False, st
-            assert st["play"]["upcalls"][:4] == [0, 0, 0, 0] and st["play"]["upcalls"][4] == 0, st
+            assert st["play"]["upcalls"] == [0, 0, 0, 0, 0, 0], st
             if ctrl_c:
                 board.ser.write(b"\x03")
                 board.ser.flush()
@@ -1059,7 +1059,7 @@ def the_frame_is_the_kernels(board):
     board.state()
     time.sleep(0.5)
     st = board.state()
-    assert st["upcalls"] == [3, 0, 0, 0, 0], st["upcalls"]
+    assert st["upcalls"] == [3, 0, 0, 0, 0, 0], st["upcalls"]
     assert sorted(st["stages"]) == sorted(KERNEL_STAGES), st["stages"]
     assert board.pyval("__import__('moy_loop').frames() > 0", strict=True)
 

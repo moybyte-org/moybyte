@@ -32,7 +32,9 @@
 // Python routes, the link's netplay drain) -- zero on a frame where nothing
 // asked for it, which is the gate. REFUSED is an upcall attempted while no VM
 // runs or nothing is registered for it: answered ABSENT, and counted, so a
-// path that still reaches for Python shows on a run that has none.
+// path that still reaches for Python shows on a run that has none. ROLE is a
+// compiled app's call of a role row the Python console serves (the ROLE door,
+// moy_loop_role), one per call.
 
 #ifndef MOY_LOOP_H
 #define MOY_LOOP_H
@@ -70,7 +72,8 @@ enum {
     MOY_UPC_DRIVER = 2,
     MOY_UPC_SERVICE = 3,
     MOY_UPC_REFUSED = 4,
-    MOY_UPC_CLASSES = 5,
+    MOY_UPC_ROLE = 5,
+    MOY_UPC_CLASSES = 6,
 };
 
 // What an upcall answers: >= 0 is its value (the frame's: the console's
@@ -150,6 +153,21 @@ enum {
 // a MOY_UP_* failure.
 typedef int (*moy_loop_up_fn)(int which, uint32_t arg, const char *line);
 
+// THE ROLE DOOR (docs/kernel_appabi_2026-10.md section 2.1): the upcall that
+// carries arguments. A compiled app's call of a role row the Python console
+// serves: the calling grant, the row (native/moy_app/roles.json's index), the
+// row's arguments packed in `arg` (n bytes, native/moy_app/moy_app.h's field
+// encoding) and a buffer for its answer (cap bytes). The binding's dispatcher
+// answers >= 0 (the row's number, or the length of the text or blob it wrote
+// into `ans`) or a moy_app.h code negated. It enters Python, so its caller is
+// the VM's task: a compiled cart's session thread reaches it only through the
+// hop to that task (moy_wasm_on_vm).
+typedef int32_t (*moy_loop_role_fn)(uint32_t grant, uint32_t row, const uint8_t *arg,
+                                    size_t n, uint8_t *ans, size_t cap);
+// What the door answers while no VM runs or no dispatcher is registered:
+// moy_app.h's MOY_APP_NEEDS_VM, negated (counted REFUSED).
+#define MOY_LOOP_ROLE_NEEDS_VM (-9)
+
 // -- the tier's side ----------------------------------------------------------
 
 void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap);
@@ -191,6 +209,12 @@ int moy_loop_diag_take(char *hitch, char *loop, size_t cap);
 void moy_loop_end(int why);
 int moy_loop_word(const char *line);
 int moy_loop_service(uint32_t which);
+// The ROLE door: counted ROLE when it crosses, REFUSED (answering
+// MOY_LOOP_ROLE_NEEDS_VM) when it cannot. The binding registers its
+// dispatcher with moy_loop_set_role, cleared with the VM's upcalls.
+int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
+                      uint8_t *ans, size_t cap);
+void moy_loop_set_role(moy_loop_role_fn fn);
 void moy_loop_say(const char *fmt, ...);
 // A whole line as it is, however long (moy_loop_say formats into 384 bytes).
 void moy_loop_say_line(const char *line);

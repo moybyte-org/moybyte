@@ -80,7 +80,7 @@ def test_the_player_hands_a_vm_free_game_to_the_front(front):
     assert st["play"]["frames"] == f0 + 10
     # Bullet Storm is unpaced ("fps": "free"): one tick a loop frame, never none.
     assert st["play"]["ticks"] == t0 + 10, "the run in front drew but never ticked"
-    assert st["play"]["upcalls"] == [0, 0, 0, 0, 0], st["play"]
+    assert st["play"]["upcalls"] == [0, 0, 0, 0, 0, 0], st["play"]
     # (`upcalls` is the host loop's last frame, which other suites drive.)
     assert st["link"] is None
 
@@ -105,7 +105,7 @@ def test_a_front_ends_on_the_hold_and_the_console_takes_the_route(front):
     assert not mp.front_live()
     info = mp.info()
     assert info[6] is True and info[10] == mp.END_HOLD, info
-    assert list(info[5]) == [0, 0, 0, 0, 0], info
+    assert list(info[5]) == [0, 0, 0, 0, 0, 0], info
     assert mp.state_json() == "null", "no run in front: the console answers `state`"
     inp.set_button("home", False)
     inp.begin_frame()

@@ -124,7 +124,7 @@ enum {                                          // why a run ended
 #define MOY_PLAY_HOME_BIT 7             // moy_input's `home`, after the seven
 // A run handle's low byte: generation << 8 | this.
 #define MOY_PLAY_TAG 0x5Au
-#define MOY_PLAY_UPC 5          // MOY_UPC_CLASSES, the loop's crossing classes
+#define MOY_PLAY_UPC 6          // MOY_UPC_CLASSES, the loop's crossing classes
 
 typedef struct {
     int32_t x, y;               // the pointer in the cart's own coordinates

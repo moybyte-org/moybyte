@@ -8,6 +8,7 @@
 #   NotifyServer     achievement events
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
+#   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
 """The console's servers for the app ABI's rows it serves (native/moy_app/
 roles.json's "shell" rows, docs/kernel_appabi_2026-10.md section 2.1): the
@@ -36,6 +37,12 @@ console ends any left open at the frame's end and at a run's end
 A cart crosses the Python binding as the shell's cart dict (the live list's own
 entry, which carries its store handle as "h"); the ROLE door names it by its
 folder.
+
+A compiled app's call of one of these rows arrives through the kernel's ROLE
+upcall (native/moy_kernel/moy_loop.h's moy_loop_role, counted ROLE) as the
+table row and its packed arguments (native/moy_app/moy_app.h's field
+encoding); `RoleDoor` decodes them, calls the same server and answers what the
+door copies back.
 """
 
 try:
@@ -490,13 +497,137 @@ class InstallServer:
             return None, None
 
 
+# -- the ROLE door ----------------------------------------------------------------
+
+# moy_app.h's codes the door answers with, negated.
+_DOOR_ABSENT, _DOOR_BAD = -8, -7
+
+# The shell rows whose arguments and answers are numbers and text, by the
+# arguments each takes in the door's fields: `s` text, `o` text where empty is
+# None, `i` a number, `c` a cart named by its folder. A shell row not here (an
+# object, a callable, the cart store's and the installer's) answers BAD.
+DOOR_ARGS = {
+    "theme.set": "so", "theme.set_variant": "s", "theme.set_skin": "s",
+    "nav.open_app": "s", "nav.is_system_app": "c", "nav.projects": "",
+    "nav.edit": "co", "nav.open_image": "so", "nav.open_text": "soo",
+    "nav.edit_file": "cso", "nav.play": "c", "nav.run_script": "ss",
+    "nav.text_mode": "i",
+    "notify.achieve": "so",
+    "wallpaper.current": "", "wallpaper.carts": "", "wallpaper.fills": "",
+    "wallpaper.id_for": "c", "wallpaper.title": "s", "wallpaper.select": "s",
+}
+
+
+def _fields(b):
+    """The packed fields: each a little-endian uint32 length and its bytes."""
+    out, at = [], 0
+    while at < len(b):
+        if len(b) - at < 4:
+            raise ValueError("a torn field")
+        n = b[at] | b[at + 1] << 8 | b[at + 2] << 16 | b[at + 3] << 24
+        at += 4
+        if n > len(b) - at:
+            raise ValueError("a torn field")
+        out.append(bytes(b[at:at + n]))
+        at += n
+    return out
+
+
+def _folder(cart):
+    """A cart as the door names it: its folder, or a built-in's title."""
+    path = cart.get("path")
+    if not path:
+        return cart.get("title") or ""
+    path = path.rstrip("/")
+    return path[path.rfind("/") + 1:]
+
+
+def _answer(v):
+    """A server's answer as the door hands it back: a number as it is, text
+    and bytes as they are, a cart as its folder, a list as its items each
+    NUL-terminated."""
+    if v is None or isinstance(v, (bool, int, str, bytes)):
+        return v
+    if isinstance(v, dict):
+        return _folder(v)
+    out = []
+    for x in v:
+        out.append((_folder(x) if isinstance(x, dict) else str(x)) + "\0")
+    return "".join(out)
+
+
+class RoleDoor:
+    """The ROLE upcall's Python half: `door(grant, row, args)` for table row
+    `row` (native/moy_app/roles.json's index), registered with the kernel's
+    loop (`moy_loop.role`). C has checked the grant holds the row's role."""
+
+    def __init__(self, ws, servers, table):
+        self._ws = ws
+        self._servers = servers
+        self._table = table
+
+    def _cart(self, folder):
+        for c in self._ws.carts.all:
+            if _folder(c) == folder:
+                return c
+        return None
+
+    def __call__(self, g, row, args):
+        name = self._table[row] if 0 <= row < len(self._table) else None
+        kinds = DOOR_ARGS.get(name)
+        if kinds is None:
+            return _DOOR_BAD
+        try:
+            fields = _fields(args)
+        except ValueError:
+            return _DOOR_BAD
+        if len(fields) != len(kinds):
+            return _DOOR_BAD
+        call = []
+        for k, f in zip(kinds, fields):
+            if k == "i":
+                if len(f) != 4:
+                    return _DOOR_BAD
+                v = f[0] | f[1] << 8 | f[2] << 16 | f[3] << 24
+                call.append(v - (1 << 32) if v & 0x80000000 else v)
+                continue
+            text = f.decode("utf-8")
+            if k == "c":
+                cart = self._cart(text)
+                if cart is None:
+                    return _DOOR_ABSENT
+                call.append(cart)
+            else:
+                call.append(None if k == "o" and not text else text)
+        role, verb = name.split(".")
+        return _answer(getattr(self._servers[role], verb)(g, *call))
+
+
+def _door_open(ws, servers):
+    """Register the door: the loop's dispatcher, and the shell rows' door
+    in moy_app (where this tier carries both)."""
+    try:
+        import moy_app
+        try:
+            import moy_loop
+        except ImportError:  # pragma: no cover - host package lane
+            from runtime import moy_loop
+        moy_loop.role(RoleDoor(ws, servers, moy_app.table()))
+    except ImportError:  # a host with no C compiler: no loop, no door
+        return
+    moy_app.door_bind(True)
+
+
 def serve_all(ws):
-    """Register every server on the console's app ABI (`ws.app_abi`)."""
+    """Register every server on the console's app ABI (`ws.app_abi`), and
+    the ROLE door a compiled app reaches them through."""
     app = ws.app_abi
-    app.serve("surface", SurfaceServer(ws))
-    app.serve("theme", ThemeServer(ws))
-    app.serve("carts", CartsServer(ws))
-    app.serve("nav", NavServer(ws))
-    app.serve("notify", NotifyServer(ws))
-    app.serve("wallpaper", WallpaperServer(ws))
-    app.serve("install", InstallServer(ws))
+    servers = {
+        "surface": SurfaceServer(ws), "theme": ThemeServer(ws),
+        "carts": CartsServer(ws), "nav": NavServer(ws),
+        "notify": NotifyServer(ws), "wallpaper": WallpaperServer(ws),
+        "install": InstallServer(ws),
+    }
+    for role, server in servers.items():
+        app.serve(role, server)
+    _door_open(ws, servers)

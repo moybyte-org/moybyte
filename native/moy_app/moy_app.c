@@ -1376,6 +1376,496 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g) {
     return (int32_t)(a->clip_seq & 0x7fffffffu);
 }
 
+// -- the ROLE door -------------------------------------------------------------------
+
+// The role table, row for row: each row's "role.verb", its role and its C row
+// (MOY_APP_SHELL for a row the Python console serves). tests/test_roles.py
+// holds it to roles.json.
+static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABLE_N] = {
+    {"damage.all", MOY_ROLE_DAMAGE, MOY_ROW_DAMAGE_ALL},
+    {"damage.again", MOY_ROLE_DAMAGE, MOY_ROW_DAMAGE_AGAIN},
+    {"surface.canvas", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CANVAS},
+    {"surface.size", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_SIZE},
+    {"surface.font_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_FONT_SCALE},
+    {"surface.chrome_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CHROME_SCALE},
+    {"surface.windowed", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_WINDOWED},
+    {"surface.bar_h", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_BAR_H},
+    {"surface.pointer", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_POINTER},
+    {"surface.glyph", MOY_ROLE_SURFACE, MOY_APP_SHELL},
+    {"theme.colors", MOY_ROLE_THEME, MOY_ROW_THEME_COLORS},
+    {"theme.token", MOY_ROLE_THEME, MOY_ROW_THEME_TOKEN},
+    {"theme.gen", MOY_ROLE_THEME, MOY_ROW_THEME_GEN},
+    {"theme.light", MOY_ROLE_THEME, MOY_ROW_THEME_LIGHT},
+    {"theme.name", MOY_ROLE_THEME, MOY_ROW_THEME_NAME},
+    {"theme.variant", MOY_ROLE_THEME, MOY_ROW_THEME_VARIANT},
+    {"theme.skin", MOY_ROLE_THEME, MOY_ROW_THEME_SKIN},
+    {"theme.set", MOY_ROLE_THEME, MOY_APP_SHELL},
+    {"theme.set_variant", MOY_ROLE_THEME, MOY_APP_SHELL},
+    {"theme.set_skin", MOY_ROLE_THEME, MOY_APP_SHELL},
+    {"files.readable", MOY_ROLE_FILES, MOY_ROW_FILES_READABLE},
+    {"files.ready", MOY_ROLE_FILES, MOY_ROW_FILES_READY},
+    {"files.begin", MOY_ROLE_FILES, MOY_ROW_FILES_BEGIN},
+    {"files.end", MOY_ROLE_FILES, MOY_ROW_FILES_END},
+    {"files.list", MOY_ROLE_FILES, MOY_ROW_FILES_LIST},
+    {"files.count", MOY_ROLE_FILES, MOY_ROW_FILES_COUNT},
+    {"files.load", MOY_ROLE_FILES, MOY_ROW_FILES_LOAD},
+    {"files.save", MOY_ROLE_FILES, MOY_ROW_FILES_SAVE},
+    {"files.delete", MOY_ROLE_FILES, MOY_ROW_FILES_DELETE},
+    {"files.duplicate", MOY_ROLE_FILES, MOY_ROW_FILES_DUPLICATE},
+    {"files.rename", MOY_ROLE_FILES, MOY_ROW_FILES_RENAME},
+    {"files.new_name", MOY_ROLE_FILES, MOY_ROW_FILES_NEW_NAME},
+    {"files.trash_list", MOY_ROLE_FILES, MOY_ROW_FILES_TRASH_LIST},
+    {"files.restore", MOY_ROLE_FILES, MOY_ROW_FILES_RESTORE},
+    {"files.empty_trash", MOY_ROLE_FILES, MOY_ROW_FILES_EMPTY_TRASH},
+    {"files.history", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY},
+    {"files.history_ops", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY_OPS},
+    {"files.history_commit", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY_COMMIT},
+    {"files.encode_image", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_IMAGE},
+    {"files.decode_image", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_IMAGE},
+    {"files.decode_cover", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_COVER},
+    {"files.encode_cover", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_COVER},
+    {"files.sig", MOY_ROLE_FILES, MOY_ROW_FILES_SIG},
+    {"files.stamp", MOY_ROLE_FILES, MOY_ROW_FILES_STAMP},
+    {"files.encode_text", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_TEXT},
+    {"files.decode_text", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_TEXT},
+    {"files.provenance", MOY_ROLE_FILES, MOY_ROW_FILES_PROVENANCE},
+    {"carts.readable", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.ready", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.begin", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.end", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.all", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.can_journal", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.slug", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.create", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.journal", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.rescan", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.hydrate", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.load_deck", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.save_deck", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.save_code", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.images", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.save_image", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"carts.encode_image", MOY_ROLE_CARTS, MOY_APP_SHELL},
+    {"nav.open_app", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.is_system_app", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.projects", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.edit", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.open_image", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.open_text", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.edit_file", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.play", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.run_script", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.text_mode", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"prefs.get", MOY_ROLE_PREFS, MOY_ROW_PREFS_GET},
+    {"prefs.set", MOY_ROLE_PREFS, MOY_ROW_PREFS_SET},
+    {"prefs.clear", MOY_ROLE_PREFS, MOY_ROW_PREFS_CLEAR},
+    {"notify.achieve", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
+    {"wallpaper.current", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.carts", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.fills", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.id_for", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.title", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.select", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.preview", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.thumbnail", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
+    {"wallpaper.load_copy", MOY_ROLE_WALLPAPER, MOY_ROW_WALLPAPER_LOAD_COPY},
+    {"wallpaper.save_copy", MOY_ROLE_WALLPAPER, MOY_ROW_WALLPAPER_SAVE_COPY},
+    {"artwork.current", MOY_ROLE_ARTWORK, MOY_ROW_ARTWORK_CURRENT},
+    {"artwork.follow", MOY_ROLE_ARTWORK, MOY_ROW_ARTWORK_FOLLOW},
+    {"clipboard.put_text", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_PUT_TEXT},
+    {"clipboard.text", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_TEXT},
+    {"clipboard.kind", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_KIND},
+    {"clipboard.seq", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_SEQ},
+    {"install.hold", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.release", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.fit", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.memory", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.chip", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.runtimes", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.home", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.can_pick", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.pick", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.root", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.writable", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.op", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.rescan", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.free", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.find", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.net", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.keep", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+};
+
+int moy_app_table_role(uint32_t row) {
+    return row < MOY_APP_TABLE_N ? TABLE[row].role : -1;
+}
+
+int moy_app_table_c_row(uint32_t row) {
+    return row < MOY_APP_TABLE_N ? TABLE[row].c_row : -1;
+}
+
+const char *moy_app_table_name(uint32_t row) {
+    return row < MOY_APP_TABLE_N ? TABLE[row].name : NULL;
+}
+
+static moy_app_door_fn s_door;
+
+void moy_app_door_bind(moy_app_door_fn fn) {
+    s_door = fn;
+}
+
+// The packed arguments, read in order.
+typedef struct {
+    const uint8_t *p;
+    size_t n, at;
+    int bad;
+} args_t;
+
+static const uint8_t *arg_field(args_t *f, size_t *len) {
+    if (f->n - f->at < 4u) {
+        f->bad = 1;
+        *len = 0;
+        return NULL;
+    }
+    const uint8_t *q = f->p + f->at;
+    size_t m = (size_t)q[0] | (size_t)q[1] << 8 | (size_t)q[2] << 16 | (size_t)q[3] << 24;
+    if (m > f->n - f->at - 4u) {
+        f->bad = 1;
+        *len = 0;
+        return NULL;
+    }
+    f->at += 4u + m;
+    *len = m;
+    return q + 4;
+}
+
+static int32_t arg_int(args_t *f) {
+    size_t m;
+    const uint8_t *q = arg_field(f, &m);
+    if (q == NULL || m != 4u) {
+        f->bad = 1;
+        return 0;
+    }
+    return (int32_t)((uint32_t)q[0] | (uint32_t)q[1] << 8 | (uint32_t)q[2] << 16
+                     | (uint32_t)q[3] << 24);
+}
+
+// A text field NUL-terminated into `out` (MOY_UF_NAME_MAX + 1 bytes): NULL for
+// an empty one where `optional`.
+static const char *arg_text(args_t *f, char out[MOY_UF_NAME_MAX + 1u], int optional) {
+    size_t m;
+    const uint8_t *q = arg_field(f, &m);
+    if (q == NULL || m > MOY_UF_NAME_MAX || memchr(q, 0, m) != NULL) {
+        f->bad = 1;
+        return NULL;
+    }
+    memcpy(out, q, m);
+    out[m] = 0;
+    return optional && m == 0u ? NULL : out;
+}
+
+static int32_t ans_put(uint8_t *ans, size_t cap, const void *data, size_t len) {
+    if (len > cap || len > 0x7fffffffu) {
+        return -MOY_APP_FULL;
+    }
+    if (len) {
+        memcpy(ans, data, len);
+    }
+    return (int32_t)len;
+}
+
+static int32_t ans_rc(int rc) {
+    return rc == MOY_APP_OK ? 0 : -rc;
+}
+
+// A blob the layer allocated: copied out on OK, freed either way.
+static int32_t ans_buf(moy_appabi_t *a, int rc, moy_buf_t *b, uint8_t *ans, size_t cap) {
+    int32_t v = rc == MOY_APP_OK ? ans_put(ans, cap, b->p, b->n) : -rc;
+    moy_app_buf_free(a, b);
+    return v;
+}
+
+static int32_t ans_name(int rc, const char *name, uint8_t *ans, size_t cap) {
+    return rc == MOY_APP_OK ? ans_put(ans, cap, name, strlen(name)) : -rc;
+}
+
+static void le32(uint8_t *q, uint32_t v) {
+    q[0] = (uint8_t)v;
+    q[1] = (uint8_t)(v >> 8);
+    q[2] = (uint8_t)(v >> 16);
+    q[3] = (uint8_t)(v >> 24);
+}
+
+// The C rows that take no argument: a field handed one is BAD.
+static int no_args(int row) {
+    switch (row) {
+        case MOY_ROW_THEME_TOKEN:
+        case MOY_ROW_FILES_LIST: case MOY_ROW_FILES_COUNT: case MOY_ROW_FILES_LOAD:
+        case MOY_ROW_FILES_HISTORY: case MOY_ROW_FILES_HISTORY_OPS:
+        case MOY_ROW_FILES_SAVE: case MOY_ROW_FILES_DELETE: case MOY_ROW_FILES_DUPLICATE:
+        case MOY_ROW_FILES_RESTORE: case MOY_ROW_FILES_RENAME: case MOY_ROW_FILES_NEW_NAME:
+        case MOY_ROW_FILES_HISTORY_COMMIT:
+        case MOY_ROW_PREFS_GET: case MOY_ROW_PREFS_SET: case MOY_ROW_PREFS_CLEAR:
+        case MOY_ROW_WALLPAPER_SAVE_COPY: case MOY_ROW_ARTWORK_FOLLOW:
+        case MOY_ROW_CLIPBOARD_PUT_TEXT:
+            return 0;
+        default:
+            return 1;
+    }
+}
+
+// The C rows a compiled app reaches through the door.
+static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *ans,
+                      size_t cap) {
+    char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u], t[MOY_UF_NAME_MAX + 1u];
+    char out[MOY_UF_NAME_MAX + 1u];
+    moy_buf_t b = {NULL, 0};
+    const uint8_t *d;
+    size_t dn, en, len = 0;
+    const uint8_t *e;
+    uint32_t cnt;
+    int rc, bin;
+    switch (row) {
+        case MOY_ROW_DAMAGE_ALL:
+            return ans_rc(moy_app_damage_all(a, g));
+        case MOY_ROW_DAMAGE_AGAIN:
+            return ans_rc(moy_app_damage_again(a, g));
+        case MOY_ROW_SURFACE_SIZE: {
+            int32_t w = 0, h = 0;
+            uint8_t q[8];
+            rc = moy_app_surface_size(a, g, &w, &h);
+            if (rc != MOY_APP_OK) {
+                return -rc;
+            }
+            le32(q, (uint32_t)w);
+            le32(q + 4, (uint32_t)h);
+            return ans_put(ans, cap, q, sizeof q);
+        }
+        case MOY_ROW_SURFACE_FONT_SCALE:
+            return moy_app_surface_font_scale(a, g);
+        case MOY_ROW_SURFACE_CHROME_SCALE:
+            return moy_app_surface_chrome_scale(a, g);
+        case MOY_ROW_SURFACE_WINDOWED:
+            return moy_app_surface_windowed(a, g);
+        case MOY_ROW_SURFACE_BAR_H:
+            return moy_app_surface_bar_h(a, g);
+        case MOY_ROW_SURFACE_POINTER: {
+            int32_t p[5] = {0, 0, 0, 0, 0};
+            uint8_t q[20];
+            rc = moy_app_surface_pointer(a, g, p);
+            if (rc != MOY_APP_OK) {
+                return -rc;
+            }
+            for (int i = 0; i < 5; i++) {
+                le32(q + 4 * i, (uint32_t)p[i]);
+            }
+            return ans_put(ans, cap, q, sizeof q);
+        }
+        case MOY_ROW_THEME_TOKEN: {
+            int32_t v = 0, r = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = moy_app_theme_token(a, g, r, &v);
+            if (rc != MOY_APP_OK) {
+                return -rc;
+            }
+            return v == MOY_TOKEN_ABSENT ? -MOY_APP_ABSENT : v;
+        }
+        case MOY_ROW_THEME_GEN:
+            return moy_app_theme_gen(a, g);
+        case MOY_ROW_THEME_LIGHT:
+            return moy_app_theme_light(a, g);
+        case MOY_ROW_THEME_NAME:
+        case MOY_ROW_THEME_VARIANT:
+        case MOY_ROW_THEME_SKIN:
+            rc = (row == MOY_ROW_THEME_NAME ? moy_app_theme_name
+                  : row == MOY_ROW_THEME_VARIANT ? moy_app_theme_variant
+                  : moy_app_theme_skin)(a, g, out, sizeof out, &len);
+            return rc == MOY_APP_OK ? ans_put(ans, cap, out, len) : -rc;
+        case MOY_ROW_FILES_READABLE:
+            return moy_app_files_readable(a, g);
+        case MOY_ROW_FILES_READY:
+            return moy_app_files_ready(a, g);
+        case MOY_ROW_FILES_BEGIN:
+            return ans_rc(moy_app_files_begin(a, g));
+        case MOY_ROW_FILES_END:
+            return ans_rc(moy_app_files_end(a, g));
+        case MOY_ROW_FILES_LIST:
+            arg_text(f, k, 0);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = moy_app_files_list(a, g, k, &b, &cnt);
+            return ans_buf(a, rc, &b, ans, cap);
+        case MOY_ROW_FILES_COUNT:
+            arg_text(f, k, 0);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = moy_app_files_count(a, g, k, &cnt);
+            return rc == MOY_APP_OK ? (int32_t)(cnt & 0x7fffffffu) : -rc;
+        case MOY_ROW_FILES_LOAD:
+        case MOY_ROW_FILES_HISTORY:
+        case MOY_ROW_FILES_HISTORY_OPS:
+            arg_text(f, k, 0);
+            arg_text(f, nm, 0);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = row == MOY_ROW_FILES_LOAD ? moy_app_files_load(a, g, k, nm, &b, &bin)
+                 : row == MOY_ROW_FILES_HISTORY ? moy_app_files_history(a, g, k, nm, &b)
+                 : moy_app_files_history_ops(a, g, k, nm, &b);
+            return ans_buf(a, rc, &b, ans, cap);
+        case MOY_ROW_FILES_SAVE:
+            arg_text(f, k, 0);
+            arg_text(f, nm, 0);
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = moy_app_files_save(a, g, k, nm, (const char *)d, dn, out);
+            return ans_name(rc, out, ans, cap);
+        case MOY_ROW_FILES_DELETE:
+        case MOY_ROW_FILES_DUPLICATE:
+        case MOY_ROW_FILES_RESTORE:
+            arg_text(f, k, 0);
+            arg_text(f, nm, 0);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = (row == MOY_ROW_FILES_DELETE ? moy_app_files_delete
+                  : row == MOY_ROW_FILES_DUPLICATE ? moy_app_files_duplicate
+                  : moy_app_files_restore)(a, g, k, nm, out);
+            return ans_name(rc, out, ans, cap);
+        case MOY_ROW_FILES_RENAME:
+            arg_text(f, k, 0);
+            arg_text(f, nm, 0);
+            arg_text(f, t, 0);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_name(moy_app_files_rename(a, g, k, nm, t, out), out, ans, cap);
+        case MOY_ROW_FILES_NEW_NAME: {
+            arg_text(f, k, 0);
+            const char *title = arg_text(f, t, 1);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_name(moy_app_files_new_name(a, g, k, title, out), out, ans, cap);
+        }
+        case MOY_ROW_FILES_TRASH_LIST:
+            rc = moy_app_files_trash_list(a, g, &b, &cnt);
+            return ans_buf(a, rc, &b, ans, cap);
+        case MOY_ROW_FILES_EMPTY_TRASH:
+            return ans_rc(moy_app_files_empty_trash(a, g));
+        case MOY_ROW_FILES_HISTORY_COMMIT: {
+            int prune = 0;
+            arg_text(f, k, 0);
+            arg_text(f, nm, 0);
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_rc(moy_app_files_history_commit(
+                a, g, k, nm, dn ? (const char *)d : NULL, dn, en ? (const char *)e : NULL,
+                en, &prune));
+        }
+        case MOY_ROW_PREFS_GET:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            rc = moy_app_prefs_get(a, g, (const char *)d, dn, (char *)ans, cap, &len);
+            return rc != MOY_APP_OK ? -rc : len > cap ? -MOY_APP_FULL : (int32_t)len;
+        case MOY_ROW_PREFS_SET:
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_rc(moy_app_prefs_set(a, g, (const char *)d, dn, (const char *)e, en));
+        case MOY_ROW_PREFS_CLEAR:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_rc(moy_app_prefs_clear(a, g, (const char *)d, dn));
+        case MOY_ROW_WALLPAPER_LOAD_COPY:
+            rc = moy_app_wallpaper_load_copy(a, g, &b);
+            return ans_buf(a, rc, &b, ans, cap);
+        case MOY_ROW_WALLPAPER_SAVE_COPY:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_rc(moy_app_wallpaper_save_copy(a, g, (const char *)d, dn));
+        case MOY_ROW_ARTWORK_CURRENT: {
+            size_t kl = 0, nl = 0;
+            rc = moy_app_artwork_current(a, g, k, sizeof k, &kl, nm, sizeof nm, &nl);
+            if (rc != MOY_APP_OK) {
+                return -rc;
+            }
+            if (8u + kl + nl > cap) {
+                return -MOY_APP_FULL;
+            }
+            le32(ans, (uint32_t)kl);
+            memcpy(ans + 4, k, kl);
+            le32(ans + 4 + kl, (uint32_t)nl);
+            memcpy(ans + 8 + kl, nm, nl);
+            return (int32_t)(8u + kl + nl);
+        }
+        case MOY_ROW_ARTWORK_FOLLOW: {
+            size_t on, nn;
+            d = arg_field(f, &dn);
+            const uint8_t *o = arg_field(f, &on);
+            e = arg_field(f, &nn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_rc(moy_app_artwork_follow(a, g, (const char *)d, dn, (const char *)o,
+                                                 on, (const char *)e, nn));
+        }
+        case MOY_ROW_CLIPBOARD_PUT_TEXT:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_rc(moy_app_clip_put_text(a, g, (const char *)d, dn));
+        case MOY_ROW_CLIPBOARD_TEXT:
+            rc = moy_app_clip_text(a, g, (char *)ans, cap, &len);
+            return rc != MOY_APP_OK ? -rc : len > cap ? -MOY_APP_FULL : (int32_t)len;
+        case MOY_ROW_CLIPBOARD_KIND:
+            return moy_app_clip_kind(a, g);
+        case MOY_ROW_CLIPBOARD_SEQ:
+            return moy_app_clip_seq(a, g);
+        default:
+            // An object the Python binding hands out, or a codec over pixels.
+            return -MOY_APP_BAD;
+    }
+}
+
+int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                     size_t n, uint8_t *ans, size_t cap) {
+    if (row >= MOY_APP_TABLE_N || (n && arg == NULL) || (cap && ans == NULL)) {
+        return -MOY_APP_BAD;
+    }
+    int c_row = TABLE[row].c_row;
+    if (c_row != MOY_APP_SHELL) {
+        if (n != 0u && no_args(c_row)) {
+            return -MOY_APP_BAD;
+        }
+        args_t f = {arg, n, 0u, 0};
+        int32_t v = door_c(a, g, c_row, &f, ans, cap);
+        return f.bad ? -MOY_APP_BAD : v;
+    }
+    int rc = moy_app_holds(a, g, TABLE[row].role);
+    if (rc != MOY_APP_OK) {
+        return -rc;
+    }
+    return s_door == NULL ? -MOY_APP_NEEDS_VM : s_door(g, row, arg, n, ans, cap);
+}
+
 // -- the counters -----------------------------------------------------------------------
 
 uint32_t moy_app_count(const moy_appabi_t *a, int row) {

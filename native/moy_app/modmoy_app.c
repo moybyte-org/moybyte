@@ -14,6 +14,13 @@
 //   app.files_end_all(), app.copy_gen()   the store's sessions and copy
 //   app.served()         {"role.verb": calls} of the rows served in Python
 //   app.grant_id(h)      the id a grant was made for
+//   app.role(g, row, args, cap) -> (answer, bytes)   the ROLE door
+//                        (moy_app_role): table row `row` with its packed
+//                        arguments, the answer and the first bytes of `cap`
+//                        it wrote
+//   table()              the role table's rows, "role.verb", in its order
+//   door_bind(on)        the shell rows' door: the kernel's ROLE upcall
+//                        (moy_loop_role), or none
 //   Damage(app, g), Surface(app, g), Theme(app, g), Files(app, g),
 //   Prefs(app, g), Artwork(app, g), Clipboard(app, g)    the roles with C rows
 //   Carts, Nav, Notify, Wallpaper, Install (app, g)   the roles served in
@@ -419,7 +426,30 @@ static mp_obj_t app_copy_gen(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(app_copy_gen_obj, app_copy_gen);
 
+// role(g, row, args, cap) -> (answer, bytes): the ROLE door, as a compiled
+// app's import reaches it.
+static mp_obj_t app_role(size_t n_args, const mp_obj_t *args) {
+    app_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    mp_buffer_info_t in;
+    mp_get_buffer_raise(args[3], &in, MP_BUFFER_READ);
+    mp_int_t cap = mp_obj_get_int(args[4]);
+    if (cap < 0) {
+        mp_raise_ValueError(NULL);
+    }
+    vstr_t v;
+    vstr_init_len(&v, (size_t)cap);
+    int32_t r = moy_app_role(self->a, (uint32_t)mp_obj_get_int_truncated(args[1]),
+                             (uint32_t)mp_obj_get_int(args[2]), in.buf, in.len,
+                             (uint8_t *)v.buf, (size_t)cap);
+    size_t got = r > 0 ? ((size_t)r < (size_t)cap ? (size_t)r : (size_t)cap) : 0u;
+    mp_obj_t out[2] = { mp_obj_new_int(r), mp_obj_new_bytes((const byte *)v.buf, got) };
+    vstr_clear(&v);
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_role_obj, 5, 5, app_role);
+
 static const mp_rom_map_elem_t app_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_role), MP_ROM_PTR(&app_role_obj) },
     { MP_ROM_QSTR(MP_QSTR_store_bind), MP_ROM_PTR(&app_store_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_files_end_all), MP_ROM_PTR(&app_files_end_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_gen), MP_ROM_PTR(&app_copy_gen_obj) },
@@ -1821,6 +1851,27 @@ static mp_obj_t mod_rows(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_rows_obj, mod_rows);
 
+static mp_obj_t mod_table(void) {
+    mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(MOY_APP_TABLE_N, NULL));
+    for (uint32_t i = 0; i < MOY_APP_TABLE_N; i++) {
+        const char *s = moy_app_table_name(i);
+        t->items[i] = mp_obj_new_str(s, strlen(s));
+    }
+    return MP_OBJ_FROM_PTR(t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_table_obj, mod_table);
+
+// The kernel's ROLE upcall (native/moy_kernel), which every image carrying
+// this module links.
+int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
+                      uint8_t *ans, size_t cap);
+
+static mp_obj_t mod_door_bind(mp_obj_t on) {
+    moy_app_door_bind(mp_obj_is_true(on) ? moy_loop_role : NULL);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_door_bind_obj, mod_door_bind);
+
 // perms() -> ((permission, role), ...): the allowlist, in role order.
 static mp_obj_t mod_perms(void) {
     mp_obj_t items[MOY_ROLE_N];
@@ -1874,6 +1925,8 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_id_for), MP_ROM_PTR(&mod_id_for_obj) },
     { MP_ROM_QSTR(MP_QSTR_roles), MP_ROM_PTR(&mod_roles_obj) },
     { MP_ROM_QSTR(MP_QSTR_rows), MP_ROM_PTR(&mod_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_table), MP_ROM_PTR(&mod_table_obj) },
+    { MP_ROM_QSTR(MP_QSTR_door_bind), MP_ROM_PTR(&mod_door_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_perms), MP_ROM_PTR(&mod_perms_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&mod_tokens_obj) },

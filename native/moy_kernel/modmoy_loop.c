@@ -8,8 +8,13 @@
 //                      console's frames drawn; `words(line)` the console's
 //                      dev words, truthy when the line asked for the REPL
 //   unregister()       the upcalls dropped
+//   role(fn)           the ROLE door's dispatcher, a ROOT POINTER too (None:
+//                      none): `fn(grant, row, args)` with the row's packed
+//                      arguments as bytes, answering an int (the row's number,
+//                      or a moy_app code negated) or the text or bytes the
+//                      door copies into the caller's buffer
 //   step(), run()      one frame / until QUIT, INTERRUPT or STOPPED
-//   upcalls()          ((console, app, driver, service, refused) of the last frame,
+//   upcalls()          ((console, app, driver, service, refused, role) of the last frame,
 //                       the same in total)
 //   tick(ms), capture([on]), meters(), meters_reset(), pump(), lit(on),
 //   health(on), frames(), drawn()
@@ -42,6 +47,7 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t moy_loop_up[5]);
 // The driver tier hands an upcall's exception back to its harness: kept here
 // until the step returns, and every later upcall of that step skipped.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_loop_exc);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_loop_role_fn);
 
 static bool s_driving;
 
@@ -140,6 +146,69 @@ static int vm_up(int which, uint32_t arg, const char *line) {
     return MOY_UP_RAISED;
 }
 
+// moy_app.h's codes the door answers with, negated: an answer too long for
+// the caller's buffer, a raise.
+#define ROLE_FULL (-2)
+#define ROLE_IO (-6)
+
+// The ROLE door's dispatcher: the registered callable with the grant, the row
+// and the packed arguments; its int answered as it is, its text or bytes
+// copied into `ans`. A raise is reported as a frame error is and answers IO;
+// a KeyboardInterrupt or a SystemExit ends the loop as from any upcall.
+static int32_t vm_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
+                       uint8_t *ans, size_t cap) {
+    mp_obj_t fn = MP_STATE_VM(moy_loop_role_fn);
+    if (fn == MP_OBJ_NULL || fn == mp_const_none) {
+        return MOY_LOOP_ROLE_NEEDS_VM;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t a[3] = {
+            mp_obj_new_int_from_uint(grant), MP_OBJ_NEW_SMALL_INT(row),
+            mp_obj_new_bytes(arg, n),
+        };
+        mp_obj_t r = mp_call_function_n_kw(fn, 3, 0, a);
+        int32_t v = 0;
+        if (r == mp_const_none || r == mp_const_false) {
+            v = 0;
+        } else if (r == mp_const_true) {
+            v = 1;
+        } else if (mp_obj_is_int(r)) {
+            v = (int32_t)mp_obj_get_int_truncated(r);
+        } else {
+            mp_buffer_info_t b;
+            if (mp_obj_is_str(r)) {
+                size_t len;
+                b.buf = (void *)mp_obj_str_get_data(r, &len);
+                b.len = len;
+            } else {
+                mp_get_buffer_raise(r, &b, MP_BUFFER_READ);
+            }
+            if (b.len > cap || b.len > 0x7fffffffu) {
+                v = ROLE_FULL;
+            } else {
+                if (b.len) {
+                    memcpy(ans, b.buf, b.len);
+                }
+                v = (int32_t)b.len;
+            }
+        }
+        nlr_pop();
+        return v;
+    }
+    mp_obj_t exc = MP_OBJ_FROM_PTR(nlr.ret_val);
+    if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(mp_obj_get_type(exc)),
+                                MP_OBJ_FROM_PTR(&mp_type_KeyboardInterrupt))) {
+        moy_loop_end(MOY_LOOP_INTERRUPT);
+    } else if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(mp_obj_get_type(exc)),
+                                       MP_OBJ_FROM_PTR(&mp_type_SystemExit))) {
+        moy_loop_end(MOY_LOOP_EXIT);
+    } else {
+        report(exc, MOY_UP_SERVICE);
+    }
+    return ROLE_IO;
+}
+
 static void set_registered(void) {
     uint32_t bits = 0;
     for (int i = 0; i <= MOY_UP_FRAME; i++) {
@@ -156,6 +225,8 @@ void moy_loop_vm_clear(void) {
         UPS[i] = MP_OBJ_NULL;
     }
     MP_STATE_VM(moy_loop_exc) = MP_OBJ_NULL;
+    MP_STATE_VM(moy_loop_role_fn) = MP_OBJ_NULL;
+    moy_loop_set_role(NULL);
     moy_loop_set_registered(0);
 }
 
@@ -220,6 +291,16 @@ static mp_obj_t loop_drive(size_t n_args, const mp_obj_t *a) {
     return MP_OBJ_NEW_SMALL_INT(r);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(loop_drive_obj, 4, 4, loop_drive);
+
+static mp_obj_t loop_role(mp_obj_t fn) {
+    if (!moy_loop_vm()) {
+        mp_raise_OSError(MP_EPERM);
+    }
+    MP_STATE_VM(moy_loop_role_fn) = fn;
+    moy_loop_set_role(fn == mp_const_none ? NULL : vm_role);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(loop_role_obj, loop_role);
 
 static mp_obj_t loop_step(void) {
     return MP_OBJ_NEW_SMALL_INT(moy_loop_step());
@@ -644,6 +725,7 @@ static const mp_rom_map_elem_t loop_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_loop) },
     { MP_ROM_QSTR(MP_QSTR_register), MP_ROM_PTR(&loop_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_unregister), MP_ROM_PTR(&loop_unregister_obj) },
+    { MP_ROM_QSTR(MP_QSTR_role), MP_ROM_PTR(&loop_role_obj) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&loop_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_diag_take), MP_ROM_PTR(&loop_diag_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_drive), MP_ROM_PTR(&loop_drive_obj) },

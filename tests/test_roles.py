@@ -95,6 +95,32 @@ def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
     assert tuple(_verbs()) == tuple(moy_app.roles())
 
 
+def test_the_role_doors_table_is_the_tables_rows():
+    """The ROLE door names a row by its index here (moy_app_role), so the C's
+    table is roles.json row for row."""
+    assert list(moy_app.table()) == [r["role"] + "." + r["verb"] for r in _rows()]
+
+
+def test_the_doors_shell_rows_take_their_servers_arguments():
+    """Each row the door decodes in Python (shell_servers.DOOR_ARGS) is a shell
+    row, and its fields are its server's arguments after the grant: one each,
+    an optional one where it defaults."""
+    import inspect
+    from runtime import shell_servers as ss
+    rows = {r["role"] + "." + r["verb"]: r for r in _rows()}
+    servers = {"theme": ss.ThemeServer, "nav": ss.NavServer,
+               "notify": ss.NotifyServer, "wallpaper": ss.WallpaperServer}
+    for name, kinds in ss.DOOR_ARGS.items():
+        r = rows[name]
+        assert r["server"] == "shell", name
+        role, verb = name.split(".")
+        params = list(inspect.signature(getattr(servers[role], verb)).parameters.values())[2:]
+        assert len(params) >= len(kinds), (name, kinds)
+        for p, k in zip(params, kinds):
+            assert (p.default is not inspect.Parameter.empty) == (k == "o"), (name, p.name, k)
+        assert all(p.default is not inspect.Parameter.empty for p in params[len(kinds):]), name
+
+
 def test_the_shell_rows_are_the_servers_methods():
     """Each shell row is a method of the server the console registers for its
     role (runtime/shell_servers.py), taking the grant first; a server method

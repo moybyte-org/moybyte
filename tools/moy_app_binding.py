@@ -142,6 +142,9 @@ _SIGS = (
     ("moy_app_artwork_follow", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE, _PCHAR, _SIZE],
      c.c_int),
     ("moy_app_holds", [_P, _U32, c.c_int], c.c_int),
+    ("moy_app_role", [_P, _U32, _U32, _P, _SIZE, _P, _SIZE], c.c_int32),
+    ("moy_app_table_name", [_U32], _PCHAR),
+    ("moy_app_door_bind", [_P], None),
     ("moy_app_store_bind", [_P, _P, _PCHAR, _SIZE, c.c_int, c.c_int], c.c_int),
     ("moy_app_why", [_P], c.c_int),
     ("moy_app_buf_free", [_P, c.POINTER(_Buf)], None),
@@ -306,6 +309,17 @@ def binding(sanitize=False):
 
         def count(self):
             return lib.moy_app_grants(self._p)
+
+        def role(self, g, row, args, cap):
+            """The ROLE door (moy_app_role): (answer, the bytes it wrote)."""
+            args = bytes(args)
+            cap = int(cap)
+            if cap < 0:
+                raise ValueError("cap")
+            ans = c.create_string_buffer(max(cap, 1))
+            r = lib.moy_app_role(self._p, int(g) & 0xFFFFFFFF, int(row), args,
+                                 len(args), ans, cap)
+            return r, ans.raw[:max(0, min(r, cap))]
 
         def damage_take(self):
             return lib.moy_app_damage_take(self._p)
@@ -881,6 +895,21 @@ def binding(sanitize=False):
                 out.append((p, r))
         return tuple(out)
 
+    table_names = tuple(lib.moy_app_table_name(i).decode() for i in range(len(_TABLE)))
+
+    def door_bind(on):
+        """The shell rows' door: the kernel's ROLE upcall, the loop's own
+        library's moy_loop_role (runtime/moy_loop.py), or none."""
+        if not on:
+            lib.moy_app_door_bind(None)
+            return
+        try:
+            import moy_loop
+        except ImportError:
+            from runtime import moy_loop
+        fn = moy_loop._lib().moy_loop_role
+        lib.moy_app_door_bind(c.cast(fn, c.c_void_p))
+
     m = types.ModuleType("moy_app")
     m.__dict__.update(
         App=App, kernel=kernel, Damage=Damage, Surface=Surface, Theme=Theme,
@@ -888,6 +917,7 @@ def binding(sanitize=False):
         Carts=Carts, Nav=Nav, Notify=Notify, Wallpaper=Wallpaper, Install=Install,
         policy=policy, manifest_error=manifest_error, id_for=id_for,
         roles=lambda: role_names, rows=lambda: row_names, perms=perms,
+        table=lambda: table_names, door_bind=door_bind,
         kinds=lambda: kind_names, tokens=lambda: token_names,
         CLIP_MAX=CLIP_MAX, SLOTS=SLOTS)
     return m

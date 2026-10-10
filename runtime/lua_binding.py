@@ -275,7 +275,7 @@ AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)
 class PlayInfo(ctypes.Structure):
     """moy_play_info_t (native/moy_play/moy_play.h)."""
     _fields_ = [("runtime", ctypes.c_char * 12), ("error", ctypes.c_char * 192),
-                ("frames", _U32), ("ticks", _U32), ("upcalls", _U32 * 5),
+                ("frames", _U32), ("ticks", _U32), ("upcalls", _U32 * 6),
                 ("stack_open", _U32), ("stack_frame", _U32),
                 ("why", ctypes.c_uint8), ("end_why", ctypes.c_uint8),
                 ("stop_why", ctypes.c_uint8), ("vm_down", ctypes.c_bool),

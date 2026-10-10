@@ -1596,28 +1596,28 @@ if DONE == [None]:
 '''
 
 LOOP_TRACE = """\
-frame 0 0 inputs pointer:click present hi hp frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0/0 idle 0
-frame 1 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=49 up 3/0/0/0/0 idle 0
-frame 2 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=48 up 3/0/0/0/0 idle 0
-frame 3 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=47 up 3/0/0/0/0 idle 0
-frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew feed sleep=46 up 4/0/0/0/0 idle 0
-frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0/0 idle 0
-frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0/0 idle 0
-frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0/0 idle 0
-frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0 idle 0
-frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
-frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
-frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
-frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 1
-frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 2
-frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 2
-frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 2
-frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0 idle 2
-frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 3
-frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 0
-frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0 idle 0
+frame 0 0 inputs pointer:click present hi hp frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0/0/0 idle 0
+frame 1 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=49 up 3/0/0/0/0/0 idle 0
+frame 2 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=48 up 3/0/0/0/0/0 idle 0
+frame 3 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=47 up 3/0/0/0/0/0 idle 0
+frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew feed sleep=46 up 4/0/0/0/0/0 idle 0
+frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0/0/0 idle 0
+frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0/0/0 idle 0
+frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0/0/0 idle 0
+frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 0
+frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 3
+frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
+frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
 meters inputs:20:0 dev:20:0 idle:20:0 pointer:20:0 present:20:0 frame:20:0 backlight:20:0 pump_tail:20:0 tail:20:None pace:20:0 account:20:0
-upcalls 61/0/0/0/0
+upcalls 61/0/0/0/0/0
 unregistered 3
 """
 

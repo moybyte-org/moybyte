@@ -75,6 +75,7 @@ typedef struct {
 static struct {
     const moy_loop_ops_t *ops;
     moy_loop_up_fn up;
+    moy_loop_role_fn role;      // the ROLE door's dispatcher, or NULL
     uint32_t registered;
     bool vm;
     bool inited;
@@ -365,6 +366,10 @@ void moy_loop_set_upcall(moy_loop_up_fn fn) {
     L.up = fn;
 }
 
+void moy_loop_set_role(moy_loop_role_fn fn) {
+    L.role = fn;
+}
+
 void moy_loop_set_registered(uint32_t bits) {
     L.registered = bits;
 }
@@ -497,6 +502,16 @@ int moy_loop_word(const char *line) {
 
 int moy_loop_service(uint32_t which) {
     return up(MOY_UP_SERVICE, which, NULL, MOY_UPC_SERVICE);
+}
+
+int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
+                      uint8_t *ans, size_t cap) {
+    if (!L.vm || L.role == NULL) {
+        moy_loop_count(MOY_UPC_REFUSED);
+        return MOY_LOOP_ROLE_NEEDS_VM;
+    }
+    moy_loop_count(MOY_UPC_ROLE);
+    return L.role(grant, row, arg, n, ans, cap);
 }
 
 // -- HITCH and LOOP (docs/kernel_survival_2026-10.md §7.3) ----------------------------

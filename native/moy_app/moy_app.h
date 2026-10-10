@@ -409,6 +409,49 @@ int moy_app_clip_text(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t
 int32_t moy_app_clip_kind(moy_appabi_t *a, uint32_t g);
 int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 
+// -- the ROLE door -----------------------------------------------------------------
+
+// The role table's rows (roles.json), C and shell alike: what the door names.
+#define MOY_APP_TABLE_N 111u
+// Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
+// for a row the Python console serves), -1 past the table; its "role.verb",
+// NULL past it.
+#define MOY_APP_SHELL (-1)
+int moy_app_table_role(uint32_t row);
+int moy_app_table_c_row(uint32_t row);
+const char *moy_app_table_name(uint32_t row);
+
+// A compiled app's way to any row (docs/kernel_appabi_2026-10.md section 2.1):
+// the grant first, table row `row`, its arguments packed in `arg` (n bytes)
+// and its answer written into `ans` (cap bytes). It answers >= 0, the row's
+// number or the length of the text or blob written, or a MOY_APP_* code
+// negated; an answer longer than `cap` is FULL and writes nothing.
+//
+// THE ARGUMENTS are fields in the row's order, each a little-endian uint32
+// length and its bytes; a number is a 4-byte field (int32, little-endian), a
+// text field its UTF-8 (a name at most MOY_UF_NAME_MAX bytes), an empty text
+// field "none" where the row takes an optional one. A missing or extra field,
+// or a number field not 4 bytes long, is BAD. surface.size and surface.pointer
+// answer their numbers as little-endian int32s; artwork.current its kind and
+// its name as two fields. A list answers its names NUL-separated, as the row's
+// buffer holds them.
+//
+// A C row runs here, its answer copied out (a blob the user-files layer
+// allocated freed with moy_app_buf_free). A C row whose shape is an object the
+// Python binding hands out (surface.canvas, theme.colors) or a codec over
+// pixels answers BAD: it has no door. A shell row whose role the grant holds
+// crosses to the Python console through the door bound with
+// moy_app_door_bind (moy_loop_role: counted ROLE, and NEEDS_VM with no VM);
+// with no door bound it answers NEEDS_VM. Its caller is the VM's task (a
+// store row takes the bus gate; a shell row enters Python): a compiled cart's
+// session thread reaches it through the hop (moy_wasm_on_vm).
+int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                     size_t n, uint8_t *ans, size_t cap);
+typedef int32_t (*moy_app_door_fn)(uint32_t g, uint32_t row, const uint8_t *arg,
+                                   size_t n, uint8_t *ans, size_t cap);
+// The door the shell rows cross: one a process, NULL for none.
+void moy_app_door_bind(moy_app_door_fn fn);
+
 // -- the counters ------------------------------------------------------------------
 
 // Calls of C row `row` since the state was made (the roles trace's coverage

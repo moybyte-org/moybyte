@@ -147,6 +147,6 @@ def test_a_run_closes_its_books_and_refuses_its_handle_after(tmp_path):
     assert (stop, vm_down, fit) == ("lever", False, None), info1
     assert ended and "boom" in error, info1
     assert frames == 8 and ticks == 8, info1
-    assert upcalls == (0, 0, 0, 0, 0), "a frame crossed into Python: %r" % (upcalls,)
+    assert upcalls == (0, 0, 0, 0, 0, 0), "a frame crossed into Python: %r" % (upcalls,)
     assert "stale" in by["STALE"], by["STALE"]
     assert so is None and sf is None, "no stack meter off a board"  # absence, never 0
