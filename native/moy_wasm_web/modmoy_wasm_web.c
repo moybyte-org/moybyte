@@ -131,6 +131,11 @@ int moy_wasm_session_live(void)
     return g_sess.live;
 }
 
+// The page runs one thread and no watcher reaches into a running export.
+void moy_wasm_session_terminate(void)
+{
+}
+
 void moy_wasm_session_close(void)
 {
     if (!g_sess.live) {

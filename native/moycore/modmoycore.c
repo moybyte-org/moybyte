@@ -2299,6 +2299,17 @@ const moycore_lua_hooks_t moycore_lua_hooks = {
 // before calling and plays the audio queue after -- the kernel's Player
 // (moy_play.c), which calls moycore_frame itself, or the glue's own _update.
 
+void moycore_stuck(const char *what)
+{
+    if (RUN.L) {
+        moycore_lua_stuck(what);
+        return;
+    }
+#if MOYCORE_WASM
+    if (RUN.wasm) moy_wasm_session_terminate();
+#endif
+}
+
 int moycore_frame(float dt, int draw, char *err, size_t n)
 {
     moy_reset_state(&RUN.c.canvas);

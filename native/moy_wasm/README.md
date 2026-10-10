@@ -527,7 +527,9 @@ WAMR's loop-edge checks (`check_suspend_flags`) are emitted only for
 shared-memory modules under `--enable-multi-thread`, so stopping such a loop
 takes a compiler change in the fork — a flag the key would then carry — or the
 board restarting. `tests/on_glass.py`'s `wasm_runaway_runs_to_its_end` pins the
-current answer. A `par` item is no different: the call that handed it over
+current answer. A cart's session is ended the same way
+(`moy_wasm_session_terminate`), by the Player's runaway watch
+(`native/moy_play/moy_play.h`). A `par` item is no different: the call that handed it over
 waits for it, so an item that never returns holds the cart where it is.
 
 ## Testing

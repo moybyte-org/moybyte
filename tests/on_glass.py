@@ -919,6 +919,35 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
     return psram
 
 
+def a_stuck_run_with_the_vm_down_is_ended(board):
+    """The stuck compiled fixture with the VM stopped (`vmstop force`): the
+    runaway watch ends its frame on the VM service task's run, the board says
+    so, the panel waits, and a Ctrl-C reaches a VM whose Player reads the run
+    as stuck with the VM down. Returns the board's stuck line."""
+    title = STUCK["wasm"][0]
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    board.pyval("__import__('moy_play').watch(%d)" % STUCK_BUDGET_MS, strict=True)
+    try:
+        line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
+        assert line is not None and title in line, line
+        assert board.wait_line("STOP running", 60) is not None, "the run never started"
+        said = board.wait_line("PLAY stuck:", STUCK_BUDGET_MS / 1000.0 + 10.0)
+        assert said is not None and "stuck: one frame ran over 2 s" in said, said
+        assert board.wait_line("STOP refused or raised", 10) is not None
+        board.ser.write(b"\x03")
+        board.ser.flush()
+        assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+        _desk_back(board)
+        info = board.pyval("__import__('moy_play').info()", strict=True)
+        assert info[12] is True and info[14] is True, info
+        print("\nSTUCK down: %s" % said.strip())
+        return said
+    finally:
+        board.pyval("__import__('moy_play').watch(0)", strict=True)
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
 def mem_reports_the_heap(board):
     line = board.cmd("mem", wait_for="REMOTE mem")
     assert line is not None and "live=" in line and "free=" in line, line
@@ -1894,6 +1923,66 @@ def _runs_clean(board, title, check=None):
         board.drain(1.0)
 
 
+# -- the runaway watch (native/moy_play/moy_play.h, #212's rider) ----------------
+#
+# A cart whose frame never comes back is ended by the kernel's watch on
+# another task, with the stuck words on its panel, and the board runs on.
+# The fixtures' third frame loops forever: the Lua one on its line, the
+# compiled one round an import call, which is where a terminated instance
+# stops. The watch's budget is shortened for the check and put back after.
+
+STUCK_BUDGET_MS = 1500
+STUCK = {"lua": ("Stuck Lua", "stuck_lua.moy"), "wasm": ("Stuck Wasm", "wasm/stuck.moy")}
+
+
+def stuck_carts_push(board, board_dir):
+    """Both stuck fixtures into the store (the compiled one built for this
+    board's chip), rescanned."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_stuck_")
+    out = os.path.join(tmp, "stuck.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "stuck.moy"), out,
+                    chips=(chip,))
+    _push_folder(board, board_dir, out, root + "/wasm_stuck.moy")
+    _push_folder(board, board_dir, str(ROOT / "tests" / "fixtures" / "stuck_lua.moy"),
+                 root + "/stuck_lua.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+
+
+def a_stuck_run_is_ended(board, runtime):
+    """`runtime`'s stuck fixture, run from the launcher: within the budget
+    and a poll its frame is ended, the run reads as raised with the stuck
+    words -- a Lua run's on the line it was on -- and the board answers and
+    runs a cart after it. Returns the error text."""
+    title = STUCK[runtime][0]
+    board.pyval("__import__('moy_play').watch(%d)" % STUCK_BUDGET_MS, strict=True)
+    try:
+        line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+        assert line is not None and "no cart match" not in line, line
+        try:
+            board.drain(STUCK_BUDGET_MS / 1000.0 + 3.0)
+            st = board.state()
+            err = st.get("cart_error") or ""
+            assert st.get("cart") == title, st.get("cart")
+            assert "stuck: one frame ran over 2 s" in err, st
+            if runtime == "lua":
+                assert "cart:7:" in err or "cart:8:" in err, err
+            info = board.pyval("__import__('moy_play').info()", strict=True)
+            assert info[14] is True, info
+            print("\nSTUCK %s: %r" % (runtime, err))
+        finally:
+            board.leave_cart()
+            board.drain(1.0)
+    finally:
+        board.pyval("__import__('moy_play').watch(0)", strict=True)
+    _runs_clean(board, "Sakura Lua")
+    return err
+
+
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # The sub-line by cause (runtime/player.py's INTERP_NOTICE_SUB, duplicated
 # here because this file drives a real board over serial rather than
@@ -2000,7 +2089,7 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
 
 NEWER_TITLE = "Newer Wasm"
 NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
-                "Update the firmware.")
+                "Update this console in Settings, then try again.")
 
 
 def wasm_newer_cart_opens_the_notice(board, board_dir):

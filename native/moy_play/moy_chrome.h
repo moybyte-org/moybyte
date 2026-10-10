@@ -73,10 +73,45 @@ void moy_chrome_clear(moy_chrome_list_t *l);
 // The hold-to-exit pill over a `cw` x `ch` canvas, `held_ms` into a `hold_ms` hold.
 void moy_chrome_pill(moy_chrome_list_t *l, int cw, int ch, uint32_t held_ms, uint32_t hold_ms);
 // The panel a crashed or refused run leaves: `notice` is the calmer one (a
-// cart this console cannot hold), titled `title`; `text` word-wrapped; the
-// hint names the way out (a compiled cart has no source to show).
+// cart this console cannot hold), titled `title` ("" or NULL: the table's
+// default for its kind); `text` word-wrapped; the hint names the way out (a
+// compiled cart has no source to show).
 void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const char *title,
                       const char *text, bool compiled);
+
+// THE PANELS' WORDS (#143): every word the error, fit and newer-console
+// panels say, in one table (moy_chrome.c's SAY), whichever tier draws them,
+// under docs/os_voice_v1.md: a dead end says what happened and the next move,
+// never in red, and the cart's own error text stays exact under it.
+enum {
+    MOY_SAY_CRASH = 0,          // a raise, on line N when there is one
+    MOY_SAY_STUCK = 1,          // the runaway watch ended a frame
+    MOY_SAY_FIT = 2,            // a compiled cart too big for what is free
+    MOY_SAY_NEWER = 3,          // a compiled cart built for a newer console
+    MOY_SAY_NOLOAD = 4,         // a cart whose files will not load
+    MOY_SAY_CONSOLE = 5,        // a stopped run that needs the console to go on
+    MOY_SAYS = 6,
+};
+// The panel's title for `say`, naming `line` where it is above 0 (a raise
+// and a stuck frame). snprintf's answer.
+int moy_chrome_title(char *out, size_t n, int say, int line);
+// The title of the panel over a cart's error `text`: STUCK's when the text
+// is the runaway watch's (moy_chrome_stuck_text), else CRASH's.
+int moy_chrome_crash_title(char *out, size_t n, const char *text, int line);
+// The error a frame the runaway watch ended carries, its budget in ms; a Lua
+// run's has its `chunk:N:` position before it.
+int moy_chrome_stuck_text(char *out, size_t n, uint32_t budget_ms);
+// The fit notice: `title` needs (total, block) bytes where (free, largest)
+// are free; total 0 when the need could not be read. Megabytes to one
+// decimal, the need rounded up and what is free rounded down, so a refusal
+// never reads as a fit.
+int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
+                        uint32_t block, uint32_t free_, uint32_t largest);
+// The newer-console notice: `missing`, the imports this console's table
+// lacks, comma-separated.
+int moy_chrome_newer_text(char *out, size_t n, const char *title, const char *missing);
+// The stopped run's own two refusals' texts (NOLOAD, CONSOLE).
+const char *moy_chrome_say_text(int say);
 // The achievement toast: `title` with the badge's `glyph`.
 void moy_chrome_toast(moy_chrome_list_t *l, const char *title, const char *glyph);
 // The notice banner, sized off the layout: its width `lw`, font scale `fs`

@@ -56,10 +56,6 @@ try:
     import chrome_ops as _ch
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
-try:
-    import chrome_ops as _ch
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
 
 # #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
 # from cart_api (its one author) and is handed to the session.
@@ -315,17 +311,18 @@ def _compiled(cart):
 # as a NOTICE rather than an error: nothing went wrong, the cart is bigger than
 # this console. A load that still runs out of memory gets the same notice; the
 # engines on every tier begin that failure's text with _OUT_OF_MEMORY.
-NOTICE_TITLE = "Too big for this console."
-_OUT_OF_MEMORY = "out of memory"
-
+#
 # A compiled cart whose module imports a name this console's import table
 # lacks was built for a newer console (moy-spec SPEC.md 16.3), and is refused
 # the same way, before it loads, with a notice naming what is missing: never
 # a load error, never a trap when the cart first calls the import. Every
 # tier's runtime answers `missing(cart)` through one comparison,
 # device/moycore_glue.missing_imports.
-NEWER_TITLE = "Needs a newer console."
-_MB = 1024 * 1024
+#
+# Both notices' words, and the error panel's, are the kernel's one table
+# (native/moy_play/moy_chrome.h's THE PANELS' WORDS, #143): chrome_ops's
+# say_title, crash_title, fit_text and newer_text.
+_OUT_OF_MEMORY = "out of memory"
 
 # A compiled cart whose module does not run natively on this console -- none
 # for this chip and compiled-code format, one with no signature while the
@@ -367,15 +364,7 @@ class _Refused(Exception):
 def newer_notice(title, missing):
     """The notice for a cart whose module imports `missing`, names this
     console's import table lacks."""
-    return ("%s needs a newer console (missing: %s). Update the firmware."
-            % (title or "This game", ", ".join(missing)))
-
-
-def _mb(n, up):
-    """`n` bytes as MB to one decimal, rounded UP for what a cart needs and
-    DOWN for what the console has, so a refusal never reads as a fit."""
-    tenths = (int(n) * 10 + (_MB - 1 if up else 0)) // _MB
-    return "%d.%d MB" % (tenths // 10, tenths % 10)
+    return _ch.newer_text(title, missing)
 
 
 def fit_notice(title, need, have):
@@ -383,20 +372,9 @@ def fit_notice(title, need, have):
     block) -- where the console has `have` -- (free, largest free block):
     the cart, what it needs and what this console has free. Either figure
     may be None when it could not be read; the notice then says what it can."""
-    title = title or "This game"
     if need is None or have is None:
-        return "%s needs more memory than this console has free." % title
-    total, block = need
-    free, largest = have
-    if total > free:
-        return ("%s needs %s of memory to run. This console has %s free."
-                % (title, _mb(total, True), _mb(free, False)))
-    if block > largest:
-        return ("%s needs %s of memory in one piece. The biggest piece this "
-                "console has free is %s." % (title, _mb(block, True),
-                                              _mb(largest, False)))
-    return ("%s needs %s of memory to run. This console has %s free, but not "
-            "in pieces it can use." % (title, _mb(total, True), _mb(free, False)))
+        return _ch.fit_text(title, 0, 0, 0, 0)
+    return _ch.fit_text(title, need[0], need[1], have[0], have[1])
 
 
 def _cart_fit(make, cart):
@@ -557,7 +535,7 @@ class Player:
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self._notice = None           # a notice's text: the panel is a notice
                                       # while cart_error still holds it (`notice`)
-        self._notice_title = NOTICE_TITLE  # ...and the title it is drawn under
+        self._notice_title = None  # ...and the title it is drawn under (None: the fit's)
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
@@ -1892,12 +1870,12 @@ class Player:
                 missing = _cart_missing(make, cart)
                 if missing:
                     raise _Refused(newer_notice(cart.get("title"), missing),
-                                   NEWER_TITLE)
+                                   _ch.say_title(_ch.SAY_NEWER))
                 fit = _cart_fit(make, cart)
                 if fit is not None and (fit[0][0] > fit[1][0]
                                         or fit[0][1] > fit[1][1]):
                     raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
-                                   NOTICE_TITLE)
+                                   _ch.say_title(_ch.SAY_FIT))
             lua = make(ns, src)
             if runtime == "wasm" and getattr(lua, "interp", False):
                 # Not an error and not a panel: the cart plays, on the
@@ -1943,7 +1921,7 @@ class Player:
                     fit = _cart_fit(make, ws.cart or {})
                     self._notice = self.cart_error = fit_notice(
                         title, fit[0] if fit else None, fit[1] if fit else None)
-                    self._notice_title = NOTICE_TITLE
+                    self._notice_title = _ch.say_title(_ch.SAY_FIT)
             else:
                 self.crash_file, self.crash_line = _lua_cart_where(
                     self.cart_error, self.ws.cart)
@@ -2373,9 +2351,11 @@ class Player:
         if cv is None:
             cv = self.ws.canvas
         notice = self.notice is not None
+        title = (self._notice_title if notice
+                 else _ch.crash_title(self.cart_error, self.crash_line))
         mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
-        _ch.replay(mp.chrome_panel(cv.w, cv.h, notice, self._notice_title,
-                                   self.cart_error or "Unknown error",
+        _ch.replay(mp.chrome_panel(cv.w, cv.h, notice, title or "",
+                                   self.cart_error or "",
                                    _compiled(self.ws.cart)), cv, self.ws)
 
     def _draw_hold_progress(self):

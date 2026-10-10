@@ -198,6 +198,98 @@ static void panel_lines(moy_chrome_list_t *l, const char *text, int cols, int ma
     }
 }
 
+// -- the panels' words (#143) -------------------------------------------------------
+
+// Each kind's title, with and without the line, and the stopped run's texts,
+// in docs/os_voice_v1.md's Spoken register (§5's failure doctrine: the fact,
+// then the next move; no "I", no exclamation, none of law 3's words); the
+// hint under them is ENGRAVED. A title fits the panel's 35 columns.
+static const struct {
+    const char *title, *title_at, *text;
+} SAY[MOY_SAYS] = {
+    [MOY_SAY_CRASH] = { "Your game stopped.", "Your game stopped on line %d.", NULL },
+    [MOY_SAY_STUCK] = { "Your game got stuck.", "Your game got stuck on line %d.", NULL },
+    [MOY_SAY_FIT] = { "Too big for this console.", NULL, NULL },
+    [MOY_SAY_NEWER] = { "Needs a newer console.", NULL, NULL },
+    [MOY_SAY_NOLOAD] = { "This cart didn't open.", NULL,
+                         "Its files didn't read back right. Get it again from Get "
+                         "Carts." },
+    [MOY_SAY_CONSOLE] = { "This game needs the console.", NULL,
+                          "Open it again from home to play it." },
+};
+// The runaway watch's words, the head a stuck title is recognised by first.
+static const char STUCK_HEAD[] = "stuck: one frame ran over ";
+static const char STUCK_TEXT[] = "stuck: one frame ran over %u s. Look for a loop that "
+                                 "never ends.";
+// The way out, under the text.
+static const char HINT_CODE[] = "TAP CODE TO SEE WHY";
+static const char HINT_HOME[] = "TAP HOME TO LEAVE";
+// The next move a fit notice offers: a fresh start has the most memory in
+// one piece.
+static const char FIT_RESTART[] = " Restarting the console might free enough.";
+
+int moy_chrome_title(char *out, size_t n, int say, int line) {
+    if (say < 0 || say >= MOY_SAYS) {
+        say = MOY_SAY_CRASH;
+    }
+    if (line > 0 && SAY[say].title_at != NULL) {
+        return snprintf(out, n, SAY[say].title_at, line);
+    }
+    return snprintf(out, n, "%s", SAY[say].title);
+}
+
+int moy_chrome_crash_title(char *out, size_t n, const char *text, int line) {
+    bool stuck = text != NULL && strstr(text, STUCK_HEAD) != NULL;
+    return moy_chrome_title(out, n, stuck ? MOY_SAY_STUCK : MOY_SAY_CRASH, line);
+}
+
+int moy_chrome_stuck_text(char *out, size_t n, uint32_t budget_ms) {
+    return snprintf(out, n, STUCK_TEXT, (unsigned)((budget_ms + 999u) / 1000u));
+}
+
+const char *moy_chrome_say_text(int say) {
+    return say >= 0 && say < MOY_SAYS && SAY[say].text != NULL ? SAY[say].text : "";
+}
+
+// `v` bytes as "N.N MB", rounded up (`up`) or down.
+static void mb(char *out, size_t n, uint32_t v, bool up) {
+    const uint64_t MB = 1024u * 1024u;
+    uint64_t tenths = ((uint64_t)v * 10u + (up ? MB - 1u : 0u)) / MB;
+    snprintf(out, n, "%u.%u MB", (unsigned)(tenths / 10u), (unsigned)(tenths % 10u));
+}
+
+int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
+                        uint32_t block, uint32_t free_, uint32_t largest) {
+    const char *t = title != NULL && *title ? title : "This game";
+    char a[16], b[16];
+    if (total == 0u) {
+        return snprintf(out, n, "%s needs more memory than this console has free.%s", t,
+                        FIT_RESTART);
+    }
+    if (total > free_) {
+        mb(a, sizeof(a), total, true);
+        mb(b, sizeof(b), free_, false);
+        return snprintf(out, n, "%s needs %s of memory to run. This console has %s free.%s",
+                        t, a, b, FIT_RESTART);
+    }
+    if (block > largest) {
+        mb(a, sizeof(a), block, true);
+        mb(b, sizeof(b), largest, false);
+        return snprintf(out, n, "%s needs %s of memory in one piece. The biggest piece this "
+                        "console has free is %s.%s", t, a, b, FIT_RESTART);
+    }
+    mb(a, sizeof(a), total, true);
+    mb(b, sizeof(b), free_, false);
+    return snprintf(out, n, "%s needs %s of memory to run. This console has %s free, but "
+                    "not in pieces it can use.%s", t, a, b, FIT_RESTART);
+}
+
+int moy_chrome_newer_text(char *out, size_t n, const char *title, const char *missing) {
+    return snprintf(out, n, "%s needs a newer console (missing: %s). Update this console "
+                    "in Settings, then try again.", title != NULL && *title ? title : "This game",
+                    missing != NULL ? missing : "");
+}
+
 void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const char *title,
                       const char *text, bool compiled) {
     // Sized against the surface: a cart-declared small canvas still gets a
@@ -206,24 +298,29 @@ void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const c
     int h = ch - 16 < 132 ? ch - 16 : 132;
     int x = (cw - w) / 2;
     int y = (ch - h) / 2 < 40 ? (ch - h) / 2 : 40;
-    int edge = ink(notice ? MOY_INK_ORANGE : MOY_INK_RED);
+    // Never red (#143, docs/os_voice_v1.md §5: no alarm): a crash is peach on
+    // purple, a notice orange on blue.
+    int edge = ink(notice ? MOY_INK_ORANGE : MOY_INK_PEACH);
     rect(l, x, y, w, h, ink(notice ? MOY_INK_DARK_BLUE : MOY_INK_DARK_PURPLE));
     rectb(l, x, y, w, h, edge);
     rect(l, x, y, w, 14, edge);
-    print(l, notice ? title : "Your game stopped.", -1, x + 6, y + 4,
-          ink(notice ? MOY_INK_BLACK : MOY_INK_WHITE), 1);
+    char head[48];
+    if (title == NULL || !*title) {
+        moy_chrome_title(head, sizeof(head), notice ? MOY_SAY_FIT : MOY_SAY_CRASH, 0);
+        title = head;
+    }
+    print(l, title, -1, x + 6, y + 4, ink(MOY_INK_BLACK), 1);
     int cols = (w - 16) / 8;
     int max_rows = (h - 30) / CODE_LH;
     if (text == NULL || !*text) {
-        text = "Unknown error";
+        text = "It stopped without saying why.";
     }
     if (max_rows > 0) {
         panel_lines(l, text, cols, max_rows, x + 8, y + 20,
                     ink(notice ? MOY_INK_WHITE : MOY_INK_PEACH));
     }
     // A compiled cart's trap has no source line behind it and no EDIT.
-    print(l, compiled ? "TAP HOME TO LEAVE" : "TAP CODE TO SEE WHY", -1, x + 8, y + h - 12,
-          ink(MOY_INK_YELLOW), 1);
+    print(l, compiled ? HINT_HOME : HINT_CODE, -1, x + 8, y + h - 12, ink(MOY_INK_YELLOW), 1);
 }
 
 void moy_chrome_toast(moy_chrome_list_t *l, const char *title, const char *g) {

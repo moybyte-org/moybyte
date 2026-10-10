@@ -186,8 +186,19 @@ const moycore_lua_hooks_t moycore_lua_hooks = {
     hk_load, hk_load, hk_frame, hk_frame, hk_frame_end,
 };
 
-/* A compiled cart's frame, where the library has WAMR (moyhost_wasm.c). */
+/* A compiled cart's frame, where the library has WAMR (moyhost_wasm.c), and
+ * its runaway watch's end: the instance terminated. */
 int (*hl_wasm_tick)(float dt, int draw, char *err, size_t n);
+void (*hl_wasm_stuck)(void);
+
+void moycore_stuck(const char *what)
+{
+    if (moycore_RUN.L) {
+        moycore_lua_stuck(what);
+        return;
+    }
+    if (hl_wasm_stuck) hl_wasm_stuck();
+}
 
 int moycore_frame(float dt, int draw, char *err, size_t n)
 {

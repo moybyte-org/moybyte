@@ -76,6 +76,7 @@ static int g_runtime;        /* 1 once WAMR is up and the table registered */
  * wasm row reaches through moycore_frame. */
 void hl_claim(void (*release)(void));
 extern int (*hl_wasm_tick)(float dt, int draw, char *err, size_t n);
+extern void (*hl_wasm_stuck)(void);
 static host_wasm *G_LIVE_W;
 int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen);
 
@@ -86,6 +87,7 @@ static void hw_release_live(void)
     memset(&moycore_RUN, 0, sizeof(moycore_RUN));
     moycore_run_cur = NULL;
     hl_wasm_tick = NULL;
+    hl_wasm_stuck = NULL;
     G_LIVE_W = NULL;
 }
 
@@ -93,6 +95,13 @@ static int hw_tick_live(float dt, int draw, char *err, size_t n)
 {
     if (!G_LIVE_W) return 0;
     return hw_tick(G_LIVE_W, dt, draw, err, (int)n) != 0 ? -1 : 0;
+}
+
+/* The runaway watch, from its thread: the instance raises "terminated by
+ * user" when its next import call returns. */
+static void hw_stuck_live(void)
+{
+    if (G_LIVE_W && G_LIVE_W->inst) wasm_runtime_terminate(G_LIVE_W->inst);
 }
 /* The table's registration storage: WAMR sorts it in place and points at it
  * until the runtime is destroyed, which on the host is never. */
@@ -285,6 +294,7 @@ host_wasm *hw_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     moycore_RUN.wasm = 1;
     G_LIVE_W = r;
     hl_wasm_tick = hw_tick_live;
+    hl_wasm_stuck = hw_stuck_live;
     return r;
 }
 

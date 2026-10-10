@@ -356,6 +356,18 @@ def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
                                                runtime="wasm")
 
 
+# The runaway watch (native/moy_play/moy_play.h): a frame that never comes
+# back is ended, Lua on its line and a compiled cart at its next import call.
+@pytest.fixture(scope="module")
+def stuck_carts(board):
+    on_glass.stuck_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runtime", ("lua", "wasm"))
+def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
+    on_glass.a_stuck_run_is_ended(board, runtime)
+
+
 def test_idle_screen_blank_and_wake(board):
     on_glass.idle_blank_and_wake(board)
     on_glass.idle_timeout_restored(board)

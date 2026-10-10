@@ -6,6 +6,9 @@
 //   chrome_inks(inks, bar_light, rings)
 //   chrome_pill(cw, ch, held_ms, hold_ms)
 //   chrome_panel(cw, ch, notice, title, text, compiled)
+//   chrome_say_title(say, line), chrome_crash_title(text, line|None),
+//   chrome_fit_text(title, total, block, free, largest),
+//   chrome_newer_text(title, missing): the panels' words (#143)
 //   chrome_toast(title, glyph)
 //   chrome_banner(lw, fs, status_h, title, sub, ok)
 //   chrome_strip_crash(cw, edit, clock, wifi), chrome_strip_band(cw, bar_h,
@@ -88,6 +91,43 @@ static mp_obj_t ch_panel(size_t n, const mp_obj_t *a) {
     return ops(l);
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_panel_obj, 6, 6, ch_panel);
+
+// The panels' words (#143), as strings.
+static mp_obj_t say_str(const char *b, int len) {
+    size_t n = len < 0 ? 0u : (size_t)len;
+    return mp_obj_new_str(b, n);
+}
+
+static mp_obj_t ch_say_title(mp_obj_t say, mp_obj_t line) {
+    char b[64];
+    int n = moy_chrome_title(b, sizeof(b), mp_obj_get_int(say), mp_obj_get_int(line));
+    return say_str(b, n < (int)sizeof(b) ? n : (int)sizeof(b) - 1);
+}
+MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_say_title_obj, ch_say_title);
+
+static mp_obj_t ch_crash_title(mp_obj_t text, mp_obj_t line) {
+    char b[64];
+    int n = moy_chrome_crash_title(b, sizeof(b), s_of(text), mp_obj_get_int(line));
+    return say_str(b, n < (int)sizeof(b) ? n : (int)sizeof(b) - 1);
+}
+MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_crash_title_obj, ch_crash_title);
+
+static mp_obj_t ch_fit_text(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    char b[320];
+    int n = moy_chrome_fit_text(b, sizeof(b), s_of(a[0]), (uint32_t)mp_obj_get_int(a[1]),
+                                (uint32_t)mp_obj_get_int(a[2]), (uint32_t)mp_obj_get_int(a[3]),
+                                (uint32_t)mp_obj_get_int(a[4]));
+    return say_str(b, n < (int)sizeof(b) ? n : (int)sizeof(b) - 1);
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_fit_text_obj, 5, 5, ch_fit_text);
+
+static mp_obj_t ch_newer_text(mp_obj_t title, mp_obj_t missing) {
+    char b[320];
+    int n = moy_chrome_newer_text(b, sizeof(b), s_of(title), s_of(missing));
+    return say_str(b, n < (int)sizeof(b) ? n : (int)sizeof(b) - 1);
+}
+MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_newer_text_obj, ch_newer_text);
 
 static mp_obj_t ch_toast(mp_obj_t title, mp_obj_t glyph) {
     moy_chrome_list_t *l = list();

@@ -240,7 +240,7 @@ def test_a_cart_built_for_a_newer_console_is_refused_with_the_notice(tmp_path):
     st = json.loads(js[0])
     assert st["cart"] == "Newer Wasm" and st["err"] is None, st
     assert st["notice"] == ("Newer Wasm needs a newer console (missing: later). "
-                            "Update the firmware."), st
+                            "Update this console in Settings, then try again."), st
 
 def test_the_jet_carts_play_in_the_browser(tmp_path):
     web_e2e.require("store")

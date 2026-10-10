@@ -699,6 +699,18 @@ def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
                                                door="shell", clear=3, runtime="wasm")
 
 
+# The runaway watch (native/moy_play/moy_play.h): a frame that never comes
+# back is ended, Lua on its line and a compiled cart at its next import call.
+@pytest.fixture(scope="module")
+def stuck_carts(board):
+    on_glass.stuck_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runtime", ("lua", "wasm"))
+def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
+    on_glass.a_stuck_run_is_ended(board, runtime)
+
+
 # -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts
 # BLE, and the WiFi driver keeps its internal RAM for the rest of the boot.

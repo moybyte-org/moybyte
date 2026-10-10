@@ -793,6 +793,7 @@ typedef struct {
     void *volatile vm_arg;
     volatile bool waiting;          // the task is in sess_wait and can serve
     TaskHandle_t thread;            // the session's task, once it runs
+    wasm_module_inst_t volatile inst;   // what moy_wasm_session_terminate stops
     lane_t lane[LANES_MAX + 1];     // [1..]: the par lanes, started on demand
 } sess_t;
 
@@ -1031,6 +1032,7 @@ static void *sess_thread(void *arg)
         rc = sess_fail(s, alloc_failed(err) ? OUT_OF_MEMORY : "instantiate", err);
         goto opened;
     }
+    s->inst = inst;
     env = wasm_runtime_create_exec_env(inst, MOY_WASM_EXEC_STACK);
     if (!env) {
         rc = sess_fail(s, OUT_OF_MEMORY, "no pool for the exec env");
@@ -1064,6 +1066,7 @@ opened:
     if (env) {
         wasm_runtime_destroy_exec_env(env);
     }
+    s->inst = NULL;
     if (inst) {
         wasm_runtime_deinstantiate(inst);
     }
@@ -1078,6 +1081,14 @@ opened:
     }
     xSemaphoreGive(s->back);               // closed
     return NULL;
+}
+
+void moy_wasm_session_terminate(void)
+{
+    sess_t *s = g_sess;
+    if (s && s->live && s->inst) {
+        wasm_runtime_terminate(s->inst);
+    }
 }
 
 int moy_wasm_session_live(void)

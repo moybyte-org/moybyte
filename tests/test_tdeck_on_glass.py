@@ -350,6 +350,18 @@ def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
                                                runtime="wasm")
 
 
+# The runaway watch (native/moy_play/moy_play.h): a frame that never comes
+# back is ended, Lua on its line and a compiled cart at its next import call.
+@pytest.fixture(scope="module")
+def stuck_carts(board):
+    on_glass.stuck_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runtime", ("lua", "wasm"))
+def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
+    on_glass.a_stuck_run_is_ended(board, runtime)
+
+
 def test_draw_gates_are_installed(board):
     on_glass.draw_gates_are_installed(board)
 
@@ -437,6 +449,10 @@ def test_doom_runs_with_the_vm_down(board):
 
 def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
     on_glass.doom_runs_with_the_vm_down(board, ctrl_c=True)
+
+
+def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
+    on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
 
 
 # LAST in the file: twenty soft resets end on a freshly started VM.

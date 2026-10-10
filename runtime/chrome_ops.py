@@ -58,3 +58,29 @@ def replay(ops, cv, ws=None):
             ws._glyph(t, (x, y, w, h), c, cv, sc or None)
         elif op == 5:
             ws._icon(t, x, y, cv, sc or None)
+
+
+# The panels' words (#143): moy_chrome.h's one table, whichever tier draws.
+SAY_CRASH, SAY_STUCK, SAY_FIT, SAY_NEWER = 0, 1, 2, 3
+
+
+def say_title(say, line=0):
+    """The panel's title for `say` (SAY_*), naming `line` where above 0."""
+    return _moy_play().chrome_say_title(say, line or 0)
+
+
+def crash_title(text, line=None):
+    """The title over a cart's error `text`: the runaway watch's when the
+    text is its, else a raise's, on `line` when it is known."""
+    return _moy_play().chrome_crash_title(text or "", line or 0)
+
+
+def fit_text(title, total, block, free, largest):
+    """The fit notice; `total` 0 when the need could not be read."""
+    return _moy_play().chrome_fit_text(title or "", int(total), int(block), int(free),
+                                       int(largest))
+
+
+def newer_text(title, missing):
+    """The newer-console notice; `missing` the names this console lacks."""
+    return _moy_play().chrome_newer_text(title or "", ", ".join(missing))

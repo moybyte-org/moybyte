@@ -25,6 +25,8 @@
 //   open(run)                    the row's check that its runtime is open
 //   frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW
 //   end(run[, why]), info([run]), current(), stack()
+//   watch(ms)                    the runaway watch's budget for the next
+//                                launch, 0 its slots' rule (a test's lever)
 //   QUIT, VIEW (a frame's bits); END_QUIT, END_CRASH (an end's why)
 //
 // The radio link and its lockstep session (modmoy_match.c has the list):
@@ -363,11 +365,12 @@ static mp_obj_t stack_obj(uint32_t v) {
 }
 
 // info([run]) -> (runtime, vm_free, why, frames, ticks, upcalls, ended,
-// error, stack_open, stack_frame, end_why, stop, vm_down, fit), the live run's
+// error, stack_open, stack_frame, end_why, stop, vm_down, fit, stuck), the live run's
 // or the last one's (`stop`: the launch's stop verdict, "stops" or the clause
 // that kept the VM; `vm_down`: it ran with the VM stopped; `fit`: the
 // verdict's fit check with the VM up -- (need, need_block, free, largest,
-// vm_heap) bytes -- or None when it did not reach one); None when
+// vm_heap) bytes -- or None when it did not reach one; `stuck`: the runaway
+// watch ended a tick); None when
 // there is none. `upcalls` is a tuple by class: CONSOLE, APP, DRIVER,
 // SERVICE, REFUSED; the two stack readings are moy_play.stack()'s, taken
 // after the open and after the last frame, None off a board.
@@ -391,7 +394,7 @@ static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
         }
         fit = mp_obj_new_tuple(5, f);
     }
-    mp_obj_t t[14] = {
+    mp_obj_t t[15] = {
         mp_obj_new_str(i.runtime, strlen(i.runtime)),
         mp_obj_new_bool(i.vm_free),
         mp_obj_new_str(why, strlen(why)),
@@ -406,8 +409,9 @@ static mp_obj_t mod_info(size_t n_args, const mp_obj_t *a) {
         mp_obj_new_str(stop, strlen(stop)),
         mp_obj_new_bool(i.vm_down),
         fit,
+        mp_obj_new_bool(i.stuck),
     };
-    return mp_obj_new_tuple(14, t);
+    return mp_obj_new_tuple(15, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_info_obj, 0, 1, mod_info);
 
@@ -417,6 +421,12 @@ static mp_obj_t mod_stack(void) {
     return stack_obj(moy_play_stack_free());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_stack_obj, mod_stack);
+
+static mp_obj_t mod_watch(mp_obj_t ms) {
+    moy_play_watch_budget((uint32_t)mp_obj_get_int(ms));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_watch_obj, mod_watch);
 
 // lockstep(run) -> 1 the frame simulates, 0 it stalls or waits, None: no
 // match (moy_play_lockstep).
@@ -450,10 +460,11 @@ extern const mp_obj_type_t moy_play_match_type;
 extern const mp_obj_fun_builtin_fixed_t moy_play_seed_of_obj;
 // The chrome (modmoy_chrome.c).
 extern const mp_obj_fun_builtin_fixed_t moy_chrome_inks_obj, moy_chrome_toast_obj,
-    moy_chrome_band_obj, moy_chrome_glyph_obj, moy_chrome_toast_arm_obj;
+    moy_chrome_band_obj, moy_chrome_glyph_obj, moy_chrome_toast_arm_obj,
+    moy_chrome_say_title_obj, moy_chrome_crash_title_obj, moy_chrome_newer_text_obj;
 extern const mp_obj_fun_builtin_var_t moy_chrome_pill_obj, moy_chrome_panel_obj,
     moy_chrome_banner_obj, moy_chrome_crash_obj, moy_chrome_right_obj, moy_chrome_title_obj,
-    moy_chrome_menu_obj, moy_chrome_about_obj, moy_chrome_notice_obj;
+    moy_chrome_menu_obj, moy_chrome_about_obj, moy_chrome_notice_obj, moy_chrome_fit_text_obj;
 
 static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_play) },
@@ -474,6 +485,7 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_END_LINK), MP_ROM_INT(MOY_PLAY_END_LINK) },
     { MP_ROM_QSTR(MP_QSTR_END_SERIAL), MP_ROM_INT(MOY_PLAY_END_SERIAL) },
     { MP_ROM_QSTR(MP_QSTR_stack), MP_ROM_PTR(&mod_stack_obj) },
+    { MP_ROM_QSTR(MP_QSTR_watch), MP_ROM_PTR(&mod_watch_obj) },
     { MP_ROM_QSTR(MP_QSTR_QUIT), MP_ROM_INT(MOY_PLAY_QUIT) },
     { MP_ROM_QSTR(MP_QSTR_HOME), MP_ROM_INT(MOY_PLAY_HOME) },
     { MP_ROM_QSTR(MP_QSTR_UNSIGNED), MP_ROM_INT(MOY_PLAY_UNSIGNED) },
@@ -487,6 +499,10 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_chrome_inks), MP_ROM_PTR(&moy_chrome_inks_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_pill), MP_ROM_PTR(&moy_chrome_pill_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_panel), MP_ROM_PTR(&moy_chrome_panel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chrome_say_title), MP_ROM_PTR(&moy_chrome_say_title_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chrome_crash_title), MP_ROM_PTR(&moy_chrome_crash_title_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chrome_fit_text), MP_ROM_PTR(&moy_chrome_fit_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chrome_newer_text), MP_ROM_PTR(&moy_chrome_newer_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_toast), MP_ROM_PTR(&moy_chrome_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_banner), MP_ROM_PTR(&moy_chrome_banner_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_strip_crash), MP_ROM_PTR(&moy_chrome_crash_obj) },

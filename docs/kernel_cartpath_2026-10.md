@@ -546,14 +546,15 @@ crash paints the panel, as today, whether or not its run stopped the VM.
 ### 8.2 The runaway watchdog (#212's rider)
 
 The service task's watchdog feed is per frame; a run that does not come back
-to the loop starves it. Before that reset, a frame-overrun budget (a multiple
-of the pacing slot, configuration) fires: a Lua run's count hook
-(`LUA_MASKCOUNT`, installed from C, outside the cart's reach) raises and the
-run ends as a crash "stuck on line N"; a wasm run is terminated and stops at
-its next import call; a Python cart's VM gets a scheduled interrupt, caught
-narrowly. A wasm loop that calls no import cannot be stopped
+to the loop starves it. Before that reset, a tick-overrun budget (a multiple
+of the pacing slot, configuration: `moy_play.h`'s RUNAWAY WATCH) fires from a
+watcher on another task: a Lua run's count hook (`LUA_MASKCOUNT`, installed
+from C, outside the cart's reach) raises on the line it is on and the run
+ends as a crash under the stuck title; a wasm run is terminated and stops at
+its next import call. A wasm loop that calls no import cannot be stopped
 (`native/moy_wasm/README.md`): the task watchdog resets the board, and the
 crash record names the cart (§8.3). The fork's loop-edge check is a #158 item.
+A Python cart's tick is not watched: its scheduled interrupt stays on #212.
 
 ### 8.3 Games in the crash record
 

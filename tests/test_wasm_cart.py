@@ -700,8 +700,9 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     # The host always interprets (there is no AOT tier on it), so this is the
     # interpreted rule's number: the module file is never reused for the
     # linear memory, so a 40 MB declaration holds two ~41 MB blocks at once.
-    assert p.notice == ("Huge Wasm needs 82.6 MB of memory to run. This "
-                        "console has 32.0 MB free."), p.notice
+    assert p.notice == ("Huge Wasm needs 82.6 MB of memory to run. This console has "
+                        "32.0 MB free. Restarting the console might free "
+                        "enough."), p.notice
     assert p._lua is None and p._update is None and p._draw is None
     assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
     _frames(ws, 3)
@@ -709,7 +710,7 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     x, y = (cv.w - min(292, cv.w - 12)) // 2, min(40, (cv.h - min(132, cv.h - 16)) // 2)
     assert _px(cv, x + 1, y + 1) == cv._wire[ws.player.NAMES["orange"]]
     assert _px(cv, x + 1, y + 1) != cv._wire[ws.player.NAMES["red"]]
-    assert player.NOTICE_TITLE == "Too big for this console."
+    assert p._notice_title == "Too big for this console."
     st = _remote_state(ws)
     assert st["notice"] == p.notice and st["cart_error"] is None
     assert bar_layer._edit_kind(ws.cart) is None
@@ -728,8 +729,9 @@ def test_the_hosts_configured_limit_is_what_it_refuses_by(tmp_path, monkeypatch)
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     monkeypatch.setattr(wasm_host, "MEMORY_LIMIT", 300 * 1024)
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. "
-                                "This console has 0.2 MB free."), ws.player.notice
+    assert ws.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. This "
+                                "console has 0.2 MB free. Restarting the console "
+                                "might free enough."), ws.player.notice
     ws._exit_to_caller()
     monkeypatch.undo()
     open_cart(ws, "Hello Wasm")
@@ -763,8 +765,9 @@ def test_a_load_that_still_runs_out_of_memory_gets_the_same_notice(tmp_path):
     _binding_or_skip()
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     real = ws.runtimes["wasm"]
-    want = ("Hello Wasm needs 0.5 MB of memory to run. This console has "
-            "32.0 MB free, but not in pieces it can use.")
+    want = ("Hello Wasm needs 0.5 MB of memory to run. This console has 32.0 MB "
+            "free, but not in pieces it can use. Restarting the console might free "
+            "enough.")
     for exc in (RuntimeError("out of memory: AOT module instantiate failed: "
                              "allocate linear memory failed"),
                 MemoryError("no PSRAM for the module file")):
@@ -786,8 +789,9 @@ def test_a_console_whose_largest_block_is_too_small_says_so(tmp_path):
                                    memory=(32 * 1024 * 1024, 100 * 1024))
     open_cart(ws, "Hello Wasm")
     assert ws.player.notice == ("Hello Wasm needs 0.3 MB of memory in one "
-                                "piece. The biggest piece this console has "
-                                "free is 0.0 MB."), ws.player.notice
+                                "piece. The biggest piece this console has free "
+                                "is 0.0 MB. Restarting the console might free "
+                                "enough."), ws.player.notice
 
 
 def test_the_notice_never_reads_as_a_fit():
@@ -796,16 +800,18 @@ def test_the_notice_never_reads_as_a_fit():
     from runtime.player import fit_notice
     mb = 1024 * 1024
     text = fit_notice("Doom", (int(2.95 * mb), mb), (int(2.94 * mb), 2 * mb))
-    assert text == "Doom needs 3.0 MB of memory to run. This console has 2.9 MB free."
+    assert text == ("Doom needs 3.0 MB of memory to run. This console has 2.9 MB "
+                    "free. Restarting the console might free enough.")
     assert fit_notice("Doom", None, None) == (
-        "Doom needs more memory than this console has free.")
+        "Doom needs more memory than this console has free. Restarting the console "
+        "might free enough.")
 
 
 # -- a cart built for a newer console ----------------------------------------------
 
 NEWER = os.path.join(FIXTURES, "newer.moy")
 NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
-                "Update the firmware.")
+                "Update this console in Settings, then try again.")
 
 
 def _newer(root):
@@ -825,7 +831,7 @@ def test_a_cart_built_for_a_newer_console_opens_the_notice_not_an_error(tmp_path
     open_cart(ws, "Newer Wasm")
     p = ws.player
     assert p.notice == NEWER_NOTICE, p.cart_error
-    assert p._notice_title == player.NEWER_TITLE == "Needs a newer console."
+    assert p._notice_title == "Needs a newer console."
     assert p._lua is None and p._update is None and p._draw is None
     assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
     _frames(ws, 3)
@@ -850,7 +856,8 @@ def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
     ws = host_app.build_workstation(_store(tmp_path, _files))
     open_cart(ws, "Files Wasm")
     assert ws.player.notice == ("Files Wasm needs a newer console (missing: "
-                                "write, erase, list). Update the firmware."), \
+                                "write, erase, list). Update this console in "
+                                "Settings, then try again."), \
         ws.player.cart_error
     ws._exit_to_caller()
     monkeypatch.undo()

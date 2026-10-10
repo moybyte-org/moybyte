@@ -154,6 +154,7 @@ typedef struct {
     // block), PSRAM free and its largest block then, and the VM's heap bytes a
     // stop would give back. All 0: the verdict did not reach the fit.
     uint32_t fit[5];
+    bool stuck;                 // the runaway watch ended its tick
 } moy_play_info_t;
 
 // The Player's row and the front's chrome list, made by `alloc` ahead of the
@@ -180,6 +181,32 @@ uint32_t moy_play_current(void);       // the live run, or 0
 #define MOY_PLAY_NO_STACK 0xFFFFFFFFu
 uint32_t moy_play_stack_free(void);
 uint32_t moy_play_last(void);          // the last run launched, live or ended
+// THE RUNAWAY WATCH (docs/kernel_cartpath_2026-10.md §8.2, #212's rider).
+// Each tick runs under a budget: MOY_PLAY_STUCK_SLOTS of the run's pacing
+// slot (30 Hz unpaced), within [MOY_PLAY_STUCK_MIN_MS, MOY_PLAY_STUCK_MAX_MS],
+// which is under every board's task-watchdog timeout. A watcher on another
+// task -- an esp_timer on a board, a thread on the host; the browser's one
+// thread has none -- polls every MOY_PLAY_WATCH_POLL_MS while a run is live,
+// and ends a tick past its budget through moycore_stuck: a Lua run's count
+// hook, installed from C outside the cart's reach, raises at its next
+// instruction on the line it is on; a compiled cart is terminated and stops
+// at its next import call. The run then reads as raised with `stuck` set,
+// its error the panel's stuck words (moy_chrome_stuck_text) and the panel
+// titled "stuck" (moy_chrome_crash_title), and the board says
+// "PLAY stuck: <id>: <error>". A compiled loop that calls no import cannot be
+// stopped (native/moy_wasm/README.md): the task watchdog resets the board,
+// and the crash record names the cart through the GAME role armed above.
+// A Python cart's tick is not watched (#212).
+#define MOY_PLAY_STUCK_SLOTS 120u
+#define MOY_PLAY_STUCK_MIN_MS 4000u
+#define MOY_PLAY_STUCK_MAX_MS 10000u
+#define MOY_PLAY_WATCH_POLL_MS 100u
+// The watcher's poll: ends the live tick when it is past its budget; true
+// when this poll fired.
+bool moy_play_watch(uint32_t now_ms);
+// The budget the next launch's ticks run under, in ms; 0 restores the slots'
+// rule. The tests' lever.
+void moy_play_watch_budget(uint32_t ms);
 // A LOCKSTEP MATCH (moy_match.h) over the run, when the kernel's link has a
 // live session: the frame's inputs are drained from the ring, and one advance
 // runs when the session's tick is due or a stall retries (the newest packet

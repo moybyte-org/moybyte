@@ -1238,6 +1238,46 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n)
     return 0;
 }
 
+// -- the runaway watch's Lua half (moy_play.h's RUNAWAY WATCH) ---------------------
+//
+// A count hook, set from the watcher's task with lua_sethook -- which Lua
+// allows from outside the running thread (lua.c's SIGINT handler does it), and
+// which a running loop notices because every backward jump re-reads the trap.
+// It raises at the cart's next instruction with the line it is on, in Lua's
+// own `chunk:N:` form, so the Player and crash-to-code read it as any raise.
+// It stays set until the frame is over: a cart that catches it with pcall
+// raises again at its next instruction outside the pcall. Carts cannot reach
+// it: no cart has the debug library.
+
+static char g_stuck_what[96];
+
+static void stuck_hook(lua_State *L, lua_Debug *ar)
+{
+    int line = -1;
+    const char *src = "cart";
+    if (lua_getinfo(L, "Sl", ar)) {
+        line = ar->currentline;
+        src = ar->short_src;
+    }
+    if (line > 0) {
+        lua_pushfstring(L, "%s:%d: %s", src, line, g_stuck_what);
+    } else {
+        lua_pushstring(L, g_stuck_what);
+    }
+    lua_error(L);
+}
+
+void moycore_lua_stuck(const char *what)
+{
+    snprintf(g_stuck_what, sizeof(g_stuck_what), "%s", what != NULL ? what : "stuck");
+    if (RUN.L) lua_sethook(RUN.L, stuck_hook, LUA_MASKCOUNT, 1);
+}
+
+void moycore_lua_unstuck(void)
+{
+    if (RUN.L) lua_sethook(RUN.L, NULL, 0, 0);
+}
+
 void moycore_lua_close(void)
 {
     if (RUN.L) lua_close(RUN.L);

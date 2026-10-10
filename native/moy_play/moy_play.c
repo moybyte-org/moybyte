@@ -27,6 +27,159 @@
 #endif
 #endif
 
+// -- the runaway watch (moy_play.h) ----------------------------------------------
+//
+// The tick's start and budget, written by the run's task around each tick
+// and read by the watcher's, under one lock, so a fire can never land on a
+// tick after the one that overran: the run's task takes the lock to close
+// the tick, and from then the watcher sees no tick.
+
+static struct {
+    volatile uint32_t since;        // when the live tick began (ms, never 0); 0: none
+    volatile uint32_t budget;       // its budget, ms
+    volatile bool fired;            // the watcher ended it
+    uint32_t override;              // moy_play_watch_budget's, 0: the slots' rule
+    char what[96];                  // the stuck words this run's ticks end with
+    bool on;                        // the watcher polls
+} W;
+
+#if defined(MOY_PLAY_STACK)
+#include "esp_timer.h"
+#include "freertos/semphr.h"
+static SemaphoreHandle_t s_watch_lock;
+static esp_timer_handle_t s_watch_timer;
+static void watch_lock(void) {
+    if (s_watch_lock != NULL) {
+        xSemaphoreTake(s_watch_lock, portMAX_DELAY);
+    }
+}
+static void watch_unlock(void) {
+    if (s_watch_lock != NULL) {
+        xSemaphoreGive(s_watch_lock);
+    }
+}
+static void watch_cb(void *arg) {
+    (void)arg;
+    moy_play_watch(moycore_run_now_ms());
+}
+// Made once, before the VM's first area on a board (moy_play_reserve).
+static void watch_make(void) {
+    if (s_watch_lock == NULL) {
+        s_watch_lock = xSemaphoreCreateMutex();
+    }
+    if (s_watch_timer == NULL) {
+        const esp_timer_create_args_t a = { .callback = watch_cb, .name = "moy_watch" };
+        if (esp_timer_create(&a, &s_watch_timer) != ESP_OK) {
+            s_watch_timer = NULL;
+        }
+    }
+}
+static void watch_run(bool on) {
+    watch_make();
+    if (s_watch_timer == NULL || W.on == on) {
+        return;
+    }
+    W.on = on;
+    if (on) {
+        esp_timer_start_periodic(s_watch_timer, MOY_PLAY_WATCH_POLL_MS * 1000u);
+    } else {
+        esp_timer_stop(s_watch_timer);
+    }
+}
+#elif !defined(__EMSCRIPTEN__)
+#include <pthread.h>
+#include <time.h>
+static pthread_mutex_t s_watch_mu = PTHREAD_MUTEX_INITIALIZER;
+static bool s_watch_thread;
+static void watch_lock(void) {
+    pthread_mutex_lock(&s_watch_mu);
+}
+static void watch_unlock(void) {
+    pthread_mutex_unlock(&s_watch_mu);
+}
+static void *watch_main(void *arg) {
+    (void)arg;
+    const struct timespec poll = { 0, (long)MOY_PLAY_WATCH_POLL_MS * 1000000L };
+    for (;;) {
+        nanosleep(&poll, NULL);
+        if (W.on) {
+            moy_play_watch(moycore_run_now_ms());
+        }
+    }
+    return NULL;
+}
+static void watch_make(void) {
+}
+static void watch_run(bool on) {
+    if (on && !s_watch_thread) {
+        pthread_t t;
+        if (pthread_create(&t, NULL, watch_main, NULL) == 0) {
+            pthread_detach(t);
+            s_watch_thread = true;
+        }
+    }
+    W.on = on;
+}
+#else
+// The browser's page runs one thread: nothing can watch a tick that never
+// returns, and the page's own "not responding" is the floor.
+static void watch_lock(void) {
+}
+static void watch_unlock(void) {
+}
+static void watch_make(void) {
+}
+static void watch_run(bool on) {
+    W.on = on;
+}
+#endif
+
+bool moy_play_watch(uint32_t now_ms) {
+    bool fire = false;
+    watch_lock();
+    if (W.since != 0u && !W.fired && now_ms - W.since >= W.budget) {
+        W.fired = fire = true;
+        moycore_stuck(W.what);
+    }
+    watch_unlock();
+    return fire;
+}
+
+void moy_play_watch_budget(uint32_t ms) {
+    W.override = ms;
+}
+
+// The budget a run's ticks get: MOY_PLAY_STUCK_SLOTS of its pacing slot
+// (a paced run's rate, else the console's 30), within the floor and ceiling.
+static uint32_t watch_budget(const moy_tick_t *t) {
+    if (W.override != 0u) {
+        return W.override;
+    }
+    uint32_t rate = t != NULL && t->rate > 0 ? (uint32_t)t->rate : 30u;
+    uint32_t ms = MOY_PLAY_STUCK_SLOTS * 1000u / rate;
+    return ms < MOY_PLAY_STUCK_MIN_MS ? MOY_PLAY_STUCK_MIN_MS
+         : ms > MOY_PLAY_STUCK_MAX_MS ? MOY_PLAY_STUCK_MAX_MS : ms;
+}
+
+static void watch_begin(uint32_t budget) {
+    uint32_t now = moycore_run_now_ms();
+    watch_lock();
+    W.budget = budget;
+    W.fired = false;
+    W.since = now != 0u ? now : 1u;
+    watch_unlock();
+}
+
+// The tick is over: whether the watcher ended it.
+static bool watch_end(void) {
+    watch_lock();
+    W.since = 0u;
+    bool fired = W.fired;
+    W.fired = false;
+    watch_unlock();
+    return fired;
+}
+
 uint32_t moy_play_stack_free(void) {
 #ifdef MOY_PLAY_STACK
     return (uint32_t)uxTaskGetStackHighWaterMark(NULL) * (uint32_t)sizeof(StackType_t);
@@ -122,6 +275,7 @@ typedef struct {
     uint32_t owner;                 // the run's OWNER row (moy_buf.h), or 0
     int view;                       // what the cart had declared last frame
     int view_w, view_h;
+    uint32_t budget;                // the runaway watch's, for each tick (ms)
     bool armed;                     // the crash record names this run
     bool reseed;                    // a lockstep frame starts: seed libmoy first
     bool lock_any;                  // the match's last send: lock_at is set
@@ -235,6 +389,9 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.reseed = false;
     R.lock_any = false;
     R.info.stack_open = R.info.stack_frame = MOY_PLAY_NO_STACK;
+    R.budget = watch_budget(NULL);
+    moy_chrome_stuck_text(W.what, sizeof(W.what), R.budget);
+    watch_run(true);
     // Armed before the runtime loads: a fault in the load names the cart.
     R.armed = R.info.game;
     if (R.armed) {
@@ -261,6 +418,8 @@ int moy_play_bind(uint32_t run, moy_input_t *in, uint32_t audio, moy_tick_t *tic
     r->in = in;
     r->audio = audio;
     r->tick = tick;
+    r->budget = watch_budget(tick);
+    moy_chrome_stuck_text(W.what, sizeof(W.what), r->budget);
     return MOY_PLAY_OK;
 }
 
@@ -373,6 +532,26 @@ static void drain(run_t *r, int32_t *aq) {
 #endif
 }
 
+// A tick the runaway watch ended: the run raised, with the stuck words. A
+// Lua run's own raise carries them after the line it was on; a compiled
+// cart's says it was terminated, and a tick that came back as the watch
+// fired had run past its budget all the same.
+void moy_kernel_say(const char *line) __attribute__((weak));
+
+static void stuck(run_t *r, bool raised) {
+    moycore_lua_unstuck();
+    if (!raised || strstr(r->info.error, W.what) == NULL) {
+        snprintf(r->info.error, sizeof(r->info.error), "%s", W.what);
+    }
+    r->info.raised = true;
+    r->info.stuck = true;
+    if (moy_kernel_say != NULL) {
+        char line[240];
+        snprintf(line, sizeof(line), "PLAY stuck: %s: %s", r->info.id, r->info.error);
+        moy_kernel_say(line);
+    }
+}
+
 int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t *out) {
     run_t *r = live(run);
     *out = 0;
@@ -405,7 +584,13 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
             r->reseed = false;
         }
         bool draw = render && i + 1u == ticks;
-        if (r->rt->frame(dt, draw, r->info.error, sizeof(r->info.error)) != 0) {
+        watch_begin(r->budget);
+        int rc = r->rt->frame(dt, draw, r->info.error, sizeof(r->info.error));
+        if (watch_end()) {
+            stuck(r, rc != 0);
+            return MOY_PLAY_RAISED;
+        }
+        if (rc != 0) {
             r->info.raised = true;
             return MOY_PLAY_RAISED;
         }
@@ -450,6 +635,7 @@ int moy_play_end(uint32_t run, int why) {
         r->info.upcalls[i] = total[i] - r->upc0[i];
     }
     r->h = 0;
+    watch_run(false);
     if (r->armed) {
         arm("");                        // the board survived the run
         r->armed = false;
@@ -576,6 +762,7 @@ void moy_play_reserve(void *(*alloc)(size_t n)) {
     if (F.overlay == NULL) {
         F.overlay = alloc(sizeof(moy_chrome_list_t));
     }
+    watch_make();
 }
 
 void moy_play_front_ops(const moy_front_ops_t *ops) {

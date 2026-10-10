@@ -268,6 +268,7 @@ typedef struct {
     bool compiled;
     bool ok;
     char err[192];
+    int say;                    // the panel's own words (MOY_SAY_*), -1: the run's error
     moy_chrome_list_t chrome;
 } stop_t;
 
@@ -648,7 +649,8 @@ static int load(uint32_t run, const char *path, bool *notice) {
     *notice = false;
     S->ok = false;
     if (moy_cat_entry(path, entry_read, NULL, (void *)path) != 0 || !S->ok) {
-        snprintf(S->err, sizeof(S->err), "This cart will not load.");
+        snprintf(S->err, sizeof(S->err), "%s", moy_chrome_say_text(MOY_SAY_NOLOAD));
+        S->say = MOY_SAY_NOLOAD;
         return 1;
     }
     // The fit again, now the VM is gone, on the largest block: what the load
@@ -658,9 +660,8 @@ static int load(uint32_t run, const char *path, bool *notice) {
     size_t free_ = heap_caps_get_free_size(PSRAM_CAPS);
     size_t largest = heap_caps_get_largest_free_block(PSRAM_CAPS);
     if (total > free_ || block > largest) {
-        snprintf(S->err, sizeof(S->err), "%s needs %u KB of memory in one piece. The "
-                 "biggest piece this console has free is %u KB.", S->title,
-                 (unsigned)(block / 1024u), (unsigned)(largest / 1024u));
+        moy_chrome_fit_text(S->err, sizeof(S->err), S->title, (uint32_t)total, (uint32_t)block,
+                            (uint32_t)free_, (uint32_t)largest);
         *notice = true;
         return 1;
     }
@@ -730,6 +731,7 @@ void moy_play_stopped_run(void) {
         return;
     }
     wire_init();
+    S->say = -1;
     moy_play_set_down(run);
     s_back = 0;
     moy_play_front_ops(&K_FRONT);
@@ -767,7 +769,10 @@ void moy_play_stopped_run(void) {
             // The front gave the frame back with the run live: a raise, or what
             // only a console composes. Either ends the run here.
             snprintf(S->err, sizeof(S->err), "%s", i.raised ? i.error
-                     : "This cart needs the console to go on.");
+                     : moy_chrome_say_text(MOY_SAY_CONSOLE));
+            if (!i.raised) {
+                S->say = MOY_SAY_CONSOLE;
+            }
             rc = 1;
         }
     }
@@ -777,8 +782,15 @@ void moy_play_stopped_run(void) {
         run_line("refused or raised");
         printf("STOP error: %s\n", S->err);
         if (!serial) {
-            panel_wait(notice ? "Not enough memory" : (S->title[0] ? S->title : "Oops"),
-                       S->err, notice);
+            char title[64];
+            if (notice) {
+                moy_chrome_title(title, sizeof(title), MOY_SAY_FIT, 0);
+            } else if (S->say >= 0) {
+                moy_chrome_title(title, sizeof(title), S->say, 0);
+            } else {
+                moy_chrome_crash_title(title, sizeof(title), S->err, 0);
+            }
+            panel_wait(title, S->err, notice);
         }
     }
     // The exit's first moment, which the return start is measured from.

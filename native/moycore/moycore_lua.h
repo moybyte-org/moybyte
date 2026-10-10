@@ -71,11 +71,24 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n);
 // The VM closed and the pool given back. Safe with no VM.
 void moycore_lua_close(void);
 
+// The runaway watch (native/moy_play/moy_play.h): from the watcher's task,
+// make the open Lua run raise at its next instruction, `what` after its
+// `chunk:N:` position; and, on the run's own task once the frame is over,
+// take the hook off again. Both safe with no VM.
+void moycore_lua_stuck(const char *what);
+void moycore_lua_unstuck(void);
+
 // One frame of the open run, whichever its runtime: the draw state reset,
 // time()'s base stamped, then the Lua frame above or a compiled cart's two
 // hooks on its engine's thread. 0, or -1 with the cart's error in `err`.
 // Defined by the binding (modmoycore.c), where a compiled cart's session is.
 int moycore_frame(float dt, int draw, char *err, size_t n);
+
+// The open run's frame is past the runaway watch's budget: from the
+// watcher's task, end it -- a Lua run raises `what` at its next instruction
+// (moycore_lua_stuck), a compiled cart is terminated and stops at its next
+// import call. Defined by the binding, where the session is.
+void moycore_stuck(const char *what);
 
 // A paint image's .moyimg text, copied, for the run's image(name) (decoded
 // at its first call, moycore_lua.c's __image_handle): 0, or -1 when the run

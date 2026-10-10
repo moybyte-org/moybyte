@@ -438,10 +438,11 @@ def lockstep(run):
 
 def info(run=None):
     """(runtime, vm_free, why, frames, ticks, upcalls, ended, error, stack_open,
-    stack_frame, end_why, stop, vm_down, fit), or None for a handle that names
+    stack_frame, end_why, stop, vm_down, fit, stuck), or None for a handle that names
     no run. `stop` is the launch's stop verdict ("stops", or the clause that
     kept the VM: STOP_WHYS); `fit` the verdict's fit check with the VM up
-    (need, need_block, free, largest, vm_heap), None where it reached none."""
+    (need, need_block, free, largest, vm_heap), None where it reached none;
+    `stuck` the runaway watch ended a tick."""
     d, lb = _play()
     i = lb.PlayInfo()
     if d.hl_play_info(d.hl_play_last() if run is None else int(run), ctypes.byref(i)) != 0:
@@ -452,7 +453,16 @@ def info(run=None):
             i.frames, i.ticks, tuple(i.upcalls), bool(i.ended),
             i.error.decode("utf-8", "replace") if i.raised else None) + st + (
                 i.end_why, STOP_WHYS[i.stop_why] if i.stop_why < len(STOP_WHYS) else "?",
-                bool(i.vm_down), tuple(i.fit) if i.fit[0] else None)
+                bool(i.vm_down), tuple(i.fit) if i.fit[0] else None, bool(i.stuck))
+
+
+def watch(ms):
+    """The runaway watch's budget for the next launch's ticks, in ms; 0
+    restores its slots' rule (moy_play.h)."""
+    d, _ = _play()
+    d.moy_play_watch_budget.argtypes = [_U32]
+    d.moy_play_watch_budget.restype = None
+    d.moy_play_watch_budget(int(ms))
 
 
 def current():
@@ -952,6 +962,10 @@ _CSIGS = (
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
     ("moy_chrome_toast_arm", [_CS, _CS, _U32], None),
     ("moy_chrome_overlay", [_CP, _U32, _CI, _CI, _CI, _CI, _CI, _U32, _U32], _B),
+    ("moy_chrome_title", [_CS, ctypes.c_size_t, _CI, _CI], _CI),
+    ("moy_chrome_crash_title", [_CS, ctypes.c_size_t, _CS, _CI], _CI),
+    ("moy_chrome_fit_text", [_CS, ctypes.c_size_t, _CS, _U32, _U32, _U32, _U32], _CI),
+    ("moy_chrome_newer_text", [_CS, ctypes.c_size_t, _CS, _CS], _CI),
 )
 _CREADY = [False]
 
@@ -1007,6 +1021,29 @@ def chrome_pill(cw, ch, held_ms, hold_ms, raster=None):
 def chrome_panel(cw, ch, notice, title, text, compiled, raster=None):
     return _chrome("moy_chrome_panel", int(cw), int(ch), bool(notice), _b(title),
                    _b(text), bool(compiled), raster=raster)
+
+
+def _say(name, *args):
+    buf = ctypes.create_string_buffer(320)
+    getattr(_clib(), name)(buf, len(buf), *args)
+    return buf.value.decode("utf-8", "replace")
+
+
+def chrome_say_title(say, line):
+    return _say("moy_chrome_title", int(say), int(line or 0))
+
+
+def chrome_crash_title(text, line):
+    return _say("moy_chrome_crash_title", _b(text), int(line or 0))
+
+
+def chrome_fit_text(title, total, block, free, largest):
+    return _say("moy_chrome_fit_text", _b(title), int(total), int(block), int(free),
+                int(largest))
+
+
+def chrome_newer_text(title, missing):
+    return _say("moy_chrome_newer_text", _b(title), _b(missing))
 
 
 def chrome_toast(title, glyph, raster=None):
