@@ -850,23 +850,33 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     lease on the kernel's tables before the stop and reads them back with the
     VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
     then -- the first heap area freed with the VM -- hold flat from the second
-    cycle, the largest block to the byte and free within KSTOP_JITTER."""
+    cycle, the largest block to the byte and free within KSTOP_JITTER. The
+    app ABI's grants (`grants=N`, native/moy_app) read the same every cycle:
+    each start re-registers the shipped apps onto the rows they had; and the
+    clipboard, a kernel row, holds what was put before the first stop."""
     import time
+    # The clipboard is the app ABI's kernel row (native/moy_app): text put
+    # before the stops reads back after them.
+    assert board.pyexec("ws.clipboard.put_text('kept across stops')"), board.last_error
     board.cmd("kstop %d stop" % n, wait_for="REMOTE kstop")
-    down = []
+    down, grants = [], []
     end = time.time() + n * per_cycle
     while len(down) < n and time.time() < end:
         line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
         if line is not None and " down " in line:
             assert "route=kstop lease=dev" in line, line
+            grants.append(line.split("grants=", 1)[1].split()[0])
             down.append(_kstop_after(line.replace(" down ", " after ")))
     assert len(down) == n, "only %d of %d stops came back" % (len(down), n)
+    assert grants[0] not in ("-", "0") and len(set(grants)) == 1, (
+        "the grant count moved across stops: %s" % grants)
     free0, largest0 = down[min(1, n - 1)][1:]
     drift = [a for a in down[1:]
              if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
     assert not drift, "PSRAM (free, largest) down after cycle 2 %s, then %s" % (
         (free0, largest0), drift)
     _desk_back(board)
+    assert board.pyval("ws.clipboard.text()") == "kept across stops", board.last_error
     return down
 
 

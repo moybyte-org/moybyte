@@ -51,6 +51,11 @@ here changes that, and no amount of wrapper would.
 
 ## The map
 
+The policy is C's (native/moy_app, `moy_app.policy`): the permission each
+role is granted by, the files kinds, the manifest refusal
+(`moy_app.manifest_error`) and the key a cart's grant is made under
+(`moy_app.id_for`: the cart's `id`, #162, else its title's slug).
+
     permission        cart globals                    AppContext role
     ---------------   -----------------------------   ---------------
     "files"           files.*  + open_editor()        ctx.files
@@ -73,11 +78,10 @@ is silently ignored, which is correct: the kid API is already the ungated floor.
 
 ## What is NEVER grantable, and why the list is a positive one
 
-`NEVER_GRANTED` names the roles a cart cannot have under any manifest. It is
-documentation and a test target -- the ENFORCEMENT is that `_ROLE_FOR` is an
-ALLOWLIST, so a role absent from it is ungrantable by construction and a new
-role added to `app_context.ROLES` is ungrantable until someone deliberately
-maps a permission onto it. (An allowlist is the direction that fails safe. The
+The policy's permission table (`moy_app.perms()`) is an ALLOWLIST, so a role
+absent from it is ungrantable by construction and a new role added to the role
+table is ungrantable until someone deliberately maps a permission onto it;
+`tests/test_user_apps.py` names the roles it leaves out. (An allowlist is the direction that fails safe. The
 same choice went the other way for moycore's verb table, for the opposite
 reason: there, what is enumerable is what libmoy OWNS, and a missed name is a
 lost feature rather than a granted capability.)
@@ -141,24 +145,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import NO_STORE
 
 
-# -- the permission -> role allowlist ----------------------------------------
-#
-# A permission name (or its `name:arg` form) maps to ONE AppContext role. Order
-# is irrelevant; membership is everything.
-
-_ROLE_FOR = {
-    "files": "files",
-    "prefs": "prefs",
-    "appearance": "theme",
-    "launch": "nav",
-    "clipboard": "clipboard",
-}
+import moy_app as _moy_app
 
 
 # The marker permission the console's TEXT APP claims its cart with -- the
 # `.md`/`.json`/`.txt` door the Files router opens (docs/text_editing_2026-09).
-# NOT in `_ROLE_FOR`, so it grants nothing; it only says which cart this is,
-# the way a shipped app claims its cart by title + `APP_PERM`.
+# Not a permission the grant policy maps, so it grants nothing; it only says
+# which cart this is, the way a shipped app claims its cart by title +
+# `APP_PERM`.
 TEXT_APP_PERM = "editor"
 
 
@@ -166,128 +160,6 @@ def is_text_app(cart):
     """True when `cart` is the console's text app."""
     perms = (cart.get("permissions") or ()) if cart else ()
     return TEXT_APP_PERM in perms
-
-
-# Roles a cart is never handed, whatever its manifest says. Enforced by
-# `_ROLE_FOR` being an allowlist; named here so the refusal is READABLE and so
-# `tests/test_user_apps.py` can pin it against `app_context.ROLES`.
-NEVER_GRANTED = ("carts", "install", "wallpaper", "artwork",
-                 "damage", "surface", "notify")
-
-
-# The user-files kinds a `"files:<kind>"` permission may name. A closed set, and
-# `recordings` is deliberately outside it: it is the one FOLDER-valued kind
-# (moy_carts.FILE_KINDS), so `save(name, blob)` does not mean anything there.
-FILE_KINDS = ("docs", "drawings", "sprites", "music")
-
-# `"files"` with no kind means the kid's DOCUMENTS -- the same `docs` kind
-# Notes authors and Files browses, so an app's notes show up where a kid would
-# look for them.
-DEFAULT_FILE_KIND = "docs"
-
-
-def slug(title):
-    """`moy_carts.slug` without the import.
-
-    Duplicated on purpose, and it is three lines: this module must stay a leaf
-    (it is reached from `player.py`, which imports nothing back into the store),
-    and the value is only ever a PREFS NAMESPACE -- if the two ever disagreed
-    the cost would be an app reading an empty settings dict, not a corrupted
-    one. `tests/test_user_apps.py` pins them equal anyway."""
-    out = ""
-    for ch in str(title).lower():
-        if ch.isalpha() or ch.isdigit():
-            out += ch
-        elif ch in " -_":
-            out += "_"
-    return out or "cart"
-
-
-def app_id_for(cart):
-    """The identity a user app's prefs namespace and crash-guard strikes are
-    keyed by: the manifest TITLE's slug, which a cart with no store path has
-    too."""
-    if not cart:
-        return "app"
-    return slug(cart.get("title") or "app")
-
-
-def _file_kinds(cart):
-    """Every user-files kind `cart`'s manifest asks for, in declaration order
-    and de-duplicated. Unknown kinds are dropped here (a typo narrows), so what
-    comes back is what could actually be granted."""
-    out = []
-    for perm in (cart.get("permissions") or ()) if cart else ():
-        perm = str(perm)
-        colon = perm.find(":")
-        arg = perm[colon + 1:] if colon >= 0 else None
-        if (perm[:colon] if colon >= 0 else perm) != "files":
-            continue
-        # A scoped grant names its kind; an unscoped one takes the default. An
-        # unknown kind is NOT a fallback to the default -- a typo must narrow
-        # to nothing, never widen to the kid's documents.
-        if arg is None:
-            arg = DEFAULT_FILE_KIND
-        elif arg not in FILE_KINDS:
-            continue
-        if arg not in out:
-            out.append(arg)
-    return out
-
-
-def manifest_error(cart):
-    """A refusal string when the manifest cannot be honoured as written, else
-    None. `Player.start` shows it on the ordinary cart-error panel and does not
-    run the cart.
-
-    ONE rule today: **a cart gets at most one user-files kind.** `files` is
-    published as a single kind-bound handle (`ScopedFiles`, whose verbs take a
-    name and never a kind), so there is nowhere for a second kind to go. Until
-    this check existed, `["files:docs", "files:drawings"]` silently kept the LAST
-    one -- an order-dependent grant, with the cart's docs quietly landing in
-    drawings and no diagnostic anywhere. Refusing beats guessing: a manifest that
-    asks for two kinds is asking for something this build does not have, and
-    the author is the only one who can say which kind they meant.
-
-    (If multi-kind is ever wanted, it is an API change -- `files.docs.save()`
-    style namespacing -- not a widening of this function.)"""
-    kinds = _file_kinds(cart)
-    if len(kinds) > 1:
-        return ("manifest asks for %d file kinds (%s) - pick one"
-                % (len(kinds), ", ".join(kinds)))
-    return None
-
-
-def granted_roles(cart):
-    """`(roles, file_kind)` for `cart`'s manifest permissions.
-
-    `roles` is the de-duplicated tuple of `AppContext` role names this cart has
-    earned; `file_kind` is the user-files kind its `files` grant is scoped to
-    (None when it has none). An unknown permission, an unknown file kind and a
-    permission naming an ungrantable role all resolve to "no grant" -- a
-    manifest can ask for anything and get only what this table says.
-
-    TWO or more file kinds is a manifest ERROR (`manifest_error`), which the
-    Player refuses before it ever reaches this function. If some other caller
-    skips that check, the files grant is dropped entirely rather than resolved
-    to one of them: the residual behaviour of a rule this function cannot
-    express has to fail closed, not pick a winner by declaration order."""
-    kinds = _file_kinds(cart)
-    file_kind = kinds[0] if len(kinds) == 1 else None
-    roles = []
-    for perm in (cart.get("permissions") or ()) if cart else ():
-        perm = str(perm)
-        colon = perm.find(":")
-        if colon >= 0:
-            perm = perm[:colon]
-        role = _ROLE_FOR.get(perm)
-        if role is None:
-            continue
-        if role == "files" and file_kind is None:
-            continue                  # unknown kind, or the multi-kind refusal
-        if role not in roles:
-            roles.append(role)
-    return (tuple(roles), file_kind)
 
 
 # -- the kind-scoped user-files handle ---------------------------------------
@@ -388,7 +260,7 @@ class ScopedFiles:
 # -- the factory -------------------------------------------------------------
 
 def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
-                    editor=None, request=None):
+                    editor=None, request=None, keep=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -407,14 +279,22 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
     `editor` is the shell's editor-handle factory (`Player._open_cart_editor`)
     and `request` is the `(kind, name, mode)` the console was asked to open --
     both passed the same way and for the same reason: they are the running
-    shell, not a role. Without them `open_editor` simply has no name."""
-    roles, kind = granted_roles(cart)
+    shell, not a role. Without them `open_editor` simply has no name.
+
+    The context is a RUN grant (native/moy_app), keyed by the cart's id and
+    made from its permissions by the C policy (`moy_app.policy`); `keep` is
+    handed the context so the run can end its grant when it ends."""
+    perms = cart.get("permissions") if cart else None
+    roles, kind = _moy_app.policy(perms)
     # `theme` is always needed: `theme()` is ungated. Requesting it twice is
     # harmless (AppContext just attaches the role), but keep the tuple clean so
     # a test can read the grant back off it.
     needs = roles if "theme" in roles else roles + ("theme",)
-    app_id = app_id_for(cart)
-    ctx = ctx_factory(app_id, needs, app_id)
+    app_id = _moy_app.id_for(cart.get("id") if cart else None,
+                             cart.get("title") if cart else None)
+    ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind)
+    if keep is not None:
+        keep(ctx)
 
     ns = {"ui": ui}
 

@@ -1,5 +1,4 @@
 # Map (grep -n a name to jump there):
-#   Damage         whole-surface invalidation
 #   Surface        the system canvas an app draws on, and its state
 #   Theme          the live panel-theme tokens and the verbs that change them
 #   _StoreRole     what Files, Carts and WallpaperRole share
@@ -8,11 +7,10 @@
 #   _RawCarts      Carts' in-session view
 #   Carts          the cart store: projects, not documents
 #   Nav            where the console goes next
-#   Prefs          per-app settings in the shell's system.json
 #   Notify         achievement events
 #   WallpaperRole  the desktop backdrop
 #   Installer      carts from outside: fetch, verify, install
-#   AppContext     what a system app is constructed with: every role above
+#   AppContext     an app's grant and roles: those above, and native/moy_app's
 """`AppContext` -- the narrowed shell interface a SYSTEM APP is handed
 (docs/app_api_v1.md, ui_refactor_2026-08 Phase 6).
 
@@ -38,21 +36,34 @@ cart's manifest permissions rather than on a class constant.
 
 ## The roles
 
-    ctx.damage      the whole-system-surface invalidation flag
+    ctx.damage      the whole-system-surface invalidation flag (C)
     ctx.surface     the system canvas, its font scale, chrome mode, pointer
     ctx.theme       the live token set + the theme/variant verbs
     ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode
-    ctx.prefs       persisted per-app settings (system.json, namespaced)
+    ctx.prefs       persisted per-app settings (system.json, namespaced; C)
     ctx.notify      achievement events
     ctx.wallpaper   the desktop backdrop capability (Appearance + Paint)
     ctx.artwork     the ArtworkService capability handle (Paint's model)
-    ctx.clipboard   the system cut/copy/paste buffer (#132)
+    ctx.clipboard   the system cut/copy/paste buffer (#132; C)
     ctx.install     carts from outside: the network, its lease, the store (#124)
 
 No role hands out the console itself: an app reaches the shell only through
 the roles above (`tests/test_app_context.py` holds it).
+
+## The grant, and the roles served in C
+
+Every context holds a GRANT (`ctx.grant`): a row of native/moy_app's grant
+table, keyed by the app's id, carrying its role mask, its files kind and its
+prefs namespace (docs/kernel_appabi_2026-10.md section 2.2). The roles marked
+(C) above are native/moy_app's role objects over that grant -- each method a C
+row of `native/moy_app/roles.json`, the state the kernel's (the damage flags,
+the settings rows, the clipboard's 4 KiB of text) -- and the rest are this
+module's classes until their steps cross them. A shipped app's grant is
+idempotent by its id, so a start re-registering the app finds the row it had;
+a user app's (`run=True`) is its run's, ended when the run ends
+(`AppContext.end`).
 
 `ctx.files` and `ctx.carts` are deliberately two roles and not one. Apps use
 the first almost exclusively (a document is a user file); only Storybook
@@ -60,14 +71,10 @@ authors CARTS. Conflating them was the source doc's biggest wrong call, because
 it hides which apps can write executable content.
 
 `ctx.clipboard` is here against the source plan, which ruled it "one comment
-and zero consumers" and deferred it. That reading came from grepping for
-`ws` followed by a dot,
-which cannot see `getattr(self.ws, "clipboard", None)` -- and that is how all
-its live consumers are written (the `clip=` argument the editor handle and
-Storybook hand
-their CodeEditor). The
-same blind spot hid Storybook's `getattr(self.ws, "artwork", None)`. When a
-count says zero and the feature ships, suspect the grep.
+and zero consumers" and deferred it: that count came from grepping for `ws`
+followed by a dot, which could not see the `getattr` its consumers were written
+with (the `clip=` argument the editor handle and Storybook hand their
+CodeEditor). When a count says zero and the feature ships, suspect the grep.
 
 ## Conventions that are not negotiable
 
@@ -95,6 +102,9 @@ shapes.
 """
 
 
+import moy_app as _moy_app
+
+
 class _NoStore:
     """The `err` value meaning "there is no writable store here" -- distinct
     from any exception text, so a caller can tell "storage is off" from "the
@@ -112,35 +122,6 @@ NO_STORE = _NoStore()
 # in a NEEDS tuple fails at construction instead of at the first draw.
 ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
          "notify", "wallpaper", "artwork", "clipboard", "install")
-
-
-# -- damage ------------------------------------------------------------------
-
-class Damage:
-    """Whole-surface invalidation.
-
-    There is exactly ONE granularity today and this role says so honestly:
-    `ws._dirty` is a global epoch flag. `docs/surface_model_v1.md` Section 3
-    explicitly RETRACTS a mechanical migration to per-surface attribution. The
-    surface table is the kernel's (native/moy_glass, the model's §15), and the
-    frame gate folds `ws._dirty` into its epoch once per painted frame, so this
-    is a plain leaf and NOT a wrapper over the table (ui_refactor_2026-08
-    Section 1.2 cut that). When opt-in attribution arrives it arrives as
-    `damage.at(sid)`; `all()` keeps meaning what it means."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def all(self):
-        """Repaint the whole system surface next frame."""
-        self.__ws._dirty = True
-
-    def again(self):
-        """Ask for one more frame from WITHIN `draw()`, where `all()` is lost
-        (the frame clears the flag after the draw). An app that works a slice
-        per frame -- an install's download -- keeps the frames coming this
-        way."""
-        self.__ws.request_frame()
 
 
 # -- surface -----------------------------------------------------------------
@@ -764,32 +745,6 @@ class Nav:
         self.__ws._set_text_mode(bool(on))
 
 
-# -- persisted per-app settings ---------------------------------------------
-
-class Prefs:
-    """Per-app settings on the shell's own `system.json` (the store Settings
-    already uses for theme/wallpaper/font/OTA channel).
-
-    NAMESPACED: keys are written as `<ns>_<key>`, where `ns` defaults to the
-    app id. It is a constructor argument and not a hard-wired `app_id` because
-    the shipped keys predate this role -- Paint's document pointer has been
-    `paint_doc` on real cards since #108, and silently renaming it would lose
-    every kid's open drawing on the next boot."""
-
-    def __init__(self, ws, ns):
-        self.__ws = ws
-        self._prefix = str(ns) + "_"
-
-    def get(self, key, default=None):
-        return self.__ws.system.get(self._prefix + key, default)
-
-    def set(self, key, value):
-        self.__ws.system.set(self._prefix + key, value)
-
-    def clear(self, key):
-        self.__ws.system.delete(self._prefix + key)
-
-
 # -- notifications -----------------------------------------------------------
 
 class Notify:
@@ -877,7 +832,7 @@ class Installer:
 
     A role of its own and not a widening of `carts`: authoring a project and
     pulling a stranger's cart off the internet are different grants, and one
-    app holds this one. Never a cart's (`system_api.NEVER_GRANTED`). Unlike the
+    app holds this one. Never a cart's (no permission maps to it). Unlike the
     storage roles its verbs raise -- the installer drives them a slice per
     frame and turns every failure into a screen of its own."""
 
@@ -1013,13 +968,18 @@ class AppContext:
     is a plain attribute hop plus one method call, with no descriptor in the
     path."""
 
-    def __init__(self, ws, app_id, needs=(), prefs_ns=None):
+    def __init__(self, ws, app_id, needs=(), prefs_ns=None, run=False,
+                 kind=None):
         self.app_id = str(app_id)
         for name in needs:
             if name not in ROLES:
                 raise ValueError("unknown app context role: " + str(name))
+        app = ws.app_abi
+        self._app = app
+        self.grant = app.grant(self.app_id, needs, kind=kind,
+                               ns=prefs_ns or self.app_id, run=run)
         if "damage" in needs:
-            self.damage = Damage(ws)
+            self.damage = _moy_app.Damage(app, self.grant)
         if "surface" in needs:
             self.surface = Surface(ws)
         if "theme" in needs:
@@ -1031,7 +991,7 @@ class AppContext:
         if "nav" in needs:
             self.nav = Nav(ws)
         if "prefs" in needs:
-            self.prefs = Prefs(ws, prefs_ns or self.app_id)
+            self.prefs = _moy_app.Prefs(app, self.grant)
         if "notify" in needs:
             self.notify = Notify(ws)
         if "wallpaper" in needs:
@@ -1042,9 +1002,12 @@ class AppContext:
             # it would only add a hop (ui_refactor_2026-08 Section 4).
             self.artwork = ws.artwork
         if "clipboard" in needs:
-            # The Clipboard object itself (#132): a plain leaf with copy/paste,
-            # and the consumers PASS it on (CodeEditor takes `clip=`), so a
-            # wrapper would have to be unwrapped again.
-            self.clipboard = getattr(ws, "clipboard", None)
+            # The consumers PASS it on (CodeEditor takes `clip=`).
+            self.clipboard = _moy_app.Clipboard(app, self.grant)
         if "install" in needs:
             self.install = Installer(ws)
+
+    def end(self):
+        """End this context's grant: a user app's run is over. Its role
+        objects answer a grant that ended from here on."""
+        self._app.end(self.grant)

@@ -415,10 +415,12 @@ Workstation and its WM, the launcher and its items, the Project, the
 catalogue's Python views, the theme tables, the font and glyph caches,
 `moybuf`'s caches, the Python cart code cache, the editors, the dev channel's
 Python words, the webhost's Python routes, the `Achievements` object with its
-`_played` and `_seen_views` counters (the play-five and toolbox badges), the
-`Clipboard` (#132), and a toast whose deadline had not run out. Today these
-die only at a reboot; under `need` they die when a big compiled cart returns,
-and none of them is carried over (§9 decision 2).
+`_played` and `_seen_views` counters (the play-five and toolbox badges), and
+a toast whose deadline had not run out. Today these die only at a reboot; under
+`need` they die when a big compiled cart returns, and none of them is carried
+over (§9 decision 2). The clipboard (#132) is not among them: it is the app
+ABI's kernel row (native/moy_app, `docs/kernel_appabi_2026-10.md` §2.4), and a
+stop leaves it with the grants and the settings rows.
 
 ### 5.5 The return, measured
 
@@ -577,8 +579,9 @@ in a run names its cart. A game spends no strikes (§9 decision 3).
    A return start is a boot without the store: #224's census holds its parts
    against today's exit to the launcher. The plan's §3 trigger for the native
    launcher is unchanged.
-2. **Session state lost at a stopped return is accepted**: the Clipboard
-   (#132), the play-five and toolbox badge counters, a toast mid-deadline. It
+2. **Session state lost at a stopped return is accepted**: the play-five and
+   toolbox badge counters, a toast mid-deadline (the clipboard is kernel state
+   since sprint 5, `docs/kernel_appabi_2026-10.md` §5). It
    happens only at a `need` stop and is handled when that code is C; no
    settings row or kernel record carries any of it over.
 3. **Games earn no crash strikes, and are named in the crash record**:

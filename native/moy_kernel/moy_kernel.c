@@ -123,6 +123,8 @@ extern __typeof__(moy_leases_release) moy_leases_release __attribute__((weak));
 extern __typeof__(moy_leases_mask) moy_leases_mask __attribute__((weak));
 // The run a stop was for, with no VM (native/moy_play's moy_play_stop.c).
 void moy_play_stopped_run(void) __attribute__((weak));
+// The app ABI's live grants (native/moy_app), where the image has it.
+uint32_t moy_app_kernel_grants(void) __attribute__((weak));
 
 void moy_loop_board_vm_start(void);
 void moy_loop_board_vm_stop(void);
@@ -1196,7 +1198,8 @@ static void moy_kernel_kstop_mark(void) {
 }
 
 // What the mark reads after the stop, cleared: "route=kstop lease=dev" when
-// both survived it.
+// both survived it, then the app ABI's live grants ("grants=N", "-" where the
+// image has none), which a return start's re-registration keeps flat.
 static void moy_kernel_kstop_readback(char *out, size_t n) {
     const moy_spine_kernel_t *k = moy_spine_kernel != NULL ? moy_spine_kernel(NULL) : NULL;
     if (k == NULL) {
@@ -1207,7 +1210,13 @@ static void moy_kernel_kstop_readback(char *out, size_t n) {
     bool route = c != NULL && moy_kind_is(c, "kstop", 5);
     // "dev" is the lease table's seventh tag (moy_route.c).
     bool lease = (moy_leases_mask(k->leases) & (1u << 6)) != 0;
-    snprintf(out, n, "route=%s lease=%s", route ? "kstop" : "lost", lease ? "dev" : "lost");
+    if (moy_app_kernel_grants != NULL) {
+        snprintf(out, n, "route=%s lease=%s grants=%u", route ? "kstop" : "lost",
+                 lease ? "dev" : "lost", (unsigned)moy_app_kernel_grants());
+    } else {
+        snprintf(out, n, "route=%s lease=%s grants=-", route ? "kstop" : "lost",
+                 lease ? "dev" : "lost");
+    }
     uint32_t mask;
     moy_returns_run(k->returns, NULL, 0);
     moy_leases_release(k->leases, "dev", 3, &mask);

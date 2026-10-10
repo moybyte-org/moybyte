@@ -58,6 +58,7 @@ KIND_AUDIO = 8
 KIND_CLIP = 9
 KIND_IMAGE = 10
 KIND_ACTOR = 11
+KIND_GRANT = 12
 
 _SLOT_MASK = SLOTS - 1
 _KIND_MASK = 0xF
@@ -388,6 +389,22 @@ def kernel(fresh):
         returns.__init__(apps)
         leases.__init__()
     return tuple(_KERNEL)
+
+
+_KERNEL_ROWS = []
+
+
+def kernel_settings(save, fresh):
+    """A Settings over the kernel's own rows (one per process, made at the
+    first call and kept), writing through `save`. `fresh` empties the rows, as
+    every start but a return start asks."""
+    if not _KERNEL_ROWS:
+        _KERNEL_ROWS.append(Settings())
+    rows = _KERNEL_ROWS[0]
+    if fresh:
+        rows.load("{}")
+    rows._save = save
+    return rows
 
 
 def _key(k):

@@ -346,6 +346,13 @@ runtime map and the VM-free rule, and the module `moy_play`. Every console
 takes it."""
 
 [[native.shared.take]]
+module = "moy_app"
+why = """
+The app ABI's kernel half (docs/kernel_appabi_2026-10.md): the grants, the
+grant policy and the roles served in C, and the module `moy_app`. Every console
+takes it."""
+
+[[native.shared.take]]
 module = "moy_kernel"
 why = """
 The kernel's entry, crash record and recovery floor

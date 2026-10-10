@@ -394,6 +394,20 @@ def test_every_console_takes_the_player_and_the_zero_denies_it(board):
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_console_takes_the_app_abi_and_the_zero_denies_it(board):
+    """native/moy_app is the app ABI's kernel half
+    (docs/kernel_appabi_2026-10.md): every console takes it; the Zero, which
+    runs no apps, denies it."""
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_app" in takes or "moy_app" in denies, (
+        "%s/board.toml neither takes nor denies moy_app" % board)
+    staged = "moy_app" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the app ABI is on every console and only there" % board)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_image_links_the_native_spine_and_no_board_names_a_twin(board):
     """The spine is native on every image (docs/kernel_spine_2026-10.md): no
     board declares a twin hook for it, and no image freezes a Python spine

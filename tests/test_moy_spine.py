@@ -70,7 +70,7 @@ def test_a_handle_is_kind_slot_and_generation(sp):
 # The kinds of moy_htab.h, one per client table: sprint 3's carve added all
 # but APP (docs/kernel_survival_2026-10.md section 3.1), and its audio pass
 # CLIP, the sample voice's clips.
-KINDS = {"APP": 1, "BUF": 2, "CANVAS": 3, "SURF": 4, "OWNER": 5, "SRC": 6,
+KINDS = {"GRANT": 12, "APP": 1, "BUF": 2, "CANVAS": 3, "SURF": 4, "OWNER": 5, "SRC": 6,
          "PEER": 7, "AUDIO": 8, "CLIP": 9}
 
 
@@ -302,6 +302,27 @@ def test_the_kernels_tables_outlive_their_views(sp):
     apps, back, returns, leases = sp.kernel(True)
     assert back.kinds() == ["launcher"] and returns.caller() is None
     assert leases.mask() == 0 and apps.count() == 0
+
+
+def test_the_kernels_settings_rows_outlive_their_views(sp):
+    """kernel_settings(save, fresh): system.json's rows as the kernel's own,
+    which a dropped view (a VM stop's sweep) leaves; a return start reads
+    them, any other start empties them, and each view writes through its own
+    hook."""
+    files = []
+    rows = sp.kernel_settings(files.append, True)
+    rows.set("theme", "forest")
+    assert files == ['{"theme": "forest"}']
+    del rows
+    import gc
+    gc.collect()
+    later = []
+    rows = sp.kernel_settings(later.append, False)
+    assert rows.get("theme") == "forest" and not rows.dirty()
+    rows.set("font", 2)
+    assert later == ['{"theme": "forest", "font": 2}'] and len(files) == 1
+    rows = sp.kernel_settings(later.append, True)
+    assert rows.keys() == [] and rows.dump() == "{}"
 
 
 # -- the settings store -----------------------------------------------------

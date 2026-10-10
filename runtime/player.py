@@ -164,10 +164,10 @@ except ImportError:                     # host: the runtime package
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 try:
-    from system_api import make_system_api, manifest_error, wants_layout
+    from system_api import make_system_api, wants_layout
 except ImportError:                     # host: the runtime package
-    from runtime.system_api import (make_system_api, manifest_error,
-                                     wants_layout)
+    from runtime.system_api import make_system_api, wants_layout
+import moy_app as _moy_app              # the grant policy (native/moy_app)
 
 # The cart-facing text editor (docs/text_editing_2026-09.md step 3). Imported
 # here rather than reached through the shell for the same reason as the module
@@ -569,6 +569,7 @@ class Player:
                                       # window resize / font-scale change re-runs it and a
                                       # steady frame costs one tuple compare
         self._app_id = None           # the crash guard's key for this run (#160), or None
+        self._app_ctx = None          # a user app's or script's context: its run grant
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._lua = None              # #67: the running runtime cart's state -- the
@@ -656,6 +657,17 @@ class Player:
         pressing it again still types."""
         self._cart_key_prev = code or 0
         self._keyp_latch = 0
+
+    def _keep_grant(self, ctx):
+        """Hold the context `make_system_api` built for this run: its grant
+        is the run's, ended with it."""
+        self._end_grant()
+        self._app_ctx = ctx
+
+    def _end_grant(self):
+        ctx, self._app_ctx = self._app_ctx, None
+        if ctx is not None:
+            ctx.end()
 
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""
@@ -811,6 +823,7 @@ class Player:
         # stands -- an exit before the heal is precisely the evidence kept.
         self._app_layout = None
         self._app_wh = None
+        self._end_grant()
         if self._app_id is not None:
             self._app_id = None
             self.ws.app_guard.release()
@@ -1267,6 +1280,7 @@ class Player:
         self._app_layout = None
         self._app_wh = None
         self._app_id = None
+        self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
                                        # pattern): a cart re-declares it each start
@@ -1340,7 +1354,7 @@ class Player:
             # not a crash and must not spend a strike. Today the only such rule
             # is "at most one file kind"; the alternative was the silent
             # last-one-wins grant this replaced.
-            _man = manifest_error(cart)
+            _man = _moy_app.manifest_error(cart.get("permissions"))
             if _man is not None:
                 return _man
             # CRASH ISOLATION FIRST, before a single line of the cart's code has
@@ -1477,12 +1491,13 @@ class Player:
         # A SCRIPT is handed the same filter by the same call: its permissions
         # come from the manifest `run_script` synthesized, so the refusing is
         # the machinery that already refuses, and `carts` is not grantable to
-        # anything (system_api.NEVER_GRANTED).
+        # anything (no permission maps to it, native/moy_app's policy).
         if self._app_id is not None or self._script:
             ns.update(make_system_api(ws.app_context, cart, ws.canvas,
                                       ws.app_bar_h,
                                       editor=self._open_cart_editor,
-                                      request=ws.take_text_request()))
+                                      request=ws.take_text_request(),
+                                      keep=self._keep_grant))
         if console is not None:
             ns.update(console.api())
         # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported

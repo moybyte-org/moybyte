@@ -11,8 +11,9 @@ restates it equal to it:
 - every role object `AppContext` builds answers exactly the table's verbs, and
   every verb an app calls on the two shared objects (the ArtworkService and the
   clipboard) is a row;
-- the grant column is `system_api`'s permission map, and a role
-  `NEVER_GRANTED` names is never granted;
+- the grant column is the C policy's permission map (`moy_app.perms()`);
+- the C rows are native/moy_app's, in the table's order, and its role
+  objects answer exactly them;
 - `docs/app_api_v1.md`'s role table lists exactly the rows;
 - each shipped app's drawn frame calls each verb no more than its budget.
 
@@ -30,7 +31,7 @@ import pytest
 from ws_helpers import build_ws
 
 from runtime import app_context as _ac
-from runtime import system_api as _api
+import moy_app
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "native" / "moy_app" / "roles.json"
@@ -63,11 +64,13 @@ def test_roles_is_the_tables_roles_in_order():
     assert tuple(_verbs()) == _ac.ROLES
 
 
-# What AppContext builds for each role, where the role is an object of its own.
-_CLASSES = {"damage": _ac.Damage, "surface": _ac.Surface, "theme": _ac.Theme,
+# What AppContext builds for each role, where the role is an object of its own:
+# native/moy_app's role types for the C roles, this tier's classes for the rest.
+_CLASSES = {"damage": moy_app.Damage, "surface": _ac.Surface, "theme": _ac.Theme,
             "files": _ac.Files, "carts": _ac.Carts, "nav": _ac.Nav,
-            "prefs": _ac.Prefs, "notify": _ac.Notify,
-            "wallpaper": _ac.WallpaperRole, "install": _ac.Installer}
+            "prefs": moy_app.Prefs, "notify": _ac.Notify,
+            "wallpaper": _ac.WallpaperRole, "install": _ac.Installer,
+            "clipboard": moy_app.Clipboard}
 
 # Attributes a role object holds that are not verbs: the storage roles' raw
 # in-session view, which `batch(fn)` hands its `fn`; and the wallpaper role's
@@ -102,14 +105,20 @@ def _shared_object_calls(handle_names, modules):
     return out
 
 
+def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
+    c_rows = [r["role"] + "." + r["verb"] for r in _rows() if r["server"] == "c"]
+    assert c_rows == list(moy_app.rows())
+    assert tuple(_verbs()) == tuple(moy_app.roles())
+
+
 def test_the_shared_objects_rows_are_what_apps_call():
-    """`ctx.artwork` and `ctx.clipboard` are objects, not role classes, so
-    their verbs are the methods apps call on them: each row must be a method,
-    and each method an app calls through the handle must be a row."""
+    """`ctx.artwork` is an object, not a role class, so its verbs are the
+    methods apps call on it: each row must be a method, and each method an app
+    calls through the handle must be a row; the same for the calls apps make
+    on the clipboard role."""
     from runtime.artwork import ArtworkService
-    from runtime.widgets import Clipboard
     verbs = _verbs()
-    for role, cls in (("artwork", ArtworkService), ("clipboard", Clipboard)):
+    for role, cls in (("artwork", ArtworkService), ("clipboard", moy_app.Clipboard)):
         for v in verbs[role]:
             assert callable(getattr(cls, v, None)), "%s.%s is not a method" % (role, v)
     art = _shared_object_calls(
@@ -126,14 +135,12 @@ def test_the_shared_objects_rows_are_what_apps_call():
 
 def test_the_grant_column_is_the_permission_map():
     perm_for = {}
-    for perm, role in _api._ROLE_FOR.items():
+    for perm, role in moy_app.perms():
         perm_for[role] = perm
     for r in _rows():
         want = perm_for.get(r["role"], "never")
         assert r["grant"] == want, "%s.%s grant %r, the map says %r" % (
             r["role"], r["verb"], r["grant"], want)
-        if r["role"] in _api.NEVER_GRANTED:
-            assert r["grant"] == "never", r
 
 
 def _doc_table():

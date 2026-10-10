@@ -320,6 +320,12 @@ The kernel's Player (docs/kernel_cartpath_2026-10.md). This board runs no
 carts: the browser it serves plays them."""
 
 [[native.shared.deny]]
+module = "moy_app"
+why = """
+The app ABI's kernel half (docs/kernel_appabi_2026-10.md). This board runs no
+apps: the browser it serves runs them."""
+
+[[native.shared.deny]]
 module = "moy_gfx"
 why = """
 The RGB565 draw kernel (fill/fill_rect/blit565/spr_batch and the #167 tri/sspr/

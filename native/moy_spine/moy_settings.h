@@ -18,8 +18,10 @@
 // json.
 //
 // A store counts the changes made since it was last clean: set and delete add
-// one, a load or moy_settings_clean zeroes it. What persists a dirty store, and
-// when, is the caller's (the binding calls its save hook, then cleans).
+// one, a load or moy_settings_clean zeroes it. What persists a dirty store is
+// its saver, which the binding registers (its save hook, behind a thunk), and
+// moy_settings_flush calls it: a write made through C (native/moy_app's prefs)
+// persists by the same path a write made through the binding does.
 //
 // Every byte comes from the moy_htab_mem_t the store is made with.
 
@@ -64,6 +66,15 @@ int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len,
                      const char *json, size_t json_len);
 // 1 when the key had a row, else 0; the store is dirty after a 1.
 int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len);
+
+// What writes the file: called with the dump; nonzero when it landed.
+typedef int (*moy_settings_save_fn)(void *ctx, const char *text, size_t len);
+// Register `fn` (NULL: none) and its `ctx`; moy_settings_saver_ctx reads it back.
+void moy_settings_saver(moy_settings_t *s, moy_settings_save_fn fn, void *ctx);
+void *moy_settings_saver_ctx(const moy_settings_t *s);
+// 1 when the store is clean afterwards: it was, or the saver landed the dump;
+// 0 when it stays dirty (no saver, the saver failed, the allocator refused).
+int moy_settings_flush(moy_settings_t *s);
 
 // The changes since the store was last clean.
 uint32_t moy_settings_dirty(const moy_settings_t *s);

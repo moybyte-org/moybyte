@@ -221,6 +221,60 @@ def _verbs():
             ("oval_p", v_oval_p, 100)]
 
 
+ROLE_N = 4000              # role reads per timed batch, best of ROLE_REPS
+ROLE_REPS = 5
+
+
+def _role_row():
+    """The app ABI's role row (docs/kernel_appabi_2026-10.md section 9): a
+    role read -- the clipboard's `seq()`, a C row over a grant -- against the
+    attribute hop it replaced (`seq` was a plain attribute), each the best
+    batch's microseconds per read, loop included in both. None where the
+    image has no `moy_app` or no microsecond clock."""
+    try:
+        m = __import__("moy_app")
+        t = __import__("time")
+    except ImportError:
+        return None
+    us = getattr(t, "ticks_us", None)
+    diff = getattr(t, "ticks_diff", None)
+    if us is None or diff is None:
+        pc = getattr(t, "perf_counter", None)
+        if pc is None:
+            return None
+
+        def us():
+            return int(pc() * 1000000)
+
+        def diff(a, b):
+            return a - b
+    app = m.App(None)
+    clip = m.Clipboard(app, app.grant("moybyte.bench", ("clipboard",)))
+
+    class _Hop:
+        pass
+
+    hop = _Hop()
+    hop.seq = 0
+    best_r = best_h = None
+    for _ in range(ROLE_REPS):
+        i = 0
+        t0 = us()
+        while i < ROLE_N:
+            clip.seq()
+            i += 1
+        r = diff(us(), t0)
+        i = 0
+        t0 = us()
+        while i < ROLE_N:
+            hop.seq
+            i += 1
+        h = diff(us(), t0)
+        best_r = r if best_r is None or r < best_r else best_r
+        best_h = h if best_h is None or h < best_h else best_h
+    return (best_r / ROLE_N, best_h / ROLE_N)
+
+
 def _init():
     # the map verb's field: a deterministic 15x8 region (tiles 0-7) written over
     # the shipped map's top-left corner, which the ray maze and the scroll
@@ -252,6 +306,7 @@ def _init():
     state["rs"] = 0.0          # fixed step per frame -- O(1), never recomputed
     state["lay"] = None        # the scroll layer, built at its phase's first frame
     state["tab"] = None        # the TABLE phase's container, same arrangement
+    state["role"] = _role_row()  # before the phases: the heap as a run finds it
     pmem(3, 0)                 # arm the pmem report: a PREVIOUS run's done
                                # flag persists (pmem is the save file), and a
                                # harness polling cell 3 must not read it
@@ -700,6 +755,10 @@ def _report():
             if sc is not None:
                 line1b += ("  " if line1b else "") + label + " +" \
                     + _f1(sc["p50"] - fl["p50"])
+        ro = state.get("role")
+        if ro is not None:
+            line1b += ("  " if line1b else "") + "ROLE " + _f1(ro[0]) + "/" \
+                + _f1(ro[1]) + "us"
         if line1b:
             print(line1b, 8, y, 14)
             y += 10
@@ -737,6 +796,9 @@ def _f1(v):
 
 def _serial_report():
     # One machine-readable block; harmless if nobody is listening.
+    ro = state.get("role")
+    if ro is not None:
+        _p("BENCHCART role read_us=" + _f1(ro[0]) + " hop_us=" + _f1(ro[1]))
     for name, k, best, med, mx in state["micro"]:
         _p("BENCHCART verb=" + name + " k=" + str(k) + " best_ms=" + str(best)
            + " med_ms=" + str(med) + " max_ms=" + str(mx))

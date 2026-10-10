@@ -203,8 +203,9 @@ PYEOF
   # Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2): the
   # glass, input, the links and the kernel's frame (moy_kernel's portable
   # half: the module `moy_loop`, whose driver tier the worker's frame steps),
-  # and sprint 4's Player (the module `moy_play`).
-  for m in moy_glass moy_input moy_net moy_kernel moy_play; do
+  # sprint 4's Player (the module `moy_play`) and sprint 5's app ABI
+  # (`moy_app`).
+  for m in moy_glass moy_input moy_net moy_kernel moy_play moy_app; do
     cp -r "${REPO_ROOT}/native/${m}" "${USERMODS_DIR}/${m}"
   done
 

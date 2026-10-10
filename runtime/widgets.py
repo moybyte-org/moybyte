@@ -2,9 +2,8 @@
 #   arm_prompt                 take the keyboard for a modal prompt
 #   ConfirmTap                 a two-tap guard on a destructive button
 #   _Blit                      the cursor sprite's blittable
-#   -- achievements            Achievements, Clipboard, Pmem
+#   -- achievements            Achievements, Pmem
 #   Achievements               the milestones a kid has unlocked
-#   Clipboard                  the one system clipboard
 #   Pmem                       a cart's 256 persistent signed ints
 #   -- placed-actor scenes     Actor, Scenes, SceneWorld
 #   Actor                      one placed actor from a scene
@@ -292,29 +291,6 @@ class Achievements:
                     self.award("toolbox")
         elif event in _EVENT_ACHIEVEMENT:
             self.award(_EVENT_ACHIEVEMENT[event])
-
-
-class Clipboard:
-    """The ONE system clipboard (#132): a tiny typed holder every editor
-    writes THROUGH while keeping its local behavior. `kind` is "text" (v1)
-    or "pixels" (the planned Paint lane); no host-OS clipboard integration
-    anywhere -- ours end-to-end, so host/device parity holds by construction.
-    Every copy in every attached editor lands here, so this is always the
-    NEWEST copy across apps; a paste that wants text just reads text()."""
-
-    def __init__(self):
-        self.kind = None          # "text" | "pixels" | None (empty)
-        self.data = None
-        self.seq = 0              # bumps per put -- lets a lane detect updates
-
-    def put_text(self, s):
-        self.kind = "text"
-        self.data = str(s)
-        self.seq += 1
-
-    def text(self):
-        """The clipboard's text, or '' (empty / holding a non-text kind)."""
-        return self.data if self.kind == "text" and self.data else ""
 
 
 class Pmem:

@@ -15,14 +15,13 @@ try:
     from chrome import NAMES
     from settings_layer import SETTINGS_TOGGLES
     from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
-    import system_api
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
     from runtime.chrome import NAMES
     from runtime.settings_layer import SETTINGS_TOGGLES
     from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
                                    ROUTE_WINDOW)
-    from runtime import system_api
+import moy_app as _moy_app
 
 
 def _resolve_app_entry(entry):
@@ -48,10 +47,10 @@ class SpineVerbs:
     # -- user apps: identity + the crash guard (#181 / #160) -----------------
 
     def app_cart_id(self, cart):
-        """The stable identity a USER APP cart's prefs namespace and crash
-        strikes are keyed by (`system_api.app_id_for`: the title slug, so it
-        survives the host-folder / device-folder mismatch)."""
-        return system_api.app_id_for(cart)
+        """The stable identity a USER APP cart's grant, prefs namespace and
+        crash strikes are keyed by (`moy_app.id_for`: the cart's `id`, #162,
+        so a renamed cart keeps them; a path-less built-in's title slug)."""
+        return _moy_app.id_for(cart.get("id"), cart.get("title"))
 
     def is_user_app(self, cart):
         """True when `cart` is an app cart the Player runs as a USER APP -- a
@@ -76,7 +75,7 @@ class SpineVerbs:
         fixed."""
         if not self.is_user_app(cart):
             return False
-        return self.app_guard.disabled(system_api.app_id_for(cart))
+        return self.app_guard.disabled(self.app_cart_id(cart))
 
     def forgive_app(self, cart):
         """Clear `cart`'s crash strikes -- the kid changed its CODE (#160).
@@ -98,7 +97,7 @@ class SpineVerbs:
         seen. False when there was nothing to forgive."""
         if not self.is_user_app(cart):
             return False
-        return self.app_guard.forgive(system_api.app_id_for(cart))
+        return self.app_guard.forgive(self.app_cart_id(cart))
 
     def forgive_wallpaper(self, cart):
         """Clear `cart`'s crash strikes AS THE BACKDROP (#160) -- `forgive_app`'s

@@ -139,9 +139,12 @@ no migrations).
 them. Reads are `get(key, default)`, a value decoded afresh from its row (so
 nothing a reader does to it changes the store; `text(key)` is the row's JSON for
 a reader that only compares), and the one write is `set(key, value)`: it
-encodes the value as `json.dumps` writes it, marks the store dirty and calls the
-save hook with the file's text, which `SystemStore._write` writes through the
-Python SD gate until sprint 3 makes the gate native. A hook that answers False
+encodes the value as `json.dumps` writes it, marks the store dirty and flushes
+it through the rows' saver (`moy_settings_flush`), which the binding registers
+over the save hook; `SystemStore._write` writes the file's text through the SD
+gate. A write made in C (native/moy_app's prefs) flushes through the same
+saver. On a board the rows are the kernel's (`moy_spine.kernel_settings`): a VM
+stop leaves them, and their saver goes with the VM that registered it. A hook that answers False
 (a card pulled) leaves the store dirty and the next write carries the change;
 `persist=False` defers a write the same way. A write cannot be left out of the
 file by a caller that forgot to ask, and a key has one writer: the strike

@@ -96,7 +96,7 @@ _SIGS = (
     ("moy_back_reset", [_P], None),
     ("moy_returns_reset", [_P], None),
     ("moy_leases_reset", [_P], None),
-    ("moy_spine_kernel", [_P], c.POINTER(_P * 4)),
+    ("moy_spine_kernel", [_P], c.POINTER(_P * 5)),
     ("moy_settings_new", [_P], _P),
     ("moy_settings_free", [_P], None),
     ("moy_settings_validate", [_PCHAR, _SIZE], c.c_int),
@@ -110,7 +110,13 @@ _SIGS = (
     ("moy_settings_at", [_P, _U32, _PP, c.POINTER(_SIZE), _PP,
                          c.POINTER(_SIZE)], c.c_int),
     ("moy_settings_dump", [_P, c.c_char_p, _SIZE], _SIZE),
+    ("moy_settings_saver", [_P, _P, _P], None),
+    ("moy_settings_flush", [_P], c.c_int),
+    ("moy_settings_saver_ctx", [_P], _P),
 )
+
+# moy_settings_save_fn: (ctx, text, len) -> nonzero when it landed.
+SAVE_FN = c.CFUNCTYPE(c.c_int, _P, _P, _SIZE)
 
 LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev")
 
@@ -131,7 +137,7 @@ def binding(sanitize=False):
         SLOT_BITS=8, KIND_SHIFT=8, GEN_SHIFT=12, GEN_MAX=(1 << 18) - 1,
         SLOTS=256, ID_MAX=15, KIND_APP=1, KIND_BUF=2, KIND_CANVAS=3,
         KIND_SURF=4, KIND_OWNER=5, KIND_SRC=6, KIND_PEER=7, KIND_AUDIO=8, KIND_CLIP=9,
-        KIND_IMAGE=10, KIND_ACTOR=11,
+        KIND_IMAGE=10, KIND_ACTOR=11, KIND_GRANT=12,
         STAYED=0, PUSHED=1, RETURNED=2,
         ROOT="launcher", EDITOR="menu", ROUTE_HOME=0, ROUTE_EDITOR=1,
         ROUTE_APP=2, ROUTE_WINDOW=3, LEASE_TAGS=LEASE_TAGS, IMPL="c")
@@ -443,8 +449,31 @@ def binding(sanitize=False):
             if not self._p:
                 nomem("settings")
             self._save = save
+            self._saver()
 
-        __del__ = free_with("moy_settings_free")
+        def _saver(self):
+            # The rows' saver (moy_settings_saver): the hook behind a thunk,
+            # which holds what the hook raises for flush() to raise.
+            def thunk(_ctx, text, n):
+                if self._save is None:
+                    return 0
+                try:
+                    return int(self._save(c.string_at(text, n).decode()) is not False)
+                except BaseException as exc:    # noqa: BLE001 -- raised by flush()
+                    self._exc = exc
+                    return 0
+            self._exc = None
+            self._thunk = SAVE_FN(thunk)
+            lib.moy_settings_saver(self._p, c.cast(self._thunk, _P), id(self))
+
+        def __del__(self):
+            if self._p:
+                if self.__dict__.get("_own", True):
+                    lib.moy_settings_free(self._p)
+                elif lib.moy_settings_saver_ctx(self._p) == id(self):
+                    # The kernel's rows outlive the view; its saver goes.
+                    lib.moy_settings_saver(self._p, None, None)
+                self._p = None
 
         def load(self, text):
             b = raw(text, "system.json is a str")
@@ -500,12 +529,11 @@ def binding(sanitize=False):
             return lib.moy_settings_dirty(self._p) > 0
 
         def flush(self):
-            if not lib.moy_settings_dirty(self._p):
-                return True
-            if self._save is None or self._save(self.dump()) is False:
-                return False
-            lib.moy_settings_clean(self._p)
-            return True
+            clean = lib.moy_settings_flush(self._p)
+            exc, self._exc = self._exc, None
+            if exc is not None:
+                raise exc
+            return bool(clean)
 
         def keys(self):
             out = []
@@ -538,7 +566,7 @@ def binding(sanitize=False):
         k = lib.moy_spine_kernel(mem)
         if not k:
             nomem("kernel tables")
-        apps_p, back_p, returns_p, leases_p = k.contents
+        apps_p, back_p, returns_p, leases_p, _rows = k.contents
         lib.moy_apps_clear(apps_p)
         if fresh:
             lib.moy_back_reset(back_p)
@@ -551,9 +579,24 @@ def binding(sanitize=False):
         a = view(apps, apps_p)
         return (a, view(back, back_p), view(rets, returns_p, _apps=a), view(leas, leases_p))
 
+    def kernel_settings(save, fresh):
+        k = lib.moy_spine_kernel(mem)
+        if not k:
+            nomem("kernel tables")
+        rows = k.contents[4]
+        if fresh:
+            lib.moy_settings_load(rows, b"{}", 2, c.byref(c.c_uint32()))
+        o = Settings.__new__(Settings)
+        o._p, o._own, o._save = rows, False, save
+        o._saver()
+        return o
+
     for cls in (Table, AppRegistry, BackStack, Returns, Leases, Settings):
         m.__dict__[cls.__name__] = cls
     m.kernel = kernel
+    m.kernel_settings = kernel_settings
+    m.lib = lib
+    m.mem = mem
     return m
 
 

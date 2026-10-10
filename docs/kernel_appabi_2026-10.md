@@ -84,7 +84,7 @@ and `ROLES` are each held to it by a test (`tests/test_roles.py`).
 - **C**: the state is the kernel's and resident: the settings rows, the
   glass, a kernel row this sprint adds, the lease table, the engine's sizing,
   and the user-files layer (§12 answer 4). Each verb is its own C
-  function in `+native/moy_app/` taking the grant handle; there is no by-name
+  function in `native/moy_app/` taking the grant handle; there is no by-name
   dispatcher.
 - **shell**: the state is the Python console's, which stays Python: the
   routes' surfaces, the look and its caches, the wallpaper cart's namespace,
@@ -128,17 +128,23 @@ are Python callables bound in the binding, as today.
 | a user app (`type: "app"` cart, Python) | the manifest's permissions | the grant is made in C at the run's launch; the Python cart binding publishes globals only for granted verbs |
 | a compiled app (wasm) | the manifest's permissions and extension, and the module's imports | each import must be a row of a granted role; one from an ungranted role is refused at load, named (§4) |
 
-**The grant.** Every caller of a role holds a grant: a loan on an OWNER row
-(sprint 3's lifetimes, `docs/kernel_survival_2026-10.md`), carrying the app's
-key, its role mask, its files kind, its prefs namespace and its surface row.
+**The grant.** Every caller of a role holds a grant: a row of native/moy_app's
+own grant table (`moy_htab.h`'s kind 12, GRANT), carrying the app's key, its
+class, its role mask, its files kind, its prefs namespace and an OWNER handle it
+names (sprint 3's lifetimes, `docs/kernel_survival_2026-10.md`), and from step
+5 its surface row. It is not itself an OWNER row because `moy_glass_end_owners()`
+ends every OWNER row at a stop, and a shipped app's grant outlives one (step 4,
+2026-10-10). The table is the kernel's on a board (`moy_app_kernel`, made once
+in PSRAM, so a stop leaves it); elsewhere each console owns one.
 **A grant is keyed by the cart's `id`** (#162, moy-spec's SPEC.md §3.1): the
 manifest's `<author>.<name>` when it has one, else the cart's folder less
 `.moy`, which is what the spec keys a host's records by; a path-less built-in
 (`runtime/boot_carts.py`) has neither and is keyed by its title's slug. A
 renamed cart keeps its prefs namespace and its strikes. A shipped app's grant
-is keyed by its registered id and idempotent: a start re-registering
-the app finds the row it had, so a stop leaves the count where it was. A user
-app's grant is its run's, and goes with the run. The grant policy is C's
+(class SHIPPED) is keyed by its registered id and idempotent: a start
+re-registering the app finds the row it had, so a stop leaves the count where
+it was. A user app's grant (class RUN) is its run's: the Player ends it when
+the run ends, and a fresh start ends any left. The grant policy is C's
 whole: the permission-to-role map, the file kinds, `manifest_error`, and
 `app_id_for`, the key above (the built-in's slug is ASCII letters and digits,
 the C rule; CPython's Unicode `isalpha()` no longer decides it).
@@ -173,7 +179,7 @@ only the shell's own calls (boot restore, cycling) reach the look's
 
 | role | import shape | server | notes |
 |---|---|---|---|
-| `damage` | `all()`, `again()` | C | the kernel's frame epoch flag, folded where the frame gate folds `ws._dirty`; `again` is the loop's next-frame request |
+| `damage` | `all()`, `again()` | C | two kernel flags, ALL and AGAIN, folded into `ws._dirty` where the frame gate folds the kernel epoch (`_needs_redraw` takes both); the gate drops an ALL raised by its own draw, as it cleared `ws._dirty`, so a draw's `all` is lost and its `again` is the next frame |
 | `surface` | `canvas() -> handle`, `size(&w,&h)`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `pointer(out[5])` | C | the grant's **surface row**, written by the shell (§2.5); the pointer is the kernel's input state in the app's coordinates; `bar_h` joins the role so the ungated cart global and the shipped apps read one value |
 | `surface` | `glyph` | Python-only | the toolkit's icon callable, until sprint 6 |
 | `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)`, `skin(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
@@ -181,12 +187,12 @@ only the shell's own calls (boot restore, cycling) reach the look's
 | `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (§12 answer 4); history ops cross as bytes. A **session** is mount and readiness only (§2.6) |
 | `carts` | `ids(out)`, `title(cart, buf)`, `slug`, `can_journal`, `load_deck`, `images`, `encode_image`, `save_deck`, `save_code`, `save_image`, `rescan` (the old `hydrate` and `apply`) | shell | the live list is the shell's; the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`) |
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
-| `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default |
+| `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default. On a board the rows are the kernel's (`moy_spine_kernel`'s, viewed by `moy_spine.kernel_settings`), and a write flushes through the rows' own saver (`moy_settings_flush`), which the console's store registers while its VM runs; a write made with no VM stays dirty in the rows, and the next start flushes them before it reads the file |
 | `notify` | `achieve(kind, key)` | shell | the `Achievements` object is the console's |
 | `wallpaper` | `current(buf)`, `fills(out)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)` | shell | `current` is the look's live `wallpaper_id`, which differs from the settings row after a boot fallback that does not persist (`runtime/appearance.py`); `preview` is a Python callable on the frame path |
 | `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file and its preview sidecar (`runtime/moy_image.py`'s, the plan's §2.2.1 row) |
 | `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open drawing, its settings rows; `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the drawing through `files`; Paint's `NEEDS` gains `files` |
-| `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD and keeps the old text. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
+| `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD (the Python binding's False) and keeps the old text, and the code editor keeps that copy as its own until another lands. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
 | `install` | `hold()`, `release()` | C | the lease table |
 | `install` | `fit(...)`, `memory(&free,&block)`, `chip(buf)`, `runtimes(out)` | C | the engine's sizing |
 | `install` | `home(buf)`, `can_pick()`, `pick(name, size, host) -> request`, `poll`, `close`, `root(buf)`, `writable()`, `begin()`, `end()`, `rescan()`, `free(&bytes,&block)`, `find(folder) -> cart` | shell | |
@@ -225,9 +231,11 @@ one assertion that no role hands out the console and no app module names it.
 
 ## 3. The Python binding
 
-**What it becomes.** `+native/moy_app/modmoy_app.c` on the boards and in the
-browser, and a ctypes binding on the host (`+tools/moy_app_binding.py`, the
-`tools/moy_spine_binding.py` pattern): role types whose methods are the table's
+**What it becomes.** `native/moy_app/modmoy_app.c` on the boards and in the
+browser, and a ctypes binding on the host (`tools/moy_app_binding.py`, the
+`tools/moy_spine_binding.py` pattern, over the spine's host library, which
+carries native/moy_app so a Settings the spine made is a pointer moy_app
+writes; the `runtime` package registers it as `moy_app`): role types whose methods are the table's
 C rows over a grant handle, with the shell and Python-only rows bound to the
 Workstation's registered servers. `runtime/app_context.py` keeps `ROLES`,
 `NO_STORE` and `AppContext`; every role class is deleted.
@@ -394,7 +402,7 @@ go through Paint's registered app.
 
 | file and function | goes to | Python deleted |
 |---|---|---|
-| `runtime/app_context.py`: `Damage`, `Surface`, `Theme`, `_StoreRole`, `_RawFiles`, `Files`, `_RawCarts`, `Carts`, `Nav`, `Prefs`, `Notify`, `WallpaperRole`, `Installer` | the role table; C rows in `+native/moy_app/moy_app.c`; shell and Python-only rows on the Workstation's registered servers | every class; `ROLES`, `NO_STORE`, `AppContext` stay |
+| `runtime/app_context.py`: `Damage`, `Surface`, `Theme`, `_StoreRole`, `_RawFiles`, `Files`, `_RawCarts`, `Carts`, `Nav`, `Prefs`, `Notify`, `WallpaperRole`, `Installer` | the role table; C rows in `native/moy_app/moy_app.c`; shell and Python-only rows on the Workstation's registered servers | every class; `ROLES`, `NO_STORE`, `AppContext` stay |
 | `runtime/system_api.py`: `_ROLE_FOR`, `granted_roles`, `NEVER_GRANTED`, `FILE_KINDS`, `DEFAULT_FILE_KIND`, `ScopedFiles`, `manifest_error`, `slug`, `app_id_for` | the grant in C | those; `make_system_api`, `wants_layout`, `is_text_app` stay |
 | `runtime/file_widgets.py`: `FileGridView` | the `files` role | its Workstation reads |
 | `runtime/moy_files.py`, `runtime/moy_file_ops.py` | C in `native/moy_store`, a module the Zero denies (§12 answer 4) | both |
@@ -430,8 +438,9 @@ code it pins lands (`tests/test_semantic_traces.py`, on both object models).
    browser build run `native/moy_spine/`; `runtime/moy_spine.py` moves under
    `tests/` as the differential oracle.
 4. **`+native/moy_app/`, the grant and the first C rows**: the module in its
-   three bindings (denied on the Zero, which runs no apps); the grant as an
-   OWNER loan with its policy in C, keyed by the cart's `id` (§2.2); `prefs`,
+   three bindings (denied on the Zero, which runs no apps); the grant as a
+   GRANT row naming an OWNER, with its policy in C, keyed by the cart's `id`
+   (§2.2); `prefs`,
    `damage`, `clipboard` (its 4 KiB row); their Python classes deleted; a
    parity test across the bindings (`tests/test_gfx_binding.py`'s pattern);
    the Bench role row.
@@ -500,6 +509,13 @@ against that bug before it goes green.
 - `glyph`, `install.net` and `install.keep` are Python-only rows.
 - No surface but the launcher comes back after a stop (§5); the stop's
   refusal for any other route is "place".
+- Step 4 (2026-10-10): the grant is a GRANT row (kind 12) of native/moy_app's
+  own table, naming an OWNER, so `moy_glass_end_owners()` at a stop leaves it;
+  the KSTOP down line reads the count (`grants=N`). The settings rows move into
+  the kernel (`moy_spine_kernel`) and save through their own saver rather than
+  a hop to the VM. The damage flags fold at the frame gate's existing fold, one
+  mechanism. Each C row counts its calls in C, the counter the trace's coverage
+  and the budgets read; a size query (no buffer) that succeeds is not a call.
 
 ## 12. The owner's answers (2026-10-10)
 

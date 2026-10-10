@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "moy_htab.h"
+#include "moy_settings.h"
 
 #define MOY_ID_MAX 15u
 #define MOY_BACK_DEPTH 32u
@@ -160,7 +161,8 @@ uint32_t moy_leases_mask(const moy_leases_t *l);
 
 // -- the kernel's own tables --------------------------------------------------
 
-// The console's registry, back-stack, return records and leases as kernel
+// The console's registry, back-stack, return records, leases and settings rows
+// (system.json, moy_settings.h) as kernel
 // singletons (docs/kernel_cartpath_2026-10.md §5.4): made once, from `mem`, at
 // the first call that passes one, and never freed, so a VM stop's sweep leaves
 // them and a return start reads them. The VM's objects are views of these
@@ -171,6 +173,7 @@ typedef struct {
     moy_back_t *back;
     moy_returns_t *returns;
     moy_leases_t *leases;
+    moy_settings_t *settings;
 } moy_spine_kernel_t;
 
 const moy_spine_kernel_t *moy_spine_kernel(const moy_htab_mem_t *mem);

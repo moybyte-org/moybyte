@@ -93,6 +93,12 @@ static void spine_release(void *p, size_t n) {
 
 static const moy_htab_mem_t spine_mem = { spine_alloc, spine_release };
 
+// The allocator kernel state takes (native/moy_app's binding makes its state
+// from it too).
+const moy_htab_mem_t *moy_spine_mem(void) {
+    return &spine_mem;
+}
+
 // -- errors and arguments --------------------------------------------------------
 
 static MP_DEFINE_CONST_OBJ_TYPE(
@@ -832,14 +838,53 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- Settings ----------------------------------------------------------------------
 
+static const mp_obj_type_t settings_type;
+
 typedef struct {
     mp_obj_base_t base;
     moy_settings_t *s;
     mp_obj_t save;          // the hook that writes the file, or None
+    bool own;               // false: a view of the kernel's rows
 } settings_obj_t;
 
 static moy_settings_t *settings_of(mp_obj_t self) {
     return ((settings_obj_t *)MP_OBJ_TO_PTR(self))->s;
+}
+
+// The rows' saver (moy_settings_saver): the object's hook, called with the
+// dump. What the hook raises is held and raised by settings_raise() once the
+// C flush has returned, so the flush frees what it took on every path.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_spine_save_exc);
+
+static int settings_saver(void *ctx, const char *text, size_t n) {
+    settings_obj_t *o = ctx;
+    if (o->save == mp_const_none) {
+        return 0;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t r = mp_call_function_1(
+            o->save, mp_obj_new_str_copy(&mp_type_str, (const byte *)text, n));
+        nlr_pop();
+        return r != mp_const_false;
+    }
+    MP_STATE_VM(moy_spine_save_exc) = MP_OBJ_FROM_PTR(nlr.ret_val);
+    return 0;
+}
+
+// Raise what the last saver call raised, if it raised.
+void moy_spine_settings_raise(void) {
+    mp_obj_t exc = MP_STATE_VM(moy_spine_save_exc);
+    if (exc != MP_OBJ_NULL) {
+        MP_STATE_VM(moy_spine_save_exc) = MP_OBJ_NULL;
+        nlr_raise(exc);
+    }
+}
+
+// The C rows a Settings object holds, or NULL for any other object: what
+// native/moy_app's binding writes prefs into.
+moy_settings_t *moy_spine_settings_of(mp_obj_t o) {
+    return mp_obj_is_type(o, &settings_type) ? settings_of(o) : NULL;
 }
 
 static mp_obj_t settings_make_new(const mp_obj_type_t *type, size_t n_args,
@@ -853,10 +898,12 @@ static mp_obj_t settings_make_new(const mp_obj_type_t *type, size_t n_args,
                               allowed, args);
     settings_obj_t *o = mp_obj_malloc_with_finaliser(settings_obj_t, type);
     o->save = args[ARG_save].u_obj;
+    o->own = true;
     o->s = moy_settings_new(&spine_mem);
     if (o->s == NULL) {
         no_memory();
     }
+    moy_settings_saver(o->s, settings_saver, o);
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -985,16 +1032,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(settings_dump_obj, settings_dump);
 
 // The write hook, when the store is dirty: True when it is clean afterwards.
 static mp_obj_t settings_flush(mp_obj_t self_in) {
-    settings_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (moy_settings_dirty(self->s) == 0u) {
-        return mp_const_true;
-    }
-    if (self->save == mp_const_none
-        || mp_call_function_1(self->save, settings_dump(self_in)) == mp_const_false) {
-        return mp_const_false;
-    }
-    moy_settings_clean(self->s);
-    return mp_const_true;
+    int clean = moy_settings_flush(settings_of(self_in));
+    moy_spine_settings_raise();
+    return bool_obj(clean);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_flush_obj, settings_flush);
 
@@ -1092,7 +1132,15 @@ static MP_DEFINE_CONST_FUN_OBJ_1(settings_keys_obj, settings_keys);
 
 static mp_obj_t settings_del(mp_obj_t self_in) {
     settings_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    moy_settings_free(self->s);
+    if (self->s == NULL) {
+        return mp_const_none;
+    }
+    if (self->own) {
+        moy_settings_free(self->s);
+    } else if (moy_settings_saver_ctx(self->s) == self) {
+        // The kernel's rows outlive this VM: their saver goes with the view.
+        moy_settings_saver(self->s, NULL, NULL);
+    }
     self->s = NULL;
     return mp_const_none;
 }
@@ -1420,6 +1468,29 @@ static mp_obj_t mod_kernel(mp_obj_t fresh) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_kernel_obj, mod_kernel);
 
+// kernel_settings(save, fresh) -> Settings: a view of the kernel's settings
+// rows (moy_spine_kernel's), which outlive the VM, writing through `save`. Its
+// finaliser frees no row and takes its saver away, so with no VM a dirty row
+// waits for the next start's view. `fresh` empties the rows, as every start but
+// a return start asks (the console loads system.json into them next).
+static mp_obj_t mod_kernel_settings(mp_obj_t save, mp_obj_t fresh) {
+    const moy_spine_kernel_t *k = moy_spine_kernel(&spine_mem);
+    if (k == NULL) {
+        no_memory();
+    }
+    if (mp_obj_is_true(fresh)) {
+        uint32_t rows;
+        moy_settings_load(k->settings, "{}", 2, &rows);
+    }
+    settings_obj_t *o = mp_obj_malloc_with_finaliser(settings_obj_t, &settings_type);
+    o->s = k->settings;
+    o->save = save;
+    o->own = false;
+    moy_settings_saver(o->s, settings_saver, o);
+    return MP_OBJ_FROM_PTR(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_kernel_settings_obj, mod_kernel_settings);
+
 // -- the module --------------------------------------------------------------------
 
 static const mp_rom_obj_tuple_t lease_tags_tuple = {
@@ -1444,6 +1515,7 @@ static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_CrashGuard), MP_ROM_PTR(&guard_type) },
     { MP_ROM_QSTR(MP_QSTR_set_mirror), MP_ROM_PTR(&mod_set_mirror_obj) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&mod_kernel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kernel_settings), MP_ROM_PTR(&mod_kernel_settings_obj) },
     { MP_ROM_QSTR(MP_QSTR_SLOT_BITS), MP_ROM_INT(8) },
     { MP_ROM_QSTR(MP_QSTR_KIND_SHIFT), MP_ROM_INT(MOY_HTAB_KIND_SHIFT) },
     { MP_ROM_QSTR(MP_QSTR_GEN_SHIFT), MP_ROM_INT(MOY_HTAB_GEN_SHIFT) },
@@ -1461,6 +1533,7 @@ static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KIND_CLIP), MP_ROM_INT(MOY_KIND_CLIP) },
     { MP_ROM_QSTR(MP_QSTR_KIND_IMAGE), MP_ROM_INT(MOY_KIND_IMAGE) },
     { MP_ROM_QSTR(MP_QSTR_KIND_ACTOR), MP_ROM_INT(MOY_KIND_ACTOR) },
+    { MP_ROM_QSTR(MP_QSTR_KIND_GRANT), MP_ROM_INT(MOY_KIND_GRANT) },
     { MP_ROM_QSTR(MP_QSTR_STAYED), MP_ROM_INT(MOY_GOTO_STAYED) },
     { MP_ROM_QSTR(MP_QSTR_PUSHED), MP_ROM_INT(MOY_GOTO_PUSHED) },
     { MP_ROM_QSTR(MP_QSTR_RETURNED), MP_ROM_INT(MOY_GOTO_RETURNED) },

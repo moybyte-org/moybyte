@@ -399,7 +399,10 @@ const moy_spine_kernel_t *moy_spine_kernel(const moy_htab_mem_t *mem) {
     k.back = moy_back_new(mem);
     k.returns = k.apps != NULL ? moy_returns_new(mem, k.apps) : NULL;
     k.leases = moy_leases_new(mem);
-    if (k.apps == NULL || k.back == NULL || k.returns == NULL || k.leases == NULL) {
+    k.settings = moy_settings_new(mem);
+    if (k.apps == NULL || k.back == NULL || k.returns == NULL || k.leases == NULL
+        || k.settings == NULL) {
+        moy_settings_free(k.settings);
         moy_returns_free(k.returns);
         moy_apps_free(k.apps);
         moy_back_free(k.back);

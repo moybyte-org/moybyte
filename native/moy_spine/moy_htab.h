@@ -48,6 +48,7 @@ enum {
     MOY_KIND_CLIP = 9,      // the sample voice's clips (native/moy_audio)
     MOY_KIND_IMAGE = 10,    // a run's decoded pictures (native/moy_play)
     MOY_KIND_ACTOR = 11,    // reserved: a Lua run's actors are its own tables (moycore_scene.h)
+    MOY_KIND_GRANT = 12,    // the app ABI's grants (native/moy_app)
 };
 
 enum {

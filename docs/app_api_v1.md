@@ -83,21 +83,24 @@ roles it declared:
 
 | role | what it is | verbs |
 |---|---|---|
-| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()` | `all()`, `again()` |
+| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
 | `ctx.surface` | the system canvas the app draws on, its scales, the desk's window flag, the live pointer, the chrome glyph painter | `canvas()`, `font_scale()`, `chrome_scale()`, `windowed()`, `pointer()`, `glyph()` |
 | `ctx.theme` | the live panel-theme tokens and the verbs that change the look | `colors()`, `light()`, `name()`, `variant()`, `skin()`, `set()`, `set_variant()`, `set_skin()` |
 | `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps | `readable()`, `ready()`, `batch()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, projects' decks, code and images | `readable()`, `ready()`, `batch()`, `all()`, `can_journal()`, `slug()`, `hydrate()`, `apply()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()` |
-| `ctx.prefs` | per-app settings on `system.json`, namespaced per app | `get()`, `set()`, `clear()` |
+| `ctx.prefs` | per-app settings on `system.json`'s rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
 | `ctx.notify` | achievement events | `achieve()` |
 | `ctx.wallpaper` | the desktop-backdrop capability (Appearance and Paint only) | `current()`, `carts()`, `fills()`, `id_for()`, `cart_by_id()`, `select()`, `preview()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | the ArtworkService itself (Paint's document model) | `attach()`, `doc_name()`, `editable()`, `is_paint_app()`, `load()`, `new_doc()`, `open_named()`, `resend()`, `save()`, `set_wallpaper()`, `sync_wallpaper()`, `targets()`, `thumbnail()`, `usage()`, `why_read_only()` |
-| `ctx.clipboard` | the system cut/copy/paste buffer (#132) | `put_text()`, `text()` |
+| `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `put_text()`, `text()`, `kind()`, `seq()` |
 | `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `session()`, `rescan()`, `free()`, `find()`, `net()`, `keep()` |
 
 Read that module for the signatures. The verbs column is the role table's
 (`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
+Every context holds a **grant**, a row of native/moy_app's grant table keyed by
+the app's id; `damage`, `prefs` and `clipboard` are native/moy_app's role
+objects over it, each method a C row (the table's `server` column says which).
 Four things about the roles are load-bearing:
 
 - **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the
@@ -239,17 +242,19 @@ proves it with one cart source opened twice, one manifest line apart.
 | permission | cart globals |
 |---|---|
 | `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name/badge`, scoped to ONE user-files kind (`docs` by default). `new_name(title)` takes a name a person typed and answers what it may be stored as; `badge(name)` is the mode table's short label for a row (`MD`/`TXT`/`JSON`/`PY`/`LUA`) |
-| `prefs` | `prefs.get` / `prefs.set`, namespaced under the app's own title slug |
+| `prefs` | `prefs.get` / `prefs.set`, namespaced under the cart's `id` (#162: the manifest's `<author>.<name>`, else its folder less `.moy`), so a renamed cart keeps them |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
 
 Never grantable, whatever a manifest says: `shell`, `carts` (a cart that can
 author carts can escalate itself), `install` (the same, with somebody else's
 cart), `wallpaper`, `artwork`, `damage`, `surface`, `notify`. Firmware update and reboot are not roles at all. The
-enforcement is that the permission table is an ALLOWLIST, so a role nobody
-mapped is ungrantable by construction; a test asserts every role in
-`app_context.ROLES` is classified as one or the other, so ADDING a role forces
-the decision.
+policy is C's (native/moy_app: the permission table, the files kinds, the
+two-kinds refusal and the key a grant is made under, the cart's `id`), and its
+permission table is an ALLOWLIST, so a role nobody mapped is ungrantable by
+construction; a test asserts every role in `app_context.ROLES` is classified as
+one or the other, so ADDING a role forces the decision. A user app's grant is
+its run's and ends with it; its crash-guard strikes are keyed by the same id.
 
 Four globals every `type: "app"` cart gets with no permission, because they are
 how an app draws rather than what it may reach: **`ui`** (the real

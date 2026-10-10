@@ -2086,7 +2086,8 @@ def say(*a):
 def _count(obj, role):
     """Count every table row of `role` called on `obj`: the coverage ratchet's
     tally, kept on the instance so the class and every other holder are
-    untouched."""
+    untouched. A C role's object takes no attribute on a VM: its rows are
+    counted by native/moy_app itself (`_c_called`)."""
     for r, verb in ROWS:
         if r != role:
             continue
@@ -2096,7 +2097,19 @@ def _count(obj, role):
             CALLED[_key] = CALLED.get(_key, 0) + 1
             return _real(*a, **kw)
 
-        setattr(obj, verb, counted)
+        try:
+            setattr(obj, verb, counted)
+        except (AttributeError, TypeError):
+            return
+
+
+def _c_called(app, before):
+    """The C rows called since `before` (an earlier `app.counts()`)."""
+    import moy_app
+    now = app.counts()
+    for i, name in enumerate(moy_app.rows()):
+        if now[i] > before[i]:
+            CALLED[name] = CALLED.get(name, 0) + now[i] - before[i]
 
 
 def _n(v):
@@ -2119,13 +2132,14 @@ def roles_trace(ws):
     say("roles", " ".join(sorted(k for k in ROLES if hasattr(ctx, k))))
     for role in ROLES:
         _count(getattr(ctx, role), role)
+    c_before = ws.app_abi.counts()
 
     # -- damage
-    ws._dirty = False
-    ws._frame_requested = False
+    ws.app_abi.damage_take()
     ctx.damage.all()
+    d_all = ws.app_abi.damage_take()
     ctx.damage.again()
-    say("damage", ws._dirty, ws._frame_requested)
+    say("damage", d_all, ws.app_abi.damage_take(), ws.app_abi.damage_take())
 
     # -- surface
     s = ctx.surface
@@ -2263,8 +2277,9 @@ def roles_trace(ws):
     # -- clipboard
     cl = ctx.clipboard
     say("clip empty", repr(cl.text()))
-    cl.put_text("hello")
-    say("clip", cl.text(), cl.kind, cl.seq)
+    s0 = cl.seq()
+    say("clip put", cl.put_text("hello"), cl.put_text("x" * 4097))
+    say("clip", cl.text(), cl.kind(), cl.seq() - s0)
 
     # -- install
     i = ctx.install
@@ -2282,6 +2297,7 @@ def roles_trace(ws):
     say("engine", type(i.runtimes()).__name__, i.memory() is None or len(i.memory()) == 2,
         i.fit("wasm", 0, 0, False), len(i.chip()))
 
+    _c_called(ws.app_abi, c_before)
     uncalled = [r + "." + v for r, v in ROWS if (r + "." + v) not in CALLED]
     say("uncalled", " ".join(uncalled) or "-")
 '''
@@ -2392,7 +2408,7 @@ def _roles_trace_board(exe, tmp_path):
 
 ROLES_TRACE = """\
 roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
-damage True True
+damage 1 2 0
 surface True 1 1 False True
 glyph drawn
 theme night dark default False True True
@@ -2448,6 +2464,7 @@ artwork open None 'pic'
 artwork wall True True
 artwork attach 'Trace Cart' False
 clip empty ''
+clip put True False
 clip hello text 1
 install True True False None True True True
 lease True None

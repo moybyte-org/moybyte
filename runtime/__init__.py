@@ -34,6 +34,23 @@ def _native_spine():
 
 moy_spine = _native_spine()
 
+
+def _native_app():
+    """The app ABI's C rows (native/moy_app) over the same host library as
+    the spine, registered as `moy_app` like it."""
+    if "moy_app" in _sys.modules:
+        return _sys.modules["moy_app"]
+    from tools import moy_app_binding
+    mod = moy_app_binding.binding()
+    if mod is None:
+        raise ImportError("the host's app ABI needs a C compiler "
+                          "(native/moy_app over ctypes)")
+    _sys.modules["moy_app"] = mod
+    return mod
+
+
+moy_app = _native_app()
+
 from . import palette  # noqa: E402
 from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
 from .input import InputState  # noqa: E402

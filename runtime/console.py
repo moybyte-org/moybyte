@@ -291,13 +291,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # console.Pointer / console.Popup / console.ACHIEVEMENTS / ... resolve for
 # Workstation + host_app + tests.
 try:
-    from widgets import (Achievements, Pmem, Clipboard, Popup,
+    from widgets import (Achievements, Pmem, Popup,
                          ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
                          _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
     from moy_input import Pointer
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, Pmem, Clipboard,
+    from runtime.widgets import (Achievements, Pmem,
                                  Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
                                  _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
     from runtime.moy_input import Pointer
@@ -324,6 +324,7 @@ try:
     from app_context import AppContext
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import AppContext
+import moy_app as _moy_app
 
 # Crash isolation for content the shell runs on the kid's behalf (#160,
 # ui_refactor_2026-08 Phase 8): three failed runs and an app cart, or the
@@ -511,6 +512,20 @@ def _kernel_tables():
         tables[1].goto("launcher")
         tables[2].spend()
     return tables
+
+
+def _app_abi(rows):
+    """The app ABI's state (native/moy_app): the kernel's where the console
+    runs on a kernel (a board), so a VM stop leaves its grants and clipboard
+    for the next VM, its prefs the kernel's settings rows; elsewhere this
+    console's own, its prefs written into `rows`. A return start keeps the
+    kernel's as it was; every other start ends its run grants."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return _moy_app.App(rows)
+    start = getattr(moy_kernel, "start", None)
+    return _moy_app.kernel(not (start is not None and start() == "return"))
 
 
 _SPLASH_IMG = None
@@ -717,11 +732,33 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # already builds an AppContext. It captures nothing; every field is read
         # through `self` at the moment of use, because none of them is wired yet.
         self.store = StoreHandle(self)
+        # system.json (#209 landing B): the store owns the rows and the hook
+        # that writes them; `self.system` is a plain ALIAS of the rows and
+        # neither name is ever rebound -- prefs.load() replaces them in place,
+        # which keeps the launcher's per-paint favorites read, the prefs role
+        # and the guards honest. Reads are `system.get`, writes are
+        # `system.set`, and a write persists itself.
+        self.prefs = SystemStore(self, self.store)
+        self.system = self.prefs.rows
+        # The app ABI's state (native/moy_app): the grants every AppContext
+        # holds, the damage flags the frame gate folds, the clipboard, and
+        # prefs written into the rows above. The kernel's on a board, so a VM
+        # stop leaves it; this console's own elsewhere.
+        self.app_abi = _app_abi(self.system)
+        self._damage_take = self.app_abi.damage_take
+        self._damage_drop = self.app_abi.damage_drop
+        # The system clipboard (#132): the one buffer every editor writes
+        # through (the code tab, a cart's editor handle), so copy in one app
+        # pastes in another; the code tab's lane over a grant of its own.
+        # Console-side end-to-end -- works identically over the web
+        # transport, never touches a host OS clipboard (parity trap).
+        self.clipboard = _moy_app.Clipboard(
+            self.app_abi, self.app_abi.grant("editor", ("clipboard",)))
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         # A narrow capability for the shipped Paint app. It is not a Layer, so
         # it is not in app_decls -- but it is on the APP side of the seam, so it
         # takes an AppContext like one. Its prefs namespace is "paint" and not
-        # its id, because `paint_doc` is on real cards since #108 (see Prefs).
+        # its id, because `paint_doc` is on real cards since #108.
         self.artwork = ArtworkService(
             self.app_context("paint", ArtworkService.NEEDS, prefs_ns="paint"))
         self.audio_out = None       # injected where no feeder task plays the mix: a PcmPump
@@ -982,20 +1019,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
-        # The system clipboard (#132): the one typed holder every editor writes
-        # through (the code tab, a cart's editor handle), so copy in one
-        # app pastes in another. Console-side end-to-end -- works identically
-        # over the web transport, never touches a host OS clipboard (parity
-        # trap).
-        self.clipboard = Clipboard()
-        # system.json (#209 landing B): the store owns the rows and the hook
-        # that writes them; `self.system` is a plain ALIAS of the rows and
-        # neither name is ever rebound -- prefs.load() replaces them in place,
-        # which keeps the launcher's per-paint favorites read, app_context's
-        # Prefs role and the guards honest. Reads are `system.get`, writes are
-        # `system.set`, and a write persists itself.
-        self.prefs = SystemStore(self, self.store)
-        self.system = self.prefs.rows
         # Crash isolation (#160 / Phase 8): the rows themselves, because they
         # stay the same object across a load. One ledger per role -- see
         # runtime/crash_guard.py, "Two roles, two ledgers".
@@ -1322,7 +1345,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 break
         if cart is None:
             return False
-        self._text_request = (kind or system_api.DEFAULT_FILE_KIND,
+        self._text_request = (kind or _moy_app.kinds()[0],
                               str(name), mode)
         # Back to whoever asked, not home: Files opened this, so its X returns
         # to the shelf the person was standing on, and the Editor's Config tab
@@ -2029,7 +2052,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
         return True
 
-    def app_context(self, app_id, needs=(), prefs_ns=None):
+    def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None):
         """Build the narrowed shell interface for one system app
         (docs/app_api_v1.md, runtime/app_context.py).
 
@@ -2037,8 +2060,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         ONLY those roles -- so an app reaching for something it did not declare
         raises here rather than growing an invisible dependency. That filter is
         the whole point: Phase 7's `make_system_api(ctx, cart)` is this same
-        call with a cart's manifest permissions in place of a class constant."""
-        return AppContext(self, app_id, needs, prefs_ns)
+        call with a cart's manifest permissions in place of a class constant,
+        its grant a RUN grant (`run`) scoped to its files `kind`."""
+        return AppContext(self, app_id, needs, prefs_ns, run, kind)
 
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #
@@ -2131,8 +2155,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         (there is no folder for crash-to-code to open).
 
         THE CAPABILITY GATE (#120) is that manifest and nothing more: `files`,
-        `prefs`, `console`. `carts` is ungrantable to any cart at all
-        (`system_api.NEVER_GRANTED`) and the network is gated on a `network`
+        `prefs`, `console`. `carts` is ungrantable to any cart at all (no
+        permission maps to it, `moy_app.perms()`) and the network is gated on a `network`
         permission this manifest does not carry, so a script naming either has
         no such NAME -- and the console says which one it wanted.
 
@@ -3507,6 +3531,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._kframes -= 1
             self._dirty = True
             return True
+        if self._damage_take():
+            # The app ABI's damage flags (native/moy_app): an app's `all` or
+            # `again`, folded into the one dirty flag here.
+            self._dirty = True
         if self._dirty:
             return True
         if self._animating(dt):
@@ -3841,6 +3869,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
         self._dirty = False
+        self._damage_drop()          # an app's `all` from this draw is spent
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the

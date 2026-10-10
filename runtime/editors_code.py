@@ -49,13 +49,16 @@ class CodeEditor:
         # The internal clipboard (#89): a plain string, NOT the OS clipboard, so
         # copy/cut/paste behave identically on the host and the device. Kept across
         # set_text() (a reload) so a copy survives switching what you view.
-        # `clip` (#132) is the OPTIONAL system clipboard (widgets.Clipboard):
-        # copy/cut write THROUGH it and paste prefers it, so a copy here lands
-        # in a cart's editor handle and vice versa. None (unit tests,
-        # embedding) keeps
-        # the local-only behavior exactly.
+        # `clip` (#132) is the OPTIONAL system clipboard (the clipboard role,
+        # native/moy_app): copy/cut write THROUGH it and paste prefers it, so
+        # a copy here lands in a cart's editor handle and vice versa. A copy
+        # longer than the role holds stays here alone, and paste prefers it
+        # until another copy lands there (`_clip_lost`, the role's seq at the
+        # refusal). None (unit tests, embedding) keeps the local-only
+        # behavior exactly.
         self.clipboard = ""
         self.clip = clip
+        self._clip_lost = None
         self.set_text(src)
 
     def set_view_size(self, cols, rows):
@@ -310,8 +313,7 @@ class CodeEditor:
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
-        if self.clip is not None:
-            self.clip.put_text(self.clipboard)   # the system lane (#132)
+        self._write_through()
         return True
 
     def cut(self):
@@ -319,9 +321,15 @@ class CodeEditor:
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
-        if self.clip is not None:
-            self.clip.put_text(self.clipboard)   # the system lane (#132)
+        self._write_through()
         return self.delete_selection()
+
+    def _write_through(self):
+        """The copy into the system lane (#132), or, refused as too long,
+        the lane's seq at the refusal."""
+        if self.clip is not None:
+            ok = self.clip.put_text(self.clipboard)
+            self._clip_lost = None if ok else self.clip.seq()
 
     def select_all(self):
         """Select the whole buffer: anchor at the start, caret at the end
@@ -336,8 +344,12 @@ class CodeEditor:
         """What paste() would insert: the system clipboard's text when one is
         attached and holds any (every local copy wrote through, so it is
         always the newest), else the internal string."""
-        if self.clip is not None and self.clip.text():
-            return self.clip.text()
+        clip = self.clip
+        if clip is not None and (self._clip_lost is None
+                                 or clip.seq() != self._clip_lost):
+            t = clip.text()
+            if t:
+                return t
         return self.clipboard
 
     def paste(self):

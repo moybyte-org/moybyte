@@ -1,30 +1,61 @@
-"""The system clipboard (#132): one typed holder (widgets.Clipboard) every
-editor writes THROUGH while keeping its local behavior -- copy in the code tab
-pastes into a note, and an editor with no
-workstation attached behaves exactly as before (the local-only contract)."""
+"""The system clipboard (#132): one buffer, the clipboard role's C row
+(native/moy_app), every editor writes THROUGH while keeping its local behavior
+-- copy in the code tab pastes into a note, and an editor with no workstation
+attached behaves exactly as before (the local-only contract)."""
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import host_app
-from runtime.widgets import Clipboard
 from runtime.editors_code import CodeEditor
+import moy_app
 
 
-# -- the holder ---------------------------------------------------------------
+def Clipboard():
+    """A clipboard role over a state of its own: what a console's grant
+    hands an editor."""
+    app = moy_app.App(None)
+    return moy_app.Clipboard(app, app.grant("probe", ("clipboard",)))
+
+
+# -- the buffer ---------------------------------------------------------------
 
 def test_clipboard_holder_typed_and_versioned():
     c = Clipboard()
-    assert c.text() == "" and c.kind is None
-    c.put_text("hello")
-    assert c.text() == "hello" and c.kind == "text"
-    s0 = c.seq
+    assert c.text() == "" and c.kind() is None
+    assert c.put_text("hello") is True
+    assert c.text() == "hello" and c.kind() == "text"
+    s0 = c.seq()
     c.put_text("world")
-    assert c.seq == s0 + 1
-    # A future non-text kind never leaks out of text().
-    c.kind, c.data = "pixels", {"w": 8, "h": 8}
-    assert c.text() == ""
+    assert c.seq() == s0 + 1
+
+
+def test_a_put_over_the_buffer_is_refused_and_keeps_the_old_text():
+    """4 KiB of text (configuration, docs/kernel_appabi_2026-10.md 2.4): a
+    longer put answers False and leaves the buffer and its seq as they were."""
+    c = Clipboard()
+    c.put_text("kept")
+    s0 = c.seq()
+    assert c.put_text("x" * (moy_app.CLIP_MAX + 1)) is False
+    assert c.text() == "kept" and c.seq() == s0
+    assert c.put_text("y" * moy_app.CLIP_MAX) is True
+    assert len(c.text()) == moy_app.CLIP_MAX
+
+
+def test_a_copy_longer_than_the_buffer_pastes_from_the_editor():
+    """The code editor keeps a copy the role refused, and pastes it until
+    another copy lands in the role."""
+    clip = Clipboard()
+    clip.put_text("short")
+    big = "z" * (moy_app.CLIP_MAX + 10)
+    a = CodeEditor(big, clip=clip)
+    a.select_all()
+    assert a.copy()
+    assert clip.text() == "short"
+    assert a.paste_text() == big
+    clip.put_text("newer")                 # another app copied since
+    assert a.paste_text() == "newer"
 
 
 # -- the CodeEditor lane (code tab + editor handle + Storybook share it) -----
@@ -98,7 +129,7 @@ def test_a_note_pastes_what_the_code_editor_copied(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.clipboard.put_text("def bounce():")     # what a code-tab copy left behind
     ed = _handle(ws, "note")
-    assert ed.ed.clip is ws.clipboard
+    assert ed.ed.clip.text() == ws.clipboard.text()   # one buffer, two grants
     assert ed.key(0x16)                        # Ctrl+V
     assert ed.text() == "def bounce():"
     assert ed.dirty()

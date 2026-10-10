@@ -244,9 +244,10 @@ UNIX_MP_NATIVE := native
 # are built together. moy_glass, moy_input
 # and moy_net are sprint 3's kernel modules, listed before they compile anything
 # (docs/kernel_survival_2026-10.md section 2). moy_play is sprint 4's Player
-# (docs/kernel_cartpath_2026-10.md).
+# (docs/kernel_cartpath_2026-10.md), moy_app sprint 5's app ABI
+# (docs/kernel_appabi_2026-10.md).
 UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
-    moy_glass moy_input moy_net moy_kernel moy_play
+    moy_glass moy_input moy_net moy_kernel moy_play moy_app
 UNIX_MP_INDEX ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 

@@ -234,8 +234,10 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
 
-_ROLE_CLASSES = ("Damage", "Surface", "Theme", "Files", "Carts", "Nav", "Prefs",
+_ROLE_CLASSES = ("Surface", "Theme", "Files", "Carts", "Nav",
                  "Notify", "WallpaperRole", "_RawFiles", "_RawCarts")
+# The C roles' types (native/moy_app's, Python classes on the host binding).
+_C_ROLE_CLASSES = ("Damage", "Prefs", "Clipboard")
 
 
 def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
@@ -247,9 +249,11 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
     What it guards: a context rebuilt per frame -- the obvious way to make
     `ctx` "always fresh" and the one that would put eleven object allocations
     into every frame on a board with ~23KB of internal SRAM free in play."""
+    import moy_app
     built = []
-    for name in _ROLE_CLASSES:
-        cls = getattr(_ac, name)
+    for mod, name in ([(_ac, n) for n in _ROLE_CLASSES]
+                      + [(moy_app, n) for n in _C_ROLE_CLASSES]):
+        cls = getattr(mod, name)
         real = cls.__init__
 
         def counted(self, *a, _r=real, _n=name, **kw):
@@ -828,13 +832,13 @@ def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):
 
 
 def test_an_untitled_cart_still_gets_a_stable_prefs_namespace():
-    """`app_id_for` keys an app's prefs namespace and its crash-guard strikes.
-    An empty id would put a bare `_scroll` into the shell's own settings dict,
-    beside `theme` and `font_scale`."""
-    assert _api.app_id_for(None) == "app"
-    assert _api.app_id_for({}) == "app"
-    assert _api.app_id_for({"title": ""}) == "app"
-    assert _api.app_id_for({"title": "My Notes!"}) == "my_notes"
+    """`moy_app.id_for` keys an app's grant, prefs namespace and crash-guard
+    strikes. An empty id would put a bare `_scroll` into the shell's own
+    settings dict, beside `theme` and `font_scale`."""
+    import moy_app
+    assert moy_app.id_for(None, None) == "app"
+    assert moy_app.id_for("", "") == "app"
+    assert moy_app.id_for(None, "My Notes!") == "my_notes"
 
 
 # -- the LEAVING hook is a host guarantee -------------------------------------

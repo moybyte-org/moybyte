@@ -1,0 +1,569 @@
+// moy_app's MicroPython binding: the app ABI's C rows (moy_app.h) as role
+// objects over a grant, the grant policy, and the state they read.
+//
+//   App(settings)        a console's own state, prefs written into `settings`
+//                        (a moy_spine.Settings; None: prefs answer ABSENT)
+//   kernel(fresh)        a view of the kernel's (moy_app_kernel), whose rows
+//                        are the kernel's settings; `fresh` ends RUN grants
+//   app.grant(id, roles, kind=None, ns=None, run=False) -> handle
+//   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
+//   Damage(app, g), Prefs(app, g), Clipboard(app, g)   the C roles
+//   policy(perms), manifest_error(perms), id_for(id, title)   the grant policy
+//
+// A role object's methods are the table's C rows and nothing else: no
+// attribute is a property, and each call is the C function and its counter.
+// What a verb answers in the ABI's codes becomes what the Python roles
+// answered: prefs.get the caller's default for ABSENT, clipboard.kind "text"
+// or None, clipboard.put_text False for text over CLIP_MAX (the old text kept). A refused call raises: ValueError for STALE, DENIED and BAD,
+// MemoryError for NOMEM, OSError(ENOSPC) for a full grant table.
+
+#include <string.h>
+
+#include "py/mperrno.h"
+#include "py/objstr.h"
+#include "py/objtuple.h"
+#include "py/runtime.h"
+
+#include "moy_app.h"
+
+// native/moy_spine's binding: the allocator kernel state takes, the C rows a
+// Settings holds, and what its saver raised.
+const moy_htab_mem_t *moy_spine_mem(void);
+moy_settings_t *moy_spine_settings_of(mp_obj_t o);
+void moy_spine_settings_raise(void);
+
+// -- errors -------------------------------------------------------------------------
+
+static MP_NORETURN void raise_rc(int rc) {
+    if (rc == MOY_APP_NOMEM) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    if (rc == MOY_APP_FULL) {
+        mp_raise_OSError(MP_ENOSPC);
+    }
+    if (rc == MOY_APP_STALE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a grant that ended"));
+    }
+    if (rc == MOY_APP_DENIED) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a role the grant does not hold"));
+    }
+    mp_raise_ValueError(MP_ERROR_TEXT("an argument the role refuses"));
+}
+
+static void check(int rc) {
+    if (rc != MOY_APP_OK) {
+        raise_rc(rc);
+    }
+}
+
+static const char *str_of(mp_obj_t o, size_t *n) {
+    if (!mp_obj_is_str(o)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("a str"));
+    }
+    return mp_obj_str_get_data(o, n);
+}
+
+static mp_obj_t json_call(qstr name, mp_obj_t arg) {
+    mp_obj_t json = mp_import_name(MP_QSTR_json, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+    return mp_call_function_1(mp_load_attr(json, name), arg);
+}
+
+// -- App -------------------------------------------------------------------------------
+
+typedef struct {
+    mp_obj_base_t base;
+    moy_appabi_t *a;
+    mp_obj_t rows;          // the Settings prefs write into, kept alive
+    bool own;               // false: a view of the kernel's
+} app_obj_t;
+
+static const mp_obj_type_t app_type;
+
+static moy_appabi_t *app_of(mp_obj_t o) {
+    if (!mp_obj_is_type(o, &app_type)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("an App"));
+    }
+    return ((app_obj_t *)MP_OBJ_TO_PTR(o))->a;
+}
+
+static mp_obj_t app_make_new(const mp_obj_type_t *type, size_t n_args,
+                             size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    moy_settings_t *rows = NULL;
+    if (args[0] != mp_const_none) {
+        rows = moy_spine_settings_of(args[0]);
+        if (rows == NULL) {
+            mp_raise_TypeError(MP_ERROR_TEXT("prefs are a moy_spine.Settings"));
+        }
+    }
+    app_obj_t *o = mp_obj_malloc_with_finaliser(app_obj_t, type);
+    o->rows = args[0];
+    o->own = true;
+    o->a = moy_app_new(moy_spine_mem(), rows);
+    if (o->a == NULL) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    return MP_OBJ_FROM_PTR(o);
+}
+
+static mp_obj_t app_del(mp_obj_t self_in) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->own) {
+        moy_app_free(self->a);
+    }
+    self->a = NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_del_obj, app_del);
+
+// The role mask an iterable of role names asks for; ValueError for a name the
+// table does not have.
+static uint32_t roles_mask(mp_obj_t roles) {
+    uint32_t mask = 0u;
+    mp_obj_t it = mp_getiter(roles, NULL), r;
+    while ((r = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+        size_t n;
+        const char *s = str_of(r, &n);
+        int i = 0;
+        while (i < MOY_ROLE_N && !(strlen(moy_app_role_name(i)) == n
+                                   && memcmp(moy_app_role_name(i), s, n) == 0)) {
+            i++;
+        }
+        if (i == MOY_ROLE_N) {
+            mp_raise_ValueError(MP_ERROR_TEXT("unknown app context role"));
+        }
+        mask |= 1u << i;
+    }
+    return mask;
+}
+
+static mp_obj_t app_grant(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_id, ARG_roles, ARG_kind, ARG_ns, ARG_run, ARG_owner };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_app_id, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_roles, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
+        { MP_QSTR_kind, MP_ARG_OBJ, { .u_obj = mp_const_none } },
+        { MP_QSTR_ns, MP_ARG_OBJ, { .u_obj = mp_const_none } },
+        { MP_QSTR_run, MP_ARG_OBJ, { .u_obj = mp_const_false } },
+        { MP_QSTR_owner, MP_ARG_INT, { .u_int = 0 } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed),
+                     allowed, args);
+    moy_appabi_t *a = app_of(pos_args[0]);
+    size_t n, ns_n;
+    const char *id = str_of(args[ARG_id].u_obj, &n);
+    const char *ns = id;
+    ns_n = n;
+    if (args[ARG_ns].u_obj != mp_const_none) {
+        ns = str_of(args[ARG_ns].u_obj, &ns_n);
+    }
+    int kind = -1;
+    if (args[ARG_kind].u_obj != mp_const_none) {
+        size_t kn;
+        const char *k = str_of(args[ARG_kind].u_obj, &kn);
+        kind = moy_app_kind_of(k, kn);
+        if (kind < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("unknown files kind"));
+        }
+    }
+    uint32_t h;
+    check(moy_app_grant(a, id, n,
+                        mp_obj_is_true(args[ARG_run].u_obj) ? MOY_GRANT_RUN : MOY_GRANT_SHIPPED,
+                        roles_mask(args[ARG_roles].u_obj), kind, ns, ns_n,
+                        (uint32_t)args[ARG_owner].u_int, &h));
+    return mp_obj_new_int_from_uint(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(app_grant_obj, 3, app_grant);
+
+static uint32_t grant_arg(mp_obj_t h) {
+    mp_int_t v = mp_obj_get_int(h);
+    return v > 0 && v < ((mp_int_t)1 << 30) ? (uint32_t)v : 0u;
+}
+
+static mp_obj_t app_end(mp_obj_t self, mp_obj_t h) {
+    return mp_obj_new_bool(moy_app_end(app_of(self), grant_arg(h)) == MOY_APP_OK);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(app_end_obj, app_end);
+
+static mp_obj_t app_count(mp_obj_t self) {
+    return MP_OBJ_NEW_SMALL_INT(moy_app_grants(app_of(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_count_obj, app_count);
+
+static mp_obj_t app_damage_take(mp_obj_t self) {
+    return MP_OBJ_NEW_SMALL_INT(moy_app_damage_take(app_of(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_damage_take_obj, app_damage_take);
+
+static mp_obj_t app_damage_drop(mp_obj_t self) {
+    moy_app_damage_drop(app_of(self));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_damage_drop_obj, app_damage_drop);
+
+static mp_obj_t app_counts(mp_obj_t self) {
+    moy_appabi_t *a = app_of(self);
+    mp_obj_t items[MOY_ROW_N];
+    for (int i = 0; i < MOY_ROW_N; i++) {
+        items[i] = mp_obj_new_int_from_uint(moy_app_count(a, i));
+    }
+    return mp_obj_new_tuple(MOY_ROW_N, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_counts_obj, app_counts);
+
+static const mp_rom_map_elem_t app_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_grant), MP_ROM_PTR(&app_grant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&app_count_obj) },
+    { MP_ROM_QSTR(MP_QSTR_damage_take), MP_ROM_PTR(&app_damage_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_damage_drop), MP_ROM_PTR(&app_damage_drop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_counts), MP_ROM_PTR(&app_counts_obj) },
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&app_del_obj) },
+};
+static MP_DEFINE_CONST_DICT(app_locals, app_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    app_type, MP_QSTR_App, MP_TYPE_FLAG_NONE,
+    make_new, app_make_new,
+    locals_dict, &app_locals
+    );
+
+// kernel(fresh) -> App: a view of the kernel's state, which a VM stop leaves.
+static mp_obj_t mod_kernel(mp_obj_t fresh) {
+    moy_appabi_t *a = moy_app_kernel(moy_spine_mem());
+    if (a == NULL) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    if (mp_obj_is_true(fresh)) {
+        moy_app_fresh(a);
+    }
+    app_obj_t *o = mp_obj_malloc_with_finaliser(app_obj_t, &app_type);
+    o->a = a;
+    o->rows = mp_const_none;
+    o->own = false;
+    return MP_OBJ_FROM_PTR(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_kernel_obj, mod_kernel);
+
+// -- the roles ---------------------------------------------------------------------------
+
+typedef struct {
+    mp_obj_base_t base;
+    mp_obj_t app;
+    uint32_t g;
+} role_obj_t;
+
+static mp_obj_t role_make_new(const mp_obj_type_t *type, size_t n_args,
+                              size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 2, 2, false);
+    app_of(args[0]);
+    role_obj_t *o = mp_obj_malloc(role_obj_t, type);
+    o->app = args[0];
+    o->g = grant_arg(args[1]);
+    return MP_OBJ_FROM_PTR(o);
+}
+
+static moy_appabi_t *role_app(mp_obj_t self, uint32_t *g) {
+    role_obj_t *o = MP_OBJ_TO_PTR(self);
+    *g = o->g;
+    return ((app_obj_t *)MP_OBJ_TO_PTR(o->app))->a;
+}
+
+// damage
+
+static mp_obj_t damage_all(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    check(moy_app_damage_all(a, g));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(damage_all_obj, damage_all);
+
+static mp_obj_t damage_again(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    check(moy_app_damage_again(a, g));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(damage_again_obj, damage_again);
+
+static const mp_rom_map_elem_t damage_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_all), MP_ROM_PTR(&damage_all_obj) },
+    { MP_ROM_QSTR(MP_QSTR_again), MP_ROM_PTR(&damage_again_obj) },
+};
+static MP_DEFINE_CONST_DICT(damage_locals, damage_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    damage_type, MP_QSTR_Damage, MP_TYPE_FLAG_NONE,
+    make_new, role_make_new,
+    locals_dict, &damage_locals
+    );
+
+// prefs
+
+static mp_obj_t prefs_get(size_t n_args, const mp_obj_t *args) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(args[0], &g);
+    size_t kn, len = 0;
+    const char *k = str_of(args[1], &kn);
+    // The size (a call with no buffer counts nothing), then the row.
+    int rc = moy_app_prefs_get(a, g, k, kn, NULL, 0, &len);
+    if (rc == MOY_APP_OK) {
+        vstr_t v;
+        vstr_init_len(&v, len);
+        rc = moy_app_prefs_get(a, g, k, kn, v.buf, len, &len);
+        if (rc == MOY_APP_OK) {
+            return json_call(MP_QSTR_loads, mp_obj_new_str_from_vstr(&v));
+        }
+        vstr_clear(&v);
+    }
+    if (rc == MOY_APP_ABSENT) {
+        return n_args > 2 ? args[2] : mp_const_none;
+    }
+    raise_rc(rc);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(prefs_get_obj, 2, 3, prefs_get);
+
+static mp_obj_t prefs_set(mp_obj_t self, mp_obj_t key, mp_obj_t value) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    size_t kn, jn;
+    const char *k = str_of(key, &kn);
+    mp_obj_t text = json_call(MP_QSTR_dumps, value);
+    const char *j = mp_obj_str_get_data(text, &jn);
+    int rc = moy_app_prefs_set(a, g, k, kn, j, jn);
+    moy_spine_settings_raise();
+    if (rc != MOY_APP_ABSENT) {
+        check(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(prefs_set_obj, prefs_set);
+
+static mp_obj_t prefs_clear(mp_obj_t self, mp_obj_t key) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    size_t kn;
+    const char *k = str_of(key, &kn);
+    int rc = moy_app_prefs_clear(a, g, k, kn);
+    moy_spine_settings_raise();
+    if (rc != MOY_APP_ABSENT) {
+        check(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(prefs_clear_obj, prefs_clear);
+
+static const mp_rom_map_elem_t prefs_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_get), MP_ROM_PTR(&prefs_get_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&prefs_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_clear), MP_ROM_PTR(&prefs_clear_obj) },
+};
+static MP_DEFINE_CONST_DICT(prefs_locals, prefs_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    prefs_type, MP_QSTR_Prefs, MP_TYPE_FLAG_NONE,
+    make_new, role_make_new,
+    locals_dict, &prefs_locals
+    );
+
+// clipboard
+
+static mp_obj_t clip_put_text(mp_obj_t self, mp_obj_t text) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    size_t n;
+    const char *s = mp_obj_is_str(text) ? mp_obj_str_get_data(text, &n)
+                    : mp_obj_str_get_data(mp_obj_str_make_new(&mp_type_str, 1, 0, &text), &n);
+    int rc = moy_app_clip_put_text(a, g, s, n);
+    if (rc != MOY_APP_BAD) {
+        check(rc);
+    }
+    return mp_obj_new_bool(rc == MOY_APP_OK);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(clip_put_text_obj, clip_put_text);
+
+static mp_obj_t clip_text(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    size_t len = 0;
+    check(moy_app_clip_text(a, g, NULL, 0, &len));
+    vstr_t v;
+    vstr_init_len(&v, len);
+    check(moy_app_clip_text(a, g, v.buf, len, &len));
+    return mp_obj_new_str_from_vstr(&v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(clip_text_obj, clip_text);
+
+static mp_obj_t clip_kind(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    int32_t k = moy_app_clip_kind(a, g);
+    if (k < 0) {
+        raise_rc(-k);
+    }
+    return k == MOY_CLIP_TEXT ? MP_OBJ_NEW_QSTR(MP_QSTR_text) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(clip_kind_obj, clip_kind);
+
+static mp_obj_t clip_seq(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    int32_t s = moy_app_clip_seq(a, g);
+    if (s < 0) {
+        raise_rc(-s);
+    }
+    return MP_OBJ_NEW_SMALL_INT(s);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(clip_seq_obj, clip_seq);
+
+static const mp_rom_map_elem_t clip_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_put_text), MP_ROM_PTR(&clip_put_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&clip_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kind), MP_ROM_PTR(&clip_kind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seq), MP_ROM_PTR(&clip_seq_obj) },
+};
+static MP_DEFINE_CONST_DICT(clip_locals, clip_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    clip_type, MP_QSTR_Clipboard, MP_TYPE_FLAG_NONE,
+    make_new, role_make_new,
+    locals_dict, &clip_locals
+    );
+
+// -- the policy ----------------------------------------------------------------------------
+
+static void policy_read(mp_obj_t perms, moy_app_policy_t *p) {
+    moy_app_policy_init(p);
+    if (perms == mp_const_none) {
+        return;
+    }
+    mp_obj_t it = mp_getiter(perms, NULL), x;
+    while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+        if (!mp_obj_is_str(x)) {
+            x = mp_obj_str_make_new(&mp_type_str, 1, 0, &x);
+        }
+        size_t n;
+        const char *s = mp_obj_str_get_data(x, &n);
+        moy_app_policy_add(p, s, n);
+    }
+}
+
+// policy(perms) -> (roles, kind): the roles in the table's order, the files
+// kind or None.
+static mp_obj_t mod_policy(mp_obj_t perms) {
+    moy_app_policy_t p;
+    policy_read(perms, &p);
+    int kind;
+    uint32_t mask = moy_app_policy_roles(&p, &kind);
+    mp_obj_t items[MOY_ROLE_N];
+    size_t n = 0;
+    for (int i = 0; i < MOY_ROLE_N; i++) {
+        if (mask & (1u << i)) {
+            const char *r = moy_app_role_name(i);
+            items[n++] = mp_obj_new_str(r, strlen(r));
+        }
+    }
+    const char *k = moy_app_kind_name(kind);
+    mp_obj_t out[2] = { mp_obj_new_tuple(n, items),
+                        k != NULL ? mp_obj_new_str(k, strlen(k)) : mp_const_none };
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_policy_obj, mod_policy);
+
+static mp_obj_t mod_manifest_error(mp_obj_t perms) {
+    moy_app_policy_t p;
+    policy_read(perms, &p);
+    char why[96];
+    size_t n = moy_app_policy_error(&p, why, sizeof(why));
+    return n ? mp_obj_new_str(why, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_manifest_error_obj, mod_manifest_error);
+
+static mp_obj_t mod_id_for(mp_obj_t id, mp_obj_t title) {
+    size_t idn = 0, tn = 0;
+    const char *i = NULL, *t = NULL;
+    if (mp_obj_is_str(id)) {
+        i = mp_obj_str_get_data(id, &idn);
+    }
+    if (mp_obj_is_str(title)) {
+        t = mp_obj_str_get_data(title, &tn);
+    }
+    char out[MOY_APP_ID_MAX + 1];
+    size_t n = moy_app_id_for(i, idn, t, tn, out, sizeof(out));
+    return mp_obj_new_str(out, n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_id_for_obj, mod_id_for);
+
+static mp_obj_t names_tuple(const char *(*name)(int), int n) {
+    mp_obj_t items[16];         // the most names a table has: roles (12), rows, kinds
+    for (int i = 0; i < n; i++) {
+        const char *s = name(i);
+        items[i] = mp_obj_new_str(s, strlen(s));
+    }
+    return mp_obj_new_tuple(n, items);
+}
+
+static mp_obj_t mod_roles(void) {
+    return names_tuple(moy_app_role_name, MOY_ROLE_N);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_roles_obj, mod_roles);
+
+static mp_obj_t mod_rows(void) {
+    return names_tuple(moy_app_row_name, MOY_ROW_N);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_rows_obj, mod_rows);
+
+// perms() -> ((permission, role), ...): the allowlist, in role order.
+static mp_obj_t mod_perms(void) {
+    mp_obj_t items[MOY_ROLE_N];
+    size_t n = 0;
+    for (int i = 0; i < MOY_ROLE_N; i++) {
+        const char *p = moy_app_perm_of(i);
+        if (*p != '\0') {
+            const char *r = moy_app_role_name(i);
+            mp_obj_t pair[2] = { mp_obj_new_str(p, strlen(p)), mp_obj_new_str(r, strlen(r)) };
+            items[n++] = mp_obj_new_tuple(2, pair);
+        }
+    }
+    return mp_obj_new_tuple(n, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_perms_obj, mod_perms);
+
+static const char *kind_name(int k) {
+    return moy_app_kind_name(k);
+}
+
+static mp_obj_t mod_kinds(void) {
+    return names_tuple(kind_name, MOY_APP_KINDS);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_kinds_obj, mod_kinds);
+
+// -- the module ----------------------------------------------------------------------------
+
+static const mp_rom_map_elem_t moy_app_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_app) },
+    { MP_ROM_QSTR(MP_QSTR_App), MP_ROM_PTR(&app_type) },
+    { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&mod_kernel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_Damage), MP_ROM_PTR(&damage_type) },
+    { MP_ROM_QSTR(MP_QSTR_Prefs), MP_ROM_PTR(&prefs_type) },
+    { MP_ROM_QSTR(MP_QSTR_Clipboard), MP_ROM_PTR(&clip_type) },
+    { MP_ROM_QSTR(MP_QSTR_policy), MP_ROM_PTR(&mod_policy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_manifest_error), MP_ROM_PTR(&mod_manifest_error_obj) },
+    { MP_ROM_QSTR(MP_QSTR_id_for), MP_ROM_PTR(&mod_id_for_obj) },
+    { MP_ROM_QSTR(MP_QSTR_roles), MP_ROM_PTR(&mod_roles_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rows), MP_ROM_PTR(&mod_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_perms), MP_ROM_PTR(&mod_perms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
+    { MP_ROM_QSTR(MP_QSTR_CLIP_MAX), MP_ROM_INT(MOY_APP_CLIP_MAX) },
+    { MP_ROM_QSTR(MP_QSTR_SLOTS), MP_ROM_INT(MOY_GRANT_SLOTS) },
+};
+static MP_DEFINE_CONST_DICT(moy_app_globals, moy_app_globals_table);
+
+const mp_obj_module_t moy_app_module = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&moy_app_globals,
+};
+
+MP_REGISTER_MODULE(MP_QSTR_moy_app, moy_app_module);

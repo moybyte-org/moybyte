@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import app_context as _ac        # noqa: E402
 from runtime import bar_layer as _bar         # noqa: E402
 from runtime import crash_guard, moy_carts, system_api  # noqa: E402
+import moy_app                                 # noqa: E402
 from runtime.crash_guard import CrashGuard    # noqa: E402
 from runtime.moy_spine import Settings        # noqa: E402
 from ws_helpers import build_ws                # noqa: E402
@@ -105,28 +106,34 @@ def _hit_rect(ns, verb, arg=None):
 # the permission -> role map
 # ---------------------------------------------------------------------------
 
+# The roles no permission maps to: a cart never has them, whatever its
+# manifest says.
+NEVER_GRANTED = ("carts", "install", "wallpaper", "artwork", "damage",
+                 "surface", "notify")
+
+
 def test_every_role_is_either_grantable_or_named_ungrantable():
-    """The ratchet: adding a role to `AppContext` forces a DECISION about
+    """The ratchet: adding a role to the table forces a DECISION about
     whether a cart may have it. Without this, a new role defaults to
     "ungrantable by omission" -- correct today and invisible tomorrow, when
-    somebody maps a permission onto it without noticing there was a policy."""
-    grantable = set(system_api._ROLE_FOR.values())
-    never = set(system_api.NEVER_GRANTED)
+    somebody maps a permission onto it without noticing there was a policy.
+    The policy is C's (native/moy_app): its permission table is an allowlist."""
+    grantable = {role for _perm, role in moy_app.perms()}
+    never = set(NEVER_GRANTED)
     assert grantable | never == set(_ac.ROLES), (
-        "roles classified by neither _ROLE_FOR nor NEVER_GRANTED: %s"
+        "roles classified by neither moy_app.perms() nor NEVER_GRANTED: %s"
         % sorted(set(_ac.ROLES) - (grantable | never)))
     assert not (grantable & never), "a role is both grantable and never"
 
 
 def test_the_dangerous_roles_are_not_grantable():
+    granted = {role for _perm, role in moy_app.perms()}
     for role in ("carts", "wallpaper", "artwork"):
-        assert role in system_api.NEVER_GRANTED
-        assert role not in system_api._ROLE_FOR.values()
+        assert role in NEVER_GRANTED and role not in granted
 
 
 def test_a_manifest_asking_for_shell_or_carts_gets_neither():
-    roles, kind = system_api.granted_roles(
-        {"permissions": ["shell", "carts", "ota", "reboot", "graphics"]})
+    roles, kind = moy_app.policy(["shell", "carts", "ota", "reboot", "graphics"])
     assert roles == ()
     assert kind is None
 
@@ -141,14 +148,15 @@ def test_a_manifest_asking_for_shell_or_carts_gets_neither():
     (["appearance"], ("theme",), None),
     (["launch"], ("nav",), None),
     (["files:docs", "prefs"], ("files", "prefs"), "docs"),
+    (["prefs", "files:docs"], ("files", "prefs"), "docs"),  # the table's order
     (["files:docs", "files:docs"], ("files",), "docs"),   # a repeat is one kind
     # TWO kinds is a manifest error (below); the residual here fails CLOSED
     # rather than keeping whichever was declared last.
     (["files:docs", "files:music"], (), None),
     (["files", "files:music", "prefs"], ("prefs",), None),
 ])
-def test_granted_roles_reads_the_manifest(perms, roles, kind):
-    assert system_api.granted_roles({"permissions": perms}) == (roles, kind)
+def test_the_policy_reads_the_manifest(perms, roles, kind):
+    assert moy_app.policy(perms) == (roles, kind)
 
 
 @pytest.mark.parametrize("perms,bad", [
@@ -164,7 +172,7 @@ def test_two_file_kinds_is_a_manifest_error(perms, bad):
     It used to be kept silently -- last declaration wins, order-dependent, no
     diagnostic -- which put an app's documents in `music` and looked like a
     save that did not happen."""
-    err = system_api.manifest_error({"permissions": perms})
+    err = moy_app.manifest_error(perms)
     if not bad:
         assert err is None, err
     else:
@@ -182,16 +190,21 @@ def test_a_two_kind_manifest_is_refused_before_the_cart_runs(tmp_path):
     _open(ws, "Greedy")
     assert ws.player.cart_error is not None
     assert "file kinds" in ws.player.cart_error, ws.player.cart_error
-    assert ws.app_guard.strikes("greedy") == 0
+    assert ws.app_guard.strikes("Greedy") == 0
 
 
-def test_the_prefs_namespace_is_the_title_slug_and_matches_the_store():
-    """Keyed on the TITLE, not the folder: the device seeds a folder from the
-    title slug while the host copies the source folder, and an app whose saved
-    settings changed identity across that crossing would lose them."""
-    assert system_api.app_id_for({"title": "My Notes!"}) == "my_notes"
-    for title in ("My Notes!", "Calc", "Tap Only Red", ""):
-        assert system_api.slug(title) == moy_carts.slug(title)
+def test_the_grant_is_keyed_by_the_carts_id():
+    """The cart's id (#162, SPEC.md 3.1): the manifest's `<author>.<name>`, or
+    its folder less `.moy` -- what the store's cart dict carries as `id`. A
+    renamed cart keeps its prefs and strikes; a path-less built-in has no id
+    and is keyed by its title's slug (ASCII letters and digits, the C rule)."""
+    assert moy_app.id_for("moybyte.notes", "Notes") == "moybyte.notes"
+    assert moy_app.id_for("moybyte.notes", "Renamed") == "moybyte.notes"
+    assert moy_app.id_for(None, "My Notes!") == "my_notes"
+    assert moy_app.id_for(None, None) == "app"
+    assert moy_app.id_for(None, "!!!") == "cart"
+    for title in ("My Notes!", "Calc", "Tap Only Red"):
+        assert moy_app.id_for(None, title) == moy_carts.slug(title)
 
 
 def test_wants_layout_only_fires_on_a_top_level_def():
@@ -256,7 +269,7 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
     again = ns["open_editor"](names[0])
     assert again.text() == "HELLO\nWORLD"
     # ...and its own prefs slot remembers it, namespaced under the app id.
-    assert ws.system.get("notes_last") == names[0]
+    assert ws.system.get("moybyte.notes_last") == names[0]
 
 
 def test_the_demo_apps_prefs_cannot_see_the_shells_own_settings(tmp_path):
@@ -265,10 +278,10 @@ def test_the_demo_apps_prefs_cannot_see_the_shells_own_settings(tmp_path):
     _frames(ws)
     prefs = ws.player.ns["prefs"]
     ws.system.set("theme", "night")
-    assert prefs.get("theme") is None       # reads notes_theme, not theme
+    assert prefs.get("theme") is None       # reads moybyte.notes_theme, not theme
     prefs.set("theme", "hacked")
-    assert ws.system.get("theme") == "night"    # ...and writes notes_theme
-    assert ws.system.get("notes_theme") == "hacked"
+    assert ws.system.get("theme") == "night"    # ...and writes moybyte.notes_theme
+    assert ws.system.get("moybyte.notes_theme") == "hacked"
 
 
 def test_a_user_app_is_always_exitable_through_the_hosts_bar(tmp_path):
@@ -630,7 +643,7 @@ def test_a_healthy_app_leaves_no_strike_behind(tmp_path):
     _open(ws, "Notes")
     _frames(ws, CrashGuard.HEAL_FRAMES + 1)
     assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.app_guard.strikes("notes") == 0
+    assert ws.app_guard.strikes("moybyte.notes") == 0
     assert ws.app_guard.last_open() is None
     assert ws.cart_broken(ws.cart) is False
 
@@ -673,7 +686,7 @@ def test_a_cart_that_raises_on_every_open_is_disabled_after_three(tmp_path):
         _open(ws, "Boomy")
         assert ws.player.cart_error is not None, i
         assert "always broken" in ws.player.cart_error, ws.player.cart_error
-        assert ws.app_guard.strikes("boomy") == i + 1
+        assert ws.app_guard.strikes("Boomy") == i + 1
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     assert ws.cart_broken(boomy) is True
     ws.go_home()
@@ -693,7 +706,7 @@ def test_the_strikes_survive_a_reboot(tmp_path):
         _open(ws, "Boomy")
         assert ws.player.cart_error is not None
     ws = build_ws(tmp_path)
-    assert ws.app_guard.strikes("boomy") == 3
+    assert ws.app_guard.strikes("Boomy") == 3
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     assert ws.cart_broken(boomy) is True
 
@@ -751,7 +764,7 @@ def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
     ws.screen = "menu"
     ws.editor.set_text(FIXED_SRC)
     assert ws.save_code() is True
-    assert ws.app_guard.strikes("boomy") == 0
+    assert ws.app_guard.strikes("Boomy") == 0
     assert ws.cart_broken(boomy) is False
 
     # ...and the app opens and runs again, with a full three strikes back.

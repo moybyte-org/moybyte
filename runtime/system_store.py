@@ -8,9 +8,10 @@ the same "is there a writable store?" guard around it.
 ## The rows are the store, and `set` is the only way in
 
 `ws.system` is `prefs.rows`, the spine's `Settings` (native/moy_spine):
-one row per key holding the value's JSON text. It is the most-aliased object in
+one row per key holding the value's JSON text, the kernel's own rows on a
+board (`moy_spine.kernel_settings`). It is the most-aliased object in
 the shell -- the launcher reads `favorites` on every home paint,
-`app_context.Prefs` reads and writes it namespaced, the crash guard keeps its
+the prefs role reads and writes it namespaced (native/moy_app), the crash guard keeps its
 ledger in it, the goldens poke a pin into it -- and it is created once and never
 rebound, so `load()` replaces its rows IN PLACE and every alias, including one
 captured before the store was wired, stays honest.
@@ -43,6 +44,20 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _err_text
     from runtime.moy_spine import Settings
+
+
+def _rows(save):
+    """The settings rows: the kernel's where the console runs on a kernel (a
+    board), so a VM stop leaves them and a prefs write made with no VM waits
+    in them for the next start; elsewhere this console's own. Every start but
+    a return start empties the kernel's, and `load()` fills them."""
+    try:
+        import moy_kernel
+        from moy_spine import kernel_settings
+    except ImportError:
+        return Settings(save)
+    start = getattr(moy_kernel, "start", None)
+    return kernel_settings(save, not (start is not None and start() == "return"))
 
 
 def safe_mode():
@@ -105,7 +120,7 @@ class SystemStore:
         self.store = handle
         # THE store. `Workstation.__init__` aliases it as `ws.system` and
         # nothing rebinds either name again -- `load()` replaces its rows.
-        self.rows = Settings(self._write)
+        self.rows = _rows(self._write)
         self.safe = safe_mode()
 
     # -- system.json ---------------------------------------------------------
@@ -122,6 +137,9 @@ class SystemStore:
         if self.safe:
             print("Moybyte SAFE start: system.json ignored")
             return self.rows
+        # A return start's rows may carry a write the stopped VM never saved:
+        # it reaches the file before the file is read back.
+        self.rows.flush()
         ws = self.ws
         try:
             loaded = self.store.call(
