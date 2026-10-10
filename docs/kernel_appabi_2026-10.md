@@ -71,12 +71,13 @@ objects; `artwork` and `clipboard` are objects; `shell` is the whole console.
 
 ### 2.1 One table, a server per verb
 
-**The role table is data**: `+native/moy_app/roles.json`, one row per verb: the
-role, the verb, its C signature, its wasm type (or none), its **server**, and
-the permission that grants it (or `never`). It is to the app ABI what moy-spec's
-`wasm-imports.json` is to the cart verbs; the bindings, the import adapter,
-`docs/app_api_v1.md`'s table and an author's header are each held to it by a
-test, and `ROLES` is read from it.
+**The role table is data**: `native/moy_app/roles.json`, one row per verb: the
+role, the verb, its **server**, the permission that grants it (or `never`) and
+its wasm type (or none); a C row's signature is its header's. Every row starts
+`python`, today's server, and the step that crosses a verb flips its row. It is
+to the app ABI what moy-spec's `wasm-imports.json` is to the cart verbs; the
+bindings, the import adapter, `docs/app_api_v1.md`'s table, an author's header
+and `ROLES` are each held to it by a test (`tests/test_roles.py`).
 
 **Every verb has one of three servers.**
 
@@ -417,7 +418,7 @@ gate — `make test`, `tools/preflight.sh --web`, `tools/board.py pass tdeck p4`
 `docs/app_api_v1.md`'s first. Each trace is extended before the
 code it pins lands (`tests/test_semantic_traces.py`, on both object models).
 
-1. **The table and the nets.** `+native/moy_app/roles.json` from today's
+1. **The table and the nets.** `native/moy_app/roles.json` from today's
    roles; a `roles` trace family (each verb's effect over a real store); a
    per-verb call counter and a coverage ratchet (every row called by some
    test); per-frame budgets per verb, shell verbs included, for each app's

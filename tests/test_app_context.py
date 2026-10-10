@@ -188,52 +188,9 @@ def test_no_role_uses_a_property_forward():
 
 
 # -- PERF: the hoist is applied -------------------------------------------------
-
-_HOT = {
-    # app id -> the cap on `ctx.surface.canvas()` calls in one drawn frame.
-    # ONE is the target: `cv = self._surf.canvas()` at the top of draw(). The
-    # caps are the MEASURED counts (2026-08-19) with no slack above the highest
-    # observed value, so a canvas() call added inside a per-widget helper fails
-    # here instead of costing a hop per widget on glass.
-    "calc": 1, "artwork": 1, "appearance": 1,
-    "storybook": 1, "files": 1,
-}
-
-
-@pytest.mark.parametrize("kind", sorted(_HOT))
-def test_the_canvas_role_is_hoisted_once_per_drawn_frame(tmp_path, kind):
-    """The hoist mandate as a counter budget. `ctx.surface` is a plain attribute
-    and cannot be counted without adding the very descriptor this file forbids,
-    so the countable signal is the role's own verb: how many times a frame asks
-    the surface role for the canvas.
-
-    LOWER BOUND FIRST -- without it the test passes when the app stops drawing
-    at all, or when the counter is wired to the wrong object, which is exactly
-    how a budget quietly stops being one (test_top_bar.py records the same
-    lesson from a real regression)."""
-    ws = _ws(tmp_path)
-    app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
-    surf = app.ctx.surface
-    calls = [0]
-    real = surf.canvas
-
-    def counted():
-        calls[0] += 1
-        return real()
-
-    surf.canvas = counted
-    frames = 4
-    for _ in range(frames):
-        ws._dirty = True
-        app.draw(1 / 30.0)
-    assert calls[0] >= frames, \
-        "no canvas() call counted in %d frames -- is the counter on the right role?" \
-        % frames
-    per_frame = calls[0] / float(frames)
-    assert per_frame <= _HOT[kind], \
-        "%s asks ctx.surface for the canvas %.1f times per frame (cap %d): hoist it" \
-        % (kind, per_frame, _HOT[kind])
+#
+# The per-frame role budgets, `surface.canvas` at one read per drawn frame
+# among them, are `tests/test_roles.py`'s.
 
 
 def _quiesce_frame(ws):

@@ -81,24 +81,25 @@ answer.
 An app now takes an **`AppContext`** (`runtime/app_context.py`) carrying only the
 roles it declared:
 
-| role | what it is |
-|---|---|
-| `ctx.damage` | `all()` -- repaint the whole system surface next frame |
-| `ctx.surface` | `canvas()`, `size()`, `font_scale()`, `windowed()`, `pointer()`, `glyph()` |
-| `ctx.theme` | `colors()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()` |
-| `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image codec |
-| `ctx.carts` | the CART store: projects, decks, cart images, `create`/`scan`/`hydrate` |
-| `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()`, `projects()`, `edit()`, `edit_file()`, `open_text()`, `open_image()`, `run_script()` |
-| `ctx.prefs` | `get`/`set`/`clear` on `system.json`, namespaced per app |
-| `ctx.notify` | `achieve()`, `notice()` |
-| `ctx.wallpaper` | the desktop-backdrop capability (this app and Paint only) |
-| `ctx.artwork` | the ArtworkService handle (Paint's document model) |
-| `ctx.clipboard` | the system cut/copy/paste buffer (#132) |
-| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves |
-| `ctx.shell` | the escape hatch -- see below |
+| role | what it is | verbs |
+|---|---|---|
+| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()` | `all()`, `again()` |
+| `ctx.surface` | the system canvas the app draws on, its scales, the desk's window flag, the live pointer, the chrome glyph painter | `canvas()`, `font_scale()`, `chrome_scale()`, `windowed()`, `pointer()`, `glyph()` |
+| `ctx.theme` | the live panel-theme tokens and the verbs that change the look | `colors()`, `light()`, `name()`, `variant()`, `skin()`, `set()`, `set_variant()`, `set_skin()` |
+| `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps | `readable()`, `ready()`, `batch()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
+| `ctx.carts` | the CART store: the live cart list, projects' decks, code and images | `readable()`, `ready()`, `batch()`, `all()`, `can_journal()`, `slug()`, `hydrate()`, `apply()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
+| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `app()`, `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()` |
+| `ctx.prefs` | per-app settings on `system.json`, namespaced per app | `get()`, `set()`, `clear()` |
+| `ctx.notify` | achievement events | `achieve()` |
+| `ctx.wallpaper` | the desktop-backdrop capability (Appearance and Paint only) | `current()`, `carts()`, `fills()`, `id_for()`, `cart_by_id()`, `select()`, `preview()`, `load_copy()`, `save_copy()` |
+| `ctx.artwork` | the ArtworkService itself (Paint's document model) | `attach()`, `doc_name()`, `editable()`, `is_paint_app()`, `load()`, `new_doc()`, `open_named()`, `resend()`, `save()`, `set_wallpaper()`, `sync_wallpaper()`, `targets()`, `thumbnail()`, `usage()`, `why_read_only()` |
+| `ctx.clipboard` | the system cut/copy/paste buffer (#132) | `put_text()`, `text()` |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `session()`, `rescan()`, `free()`, `find()`, `net()`, `keep()` |
+| `ctx.shell` | the escape hatch -- see below | `ws` |
 
-Read that module for the signatures; it is the authority and this table is a
-map. Four things about it are load-bearing:
+Read that module for the signatures. The verbs column is the role table's
+(`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
+Four things about the roles are load-bearing:
 
 - **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the
   declared roles, so reaching an undeclared one raises immediately.
@@ -113,7 +114,7 @@ map. Four things about it are load-bearing:
 - **Hoist.** Bind the roles you use every frame once in `__init__`
   (`self._surf = ctx.surface`) and read the live values once at the top of
   `draw()`. Reading `ctx.surface.canvas()` per widget adds a call per widget;
-  a counter budget in that test file caps it at one per drawn frame.
+  a counter budget in `tests/test_roles.py` caps it at one per drawn frame.
 - **Storage returns `(value, err)` and never raises.** `err` is `None`, the
   `NO_STORE` singleton, or the failure's text -- which is exactly what
   `app_shell._persist` turns into CAN'T SAVE HERE versus CAN'T SAVE <why>.
@@ -122,7 +123,7 @@ map. Four things about it are load-bearing:
 
 **`ctx.shell` is the un-narrowed Workstation, and it is open for one reason:**
 the shared `file_widgets.FileGridView` still duck-types on `ws.carts_store` /
-`ws.carts_root` / `ws._with_sd`. Four apps declare it to construct that widget,
+`ws.carts_root` / `ws._with_sd`. Two apps declare it to construct that widget,
 its consumer list is pinned so it can only shrink, and it is the one role a user
 app will never be granted. Giving the widget the files role closes it.
 

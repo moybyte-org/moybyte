@@ -9,7 +9,7 @@
 #   Carts          the cart store: projects, not documents
 #   Nav            where the console goes next
 #   Prefs          per-app settings in the shell's system.json
-#   Notify         achievements and the system notice banner
+#   Notify         achievement events
 #   WallpaperRole  the desktop backdrop
 #   Installer      carts from outside: fetch, verify, install
 #   AppContext     what a system app is constructed with: every role above
@@ -804,7 +804,7 @@ class Prefs:
 # -- notifications -----------------------------------------------------------
 
 class Notify:
-    """Achievements (#21) and the system notice banner."""
+    """Achievement events (#21)."""
 
     def __init__(self, ws):
         self.__ws = ws

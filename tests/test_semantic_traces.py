@@ -2048,3 +2048,417 @@ def test_survival_trace_holds_over_the_native_spine(name, tmp_path):
             "them.")
     mp = _survival_trace(name, exe, tmp_path, "native", NATIVE_SPINE)
     assert mp == want, "the native spine diverges: " + _first_difference(mp, want)
+
+
+# -- the roles' trace (#224, sprint 5) -------------------------------------------
+#
+# Every row of the app ABI's role table (native/moy_app/roles.json) driven
+# once through a context that holds every role, over a real Workstation and
+# its store, and the effect logged: the net sprint 5's steps swap the roles'
+# servers under. On CPython the Workstation is the host's (runtime/host_app.py);
+# on the boards' object model it is the T-Deck's own desktop, booted by
+# moy_runtime.run_desktop over test_frame_alloc's fakes, seeded from the same
+# system carts. The driver counts every row it calls on the role objects
+# themselves, so a row added to the table and not driven here fails as an
+# "uncalled" line: the coverage ratchet. @ROWS@ is the table's (role, verb)
+# list.
+
+ROLES_DRIVER = r'''ROWS = @ROWS@
+CALLED = {}
+
+
+def say(*a):
+    print("T", " ".join(str(x) for x in a))
+
+
+def _count(obj, role):
+    """Count every table row of `role` called on `obj`: the coverage ratchet's
+    tally, kept on the instance so the class and every other holder are
+    untouched."""
+    for r, verb in ROWS:
+        if r != role or (role == "shell"):
+            continue
+        real = getattr(obj, verb)
+
+        def counted(*a, _real=real, _key=r + "." + verb, **kw):
+            CALLED[_key] = CALLED.get(_key, 0) + 1
+            return _real(*a, **kw)
+
+        setattr(obj, verb, counted)
+
+
+def _n(v):
+    """A value as the log shows it: blobs by length, lists by their items."""
+    if v is None or isinstance(v, (bool, int, str)):
+        return repr(v)
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return "b%d" % len(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ",".join(_n(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ",".join(str(k) + ":" + _n(v[k]) for k in sorted(v)) + "}"
+    if v is NO_STORE:
+        return "NO_STORE"
+    return type(v).__name__
+
+
+def roles_trace(ws):
+    roles = [r for r in ROLES if r != "shell"]
+    ctx = ws.app_context("tracer", roles + ["shell"], prefs_ns="tracer")
+    say("roles", " ".join(sorted(k for k in ROLES if hasattr(ctx, k))))
+    for role in roles:
+        _count(getattr(ctx, role), role)
+    CALLED["shell.workstation"] = 1 if ctx.shell is ws else 0
+
+    # -- damage
+    ws._dirty = False
+    ws._frame_requested = False
+    ctx.damage.all()
+    ctx.damage.again()
+    say("damage", ws._dirty, ws._frame_requested)
+
+    # -- surface
+    s = ctx.surface
+    cv = s.canvas()
+    say("surface", cv is ws.sys_canvas, s.font_scale(), s.chrome_scale(),
+        s.windowed(), s.pointer() is ws.pointer)
+    s.glyph("x", (0, 0, 16, 16), 7, cv)
+    say("glyph drawn")
+
+    # -- theme
+    t = ctx.theme
+    th = t.colors()
+    say("theme", t.name(), t.variant(), t.skin(), t.light(), th is ws.theme_colors,
+        len(th) > 10)
+    t.set("forest")
+    t.set_variant("light")
+    say("theme set", t.name(), t.variant(), t.light(), t.colors() is ws.theme_colors)
+    t.set_skin(t.skin())
+    t.set("night", variant="dark")
+    say("theme back", t.name(), t.variant(), t.light())
+
+    # -- prefs
+    p = ctx.prefs
+    say("prefs absent", p.get("k"), p.get("k", 5))
+    p.set("k", [1, "two"])
+    say("prefs set", _n(p.get("k")), _n(ws.system.get("tracer_k")))
+    p.clear("k")
+    say("prefs cleared", p.get("k", "gone"))
+
+    # -- files
+    f = ctx.files
+    say("files ready", f.readable(), f.ready())
+    say("files list", _n(f.list("docs")), _n(f.count("docs")))
+    name, err = f.new_name("docs", "trace note")
+    say("new_name", name, err)
+    say("save", _n(f.save("docs", name, f.encode_text("one\ntwo"))))
+    blob, err = f.load("docs", name)
+    say("load", _n(blob), err, _n(f.decode_text(blob)))
+    say("duplicate", _n(f.duplicate("docs", name)))
+    say("rename", _n(f.rename("docs", name, "renamed")))
+    say("list", _n(f.list("docs")[0]))
+    say("delete", _n(f.delete("docs", "renamed")))
+    say("trash", _n(f.trash_list()))
+    say("restore", _n(f.restore("docs", "renamed")))
+    say("empty_trash", _n(f.delete("docs", "renamed")), _n(f.empty_trash()),
+        _n(f.trash_list()))
+    px = f.encode_image(2, 2, bytes([1, 2, 3, 4]))
+    say("image", type(px).__name__, _n(f.decode_image(px)))
+    cover = f.encode_cover(bytes(128 * 128))
+    dc = f.decode_cover(cover)
+    say("cover", cover is not None, dc is not None and len(dc))
+    sig = f.sig(px)
+    st = f.stamp(px, "drawings", "src", sig)
+    src, ssig = f.provenance(st)
+    say("stamp", type(sig).__name__, src, ssig == sig, _n(f.provenance(px)))
+    say("drawing", _n(f.save("drawings", "pic", px)))
+    say("history", _n(f.history_commit("drawings", "pic", [["dot", 1, 1]],
+                                       keyframe=None)))
+    say("history read", _n(f.history("drawings", "pic")),
+        _n(f.history_ops("drawings", "pic")))
+    say("batch", _n(f.batch(lambda raw: raw.count("drawings"))))
+
+    # -- carts
+    c = ctx.carts
+    say("carts ready", c.readable(), c.ready(), c.can_journal(), c.slug("A b-C!"))
+    n0 = len(c.all())
+    made, err = c.batch(lambda raw: raw.create("Trace Cart", src="def _draw():\n    cls(1)\n", type="game"))
+    say("create", made is not None, err)
+    items, err = c.batch(lambda raw: raw.scan())
+    c.apply(items)
+    cart = None
+    for x in c.all():
+        if x.get("title") == "Trace Cart":
+            cart = x
+    say("carts", len(c.all()) - n0, cart is not None)
+    c.hydrate(cart)
+    say("deck", _n(c.load_deck(cart)), _n(c.save_deck(cart, '{"pages": []}')),
+        _n(c.load_deck(cart)))
+    say("code", _n(c.save_code(cart, "def _draw():\n    cls(2)\n")))
+    cpx = c.encode_image(2, 2, bytes([5, 6, 7, 8]))
+    imgs, err = c.images(cart)
+    say("cart image", _n(imgs), err, _n(c.save_image(cart, "pic", cpx)),
+        _n(f.decode_image(c.images(cart)[0]["pic"])))
+
+    # -- nav
+    nv = ctx.nav
+    say("nav", nv.app("calc") is not None, nv.app("nope"), nv.is_system_app(cart),
+        cart in nv.projects())
+    say("open_app", nv.open_app("calc"), nv.open_app("nope"), ws.wm.top_kind())
+    ws.go_home()
+    say("edit", nv.edit(cart, "code"), ws.wm.top_kind())
+    ws.go_home()
+    say("edit_file", nv.edit_file(cart, "manifest.json"), ws.wm.top_kind())
+    ws.go_home()
+    say("open_image", nv.open_image("pic", "drawings"), ws.wm.top_kind())
+    ws.go_home()
+    say("open_text", nv.open_text("missing.md", "docs"), ws.wm.top_kind())
+    ws.go_home()
+    say("run_script", _n(nv.run_script("docs", "nope.py")))
+    ws.go_home()
+    nv.text_mode(True)
+    t1 = ws.input.text_mode
+    nv.text_mode(False)
+    say("text_mode", t1, ws.input.text_mode)
+    nv.play(cart, ws.launcher_layer)
+    say("play", ws.wm.top_kind())
+    ws.go_home()
+
+    # -- notify
+    ctx.notify.achieve("open", "trace")
+    say("notify")
+
+    # -- wallpaper
+    w = ctx.wallpaper
+    say("wallpaper", w.current(), len(w.fills()) > 0, _n(w.id_for({"title": "Wall Z"})))
+    say("wallpaper carts", len(w.carts()) >= 0, w.cart_by_id("fill:nope"))
+    w.select("fill:black")
+    say("selected", w.current(), ws.system.get("wallpaper"))
+    w.preview(cv, (0, 0, 32, 24), 0)
+    say("copy", _n(w.load_copy()), _n(w.save_copy(px)),
+        _n(f.decode_image(w.load_copy()[0])))
+
+    # -- artwork
+    a = ctx.artwork
+    say("artwork", a.is_paint_app(cart), _n(a.doc_name()), a.editable(),
+        _n(a.why_read_only()))
+    a.new_doc(32, 24)
+    say("artwork new", _n(a.doc_name()), _n(a.load() is not None))
+    say("artwork save", _n(a.save(bytes(32 * 24), 32, 24)), _n(a.usage("pic")))
+    say("artwork targets", len(a.targets()) >= 0, _n(a.thumbnail(16, 12) is not None))
+    say("artwork open", _n(a.open_named("pic", "drawings")), _n(a.doc_name()))
+    say("artwork wall", _n(a.set_wallpaper()), _n(a.sync_wallpaper()))
+    k = list(a.targets()).index("Trace Cart")
+    say("artwork attach", _n(a.attach(k, "pic")), _n(a.resend(k, "pic")))
+
+    # -- clipboard
+    cl = ctx.clipboard
+    say("clip empty", repr(cl.text()))
+    cl.put_text("hello")
+    say("clip", cl.text(), cl.kind, cl.seq)
+
+    # -- install
+    i = ctx.install
+    say("install", i.root() == ws.carts_root, i.writable(), i.can_pick(),
+        i.home(), i.net() is ws.cart_net, i.keep() is ws.cart_keep,
+        i.pick("x", 1, "h") is None)
+    say("lease", i.hold() in (True, False), i.release())
+    say("session", i.session(lambda: 7))
+    i.rescan()
+    folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
+    found = i.find(folder)
+    say("find", i.find("nope.moy"), folder, found is not None and found.get("title"))
+    fr = i.free()
+    say("free", fr is None or len(fr) == 2)
+    say("engine", type(i.runtimes()).__name__, i.memory() is None or len(i.memory()) == 2,
+        i.fit("wasm", 0, 0, False), len(i.chip()))
+
+    uncalled = [r + "." + v for r, v in ROWS if (r + "." + v) not in CALLED]
+    say("uncalled", " ".join(uncalled) or "-")
+'''
+
+
+def roles_rows():
+    """The role table's (role, verb) rows, in table order."""
+    import json
+    rows = json.loads((ROOT / "native" / "moy_app" / "roles.json").read_text())
+    return [(r["role"], r["verb"]) for r in rows["rows"]]
+
+
+def _roles_driver():
+    return ROLES_DRIVER.replace("@ROWS@", repr(roles_rows()))
+
+
+def _roles_trace_cpython(tmp_path):
+    from runtime import host_app
+    from runtime.app_context import NO_STORE, ROLES
+    import contextlib
+    import io
+    ns = {"ROLES": ROLES, "NO_STORE": NO_STORE}
+    exec(_roles_driver(), ns)
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ns["roles_trace"](ws)
+    return [line[2:] for line in out.getvalue().splitlines()
+            if line.startswith("T ")]
+
+
+ROLES_BOOT = r'''
+import sys
+import _thread
+import time
+ROOT = @ROOT@
+sys.path.insert(0, ROOT + "/stage")
+sys.path.insert(0, ROOT + "/fakes")
+DONE = _thread.allocate_lock()
+DONE.acquire()
+
+
+def main():
+    try:
+        import fake_machine
+        sys.modules["machine"] = fake_machine
+        import moycore as _real_moycore
+        import moycore_shim
+        moycore_shim.install(_real_moycore, moycore_shim)
+        sys.modules["moycore"] = moycore_shim
+        import moybyte_sd
+        moybyte_sd._live_mounted = True
+        import carts_data
+        import moy_runtime
+
+        def _load(self, boot, store):
+            carts, root = boot.load_carts(store, carts_data.CARTS_Z,
+                                          root=ROOT + "/carts", media="SD")
+            self.on_sd = True
+            return carts, root, None
+
+        moy_runtime._Storage.load = _load
+        moy_runtime.POWER_SAVE_MS = 0
+        desk = moy_runtime.run_desktop()
+        import moy_loop
+        for _ in range(5):
+            moy_loop.step()
+        from app_context import NO_STORE, ROLES
+        g = {"ROLES": ROLES, "NO_STORE": NO_STORE}
+        exec(DRIVER, g)
+        g["roles_trace"](desk.ws)
+        print("DRIVER_DONE")
+    except BaseException as exc:             # noqa -- say it, then end the run
+        sys.print_exception(exc)
+    DONE.release()
+
+
+DRIVER = @DRIVER@
+_thread.stack_size(4 << 20)
+_thread.start_new_thread(main, ())
+DONE.acquire()
+time.sleep_ms(50)
+'''
+
+
+def _roles_trace_board(exe, tmp_path):
+    import test_frame_alloc as fa
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import gen_device_carts
+    finally:
+        sys.path.pop(0)
+    fa._stage(tmp_path, exe)
+    stage = tmp_path / "stage"
+    (stage / "carts_data.mpy").unlink()
+    (stage / "carts_data.py").write_text(gen_device_carts.render_packed_module(
+        gen_device_carts.build_packed(str(ROOT / "system_carts"))))
+    script = tmp_path / "roles_driver.py"
+    script.write_text(ROLES_BOOT.replace("@ROOT@", repr(str(tmp_path)))
+                      .replace("@DRIVER@", repr(_roles_driver())))
+    out = subprocess.run([exe, "-X", "heapsize=64M", str(script)],
+                         capture_output=True, text=True, timeout=240,
+                         stdin=subprocess.PIPE)
+    lines = out.stdout.strip().splitlines()
+    assert lines and lines[-1] == "DRIVER_DONE", out.stdout[-4000:] + out.stderr
+    return [line[2:] for line in lines if line.startswith("T ")]
+
+
+ROLES_TRACE = """\
+roles artwork carts clipboard damage files install nav notify prefs shell surface theme wallpaper
+damage True True
+surface True 1 1 False True
+glyph drawn
+theme night dark default False True True
+theme set forest light True True
+theme back night dark False
+prefs absent None 5
+prefs set [1,'two'] [1,'two']
+prefs cleared gone
+files ready True True
+files list [[],None] [0,None]
+new_name trace_note None
+save ['trace_note',None]
+load 'one\\ntwo' None ['one','two']
+duplicate ['trace_note_2',None]
+rename ['renamed',None]
+list ['renamed','trace_note_2']
+delete ['renamed',None]
+trash [[['docs','renamed']],None]
+restore ['renamed',None]
+empty_trash ['renamed',None] [None,None] [[],None]
+image str [2,2,b4]
+cover True 3
+stamp int drawings/src True [None,None]
+drawing ['pic',None]
+history [None,None]
+history read [[{ops:[['dot',1,1]],t:'seg'}],None] [[['dot',1,1]],None]
+batch [1,None]
+carts ready True True True a_b_c
+create True None
+carts 1 True
+deck [None,None] [None,None] ['{"pages": []}',None]
+code [['ok',''],None]
+cart image {} None [None,None] [2,2,b4]
+nav True None False True
+open_app True False calc
+edit True menu
+edit_file True desktop
+open_image True artwork
+open_text True desktop
+run_script [False,"CAN'T READ IT"]
+text_mode True False
+play desktop
+notify
+wallpaper moybyte.moy_night True 'moybyte.wall_z'
+wallpaper carts True None
+selected fill:black fill:black
+copy [None,None] [None,None] [2,2,b4]
+artwork False 'pic' True ''
+artwork new 'drawing_2' False
+artwork save True []
+artwork targets True True
+artwork open None 'pic'
+artwork wall True True
+artwork attach 'Trace Cart' False
+clip empty ''
+clip hello text 1
+install True True False None True True True
+lease True None
+session 7
+find None local.trace_cart.moy Trace Cart
+free True
+engine tuple True None 2
+uncalled -
+"""
+
+
+def test_roles_trace_is_the_interface_on_every_vm(tmp_path):
+    want = ROLES_TRACE.splitlines()
+    py = _roles_trace_cpython(tmp_path / "cpython")
+    assert py == want, "the roles trace moved: " + _first_difference(py, want)
+    exe = require_unix_mp(
+        "moycore", "moy_gfx", "moy_audio", board_model=True,
+        why="The app ABI's roles on the boards' object model, over the "
+            "T-Deck's own desktop: the net sprint 5 swaps their servers under.")
+    (tmp_path / "board").mkdir()
+    b32 = _roles_trace_board(exe, tmp_path / "board")
+    assert b32 == want, ("the T-Deck desktop diverges: "
+                         + _first_difference(b32, want))
