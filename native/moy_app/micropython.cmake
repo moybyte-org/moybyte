@@ -9,6 +9,7 @@
 add_library(usermod_moy_app INTERFACE)
 target_sources(usermod_moy_app INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_app.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_app_wasm.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_app.c
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store/moy_ufiles.c
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store/modmoy_ufiles.c)

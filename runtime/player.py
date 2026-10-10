@@ -150,7 +150,9 @@ SUPPORTED_EXTENSIONS = (
     "moybyte.images",     # #63: image(name) / Image paint-image assets
     "moybyte.net",        # #65: net.send / on_net (also permission-gated)
     "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
+    "moybyte.app",        # #224: a compiled app's role imports (native/moy_app/moy_app_wasm.h)
 )
+APP_EXT = "moybyte.app"
 
 
 try:                                    # device: ticks is frozen flat
@@ -574,6 +576,7 @@ class Player:
                                       # window resize / font-scale change re-runs it and a
                                       # steady frame costs one tuple compare
         self._app_id = None           # the crash guard's key for this run (#160), or None
+        self._run_handle = 0          # the kernel Player's handle on this run, or 0
         self._app_ctx = None          # a user app's or script's context: its run grant
         self._embed_ctx = None        # the shell's drawings grant, for a note's embeds
                                       # when the run is not guarded
@@ -685,8 +688,39 @@ class Player:
         left open (a session holds no gate; runtime/shell_servers.py)."""
         ctx, self._app_ctx = self._app_ctx, None
         if ctx is not None:
+            self._wasm_bind(None)
             ctx.end()
         self.ws.store.end_all()
+
+    def _heal_front_run(self):
+        """A user app whose frames the kernel drew in its front (a compiled
+        app on a board: no Python tick, so no `app_guard.frame`) heals at its
+        end when the kernel's run drew the guard's frames and raised nothing,
+        as a Python-ticked run heals during them."""
+        guard = self.ws.app_guard
+        info_of = getattr(_moy_play, "info", None)
+        run, self._run_handle = self._run_handle, 0
+        try:
+            info = info_of(run) if info_of is not None and run else None
+        except Exception:  # noqa: BLE001 -- no run, no heal
+            info = None
+        if info is not None and info[3] >= guard.HEAL_FRAMES and info[7] is None:
+            guard.heal()
+
+    def _wasm_bind(self, cart):
+        """The run a compiled app's imports serve (native/moy_app/
+        moy_app_wasm.h): this run's grant and the roles its permissions name,
+        for a compiled user app that declares the app extension; none
+        otherwise, so its module's imports from it are refused at load."""
+        bind = getattr(getattr(self.ws, "app_abi", None), "wasm_bind", None)
+        if bind is None:
+            return
+        ctx = self._app_ctx
+        if (cart is None or ctx is None or cart.get("runtime") != "wasm"
+                or APP_EXT not in (cart.get("extensions") or ())):
+            bind(0, ())
+            return
+        bind(ctx.grant, _moy_app.policy(cart.get("permissions"))[0])
 
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""
@@ -845,6 +879,7 @@ class Player:
         self._end_grant()
         if self._app_id is not None:
             self._app_id = None
+            self._heal_front_run()
             self.ws.app_guard.release()
         # Nor may its SOUND. The device mixer is a global the cart only ever
         # posts notes to -- libmoy keeps sequencing a looping sfx or music track
@@ -1132,12 +1167,14 @@ class Player:
             return self._refuse(err)
         _rt = project.cart.get("runtime", "python")
         run = 0
+        self._run_handle = 0
         if _rt != "python":
             # The kernel decides the stop from the catalogue entry before
             # anything of the run is built here (docs/kernel_cartpath_2026-10.md
             # section 5.2): an audio session or a buffer made with the VM up
             # would sit inside the free run the stop is about to widen.
             run = self._launch_play(cart)
+            self._run_handle = run
             if run and self._stop_for(run, cart):
                 return True
         t_reclaim, t_audio = self._prepare_world(ws, project, cart, t0)
@@ -1695,10 +1732,31 @@ class Player:
                 resume(rec())
             except Exception as exc:  # noqa: BLE001 -- a lost place is not a lost run
                 print("PLAY resume:", exc)
+        self._stop_grant(cart)
         print("PLAY stop: %s runs with the VM down" % (cart.get("title") or "cart"))
         self._stopping = True
         stop()
         return True
+
+    def _stop_grant(self, cart):
+        """A compiled app the VM stops for (its imports all C-served, the
+        verdict's rule) runs with no Python to make its grant: the grant is
+        made here, before the stop, as make_system_api makes a user app's
+        (the C policy and key, the ungated theme and surface beside its
+        roles), and bound for its imports. It is kernel state, so the stop
+        leaves it; the start after the run ends it (console._app_abi)."""
+        ws = self.ws
+        app = getattr(ws, "app_abi", None)
+        if (app is None or getattr(app, "wasm_bind", None) is None
+                or cart.get("runtime") != "wasm"
+                or APP_EXT not in (cart.get("extensions") or ())
+                or not ws.is_user_app(cart)):
+            return
+        roles, kind = _moy_app.policy(cart.get("permissions"))
+        needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
+        app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
+        g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True)
+        app.wasm_bind(g, roles)
 
     def _bind_play(self, run):
         """Give the launched run's frame to the kernel's Player when its
@@ -1909,6 +1967,8 @@ class Player:
                                         or fit[0][1] > fit[1][1]):
                     raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
                                    _ch.say_title(_ch.SAY_FIT))
+            if runtime == "wasm":
+                self._wasm_bind(ws.cart)
             lua = make(ns, src)
             if runtime == "wasm" and getattr(lua, "interp", False):
                 # Not an error and not a panel: the cart plays, on the

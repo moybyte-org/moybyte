@@ -1635,6 +1635,94 @@ def wasm_carts_push(board, board_dir):
     return dict(WASM_CARTS)
 
 
+APP_ROLES = ("app_roles", "App Roles Wasm")
+APP_SHORT = ("app_short", "App Short Wasm")
+APP_SHELL = ("app_shell", "App Shell Wasm")
+
+
+def wasm_app_push(board, board_dir):
+    """The compiled app fixtures (docs/kernel_appabi_2026-10.md section 4),
+    built for this board's chip and pushed as wasm_<name>.moy: App Roles Wasm,
+    the same module with no permission (App Short Wasm), and App Shell Wasm,
+    which imports a shell-served row. Returns the carts root."""
+    import json
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_app_")
+    fixtures = ROOT / "tests" / "fixtures" / "wasm"
+    for name, src in (("app_roles", "app_roles"), ("app_short", "app_roles"),
+                      ("app_shell", "app_shell")):
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(fixtures / (src + ".moy")), out, chips=(chip,))
+        if name == "app_short":
+            p = os.path.join(out, "manifest.json")
+            with open(p) as f:
+                man = json.load(f)
+            man["title"] = APP_SHORT[1]
+            man["moybyte"]["permissions"] = []
+            with open(p, "w") as f:
+                json.dump(man, f)
+        _push_folder(board, board_dir, out, root + "/wasm_" + name + ".moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    # Pushed code is fixed code: the strikes an earlier run of these left
+    # (the crash guard, #160) are forgiven, as a commit forgives them.
+    for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1]):
+        board.pyval("ws.app_guard.forgive(ws.app_cart_id(next(c for c in "
+                    "ws.carts.all if c['title'] == %r))) or 1" % title, strict=True)
+    return root
+
+
+def wasm_app_reaches_its_roles(board, root):
+    """App Roles Wasm runs with its prefs and theme imports and no crossing of
+    any class but the console's frame, each prefs row hopped to the VM's task (moy_app.wasm_hops: the
+    hop's price per call, printed); the module one permission short is refused
+    at load naming prefs_get; App Shell Wasm's verdict keeps the VM, naming its
+    shell-served import. Leaves the desk as it found it."""
+    hops0 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
+    line = board.cmd("run %s" % APP_ROLES[1].lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == APP_ROLES[1], st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        assert not st.get("notice"), st["notice"]
+        # The run's books hold no crossing but the console's own frame.
+        play = st.get("play")
+        assert play is not None and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    # The run's frames were the kernel's: its end healed the crash guard.
+    strikes = board.pyval("ws.app_guard.strikes(ws.app_cart_id(next(c for c in ws.carts.all "
+                          "if c['title'] == %r)))" % APP_ROLES[1], strict=True)
+    assert strikes == 0, "the run's end left %r strikes" % strikes
+    hops1 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
+    n, us, work = [b - a for a, b in zip(hops0, hops1)]
+    assert n >= 2, "prefs.get and prefs.set did not hop: %r -> %r" % (hops0, hops1)
+    print("\nWASM APP: %d hops, %d us end to end, %d us the rows' own: %.1f us "
+          "per hop" % (n, us, work, (us - work) / n))
+    line = board.cmd("run %s" % APP_SHORT[1].lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        err = board.state().get("cart_error") or ""
+        assert "moybyte.app.prefs_get" in err, err
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    census = board.pyval("__import__('moy_play').census(%r)"
+                         % (root + "/wasm_app_shell.moy"), strict=True)
+    assert list(census) == ["wasm", False, "import moybyte.app.theme_set_variant"], census
+    census = board.pyval("__import__('moy_play').census(%r)"
+                         % (root + "/wasm_app_roles.moy"), strict=True)
+    assert list(census) == ["wasm", True, "free"], census
+    return (us - work) / n
+
+
 def wasm_cart_fps(board, title, seconds=10.0, check=None):
     """Run `title` from the launcher, check it ticks with no error on the
     wasm runtime, and read its drawn fps off the PERF line over `seconds`

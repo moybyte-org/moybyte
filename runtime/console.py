@@ -516,13 +516,20 @@ def _app_abi(rows):
     runs on a kernel (a board), so a VM stop leaves its grants and clipboard
     for the next VM, its prefs the kernel's settings rows; elsewhere this
     console's own, its prefs written into `rows`. A return start keeps the
-    kernel's as it was; every other start ends its run grants."""
+    kernel's as it was but for the stopped run's grant, which it ends; every
+    other start ends its run grants."""
     try:
         import moy_kernel
     except ImportError:
         return _moy_app.App(rows)
     start = getattr(moy_kernel, "start", None)
-    return _moy_app.kernel(not (start is not None and start() == "return"))
+    returning = start is not None and start() == "return"
+    app = _moy_app.kernel(not returning)
+    if returning:
+        # A compiled app's run that stopped the VM held its grant across the
+        # stop (Player._stop_grant); that run is over now.
+        app.wasm_end()
+    return app
 
 
 _SPLASH_IMG = None

@@ -145,6 +145,12 @@ _SIGS = (
     ("moy_app_role", [_P, _U32, _U32, _P, _SIZE, _P, _SIZE], c.c_int32),
     ("moy_app_table_name", [_U32], _PCHAR),
     ("moy_app_door_bind", [_P], None),
+    ("moy_app_wasm_bind", [_P, _U32, _U32], None),
+    ("moy_app_wasm_end", [], None),
+    ("moy_app_wasm_forget", [_P], None),
+    ("moy_app_wasm_natives", [_PU32], _P),
+    ("moy_app_wasm_row", [_U32], c.c_int),
+    ("moy_app_wasm_hops", [_PU32, _PU32, _PU32], None),
     ("moy_app_store_bind", [_P, _P, _PCHAR, _SIZE, c.c_int, c.c_int], c.c_int),
     ("moy_app_why", [_P], c.c_int),
     ("moy_app_buf_free", [_P, c.POINTER(_Buf)], None),
@@ -280,6 +286,7 @@ def binding(sanitize=False):
 
         def __del__(self):
             if getattr(self, "_own", False) and self._p:
+                lib.moy_app_wasm_forget(self._p)
                 lib.moy_app_free(self._p)
                 self._p = None
 
@@ -309,6 +316,14 @@ def binding(sanitize=False):
 
         def count(self):
             return lib.moy_app_grants(self._p)
+
+        def wasm_bind(self, g, roles=()):
+            """The run a compiled app's imports serve (moy_app_wasm_bind)."""
+            g = int(g) & 0xFFFFFFFF
+            lib.moy_app_wasm_bind(self._p if g else None, g, mask_of(roles) if g else 0)
+
+        def wasm_end(self):
+            lib.moy_app_wasm_end()
 
         def role(self, g, row, args, cap):
             """The ROLE door (moy_app_role): (answer, the bytes it wrote)."""
@@ -897,6 +912,22 @@ def binding(sanitize=False):
 
     table_names = tuple(lib.moy_app_table_name(i).decode() for i in range(len(_TABLE)))
 
+    class _Native(c.Structure):
+        _fields_ = [("symbol", c.c_char_p), ("fn", c.c_void_p),
+                    ("signature", c.c_char_p), ("attachment", c.c_void_p)]
+
+    def wasm_rows():
+        n = c.c_uint32()
+        p = lib.moy_app_wasm_natives(c.byref(n))
+        t = (_Native * n.value).from_address(p)
+        return tuple((t[i].symbol.decode(), t[i].signature.decode(),
+                      lib.moy_app_wasm_row(i)) for i in range(n.value))
+
+    def wasm_hops():
+        n, us, work = c.c_uint32(), c.c_uint32(), c.c_uint32()
+        lib.moy_app_wasm_hops(c.byref(n), c.byref(us), c.byref(work))
+        return n.value, us.value, work.value
+
     def door_bind(on):
         """The shell rows' door: the kernel's ROLE upcall, the loop's own
         library's moy_loop_role (runtime/moy_loop.py), or none."""
@@ -917,7 +948,8 @@ def binding(sanitize=False):
         Carts=Carts, Nav=Nav, Notify=Notify, Wallpaper=Wallpaper, Install=Install,
         policy=policy, manifest_error=manifest_error, id_for=id_for,
         roles=lambda: role_names, rows=lambda: row_names, perms=perms,
-        table=lambda: table_names, door_bind=door_bind,
+        table=lambda: table_names, door_bind=door_bind, wasm_rows=wasm_rows,
+        wasm_hops=wasm_hops, _lib=lib,
         kinds=lambda: kind_names, tokens=lambda: token_names,
         CLIP_MAX=CLIP_MAX, SLOTS=SLOTS)
     return m

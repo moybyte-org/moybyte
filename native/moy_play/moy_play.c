@@ -323,7 +323,7 @@ static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
     }
     memcpy(c->info->runtime, line, n);
     c->info->runtime[n] = 0;
-    c->info->vm_free = moy_play_vm_free(e, &c->info->why);
+    c->info->vm_free = moy_play_vm_free_at(c->path, e, &c->info->why, NULL, 0);
     c->info->game = moy_play_is_game(e);
     c->info->title[0] = 0;
     if (e->title.v != NULL && *e->title.v == '"') {
@@ -345,7 +345,8 @@ static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
     c->info->id[fn] = 0;
     // Whether the VM stops for it: decided here, from the entry, before
     // anything of the cart loads (section 5.2's step 1).
-    if (!c->info->vm_free || !c->info->game) {
+    // A VM-free run is a game's or a compiled app's (rule 2).
+    if (!c->info->vm_free) {
         c->info->stop_why = MOY_PLAY_KEEP_RULE;
     } else if (moy_play_stop_verdict == NULL) {
         c->info->stop_why = MOY_PLAY_KEEP_LEVER;

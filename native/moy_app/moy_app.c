@@ -29,7 +29,27 @@ struct moy_app {
     uint32_t copy_gen;
     char root[MOY_APP_ROOT_MAX + 1];
     uint32_t counts[MOY_ROW_N];
+    uint32_t seq;               // the seqlock: odd while the look or the clipboard is written
 };
+
+// The seqlock's writer half, around every write of the look and the clipboard.
+static void seq_open(moy_appabi_t *a) {
+    __atomic_store_n(&a->seq, a->seq + 1u, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+}
+
+static void seq_close(moy_appabi_t *a) {
+    __atomic_store_n(&a->seq, a->seq + 1u, __ATOMIC_RELEASE);
+}
+
+uint32_t moy_app_seq_begin(const moy_appabi_t *a) {
+    return __atomic_load_n(&a->seq, __ATOMIC_ACQUIRE);
+}
+
+int moy_app_seq_end(const moy_appabi_t *a, uint32_t s) {
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&a->seq, __ATOMIC_RELAXED) == s;
+}
 
 static const char *const ROLE_NAMES[MOY_ROLE_N] = {
     "damage", "surface", "theme", "files", "carts", "nav", "prefs", "notify",
@@ -149,8 +169,10 @@ void moy_app_fresh(moy_appabi_t *a) {
         }
     }
     a->damage = 0u;
+    seq_open(a);
     a->clip_kind = MOY_CLIP_EMPTY;
     a->clip_len = 0u;
+    seq_close(a);
     a->sessions = 0u;
 }
 
@@ -525,10 +547,12 @@ int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
     if (n > MOY_APP_NAME_MAX || vn > MOY_APP_NAME_MAX) {
         return MOY_APP_BAD;
     }
+    seq_open(a);
     put_name(a->name, &a->name_len, name, n);
     put_name(a->variant, &a->variant_len, variant, vn);
     memcpy(a->tokens, tokens, sizeof(a->tokens));
     a->theme_gen++;
+    seq_close(a);
     return MOY_APP_OK;
 }
 
@@ -536,8 +560,10 @@ int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n) {
     if (n > MOY_APP_NAME_MAX) {
         return MOY_APP_BAD;
     }
+    seq_open(a);
     put_name(a->skin, &a->skin_len, skin, n);
     a->theme_gen++;
+    seq_close(a);
     return MOY_APP_OK;
 }
 
@@ -1336,10 +1362,12 @@ int moy_app_clip_put_text(moy_appabi_t *a, uint32_t g, const char *text, size_t 
     if (n > MOY_APP_CLIP_MAX) {
         return MOY_APP_BAD;
     }
+    seq_open(a);
     memcpy(a->clip, text, n);
     a->clip_len = (uint32_t)n;
     a->clip_kind = MOY_CLIP_TEXT;
     a->clip_seq++;
+    seq_close(a);
     return MOY_APP_OK;
 }
 

@@ -266,7 +266,7 @@ oracle the binding is fuzzed against.
 
 ### 4.1 What it is
 
-`+native/moy_app/moy_app_wasm.c`: one native per row with a wasm type,
+`native/moy_app/moy_app_wasm.c`: one native per row with a wasm type,
 registered with the engine under the role module's name beside libmoy's `moy`
 table, the same table on the host's WAMR (ctypes), the boards and the browser
 (`native/moy_wasm_web`, whose JavaScript adapters wrap the same C thunks). A
@@ -319,22 +319,22 @@ primitives.
 
 ### 4.2 What moy-spec has to change
 
-moy-spec's SPEC.md §16.2 allows a compiled cart functions from module `"moy"`
-and nothing else. libmoy enforces it twice (`native/moycore/libmoy/moy_wasm.c`,
-vendored, never edited here): `moy_wasm_check` refuses another module, and
-`moy_wasm_check_bytes` types every import against the one table
-(`row_named`, `row_type_is`). So no conforming host can link a role import,
-ours included. The change, opened as a proposal (§12 answer 1):
+moy-spec's SPEC.md §16.2 allowed a compiled cart functions from module `"moy"`
+and nothing else, and libmoy enforced it twice: `moy_wasm_check` refused
+another module, and `moy_wasm_check_bytes` typed every import against the one
+table. So no conforming host could link a role import, ours included. The
+change, opened as a proposal (§12 answer 1; moy-spec 8c5f06b, 2026-10-10,
+vendored here by `make vendor-libmoy`):
 
 - **The rule.** A compiled cart may also import from a module named by a
   vendor extension its manifest declares (§10's `vendor.feature` names: the
   extension `moybyte.app`, the module `"moybyte.app"`). A host without the
-  extension refuses the cart before it runs, as §3.1 refuses an unknown
+  extension refuses the cart before it runs, as §10 refuses an unknown
   extension.
-- **libmoy.** Both checks take the host's extension tables, each a list of
-  `(module, name, type)` rows, and type an extension import against its table
-  as they type a `moy` one; an import from a module no table names is refused
-  as now.
+- **libmoy.** `moy_wasm_check_bytes_ext` and `moy_wasm_check_ext` take the
+  host's extension tables, each a module and its (name, type) rows, and type
+  an extension import against its table as they type a `moy` one; an import
+  from a module no table names is refused as before.
 - **`moy check`.** It types `moy` imports as now. An import from a module the
   manifest declares as an extension is reported as that extension's, untyped,
   with the warning that the cart runs only on hosts carrying it; an import from
@@ -590,6 +590,27 @@ against that bug before it goes green.
   it decodes the fields per row (`DOOR_ARGS`) and names a cart by its folder.
   Rows whose shape is an object (`surface.canvas`, `theme.colors`, `glyph`,
   `preview`) or a codec over pixels answer BAD at the door.
+
+- Step 9 (2026-10-10): the adapter's natives are the role table's rows with a
+  wasm type (24: the theme's reads and switches, prefs, the clipboard, seven
+  files rows, `nav.open_app`), each imported as `<role>_<verb>` and run
+  through the ROLE door, `moy_app_role`, so a thunk is a packing of its
+  arguments. The seqlock is one word in the state, taken by every write of the
+  look and the clipboard; a seqlock row's read spins, and yields after 64
+  turns, so a reader on the writer's core cannot starve it. prefs and the files
+  reads hop as the writes do, since the settings rows and the store are the VM
+  task's. The run's grant is the Player's: `Player._wasm_bind` binds the grant
+  `make_system_api` made, with the role mask the C policy reads from the
+  permissions, and a module importing a row of a role outside that mask is
+  refused at load naming the import; the theme's C rows need none, as `theme()`
+  is ungated. libmoy is handed the extension's table only while a grant is
+  bound, so a cart that declares no extension imports only from `"moy"`. A
+  compiled app the VM stops for has its grant made by `Player._stop_grant`
+  before the stop and ended by the start after it (`console._app_abi`). The
+  verdict reads the module's first 4 KiB for its imports; a head that does not
+  reach the end of the imports keeps the VM. The census names a kept import
+  (`"wasm vm import moybyte.app.<name>"`); `info` says `"import"`. The host's
+  moy_play library carries native/moy_app's table so its census is a board's.
 
 ## 12. The owner's answers (2026-10-10)
 

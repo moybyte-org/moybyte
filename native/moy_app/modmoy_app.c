@@ -18,6 +18,12 @@
 //                        (moy_app_role): table row `row` with its packed
 //                        arguments, the answer and the first bytes of `cap`
 //                        it wrote
+//   app.wasm_bind(g, roles)   the run a compiled app's imports serve: its
+//                        grant and the roles its permissions name (g 0: none)
+//   app.wasm_end()       that run is over: its grant ended, unbound
+//   wasm_rows()          the import adapter's natives: (name, type, table row)
+//   wasm_hops()          (hops made, their microseconds end to end, the rows'
+//                        own microseconds on the VM's task)
 //   table()              the role table's rows, "role.verb", in its order
 //   door_bind(on)        the shell rows' door: the kernel's ROLE upcall
 //                        (moy_loop_role), or none
@@ -53,6 +59,7 @@
 #include "py/runtime.h"
 
 #include "moy_app.h"
+#include "moy_app_wasm.h"
 
 // native/moy_spine's binding: the allocator kernel state takes, the C rows a
 // Settings holds, and what its saver raised.
@@ -158,6 +165,9 @@ static mp_obj_t app_make_new(const mp_obj_type_t *type, size_t n_args,
 static mp_obj_t app_del(mp_obj_t self_in) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (self->own) {
+        // A console's own state goes: unbound if it served the run. The
+        // kernel's outlives this view, and a run the VM stopped for keeps it.
+        moy_app_wasm_forget(self->a);
         moy_app_free(self->a);
     }
     self->a = NULL;
@@ -448,8 +458,26 @@ static mp_obj_t app_role(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_role_obj, 5, 5, app_role);
 
+// wasm_bind(g, roles): the run a compiled app's imports serve.
+static mp_obj_t app_wasm_bind(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    uint32_t h = (uint32_t)mp_obj_get_int_truncated(g);
+    moy_app_wasm_bind(h ? self->a : NULL, h, h ? roles_mask(roles) : 0u);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(app_wasm_bind_obj, app_wasm_bind);
+
+static mp_obj_t app_wasm_end(mp_obj_t self_in) {
+    (void)self_in;
+    moy_app_wasm_end();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(app_wasm_end_obj, app_wasm_end);
+
 static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_role), MP_ROM_PTR(&app_role_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_bind), MP_ROM_PTR(&app_wasm_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_end), MP_ROM_PTR(&app_wasm_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_store_bind), MP_ROM_PTR(&app_store_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_files_end_all), MP_ROM_PTR(&app_files_end_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_gen), MP_ROM_PTR(&app_copy_gen_obj) },
@@ -1861,6 +1889,29 @@ static mp_obj_t mod_table(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_table_obj, mod_table);
 
+static mp_obj_t mod_wasm_rows(void) {
+    uint32_t n;
+    const moy_app_native_t *t = moy_app_wasm_natives(&n);
+    mp_obj_tuple_t *out = MP_OBJ_TO_PTR(mp_obj_new_tuple(n, NULL));
+    for (uint32_t i = 0; i < n; i++) {
+        mp_obj_t r[3] = { mp_obj_new_str(t[i].symbol, strlen(t[i].symbol)),
+                          mp_obj_new_str(t[i].signature, strlen(t[i].signature)),
+                          MP_OBJ_NEW_SMALL_INT(moy_app_wasm_row(i)) };
+        out->items[i] = mp_obj_new_tuple(3, r);
+    }
+    return MP_OBJ_FROM_PTR(out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_rows_obj, mod_wasm_rows);
+
+static mp_obj_t mod_wasm_hops(void) {
+    uint32_t n, us, work;
+    moy_app_wasm_hops(&n, &us, &work);
+    mp_obj_t r[3] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us),
+                      mp_obj_new_int_from_uint(work) };
+    return mp_obj_new_tuple(3, r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_hops_obj, mod_wasm_hops);
+
 // The kernel's ROLE upcall (native/moy_kernel), which every image carrying
 // this module links.
 int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
@@ -1927,6 +1978,8 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rows), MP_ROM_PTR(&mod_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_table), MP_ROM_PTR(&mod_table_obj) },
     { MP_ROM_QSTR(MP_QSTR_door_bind), MP_ROM_PTR(&mod_door_bind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_rows), MP_ROM_PTR(&mod_wasm_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_hops), MP_ROM_PTR(&mod_wasm_hops_obj) },
     { MP_ROM_QSTR(MP_QSTR_perms), MP_ROM_PTR(&mod_perms_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&mod_tokens_obj) },

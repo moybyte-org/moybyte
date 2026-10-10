@@ -292,6 +292,26 @@ const NativeSymbol *moy_wasm_natives(uint32_t *count);
 int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
                          char *err, size_t errlen);
 
+/* A vendor extension's import module (SPEC.md 16.2, 10): a cart whose
+ * manifest declares extension `module` may import functions from the module
+ * of that name, each a row of `rows` at the row's signature (WAMR's string,
+ * as the "moy" table's). The rows are the vendor's; libmoy only types the
+ * imports against them. */
+typedef struct moy_wasm_ext {
+    const char *module;
+    const NativeSymbol *rows;
+    uint32_t count;
+} moy_wasm_ext;
+
+/* moy_wasm_check_bytes with the host's extension tables: the `n_ext` of
+ * `ext` are the extensions the host carries that the cart declares, and an
+ * import from one of their modules is typed against its table as a "moy"
+ * import is against the import table. An import from any other module is
+ * refused as before. moy_wasm_check_bytes is this with none. */
+int moy_wasm_check_bytes_ext(const uint8_t *wasm, size_t size, uint32_t pages,
+                             const moy_wasm_ext *ext, uint32_t n_ext,
+                             char *err, size_t errlen);
+
 /* Release the cart's layers through con->host.layer_free and unbind the
  * instance. The instance, and under WAMR its exec env and module, stay the
  * host's to destroy. Safe on a zeroed moy_wasm that was never opened and
@@ -322,6 +342,14 @@ int moy_wasm_register(NativeSymbol *storage);
  * binding exists until moy_wasm_open. `moy check` refuses it statically. */
 int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
                    uint32_t pages, char *err, size_t errlen);
+
+/* moy_wasm_check with the host's extension tables, as
+ * moy_wasm_check_bytes_ext takes them: an import from an extension's module
+ * must be one of its rows, and linked -- the host registered the extension's
+ * natives under its module name, at their signatures, before the load. */
+int moy_wasm_check_ext(wasm_module_t module, const uint8_t *wasm, size_t size,
+                       uint32_t pages, const moy_wasm_ext *ext, uint32_t n_ext,
+                       char *err, size_t errlen);
 
 /* Bind the instance behind `env` to `con`: its imports draw on con->canvas
  * (the screen) and call con->host. Looks up the three hooks. Returns 0, or

@@ -272,7 +272,9 @@ function say(s) { self.postMessage({ t: "status", s: s }); }
 // from the table's own signature strings (moy_web_natives): every verb the
 // cart calls is the C function every host calls (moycore's libmoy/moy_wasm.c),
 // with the same marshalling, blit, read and traps. This is moy-spec's web
-// player's adapter (runner/cart.js) on this worker's VM. The two modules have
+// player's adapter (runner/cart.js) on this worker's VM. A compiled app's
+// "moybyte.app" imports are the same adapters over the app ABI's rows
+// (moy_web_app_natives, native/moy_app/moy_app_wasm.h). The two modules have
 // separate memories, so a pointer the cart hands over is an offset into ITS
 // memory: where a row says '*~' -- a pointer and the length it covers -- the
 // range is bounds-checked against the cart's memory, copied into the VM's,
@@ -360,10 +362,11 @@ export function installCartEngine(M) {
             return 1;
         },
     };
-    // One import per row of the table, each an adapter over the row's C.
-    function adapters() {
+    // One import per row of a table (`natives`: the "moy" table's, or the app
+    // extension's "moybyte.app" rows), each an adapter over the row's C.
+    function adapters(natives) {
         const cp = C.malloc(4);
-        const base = C.natives(cp);
+        const base = natives(cp);
         const n = u32()[cp >> 2];
         C.free(cp);
         const out = {};
@@ -422,8 +425,11 @@ export function installCartEngine(M) {
                 // cart_engine_test.mjs pins it with a VM that grows on its
                 // first malloc.
                 const module = new WebAssembly.Module(bytes);
-                if (!imports) imports = adapters();
-                instance = new WebAssembly.Instance(module, { moy: imports });
+                if (!imports) {
+                    imports = { moy: adapters(C.natives) };
+                    if (C.appNatives) imports["moybyte.app"] = adapters(C.appNatives);
+                }
+                instance = new WebAssembly.Instance(module, imports);
             } catch (e) {
                 instance = null;
                 const msg = String((e && e.message) || e);

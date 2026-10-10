@@ -20,6 +20,9 @@ What it proves, in real Chrome against the built dist/:
     fixture writes on one load and finds them on the next, out of OPFS;
   * a cart importing a name the browser's table lacks (the Newer Wasm
     fixture) is refused before it loads, with the Player's notice naming it;
+  * a compiled app (App Roles Wasm) reaches its prefs and theme rows through
+    imports from "moybyte.app" with no upcall of any class, and the same
+    module one permission short is refused at load, the import named;
   * Get Carts offers a compiled cart from a local index and installs it --
     reading only the members this console keeps, by range, so not one byte
     of a chip's module crosses -- and the installed cart plays on the next
@@ -241,6 +244,41 @@ def test_a_cart_built_for_a_newer_console_is_refused_with_the_notice(tmp_path):
     assert st["cart"] == "Newer Wasm" and st["err"] is None, st
     assert st["notice"] == ("Newer Wasm needs a newer console (missing: later). "
                             "Update this console in Settings, then try again."), st
+
+APP_ROLES = ROOT / "tests" / "fixtures" / "wasm" / "app_roles.moy"
+_APP_STATE = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "
+              "notice: s.notice, play: s.play && s.play.upcalls, ups: s.upcall_totals}))")
+
+
+def test_a_compiled_app_reaches_its_roles_with_no_upcall(tmp_path):
+    """App Roles Wasm (its src/main.wat says what it does) imports prefs and
+    theme rows from "moybyte.app": in the browser they are the page's adapters
+    over the same C rows (native/moy_app/moy_app_wasm.c), so no crossing of
+    any class but the page's own frame (CONSOLE) is made. The same module with no "prefs" permission
+    is refused at load, naming prefs_get."""
+    web_e2e.require("store")
+    ok = _built(APP_ROLES, tmp_path / "carts" / "app_roles.moy")
+    short = _built(APP_ROLES, tmp_path / "carts" / "app_short.moy")
+    man = json.loads((short / "manifest.json").read_text())
+    man["title"] = "App Short Wasm"
+    man["moybyte"]["permissions"] = []
+    (short / "manifest.json").write_text(json.dumps(man))
+    site = _site(tmp_path, [ok, short])
+    got = {}
+    for name in ("app_roles", "app_short"):
+        out, js = _play(tmp_path, site, name, "?handheld=1&dev=1&cart=%s.moy" % name, [
+            {"wait": 3000}, {"js": _APP_STATE}, {"shot": name},
+        ])
+        assert len(js) == 1, "the scenario did not run to its end:\n%s" % out[-4000:]
+        got[name] = json.loads(js[0])
+    st = got["app_roles"]
+    assert st["cart"] == "App Roles Wasm" and st["err"] is None and st["notice"] is None, st
+    # The page drives the console's frame (CONSOLE: the frame upcalls); every
+    # other class, ROLE among them, stays at zero for the run.
+    assert st["ups"][1:] == [0, 0, 0, 0, 0], "the run crossed into Python: %r" % (st,)
+    st = got["app_short"]
+    assert "moybyte.app.prefs_get" in (st["err"] or ""), st
+
 
 def test_the_jet_carts_play_in_the_browser(tmp_path):
     web_e2e.require("store")

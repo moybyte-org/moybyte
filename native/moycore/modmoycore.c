@@ -1485,10 +1485,37 @@ typedef struct {
     // points at it until the runtime is destroyed, so it lives as long as
     // this struct does -- freed by wasm_end, after the session's teardown.
     NativeSymbol *natives;
+    NativeSymbol *app_natives;   // the same, for the app extension's rows
 #endif
 } wrun_t;
 
 static wrun_t *WR;
+
+// The app ABI's import adapter (native/moy_app/moy_app_wasm.h): the rows a
+// compiled app imports from module "moybyte.app", WAMR's NativeSymbol field
+// for field, and the load's grant check. Weak: an image without native/moy_app
+// (the Zero) has no extension, and a module importing from it is refused as
+// any import outside "moy" is.
+#define APP_EXT "moybyte.app"
+const NativeSymbol *moy_app_wasm_natives(uint32_t *count) __attribute__((weak));
+uint32_t moy_app_wasm_grant(void) __attribute__((weak));
+int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen)
+    __attribute__((weak));
+
+// The extension's table for libmoy's check: only while a run's app grant is
+// bound (the Player binds it for a compiled user app that declares the
+// extension), so a cart that declares none imports only from "moy".
+static uint32_t app_ext(moy_wasm_ext *x)
+{
+    uint32_t n = 0;
+    if (moy_app_wasm_natives == NULL || moy_app_wasm_grant == NULL
+        || moy_app_wasm_grant() == 0) return 0;
+    x->module = APP_EXT;
+    x->rows = moy_app_wasm_natives(&n);
+    x->count = n;
+    return 1;
+}
+
 static const uint8_t *g_whead;   // the canonical .wasm's head, for the check
 static size_t g_whead_len;
 static uint32_t g_wpages;        // the manifest's "memory"
@@ -1518,6 +1545,7 @@ static void wrun_free(wrun_t *r)
     if (r == WR) files_close();
 #if MOY_WASM
     wmem_free(r->natives);
+    wmem_free(r->app_natives);
 #endif
     wmem_free(r->writable);
     wmem_free(r);
@@ -1742,6 +1770,20 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
         snprintf(err, errlen, "the import table did not register");
         return 1;
     }
+    if (moy_app_wasm_natives != NULL) {
+        uint32_t an = 0;
+        const NativeSymbol *rows = moy_app_wasm_natives(&an);
+        WR->app_natives = (NativeSymbol *)wmem_calloc(an, sizeof(NativeSymbol));
+        if (!WR->app_natives) {
+            snprintf(err, errlen, "out of memory: no PSRAM for the import table");
+            return 1;
+        }
+        memcpy(WR->app_natives, rows, an * sizeof(NativeSymbol));
+        if (!wasm_runtime_register_natives(APP_EXT, WR->app_natives, an)) {
+            snprintf(err, errlen, "the app extension's table did not register");
+            return 1;
+        }
+    }
 #else
     // The page's adapters read the table where it is (moy_web_natives).
     (void)err;
@@ -1753,11 +1795,22 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
 static int wo_loaded(void *user, moy_wasm_module module, char *err, size_t errlen)
 {
     (void)user;
+    moy_wasm_ext x = { NULL, NULL, 0 };
+    uint32_t nx = app_ext(&x);
 #if MOY_WASM
-    return moy_wasm_check(module, g_whead, g_whead_len, g_wpages, err, errlen);
+    const uint8_t *head = g_whead;
+    size_t head_len = g_whead_len;
+    if (moy_wasm_check_ext(module, head, head_len, g_wpages, &x, nx, err, errlen)) return 1;
 #else
-    return moy_wasm_check_bytes(module->bytes, module->size, g_wpages, err, errlen);
+    const uint8_t *head = module->bytes;
+    size_t head_len = module->size;
+    if (moy_wasm_check_bytes_ext(module->bytes, module->size, g_wpages, &x, nx, err, errlen))
+        return 1;
 #endif
+    // Each import from the extension against the run's grant, named when its
+    // role is not one the cart's permissions name.
+    return nx && moy_app_wasm_admit != NULL ? moy_app_wasm_admit(head, head_len, err, errlen)
+                                            : 0;
 }
 
 static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)

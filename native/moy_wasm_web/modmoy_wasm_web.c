@@ -51,12 +51,25 @@
 // its adapters call: a C function by its table index (the table's rows), the
 // table itself and the trap (embed.c's exports), and the allocator.
 EM_JS_DEPS(moy_wasm_web, "$stringToUTF8,$getWasmTableEntry,malloc,free,"
-                         "moy_web_natives,moy_web_trapped,moy_web_item_trap");
+                         "moy_web_natives,moy_web_app_natives,moy_web_trapped,"
+                         "moy_web_item_trap");
+
+// The app ABI's import adapter (native/moy_app/moy_app_wasm.h): the rows of
+// module "moybyte.app", which the page's adapters wrap as they wrap the "moy"
+// table's (worker.js). Weak there: an image without native/moy_app answers no
+// rows.
+const void *moy_app_wasm_natives(uint32_t *count) __attribute__((weak));
+EMSCRIPTEN_KEEPALIVE const void *moy_web_app_natives(uint32_t *count)
+{
+    *count = 0;
+    return moy_app_wasm_natives != NULL ? moy_app_wasm_natives(count) : NULL;
+}
 
 EM_JS(int, web_open, (const uint8_t *bytes, uint32_t len, char *err, int errlen), {
     var e = Module.moyEngine;
     var why = e ? e.open(HEAPU8.subarray(bytes, bytes + len), {
                       fn: getWasmTableEntry, natives: _moy_web_natives,
+                      appNatives: _moy_web_app_natives,
                       trapped: _moy_web_trapped, itemTrap: _moy_web_item_trap,
                       malloc: _malloc, free: _free })
                 : "instantiate: this page has no WebAssembly cart engine";

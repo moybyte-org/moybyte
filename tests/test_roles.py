@@ -95,6 +95,15 @@ def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
     assert tuple(_verbs()) == tuple(moy_app.roles())
 
 
+def test_the_import_adapter_is_the_tables_wasm_column():
+    """A row with a wasm type is one native of native/moy_app/moy_app_wasm.c,
+    imported from module moybyte.app as <role>_<verb> at that type, in the
+    table's order; a row without one has no native."""
+    want = [(r["role"] + "_" + r["verb"], r["wasm"], i)
+            for i, r in enumerate(_rows()) if r["wasm"] is not None]
+    assert list(moy_app.wasm_rows()) == want
+
+
 def test_the_role_doors_table_is_the_tables_rows():
     """The ROLE door names a row by its index here (moy_app_role), so the C's
     table is roles.json row for row."""

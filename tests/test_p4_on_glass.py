@@ -163,6 +163,11 @@ def wasm_carts(board):
     return on_glass.wasm_carts_push(board, WASM_BOARD_DIR)
 
 
+def test_a_compiled_app_reaches_its_roles_through_imports(board):
+    root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
+    on_glass.wasm_app_reaches_its_roles(board, root)
+
+
 def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
     on_glass.wasm_cart_holds_its_floor(board, wasm_carts["hello"],
                                        WASM_HELLO_FPS_FLOOR,

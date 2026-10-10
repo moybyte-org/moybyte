@@ -23,20 +23,21 @@ void moy_play_host_runtimes(int lua, int wasm) {
 }
 
 typedef struct {
+    const char *path;
     char *out;
     size_t n;
 } census_t;
 
 static int one(void *ctx, const moy_cat_entry_t *e) {
     census_t *c = ctx;
-    moy_play_census_line(e, c->out, c->n);
+    moy_play_census_line_at(c->path, e, c->out, c->n);
     return 0;
 }
 
 // "<runtime> <free|vm> <why>" for the cart folder at `path`; -1 when it is no
 // cart.
 int moy_play_census(const char *path, char *out, size_t n) {
-    census_t c = { out, n };
+    census_t c = { path, out, n };
     out[0] = 0;
     return moy_cat_entry(path, one, NULL, &c) == 0 && out[0] ? 0 : -1;
 }

@@ -452,6 +452,15 @@ typedef int32_t (*moy_app_door_fn)(uint32_t g, uint32_t row, const uint8_t *arg,
 // The door the shell rows cross: one a process, NULL for none.
 void moy_app_door_bind(moy_app_door_fn fn);
 
+// -- the seqlock ------------------------------------------------------------------
+
+// Every write of the look (theme_write, theme_write_skin) and of the clipboard
+// takes the state's seqlock, so a reader on another thread (a compiled app's
+// session thread, moy_app_wasm.h) reads a row whole: begin, read, and read
+// again unless end answers true; an odd begin is a write in progress.
+uint32_t moy_app_seq_begin(const moy_appabi_t *a);
+int moy_app_seq_end(const moy_appabi_t *a, uint32_t s);
+
 // -- the counters ------------------------------------------------------------------
 
 // Calls of C row `row` since the state was made (the roles trace's coverage

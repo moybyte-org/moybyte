@@ -9,6 +9,6 @@
 MOY_APP_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_APP_DIR)/modmoy_app.c $(MOY_APP_DIR)/../moy_store/modmoy_ufiles.c
-SRC_USERMOD_LIB_C += $(MOY_APP_DIR)/moy_app.c $(MOY_APP_DIR)/../moy_store/moy_ufiles.c
+SRC_USERMOD_LIB_C += $(MOY_APP_DIR)/moy_app.c $(MOY_APP_DIR)/moy_app_wasm.c $(MOY_APP_DIR)/../moy_store/moy_ufiles.c
 CFLAGS_USERMOD += -I$(MOY_APP_DIR) -I$(MOY_APP_DIR)/../moy_spine -I$(MOY_APP_DIR)/../moy_input \
     -I$(MOY_APP_DIR)/../moy_store -I$(MOY_APP_DIR)/../moy_png

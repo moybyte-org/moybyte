@@ -9,7 +9,7 @@
 //     misses, tick_cost, draw_frame, tick_frame, late, probing
 //   MAX_CATCHUP, MAX_DIV  the model's integer bounds (the CPython module
 //                         adds its real-valued constants)
-//   census(path)      the VM-free rule (moy_play_vm_free) over the cart folder
+//   census(path)      the VM-free rule (moy_play_vm_free_at) over the cart folder
 //                     at `path`, as the store's C reads its catalogue entry:
 //                     (runtime, vm_free, why), or None when it is no cart.
 //                     This image's runtime map has a "lua" row where moycore is
@@ -212,15 +212,22 @@ static void rows_once(void) {
     moy_play_rows(lua, wasm, true);
 }
 
+typedef struct {
+    const char *path;
+    char *line;
+} census_t;
+
 static int census_one(void *ctx, const moy_cat_entry_t *e) {
-    moy_play_census_line(e, (char *)ctx, 96);
+    census_t *c = ctx;
+    moy_play_census_line_at(c->path, e, c->line, 96);
     return 0;
 }
 
 static mp_obj_t mod_census(mp_obj_t path_obj) {
     char line[96] = "";
     rows_once();
-    if (moy_cat_entry(mp_obj_str_get_str(path_obj), census_one, NULL, line) != 0
+    census_t c = { mp_obj_str_get_str(path_obj), line };
+    if (moy_cat_entry(c.path, census_one, NULL, &c) != 0
         || line[0] == 0) {
         return mp_const_none;
     }

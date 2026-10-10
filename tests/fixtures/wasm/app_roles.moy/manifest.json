@@ -1,0 +1,16 @@
+{
+  "format": "moy-1",
+  "title": "App Roles Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 1,
+  "extensions": [
+    "moybyte.app"
+  ],
+  "moybyte": {
+    "type": "app",
+    "permissions": [
+      "prefs"
+    ]
+  }
+}

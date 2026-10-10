@@ -89,16 +89,20 @@ carts stay Python and keep the VM.
 
 ## 2. Which carts run with no VM
 
-**The rule, decided at launch from the catalogue entry alone**
-(`moy_play_vm_free`, one C function, the census's and the Player's):
+**The rule, decided at launch from the catalogue entry**, and for a compiled
+app from its module's imports too (`moy_play_vm_free_at`, one C function, the
+census's and the Player's):
 
 1. the runtime is `lua` or `wasm`, and the image takes it;
 2. the type is `game`, read with the store's default: a manifest that names
    no type is a `game` when it is a spec cart and an `app` otherwise
    (`runtime/moy_carts.py`'s rule, which `moy_cat.c` stores raw today and C
-   applies the same way);
+   applies the same way) -- or `app` with the runtime `wasm`, where the image
+   carries native/moy_app (`docs/kernel_appabi_2026-10.md` §4.1);
 3. every permission is in the **native set**: `graphics`, `input`, `audio`,
-   `multiplayer`.
+   `multiplayer`; for a compiled app a role's permission passes too when every
+   row its module imports from the app extension is C-served, and an import
+   of a shell-served row keeps the VM with `why` "import" naming it.
 
 **Everything else keeps the VM**, by name: `network` (the `wifi` object),
 `console` (the text console), `pins` (on a console no backend is granted, and

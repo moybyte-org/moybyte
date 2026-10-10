@@ -266,6 +266,22 @@ how an app draws rather than what it may reach: **`ui`** (the real
 live tokens -- its `th`), and **`bar_h()`** (rows the host's exitable strip owns;
 draw below them, never hardcode 18).
 
+### A compiled user app (#224)
+
+A user app may be compiled: `"runtime": "wasm"` with `"extensions":
+["moybyte.app"]` in its manifest. It reaches its roles through IMPORTS from
+module `"moybyte.app"` (moy-spec SPEC.md §16.2's vendor-extension rule), each
+named `<role>_<verb>` at the type the role table's `wasm` column gives
+(`native/moy_app/roles.json`); `native/moy_app/moy_app_wasm.h` is the
+adapter's contract. A number answers as an `i32`, text or a blob is written
+into the caller's buffer and answers its length, and a negative answer is
+moy_app.h's code negated. The theme's reads are every app's, as `theme()` is;
+an import from any other role its permissions do not name is refused at load,
+the import named. The app is cart-shaped: fullscreen, its loop the cart's. When
+every row it imports is served in C it runs as a VM-free cart does; one that
+imports a row the Python console serves (`theme_set*`, `nav_open_app`) keeps
+the VM.
+
 ### The canvas: FIXED by default, responsive by opt-in
 
 A shipped app is responsive because a Layer class can afford to be. A cart

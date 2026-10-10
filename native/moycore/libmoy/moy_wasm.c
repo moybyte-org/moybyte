@@ -1342,12 +1342,30 @@ static int row_type_is(reader types, uint32_t index, const NativeSymbol *row)
         && !memcmp(res, want_r, nr);
 }
 
-static const NativeSymbol *row_named(const uint8_t *name, uint32_t n)
+static const NativeSymbol *row_in(const NativeSymbol *t, uint32_t count,
+                                  const uint8_t *name, uint32_t n)
 {
-    uint32_t count, i;
-    const NativeSymbol *t = moy_wasm_natives(&count);
+    uint32_t i;
     for (i = 0; i < count; i++)
         if (strlen(t[i].symbol) == n && !memcmp(t[i].symbol, name, n)) return &t[i];
+    return NULL;
+}
+
+static const NativeSymbol *row_named(const uint8_t *name, uint32_t n)
+{
+    uint32_t count;
+    const NativeSymbol *t = moy_wasm_natives(&count);
+    return row_in(t, count, name, n);
+}
+
+/* The extension whose module is `mod`, or NULL. */
+static const moy_wasm_ext *ext_named(const moy_wasm_ext *ext, uint32_t n_ext,
+                                     const uint8_t *mod, uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; ext && i < n_ext; i++)
+        if (ext[i].module && strlen(ext[i].module) == n && !memcmp(ext[i].module, mod, n))
+            return &ext[i];
     return NULL;
 }
 
@@ -1435,6 +1453,13 @@ static int global_at(reader globals, uint32_t index, uint8_t *type, uint8_t *mut
 int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
                          char *err, size_t errlen)
 {
+    return moy_wasm_check_bytes_ext(wasm, size, pages, NULL, 0, err, errlen);
+}
+
+int moy_wasm_check_bytes_ext(const uint8_t *wasm, size_t size, uint32_t pages,
+                             const moy_wasm_ext *ext, uint32_t n_ext,
+                             char *err, size_t errlen)
+{
     reader r, sec[12];
     int have[12] = {0}, seen[3] = {0, 0, 0}, memory = 0, h, par = 0, item = 0, sp = 0;
     uint32_t n = 0, i;
@@ -1468,21 +1493,25 @@ int moy_wasm_check_bytes(const uint8_t *wasm, size_t size, uint32_t pages,
         uint32_t ml, nl, type;
         uint8_t kind;
         const NativeSymbol *row;
+        const moy_wasm_ext *x = NULL;
+        int is_moy;
         if (!rd_name(&r, &mod, &ml) || !rd_name(&r, &name, &nl) || !rd_byte(&r, &kind))
             return fail(err, errlen, "the import section does not parse");
-        if (ml != strlen(MOY_WASM_MODULE) || memcmp(mod, MOY_WASM_MODULE, ml))
-            return fail(err, errlen, "imports %.*s.%.*s: a compiled cart imports only from module \"moy\"",
+        is_moy = ml == strlen(MOY_WASM_MODULE) && !memcmp(mod, MOY_WASM_MODULE, ml);
+        if (!is_moy && !(x = ext_named(ext, n_ext, mod, ml)))
+            return fail(err, errlen, "imports %.*s.%.*s: a compiled cart imports only from module \"moy\" and the extensions it declares",
                         (int)ml, (const char *)mod, (int)nl, (const char *)name);
         if (kind != 0)
             return fail(err, errlen, "imports %.*s.%.*s as something other than a function",
                         (int)ml, (const char *)mod, (int)nl, (const char *)name);
         if (!rd_leb(&r, &type))
             return fail(err, errlen, "the import section does not parse");
-        row = row_named(name, nl);
+        row = is_moy ? row_named(name, nl) : row_in(x->rows, x->count, name, nl);
         if (!row || !row_type_is(sec[1], type, row))
-            return fail(err, errlen, "imports %.*s.%.*s, which is not in the import table at that type",
-                        (int)ml, (const char *)mod, (int)nl, (const char *)name);
-        if (nl == 3 && !memcmp(name, "par", 3)) par = 1;
+            return fail(err, errlen, "imports %.*s.%.*s, which is not in %s at that type",
+                        (int)ml, (const char *)mod, (int)nl, (const char *)name,
+                        is_moy ? "the import table" : "its extension's table");
+        if (is_moy && nl == 3 && !memcmp(name, "par", 3)) par = 1;
     }
 
     r = sec[7];
@@ -1548,6 +1577,13 @@ static int hook_type(wasm_func_type_t t, uint32_t nparams, wasm_valkind_t kind)
 int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
                    uint32_t pages, char *err, size_t errlen)
 {
+    return moy_wasm_check_ext(module, wasm, size, pages, NULL, 0, err, errlen);
+}
+
+int moy_wasm_check_ext(wasm_module_t module, const uint8_t *wasm, size_t size,
+                       uint32_t pages, const moy_wasm_ext *ext, uint32_t n_ext,
+                       char *err, size_t errlen)
+{
     int32_t i, n;
     int seen[3] = {0, 0, 0}, memory = 0, par = 0, item = 0, sp = 0;
     wasm_import_t im;
@@ -1557,17 +1593,23 @@ int moy_wasm_check(wasm_module_t module, const uint8_t *wasm, size_t size,
 
     n = wasm_runtime_get_import_count(module);
     for (i = 0; i < n; i++) {
+        const moy_wasm_ext *x = NULL;
+        int is_moy;
         wasm_runtime_get_import_type(module, i, &im);
-        if (strcmp(im.module_name, MOY_WASM_MODULE) != 0)
-            return fail(err, errlen, "imports %s.%s: a compiled cart imports only from module \"moy\"",
+        is_moy = strcmp(im.module_name, MOY_WASM_MODULE) == 0;
+        if (!is_moy && !(x = ext_named(ext, n_ext, (const uint8_t *)im.module_name,
+                                       (uint32_t)strlen(im.module_name))))
+            return fail(err, errlen, "imports %s.%s: a compiled cart imports only from module \"moy\" and the extensions it declares",
                         im.module_name, im.name);
         if (im.kind != WASM_IMPORT_EXPORT_KIND_FUNC)
             return fail(err, errlen, "imports %s.%s as something other than a function",
                         im.module_name, im.name);
-        if (!im.linked)
-            return fail(err, errlen, "imports %s.%s, which is not in the import table at that type",
-                        im.module_name, im.name);
-        if (!strcmp(im.name, "par")) par = 1;
+        if (!im.linked || (x && !row_in(x->rows, x->count, (const uint8_t *)im.name,
+                                         (uint32_t)strlen(im.name))))
+            return fail(err, errlen, "imports %s.%s, which is not in %s at that type",
+                        im.module_name, im.name,
+                        is_moy ? "the import table" : "its extension's table");
+        if (is_moy && !strcmp(im.name, "par")) par = 1;
     }
 
     n = wasm_runtime_get_export_count(module);

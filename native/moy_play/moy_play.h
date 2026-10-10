@@ -2,12 +2,17 @@
 // cart's run is, decided and driven below the VM.
 //
 // THE VM-FREE RULE (§2), one function the census and the Player both call,
-// decided from the catalogue entry alone:
+// decided from the catalogue entry, and for a compiled app from its module's
+// imports too:
 //   1. the runtime is "lua" or "wasm" and this image has its row (moy_rt_get);
 //   2. the type is "game" (a manifest that names none is a game when it is a
-//      spec cart, an app otherwise: runtime/moy_carts.py's rule);
+//      spec cart, an app otherwise: runtime/moy_carts.py's rule), or "app"
+//      with the runtime "wasm" where the image carries native/moy_app;
 //   3. every permission is in the native set: graphics, input, audio,
-//      multiplayer. A permission the kernel does not know keeps the VM.
+//      multiplayer -- or, for a compiled app, a role's permission, which
+//      passes when every row the module imports from the app extension is
+//      C-served (moy_play_vm_free_at). A permission the kernel does not know
+//      keeps the VM.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed.
 //
@@ -65,10 +70,20 @@ enum {
     MOY_PLAY_WHY_NORT = 3,      // the runtime's row is not in this image
     MOY_PLAY_WHY_TYPE = 4,      // not a game
     MOY_PLAY_WHY_PERM = 5,      // a permission outside the native set
-    MOY_PLAY_WHY_COUNT = 6,
+    MOY_PLAY_WHY_IMPORT = 6,    // a compiled app imports a row the Python console serves
+    MOY_PLAY_WHY_COUNT = 7,
 };
 
 bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why);
+// The verdict with the cart's folder: a compiled app ("runtime": "wasm",
+// "type": "app") passes rule 2 where the image carries native/moy_app, and
+// rule 3 maps each permission through the role table -- a role's permission
+// passes when every import its module makes from the app extension
+// (moybyte.app, native/moy_app/moy_app_wasm.h) is a C-served row, read from
+// the head of its main; one that imports a shell-served row keeps the VM
+// (WHY_IMPORT), the import named in `imp` ("moybyte.app.<name>").
+bool moy_play_vm_free_at(const char *path, const moy_cat_entry_t *e, uint8_t *why,
+                         char *imp, size_t cap);
 // Rule 2 alone: the entry is a game, with the store's default.
 bool moy_play_is_game(const moy_cat_entry_t *e);
 
@@ -264,11 +279,15 @@ bool moy_play_interrupt_pending(void) __attribute__((weak));
 // are built, python where a VM registers it.
 void moy_play_rows(bool lua, bool wasm, bool python);
 // The reason's word, for `info`, `state` and the census: "free", "broken",
-// "runtime", "absent", "type", "permission".
+// "runtime", "absent", "type", "permission", "import".
 const char *moy_play_why_name(uint8_t why);
 // The census's line for an entry: "<runtime> <free|vm> <why>", the runtime
 // with the store's default ("lua" for a spec cart that names none, "python"
 // otherwise, "?" for one that is no string). snprintf's answer.
 int moy_play_census_line(const moy_cat_entry_t *e, char *out, size_t n);
+// The same with the cart's folder (moy_play_vm_free_at); a compiled app kept
+// by an import reads "<runtime> vm import moybyte.app.<name>".
+int moy_play_census_line_at(const char *path, const moy_cat_entry_t *e, char *out,
+                            size_t n);
 
 #endif // MOY_PLAY_H

@@ -45,13 +45,21 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
+_APP = os.path.join(native_build.ROOT, "native", "moy_app")
+_INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SHIM = os.path.join(_PLAY, "moy_play_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_play")
 _SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
             "moy_tick.h", "moy_tick.c",
             "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_json.h",
             "moy_json.c", "moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
-            "moy_store_host.c")
+            "moy_store_host.c",
+            # native/moy_app's table, which a compiled app's verdict reads its
+            # imports through, as on a board
+            "moy_app.h", "moy_app.c", "moy_app_wasm.h", "moy_app_wasm.c",
+            "moy_htab.h", "moy_htab.c", "moy_settings.h", "moy_settings.c",
+            "moy_route.h", "moy_route.c", "moy_ledger.h", "moy_ledger.c",
+            "moy_input.h", "moy_ufiles.h")
 _LIB = [None]
 
 MAX_CATCHUP = 4
@@ -98,7 +106,8 @@ def build(verbose=False, real="float"):
     flags = None if real == "float" else native_build.BASE_CFLAGS + ["-DMOY_TICK_REAL=" + real]
     return native_build.build("moy_play" if real == "float" else "moy_play_" + real,
                               _SHIM, _SOURCES, _CACHE, cflags=flags,
-                              libmoy_dir=(_PLAY, _SPINE, _STORE), verbose=verbose)
+                              libmoy_dir=(_PLAY, _SPINE, _STORE, _APP, _INPUT),
+                              verbose=verbose)
 
 
 def _lib(real="float"):
@@ -183,7 +192,7 @@ def census(path, lua=True, wasm=True):
     out = ctypes.create_string_buffer(96)
     if d.moy_play_census(os.path.abspath(path).encode(), out, len(out)) != 0:
         return None
-    rt, verdict, why = out.value.decode().split(" ")
+    rt, verdict, why = out.value.decode().split(" ", 2)
     return rt, verdict == "free", why
 
 
@@ -349,7 +358,7 @@ END_HOLD, END_QUIT, END_MENU, END_CRASH, END_LINK, END_SERIAL = range(6)
 _WHAT = ("ok", "stale run", "full", "no memory", "no such cart",
          "runtime not in this image", "newer", "does not fit", "raised", "ended",
          "needs the VM")
-_WHY = ("free", "broken", "runtime", "absent", "type", "permission")
+_WHY = ("free", "broken", "runtime", "absent", "type", "permission", "import")
 
 
 def _play():
