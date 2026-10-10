@@ -86,24 +86,23 @@ roles it declared:
 | `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
 | `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the host strip's rows (`bar_h()`, what a user app's ungated `bar_h()` reads), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`); and the chrome glyph painter | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `pointer()`, `glyph()` |
 | `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's, variant's and skin's names; and the verbs that change the look | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `skin()`, `set()`, `set_variant()`, `set_skin()` |
-| `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps | `readable()`, `ready()`, `batch()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
-| `ctx.carts` | the CART store: the live cart list, projects' decks, code and images | `readable()`, `ready()`, `batch()`, `all()`, `can_journal()`, `slug()`, `hydrate()`, `apply()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
+| `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
+| `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal, its deck, code and images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()` |
 | `ctx.prefs` | per-app settings on `system.json`'s rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
 | `ctx.notify` | achievement events | `achieve()` |
-| `ctx.wallpaper` | the desktop-backdrop capability (Appearance and Paint only) | `current()`, `carts()`, `fills()`, `id_for()`, `cart_by_id()`, `select()`, `preview()`, `load_copy()`, `save_copy()` |
-| `ctx.artwork` | the ArtworkService itself (Paint's document model) | `attach()`, `doc_name()`, `editable()`, `is_paint_app()`, `load()`, `new_doc()`, `open_named()`, `resend()`, `save()`, `set_wallpaper()`, `sync_wallpaper()`, `targets()`, `thumbnail()`, `usage()`, `why_read_only()` |
+| `ctx.wallpaper` | the desktop backdrop (Appearance chooses one; Paint and Files copy a drawing into it): the look's choice, the wallpaper carts and fills, a wallpaper's title, the live preview, My Art's thumbnail (the backdrop's own decode), the backdrop's backing copy | `current()`, `carts()`, `fills()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
+| `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | `current()`, `follow()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `put_text()`, `text()`, `kind()`, `seq()` |
-| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, the store session an install writes in, the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `session()`, `rescan()`, `free()`, `find()`, `net()`, `keep()` |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()` |
 
 Read that module for the signatures. The verbs column is the role table's
 (`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
 Every context holds a **grant**, a row of native/moy_app's grant table keyed by
-the app's id; `damage`, `surface`, `theme`, `prefs` and `clipboard` are
-native/moy_app's role objects over it, each method a C row but for the rows
-the table serves in Python (`surface.glyph`, `theme.set*`), which call the
-server the console registers for the role (the table's `server` column says
-which).
+the app's id, and every role is native/moy_app's role object over it: a C row
+reads the kernel's state, and a shell row checks the grant and calls the server
+the console registers for the role (`runtime/shell_servers.py`) with the grant
+first (the table's `server` column says which).
 Four things about the roles are load-bearing:
 
 - **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the
@@ -123,8 +122,10 @@ Four things about the roles are load-bearing:
 - **Storage returns `(value, err)` and never raises.** `err` is `None`, the
   `NO_STORE` singleton, or the failure's text -- which is exactly what
   `app_shell._persist` turns into CAN'T SAVE HERE versus CAN'T SAVE <why>.
-  Several verbs in one storage session go through `batch(fn)`, whose `fn` gets a
-  raw view of the same verbs.
+  Each verb is one store op, taking the bus gate around itself; `begin()` and
+  `end()` bracket a session, which is readiness only and holds no gate, so one
+  left open cannot stop the panel flushing -- the console ends it at the next
+  frame and at a run's end.
 
 **No role hands out the console.** An app reaches the shell only through the
 roles above; the shared `file_widgets.FileGridView` lists and loads through the

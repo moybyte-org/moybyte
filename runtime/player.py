@@ -665,9 +665,12 @@ class Player:
         self._app_ctx = ctx
 
     def _end_grant(self):
+        """The run is over: its grant ends, and so does any store session it
+        left open (a session holds no gate; runtime/shell_servers.py)."""
         ctx, self._app_ctx = self._app_ctx, None
         if ctx is not None:
             ctx.end()
+        self.ws.store.end_all()
 
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""

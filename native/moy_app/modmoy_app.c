@@ -11,15 +11,19 @@
 //   app.bind_pointer(pointer), app.theme_write(name, variant, colors),
 //   app.theme_write_skin(skin), app.serve(role, server)   the shell's writes
 //   app.served()         {"role.verb": calls} of the rows served in Python
+//   app.grant_id(h)      the id a grant was made for
 //   Damage(app, g), Surface(app, g), Theme(app, g), Prefs(app, g),
-//   Clipboard(app, g)    the C roles
+//   Artwork(app, g), Clipboard(app, g)    the roles with C rows
+//   Files, Carts, Nav, Notify, Wallpaper, Install (app, g)   the roles served
+//                        in Python, every row the console's
 //   tokens()             the token vocabulary, in role-id order
 //   policy(perms), manifest_error(perms), id_for(id, title)   the grant policy
 //
 // A role object's methods are the table's rows and nothing else: no attribute
 // is a property, and each call of a C row is the C function and its counter. A
-// row the table serves elsewhere (surface.glyph, theme.set*) calls the server
-// the console registered for the role (app.serve), with the same arguments.
+// row the table serves in Python (its "shell" rows) checks that the grant holds
+// the role, counts the call and calls the server the console registered for
+// the role (app.serve) as `server.<verb>(grant, *args, **kw)`.
 // What Python keeps as objects stays objects: surface.canvas() is the canvas
 // the shell wrote into the grant's row, surface.pointer() a named tuple of the
 // row's five numbers, theme.colors() a dict built from the token table at its
@@ -217,6 +221,14 @@ static mp_obj_t app_end(mp_obj_t self, mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(app_end_obj, app_end);
 
+// grant_id(h) -> the id grant `h` was made for; ValueError for one that ended.
+static mp_obj_t app_grant_id(mp_obj_t self, mp_obj_t h) {
+    const moy_grant_t *g;
+    check(moy_app_grant_get(app_of(self), grant_arg(h), &g));
+    return mp_obj_new_str(g->id, g->id_len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(app_grant_id_obj, app_grant_id);
+
 static mp_obj_t app_count(mp_obj_t self) {
     return MP_OBJ_NEW_SMALL_INT(moy_app_grants(app_of(self)));
 }
@@ -383,6 +395,7 @@ static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&app_serve_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant), MP_ROM_PTR(&app_grant_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_grant_id), MP_ROM_PTR(&app_grant_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&app_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_damage_take), MP_ROM_PTR(&app_damage_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_damage_drop), MP_ROM_PTR(&app_damage_drop_obj) },
@@ -423,6 +436,15 @@ typedef struct {
     mp_obj_t app;
     uint32_t g;
 } role_obj_t;
+
+static mp_obj_t role_make_new(const mp_obj_type_t *type, size_t n_args,
+                              size_t n_kw, const mp_obj_t *args);
+
+// A role whose rows are all served in Python: its type, from a table of ROWs.
+#define SERVED_ROLE(r, Name) \
+    static MP_DEFINE_CONST_DICT(r##_locals, r##_locals_table); \
+    static MP_DEFINE_CONST_OBJ_TYPE(r##_type, MP_QSTR_##Name, MP_TYPE_FLAG_NONE, \
+                                    make_new, role_make_new, locals_dict, &r##_locals);
 
 static mp_obj_t role_make_new(const mp_obj_type_t *type, size_t n_args,
                               size_t n_kw, const mp_obj_t *args) {
@@ -470,18 +492,20 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &damage_locals
     );
 
-// The server the console registered for a role's other rows, its verb called
-// with the role call's arguments.
-static mp_obj_t serve_call(mp_obj_t self, qstr role, qstr verb, size_t n_args,
-                           const mp_obj_t *args, mp_map_t *kw) {
+// A row served in Python: the grant checked for the role, the row counted,
+// then the server the console registered for the role called as
+// `server.<verb>(grant, *args, **kw)`. No allocation once the row has been
+// called: the method is loaded unbound and the arguments sit on the stack.
+static mp_obj_t serve_call(mp_obj_t self, int role_i, qstr role, qstr verb,
+                           size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
     role_obj_t *o = MP_OBJ_TO_PTR(self);
     app_obj_t *app = MP_OBJ_TO_PTR(o->app);
+    check(moy_app_holds(app->a, o->g, role_i));
     mp_map_elem_t *e = mp_map_lookup(mp_obj_dict_get_map(app->servers),
                                      MP_OBJ_NEW_QSTR(role), MP_MAP_LOOKUP);
     if (e == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("no server for the role"));
     }
-    // The row's counter: no allocation once the row has been called.
     mp_map_elem_t *r = mp_map_lookup(mp_obj_dict_get_map(app->served),
                                      MP_OBJ_NEW_QSTR(role), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
     if (r->value == MP_OBJ_NULL) {
@@ -491,23 +515,30 @@ static mp_obj_t serve_call(mp_obj_t self, qstr role, qstr verb, size_t n_args,
                                      MP_OBJ_NEW_QSTR(verb), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
     c->value = MP_OBJ_NEW_SMALL_INT(c->value == MP_OBJ_NULL ? 1
                                     : MP_OBJ_SMALL_INT_VALUE(c->value) + 1);
-    mp_obj_t fn = mp_load_attr(e->value, verb);
     size_t n_kw = kw == NULL ? 0u : kw->used;
-    if (n_kw == 0u) {
-        return mp_call_function_n_kw(fn, n_args, 0, args);
-    }
-    // A builtin's keyword map is a fixed table, every entry filled.
-    mp_obj_t all[8];
-    if (n_args + 2u * n_kw > MP_ARRAY_SIZE(all)) {
+    mp_obj_t all[14];
+    if (3u + n_args + 2u * n_kw > MP_ARRAY_SIZE(all)) {
         mp_raise_TypeError(MP_ERROR_TEXT("too many arguments"));
     }
-    memcpy(all, args, n_args * sizeof(mp_obj_t));
+    mp_load_method(e->value, verb, all);
+    all[2] = MP_OBJ_NEW_SMALL_INT(o->g);
+    memcpy(all + 3, args, n_args * sizeof(mp_obj_t));
+    // A builtin's keyword map is a fixed table, every entry filled.
     for (size_t i = 0; i < n_kw; i++) {
-        all[n_args + 2u * i] = kw->table[i].key;
-        all[n_args + 2u * i + 1u] = kw->table[i].value;
+        all[3u + n_args + 2u * i] = kw->table[i].key;
+        all[3u + n_args + 2u * i + 1u] = kw->table[i].value;
     }
-    return mp_call_function_n_kw(fn, n_args, n_kw, all);
+    return mp_call_method_n_kw(n_args + 1u, n_kw, all);
 }
+
+// One row served in Python: role `r` (MOY_ROLE_<R>), verb `v`.
+#define SERVED(r, R, v) \
+    static mp_obj_t r##_##v(size_t n_args, const mp_obj_t *args, mp_map_t *kw) { \
+        return serve_call(args[0], MOY_ROLE_##R, MP_QSTR_##r, MP_QSTR_##v, \
+                          n_args - 1u, args + 1, kw); \
+    } \
+    static MP_DEFINE_CONST_FUN_OBJ_KW(r##_##v##_obj, 1, r##_##v);
+#define ROW(r, v) { MP_ROM_QSTR(MP_QSTR_##v), MP_ROM_PTR(&r##_##v##_obj) },
 
 // surface
 
@@ -586,10 +617,7 @@ static mp_obj_t surface_pointer(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_pointer_obj, surface_pointer);
 
-static mp_obj_t surface_glyph(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
-    return serve_call(args[0], MP_QSTR_surface, MP_QSTR_glyph, n_args - 1, args + 1, kw);
-}
-static MP_DEFINE_CONST_FUN_OBJ_KW(surface_glyph_obj, 1, surface_glyph);
+SERVED(surface, SURFACE, glyph)
 
 static const mp_rom_map_elem_t surface_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_canvas), MP_ROM_PTR(&surface_canvas_obj) },
@@ -696,20 +724,9 @@ static mp_obj_t theme_skin(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_skin_obj, theme_skin);
 
-static mp_obj_t theme_set(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
-    return serve_call(args[0], MP_QSTR_theme, MP_QSTR_set, n_args - 1, args + 1, kw);
-}
-static MP_DEFINE_CONST_FUN_OBJ_KW(theme_set_obj, 1, theme_set);
-
-static mp_obj_t theme_set_variant(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
-    return serve_call(args[0], MP_QSTR_theme, MP_QSTR_set_variant, n_args - 1, args + 1, kw);
-}
-static MP_DEFINE_CONST_FUN_OBJ_KW(theme_set_variant_obj, 1, theme_set_variant);
-
-static mp_obj_t theme_set_skin(size_t n_args, const mp_obj_t *args, mp_map_t *kw) {
-    return serve_call(args[0], MP_QSTR_theme, MP_QSTR_set_skin, n_args - 1, args + 1, kw);
-}
-static MP_DEFINE_CONST_FUN_OBJ_KW(theme_set_skin_obj, 1, theme_set_skin);
+SERVED(theme, THEME, set)
+SERVED(theme, THEME, set_variant)
+SERVED(theme, THEME, set_skin)
 
 static const mp_rom_map_elem_t theme_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&theme_colors_obj) },
@@ -863,6 +880,270 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &clip_locals
     );
 
+// -- the roles served in Python -------------------------------------------------------------
+//
+// Every row of these roles is the console's (roles.json's "shell" server): the
+// binding checks the grant, counts the row and calls the registered server.
+
+// files
+
+SERVED(files, FILES, readable)
+SERVED(files, FILES, ready)
+SERVED(files, FILES, begin)
+SERVED(files, FILES, end)
+SERVED(files, FILES, list)
+SERVED(files, FILES, count)
+SERVED(files, FILES, load)
+SERVED(files, FILES, save)
+SERVED(files, FILES, delete)
+SERVED(files, FILES, duplicate)
+SERVED(files, FILES, rename)
+SERVED(files, FILES, new_name)
+SERVED(files, FILES, trash_list)
+SERVED(files, FILES, restore)
+SERVED(files, FILES, empty_trash)
+SERVED(files, FILES, history)
+SERVED(files, FILES, history_ops)
+SERVED(files, FILES, history_commit)
+SERVED(files, FILES, encode_image)
+SERVED(files, FILES, decode_image)
+SERVED(files, FILES, decode_cover)
+SERVED(files, FILES, encode_cover)
+SERVED(files, FILES, sig)
+SERVED(files, FILES, stamp)
+SERVED(files, FILES, encode_text)
+SERVED(files, FILES, decode_text)
+SERVED(files, FILES, provenance)
+
+static const mp_rom_map_elem_t files_locals_table[] = {
+    ROW(files, readable)
+    ROW(files, ready)
+    ROW(files, begin)
+    ROW(files, end)
+    ROW(files, list)
+    ROW(files, count)
+    ROW(files, load)
+    ROW(files, save)
+    ROW(files, delete)
+    ROW(files, duplicate)
+    ROW(files, rename)
+    ROW(files, new_name)
+    ROW(files, trash_list)
+    ROW(files, restore)
+    ROW(files, empty_trash)
+    ROW(files, history)
+    ROW(files, history_ops)
+    ROW(files, history_commit)
+    ROW(files, encode_image)
+    ROW(files, decode_image)
+    ROW(files, decode_cover)
+    ROW(files, encode_cover)
+    ROW(files, sig)
+    ROW(files, stamp)
+    ROW(files, encode_text)
+    ROW(files, decode_text)
+    ROW(files, provenance)
+};
+SERVED_ROLE(files, Files)
+
+// carts
+
+SERVED(carts, CARTS, readable)
+SERVED(carts, CARTS, ready)
+SERVED(carts, CARTS, begin)
+SERVED(carts, CARTS, end)
+SERVED(carts, CARTS, all)
+SERVED(carts, CARTS, can_journal)
+SERVED(carts, CARTS, slug)
+SERVED(carts, CARTS, create)
+SERVED(carts, CARTS, journal)
+SERVED(carts, CARTS, rescan)
+SERVED(carts, CARTS, hydrate)
+SERVED(carts, CARTS, load_deck)
+SERVED(carts, CARTS, save_deck)
+SERVED(carts, CARTS, save_code)
+SERVED(carts, CARTS, images)
+SERVED(carts, CARTS, save_image)
+SERVED(carts, CARTS, encode_image)
+
+static const mp_rom_map_elem_t carts_locals_table[] = {
+    ROW(carts, readable)
+    ROW(carts, ready)
+    ROW(carts, begin)
+    ROW(carts, end)
+    ROW(carts, all)
+    ROW(carts, can_journal)
+    ROW(carts, slug)
+    ROW(carts, create)
+    ROW(carts, journal)
+    ROW(carts, rescan)
+    ROW(carts, hydrate)
+    ROW(carts, load_deck)
+    ROW(carts, save_deck)
+    ROW(carts, save_code)
+    ROW(carts, images)
+    ROW(carts, save_image)
+    ROW(carts, encode_image)
+};
+SERVED_ROLE(carts, Carts)
+
+// nav
+
+SERVED(nav, NAV, open_app)
+SERVED(nav, NAV, is_system_app)
+SERVED(nav, NAV, projects)
+SERVED(nav, NAV, edit)
+SERVED(nav, NAV, open_image)
+SERVED(nav, NAV, open_text)
+SERVED(nav, NAV, edit_file)
+SERVED(nav, NAV, play)
+SERVED(nav, NAV, run_script)
+SERVED(nav, NAV, text_mode)
+
+static const mp_rom_map_elem_t nav_locals_table[] = {
+    ROW(nav, open_app)
+    ROW(nav, is_system_app)
+    ROW(nav, projects)
+    ROW(nav, edit)
+    ROW(nav, open_image)
+    ROW(nav, open_text)
+    ROW(nav, edit_file)
+    ROW(nav, play)
+    ROW(nav, run_script)
+    ROW(nav, text_mode)
+};
+SERVED_ROLE(nav, Nav)
+
+// notify
+
+SERVED(notify, NOTIFY, achieve)
+
+static const mp_rom_map_elem_t notify_locals_table[] = {
+    ROW(notify, achieve)
+};
+SERVED_ROLE(notify, Notify)
+
+// wallpaper
+
+SERVED(wallpaper, WALLPAPER, current)
+SERVED(wallpaper, WALLPAPER, carts)
+SERVED(wallpaper, WALLPAPER, fills)
+SERVED(wallpaper, WALLPAPER, id_for)
+SERVED(wallpaper, WALLPAPER, title)
+SERVED(wallpaper, WALLPAPER, select)
+SERVED(wallpaper, WALLPAPER, preview)
+SERVED(wallpaper, WALLPAPER, thumbnail)
+SERVED(wallpaper, WALLPAPER, load_copy)
+SERVED(wallpaper, WALLPAPER, save_copy)
+
+static const mp_rom_map_elem_t wallpaper_locals_table[] = {
+    ROW(wallpaper, current)
+    ROW(wallpaper, carts)
+    ROW(wallpaper, fills)
+    ROW(wallpaper, id_for)
+    ROW(wallpaper, title)
+    ROW(wallpaper, select)
+    ROW(wallpaper, preview)
+    ROW(wallpaper, thumbnail)
+    ROW(wallpaper, load_copy)
+    ROW(wallpaper, save_copy)
+};
+SERVED_ROLE(wallpaper, Wallpaper)
+
+// install
+
+SERVED(install, INSTALL, hold)
+SERVED(install, INSTALL, release)
+SERVED(install, INSTALL, fit)
+SERVED(install, INSTALL, memory)
+SERVED(install, INSTALL, chip)
+SERVED(install, INSTALL, runtimes)
+SERVED(install, INSTALL, home)
+SERVED(install, INSTALL, can_pick)
+SERVED(install, INSTALL, pick)
+SERVED(install, INSTALL, root)
+SERVED(install, INSTALL, writable)
+SERVED(install, INSTALL, op)
+SERVED(install, INSTALL, rescan)
+SERVED(install, INSTALL, free)
+SERVED(install, INSTALL, find)
+SERVED(install, INSTALL, net)
+SERVED(install, INSTALL, keep)
+
+static const mp_rom_map_elem_t install_locals_table[] = {
+    ROW(install, hold)
+    ROW(install, release)
+    ROW(install, fit)
+    ROW(install, memory)
+    ROW(install, chip)
+    ROW(install, runtimes)
+    ROW(install, home)
+    ROW(install, can_pick)
+    ROW(install, pick)
+    ROW(install, root)
+    ROW(install, writable)
+    ROW(install, op)
+    ROW(install, rescan)
+    ROW(install, free)
+    ROW(install, find)
+    ROW(install, net)
+    ROW(install, keep)
+};
+SERVED_ROLE(install, Install)
+
+// artwork
+
+// current() -> (kind, name) of Paint's open picture, or None while none is named.
+static mp_obj_t artwork_current(mp_obj_t self) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    char kind[MOY_APP_DOC_MAX], name[MOY_APP_DOC_MAX];
+    size_t kn = 0, nn = 0;
+    int rc = moy_app_artwork_current(a, g, kind, sizeof(kind), &kn, name, sizeof(name), &nn);
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_none;
+    }
+    check(rc);
+    if (kn > sizeof(kind) || nn > sizeof(name)) {
+        return mp_const_none;           // a row no picture of Paint's names
+    }
+    mp_obj_t items[2] = { mp_obj_new_str(kind, kn), mp_obj_new_str(name, nn) };
+    return mp_obj_new_tuple(2, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(artwork_current_obj, artwork_current);
+
+// follow(kind, old, new) -> True when the open picture was kind/old and is now
+// kind/new.
+static mp_obj_t artwork_follow(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    uint32_t g;
+    moy_appabi_t *a = role_app(args[0], &g);
+    size_t kn, on, nn;
+    const char *k = str_of(args[1], &kn);
+    const char *o = str_of(args[2], &on);
+    const char *n = str_of(args[3], &nn);
+    int rc = moy_app_artwork_follow(a, g, k, kn, o, on, n, nn);
+    moy_spine_settings_raise();
+    if (rc == MOY_APP_ABSENT) {
+        return mp_const_false;
+    }
+    check(rc);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(artwork_follow_obj, 4, 4, artwork_follow);
+
+static const mp_rom_map_elem_t artwork_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&artwork_current_obj) },
+    { MP_ROM_QSTR(MP_QSTR_follow), MP_ROM_PTR(&artwork_follow_obj) },
+};
+static MP_DEFINE_CONST_DICT(artwork_locals, artwork_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    artwork_type, MP_QSTR_Artwork, MP_TYPE_FLAG_NONE,
+    make_new, role_make_new,
+    locals_dict, &artwork_locals
+    );
+
 // -- the policy ----------------------------------------------------------------------------
 
 static void policy_read(mp_obj_t perms, moy_app_policy_t *p) {
@@ -987,6 +1268,13 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Theme), MP_ROM_PTR(&theme_type) },
     { MP_ROM_QSTR(MP_QSTR_Prefs), MP_ROM_PTR(&prefs_type) },
     { MP_ROM_QSTR(MP_QSTR_Clipboard), MP_ROM_PTR(&clip_type) },
+    { MP_ROM_QSTR(MP_QSTR_Artwork), MP_ROM_PTR(&artwork_type) },
+    { MP_ROM_QSTR(MP_QSTR_Files), MP_ROM_PTR(&files_type) },
+    { MP_ROM_QSTR(MP_QSTR_Carts), MP_ROM_PTR(&carts_type) },
+    { MP_ROM_QSTR(MP_QSTR_Nav), MP_ROM_PTR(&nav_type) },
+    { MP_ROM_QSTR(MP_QSTR_Notify), MP_ROM_PTR(&notify_type) },
+    { MP_ROM_QSTR(MP_QSTR_Wallpaper), MP_ROM_PTR(&wallpaper_type) },
+    { MP_ROM_QSTR(MP_QSTR_Install), MP_ROM_PTR(&install_type) },
     { MP_ROM_QSTR(MP_QSTR_policy), MP_ROM_PTR(&mod_policy_obj) },
     { MP_ROM_QSTR(MP_QSTR_manifest_error), MP_ROM_PTR(&mod_manifest_error_obj) },
     { MP_ROM_QSTR(MP_QSTR_id_for), MP_ROM_PTR(&mod_id_for_obj) },

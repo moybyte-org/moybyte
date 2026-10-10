@@ -36,6 +36,7 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
     "theme.variant", "theme.skin",
     "prefs.get", "prefs.set", "prefs.clear",
+    "artwork.current", "artwork.follow",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
 };
 
@@ -688,6 +689,195 @@ int moy_app_prefs_clear(moy_appabi_t *a, uint32_t g, const char *key, size_t n) 
     }
     moy_settings_flush(a->prefs);
     return MOY_APP_OK;
+}
+
+// -- artwork ----------------------------------------------------------------------------
+
+// Four hex digits of `s` (`n` bytes left before the closing quote), or -1.
+static long hex4(const char *s, size_t n) {
+    if (n < 4u) {
+        return -1;
+    }
+    long v = 0;
+    for (int k = 0; k < 4; k++) {
+        char h = s[k];
+        int d = h >= '0' && h <= '9' ? h - '0' : h >= 'a' && h <= 'f' ? h - 'a' + 10
+                : h >= 'A' && h <= 'F' ? h - 'A' + 10 : -1;
+        if (d < 0) {
+            return -1;
+        }
+        v = (v << 4) | d;
+    }
+    return v;
+}
+
+// A JSON string's text decoded into `out` (UTF-8, up to cap): its length, or -1
+// for text that is not one string.
+static long json_str(const char *j, size_t jn, char *out, size_t cap) {
+    if (jn < 2u || j[0] != '"' || j[jn - 1u] != '"') {
+        return -1;
+    }
+    size_t n = 0;
+    for (size_t i = 1; i + 1u < jn; i++) {
+        uint32_t ch = (unsigned char)j[i];
+        if (ch == '"') {
+            return -1;
+        }
+        if (ch == '\\') {
+            if (++i + 1u >= jn) {
+                return -1;
+            }
+            char e = j[i];
+            const char *simple = "\"\\/bfnrt", *to = "\"\\/\b\f\n\r\t";
+            const char *at = strchr(simple, e);
+            if (e != 'u' && (at == NULL || e == '\0')) {
+                return -1;
+            }
+            if (e != 'u') {
+                ch = (unsigned char)to[at - simple];
+            } else {
+                long hi = hex4(j + i + 1u, jn - i - 2u);
+                if (hi < 0) {
+                    return -1;
+                }
+                i += 4u;
+                ch = (uint32_t)hi;
+                if (ch >= 0xd800u && ch < 0xdc00u && i + 6u < jn
+                    && j[i + 1u] == '\\' && j[i + 2u] == 'u') {
+                    long lo = hex4(j + i + 3u, jn - i - 4u);
+                    if (lo >= 0xdc00 && lo < 0xe000) {
+                        ch = 0x10000u + ((ch - 0xd800u) << 10) + ((uint32_t)lo - 0xdc00u);
+                        i += 6u;
+                    }
+                }
+                unsigned char u[4];
+                size_t un;
+                if (ch < 0x80u) {
+                    u[0] = (unsigned char)ch;
+                    un = 1;
+                } else if (ch < 0x800u) {
+                    u[0] = (unsigned char)(0xc0u | (ch >> 6));
+                    u[1] = (unsigned char)(0x80u | (ch & 0x3fu));
+                    un = 2;
+                } else if (ch < 0x10000u) {
+                    u[0] = (unsigned char)(0xe0u | (ch >> 12));
+                    u[1] = (unsigned char)(0x80u | ((ch >> 6) & 0x3fu));
+                    u[2] = (unsigned char)(0x80u | (ch & 0x3fu));
+                    un = 3;
+                } else {
+                    u[0] = (unsigned char)(0xf0u | (ch >> 18));
+                    u[1] = (unsigned char)(0x80u | ((ch >> 12) & 0x3fu));
+                    u[2] = (unsigned char)(0x80u | ((ch >> 6) & 0x3fu));
+                    u[3] = (unsigned char)(0x80u | (ch & 0x3fu));
+                    un = 4;
+                }
+                for (size_t k = 0; k < un; k++, n++) {
+                    if (out != NULL && n < cap) {
+                        out[n] = (char)u[k];
+                    }
+                }
+                continue;
+            }
+        }
+        if (out != NULL && n < cap) {
+            out[n] = (char)ch;
+        }
+        n++;
+    }
+    return (long)n;
+}
+
+// One of Paint's rows, decoded: its length, or -1 when it is absent or not a string.
+static long art_row(const moy_appabi_t *a, const char *key, char *out, size_t cap) {
+    const char *j;
+    size_t jn;
+    if (a->prefs == NULL || !moy_settings_get(a->prefs, key, strlen(key), &j, &jn)) {
+        return -1;
+    }
+    return json_str(j, jn, out, cap);
+}
+
+#define ART_KIND MOY_APP_ARTWORK_NS "_doc_kind"
+#define ART_DOC MOY_APP_ARTWORK_NS "_doc"
+static const char DRAWINGS[] = "drawings";
+
+int moy_app_artwork_current(moy_appabi_t *a, uint32_t g, char *kind, size_t kcap,
+                            size_t *klen, char *name, size_t ncap, size_t *nlen) {
+    int rc;
+    if (holding(a, g, MOY_ROLE_ARTWORK, &rc) == NULL) {
+        a->counts[MOY_ROW_ARTWORK_CURRENT]++;
+        return rc;
+    }
+    long n = art_row(a, ART_DOC, name, ncap);
+    if (n < 0) {
+        a->counts[MOY_ROW_ARTWORK_CURRENT]++;
+        return MOY_APP_ABSENT;
+    }
+    a->counts[MOY_ROW_ARTWORK_CURRENT] += kind != NULL || name != NULL;
+    *nlen = (size_t)n;
+    long k = art_row(a, ART_KIND, kind, kcap);
+    if (k < 0) {
+        k = (long)(sizeof(DRAWINGS) - 1u);
+        if (kind != NULL) {
+            memcpy(kind, DRAWINGS, (size_t)k < kcap ? (size_t)k : kcap);
+        }
+    }
+    *klen = (size_t)k;
+    return MOY_APP_OK;
+}
+
+int moy_app_artwork_follow(moy_appabi_t *a, uint32_t g, const char *kind, size_t kn,
+                           const char *old, size_t on, const char *nw, size_t nn) {
+    int rc;
+    a->counts[MOY_ROW_ARTWORK_FOLLOW]++;
+    if (holding(a, g, MOY_ROLE_ARTWORK, &rc) == NULL) {
+        return rc;
+    }
+    if (nn == 0u || nn > MOY_APP_DOC_MAX || kn > MOY_APP_DOC_MAX || on > MOY_APP_DOC_MAX) {
+        return MOY_APP_BAD;
+    }
+    char row[2u * MOY_APP_DOC_MAX + 2u];
+    size_t rn = 0;
+    row[rn++] = '"';
+    for (size_t i = 0; i < nn; i++) {
+        unsigned char ch = (unsigned char)nw[i];
+        if (ch < 0x20u) {
+            return MOY_APP_BAD;
+        }
+        if (ch == '"' || ch == '\\') {
+            row[rn++] = '\\';
+        }
+        row[rn++] = (char)ch;
+    }
+    row[rn++] = '"';
+    char cur[MOY_APP_DOC_MAX];
+    long n = art_row(a, ART_DOC, cur, sizeof(cur));
+    if (n < 0 || (size_t)n != on || memcmp(cur, old, on) != 0) {
+        return MOY_APP_ABSENT;
+    }
+    long k = art_row(a, ART_KIND, cur, sizeof(cur));
+    const char *have = cur;
+    if (k < 0) {
+        have = DRAWINGS;
+        k = (long)(sizeof(DRAWINGS) - 1u);
+    }
+    if ((size_t)k != kn || memcmp(have, kind, kn) != 0) {
+        return MOY_APP_ABSENT;
+    }
+    rc = moy_settings_set(a->prefs, ART_DOC, sizeof(ART_DOC) - 1u, row, rn);
+    if (rc != MOY_SETTINGS_OK) {
+        return rc == MOY_SETTINGS_NOMEM ? MOY_APP_NOMEM : MOY_APP_BAD;
+    }
+    moy_settings_flush(a->prefs);
+    return MOY_APP_OK;
+}
+
+// -- the rows served in Python ------------------------------------------------------------
+
+int moy_app_holds(const moy_appabi_t *a, uint32_t g, int role) {
+    int rc;
+    holding(a, g, role, &rc);
+    return rc;
 }
 
 // -- the clipboard ----------------------------------------------------------------------

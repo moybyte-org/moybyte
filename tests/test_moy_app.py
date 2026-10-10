@@ -43,21 +43,30 @@ class _Plain:
 
 
 class _Servers:
-    def __init__(self, say):
-        self.say = say
+    def __init__(self, say, ap=None, app=None):
+        self.say, self.ap, self.app = say, ap, app
 
-    def glyph(self, kind, rect, c, cv=None):
-        self.say("glyph", kind, rect, c, cv)
+    def glyph(self, g, kind, rect, c, cv=None):
+        self.say("glyph", g > 0, kind, rect, c, cv)
 
-    def set(self, name, variant=None):
+    def set(self, g, name, variant=None):
         self.say("set", name, variant)
 
-    def set_variant(self, v):
+    def set_variant(self, g, v):
         self.say("set_variant", v)
 
-    def set_skin(self, name):
+    def set_skin(self, g, name):
         self.say("set_skin", name)
         return 7
+
+    # every shell row of the other roles: the grant's id, the arguments back
+    def __getattr__(self, verb):
+        if verb.startswith("_"):
+            raise AttributeError(verb)
+
+        def row(g, *a, **kw):
+            return (verb, self.app.grant_id(g), a, sorted(kw.items()))
+        return row
 
 
 def run(sp, ap, say, mi):
@@ -189,6 +198,48 @@ def run(sp, ap, say, mi):
     t.set("berry", variant="light")
     t.set_variant("dark")
     say("served", t.set_skin("outline"), sorted(app.served().items()))
+
+    # -- the roles served in Python: the grant checked, the row counted, the
+    # server called with the grant first
+    every = app.grant("tracer", ("files", "carts", "nav", "notify", "wallpaper",
+                                 "install", "artwork"))
+    srv2 = _Servers(say, ap, app)
+    for role in ("files", "carts", "nav", "notify", "wallpaper", "install"):
+        app.serve(role, srv2)
+    say("files", ap.Files(app, every).load("docs", "a"),
+        ap.Files(app, every).begin(), ap.Carts(app, every).journal("c", "m", "s", grad=1))
+    say("nav", ap.Nav(app, every).play("cart"), ap.Notify(app, every).achieve("open"),
+        ap.Wallpaper(app, every).thumbnail(4, 3), ap.Install(app, every).op(None))
+    try:
+        ap.Files(app, sg).list("docs")
+        say("files allowed")
+    except ValueError as e:
+        say("files denied", str(e))
+    say("served", sorted(app.served().items()))
+
+    # -- artwork: Paint's open picture, its rows
+    art = ap.Artwork(app, every)
+    say("artwork none", art.current(), art.follow("drawings", "a", "b"))
+    rows.set("paint_doc", "pic 1")
+    say("artwork", art.current(), art.follow("drawings", "nope", "x"),
+        art.follow("docs", "pic 1", "x"), art.current())
+    say("follow", art.follow("drawings", "pic 1", 'pic "2"'), art.current(),
+        rows.get("paint_doc"))
+    rows.set("paint_doc_kind", "project:caf\u00e9.moy")
+    rows.set("paint_doc", "caf\u00e9 \U0001f600")
+    say("unicode", art.current() == ("project:caf\u00e9.moy", "caf\u00e9 \U0001f600"),
+        art.follow("project:caf\u00e9.moy", "caf\u00e9 \U0001f600", "n\u00e9w"),
+        art.current() == ("project:caf\u00e9.moy", "n\u00e9w"))
+    for bad in ("", "a\nb", "x" * 256):
+        try:
+            art.follow("project:caf\u00e9.moy", "n\u00e9w", bad)
+            say("followed", len(bad))
+        except ValueError:
+            say("refused", len(bad))
+    rows.set("paint_doc", 7)
+    say("not a name", art.current())
+    rows.delete("paint_doc")
+    rows.delete("paint_doc_kind")
     say("tokens", list(ap.tokens()))
 
     # -- denied and stale

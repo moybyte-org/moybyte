@@ -9,8 +9,7 @@ restates it equal to it:
 
 - `app_context.ROLES` is the table's roles, in its order;
 - every role object `AppContext` builds answers exactly the table's verbs, and
-  every verb an app calls on the two shared objects (the ArtworkService and the
-  clipboard) is a row;
+  every shell row is a method of the server the console registers for it;
 - the grant column is the C policy's permission map (`moy_app.perms()`);
 - the C rows are native/moy_app's, in the table's order, and its role
   objects answer exactly them;
@@ -35,7 +34,7 @@ import moy_app
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "native" / "moy_app" / "roles.json"
-SERVERS = ("python", "shell", "c")
+SERVERS = ("shell", "c")
 
 
 def _rows():
@@ -64,26 +63,21 @@ def test_roles_is_the_tables_roles_in_order():
     assert tuple(_verbs()) == _ac.ROLES
 
 
-# What AppContext builds for each role, where the role is an object of its own:
-# native/moy_app's role types for the C roles, this tier's classes for the rest.
+# What AppContext builds for each role: native/moy_app's role type, every one.
 _CLASSES = {"damage": moy_app.Damage, "surface": moy_app.Surface,
-            "theme": moy_app.Theme,
-            "files": _ac.Files, "carts": _ac.Carts, "nav": _ac.Nav,
-            "prefs": moy_app.Prefs, "notify": _ac.Notify,
-            "wallpaper": _ac.WallpaperRole, "install": _ac.Installer,
-            "clipboard": moy_app.Clipboard}
+            "theme": moy_app.Theme, "files": moy_app.Files,
+            "carts": moy_app.Carts, "nav": moy_app.Nav, "prefs": moy_app.Prefs,
+            "notify": moy_app.Notify, "wallpaper": moy_app.Wallpaper,
+            "artwork": moy_app.Artwork, "clipboard": moy_app.Clipboard,
+            "install": moy_app.Install}
 
-# Attributes a role object holds that are not verbs: the storage roles' raw
-# in-session view, which `batch(fn)` hands its `fn`; and the wallpaper role's
-# inherited storage machinery, which its own copy verbs use and its class
-# keeps out of its surface (no app reads its readiness or opens its session).
-_NOT_VERBS = {"raw"}
-_INHERITED = {"wallpaper": {"batch", "readable", "ready"}}
+
+def test_every_role_has_its_type():
+    assert set(_CLASSES) == set(_ac.ROLES)
 
 
 def _public(role, cls):
-    skip = _NOT_VERBS | _INHERITED.get(role, set())
-    return {n for n in dir(cls) if not n.startswith("_") and n not in skip
+    return {n for n in dir(cls) if not n.startswith("_")
             and callable(getattr(cls, n))}
 
 
@@ -95,43 +89,34 @@ def test_each_role_object_answers_exactly_its_rows(role):
     assert verbs - have == set(), "%s rows with no verb: %s" % (role, sorted(verbs - have))
 
 
-def _shared_object_calls(handle_names, modules):
-    """Every `<handle>.<verb>(` an app module makes on a shared role object."""
-    out = set()
-    for mod in modules:
-        text = (ROOT / "runtime" / (mod + ".py")).read_text()
-        for h in handle_names:
-            for m in re.finditer(r"(?<![\w.])" + re.escape(h) + r"\.([a-z_]+)\(", text):
-                out.add(m.group(1))
-    return out
-
-
 def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
     c_rows = [r["role"] + "." + r["verb"] for r in _rows() if r["server"] == "c"]
     assert c_rows == list(moy_app.rows())
     assert tuple(_verbs()) == tuple(moy_app.roles())
 
 
-def test_the_shared_objects_rows_are_what_apps_call():
-    """`ctx.artwork` is an object, not a role class, so its verbs are the
-    methods apps call on it: each row must be a method, and each method an app
-    calls through the handle must be a row; the same for the calls apps make
-    on the clipboard role."""
-    from runtime.artwork import ArtworkService
-    verbs = _verbs()
-    for role, cls in (("artwork", ArtworkService), ("clipboard", moy_app.Clipboard)):
-        for v in verbs[role]:
-            assert callable(getattr(cls, v, None)), "%s.%s is not a method" % (role, v)
-    art = _shared_object_calls(
-        ("self._art", "art"),
-        ("artwork", "appearance_app", "storybook_app", "files_app"))
-    art |= _shared_object_calls(("ws.artwork", "self.artwork"), ("console",))
-    assert art - set(verbs["artwork"]) == set(), \
-        "artwork verbs called with no row: %s" % sorted(art - set(verbs["artwork"]))
-    clip = _shared_object_calls(("self._clip", "self.clip"),
-                                ("storybook_app", "editors_code"))
-    assert clip - set(verbs["clipboard"]) == set(), \
-        "clipboard verbs called with no row: %s" % sorted(clip - set(verbs["clipboard"]))
+def test_the_shell_rows_are_the_servers_methods():
+    """Each shell row is a method of the server the console registers for its
+    role (runtime/shell_servers.py), taking the grant first; a server method
+    that is no row is a verb no app can reach."""
+    import inspect
+    from runtime import shell_servers as ss
+    servers = {"surface": ss.SurfaceServer, "theme": ss.ThemeServer,
+               "files": ss.FilesServer, "carts": ss.CartsServer,
+               "nav": ss.NavServer, "notify": ss.NotifyServer,
+               "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
+    shell = {}
+    for r in _rows():
+        if r["server"] == "shell":
+            shell.setdefault(r["role"], set()).add(r["verb"])
+    assert set(shell) == set(servers)
+    for role, cls in servers.items():
+        have = {n for n in dir(cls) if not n.startswith("_")
+                and callable(getattr(cls, n))}
+        assert have == shell[role], (role, sorted(have ^ shell[role]))
+        for v in have:
+            params = list(inspect.signature(getattr(cls, v)).parameters)
+            assert params[:2] == ["self", "g"], (role, v, params)
 
 
 def test_the_grant_column_is_the_permission_map():

@@ -1,26 +1,7 @@
-# Map (grep -n a name to jump there):
-#   SurfaceServer  surface's Python-only row: the toolkit's glyph callable
-#   ThemeServer    theme's Python rows: the verbs that change the look
-#   _StoreRole     what Files, Carts and WallpaperRole share
-#   _RawFiles      the user-files verbs with no session and no error mapping
-#   Files          the user-files store (`files/<kind>/` beside the carts)
-#   _RawCarts      Carts' in-session view
-#   Carts          the cart store: projects, not documents
-#   Nav            where the console goes next
-#   Notify         achievement events
-#   WallpaperRole  the desktop backdrop
-#   Installer      carts from outside: fetch, verify, install
-#   AppContext     an app's grant and roles: those above, and native/moy_app's
 """`AppContext` -- the narrowed shell interface a SYSTEM APP is handed
 (docs/app_api_v1.md, ui_refactor_2026-08 Phase 6).
 
-Before this, every app held a `self.ws` back-reference into `Workstation` and
-reached through it for whatever it needed, private members included: 41
-distinct names / ~371 uses across the seven shipped apps, 13 of them private.
-That is a service locator, and it is why nothing can say what an app is allowed
-to do -- which is exactly what Phase 7 (user apps) has to answer.
-
-An app now gets ONE object with a small number of ROLES on it, and it declares
+An app gets ONE object with a small number of ROLES on it, and it declares
 which roles it uses:
 
     class CalcAppLayer:
@@ -31,78 +12,65 @@ roles, so touching an undeclared one is an `AttributeError` on the spot rather
 than a coupling nobody notices. `tests/test_app_context.py` pins both
 directions -- every role an app's source names must be declared, and every role
 it declares must be named (an over-declaration is a permission nobody needs).
-Phase 7's `make_system_api(ctx, cart)` is then the same filter keyed on a
-cart's manifest permissions rather than on a class constant.
+`make_system_api(ctx, cart)` (runtime/system_api.py) is the same filter keyed
+on a cart's manifest permissions rather than on a class constant.
 
 ## The roles
 
-    ctx.damage      the whole-system-surface invalidation flag (C)
+    ctx.damage      the whole-system-surface invalidation flags
     ctx.surface     the canvas the app draws on, its size, scales, window, bar,
-                    pointer (C, but glyph)
-    ctx.theme       the live token set (C) + the theme/variant/skin verbs
+                    pointer; the toolkit's glyph
+    ctx.theme       the live token set + the theme/variant/skin verbs
     ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode
-    ctx.prefs       persisted per-app settings (system.json, namespaced; C)
+    ctx.prefs       persisted per-app settings (system.json, namespaced)
     ctx.notify      achievement events
-    ctx.wallpaper   the desktop backdrop capability (Appearance + Paint)
-    ctx.artwork     the ArtworkService capability handle (Paint's model)
-    ctx.clipboard   the system cut/copy/paste buffer (#132; C)
+    ctx.wallpaper   the desktop backdrop (Appearance, Paint, Files' WALL)
+    ctx.artwork     Paint's open picture: which it is, and following a rename
+    ctx.clipboard   the system cut/copy/paste buffer (#132)
     ctx.install     carts from outside: the network, its lease, the store (#124)
 
 No role hands out the console itself: an app reaches the shell only through
 the roles above (`tests/test_app_context.py` holds it).
 
-## The grant, and the roles served in C
+## The grant, and where each row is served
 
 Every context holds a GRANT (`ctx.grant`): a row of native/moy_app's grant
 table, keyed by the app's id, carrying its role mask, its files kind and its
-prefs namespace (docs/kernel_appabi_2026-10.md section 2.2). The roles marked
-(C) above are native/moy_app's role objects over that grant -- each method a C
-row of `native/moy_app/roles.json`, the state the kernel's (the damage flags,
-the grant's surface row, the live token table, the settings rows, the
-clipboard's 4 KiB of text) -- and the rest are this module's classes until
-their steps cross them. A row the table serves in Python (`surface.glyph`,
-`theme.set*`) is the server the console registers for its role
-(`SurfaceServer`, `ThemeServer`). A shipped app's grant is
-idempotent by its id, so a start re-registering the app finds the row it had;
-a user app's (`run=True`) is its run's, ended when the run ends
-(`AppContext.end`).
+prefs namespace (docs/kernel_appabi_2026-10.md section 2.2). Every role object
+is native/moy_app's over that grant, one method per row of
+`native/moy_app/roles.json`: a C row reads the kernel's state (the damage
+flags, the grant's surface row, the live token table, the settings rows, Paint's
+open picture, the clipboard's 4 KiB of text); a shell row calls the server the
+console registers for its role (runtime/shell_servers.py) with the grant first.
+A shipped app's grant is idempotent by its id, so a start re-registering the
+app finds the row it had; a user app's (`run=True`) is its run's, ended when
+the run ends (`AppContext.end`).
 
 `ctx.files` and `ctx.carts` are deliberately two roles and not one. Apps use
-the first almost exclusively (a document is a user file); only Storybook
-authors CARTS. Conflating them was the source doc's biggest wrong call, because
-it hides which apps can write executable content.
-
-`ctx.clipboard` is here against the source plan, which ruled it "one comment
-and zero consumers" and deferred it: that count came from grepping for `ws`
-followed by a dot, which could not see the `getattr` its consumers were written
-with (the `clip=` argument the editor handle and Storybook hand their
-CodeEditor). When a count says zero and the feature ships, suspect the grep.
+the first almost exclusively (a document is a user file); an app that writes a
+cart -- Storybook authoring a story, Paint and Files copying a picture into a
+project's images -- holds the second, which is what says it can write
+executable content.
 
 ## Conventions that are not negotiable
 
-**No `property` forwards.** Measured on this repo's unix MicroPython build and
-scaled by the P4 factor (ui_refactor_2026-08 Section 2.4): a plain attribute hop
-costs +0.5us, the same forward written as a `@property` costs +5.1us. There is
-not one `property` in this file, and `tests/test_app_context.py` asserts it.
-Live shell state is read through a METHOD (`surface.canvas()`), which is never
-stale and is cheaper than a descriptor; identity (`ctx.app_id`, the role
-objects themselves) is a plain attribute.
+**No `property` forwards.** A plain attribute hop costs +0.5us on this repo's
+MicroPython scaled to the P4, the same forward as a `@property` +5.1us
+(ui_refactor_2026-08 Section 2.4). Live shell state is read through a METHOD
+(`surface.canvas()`); identity (`ctx.app_id`, the role objects) is a plain
+attribute.
 
-**Hoist.** The tree already writes `ws = self.ws` 220 times. Under a context
-that idiom becomes `surf = ctx.surface` / `cv = surf.canvas()` ONCE at the top
-of `draw()`, and roles used on every frame are bound in `__init__`
-(`self._surf = ctx.surface`). Reading `ctx.surface.canvas()` per drawn widget
-adds a hop per access and is the one way this refactor could cost performance.
+**Hoist.** Roles used on every frame are bound in `__init__`
+(`self._surf = ctx.surface`) and live values read ONCE at the top of `draw()`
+(`cv = surf.canvas()`), never per drawn widget.
 
 **Storage returns `(value, err)`, it does not raise.** `err` is `None` on
 success, the `NO_STORE` singleton when there is no writable store, else the
-exception's text -- which is precisely the contract `app_shell._persist`
-hand-rolled in three apps. Compound sequences that must share ONE storage
-session go through `batch(fn)`, whose `fn` receives a RAW view of the same
-verbs (bare values, exceptions propagate) so that no verb has two return
-shapes.
+failure's text -- the difference between CAN'T SAVE HERE and CAN'T SAVE <why>.
+Each storage verb is one store op; `begin`/`end` bracket a session, which holds
+nothing a frame waits on (runtime/shell_servers.py).
 """
 
 
@@ -126,785 +94,6 @@ NO_STORE = _NoStore()
 # in a NEEDS tuple fails at construction instead of at the first draw.
 ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
          "notify", "wallpaper", "artwork", "clipboard", "install")
-
-
-# -- the servers of surface's and theme's Python rows --------------------------
-
-class SurfaceServer:
-    """`surface.glyph`, the role's Python-only row (native/moy_app/roles.json):
-    the toolkit's icon callable, which moy_app's Surface calls with the app's
-    arguments. Every other surface verb is the grant's C surface row, which
-    the console writes (`Workstation._surface_write`)."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def glyph(self, kind, rect, c, cv=None):
-        """Draw a centred `chrome._GLYPHS` icon. Pass `ctx.surface.glyph` as
-        `glyph_draw=` to `ui.chip` -- the icon vocabulary bridge."""
-        self.__ws._glyph(kind, rect, c, cv)
-
-
-class ThemeServer:
-    """`theme.set`, `set_variant` and `set_skin`: the look coordinates its
-    caches, the skin and the wallpaper, so the verbs that change it are the
-    look's (docs/visual_identity_v1.md Section 4.3). The reads are the C token
-    table the look writes at every switch (`Appearance.publish`).
-
-    A theme PICKER wants the OTHER themes' tokens too. That is not a role:
-    `chrome.THEMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
-    module an app imports directly, exactly as `ui` is imported directly.
-    `skin.names()` is the same shape of thing and travels the same way."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def set(self, name, variant=None):
-        self.__ws.look.set_theme(name, variant=variant)
-
-    def set_variant(self, variant):
-        self.__ws.look.set_theme_variant(variant)
-
-    def set_skin(self, name):
-        """Install a widget skin and remember it. `ws.look` owns the install
-        because the skin is process-wide state in `ui` and its name is a
-        persisted setting -- exactly like the theme."""
-        self.__ws.look.set_skin(name)
-
-
-# -- the storage roles' shared machinery -------------------------------------
-
-class _StoreRole:
-    """What `Files`, `Carts` and `WallpaperRole` all are underneath: a
-    readiness pair, a `batch(fn)` session, and the `(value, err)` wrappers that
-    turn ONE `_with_sd` call plus a try/except into the module's contract.
-
-    It was written twice verbatim (`Files` and `Carts` carried identical
-    `readable`/`ready`/`batch`/`_read`/`_write` bodies) and hand-rolled twice
-    more, in `Files.history_commit` and in the wallpaper role's copy verbs --
-    four copies of a try/except whose whole job is that nothing here raises.
-    One of them going quietly wrong is not a thing a caller could notice: it
-    would surface as a save that did not happen.
-
-    NOT a role: `ROLES` does not name it and `AppContext` never builds one.
-    Subclasses call `_StoreRole.__init__(self, ws)`, set `self.raw` to their
-    in-session view, and reach the shell through `_store()` / `_shell()` -- the
-    Workstation is held HERE, once, so there is a single mangled reference
-    rather than one per subclass.
-
-    The (store, root, can_manage, with_sd) guard is NOT re-derived here (#209
-    landing C, architecture doc 2a): the shell's ONE `StoreHandle` is taken off
-    it at construction, and `readable`/`ready`/`_session` are that object's
-    `ready`/`writable`/`call`. It arrives as an object rather than an import, so
-    this module stays the leaf it is -- it imports nothing of the shell -- and
-    it still reads the store THROUGH `ws` per call, so the late service
-    injection cannot become a wiring-order trap here either."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-        self.__store = ws.store
-
-    # -- the shell, for subclasses ------------------------------------------
-
-    def _store(self):
-        """The cart-store MODULE (`moy_carts`), or None where no store is
-        wired. The codec verbs are pure functions on it."""
-        return self.__ws.carts_store
-
-    def _shell(self):
-        """The Workstation. Module-internal, for the handful of verbs that
-        reach past the store itself (`look.wallpaper_id`, the wallpaper
-        cart lookups, ...)."""
-        return self.__ws
-
-    # -- readiness -----------------------------------------------------------
-
-    def readable(self):
-        """A store exists to READ from."""
-        return self.__store.ready()
-
-    def ready(self):
-        """A store exists AND writes are enabled (the `_store_ready` predicate
-        every Desk-Lab app used to spell out)."""
-        return self.__store.writable()
-
-    # -- the session ---------------------------------------------------------
-
-    def _session(self, fn):
-        """`fn()` inside ONE storage session, as `(value, err)`. The single
-        try/except in this module's storage path."""
-        try:
-            return (self.__store.call(fn), None)
-        except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
-            return (None, str(exc))
-
-    def batch(self, fn):
-        """Run several verbs under ONE storage session -- the SD mount is the
-        expensive part, and every app that reads a directory listing then N
-        files does so in one `_with_sd` today.
-
-        `fn(raw)` gets the RAW view (bare returns, exceptions propagate);
-        `batch` returns `(fn's value, err)`."""
-        if not self.ready():
-            return (None, NO_STORE)
-        return self._session(lambda: fn(self.raw))
-
-    def _read(self, verb, *args):
-        if not self.readable():
-            return (None, NO_STORE)
-        return self._session(lambda: verb(*args))
-
-    def _write(self, verb, *args):
-        if not self.ready():
-            return (None, NO_STORE)
-        return self._session(lambda: verb(*args))
-
-
-# -- the user-files store (#108) ---------------------------------------------
-
-class _RawFiles:
-    """The user-files verbs with NO session and NO error wrapping -- what runs
-    INSIDE `Files.batch()`, where the batch already owns the try/except. Bare
-    return values; a failure raises. Kept as a separate class so no verb name
-    ever has two return shapes."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    # -- named documents ----------------------------------------------------
-
-    def list(self, kind):
-        return self.__ws.carts_store.list_files(kind, self.__ws.carts_root)
-
-    def count(self, kind):
-        return self.__ws.carts_store.count_files(kind, self.__ws.carts_root)
-
-    def load(self, kind, name):
-        return self.__ws.carts_store.load_file(kind, name, self.__ws.carts_root)
-
-    def save(self, kind, name, blob):
-        return self.__ws.carts_store.save_file(kind, name, blob,
-                                              self.__ws.carts_root)
-
-    def delete(self, kind, name):
-        return self.__ws.carts_store.delete_file(kind, name, self.__ws.carts_root)
-
-    def duplicate(self, kind, name):
-        return self.__ws.carts_store.duplicate_file(kind, name,
-                                                   self.__ws.carts_root)
-
-    def rename(self, kind, name, new):
-        return self.__ws.carts_store.rename_file(kind, name, new,
-                                                self.__ws.carts_root)
-
-    def new_name(self, kind, title=None):
-        store = self.__ws.carts_store
-        if title:
-            return store.free_file_name(kind, title, self.__ws.carts_root)
-        return store.new_file_name(kind, self.__ws.carts_root)
-
-    # -- the restorable trash ------------------------------------------------
-
-    def trash_list(self):
-        return self.__ws.carts_store.trash_list(self.__ws.carts_root)
-
-    def restore(self, kind, name):
-        return self.__ws.carts_store.restore_file(kind, name, self.__ws.carts_root)
-
-    def empty_trash(self):
-        return self.__ws.carts_store.empty_trash(self.__ws.carts_root)
-
-    # -- the #111 op-history sidecars ---------------------------------------
-
-    def history(self, kind, name):
-        return self.__ws.carts_store.load_history(kind, name, self.__ws.carts_root)
-
-    def history_ops(self, kind, name):
-        store = self.__ws.carts_store
-        return store.ops_since_keyframe(
-            store.load_history(kind, name, self.__ws.carts_root))
-
-    def history_commit(self, kind, name, ops, keyframe=None):
-        return self.__ws.carts_store.history_commit(
-            kind, name, ops, keyframe=keyframe, root=self.__ws.carts_root)
-
-
-class Files(_StoreRole):
-    """The USER-FILES store (#108): `files/<kind>/` beside the carts dir, with
-    a restorable trash, auto-naming and the op-history sidecars.
-
-    Every verb returns `(value, err)`; `err` is `None`, `NO_STORE`, or the
-    failure's text. Nothing here raises -- that is the contract
-    `app_shell._persist` already hand-rolled three times. The readiness pair,
-    `batch` and the `_read`/`_write` wrappers are `_StoreRole`'s."""
-
-    def __init__(self, ws):
-        _StoreRole.__init__(self, ws)
-        self.raw = _RawFiles(ws)
-
-    # -- named documents -----------------------------------------------------
-
-    def list(self, kind):
-        return self._read(self.raw.list, kind)
-
-    def count(self, kind):
-        return self._read(self.raw.count, kind)
-
-    def load(self, kind, name):
-        return self._read(self.raw.load, kind, name)
-
-    def save(self, kind, name, blob):
-        return self._write(self.raw.save, kind, name, blob)
-
-    def delete(self, kind, name):
-        return self._write(self.raw.delete, kind, name)
-
-    def duplicate(self, kind, name):
-        return self._write(self.raw.duplicate, kind, name)
-
-    def rename(self, kind, name, new):
-        return self._write(self.raw.rename, kind, name, new)
-
-    def new_name(self, kind, title=None):
-        """A free name for a NEW item. With a `title` it is that title, slugged
-        the kind's way and unique-ified (so a typed `todo.txt` stays
-        `todo.txt`); without one it is the kind's auto-name."""
-        return self._read(self.raw.new_name, kind, title)
-
-    # -- the restorable trash ------------------------------------------------
-
-    def trash_list(self):
-        return self._read(self.raw.trash_list)
-
-    def restore(self, kind, name):
-        return self._write(self.raw.restore, kind, name)
-
-    def empty_trash(self):
-        return self._write(self.raw.empty_trash)
-
-    # -- the #111 op-history sidecars ---------------------------------------
-
-    def history(self, kind, name):
-        """The raw sidecar records. To SEED an undo stack use `history_ops` --
-        the records before the last keyframe are superseded by it."""
-        return self._read(self.raw.history, kind, name)
-
-    def history_ops(self, kind, name):
-        """The ops after the sidecar's last keyframe -- an op_history.History
-        seed. The ONE reader of that window (moy_carts.ops_since_keyframe)."""
-        return self._read(self.raw.history_ops, kind, name)
-
-    def history_commit(self, kind, name, ops, keyframe=None):
-        # `keyframe` rides as a positional through `_write` (the raw verb takes
-        # it fourth); it used to be a hand-rolled copy of `_write` for exactly
-        # that one keyword.
-        return self._write(self.raw.history_commit, kind, name, ops, keyframe)
-
-    # -- the image codec + provenance stamps (#108 phase 2) ------------------
-    #
-    # Pure functions on the store module: no session, no failure mode beyond a
-    # bad blob, so they return the value directly rather than a pair.
-
-    def encode_image(self, w, h, indices):
-        store = self._store()
-        return store.encode_moyimg(w, h, indices) if store is not None else None
-
-    def decode_image(self, blob):
-        store = self._store()
-        return store.decode_moyimg(blob) if (store is not None and blob) else None
-
-    # A cart's cover (SPEC.md 3.6) is the one picture that is not a moyimg:
-    # Paint opens it as 128 x 128 indices in the console palette and saves it
-    # back as an indexed cover.png.
-
-    def decode_cover(self, blob):
-        store = self._store()
-        return store.decode_cover(blob) if (store is not None and blob) else None
-
-    def encode_cover(self, indices):
-        store = self._store()
-        return store.encode_cover(indices) if store is not None else None
-
-    def sig(self, blob):
-        """The content signature a copy is stamped with, so a later edit can
-        offer "your drawing changed -> UPDATE"."""
-        store = self._store()
-        return store.content_sig(blob) if store is not None else None
-
-    def stamp(self, blob, kind, name, sig):
-        """Stamp `blob` with where it was copied FROM and that source's sig.
-
-        No store means no provenance to add, so the blob passes through -- the
-        same degradation `stamp_provenance` already applies to a blob it cannot
-        parse. Returning None here would hand Paint's copy-on-use path a None to
-        save, which is the drawing lost."""
-        store = self._store()
-        if store is None:
-            return blob
-        return store.stamp_provenance(blob, kind, name, sig)
-
-    # -- the document codec (#181) -------------------------------------------
-    #
-    # Pure functions on the store, same shape as the image codec above. A
-    # document is plain Markdown, so these are `str` and `splitlines` -- they
-    # stay a named seam so a USER APP cart writing a note goes through the one
-    # place that says what a `.md` holds.
-
-    def encode_text(self, body):
-        store = self._store()
-        return store.encode_text(body) if store is not None else None
-
-    def decode_text(self, blob):
-        """The doc body as a list of LINES ([] on anything malformed)."""
-        store = self._store()
-        return store.decode_text(blob) if (store is not None and blob) else []
-
-    def provenance(self, blob):
-        """`(src_key, sig)` off a stamped copy, or `(None, None)`."""
-        store = self._store()
-        if store is None or not blob:
-            return (None, None)
-        return store.read_provenance(blob)
-
-
-# -- the cart store ----------------------------------------------------------
-
-def _catalogue():
-    """The store's cart interface (`moy_catalogue`), imported at the call so
-    this module stays a leaf."""
-    try:
-        import moy_catalogue
-    except ImportError:  # pragma: no cover - host package lane
-        from runtime import moy_catalogue
-    return moy_catalogue
-
-
-class _RawCarts:
-    """`Carts`' in-session view -- same split, same reason as `_RawFiles`. A
-    cart it returns carries its store handle as "h" (`moy_catalogue`)."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def create(self, title, src=None, type=None):
-        return _catalogue().create(title, self.__ws.carts_root, src=src,
-                                   type=type)
-
-    def scan(self):
-        return _catalogue().catalogue(self.__ws.carts_root)
-
-    def load_deck(self, cart):
-        return self.__ws.carts_store.load_deck(cart)
-
-    def save_deck(self, cart, blob):
-        return self.__ws.carts_store.save_deck(cart, blob)
-
-    def save_code(self, cart, src):
-        return self.__ws.carts_store.save_code(cart, src)
-
-    def images(self, cart):
-        """The cart's image assets by name (`moy_carts.load_images` takes the
-        cart's PATH, so a path string is accepted too)."""
-        path = cart.get("path") if isinstance(cart, dict) else cart
-        return self.__ws.carts_store.load_images(path)
-
-    def save_image(self, cart, name, blob):
-        return self.__ws.carts_store.save_image(cart, name, blob)
-
-    def journal_append(self, h, main, src, grad=0):
-        return _catalogue().journal_append(h, main, src, grad=grad)
-
-
-class Carts(_StoreRole):
-    """The CART store -- projects, not documents.
-
-    Deliberately a SEPARATE role from `ctx.files`: a cart is executable
-    content, and an app that can author one is doing something categorically
-    different from an app that saves a drawing. Storybook is the only shipped
-    consumer of the authoring half; Paint uses only the
-    copy-into-a-project verbs. Same `(value, err)` contract as `Files`, off the
-    same `_StoreRole` machinery."""
-
-    def __init__(self, ws):
-        _StoreRole.__init__(self, ws)
-        self.raw = _RawCarts(ws)
-
-    def all(self):
-        """Every scanned cart (the FULL list, not the launcher run-grid)."""
-        return self._shell().carts.all
-
-    def can_journal(self):
-        """True when there is a store to journal into (#111): a board with no
-        writable store has none, and the graduation path degrades."""
-        return self._store() is not None
-
-    def slug(self, text):
-        store = self._store()
-        return store.slug(text) if store is not None else text
-
-    def hydrate(self, cart):
-        """Load a slimmed cart's full payloads back IN PLACE (#66)."""
-        return self._shell().carts.rehydrate(cart)
-
-    def apply(self, items):
-        """Adopt a fresh scan as the live cart list (re-derives both grids)."""
-        self._shell().carts.apply(items)
-
-    def load_deck(self, cart):
-        return self._read(self.raw.load_deck, cart)
-
-    def save_deck(self, cart, blob):
-        return self._write(self.raw.save_deck, cart, blob)
-
-    def save_code(self, cart, src):
-        return self._write(self.raw.save_code, cart, src)
-
-    def images(self, cart):
-        return self._read(self.raw.images, cart)
-
-    def save_image(self, cart, name, blob):
-        return self._write(self.raw.save_image, cart, name, blob)
-
-    # The .moyimg ENCODER, mirrored from `Files`. Deliberately on both roles: a
-    # `.moyimg` blob is the same bytes whether it lands in `files/drawings/` or
-    # in a cart's `images/`, and Storybook (which needs it to put a painting on a
-    # page) must not be handed the whole user-files store to reach it. There is
-    # no decoder here on purpose -- `images()` hands back the stored blobs and
-    # nothing reads a cart image through this role.
-
-    def encode_image(self, w, h, indices):
-        store = self._store()
-        return store.encode_moyimg(w, h, indices) if store is not None else None
-
-
-# -- navigation --------------------------------------------------------------
-
-class Nav:
-    """Where the console goes next.
-
-    `open_app()` is the APP-TO-APP seam. `docs/app_api_v1.md` listed
-    app-to-app as an explicit v1 NON-GOAL and it shipped anyway -- `files_app`
-    reached the notebook app's `open_named(...)` across five sites, because
-    "open this doc" is a real product need and there was no seam for it.
-    This is the seam. It resolves by registered ID, so an app never holds a
-    hard reference to another app's class."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def open_app(self, app_id, cart=None):
-        """Spawn the registered app `app_id`. False when this build does not
-        carry it or no cart carries its identity."""
-        app = self.__ws._apps_by_id.get(app_id)
-        if app is None:
-            return False
-        return bool(self.__ws.open_app(app, cart))
-
-    def is_system_app(self, cart):
-        """True when a registered app's identity claims `cart` -- what keeps
-        app carts out of project lists."""
-        return self.__ws.is_system_app(cart)
-
-    def projects(self):
-        """The editable PROJECTS -- every scanned cart a system app does not
-        claim as its identity, which is exactly the roster the Editor's
-        project-picker shows without its "+ New" tile.
-
-        Here and not on `ctx.carts` on purpose: a list of places to GO is
-        navigation, and an app that browses projects is not thereby allowed to
-        author executable content."""
-        ws = self.__ws
-        return [c for c in ws.carts.all if not ws.is_system_app(c)]
-
-    def edit(self, cart, tab=None):
-        """Open `cart` in the project EDITOR, optionally landing on one tab.
-
-        The Files router's door for a `.moy` folder (which opens the project,
-        never a listing) and for a cart's own main file (`tab="code"`). False
-        when there is nothing to edit -- `open_in_editor` lands a source-less
-        cart on the error panel, and the caller shows its own status instead.
-
-        Leaving the Editor comes back HERE, to the app that opened it, on the
-        row it was showing (`Workstation._go_home_or_back`)."""
-        if cart is None:
-            return False
-        ws = self.__ws
-        ws._note_app_caller()
-        ws.open_in_editor(cart)
-        if ws.project is None or ws.project.cart is not cart:
-            return False
-        if tab:
-            ws.set_menu_view(tab)
-        return True
-
-    def open_image(self, name, kind=None, cart=None):
-        """Open a PICTURE in Paint -- the Files router's image door, for a
-        gallery drawing and for a cart's OWN image (`cart` given) alike. The
-        Editor's ADVANCED files row takes the same console verb, so there is
-        one image route and not two. False when the build carries no Paint."""
-        return self.__ws.open_image(name, kind, cart)
-
-    def open_text(self, name, kind=None, mode=None):
-        """Open a user-files TEXT document in the console's text app, in `mode`.
-
-        The Files router's door for anything that is not a project, a project's
-        main file or a drawing. The text app is a CART now (step 3 of
-        docs/text_editing_2026-09.md) -- Notes, over the editor handle -- and
-        this signature did not move: an app asks to open a document and does
-        not learn what draws it. False when the build carries no text app."""
-        return self.__ws.open_text_cart(name, kind, mode)
-
-    def edit_file(self, cart, name, mode=None):
-        """Open one of `cart`'s OWN files (`manifest.json`, `config.json`, a
-        script beside the main) in the editor, through that project's Editor.
-
-        The Files router's door for a project file, and deliberately not
-        `open_text`: a project file is reached with the loader in the loop
-        (docs/text_editing_2026-09.md), which is what going through the Editor
-        buys -- the return re-reads the folder. Leaving THAT Editor then comes
-        back to this app, the same way `edit` does."""
-        if cart is None:
-            return False
-        ws = self.__ws
-        ws._note_app_caller()
-        return bool(ws.open_project_file(cart, name, mode))
-
-    def play(self, cart, caller):
-        """Open `cart` as a workspace and RUN it, returning to `caller` on
-        exit -- the Storybook PLAY verb."""
-        ws = self.__ws
-        ws._open_workspace(cart)
-        ws.run(ws.project, caller)
-
-    def run_script(self, kind, name):
-        """RUN a vault SCRIPT -- a bare `.py`/`.lua` file, which is a cart with
-        no folder (step 6 of docs/text_editing_2026-09.md). The Files router's
-        RUN door.
-
-        `(ok, why)`: the shell synthesizes the manifest, starts it on the text
-        console and returns True, or answers a kid-facing line the caller shows
-        on its status. Navigation and not `carts`, for the same reason
-        `projects()` is: RUNNING something is going somewhere, and it is
-        emphatically not permission to AUTHOR a cart."""
-        return self.__ws.run_script(kind, name)
-
-    def text_mode(self, on):
-        """Flip the keyboard between typing (clean ASCII) and game (raw
-        matrix) mode. A TYPING app gets this from its registration; this is for
-        an app that changes mode mid-session (Storybook's page editor)."""
-        self.__ws._set_text_mode(bool(on))
-
-
-# -- notifications -----------------------------------------------------------
-
-class Notify:
-    """Achievement events (#21)."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def achieve(self, kind, key=None):
-        """Note an achievement event. Silent when the build carries none."""
-        ach = getattr(self.__ws, "ach", None)
-        if ach is not None:
-            ach.note(kind, key)
-
-
-# -- the desktop backdrop capability ----------------------------------------
-
-class WallpaperRole(_StoreRole):
-    """The desktop backdrop (#28). A CAPABILITY, not a core role -- two apps
-    use it (Appearance chooses one, Paint publishes into one) and nothing else
-    should.
-
-    A `_StoreRole` for its two COPY verbs only: the backdrop has a backing file
-    and therefore the same session + `(value, err)` contract the storage roles
-    have. Everything above the copy verbs is plain shell state. It sets no
-    `raw` view (there is no directory of backdrops to walk), so `batch` is not
-    part of this role's surface."""
-
-    def __init__(self, ws):
-        _StoreRole.__init__(self, ws)
-
-    def current(self):
-        """The active wallpaper id (a cart slug or `fill:<color>`)."""
-        return self._shell().look.wallpaper_id
-
-    def carts(self):
-        """The wallpaper-type carts available as backdrops."""
-        return self._shell().look.wallpaper_carts()
-
-    def fills(self):
-        """The built-in solid fills -- always present, so there is always a
-        valid pick even with zero wallpaper carts installed."""
-        return self._shell().look.FILL_WALLPAPERS
-
-    def id_for(self, cart):
-        return self._shell().look.wp_id_for(cart)
-
-    def cart_by_id(self, wp_id):
-        return self._shell().look.wp_cart_by_id(wp_id)
-
-    def select(self, wp_id):
-        self._shell().look.select_wallpaper(wp_id)
-
-    def preview(self, cv, rect, dt):
-        """Composite the live backdrop into `rect` -- the Appearance preview."""
-        self._shell().wallpaper.draw_preview(cv, rect, dt)
-
-    # The backdrop's own backing file (the legacy artwork.moyimg, now the
-    # wallpaper COPY -- #108 copy-on-set). Same (value, err) contract as Files,
-    # and now the same MACHINERY: `_read`/`_write` carry the readiness gate and
-    # the one try/except, and the two `_raw_*` bodies below are this role's
-    # in-session view (the `raw` split every storage role uses).
-
-    def load_copy(self):
-        return self._read(self._raw_load_copy)
-
-    def save_copy(self, blob):
-        return self._write(self._raw_save_copy, blob)
-
-    def _raw_load_copy(self):
-        ws = self._shell()
-        return ws.carts_store.load_artwork(ws.carts_root)
-
-    def _raw_save_copy(self, blob):
-        ws = self._shell()
-        return ws.carts_store.save_artwork(blob, ws.carts_root)
-
-
-# -- the cart installer -----------------------------------------------------
-
-class Installer:
-    """Carts from outside (#124): the network a store fetches with, the radio
-    lease it fetches under, and the store session it installs inside.
-    `runtime/cart_index.py` does the installing; this is what it is handed.
-
-    A role of its own and not a widening of `carts`: authoring a project and
-    pulling a stranger's cart off the internet are different grants, and one
-    app holds this one. Never a cart's (no permission maps to it). Unlike the
-    storage roles its verbs raise -- the installer drives them a slice per
-    frame and turns every failure into a screen of its own."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-        self.__store = ws.store
-
-    def net(self):
-        """The transport (`online()`, `open(url)`), or None where this console
-        has no way to fetch."""
-        return self.__ws.cart_net
-
-    def home(self):
-        """Where this console's carts are got instead, when not here: "board"
-        on a page a console serves, "headless" on one a console with no screen
-        serves, else None."""
-        return self.__ws.cart_home
-
-    def keep(self):
-        """The store of record's keeper (`runtime/cart_index.py`), where the
-        files an install writes are not it -- the browser's OPFS -- else
-        None."""
-        return self.__ws.cart_keep
-
-    def can_pick(self):
-        """True where the player can hand this console a file of their own (a
-        browser page), for an external file it cannot fetch."""
-        return self.__ws.cart_pick is not None
-
-    def pick(self, name, size, host):
-        """Ask the player for their own copy of `name` (`size` bytes, which
-        this console cannot fetch from `host`). A handle whose `poll()` is
-        None until they answer, then ("file", path) or ("cancel",); `close()`
-        takes the question away. None where nothing can ask."""
-        ask = self.__ws.cart_pick
-        return None if ask is None else ask(name, size, host)
-
-    def hold(self):
-        """Take the radio under the "carts" lease. True when it came up."""
-        return self.__ws.wifi_hold("carts")
-
-    def release(self):
-        self.__ws.wifi_release("carts")
-
-    def root(self):
-        return self.__ws.carts_root
-
-    def writable(self):
-        return self.__store.writable()
-
-    def session(self, fn):
-        """`fn()` inside ONE store session (the SD gate on the T-Deck)."""
-        return self.__store.call(fn)
-
-    def rescan(self):
-        """Re-read the store, so the shelf shows what came and went."""
-        self.__ws.carts.rescan()
-
-    def free(self):
-        """`(free bytes, block size)` of the store the carts live on, or None
-        when it cannot say -- the keeper's answer where there is one, which is
-        the store of record's. Call inside `session` (on the T-Deck the card's
-        free count is read off the card)."""
-        keep = self.__ws.cart_keep
-        if keep is not None:
-            return keep.free()
-        try:
-            import os
-            st = os.statvfs(self.__ws.carts_root)
-        except (ImportError, OSError, AttributeError, TypeError):
-            return None
-        return st[0] * st[4], st[0]
-
-    def find(self, folder):
-        """The scanned cart whose `.moy` folder is `folder`, or None."""
-        tail = "/" + folder
-        for c in self.__ws.carts.all:
-            if str(c.get("path") or "").replace("\\", "/").endswith(tail):
-                return c
-        return None
-
-    def runtimes(self):
-        """The cart runtimes this build carries ("lua", "wasm")."""
-        return tuple(self.__ws.runtimes)
-
-    def fit(self, runtime, pages, module_len, interp):
-        """`(need, have)` for a cart of `runtime` declaring `pages` of memory
-        whose module file is `module_len` bytes: what its load needs --
-        `(total, largest block)` by the engine's own sizing -- and what this
-        console has free. The Player's check before a load, asked of the
-        numbers alone. None when the runtime cannot say."""
-        rt = self.__ws.runtimes.get(runtime)
-        of = getattr(rt, "footprint_of", None)
-        mem = getattr(rt, "memory", None)
-        if of is None or mem is None or not pages:
-            return None
-        try:
-            need = of(pages, module_len, interp)
-            return None if need is None else (need, mem())
-        except Exception:  # noqa: BLE001 -- a report is advisory
-            return None
-
-    def memory(self):
-        """`(free, largest block)` of the memory a compiled cart loads into,
-        as the engine reports it, or None where no engine says."""
-        mem = getattr(self.__ws.runtimes.get("wasm"), "memory", None)
-        if mem is None:
-            return None
-        try:
-            return mem()
-        except Exception:  # noqa: BLE001
-            return None
-
-    def chip(self):
-        """`(chip, compiled-code format)` of this console's compiled tier --
-        what its modules are named for -- or `(None, None)` where there is
-        none (the host)."""
-        try:
-            import moy_wasm
-            return moy_wasm.CHIP, moy_wasm.FORMAT
-        except (ImportError, AttributeError):
-            return None, None
 
 
 # -- the context itself ------------------------------------------------------
@@ -937,27 +126,24 @@ class AppContext:
         if "theme" in needs:
             self.theme = _moy_app.Theme(app, self.grant)
         if "files" in needs:
-            self.files = Files(ws)
+            self.files = _moy_app.Files(app, self.grant)
         if "carts" in needs:
-            self.carts = Carts(ws)
+            self.carts = _moy_app.Carts(app, self.grant)
         if "nav" in needs:
-            self.nav = Nav(ws)
+            self.nav = _moy_app.Nav(app, self.grant)
         if "prefs" in needs:
             self.prefs = _moy_app.Prefs(app, self.grant)
         if "notify" in needs:
-            self.notify = Notify(ws)
+            self.notify = _moy_app.Notify(app, self.grant)
         if "wallpaper" in needs:
-            self.wallpaper = WallpaperRole(ws)
+            self.wallpaper = _moy_app.Wallpaper(app, self.grant)
         if "artwork" in needs:
-            # The ArtworkService instance itself, not a wrapper: it is already
-            # a narrow capability object with its own vocabulary, and wrapping
-            # it would only add a hop (ui_refactor_2026-08 Section 4).
-            self.artwork = ws.artwork
+            self.artwork = _moy_app.Artwork(app, self.grant)
         if "clipboard" in needs:
             # The consumers PASS it on (CodeEditor takes `clip=`).
             self.clipboard = _moy_app.Clipboard(app, self.grant)
         if "install" in needs:
-            self.install = Installer(ws)
+            self.install = _moy_app.Install(app, self.grant)
 
     def end(self):
         """End this context's grant: a user app's run is over. Its role

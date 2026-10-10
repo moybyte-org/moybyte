@@ -45,17 +45,14 @@ from runtime import system_api as _api
 from runtime.app_decls import APPS
 
 
-# Every (module, class) on the app side of the seam. The seven registered apps
-# come from the generated declaration -- so a NEW app is covered by these tests
-# the moment it is declared, with no list to remember here (Phase 5's point).
-# ArtworkService is not a Layer and so is not in APPS, but it is on the app side
-# and takes a context exactly as an app does.
+# Every (module, class) on the app side of the seam: the registered apps, from
+# the generated declaration -- so a NEW app is covered by these tests the
+# moment it is declared, with no list to remember here (Phase 5's point).
 def _app_targets():
     out = []
     for d in APPS:
         mod, _, cls = str(d["entry"]).partition(":")
         out.append((mod, cls))
-    out.append(("artwork", "ArtworkService"))
     return out
 
 
@@ -70,13 +67,38 @@ def _class_node(mod_name, cls_name):
     raise AssertionError("no class %s in runtime/%s.py" % (cls_name, mod_name))
 
 
-def _roles_named(cls_node):
+# The modules an app's model classes live in: a class an app builds over its
+# own context (Paint's `ArtworkService(ctx)`, `PictureCopies(ctx)`) reaches
+# roles on the app's behalf, so its source counts as the app's.
+_MODEL_MODULES = ("artwork", "picture_copies")
+
+
+def _model_node(name):
+    for mod in _MODEL_MODULES:
+        tree = ast.parse((RUNTIME / (mod + ".py")).read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == name:
+                return node
+    return None
+
+
+def _roles_named(cls_node, seen=None):
     """Every AppContext ROLE the class's source reaches, however it is spelled:
-    `ctx.files`, `self.ctx.files`, or the hoist `f = ctx.files`. Every form goes
-    through one `<something>.ctx.<role>` or `ctx.<role>` attribute node, so one
-    walk catches them all."""
+    `ctx.files`, `self.ctx.files`, or the hoist `f = ctx.files` -- and the
+    roles of every model class it builds over its context (`Model(ctx)`).
+    Every form goes through one `<something>.ctx.<role>` or `ctx.<role>`
+    attribute node, so one walk catches them all."""
+    seen = set() if seen is None else seen
+    seen.add(cls_node.name)
     found = set()
     for node in ast.walk(cls_node):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id not in seen
+                and any(isinstance(a, ast.Name) and a.id == "ctx" for a in node.args)):
+            model = _model_node(node.func.id)
+            if model is not None:
+                found |= _roles_named(model, seen)
+            continue
         if not isinstance(node, ast.Attribute) or node.attr not in _ac.ROLES:
             continue
         base = node.value
@@ -129,9 +151,7 @@ def test_an_app_declares_nothing_it_does_not_use(mod, cls):
 def test_the_context_carries_only_the_declared_roles(tmp_path):
     ws = _ws(tmp_path)
     for _mod, cls in APP_TARGETS:
-        app = ws.artwork if cls == "ArtworkService" else None
-        if app is None:
-            app = next(a for a, _t in ws._apps if type(a).__name__ == cls)
+        app = next(a for a, _t in ws._apps if type(a).__name__ == cls)
         ctx = app.ctx
         declared = set(_declared(_mod, cls))
         for role in _ac.ROLES:
@@ -223,8 +243,10 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
     render as CAN'T SAVE None instead of CAN'T SAVE HERE."""
     from runtime import app_shell
     from runtime import artwork
+    from runtime import shell_servers
     assert app_shell.NO_STORE is _ac.NO_STORE
     assert artwork.NO_STORE is _ac.NO_STORE
+    assert shell_servers.NO_STORE is _ac.NO_STORE
     ws = _ws(tmp_path)
     ws.carts_store = None
     _v, err = ws.app_context("demo", ("files",)).files.load("docs", "x")
@@ -234,10 +256,9 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
 
-_ROLE_CLASSES = ("Files", "Carts", "Nav",
-                 "Notify", "WallpaperRole", "_RawFiles", "_RawCarts")
-# The C roles' types (native/moy_app's, Python classes on the host binding).
-_C_ROLE_CLASSES = ("Damage", "Surface", "Theme", "Prefs", "Clipboard")
+# Every role's type (native/moy_app's, Python classes on the host binding).
+_ROLE_CLASSES = ("Damage", "Surface", "Theme", "Files", "Carts", "Nav", "Prefs",
+                 "Notify", "Wallpaper", "Artwork", "Clipboard", "Install")
 
 
 def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
@@ -251,9 +272,8 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
     into every frame on a board with ~23KB of internal SRAM free in play."""
     import moy_app
     built = []
-    for mod, name in ([(_ac, n) for n in _ROLE_CLASSES]
-                      + [(moy_app, n) for n in _C_ROLE_CLASSES]):
-        cls = getattr(mod, name)
+    for name in _ROLE_CLASSES:
+        cls = getattr(moy_app, name)
         real = cls.__init__
 
         def counted(self, *a, _r=real, _n=name, **kw):
@@ -264,10 +284,10 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
 
     ws = _ws(tmp_path)
     boot = len(built)
-    # Lower bound first: eight contexts (seven apps + ArtworkService), each with
-    # several roles, are built during boot. A zero here means the counter is not
+    # Lower bound first: seven contexts, one per app, each with several roles,
+    # are built during boot. A zero here means the counter is not
     # on the construction path any more.
-    assert boot >= 8, "no role construction counted at boot (%d)" % boot
+    assert boot >= 7, "no role construction counted at boot (%d)" % boot
 
     app = ws._apps_by_id["files"]
     assert ws.open_app(app)
@@ -330,7 +350,8 @@ def test_storage_verbs_report_no_store_instead_of_raising(tmp_path):
     for res in (ctx.files.load("docs", "x"),
                 ctx.files.save("docs", "x", "y"),
                 ctx.files.trash_list(),
-                ctx.files.batch(lambda f: f.list("docs")),
+                ctx.files.begin(),
+                ctx.carts.begin(),
                 ctx.carts.load_deck({"path": "/nope"}),
                 ctx.carts.save_code({"path": "/nope"}, "x")):
         value, err = res
@@ -464,7 +485,7 @@ def _new_cart(carts, title):
     assertion about a cart's FOLDER hostage to whichever seed sorts first --
     one with a deck.json or an images/ dir would read as a role verb that
     wrote when it should not have."""
-    cart, err = carts.batch(lambda raw: raw.create(title, type="story"))
+    cart, err = carts.create(title, None, "story")
     assert err is None, err
     return cart
 
@@ -546,27 +567,65 @@ def test_stamp_passes_the_blob_through_when_there_is_no_store(tmp_path):
     assert stamped != blob and "drawings/kite" in stamped
 
 
-def test_the_raw_view_runs_the_same_verbs_inside_one_session(tmp_path):
-    """`batch(fn)` hands `fn` the RAW view -- bare values, exceptions
-    propagating -- so that no verb name ever has two return shapes. `_RawFiles`
-    is a separate class for exactly that, and its bodies are reachable ONLY
-    this way, so nothing else in the suite executes them."""
+def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
+    """`begin`/`end` bracket a session, and inside one a verb answers exactly
+    as it does outside one: there is no raw view, so no verb has two return
+    shapes. A session left open ends at the next frame, and at a run's end."""
     ws, files = _files(tmp_path)
     files.save("docs", "note", _store.encode_text("hi"))
-    files.history_commit("docs", "note", [["ins", 1]])
-    files.delete("docs", "note")
-    seen, err = files.batch(lambda raw: (raw.count("docs"),
-                                         raw.trash_list(),
-                                         raw.history("docs", "note"),
-                                         raw.empty_trash(),
-                                         raw.trash_list()))
-    assert err is None
-    assert seen == (0, [("docs", "note")], [], None, [])
-    assert os.listdir(_trash_dir(ws, "docs")) == []
-    # RAW means a failure RAISES -- and `batch`'s one try/except is what turns
-    # it back into the module's `(value, err)`.
-    value, err = files.batch(lambda raw: raw.count("nope"))
-    assert value is None and "nope" in str(err) and err is not _ac.NO_STORE
+    outside = (files.count("docs"), files.list("docs"), files.count("nope"))
+    assert files.begin() == (True, None)
+    assert ws.store.open == 1
+    inside = (files.count("docs"), files.list("docs"), files.count("nope"))
+    files.end()
+    assert ws.store.open == 0
+    assert inside == outside
+    assert inside[2][0] is None and "nope" in str(inside[2][1])
+    files.begin()
+    files.begin()
+    ws._dirty = True
+    ws.frame(1 / 30.0)
+    assert ws.store.open == 0, "a frame left the sessions open"
+    files.begin()
+    ws.player._end_grant()
+    assert ws.store.open == 0, "a run's end left a session open"
+
+
+def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
+    """The bus rule (docs/kernel_appabi_2026-10.md section 2.6): on the
+    T-Deck the card shares the panel's SPI host, and the gate that drains the
+    flush is held only around one store op. This is the host's model of it: a
+    gate held while `_with_sd` runs an op, and a present that cannot flush
+    while it is held. A session leaked across frames must present every frame
+    and never be held at a present."""
+    ws, files = _files(tmp_path)
+    gate = [0]
+    held_at_present = []
+
+    def with_sd(fn):
+        gate[0] += 1
+        try:
+            return fn()
+        finally:
+            gate[0] -= 1
+
+    ws._with_sd = with_sd
+    real_flush = ws.comp.flush
+
+    def flush(*a, **kw):
+        held_at_present.append(gate[0])
+        return real_flush(*a, **kw)
+
+    ws.comp.flush = flush
+    files.begin()                                  # never ended
+    files.save("docs", "leak", _store.encode_text("x"))
+    before = ws._frames_drawn
+    for _ in range(4):
+        ws._dirty = True
+        ws.frame(1 / 30.0)
+    assert ws._frames_drawn - before == 4, "the panel stopped presenting"
+    assert held_at_present and set(held_at_present) == {0}, held_at_present
+    assert ws.store.open == 0
 
 
 def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
@@ -902,8 +961,9 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # `runtime/*_app.py runtime/artwork.py`, whose glob also catches editor_app.py
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
-MIGRATED = ("calc_app", "appearance_app", "storybook_app",
-            "files_app", "artwork", "app_shell", "getcarts_app", "file_widgets")
+MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",
+            "artwork", "picture_copies", "app_shell", "getcarts_app",
+            "file_widgets")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)

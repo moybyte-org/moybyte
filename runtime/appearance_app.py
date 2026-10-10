@@ -149,9 +149,10 @@ class AppearanceAppLayer:
     TITLE = "APPEARANCE"
     MODES = ("images", "carts", "themes")
     # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
-    # CAPABILITY, not a core role: this app and Paint are its only consumers,
-    # and nothing else should reach the desktop backdrop.
-    NEEDS = ("surface", "theme", "damage", "wallpaper", "artwork")
+    # CAPABILITY, not a core role: this app and the two that copy a drawing
+    # into it (Paint, Files) are its only consumers. My Art's card is the
+    # backdrop's own decode, scaled (`wallpaper.thumbnail`).
+    NEEDS = ("surface", "theme", "damage", "wallpaper")
 
     def __init__(self, ctx, names):
         self.ctx = ctx
@@ -160,7 +161,6 @@ class AppearanceAppLayer:
         self._theme = ctx.theme
         self._damage = ctx.damage
         self._wall = ctx.wallpaper
-        self._art = ctx.artwork
         self.names = names
         cv = ctx.surface.canvas()
         self.layout = AppearanceLayout(cv.w, cv.h, self._surf.font_scale(),
@@ -187,8 +187,7 @@ class AppearanceAppLayer:
         # Land on the current wallpaper's source category. Solid fills live on
         # the IMAGES tab beside My Art.
         wp = self._wall.current()
-        cart = self._wall.cart_by_id(wp)
-        my_art = cart is not None and cart.get("title") == "My Art"
+        my_art = self._wall.title(wp) == "My Art"
         fill = isinstance(wp, str) and wp.startswith("fill:")
         self.mode = "images" if (my_art or fill) else "carts"
         self.sel = self._selected_index()
@@ -491,7 +490,7 @@ class AppearanceAppLayer:
         if isinstance(cart, str):              # solid fill: the color itself
             cv.rect(ix, iy, iw, ih, self.names.get(cart[5:], 0))
         elif image_kind:
-            preview = self._art.thumbnail(iw, ih)
+            preview = self._wall.thumbnail(iw, ih)
             if preview is not None:
                 cv.spr(preview, ix, iy)
             else:

@@ -254,7 +254,7 @@ _SKIN_OWNERS = {
 # AppContext role an app reaches the setting through, and the kernel's boot
 # cascade, which re-applies the stored name through the owner.
 _SKIN_FORWARDERS = {
-    "app_context.py": "ThemeServer.set_skin -> ws.look.set_skin",
+    "shell_servers.py": "ThemeServer.set_skin -> ws.look.set_skin",
     "console_spine.py": "load_system's apply cascade -> ws.look.set_skin",
 }
 

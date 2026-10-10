@@ -73,8 +73,8 @@ objects; `artwork` and `clipboard` are objects; `shell` is the whole console.
 
 **The role table is data**: `native/moy_app/roles.json`, one row per verb: the
 role, the verb, its **server**, the permission that grants it (or `never`) and
-its wasm type (or none); a C row's signature is its header's. Every row starts
-`python`, today's server, and the step that crosses a verb flips its row. It is
+its wasm type (or none); a C row's signature is its header's. A row is `c` or
+`shell`; the step that crosses a verb flips its row. It is
 to the app ABI what moy-spec's `wasm-imports.json` is to the cart verbs; the
 bindings, the import adapter, `docs/app_api_v1.md`'s table, an author's header
 and `ROLES` are each held to it by a test (`tests/test_roles.py`).
@@ -184,19 +184,17 @@ only the shell's own calls (boot restore, cycling) reach the look's
 | `surface` | `glyph` | Python-only | the toolkit's icon callable, until sprint 6 |
 | `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)`, `skin(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
 | `theme` | `set(name, variant)`, `set_variant(v)`, `set_skin(name)` | shell | the look coordinates caches, the skin and the wallpaper |
-| `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (§12 answer 4); history ops cross as bytes. A **session** is mount and readiness only (§2.6) |
-| `carts` | `ids(out)`, `title(cart, buf)`, `slug`, `can_journal`, `load_deck`, `images`, `encode_image`, `save_deck`, `save_code`, `save_image`, `rescan` (the old `hydrate` and `apply`) | shell | the live list is the shell's; the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`) |
+| `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (§12 answer 4); history ops cross as bytes. A **session** is readiness only (§2.6). Served by the console's `FilesServer` until step 7 crosses it |
+| `carts` | the table's rows: the store's readiness and session, the live list, a new cart, its undo journal, a rescan (the old `apply`), its deck, code and images | shell | the live list is the shell's; a cart crosses the Python binding as the list's own dict, and the ROLE door names it by its folder; `create` and `journal` are Storybook's new story and graduation, `rescan` adopts a fresh scan (the old `apply`); the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`). Never granted, so no import shape |
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
 | `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default. On a board the rows are the kernel's (`moy_spine_kernel`'s, viewed by `moy_spine.kernel_settings`), and a write flushes through the rows' own saver (`moy_settings_flush`), which the console's store registers while its VM runs; a write made with no VM stays dirty in the rows, and the next start flushes them before it reads the file |
 | `notify` | `achieve(kind, key)` | shell | the `Achievements` object is the console's |
-| `wallpaper` | `current(buf)`, `fills(out)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)` | shell | `current` is the look's live `wallpaper_id`, which differs from the settings row after a boot fallback that does not persist (`runtime/appearance.py`); `preview` is a Python callable on the frame path |
-| `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file and its preview sidecar (`runtime/moy_image.py`'s, the plan's §2.2.1 row) |
-| `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open drawing, its settings rows; `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the drawing through `files`; Paint's `NEEDS` gains `files` |
+| `wallpaper` | `current(buf)`, `fills(out)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)`, `thumbnail(w, h)` | shell | `current` is the look's live `wallpaper_id`, which differs from the settings row after a boot fallback that does not persist (`runtime/appearance.py`); `preview` is a Python callable on the frame path; `thumbnail` is My Art's card, the backdrop's own decode scaled (§6) |
+| `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file and its preview sidecar (`runtime/moy_image.py`'s, the plan's §2.2.1 row); served by the console until step 7, with the user-files layer whose store it is; a write drops the backdrop's decode |
+| `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open picture, its settings rows `paint_doc_kind` and `paint_doc` (JSON strings, no kind row the drawings kind); `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the picture through `files` |
 | `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD (the Python binding's False) and keeps the old text, and the code editor keeps that copy as its own until another lands. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
-| `install` | `hold()`, `release()` | C | the lease table |
-| `install` | `fit(...)`, `memory(&free,&block)`, `chip(buf)`, `runtimes(out)` | C | the engine's sizing |
-| `install` | `home(buf)`, `can_pick()`, `pick(name, size, host) -> request`, `poll`, `close`, `root(buf)`, `writable()`, `begin()`, `end()`, `rescan()`, `free(&bytes,&block)`, `find(folder) -> cart` | shell | |
-| `install` | `net()`, `keep()` | Python-only | the transport and the keeper are objects `runtime/cart_index.py` drives (`net_text` among them) |
+| `install` | `hold()`, `release()`, `fit(...)`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick(name, size, host)`, `root()`, `writable()`, `rescan()`, `free()`, `find(folder)` | shell | the lease's radio bring-up and the engine objects are the console's; the role is never granted, so no compiled app imports a row and none is C (§11, step 6) |
+| `install` | `net()`, `keep()`, `op(fn)` | Python-only | the transport and the keeper are objects `runtime/cart_index.py` drives (`net_text` among them); `op(fn)` is one installer op inside the bus gate |
 | `shell` | — | — | closed (§2.7) |
 
 ### 2.5 The surface row and the desk
@@ -213,11 +211,14 @@ its own row, never the last window's.
 On the T-Deck the card shares the panel's SPI host, and the bus gate drains the
 flush and holds the next one off while it is held
 (`native/moy_store/moy_vol.h`). A session therefore holds no gate: `begin`
-mounts and checks readiness, every verb takes and leaves the gate around its
-own op, and `end` releases the mount. A session left open ends at the frame's
-end and at the run's end. `batch(fn)` and `install.session(fn)` become `begin`
-and `end`; the raw views (`_RawFiles`, `_RawCarts`) go, so inside a session a
-verb answers as it does outside one.
+checks readiness (the card is mounted once, at its first op, and stays,
+`device/moybyte_sd.py`), every verb takes and leaves the gate around its own op
+(`StoreHandle.call`), and `end` closes the session. One left open ends at the
+next frame's start and at the run's end (`StoreHandle.end_all`). `batch(fn)`
+becomes `begin` and `end`, and its callers make one op per verb;
+`install.session(fn)`, whose caller already ran one installer op per call,
+becomes the Python-only `install.op(fn)`; the raw views (`_RawFiles`,
+`_RawCarts`) go, so inside a session a verb answers as it does outside one.
 
 ### 2.7 Closing `ctx.shell`
 
@@ -246,9 +247,8 @@ cart's binding of a grant; the grant policy goes to C (§2.2).
 as a dict (the shell's draw sites read `ws.theme_colors`, and the toolkit takes
 a dict until sprint 6); `surface.canvas()` as the canvas object; storage verbs
 answering `(value, err)` with `err` `None`, `NO_STORE` or the text, which
-`runtime/app_shell.py`'s CAN'T SAVE HERE versus CAN'T SAVE <why> reads;
-`batch(fn)` as sugar over `begin`/`end`; no `property`, live values through
-methods; a call counter per verb.
+`runtime/app_shell.py`'s CAN'T SAVE HERE versus CAN'T SAVE <why> reads; no
+`property`, live values through methods; a call counter per verb.
 
 **What stays Python behind the line, because the WMs and `console.py` stay
 Python:** the shell servers; the app objects and their hooks, which the Python
@@ -390,13 +390,19 @@ keyed on it; `set_skin` installs the skin in the Python toolkit;
 rows through the relayout. The theme catalogue (`runtime/chrome.py`'s `THEMES`
 and `theme_colors`) stays data the look reads; only the live table crosses.
 
-**`ArtworkService`** (`runtime/artwork.py`) is Paint's document model with the
-wallpaper and project copy verbs, and stops being a role: consumers take
-`artwork.current()` and `files`; Appearance's thumbnail comes from `files` and
-the image codec; Files' rename repoint is `artwork.follow`; Paint's publish
-into the backdrop is `wallpaper.save_copy` and `select`. The service stays
-with Paint, built with Paint's grant, and the console's three reaches into it
-go through Paint's registered app.
+**`ArtworkService`** (`runtime/artwork.py`) is Paint's document model and
+stops being a role: Paint builds it over its own grant
+(`PaintAppLayer.service`), and the console's three reaches into it (the image
+door, `sync_wallpaper`, the Paint cart's identity) and the backdrop's My Art
+go through Paint's registered app (`ws.artwork`). Storybook reads Paint's
+picture through `artwork.current()` and `files`; Files' rename repoint is
+`artwork.follow`. The copy verbs (WALL, GAME, "used in" and its UPDATE) are
+`runtime/picture_copies.py`'s, over each consumer's own roles -- `files`,
+`wallpaper.save_copy` and `select`, `carts.save_image`, `nav.is_system_app` --
+so Files holds `carts` and `wallpaper`. Appearance's My Art card is
+`wallpaper.thumbnail`: the backdrop already holds the copy decoded, and a
+second decode in Appearance would hold another screen of indices on the
+T-Deck.
 
 ## 7. The crossing table
 
@@ -528,6 +534,20 @@ against that bug before it goes green.
   app's context holds `surface` for the ungated `bar_h()`. The rows served in
   Python call the server the console registers per role (`app.serve`) and are
   counted in the binding (`app.served()`).
+
+- Step 6 (2026-10-10): every role object is native/moy_app's; a shell row
+  checks the grant (`moy_app_holds`), counts in `app.served()` and calls the
+  server the console registers (`runtime/shell_servers.py`) with the grant
+  first, so `nav.play` returns to the grant's app. A cart crosses the Python
+  binding as the live list's dict: the window managers and the apps reading a
+  dozen cart fields stay Python (sprint 7 does not run), and an id would buy a
+  lookup per call for nobody; the ROLE door names a cart by its folder. The
+  install role's lease and engine rows stay shell: it is never granted, the
+  radio's bring-up is the console's Python service and the engine sizing reads
+  the runtime objects. `wallpaper.load_copy`/`save_copy` cross with the
+  user-files layer in step 7, whose store they write. Files holds `carts` and
+  `wallpaper` for the copy verbs it already ran through the ArtworkService:
+  writing a project's image is writing a cart, and the grant now says so.
 
 ## 12. The owner's answers (2026-10-10)
 

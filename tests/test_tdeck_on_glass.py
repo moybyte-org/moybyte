@@ -307,6 +307,10 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_a_leaked_session_leaves_the_panel_flushing(board):
+    on_glass.a_leaked_session_leaves_the_panel_flushing(board)
+
+
 def test_a_stale_handle_is_refused_loudly(board):
     on_glass.stale_handle_is_refused_loudly(board)
 

@@ -75,10 +75,9 @@ class StoreHandle:
     """The (store, root, can_manage, with_sd) guard 4-tuple, as an object.
 
     Four bodies re-derived it before this landing (`_persist_system`,
-    `_persist_wallpaper`, `_save_achievements`, `rescan_carts`) and
-    `app_context._StoreRole` re-derives it once more for the storage roles --
-    which is why this is a standalone object and not private to `SystemStore`:
-    CartManager and the roles take one too.
+    `_persist_wallpaper`, `_save_achievements`, `rescan_carts`) -- which is why
+    this is a standalone object and not private to `SystemStore`: CartManager
+    and the storage roles' servers (runtime/shell_servers.py) take one too.
 
     Plain methods, no properties: a property forward measured +5.1us against a
     plain hop's +0.5us on this codebase, and `writable()` sits in front of every
@@ -99,11 +98,30 @@ class StoreHandle:
         return self.ready() and bool(self.ws.can_manage)
 
     def call(self, fn):
-        """Run `fn()` inside ONE storage session. On the T-Deck this mounts the
-        SD card for the duration and releases it after, so the render loop's
-        flushes never collide with it on the shared SPI bus; on the host and the
+        """Run `fn()` as ONE store op. On the T-Deck the op takes the bus gate
+        (the card shares the panel's SPI host: the flush drains first and the
+        next one waits) and leaves it when `fn` returns; on the host and the
         flash-backed boards it is a passthrough."""
         return self.ws._with_sd(fn)
+
+    # A role's session (`files.begin`/`end`, docs/kernel_appabi_2026-10.md
+    # section 2.6) is bookkeeping and nothing else: it holds no gate, because
+    # every op takes the gate around itself (`call`). The console ends any
+    # left open at the frame's end and at a run's end (`end_all`).
+    open = 0
+
+    def begin(self):
+        self.open += 1
+
+    def end(self):
+        if self.open > 0:
+            self.open -= 1
+
+    def end_all(self):
+        """End every session left open; how many there were."""
+        n = self.open
+        self.open = 0
+        return n
 
 
 class SystemStore:

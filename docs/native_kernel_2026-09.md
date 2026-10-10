@@ -225,7 +225,7 @@ sprints that follow it:
 | radios and links: WiFi, ESP-NOW, the updaters, the webhost and sync RPC | `device/device_wifi.py`, `moy_espnow.py` (deleted by sprint 4: `native/moy_play/moy_match.c`), `moy_c6_update.py` (deleted by sprint 3's links pass), `device/moy_webhost.py`, `moy_webserver.py` (deleted by sprint 3's links pass), `runtime/moy_sync.py` | 3 |
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `system_menu_ui.py` and `netplay.py` (deleted by sprint 4: `native/moy_play/moy_chrome.c`, `native/moy_play/moy_match.c`), the notify path | 4 |
-| the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/artwork.py`'s `ArtworkService` (the rest of the file is Paint, an app), `runtime/wallpaper.py` | 5 |
+| the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/shell_servers.py`, `runtime/wallpaper.py` | 5 |
 | the toolkit's core | `runtime/ui.py` | 6 |
 | the window managers | `runtime/wm_windowed.py`, `runtime/wm_desk.py`, `runtime/wm_chrome.py`, the rest of `runtime/console.py` | 7 |
 | apps (stay Python) | the launcher, Settings, Files, Paint, Calc, Notes, Storybook, Appearance, the Editor and its tabs (the Studio, `docs/studio_2026-09.md`, panes and docking included), `runtime/blocks.py` (the block compiler is an editor's) | — |
@@ -297,7 +297,7 @@ console needs while no Python app runs is OS.
 | `runtime/app_shell.py` | app | — | the list shell Files, Storybook and Get Carts share |
 | `runtime/appearance.py` | roles | 5, stays | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons. It stays Python, the coordinator, and writes what the theme role's C rows answer, the live token table (`docs/kernel_appabi_2026-10.md` §6) |
 | `runtime/appearance_app.py` | app | — | Appearance |
-| `runtime/artwork.py` | split | 5, rest stays | `ArtworkService` is a role service (5); `PaintDocument`, `PaintAppLayout` and `PaintAppLayer`, the Paint app, stay Python |
+| `runtime/artwork.py` | app | — | Paint: `PaintDocument`, `PaintAppLayout`, `PaintAppLayer`, and `ArtworkService`, its document model, built over Paint's grant; the `artwork` role's C rows read the open picture from Paint's prefs (`docs/kernel_appabi_2026-10.md` §6) |
 | `runtime/audio.py` | split | 3, rest stays | `AudioEngine` crossed with audio (deleted 2026-10-07); the bank model (`SFX`, `MusicTrack`, `AudioBank`) is the music editor's data and stays |
 | `runtime/audio_binding.py` | host-only | — | the host's ctypes binding of libmoy audio; sprint 3's audio crossing rebinds it |
 | `runtime/bar_layer.py` | window managers | 7 | the top bar and dock every WM draws; its geometry constants are read outside it |
@@ -379,12 +379,14 @@ console needs while no Python app runs is OS.
 | `runtime/palette.py` | glass | 3 | the MOY64 table the canvas converts through; the native canvas owns it |
 | `runtime/perf_hud.py` | frame tail | 3 | the FPS and frame-time overlay, drawn over any content |
 | `runtime/perf_line.py` | frame tail | 3 | the PERF line's one field table, formatter and parser |
+| `runtime/picture_copies.py` | app | — | a drawing's copies into the backdrop and a project, made by Paint and Files over their own roles |
 | `runtime/player.py` | cart path | 4 | the cart loop and the runtime map |
 | `runtime/players.py` | cart path | 4 | input routing to player slots and the net seam netplay uses |
 | `runtime/project.py` | app | — | `Project`: `runtime/project_store.py`'s class plus the Editor's half, the per-tab op histories (`history_for`) and the CONFIG tab's undo codec |
 | `runtime/project_store.py` | store | 1b | the open cart's data, its builders and its `commit_*` verbs, split from `runtime/project.py`; the code commit's graduation check still asks the block compiler and Storybook's deck compiler, which are apps' |
 | `runtime/scene_editor_ui.py` | app | — | the Editor's Scene tab |
 | `runtime/settings_layer.py` | app | — | Settings; its WIFI panel drives the spine's leases |
+| `runtime/shell_servers.py` | roles | 5, stays | the console's servers of the role table's shell rows, which stay Python with the console (`docs/kernel_appabi_2026-10.md` §2.1) |
 | `runtime/skin.py` | toolkit | 6 | the skin catalogue stays unchanged data the native toolkit installs (§4.5) |
 | `runtime/storybook_app.py` | app | — | Storybook |
 | `runtime/surface.py` | glass | 3 | the Surface and its dirty protocol, kernel-owned after the `surface_model_v1.md` amendment (§8) |

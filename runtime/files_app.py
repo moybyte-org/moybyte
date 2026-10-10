@@ -5,7 +5,7 @@ they gain content) open a thumbnail grid -- newest first, names always visible
 under the art, one breadcrumb row planting "things live in places". Item verbs
 ride a selection bar: OPEN (in the owning app -- a second tap on the selected
 tile does the same), RENAME (optional -- names are auto-given), COPY,
-WALL / GAME (the copy-on-use reuse actions, via the ArtworkService), and
+WALL / GAME (the copy-on-use reuse actions, runtime/picture_copies.py), and
 DELETE -- which moves to the restorable trash, never destroys (trash trains
 recovery; confirms train click-through).
 
@@ -26,6 +26,11 @@ try:
     from editors_base import TextEntry
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import TextEntry
+
+try:
+    from picture_copies import PictureCopies
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.picture_copies import PictureCopies
 
 try:
     from file_widgets import FileGridView
@@ -126,8 +131,11 @@ class FilesAppLayer(ListShellApp):
     # app-to-app jumps the router takes (a drawing opens in Paint, a note on
     # the text page, a project in the Editor) --
     # app_api_v1 called that a v1 non-goal and it shipped anyway, because it is
-    # a real product need; `shell` is only the FileGridView duck-type.
-    NEEDS = ("surface", "theme", "damage", "files", "nav", "artwork")
+    # a real product need. WALL, GAME and USE copy a drawing into the backdrop
+    # and into a project (`carts`, `wallpaper`: runtime/picture_copies.py), and
+    # `artwork` follows a renamed drawing Paint has open.
+    NEEDS = ("surface", "theme", "damage", "files", "nav", "artwork", "carts",
+             "wallpaper")
 
     GRID_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
     DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # the kinds the router opens
@@ -146,6 +154,7 @@ class FilesAppLayer(ListShellApp):
         self._store = ctx.files       # ListShellApp's storage role
         self._nav = ctx.nav
         self._art = ctx.artwork
+        self._copies = PictureCopies(ctx)
         self.names = names
         cv = ctx.surface.canvas()
         self.layout = FilesLayout(cv.w, cv.h, self._surf.font_scale(),
@@ -175,21 +184,22 @@ class FilesAppLayer(ListShellApp):
     # -- store ----------------------------------------------------------------
 
     def _refresh_counts(self):
-        """Every kind's count + the trash listing in ONE storage session -- the
-        SD mount is the expensive part, which is what ctx.files.batch is for."""
+        """Every kind's count + the trash listing: one store op each."""
         self.counts = {}
         self.trash = ()
+        counts = {}
+        for kind, _label in KIND_LABELS:
+            if kind != PROJECTS:              # not a files kind -- see above
+                n, err = self._store.count(kind)
+                if err is not None:           # an unreadable store lists nothing
+                    return self._count_projects()
+                counts[kind] = n
+        trash, err = self._store.trash_list()
+        if err is None:
+            self.counts, self.trash = counts, tuple(trash)
+        self._count_projects()
 
-        def _list(f):
-            counts = {}
-            for kind, _label in KIND_LABELS:
-                if kind != PROJECTS:          # not a files kind -- see above
-                    counts[kind] = f.count(kind)
-            return counts, tuple(f.trash_list())
-
-        got, err = self._store.batch(_list)
-        if err is None and got is not None:   # an unreadable store lists nothing
-            self.counts, self.trash = got
+    def _count_projects(self):
         self.counts[PROJECTS] = len(self._nav.projects())
 
     def open(self):
@@ -344,7 +354,7 @@ class FilesAppLayer(ListShellApp):
         self.route(name, kind=self.grid.kind)
 
     def _act(self, verb, name):
-        art = self._art
+        art = self._copies
         if verb == "RUN":
             ok, why = self._nav.run_script(self.grid.kind, name)
             if not ok:
@@ -394,10 +404,8 @@ class FilesAppLayer(ListShellApp):
             res = self._store.rename(self.grid.kind, name, self.rename.text)
             if self._persist(res):
                 new = res[0] or name
-                art = self._art
                 # A renamed open drawing keeps Paint pointed at it.
-                if self.grid.kind == "drawings" and art.doc_name() == name:
-                    art.open_named(new)
+                self._art.follow(self.grid.kind, name, new)
                 self.grid.invalidate(name)
                 self.grid.refresh()
                 self.grid.select(new)
@@ -434,7 +442,7 @@ class FilesAppLayer(ListShellApp):
     def _resend(self, i):
         """Re-copy the drawing to one usage row -- the one-tap UPDATE / send-
         again (#108 phase 2). Stays in the list, re-scanned so the '*' clears."""
-        art = self._art
+        art = self._copies
         if 0 <= i < len(self.used_rows) and self.used_name:
             row = self.used_rows[i]
             if art.resend(row, self.used_name):
@@ -446,7 +454,7 @@ class FilesAppLayer(ListShellApp):
         self._damage.all()
 
     def _game_pick(self, i):
-        art = self._art
+        art = self._copies
         name = self.grid.sel_name()
         if 0 <= i < len(self.project_names) and name:
             title = art.attach(i, name)

@@ -125,7 +125,8 @@ class SpineVerbs:
                                  persist=False)
         # Paint's shared document lives outside the re-seeded built-in cart. Restore
         # My Art's bg asset before compiling a persisted My Art wallpaper.
-        self.artwork.sync_wallpaper()
+        if self.artwork is not None:
+            self.artwork.sync_wallpaper()
         # A SAFE start (the kernel's recovery screen) runs no wallpaper cart:
         # the settings' absence would fall back to the first one there is.
         wallpaper = self.system.get("wallpaper")
@@ -316,9 +317,15 @@ class SpineVerbs:
         """
         for d in APPS:
             cls = _resolve_app_entry(d["entry"])
-            app = cls(self.app_context(d["id"], getattr(cls, "NEEDS", ())),
+            app = cls(self.app_context(d["id"], getattr(cls, "NEEDS", ()),
+                                       prefs_ns=getattr(cls, "PREFS_NS", None)),
                       NAMES)
             setattr(self, str(d["id"]) + "_app", app)
+            # Paint's document model is the console's reach into Paint (the
+            # backdrop's My Art, the image door, the Paint cart's identity).
+            service = getattr(app, "service", None)
+            if service is not None:
+                self.artwork = service
             ms = d.get("min_size")
             self.register_app(app, text_mode=bool(d.get("text_mode")),
                               min_size=(tuple(ms) if ms else None))

@@ -30,10 +30,10 @@ mentions a capability provably cannot use it.
 
 A cart runs `exec` in a plain namespace with the real builtins: it can
 `import`, walk `gc.get_objects()`, or reach an attribute on anything it was
-handed. The role objects hold their `Workstation` in a name-mangled slot
-(`self.__ws` -> `_Theme__ws`), and `ScopedFiles` holds its unscoped role the
-same way, so the obvious reach-through -- `files._files.save("drawings", ...)`,
-`prefs._ws.carts_store` -- fails. That is a SPEED BUMP: it turns an accident
+handed. The role objects are native/moy_app's, which hold a grant and the
+console's app ABI state, and `ScopedFiles` holds its unscoped role in a
+name-mangled slot, so the obvious reach-through --
+`files._files.save("drawings", ...)` -- fails. That is a SPEED BUMP: it turns an accident
 into a deliberate act, and it makes the honest API the easy one. It is not
 containment, and two things say so plainly. A cart that goes looking will find
 a path, and **on the boards it does not even bump**: MicroPython implements no
@@ -92,9 +92,10 @@ lost feature rather than a granted capability.)
     two roles in the first place.
   * `install` -- carts from the internet, written into the store. It is
     `carts`' reason twice over: executable content, and somebody else's.
-  * `wallpaper` / `artwork` -- capability handles held by exactly one shipped
-    app each. `artwork` stays IDENTITY-gated in the Player (Paint's own cart,
-    by title+permission+slug), which a renamed copy cannot inherit.
+  * `wallpaper` / `artwork` -- the desktop backdrop and Paint's open picture,
+    held by the shipped apps that choose or copy into them. Paint's own model
+    stays IDENTITY-gated in the Player (Paint's own cart, by
+    title+permission+slug), which a renamed copy cannot inherit.
   * `damage` / `surface` -- the shell's invalidation epoch and its live canvas
     plumbing. A cart repaints because the Player ticked it; a cart that could
     dirty the shell every frame would defeat the redraw gate on every tier.

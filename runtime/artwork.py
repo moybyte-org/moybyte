@@ -3,18 +3,18 @@
 #   PaintAppLayout                responsive Paint chrome for one window rect
 #   PaintAppLayer                 the Paint app process: layout, input, draw
 #   PaintAppLayer.is_app          the app-API matcher
-#   ArtworkService                Paint's document model, wallpapers and attachments
+#   ArtworkService                Paint's document model and the My Art backdrop
 #   ArtworkService.load           the open drawing as (w, h, index bytes)
 #   ArtworkService.save           persist the canvas to its named drawing
 #   ArtworkService.set_wallpaper  a drawing as the desktop wallpaper
 #   ArtworkService.attach         copy a drawing into a cart
-#   ArtworkService.usage          where a drawing is used
-"""Paint's narrow shell-owned artwork capability.
+"""Paint: the app, and its document model.
 
-The Paint cartridge owns the editor, pixels and interaction. This service owns
-only the operations a sandboxed cartridge cannot perform: persisting drawings,
-publishing one through the built-in ``My Art`` wallpaper cartridge, and copying
-one into a chosen project as ``images/bg.moyimg``.
+PaintAppLayer owns the editor, pixels and interaction; ArtworkService, which
+Paint builds over its own roles, owns the open picture (persisting it) and
+the ``My Art`` backdrop drawn from the wallpaper copy. Publishing a drawing
+through ``My Art`` or into a project as ``images/bg.moyimg`` is
+runtime/picture_copies.py's, which Files uses too.
 
 Drawings are USER FILES (#108): named ``files/drawings/*.moyimg`` items in the
 store, auto-named (naming is never a gate), browsed by the Files app, and
@@ -23,9 +23,9 @@ serves only as the WALLPAPER COPY. Publishing is copy-on-use everywhere:
 WALL/GAME copy the named file's pixels at that moment (editing the drawing
 afterwards changes nothing until it is sent again -- the photo-roll model).
 
-The Player injects this object only into the shipped Paint app when its manifest
-requests the ``artwork`` permission. Ordinary kid cartridges keep the frozen cart
-API unchanged and cannot reach the store through this object.
+The Player hands the service only to the shipped Paint cart, by its identity
+(``is_paint_app``). Ordinary kid cartridges keep the frozen cart API unchanged
+and cannot reach the store through this object.
 """
 
 try:
@@ -53,6 +53,11 @@ try:
     from widgets import ConfirmTap
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
+
+try:
+    from picture_copies import PictureCopies
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.picture_copies import PictureCopies
 
 try:
     from moy_store_base import COVER_FILE
@@ -427,10 +432,14 @@ class PaintAppLayer:
     # fallback.
     TOOL_ICONS = ("edit", "paint", "eraser", "fill", "picker",
                   "line", "rect_tool", "circle", "spray", "move")
-    # The shell roles this app uses (runtime/app_context.py). The DOCUMENT model
-    # lives on the ArtworkService (ctx.artwork); `files` is the drawings grid's
-    # (FileGridView lists and loads through it).
-    NEEDS = ("surface", "theme", "damage", "artwork", "files")
+    # The shell roles this app uses (runtime/app_context.py): the drawings
+    # grid's `files` (FileGridView lists and loads through it), and what its
+    # document model (`ArtworkService`, built here) and its copies use.
+    NEEDS = ("surface", "theme", "damage", "files", "carts", "wallpaper",
+             "prefs", "notify", "nav")
+    # The open picture's rows, `paint_doc` and `paint_doc_kind`, which the
+    # artwork role's C rows read (native/moy_app's MOY_APP_ARTWORK_NS).
+    PREFS_NS = "paint"
 
     def __init__(self, ctx, names):
         self.ctx = ctx
@@ -438,7 +447,7 @@ class PaintAppLayer:
         self._surf = ctx.surface
         self._theme = ctx.theme
         self._damage = ctx.damage
-        self._art = ctx.artwork
+        self._art = self.service = ArtworkService(ctx)
         self.names = names
         cv = ctx.surface.canvas()
         desktop = cv.w >= 640 and cv.h >= 400
@@ -1024,12 +1033,14 @@ class PaintAppLayer:
 
 
 class ArtworkService:
-    """Paint's DOCUMENT model + the wallpaper/project copy-on-use verbs.
-
-    Not a Layer, so it is not in `app_decls` -- but it sits on the APP side of
-    the shell seam, so it takes an `AppContext` exactly as an app does
-    (runtime/app_context.py). Its prefs namespace is "paint" and not its id:
-    `paint_doc` has been the key in real cards' system.json since #108."""
+    """Paint's DOCUMENT model: the open picture, its load and save, and the
+    desktop backdrop drawn from the wallpaper copy (My Art). Paint builds it
+    over Paint's own context and keeps it as `PaintAppLayer.service`, which
+    is how the console reaches it; the copy-on-use verbs are Paint's
+    `PictureCopies` (runtime/picture_copies.py), over the same roles. The open
+    picture lives in Paint's prefs, whose namespace is "paint" (`paint_doc` has
+    been the key in real cards' system.json since #108), which the `artwork`
+    role's C rows read for every other app."""
 
     # The largest document Paint holds -- and it is Paint's OWN largest, the
     # 512x300 desktop wallpaper it seeds and edits, not a number picked for the
@@ -1040,9 +1051,7 @@ class ArtworkService:
     # makes; a 320x240 seed background is ordinary work.
     MAX_W = 512
     MAX_H = 300
-    WALL_TITLE = "My Art"
     PAINT_TITLE = "Paint"
-    NEEDS = ("files", "carts", "wallpaper", "prefs", "notify", "nav")
     # The off-heap loan key for the DESKTOP BACKDROP (#186). Its own key, not
     # PaintDocument's "artwork" and not the wallpaper cart's "wallpaper":
     # release_bakes(owner) frees everything an owner holds, so a shared key
@@ -1058,7 +1067,7 @@ class ArtworkService:
         self._wall = ctx.wallpaper
         self._prefs = ctx.prefs
         self._notify = ctx.notify
-        self._nav = ctx.nav
+        self.copies = PictureCopies(ctx)
         self.last_error = ""
         self._cached = None            # the OPEN doc's decoded (w, h, bytes)
         self._wall_decoded = None      # the wallpaper COPY's decoded tuple
@@ -1084,12 +1093,6 @@ class ArtworkService:
         if not path:                 # embedded fallback cart (no writable store)
             return int(cart.get("version", 0)) >= 1
         return builtin_name(path) == "moybyte.paint.moy"
-
-    def _wall_cart(self):
-        for cart in self._carts.all():
-            if cart.get("type") == "wallpaper" and cart.get("title") == self.WALL_TITLE:
-                return cart
-        return None
 
     def available(self):
         return self._ready()
@@ -1179,23 +1182,17 @@ class ArtworkService:
         self._read_only = False
         self._why = ""
 
-        def _load(f):
-            name = self.doc_name()
-            if kind != self.DRAWINGS:
-                return name, f.load(kind, name)
-            if name:
-                return name, f.load(kind, name)
-            names = f.list(kind)
-            if names:
-                return names[0], f.load(kind, names[0])
-            return None, None
-
-        got, err = files.batch(_load)
+        name = self.doc_name()
+        blob, err = None, None
+        if kind == self.DRAWINGS and not name:
+            names, err = files.list(kind)
+            name = names[0] if names else None
+        if name is not None and err is None:
+            blob, err = files.load(kind, name)
         if err is not None:      # a bad/missing drawing is non-fatal
             if err is not NO_STORE:
                 self.last_error = str(err)
             return None
-        name, blob = got
         if name is not None:
             self._set_doc_name(name, kind)
         if self._cover_doc():
@@ -1242,16 +1239,13 @@ class ArtworkService:
             blob = files.encode_cover(indices)
         else:
             blob = files.encode_image(w, h, indices)
-        name = self.doc_name()
-
-        def _write(f):
-            # A cart's own image keeps its name: the FORMAT chose it, and an
-            # auto-name would write a file the cart does not look for.
-            n = name or f.new_name(kind)
-            f.save(kind, n, blob)
-            return n
-
-        got, err = files.batch(_write)
+        # A cart's own image keeps its name: the FORMAT chose it, and an
+        # auto-name would write a file the cart does not look for.
+        got, err = self.doc_name(), None
+        if not got:
+            got, err = files.new_name(kind)
+        if err is None:
+            _v, err = files.save(kind, got, blob)
         if err is not None:      # surface failure in the app
             self.last_error = str(err)
             return False
@@ -1293,7 +1287,7 @@ class ArtworkService:
         """Restore ``My Art/bg`` from the re-seed-proof wallpaper-copy file."""
         if not self._ready():
             return False
-        wall = self._wall_cart()
+        wall = self.copies.wall_cart()
         if wall is None or not wall.get("path"):
             return False
         blob, err = self._wall.load_copy()
@@ -1302,75 +1296,36 @@ class ArtworkService:
             return False
         if not blob:
             return False
-
-        def _sync(c):
-            if c.images(wall).get("bg") != blob:
-                c.save_image(wall, "bg", blob)
-            return True
-
-        got, err = self._carts.batch(_sync)
+        images, err = self._carts.images(wall)
+        if err is None and (images or {}).get("bg") != blob:
+            _v, err = self._carts.save_image(wall, "bg", blob)
         if err is not None:
             self.last_error = str(err)
             return False
-        return bool(got)
-
-    def _wallpaper_id(self):
-        wall = self._wall_cart()
-        return self._wall.id_for(wall) if wall is not None else None
+        return True
 
     def set_wallpaper(self, name=None):
         """Copy the named drawing (default: the open one) into the wallpaper
         slot and make it the active desktop backdrop."""
-        if not self._ready():
-            self.last_error = "STORAGE OFF"
-            return False
-        files = self._files
-        wall = self._wall_cart()
-        # THREE storage sessions where this was one, because the three writes
-        # belong to three different roles now (a user file is read, the
-        # backdrop's own copy is written, a CART's image is written). Cheap by
-        # construction: `_with_sd` is a call-through on the host and on the P4,
-        # and on the T-Deck `with_sd_live` mounts once and keeps the card
-        # resident for the session -- so a second call is a readiness check.
-        n = name or self._open_drawing()
-        blob = files.load(self.DRAWINGS, n)[0] if n else None
-        if not blob:
-            self.last_error = "SAVE FIRST"
-            return False
-        # Provenance (#108 phase 2): the wallpaper copy remembers the drawing it
-        # came from + that drawing's signature now, so a later edit can offer
-        # "your drawing changed -> UPDATE".
-        stamped = files.stamp(blob, "drawings", n, files.sig(blob))
-        _v, err = self._wall.save_copy(stamped)
-        if err is not None:
-            self.last_error = str(err)
-            return False
-        if wall is not None and wall.get("path"):
-            _v, err = self._carts.save_image(wall, "bg", stamped)
-            if err is not None:
-                self.last_error = str(err)
-                return False
+        ok = self.copies.set_wallpaper(name or self._open_drawing())
+        self.last_error = self.copies.last_error
+        return ok
+
+    def copy_changed(self):
+        """The wallpaper copy was written (the wallpaper role's `save_copy`,
+        from any app): the backdrop's decode, its loans and the thumbnail go,
+        read again at the next draw."""
         self._wall_decoded = None
-        self._drop_wall_bitmap()       # #186: the outgoing backdrop's loans --
-                                       # here and not only via select_wallpaper,
-                                       # because this can still answer False
-                                       # below without ever reaching it
+        self._drop_wall_bitmap()
         self._thumb_bitmap = None
         self._thumb_key = None
-        wp_id = self._wallpaper_id()
-        if wp_id is None:
-            self.last_error = "NO WALLPAPER"
-            return False
-        self._wall.select(wp_id)
-        self.last_error = ""
-        return True
 
     def owns_wallpaper(self, wp_id):
-        return wp_id is not None and wp_id == self._wallpaper_id()
+        return wp_id is not None and wp_id == self.copies.wallpaper_id()
 
     def _wall_data(self):
         """The wallpaper copy's decoded (w, h, indices), cached in RAM after
-        the first read; invalidated by set_wallpaper. A clean miss caches as
+        the first read; invalidated by copy_changed. A clean miss caches as
         False so an absent/oversize copy never costs a per-frame SD read
         (draw_wallpaper runs every drawn frame); read ERRORS stay uncached --
         a transient SD hiccup should not hide the wallpaper for the session."""
@@ -1476,90 +1431,13 @@ class ArtworkService:
             self._thumb_key = key
         return self._thumb_bitmap
 
-    def _targets(self):
-        # System-app identities (Paint itself, Files, Calc, ...) are not game
-        # projects; offering them a bg copy would just be clutter.
-        return [cart for cart in self._carts.all()
-                if cart.get("type") in ("game", "app") and cart.get("path")
-                and not self._nav.is_system_app(cart)]
-
     def targets(self):
         """Project titles Paint can offer in its GAME background picker."""
-        return tuple(cart.get("title", "PROJECT") for cart in self._targets())
+        return self.copies.targets()
 
     def attach(self, index, name=None):
         """Copy the named drawing (default: the open one) into one project as
-        ``images/bg.moyimg`` -- a copy at this moment, never a reference."""
-        if not self._ready():
-            self.last_error = "STORAGE OFF"
-            return None
-        targets = self._targets()
-        try:
-            target = targets[int(index)]
-        except (IndexError, TypeError, ValueError):
-            self.last_error = "NO PROJECT"
-            return None
-        files = self._files
-        n = name or self._open_drawing()
-        blob = files.load(self.DRAWINGS, n)[0] if n else None
-        data = files.decode_image(blob)
-        if not blob or data is None:
-            self.last_error = "SAVE FIRST"
-            return None
-        # The signature is of the SOURCE file as it stands now (before any
-        # resize), so change-detection re-reads files/drawings/<n> and compares
-        # its content_sig to this stamp (#108 phase 2).
-        sig = files.sig(blob)
-        if data[0] != 320 or data[1] != 240:
-            game = cover_indices(data[2], data[0], data[1], 320, 240)
-            blob = files.encode_image(320, 240, game)
-        _v, err = self._carts.save_image(
-            target, "bg", files.stamp(blob, "drawings", n, sig))
-        if err is not None:
-            self.last_error = str(err)
-            return None
-        self.last_error = ""
-        return target.get("title", "PROJECT")
-
-    # -- provenance: where a drawing is used (#108 phase 2) -------------------
-
-    def usage(self, name):
-        """Where drawing `name` is currently used -- the File Manager's "used
-        in:" list (#108 phase 2). Returns rows {"label", "kind", "index",
-        "stale"}: one per consumer holding a copy stamped src=="drawings/<name>"
-        (the wallpaper + any project bg). `stale` is True when the source
-        drawing changed since the copy (its content_sig differs), which powers
-        the one-tap UPDATE re-copy. Pull-based: a renamed/deleted source simply
-        matches nothing, so the affordance just never appears."""
-        if not self._ready() or not name:
-            return []
-        files = self._files
-        src_key = "drawings/" + str(name)
-        src, err = files.load("drawings", name)
-        if err is not None:      # an unreadable source lists nothing
-            return []
-        cur = files.sig(src or "")
-        rows = []
-        wblob = self._wall.load_copy()[0]
-        wsrc, wsig = files.provenance(wblob)
-        if wsrc == src_key:
-            rows.append({"label": "WALLPAPER", "kind": "wall", "index": -1,
-                         "stale": wsig != cur})
-        for i, cart in enumerate(self._targets()):
-            blob = (cart.get("images") or {}).get("bg")
-            if not blob:
-                continue
-            psrc, psig = files.provenance(blob)
-            if psrc == src_key:
-                rows.append({"label": cart.get("title", "PROJECT"),
-                             "kind": "game", "index": i, "stale": psig != cur})
-        return rows
-
-    def resend(self, row, name):
-        """Re-copy drawing `name` to one usage row -- the "send again" (or the
-        stale row's UPDATE) action. Returns True on success."""
-        if not isinstance(row, dict) or not name:
-            return False
-        if row.get("kind") == "wall":
-            return self.set_wallpaper(name)
-        return self.attach(row.get("index", -1), name) is not None
+        ``images/bg.moyimg``: the project's title, or None."""
+        got = self.copies.attach(index, name or self._open_drawing())
+        self.last_error = self.copies.last_error
+        return got

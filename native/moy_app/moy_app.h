@@ -70,6 +70,7 @@ enum {
     MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
     MOY_ROW_THEME_SKIN,
     MOY_ROW_PREFS_GET, MOY_ROW_PREFS_SET, MOY_ROW_PREFS_CLEAR,
+    MOY_ROW_ARTWORK_CURRENT, MOY_ROW_ARTWORK_FOLLOW,
     MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
     MOY_ROW_CLIPBOARD_SEQ,
     MOY_ROW_N
@@ -83,6 +84,8 @@ enum {
 #define MOY_APP_NAME_MAX 31u    // a theme's, a variant's and a skin's name bytes
 #define MOY_APP_TOKENS 28u      // the token vocabulary's roles
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
+#define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
+#define MOY_APP_ARTWORK_NS "paint"  // the namespace Paint's open picture is kept in
 
 enum { MOY_GRANT_SHIPPED = 0, MOY_GRANT_RUN = 1 };
 enum { MOY_DAMAGE_ALL = 1u, MOY_DAMAGE_AGAIN = 2u };
@@ -255,6 +258,27 @@ int moy_app_prefs_get(moy_appabi_t *a, uint32_t g, const char *key, size_t n,
 int moy_app_prefs_set(moy_appabi_t *a, uint32_t g, const char *key, size_t n,
                       const char *json, size_t json_n);
 int moy_app_prefs_clear(moy_appabi_t *a, uint32_t g, const char *key, size_t n);
+
+// -- artwork -----------------------------------------------------------------------
+
+// Paint's open picture: the settings rows `paint_doc_kind` and `paint_doc`, each a
+// JSON string (no kind row is the drawings kind), which Paint's model writes
+// through its prefs. current: OK and the kind and the name (copied up to each
+// cap; with no buffers, the sizes alone, counted only when it fails), or ABSENT
+// while no picture is named. follow: when the open picture is `kind`/`old` it
+// becomes `kind`/`new` and OK (a file renamed under it); ABSENT when it is
+// another; BAD for a name empty, longer than MOY_APP_DOC_MAX or holding a
+// control byte. Text crosses as UTF-8; the rows hold it JSON-escaped.
+int moy_app_artwork_current(moy_appabi_t *a, uint32_t g, char *kind, size_t kcap,
+                            size_t *klen, char *name, size_t ncap, size_t *nlen);
+int moy_app_artwork_follow(moy_appabi_t *a, uint32_t g, const char *kind, size_t kn,
+                           const char *old, size_t on, const char *nw, size_t nn);
+
+// -- the rows served in Python ------------------------------------------------------
+
+// Whether grant `g` holds `role`: OK, STALE or DENIED. A binding asks it before
+// it calls the server the console registered for a role's rows that are not C's.
+int moy_app_holds(const moy_appabi_t *a, uint32_t g, int role);
 
 // -- the clipboard -----------------------------------------------------------------
 

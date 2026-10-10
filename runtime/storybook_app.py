@@ -34,6 +34,11 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 import json
 
 try:
+    from picture_copies import current_picture
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.picture_copies import current_picture
+
+try:
     from editors_code import CodeEditor
     from editors_base import KeyEdge
 except ImportError:  # pragma: no cover - direct host import
@@ -169,8 +174,9 @@ class StorybookAppLayer(ListShellApp):
     # The shell roles this app uses (runtime/app_context.py). Storybook is the
     # ONE shipped app that authors CARTS -- which is exactly why ctx.carts is a
     # role of its own and not folded into ctx.files (a story is executable
-    # content; a drawing is not).
-    NEEDS = ("surface", "theme", "damage", "carts", "nav", "artwork",
+    # content; a drawing is not). USE MY PAINTING reads Paint's open picture:
+    # which it is (`artwork`), and its pixels (`files`).
+    NEEDS = ("surface", "theme", "damage", "carts", "nav", "artwork", "files",
              "clipboard")
 
     def __init__(self, ctx, names):
@@ -182,6 +188,7 @@ class StorybookAppLayer(ListShellApp):
         self._store = ctx.carts    # ListShellApp's storage role: CARTS here
         self._nav = ctx.nav
         self._art = ctx.artwork
+        self._files = ctx.files
         self._clip = ctx.clipboard
         self.names = names
         cv = ctx.surface.canvas()
@@ -228,13 +235,9 @@ class StorybookAppLayer(ListShellApp):
             self.status = "CAN'T SAVE HERE"
             return
         cart = self.cart
-        deck_blob = json.dumps(self.deck)
-
-        def _write(c):
-            c.save_deck(cart, deck_blob)
-            return c.save_code(cart, src)
-
-        _v, err = self._store.batch(_write)
+        _v, err = self._store.save_deck(cart, json.dumps(self.deck))
+        if err is None:
+            _v, err = self._store.save_code(cart, src)
         if err is not None:      # surface, never crash the shell
             self.status = ("CAN'T SAVE " + str(err))[:28]
 
@@ -294,20 +297,14 @@ class StorybookAppLayer(ListShellApp):
                 "pages": [{"bg": BGS[0], "art": None,
                            "text": ["Once upon a time..."]}]}
         src = deck_to_code(deck, title)
-        deck_blob = json.dumps(deck)
-
-        def _make(c):
-            cart = c.create(title, src=src, type=STORY_TYPE)
-            c.save_deck(cart, deck_blob)
-            return cart, c.scan()
-
-        got, err = self._store.batch(_make)
+        cart, err = self._store.create(title, src, STORY_TYPE)
+        if err is None:
+            _v, err = self._store.save_deck(cart, json.dumps(deck))
         if err is not None:
             self.status = ("NEW STORY FAILED " + str(err))[:28]
             self._damage.all()
             return
-        cart, items = got
-        self._store.apply(items)
+        self._store.rescan()
         # Open the freshly created story (find its scanned twin by path).
         for c in self._stories():
             if c.get("path") == cart.get("path"):
@@ -362,15 +359,11 @@ class StorybookAppLayer(ListShellApp):
         still marks the RAM copy graduated (never re-offers a clobbering SAVE
         this session), it just won't persist until the next successful write."""
         carts = self._store
-        h = cart.get("h")
-        if h and carts.ready() and carts.can_journal():
+        if cart.get("h") and carts.ready() and carts.can_journal():
             mainf = cart.get("main", "main.py")
-
-            def _write(c):
-                c.journal_append(h, mainf, baseline_src, grad=0)
-                c.journal_append(h, mainf, diverged_src, grad=1)
-
-            _v, err = carts.batch(_write)
+            _v, err = carts.journal(cart, mainf, baseline_src, 0)
+            if err is None:
+                _v, err = carts.journal(cart, mainf, diverged_src, 1)
             if err is not None:  # never crash the shell over this
                 print("Moybyte story graduation failed:", err)
         cart["graduated"] = True
@@ -380,7 +373,7 @@ class StorybookAppLayer(ListShellApp):
             return
         self._commit_deck()
         # exit pops home (launcher root rule)
-        self._nav.play(self.cart, self)
+        self._nav.play(self.cart)
 
     def _back_to_shelf(self):
         self._commit_deck()
@@ -451,8 +444,7 @@ class StorybookAppLayer(ListShellApp):
         (the Paint attach mechanism, one image per attach)."""
         if self.read_only or not (0 <= self.page_i < len(self._pages())):
             return
-        art = self._art
-        loaded = art.load() if art is not None else None
+        loaded = current_picture(self._files, self._art)
         if loaded is None:
             self.status = "PAINT SOMETHING FIRST"
             self._damage.all()

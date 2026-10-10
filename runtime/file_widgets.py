@@ -38,7 +38,7 @@ class Bitmap:
 
 def cover_indices(src, sw, sh, dw, dh, out=None):
     """Nearest-neighbor cover crop: source cropped centered to the target
-    aspect, then sampled to exactly dw x dh (the ArtworkService formula).
+    aspect, then sampled to exactly dw x dh (the backdrop's and a copy's formula).
 
     `out` is a caller-supplied dw*dh buffer. The desktop backdrop resamples to
     the whole SCREEN (#186), and a screenful of indices is 153,600 bytes on the

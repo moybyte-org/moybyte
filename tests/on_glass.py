@@ -181,6 +181,26 @@ def py_probe_reaches_the_console(board):
     assert line == "PY True", line
 
 
+def a_leaked_session_leaves_the_panel_flushing(board):
+    """The bus rule of the app ABI's sessions (docs/kernel_appabi_2026-10.md
+    section 2.6): on the T-Deck the card shares the panel's SPI host, and the
+    gate that drains the flush is held only around one store op, never by a
+    session. A files session begun and never ended, with a store op inside it,
+    must leave the panel presenting every repaint, and the next frame ends it."""
+    import time
+    files = "ws.files_app.ctx.files"
+    assert board.pyval(files + ".begin()", strict=True) == (True, None)
+    n, err = board.pyval(files + ".count('drawings')", strict=True)
+    assert err is None and isinstance(n, int), (n, err)
+    d0 = board.pyval("ws._frames_drawn", strict=True)
+    for _ in range(4):
+        board.pyval("setattr(ws, '_dirty', True)", strict=True)
+        time.sleep(0.25)
+    d1 = board.pyval("ws._frames_drawn", strict=True)
+    assert d1 >= d0 + 3, "the panel stopped presenting: %d -> %d" % (d0, d1)
+    assert board.pyval("ws.store.open", strict=True) == 0, "a frame left the session open"
+
+
 def stale_handle_is_refused_loudly(board):
     """Sprint 2's gate (#224): the spine refuses a dead handle out loud, on this
     board, and the board runs the native spine. `kstale` hands it a released, a

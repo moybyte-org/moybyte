@@ -324,7 +324,7 @@ class GetCartsAppLayer(ListShellApp):
         if root is None or not self._inst.writable():
             return
         try:
-            self._inst.session(lambda: _ci.recover(root))
+            self._inst.op(lambda: _ci.recover(root))
         except Exception as exc:  # noqa: BLE001 -- recover runs again next open
             _ci._log("recover failed: %s" % exc)
 
@@ -385,7 +385,7 @@ class GetCartsAppLayer(ListShellApp):
                 return
             root = self._inst.root()
             if root is not None and self._inst.writable():
-                self.indexes = self._inst.session(lambda: _ci.load_indexes(root))
+                self.indexes = self._inst.op(lambda: _ci.load_indexes(root))
             else:
                 self.indexes = list(_ci.DEFAULT_INDEXES)
             self._step = 1
@@ -500,7 +500,7 @@ class GetCartsAppLayer(ListShellApp):
                             "fit": None})
             return out, (inst.free() if root is not None else None)
         try:
-            rows, free = inst.session(_scan)
+            rows, free = inst.op(_scan)
         except Exception as exc:  # noqa: BLE001 -- an unreadable store lists everything as GET
             _ci._log("store scan failed: %s" % exc)
             rows = [{"cart": c, "plan": _ci.plan(c, chip, fmt, ranges), "state": "get",
@@ -763,7 +763,7 @@ class GetCartsAppLayer(ListShellApp):
         keep = "store" if (arc and mem is not None
                            and mem[1] < ARCHIVE_RAM_SHARE * arc) else "ram"
         self.job = _ci.Install(row["cart"], row["plan"], self._inst.net(),
-                               self._inst.root(), self._inst.session, self.accepted,
+                               self._inst.root(), self._inst.op, self.accepted,
                                archive=keep, supplied=self.supplied,
                                keep=self._inst.keep())
         self._go("getting")
@@ -808,7 +808,7 @@ class GetCartsAppLayer(ListShellApp):
         if cart is None:
             return
         self._release()
-        self._nav.play(cart, self)
+        self._nav.play(cart)
 
     def _remove(self):
         if not self.arm_remove:
@@ -821,7 +821,7 @@ class GetCartsAppLayer(ListShellApp):
         root = self._inst.root()
         keep = self._inst.keep()
         try:
-            self._inst.session(lambda: _ci.remove(root, row["cart"]["folder"], keep))
+            self._inst.op(lambda: _ci.remove(root, row["cart"]["folder"], keep))
         except Exception as exc:  # noqa: BLE001 -- the folder stays; say so
             _ci._log("remove failed: %s" % exc)
             self.status = "CAN'T REMOVE IT"

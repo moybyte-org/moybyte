@@ -3,14 +3,17 @@ tests/test_moy_app.py holds native/moy_app's bindings to (the ctypes one on
 CPython, the native module on the desktop MicroPython).
 
 This is what `runtime/app_context.py`'s `Damage`, `Surface`, `Theme` and
-`Prefs`, `runtime/widgets.py`'s `Clipboard` and `runtime/system_api.py`'s grant
-policy did before sprint 5 steps 4 and 5 moved them to C, reshaped only where
-the design moved the line (docs/kernel_appabi_2026-10.md section 2): a grant
-table keyed by the app's id, the role mask checked on every call, the damage
-flags the frame gate takes, each grant's surface row and the pointer it is
-offset from, the live token table under its generation, a clipboard of at most
-CLIP_MAX bytes of text, and the key a cart's grant is made under (its id, else
-its title's slug, ASCII only). It runs on CPython and on MicroPython alike, and
+`Prefs`, `runtime/widgets.py`'s `Clipboard`, the ArtworkService's open picture
+and `runtime/system_api.py`'s grant policy did before sprint 5 steps 4 to 6
+moved them to C, reshaped only where the design moved the line
+(docs/kernel_appabi_2026-10.md section 2): a grant table keyed by the app's id,
+the role mask checked on every call, the damage flags the frame gate takes, each
+grant's surface row and the pointer it is offset from, the live token table
+under its generation, Paint's open picture in its settings rows, a clipboard of
+at most CLIP_MAX bytes of text, and the key a cart's grant is made under (its
+id, else its title's slug, ASCII only); and the binding of the rows the console
+serves in Python, which check the grant, count the call and call the server
+with the grant first. It runs on CPython and on MicroPython alike, and
 nothing in the runtime imports it.
 """
 
@@ -29,7 +32,7 @@ _ROWS = ("damage.all", "damage.again",
          "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
          "theme.variant", "theme.skin",
          "prefs.get", "prefs.set",
-         "prefs.clear", "clipboard.put_text", "clipboard.text",
+         "prefs.clear", "artwork.current", "artwork.follow", "clipboard.put_text", "clipboard.text",
          "clipboard.kind", "clipboard.seq")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
@@ -38,6 +41,7 @@ _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive")
 _FLAGS = ("surface_light", "bar_light")
 NAME_MAX = 31
+DOC_MAX = 255
 _KINDS = ("docs", "drawings", "sprites", "music")
 _PERMS = (("appearance", "theme"), ("files", "files"), ("launch", "nav"),
           ("prefs", "prefs"), ("clipboard", "clipboard"))
@@ -175,10 +179,20 @@ class App:
     def served(self):
         return dict(self._served)
 
-    def _serve(self, role, verb):
+    def grant_id(self, h):
+        g = self._grants.get(h)
+        if g is None:
+            raise ValueError("a grant that ended")
+        return g[0]
+
+    def _serve(self, h, role, verb):
+        self._hold(h, role)
+        server = self._servers.get(role)
+        if server is None:
+            raise ValueError("no server for the role")
         key = role + "." + verb
         self._served[key] = self._served.get(key, 0) + 1
-        return getattr(self._servers[role], verb)
+        return getattr(server, verb)
 
     def counts(self):
         return tuple(self._counts)
@@ -245,7 +259,7 @@ class Surface(_Role):
                         bool(p.visible)))
 
     def glyph(self, *a, **kw):
-        return self._app._serve("surface", "glyph")(*a, **kw)
+        return self._app._serve(self._g, "surface", "glyph")(self._g, *a, **kw)
 
 
 class Theme(_Role):
@@ -289,13 +303,13 @@ class Theme(_Role):
         return self._app._names[2]
 
     def set(self, *a, **kw):
-        return self._app._serve("theme", "set")(*a, **kw)
+        return self._app._serve(self._g, "theme", "set")(self._g, *a, **kw)
 
     def set_variant(self, *a, **kw):
-        return self._app._serve("theme", "set_variant")(*a, **kw)
+        return self._app._serve(self._g, "theme", "set_variant")(self._g, *a, **kw)
 
     def set_skin(self, *a, **kw):
-        return self._app._serve("theme", "set_skin")(*a, **kw)
+        return self._app._serve(self._g, "theme", "set_skin")(self._g, *a, **kw)
 
 
 class Prefs(_Role):
@@ -401,3 +415,71 @@ def id_for(cart_id, title):
         elif ch in " -_":
             out += "_"
     return out[:ID_MAX] or "cart"
+
+
+class Artwork(_Role):
+    """Paint's open picture: the rows paint_doc_kind and paint_doc."""
+
+    def _rows_text(self, key):
+        rows = self._app._rows
+        t = None if rows is None else rows.text("paint_" + key)
+        v = None if t is None else json.loads(t)
+        return v if isinstance(v, str) else None
+
+    def current(self):
+        self._app._hold(self._g, "artwork", "artwork.current")
+        name = self._rows_text("doc")
+        kind = self._rows_text("doc_kind") or "drawings"
+        if name is None or len(name.encode()) > DOC_MAX or len(kind.encode()) > DOC_MAX:
+            return None
+        return (kind, name)
+
+    def follow(self, kind, old, new):
+        self._app._hold(self._g, "artwork", "artwork.follow")
+        for x in (kind, old, new):
+            if not isinstance(x, str):
+                raise TypeError("a str")
+        if (not new or len(new.encode()) > DOC_MAX or len(kind.encode()) > DOC_MAX
+                or len(old.encode()) > DOC_MAX
+                or any(ord(ch) < 0x20 for ch in new)):
+            raise ValueError("an argument the role refuses")
+        name = self._rows_text("doc")
+        if name != old or (self._rows_text("doc_kind") or "drawings") != kind:
+            return False
+        self._app._rows.set_text("paint_doc", json.dumps(new))
+        return True
+
+
+# The roles every row of which the console serves (roles.json's "shell" rows).
+_SERVED = {
+    "files": ("readable ready begin end list count load save delete duplicate "
+              "rename new_name trash_list restore empty_trash history history_ops "
+              "history_commit encode_image decode_image decode_cover encode_cover "
+              "sig stamp encode_text decode_text provenance"),
+    "carts": ("readable ready begin end all can_journal slug create journal rescan "
+              "hydrate load_deck save_deck save_code images save_image encode_image"),
+    "nav": ("open_app is_system_app projects edit open_image open_text edit_file "
+            "play run_script text_mode"),
+    "notify": "achieve",
+    "wallpaper": ("current carts fills id_for title select preview thumbnail "
+                  "load_copy save_copy"),
+    "install": ("hold release fit memory chip runtimes home can_pick pick root "
+                "writable op rescan free find net keep"),
+}
+
+
+def _served_role(role):
+    def row(verb):
+        def call(self, *a, **kw):
+            return self._app._serve(self._g, role, verb)(self._g, *a, **kw)
+        return call
+    return type(role[0].upper() + role[1:], (_Role,),
+                {v: row(v) for v in _SERVED[role].split()})
+
+
+Files = _served_role("files")
+Carts = _served_role("carts")
+Nav = _served_role("nav")
+Notify = _served_role("notify")
+Wallpaper = _served_role("wallpaper")
+Install = _served_role("install")

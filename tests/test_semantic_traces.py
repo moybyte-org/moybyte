@@ -2209,16 +2209,17 @@ def roles_trace(ws):
                                        keyframe=None)))
     say("history read", _n(f.history("drawings", "pic")),
         _n(f.history_ops("drawings", "pic")))
-    say("batch", _n(f.batch(lambda raw: raw.count("drawings"))))
+    say("session", _n(f.begin()), ws.store.open, _n(f.count("drawings")), f.end(),
+        ws.store.open)
 
     # -- carts
     c = ctx.carts
     say("carts ready", c.readable(), c.ready(), c.can_journal(), c.slug("A b-C!"))
+    say("carts session", _n(c.begin()), c.end())
     n0 = len(c.all())
-    made, err = c.batch(lambda raw: raw.create("Trace Cart", src="def _draw():\n    cls(1)\n", type="game"))
+    made, err = c.create("Trace Cart", "def _draw():\n    cls(1)\n", "game")
     say("create", made is not None, err)
-    items, err = c.batch(lambda raw: raw.scan())
-    c.apply(items)
+    c.rescan()
     cart = None
     for x in c.all():
         if x.get("title") == "Trace Cart":
@@ -2228,6 +2229,8 @@ def roles_trace(ws):
     say("deck", _n(c.load_deck(cart)), _n(c.save_deck(cart, '{"pages": []}')),
         _n(c.load_deck(cart)))
     say("code", _n(c.save_code(cart, "def _draw():\n    cls(2)\n")))
+    say("journal", _n(c.journal(cart, "main.py", "def _draw():\n    cls(3)\n", 0)),
+        _n(c.journal({"title": "none"}, "main.py", "", 0)))
     cpx = c.encode_image(2, 2, bytes([5, 6, 7, 8]))
     imgs, err = c.images(cart)
     say("cart image", _n(imgs), err, _n(c.save_image(cart, "pic", cpx)),
@@ -2252,7 +2255,7 @@ def roles_trace(ws):
     t1 = ws.input.text_mode
     nv.text_mode(False)
     say("text_mode", t1, ws.input.text_mode)
-    nv.play(cart, ws.launcher_layer)
+    nv.play(cart)
     say("play", ws.wm.top_kind())
     ws.go_home()
 
@@ -2263,25 +2266,35 @@ def roles_trace(ws):
     # -- wallpaper
     w = ctx.wallpaper
     say("wallpaper", w.current(), len(w.fills()) > 0, _n(w.id_for({"title": "Wall Z"})))
-    say("wallpaper carts", len(w.carts()) >= 0, w.cart_by_id("fill:nope"))
+    say("wallpaper carts", len(w.carts()) >= 0, w.title("fill:nope"),
+        w.title(w.id_for(w.carts()[0])) == w.carts()[0].get("title"))
     w.select("fill:black")
     say("selected", w.current(), ws.system.get("wallpaper"))
     w.preview(cv, (0, 0, 32, 24), 0)
     say("copy", _n(w.load_copy()), _n(w.save_copy(px)),
         _n(f.decode_image(w.load_copy()[0])))
 
-    # -- artwork
+    # -- artwork: Paint's open picture, through Paint's model and the role
     a = ctx.artwork
-    say("artwork", a.is_paint_app(cart), _n(a.doc_name()), a.editable(),
-        _n(a.why_read_only()))
-    a.new_doc(32, 24)
-    say("artwork new", _n(a.doc_name()), _n(a.load() is not None))
-    say("artwork save", _n(a.save(bytes(32 * 24), 32, 24)), _n(a.usage("pic")))
-    say("artwork targets", len(a.targets()) >= 0, _n(a.thumbnail(16, 12) is not None))
-    say("artwork open", _n(a.open_named("pic", "drawings")), _n(a.doc_name()))
-    say("artwork wall", _n(a.set_wallpaper()), _n(a.sync_wallpaper()))
-    k = list(a.targets()).index("Trace Cart")
-    say("artwork attach", _n(a.attach(k, "pic")), _n(a.resend(k, "pic")))
+    paint = ws.artwork
+    say("artwork", paint.is_paint_app(cart), _n(a.current()), paint.editable(),
+        _n(paint.why_read_only()))
+    paint.new_doc(32, 24)
+    say("artwork new", _n(a.current()), _n(paint.load() is not None))
+    say("artwork save", _n(paint.save(bytes(32 * 24), 32, 24)), _n(a.current()))
+    paint.open_named("pic", "drawings")
+    say("artwork follow", _n(a.follow("drawings", "nope", "x")),
+        _n(a.follow("drawings", "pic", "pic2")), _n(a.current()), _n(paint.doc_name()))
+    a.follow("drawings", "pic2", "pic")
+
+    # -- the copies of a drawing (runtime/picture_copies.py), over these roles
+    pc = PictureCopies(ctx)
+    say("copies", _n(pc.usage("pic")), len(pc.targets()) >= 0,
+        _n(w.thumbnail(16, 12) is not None))
+    say("copies wall", _n(pc.set_wallpaper("pic")), _n(paint.sync_wallpaper()))
+    k = list(pc.targets()).index("Trace Cart")
+    say("copies attach", _n(pc.attach(k, "pic")), _n(pc.resend({"kind": "game", "index": k}, "pic")),
+        _n([r["kind"] for r in pc.usage("pic")]))
 
     # -- clipboard
     cl = ctx.clipboard
@@ -2296,7 +2309,7 @@ def roles_trace(ws):
         i.home(), i.net() is ws.cart_net, i.keep() is ws.cart_keep,
         i.pick("x", 1, "h") is None)
     say("lease", i.hold() in (True, False), i.release())
-    say("session", i.session(lambda: 7))
+    say("op", i.op(lambda: 7))
     i.rescan()
     folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
     found = i.find(folder)
@@ -2326,9 +2339,10 @@ def _roles_driver():
 def _roles_trace_cpython(tmp_path):
     from runtime import host_app
     from runtime.app_context import NO_STORE, ROLES
+    from runtime.picture_copies import PictureCopies
     import contextlib
     import io
-    ns = {"ROLES": ROLES, "NO_STORE": NO_STORE}
+    ns = {"ROLES": ROLES, "NO_STORE": NO_STORE, "PictureCopies": PictureCopies}
     exec(_roles_driver(), ns)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     out = io.StringIO()
@@ -2375,7 +2389,8 @@ def main():
         for _ in range(5):
             moy_loop.step()
         from app_context import NO_STORE, ROLES
-        g = {"ROLES": ROLES, "NO_STORE": NO_STORE}
+        from picture_copies import PictureCopies
+        g = {"ROLES": ROLES, "NO_STORE": NO_STORE, "PictureCopies": PictureCopies}
         exec(DRIVER, g)
         g["roles_trace"](desk.ws)
         print("DRIVER_DONE")
@@ -2445,12 +2460,14 @@ stamp int drawings/src True [None,None]
 drawing ['pic',None]
 history [None,None]
 history read [[{ops:[['dot',1,1]],t:'seg'}],None] [[['dot',1,1]],None]
-batch [1,None]
+session [True,None] 1 [1,None] None 0
 carts ready True True True a_b_c
+carts session [True,None] None
 create True None
 carts 1 True
 deck [None,None] [None,None] ['{"pages": []}',None]
 code [['ok',''],None]
+journal [1,None] [None,'NO CART']
 cart image {} None [None,None] [2,2,b4]
 nav False True
 open_app True False calc
@@ -2463,22 +2480,22 @@ text_mode True False
 play desktop
 notify
 wallpaper moybyte.moy_night True 'moybyte.wall_z'
-wallpaper carts True None
+wallpaper carts True None True
 selected fill:black fill:black
 copy [None,None] [None,None] [2,2,b4]
-artwork False 'pic' True ''
-artwork new 'drawing_2' False
-artwork save True []
-artwork targets True True
-artwork open None 'pic'
-artwork wall True True
-artwork attach 'Trace Cart' False
+artwork False ['drawings','pic'] True ''
+artwork new ['drawings','drawing_2'] False
+artwork save True ['drawings','drawing_2']
+artwork follow False True ['drawings','pic2'] 'pic2'
+copies [] True True
+copies wall True True
+copies attach 'Trace Cart' True ['wall','game']
 clip empty ''
 clip put True False
 clip hello text 1
 install True True False None True True True
 lease True None
-session 7
+op 7
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2

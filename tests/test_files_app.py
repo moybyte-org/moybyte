@@ -219,24 +219,25 @@ def test_usage_tracks_stale_copies_and_update_clears_them(tmp_path):
     ws = _ws(tmp_path)
     _seed_drawing(carts, "dragon", color=20)
     # Copy it into a project (with a provenance stamp) + set as wallpaper.
-    ti = ws.artwork.targets().index("Star Catcher")
-    assert ws.artwork.attach(ti, "dragon")
-    assert ws.artwork.set_wallpaper("dragon")
+    copies = ws.files_app._copies
+    ti = copies.targets().index("Star Catcher")
+    assert copies.attach(ti, "dragon")
+    assert copies.set_wallpaper("dragon")
 
-    rows = ws.artwork.usage("dragon")
+    rows = copies.usage("dragon")
     labels = {r["label"] for r in rows}
     assert "Star Catcher" in labels and "WALLPAPER" in labels
     assert all(not r["stale"] for r in rows)          # fresh copies
 
     # Edit the source drawing: every copy is now stale (pull-based detection).
     _seed_drawing(carts, "dragon", color=33)
-    rows = ws.artwork.usage("dragon")
+    rows = copies.usage("dragon")
     assert all(r["stale"] for r in rows)
 
     # UPDATE (send again) the project copy -> only it clears.
     game_row = next(r for r in rows if r["label"] == "Star Catcher")
-    assert ws.artwork.resend(game_row, "dragon")
-    rows = {r["label"]: r["stale"] for r in ws.artwork.usage("dragon")}
+    assert copies.resend(game_row, "dragon")
+    rows = {r["label"]: r["stale"] for r in copies.usage("dragon")}
     assert rows["Star Catcher"] is False
     assert rows["WALLPAPER"] is True                   # not re-sent yet
 

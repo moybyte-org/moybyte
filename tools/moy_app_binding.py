@@ -5,7 +5,8 @@ runtime package registers it as `moy_app` (runtime/__init__.py), so the host's
 roles are the C rows every image runs.
 
 `binding()` returns a module-like object with modmoy_app.c's names -- App,
-kernel, Damage, Surface, Theme, Prefs, Clipboard, policy, manifest_error,
+kernel, Damage, Surface, Theme, Prefs, Artwork, Clipboard, the roles served
+in Python (Files, Carts, Nav, Notify, Wallpaper, Install), policy, manifest_error,
 id_for, roles, rows, perms, kinds, tokens and the constants -- or None where
 there is no C compiler. Each
 call into C is moy_app.h's ABI and nothing more; what a binding adds is the
@@ -35,13 +36,19 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 12, 23, 4, 28
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 12, 25, 4, 28
+DOC_MAX = 255
 NAME_MAX = 31
 TOKEN_ABSENT = -(1 << 31)
 CLIP_MAX = 4096
 SLOTS = 32
 ID_MAX = 63
 _ENOSPC = 28
+
+
+# The role table: the served roles' rows are its own.
+with open(os.path.join(HERE, "..", "native", "moy_app", "roles.json")) as _f:
+    _TABLE = json.load(_f)["rows"]
 
 
 # surface.pointer()'s answer: the row's five numbers, by name as by index.
@@ -53,6 +60,12 @@ class _Surf(c.Structure):
                 ("ox", c.c_int32), ("oy", c.c_int32), ("bar_h", c.c_int32),
                 ("font_scale", c.c_uint8), ("chrome_scale", c.c_uint8),
                 ("windowed", c.c_uint8)]
+
+
+class _Grant(c.Structure):
+    _fields_ = [("id_len", c.c_uint8), ("ns_len", c.c_uint8), ("cls", c.c_uint8),
+                ("kind", c.c_int8), ("roles", c.c_uint32), ("owner", c.c_uint32),
+                ("id", c.c_char * (ID_MAX + 1))]
 
 
 class _Policy(c.Structure):
@@ -112,6 +125,12 @@ _SIGS = (
     ("moy_app_clip_text", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_clip_kind", [_P, _U32], c.c_int32),
     ("moy_app_clip_seq", [_P, _U32], c.c_int32),
+    ("moy_app_artwork_current", [_P, _U32, _P, _SIZE, _PSIZE, _P, _SIZE, _PSIZE],
+     c.c_int),
+    ("moy_app_artwork_follow", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE, _PCHAR, _SIZE],
+     c.c_int),
+    ("moy_app_holds", [_P, _U32, c.c_int], c.c_int),
+    ("moy_app_grant_get", [_P, _U32, c.POINTER(c.c_void_p)], c.c_int),
     ("moy_app_count", [_P, c.c_int], _U32),
     ("moy_app_row_name", [c.c_int], _PCHAR),
     ("moy_app_role_name", [c.c_int], _PCHAR),
@@ -226,6 +245,12 @@ def binding(sanitize=False):
         def end(self, h):
             return lib.moy_app_end(self._p, h) == OK
 
+        def grant_id(self, h):
+            row = c.c_void_p()
+            _check(lib.moy_app_grant_get(self._p, int(h), c.byref(row)))
+            g = _Grant.from_address(row.value)
+            return g.id[:g.id_len].decode()
+
         def count(self):
             return lib.moy_app_grants(self._p)
 
@@ -274,10 +299,14 @@ def binding(sanitize=False):
         def served(self):
             return dict(self._served)
 
-        def _serve(self, role, verb):
+        def _serve(self, g, role, verb):
+            _check(lib.moy_app_holds(self._p, g, role_names.index(role)))
+            server = self._servers.get(role)
+            if server is None:
+                raise ValueError("no server for the role")
             key = role + "." + verb
             self._served[key] = self._served.get(key, 0) + 1
-            return getattr(self._servers[role], verb)
+            return getattr(server, verb)
 
         def _colors_at(self, gen):
             if self._colors is not None and self._colors_gen == gen:
@@ -349,7 +378,7 @@ def binding(sanitize=False):
             return Pointer(v[0], v[1], bool(v[2]), bool(v[3]), bool(v[4]))
 
         def glyph(self, *a, **kw):
-            return self._app._serve("surface", "glyph")(*a, **kw)
+            return self._app._serve(self._g, "surface", "glyph")(self._g, *a, **kw)
 
     class Theme(_Role):
         def colors(self):
@@ -387,13 +416,13 @@ def binding(sanitize=False):
             return self._name(lib.moy_app_theme_skin)
 
         def set(self, *a, **kw):
-            return self._app._serve("theme", "set")(*a, **kw)
+            return self._app._serve(self._g, "theme", "set")(self._g, *a, **kw)
 
         def set_variant(self, *a, **kw):
-            return self._app._serve("theme", "set_variant")(*a, **kw)
+            return self._app._serve(self._g, "theme", "set_variant")(self._g, *a, **kw)
 
         def set_skin(self, *a, **kw):
-            return self._app._serve("theme", "set_skin")(*a, **kw)
+            return self._app._serve(self._g, "theme", "set_skin")(self._g, *a, **kw)
 
     class Prefs(_Role):
         def get(self, key, default=None):
@@ -429,6 +458,27 @@ def binding(sanitize=False):
             kb = _str(key)
             self._flushed(lib.moy_app_prefs_clear(self._app._p, self._g, kb, len(kb)))
 
+    class Artwork(_Role):
+        def current(self):
+            kb = c.create_string_buffer(DOC_MAX)
+            nb = c.create_string_buffer(DOC_MAX)
+            kn, nn = c.c_size_t(), c.c_size_t()
+            rc = lib.moy_app_artwork_current(self._app._p, self._g, kb, DOC_MAX,
+                                             c.byref(kn), nb, DOC_MAX, c.byref(nn))
+            if rc == ABSENT:
+                return None
+            _check(rc)
+            if kn.value > DOC_MAX or nn.value > DOC_MAX:
+                return None
+            return (kb.raw[:kn.value].decode(), nb.raw[:nn.value].decode())
+
+        def follow(self, kind, old, new):
+            kb, ob, nb = _str(kind), _str(old), _str(new)
+            rc = lib.moy_app_artwork_follow(self._app._p, self._g, kb, len(kb),
+                                            ob, len(ob), nb, len(nb))
+            Prefs._flushed(self, rc)
+            return rc == OK
+
     class Clipboard(_Role):
         def put_text(self, text):
             b = str(text).encode("utf-8", "surrogateescape")
@@ -456,6 +506,22 @@ def binding(sanitize=False):
             if s < 0:
                 _raise(-s)
             return s
+
+    def _served_role(role):
+        """A role whose rows are all served in Python: one method per row of
+        the table, each the grant checked, the row counted and the server
+        called as modmoy_app.c's SERVED rows are."""
+        def row(verb):
+            def call(self, *a, **kw):
+                return self._app._serve(self._g, role, verb)(self._g, *a, **kw)
+            call.__name__ = verb
+            return call
+        verbs = [r["verb"] for r in _TABLE if r["role"] == role]
+        return type(role.capitalize(), (_Role,), {v: row(v) for v in verbs})
+
+    Files, Carts, Nav, Notify, Wallpaper, Install = (
+        _served_role(r) for r in ("files", "carts", "nav", "notify", "wallpaper",
+                                  "install"))
 
     def _policy(perms):
         p = _Policy()
@@ -496,7 +562,8 @@ def binding(sanitize=False):
     m = types.ModuleType("moy_app")
     m.__dict__.update(
         App=App, kernel=kernel, Damage=Damage, Surface=Surface, Theme=Theme,
-        Prefs=Prefs, Clipboard=Clipboard,
+        Prefs=Prefs, Clipboard=Clipboard, Artwork=Artwork, Files=Files,
+        Carts=Carts, Nav=Nav, Notify=Notify, Wallpaper=Wallpaper, Install=Install,
         policy=policy, manifest_error=manifest_error, id_for=id_for,
         roles=lambda: role_names, rows=lambda: row_names, perms=perms,
         kinds=lambda: kind_names, tokens=lambda: token_names,

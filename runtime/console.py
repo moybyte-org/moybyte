@@ -312,18 +312,15 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wallpaper import Wallpaper
 
-try:
-    from artwork import ArtworkService
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.artwork import ArtworkService
-
 # The narrowed shell interface a SYSTEM APP is handed (ui_refactor_2026-08
 # Phase 6). An app no longer holds `ws`; it holds an AppContext carrying only
 # the roles its NEEDS tuple declares -- see runtime/app_context.py.
 try:
-    from app_context import AppContext, SurfaceServer, ThemeServer
+    from app_context import AppContext
+    import shell_servers as _shell_servers
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_context import AppContext, SurfaceServer, ThemeServer
+    from runtime.app_context import AppContext
+    from runtime import shell_servers as _shell_servers
 import moy_app as _moy_app
 
 # Crash isolation for content the shell runs on the kid's behalf (#160,
@@ -728,8 +725,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The (store, root, can_manage, with_sd) guard 4-tuple as ONE object
         # (#209 landing B, system_store.py). FIRST, because everything that
         # touches storage takes it: both store-owning collaborators below AND
-        # app_context's storage roles -- and the ArtworkService a few lines down
-        # already builds an AppContext. It captures nothing; every field is read
+        # the storage roles' servers. It captures nothing; every field is read
         # through `self` at the moment of use, because none of them is wired yet.
         self.store = StoreHandle(self)
         # system.json (#209 landing B): the store owns the rows and the hook
@@ -747,11 +743,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.app_abi = _app_abi(self.system)
         self._damage_take = self.app_abi.damage_take
         self._damage_drop = self.app_abi.damage_drop
-        # The servers of the roles' Python rows, and the live token table the
-        # look writes at every switch. The surface rows' pointer is bound by
-        # `set_pointer`; until then they answer none.
-        self.app_abi.serve("surface", SurfaceServer(self))
-        self.app_abi.serve("theme", ThemeServer(self))
+        # The servers of the roles' shell rows (runtime/shell_servers.py), and
+        # the live token table the look writes at every switch. The surface
+        # rows' pointer is bound by `set_pointer`; until then they answer none.
+        _shell_servers.serve_all(self)
         self.look.publish()
         # The system clipboard (#132): the one buffer every editor writes
         # through (the code tab, a cart's editor handle), so copy in one app
@@ -761,12 +756,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.clipboard = _moy_app.Clipboard(
             self.app_abi, self.app_abi.grant("editor", ("clipboard",)))
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
-        # A narrow capability for the shipped Paint app. It is not a Layer, so
-        # it is not in app_decls -- but it is on the APP side of the seam, so it
-        # takes an AppContext like one. Its prefs namespace is "paint" and not
-        # its id, because `paint_doc` is on real cards since #108.
-        self.artwork = ArtworkService(
-            self.app_context("paint", ArtworkService.NEEDS, prefs_ns="paint"))
+        # Paint's document model (runtime/artwork.py's ArtworkService), which
+        # Paint builds over its own grant: the backdrop's My Art, the image
+        # door and the Paint cart's identity reach it here. None until the
+        # apps register, and in a build that carries no Paint.
+        self.artwork = None
         self.audio_out = None       # injected where no feeder task plays the mix: a PcmPump
         self.audio = None           # the open cart's AudioSession (built on a run, #16)
         # WiFi (#38): a SYSTEM service shared across carts, not per-cart.
@@ -3612,6 +3606,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # which follows Settings -> PERF DIAG on device. perf_hud alone keeps
         # the LIGHT set (frame total, flush, fps): watching the fps chip must
         # not cost milliseconds.
+        # A store session a role opened and left open (`files.begin`) ends
+        # here, at the next frame: it holds no gate, so this is bookkeeping,
+        # never a flush held off (runtime/shell_servers.py).
+        st = self.store
+        if st.open:
+            st.end_all()
         lk = self.link
         if lk is not None and getattr(lk, "_m", None) is not None:
             lk.sync(self)             # the session the link formed, the cart it asked for
