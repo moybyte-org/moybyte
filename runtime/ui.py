@@ -1,8 +1,8 @@
 # Map (grep -n a name to jump there):
 #   is_light                          the theme's tool-surface presentation class
-#   wrap_words                        greedy word wrap
+#   wrap_words                        the text path's wrap (C); text_width beside it
 #   -- rect algebra                   inset, cut_top, cut_bottom, cut_left, split
-#   -- interaction state              widget_state, state_token
+#   -- interaction state              widget_state
 #   -- the style                      use_skin, metrics, state_colors (C)
 #   -- draw == tap                    Hits
 #   Hits                              per-draw hit registry
@@ -107,21 +107,19 @@ def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
 
 
 def wrap_words(text, maxc):
-    """Greedy word-wrap of `text` into lines of at most `maxc` chars (an
-    over-long single word gets its own truncated line)."""
-    lines = []
-    cur = ""
-    for word in str(text).split():
-        cand = word if not cur else cur + " " + word
-        if len(cand) <= maxc:
-            cur = cand
-        else:
-            if cur:
-                lines.append(cur)
-            cur = word[:maxc]
-    if cur:
-        lines.append(cur)
-    return lines
+    """Greedy word-wrap of `text` into lines of at most `maxc` BYTES, words
+    joined by single spaces (an over-long single word gets its own line,
+    truncated at a codepoint). The one wrap: native/moy_gfx/moy_text.h."""
+    if type(text) is not str:
+        text = str(text)
+    return _C.wrap(text, maxc)
+
+
+def text_width(s, scale=1):
+    """The pixels `s` draws at `scale`: UTF-8 bytes, a cell each."""
+    if type(s) is not str:
+        s = str(s)
+    return _C.text_width(s, scale)
 
 
 # --- rect algebra (pure tuple math; every rect is (x, y, w, h)) --------------

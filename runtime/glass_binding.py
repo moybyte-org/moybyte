@@ -31,11 +31,16 @@ _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 # The toolkit (native/moy_ui) is compiled into this library: its primitives
 # draw into the canvas rows this library holds (tools/moy_ui_binding.py).
 _UI = os.path.join(native_build.ROOT, "native", "moy_ui")
+_GFX = os.path.join(native_build.ROOT, "native", "moy_gfx")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
-            "moy_ui.h", "moy_ui.c", "moy_ui_tables.h", "moy_ui_tables.c")
+            "moy_ui.h", "moy_ui.c", "moy_ui_tables.h", "moy_ui_tables.c",
+            # ...and the text path and the raster under it, as gfx_binding
+            # builds them (libmoy at RGB565: the flag is in build() below)
+            "moy_text.h", "moy_text.c", "moy_gfx_kernels.h", "moy_gfx_kernels.c",
+            "moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
 
 ROLE_LAYER, ROLE_BAKE, ROLE_SCRATCH, ROLE_CACHE, ROLE_PAINT, ROLE_POOL = range(1, 7)
 ORIGIN_HEAP, ORIGIN_POOL, ORIGIN_ALLOC = 0, 1, 2
@@ -109,7 +114,9 @@ _PyBUF_WRITE = 0x200
 
 def build(verbose=False):
     return native_build.build("moy_glass", _SHIM, _SOURCES, _CACHE,
-                              libmoy_dir=(_GLASS, _SPINE, _UI), verbose=verbose)
+                              libmoy_dir=(_GLASS, _SPINE, _UI, _GFX, native_build.LIBMOY),
+                              cflags=native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"],
+                              verbose=verbose)
 
 
 def _lib():

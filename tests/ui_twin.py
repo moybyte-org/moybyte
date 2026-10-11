@@ -11,6 +11,8 @@ here, and edited only where the shipped toolkit's contract deliberately
 moves (each such edit says so where it is).
 """
 
+import re
+
 from runtime.widgets import _in as rect_in
 
 _BLACK = 0
@@ -29,20 +31,46 @@ def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
     if can_dn:
         cv.print('v', dn_xy[0], dn_xy[1], c, scale)
 
+# Edited with the text path (sprint 6 step 3, docs/kernel_toolkit_2026-10.md
+# §4): text is measured in UTF-8 BYTES, whitespace is str.split()'s ASCII set,
+# and a truncation backs up to the last whole codepoint, ending its line. For
+# ASCII this is the old body exactly.
+_SPACES = re.compile(b"[ \t\n\r\x0b\x0c\x1c-\x1f]+")
+
+
+def fit_bytes(b, cells):
+    if len(b) <= cells:
+        return b
+    k = cells
+    while k > 0 and (b[k] & 0xC0) == 0x80:
+        k -= 1
+    return b[:k]
+
+
 def wrap_words(text, maxc):
     lines = []
-    cur = ''
-    for word in str(text).split():
-        cand = word if not cur else cur + ' ' + word
+    cur = b''
+    if maxc < 1:
+        return lines
+    for word in _SPACES.split(str(text).encode('utf-8')):
+        if not word:
+            continue
+        cand = word if not cur else cur + b' ' + word
         if len(cand) <= maxc:
             cur = cand
+            continue
+        if cur:
+            lines.append(cur)
+        cur = b''
+        if len(word) <= maxc:
+            cur = word
         else:
-            if cur:
-                lines.append(cur)
-            cur = word[:maxc]
+            f = fit_bytes(word, maxc)
+            if f:
+                lines.append(f)
     if cur:
         lines.append(cur)
-    return lines
+    return [ln.decode('utf-8') for ln in lines]
 
 def inset(rect, dx, dy=None):
     if dy is None:

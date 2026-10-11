@@ -7,16 +7,13 @@ calls here.
 
 | file | holds |
 |---|---|
-| `style.json` | the style: each kind's `(field, ink, edge)` token spec per state, each kind's metric slots, the state aliases, the quirks that stay code, the skins as deltas, the token row's order (moy_app's vocabulary) and the hit buffer's capacity |
-| `strings/en.json` | the strings C draws, English, one entry per string id |
+| `style.json` | the style (its own "about" says what it holds), the token row's order (moy_app's vocabulary) and the hit buffer's capacity |
+| `strings/en.json` | English for every string C draws, by id |
 | `moy_ui_tables.h`, `moy_ui_tables.c` | GENERATED from the two by `tools/gen_ui_tables.py` and committed; `tests/test_ui_tables.py` fails a stale pair |
 | `moy_ui.h`, `moy_ui.c` | the style resolution: kinds and states by name, the skin by name, the looks (the style resolved against a token row) |
 | `modmoy_ui.c` | the module `moy_ui` the boards and the browser import |
 
-A data edit is the JSON plus the regenerated tables; it touches no C body
-and no Python logic, and it still needs a firmware build to reach a board.
-The tables are `const`; the looks are allocated once, in PSRAM where a board
-has it.
+Which edits are data and which need C is the design doc's §2.2.
 
 On the host the C is compiled into the glass's library
 (`runtime/glass_binding.py`), because its primitives draw into the canvas

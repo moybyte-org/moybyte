@@ -38,6 +38,7 @@
 #endif
 
 #include "moy_gfx_kernels.h"
+#include "moy_text.h"
 
 /* ---- the shape verbs under a fill pattern ------------------------------ */
 
@@ -365,9 +366,14 @@ void mg_text(uint16_t *dst, size_t dcap, int dw,
         moy_print(&c, s, slen, x, y, 0);
         return;
     }
-    mg_text_raw(dst, dcap, dw, s, slen, x, y, (uint16_t)(col & 0xFFFF),
-                font, nglyphs, first, scale, cam_x, cam_y,
-                cx0, cy0, cx1, cy1);
+    // Above scale 1 this is system text: the one UI text path (moy_text.h),
+    // whose font is libmoy's same petme128.
+    (void)font;
+    (void)nglyphs;
+    (void)first;
+    moy_text_target_t t = {dst, dcap, dw, cam_x, cam_y, cx0, cy0, cx1, cy1};
+    moy_text(&t, MOY_FONT_PETME128, MOY_TEXT_PY, s, slen, x, y, (uint16_t)(col & 0xFFFF),
+             scale, MOY_TEXT_LEFT, -1);
 }
 
 /* ---- the layer restore (moy_gfx_kernels.h has the contract) ------------ */

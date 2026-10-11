@@ -8,6 +8,7 @@
 
 #include "moy_chrome.h"
 #include "moy_gfx_kernels.h"
+#include "moy_text.h"
 #include "moy.h"
 
 // -- the inks ----------------------------------------------------------------------
@@ -79,7 +80,7 @@ static void print(moy_chrome_list_t *l, const char *s, int max, int x, int y, in
                   int scale) {
     size_t n = s != NULL ? strlen(s) : 0;
     if (max >= 0 && n > (size_t)max) {
-        n = (size_t)max;
+        n = moy_text_fit((const uint8_t *)s, n, (size_t)max);    // never mid-codepoint
     }
     moy_chrome_op_t *o = put(l, MOY_CH_TEXT, c, x, y, 0, 0);
     if (o != NULL) {
@@ -128,73 +129,25 @@ void moy_chrome_pill(moy_chrome_list_t *l, int cw, int ch, uint32_t held_ms, uin
 
 #define CODE_LH 10
 
-// The panel's text, word-wrapped into `cols`-byte lines, a word longer than
-// that hard-split (runtime's _wrap, line for line), the first `max_rows`
-// printed CODE_LH apart.
+// The panel's text, word-wrapped into `cols`-byte lines by the one wrap
+// (moy_text_wrap's panel mode: a newline ends a line, a word longer than a
+// line breaks across lines at a codepoint), the first `max_rows` printed
+// CODE_LH apart.
+#define PANEL_ROWS 32
 static void panel_lines(moy_chrome_list_t *l, const char *text, int cols, int max_rows, int x,
                         int y, int c) {
     if (cols < 1) {
         cols = 1;
     }
-    int row = 0;
-    char line[256];
-    const char *t = text;
-    for (;;) {
-        const char *pe = strchr(t, '\n');
-        if (pe == NULL) {
-            pe = t + strlen(t);
-        }
-        size_t ln = 0;                  // the line being built
-        const char *w = t;
-        for (;;) {
-            const char *we = w;
-            while (we < pe && *we != ' ') {
-                we++;
-            }
-            size_t wn = (size_t)(we - w);
-            while (wn > (size_t)cols) {
-                if (ln) {
-                    if (row < max_rows) {
-                        print(l, line, (int)ln, x, y + row * CODE_LH, c, 1);
-                    }
-                    row++;
-                    ln = 0;
-                }
-                if (row < max_rows) {
-                    print(l, w, cols, x, y + row * CODE_LH, c, 1);
-                }
-                row++;
-                w += cols;
-                wn -= (size_t)cols;
-            }
-            if (ln == 0) {
-                memcpy(line, w, wn);
-                ln = wn;
-            } else if (ln + 1u + wn <= (size_t)cols) {
-                line[ln] = ' ';
-                memcpy(line + ln + 1, w, wn);
-                ln += 1u + wn;
-            } else {
-                if (row < max_rows) {
-                    print(l, line, (int)ln, x, y + row * CODE_LH, c, 1);
-                }
-                row++;
-                memcpy(line, w, wn);
-                ln = wn;
-            }
-            if (we >= pe) {
-                break;
-            }
-            w = we + 1;
-        }
-        if (row < max_rows) {
-            print(l, line, (int)ln, x, y + row * CODE_LH, c, 1);
-        }
-        row++;
-        if (*pe == 0 || row >= max_rows) {
-            return;
-        }
-        t = pe + 1;
+    if (max_rows > PANEL_ROWS) {
+        max_rows = PANEL_ROWS;
+    }
+    moy_text_line_t lines[PANEL_ROWS];
+    const uint8_t *s = (const uint8_t *)text;
+    int n = moy_text_wrap(MOY_FONT_PETME128, s, strlen(text), cols, MOY_WRAP_PANEL, lines,
+                          max_rows);
+    for (int row = 0; row < n && row < max_rows; row++) {
+        print(l, text + lines[row].off, lines[row].len, x, y + row * CODE_LH, c, 1);
     }
 }
 

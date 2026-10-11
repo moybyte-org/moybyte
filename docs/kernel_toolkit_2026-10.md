@@ -290,11 +290,18 @@ them in its player window, cart-shaped: a fixed canvas, scaled.
 canvases' print gate already uses at every scale (`mg_text_raw` with the staged
 petme128 blob, `native/moy_gfx/modmoy_gfx.c`'s print gate):
 
-    int moy_text(sink, uint32_t font, uint8_t source, const uint8_t *s, size_t n,
-                 int x, int y, int ink, int scale, int align, int maxw);   // drawn width
+    int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
+                 const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
+                 int align, int maxw);                                    // drawn width
     int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);
-    int moy_text_wrap(uint32_t font, const uint8_t *s, size_t n, int cols,
-                      moy_ui_span_t *lines, int cap);
+    int moy_text_wrap(uint32_t font, const uint8_t *s, size_t n, int cols, int mode,
+                      moy_text_line_t *lines, int cap);
+
+As built (step 3, `native/moy_gfx/moy_text.h`): the destination is a text
+target (buffer, camera, clip) that a sink, the print gate and the `text`
+kernel each fill from what they hold, and the wrap has two modes, the
+toolkit's (words, truncation) and the panels' (hard newlines, long words
+broken across lines), so the two old wraps are one body.
 
 Every UI text reaches it: the system canvases' `print`, every primitive's
 label, the scaled display type (`chrome._print_scaled`), `chrome._text_w`, word
@@ -496,8 +503,9 @@ meters check it.
 
 **The owner's (2026-10-11):**
 
-1. **Windowed, reflowing compiled apps are deferred.** A compiled app keeps
-   today's player window on the desk (§6). The single run slot is moycore's,
+1. **Reflowing (resize-aware) compiled apps are deferred.** A compiled app
+   keeps today's player window on the desk (§6), a fixed canvas the WM
+   scales, and nothing in this sprint removes or regresses it. The single run slot is moycore's,
    and lifting it is a later, P4-first item.
 2. **Layout as data is dropped this sprint.** Style and strings are data;
    every layout stays Python.
@@ -532,4 +540,4 @@ Each sentence is fixed where it lives, by the step given:
 | `surface.glyph` is a Python-only row until sprint 6 | `docs/kernel_appabi_2026-10.md` §2.1, §2.4, §11; `docs/app_api_v1.md` | 4 |
 | moy_chrome's glyph raster is fed from Python at start | `native/moy_play/moy_chrome.h` | 4 |
 | `ui` is the real `runtime/ui.py` in Python | `docs/app_api_v1.md`, `runtime/system_api.py`'s header | 6 |
-| a windowed compiled app is sprint 6's, its lifecycle exports and its input an event queue | `docs/kernel_appabi_2026-10.md` §4.1, §12 | 10 |
+| a reflowing (resize-aware) compiled app is sprint 6's, its lifecycle exports and its input an event queue | `docs/kernel_appabi_2026-10.md` §4.1, §12 | 10 |

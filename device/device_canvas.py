@@ -2349,6 +2349,17 @@ class SystemCanvas(DeviceCanvas):
            self._cam_x, self._cam_y,
            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
+    def print_scaled(self, s, x, y, c, scale):
+        """The display type: `s` at `scale` (a whole number, NOT the font
+        scale), one op through the one UI text path -- what
+        chrome._print_scaled draws a heading with."""
+        self.flush_batch()             # a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_TEXT] += 1
+        self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s),
+                       int(x), int(y), self._col(c), _FONT8, _FONT8_FIRST,
+                       max(1, int(scale)), self._cam_x, self._cam_y,
+                       self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
     def _make_layer(self, comp):
         # A system surface's layers are system surfaces too: bar_layer,
         # launcher_layer, wm_windowed and host_api all print into layers, and a

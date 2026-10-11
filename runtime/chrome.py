@@ -44,17 +44,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _in, _err_text
 
-# The shared petme128 glyph source (#62) -- the Library shelf's display type
-# (_print_scaled) rasterizes it through plain rect blocks so it renders identically
-# on every canvas (host SystemCanvas, device, web recording). Staged as `moy_font`
-# on the device builds, `font`/`runtime.font` on host trees.
+# The toolkit's face: the display type's widths go through its text path.
 try:
-    import moy_font as _font
-except ImportError:  # pragma: no cover - host fallback
-    try:
-        import font as _font
-    except ImportError:
-        from runtime import font as _font
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
 
 # Surface geometry constants the Layout classes derive their responsive rects from.
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
@@ -801,11 +795,11 @@ def _gbtn(ws, names, kind, label, rect, fill, cv):
 
 def _print_scaled(cv, s, x, y, c, mult=2):
     """System DISPLAY type (visual identity v1): print `s` at `mult` x the canvas's
-    system font scale, each glyph pixel a filled block via cv.rect -- so the Library
-    shelf's headings ("LIBRARY", the MAKE card) render identically on the host
-    SystemCanvas, a recording canvas, and the device. cv.print ignores its legacy
-    per-call scale arg (one system size), which is why this helper exists; at an
-    effective scale of 1 it defers to cv.print (byte-identical petme128)."""
+    system font scale -- the Library shelf's headings ("LIBRARY", the MAKE card).
+    cv.print ignores its legacy per-call scale arg (one system size), which is why
+    this helper exists: above an effective scale of 1 it is one `print_scaled`, the
+    one UI text path at that scale (native/moy_gfx/moy_text.h); at 1 it is
+    cv.print."""
     fs = getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
@@ -813,16 +807,16 @@ def _print_scaled(cv, s, x, y, c, mult=2):
     if sc <= 1:
         cv.print(s, x, y, c, 1)
         return
-    ci = c & 63
-    _font.draw_scaled(lambda bx, by, n: cv.rect(bx, by, n, n, ci), s, x, y, sc)
+    cv.print_scaled(s, x, y, c, sc)
 
 
 def _text_w(cv, s, mult=1):
-    """The on-screen width of `s` printed at `mult` x the canvas font scale."""
+    """The on-screen width of `s` printed at `mult` x the canvas font scale, as
+    the text path measures it (UTF-8 bytes)."""
     fs = getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
-    return len(str(s)) * 8 * fs * max(1, int(mult))
+    return _ui.text_width(s, fs * max(1, int(mult)))
 
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------

@@ -55,6 +55,7 @@
 // and GCC refuses to inline across a mismatch in optimization attributes, so a
 // header pulled in at -O2 would turn the per-row fill into a per-row call.
 #include "moy_gfx_kernels.h"
+#include "moy_text.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
@@ -1385,6 +1386,15 @@ static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
     }
 }
 
+// The ctx's text target: its buffer, camera and clip (moy_text.h).
+static moy_text_target_t ctx_text_target(const moy_gfx_draw_ctx_obj_t *c) {
+    const int32_t *st = c->st;
+    moy_text_target_t t = {c->px, (size_t)c->cap, (int)st[ST_W], (int)st[ST_CAM_X],
+                           (int)st[ST_CAM_Y], (int)st[ST_CX0], (int)st[ST_CY0],
+                           (int)st[ST_CX1], (int)st[ST_CY1]};
+    return t;
+}
+
 static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
                                const mp_obj_t *args) {
     moy_gfx_draw_gate_obj_t *g = MP_OBJ_TO_PTR(self_in);
@@ -1422,11 +1432,10 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         }
         size_t slen;
         const char *s = mp_obj_str_get_data(args[0], &slen);
-        mg_text_raw(c->px, c->cap, st[ST_W], (const uint8_t *)s, slen,
-                         x, y, c->pal[(size_t)(ci & 63) % c->npal],
-                         c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
-                         st[ST_CAM_X], st[ST_CAM_Y],
-                         st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
+        moy_text_target_t tt = ctx_text_target(c);
+        moy_text(&tt, MOY_FONT_PETME128, MOY_TEXT_PY, (const uint8_t *)s, slen, x, y,
+                 c->pal[(size_t)(ci & 63) % c->npal], st[ST_FONT_SCALE],
+                 MOY_TEXT_LEFT, -1);
         st[ST_N_TEXT]++;
         if (st[ST_PROF]) st[ST_T_TEXT] += (int32_t)(mp_hal_ticks_us() - t0);
         return mp_const_none;
@@ -1659,11 +1668,9 @@ void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
     if (!ctx_live(c)) {
         return;
     }
-    const int32_t *st = c->st;
-    mg_text_raw(c->px, c->cap, st[ST_W], s, slen, x, y, capi_col(c, ci),
-                     c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
-                     st[ST_CAM_X], st[ST_CAM_Y],
-                     st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
+    moy_text_target_t tt = ctx_text_target(c);
+    moy_text(&tt, MOY_FONT_PETME128, MOY_TEXT_PY, s, slen, x, y, capi_col(c, ci),
+             c->st[ST_FONT_SCALE], MOY_TEXT_LEFT, -1);
     c->st[ST_N_TEXT]++;
 }
 

@@ -9,6 +9,7 @@
 #include "py/objstr.h"
 
 #include "moy_ui.h"
+#include "../moy_gfx/moy_text.h"
 
 static mp_obj_t names_tuple(const char *const *names, int n) {
     mp_obj_t items[MOY_UI_KINDS > MOY_UI_STRINGS ? MOY_UI_KINDS : MOY_UI_STRINGS];
@@ -142,6 +143,49 @@ static mp_obj_t ui_metrics(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_metrics_obj, ui_metrics);
 
+// text_width(s, scale=1): the pixels `s` draws at `scale` (moy_text.h: bytes).
+static mp_obj_t ui_text_width(size_t n_args, const mp_obj_t *args) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(args[0], &n);
+    int scale = n_args > 1 ? (int)mp_obj_get_int(args[1]) : 1;
+    return MP_OBJ_NEW_SMALL_INT(moy_text_width(MOY_FONT_PETME128, (const uint8_t *)s, n, scale));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_width_obj, 1, 2, ui_text_width);
+
+// wrap(s, cols) -> [line, ...]: the toolkit's word wrap (moy_text_wrap's
+// words mode), each line its words joined by single spaces.
+#define WRAP_LINES 32
+static mp_obj_t ui_wrap(mp_obj_t text, mp_obj_t cols_in) {
+    size_t n;
+    const uint8_t *s = (const uint8_t *)mp_obj_str_get_data(text, &n);
+    int cols = (int)mp_obj_get_int(cols_in);
+    moy_text_line_t stack[WRAP_LINES];
+    moy_text_line_t *lines = stack;
+    int count = moy_text_wrap(MOY_FONT_PETME128, s, n, cols, MOY_WRAP_WORDS, lines,
+                              WRAP_LINES);
+    if (count > WRAP_LINES) {
+        lines = m_new(moy_text_line_t, count);
+        moy_text_wrap(MOY_FONT_PETME128, s, n, cols, MOY_WRAP_WORDS, lines, count);
+    }
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < count; i++) {
+        const moy_text_line_t *l = &lines[i];
+        if (!l->collapse) {
+            mp_obj_list_append(out, mp_obj_new_str((const char *)s + l->off, l->len));
+            continue;
+        }
+        vstr_t v;
+        vstr_init_len(&v, l->len);
+        v.len = moy_text_collapse(s, l, (uint8_t *)v.buf);
+        mp_obj_list_append(out, mp_obj_new_str_from_vstr(&v));
+    }
+    if (lines != stack) {
+        m_del(moy_text_line_t, lines, count);
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_wrap_obj, ui_wrap);
+
 static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ui) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&ui_tokens_obj) },
@@ -156,6 +200,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_look), MP_ROM_PTR(&ui_look_obj) },
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&ui_colors_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_width), MP_ROM_PTR(&ui_text_width_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wrap), MP_ROM_PTR(&ui_wrap_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ui_globals, moy_ui_globals_table);
 

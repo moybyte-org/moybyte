@@ -336,7 +336,7 @@ console needs while no Python app runs is OS.
 | `runtime/editors_sheet.py` | app | — | the sprite, tile and map models; `IconSheet` is also the bar's icon data, which the bar reads in 7 |
 | `runtime/file_widgets.py` | app | — | the thumbnail-grid picker Files and Paint share |
 | `runtime/files_app.py` | app | — | Files |
-| `runtime/font.py` | host-only | — | the host's petme128 glyph table, standing in for the `framebuf` font a board has; the native canvas carries its font from sprint 3, and one text path for every runtime is sprint 6's (§10) |
+| `runtime/font.py` | host-only | — | the host's petme128 glyph table, standing in for the `framebuf` font a board has; the native canvas carries its font from sprint 3, and the one UI text path is `native/moy_gfx/moy_text.h` (sprint 6's step 3) |
 | `runtime/getcarts_app.py` | app | — | Get Carts, a registered system app |
 | `runtime/gfx_binding.py` | host-only | — | the host's `moy_gfx`; sprint 3's glass rebinds it |
 | `runtime/history_router.py` | app | — | the Editor's UNDO and REDO router |
@@ -968,7 +968,9 @@ makes it false, not annotated:
    kernel-owned (owner, 2026-10-05).
 5. **The desk.** Whether the P4 ever stops its VM with apps open.
 6. **Text.** One text path for every app runtime; a fixed 8×8 font will not be
-   enough for wasm apps (#158's e-reader case). Sprint 6.
+   enough for wasm apps (#158's e-reader case). Answered by sprint 6's step 3:
+   `native/moy_gfx/moy_text.h`, its font a handle, so a font beyond petme128
+   is a row behind the same call (theming's font format).
 7. **The open placements** of §2.2.1: the rows whose sprint reads `open`, each
    with its question in its note. Each is answered before its group's sprint
    starts.

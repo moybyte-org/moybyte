@@ -9,6 +9,7 @@ registers this as `moy_ui`, so the host's toolkit is the C every image runs.
 
 import ctypes
 import os
+import re
 import sys
 import types
 
@@ -36,7 +37,17 @@ _SIGS = (
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
+    ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
+    ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
 )
+
+
+class _Line(c.Structure):
+    """moy_text.h's moy_text_line_t."""
+    _fields_ = [("off", c.c_uint16), ("len", c.c_uint16), ("collapse", c.c_uint8)]
+
+
+_SPACE = re.compile(rb"[ \t\n\r\x0b\x0c\x1c-\x1f]+")
 
 
 def _names(lib, sym, n):
@@ -107,6 +118,25 @@ def binding():
             return None
         return tuple(p[i] for i in range(n.value))
 
+    def text_width(text, scale=1):
+        b = _b(text)
+        return lib.moy_text_width(0, b, len(b), int(scale))
+
+    def wrap(text, cols):
+        b = _b(text)
+        n = lib.moy_text_wrap(0, b, len(b), int(cols), 0, None, 0)
+        lines = (_Line * max(1, n))()
+        lib.moy_text_wrap(0, b, len(b), int(cols), 0, lines, n)
+        out = []
+        for ln in lines[:n]:
+            seg = b[ln.off:ln.off + ln.len]
+            if ln.collapse:
+                seg = _SPACE.sub(b" ", seg).strip(b" ")
+            out.append(seg.decode("utf-8"))
+        return out
+
+    m.text_width = text_width
+    m.wrap = wrap
     m.tokens = lambda: tokens
     m.states = lambda: states
     m.kinds = lambda: kinds[:counts["COLOR_KINDS"]]

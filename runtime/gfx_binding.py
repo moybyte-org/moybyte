@@ -63,7 +63,7 @@ _CFLAGS = native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"]
 # and refuses a name that appears in each, so this cannot silently pick up a
 # stale copy.
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
-           "moy_gfx_kernels.h", "moy_gfx_kernels.c")
+           "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c")
 
 # ...and where to find them. One tuple rather than a literal at the call site,
 # because a caller that reconstructs the build (tests/test_native_build_no_
