@@ -349,6 +349,33 @@ def test_a_cart_message_crosses_and_is_pumped_not_delivered_mid_send():
     assert got == [{"hi": 5}]
 
 
+def test_net_pump_and_send_import_nothing(monkeypatch):
+    """net.pump() runs every frame of a multiplayer cart. On a board `json` is
+    an extensible built-in that never enters sys.modules, so an `import json`
+    there is a filesystem search on every call, and one inside pump halved
+    Brick Siege and Harpoon Pop on every console board (#66)."""
+    import builtins
+    air, clock, a, b = _pair()
+    got = []
+    b.net.on_message(got.append)
+    assert a.net.send({"hi": 5}) is True
+    b.poll()
+    seen = []
+    real = builtins.__import__
+
+    def spy(name, *args, **kw):
+        seen.append(name)
+        return real(name, *args, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", spy)
+    b.net.pump()                        # a frame with a message in
+    b.net.pump()                        # and one with none
+    a.net.send({"again": 1})
+    monkeypatch.undo()
+    assert seen == [], "the frame path imported %r" % seen
+    assert got == [{"hi": 5}]
+
+
 def test_an_oversized_message_is_dropped_whole_rather_than_truncated():
     """A half-delivered message reads as a game-logic bug at the other end, so
     the honest failure is to refuse it and say so."""

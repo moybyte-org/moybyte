@@ -304,6 +304,12 @@ class LoopbackNet(NetService):
 # cart's net.* messages as JSON, and the actions the link leaves for the
 # console (open the cart a host named, re-run it from frame zero).
 
+# json is imported ONCE, here, and never inside a function: on a board it is
+# an extensible built-in, which MicroPython never enters in sys.modules, so
+# every `import json` searches sys.path on the filesystem first -- and
+# net.pump() runs every frame of a multiplayer cart (#66 has the cost).
+import json
+
 try:
     import moy_play as _mp
 except ImportError:                     # CPython: the host's ctypes module
@@ -356,7 +362,6 @@ def _decode_config(text):
     if not text:
         return None
     try:
-        import json
         cfg = json.loads(text)
         return cfg if isinstance(cfg, dict) and cfg else None
     except Exception:  # noqa: BLE001
@@ -401,7 +406,6 @@ class LockstepSession:
             _m.start(b"\x00" * 6)
             cfg = None
             if config:
-                import json
                 cfg = json.dumps(config)
             _m.begin(index, seed, session, cfg)
             _m.tick_ms = int(1000 // tick_hz)
@@ -523,7 +527,6 @@ class EspNowNet(NetService):
 
     def send(self, data):
         try:
-            import json
             body = json.dumps(data).encode()
         except Exception as exc:  # noqa: BLE001 -- a cart must not crash on send
             print("Moybyte net.send: cannot encode:", exc)
@@ -538,7 +541,6 @@ class EspNowNet(NetService):
     def pump(self):
         m = self._link._m
         if m is not None:
-            import json
             while True:
                 b = m.take_msg()
                 if b is None:
@@ -800,7 +802,6 @@ class EspNowLink:
             return False
         cfg = getattr(ws, "config", None) if ws is not None else None
         try:
-            import json
             self._m.set_config(json.dumps(cfg) if cfg else None)
         except Exception:  # noqa: BLE001
             self._m.set_config(None)
