@@ -10,6 +10,7 @@ content-draw and 181ms by real frame). So every number here is measured around
 
 Usage:
     python tools/p4_bench.py --board p4 [--out bench.md]
+    python tools/p4_bench.py --board tdeck --repaint settings,files
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -45,9 +46,12 @@ ws._D = time.ticks_diff
 ws._ft = []
 ws._lt = {}
 ws._recording = False
+ws._force = False
 if not hasattr(ws, '_bench_installed'):
     _of = ws.frame
     def _f(dt, _of=_of):
+        if ws._recording and ws._force:
+            ws.mark_dirty()        # --repaint: every frame paints the surface
         a = ws._T()
         n0 = ws._frames_drawn
         r = _of(dt)
@@ -244,13 +248,45 @@ def bench_all(b, out_path):
     return bench
 
 
+def bench_repaint(b, surfaces, seconds, out_path):
+    """The widget A/B (docs/kernel_toolkit_2026-10.md §10): each surface open
+    and repainted EVERY frame for `seconds`, painted-frame ms. Board-neutral,
+    so the S3s take it with the P4s."""
+    bench = Bench(b)
+    print("\n=== repaint benchmark (painted-frame ms) ===")
+    for name in surfaces:
+        if name == "settings":
+            b.open("settings")
+        elif not pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % name):
+            print("  %-34s (app not available)" % name)
+            continue
+        b.drain(2.5)
+        b.cmd("py setattr(ws, '_force', True) or 1", wait_for="PY")
+        bench.start(); b.drain(seconds); bench.stop("repaint: %s" % name)
+        b.cmd("py setattr(ws, '_force', False) or 1", wait_for="PY")
+        pyexec(b, "ws.go_home()"); b.drain(2.0)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
 def main():
     ap = argparse.ArgumentParser()
     add_board_args(ap)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--repaint", default=None, metavar="SURFACES",
+                    help="comma-separated surfaces (settings, files, storybook,"
+                         " ...) to repaint every frame instead of the panel run")
+    ap.add_argument("--seconds", type=float, default=6.0)
     args = ap.parse_args()
     b = board_from_args(args)
     try:
+        if args.repaint:
+            bench_repaint(b, args.repaint.split(","), args.seconds, args.out)
+            return 0
         if not b.attach_only:       # an attach-only board is benched as found
             b.reset()
         bench_all(b, args.out)

@@ -643,8 +643,15 @@ class DeviceCanvas:
         self._pal_epoch = 0
         self._wire_pal_arr = None      # #167 fill_spans palette cache (see _wire_pal)
         self._wire_pal_gen = -1
-        self._gate_state = None
-        self._gate_pal = None
+        # The row's draw state and colour table, kept in step on EVERY canvas,
+        # gated or not: native/moy_ui's primitives draw into the row through
+        # them, so a host canvas (no draw gates) carries the same clip,
+        # palette and op counters a board's does.
+        st = self._gate_state = self._crow.state
+        self._gate_pal = self._crow.pal
+        st[_ST_W] = self.w             # the stride: a new canvas owns its buffer
+        st[_ST_H] = self.h
+        st[_ST_FONT_SCALE] = max(1, int(getattr(self, "font_scale", 1)))
         # SPEC.md 6's fill pattern: 0 is solid (the state every frame starts in)
         # and -1 leaves a hole pixel untouched. Read by the nine shape verbs and
         # by nothing else -- see fillp().
@@ -672,6 +679,7 @@ class DeviceCanvas:
         # one, so those keep the moy_gfx path untouched.
         self._ppa_fill = getattr(self, "ppa_fill", None)
         self.reset_state()
+        self._sync_gate_pal()
         self._install_draw_gates()
         _room(self)
 
@@ -1207,6 +1215,7 @@ class DeviceCanvas:
             i = (y * self._stride + x) * 2
             b = self._buf
             return _PAL565_INDEX.get(b[i] | (b[i + 1] << 8), 0)
+        self._gate_state[_ST_N_FILL] += 1
         if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
             self._gfx.fill_rect(self._buf, self._stride, x, y, 1, 1, self._col(c))
 
@@ -1231,6 +1240,7 @@ class DeviceCanvas:
         # instead of a method call, and _col is inlined for the same reason.
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_FILL] += 1   # the gate's count, on every tier
         self._fill(int(x), int(y), int(w), int(h),
                    self._wire[self._pal_map[c & 63]])
 
@@ -1240,6 +1250,7 @@ class DeviceCanvas:
         # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_FILL] += 1   # one op, as the gate counts it
         x = int(x); y = int(y); w = int(w); h = int(h)
         col = self._wire[self._pal_map[c & 63]]
         self._fill(x, y, w, 1, col)
@@ -1986,6 +1997,7 @@ class DeviceCanvas:
             self.flush_batch()         # #63: print() is a non-spr primitive -> break batch
         # Chrome draws text by the dozen per frame, so the DRAW2 ticks pair
         # is gated here like _fill's (see its note).
+        self._gate_state[_ST_N_TEXT] += 1
         _prof = self._prof
         _t0 = _ticks_us() if _prof else 0
         self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
@@ -2325,6 +2337,7 @@ class SystemCanvas(DeviceCanvas):
             DeviceCanvas.print(self, s, x, y, c)
             return
         self.flush_batch()             # a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_TEXT] += 1
         # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
         # two diverge the moment a viewport is set (#155) -- which is exactly
         # what wm_windowed._direct_render does to paint a window's content in

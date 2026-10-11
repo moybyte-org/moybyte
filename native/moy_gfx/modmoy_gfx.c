@@ -656,13 +656,12 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_obj, 5, 5, moy_gfx_copy)
 // fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y, cx0, cy0, cx1, cy1)
 // -- the #163 span batch WITHOUT a DrawCtx (#167).
 //
-// Why this exists next to DrawCtx.fill_rects: the T-Deck ROOT canvas never
-// installs the draw gates (its _fill has to poke the SRAM-bounce flush pump
-// between native ops, #66, and a C gate has no cheap way back into Python), so
-// on that board DrawCtx.fill_rects is unreachable and DeviceCanvas.fill_rects
-// falls back to ONE INTERPRETER rect() PER SPAN -- precisely the dispatch cost
-// the batch exists to delete. Measured on glass: a 160-span software-3D frame
-// cost ~10ms of Python there while the gated P4 ran the same batch in ~1ms.
+// Why this exists next to DrawCtx.fill_rects: a canvas without a DrawCtx (one
+// whose _install_draw_gates probe failed) would otherwise fall back to ONE
+// INTERPRETER rect() PER SPAN -- precisely the dispatch cost the batch exists
+// to delete. Measured on glass when a board's root canvas had no gates: a
+// 160-span software-3D frame cost ~10ms of Python where the gated P4 ran the
+// same batch in ~1ms.
 //
 // So this takes the buffer, camera and clip as plain arguments exactly like
 // circ/line above, which makes it work on EVERY canvas, gated or not.

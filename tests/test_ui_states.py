@@ -805,3 +805,116 @@ def test_cell_draws_a_centred_glyph_or_icon_in_the_art_rect():
     b = SystemCanvas(60, 60)
     ui.cell(b, th, (0, 0, 40, 40), None, icon_img=IMG, pad=0)
     assert bytes(a._buf) != bytes(b._buf)
+
+
+# =============================================================================
+# 5. the widget matrix: every kind in every state, both skins
+# =============================================================================
+
+def _paint_matrix(cv, th):
+    """Every style kind in all six states through the widget that draws it
+    (row, cell, chip, button), plus a kind the table does not name."""
+    own = {
+        "tab": lambda r: ui.tab_row(cv, th, (0, r[1], 318, 14),
+                                    (("a", "Aa", "gear"), ("b", "Bb", "map")),
+                                    "b"),
+        "status": lambda r: ui.status_row(cv, th, (0, r[1], 318, 14),
+                                          ("Ln 1", "ok")),
+        "panel": lambda r: ui.panel(cv, th, (2, r[1] + 1, 150, 12)),
+        "panel_title": lambda r: ui.panel(cv, th, (160, r[1] + 1, 150, 12),
+                                          title="T"),
+        "toolbar": lambda r: ui.toolbar(cv, th, (0, r[1], 318, 14)),
+        "scrollbar": lambda r: _matrix_bar(cv, th, r[1]),
+        "focus": lambda r: ui.focus_ring(cv, th, (20, r[1] + 4, 100, 6)),
+    }
+    kinds = sorted(ui.DEFAULT_SPECS) + ["nosuchkind"]
+    y = 0
+    for kind in kinds:
+        if kind in own:
+            own[kind]((0, y))
+            y += 15
+            continue
+        x = 0
+        for st in ui.STATES:
+            r = (x, y, 52, 14)
+            on, hot, dis = st == ui.ON, st == ui.HOT, st == ui.DISABLED
+            interact = st if st in (ui.HOVER, ui.PRESSED) else None
+            if kind.startswith("button"):
+                bk = {"button": "normal"}.get(kind, kind[7:])
+                ui.button(cv, th, r, "B" + kind[:3], kind=bk, on=on,
+                          disabled=dis, state=interact)
+            elif kind == "chip":
+                ui.chip(cv, th, r, "CHIP", on=on, hot=hot, disabled=dis,
+                        state=interact)
+            elif kind.startswith("cell"):
+                ui.cell(cv, th, r, "C", kind=kind, on=on, hot=hot,
+                        disabled=dis, state=interact, band=kind == "cell_band")
+            else:
+                ui.row(cv, th, r, kind, kind=kind, on=on, hot=hot,
+                       disabled=dis, state=interact, value="v")
+            x += 53
+        y += 15
+
+
+def _matrix_bar(cv, th, y):
+    sr = ui.ScrollRegion(horizontal=True)
+    sr.set((0, y, 318, 14), 900)
+    sr.scroll_by(200)
+    sr.draw_bar(cv, th)
+
+
+# skin theme/variant sha256[:16] of the index readout at 320x320@1.
+WIDGET_MATRIX_HASHES = (
+    "default night/dark babd1e933157eac8",
+    "default night/light eb666cdc27a9983e",
+    "default indigo/dark 1f5b2687fb082baf",
+    "default indigo/light 3faf3fb024f8d111",
+    "default berry/dark 5733e75345aff7c4",
+    "default berry/light 1a3d39ac5a098fa5",
+    "default forest/dark cebdedcf4eef037e",
+    "default forest/light 5d96e40e41764211",
+    "default slate/dark 4d58e451940478a3",
+    "default slate/light 63aa1a7b86f1dbe7",
+    "default machine/dark 65f2d1029e4a47be",
+    "default machine/light 83cc6bd9a56cd0be",
+    "outline night/dark 9ed88f5b13c83257",
+    "outline night/light bb907d737c9224e9",
+    "outline indigo/dark 23ad64a994c553f3",
+    "outline indigo/light 630f059649d3fa5c",
+    "outline berry/dark eefb5c1eb3efe41a",
+    "outline berry/light e5da731b61ce3a12",
+    "outline forest/dark 6b2697bd57a365aa",
+    "outline forest/light c432768e346a346d",
+    "outline slate/dark a0dffbd013cff200",
+    "outline slate/light b2afd05463488cce",
+    "outline machine/dark 8580e1cce536e540",
+    "outline machine/light bb907d737c9224e9",
+)
+
+
+def _matrix_hashes():
+    from runtime import skin
+    out = []
+    try:
+        for sk in skin.names():
+            skin.use(sk)
+            for name, _tokens in THEMES:
+                for variant in THEME_VARIANTS:
+                    cv = SystemCanvas(320, 320)
+                    _paint_matrix(cv, theme_colors(name, variant))
+                    out.append("%s %s/%s %s" % (
+                        sk, name, variant,
+                        hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
+    finally:
+        skin.use(skin.DEFAULT)
+    return out
+
+
+def test_every_kind_in_every_state_is_byte_identical():
+    """The widget matrix (docs/kernel_toolkit_2026-10.md §7): each style kind
+    in each state, both skins, all twelve theme sets -- pinned before the
+    toolkit crossed to C, so the crossing cannot move one pixel of it."""
+    got = _matrix_hashes()
+    assert len(got) == len(WIDGET_MATRIX_HASHES) == 24
+    for g, w in zip(got, WIDGET_MATRIX_HASHES):
+        assert g == w, "a kind's pixels moved: %s (pinned %s)" % (g, w)

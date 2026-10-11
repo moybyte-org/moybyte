@@ -57,8 +57,8 @@ and a Python app's button is a compiled app's button.
 | data | its source | read by |
 |---|---|---|
 | **theme tokens** | `runtime/chrome.py`'s `THEMES` and `THEME_LIGHT`, written by the look into native/moy_app's live token table (sprint 5) | the C style resolution; every app's `theme` reads |
-| **style** | `+native/moy_ui/style.json`: the kinds, the states, each `(field, ink, edge)` spec with its alias chains, each kind's metric tuple with its slot names, the quirks of `NON_DATA_QUIRKS` against their kinds, the skins as deltas, the glyph vocabulary | the generated `+native/moy_ui/moy_ui_tables.c` |
-| **strings** | `+native/moy_ui/strings/en.json`: one entry per string id, English complete, each format's conversions part of its text | the same generated table (§2.3) |
+| **style** | `native/moy_ui/style.json`: the kinds, the states, each `(field, ink, edge)` spec with its alias chains, each kind's metric tuple with its slot names, the quirks of `NON_DATA_QUIRKS` against their kinds, the skins as deltas, the glyph vocabulary | the generated `+native/moy_ui/moy_ui_tables.c` |
+| **strings** | `native/moy_ui/strings/en.json`: one entry per string id, English complete, each format's conversions part of its text | the same generated table (§2.3) |
 
 **The generated table is committed.** `runtime/native_build.py` runs no
 generator, and neither do the board builds, so `+tools/gen_ui_tables.py` writes
@@ -386,7 +386,7 @@ host. No pixel-moving theming phase and no Studio step overlaps the sprint
 
 | what | where it goes | the Python removed |
 |---|---|---|
-| `runtime/ui.py`: `DEFAULT_SPECS`, `DEFAULT_METRICS`, the slot constants, `NON_DATA_QUIRKS`, `_STATE_ALIAS` | `+native/moy_ui/style.json` and its generated table | the tables; the slot names stay as constants the face exports |
+| `runtime/ui.py`: `DEFAULT_SPECS`, `DEFAULT_METRICS`, the slot constants, `NON_DATA_QUIRKS`, `_STATE_ALIAS` | `native/moy_ui/style.json` and its generated table | the tables; the slot names stay as constants the face exports |
 | `runtime/ui.py`: `_token`, `state_token`, `_flatten_kind`, `_bind_theme`, `widget_state`, `metrics`, `state_colors` | the C style resolution (§3.1) | the bodies; `state_colors` and `metrics` stay as faces |
 | `runtime/ui.py`: `set_skin` and its callable seam `fn(th, kind, state)` | the skin by name in C | the seam, with `tests/test_ui_states.py`'s case that installs a callable; no runtime caller uses it |
 | `runtime/ui.py`: the widget bodies (button through `fill_uncovered`), `scroll_cues` | the C primitives (§3.3) | the bodies, kept under `tests/` as the twin |
@@ -418,7 +418,7 @@ steps 2, 3 and 6, not only at the end.
 
 1. **The rows on the host, and the nets.** Every canvas keeps its row's state,
    palette and counters in step, with the host test of §3.1;
-   `+native/moy_ui/style.json` and `strings/en.json` written from today's
+   `native/moy_ui/style.json` and `native/moy_ui/strings/en.json` written from today's
    tables and literals, held equal by a test; the widget matrix extended; the
    twin under `tests/` with its fuzz; per-widget op budgets pinned from the
    twin's counted ops; the Hits capacity measured; a ratchet that every key a

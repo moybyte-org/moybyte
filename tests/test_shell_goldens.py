@@ -525,9 +525,33 @@ def _pin_cover_budget(monkeypatch):
 # the tests
 # ---------------------------------------------------------------------------
 
+def _hits_peak(monkeypatch):
+    """The most rects one `ui.Hits` holds at once while the goldens render."""
+    from runtime import ui
+    peak = [0]
+    add = ui.Hits.add
+
+    def counting(self, rect, verb, arg=None):
+        add(self, rect, verb, arg)
+        if len(self._items) > peak[0]:
+            peak[0] = len(self._items)
+
+    monkeypatch.setattr(ui.Hits, "add", counting)
+    return peak
+
+
 @pytest.mark.parametrize("config_name", sorted(CONFIGS))
-def test_shell_surfaces_match_goldens(config_name, tmp_path, request):
+def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
+                                     monkeypatch):
+    peak = _hits_peak(monkeypatch)
     got = capture(config_name, tmp_path / "carts")
+    cap = json.loads((ROOT / "native" / "moy_ui" / "style.json").read_text())[
+        "hits_capacity"]
+    assert 0 < peak[0] and 2 * peak[0] <= cap, (
+        "a surface registers %d hit rects in the goldens' frames; the hit "
+        "buffer's capacity (style.json's hits_capacity, %d) is twice the most "
+        "any surface registers (docs/kernel_toolkit_2026-10.md §3.4)"
+        % (peak[0], cap))
 
     if _updating(request):
         assert not hasattr(request.config, "workerinput"), (
