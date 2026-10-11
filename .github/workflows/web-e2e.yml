@@ -193,6 +193,13 @@ jobs:
       - name: wasi-sdk for the Jet carts
         run: .venv/bin/python tools/jet_cart.py --toolchain
 
+      # The hosted console's Python side reads user files through moy_ufiles,
+      # whose host library compiles the MicroPython tree's inflater and
+      # compressor; this is the target that fetches that tree (and ci.yml's
+      # step of the same name). Without it the store suites fail on import.
+      - name: Build the desktop MicroPython with the native usermods
+        run: make unix-micropython
+
       - name: Drive the hosted console in real Chrome
         run: |
           .venv/bin/python -m pytest -p xdist -n 4 -rs --junitxml=web-e2e.xml \
