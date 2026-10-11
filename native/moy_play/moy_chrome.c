@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "moy_chrome.h"
+#include "moy_str.h"
 #include "moy_gfx_kernels.h"
 #include "moy_text.h"
 #include "moy_ui.h"
@@ -46,7 +47,7 @@ static moy_chrome_op_t *put(moy_chrome_list_t *l, uint8_t op, int c, int x, int 
     o->op = op;
     o->c = (uint8_t)(c & 63);
     o->scale = 0;
-    o->pad = 0;
+    o->src = 0;
     o->x = (int16_t)x;
     o->y = (int16_t)y;
     o->w = (int16_t)w;
@@ -76,9 +77,10 @@ static void rectb(moy_chrome_list_t *l, int x, int y, int w, int h, int c) {
     put(l, MOY_CH_RECTB, c, x, y, w, h);
 }
 
-// `text` cut to its first `max` bytes (a negative max: all of it).
-static void print(moy_chrome_list_t *l, const char *s, int max, int x, int y, int c,
-                  int scale) {
+// `text` cut to its first `max` bytes (a negative max: all of it), from
+// `src` (moy_text.h's sources: the raster refuses a LIT).
+static void print(moy_chrome_list_t *l, uint8_t src, const char *s, int max, int x, int y,
+                  int c, int scale) {
     size_t n = s != NULL ? strlen(s) : 0;
     if (max >= 0 && n > (size_t)max) {
         n = moy_text_fit((const uint8_t *)s, n, (size_t)max);    // never mid-codepoint
@@ -86,6 +88,7 @@ static void print(moy_chrome_list_t *l, const char *s, int max, int x, int y, in
     moy_chrome_op_t *o = put(l, MOY_CH_TEXT, c, x, y, 0, 0);
     if (o != NULL) {
         o->scale = (uint8_t)scale;
+        o->src = src;
         str_in(l, o, s != NULL ? s : "", n);
     }
 }
@@ -115,9 +118,9 @@ void moy_chrome_pill(moy_chrome_list_t *l, int cw, int ch, uint32_t held_ms, uin
     int x = (cw - w) / 2, y = 6;
     rect(l, x, y, w, h, ink(MOY_INK_BLACK));
     rectb(l, x, y, w, h, ink(MOY_INK_LIGHT_GREY));
-    static const char LABEL[] = "HOLD TO EXIT";
-    int ln = (int)sizeof(LABEL) - 1;
-    print(l, LABEL, -1, x + (w - ln * 8) / 2, y + 2, ink(MOY_INK_WHITE), 1);
+    const char *label = moy_str(MOY_S_CHROME_HOLD_TO_EXIT);
+    int ln = (int)strlen(label);
+    print(l, MOY_TEXT_TABLE, label, -1, x + (w - ln * 8) / 2, y + 2, ink(MOY_INK_WHITE), 1);
     if (hold_ms == 0u) {
         return;
     }
@@ -135,8 +138,8 @@ void moy_chrome_pill(moy_chrome_list_t *l, int cw, int ch, uint32_t held_ms, uin
 // line breaks across lines at a codepoint), the first `max_rows` printed
 // CODE_LH apart.
 #define PANEL_ROWS 32
-static void panel_lines(moy_chrome_list_t *l, const char *text, int cols, int max_rows, int x,
-                        int y, int c) {
+static void panel_lines(moy_chrome_list_t *l, uint8_t src, const char *text, int cols,
+                        int max_rows, int x, int y, int c) {
     if (cols < 1) {
         cols = 1;
     }
@@ -148,7 +151,7 @@ static void panel_lines(moy_chrome_list_t *l, const char *text, int cols, int ma
     int n = moy_text_wrap(MOY_FONT_PETME128, s, strlen(text), cols, MOY_WRAP_PANEL, lines,
                           max_rows);
     for (int row = 0; row < n && row < max_rows; row++) {
-        print(l, text + lines[row].off, lines[row].len, x, y + row * CODE_LH, c, 1);
+        print(l, src, text + lines[row].off, lines[row].len, x, y + row * CODE_LH, c, 1);
     }
 }
 
@@ -158,90 +161,92 @@ static void panel_lines(moy_chrome_list_t *l, const char *text, int cols, int ma
 // in docs/os_voice_v1.md's Spoken register (§5's failure doctrine: the fact,
 // then the next move; no "I", no exclamation, none of law 3's words); the
 // hint under them is ENGRAVED. A title fits the panel's 35 columns.
+// Each say's string ids (native/moy_spine/strings/en.json), -1 for none.
 static const struct {
-    const char *title, *title_at, *text;
+    int16_t title, title_at, text;
 } SAY[MOY_SAYS] = {
-    [MOY_SAY_CRASH] = { "Your game stopped.", "Your game stopped on line %d.", NULL },
-    [MOY_SAY_STUCK] = { "Your game got stuck.", "Your game got stuck on line %d.", NULL },
-    [MOY_SAY_FIT] = { "Too big for this console.", NULL, NULL },
-    [MOY_SAY_NEWER] = { "Needs a newer console.", NULL, NULL },
-    [MOY_SAY_NOLOAD] = { "This cart didn't open.", NULL,
-                         "Its files didn't read back right. Get it again from Get "
-                         "Carts." },
-    [MOY_SAY_CONSOLE] = { "This game needs the console.", NULL,
-                          "Open it again from home to play it." },
+    [MOY_SAY_CRASH] = { MOY_S_SAY_CRASH, MOY_S_SAY_CRASH_LINE, -1 },
+    [MOY_SAY_STUCK] = { MOY_S_SAY_STUCK, MOY_S_SAY_STUCK_LINE, -1 },
+    [MOY_SAY_FIT] = { MOY_S_SAY_FIT, -1, -1 },
+    [MOY_SAY_NEWER] = { MOY_S_SAY_NEWER, -1, -1 },
+    [MOY_SAY_NOLOAD] = { MOY_S_SAY_NOLOAD, -1, MOY_S_SAY_NOLOAD_TEXT },
+    [MOY_SAY_CONSOLE] = { MOY_S_SAY_CONSOLE, -1, MOY_S_SAY_CONSOLE_TEXT },
 };
-// The runaway watch's words, the head a stuck title is recognised by first.
-static const char STUCK_HEAD[] = "stuck: one frame ran over ";
-static const char STUCK_TEXT[] = "stuck: one frame ran over %u s. Look for a loop that "
-                                 "never ends.";
-// The way out, under the text.
-static const char HINT_CODE[] = "TAP CODE TO SEE WHY";
-static const char HINT_HOME[] = "TAP HOME TO LEAVE";
-// The next move a fit notice offers: a fresh start has the most memory in
-// one piece.
-static const char FIT_RESTART[] = " Restarting the console might free enough.";
+
+// The runaway watch's words (stuck.text) are recognised in a crash's text by
+// their head, the text before its first conversion.
+static bool stuck_head_in(const char *text) {
+    const char *f = moy_str(MOY_S_STUCK_TEXT);
+    const char *pc = strchr(f, '%');
+    size_t n = pc != NULL ? (size_t)(pc - f) : strlen(f);
+    if (n == 0) {
+        return false;
+    }
+    for (const char *p = text; *p; p++) {
+        if (strncmp(p, f, n) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 int moy_chrome_title(char *out, size_t n, int say, int line) {
     if (say < 0 || say >= MOY_SAYS) {
         say = MOY_SAY_CRASH;
     }
-    if (line > 0 && SAY[say].title_at != NULL) {
-        return snprintf(out, n, SAY[say].title_at, line);
+    if (line > 0 && SAY[say].title_at >= 0) {
+        return moy_str_fmt(out, n, SAY[say].title_at, line);
     }
-    return snprintf(out, n, "%s", SAY[say].title);
+    return moy_str_copy(out, n, SAY[say].title);
 }
 
 int moy_chrome_crash_title(char *out, size_t n, const char *text, int line) {
-    bool stuck = text != NULL && strstr(text, STUCK_HEAD) != NULL;
+    bool stuck = text != NULL && stuck_head_in(text);
     return moy_chrome_title(out, n, stuck ? MOY_SAY_STUCK : MOY_SAY_CRASH, line);
 }
 
 int moy_chrome_stuck_text(char *out, size_t n, uint32_t budget_ms) {
-    return snprintf(out, n, STUCK_TEXT, (unsigned)((budget_ms + 999u) / 1000u));
+    return moy_str_fmt(out, n, MOY_S_STUCK_TEXT, (unsigned)((budget_ms + 999u) / 1000u));
 }
 
 const char *moy_chrome_say_text(int say) {
-    return say >= 0 && say < MOY_SAYS && SAY[say].text != NULL ? SAY[say].text : "";
+    return say >= 0 && say < MOY_SAYS && SAY[say].text >= 0 ? moy_str(SAY[say].text) : "";
 }
 
 // `v` bytes as "N.N MB", rounded up (`up`) or down.
 static void mb(char *out, size_t n, uint32_t v, bool up) {
     const uint64_t MB = 1024u * 1024u;
     uint64_t tenths = ((uint64_t)v * 10u + (up ? MB - 1u : 0u)) / MB;
-    snprintf(out, n, "%u.%u MB", (unsigned)(tenths / 10u), (unsigned)(tenths % 10u));
+    moy_str_fmt(out, n, MOY_S_FIT_MEGABYTES, (unsigned)(tenths / 10u),
+                (unsigned)(tenths % 10u));
 }
 
 int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
                         uint32_t block, uint32_t free_, uint32_t largest) {
-    const char *t = title != NULL && *title ? title : "This game";
+    const char *t = title != NULL && *title ? title : moy_str(MOY_S_FIT_THIS_GAME);
+    const char *again = moy_str(MOY_S_FIT_RESTART);
     char a[16], b[16];
     if (total == 0u) {
-        return snprintf(out, n, "%s needs more memory than this console has free.%s", t,
-                        FIT_RESTART);
+        return moy_str_fmt(out, n, MOY_S_FIT_UNKNOWN, t, again);
     }
+    int id = MOY_S_FIT_PIECES;
+    uint32_t need = total, have = free_;
     if (total > free_) {
-        mb(a, sizeof(a), total, true);
-        mb(b, sizeof(b), free_, false);
-        return snprintf(out, n, "%s needs %s of memory to run. This console has %s free.%s",
-                        t, a, b, FIT_RESTART);
+        id = MOY_S_FIT_NEEDS;
+    } else if (block > largest) {
+        id = MOY_S_FIT_BLOCK;
+        need = block;
+        have = largest;
     }
-    if (block > largest) {
-        mb(a, sizeof(a), block, true);
-        mb(b, sizeof(b), largest, false);
-        return snprintf(out, n, "%s needs %s of memory in one piece. The biggest piece this "
-                        "console has free is %s.%s", t, a, b, FIT_RESTART);
-    }
-    mb(a, sizeof(a), total, true);
-    mb(b, sizeof(b), free_, false);
-    return snprintf(out, n, "%s needs %s of memory to run. This console has %s free, but "
-                    "not in pieces it can use.%s", t, a, b, FIT_RESTART);
+    mb(a, sizeof(a), need, true);
+    mb(b, sizeof(b), have, false);
+    return moy_str_fmt(out, n, id, t, a, b, again);
 }
 
 int moy_chrome_newer_text(char *out, size_t n, const char *title, const char *missing) {
-    return snprintf(out, n, "%s needs a newer console (missing: %s). Update this console "
-                    "in Settings, then try again.", title != NULL && *title ? title : "This game",
-                    missing != NULL ? missing : "");
+    return moy_str_fmt(out, n, MOY_S_NEWER_TEXT,
+                       title != NULL && *title ? title : moy_str(MOY_S_FIT_THIS_GAME),
+                       missing != NULL ? missing : "");
 }
 
 void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const char *title,
@@ -258,23 +263,26 @@ void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const c
     rect(l, x, y, w, h, ink(notice ? MOY_INK_DARK_BLUE : MOY_INK_DARK_PURPLE));
     rectb(l, x, y, w, h, edge);
     rect(l, x, y, w, 14, edge);
-    char head[48];
+    uint8_t tsrc = MOY_TEXT_PY;
     if (title == NULL || !*title) {
-        moy_chrome_title(head, sizeof(head), notice ? MOY_SAY_FIT : MOY_SAY_CRASH, 0);
-        title = head;
+        title = moy_str(SAY[notice ? MOY_SAY_FIT : MOY_SAY_CRASH].title);
+        tsrc = MOY_TEXT_TABLE;
     }
-    print(l, title, -1, x + 6, y + 4, ink(MOY_INK_BLACK), 1);
+    print(l, tsrc, title, -1, x + 6, y + 4, ink(MOY_INK_BLACK), 1);
     int cols = (w - 16) / 8;
     int max_rows = (h - 30) / CODE_LH;
+    uint8_t src = MOY_TEXT_PY;
     if (text == NULL || !*text) {
-        text = "It stopped without saying why.";
+        text = moy_str(MOY_S_CHROME_NO_TEXT);
+        src = MOY_TEXT_TABLE;
     }
     if (max_rows > 0) {
-        panel_lines(l, text, cols, max_rows, x + 8, y + 20,
+        panel_lines(l, src, text, cols, max_rows, x + 8, y + 20,
                     ink(notice ? MOY_INK_WHITE : MOY_INK_PEACH));
     }
     // A compiled cart's trap has no source line behind it and no EDIT.
-    print(l, compiled ? HINT_HOME : HINT_CODE, -1, x + 8, y + h - 12, ink(MOY_INK_YELLOW), 1);
+    print(l, MOY_TEXT_TABLE, moy_str(compiled ? MOY_S_CHROME_HINT_HOME : MOY_S_CHROME_HINT_CODE),
+          -1, x + 8, y + h - 12, ink(MOY_INK_YELLOW), 1);
 }
 
 void moy_chrome_toast(moy_chrome_list_t *l, const char *title, const char *g) {
@@ -283,9 +291,10 @@ void moy_chrome_toast(moy_chrome_list_t *l, const char *title, const char *g) {
     rectb(l, x, y, w, h, ink(MOY_INK_YELLOW));
     rect(l, x, y, w, 12, ink(MOY_INK_YELLOW));
     glyph(l, "trophy", x + 2, y - 1, 12, 12, ink(MOY_INK_BLACK), 0);
-    print(l, "ACHIEVEMENT UNLOCKED!", -1, x + 16, y + 2, ink(MOY_INK_BLACK), 1);
+    print(l, MOY_TEXT_TABLE, moy_str(MOY_S_CHROME_ACHIEVEMENT), -1, x + 16, y + 2,
+          ink(MOY_INK_BLACK), 1);
     glyph(l, g != NULL ? g : "", x + 6, y + 16, 16, 16, ink(MOY_INK_YELLOW), 0);
-    print(l, title, 24, x + 28, y + 20, ink(MOY_INK_WHITE), 2);
+    print(l, MOY_TEXT_PY, title, 24, x + 28, y + 20, ink(MOY_INK_WHITE), 2);
 }
 
 void moy_chrome_banner(moy_chrome_list_t *l, int lw, int fs, int status_h, const char *title,
@@ -304,9 +313,9 @@ void moy_chrome_banner(moy_chrome_list_t *l, int lw, int fs, int status_h, const
     rectb(l, x, y, w, h, accent);
     rect(l, x, y, w, 3 * fs, accent);            // a lit edge, not a full title bar
     glyph(l, "gear", x + 5 * fs, y + 8 * fs, 14 * fs, 14 * fs, accent, 0);
-    print(l, title, 22, x + 22 * fs, y + 7 * fs, ink(MOY_INK_INK), 2 * fs);
+    print(l, MOY_TEXT_PY, title, 22, x + 22 * fs, y + 7 * fs, ink(MOY_INK_INK), 2 * fs);
     if (sub != NULL && *sub) {
-        print(l, sub, 26, x + 22 * fs, y + 22 * fs, ink(MOY_INK_INK_DIM), fs);
+        print(l, MOY_TEXT_PY, sub, 26, x + 22 * fs, y + 22 * fs, ink(MOY_INK_INK_DIM), fs);
     }
 }
 
@@ -337,7 +346,7 @@ void moy_chrome_strip_crash(moy_chrome_list_t *l, int cw, int edit, const char *
     icon(l, "map", 2 + 4 * BAR_STRIDE, BAR_Y, 0);
     icon(l, "blocks", 2 + 5 * BAR_STRIDE, BAR_Y, 0);
     icon(l, "music", 2 + 6 * BAR_STRIDE, BAR_Y, 0);
-    print(l, clock, -1, BAR_CLOCK_X, 3, ink(MOY_INK_CHROME_DIM), 1);
+    print(l, MOY_TEXT_PY, clock, -1, BAR_CLOCK_X, 3, ink(MOY_INK_CHROME_DIM), 1);
     icon(l, wifi, BAR_WIFI_X, BAR_Y, 0);
     icon(l, "batt", BAR_BATT_X, BAR_Y, 0);
 }
@@ -355,7 +364,7 @@ void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light) 
 void moy_chrome_strip_right(moy_chrome_list_t *l, const moy_chrome_lay_t *lay,
                             const char *clock, const char *wifi, bool show_x) {
     if (lay == NULL) {
-        print(l, clock, -1, ZONE_CLOCK_X, 3, ink(MOY_INK_CHROME_DIM), 1);
+        print(l, MOY_TEXT_PY, clock, -1, ZONE_CLOCK_X, 3, ink(MOY_INK_CHROME_DIM), 1);
         icon(l, wifi, BAR_WIFI_X, BAR_Y, 0);
         icon(l, "batt", BAR_BATT_X, BAR_Y, 0);
         glyph(l, "menu", ZONE_GEAR_X, BAR_Y, BAR_ICON, BAR_ICON, ink(MOY_INK_CHROME), 0);
@@ -365,7 +374,7 @@ void moy_chrome_strip_right(moy_chrome_list_t *l, const moy_chrome_lay_t *lay,
         return;
     }
     int cs = lay->cs;
-    print(l, clock, -1, lay->clock_x, 3 + lay->text_dy, ink(MOY_INK_CHROME_DIM), 1);
+    print(l, MOY_TEXT_PY, clock, -1, lay->clock_x, 3 + lay->text_dy, ink(MOY_INK_CHROME_DIM), 1);
     icon(l, wifi, lay->wifi[0], lay->wifi[1], cs);
     icon(l, "batt", lay->batt[0], lay->batt[1], cs);
     glyph(l, "menu", lay->menu[0], lay->menu[1], lay->menu[2], lay->menu[3],
@@ -378,7 +387,7 @@ void moy_chrome_strip_right(moy_chrome_list_t *l, const moy_chrome_lay_t *lay,
 void moy_chrome_strip_title(moy_chrome_list_t *l, const char *title, int zx, int zw, int dy) {
     int maxc = zw / 8;                          // 8px cells in the lent rect
     if (maxc > 0) {
-        print(l, title, maxc, zx, 3 + dy, ink(MOY_INK_CHROME_DIM), 1);
+        print(l, MOY_TEXT_PY, title, maxc, zx, 3 + dy, ink(MOY_INK_CHROME_DIM), 1);
     }
 }
 
@@ -428,14 +437,19 @@ void moy_chrome_menu(moy_chrome_list_t *l, const uint8_t *kind, const char *cons
             maxc = 0;
         }
         if (label[i] != NULL && label[i][0] && maxc > 0) {
-            print(l, label[i], maxc, tx, cy + dy, c, 1);
+            print(l, MOY_TEXT_PY, label[i], maxc, tx, cy + dy, c, 1);
         }
         cy += row_h;
     }
 }
 
 void moy_chrome_about(moy_chrome_list_t *l, int cw, int ch, int fs, const char *ver) {
-    const char *lines[4] = {"moybyte", ver != NULL && *ver ? ver : "v0.4", "", "TAP TO CLOSE"};
+    const char *lines[4] = {moy_str(MOY_S_ABOUT_NAME),
+                            ver != NULL && *ver ? ver : moy_str(MOY_S_ABOUT_VERSION_UNKNOWN), "",
+                            moy_str(MOY_S_ABOUT_CLOSE)};
+    // The version is the caller's; the rest is the table's.
+    const uint8_t src[4] = {MOY_TEXT_TABLE, ver != NULL && *ver ? MOY_TEXT_PY : MOY_TEXT_TABLE,
+                            MOY_TEXT_TABLE, MOY_TEXT_TABLE};
     int fw = 8 * fs;
     int w = 0;
     for (int i = 0; i < 4; i++) {
@@ -455,7 +469,7 @@ void moy_chrome_about(moy_chrome_list_t *l, int cw, int ch, int fs, const char *
     int ly = y + 10 * fs;
     for (int i = 0; i < 4; i++) {
         int lw = (int)strlen(lines[i]) * fw;
-        print(l, lines[i], -1, x + (w - lw) / 2, ly, c, 1);
+        print(l, src[i], lines[i], -1, x + (w - lw) / 2, ly, c, 1);
         ly += 12 * fs;
     }
 }
@@ -482,12 +496,15 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
                 mg_fill_rect(px, cap, w, o->x, o->y, 1, o->h, col);
                 mg_fill_rect(px, cap, w, o->x + o->w - 1, o->y, 1, o->h, col);
                 break;
-            case MOY_CH_TEXT:
+            case MOY_CH_TEXT: {
                 // The canvas's own font scale: a print's scale argument is
-                // ignored on every tier (SPEC.md 6).
-                mg_text(px, cap, w, (const uint8_t *)l->text + o->s, o->n, o->x, o->y, col,
-                        moy_font_data, 96, 32, fs, 0, 0, 0, 0, w, h);
+                // ignored on every tier (SPEC.md 6). The one text path, which
+                // refuses a LIT op.
+                moy_text_target_t t = {px, cap, w, 0, 0, 0, 0, w, h};
+                moy_text(&t, MOY_FONT_PETME128, o->src, (const uint8_t *)l->text + o->s, o->n,
+                         o->x, o->y, (uint16_t)col, fs, MOY_TEXT_LEFT, -1);
                 break;
+            }
             case MOY_CH_GLYPH: {
                 // The one glyph raster (native/moy_ui); an unknown glyph draws
                 // nothing.

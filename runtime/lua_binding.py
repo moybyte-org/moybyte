@@ -100,6 +100,7 @@ def build(verbose=False, wasm=None):
         "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
         "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
         "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
+        "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
         "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
         "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
         "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",

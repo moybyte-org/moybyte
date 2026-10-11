@@ -1,6 +1,6 @@
 """The toolkit's style and strings are DATA (docs/kernel_toolkit_2026-10.md
 §2): native/moy_ui/style.json holds what the twin's tables hold, the strings
-C draws are native/moy_ui/strings/en.json's, and every theme key a style spec
+C draws are native/moy_spine/strings/en.json's and none is left a literal, and every theme key a style spec
 reads is in the token vocabulary the C resolution reads from.
 """
 
@@ -13,7 +13,7 @@ from runtime.chrome import THEME_VARIANTS, THEMES, theme_colors
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STYLE = os.path.join(ROOT, "native", "moy_ui", "style.json")
-STRINGS = os.path.join(ROOT, "native", "moy_ui", "strings", "en.json")
+STRINGS = os.path.join(ROOT, "native", "moy_spine", "strings", "en.json")
 TOKENS_C = os.path.join(ROOT, "native", "moy_app", "moy_app.c")
 
 
@@ -170,15 +170,16 @@ def _c_literals():
     return out
 
 
-def test_every_string_c_draws_has_its_entry():
+def test_no_string_c_draws_is_left_a_literal():
+    """Each entry's words, every run between conversions of four bytes or
+    more, appear in no C literal of the files that draw: they read the table."""
     lits = _c_literals()
     for sid, text in _strings().items():
         assert re.match(r"^[a-z_]+\.[a-z_]+$", sid), sid
-        # A board-defined name the preprocessor pastes in front of a
-        # literal ("MOY_KERNEL_BUTTON_NAME" ": NEXT ...") is the entry's %s.
-        bare = text[2:] if text.startswith("%s") else text
-        hit = any(bare in lit for lit in lits)
-        assert hit, "%s: %r is no literal in %s" % (sid, text, C_DRAWS)
+        for run in re.split(r"%(?:08x|[sdu])", text):
+            if len(run.strip()) >= 4:
+                hit = [lit for lit in lits if run.strip() in lit]
+                assert not hit, "%s: %r is still a literal in %s" % (sid, run, hit)
 
 
 def test_each_entry_keeps_its_conversions_in_order():

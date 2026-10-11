@@ -58,7 +58,7 @@ and a Python app's button is a compiled app's button.
 |---|---|---|
 | **theme tokens** | `runtime/chrome.py`'s `THEMES` and `THEME_LIGHT`, written by the look into native/moy_app's live token table (sprint 5) | the C style resolution; every app's `theme` reads |
 | **style** | `native/moy_ui/style.json`: the kinds, the states, each `(field, ink, edge)` spec with its alias chains, each kind's metric tuple with its slot names, the quirks of `NON_DATA_QUIRKS` against their kinds, the skins as deltas, the glyph vocabulary | the generated `native/moy_ui/moy_ui_tables.c` |
-| **strings** | `native/moy_ui/strings/en.json`: one entry per string id, English complete, each format's conversions part of its text | the same generated table (§2.3) |
+| **strings** | `native/moy_spine/strings/en.json`: one entry per string id, English complete, each format's conversions part of its text | the generated `native/moy_spine/moy_str_table.c` (§2.3) |
 
 **The generated table is committed.** `runtime/native_build.py` runs no
 generator, and neither do the board builds, so `tools/gen_ui_tables.py` writes
@@ -88,9 +88,11 @@ skin's entry.
 
 ### 2.3 Strings as data: the localization hook (#135)
 
-A string id is a dotted name (`fit.needs_free`, `recovery.title`). C reads
-`moy_ui_str(id) -> span`; the Python face reads `ui.s(id)`; a compiled app
-reads `ui_str(id, buf)`. Each entry keeps its conversions in order (`%s`, `%u`,
+A string id is a dotted name (`fit.needs`, `recovery.title`). C reads
+`moy_str(id)` and formats with `moy_str_fmt` (`native/moy_spine/moy_str.h`);
+the Python face reads `ui.s(id)`. The table is the spine's, not the toolkit's,
+because every image links the spine and the kernel's floor draws its words on
+the Zero, which denies the toolkit. Each entry keeps its conversions in order (`%s`, `%u`,
 `%d`, `%08x`: the stuck, fit, ABOUT and recovery texts use all four), and a
 language pack whose entry carries different conversions is refused for that
 id, which then reads English: a pack is untrusted data, as a theme is
@@ -425,7 +427,7 @@ steps 2, 3 and 6, not only at the end.
 
 1. **The rows on the host, and the nets.** Every canvas keeps its row's state,
    palette and counters in step, with the host test of §3.1;
-   `native/moy_ui/style.json` and `native/moy_ui/strings/en.json` written from today's
+   `native/moy_ui/style.json` and the strings' `en.json` written from today's
    tables and literals, held equal by a test; the widget matrix extended; the
    twin under `tests/` with its fuzz; per-widget op budgets pinned from the
    twin's counted ops; the Hits capacity measured; a ratchet that every key a

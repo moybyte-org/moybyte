@@ -111,6 +111,7 @@
 #include "moy_kernel.h"
 #include "moy_loop.h"
 #include "moy_recovery.h"
+#include "moy_str.h"
 #include "../moy_spine/moy_route.h"
 
 // The kernel's own route tables (moy_route.h), where the image has the spine:
@@ -468,8 +469,8 @@ void moy_kernel_feed(void) {
         if (esp_task_wdt_add(NULL) != ESP_OK) {
             return;
         }
-        snprintf(s_twdt_what, sizeof(s_twdt_what), "console hung: no frame in %us",
-                 (unsigned)CONFIG_ESP_TASK_WDT_TIMEOUT_S);
+        moy_str_fmt(s_twdt_what, sizeof(s_twdt_what), MOY_S_RECOVERY_HUNG,
+                    (unsigned)CONFIG_ESP_TASK_WDT_TIMEOUT_S);
         s_wd_armed = true;
         s_wd_max_gap_ms = 0;
         s_wd_frames = 0;
@@ -762,16 +763,14 @@ static void k_choose(int choice) {
 // The floor: never returns. Runs on the VM task's stack, with no VM.
 static void moy_kernel_recovery(int why) {
     static k_floor_t k;
-    const char *hint =
-        #if defined(MOY_KERNEL_TOUCH_AXS15231)
-        "TAP A CHOICE, OR SERIAL";
-        #elif defined(MOY_KERNEL_BUTTON_GPIO)
-        MOY_KERNEL_BUTTON_NAME ": NEXT  HOLD: PICK";
-        #elif defined(MOY_KERNEL_IDLE_SAFE_MS)
-        "SERIAL: retry / safe / repl";
-        #else
-        "SERIAL: retry / safe / repl";
-        #endif
+    char hint[MOY_RV_COLS];
+    #if defined(MOY_KERNEL_TOUCH_AXS15231)
+    moy_str_copy(hint, sizeof(hint), MOY_S_RECOVERY_HINT_TOUCH);
+    #elif defined(MOY_KERNEL_BUTTON_GPIO)
+    moy_str_fmt(hint, sizeof(hint), MOY_S_RECOVERY_HINT_BUTTON, MOY_KERNEL_BUTTON_NAME);
+    #else
+    moy_str_copy(hint, sizeof(hint), MOY_S_RECOVERY_HINT_SERIAL);
+    #endif
     k.why = why;
     #ifdef MOY_KERNEL_PANEL
     moy_rgeom_init(&k.g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
@@ -886,7 +885,7 @@ static void moy_kernel_recovery(int why) {
         }
         if (left != shown_left) {
             shown_left = left;
-            snprintf(k.v.hint, sizeof(k.v.hint), "SERIAL ONLY: SAFE IN %ds", left);
+            moy_str_fmt(k.v.hint, sizeof(k.v.hint), MOY_S_RECOVERY_SAFE_IN, left);
             k_draw(&k);
         }
         #endif
@@ -995,7 +994,7 @@ bool moy_kernel_plain_web(void) {
     moy_rgeom_init(&g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
                    MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
     moy_web_screen_view(&v, url, NULL, MOY_FW_LABEL);
-    moy_recovery_render_plain(fb, &g, "MOYBYTE WEB CONSOLE", &v);
+    moy_recovery_render_plain(fb, &g, moy_str(MOY_S_WEB_TITLE), &v);
     return MOY_KERNEL_PANEL(present)() == 0;
     #else
     return false;

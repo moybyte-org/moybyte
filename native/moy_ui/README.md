@@ -8,10 +8,12 @@ calls here.
 | file | holds |
 |---|---|
 | `style.json` | the style (its own "about" says what it holds), the token row's order (moy_app's vocabulary) and the hit buffer's capacity |
-| `strings/en.json` | English for every string C draws, by id |
-| `moy_ui_tables.h`, `moy_ui_tables.c` | GENERATED from the two by `tools/gen_ui_tables.py` and committed; `tests/test_ui_tables.py` fails a stale pair |
+| `moy_ui_tables.h`, `moy_ui_tables.c` | GENERATED from `style.json` by `tools/gen_ui_tables.py` and committed; `tests/test_ui_tables.py` fails a stale pair |
 | `moy_ui.h`, `moy_ui.c` | the style resolution: kinds and states by name, the skin by name, the looks (the style resolved against a token row) |
-| `modmoy_ui.c` | the module `moy_ui` the boards and the browser import |
+| `modmoy_ui.c` | the module `moy_ui` the boards and the browser import; its `s`, `str_set` and `str_reset` read and write the spine's string table |
+
+The strings C draws are the spine's (`native/moy_spine/moy_str.h`), not this
+module's: the kernel's floor draws them on an image with no toolkit.
 
 Which edits are data and which need C is the design doc's §2.2.
 

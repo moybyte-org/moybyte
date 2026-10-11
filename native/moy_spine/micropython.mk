@@ -6,5 +6,6 @@ MOY_SPINE_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_SPINE_DIR)/modmoy_spine.c
 SRC_USERMOD_LIB_C += $(MOY_SPINE_DIR)/moy_htab.c $(MOY_SPINE_DIR)/moy_route.c \
-	$(MOY_SPINE_DIR)/moy_ledger.c $(MOY_SPINE_DIR)/moy_settings.c
+	$(MOY_SPINE_DIR)/moy_ledger.c $(MOY_SPINE_DIR)/moy_settings.c \
+	$(MOY_SPINE_DIR)/moy_str.c $(MOY_SPINE_DIR)/moy_str_table.c
 CFLAGS_USERMOD += -I$(MOY_SPINE_DIR)

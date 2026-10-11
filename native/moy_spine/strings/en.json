@@ -40,6 +40,7 @@
     "recovery.pc": "PC %08x AT %08x",
     "recovery.uptime": "UP %us  BOOT %u",
     "recovery.fw": "FW %s",
+    "recovery.unknown": "?",
     "recovery.hint_touch": "TAP A CHOICE, OR SERIAL",
     "recovery.hint_button": "%s: NEXT  HOLD: PICK",
     "recovery.hint_serial": "SERIAL: retry / safe / repl",

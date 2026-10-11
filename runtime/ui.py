@@ -6,7 +6,7 @@
 #   -- the style                      use_skin, metrics, state_colors (C)
 #   -- draw == tap                    Hits
 #   Hits                              per-draw hit registry
-#   -- glyphs                         glyph, glyph_id (C)
+#   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
 #   -- widgets                        button, chip
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
@@ -602,6 +602,13 @@ class Hits:
 # editor's chip faces).
 
 _GLYPH_ID = {}                        # kind -> id, interned at first use
+
+
+def s(sid):
+    """The text of string id `sid` (native/moy_spine/strings/en.json): the
+    language pack's entry, else English."""
+    return _C.s(sid)
+
 
 
 def glyph_id(kind):

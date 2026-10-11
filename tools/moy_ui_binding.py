@@ -40,6 +40,10 @@ _SIGS = (
     ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
     ("moy_ui_glyph_id", [_P, _Z], _I),
     ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
+    ("moy_str", [_I], c.c_char_p),
+    ("moy_str_id", [_P, _Z], _I),
+    ("moy_str_set", [_I, c.c_char_p, _Z], _I),
+    ("moy_str_reset", [], None),
 )
 
 
@@ -540,6 +544,28 @@ def binding():
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
     m.glyph = glyph
+
+    def s(name):
+        b = _b(name)
+        i = lib.moy_str_id(b, len(b))
+        if i < 0:
+            raise KeyError(name)
+        return lib.moy_str(i).decode("utf-8")
+
+    def str_set(name, text):
+        b = _b(name)
+        i = lib.moy_str_id(b, len(b))
+        if i < 0:
+            raise KeyError(name)
+        t = None if text is None else _b(text)
+        rc = lib.moy_str_set(i, t, 0 if t is None else len(t))
+        if rc == 3:
+            raise MemoryError("moy_ui: no room for the pack")
+        return rc == 0
+
+    m.s = s
+    m.str_set = str_set
+    m.str_reset = lambda: lib.moy_str_reset()
     m.text_width = text_width
     m.wrap = wrap
     m.tokens = lambda: tokens

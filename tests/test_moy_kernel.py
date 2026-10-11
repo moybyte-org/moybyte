@@ -73,10 +73,11 @@ def _lib():
     so = native_build.build(
         "moy_kernel_host", os.path.join(KERNEL, "moy_recovery.c"),
         ["moy_crash.c", "moy_crash.h", "moy_recovery.h", "moy_boot.c", "moy_boot.h",
-         "moy_data.c", "moy.h"],
+         "moy_data.c", "moy.h", "moy_str.h", "moy_str.c", "moy_str_table.h",
+         "moy_str_table.c"],
         os.path.join(ROOT, ".build", "host_kernel"),
         cflags=native_build.BASE_CFLAGS + ["-Wall", "-Werror"],
-        libmoy_dir=[KERNEL, LIBMOY])
+        libmoy_dir=[KERNEL, LIBMOY, os.path.join(ROOT, "native", "moy_spine")])
     if so is None:
         pytest.skip("no C compiler")
     lib = ctypes.CDLL(so)

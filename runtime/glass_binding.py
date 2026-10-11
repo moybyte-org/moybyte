@@ -38,7 +38,7 @@ _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
             "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_interact.c",
             "moy_ui_tables.h",
-            "moy_ui_tables.c",
+            "moy_ui_tables.c", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
             # ...and the text path and the raster under it, as gfx_binding
             # builds them (libmoy at RGB565: the flag is in build() below)
             "moy_text.h", "moy_text.c", "moy_gfx_kernels.h", "moy_gfx_kernels.c",

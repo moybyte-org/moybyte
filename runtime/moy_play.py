@@ -935,7 +935,7 @@ MENU_ITEM, MENU_HEADER, MENU_SEP = 0, 1, 2
 
 
 class _ChOp(ctypes.Structure):
-    _fields_ = [("op", _U8), ("c", _U8), ("scale", _U8), ("pad", _U8),
+    _fields_ = [("op", _U8), ("c", _U8), ("scale", _U8), ("src", _U8),
                 ("x", ctypes.c_int16), ("y", ctypes.c_int16), ("w", ctypes.c_int16),
                 ("h", ctypes.c_int16), ("s", _U16), ("n", _U16)]
 

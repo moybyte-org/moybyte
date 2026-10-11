@@ -2,7 +2,8 @@
 (docs/kernel_toolkit_2026-10.md §2.1, §10 "style is data").
 
 * The drift test: tools/gen_ui_tables.py run over the tree's style.json and
-  strings reproduces the committed moy_ui_tables.h/.c byte for byte.
+  strings reproduces the committed moy_ui_tables.h/.c and
+  native/moy_spine/moy_str_table.h/.c byte for byte.
 * The data test: a copy of style.json with one state's token, one metric and
   one new kind changed, regenerated and built through runtime/native_build.py's
   own path (the glass's library, as the host builds it), resolves the change where it was made and nowhere else -- so no
@@ -23,11 +24,9 @@ ABSENT = -(1 << 31)
 
 
 def test_the_committed_tables_are_the_datas():
-    h, c = gen_ui_tables.generate(*gen_ui_tables.load(UI))
-    with open(os.path.join(UI, "moy_ui_tables.h")) as f:
-        assert f.read() == h, "moy_ui_tables.h is stale: run tools/gen_ui_tables.py"
-    with open(os.path.join(UI, "moy_ui_tables.c")) as f:
-        assert f.read() == c, "moy_ui_tables.c is stale: run tools/gen_ui_tables.py"
+    for path, text in gen_ui_tables.outputs():
+        with open(path) as f:
+            assert f.read() == text, "%s is stale: run tools/gen_ui_tables.py" % path
 
 
 def _lib(d, cache):
@@ -69,7 +68,7 @@ def test_a_style_edit_is_drawn_where_it_was_made_and_nowhere_else(tmp_path):
                                     on=[["play", 11], 0, ["edge", 13]])
     with open(edit_dir / "style.json", "w") as f:
         json.dump(style, f)
-    h, c = gen_ui_tables.generate(*gen_ui_tables.load(str(edit_dir)))
+    h, c = gen_ui_tables.generate(gen_ui_tables.load(str(edit_dir)))
     (edit_dir / "moy_ui_tables.h").write_text(h)
     (edit_dir / "moy_ui_tables.c").write_text(c)
 

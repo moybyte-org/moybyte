@@ -9,9 +9,10 @@
 #include "py/objstr.h"
 
 #include "moy_ui.h"
+#include "moy_str.h"
 
 static mp_obj_t names_tuple(const char *const *names, int n) {
-    mp_obj_t items[MOY_UI_KINDS > MOY_UI_STRINGS ? MOY_UI_KINDS : MOY_UI_STRINGS];
+    mp_obj_t items[MOY_UI_KINDS > MOY_UI_TOKENS ? MOY_UI_KINDS : MOY_UI_TOKENS];
     for (int i = 0; i < n; i++) {
         items[i] = mp_obj_new_str(names[i], strlen(names[i]));
     }
@@ -201,6 +202,51 @@ static mp_obj_t ui_glyph_id(mp_obj_t name) {
     return MP_OBJ_NEW_SMALL_INT(moy_ui_glyph_id(s, n));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_glyph_id_obj, ui_glyph_id);
+
+// -- the strings C draws (native/moy_spine/moy_str.h) ------------------------------
+
+static int str_id(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    int id = moy_str_id(s, n);
+    if (id < 0) {
+        mp_raise_type_arg(&mp_type_KeyError, name);
+    }
+    return id;
+}
+
+// s(id) -> the id's text: the pack's entry, else English.
+static mp_obj_t ui_s(mp_obj_t name) {
+    const char *t = moy_str(str_id(name));
+    return mp_obj_new_str(t, strlen(t));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_s_obj, ui_s);
+
+// str_set(id, text) -> True, or False when the pack's entry is refused (its
+// conversions differ from English's: the id reads English). None removes it.
+static mp_obj_t ui_str_set(mp_obj_t name, mp_obj_t text) {
+    int id = str_id(name);
+    int rc;
+    if (text == mp_const_none) {
+        rc = moy_str_set(id, NULL, 0);
+    } else {
+        size_t n;
+        const char *t = mp_obj_str_get_data(text, &n);
+        rc = moy_str_set(id, t, n);
+    }
+    if (rc == MOY_STR_NOMEM) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    return mp_obj_new_bool(rc == MOY_STR_OK);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_str_set_obj, ui_str_set);
+
+// str_reset(): every pack entry removed; the table reads English.
+static mp_obj_t ui_str_reset(void) {
+    moy_str_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_str_reset_obj, ui_str_reset);
 
 // -- the canvas, the box, the text and the colours as the faces pass them --------------
 //
@@ -864,6 +910,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_wrap), MP_ROM_PTR(&ui_wrap_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_names), MP_ROM_PTR(&ui_glyph_names_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },
+    { MP_ROM_QSTR(MP_QSTR_str_set), MP_ROM_PTR(&ui_str_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_str_reset), MP_ROM_PTR(&ui_str_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&ui_glyph_obj) },
     { MP_ROM_QSTR(MP_QSTR_row), MP_ROM_PTR(&ui_row_obj) },
     { MP_ROM_QSTR(MP_QSTR_cell), MP_ROM_PTR(&ui_cell_obj) },

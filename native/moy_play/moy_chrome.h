@@ -10,9 +10,15 @@
 // through a VM's canvas (runtime/chrome.py's `replay`; the canvas keeps its
 // damage, its sprite-batch order and a web view's recording), or rasterised
 // here into an RGB565 buffer by the same kernels the canvas verbs end in
-// (moy_gfx_kernels.h; a glyph by native/moy_ui's one glyph raster, over its
-// vocabulary), for a frame the kernel draws with no VM call. The two agree
-// pixel for pixel (tests/test_moy_chrome.py).
+// (moy_gfx_kernels.h; text by the one text path, moy_text.h; a glyph by
+// native/moy_ui's one glyph raster, over its vocabulary), for a frame the
+// kernel draws with no VM call. The two agree pixel for pixel
+// (tests/test_moy_chrome.py).
+//
+// THE WORDS are the string table's (native/moy_spine/moy_str.h), and each
+// text op carries its source: TABLE for the table's, PY for text a caller
+// passed in (titles, the clock, menu rows), never LIT
+// (tests/test_ui_strings.py).
 //
 // THE INKS are the shell's: its theme's roles and its named palette, resolved
 // to indices by the shell and handed over (moy_chrome_set_inks) whenever it
@@ -38,7 +44,7 @@ typedef struct {
     uint8_t op;
     uint8_t c;                  // palette index (TEXT, RECT, RECTB, GLYPH)
     uint8_t scale;              // TEXT: its scale; GLYPH/ICON: 0 is the canvas's own
-    uint8_t pad;
+    uint8_t src;                // TEXT: its source (moy_text.h); a LIT is never drawn
     int16_t x, y, w, h;         // GLYPH: its rect; ICON: x, y
     uint16_t s, n;              // TEXT: the string; GLYPH/ICON: the kind's name
 } moy_chrome_op_t;
