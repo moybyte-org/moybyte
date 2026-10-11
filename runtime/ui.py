@@ -101,10 +101,9 @@ def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
     """The list-overflow chevrons ('^' above, 'v' below) -- one implementation
     for every scrolling surface; positions/color stay the caller's (they are
     part of each surface's frozen geometry)."""
-    if can_up:
-        cv.print("^", up_xy[0], up_xy[1], c, scale)
-    if can_dn:
-        cv.print("v", dn_xy[0], dn_xy[1], c, scale)
+    if can_up or can_dn:
+        _C.scroll_cues(cv.ui_sink(), int(up_xy[0]), int(up_xy[1]), int(dn_xy[0]),
+                       int(dn_xy[1]), can_up, can_dn, c)
 
 
 def wrap_words(text, maxc):
@@ -615,6 +614,61 @@ def _glyph_draw(kind, rect, c, cv):
     glyph(cv, kind, rect, c)
 
 
+# --- the C primitives' face ------------------------------------------------------
+#
+# A widget below is one call into native/moy_ui with the canvas's CANVAS handle
+# (`cv.ui_sink()`), the look its theme resolves in, the kind's id, the state
+# flags and its content as positional ints and strs: coordinates converted
+# toward zero, as the print gate converts them.
+
+_F_ON, _F_HOT, _F_DISABLED, _F_EDGE = 1, 2, 4, 8
+_F_BAND, _F_EDGE_LAST, _F_LABEL, _F_ICON, _F_GLYPH = 16, 32, 64, 128, 256
+_FRAME, _CONTENT, _ALL = 1, 2, 3
+
+
+def _look(th):
+    """The C look `th` resolves in (its ring slot), binding it on a miss. A
+    caller with no theme passes its own colours; any look serves it."""
+    if th is None:
+        return 0
+    if th is not _TH:
+        _bind_theme(th)
+    return _LOOK
+
+
+def _interact(state):
+    """`Hits.state_of`'s answer as the C takes it: PRESSED, HOVER or -1."""
+    if state is None:
+        return -1
+    return _STATE_ID.get(state, -1)
+
+
+def _text(v):
+    """A label as the C takes it: the str, "" for a falsy one."""
+    if not v:
+        return ""
+    return v if type(v) is str else str(v)
+
+
+def label(cv, rect, text, ink, align=ALIGN_LEFT):
+    """Text in a box at the canvas's font scale: truncated to what fits (at a
+    codepoint), placed by `align`, centred vertically. Returns the drawn
+    width."""
+    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
+    return _C.label(cv.ui_sink(), 0, x, y, w, h, _text(text), ink, align)
+
+
+def list(cv, th, rect, items, region, row_h, sel=-1, kind="row_list"):
+    """A scrolling list: the `items` (strs) as `kind` rows `row_h` apart in
+    `rect`, scrolled by `region` (a ScrollRegion this sets to the list's
+    extent), `sel` the selected row, and the region's bar."""
+    region.set(rect, len(items) * row_h)
+    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
+    packed = "\0".join(items).encode("utf-8")
+    _C.list(cv.ui_sink(), _look(th), x, y, w, h, _kind_id(kind), packed,
+            len(items), row_h, region.offset, sel, _fs(cv), region.BAR_W)
+
+
 # --- widgets ------------------------------------------------------------------
 #
 # Every draw below reads its look from `state_colors` and its numbers from
@@ -827,64 +881,55 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
     """
     if fs is None:
         fs = _fs(cv)
-    x, y, w, h = rect
+    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
     if state is None and hits is not None and verb is not None:
         state = hits.state_of(verb, arg)
-    st = widget_state(on, hot, disabled, state)
-    if colors is None:
-        colors = state_colors(th, kind, st)
-    field, ink, edge_c = colors
-    m = _METRICS["row"]
-    if field is not None:
-        cv.rect(x, y, w, h, field)
-    if edge and edge_c is not None:
-        n = m[ROW_EDGE]
-        if n > 0:
-            cv.rectb(x, y, w, h, edge_c)
-            i = 1
-            while i < n:                   # skins only; the default is 1 ring
-                cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge_c)
-                i += 1
-    if pad is None:
-        pad = m[ROW_PAD] * fs
-    fw = 8 * fs * scale
-    th_ = 8 * fs * scale
-    tx = x + pad
-    right = x + w - (pad if pad_right is None else pad_right)
+    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
+        _F_DISABLED if disabled else 0) | (_F_EDGE if edge else 0)
+    gid = -1
+    own = icon_img is not None or (glyph is not None and glyph_draw is not None)
     if icon_img is not None:
-        box = m[ROW_ICON] * fs
-        cv.spr(icon_img, tx, y + (h - box) // 2, fs)
-        tx += box + pad
+        flags |= _F_ICON
     elif glyph is not None:
-        box = (m[ROW_GLYPH] if glyph_size is None else glyph_size) * fs
-        (_glyph_draw if glyph_draw is None else glyph_draw)(glyph, (tx, y + (h - box) // 2, box, box),
-                   ink if glyph_ink is None else glyph_ink, cv)
-        tx += box + pad
-    ty = y + ((h - th_) // 2 if text_dy is None else text_dy)
-    if value is not None:
+        flags |= _F_GLYPH
+        if glyph_draw is None:
+            gid = glyph_id(glyph)
+    if value is not None and type(value) is not str:
         value = str(value)
-        maxv = (right - tx) // fw
-        if maxv < 0:
-            maxv = 0
-        if len(value) > maxv:
-            value = value[:maxv]
-        if value:
-            cv.print(value, right - len(value) * fw, ty,
-                     ink if value_ink is None else value_ink, scale)
-            right -= (len(value) + m[ROW_GAP]) * fw   # a blank column between
-    if label:
-        label = str(label)
-        maxc = (right - tx) // fw
-        if maxc < 0:
-            maxc = 0
-        if len(label) > maxc:
-            label = label[:maxc]
-        if label:
-            cv.print(label, tx, ty, ink, scale)
+    pad_i = None if pad is None else int(pad)
+    dy = None if text_dy is None else int(text_dy)
+    pr = None if pad_right is None else int(pad_right)
+    look = _look(th)
+    kid = _kind_id(kind)
+    act = _interact(state)
+    text = _text(label)
+    if not own:
+        _C.row(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, value, gid,
+               glyph_size, glyph_ink, value_ink, pad_i, pr, dy, int(scale), fs,
+               colors, _ALL)
+    else:
+        # The caller's picture lands between the frame and the text, as the
+        # body it replaced drew it.
+        _C.row(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, value, gid,
+               glyph_size, glyph_ink, value_ink, pad_i, pr, dy, int(scale), fs,
+               colors, _FRAME)
+        m = _METRICS["row"]
+        p = m[ROW_PAD] * fs if pad_i is None else pad_i
+        if icon_img is not None:
+            box = m[ROW_ICON] * fs
+            cv.spr(icon_img, x + p, y + (h - box) // 2, fs)
+        else:
+            box = (m[ROW_GLYPH] if glyph_size is None else glyph_size) * fs
+            ink = (state_colors(th, kind, widget_state(on, hot, disabled, state))
+                   if colors is None else colors)[1]
+            glyph_draw(glyph, (x + p, y + (h - box) // 2, box, box),
+                       ink if glyph_ink is None else glyph_ink, cv)
+        _C.row(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, value, gid,
+               glyph_size, glyph_ink, value_ink, pad_i, pr, dy, int(scale), fs,
+               colors, _CONTENT)
     # A DISABLED row registers nothing: "dim ink, non-registering" is the whole
-    # point of the state -- the sites that hand-roll disabled ink today
-    # all still accept taps, which is the bug the state absorbs.
-    if hits is not None and verb is not None and st != DISABLED:
+    # point of the state.
+    if hits is not None and verb is not None and not disabled:
         hits.add(rect, verb, arg)
 
 
@@ -972,58 +1017,45 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     """
     if fs is None:
         fs = _fs(cv)
-    x, y, w, h = rect
-    st = widget_state(on, hot, disabled, state)
-    if colors is None:
-        colors = state_colors(th, kind, st)
-    field, ink, edge_c = colors
-    m = _METRICS["cell"]
-    if pad is None:
-        pad = m[CELL_PAD] * fs
-    if caption_h is None:
-        caption_h = m[CELL_CAP] * fs if label is not None else 0
-    if field is not None:
-        cv.rect(x, y, w, h, field)
-    if label is not None and caption_h > 0:
-        cap_y = y + h - caption_h
-        cap_ink = ink
-        if band:
-            if band_fill is None or band_ink is None:
-                bf, bi, _be = state_colors(th, "cell_band", st)
-                if band_fill is None:
-                    band_fill = bf
-                if band_ink is None:
-                    band_ink = bi
-            cv.rect(x, cap_y, w, caption_h, band_fill)
-            cap_ink = band_ink
-        label = str(label)
-        maxc = max(0, (w - 2 * pad) // (8 * fs))
-        if len(label) > maxc:
-            label = label[:maxc]
-        if label:
-            lw = len(label) * 8 * fs
-            if text_dx is None:
-                lx = (x + pad + m[CELL_INDENT] * fs) if band else (
-                    x + (w - lw) // 2)
-            else:
-                lx = x + text_dx
-            ly = (cap_y + (caption_h - 8 * fs) // 2) if text_dy is None else (
-                y + text_dy)
-            cv.print(label, lx, ly, cap_ink, 1)
-    n = m[CELL_EDGE]
-    if edge_c is not None and n > 0 and not edge_last:
-        _cell_edge(cv, x, y, w, h, edge_c, n)
-    art = cell_art_rect(rect, fs, pad, caption_h)
+    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
+    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
+        _F_DISABLED if disabled else 0) | (_F_BAND if band else 0) | (
+        _F_EDGE_LAST if edge_last else 0) | (_F_LABEL if label is not None else 0)
+    gid = -1
+    own = icon_img is not None or (glyph is not None and glyph_draw is not None)
+    if icon_img is not None:
+        flags |= _F_ICON
+    elif glyph is not None:
+        flags |= _F_GLYPH
+        if glyph_draw is None:
+            gid = glyph_id(glyph)
+    look = _look(th)
+    kid = _kind_id(kind)
+    act = _interact(state)
+    text = None if label is None else (label if type(label) is str else str(label))
+    pad_i = None if pad is None else int(pad)
+    cap = None if caption_h is None else int(caption_h)
+    dx = None if text_dx is None else int(text_dx)
+    dy = None if text_dy is None else int(text_dy)
+    if not own:
+        return _C.cell(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, gid,
+                       pad_i, cap, band_fill, band_ink, dx, dy, fs, colors, _ALL)
+    # The caller's picture lands between the frame and a late edge.
+    art = _C.cell(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, gid,
+                  pad_i, cap, band_fill, band_ink, dx, dy, fs, colors, _FRAME)
     ax, ay, aw, ah = art
+    m = _METRICS["cell"]
     if icon_img is not None:
         box = m[CELL_ICON] * fs
         cv.spr(icon_img, ax + (aw - box) // 2, ay + (ah - box) // 2, fs)
-    elif glyph is not None:
+    else:
         box = m[CELL_GLYPH] * fs
-        (_glyph_draw if glyph_draw is None else glyph_draw)(glyph, (ax + (aw - box) // 2, ay + (ah - box) // 2,
-                           box, box), ink, cv)
-    if edge_c is not None and n > 0 and edge_last:
-        _cell_edge(cv, x, y, w, h, edge_c, n)
+        ink = (state_colors(th, kind, widget_state(on, hot, disabled, state))
+               if colors is None else colors)[1]
+        glyph_draw(glyph, (ax + (aw - box) // 2, ay + (ah - box) // 2, box, box),
+                   ink, cv)
+    _C.cell(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, gid, pad_i, cap,
+            band_fill, band_ink, dx, dy, fs, colors, _CONTENT)
     return art
 
 
@@ -1338,26 +1370,9 @@ def fill_uncovered(cv, inner, outer, col):
     fully covered (the Scene pane's layout), and degrades to one full fill when the
     two rects do not overlap, so it is safe on every tier.
     """
-    ix, iy, iw, ih = int(inner[0]), int(inner[1]), int(inner[2]), int(inner[3])
-    ox, oy, ow, oh = int(outer[0]), int(outer[1]), int(outer[2]), int(outer[3])
-    if iw <= 0 or ih <= 0:
-        return
-    ix1, iy1 = ix + iw, iy + ih
-    ox1, oy1 = ox + ow, oy + oh
-    if ox >= ix1 or ox1 <= ix or oy >= iy1 or oy1 <= iy:
-        cv.rect(ix, iy, iw, ih, col)          # no overlap: all of it is uncovered
-        return
-    if iy < oy:                                # strip above
-        cv.rect(ix, iy, iw, oy - iy, col)
-    if iy1 > oy1:                              # strip below
-        cv.rect(ix, oy1, iw, iy1 - oy1, col)
-    my0 = iy if iy > oy else oy                # the vertically-overlapping band
-    my1 = iy1 if iy1 < oy1 else oy1
-    if my1 > my0:
-        if ix < ox:                            # strip left
-            cv.rect(ix, my0, ox - ix, my1 - my0, col)
-        if ix1 > ox1:                          # strip right
-            cv.rect(ox1, my0, ix1 - ox1, my1 - my0, col)
+    _C.fill_uncovered(cv.ui_sink(), int(inner[0]), int(inner[1]), int(inner[2]),
+                      int(inner[3]), int(outer[0]), int(outer[1]), int(outer[2]),
+                      int(outer[3]), col)
 
 
 # --- scrolling ------------------------------------------------------------------
@@ -1574,33 +1589,13 @@ class ScrollRegion:
     def bar_rect(self, fs=1):
         """The scrollbar thumb rect, or None when everything fits."""
         x, y, w, h = self.view
-        m = self._max_offset()
-        vis = self._extent()
-        if m <= 0 or vis <= 0:
-            return None
-        bw = self.BAR_W * fs
-        th_ = max(_METRICS["scrollbar"][SB_MIN] * fs,
-                  vis * vis // self.content)
-        tp = (vis - th_) * self.offset // m
-        if self.horizontal:
-            return (x + tp, y + h - bw, th_, bw)
-        return (x + w - bw, y + tp, bw, th_)
+        return _C.bar_rect(int(x), int(y), int(w), int(h), self.content, self.offset,
+                           self.horizontal, fs, self.BAR_W)
 
     def draw_bar(self, cv, th):
-        fs = _fs(cv)
-        r = self.bar_rect(fs)
-        if r is None:
-            return
         x, y, w, h = self.view
-        bw = self.BAR_W * fs
-        trough, thumb, _e = state_colors(th, "scrollbar", REST)
-        if trough is not None:            # a skin may show the thumb alone
-            if self.horizontal:
-                cv.rect(x, y + h - bw, w, bw, trough)
-            else:
-                cv.rect(x + w - bw, y, bw, h, trough)
-        if thumb is not None:
-            cv.rect(r[0], r[1], r[2], r[3], thumb)
+        _C.scrollbar(cv.ui_sink(), _look(th), int(x), int(y), int(w), int(h),
+                     self.content, self.offset, self.horizontal, _fs(cv), self.BAR_W)
 
 
 class DragTap:

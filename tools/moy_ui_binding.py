@@ -44,6 +44,53 @@ _SIGS = (
 )
 
 
+class _Box(c.Structure):
+    _fields_ = [("x", c.c_int16), ("y", c.c_int16), ("w", c.c_int16), ("h", c.c_int16)]
+
+
+class _Span(c.Structure):
+    _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
+
+
+class _Sink(c.Structure):
+    _fields_ = [("kind", c.c_uint8), ("fs", c.c_uint8), ("look", c.c_uint8),
+                ("dst", c.c_void_p)]
+
+
+_I16 = c.c_int16
+
+
+class _Row(c.Structure):
+    _fields_ = [("label", _Span), ("value", _Span)] + [
+        (n, _I16) for n in ("glyph", "glyph_size", "glyph_ink", "value_ink", "pad",
+                            "pad_right", "text_dy", "scale", "fs")] + [
+        ("colors", _I16 * 3)]
+
+
+class _Cell(c.Structure):
+    _fields_ = [("label", _Span)] + [
+        (n, _I16) for n in ("glyph", "pad", "caption_h", "band_fill", "band_ink",
+                            "text_dx", "text_dy", "fs")] + [("colors", _I16 * 3)]
+
+
+DEFAULT, FROM_STYLE = -32768, -2
+
+_DRAW_SIGS = (
+    ("moy_ui_sink_row", [c.POINTER(_Sink), c.c_uint32, _I], _I),
+    ("moy_ui_calls", [], c.c_uint32),
+    ("moy_ui_row", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Row), _I], _I),
+    ("moy_ui_cell", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Cell), _I,
+                     c.POINTER(_Box)], _I),
+    ("moy_ui_label", [c.POINTER(_Sink), _Box, _Span, _I, _I], _I),
+    ("moy_ui_bar_rect", [_Box, _I, _I, _I, _I, _I, c.POINTER(_Box)], _I),
+    ("moy_ui_scrollbar", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I], _I),
+    ("moy_ui_scroll_cues", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
+    ("moy_ui_fill_uncovered", [c.POINTER(_Sink), _Box, _Box, _I], _I),
+    ("moy_ui_list", [c.POINTER(_Sink), _Box, _I, c.c_char_p, _Z, _I, _I, _I, _I, _I,
+                     _I], _I),
+)
+
+
 class _Line(c.Structure):
     """moy_text.h's moy_text_line_t."""
     _fields_ = [("off", c.c_uint16), ("len", c.c_uint16), ("collapse", c.c_uint8)]
@@ -70,7 +117,7 @@ def binding():
         lib = glass_binding._lib()
     except ImportError:
         return None
-    for name, args, res in _SIGS:
+    for name, args, res in _SIGS + _DRAW_SIGS:
         fn = getattr(lib, name)
         fn.argtypes = args
         fn.restype = res
@@ -147,6 +194,108 @@ def binding():
                                 int(ci), int(scale)) == STALE:
             raise ValueError("moy_ui: stale canvas")
 
+    def sink(canvas, look):
+        s = _Sink()
+        rc = lib.moy_ui_sink_row(c.byref(s), int(canvas), int(look))
+        if rc == STALE:
+            raise ValueError("moy_ui: stale canvas")
+        _check(rc)
+        return s
+
+    def span(text):
+        if text is None:
+            return _Span(None, 0), None
+        b = _b(text)
+        buf = c.create_string_buffer(b, len(b))
+        return _Span(c.addressof(buf), len(b)), buf
+
+    def opt(v, none):
+        return none if v is None else int(v)
+
+    def colors3(cols, out):
+        for i in range(3):
+            out[i] = FROM_STYLE if cols is None else opt(cols[i], -1)
+
+    def box(x, y, w, h):
+        return _Box(int(x), int(y), int(w), int(h))
+
+    def row(canvas, look, x, y, w, h, kind, flags, interact, label, value, glyph,
+            glyph_size, glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs,
+            colors, phase):
+        s = sink(canvas, look)
+        r = _Row()
+        r.label, keep1 = span(label)
+        r.value, keep2 = span(value)
+        r.glyph = int(glyph)
+        r.glyph_size = opt(glyph_size, DEFAULT)
+        r.glyph_ink = opt(glyph_ink, FROM_STYLE)
+        r.value_ink = opt(value_ink, FROM_STYLE)
+        r.pad, r.pad_right = opt(pad, DEFAULT), opt(pad_right, DEFAULT)
+        r.text_dy = opt(text_dy, DEFAULT)
+        r.scale, r.fs = int(scale), int(fs)
+        colors3(colors, r.colors)
+        _check(lib.moy_ui_row(c.byref(s), box(x, y, w, h), int(kind), int(flags),
+                              int(interact), c.byref(r), int(phase)))
+
+    def cell(canvas, look, x, y, w, h, kind, flags, interact, label, glyph, pad,
+             caption_h, band_fill, band_ink, text_dx, text_dy, fs, colors, phase):
+        s = sink(canvas, look)
+        k = _Cell()
+        k.label, keep = span(label)
+        k.glyph = int(glyph)
+        k.pad, k.caption_h = opt(pad, DEFAULT), opt(caption_h, DEFAULT)
+        k.band_fill, k.band_ink = opt(band_fill, FROM_STYLE), opt(band_ink, FROM_STYLE)
+        k.text_dx, k.text_dy = opt(text_dx, DEFAULT), opt(text_dy, DEFAULT)
+        k.fs = int(fs)
+        colors3(colors, k.colors)
+        art = _Box()
+        _check(lib.moy_ui_cell(c.byref(s), box(x, y, w, h), int(kind), int(flags),
+                               int(interact), c.byref(k), int(phase), c.byref(art)))
+        return (art.x, art.y, art.w, art.h)
+
+    def label(canvas, look, x, y, w, h, text, ink, align):
+        sp, keep = span(text)
+        return lib.moy_ui_label(c.byref(sink(canvas, look)), box(x, y, w, h), sp,
+                                int(ink), int(align))
+
+    def bar_rect(x, y, w, h, content, offset, horizontal, fs, bar_w):
+        out = _Box()
+        if not lib.moy_ui_bar_rect(box(x, y, w, h), int(content), int(offset),
+                                   1 if horizontal else 0, int(fs), int(bar_w),
+                                   c.byref(out)):
+            return None
+        return (out.x, out.y, out.w, out.h)
+
+    def scrollbar(canvas, look, x, y, w, h, content, offset, horizontal, fs, bar_w):
+        _check(lib.moy_ui_scrollbar(c.byref(sink(canvas, look)), box(x, y, w, h),
+                                    int(content), int(offset), 1 if horizontal else 0,
+                                    int(fs), int(bar_w)))
+
+    def scroll_cues(canvas, ux, uy, dx, dy, can_up, can_dn, ci):
+        _check(lib.moy_ui_scroll_cues(c.byref(sink(canvas, 0)), int(ux), int(uy),
+                                      int(dx), int(dy), 1 if can_up else 0,
+                                      1 if can_dn else 0, int(ci)))
+
+    def fill_uncovered(canvas, ix, iy, iw, ih, ox, oy, ow, oh, ci):
+        _check(lib.moy_ui_fill_uncovered(c.byref(sink(canvas, 0)), box(ix, iy, iw, ih),
+                                         box(ox, oy, ow, oh), int(ci)))
+
+    def list_(canvas, look, x, y, w, h, kind, items, count, row_h, offset, sel, fs,
+              bar_w):
+        b = bytes(items)
+        _check(lib.moy_ui_list(c.byref(sink(canvas, look)), box(x, y, w, h), int(kind),
+                               b, len(b), int(count), int(row_h), int(offset), int(sel),
+                               int(fs), int(bar_w)))
+
+    m.calls = lambda: lib.moy_ui_calls()
+    m.row = row
+    m.cell = cell
+    m.label = label
+    m.bar_rect = bar_rect
+    m.scrollbar = scrollbar
+    m.scroll_cues = scroll_cues
+    m.fill_uncovered = fill_uncovered
+    m.list = list_
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
     m.glyph = glyph

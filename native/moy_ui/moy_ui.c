@@ -23,6 +23,7 @@ typedef struct {
 typedef struct {
     look_t look[MOY_UI_LOOKS];
     uint32_t gen;
+    uint32_t calls;                 // primitive entries: one per widget drawn
     uint8_t skin;
 } ui_t;
 
@@ -90,6 +91,17 @@ int moy_ui_skin_use(const char *name, size_t n) {
         u->gen++;
     }
     return s;
+}
+
+void moy_ui_count_call(void) {
+    ui_t *u = ui();
+    if (u != NULL) {
+        u->calls++;
+    }
+}
+
+uint32_t moy_ui_calls(void) {
+    return s_ui != NULL ? s_ui->calls : 0;
 }
 
 int moy_ui_skin(void) {
@@ -214,6 +226,7 @@ static int row_target(uint32_t canvas, moy_canvas_row_t **out, moy_text_target_t
 }
 
 int moy_ui_row_glyph(uint32_t canvas, int g, int x, int y, int w, int h, int ci, int scale) {
+    moy_ui_count_call();
     moy_canvas_row_t *row;
     moy_text_target_t t;
     int rc = row_target(canvas, &row, &t);

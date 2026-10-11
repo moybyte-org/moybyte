@@ -408,28 +408,36 @@ def test_a_skin_is_a_delta_over_the_defaults():
 # =============================================================================
 
 class _CountingCanvas:
-    """A real system canvas with counted draw verbs. Counts DISPATCH, which is
-    what the P4's editor tabs are bound by -- not pixels."""
+    """A real system canvas whose draw ops are counted. Counts DISPATCH, which
+    is what the P4's editor tabs are bound by -- not pixels: the row's fill and
+    text counters (what a C primitive bumps per op, as the gates do) plus the
+    sprites the faces blit."""
 
     def __init__(self, w=320, h=240, fs=1):
         self._cv = SystemCanvas(w, h, font_scale=fs)
+        self._cv.gate_counts_reset()
         self.font_scale = fs
-        self.ops = 0
+        self._spr = 0
+
+    @property
+    def ops(self):
+        fills, texts, _fu, _tu = self._cv.gate_counts()
+        return fills + texts + self._spr
+
+    def ui_sink(self):
+        return self._cv.ui_sink()
 
     def rect(self, *a):
-        self.ops += 1
         self._cv.rect(*a)
 
     def rectb(self, *a):
-        self.ops += 1
         self._cv.rectb(*a)
 
     def print(self, *a):
-        self.ops += 1
         self._cv.print(*a)
 
     def spr(self, *a):
-        self.ops += 1
+        self._spr += 1
         self._cv.spr(*a)
 
 
@@ -478,7 +486,9 @@ def test_the_skin_path_allocates_nothing_per_draw(monkeypatch):
     cv = _CountingCanvas()
     _draw_many(cv, th, 100)
 
-    assert len(handed) >= 600, (
+    # Rows and cells resolve their colours inside native/moy_ui (one C call
+    # each), so the face's resolutions are the other four widgets' 400.
+    assert len(handed) >= 400, (
         "only %d resolutions counted -- is the probe still wired to "
         "ui.state_colors?" % len(handed))
     assert len(slow) >= 1, "no C resolution counted -- is _colors_slow wired?"
@@ -494,32 +504,29 @@ def test_the_skin_path_allocates_nothing_per_draw(monkeypatch):
     assert ui.metrics("row") is ui.metrics("row")
 
 
-def test_a_theme_switch_resolves_once_and_then_stays_cached(monkeypatch):
+def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch):
     """The fast path is an identity compare, so alternating themes must not
-    thrash: each theme pays one C resolution per kind and state it draws."""
-    slow = []
-    real_slow = ui._colors_slow
-    monkeypatch.setattr(
-        ui, "_colors_slow",
-        lambda k, st: (slow.append(k), real_slow(k, st))[1])
+    thrash: each theme is packed into a C look once, while the ring holds it."""
+    packs = []
+    real_look = ui._C.look
+    monkeypatch.setattr(ui._C, "look",
+                        lambda slot, row: (packs.append(slot), real_look(slot, row))[1])
     ui.use_skin(DEFAULT)
     a, b = theme_colors("night"), theme_colors("berry")
     cv = _CountingCanvas()
     for _ in range(20):
         ui.row(cv, a, (0, 0, 100, 16), "x")
-    n_after_a = len(slow)
-    assert n_after_a >= 1, "no resolution counted -- is the probe wired?"
-    assert n_after_a == 1, slow
+    assert len(packs) == 1, "no pack counted -- is the probe wired?"
     for _ in range(20):
         ui.row(cv, b, (0, 0, 100, 16), "x")
-    assert len(slow) == 2, slow
-    # And back: a theme the ring still holds costs NO resolution. This is what
-    # keeps the `self.theme or {}` sites (an empty dict is a fresh object every
-    # call) from wiping the live theme's cache once per frame.
+    assert len(packs) == 2, packs
+    # And back: a theme the ring still holds costs NO pack. This is what keeps
+    # the `self.theme or {}` sites (an empty dict is a fresh object every
+    # call) from evicting the live theme once per frame.
     for _ in range(20):
         ui.row(cv, a, (0, 0, 100, 16), "x")
         ui.row(cv, {}, (0, 0, 100, 16), "x")       # a throwaway theme
-    assert len(slow) == 2 + 20, slow
+    assert len(packs) == 2 + 20, packs
 
 
 def test_the_default_skin_adds_no_draw_calls():

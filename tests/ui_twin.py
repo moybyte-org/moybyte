@@ -510,20 +510,18 @@ def row(cv, th, rect, label, kind='row', on=False, hot=False, disabled=False, st
         maxv = (right - tx) // fw
         if maxv < 0:
             maxv = 0
-        if len(value) > maxv:
-            value = value[:maxv]
+        value = fit_bytes(value.encode('utf-8'), maxv)    # bytes (step 5)
         if value:
-            cv.print(value, right - len(value) * fw, ty, ink if value_ink is None else value_ink, scale)
+            cv.print(value.decode('utf-8'), right - len(value) * fw, ty, ink if value_ink is None else value_ink, scale)
             right -= (len(value) + m[ROW_GAP]) * fw
     if label:
         label = str(label)
         maxc = (right - tx) // fw
         if maxc < 0:
             maxc = 0
-        if len(label) > maxc:
-            label = label[:maxc]
+        label = fit_bytes(label.encode('utf-8'), maxc)    # bytes (step 5)
         if label:
-            cv.print(label, tx, ty, ink, scale)
+            cv.print(label.decode('utf-8'), tx, ty, ink, scale)
     if hits is not None and verb is not None and (st != DISABLED):
         hits.add(rect, verb, arg)
 
@@ -576,10 +574,10 @@ def cell(cv, th, rect, label=None, kind='cell', on=False, hot=False, disabled=Fa
             cap_ink = band_ink
         label = str(label)
         maxc = max(0, (w - 2 * pad) // (8 * fs))
-        if len(label) > maxc:
-            label = label[:maxc]
+        label = fit_bytes(label.encode('utf-8'), maxc)    # bytes (step 5)
         if label:
             lw = len(label) * 8 * fs
+            label = label.decode('utf-8')
             if text_dx is None:
                 lx = x + pad + m[CELL_INDENT] * fs if band else x + (w - lw) // 2
             else:
@@ -1217,3 +1215,34 @@ def blit_glyph(cv, kind, rect, c, scale=None):
     oy = y + (h - span) // 2
     for dx, dy, rw in glyph_runs(kind, fs):
         cv.rect(ox + dx, oy + dy, rw, fs, c)
+
+
+# --- the primitives step 5 added, as references ---------------------------------
+
+
+def label(cv, rect, text, ink, align=0):
+    x, y, w, h = rect
+    adv = 8 * _fs(cv)
+    b = fit_bytes(str(text).encode('utf-8'), max(0, w // adv)) if text else b''
+    tw = len(b) * adv
+    if align == ALIGN_CENTER:
+        x += (w - tw) // 2
+    elif align == ALIGN_RIGHT:
+        x += w - tw
+    if b:
+        cv.print(b.decode('utf-8'), x, y + (h - adv) // 2, ink)
+    return tw
+
+
+def list(cv, th, rect, items, region, row_h, sel=-1, kind='row_list'):
+    region.set(rect, len(items) * row_h)
+    x, y, w, h = rect
+    fs = _fs(cv)
+    cv.clip(x, y, w, h)
+    for i in range(len(items)):
+        ry = y + i * row_h - region.offset
+        if ry + row_h > y and ry < y + h:
+            row(cv, th, (x, ry, w - region.BAR_W * fs, row_h), items[i], kind=kind,
+                on=i == sel)
+    cv.clip()
+    region.draw_bar(cv, th)

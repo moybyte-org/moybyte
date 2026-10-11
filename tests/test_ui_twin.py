@@ -128,7 +128,7 @@ def _row(m, cv, th, c):
           value=c["label2"] if c["flag"] else None, edge=c["n"] != 0,
           pad=c["pad"], text_dy=c["dy"], hits=hits, verb="row", arg=c["int"],
           scale=c["scale"])
-    return [(it[0], it[1], it[2]) for it in hits._items]
+    return [(tuple(int(v) for v in it[0]), it[1], it[2]) for it in hits._items]
 
 
 def _cell(m, cv, th, c):
@@ -205,7 +205,22 @@ def _algebra(m, cv, th, c):
     return out
 
 
+def _label(m, cv, th, c):
+    return m.label(cv, c["box"], c["label"], c["int"] & 63, c["n"] % 3)
+
+
+def _list(m, cv, th, c):
+    sr = m.ScrollRegion()
+    sr.offset = 0
+    items = [c["label"], c["label2"], "Row", "caf\u00e9", ""][:c["n"] + 1]
+    rect = tuple(int(v) for v in c["box"])
+    m.list(cv, th, rect, items, sr, max(1, 8 + c["int"]), c["int"] % 4, c["kind"])
+    sr.scroll_by(c["n"] * 7)
+    m.list(cv, th, rect, items, sr, max(1, 8 + c["int"]), -1, c["kind"])
+
+
 WIDGETS = {
+    "label": _label, "list": _list,
     "button": _button, "chip": _chip, "row": _row, "cell": _cell,
     "tab_row": _tab_row, "status_row": _status_row,
     "game_family": _game_family, "frames": _frames,
@@ -216,8 +231,8 @@ CASES = 48
 
 # The faces convert coordinates toward zero before the C call, as the print
 # gate's gate_num does (§7); the twin's bodies slice with them, so the oracle
-# draws the truncated case. False while the toolkit is still the Python.
-FACE_TRUNCATES = False
+# draws the truncated case. The widgets whose bodies are C take raw floats.
+FACE_TRUNCATES = {"row", "cell", "scroll"}
 
 
 def _truncated(c):
@@ -259,7 +274,7 @@ def test_the_toolkit_draws_what_the_twin_drew(widget, _skins):
         c = _case(r)
         want, want_ops, want_ret = _draw(twin, twin.use, widget, _truncated(c))
         got, got_ops, got_ret = _draw(ui, ui.use_skin, widget,
-                                      c if FACE_TRUNCATES else _truncated(c))
+                                      c if widget in FACE_TRUNCATES else _truncated(c))
         if got != want:
             raise AssertionError("%s case %d %r: pixels differ in %r (hash %s, "
                                  "twin %s)" % (
@@ -431,3 +446,24 @@ def test_each_widget_issues_its_budgeted_ops(name):
     assert _ops(ui, fn) == budget, (
         "%s issues %r ops, budgeted %r: a body drawing more or fewer ops "
         "than the one it replaced" % (name, _ops(ui, fn), budget))
+
+
+def test_a_widget_is_one_crossing():
+    """The binding's entry counter against the widget calls the test made: a
+    row, a cell, a label, a bar is ONE call into native/moy_ui -- no per-op
+    Python left behind. A caller's own picture splits one into two."""
+    th = theme_colors("machine")
+    cv = SystemCanvas(200, 120, font_scale=2)
+    before = ui._C.calls()
+    for i in range(10):
+        ui.row(cv, th, (0, i * 10, 200, 10), "R%d" % i, value="v", on=i == 3)
+    for i in range(5):
+        ui.cell(cv, th, (i * 30, 0, 28, 40), "C")
+    ui.label(cv, (0, 0, 100, 20), "hi", 7)
+    sr = ui.ScrollRegion()
+    sr.set((0, 0, 60, 100), 400)
+    sr.draw_bar(cv, th)
+    assert ui._C.calls() - before == 17
+    before = ui._C.calls()
+    ui.row(cv, th, (0, 0, 200, 16), "ICON", icon_img=IMG)
+    assert ui._C.calls() - before == 2
