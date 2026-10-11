@@ -176,6 +176,7 @@ enum {
 typedef struct { int8_t n; int8_t t[3]; } moy_ui_spec_t;
 extern const int moy_ui_n_tokens, moy_ui_n_roles, moy_ui_n_states, moy_ui_n_kinds,
     moy_ui_n_color_kinds, moy_ui_n_skins, moy_ui_n_strings, moy_ui_n_glyphs;
+extern const int moy_ui_hits_cap;
 extern const char *const moy_ui_token_names[MOY_UI_TOKENS];
 extern const char *const moy_ui_role_names[MOY_UI_ROLES];
 extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];

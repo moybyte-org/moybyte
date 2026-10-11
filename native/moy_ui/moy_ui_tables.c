@@ -12,6 +12,7 @@ const int moy_ui_n_color_kinds = MOY_UI_COLOR_KINDS;
 const int moy_ui_n_skins = MOY_UI_SKINS;
 const int moy_ui_n_strings = MOY_UI_STRINGS;
 const int moy_ui_n_glyphs = MOY_UI_GLYPHS;
+const int moy_ui_hits_cap = MOY_UI_HITS_CAP;
 
 const char *const moy_ui_token_names[MOY_UI_TOKENS] = {
     "panel",

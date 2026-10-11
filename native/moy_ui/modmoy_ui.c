@@ -717,6 +717,130 @@ static mp_obj_t ui_cell_art(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cell_art_obj, 4, 4, ui_cell_art);
 
+
+// -- interaction over caller-owned buffers ------------------------------------------------
+
+static void *rw(mp_obj_t o, size_t need, size_t *len) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_RW);
+    if (b.len < need) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: state buffer too small"));
+    }
+    if (len != NULL) {
+        *len = b.len;
+    }
+    return b.buf;
+}
+
+static mp_obj_t ui_hits_cap(void) {
+    return MP_OBJ_NEW_SMALL_INT(MOY_UI_HITS_CAP);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_hits_cap_obj, ui_hits_cap);
+
+static mp_obj_t ui_hits_clear(mp_obj_t buf) {
+    moy_ui_hits_clear(rw(buf, MOY_UI_HITS_HDR * 4, NULL));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_hits_clear_obj, ui_hits_clear);
+
+// hits_add(buf, rect, id) -> False when full
+static mp_obj_t ui_hits_add(mp_obj_t buf, mp_obj_t rect, mp_obj_t id) {
+    size_t len;
+    int32_t *b = rw(buf, MOY_UI_HITS_HDR * 4, &len);
+    int32_t r[4];
+    rect_of(rect, r);
+    return mp_obj_new_bool(moy_ui_hits_add(b, len / 4, r[0], r[1], r[2], r[3],
+                                           mp_obj_get_int(id)) == MOY_UI_OK);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_hits_add_obj, ui_hits_add);
+
+static mp_obj_t ui_hits_at(mp_obj_t buf, mp_obj_t px, mp_obj_t py) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_hits_at(rw(buf, MOY_UI_HITS_HDR * 4, NULL), num(px),
+                                               num(py)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_hits_at_obj, ui_hits_at);
+
+// hits_pump(buf, px, py, down, pointing, pump): pump is an array('i') of
+// (hover, pressed, armed, down), read and written in place.
+static mp_obj_t ui_hits_pump(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_pump_t *p = rw(a[5], sizeof(moy_ui_pump_t), NULL);
+    moy_ui_hits_pump(rw(a[0], MOY_UI_HITS_HDR * 4, NULL), num(a[1]), num(a[2]),
+                     mp_obj_is_true(a[3]), mp_obj_is_true(a[4]), p);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_hits_pump_obj, 6, 6, ui_hits_pump);
+
+static float dt_of(mp_obj_t o) {
+    return o == mp_const_none ? 0.0f : (float)mp_obj_get_float(o);
+}
+
+static moy_ui_scroll_t *scroll_of(mp_obj_t o) {
+    return rw(o, sizeof(moy_ui_scroll_t), NULL);
+}
+
+static mp_obj_t ui_scroll_stop(mp_obj_t st) {
+    moy_ui_scroll_stop(scroll_of(st));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_scroll_stop_obj, ui_scroll_stop);
+
+static mp_obj_t ui_scroll_drag_start(mp_obj_t st, mp_obj_t p) {
+    moy_ui_scroll_drag_start(scroll_of(st), num(p));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_scroll_drag_start_obj, ui_scroll_drag_start);
+
+// scroll_drag_move(st, p, dt, offset, content, extent) -> the new offset, or
+// -1 when no drag is live
+static mp_obj_t ui_scroll_drag_move(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t off = num(a[3]);
+    if (!moy_ui_scroll_drag_move(scroll_of(a[0]), num(a[1]), dt_of(a[2]), &off,
+                                 num(a[4]), num(a[5]))) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    return mp_obj_new_int(off);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_drag_move_obj, 6, 6, ui_scroll_drag_move);
+
+static mp_obj_t ui_scroll_drag_end(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_scroll_drag_end(scroll_of(a[0]), num(a[1]), num(a[2]), num(a[3]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_drag_end_obj, 4, 4, ui_scroll_drag_end);
+
+// scroll_tick(st, dt, offset, content, extent) -> the new offset, or -1 when
+// nothing coasts
+static mp_obj_t ui_scroll_tick(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t off = num(a[2]);
+    if (!moy_ui_scroll_tick(scroll_of(a[0]), dt_of(a[1]), &off, num(a[3]), num(a[4]))) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    return mp_obj_new_int(off);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_tick_obj, 5, 5, ui_scroll_tick);
+
+// dragtap(tap, st, view, horizontal, px, py, click, down, slop, dt, offset,
+//         content, out) -> True on a clean tap; out (array('i')) gets the
+// offset and the tap's x and y
+static mp_obj_t ui_dragtap(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_dragtap_t *t = rw(a[0], sizeof(moy_ui_dragtap_t), NULL);
+    int32_t view[4];
+    rect_of(a[2], view);
+    int32_t *out = rw(a[12], 3 * sizeof(int32_t), NULL);
+    out[0] = num(a[10]);
+    int tapped = moy_ui_dragtap_frame(t, scroll_of(a[1]), view, mp_obj_is_true(a[3]),
+                                      num(a[4]), num(a[5]), mp_obj_is_true(a[6]),
+                                      mp_obj_is_true(a[7]), num(a[8]), dt_of(a[9]),
+                                      &out[0], num(a[11]), &out[1], &out[2]);
+    return mp_obj_new_bool(tapped);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_dragtap_obj, 13, 13, ui_dragtap);
+
 static mp_obj_t ui_calls(void) {
     return mp_obj_new_int_from_uint(moy_ui_calls());
 }
@@ -750,6 +874,17 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill_uncovered), MP_ROM_PTR(&ui_fill_uncovered_obj) },
     { MP_ROM_QSTR(MP_QSTR_list), MP_ROM_PTR(&ui_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_calls), MP_ROM_PTR(&ui_calls_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hits_cap), MP_ROM_PTR(&ui_hits_cap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hits_clear), MP_ROM_PTR(&ui_hits_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hits_add), MP_ROM_PTR(&ui_hits_add_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hits_at), MP_ROM_PTR(&ui_hits_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hits_pump), MP_ROM_PTR(&ui_hits_pump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_stop), MP_ROM_PTR(&ui_scroll_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_drag_start), MP_ROM_PTR(&ui_scroll_drag_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_drag_move), MP_ROM_PTR(&ui_scroll_drag_move_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_drag_end), MP_ROM_PTR(&ui_scroll_drag_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_tick), MP_ROM_PTR(&ui_scroll_tick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dragtap), MP_ROM_PTR(&ui_dragtap_obj) },
     { MP_ROM_QSTR(MP_QSTR_button), MP_ROM_PTR(&ui_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_button_x), MP_ROM_PTR(&ui_button_x_obj) },
     { MP_ROM_QSTR(MP_QSTR_chip), MP_ROM_PTR(&ui_chip_obj) },

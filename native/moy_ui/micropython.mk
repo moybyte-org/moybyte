@@ -5,6 +5,7 @@ MOY_UI_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_UI_DIR)/modmoy_ui.c
 SRC_USERMOD_LIB_C += $(MOY_UI_DIR)/moy_ui.c $(MOY_UI_DIR)/moy_ui_glyph.c $(MOY_UI_DIR)/moy_ui_draw.c \
+    $(MOY_UI_DIR)/moy_ui_interact.c \
     $(MOY_UI_DIR)/moy_ui_tables.c
 CFLAGS_USERMOD += -I$(MOY_UI_DIR) -I$(MOY_UI_DIR)/../moy_gfx -I$(MOY_UI_DIR)/../moy_glass \
     -I$(MOY_UI_DIR)/../moy_spine

@@ -77,6 +77,11 @@ widgets._in, re-exported here as `rect_in`.)
 
 from array import array
 
+try:
+    from struct import unpack_from as _unpack
+except ImportError:  # pragma: no cover - a port with only ustruct
+    from ustruct import unpack_from as _unpack
+
 import moy_ui as _C
 
 try:
@@ -417,6 +422,11 @@ def cell_state(index, hover_index=-1, pressed_index=-1):
 HITS_DEBUG = False
 
 
+# The hit buffer's capacity: twice the most rects any surface registers in the
+# goldens' frames (native/moy_ui/style.json's hits_capacity).
+HITS_CAP = _C.hits_cap()
+
+
 class Hits:
     """Per-draw hit registry AND the surface's interaction-state holder.
 
@@ -458,35 +468,66 @@ class Hits:
     small glue. The pump only says where the pointer is.
     """
 
-    def __init__(self):
-        self._items = []
+    def __init__(self, cap=None):
+        cap = HITS_CAP if cap is None else cap
+        # The rects live in a buffer this object owns, the rules in C
+        # (native/moy_ui); ids are interned per clear().
+        self._buf = array("i", bytes(4 * (2 + 5 * cap)))
+        self._keys = []         # id -> (verb, arg), this draw's
+        self._ids = {}          # (verb, arg) -> id
+        self._pump = array("i", [-1, -1, -1, 0])
+        self._said_full = False
         self.hover = None       # (verb, arg) under a resting pointing cursor
         self.pressed = None     # (verb, arg) held down, pointer still inside
         self._armed = None      # what the press EDGE landed on
         self._down = False      # last sample's held state (for the edge)
 
     def clear(self):
-        del self._items[:]
+        _C.hits_clear(self._buf)
+        del self._keys[:]
+        self._ids.clear()
 
     def add(self, rect, verb, arg=None):
+        key = (verb, arg)
+        i = self._ids.get(key)
+        if i is None:
+            i = len(self._keys)
+            self._keys.append(key)
+            self._ids[key] = i
+        elif HITS_DEBUG:
+            raise ValueError(
+                "duplicate Hits id (%r, %r): state_of() would be "
+                "ambiguous" % (verb, arg))
+        if not _C.hits_add(self._buf, rect, i):
+            self._full(key)
+
+    def _full(self, key):
+        """An add past the buffer's capacity: refused, said once per surface,
+        and an error under HITS_DEBUG -- a tap must never be lost silently."""
         if HITS_DEBUG:
-            items = self._items
-            for i in range(len(items)):
-                it = items[i]
-                if it[1] == verb and it[2] == arg:
-                    raise ValueError(
-                        "duplicate Hits id (%r, %r): state_of() would be "
-                        "ambiguous" % (verb, arg))
-        self._items.append((rect, verb, arg))
+            raise OverflowError("Hits full at %d rects: %r not registered"
+                                % (len(self._keys), key))
+        if not self._said_full:
+            self._said_full = True
+            print("HITS FULL: %d rects, %r and later ones not registered"
+                  % (len(self._keys), key))
+
+    @property
+    def _items(self):
+        """The registered (rect, verb, arg)s, in order -- for tests."""
+        b = self._buf
+        out = []
+        for i in range(b[0]):
+            r = b[2 + 5 * i:7 + 5 * i]
+            out.append(((r[0], r[1], r[2], r[3]), self._keys[r[4]][0],
+                        self._keys[r[4]][1]))
+        return out
 
     def at(self, px, py):
         """(verb, arg) of the topmost hit at (px, py), or None. Later adds win
         (drawn later = on top), matching paint order."""
-        for i in range(len(self._items) - 1, -1, -1):
-            rect, verb, arg = self._items[i]
-            if rect_in(px, py, rect):
-                return (verb, arg)
-        return None
+        i = _C.hits_at(self._buf, px, py)
+        return self._keys[i] if i >= 0 else None
 
     # -- the interaction pump --------------------------------------------------
 
@@ -503,17 +544,18 @@ class Hits:
         down = bool(getattr(pointer, "down", False))
         pointing = bool(getattr(pointer, "visible", False)
                         or getattr(pointer, "hovering", False))
-        hit = self.at(px, py)
-        if down:
-            if not self._down:
-                self._armed = hit          # the press EDGE picks the target
-            armed = self._armed
-            new_pressed = armed if (armed is not None and hit == armed) else None
-            new_hover = None               # a pointer that is down never hovers
-        else:
+        p = self._pump
+        armed = self._armed
+        p[2] = -1 if armed is None else self._ids.get(armed, -1)
+        p[3] = 1 if self._down else 0
+        _C.hits_pump(self._buf, px, py, down, pointing, p)
+        keys = self._keys
+        new_hover = keys[p[0]] if p[0] >= 0 else None
+        new_pressed = keys[p[1]] if p[1] >= 0 else None
+        if not down:
             self._armed = None
-            new_pressed = None
-            new_hover = hit if pointing else None
+        elif not self._down:
+            self._armed = keys[p[2]] if p[2] >= 0 else None   # the press EDGE
         self._down = down
         changed = (new_hover != self.hover) or (new_pressed != self.pressed)
         self.hover = new_hover
@@ -1214,10 +1256,10 @@ class ScrollRegion:
         self.view = (0, 0, 0, 0)
         self.content = 0            # content extent along the scroll axis
         self.offset = 0
-        self._drag = None           # last drag sample's axis coordinate
-        self._vel = 0.0             # kinetic: EMA finger velocity, px/ms
-        self._fling = False         # a released fling is coasting
-        self._foff = 0.0            # float offset shadow while coasting
+        # The drag and the fling (the last drag sample, the EMA finger velocity
+        # in px/ms, the float offset while coasting, their flags) live in this
+        # buffer; the rules are native/moy_ui's (moy_ui_scroll_t).
+        self._st = bytearray(16)
         # Scroll-as-blit paint ring (#113): the most recent painted frames'
         # (frame_no, offset, key, stamp), newest first. blit_shift compares the
         # current offset against the paint whose pixels sit in the target
@@ -1310,64 +1352,57 @@ class ScrollRegion:
     # drag_* take the AXIS coordinate (py vertically, px horizontally);
     # DragTap below picks it for callers that feed whole pointer samples.
 
+    @property
+    def _vel(self):
+        """The release velocity, px/ms (single precision) -- for tests."""
+        return _unpack("<f", self._st, 0)[0]
+
+    @property
+    def _drag(self):
+        """The last drag sample's axis coordinate, None with no drag live."""
+        if not self._st[12] & 1:
+            return None
+        return _unpack("<i", self._st, 8)[0]
+
     def drag_start(self, p):
-        self._drag = p
-        self.stop()                 # a new touch CATCHES a live fling
+        _C.scroll_drag_start(self._st, p)
 
     def drag_move(self, p, dt_ms=None):
-        if self._drag is None:
+        off = _C.scroll_drag_move(self._st, p, dt_ms, self.offset, self.content,
+                                  self.view[2] if self.horizontal else self.view[3])
+        if off < 0:
             return False
-        d = self._drag - p
-        self.scroll_by(d)
-        self._drag = p
-        # Release-velocity EMA, fed the loop's dt by the caller. The pointer
-        # routes every frame (the redraw gate only skips DRAWS), so a held-
-        # still finger decays the velocity to ~0 -- hold-then-release is a
-        # stop, not a fling. No dt (a legacy caller): velocity stays 0.
-        if dt_ms:
-            self._vel += (d / dt_ms - self._vel) * self.VEL_EMA
+        self.offset = off
         return True
 
     def drag_end(self):
-        self._drag = None
-        if abs(self._vel) >= self.MIN_FLING and self._max_offset() > 0:
-            self._fling = True
-            self._foff = float(self.offset)
+        _C.scroll_drag_end(self._st, self.offset, self.content,
+                           self.view[2] if self.horizontal else self.view[3])
 
     def stop(self):
         """Kill any kinetic motion (a catching touch / a programmatic scroll)."""
-        self._fling = False
-        self._vel = 0.0
+        _C.scroll_stop(self._st)
 
     @property
     def animating(self):
         """True while a released fling is coasting -- the owner ticks it each
         frame and keeps the redraw gate open until it rests."""
-        return self._fling
+        return bool(self._st[12] & 2)
 
     def tick(self, dt_ms):
         """Advance a coasting fling by one frame (dt_ms injected): integrate
         the offset, decay the velocity, hard-stop at the clamp edges (#113
         v1: no overshoot). Returns True when this frame moved the view."""
-        if not self._fling or dt_ms <= 0:
+        off = _C.scroll_tick(self._st, dt_ms, self.offset, self.content,
+                             self.view[2] if self.horizontal else self.view[3])
+        if off < 0:
             return False
-        self._foff += self._vel * dt_ms
-        self._vel *= self.FRICTION ** dt_ms
-        m = self._max_offset()
-        if self._foff <= 0:
-            self._foff = 0.0
-            self.stop()
-        elif self._foff >= m:
-            self._foff = float(m)
-            self.stop()
-        elif abs(self._vel) < self.STOP_VEL:
-            self.stop()
-        self.offset = int(self._foff + 0.5)
+        self.offset = off
         return True
 
     @property
     def drag_active(self):
-        return self._drag is not None
+        return bool(self._st[12] & 1)
 
     # -- scrollbar -----------------------------------------------------------
 
@@ -1393,14 +1428,15 @@ class DragTap:
 
     def __init__(self, region):
         self.region = region
-        self._press = None          # (x, y) at the press edge, while pending
-        self._dragging = False
-        self._caught = False        # this press stopped a live fling (#113):
+        # The gesture's state (the press point and its flags) lives in a buffer this
+        # object owns; the rules are native/moy_ui's.
+        self._t = bytearray(12)
+        self._out = array("i", [0, 0, 0])
                                     # its release is a CATCH, never a tap
 
     @property
     def dragging(self):
-        return self._dragging
+        return bool(self._t[8] & 2)
 
     def frame(self, px, py, click, down, slop=6, dt_ms=None):
         """One pointer sample: `click` is the press edge, `down` the held
@@ -1408,30 +1444,12 @@ class DragTap:
         Returns the press-edge (x, y) on a clean tap release, else None.
         While a drag is live the region's offset follows the finger -- the
         caller syncs its scroll state from region.offset."""
-        region = self.region
-        axis = px if region.horizontal else py
-        if click:
-            if rect_in(px, py, region.view):
-                self._press = (px, py)
-                self._dragging = False
-                self._caught = region.animating   # read BEFORE drag_start stops it
-                region.drag_start(axis)
-            return None
-        if down:
-            if self._press is not None and not self._dragging:
-                sx, sy = self._press
-                if abs(px - sx) > slop or abs(py - sy) > slop:
-                    self._dragging = True
-            if self._dragging:
-                region.drag_move(axis, dt_ms)  # the region owns the offset mid-drag
-            return None
-        region.drag_end()
-        press, self._press = self._press, None
-        was_drag, self._dragging = self._dragging, False
-        caught, self._caught = self._caught, False
-        if press is None or was_drag or caught:
-            return None
-        return press
+        r = self.region
+        out = self._out
+        tapped = _C.dragtap(self._t, r._st, r.view, r.horizontal, px, py, click, down,
+                            slop, dt_ms, r.offset, r.content, out)
+        r.offset = out[0]
+        return (out[1], out[2]) if tapped else None
 
 
 _load_metrics()

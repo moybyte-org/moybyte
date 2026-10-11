@@ -157,6 +157,7 @@ def generate(style, strings):
              "moy_ui_n_kinds,")
     h.append("    moy_ui_n_color_kinds, moy_ui_n_skins, moy_ui_n_strings, "
              "moy_ui_n_glyphs;")
+    h.append("extern const int moy_ui_hits_cap;")
     h.append("extern const char *const moy_ui_token_names[MOY_UI_TOKENS];")
     h.append("extern const char *const moy_ui_role_names[MOY_UI_ROLES];")
     h.append("extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];")
@@ -195,6 +196,7 @@ def generate(style, strings):
     for k in ("tokens", "roles", "states", "kinds", "color_kinds", "skins",
               "strings", "glyphs"):
         c.append("const int moy_ui_n_%s = MOY_UI_%s;" % (k, k.upper()))
+    c.append("const int moy_ui_hits_cap = MOY_UI_HITS_CAP;")
     c.append("")
 
     def names(decl, seq):

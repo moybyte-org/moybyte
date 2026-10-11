@@ -348,9 +348,10 @@ def test_ui_stays_a_leaf():
         assert leaf not in ("chrome", "console", "skin", "settings_layer",
                             "wm_windowed"), name
     # The imports are the C this module is the face of, the array type its
-    # token rows travel in, and the peer leaf that owns the single hit-test.
+    # token rows and hit buffers travel in, struct to read a scroll state's
+    # velocity, and the peer leaf that owns the single hit-test.
     assert set(n.split(".")[-1] for n in names) == {
-        "widgets", "moy_ui", "array"}, names
+        "widgets", "moy_ui", "array", "struct", "ustruct"}, names
 
 
 # =============================================================================
@@ -916,3 +917,29 @@ def test_the_toggle_is_a_chip_that_reads_switched_on():
     ui.chip(a, th, (2, 2, 70, 18), "ON", on=True, kind="toggle")
     ui.chip(b, th, (2, 2, 70, 18), "ON", on=True)
     assert bytes(a._buf) != bytes(b._buf)
+
+
+def test_no_tap_is_lost_past_the_capacity(capsys):
+    """An add past the hit buffer's capacity is refused, said ONCE per
+    surface, and an error under HITS_DEBUG (docs/kernel_toolkit_2026-10.md
+    §3.4): the widget drawn last must never lose its tap silently."""
+    hits = ui.Hits(cap=4)
+    for i in range(6):
+        hits.add((i * 10, 0, 10, 10), "k", i)
+    assert len(hits._items) == 4
+    assert hits.at(5, 5) == ("k", 0) and hits.at(45, 5) is None
+    out = capsys.readouterr().out
+    assert out.count("HITS FULL") == 1, out
+    assert ui.HITS_CAP == 32
+    ui.HITS_DEBUG = True
+    try:
+        h = ui.Hits(cap=1)
+        h.add((0, 0, 1, 1), "a")
+        try:
+            h.add((0, 0, 1, 1), "b")
+        except OverflowError:
+            pass
+        else:
+            raise AssertionError("a full buffer did not raise under HITS_DEBUG")
+    finally:
+        ui.HITS_DEBUG = False

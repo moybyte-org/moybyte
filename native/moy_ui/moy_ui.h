@@ -26,7 +26,7 @@
 #include "moy_text.h"
 #include "moy_ui_tables.h"
 
-enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3 };
+enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4 };
 
 #define MOY_UI_ABSENT INT32_MIN     // a token the theme does not hold
 #define MOY_UI_LOOKS 5
@@ -209,5 +209,66 @@ void moy_ui_row_content(const int32_t r[4], int fs, int32_t pad, int32_t pad_rig
                         int glyph, int32_t glyph_size, int32_t out[4]);
 void moy_ui_cell_art(const int32_t r[4], int fs, int32_t pad, int32_t caption_h,
                      int32_t out[4]);
+
+// -- interaction over caller-owned state (moy_ui_interact.c) ------------------------------
+//
+// Hits, ScrollRegion and DragTap's rules as pure functions over buffers the
+// CALLER owns (a bytearray inside the Python object, a span of a compiled
+// app's memory); the kernel holds nothing between calls.
+
+// A hit buffer: int32 words, a header then five words per rect (x, y, w, h,
+// id). Its capacity is the caller's; an add past it answers FULL and is
+// counted in the header.
+enum { MOY_UI_HITS_N = 0, MOY_UI_HITS_FULL = 1, MOY_UI_HITS_HDR = 2 };
+#define MOY_UI_HITS_WORDS(cap) (MOY_UI_HITS_HDR + 5 * (cap))
+void moy_ui_hits_clear(int32_t *b);
+int moy_ui_hits_add(int32_t *b, size_t words, int32_t x, int32_t y, int32_t w, int32_t h,
+                    int32_t id);
+// The topmost id at (px, py) -- the last added wins -- or -1.
+int32_t moy_ui_hits_at(const int32_t *b, int32_t px, int32_t py);
+// The pump (#177's rules): hover needs a POINTING cursor and a pointer that
+// is up; the press EDGE arms the rect under it, pressed holds while the
+// pointer stays on the armed rect; release clears both.
+typedef struct {
+    int32_t hover, pressed, armed;
+    int32_t down;
+} moy_ui_pump_t;
+void moy_ui_hits_pump(const int32_t *b, int32_t px, int32_t py, int down, int pointing,
+                      moy_ui_pump_t *p);
+
+// A scroll state's motion; the offset, the content extent and the view are
+// the caller's, passed in. Single-precision, as the boards' MicroPython
+// computes; every dt is injected, never read from a clock.
+#define MOY_UI_FRICTION 0.995f      // per-ms decay: a fling coasts ~1 s
+#define MOY_UI_MIN_FLING 0.15f      // px/ms: a release slower than this is a stop
+#define MOY_UI_STOP_VEL 0.02f       // px/ms: coasting below this comes to rest
+#define MOY_UI_VEL_EMA 0.5f         // the release velocity's EMA weight
+enum { MOY_UI_SCROLL_DRAG = 1, MOY_UI_SCROLL_FLING = 2 };
+typedef struct {
+    float vel, foff;
+    int32_t drag;
+    int32_t flags;
+} moy_ui_scroll_t;
+void moy_ui_scroll_stop(moy_ui_scroll_t *s);
+void moy_ui_scroll_drag_start(moy_ui_scroll_t *s, int32_t p);
+int moy_ui_scroll_drag_move(moy_ui_scroll_t *s, int32_t p, float dt_ms, int32_t *offset,
+                            int32_t content, int32_t extent);
+void moy_ui_scroll_drag_end(moy_ui_scroll_t *s, int32_t offset, int32_t content,
+                            int32_t extent);
+int moy_ui_scroll_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
+                       int32_t extent);
+
+// Press/drag/release over a region: a press in the view arms a tap; travel
+// past `slop` turns it into a scroll; a clean release fires it; a press that
+// caught a fling never taps.
+enum { MOY_UI_TAP_PRESS = 1, MOY_UI_TAP_DRAGGING = 2, MOY_UI_TAP_CAUGHT = 4 };
+typedef struct {
+    int32_t px, py;
+    int32_t flags;
+} moy_ui_dragtap_t;
+int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t view[4],
+                         int horizontal, int32_t px, int32_t py, int click, int down,
+                         int32_t slop, float dt_ms, int32_t *offset, int32_t content,
+                         int32_t *tx, int32_t *ty);
 
 #endif // MOY_UI_H

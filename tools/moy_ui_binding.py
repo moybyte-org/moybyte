@@ -113,6 +113,20 @@ _DRAW_SIGS = (
     ("moy_ui_split", [_R4, _I, c.c_int32, _I, c.c_void_p, _I], _I),
     ("moy_ui_row_content", [_R4, _I, c.c_int32, c.c_int32, _I, _I, c.c_int32, _R4], None),
     ("moy_ui_cell_art", [_R4, _I, c.c_int32, c.c_int32, _R4], None),
+    ("moy_ui_hits_clear", [c.c_void_p], None),
+    ("moy_ui_hits_add", [c.c_void_p, _Z, c.c_int32, c.c_int32, c.c_int32, c.c_int32,
+                         c.c_int32], _I),
+    ("moy_ui_hits_at", [c.c_void_p, c.c_int32, c.c_int32], c.c_int32),
+    ("moy_ui_hits_pump", [c.c_void_p, c.c_int32, c.c_int32, _I, _I, c.c_void_p], None),
+    ("moy_ui_scroll_stop", [c.c_void_p], None),
+    ("moy_ui_scroll_drag_start", [c.c_void_p, c.c_int32], None),
+    ("moy_ui_scroll_drag_move", [c.c_void_p, c.c_int32, c.c_float, c.c_void_p, c.c_int32,
+                                 c.c_int32], _I),
+    ("moy_ui_scroll_drag_end", [c.c_void_p, c.c_int32, c.c_int32, c.c_int32], None),
+    ("moy_ui_scroll_tick", [c.c_void_p, c.c_float, c.c_void_p, c.c_int32, c.c_int32], _I),
+    ("moy_ui_dragtap_frame", [c.c_void_p, c.c_void_p, _R4, _I, c.c_int32, c.c_int32, _I, _I,
+                              c.c_int32, c.c_float, c.c_void_p, c.c_int32, c.c_void_p,
+                              c.c_void_p], _I),
 )
 
 
@@ -460,6 +474,68 @@ def binding():
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
     m.list = list_
+    # -- interaction over caller-owned buffers --------------------------------
+
+    def _buf(b):
+        """A writable caller buffer's address (array or bytearray)."""
+        return (c.c_char * (len(b) * b.itemsize if hasattr(b, "itemsize") else len(b))) \
+            .from_buffer(b)
+
+    def hits_clear(buf):
+        lib.moy_ui_hits_clear(_buf(buf))
+
+    def hits_add(buf, rect, id_):
+        b = _buf(buf)
+        return lib.moy_ui_hits_add(b, len(b) // 4, int(rect[0]), int(rect[1]),
+                                   int(rect[2]), int(rect[3]), int(id_)) == OK
+
+    def hits_at(buf, px, py):
+        return lib.moy_ui_hits_at(_buf(buf), int(px), int(py))
+
+    def hits_pump(buf, px, py, down, pointing, pump):
+        lib.moy_ui_hits_pump(_buf(buf), int(px), int(py), 1 if down else 0,
+                             1 if pointing else 0, _buf(pump))
+
+    def _dt(v):
+        return 0.0 if v is None else float(v)
+
+    def scroll_stop(st):
+        lib.moy_ui_scroll_stop(_buf(st))
+
+    def scroll_drag_start(st, p):
+        lib.moy_ui_scroll_drag_start(_buf(st), int(p))
+
+    def scroll_drag_move(st, p, dt, offset, content, extent):
+        off = c.c_int32(int(offset))
+        if not lib.moy_ui_scroll_drag_move(_buf(st), int(p), _dt(dt), c.byref(off),
+                                           int(content), int(extent)):
+            return -1
+        return off.value
+
+    def scroll_drag_end(st, offset, content, extent):
+        lib.moy_ui_scroll_drag_end(_buf(st), int(offset), int(content), int(extent))
+
+    def scroll_tick(st, dt, offset, content, extent):
+        off = c.c_int32(int(offset))
+        if not lib.moy_ui_scroll_tick(_buf(st), _dt(dt), c.byref(off), int(content),
+                                      int(extent)):
+            return -1
+        return off.value
+
+    def dragtap(tap, st, view, horizontal, px, py, click, down, slop, dt, offset,
+                content, out):
+        o = (c.c_int32 * 3)(int(offset), 0, 0)
+        tapped = lib.moy_ui_dragtap_frame(
+            _buf(tap), _buf(st), r4(view), 1 if horizontal else 0, int(px), int(py),
+            1 if click else 0, 1 if down else 0, int(slop), _dt(dt), c.byref(o, 0),
+            int(content), c.byref(o, 4), c.byref(o, 8))
+        out[0], out[1], out[2] = o[0], o[1], o[2]
+        return bool(tapped)
+
+    for f in (hits_clear, hits_add, hits_at, hits_pump, scroll_stop, scroll_drag_start,
+              scroll_drag_move, scroll_drag_end, scroll_tick, dragtap):
+        setattr(m, f.__name__, f)
+    m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
