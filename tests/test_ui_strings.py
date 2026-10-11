@@ -292,3 +292,25 @@ def test_the_py_sites_only_come_down():
         assert n <= PY_SITES.get(rel, 0), (
             "%s: %d MOY_TEXT_PY sites, the ratchet holds %d" % (rel, n, PY_SITES.get(rel, 0)))
     assert got == PY_SITES, "a PY site moved to the table: lower PY_SITES to %r" % got
+
+
+# The Python-fed words that moved to the table: the sysmenu's rows and the
+# notices the runtime raises. A literal back in its file is a string the
+# language pack cannot reach.
+PY_FED_MOVED = {
+    "runtime/console_notices.py": ["MOYBYTE UPDATED", "UPDATE UNDONE", '"now %s"',
+                                   '"still on %s"', '"CART"', "RESTART CART",
+                                   "DELETE CART", '"SYSTEM"', "CLEAR SEARCH",
+                                   '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"REBOOT"'],
+    "runtime/device_boot.py": ["IT CRASHED LAST TIME"],
+    "runtime/cart_manager.py": ["the store is full"],
+}
+
+
+def test_the_python_fed_words_read_the_table():
+    for rel, words in PY_FED_MOVED.items():
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+            src = f.read()
+        for w in words:
+            q = w if w.startswith('"') else '"%s' % w
+            assert q not in src, "%s holds the literal %s: use ui.s(id)" % (rel, w)

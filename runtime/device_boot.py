@@ -77,6 +77,11 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.crash_guard import take_crash
 
 try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host package lane
+    from runtime import ui as _ui
+
+try:
     import moy_kernel as _kernel
 except ImportError:  # every tier but a console board's
     _kernel = None
@@ -263,6 +268,6 @@ def boot_ok(ws, kernel=None):
     rec = take_crash()
     if rec:
         who = rec.get("id") or rec.get("task") or "?"
-        ws.notice("IT CRASHED LAST TIME", "%s: %s" % (who, rec.get("what") or rec.get("kind")),
+        ws.notice(_ui.s("notice.crashed_last"), "%s: %s" % (who, rec.get("what") or rec.get("kind")),
                   "warn", 10000)
     return rec

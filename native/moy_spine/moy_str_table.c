@@ -4,6 +4,21 @@
 #include "moy_str_table.h"
 
 const char *const moy_str_ids[MOY_STRINGS] = {
+    "menu.cart",
+    "menu.restart_cart",
+    "menu.delete_cart",
+    "menu.system",
+    "menu.clear_search",
+    "menu.search",
+    "menu.settings",
+    "menu.about",
+    "menu.reboot",
+    "notice.updated",
+    "notice.now",
+    "notice.undone",
+    "notice.still_on",
+    "notice.crashed_last",
+    "notice.store_full",
     "chrome.hold_to_exit",
     "chrome.achievement",
     "chrome.no_text",
@@ -57,6 +72,21 @@ const char *const moy_str_ids[MOY_STRINGS] = {
 };
 
 const char *const moy_str_en[MOY_STRINGS] = {
+    "CART",
+    "RESTART CART",
+    "DELETE CART",
+    "SYSTEM",
+    "CLEAR SEARCH",
+    "SEARCH",
+    "SETTINGS",
+    "ABOUT",
+    "REBOOT",
+    "MOYBYTE UPDATED",
+    "now %s",
+    "UPDATE UNDONE",
+    "still on %s",
+    "IT CRASHED LAST TIME",
+    "the store is full",
     "HOLD TO EXIT",
     "ACHIEVEMENT UNLOCKED!",
     "It stopped without saying why.",

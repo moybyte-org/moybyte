@@ -17,6 +17,10 @@ try:
     import chrome_ops as _ch
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
 
 
 class Notices:
@@ -100,9 +104,9 @@ class Notices:
         if not verdict:
             return False
         if verdict[0] == "ok":
-            self.notice("MOYBYTE UPDATED", "now %s" % u.version_label(), "ok")
+            self.notice(_ui.s("notice.updated"), _ui.s("notice.now") % u.version_label(), "ok")
         else:
-            self.notice("UPDATE UNDONE", "still on %s" % u.version_label(), "warn")
+            self.notice(_ui.s("notice.undone"), _ui.s("notice.still_on") % u.version_label(), "warn")
         return True
 
     def _draw_notice(self):
@@ -146,22 +150,22 @@ class SystemMenuUI:
         The cart group is OMITTED entirely (not greyed) when no cart is open."""
         rows = []
         if self.ws.cart is not None:
-            rows.append(("header", "CART"))
-            rows.append(("item", "RESTART CART", self._menu_restart_cart))
-            rows.append(("item", "DELETE CART", self._menu_delete_cart))
+            rows.append(("header", _ui.s("menu.cart")))
+            rows.append(("item", _ui.s("menu.restart_cart"), self._menu_restart_cart))
+            rows.append(("item", _ui.s("menu.delete_cart"), self._menu_delete_cart))
             rows.append(("sep",))
-        rows.append(("header", "SYSTEM"))
+        rows.append(("header", _ui.s("menu.system")))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
         # from the launcher home -- the label flips to CLEAR SEARCH once a query
         # is active/typing, so the same row both opens and dismisses it.
         if self.ws.screen == "launcher":
-            label = ("CLEAR SEARCH"
-                      if (self.ws.search_typing or self.ws.search_query)
-                      else "SEARCH")
+            label = _ui.s("menu.clear_search"
+                          if (self.ws.search_typing or self.ws.search_query)
+                          else "menu.search")
             rows.append(("item", label, self.ws.toggle_search))
-        rows.append(("item", "SETTINGS", self.ws.open_settings))
-        rows.append(("item", "ABOUT", self._menu_about))
-        rows.append(("item", "REBOOT", self._menu_reboot))
+        rows.append(("item", _ui.s("menu.settings"), self.ws.open_settings))
+        rows.append(("item", _ui.s("menu.about"), self._menu_about))
+        rows.append(("item", _ui.s("menu.reboot"), self._menu_reboot))
         return rows
 
     def _menu_restart_cart(self):

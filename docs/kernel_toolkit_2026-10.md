@@ -104,8 +104,11 @@ ABOUT box's formats) and of `native/moy_kernel/moy_recovery.c` and
 `native/moy_kernel/moy_kernel.c`. The menu rows, the panel and strip titles,
 the notice banner and the toast are **Python-fed**: `runtime/console_notices.py`
 and the bar pass them into moy_chrome (`native/moy_play/modmoy_chrome.c`'s
-builders), so they move with the Python strings, later, under a ratchet
-(owner, 2026-10-11). Until then a screen may mix the two sources.
+builders). The sysmenu's rows and the notices the runtime raises read the
+table through `ui.s(id)` (`PY_FED_MOVED` in `tests/test_ui_strings.py` pins
+their literals out); the other Python-fed words (the running-slowly notice's
+constants, the bar's titles, the update and store texts built elsewhere)
+still pass as `PY`, and a screen may mix the two sources.
 
 **Every `moy_text` call carries its source** (§4): `TABLE` (a string id), `PY`
 (text a runtime passed in), `DATA` (a number or a user's text, formatted into
