@@ -107,6 +107,15 @@ Deliberately NOT covered
     the Phase 0 list, and the update screen's content is a live network state
     machine.
 
+The draw budgets
+----------------
+Beside each hash, `tests/shell_goldens/counts.json` pins the settled frame's
+(fills, texts) through the system canvas's native gates (`gate_counts`, real
+on the host since sprint 6). Pixels can hold while the work to draw them
+grows; a budget that moves fails by name, and is re-pinned by the same
+command as the hashes. Only the system canvas counts: a window's own canvas on
+the desk is not in the number.
+
 What moves these goldens (so a red one is diagnosable)
 -----------------------------------------------------
 Three things, in descending order of likelihood: a shell DRAW change; a
@@ -146,6 +155,11 @@ from ws_helpers import open_cart
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
 GOLDEN_FILE = GOLDEN_DIR / "hashes.json"
+# The draw budgets: each settled surface's (fills, texts) through the system
+# canvas's native gates (`gate_counts`), pinned per config beside the hashes
+# (docs/theming_2026-09.md §9, phase 2a). Pixels can hold while the work to
+# draw them grows; this is the net for that, re-pinned with the hashes.
+COUNTS_FILE = GOLDEN_DIR / "counts.json"
 
 UPDATE_ENV = "MOYBYTE_UPDATE_GOLDENS"
 REBASELINE_CMD = (
@@ -320,15 +334,23 @@ def _quiesce(ws):
     ws.bar_layer._clock_text = lambda: _CLOCK
 
 
+_DRAWN = {}             # (config, surface) -> (fills, texts) of the settled frame
+
+
 def _render(ws, surface, config_name):
-    """Draw until two consecutive frames are byte-identical; hash that frame."""
+    """Draw until two consecutive frames are byte-identical; hash that frame.
+    The settled frame's fills and texts go to `_DRAWN`."""
     prev = None
+    cv = ws.sys_canvas
     for _ in range(_MAX_FRAMES):
         _quiesce(ws)
         ws._dirty = True                 # defeat the #44 redraw gate
+        cv.gate_counts_reset()
         ws.frame(_DT)
-        cur = bytes(ws.sys_canvas._buf)
+        cur = bytes(cv._buf)
         if cur == prev:
+            fills, texts = cv.gate_counts()[:2]
+            _DRAWN[(config_name, surface)] = (fills, texts)
             return hashlib.sha256(cur).hexdigest()
         prev = cur
     raise AssertionError(
@@ -517,6 +539,15 @@ def _write_goldens_on_teardown(request):
         stored = {k: v for k, v in stored.items() if k in CONFIGS}
     GOLDEN_FILE.write_text(
         json.dumps(stored, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    counts = json.loads(COUNTS_FILE.read_text(encoding="utf-8")) \
+        if COUNTS_FILE.exists() else {}
+    for config in _CAPTURED:
+        counts[config] = {s: list(_DRAWN[(config, s)]) for s in _CAPTURED[config]}
+    counts = {k: v for k, v in counts.items() if k in stored}
+    COUNTS_FILE.write_text("{\n%s\n}\n" % ",\n".join(
+        '  "%s": {\n%s\n  }' % (c, ",\n".join(
+            '    "%s": [%d, %d]' % (k, v[0], v[1]) for k, v in sorted(counts[c].items())))
+        for c in sorted(counts)), encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -602,6 +633,19 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
                      "moved and why, re-baseline deliberately:")
         lines.append("    " + REBASELINE_CMD)
         raise AssertionError("\n".join(lines))
+
+    pinned = json.loads(COUNTS_FILE.read_text(encoding="utf-8")).get(config_name, {})
+    drawn = {s: list(_DRAWN[(config_name, s)]) for s in got}
+    off = ["    %-24s pinned %s, drew %s (%s)"
+           % (s, pinned.get(s), drawn[s],
+              "DEARER" if pinned.get(s) is None or any(
+                  d > p for d, p in zip(drawn[s], pinned[s])) else "cheaper")
+           for s in sorted(drawn) if drawn[s] != pinned.get(s)]
+    assert not off, (
+        "DRAW BUDGET MOVED -- config %r, (fills, texts) per settled frame:\n%s\n"
+        "  Same pixels, different work. A cheaper draw is re-pinned; a dearer "
+        "one needs a reason first. Re-pin with:\n    %s"
+        % (config_name, "\n".join(off), REBASELINE_CMD))
 
 
 def test_goldens_file_covers_exactly_the_matrix(request):

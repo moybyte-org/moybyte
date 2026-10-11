@@ -648,11 +648,13 @@ become roles in phase 3, with the shade roles, so the token row grows once;
 the eight inside one are deleted by 2b. `look_gen` moves to phase 6 (§6).
 What stays is the two nets the restyling phases are gated by:
   1. **The chrome-literal ratchet.** Per `runtime/` module, the count of
-     `NAMES["..."]` colour literals and `light_chrome()` branches, pinned; a
-     module's count may fall, never rise.
-  2. **`gate_counts` budgets.** Every golden surface's fills and texts per full
-     draw, pinned per config beside the hashes; a surface may get cheaper,
-     never dearer, without a named re-pin.
+     `NAMES["..."]` colour literals and `light_chrome()` / `is_light()`
+     branches, pinned (`tests/test_chrome_literals.py`); a module's count may
+     fall, never rise.
+  2. **`gate_counts` budgets.** Every golden surface's fills and texts in its
+     settled frame, pinned per config beside the hashes
+     (`tests/shell_goldens/counts.json`); a moved budget fails by name, and a
+     dearer one needs a reason before it is re-pinned.
 
 **Phase 2b — the T-Deck row** (one step; one named re-baseline). First,
 `docs/surface_model_v1.md` §5.1 ("executed path provably unchanged") is
