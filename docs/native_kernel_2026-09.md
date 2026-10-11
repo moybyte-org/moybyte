@@ -397,7 +397,7 @@ console needs while no Python app runs is OS.
 | `runtime/text_modes.py` | app | — | the editor mode table |
 | `runtime/tick_model.py` | cart path | 4 | the scheduler that paces a cart's logic and draw |
 | `runtime/ticks.py` | app | — | the Python side's clock shim, a support leaf; the native modules have their own clock; the Zero takes it |
-| `runtime/ui.py` | toolkit | 6 | the immediate-mode toolkit core; `docs/theming_2026-09.md` §8 lists what is built ahead of it |
+| `runtime/ui.py` | toolkit | 6 | the toolkit's face: since sprint 6 the bodies, the style, the text path, the glyphs and the pump are `native/moy_ui`'s C, and a compiled app draws the same widgets through the `ui` rows (`docs/kernel_toolkit_2026-10.md`); `docs/theming_2026-09.md` §8 lists what is built ahead of it |
 | `runtime/update_ui.py` | frame tail | open | the firmware-update flow (SD, online, C6) with its per-frame install pump; Settings opens it. Question: is it an OS screen that crosses with `device/moy_ota.py` in 3 (or with the toolkit in 6), because a console that cannot start its VM must still update itself, or a Settings screen that stays Python above a native updater? |
 | `runtime/wallpaper.py` | roles | 5 | the backdrop renderer behind the wallpaper role; a wallpaper cart runs under the spine's crash guard |
 | `runtime/wasm_binding.py` | host-only | — | the host's ctypes binding of libmoy's wasm import table |

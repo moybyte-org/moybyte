@@ -242,8 +242,8 @@ Workstation's registered servers. `runtime/app_context.py` keeps `ROLES`,
 cart's binding of a grant; the grant policy goes to C (§2.2).
 
 **What the binding keeps, because the Python side is Python:** `theme.colors()`
-as a dict (the shell's draw sites read `ws.theme_colors`, and the toolkit takes
-a dict until sprint 6); `surface.canvas()` as the canvas object; storage verbs
+as a dict (the shell's draw sites read `ws.theme_colors`, and the toolkit's
+face takes a dict, which it packs into a token row for `native/moy_ui`); `surface.canvas()` as the canvas object; storage verbs
 answering `(value, err)` with `err` `None`, `NO_STORE` or the text, which
 `runtime/app_shell.py`'s CAN'T SAVE HERE versus CAN'T SAVE <why> reads; no
 `property`, live values through methods; a call counter per verb.
@@ -310,10 +310,12 @@ A compiled app that imports a shell row keeps the VM, and `why` names the
 import. A Lua or Python app is unaffected: neither runs with no VM.
 
 **Cart-shaped** (§12 answer 8): a compiled app runs as a compiled cart does,
-fullscreen, its loop the cart's. A compiled app as a registered, windowed
-Layer, with a window's surface, size and focus events, its lifecycle as
-exports and its input as an event queue, is sprint 6's, beside the toolkit's C
-primitives.
+fullscreen, its loop the cart's; on the P4 desk it keeps the player window, a
+fixed canvas the WM scales, and draws the toolkit's widgets through the `ui`
+rows (`docs/kernel_toolkit_2026-10.md` §3.5). A reflowing (resize-aware)
+compiled app, a registered Layer with a window's surface, size and focus
+events, its lifecycle as exports and its input as an event queue, is
+deferred (owner, 2026-10-11).
 
 ### 4.2 What moy-spec has to change
 
@@ -627,9 +629,10 @@ against that bug before it goes green.
 6. Not a decision: the clipboard is a C role, so it survives a stop as kernel
    state does; its buffer is bounded at 4 KiB of text in PSRAM.
 7. **`persist` leaves the app ABI**; only the shell's own calls use it.
-8. **A compiled app is cart-shaped in sprint 5**; a windowed compiled app (a
-   window's surface, size and focus events) is sprint 6's, alongside the
-   toolkit's C primitives.
+8. **A compiled app is cart-shaped**: a fixed canvas, in its player window on
+   the desk. A reflowing (resize-aware) compiled app, with a window's
+   surface, size and focus events, is deferred (owner, 2026-10-11); sprint 6
+   gave the cart-shaped app the toolkit's rows instead.
 9. **Grants are keyed by the cart's `id`** (#162, SPEC.md §3.1), not the
    title slug, so a renamed cart keeps its prefs and strikes.
 

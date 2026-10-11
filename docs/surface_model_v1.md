@@ -845,7 +845,7 @@ because the `_dirty` writes are untouched and the frame gate folds them into
 one kernel call per painted frame. L8's two directions read the kernel's gens
 and counters on every tier.
 
-**Until sprint 7**, `runtime/console.py`'s frame gate and `wm_windowed`'s
-content freeze (§14.1) stay Python over the kernel's table; the window
-managers' sprint re-expresses the predicate in C, which is the row §7 reserved
-for it.
+`runtime/console.py`'s frame gate and `wm_windowed`'s content freeze (§14.1)
+are Python over the kernel's table: the window managers stay Python (sprint 7
+does not run, `docs/kernel_toolkit_2026-10.md`), so the predicate in C, the
+row §7 reserved for it, waits for whatever moves the window managers.
