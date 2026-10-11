@@ -34,7 +34,7 @@ grants a subset to a `type: "app"` cart by its manifest permissions.
 | role | verbs (live in the code) | shipped consumers | user-app grant |
 |---|---|---|---|
 | `damage` | `all`, `again` | Calc, Files, Paint, Appearance, Storybook, Get Carts | never |
-| `surface` | `canvas`, `font_scale`, `chrome_scale`, `windowed`, `pointer`, `glyph` | the same six | never; a cart gets `screen()` and `bar_h()` ungated |
+| `surface` | `canvas`, `font_scale`, `chrome_scale`, `windowed`, `pointer` | the same five | never; a cart gets `screen()` and `bar_h()` ungated |
 | `theme` | `colors`, `light`, `name`, `variant`, `skin`, `set`, `set_variant`, `set_skin` | the same six | reads ungated (`theme()`); `appearance` grants `set_theme`, `themes` |
 | `files` | the user-files store: list, count, load, save, delete, duplicate, rename, new_name, the trash, history and its ops, the image, cover and text codecs, `sig`, `stamp`, `provenance`; `readable`, `ready`, `batch` | Files, `ArtworkService` | `files` / `files:<kind>`, one kind (`ScopedFiles`), with `open_editor` |
 | `carts` | `all`, `can_journal`, `slug`, `hydrate`, `apply`, `load_deck`, `save_deck`, `save_code`, `images`, `save_image`, `encode_image`; `batch` | Storybook, `ArtworkService` | never |
@@ -58,8 +58,8 @@ cycling).
 **What is object-shaped** (the plan's §2.1): `surface.canvas` and `pointer`
 (five call sites: `runtime/app_shell.py`, `runtime/artwork.py`,
 `runtime/files_app.py`, two in `runtime/getcarts_app.py`) return objects;
-`surface.glyph` is passed as a callable (`glyph_draw=`) into every toolkit chip
-in `runtime/app_shell.py`, `runtime/artwork.py` and `runtime/appearance_app.py`;
+the glyphs those apps' chips carry are the toolkit's own (`ui.glyph`, sprint
+6's step 4), not a role row;
 `theme.colors` returns a dict; `files.batch`, `carts.batch` and
 `install.session` take a callback; `nav.play` takes the calling Layer;
 `carts.all`, `wallpaper.carts`, `cart_by_id`, `install.find` and
@@ -95,8 +95,7 @@ and `ROLES` are each held to it by a test (`tests/test_roles.py`).
   wallpaper read is shell-served, and none of them is per-frame.
 - **Python-only**: a row with no wasm type, for a verb whose only consumer is
   Python code on paths and objects: `install.net` and `install.keep`, which
-  Get Carts' engine (`runtime/cart_index.py`, an app's) drives, and
-  `surface.glyph`, the toolkit's icon callable until sprint 6. `install` is
+  Get Carts' engine (`runtime/cart_index.py`, an app's) drives. `install` is
   never granted to a cart, so the role is Python-only in all but its lease and
   engine rows.
 
@@ -117,8 +116,8 @@ no VM.
 shim, or a cached object checked by one integer: `theme.colors()` returns the
 dict built at the last token generation and compares only that generation;
 `surface.canvas()` returns the canvas object registered for the grant's glass
-row. The shell-served verbs a frame calls — `glyph` and `wallpaper.preview` —
-are Python callables bound in the binding, as today.
+row. The shell-served verb a frame calls, `wallpaper.preview`, is a Python
+callable bound in the binding.
 
 ### 2.2 How an app declares what it imports
 
@@ -181,7 +180,6 @@ only the shell's own calls (boot restore, cycling) reach the look's
 |---|---|---|---|
 | `damage` | `all()`, `again()` | C | two kernel flags, ALL and AGAIN, folded into `ws._dirty` where the frame gate folds the kernel epoch (`_needs_redraw` takes both); the gate drops an ALL raised by its own draw, as it cleared `ws._dirty`, so a draw's `all` is lost and its `again` is the next frame |
 | `surface` | `canvas() -> handle`, `size(&w,&h)`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `pointer(out[5])` | C | the grant's **surface row**, written by the shell (§2.5); the pointer is the kernel's input state in the app's coordinates; `bar_h` joins the role so the ungated cart global and the shipped apps read one value |
-| `surface` | `glyph` | Python-only | the toolkit's icon callable, until sprint 6 |
 | `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)`, `skin(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
 | `theme` | `set(name, variant)`, `set_variant(v)`, `set_skin(name)` | shell | the look coordinates caches, the skin and the wallpaper |
 | `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (`moy_ufiles.h`, §12 answer 4), reached through the verb table the console binds with the store; history ops cross as JSON bytes. A **session** is readiness only (§2.6). A grant made with a files kind reaches that kind alone |
@@ -512,7 +510,7 @@ against that bug before it goes green.
 - Cart and wallpaper reads are shell-served, not C over a resident catalogue:
   none is per-frame, and building one is store work no role needs.
 - Python callers reach shell verbs directly; only a compiled app uses ROLE.
-- `glyph`, `install.net` and `install.keep` are Python-only rows.
+- `install.net` and `install.keep` are Python-only rows.
 - No surface but the launcher comes back after a stop (§5); the stop's
   refusal for any other route is "place".
 - Step 4 (2026-10-10): the grant is a GRANT row (kind 12) of native/moy_app's
@@ -588,7 +586,7 @@ against that bug before it goes green.
   runs; a raise answers IO. The Python half is `RoleDoor`
   (`runtime/shell_servers.py`), registered by `serve_all` with `moy_loop.role`;
   it decodes the fields per row (`DOOR_ARGS`) and names a cart by its folder.
-  Rows whose shape is an object (`surface.canvas`, `theme.colors`, `glyph`,
+  Rows whose shape is an object (`surface.canvas`, `theme.colors`,
   `preview`) or a codec over pixels answer BAD at the door.
 
 - Step 9 (2026-10-10): the adapter's natives are the role table's rows with a

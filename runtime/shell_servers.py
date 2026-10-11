@@ -1,5 +1,4 @@
 # Map (grep -n a name to jump there):
-#   SurfaceServer    surface.glyph, the toolkit's icon callable
 #   ThemeServer      theme.set*, the verbs that change the look
 #   _Store           the (value, err) storage wrappers the storage servers share
 #   _Session         the readiness pair and the session of the cart store
@@ -51,21 +50,7 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.app_context import NO_STORE
 
 
-# -- surface and theme ---------------------------------------------------------
-
-class SurfaceServer:
-    """`surface.glyph`, the role's Python-only row: the toolkit's icon
-    callable. Every other surface verb is the grant's C surface row, which the
-    console writes (`Workstation._surface_write`)."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def glyph(self, g, kind, rect, c, cv=None):
-        """Draw a centred `chrome._GLYPHS` icon. Pass `ctx.surface.glyph` as
-        `glyph_draw=` to `ui.chip` -- the icon vocabulary bridge."""
-        self.__ws._glyph(kind, rect, c, cv)
-
+# -- theme ---------------------------------------------------------------------
 
 class ThemeServer:
     """`theme.set`, `set_variant` and `set_skin`: the look coordinates its
@@ -623,7 +608,7 @@ def serve_all(ws):
     the ROLE door a compiled app reaches them through."""
     app = ws.app_abi
     servers = {
-        "surface": SurfaceServer(ws), "theme": ThemeServer(ws),
+        "theme": ThemeServer(ws),
         "carts": CartsServer(ws), "nav": NavServer(ws),
         "notify": NotifyServer(ws), "wallpaper": WallpaperServer(ws),
         "install": InstallServer(ws),

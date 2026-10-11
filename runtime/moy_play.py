@@ -966,7 +966,6 @@ _CSIGS = (
     ("moy_chrome_strip_title", [_CP, _CS, _CI, _CI, _CI], None),
     ("moy_chrome_menu", [_CP, _CP, _CP, _CI, _CI, _CI, _CI, _CI, _CI, _CI, _CI], None),
     ("moy_chrome_about", [_CP, _CI, _CI, _CI, _CS], None),
-    ("moy_chrome_glyph_put", [_CS, ctypes.POINTER(_U16)], _CI),
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
     ("moy_chrome_toast_arm", [_CS, _CS, _U32], None),
@@ -1104,11 +1103,6 @@ def chrome_menu(rows, sel, x, y, w, h, fs, cs):
 
 def chrome_about(cw, ch, fs, ver):
     return _chrome("moy_chrome_about", int(cw), int(ch), int(fs), _b(ver))
-
-
-def chrome_glyph(kind, rows):
-    arr = (_U16 * 12)(*[int(r) & 0xFFF for r in rows])
-    return _clib().moy_chrome_glyph_put(_b(kind), arr) == 0
 
 
 def chrome_notice(title, sub, ok, until_ms):

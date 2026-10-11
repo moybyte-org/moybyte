@@ -34,6 +34,38 @@ int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale) {
     return (int)n * MOY_TEXT_CELL * scale;
 }
 
+void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col) {
+    int stride = t->dw;
+    if (stride <= 0 || t->px == NULL) {
+        return;
+    }
+    x -= t->cam_x;
+    y -= t->cam_y;
+    int x0 = t->cx0 > x ? t->cx0 : x;
+    int y0 = t->cy0 > y ? t->cy0 : y;
+    int x1 = x + w < t->cx1 ? x + w : t->cx1;
+    int y1 = y + h < t->cy1 ? y + h : t->cy1;
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        y0 = 0;
+    }
+    if (x1 > stride) {
+        x1 = stride;
+    }
+    int rows = (int)(t->cap / (size_t)stride);
+    if (y1 > rows) {
+        y1 = rows;
+    }
+    if (x1 <= x0 || y1 <= y0) {
+        return;
+    }
+    for (int row = y0; row < y1; row++) {
+        mg_fill_run(t->px + (size_t)row * (size_t)stride + (size_t)x0, (size_t)(x1 - x0), col);
+    }
+}
+
 int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw) {

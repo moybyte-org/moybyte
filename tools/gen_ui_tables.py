@@ -127,6 +127,8 @@ def generate(style, strings):
     h.append("#define MOY_UI_SPECS %d" % len(t.specs))
     h.append("#define MOY_UI_STRINGS %d" % len(ids))
     h.append("#define MOY_UI_HITS_CAP %d" % style["hits_capacity"])
+    h.append("#define MOY_UI_GLYPHS %d" % len(style["glyphs"]))
+    h.append("#define MOY_UI_GLYPH_SIZE %d" % style["glyph_size"])
     h.append("")
     h.append("// The states, strongest first (widget_state's precedence).")
     h.append("enum {")
@@ -153,7 +155,8 @@ def generate(style, strings):
     h.append("typedef struct { int8_t n; int8_t t[3]; } moy_ui_spec_t;")
     h.append("extern const int moy_ui_n_tokens, moy_ui_n_roles, moy_ui_n_states, "
              "moy_ui_n_kinds,")
-    h.append("    moy_ui_n_color_kinds, moy_ui_n_skins, moy_ui_n_strings;")
+    h.append("    moy_ui_n_color_kinds, moy_ui_n_skins, moy_ui_n_strings, "
+             "moy_ui_n_glyphs;")
     h.append("extern const char *const moy_ui_token_names[MOY_UI_TOKENS];")
     h.append("extern const char *const moy_ui_role_names[MOY_UI_ROLES];")
     h.append("extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];")
@@ -173,6 +176,9 @@ def generate(style, strings):
     h.append("extern const int16_t moy_ui_metric_vals[MOY_UI_SKINS][MOY_UI_KINDS]"
              "[MOY_UI_SLOTS];")
     h.append("extern const char *const moy_ui_metric_slots[MOY_UI_KINDS];")
+    h.append("// The glyph vocabulary: each glyph's rows, bit (size - 1 - col) the ink.")
+    h.append("extern const char *const moy_ui_glyph_names[MOY_UI_GLYPHS];")
+    h.append("extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];")
     h.append("extern const char *const moy_ui_string_ids[MOY_UI_STRINGS];")
     h.append("extern const char *const moy_ui_strings_en[MOY_UI_STRINGS];")
     h.append("\n#endif // MOY_UI_TABLES_H")
@@ -187,7 +193,7 @@ def generate(style, strings):
     c.append('#include "moy_ui_tables.h"\n')
     c.append("// The counts, for a binding that reads the tables by symbol.")
     for k in ("tokens", "roles", "states", "kinds", "color_kinds", "skins",
-              "strings"):
+              "strings", "glyphs"):
         c.append("const int moy_ui_n_%s = MOY_UI_%s;" % (k, k.upper()))
     c.append("")
 
@@ -243,6 +249,18 @@ def generate(style, strings):
     c.append("};\n")
     names("const char *const moy_ui_metric_slots[MOY_UI_KINDS]",
           [" ".join(style["metrics"].get(k, {})) for k in t.kinds])
+    gs = style["glyph_size"]
+    if gs > 16:
+        raise SystemExit("a glyph row is a uint16: glyph_size %d" % gs)
+    names("const char *const moy_ui_glyph_names[MOY_UI_GLYPHS]", list(style["glyphs"]))
+    c.append("const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE] = {")
+    for k, rows in style["glyphs"].items():
+        if len(rows) != gs or any(len(r) != gs or set(r) - set("#.") for r in rows):
+            raise SystemExit("glyph %s: %d rows of %d '#'/'.'" % (k, gs, gs))
+        vals = [sum(1 << (gs - 1 - i) for i, ch in enumerate(r) if ch == "#")
+                for r in rows]
+        c.append("    {%s},  // %s" % (", ".join("0x%03X" % v for v in vals), k))
+    c.append("};\n")
     names("const char *const moy_ui_string_ids[MOY_UI_STRINGS]", ids)
     for sid, text in strings.items():
         if not set(CONVERSION.findall(text.replace("%%", ""))) <= {

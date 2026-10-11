@@ -58,15 +58,12 @@ except ImportError:  # pragma: no cover - host fallback
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from editors import PaintEditor, KeyEdge, _pe_line
 
-# The shared pre-literate glyph vocabulary (#89-#93 icon pass): the tool row draws a
-# 12x12 chrome glyph per button instead of a one-char label. Imported for the
-# membership check that keeps the letter as a fallback if a kind is ever missing.
 # `default_icon_pixels` is the icon editor's per-slot RESET (#90) -- chrome.py owns
 # the baked default art, PaintEditor.reset_tile stays sheet-agnostic.
 try:
-    from chrome import _GLYPHS, default_icon_pixels
+    from chrome import default_icon_pixels
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _GLYPHS, default_icon_pixels
+    from runtime.chrome import default_icon_pixels
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
@@ -120,7 +117,7 @@ _PAINT_FILES = (210, 178, 92, 20)
 # the two freed slots just widen the remaining mode buttons (spacing).
 # The drawing tools are direct mode buttons (touch-first, no chords): a tap selects
 # that tool, and a grid drag then draws it with a live preview. Single-char labels
-# are the fallback if a glyph is ever missing; the glyphs (chrome.py _GLYPHS) are
+# are the fallback if a glyph is ever missing; the glyphs (`ui.glyph`) are
 # the pre-literate primary cue. Order within each tuple is the hit-test/draw order.
 _TOOL_ROW1 = ("pen", "fill", "rect", "line", "oval", "select")
 _TOOL_ROW2 = ("copy", "paste", "erase", "mirror", "fliph", "flipv", "rot",
@@ -132,9 +129,9 @@ _TOOL_LABEL = {
     "mirror": "|", "fliph": "H", "flipv": "M", "rot": "T", "sleft": "<",
     "sright": ">", "sup": "^", "sdown": "v", "clear": "X",
 }
-# The pre-literate glyph for each tool (#89-#93 icon pass): a 12x12 chrome glyph
-# (runtime/chrome.py _GLYPHS) drawn centered instead of the single-char label, so
-# the row reads as pictures. _blit_glyph draws NOTHING for an unknown kind, so the
+# The pre-literate glyph for each tool (#89-#93 icon pass): a 12x12 glyph
+# (`ui.glyph`) drawn centered instead of the single-char label, so the row
+# reads as pictures. An unknown kind draws NOTHING (`ui.glyph_id` is -1), so the
 # _TOOL_LABEL letter above stays the guaranteed fallback (see _draw_tools).
 _TOOL_GLYPH = {
     "pen": "edit", "fill": "fill",
@@ -624,7 +621,7 @@ class PaintLayer:
             cv.rect(x, y, w, h, fill)
             cv.rectb(x, y, w, h, NAMES["light_grey"])
             kind = _TOOL_GLYPH.get(tid)
-            if kind is not None and kind in _GLYPHS:
+            if _ui.glyph_id(kind) >= 0:
                 ws._glyph(kind, (x, y, w, h), ink, cv)
             else:                            # missing glyph -> the letter is the fallback
                 cv.print(_TOOL_LABEL[tid],

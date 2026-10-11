@@ -10,7 +10,6 @@
     {"role": "surface", "verb": "windowed", "server": "c", "grant": "never", "wasm": null},
     {"role": "surface", "verb": "bar_h", "server": "c", "grant": "never", "wasm": null},
     {"role": "surface", "verb": "pointer", "server": "c", "grant": "never", "wasm": null},
-    {"role": "surface", "verb": "glyph", "server": "shell", "grant": "never", "wasm": null},
     {"role": "theme", "verb": "colors", "server": "c", "grant": "appearance", "wasm": null},
     {"role": "theme", "verb": "token", "server": "c", "grant": "appearance", "wasm": "(i)i"},
     {"role": "theme", "verb": "gen", "server": "c", "grant": "appearance", "wasm": "()i"},

@@ -412,7 +412,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 111u
+#define MOY_APP_TABLE_N 110u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.

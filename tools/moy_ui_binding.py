@@ -38,6 +38,8 @@ _SIGS = (
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
     ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
+    ("moy_ui_glyph_id", [_P, _Z], _I),
+    ("moy_ui_row_glyph", [c.c_uint32, _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
 )
 
@@ -73,12 +75,13 @@ def binding():
         fn.argtypes = args
         fn.restype = res
     counts = {}
-    for key in ("TOKENS", "STATES", "KINDS", "COLOR_KINDS", "SKINS"):
+    for key in ("TOKENS", "STATES", "KINDS", "COLOR_KINDS", "SKINS", "GLYPHS"):
         counts[key] = c.c_int.in_dll(lib, "moy_ui_n_" + key.lower()).value
     tokens = _names(lib, "moy_ui_token_names", counts["TOKENS"])
     states = _names(lib, "moy_ui_state_names", counts["STATES"])
     kinds = _names(lib, "moy_ui_kind_names", counts["KINDS"])
     skins = _names(lib, "moy_ui_skin_names", counts["SKINS"])
+    glyphs = _names(lib, "moy_ui_glyph_names", counts["GLYPHS"])
     m = types.ModuleType("moy_ui")
 
     def _b(s):
@@ -135,6 +138,18 @@ def binding():
             out.append(seg.decode("utf-8"))
         return out
 
+    def glyph_id(name):
+        b = _b(name)
+        return lib.moy_ui_glyph_id(b, len(b))
+
+    def glyph(canvas, g, x, y, w, h, ci, scale):
+        if lib.moy_ui_row_glyph(int(canvas), int(g), int(x), int(y), int(w), int(h),
+                                int(ci), int(scale)) == STALE:
+            raise ValueError("moy_ui: stale canvas")
+
+    m.glyph_names = lambda: glyphs
+    m.glyph_id = glyph_id
+    m.glyph = glyph
     m.text_width = text_width
     m.wrap = wrap
     m.tokens = lambda: tokens

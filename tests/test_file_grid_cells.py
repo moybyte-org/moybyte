@@ -239,7 +239,7 @@ def test_the_private_button_copies_are_gone():
     assert "def _button(" not in src, "storybook_app re-grew a private _button"
 
 
-def test_the_disabled_history_chip_dims_through_the_theme_role():
+def test_the_disabled_history_chip_dims_through_the_theme_role(monkeypatch):
     """The affordance is the INK (there is no dimmed sprite), and it now comes
     from the theme's own `ink_dim` role rather than a hardcoded palette index --
     so it stays legible in all 12 family x variant sets."""
@@ -259,16 +259,13 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
                 def colors():
                     return th
 
-            class _Surface:
-                @staticmethod
-                def glyph(kind, rect, color, cv=None):
-                    seen.append(color)
-
+            # The chip draws its glyph through the toolkit's own raster.
+            monkeypatch.setattr(ui, "_glyph_draw",
+                                lambda kind, rect, color, cv: seen.append(color))
             app = ListShellApp()
             # The app reads its shell through AppContext roles now
-            # (runtime/app_context.py), so the stub supplies those two.
+            # (runtime/app_context.py), so the stub supplies the theme.
             app._theme = _Theme()
-            app._surf = _Surface()
             app.layout = _Layout()
             cv = SystemCanvas(320, 240, 1)
             app._button(cv, "undo", (4, 4, 18, 18), glyph="undo", enabled=True)

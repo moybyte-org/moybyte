@@ -148,7 +148,7 @@ class ListShellApp:
         Storybook's, which was the same call with the two arguments it never
         passes left off. They are this one method now."""
         _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
-                 glyph=glyph, glyph_draw=self._surf.glyph, disabled=not enabled)
+                 glyph=glyph, disabled=not enabled)
 
     # -- typed keys ------------------------------------------------------------
 

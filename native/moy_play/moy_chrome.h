@@ -10,8 +10,9 @@
 // through a VM's canvas (runtime/chrome.py's `replay`; the canvas keeps its
 // damage, its sprite-batch order and a web view's recording), or rasterised
 // here into an RGB565 buffer by the same kernels the canvas verbs end in
-// (moy_gfx_kernels.h), for a frame the kernel draws with no VM call. The two
-// agree pixel for pixel (tests/test_moy_chrome.py).
+// (moy_gfx_kernels.h; a glyph by native/moy_ui's one glyph raster, over its
+// vocabulary), for a frame the kernel draws with no VM call. The two agree
+// pixel for pixel (tests/test_moy_chrome.py).
 //
 // THE INKS are the shell's: its theme's roles and its named palette, resolved
 // to indices by the shell and handed over (moy_chrome_set_inks) whenever it
@@ -150,8 +151,6 @@ void moy_chrome_about(moy_chrome_list_t *l, int cw, int ch, int fs, const char *
 
 // -- the raster ------------------------------------------------------------------
 
-// A glyph the raster may draw: twelve 12-bit rows, MSB the leftmost pixel.
-int moy_chrome_glyph_put(const char *kind, const uint16_t rows[12]);
 // Draw `l` into an RGB565 buffer `w` x `h` through `pal` (64 index -> word);
 // `fs` is the canvas's font scale for a GLYPH op that names none. An ICON op
 // draws nothing here (the bar's icons are the shell's sheet).

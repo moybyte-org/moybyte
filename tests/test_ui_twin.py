@@ -47,6 +47,22 @@ def _glyph_draw(kind, rect, color, cv):
     cv.rectb(x, y, w, h, color)
 
 
+def _raster(kind, rect, color, cv):
+    """The real C glyph raster: the twin draws its glyphs through it, as the
+    toolkit does (§7)."""
+    ui.glyph(cv, kind, rect, color)
+
+
+def _gd(m, c):
+    """A case's glyph_draw: none without a glyph; the twin always passes the
+    raster; the toolkit half the time passes none and draws its own."""
+    if not c["glyph"]:
+        return None
+    if m is ui and c["flag"]:
+        return None
+    return _raster
+
+
 LABELS = ("", "A", "OK", "PLAY", "CHANGE", "Config", "DELETE FOREVER",
           "a label much wider than any box it is drawn into",
           "café", "Ünïcödé Läbël",
@@ -90,7 +106,7 @@ def _button(m, cv, th, c):
     m.button(cv, th, c["box"], c["label"], kind=c["bkind"], on=c["on"],
              icon_img=IMG if c["icon"] else None,
              glyph="run" if c["glyph"] else None,
-             glyph_draw=_glyph_draw if c["glyph"] else None,
+             glyph_draw=_gd(m, c),
              disabled=c["disabled"], state=c["state"])
 
 
@@ -98,7 +114,7 @@ def _chip(m, cv, th, c):
     m.chip(cv, th, c["box"], c["label"], on=c["on"], hot=c["hot"],
            fs=c["fs"] if c["flag"] else None,
            glyph="edit" if c["glyph"] else None,
-           glyph_draw=_glyph_draw if c["glyph"] else None,
+           glyph_draw=_gd(m, c),
            disabled=c["disabled"], state=c["state"])
 
 
@@ -108,7 +124,7 @@ def _row(m, cv, th, c):
           hot=c["hot"], disabled=c["disabled"], state=c["state"],
           icon_img=IMG if c["icon"] else None,
           glyph="gear" if c["glyph"] else None,
-          glyph_draw=_glyph_draw if c["glyph"] else None,
+          glyph_draw=_gd(m, c),
           value=c["label2"] if c["flag"] else None, edge=c["n"] != 0,
           pad=c["pad"], text_dy=c["dy"], hits=hits, verb="row", arg=c["int"],
           scale=c["scale"])
@@ -122,7 +138,7 @@ def _cell(m, cv, th, c):
                   band=c["n"] > 2, pad=c["pad"],
                   icon_img=IMG if c["icon"] else None,
                   glyph="map" if c["glyph"] else None,
-                  glyph_draw=_glyph_draw if c["glyph"] else None,
+                  glyph_draw=_gd(m, c),
                   text_dy=c["dy"], edge_last=c["hot"])
 
 
@@ -145,7 +161,7 @@ def _status_row(m, cv, th, c):
 def _game_family(m, cv, th, c):
     m.game_btn(cv, c["box"], c["label"], c["int"] & 63)
     m.game_icon_btn(cv, c["box2"], "run", c["label2"], 11,
-                    glyph_draw=_glyph_draw if c["glyph"] else None)
+                    glyph_draw=_raster if c["glyph"] else None)
     m.mini_btn(cv, c["box"], c["label2"], 9,
                label_rect=c["box2"] if c["flag"] else None)
 
@@ -362,6 +378,13 @@ def _b_fill_uncovered(m, cv, th):
     m.fill_uncovered(cv, (0, 20, 120, 40), (10, 25, 60, 20), 3)
 
 
+def _b_glyph(m, cv, th):
+    if m is twin:
+        twin.blit_glyph(cv, "run", (4, 4, 40, 40), 7)
+    else:
+        m.glyph(cv, "run", (4, 4, 40, 40), 7)
+
+
 # (fills, texts) per call at font scale 2 on the machine theme: what the twin
 # issues, and so what a C primitive must issue.
 OP_BUDGETS = {
@@ -389,6 +412,7 @@ OP_BUDGETS = {
     "scrollbar": (_b_scrollbar, (2, 0)),
     "scroll_cues": (_b_scroll_cues, (0, 2)),
     "fill_uncovered": (_b_fill_uncovered, (4, 0)),
+    "glyph": (_b_glyph, (10, 0)),                 # one fill per span
 }
 
 

@@ -19,10 +19,7 @@ def ws(tmp_path_factory):
         moy_play._clib()
     except RuntimeError:
         pytest.skip("no host Player (a C compiler builds it)")
-    w = build_ws(tmp_path_factory.mktemp("chrome"))
-    from runtime.console_notices import register_glyphs
-    register_glyphs()
-    return w
+    return build_ws(tmp_path_factory.mktemp("chrome"))
 
 
 def _both(ws, piece, *args):

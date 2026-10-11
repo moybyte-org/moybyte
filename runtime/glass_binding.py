@@ -36,7 +36,8 @@ _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
-            "moy_ui.h", "moy_ui.c", "moy_ui_tables.h", "moy_ui_tables.c",
+            "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_tables.h",
+            "moy_ui_tables.c",
             # ...and the text path and the raster under it, as gfx_binding
             # builds them (libmoy at RGB565: the flag is in build() below)
             "moy_text.h", "moy_text.c", "moy_gfx_kernels.h", "moy_gfx_kernels.c",
@@ -112,9 +113,12 @@ _FROM_MEMORY.restype = ctypes.py_object
 _PyBUF_WRITE = 0x200
 
 
-def build(verbose=False):
-    return native_build.build("moy_glass", _SHIM, _SOURCES, _CACHE,
-                              libmoy_dir=(_GLASS, _SPINE, _UI, _GFX, native_build.LIBMOY),
+def build(verbose=False, ui_dir=None, cache=None):
+    """The library's path. `ui_dir` builds it over another copy of
+    native/moy_ui (tests/test_ui_tables.py's edited style), into `cache`."""
+    return native_build.build("moy_glass", _SHIM, _SOURCES, cache or _CACHE,
+                              libmoy_dir=(_GLASS, _SPINE, ui_dir or _UI, _GFX,
+                                          native_build.LIBMOY),
                               cflags=native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"],
                               verbose=verbose)
 

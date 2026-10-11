@@ -53,12 +53,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The shared pre-literate glyph vocabulary (#92 icon pass): the copy/paste/duplicate/
 # reorder pads lead with a 12x12 chrome glyph; the bar UNDO/REDO draw glyph-only.
-# Imported for the membership check that keeps the word label as a fallback
-# (the pads row still checks it; the glyph-button body itself is chrome._gbtn).
+# A kind the vocabulary lacks (`ui.glyph_id` -1) keeps the word label (the glyph-
+# button body itself is chrome._gbtn).
 try:
-    from chrome import _GLYPHS, _gbtn as _chrome_gbtn
+    from chrome import _gbtn as _chrome_gbtn
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _GLYPHS, _gbtn as _chrome_gbtn
+    from runtime.chrome import _gbtn as _chrome_gbtn
 
 try:
     import ui as _ui
@@ -662,7 +662,7 @@ class MusicEditorUI:
                 # (the pads are wide enough); the rest stay plain labels. A missing
                 # glyph kind falls back to the plain labeled button.
                 kind = _MU_PAD_GLYPH.get(lbl)
-                if kind is not None and kind in _GLYPHS:
+                if _ui.glyph_id(kind) >= 0:
                     self.ws._icon_btn(kind, lbl, rect, fill, cv)
                 else:
                     self.ws._btn(lbl, rect, fill, cv)

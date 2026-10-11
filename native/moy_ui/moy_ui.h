@@ -23,6 +23,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moy_text.h"
 #include "moy_ui_tables.h"
 
 enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3 };
@@ -53,5 +54,23 @@ int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]);
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
 // The active skin's metric slots for `kind` (its count in *n, 0: none).
 const int16_t *moy_ui_metrics(int kind, int *n);
+
+// -- glyphs (moy_ui_glyph.c) ----------------------------------------------------
+
+// A glyph's id by name, or -1 (draws nothing: the caller's label stays).
+int moy_ui_glyph_id(const char *name, size_t n);
+// Draw glyph `g` centred in the rect (x, y, w, h), each glyph pixel a
+// `scale` square, into a target. Returns the spans filled (a span is one
+// fill, as the canvas counts them).
+int moy_ui_glyph_draw(const moy_text_target_t *t, int g, int x, int y, int w, int h,
+                      uint16_t col, int scale);
+
+// -- the ROW sink (moy_ui.c) ------------------------------------------------------
+
+// Draw glyph `g` into canvas row `canvas` (a CANVAS handle, checked as any
+// handle is): its camera, clip and size from the row's state, `ci` through
+// the row's palette, the row's fill counter bumped per span. MOY_UI_STALE
+// when the row is gone.
+int moy_ui_row_glyph(uint32_t canvas, int g, int x, int y, int w, int h, int ci, int scale);
 
 #endif // MOY_UI_H

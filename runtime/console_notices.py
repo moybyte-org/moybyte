@@ -6,22 +6,9 @@ and both WMs read.
 """
 
 try:
-    from chrome import (_ticks_ms, _ticks_diff, NAMES, _GLYPHS)
+    from chrome import (_ticks_ms, _ticks_diff, NAMES)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_ticks_ms, _ticks_diff, NAMES, _GLYPHS)
-
-# The glyphs the kernel draws over a run it drives (the toast's trophy and the
-# badges', the banner's gear, the crash bar's menu), handed to its raster once.
-KERNEL_GLYPHS = ("trophy", "gear", "menu", "app", "run", "paint", "map", "code",
-                 "star", "heart", "spark", "smile", "key")
-
-
-def register_glyphs():
-    mp = _ch._moy_play()
-    for k in KERNEL_GLYPHS:
-        rows = _GLYPHS.get(k)
-        if rows is not None:
-            mp.chrome_glyph(k, rows)
+    from runtime.chrome import (_ticks_ms, _ticks_diff, NAMES)
 try:
     from widgets import (Achievements, TOAST_MS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -41,7 +28,6 @@ class Notices:
         the store, the unlock effects (the toast deadline + the beep) are the
         kernel's own. Call after the store + carts_root are injected (host
         build_workstation / device run_desktop)."""
-        register_glyphs()
         self.ach = Achievements(self.prefs.load_achievements(),
                                 on_save=self.prefs.save_achievements,
                                 on_unlock=self._achievement_unlocked)

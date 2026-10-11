@@ -442,8 +442,8 @@ class AppearanceAppLayer:
         cv.rect(ax + 1, ay + 1, ww - 2, strip, th["title"])
         if ww >= 70 * fs:
             cv.print("MOYBYTE", ax + 3 * fs, ay + 2 * fs, th["title_ink"], 1)
-        self._surf.glyph("close", (ax + ww - strip, ay + 1, strip - 1, strip - 1),
-                         th["title_ink"], cv)
+        _ui.glyph(cv, "close", (ax + ww - strip, ay + 1, strip - 1, strip - 1),
+                  th["title_ink"])
         # body: a text line, a selected row, an accent button
         body_y = ay + strip + 2 * fs
         body_h = wh - strip - 3 * fs

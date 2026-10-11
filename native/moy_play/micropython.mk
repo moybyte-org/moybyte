@@ -10,4 +10,5 @@ SRC_USERMOD_LIB_C += $(MOY_PLAY_DIR)/moy_tick.c $(MOY_PLAY_DIR)/moy_rt.c \
     $(MOY_PLAY_DIR)/moy_match.c $(MOY_PLAY_DIR)/moy_match_kernel.c $(MOY_PLAY_DIR)/moy_chrome.c
 CFLAGS_USERMOD += -I$(MOY_PLAY_DIR) -I$(MOY_PLAY_DIR)/../moy_store -I$(MOY_PLAY_DIR)/../moy_spine \
     -I$(MOY_PLAY_DIR)/../moycore -I$(MOY_PLAY_DIR)/../moy_input -I$(MOY_PLAY_DIR)/../moy_kernel \
-    -I$(MOY_PLAY_DIR)/../moy_glass -I$(MOY_PLAY_DIR)/../moy_gfx -I$(MOY_PLAY_DIR)/../moy_gfx/libmoy
+    -I$(MOY_PLAY_DIR)/../moy_glass -I$(MOY_PLAY_DIR)/../moy_gfx -I$(MOY_PLAY_DIR)/../moy_gfx/libmoy \
+    -I$(MOY_PLAY_DIR)/../moy_ui

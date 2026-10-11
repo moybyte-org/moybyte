@@ -1419,7 +1419,6 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"surface.windowed", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_WINDOWED},
     {"surface.bar_h", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_BAR_H},
     {"surface.pointer", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_POINTER},
-    {"surface.glyph", MOY_ROLE_SURFACE, MOY_APP_SHELL},
     {"theme.colors", MOY_ROLE_THEME, MOY_ROW_THEME_COLORS},
     {"theme.token", MOY_ROLE_THEME, MOY_ROW_THEME_TOKEN},
     {"theme.gen", MOY_ROLE_THEME, MOY_ROW_THEME_GEN},

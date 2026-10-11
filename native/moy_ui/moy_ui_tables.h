@@ -15,6 +15,8 @@
 #define MOY_UI_SPECS 32
 #define MOY_UI_STRINGS 49
 #define MOY_UI_HITS_CAP 32
+#define MOY_UI_GLYPHS 62
+#define MOY_UI_GLYPH_SIZE 12
 
 // The states, strongest first (widget_state's precedence).
 enum {
@@ -172,7 +174,7 @@ enum {
 
 typedef struct { int8_t n; int8_t t[3]; } moy_ui_spec_t;
 extern const int moy_ui_n_tokens, moy_ui_n_roles, moy_ui_n_states, moy_ui_n_kinds,
-    moy_ui_n_color_kinds, moy_ui_n_skins, moy_ui_n_strings;
+    moy_ui_n_color_kinds, moy_ui_n_skins, moy_ui_n_strings, moy_ui_n_glyphs;
 extern const char *const moy_ui_token_names[MOY_UI_TOKENS];
 extern const char *const moy_ui_role_names[MOY_UI_ROLES];
 extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];
@@ -188,6 +190,9 @@ extern const uint8_t moy_ui_kind_specs[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_STATES
 extern const uint8_t moy_ui_metric_n[MOY_UI_KINDS];
 extern const int16_t moy_ui_metric_vals[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_SLOTS];
 extern const char *const moy_ui_metric_slots[MOY_UI_KINDS];
+// The glyph vocabulary: each glyph's rows, bit (size - 1 - col) the ink.
+extern const char *const moy_ui_glyph_names[MOY_UI_GLYPHS];
+extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 extern const char *const moy_ui_string_ids[MOY_UI_STRINGS];
 extern const char *const moy_ui_strings_en[MOY_UI_STRINGS];
 

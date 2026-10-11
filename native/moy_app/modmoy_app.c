@@ -711,8 +711,6 @@ static mp_obj_t surface_pointer(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_pointer_obj, surface_pointer);
 
-SERVED(surface, SURFACE, glyph)
-
 static const mp_rom_map_elem_t surface_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_canvas), MP_ROM_PTR(&surface_canvas_obj) },
     { MP_ROM_QSTR(MP_QSTR_size), MP_ROM_PTR(&surface_size_obj) },
@@ -721,7 +719,6 @@ static const mp_rom_map_elem_t surface_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_windowed), MP_ROM_PTR(&surface_windowed_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_h), MP_ROM_PTR(&surface_bar_h_obj) },
     { MP_ROM_QSTR(MP_QSTR_pointer), MP_ROM_PTR(&surface_pointer_obj) },
-    { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&surface_glyph_obj) },
 };
 static MP_DEFINE_CONST_DICT(surface_locals, surface_locals_table);
 

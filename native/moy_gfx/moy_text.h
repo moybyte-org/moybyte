@@ -44,6 +44,11 @@ typedef struct {
     int cx0, cy0, cx1, cy1;
 } moy_text_target_t;
 
+// Fill a rect into a target: camera-offset, clipped to the clip and the
+// buffer, as the canvas's rect and the draw gates fill (the toolkit's
+// primitives draw their fields and glyphs with it).
+void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col);
+
 // Draw `s` (n bytes) at (x, y) in `col` at `scale`. With maxw >= 0 the text
 // fits the box: it truncates to what fits in maxw pixels, at a codepoint
 // boundary, and `align` places it in the box. The drawn width, or -1 when

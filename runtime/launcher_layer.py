@@ -27,9 +27,9 @@ the last surface). Three classes:
 
 Boundary (single source of truth): ws.launcher (the instance) + ws.open() (open the
 selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The Launcher
-CLASS needs the palette + the shared glyph blitter for its tile art -- `NAMES` and
-`_blit_glyph` are INJECTED at construction (the established pattern; `_blit_glyph` is the
-one shared toolkit fn), and the launcher-only tile-type maps `_TYPE_GLYPH`/`_TYPE_COLOR`
+CLASS needs the palette + the shared glyph raster for its tile art -- `NAMES` and
+`ui.glyph` are INJECTED at construction (the established pattern; kept as
+`self._blit_glyph`), and the launcher-only tile-type maps `_TYPE_GLYPH`/`_TYPE_COLOR`
 live here. The rect hit-test is `ui.rect_in`. LauncherHomeLayer takes NAMES injected
 too. No circular import: this is a leaf (the only console
 touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).

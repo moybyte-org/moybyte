@@ -136,7 +136,7 @@ def test_the_shell_rows_are_the_servers_methods():
     that is no row is a verb no app can reach."""
     import inspect
     from runtime import shell_servers as ss
-    servers = {"surface": ss.SurfaceServer, "theme": ss.ThemeServer,
+    servers = {"theme": ss.ThemeServer,
                "carts": ss.CartsServer,
                "nav": ss.NavServer, "notify": ss.NotifyServer,
                "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
@@ -193,7 +193,7 @@ def test_the_doc_table_lists_exactly_the_rows():
 # once per frame by every app: the lower bound that keeps the counter honest.
 
 BUDGETS = {
-    "artwork": {"surface.canvas": 1, "theme.colors": 25, "surface.glyph": 13},
+    "artwork": {"surface.canvas": 1, "theme.colors": 25},
     "appearance": {"surface.canvas": 1, "theme.colors": 9,
                    "wallpaper.preview": 1, "wallpaper.carts": 1},
     "storybook": {"surface.canvas": 1, "theme.colors": 2, "carts.all": 1},

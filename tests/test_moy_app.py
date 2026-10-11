@@ -47,9 +47,6 @@ class _Servers:
     def __init__(self, say, ap=None, app=None):
         self.say, self.ap, self.app = say, ap, app
 
-    def glyph(self, g, kind, rect, c, cv=None):
-        self.say("glyph", g > 0, kind, rect, c, cv)
-
     def set(self, g, name, variant=None):
         self.say("set", name, variant)
 
@@ -161,10 +158,7 @@ def run(sp, ap, say, mi, root):
     say("live", tuple(s.pointer()))
     say("unbind", app.bind_pointer(None), s.pointer())
     srv = _Servers(say)
-    app.serve("surface", srv)
     app.serve("theme", srv)
-    s.glyph("close", (1, 2, 3, 4), 7)
-    s.glyph("play", (0, 0, 8, 8), 9, cv=None)
 
     # -- the theme rows
     t = ap.Theme(app, sg)

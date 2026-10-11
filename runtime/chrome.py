@@ -14,12 +14,12 @@ console draws with, extracted from console.py so the Workstation kernel is alone
 that file.
 
 Everything here is PURE: the MOY64 palette (NAMES/color), the responsive Layout /
-CodeLayout geometry (#39), the pre-literate icon-glyph vocabulary (_GLYPHS /
-_blit_glyph), the themeable top-bar IconSheet defaults (_ICON / _ICON_ART /
+CodeLayout geometry (#39), the glyph-button helper (_gbtn; the 12x12 glyphs
+themselves are native/moy_ui's, drawn by `ui.glyph`), the themeable top-bar IconSheet defaults (_ICON / _ICON_ART /
 _default_icon_sheet), and the small helpers (_in / _clamp_scroll / _cursor_delta /
 _ticks_* / _err_text / _from_ascii). Nothing touches a Workstation -- these are the
 functions/constants shared by console.py AND the surface modules (launcher_layer
-imports Layout; every surface gets NAMES/_blit_glyph injected). console.py imports it
+imports Layout; every surface gets NAMES and `ui.glyph` injected). console.py imports it
 all back and re-exports under the pre-extraction `console.X` names, so every caller +
 test is unchanged.
 
@@ -545,239 +545,8 @@ class CodeLayout(LayoutBase):
 
 
 # --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
-# 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
-# size (boxes are 14-16px), then centered in each button's rect and blitted in
-# the requested palette color via the indexed primitives only -- so they render
-# identically on the host canvas and the frozen device console. Each
-# glyph is a tuple of 12 ints: row r, bit (11 - col) set => pixel on. Constant
-# (no per-frame allocation; freezes into firmware at ~15*12 ints).
-#
-# Hand-authored at this grid, adapted from the Pixelarticons set
-# (https://pixelarticons.com, MIT License (c) Gerrit Halfmann) -- a purpose-built
-# pixel-icon vocabulary; shapes traced down to 12x12 and hand-cleaned for
-# legibility at button size. MIT permits this use; this comment is the notice.
-_GLYPH_SIZE = 12
-_GLYPHS = {
-    "run":    (0x000, 0x180, 0x1C0, 0x1E0, 0x1F0, 0x1F8, 0x1F8, 0x1F0, 0x1E0, 0x1C0, 0x180, 0x000),
-    "save":   (0x000, 0x7FE, 0x402, 0x5FA, 0x402, 0x402, 0x4F2, 0x492, 0x492, 0x492, 0x7FE, 0x000),
-    "close":  (0x000, 0x204, 0x30C, 0x198, 0x0F0, 0x060, 0x060, 0x0F0, 0x198, 0x30C, 0x204, 0x000),
-    "edit":   (0x01E, 0x03E, 0x07C, 0x0F8, 0x0F0, 0x1E0, 0x3C0, 0x780, 0x700, 0x600, 0x400, 0x000),
-    "paint":  (0x006, 0x00C, 0x018, 0x030, 0x060, 0x0E0, 0x1F0, 0x1F0, 0x1F0, 0x0E0, 0x000, 0x000),
-    "home":   (0x000, 0x060, 0x0F0, 0x1F8, 0x3FC, 0x7FE, 0x204, 0x264, 0x264, 0x264, 0x3FC, 0x000),
-    "minus":  (0x000, 0x000, 0x000, 0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x000, 0x000, 0x000, 0x000),
-    "plus":   (0x000, 0x000, 0x060, 0x060, 0x060, 0x7FE, 0x7FE, 0x060, 0x060, 0x060, 0x000, 0x000),
-    "turtle": (0x000, 0x0F8, 0x1FC, 0x3FE, 0x3FE, 0x3FE, 0x3FE, 0x2ED, 0x653, 0x000, 0x000, 0x000),
-    "rabbit": (0x220, 0x220, 0x220, 0x360, 0x1C0, 0x3E0, 0x7F4, 0x7F0, 0x3E0, 0x000, 0x000, 0x000),
-    "star":   (0x000, 0x060, 0x060, 0x0F0, 0xFFC, 0x7F8, 0x3F0, 0x3F0, 0x618, 0x618, 0x000, 0x000),
-    "dot":    (0x000, 0x000, 0x000, 0x0F0, 0x1F8, 0x1F8, 0x1F8, 0x0F0, 0x000, 0x000, 0x000, 0x000),
-    "get":    (0x000, 0x060, 0x060, 0x060, 0x264, 0x1F0, 0x0E0, 0x040, 0x7FE, 0x402, 0x7FE, 0x000),
-    "put":    (0x000, 0x040, 0x0E0, 0x1F0, 0x264, 0x060, 0x060, 0x060, 0x7FE, 0x402, 0x7FE, 0x000),
-    "heart":  (0x000, 0x30C, 0x79E, 0x7FE, 0x7FE, 0x7FE, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x000, 0x000),
-    # "map": a 3x3 tile grid (the tilemap editor's nav/open icon, #32) -- full
-    # h-lines at rows 1/5/9, v-lines at cols 1/5/9, so it reads as a placed grid.
-    "map":    (0x000, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x000, 0x000),
-    # "blocks": two stacked Scratch-style notched bricks (the #29 block-editor icon).
-    "blocks": (0x000, 0x3F8, 0x7FC, 0x7FC, 0x3F8, 0x000, 0x1FC, 0x3FE, 0x3FE, 0x1FC, 0x000, 0x000),
-    # "scene": the placement editor (#85 Stage 2) -- a viewport frame with two
-    # placed actors inside (one low-left, one high-right): things ON a stage.
-    "scene":  (0x000, 0x7FE, 0x402, 0x40E, 0x40E, 0x402, 0x582, 0x582, 0x402, 0x7FE, 0x000, 0x000),
-    # Desktop-shell icons (#28). "code" = angle brackets </>; "gear" = a
-    # settings cog; "note" = a music note (the #16 music slot, greyed until it
-    # lands); "app" = a generic window (default cart icon).
-    "code":   (0x000, 0x048, 0x08C, 0x118, 0x230, 0x230, 0x118, 0x08C, 0x048, 0x000, 0x000, 0x000),
-    "gear":   (0x000, 0x060, 0x276, 0x3FC, 0x1F8, 0x18C, 0x18C, 0x1F8, 0x3FC, 0x276, 0x060, 0x000),
-    "note":   (0x000, 0x07E, 0x042, 0x042, 0x042, 0x042, 0x0C6, 0x1CE, 0x1CE, 0x0C4, 0x000, 0x000),
-    # "music": a beamed pair of eighth notes -- the #50 sound-editor switcher's
-    # fallback glyph (the bar normally blits the 16x16 IconSheet "music" sprite).
-    "music":  (0x000, 0x07E, 0x042, 0x042, 0x042, 0x0C2, 0x1C2, 0x1CE, 0x00E, 0x00C, 0x000, 0x000),
-    "app":    (0x000, 0x7FE, 0x402, 0x7FE, 0x402, 0x402, 0x402, 0x402, 0x402, 0x402, 0x7FE, 0x000),
-    "wifi":   (0x000, 0x000, 0x1F8, 0x204, 0x0F0, 0x108, 0x060, 0x000, 0x060, 0x000, 0x000, 0x000),
-    "batt":   (0x000, 0x000, 0x180, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x000, 0x000, 0x000),
-    # Achievements (#21): "trophy" (the unlocked-badge cue), "lock" (a locked/secret
-    # entry), "smile" (the "Oh! You found me!" Easter-egg character), "key" (the
-    # explorer reward), and "spark" (the celebratory confetti pip).
-    "trophy": (0x000, 0x7FE, 0x7FE, 0x3FC, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x060, 0x1F8, 0x1F8, 0x000),
-    "lock":   (0x000, 0x0F0, 0x108, 0x108, 0x108, 0x7FE, 0x7FE, 0x792, 0x792, 0x7FE, 0x7FE, 0x000),
-    "smile":  (0x0F0, 0x308, 0x404, 0x492, 0x492, 0x404, 0x444, 0x438, 0x404, 0x308, 0x0F0, 0x000),
-    "key":    (0x000, 0x1C0, 0x220, 0x220, 0x1C0, 0x080, 0x080, 0x0E0, 0x080, 0x0E0, 0x000, 0x000),
-    "spark":  (0x000, 0x060, 0x060, 0x060, 0x366, 0x1FC, 0x060, 0x1FC, 0x366, 0x060, 0x060, 0x000),
-    # "menu": the hamburger (≡) -- three full-width bars. The system-menu (#52) toggle;
-    # always a _glyph bitmap (NOT a themeable IconSheet slot) so it can't go blank on a
-    # device whose saved theme predates this icon.
-    "menu":   (0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x000),
-    # "projects": a 2x2 grid of tiles -- the Editor's "back to the project-picker"
-    # affordance (spec shell_ux_v1.md). Not an IconSheet slot, so it renders via the
-    # _glyph fallback (ws._icon falls back to this 12x12 bitmap for kinds not in _ICON).
-    "projects": (0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000, 0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000),
-    # --- editor tool-row glyphs (#89-#93) -----------------------------------
-    # The pre-literate icons for the six editors' new tool buttons -- the paint
-    # transforms (#90), the map tools (#91), the code range ops (#89), the music
-    # copy/reorder pads (#92) and the block undo/redo (#93) -- so those rows read
-    # as pictures, not one-letter labels, on the small tiers a kid can't yet read.
-    # Same authoring provenance as the set above (traced/hand-cleaned in the
-    # Pixelarticons style; MIT (c) Gerrit Halfmann -- see the note over _GLYPHS).
-    # "undo"/"redo": a bent arrow curling back (undo left, redo its mirror).
-    "undo":      (0x000, 0x000, 0x100, 0x300, 0x7C0, 0xFC0, 0x7C8, 0x318, 0x038, 0x0F0, 0x000, 0x000),
-    "redo":      (0x000, 0x000, 0x008, 0x00C, 0x03E, 0x03F, 0x13E, 0x18C, 0x1C0, 0x0F0, 0x000, 0x000),
-    # "copy": two overlapping pages; "duplicate": one page with a + (a distinct
-    # "make another" -- both appear on the music pad, so they must not collide).
-    "copy":      (0x000, 0x0FC, 0x084, 0x3F4, 0x294, 0x294, 0x2FC, 0x210, 0x210, 0x3F0, 0x000, 0x000),
-    "duplicate": (0x000, 0x3F8, 0x208, 0x248, 0x2E8, 0x248, 0x208, 0x208, 0x208, 0x3F8, 0x000, 0x000),
-    # "cut": open scissors; "paste": a clipboard with lines.
-    "cut":       (0x000, 0x606, 0x606, 0x30C, 0x198, 0x0F0, 0x060, 0x0F0, 0x198, 0x39C, 0x39C, 0x000),
-    "paste":     (0x0E0, 0x110, 0x7FC, 0x404, 0x5F4, 0x404, 0x5F4, 0x404, 0x5F4, 0x404, 0x7FC, 0x000),
-    # "select": a dashed selection marquee; "find": a magnifying glass.
-    "select":    (0x000, 0x6DA, 0x402, 0x402, 0x000, 0x402, 0x402, 0x000, 0x402, 0x402, 0x6DA, 0x000),
-    "find":      (0x000, 0x1E0, 0x210, 0x408, 0x408, 0x408, 0x210, 0x1E0, 0x038, 0x01C, 0x008, 0x000),
-    # "indent"/"outdent": stacked text lines nudged right / left by a margin bar;
-    # "linenums": two lines with leading digits (the code gutter toggle).
-    "indent":    (0x000, 0x7F8, 0x000, 0x1FC, 0x000, 0xC00, 0xDE0, 0xDF8, 0xDE0, 0xC00, 0x000, 0x000),
-    "outdent":   (0x000, 0x1FE, 0x000, 0x3F8, 0x000, 0x003, 0x07B, 0x1FB, 0x07B, 0x003, 0x000, 0x000),
-    "linenums":  (0x000, 0x4FC, 0xCFC, 0x400, 0x4FC, 0x000, 0x4FC, 0xCFC, 0x400, 0x4FC, 0x000, 0x000),
-    # "tools": a wrench (the code editor's TLS tool-palette toggle).
-    "tools":     (0x000, 0x01C, 0x02E, 0x024, 0x018, 0x030, 0x060, 0x0C0, 0x180, 0x300, 0x200, 0x000),
-    # "fill": a handled paint pail over a paint splash (the bucket/flood tool; the
-    # map's FLOOD tool reuses it -- one bucket idiom). The handle arc is what keeps
-    # it reading as a pail, not a wine glass, at 12px.
-    "fill":      (0x000, 0x0E0, 0x110, 0x3F0, 0x210, 0x210, 0x210, 0x210, 0x1E0, 0x0C0, 0x1E0, 0x0C0),
-    # "flip_h"/"flip_v": two solid triangles mirrored about the vertical / horizontal
-    # axis; "rotate": a broken circle with an arrowhead (turn 90).
-    "flip_h":    (0x000, 0x404, 0x60C, 0x71C, 0x7BC, 0x7BC, 0x71C, 0x60C, 0x404, 0x000, 0x000, 0x000),
-    "flip_v":    (0x000, 0x3F8, 0x3F8, 0x1F0, 0x0E0, 0x000, 0x0E0, 0x1F0, 0x3F8, 0x3F8, 0x000, 0x000),
-    "rotate":    (0x000, 0x0E4, 0x316, 0x40E, 0x41E, 0x800, 0x800, 0x400, 0x410, 0x318, 0x0E0, 0x000),
-    # "mirror": two arrowheads pointing INTO a solid vertical axis line -- the
-    # paint editor's mirror-draw toggle (#90), a persistent symmetry axis rather
-    # than the one-shot flip_h/flip_v transforms above.
-    "mirror":    (0x000, 0x060, 0x060, 0x462, 0x666, 0x76E, 0x76E, 0x666, 0x462, 0x060, 0x060, 0x000),
-    # "arr_l/r/u/d": solid directional arrows (the paint pixel-shift + music reorder).
-    "arr_l":     (0x000, 0x000, 0x040, 0x0C0, 0x1C0, 0x3F8, 0x1C0, 0x0C0, 0x040, 0x000, 0x000, 0x000),
-    "arr_r":     (0x000, 0x000, 0x020, 0x030, 0x038, 0x1FC, 0x038, 0x030, 0x020, 0x000, 0x000, 0x000),
-    "arr_u":     (0x000, 0x020, 0x070, 0x0F8, 0x1FC, 0x070, 0x070, 0x070, 0x070, 0x000, 0x000, 0x000),
-    "arr_d":     (0x000, 0x000, 0x070, 0x070, 0x070, 0x070, 0x1FC, 0x0F8, 0x070, 0x020, 0x000, 0x000),
-    # "clear": a trash can (empties the sprite); "rect_tool": a hollow rectangle
-    # (the map's box tool); "resize": a diagonal double-arrow (the map WH resize).
-    "clear":     (0x000, 0x1F8, 0x7FE, 0x204, 0x2A4, 0x2A4, 0x2A4, 0x2A4, 0x2A4, 0x3FC, 0x1F8, 0x000),
-    "rect_tool": (0x000, 0x000, 0x7FC, 0x404, 0x404, 0x404, 0x404, 0x404, 0x7FC, 0x000, 0x000, 0x000),
-    "resize":    (0x000, 0x3C0, 0x300, 0x280, 0x040, 0x020, 0x010, 0x014, 0x00C, 0x03C, 0x000, 0x000),
-    # The standalone Paint app's tool vocabulary (artwork.py): "eraser" a tilted
-    # eraser block over its smear; "picker" the eyedropper; "line" a bare diagonal
-    # stroke; "circle" the hollow shape tool; "spray" a can puffing dots; "move"
-    # the four-way pan cross. Same Pixelarticons-style provenance as the set above.
-    "eraser":    (0x000, 0x078, 0x0FC, 0x1FC, 0x3F8, 0x3F0, 0x7E0, 0x7C0, 0x7C0, 0x380, 0x7E0, 0x000),
-    "picker":    (0x01C, 0x03E, 0x03E, 0x07C, 0x0F0, 0x1E0, 0x3C0, 0x380, 0x700, 0x600, 0x400, 0x000),
-    "line":      (0x000, 0x006, 0x00E, 0x01C, 0x038, 0x070, 0x0E0, 0x1C0, 0x380, 0x700, 0x600, 0x000),
-    "circle":    (0x0F0, 0x30C, 0x204, 0x402, 0x402, 0x402, 0x402, 0x402, 0x402, 0x204, 0x30C, 0x0F0),
-    "spray":     (0x314, 0x32A, 0x794, 0x7AA, 0x794, 0x780, 0x780, 0x780, 0x780, 0x780, 0x780, 0x000),
-    "move":      (0x060, 0x0F0, 0x1F8, 0x060, 0x462, 0xE67, 0xE67, 0x462, 0x060, 0x1F8, 0x0F0, 0x060),
-}
-
-
-_GLYPH_RUNS = {}
-
-
-def _glyph_runs(kind, fs):
-    """The flat (dx, dy, width) span list for glyph `kind` at pixel scale `fs`,
-    memoised per (kind, fs).
-
-    The mask walk itself was the cost, not the drawing: on glass (p4_attrib, #58)
-    a _blit_glyph call ran 48us and issued ~14 native rects whose kernel time was
-    0.4ms/267 calls -- i.e. ~1.5us of pixels behind ~35us of Python bit-testing
-    144 cells. The Sprites tab draws 19 glyphs a frame, so that walk alone was
-    13ms of an 52ms tab. _GLYPHS is a module constant (never themed -- the
-    themeable 16x16 bar icons are the separate IconSheet), so the spans can be
-    computed once per scale and kept for the life of the process; ~30 kinds x a
-    handful of scales x ~30 spans is a few KB frozen into firmware-sized terms.
-
-    Flat rather than a list of tuples: MicroPython pays per object, and the draw
-    loop reads three ints by index instead of unpacking a tuple per span."""
-    key = (kind, fs)
-    runs = _GLYPH_RUNS.get(key)
-    if runs is not None:
-        return runs
-    bits = _GLYPHS.get(kind)
-    n = _GLYPH_SIZE
-    runs = []
-    if bits is not None:
-        for r in range(n):
-            row = bits[r]
-            if not row:
-                continue
-            yy = r * fs
-            run = 0                                 # length of the current on-run
-            for col in range(n):                    # walk L->R, coalescing runs
-                if row & (1 << (n - 1 - col)):
-                    run += 1
-                elif run:
-                    runs.append((col - run) * fs)
-                    runs.append(yy)
-                    runs.append(run * fs)
-                    run = 0
-            if run:
-                runs.append((n - run) * fs)
-                runs.append(yy)
-                runs.append(run * fs)
-    _GLYPH_RUNS[key] = runs
-    return runs
-
-
-_GLYPH_PACKS = {}
-
-
-def _glyph_pack(kind, fs):
-    """The (kind, fs) span list as a packed int16 quad array for `fill_rects`
-    (#163): (dx, dy, w, fs, 0) per run, drawn in ONE native call with the color
-    passed as the call-level override -- so one pack serves every theme ink.
-    Cached forever like _GLYPH_RUNS (a few KB across all kinds x scales)."""
-    key = (kind, fs)
-    pack = _GLYPH_PACKS.get(key)
-    if pack is None:
-        runs = _glyph_runs(kind, fs)
-        lst = []
-        for i in range(0, len(runs), 3):
-            lst.append(runs[i])
-            lst.append(runs[i + 1])
-            lst.append(runs[i + 2])
-            lst.append(fs)
-            lst.append(0)
-        pack = array("h", lst)
-        _GLYPH_PACKS[key] = pack
-    return pack
-
-
-def _blit_glyph(cv, kind, rect, c, scale=None):
-    """Draw an icon glyph (no background) centered in `rect`, in color `c`, onto
-    canvas `cv`. The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel
-    bitmap (see _GLYPHS) blitted via the indexed primitives only (rect spans), so
-    it renders identically on host and device. Unknown kinds draw NOTHING, so
-    every caller can keep a text label as the guaranteed fallback. Module-level so
-    both Workstation._glyph and Launcher (which only holds a canvas) share one
-    implementation -- the glyph encoding lives in exactly one loop.
-
-    `scale` (visual identity v1): an explicit pixel scale overriding the canvas
-    font scale -- the Library's cover-art-sized type glyphs. Default None keeps
-    every existing call byte-identical."""
-    x, y, w, h = rect
-    n = _GLYPH_SIZE
-    # Scale the icon mask with the canvas's system font scale (#39) so glyphs grow
-    # alongside text on a larger system canvas. A plain (game) Canvas has font_scale
-    # 1, so this is byte-identical to the original 1x path everywhere else.
-    fs = int(scale) if scale else getattr(cv, "font_scale", 1)
-    if fs < 1:
-        fs = 1
-    runs = _glyph_runs(kind, fs)
-    if not runs:                                    # unknown -> nothing (fallback contract)
-        return
-    span = n * fs
-    ox = x + (w - span) // 2                          # center the (scaled) mask in the rect
-    oy = y + (h - span) // 2
-    fr = getattr(cv, "fill_rects", None)              # probe: minimal canvases
-    if fr is not None:                                # (#163) one native call
-        fr(_glyph_pack(kind, fs), -1, ox, oy, c)
-        return
-    i = 0
-    while i < len(runs):
-        cv.rect(ox + runs[i], oy + runs[i + 1], runs[i + 2], fs, c)
-        i += 3
+# The 12x12 bitmaps are native/moy_ui/style.json's "glyphs", drawn by the one
+# C raster (`ui.glyph`), centred in a button's rect in any palette colour.
 
 
 def _gbtn(ws, names, kind, label, rect, fill, cv):
@@ -786,7 +555,7 @@ def _gbtn(ws, names, kind, label, rect, fill, cv):
     button's label ink) over it. Falls back to the word `label` when the glyph
     kind is missing (or None), so the row is never blank. The ONE body behind
     the map/music/block editor surfaces' `_gbtn` delegates."""
-    if kind is not None and kind in _GLYPHS:
+    if _ui.glyph_id(kind) >= 0:
         ws._btn("", rect, fill, cv)
         ws._glyph(kind, rect, names["black"], cv)
     else:
@@ -822,7 +591,7 @@ def _text_w(cv, s, mult=1):
 # --- the unified top bar's icon theme (Stage 1) -----------------------------
 #
 # The top bar's chrome controls are 16x16 sprites drawn from an EDITABLE IconSheet
-# (so the bar is themeable), not the hardcoded _GLYPHS bitmaps -- which collapses the
+# (so the bar is themeable), not the fixed 12x12 glyphs -- which collapses the
 # ~120 glyph rect-spans/frame the labeled button rows cost into ~12 cached sprite
 # blits (a measured ~15ms/frame device win). `_ICON` is the slot map: a chrome kind ->
 # its sprite id in the 8x4 IconSheet (row-major). The IconSheet is loaded from
@@ -958,7 +727,7 @@ _ICON_ART = {
         ".7...bbb......7.", ".7...bbb......7.", ".7............7.", ".77777777777777.",
         "................", "................", "................", "................",
     ),
-    # "undo"/"redo" (#88): the SAME curl the 12x12 _GLYPHS vocabulary already draws
+    # "undo"/"redo" (#88): the SAME curl the 12x12 glyph vocabulary already draws
     # (undo left, redo its horizontal mirror -- kept pixel-consistent with the
     # code editor's existing tool-palette icon so the two affordances read as one
     # visual language), just re-authored at 16x16 for the themeable IconSheet.

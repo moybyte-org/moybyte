@@ -162,7 +162,7 @@ _MAP_TOOLS = ("stamp", "rect", "flood", "select")
 _MAP_TOOL_LABEL = {"stamp": "PN", "rect": "BX", "flood": "FL", "select": "SE"}
 # The pre-literate glyph the TOOL button shows for the ACTIVE tool (#91 icon pass):
 # a pen/brush for STAMP, a hollow box for RECT, a paint bucket for FLOOD, a dashed
-# marquee for SELECT. _blit_glyph draws nothing for an unknown kind, so
+# marquee for SELECT. `ui.glyph` draws nothing for an unknown kind, so
 # _MAP_TOOL_LABEL stays the fallback.
 _MAP_TOOL_GLYPH = {"stamp": "paint", "rect": "rect_tool", "flood": "fill",
                    "select": "select"}

@@ -427,9 +427,8 @@ class PaintAppLayer:
     TOOLS = ("PENCIL", "BRUSH", "ERASER", "FILL", "PICK",
              "LINE", "BOX", "CIRCLE", "SPRAY", "PAN")
     GLYPHS = ("P", "B", "E", "F", "I", "/", "#", "O", "*", "+")
-    # Icon vocabulary for the tool buttons (chrome._GLYPHS kinds, drawn via
-    # ctx.surface.glyph); the single-letter GLYPHS above stay the guaranteed
-    # fallback.
+    # Icon vocabulary for the tool buttons (glyph kinds, drawn by `ui.glyph`);
+    # the single-letter GLYPHS above stay the guaranteed fallback.
     TOOL_ICONS = ("edit", "paint", "eraser", "fill", "picker",
                   "line", "rect_tool", "circle", "spray", "move")
     # The shell roles this app uses (runtime/app_context.py): the drawings
@@ -532,12 +531,10 @@ class PaintAppLayer:
 
     def _button(self, cv, label, r, on=False, glyph=None):
         # One shared implementation now (ui.chip) -- pixel-identical delegate.
-        # `glyph` draws a chrome._GLYPHS icon instead of the text (the surface
-        # role's `glyph` is
-        # the vocabulary bridge -- the game_icon_btn pattern); unknown kinds draw
-        # nothing, so callers only pass kinds this build ships.
+        # `glyph` draws a glyph instead of the text (`ui.glyph`); unknown kinds
+        # draw nothing, so callers only pass kinds this build ships.
         _ui.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs,
-                 glyph=glyph, glyph_draw=self._surf.glyph)
+                 glyph=glyph)
 
     def _display_spec(self):
         vx, vy, vw, vh = self.layout.view

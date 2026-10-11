@@ -1048,6 +1048,13 @@ class DeviceCanvas:
         for i in range(64):
             pal[i] = self._wire[pm[i]]
 
+    def ui_sink(self):
+        """The CANVAS handle a native/moy_ui primitive draws through, once the
+        pending sprite batch has landed (#63's order rule)."""
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
+        return self._crow.h
+
     def gate_counts(self):
         """(fills, texts, fill_us, text_us) drawn through the native gates since
         the last gate_counts_reset -- the on-glass proof the fast lane is live."""

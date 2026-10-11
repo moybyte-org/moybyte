@@ -15,7 +15,7 @@
 //   light), chrome_strip_right(lay|None, clock, wifi, show_x),
 //   chrome_strip_title(title, zx, zw, dy)
 //   chrome_menu(rows, sel, x, y, w, h, fs, cs), chrome_about(cw, ch, fs, ver)
-//   chrome_glyph(kind, rows), chrome_notice(title, sub, ok, until_ms),
+//   chrome_notice(title, sub, ok, until_ms),
 //   chrome_toast_arm(title, glyph, until_ms)
 
 #include <string.h>
@@ -234,18 +234,6 @@ static mp_obj_t ch_about(size_t n, const mp_obj_t *a) {
     return ops(l);
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_about_obj, 4, 4, ch_about);
-
-static mp_obj_t ch_glyph(mp_obj_t kind, mp_obj_t rows) {
-    size_t n;
-    mp_obj_t *it;
-    mp_obj_get_array(rows, &n, &it);
-    uint16_t r[12] = {0};
-    for (size_t i = 0; i < 12 && i < n; i++) {
-        r[i] = (uint16_t)(mp_obj_get_int(it[i]) & 0xFFF);
-    }
-    return mp_obj_new_bool(moy_chrome_glyph_put(mp_obj_str_get_str(kind), r) == 0);
-}
-MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_glyph_obj, ch_glyph);
 
 static mp_obj_t ch_notice(size_t n, const mp_obj_t *a) {
     (void)n;

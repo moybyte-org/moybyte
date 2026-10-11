@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "moy_ui.h"
+#include "moy_canvas.h"
 
 #if __has_include("esp_heap_caps.h")
 #include "esp_heap_caps.h"
@@ -189,4 +190,36 @@ const int16_t *moy_ui_metrics(int kind, int *n) {
     }
     *n = moy_ui_metric_n[kind];
     return moy_ui_metric_vals[moy_ui_skin()][kind];
+}
+
+// -- the ROW sink ------------------------------------------------------------------
+
+static int row_target(uint32_t canvas, moy_canvas_row_t **out, moy_text_target_t *t) {
+    moy_canvas_row_t *row;
+    if (moy_canvas_get(canvas, &row) != 0 || row->px == NULL) {
+        return MOY_UI_STALE;
+    }
+    const int32_t *st = row->st;
+    t->px = row->px;
+    t->cap = row->cap;
+    t->dw = (int)st[MOY_ST_W];
+    t->cam_x = (int)st[MOY_ST_CAM_X];
+    t->cam_y = (int)st[MOY_ST_CAM_Y];
+    t->cx0 = (int)st[MOY_ST_CX0];
+    t->cy0 = (int)st[MOY_ST_CY0];
+    t->cx1 = (int)st[MOY_ST_CX1];
+    t->cy1 = (int)st[MOY_ST_CY1];
+    *out = row;
+    return MOY_UI_OK;
+}
+
+int moy_ui_row_glyph(uint32_t canvas, int g, int x, int y, int w, int h, int ci, int scale) {
+    moy_canvas_row_t *row;
+    moy_text_target_t t;
+    int rc = row_target(canvas, &row, &t);
+    if (rc != MOY_UI_OK) {
+        return rc;
+    }
+    row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&t, g, x, y, w, h, row->pal[ci & 63], scale);
+    return MOY_UI_OK;
 }

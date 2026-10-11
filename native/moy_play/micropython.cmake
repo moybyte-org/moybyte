@@ -34,6 +34,7 @@ target_include_directories(usermod_moy_play INTERFACE ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moycore ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx/libmoy
     ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx
     ${CMAKE_CURRENT_LIST_DIR}/../moy_lua/lua ${CMAKE_CURRENT_LIST_DIR}/../moy_input
-    ${CMAKE_CURRENT_LIST_DIR}/../moy_kernel ${CMAKE_CURRENT_LIST_DIR}/../moy_glass)
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_kernel ${CMAKE_CURRENT_LIST_DIR}/../moy_glass
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_ui)
 
 target_link_libraries(usermod INTERFACE usermod_moy_play)

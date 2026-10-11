@@ -6,6 +6,7 @@
 #   -- the style                      use_skin, metrics, state_colors (C)
 #   -- draw == tap                    Hits
 #   Hits                              per-draw hit registry
+#   -- glyphs                         glyph, glyph_id (C)
 #   -- widgets                        button, chip
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
@@ -576,6 +577,44 @@ class Hits:
         return None
 
 
+# --- glyphs: the icon vocabulary, drawn by native/moy_ui ------------------------
+#
+# The 12x12 glyphs are style.json's "glyphs"; one C raster derives each one's
+# spans at draw time, at any scale, and draws them into the canvas's row. A
+# widget given `glyph=` draws it through here unless the caller passes its own
+# `glyph_draw(kind, rect, color, cv)`, which then REPLACES the label (the code
+# editor's chip faces).
+
+_GLYPH_ID = {}                        # kind -> id, interned at first use
+
+
+def glyph_id(kind):
+    """The glyph's id, or -1 when the vocabulary has no such glyph -- the
+    question "is it a glyph" every caller with a label fallback asks."""
+    g = _GLYPH_ID.get(kind)
+    if g is None:
+        g = _C.glyph_id(kind) if type(kind) is str else -1
+        _GLYPH_ID[kind] = g
+    return g
+
+
+def glyph(cv, kind, rect, c, scale=None):
+    """Draw glyph `kind` centred in `rect` in colour `c` (no background), each
+    glyph pixel a `scale` square -- the canvas's font scale by default. An
+    unknown kind draws NOTHING, so a caller keeps its text label as the
+    fallback."""
+    g = glyph_id(kind)
+    if g < 0:
+        return
+    fs = int(scale) if scale else _fs(cv)
+    x, y, w, h = rect
+    _C.glyph(cv.ui_sink(), g, int(x), int(y), int(w), int(h), c, fs)
+
+
+def _glyph_draw(kind, rect, c, cv):
+    glyph(cv, kind, rect, c)
+
+
 # --- widgets ------------------------------------------------------------------
 #
 # Every draw below reads its look from `state_colors` and its numbers from
@@ -588,7 +627,8 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
            glyph=None, glyph_draw=None, disabled=False, state=None):
     """One themed chip button: filled field, thin dark edge, centered label
     (truncated to fit), optional 16x16 icon image or 12x12 glyph at the left.
-    Glyphs require the caller's leaf-safe `glyph_draw(kind, rect, color, cv)`;
+    A glyph is drawn by `glyph` unless the caller passes its own
+    `glyph_draw(kind, rect, color, cv)`;
     `on` swaps to the accent (the pressed/active look).
 
     `disabled` + `state` are the six-state model (see `widget_state`): they
@@ -616,7 +656,9 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     pad = m[BTN_PAD] * fs
     icon_box = m[BTN_ICON] * fs
     iw = 0
-    has_glyph = glyph is not None and glyph_draw is not None
+    has_glyph = glyph is not None
+    if has_glyph and glyph_draw is None:
+        glyph_draw = _glyph_draw
     if icon_img is not None or has_glyph:
         iw = (icon_box if icon_img is not None else m[BTN_GLYPH] * fs) + pad
     label = str(label)
@@ -651,9 +693,9 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     theme's title ink; `on` swaps to the accent toggle look (edge border);
     `hot` to danger red with light ink (an armed destructive action).
 
-    `glyph` + `glyph_draw` (the game_icon_btn pattern -- the caller passes
-    ws._glyph so this module never imports the vocabulary): draw the icon
-    centered in the chip INSTEAD of the text label. The label still names the
+    `glyph` (a glyph kind, drawn by `glyph`, or the caller's own
+    `glyph_draw(kind, rect, color, cv)`): draw the icon centered in the chip
+    INSTEAD of the text label. The label still names the
     chip at the call site (and is the fallback when no glyph is given).
 
     `chip` vs `button`: chip is the PANEL-chrome vocabulary (toolbars inside
@@ -684,8 +726,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
         while i < n:
             cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge)
             i += 1
-    if glyph is not None and glyph_draw is not None:
-        glyph_draw(glyph, rect, ink, cv)
+    if glyph is not None:
+        (_glyph_draw if glyph_draw is None else glyph_draw)(glyph, rect, ink, cv)
         return
     fw = 8 * fs
     label = str(label)
@@ -813,9 +855,9 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
         box = m[ROW_ICON] * fs
         cv.spr(icon_img, tx, y + (h - box) // 2, fs)
         tx += box + pad
-    elif glyph is not None and glyph_draw is not None:
+    elif glyph is not None:
         box = (m[ROW_GLYPH] if glyph_size is None else glyph_size) * fs
-        glyph_draw(glyph, (tx, y + (h - box) // 2, box, box),
+        (_glyph_draw if glyph_draw is None else glyph_draw)(glyph, (tx, y + (h - box) // 2, box, box),
                    ink if glyph_ink is None else glyph_ink, cv)
         tx += box + pad
     ty = y + ((h - th_) // 2 if text_dy is None else text_dy)
@@ -976,9 +1018,9 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     if icon_img is not None:
         box = m[CELL_ICON] * fs
         cv.spr(icon_img, ax + (aw - box) // 2, ay + (ah - box) // 2, fs)
-    elif glyph is not None and glyph_draw is not None:
+    elif glyph is not None:
         box = m[CELL_GLYPH] * fs
-        glyph_draw(glyph, (ax + (aw - box) // 2, ay + (ah - box) // 2,
+        (_glyph_draw if glyph_draw is None else glyph_draw)(glyph, (ax + (aw - box) // 2, ay + (ah - box) // 2,
                            box, box), ink, cv)
     if edge_c is not None and n > 0 and edge_last:
         _cell_edge(cv, x, y, w, h, edge_c, n)

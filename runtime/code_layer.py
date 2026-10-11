@@ -61,25 +61,13 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import text_modes as _modes
 
 # The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
-# palette row draw a 12x12 chrome glyph per button instead of the terse 2-3 char
-# label. Looked up LAZILY (not a top-level import): chrome.py imports THIS module for
-# its code-layout constants before it defines _GLYPHS, so a module-level
-# `from chrome import _GLYPHS` here would be a circular import. By draw time chrome is
-# fully loaded, so the cached lookup below resolves the dict once.
-_GLYPHS = None
+# palette row draw a 12x12 glyph per button instead of the terse 2-3 char label.
 
 
 def _glyph_known(kind):
-    """True if `kind` is a known chrome glyph (so a button draws the icon; else the
-    text label is the fallback). Caches the _GLYPHS dict on first draw-time call."""
-    global _GLYPHS
-    if _GLYPHS is None:
-        try:
-            from chrome import _GLYPHS as _G
-        except ImportError:  # pragma: no cover - direct host import
-            from runtime.chrome import _GLYPHS as _G
-        _GLYPHS = _G
-    return kind in _GLYPHS
+    """True if `kind` is a known glyph (so a button draws the icon; else the
+    text label is the fallback)."""
+    return _ui.glyph_id(kind) >= 0
 
 
 # The code editor draws its chrome in its OWN palette (`_tones`), not in the
@@ -278,7 +266,7 @@ class CodeLayer:
                    "find": "FND", "indent": ">>", "outdent": "<<", "gutter": "#",
                    "auto": "AC", "goto": "DEF", "undo": "UN", "redo": "RE"}
     # The pre-literate glyph per tool (#89 icon pass): drawn centered instead of the
-    # label. _blit_glyph draws nothing for an unknown kind, so _TOOL_LABEL stays the
+    # label. `ui.glyph` draws nothing for an unknown kind, so _TOOL_LABEL stays the
     # guaranteed fallback (gutter -> the numbered-lines glyph; auto/goto have no glyph
     # yet -> the AC/DEF labels).
     _TOOL_GLYPH = {"sel": "select", "copy": "copy", "cut": "cut", "paste": "paste",

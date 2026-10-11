@@ -5,7 +5,7 @@
   strings reproduces the committed moy_ui_tables.h/.c byte for byte.
 * The data test: a copy of style.json with one state's token, one metric and
   one new kind changed, regenerated and built through runtime/native_build.py's
-  own path, resolves the change where it was made and nowhere else -- so no
+  own path (the glass's library, as the host builds it), resolves the change where it was made and nowhere else -- so no
   value lives in a C body.
 """
 
@@ -14,7 +14,7 @@ import json
 import os
 import shutil
 
-from runtime import native_build
+from runtime import glass_binding
 from tools import gen_ui_tables
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,9 +31,7 @@ def test_the_committed_tables_are_the_datas():
 
 
 def _lib(d, cache):
-    so = native_build.build(
-        "moy_ui_data", os.path.join(d, "moy_ui.c"),
-        ["moy_ui.h", "moy_ui_tables.h", "moy_ui_tables.c"], cache, libmoy_dir=d)
+    so = glass_binding.build(ui_dir=d, cache=cache)
     lib = ctypes.CDLL(so)
     lib.moy_ui_colors.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                   ctypes.POINTER(ctypes.c_int16)]

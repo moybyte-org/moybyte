@@ -2153,8 +2153,6 @@ def roles_trace(ws):
     say("pointer", ptr is not None, pt is None if ptr is None else
         tuple(pt) == (ptr.x, ptr.y, bool(ptr.down), bool(ptr.click),
                       bool(ptr.visible)))
-    s.glyph("x", (0, 0, 16, 16), 7, cv)
-    say("glyph drawn")
 
     # -- theme
     t = ctx.theme
@@ -2436,7 +2434,6 @@ roles artwork carts clipboard damage files install nav notify prefs surface them
 damage 1 2 0
 surface True True 1 1 False True
 pointer True True
-glyph drawn
 theme night dark default False True True True True
 theme set forest light True True True
 theme back night dark False

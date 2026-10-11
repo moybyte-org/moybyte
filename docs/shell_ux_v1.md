@@ -279,7 +279,7 @@ gentlest:
   `code_layer` / `paint_layer` / `map_editor_ui` / `scene_editor_ui` /
   `music_editor_ui` — owned as tabs by `runtime/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
   explicit cross-parent MOVE flow, and outline undo/redo (#93). Tool buttons
-  draw from the shared 12×12 glyph vocabulary (`chrome._GLYPHS`), so every tool
+  draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
 - **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen; exit
   returns to the Editor **on the tab you were on**. Test-play is a round trip, not a

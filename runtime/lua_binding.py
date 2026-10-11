@@ -36,6 +36,7 @@ _MOYCORE = os.path.join(_NATIVE, "moycore")          # the layer glue the boards
 _MOY_GFX = os.path.join(_NATIVE, "moy_gfx")          # the layer restore's kernels
 _SPINE = os.path.join(_NATIVE, "moy_spine")          # the JSON scanner, the handle tables
 _PLAY = os.path.join(_NATIVE, "moy_play")            # the kernel's Player
+_UI = os.path.join(_NATIVE, "moy_ui")                # moy_chrome's glyph raster
 _STORE = os.path.join(_NATIVE, "moy_store")          # the catalogue a launch reads
 _KERNEL = os.path.join(_NATIVE, "moy_kernel")        # the loop's upcall classes
 _INPUT = os.path.join(_NATIVE, "moy_input")
@@ -98,6 +99,7 @@ def build(verbose=False, wasm=None):
         "moy_play.h", "moy_play.c", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
         "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
         "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
+        "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
         "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
         "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
         "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
@@ -105,7 +107,7 @@ def build(verbose=False, wasm=None):
     cflags = list(_CFLAGS)
     link = ["-lm"]
     dirs = (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
-            _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS)
+            _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI)
     got = None
     if wasm is not False:
         from . import wasm_binding

@@ -9,6 +9,7 @@
 #include "moy_chrome.h"
 #include "moy_gfx_kernels.h"
 #include "moy_text.h"
+#include "moy_ui.h"
 #include "moy.h"
 
 // -- the inks ----------------------------------------------------------------------
@@ -461,42 +462,6 @@ void moy_chrome_about(moy_chrome_list_t *l, int cw, int ch, int fs, const char *
 
 // -- the raster --------------------------------------------------------------------
 
-#define GLYPHS 32
-
-static struct {
-    char kind[12];
-    uint16_t rows[12];
-} g_glyph[GLYPHS];
-
-int moy_chrome_glyph_put(const char *kind, const uint16_t rows[12]) {
-    int at = -1;
-    for (int i = 0; i < GLYPHS; i++) {
-        if (strncmp(g_glyph[i].kind, kind, sizeof(g_glyph[i].kind)) == 0) {
-            at = i;
-            break;
-        }
-        if (at < 0 && g_glyph[i].kind[0] == 0) {
-            at = i;
-        }
-    }
-    if (at < 0 || strlen(kind) >= sizeof(g_glyph[0].kind)) {
-        return -1;
-    }
-    snprintf(g_glyph[at].kind, sizeof(g_glyph[at].kind), "%s", kind);
-    memcpy(g_glyph[at].rows, rows, sizeof(g_glyph[at].rows));
-    return 0;
-}
-
-static const uint16_t *glyph_rows(const char *kind, size_t n) {
-    for (int i = 0; i < GLYPHS; i++) {
-        if (g_glyph[i].kind[0] && strlen(g_glyph[i].kind) == n
-                && memcmp(g_glyph[i].kind, kind, n) == 0) {
-            return g_glyph[i].rows;
-        }
-    }
-    return NULL;
-}
-
 void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
                        const uint16_t *pal, int fs) {
     size_t cap = (size_t)w * (size_t)h;
@@ -524,26 +489,11 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
                         moy_font_data, 96, 32, fs, 0, 0, 0, 0, w, h);
                 break;
             case MOY_CH_GLYPH: {
-                const uint16_t *rows = glyph_rows(l->text + o->s, o->n);
-                if (rows == NULL) {
-                    break;                  // an unknown glyph draws nothing
-                }
-                int sc = o->scale ? o->scale : fs;
-                int span = 12 * sc;
-                int ox = o->x + (o->w - span) / 2, oy = o->y + (o->h - span) / 2;
-                for (int r = 0; r < 12; r++) {
-                    int run = 0;
-                    for (int c = 0; c <= 12; c++) {
-                        bool on = c < 12 && (rows[r] & (1u << (11 - c)));
-                        if (on) {
-                            run++;
-                        } else if (run) {
-                            mg_fill_rect(px, cap, w, ox + (c - run) * sc, oy + r * sc,
-                                         run * sc, sc, col);
-                            run = 0;
-                        }
-                    }
-                }
+                // The one glyph raster (native/moy_ui); an unknown glyph draws
+                // nothing.
+                moy_text_target_t t = {px, cap, w, 0, 0, 0, 0, w, h};
+                moy_ui_glyph_draw(&t, moy_ui_glyph_id(l->text + o->s, o->n), o->x, o->y, o->w,
+                                  o->h, (uint16_t)col, o->scale ? o->scale : fs);
                 break;
             }
             default:

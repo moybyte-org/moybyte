@@ -501,9 +501,6 @@ def binding(sanitize=False):
             _check(rc)
             return Pointer(v[0], v[1], bool(v[2]), bool(v[3]), bool(v[4]))
 
-        def glyph(self, *a, **kw):
-            return self._app._serve(self._g, "surface", "glyph")(self._g, *a, **kw)
-
     class Theme(_Role):
         def colors(self):
             gen = c.c_uint32()

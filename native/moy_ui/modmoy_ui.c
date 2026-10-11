@@ -9,7 +9,6 @@
 #include "py/objstr.h"
 
 #include "moy_ui.h"
-#include "../moy_gfx/moy_text.h"
 
 static mp_obj_t names_tuple(const char *const *names, int n) {
     mp_obj_t items[MOY_UI_KINDS > MOY_UI_STRINGS ? MOY_UI_KINDS : MOY_UI_STRINGS];
@@ -186,6 +185,37 @@ static mp_obj_t ui_wrap(mp_obj_t text, mp_obj_t cols_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_wrap_obj, ui_wrap);
 
+static mp_obj_t ui_glyph_names(void) {
+    mp_obj_t items[MOY_UI_GLYPHS];
+    for (int i = 0; i < MOY_UI_GLYPHS; i++) {
+        items[i] = mp_obj_new_str(moy_ui_glyph_names[i], strlen(moy_ui_glyph_names[i]));
+    }
+    return mp_obj_new_tuple(MOY_UI_GLYPHS, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_glyph_names_obj, ui_glyph_names);
+
+// glyph_id(name) -> its id, or -1.
+static mp_obj_t ui_glyph_id(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_glyph_id(s, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_glyph_id_obj, ui_glyph_id);
+
+// glyph(canvas, g, x, y, w, h, ci, scale): one glyph into a canvas row.
+static mp_obj_t ui_glyph(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int rc = moy_ui_row_glyph((uint32_t)mp_obj_get_int(a[0]), mp_obj_get_int(a[1]),
+                              mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                              mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                              mp_obj_get_int(a[6]), mp_obj_get_int(a[7]));
+    if (rc == MOY_UI_STALE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: stale canvas"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_glyph_obj, 8, 8, ui_glyph);
+
 static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ui) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&ui_tokens_obj) },
@@ -202,6 +232,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_width), MP_ROM_PTR(&ui_text_width_obj) },
     { MP_ROM_QSTR(MP_QSTR_wrap), MP_ROM_PTR(&ui_wrap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_glyph_names), MP_ROM_PTR(&ui_glyph_names_obj) },
+    { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&ui_glyph_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ui_globals, moy_ui_globals_table);
 

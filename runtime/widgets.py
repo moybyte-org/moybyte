@@ -37,7 +37,7 @@ console.py imports these classes back so `console.Popup` /
 both CPython and MicroPython.)
 
 (Launcher stayed in console.py: its draw() needs the palette NAMES + the shared
-`_blit_glyph` glyph vocabulary + the tile-type constants, and its bare-construction
+glyph raster (`ui.glyph`) + the tile-type constants, and its bare-construction
 default needs Layout -- moving it would inject NAMES/a glyph fn into a class the
 Workstation constructs, or pull the whole glyph vocabulary out here, i.e. the ugly
 cross-import web. It's cohesive with the launcher-home rendering, so it's left put.)
@@ -166,7 +166,7 @@ def rotate_indices(pix, w, h, deg, transparent):
 # the hidden Easter-egg rewards. Each is a tuple (id, name, glyph, hidden):
 #   id     -- stable key persisted in achievements.json
 #   name   -- the friendly title shown in the toast + the achievements view
-#   glyph  -- the icon from _GLYPHS drawn beside it
+#   glyph  -- the glyph (`ui.glyph`) drawn beside it
 #   hidden -- True hides the name as "???" in the view until it's unlocked, so a
 #             secret stays a surprise (the Easter-egg rewards are all hidden).
 # Backend-agnostic + MicroPython-safe (a plain tuple of tuples, frozen into the

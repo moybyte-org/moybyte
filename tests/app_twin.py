@@ -280,9 +280,6 @@ class Surface(_Role):
         return Pointer((p.x - r[3], p.y - r[4], bool(p.down), bool(p.click),
                         bool(p.visible)))
 
-    def glyph(self, *a, **kw):
-        return self._app._serve(self._g, "surface", "glyph")(self._g, *a, **kw)
-
 
 class Theme(_Role):
     def colors(self):

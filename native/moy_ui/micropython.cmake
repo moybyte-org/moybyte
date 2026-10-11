@@ -6,7 +6,12 @@
 add_library(usermod_moy_ui INTERFACE)
 target_sources(usermod_moy_ui INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_ui_glyph.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_tables.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_ui.c)
-target_include_directories(usermod_moy_ui INTERFACE ${CMAKE_CURRENT_LIST_DIR})
+# It draws through native/moy_gfx's text path into native/moy_glass's canvas
+# rows, whose handle table is native/moy_spine's.
+target_include_directories(usermod_moy_ui INTERFACE ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx ${CMAKE_CURRENT_LIST_DIR}/../moy_glass
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_spine)
 target_link_libraries(usermod INTERFACE usermod_moy_ui)

@@ -355,7 +355,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
 # Launcher grid CLASS (its instance stays ws.launcher, the single source everything
 # reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
-# nav). Launcher takes NAMES + _blit_glyph injected for its tile art; ws.open() stays.
+# nav). Launcher takes NAMES + ui.glyph injected for its tile art; ws.open() stays.
 try:
     from launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
                                 make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE,
@@ -442,8 +442,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 # The console's stateless base layer -- the MOY64 palette (NAMES), the
-# responsive Layout/CodeLayout geometry (#39), the icon-glyph blitter
-# (_blit_glyph), the themeable top-bar IconSheet slot map + art
+# responsive Layout/CodeLayout geometry (#39), the themeable top-bar IconSheet slot map + art
 # (_ICON/_ICON_ART), the cursor sprite (CURSOR), and the small pure helpers
 # (_clamp_scroll/_cursor_delta/_ticks_*/_err_text) -- lives in chrome.py.
 # Imported back so every bare reference below and every `console.X` a test
@@ -452,13 +451,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # Same bare-or-package fallback as the surfaces above.
 try:
     from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR, NAMES,
-                        _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout, _blit_glyph,
+                        _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
                         _ICON, _ICON_ART, _nibble, chrome_scale_floor, _cursor_delta,
                         _clamp_scroll, _in, _SPLASH_MS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
                                 NAMES, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
-                                _blit_glyph, _ICON, _ICON_ART, _nibble,
+                                _ICON, _ICON_ART, _nibble,
                                 chrome_scale_floor, _cursor_delta, _clamp_scroll,
                                 _in, _SPLASH_MS)
 
@@ -891,7 +890,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.search_query = ""
         self.search_typing = False
         self.launcher = Launcher(self._launcher_items(self.carts.all),
-                                 self.layout, NAMES, _blit_glyph)
+                                 self.layout, NAMES, _uimod.glyph)
         # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
         # density tiers (visual identity v1 Section 1.2); the picker below keeps the
         # single-verb pick, so the flag stays off there.
@@ -914,7 +913,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
         # opens the chosen cart in the Editor.
         self.picker = Launcher(self._picker_items(self.carts.all),
-                               self.layout, NAMES, _blit_glyph)
+                               self.layout, NAMES, _uimod.glyph)
         self.picker.icon_for = self._icon_image_keyed
         self.picker.cover_for = self.covers.cover_for
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
@@ -4000,9 +3999,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # editors/cart-overlay callers); the desktop/system callers pass cv=
         # self.sys_canvas so the glyph follows the system font scale (#39). `scale`
         # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
-        # slot (#203). The shared blit + the glyph encoding live in the module-level
-        # _blit_glyph so Launcher (canvas-only) renders the identical vocabulary.
-        _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
+        # slot (#203). The raster is native/moy_ui's, through `ui.glyph`, which
+        # Launcher (canvas-only) is handed too.
+        _uimod.glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
