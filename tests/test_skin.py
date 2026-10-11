@@ -40,7 +40,7 @@ from pathlib import Path
 import pytest
 
 from runtime import ui
-from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
+from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
 
@@ -147,7 +147,7 @@ def test_the_shipped_widgets_are_identical_after_a_round_trip():
     """The 48-hash widget sheet, re-rendered after "outline" was installed
     and the default installed again. Cheaper than the shell goldens and it
     walks every widget's branches."""
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             for (w, h, fs) in ((320, 240, 1), (1024, 600, 2)):
@@ -188,7 +188,7 @@ def test_every_state_of_every_kind_resolves_on_all_twelve_theme_sets():
     skin or theme that names NO state token still resolves to a real palette
     index (or to None, which means 'paint nothing here'), so all 12 family x
     variant sets keep working unmodified under any skin."""
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             for use in (DEFAULT, "outline"):
@@ -242,7 +242,7 @@ _SKIN_OWNERS = {
     # sheet -- onto ws.look.
     "appearance.py": "installs + persists the skin (Appearance.set_skin)",
     # The PICKER: reads the catalog's NAME LIST (`ui.skin_names`), as it reads
-    # chrome.THEMES, and asks the theme role to install one.
+    # chrome.THEME_NAMES, and asks the theme role to install one.
     "appearance_app.py": "lists the catalog; installs via ctx.theme.set_skin",
 }
 
@@ -551,7 +551,7 @@ def test_the_second_skin_draws_a_real_frame_on_every_theme():
     """A restyle must not resolve to nothing. Rendered on all 12 theme sets:
     the outline skin's canvases differ from the default's, and never come out
     blank."""
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             ui.use_skin(DEFAULT)
@@ -910,7 +910,7 @@ def test_the_second_skin_reaches_the_kinds_that_moved():
     the outline skin forgot would resolve identically and this fails."""
     for kind in sorted(_SHELL_KINDS):
         moved = 0
-        for name, _tokens in THEMES:
+        for name in THEME_NAMES:
             for variant in THEME_VARIANTS:
                 th = theme_colors(name, variant)
                 for state in (ui.REST, ui.ON, ui.DISABLED):
@@ -964,7 +964,7 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
     would pass every golden and move a pixel on one theme."""
     ui.use_skin(DEFAULT)
     checked = 0
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             for (kind, state), before in _PRE_207_TRIPLES.items():

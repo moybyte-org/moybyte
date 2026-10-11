@@ -810,13 +810,13 @@ handles instead of objects.
 **Why now, and at what scope.** The registry is inert on every shipping tier
 today: no canvas defines `begin_surface`, `wm_windowed`'s `_recording` is
 never set, and nothing reads a gen — the P4 desk's retained caches and streaks
-and the launcher's are the Python window managers' and stay theirs until §9's
-Phase C, which the kernel plan schedules as sprint 7 (the window managers).
+and the launcher's are the Python window managers' and stay theirs: §9's
+Phase C was the kernel plan's sprint 7 (the window managers), which does not
+run (`docs/native_kernel_2026-09.md` §10 question 8).
 So the glass pass ports the registry as it is, inert, plus the epoch fold, and
 no kernel compositor reads a gen in sprint 3; §7's ledger rows that fold
-fields "in C" mean Phase C, as they always did, and that phase is where the
-per-buffer N-deep last-seen and the frame gate's predicate are re-expressed
-natively. Two things make the move worth doing now rather than then. From
+fields "in C" mean Phase C, as they always did, and with it the per-buffer
+N-deep last-seen and the frame gate's predicate stay Python. Two things make the move worth doing now rather than then. From
 sprint 4 a Lua or wasm cart runs with no VM on the S3 boards: L9 still holds
 for it — content-dirty exactly on the frames it renders — and there is no
 Python left to say so, so the producer signal has to be a kernel call. And

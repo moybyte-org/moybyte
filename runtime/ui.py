@@ -31,7 +31,7 @@ the redesign thread):
   * Widgets take RECTS; the per-surface Layout classes keep owning reflow
     (their frozen 320x240 `_base` branches are the parity contract). The
     combinators here are helpers FOR those classes, not a layout engine.
-  * Colors come from the semantic theme tokens (chrome.THEMES -- surface/ink/
+  * Colors come from the semantic theme tokens (chrome.theme_colors -- surface/ink/
     focus/play/author/danger/...), so restyling an app means routing it
     through this module, not hunting literals.
   * STYLE IS DATA, not code. Every per-state colour and every number a draw

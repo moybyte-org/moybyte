@@ -40,7 +40,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import appearance, moy_carts, ui  # noqa: E402
-from runtime.chrome import THEMES, theme_colors  # noqa: E402
+from runtime.chrome import THEME_NAMES, theme_colors  # noqa: E402
 from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
 
 
@@ -126,7 +126,7 @@ def test_the_token_dict_is_rebound_so_the_shelf_key_changes(tmp_path):
 def test_an_unknown_theme_falls_back_and_an_unknown_variant_too(tmp_path):
     ws = build_ws(tmp_path)
     ws.look.set_theme("no-such-theme", persist=False)
-    assert ws.look.theme_name == THEMES[0][0]
+    assert ws.look.theme_name == THEME_NAMES[0]
     ws.look.set_theme_variant("chartreuse", persist=False)
     assert ws.look.theme_variant == "dark"
 
@@ -151,7 +151,7 @@ def test_set_theme_with_no_variant_keeps_the_current_one(tmp_path):
 
 def test_cycle_theme_steps_the_catalog_and_wraps(tmp_path):
     ws = build_ws(tmp_path)
-    names = [n for n, _t in THEMES]
+    names = [n for n in THEME_NAMES]
     ws.look.set_theme(names[-1], persist=False)
     ws.look.cycle_theme(1)
     assert ws.look.theme_name == names[0]

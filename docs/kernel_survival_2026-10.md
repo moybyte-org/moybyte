@@ -117,7 +117,9 @@ deletes the twin in the same change.
 **What stays Python after sprint 3, by decision.** The Workstation, the window
 managers and the draw stack (`runtime/console.py`, `runtime/wm.py`,
 `runtime/wm_windowed.py`, `runtime/launcher_layer.py`) with their retained
-caches and streaks: sprint 7's, reached from the loop by three upcalls a frame.
+caches and streaks, reached from the loop by three upcalls a frame; they stay
+Python, because sprint 7, which would have moved them, does not run
+(`docs/native_kernel_2026-09.md` §10 question 8).
 The Player, the tick model, the runtime map and moycore's frame glue
 (`runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`'s input
 refresh and the frame around `tick()`): sprint 4's. The bank model the Music
@@ -316,8 +318,8 @@ epoch, the prefix-scoped sync) is inert on every shipping tier — no canvas
 defines `begin_surface`, so `wm_windowed`'s `_recording` is never set — and
 nothing reads a gen: the P4 desk's retained caches and streaks
 (`wm_windowed.py`'s stamp and desk streaks, `runtime/launcher_layer.py`'s
-`_advance_streak`) are the Python window managers' and stay theirs until
-sprint 7. Pass 1 ports the registry as a kernel table of kind SURF with the
+`_advance_streak`) are the Python window managers' and stay theirs (sprint 7
+does not run). Pass 1 ports the registry as a kernel table of kind SURF with the
 same fields and the same three producer verbs, deletes the Python leaf, and
 adds the one thing the kernel needs now: a signal in the other direction.
 
@@ -344,10 +346,10 @@ Why the table crosses now and not with the window managers: so that sprint 4's
 VM-free cart has a producer it can reach — L9 holds for a cart with no VM,
 content-dirty on exactly the frames it renders, and the signal must be a
 kernel call — and so that the kernel's own draws have the epoch above to move.
-The per-buffer N-deep last-seen of §4 and the predicate of the frame gate are
-re-expressed in C in sprint 7, which is Phase C of that document's §9 and the
-column its §7 ledger names. Until then, `runtime/console.py`'s frame gate
-stays Python and folds `ws._dirty` into one `moy_surface_epoch()` per dirty
+The per-buffer N-deep last-seen of §4 and the predicate of the frame gate
+would be re-expressed in C by Phase C of that document's §9 (the column its §7
+ledger names), which was sprint 7 and does not run. `runtime/console.py`'s
+frame gate stays Python and folds `ws._dirty` into one `moy_surface_epoch()` per dirty
 frame; the roughly 135 write sites across 31 files are untouched, which keeps
 L6 true on the S3 (one C call per painted frame, none per write) and matches
 §7's "writes never".
@@ -813,7 +815,7 @@ returns; each frame's poll binds the listener once the link has an address, or
 fails the join after `MOY_WC_JOIN_MS` into the Settings row's label. The paired
 URL is the switch's, and the park — the glass given to the connection screen —
 is its flag, whose change is a kernel epoch (§3.3). Above it stays Python what
-the window managers own until sprint 7: the pin's minting and its row in
+the window managers own: the pin's minting and its row in
 `system.json`, the park and unpark through the router (`runtime/web_console.py`),
 and the themed screen (`runtime/web_console_ui.py`, with its QR from
 `runtime/moy_qr.py`), which is the screen while the VM runs (§13, question 8).
@@ -1031,7 +1033,7 @@ plus the PUMP, HITCH and LOOP lines `device/device_diag.py` formats.
 `native/moy_kernel/moy_boot.c` is the kernel's first light: the logo drawn
 and lit before any VM (§13's question 9). `build_desktop`'s order is to follow
 it there: the splash, the store (C), the runtime probe (Python until
-sprint 4), the Workstation and the window manager (Python until sprint 7), the
+sprint 4), the Workstation and the window manager (Python), the
 services wired as kernel handles the Python side reads, the OTA verdict, the
 loop. `mem_census.mark` stays on the path with its names. The boot is timed at
 every pass (§9).
@@ -1198,7 +1200,7 @@ their group's sprint. The recommendations, each one sentence of mechanism:
   rows only** (§3.2); a cart's rows are cart memory and go with the run; the
   NOMEM path evicts the pool, then keeps the gc-heap last resort, counted.
 - **The surface table crosses now as an inert registry plus the epoch fold**,
-  with a kernel-to-WM epoch (§3.3); no compositor reads a gen until sprint 7.
+  with a kernel-to-WM epoch (§3.3); no kernel compositor reads a gen.
 - **Every off-heap buffer is a BUF row with a role, owners are OWNER rows**,
   and the new kinds are in `moy_htab.h` from the carve (§3.1).
 - **The draw gates survive and no verb grows a Python frame** (§3.1).

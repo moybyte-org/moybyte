@@ -23,7 +23,7 @@ from pathlib import Path
 
 from runtime import ui
 import ui_twin as twin
-from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
+from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 from runtime.file_widgets import FileGridView
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 
@@ -75,7 +75,7 @@ def test_every_tile_is_the_toolkit_cell_not_a_copy_of_it():
     """Pixel equality against `ui.cell` ITSELF (plus the caller's own art), for
     every theme family x variant and every selection state. A transcription
     would pass a shape test and fail this one."""
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             for sel in (-1, 0, 2):
@@ -249,7 +249,7 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
         def __init__(self):
             self._init_frame(320, 240, 1, False)
 
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             seen = []

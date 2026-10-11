@@ -59,7 +59,7 @@ _SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
 _SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title row (#21)
 _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #21)
 
-# (The panel colors moved to the selectable THEME tokens -- chrome.THEMES,
+# (The panel colors are the selectable THEME tokens -- chrome.theme_colors,
 # picked in the Appearance app; the "night" default is the moybyte site colorway.)
 
 

@@ -271,7 +271,7 @@ def test_bad_custom_block_names_raise_blockerror():
 
 def test_myblocks_category_present_and_colored():
     assert blocks.CAT_PROCS in blocks.categories()
-    assert blocks.CAT_PROCS in blocks.CATEGORY_COLOR
+    assert "block_" + blocks.CAT_PROCS in _content_roles()
     # proc_def + call live in the My Blocks category
     assert set(blocks.blocks_in_category(blocks.CAT_PROCS)) == {"proc_def", "call"}
 
@@ -484,3 +484,8 @@ def test_ui_proc_menu_adds_an_input(tmp_path):
     bui.blk_kbd["entry"].text = "size"
     bui._blk_kbd_commit()
     assert blocks.proc_params(pd) == ["size"]
+
+
+def _content_roles():
+    from runtime import chrome
+    return chrome.theme_content("night")

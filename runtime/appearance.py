@@ -70,12 +70,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
-                        DEFAULT_THEME, DEFAULT_VARIANT, theme_colors, THEMES,
-                        THEME_VARIANTS)
+                        DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
+                        theme_content, THEME_NAMES, THEME_VARIANTS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                                 DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
-                                THEMES, THEME_VARIANTS)
+                                theme_content, THEME_NAMES, THEME_VARIANTS)
 try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -404,12 +404,12 @@ class Appearance:
 
     def set_theme(self, name, persist=True, variant=None):
         """Pick the panel THEME (Appearance app -> THEMES): swap the chrome token set
-        (chrome.THEMES) the panels/window chrome/selection accents read each draw,
+        (chrome.theme_colors) the panels/window chrome/selection accents read each draw,
         and persist the choice. An unknown name falls back to the default.
         `variant` picks the theme's dark/light presentation (None keeps the
         current variant, so existing name-only callers are untouched)."""
         ws = self.ws
-        if not any(n == name for n, _t in THEMES):
+        if name not in THEME_NAMES:
             name = DEFAULT_THEME
         if variant is not None:
             self.theme_variant = variant if variant in THEME_VARIANTS \
@@ -439,9 +439,9 @@ class Appearance:
         self.set_theme(self.theme_name, persist=persist, variant=variant)
 
     def cycle_theme(self, d):
-        """Step the panel theme through chrome.THEMES (programmatic verb; the UI
+        """Step the panel theme through chrome.THEME_NAMES (programmatic verb; the UI
         pick is the Appearance app). Applies + persists."""
-        names = [n for n, _t in THEMES]
+        names = THEME_NAMES
         cur = self.theme_name if self.theme_name in names else names[0]
         self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
 
@@ -483,6 +483,11 @@ class Appearance:
         if abi is not None:
             abi.theme_write(self.theme_name, self.theme_variant, self.ws.theme_colors)
             abi.theme_write_skin(self.skin_name)
+
+    def content_colors(self):
+        """The live theme's CONTENT roles (code syntax, block colours):
+        `chrome.theme_content` for the current theme and variant."""
+        return theme_content(self.theme_name, self.theme_variant)
 
     def light_chrome(self):
         """True when the live theme's tool surface is LIGHT (visual identity v1

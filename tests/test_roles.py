@@ -359,7 +359,7 @@ def test_the_token_vocabulary_is_every_themes_keys():
     resolves to."""
     from runtime import chrome
     keys = set()
-    for name, _t in chrome.THEMES:
+    for name in chrome.THEME_NAMES:
         for variant in chrome.THEME_VARIANTS:
             keys |= set(chrome.theme_colors(name, variant))
     assert set(moy_app.tokens()) == keys

@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "name": "indigo",
+  "colors": {
+    "dark": {
+      "panel": 61, "edge": 13, "title": 13, "title_ink": 0, "accent": 10,
+      "hilite": 13, "dim": 1
+    },
+    "light": {
+      "panel": 48, "edge": 61, "title": 13, "title_ink": 0, "accent": 10,
+      "hilite": 24, "dim": 49, "desktop": 24, "desktop_pattern": 48,
+      "border": 61
+    }
+  }
+}

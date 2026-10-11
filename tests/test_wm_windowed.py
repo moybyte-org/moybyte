@@ -1038,16 +1038,16 @@ def test_settings_keyboard_close_is_surgical_too(tmp_path):
 
 
 def test_theme_setting_cycles_and_persists(tmp_path):
-    """Settings -> THEME cycles chrome.THEMES, retints the panel chrome
+    """Settings -> THEME cycles chrome.THEME_NAMES, retints the panel chrome
     everywhere (settings panel, window strips, chips, selection accents), and
     persists to system.json; the default "night" keeps today's exact colors."""
     ws = _ws(tmp_path)                             # aliases the bare-name modules
-    from runtime.chrome import THEMES, theme_colors
+    from runtime.chrome import THEME_NAMES, theme_colors
     drv = _drv(ws)
     assert ws.look.theme_name == "night"
     assert ws.theme_colors == theme_colors("night")
     ws.look.cycle_theme(1)
-    assert ws.look.theme_name == THEMES[1][0]           # "indigo"
+    assert ws.look.theme_name == THEME_NAMES[1]           # "indigo"
     assert ws.theme_colors is not theme_colors("night")
     assert ws.launcher.theme is ws.theme_colors    # accents follow
     assert ws.system.get("theme") == ws.look.theme_name  # persisted

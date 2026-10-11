@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Write the toolkit's tables from their data (docs/kernel_toolkit_2026-10.md
 §2.1): native/moy_ui's `style.json` in, its `moy_ui_tables.h` and
-`moy_ui_tables.c` out; native/moy_spine's `strings/en.json` in, its
+`moy_ui_tables.c` out, the seed theme packages (`themes/*.json`) embedded in
+them; native/moy_spine's `strings/en.json` in, its
 `moy_str_table.h` and `moy_str_table.c` out. The output is committed: no build
 runs this, and tests/test_ui_tables.py regenerates it and fails on any
 difference.
@@ -106,8 +107,9 @@ class Tables:
         return out
 
 
-def generate(style):
+def generate(style, d=DIR):
     t = Tables(style)
+    t.dir = d
     nslot = max(len(v) for v in style["metrics"].values())
     skins = [(s, t.kind_specs(s), t.metrics(s)) for s in t.skins]
     h = []
@@ -252,7 +254,149 @@ def generate(style):
                 for r in rows]
         c.append("    {%s},  // %s" % (", ".join("0x%03X" % v for v in vals), k))
     c.append("};\n")
+    th, tc = generate_theme(style, t)
+    h[-1:-1] = th
+    c.extend(tc)
     return "\n".join(h) + "\n", "\n".join(c)
+
+
+def _luminance():
+    """MOY64's relative luminance (WCAG), x10000, from runtime/palette.py."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_moy64", os.path.join(ROOT, "runtime", "palette.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def lin(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return [round(10000 * (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)))
+            for r, g, b in mod.MOY64]
+
+
+def generate_theme(style, t):
+    """The theme loader's tables (native/moy_ui/moy_theme.c): format 1's
+    limits, the derivation rules, the readability pairs, MOY64's luminance and
+    the seed packages' bytes."""
+    th = style["theme"]
+    seeds = []
+    for name in th["seeds"]:
+        with open(os.path.join(t.dir, "themes", name + ".json"), "rb") as f:
+            src = f.read()
+        pkg = json.loads(src)
+        if pkg.get("name") != name or len(src) > th["bytes"]:
+            raise SystemExit("themes/%s.json: named %s, within %d bytes"
+                             % (name, name, th["bytes"]))
+        seeds.append((name, src))
+    root_pkg = json.loads(seeds[0][1])
+    root = root_pkg["colors"]
+    roles = t.tokens + list(th["content"])
+    if set(roles) & set(t.aliases) or len(set(roles)) != len(roles):
+        raise SystemExit("theme.content: a role named twice")
+    metrics = list(th["metrics"])
+    missing = [m for m in metrics if m not in root_pkg.get("metrics", {})]
+    if missing:
+        raise SystemExit("the default theme leaves metrics %s unset" % missing)
+    rules, at, flags = [], [], [0] * len(roles)
+    for v in ("dark", "light", "both"):
+        at.append((len(rules), len(th["derive"][v])))
+        for role, val in th["derive"][v]:
+            r = roles.index(role)
+            if isinstance(val, bool):
+                flags[r] = 1
+                rules.append((r, 0, int(val)))
+            elif isinstance(val, int):
+                rules.append((r, 0, val))
+            else:
+                rules.append((r, 1, roles.index(val)))
+    derived = {roles[r] for r, _k, _v in rules}
+    for v in ("dark", "light"):
+        missing = [k for k in roles if k not in derived and k not in root[v]]
+        if missing:
+            raise SystemExit("the default theme's %s leaves %s unset" % (v, missing))
+    h = ["// Theme packages, format 1 (moy_theme.c): the limits, the derivation",
+         "// rules, the readability pairs, MOY64's luminance and the seeds.",
+         "#define MOY_THEME_FORMAT %d" % th["format"],
+         "#define MOY_THEME_SEEDS %d" % len(seeds),
+         "#define MOY_THEME_BYTES %d" % th["bytes"],
+         "#define MOY_THEME_DEPTH %d" % th["depth"],
+         "#define MOY_THEME_RULES %d" % len(rules),
+         "#define MOY_THEME_PAIRS %d" % len(th["pairs"]),
+         "#define MOY_THEME_CONTRAST %d" % th["contrast"],
+         "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
+         "#define MOY_THEME_ROLES %d  // the tokens, then the content roles" % len(roles),
+         "#define MOY_THEME_METRICS %d" % len(metrics),
+         "#define MOY_THEME_EFFECTS %d" % len(th["effects"]),
+         "#define MOY_THEME_EFFECTS_CAP %d" % th["effects_cap"],
+         "// A missing role's rule: `role` gets `v`, a palette index or flag, or",
+         "// (is_role) the role `v`'s value.",
+         "typedef struct { uint8_t role, is_role, v; } moy_theme_rule_t;",
+         "extern const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES];",
+         "// [dark, light, both]: (first rule, count).",
+         "extern const uint8_t moy_theme_rules_at[3][2];",
+         "extern const uint8_t moy_theme_flag[MOY_THEME_ROLES];",
+         "extern const char *const moy_theme_role_names[MOY_THEME_ROLES];",
+         "extern const char *const moy_theme_metric_names[MOY_THEME_METRICS];",
+         "// each metric's [min, max]",
+         "extern const int8_t moy_theme_metric_range[MOY_THEME_METRICS][2];",
+         "extern const char *const moy_theme_effect_names[MOY_THEME_EFFECTS];",
+         "extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];",
+         "extern const uint16_t moy_theme_lum[64];",
+         "extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];",
+         "extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];",
+         "extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];",
+         "extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];",
+         "extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,",
+         "    moy_theme_n_effects;"]
+    c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
+    for r, k, v in rules:
+        c.append("    {%d, %d, %d},  // %s" % (r, k, v, roles[r]))
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_rules_at[3][2] = {%s};\n"
+             % ", ".join("{%d, %d}" % a for a in at))
+    c.append("const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {%s};\n"
+             % ", ".join(map(str, flags)))
+    c.append("const char *const moy_theme_role_names[MOY_THEME_ROLES] = {")
+    c.extend("    %s," % _c_str(r) for r in roles)
+    c.append("};\n")
+    c.append("const char *const moy_theme_metric_names[MOY_THEME_METRICS] = {")
+    c.extend("    %s," % _c_str(m) for m in metrics)
+    c.append("};\n")
+    c.append("const int8_t moy_theme_metric_range[MOY_THEME_METRICS][2] = {%s};\n"
+             % ", ".join("{%d, %d}" % tuple(th["metrics"][m]) for m in metrics))
+    c.append("const char *const moy_theme_effect_names[MOY_THEME_EFFECTS] = {")
+    c.extend("    %s," % _c_str(e) for e in th["effects"])
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {")
+    for a, b in th["pairs"]:
+        c.append("    {%d, %d},  // %s / %s" % (roles.index(a), roles.index(b), a, b))
+    c.append("};\n")
+    lum = _luminance()
+    c.append("const uint16_t moy_theme_lum[64] = {")
+    for i in range(0, 64, 8):
+        c.append("    %s," % ", ".join("%5d" % v for v in lum[i:i + 8]))
+    c.append("};\n")
+    c.append("const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {")
+    c.extend("    %s," % _c_str(k) for k in th["reserved"])
+    c.append("};\n")
+    c.append("const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {")
+    c.extend("    %s," % _c_str(n) for n, _s in seeds)
+    c.append("};\n")
+    c.append("const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {")
+    for n, src in seeds:
+        lines = src.decode("utf-8").splitlines(True)
+        c.append("    // themes/%s.json" % n)
+        c.extend("    %s" % _c_str(ln) for ln in lines[:-1])
+        c.append("    %s," % _c_str(lines[-1]))
+    c.append("};\n")
+    c.append("const int moy_ui_n_themes = MOY_THEME_SEEDS;")
+    c.append("const int moy_theme_n_roles = MOY_THEME_ROLES;")
+    c.append("const int moy_theme_n_metrics = MOY_THEME_METRICS;")
+    c.append("const int moy_theme_n_effects = MOY_THEME_EFFECTS;")
+    c.append("const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {%s};\n"
+             % ", ".join(str(len(s)) for _n, s in seeds))
+    return h, c
 
 
 def generate_strings(strings):
@@ -297,7 +441,7 @@ def load_strings(d):
 
 def outputs(ui_dir=DIR, str_dir=STR_DIR):
     """[(path, text)] of every generated file."""
-    h, c = generate(load(ui_dir))
+    h, c = generate(load(ui_dir), ui_dir)
     sh, sc = generate_strings(load_strings(str_dir))
     return [(os.path.join(ui_dir, "moy_ui_tables.h"), h),
             (os.path.join(ui_dir, "moy_ui_tables.c"), c),

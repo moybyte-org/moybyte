@@ -9,11 +9,14 @@
 #include "py/objstr.h"
 
 #include "moy_ui.h"
+#include "moy_theme.h"
 #include "moy_str.h"
 #include "moy_ui_wasm.h"
 
+#define NAMES_CAP (MOY_UI_KINDS > MOY_THEME_ROLES ? MOY_UI_KINDS : MOY_THEME_ROLES)
+
 static mp_obj_t names_tuple(const char *const *names, int n) {
-    mp_obj_t items[MOY_UI_KINDS > MOY_UI_TOKENS ? MOY_UI_KINDS : MOY_UI_TOKENS];
+    mp_obj_t items[NAMES_CAP];
     for (int i = 0; i < n; i++) {
         items[i] = mp_obj_new_str(names[i], strlen(names[i]));
     }
@@ -82,6 +85,95 @@ static mp_obj_t ui_skin(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_str(name, strlen(name));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_skin_obj, 0, 1, ui_skin);
+
+// -- themes (moy_theme.h) ----------------------------------------------------------
+
+// themes(): the seed packages' names, the default first.
+static mp_obj_t ui_themes(void) {
+    return names_tuple(moy_theme_seed_names, MOY_THEME_SEEDS);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_themes_obj, ui_themes);
+
+// theme_roles(): the role row's names, the tokens first.
+static mp_obj_t ui_theme_roles(void) {
+    return names_tuple(moy_theme_role_names, MOY_THEME_ROLES);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_roles_obj, ui_theme_roles);
+
+// theme(name, light) -> (row, unreadable, rc): the flattened role row as a
+// tuple of MOY_THEME_ROLES ints, the readability bits, and OK or the refusal
+// the default's row stands in for.
+static mp_obj_t ui_theme(mp_obj_t name, mp_obj_t light) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    int32_t row[MOY_THEME_ROLES];
+    uint32_t bad = 0;
+    int rc = moy_theme_resolve(s, n, mp_obj_is_true(light) ? MOY_THEME_LIGHT
+                               : MOY_THEME_DARK, row, &bad);
+    mp_obj_t items[MOY_THEME_ROLES];
+    for (int i = 0; i < MOY_THEME_ROLES; i++) {
+        items[i] = MP_OBJ_NEW_SMALL_INT(row[i]);
+    }
+    mp_obj_t out[3] = {mp_obj_new_tuple(MOY_THEME_ROLES, items),
+                       mp_obj_new_int_from_uint(bad), MP_OBJ_NEW_SMALL_INT(rc)};
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_obj, ui_theme);
+
+static mp_obj_t name_obj(const char *s) {
+    return mp_obj_new_str(s, strlen(s));
+}
+
+// theme_shape(name) -> (metrics, effects): the metrics as a tuple in
+// style.json's order, and each text effect other than none as a tuple
+// (part, state, effect, role) of names.
+static mp_obj_t ui_theme_shape(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    int8_t m[MOY_THEME_METRICS];
+    uint8_t fx[MOY_UI_KINDS][MOY_UI_STATES][2];
+    moy_theme_shape(s, n, m, fx);
+    mp_obj_t mi[MOY_THEME_METRICS];
+    for (int i = 0; i < MOY_THEME_METRICS; i++) {
+        mi[i] = MP_OBJ_NEW_SMALL_INT(m[i]);
+    }
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (int k = 0; k < MOY_UI_KINDS; k++) {
+        for (int st = 0; st < MOY_UI_STATES; st++) {
+            if (fx[k][st][0] == 0) {
+                continue;
+            }
+            mp_obj_t e[4] = {name_obj(moy_ui_kind_names[k]), name_obj(moy_ui_state_names[st]),
+                             name_obj(moy_theme_effect_names[fx[k][st][0]]),
+                             name_obj(moy_theme_role_names[fx[k][st][1]])};
+            mp_obj_list_append(list, mp_obj_new_tuple(4, e));
+        }
+    }
+    size_t len;
+    mp_obj_t *items;
+    mp_obj_list_get(list, &len, &items);
+    mp_obj_t out[2] = {mp_obj_new_tuple(MOY_THEME_METRICS, mi), mp_obj_new_tuple(len, items)};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_shape_obj, ui_theme_shape);
+
+// theme_install(src) -> (rc, notes): src a theme.json's bytes.
+static mp_obj_t ui_theme_install(mp_obj_t src) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(src, &b, MP_BUFFER_READ);
+    uint8_t notes = 0;
+    int rc = moy_theme_install(b.buf, b.len, &notes);
+    mp_obj_t out[2] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes)};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_install_obj, ui_theme_install);
+
+// theme_installed(): the installed package's name, or None.
+static mp_obj_t ui_theme_installed(void) {
+    const char *s = moy_theme_installed();
+    return s == NULL ? mp_const_none : mp_obj_new_str(s, strlen(s));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_installed_obj, ui_theme_installed);
 
 static mp_obj_t ui_gen(void) {
     return mp_obj_new_int_from_uint(moy_ui_gen());
@@ -916,6 +1008,12 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_skins), MP_ROM_PTR(&ui_skins_obj) },
     { MP_ROM_QSTR(MP_QSTR_skin), MP_ROM_PTR(&ui_skin_obj) },
     { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&ui_gen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_themes), MP_ROM_PTR(&ui_themes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme), MP_ROM_PTR(&ui_theme_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_roles), MP_ROM_PTR(&ui_theme_roles_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_shape), MP_ROM_PTR(&ui_theme_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_install), MP_ROM_PTR(&ui_theme_install_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
     { MP_ROM_QSTR(MP_QSTR_look), MP_ROM_PTR(&ui_look_obj) },
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&ui_colors_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },

@@ -22,7 +22,7 @@ import pytest
 
 import ui_twin as twin
 from runtime import ui
-from runtime.chrome import THEME_VARIANTS, THEMES, theme_colors
+from runtime.chrome import THEME_VARIANTS, THEME_NAMES, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 
@@ -67,7 +67,7 @@ LABELS = ("", "A", "OK", "PLAY", "CHANGE", "Config", "DELETE FOREVER",
           "a label much wider than any box it is drawn into",
           "café", "Ünïcödé Läbël",
           "日本語", "x€y\U0001f600z")
-THEME_SETS = [(n, v) for n, _t in THEMES for v in THEME_VARIANTS]
+THEME_SETS = [(n, v) for n in THEME_NAMES for v in THEME_VARIANTS]
 STATE_ARGS = (None, "hover", "pressed")
 
 

@@ -12,6 +12,7 @@ target_sources(usermod_moy_ui INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_sink.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_wasm.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_tables.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_theme.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_ui.c)
 # It draws through native/moy_gfx's text path into native/moy_glass's canvas
 # rows, whose handle table is native/moy_spine's.

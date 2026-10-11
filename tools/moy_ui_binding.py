@@ -34,6 +34,10 @@ _SIGS = (
     ("moy_ui_skin_use", [_P, _Z], _I),
     ("moy_ui_skin", [], _I),
     ("moy_ui_gen", [], c.c_uint32),
+    ("moy_theme_resolve", [_P, _Z, _I, c.c_void_p, c.POINTER(c.c_uint32)], _I),
+    ("moy_theme_install", [_P, _Z, c.POINTER(c.c_uint8)], _I),
+    ("moy_theme_shape", [_P, _Z, c.c_void_p, c.c_void_p], _I),
+    ("moy_theme_installed", [], c.c_char_p),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
@@ -577,6 +581,50 @@ def binding():
     m.skins = lambda: skins
     m.skin = skin
     m.gen = lambda: lib.moy_ui_gen()
+    seeds = _names(lib, "moy_theme_seed_names", c.c_int.in_dll(lib, "moy_ui_n_themes").value)
+    m.themes = lambda: seeds
+    n_roles = c.c_int.in_dll(lib, "moy_theme_n_roles").value
+    roles = _names(lib, "moy_theme_role_names", n_roles)
+    metric_n = c.c_int.in_dll(lib, "moy_theme_n_metrics").value
+    effect_names = _names(lib, "moy_theme_effect_names",
+                          c.c_int.in_dll(lib, "moy_theme_n_effects").value)
+    m.theme_roles = lambda: roles
+
+    def theme_shape(name):
+        b = _b(name)
+        mets = (c.c_int8 * metric_n)()
+        fx = (c.c_uint8 * (len(kinds) * len(states) * 2))()
+        lib.moy_theme_shape(b, len(b), mets, fx)
+        out = []
+        for k in range(len(kinds)):
+            for st in range(len(states)):
+                i = (k * len(states) + st) * 2
+                if fx[i]:
+                    out.append((kinds[k], states[st], effect_names[fx[i]], roles[fx[i + 1]]))
+        return tuple(mets), tuple(out)
+
+    m.theme_shape = theme_shape
+
+    def theme(name, light):
+        b = _b(name)
+        row = (c.c_int32 * n_roles)()
+        bad = c.c_uint32()
+        rc = lib.moy_theme_resolve(b, len(b), 1 if light else 0, row, c.byref(bad))
+        return tuple(row), bad.value, rc
+
+    def theme_install(src):
+        b = bytes(src)
+        notes = c.c_uint8()
+        rc = lib.moy_theme_install(b, len(b), c.byref(notes))
+        return rc, notes.value
+
+    def theme_installed():
+        s = lib.moy_theme_installed()
+        return None if s is None else s.decode()
+
+    m.theme = theme
+    m.theme_install = theme_install
+    m.theme_installed = theme_installed
     m.look = look
     m.colors = colors
     m.metrics = metrics

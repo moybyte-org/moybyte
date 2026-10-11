@@ -311,7 +311,7 @@ console needs while no Python app runs is OS.
 | `runtime/cart_index.py` | app | — | Get Carts' engine: the index, the per-console plan and `Install`; it writes through the store |
 | `runtime/cart_manager.py` | store | 1b | the shelf's roster: scan, new, duplicate, delete, favorites and recents |
 | `runtime/cart_verbs.py` | cart path | open | the cart API's names as one tuple, read by the code editor's highlighter and the block compiler; follows `runtime/cart_api.py` |
-| `runtime/chrome.py` | split | 5 + 6 + 7, rest stays | the live token table crossed (5: native/moy_app's, which the look writes), and `THEMES`, `theme_colors` and the default bar icons stay data the look reads (`docs/kernel_appabi_2026-10.md` §6); colour names, the glyph vocabulary and scaled-text helpers → 6; `Layout` → 7 with the bar it positions; `CodeLayout` stays with the Editor |
+| `runtime/chrome.py` | split | 5 + 6 + 7, rest stays | the live token table crossed (5: native/moy_app's, which the look writes), and `theme_colors` (over native/moy_ui's theme loader, `docs/theming_2026-09.md`) and the default bar icons stay what the look reads (`docs/kernel_appabi_2026-10.md` §6); colour names, the glyph vocabulary and scaled-text helpers → 6; `Layout` stays Python with the bar it positions (sprint 7 does not run); `CodeLayout` stays with the Editor |
 | `runtime/code_layer.py` | app | — | the Editor's Code tab |
 | `runtime/console.py` | split | 2 + 7 | the spine's half is `runtime/console_spine.py` (2); the layer stack, frame, pointer, composite and the rest → 7, where the file is deleted; `wire_workstation_core` loses a line as each service crosses |
 | `runtime/console_spine.py` | spine | 2 | the run and exit verbs, app registration and resolution, the WiFi lease and the settings wiring, over `native/moy_spine`; its Python side (the app objects, the surfaces a route lands on, the radio glue) stays until each subject's sprint (`docs/kernel_spine_2026-10.md`) |
@@ -811,11 +811,11 @@ Sprint 4 is where the memory half's acceptance test is met and the cart path
 runs VM-free. Sprints 5 to 7 finish the line as far as the scope the owner
 chooses before sprint 5 takes them (§10 question 8).
 
-**The Studio's Run pane is sprint 7's concern.** `docs/studio_2026-09.md` docks
-the playtest window into a pane the Editor lends, which is new policy in
-`runtime/wm_windowed.py`. It lands before sprint 7 starts, so the port carries
-it, or it is designed into sprint 7; it never lands during sprint 6 or 7, whose
-gates hold pixels (`docs/theming_2026-09.md` §8 sets the same rule for
+**The Studio's Run pane is window-manager policy.** `docs/studio_2026-09.md`
+docks the playtest window into a pane the Editor lends, which is new policy in
+`runtime/wm_windowed.py`; the window managers stay Python (sprint 7 does not
+run, §10 question 8), so the pane is Python too. It never landed during sprint
+6, whose gate held pixels (`docs/theming_2026-09.md` §8 sets the same rule for
 theming). The Player in the pane is the same Player, so sprint 4's gate is
 unaffected.
 
@@ -935,7 +935,7 @@ makes it false, not annotated:
 | "MicroPython is the shell and is not the engine" | `docs/moycore_direction.md` §1 | sprint 4 |
 | the C-layers decision ("a second console in C") | `docs/moycore_direction.md` §3 | sprint 4 |
 | "Presentation stays per-board and outside moycore" | `docs/moycore_direction.md` §3 | stands — the kernel is not moycore; re-read at sprint 3 |
-| `console.py` as the shell kernel | `.claude/rules/shell.md` | sprint 7 |
+| `console.py` as the shell kernel | `.claude/rules/shell.md` | stands: sprint 7 does not run (§10 question 8) |
 | the Surface's home and producer-owned dirty signals | `docs/surface_model_v1.md` §2–§3 | the amendment, before sprint 3 |
 | the roles as object-returning methods | `docs/app_api_v1.md` | sprint 5 |
 | the heap "never gives an area back" (false as mechanism: §1.3) | `tools/esp32_build_lib.sh`, the split reserve's comment | the next change that touches the file — a comment edit alone would run the firmware build |

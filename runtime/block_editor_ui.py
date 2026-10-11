@@ -1938,9 +1938,7 @@ class BlockEditorUI:
             return
         b = row.block
         cat = self._blk_block_cat(b)
-        fill = NAMES[_blocks_mod.CATEGORY_COLOR.get(cat, "dark_grey")]
-        if row.is_else:
-            fill = NAMES["orange"]
+        fill = self._cat_color(_blocks_mod.CAT_CONTROL if row.is_else else cat)
         label = self._blk_row_text(b, row.is_else)
         is_body = (not row.is_else) and self._is_body_block(b)
         # tile width: fit the content (a discrete Scratch block, not a full-width bar).
@@ -1991,6 +1989,12 @@ class BlockEditorUI:
         sval = self._blk_slot_display(b, slots[si])
         cv.rect(x + 4 * fs + col0 * cell, y + 12 * fs,
                 max(cell, len(sval) * cell), fs, NAMES["yellow"])
+
+    def _cat_color(self, cat):
+        """A block category's colour: the theme's `block_<category>` content
+        role (the Scratch look by default), dark grey for no category."""
+        c = self.ws.look.content_colors().get("block_" + str(cat))
+        return self._NAMES["dark_grey"] if c is None else c
 
     def _blk_block_cat(self, b):
         d = _blocks_mod.block_def(b.get("t"))
@@ -2173,12 +2177,11 @@ class BlockEditorUI:
         # My Blocks rows (#48): "+ new block" and every "call NAME" carry the category
         # color so the palette reads consistently.
         if item == _NEW_PROC_ITEM or item[:len(_CALL_PREFIX)] == _CALL_PREFIX:
-            return NAMES[_blocks_mod.CATEGORY_COLOR.get(_blocks_mod.CAT_PROCS,
-                                                        "dark_grey")]
+            return self._cat_color(_blocks_mod.CAT_PROCS)
         if m["mode"] == "cat":
-            return NAMES[_blocks_mod.CATEGORY_COLOR.get(item, "dark_grey")]
+            return self._cat_color(item)
         if m["mode"] in ("blk", "expr"):
             d = _blocks_mod.block_def(item)
             if d:
-                return NAMES[_blocks_mod.CATEGORY_COLOR.get(d["category"], "dark_grey")]
+                return self._cat_color(d["category"])
         return None

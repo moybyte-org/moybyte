@@ -9,7 +9,7 @@ import os
 import re
 
 import ui_twin as twin
-from runtime.chrome import THEME_VARIANTS, THEMES, theme_colors
+from runtime.chrome import THEME_VARIANTS, THEME_NAMES, theme_colors
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STYLE = os.path.join(ROOT, "native", "moy_ui", "style.json")
@@ -137,7 +137,7 @@ def test_every_key_a_spec_reads_is_in_the_token_vocabulary():
                     _roles_read(spec, read)
     vocab = _vocabulary()
     held = set()
-    for name, _t in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             held.update(k for k in theme_colors(name, variant) if k in read)
     assert held, "no theme holds any key a spec reads: the ratchet is vacuous"

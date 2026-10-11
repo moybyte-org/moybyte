@@ -59,7 +59,7 @@ class ThemeServer:
     table the look writes at every switch (`Appearance.publish`).
 
     A theme PICKER wants the OTHER themes' tokens too. That is not a role:
-    `chrome.THEMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
+    `chrome.THEME_NAMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
     module an app imports directly, exactly as `ui` is imported directly."""
 
     def __init__(self, ws):

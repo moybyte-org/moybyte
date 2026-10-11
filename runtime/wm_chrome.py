@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
 # title strip / accents / dim texture) reads the ws.theme_colors tokens per draw
-# (chrome.THEMES, Settings -> THEME; the "night" default is the moybyte site
+# (chrome.theme_colors, Appearance -> THEMES; the "night" default is the moybyte site
 # colorway -- midnight navy panels, lavender strips, the yellow CTA accent).
 _SHADOW = NAMES["black"]
 _BTN_X_FG = NAMES["red"]

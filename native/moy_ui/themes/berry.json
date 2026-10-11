@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "name": "berry",
+  "colors": {
+    "dark": {
+      "panel": 62, "edge": 14, "title": 14, "title_ink": 0, "accent": 10,
+      "hilite": 2, "dim": 63
+    },
+    "light": {
+      "panel": 7, "edge": 62, "title": 14, "title_ink": 0, "accent": 10,
+      "hilite": 25, "dim": 6, "desktop": 25, "desktop_pattern": 7,
+      "border": 62
+    }
+  }
+}

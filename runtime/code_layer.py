@@ -990,13 +990,31 @@ class CodeLayer:
 
     # -- draw ----------------------------------------------------------------
 
-    # Light-surface syntax set (visual identity v1 Phase 3): the dark-background
-    # highlight colors above don't read on the warm cream surface, so runs remap
-    # through this at draw time (per RUN, not per char -- the _hl memo stays
-    # untouched). Deep, §4.2-friendly hues: black text, deep teal keywords, dark
-    # green strings, brown numbers, dim warm comments, dark purple cart verbs.
-    _HL_LIGHT = {_HL_TEXT: 0, _HL_KEYWORD: 59, _HL_STRING: 3,
-                 _HL_NUMBER: 4, _HL_COMMENT: 53, _HL_BUILTIN: 2}
+    # The syntax colours are the theme's CONTENT roles (`code_*`, style.json's
+    # theme section): the highlighter tags each char with its class (the _HL_*
+    # indices above), and runs remap through the theme's roles at draw time
+    # (per RUN, not per char -- the _hl memo stays untouched). The default
+    # derivation gives a light surface deep, §4.2-friendly hues (black text,
+    # deep teal keywords, dark green strings, brown numbers, dim warm comments,
+    # dark purple cart verbs) and a dark one the classes' own colours.
+    # The map is rebuilt only when the content dict changes (one shared dict
+    # per theme and variant), so a draw allocates nothing.
+    _hl_src = None
+    _hl_val = None
+
+    def _hl_map(self):
+        c = self.ws.look.content_colors()
+        if c is not self._hl_src:
+            m = {_HL_TEXT: c["code_text"], _HL_KEYWORD: c["code_keyword"],
+                 _HL_STRING: c["code_string"], _HL_NUMBER: c["code_number"],
+                 _HL_COMMENT: c["code_comment"], _HL_BUILTIN: c["code_builtin"]}
+            self._hl_val = None
+            for k, v in m.items():
+                if k != v:
+                    self._hl_val = m
+                    break
+            self._hl_src = c
+        return self._hl_val
 
     def _tones(self):
         """Per-draw color roles: frozen literals on the 320x240 baseline
@@ -1008,9 +1026,9 @@ class CodeLayer:
         # outline + the dim gutter number ink. indigo/orange read on every surface the
         # editor uses; on a light theme the selection uses the theme hilite token.
         # The frozen 320x240 literals hold only in DARK chrome; a light theme
-        # variant themes the base tier too (owner ask 2026-07-23) -- the light
-        # branch below carries the _HL_LIGHT syntax set, so code is exactly
-        # "light and dark" on the small tier.
+        # variant themes the base tier too (owner ask 2026-07-23), with the
+        # theme's syntax roles, so code is exactly "light and dark" on the
+        # small tier.
         if self.ws.code_layout._base and not self.ws.look.light_chrome():
             return _as_theme({"bg": NAMES["black"], "caret": NAMES["yellow"],
                               "sym_bg": NAMES["dark_grey"],
@@ -1024,14 +1042,14 @@ class CodeLayer:
                               "caret": th.get("accent", NAMES["yellow"]),
                               "sym_bg": NAMES["dark_grey"],
                               "sym_edge": th.get("hilite", NAMES["indigo"]),
-                              "sym_ink": NAMES["white"], "hl": None,
+                              "sym_ink": NAMES["white"], "hl": self._hl_map(),
                               "sel": th.get("hilite", NAMES["indigo"]),
                               "find": NAMES["orange"],
                               "gutter": NAMES["dark_grey"]})
         return _as_theme({"bg": th["surface"], "caret": th["ink"],
                           "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
                           "sym_edge": th["border"], "sym_ink": th["ink"],
-                          "hl": self._HL_LIGHT,
+                          "hl": self._hl_map(),
                           "sel": th.get("hilite", NAMES["indigo"]),
                           "find": NAMES["orange"],
                           "gutter": th.get("border", NAMES["dark_grey"])})

@@ -6,8 +6,7 @@
 #   CodeLayout                        responsive code-editor geometry
 #   -- Button icon glyphs             the pre-literate icon vocabulary
 #   -- the unified top bar's icon theme  the bar's icon sheet
-#   -- Panel THEMES                   the theme token tables
-#   -- Light variants                 theme_colors
+#   -- Panel THEMES                   THEME_NAMES, the seed packages' names
 #   theme_colors                      the full token dict for a theme and variant
 """The console's stateless base layer -- the chrome + geometry the shared Moybyte
 console draws with, extracted from console.py so the Workstation kernel is alone in
@@ -767,180 +766,63 @@ _ICON_ART = {
 _ICON_VERSION = 5
 
 
-# --- Panel THEMES (owner ask, 2026-07-08) -----------------------------------
-# Named token sets for the console's PANEL chrome -- the Settings panel, the Make
-# picker backdrop, the windowed WM's title strips / borders / taskbar chips, and
-# the launcher's selection accents. Selectable in Settings -> THEME, persisted in
-# system.json. Color tokens are MOY64 indices; presentation flags are booleans:
-#   panel     -- panel / window-strip background (the dark field)
-#   edge      -- panel border + secondary chrome ink (the theme's tint family)
-#   title     -- the FOCUSED window title strip (windowed WM)
-#   title_ink -- ink on that strip
-#   accent    -- the CTA: focused taskbar chip, selected tile ring/pill, rubber band
-#   hilite    -- row/tile selection background
-#   dim       -- faint texture (picker dots, unfocused window borders)
-# "night" is the moybyte brand colorway (the site palette) and MUST keep today's
-# exact values -- it's the default, and the golden/parity nets pin its pixels.
-#
-# Visual identity v1 (docs/visual_identity_v1.md Section 4.3) adds SEMANTIC roles on
-# top of the original seven: a theme dict may also carry any of the keys below, and
-# theme_colors() fills every missing role from the base tokens / the frozen literals
-# (see _SEMANTIC_ALIAS / _SEMANTIC_STATIC / _SEMANTIC_FLAGS), so legacy themes
-# resolve them without repeating themselves and "night" stays byte-identical.
-# Surfaces migrating off scattered literal indices read the roles; the defaults
-# ARE today's literals.
-#   desktop / desktop_pattern -- the construction field + its sparse dot grid
-#   surface / surface_alt / ink / ink_dim -- tool surface + text (Phase 3 Studio)
-#   surface_light -- boolean presentation class; never inferred from a color index
-#   border    -- 1px panel/window border
-#   selection -- selected row/tile background
-#   focus     -- keyboard/pointer focus (yellow in every shipped theme)
-#   play      -- the PLAY verb / success / healthy state (signal green)
-#   author    -- the MAKE/CHANGE authoring accent
-#   danger    -- destructive confirm / errors only (red)
-THEMES = (
-    ("night",  {"panel": 60, "edge": 13, "title": 13, "title_ink": 0,
-                "accent": 10, "hilite": 13, "dim": 1}),
-    ("indigo", {"panel": 61, "edge": 13, "title": 13, "title_ink": 0,
-                "accent": 10, "hilite": 13, "dim": 1}),
-    ("berry",  {"panel": 62, "edge": 14, "title": 14, "title_ink": 0,
-                "accent": 10, "hilite": 2, "dim": 63}),
-    ("forest", {"panel": 58, "edge": 11, "title": 11, "title_ink": 0,
-                "accent": 10, "hilite": 3, "dim": 59}),
-    ("slate",  {"panel": 54, "edge": 6, "title": 6, "title_ink": 0,
-                "accent": 9, "hilite": 5, "dim": 55}),
-    # Open Machine (docs/visual_identity_v1.md, the chosen direction): the dark-blue
-    # construction field with a navy dot grid + raised chrome (Section 4.2's strict
-    # jobs: 1 = field, 60 = raised dark panel/inactive chrome), grape for identity/
-    # selection (Moy, focused titles, selected tabs), and the signal verbs -- yellow
-    # focus, green PLAY, orange authoring. Opt-in (Settings -> THEME), never a
-    # mutation of the "night" default.
-    # (title = cool paper 48: the mockup's warm-LIGHT window strips/toolbars with
-    # dark ink; grape stays the SELECTION color -- tabs read "selection", not
-    # "title", so the two roles diverge cleanly.)
-    ("machine", {"panel": 1, "edge": 60, "title": 48, "title_ink": 0,
-                 "accent": 10, "hilite": 60, "dim": 60,
-                 "desktop": 1, "desktop_pattern": 60, "surface": 7,
-                 "surface_alt": 52, "ink": 0, "ink_dim": 53, "border": 1,
-                 "selection": 13, "focus": 10, "play": 11, "author": 9,
-                 "danger": 8, "surface_light": True}),
-)
-DEFAULT_THEME = "night"
-
-# --- Light variants (owner ask, 2026-07-23) ---------------------------------
-# Every theme family now ships a DARK and a LIGHT presentation of the same hue
-# identity (visual identity v1 Section 4.3's `surface_light` class, generalized
-# from the one "machine" theme to the whole catalog). THEMES above stays the
-# DARK set -- byte-identical, it is what every existing caller/golden pins.
-# The light sets below are FULL token dicts (base + semantic roles): light
-# papers/pastels for fields, dark ink, the family's tint kept for titles/
-# selection so switching variant never changes a theme's identity. Palette
-# jobs (Section 4.2 discipline): 48 cool paper / 52 warm paper / 7 cream for
-# surfaces, 49/6 for quiet texture, 53 dim warm ink, pastels 19/22/24/25 for
-# the per-family selection wash; signal verbs stay yellow/green/orange/red.
+# --- Panel THEMES ----------------------------------------------------------
+# A theme is a data package (docs/theming_2026-09.md): the seeds are
+# native/moy_ui/themes/*.json, embedded in the image and read by the C loader
+# (native/moy_ui/moy_theme.c), which validates them, walks `inherits` and
+# fills every role a package leaves unset from style.json's derivation rules.
+# The roles are style.json's `tokens`; their jobs are
+# docs/visual_identity_v1.md Section 4.3's. Colour roles are MOY64 indices;
+# `surface_light` and `bar_light` are presentation flags (booleans here).
+# The default is the first seed ("night", the moybyte site palette), and a
+# name no package provides resolves as the default.
+THEME_NAMES = _ui._C.themes()
+DEFAULT_THEME = THEME_NAMES[0]
 THEME_VARIANTS = ("dark", "light")
 DEFAULT_VARIANT = "dark"
-_LIGHT_COMMON = {"surface": 7, "surface_alt": 52, "ink": 0, "ink_dim": 53,
-                 "chrome_ink": 0, "chrome_ink_dim": 53, "selection_ink": 0,
-                 "focus": 10, "play": 11, "author": 9, "danger": 8,
-                 "surface_light": True, "bar_light": True}
-THEME_LIGHT = {
-    "night":  {"panel": 48, "edge": 60, "title": 13, "title_ink": 0,
-               "accent": 10, "hilite": 22, "dim": 49,
-               "desktop": 22, "desktop_pattern": 48, "border": 60},
-    "indigo": {"panel": 48, "edge": 61, "title": 13, "title_ink": 0,
-               "accent": 10, "hilite": 24, "dim": 49,
-               "desktop": 24, "desktop_pattern": 48, "border": 61},
-    "berry":  {"panel": 7, "edge": 62, "title": 14, "title_ink": 0,
-               "accent": 10, "hilite": 25, "dim": 6,
-               "desktop": 25, "desktop_pattern": 7, "border": 62},
-    "forest": {"panel": 52, "edge": 58, "title": 11, "title_ink": 0,
-               "accent": 10, "hilite": 19, "dim": 6,
-               "desktop": 19, "desktop_pattern": 52, "border": 58,
-               "surface": 52, "surface_alt": 31},
-    "slate":  {"panel": 6, "edge": 54, "title": 50, "title_ink": 7,
-               "accent": 9, "hilite": 48, "dim": 49,
-               "desktop": 49, "desktop_pattern": 6, "border": 54,
-               "surface": 6, "surface_alt": 48},
-    # Open Machine by day: the construction field itself turns to cool paper
-    # with a quiet grey dot grid; tool surfaces stay cream, grape stays the
-    # selection identity (Section 4.2's jobs, light-inverted).
-    "machine": {"panel": 48, "edge": 60, "title": 48, "title_ink": 0,
-                "accent": 10, "hilite": 22, "dim": 49,
-                "desktop": 48, "desktop_pattern": 49, "border": 1,
-                "selection": 13},
-}
-
-# Semantic-role fallbacks (visual identity v1 Section 4.3). Aliases resolve a missing
-# role from the theme's own base tokens; statics are the frozen literals the surfaces
-# hardcode today, so a legacy theme keeps its exact pixels when a surface switches
-# from the literal to the role.
-_SEMANTIC_ALIAS = (("desktop", "panel"), ("desktop_pattern", "dim"),
-                   ("surface", "panel"), ("surface_alt", "panel"),
-                   ("border", "edge"), ("selection", "hilite"),
-                   ("focus", "accent"),
-                   # Section 4.3's window-strip roles: default to the base
-                   # title/panel tokens the WM reads today.
-                   ("title_active", "title"), ("title_inactive", "panel"))
-_SEMANTIC_STATIC = (("ink", 7), ("ink_dim", 6),      # white / light-grey text
-                    # Ink on the OS chrome itself (bar/taskbar/window strips/
-                    # focused ring) as opposed to `ink` on tool SURFACES -- the
-                    # two diverge in "machine" (dark chrome, light surfaces).
-                    ("chrome_ink", 7), ("chrome_ink_dim", 6),
-                    # Ink on a selection/hilite fill (every dark theme's hilite
-                    # is a dark tint -- white ink; light pastel fills flip it).
-                    ("selection_ink", 7),
-                    # The OS bar band: frozen black + dark-grey shelf edge
-                    # on every dark theme.
-                    ("bar", 0), ("bar_edge", 5),
-                    ("play", 11),                    # signal green: PLAY/healthy
-                    ("author", 10),                  # today's Make-tile yellow
-                    ("danger", 8))                   # red: errors/destructive only
-_SEMANTIC_FLAGS = (("surface_light", False), ("bar_light", False))
+_THEME_FLAGS = ("surface_light", "bar_light")
 _THEME_CACHE = {}
+_CONTENT_CACHE = {}
 
 
 def theme_colors(name, variant=DEFAULT_VARIANT):
-    """The full token dict for theme `name` in `variant` ("dark"/"light"): base
-    tokens + every semantic role, missing roles resolved per _SEMANTIC_ALIAS/
-    _SEMANTIC_STATIC, falling back to the default theme (and to the dark set
-    when a theme has no light tokens). Returns a shared cached dict (treat as
-    read-only). The one-arg call keeps its exact pre-variant behavior."""
-    resolved = DEFAULT_THEME
-    for n, _tokens in THEMES:
-        if n == name:
-            resolved = name
-            break
+    """The full token dict for theme `name` in `variant` ("dark"/"light"),
+    flattened by the C loader: every role set, an unknown name or variant
+    resolving as the default's. Returns a shared cached dict (treat as
+    read-only)."""
+    if name not in THEME_NAMES:
+        name = DEFAULT_THEME
     if variant not in THEME_VARIANTS:
         variant = DEFAULT_VARIANT
-    if variant == "light" and resolved not in THEME_LIGHT:
-        variant = "dark"
-    key = (resolved, variant)
+    key = (name, variant)
     cached = _THEME_CACHE.get(key)
     if cached is None:
-        tokens = None
-        for n, t in THEMES:
-            if n == resolved:
-                tokens = t
-                break
-        if variant == "light":
-            tokens = dict(_LIGHT_COMMON)
-            tokens.update(THEME_LIGHT[resolved])
-            # The OS bar band follows the light panel tone unless a theme
-            # says otherwise (dark themes keep the frozen black band, below).
-            tokens.setdefault("bar", tokens["panel"])
-            tokens.setdefault("bar_edge", tokens["dim"])
-        cached = dict(tokens)
-        for role, base in _SEMANTIC_ALIAS:
-            if role not in cached:
-                cached[role] = cached[base]
-        for role, idx in _SEMANTIC_STATIC:
-            if role not in cached:
-                cached[role] = idx
-        for role, value in _SEMANTIC_FLAGS:
-            if role not in cached:
-                cached[role] = value
+        row = _ui._C.theme(name, variant == "light")[0]
+        cached = {}
+        for role, v in zip(_ui._C.tokens(), row):
+            cached[role] = bool(v) if role in _THEME_FLAGS else v
         _THEME_CACHE[key] = cached
+    return cached
+
+
+def theme_content(name, variant=DEFAULT_VARIANT):
+    """The CONTENT roles of theme `name` in `variant` -- code syntax and block
+    colours (style.json's `theme.content`), which are not in the live token
+    row apps read. A shared cached dict, resolved as `theme_colors` is."""
+    if name not in THEME_NAMES:
+        name = DEFAULT_THEME
+    if variant not in THEME_VARIANTS:
+        variant = DEFAULT_VARIANT
+    key = (name, variant)
+    cached = _CONTENT_CACHE.get(key)
+    if cached is None:
+        row = _ui._C.theme(name, variant == "light")[0]
+        roles = _ui._C.theme_roles()
+        n = len(_ui._C.tokens())
+        cached = {}
+        for i in range(n, len(roles)):
+            cached[roles[i]] = row[i]
+        _CONTENT_CACHE[key] = cached
     return cached
 
 

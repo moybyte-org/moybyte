@@ -387,8 +387,9 @@ record already. Everything else in the role is shell-served.
 writes the live token table and then rebuilds `ws.theme_colors` and the caches
 keyed on it; `set_skin` installs the skin in the Python toolkit;
 `select_wallpaper` drives the Python component; the scales go into the surface
-rows through the relayout. The theme catalogue (`runtime/chrome.py`'s `THEMES`
-and `theme_colors`) stays data the look reads; only the live table crosses.
+rows through the relayout. The theme catalogue (the seed packages native/moy_ui's
+loader flattens, read through `runtime/chrome.py`'s `theme_colors`) is what the
+look reads; only the live table crosses.
 
 **`ArtworkService`** (`runtime/artwork.py`) is Paint's document model and
 stops being a role: Paint builds it over its own grant

@@ -141,5 +141,39 @@ extern const char *const moy_ui_metric_slots[MOY_UI_KINDS];
 // The glyph vocabulary: each glyph's rows, bit (size - 1 - col) the ink.
 extern const char *const moy_ui_glyph_names[MOY_UI_GLYPHS];
 extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
+// Theme packages, format 1 (moy_theme.c): the limits, the derivation
+// rules, the readability pairs, MOY64's luminance and the seeds.
+#define MOY_THEME_FORMAT 1
+#define MOY_THEME_SEEDS 6
+#define MOY_THEME_BYTES 4096
+#define MOY_THEME_DEPTH 4
+#define MOY_THEME_RULES 59
+#define MOY_THEME_PAIRS 7
+#define MOY_THEME_CONTRAST 30
+#define MOY_THEME_RESERVED 10
+#define MOY_THEME_ROLES 45  // the tokens, then the content roles
+#define MOY_THEME_METRICS 3
+#define MOY_THEME_EFFECTS 3
+#define MOY_THEME_EFFECTS_CAP 32
+// A missing role's rule: `role` gets `v`, a palette index or flag, or
+// (is_role) the role `v`'s value.
+typedef struct { uint8_t role, is_role, v; } moy_theme_rule_t;
+extern const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES];
+// [dark, light, both]: (first rule, count).
+extern const uint8_t moy_theme_rules_at[3][2];
+extern const uint8_t moy_theme_flag[MOY_THEME_ROLES];
+extern const char *const moy_theme_role_names[MOY_THEME_ROLES];
+extern const char *const moy_theme_metric_names[MOY_THEME_METRICS];
+// each metric's [min, max]
+extern const int8_t moy_theme_metric_range[MOY_THEME_METRICS][2];
+extern const char *const moy_theme_effect_names[MOY_THEME_EFFECTS];
+extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];
+extern const uint16_t moy_theme_lum[64];
+extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];
+extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];
+extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];
+extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];
+extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,
+    moy_theme_n_effects;
 
 #endif // MOY_UI_TABLES_H

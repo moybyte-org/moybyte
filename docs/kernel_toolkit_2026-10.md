@@ -56,7 +56,7 @@ and a Python app's button is a compiled app's button.
 
 | data | its source | read by |
 |---|---|---|
-| **theme tokens** | `runtime/chrome.py`'s `THEMES` and `THEME_LIGHT`, written by the look into native/moy_app's live token table (sprint 5) | the C style resolution; every app's `theme` reads |
+| **theme tokens** | the theme packages (`native/moy_ui/themes/`, flattened by `native/moy_ui/moy_theme.c`, `docs/theming_2026-09.md`), written by the look into native/moy_app's live token table (sprint 5) | the C style resolution; every app's `theme` reads |
 | **style** | `native/moy_ui/style.json`: the kinds, the states, each `(field, ink, edge)` spec with its alias chains, each kind's metric tuple with its slot names, the quirks of `NON_DATA_QUIRKS` against their kinds, the skins as deltas, the glyph vocabulary | the generated `native/moy_ui/moy_ui_tables.c` |
 | **strings** | `native/moy_spine/strings/en.json`: one entry per string id, English complete, each format's conversions part of its text | the generated `native/moy_spine/moy_str_table.c` (§2.3) |
 
@@ -78,7 +78,7 @@ skin's entry.
 | a change | the edit |
 |---|---|
 | which token a widget state paints; a skin | data (style) |
-| a theme's colours | Python data today (`THEMES`); a package after theming |
+| a theme's colours | data (a theme package) |
 | a pad, an edge weight, a strip height, a label alignment | data (metrics); a size change moves goldens, a deliberate act as today |
 | a new kind that reuses a primitive's shape: a toggle, the Studio's pane tab, another row look | data (style) |
 | a glyph's pixels; a new glyph | data (style's glyph vocabulary) |

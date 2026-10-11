@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "name": "slate",
+  "colors": {
+    "dark": {
+      "panel": 54, "edge": 6, "title": 6, "title_ink": 0, "accent": 9,
+      "hilite": 5, "dim": 55
+    },
+    "light": {
+      "panel": 6, "edge": 54, "title": 50, "title_ink": 7, "accent": 9,
+      "hilite": 48, "dim": 49, "desktop": 49, "desktop_pattern": 6,
+      "border": 54, "surface": 6, "surface_alt": 48
+    }
+  }
+}

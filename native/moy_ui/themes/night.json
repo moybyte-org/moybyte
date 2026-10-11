@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "name": "night",
+  "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },
+  "colors": {
+    "dark": {
+      "panel": 60, "edge": 13, "title": 13, "title_ink": 0, "accent": 10,
+      "hilite": 13, "dim": 1
+    },
+    "light": {
+      "panel": 48, "edge": 60, "title": 13, "title_ink": 0, "accent": 10,
+      "hilite": 22, "dim": 49, "desktop": 22, "desktop_pattern": 48,
+      "border": 60
+    }
+  }
+}

@@ -20,7 +20,7 @@ Three jobs, in the order they matter:
 import hashlib
 
 from runtime import ui
-from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
+from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
 
@@ -199,7 +199,7 @@ def test_shipped_widgets_are_byte_identical():
     320x240/3x -- the axes the 320x240-dark-only checks structurally cannot
     see."""
     seen = []
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             for (w, h, fs) in _SIZES:
                 th = theme_colors(name, variant)
@@ -279,7 +279,7 @@ def test_state_names_are_distinct_constants():
 def test_every_state_resolves_on_all_twelve_theme_sets():
     """The restyle promise: a skin/theme that names NO state token still paints
     a correct cue, so all 12 family x variant sets keep working unmodified."""
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = theme_colors(name, variant)
             palette = set(th.values())
@@ -880,7 +880,7 @@ def _matrix_hashes():
     try:
         for sk in ui.skin_names():
             ui.use_skin(sk)
-            for name, _tokens in THEMES:
+            for name in THEME_NAMES:
                 for variant in THEME_VARIANTS:
                     cv = SystemCanvas(320, 320)
                     _paint_matrix(cv, theme_colors(name, variant))

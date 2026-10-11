@@ -21,8 +21,8 @@ which is exactly the risk of transcribing hand-rolled widgets onto a toolkit.
 
 The matrix, and why it is this one
 ----------------------------------
-Five configurations, each ONE axis away from the frozen baseline, so a red
-golden names the axis by itself. Every configuration renders the SAME surface
+Eight configurations, each ONE axis away from the frozen baseline or from
+the windowed row, so a red golden names the axis by itself. Every configuration renders the SAME surface
 list (plus the two desk surfaces that only exist on the windowed tier), which
 keeps the matrix a clean product instead of a pile of special cases.
 
@@ -65,11 +65,17 @@ keeps the matrix a clean product instead of a pile of special cases.
                            FONT_SCALE 1, so what it actually draws is cs 2 over
                            fs 1; no config models that tier, which was already
                            true before the diagonal was declared.)
+  p4_1024x600_cs2_fs1_windowed  the P4 AS SHIPPED: the same desk at font
+                           scale 1, so its 7.0" floor makes chrome scale 2
+                           over text scale 1 -- the tier the row above does
+                           not model. One axis from it (font scale).
+  p4_1024x600_fs2_windowed_light  the windowed row in the light variant: the
+                           one place light chrome meets the WM's decorations.
+                           One axis from the windowed row (variant).
 
-That is 6 configurations x 19 surfaces (+2 windowed-only) = 116 goldens in
-about 1 second. The combination NOT covered is light-on-windowed; it is the
-one intersection, not an axis, and adding it would start the product
-explosion this phase was told to avoid.
+The last two were added before theming's first phase
+(`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
+them on the tier and the variant every restyle reaches.
 
 Determinism
 -----------
@@ -100,7 +106,6 @@ Deliberately NOT covered
   * The EDIT ICONS ("theme") surface and the OTA update screen: neither is in
     the Phase 0 list, and the update screen's content is a live network state
     machine.
-  * light x windowed (see the matrix note above).
 
 What moves these goldens (so a red one is diagnosable)
 -----------------------------------------------------
@@ -263,6 +268,12 @@ CONFIGS = {
         diagonal_in=None),
     "p4_1024x600_fs2_windowed": dict(
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark",
+        diagonal_in=7.0),
+    "p4_1024x600_cs2_fs1_windowed": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0),
+    "p4_1024x600_fs2_windowed_light": dict(
+        sys_size=(1024, 600), font_scale=2, windowed=True, variant="light",
         diagonal_in=7.0),
 }
 

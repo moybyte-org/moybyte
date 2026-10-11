@@ -342,8 +342,8 @@ every responsive tier — the token gate is no longer machine-only. Each surface
 frozen 320×240 `_base` branch keeps its literal indices **only in dark chrome**
 (the device parity contract holds at the default theme): under a light variant
 the base tier takes the token path too, so the small tier gets exactly a dark and
-a light presentation of every editor (code included — its `_HL_LIGHT` syntax set
-is the light half of the pair). Bar **icons get derived light variants** at draw
+a light presentation of every editor (code included — the theme's light `code_*`
+content roles are the light half of the pair, `docs/theming_2026-09.md` §4.1). Bar **icons get derived light variants** at draw
 time (`Workstation._bar_image`): the IconSheet's untouched index-0 plate — invisible
 on the frozen black bar — is keyed transparent and white strokes remap to ink-black
 on a `bar_light` theme, so wifi/battery/close never draw a black plate on a light

@@ -448,3 +448,285 @@ const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE] = {
     {0x314, 0x32A, 0x794, 0x7AA, 0x794, 0x780, 0x780, 0x780, 0x780, 0x780, 0x780, 0x000},  // spray
     {0x060, 0x0F0, 0x1F8, 0x060, 0x462, 0xE67, 0xE67, 0x462, 0x060, 0x1F8, 0x0F0, 0x060},  // move
 };
+
+const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
+    {28, 0, 6},  // code_text
+    {29, 0, 12},  // code_keyword
+    {30, 0, 11},  // code_string
+    {31, 0, 9},  // code_number
+    {32, 0, 5},  // code_comment
+    {33, 0, 14},  // code_builtin
+    {9, 0, 7},  // surface
+    {10, 0, 52},  // surface_alt
+    {11, 0, 0},  // ink
+    {12, 0, 53},  // ink_dim
+    {24, 0, 0},  // chrome_ink
+    {25, 0, 53},  // chrome_ink_dim
+    {15, 0, 0},  // selection_ink
+    {16, 0, 10},  // focus
+    {17, 0, 11},  // play
+    {18, 0, 9},  // author
+    {19, 0, 8},  // danger
+    {20, 0, 1},  // surface_light
+    {23, 0, 1},  // bar_light
+    {21, 1, 0},  // bar
+    {22, 1, 6},  // bar_edge
+    {28, 0, 0},  // code_text
+    {29, 0, 59},  // code_keyword
+    {30, 0, 3},  // code_string
+    {31, 0, 4},  // code_number
+    {32, 0, 53},  // code_comment
+    {33, 0, 2},  // code_builtin
+    {7, 1, 0},  // desktop
+    {8, 1, 6},  // desktop_pattern
+    {9, 1, 0},  // surface
+    {10, 1, 0},  // surface_alt
+    {13, 1, 1},  // border
+    {14, 1, 5},  // selection
+    {16, 1, 4},  // focus
+    {26, 1, 2},  // title_active
+    {27, 1, 0},  // title_inactive
+    {11, 0, 7},  // ink
+    {12, 0, 6},  // ink_dim
+    {24, 0, 7},  // chrome_ink
+    {25, 0, 6},  // chrome_ink_dim
+    {15, 0, 7},  // selection_ink
+    {21, 0, 0},  // bar
+    {22, 0, 5},  // bar_edge
+    {17, 0, 11},  // play
+    {18, 0, 10},  // author
+    {19, 0, 8},  // danger
+    {20, 0, 0},  // surface_light
+    {23, 0, 0},  // bar_light
+    {34, 0, 10},  // block_events
+    {35, 0, 9},  // block_control
+    {36, 0, 12},  // block_actors
+    {37, 0, 2},  // block_looks
+    {38, 0, 3},  // block_draw
+    {39, 0, 13},  // block_input
+    {40, 0, 8},  // block_variables
+    {41, 0, 15},  // block_lists
+    {42, 0, 11},  // block_operators
+    {43, 0, 14},  // block_sound
+    {44, 0, 4},  // block_myblocks
+};
+
+const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 21}, {27, 32}};
+
+const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
+    "panel",
+    "edge",
+    "title",
+    "title_ink",
+    "accent",
+    "hilite",
+    "dim",
+    "desktop",
+    "desktop_pattern",
+    "surface",
+    "surface_alt",
+    "ink",
+    "ink_dim",
+    "border",
+    "selection",
+    "selection_ink",
+    "focus",
+    "play",
+    "author",
+    "danger",
+    "surface_light",
+    "bar",
+    "bar_edge",
+    "bar_light",
+    "chrome_ink",
+    "chrome_ink_dim",
+    "title_active",
+    "title_inactive",
+    "code_text",
+    "code_keyword",
+    "code_string",
+    "code_number",
+    "code_comment",
+    "code_builtin",
+    "block_events",
+    "block_control",
+    "block_actors",
+    "block_looks",
+    "block_draw",
+    "block_input",
+    "block_variables",
+    "block_lists",
+    "block_operators",
+    "block_sound",
+    "block_myblocks",
+};
+
+const char *const moy_theme_metric_names[MOY_THEME_METRICS] = {
+    "radius",
+    "press_dx",
+    "press_dy",
+};
+
+const int8_t moy_theme_metric_range[MOY_THEME_METRICS][2] = {{0, 3}, {-3, 3}, {-3, 3}};
+
+const char *const moy_theme_effect_names[MOY_THEME_EFFECTS] = {
+    "none",
+    "shadow",
+    "emboss",
+};
+
+const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
+    {2, 3},  // title / title_ink
+    {26, 3},  // title_active / title_ink
+    {9, 11},  // surface / ink
+    {10, 11},  // surface_alt / ink
+    {14, 15},  // selection / selection_ink
+    {0, 24},  // panel / chrome_ink
+    {21, 24},  // bar / chrome_ink
+};
+
+const uint16_t moy_theme_lum[64] = {
+        0,   261,   638,  1792,  1496,   981,  5462,  9000,
+     2180,  4745,  8140,  5575,  3758,  2018,  3728,  6735,
+     4489,  5409,  6549,  6817,  6877,  5889,  4593,  4127,
+     4580,  4658,  4549,  6988,  1663,  2876,   876,  5260,
+     1442,   503,  2001,  2918,  2302,  3882,  6720,  5413,
+     5570,  5925,  2412,   901,  1547,  2171,  1908,  5701,
+     7517,  4669,  2465,  1096,  7271,  2386,   466,   222,
+      498,   779,  1074,   804,   499,   400,   562,   521,
+};
+
+const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
+    "surfaces",
+    "frame",
+    "fonts",
+    "sprites",
+    "icons",
+    "images",
+    "wallpapers",
+    "layout",
+    "sounds",
+    "editor",
+};
+
+const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {
+    "night",
+    "indigo",
+    "berry",
+    "forest",
+    "slate",
+    "machine",
+};
+
+const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
+    // themes/night.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"night\",\012"
+    "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 60, \"edge\": 13, \"title\": 13, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 13, \"dim\": 1\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 48, \"edge\": 60, \"title\": 13, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 22, \"dim\": 49, \"desktop\": 22, \"desktop_pattern\": 48,\012"
+    "      \"border\": 60\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
+    // themes/indigo.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"indigo\",\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 61, \"edge\": 13, \"title\": 13, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 13, \"dim\": 1\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 48, \"edge\": 61, \"title\": 13, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 24, \"dim\": 49, \"desktop\": 24, \"desktop_pattern\": 48,\012"
+    "      \"border\": 61\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
+    // themes/berry.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"berry\",\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 62, \"edge\": 14, \"title\": 14, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 2, \"dim\": 63\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 7, \"edge\": 62, \"title\": 14, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 25, \"dim\": 6, \"desktop\": 25, \"desktop_pattern\": 7,\012"
+    "      \"border\": 62\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
+    // themes/forest.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"forest\",\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 58, \"edge\": 11, \"title\": 11, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 3, \"dim\": 59\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 52, \"edge\": 58, \"title\": 11, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 19, \"dim\": 6, \"desktop\": 19, \"desktop_pattern\": 52,\012"
+    "      \"border\": 58, \"surface\": 52, \"surface_alt\": 31\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
+    // themes/slate.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"slate\",\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 54, \"edge\": 6, \"title\": 6, \"title_ink\": 0, \"accent\": 9,\012"
+    "      \"hilite\": 5, \"dim\": 55\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 6, \"edge\": 54, \"title\": 50, \"title_ink\": 7, \"accent\": 9,\012"
+    "      \"hilite\": 48, \"dim\": 49, \"desktop\": 49, \"desktop_pattern\": 6,\012"
+    "      \"border\": 54, \"surface\": 6, \"surface_alt\": 48\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
+    // themes/machine.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"machine\",\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 1, \"edge\": 60, \"title\": 48, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 60, \"dim\": 60, \"desktop\": 1, \"desktop_pattern\": 60,\012"
+    "      \"surface\": 7, \"surface_alt\": 52, \"ink\": 0, \"ink_dim\": 53,\012"
+    "      \"border\": 1, \"selection\": 13, \"focus\": 10, \"play\": 11, \"author\": 9,\012"
+    "      \"danger\": 8, \"surface_light\": true,\012"
+    "      \"code_text\": 0, \"code_keyword\": 59, \"code_string\": 3,\012"
+    "      \"code_number\": 4, \"code_comment\": 53, \"code_builtin\": 2\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 48, \"edge\": 60, \"title\": 48, \"title_ink\": 0, \"accent\": 10,\012"
+    "      \"hilite\": 22, \"dim\": 49, \"desktop\": 48, \"desktop_pattern\": 49,\012"
+    "      \"border\": 1, \"selection\": 13\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
+};
+
+const int moy_ui_n_themes = MOY_THEME_SEEDS;
+const int moy_theme_n_roles = MOY_THEME_ROLES;
+const int moy_theme_n_metrics = MOY_THEME_METRICS;
+const int moy_theme_n_effects = MOY_THEME_EFFECTS;
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {423, 364, 360, 397, 390, 721};

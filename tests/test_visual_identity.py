@@ -29,10 +29,10 @@ def _home_layer(ws):
 # -- Section 4.3: semantic theme roles ---------------------------------------
 
 def test_every_theme_resolves_every_semantic_role():
-    from runtime.chrome import THEMES, theme_colors
+    from runtime.chrome import THEME_NAMES, theme_colors
     roles = ("desktop", "desktop_pattern", "surface", "surface_alt", "border",
              "ink", "ink_dim", "selection", "focus", "play", "author", "danger")
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         th = theme_colors(name)
         for role in roles:
             assert role in th, (name, role)
@@ -59,9 +59,9 @@ def test_night_base_tokens_are_byte_identical():
 def test_machine_theme_is_optional_and_selectable(tmp_path):
     """Open Machine ships as an opt-in Settings theme with the Section 4.2 jobs:
     dark-blue field, signal verbs (play green / author orange / focus yellow)."""
-    from runtime.chrome import THEMES, DEFAULT_THEME, theme_colors
+    from runtime.chrome import THEME_NAMES, DEFAULT_THEME, theme_colors
     assert DEFAULT_THEME == "night"
-    assert any(n == "machine" for n, _t in THEMES)
+    assert any(n == "machine" for n in THEME_NAMES)
     th = theme_colors("machine")
     assert th["panel"] == th["desktop"] == 1     # dark blue construction field
     assert th["play"] == 11 and th["author"] == 9 and th["focus"] == 10
@@ -85,14 +85,13 @@ def test_every_theme_has_a_light_variant_resolving_every_role():
     """Each theme family ships DARK + LIGHT presentations of the same identity:
     the light set resolves every semantic role, is marked surface_light, and
     flips the chrome ink dark (light fields need dark text)."""
-    from runtime.chrome import THEMES, THEME_LIGHT, theme_colors
+    from runtime.chrome import THEME_NAMES, theme_colors
     roles = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
              "desktop", "desktop_pattern", "surface", "surface_alt", "border",
              "ink", "ink_dim", "chrome_ink", "chrome_ink_dim", "selection",
              "focus", "play", "author", "danger",
              "title_active", "title_inactive")
-    for name, _tokens in THEMES:
-        assert name in THEME_LIGHT, name
+    for name in THEME_NAMES:
         th = theme_colors(name, "light")
         for role in roles:
             assert role in th, (name, role)
@@ -107,8 +106,8 @@ def test_dark_variant_is_the_legacy_token_set():
     """theme_colors(name) == theme_colors(name, "dark") -- the one-arg call
     (every existing caller) keeps its exact pre-variant pixels, including the
     chrome ink statics (white / light-grey)."""
-    from runtime.chrome import THEMES, theme_colors
-    for name, _tokens in THEMES:
+    from runtime.chrome import THEME_NAMES, theme_colors
+    for name in THEME_NAMES:
         th = theme_colors(name)
         assert th is theme_colors(name, "dark")
         if name != "machine":

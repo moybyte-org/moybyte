@@ -1,5 +1,5 @@
 {
-  "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code and the skins as deltas, and the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
+  "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code and the skins as deltas, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
   "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive"],
   "states": ["disabled", "pressed", "hot", "on", "hover", "rest"],
   "aliases": {
@@ -1173,5 +1173,51 @@
       ".....##....."
     ]
   },
-  "hits_capacity": 32
+  "hits_capacity": 32,
+  "theme": {
+    "about": "Theme packages, format 1 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on the MOY64 table. 'bytes' caps a theme.json, 'depth' the inherits chain.",
+    "format": 1,
+    "seeds": ["night", "indigo", "berry", "forest", "slate", "machine"],
+    "bytes": 4096,
+    "depth": 4,
+    "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment", "code_builtin", "block_events", "block_control", "block_actors", "block_looks", "block_draw", "block_input", "block_variables", "block_lists", "block_operators", "block_sound", "block_myblocks"],
+    "metrics": {"radius": [0, 3], "press_dx": [-3, 3], "press_dy": [-3, 3]},
+    "effects": ["none", "shadow", "emboss"],
+    "effects_cap": 32,
+    "reserved": ["surfaces", "frame", "fonts", "sprites", "icons", "images", "wallpapers", "layout", "sounds", "editor"],
+    "derive": {
+      "dark": [
+        ["code_text", 6], ["code_keyword", 12], ["code_string", 11],
+        ["code_number", 9], ["code_comment", 5], ["code_builtin", 14]
+      ],
+      "light": [
+        ["surface", 7], ["surface_alt", 52], ["ink", 0], ["ink_dim", 53],
+        ["chrome_ink", 0], ["chrome_ink_dim", 53], ["selection_ink", 0],
+        ["focus", 10], ["play", 11], ["author", 9], ["danger", 8],
+        ["surface_light", true], ["bar_light", true],
+        ["bar", "panel"], ["bar_edge", "dim"],
+        ["code_text", 0], ["code_keyword", 59], ["code_string", 3],
+        ["code_number", 4], ["code_comment", 53], ["code_builtin", 2]
+      ],
+      "both": [
+        ["desktop", "panel"], ["desktop_pattern", "dim"], ["surface", "panel"],
+        ["surface_alt", "panel"], ["border", "edge"], ["selection", "hilite"],
+        ["focus", "accent"], ["title_active", "title"], ["title_inactive", "panel"],
+        ["ink", 7], ["ink_dim", 6], ["chrome_ink", 7], ["chrome_ink_dim", 6],
+        ["selection_ink", 7], ["bar", 0], ["bar_edge", 5], ["play", 11],
+        ["author", 10], ["danger", 8],
+        ["surface_light", false], ["bar_light", false],
+        ["block_events", 10], ["block_control", 9], ["block_actors", 12],
+        ["block_looks", 2], ["block_draw", 3], ["block_input", 13],
+        ["block_variables", 8], ["block_lists", 15], ["block_operators", 11],
+        ["block_sound", 14], ["block_myblocks", 4]
+      ]
+    },
+    "pairs": [
+      ["title", "title_ink"], ["title_active", "title_ink"], ["surface", "ink"],
+      ["surface_alt", "ink"], ["selection", "selection_ink"], ["panel", "chrome_ink"],
+      ["bar", "chrome_ink"]
+    ],
+    "contrast": 30
+  }
 }

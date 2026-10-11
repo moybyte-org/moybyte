@@ -85,7 +85,7 @@ def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
     assert ws._animating(1 / 30) is False
 
     app._set_mode("themes")
-    berry_i = [item[0] for item in app._items()].index("berry")
+    berry_i = list(app._items()).index("berry")
     app._apply(berry_i)
     assert ws.look.theme_name == "berry"
     assert ws.theme_colors["title"] == 14
@@ -301,6 +301,6 @@ def test_small_theme_grid_stays_inside_catalog(tmp_path):
     app = _open_appearance(ws)
     app._set_mode("themes")
     cards = app.layout.cards(len(app._items()))
-    assert len(cards) == len(chrome.THEMES)     # one card per shipped theme
+    assert len(cards) == len(chrome.THEME_NAMES)     # one card per shipped theme
     bottom = app.layout.catalog[1] + app.layout.catalog[3]
     assert max(y + h for _x, y, _w, h in cards) <= bottom

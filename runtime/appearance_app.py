@@ -16,9 +16,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name
 
 try:
-    from chrome import THEMES, THEME_VARIANTS, theme_colors
+    from chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
+    from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 
 try:
     import ui as _ui
@@ -200,7 +200,7 @@ class AppearanceAppLayer:
             return self._image_items()
         if self.mode == "carts":
             return self._cart_items()
-        return list(THEMES)
+        return list(THEME_NAMES)
 
     def _wall_id(self, item):
         """The selectable wallpaper id: a fill item IS its id string."""
@@ -210,7 +210,7 @@ class AppearanceAppLayer:
         items = self._items()
         if self.mode == "themes":
             for i, item in enumerate(items):
-                if item[0] == self._theme.name():
+                if item == self._theme.name():
                     return i
             return 0
         for i, item in enumerate(items):
@@ -231,8 +231,8 @@ class AppearanceAppLayer:
         self.sel = max(0, min(int(index), len(items) - 1))
         item = items[self.sel]
         if self.mode == "themes":
-            self._theme.set(item[0])
-            self.status = (item[0] + " " + self._theme.variant()).upper()
+            self._theme.set(item)
+            self.status = (item + " " + self._theme.variant()).upper()
         else:
             self._wall.select(self._wall_id(item))
             self.status = self._wall_title(item).upper()
@@ -539,7 +539,7 @@ class AppearanceAppLayer:
     def _draw_theme_card(self, cv, r, item, selected):
         # Cards preview the theme in the ACTIVE variant, so flipping DARK/LIGHT
         # repaints the whole catalog in that presentation.
-        name = item[0]
+        name = item
         tok = theme_colors(name, self._theme.variant())
         x, y, w, h = r
         fs = self.layout.fs

@@ -1,18 +1,20 @@
 # Theming — one data package re-skins the whole OS (2026-09)
 
-**Status: DRAFT rev 2, 2026-09-27.** Rev 1 went through an adversarial
-architecture pass and a performance/hardware pass the same day (verdicts:
-**STANDS WITH FIXES, close to REWORK** / **PERF CASE STANDS WITH FIXES**).
-All of their findings were taken into this revision; **§14 records each one
-and where it landed**. The owner's decisions are in §1. Nothing here is
-scheduled until the owner accepts it.
-**Depends on:** `docs/native_kernel_2026-09.md` (the toolkit and the window
-managers move below the app verb table; §8 maps every theming piece onto its
-sprints). **Relates to:** `docs/visual_identity_v1.md` (the default look),
+**Status: ACCEPTED by the owner, 2026-10-11.** Rev 2 (2026-09-27) took an
+adversarial architecture pass and a performance/hardware pass the same day
+(verdicts: **STANDS WITH FIXES, close to REWORK** / **PERF CASE STANDS WITH
+FIXES**); **§14 records each finding and where it landed**. Rev 3
+(2026-10-11) re-reads §2, §8 and §9 against what kernel sprint 6 built, rules
+on §12's questions and plans phases 1-4 as steps. The owner's decisions are in
+§1; where a phase stands is #224's.
+**Depends on:** `docs/kernel_toolkit_2026-10.md` (sprint 6 of
+`docs/native_kernel_2026-09.md`: the toolkit's bodies in C, with style as
+data; the window managers stay Python; §8 maps every theming piece onto it).
+**Relates to:** `docs/visual_identity_v1.md` (the default look),
 `docs/app_api_v1.md` (`ctx.theme`, the app-cart `theme()` global),
 `docs/surface_model_v1.md` (one dirty protocol), `docs/shell_ux_v1.md` (#105,
 the two worlds), `docs/studio_2026-09.md` (the Studio's chrome is drawn from
-these parts), `runtime/skin.py` (skins as data), #177, #146, #147, #203.
+these parts), `native/moy_ui/style.json` (style as data), #177, #146, #147, #203.
 Claims are labelled as in `docs/surface_model_v1.md`: **SOURCE** (read out of
 code, with the file), **ESTIMATED** (with how), **PREDICTED** (with the gate
 that settles it).
@@ -52,6 +54,7 @@ for them from format 1.
 | D5 | **Layout: both.** A theme sets the default bar layout and window mode; the user can override either in Settings, and the override survives a theme switch. Designed in the shell-layout doc (§4.8). |
 | D6 | **Themes bring wallpapers**, per **slot** (`desk`, `home`), which may differ; the user can override each slot. A theme ships static images and may name installed wallpaper carts (§4.9). |
 | D7 | **The home is one layout on every board**: the cover carousel with tabs (Games / Mine / Apps / Make), themeable, with its own wallpaper slot. **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
+| D8 | **Format 1 carries four more keys** (owner, 2026-10-11, before phase 1 froze it): **content colour roles** for code syntax and the block editor's block colours (§4.1); a **corner radius of 0 to 3** (§4.2); a **pressed-label offset** (§4.2); and a **text effect** per part and state, `none`, `shadow` or `emboss` with the role it paints in (§4.3). Their defaults reproduce today's pixels. The Paint, sprite, map and scene canvases stay exempt. |
 
 The pictures for D1 and D7, with the shell as it rendered before, are in
 `docs/media/theming_2026-09/` (its README says which are mockups).
@@ -63,21 +66,29 @@ Each was mocked and judged worse (§11).
 
 ## 2. What exists today
 
-**SOURCE.** Theming is already data in three layers; what it lacks is reach.
+**SOURCE.** Theming is data in three layers; what it lacks is reach.
 
-- **Colour tokens:** `runtime/chrome.py`. `THEMES` holds six families (`night`,
-  `indigo`, `berry`, `forest`, `slate`, `machine`), each with a light variant in
-  `THEME_LIGHT`, so twelve token sets. `theme_colors(name, variant)` resolves the
-  base keys (`panel`, `edge`, `title`, `title_ink`, `accent`, `hilite`, `dim`)
-  plus the semantic roles of `docs/visual_identity_v1.md` §4.3 and two flags,
-  `surface_light` and `bar_light`. `runtime/appearance.py`'s `set_theme`
-  installs a set.
+- **Theme packages:** the six families (`night`, `indigo`, `berry`, `forest`,
+  `slate`, `machine`) are seed packages in format 1 (§3),
+  `native/moy_ui/themes/*.json`, each with a dark and a light table, embedded
+  in every image by `tools/gen_ui_tables.py`. `native/moy_ui/moy_theme.c` is
+  the loader: it reads a theme.json with a strict reader of its own, walks
+  `inherits` and fills every role a package leaves unset from the derivation
+  rules in `native/moy_ui/style.json`'s `theme` section (§5).
+  `runtime/chrome.py`'s `theme_colors(name, variant)` is its Python face;
+  `runtime/appearance.py`'s `set_theme` installs a set and writes it into
+  native/moy_app's live token table, whose generation moves on every write.
 - **Widget style:** `native/moy_ui/style.json` (kind × state → a
   `(field, ink, edge)` triple of token specs, and each kind's metric slots),
   with the state ladder `disabled > pressed > hot > on > hover > rest` and the
-  quirks it lists, resolved in C by `native/moy_ui` (sprint 6's step 2). A
-  skin is a delta in the same file, installed by name (`ui.use_skin`); two
-  ship, `default` and `outline`.
+  quirks it lists, resolved in C by `native/moy_ui` against the live token row
+  (sprint 6). A skin is a delta in the same file, installed by name
+  (`ui.use_skin`); two ship, `default` and `outline`.
+- **Text:** one text call, `moy_text` (`native/moy_gfx/moy_text.h`), for every
+  UI string: UTF-8, a font argument (one font today, petme128, id 0), `align`
+  and `maxw`, and it returns the drawn width. Chrome text at every scale is
+  `mg_text_raw` over the staged petme128 blob; a cart's `print` is libmoy's
+  `moy_print`.
 - **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
   from `chrome._ICON_ART`, or the user's own edited sheet, `system_icons.moygfx`
   (Settings → EDIT ICONS).
@@ -87,30 +98,32 @@ Each was mocked and judged worse (§11).
   `name()`, `variant()`, `set()`, `set_variant()`, `skin`, `set_skin`;
   `runtime/app_context.py`). App carts (`"moybyte": {"type": "app"}`) through the ungated
   `theme()` global, which returns today's token dict (`runtime/system_api.py`;
-  `system_carts/moybyte.notes.moy` reads `th["panel"]` and `th["ink_dim"]`). **Games
-  have no `theme()`**, and giving them one would be a cart-verb change in
-  moy-spec's SPEC.md.
+  `system_carts/moybyte.notes.moy` reads `th["panel"]` and `th["ink_dim"]`).
+  Compiled apps read the token row through their `theme` imports
+  (`native/moy_app/roles.json`). **Games have no `theme()`**, and giving them
+  one would be a cart-verb change in moy-spec's SPEC.md.
 - **Persisted settings:** `theme`, `theme_variant`, `skin` and `wallpaper` in
   `system.json`.
 
 What stops a Platinum or Win95 theme today:
 
-1. **Most drawing does not go through the toolkit.** ESTIMATED (grep of
-   `runtime/`, 2026-09-27): a few hundred raw `rect`/`print`/`text`/`line`
-   calls against about 50 toolkit widget calls, over ~25 modules. At 320×240 /
-   font scale 1 the shell takes frozen hand-rolled branches (`if not
-   ws.layout._base`) kept for pixel parity (`docs/history/ui_refactor_2026-08.md`,
-   "the frozen baseline"). And 13 `light_chrome()` sites branch on the light
-   presentation in code.
+1. **Most chrome is drawn by hand, in literal colours.** ESTIMATED (grep of
+   `runtime/`, 2026-10-11): about 375 canvas `rect`/`print`/`line`/`circ` calls
+   over 32 modules against about 80 toolkit calls over 18, and about 340
+   `NAMES["..."]` colour literals over 19 modules. Most of the hand-drawn calls
+   are a row's value text or a small mark inside a row a Layout class already
+   places, not a widget the toolkit could draw whole. At 320×240 / font scale 1
+   the shell takes frozen hand-rolled branches (`if not ws.layout._base`) kept
+   for pixel parity (`docs/history/ui_refactor_2026-08.md`, "the frozen
+   baseline"). Eleven `light_chrome()` sites branch on the light presentation
+   in code; eight of them sit inside a `_base` branch.
 2. **A skin can only colour and pad.** There is no frame style (raised, sunken,
    etched), no skinnable window decoration or bar. A 4×4 two-colour pattern fill
    does exist, `fillp` (`device/device_canvas.py`), but on a per-pixel lane (§4.4).
-3. **One font, and chrome text at scale 1 is libmoy's.** `mg_text` hands scale 1
-   to libmoy's `moy_print`, which uses its own compiled-in petme128 and ignores
-   the font blob (`native/moy_gfx/moy_gfx_kernels.c`). The S3 boards and the
-   shipped P4 draw their chrome at scale 1. Layout arithmetic is written in
-   multiples of the 8px cell (ESTIMATED: 131 `8 * fs` sites in `runtime/`, and
-   more in other forms; phase 4 recounts before sizing).
+3. **One font.** `moy_text`'s font argument has one row, and layout
+   arithmetic is written in multiples of the 8px cell (ESTIMATED: about 185
+   `8 * fs` sites in `runtime/`, and more in other forms; phase 4 recounts
+   before sizing).
 4. **Layout is fixed per tier:** the bar, the taskbar and the window mode are code.
 
 ## 3. The package
@@ -119,18 +132,55 @@ A theme is a folder with `"moybyte": {"type": "theme"}` in its manifest (the
 field is `type` in the manifest's `moybyte` object, as for wallpapers and apps;
 `kind` is the Files document vocabulary).
 It holds a `theme.json` and optional **data** assets: images, fonts, sprite and
-icon sheets. It never holds a cart or a script. Every key is optional (§5).
+icon sheets. It never holds a cart or a script.
+
+**Format 1, as the loader reads it** (`native/moy_ui/moy_theme.h`; frozen
+2026-10-11 by phase 1):
 
 ```json
 {
   "format": 1,
-  "name": "Platinum",
-  "inherits": "moy",
+  "name": "dusk",
+  "inherits": "berry",
   "colors": {
-    "dark":  { "panel": 1,  "title": 13, "title_ink": 7, "surface": 60 },
-    "light": { "panel": 6,  "title": 48, "title_ink": 0, "surface": 6,
-               "shade_hi": 7, "shade_lo": 50, "shade_dark": 0, "desk": 22 }
+    "dark":  { "panel": 1, "title": 13, "title_ink": 7, "code_keyword": 12 },
+    "light": { "panel": 6, "title": 48, "title_ink": 0, "block_events": 9 }
   },
+  "metrics": { "radius": 2, "press_dx": 1, "press_dy": 1 },
+  "text": {
+    "button": { "disabled": { "effect": "emboss", "color": "ink" } }
+  }
+}
+```
+
+- **`format`** (an integer, required): a reader refuses a newer one. A key or
+  a role a later phase defines is additive: an older reader ignores it, so it
+  needs no bump. Renaming or removing a key, a role or a value's meaning bumps
+  `format`. There is no migration pass, which is the store rule.
+- **`name`** (required): 1 to 24 of `a-z`, `0-9`, `_`, `-`. A seed's name is
+  reserved.
+- **`inherits`**: one parent, by name (§5). A theme that names none inherits
+  the default.
+- **`colors.dark`, `colors.light`**: role → MOY64 index, or a flag role →
+  `true`/`false` (§4.1). A role is a token of the live row or a content role.
+  Every role is optional.
+- **`metrics`**: `radius` (0-3), `press_dx` and `press_dy` (-3 to 3), each
+  clamped to its range (§4.2); the default seed sets every one to 0.
+- **`text`**: part → state → `{"effect": "none" | "shadow" | "emboss",
+  "color": ROLE}` (§4.3); at most 32 per package. An effect other than `none`
+  names its role, or it is dropped.
+- **Reserved:** `surfaces`, `frame`, `fonts`, `sprites`, `icons`,
+  `images`, `wallpapers`, `layout`, `sounds`, `editor` (style.json's
+  `theme.reserved`) are accepted and not read yet. Each is defined, additively,
+  by the phase that first reads it (§9).
+- Any other key or role is ignored, a value of the wrong type is dropped and an
+  index outside 0-63 is clamped, and each is noted (§7).
+
+What the reserved keys will hold, as rev 2 sketched them (and the metrics
+§4.2 lists beyond format 1's three, added to `metrics` additively):
+
+```json
+{
   "metrics":  { "border": 1, "title_h": 14, "button": 11, "pad": 4, "gap": 4, "shadow": 1 },
   "surfaces": {
     "window.title": { "active": "pinstripe shade_lo/shade_hi, border" },
@@ -152,21 +202,18 @@ icon sheets. It never holds a cart or a script. Every key is optional (§5).
 
 - **Variants are an axis, not two themes.** `colors.dark` and `colors.light`
   under one package keep D1's "one routine, two tables" and today's
-  `variant()`/`set_variant()`. The 13 `light_chrome()` branches become token
-  differences (phase 2).
+  `variant()`/`set_variant()`. The `light_chrome()` branches become token
+  differences (phases 2b and 3).
 - **`images`** are static pictures the theme ships. **`wallpapers`** name
   installed wallpaper carts by id. An id that is not installed falls back to
   the image, then to the default (§4.9).
-- **`layout`**, **`sounds`** and **`editor`** are reserved in format 1 and have
-  no defined keys yet. `layout` is filled by the shell-layout doc; `sounds`
-  waits for #141; `editor` is where code colour schemes go when they come
-  (`docs/studio_2026-09.md` §12), since syntax colours are content in format 1
-  (§4.3).
-- **Format rule:** a reader refuses a newer `format` major and ignores unknown
-  keys. There is no migration pass, which is the store rule.
+- **`layout`**, **`sounds`** and **`editor`** have no defined keys yet.
+  `layout` is filled by the shell-layout doc; `sounds` waits for #141; `editor`
+  is where code colour schemes go when they come
+  (`docs/studio_2026-09.md` §12), since syntax colours are content (§4.3).
 
-Key names and the surface grammar are illustrative until phase 1 freezes them;
-the SHAPE is the decision.
+The sketched key names and the surface grammar are illustrative until the
+phase that reads them freezes them; the SHAPE is the decision.
 
 ## 4. The vocabulary — the public contract
 
@@ -176,35 +223,65 @@ node tree that point releases then changed (§10).
 
 ### 4.1 Colour roles
 
-**Today's keys are the base vocabulary** (`panel`, `edge`, `title`,
-`title_ink`, `accent`, `hilite`, `dim` and the §4.3 semantic roles of
-`docs/visual_identity_v1.md`). They stay valid names, so `theme()` and
-`ctx.theme.colors()` keep answering what app carts already read. Format 1 adds
-the **background/foreground pairs** that are missing (a `_ink` for every fill
-role) and the bevel shades (`shade_hi`, `shade_lo`, `shade_dark`). Pairing is
-what makes the readability check possible (§7). Inactive and disabled colours
-are **derived by a rule** unless a theme sets them, so a kid-made theme sets
-about a dozen roles. Every value is a **MOY64 index**; per-theme RGB palettes are
-declined (§11).
+**The roles are the token row's** (`native/moy_ui/style.json`'s `tokens`:
+`panel`, `edge`, `title`, `title_ink`, `accent`, `hilite`, `dim` and the §4.3
+semantic roles of `docs/visual_identity_v1.md`, 28 in all, two of them the
+flags `surface_light` and `bar_light`). They are the names `theme()`,
+`ctx.theme.colors()` and a compiled app's `theme` imports already answer, so
+format 1 adds nothing an app cart has to learn. Every value is a **MOY64
+index**; per-theme RGB palettes are declined (§11).
 
-The six shipped families and the `outline` skin become seed theme packages in
-phase 1, re-expressed in this format. There is no reader for the old settings
-beyond that: under the no-migrations rule a stored name that no package
-provides reads as absent and resolves to the default.
+A role a package leaves unset is **derived by a rule** (style.json's
+`theme.derive`, §5): `surface` from `panel`, `focus` from `accent`, the inks
+from fixed indices per variant, and so on, so a kid-made theme sets the seven
+base roles or fewer. The readability check (§7) holds the **background/ink
+pairs** listed in `theme.pairs`, which are pairs of today's roles.
+
+**Content roles** (D8) are a second set in the same `colors` tables
+(style.json's `theme.content`), outside the live token row, so the app ABI's
+vocabulary does not move: `code_text`, `code_keyword`, `code_string`,
+`code_number`, `code_comment` and `code_builtin` for the Code tab's syntax
+classes, and `block_<category>` for each block category (`block_events`,
+`block_control`, `block_actors`, `block_looks`, `block_draw`, `block_input`,
+`block_variables`, `block_lists`, `block_operators`, `block_sound`,
+`block_myblocks`). Their derivation gives today's colours: the syntax set per
+variant (the dark classes' own colours, and the light set the Code tab drew on
+a light surface), and the Scratch category colours in both. A seed whose dark
+table has a light surface (`machine`) sets the light syntax set itself.
+`runtime/code_layer.py` and `runtime/block_editor_ui.py` read them through
+the look (`runtime/appearance.py`'s `content_colors`).
+
+**Additive roles come with the phase that draws them**, under §3's rule: the
+bevel shades (`shade_hi`, `shade_lo`, `shade_dark`) with phase 3's painter,
+and an `_ink` for a fill role that lacks one when a surface first paints text
+on it. Each joins the token row (and native/moy_app's vocabulary, which
+`tests/test_ui_style_data.py` holds to it) with a derivation rule, so every
+existing theme keeps its pixels.
+
+The six shipped families are seed packages in format 1 (§2). There is no
+reader for the old settings beyond that: under the no-migrations rule a stored
+name that no package provides reads as absent and resolves to the default. The
+`outline` skin stays a skin until phase 3, when a theme's `surfaces` can say
+what it says and the skin axis folds into the theme (§9).
 
 ### 4.2 Metrics
 
 Logical pixels, multiplied by the chrome scale each tier already computes (the
-#203 floor): `border`, `title_h`, `button`, `pad`, `gap`, `shadow`, `radius` (0
-or 1: a cut corner, never a curve). Never absolute screen positions: a theme that
+#203 floor): `border`, `title_h`, `button`, `pad`, `gap`, `shadow`, `radius`
+(0 to 3, D8: a corner cut from a precomputed mask in C, one per radius, so a
+rounded box costs four masked corner spans and no per-pixel test), and the
+pressed-label offset `press_dx`, `press_dy` (D8: the label of a part in its
+`pressed` state shifts by that much, as Windows 95's buttons do). Format 1
+defines `radius`, `press_dx` and `press_dy`, all 0 in the default seed; the
+painter draws the corners and the primitives the offset in phase 3. Never absolute screen positions: a theme that
 places things by pixel works at one resolution only, which split Rockbox's
 catalogue by screen size (§10). Moybyte runs from 320×240 to 1280×800.
 
 ### 4.3 Parts × states
 
 **The part list is derived from the toolkit's tables, not invented.** It is the
-kinds in `ui.DEFAULT_SPECS` and `ui.DEFAULT_METRICS` (`button`,
-`button_play`/`_author`/`_danger`, `chip`, `tab`, `row` and its
+kinds in `native/moy_ui/style.json`'s `kinds` and `metrics` (`button`,
+`button_play`/`_author`/`_danger`, `chip`, `toggle`, `tab`, `row` and its
 `row_menu`/`row_list`/`row_chrome`/`row_cta`, `cell`, `cell_band`, `panel`,
 `panel_title`, `toolbar`, `scrollbar`, `status`, `focus`, `dialog`,
 `text_field`, `game_btn`, `mini_btn`, …), plus the chrome the WMs and the bar
@@ -212,23 +289,37 @@ draw (`window`, `window.title`, `window.button.*`, `bar`, `bar.item`, `desk`,
 `desk.icon`), the home's parts once the shell-layout doc names them, and the
 Studio's pane parts (a pane tab with a close, the panel list, a splitter, a
 drop zone, the completion popup: `docs/studio_2026-09.md` §8), which join the
-toolkit's tables before phase 1 freezes the list. A test
-asserts the spec lists every kind the toolkit resolves. Each entry of
-`NON_DATA_QUIRKS` is ruled on in phase 1: either it becomes expressible, or it
-stays code and is recorded as such.
+style file as kinds before the list is frozen. The list is frozen by phase 3,
+the first phase whose package key (`surfaces`) names parts; a test then
+asserts the spec lists every kind the toolkit resolves.
 
-States are the ladder `runtime/ui.py` already resolves (`rest`, `hover`, `on`,
-`hot`, `pressed`, `disabled`), plus `active`/`inactive` for windows. A missing
-state follows a documented chain (`pressed → hot → rest`, `inactive → active`).
-In the file, parts and states are **nested objects**, never a flattened
-`part:state` string. At runtime they are the nested tables `ui.py` already
-insists on, because a flattened key allocates a string per widget per frame
-(SOURCE: `runtime/ui.py`'s header).
+**The quirks stay code** (ruled 2026-10-11, phase 1; style.json's `quirks`):
+`game_btn` and `text_field` draw on the game canvas, which a theme does not
+reach (§6), and `mini_btn`'s and `chip`'s unscaled label pads are revisited
+by phase 4, when layout reads line metrics instead of the 8px cell.
 
-**What "chrome" means** (for the lint in phase 2): the pixels the shell, the WMs
+States are the ladder native/moy_ui resolves (`rest`, `hover`, `on`, `hot`,
+`pressed`, `disabled`), plus `active`/`inactive` for windows. A missing state
+follows a documented chain (`pressed → hot → rest`, `inactive → active`). In
+the file, parts and states are **nested objects**, never a flattened
+`part:state` string; at runtime they are the C look's per-kind, per-state
+table (§5).
+
+**What "chrome" means** (for the ratchet in phase 2a): the pixels the shell, the WMs
 and the toolkit draw around content. Content is exempt: the Paint and sprite
 canvases, the map and scene views, code syntax colours and the block editor's
-block colours. Those are not themed in format 1.
+block colours, which format 1 themes through the content roles (§4.1, D8).
+The Paint and sprite canvases and the map and scene views stay exempt.
+
+**Text effects** (D8). A part in a state may name a text effect: `none`,
+`shadow` (the label drawn once more, offset one pixel down and right, in the
+named role, under the label) or `emboss` (the same, offset up and left in one
+role and down and right in the label's own colour: the etched disabled text of
+Windows 9x and Platinum). The package key is `text`, part → state →
+`{"effect", "color"}`, and the default is `none` everywhere, which is today's
+drawing. Format 1 defines the key and the loader resolves it
+(`moy_theme_shape`); the primitives draw it in phase 3, beside the painter,
+or in phase 4 if it needs the font's metrics.
 
 ### 4.4 Surfaces: a one-line grammar, compiled once
 
@@ -240,10 +331,13 @@ gradient in text, and how Windows drew all of Win95 from one `DrawEdge` routine
 fed by a few shade colours (§10).
 
 - **The text never reaches a draw.** The loader compiles every surface once
-  into a small integer record (a style id, `stid`; not `docs/surface_model_v1.md`'s Surface `sid`) in a C table. A draw calls
-  **one gated verb**, `surface(x, y, w, h, stid)`, in the draw context beside
-  `rect`, `rectb`, `print` and `pix`. Colours stay MOY64 indices resolved through
-  the context's palette at draw, as every gate does.
+  into a small integer record (a style id, `stid`; not
+  `docs/surface_model_v1.md`'s Surface `sid`) in a C table. A draw is **one C
+  call through the toolkit's sink** (`docs/kernel_toolkit_2026-10.md` §3.1),
+  the path every primitive already draws through: a primitive whose kind has a
+  surface paints it in place of its field and edge, and the WMs' decorations
+  reach it through one `ui` face. Colours stay MOY64 indices resolved through
+  the canvas row's palette at draw, as every primitive's do.
 - **Patterns get a fast lane.** `fillp` already draws a 4×4 two-colour
   screen-anchored pattern natively, but per pixel (a bit test and a 16-bit store,
   `libmoy/moy_pixel.h`). The solid fill path pairs 32-bit stores because the
@@ -256,9 +350,9 @@ fed by a few shade colours (§10).
 - **Not the PPA.** Painter fills stay on the CPU: a 1:1 PSRAM fill is
   bandwidth-bound and CPU ≈ PPA (`.claude/rules/boards.md`). The PPA stays for
   upscale composites.
-- **The T-Deck's flush pump.** One painter call can cover a large area but
-  counts as one gated op, so it calls `gate_pump` in proportion to the rows it
-  writes (`device/device_canvas.py`, `GATE_PUMP_EVERY`).
+- **No flush pump.** One painter call can cover a large area, and the T-Deck's
+  flush feeds itself (`native/moy_flush/moy_flush.c`'s feeder loop), so the
+  painter pumps nothing, as the sink's primitives pump nothing.
 
 ### 4.5 Frame styles and window decoration
 
@@ -289,23 +383,19 @@ strip, so the same style draws that strip.
 Up to three roles: `ui`, `title`, `mono`. A theme font is a bitmap font file.
 The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
 `print` path is byte-identical, including the Lua C API that shares
-`mg_text_raw`. This is the kernel doc's "one text path for every app runtime"
-(`docs/native_kernel_2026-09.md` §10.6), built once.
+`mg_text_raw`. The one text path for every app runtime is sprint 6's
+`moy_text` (`docs/kernel_toolkit_2026-10.md` §4).
 
-- **Chrome text gets its own lane at every scale.** Today scale 1 is libmoy's
-  `moy_print` with its compiled-in petme128. The theme font is a separate
-  `moy_gfx` text lane that the chrome uses at every scale; libmoy stays the
-  carts'. A chrome-side text lane was once reverted and later re-crossed on S3
-  A/B numbers (`moy_gfx_kernels.c`'s header records both), so this lane is gated
-  on an S3 A/B.
-- **The font is a handle in the draw context.** It enters the native print gate
-  the way petme128 does today, bound when the context is created, never a second
-  Python-side path.
-- **Measuring is C too.** The text call takes `align` and `maxw` and returns the
-  drawn width, fitting and truncating in the same call, instead of per-frame
-  `text_w()` round trips from Python. The Python fallback that draws one `rect`
-  per glyph run (`_print_scaled`) routes to C. Scaled text emits per-row runs
-  through the span fill, not per-pixel stores.
+- **A theme font is a row behind `moy_text`'s font argument.** The call takes
+  a `uint32` font id (petme128 is 0) at every scale; a theme font is another
+  row there, never a second Python-side path. A chrome-side text lane was once
+  reverted and later re-crossed on S3 A/B numbers (`moy_gfx_kernels.c`'s header
+  records both), so each new lane is gated on an S3 A/B. A cart's `print` stays
+  libmoy's `moy_print`.
+- **Measuring is C.** `moy_text` takes `align` and `maxw` and returns the drawn
+  width, and `moy_text_width` and `moy_text_wrap` measure in the same raster.
+  What phase 4 adds is line metrics a layout reads in place of the 8px cell.
+  Scaled text emits per-row runs through the span fill, not per-pixel stores.
 - **The format is aligned.** Its header and tables are naturally aligned, and
   the parser assembles multi-byte fields from bytes or requires a `moybuf`
   (64-byte aligned) buffer. GCC on the S3 faults on an unaligned 16- or 32-bit
@@ -370,26 +460,34 @@ installed **wallpaper carts** for them. The user can override each slot.
 
 ## 5. Fallback and inheritance, resolved once
 
-Every key is optional. A theme resolves through `inherits` (one parent, **depth
-capped, cycles rejected** at load) and ends at the built-in default, which is
-always complete. A missing sprite draws the surface; a missing surface draws the
-default for that part; a missing state follows §4.3's chain. So a five-line
-recolour is a valid theme and a full Platinum grows from it, as Winamp skins
-fell back to the base skin and KDE Plasma themes fall back to Breeze (§10).
+Every key but `format` and `name` is optional. A theme resolves through
+`inherits` (one parent; a theme that names none inherits the default) and ends
+at the default seed, `night`, which sets every role nothing derives. The chain
+is **capped at four links and a cycle is refused**, at install and at resolve
+(style.json's `theme.depth`). Each role comes from the nearest package that
+sets it; what is still unset is filled by `theme.derive`, the variant's own
+rules first and then those of both variants, a rule giving a fixed index, a
+flag or another role's value. So every role of the row is set, and a five-line
+recolour is a valid theme from which a full Platinum grows, as Winamp skins
+fell back to the base skin and KDE Plasma themes fall back to Breeze (§10). A
+missing sprite draws the surface; a missing surface draws the default for that
+part; a missing state follows §4.3's chain.
 
-**All of it resolves at flatten, never at draw.** Loading a theme flattens it
-once per (theme, kind): inheritance, state chains and derived roles collapse
-into the per-kind tables the toolkit reads today, where a widget pays one
-identity compare and two interned dict lookups (SOURCE: `runtime/ui.py`,
-`_FLAT_RING`). The Appearance editor's previews use colours only; they do not
-load other themes' assets, since its preview ring holds four entries and would
-thrash.
+**All of it resolves at flatten, never at draw.** `moy_theme_resolve` turns a
+(theme, variant) into the 28-value token row once; the look resolves the style
+against that row lazily, per kind, into three palette indices per state, and
+again only when the skin's or the row's generation moves
+(`native/moy_ui/moy_ui.c`). A widget pays an array read. `theme_colors` caches
+the row's dict per (theme, variant). The Appearance editor's previews use
+colours only; they do not load other themes' assets, since the face's preview
+ring holds four looks and would thrash.
 
 ## 6. Who reads it, and how a switch invalidates
 
 - **The toolkit and the WMs** are the only drawing code that resolves parts and
-  surfaces. Screens that draw chrome by hand move onto the toolkit (phase 2); a
-  literal colour index in chrome (§4.3's definition) fails a lint.
+  surfaces. Screens that draw chrome by hand move onto the toolkit as phase 3
+  restyles them; a literal colour in chrome (§4.3's definition) is counted by
+  a ratchet that only falls (phase 2a).
 - **Shipped apps** read roles through `ctx.theme` and draw through the toolkit,
   so they restyle with every theme (D4).
 - **App carts** read the live tokens through `theme()` (unchanged; §4.1 keeps its
@@ -400,7 +498,9 @@ thrash.
 - **A switch is one Class A dirty plus one integer.** A theme load, switch or
   in-place edit is an un-attributed Class A dirty (`ws._dirty`, the global
   epoch; `docs/surface_model_v1.md` §3) and bumps one monotonic integer,
-  `look_gen`. Every cache that outlives a frame folds `look_gen` into its key:
+  `look_gen`: native/moy_app's token-table generation, which every write of
+  the live row already moves (sprint 5). Every cache that outlives a frame
+  folds `look_gen` into its key:
   - the launcher statics (today keyed on `id(theme_colors)`);
   - the bar strip (today poked by `invalidate()`);
   - `wm_chrome`'s frozen chrome (today keyed on theme name and variant, so an
@@ -416,19 +516,35 @@ thrash.
   mechanism, and `set_theme`'s per-cache pokes are deleted. A test edits a theme
   in place and asserts every cached surface repaints.
 
+  **The fold lands in phase 6**, with the first in-place edit (the theme
+  editor) and the first re-install under one name. Until then a (theme,
+  variant) names one row for the life of the image, `theme_colors` hands out
+  one dict per pair and never frees it, so today's keys cannot go stale and no
+  `id()` is reused.
+
 ## 7. Safety
 
 Kids will trade themes, so a theme is untrusted input:
 
-- **Data only.** Parse, validate and clamp: indices to 0–63, metrics to ranges;
-  an unknown style, part or key falls back or is ignored; a file over the size cap
-  is refused; `inherits` depth is capped and cycles are rejected. No scripts, no
-  carts inside, no plug-ins (§10: GTK 2 engines, Haiku decorators, and a KDE store
-  theme that deleted a user's files).
-- **Readability check** at load and in the editor. Every background/foreground
-  pair must clear a contrast floor on the MOY64 table, and for a dither or
-  pinstripe fill the ink is checked against **both** colours. A failing pair is
-  reported and the editor offers the nearest passing index.
+- **Data only.** Parse, validate and clamp (`native/moy_ui/moy_theme.c`, a
+  strict JSON reader of its own, built on every tier): a theme.json over
+  `theme.bytes` (4096) is refused, as is malformed JSON, nesting past eight
+  levels, a missing, non-integer or newer `format`, a missing or ill-formed
+  `name`, a seed's name, or an `inherits` that names no package, cycles or
+  runs past the cap. An index is clamped to 0-63, a value of the wrong type is
+  dropped and an unknown key or role is ignored, each noted to the caller.
+  A metric is clamped to its range, a text effect with an unknown part,
+  state or effect name, or without its role, is ignored or dropped and noted,
+  and a package holds at most 32 effects. No scripts, no
+  carts inside, no plug-ins (§10: GTK 2 engines, Haiku decorators, and a KDE
+  store theme that deleted a user's files). `tests/test_theme_loader.py`
+  fuzzes the reader and holds the boards' module to the host's answers.
+- **Readability check** at load and in the editor. Every pair of `theme.pairs`
+  must clear `theme.contrast` (a WCAG ratio of 3.0, the floor for large text
+  and UI parts) on the MOY64 table; a failing pair sets its bit in the report
+  and never refuses the theme. For a dither or pinstripe fill the ink is
+  checked against **both** colours (phase 3). The editor offers the nearest
+  passing index (phase 6). Every seed passes in both variants.
 - **Persist only after it has rendered once.** A theme that fails to draw is never
   saved, so it cannot return after a reboot, as a malformed SerenityOS theme did
   (§10).
@@ -438,73 +554,166 @@ Kids will trade themes, so a theme is untrusted input:
   "boot-time hold" has no mechanism on the touch-only boards.
 - **Two themes are firmware, not files.** The default and a high-contrast theme
   are frozen into the image under reserved ids that no user theme can take.
+  Every seed is firmware already (§2); the high-contrast seed joins them in
+  phase 6.
+
+Persist-after-render, the strike ledger and the reset key arrive in phase 6
+with the first theme a user can install from outside the image; until then
+every theme a console can select is a seed.
 
 ## 8. Placement against the native kernel
 
-`docs/native_kernel_2026-09.md` moves the toolkit core native in its sprint 6
-("one implementation for every app runtime", with style as data;
-`docs/kernel_toolkit_2026-10.md`), keeps the WMs Python (its §10 question 8:
-sprint 7 does not run), and turned the app roles into an import-shaped ABI in
-sprint 5 ("style tables → a theme handle and token reads"). **Theming runs after
-sprint 6, written in C against the toolkit, with no Python reference built
-first** (owner, 2026-10-11). The pieces:
+Sprint 6 of `docs/native_kernel_2026-09.md` put the toolkit's bodies in C with
+style as data (`docs/kernel_toolkit_2026-10.md`); the WMs stay Python (its §10
+question 8: sprint 7 does not run); sprint 5 turned the app roles into an
+import-shaped ABI with a live token table and its generation. **Theming runs
+after sprint 6, written in C against the toolkit, with no Python reference
+built first** (owner, 2026-10-11). The pieces:
 
-| theming piece | built where | why it survives the kernel |
+| theming piece | built where | why |
 |---|---|---|
-| the vocabulary and the package format (§3–§5) | a spec, now | it IS the theme half of the sprint 5 ABI |
-| the default look (D1) as token tables and skin data | data | data crosses unchanged |
-| toolkit reach (phase 2) | Python surfaces calling the C toolkit, after sprint 6 | the apps and the WMs stay Python; a screen on the toolkit draws through its C primitives |
-| the surface painter and pattern lane, 9-slice and mask blits, the chrome text lane | **C**, `moy_gfx` and upstream libmoy, after sprint 6 | draw kernels are C; "a hot loop lives on one side" (kernel doc §4.1). The painter becomes an op of the toolkit's sink and the text lane a font behind its one text call |
-| theme policy: flatten, frame styles, the loader | **C**, after sprint 6, beside the toolkit's style resolution | the toolkit's look is C, so a theme installs as a delta through the entry a skin uses; a Python reference would be written only to be deleted |
-| theme assets (fonts, sheets, images) | plain buffers owned by the loader, allocated with `moybuf` alloc and free (`malloc_dma` has no free), in PSRAM (`MALLOC_CAP_SPIRAM`) | they become kernel handles when sprint 2 builds the handle tables; no interim handle mechanism is built ahead (kernel doc §4.4) |
+| the package format and the loader: validate, clamp, inherit, derive, readability (§3-§5, §7) | **C**, `native/moy_ui/moy_theme.c`, with its rules and seeds as style.json data (phase 1) | the toolkit's look is C; the loader writes the token row the look resolves against, and the boards, the host and the browser run the same reader |
+| the default look (D1) as seed packages and style data | data | data crosses unchanged |
+| toolkit reach (phases 2 and 3) | Python surfaces calling the C toolkit | the apps and the WMs stay Python; a screen on the toolkit draws through its C primitives |
+| the surface painter and pattern lane, 9-slice and mask blits | **C**, `native/moy_ui` over `moy_gfx` and upstream libmoy (phase 3) | draw kernels are C; "a hot loop lives on one side" (kernel doc §4.1). The painter is an op of the toolkit's sink |
+| frame styles | **C** beside the primitives, reached from the WMs' decoration path (phase 3) | a style is our code, a theme only names it (§4.5) |
+| fonts | **C**, a row behind `moy_text`'s font argument (phase 4) | the one text call exists; a font is data behind it |
+| theme assets (fonts, sheets, images) | loader-owned buffers in PSRAM (`MALLOC_CAP_SPIRAM`), each a BUF row of the kernel's handle table with a role, as every off-heap buffer is (`docs/kernel_survival_2026-10.md`) | no second handle mechanism |
 
 **Memory rule.** On the S3 boards, PSRAM outside the Python heap is the
 cart-runtime reserve, and the biggest carts need most of it
-(`.claude/rules/boards.md`). So: **one loaded theme at a time**, a hard
-per-theme byte cap set in phase 1, no per-tint bakes (§4.6), and every phase
-takes the kernel doc's internal-SRAM gate (its §4.6).
+(`.claude/rules/boards.md`). So: **one loaded theme at a time** (the loader
+holds the seeds as flash constants and one installed package beside them),
+a hard byte cap (a theme.json is capped at 4096 bytes; the cap on a package's
+assets is set by the phase that first loads one), no per-tint bakes (§4.6),
+and every phase takes the kernel doc's internal-SRAM gate (its §4.6). Phase 1
+allocates nothing at boot: the installed slot is allocated on the first
+install.
 
-**Timing against the kernel's golden gates.** The kernel's sprint 6 gate holds
-the toolkit rows' goldens byte-for-byte. **Every theming phase starts after
-sprint 6 closes** (owner, 2026-10-11); sprint 7 does not run, so nothing waits
-on it. After that a new theme is data and moves only its own
-goldens. The Studio (`docs/studio_2026-09.md` §8) moves pixels too and takes the
-same rule; its T-Deck bar rides phase 2b's re-baseline rather than making a
-second one.
+**Timing against the kernel's golden gates.** The kernel's sprint 6 gate held
+the toolkit rows' goldens byte-for-byte, and every theming phase starts after
+it (owner, 2026-10-11); sprint 7 does not run, so nothing waits on it. After
+phase 4 a new theme is data and moves only its own goldens. The Studio
+(`docs/studio_2026-09.md` §8) moves pixels too and takes the same rule; it is
+not scheduled, so phase 2b re-baselines the T-Deck rows without it and the
+Studio's T-Deck bar makes its own named re-baseline when it lands.
 
 ## 9. Phases
 
 Each phase deletes what it replaces and passes `tools/preflight.sh`. **Pixels
-move only in the phases that restyle on purpose (3 and 4)**, each re-baselining
-once and naming what moved. Every other phase holds the goldens byte-identical.
+move only in the phases that restyle on purpose (2b, 3 and 4)**, each
+re-baselining once and naming what moved, with before/after renders for the
+owner. Every other step holds the goldens byte-identical. Each step below is
+one commit, gated at its end by `make test`, `tools/check_docs.py`,
+`tools/preflight.sh --web` and a board pass on the T-Deck and the Waveshare P4
+(`tools/board.py pass tdeck p4`), and records each board's image headroom
+from the build. A step that changes no file a board image carries
+(`runtime/`, `device/`, `native/`, `system_carts/`, `firmware/`) skips the
+pass and says so.
 
 **How performance is gated** (from `docs/history/ui_refactor_2026-08.md` §7):
 per-cart fps is the *control*; a UI change must not move it at all. The
 instrument is `tools/p4_bench.py`'s painted-frame medians and p90s per surface
 (≥2 ms is signal, ≥3 ms needs an explanation), and every `* idle` scenario must
-capture zero frames. It runs on the boards named in each phase with `--board`;
-its scenarios were written for the P4 desk, so phase 2 first adds the
-fullscreen tier's surfaces. In CI, per-surface budgets per full draw in
-`tests/test_top_bar.py`'s shape: `canvas.gate_counts()` fills and texts,
-allocations, `hits.add` calls and idle paint count. Each phase names which meter
-sees its cost: DRAW2 and `gate_counts` for fill and text time, PERFCNT for
-instructions versus memory, `moy_prof` for the whole image. Per-board verdicts do
-not transfer, so every gate names its boards. Every phase also records each
-board's image headroom from the build (P4 first) and takes the kernel doc's
-internal-SRAM gate (its §4.6).
+capture zero frames. Its desk scenarios are the P4's; on a fullscreen board
+its `--repaint` mode times a surface painted every frame. In CI, per-surface
+budgets per full draw (phase 2a): `canvas.gate_counts()` fills and texts, which
+are real on the host since sprint 6. Each phase names which meter sees its
+cost: DRAW2 and `gate_counts` for fill and text time, PERFCNT for instructions
+versus memory, `moy_prof` for the whole image. Per-board verdicts do not
+transfer, so every gate names its boards, and a gate on a board this desk does
+not have (the Guition S3) is recorded as not run, never as passed.
+
+**Phase 1 — the spec and the loader** (one step; landed 2026-10-11). Two
+golden configs added first and captured on the unchanged code: cs 2 over fs 1
+(the P4 as shipped) and light on the windowed tier. Format 1 frozen (§3); the
+loader in C (§7); the six families as seed packages, which delete
+`chrome.THEMES`, `THEME_LIGHT` and the derivation tables they replace; D8's
+content roles (read by the Code and Blocks tabs, deleting `_HL_LIGHT` and
+`blocks.CATEGORY_COLOR`), metrics and text effects; the quirks ruled on (§4.3).
+Gate: every seed flattens to the row the Python
+tables gave, in both variants (the goldens hold it: byte-identical on all
+eight configs); load → flatten → dump round-trips; the reader fuzzed, and the
+boards' module answers the fuzz corpus as the host's does
+(`tests/test_theme_loader.py`).
+
+**Phase 2a — the nets** (one step; goldens byte-identical). Rev 2 had this
+phase move every hand-drawn chrome surface onto the toolkit on the non-`_base`
+configs. Read against sprint 6's code (§2), most hand-drawn calls are a row's
+value text or a mark inside a row a Layout already places, which no primitive
+draws whole, so moving them byte-identically means a kind per surface for
+pixels phase 3 restyles anyway. They move in phase 3 instead, under its
+re-baseline. The three `light_chrome()` branches outside a `_base` branch
+become roles in phase 3, with the shade roles, so the token row grows once;
+the eight inside one are deleted by 2b. `look_gen` moves to phase 6 (§6).
+What stays is the two nets the restyling phases are gated by:
+  1. **The chrome-literal ratchet.** Per `runtime/` module, the count of
+     `NAMES["..."]` colour literals and `light_chrome()` branches, pinned; a
+     module's count may fall, never rise.
+  2. **`gate_counts` budgets.** Every golden surface's fills and texts per full
+     draw, pinned per config beside the hashes; a surface may get cheaper,
+     never dearer, without a named re-pin.
+
+**Phase 2b — the T-Deck row** (one step; one named re-baseline). First,
+`docs/surface_model_v1.md` §5.1 ("executed path provably unchanged") is
+amended. Then the `_base` branches retire: the frozen geometry in every
+Layout class (`runtime/chrome.py`'s `Layout` and `CodeLayout`, and the
+Editor tabs', Paint's and the cards' layouts) and the frozen draw branches
+(`editor_app`'s zone guard, Settings', Code's and the cards' `_base` and
+`light = (not lay._base) or …` branches), so the 320×240 rows run the code
+every other tier runs. Rev 2's worry, that a toolkit widget is a wide Python
+frame that heap-allocates per call, is sprint 6's to have settled: a widget is
+one call from a thin face into C, so the call cost is measured, not
+presumed. Gate: one re-baseline of the two 320×240 rows with the moved pixels
+named and rendered; `p4_bench --board tdeck --repaint` on the Settings,
+Files and Editor surfaces within the thresholds against the image before;
+`Hits` stays barred from grids; the ratchet's count falls.
+
+**Phase 3 — shapes** (four steps, one re-baseline).
+  1. **The pattern lane, upstream.** An opaque two-colour pattern fill in
+     libmoy (moy-spec), re-vendored; conformance scenes for it. Gate: a pattern
+     fill within a set margin of a solid fill of the same area, on the P4 and
+     the T-Deck; goldens byte-identical (nothing draws it yet).
+  2. **The painter and `surfaces`.** The surface grammar frozen and compiled by
+     the loader into `stid` records (§4.4); the painter as a sink op; the
+     shade roles and the roles the three `light_chrome()` branches need join
+     the row with derivation rules; the part list frozen and tested against
+     the style file; the corner masks for `radius` 1-3, the pressed-label
+     offset and the text effects drawn by the primitives (D8). Gate: goldens byte-identical (no seed sets `surfaces`);
+     painter µs per call on the P4 and the T-Deck; `tools/p4_conformance.py`
+     painter scenes on both.
+  3. **Frame styles.** `classic`, `tab`, `platinum`, `win9x`, `flat` in C,
+     reached from `runtime/wm_chrome.py`'s decoration path and the bar; the
+     `frame` and `metrics` keys defined. Gate: goldens byte-identical
+     (`classic` is today's frame); a Platinum and a Win95 seed render every
+     golden surface with no code of their own, pinned as goldens of their own.
+  4. **D1 lands.** D1's tokens and shapes become the default seed, the
+     hand-drawn surfaces it restyles move onto the toolkit as it does, and
+     `outline` becomes a seed package (the skin axis folds into the theme).
+     Gate: **one re-baseline, named and rendered** against the mockups in
+     `docs/media/theming_2026-09/`; p4_bench on the P4 and the T-Deck; the
+     ratchet's count falls.
+
+**Phase 4 — type** (three steps, one re-baseline).
+  1. **The font format and its lane.** The aligned bitmap format (§4.7), read
+     by the loader into a buffer it owns; a font row behind `moy_text`'s font
+     argument; the `fonts` key defined. Gate: goldens byte-identical (no seed
+     names a font); the cart `print` path and the Lua C API byte-identical; an
+     S3 A/B of the lane on the T-Deck; a fuzzed-font load on T-Deck glass.
+  2. **Layout reads line metrics.** The `8 * fs` arithmetic reads the font's
+     line metrics, and `mini_btn`'s and `chip`'s quirks are re-ruled (§4.3).
+     Gate: goldens byte-identical (petme128's metrics are the 8px cell).
+  3. **Tiny5 lands** as the UI font, with #135's glyph coverage and the OFL
+     notices. Gate: **one re-baseline, named and rendered**; `moy_prof` on the
+     T-Deck home and Settings; legibility on T-Deck glass (and on the Guition
+     S3's when it is on a desk).
 
 | phase | builds | gate |
 |---|---|---|
-| **1 — the spec** | §3–§5 frozen as `format: 1`: roles, parts (derived from the tables), the surface grammar, frame-style names, reserved `layout`/`sounds`; the loader (validate, clamp, flatten, readability check, size cap); the six families and `outline` as seed packages; a ruling per `NON_DATA_QUIRKS` entry. Two golden configs added first: cs 2 over fs 1 (the P4 as shipped) and light on the windowed tier | load → flatten → dump round-trip; a fuzzed loader; the spec lists every kind the toolkit resolves; **goldens byte-identical** |
-| **2a — reach** | every chrome surface onto the toolkit or the WM's decoration path, **non-`_base` configs only**; the 13 `light_chrome()` branches become tokens; `look_gen` replaces the identity and name keys (§6); the chrome lint | **goldens byte-identical on every config**; `gate_counts` budgets in CI; p4_bench medians unchanged on the P4 and the Guition S3 |
-| **2b — the T-Deck row** | the `_base` branches retired. This reverses the recorded frozen-baseline decision, and `docs/surface_model_v1.md` §5.1 ("executed path provably unchanged") is amended first. The widget call cost is measured warm and on a fragmented heap on an S3 first: a toolkit widget is a wide Python frame that heap-allocates per call (`docs/perf_native_gap_v1.md`, the #63 declines) | one deliberate re-baseline of the 320×240 rows, the moved pixels named; p4_bench on the **T-Deck** within thresholds, with a chrome-frame dev-channel timing; `Hits` stays barred from grids |
-| **3 — shapes** | the painter (§4.4) with the pattern lane upstream in moy-spec; `surface()` as a gated verb; frame styles `classic`, `tab`, `platinum`, `win9x`, `flat`; 9-slice and mask blits; **D1's shapes and tokens land** | one deliberate re-baseline, named; a Platinum and a Win95 theme render the golden surfaces with no code of their own; painter µs per call on the P4 and an S3; `tools/p4_conformance.py` painter scenes on the P4 **and** an S3; a pattern fill within a set margin of a solid fill of the same area |
-| **4 — type** | the aligned font format, the chrome text lane at every scale, `align`/`maxw` returning width, layout reading line metrics instead of the 8px cell; **Tiny5 lands** as the UI font; licence notices | one deliberate re-baseline, named; the cart `print` path and the Lua C API byte-identical; an S3 A/B of the chrome text lane; `moy_prof` on the T-Deck home and Settings; a fuzzed-font load on S3 glass; legibility on T-Deck and Guition S3 glass |
 | **5 — layout** | per the shell-layout doc (§4.8) | that doc's gates, plus: bar and dock strips keep their cache (idle frames zero, strip rebuilt only on a key change) |
-| **6 — sprites and sharing** | the sprite sheet (D3); theme packages in the store; the Appearance app as the theme editor; a one-line text form for colour-only themes; `home_safe` and `"type": "theme"` with their side effects (the RUN grid and Editor picker exclusions, other moy hosts, the Zero's store sync) | a kid-made theme round-trips through the editor, the store and a second board; a sprite part no slower than its surface fallback; idle home captures zero frames on all four console boards |
+| **6 — sprites and sharing** | the sprite sheet (D3); theme packages in the store; the Appearance app as the theme editor; a one-line text form for colour-only themes; `look_gen` in every cache key (§6); persist-after-render, the strike ledger and a reset key per board (§7); the high-contrast seed; `home_safe` (§12) and `"type": "theme"` with their side effects (the RUN grid and Editor picker exclusions, other moy hosts, the Zero's store sync) | a kid-made theme round-trips through the editor, the store and a second board; a sprite part no slower than its surface fallback; an in-place edit repaints every cached surface; idle home captures zero frames on all four console boards |
 
-Every phase starts after the kernel's sprint 6 (§8). Phase 3's painter and
-phase 4's text lane extend that sprint's toolkit sink and its one text call.
+Phases 5 and 6 are planned as steps when they start.
 
 ## 10. What other systems taught (research, 2026-09-27)
 
@@ -553,14 +762,22 @@ About eighteen systems were studied; the lessons that shaped this doc:
   colours, cartridge-shell or notched cards, labels inside the desk tiles, and
   Pixel Operator replacing Tiny5.
 
-## 12. Open questions
+## 12. Questions, ruled
 
-1. **Home readability:** a `home_safe` wallpaper flag, or a scrim the home always
-   draws at source resolution (§4.9)?
-2. **Sprites in phase 3 or phase 6** (D3 allows either)?
-3. **A generator:** a theme derived from a wallpaper or one picked colour, the way
-   Material You derives one (§10)?
-4. **Theme sounds:** defined with #141, or earlier?
+Rev 2 left four questions open. Each is ruled (2026-10-11) with the pick that
+builds least; each is a pick the owner can overturn.
+
+1. **Home readability: `home_safe` or a scrim (§4.9)?** Deferred to phase 6,
+   where the home's wallpaper slot and `"type": "theme"` land, and decided
+   there against the shell-layout doc's home. Until then the default home
+   wallpaper is a still image that is readable by construction.
+2. **Sprites in phase 3 or phase 6 (D3)?** Phase 6. Phase 3's parts draw
+   surfaces; a sprite part then only replaces a surface, so nothing in phases
+   3-5 depends on it, and format 1 already reserves `sprites`.
+3. **A generator** (a theme derived from a wallpaper or one picked colour)?
+   No generator. The derivation rules (§5) already make a few roles a whole
+   theme, and phase 6's one-line colour-only form covers the rest.
+4. **Theme sounds: with #141 or earlier?** With #141. `sounds` stays reserved.
 
 ## 13. Sentences this doc will make false
 
@@ -568,8 +785,7 @@ Each is corrected in place by the phase that falsifies it:
 
 | sentence | in | fixed by |
 |---|---|---|
-| a theme is a `chrome.THEMES` token set and a skin is colours and pads | `runtime/chrome.py`, `runtime/skin.py` headers | phases 1 and 3 |
-| "`runtime/skin.py` unchanged" | `docs/native_kernel_2026-09.md` §4.5 | phase 1 |
+| a skin is colours and pads | `native/moy_ui/style.json`'s `about`, `runtime/ui.py`'s header | phase 3 |
 | the 320×240 row is frozen `_base`-verbatim and does not exercise the toolkit | `.claude/rules/shell.md`, `.claude/rules/rendering.md`, `CLAUDE.md`, `tests/test_shell_goldens.py`, `docs/history/ui_refactor_2026-08.md` | phase 2b |
 | the T-Deck tier's "executed path provably unchanged" | `docs/surface_model_v1.md` §5.1 | amended before phase 2b |
 | the default look is the "night" token set; "Avoid: bevels and fake plastic controls" as a rule for every look | `docs/visual_identity_v1.md`, `docs/shell_ux_v1.md` | phase 3, scoped to the default theme |
