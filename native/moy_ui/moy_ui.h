@@ -65,14 +65,6 @@ int moy_ui_glyph_id(const char *name, size_t n);
 int moy_ui_glyph_draw(const moy_text_target_t *t, int g, int x, int y, int w, int h,
                       uint16_t col, int scale);
 
-// -- the ROW sink (moy_ui.c) ------------------------------------------------------
-
-// Draw glyph `g` into canvas row `canvas` (a CANVAS handle, checked as any
-// handle is): its camera, clip and size from the row's state, `ci` through
-// the row's palette, the row's fill counter bumped per span. MOY_UI_STALE
-// when the row is gone.
-int moy_ui_row_glyph(uint32_t canvas, int g, int x, int y, int w, int h, int ci, int scale);
-
 // -- the primitives (moy_ui_draw.c) ----------------------------------------------
 //
 // Each takes a sink, a box, a kind id and the widget's state flags, then its
@@ -95,6 +87,9 @@ typedef struct {
     void *dst;
 } moy_ui_sink_t;
 int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look);
+// A glyph through a sink (moy_ui_glyph_draw's raster, a fill per span).
+int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h, int ci,
+                      int scale);
 // Every primitive counts its entry: the gate's "one crossing per widget".
 void moy_ui_count_call(void);
 uint32_t moy_ui_calls(void);
@@ -158,5 +153,61 @@ int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t 
 // `kind` row clipped to the box, and the bar.
 int moy_ui_list(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const uint8_t *items,
                 size_t len, int count, int row_h, int offset, int sel, int fs, int bar_w);
+
+// -- buttons and frames ---------------------------------------------------------------
+
+typedef struct {
+    moy_ui_span_t label;
+    int16_t glyph;                  // its id, or -1 (with F_GLYPH: a slot the caller fills)
+    int16_t fs;
+    int16_t colors[3];              // chip's override; button reads its kind's
+} moy_ui_button_t;
+// A button: the field, its rings, the icon or glyph, the label (centred by
+// the style). button_x: where its icon or glyph lands, for a caller's own.
+int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                  const moy_ui_button_t *k, int phase);
+int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs);
+// A chip: a glyph, when it has one, REPLACES its label.
+int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                const moy_ui_button_t *k, int phase);
+// The tab ladder's chips (`labels` NUL-separated), every tab icon-only when the
+// labelled row would not fit; the count placed. One tab, `ink` its inactive ink.
+int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int count, int fs,
+                     int gap, moy_ui_box_t *out, int *labels_on);
+int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on,
+               moy_ui_span_t label, int ink, int fs, int phase);
+// The status band: its items (NUL-separated) left to right while they fit.
+int moy_ui_status(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                  int count, int fs);
+// The game-canvas family: caller-coloured, theme-free.
+int moy_ui_game_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
+                    int fs);
+int moy_ui_game_icon_btn(const moy_ui_sink_t *s, moy_ui_box_t b, int g, moy_ui_span_t label,
+                         int fill_c, int fs, int phase);
+int moy_ui_mini_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
+                    int lx, int ly);
+int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b);
+int moy_ui_dialog(const moy_ui_sink_t *s, moy_ui_box_t b, int ring, int fill_c);
+// `colors` NULL: the style's (field, ring, ink, placeholder ink, caret).
+int moy_ui_text_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t,
+                      moy_ui_span_t hint, const int16_t colors[5], int fs);
+moy_ui_box_t moy_ui_inset(moy_ui_box_t r, int dx, int dy);
+// A panel; answers its content box (inside the border, below a title strip).
+int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
+                 moy_ui_box_t *content);
+int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
+
+// -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
+
+void moy_ui_inset32(const int32_t r[4], int32_t dx, int32_t dy, int32_t out[4]);
+enum { MOY_UI_CUT_TOP = 0, MOY_UI_CUT_BOTTOM = 1, MOY_UI_CUT_LEFT = 2, MOY_UI_CUT_RIGHT = 3 };
+void moy_ui_cut(const int32_t r[4], int side, int32_t n, int32_t band[4], int32_t rest[4]);
+// n equal spans across (horizontal) or down r, the slack to the last; the count.
+int moy_ui_split(const int32_t r[4], int n, int32_t gap, int horizontal, int32_t (*out)[4],
+                 int cap);
+void moy_ui_row_content(const int32_t r[4], int fs, int32_t pad, int32_t pad_right, int icon,
+                        int glyph, int32_t glyph_size, int32_t out[4]);
+void moy_ui_cell_art(const int32_t r[4], int fs, int32_t pad, int32_t caption_h,
+                     int32_t out[4]);
 
 #endif // MOY_UI_H

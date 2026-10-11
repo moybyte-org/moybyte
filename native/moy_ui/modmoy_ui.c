@@ -202,46 +202,79 @@ static mp_obj_t ui_glyph_id(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_glyph_id_obj, ui_glyph_id);
 
-// glyph(canvas, g, x, y, w, h, ci, scale): one glyph into a canvas row.
-static mp_obj_t ui_glyph(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    int rc = moy_ui_row_glyph((uint32_t)mp_obj_get_int(a[0]), mp_obj_get_int(a[1]),
-                              mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
-                              mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
-                              mp_obj_get_int(a[6]), mp_obj_get_int(a[7]));
-    if (rc == MOY_UI_STALE) {
-        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: stale canvas"));
+// -- the canvas, the box, the text and the colours as the faces pass them --------------
+//
+// A face passes the canvas object itself, its rect as it has it and its
+// text and colours raw: the conversions are here, in C, because on a board
+// every Python call a face makes costs more than the widget it draws.
+
+// The sink of canvas `cv` (its `_ui`: the CANVAS handle and the sprite
+// queue), once the pending sprite batch has landed (#63's order rule).
+static void sink_of(moy_ui_sink_t *s, mp_obj_t cv, mp_obj_t look) {
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(mp_load_attr(cv, MP_QSTR__ui), &n, &it);
+    if (n < 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: not a canvas"));
     }
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_glyph_obj, 8, 8, ui_glyph);
-
-// -- the primitives -----------------------------------------------------------------
-
-static void sink_of(moy_ui_sink_t *s, mp_obj_t canvas, mp_obj_t look) {
-    int rc = moy_ui_sink_row(s, (uint32_t)mp_obj_get_int(canvas), mp_obj_get_int(look));
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(it[1], &b, MP_BUFFER_READ);
+    if (b.len >= 2 && ((const int16_t *)b.buf)[0] > 4) {
+        mp_obj_t dest[2];
+        mp_load_method(cv, MP_QSTR_flush_batch, dest);
+        mp_call_method_n_kw(0, 0, dest);
+    }
+    int rc = moy_ui_sink_row(s, (uint32_t)mp_obj_get_int(it[0]),
+                             look == mp_const_none ? 0 : mp_obj_get_int(look));
     if (rc == MOY_UI_STALE) {
         mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: stale canvas"));
     }
     check(rc);
 }
 
+// A coordinate, converted toward zero as the print gate's gate_num does.
+static int32_t num(mp_obj_t o) {
+    if (mp_obj_is_small_int(o)) {
+        return (int32_t)MP_OBJ_SMALL_INT_VALUE(o);
+    }
+#if MICROPY_PY_BUILTINS_FLOAT
+    if (mp_obj_is_float(o)) {
+        return (int32_t)mp_obj_get_float(o);
+    }
+#endif
+    return (int32_t)mp_obj_get_int(o);
+}
+
+static void rect_of(mp_obj_t o, int32_t r[4]) {
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(o, &n, &it);
+    if (n < 4) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: a rect is (x, y, w, h)"));
+    }
+    for (int i = 0; i < 4; i++) {
+        r[i] = num(it[i]);
+    }
+}
+
+static moy_ui_box_t box_of(mp_obj_t o) {
+    int32_t r[4];
+    rect_of(o, r);
+    moy_ui_box_t b = {(int16_t)r[0], (int16_t)r[1], (int16_t)r[2], (int16_t)r[3]};
+    return b;
+}
+
 static int16_t i16(mp_obj_t o) {
-    return (int16_t)mp_obj_get_int(o);
+    return (int16_t)num(o);
 }
 
 static int16_t opt(mp_obj_t o, int16_t none) {
-    return o == mp_const_none ? none : (int16_t)mp_obj_get_int(o);
+    return o == mp_const_none ? none : (int16_t)num(o);
 }
 
-static moy_ui_span_t span(mp_obj_t o) {
-    moy_ui_span_t sp = {NULL, 0};
-    if (o != mp_const_none) {
-        size_t n;
-        sp.p = (const uint8_t *)mp_obj_str_get_data(o, &n);
-        sp.n = (uint16_t)(n > 0xFFFF ? 0xFFFF : n);
-    }
-    return sp;
+// A colour: the style's (None), else the index the canvas would mask it to.
+static int16_t col(mp_obj_t o, int16_t none) {
+    return o == mp_const_none ? none : (int16_t)(mp_obj_get_int(o) & 63);
 }
 
 static void colors3(mp_obj_t o, int16_t out[3]) {
@@ -253,13 +286,32 @@ static void colors3(mp_obj_t o, int16_t out[3]) {
     mp_obj_t *it;
     mp_obj_get_array(o, &n, &it);
     for (size_t i = 0; i < 3; i++) {
-        out[i] = i < n ? opt(it[i], -1) : -1;
+        out[i] = i < n ? col(it[i], -1) : -1;
     }
 }
 
-static moy_ui_box_t box4(const mp_obj_t *a) {
-    moy_ui_box_t b = {i16(a[0]), i16(a[1]), i16(a[2]), i16(a[3])};
-    return b;
+// Text: a str as it is; anything else as str() makes it (None reads "").
+static moy_ui_span_t span_of(mp_obj_t o) {
+    moy_ui_span_t sp = {NULL, 0};
+    if (o == mp_const_none) {
+        return sp;
+    }
+    if (!mp_obj_is_str(o)) {
+        o = mp_obj_str_make_new(&mp_type_str, 1, 0, &o);
+    }
+    size_t n;
+    sp.p = (const uint8_t *)mp_obj_str_get_data(o, &n);
+    sp.n = (uint16_t)(n > 0xFFFF ? 0xFFFF : n);
+    return sp;
+}
+
+// A label a falsy value hides (row's `if label:`).
+static moy_ui_span_t span_if(mp_obj_t o) {
+    if (!mp_obj_is_true(o)) {
+        moy_ui_span_t sp = {(const uint8_t *)"", 0};
+        return sp;
+    }
+    return span_of(o);
 }
 
 static mp_obj_t box_tuple(moy_ui_box_t b) {
@@ -268,128 +320,402 @@ static mp_obj_t box_tuple(moy_ui_box_t b) {
     return mp_obj_new_tuple(4, t);
 }
 
-// row(canvas, look, x, y, w, h, kind, flags, interact, label, value, glyph,
-//     glyph_size, glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs,
-//     colors, phase)
+static mp_obj_t rect_tuple(const int32_t r[4]) {
+    mp_obj_t t[4] = {mp_obj_new_int(r[0]), mp_obj_new_int(r[1]), mp_obj_new_int(r[2]),
+                     mp_obj_new_int(r[3])};
+    return mp_obj_new_tuple(4, t);
+}
+
+static int fs_or(mp_obj_t o, const moy_ui_sink_t *s) {
+    return o == mp_const_none ? s->fs : (int)num(o);
+}
+
+// -- glyphs ---------------------------------------------------------------------------
+
+// glyph(cv, g, rect, ci, scale): scale None is the canvas's font scale
+static mp_obj_t ui_glyph(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    moy_ui_box_t b = box_of(a[2]);
+    check(moy_ui_sink_glyph(&s, mp_obj_get_int(a[1]), b.x, b.y, b.w, b.h,
+                            mp_obj_get_int(a[3]), fs_or(a[4], &s)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_glyph_obj, 5, 5, ui_glyph);
+
+// -- rows, cells and lists ---------------------------------------------------------------
+
+// row(cv, look, rect, kind, flags, interact, label, value, glyph, glyph_size,
+//     glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs, colors, phase)
 static mp_obj_t ui_row(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     moy_ui_row_t r;
-    r.label = span(a[9]);
-    r.value = span(a[10]);
-    r.glyph = i16(a[11]);
-    r.glyph_size = opt(a[12], MOY_UI_DEFAULT);
-    r.glyph_ink = opt(a[13], MOY_UI_FROM_STYLE);
-    r.value_ink = opt(a[14], MOY_UI_FROM_STYLE);
-    r.pad = opt(a[15], MOY_UI_DEFAULT);
-    r.pad_right = opt(a[16], MOY_UI_DEFAULT);
-    r.text_dy = opt(a[17], MOY_UI_DEFAULT);
-    r.scale = i16(a[18]);
-    r.fs = i16(a[19]);
-    colors3(a[20], r.colors);
-    check(moy_ui_row(&s, box4(a + 2), mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
-                     mp_obj_get_int(a[8]), &r, mp_obj_get_int(a[21])));
+    r.label = span_if(a[6]);
+    r.value = span_of(a[7]);
+    r.glyph = i16(a[8]);
+    r.glyph_size = opt(a[9], MOY_UI_DEFAULT);
+    r.glyph_ink = col(a[10], MOY_UI_FROM_STYLE);
+    r.value_ink = col(a[11], MOY_UI_FROM_STYLE);
+    r.pad = opt(a[12], MOY_UI_DEFAULT);
+    r.pad_right = opt(a[13], MOY_UI_DEFAULT);
+    r.text_dy = opt(a[14], MOY_UI_DEFAULT);
+    r.scale = i16(a[15]);
+    r.fs = (int16_t)fs_or(a[16], &s);
+    colors3(a[17], r.colors);
+    check(moy_ui_row(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                     mp_obj_get_int(a[5]), &r, mp_obj_get_int(a[18])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_row_obj, 22, 22, ui_row);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_row_obj, 19, 19, ui_row);
 
-// cell(canvas, look, x, y, w, h, kind, flags, interact, label, glyph, pad,
-//      caption_h, band_fill, band_ink, text_dx, text_dy, fs, colors, phase)
-//      -> the art box
+// cell(cv, look, rect, kind, flags, interact, label, glyph, pad, caption_h,
+//      band_fill, band_ink, text_dx, text_dy, fs, colors, phase) -> the art box
 static mp_obj_t ui_cell(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     moy_ui_cell_t k;
-    k.label = span(a[9]);
-    k.glyph = i16(a[10]);
-    k.pad = opt(a[11], MOY_UI_DEFAULT);
-    k.caption_h = opt(a[12], MOY_UI_DEFAULT);
-    k.band_fill = opt(a[13], MOY_UI_FROM_STYLE);
-    k.band_ink = opt(a[14], MOY_UI_FROM_STYLE);
-    k.text_dx = opt(a[15], MOY_UI_DEFAULT);
-    k.text_dy = opt(a[16], MOY_UI_DEFAULT);
-    k.fs = i16(a[17]);
-    colors3(a[18], k.colors);
+    k.label = span_of(a[6]);
+    k.glyph = i16(a[7]);
+    k.pad = opt(a[8], MOY_UI_DEFAULT);
+    k.caption_h = opt(a[9], MOY_UI_DEFAULT);
+    k.band_fill = col(a[10], MOY_UI_FROM_STYLE);
+    k.band_ink = col(a[11], MOY_UI_FROM_STYLE);
+    k.text_dx = opt(a[12], MOY_UI_DEFAULT);
+    k.text_dy = opt(a[13], MOY_UI_DEFAULT);
+    k.fs = (int16_t)fs_or(a[14], &s);
+    colors3(a[15], k.colors);
     moy_ui_box_t art;
-    check(moy_ui_cell(&s, box4(a + 2), mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
-                      mp_obj_get_int(a[8]), &k, mp_obj_get_int(a[19]), &art));
+    check(moy_ui_cell(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[16]), &art));
     return box_tuple(art);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cell_obj, 20, 20, ui_cell);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cell_obj, 17, 17, ui_cell);
 
-// label(canvas, look, x, y, w, h, text, ink, align) -> the drawn width
+// label(cv, rect, text, ink, align) -> the drawn width
 static mp_obj_t ui_label(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
-    sink_of(&s, a[0], a[1]);
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_label(&s, box4(a + 2), span(a[6]),
-                                             mp_obj_get_int(a[7]), mp_obj_get_int(a[8])));
+    sink_of(&s, a[0], mp_const_none);
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_label(&s, box_of(a[1]), span_if(a[2]),
+                                             mp_obj_get_int(a[3]), mp_obj_get_int(a[4])));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_label_obj, 9, 9, ui_label);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_label_obj, 5, 5, ui_label);
 
-// bar_rect(x, y, w, h, content, offset, horizontal, fs, bar_w) -> the thumb, or None
+// bar_rect(view, content, offset, horizontal, fs, bar_w) -> the thumb, or None
 static mp_obj_t ui_bar_rect(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_box_t r;
-    if (!moy_ui_bar_rect(box4(a), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
-                         mp_obj_is_true(a[6]), mp_obj_get_int(a[7]), mp_obj_get_int(a[8]),
+    if (!moy_ui_bar_rect(box_of(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                         mp_obj_is_true(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
                          &r)) {
         return mp_const_none;
     }
     return box_tuple(r);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_rect_obj, 9, 9, ui_bar_rect);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_rect_obj, 6, 6, ui_bar_rect);
 
-// scrollbar(canvas, look, x, y, w, h, content, offset, horizontal, fs, bar_w)
+// scrollbar(cv, look, view, content, offset, horizontal, bar_w)
 static mp_obj_t ui_scrollbar(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
-    check(moy_ui_scrollbar(&s, box4(a + 2), mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
-                           mp_obj_is_true(a[8]), mp_obj_get_int(a[9]),
-                           mp_obj_get_int(a[10])));
+    check(moy_ui_scrollbar(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                           mp_obj_is_true(a[5]), s.fs, mp_obj_get_int(a[6])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrollbar_obj, 11, 11, ui_scrollbar);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrollbar_obj, 7, 7, ui_scrollbar);
 
-// scroll_cues(canvas, ux, uy, dx, dy, can_up, can_dn, ci)
+// scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, ci)
 static mp_obj_t ui_scroll_cues(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
+    int up = mp_obj_is_true(a[3]), dn = mp_obj_is_true(a[4]);
+    if (!up && !dn) {
+        return mp_const_none;
+    }
     moy_ui_sink_t s;
-    sink_of(&s, a[0], MP_OBJ_NEW_SMALL_INT(0));
-    check(moy_ui_scroll_cues(&s, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
-                             mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
-                             mp_obj_is_true(a[5]), mp_obj_is_true(a[6]),
-                             mp_obj_get_int(a[7])));
+    sink_of(&s, a[0], mp_const_none);
+    size_t n;
+    mp_obj_t *u, *d;
+    mp_obj_get_array(a[1], &n, &u);
+    mp_obj_get_array(a[2], &n, &d);
+    check(moy_ui_scroll_cues(&s, num(u[0]), num(u[1]), num(d[0]), num(d[1]), up, dn,
+                             mp_obj_get_int(a[5])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_cues_obj, 8, 8, ui_scroll_cues);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_cues_obj, 6, 6, ui_scroll_cues);
 
-// fill_uncovered(canvas, ix, iy, iw, ih, ox, oy, ow, oh, ci)
+// fill_uncovered(cv, inner, outer, ci)
 static mp_obj_t ui_fill_uncovered(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
-    sink_of(&s, a[0], MP_OBJ_NEW_SMALL_INT(0));
-    check(moy_ui_fill_uncovered(&s, box4(a + 1), box4(a + 5), mp_obj_get_int(a[9])));
+    sink_of(&s, a[0], mp_const_none);
+    check(moy_ui_fill_uncovered(&s, box_of(a[1]), box_of(a[2]), mp_obj_get_int(a[3])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_fill_uncovered_obj, 10, 10, ui_fill_uncovered);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_fill_uncovered_obj, 4, 4, ui_fill_uncovered);
 
-// list(canvas, look, x, y, w, h, kind, items, count, row_h, offset, sel, fs, bar_w)
+// list(cv, look, rect, kind, items, count, row_h, offset, sel, bar_w)
 static mp_obj_t ui_list(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[7], &b, MP_BUFFER_READ);
-    check(moy_ui_list(&s, box4(a + 2), mp_obj_get_int(a[6]), (const uint8_t *)b.buf, b.len,
-                      mp_obj_get_int(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
-                      mp_obj_get_int(a[11]), mp_obj_get_int(a[12]), mp_obj_get_int(a[13])));
+    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    check(moy_ui_list(&s, box_of(a[2]), mp_obj_get_int(a[3]), (const uint8_t *)b.buf, b.len,
+                      mp_obj_get_int(a[5]), mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
+                      mp_obj_get_int(a[8]), s.fs, mp_obj_get_int(a[9])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_list_obj, 14, 14, ui_list);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_list_obj, 10, 10, ui_list);
+
+// -- buttons and frames --------------------------------------------------------------------
+
+// button(cv, look, rect, kind, flags, interact, label, glyph, phase)
+static mp_obj_t ui_button(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_button_t k;
+    k.label = span_of(a[6]);
+    k.glyph = i16(a[7]);
+    k.fs = s.fs;
+    k.colors[0] = k.colors[1] = k.colors[2] = MOY_UI_FROM_STYLE;
+    check(moy_ui_button(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                        mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[8])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_button_obj, 9, 9, ui_button);
+
+// button_x(rect, flags, label, fs): where its icon or glyph lands
+static mp_obj_t ui_button_x(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_button_x(box_of(a[0]), mp_obj_get_int(a[1]),
+                                                span_of(a[2]), mp_obj_get_int(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_button_x_obj, 4, 4, ui_button_x);
+
+// chip(cv, look, rect, kind, flags, interact, label, glyph, fs, colors, phase)
+static mp_obj_t ui_chip(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_button_t k;
+    k.label = span_of(a[6]);
+    k.glyph = i16(a[7]);
+    k.fs = (int16_t)fs_or(a[8], &s);
+    colors3(a[9], k.colors);
+    check(moy_ui_chip(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[10])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_chip_obj, 11, 11, ui_chip);
+
+#define TABS 32
+// tab_rects(rect, labels, count, fs, gap) -> (labels_on, [box, ...])
+static mp_obj_t ui_tab_rects(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[1], &b, MP_BUFFER_READ);
+    moy_ui_box_t out[TABS];
+    int on = 0;
+    int count = mp_obj_get_int(a[2]);
+    int n = moy_ui_tab_rects(box_of(a[0]), (const uint8_t *)b.buf, b.len,
+                             count > TABS ? TABS : count, mp_obj_get_int(a[3]),
+                             opt(a[4], MOY_UI_DEFAULT), out, &on);
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < n; i++) {
+        mp_obj_list_append(list, box_tuple(out[i]));
+    }
+    mp_obj_t t[2] = {mp_obj_new_bool(on), list};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_tab_rects_obj, 5, 5, ui_tab_rects);
+
+// tab(cv, look, rect, active, labels_on, label, ink, phase)
+static mp_obj_t ui_tab(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_tab(&s, box_of(a[2]), mp_obj_is_true(a[3]), mp_obj_is_true(a[4]),
+                     span_of(a[5]), col(a[6], MOY_UI_FROM_STYLE), s.fs,
+                     mp_obj_get_int(a[7])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_tab_obj, 8, 8, ui_tab);
+
+// status(cv, look, rect, items, count)
+static mp_obj_t ui_status(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+    check(moy_ui_status(&s, box_of(a[2]), (const uint8_t *)b.buf, b.len, mp_obj_get_int(a[4]),
+                        s.fs));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_status_obj, 5, 5, ui_status);
+
+// game_btn(cv, rect, label, fill)
+static mp_obj_t ui_game_btn(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    check(moy_ui_game_btn(&s, box_of(a[1]), span_of(a[2]), mp_obj_get_int(a[3]), s.fs));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_game_btn_obj, 4, 4, ui_game_btn);
+
+// game_icon_btn(cv, rect, glyph, label, fill, phase)
+static mp_obj_t ui_game_icon_btn(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    check(moy_ui_game_icon_btn(&s, box_of(a[1]), mp_obj_get_int(a[2]), span_if(a[3]),
+                               mp_obj_get_int(a[4]), s.fs, mp_obj_get_int(a[5])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_game_icon_btn_obj, 6, 6, ui_game_icon_btn);
+
+// mini_btn(cv, rect, label, fill, label_rect)
+static mp_obj_t ui_mini_btn(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    moy_ui_box_t b = box_of(a[1]);
+    moy_ui_box_t l = a[4] == mp_const_none ? b : box_of(a[4]);
+    check(moy_ui_mini_btn(&s, b, span_of(a[2]), mp_obj_get_int(a[3]), l.x, l.y));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_mini_btn_obj, 5, 5, ui_mini_btn);
+
+// toolbar(cv, look, rect)
+static mp_obj_t ui_toolbar(mp_obj_t cv, mp_obj_t look, mp_obj_t rect) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    check(moy_ui_toolbar(&s, box_of(rect)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_toolbar_obj, ui_toolbar);
+
+// dialog(cv, rect, ring, fill)
+static mp_obj_t ui_dialog(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    check(moy_ui_dialog(&s, box_of(a[1]), col(a[2], MOY_UI_FROM_STYLE),
+                        col(a[3], MOY_UI_FROM_STYLE)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_dialog_obj, 4, 4, ui_dialog);
+
+// text_field(cv, rect, text, hint, colors, fs): fs None is 1 (the quirk)
+static mp_obj_t ui_text_field(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    int16_t c[5];
+    const int16_t *cp = NULL;
+    if (a[4] != mp_const_none) {
+        size_t n;
+        mp_obj_t *it;
+        mp_obj_get_array(a[4], &n, &it);
+        for (size_t i = 0; i < 5; i++) {
+            c[i] = i < n ? col(it[i], -1) : -1;
+        }
+        cp = c;
+    }
+    check(moy_ui_text_field(&s, box_of(a[1]), span_if(a[2]), span_if(a[3]), cp,
+                            a[5] == mp_const_none ? 1 : (int)num(a[5])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_field_obj, 6, 6, ui_text_field);
+
+// panel(cv, look, rect, title, fs) -> the content box
+static mp_obj_t ui_panel(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_box_t ct;
+    check(moy_ui_panel(&s, box_of(a[2]), span_if(a[3]), fs_or(a[4], &s), &ct));
+    return box_tuple(ct);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_panel_obj, 5, 5, ui_panel);
+
+// focus_ring(cv, look, rect, fs)
+static mp_obj_t ui_focus_ring(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_focus_ring(&s, box_of(a[2]), fs_or(a[3], &s)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_focus_ring_obj, 4, 4, ui_focus_ring);
+
+// -- rect algebra ---------------------------------------------------------------------------
+
+// inset(rect, dx, dy)
+static mp_obj_t ui_inset(mp_obj_t rect, mp_obj_t dx, mp_obj_t dy) {
+    int32_t r[4], o[4];
+    rect_of(rect, r);
+    moy_ui_inset32(r, num(dx), num(dy), o);
+    return rect_tuple(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_inset_obj, ui_inset);
+
+// cut(rect, side, n) -> (band, rest)
+static mp_obj_t ui_cut(mp_obj_t rect, mp_obj_t side, mp_obj_t n) {
+    int32_t r[4], band[4], rest[4];
+    rect_of(rect, r);
+    moy_ui_cut(r, mp_obj_get_int(side), num(n), band, rest);
+    mp_obj_t t[2] = {rect_tuple(band), rect_tuple(rest)};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_cut_obj, ui_cut);
+
+#define SPLITS 64
+// split(rect, n, gap, horizontal) -> [rect, ...]
+static mp_obj_t ui_split(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t r[4];
+    rect_of(a[0], r);
+    int n = mp_obj_get_int(a[1]);
+    int32_t out[SPLITS][4];
+    int got = moy_ui_split(r, n > SPLITS ? SPLITS : n, num(a[2]), mp_obj_is_true(a[3]),
+                           out, SPLITS);
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < got && i < SPLITS; i++) {
+        mp_obj_list_append(list, rect_tuple(out[i]));
+    }
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_split_obj, 4, 4, ui_split);
+
+// row_content(rect, fs, pad, pad_right, icon, glyph, glyph_size)
+static mp_obj_t ui_row_content(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t r[4], o[4];
+    rect_of(a[0], r);
+    moy_ui_row_content(r, mp_obj_get_int(a[1]), opt(a[2], MOY_UI_DEFAULT),
+                       opt(a[3], MOY_UI_DEFAULT), mp_obj_is_true(a[4]), mp_obj_is_true(a[5]),
+                       opt(a[6], MOY_UI_DEFAULT), o);
+    return rect_tuple(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_row_content_obj, 7, 7, ui_row_content);
+
+// cell_art(rect, fs, pad, caption_h)
+static mp_obj_t ui_cell_art(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t r[4], o[4];
+    rect_of(a[0], r);
+    moy_ui_cell_art(r, mp_obj_get_int(a[1]), opt(a[2], MOY_UI_DEFAULT), num(a[3]), o);
+    return rect_tuple(o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cell_art_obj, 4, 4, ui_cell_art);
 
 static mp_obj_t ui_calls(void) {
     return mp_obj_new_int_from_uint(moy_ui_calls());
@@ -424,6 +750,25 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill_uncovered), MP_ROM_PTR(&ui_fill_uncovered_obj) },
     { MP_ROM_QSTR(MP_QSTR_list), MP_ROM_PTR(&ui_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_calls), MP_ROM_PTR(&ui_calls_obj) },
+    { MP_ROM_QSTR(MP_QSTR_button), MP_ROM_PTR(&ui_button_obj) },
+    { MP_ROM_QSTR(MP_QSTR_button_x), MP_ROM_PTR(&ui_button_x_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chip), MP_ROM_PTR(&ui_chip_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tab_rects), MP_ROM_PTR(&ui_tab_rects_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tab), MP_ROM_PTR(&ui_tab_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&ui_status_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_btn), MP_ROM_PTR(&ui_game_btn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_icon_btn), MP_ROM_PTR(&ui_game_icon_btn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mini_btn), MP_ROM_PTR(&ui_mini_btn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_toolbar), MP_ROM_PTR(&ui_toolbar_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },
+    { MP_ROM_QSTR(MP_QSTR_panel), MP_ROM_PTR(&ui_panel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_focus_ring), MP_ROM_PTR(&ui_focus_ring_obj) },
+    { MP_ROM_QSTR(MP_QSTR_inset), MP_ROM_PTR(&ui_inset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cut), MP_ROM_PTR(&ui_cut_obj) },
+    { MP_ROM_QSTR(MP_QSTR_split), MP_ROM_PTR(&ui_split_obj) },
+    { MP_ROM_QSTR(MP_QSTR_row_content), MP_ROM_PTR(&ui_row_content_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cell_art), MP_ROM_PTR(&ui_cell_art_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ui_globals, moy_ui_globals_table);
 

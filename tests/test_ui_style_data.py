@@ -38,8 +38,15 @@ def _metrics(j):
     return {k: tuple(v.values()) for k, v in j.items()}
 
 
+# Kinds the style gained after the crossing: data with no Python body behind
+# them, so the twin has no table for them.
+ADDED_KINDS = ("toggle",)
+
+
 def test_the_style_file_is_the_twins_tables():
     d = _style()
+    for k in ADDED_KINDS:
+        del d["kinds"][k]
     assert tuple(d["states"]) == twin.STATES
     assert {k: tuple(v) for k, v in d["aliases"].items()} == twin._STATE_ALIAS
     assert d["button_kinds"] == twin._BUTTON_KIND_KEY

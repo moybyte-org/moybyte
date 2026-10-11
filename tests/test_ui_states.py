@@ -807,7 +807,9 @@ def _paint_matrix(cv, th):
         "scrollbar": lambda r: _matrix_bar(cv, th, r[1]),
         "focus": lambda r: ui.focus_ring(cv, th, (20, r[1] + 4, 100, 6)),
     }
-    kinds = sorted(ui.kinds()) + ["nosuchkind"]
+    # The kinds as they were pinned (step 1); a kind added since is pinned by
+    # its own test, so it never moves these hashes.
+    kinds = sorted(k for k in ui.kinds() if k not in ("toggle",)) + ["nosuchkind"]
     y = 0
     for kind in kinds:
         if kind in own:
@@ -897,3 +899,20 @@ def test_every_kind_in_every_state_is_byte_identical():
     assert len(got) == len(WIDGET_MATRIX_HASHES) == 24
     for g, w in zip(got, WIDGET_MATRIX_HASHES):
         assert g == w, "a kind's pixels moved: %s (pinned %s)" % (g, w)
+
+
+def test_the_toggle_is_a_chip_that_reads_switched_on():
+    """A kind added as data (sprint 6, docs/kernel_toolkit_2026-10.md §2.2):
+    chip's shape and chip's look, except ON, which paints the theme's play
+    green with light ink."""
+    th = theme_colors("machine")
+    for st in ui.STATES:
+        t, c = ui.state_colors(th, "toggle", st), ui.state_colors(th, "chip", st)
+        if st == ui.ON:
+            assert t == (th["play"], 7, c[2])
+        else:
+            assert t == c, st
+    a, b = SystemCanvas(80, 24), SystemCanvas(80, 24)
+    ui.chip(a, th, (2, 2, 70, 18), "ON", on=True, kind="toggle")
+    ui.chip(b, th, (2, 2, 70, 18), "ON", on=True)
+    assert bytes(a._buf) != bytes(b._buf)

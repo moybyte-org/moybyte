@@ -3977,7 +3977,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         label and a kid who can't read still gets the picture. Implementation:
         ui.game_icon_btn."""
         _uimod.game_icon_btn(cv if cv is not None else self.canvas, rect,
-                             kind, label, fill, self._glyph)
+                             kind, label, fill, _uimod.glyph_draw)
 
     # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
     # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees

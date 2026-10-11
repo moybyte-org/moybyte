@@ -232,7 +232,9 @@ CASES = 48
 # The faces convert coordinates toward zero before the C call, as the print
 # gate's gate_num does (§7); the twin's bodies slice with them, so the oracle
 # draws the truncated case. The widgets whose bodies are C take raw floats.
-FACE_TRUNCATES = {"row", "cell", "scroll"}
+FACE_TRUNCATES = set(("row", "cell", "scroll", "button", "chip", "tab_row",
+                      "status_row", "game_family", "frames", "text_field",
+                      "algebra", "label", "list"))
 
 
 def _truncated(c):

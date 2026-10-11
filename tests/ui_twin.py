@@ -407,9 +407,8 @@ def button(cv, th, rect, label, kind='normal', on=False, icon_img=None, glyph=No
         iw = (icon_box if icon_img is not None else m[BTN_GLYPH] * fs) + pad
     label = str(label)
     maxc = max(0, (w - 2 * pad - iw) // fw)
-    if len(label) > maxc:
-        label = label[:maxc]
-    tw = iw + len(label) * fw
+    label = fit_bytes(label.encode('utf-8'), maxc).decode('utf-8')  # bytes (step 6)
+    tw = iw + len(label.encode('utf-8')) * fw
     align = m[BTN_ALIGN]
     if align == ALIGN_CENTER:
         off = (w - tw) // 2
@@ -451,9 +450,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None, glyph=None, glyph_dr
     fw = 8 * fs
     label = str(label)
     maxc = max(0, (w - m[CHIP_CLIP]) // fw)
-    if len(label) > maxc:
-        label = label[:maxc]
-    lw = len(label) * fw
+    label = fit_bytes(label.encode('utf-8'), maxc).decode('utf-8')  # bytes (step 6)
+    lw = len(label.encode('utf-8')) * fw
     minx = m[CHIP_MINX]
     align = m[CHIP_ALIGN]
     if align == ALIGN_CENTER:
@@ -617,7 +615,7 @@ def tab_row_rects(rect, tabs, fs, gap=None):
 
     def chip_w(label, labels_on):
         if labels_on and label:
-            return icon_w + pad + len(str(label)) * fw + pad
+            return icon_w + pad + len(str(label).encode('utf-8')) * fw + pad
         return icon_w + 2 * pad
     labels_on = True
     total = 0
@@ -689,10 +687,10 @@ def status_row(cv, th, rect, items):
     gap = m[ST_GAP]
     for item in items:
         s = str(item)
-        if tx + len(s) * fw > x + w:
+        if tx + len(s.encode('utf-8')) * fw > x + w:
             break
         cv.print(s, tx, ty, ink, 1)
-        tx += (len(s) + gap) * fw
+        tx += (len(s.encode('utf-8')) + gap) * fw
 
 def game_btn(cv, rect, label, fill):
     (x, y, w, h) = rect
@@ -766,7 +764,7 @@ def text_field(cv, rect, text, placeholder='', colors=None, fs=None):
     elif placeholder:
         cv.print(placeholder, x + px, y + py, hint, 1)
     if caret is not None:
-        cv.rect(x + px + len(text) * 8 * fs, y + py, m[TF_CARET_W] * fs, m[TF_CARET_H] * fs, caret)
+        cv.rect(x + px + len(text.encode('utf-8')) * 8 * fs, y + py, m[TF_CARET_W] * fs, m[TF_CARET_H] * fs, caret)
 
 def panel(cv, th, rect, title=None, fs=None):
     if fs is None:

@@ -678,6 +678,9 @@ class DeviceCanvas:
         # read -- 4-5x a CPU fill above the crossover. None on backends without
         # one, so those keep the moy_gfx path untouched.
         self._ppa_fill = getattr(self, "ppa_fill", None)
+        # What native/moy_ui's primitives draw through: this canvas's CANVAS
+        # handle, and the sprite queue a primitive lands before it draws.
+        self._ui = (self._crow.h, self._batch_arr)
         self.reset_state()
         self._sync_gate_pal()
         self._install_draw_gates()
@@ -1047,13 +1050,6 @@ class DeviceCanvas:
             return
         for i in range(64):
             pal[i] = self._wire[pm[i]]
-
-    def ui_sink(self):
-        """The CANVAS handle a native/moy_ui primitive draws through, once the
-        pending sprite batch has landed (#63's order rule)."""
-        if self._batch_arr[0] > 4:
-            self.flush_batch()
-        return self._crow.h
 
     def gate_counts(self):
         """(fills, texts, fill_us, text_us) drawn through the native gates since

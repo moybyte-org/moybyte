@@ -21,10 +21,13 @@ windows keep re-deriving (rect cuts/splits/insets), the draw==tap `Hits`
 registry, and the one `ScrollRegion` model. Design rules (deliberate, argued in
 the redesign thread):
 
-  * IMMEDIATE MODE over the indexed canvas primitives only (rect/rectb/print/
-    spr) -- renders identically on the host SystemCanvas, the device canvas,
-    and the web RecordingLayer; no retained tree, no per-frame allocation
-    beyond small tuples.
+  * IMMEDIATE MODE, and the bodies are C: each widget is one call into
+    native/moy_ui (docs/kernel_toolkit_2026-10.md), which draws into the
+    canvas's CANVAS row through the kernels the canvas verbs end in -- so it
+    renders identically on the host, every board and the browser, and a
+    compiled app draws the same widgets. No retained tree, no per-frame
+    allocation beyond small tuples. tests/ui_twin.py keeps the Python bodies
+    as the oracle.
   * Widgets take RECTS; the per-surface Layout classes keep owning reflow
     (their frozen 320x240 `_base` branches are the parity contract). The
     combinators here are helpers FOR those classes, not a layout engine.
@@ -101,9 +104,7 @@ def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
     """The list-overflow chevrons ('^' above, 'v' below) -- one implementation
     for every scrolling surface; positions/color stay the caller's (they are
     part of each surface's frozen geometry)."""
-    if can_up or can_dn:
-        _C.scroll_cues(cv.ui_sink(), int(up_xy[0]), int(up_xy[1]), int(dn_xy[0]),
-                       int(dn_xy[1]), can_up, can_dn, c)
+    _C.scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c)
 
 
 def wrap_words(text, maxc):
@@ -127,68 +128,41 @@ def text_width(s, scale=1):
 def inset(rect, dx, dy=None):
     """Shrink `rect` by dx horizontally and dy (default dx) vertically, clamped
     so the result never has negative size."""
-    if dy is None:
-        dy = dx
-    x, y, w, h = rect
-    return (x + dx, y + dy, max(0, w - 2 * dx), max(0, h - 2 * dy))
+    return _C.inset(rect, dx, dx if dy is None else dy)
 
 
 def cut_top(rect, h):
     """Split off an h-tall band from the top: returns (band, rest)."""
-    x, y, w, rh = rect
-    h = max(0, min(h, rh))
-    return (x, y, w, h), (x, y + h, w, rh - h)
+    return _C.cut(rect, 0, h)
 
 
 def cut_bottom(rect, h):
     """Split off an h-tall band from the bottom: returns (band, rest)."""
-    x, y, w, rh = rect
-    h = max(0, min(h, rh))
-    return (x, y + rh - h, w, h), (x, y, w, rh - h)
+    return _C.cut(rect, 1, h)
 
 
 def cut_left(rect, w):
     """Split off a w-wide band from the left: returns (band, rest)."""
-    x, y, rw, h = rect
-    w = max(0, min(w, rw))
-    return (x, y, w, h), (x + w, y, rw - w, h)
+    return _C.cut(rect, 2, w)
 
 
 def cut_right(rect, w):
     """Split off a w-wide band from the right: returns (band, rest)."""
-    x, y, rw, h = rect
-    w = max(0, min(w, rw))
-    return (x + rw - w, y, w, h), (x, y, rw - w, h)
+    return _C.cut(rect, 3, w)
 
 
 def hsplit(rect, n, gap=0):
     """`n` equal-width columns across `rect` (integer slack goes to the last)."""
-    x, y, w, h = rect
     if n <= 1:
         return [rect]
-    cw = (w - (n - 1) * gap) // n
-    cols = []
-    cx = x
-    for i in range(n - 1):
-        cols.append((cx, y, cw, h))
-        cx += cw + gap
-    cols.append((cx, y, x + w - cx, h))
-    return cols
+    return _C.split(rect, n, gap, True)
 
 
 def vsplit(rect, n, gap=0):
     """`n` equal-height rows down `rect` (integer slack goes to the last)."""
-    x, y, w, h = rect
     if n <= 1:
         return [rect]
-    rh = (h - (n - 1) * gap) // n
-    rows = []
-    ry = y
-    for i in range(n - 1):
-        rows.append((x, ry, w, rh))
-        ry += rh + gap
-    rows.append((x, ry, w, y + h - ry))
-    return rows
+    return _C.split(rect, n, gap, False)
 
 
 # (rect_in is widgets._in, imported at the top -- one hit-test definition.)
@@ -343,6 +317,7 @@ def metrics(kind):
 
 
 _BUTTON_KIND = {}                     # button(kind=...) -> the style kind
+_BUTTON_KID = {}                      # button(kind=...) -> its kind id
 
 
 def _button_kind(kind):
@@ -602,24 +577,30 @@ def glyph(cv, kind, rect, c, scale=None):
     glyph pixel a `scale` square -- the canvas's font scale by default. An
     unknown kind draws NOTHING, so a caller keeps its text label as the
     fallback."""
-    g = glyph_id(kind)
-    if g < 0:
-        return
-    fs = int(scale) if scale else _fs(cv)
-    x, y, w, h = rect
-    _C.glyph(cv.ui_sink(), g, int(x), int(y), int(w), int(h), c, fs)
+    g = _GLYPH_ID.get(kind)
+    if g is None:
+        g = glyph_id(kind)
+    if g >= 0:
+        _C.glyph(cv, g, rect, c, scale or None)
 
 
 def _glyph_draw(kind, rect, c, cv):
     glyph(cv, kind, rect, c)
 
 
+# The default glyph drawer, as a `glyph_draw=` a caller passes to mean "the
+# toolkit's own raster" (game_icon_btn's, which draws no glyph without one).
+glyph_draw = _glyph_draw
+
+
 # --- the C primitives' face ------------------------------------------------------
 #
-# A widget below is one call into native/moy_ui with the canvas's CANVAS handle
-# (`cv.ui_sink()`), the look its theme resolves in, the kind's id, the state
-# flags and its content as positional ints and strs: coordinates converted
-# toward zero, as the print gate converts them.
+# A widget below is one call into native/moy_ui with the canvas itself, the
+# look its theme resolves in, the kind's id, the state flags and its rect,
+# text and colours as the caller has them: the binding converts coordinates
+# toward zero (as the print gate does), masks colours as the canvas does and
+# lands a pending sprite batch first. On a board a Python call costs more than
+# most widgets draw, so a face makes one.
 
 _F_ON, _F_HOT, _F_DISABLED, _F_EDGE = 1, 2, 4, 8
 _F_BAND, _F_EDGE_LAST, _F_LABEL, _F_ICON, _F_GLYPH = 16, 32, 64, 128, 256
@@ -636,26 +617,11 @@ def _look(th):
     return _LOOK
 
 
-def _interact(state):
-    """`Hits.state_of`'s answer as the C takes it: PRESSED, HOVER or -1."""
-    if state is None:
-        return -1
-    return _STATE_ID.get(state, -1)
-
-
-def _text(v):
-    """A label as the C takes it: the str, "" for a falsy one."""
-    if not v:
-        return ""
-    return v if type(v) is str else str(v)
-
-
 def label(cv, rect, text, ink, align=ALIGN_LEFT):
     """Text in a box at the canvas's font scale: truncated to what fits (at a
     codepoint), placed by `align`, centred vertically. Returns the drawn
     width."""
-    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
-    return _C.label(cv.ui_sink(), 0, x, y, w, h, _text(text), ink, align)
+    return _C.label(cv, rect, text, ink, align)
 
 
 def list(cv, th, rect, items, region, row_h, sel=-1, kind="row_list"):
@@ -663,10 +629,9 @@ def list(cv, th, rect, items, region, row_h, sel=-1, kind="row_list"):
     `rect`, scrolled by `region` (a ScrollRegion this sets to the list's
     extent), `sel` the selected row, and the region's bar."""
     region.set(rect, len(items) * row_h)
-    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
-    packed = "\0".join(items).encode("utf-8")
-    _C.list(cv.ui_sink(), _look(th), x, y, w, h, _kind_id(kind), packed,
-            len(items), row_h, region.offset, sel, _fs(cv), region.BAR_W)
+    _C.list(cv, _LOOK if th is _TH else _look(th), rect, _kind_id(kind),
+            "\0".join(items).encode("utf-8"), len(items), row_h, region.offset, sel,
+            region.BAR_W)
 
 
 # --- widgets ------------------------------------------------------------------
@@ -693,54 +658,40 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     The field/ink/edge come from the skin under the key `kind` maps to
     (style.json's "button_kinds"), the pads/boxes/alignment from
     `_METRICS["button"]`."""
-    fs = _fs(cv)
-    x, y, w, h = rect
-    st = widget_state(on, False, disabled, state)
-    bg, ink, edge = state_colors(th, _button_kind(kind), st)
-    m = _METRICS["button"]
-    cv.rect(x, y, w, h, bg)
-    n = m[BTN_EDGE]
-    if n > 0:
-        cv.rectb(x, y, w, h, edge)
-        i = 1
-        while i < n:                       # skins only; the default is 1 ring
-            cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge)
-            i += 1
-    fw = 8 * fs
-    pad = m[BTN_PAD] * fs
-    icon_box = m[BTN_ICON] * fs
-    iw = 0
-    has_glyph = glyph is not None
-    if has_glyph and glyph_draw is None:
-        glyph_draw = _glyph_draw
-    if icon_img is not None or has_glyph:
-        iw = (icon_box if icon_img is not None else m[BTN_GLYPH] * fs) + pad
-    label = str(label)
-    maxc = max(0, (w - 2 * pad - iw) // fw)
-    if len(label) > maxc:
-        label = label[:maxc]
-    tw = iw + len(label) * fw
-    align = m[BTN_ALIGN]
-    if align == ALIGN_CENTER:
-        off = (w - tw) // 2
-    elif align == ALIGN_RIGHT:
-        off = w - pad - tw
-    else:
-        off = pad
-    if off < pad:
-        off = pad
-    tx = x + off
+    flags = (_F_ON if on else 0) | (_F_DISABLED if disabled else 0)
+    gid = -1
     if icon_img is not None:
-        cv.spr(icon_img, tx, y + (h - icon_box) // 2, fs)
-    elif has_glyph:
+        flags |= _F_ICON
+    elif glyph is not None:
+        flags |= _F_GLYPH
+        if glyph_draw is None:
+            gid = glyph_id(glyph)
+    look = _LOOK if th is _TH else _look(th)
+    kid = _BUTTON_KID.get(kind)
+    if kid is None:
+        kid = _BUTTON_KID[kind] = _kind_id(_button_kind(kind))
+    act = -1 if state is None else _STATE_ID.get(state, -1)
+    if icon_img is None and (glyph is None or glyph_draw is None):
+        _C.button(cv, look, rect, kid, flags, act, label, gid, _ALL)
+        return
+    _C.button(cv, look, rect, kid, flags, act, label, gid, _FRAME)
+    fs = _fs(cv)
+    tx = _C.button_x(rect, flags, label, fs)
+    y, h = int(rect[1]), int(rect[3])
+    m = _METRICS["button"]
+    if icon_img is not None:
+        box = m[BTN_ICON] * fs
+        cv.spr(icon_img, tx, y + (h - box) // 2, fs)
+    else:
+        ink = state_colors(th, _button_kind(kind),
+                           widget_state(on, False, disabled, state))[1]
         glyph_draw(glyph, (tx, y, m[BTN_GLYPH] * fs, h), ink, cv)
-    if label:
-        cv.print(label, tx + iw, y + (h - 8 * fs) // 2, ink, 1)
+    _C.button(cv, look, rect, kid, flags, act, label, gid, _CONTENT)
 
 
 def chip(cv, th, rect, label, on=False, hot=False, fs=None,
          glyph=None, glyph_draw=None, disabled=False, state=None,
-         colors=None):
+         colors=None, kind="chip"):
     """The app-toolbar CHIP -- the one implementation of the `_button` the
     Appearance/Storybook/Artwork apps each used to carry a local copy
     of (pixel-identical to those). A quiet field on the panel color with the
@@ -760,51 +711,32 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     default to the exact pixels the goldens pin. `disabled` is what the one
     live private copy -- `code_layer._panel_btn` -- dims by hand today.
 
+    `kind` is the style entry it resolves against: "chip", or another kind
+    of its shape ("toggle", whose ON reads as switched on).
+
     `colors` is the same escape hatch `row` and `cell` carry: an explicit
     (field, ink, edge) triple bypassing the skin, for a site whose pixels are
     frozen off-token. `field` None paints no field, `edge` None no border."""
-    if fs is None:
-        fs = _fs(cv)
-    x, y, w, h = rect
-    st = widget_state(on, hot, disabled, state)
-    if colors is None:
-        colors = state_colors(th, "chip", st)
-    bg, ink, edge = colors
-    m = _METRICS["chip"]
-    if bg is not None:
-        cv.rect(x, y, w, h, bg)
-    n = m[CHIP_EDGE]
-    if n > 0 and edge is not None:
-        cv.rectb(x, y, w, h, edge)
-        i = 1
-        while i < n:
-            cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge)
-            i += 1
+    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
+        _F_DISABLED if disabled else 0)
+    gid = -1
     if glyph is not None:
-        (_glyph_draw if glyph_draw is None else glyph_draw)(glyph, rect, ink, cv)
+        flags |= _F_GLYPH
+        if glyph_draw is None:
+            gid = glyph_id(glyph)
+    look = _LOOK if th is _TH else _look(th)
+    kid = _KIND_ID.get(kind)
+    if kid is None:
+        kid = _kind_id(kind)
+    act = -1 if state is None else _STATE_ID.get(state, -1)
+    if glyph is None or glyph_draw is None:
+        _C.chip(cv, look, rect, kid, flags, act, label, gid, fs, colors, _ALL)
         return
-    fw = 8 * fs
-    label = str(label)
-    # A label wider than the chip CLIPS (draw-what-fits, like label_row) --
-    # overflow escaped the rect and landed ink-on-anything (#174).
-    maxc = max(0, (w - m[CHIP_CLIP]) // fw)
-    if len(label) > maxc:
-        label = label[:maxc]
-    lw = len(label) * fw
-    minx = m[CHIP_MINX]
-    align = m[CHIP_ALIGN]
-    if align == ALIGN_CENTER:
-        ox = (w - lw) // 2
-    elif align == ALIGN_RIGHT:
-        ox = w - minx - lw
-    else:
-        ox = minx
-    if ox < minx:
-        ox = minx
-    oy = (h - 8 * fs) // 2
-    if oy < m[CHIP_MINY]:
-        oy = m[CHIP_MINY]
-    cv.print(label, x + ox, y + oy, ink, 1)
+    # The caller's glyph REPLACES the label.
+    _C.chip(cv, look, rect, kid, flags, act, label, gid, fs, colors, _FRAME)
+    ink = (state_colors(th, kind, widget_state(on, hot, disabled, state))
+           if colors is None else colors)[1]
+    glyph_draw(glyph, rect, ink, cv)
 
 
 # --- list rows and grid cells: the two shapes the tree hand-rolls ~29 times ----
@@ -879,42 +811,35 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
     callers that need the content band call the PURE `row_content_rect`
     instead (the `cell_art_rect` precedent).
     """
-    if fs is None:
-        fs = _fs(cv)
-    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
     if state is None and hits is not None and verb is not None:
         state = hits.state_of(verb, arg)
     flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
         _F_DISABLED if disabled else 0) | (_F_EDGE if edge else 0)
     gid = -1
-    own = icon_img is not None or (glyph is not None and glyph_draw is not None)
     if icon_img is not None:
         flags |= _F_ICON
     elif glyph is not None:
         flags |= _F_GLYPH
         if glyph_draw is None:
             gid = glyph_id(glyph)
-    if value is not None and type(value) is not str:
-        value = str(value)
-    pad_i = None if pad is None else int(pad)
-    dy = None if text_dy is None else int(text_dy)
-    pr = None if pad_right is None else int(pad_right)
-    look = _look(th)
-    kid = _kind_id(kind)
-    act = _interact(state)
-    text = _text(label)
-    if not own:
-        _C.row(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, value, gid,
-               glyph_size, glyph_ink, value_ink, pad_i, pr, dy, int(scale), fs,
-               colors, _ALL)
+    look = _LOOK if th is _TH else _look(th)
+    kid = _KIND_ID.get(kind)
+    if kid is None:
+        kid = _kind_id(kind)
+    act = -1 if state is None else _STATE_ID.get(state, -1)
+    if icon_img is None and (glyph is None or glyph_draw is None):
+        _C.row(cv, look, rect, kid, flags, act, label, value, gid, glyph_size,
+               glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs, colors, _ALL)
     else:
         # The caller's picture lands between the frame and the text, as the
         # body it replaced drew it.
-        _C.row(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, value, gid,
-               glyph_size, glyph_ink, value_ink, pad_i, pr, dy, int(scale), fs,
-               colors, _FRAME)
+        _C.row(cv, look, rect, kid, flags, act, label, value, gid, glyph_size,
+               glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs, colors, _FRAME)
+        if fs is None:
+            fs = _fs(cv)
+        x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
         m = _METRICS["row"]
-        p = m[ROW_PAD] * fs if pad_i is None else pad_i
+        p = m[ROW_PAD] * fs if pad is None else int(pad)
         if icon_img is not None:
             box = m[ROW_ICON] * fs
             cv.spr(icon_img, x + p, y + (h - box) // 2, fs)
@@ -924,9 +849,9 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
                    if colors is None else colors)[1]
             glyph_draw(glyph, (x + p, y + (h - box) // 2, box, box),
                        ink if glyph_ink is None else glyph_ink, cv)
-        _C.row(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, value, gid,
-               glyph_size, glyph_ink, value_ink, pad_i, pr, dy, int(scale), fs,
-               colors, _CONTENT)
+        _C.row(cv, look, rect, kid, flags, act, label, value, gid, glyph_size,
+               glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs, colors,
+               _CONTENT)
     # A DISABLED row registers nothing: "dim ink, non-registering" is the whole
     # point of the state.
     if hits is not None and verb is not None and not disabled:
@@ -942,18 +867,7 @@ def row_content_rect(rect, fs=1, pad=None, pad_right=None, icon=False,
     `cell`: a caller that draws its own trailing content (a stepper pair, a
     progress bar, a badge) needs the arithmetic WITHOUT the draw paying a tuple
     allocation on every row of every frame."""
-    m = _METRICS["row"]
-    if pad is None:
-        pad = m[ROW_PAD] * fs
-    if pad_right is None:
-        pad_right = pad
-    x, y, w, h = rect
-    tx = x + pad
-    if icon:
-        tx += m[ROW_ICON] * fs + pad
-    elif glyph:
-        tx += (m[ROW_GLYPH] if glyph_size is None else glyph_size) * fs + pad
-    return (tx, y, max(0, x + w - pad_right - tx), h)
+    return _C.row_content(rect, fs, pad, pad_right, icon, glyph, glyph_size)
 
 
 def cell_art_rect(rect, fs=1, pad=None, caption_h=0):
@@ -961,11 +875,7 @@ def cell_art_rect(rect, fs=1, pad=None, caption_h=0):
     three sides, above the caption zone at the bottom. Separate from `cell` so
     a grid can size its thumbnail CACHE once, outside the loop, exactly as
     `FileGridView.draw` derives `art_w`/`art_h` before iterating."""
-    if pad is None:
-        pad = _METRICS["cell"][CELL_PAD] * fs
-    x, y, w, h = rect
-    return (x + pad, y + pad, max(0, w - 2 * pad),
-            max(0, h - pad - caption_h))
+    return _C.cell_art(rect, fs, pad, caption_h)
 
 
 def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
@@ -1015,34 +925,29 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     `appearance_app._draw_wall_card` and `cards_layer._draw_bg_thumbs` both
     already do by hand.
     """
-    if fs is None:
-        fs = _fs(cv)
-    x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
     flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
         _F_DISABLED if disabled else 0) | (_F_BAND if band else 0) | (
         _F_EDGE_LAST if edge_last else 0) | (_F_LABEL if label is not None else 0)
     gid = -1
-    own = icon_img is not None or (glyph is not None and glyph_draw is not None)
     if icon_img is not None:
         flags |= _F_ICON
     elif glyph is not None:
         flags |= _F_GLYPH
         if glyph_draw is None:
             gid = glyph_id(glyph)
-    look = _look(th)
-    kid = _kind_id(kind)
-    act = _interact(state)
-    text = None if label is None else (label if type(label) is str else str(label))
-    pad_i = None if pad is None else int(pad)
-    cap = None if caption_h is None else int(caption_h)
-    dx = None if text_dx is None else int(text_dx)
-    dy = None if text_dy is None else int(text_dy)
-    if not own:
-        return _C.cell(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, gid,
-                       pad_i, cap, band_fill, band_ink, dx, dy, fs, colors, _ALL)
+    look = _LOOK if th is _TH else _look(th)
+    kid = _KIND_ID.get(kind)
+    if kid is None:
+        kid = _kind_id(kind)
+    act = -1 if state is None else _STATE_ID.get(state, -1)
+    if icon_img is None and (glyph is None or glyph_draw is None):
+        return _C.cell(cv, look, rect, kid, flags, act, label, gid, pad, caption_h,
+                       band_fill, band_ink, text_dx, text_dy, fs, colors, _ALL)
     # The caller's picture lands between the frame and a late edge.
-    art = _C.cell(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, gid,
-                  pad_i, cap, band_fill, band_ink, dx, dy, fs, colors, _FRAME)
+    art = _C.cell(cv, look, rect, kid, flags, act, label, gid, pad, caption_h,
+                  band_fill, band_ink, text_dx, text_dy, fs, colors, _FRAME)
+    if fs is None:
+        fs = _fs(cv)
     ax, ay, aw, ah = art
     m = _METRICS["cell"]
     if icon_img is not None:
@@ -1054,8 +959,8 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
                if colors is None else colors)[1]
         glyph_draw(glyph, (ax + (aw - box) // 2, ay + (ah - box) // 2, box, box),
                    ink, cv)
-    _C.cell(cv.ui_sink(), look, x, y, w, h, kid, flags, act, text, gid, pad_i, cap,
-            band_fill, band_ink, dx, dy, fs, colors, _CONTENT)
+    _C.cell(cv, look, rect, kid, flags, act, label, gid, pad, caption_h,
+            band_fill, band_ink, text_dx, text_dy, fs, colors, _CONTENT)
     return art
 
 
@@ -1078,33 +983,14 @@ def tab_row_rects(rect, tabs, fs, gap=None):
     The gap/pad/icon-box are skin metrics, but they are the one group that
     SIZES a widget: changing them reflows the tab ladder and re-baselines the
     goldens. That is a deliberate versioned act, not a data tweak (Section 3.3)."""
-    m = _METRICS["tab"]
-    if gap is None:
-        gap = m[TAB_GAP] * fs
-    x0, y, w, h = rect
-    fw = 8 * fs
-    pad = m[TAB_PAD] * fs
-    icon_w = m[TAB_ICON] * fs
-
-    def chip_w(label, labels_on):
-        if labels_on and label:
-            return icon_w + pad + len(str(label)) * fw + pad
-        return icon_w + 2 * pad
-
-    labels_on = True
-    total = 0
+    labels = []
     for _id, label in tabs:
-        total += chip_w(label, True) + gap
-    if total - gap > w:
-        labels_on = False
+        labels.append(str(label) if label else "")
+    on, rects = _C.tab_rects(rect, "\0".join(labels).encode("utf-8"), len(labels),
+                             fs, gap)
     out = []
-    x = x0
-    for tid, label in tabs:
-        cw = chip_w(label, labels_on)
-        if x + cw > x0 + w:
-            break
-        out.append((tid, (x, y, cw, h), labels_on))
-        x += cw + gap
+    for i in range(len(rects)):
+        out.append((tabs[i][0], rects[i], on))
     return out
 
 
@@ -1115,36 +1001,26 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
     quiet on the field. Registers ("tab", id) hits; returns the geometry list
     so a cached-strip caller can hit-test without redrawing."""
     fs = _fs(cv)
-    m = _METRICS["tab"]
-    on_field, on_ink, _oe = state_colors(th, "tab", ON)
-    off_field, off_ink, _re = state_colors(th, "tab", REST)
-    if ink is not None:
-        off_ink = ink
     icons = {}
     slim = []
     for tid, label, icon_kind in tabs:
         slim.append((tid, label))
         icons[tid] = icon_kind
     rects = tab_row_rects(rect, slim, fs)
+    look = _LOOK if th is _TH else _look(th)
+    m = _METRICS["tab"]
     pad = m[TAB_PAD] * fs
     box = m[TAB_ICON] * fs
     for tid, r, labels_on in rects:
-        x, y, w, h = r
-        if tid == active:
-            if on_field is not None:
-                cv.rect(x, y, w, h, on_field)
-            ink_i = on_ink
-        else:
-            if off_field is not None:
-                cv.rect(x, y, w, h, off_field)
-            ink_i = off_ink
+        text = str(_tab_label(tabs, tid))
         img = icon_for(icons[tid]) if icon_for is not None else None
-        if img is not None:
-            cv.spr(img, x + (pad if labels_on else (w - box) // 2),
-                   y + (h - box) // 2, fs)
-        if labels_on:
-            cv.print(str(_tab_label(tabs, tid)),
-                     x + pad + box + pad, y + (h - 8 * fs) // 2, ink_i, 1)
+        if img is None:
+            _C.tab(cv, look, r, tid == active, labels_on, text, ink, _ALL)
+        else:
+            x, y, w, h = r
+            _C.tab(cv, look, r, tid == active, labels_on, text, ink, _FRAME)
+            cv.spr(img, x + (pad if labels_on else (w - box) // 2), y + (h - box) // 2, fs)
+            _C.tab(cv, look, r, tid == active, labels_on, text, ink, _CONTENT)
         if hits is not None:
             hits.add(r, "tab", tid)
     return rects
@@ -1160,23 +1036,11 @@ def _tab_label(tabs, tid):
 def status_row(cv, th, rect, items):
     """The window status band ("Ln 13, Col 1" / "No issues"): a quiet strip on
     the alt surface with dim ink, items spaced left-to-right."""
-    fs = _fs(cv)
-    x, y, w, h = rect
-    field, ink, rule = state_colors(th, "status", REST)
-    m = _METRICS["status"]
-    cv.rect(x, y, w, h, field)
-    if rule is not None and m[ST_RULE] > 0:
-        cv.rect(x, y, w, m[ST_RULE] * fs, rule)
-    fw = 8 * fs
-    tx = x + m[ST_PAD] * fs
-    ty = y + (h - 8 * fs + m[ST_DY] * fs) // 2
-    gap = m[ST_GAP]
+    parts = []
     for item in items:
-        s = str(item)
-        if tx + len(s) * fw > x + w:
-            break
-        cv.print(s, tx, ty, ink, 1)
-        tx += (len(s) + gap) * fw
+        parts.append(item if type(item) is str else str(item))
+    _C.status(cv, _LOOK if th is _TH else _look(th), rect,
+              "\0".join(parts).encode("utf-8"), len(parts))
 
 
 # --- the classic game-canvas button family -----------------------------------
@@ -1196,32 +1060,24 @@ def game_btn(cv, rect, label, fill):
     at font scale 1 the label prints with the legacy scale-2 arg but centers
     with height 8 (byte-identical to the shipped pixels) -- a BRANCH, not a
     number, which is why it stays code (style.json's "quirks")."""
-    x, y, w, h = rect
-    fs = _fs(cv)
-    m = _METRICS["game_btn"]
-    cv.rect(x, y, w, h, fill)
-    cv.rectb(x, y, w, h, m[GB_RING])
-    if fs <= 1:
-        cv.print(label, x + m[GB_PAD], y + (h - 8) // 2, m[GB_INK], 2)
-    else:
-        cv.print(label, x + m[GB_PAD] * fs, y + (h - 8 * fs) // 2,
-                 m[GB_INK], 2)
+    _C.game_btn(cv, rect, label, fill)
 
 
 def game_icon_btn(cv, rect, kind, label, fill, glyph_draw=None):
     """A button that leads with an icon glyph (pre-literate) and keeps the word
     as a small secondary cue beside it."""
-    x, y, w, h = rect
-    fs = _fs(cv)
-    m = _METRICS["game_icon_btn"]
-    cv.rect(x, y, w, h, fill)
-    cv.rectb(x, y, w, h, m[GI_RING])
-    if glyph_draw is not None:
-        glyph_draw(kind, (x + m[GI_PAD] * fs, y, m[GI_GLYPH] * fs, h),
-                   m[GI_INK], cv)
-    if label:
-        cv.print(label, x + m[GI_LABEL] * fs, y + (h - 8 * fs) // 2,
-                 m[GI_INK], 1)
+    if glyph_draw is None:
+        # no glyph at all, as the body it replaced drew it
+        _C.game_icon_btn(cv, rect, -1, label, fill, _ALL)
+    elif glyph_draw is _glyph_draw:
+        _C.game_icon_btn(cv, rect, glyph_id(kind), label, fill, _ALL)
+    else:
+        _C.game_icon_btn(cv, rect, -1, label, fill, _FRAME)
+        fs = _fs(cv)
+        m = _METRICS["game_icon_btn"]
+        glyph_draw(kind, (int(rect[0]) + m[GI_PAD] * fs, int(rect[1]),
+                          m[GI_GLYPH] * fs, int(rect[3])), m[GI_INK], cv)
+        _C.game_icon_btn(cv, rect, -1, label, fill, _CONTENT)
 
 
 def mini_btn(cv, rect, label, fill, label_rect=None):
@@ -1233,19 +1089,13 @@ def mini_btn(cv, rect, label, fill, label_rect=None):
     than the label's own box -- a chrome-scaled tap target (#203), whose fill
     still paints the whole finger-sized `rect`. Defaults to `rect`, which is the
     identity everywhere the two are the same size."""
-    x, y, w, h = rect
-    m = _METRICS["mini_btn"]
-    cv.rect(x, y, w, h, fill)
-    lx, ly = (rect if label_rect is None else label_rect)[:2]
-    cv.print(label, lx + m[MB_PADX], ly + m[MB_PADY], m[MB_INK], 1)
+    _C.mini_btn(cv, rect, label, fill, label_rect)
 
 
 def toolbar(cv, th, rect):
     """The app toolbar band (Storybook): the theme's title surface --
     chips and status text draw over it in title_ink."""
-    x, y, w, h = rect
-    field, _ink, _edge = state_colors(th, "toolbar", REST)
-    cv.rect(x, y, w, h, field)
+    _C.toolbar(cv, _LOOK if th is _TH else _look(th), rect)
     return rect
 
 
@@ -1254,17 +1104,7 @@ def dialog(cv, rect, ring=None, fill=None):
     menu, the graduation banner): dark-purple base + a colored frame. Geometry
     stays the caller's (their hit rects are test-pinned constants); only the
     shell drawing is shared. `ring`/`fill` default to the skin's."""
-    x, y, w, h = rect
-    m = _METRICS["dialog"]
-    cv.rect(x, y, w, h, m[DLG_FILL] if fill is None else fill)
-    c = m[DLG_RING] if ring is None else ring
-    n = m[DLG_EDGE]
-    if n > 0:
-        cv.rectb(x, y, w, h, c)
-        i = 1
-        while i < n:
-            cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, c)
-            i += 1
+    _C.dialog(cv, rect, ring, fill)
 
 
 def dialog_rings():
@@ -1282,73 +1122,20 @@ def text_field(cv, rect, text, placeholder="", colors=None, fs=None):
     advance never scale. Pass `fs` to scale them (a system-surface field on a
     font-scaled tier) and `colors` -- (field, ring, ink, placeholder, caret) --
     to theme it; both default to the frozen rendering the goldens pin."""
-    x, y, w, h = rect
-    m = _METRICS["text_field"]
-    if colors is None:
-        field, ring, ink = m[TF_FIELD], m[TF_RING], m[TF_INK]
-        hint, caret = m[TF_HINT], m[TF_CARET]
-    else:
-        field, ring, ink, hint, caret = colors
-    if fs is None:
-        fs = 1
-    px = m[TF_PADX] * fs
-    py = m[TF_PADY] * fs
-    if field is not None:
-        cv.rect(x, y, w, h, field)
-    if ring is not None:
-        cv.rectb(x, y, w, h, ring)
-    if text:
-        cv.print(text, x + px, y + py, ink, 1)
-    elif placeholder:
-        cv.print(placeholder, x + px, y + py, hint, 1)
-    if caret is not None:
-        cv.rect(x + px + len(text) * 8 * fs, y + py,
-                m[TF_CARET_W] * fs, m[TF_CARET_H] * fs, caret)
+    _C.text_field(cv, rect, text, placeholder, colors, fs)
 
 
 def panel(cv, th, rect, title=None, fs=None):
     """A tool panel: the warm surface + thin border, optionally a compact title
     strip (title bg / title ink tokens). Returns the CONTENT rect (inside the
     border, below any title strip)."""
-    if fs is None:
-        fs = _fs(cv)
-    x, y, w, h = rect
-    field, _ink, border = state_colors(th, "panel", REST)
-    m = _METRICS["panel"]
-    cv.rect(x, y, w, h, field)
-    n = m[PANEL_EDGE] * fs
-    i = 0
-    while i < n:                           # the border grows OUTWARD with fs
-        cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, border)
-        i += 1
-    content = inset(rect, m[PANEL_INSET], m[PANEL_INSET])
-    if title:
-        strip, content = cut_top(content, m[PANEL_STRIP] * fs)
-        sx, sy, sw, sh = strip
-        tf, ti, _te = state_colors(th, "panel_title", REST)
-        cv.rect(sx, sy, sw, sh, tf)
-        cv.print(str(title), sx + m[PANEL_PAD] * fs, sy + (sh - 8 * fs) // 2,
-                 ti, 1)
-    return content
+    return _C.panel(cv, _LOOK if th is _TH else _look(th), rect, title, fs)
 
 
 def focus_ring(cv, th, rect, fs=None):
     """The Section 5.2 focus treatment: signal-yellow ring with a 1-step gap --
     one implementation so keyboard/pointer focus looks the same everywhere."""
-    if fs is None:
-        fs = _fs(cv)
-    x, y, w, h = rect
-    _f, _i, color = state_colors(th, "focus", REST)
-    m = _METRICS["focus"]
-    n = m[FOCUS_RINGS]
-    if n < fs:
-        n = fs
-    gap = m[FOCUS_GAP]
-    i = 0
-    while i < n:
-        d = fs + gap + i
-        cv.rectb(x - d, y - d, w + 2 * d, h + 2 * d, color)
-        i += 1
+    _C.focus_ring(cv, _LOOK if th is _TH else _look(th), rect, fs)
 
 
 def fill_uncovered(cv, inner, outer, col):
@@ -1370,9 +1157,7 @@ def fill_uncovered(cv, inner, outer, col):
     fully covered (the Scene pane's layout), and degrades to one full fill when the
     two rects do not overlap, so it is safe on every tier.
     """
-    _C.fill_uncovered(cv.ui_sink(), int(inner[0]), int(inner[1]), int(inner[2]),
-                      int(inner[3]), int(outer[0]), int(outer[1]), int(outer[2]),
-                      int(outer[3]), col)
+    _C.fill_uncovered(cv, inner, outer, col)
 
 
 # --- scrolling ------------------------------------------------------------------
@@ -1588,14 +1373,12 @@ class ScrollRegion:
 
     def bar_rect(self, fs=1):
         """The scrollbar thumb rect, or None when everything fits."""
-        x, y, w, h = self.view
-        return _C.bar_rect(int(x), int(y), int(w), int(h), self.content, self.offset,
-                           self.horizontal, fs, self.BAR_W)
+        return _C.bar_rect(self.view, self.content, self.offset, self.horizontal, fs,
+                           self.BAR_W)
 
     def draw_bar(self, cv, th):
-        x, y, w, h = self.view
-        _C.scrollbar(cv.ui_sink(), _look(th), int(x), int(y), int(w), int(h),
-                     self.content, self.offset, self.horizontal, _fs(cv), self.BAR_W)
+        _C.scrollbar(cv, _LOOK if th is _TH else _look(th), self.view, self.content,
+                     self.offset, self.horizontal, self.BAR_W)
 
 
 class DragTap:

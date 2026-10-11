@@ -239,7 +239,7 @@ def test_the_private_button_copies_are_gone():
     assert "def _button(" not in src, "storybook_app re-grew a private _button"
 
 
-def test_the_disabled_history_chip_dims_through_the_theme_role(monkeypatch):
+def test_the_disabled_history_chip_dims_through_the_theme_role():
     """The affordance is the INK (there is no dimmed sprite), and it now comes
     from the theme's own `ink_dim` role rather than a hardcoded palette index --
     so it stays legible in all 12 family x variant sets."""
@@ -259,17 +259,23 @@ def test_the_disabled_history_chip_dims_through_the_theme_role(monkeypatch):
                 def colors():
                     return th
 
-            # The chip draws its glyph through the toolkit's own raster.
-            monkeypatch.setattr(ui, "_glyph_draw",
-                                lambda kind, rect, color, cv: seen.append(color))
             app = ListShellApp()
             # The app reads its shell through AppContext roles now
             # (runtime/app_context.py), so the stub supplies the theme.
             app._theme = _Theme()
             app.layout = _Layout()
-            cv = SystemCanvas(320, 240, 1)
-            app._button(cv, "undo", (4, 4, 18, 18), glyph="undo", enabled=True)
-            app._button(cv, "redo", (26, 4, 18, 18), glyph="redo", enabled=False)
+            for glyph, enabled in (("undo", True), ("redo", False)):
+                cv = SystemCanvas(40, 30, 1)
+                app._button(cv, glyph, (4, 4, 18, 18), glyph=glyph, enabled=enabled)
+                # The twin's chip paints its glyph in the disabled ink its
+                # state table resolves through the theme's `ink_dim` role.
+                ref = SystemCanvas(40, 30, 1)
+                twin.chip(ref, th, (4, 4, 18, 18), glyph, fs=1, glyph=glyph,
+                          glyph_draw=lambda k, r, c, v: ui.glyph(v, k, r, c),
+                          disabled=not enabled)
+                assert bytes(cv._buf) == bytes(ref._buf), (name, variant, glyph)
+                seen.append(twin.state_colors(th, "chip", twin.DISABLED if not enabled
+                                              else twin.REST)[1])
             assert seen == [th["title_ink"],
                             twin.state_token(th, "disabled_ink", 6)], (name, variant)
             assert seen[0] != seen[1], (name, variant)

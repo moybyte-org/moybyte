@@ -104,6 +104,7 @@ const char *const moy_ui_kind_names[MOY_UI_KINDS] = {
     "cell",
     "cell_band",
     "chip",
+    "toggle",
     "row_menu",
     "row_list",
     "row_chrome",
@@ -154,6 +155,7 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {3, {-30, -5, 10}},
     {1, {0, 0, 0}},
     {2, {-2, 13, 0}},
+    {2, {-18, 11, 0}},
     {2, {-6, 13, 0}},
     {2, {-16, 7, 0}},
     {2, {-26, 6, 0}},
@@ -179,21 +181,22 @@ const uint8_t moy_ui_kind_specs[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_STATES][3] = 
         {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 6}, {1, 11, 12}, {1, 11, 9}},  // cell
         {{10, 11, 0}, {10, 11, 0}, {7, 11, 0}, {6, 13, 0}, {10, 11, 0}, {10, 11, 0}},  // cell_band
         {{1, 2, 3}, {4, 5, 14}, {7, 8, 9}, {6, 13, 14}, {1, 11, 12}, {1, 11, 9}},  // chip
-        {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {15, 16, 0}, {0, 17, 12}, {0, 17, 0}},  // row_menu
-        {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {15, 16, 0}, {0, 18, 12}, {0, 18, 0}},  // row_list
-        {{0, 17, 0}, {4, 5, 0}, {7, 8, 9}, {15, 16, 0}, {0, 19, 12}, {0, 19, 0}},  // row_chrome
-        {{15, 2, 9}, {4, 5, 6}, {7, 8, 9}, {6, 13, 6}, {15, 13, 12}, {15, 13, 9}},  // row_cta
-        {{20, 2, 13}, {4, 5, 13}, {20, 21, 13}, {6, 13, 13}, {20, 21, 12}, {20, 21, 13}},  // button
-        {{22, 2, 13}, {4, 5, 13}, {22, 8, 13}, {6, 13, 13}, {22, 8, 12}, {22, 8, 13}},  // button_play
-        {{23, 2, 13}, {4, 5, 13}, {23, 13, 13}, {6, 13, 13}, {23, 13, 12}, {23, 13, 13}},  // button_author
-        {{24, 2, 13}, {4, 5, 13}, {24, 8, 13}, {6, 13, 13}, {24, 8, 12}, {24, 8, 13}},  // button_danger
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {25, 11, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {26, 18, 27}},  // status
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {28, 0, 27}},  // panel
+        {{1, 2, 3}, {4, 5, 14}, {7, 8, 9}, {15, 8, 14}, {1, 11, 12}, {1, 11, 9}},  // toggle
+        {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {16, 17, 0}, {0, 18, 12}, {0, 18, 0}},  // row_menu
+        {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {16, 17, 0}, {0, 19, 12}, {0, 19, 0}},  // row_list
+        {{0, 18, 0}, {4, 5, 0}, {7, 8, 9}, {16, 17, 0}, {0, 20, 12}, {0, 20, 0}},  // row_chrome
+        {{16, 2, 9}, {4, 5, 6}, {7, 8, 9}, {6, 13, 6}, {16, 13, 12}, {16, 13, 9}},  // row_cta
+        {{21, 2, 13}, {4, 5, 13}, {21, 22, 13}, {6, 13, 13}, {21, 22, 12}, {21, 22, 13}},  // button
+        {{23, 2, 13}, {4, 5, 13}, {23, 8, 13}, {6, 13, 13}, {23, 8, 12}, {23, 8, 13}},  // button_play
+        {{24, 2, 13}, {4, 5, 13}, {24, 13, 13}, {6, 13, 13}, {24, 13, 12}, {24, 13, 13}},  // button_author
+        {{25, 2, 13}, {4, 5, 13}, {25, 8, 13}, {6, 13, 13}, {25, 8, 12}, {25, 8, 13}},  // button_danger
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {26, 11, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {27, 19, 28}},  // status
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {29, 0, 28}},  // panel
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 11, 0}},  // panel_title
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 0, 0}},  // toolbar
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {9, 18, 0}},  // scrollbar
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 29}},  // focus
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {9, 19, 0}},  // scrollbar
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 30}},  // focus
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // text_field
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_btn
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_icon_btn
@@ -201,25 +204,26 @@ const uint8_t moy_ui_kind_specs[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_STATES][3] = 
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // dialog
     },
     {  // outline
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {30, 11, 6}, {0, 11, 31}, {0, 11, 9}},  // row
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {30, 11, 6}, {0, 11, 31}, {0, 11, 9}},  // cell
-        {{30, 18, 0}, {6, 13, 0}, {7, 8, 0}, {6, 13, 0}, {30, 11, 0}, {30, 11, 0}},  // cell_band
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {30, 11, 6}, {0, 11, 31}, {0, 11, 9}},  // chip
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 18, 31}, {0, 18, 9}},  // row_menu
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 18, 31}, {0, 18, 9}},  // row_list
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 11, 31}, {0, 11, 9}},  // row_chrome
-        {{0, 18, 18}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 11, 31}, {0, 11, 6}},  // row_cta
-        {{1, 18, 18}, {6, 13, 6}, {20, 21, 9}, {6, 13, 6}, {20, 21, 31}, {20, 21, 9}},  // button
-        {{1, 18, 18}, {6, 13, 6}, {22, 8, 9}, {6, 13, 6}, {22, 8, 31}, {22, 8, 9}},  // button_play
-        {{1, 18, 18}, {6, 13, 6}, {23, 13, 9}, {6, 13, 6}, {23, 13, 31}, {23, 13, 9}},  // button_author
-        {{1, 18, 18}, {6, 13, 6}, {24, 8, 9}, {6, 13, 6}, {24, 8, 31}, {24, 8, 9}},  // button_danger
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {30, 11, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {1, 18, 6}},  // status
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {28, 0, 6}},  // panel
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {30, 11, 0}},  // panel_title
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {31, 11, 6}, {0, 11, 32}, {0, 11, 9}},  // row
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {31, 11, 6}, {0, 11, 32}, {0, 11, 9}},  // cell
+        {{31, 19, 0}, {6, 13, 0}, {7, 8, 0}, {6, 13, 0}, {31, 11, 0}, {31, 11, 0}},  // cell_band
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {31, 11, 6}, {0, 11, 32}, {0, 11, 9}},  // chip
+        {{1, 2, 3}, {4, 5, 14}, {7, 8, 9}, {15, 8, 14}, {1, 11, 12}, {1, 11, 9}},  // toggle
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 19, 32}, {0, 19, 9}},  // row_menu
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 19, 32}, {0, 19, 9}},  // row_list
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 11, 32}, {0, 11, 9}},  // row_chrome
+        {{0, 19, 19}, {6, 13, 6}, {7, 8, 7}, {6, 13, 6}, {0, 11, 32}, {0, 11, 6}},  // row_cta
+        {{1, 19, 19}, {6, 13, 6}, {21, 22, 9}, {6, 13, 6}, {21, 22, 32}, {21, 22, 9}},  // button
+        {{1, 19, 19}, {6, 13, 6}, {23, 8, 9}, {6, 13, 6}, {23, 8, 32}, {23, 8, 9}},  // button_play
+        {{1, 19, 19}, {6, 13, 6}, {24, 13, 9}, {6, 13, 6}, {24, 13, 32}, {24, 13, 9}},  // button_author
+        {{1, 19, 19}, {6, 13, 6}, {25, 8, 9}, {6, 13, 6}, {25, 8, 32}, {25, 8, 9}},  // button_danger
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {31, 11, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {1, 19, 6}},  // status
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {29, 0, 6}},  // panel
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {31, 11, 0}},  // panel_title
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {1, 0, 0}},  // toolbar
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 6, 0}},  // scrollbar
-        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 31}},  // focus
+        {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 32}},  // focus
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // text_field
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_btn
         {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_icon_btn
@@ -228,7 +232,7 @@ const uint8_t moy_ui_kind_specs[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_STATES][3] = 
     },
 };
 
-const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {5, 6, 0, 5, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3};
+const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {5, 6, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3};
 
 const int16_t moy_ui_metric_vals[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_SLOTS] = {
     {  // default
@@ -236,6 +240,7 @@ const int16_t moy_ui_metric_vals[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_SLOTS] = {
         {2, 14, 2, 16, 14, 1, 0, 0, 0},  // cell
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // cell_band
         {4, 2, 1, 1, 1, 0, 0, 0, 0},  // chip
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},  // toggle
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_menu
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_list
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_chrome
@@ -262,6 +267,7 @@ const int16_t moy_ui_metric_vals[MOY_UI_SKINS][MOY_UI_KINDS][MOY_UI_SLOTS] = {
         {2, 14, 2, 16, 14, 1, 0, 0, 0},  // cell
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // cell_band
         {4, 2, 1, 2, 0, 0, 0, 0, 0},  // chip
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},  // toggle
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_menu
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_list
         {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_chrome
@@ -290,6 +296,7 @@ const char *const moy_ui_metric_slots[MOY_UI_KINDS] = {
     "pad caption indent icon glyph edge",
     "",
     "clip min_x min_y edge align",
+    "",
     "",
     "",
     "",

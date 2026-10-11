@@ -49,6 +49,14 @@
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["edge", 13]],
       "disabled": [["panel", 60], ["disabled_ink", 6], ["disabled_edge", 1]]
     },
+    "toggle": {
+      "rest": [["panel", 60], ["title_ink", 0], ["dim", 1]],
+      "hover": [["panel", 60], ["title_ink", 0], ["hover_cue", "accent", 10]],
+      "on": [["play", 11], 7, ["edge", 13]],
+      "hot": [["danger", 8], 7, ["dim", 1]],
+      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["edge", 13]],
+      "disabled": [["panel", 60], ["disabled_ink", 6], ["disabled_edge", 1]]
+    },
     "row_menu": {
       "rest": [null, ["chrome_ink_dim", 6], null],
       "hover": [null, ["chrome_ink_dim", 6], ["hover_cue", "accent", 10]],

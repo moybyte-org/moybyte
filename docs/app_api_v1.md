@@ -261,8 +261,9 @@ one or the other, so ADDING a role forces the decision. A user app's grant is
 its run's and ends with it; its crash-guard strikes are keyed by the same id.
 
 Four globals every `type: "app"` cart gets with no permission, because they are
-how an app draws rather than what it may reach: **`ui`** (the real
-`runtime/ui.py`), **`screen()`** (the canvas -- `ui`'s `cv`), **`theme()`** (the
+how an app draws rather than what it may reach: **`ui`** (`runtime/ui.py`, the
+face of the toolkit's C in `native/moy_ui`, the same widgets a compiled app
+draws), **`screen()`** (the canvas -- `ui`'s `cv`), **`theme()`** (the
 live tokens -- its `th`), and **`bar_h()`** (rows the host's exitable strip owns;
 draw below them, never hardcode 18).
 

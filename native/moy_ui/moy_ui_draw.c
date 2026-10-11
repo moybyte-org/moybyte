@@ -83,6 +83,14 @@ static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scal
                                                    d->row->pal[ci & 63], scale);
 }
 
+int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h, int ci,
+                      int scale) {
+    draw_t d;
+    open_draw(s, &d);
+    glyph(&d, g, x, y, w, h, ci, scale);
+    return MOY_UI_OK;
+}
+
 int moy_ui_fdiv(int a, int b) {
     int q = a / b, r = a % b;
     return (r != 0 && ((r < 0) != (b < 0))) ? q - 1 : q;
@@ -424,4 +432,497 @@ int moy_ui_list(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const uint8_t 
     st[MOY_ST_CX1] = saved[2];
     st[MOY_ST_CY1] = saved[3];
     return moy_ui_scrollbar(s, b, count * row_h, offset, 0, fs, bar_w);
+}
+
+// -- buttons -------------------------------------------------------------------------
+
+static int fit_cells(moy_ui_span_t t, int maxc) {
+    return (int)moy_text_fit(t.p, t.n, maxc > 0 ? (size_t)maxc : 0);
+}
+
+// The button's label run: where its icon or glyph and its label start.
+static int button_off(moy_ui_box_t b, int iw, int ln, int fs) {
+    int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
+    int tw = iw + ln * 8 * fs;
+    int align = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ALIGN);
+    int off;
+    if (align == MOY_TEXT_CENTER) {
+        off = moy_ui_fdiv(b.w - tw, 2);
+    } else if (align == MOY_TEXT_RIGHT) {
+        off = b.w - pad - tw;
+    } else {
+        off = pad;
+    }
+    return off < pad ? pad : off;
+}
+
+static int button_iw(int flags, int fs) {
+    int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
+    if (flags & MOY_UI_F_ICON) {
+        return metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON) * fs + pad;
+    }
+    if (flags & MOY_UI_F_GLYPH) {
+        return metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs + pad;
+    }
+    return 0;
+}
+
+int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs) {
+    int iw = button_iw(flags, fs);
+    int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
+    int ln = fit_cells(label, moy_ui_fdiv(b.w - 2 * pad - iw, 8 * fs));
+    return b.x + button_off(b, iw, ln, fs);
+}
+
+int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                  const moy_ui_button_t *k, int phase) {
+    draw_t d;
+    open_draw(s, &d);
+    int fs = k->fs, x = b.x, y = b.y, w = b.w, h = b.h;
+    int16_t c[3];
+    colours(&d, kind, moy_ui_state_of(flags & ~MOY_UI_F_HOT, interact), NULL, c);
+    int bg = c[0], ink = c[1], edge = c[2];
+    if (phase & MOY_UI_PHASE_FRAME) {
+        fill(&d, x, y, w, h, bg);
+        int n = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
+        if (n > 0) {
+            rings(&d, x, y, w, h, edge, n);
+        }
+    }
+    if (!(phase & MOY_UI_PHASE_CONTENT)) {
+        return MOY_UI_OK;
+    }
+    int iw = button_iw(flags, fs);
+    int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
+    int ln = fit_cells(k->label, moy_ui_fdiv(w - 2 * pad - iw, 8 * fs));
+    int tx = x + button_off(b, iw, ln, fs);
+    if (!(flags & MOY_UI_F_ICON) && (flags & MOY_UI_F_GLYPH) && k->glyph >= 0) {
+        glyph(&d, k->glyph, tx, y, metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs, h, ink,
+              d.tfs);
+    }
+    if (ln) {
+        text(&d, k->label.p, (size_t)ln, tx + iw, y + moy_ui_fdiv(h - 8 * fs, 2), ink);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                const moy_ui_button_t *k, int phase) {
+    draw_t d;
+    open_draw(s, &d);
+    int fs = k->fs, x = b.x, y = b.y, w = b.w, h = b.h;
+    int16_t c[3];
+    colours(&d, kind, moy_ui_state_of(flags, interact), k->colors, c);
+    int bg = c[0], ink = c[1], edge = c[2];
+    if (phase & MOY_UI_PHASE_FRAME) {
+        if (bg >= 0) {
+            fill(&d, x, y, w, h, bg);
+        }
+        int n = metric(MOY_UI_K_CHIP, MOY_UI_M_CHIP_EDGE);
+        if (n > 0 && edge >= 0) {
+            rings(&d, x, y, w, h, edge, n);
+        }
+    }
+    if (!(phase & MOY_UI_PHASE_CONTENT)) {
+        return MOY_UI_OK;
+    }
+    if (flags & MOY_UI_F_GLYPH) {
+        // The glyph REPLACES the label.
+        if (k->glyph >= 0) {
+            glyph(&d, k->glyph, x, y, w, h, ink, d.tfs);
+        }
+        return MOY_UI_OK;
+    }
+    int fw = 8 * fs;
+    int ln = fit_cells(k->label, moy_ui_fdiv(w - metric(MOY_UI_K_CHIP, MOY_UI_M_CHIP_CLIP), fw));
+    int lw = ln * fw;
+    int minx = metric(MOY_UI_K_CHIP, MOY_UI_M_CHIP_MIN_X);
+    int align = metric(MOY_UI_K_CHIP, MOY_UI_M_CHIP_ALIGN);
+    int ox;
+    if (align == MOY_TEXT_CENTER) {
+        ox = moy_ui_fdiv(w - lw, 2);
+    } else if (align == MOY_TEXT_RIGHT) {
+        ox = w - minx - lw;
+    } else {
+        ox = minx;
+    }
+    if (ox < minx) {
+        ox = minx;
+    }
+    int oy = moy_ui_fdiv(h - 8 * fs, 2);
+    int miny = metric(MOY_UI_K_CHIP, MOY_UI_M_CHIP_MIN_Y);
+    if (oy < miny) {
+        oy = miny;
+    }
+    text(&d, k->label.p, (size_t)ln, x + ox, y + oy, ink);
+    return MOY_UI_OK;
+}
+
+// -- tabs and status ------------------------------------------------------------------
+
+// The tab chips laid left to right (draw-what-fits; every tab collapses to
+// its icon when the labelled row would not fit). `labels` are NUL-separated.
+int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int count, int fs,
+                     int gap, moy_ui_box_t *out, int *labels_on) {
+    int pad = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_PAD) * fs;
+    int icon_w = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_ICON) * fs;
+    int fw = 8 * fs;
+    if (gap == MOY_UI_DEFAULT) {
+        gap = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_GAP) * fs;
+    }
+    int total = 0;
+    size_t at = 0;
+    for (int i = 0; i < count && at <= len; i++) {
+        size_t e = at;
+        while (e < len && labels[e] != 0) {
+            e++;
+        }
+        int n = (int)(e - at);
+        total += (n ? icon_w + pad + n * fw + pad : icon_w + 2 * pad) + gap;
+        at = e + 1;
+    }
+    int on = !(total - gap > r.w);
+    *labels_on = on;
+    int x = r.x, placed = 0;
+    at = 0;
+    for (int i = 0; i < count && at <= len; i++) {
+        size_t e = at;
+        while (e < len && labels[e] != 0) {
+            e++;
+        }
+        int n = (int)(e - at);
+        int cw = (on && n) ? icon_w + pad + n * fw + pad : icon_w + 2 * pad;
+        if (x + cw > r.x + r.w) {
+            break;
+        }
+        out[placed++] = (moy_ui_box_t){(int16_t)x, r.y, (int16_t)cw, r.h};
+        x += cw + gap;
+        at = e + 1;
+    }
+    return placed;
+}
+
+// One tab chip: its field (the ON look when `active`), the icon slot the
+// caller fills between the phases, its label when `labels_on`.
+int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on,
+               moy_ui_span_t label, int ink, int fs, int phase) {
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[3];
+    moy_ui_colors(d.look, MOY_UI_K_TAB, active ? MOY_UI_ON : MOY_UI_REST, c);
+    int ink_i = active ? c[1] : (ink == MOY_UI_FROM_STYLE ? c[1] : ink);
+    if ((phase & MOY_UI_PHASE_FRAME) && c[0] >= 0) {
+        fill(&d, r.x, r.y, r.w, r.h, c[0]);
+    }
+    if ((phase & MOY_UI_PHASE_CONTENT) && labels_on) {
+        int pad = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_PAD) * fs;
+        int box = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_ICON) * fs;
+        text(&d, label.p, label.n, r.x + pad + box + pad, r.y + moy_ui_fdiv(r.h - 8 * fs, 2),
+             ink_i);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_status(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                  int count, int fs) {
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[3];
+    moy_ui_colors(d.look, MOY_UI_K_STATUS, MOY_UI_REST, c);
+    fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    int rule = metric(MOY_UI_K_STATUS, MOY_UI_M_STATUS_RULE);
+    if (c[2] >= 0 && rule > 0) {
+        fill(&d, b.x, b.y, b.w, rule * fs, c[2]);
+    }
+    int fw = 8 * fs;
+    int tx = b.x + metric(MOY_UI_K_STATUS, MOY_UI_M_STATUS_PAD) * fs;
+    int ty = b.y + moy_ui_fdiv(b.h - 8 * fs + metric(MOY_UI_K_STATUS, MOY_UI_M_STATUS_DY) * fs,
+                               2);
+    int gap = metric(MOY_UI_K_STATUS, MOY_UI_M_STATUS_GAP);
+    size_t at = 0;
+    for (int i = 0; i < count && at <= len; i++) {
+        size_t e = at;
+        while (e < len && items[e] != 0) {
+            e++;
+        }
+        int n = (int)(e - at);
+        if (tx + n * fw > b.x + b.w) {
+            break;
+        }
+        text(&d, items + at, (size_t)n, tx, ty, c[1]);
+        tx += (n + gap) * fw;
+        at = e + 1;
+    }
+    return MOY_UI_OK;
+}
+
+// -- the game-canvas family -------------------------------------------------------------
+
+int moy_ui_game_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
+                    int fs) {
+    draw_t d;
+    open_draw(s, &d);
+    fill(&d, b.x, b.y, b.w, b.h, fill_c);
+    rectb(&d, b.x, b.y, b.w, b.h, metric(MOY_UI_K_GAME_BTN, MOY_UI_M_GAME_BTN_RING));
+    int pad = metric(MOY_UI_K_GAME_BTN, MOY_UI_M_GAME_BTN_PAD);
+    int ink = metric(MOY_UI_K_GAME_BTN, MOY_UI_M_GAME_BTN_INK);
+    // The frozen quirk (style.json's quirks): at scale 1 the label centres
+    // with height 8; above it, at the scale.
+    if (fs <= 1) {
+        text(&d, label.p, label.n, b.x + pad, b.y + moy_ui_fdiv(b.h - 8, 2), ink);
+    } else {
+        text(&d, label.p, label.n, b.x + pad * fs, b.y + moy_ui_fdiv(b.h - 8 * fs, 2), ink);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_game_icon_btn(const moy_ui_sink_t *s, moy_ui_box_t b, int g, moy_ui_span_t label,
+                         int fill_c, int fs, int phase) {
+    draw_t d;
+    open_draw(s, &d);
+    int ink = metric(MOY_UI_K_GAME_ICON_BTN, MOY_UI_M_GAME_ICON_BTN_INK);
+    if (phase & MOY_UI_PHASE_FRAME) {
+        fill(&d, b.x, b.y, b.w, b.h, fill_c);
+        rectb(&d, b.x, b.y, b.w, b.h,
+              metric(MOY_UI_K_GAME_ICON_BTN, MOY_UI_M_GAME_ICON_BTN_RING));
+    }
+    if (!(phase & MOY_UI_PHASE_CONTENT)) {
+        return MOY_UI_OK;
+    }
+    if (g >= 0) {
+        glyph(&d, g, b.x + metric(MOY_UI_K_GAME_ICON_BTN, MOY_UI_M_GAME_ICON_BTN_PAD) * fs,
+              b.y, metric(MOY_UI_K_GAME_ICON_BTN, MOY_UI_M_GAME_ICON_BTN_GLYPH) * fs, b.h, ink,
+              d.tfs);
+    }
+    if (label.n) {
+        text(&d, label.p, label.n,
+             b.x + metric(MOY_UI_K_GAME_ICON_BTN, MOY_UI_M_GAME_ICON_BTN_LABEL) * fs,
+             b.y + moy_ui_fdiv(b.h - 8 * fs, 2), ink);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_mini_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
+                    int lx, int ly) {
+    draw_t d;
+    open_draw(s, &d);
+    fill(&d, b.x, b.y, b.w, b.h, fill_c);
+    text(&d, label.p, label.n, lx + metric(MOY_UI_K_MINI_BTN, MOY_UI_M_MINI_BTN_PAD_X),
+         ly + metric(MOY_UI_K_MINI_BTN, MOY_UI_M_MINI_BTN_PAD_Y),
+         metric(MOY_UI_K_MINI_BTN, MOY_UI_M_MINI_BTN_INK));
+    return MOY_UI_OK;
+}
+
+// -- frames -----------------------------------------------------------------------------
+
+int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b) {
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[3];
+    moy_ui_colors(d.look, MOY_UI_K_TOOLBAR, MOY_UI_REST, c);
+    fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    return MOY_UI_OK;
+}
+
+int moy_ui_dialog(const moy_ui_sink_t *s, moy_ui_box_t b, int ring, int fill_c) {
+    draw_t d;
+    open_draw(s, &d);
+    fill(&d, b.x, b.y, b.w, b.h,
+         fill_c == MOY_UI_FROM_STYLE ? metric(MOY_UI_K_DIALOG, MOY_UI_M_DIALOG_FILL) : fill_c);
+    int c = ring == MOY_UI_FROM_STYLE ? metric(MOY_UI_K_DIALOG, MOY_UI_M_DIALOG_RING) : ring;
+    int n = metric(MOY_UI_K_DIALOG, MOY_UI_M_DIALOG_EDGE);
+    if (n > 0) {
+        rings(&d, b.x, b.y, b.w, b.h, c, n);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_text_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t,
+                      moy_ui_span_t hint, const int16_t colors[5], int fs) {
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[5];
+    static const int slot[5] = {MOY_UI_M_TEXT_FIELD_FIELD, MOY_UI_M_TEXT_FIELD_RING,
+                                MOY_UI_M_TEXT_FIELD_INK, MOY_UI_M_TEXT_FIELD_HINT,
+                                MOY_UI_M_TEXT_FIELD_CARET};
+    for (int i = 0; i < 5; i++) {
+        c[i] = colors != NULL ? colors[i] : (int16_t)metric(MOY_UI_K_TEXT_FIELD, slot[i]);
+    }
+    int px = metric(MOY_UI_K_TEXT_FIELD, MOY_UI_M_TEXT_FIELD_PAD_X) * fs;
+    int py = metric(MOY_UI_K_TEXT_FIELD, MOY_UI_M_TEXT_FIELD_PAD_Y) * fs;
+    if (c[0] >= 0) {
+        fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    }
+    if (c[1] >= 0) {
+        rectb(&d, b.x, b.y, b.w, b.h, c[1]);
+    }
+    if (t.n) {
+        text(&d, t.p, t.n, b.x + px, b.y + py, c[2]);
+    } else if (hint.n) {
+        text(&d, hint.p, hint.n, b.x + px, b.y + py, c[3]);
+    }
+    if (c[4] >= 0) {
+        fill(&d, b.x + px + (int)t.n * 8 * fs, b.y + py,
+             metric(MOY_UI_K_TEXT_FIELD, MOY_UI_M_TEXT_FIELD_CARET_W) * fs,
+             metric(MOY_UI_K_TEXT_FIELD, MOY_UI_M_TEXT_FIELD_CARET_H) * fs, c[4]);
+    }
+    return MOY_UI_OK;
+}
+
+moy_ui_box_t moy_ui_inset(moy_ui_box_t r, int dx, int dy) {
+    int w = r.w - 2 * dx, h = r.h - 2 * dy;
+    return (moy_ui_box_t){(int16_t)(r.x + dx), (int16_t)(r.y + dy), (int16_t)(w > 0 ? w : 0),
+                          (int16_t)(h > 0 ? h : 0)};
+}
+
+int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
+                 moy_ui_box_t *content) {
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[3];
+    moy_ui_colors(d.look, MOY_UI_K_PANEL, MOY_UI_REST, c);
+    fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    int n = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_EDGE) * fs;
+    for (int i = 0; i < n; i++) {           // the border grows OUTWARD with fs
+        rectb(&d, b.x - i, b.y - i, b.w + 2 * i, b.h + 2 * i, c[2]);
+    }
+    int in = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_INSET);
+    moy_ui_box_t ct = moy_ui_inset(b, in, in);
+    if (title.n) {
+        int sh = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_STRIP) * fs;
+        if (sh > ct.h) {
+            sh = ct.h;
+        }
+        if (sh < 0) {
+            sh = 0;
+        }
+        moy_ui_box_t strip = {ct.x, ct.y, ct.w, (int16_t)sh};
+        ct = (moy_ui_box_t){ct.x, (int16_t)(ct.y + sh), ct.w, (int16_t)(ct.h - sh)};
+        int16_t tc[3];
+        moy_ui_colors(d.look, MOY_UI_K_PANEL_TITLE, MOY_UI_REST, tc);
+        fill(&d, strip.x, strip.y, strip.w, strip.h, tc[0]);
+        text(&d, title.p, title.n, strip.x + metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_PAD) * fs,
+             strip.y + moy_ui_fdiv(strip.h - 8 * fs, 2), tc[1]);
+    }
+    if (content != NULL) {
+        *content = ct;
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[3];
+    moy_ui_colors(d.look, MOY_UI_K_FOCUS, MOY_UI_REST, c);
+    int n = metric(MOY_UI_K_FOCUS, MOY_UI_M_FOCUS_RINGS);
+    if (n < fs) {
+        n = fs;
+    }
+    int gap = metric(MOY_UI_K_FOCUS, MOY_UI_M_FOCUS_GAP);
+    for (int i = 0; i < n; i++) {
+        int dd = fs + gap + i;
+        rectb(&d, b.x - dd, b.y - dd, b.w + 2 * dd, b.h + 2 * dd, c[2]);
+    }
+    return MOY_UI_OK;
+}
+
+// -- rect algebra (pure: every rect is x, y, w, h) -------------------------------------
+
+void moy_ui_inset32(const int32_t r[4], int32_t dx, int32_t dy, int32_t out[4]) {
+    int32_t w = r[2] - 2 * dx, h = r[3] - 2 * dy;
+    out[0] = r[0] + dx;
+    out[1] = r[1] + dy;
+    out[2] = w > 0 ? w : 0;
+    out[3] = h > 0 ? h : 0;
+}
+
+void moy_ui_cut(const int32_t r[4], int side, int32_t n, int32_t band[4], int32_t rest[4]) {
+    int32_t x = r[0], y = r[1], w = r[2], h = r[3];
+    int32_t lim = side < 2 ? h : w;
+    if (n > lim) {
+        n = lim;
+    }
+    if (n < 0) {
+        n = 0;
+    }
+    int32_t b[4], o[4];
+    switch (side) {
+        case MOY_UI_CUT_TOP:
+            b[0] = x; b[1] = y; b[2] = w; b[3] = n;
+            o[0] = x; o[1] = y + n; o[2] = w; o[3] = h - n;
+            break;
+        case MOY_UI_CUT_BOTTOM:
+            b[0] = x; b[1] = y + h - n; b[2] = w; b[3] = n;
+            o[0] = x; o[1] = y; o[2] = w; o[3] = h - n;
+            break;
+        case MOY_UI_CUT_LEFT:
+            b[0] = x; b[1] = y; b[2] = n; b[3] = h;
+            o[0] = x + n; o[1] = y; o[2] = w - n; o[3] = h;
+            break;
+        default:
+            b[0] = x + w - n; b[1] = y; b[2] = n; b[3] = h;
+            o[0] = x; o[1] = y; o[2] = w - n; o[3] = h;
+            break;
+    }
+    memcpy(band, b, sizeof(b));
+    memcpy(rest, o, sizeof(o));
+}
+
+int moy_ui_split(const int32_t r[4], int n, int32_t gap, int horizontal, int32_t (*out)[4],
+                 int cap) {
+    if (n <= 1) {
+        if (cap > 0) {
+            memcpy(out[0], r, 4 * sizeof(int32_t));
+        }
+        return 1;
+    }
+    int32_t x = r[0], y = r[1], w = r[2], h = r[3];
+    int32_t span = horizontal ? w : h;
+    int32_t c = moy_ui_fdiv((int)(span - (n - 1) * gap), n);
+    int32_t at = horizontal ? x : y;
+    for (int i = 0; i < n && i < cap; i++) {
+        int32_t len = i < n - 1 ? c : (horizontal ? x + w : y + h) - at;
+        if (horizontal) {
+            out[i][0] = at; out[i][1] = y; out[i][2] = len; out[i][3] = h;
+        } else {
+            out[i][0] = x; out[i][1] = at; out[i][2] = w; out[i][3] = len;
+        }
+        at += c + gap;
+    }
+    return n;
+}
+
+void moy_ui_row_content(const int32_t r[4], int fs, int32_t pad, int32_t pad_right, int icon,
+                        int glyph_, int32_t glyph_size, int32_t out[4]) {
+    if (pad == MOY_UI_DEFAULT) {
+        pad = metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs;
+    }
+    if (pad_right == MOY_UI_DEFAULT) {
+        pad_right = pad;
+    }
+    int32_t tx = r[0] + pad;
+    if (icon) {
+        tx += metric(MOY_UI_K_ROW, MOY_UI_M_ROW_ICON) * fs + pad;
+    } else if (glyph_) {
+        tx += (glyph_size == MOY_UI_DEFAULT ? metric(MOY_UI_K_ROW, MOY_UI_M_ROW_GLYPH)
+                                            : glyph_size) * fs + pad;
+    }
+    int32_t w = r[0] + r[2] - pad_right - tx;
+    out[0] = tx;
+    out[1] = r[1];
+    out[2] = w > 0 ? w : 0;
+    out[3] = r[3];
+}
+
+void moy_ui_cell_art(const int32_t r[4], int fs, int32_t pad, int32_t caption_h,
+                     int32_t out[4]) {
+    if (pad == MOY_UI_DEFAULT) {
+        pad = metric(MOY_UI_K_CELL, MOY_UI_M_CELL_PAD) * fs;
+    }
+    int32_t w = r[2] - 2 * pad, h = r[3] - pad - caption_h;
+    out[0] = r[0] + pad;
+    out[1] = r[1] + pad;
+    out[2] = w > 0 ? w : 0;
+    out[3] = h > 0 ? h : 0;
 }

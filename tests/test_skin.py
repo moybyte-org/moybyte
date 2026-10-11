@@ -424,8 +424,12 @@ class _CountingCanvas:
         fills, texts, _fu, _tu = self._cv.gate_counts()
         return fills + texts + self._spr
 
-    def ui_sink(self):
-        return self._cv.ui_sink()
+    @property
+    def _ui(self):
+        return self._cv._ui
+
+    def flush_batch(self):
+        self._cv.flush_batch()
 
     def rect(self, *a):
         self._cv.rect(*a)
@@ -453,55 +457,34 @@ def _draw_many(cv, th, n=100):
         ui.status_row(cv, th, (0, 210, 200, 14), ("a", "b"))
 
 
-def test_the_skin_path_allocates_nothing_per_draw(monkeypatch):
-    """Zero per-draw allocation, expressed as OBJECT IDENTITY.
+def test_the_skin_path_resolves_in_c_once_per_theme(monkeypatch):
+    """Every widget's colours resolve inside native/moy_ui against the look
+    its theme was packed into: 600 widget draws on one theme pack it ONCE and
+    never ask the face's cache (`state_colors`, which stays for the callers
+    that want a triple), and the faces' own tuples stay shared.
 
-    A transient tuple is not observable in CPython (tracemalloc reports live
-    blocks; gc counts are net of frees), so the measurable form of "the draw
-    did not build a tuple" is that the tuple it handed back is the SHARED one
-    the flatten built. 600 widget draws must yield a handful of distinct
-    objects; a resolver that rebuilds per call yields 600.
-
-    Floor first: without the length assertion this test passes when the probe
+    Floor first: without the pack assertion this test passes when the probe
     is gone, which is how a regression net quietly stops being one."""
     th = theme_colors("night")
-    slow = []
-    real_slow = ui._colors_slow
-
-    def counted_slow(kind, state):
-        slow.append((kind, state))
-        return real_slow(kind, state)
-
-    handed = []
+    packs = []
+    real_look = ui._C.look
+    monkeypatch.setattr(ui._C, "look",
+                        lambda slot, row: (packs.append(slot), real_look(slot, row))[1])
+    asked = []
     real_colors = ui.state_colors
-
-    def counted_colors(t, kind, state):
-        out = real_colors(t, kind, state)
-        handed.append(out)
-        return out
-
+    monkeypatch.setattr(ui, "state_colors",
+                        lambda t, k, st: (asked.append(k), real_colors(t, k, st))[1])
     ui.use_skin(DEFAULT)
-    monkeypatch.setattr(ui, "_colors_slow", counted_slow)
-    monkeypatch.setattr(ui, "state_colors", counted_colors)
     cv = _CountingCanvas()
+    calls = ui._C.calls()
     _draw_many(cv, th, 100)
-
-    # Rows and cells resolve their colours inside native/moy_ui (one C call
-    # each), so the face's resolutions are the other four widgets' 400.
-    assert len(handed) >= 400, (
-        "only %d resolutions counted -- is the probe still wired to "
-        "ui.state_colors?" % len(handed))
-    assert len(slow) >= 1, "no C resolution counted -- is _colors_slow wired?"
-    # One crossing into C per (kind, state) for this theme, and never again:
-    # the identity fast path (`th is _TH`) keeps a draw off the C.
-    assert len(slow) == len(set(slow)) <= 24, slow
-    # ZERO ALLOCATION: every triple is one of the cached, shared tuples.
-    distinct = len(set(id(t) for t in handed))
-    assert distinct <= 24, (
-        "%d distinct colour tuples for %d resolutions -- the resolution path "
-        "is building one per draw" % (distinct, len(handed)))
-    # The metrics tuples are shared too: `metrics()` is a dict get.
+    assert ui._C.calls() - calls >= 600, "the widgets stopped calling the C"
+    assert len(packs) == 1, packs
+    assert asked == [], "a widget resolved its colours in Python: %r" % asked[:5]
+    # The metrics tuples are shared: `metrics()` is a dict get.
     assert ui.metrics("row") is ui.metrics("row")
+    a = ui.state_colors(th, "chip", ui.ON)
+    assert ui.state_colors(th, "chip", ui.ON) is a
 
 
 def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch):

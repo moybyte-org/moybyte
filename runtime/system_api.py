@@ -110,11 +110,12 @@ lost feature rather than a granted capability.)
 These four are published to every `type: "app"` cart with no permission,
 because they are not capabilities -- they are how an app draws.
 
-  * `ui` is the REAL `runtime/ui.py`, the same leaf the shipped apps use: the
-    rect algebra, the six-state widgets (`button`/`chip`/`row`/`cell`/
-    `tab_row`/`status_row`/`panel`/`dialog`/`text_field`), `ScrollRegion` and
-    `Hits`. It takes `(cv, th, rect)` and imports nothing from the shell, so it
-    needed no port to cross this boundary.
+  * `ui` is `runtime/ui.py`, the same leaf the shipped apps use: the face of
+    the toolkit's C (`native/moy_ui`) -- the rect algebra, the six-state
+    widgets (`button`/`chip`/`row`/`cell`/`label`/`list`/`tab_row`/
+    `status_row`/`panel`/`dialog`/`text_field`), the glyphs, `ScrollRegion`
+    and `Hits`. It takes `(cv, th, rect)` and imports nothing from the shell,
+    so it needed no port to cross this boundary.
   * `screen()` returns the canvas the cart is drawing on -- what `ui`'s `cv`
     argument wants. It is the SAME surface the kid API's `rect`/`print` already
     write to, so it grants no new reach; it just names the object.
