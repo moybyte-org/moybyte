@@ -10,7 +10,7 @@ content-draw and 181ms by real frame). So every number here is measured around
 
 Usage:
     python tools/p4_bench.py --board p4 [--out bench.md]
-    python tools/p4_bench.py --board tdeck --repaint settings,files
+    python tools/p4_bench.py --board tdeck --repaint settings,files,editor:code
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -257,6 +257,11 @@ def bench_repaint(b, surfaces, seconds, out_path):
     for name in surfaces:
         if name == "settings":
             b.open("settings")
+        elif name.startswith("editor:"):
+            # an Editor tab on Star Catcher, as the shell goldens open it
+            pyexec(b, "ws.open_in_editor([c for c in ws.carts.all "
+                      "if c.get('title') == 'Star Catcher'][0])\n"
+                      "ws.set_menu_view('%s')" % name[7:])
         elif not pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % name):
             print("  %-34s (app not available)" % name)
             continue
@@ -279,7 +284,8 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--repaint", default=None, metavar="SURFACES",
                     help="comma-separated surfaces (settings, files, storybook,"
-                         " ...) to repaint every frame instead of the panel run")
+                         " editor:TAB, ...) to repaint every frame instead of"
+                         " the panel run")
     ap.add_argument("--seconds", type=float, default=6.0)
     args = ap.parse_args()
     b = board_from_args(args)

@@ -1719,12 +1719,11 @@ class BlockEditorUI:
         lay = self.block_layout
         fs = lay.fs
         be = self.blocks_ed
-        # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
-        # shelf tiers; the frozen dark-blue body at 320x240, byte-identical. The
-        # block PIECES keep their own colorful language (self-backed rows).
+        # Phase 3 (visual identity v1): the theme's tool surface and ink on
+        # every tier. The block PIECES keep their own colorful language
+        # (self-backed rows, the theme's `block_*` content roles).
         th = ws.theme_colors
-        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
-        cv.cls(th["surface"] if light else NAMES["dark_blue"])
+        cv.cls(th["surface"])
         # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
         # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
         # hint for surprising blocks on the left, the SAVE-status / "CODE LOCKED"
@@ -1736,10 +1735,10 @@ class BlockEditorUI:
         else:
             if self.blk_status:
                 cv.print(self.blk_status[:14], lay.status_x, lay.hint_y,
-                         th["author"] if light else NAMES["yellow"], 1)
+                         th["author"], 1)
             elif be is not None and be.dirty:
                 cv.print("*", lay.status_x, lay.hint_y,
-                         th["author"] if light else NAMES["yellow"], 1)
+                         th["author"], 1)
         if be is None:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
@@ -1756,7 +1755,7 @@ class BlockEditorUI:
                 # truncate to leave the right end for the status slot
                 hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
                 cv.print(hint[:hmax], lay.x0, lay.hint_y,
-                         th["ink_dim"] if light else NAMES["light_grey"], 1)
+                         th["ink_dim"], 1)
         rows = be.rows
         for vi in range(lay.rows):
             ridx = self.blk_top + vi
@@ -1768,7 +1767,7 @@ class BlockEditorUI:
             cv, (lay.x0 + lay.outline_w - 8 * fs, lay.y0),
             (lay.x0 + lay.outline_w - 8 * fs, lay.y0 + (lay.rows - 1) * lay.row_h),
             self.blk_top > 0, self.blk_top + lay.rows < len(rows),
-            th["ink"] if light else NAMES["white"])
+            th["ink"])
         # action bar: editing controls + the #29 graduation action only (SAVE/CLOSE
         # moved to the unified bar).
         ws._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)
@@ -1922,8 +1921,7 @@ class BlockEditorUI:
         cell = lay.cell
         rh = lay.row_h
         th = self.ws.theme_colors
-        light = (not lay._base) or self.ws.look.light_chrome()
-        bg = th["surface"] if light else NAMES["dark_blue"]
+        bg = th["surface"]
         y = lay.y0 + vi * rh
         x = lay.x0 + row.depth * lay.indent
         w = lay.outline_w - row.depth * lay.indent

@@ -428,9 +428,9 @@ byte-identical default. 2026-07-23: every theme family ships a **dark AND a
 light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
 `theme_variant`), and the tokens now reach the whole system: the OS bar,
 Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,
-the windowed-WM strips/chips, and the editor tabs on every responsive tier —
-the frozen 320×240 `_base` branches keep their literals only in DARK chrome, so
-a light variant themes the small tier too. Bar icons derive plate-free
+the windowed-WM strips/chips, and the editor tabs on every tier, the 320×240
+one included (its frozen dark literals retired with theming's phase 2b,
+2026-10-11). Bar icons derive plate-free
 light-mode sprites at draw time (`Workstation._bar_image`), so wifi/battery
 read on a light band. See docs/visual_identity_v1.md §4.3 for the role
 contract.)*

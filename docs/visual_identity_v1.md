@@ -338,12 +338,11 @@ title_active / title_inactive (the WM strip pair, aliased to title/panel)
 The Phase 5 system-app pass landed with it: the zoned bar, Settings (rows +
 Wi-Fi panel), the ≡ system menu, About, achievements, the OTA update screens, and
 the editor tab surfaces (block/map/paint/scene/music/code/cards) read tokens on
-every responsive tier — the token gate is no longer machine-only. Each surface's
-frozen 320×240 `_base` branch keeps its literal indices **only in dark chrome**
-(the device parity contract holds at the default theme): under a light variant
-the base tier takes the token path too, so the small tier gets exactly a dark and
-a light presentation of every editor (code included — the theme's light `code_*`
-content roles are the light half of the pair, `docs/theming_2026-09.md` §4.1). Bar **icons get derived light variants** at draw
+every tier — the token gate is no longer machine-only. The 320×240 tier's
+editors read the same tokens (their frozen dark literals retired with theming's
+phase 2b, 2026-10-11; `docs/theming_2026-09.md` §9), so the small tier gets a
+dark and a light presentation of every editor in every theme (code included —
+the theme's `code_*` content roles, §4.1 there). Bar **icons get derived light variants** at draw
 time (`Workstation._bar_image`): the IconSheet's untouched index-0 plate — invisible
 on the frozen black bar — is keyed transparent and white strokes remap to ink-black
 on a `bar_light` theme, so wifi/battery/close never draw a black plate on a light

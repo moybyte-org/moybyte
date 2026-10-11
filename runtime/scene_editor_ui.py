@@ -610,13 +610,12 @@ class SceneEditorUI:
         se = self.sceneedit
         sheet = ws.project.sheet
         th = ws.theme_colors
-        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
-        cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
+        cv.rect(*(lay.body_fill + (th["surface"],)))
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
         _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
-                           th["surface"] if light else NAMES["black"])
+                           th["surface"])
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         x0, y0, scale, vw, vh = self._sv_metrics()
         title = "SCENE"
@@ -624,7 +623,7 @@ class SceneEditorUI:
             title += " " + str(self.scene_name)[:8].upper()
         title += "  TILE " + str(se.n if se else 0) + "  z" + str(self.scene_zoom + 1)
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
-                 th["ink"] if light else NAMES["green"], 1)
+                 th["ink"], 1)
         if se is None or sheet is None:
             return
         tm = ws.project.tilemap

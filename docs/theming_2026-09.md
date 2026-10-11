@@ -595,7 +595,7 @@ the toolkit rows' goldens byte-for-byte, and every theming phase starts after
 it (owner, 2026-10-11); sprint 7 does not run, so nothing waits on it. After
 phase 4 a new theme is data and moves only its own goldens. The Studio
 (`docs/studio_2026-09.md` §8) moves pixels too and takes the same rule; it is
-not scheduled, so phase 2b re-baselines the T-Deck rows without it and the
+not scheduled, so phase 2b re-baselines the T-Deck's dark row without it and the
 Studio's T-Deck bar makes its own named re-baseline when it lands.
 
 ## 9. Phases
@@ -656,20 +656,34 @@ What stays is the two nets the restyling phases are gated by:
      (`tests/shell_goldens/counts.json`); a moved budget fails by name, and a
      dearer one needs a reason before it is re-pinned.
 
-**Phase 2b — the T-Deck row** (one step; one named re-baseline). First,
-`docs/surface_model_v1.md` §5.1 ("executed path provably unchanged") is
-amended. Then the `_base` branches retire: the frozen geometry in every
-Layout class (`runtime/chrome.py`'s `Layout` and `CodeLayout`, and the
-Editor tabs', Paint's and the cards' layouts) and the frozen draw branches
-(`editor_app`'s zone guard, Settings', Code's and the cards' `_base` and
-`light = (not lay._base) or …` branches), so the 320×240 rows run the code
-every other tier runs. Rev 2's worry, that a toolkit widget is a wide Python
-frame that heap-allocates per call, is sprint 6's to have settled: a widget is
-one call from a thin face into C, so the call cost is measured, not
-presumed. Gate: one re-baseline of the two 320×240 rows with the moved pixels
-named and rendered; `p4_bench --board tdeck --repaint` on the Settings,
-Files and Editor surfaces within the thresholds against the image before;
-`Hits` stays barred from grids; the ratchet's count falls.
+**Phase 2b — the T-Deck row's colours** (one step; one named re-baseline;
+landed 2026-10-11). First `docs/surface_model_v1.md` §5.1 is amended: its
+"executed path unchanged" is the presentation's contract, not a freeze on the
+shell's pixels. Then the 320×240 tier's editors (Blocks, Code, Sprites, Map,
+Scene, Music, Make it mine) draw in the theme's tokens in the dark variant as
+they already did in the light one: the `light = (not lay._base) or …` and
+`_base and not light_chrome()` branches and their frozen dark literals are
+deleted, so a theme recolours the T-Deck's editors as it does every other
+tier's. The dark 320×240 golden row moves (its seven editor surfaces); the
+light row and every other config hold.
+
+Rev 2 had 2b retire every `_base` branch, the geometry with the colours. It
+was built, rendered and **reverted the same day** (2026-10-11): the responsive
+formulas were never designed at 320×240, and running them there dropped the
+Map, Scene and Music tabs off the Editor's bar (the labelled tab row needs
+about 166px of a 202px zone that also holds PROJECTS and PLAY) and shrank the
+Sprites grid from 144px to 96px to clear tool rows that overlap the button
+column anyway. Fixing that is a T-Deck layout per surface, which is design,
+not reach; it belongs to phase 3's D1 step, which redraws those surfaces
+against the 320×240 mockups and re-baselines the row once. So the `_base`
+geometry, the Editor's icon ladder at 320×240 and the toolkit-free Settings
+scrollbar stay until then, and "the 320×240 row does not exercise the
+toolkit" stays true for layout.
+
+Gate: one re-baseline of the dark 320×240 row, named and rendered;
+`tools/p4_bench.py --board tdeck --repaint` on Settings, Files and the seven
+Editor tabs within the thresholds against the image before; the ratchet's
+count falls.
 
 **Phase 3 — shapes** (four steps, one re-baseline).
   1. **The pattern lane, upstream.** An opaque two-colour pattern fill in
@@ -690,8 +704,11 @@ Files and Editor surfaces within the thresholds against the image before;
      (`classic` is today's frame); a Platinum and a Win95 seed render every
      golden surface with no code of their own, pinned as goldens of their own.
   4. **D1 lands.** D1's tokens and shapes become the default seed, the
-     hand-drawn surfaces it restyles move onto the toolkit as it does, and
-     `outline` becomes a seed package (the skin axis folds into the theme).
+     hand-drawn surfaces it restyles move onto the toolkit as it does, the
+     `_base` geometry retires as each surface gets its 320×240 layout (2b's
+     reverted half: the Editor's bar against the Studio's T-Deck mockup, the
+     Sprites tab's grid and tool rows), and `outline` becomes a seed package
+     (the skin axis folds into the theme).
      Gate: **one re-baseline, named and rendered** against the mockups in
      `docs/media/theming_2026-09/`; p4_bench on the P4 and the T-Deck; the
      ratchet's count falls.
@@ -788,8 +805,7 @@ Each is corrected in place by the phase that falsifies it:
 | sentence | in | fixed by |
 |---|---|---|
 | a skin is colours and pads | `native/moy_ui/style.json`'s `about`, `runtime/ui.py`'s header | phase 3 |
-| the 320×240 row is frozen `_base`-verbatim and does not exercise the toolkit | `.claude/rules/shell.md`, `.claude/rules/rendering.md`, `CLAUDE.md`, `tests/test_shell_goldens.py`, `docs/history/ui_refactor_2026-08.md` | phase 2b |
-| the T-Deck tier's "executed path provably unchanged" | `docs/surface_model_v1.md` §5.1 | amended before phase 2b |
+| the 320×240 row is frozen `_base`-verbatim and does not exercise the toolkit | `.claude/rules/shell.md`, `.claude/rules/rendering.md`, `CLAUDE.md`, `tests/test_shell_goldens.py`, `runtime/layout_base.py` | phase 3, step 4 (the geometry; 2b retired the colours) |
 | the default look is the "night" token set; "Avoid: bevels and fake plastic controls" as a rule for every look | `docs/visual_identity_v1.md`, `docs/shell_ux_v1.md` | phase 3, scoped to the default theme |
 | "Petme128 remains the canonical runtime glyph source for v1" | `docs/visual_identity_v1.md` §5.4 | phase 4 (carts keep it; the chrome moves) |
 | `bar_h()` as the whole content contract | `docs/app_api_v1.md`, `runtime/system_api.py` | the shell-layout doc |

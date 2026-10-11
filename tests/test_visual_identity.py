@@ -142,17 +142,17 @@ def test_variant_survives_reboot(tmp_path):
     assert ws2.theme_colors["surface_light"] is True
 
 
-def test_base_tier_editors_follow_light_chrome(tmp_path):
-    """The 320x240 _base editor branches keep their frozen literals ONLY in dark
-    chrome; a light variant themes the base tier too (owner ask 2026-07-23 --
-    'editors follow the styles')."""
-    from runtime.chrome import NAMES
+def test_base_tier_editors_follow_the_theme(tmp_path):
+    """The 320x240 tier's editors read the theme's tokens in both variants
+    (owner ask 2026-07-23 -- 'editors follow the styles'; the frozen dark
+    literals retired with theming's phase 2b)."""
     ws = _ws(tmp_path)                      # 320x240 base tier
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("edit"))
     ws.change_selected()
     t = ws.cards_layer._tones()
-    assert t["body"] == NAMES["dark_purple"]        # frozen dark baseline
+    assert t["body"] == ws.theme_colors["surface"]  # themed in dark too
+    assert ws.code_layer._tones()["bg"] == ws.theme_colors["surface"]
     ws.look.set_theme_variant("light")
     t = ws.cards_layer._tones()
     assert t["body"] == ws.theme_colors["surface"]  # themed on light

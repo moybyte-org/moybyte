@@ -285,7 +285,12 @@ say: **do nothing here.** The per-frame executed path gains the kernel's
 epoch read (L6) and nothing else, and the gate for this tier is each S3's
 on-glass suite and the perf roster within noise, not file bytes — the frozen
 *source* of shared files may still drift textually (comments, unrelated
-edits).
+edits). This contract is the presentation's, not the shell's pixels: the
+shell's own draws on this tier change when a restyle changes them, once and
+named, gated by the suite, the roster and `tools/p4_bench.py --board tdeck
+--repaint` within its thresholds (amended 2026-10-11 for theming's phase 2b,
+which moved the T-Deck editors' frozen dark literals onto the theme's tokens;
+`docs/theming_2026-09.md` §9).
 
 **A compiled cart's frame reaches the flush from the cart's own memory and
 adds nothing to the contract.** The game composite on a banded board is a

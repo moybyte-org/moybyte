@@ -1017,25 +1017,11 @@ class CodeLayer:
         return self._hl_val
 
     def _tones(self):
-        """Per-draw color roles: frozen literals on the 320x240 baseline
-        (byte-identical); theme tokens on the shelf tiers. The syntax remap only
-        engages on a LIGHT surface (dark ink token), so the dark themes keep the
-        shipped highlight set on their own panel color."""
+        """Per-draw color roles from the theme tokens, on every tier. The
+        syntax remap is the theme's `code_*` content roles (`_hl_map`).
+        sel/find (#89): the selection tint (drawn BEHIND the text), the
+        find-match outline and the dim gutter number ink."""
         NAMES = self._NAMES
-        # sel/find (#89): the selection tint (drawn BEHIND the text) + the find-match
-        # outline + the dim gutter number ink. indigo/orange read on every surface the
-        # editor uses; on a light theme the selection uses the theme hilite token.
-        # The frozen 320x240 literals hold only in DARK chrome; a light theme
-        # variant themes the base tier too (owner ask 2026-07-23), with the
-        # theme's syntax roles, so code is exactly "light and dark" on the
-        # small tier.
-        if self.ws.code_layout._base and not self.ws.look.light_chrome():
-            return _as_theme({"bg": NAMES["black"], "caret": NAMES["yellow"],
-                              "sym_bg": NAMES["dark_grey"],
-                              "sym_edge": NAMES["indigo"],
-                              "sym_ink": NAMES["white"], "hl": None,
-                              "sel": NAMES["indigo"], "find": NAMES["orange"],
-                              "gutter": NAMES["dark_grey"]})
         th = self.ws.theme_colors
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
             return _as_theme({"bg": th.get("surface", NAMES["black"]),

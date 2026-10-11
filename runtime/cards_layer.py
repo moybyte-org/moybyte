@@ -663,21 +663,9 @@ class CardsLayer:
     # -- draw ----------------------------------------------------------------
 
     def _tones(self):
-        """Per-draw color roles: the frozen literals on the 320x240 baseline
-        (byte-identical), the semantic theme tokens on the shelf tiers -- the
-        Phase 3 warm tool surface (visual identity v1 Section 10): cream body,
-        dark ink, the orange authoring accent on the value controls."""
-        NAMES = self._NAMES
-        # The frozen 320x240 literals hold only in DARK chrome; a light theme
-        # variant themes the base tier too (owner ask 2026-07-23).
-        if self.layout._base and not self.ws.look.light_chrome():
-            return _as_theme(
-                   {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
-                    "head": NAMES["white"], "text": NAMES["light_grey"],
-                    "sel_text": NAMES["white"], "row": NAMES["indigo"],
-                    "accent": NAMES["yellow"], "track": NAMES["dark_grey"],
-                    "knob": NAMES["white"], "cell": NAMES["dark_purple"],
-                    "cell_edge": NAMES["dark_grey"]})
+        """Per-draw color roles: the semantic theme tokens on every tier --
+        the Phase 3 tool surface (visual identity v1 Section 10): the surface
+        body, its ink, the authoring accent on the value controls."""
         th = self.ws.theme_colors
         return _as_theme(
                {"body": th["surface"], "edge": th["border"],

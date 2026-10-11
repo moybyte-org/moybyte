@@ -674,27 +674,23 @@ class PaintLayer:
         # through the side/bottom strips. Match the cards tab (which fills the whole
         # area) so the editor is fully opaque. (Harmless on the EDIT-ICONS path,
         # which already cls()'d to black.)
-        # Phase 3 (visual identity v1): the BODY joins the warm tool surface on
-        # the shelf tiers; the PANEL stays the dark work canvas (the sprite art's
-        # own field) on every tier. Baseline literals byte-identical.
+        # Phase 3 (visual identity v1): the body and the panel are the theme's
+        # tool surface on every tier -- the pixel grid and swatch/preview cells
+        # all back themselves.
         th = ws.theme_colors
-        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
-        cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
-        # The panel joins the surface on the light tiers -- the pixel grid and
-        # swatch/preview cells all back themselves, so only the frozen dark
-        # baseline needs the black plate.
+        cv.rect(*(lay.body_fill + (th["surface"],)))
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
         _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
-                           th["surface"] if light else NAMES["black"])
-        cv.rectb(*(lay.panel + ((th["author"] if light else NAMES["orange"]),)))
+                           th["surface"])
+        cv.rectb(*(lay.panel + (th["author"],)))
         # No dirty star: SAVE (the button and the concept) is gone (#111) -- autosave
         # commits pending edits within seconds, so "unsaved" is not a state a kid can
         # act on; write FAILURES surface loudly via ws.save_status instead.
         title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
-                 th["ink"] if light else NAMES["orange"], 1)
+                 th["ink"], 1)
         if pe is None or sheet is None:
             return
         # Zoomed pixel grid: a fixed lay.pg_span square, cells shrink as the sprite
@@ -737,7 +733,7 @@ class PaintLayer:
             y = lay.sw_y0 + (idx // lay.sw_cols) * lay.sw
             cv.rect(x, y, lay.sw, lay.sw, idx)
             cv.rectb(x, y, lay.sw, lay.sw,
-                     (th["ink"] if light else NAMES["white"])
+                     th["ink"]
                      if idx == pe.color else NAMES["dark_grey"])
         # Sprite selector + a SIZE cycle button (#30) + a preview of the sprite,
         # scaled so the whole NxN span fits the layout's preview box.
@@ -768,7 +764,7 @@ class PaintLayer:
         if ws.paint_status:
             cv.print(ws.paint_status[:lay.status_maxc],
                      lay.status_xy[0], lay.status_xy[1],
-                     th["author"] if light else NAMES["yellow"], 1)
+                     th["author"], 1)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
         self._draw_tools()               # #90: undo/redo/fill/transform row
 

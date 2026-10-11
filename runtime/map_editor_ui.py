@@ -928,18 +928,16 @@ class MapEditorUI:
         # span edge to edge, so without this fill stale pixels would bleed through
         # the side/bottom strips. Match the cards tab (fills the whole area) so the
         # editor is fully opaque.
-        # Phase 3 (visual identity v1): warm body on the shelf tiers, dark map
-        # canvas kept on every tier. Baseline literals byte-identical.
+        # Phase 3 (visual identity v1): the theme's surface body on every tier;
+        # the map cells and the tile-palette strip back themselves (dark map
+        # field), so the panel joins the surface.
         th = ws.theme_colors
-        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
-        cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
-        # Map cells + the tile-palette strip back themselves (dark map field),
-        # so the panel joins the surface on the light tiers too.
+        cv.rect(*(lay.body_fill + (th["surface"],)))
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
         _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
-                           th["surface"] if light else NAMES["black"])
+                           th["surface"])
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
         # upscale and the title's "z<level>" badge.
@@ -950,7 +948,7 @@ class MapEditorUI:
             title = "MAP  TILE " + str(me.n if me else 0)
         title = title + "  z" + self._mv_zoom_label()
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
-                 th["ink"] if light else NAMES["green"], 1)
+                 th["ink"], 1)
         if me is None or sheet is None or ws.project.tilemap is None:
             return
         tm = ws.project.tilemap
