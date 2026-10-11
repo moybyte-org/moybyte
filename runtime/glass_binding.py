@@ -28,10 +28,14 @@ from . import native_build
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _GLASS = os.path.join(native_build.ROOT, "native", "moy_glass")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
+# The toolkit (native/moy_ui) is compiled into this library: its primitives
+# draw into the canvas rows this library holds (tools/moy_ui_binding.py).
+_UI = os.path.join(native_build.ROOT, "native", "moy_ui")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
-            "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c")
+            "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
+            "moy_ui.h", "moy_ui.c", "moy_ui_tables.h", "moy_ui_tables.c")
 
 ROLE_LAYER, ROLE_BAKE, ROLE_SCRATCH, ROLE_CACHE, ROLE_PAINT, ROLE_POOL = range(1, 7)
 ORIGIN_HEAP, ORIGIN_POOL, ORIGIN_ALLOC = 0, 1, 2
@@ -105,7 +109,7 @@ _PyBUF_WRITE = 0x200
 
 def build(verbose=False):
     return native_build.build("moy_glass", _SHIM, _SOURCES, _CACHE,
-                              libmoy_dir=(_GLASS, _SPINE), verbose=verbose)
+                              libmoy_dir=(_GLASS, _SPINE, _UI), verbose=verbose)
 
 
 def _lib():

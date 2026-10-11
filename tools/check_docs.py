@@ -155,6 +155,9 @@ NOT_OURS = (
     # native/moy_store/moy_ufiles.c took it; the kernel plans and the tests'
     # golden name them to say what crossed.
     "runtime/moy_files.py", "runtime/moy_file_ops.py",
+    # The skin catalog, deleted by sprint 6's step 2 when its deltas moved
+    # into native/moy_ui/style.json; the plans name it to say what crossed.
+    "runtime/skin.py", "skin.py",
 )
 
 

@@ -26,17 +26,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-# The widget-SKIN catalog (runtime/skin.py). Imported for its NAME LIST only,
-# exactly as `chrome.THEMES` is imported above and for the same reason
-# (app_context.Theme's note: a picker needs the catalog, and a catalog is a
-# pure leaf, not a role). Reading the active skin and INSTALLING one both go
-# through `ctx.theme` -- this app never calls `skin.use`, because the install
-# is process-wide state plus a persisted setting and the Workstation owns it.
-try:
-    import skin as _skin
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import skin as _skin
-
 
 class AppearanceLayout:
     # Min-size convention (ui.py): the WM clamps window resizes to these
@@ -298,7 +287,7 @@ class AppearanceAppLayer:
         entry at font scale 1 and 2 on every tier."""
         fs = self.layout.fs
         x, y, w, _h = self.layout.field
-        names = _skin.names()
+        names = _ui.skin_names()
         gap = 3 * fs
         cw = max(1, (w - gap * (len(names) + 1)) // len(names))
         out = []

@@ -335,7 +335,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the widget skin, the system font scale, the wallpaper
 # choice and the top-bar icon sheet. It is also the module that installs a skin
-# (`skin.use`), for the same reason it installs a theme: the choice is a
+# (`ui.use_skin`), for the same reason it installs a theme: the choice is a
 # persisted setting and the installed skin is process-wide state inside `ui`.
 # Every surface just draws through `ui` and never learns a skin exists.
 try:

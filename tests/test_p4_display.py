@@ -1240,8 +1240,8 @@ def test_a_clear_is_never_a_quiet_frame():
     comp.rotated = True
     cv = mod.P4SystemCanvas(comp, font_scale=1)
     assert cv._ppa is None, "the host has no PPA: cls takes the CPU fill"
-    # The host kernel installs no gates; stand the state array in so the
-    # snapshot has counters to compare (the device's gates write these).
+    # A fresh state array, so the snapshot's counters start at zero (the
+    # canvas row's own counters carry every op the canvas drew so far).
     cv._gate_state = array("i", bytearray(4 * _ST_LEN))
     assert not cv._gates_unchanged(), "no frame yet: never quiet"
     cv.sync_back()

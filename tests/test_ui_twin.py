@@ -21,7 +21,7 @@ import random
 import pytest
 
 import ui_twin as twin
-from runtime import skin, ui
+from runtime import ui
 from runtime.chrome import THEME_VARIANTS, THEMES, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -232,7 +232,7 @@ def _bbox(a, b, w=128):
 @pytest.fixture
 def _skins():
     yield
-    skin.use(skin.DEFAULT)
+    ui.use_skin("default")
     twin.use(twin.DEFAULT)
 
 
@@ -242,7 +242,7 @@ def test_the_toolkit_draws_what_the_twin_drew(widget, _skins):
     for i in range(CASES):
         c = _case(r)
         want, want_ops, want_ret = _draw(twin, twin.use, widget, _truncated(c))
-        got, got_ops, got_ret = _draw(ui, skin.use, widget,
+        got, got_ops, got_ret = _draw(ui, ui.use_skin, widget,
                                       c if FACE_TRUNCATES else _truncated(c))
         if got != want:
             raise AssertionError("%s case %d %r: pixels differ in %r (hash %s, "

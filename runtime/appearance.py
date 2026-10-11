@@ -80,13 +80,6 @@ try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_sheet import IconSheet
-# The skin CATALOG. This module is the OWNER the ratchet in tests/test_skin.py
-# names (`_SKIN_OWNERS`): the one place `skin.use` is called, and the only
-# module besides the picker allowed to import it at all.
-try:
-    import skin as _skin
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import skin as _skin
 try:
     import ui as _uimod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -146,7 +139,7 @@ class Appearance:
         # on a board the two readings are the same (one Workstation, and `ui`'s
         # own tables are the default), and on a host that builds several in one
         # process an unrelated boot must not silently restyle the others.
-        self.skin_name = _skin.active()
+        self.skin_name = _uimod.active_skin()
         self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
                                       # the single source; select_wallpaper drives it.
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
@@ -454,20 +447,20 @@ class Appearance:
 
     def skin_names(self):
         """The widget skins a picker may offer, in presentation order."""
-        return _skin.names()
+        return _uimod.skin_names()
 
     def set_skin(self, name, persist=True):
         """Install the widget SKIN (Appearance -> THEMES -> the skin chips) and
         persist the choice, exactly as `set_theme` does for the colorway.
 
-        A skin is a delta over `ui`'s widget tables -- fields, edges, label
+        A skin is a delta over the toolkit's style (native/moy_ui/style.json) -- fields, edges, label
         alignment -- so every surface changes at once and none of them knows:
         this is the ONLY place the catalog is installed. An unknown name
-        resolves to the default (`skin.use`), and the RESOLVED name is what
+        resolves to the default (`ui.use_skin`), and the RESOLVED name is what
         gets stored, so a store that names a skin this build dropped heals
         itself on the next pick instead of re-failing every boot."""
         ws = self.ws
-        self.skin_name = _skin.use(name)
+        self.skin_name = _uimod.use_skin(name)
         self.publish()
         # Same two invalidations a theme change needs: the cached top-bar strip
         # paints widget pixels and its key does not fold the skin, and every

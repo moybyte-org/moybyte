@@ -66,6 +66,22 @@ def _native_ufiles():
 
 moy_ufiles = _native_ufiles()
 
+def _native_ui():
+    """The toolkit's C (native/moy_ui) over the glass's host library,
+    registered as `moy_ui` like the boards' module (tools/moy_ui_binding.py)."""
+    if "moy_ui" in _sys.modules:
+        return _sys.modules["moy_ui"]
+    from tools import moy_ui_binding
+    mod = moy_ui_binding.binding()
+    if mod is None:
+        raise ImportError("the host's toolkit needs a C compiler "
+                          "(native/moy_ui over ctypes)")
+    _sys.modules["moy_ui"] = mod
+    return mod
+
+
+moy_ui = _native_ui()
+
 from . import palette  # noqa: E402
 from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
 from .input import InputState  # noqa: E402

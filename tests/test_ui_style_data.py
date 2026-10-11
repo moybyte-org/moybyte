@@ -85,6 +85,15 @@ def test_the_metric_slots_are_named_once_per_kind():
             assert getattr(twin, const) == i, (kind, const)
 
 
+def test_the_token_row_is_the_app_abis_vocabulary_in_order():
+    """moy_ui's token row is moy_app's live token table, so a compiled run's
+    look is fed from it as it stands."""
+    with open(TOKENS_C) as f:
+        src = f.read()
+    m = re.search(r"TOKEN_NAMES\[MOY_APP_TOKENS\] = \{(.*?)\};", src, re.S)
+    assert _style()["tokens"] == re.findall(r'"([a-z_]+)"', m.group(1))
+
+
 def test_hits_capacity_is_configuration():
     """Twice the most rects any surface registers in the goldens' frames:
     16 (the calculator's keypad), measured with step 1 of the toolkit pass.

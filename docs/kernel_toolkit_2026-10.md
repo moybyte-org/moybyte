@@ -57,11 +57,11 @@ and a Python app's button is a compiled app's button.
 | data | its source | read by |
 |---|---|---|
 | **theme tokens** | `runtime/chrome.py`'s `THEMES` and `THEME_LIGHT`, written by the look into native/moy_app's live token table (sprint 5) | the C style resolution; every app's `theme` reads |
-| **style** | `native/moy_ui/style.json`: the kinds, the states, each `(field, ink, edge)` spec with its alias chains, each kind's metric tuple with its slot names, the quirks of `NON_DATA_QUIRKS` against their kinds, the skins as deltas, the glyph vocabulary | the generated `+native/moy_ui/moy_ui_tables.c` |
+| **style** | `native/moy_ui/style.json`: the kinds, the states, each `(field, ink, edge)` spec with its alias chains, each kind's metric tuple with its slot names, the quirks of `NON_DATA_QUIRKS` against their kinds, the skins as deltas, the glyph vocabulary | the generated `native/moy_ui/moy_ui_tables.c` |
 | **strings** | `native/moy_ui/strings/en.json`: one entry per string id, English complete, each format's conversions part of its text | the same generated table (§2.3) |
 
 **The generated table is committed.** `runtime/native_build.py` runs no
-generator, and neither do the board builds, so `+tools/gen_ui_tables.py` writes
+generator, and neither do the board builds, so `tools/gen_ui_tables.py` writes
 `moy_ui_tables.c` and the commit carries both; a test regenerates it and fails
 on any difference, as preflight's derived-artifact steps do for the web blob.
 A data edit is the JSON plus the regenerated file; it touches no C body and no
@@ -131,8 +131,8 @@ a primitive when the Studio lands, which by its §8 is not during this sprint.
 
 `+native/moy_ui/`: the style resolution, the primitives, the hit pump, the
 scroll model and the string table. Three bindings, the moy_app pattern: a
-MicroPython usermod (`+native/moy_ui/modmoy_ui.c`) on the boards and in the
-browser; a ctypes binding on the host (`+tools/moy_ui_binding.py`); and wasm
+MicroPython usermod (`native/moy_ui/modmoy_ui.c`) on the boards and in the
+browser; a ctypes binding on the host (`tools/moy_ui_binding.py`); and wasm
 rows in the role table (§3.5). The Zero denies it in its board.toml: it runs no
 apps.
 
@@ -467,7 +467,7 @@ first runs it red against that bug, then green.
 | the C on glass is the host's C | a widget sheet on the T-Deck, the Guition S3 and both P4s, hashed per widget against the host | a target-only difference: an unaligned load on the S3, a lane chosen differently |
 | one crossing and the same ops per widget | the binding's entry counter in C, against the number of widget calls the test made; the row's op counters per widget against the budgets pinned from the twin | a widget drawn through per-op Python calls; a body that issues more or fewer ops than the one it replaced |
 | a widget-heavy frame A/B on one S3 board and one P4 board | `tools/p4_bench.py` painted-frame medians and p90s for Settings, Files, Storybook and the editor's tabs on the Waveshare P4, and Settings and Files on the T-Deck and the Guition S3 with the dev channel's chrome-frame timing, against step 1's A; no surface 2 ms or more slower; idle scenarios capture zero frames | a flatten per widget, a by-name lookup per call, a keyword parse in C, a tuple built per `state_colors` |
-| style is data | a test copies the tree's `style.json`, changes a state's token and a metric and adds a kind, runs `+tools/gen_ui_tables.py`, builds the host library through `runtime/native_build.py`'s own path, and finds the change drawn where expected and nowhere else; the drift test fails a committed table that differs from its JSON | a value written into a C body instead of read from the table; a stale committed table |
+| style is data | a test copies the tree's `style.json`, changes a state's token and a metric and adds a kind, runs `tools/gen_ui_tables.py`, builds the host library through `runtime/native_build.py`'s own path, and finds the change drawn where expected and nowhere else; the drift test fails a committed table that differs from its JSON | a value written into a C body instead of read from the table; a stale committed table |
 | strings are data | `moy_text` refuses `LIT`, and the C-drawn screens rendered under a pseudo-locale draw no `LIT` call; a source ratchet finds no string literal passed to the raster in `native/`; a pack with a mismatched conversion reads English for that id | a literal left in C; a translation that breaks `snprintf` |
 | one text path | a source ratchet over `native/` and `runtime/`: `mg_text_raw` is called only from `moy_text` and the print gate's entry into it, and `draw_scaled`, `panel_lines` and `wrap_words` have no body left; `tests/spec_conformance/hashes.json` and the Lua C API unchanged | a second rasteriser left behind; a cart pixel moved |
 | `surface.glyph` gone | roles.json and the role ratchet; `_GLYPHS` named nowhere in `runtime/`; no `chrome_glyph` | a pushed copy left to drift |

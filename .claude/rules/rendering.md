@@ -128,9 +128,11 @@ left:
   self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
   +5.1µs) — live state reads through a method. `prefs_ns` exists because
   `paint_doc` is the real key in kids' `system.json` since #108.
-- **Style is data** — `runtime/skin.py`, NOT `chrome.py`, which would close
-  `ui → chrome → settings_layer → ui`. `tests/test_skin.py` pins skin knowledge to
-  its two owner modules in both directions.
+- **Style is data** — `native/moy_ui/style.json`, resolved by `native/moy_ui`'s
+  C, with `runtime/ui.py` its face (sprint 6, `docs/kernel_toolkit_2026-10.md`).
+  A data edit is the JSON plus `tools/gen_ui_tables.py`'s committed output
+  (`tests/test_ui_tables.py` fails a stale one). `tests/test_skin.py` pins skin
+  knowledge to its two owner modules in both directions.
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
   roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
   `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not

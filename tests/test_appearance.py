@@ -39,7 +39,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import appearance, moy_carts, skin, ui  # noqa: E402
+from runtime import appearance, moy_carts, ui  # noqa: E402
 from runtime.chrome import THEMES, theme_colors  # noqa: E402
 from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
 
@@ -172,7 +172,7 @@ def test_persist_false_writes_nothing(tmp_path):
         ws.look.select_wallpaper("fill:black", persist=False)
         assert _stored(ws) == {}
     finally:
-        skin.use(skin.DEFAULT)      # process-wide state: never leak it
+        ui.use_skin("default")      # process-wide state: never leak it
 
 
 # -- skin ---------------------------------------------------------------------
@@ -185,29 +185,28 @@ def test_set_skin_installs_into_ui_and_stores_the_RESOLVED_name(tmp_path):
     plain = ui.state_colors(th, "row", ui.REST)
     try:
         ws.look.set_skin("outline")
-        assert ws.look.skin_name == "outline" and skin.active() == "outline"
+        assert ws.look.skin_name == "outline" and ui.active_skin() == "outline"
         assert ui.state_colors(th, "row", ui.REST) != plain
         assert _stored(ws)["skin"] == "outline"
         ws.look.set_skin("no-such-skin")
-        assert ws.look.skin_name == skin.DEFAULT
-        assert _stored(ws)["skin"] == skin.DEFAULT
+        assert ws.look.skin_name == "default"
+        assert _stored(ws)["skin"] == "default"
     finally:
-        skin.use(skin.DEFAULT)
+        ui.use_skin("default")
 
 
 def test_skin_names_is_the_catalog_order(tmp_path):
     ws = build_ws(tmp_path)
-    assert list(ws.look.skin_names()) == list(skin.names())
+    assert list(ws.look.skin_names()) == list(ui.skin_names())
 
 
 def test_appearance_is_the_one_module_that_installs_a_skin():
     """The owner half of tests/test_skin.py's two-way ratchet, from this side:
-    `skin.use` is called here and nowhere else, and console.py -- the owner
-    until this landing -- no longer imports the catalog at all."""
+    `ui.use_skin` is called here and nowhere else in the shell."""
     src = ROOT.joinpath("runtime/appearance.py").read_text(encoding="utf-8")
-    assert "_skin.use(" in src
+    assert "_uimod.use_skin(" in src
     console_src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
-    assert "import skin" not in console_src
+    assert "use_skin(" not in console_src
 
 
 # -- font scale ---------------------------------------------------------------
@@ -433,7 +432,7 @@ def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):
         assert ws2.look.skin_name == "outline"
         assert ws2.theme_colors == theme_colors("forest", "light")
     finally:
-        skin.use(skin.DEFAULT)
+        ui.use_skin("default")
 
 
 def test_the_look_is_built_before_anything_reads_it(tmp_path):

@@ -22,6 +22,7 @@ import inspect
 from pathlib import Path
 
 from runtime import ui
+import ui_twin as twin
 from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
 from runtime.file_widgets import FileGridView
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -273,7 +274,7 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
             app._button(cv, "undo", (4, 4, 18, 18), glyph="undo", enabled=True)
             app._button(cv, "redo", (26, 4, 18, 18), glyph="redo", enabled=False)
             assert seen == [th["title_ink"],
-                            ui.state_token(th, "disabled_ink", 6)], (name, variant)
+                            twin.state_token(th, "disabled_ink", 6)], (name, variant)
             assert seen[0] != seen[1], (name, variant)
 
 

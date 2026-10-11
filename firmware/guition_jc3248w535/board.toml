@@ -354,6 +354,13 @@ user-files layer the files role is served over (native/moy_store/moy_ufiles.h,
 the module `moy_ufiles`). Every console takes it."""
 
 [[native.shared.take]]
+module = "moy_ui"
+why = """
+The widget toolkit's bodies in C with style and strings as data
+(docs/kernel_toolkit_2026-10.md), and the module `moy_ui` runtime/ui.py's face
+calls. Every console takes it."""
+
+[[native.shared.take]]
 module = "moy_kernel"
 why = """
 The kernel's entry, crash record and recovery floor

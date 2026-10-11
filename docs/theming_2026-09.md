@@ -72,11 +72,12 @@ Each was mocked and judged worse (§11).
   plus the semantic roles of `docs/visual_identity_v1.md` §4.3 and two flags,
   `surface_light` and `bar_light`. `runtime/appearance.py`'s `set_theme`
   installs a set.
-- **Widget style:** `runtime/ui.py`'s `DEFAULT_SPECS` (kind × state → a
-  `(field, ink, edge)` triple of token specs) and `DEFAULT_METRICS`, with the
-  state ladder `disabled > pressed > hot > on > hover > rest` and the quirks
-  listed in `NON_DATA_QUIRKS`. `runtime/skin.py` installs a skin as a delta over
-  both; two ship, `default` and `outline`.
+- **Widget style:** `native/moy_ui/style.json` (kind × state → a
+  `(field, ink, edge)` triple of token specs, and each kind's metric slots),
+  with the state ladder `disabled > pressed > hot > on > hover > rest` and the
+  quirks it lists, resolved in C by `native/moy_ui` (sprint 6's step 2). A
+  skin is a delta in the same file, installed by name (`ui.use_skin`); two
+  ship, `default` and `outline`.
 - **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
   from `chrome._ICON_ART`, or the user's own edited sheet, `system_icons.moygfx`
   (Settings → EDIT ICONS).

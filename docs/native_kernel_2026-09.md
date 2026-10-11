@@ -226,7 +226,7 @@ sprints that follow it:
 | the store: index, catalogue, covers, seed, project loading | `runtime/moy_carts.py`, `runtime/cover_cache.py`, `runtime/moy_seed.py`, `runtime/project.py` (in part) | 1b |
 | the cart path: loop, tick model, runtime map, moycore glue, in-cart chrome, netplay lockstep, notices and toasts over a cart | `runtime/player.py`, `runtime/tick_model.py`, `device/moycore_glue.py`, `system_menu_ui.py` and `netplay.py` (deleted by sprint 4: `native/moy_play/moy_chrome.c`, `native/moy_play/moy_match.c`), the notify path | 4 |
 | the roles and their services | `runtime/app_context.py`, `runtime/system_api.py`, `runtime/shell_servers.py`, `runtime/wallpaper.py` | 5 |
-| the toolkit's core | `runtime/ui.py` | 6 |
+| the toolkit's core | `runtime/ui.py`, its style resolution in `native/moy_ui` since sprint 6's step 2 (`docs/kernel_toolkit_2026-10.md`) | 6 |
 | the window managers | `runtime/wm_windowed.py`, `runtime/wm_desk.py`, `runtime/wm_chrome.py`, the rest of `runtime/console.py` | 7 |
 | apps (stay Python) | the launcher, Settings, Files, Paint, Calc, Notes, Storybook, Appearance, the Editor and its tabs (the Studio, `docs/studio_2026-09.md`, panes and docking included), `runtime/blocks.py` (the block compiler is an editor's) | — |
 
@@ -387,7 +387,7 @@ console needs while no Python app runs is OS.
 | `runtime/scene_editor_ui.py` | app | — | the Editor's Scene tab |
 | `runtime/settings_layer.py` | app | — | Settings; its WIFI panel drives the spine's leases |
 | `runtime/shell_servers.py` | roles | 5, stays | the console's servers of the role table's shell rows, which stay Python with the console (`docs/kernel_appabi_2026-10.md` §2.1) |
-| `runtime/skin.py` | toolkit | 6 | the skin catalogue stays unchanged data the native toolkit installs (§4.5) |
+| `runtime/skin.py` | toolkit | 6 | deleted by sprint 6's step 2: the skins are deltas in `native/moy_ui/style.json`, installed by name in C |
 | `runtime/storybook_app.py` | app | — | Storybook |
 | `runtime/surface.py` | glass | 3 | the Surface and its dirty protocol, kernel-owned after the `surface_model_v1.md` amendment (§8) |
 | `runtime/system_api.py` | roles | 5 | the user-app permission filter over the roles |
@@ -667,8 +667,8 @@ soft-reset backstop and heap arenas were drafted and dropped (owner,
 The toolkit goes native on a third trigger (owner, 2026-09-27): **one
 implementation for every app runtime**, so a Python app and a wasm app draw the
 same button through the same code. It is shaped for it: immediate mode with no
-retained tree (L7 stands), style as data (`DEFAULT_SPECS` / `DEFAULT_METRICS`,
-skins as deltas, `runtime/skin.py` unchanged), geometry pure and separate from
+retained tree (L7 stands), style as data (`native/moy_ui/style.json` since sprint 6, skins as deltas in
+it), geometry pure and separate from
 drawing, drawing through canvas verbs that are already C. The cost is iteration
 speed on widgets; style changes stay free. The theme data the toolkit consumes,
 and which theming pieces are built ahead of this sprint, are

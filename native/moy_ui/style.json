@@ -1,5 +1,6 @@
 {
   "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code and the skins as deltas. tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
+  "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive"],
   "states": ["disabled", "pressed", "hot", "on", "hover", "rest"],
   "aliases": {
     "hover": ["dim"],

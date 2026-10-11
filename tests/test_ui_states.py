@@ -296,17 +296,25 @@ def test_every_state_resolves_on_all_twelve_theme_sets():
                     assert edge in palette
 
 
-def test_state_token_walks_the_alias_chain():
-    th = {"dim": 42, "accent": 9, "hilite": 5, "ink": 7}
-    assert ui.state_token(th, "hover") == 42            # hover -> dim
-    assert ui.state_token(th, "hover_cue") == 9         # -> focus -> accent
-    assert ui.state_token(th, "pressed") == 5           # -> selection -> hilite
-    assert ui.state_token(th, "pressed_ink") == 7       # -> selection_ink -> ink
-    assert ui.state_token(th, "nope", 3) == 3           # unknown -> fallback
-    # A theme that DOES name the token wins over the chain.
-    assert ui.state_token({"hover": 1, "dim": 42}, "hover") == 1
-    # Index 0 (black) is a legitimate value, not a miss.
-    assert ui.state_token({"hover": 0}, "hover", 9) == 0
+def test_state_tokens_walk_the_alias_chain_in_c():
+    """A state token the theme does not hold resolves through its alias chain
+    (native/moy_ui), read here through the row kind's specs: hover's edge is
+    hover_cue (-> focus -> accent), pressed's field pressed (-> selection ->
+    hilite) and its ink pressed_ink (-> selection_ink -> ink)."""
+    th = {"panel": 60, "dim": 42, "accent": 9, "hilite": 5, "ink": 3,
+          "title_ink": 0}
+    assert ui.state_colors(th, "row", ui.HOVER)[2] == 9
+    field, ink, _edge = ui.state_colors(th, "row", ui.PRESSED)
+    assert (field, ink) == (5, 3)
+    # A theme that DOES name the token wins over the chain; index 0 is a
+    # value, not a miss.
+    th2 = dict(th, focus=0, selection=11)
+    assert ui.state_colors(th2, "row", ui.HOVER)[2] == 0
+    assert ui.state_colors(th2, "row", ui.PRESSED)[0] == 11
+    # A theme silent on every role paints the chain's literal fallback, and a
+    # spec with no fallback paints nothing.
+    assert ui.state_colors({}, "row", ui.REST) == (60, 0, 1)
+    assert ui.state_colors({}, "row_menu", ui.REST) == (None, 6, None)
 
 
 def test_hover_is_additive_and_disabled_only_dims():
@@ -322,40 +330,10 @@ def test_hover_is_additive_and_disabled_only_dims():
     assert dis[1] != rest[1] and dis[1] == th["ink_dim"]
 
 
-# -- the skin seam --------------------------------------------------------------
-
-def test_set_skin_intercepts_every_kind_and_state_and_can_fall_through():
-    """Where Phase 4 plugs in. `runtime/skin.py` will install a closure over its
-    pre-flattened nested SKIN[kind][state] tables; ui.py must never import it."""
-    seen = []
-
-    def skin(th, kind, state):
-        seen.append((kind, state))
-        if state == ui.REST:
-            return None                       # fall through to the default
-        return (1, 2, 3)
-
-    th = theme_colors("night")
-    default_rest = ui.state_colors(th, "row", ui.REST)
-    ui.set_skin(skin)
-    try:
-        assert ui.state_colors(th, "row", ui.PRESSED) == (1, 2, 3)
-        assert ui.state_colors(th, "cell", ui.HOVER) == (1, 2, 3)
-        assert ui.state_colors(th, "row", ui.REST) == default_rest
-        # The widgets route through the same seam, so a skin restyles them.
-        cv = SystemCanvas(60, 20)
-        ui.row(cv, th, (0, 0, 60, 20), "X", on=True)
-        assert cv.pix(1, 1) == 1
-    finally:
-        ui.set_skin(None)
-    assert ("row", ui.PRESSED) in seen and ("cell", ui.HOVER) in seen
-    assert ui.state_colors(th, "row", ui.PRESSED) != (1, 2, 3)
-
-
 def test_ui_stays_a_leaf():
-    """The cycle ui -> chrome -> settings_layer -> ui must stay impossible: the
-    skin installs itself into ui, ui never reaches for it. Checked on IMPORT
-    STATEMENTS, not on substrings -- the module documents the cycle in prose."""
+    """The cycle ui -> chrome -> settings_layer -> ui must stay impossible.
+    Checked on IMPORT STATEMENTS, not on substrings -- the module documents
+    the cycle in prose."""
     import ast
     tree = ast.parse(open(ui.__file__).read())
     names = []
@@ -369,8 +347,10 @@ def test_ui_stays_a_leaf():
         leaf = name.split(".")[-1]
         assert leaf not in ("chrome", "console", "skin", "settings_layer",
                             "wm_windowed"), name
-    # The ONE import is the peer leaf that owns the single hit-test.
-    assert set(n.split(".")[-1] for n in names) == {"widgets"}, names
+    # The imports are the C this module is the face of, the array type its
+    # token rows travel in, and the peer leaf that owns the single hit-test.
+    assert set(n.split(".")[-1] for n in names) == {
+        "widgets", "moy_ui", "array"}, names
 
 
 # =============================================================================
@@ -827,7 +807,7 @@ def _paint_matrix(cv, th):
         "scrollbar": lambda r: _matrix_bar(cv, th, r[1]),
         "focus": lambda r: ui.focus_ring(cv, th, (20, r[1] + 4, 100, 6)),
     }
-    kinds = sorted(ui.DEFAULT_SPECS) + ["nosuchkind"]
+    kinds = sorted(ui.kinds()) + ["nosuchkind"]
     y = 0
     for kind in kinds:
         if kind in own:
@@ -893,11 +873,10 @@ WIDGET_MATRIX_HASHES = (
 
 
 def _matrix_hashes():
-    from runtime import skin
     out = []
     try:
-        for sk in skin.names():
-            skin.use(sk)
+        for sk in ui.skin_names():
+            ui.use_skin(sk)
             for name, _tokens in THEMES:
                 for variant in THEME_VARIANTS:
                     cv = SystemCanvas(320, 320)
@@ -906,7 +885,7 @@ def _matrix_hashes():
                         sk, name, variant,
                         hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
     finally:
-        skin.use(skin.DEFAULT)
+        ui.use_skin("default")
     return out
 
 
