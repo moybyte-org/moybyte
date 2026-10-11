@@ -38,7 +38,7 @@ different fonts, not recolours only.
 sprites, images and the package. Where the bar goes, window modes (floating or
 tiled) and the home screen's structure are **shell layout**. The owner decided
 them (D5, D7), and they are designed in their own doc against
-`docs/shell_ux_v1.md` and the kernel's sprint 7 (§4.8). A theme reserves keys
+`docs/shell_ux_v1.md` and the window managers, which stay Python (§4.8). A theme reserves keys
 for them from format 1.
 
 ## 1. Decisions (owner, 2026-09-27)
@@ -336,8 +336,8 @@ from rev 1's review:
   one the fullscreen tiers boot to, replacing the windowed tier's games-only
   Library. What its Apps and Make tabs do on the desk, where apps are already
   desk icons and open as windows, is written out there.
-- **Its own kernel mapping.** Bar presets, a dock and tiling grow the WMs the
-  kernel's sprint 7 ports, so that doc records its scope in sprint 7.
+- **Its own kernel mapping.** Bar presets, a dock and tiling grow the WMs, which
+  stay Python (the kernel doc's §10 question 8: its sprint 7 does not run).
 
 Format 1 reserves `layout` with no keys, so no theme written before that doc
 lands is broken by it.
@@ -441,18 +441,20 @@ Kids will trade themes, so a theme is untrusted input:
 ## 8. Placement against the native kernel
 
 `docs/native_kernel_2026-09.md` moves the toolkit core native in its sprint 6
-("one implementation for every app runtime", with style as data) and the WMs in
-sprint 7, and turns the app roles into an import-shaped ABI in sprint 5 ("style
-tables → a theme handle and token reads"). Theming is shaped to that line so that
-nothing built now is thrown away:
+("one implementation for every app runtime", with style as data;
+`docs/kernel_toolkit_2026-10.md`), keeps the WMs Python (its §10 question 8:
+sprint 7 does not run), and turned the app roles into an import-shaped ABI in
+sprint 5 ("style tables → a theme handle and token reads"). **Theming runs after
+sprint 6, written in C against the toolkit, with no Python reference built
+first** (owner, 2026-10-11). The pieces:
 
 | theming piece | built where | why it survives the kernel |
 |---|---|---|
 | the vocabulary and the package format (§3–§5) | a spec, now | it IS the theme half of the sprint 5 ABI |
 | the default look (D1) as token tables and skin data | data | data crosses unchanged |
-| toolkit reach (phase 2) | Python, now | the apps stay Python on the kernel's table; every screen on the toolkit is what sprint 6 then speeds up at once |
-| the surface painter and pattern lane, 9-slice and mask blits, the chrome text lane | **C**, `moy_gfx` and upstream libmoy | draw kernels are C under either kernel language; "a hot loop lives on one side" (kernel doc §4.1). PREDICTED reuse by sprint 6; its gate is sprint 6 calling these entry points unchanged |
-| theme policy: flatten, frame styles, the loader | Python, now, as the reference | how every kernel crossing works: Python pins behaviour, goldens hold it, the crossing ports it and deletes it (kernel doc §4.2) |
+| toolkit reach (phase 2) | Python surfaces calling the C toolkit, after sprint 6 | the apps and the WMs stay Python; a screen on the toolkit draws through its C primitives |
+| the surface painter and pattern lane, 9-slice and mask blits, the chrome text lane | **C**, `moy_gfx` and upstream libmoy, after sprint 6 | draw kernels are C; "a hot loop lives on one side" (kernel doc §4.1). The painter becomes an op of the toolkit's sink and the text lane a font behind its one text call |
+| theme policy: flatten, frame styles, the loader | **C**, after sprint 6, beside the toolkit's style resolution | the toolkit's look is C, so a theme installs as a delta through the entry a skin uses; a Python reference would be written only to be deleted |
 | theme assets (fonts, sheets, images) | plain buffers owned by the loader, allocated with `moybuf` alloc and free (`malloc_dma` has no free), in PSRAM (`MALLOC_CAP_SPIRAM`) | they become kernel handles when sprint 2 builds the handle tables; no interim handle mechanism is built ahead (kernel doc §4.4) |
 
 **Memory rule.** On the S3 boards, PSRAM outside the Python heap is the
@@ -462,10 +464,9 @@ per-theme byte cap set in phase 1, no per-tint bakes (§4.6), and every phase
 takes the kernel doc's internal-SRAM gate (its §4.6).
 
 **Timing against the kernel's golden gates.** The kernel's sprint 6 gate holds
-the toolkit rows' goldens byte-for-byte, and sprint 7's holds the P4 desk's
-on-glass suites unchanged. **No pixel-moving theming phase overlaps sprint 6
-or 7.** The restyle phases (3 and 4) land before sprint 6
-starts, or after 7 closes. After that a new theme is data and moves only its own
+the toolkit rows' goldens byte-for-byte. **Every theming phase starts after
+sprint 6 closes** (owner, 2026-10-11); sprint 7 does not run, so nothing waits
+on it. After that a new theme is data and moves only its own
 goldens. The Studio (`docs/studio_2026-09.md` §8) moves pixels too and takes the
 same rule; its T-Deck bar rides phase 2b's re-baseline rather than making a
 second one.
@@ -501,8 +502,8 @@ internal-SRAM gate (its §4.6).
 | **5 — layout** | per the shell-layout doc (§4.8) | that doc's gates, plus: bar and dock strips keep their cache (idle frames zero, strip rebuilt only on a key change) |
 | **6 — sprites and sharing** | the sprite sheet (D3); theme packages in the store; the Appearance app as the theme editor; a one-line text form for colour-only themes; `home_safe` and `"type": "theme"` with their side effects (the RUN grid and Editor picker exclusions, other moy hosts, the Zero's store sync) | a kid-made theme round-trips through the editor, the store and a second board; a sprite part no slower than its surface fallback; idle home captures zero frames on all four console boards |
 
-Phases 1 and 2a can start now. Phase 3's painter and phase 4's text lane are the
-C pieces the kernel's sprint 6 is predicted to reuse (§8).
+Every phase starts after the kernel's sprint 6 (§8). Phase 3's painter and
+phase 4's text lane extend that sprint's toolkit sink and its one text call.
 
 ## 10. What other systems taught (research, 2026-09-27)
 
