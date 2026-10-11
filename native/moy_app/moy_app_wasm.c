@@ -75,6 +75,30 @@ uint32_t moy_app_wasm_grant(void) {
     return s_g;
 }
 
+uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *skin,
+                            uint32_t cap) {
+    moy_appabi_t *a = s_a;
+    if (a == NULL) {
+        return 0u;
+    }
+    for (unsigned spins = 0;; spins++) {
+        uint32_t q = moy_app_seq_begin(a);
+        if (!(q & 1u)) {
+            uint32_t gen = moy_app_theme_read(a, out) + 1u;
+            gen = gen != 0u ? gen : 1u;
+            if (gen != have && cap > 0u) {
+                skin[moy_app_skin_read(a, skin, cap - 1u)] = 0;
+            }
+            if (moy_app_seq_end(a, q)) {
+                return gen;
+            }
+        }
+        if (spins >= 64u) {
+            yield();
+        }
+    }
+}
+
 void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us) {
     *count = s_hops;
     *us = s_hop_us;
@@ -191,6 +215,8 @@ enum {
     N_NAV_OPEN_APP,
     N_PREFS_GET, N_PREFS_SET, N_PREFS_CLEAR,
     N_CLIPBOARD_PUT_TEXT, N_CLIPBOARD_TEXT, N_CLIPBOARD_KIND, N_CLIPBOARD_SEQ,
+    N_UI_KIND, N_UI_GLYPH_ID, N_UI_BUTTON, N_UI_LABEL, N_UI_LIST, N_UI_HITS_CLEAR,
+    N_UI_HITS_ADD, N_UI_HITS_PUMP, N_UI_DRAGTAP,
     N_COUNT
 };
 
@@ -203,9 +229,11 @@ static const char *const ROW_OF[N_COUNT] = {
     "nav.open_app",
     "prefs.get", "prefs.set", "prefs.clear",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
+    "ui.kind", "ui.glyph_id", "ui.button", "ui.label", "ui.list", "ui.hits_clear",
+    "ui.hits_add", "ui.hits_pump", "ui.dragtap",
 };
 
-static int s_rows[N_COUNT];
+static int8_t s_rows[N_COUNT];      // MOY_APP_TABLE_N < 128
 static int s_rows_made;
 
 int moy_app_wasm_row(uint32_t i) {
@@ -217,7 +245,7 @@ int moy_app_wasm_row(uint32_t i) {
             s_rows[k] = -1;
             for (uint32_t r = 0; r < MOY_APP_TABLE_N; r++) {
                 if (strcmp(moy_app_table_name(r), ROW_OF[k]) == 0) {
-                    s_rows[k] = (int)r;
+                    s_rows[k] = (int8_t)r;
                     break;
                 }
             }
@@ -353,6 +381,28 @@ static int32_t w_clipboard_seq(void *e) {
 #define FN(f) ((void *)(f))
 #endif
 
+// The toolkit's rows are native/moy_ui's (moy_ui_wasm.h), linked where the
+// image carries the toolkit: weak here, so a library without it (the host's
+// spine library, which runtime/moyhost_wasm.c fills from its own) answers
+// NULL for them.
+#define UI_WEAK __attribute__((weak))
+int32_t moy_ui_wasm_kind(void *, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_glyph_id(void *, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_button(void *, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                           int32_t, const uint8_t *, uint32_t, int32_t) UI_WEAK;
+int32_t moy_ui_wasm_label(void *, int32_t, int32_t, int32_t, int32_t, const uint8_t *,
+                          uint32_t, int32_t, int32_t) UI_WEAK;
+int32_t moy_ui_wasm_list(void *, int32_t, int32_t, int32_t, int32_t, int32_t, const uint8_t *,
+                         uint32_t, int32_t, int32_t, int32_t, int32_t) UI_WEAK;
+int32_t moy_ui_wasm_hits_clear(void *, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_hits_add(void *, uint8_t *, uint32_t, int32_t, int32_t, int32_t, int32_t,
+                             int32_t) UI_WEAK;
+int32_t moy_ui_wasm_hits_pump(void *, uint8_t *, uint32_t, int32_t, int32_t, int32_t, int32_t,
+                              uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_dragtap(void *, uint8_t *, uint32_t, int32_t, int32_t, int32_t, int32_t,
+                            int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                            float) UI_WEAK;
+
 // The rows, roles.json's wasm types: what tests/test_roles.py holds equal.
 static const moy_app_native_t NATIVES[N_COUNT] = {
     { "theme_token", FN(w_theme_token), "(i)i", NULL },
@@ -379,6 +429,15 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "clipboard_text", FN(w_clipboard_text), "(*~)i", NULL },
     { "clipboard_kind", FN(w_clipboard_kind), "()i", NULL },
     { "clipboard_seq", FN(w_clipboard_seq), "()i", NULL },
+    { "ui_kind", FN(moy_ui_wasm_kind), "(*~)i", NULL },
+    { "ui_glyph_id", FN(moy_ui_wasm_glyph_id), "(*~)i", NULL },
+    { "ui_button", FN(moy_ui_wasm_button), "(iiiiiii*~i)i", NULL },
+    { "ui_label", FN(moy_ui_wasm_label), "(iiii*~ii)i", NULL },
+    { "ui_list", FN(moy_ui_wasm_list), "(iiiii*~iiii)i", NULL },
+    { "ui_hits_clear", FN(moy_ui_wasm_hits_clear), "(*~)i", NULL },
+    { "ui_hits_add", FN(moy_ui_wasm_hits_add), "(*~iiiii)i", NULL },
+    { "ui_hits_pump", FN(moy_ui_wasm_hits_pump), "(*~iiii*~)i", NULL },
+    { "ui_dragtap", FN(moy_ui_wasm_dragtap), "(*~iiiiiiiiiiif)i", NULL },
 };
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {
@@ -506,6 +565,9 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
         return 1;
     }
     int role = moy_app_table_role((uint32_t)row);
+    if (role == MOY_ROLE_UI) {
+        return 0;                   // the toolkit's rows: every compiled app's, no grant
+    }
     int ungated = role == MOY_ROLE_THEME && moy_app_table_c_row((uint32_t)row) != MOY_APP_SHELL;
     if ((!ungated && !(s_roles & (1u << role))) || moy_app_holds(s_a, s_g, role) != MOY_APP_OK) {
         const char *perm = moy_app_perm_of(role);

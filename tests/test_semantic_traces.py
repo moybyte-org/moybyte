@@ -2325,10 +2325,11 @@ def roles_trace(ws):
 
 
 def roles_rows():
-    """The role table's (role, verb) rows, in table order."""
+    """The role table's (role, verb) rows, in table order, but the toolkit's:
+    a compiled app's alone (tests/test_ui_wasm.py drives each)."""
     import json
     rows = json.loads((ROOT / "native" / "moy_app" / "roles.json").read_text())
-    return [(r["role"], r["verb"]) for r in rows["rows"]]
+    return [(r["role"], r["verb"]) for r in rows["rows"] if r["role"] != "ui"]
 
 
 def _roles_driver():

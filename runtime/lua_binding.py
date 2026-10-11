@@ -100,7 +100,7 @@ def build(verbose=False, wasm=None):
         "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
         "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
         "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
-        "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
+        "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
         "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
         "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
         "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
@@ -117,6 +117,10 @@ def build(verbose=False, wasm=None):
     name = "moyhost_lua"
     if got is not None:
         inc, lib = got
+        # ...and the toolkit's rows a compiled app imports, over the RUN sink
+        # (native/moy_ui/moy_ui_wasm.h)
+        names += ["moy_ui.c", "moy_ui_draw.c", "moy_ui_interact.c", "moy_ui_wasm.h",
+                  "moy_ui_wasm.c"]
         names += ["moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c",
                   "moy_audio.h", "moy_files.h", "moy_files.c", "moyhost_wasm.c"]
         cflags += ["-DMOY_WASM=1", "-isystem", inc,

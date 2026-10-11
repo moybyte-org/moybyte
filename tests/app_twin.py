@@ -24,7 +24,7 @@ SLOTS = 32
 ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-          "notify", "wallpaper", "artwork", "clipboard", "install")
+          "notify", "wallpaper", "artwork", "clipboard", "install", "ui")
 _ROWS = ("damage.all", "damage.again",
          "surface.canvas", "surface.size", "surface.font_scale",
          "surface.chrome_scale", "surface.windowed", "surface.bar_h",
@@ -41,7 +41,11 @@ _ROWS = ("damage.all", "damage.again",
          "prefs.get", "prefs.set",
          "prefs.clear", "wallpaper.load_copy", "wallpaper.save_copy",
          "artwork.current", "artwork.follow", "clipboard.put_text", "clipboard.text",
-         "clipboard.kind", "clipboard.seq")
+         "clipboard.kind", "clipboard.seq",
+         # the toolkit's rows: a compiled app's, served by native/moy_ui and
+         # counted by nothing here
+         "ui.kind", "ui.glyph_id", "ui.button", "ui.label", "ui.list",
+         "ui.hits_clear", "ui.hits_add", "ui.hits_pump", "ui.dragtap")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",

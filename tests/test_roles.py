@@ -42,8 +42,12 @@ def _rows():
 
 
 def _verbs():
+    """Each role's verbs but the toolkit's, which no AppContext object serves
+    (app_context.TOOLKIT; tests/test_ui_wasm.py drives its rows)."""
     out = {}
     for r in _rows():
+        if r["role"] == _ac.TOOLKIT:
+            continue
         out.setdefault(r["role"], []).append(r["verb"])
     return out
 
@@ -92,7 +96,7 @@ def test_each_role_object_answers_exactly_its_rows(role):
 def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
     c_rows = [r["role"] + "." + r["verb"] for r in _rows() if r["server"] == "c"]
     assert c_rows == list(moy_app.rows())
-    assert tuple(_verbs()) == tuple(moy_app.roles())
+    assert tuple(_verbs()) + (_ac.TOOLKIT,) == tuple(moy_app.roles())
 
 
 def test_the_import_adapter_is_the_tables_wasm_column():

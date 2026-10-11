@@ -2257,6 +2257,31 @@ static mp_obj_t mod_frame_settle(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_frame_settle_obj, mod_frame_settle);
 
+// The canvas a compiled app's ui rows draw on (native/moy_ui/moy_ui_wasm.h):
+// the run's draw target, an owed or kept frame on the screen written in
+// first, as libmoy's own verbs settle it before they draw. NULL with no
+// compiled run, or inside one of par's items, which reach no import.
+void *moycore_ui_target(void);
+void *moycore_ui_target(void)
+{
+#if MOYCORE_WASM
+    if (!RUN.wasm || !WR || WR->w.items) return NULL;
+    moy_wasm *w = &WR->w;
+#if MOY_WASM
+    if (w->target == w->screen && (w->owed || w->kept)) {
+        if (!w->owed) {
+            w->owed = w->kept;
+            w->kept = NULL;
+        }
+        moy_wasm_settle(w);
+    }
+#endif
+    return w->target;
+#else
+    return NULL;
+#endif
+}
+
 // frame_presented(kept=None, off=0) -- the board has shown the owed frame.
 // `kept[off:]` is its copy of the frame, byte for byte, alive until the next
 // blit; the canvas is written from it if the cart draws on the screen before

@@ -10,6 +10,7 @@
 
 #include "moy_ui.h"
 #include "moy_str.h"
+#include "moy_ui_wasm.h"
 
 static mp_obj_t names_tuple(const char *const *names, int n) {
     mp_obj_t items[MOY_UI_KINDS > MOY_UI_TOKENS ? MOY_UI_KINDS : MOY_UI_TOKENS];
@@ -887,6 +888,18 @@ static mp_obj_t ui_dragtap(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_dragtap_obj, 13, 13, ui_dragtap);
 
+// wasm_rows() -> the toolkit's rows a compiled app imports ("ui_button", ...),
+// in roles.json's order: what this image serves (moy_ui_wasm.h).
+static mp_obj_t ui_wasm_rows(void) {
+    mp_obj_t items[MOY_UI_WASM_ROWS];
+    for (int i = 0; i < MOY_UI_WASM_ROWS; i++) {
+        const char *n = moy_ui_wasm_name(i);
+        items[i] = mp_obj_new_str(n, strlen(n));
+    }
+    return mp_obj_new_tuple(MOY_UI_WASM_ROWS, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_wasm_rows_obj, ui_wasm_rows);
+
 static mp_obj_t ui_calls(void) {
     return mp_obj_new_int_from_uint(moy_ui_calls());
 }
@@ -911,6 +924,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_glyph_names), MP_ROM_PTR(&ui_glyph_names_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_rows), MP_ROM_PTR(&ui_wasm_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_set), MP_ROM_PTR(&ui_str_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_reset), MP_ROM_PTR(&ui_str_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&ui_glyph_obj) },

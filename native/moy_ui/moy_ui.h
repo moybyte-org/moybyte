@@ -76,9 +76,11 @@ int moy_ui_glyph_draw(const moy_text_target_t *t, int g, int x, int y, int w, in
 typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 typedef struct { const uint8_t *p; uint16_t n; } moy_ui_span_t;
 
-// A sink: where a primitive draws. ROW: a canvas row of the glass, named by
-// its CANVAS handle (moy_ui_sink_row checks it); `fs` is the row's font
-// scale, the scale its text draws at; `look` the look its colours resolve in.
+// A sink: where a primitive draws, always through a canvas row (`dst`). ROW:
+// a canvas row of the glass, named by its CANVAS handle (moy_ui_sink_row
+// checks it). RUN: a compiled run's libmoy canvas lent as a row of its own,
+// its draw state saved, reset and restored around the call (moy_ui_wasm.h).
+// `fs` is the scale text draws at; `look` the look its colours resolve in.
 enum { MOY_UI_SINK_ROW = 1, MOY_UI_SINK_RUN = 2 };
 typedef struct {
     uint8_t kind;

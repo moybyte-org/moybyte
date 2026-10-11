@@ -94,6 +94,10 @@ NO_STORE = _NoStore()
 # in a NEEDS tuple fails at construction instead of at the first draw.
 ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
          "notify", "wallpaper", "artwork", "clipboard", "install")
+# The role table's last role is the toolkit's rows for a compiled app
+# (native/moy_ui/moy_ui_wasm.h). A Python app draws the same C through
+# `import ui`, so no app declares it and no role object is built for it.
+TOOLKIT = "ui"
 
 
 # -- the context itself ------------------------------------------------------

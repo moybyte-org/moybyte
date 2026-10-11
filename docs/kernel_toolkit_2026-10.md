@@ -220,14 +220,14 @@ primitive → `moy_text` → `snprintf` runs on mp_task's stack, whose margin
 
 | primitive | C | Python face | wasm row (`moybyte.app`) |
 |---|---|---|---|
-| button | `moy_ui_button` | `ui.button`, signature unchanged | `ui_button(x, y, w, h, kind, state, label, len, glyph)` |
+| button | `moy_ui_button` | `ui.button`, signature unchanged | `ui_button(x, y, w, h, kind, flags, interact, label, len, glyph)` |
 | chip, and a toggle as a chip kind | `moy_ui_chip` | `ui.chip`, unchanged | `ui_chip(...)` |
 | row | `moy_ui_row` | `ui.row`, unchanged | `ui_row(x, y, w, h, kind, state, label, len, value, vlen, glyph)` |
 | cell | `moy_ui_cell`, returns the art box | `ui.cell`, unchanged | `ui_cell(..., art_out)` |
 | tab row | `moy_ui_tabs`, returns the tab boxes | `ui.tab_row`, `ui.tab_row_rects`, unchanged | `ui_tabs(...)` |
 | status row, panel, toolbar, focus ring, dialog, text field | one function each | unchanged | one row each |
 | scrollbar | `moy_ui_scrollbar` over a scroll state | `ScrollRegion.draw_bar`, unchanged | `ui_scrollbar(...)` |
-| scroll list: visible rows, the selection and the bar over a scroll state | `moy_ui_list` | new: `ui.list` | `ui_list(x, y, w, h, scroll, items, len, n, row_h, sel)` |
+| scroll list: visible rows, the selection and the bar over a scroll state | `moy_ui_list` | new: `ui.list` | `ui_list(x, y, w, h, kind, items, len, n, row_h, offset, sel)` |
 | label: text in a box, aligned, clipped; returns the width | `moy_ui_label` | new: `ui.label` | `ui_label(...)` |
 | glyph (§5) | `moy_ui_glyph` | new: `ui.glyph`, `ui.glyph_id` | `ui_glyph(...)` |
 | the game-canvas family | `moy_ui_game_btn` and its two siblings | unchanged | none: cart verbs draw a cart's buttons |
@@ -279,12 +279,27 @@ nothing to end at a VM stop: the plan's §4.3 rule holds with no handle.
 ### 3.5 The role table's `ui` rows
 
 The `ui` rows join `native/moy_app/roles.json` as a role of their own: server
-`c`, wasm-typed, ungated by the same special case the theme's reads have
-(`Player._wasm_bind` gives them to every compiled app). So the author's header,
-`docs/app_api_v1.md`'s table, the adapter's registration and
-`tests/test_roles.py`'s ratchets cover them; a cart that declares no
-`moybyte.app` extension imports only from `"moy"`, as now. A compiled app uses
-them in its player window, cart-shaped: a fixed canvas, scaled.
+`c`, grant `never`, wasm-typed, and taking no grant: the load's check admits
+them for every compiled app that declares the extension. As built (step 9):
+nine rows (`ui_kind`, `ui_glyph_id`, `ui_button`, `ui_label`, `ui_list`, and
+the pump's `ui_hits_clear`, `ui_hits_add`, `ui_hits_pump`, `ui_dragtap` over
+buffers in the app's memory), served by `native/moy_ui/moy_ui_wasm.c` and
+named in `native/moy_app/moy_app_wasm.c`'s table, so every engine's adapter
+registers them with the rest. No AppContext object is built for the role
+(`app_context.TOOLKIT`): a Python app draws the same C through `import ui`.
+The rows' contract and buffer layouts are `docs/app_api_v1.md`'s compiled-app
+section; `tests/test_roles.py` holds the table, the adapter and the doc
+together, and the fixture `tests/fixtures/wasm/app_ui.moy` imports every row.
+A cart that declares no `moybyte.app` extension imports only from `"moy"`, as
+now. A compiled app uses them in its player window, cart-shaped: a fixed
+canvas, scaled.
+
+**The RUN sink lends the run's canvas as a row.** The target is the run's
+(`moycore_ui_target`, from the module that drives the run: an owed or kept
+frame settled first, as libmoy's verbs do); around each row the run's draw
+state is saved, reset and restored, and the reset canvas's index-to-pixel
+words become the lent row's palette, so the primitives draw it exactly as
+they draw a glass row.
 
 ## 4. One text path
 

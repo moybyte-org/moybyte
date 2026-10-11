@@ -280,6 +280,68 @@ def test_a_compiled_app_reaches_its_roles_with_no_upcall(tmp_path):
     assert "moybyte.app.prefs_get" in (st["err"] or ""), st
 
 
+APP_UI = ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"
+# What App UI Wasm's widgets cover (its src/main.wat): the button, the list and
+# the label.
+_APP_UI_RECTS = ((20, 80, 80, 20), (120, 80, 160, 96), (20, 110, 80, 10))
+
+
+def _app_ui_host_words(tmp_path):
+    """The fixture's frame on the host's WAMR (tests/test_ui_wasm.py's run),
+    as canonical RGB565 words."""
+    from runtime import host_app, wasm_host
+    from tools import wasm_cart
+    from ws_helpers import open_cart
+    if not wasm_host.available():
+        pytest.skip("no host wasm binding to hold the page to")
+    root = str(tmp_path / "host_carts")
+    host_app.moy_carts.ensure_dirs(root)
+    wasm_cart.build(str(APP_UI), os.path.join(root, "app_ui.moy"))
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    open_cart(ws, "App UI Wasm")
+    for _ in range(9):
+        ws._dirty = True
+        ws.frame(1.0 / 30.0)
+    words = tier_frame.from_canvas(ws.sys_canvas._buf, True)     # the host keeps panel order
+    ws.exit()
+    return words
+
+
+def _rects(words):
+    out = []
+    for x, y, w, h in _APP_UI_RECTS:
+        out.append([words[j * tier_frame.W + i] for j in range(y, y + h) for i in range(x, x + w)])
+    return out
+
+
+def test_a_compiled_app_draws_the_toolkits_widgets_in_the_browser(tmp_path):
+    """App UI Wasm (its src/main.wat says what it does) draws a button, a
+    scrolling list and a label through the `ui` rows: in the browser they are
+    the page's adapters over the same C (native/moy_ui/moy_ui_wasm.c), so the
+    run makes no crossing but the page's frame, and the widgets' pixels are
+    the host's run's, rect for rect."""
+    web_e2e.require("store")
+    sys.path.insert(0, str(ROOT))
+    app = _built(APP_UI, tmp_path / "carts" / "app_ui.moy")
+    out, js = _play(tmp_path, _site(tmp_path, [app]), "app_ui",
+                    "?handheld=1&dev=1&cart=app_ui.moy", [
+        {"wait": 3000}, {"js": _APP_STATE}, {"js": _CANVAS},
+        # a last step, so the canvas's long line is flushed before the page closes
+        {"shot": "app_ui"},
+    ])
+    assert len(js) == 2, "the scenario did not run to its end:\n%s" % out[-4000:]
+    st = json.loads(js[0])
+    assert st["cart"] == "App UI Wasm" and st["err"] is None and st["notice"] is None, st
+    assert st["ups"][1:] == [0, 0, 0, 0, 0], "the run crossed into Python: %r" % (st,)
+    size, b64 = js[1].split(":", 1)
+    assert size == "%dx%d" % (tier_frame.W, tier_frame.H), size
+    page = _rects(tier_frame.from_rgba(base64.b64decode(b64)))
+    host = _rects(_app_ui_host_words(tmp_path))
+    for rect, a, b in zip(_APP_UI_RECTS, page, host):
+        assert a == b, "the page drew %r otherwise than the host's run" % (rect,)
+
+
 def test_the_jet_carts_play_in_the_browser(tmp_path):
     web_e2e.require("store")
     sys.path.insert(0, str(ROOT))

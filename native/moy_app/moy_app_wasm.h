@@ -70,6 +70,14 @@ typedef int (*moy_app_import_fn)(void *ctx, const uint8_t *mod, size_t mn,
                                  const uint8_t *name, size_t nn);
 int moy_app_wasm_imports(const uint8_t *head, size_t n, moy_app_import_fn fn, void *ctx);
 
+// The live theme's token row and its skin's name (NUL-terminated in `cap`
+// bytes), read under the state's seqlock for the toolkit's rows
+// (native/moy_ui/moy_ui_wasm.h): copied only when the generation differs
+// from `have`. Answers a generation that is never 0, or 0 while no run is
+// bound.
+uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *skin,
+                            uint32_t cap);
+
 // The hops made, the microseconds they took end to end, and the rows' own
 // share of those on the VM's task: the hop's price per call is the difference
 // over the count (the suites read it).

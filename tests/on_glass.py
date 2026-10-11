@@ -1638,13 +1638,15 @@ def wasm_carts_push(board, board_dir):
 APP_ROLES = ("app_roles", "App Roles Wasm")
 APP_SHORT = ("app_short", "App Short Wasm")
 APP_SHELL = ("app_shell", "App Shell Wasm")
+APP_UI = ("app_ui", "App UI Wasm")
 
 
 def wasm_app_push(board, board_dir):
     """The compiled app fixtures (docs/kernel_appabi_2026-10.md section 4),
     built for this board's chip and pushed as wasm_<name>.moy: App Roles Wasm,
     the same module with no permission (App Short Wasm), and App Shell Wasm,
-    which imports a shell-served row. Returns the carts root."""
+    which imports a shell-served row, and App UI Wasm, which draws the
+    toolkit's widgets through the `ui` rows. Returns the carts root."""
     import json
     import tempfile
     from tools import wasm_cart
@@ -1654,7 +1656,7 @@ def wasm_app_push(board, board_dir):
     tmp = tempfile.mkdtemp(prefix="moy_wasm_app_")
     fixtures = ROOT / "tests" / "fixtures" / "wasm"
     for name, src in (("app_roles", "app_roles"), ("app_short", "app_roles"),
-                      ("app_shell", "app_shell")):
+                      ("app_shell", "app_shell"), ("app_ui", "app_ui")):
         out = os.path.join(tmp, name + ".moy")
         wasm_cart.build(str(fixtures / (src + ".moy")), out, chips=(chip,))
         if name == "app_short":
@@ -1669,7 +1671,7 @@ def wasm_app_push(board, board_dir):
     board.pyval("len(ws.rescan_carts() or ())", timeout=60)
     # Pushed code is fixed code: the strikes an earlier run of these left
     # (the crash guard, #160) are forgiven, as a commit forgives them.
-    for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1]):
+    for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1]):
         board.pyval("ws.app_guard.forgive(ws.app_cart_id(next(c for c in "
                     "ws.carts.all if c['title'] == %r))) or 1" % title, strict=True)
     return root
@@ -1721,6 +1723,88 @@ def wasm_app_reaches_its_roles(board, root):
                          % (root + "/wasm_app_roles.moy"), strict=True)
     assert list(census) == ["wasm", True, "free"], census
     return (us - work) / n
+
+
+# App UI Wasm's pmem slots (tests/fixtures/wasm/app_ui.moy/src/main.wat) and
+# where its list is on its canvas.
+_UI_FRAMES, _UI_OFFSET, _UI_KEPT, _UI_BTN, _UI_LIST, _UI_FAIL = 0, 1, 4, 5, 6, 8
+_UI_LIST_XY = (200, 150)
+
+
+def _app_ui_host_pmem(look):
+    """The fixture's pmem after its first frames on the host's WAMR in the
+    board's look (theme, variant, skin): the widgets' pixel hashes the
+    board's must equal."""
+    import tempfile
+    from runtime import host_app, wasm_host
+    from tools import wasm_cart
+    from ws_helpers import open_cart
+    if not wasm_host.available():
+        pytest.skip("no host wasm binding to hold the board's widgets to")
+    root = os.path.join(tempfile.mkdtemp(prefix="moy_app_ui_"), "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"),
+                    os.path.join(root, "app_ui.moy"))
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    ws.look.set_theme(look[0], persist=False, variant=look[1])
+    ws.look.set_skin(look[2], persist=False)
+    open_cart(ws, APP_UI[1])
+    for _ in range(9):
+        ws._dirty = True
+        ws.frame(1.0 / 30.0)
+    pm = list(ws.player._lua._run.pmem()[1])
+    ws.exit()
+    return pm
+
+
+def wasm_app_draws_the_toolkit(board, root):
+    """App UI Wasm draws a button, a scrolling list and a label through the
+    `ui` rows (docs/kernel_toolkit_2026-10.md §3.5) with a palette remap, a
+    camera and a fill pattern of its own set: no row fails, the widgets'
+    pixel hashes are the host's run's, the cart's draw state survives the
+    rows, the run crosses into Python for nothing but the console's frame,
+    the census keeps it VM-free, and a swipe through the real pointer feed
+    scrolls the list through the run's snapshot. Leaves the desk as it found
+    it."""
+    host = _app_ui_host_pmem(board.pyval(
+        "(ws.look.theme_name, ws.look.theme_variant, ws.look.skin_name)", strict=True))
+    pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
+               "(__import__('array').array('i', bytearray(1024)))")
+    line = board.cmd("run %s" % APP_UI[1].lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == APP_UI[1], st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        play = st.get("play")
+        assert play is not None and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
+        pm = board.pyval(pm_expr, timeout=30, strict=True)
+        assert pm[_UI_FAIL] == 0, "a ui row answered -%d" % pm[_UI_FAIL]
+        assert pm[_UI_KEPT] == 8, "the cart's draw state was lost: %r" % pm[_UI_KEPT]
+        assert (pm[_UI_BTN], pm[_UI_LIST]) == (host[_UI_BTN], host[_UI_LIST]), (
+            "the widgets' hashes %r, the host's %r" % (pm[_UI_BTN:_UI_LIST + 1],
+                                                       host[_UI_BTN:_UI_LIST + 1]))
+        assert pm[_UI_OFFSET] == 0, pm
+        # Where the list's middle is on the glass: the console's own game
+        # mapping, searched along each axis.
+        sx, sy = board.pyval(
+            "(lambda f, g: (next(x for x in range(2048) if f(x, 0)[0] >= g[0]), "
+            "next(y for y in range(2048) if f(0, y)[1] >= g[1])))(ws._game_xy, %r)"
+            % (_UI_LIST_XY,), strict=True)
+        board.swipe(sx, sy, sx, sy - 120, frames=12)
+        board.drain(1.5)
+        pm = board.pyval(pm_expr, timeout=30, strict=True)
+        assert pm[_UI_OFFSET] > 0, "the swipe did not scroll the list: %r" % pm
+        assert pm[_UI_FAIL] == 0, pm
+        assert not board.state().get("cart_error")
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    census = board.pyval("__import__('moy_play').census(%r)" % (root + "/wasm_app_ui.moy"),
+                         strict=True)
+    assert list(census) == ["wasm", True, "free"], census
 
 
 def wasm_cart_fps(board, title, seconds=10.0, check=None):

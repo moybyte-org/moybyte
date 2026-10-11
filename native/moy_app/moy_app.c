@@ -53,7 +53,7 @@ int moy_app_seq_end(const moy_appabi_t *a, uint32_t s) {
 
 static const char *const ROLE_NAMES[MOY_ROLE_N] = {
     "damage", "surface", "theme", "files", "carts", "nav", "prefs", "notify",
-    "wallpaper", "artwork", "clipboard", "install",
+    "wallpaper", "artwork", "clipboard", "install", "ui",
 };
 
 static const char *const ROW_NAMES[MOY_ROW_N] = {
@@ -73,6 +73,8 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "wallpaper.load_copy", "wallpaper.save_copy",
     "artwork.current", "artwork.follow",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
+    "ui.kind", "ui.glyph_id", "ui.button", "ui.label", "ui.list", "ui.hits_clear",
+    "ui.hits_add", "ui.hits_pump", "ui.dragtap",
 };
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
@@ -565,6 +567,12 @@ int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n) {
     a->theme_gen++;
     seq_close(a);
     return MOY_APP_OK;
+}
+
+size_t moy_app_skin_read(const moy_appabi_t *a, char *out, size_t cap) {
+    size_t n = a->skin_len < cap ? a->skin_len : cap;
+    memcpy(out, a->skin, n);
+    return n;
 }
 
 uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]) {
@@ -1520,6 +1528,15 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"install.find", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"install.net", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"install.keep", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"ui.kind", MOY_ROLE_UI, MOY_ROW_UI_KIND},
+    {"ui.glyph_id", MOY_ROLE_UI, MOY_ROW_UI_GLYPH_ID},
+    {"ui.button", MOY_ROLE_UI, MOY_ROW_UI_BUTTON},
+    {"ui.label", MOY_ROLE_UI, MOY_ROW_UI_LABEL},
+    {"ui.list", MOY_ROLE_UI, MOY_ROW_UI_LIST},
+    {"ui.hits_clear", MOY_ROLE_UI, MOY_ROW_UI_HITS_CLEAR},
+    {"ui.hits_add", MOY_ROLE_UI, MOY_ROW_UI_HITS_ADD},
+    {"ui.hits_pump", MOY_ROLE_UI, MOY_ROW_UI_HITS_PUMP},
+    {"ui.dragtap", MOY_ROLE_UI, MOY_ROW_UI_DRAGTAP},
 };
 
 int moy_app_table_role(uint32_t row) {

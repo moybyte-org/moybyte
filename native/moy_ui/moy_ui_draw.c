@@ -9,6 +9,10 @@
 #include "moy_canvas.h"
 
 // -- the sink --------------------------------------------------------------------
+//
+// Both sinks are a canvas row by the time a primitive draws: ROW's is the
+// glass's (moy_ui_sink.c), RUN's a row a compiled run's canvas lends
+// (moy_ui_wasm.c).
 
 typedef struct {
     moy_canvas_row_t *row;
@@ -16,21 +20,6 @@ typedef struct {
     int tfs;                    // the scale print draws at: the row's font scale
     int look;
 } draw_t;
-
-int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look) {
-    moy_canvas_row_t *row;
-    if (moy_canvas_get(canvas, &row) != 0 || row->px == NULL) {
-        return MOY_UI_STALE;
-    }
-    if (look < 0 || look >= MOY_UI_LOOKS) {
-        return MOY_UI_BAD;
-    }
-    s->kind = MOY_UI_SINK_ROW;
-    s->fs = (uint8_t)(row->st[MOY_ST_FONT_SCALE] > 0 ? row->st[MOY_ST_FONT_SCALE] : 1);
-    s->look = (uint8_t)look;
-    s->dst = row;
-    return MOY_UI_OK;
-}
 
 static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
     moy_ui_count_call();

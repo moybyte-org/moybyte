@@ -9,6 +9,8 @@ target_sources(usermod_moy_ui INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_glyph.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_draw.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_interact.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_ui_sink.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_ui_wasm.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_tables.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_ui.c)
 # It draws through native/moy_gfx's text path into native/moy_glass's canvas
@@ -16,4 +18,8 @@ target_sources(usermod_moy_ui INTERFACE
 target_include_directories(usermod_moy_ui INTERFACE ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx ${CMAKE_CURRENT_LIST_DIR}/../moy_glass
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine)
+# The RUN sink (moy_ui_wasm.c) reads a compiled run's libmoy canvas, whose
+# layout MOY_PIXEL_RGB565 sets: the same for every translation unit that sees
+# moy.h, as native/moy_gfx's and native/moycore's say.
+target_compile_definitions(usermod_moy_ui INTERFACE MOY_PIXEL_RGB565=1)
 target_link_libraries(usermod INTERFACE usermod_moy_ui)

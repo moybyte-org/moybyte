@@ -283,6 +283,26 @@ every row it imports is served in C it runs as a VM-free cart does; one that
 imports a row the Python console serves (`theme_set*`, `nav_open_app`) keeps
 the VM.
 
+**The toolkit's rows** (the table's `ui` role) are every compiled app's, with
+no permission: the same C a Python app's `ui` draws (`native/moy_ui`), drawn
+into the app's canvas with no hop and no upcall (`native/moy_ui/moy_ui_wasm.h`
+is their contract). `ui_kind(name)` and `ui_glyph_id(name)` answer the ids
+the drawing rows take (an unknown kind draws as a row, an unknown glyph as
+none); `ui_button(x, y, w, h, kind, flags, interact, label, glyph)` takes
+flags ON 1, HOT 2, DISABLED 4 and `interact` PRESSED 1, HOVER 4 or -1;
+`ui_label(x, y, w, h, text, ink, align)` answers the drawn width;
+`ui_list(x, y, w, h, kind, items, count, row_h, offset, sel)` takes its items
+NUL-separated. A widget looks the same whatever palette, camera, clip or fill
+pattern the app left set, and the app finds them as it left them. The pump
+keeps its state in the app's memory, each buffer 4-byte aligned:
+`ui_hits_clear(buf)`, `ui_hits_add(buf, x, y, w, h, id)` and
+`ui_hits_pump(buf, px, py, down, pointing, pump)` over a hit buffer (two
+header words, then five per rect) and a 16-byte pump (hover id, pressed id,
+armed id, down); `ui_dragtap(drag, x, y, w, h, horizontal, px, py, click,
+down, slop, content, dt_ms)` over a 40-byte drag (the tap's 12 bytes, the
+scroll's 16, then the offset and the last tap's x and y), answering 1 on a
+clean tap. `tests/fixtures/wasm/app_ui.moy` uses every row.
+
 ### The canvas: FIXED by default, responsive by opt-in
 
 A shipped app is responsive because a Layer class can afford to be. A cart

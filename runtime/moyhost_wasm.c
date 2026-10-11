@@ -42,6 +42,7 @@
 #include "moycore_run.h"
 #include "moycore_lua.h"
 #include "moy_files.h"
+#include "moy_ui_wasm.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -205,7 +206,30 @@ static int app_register(void)
     if (!g_app_rows || g_app_store) return 1;
     if (!(g_app_store = (NativeSymbol *)malloc(g_app_n * sizeof *g_app_store))) return 0;
     memcpy(g_app_store, g_app_rows, g_app_n * sizeof *g_app_store);
+    /* The toolkit's rows are native/moy_ui's, compiled into this library;
+     * the spine's library that hands the table over has none of its own. */
+    for (uint32_t i = 0; i < g_app_n; i++)
+        if (!g_app_store[i].func_ptr)
+            g_app_store[i].func_ptr = moy_ui_wasm_native(g_app_store[i].symbol);
     return wasm_runtime_register_natives("moybyte.app", g_app_store, g_app_n) ? 1 : 0;
+}
+
+/* The canvas the ui rows draw on (native/moy_ui/moy_ui_wasm.h): the live
+ * run's draw target, an owed or kept frame written in first, as the board's
+ * module does. */
+void *moycore_ui_target(void)
+{
+    host_wasm *r = G_LIVE_W;
+    if (!r || !r->bound || r->dead || r->w.items) return NULL;
+    moy_wasm *w = &r->w;
+    if (w->target == w->screen && (w->owed || w->kept)) {
+        if (!w->owed) {
+            w->owed = w->kept;
+            w->kept = NULL;
+        }
+        moy_wasm_settle(w);
+    }
+    return w->target;
 }
 
 void hw_app_ext(const NativeSymbol *rows, uint32_t n, uint32_t (*grant)(void),

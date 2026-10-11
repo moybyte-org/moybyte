@@ -58,6 +58,7 @@ enum {
     MOY_ROLE_DAMAGE = 0, MOY_ROLE_SURFACE, MOY_ROLE_THEME, MOY_ROLE_FILES,
     MOY_ROLE_CARTS, MOY_ROLE_NAV, MOY_ROLE_PREFS, MOY_ROLE_NOTIFY,
     MOY_ROLE_WALLPAPER, MOY_ROLE_ARTWORK, MOY_ROLE_CLIPBOARD, MOY_ROLE_INSTALL,
+    MOY_ROLE_UI,
     MOY_ROLE_N
 };
 
@@ -85,6 +86,9 @@ enum {
     MOY_ROW_ARTWORK_CURRENT, MOY_ROW_ARTWORK_FOLLOW,
     MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
     MOY_ROW_CLIPBOARD_SEQ,
+    MOY_ROW_UI_KIND, MOY_ROW_UI_GLYPH_ID, MOY_ROW_UI_BUTTON, MOY_ROW_UI_LABEL,
+    MOY_ROW_UI_LIST, MOY_ROW_UI_HITS_CLEAR, MOY_ROW_UI_HITS_ADD, MOY_ROW_UI_HITS_PUMP,
+    MOY_ROW_UI_DRAGTAP,
     MOY_ROW_N
 };
 
@@ -243,6 +247,8 @@ int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n);
 // The table whole and its generation, uncounted: what a binding builds its
 // colours from.
 uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]);
+// The skin's name (up to cap bytes, unterminated), uncounted; its length.
+size_t moy_app_skin_read(const moy_appabi_t *a, char *out, size_t cap);
 
 // The rows. colors: the generation a binding's colour dict is keyed on (it
 // rebuilds the dict from moy_app_theme_read when it moves). token: one role's
@@ -412,7 +418,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 110u
+#define MOY_APP_TABLE_N 119u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.
