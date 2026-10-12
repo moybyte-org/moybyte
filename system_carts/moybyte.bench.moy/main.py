@@ -211,6 +211,13 @@ def _verbs():
              2 + (i & 15))
         fillp()
 
+    def v_rect_p(i):
+        # Same call as v_rect under an OPAQUE pattern: the pair is the theme
+        # painter's pattern lane against a solid fill of the same area.
+        fillp(0xA5A5, 1)
+        rect((i * 37) % 290, (i * 53) % 225, 24, 12, 2 + (i & 15))
+        fillp()
+
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
             ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
             ("rectb", v_rectb, 100), ("circb", v_circb, 100),
@@ -218,7 +225,7 @@ def _verbs():
             ("map", v_map, 8), ("sspr", v_sspr, 50),
             ("tline", v_tline, 50), ("trib", v_trib, 50),
             ("oval", v_oval, 100), ("ovalb", v_ovalb, 100),
-            ("oval_p", v_oval_p, 100)]
+            ("oval_p", v_oval_p, 100), ("rect_p", v_rect_p, 100)]
 
 
 ROLE_N = 4000              # role reads per timed batch, best of ROLE_REPS
@@ -839,7 +846,7 @@ def _serial_report():
 _VERB_ID = {"cls": 0, "rect": 1, "circ": 2, "line": 3, "pix": 4, "print": 5,
             "rectb": 6, "circb": 7, "tri": 8, "spr": 9, "map": 10,
             "sspr": 11, "tline": 12, "trib": 13, "oval": 14, "ovalb": 15,
-            "oval_p": 16}
+            "oval_p": 16, "rect_p": 17}
 _PHASE_ORDER = (("idle", 0), ("logic", 1), ("draw", 2),
                 ("silent", 3), ("sound", 4), ("ray", 5), ("tetra", 6),
                 ("scroll", 7), ("layer", 8), ("float", 9), ("table", 10))

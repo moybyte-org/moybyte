@@ -45,7 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 PMEM_MAGIC = 45948
 VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
               "circb", "tri", "spr", "map", "sspr", "tline", "trib",
-              "oval", "ovalb", "oval_p")
+              "oval", "ovalb", "oval_p", "rect_p")
 PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound",
                "ray", "tetra", "scroll", "layer", "float", "table")
 

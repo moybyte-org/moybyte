@@ -149,6 +149,12 @@ local VERBS = {
            2 + (i & 15))
       fillp()
     end },
+  -- Same call as rect under an OPAQUE pattern: the theme painter's lane.
+  { name = "rect_p", k0 = 100, fn = function(i)
+      fillp(0xA5A5, 1)
+      rect((i * 37) % 290, (i * 53) % 225, 24, 12, 2 + (i & 15))
+      fillp()
+    end },
 }
 
 function _init()
@@ -551,7 +557,7 @@ end
 local VERB_ID = { cls = 0, rect = 1, circ = 2, line = 3, pix = 4, print = 5,
                   rectb = 6, circb = 7, tri = 8, spr = 9, map = 10,
                   sspr = 11, tline = 12, trib = 13, oval = 14, ovalb = 15,
-                  oval_p = 16 }
+                  oval_p = 16, rect_p = 17 }
 local PHASE_ORDER = { { "idle", 0 }, { "logic", 1 }, { "draw", 2 },
                       { "silent", 3 }, { "sound", 4 }, { "ray", 5 },
                       { "tetra", 6 }, { "scroll", 7 }, { "layer", 8 },

@@ -338,15 +338,18 @@ fed by a few shade colours (§10).
   surface paints it in place of its field and edge, and the WMs' decorations
   reach it through one `ui` face. Colours stay MOY64 indices resolved through
   the canvas row's palette at draw, as every primitive's do.
-- **Patterns get a fast lane.** `fillp` already draws a 4×4 two-colour
-  screen-anchored pattern natively, but per pixel (a bit test and a 16-bit store,
-  `libmoy/moy_pixel.h`). The solid fill path pairs 32-bit stores because the
-  naive loop was measured far slower on P4 glass (`moy_gfx_kernels.h`). The
-  painter is built on `fillp`'s semantics with an **opaque two-colour pattern
-  lane** (four precomputed row words, stored like a solid fill). A pattern then
-  costs about what a solid fill does. That lane is libmoy's, so it lands
-  **upstream in moy-spec** and is re-vendored. PREDICTED; the gate is phase 3's
-  bench.
+- **Patterns get a fast lane.** `fillp`'s 4×4 two-colour screen-anchored
+  pattern is drawn by libmoy's `moy_ds_span` (`libmoy/moy_pixel.h`). An
+  **opaque** pattern (its holes take a colour) is periodic in four pixels, so
+  `moy_pat_span` derives the four column-phase colours once a span and writes
+  the run as 32-bit words with `moy_fill`'s head and tail handling: two
+  alternating words on the 565 build, one on the index build. A pattern with
+  untouched holes keeps the per-pixel walk. `rect`, `circ`, `tri` and `oval`
+  all reach the lane through the span path. It lives upstream in moy-spec, is
+  re-vendored, and is pinned by the `fillp` conformance scene (odd and even
+  starts at widths 1-31, a circle and a triangle). The painter is built on
+  `fillp`'s semantics over this lane. Its kernel cost against a solid fill, on
+  the P4 and the T-Deck, is recorded in **#66** (2026-10-12).
 - **Not the PPA.** Painter fills stay on the CPU: a 1:1 PSRAM fill is
   bandwidth-bound and CPU ≈ PPA (`.claude/rules/boards.md`). The PPA stays for
   upscale composites.
@@ -686,7 +689,7 @@ Editor tabs within the thresholds against the image before; the ratchet's
 count falls.
 
 **Phase 3 — shapes** (four steps, one re-baseline).
-  1. **The pattern lane, upstream.** An opaque two-colour pattern fill in
+  1. **The pattern lane, upstream** (landed 2026-10-12). An opaque two-colour pattern fill in
      libmoy (moy-spec), re-vendored; conformance scenes for it. Gate: a pattern
      fill within a set margin of a solid fill of the same area, on the P4 and
      the T-Deck; goldens byte-identical (nothing draws it yet).
@@ -708,7 +711,9 @@ count falls.
      `_base` geometry retires as each surface gets its 320×240 layout (2b's
      reverted half: the Editor's bar against the Studio's T-Deck mockup, the
      Sprites tab's grid and tool rows), and `outline` becomes a seed package
-     (the skin axis folds into the theme).
+     (the skin axis folds into the theme). The Code tab's `code_comment` on
+     its 320×240 background is fixed here (2b left grey on blue; owner,
+     2026-10-12).
      Gate: **one re-baseline, named and rendered** against the mockups in
      `docs/media/theming_2026-09/`; p4_bench on the P4 and the T-Deck; the
      ratchet's count falls.
@@ -784,7 +789,10 @@ About eighteen systems were studied; the lessons that shaped this doc:
 ## 12. Questions, ruled
 
 Rev 2 left four questions open. Each is ruled (2026-10-11) with the pick that
-builds least; each is a pick the owner can overturn.
+builds least, and the owner accepted all four on 2026-10-12, with §9's
+sequencing picks: the 320×240 layout code retires in phase 3 step 4, toolkit
+reach for hand-drawn rows waits for phase 3 and `look_gen` for phase 6, and
+`outline` stays a skin until phase 3 step 4.
 
 1. **Home readability: `home_safe` or a scrim (§4.9)?** Deferred to phase 6,
    where the home's wallpaper slot and `"type": "theme"` land, and decided

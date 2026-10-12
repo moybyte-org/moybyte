@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| vendored at | `403680a` (2026-09-26, branch main) |
+| vendored at | `adb9079` (2026-10-12, branch main) |
 
 SPEC.md §11: *an implementation conforms when it runs the conformance suite and
 produces pixel-identical output.* Moybyte is the reference console, so that is a
