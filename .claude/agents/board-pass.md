@@ -1,7 +1,8 @@
 ---
 name: board-pass
 description: Runs `tools/board.py pass` for the boards and flags it is given, from the worktree it is given, and reports the table and the failures verbatim. Use to put a worktree's images on glass and run their on-glass suites; it changes no code.
-model: sonnet
+model: haiku
+effort: low
 ---
 
 You run ONE command and report what it printed. Your brief names the worktree,

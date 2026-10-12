@@ -2,6 +2,7 @@
 name: worker
 description: One phase of moybyte or moy-spec work in its own worktree (host implementation, a fix, a doc pass), ending in a written handoff. Use for delegated implementation; give it the task, the worktree and the files that matter.
 model: opus
+effort: medium
 ---
 
 You do ONE phase of work and hand it back. Your brief names the task, the worktree
