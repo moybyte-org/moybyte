@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "name": "win95",
+  "frame": { "style": "win9x" },
+  "metrics": { "radius": 0, "press_dx": 1, "press_dy": 1 },
+  "colors": {
+    "dark": {
+      "panel": 54, "edge": 50, "title": 1, "title_ink": 7, "title_inactive": 51,
+      "accent": 12, "hilite": 1, "dim": 51, "desktop": 58, "desktop_pattern": 3,
+      "shade_hi": 50, "shade_lo": 55, "shade_dark": 0
+    },
+    "light": {
+      "panel": 6, "edge": 50, "title": 1, "title_ink": 7, "title_inactive": 50,
+      "accent": 12, "hilite": 1, "dim": 50, "desktop": 58, "desktop_pattern": 3,
+      "surface": 7, "surface_alt": 6, "border": 50, "selection": 1,
+      "selection_ink": 7, "chrome_ink_dim": 50, "ink_dim": 50,
+      "shade_hi": 7, "shade_lo": 50, "shade_dark": 0
+    }
+  },
+  "text": {
+    "button": { "disabled": { "effect": "emboss", "color": "shade_hi" } }
+  },
+  "surfaces": {
+    "button": { "rest": "bevel2, fill panel",
+                "pressed": "sunken, border shade_dark, fill panel" },
+    "chip": { "rest": "raised, fill panel", "on": "sunken, dither shade_hi/panel" },
+    "tab": { "rest": "raised, fill panel" },
+    "toolbar": { "rest": "raised, fill panel" },
+    "panel": { "rest": "etched" },
+    "bar.item": { "rest": "raised, fill panel",
+                  "on": "sunken, dither shade_hi/panel" }
+  }
+}

@@ -1175,9 +1175,9 @@
   },
   "hits_capacity": 32,
   "theme": {
-    "about": "Theme packages, format 1 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on the MOY64 table. 'bytes' caps a theme.json, 'depth' the inherits chain. A package's 'text' and 'surfaces' are keyed by part, then state: the parts are the kinds, then 'parts' (the chrome the WMs and the bar draw); the states are the style's, then 'states' (a window's), and a state a part does not name follows 'chain' to rest. A surface is one line of the grammar (docs/theming_2026-09.md \u00a74.4): an edge of 'edges', a fill of 'fills' with its colours, 'border' with an optional colour, 'shadow'; a colour is a token or a palette index. A package holds at most 'surfaces_cap' surfaces of at most 'surface_len' bytes each.",
+    "about": "Theme packages, format 1 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on the MOY64 table. 'bytes' caps a theme.json, 'depth' the inherits chain. A package's 'text' and 'surfaces' are keyed by part, then state: the parts are the kinds, then 'parts' (the chrome the WMs and the bar draw); the states are the style's, then 'states' (a window's), and a state a part does not name follows 'chain' to rest. A surface is one line of the grammar (docs/theming_2026-09.md \u00a74.4): an edge of 'edges', a fill of 'fills' with its colours, 'border' with an optional colour, 'shadow'; a colour is a token or a palette index. A package holds at most 'surfaces_cap' surfaces of at most 'surface_len' bytes each. A package's 'frame' chooses a window frame: 'style' one of 'frames', 'title_align' one of 'title_aligns', 'buttons' each letter of 'frame_buttons' once (close, minimise, maximise, the title), a '|' between them allowed; what it leaves out is its style's.",
     "format": 1,
-    "seeds": ["night", "indigo", "berry", "forest", "slate", "machine"],
+    "seeds": ["night", "indigo", "berry", "forest", "slate", "machine", "platinum", "win95"],
     "bytes": 4096,
     "depth": 4,
     "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment", "code_builtin", "block_events", "block_control", "block_actors", "block_looks", "block_draw", "block_input", "block_variables", "block_lists", "block_operators", "block_sound", "block_myblocks"],
@@ -1191,7 +1191,10 @@
     "fills": ["fill", "dither", "pinstripe", "gradient"],
     "surfaces_cap": 32,
     "surface_len": 48,
-    "reserved": ["frame", "fonts", "sprites", "icons", "images", "wallpapers", "layout", "sounds", "editor"],
+    "frames": ["classic", "tab", "platinum", "win9x", "flat"],
+    "title_aligns": ["left", "center", "right"],
+    "frame_buttons": "CMZT",
+    "reserved": ["fonts", "sprites", "icons", "images", "wallpapers", "layout", "sounds", "editor"],
     "derive": {
       "dark": [
         ["code_text", 6], ["code_keyword", 12], ["code_string", 11],

@@ -5,6 +5,7 @@
 #   -- interaction state              widget_state
 #   -- the style                      use_skin, metrics, state_colors (C)
 #   -- the theme's shape              use_shape, paint (C)
+#   -- window frames                  frame, frame_buttons, frame_band (C)
 #   -- draw == tap                    Hits
 #   Hits                              per-draw hit registry
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
@@ -1168,6 +1169,32 @@ def paint(cv, th, rect, part, state=REST):
         p = _PART_ID[part] = _C.parts().index(part)
     return _C.paint(cv, _LOOK if th is _TH else _look(th), rect, p,
                     _THEME_STATE_ID[state])
+
+
+# --- window frames ---------------------------------------------------------------
+# The window decoration and the bar's band in the frame style the theme
+# chooses (docs/theming_2026-09.md §4.5): the styles are C, a theme only picks
+# one, its title alignment and its button order.
+
+FRAME_BUTTONS = ("close", "max", "min")
+
+
+def frame(cv, th, rect, title_h, title, active, has_min, fs):
+    """Window `rect`'s frame: its ring, its `title_h` strip with `title` and
+    the strip's buttons, its drop shadow. `has_min`: a minimise button."""
+    _C.frame(cv, _LOOK if th is _TH else _look(th), rect, title_h, title, active, has_min, fs)
+
+
+def frame_buttons(rect, title_h, title, has_min, fs):
+    """The strip's buttons as `frame` draws them, left to right:
+    [(name, rect, right)], `right` True for the group right of the title."""
+    return [(FRAME_BUTTONS[b[0]], (b[1], b[2], b[3], b[4]), b[5] == 1)
+            for b in _C.frame_buttons(rect, title_h, title, has_min, fs)]
+
+
+def frame_band(cv, th, rect, light=False):
+    """The bar's band in the frame's style; `light`: a window's light toolbar."""
+    _C.frame_band(cv, _LOOK if th is _TH else _look(th), rect, light)
 
 
 def toolbar(cv, th, rect):

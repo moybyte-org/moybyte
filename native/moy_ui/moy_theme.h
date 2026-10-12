@@ -10,7 +10,8 @@
 // numbers, each clamped to its range), `text` (part -> state -> a text
 // effect and the role it paints with) and `surfaces` (part -> state -> one
 // line of the surface grammar, compiled here into a record the painter
-// draws). The keys style.json's theme section
+// draws) and `frame` (the window frame's style, title alignment and button
+// order: moy_ui.h's moy_ui_frame). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
 // and noted. A reader refuses a newer `format`; a key a later phase defines
 // is additive and needs no bump.
@@ -73,6 +74,7 @@ typedef struct {
     uint8_t surface[MOY_THEME_SURFACES_CAP][2]; // part, state
     moy_ui_surface_t surface_rec[MOY_THEME_SURFACES_CAP];
     uint8_t n_surfaces;
+    uint8_t frame[MOY_UI_FRAME_FIELDS];     // moy_ui_shape_t's frame, 0 where silent
     uint8_t notes;
 } moy_theme_pkg_t;
 

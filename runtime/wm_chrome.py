@@ -11,12 +11,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
 
-# Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
-# title strip / accents / dim texture) reads the ws.theme_colors tokens per draw
-# (chrome.theme_colors, Appearance -> THEMES; the "night" default is the moybyte site
-# colorway -- midnight navy panels, lavender strips, the yellow CTA accent).
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
+# The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
+# style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
 _SHADOW = NAMES["black"]
-_BTN_X_FG = NAMES["red"]
 
 # Shell-process title strips (registered apps contribute TITLE through the app
 # registry instead; the player shows the live cart title).
@@ -65,32 +67,9 @@ class WindowChrome:
             self._win_grip(win, focused)
             return
         win._chrome_streak += 1
-        sc = self._root_canvas
-        ws = self.ws
-        th = ws.theme_colors
-        fs = self._fs()
-        sh = 3
-        sc.rect(win.x + sh, win.y + win.h, win.w, sh, _SHADOW)     # bottom shadow
-        sc.rect(win.x + win.w, win.y + sh, sh, win.h, _SHADOW)     # right shadow
-        sc.rectb(win.x, win.y, win.w, win.h,
-                 th["chrome_ink"] if focused else th["dim"])
-        # Title strip: label left, [minimize][maximize][close] right. Focused =
-        # the theme's active-title tint with its ink (the active-title cue,
-        # Picotron-style); unfocused = the inactive strip role with dim ink.
-        strip_bg = th["title_active"] if focused else th["title_inactive"]
-        strip_fg = th["title_ink"] if focused else th["chrome_ink_dim"]
-        sc.rect(win.x + 1, win.y + 1, win.w - 2, win.title_h, strip_bg)
-        sc.rect(win.x + 1, win.y + win.title_h, win.w - 2, 1,
-                th["chrome_ink"] if focused else th["dim"])
-        title = self._win_title(win)
-        btns = self._strip_buttons(win)
-        first_btn_x = btns[-1][1][0] if btns else win.x + win.w
-        maxc = max(0, (first_btn_x - (win.x + 4 * fs)) // (8 * fs))
-        if maxc > 0:
-            sc.print(title[:maxc], win.x + 4 * fs, win.y + 1 + 5 * fs, strip_fg, 1)
-        for name, rect in btns:
-            glyph = {"close": "close", "max": "app", "min": "minus"}[name]
-            ws._glyph(glyph, rect, _BTN_X_FG if name == "close" else strip_fg, sc)
+        _ui.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
+                  win.title_h, self._win_title(win), focused, win.kind != "desktop",
+                  self._fs())
         self._win_grip(win, focused)
 
     def _win_title(self, win):
@@ -104,51 +83,53 @@ class WindowChrome:
                 return base + " - " + str(t)
         return base
 
+    def _frame_buttons(self, win):
+        """The title-strip buttons as the frame style lays them, left to right:
+        [(name, rect, right)]. Close, maximize, and -- app windows only --
+        minimize (a running game can't minimize: hiding it would mean silently
+        pausing it)."""
+        return _ui.frame_buttons((win.x, win.y, win.w, win.h), win.title_h,
+                                 self._win_title(win), win.kind != "desktop", self._fs())
+
     def _strip_buttons(self, win):
-        """The title-strip buttons as (name, rect), laid RIGHT to LEFT: close,
-        maximize, and -- app windows only -- minimize (a running game can't
-        minimize: hiding it would mean silently pausing it)."""
-        fs = self._fs()
-        ic = 16 * fs
-        y = win.y + 1 + (win.title_h - ic) // 2
-        x = win.x + win.w - 2 - ic
-        out = [("close", (x, y, ic, ic))]
-        x -= ic + 2 * fs
-        out.append(("max", (x, y, ic, ic)))
-        if win.kind != "desktop":
-            x -= ic + 2 * fs
-            out.append(("min", (x, y, ic, ic)))
-        return out
+        """The title-strip buttons as (name, rect), RIGHT to LEFT."""
+        return [(n, r) for n, r, _side in reversed(self._frame_buttons(win))]
 
     def _strip_button_hit(self, win, px, py):
         """Fat-finger resolution for the strip buttons (owner report 2026-07-27:
         'when I exit a window it stays on the desktop'). At font scale 1 the
         visual buttons are 16px (~1.7mm on the 7\" glass) at 18px pitch, so a
         finger tap missed the exact rect and fell through to the drag-arm --
-        the window moved a little and never closed. A tap anywhere in the
-        button BLOCK (the buttons' span plus the border to the window's right
-        edge, plus a small overhang below the strip) now resolves to the
-        NEAREST button center. Per-button padding can't work at this pitch;
-        same fix class as _grip_hit_rect (2026-07-10)."""
-        btns = self._strip_buttons(win)
+        the window moved a little and never closed. A tap anywhere in a button
+        GROUP's block (the group's span out to the window's edge on its side,
+        plus a small overhang below the strip) resolves to the group's NEAREST
+        button center. Per-button padding can't work at this pitch; same fix
+        class as _grip_hit_rect (2026-07-10)."""
+        btns = self._frame_buttons(win)
         if not btns:
             return None
         fs = self._fs()
         pad = 6 * fs
-        left = min(r[0] for _, r in btns) - pad
-        right = win.x + win.w               # past X is the dead border strip
-        top = win.y
-        bottom = win.y + 1 + win.title_h + pad
-        if not (left <= px < right and top <= py < bottom):
+        if not (win.y <= py < win.y + 1 + win.title_h + pad):
             return None
         best = None
         bd = None
-        for name, (bx, by, bw, bh) in btns:
-            cx = bx + bw // 2
-            cy = by + bh // 2
-            d = (px - cx) * (px - cx) + (py - cy) * (py - cy)
-            if bd is None or d < bd:
-                best, bd = name, d
+        for right in (False, True):
+            grp = [(n, r) for n, r, side in btns if side == right]
+            if not grp:
+                continue
+            if right:
+                left, end = min(r[0] for _, r in grp) - pad, win.x + win.w
+            else:
+                left, end = win.x, max(r[0] + r[2] for _, r in grp) + pad
+            if not (left <= px < end):
+                continue
+            for name, (bx, by, bw, bh) in grp:
+                cx = bx + bw // 2
+                cy = by + bh // 2
+                d = (px - cx) * (px - cx) + (py - cy) * (py - cy)
+                if bd is None or d < bd:
+                    best, bd = name, d
         return best
 
     def _grip_rect(self, win):
@@ -245,8 +226,10 @@ class WindowChrome:
                 fg = NAMES["black"]                # ink on the accent CTA chip
             else:
                 fg = th["edge"] if win.minimized else th["chrome_ink"]
-            sc.rect(x, y, w, h, bg)
-            sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
+            state = _ui.ON if focused else (_ui.DISABLED if win.minimized else _ui.REST)
+            if not _ui.paint(sc, th, (x, y, w, h), "bar.item", state):
+                sc.rect(x, y, w, h, bg)
+                sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
             sc.print(label, x + 4 * fs, y + (h - 8 * fs) // 2, fg, 1)
 
     def _chip_tap(self, key):

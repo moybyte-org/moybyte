@@ -135,7 +135,7 @@ It holds a `theme.json` and optional **data** assets: images, fonts, sprite and
 icon sheets. It never holds a cart or a script.
 
 **Format 1, as the loader reads it** (`native/moy_ui/moy_theme.h`; frozen
-2026-10-11 by phase 1, `surfaces` defined 2026-10-12 by phase 3):
+2026-10-11 by phase 1, `surfaces` and `frame` defined 2026-10-12 by phase 3):
 
 ```json
 {
@@ -147,6 +147,7 @@ icon sheets. It never holds a cart or a script.
     "light": { "panel": 6, "title": 48, "title_ink": 0, "block_events": 9 }
   },
   "metrics": { "radius": 2, "press_dx": 1, "press_dy": 1 },
+  "frame": { "style": "platinum", "title_align": "center", "buttons": "C|T|ZM" },
   "text": {
     "button": { "disabled": { "effect": "emboss", "color": "ink" } }
   },
@@ -175,7 +176,12 @@ icon sheets. It never holds a cart or a script.
   names its role, or it is dropped.
 - **`surfaces`**: part → state → one line of the surface grammar (§4.4); at
   most 32 per package. Text the grammar does not take is dropped.
-- **Reserved:** `frame`, `fonts`, `sprites`, `icons`,
+- **`frame`**: `style`, one of `classic`, `tab`, `platinum`, `win9x`, `flat`;
+  `title_align`, one of `left`, `center`, `right`; `buttons`, each of `C`
+  (close), `M` (minimise), `Z` (maximise) and `T` (the title) once, a `|`
+  between them allowed. What a theme leaves out is its style's own (§4.5); a
+  value the key does not take is dropped.
+- **Reserved:** `fonts`, `sprites`, `icons`,
   `images`, `wallpapers`, `layout`, `sounds`, `editor` (style.json's
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
@@ -188,7 +194,6 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
 ```json
 {
   "metrics":  { "border": 1, "title_h": 14, "button": 11, "pad": 4, "gap": 4, "shadow": 1 },
-  "frame":    { "style": "platinum", "title_align": "center", "buttons": "C|T|Z" },
   "fonts":    { "ui": "ui.fnt", "title": "title.fnt" },
   "sprites":  "parts.moygfx",
   "icons":    "icons.moygfx",
@@ -429,11 +434,45 @@ theme gives the part no surface.
 
 Window frames are a **built-in style chosen by name**: `classic` (D1's), `tab`
 (a Haiku-style title tab as wide as its title), `platinum`, `win9x`, `flat`.
-Parameters: title alignment, a button-order string (`C|T|MZ`: close left,
-title, minimise and maximise right), and whether the title strip spans the
-window. The styles are our code; a theme only chooses. SerenityOS and xfwm4 work
-this way (§10). On the fullscreen tiers the "window" is the app's full-screen
-strip, so the same style draws that strip.
+Parameters: title alignment and a button-order string (`C|T|MZ`: close left,
+title, minimise and maximise right). The styles are our code; a theme only
+chooses. SerenityOS and xfwm4 work this way (§10). On the fullscreen tiers the
+"window" is the app's full-screen strip, so the same style draws that strip.
+
+**As built** (`native/moy_ui/moy_ui_draw.c`'s `moy_ui_frame`, reached through
+`ui.frame` from `runtime/wm_chrome.py`; phase 3 step 3, 2026-10-12). `classic`
+is the frame the WM drew in Python, op for op. `flat` is classic without the
+strip's bottom line and the red close. `win9x` lights the ring from the top
+left, sets a title bar inside a frame of `panel`, and boxes each button as
+Win95's `bevel2` with its glyph in `chrome_ink`. `platinum` centres the title,
+pinstripes the active strip in `shade_lo` either side of it, and draws small
+raised boxes with marks of their own (none for close, a square for maximise,
+two bars for minimise). `tab` draws the strip in `panel` with a raised tab as
+wide as its buttons and title. Each style has its own title alignment and
+button order (classic, win9x and flat `T|MZC`, platinum `C|T|ZM`, tab
+`C|T|MZ`), which `title_align` and `buttons` replace. A window's strip buttons
+are laid out by the same C (`ui.frame_buttons`) the fat-finger hit-test reads,
+each group resolving taps out to the window edge on its own side. The bar's
+band (`ui.frame_band`) is the style's too: `win9x` lights its top row, the
+others draw today's band, and a theme's `bar` surface replaces it. A
+`window.title` or `window.button` surface a theme names is painted in place of
+the style's own; the title takes `window.title`'s text effect; a taskbar chip
+paints `bar.item` (focused `on`, minimised `disabled`).
+
+Ruled 2026-10-12, each the pick that builds least:
+- **One footprint for every style**: the window box's one-pixel ring, the
+  `title_h` strip and the three-pixel drop shadow right of and below the box,
+  which the WM's damage, its frozen chrome, its hit-tests and the content rect
+  are built on. A style's geometry inside it is the style's code, so `metrics`
+  keeps format 1's three; §4.2's `border`, `title_h`, `button`, `pad`, `gap` and
+  `shadow` stay unread until a phase moves that footprint.
+- **Whether the strip spans the window is the style's**, not a parameter: `tab`
+  does not, and the strip beyond its tab is `panel`, the window's own, since a
+  see-through strip would need the WM's damage to cover the desk under it.
+- **The shadow is `shade_dark`** in every style but `classic`, which keeps its
+  black.
+- **`window`'s own surface is not read**: the ring is the style's, and a
+  surface under the content would be filled and then covered every chrome draw.
 
 ### 4.6 Sprites and icons (D3)
 
@@ -775,11 +814,15 @@ count falls.
      (`tests/on_glass.py`'s `painter_matches_host`). Ruled 2026-10-12:
      `tools/p4_conformance.py` captures a cart's game canvas, which the
      painter, being chrome, never reaches.
-  3. **Frame styles.** `classic`, `tab`, `platinum`, `win9x`, `flat` in C,
-     reached from `runtime/wm_chrome.py`'s decoration path and the bar; the
-     `frame` and `metrics` keys defined. Gate: goldens byte-identical
-     (`classic` is today's frame); a Platinum and a Win95 seed render every
-     golden surface with no code of their own, pinned as goldens of their own.
+  3. **Frame styles** (landed 2026-10-12). `classic`, `tab`, `platinum`,
+     `win9x`, `flat` in C, reached from `runtime/wm_chrome.py`'s decoration
+     path and the bar; the `frame` key defined, `metrics` kept at format 1's
+     three (§4.5). Gate: goldens byte-identical (`classic` is today's frame);
+     a Platinum and a Win95 seed (`platinum`, `win95`) render every golden
+     surface with no code of their own, pinned as goldens of their own (the
+     P4 as shipped, light); the chrome-literal ratchet falls; `gate_counts`
+     budgets hold on every existing config; p4_bench on the P4 and the
+     T-Deck.
   4. **D1 lands.** D1's tokens and shapes become the default seed, the
      hand-drawn surfaces it restyles move onto the toolkit as it does, the
      `_base` geometry retires as each surface gets its 320×240 layout (2b's

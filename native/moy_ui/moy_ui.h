@@ -91,6 +91,7 @@ typedef struct {
 // a stid, 0 for none, else 1 + its record in `surf`), parts and states as
 // the theme names them (MOY_THEME_PARTS: the kinds, then the chrome's parts).
 #define MOY_UI_STIDS 64
+#define MOY_UI_FRAME_FIELDS 6
 #define MOY_UI_FX_NAMED_NONE 0xfd
 typedef struct {
     int8_t metric[MOY_THEME_METRICS];
@@ -98,6 +99,10 @@ typedef struct {
     uint8_t effect[MOY_THEME_PARTS][MOY_THEME_STATES][2];
     uint8_t stid[MOY_THEME_PARTS][MOY_THEME_STATES];
     moy_ui_surface_t surf[MOY_UI_STIDS];
+    // The window frame (moy_ui_frame): [0] the style + 1, [1] the title's
+    // alignment + 1, [2..5] the buttons' letters in order; 0 where the theme
+    // is silent, which draws the style's own (a silent style is classic).
+    uint8_t frame[MOY_UI_FRAME_FIELDS];
 } moy_ui_shape_t;
 extern const int moy_ui_shape_size;     // sizeof, for the bindings' layout check
 // The shape of a theme that names nothing: metrics 0, no effect, no surface.
@@ -268,6 +273,32 @@ int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
 int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, int *painted);
 // A theme part's id by name, or -1.
 int moy_ui_part(const char *name, size_t n);
+
+// -- window frames (docs/theming_2026-09.md §4.5) ---------------------------------------
+//
+// A window's decoration in the built-in style the installed shape chooses
+// (style.json's theme.frames), with its title alignment and button order.
+// Every style draws inside one footprint, the one the WMs' damage, hit-tests
+// and content rects are built on: the window box's one-pixel ring, the
+// `title_h` strip under its top edge, and the three-pixel drop shadow right
+// of and below the box. The `window.title` and `window.button` surfaces a
+// theme names are painted in place of the style's own; the title takes
+// `window.title`'s text effect. States are MOY_THEME_S_ACTIVE / _INACTIVE.
+enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2 };
+typedef struct {
+    moy_ui_box_t box;
+    uint8_t id;                     // MOY_UI_FB_*
+    uint8_t right;                  // 1: in the group right of the title
+} moy_ui_frame_button_t;
+// The strip's buttons as the frame draws them, left to right; the count. A
+// window without a minimise (`has_min` 0) has two.
+int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int has_min, int fs,
+                         moy_ui_frame_button_t out[3]);
+int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_span_t title,
+                 int active, int has_min, int fs);
+// The bar's band in the frame's style (`bar`'s surface where the theme names
+// one): `light` is a window's light toolbar.
+int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 

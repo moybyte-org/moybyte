@@ -818,6 +818,45 @@ static mp_obj_t ui_paint(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_paint_obj, 5, 5, ui_paint);
 
+// frame(cv, look, rect, title_h, title, active, has_min, fs): a window's frame
+static mp_obj_t ui_frame(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_frame(&s, box_of(a[2]), mp_obj_get_int(a[3]), span_of(a[4]),
+                       mp_obj_is_true(a[5]), mp_obj_is_true(a[6]), mp_obj_get_int(a[7])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_obj, 8, 8, ui_frame);
+
+// frame_buttons(rect, title_h, title, has_min, fs) -> ((id, x, y, w, h, right), ...)
+// left to right
+static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_frame_button_t b[3];
+    int n = moy_ui_frame_buttons(box_of(a[0]), mp_obj_get_int(a[1]), span_of(a[2]),
+                                 mp_obj_is_true(a[3]), mp_obj_get_int(a[4]), b);
+    mp_obj_t out[3];
+    for (int i = 0; i < n; i++) {
+        mp_obj_t t[6] = {MP_OBJ_NEW_SMALL_INT(b[i].id), MP_OBJ_NEW_SMALL_INT(b[i].box.x),
+                         MP_OBJ_NEW_SMALL_INT(b[i].box.y), MP_OBJ_NEW_SMALL_INT(b[i].box.w),
+                         MP_OBJ_NEW_SMALL_INT(b[i].box.h), MP_OBJ_NEW_SMALL_INT(b[i].right)};
+        out[i] = mp_obj_new_tuple(6, t);
+    }
+    return mp_obj_new_tuple(n, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_buttons_obj, 5, 5, ui_frame_buttons);
+
+// frame_band(cv, look, rect, light): the bar's band
+static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_frame_band(&s, box_of(a[2]), mp_obj_is_true(a[3])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 4, 4, ui_frame_band);
+
 // dialog(cv, rect, ring, fill)
 static mp_obj_t ui_dialog(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -1138,6 +1177,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mini_btn), MP_ROM_PTR(&ui_mini_btn_obj) },
     { MP_ROM_QSTR(MP_QSTR_toolbar), MP_ROM_PTR(&ui_toolbar_obj) },
     { MP_ROM_QSTR(MP_QSTR_paint), MP_ROM_PTR(&ui_paint_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&ui_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_buttons), MP_ROM_PTR(&ui_frame_buttons_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_band), MP_ROM_PTR(&ui_frame_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_panel), MP_ROM_PTR(&ui_panel_obj) },

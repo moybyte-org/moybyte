@@ -108,9 +108,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
-    import chrome_ops as _ch
+    import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
+    from runtime import ui as _ui
 
 
 
@@ -449,7 +449,7 @@ class BarLayer:
             # guardrail holds).
             bar_h = self._bar_h(where)
             zone = self._zone_rect(where)
-            _ch.replay(mp.chrome_strip_band(cv.w, bar_h, False), cv, ws)
+            _ui.frame_band(cv, ws.theme_colors, (0, 0, cv.w, bar_h))
             self._render_right_zone(cv, where, mp)
             title = (ws.cart.get("title") if ws.cart else "") or ""
             dy = 0 if self._zone_is_game(where) else ws.layout.bar_text_dy
@@ -460,7 +460,7 @@ class BarLayer:
         # (#73), whose WM title strip carries min/max/close -- then the active
         # app's LENT left zone.
         bar_h = self._bar_h(where)
-        _ch.replay(mp.chrome_strip_band(cv.w, bar_h, self.zone_band_light(where)), cv, ws)
+        _ui.frame_band(cv, ws.theme_colors, (0, 0, cv.w, bar_h), self.zone_band_light(where))
         if not self._in_window(where):
             self._render_right_zone(cv, where, mp)
         owner = self._zone_owner(where)
@@ -503,12 +503,10 @@ class BarLayer:
         # Same background the strip itself uses (the light-theme in-window band
         # is a different token), minus the bottom edge line so the repaint can
         # never eat it.
-        if self.zone_band_light(where):
-            bg = th["surface"]
-        else:
-            bg = th["bar"]
         bar_h = self._bar_h(where)
-        cv.rect(x, y, w, min(h, max(0, bar_h - 1)), bg)
+        cv.clip(x, y, w, min(h, max(0, bar_h - 1)))
+        _ui.frame_band(cv, th, (0, 0, cv.w, bar_h), self.zone_band_light(where))
+        cv.clip()
         cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
                  th["chrome_ink_dim"], 1)
 

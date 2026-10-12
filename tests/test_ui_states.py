@@ -137,6 +137,22 @@ SHIPPED_WIDGET_HASHES = (
     "machine/light 480x320@1 1837c59cdab0f52e",
     "machine/light 1024x600@2 f9f24b590dd2c874",
     "machine/light 320x240@3 3a0d204690518100",
+    "platinum/dark 320x240@1 720d378fe76856ea",
+    "platinum/dark 480x320@1 d3881c99b479b558",
+    "platinum/dark 1024x600@2 f54ffd18e95aba4b",
+    "platinum/dark 320x240@3 6c2d9c1bbb67ac68",
+    "platinum/light 320x240@1 9815814028935fcd",
+    "platinum/light 480x320@1 a944d0d72173f5f2",
+    "platinum/light 1024x600@2 0d592b3a9720856c",
+    "platinum/light 320x240@3 567f142d0c9c4a39",
+    "win95/dark 320x240@1 4eb0f5d13f4941b2",
+    "win95/dark 480x320@1 e7b815e10720c833",
+    "win95/dark 1024x600@2 b8224fe13645ea22",
+    "win95/dark 320x240@3 c18e8416568247f4",
+    "win95/light 320x240@1 3c58b62ff3c942d9",
+    "win95/light 480x320@1 6d3bfdcee35c31f8",
+    "win95/light 1024x600@2 36af2ce9997cc0b8",
+    "win95/light 320x240@3 9ccdbf133d7bdbce",
 )
 
 _SIZES = ((320, 240, 1), (480, 320, 1), (1024, 600, 2), (320, 240, 3))
@@ -860,6 +876,10 @@ WIDGET_MATRIX_HASHES = (
     "default slate/light 63aa1a7b86f1dbe7",
     "default machine/dark 65f2d1029e4a47be",
     "default machine/light 83cc6bd9a56cd0be",
+    "default platinum/dark 30d03e8a611e704d",
+    "default platinum/light e1fabd328f2f933a",
+    "default win95/dark e363c736237a7c2c",
+    "default win95/light 83495fd337e49d53",
     "outline night/dark 9ed88f5b13c83257",
     "outline night/light bb907d737c9224e9",
     "outline indigo/dark 23ad64a994c553f3",
@@ -872,6 +892,10 @@ WIDGET_MATRIX_HASHES = (
     "outline slate/light b2afd05463488cce",
     "outline machine/dark 8580e1cce536e540",
     "outline machine/light bb907d737c9224e9",
+    "outline platinum/dark c8717a4803750c9b",
+    "outline platinum/light 2a0fdc5aecd4dbd5",
+    "outline win95/dark 56b81509850bc83d",
+    "outline win95/light 5aa9a4521b7c4bdd",
 )
 
 
@@ -897,7 +921,7 @@ def test_every_kind_in_every_state_is_byte_identical():
     in each state, both skins, all twelve theme sets -- pinned before the
     toolkit crossed to C, so the crossing cannot move one pixel of it."""
     got = _matrix_hashes()
-    assert len(got) == len(WIDGET_MATRIX_HASHES) == 24
+    assert len(got) == len(WIDGET_MATRIX_HASHES) == 32
     for g, w in zip(got, WIDGET_MATRIX_HASHES):
         assert g == w, "a kind's pixels moved: %s (pinned %s)" % (g, w)
 

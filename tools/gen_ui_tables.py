@@ -358,6 +358,17 @@ def generate_theme(style, t):
          "#define MOY_THEME_FILLS %d" % len(th["fills"]),
          "#define MOY_THEME_SURFACES_CAP %d" % th["surfaces_cap"],
          "#define MOY_THEME_SURFACE_LEN %d" % th["surface_len"],
+         "// A frame: its style, its title's alignment, its buttons' letters.",
+         "#define MOY_THEME_FRAMES %d" % len(th["frames"]),
+         "#define MOY_THEME_ALIGNS %d" % len(th["title_aligns"]),
+         "#define MOY_THEME_FRAME_BUTTONS %s" % _c_str(th["frame_buttons"]),
+         "enum {",
+         *["    MOY_THEME_FRAME_%s = %d," % (_ident(f), i) for i, f in enumerate(th["frames"])],
+         "};",
+         "enum {",
+         *["    MOY_THEME_ALIGN_%s = %d," % (_ident(a), i)
+           for i, a in enumerate(th["title_aligns"])],
+         "};",
          "enum {",
          *["    MOY_THEME_M_%s = %d," % (_ident(m), i) for i, m in enumerate(metrics)],
          "};",
@@ -392,6 +403,8 @@ def generate_theme(style, t):
          "extern const uint8_t moy_theme_state_next[MOY_THEME_STATES];",
          "extern const char *const moy_theme_edge_names[MOY_THEME_EDGES];",
          "extern const char *const moy_theme_fill_names[MOY_THEME_FILLS];",
+         "extern const char *const moy_theme_frame_names[MOY_THEME_FRAMES];",
+         "extern const char *const moy_theme_align_names[MOY_THEME_ALIGNS];",
          "extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];",
          "extern const uint16_t moy_theme_lum[64];",
          "extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];",
@@ -422,7 +435,9 @@ def generate_theme(style, t):
     for decl, seq in (("moy_theme_part_names[MOY_THEME_PARTS]", parts),
                       ("moy_theme_state_names[MOY_THEME_STATES]", states),
                       ("moy_theme_edge_names[MOY_THEME_EDGES]", th["edges"]),
-                      ("moy_theme_fill_names[MOY_THEME_FILLS]", th["fills"])):
+                      ("moy_theme_fill_names[MOY_THEME_FILLS]", th["fills"]),
+                      ("moy_theme_frame_names[MOY_THEME_FRAMES]", th["frames"]),
+                      ("moy_theme_align_names[MOY_THEME_ALIGNS]", th["title_aligns"])):
         c.append("const char *const %s = {" % decl)
         c.extend("    %s," % _c_str(n) for n in seq)
         c.append("};\n")

@@ -43,7 +43,7 @@ PINNED = {
     "update_ui.py": (2, 0),
     "wallpaper.py": (4, 0),
     "web_console_ui.py": (3, 0),
-    "wm_chrome.py": (3, 0),
+    "wm_chrome.py": (2, 0),
 }
 
 

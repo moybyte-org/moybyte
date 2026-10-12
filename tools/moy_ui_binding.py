@@ -68,12 +68,17 @@ def _shape_type(metrics, parts, states, stids):
                     ("n_fx", c.c_uint8),
                     ("effect", ((c.c_uint8 * 2) * states) * parts),
                     ("stid", (c.c_uint8 * states) * parts),
-                    ("surf", _Surface * stids)]
+                    ("surf", _Surface * stids),
+                    ("frame", c.c_uint8 * 6)]
     return _Shape
 
 
 class _Span(c.Structure):
     _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
+
+
+class _FrameButton(c.Structure):
+    _fields_ = [("box", _Box), ("id", c.c_uint8), ("right", c.c_uint8)]
 
 
 class _Sink(c.Structure):
@@ -130,6 +135,9 @@ _DRAW_SIGS = (
     ("moy_ui_mini_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
     ("moy_ui_toolbar", [c.POINTER(_Sink), _Box], _I),
     ("moy_ui_paint", [c.POINTER(_Sink), _Box, _I, _I, c.POINTER(_I)], _I),
+    ("moy_ui_frame", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
+    ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
+    ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
     ("moy_ui_dialog", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_text_field", [c.POINTER(_Sink), _Box, _Span, _Span, c.c_void_p, _I], _I),
     ("moy_ui_panel", [c.POINTER(_Sink), _Box, _Span, _I, c.POINTER(_Box)], _I),
@@ -445,6 +453,23 @@ def binding():
                                 c.byref(painted)))
         return bool(painted.value)
 
+    def frame(cv, look, rect, title_h, title, active, has_min, fs):
+        s = sink(cv, look)
+        sp, keep = span_if(title)
+        _check(lib.moy_ui_frame(c.byref(s), box_of(rect), int(title_h), sp,
+                                1 if active else 0, 1 if has_min else 0, int(fs)))
+
+    def frame_buttons(rect, title_h, title, has_min, fs):
+        sp, keep = span_if(title)
+        out = (_FrameButton * 3)()
+        n = lib.moy_ui_frame_buttons(box_of(rect), int(title_h), sp, 1 if has_min else 0,
+                                     int(fs), out)
+        return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
+
+    def frame_band(cv, look, rect, light):
+        _check(lib.moy_ui_frame_band(c.byref(sink(cv, look)), box_of(rect),
+                                     1 if light else 0))
+
     def dialog(cv, rect, ring, fill):
         _check(lib.moy_ui_dialog(c.byref(sink(cv, None)), box_of(rect),
                                  col(ring, FROM_STYLE), col(fill, FROM_STYLE)))
@@ -502,7 +527,7 @@ def binding():
 
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
-              mini_btn, toolbar, paint, dialog, text_field, panel, focus_ring, inset, cut,
+              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, dialog, text_field, panel, focus_ring, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
     m.list = list_

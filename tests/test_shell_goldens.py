@@ -21,7 +21,7 @@ which is exactly the risk of transcribing hand-rolled widgets onto a toolkit.
 
 The matrix, and why it is this one
 ----------------------------------
-Eight configurations, each ONE axis away from the frozen baseline or from
+Ten configurations, each ONE axis away from the frozen baseline or from
 the windowed row, so a red golden names the axis by itself. Every configuration renders the SAME surface
 list (plus the two desk surfaces that only exist on the windowed tier), which
 keeps the matrix a clean product instead of a pile of special cases.
@@ -72,6 +72,13 @@ keeps the matrix a clean product instead of a pile of special cases.
   p4_1024x600_fs2_windowed_light  the windowed row in the light variant: the
                            one place light chrome meets the WM's decorations.
                            One axis from the windowed row (variant).
+  p4_1024x600_cs2_fs1_platinum_light, p4_1024x600_cs2_fs1_win95_light
+                           the P4 as shipped, light, under the Platinum and the
+                           Win95 seed packages: a theme's frame style, surfaces,
+                           text effects and metrics on every surface, with no
+                           code of their own (docs/theming_2026-09.md §9, phase
+                           3 step 3). One axis (theme) from the as-shipped row
+                           in the light variant.
 
 The last two were added before theming's first phase
 (`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
@@ -289,6 +296,12 @@ CONFIGS = {
     "p4_1024x600_fs2_windowed_light": dict(
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="light",
         diagonal_in=7.0),
+    "p4_1024x600_cs2_fs1_platinum_light": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="platinum"),
+    "p4_1024x600_cs2_fs1_win95_light": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="win95"),
 }
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every
@@ -300,10 +313,10 @@ _INDEPENDENCE_CONFIG = "big_800x480_fs3_dark"
 def _axes(cfg):
     """The one-line axis description quoted in a failure message."""
     w, h = cfg["sys_size"] or (320, 240)
-    return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s" % (
+    return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s theme=%s" % (
         w, h, cfg["font_scale"], cfg["variant"],
         "windowed" if cfg["windowed"] else "fullscreen",
-        cfg["diagonal_in"] or "-")
+        cfg["diagonal_in"] or "-", cfg.get("theme", "night"))
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +396,8 @@ def _build(cfg, carts_dir):
         panel_diagonal_in=cfg["diagonal_in"])
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
-    ws.look.set_theme_variant(cfg["variant"], persist=False)
+    ws.look.set_theme(cfg.get("theme", ws.look.theme_name), persist=False,
+                      variant=cfg["variant"])
     keep = [c for c in ws.carts.all if c.get("title") not in GOLDEN_EXCLUDE]
     if len(keep) != len(ws.carts.all):
         ws.carts.apply(keep)            # pin the roster -- see GOLDEN_EXCLUDE
@@ -481,18 +495,26 @@ def surface_names(config_name):
     return names
 
 
+def _ui():
+    from runtime import ui
+    return ui
+
+
 def capture(config_name, carts_dir):
     """{surface: sha256} for one configuration."""
     cfg = CONFIGS[config_name]
     ws = _build(cfg, carts_dir)
     expect_bytes = ws.sys_canvas.w * ws.sys_canvas.h * 2      # RGB565
     out = {}
-    for name, enter in _surface_plan(ws, cfg):
-        enter()
-        assert len(bytes(ws.sys_canvas._buf)) == expect_bytes, (
-            "%s/%s: system canvas is %d bytes, expected %d (w*h*2)"
-            % (config_name, name, len(bytes(ws.sys_canvas._buf)), expect_bytes))
-        out[name] = _render(ws, name, config_name)
+    try:
+        for name, enter in _surface_plan(ws, cfg):
+            enter()
+            assert len(bytes(ws.sys_canvas._buf)) == expect_bytes, (
+                "%s/%s: system canvas is %d bytes, expected %d (w*h*2)"
+                % (config_name, name, len(bytes(ws.sys_canvas._buf)), expect_bytes))
+            out[name] = _render(ws, name, config_name)
+    finally:
+        _ui().use_shape(None)          # the shape is process-wide: leave none behind
     return out
 
 

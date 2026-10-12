@@ -666,6 +666,20 @@ const char *const moy_theme_fill_names[MOY_THEME_FILLS] = {
     "gradient",
 };
 
+const char *const moy_theme_frame_names[MOY_THEME_FRAMES] = {
+    "classic",
+    "tab",
+    "platinum",
+    "win9x",
+    "flat",
+};
+
+const char *const moy_theme_align_names[MOY_THEME_ALIGNS] = {
+    "left",
+    "center",
+    "right",
+};
+
 const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {5, 2, 5, 5, 5, 255, 5, 6};
 
 const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
@@ -690,7 +704,6 @@ const uint16_t moy_theme_lum[64] = {
 };
 
 const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
-    "frame",
     "fonts",
     "sprites",
     "icons",
@@ -708,6 +721,8 @@ const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {
     "forest",
     "slate",
     "machine",
+    "platinum",
+    "win95",
 };
 
 const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
@@ -814,6 +829,75 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    }\012"
     "  }\012"
     "}\012",
+    // themes/platinum.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"platinum\",\012"
+    "  \"frame\": { \"style\": \"platinum\" },\012"
+    "  \"metrics\": { \"radius\": 2, \"press_dx\": 0, \"press_dy\": 0 },\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 51, \"edge\": 6, \"title\": 50, \"title_ink\": 7, \"accent\": 22,\012"
+    "      \"hilite\": 50, \"dim\": 54, \"desktop\": 61, \"desktop_pattern\": 13,\012"
+    "      \"shade_hi\": 50, \"shade_lo\": 54, \"shade_dark\": 0\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 48, \"edge\": 51, \"title\": 48, \"title_ink\": 0, \"title_inactive\": 48,\012"
+    "      \"accent\": 22, \"hilite\": 22, \"dim\": 49, \"desktop\": 13, \"desktop_pattern\": 23,\012"
+    "      \"surface\": 7, \"surface_alt\": 48, \"border\": 51, \"selection\": 22,\012"
+    "      \"chrome_ink_dim\": 50, \"bar\": 7, \"bar_edge\": 0,\012"
+    "      \"shade_hi\": 7, \"shade_lo\": 49, \"shade_dark\": 50\012"
+    "    }\012"
+    "  },\012"
+    "  \"text\": {\012"
+    "    \"button\": { \"disabled\": { \"effect\": \"emboss\", \"color\": \"shade_hi\" } }\012"
+    "  },\012"
+    "  \"surfaces\": {\012"
+    "    \"button\": { \"rest\": \"raised, fill surface_alt, border chrome_ink\",\012"
+    "                \"pressed\": \"sunken, fill shade_lo, border chrome_ink\" },\012"
+    "    \"chip\": { \"rest\": \"raised, fill surface_alt, border edge\",\012"
+    "              \"on\": \"sunken, fill selection, border edge\" },\012"
+    "    \"tab\": { \"rest\": \"raised, fill surface_alt, border edge\" },\012"
+    "    \"toolbar\": { \"rest\": \"raised, fill panel\" },\012"
+    "    \"panel\": { \"rest\": \"etched\" },\012"
+    "    \"bar.item\": { \"rest\": \"raised, fill panel, border edge\",\012"
+    "                  \"on\": \"sunken, fill selection, border edge\" }\012"
+    "  }\012"
+    "}\012",
+    // themes/win95.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"win95\",\012"
+    "  \"frame\": { \"style\": \"win9x\" },\012"
+    "  \"metrics\": { \"radius\": 0, \"press_dx\": 1, \"press_dy\": 1 },\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 54, \"edge\": 50, \"title\": 1, \"title_ink\": 7, \"title_inactive\": 51,\012"
+    "      \"accent\": 12, \"hilite\": 1, \"dim\": 51, \"desktop\": 58, \"desktop_pattern\": 3,\012"
+    "      \"shade_hi\": 50, \"shade_lo\": 55, \"shade_dark\": 0\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 6, \"edge\": 50, \"title\": 1, \"title_ink\": 7, \"title_inactive\": 50,\012"
+    "      \"accent\": 12, \"hilite\": 1, \"dim\": 50, \"desktop\": 58, \"desktop_pattern\": 3,\012"
+    "      \"surface\": 7, \"surface_alt\": 6, \"border\": 50, \"selection\": 1,\012"
+    "      \"selection_ink\": 7, \"chrome_ink_dim\": 50, \"ink_dim\": 50,\012"
+    "      \"shade_hi\": 7, \"shade_lo\": 50, \"shade_dark\": 0\012"
+    "    }\012"
+    "  },\012"
+    "  \"text\": {\012"
+    "    \"button\": { \"disabled\": { \"effect\": \"emboss\", \"color\": \"shade_hi\" } }\012"
+    "  },\012"
+    "  \"surfaces\": {\012"
+    "    \"button\": { \"rest\": \"bevel2, fill panel\",\012"
+    "                \"pressed\": \"sunken, border shade_dark, fill panel\" },\012"
+    "    \"chip\": { \"rest\": \"raised, fill panel\", \"on\": \"sunken, dither shade_hi/panel\" },\012"
+    "    \"tab\": { \"rest\": \"raised, fill panel\" },\012"
+    "    \"toolbar\": { \"rest\": \"raised, fill panel\" },\012"
+    "    \"panel\": { \"rest\": \"etched\" },\012"
+    "    \"bar.item\": { \"rest\": \"raised, fill panel\",\012"
+    "                  \"on\": \"sunken, dither shade_hi/panel\" }\012"
+    "  }\012"
+    "}\012",
 };
 
 const int moy_ui_n_themes = MOY_THEME_SEEDS;
@@ -822,4 +906,4 @@ const int moy_theme_n_metrics = MOY_THEME_METRICS;
 const int moy_theme_n_effects = MOY_THEME_EFFECTS;
 const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {423, 364, 360, 397, 390, 779};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {423, 364, 360, 397, 390, 779, 1388, 1300};

@@ -182,13 +182,13 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 // Theme packages, format 1 (moy_theme.c): the limits, the derivation
 // rules, the readability pairs, MOY64's luminance and the seeds.
 #define MOY_THEME_FORMAT 1
-#define MOY_THEME_SEEDS 6
+#define MOY_THEME_SEEDS 8
 #define MOY_THEME_BYTES 4096
 #define MOY_THEME_DEPTH 4
 #define MOY_THEME_RULES 69
 #define MOY_THEME_PAIRS 7
 #define MOY_THEME_CONTRAST 30
-#define MOY_THEME_RESERVED 9
+#define MOY_THEME_RESERVED 8
 #define MOY_THEME_ROLES 51  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3
@@ -201,6 +201,22 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_FILLS 4
 #define MOY_THEME_SURFACES_CAP 32
 #define MOY_THEME_SURFACE_LEN 48
+// A frame: its style, its title's alignment, its buttons' letters.
+#define MOY_THEME_FRAMES 5
+#define MOY_THEME_ALIGNS 3
+#define MOY_THEME_FRAME_BUTTONS "CMZT"
+enum {
+    MOY_THEME_FRAME_CLASSIC = 0,
+    MOY_THEME_FRAME_TAB = 1,
+    MOY_THEME_FRAME_PLATINUM = 2,
+    MOY_THEME_FRAME_WIN9X = 3,
+    MOY_THEME_FRAME_FLAT = 4,
+};
+enum {
+    MOY_THEME_ALIGN_LEFT = 0,
+    MOY_THEME_ALIGN_CENTER = 1,
+    MOY_THEME_ALIGN_RIGHT = 2,
+};
 enum {
     MOY_THEME_M_RADIUS = 0,
     MOY_THEME_M_PRESS_DX = 1,
@@ -244,6 +260,8 @@ extern const char *const moy_theme_state_names[MOY_THEME_STATES];
 extern const uint8_t moy_theme_state_next[MOY_THEME_STATES];
 extern const char *const moy_theme_edge_names[MOY_THEME_EDGES];
 extern const char *const moy_theme_fill_names[MOY_THEME_FILLS];
+extern const char *const moy_theme_frame_names[MOY_THEME_FRAMES];
+extern const char *const moy_theme_align_names[MOY_THEME_ALIGNS];
 extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];
 extern const uint16_t moy_theme_lum[64];
 extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];

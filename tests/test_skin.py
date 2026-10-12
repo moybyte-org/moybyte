@@ -971,7 +971,7 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
                 assert tuple(ui.state_colors(th, kind, state)) == \
                     tuple(before(th)), (name, variant, kind, state)
                 checked += 1
-    assert checked == 12 * len(_PRE_207_TRIPLES)
+    assert checked == 2 * len(THEME_NAMES) * len(_PRE_207_TRIPLES)
     # Every kind this catalog registered is transcribed above -- a kind added
     # without its "what it replaced" row is a colour nobody checked.
     assert {k for k, _s in _PRE_207_TRIPLES} == set(_SHELL_KINDS)

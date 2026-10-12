@@ -355,6 +355,78 @@ static int name_field(rd_t *r, const char *const *names, int count) {
     return i < 0 ? -2 : i;
 }
 
+// `buttons`: each letter of MOY_THEME_FRAME_BUTTONS once, a '|' between them
+// allowed, into out[0..3]. 1, or 0 for any other text.
+static int button_order(const char *s, int n, uint8_t out[4]) {
+    const char *set = MOY_THEME_FRAME_BUTTONS;
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        if (s[i] == '|') {
+            continue;
+        }
+        const char *at = strchr(set, s[i]);
+        if (s[i] == 0 || at == NULL || k == 4 || memchr(out, s[i], (size_t)k) != NULL) {
+            return 0;
+        }
+        out[k++] = (uint8_t)s[i];
+    }
+    return k == 4;
+}
+
+// `frame`: {"style", "title_align", "buttons"} into out->frame (moy_ui.h's
+// layout). 0, or -1: malformed.
+static int frame_key(rd_t *r, moy_theme_pkg_t *out) {
+    if (eat(r, '}')) {
+        return 0;
+    }
+    r->depth++;
+    for (;;) {
+        char key[16];
+        int over;
+        if (str(r, key, sizeof(key), &over) < 0 || !eat(r, ':')) {
+            return -1;
+        }
+        int is_style = !over && strcmp(key, "style") == 0;
+        int is_align = !over && strcmp(key, "title_align") == 0;
+        if (is_style || is_align) {
+            int i = is_style ? name_field(r, moy_theme_frame_names, MOY_THEME_FRAMES)
+                             : name_field(r, moy_theme_align_names, MOY_THEME_ALIGNS);
+            if (i == -1) {
+                return -1;
+            }
+            if (i < 0) {
+                out->notes |= MOY_THEME_N_DROPPED;
+            } else {
+                out->frame[is_style ? 0 : 1] = (uint8_t)(i + 1);
+            }
+        } else if (!over && strcmp(key, "buttons") == 0) {
+            char buf[16];
+            int32_t iv;
+            int len = peek(r) == '"' ? str(r, buf, sizeof(buf), &over) : -2;
+            if (len == -1 || (len == -2 && value(r, &iv) < 0)) {
+                return -1;
+            }
+            uint8_t order[4];
+            if (len >= 0 && !over && button_order(buf, len, order)) {
+                memcpy(&out->frame[2], order, 4);
+            } else {
+                out->notes |= MOY_THEME_N_DROPPED;
+            }
+        } else {
+            int32_t iv;
+            if (value(r, &iv) < 0) {
+                return -1;
+            }
+            out->notes |= MOY_THEME_N_UNKNOWN;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        r->depth--;
+        return eat(r, '}') ? 0 : -1;
+    }
+}
+
 // One state's effect: {"effect": NAME, "color": ROLE}. 0, or -1: malformed.
 static int effect(rd_t *r, moy_theme_pkg_t *out, int kind, int state) {
     int eff = -1, role = -1, bad = 0;
@@ -717,9 +789,12 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
                 kind = keyed(&r, out, moy_theme_part_names, MOY_THEME_PARTS, each_part, 0);
             } else if (strcmp(key, "surfaces") == 0 && eat(&r, '{')) {
                 kind = keyed(&r, out, moy_theme_part_names, MOY_THEME_PARTS, each_surface, 0);
+            } else if (strcmp(key, "frame") == 0 && eat(&r, '{')) {
+                kind = frame_key(&r, out);
             } else {
                 if (strcmp(key, "colors") == 0 || strcmp(key, "metrics") == 0
-                    || strcmp(key, "text") == 0 || strcmp(key, "surfaces") == 0) {
+                    || strcmp(key, "text") == 0 || strcmp(key, "surfaces") == 0
+                    || strcmp(key, "frame") == 0) {
                     out->notes |= MOY_THEME_N_DROPPED;
                 } else if (!reserved(key)) {
                     out->notes |= MOY_THEME_N_UNKNOWN;
@@ -902,6 +977,14 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
 
 static void apply_shape(const moy_theme_pkg_t *pkg, void *ctx) {
     moy_ui_shape_t *sh = ctx;
+    for (int i = 0; i < 2; i++) {
+        if (sh->frame[i] == 0) {
+            sh->frame[i] = pkg->frame[i];
+        }
+    }
+    if (sh->frame[2] == 0) {
+        memcpy(&sh->frame[2], &pkg->frame[2], 4);
+    }
     for (int i = 0; i < MOY_THEME_METRICS; i++) {
         if (sh->metric[i] == MOY_THEME_NO_METRIC) {
             sh->metric[i] = pkg->metric[i];

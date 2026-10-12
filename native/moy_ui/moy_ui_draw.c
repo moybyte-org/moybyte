@@ -905,6 +905,297 @@ int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, in
     return MOY_UI_OK;
 }
 
+// -- window frames ------------------------------------------------------------------------
+//
+// Classic is the frame the WM drew in Python, op for op: the shadow, the ring,
+// the strip, its bottom line, the title, the buttons' glyphs. The other styles
+// draw in the same footprint (moy_ui.h).
+
+#define FRAME_BLACK 0               // MOY64 black: classic's shadow
+#define FRAME_RED 8                 // MOY64 red: classic's close glyph
+
+// Each style's own title alignment and button order (style.json's
+// theme.frame_buttons letters: C close, M minimise, Z maximise, T the title).
+static const uint8_t k_frame_align[MOY_THEME_FRAMES] = {
+    MOY_THEME_ALIGN_LEFT, MOY_THEME_ALIGN_LEFT, MOY_THEME_ALIGN_CENTER, MOY_THEME_ALIGN_LEFT,
+    MOY_THEME_ALIGN_LEFT,
+};
+static const char *const k_frame_order[MOY_THEME_FRAMES] = {"TMZC", "CTMZ", "CTZM", "TMZC",
+                                                            "TMZC"};
+
+typedef struct {
+    int style, align, fs, th;
+    int n;
+    moy_ui_frame_button_t b[3];
+    int maxc, cells;                // the title's room and what of it is drawn, in cells
+    int tx, ty;
+    int16_t tab_w;                  // tab: the tab's width from the ring
+} frame_lay_t;
+
+static int cells_of(moy_ui_span_t t) {
+    int n = 0;
+    for (uint16_t i = 0; i < t.n; i++) {
+        n += (t.p[i] & 0xc0) != 0x80;
+    }
+    return n;
+}
+
+static int fb_id(uint8_t letter) {
+    return letter == 'C' ? MOY_UI_FB_CLOSE : letter == 'Z' ? MOY_UI_FB_MAX : MOY_UI_FB_MIN;
+}
+
+// A button box's size and the gap between two, per style.
+static void frame_box(int style, int fs, int th, int *bw, int *bh, int *gap) {
+    if (style == MOY_THEME_FRAME_PLATINUM) {
+        *bw = *bh = 11 * fs;
+        *gap = 4 * fs;
+    } else if (style == MOY_THEME_FRAME_WIN9X) {
+        *bw = 16 * fs;
+        *bh = 14 * fs;
+        *gap = 2 * fs;
+    } else {
+        *bw = *bh = 16 * fs;
+        *gap = 2 * fs;
+    }
+    (void)th;
+}
+
+static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_ui_span_t title,
+                         int has_min, int fs, frame_lay_t *L) {
+    int style = sh != NULL && sh->frame[0] ? sh->frame[0] - 1 : MOY_THEME_FRAME_CLASSIC;
+    L->style = style;
+    L->align = sh != NULL && sh->frame[1] ? sh->frame[1] - 1 : k_frame_align[style];
+    L->fs = fs;
+    L->th = th;
+    const char *order = sh != NULL && sh->frame[2] ? (const char *)&sh->frame[2]
+                                                   : k_frame_order[style];
+    int bw, bh, gap;
+    frame_box(style, fs, th, &bw, &bh, &gap);
+    int margin = style == MOY_THEME_FRAME_PLATINUM ? 1 + 6 * fs
+                 : style == MOY_THEME_FRAME_WIN9X  ? 4
+                                                   : 2;
+    int by = style == MOY_THEME_FRAME_WIN9X ? w.y + 2 + moy_ui_fdiv(th - 2 - bh, 2)
+                                            : w.y + 1 + moy_ui_fdiv(th - bh, 2);
+    // the letters each side of the title
+    uint8_t left[3], right[3];
+    int nl = 0, nr = 0, side = 0;
+    for (int i = 0; i < 4; i++) {
+        uint8_t c = (uint8_t)order[i];
+        if (c == 'T') {
+            side = 1;
+        } else if (c != 'M' || has_min) {
+            if (side) {
+                right[nr++] = c;
+            } else {
+                left[nl++] = c;
+            }
+        }
+    }
+    int lw = nl ? nl * bw + (nl - 1) * gap : 0;
+    int rw = nr ? nr * bw + (nr - 1) * gap : 0;
+    int cell = 8 * fs;
+    int x0 = (nl ? w.x + margin + lw : w.x) + 4 * fs;
+    int cells = cells_of(title);
+    int rx;                          // the right group's left edge
+    if (style == MOY_THEME_FRAME_TAB) {
+        int room = w.x + w.w - margin - (nr ? rw + 4 * fs : 0) - x0;
+        L->maxc = room > 0 ? moy_ui_fdiv(room, cell) : 0;
+        L->cells = cells < L->maxc ? cells : L->maxc;
+        rx = x0 + L->cells * cell + 4 * fs;
+        int end = nr ? rx + rw + margin : rx;
+        L->tab_w = (int16_t)(end - (w.x + 1));
+        L->tx = x0;
+    } else {
+        rx = w.x + w.w - margin - rw;
+        int limit = nr ? rx : w.x + w.w;
+        L->maxc = limit - x0 > 0 ? moy_ui_fdiv(limit - x0, cell) : 0;
+        L->cells = cells < L->maxc ? cells : L->maxc;
+        int tw = L->cells * cell;
+        int tx = x0;
+        if (L->align == MOY_THEME_ALIGN_CENTER) {
+            tx = w.x + moy_ui_fdiv(w.w - tw, 2);
+        } else if (L->align == MOY_THEME_ALIGN_RIGHT) {
+            tx = limit - 4 * fs - tw;
+        }
+        tx = tx > limit - tw ? limit - tw : tx;
+        L->tx = tx < x0 ? x0 : tx;
+        L->tab_w = 0;
+    }
+    L->ty = w.y + 1 + moy_ui_fdiv(th - cell, 2);
+    L->n = 0;
+    int x = w.x + margin;
+    for (int i = 0; i < nl; i++, x += bw + gap) {
+        L->b[L->n++] = (moy_ui_frame_button_t){
+            {(int16_t)x, (int16_t)by, (int16_t)bw, (int16_t)bh}, (uint8_t)fb_id(left[i]), 0};
+    }
+    x = rx;
+    for (int i = 0; i < nr; i++, x += bw + gap) {
+        L->b[L->n++] = (moy_ui_frame_button_t){
+            {(int16_t)x, (int16_t)by, (int16_t)bw, (int16_t)bh}, (uint8_t)fb_id(right[i]), 1};
+    }
+}
+
+int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int has_min, int fs,
+                         moy_ui_frame_button_t out[3]) {
+    frame_lay_t L;
+    frame_layout(moy_ui_shape(), win, title_h, title, has_min, fs, &L);
+    for (int i = 0; i < L.n; i++) {
+        out[i] = L.b[i];
+    }
+    return L.n;
+}
+
+static const char *const k_fb_glyph[3] = {"close", "app", "minus"};
+
+static int fb_glyph(int id) {
+    return moy_ui_glyph_id(k_fb_glyph[id], strlen(k_fb_glyph[id]));
+}
+
+// A style's own surface for a part, painted unless the theme names one.
+static void own_surface(draw_t *d, moy_ui_box_t b, int part, int state,
+                        const moy_ui_surface_t *own) {
+    if (!surface(d, b, part, state, -1, -1)) {
+        d->row->st[MOY_ST_N_FILL] += moy_ui_paint_surface(&d->t, d->row->pal, d->look, b, own,
+                                                          -1, -1, 0);
+    }
+}
+
+static moy_ui_surface_t surf_of(int edge, int fill, int a, int b, int border) {
+    moy_ui_surface_t sf = {(uint8_t)edge, (uint8_t)fill, (uint8_t)(border >= 0),
+                           (int8_t)MOY_UI_TERM_TOKEN(a), (int8_t)MOY_UI_TERM_TOKEN(b),
+                           (int8_t)(border >= 0 ? MOY_UI_TERM_TOKEN(border) : 0)};
+    return sf;
+}
+
+int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t title, int active,
+                 int has_min, int fs) {
+    draw_t d;
+    open_draw(s, &d);
+    frame_lay_t L;
+    frame_layout(d.sh, w, th, title, has_min, fs, &L);
+    int st = active ? MOY_THEME_S_ACTIVE : MOY_THEME_S_INACTIVE;
+    int look = d.look;
+    int edge = moy_ui_token(look, active ? MOY_UI_T_CHROME_INK : MOY_UI_T_DIM);
+    int t_bg = active ? MOY_UI_T_TITLE_ACTIVE : MOY_UI_T_TITLE_INACTIVE;
+    int bg = moy_ui_token(look, t_bg);
+    int fg = moy_ui_token(look, active ? MOY_UI_T_TITLE_INK : MOY_UI_T_CHROME_INK_DIM);
+    int dark = L.style == MOY_THEME_FRAME_CLASSIC ? FRAME_BLACK
+                                                  : moy_ui_token(look, MOY_UI_T_SHADE_DARK);
+    moy_ui_box_t strip = {(int16_t)(w.x + 1), (int16_t)(w.y + 1), (int16_t)(w.w - 2), (int16_t)th};
+    fill(&d, w.x + 3, w.y + w.h, w.w, 3, dark);
+    fill(&d, w.x + w.w, w.y + 3, 3, w.h, dark);
+    if (L.style == MOY_THEME_FRAME_WIN9X) {
+        int hi = moy_ui_token(look, MOY_UI_T_SHADE_HI);
+        int panel = moy_ui_token(look, MOY_UI_T_PANEL);
+        fill(&d, w.x, w.y, w.w - 1, 1, hi);
+        fill(&d, w.x, w.y, 1, w.h - 1, hi);
+        fill(&d, w.x, w.y + w.h - 1, w.w, 1, dark);
+        fill(&d, w.x + w.w - 1, w.y, 1, w.h, dark);
+        fill(&d, strip.x, strip.y, strip.w, strip.h, panel);
+        moy_ui_box_t bar = {(int16_t)(w.x + 2), (int16_t)(w.y + 2), (int16_t)(w.w - 4),
+                            (int16_t)(th - 2)};
+        if (!surface(&d, bar, MOY_THEME_P_WINDOW_TITLE, st, bg, -1)) {
+            fill(&d, bar.x, bar.y, bar.w, bar.h, bg);
+        }
+    } else {
+        rectb(&d, w.x, w.y, w.w, w.h, edge);
+        if (L.style == MOY_THEME_FRAME_TAB) {
+            fill(&d, strip.x, strip.y, strip.w, strip.h, moy_ui_token(look, MOY_UI_T_PANEL));
+            moy_ui_box_t tab = {strip.x, strip.y, L.tab_w, strip.h};
+            moy_ui_surface_t own = surf_of(MOY_UI_EDGE_RAISED, MOY_UI_FILL_SOLID, t_bg, t_bg, -1);
+            own_surface(&d, tab, MOY_THEME_P_WINDOW_TITLE, st, &own);
+        } else if (!surface(&d, strip, MOY_THEME_P_WINDOW_TITLE, st, bg, edge)) {
+            fill(&d, strip.x, strip.y, strip.w, strip.h, bg);
+        }
+        if (L.style == MOY_THEME_FRAME_PLATINUM && active) {
+            // the pinstripes either side of the title, cleared round it and the boxes
+            moy_ui_box_t pin = {(int16_t)(w.x + 1 + 2 * fs), (int16_t)(w.y + 1 + 3 * fs),
+                                (int16_t)(w.w - 2 - 4 * fs), (int16_t)(th - 6 * fs)};
+            moy_ui_surface_t ps =
+                surf_of(MOY_UI_EDGE_FLAT, MOY_UI_FILL_PINSTRIPE, MOY_UI_T_SHADE_LO, t_bg, -1);
+            d.row->st[MOY_ST_N_FILL] +=
+                moy_ui_paint_surface(&d.t, d.row->pal, look, pin, &ps, -1, -1, 0);
+            if (L.cells > 0) {
+                fill(&d, L.tx - 4 * fs, pin.y, L.cells * 8 * fs + 8 * fs, pin.h, bg);
+            }
+            for (int i = 0; i < L.n; i++) {
+                moy_ui_box_t b = L.b[i].box;
+                fill(&d, b.x - 2 * fs, pin.y, b.w + 4 * fs, pin.h, bg);
+            }
+        }
+        if (L.style != MOY_THEME_FRAME_FLAT) {
+            fill(&d, strip.x, w.y + th, strip.w, 1, edge);
+        }
+    }
+    if (L.maxc > 0) {
+        use_part(&d, MOY_THEME_P_WINDOW_TITLE, st, fs);
+        int n = (int)moy_text_fit(title.p, title.n, (size_t)L.cells);
+        text(&d, title.p, (size_t)n, L.tx, L.ty, fg);
+        d.fx = 0;
+    }
+    for (int i = 0; i < L.n; i++) {
+        moy_ui_box_t b = L.b[i].box;
+        int id = L.b[i].id;
+        int ink = fg;
+        if (L.style == MOY_THEME_FRAME_WIN9X) {
+            moy_ui_surface_t own =
+                surf_of(MOY_UI_EDGE_BEVEL2, MOY_UI_FILL_SOLID, MOY_UI_T_PANEL, MOY_UI_T_PANEL, -1);
+            own_surface(&d, b, MOY_THEME_P_WINDOW_BUTTON, st, &own);
+            ink = moy_ui_token(look, MOY_UI_T_CHROME_INK);
+        } else if (L.style == MOY_THEME_FRAME_PLATINUM) {
+            moy_ui_surface_t own =
+                surf_of(active ? MOY_UI_EDGE_RAISED : MOY_UI_EDGE_FLAT, MOY_UI_FILL_SOLID, t_bg,
+                        t_bg, active ? MOY_UI_T_CHROME_INK : MOY_UI_T_DIM);
+            own_surface(&d, b, MOY_THEME_P_WINDOW_BUTTON, st, &own);
+            int m = 3 * fs;
+            if (id == MOY_UI_FB_MAX) {
+                rectb(&d, b.x + m, b.y + m, b.w - 2 * m - fs, b.h - 2 * m - fs, edge);
+            } else if (id == MOY_UI_FB_MIN) {
+                fill(&d, b.x + m, b.y + m + fs, b.w - 2 * m, fs, edge);
+                fill(&d, b.x + m, b.y + b.h - m - 2 * fs, b.w - 2 * m, fs, edge);
+            }
+            continue;
+        } else {
+            surface(&d, b, MOY_THEME_P_WINDOW_BUTTON, st, bg, edge);
+            if (id == MOY_UI_FB_CLOSE && L.style != MOY_THEME_FRAME_FLAT) {
+                ink = FRAME_RED;
+            }
+        }
+        glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
+    }
+    return MOY_UI_OK;
+}
+
+// A one-pixel row, left out where the clip leaves it out: a clock cell's
+// repaint is the band under a clip that stops above its bottom line.
+static void line_row(draw_t *d, int x, int y, int w, int ci) {
+    int row = y - d->t.cam_y;
+    if (row >= d->t.cy0 && row < d->t.cy1) {
+        fill(d, x, y, w, 1, ci);
+    }
+}
+
+int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light) {
+    draw_t d;
+    open_draw(s, &d);
+    int look = d.look;
+    int bg = moy_ui_token(look, light ? MOY_UI_T_SURFACE : MOY_UI_T_BAR);
+    int line = moy_ui_token(look, light ? MOY_UI_T_BORDER : MOY_UI_T_BAR_EDGE);
+    if (surface(&d, b, MOY_THEME_P_BAR, MOY_UI_REST, bg, line)) {
+        return MOY_UI_OK;
+    }
+    const moy_ui_shape_t *sh = d.sh;
+    int style = sh != NULL && sh->frame[0] ? sh->frame[0] - 1 : MOY_THEME_FRAME_CLASSIC;
+    fill(&d, b.x, b.y, b.w, b.h, bg);
+    if (style == MOY_THEME_FRAME_WIN9X) {
+        line_row(&d, b.x, b.y, b.w, moy_ui_token(look, MOY_UI_T_SHADE_HI));
+        line_row(&d, b.x, b.y + b.h - 1, b.w, moy_ui_token(look, MOY_UI_T_SHADE_DARK));
+    } else {
+        line_row(&d, b.x, b.y + b.h - 1, b.w, line);
+    }
+    return MOY_UI_OK;
+}
+
 // -- rect algebra (pure: every rect is x, y, w, h) -------------------------------------
 
 void moy_ui_inset32(const int32_t r[4], int32_t dx, int32_t dy, int32_t out[4]) {
