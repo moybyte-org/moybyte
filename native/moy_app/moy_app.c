@@ -84,10 +84,12 @@ static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
     "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim",
     "border", "selection", "selection_ink", "focus", "play", "author", "danger",
     "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink",
-    "chrome_ink_dim", "title_active", "title_inactive",
+    "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo",
+    "shade_dark", "ink_accent", "ink_note", "band_light",
 };
 #define TOKEN_SURFACE_LIGHT 20
 #define TOKEN_BAR_LIGHT 23
+#define TOKEN_BAND_LIGHT 33
 
 static const char *const KIND_NAMES[MOY_APP_KINDS] = {
     "docs", "drawings", "sprites", "music",
@@ -525,7 +527,8 @@ const char *moy_app_token_name(int role) {
 }
 
 int moy_app_token_flag(int role) {
-    return role == TOKEN_SURFACE_LIGHT || role == TOKEN_BAR_LIGHT;
+    return role == TOKEN_SURFACE_LIGHT || role == TOKEN_BAR_LIGHT
+           || role == TOKEN_BAND_LIGHT;
 }
 
 int moy_app_token_of(const char *name, size_t n) {

@@ -130,6 +130,11 @@ def generate(style, d=DIR):
     h.append("#define MOY_UI_GLYPHS %d" % len(style["glyphs"]))
     h.append("#define MOY_UI_GLYPH_SIZE %d" % style["glyph_size"])
     h.append("")
+    h.append("// The tokens, in the row's order.")
+    h.append("enum {")
+    for i, tok in enumerate(t.tokens):
+        h.append("    MOY_UI_T_%s = %d," % (_ident(tok), i))
+    h.append("};\n")
     h.append("// The states, strongest first (widget_state's precedence).")
     h.append("enum {")
     for i, st in enumerate(t.states):
@@ -315,6 +320,22 @@ def generate_theme(style, t):
         missing = [k for k in roles if k not in derived and k not in root[v]]
         if missing:
             raise SystemExit("the default theme's %s leaves %s unset" % (v, missing))
+    parts = t.kinds + list(th["parts"])
+    states = t.states + list(th["states"])
+    if len(set(parts)) != len(parts) or len(set(states)) != len(states):
+        raise SystemExit("theme.parts / theme.states: a name twice")
+    nxt = []
+    for st in states:
+        if st == "rest":
+            nxt.append(255)
+            continue
+        seen, cur = set(), st
+        while cur != "rest":
+            if cur in seen or th["chain"].get(cur) not in states:
+                raise SystemExit("theme.chain: %s does not end at rest" % st)
+            seen.add(cur)
+            cur = th["chain"][cur]
+        nxt.append(states.index(th["chain"][st]))
     h = ["// Theme packages, format 1 (moy_theme.c): the limits, the derivation",
          "// rules, the readability pairs, MOY64's luminance and the seeds.",
          "#define MOY_THEME_FORMAT %d" % th["format"],
@@ -329,6 +350,30 @@ def generate_theme(style, t):
          "#define MOY_THEME_METRICS %d" % len(metrics),
          "#define MOY_THEME_EFFECTS %d" % len(th["effects"]),
          "#define MOY_THEME_EFFECTS_CAP %d" % th["effects_cap"],
+         "// What `text` and `surfaces` are keyed by: the kinds, then the chrome's",
+         "// parts; the style's states, then a window's.",
+         "#define MOY_THEME_PARTS %d" % len(parts),
+         "#define MOY_THEME_STATES %d" % len(states),
+         "#define MOY_THEME_EDGES %d" % len(th["edges"]),
+         "#define MOY_THEME_FILLS %d" % len(th["fills"]),
+         "#define MOY_THEME_SURFACES_CAP %d" % th["surfaces_cap"],
+         "#define MOY_THEME_SURFACE_LEN %d" % th["surface_len"],
+         "enum {",
+         *["    MOY_THEME_M_%s = %d," % (_ident(m), i) for i, m in enumerate(metrics)],
+         "};",
+         "enum {",
+         *["    MOY_THEME_FX_%s = %d," % (_ident(e), i) for i, e in enumerate(th["effects"])],
+         "};",
+         "// The chrome's parts, after the kinds.",
+         "enum {",
+         *["    MOY_THEME_P_%s = %d," % (_ident(p), len(t.kinds) + i)
+           for i, p in enumerate(th["parts"])],
+         "};",
+         "// The states past the style's.",
+         "enum {",
+         *["    MOY_THEME_S_%s = %d," % (_ident(st), len(t.states) + i)
+           for i, st in enumerate(th["states"])],
+         "};",
          "// A missing role's rule: `role` gets `v`, a palette index or flag, or",
          "// (is_role) the role `v`'s value.",
          "typedef struct { uint8_t role, is_role, v; } moy_theme_rule_t;",
@@ -341,6 +386,12 @@ def generate_theme(style, t):
          "// each metric's [min, max]",
          "extern const int8_t moy_theme_metric_range[MOY_THEME_METRICS][2];",
          "extern const char *const moy_theme_effect_names[MOY_THEME_EFFECTS];",
+         "extern const char *const moy_theme_part_names[MOY_THEME_PARTS];",
+         "extern const char *const moy_theme_state_names[MOY_THEME_STATES];",
+         "// The state a state falls back to when a part does not name it; rest: 255.",
+         "extern const uint8_t moy_theme_state_next[MOY_THEME_STATES];",
+         "extern const char *const moy_theme_edge_names[MOY_THEME_EDGES];",
+         "extern const char *const moy_theme_fill_names[MOY_THEME_FILLS];",
          "extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];",
          "extern const uint16_t moy_theme_lum[64];",
          "extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];",
@@ -348,7 +399,7 @@ def generate_theme(style, t):
          "extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];",
          "extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];",
          "extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,",
-         "    moy_theme_n_effects;"]
+         "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states;"]
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
     for r, k, v in rules:
         c.append("    {%d, %d, %d},  // %s" % (r, k, v, roles[r]))
@@ -368,6 +419,15 @@ def generate_theme(style, t):
     c.append("const char *const moy_theme_effect_names[MOY_THEME_EFFECTS] = {")
     c.extend("    %s," % _c_str(e) for e in th["effects"])
     c.append("};\n")
+    for decl, seq in (("moy_theme_part_names[MOY_THEME_PARTS]", parts),
+                      ("moy_theme_state_names[MOY_THEME_STATES]", states),
+                      ("moy_theme_edge_names[MOY_THEME_EDGES]", th["edges"]),
+                      ("moy_theme_fill_names[MOY_THEME_FILLS]", th["fills"])):
+        c.append("const char *const %s = {" % decl)
+        c.extend("    %s," % _c_str(n) for n in seq)
+        c.append("};\n")
+    c.append("const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {%s};\n"
+             % ", ".join(map(str, nxt)))
     c.append("const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {")
     for a, b in th["pairs"]:
         c.append("    {%d, %d},  // %s / %s" % (roles.index(a), roles.index(b), a, b))
@@ -394,6 +454,8 @@ def generate_theme(style, t):
     c.append("const int moy_theme_n_roles = MOY_THEME_ROLES;")
     c.append("const int moy_theme_n_metrics = MOY_THEME_METRICS;")
     c.append("const int moy_theme_n_effects = MOY_THEME_EFFECTS;")
+    c.append("const int moy_theme_n_parts = MOY_THEME_PARTS;")
+    c.append("const int moy_theme_n_states = MOY_THEME_STATES;")
     c.append("const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {%s};\n"
              % ", ".join(str(len(s)) for _n, s in seeds))
     return h, c

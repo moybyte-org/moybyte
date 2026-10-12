@@ -50,8 +50,10 @@ _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
            "author", "danger", "surface_light", "bar", "bar_edge", "bar_light",
-           "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive")
-_FLAGS = ("surface_light", "bar_light")
+           "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive",
+           "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note",
+           "band_light")
+_FLAGS = ("surface_light", "bar_light", "band_light")
 NAME_MAX = 31
 DOC_MAX = 255
 _KINDS = ("docs", "drawings", "sprites", "music")

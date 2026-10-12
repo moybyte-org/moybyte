@@ -28,6 +28,8 @@
 
 enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4 };
 
+typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
+
 #define MOY_UI_ABSENT INT32_MIN     // a token the theme does not hold
 #define MOY_UI_LOOKS 5
 #define MOY_UI_LOOK_RUN 4           // the compiled run's look
@@ -55,6 +57,69 @@ int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
 // The active skin's metric slots for `kind` (its count in *n, 0: none).
 const int16_t *moy_ui_metrics(int kind, int *n);
 
+// A token of `look`'s row: its palette index, or -1 where the theme is silent.
+int moy_ui_token(int look, int token);
+
+// -- the theme's shape: surfaces, metrics, text effects ----------------------------
+//
+// A SURFACE (docs/theming_2026-09.md §4.4) is one line of text in a theme,
+// compiled once by the loader (moy_theme.c) into a record: an edge, a fill and
+// its two colours, an optional border and an optional shadow. A colour is a
+// TERM: a palette index (0-63), a token of the look's row
+// (MOY_UI_TERM_TOKEN), or MOY_UI_TERM_STYLE, the part's own field (a fill) or
+// edge (a border) as the style resolves it.
+enum {
+    MOY_UI_EDGE_FLAT = 0, MOY_UI_EDGE_RAISED = 1, MOY_UI_EDGE_SUNKEN = 2,
+    MOY_UI_EDGE_ETCHED = 3, MOY_UI_EDGE_BEVEL2 = 4,
+};
+// MOY_UI_FILL_STYLE: no fill clause, the part's own field.
+enum {
+    MOY_UI_FILL_STYLE = 0, MOY_UI_FILL_SOLID = 1, MOY_UI_FILL_DITHER = 2,
+    MOY_UI_FILL_PINSTRIPE = 3, MOY_UI_FILL_GRADIENT = 4,
+};
+enum { MOY_UI_SURF_BORDER = 1, MOY_UI_SURF_SHADOW = 2 };
+#define MOY_UI_TERM_STYLE INT8_MIN
+#define MOY_UI_TERM_TOKEN(t) ((int8_t)(-1 - (t)))
+typedef struct {
+    uint8_t edge, fill, flags;
+    int8_t a, b, line;              // the fill's colours (b: a pattern's second); the border's
+} moy_ui_surface_t;
+
+// A theme's shape, resolved once (moy_theme_shape): its metrics, each part's
+// text effect and surface per state ({effect, role} with {0, 0xff} for none,
+// {0, MOY_UI_FX_NAMED_NONE} for a `none` the theme names, which a chain stops at;
+// a stid, 0 for none, else 1 + its record in `surf`), parts and states as
+// the theme names them (MOY_THEME_PARTS: the kinds, then the chrome's parts).
+#define MOY_UI_STIDS 64
+#define MOY_UI_FX_NAMED_NONE 0xfd
+typedef struct {
+    int8_t metric[MOY_THEME_METRICS];
+    uint8_t n_surf, n_fx;
+    uint8_t effect[MOY_THEME_PARTS][MOY_THEME_STATES][2];
+    uint8_t stid[MOY_THEME_PARTS][MOY_THEME_STATES];
+    moy_ui_surface_t surf[MOY_UI_STIDS];
+} moy_ui_shape_t;
+extern const int moy_ui_shape_size;     // sizeof, for the bindings' layout check
+// The shape of a theme that names nothing: metrics 0, no effect, no surface.
+void moy_ui_shape_clear(moy_ui_shape_t *sh);
+// Install the shape every primitive draws with (NULL: the empty one); like the
+// skin, one for the process. Each state a part leaves unnamed takes what its
+// chain (style.json's theme.chain) reaches, here, once.
+int moy_ui_shape_use(const moy_ui_shape_t *sh);
+const moy_ui_shape_t *moy_ui_shape(void);
+// The record and the effect `part` paints in `state` under an installed
+// shape: NULL / 0 where it names none.
+const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state);
+int moy_ui_shape_effect(const moy_ui_shape_t *sh, int part, int state, int *role);
+
+// The painter (moy_ui_paint.c): surface `sf` into box `b` of a target, its
+// terms resolved through `look` (`field` and `edge` stand for
+// MOY_UI_TERM_STYLE; -1 paints nothing), its outline cut by the corner mask
+// of `radius` (0-3). Never draws outside the box. Answers the fills it made.
+int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[64], int look,
+                         moy_ui_box_t b, const moy_ui_surface_t *sf, int field, int edge,
+                         int radius);
+
 // -- glyphs (moy_ui_glyph.c) ----------------------------------------------------
 
 // A glyph's id by name, or -1 (draws nothing: the caller's label stays).
@@ -73,7 +138,6 @@ int moy_ui_glyph_draw(const moy_text_target_t *t, int g, int x, int y, int w, in
 // or -1; a colour override is an index, -1 for "paint nothing", or
 // MOY_UI_FROM_STYLE; a geometry knob left to the style is MOY_UI_DEFAULT.
 
-typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 typedef struct { const uint8_t *p; uint16_t n; } moy_ui_span_t;
 
 // A sink: where a primitive draws, always through a canvas row (`dst`). ROW:
@@ -198,6 +262,12 @@ moy_ui_box_t moy_ui_inset(moy_ui_box_t r, int dx, int dy);
 int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
                  moy_ui_box_t *content);
 int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
+// Paint `part`'s surface in `state` (theme part and state ids) into the box,
+// as a primitive paints its frame. *painted: 0 when the part names none
+// there (nothing drawn).
+int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, int *painted);
+// A theme part's id by name, or -1.
+int moy_ui_part(const char *name, size_t n);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 

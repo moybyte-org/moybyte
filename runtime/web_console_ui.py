@@ -220,9 +220,9 @@ class WebConsoleUI:
         line would clip exactly where the digits are -- and the digits are the
         half nobody can guess.
 
-        The pin's ink comes off the theme's own presentation class rather than a
-        constant: `accent` is signal yellow, which on a dark panel is the loudest
-        thing on the screen and on a LIGHT one is yellow on cream."""
+        The pin's ink is the theme's `ink_accent`, not a constant: `accent` is
+        signal yellow, which on a dark panel is the loudest thing on the screen
+        and on a LIGHT one is yellow on cream, so a light surface's is its ink."""
         x, y, _w, _h = rect
         host = url.replace("http://", "")
         pin = ""
@@ -231,4 +231,4 @@ class WebConsoleUI:
         cv.print(host.rstrip("/") or "?", x, y, th["ink"], 1)
         if pin:
             cv.print("PIN " + pin, x, y + 10 * fs,
-                     th["ink"] if _ui.is_light(th) else th["accent"], 1)
+                     th["ink_accent"], 1)

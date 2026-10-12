@@ -568,8 +568,7 @@ class MusicEditorUI:
             cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, base_dim
                      if not cur else sel_ink, 1)
             note = _mu_note_name(pitch)
-            note_c = sel_ink if cur else (
-                NAMES["brown"] if self.ws.look.light_chrome() else NAMES["peach"])
+            note_c = sel_ink if cur else self.ws.theme_colors["ink_note"]
             cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
                      base_dim, 1)
             cv.print(_MU_WAVE_LABELS[wave & 7], x + 64 * fs, y + 4 * fs, tc, 1)

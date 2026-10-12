@@ -42,6 +42,12 @@ const char *const moy_ui_token_names[MOY_UI_TOKENS] = {
     "chrome_ink_dim",
     "title_active",
     "title_inactive",
+    "shade_hi",
+    "shade_lo",
+    "shade_dark",
+    "ink_accent",
+    "ink_note",
+    "band_light",
 };
 
 const char *const moy_ui_role_names[MOY_UI_ROLES] = {
@@ -73,6 +79,12 @@ const char *const moy_ui_role_names[MOY_UI_ROLES] = {
     "chrome_ink_dim",
     "title_active",
     "title_inactive",
+    "shade_hi",
+    "shade_lo",
+    "shade_dark",
+    "ink_accent",
+    "ink_note",
+    "band_light",
     "hover",
     "hover_cue",
     "pressed",
@@ -142,17 +154,17 @@ const char *const moy_ui_button_kinds[4][2] = {
 const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {0, {0, 0, 0}},
     {2, {-1, 60, 0}},
-    {2, {-33, 6, 0}},
-    {2, {-34, 1, 0}},
-    {3, {-31, -6, 13}},
-    {2, {-32, 7, 0}},
+    {2, {-39, 6, 0}},
+    {2, {-40, 1, 0}},
+    {3, {-37, -6, 13}},
+    {2, {-38, 7, 0}},
     {2, {-5, 10, 0}},
     {2, {-20, 8, 0}},
     {1, {7, 0, 0}},
     {2, {-7, 1, 0}},
     {2, {-3, 13, 0}},
     {2, {-4, 0, 0}},
-    {3, {-30, -5, 10}},
+    {3, {-36, -5, 10}},
     {1, {0, 0, 0}},
     {2, {-2, 13, 0}},
     {2, {-18, 11, 0}},
@@ -450,12 +462,12 @@ const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE] = {
 };
 
 const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
-    {28, 0, 6},  // code_text
-    {29, 0, 12},  // code_keyword
-    {30, 0, 11},  // code_string
-    {31, 0, 9},  // code_number
-    {32, 0, 5},  // code_comment
-    {33, 0, 14},  // code_builtin
+    {34, 0, 6},  // code_text
+    {35, 0, 12},  // code_keyword
+    {36, 0, 11},  // code_string
+    {37, 0, 9},  // code_number
+    {38, 0, 5},  // code_comment
+    {39, 0, 14},  // code_builtin
     {9, 0, 7},  // surface
     {10, 0, 52},  // surface_alt
     {11, 0, 0},  // ink
@@ -469,14 +481,18 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {19, 0, 8},  // danger
     {20, 0, 1},  // surface_light
     {23, 0, 1},  // bar_light
+    {33, 0, 1},  // band_light
+    {28, 0, 7},  // shade_hi
+    {31, 1, 11},  // ink_accent
+    {32, 0, 4},  // ink_note
     {21, 1, 0},  // bar
     {22, 1, 6},  // bar_edge
-    {28, 0, 0},  // code_text
-    {29, 0, 59},  // code_keyword
-    {30, 0, 3},  // code_string
-    {31, 0, 4},  // code_number
-    {32, 0, 53},  // code_comment
-    {33, 0, 2},  // code_builtin
+    {34, 0, 0},  // code_text
+    {35, 0, 59},  // code_keyword
+    {36, 0, 3},  // code_string
+    {37, 0, 4},  // code_number
+    {38, 0, 53},  // code_comment
+    {39, 0, 2},  // code_builtin
     {7, 1, 0},  // desktop
     {8, 1, 6},  // desktop_pattern
     {9, 1, 0},  // surface
@@ -498,22 +514,28 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {19, 0, 8},  // danger
     {20, 0, 0},  // surface_light
     {23, 0, 0},  // bar_light
-    {34, 0, 10},  // block_events
-    {35, 0, 9},  // block_control
-    {36, 0, 12},  // block_actors
-    {37, 0, 2},  // block_looks
-    {38, 0, 3},  // block_draw
-    {39, 0, 13},  // block_input
-    {40, 0, 8},  // block_variables
-    {41, 0, 15},  // block_lists
-    {42, 0, 11},  // block_operators
-    {43, 0, 14},  // block_sound
-    {44, 0, 4},  // block_myblocks
+    {33, 0, 0},  // band_light
+    {28, 1, 5},  // shade_hi
+    {29, 1, 6},  // shade_lo
+    {30, 0, 0},  // shade_dark
+    {31, 1, 4},  // ink_accent
+    {32, 0, 15},  // ink_note
+    {40, 0, 10},  // block_events
+    {41, 0, 9},  // block_control
+    {42, 0, 12},  // block_actors
+    {43, 0, 2},  // block_looks
+    {44, 0, 3},  // block_draw
+    {45, 0, 13},  // block_input
+    {46, 0, 8},  // block_variables
+    {47, 0, 15},  // block_lists
+    {48, 0, 11},  // block_operators
+    {49, 0, 14},  // block_sound
+    {50, 0, 4},  // block_myblocks
 };
 
-const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 21}, {27, 32}};
+const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 25}, {31, 38}};
 
-const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
     "panel",
@@ -544,6 +566,12 @@ const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
     "chrome_ink_dim",
     "title_active",
     "title_inactive",
+    "shade_hi",
+    "shade_lo",
+    "shade_dark",
+    "ink_accent",
+    "ink_note",
+    "band_light",
     "code_text",
     "code_keyword",
     "code_string",
@@ -577,6 +605,69 @@ const char *const moy_theme_effect_names[MOY_THEME_EFFECTS] = {
     "emboss",
 };
 
+const char *const moy_theme_part_names[MOY_THEME_PARTS] = {
+    "row",
+    "cell",
+    "cell_band",
+    "chip",
+    "toggle",
+    "row_menu",
+    "row_list",
+    "row_chrome",
+    "row_cta",
+    "button",
+    "button_play",
+    "button_author",
+    "button_danger",
+    "tab",
+    "status",
+    "panel",
+    "panel_title",
+    "toolbar",
+    "scrollbar",
+    "focus",
+    "text_field",
+    "game_btn",
+    "game_icon_btn",
+    "mini_btn",
+    "dialog",
+    "window",
+    "window.title",
+    "window.button",
+    "bar",
+    "bar.item",
+    "desk",
+    "desk.icon",
+};
+
+const char *const moy_theme_state_names[MOY_THEME_STATES] = {
+    "disabled",
+    "pressed",
+    "hot",
+    "on",
+    "hover",
+    "rest",
+    "active",
+    "inactive",
+};
+
+const char *const moy_theme_edge_names[MOY_THEME_EDGES] = {
+    "flat",
+    "raised",
+    "sunken",
+    "etched",
+    "bevel2",
+};
+
+const char *const moy_theme_fill_names[MOY_THEME_FILLS] = {
+    "fill",
+    "dither",
+    "pinstripe",
+    "gradient",
+};
+
+const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {5, 2, 5, 5, 5, 255, 5, 6};
+
 const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
     {2, 3},  // title / title_ink
     {26, 3},  // title_active / title_ink
@@ -599,7 +690,6 @@ const uint16_t moy_theme_lum[64] = {
 };
 
 const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
-    "surfaces",
     "frame",
     "fonts",
     "sprites",
@@ -712,7 +802,8 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"hilite\": 60, \"dim\": 60, \"desktop\": 1, \"desktop_pattern\": 60,\012"
     "      \"surface\": 7, \"surface_alt\": 52, \"ink\": 0, \"ink_dim\": 53,\012"
     "      \"border\": 1, \"selection\": 13, \"focus\": 10, \"play\": 11, \"author\": 9,\012"
-    "      \"danger\": 8, \"surface_light\": true,\012"
+    "      \"danger\": 8, \"surface_light\": true, \"band_light\": true,\012"
+    "      \"ink_accent\": 0, \"ink_note\": 4,\012"
     "      \"code_text\": 0, \"code_keyword\": 59, \"code_string\": 3,\012"
     "      \"code_number\": 4, \"code_comment\": 53, \"code_builtin\": 2\012"
     "    },\012"
@@ -729,4 +820,6 @@ const int moy_ui_n_themes = MOY_THEME_SEEDS;
 const int moy_theme_n_roles = MOY_THEME_ROLES;
 const int moy_theme_n_metrics = MOY_THEME_METRICS;
 const int moy_theme_n_effects = MOY_THEME_EFFECTS;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {423, 364, 360, 397, 390, 721};
+const int moy_theme_n_parts = MOY_THEME_PARTS;
+const int moy_theme_n_states = MOY_THEME_STATES;
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {423, 364, 360, 397, 390, 779};

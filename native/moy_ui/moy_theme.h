@@ -7,8 +7,10 @@
 // Format 1 defines `format`, `name`, `inherits`, `colors.dark` /
 // `colors.light` (role -> MOY64 index, or a flag role -> true/false; a role
 // is a token of the live row or a content role), `metrics` (theme-wide
-// numbers, each clamped to its range) and `text` (part -> state -> a text
-// effect and the role it paints with). The keys style.json's theme section
+// numbers, each clamped to its range), `text` (part -> state -> a text
+// effect and the role it paints with) and `surfaces` (part -> state -> one
+// line of the surface grammar, compiled here into a record the painter
+// draws). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
 // and noted. A reader refuses a newer `format`; a key a later phase defines
 // is additive and needs no bump.
@@ -16,9 +18,9 @@
 // Resolution walks `inherits` from the theme to the default seed (a theme
 // that names no parent inherits the default), each role taken from the
 // nearest package that sets it, then fills what is still unset from the
-// derivation rules, so every role of the row is set; metrics and text
-// effects resolve the same way, nearest package first, the default seed
-// setting every metric. The chain is capped at
+// derivation rules, so every role of the row is set; metrics, text
+// effects and surfaces resolve the same way, nearest package first, the
+// default seed setting every metric. The chain is capped at
 // MOY_THEME_DEPTH and a cycle is refused. Readability is a report, never a
 // refusal: each (background, ink) pair under MOY_THEME_CONTRAST sets its bit.
 //
@@ -32,6 +34,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moy_ui.h"
 #include "moy_ui_tables.h"
 
 // What a parse or an install answers: OK, or why the theme was refused.
@@ -65,8 +68,11 @@ typedef struct {
     char inherits[MOY_THEME_NAME_MAX + 1];  // "" : the default
     int8_t role[2][MOY_THEME_ROLES];        // [variant][role], MOY_THEME_UNSET where silent
     int8_t metric[MOY_THEME_METRICS];       // MOY_THEME_NO_METRIC where silent
-    uint8_t effect[MOY_THEME_EFFECTS_CAP][4];   // kind, state, effect, role
+    uint8_t effect[MOY_THEME_EFFECTS_CAP][4];   // part, state, effect, role
     uint8_t n_effects;
+    uint8_t surface[MOY_THEME_SURFACES_CAP][2]; // part, state
+    moy_ui_surface_t surface_rec[MOY_THEME_SURFACES_CAP];
+    uint8_t n_surfaces;
     uint8_t notes;
 } moy_theme_pkg_t;
 
@@ -92,10 +98,14 @@ const char *moy_theme_installed(void);
 int moy_theme_resolve(const char *name, size_t n, int variant,
                       int32_t row[MOY_THEME_ROLES], uint32_t *unreadable);
 
-// Theme `name`'s metrics (every one set) and its text effects:
-// effects[kind][state] = {effect, role}, {0, MOY_THEME_NO_ROLE} where none.
-// The return is as resolve's.
-int moy_theme_shape(const char *name, size_t n, int8_t metrics[MOY_THEME_METRICS],
-                    uint8_t effects[MOY_UI_KINDS][MOY_UI_STATES][2]);
+// Theme `name`'s shape: its metrics (every one set), its text effects and its
+// surfaces, each from the nearest package that sets it (moy_ui.h's
+// moy_ui_shape_t). The return is as resolve's.
+int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out);
+
+// Compile one surface's text (docs/theming_2026-09.md §4.4) into *out.
+// MOY_THEME_OK, or -1 for text the grammar does not take; *notes gets
+// MOY_THEME_N_CLAMPED for an index clamped to 0..63.
+int moy_theme_surface(const char *s, size_t n, moy_ui_surface_t *out, uint8_t *notes);
 
 #endif // MOY_THEME_H

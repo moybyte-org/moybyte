@@ -135,7 +135,7 @@ It holds a `theme.json` and optional **data** assets: images, fonts, sprite and
 icon sheets. It never holds a cart or a script.
 
 **Format 1, as the loader reads it** (`native/moy_ui/moy_theme.h`; frozen
-2026-10-11 by phase 1):
+2026-10-11 by phase 1, `surfaces` defined 2026-10-12 by phase 3):
 
 ```json
 {
@@ -149,6 +149,10 @@ icon sheets. It never holds a cart or a script.
   "metrics": { "radius": 2, "press_dx": 1, "press_dy": 1 },
   "text": {
     "button": { "disabled": { "effect": "emboss", "color": "ink" } }
+  },
+  "surfaces": {
+    "button": { "rest": "bevel2, fill surface", "pressed": "sunken, fill shade_lo" },
+    "window.title": { "active": "pinstripe shade_lo/shade_hi, border" }
   }
 }
 ```
@@ -169,7 +173,9 @@ icon sheets. It never holds a cart or a script.
 - **`text`**: part → state → `{"effect": "none" | "shadow" | "emboss",
   "color": ROLE}` (§4.3); at most 32 per package. An effect other than `none`
   names its role, or it is dropped.
-- **Reserved:** `surfaces`, `frame`, `fonts`, `sprites`, `icons`,
+- **`surfaces`**: part → state → one line of the surface grammar (§4.4); at
+  most 32 per package. Text the grammar does not take is dropped.
+- **Reserved:** `frame`, `fonts`, `sprites`, `icons`,
   `images`, `wallpapers`, `layout`, `sounds`, `editor` (style.json's
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
@@ -182,12 +188,6 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
 ```json
 {
   "metrics":  { "border": 1, "title_h": 14, "button": 11, "pad": 4, "gap": 4, "shadow": 1 },
-  "surfaces": {
-    "window.title": { "active": "pinstripe shade_lo/shade_hi, border" },
-    "button":       { "rest": "raised, fill surface, border",
-                      "pressed": "sunken, fill shade_lo, border" },
-    "desk":         { "rest": "dither desk/23" }
-  },
   "frame":    { "style": "platinum", "title_align": "center", "buttons": "C|T|Z" },
   "fonts":    { "ui": "ui.fnt", "title": "title.fnt" },
   "sprites":  "parts.moygfx",
@@ -212,8 +212,8 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
   is where code colour schemes go when they come
   (`docs/studio_2026-09.md` §12), since syntax colours are content (§4.3).
 
-The sketched key names and the surface grammar are illustrative until the
-phase that reads them freezes them; the SHAPE is the decision.
+The sketched key names are illustrative until the phase that reads them
+freezes them; the SHAPE is the decision.
 
 ## 4. The vocabulary — the public contract
 
@@ -225,10 +225,11 @@ node tree that point releases then changed (§10).
 
 **The roles are the token row's** (`native/moy_ui/style.json`'s `tokens`:
 `panel`, `edge`, `title`, `title_ink`, `accent`, `hilite`, `dim` and the §4.3
-semantic roles of `docs/visual_identity_v1.md`, 28 in all, two of them the
-flags `surface_light` and `bar_light`). They are the names `theme()`,
-`ctx.theme.colors()` and a compiled app's `theme` imports already answer, so
-format 1 adds nothing an app cart has to learn. Every value is a **MOY64
+semantic roles of `docs/visual_identity_v1.md`, then the roles phase 3 added
+below, three of them the flags `surface_light`, `bar_light` and
+`band_light`). They are the names `theme()`, `ctx.theme.colors()` and a
+compiled app's `theme` imports answer; a role a phase adds is appended to the
+row, so a compiled app's role ids do not move. Every value is a **MOY64
 index**; per-theme RGB palettes are declined (§11).
 
 A role a package leaves unset is **derived by a rule** (style.json's
@@ -251,12 +252,23 @@ table has a light surface (`machine`) sets the light syntax set itself.
 `runtime/code_layer.py` and `runtime/block_editor_ui.py` read them through
 the look (`runtime/appearance.py`'s `content_colors`).
 
-**Additive roles come with the phase that draws them**, under §3's rule: the
-bevel shades (`shade_hi`, `shade_lo`, `shade_dark`) with phase 3's painter,
-and an `_ink` for a fill role that lacks one when a surface first paints text
-on it. Each joins the token row (and native/moy_app's vocabulary, which
+**Additive roles come with the phase that draws them**, under §3's rule, each
+joining the token row (and native/moy_app's vocabulary, which
 `tests/test_ui_style_data.py` holds to it) with a derivation rule, so every
-existing theme keeps its pixels.
+existing theme keeps its pixels. Phase 3's painter added six (2026-10-12):
+
+| role | what it is | derived from |
+|---|---|---|
+| `shade_hi`, `shade_lo`, `shade_dark` | the bevel shades a surface's edges draw in (§4.4) | `hilite` (white in the light variant), `dim`, black |
+| `ink_accent` | emphasis text on the surface: the web console's pin | `accent`; `ink` in the light variant |
+| `ink_note` | a note's name in the Music tab's step list | peach; brown in the light variant |
+| `band_light` (a flag) | an in-window bar band is light, and its zone owners ink it dark | false; true in the light variant |
+
+They are the three `light_chrome()` branches outside a `_base` branch turned
+into tokens (`runtime/web_console_ui.py`, `runtime/music_editor_ui.py`,
+`runtime/bar_layer.py`). `machine`, the seed whose dark table has a light
+surface, sets the three itself, as it sets its syntax colours. An `_ink` for a
+fill role that lacks one comes when a surface first paints text on it.
 
 The six shipped families are seed packages in format 1 (§2). There is no
 reader for the old settings beyond that: under the no-migrations rule a stored
@@ -272,26 +284,34 @@ Logical pixels, multiplied by the chrome scale each tier already computes (the
 rounded box costs four masked corner spans and no per-pixel test), and the
 pressed-label offset `press_dx`, `press_dy` (D8: the label of a part in its
 `pressed` state shifts by that much, as Windows 95's buttons do). Format 1
-defines `radius`, `press_dx` and `press_dy`, all 0 in the default seed; the
-painter draws the corners and the primitives the offset in phase 3. Never absolute screen positions: a theme that
+defines `radius`, `press_dx` and `press_dy`, all 0 in the default seed.
+Ruled 2026-10-12 with phase 3's painter, each the pick that builds least:
+`radius` rounds the surfaces a theme paints (a part with no surface keeps
+today's square frame), and is in pixels, unscaled, as the toolkit's rings are,
+since a mask exists for each radius; the pressed offset is multiplied by the
+primitive's font scale and moves the label and a toolkit glyph, not an icon
+or glyph the caller draws itself. Never absolute screen positions: a theme that
 places things by pixel works at one resolution only, which split Rockbox's
 catalogue by screen size (§10). Moybyte runs from 320×240 to 1280×800.
 
 ### 4.3 Parts × states
 
-**The part list is derived from the toolkit's tables, not invented.** It is the
-kinds in `native/moy_ui/style.json`'s `kinds` and `metrics` (`button`,
-`button_play`/`_author`/`_danger`, `chip`, `toggle`, `tab`, `row` and its
-`row_menu`/`row_list`/`row_chrome`/`row_cta`, `cell`, `cell_band`, `panel`,
-`panel_title`, `toolbar`, `scrollbar`, `status`, `focus`, `dialog`,
-`text_field`, `game_btn`, `mini_btn`, …), plus the chrome the WMs and the bar
-draw (`window`, `window.title`, `window.button.*`, `bar`, `bar.item`, `desk`,
-`desk.icon`), the home's parts once the shell-layout doc names them, and the
-Studio's pane parts (a pane tab with a close, the panel list, a splitter, a
-drop zone, the completion popup: `docs/studio_2026-09.md` §8), which join the
-style file as kinds before the list is frozen. The list is frozen by phase 3,
-the first phase whose package key (`surfaces`) names parts; a test then
-asserts the spec lists every kind the toolkit resolves.
+**The part list is derived from the toolkit's tables, not invented**, and was
+frozen on 2026-10-12 with the first package key that names parts
+(`surfaces`). It is the kinds of `native/moy_ui/style.json`'s `kinds` and
+`metrics`, in the tables' order: `row`, `cell`, `cell_band`, `chip`,
+`toggle`, `row_menu`, `row_list`, `row_chrome`, `row_cta`, `button`,
+`button_play`, `button_author`, `button_danger`, `tab`, `status`, `panel`,
+`panel_title`, `toolbar`, `scrollbar`, `focus`, `text_field`, `game_btn`,
+`game_icon_btn`, `mini_btn`, `dialog`; then the chrome the WMs and the bar
+draw, style.json's `theme.parts`: `window`, `window.title`, `window.button`,
+`bar`, `bar.item`, `desk`, `desk.icon`. A window's buttons are one part
+(ruled 2026-10-12, the pick that builds least: the frame style tells them
+apart, §4.5). `tests/test_theme_loader.py` holds this paragraph to the
+tables. A part added later is additive (§3): the home's parts once the
+shell-layout doc names them, and the Studio's pane parts (a pane tab with a
+close, the panel list, a splitter, a drop zone, the completion popup:
+`docs/studio_2026-09.md` §8), which join the style file as kinds.
 
 **The quirks stay code** (ruled 2026-10-11, phase 1; style.json's `quirks`):
 `game_btn` and `text_field` draw on the game canvas, which a theme does not
@@ -299,8 +319,10 @@ reach (§6), and `mini_btn`'s and `chip`'s unscaled label pads are revisited
 by phase 4, when layout reads line metrics instead of the 8px cell.
 
 States are the ladder native/moy_ui resolves (`rest`, `hover`, `on`, `hot`,
-`pressed`, `disabled`), plus `active`/`inactive` for windows. A missing state
-follows a documented chain (`pressed → hot → rest`, `inactive → active`). In
+`pressed`, `disabled`), plus `active`/`inactive` for windows (style.json's
+`theme.states`). A state a part does not name follows style.json's
+`theme.chain` at draw: `pressed → hot → rest`, `inactive → active → rest`,
+every other state to `rest`. In
 the file, parts and states are **nested objects**, never a flattened
 `part:state` string; at runtime they are the C look's per-kind, per-state
 table (§5).
@@ -318,8 +340,11 @@ role and down and right in the label's own colour: the etched disabled text of
 Windows 9x and Platinum). The package key is `text`, part → state →
 `{"effect", "color"}`, and the default is `none` everywhere, which is today's
 drawing. Format 1 defines the key and the loader resolves it
-(`moy_theme_shape`); the primitives draw it in phase 3, beside the painter,
-or in phase 4 if it needs the font's metrics.
+(`moy_theme_shape`); the primitives draw it (phase 3), for the labels of the
+parts that paint surfaces (§4.4). Ruled 2026-10-12: an emboss is three
+draws, the effect's copy up and left, the label's colour down and right, then
+the label; an effect draws only in a role of the token row, since a content
+role is not in the row a look resolves against.
 
 ### 4.4 Surfaces: a one-line grammar, compiled once
 
@@ -329,6 +354,49 @@ A part's look is a short text: an **edge** (`flat`, `raised`, `sunken`,
 `border` and `shadow`. This is how Openbox themes describe every bevel and
 gradient in text, and how Windows drew all of Win95 from one `DrawEdge` routine
 fed by a few shade colours (§10).
+
+**The grammar** (frozen 2026-10-12 by phase 3; `native/moy_ui/moy_theme.c`'s
+`moy_theme_surface`):
+
+```text
+surface := clause { "," clause }
+clause  := EDGE | "fill" C | ("dither" | "pinstripe" | "gradient") C "/" C
+         | "border" [C] | "shadow"
+EDGE    := flat | raised | sunken | etched | bevel2
+C       := a token of the live row, not a flag | a palette index 0-63
+```
+
+Words are lower case and split by spaces, `A/B` is one word, each clause comes
+at most once, and a surface is at most `theme.surface_len` bytes. What a
+surface leaves out is the part's own: no edge is `flat`, no fill is the
+part's field, a bare `border` is the part's edge colour. An index over 63 is
+clamped and noted; any other text the grammar does not take drops that
+surface and is noted (§7). The package key is `surfaces`, part → state →
+text, at most `theme.surfaces_cap` per package, resolved nearest package
+first like the text effects (§5).
+
+**How the painter draws one** (`native/moy_ui/moy_ui_paint.c`; ruled
+2026-10-12, each the pick that builds least). Everything stays inside the
+part's box. `shadow` takes the box's last column and row in `shade_dark`, and
+the rest is the body. The fill goes under the corner mask of the theme's
+`radius` (§4.2); then one-pixel outlines from the outside in: the `border`,
+then the edge's levels, each with its top and left in one colour and its
+bottom and right in another (square, the top-right and bottom-left corners
+are the bottom-right colour's, as `DrawEdge`'s are; rounded, the two upper
+arcs are the top-left colour's). `raised` is `shade_hi` over `shade_lo`,
+`sunken` the reverse, `etched` sunken then raised, and `bevel2` an outer level
+of the fill colour over `shade_dark` and an inner raised one, which is Win95's
+button. `dither` is a checkerboard, `pinstripe` alternate rows, `gradient`
+runs from A at the top to B at the bottom in bands of a 4×4 ordered dither,
+one band per level. A pattern is anchored to the buffer as `fillp`'s is and
+opaque. The parts that paint a surface in place of their field and edge are
+the ones whose primitive draws a field: `row`, `cell` (its caption band and
+label stay its own), `button` and its kinds, `chip`, `tab`, `toolbar`,
+`panel` (in place of its outward border too) and `panel_title`; the
+caller-coloured and game-canvas ones (the quirks above, `dialog`, `focus`,
+`scrollbar`, `status`) do not. A chrome part (`window`, …) is painted through
+the `ui` face, `ui.paint`, which paints nothing and answers False where the
+theme gives the part no surface.
 
 - **The text never reaches a draw.** The loader compiles every surface once
   into a small integer record (a style id, `stid`; not
@@ -477,7 +545,7 @@ missing sprite draws the surface; a missing surface draws the default for that
 part; a missing state follows §4.3's chain.
 
 **All of it resolves at flatten, never at draw.** `moy_theme_resolve` turns a
-(theme, variant) into the 28-value token row once; the look resolves the style
+(theme, variant) into the token row once; the look resolves the style
 against that row lazily, per kind, into three palette indices per state, and
 again only when the skin's or the row's generation moves
 (`native/moy_ui/moy_ui.c`). A widget pays an array read. `theme_colors` caches
@@ -538,7 +606,8 @@ Kids will trade themes, so a theme is untrusted input:
   dropped and an unknown key or role is ignored, each noted to the caller.
   A metric is clamped to its range, a text effect with an unknown part,
   state or effect name, or without its role, is ignored or dropped and noted,
-  and a package holds at most 32 effects. No scripts, no
+  and a package holds at most 32 effects; a surface the grammar does not take
+  (§4.4) is dropped and noted, and a package holds at most 32 surfaces. No scripts, no
   carts inside, no plug-ins (§10: GTK 2 engines, Haiku decorators, and a KDE
   store theme that deleted a user's files). `tests/test_theme_loader.py`
   fuzzes the reader and holds the boards' module to the host's answers.
@@ -546,7 +615,8 @@ Kids will trade themes, so a theme is untrusted input:
   must clear `theme.contrast` (a WCAG ratio of 3.0, the floor for large text
   and UI parts) on the MOY64 table; a failing pair sets its bit in the report
   and never refuses the theme. For a dither or pinstripe fill the ink is
-  checked against **both** colours (phase 3). The editor offers the nearest
+  checked against **both** colours (phase 3, step 4: ruled 2026-10-12, since
+  the check needs each part's ink, which the style resolves in the look). The editor offers the nearest
   passing index (phase 6). Every seed passes in both variants.
 - **Persist only after it has rendered once.** A theme that fails to draw is never
   saved, so it cannot return after a reboot, as a malformed SerenityOS theme did
@@ -693,14 +763,18 @@ count falls.
      libmoy (moy-spec), re-vendored; conformance scenes for it. Gate: a pattern
      fill within a set margin of a solid fill of the same area, on the P4 and
      the T-Deck; goldens byte-identical (nothing draws it yet).
-  2. **The painter and `surfaces`.** The surface grammar frozen and compiled by
+  2. **The painter and `surfaces`** (landed 2026-10-12). The surface grammar frozen and compiled by
      the loader into `stid` records (§4.4); the painter as a sink op; the
      shade roles and the roles the three `light_chrome()` branches need join
      the row with derivation rules; the part list frozen and tested against
      the style file; the corner masks for `radius` 1-3, the pressed-label
-     offset and the text effects drawn by the primitives (D8). Gate: goldens byte-identical (no seed sets `surfaces`);
-     painter µs per call on the P4 and the T-Deck; `tools/p4_conformance.py`
-     painter scenes on both.
+     offset and the text effects drawn by the primitives (D8). Gate: goldens
+     byte-identical (no seed sets `surfaces`); painter µs per call on the P4
+     and the T-Deck; the painter scenes of `tests/test_ui_painter.py` painted
+     on every console board and read back equal to the host's
+     (`tests/on_glass.py`'s `painter_matches_host`). Ruled 2026-10-12:
+     `tools/p4_conformance.py` captures a cart's game canvas, which the
+     painter, being chrome, never reaches.
   3. **Frame styles.** `classic`, `tab`, `platinum`, `win9x`, `flat` in C,
      reached from `runtime/wm_chrome.py`'s decoration path and the bar; the
      `frame` and `metrics` keys defined. Gate: goldens byte-identical
@@ -711,7 +785,8 @@ count falls.
      `_base` geometry retires as each surface gets its 320×240 layout (2b's
      reverted half: the Editor's bar against the Studio's T-Deck mockup, the
      Sprites tab's grid and tool rows), and `outline` becomes a seed package
-     (the skin axis folds into the theme). The Code tab's `code_comment` on
+     (the skin axis folds into the theme). The readability check learns the
+     dither and pinstripe fills (§7). The Code tab's `code_comment` on
      its 320×240 background is fixed here (2b left grey on blue; owner,
      2026-10-12).
      Gate: **one re-baseline, named and rendered** against the mockups in

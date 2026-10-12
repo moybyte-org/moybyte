@@ -21,6 +21,7 @@ typedef struct {
 
 typedef struct {
     look_t look[MOY_UI_LOOKS];
+    moy_ui_shape_t shape;
     uint32_t gen;
     uint32_t calls;                 // primitive entries: one per widget drawn
     uint8_t skin;
@@ -40,6 +41,7 @@ static ui_t *ui(void) {
                 u->look[i].tok[t] = MOY_UI_ABSENT;
             }
         }
+        moy_ui_shape_clear(&u->shape);
         u->gen = 1;
         s_ui = u;
     }
@@ -201,4 +203,88 @@ const int16_t *moy_ui_metrics(int kind, int *n) {
     }
     *n = moy_ui_metric_n[kind];
     return moy_ui_metric_vals[moy_ui_skin()][kind];
+}
+
+int moy_ui_token(int look, int token) {
+    ui_t *u = ui();
+    if (u == NULL || look < 0 || look >= MOY_UI_LOOKS || token < 0 || token >= MOY_UI_TOKENS) {
+        return -1;
+    }
+    int32_t v = u->look[look].tok[token];
+    return v == MOY_UI_ABSENT ? -1 : (int)(v & 63);
+}
+
+int moy_ui_part(const char *name, size_t n) {
+    return find(moy_theme_part_names, MOY_THEME_PARTS, name, n);
+}
+
+// -- the theme's shape ------------------------------------------------------------
+
+const int moy_ui_shape_size = (int)sizeof(moy_ui_shape_t);  // the bindings' layout check
+
+void moy_ui_shape_clear(moy_ui_shape_t *sh) {
+    memset(sh, 0, sizeof(*sh));
+    for (int p = 0; p < MOY_THEME_PARTS; p++) {
+        for (int st = 0; st < MOY_THEME_STATES; st++) {
+            sh->effect[p][st][1] = 0xff;
+        }
+    }
+}
+
+// Fill each state a part leaves unnamed from its chain, so a draw reads one
+// entry (docs/theming_2026-09.md §5: resolved at install, never at draw).
+static void fill_chains(moy_ui_shape_t *sh) {
+    for (int p = 0; p < MOY_THEME_PARTS; p++) {
+        for (int st = 0; st < MOY_THEME_STATES; st++) {
+            int at = st;
+            while (sh->stid[p][st] == 0 && moy_theme_state_next[at] != 0xff) {
+                at = moy_theme_state_next[at];
+                sh->stid[p][st] = sh->stid[p][at];
+            }
+            at = st;
+            while (sh->effect[p][st][0] == 0 && sh->effect[p][st][1] != MOY_UI_FX_NAMED_NONE
+                   && moy_theme_state_next[at] != 0xff) {
+                at = moy_theme_state_next[at];
+                sh->effect[p][st][0] = sh->effect[p][at][0];
+                sh->effect[p][st][1] = sh->effect[p][at][1];
+            }
+        }
+    }
+}
+
+int moy_ui_shape_use(const moy_ui_shape_t *sh) {
+    ui_t *u = ui();
+    if (u == NULL) {
+        return MOY_UI_NOMEM;
+    }
+    if (sh == NULL) {
+        moy_ui_shape_clear(&u->shape);
+    } else {
+        memcpy(&u->shape, sh, sizeof(*sh));
+        fill_chains(&u->shape);
+    }
+    return MOY_UI_OK;
+}
+
+const moy_ui_shape_t *moy_ui_shape(void) {
+    ui_t *u = ui();
+    return u != NULL ? &u->shape : NULL;
+}
+
+const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state) {
+    if (sh == NULL || sh->n_surf == 0 || part < 0 || part >= MOY_THEME_PARTS || state < 0
+        || state >= MOY_THEME_STATES) {
+        return NULL;
+    }
+    uint8_t id = sh->stid[part][state];
+    return id != 0 && id <= sh->n_surf ? &sh->surf[id - 1] : NULL;
+}
+
+int moy_ui_shape_effect(const moy_ui_shape_t *sh, int part, int state, int *role) {
+    if (sh == NULL || sh->n_fx == 0 || part < 0 || part >= MOY_THEME_PARTS || state < 0
+        || state >= MOY_THEME_STATES) {
+        return 0;
+    }
+    *role = sh->effect[part][state][1];
+    return sh->effect[part][state][0];
 }

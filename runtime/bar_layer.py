@@ -289,12 +289,13 @@ class BarLayer:
 
     def zone_band_light(self, where):
         """True when `where`'s bar band is LIGHT -- an in-window band under a
-        light-surface theme, or ANY band when the theme's OS bar itself is
-        light (`bar_light`, the light variants) -- zone owners pick their band
+        theme whose window bands are light (`band_light`), or ANY band when the
+        theme's OS bar itself is light (`bar_light`) -- zone owners pick their band
         ink with this so lent-zone text stays readable on either band."""
-        if self.ws.theme_colors.get("bar_light", False):
+        th = self.ws.theme_colors
+        if th.get("bar_light", False):
             return True
-        return self._in_window(where) and self.ws.look.light_chrome()
+        return self._in_window(where) and th.get("band_light", False)
 
     def _in_window(self, where):
         """True when `where`'s bar is being drawn INSIDE a window of the windowed

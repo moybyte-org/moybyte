@@ -773,14 +773,15 @@ _ICON_VERSION = 5
 # fills every role a package leaves unset from style.json's derivation rules.
 # The roles are style.json's `tokens`; their jobs are
 # docs/visual_identity_v1.md Section 4.3's. Colour roles are MOY64 indices;
-# `surface_light` and `bar_light` are presentation flags (booleans here).
+# `surface_light`, `bar_light` and `band_light` are presentation flags
+# (booleans here).
 # The default is the first seed ("night", the moybyte site palette), and a
 # name no package provides resolves as the default.
 THEME_NAMES = _ui._C.themes()
 DEFAULT_THEME = THEME_NAMES[0]
 THEME_VARIANTS = ("dark", "light")
 DEFAULT_VARIANT = "dark"
-_THEME_FLAGS = ("surface_light", "bar_light")
+_THEME_FLAGS = ("surface_light", "bar_light", "band_light")
 _THEME_CACHE = {}
 _CONTENT_CACHE = {}
 

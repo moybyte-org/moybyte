@@ -415,6 +415,7 @@ class Appearance:
             self.theme_variant = variant if variant in THEME_VARIANTS \
                 else DEFAULT_VARIANT
         self.theme_name = name
+        _uimod.use_shape(name)
         # REBOUND, never mutated in place: the launcher's statics keys fold
         # id(ws.theme_colors), so the new dict IS the invalidation.
         ws.theme_colors = theme_colors(name, self.theme_variant)

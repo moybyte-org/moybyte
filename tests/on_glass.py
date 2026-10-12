@@ -172,6 +172,86 @@ def every_app_claims_one_cart(board):
     assert not wrong, "app cart claims off (seed/title drift?): %r" % wrong
 
 
+# The painter (docs/theming_2026-09.md §4.4): tests/test_ui_painter.py's
+# scenes without text, each (surface, metrics, rect) on a 16x12 canvas
+# cleared to 9, as one installed package's `desk` surface.
+PAINTER_SCENES = (
+    ("raised, fill 7", {}, (2, 2, 6, 5)),
+    ("sunken, fill 7", {}, (2, 2, 6, 5)),
+    ("etched, fill 7", {}, (2, 2, 6, 5)),
+    ("bevel2, fill 7", {}, (2, 2, 6, 5)),
+    ("raised, fill 7, border 12", {}, (2, 2, 6, 5)),
+    ("fill 7, shadow", {}, (2, 2, 6, 5)),
+    ("fill 7, border 12", {"radius": 1}, (2, 2, 8, 6)),
+    ("fill 7, border 12", {"radius": 2}, (2, 2, 8, 6)),
+    ("raised, fill 7, border 12", {"radius": 3}, (2, 2, 8, 8)),
+    ("dither 7/0", {}, (2, 2, 4, 4)),
+    ("dither 7/0", {}, (3, 2, 9, 4)),
+    ("pinstripe 7/0", {}, (2, 1, 11, 7)),
+    ("gradient 7/0", {}, (0, 0, 16, 12)),
+)
+
+
+def _painter_src(text, metrics):
+    import json
+    return json.dumps({"format": 1, "name": "painted", "metrics": metrics,
+                       "surfaces": {"desk": {"rest": text}}}).encode()
+
+
+def painter_host_frames():
+    """The host's index frame of each PAINTER_SCENES scene."""
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import ui
+    from runtime.chrome import theme_colors
+    from runtime.host_canvas import indices_of, make_system_canvas
+    th = theme_colors("night")
+    out = []
+    try:
+        for text, metrics, rect in PAINTER_SCENES:
+            assert moy_ui.theme_install(_painter_src(text, metrics))[0] == 0
+            ui.use_shape("painted")
+            cv = make_system_canvas(16, 12)
+            cv.cls(9)
+            assert ui.paint(cv, th, rect, "desk")
+            out.append(bytes(indices_of(cv)))
+    finally:
+        ui.use_shape(None)
+    return out
+
+
+_PAINTER_HELPER = """
+import ui, chrome, moy_ui, device_canvas, binascii
+def _paint_scene(src, rect):
+    cv = (ws.sys_canvas or ws.canvas).new_layer(16, 12)
+    try:
+        assert moy_ui.theme_install(src)[0] == 0
+        ui.use_shape('painted')
+        cv.cls(9)
+        assert ui.paint(cv, chrome.theme_colors('night'), rect, 'desk')
+        px = device_canvas.to_indices(cv._buf, cv._wire)
+        return binascii.hexlify(bytes(px)).decode()
+    finally:
+        cv.release()
+        ui.use_shape(ws.look.theme_name)
+"""
+
+
+def painter_matches_host(board):
+    """Every painter scene, painted by this board's moy_ui into a scratch
+    layer and read back as palette indices, is the host's frame byte for
+    byte: the painter, its corner masks and the pattern lane are one C body
+    on every tier. The live theme's shape is put back after each scene."""
+    want = painter_host_frames()
+    board.pyexec(_PAINTER_HELPER, strict=True)
+    for (text, metrics, rect), frame in zip(PAINTER_SCENES, want):
+        got = board.pyval("ws._g['_paint_scene'](%r, %r)" % (_painter_src(text, metrics), rect),
+                          strict=True)
+        assert bytes.fromhex(got) == frame, (text, metrics, rect)
+    assert board.pyval("__import__('moy_ui').theme_shape(ws.look.theme_name)[2]",
+                       strict=True) == ()
+
+
 def py_probe_reaches_the_console(board):
     line = board.cmd("py ws._frames_drawn", wait_for="PY ")
     assert line is not None and line.startswith("PY "), line

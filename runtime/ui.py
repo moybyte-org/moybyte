@@ -4,6 +4,7 @@
 #   -- rect algebra                   inset, cut_top, cut_bottom, cut_left, split
 #   -- interaction state              widget_state
 #   -- the style                      use_skin, metrics, state_colors (C)
+#   -- the theme's shape              use_shape, paint (C)
 #   -- draw == tap                    Hits
 #   Hits                              per-draw hit registry
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
@@ -1139,6 +1140,34 @@ def mini_btn(cv, rect, label, fill, label_rect=None):
     still paints the whole finger-sized `rect`. Defaults to `rect`, which is the
     identity everywhere the two are the same size."""
     _C.mini_btn(cv, rect, label, fill, label_rect)
+
+
+# --- the theme's shape ---------------------------------------------------------
+# A theme's surfaces, corner radius, pressed-label offset and text effects
+# (docs/theming_2026-09.md §4.2-§4.4), resolved once in C and drawn by every
+# primitive. Like the skin, one for the process.
+
+_PART_ID = {}
+_THEME_STATE_ID = {}
+for _i, _s in enumerate(_C.theme_states()):
+    _THEME_STATE_ID[_s] = _i
+
+
+def use_shape(name):
+    """Install theme `name`'s shape for every primitive (None: the empty one,
+    which draws as no theme had one)."""
+    _C.use_shape(name)
+
+
+def paint(cv, th, rect, part, state=REST):
+    """Paint theme part `part`'s surface in `state` into `rect`, as a
+    primitive paints its frame. False, drawing nothing, when the theme gives
+    the part none there: the caller draws its own."""
+    p = _PART_ID.get(part)
+    if p is None:
+        p = _PART_ID[part] = _C.parts().index(part)
+    return _C.paint(cv, _LOOK if th is _TH else _look(th), rect, p,
+                    _THEME_STATE_ID[state])
 
 
 def toolbar(cv, th, rect):

@@ -379,6 +379,10 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_painter_matches_the_host(board):
+    on_glass.painter_matches_host(board)
+
+
 def test_a_stale_handle_is_refused_loudly(board):
     on_glass.stale_handle_is_refused_loudly(board)
 

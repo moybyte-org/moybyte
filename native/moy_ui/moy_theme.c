@@ -14,6 +14,7 @@
 
 #define JSON_DEPTH 8          // the deepest nesting the reader follows
 #define UNSET_ROW INT32_MIN
+#define FX_UNSET 0xfe      // an effect no package has named yet
 
 // -- the reader: strict JSON over a byte span, no tree ------------------------
 
@@ -460,9 +461,195 @@ static int each_state(rd_t *r, moy_theme_pkg_t *out, int state, int kind) {
     return effect(r, out, kind, state);
 }
 
-static int each_part(rd_t *r, moy_theme_pkg_t *out, int kind, int unused) {
+static int each_part(rd_t *r, moy_theme_pkg_t *out, int part, int unused) {
     (void)unused;
-    return keyed(r, out, moy_ui_state_names, MOY_UI_STATES, each_state, kind);
+    return keyed(r, out, moy_theme_state_names, MOY_THEME_STATES, each_state, part);
+}
+
+// -- surfaces: the grammar (docs/theming_2026-09.md §4.4) ------------------------
+//
+//   surface := clause { "," clause }
+//   clause  := EDGE | "fill" C | ("dither" | "pinstripe" | "gradient") C "/" C
+//            | "border" [C] | "shadow"
+//   C       := a token of the live row (not a flag) | a palette index
+//
+// Words are lower case, split by spaces; each clause at most once. What is
+// left out is the part's own: no edge is flat, no fill its field, a bare
+// border its edge colour.
+
+static int is_space(char c) {
+    return c == ' ' || c == '\t';
+}
+
+// The next word of [*p, end) up to a space or a comma: its length (0: none).
+static int next_word(const char **p, const char *end, const char **w) {
+    while (*p < end && is_space(**p)) {
+        (*p)++;
+    }
+    *w = *p;
+    while (*p < end && !is_space(**p) && **p != ',') {
+        (*p)++;
+    }
+    return (int)(*p - *w);
+}
+
+static int word_is(const char *w, int n, const char *lit) {
+    return (int)strlen(lit) == n && memcmp(w, lit, (size_t)n) == 0;
+}
+
+static int word_in(const char *w, int n, const char *const *names, int count) {
+    for (int i = 0; i < count; i++) {
+        if (word_is(w, n, names[i])) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// A colour word: a token's term or an index. 0, or -1.
+static int term_of(const char *w, int n, int8_t *out, uint8_t *notes) {
+    if (n >= 1 && w[0] >= '0' && w[0] <= '9') {
+        if (n > 3) {
+            return -1;
+        }
+        int v = 0;
+        for (int i = 0; i < n; i++) {
+            if (w[i] < '0' || w[i] > '9') {
+                return -1;
+            }
+            v = v * 10 + (w[i] - '0');
+        }
+        if (v > 63) {
+            v = 63;
+            *notes |= MOY_THEME_N_CLAMPED;
+        }
+        *out = (int8_t)v;
+        return 0;
+    }
+    int t = word_in(w, n, moy_ui_token_names, MOY_UI_TOKENS);
+    if (t < 0 || moy_theme_flag[t]) {
+        return -1;
+    }
+    *out = MOY_UI_TERM_TOKEN(t);
+    return 0;
+}
+
+int moy_theme_surface(const char *s, size_t n, moy_ui_surface_t *out, uint8_t *notes) {
+    const char *p = s, *end = s + n;
+    uint8_t seen = 0, note = 0;     // bits: edge, fill, border, shadow
+    memset(out, 0, sizeof(*out));
+    out->a = out->b = out->line = MOY_UI_TERM_STYLE;
+    if (n == 0 || n > MOY_THEME_SURFACE_LEN) {
+        return -1;
+    }
+    for (;;) {
+        const char *w;
+        int wn = next_word(&p, end, &w);
+        if (wn == 0) {
+            return -1;              // an empty clause
+        }
+        int i;
+        uint8_t bit;
+        if ((i = word_in(w, wn, moy_theme_edge_names, MOY_THEME_EDGES)) >= 0) {
+            bit = 1;
+            out->edge = (uint8_t)i;
+        } else if ((i = word_in(w, wn, moy_theme_fill_names, MOY_THEME_FILLS)) >= 0) {
+            bit = 2;
+            out->fill = (uint8_t)(i + 1);
+            const char *c;
+            int cn = next_word(&p, end, &c);
+            if (out->fill == MOY_UI_FILL_SOLID) {
+                if (term_of(c, cn, &out->a, &note) < 0) {
+                    return -1;
+                }
+            } else {
+                const char *slash = memchr(c, '/', (size_t)cn);
+                if (slash == NULL || term_of(c, (int)(slash - c), &out->a, &note) < 0
+                    || term_of(slash + 1, cn - (int)(slash - c) - 1, &out->b, &note) < 0) {
+                    return -1;
+                }
+            }
+        } else if (word_is(w, wn, "border")) {
+            bit = 4;
+            out->flags |= MOY_UI_SURF_BORDER;
+            const char *c;
+            int cn = next_word(&p, end, &c);
+            if (cn > 0 && term_of(c, cn, &out->line, &note) < 0) {
+                return -1;
+            }
+        } else if (word_is(w, wn, "shadow")) {
+            bit = 8;
+            out->flags |= MOY_UI_SURF_SHADOW;
+        } else {
+            return -1;
+        }
+        if (seen & bit) {
+            return -1;
+        }
+        seen |= bit;
+        const char *rest;
+        if (next_word(&p, end, &rest) != 0) {
+            return -1;              // a word past the clause's end
+        }
+        if (p == end) {
+            break;
+        }
+        p++;                        // the comma
+    }
+    *notes |= note;
+    return MOY_THEME_OK;
+}
+
+// One part's surfaces: an object of state -> text. 0, or -1: malformed.
+static int each_surface(rd_t *r, moy_theme_pkg_t *out, int part, int unused) {
+    (void)unused;
+    if (eat(r, '}')) {
+        return 0;
+    }
+    for (;;) {
+        char key[MOY_THEME_NAME_MAX + 1];
+        char text[MOY_THEME_SURFACE_LEN + 1];
+        int over, tover = 0, len = -2;
+        int32_t iv;
+        if (str(r, key, sizeof(key), &over) < 0 || !eat(r, ':')) {
+            return -1;
+        }
+        int state = over ? -1 : find_name(moy_theme_state_names, MOY_THEME_STATES, key);
+        if (peek(r) == '"') {
+            len = str(r, text, sizeof(text), &tover);
+            if (len < 0) {
+                return -1;
+            }
+        } else if (value(r, &iv) < 0) {
+            return -1;
+        }
+        moy_ui_surface_t rec;
+        if (part < 0 || state < 0) {
+            out->notes |= MOY_THEME_N_UNKNOWN;
+        } else if (len < 0 || tover || moy_theme_surface(text, (size_t)len, &rec, &out->notes)) {
+            out->notes |= MOY_THEME_N_DROPPED;
+        } else {
+            int i = 0;
+            while (i < out->n_surfaces
+                   && !(out->surface[i][0] == part && out->surface[i][1] == state)) {
+                i++;
+            }
+            if (i == out->n_surfaces && out->n_surfaces >= MOY_THEME_SURFACES_CAP) {
+                out->notes |= MOY_THEME_N_DROPPED;
+            } else {
+                if (i == out->n_surfaces) {
+                    out->n_surfaces++;
+                }
+                out->surface[i][0] = (uint8_t)part;
+                out->surface[i][1] = (uint8_t)state;
+                out->surface_rec[i] = rec;
+            }
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        return eat(r, '}') ? 0 : -1;
+    }
 }
 
 static int reserved(const char *key) {
@@ -527,10 +714,12 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
             } else if (strcmp(key, "metrics") == 0 && eat(&r, '{')) {
                 kind = metrics(&r, out);
             } else if (strcmp(key, "text") == 0 && eat(&r, '{')) {
-                kind = keyed(&r, out, moy_ui_kind_names, MOY_UI_KINDS, each_part, 0);
+                kind = keyed(&r, out, moy_theme_part_names, MOY_THEME_PARTS, each_part, 0);
+            } else if (strcmp(key, "surfaces") == 0 && eat(&r, '{')) {
+                kind = keyed(&r, out, moy_theme_part_names, MOY_THEME_PARTS, each_surface, 0);
             } else {
                 if (strcmp(key, "colors") == 0 || strcmp(key, "metrics") == 0
-                    || strcmp(key, "text") == 0) {
+                    || strcmp(key, "text") == 0 || strcmp(key, "surfaces") == 0) {
                     out->notes |= MOY_THEME_N_DROPPED;
                 } else if (!reserved(key)) {
                     out->notes |= MOY_THEME_N_UNKNOWN;
@@ -711,51 +900,69 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
     return rc;
 }
 
-typedef struct {
-    int8_t *metrics;
-    uint8_t (*effects)[MOY_UI_STATES][2];
-    uint8_t have[MOY_UI_KINDS][MOY_UI_STATES];
-} shape_ctx_t;
-
 static void apply_shape(const moy_theme_pkg_t *pkg, void *ctx) {
-    shape_ctx_t *c = ctx;
+    moy_ui_shape_t *sh = ctx;
     for (int i = 0; i < MOY_THEME_METRICS; i++) {
-        if (c->metrics[i] == MOY_THEME_NO_METRIC) {
-            c->metrics[i] = pkg->metric[i];
+        if (sh->metric[i] == MOY_THEME_NO_METRIC) {
+            sh->metric[i] = pkg->metric[i];
         }
     }
     for (int i = 0; i < pkg->n_effects; i++) {
         const uint8_t *e = pkg->effect[i];
-        if (!c->have[e[0]][e[1]]) {
-            c->have[e[0]][e[1]] = 1;
-            c->effects[e[0]][e[1]][0] = e[2];
-            c->effects[e[0]][e[1]][1] = e[3];
+        uint8_t *at = sh->effect[e[0]][e[1]];
+        if (at[1] == FX_UNSET) {
+            at[0] = e[2];
+            at[1] = e[2] != 0 ? e[3] : MOY_UI_FX_NAMED_NONE;
+            if (e[2] != 0) {
+                sh->n_fx++;
+            }
         }
+    }
+    for (int i = 0; i < pkg->n_surfaces; i++) {
+        const uint8_t *ps = pkg->surface[i];
+        if (sh->stid[ps[0]][ps[1]] != 0) {
+            continue;
+        }
+        const moy_ui_surface_t *rec = &pkg->surface_rec[i];
+        int k = 0;
+        while (k < sh->n_surf && memcmp(&sh->surf[k], rec, sizeof(*rec)) != 0) {
+            k++;
+        }
+        if (k == sh->n_surf) {
+            if (sh->n_surf >= MOY_UI_STIDS) {
+                continue;
+            }
+            sh->surf[sh->n_surf++] = *rec;
+        }
+        sh->stid[ps[0]][ps[1]] = (uint8_t)(k + 1);
     }
 }
 
-static int resolve_shape(const char *name, size_t n, int8_t metrics[MOY_THEME_METRICS],
-                         uint8_t effects[MOY_UI_KINDS][MOY_UI_STATES][2]) {
-    shape_ctx_t c;
-    memset(&c, 0, sizeof(c));
-    c.metrics = metrics;
-    c.effects = effects;
-    memset(metrics, MOY_THEME_NO_METRIC, MOY_THEME_METRICS);
-    for (int k = 0; k < MOY_UI_KINDS; k++) {
-        for (int st = 0; st < MOY_UI_STATES; st++) {
-            effects[k][st][0] = 0;
-            effects[k][st][1] = MOY_THEME_NO_ROLE;
+static int resolve_shape(const char *name, size_t n, moy_ui_shape_t *sh) {
+    moy_ui_shape_clear(sh);
+    memset(sh->metric, MOY_THEME_NO_METRIC, sizeof(sh->metric));
+    for (int p = 0; p < MOY_THEME_PARTS; p++) {
+        for (int st = 0; st < MOY_THEME_STATES; st++) {
+            sh->effect[p][st][1] = FX_UNSET;
         }
     }
-    return chain(name, n, apply_shape, &c);
+    int rc = chain(name, n, apply_shape, sh);
+    for (int p = 0; p < MOY_THEME_PARTS; p++) {
+        for (int st = 0; st < MOY_THEME_STATES; st++) {
+            if (sh->effect[p][st][1] == FX_UNSET) {
+                sh->effect[p][st][0] = 0;
+                sh->effect[p][st][1] = MOY_THEME_NO_ROLE;
+            }
+        }
+    }
+    return rc;
 }
 
-int moy_theme_shape(const char *name, size_t n, int8_t metrics[MOY_THEME_METRICS],
-                    uint8_t effects[MOY_UI_KINDS][MOY_UI_STATES][2]) {
-    int rc = resolve_shape(name, n, metrics, effects);
+int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out) {
+    int rc = resolve_shape(name, n, out);
     if (rc != MOY_THEME_OK) {
         const char *def = moy_theme_seed_names[0];
-        resolve_shape(def, strlen(def), metrics, effects);
+        resolve_shape(def, strlen(def), out);
     }
     return rc;
 }

@@ -317,6 +317,10 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_painter_matches_the_host(board):
+    on_glass.painter_matches_host(board)
+
+
 def test_a_leaked_session_leaves_the_panel_flushing(board):
     on_glass.a_leaked_session_leaves_the_panel_flushing(board)
 

@@ -1,6 +1,6 @@
 {
   "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code and the skins as deltas, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
-  "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive"],
+  "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note", "band_light"],
   "states": ["disabled", "pressed", "hot", "on", "hover", "rest"],
   "aliases": {
     "hover": ["dim"],
@@ -1175,7 +1175,7 @@
   },
   "hits_capacity": 32,
   "theme": {
-    "about": "Theme packages, format 1 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on the MOY64 table. 'bytes' caps a theme.json, 'depth' the inherits chain.",
+    "about": "Theme packages, format 1 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on the MOY64 table. 'bytes' caps a theme.json, 'depth' the inherits chain. A package's 'text' and 'surfaces' are keyed by part, then state: the parts are the kinds, then 'parts' (the chrome the WMs and the bar draw); the states are the style's, then 'states' (a window's), and a state a part does not name follows 'chain' to rest. A surface is one line of the grammar (docs/theming_2026-09.md \u00a74.4): an edge of 'edges', a fill of 'fills' with its colours, 'border' with an optional colour, 'shadow'; a colour is a token or a palette index. A package holds at most 'surfaces_cap' surfaces of at most 'surface_len' bytes each.",
     "format": 1,
     "seeds": ["night", "indigo", "berry", "forest", "slate", "machine"],
     "bytes": 4096,
@@ -1184,7 +1184,14 @@
     "metrics": {"radius": [0, 3], "press_dx": [-3, 3], "press_dy": [-3, 3]},
     "effects": ["none", "shadow", "emboss"],
     "effects_cap": 32,
-    "reserved": ["surfaces", "frame", "fonts", "sprites", "icons", "images", "wallpapers", "layout", "sounds", "editor"],
+    "parts": ["window", "window.title", "window.button", "bar", "bar.item", "desk", "desk.icon"],
+    "states": ["active", "inactive"],
+    "chain": {"disabled": "rest", "pressed": "hot", "hot": "rest", "on": "rest", "hover": "rest", "active": "rest", "inactive": "active"},
+    "edges": ["flat", "raised", "sunken", "etched", "bevel2"],
+    "fills": ["fill", "dither", "pinstripe", "gradient"],
+    "surfaces_cap": 32,
+    "surface_len": 48,
+    "reserved": ["frame", "fonts", "sprites", "icons", "images", "wallpapers", "layout", "sounds", "editor"],
     "derive": {
       "dark": [
         ["code_text", 6], ["code_keyword", 12], ["code_string", 11],
@@ -1194,7 +1201,8 @@
         ["surface", 7], ["surface_alt", 52], ["ink", 0], ["ink_dim", 53],
         ["chrome_ink", 0], ["chrome_ink_dim", 53], ["selection_ink", 0],
         ["focus", 10], ["play", 11], ["author", 9], ["danger", 8],
-        ["surface_light", true], ["bar_light", true],
+        ["surface_light", true], ["bar_light", true], ["band_light", true],
+        ["shade_hi", 7], ["ink_accent", "ink"], ["ink_note", 4],
         ["bar", "panel"], ["bar_edge", "dim"],
         ["code_text", 0], ["code_keyword", 59], ["code_string", 3],
         ["code_number", 4], ["code_comment", 53], ["code_builtin", 2]
@@ -1206,7 +1214,9 @@
         ["ink", 7], ["ink_dim", 6], ["chrome_ink", 7], ["chrome_ink_dim", 6],
         ["selection_ink", 7], ["bar", 0], ["bar_edge", 5], ["play", 11],
         ["author", 10], ["danger", 8],
-        ["surface_light", false], ["bar_light", false],
+        ["surface_light", false], ["bar_light", false], ["band_light", false],
+        ["shade_hi", "hilite"], ["shade_lo", "dim"], ["shade_dark", 0],
+        ["ink_accent", "accent"], ["ink_note", 15],
         ["block_events", 10], ["block_control", 9], ["block_actors", 12],
         ["block_looks", 2], ["block_draw", 3], ["block_input", 13],
         ["block_variables", 8], ["block_lists", 15], ["block_operators", 11],

@@ -13,7 +13,7 @@
 #include "moy_str.h"
 #include "moy_ui_wasm.h"
 
-#define NAMES_CAP (MOY_UI_KINDS > MOY_THEME_ROLES ? MOY_UI_KINDS : MOY_THEME_ROLES)
+#define NAMES_CAP (MOY_THEME_PARTS > MOY_THEME_ROLES ? MOY_THEME_PARTS : MOY_THEME_ROLES)
 
 static mp_obj_t names_tuple(const char *const *names, int n) {
     mp_obj_t items[NAMES_CAP];
@@ -124,38 +124,104 @@ static mp_obj_t name_obj(const char *s) {
     return mp_obj_new_str(s, strlen(s));
 }
 
-// theme_shape(name) -> (metrics, effects): the metrics as a tuple in
-// style.json's order, and each text effect other than none as a tuple
-// (part, state, effect, role) of names.
-static mp_obj_t ui_theme_shape(mp_obj_t name) {
-    size_t n;
-    const char *s = mp_obj_str_get_data(name, &n);
-    int8_t m[MOY_THEME_METRICS];
-    uint8_t fx[MOY_UI_KINDS][MOY_UI_STATES][2];
-    moy_theme_shape(s, n, m, fx);
-    mp_obj_t mi[MOY_THEME_METRICS];
-    for (int i = 0; i < MOY_THEME_METRICS; i++) {
-        mi[i] = MP_OBJ_NEW_SMALL_INT(m[i]);
-    }
-    mp_obj_t list = mp_obj_new_list(0, NULL);
-    for (int k = 0; k < MOY_UI_KINDS; k++) {
-        for (int st = 0; st < MOY_UI_STATES; st++) {
-            if (fx[k][st][0] == 0) {
-                continue;
-            }
-            mp_obj_t e[4] = {name_obj(moy_ui_kind_names[k]), name_obj(moy_ui_state_names[st]),
-                             name_obj(moy_theme_effect_names[fx[k][st][0]]),
-                             name_obj(moy_theme_role_names[fx[k][st][1]])};
-            mp_obj_list_append(list, mp_obj_new_tuple(4, e));
-        }
-    }
+static mp_obj_t list_tuple(mp_obj_t list) {
     size_t len;
     mp_obj_t *items;
     mp_obj_list_get(list, &len, &items);
-    mp_obj_t out[2] = {mp_obj_new_tuple(MOY_THEME_METRICS, mi), mp_obj_new_tuple(len, items)};
-    return mp_obj_new_tuple(2, out);
+    return mp_obj_new_tuple(len, items);
+}
+
+static mp_obj_t surface_obj(const moy_ui_surface_t *r) {
+    mp_obj_t f[6] = {MP_OBJ_NEW_SMALL_INT(r->edge), MP_OBJ_NEW_SMALL_INT(r->fill),
+                     MP_OBJ_NEW_SMALL_INT(r->flags), MP_OBJ_NEW_SMALL_INT(r->a),
+                     MP_OBJ_NEW_SMALL_INT(r->b), MP_OBJ_NEW_SMALL_INT(r->line)};
+    return mp_obj_new_tuple(6, f);
+}
+
+static void shape_of(mp_obj_t name, moy_ui_shape_t *sh) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    moy_theme_shape(s, n, sh);
+}
+
+// theme_shape(name) -> (metrics, effects, surfaces): the metrics as a tuple
+// in style.json's order; each text effect other than none as (part, state,
+// effect, role) of names; each surface as (part, state, record), the record
+// (edge, fill, flags, a, b, line) as moy_ui.h's moy_ui_surface_t holds it.
+static mp_obj_t ui_theme_shape(mp_obj_t name) {
+    moy_ui_shape_t *sh = m_new(moy_ui_shape_t, 1);
+    shape_of(name, sh);
+    mp_obj_t mi[MOY_THEME_METRICS];
+    for (int i = 0; i < MOY_THEME_METRICS; i++) {
+        mi[i] = MP_OBJ_NEW_SMALL_INT(sh->metric[i]);
+    }
+    mp_obj_t fx = mp_obj_new_list(0, NULL), sf = mp_obj_new_list(0, NULL);
+    for (int p = 0; p < MOY_THEME_PARTS; p++) {
+        for (int st = 0; st < MOY_THEME_STATES; st++) {
+            const uint8_t *e = sh->effect[p][st];
+            if (e[0] != 0) {
+                mp_obj_t t[4] = {name_obj(moy_theme_part_names[p]),
+                                 name_obj(moy_theme_state_names[st]),
+                                 name_obj(moy_theme_effect_names[e[0]]),
+                                 name_obj(moy_theme_role_names[e[1]])};
+                mp_obj_list_append(fx, mp_obj_new_tuple(4, t));
+            }
+            if (sh->stid[p][st] != 0) {
+                mp_obj_t t[3] = {name_obj(moy_theme_part_names[p]),
+                                 name_obj(moy_theme_state_names[st]),
+                                 surface_obj(&sh->surf[sh->stid[p][st] - 1])};
+                mp_obj_list_append(sf, mp_obj_new_tuple(3, t));
+            }
+        }
+    }
+    m_del(moy_ui_shape_t, sh, 1);
+    mp_obj_t out[3] = {mp_obj_new_tuple(MOY_THEME_METRICS, mi), list_tuple(fx), list_tuple(sf)};
+    return mp_obj_new_tuple(3, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_shape_obj, ui_theme_shape);
+
+// surface(text) -> (record, notes), or None for text the grammar refuses.
+static mp_obj_t ui_surface(mp_obj_t text) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(text, &n);
+    moy_ui_surface_t r;
+    uint8_t notes = 0;
+    if (moy_theme_surface(s, n, &r, &notes) != MOY_THEME_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t out[2] = {surface_obj(&r), MP_OBJ_NEW_SMALL_INT(notes)};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_surface_obj, ui_surface);
+
+// use_shape(name): install theme `name`'s shape for every primitive (None:
+// the empty one); the resolve's return.
+static mp_obj_t ui_use_shape(mp_obj_t name) {
+    int rc = MOY_THEME_OK;
+    if (name == mp_const_none) {
+        moy_ui_shape_use(NULL);
+    } else {
+        moy_ui_shape_t *sh = m_new(moy_ui_shape_t, 1);
+        size_t n;
+        const char *s = mp_obj_str_get_data(name, &n);
+        rc = moy_theme_shape(s, n, sh);
+        moy_ui_shape_use(sh);
+        m_del(moy_ui_shape_t, sh, 1);
+    }
+    return MP_OBJ_NEW_SMALL_INT(rc);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_use_shape_obj, ui_use_shape);
+
+// parts(), theme_states(): what a theme's `text` and `surfaces` are keyed by.
+static mp_obj_t ui_parts(void) {
+    return names_tuple(moy_theme_part_names, MOY_THEME_PARTS);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_parts_obj, ui_parts);
+
+static mp_obj_t ui_theme_states(void) {
+    return names_tuple(moy_theme_state_names, MOY_THEME_STATES);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_states_obj, ui_theme_states);
 
 // theme_install(src) -> (rc, notes): src a theme.json's bytes.
 static mp_obj_t ui_theme_install(mp_obj_t src) {
@@ -195,7 +261,7 @@ static mp_obj_t ui_look(mp_obj_t slot, mp_obj_t tokens) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(tokens, &b, MP_BUFFER_READ);
     if (b.len != MOY_UI_TOKENS * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: a token row is 28 int32"));
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: a token row is one int32 per token"));
     }
     int32_t row[MOY_UI_TOKENS];
     memcpy(row, b.buf, sizeof(row));
@@ -741,6 +807,17 @@ static mp_obj_t ui_toolbar(mp_obj_t cv, mp_obj_t look, mp_obj_t rect) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_toolbar_obj, ui_toolbar);
 
+// paint(cv, look, rect, part, state) -> painted: part and state are theme ids
+static mp_obj_t ui_paint(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    int painted = 0;
+    check(moy_ui_paint(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), &painted));
+    return mp_obj_new_bool(painted);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_paint_obj, 5, 5, ui_paint);
+
 // dialog(cv, rect, ring, fill)
 static mp_obj_t ui_dialog(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -1012,6 +1089,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme), MP_ROM_PTR(&ui_theme_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_roles), MP_ROM_PTR(&ui_theme_roles_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_shape), MP_ROM_PTR(&ui_theme_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_surface), MP_ROM_PTR(&ui_surface_obj) },
+    { MP_ROM_QSTR(MP_QSTR_use_shape), MP_ROM_PTR(&ui_use_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_parts), MP_ROM_PTR(&ui_parts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_states), MP_ROM_PTR(&ui_theme_states_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_install), MP_ROM_PTR(&ui_theme_install_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
     { MP_ROM_QSTR(MP_QSTR_look), MP_ROM_PTR(&ui_look_obj) },
@@ -1056,6 +1137,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_game_icon_btn), MP_ROM_PTR(&ui_game_icon_btn_obj) },
     { MP_ROM_QSTR(MP_QSTR_mini_btn), MP_ROM_PTR(&ui_mini_btn_obj) },
     { MP_ROM_QSTR(MP_QSTR_toolbar), MP_ROM_PTR(&ui_toolbar_obj) },
+    { MP_ROM_QSTR(MP_QSTR_paint), MP_ROM_PTR(&ui_paint_obj) },
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_panel), MP_ROM_PTR(&ui_panel_obj) },

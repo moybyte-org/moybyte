@@ -26,7 +26,6 @@ _BRANCH = re.compile(r"light_chrome\(\)|\bis_light\(")
 PINNED = {
     "achievements_ui.py": (11, 0),
     "appearance.py": (0, 1),
-    "bar_layer.py": (0, 1),
     "block_editor_ui.py": (53, 0),
     "calc_app.py": (2, 0),
     "cards_layer.py": (26, 0),
@@ -35,7 +34,7 @@ PINNED = {
     "editor_app.py": (2, 0),
     "launcher_layer.py": (39, 0),
     "map_editor_ui.py": (44, 0),
-    "music_editor_ui.py": (36, 1),
+    "music_editor_ui.py": (34, 0),
     "paint_layer.py": (24, 0),
     "perf_hud.py": (4, 0),
     "scene_editor_ui.py": (36, 0),
@@ -43,7 +42,7 @@ PINNED = {
     "text_console.py": (6, 0),
     "update_ui.py": (2, 0),
     "wallpaper.py": (4, 0),
-    "web_console_ui.py": (3, 1),
+    "web_console_ui.py": (3, 0),
     "wm_chrome.py": (3, 0),
 }
 

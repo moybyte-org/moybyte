@@ -36,7 +36,9 @@ _SIGS = (
     ("moy_ui_gen", [], c.c_uint32),
     ("moy_theme_resolve", [_P, _Z, _I, c.c_void_p, c.POINTER(c.c_uint32)], _I),
     ("moy_theme_install", [_P, _Z, c.POINTER(c.c_uint8)], _I),
-    ("moy_theme_shape", [_P, _Z, c.c_void_p, c.c_void_p], _I),
+    ("moy_theme_shape", [_P, _Z, c.c_void_p], _I),
+    ("moy_theme_surface", [_P, _Z, c.c_void_p, c.POINTER(c.c_uint8)], _I),
+    ("moy_ui_shape_use", [c.c_void_p], _I),
     ("moy_theme_installed", [], c.c_char_p),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
@@ -53,6 +55,21 @@ _SIGS = (
 
 class _Box(c.Structure):
     _fields_ = [("x", c.c_int16), ("y", c.c_int16), ("w", c.c_int16), ("h", c.c_int16)]
+
+
+class _Surface(c.Structure):
+    _fields_ = [("edge", c.c_uint8), ("fill", c.c_uint8), ("flags", c.c_uint8),
+                ("a", c.c_int8), ("b", c.c_int8), ("line", c.c_int8)]
+
+
+def _shape_type(metrics, parts, states, stids):
+    class _Shape(c.Structure):
+        _fields_ = [("metric", c.c_int8 * metrics), ("n_surf", c.c_uint8),
+                    ("n_fx", c.c_uint8),
+                    ("effect", ((c.c_uint8 * 2) * states) * parts),
+                    ("stid", (c.c_uint8 * states) * parts),
+                    ("surf", _Surface * stids)]
+    return _Shape
 
 
 class _Span(c.Structure):
@@ -112,6 +129,7 @@ _DRAW_SIGS = (
     ("moy_ui_game_icon_btn", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_mini_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
     ("moy_ui_toolbar", [c.POINTER(_Sink), _Box], _I),
+    ("moy_ui_paint", [c.POINTER(_Sink), _Box, _I, _I, c.POINTER(_I)], _I),
     ("moy_ui_dialog", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_text_field", [c.POINTER(_Sink), _Box, _Span, _Span, c.c_void_p, _I], _I),
     ("moy_ui_panel", [c.POINTER(_Sink), _Box, _Span, _I, c.POINTER(_Box)], _I),
@@ -421,6 +439,12 @@ def binding():
     def toolbar(cv, look, rect):
         _check(lib.moy_ui_toolbar(c.byref(sink(cv, look)), box_of(rect)))
 
+    def paint(cv, look, rect, part, state):
+        painted = _I()
+        _check(lib.moy_ui_paint(c.byref(sink(cv, look)), box_of(rect), int(part), int(state),
+                                c.byref(painted)))
+        return bool(painted.value)
+
     def dialog(cv, rect, ring, fill):
         _check(lib.moy_ui_dialog(c.byref(sink(cv, None)), box_of(rect),
                                  col(ring, FROM_STYLE), col(fill, FROM_STYLE)))
@@ -478,7 +502,7 @@ def binding():
 
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
-              mini_btn, toolbar, dialog, text_field, panel, focus_ring, inset, cut,
+              mini_btn, toolbar, paint, dialog, text_field, panel, focus_ring, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
     m.list = list_
@@ -590,20 +614,52 @@ def binding():
                           c.c_int.in_dll(lib, "moy_theme_n_effects").value)
     m.theme_roles = lambda: roles
 
+    parts = _names(lib, "moy_theme_part_names", c.c_int.in_dll(lib, "moy_theme_n_parts").value)
+    th_states = _names(lib, "moy_theme_state_names",
+                       c.c_int.in_dll(lib, "moy_theme_n_states").value)
+    Shape = _shape_type(metric_n, len(parts), len(th_states), 64)
+    assert c.sizeof(Shape) == c.c_int.in_dll(lib, "moy_ui_shape_size").value
+    m.parts = lambda: parts
+    m.theme_states = lambda: th_states
+
+    def rec(r):
+        return (r.edge, r.fill, r.flags, r.a, r.b, r.line)
+
     def theme_shape(name):
         b = _b(name)
-        mets = (c.c_int8 * metric_n)()
-        fx = (c.c_uint8 * (len(kinds) * len(states) * 2))()
-        lib.moy_theme_shape(b, len(b), mets, fx)
-        out = []
-        for k in range(len(kinds)):
-            for st in range(len(states)):
-                i = (k * len(states) + st) * 2
-                if fx[i]:
-                    out.append((kinds[k], states[st], effect_names[fx[i]], roles[fx[i + 1]]))
-        return tuple(mets), tuple(out)
+        sh = Shape()
+        lib.moy_theme_shape(b, len(b), c.byref(sh))
+        fx, sf = [], []
+        for p in range(len(parts)):
+            for st in range(len(th_states)):
+                e = sh.effect[p][st]
+                if e[0]:
+                    fx.append((parts[p], th_states[st], effect_names[e[0]], roles[e[1]]))
+                if sh.stid[p][st]:
+                    sf.append((parts[p], th_states[st], rec(sh.surf[sh.stid[p][st] - 1])))
+        return tuple(sh.metric), tuple(fx), tuple(sf)
+
+    def surface(text):
+        b = _b(text)
+        r = _Surface()
+        notes = c.c_uint8()
+        if lib.moy_theme_surface(b, len(b), c.byref(r), c.byref(notes)) != 0:
+            return None
+        return rec(r), notes.value
+
+    def use_shape(name):
+        if name is None:
+            lib.moy_ui_shape_use(None)
+            return 0
+        b = _b(name)
+        sh = Shape()
+        rc = lib.moy_theme_shape(b, len(b), c.byref(sh))
+        lib.moy_ui_shape_use(c.byref(sh))
+        return rc
 
     m.theme_shape = theme_shape
+    m.surface = surface
+    m.use_shape = use_shape
 
     def theme(name, light):
         b = _b(name)

@@ -11,6 +11,9 @@
 * Readability: the seeds clear the floor; a pair under it sets its bit.
 * Metrics and text effects: the default sets every metric; a theme's are
   clamped, inherited and noted like its colours.
+* Surfaces: the grammar (docs/theming_2026-09.md §4.4) compiles what it
+  takes into the record the painter reads and refuses the rest; a package's
+  surfaces are keyed by part and state, capped, inherited and noted.
 * A fuzz: mutated seed bytes never crash the reader and never yield a row
   outside MOY64 or a flag outside 0/1; and the boards' module (the desktop
   MicroPython's `moy_ui`) answers the corpus exactly as the host's does.
@@ -20,6 +23,7 @@ import ctypes
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +33,7 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import glass_binding
-from tools import gen_ui_tables
+from tools import gen_ui_tables, moy_ui_binding
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unix_mp import require_unix_mp  # noqa: E402
@@ -97,10 +101,11 @@ def test_a_recolour_inherits_the_rest():
     mine, berry = _row("mine")[0], _row("berry")[0]
     i = ROLES.index("accent")
     assert mine[i] == 12
-    # focus derives from accent, so it follows the recolour
-    assert mine[ROLES.index("focus")] == 12
-    assert [v for k, v in enumerate(mine) if ROLES[k] not in ("accent", "focus")] \
-        == [v for k, v in enumerate(berry) if ROLES[k] not in ("accent", "focus")]
+    # focus and ink_accent derive from accent, so they follow the recolour
+    follow = ("accent", "focus", "ink_accent")
+    assert mine[ROLES.index("focus")] == mine[ROLES.index("ink_accent")] == 12
+    assert [v for k, v in enumerate(mine) if ROLES[k] not in follow] \
+        == [v for k, v in enumerate(berry) if ROLES[k] not in follow]
     # no `inherits`: the default is the parent
     moy_ui.theme_install(_src("mine2", colors={"dark": {"accent": 12}}))
     night = _row("night")[0]
@@ -176,7 +181,7 @@ def test_every_block_category_and_syntax_class_has_a_role():
 
 def test_metrics_and_text_effects():
     names = list(TH["metrics"])
-    assert moy_ui.theme_shape("night") == ((0,) * len(names), ())
+    assert moy_ui.theme_shape("night") == ((0,) * len(names), (), ())
     rc, notes = moy_ui.theme_install(_src("w", inherits="berry",
         metrics={"radius": 9, "press_dx": 1, "glow": 2},
         text={"button": {"disabled": {"effect": "emboss", "color": "ink"},
@@ -184,7 +189,7 @@ def test_metrics_and_text_effects():
               "nope": {"rest": {"effect": "none"}},
               "row": {"hover": {"effect": "sparkle", "color": "ink"}}}))
     assert rc == OK and notes == N_CLAMPED | N_UNKNOWN | N_DROPPED
-    mets, fx = moy_ui.theme_shape("w")
+    mets, fx, _sf = moy_ui.theme_shape("w")
     want = dict.fromkeys(names, 0)
     want.update(radius=3, press_dx=1)
     assert mets == tuple(want[n] for n in names)
@@ -192,6 +197,101 @@ def test_metrics_and_text_effects():
     # an effect of `none` is no effect: nothing is listed
     rc, _n = moy_ui.theme_install(_src("w2", text={"chip": {"on": {"effect": "none"}}}))
     assert rc == OK and moy_ui.theme_shape("w2")[1] == ()
+
+
+# -- surfaces ---------------------------------------------------------------------
+
+STYLE_TERM = -128
+
+
+def _tok(name):
+    return -1 - STYLE["tokens"].index(name)
+
+
+@pytest.mark.parametrize("text,rec,notes", [
+    ("flat", (0, 0, 0, STYLE_TERM, STYLE_TERM, STYLE_TERM), 0),
+    ("raised, fill surface, border", (1, 1, 1, _tok("surface"), STYLE_TERM, STYLE_TERM), 0),
+    ("pinstripe shade_lo/shade_hi, border",
+     (0, 3, 1, _tok("shade_lo"), _tok("shade_hi"), STYLE_TERM), 0),
+    ("dither desktop/23", (0, 2, 0, _tok("desktop"), 23, STYLE_TERM), 0),
+    ("gradient 1/12, shadow, bevel2", (4, 4, 2, 1, 12, STYLE_TERM), 0),
+    ("border edge", (0, 0, 1, STYLE_TERM, STYLE_TERM, _tok("edge")), 0),
+    ("etched,border 0,shadow", (3, 0, 3, STYLE_TERM, STYLE_TERM, 0), 0),
+    ("  sunken ,\tfill 7  ", (2, 1, 0, 7, STYLE_TERM, STYLE_TERM), 0),
+    ("fill 99", (0, 1, 0, 63, STYLE_TERM, STYLE_TERM), N_CLAMPED),
+])
+def test_the_surface_grammar_compiles_what_it_takes(text, rec, notes):
+    assert moy_ui.surface(text) == (rec, notes)
+
+
+@pytest.mark.parametrize("text", [
+    "", " ", ",", "raised,", ",raised", "raised,,border", "raised raised",
+    "raised, sunken", "fill 1, fill 2", "border, border", "shadow, shadow",
+    "fill", "fill nope", "fill surface_light", "fill code_text", "fill 1/2",
+    "fill -1", "fill 1234", "fill 1 2", "dither 1", "dither 1/", "dither /2",
+    "dither 1 / 2", "gradient a/b", "border 1 2", "shadow 1", "Raised", "raised;",
+    "bevel", "fill  ", "raised " + "x" * 60, "fill " + "panel," * 8,
+])
+def test_the_surface_grammar_refuses_the_rest(text):
+    assert moy_ui.surface(text) is None
+
+
+def test_the_surface_compiler_survives_any_words():
+    rng = random.Random(4)
+    words = (STYLE["theme"]["edges"] + STYLE["theme"]["fills"]
+             + ["border", "shadow", "panel", "ink", "7", "63", "64", "/", ",", " ", "a/b",
+                "shade_hi/3", "surface_light", "", "x"])
+    tokens = len(STYLE["tokens"])
+    for _i in range(4000):
+        text = " ".join(rng.choice(words) for _w in range(rng.randint(0, 7)))
+        got = moy_ui.surface(text)
+        if got is None:
+            continue
+        (edge, fill, flags, a, b, line), notes = got
+        assert edge < len(STYLE["theme"]["edges"]) and fill <= len(STYLE["theme"]["fills"])
+        assert flags < 4 and notes in (0, N_CLAMPED)
+        for t in (a, b, line):
+            assert t == STYLE_TERM or 0 <= t <= 63 or -tokens <= t <= -1, (text, t)
+
+
+def test_a_packages_surfaces_are_keyed_capped_inherited_and_noted():
+    sf = {"button": {"rest": "raised, border", "pressed": "sunken",
+                     "glow": "flat", "hot": "sparkly", "on": 3},
+          "window.title": {"active": "pinstripe shade_lo/shade_hi"},
+          "nope": {"rest": "flat"}}
+    rc, notes = moy_ui.theme_install(_src("s1", surfaces=sf))
+    assert rc == OK and notes == N_UNKNOWN | N_DROPPED
+    _m, _fx, got = moy_ui.theme_shape("s1")
+    assert got == (
+        ("button", "pressed", (2, 0, 0, STYLE_TERM, STYLE_TERM, STYLE_TERM)),
+        ("button", "rest", (1, 0, 1, STYLE_TERM, STYLE_TERM, STYLE_TERM)),
+        ("window.title", "active",
+         (0, 3, 0, _tok("shade_lo"), _tok("shade_hi"), STYLE_TERM)))
+    # the cap: a package holds at most surfaces_cap
+    many = {k: {"rest": "raised", "hover": "sunken"} for k in moy_ui.parts()}
+    assert 2 * len(many) > TH["surfaces_cap"]
+    rc, notes = moy_ui.theme_install(_src("s4", surfaces=many))
+    assert rc == OK and notes == N_DROPPED
+    assert len(moy_ui.theme_shape("s4")[2]) == TH["surfaces_cap"]
+    # a later key for the same part and state replaces the earlier
+    rc, notes = moy_ui.theme_install(
+        b'{"format": 1, "name": "s5", "surfaces": {"chip": {"rest": "raised"},'
+        b' "chip": {"rest": "sunken"}}}')
+    assert (rc, notes) == (OK, 0)
+    assert moy_ui.theme_shape("s5")[2] == (
+        ("chip", "rest", (2, 0, 0, STYLE_TERM, STYLE_TERM, STYLE_TERM)),)
+
+
+def test_the_part_list_is_the_kinds_then_the_chrome_and_the_doc_lists_it():
+    kinds = list(STYLE["kinds"]) + [k for k in STYLE["metrics"] if k not in STYLE["kinds"]]
+    assert list(moy_ui.parts()) == kinds + TH["parts"]
+    assert list(moy_ui.theme_states()) == STYLE["states"] + TH["states"]
+    with open(os.path.join(ROOT, "docs", "theming_2026-09.md")) as f:
+        doc = f.read()
+    sec = doc[doc.index("### 4.3 Parts"):doc.index("### 4.4")]
+    listed = set(re.findall(r"`([a-z_.]+)`", sec))
+    missing = [p for p in moy_ui.parts() if p not in listed]
+    assert not missing, "docs/theming_2026-09.md §4.3 does not list %s" % missing
 
 
 # -- the chain, over a copy whose seeds chain -----------------------------------
@@ -202,10 +302,14 @@ def _chained_lib(tmp_path):
     style = json.loads((d / "style.json").read_text())
     links = {"c1": "night", "c2": "c1", "c3": "c2", "c4": "c3", "c5": "c4",
              "loop_a": "loop_b", "loop_b": "loop_a"}
+    surfaces = {"c1": {"button": {"rest": "raised", "pressed": "sunken"},
+                       "chip": {"rest": "raised"}},
+                "c2": {"button": {"rest": "etched"}}}
     for name, parent in links.items():
         (d / "themes" / (name + ".json")).write_text(json.dumps(
             {"format": 1, "name": name, "inherits": parent,
-             "colors": {"dark": {"dim": int(name[-1]) if name[-1].isdigit() else 0}}}))
+             "colors": {"dark": {"dim": int(name[-1]) if name[-1].isdigit() else 0}},
+             "surfaces": surfaces.get(name, {})}))
     style["theme"]["seeds"] += list(links)
     (d / "style.json").write_text(json.dumps(style))
     h, c = gen_ui_tables.generate(gen_ui_tables.load(str(d)), str(d))
@@ -220,7 +324,30 @@ def _chained_lib(tmp_path):
         bad = ctypes.c_uint32()
         rc = lib.moy_theme_resolve(name.encode(), len(name), 0, row, ctypes.byref(bad))
         return rc, list(row)
+
+    def shape(name):
+        sh = Shape()
+        lib.moy_theme_shape(name.encode(), len(name), ctypes.byref(sh))
+        parts, states = moy_ui.parts(), moy_ui.theme_states()
+        return {(parts[p], states[st]): sh.surf[sh.stid[p][st] - 1].edge
+                for p in range(len(parts)) for st in range(len(states))
+                if sh.stid[p][st]}, sh.n_surf
+    Shape = moy_ui_binding._shape_type(len(TH["metrics"]), len(moy_ui.parts()),
+                                       len(moy_ui.theme_states()), 64)
+    resolve.shape = shape
     return resolve
+
+
+def test_surfaces_inherit_nearest_first(tmp_path):
+    shape = _chained_lib(tmp_path).shape
+    edges = TH["edges"]
+    got, n = shape("c3")                # c3 -> c2 -> c1
+    assert {k: edges[v] for k, v in got.items()} == {
+        ("button", "rest"): "etched", ("button", "pressed"): "sunken",
+        ("chip", "rest"): "raised"}
+    assert n == 3
+    got, n = shape("c1")
+    assert n == 2                       # chip and button share raised's record
 
 
 def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
@@ -245,8 +372,11 @@ def _corpus(n):
                       text={"button": {"disabled": {"effect": "emboss", "color": "ink"},
                                        "pressed": {"effect": "shadow", "color": "dim"}},
                             "tab": {"on": {"effect": "shadow", "color": "code_text"}}},
-                      colors={"dark": {"block_sound": 3, "accent": 9}}))
-    alphabet = b'{}[]":,0123456789-.eE truefalsnl\\'
+                      colors={"dark": {"block_sound": 3, "accent": 9}},
+                      surfaces={"button": {"rest": "bevel2, fill surface, shadow",
+                                           "pressed": "sunken, dither shade_lo/7"},
+                                "window.title": {"active": "pinstripe shade_lo/shade_hi"}}))
+    alphabet = b'{}[]":,0123456789-.eE truefalsnl\\/ '
     out = list(seeds)
     while len(out) < n:
         b = bytearray(rng.choice(seeds))

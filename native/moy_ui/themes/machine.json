@@ -7,7 +7,8 @@
       "hilite": 60, "dim": 60, "desktop": 1, "desktop_pattern": 60,
       "surface": 7, "surface_alt": 52, "ink": 0, "ink_dim": 53,
       "border": 1, "selection": 13, "focus": 10, "play": 11, "author": 9,
-      "danger": 8, "surface_light": true,
+      "danger": 8, "surface_light": true, "band_light": true,
+      "ink_accent": 0, "ink_note": 4,
       "code_text": 0, "code_keyword": 59, "code_string": 3,
       "code_number": 4, "code_comment": 53, "code_builtin": 2
     },

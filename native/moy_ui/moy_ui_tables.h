@@ -5,8 +5,8 @@
 
 #include <stdint.h>
 
-#define MOY_UI_TOKENS 28
-#define MOY_UI_ROLES 34
+#define MOY_UI_TOKENS 34
+#define MOY_UI_ROLES 40
 #define MOY_UI_STATES 6
 #define MOY_UI_KINDS 25
 #define MOY_UI_COLOR_KINDS 20
@@ -16,6 +16,44 @@
 #define MOY_UI_HITS_CAP 32
 #define MOY_UI_GLYPHS 62
 #define MOY_UI_GLYPH_SIZE 12
+
+// The tokens, in the row's order.
+enum {
+    MOY_UI_T_PANEL = 0,
+    MOY_UI_T_EDGE = 1,
+    MOY_UI_T_TITLE = 2,
+    MOY_UI_T_TITLE_INK = 3,
+    MOY_UI_T_ACCENT = 4,
+    MOY_UI_T_HILITE = 5,
+    MOY_UI_T_DIM = 6,
+    MOY_UI_T_DESKTOP = 7,
+    MOY_UI_T_DESKTOP_PATTERN = 8,
+    MOY_UI_T_SURFACE = 9,
+    MOY_UI_T_SURFACE_ALT = 10,
+    MOY_UI_T_INK = 11,
+    MOY_UI_T_INK_DIM = 12,
+    MOY_UI_T_BORDER = 13,
+    MOY_UI_T_SELECTION = 14,
+    MOY_UI_T_SELECTION_INK = 15,
+    MOY_UI_T_FOCUS = 16,
+    MOY_UI_T_PLAY = 17,
+    MOY_UI_T_AUTHOR = 18,
+    MOY_UI_T_DANGER = 19,
+    MOY_UI_T_SURFACE_LIGHT = 20,
+    MOY_UI_T_BAR = 21,
+    MOY_UI_T_BAR_EDGE = 22,
+    MOY_UI_T_BAR_LIGHT = 23,
+    MOY_UI_T_CHROME_INK = 24,
+    MOY_UI_T_CHROME_INK_DIM = 25,
+    MOY_UI_T_TITLE_ACTIVE = 26,
+    MOY_UI_T_TITLE_INACTIVE = 27,
+    MOY_UI_T_SHADE_HI = 28,
+    MOY_UI_T_SHADE_LO = 29,
+    MOY_UI_T_SHADE_DARK = 30,
+    MOY_UI_T_INK_ACCENT = 31,
+    MOY_UI_T_INK_NOTE = 32,
+    MOY_UI_T_BAND_LIGHT = 33,
+};
 
 // The states, strongest first (widget_state's precedence).
 enum {
@@ -147,14 +185,47 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_SEEDS 6
 #define MOY_THEME_BYTES 4096
 #define MOY_THEME_DEPTH 4
-#define MOY_THEME_RULES 59
+#define MOY_THEME_RULES 69
 #define MOY_THEME_PAIRS 7
 #define MOY_THEME_CONTRAST 30
-#define MOY_THEME_RESERVED 10
-#define MOY_THEME_ROLES 45  // the tokens, then the content roles
+#define MOY_THEME_RESERVED 9
+#define MOY_THEME_ROLES 51  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3
 #define MOY_THEME_EFFECTS_CAP 32
+// What `text` and `surfaces` are keyed by: the kinds, then the chrome's
+// parts; the style's states, then a window's.
+#define MOY_THEME_PARTS 32
+#define MOY_THEME_STATES 8
+#define MOY_THEME_EDGES 5
+#define MOY_THEME_FILLS 4
+#define MOY_THEME_SURFACES_CAP 32
+#define MOY_THEME_SURFACE_LEN 48
+enum {
+    MOY_THEME_M_RADIUS = 0,
+    MOY_THEME_M_PRESS_DX = 1,
+    MOY_THEME_M_PRESS_DY = 2,
+};
+enum {
+    MOY_THEME_FX_NONE = 0,
+    MOY_THEME_FX_SHADOW = 1,
+    MOY_THEME_FX_EMBOSS = 2,
+};
+// The chrome's parts, after the kinds.
+enum {
+    MOY_THEME_P_WINDOW = 25,
+    MOY_THEME_P_WINDOW_TITLE = 26,
+    MOY_THEME_P_WINDOW_BUTTON = 27,
+    MOY_THEME_P_BAR = 28,
+    MOY_THEME_P_BAR_ITEM = 29,
+    MOY_THEME_P_DESK = 30,
+    MOY_THEME_P_DESK_ICON = 31,
+};
+// The states past the style's.
+enum {
+    MOY_THEME_S_ACTIVE = 6,
+    MOY_THEME_S_INACTIVE = 7,
+};
 // A missing role's rule: `role` gets `v`, a palette index or flag, or
 // (is_role) the role `v`'s value.
 typedef struct { uint8_t role, is_role, v; } moy_theme_rule_t;
@@ -167,6 +238,12 @@ extern const char *const moy_theme_metric_names[MOY_THEME_METRICS];
 // each metric's [min, max]
 extern const int8_t moy_theme_metric_range[MOY_THEME_METRICS][2];
 extern const char *const moy_theme_effect_names[MOY_THEME_EFFECTS];
+extern const char *const moy_theme_part_names[MOY_THEME_PARTS];
+extern const char *const moy_theme_state_names[MOY_THEME_STATES];
+// The state a state falls back to when a part does not name it; rest: 255.
+extern const uint8_t moy_theme_state_next[MOY_THEME_STATES];
+extern const char *const moy_theme_edge_names[MOY_THEME_EDGES];
+extern const char *const moy_theme_fill_names[MOY_THEME_FILLS];
 extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];
 extern const uint16_t moy_theme_lum[64];
 extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];
@@ -174,6 +251,6 @@ extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];
 extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];
 extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];
 extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,
-    moy_theme_n_effects;
+    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states;
 
 #endif // MOY_UI_TABLES_H

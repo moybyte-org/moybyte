@@ -119,8 +119,8 @@ def build(verbose=False, wasm=None):
         inc, lib = got
         # ...and the toolkit's rows a compiled app imports, over the RUN sink
         # (native/moy_ui/moy_ui_wasm.h)
-        names += ["moy_ui.c", "moy_ui_draw.c", "moy_ui_interact.c", "moy_ui_wasm.h",
-                  "moy_ui_wasm.c"]
+        names += ["moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_interact.c",
+                  "moy_ui_wasm.h", "moy_ui_wasm.c"]
         names += ["moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c",
                   "moy_audio.h", "moy_files.h", "moy_files.c", "moyhost_wasm.c"]
         cflags += ["-DMOY_WASM=1", "-isystem", inc,

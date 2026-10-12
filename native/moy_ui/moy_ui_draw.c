@@ -19,6 +19,10 @@ typedef struct {
     moy_text_target_t t;
     int tfs;                    // the scale print draws at: the row's font scale
     int look;
+    const moy_ui_shape_t *sh;   // the theme's shape
+    // The part being drawn: its text effect and that effect's colour, and the
+    // pressed-label offset (use_part). Zero until a primitive names its part.
+    int fx, fx_c, pdx, pdy;
 } draw_t;
 
 static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
@@ -37,6 +41,26 @@ static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
     d->t.cy1 = (int)st[MOY_ST_CY1];
     d->tfs = s->fs;
     d->look = s->look;
+    d->sh = moy_ui_shape();
+    d->fx = d->fx_c = d->pdx = d->pdy = 0;
+}
+
+// Name the part (a kind) and its state for the text and glyphs that follow:
+// its text effect, and in the pressed state the label's offset at scale fs.
+static void use_part(draw_t *d, int kind, int state, int fs) {
+    if (d->sh == NULL) {
+        return;
+    }
+    int role = 0;
+    d->fx = moy_ui_shape_effect(d->sh, kind, state, &role);
+    d->fx_c = d->fx ? moy_ui_token(d->look, role) : -1;
+    if (d->fx_c < 0) {
+        d->fx = 0;
+    }
+    if (state == MOY_UI_PRESSED) {
+        d->pdx = d->sh->metric[MOY_THEME_M_PRESS_DX] * fs;
+        d->pdy = d->sh->metric[MOY_THEME_M_PRESS_DY] * fs;
+    }
 }
 
 static void fill(draw_t *d, int x, int y, int w, int h, int ci) {
@@ -61,15 +85,43 @@ static void rings(draw_t *d, int x, int y, int w, int h, int ci, int n) {
     }
 }
 
-static void text(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
+static void text_at(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
     moy_text(&d->t, MOY_FONT_PETME128, MOY_TEXT_PY, s, n, x, y, d->row->pal[ci & 63],
              d->tfs, MOY_TEXT_LEFT, -1);
     d->row->st[MOY_ST_N_TEXT]++;
 }
 
+// A label in the part's effect (docs/theming_2026-09.md §4.3): `shadow` is
+// the label once more in the effect's colour one pixel down and right,
+// under it; `emboss` is that up and left in the effect's colour and down and
+// right in the label's own.
+static void text(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
+    x += d->pdx;
+    y += d->pdy;
+    if (d->fx == MOY_THEME_FX_SHADOW) {
+        text_at(d, s, n, x + 1, y + 1, d->fx_c);
+    } else if (d->fx == MOY_THEME_FX_EMBOSS) {
+        text_at(d, s, n, x - 1, y - 1, d->fx_c);
+        text_at(d, s, n, x + 1, y + 1, ci);
+    }
+    text_at(d, s, n, x, y, ci);
+}
+
 static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scale) {
-    d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, g, x, y, w, h,
+    d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, g, x + d->pdx, y + d->pdy, w, h,
                                                    d->row->pal[ci & 63], scale);
+}
+
+// The part's surface in `state`, painted in place of its field and edge when
+// the theme gives it one: 1, or 0 for "draw the field and edge as ever".
+static int surface(draw_t *d, moy_ui_box_t b, int part, int state, int field, int edge) {
+    const moy_ui_surface_t *sf = moy_ui_shape_surface(d->sh, part, state);
+    if (sf == NULL) {
+        return 0;
+    }
+    d->row->st[MOY_ST_N_FILL] += moy_ui_paint_surface(&d->t, d->row->pal, d->look, b, sf, field,
+                                                      edge, d->sh->metric[MOY_THEME_M_RADIUS]);
+    return 1;
 }
 
 int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h, int ci,
@@ -134,9 +186,10 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
     open_draw(s, &d);
     int fs = r->fs, x = b.x, y = b.y, w = b.w, h = b.h;
     int16_t c[3];
-    colours(&d, kind, moy_ui_state_of(flags, interact), r->colors, c);
+    int state = moy_ui_state_of(flags, interact);
+    colours(&d, kind, state, r->colors, c);
     int field = c[0], ink = c[1], edge = c[2];
-    if (phase & MOY_UI_PHASE_FRAME) {
+    if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, field, edge)) {
         if (field >= 0) {
             fill(&d, x, y, w, h, field);
         }
@@ -148,6 +201,7 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
+    use_part(&d, kind, state, fs);
     int pad = dflt(r->pad, metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs);
     int fw = 8 * fs * r->scale;
     int tx = x + pad;
@@ -199,9 +253,12 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
                                            : 0);
     int n = metric(MOY_UI_K_CELL, MOY_UI_M_CELL_EDGE);
     if (phase & MOY_UI_PHASE_FRAME) {
-        if (field >= 0) {
+        if (surface(&d, b, kind, state, field, edge)) {
+            n = 0;                          // the surface drew the edge
+        } else if (field >= 0) {
             fill(&d, x, y, w, h, field);
         }
+        use_part(&d, kind, state, fs);
         if (has_label && cap > 0) {
             int cap_y = y + h - cap;
             int cap_ink = ink;
@@ -246,6 +303,10 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
         art->h = (int16_t)ah;
     }
     if (phase & MOY_UI_PHASE_CONTENT) {
+        if (!(phase & MOY_UI_PHASE_FRAME)) {
+            n = moy_ui_shape_surface(d.sh, kind, state) != NULL ? 0 : n;
+            use_part(&d, kind, state, fs);
+        }
         if (!(flags & MOY_UI_F_ICON) && (flags & MOY_UI_F_GLYPH) && k->glyph >= 0) {
             int box = metric(MOY_UI_K_CELL, MOY_UI_M_CELL_GLYPH) * fs;
             glyph(&d, k->glyph, ax + moy_ui_fdiv(aw - box, 2), ay + moy_ui_fdiv(ah - box, 2),
@@ -469,9 +530,10 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     open_draw(s, &d);
     int fs = k->fs, x = b.x, y = b.y, w = b.w, h = b.h;
     int16_t c[3];
-    colours(&d, kind, moy_ui_state_of(flags & ~MOY_UI_F_HOT, interact), NULL, c);
+    int state = moy_ui_state_of(flags & ~MOY_UI_F_HOT, interact);
+    colours(&d, kind, state, NULL, c);
     int bg = c[0], ink = c[1], edge = c[2];
-    if (phase & MOY_UI_PHASE_FRAME) {
+    if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, bg, edge)) {
         fill(&d, x, y, w, h, bg);
         int n = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
         if (n > 0) {
@@ -481,6 +543,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
+    use_part(&d, kind, state, fs);
     int iw = button_iw(flags, fs);
     int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
     int ln = fit_cells(k->label, moy_ui_fdiv(w - 2 * pad - iw, 8 * fs));
@@ -501,9 +564,10 @@ int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
     open_draw(s, &d);
     int fs = k->fs, x = b.x, y = b.y, w = b.w, h = b.h;
     int16_t c[3];
-    colours(&d, kind, moy_ui_state_of(flags, interact), k->colors, c);
+    int state = moy_ui_state_of(flags, interact);
+    colours(&d, kind, state, k->colors, c);
     int bg = c[0], ink = c[1], edge = c[2];
-    if (phase & MOY_UI_PHASE_FRAME) {
+    if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, bg, edge)) {
         if (bg >= 0) {
             fill(&d, x, y, w, h, bg);
         }
@@ -515,6 +579,7 @@ int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
+    use_part(&d, kind, state, fs);
     if (flags & MOY_UI_F_GLYPH) {
         // The glyph REPLACES the label.
         if (k->glyph >= 0) {
@@ -598,12 +663,15 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
     draw_t d;
     open_draw(s, &d);
     int16_t c[3];
-    moy_ui_colors(d.look, MOY_UI_K_TAB, active ? MOY_UI_ON : MOY_UI_REST, c);
+    int state = active ? MOY_UI_ON : MOY_UI_REST;
+    moy_ui_colors(d.look, MOY_UI_K_TAB, state, c);
     int ink_i = active ? c[1] : (ink == MOY_UI_FROM_STYLE ? c[1] : ink);
-    if ((phase & MOY_UI_PHASE_FRAME) && c[0] >= 0) {
+    if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, r, MOY_UI_K_TAB, state, c[0], c[2])
+        && c[0] >= 0) {
         fill(&d, r.x, r.y, r.w, r.h, c[0]);
     }
     if ((phase & MOY_UI_PHASE_CONTENT) && labels_on) {
+        use_part(&d, MOY_UI_K_TAB, state, fs);
         int pad = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_PAD) * fs;
         int box = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_ICON) * fs;
         text(&d, label.p, label.n, r.x + pad + box + pad, r.y + moy_ui_fdiv(r.h - 8 * fs, 2),
@@ -709,7 +777,9 @@ int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b) {
     open_draw(s, &d);
     int16_t c[3];
     moy_ui_colors(d.look, MOY_UI_K_TOOLBAR, MOY_UI_REST, c);
-    fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    if (!surface(&d, b, MOY_UI_K_TOOLBAR, MOY_UI_REST, c[0], c[2])) {
+        fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    }
     return MOY_UI_OK;
 }
 
@@ -770,10 +840,12 @@ int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
     open_draw(s, &d);
     int16_t c[3];
     moy_ui_colors(d.look, MOY_UI_K_PANEL, MOY_UI_REST, c);
-    fill(&d, b.x, b.y, b.w, b.h, c[0]);
-    int n = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_EDGE) * fs;
-    for (int i = 0; i < n; i++) {           // the border grows OUTWARD with fs
-        rectb(&d, b.x - i, b.y - i, b.w + 2 * i, b.h + 2 * i, c[2]);
+    if (!surface(&d, b, MOY_UI_K_PANEL, MOY_UI_REST, c[0], c[2])) {
+        fill(&d, b.x, b.y, b.w, b.h, c[0]);
+        int n = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_EDGE) * fs;
+        for (int i = 0; i < n; i++) {       // the border grows OUTWARD with fs
+            rectb(&d, b.x - i, b.y - i, b.w + 2 * i, b.h + 2 * i, c[2]);
+        }
     }
     int in = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_INSET);
     moy_ui_box_t ct = moy_ui_inset(b, in, in);
@@ -789,7 +861,10 @@ int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
         ct = (moy_ui_box_t){ct.x, (int16_t)(ct.y + sh), ct.w, (int16_t)(ct.h - sh)};
         int16_t tc[3];
         moy_ui_colors(d.look, MOY_UI_K_PANEL_TITLE, MOY_UI_REST, tc);
-        fill(&d, strip.x, strip.y, strip.w, strip.h, tc[0]);
+        if (!surface(&d, strip, MOY_UI_K_PANEL_TITLE, MOY_UI_REST, tc[0], tc[2])) {
+            fill(&d, strip.x, strip.y, strip.w, strip.h, tc[0]);
+        }
+        use_part(&d, MOY_UI_K_PANEL_TITLE, MOY_UI_REST, fs);
         text(&d, title.p, title.n, strip.x + metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_PAD) * fs,
              strip.y + moy_ui_fdiv(strip.h - 8 * fs, 2), tc[1]);
     }
@@ -813,6 +888,20 @@ int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
         int dd = fs + gap + i;
         rectb(&d, b.x - dd, b.y - dd, b.w + 2 * dd, b.h + 2 * dd, c[2]);
     }
+    return MOY_UI_OK;
+}
+
+int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, int *painted) {
+    if (part < 0 || part >= MOY_THEME_PARTS || state < 0 || state >= MOY_THEME_STATES) {
+        return MOY_UI_BAD;
+    }
+    draw_t d;
+    open_draw(s, &d);
+    int16_t c[3] = {-1, -1, -1};
+    if (part < MOY_UI_KINDS) {
+        moy_ui_colors(d.look, part, state < MOY_UI_STATES ? state : MOY_UI_REST, c);
+    }
+    *painted = surface(&d, b, part, state, c[0], c[2]);
     return MOY_UI_OK;
 }
 
