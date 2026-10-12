@@ -17,10 +17,9 @@ struct moy_app {
     const moy_input_ptr_t *ptr; // the pointer the surface rows read, or NULL
     uint32_t theme_gen;         // bumped by every write of the look
     int32_t tokens[MOY_APP_TOKENS];
-    uint8_t name_len, variant_len, skin_len;
+    uint8_t name_len, variant_len;
     char name[MOY_APP_NAME_MAX + 1];
     char variant[MOY_APP_NAME_MAX + 1];
-    char skin[MOY_APP_NAME_MAX + 1];
     const moy_uf_ops_t *uf;     // the user-files layer the store rows reach, or NULL
     uint8_t readable, writable;
     int gated;                  // the gate a store row holds now, -1 for none
@@ -61,7 +60,7 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "surface.canvas", "surface.size", "surface.font_scale", "surface.chrome_scale",
     "surface.windowed", "surface.bar_h", "surface.pointer",
     "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
-    "theme.variant", "theme.skin",
+    "theme.variant",
     "files.readable", "files.ready", "files.begin", "files.end", "files.list",
     "files.count", "files.load", "files.save", "files.delete", "files.duplicate",
     "files.rename", "files.new_name", "files.trash_list", "files.restore",
@@ -561,20 +560,9 @@ int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
     return MOY_APP_OK;
 }
 
-int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n) {
-    if (n > MOY_APP_NAME_MAX) {
-        return MOY_APP_BAD;
-    }
-    seq_open(a);
-    put_name(a->skin, &a->skin_len, skin, n);
-    a->theme_gen++;
-    seq_close(a);
-    return MOY_APP_OK;
-}
-
-size_t moy_app_skin_read(const moy_appabi_t *a, char *out, size_t cap) {
-    size_t n = a->skin_len < cap ? a->skin_len : cap;
-    memcpy(out, a->skin, n);
+size_t moy_app_name_read(const moy_appabi_t *a, char *out, size_t cap) {
+    size_t n = a->name_len < cap ? a->name_len : cap;
+    memcpy(out, a->name, n);
     return n;
 }
 
@@ -650,10 +638,6 @@ int moy_app_theme_name(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_
 
 int moy_app_theme_variant(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len) {
     return name_row(a, g, MOY_ROW_THEME_VARIANT, a->variant, a->variant_len, out, cap, len);
-}
-
-int moy_app_theme_skin(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len) {
-    return name_row(a, g, MOY_ROW_THEME_SKIN, a->skin, a->skin_len, out, cap, len);
 }
 
 // -- prefs ------------------------------------------------------------------------------
@@ -1436,10 +1420,8 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"theme.light", MOY_ROLE_THEME, MOY_ROW_THEME_LIGHT},
     {"theme.name", MOY_ROLE_THEME, MOY_ROW_THEME_NAME},
     {"theme.variant", MOY_ROLE_THEME, MOY_ROW_THEME_VARIANT},
-    {"theme.skin", MOY_ROLE_THEME, MOY_ROW_THEME_SKIN},
     {"theme.set", MOY_ROLE_THEME, MOY_APP_SHELL},
     {"theme.set_variant", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.set_skin", MOY_ROLE_THEME, MOY_APP_SHELL},
     {"files.readable", MOY_ROLE_FILES, MOY_ROW_FILES_READABLE},
     {"files.ready", MOY_ROLE_FILES, MOY_ROW_FILES_READY},
     {"files.begin", MOY_ROLE_FILES, MOY_ROW_FILES_BEGIN},
@@ -1724,10 +1706,8 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return moy_app_theme_light(a, g);
         case MOY_ROW_THEME_NAME:
         case MOY_ROW_THEME_VARIANT:
-        case MOY_ROW_THEME_SKIN:
             rc = (row == MOY_ROW_THEME_NAME ? moy_app_theme_name
-                  : row == MOY_ROW_THEME_VARIANT ? moy_app_theme_variant
-                  : moy_app_theme_skin)(a, g, out, sizeof out, &len);
+                  : moy_app_theme_variant)(a, g, out, sizeof out, &len);
             return rc == MOY_APP_OK ? ans_put(ans, cap, out, len) : -rc;
         case MOY_ROW_FILES_READABLE:
             return moy_app_files_readable(a, g);

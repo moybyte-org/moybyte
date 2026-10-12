@@ -12,7 +12,7 @@ for the rules.
 | touch an ESP32-P4 board | that board's README, then `native/p4/` | the panel is a board DEFINE (`MOY_DSI_PANEL_*`); compositors `native/moy_glass/moy_present_*.c`, PPA canvas `device/p4_canvas.py`, P4 tier `device/p4_desktop.py` over `device/desktop_spine.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once"; `tests/moy_flush_harness/` compiles it with no board |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
-| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
+| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and every row draws through the toolkit: a layout formula moves the T-Deck's 320×240 too |
 | add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in moy-spec | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
 | touch a compiled (wasm) cart or the tier | `docs/wasm_tier_plan_2026-09.md`, then `experiments/wasm_aot/README.md` | the ABI is moy-spec's (proposals/wasm-runtime.md), the measurements are **#158**, and how a host EXECUTES a module never enters the spec |
 | touch `native/moy_wasm/` | its README | VENDORED from our WAMR fork (`make vendor-wamr`, pin in `native/moy_wasm/wamr_pin.h`): fix the fork and re-vendor, never edit the copy; a board TAKES or denies it in board.toml |

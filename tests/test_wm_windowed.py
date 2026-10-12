@@ -1152,7 +1152,7 @@ def test_live_resize_body_follows_grip(tmp_path):
     feel, #58): the focused border lands at the rubber corner, grown area shows
     the panel field, the real relayout still only happens on release."""
     ws = _ws(tmp_path)
-    _BORDER_TOP = ws.theme_colors["chrome_ink"]   # focused border role
+    _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
     win, cw, ch = _engage_resize(ws, drv)
     ow, oh = win.w, win.h
@@ -1180,7 +1180,7 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     """A canvas without blit_strip_rect (the web RecordingLayer) keeps the old
     rubber-band OUTLINE preview and the full-screen backdrop restore."""
     ws = _ws(tmp_path)
-    _BORDER_TOP = ws.theme_colors["chrome_ink"]   # focused border role
+    _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
     ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
     win, cw, ch = _engage_resize(ws, drv)
@@ -1985,8 +1985,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_fli
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "72672824a44ad246b1d71495c25cc09e2bc1795844b12f59665c6e743d804b0f",
-    "5ad6b167e6b80f47a28acf31eb5f2b61f75b89ccc21f3782a5f322ec8b914f76",
+    "b4a20097a46ccf3f0e7bc9178a635729ce1ca6fc8efec99e55662156c2ce6394",
+    "3f2d5fdc46dac82467460ea9eb09ff534e3a8f01621bf6b3a001244ea5389d2d",
 )
 
 

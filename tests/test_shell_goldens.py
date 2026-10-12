@@ -21,14 +21,14 @@ which is exactly the risk of transcribing hand-rolled widgets onto a toolkit.
 
 The matrix, and why it is this one
 ----------------------------------
-Ten configurations, each ONE axis away from the frozen baseline or from
+Ten configurations, each ONE axis away from the T-Deck row or from
 the windowed row, so a red golden names the axis by itself. Every configuration renders the SAME surface
 list (plus the two desk surfaces that only exist on the windowed tier), which
 keeps the matrix a clean product instead of a pile of special cases.
 
-  tdeck_320x240_fs1_dark   the frozen baseline: shared canvas (sys IS game),
-                           font scale 1, dark. Every other tier degrades to
-                           these pixels, so this is the reference row.
+  tdeck_320x240_fs1_dark   the T-Deck: shared canvas (sys IS game), font
+                           scale 1, dark -- the smallest canvas the layout
+                           formulas meet, so this is the reference row.
   tdeck_320x240_fs1_light  the SAME geometry, `variant="light"`. The variant
                            axis in isolation: any difference from the row
                            above is purely the token set. Before this file,
@@ -130,14 +130,10 @@ Three things, in descending order of likelihood: a shell DRAW change; a
 picker grid and every Editor tab render the seeded store, and the Editor tabs
 render `Star Catcher` specifically); and a font/palette change.
 
-One structural fact learned while proving this harness can fail (2026-08-19):
-at 320x240 / font scale 1 the shell takes its FROZEN hand-rolled branches --
-`editor_app._draw_zone` and its siblings are guarded `if not ws.layout._base`
--- so the `runtime/ui.py` toolkit is only live on the other three rows.
-Perturbing `ui.button`'s pad by one unit turned guition / big_fs3 / p4 red and
-left BOTH tdeck rows green. So the Phase 3 widget transcription is gated by
-the non-`_base` configs; a matrix of just the baseline tier would have watched
-that phase go by without seeing it.
+Every row draws through the toolkit and the `*Layout` formulas, the T-Deck's
+320x240 included: the frozen 320x240 branches (`_base`) retired with theming
+phase 3 step 4 (docs/theming_2026-09.md §9), so a widget or a layout formula
+change moves the T-Deck rows as it moves the others.
 
 Re-baselining is a DELIBERATE act
 ---------------------------------
@@ -761,8 +757,8 @@ def test_editor_tabs_render_independently(tmp_path):
     wrong.
 
     Every ORDERED PAIR, at the config where it showed. font_scale 3 is what
-    collapses the workspace panes; the 320x240 rows take the frozen `_base`
-    branches, where no editor is ever bounded. The pairs share one workstation, so
+    collapses the workspace panes; at 320x240 the workspace is off, so no
+    editor is ever bounded there. The pairs share one workstation, so
     the state also ACCUMULATES across them -- a stronger claim than pairwise, for
     the price of one build."""
     cfg = CONFIGS[_INDEPENDENCE_CONFIG]

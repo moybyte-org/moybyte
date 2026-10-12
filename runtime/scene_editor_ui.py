@@ -106,9 +106,7 @@ class SceneLayout(LayoutBase):
     the paged tile palette + pan/zoom column, the props row and the toolbar,
     derived from the SYSTEM canvas size (w, h) + font scale.
 
-    Same hard contract as MapLayout: at (320, 240, 1) every field equals the
-    frozen module constant, byte for byte (the `_base` branch); the responsive
-    formulas only run on a larger canvas / bigger font. The world VIEW is the
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas. The world VIEW is the
     star of the reflow -- a big panel shows the whole 320x240 viewport (and
     beyond) with no panning."""
 
@@ -116,33 +114,12 @@ class SceneLayout(LayoutBase):
                  chrome_scale=None):
         # `bounds` (bx, by, bw, bh) confines the whole editor to a SUB-RECT of the
         # system canvas -- the right pane of the combined Blocks+Scene workspace
-        # (blocks-left / objects-right, Scratch-style). A bounded layout never takes
-        # the frozen 320x240 branch (it's a big-screen feature), so `_base` excludes
-        # it and the T-Deck's scene tab is byte-identical.
-        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None,
+        # (blocks-left / objects-right, Scratch-style), a big-screen feature: the
+        # T-Deck's scene tab is never bounded.
+        LayoutBase.__init__(self, w, h, font_scale,
                             chrome_scale=chrome_scale)
         fs = self.fs
         self.zooms = _SV_ZOOMS
-        if self._base:
-            self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
-            self.panel = (8, 16, 304, 204)
-            self.title_xy = (14, 18)
-            self.sv_x0, self.sv_y0 = _SV_X0, _SV_Y0
-            self.sv_avail_w, self.sv_avail_h = _SV_AVAIL_W, _SV_AVAIL_H
-            self.tp_x0, self.tp_y0 = _TP_X0, _TP_Y0
-            self.tp_cell, self.tp_cols, self.tp_rows = _TP_CELL, _TP_COLS, _TP_ROWS
-            self.tp_page = _TP_PAGE
-            self.tp_area = _TP_AREA
-            self.tp_prev, self.tp_next = _TP_PREV, _TP_NEXT
-            self.flip_btn = _SC_FLIP
-            self.zoom_btn = _SC_ZOOM
-            self.pan_up, self.pan_lf, self.pan_rt, self.pan_dn = \
-                _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN
-            self.tag_btn, self.del_btn, self.snap_btn = _SC_TAG, _SC_DEL, _SC_SNAP
-            self.undo_btn, self.redo_btn = _SC_UNDO, _SC_REDO
-            self.front_btn, self.back_btn = _SC_FRONT, _SC_BACK
-            self.pan_thresh = _SC_PAN_THRESH
-            return
         # -- responsive: the MapLayout formulas (right column anchored to the
         # panel's right edge, button row to its bottom, view fills the rest) ----
         bar_h = 18 * self.cs          # the OS bar's own height (#203)

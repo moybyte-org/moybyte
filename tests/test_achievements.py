@@ -164,7 +164,7 @@ def test_achievements_view_hides_secrets(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     # Open the achievements view via its trophy button, then render it.
-    _tap(drv, C._SET_ACH)
+    _tap(drv, ws.layout.set_ach)
     assert ws.show_achievements
     drv.frame(1 / 30)
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
@@ -209,8 +209,7 @@ def test_konami_wrong_key_restarts(tmp_path):
 def test_clock_tap_egg(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    # The egg hit regions now come from the responsive layout (#39); at the 320x240
-    # baseline they are exactly the old _CLOCK_HIT / _SET_TITLE_HIT.
+    # The egg hit regions come from the responsive layout (#39).
     for _ in range(ws.ach_ui._CLOCK_TAP_GOAL):
         _tap(drv, ws.layout.clock_hit())
     assert ws.ach.has("clock_tinker")        # hidden "Time Traveler"

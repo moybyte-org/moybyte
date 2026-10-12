@@ -75,8 +75,7 @@ _LAZY_MODULES = {
     "scene_editor_ui": ("SceneEditorUI",),
     "music_editor_ui": ("MusicEditorUI", "_MU_VIEW", "_MU_PLAY", "_mu_pad_rect"),
     "paint_layer": ("PaintLayer", "ThemeLayer", "_PG_X0", "_PG_Y0", "_PG_SPAN",
-                    "_SW_X0", "_SW_Y0", "_SW", "_SW_COLS", "_PAINT_SIZE",
-                    "_PAINT_CLOSE", "_PAINT_GET", "_PAINT_PUT"),
+                    "_SW_X0", "_SW_Y0", "_SW", "_SW_COLS"),
 }
 
 
@@ -267,9 +266,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # source of the _SET_* geometry constants; the two tests reach as console._X are
 # imported back here.
 try:
-    from settings_layer import (SettingsLayer, _SET_BACK, _SET_ACH)
+    from settings_layer import SettingsLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import (SettingsLayer, _SET_BACK, _SET_ACH)
+    from runtime.settings_layer import SettingsLayer
 
 # The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
 # the full-screen text view + drawing + code-UI state; the shared ws.editor
@@ -333,11 +332,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard, WALLPAPER_KEY
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
-# -- theme + variant, the widget skin, the system font scale, the wallpaper
-# choice and the top-bar icon sheet. It is also the module that installs a skin
-# (`ui.use_skin`), for the same reason it installs a theme: the choice is a
-# persisted setting and the installed skin is process-wide state inside `ui`.
-# Every surface just draws through `ui` and never learns a skin exists.
+# -- theme + variant, the system font scale, the wallpaper choice and the
+# top-bar icon sheet. It also installs the theme's shape (`ui.use_shape`): the
+# choice is a persisted setting and the installed shape is process-wide state
+# inside `ui`. Every surface just draws through `ui`.
 try:
     from appearance import Appearance
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -711,10 +709,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                              self.look.effective_chrome_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
         # on the SYSTEM canvas at native size, so their layout (visible cols/rows,
-        # button rects, palette/menu) derives from (w, h, font_scale) -- exactly the
-        # _base-verbatim pattern Layout uses for the desktop. Rebuilt by _relayout on
-        # a size/font change. (Sprite/paint + map editors stay a 320x240 viewport --
-        # step 3.)
+        # button rects, palette/menu) derives from (w, h, font_scale), as Layout's
+        # does for the desktop. Rebuilt by _relayout on a size/font change.
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
                                       self.look.effective_font_scale(),
                                       self.look.effective_chrome_scale())

@@ -58,11 +58,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
 
 try:
-    from settings_layer import (_SET_ROW_H, _SET_X, _SET_W, _SET_ROW_Y0,
-                                 _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
+    from settings_layer import _SET_ROW_H
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import (_SET_ROW_H, _SET_X, _SET_W, _SET_ROW_Y0,
-                                         _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
+    from runtime.settings_layer import _SET_ROW_H
 
 try:
     from code_layer import (_CODE_LH, _CODE_X0, _CODE_Y0,
@@ -145,10 +143,8 @@ _PAGE_NEXT = (304, 110, 14, 24)
 # reclaiming it, deliberately, for two reasons. (1) Settings is an inset DIALOG
 # over the wallpaper, so 24*fs at the bottom simply reads against the 20*fs at the
 # top -- removing the dock moved only the dock's own pixels, and not one row of the
-# panel. (2) The `_base` branch below is frozen VERBATIM at 320x240/fs1 by
-# contract, so it could not follow a reclaim; growing the panel on the responsive
-# tiers alone would leave the T-Deck's Settings proportioned differently from every
-# other tier's for no reason but that one branch is a literal. (The launcher grid
+# panel. (2) Every tier's Settings keeps one proportion, the T-Deck's included.
+# (The launcher grid
 # is the other half of the story: it reclaimed its share back in #46, when the
 # launcher stopped drawing the dock, and still runs to grid_bottom.)
 _PANEL_FLOOR = 24       # Settings panel bottom inset, in fs-scaled px
@@ -161,9 +157,8 @@ _PANEL_FLOOR = 24       # Settings panel bottom inset, in fs-scaled px
 _CURSOR_BASE = 7
 _CURSOR_ACCEL = 2
 
-# (_BASE_W/_BASE_H -- the baseline the responsive layout reproduces EXACTLY, #39
-# graceful degradation -- come from the layout_base leaf above; console.py still
-# imports them back from here.)
+# (_BASE_W/_BASE_H -- the T-Deck's canvas, every layout's default size -- come
+# from the layout_base leaf above; console.py still imports them back from here.)
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 # (The letterbox/bezel fill _VIEWPORT_BEZEL (#39) moved to wm.py with the viewport
 # composite it belongs to -- FullscreenStackWM.composite_game is its only user.)
@@ -224,12 +219,7 @@ class Layout(LayoutBase):
     hand-placed 320x240 constants. The desktop reflows to fill a larger panel and
     the chrome scales with the font.
 
-    The single hard contract: at (w, h, fs) == (320, 240, 1) every field equals the
-    frozen module constant, byte-for-byte -- the T-Deck path is unchanged. The exact
-    baseline is reproduced VERBATIM (the `_base` branch) rather than re-derived, so
-    no reflow formula's integer-floor can drift a pixel at the default size; the
-    responsive formulas only run on a larger canvas / bigger font. The editors stay
-    a fixed 320x240 viewport in step 1, so their constants are NOT routed here.
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas. The editors' geometry is their own `*Layout`'s.
 
     `font_w` is the on-screen char-cell width (8 * fs) so callers center/space text
     that the SystemCanvas renders at `fs`.
@@ -265,7 +255,7 @@ class Layout(LayoutBase):
         self.icon_box = _ICON_BOX * fs
         self.icon_y0 = self.status_h + 8 * fs
         self.grid_bottom = self.h - 4 * fs           # launcher grid floor
-        self.icon_x0 = _ICON_X0 if self._base else _ICON_X0 * fs   # legacy attr
+        self.icon_x0 = _ICON_X0 * fs
         # The Library SHELF (visual identity v1's library concept mockup) on EVERY
         # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
         # one launcher look everywhere). A framed panel (header "LIBRARY" + footer
@@ -380,32 +370,22 @@ class Layout(LayoutBase):
         # the panel height), so a taller row costs rows on SCREEN, never rows.
         self.set_row_h = _SET_ROW_H * cs
         self.row_text_dy = (self.set_row_h - _SET_ROW_H * fs) // 2
-        if self._base:
-            self.set_x = _SET_X
-            self.set_w = _SET_W
-            self.set_row_y0 = _SET_ROW_Y0
-            self.settings_panel = (8, 16, 304, 198)         # frozen baseline
-            self.set_back = _SET_BACK
-            self.set_ach = _SET_ACH
-            self.set_title_hit = _SET_TITLE_HIT
-            self.set_head_dy = 0
-        else:
-            # The Settings panel fills the band between the status strip and the
-            # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
-            py0 = self.status_h + 2 * fs
-            ph = self.h - _PANEL_FLOOR * fs - py0
-            self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
-            self.set_x = self.settings_panel[0] + 10 * fs
-            self.set_w = self.settings_panel[2] - 20 * fs
-            # The title band holds the X / trophy buttons, so it takes the chrome
-            # scale with them; its gear + "SETTINGS" text re-center via set_head_dy.
-            self.set_row_y0 = py0 + 24 * cs
-            self.set_head_dy = 12 * (cs - fs)
-            pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
-            self.set_back = (pr - 20 * cs, py0 + 2 * cs, 18 * cs, 14 * cs)
-            self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
-            self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * cs,
-                                  10 * self.font_w, 16 * cs)
+        # The Settings panel fills the band between the status strip and the
+        # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
+        py0 = self.status_h + 2 * fs
+        ph = self.h - _PANEL_FLOOR * fs - py0
+        self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
+        self.set_x = self.settings_panel[0] + 10 * fs
+        self.set_w = self.settings_panel[2] - 20 * fs
+        # The title band holds the X / trophy buttons, so it takes the chrome
+        # scale with them; its gear + "SETTINGS" text re-center via set_head_dy.
+        self.set_row_y0 = py0 + 24 * cs
+        self.set_head_dy = 12 * (cs - fs)
+        pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
+        self.set_back = (pr - 20 * cs, py0 + 2 * cs, 18 * cs, 14 * cs)
+        self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
+        self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * cs,
+                              10 * self.font_w, 16 * cs)
 
     # -- derived rects (mirror the old module-constant arithmetic) ----------
     def settings_row_rect(self, i):
@@ -486,11 +466,7 @@ class CodeLayout(LayoutBase):
     visible lines + WIDER columns; at a bigger font everything (cell, bar, palette)
     grows with the text.
 
-    The single hard contract (mirrors `Layout`): at (w, h, fs) == (320, 240, 1)
-    every field equals the frozen `_CODE_*`/`_SYM_*`/`_ED_*` module constant, byte
-    for byte -- so the degradation path is exactly today. That baseline is
-    reproduced VERBATIM (the `_base` branch); the responsive formulas only run on a
-    larger canvas / bigger font.
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas: the text grid, the status band and the symbol palette.
 
     `cell` is the on-screen char-cell width (8 * fs); `lh` the line height. `cols` /
     `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
@@ -523,18 +499,13 @@ class CodeLayout(LayoutBase):
         self.x0 = _CODE_X0 * fs
         self.y0 = _CODE_Y0 * cs
         # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
-        if self._base:
-            self.cols = CodeEditor.COLS          # 38
-            self.rows = CodeEditor.ROWS          # 20
-            self.status_band = None              # no room on the 320x240 baseline
-        else:
-            avail_w = self.w - self.x0
-            self.cols = max(8, avail_w // self.cell)
-            # Status band (visual identity v1 Phase 3, the Studio mockup's
-            # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
-            self.status_band = (0, self.sym_y - 12 * fs, self.w, 12 * fs)
-            avail_h = self.status_band[1] - self.y0
-            self.rows = max(4, avail_h // self.lh)
+        avail_w = self.w - self.x0
+        self.cols = max(8, avail_w // self.cell)
+        # Status band (visual identity v1 Phase 3, the Studio mockup's
+        # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
+        self.status_band = (0, self.sym_y - 12 * fs, self.w, 12 * fs)
+        avail_h = self.status_band[1] - self.y0
+        self.rows = max(4, avail_h // self.lh)
 
     def code_area(self):
         return (self.x0, self.y0, self.cols * self.cell, self.rows * self.lh)

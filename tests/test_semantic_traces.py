@@ -2157,14 +2157,13 @@ def roles_trace(ws):
     # -- theme
     t = ctx.theme
     th = t.colors()
-    say("theme", t.name(), t.variant(), t.skin(), t.light(), th == ws.theme_colors,
+    say("theme", t.name(), t.variant(), t.light(), th == ws.theme_colors,
         len(th) > 10, t.token(0) == th["panel"], t.colors() is th)
     gen = t.gen()
     t.set("forest")
     t.set_variant("light")
     say("theme set", t.name(), t.variant(), t.light(), t.colors() == ws.theme_colors,
         t.gen() > gen)
-    t.set_skin(t.skin())
     t.set("night", variant="dark")
     say("theme back", t.name(), t.variant(), t.light())
 
@@ -2435,7 +2434,7 @@ roles artwork carts clipboard damage files install nav notify prefs surface them
 damage 1 2 0
 surface True True 1 1 False True
 pointer True True
-theme night dark default False True True True True
+theme night dark False True True True True
 theme set forest light True True True
 theme back night dark False
 prefs absent None 5

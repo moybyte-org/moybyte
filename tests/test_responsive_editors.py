@@ -85,7 +85,7 @@ def _render_editor(ws, view):
 
 
 # ---------------------------------------------------------------------------
-# Graceful degradation: 320x240 / font 1x is byte-identical to today.
+# A distinct 320x240 system canvas draws what the shared canvas draws.
 # ---------------------------------------------------------------------------
 
 def test_code_editor_320x240_is_byte_identical(tmp_path):
@@ -115,33 +115,6 @@ def test_block_menu_320x240_is_byte_identical(tmp_path):
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
-
-
-def test_code_editor_baseline_layout_constants(tmp_path):
-    """The CodeLayout at (320, 240, 1) reproduces the frozen module constants."""
-    from runtime import console as C
-    lay = C.CodeLayout(320, 240, 1)
-    assert lay._base
-    assert lay.cols == C.CodeEditor.COLS and lay.rows == C.CodeEditor.ROWS
-    # The RUN/SAVE/CLOSE top-band icons were dissolved into the unified bar (Stage-4
-    # rollout): CodeLayout no longer carries their rects (PLAY/SAVE/X live in the bar).
-    assert not hasattr(lay, "run_btn")
-    assert lay.code_area() == C._CODE_AREA
-    assert lay.sym_area == C._SYM_AREA
-
-
-def test_block_editor_baseline_layout_constants(tmp_path):
-    """The BlockLayout at (320, 240, 1) reproduces the frozen module constants."""
-    from runtime import console as C
-    lay = C.BlockLayout(320, 240, 1)
-    assert lay._base
-    assert lay.rows == C._BLK_ROWS and lay.menu_rows == C._BLK_MENU_ROWS
-    assert lay.add_btn == C._BLK_ADD and lay.code_btn == C._BLK_CODE
-    # SAVE/CLOSE dissolved into the unified bar (Stage-4 rollout): the outline shifted
-    # below the bar + a hint/status strip (y0=30, 10 rows), and BlockLayout no longer
-    # carries save_btn/close_btn (SAVE -> bar SAVE, CLOSE -> bar context X).
-    assert not hasattr(lay, "save_btn") and not hasattr(lay, "close_btn")
-    assert lay.area() == C._BLK_AREA and lay.menu == C._BLK_MENU
 
 
 # ---------------------------------------------------------------------------
@@ -437,27 +410,21 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
     assert bufs[0] == bufs[1]
 
 
-def test_paint_layout_baseline_constants(tmp_path):
-    """PaintLayout at (320, 240, 1) reproduces the frozen module constants. No
-    save_btn (#111 -- the SAVE button was removed, not just relocated)."""
+def test_paint_layout_fits_the_320x240_canvas():
+    """The T-Deck's Sprites tab (docs/theming_2026-09.md §9, phase 3 step 4):
+    the 144px grid, the tool rows under the grid and the palette, clear of the
+    button column, and GET / PUT / FILE stacked clear of CLOSE."""
     from runtime import paint_layer as P
     lay = P.PaintLayout(320, 240, 1)
-    assert lay._base
-    assert not hasattr(lay, "save_btn")
-    assert lay.pg_area == P._PG_AREA and lay.pg_span == P._PG_SPAN
-    assert lay.sw_area == P._SW_AREA
-    assert lay.spr_prev == P._SPR_PREV and lay.spr_next == P._SPR_NEXT
-    assert lay.size_btn == P._PAINT_SIZE
-    assert lay.get_btn == P._PAINT_GET and lay.put_btn == P._PAINT_PUT
-    assert lay.close_btn == P._PAINT_CLOSE
-    # The #90 two tool rows: one flat list (row 1 then row 2), aligned to _TOOLS, all
-    # inside the panel and clear of the pixel grid.
+    assert lay.pg_span == 144
+    gx, gy, gw, gh = lay.pg_area
+    col_x = min(b[0] for b in (lay.get_btn, lay.put_btn, lay.files_btn, lay.close_btn))
     assert len(lay.tool_btns) == len(P._TOOLS)
-    assert lay.tool_btns[0][1] == P._TOOL_ROW1_Y          # row 1 first
-    assert lay.tool_btns[len(P._TOOL_ROW1)][1] == P._TOOL_ROW2_Y   # row 2 starts
-    grid_bottom = P._PG_Y0 + P._PG_SPAN
     for (x, y, w, h) in lay.tool_btns:
-        assert y >= grid_bottom and y + h <= P._PAINT_CLOSE[1]
+        assert y >= gy + gh and x + w <= col_x and y + h <= 240
+    for b in (lay.get_btn, lay.put_btn, lay.files_btn):
+        assert b[1] + b[3] <= lay.close_btn[1]
+    assert lay.status_xy[1] + 8 <= lay.panel[1] + lay.panel[3]
 
 
 def test_paint_files_button_clears_the_sprite_preview(tmp_path):
@@ -529,27 +496,6 @@ def test_map_editor_320x240_is_byte_identical(tmp_path):
     assert bufs[0] == bufs[1]
 
 
-def test_map_layout_baseline_constants(tmp_path):
-    """MapLayout at (320, 240, 1) reproduces the frozen module constants. No
-    save_btn (#111 -- the SAVE button was removed, not just relocated)."""
-    from runtime import map_editor_ui as M
-    lay = M.MapLayout(320, 240, 1)
-    assert lay._base
-    assert not hasattr(lay, "save_btn")
-    assert (lay.mv_x0, lay.mv_y0) == (M._MV_X0, M._MV_Y0)
-    assert (lay.mv_avail_w, lay.mv_avail_h) == (M._MV_AVAIL_W, M._MV_AVAIL_H)
-    # The detail rungs are the frozen list; the OVERVIEW sentinel is appended on
-    # every tier (#215) and is always last, so a rung is identified by name.
-    assert lay.zooms == tuple(M._MV_ZOOMS) + (M._MV_OVERVIEW,)
-    assert lay.tp_area == M._TP_AREA and lay.tp_page == M._TP_PAGE
-    assert lay.tp_prev == M._TP_PREV and lay.tp_next == M._TP_NEXT
-    assert lay.sky_btn == M._TP_SKY and lay.zoom_btn == M._MAP_ZOOM
-    assert lay.size_btn == M._MAP_SIZE
-    assert (lay.pan_up, lay.pan_lf, lay.pan_rt, lay.pan_dn) == \
-        (M._PAN_UP, M._PAN_LF, M._PAN_RT, M._PAN_DN)
-    assert (lay.erase_btn, lay.close_btn) == (M._MAP_ERASE, M._MAP_CLOSE)
-
-
 def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
     """At 960x600 the map view rectangle grows, and the extra pixels buy MORE MAP:
     the cell is the map field size and does not change with the screen."""
@@ -604,20 +550,6 @@ def test_music_editor_320x240_is_byte_identical(tmp_path):
     assert bufs[0] == bufs[1]
 
 
-def test_music_layout_baseline_constants(tmp_path):
-    """MusicLayout at (320, 240, 1) reproduces the frozen module constants."""
-    from runtime import music_editor_ui as M
-    lay = M.MusicLayout(320, 240, 1)
-    assert lay._base
-    assert lay.title_y == M._MU_TITLE_Y and lay.view_btn == M._MU_VIEW
-    assert (lay.obj_prev, lay.obj_next) == (M._MU_OBJ_PREV, M._MU_OBJ_NEXT)
-    assert (lay.speed_dn, lay.speed_up) == (M._MU_SPEED_DN, M._MU_SPEED_UP)
-    assert lay.list_area == M._MU_LIST_AREA and lay.rows == M._MU_ROWS
-    assert lay.pad_rect(0, 0) == M._mu_pad_rect(0, 0)
-    assert lay.pad_rect(1, 3) == M._mu_pad_rect(1, 3)
-    assert (lay.play_btn, lay.loop_btn) == (M._MU_PLAY, M._MU_LOOP)
-
-
 def test_music_editor_shows_more_rows_on_large_canvas(tmp_path):
     """At 960x600 the tracker list shows MORE visible rows than the baseline 10,
     and the editor renders valid pixels on the system canvas."""
@@ -656,17 +588,6 @@ def test_cards_editor_320x240_is_byte_identical(tmp_path):
     a = _render_editor(_ws_shared(tmp_path / "a"), "cards")
     b = _render_editor(_ws_distinct_320(tmp_path / "b"), "cards")
     assert a == b
-
-
-def test_cards_layout_baseline_constants(tmp_path):
-    """CardsLayout at (320, 240, 1) reproduces the frozen module constants."""
-    from runtime import cards_layer as CL
-    lay = CL.CardsLayout(320, 240, 1)
-    assert lay._base
-    assert (lay.card_x, lay.card_w) == (CL._CARD_X, CL._CARD_W)
-    assert (lay.card_y0, lay.card_h) == (CL._CARD_Y0, CL._CARD_H)
-    assert lay.view_bottom == CL._CARD_VIEW_BOTTOM
-    assert (lay.scroll_up, lay.scroll_dn) == (CL._CARD_SCROLL_UP, CL._CARD_SCROLL_DN)
 
 
 def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):

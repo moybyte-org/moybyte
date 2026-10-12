@@ -1,13 +1,13 @@
 // moy_ui: the widget toolkit's bodies in C, with style and strings as data
 // (docs/kernel_toolkit_2026-10.md). This file is the style resolution: the
 // kinds, the states, each kind's (field, ink, edge) in each state resolved
-// against a theme's token row, each kind's metric slots, and the skin by name.
+// against a theme's token row, and each kind's metric slots.
 // The data is style.json's, generated into moy_ui_tables.c
 // (tools/gen_ui_tables.py); nothing here holds a colour or a pad.
 //
 // A LOOK is the style resolved against one token row: per kind and state,
 // three palette indices, -1 for "paint nothing". A look flattens lazily, one
-// kind at a time, and again when the skin moves. There are MOY_UI_LOOKS of
+// kind at a time, and again when its row is set. There are MOY_UI_LOOKS of
 // them, allocated once in PSRAM where a board has it: four for the Python
 // face's ring of theme dicts (the live theme, and the throwaway or preview
 // dicts a surface passes beside it), and one for a compiled run, so no
@@ -42,19 +42,12 @@ int moy_ui_button_kind(const char *name, size_t n);
 // A state's id by name, or -1.
 int moy_ui_state(const char *name, size_t n);
 
-// The skin: install one by name (an unknown name installs the default) and
-// answer the index installed; the active one; the generation, which moves on
-// every install.
-int moy_ui_skin_use(const char *name, size_t n);
-int moy_ui_skin(void);
-uint32_t moy_ui_gen(void);
-
 // Point `look` at a token row (MOY_UI_TOKENS values, MOY_UI_ABSENT where the
 // theme is silent): its flatten starts over.
 int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]);
 // (field, ink, edge) of `kind` in `state` under `look`, -1 for nothing.
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
-// The active skin's metric slots for `kind` (its count in *n, 0: none).
+// The metric slots of `kind` (its count in *n, 0: none).
 const int16_t *moy_ui_metrics(int kind, int *n);
 
 // A token of `look`'s row: its palette index, or -1 where the theme is silent.
@@ -78,6 +71,7 @@ enum {
     MOY_UI_FILL_PINSTRIPE = 3, MOY_UI_FILL_GRADIENT = 4,
 };
 enum { MOY_UI_SURF_BORDER = 1, MOY_UI_SURF_SHADOW = 2 };
+#define MOY_UI_SHADOW 2             // a surface's shadow depth in pixels (D1's hard shadow)
 #define MOY_UI_TERM_STYLE INT8_MIN
 #define MOY_UI_TERM_TOKEN(t) ((int8_t)(-1 - (t)))
 typedef struct {
@@ -93,6 +87,7 @@ typedef struct {
 #define MOY_UI_STIDS 64
 #define MOY_UI_FRAME_FIELDS 6
 #define MOY_UI_FX_NAMED_NONE 0xfd
+#define MOY_UI_SHAPE_NAME 25        // a theme's name, NUL-terminated (moy_theme.h's max + 1)
 typedef struct {
     int8_t metric[MOY_THEME_METRICS];
     uint8_t n_surf, n_fx;
@@ -103,19 +98,27 @@ typedef struct {
     // alignment + 1, [2..5] the buttons' letters in order; 0 where the theme
     // is silent, which draws the style's own (a silent style is classic).
     uint8_t frame[MOY_UI_FRAME_FIELDS];
+    // The theme the shape is of ("" for the empty one): what a library of its
+    // own (the host's compiled-app library) compares to install the same.
+    char name[MOY_UI_SHAPE_NAME];
 } moy_ui_shape_t;
 extern const int moy_ui_shape_size;     // sizeof, for the bindings' layout check
 // The shape of a theme that names nothing: metrics 0, no effect, no surface.
 void moy_ui_shape_clear(moy_ui_shape_t *sh);
-// Install the shape every primitive draws with (NULL: the empty one); like the
-// skin, one for the process. Each state a part leaves unnamed takes what its
-// chain (style.json's theme.chain) reaches, here, once.
+// Install the shape every primitive draws with (NULL: the empty one), one
+// for the process. Each state a part leaves unnamed takes what its chain
+// (style.json's theme.chain) reaches, here, once.
 int moy_ui_shape_use(const moy_ui_shape_t *sh);
 const moy_ui_shape_t *moy_ui_shape(void);
 // The record and the effect `part` paints in `state` under an installed
 // shape: NULL / 0 where it names none.
 const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state);
 int moy_ui_shape_effect(const moy_ui_shape_t *sh, int part, int state, int *role);
+// The readability check of a pattern fill (docs/theming_2026-09.md §7): each
+// part and state of `sh` whose surface is a dither or a pinstripe, its label's
+// ink in `look` against both of the pattern's colours on theme.contrast. The
+// first `cap` (part, state) pairs that miss go to `out`; answers how many miss.
+int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)[2], int cap);
 
 // The painter (moy_ui_paint.c): surface `sf` into box `b` of a target, its
 // terms resolved through `look` (`field` and `edge` stand for

@@ -75,7 +75,7 @@ uint32_t moy_app_wasm_grant(void) {
     return s_g;
 }
 
-uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *skin,
+uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
                             uint32_t cap) {
     moy_appabi_t *a = s_a;
     if (a == NULL) {
@@ -87,7 +87,7 @@ uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *sk
             uint32_t gen = moy_app_theme_read(a, out) + 1u;
             gen = gen != 0u ? gen : 1u;
             if (gen != have && cap > 0u) {
-                skin[moy_app_skin_read(a, skin, cap - 1u)] = 0;
+                name[moy_app_name_read(a, name, cap - 1u)] = 0;
             }
             if (moy_app_seq_end(a, q)) {
                 return gen;
@@ -209,7 +209,7 @@ static int32_t run(int how, int row, const int32_t *num, const span_t *s, int ns
 
 enum {
     N_THEME_TOKEN, N_THEME_GEN, N_THEME_LIGHT, N_THEME_NAME, N_THEME_VARIANT,
-    N_THEME_SKIN, N_THEME_SET, N_THEME_SET_VARIANT, N_THEME_SET_SKIN,
+    N_THEME_SET, N_THEME_SET_VARIANT,
     N_FILES_READABLE, N_FILES_READY, N_FILES_LIST, N_FILES_COUNT, N_FILES_LOAD,
     N_FILES_SAVE, N_FILES_DELETE,
     N_NAV_OPEN_APP,
@@ -223,7 +223,7 @@ enum {
 // Each native's "role.verb", in the table's order.
 static const char *const ROW_OF[N_COUNT] = {
     "theme.token", "theme.gen", "theme.light", "theme.name", "theme.variant",
-    "theme.skin", "theme.set", "theme.set_variant", "theme.set_skin",
+    "theme.set", "theme.set_variant",
     "files.readable", "files.ready", "files.list", "files.count", "files.load",
     "files.save", "files.delete",
     "nav.open_app",
@@ -277,10 +277,6 @@ static int32_t w_theme_variant(void *e, uint8_t *buf, uint32_t cap) {
     (void)e;
     return run(SEQ, R(N_THEME_VARIANT), NULL, NULL, 0, buf, cap);
 }
-static int32_t w_theme_skin(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_THEME_SKIN), NULL, NULL, 0, buf, cap);
-}
 static int32_t w_theme_set(void *e, const uint8_t *nm, uint32_t nn, const uint8_t *v,
                            uint32_t vn) {
     (void)e;
@@ -291,11 +287,6 @@ static int32_t w_theme_set_variant(void *e, const uint8_t *v, uint32_t vn) {
     (void)e;
     span_t s[1] = { { v, vn } };
     return run(HOP, R(N_THEME_SET_VARIANT), NULL, s, 1, NULL, 0);
-}
-static int32_t w_theme_set_skin(void *e, const uint8_t *v, uint32_t vn) {
-    (void)e;
-    span_t s[1] = { { v, vn } };
-    return run(HOP, R(N_THEME_SET_SKIN), NULL, s, 1, NULL, 0);
 }
 static int32_t w_files_readable(void *e) {
     (void)e;
@@ -410,10 +401,8 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "theme_light", FN(w_theme_light), "()i", NULL },
     { "theme_name", FN(w_theme_name), "(*~)i", NULL },
     { "theme_variant", FN(w_theme_variant), "(*~)i", NULL },
-    { "theme_skin", FN(w_theme_skin), "(*~)i", NULL },
     { "theme_set", FN(w_theme_set), "(*~*~)i", NULL },
     { "theme_set_variant", FN(w_theme_set_variant), "(*~)i", NULL },
-    { "theme_set_skin", FN(w_theme_set_skin), "(*~)i", NULL },
     { "files_readable", FN(w_files_readable), "()i", NULL },
     { "files_ready", FN(w_files_ready), "()i", NULL },
     { "files_list", FN(w_files_list), "(*~*~)i", NULL },

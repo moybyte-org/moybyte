@@ -1,9 +1,8 @@
 """The LOOK (#209 landing D) -- `Workstation.look`.
 
 Every verb that changes how the desktop looks: the panel theme and its
-dark/light variant, the widget skin, the system font scale, the desktop
-wallpaper and the top-bar icon sheet. Three axes plus a backdrop plus the bar
-art, which until this landing were five unrelated stretches of the kernel that
+dark/light variant, the system font scale, the desktop wallpaper and the
+top-bar icon sheet. Two axes plus a backdrop plus the bar art, which until this landing were five unrelated stretches of the kernel that
 happened to share a Settings screen.
 
 Not to be confused with `appearance_app.py`, which is the PICKER a kid taps --
@@ -88,7 +87,7 @@ _ui_is_light = _uimod.is_light
 
 
 class Appearance:
-    """The look: theme, variant, skin, font scale, wallpaper, icon sheet.
+    """The look: theme, variant, font scale, wallpaper, icon sheet.
 
     Plain methods, no properties (a property forward measured +5.1us against a
     plain hop's +0.5us on this codebase). Nothing here runs per frame -- the
@@ -132,14 +131,6 @@ class Appearance:
         # The live token dict lives on the KERNEL, not here -- see the module
         # docstring. `set_theme` is its only author; this is the first write.
         ws.theme_colors = theme_colors(DEFAULT_THEME)
-        # The widget SKIN (Appearance -> THEMES -> the skin chips) is the third
-        # axis, and unlike the two above it is not this object's state: it is
-        # installed INTO `ui`, process-wide. A fresh Workstation therefore
-        # ADOPTS what is installed rather than asserting the default over it --
-        # on a board the two readings are the same (one Workstation, and `ui`'s
-        # own tables are the default), and on a host that builds several in one
-        # process an unrelated boot must not silently restyle the others.
-        self.skin_name = _uimod.active_skin()
         self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
                                       # the single source; select_wallpaper drives it.
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
@@ -400,7 +391,7 @@ class Appearance:
     def _persist_font_scale(self):
         self.ws.system.set("font_scale", self.font_scale)
 
-    # -- panel theme + widget skin -------------------------------------------
+    # -- panel theme -----------------------------------------------------------
 
     def set_theme(self, name, persist=True, variant=None):
         """Pick the panel THEME (Appearance app -> THEMES): swap the chrome token set
@@ -446,44 +437,17 @@ class Appearance:
         cur = self.theme_name if self.theme_name in names else names[0]
         self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
 
-    def skin_names(self):
-        """The widget skins a picker may offer, in presentation order."""
-        return _uimod.skin_names()
-
-    def set_skin(self, name, persist=True):
-        """Install the widget SKIN (Appearance -> THEMES -> the skin chips) and
-        persist the choice, exactly as `set_theme` does for the colorway.
-
-        A skin is a delta over the toolkit's style (native/moy_ui/style.json) -- fields, edges, label
-        alignment -- so every surface changes at once and none of them knows:
-        this is the ONLY place the catalog is installed. An unknown name
-        resolves to the default (`ui.use_skin`), and the RESOLVED name is what
-        gets stored, so a store that names a skin this build dropped heals
-        itself on the next pick instead of re-failing every boot."""
-        ws = self.ws
-        self.skin_name = _uimod.use_skin(name)
-        self.publish()
-        # Same two invalidations a theme change needs: the cached top-bar strip
-        # paints widget pixels and its key does not fold the skin, and every
-        # other surface repaints from the damage epoch.
-        if getattr(ws, "bar_layer", None) is not None:
-            ws.bar_layer.invalidate()
-        ws._dirty = True
-        if persist:
-            ws.system.set("skin", self.skin_name)
-
     # -- the per-draw gate ---------------------------------------------------
 
     def publish(self):
         """Write the live look into the app ABI's token table (native/moy_app):
-        the theme's name, its variant, every token of `ws.theme_colors` and
-        the skin, under a new generation -- what `ctx.theme`'s rows answer and
+        the theme's name, its variant and every token of `ws.theme_colors`,
+        under a new generation -- what `ctx.theme`'s rows answer and
         its colour dict is rebuilt from. The console calls it once its app
         state exists; every switch after that comes through here."""
         abi = getattr(self.ws, "app_abi", None)
         if abi is not None:
             abi.theme_write(self.theme_name, self.theme_variant, self.ws.theme_colors)
-            abi.theme_write_skin(self.skin_name)
 
     def content_colors(self):
         """The live theme's CONTENT roles (code syntax, block colours):

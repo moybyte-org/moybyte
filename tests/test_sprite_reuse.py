@@ -147,7 +147,6 @@ def test_tile_imported_via_shared_sheet(tmp_path):
 # the real console pointer path -- the same handle_pointer() the device runs.
 
 from runtime import host_app  # noqa: E402
-from runtime import console  # noqa: E402
 
 
 def _tap(ws, rect):
@@ -175,20 +174,20 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
         ws.paint.paint(i, i)
     painted = [ws.sheet.tget(src_tile, lx, ly)
                for ly in range(ws.sheet.TILE) for lx in range(ws.sheet.TILE)]
-    _tap(ws, console._PAINT_PUT)
+    _tap(ws, ws.paint_layer.layout.put_btn)
     assert ws.paint_status == "PUT SPR " + str(src_tile)
     # It really landed in the shared sheet on disk (not just in RAM).
     shared = SpriteSheet.from_hex(moy_carts.load_shared_sheet(ws.carts_root))
     assert _tile_pixels(shared, src_tile) == painted
 
     # Cart B: a different cart, same tile id starts blank. GET imports from shared.
-    _tap(ws, console._PAINT_CLOSE)
+    _tap(ws, ws.paint_layer.layout.close_btn)
     _open_cart(ws, "Tap Only Red")
     ws._open_paint()
     ws.paint.n = src_tile
     assert [ws.sheet.tget(src_tile, lx, ly)
             for ly in range(ws.sheet.TILE) for lx in range(ws.sheet.TILE)] != painted
-    _tap(ws, console._PAINT_GET)
+    _tap(ws, ws.paint_layer.layout.get_btn)
     assert ws.paint_status == "GOT SPR " + str(src_tile)
     # The tile a kid painted in cart A now lives in cart B's sheet, unrepainted.
     assert [ws.sheet.tget(src_tile, lx, ly)
@@ -206,7 +205,7 @@ def test_get_reports_when_shared_sheet_is_empty(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Pixel Pet")
     ws._open_paint()
-    _tap(ws, console._PAINT_GET)                 # nothing saved yet
+    _tap(ws, ws.paint_layer.layout.get_btn)                 # nothing saved yet
     assert ws.paint_status in ("NO SHARED", "SHARED EMPTY")
     # The current tile was left untouched (no spurious write).
     assert ws.sheet is not None

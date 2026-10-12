@@ -231,7 +231,7 @@ Keep:
 - visible sprite/tile grids where they express real editable data;
 - flat fills, thin outlines, and deterministic geometry.
 
-Avoid:
+Avoid, in the default theme (a theme may choose otherwise, `docs/theming_2026-09.md`):
 
 - bevels and fake plastic controls;
 - CRT scanlines over ordinary system UI;
@@ -314,9 +314,9 @@ danger
 The exact storage shape is an implementation decision. The behavioral rule is not:
 system surfaces consume semantic roles rather than scattering literal indices.
 
-The shipped `night` theme must remain byte-identical until golden/parity tests are
-deliberately migrated. Open Machine should begin as an additional theme or an opt-in
-prototype, not an in-place mutation of the default.
+The default theme, `night`, carries the look `docs/theming_2026-09.md` §1 chose
+(D1, landed 2026-10-12 by its phase 3 step 4); a change to it is a named
+re-baseline of the goldens.
 
 *Status (2026-07-23): SHIPPED, extended.* Every theme family now carries a **dark
 and a light variant** (`chrome.THEME_VARIANTS`, picked in Appearance → THEMES →

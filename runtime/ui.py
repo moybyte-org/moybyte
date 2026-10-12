@@ -3,7 +3,7 @@
 #   wrap_words                        the text path's wrap (C); text_width beside it
 #   -- rect algebra                   inset, cut_top, cut_bottom, cut_left, split
 #   -- interaction state              widget_state
-#   -- the style                      use_skin, metrics, state_colors (C)
+#   -- the style                      metrics, state_colors (C)
 #   -- the theme's shape              use_shape, paint (C)
 #   -- window frames                  frame, frame_buttons, frame_band (C)
 #   -- draw == tap                    Hits
@@ -30,9 +30,8 @@ the redesign thread):
     compiled app draws the same widgets. No retained tree, no per-frame
     allocation beyond small tuples. tests/ui_twin.py keeps the Python bodies
     as the oracle.
-  * Widgets take RECTS; the per-surface Layout classes keep owning reflow
-    (their frozen 320x240 `_base` branches are the parity contract). The
-    combinators here are helpers FOR those classes, not a layout engine.
+  * Widgets take RECTS; the per-surface Layout classes keep owning reflow.
+    The combinators here are helpers FOR those classes, not a layout engine.
   * Colors come from the semantic theme tokens (chrome.theme_colors -- surface/ink/
     focus/play/author/danger/...), so restyling an app means routing it
     through this module, not hunting literals.
@@ -41,9 +40,9 @@ the redesign thread):
     alignment -- is native/moy_ui/style.json, resolved by native/moy_ui's C
     against the theme (the style section below is its face, and caches what
     it answers so a widget pays one identity compare and two dict gets and
-    allocates nothing). A skin is a delta in that file, installed by name
-    (`use_skin`). Four frozen quirks stayed code; style.json's "quirks"
-    records them.
+    allocates nothing). What a theme changes beyond colours -- surfaces, a
+    frame style, metrics, text effects -- is its shape (`use_shape`). Four
+    frozen quirks stayed code; style.json's "quirks" records them.
   * Geometry functions are PURE and separate from the draw functions, so a
     surface's tap handler hit-tests the exact rects the draw used (the
     `action_rects` pattern, generalized) -- a cached bar strip can draw once
@@ -222,14 +221,13 @@ def widget_state(on=False, hot=False, disabled=False, interact=None):
 # The look and the numbers are DATA: native/moy_ui/style.json, generated into
 # the C tables native/moy_ui resolves (docs/kernel_toolkit_2026-10.md §2). A
 # kind's (field, ink, edge) in each state is a chain of token specs resolved
-# against the theme's token row, and a skin is a delta over the default entry,
-# installed by name (`use_skin`). Nothing in this module holds a colour or a
+# against the theme's token row. Nothing in this module holds a colour or a
 # pad.
 #
 # What stays here is the FACE: `state_colors` hands back a shared tuple from a
 # cache keyed on the theme dict's identity, the kind and the state, so a widget
 # draw allocates nothing and crosses into C only on the first draw of a kind
-# under a theme (and again after a skin install). A theme dict is packed into
+# under a theme. A theme dict is packed into
 # one of the C side's four looks the first time it is seen; the ring keeps the
 # four most recent, because several surfaces pass `self.theme or {}` and an
 # EMPTY DICT IS A FRESH OBJECT every call, which must not evict the live theme.
@@ -267,7 +265,7 @@ for _i, _s in enumerate(_C.states()):
     _STATE_ID[_s] = _i
 _REST_ID = _STATE_ID[REST]
 _KIND_ID = {}                         # kind name -> id, interned at first use
-_METRICS = {}                         # kind -> the active skin's tuple
+_METRICS = {}                         # kind -> its metric tuple
 _RING = []                            # [theme dict, look slot, cache], newest first
 _RING_MAX = 4
 _TH = None                            # the theme dict _FLAT caches for
@@ -284,42 +282,13 @@ def _load_metrics():
     ScrollRegion.BAR_W = m["scrollbar"][SB_W]
 
 
-def skin_names():
-    """The skins, in presentation order -- what a picker lists."""
-    return _C.skins()
-
-
-def active_skin():
-    """The installed skin's name."""
-    return _C.skin()
-
-
-def use_skin(name):
-    """Install skin `name` (an unknown name installs the default, as
-    `chrome.theme_colors` does for an unknown theme). Returns the name that
-    was installed, so a caller persists the resolved value. Every cached
-    colour and metric is dropped: the next draw of each kind resolves again,
-    and `ScrollRegion.BAR_W` follows the scrollbar's width."""
-    global _TH, _FLAT
-    got = _C.skin(name)
-    # The ring goes whole, as the theme dicts are re-packed on their next draw:
-    # a dict a caller refilled in place since it was packed must not keep
-    # resolving against the row it had then.
-    del _RING[:]
-    _TH = None
-    _FLAT = {}
-    _load_metrics()
-    return got
-
-
 def kinds():
     """The kinds a style entry colours."""
     return _C.kinds()
 
 
 def metrics(kind):
-    """The active skin's metric tuple for `kind`; index it with the slot
-    constants above."""
+    """The metric tuple for `kind`; index it with the slot constants above."""
     return _METRICS[kind]
 
 
@@ -706,7 +675,7 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     caller that opts in pays anything. `state` is what `Hits.state_of` returned
     for this button's id.
 
-    The field/ink/edge come from the skin under the key `kind` maps to
+    The field/ink/edge come from the style under the key `kind` maps to
     (style.json's "button_kinds"), the pads/boxes/alignment from
     `_METRICS["button"]`."""
     flags = (_F_ON if on else 0) | (_F_DISABLED if disabled else 0)
@@ -766,7 +735,7 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     of its shape ("toggle", whose ON reads as switched on).
 
     `colors` is the same escape hatch `row` and `cell` carry: an explicit
-    (field, ink, edge) triple bypassing the skin, for a site whose pixels are
+    (field, ink, edge) triple bypassing the style, for a site whose pixels are
     frozen off-token. `field` None paints no field, `edge` None no border."""
     flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
         _F_DISABLED if disabled else 0)
@@ -835,8 +804,8 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
                  arithmetic follows it, so a scale-2 headline truncates at the
                  right column instead of escaping the rect.
       `edge`     draw the resolved edge as a border (Files/Storybook) or not
-                 (Settings, the system menu popup). Its WEIGHT is skin metrics.
-      `kind`     which skin entry to resolve against, as `button`'s `kind` is
+                 (Settings, the system menu popup). Its WEIGHT is style metrics.
+      `kind`     which style entry to resolve against, as `button`'s `kind` is
                  (there is no name map here: a row's kind IS the catalog key).
                  The default is the list-row palette every caller had before
                  this argument existed. The shell's own row kinds are in
@@ -844,14 +813,14 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
                  panel-CHROME rows that paint NO field until they are selected,
                  which this kind cannot express because its rest field spec is
                  always a colour.
-      `colors`   an explicit (field, ink, edge) triple, bypassing the skin --
+      `colors`   an explicit (field, ink, edge) triple, bypassing the style --
                  the escape hatch for sites whose pixels are frozen off-token
                  (Storybook's literal 7/0 rows, `cards_layer`'s own palette).
                  `field` None paints no field at all. Reach for `kind` first:
                  a colour that is a widget STATE belongs in the catalog, and
                  #207 is the triage that moved ten such sites out of here.
       `glyph_ink`/`glyph_size`  the leading glyph's colour and box, when it is
-                 not the label's ink at the skin's box (a bright badge beside
+                 not the label's ink at the style's box (a bright badge beside
                  quiet text; a 16x16 egg).
       `value`    a right-aligned secondary string (the Settings/WiFi value
                  column); the label truncates to whatever is left, and the
@@ -967,7 +936,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
                    drawn once `cell` has returned; a caller that needs the
                    frame on top of its picture passes `colors=(f, i, None)`
                    and stamps the border itself.)
-      `kind`       which skin entry to resolve against, as `row`.
+      `kind`       which style entry to resolve against, as `row`.
       `colors`     an explicit (field, ink, edge) triple, as `row`.
 
     Default draw order is field -> caption -> edge -> icon/glyph, so the
@@ -1018,7 +987,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
 def _cell_edge(cv, x, y, w, h, c, n):
     cv.rectb(x, y, w, h, c)
     i = 1
-    while i < n:                           # skins only; the default is 1 ring
+    while i < n:
         cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, c)
         i += 1
 
@@ -1031,7 +1000,7 @@ def tab_row_rects(rect, tabs, fs, gap=None):
     frozen icon ladder). `tabs` is a sequence of (id, label) -- icons are the
     draw pass's concern.
 
-    The gap/pad/icon-box are skin metrics, but they are the one group that
+    The gap/pad/icon-box are style metrics, but they are the one group that
     SIZES a widget: changing them reflows the tab ladder and re-baselines the
     goldens. That is a deliberate versioned act, not a data tweak (Section 3.3)."""
     labels = []
@@ -1058,23 +1027,28 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
         slim.append((tid, label))
         icons[tid] = icon_kind
     rects = tab_row_rects(rect, slim, fs)
-    look = _LOOK if th is _TH else _look(th)
-    m = _METRICS["tab"]
-    pad = m[TAB_PAD] * fs
-    box = m[TAB_ICON] * fs
     for tid, r, labels_on in rects:
-        text = str(_tab_label(tabs, tid))
         img = icon_for(icons[tid]) if icon_for is not None else None
-        if img is None:
-            _C.tab(cv, look, r, tid == active, labels_on, text, ink, _ALL)
-        else:
-            x, y, w, h = r
-            _C.tab(cv, look, r, tid == active, labels_on, text, ink, _FRAME)
-            cv.spr(img, x + (pad if labels_on else (w - box) // 2), y + (h - box) // 2, fs)
-            _C.tab(cv, look, r, tid == active, labels_on, text, ink, _CONTENT)
+        tab(cv, th, r, tid == active, str(_tab_label(tabs, tid)), labels_on, ink, img)
         if hits is not None:
             hits.add(r, "tab", tid)
     return rects
+
+
+def tab(cv, th, r, active, label="", labels_on=False, ink=None, img=None):
+    """One tab chip of `tab_row` in rect `r`: its field (the ON look when
+    `active`), the 16x16 `img` in its icon slot, `label` when `labels_on`."""
+    look = _LOOK if th is _TH else _look(th)
+    if img is None:
+        _C.tab(cv, look, r, active, labels_on, label, ink, _ALL)
+        return
+    fs = _fs(cv)
+    x, y, w, h = r
+    box = _METRICS["tab"][TAB_ICON] * fs
+    _C.tab(cv, look, r, active, labels_on, label, ink, _FRAME)
+    cv.spr(img, x + (_METRICS["tab"][TAB_PAD] * fs if labels_on else (w - box) // 2),
+           y + (h - box) // 2, fs)
+    _C.tab(cv, look, r, active, labels_on, label, ink, _CONTENT)
 
 
 def _tab_label(tabs, tid):
@@ -1103,8 +1077,8 @@ def status_row(cv, th, rect, items):
 #
 # They take NO theme dict -- they draw over a cart's own colours -- so their
 # ring/ink are theme-independent literals living in the metrics tuple beside
-# their pads. That is the honest home for them: they are numbers a skin sets,
-# not roles a theme resolves.
+# their pads. That is the honest home for them: they are numbers the style
+# sets, not roles a theme resolves.
 
 def game_btn(cv, rect, label, fill):
     """A labeled action button. Preserves the frozen baseline quirk VERBATIM:
@@ -1146,7 +1120,7 @@ def mini_btn(cv, rect, label, fill, label_rect=None):
 # --- the theme's shape ---------------------------------------------------------
 # A theme's surfaces, corner radius, pressed-label offset and text effects
 # (docs/theming_2026-09.md §4.2-§4.4), resolved once in C and drawn by every
-# primitive. Like the skin, one for the process.
+# primitive, one for the process.
 
 _PART_ID = {}
 _THEME_STATE_ID = {}
@@ -1158,6 +1132,14 @@ def use_shape(name):
     """Install theme `name`'s shape for every primitive (None: the empty one,
     which draws as no theme had one)."""
     _C.use_shape(name)
+
+
+def pattern_unreadable(th):
+    """The installed shape's dither and pinstripe surfaces whose label ink
+    misses the contrast floor against either colour in theme `th`, as
+    (part, state) pairs (docs/theming_2026-09.md §7). A miss never refuses a
+    theme."""
+    return _C.pattern_unreadable(_look(th))
 
 
 def paint(cv, th, rect, part, state=REST):
@@ -1208,12 +1190,12 @@ def dialog(cv, rect, ring=None, fill=None):
     """The dark MODAL panel shell (the blocks prompts/insert menu, the system
     menu, the graduation banner): dark-purple base + a colored frame. Geometry
     stays the caller's (their hit rects are test-pinned constants); only the
-    shell drawing is shared. `ring`/`fill` default to the skin's."""
+    shell drawing is shared. `ring`/`fill` default to the style's."""
     _C.dialog(cv, rect, ring, fill)
 
 
 def dialog_rings():
-    """How many rings the active skin draws around a dialog (`dialog`'s edge
+    """How many rings the style draws around a dialog (`dialog`'s edge
     count): what the kernel's chrome draws its menu and ABOUT box with."""
     return _METRICS["dialog"][DLG_EDGE]
 
@@ -1301,10 +1283,10 @@ class ScrollRegion:
     same geometry -- along the right edge vertically, the bottom edge
     horizontally)."""
 
-    # Scaled by fs at draw. This is skin METRICS (`_METRICS["scrollbar"]`) and
-    # `use_skin` rebinds it, because the bar width is the one metric that is
-    # also a public class attribute -- a caller reading BAR_W and the pixels
-    # drawn must never disagree. The module's last line sets it from C.
+    # Scaled by fs at draw. This is style METRICS (`_METRICS["scrollbar"]`),
+    # the one metric that is also a public class attribute -- a caller reading
+    # BAR_W and the pixels drawn must never disagree. The module's last line
+    # sets it from C.
     BAR_W = 4
     # Kinetic scrolling (#113 Phase 4). Velocities are px/ms so the tuning is
     # frame-rate independent; every dt is INJECTED (the loop's tick), never

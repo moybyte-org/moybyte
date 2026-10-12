@@ -89,42 +89,42 @@ class _CountingHits(ui.Hits):
 # pre-Phase-3a tree; a raw RGB565 A/B of the two module objects in one process
 # agreed on all 48 (0 differing bytes).
 SHIPPED_WIDGET_HASHES = (
-    "night/dark 320x240@1 f8108d19044793e1",
-    "night/dark 480x320@1 a1ac33fe1201673a",
-    "night/dark 1024x600@2 f35bb9aa13bc678a",
-    "night/dark 320x240@3 1ad7d2949cf72343",
-    "night/light 320x240@1 aaba6f3b32d40464",
-    "night/light 480x320@1 ee8eafacd28ebd44",
-    "night/light 1024x600@2 0782647e7ae9de1e",
-    "night/light 320x240@3 b6a942f24118f1b7",
-    "indigo/dark 320x240@1 72962530ccb605ba",
-    "indigo/dark 480x320@1 e3b77268f8608596",
-    "indigo/dark 1024x600@2 ac228d08e7b080e1",
-    "indigo/dark 320x240@3 8db6e103afb6d0de",
-    "indigo/light 320x240@1 be3f3a308dd510f2",
-    "indigo/light 480x320@1 037c229b72141e14",
-    "indigo/light 1024x600@2 b0d918d77e41b586",
-    "indigo/light 320x240@3 8033ce97f42f7f61",
-    "berry/dark 320x240@1 190e7efeb5e3c0fc",
-    "berry/dark 480x320@1 da71cb285c9c318c",
-    "berry/dark 1024x600@2 0708319d240dc470",
-    "berry/dark 320x240@3 802cbcd8bbcd57e9",
-    "berry/light 320x240@1 2103cf71543ec6e3",
-    "berry/light 480x320@1 073838a618fc7f2c",
-    "berry/light 1024x600@2 451376eb0b4c2153",
-    "berry/light 320x240@3 7bce28740b8eb807",
-    "forest/dark 320x240@1 85302653d81b6d95",
-    "forest/dark 480x320@1 0c8c29726383420e",
-    "forest/dark 1024x600@2 651ad5dcbf62b697",
-    "forest/dark 320x240@3 64e593bb9f584958",
+    "night/dark 320x240@1 0cb57928f2ebeb75",
+    "night/dark 480x320@1 01f99c5363fa33ce",
+    "night/dark 1024x600@2 6dfa9a05c3a41987",
+    "night/dark 320x240@3 c343f4fb6c3775f8",
+    "night/light 320x240@1 5635396e37980851",
+    "night/light 480x320@1 66b148010a402929",
+    "night/light 1024x600@2 49ed8f11eea607a1",
+    "night/light 320x240@3 f8b0be4bf8b6e201",
+    "indigo/dark 320x240@1 ffab511583384162",
+    "indigo/dark 480x320@1 6718cd9e2cd0a4e9",
+    "indigo/dark 1024x600@2 9d0cf7b5ee5afa6d",
+    "indigo/dark 320x240@3 5db265d6185655e2",
+    "indigo/light 320x240@1 f8d92eaa38302b1b",
+    "indigo/light 480x320@1 7a9da76c75747824",
+    "indigo/light 1024x600@2 a776df2d582d7525",
+    "indigo/light 320x240@3 2c1df2aa3a2935ec",
+    "berry/dark 320x240@1 b01966d8159d8acd",
+    "berry/dark 480x320@1 c77fde1ab374249f",
+    "berry/dark 1024x600@2 c61b2c317f9136e3",
+    "berry/dark 320x240@3 e114f42b8774a10f",
+    "berry/light 320x240@1 9b52b87610ee9087",
+    "berry/light 480x320@1 c3f7146803f30a7f",
+    "berry/light 1024x600@2 67140521889d6dae",
+    "berry/light 320x240@3 e2d3395d2306e7d2",
+    "forest/dark 320x240@1 b90c839316c2e538",
+    "forest/dark 480x320@1 5ab07a48b2945fc2",
+    "forest/dark 1024x600@2 02251a1b260be50b",
+    "forest/dark 320x240@3 cc1544b3bf52955d",
     "forest/light 320x240@1 2a18a81f55f951f4",
     "forest/light 480x320@1 71479964c0535242",
     "forest/light 1024x600@2 13367de583abfc13",
     "forest/light 320x240@3 37450731fc28bbf9",
-    "slate/dark 320x240@1 83abe25993cbf820",
-    "slate/dark 480x320@1 bf551ff15d7e2232",
-    "slate/dark 1024x600@2 3aaf24928583b0b9",
-    "slate/dark 320x240@3 526a785bf8c315a3",
+    "slate/dark 320x240@1 75d38a288beeea54",
+    "slate/dark 480x320@1 7a779d1f151a071f",
+    "slate/dark 1024x600@2 4dba96d015e0b2d6",
+    "slate/dark 320x240@3 8e1f9792772681ce",
     "slate/light 320x240@1 ed8efaefb14a47bd",
     "slate/light 480x320@1 eec11a96c80a9c14",
     "slate/light 1024x600@2 65698a96e51c3da8",
@@ -133,10 +133,10 @@ SHIPPED_WIDGET_HASHES = (
     "machine/dark 480x320@1 91f89748658bc962",
     "machine/dark 1024x600@2 387c2a580e7fca1c",
     "machine/dark 320x240@3 86e72a17d54d8c44",
-    "machine/light 320x240@1 fc0a1b294a31c829",
-    "machine/light 480x320@1 1837c59cdab0f52e",
-    "machine/light 1024x600@2 f9f24b590dd2c874",
-    "machine/light 320x240@3 3a0d204690518100",
+    "machine/light 320x240@1 b91fd481fa34bf26",
+    "machine/light 480x320@1 e2aacc49e09e86e5",
+    "machine/light 1024x600@2 8c2e8faa5158bcb4",
+    "machine/light 320x240@3 81e9acfe363c0c5f",
     "platinum/dark 320x240@1 720d378fe76856ea",
     "platinum/dark 480x320@1 d3881c99b479b558",
     "platinum/dark 1024x600@2 f54ffd18e95aba4b",
@@ -145,14 +145,22 @@ SHIPPED_WIDGET_HASHES = (
     "platinum/light 480x320@1 a944d0d72173f5f2",
     "platinum/light 1024x600@2 0d592b3a9720856c",
     "platinum/light 320x240@3 567f142d0c9c4a39",
-    "win95/dark 320x240@1 4eb0f5d13f4941b2",
-    "win95/dark 480x320@1 e7b815e10720c833",
-    "win95/dark 1024x600@2 b8224fe13645ea22",
-    "win95/dark 320x240@3 c18e8416568247f4",
+    "win95/dark 320x240@1 669526c9a144d6a9",
+    "win95/dark 480x320@1 312e567c4ff10021",
+    "win95/dark 1024x600@2 ca63600e21f6a4ed",
+    "win95/dark 320x240@3 69cf2b704ed0a105",
     "win95/light 320x240@1 3c58b62ff3c942d9",
     "win95/light 480x320@1 6d3bfdcee35c31f8",
     "win95/light 1024x600@2 36af2ce9997cc0b8",
     "win95/light 320x240@3 9ccdbf133d7bdbce",
+    "outline/dark 320x240@1 0cb57928f2ebeb75",
+    "outline/dark 480x320@1 01f99c5363fa33ce",
+    "outline/dark 1024x600@2 6dfa9a05c3a41987",
+    "outline/dark 320x240@3 c343f4fb6c3775f8",
+    "outline/light 320x240@1 5635396e37980851",
+    "outline/light 480x320@1 66b148010a402929",
+    "outline/light 1024x600@2 49ed8f11eea607a1",
+    "outline/light 320x240@3 f8b0be4bf8b6e201",
 )
 
 _SIZES = ((320, 240, 1), (480, 320, 1), (1024, 600, 2), (320, 240, 3))
@@ -293,7 +301,7 @@ def test_state_names_are_distinct_constants():
 # -- tokens: derived, never new literals ---------------------------------------
 
 def test_every_state_resolves_on_all_twelve_theme_sets():
-    """The restyle promise: a skin/theme that names NO state token still paints
+    """The restyle promise: a theme that names NO state token still paints
     a correct cue, so all 12 family x variant sets keep working unmodified."""
     for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
@@ -361,7 +369,7 @@ def test_ui_stays_a_leaf():
     assert names, "no imports found -- is the scan still reading ui.py?"
     for name in names:
         leaf = name.split(".")[-1]
-        assert leaf not in ("chrome", "console", "skin", "settings_layer",
+        assert leaf not in ("chrome", "console", "settings_layer",
                             "wm_windowed"), name
     # The imports are the C this module is the face of, the array type its
     # token rows and hit buffers travel in, struct to read a scroll state's
@@ -805,7 +813,7 @@ def test_cell_draws_a_centred_glyph_or_icon_in_the_art_rect():
 
 
 # =============================================================================
-# 5. the widget matrix: every kind in every state, both skins
+# 5. the widget matrix: every kind in every state, each theme in its shape
 # =============================================================================
 
 def _paint_matrix(cv, th):
@@ -862,66 +870,51 @@ def _matrix_bar(cv, th, y):
     sr.draw_bar(cv, th)
 
 
-# skin theme/variant sha256[:16] of the index readout at 320x320@1.
+# theme/variant sha256[:16] of the index readout at 320x320@1, the theme's
+# shape installed.
 WIDGET_MATRIX_HASHES = (
-    "default night/dark babd1e933157eac8",
-    "default night/light eb666cdc27a9983e",
-    "default indigo/dark 1f5b2687fb082baf",
-    "default indigo/light 3faf3fb024f8d111",
-    "default berry/dark 5733e75345aff7c4",
-    "default berry/light 1a3d39ac5a098fa5",
-    "default forest/dark cebdedcf4eef037e",
-    "default forest/light 5d96e40e41764211",
-    "default slate/dark 4d58e451940478a3",
-    "default slate/light 63aa1a7b86f1dbe7",
-    "default machine/dark 65f2d1029e4a47be",
-    "default machine/light 83cc6bd9a56cd0be",
-    "default platinum/dark 30d03e8a611e704d",
-    "default platinum/light e1fabd328f2f933a",
-    "default win95/dark e363c736237a7c2c",
-    "default win95/light 83495fd337e49d53",
-    "outline night/dark 9ed88f5b13c83257",
-    "outline night/light bb907d737c9224e9",
-    "outline indigo/dark 23ad64a994c553f3",
-    "outline indigo/light 630f059649d3fa5c",
-    "outline berry/dark eefb5c1eb3efe41a",
-    "outline berry/light e5da731b61ce3a12",
-    "outline forest/dark 6b2697bd57a365aa",
-    "outline forest/light c432768e346a346d",
-    "outline slate/dark a0dffbd013cff200",
-    "outline slate/light b2afd05463488cce",
-    "outline machine/dark 8580e1cce536e540",
-    "outline machine/light bb907d737c9224e9",
-    "outline platinum/dark c8717a4803750c9b",
-    "outline platinum/light 2a0fdc5aecd4dbd5",
-    "outline win95/dark 56b81509850bc83d",
-    "outline win95/light 5aa9a4521b7c4bdd",
+    "night/dark eacd2ec8885054ca",
+    "night/light 7225746c3f7fd9a8",
+    "indigo/dark 97df294b2099d54c",
+    "indigo/light 10c9a7a9b81b0b31",
+    "berry/dark b33685002cfe98e2",
+    "berry/light 7441cc6c7e63ed68",
+    "forest/dark d84375ba27dbc483",
+    "forest/light 815f962a8a0eb5b6",
+    "slate/dark 99a5468f0ac26b41",
+    "slate/light fc7f255c352fec32",
+    "machine/dark 44f834ea6580f65e",
+    "machine/light 00110bafe487161e",
+    "platinum/dark e6f6bbf6903e7608",
+    "platinum/light 55c678dfd2ab24b0",
+    "win95/dark f8e11776201207a6",
+    "win95/light 5204d3df66f989fa",
+    "outline/dark 844142682b826775",
+    "outline/light bee9c0d4e95446e2",
 )
 
 
 def _matrix_hashes():
     out = []
     try:
-        for sk in ui.skin_names():
-            ui.use_skin(sk)
-            for name in THEME_NAMES:
-                for variant in THEME_VARIANTS:
-                    cv = SystemCanvas(320, 320)
-                    _paint_matrix(cv, theme_colors(name, variant))
-                    out.append("%s %s/%s %s" % (
-                        sk, name, variant,
-                        hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
+        for name in THEME_NAMES:
+            ui.use_shape(name)
+            for variant in THEME_VARIANTS:
+                cv = SystemCanvas(320, 320)
+                _paint_matrix(cv, theme_colors(name, variant))
+                out.append("%s/%s %s" % (
+                    name, variant, hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
     finally:
-        ui.use_skin("default")
+        ui.use_shape(None)
     return out
 
 
 def test_every_kind_in_every_state_is_byte_identical():
     """The widget matrix (docs/kernel_toolkit_2026-10.md §7): each style kind
-    in each state, both skins, all twelve theme sets -- pinned before the
-    toolkit crossed to C, so the crossing cannot move one pixel of it."""
+    in each state, every seed theme in each variant under its own shape --
+    pinned so a style or a painter change moves none of it unnamed."""
     got = _matrix_hashes()
-    assert len(got) == len(WIDGET_MATRIX_HASHES) == 32
+    assert len(got) == len(WIDGET_MATRIX_HASHES) == 2 * len(THEME_NAMES)
     for g, w in zip(got, WIDGET_MATRIX_HASHES):
         assert g == w, "a kind's pixels moved: %s (pinned %s)" % (g, w)
 

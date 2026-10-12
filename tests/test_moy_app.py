@@ -53,10 +53,6 @@ class _Servers:
     def set_variant(self, g, v):
         self.say("set_variant", v)
 
-    def set_skin(self, g, name):
-        self.say("set_skin", name)
-        return 7
-
     # every shell row of the other roles: the grant's id, the arguments back
     def __getattr__(self, verb):
         if verb.startswith("_"):
@@ -162,14 +158,11 @@ def run(sp, ap, say, mi, root):
 
     # -- the theme rows
     t = ap.Theme(app, sg)
-    say("blank", t.colors(), t.gen(), t.light(), t.name(), t.variant(), t.skin(),
-        t.token(0))
+    say("blank", t.colors(), t.gen(), t.light(), t.name(), t.variant(), t.token(0))
     app.theme_write("night", "dark", {"panel": 60, "edge": 13, "surface_light": False})
     d = t.colors()
     say("theme", sorted(d.items()), t.colors() is d, t.gen(), t.light(), t.name(),
         t.variant(), t.token(0), t.token(1), t.token(9), t.token(20))
-    app.theme_write_skin("outline")
-    say("skin", t.skin(), t.gen(), t.colors() is d, t.colors() == d)
     app.theme_write("machine", "light", {"surface_light": True, "panel": 1,
                                          "bar_light": True})
     say("light", t.light(), sorted(t.colors().items()), t.name(), t.variant())
@@ -192,7 +185,7 @@ def run(sp, ap, say, mi, root):
     say("kept", t.name(), t.gen())
     t.set("berry", variant="light")
     t.set_variant("dark")
-    say("served", t.set_skin("outline"), sorted(app.served().items()))
+    say("served", sorted(app.served().items()))
 
     # -- the roles served in Python: the grant checked, the row counted, the
     # server called with the grant first

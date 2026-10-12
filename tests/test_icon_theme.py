@@ -129,7 +129,7 @@ def test_save_invalidates_bar_cache_and_bar_still_draws(tmp_path):
     ws.look.save_icons()
     assert ws._bar_img_cache == {}                            # cache invalidated by save
     # Back to a desktop bar so the changed pixels are actually re-blit; no crash.
-    drv.click(*_center(C._PAINT_CLOSE))
+    drv.click(*_center(ws.paint_layer.layout.close_btn))
     drv.frame(1 / 30)
     assert ws.screen == "settings"
     drv.frame(1 / 30)
@@ -152,7 +152,7 @@ def test_close_auto_commits_the_icon_edit(tmp_path):
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
     assert ws.look.icon_sheet.pget(0, 0) == 13                      # painted in-RAM only
-    drv.click(*_center(C._PAINT_CLOSE))                        # CLOSE, no SAVE tap
+    drv.click(*_center(ws.paint_layer.layout.close_btn))                        # CLOSE, no SAVE tap
     drv.frame(1 / 30)
     assert ws.screen == "settings"
     hexs = moy_carts.load_system_icons(carts_dir)
@@ -163,14 +163,14 @@ def test_close_auto_commits_the_icon_edit(tmp_path):
 # -- BACK returns to Settings (not a cart) ----------------------------------
 
 def test_close_returns_to_settings(tmp_path):
-    from runtime import host_app, console as C
+    from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     _click_icons_row(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"
-    drv.click(*_center(C._PAINT_CLOSE))
+    drv.click(*_center(ws.paint_layer.layout.close_btn))
     drv.frame(1 / 30)
     assert ws.screen == "settings"                            # back to Settings, not a cart
     assert ws._editing_icons is False
@@ -287,7 +287,7 @@ def test_theme_editor_starts_from_default_when_no_file(tmp_path):
 # there, see _draw_paint), so that freed rect becomes the one icon-only control.
 
 def test_reset_restores_the_selected_slot_to_its_default(tmp_path):
-    from runtime import chrome, host_app, console as C
+    from runtime import chrome, host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_theme()
@@ -299,13 +299,13 @@ def test_reset_restores_the_selected_slot_to_its_default(tmp_path):
     ws.paint.color = (default_tl + 1) % 16 or 1          # guaranteed to differ
     ws.paint.paint(0, 0)                                 # vandalize the top-left pixel
     assert ws.look.icon_sheet.pget(ox, oy) != default_tl
-    drv.click(*_center(C._PAINT_GET))                    # RESET, in icon-editing mode
+    drv.click(*_center(ws.paint_layer.layout.get_btn))                    # RESET, in icon-editing mode
     drv.frame(1 / 30)
     assert ws.look.icon_sheet.pget(ox, oy) == default_tl
 
 
 def test_reset_is_undoable(tmp_path):
-    from runtime import chrome, host_app, console as C
+    from runtime import chrome, host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_theme()
@@ -317,7 +317,7 @@ def test_reset_is_undoable(tmp_path):
     vandal = (default_tl + 1) % 16 or 1
     ws.paint.color = vandal
     ws.paint.paint(0, 0)
-    drv.click(*_center(C._PAINT_GET))
+    drv.click(*_center(ws.paint_layer.layout.get_btn))
     drv.frame(1 / 30)
     assert ws.look.icon_sheet.pget(ox, oy) == default_tl
     assert ws.paint.undo() is True

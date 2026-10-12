@@ -181,7 +181,7 @@ def test_every_block_category_and_syntax_class_has_a_role():
 
 def test_metrics_and_text_effects():
     names = list(TH["metrics"])
-    assert moy_ui.theme_shape("night") == ((0,) * len(names), (), ())
+    assert moy_ui.theme_shape("night")[:2] == ((0,) * len(names), ())
     rc, notes = moy_ui.theme_install(_src("w", inherits="berry",
         metrics={"radius": 9, "press_dx": 1, "glow": 2},
         text={"button": {"disabled": {"effect": "emboss", "color": "ink"},
@@ -206,6 +206,13 @@ STYLE_TERM = -128
 
 def _tok(name):
     return -1 - STYLE["tokens"].index(name)
+
+
+def _own(name):
+    """Theme `name`'s surfaces less those it inherits unchanged from the
+    default seed, whose surfaces every chain ends at."""
+    base = set(moy_ui.theme_shape("night")[2])
+    return tuple(r for r in moy_ui.theme_shape(name)[2] if r not in base)
 
 
 @pytest.mark.parametrize("text,rec,notes", [
@@ -261,7 +268,7 @@ def test_a_packages_surfaces_are_keyed_capped_inherited_and_noted():
           "nope": {"rest": "flat"}}
     rc, notes = moy_ui.theme_install(_src("s1", surfaces=sf))
     assert rc == OK and notes == N_UNKNOWN | N_DROPPED
-    _m, _fx, got = moy_ui.theme_shape("s1")
+    got = _own("s1")
     assert got == (
         ("button", "pressed", (2, 0, 0, STYLE_TERM, STYLE_TERM, STYLE_TERM)),
         ("button", "rest", (1, 0, 1, STYLE_TERM, STYLE_TERM, STYLE_TERM)),
@@ -272,13 +279,13 @@ def test_a_packages_surfaces_are_keyed_capped_inherited_and_noted():
     assert 2 * len(many) > TH["surfaces_cap"]
     rc, notes = moy_ui.theme_install(_src("s4", surfaces=many))
     assert rc == OK and notes == N_DROPPED
-    assert len(moy_ui.theme_shape("s4")[2]) == TH["surfaces_cap"]
+    assert len(_own("s4")) == TH["surfaces_cap"]
     # a later key for the same part and state replaces the earlier
     rc, notes = moy_ui.theme_install(
         b'{"format": 1, "name": "s5", "surfaces": {"chip": {"rest": "raised"},'
         b' "chip": {"rest": "sunken"}}}')
     assert (rc, notes) == (OK, 0)
-    assert moy_ui.theme_shape("s5")[2] == (
+    assert _own("s5") == (
         ("chip", "rest", (2, 0, 0, STYLE_TERM, STYLE_TERM, STYLE_TERM)),)
 
 
@@ -300,6 +307,10 @@ def _chained_lib(tmp_path):
     d = tmp_path / "ui"
     shutil.copytree(UI, d)
     style = json.loads((d / "style.json").read_text())
+    # The chain's own surfaces only: a default seed with none of its own.
+    night = json.loads((d / "themes" / "night.json").read_text())
+    night.pop("surfaces", None)
+    (d / "themes" / "night.json").write_text(json.dumps(night))
     links = {"c1": "night", "c2": "c1", "c3": "c2", "c4": "c3", "c5": "c4",
              "loop_a": "loop_b", "loop_b": "loop_a"}
     surfaces = {"c1": {"button": {"rest": "raised", "pressed": "sunken"},
@@ -448,3 +459,42 @@ def test_the_boards_module_answers_as_the_host_does(tmp_path):
         rc, notes, row, shape = _answer(moy_ui, src)
         want = (rc, notes, None if row is None else (tuple(row[0]), row[1], row[2]), shape)
         assert repr(want) == line, src
+
+
+# -- the readability check of a pattern fill (§7) ---------------------------------
+
+def test_every_seeds_pattern_fills_read_in_both_variants():
+    from runtime import ui
+    from runtime.chrome import THEME_VARIANTS, theme_colors
+    try:
+        for name in moy_ui.themes():
+            ui.use_shape(name)
+            for variant in THEME_VARIANTS:
+                assert ui.pattern_unreadable(theme_colors(name, variant)) == [], (
+                    name, variant)
+    finally:
+        ui.use_shape(None)
+
+
+def test_a_pattern_fill_is_checked_against_both_colours():
+    """A dither of black and white under a black label misses on the black
+    half, and so does its pinstripe; a solid fill is the pairs' business; a
+    part that paints no label is not checked."""
+    from runtime import ui
+    from runtime.chrome import theme_colors
+    rc, _n = moy_ui.theme_install(_src("dz", surfaces={
+        "button": {"rest": "dither 0/7", "pressed": "pinstripe 7/0",
+                   "hover": "dither 7/6"},
+        "chip": {"rest": "fill 0"},
+        "desk.icon": {"rest": "dither 0/7"}}))
+    assert rc == OK
+    th = dict(theme_colors("night", "light"))
+    th["ink"] = 0                      # the button's label ink at rest
+    try:
+        ui.use_shape("dz")
+        bad = ui.pattern_unreadable(th)
+    finally:
+        ui.use_shape(None)
+    assert ("button", "rest") in bad and ("button", "pressed") in bad
+    assert ("button", "hover") not in bad
+    assert not [b for b in bad if b[0] in ("chip", "desk.icon")]

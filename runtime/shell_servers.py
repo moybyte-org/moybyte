@@ -53,8 +53,8 @@ except ImportError:  # pragma: no cover - host package lane
 # -- theme ---------------------------------------------------------------------
 
 class ThemeServer:
-    """`theme.set`, `set_variant` and `set_skin`: the look coordinates its
-    caches, the skin and the wallpaper, so the verbs that change it are the
+    """`theme.set` and `set_variant`: the look coordinates its caches, the
+    shape and the wallpaper, so the verbs that change it are the
     look's (docs/visual_identity_v1.md Section 4.3). The reads are the C token
     table the look writes at every switch (`Appearance.publish`).
 
@@ -71,10 +71,6 @@ class ThemeServer:
     def set_variant(self, g, variant):
         self.__ws.look.set_theme_variant(variant)
 
-    def set_skin(self, g, name):
-        """Install a widget skin and remember it: the skin is process-wide
-        state in `ui` and its name a persisted setting, like the theme."""
-        self.__ws.look.set_skin(name)
 
 
 # -- the storage servers' shared machinery --------------------------------------
@@ -492,7 +488,7 @@ _DOOR_ABSENT, _DOOR_BAD = -8, -7
 # None, `i` a number, `c` a cart named by its folder. A shell row not here (an
 # object, a callable, the cart store's and the installer's) answers BAD.
 DOOR_ARGS = {
-    "theme.set": "so", "theme.set_variant": "s", "theme.set_skin": "s",
+    "theme.set": "so", "theme.set_variant": "s",
     "nav.open_app": "s", "nav.is_system_app": "c", "nav.projects": "",
     "nav.edit": "co", "nav.open_image": "so", "nav.open_text": "soo",
     "nav.edit_file": "cso", "nav.play": "c", "nav.run_script": "ss",

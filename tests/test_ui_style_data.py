@@ -53,19 +53,10 @@ def test_the_style_file_is_the_twins_tables():
     assert _kinds(d["kinds"]) == twin.DEFAULT_SPECS
     assert _metrics(d["metrics"]) == twin.DEFAULT_METRICS
     assert d["quirks"] == dict(twin.NON_DATA_QUIRKS)
-    assert tuple(d["skin_order"]) == twin.ORDER
-    for name, (specs, metrics) in twin.SKINS.items():
-        sk = d["skins"][name]
-        assert _kinds(sk.get("kinds", {})) == (specs or {})
-        assert _metrics(sk.get("metrics", {})) == (metrics or {})
 
 
 def test_the_metric_slots_are_named_once_per_kind():
     d = _style()
-    for name, sk in d["skins"].items():
-        for kind, slots in sk.get("metrics", {}).items():
-            assert list(slots) == list(d["metrics"][kind]), (
-                "skin %s names %s's slots differently" % (name, kind))
     # the slot constants the toolkit exports are the slots' positions
     consts = {
         "button": "BTN_PAD BTN_ICON BTN_GLYPH BTN_EDGE BTN_ALIGN",
@@ -129,8 +120,7 @@ def test_every_key_a_spec_reads_is_in_the_token_vocabulary():
     that a theme dict holds but the vocabulary does not name would be dropped
     on the way in and paint its fallback instead."""
     read = set()
-    tables = [twin.DEFAULT_SPECS] + [s for s, _m in twin.SKINS.values() if s]
-    for table in tables:
+    for table in (twin.DEFAULT_SPECS,):
         for states in table.values():
             for triple in states.values():
                 for spec in triple:

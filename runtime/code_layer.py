@@ -71,12 +71,11 @@ def _glyph_known(kind):
 
 
 # The code editor draws its chrome in its OWN palette (`_tones`), not in the
-# theme's -- the frozen 320x240 branch is a set of literals with no token behind
-# it. The tone map therefore doubles as the `th` dict the toolkit reads, by
+# theme's. The tone map therefore doubles as the `th` dict the toolkit reads, by
 # carrying the token names it looks up. Nothing is invented here: every alias
 # points at a role this surface already had, which is what lets the chips, the
 # find field, the symbol keys and the popup rows all draw as ordinary widget
-# kinds -- reachable by a skin -- instead of through `colors=` (#207).
+# kinds -- reachable by a theme -- instead of through `colors=` (#207).
 def _as_theme(t):
     """Add the ui-toolkit token aliases to a tone map, in place."""
     edge = t["sym_edge"]
@@ -106,8 +105,8 @@ _CODE_AREA = (_CODE_X0, _CODE_Y0, CodeEditor.COLS * 8, CodeEditor.ROWS * _CODE_L
 # The T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%` keys, so the code editor shows a
 # tappable palette of them along the bottom. A lua cart (#67 Phase 5) swaps in the
 # Lua set: `~` joins (for `~=`; `..` is two taps of `.`) and the optional `;` --
-# which Lua never needs -- makes room. SAME length, so the layout geometry (and
-# the frozen 320x240 baseline for python carts) is untouched.
+# which Lua never needs -- makes room. SAME length, so the layout geometry is
+# untouched.
 _CODE_SYMBOLS = "=()[]{}<>:;,.\"_%"
 _LUA_SYMBOLS = "=~()[]{}<>:,.\"_%"
 _SYM_Y = 220
@@ -1236,7 +1235,7 @@ class CodeLayer:
     def _draw_tools(self, lay, ed, t):
         """The #89 chrome: the always-visible TLS toggle, the tool palette row (when
         open) and the find bar (when open). All overlay the code body -- drawn AFTER
-        the text so they sit on top -- and never touch the frozen baseline geometry."""
+        the text so they sit on top -- and never move the layout's geometry."""
         cv = self.ws.sys_canvas
         fs = lay.fs
         # `glyph` carries the FACE spec (a glyph kind or the label text) and

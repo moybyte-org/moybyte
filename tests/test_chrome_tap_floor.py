@@ -14,10 +14,7 @@ So this file is in three parts:
     frame: a 4.5mm floor is a design number, and a test that only compared two
     hashes could not say which number it was defending.
   * the IDENTITY -- every layout in the tree, at every shipped tier, built with
-    `chrome_scale=fs` and with none, compared field by field. `_base` is
-    included on purpose: the frozen 320x240 branch is the one the whole #39
-    degradation contract rests on, and it now has one more term in its
-    predicate.
+    `chrome_scale=fs` and with none, compared field by field.
   * the GROWTH -- at cs > fs the tap targets grow and the TEXT metrics do not,
     which is the claim the issue makes and the one a reader will want checked
     without opening a PNG.
@@ -116,15 +113,6 @@ def test_the_chrome_scale_can_never_go_under_the_font(w, h, fs):
     for head in _layout_heads():
         lay = head(w, h, fs, chrome_scale=1)
         assert lay.cs == lay.fs
-
-
-def test_the_frozen_baseline_branch_needs_both_scales_at_one():
-    """`_base` is the #39 degradation contract's whole predicate. A 320x240
-    panel dense enough to floor its chrome is a DIFFERENT layout from the
-    T-Deck's, and must not reproduce constants that assume an 18px bar."""
-    assert Layout(320, 240, 1)._base
-    assert Layout(320, 240, 1, chrome_scale=1)._base
-    assert not Layout(320, 240, 1, chrome_scale=2)._base
 
 
 # The Guition, as its board.toml declares it.

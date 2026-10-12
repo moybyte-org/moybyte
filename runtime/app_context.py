@@ -20,7 +20,7 @@ on a cart's manifest permissions rather than on a class constant.
     ctx.damage      the whole-system-surface invalidation flags
     ctx.surface     the canvas the app draws on, its size, scales, window, bar,
                     pointer; the toolkit's glyph
-    ctx.theme       the live token set + the theme/variant/skin verbs
+    ctx.theme       the live token set + the theme/variant verbs
     ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode

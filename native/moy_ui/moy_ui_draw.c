@@ -907,12 +907,30 @@ int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, in
 
 // -- window frames ------------------------------------------------------------------------
 //
-// Classic is the frame the WM drew in Python, op for op: the shadow, the ring,
-// the strip, its bottom line, the title, the buttons' glyphs. The other styles
-// draw in the same footprint (moy_ui.h).
+// Classic is D1's frame (docs/theming_2026-09.md §1): a one-pixel ring and
+// the strip's bottom line in shade_dark, a hard black shadow, the strip with
+// the app's identity stripe at its left and the title beside it, and a square
+// close. The other styles draw in the same footprint (moy_ui.h).
 
 #define FRAME_BLACK 0               // MOY64 black: classic's shadow
-#define FRAME_RED 8                 // MOY64 red: classic's close glyph
+#define FRAME_RED 8                 // MOY64 red: tab's close glyph
+
+// The identity stripe's colours, the PICO-8 accents: a title picks one by a
+// hash of its bytes, so a window keeps its colour across frames and boots.
+static const uint8_t k_stripe[6] = {12, 11, 9, 14, 10, 8};
+
+static int stripe_of(moy_ui_span_t t) {
+    uint32_t h = 2166136261u;
+    for (uint16_t i = 0; i < t.n; i++) {
+        h = (h ^ t.p[i]) * 16777619u;
+    }
+    return k_stripe[h % 6u];
+}
+
+// The stripe's width at font scale fs: classic only.
+static int stripe_w(int style, int fs) {
+    return style == MOY_THEME_FRAME_CLASSIC ? 3 * fs : 0;
+}
 
 // Each style's own title alignment and button order (style.json's
 // theme.frame_buttons letters: C close, M minimise, Z maximise, T the title).
@@ -994,7 +1012,7 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
     int lw = nl ? nl * bw + (nl - 1) * gap : 0;
     int rw = nr ? nr * bw + (nr - 1) * gap : 0;
     int cell = 8 * fs;
-    int x0 = (nl ? w.x + margin + lw : w.x) + 4 * fs;
+    int x0 = (nl ? w.x + margin + lw : w.x + stripe_w(style, fs)) + 4 * fs;
     int cells = cells_of(title);
     int rx;                          // the right group's left edge
     if (style == MOY_THEME_FRAME_TAB) {
@@ -1075,7 +1093,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     frame_layout(d.sh, w, th, title, has_min, fs, &L);
     int st = active ? MOY_THEME_S_ACTIVE : MOY_THEME_S_INACTIVE;
     int look = d.look;
-    int edge = moy_ui_token(look, active ? MOY_UI_T_CHROME_INK : MOY_UI_T_DIM);
+    int edge = L.style == MOY_THEME_FRAME_CLASSIC
+                   ? moy_ui_token(look, MOY_UI_T_SHADE_DARK)
+                   : moy_ui_token(look, active ? MOY_UI_T_CHROME_INK : MOY_UI_T_DIM);
     int t_bg = active ? MOY_UI_T_TITLE_ACTIVE : MOY_UI_T_TITLE_INACTIVE;
     int bg = moy_ui_token(look, t_bg);
     int fg = moy_ui_token(look, active ? MOY_UI_T_TITLE_INK : MOY_UI_T_CHROME_INK_DIM);
@@ -1126,6 +1146,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
         if (L.style != MOY_THEME_FRAME_FLAT) {
             fill(&d, strip.x, w.y + th, strip.w, 1, edge);
         }
+        if (L.style == MOY_THEME_FRAME_CLASSIC) {
+            fill(&d, strip.x, strip.y, stripe_w(L.style, fs), th - 1, stripe_of(title));
+        }
     }
     if (L.maxc > 0) {
         use_part(&d, MOY_THEME_P_WINDOW_TITLE, st, fs);
@@ -1157,7 +1180,10 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             continue;
         } else {
             surface(&d, b, MOY_THEME_P_WINDOW_BUTTON, st, bg, edge);
-            if (id == MOY_UI_FB_CLOSE && L.style != MOY_THEME_FRAME_FLAT) {
+            if (id == MOY_UI_FB_CLOSE && L.style == MOY_THEME_FRAME_CLASSIC) {
+                int m = 2 * fs;
+                rectb(&d, b.x + m, b.y + m, b.w - 2 * m, b.h - 2 * m, fg);
+            } else if (id == MOY_UI_FB_CLOSE && L.style != MOY_THEME_FRAME_FLAT) {
                 ink = FRAME_RED;
             }
         }

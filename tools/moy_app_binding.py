@@ -41,7 +41,7 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 63, 4, 34
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 62, 4, 34
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
@@ -117,7 +117,6 @@ _SIGS = (
     ("moy_app_token_of", [_PCHAR, _SIZE], c.c_int),
     ("moy_app_theme_write", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE, c.POINTER(c.c_int32)],
      c.c_int),
-    ("moy_app_theme_write_skin", [_P, _PCHAR, _SIZE], c.c_int),
     ("moy_app_theme_read", [_P, c.POINTER(c.c_int32)], _U32),
     ("moy_app_theme_colors", [_P, _U32, _PU32], c.c_int),
     ("moy_app_theme_token", [_P, _U32, c.c_int, c.POINTER(c.c_int32)], c.c_int),
@@ -125,7 +124,6 @@ _SIGS = (
     ("moy_app_theme_light", [_P, _U32], c.c_int32),
     ("moy_app_theme_name", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_theme_variant", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
-    ("moy_app_theme_skin", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_damage_all", [_P, _U32], c.c_int),
     ("moy_app_damage_again", [_P, _U32], c.c_int),
     ("moy_app_damage_take", [_P], _U32),
@@ -371,10 +369,6 @@ def binding(sanitize=False):
             nb, vb = _str(name), _str(variant)
             _check(lib.moy_app_theme_write(self._p, nb, len(nb), vb, len(vb), tok))
 
-        def theme_write_skin(self, skin):
-            b = _str(skin)
-            _check(lib.moy_app_theme_write_skin(self._p, b, len(b)))
-
         def serve(self, role, server):
             self._servers[role] = server
 
@@ -533,17 +527,11 @@ def binding(sanitize=False):
         def variant(self):
             return self._name(lib.moy_app_theme_variant)
 
-        def skin(self):
-            return self._name(lib.moy_app_theme_skin)
-
         def set(self, *a, **kw):
             return self._app._serve(self._g, "theme", "set")(self._g, *a, **kw)
 
         def set_variant(self, *a, **kw):
             return self._app._serve(self._g, "theme", "set_variant")(self._g, *a, **kw)
-
-        def set_skin(self, *a, **kw):
-            return self._app._serve(self._g, "theme", "set_skin")(self._g, *a, **kw)
 
     class Prefs(_Role):
         def get(self, key, default=None):

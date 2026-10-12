@@ -1,7 +1,7 @@
 """The oracle for native/moy_ui (docs/kernel_toolkit_2026-10.md §7): the
 toolkit's Python bodies as they were before the crossing -- runtime/ui.py's
-style resolution, widgets, Hits, ScrollRegion and DragTap, and runtime/skin.py's
-catalog -- kept here as tests/spine_twin.py keeps the spine's. The fuzz in
+style resolution, widgets, Hits, ScrollRegion and DragTap -- kept here as
+tests/spine_twin.py keeps the spine's. The fuzz in
 tests/test_ui_twin.py draws every case through this and through the shipped
 toolkit and compares them pixel by pixel; tests/test_ui_style_data.py holds
 native/moy_ui/style.json to these tables.
@@ -1021,45 +1021,6 @@ class DragTap:
         if press is None or was_drag or caught:
             return None
         return press
-
-# --- runtime/skin.py's catalog ---
-
-DEFAULT = 'default'
-_SK_HILITE = ('hilite', 'selection', 13)
-_SK_TITLE_INK = ('title_ink', 0)
-_SK_INK_DIM = ('ink_dim', 6)
-_SK_ACCENT = ('accent', 10)
-_SK_FOCUS = ('focus', 'accent', 10)
-_SK_DIM = ('dim', 1)
-_SK_PANEL = ('panel', 60)
-_OUTLINE_ROW = {REST: (None, _SK_TITLE_INK, _SK_DIM), HOVER: (None, _SK_TITLE_INK, _SK_FOCUS), ON: (_SK_HILITE, _SK_TITLE_INK, _SK_ACCENT), HOT: (('danger', 8), 7, ('danger', 8)), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (None, _SK_INK_DIM, _SK_INK_DIM)}
-_OUTLINE_CHIP = {REST: (None, _SK_TITLE_INK, _SK_DIM), HOVER: (None, _SK_TITLE_INK, _SK_FOCUS), ON: (_SK_HILITE, _SK_TITLE_INK, _SK_ACCENT), HOT: (('danger', 8), 7, ('danger', 8)), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (None, _SK_INK_DIM, _SK_INK_DIM)}
-
-def _outline_button(bg, ink):
-    return {REST: (bg, ink, _SK_DIM), HOVER: (bg, ink, _SK_FOCUS), ON: (_SK_ACCENT, 0, _SK_ACCENT), HOT: (bg, ink, _SK_DIM), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (_SK_PANEL, _SK_INK_DIM, _SK_INK_DIM)}
-_OUTLINE_SPECS = {'row': _OUTLINE_ROW, 'cell': _OUTLINE_ROW, 'cell_band': {REST: (_SK_HILITE, _SK_TITLE_INK, None), HOVER: (_SK_HILITE, _SK_TITLE_INK, None), ON: (_SK_ACCENT, 0, None), HOT: (('danger', 8), 7, None), PRESSED: (_SK_ACCENT, 0, None), DISABLED: (_SK_HILITE, _SK_INK_DIM, None)}, 'chip': _OUTLINE_CHIP, 'button': _outline_button(('surface', 7), ('ink', 0)), 'button_play': _outline_button(('play', 7), 7), 'button_author': _outline_button(('author', 7), 0), 'button_danger': _outline_button(('danger', 7), 7), 'tab': {ON: (_SK_HILITE, _SK_TITLE_INK, None), REST: (None, 7, None)}, 'row_menu': {REST: (None, _SK_INK_DIM, _SK_DIM), HOVER: (None, _SK_INK_DIM, _SK_FOCUS), ON: (_SK_ACCENT, 0, _SK_ACCENT), HOT: (('danger', 8), 7, ('danger', 8)), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (None, _SK_INK_DIM, _SK_INK_DIM)}, 'row_list': {REST: (None, _SK_INK_DIM, _SK_DIM), HOVER: (None, _SK_INK_DIM, _SK_FOCUS), ON: (_SK_ACCENT, 0, _SK_ACCENT), HOT: (('danger', 8), 7, ('danger', 8)), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (None, _SK_INK_DIM, _SK_INK_DIM)}, 'row_chrome': {REST: (None, _SK_TITLE_INK, _SK_DIM), HOVER: (None, _SK_TITLE_INK, _SK_FOCUS), ON: (_SK_ACCENT, 0, _SK_ACCENT), HOT: (('danger', 8), 7, ('danger', 8)), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (None, _SK_INK_DIM, _SK_INK_DIM)}, 'row_cta': {REST: (None, _SK_TITLE_INK, _SK_ACCENT), HOVER: (None, _SK_TITLE_INK, _SK_FOCUS), ON: (_SK_ACCENT, 0, _SK_ACCENT), HOT: (('danger', 8), 7, ('danger', 8)), PRESSED: (_SK_ACCENT, 0, _SK_ACCENT), DISABLED: (None, _SK_INK_DIM, _SK_INK_DIM)}, 'status': {REST: (_SK_PANEL, _SK_INK_DIM, _SK_ACCENT)}, 'panel': {REST: (('surface', 'panel', 60), None, _SK_ACCENT)}, 'panel_title': {REST: (_SK_HILITE, _SK_TITLE_INK, None)}, 'toolbar': {REST: (_SK_PANEL, None, None)}, 'scrollbar': {REST: (None, _SK_ACCENT, None)}, 'focus': {REST: (None, None, _SK_FOCUS)}}
-_OUTLINE_METRICS = {'button': (2, 16, 12, 2, ALIGN_LEFT), 'chip': (4, 2, 1, 2, ALIGN_LEFT), 'row': (4, 16, 14, 1, 2), 'game_btn': (6, 10, 0), 'game_icon_btn': (2, 16, 19, 10, 0), 'mini_btn': (2, 2, 0), 'dialog': (2, 2, 10), 'text_field': (4, 3, 6, 8, 0, 10, 7, 5, 10)}
-SKINS = {DEFAULT: (None, None), 'outline': (_OUTLINE_SPECS, _OUTLINE_METRICS)}
-ORDER = (DEFAULT, 'outline')
-_active = DEFAULT
-
-def names():
-    return ORDER
-
-def active():
-    return _active
-
-def use(name):
-    global _active
-    entry = SKINS.get(name)
-    if entry is None:
-        name = DEFAULT
-        entry = SKINS[DEFAULT]
-    (specs, metrics) = entry
-    set_skin(None, specs, metrics)
-    _active = name
-    return name
-
 
 # --- the glyph raster as it was in runtime/chrome.py ---------------------------
 # The oracle for native/moy_ui's glyph raster (tests/test_chrome_glyphs.py):

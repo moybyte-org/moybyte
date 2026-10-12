@@ -70,7 +70,6 @@ enum {
     MOY_ROW_SURFACE_POINTER,
     MOY_ROW_THEME_COLORS, MOY_ROW_THEME_TOKEN, MOY_ROW_THEME_GEN,
     MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
-    MOY_ROW_THEME_SKIN,
     MOY_ROW_FILES_READABLE, MOY_ROW_FILES_READY, MOY_ROW_FILES_BEGIN,
     MOY_ROW_FILES_END, MOY_ROW_FILES_LIST, MOY_ROW_FILES_COUNT, MOY_ROW_FILES_LOAD,
     MOY_ROW_FILES_SAVE, MOY_ROW_FILES_DELETE, MOY_ROW_FILES_DUPLICATE,
@@ -97,7 +96,7 @@ enum {
 #define MOY_APP_KEY_MAX 127u    // a namespaced prefs key's bytes
 #define MOY_APP_CLIP_MAX 4096u  // the clipboard's text, in bytes (configuration)
 #define MOY_APP_KINDS 4u        // the files kinds a permission may name
-#define MOY_APP_NAME_MAX 31u    // a theme's, a variant's and a skin's name bytes
+#define MOY_APP_NAME_MAX 31u    // a theme's and a variant's name bytes
 #define MOY_APP_TOKENS 34u      // the token vocabulary's roles
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
 #define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
@@ -238,23 +237,22 @@ int moy_app_token_flag(int role);
 int moy_app_token_of(const char *name, size_t n);
 
 // The look's writes: the live theme (its name, its variant and every token,
-// MOY_TOKEN_ABSENT for a role it does not set) and the skin. Each bumps the
-// generation. OK, or BAD for a name over MOY_APP_NAME_MAX bytes.
+// MOY_TOKEN_ABSENT for a role it does not set). It bumps the generation. OK,
+// or BAD for a name over MOY_APP_NAME_MAX bytes.
 int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
                         const char *variant, size_t vn,
                         const int32_t tokens[MOY_APP_TOKENS]);
-int moy_app_theme_write_skin(moy_appabi_t *a, const char *skin, size_t n);
 // The table whole and its generation, uncounted: what a binding builds its
 // colours from.
 uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]);
-// The skin's name (up to cap bytes, unterminated), uncounted; its length.
-size_t moy_app_skin_read(const moy_appabi_t *a, char *out, size_t cap);
+// The theme's name (up to cap bytes, unterminated), uncounted; its length.
+size_t moy_app_name_read(const moy_appabi_t *a, char *out, size_t cap);
 
 // The rows. colors: the generation a binding's colour dict is keyed on (it
 // rebuilds the dict from moy_app_theme_read when it moves). token: one role's
 // value, BAD for an unknown role, ABSENT for one the theme does not set. gen
 // and light (the surface_light flag) answer the value or the code negated.
-// name, variant, skin: OK and the length (copied up to cap; no buffer: the
+// name, variant: OK and the length (copied up to cap; no buffer: the
 // size alone, counted only when it fails).
 int moy_app_theme_colors(moy_appabi_t *a, uint32_t g, uint32_t *gen);
 int moy_app_theme_token(moy_appabi_t *a, uint32_t g, int role, int32_t *v);
@@ -262,7 +260,6 @@ int32_t moy_app_theme_gen(moy_appabi_t *a, uint32_t g);
 int32_t moy_app_theme_light(moy_appabi_t *a, uint32_t g);
 int moy_app_theme_name(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len);
 int moy_app_theme_variant(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len);
-int moy_app_theme_skin(moy_appabi_t *a, uint32_t g, char *out, size_t cap, size_t *len);
 
 // -- prefs ---------------------------------------------------------------------------
 
@@ -418,7 +415,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 119u
+#define MOY_APP_TABLE_N 117u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.
@@ -460,7 +457,7 @@ void moy_app_door_bind(moy_app_door_fn fn);
 
 // -- the seqlock ------------------------------------------------------------------
 
-// Every write of the look (theme_write, theme_write_skin) and of the clipboard
+// Every write of the look (theme_write) and of the clipboard
 // takes the state's seqlock, so a reader on another thread (a compiled app's
 // session thread, moy_app_wasm.h) reads a row whole: begin, read, and read
 // again unless end answers true; an odd begin is a write in progress.

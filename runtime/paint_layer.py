@@ -27,7 +27,7 @@ ws.editor), `ws._editing_icons` / `ws.paint_status` (lifecycle mode/status), and
 system state the device + tests pin). PaintLayer READS those and DISPATCHES to them; it
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
-console.py imports them back so tests + tools resolve console._PG_X0 / _PAINT_CLOSE / ...).
+console.py imports them back so tests + tools resolve console._PG_X0 / _PG_SPAN / ...).
 `NAMES` (palette) is injected (the circular-import dodge); the rect hit-test is
 `ui.rect_in`, imported directly;
 the shared draw toolkit (ws._btn/_icon_btn) stays on Workstation.
@@ -43,9 +43,8 @@ so its bar-tap check is guarded on menu_view == "paint" (a theme-editor tap must
 the grid, not the Editor's tab ladder).
 
 Responsive (#39 step 3): the paint editor is SYSTEM-domain now -- it draws on the
-reflowed system canvas at the panel's native size via `PaintLayout` (the CodeLayout
-pattern: every field equals the frozen module constant at (320, 240, 1), byte for
-byte, and the responsive formulas only run on a larger canvas / bigger font). On a
+reflowed system canvas at the panel's native size via `PaintLayout`, whose
+formulas lay out every canvas, the T-Deck's 320x240 included. On a
 big panel the zoomed pixel grid GROWS to fill the space (a multiple of 48px so the
 1x1/2x2/3x3 sprite sizes all divide it into whole pixels) and the chrome scales with
 the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
@@ -73,40 +72,19 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
-# The frozen 320x240 baseline PaintLayout reproduces VERBATIM (#39 graceful
-# degradation). Zoomed pixel grid: a fixed _PG_SPAN square; the per-pixel cell
-# shrinks as the sprite size grows (1x1 -> 18px cells; 2x2 -> 9px; 3x3 -> 6px), so
-# a bigger sprite (#30) edits in the same on-screen footprint.
+# The grid's origin and span and the swatch column at the 320x240 canvas, which
+# PaintLayout derives on every canvas. Zoomed pixel grid: a fixed _PG_SPAN
+# square; the per-pixel cell shrinks as the sprite size grows (1x1 -> 18px
+# cells; 2x2 -> 9px; 3x3 -> 6px), so a bigger sprite (#30) edits in the same
+# on-screen footprint.
 _PG_X0 = 14
 _PG_Y0 = 32
 _PG_CELL = 18                      # cell size at size 1 (8x8); _PG_SPAN derives from it
 _PG_SPAN = 8 * _PG_CELL            # fixed grid footprint in px (144), all sizes
-_PG_AREA = (_PG_X0, _PG_Y0, _PG_SPAN, _PG_SPAN)
 _SW_X0 = 170
 _SW_Y0 = 32
 _SW = 18
 _SW_COLS = 2
-_SW_AREA = (_SW_X0, _SW_Y0, _SW_COLS * _SW, (16 // _SW_COLS) * _SW)
-_SPR_PREV = (214, 40, 40, 24)
-_SPR_NEXT = (262, 40, 40, 24)
-_PAINT_SIZE = (214, 68, 88, 20)    # cycle sprite size 1x1 / 2x2 / 3x3 (#30)
-# CLOSE dropped below the TWO tool rows (#90 added a second row): a shorter button
-# height buys the extra row on the 320x240 T-Deck without shrinking the pixel grid.
-# Byte-identical-verbatim in PaintLayout._base. (SAVE lived at x14 here; #111 removed
-# it -- the freed strip stays empty rather than widening CLOSE, so the status text at
-# status_xy doesn't need to move too.)
-_PAINT_CLOSE = (200, 202, 102, 16)
-# Cross-cart sprite reuse (#18): GET imports the current tile FROM the shared sheet,
-# PUT saves it TO the shared sheet. Hidden in the theme (icon) editor.
-_PAINT_GET = (210, 130, 92, 20)
-_PAINT_PUT = (210, 154, 92, 20)
-# "Send to Files" (#108): export the whole sprite sheet to files/sprites/ as a
-# named user file. Stacked below GET/PUT in the right column (#111: moved off
-# y98 -- that slot sat flush against the sprite preview thumbnail at (240,92)-
-# (272,124), a snug fit that read as an overlap; y178 clears it with room to
-# spare, matching the responsive branch's already-correct sequencing below).
-# Hidden in the theme editor, like GET/PUT.
-_PAINT_FILES = (210, 178, 92, 20)
 
 # -- tool palette (#90) -------------------------------------------------------
 # TWO compact rows of single-glyph tool buttons drawn just below the pixel grid.
@@ -146,18 +124,6 @@ _TOOL_MODE = {
     "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "rect": PaintEditor.RECT,
     "line": PaintEditor.LINE, "oval": PaintEditor.OVAL, "select": PaintEditor.SELECT,
 }
-# Baseline (320x240) tool rows: two full-width strips in the gap between the grid
-# bottom (y176) and the SAVE/CLOSE row (y202). Row 1 = 8 buttons of 35px, row 2 =
-# 11 buttons of 26px, both across x14..300.
-_TOOL_X0 = 14
-_TOOL_ROW1_Y = 176
-_TOOL_ROW2_Y = 189
-_TOOL_H = 12
-_TOOL_SPAN = 286                       # x14..300 usable width
-_TOOL_CW1 = _TOOL_SPAN // len(_TOOL_ROW1)   # 35
-_TOOL_CW2 = _TOOL_SPAN // len(_TOOL_ROW2)   # 26
-
-
 def _tool_row(x0, y0, cw, h, n):
     """A row of n button rects (x, y, w, h), cw apart with a 1px gutter."""
     return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
@@ -168,11 +134,9 @@ class PaintLayout(LayoutBase):
     grid, the 16-color swatch column, the sprite-selector / SIZE / GET / PUT buttons
     and the SAVE/CLOSE row, derived from the SYSTEM canvas size (w, h) + font scale.
 
-    The single hard contract (mirrors Layout/CodeLayout): at (w, h, fs) ==
-    (320, 240, 1) every field equals the frozen `_PG_*`/`_SW_*`/`_PAINT_*` module
-    constant, byte for byte -- reproduced VERBATIM in the `_base` branch so no
-    reflow formula's integer-floor can drift a pixel on the T-Deck. The responsive
-    formulas only run on a larger canvas / bigger font.
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas (docs/theming_2026-09.md §9, phase 3 step 4): there the tool rows sit
+    under the grid and the palette, beside the button column, which keeps the
+    144px grid, and GET / PUT / FILE stack tighter above CLOSE.
 
     The grid span is the star of the reflow: it grows to the largest multiple of
     48px that fits (48 = lcm of the 8/16/24 sprite dims, so every zoom level keeps
@@ -183,31 +147,6 @@ class PaintLayout(LayoutBase):
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        if self._base:
-            self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
-            self.panel = (8, 16, 304, 204)
-            self.title_xy = (14, 18)
-            self.pg_x0, self.pg_y0, self.pg_span = _PG_X0, _PG_Y0, _PG_SPAN
-            self.pg_area = _PG_AREA
-            self.sw_x0, self.sw_y0, self.sw, self.sw_cols = _SW_X0, _SW_Y0, _SW, _SW_COLS
-            self.sw_area = _SW_AREA
-            self.spr_prev = _SPR_PREV
-            self.spr_next = _SPR_NEXT
-            self.size_btn = _PAINT_SIZE
-            self.prev_xy = (240, 92)
-            self.prev_box = 32
-            self.get_btn = _PAINT_GET
-            self.put_btn = _PAINT_PUT
-            self.files_btn = _PAINT_FILES
-            self.close_btn = _PAINT_CLOSE
-            self.status_xy = (110, 206)
-            self.status_maxc = 11
-            # The #90 tool rows: row 1 = drawing modes + undo/redo, row 2 =
-            # copy/paste/erase + transforms, in the grid->CLOSE gap (verbatim).
-            self.tool_btns = (
-                _tool_row(_TOOL_X0, _TOOL_ROW1_Y, _TOOL_CW1, _TOOL_H, len(_TOOL_ROW1))
-                + _tool_row(_TOOL_X0, _TOOL_ROW2_Y, _TOOL_CW2, _TOOL_H, len(_TOOL_ROW2)))
-            return
         # -- responsive: anchor the panel to the canvas, the swatch/button column to
         # the panel's right edge, and grow the grid to fill what's left ------------
         bar_h = 18 * self.cs          # the OS bar's own height (#203)
@@ -224,11 +163,15 @@ class PaintLayout(LayoutBase):
         tools_band = 2 * toolh + 2 * fs           # two rows + a gutter
         self.pg_x0 = px + 6 * fs
         self.pg_y0 = py + 16 * fs
-        # Reserve BOTH tool rows' band (their height + gaps) above the CLOSE row so the
-        # grid never grows over them -- otherwise the same as the shipped formula.
-        avail = min(rc_x - self.pg_x0 - 8 * fs,
-                    row_y - self.pg_y0 - tools_band - 6 * fs)
-        self.pg_span = max(48, 48 * (avail // 48))
+        # The tool rows go one of two ways, whichever leaves the bigger grid: two
+        # full-width strips above the CLOSE row, or (a short canvas: the T-Deck)
+        # strips under the grid and the palette only, beside the button column,
+        # with the status line under them.
+        span_w = rc_x - self.pg_x0 - 8 * fs
+        wide = min(span_w, row_y - self.pg_y0 - tools_band - 6 * fs)
+        narrow = min(span_w, p_bottom - self.pg_y0 - tools_band - 16 * fs)
+        compact = 48 * (narrow // 48) > 48 * (wide // 48)
+        self.pg_span = max(48, 48 * ((narrow if compact else wide) // 48))
         self.pg_area = (self.pg_x0, self.pg_y0, self.pg_span, self.pg_span)
         self.sw_x0, self.sw_y0 = rc_x, self.pg_y0
         self.sw = _SW * fs
@@ -240,19 +183,33 @@ class PaintLayout(LayoutBase):
         self.size_btn = (rc_x + 44 * fs, self.pg_y0 + 36 * fs, 88 * fs, 20 * fs)
         self.prev_xy = (rc_x + 70 * fs, self.pg_y0 + 60 * fs)
         self.prev_box = 32 * fs
-        self.get_btn = (rc_x + 40 * fs, self.pg_y0 + 98 * fs, 92 * fs, 20 * fs)
-        self.put_btn = (rc_x + 40 * fs, self.pg_y0 + 122 * fs, 92 * fs, 20 * fs)
-        self.files_btn = (rc_x + 40 * fs, self.pg_y0 + 146 * fs, 92 * fs, 20 * fs)
         self.close_btn = (p_right - 112 * fs, row_y, 102 * fs, 26 * fs)
-        self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
-        self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
+        # GET / PUT / FILE stack down the column, tighter where CLOSE is close.
+        get_y = self.pg_y0 + 98 * fs
+        room = row_y - 4 * fs - get_y
+        step, bh = 24 * fs, 20 * fs
+        if 45 * fs <= room < 68 * fs:
+            step = room // 3
+            bh = step - 3 * fs
+        self.get_btn = (rc_x + 40 * fs, get_y, 92 * fs, bh)
+        self.put_btn = (rc_x + 40 * fs, get_y + step, 92 * fs, bh)
+        self.files_btn = (rc_x + 40 * fs, get_y + 2 * step, 92 * fs, bh)
         # The #90 tool rows: two full-width strips just above the CLOSE row,
         # growing their button cells with the panel width. The reserved `avail` band
         # above keeps the (grown) grid clear of them. Row 2 sits directly above the
         # CLOSE row; row 1 above it.
-        row2_y = row_y - toolh - 3 * fs
-        row1_y = row2_y - toolh - 1 * fs
-        tool_span = (p_right - 6 * fs) - self.pg_x0
+        if compact:
+            row1_y = self.pg_y0 + self.pg_span + 2 * fs
+            row2_y = row1_y + toolh + 1 * fs
+            tool_span = min(self.sw_x0 + self.sw_cols * self.sw,
+                            self.close_btn[0] - 4 * fs) - self.pg_x0
+            self.status_xy = (self.pg_x0, row2_y + toolh + 3 * fs)
+        else:
+            row2_y = row_y - toolh - 3 * fs
+            row1_y = row2_y - toolh - 1 * fs
+            tool_span = (p_right - 6 * fs) - self.pg_x0
+            self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
+        self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
         cw1 = max(10 * fs, tool_span // len(_TOOL_ROW1))
         cw2 = max(10 * fs, tool_span // len(_TOOL_ROW2))
         self.tool_btns = (
@@ -724,8 +681,7 @@ class PaintLayer:
                 cv.line(gx0, gy0 + t * tpx,
                         gx0 + span - 1, gy0 + t * tpx, NAMES["light_grey"])
         # The selection marquee + the live shape/select drag preview (#90). Draws
-        # nothing in the default (no-selection, no-drag) state, so the frozen 320x240
-        # baseline stays byte-identical (the #39 parity contract).
+        # nothing in the default (no-selection, no-drag) state.
         self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
         # 16-color palette (2x8), the selected swatch outlined white.
         for idx in range(16):

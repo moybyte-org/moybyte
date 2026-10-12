@@ -35,7 +35,7 @@ grants a subset to a `type: "app"` cart by its manifest permissions.
 |---|---|---|---|
 | `damage` | `all`, `again` | Calc, Files, Paint, Appearance, Storybook, Get Carts | never |
 | `surface` | `canvas`, `font_scale`, `chrome_scale`, `windowed`, `pointer` | the same five | never; a cart gets `screen()` and `bar_h()` ungated |
-| `theme` | `colors`, `light`, `name`, `variant`, `skin`, `set`, `set_variant`, `set_skin` | the same six | reads ungated (`theme()`); `appearance` grants `set_theme`, `themes` |
+| `theme` | `colors`, `light`, `name`, `variant`, `set`, `set_variant` | the same six | reads ungated (`theme()`); `appearance` grants `set_theme`, `themes` |
 | `files` | the user-files store: list, count, load, save, delete, duplicate, rename, new_name, the trash, history and its ops, the image, cover and text codecs, `sig`, `stamp`, `provenance`; `readable`, `ready`, `batch` | Files, `ArtworkService` | `files` / `files:<kind>`, one kind (`ScopedFiles`), with `open_editor` |
 | `carts` | `all`, `can_journal`, `slug`, `hydrate`, `apply`, `load_deck`, `save_deck`, `save_code`, `images`, `save_image`, `encode_image`; `batch` | Storybook, `ArtworkService` | never |
 | `nav` | `app`, `open_app`, `is_system_app`, `projects`, `edit`, `edit_file`, `open_image`, `open_text`, `play`, `run_script`, `text_mode` | Files, Storybook, Get Carts, `ArtworkService` | `launch` grants `open_app` |
@@ -180,8 +180,8 @@ only the shell's own calls (boot restore, cycling) reach the look's
 |---|---|---|---|
 | `damage` | `all()`, `again()` | C | two kernel flags, ALL and AGAIN, folded into `ws._dirty` where the frame gate folds the kernel epoch (`_needs_redraw` takes both); the gate drops an ALL raised by its own draw, as it cleared `ws._dirty`, so a draw's `all` is lost and its `again` is the next frame |
 | `surface` | `canvas() -> handle`, `size(&w,&h)`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `pointer(out[5])` | C | the grant's **surface row**, written by the shell (§2.5); the pointer is the kernel's input state in the app's coordinates; `bar_h` joins the role so the ungated cart global and the shipped apps read one value |
-| `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)`, `skin(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
-| `theme` | `set(name, variant)`, `set_variant(v)`, `set_skin(name)` | shell | the look coordinates caches, the skin and the wallpaper |
+| `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
+| `theme` | `set(name, variant)`, `set_variant(v)` | shell | the look coordinates caches, the theme's shape and the wallpaper |
 | `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (`moy_ufiles.h`, §12 answer 4), reached through the verb table the console binds with the store; history ops cross as JSON bytes. A **session** is readiness only (§2.6). A grant made with a files kind reaches that kind alone |
 | `carts` | the table's rows: the store's readiness and session, the live list, a new cart, its undo journal, a rescan (the old `apply`), its deck, code and images | shell | the live list is the shell's; a cart crosses the Python binding as the list's own dict, and the ROLE door names it by its folder; `create` and `journal` are Storybook's new story and graduation, `rescan` adopts a fresh scan (the old `apply`); the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`). Never granted, so no import shape |
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
@@ -385,7 +385,7 @@ record already. Everything else in the role is shell-served.
 
 **`runtime/appearance.py`** (the look) stays the coordinator: `set_theme`
 writes the live token table and then rebuilds `ws.theme_colors` and the caches
-keyed on it; `set_skin` installs the skin in the Python toolkit;
+keyed on it, and installs the theme's shape in the toolkit;
 `select_wallpaper` drives the Python component; the scales go into the surface
 rows through the relayout. The theme catalogue (the seed packages native/moy_ui's
 loader flattens, read through `runtime/chrome.py`'s `theme_colors`) is what the

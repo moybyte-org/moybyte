@@ -159,7 +159,7 @@ _NEW_ROW = "+ NEW SCRIPT"
 # `code_layer._as_theme`: carry the role names the toolkit looks up, each
 # pointing at a role this surface already had. A card row is then an ordinary
 # "row_chrome" -- bright label at rest, the selection wash when it is the one
-# being stepped -- and a skin reaches it (#207).
+# being stepped -- and a theme reaches it (#207).
 def _as_theme(t):
     """Add the ui-toolkit token aliases to a tone map, in place."""
     t["chrome_ink"] = t["text"]         # row_chrome REST ink
@@ -173,28 +173,13 @@ class CardsLayout(LayoutBase):
     card column + scroll chevrons, the per-display card heights and the picture-cell
     sizes, derived from the SYSTEM canvas size (w, h) + font scale.
 
-    The single hard contract (mirrors Layout/CodeLayout/PaintLayout/...): at
-    (w, h, fs) == (320, 240, 1) every field equals the frozen `_CARD_*` module
-    constant, byte for byte (the `_base` branch); the responsive formulas only run
-    on a larger canvas / bigger font. A bigger panel shows MORE cards at once (the
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas. A bigger panel shows MORE cards at once (the
     view band grows) and the cards span its full width."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        if self._base:
-            self.body = (0, 18, _BASE_W, _BASE_H - 18)
-            self.head_glyph = (8, 22, 14, 14)
-            self.head_xy = (26, 22)
-            self.card_x, self.card_w = _CARD_X, _CARD_W
-            self.card_y0, self.card_h = _CARD_Y0, _CARD_H
-            self.view_bottom = _CARD_VIEW_BOTTOM
-            self.scroll_up, self.scroll_dn = _CARD_SCROLL_UP, _CARD_SCROLL_DN
-            self.info_btn = _CARD_INFO_BTN
-            self.gap = 2
-            self.h_cells, self.h_icons, self.h_meter = 44, 36, 32
-            return
         bar_h = 18 * self.cs          # the OS bar's own height (#203)
         self.body = (0, bar_h, self.w, self.h - bar_h)
         self.head_glyph = (8 * fs, bar_h + 4 * fs, 14 * fs, 14 * fs)

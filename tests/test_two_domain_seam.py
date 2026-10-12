@@ -244,7 +244,7 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     assert ws.look.font_scale == 3                            # remembered
     assert ws.look.effective_font_scale() == 1              # but not applied (can't scale)
     assert ws.layout.fs == 1                             # layout stays the baseline
-    assert ws.layout._base                               # i.e. exactly today's geometry
+    assert (ws.layout.w, ws.layout.h) == (320, 240)      # the T-Deck's geometry
     assert moy_carts.load_system(carts_dir).get("font_scale") == 3   # persisted
     # It renders without error and the desktop is still the 320x240 baseline
     # shelf (3 columns at the small tier's card proportions).

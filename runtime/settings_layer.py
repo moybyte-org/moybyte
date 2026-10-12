@@ -48,16 +48,8 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 
-# -- settings-screen geometry (single source; console.py imports these back) --
-# These are ALSO used by console's Layout (the responsive lay.set_* fields), so they're
-# re-exported by console.py rather than duplicated -- the block_editor_ui.py pattern.
-_SET_X = 18
-_SET_W = 284
-_SET_ROW_Y0 = 40
+# -- settings-screen geometry: the row height console's Layout scales ---------
 _SET_ROW_H = 26
-_SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
-_SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title row (#21)
-_SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #21)
 
 # (The panel colors are the selectable THEME tokens -- chrome.theme_colors,
 # picked in the Appearance app; the "night" default is the moybyte site colorway.)
@@ -676,7 +668,7 @@ class SettingsLayer:
         ws._icon("wifi" if connected else "wifi_off", x, y + dy, cv)
         if connected:
             # The ONE ink here that is not a widget state: `play` says CONNECTED,
-            # which is a status the theme owns and no skin should overrule.
+            # which is a status the theme owns and no style should overrule.
             _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
                     colors=(None, th["play"], None), edge=False,
                     pad=20 * fs, text_dy=5 + dy, fs=fs)
@@ -1046,12 +1038,11 @@ class SettingsLayer:
                 and tog is self._rows_tog and idle is self._rows_idle):
             return self._rows_cache
         # The registry block sits directly after EDIT ICONS, which is where the
-        # hand-spliced FRAMESKIP/PERF DIAG rows were: same order, same indices,
-        # same frozen 320x240 pixels.
+        # hand-spliced FRAMESKIP/PERF DIAG rows were: same order, same indices.
         rows = self._SETTINGS_ROWS + tog
         if bt:
             # Keep network/input together. Dynamic capability gating preserves
-            # the non-P4 Settings row indices and frozen 320x240 pixels.
+            # the non-P4 Settings row indices.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
         if idle is not None:
@@ -1564,10 +1555,7 @@ class SettingsLayer:
             cv, (xr, lay.set_row_y0), (xr, py + ph - 9 * lay.fs),
             self.set_top > 0, self.set_top + vis < len(rows),
             th_["ink"] if th_.get("bar_light", False) else th_["chrome_ink"])
-        if not lay._base:
-            # Shelf tiers: the toolkit scrollbar alongside (base keeps the frozen
-            # chevron-only pixels).
-            self._scroll_region().draw_bar(cv, ws.theme_colors)
+        self._scroll_region().draw_bar(cv, ws.theme_colors)
 
     def _draw_settings_row(self, i):
         NAMES = self._NAMES
@@ -1585,9 +1573,9 @@ class SettingsLayer:
         # the caller into the space `row` left: a value at the fixed value COLUMN
         # (x + w - 78fs, not right-aligned, so `row`'s `value=` slot is the wrong
         # shape), an icon, an OPEN affordance or a stepper.
-        # The palette is the skin's "row_menu" kind (#207): a Settings row is
+        # The palette is the style's "row_menu" kind (#207): a Settings row is
         # panel-CHROME coloured, which the row kind cannot express, so it is its
-        # own catalog entry rather than a hand-built triple no skin could reach.
+        # own catalog entry rather than a hand-built triple no theme could reach.
         _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", on=sel,
                 edge=False, pad=4, text_dy=5 + lay.row_text_dy, fs=lay.fs)
         # Below here the rect is the row's own CONTENT band -- the fs-tall strip

@@ -1,29 +1,18 @@
-"""`LayoutBase` is the ONE home of the frozen-baseline predicate (#209 W2).
+"""`LayoutBase` is the ONE common head of the responsive `*Layout` classes
+(#209 W2): `w`, `h`, `fs` (clamped to >= 1) and the chrome scale `cs`.
 
-Eight responsive `*Layout` classes hand-copied the same four-line `__init__`
-head and the same `self._base = (self.w == _BASE_W and self.h == _BASE_H and
-fs == 1)` test -- `chrome.Layout`, `chrome.CodeLayout` and the six editor
-layouts in their own files (cards/paint/map/music/scene/block). `_base` is what
-decides whether a layout reproduces the pre-#39 constants VERBATIM or runs the
-reflow formulas, so eight copies of it is eight chances for the T-Deck's
-byte-identical guarantee to become a discipline rather than a structure
-(`docs/history/console_architecture_2026-08.md` §6).
+Eight classes -- `chrome.Layout`, `chrome.CodeLayout` and the six editor
+layouts (cards/paint/map/music/scene/block) -- subclass it. Each lays out
+every canvas, the T-Deck's 320x240 included, through the same formulas: the
+frozen 320x240 branch they once kept (`_base`) retired with theming phase 3
+step 4 (docs/theming_2026-09.md §9), and this file holds that retirement:
 
-Two halves, deliberately:
-
-  * BEHAVIOUR -- every class's `_base` still equals the expression it replaced,
-    over a probe matrix that straddles the baseline on each axis (and, for the
-    two classes that extend the predicate with `bounds is None`, on that one
-    too). A structural check alone would pass against a base whose predicate
-    had drifted.
-  * ANTI-REFORK -- no other shared module re-declares `_BASE_W = 320` or writes
-    its own `self._base = (...)`. A behavioural check alone would pass against
-    a ninth class that quietly grew its own copy, which is exactly how the
-    eight happened.
+  * no layout carries a `_base` attribute, and no module reads one;
+  * no other shared module re-declares the 320x240 default size.
 
 The app tier is a DECLARED second vocabulary and is not covered here:
 `app_shell.ListShellLayout` and the calc/appearance/artwork heads speak
-`(w, h, fs, windowed=)` with no `_base` branch at all (§6).
+`(w, h, fs, windowed=)` (§6).
 """
 
 import ast
@@ -56,67 +45,29 @@ LAYOUTS = [
     (BlockLayout, True),
 ]
 
-# Straddles the baseline on each axis on its own -- 320x240/1 (the one True
-# case), one pixel off in each dimension, the bigger tiers the goldens render
-# (480x320 Guition, 1024x600 windowed), and font scales 2/3. The non-positive
-# scales pin the `max(1, ...)` clamp: fs=0 must READ as 1, not fall through and
-# make some other size the baseline.
-MATRIX = [
-    (320, 240, 1), (320, 240, 2), (320, 240, 3),
-    (321, 240, 1), (319, 240, 1), (320, 241, 1), (320, 239, 1),
-    (480, 320, 1), (480, 320, 2), (1024, 600, 1), (1024, 600, 3),
-    (640, 480, 1), (240, 320, 1),
-    (320, 240, 0), (320, 240, -3),
-]
-
-BOUNDS = [None, (0, 0, 320, 240), (10, 10, 500, 400)]
-
-
 def _read(rel):
     with open(os.path.join(ROOT, rel), "r", encoding="utf-8") as f:
         return f.read()
 
 
-def _expected(w, h, font_scale, bounds=None):
-    """The predicate as the eight classes each spelled it, before the base."""
-    w, h = int(w), int(h)
-    fs = max(1, int(font_scale))
-    return (w == 320 and h == 240 and fs == 1 and bounds is None)
-
-
-@pytest.mark.parametrize("cls,has_bounds", LAYOUTS,
-                         ids=[c.__name__ for c, _ in LAYOUTS])
+@pytest.mark.parametrize("cls,has_bounds", LAYOUTS)
 def test_every_layout_subclasses_the_base(cls, has_bounds):
     assert issubclass(cls, layout_base.LayoutBase)
 
 
-@pytest.mark.parametrize("cls,has_bounds", LAYOUTS,
-                         ids=[c.__name__ for c, _ in LAYOUTS])
-def test_the_base_predicate_is_what_it_replaced(cls, has_bounds):
-    for (w, h, fs) in MATRIX:
-        for bounds in (BOUNDS if has_bounds else [None]):
-            lay = cls(w, h, fs, bounds) if has_bounds else cls(w, h, fs)
-            want = _expected(w, h, fs, bounds)
-            assert lay._base is want, (cls.__name__, w, h, fs, bounds)
-            # The head the base took over, too: a subclass that stopped
-            # delegating could still pass the predicate check by luck.
-            assert (lay.w, lay.h, lay.fs) == (int(w), int(h), max(1, int(fs)))
+@pytest.mark.parametrize("cls,has_bounds", LAYOUTS)
+def test_no_layout_keeps_a_frozen_branch(cls, has_bounds):
+    for args in ((), (320, 240, 1), (480, 320, 1), (1024, 600, 2)):
+        lay = cls(*args)
+        assert not hasattr(lay, "_base"), (cls.__name__, args)
+    assert (cls().w, cls().h, cls().fs) == (layout_base.BASE_W, layout_base.BASE_H, 1)
 
 
-def test_bounds_only_ever_narrows_the_baseline():
-    """The extension is an AND term: it can turn `_base` off, never on."""
-    for cls in (SceneLayout, BlockLayout):
-        assert cls(320, 240, 1, None)._base is True
-        assert cls(320, 240, 1, (0, 0, 320, 240))._base is False
-        # ... and no `bounds` can rescue a non-baseline size.
-        assert cls(1024, 600, 1, None)._base is False
-
-
-def test_the_defaults_are_the_baseline():
+def test_the_scales_clamp():
     for cls, _ in LAYOUTS:
-        assert cls()._base is True
-        assert (cls().w, cls().h, cls().fs) == (layout_base.BASE_W,
-                                                layout_base.BASE_H, 1)
+        assert cls(320, 240, 0).fs == 1 and cls(320, 240, -3).fs == 1
+        assert cls(320, 240, 1, chrome_scale=2).cs == 2
+        assert cls(320, 240, 2, chrome_scale=1).cs == 2
 
 
 def test_the_base_is_a_leaf():
@@ -156,30 +107,11 @@ def test_nothing_else_declares_the_baseline_constants():
             "runtime/layout_base.py instead" % rel)
 
 
-def _geometry_base_assignments(src):
-    """`self._base = <expr mentioning BASE_W/BASE_H>` -- the geometry predicate.
-
-    Matched on the right-hand side rather than the attribute name, because
-    `_base` is not reserved: `op_history.History._base` is the undo keyframe
-    snapshot and has nothing to do with screen size.
-    """
-    tree = ast.parse(src)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        targets = [t for t in node.targets
-                   if isinstance(t, ast.Attribute) and t.attr == "_base"]
-        if not targets:
-            continue
-        names = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
-        if names & _BASELINE_NAMES:
-            yield node.lineno
-
-
-def test_nothing_else_writes_its_own_base_predicate():
+def test_no_module_reads_a_layout_base():
+    """A `layout._base` read is a frozen 320x240 branch coming back.
+    `op_history.History._base` is the undo keyframe and is not a layout."""
+    pat = re.compile(r"(layout|lay|L|self)\._base\b")
     for rel, src in _shared_sources():
-        lines = list(_geometry_base_assignments(src))
-        assert not lines, (
-            "%s builds its own baseline predicate at line(s) %s; subclass "
-            "LayoutBase (and pass base_extra= for an extra term) instead"
-            % (rel, lines))
+        if rel.endswith("op_history.py"):
+            continue
+        assert not pat.search(src), "%s reads a layout's `_base`" % rel

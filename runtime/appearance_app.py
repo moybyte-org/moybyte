@@ -277,31 +277,6 @@ class AppearanceAppLayer:
         self.status = (self._theme.name() + " " + variant).upper()
         self._damage.all()
 
-    def _skin_chip_rects(self):
-        """The THEMES tab's SKIN chips -- the widget look, under the DARK/LIGHT
-        band (same rects for draw and hit-test).
-
-        Its own band rather than the room left beside the variant chips: a skin
-        name is a word, and that room is 70px at 320x240, which clips
-        "DEFAULT" to four characters. A full-width band fits every catalog
-        entry at font scale 1 and 2 on every tier."""
-        fs = self.layout.fs
-        x, y, w, _h = self.layout.field
-        names = _ui.skin_names()
-        gap = 3 * fs
-        cw = max(1, (w - gap * (len(names) + 1)) // len(names))
-        out = []
-        cx = x + gap
-        for name in names:
-            out.append((name, (cx, y + 19 * fs, cw, 13 * fs)))
-            cx += cw + gap
-        return out
-
-    def _set_skin(self, name):
-        self._theme.set_skin(name)
-        self.status = ("SKIN " + name).upper()
-        self._damage.all()
-
     def handle_pointer(self, px, py, click):
         lay = self.layout
         if not click:
@@ -314,10 +289,6 @@ class AppearanceAppLayer:
             for v, r in self._variant_chip_rects():
                 if _in(px, py, r):
                     self._set_variant(v)
-                    return True
-            for s, r in self._skin_chip_rects():
-                if _in(px, py, r):
-                    self._set_skin(s)
                     return True
         for i, r in enumerate(lay.cards(len(self._items()))):
             if _in(px, py, r):
@@ -346,16 +317,13 @@ class AppearanceAppLayer:
         if self.mode == "themes":
             fs = lay.fs
             fx, fy, fw, fh = lay.field
-            # Two chip bands over the preview: the theme's dark/light variant,
-            # then the widget skin. Both restyle what the mock windows below
-            # are made of, so they belong on the same tab as the colorway.
+            # The theme's dark/light variant over the preview: it restyles
+            # what the mock windows below are made of, so it belongs on the
+            # same tab as the theme.
             band = 17 * fs
             for v, r in self._variant_chip_rects():
                 self._button(cv, v.upper(), r, self._theme.variant() == v)
-            for s, r in self._skin_chip_rects():
-                self._button(cv, s.upper(), r, self._theme.skin() == s)
-            self._draw_theme_preview(cv, (fx, fy + 2 * band, fw,
-                                          max(1, fh - 2 * band)))
+            self._draw_theme_preview(cv, (fx, fy + band, fw, max(1, fh - band)))
         elif lay.screen is not None:
             self._draw_monitor(cv, dt)
 

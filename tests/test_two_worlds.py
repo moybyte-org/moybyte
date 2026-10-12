@@ -5,7 +5,6 @@ navigation loop between them (PLAY icon <-> Make tile / CHANGE)."""
 import pytest
 
 from runtime import host_app
-from runtime import ui as _ui
 from runtime.host_canvas import make_system_canvas
 
 
@@ -92,9 +91,11 @@ def _label_ink(label, fs, ink, field):
     return _ink(cv, (0, 0, cv.w, cv.h), ink)
 
 
-def _chip_colors(ws, key):
-    st = _ui.ON if key == "play" else _ui.REST
-    return _ui.state_colors(ws.theme_colors, "chip", st)
+def _label_colors(ws):
+    """The default theme paints a label in a pill of its `desk` surface, in
+    the bar's colours."""
+    th = ws.theme_colors
+    return th["bar"], th["chrome_ink"]
 
 
 def _on_canvas(cv, r):
@@ -115,9 +116,11 @@ def test_desk_labels_render_whole_on_the_open_machine_wallpaper(tmp_path, size, 
     cv = ws.sys_canvas
     efs = ws.look.effective_font_scale()
     seen = []
-    for key, box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
-        field, ink, _edge = _chip_colors(ws, key)
-        assert _ink(cv, pill, ink) == _label_ink(label, efs, ink, field), label
+    desk = ws.wm._backdrop_layer
+    field, ink = _label_colors(ws)
+    for key, box, pill, label, _cart in desk._icon_rects():
+        drawn = desk.label_rect(pill, label, efs)
+        assert _ink(cv, drawn, ink) == _label_ink(label, efs, ink, field), label
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
@@ -139,9 +142,10 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
-        field, ink, _edge = _chip_colors(ws, key)
-        fits = (pill[2] - 4) // (8 * fs)
-        assert _ink(cv, pill, ink) == _label_ink(label[:fits], fs, ink, field), label
+        field, ink = _label_colors(ws)
+        drawn = ws.wm._backdrop_layer.label_rect(pill, label, fs)
+        fits = drawn[2] // (8 * fs)
+        assert _ink(cv, drawn, ink) == _label_ink(label[:fits], fs, ink, field), label
 
 
 def test_desk_bar_has_no_context_x(tmp_path):

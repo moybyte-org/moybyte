@@ -111,7 +111,7 @@ class SpineVerbs:
 
     def load_system(self):
         """Read the system settings (`self.prefs`) and APPLY them -- the saved
-        wallpaper, font scale, theme, skin and every persisted toggle (#39).
+        wallpaper, font scale, theme and every persisted toggle (#39).
 
         The read is the store's; this cascade is kernel policy and stays here.
         What a setting MEANS is the shell's business -- each one relays through
@@ -137,13 +137,6 @@ class SpineVerbs:
                             persist=False,
                             variant=self.system.get("theme_variant",
                                                     self.look.theme_variant))
-        # The widget skin, beside the colorway it belongs with. Applied ONLY
-        # when the store names one: `ui`'s tables are already the default, so
-        # "no key" means "nothing to install", not "install the default over
-        # whatever this process has" -- see the note at Appearance.skin_name.
-        _sk = self.system.get("skin")
-        if _sk is not None:
-            self.look.set_skin(_sk, persist=False)
         # Every persisted ON/OFF setting, through the verb its registry entry
         # names (#209 section 7): the key is the system.json key, the default is
         # declared beside it, and a board that cannot serve one gets the honest

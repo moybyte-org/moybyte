@@ -9,7 +9,7 @@
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
 //   app.surface_write(canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0)
 //   app.bind_pointer(pointer), app.theme_write(name, variant, colors),
-//   app.theme_write_skin(skin), app.serve(role, server),
+//   app.serve(role, server),
 //   app.store_bind(root, readable, writable, no_store)   the shell's writes
 //   app.files_end_all(), app.copy_gen()   the store's sessions and copy
 //   app.served()         {"role.verb": calls} of the rows served in Python
@@ -367,14 +367,6 @@ static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_theme_write_obj, 4, 4, app_theme_write);
 
-static mp_obj_t app_theme_write_skin(mp_obj_t self, mp_obj_t skin) {
-    size_t n;
-    const char *s = str_of(skin, &n);
-    check(moy_app_theme_write_skin(app_of(self), s, n));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(app_theme_write_skin_obj, app_theme_write_skin);
-
 static mp_obj_t app_serve(mp_obj_t self_in, mp_obj_t role, mp_obj_t server) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
     app_of(self_in);
@@ -485,7 +477,6 @@ static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_surface_write), MP_ROM_PTR(&app_surface_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_bind_pointer), MP_ROM_PTR(&app_bind_pointer_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_write), MP_ROM_PTR(&app_theme_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_theme_write_skin), MP_ROM_PTR(&app_theme_write_skin_obj) },
     { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&app_serve_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant), MP_ROM_PTR(&app_grant_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
@@ -810,14 +801,8 @@ static mp_obj_t theme_variant(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_variant_obj, theme_variant);
 
-static mp_obj_t theme_skin(mp_obj_t self) {
-    return name_read(self, moy_app_theme_skin);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(theme_skin_obj, theme_skin);
-
 SERVED(theme, THEME, set)
 SERVED(theme, THEME, set_variant)
-SERVED(theme, THEME, set_skin)
 
 static const mp_rom_map_elem_t theme_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&theme_colors_obj) },
@@ -826,10 +811,8 @@ static const mp_rom_map_elem_t theme_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_light), MP_ROM_PTR(&theme_light_obj) },
     { MP_ROM_QSTR(MP_QSTR_name), MP_ROM_PTR(&theme_name_obj) },
     { MP_ROM_QSTR(MP_QSTR_variant), MP_ROM_PTR(&theme_variant_obj) },
-    { MP_ROM_QSTR(MP_QSTR_skin), MP_ROM_PTR(&theme_skin_obj) },
     { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&theme_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_variant), MP_ROM_PTR(&theme_set_variant_obj) },
-    { MP_ROM_QSTR(MP_QSTR_set_skin), MP_ROM_PTR(&theme_set_skin_obj) },
 };
 static MP_DEFINE_CONST_DICT(theme_locals, theme_locals_table);
 

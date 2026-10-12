@@ -1,5 +1,5 @@
 {
-  "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code and the skins as deltas, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
+  "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
   "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note", "band_light"],
   "states": ["disabled", "pressed", "hot", "on", "hover", "rest"],
   "aliases": {
@@ -166,142 +166,6 @@
     "mini_btn": "unscaled label pads (2, 2): the Settings steppers' vocabulary predates font scaling and its pads never grew. Data (MB_*), unscaled by branch.",
     "chip": "unscaled label clip/min pads (4, 2, 1): a chip's label geometry is in raw pixels while its glyph box is not. Data (CHIP_*), unscaled."
   },
-  "skins": {
-    "default": {},
-    "outline": {
-      "kinds": {
-        "row": {
-          "rest": [null, ["title_ink", 0], ["dim", 1]],
-          "hover": [null, ["title_ink", 0], ["focus", "accent", 10]],
-          "on": [["hilite", "selection", 13], ["title_ink", 0], ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "cell": {
-          "rest": [null, ["title_ink", 0], ["dim", 1]],
-          "hover": [null, ["title_ink", 0], ["focus", "accent", 10]],
-          "on": [["hilite", "selection", 13], ["title_ink", 0], ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "cell_band": {
-          "rest": [["hilite", "selection", 13], ["title_ink", 0], null],
-          "hover": [["hilite", "selection", 13], ["title_ink", 0], null],
-          "on": [["accent", 10], 0, null],
-          "hot": [["danger", 8], 7, null],
-          "pressed": [["accent", 10], 0, null],
-          "disabled": [["hilite", "selection", 13], ["ink_dim", 6], null]
-        },
-        "chip": {
-          "rest": [null, ["title_ink", 0], ["dim", 1]],
-          "hover": [null, ["title_ink", 0], ["focus", "accent", 10]],
-          "on": [["hilite", "selection", 13], ["title_ink", 0], ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "button": {
-          "rest": [["surface", 7], ["ink", 0], ["dim", 1]],
-          "hover": [["surface", 7], ["ink", 0], ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["surface", 7], ["ink", 0], ["dim", 1]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [["panel", 60], ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "button_play": {
-          "rest": [["play", 7], 7, ["dim", 1]],
-          "hover": [["play", 7], 7, ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["play", 7], 7, ["dim", 1]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [["panel", 60], ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "button_author": {
-          "rest": [["author", 7], 0, ["dim", 1]],
-          "hover": [["author", 7], 0, ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["author", 7], 0, ["dim", 1]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [["panel", 60], ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "button_danger": {
-          "rest": [["danger", 7], 7, ["dim", 1]],
-          "hover": [["danger", 7], 7, ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["danger", 7], 7, ["dim", 1]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [["panel", 60], ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "tab": {
-          "rest": [null, 7, null],
-          "on": [["hilite", "selection", 13], ["title_ink", 0], null]
-        },
-        "row_menu": {
-          "rest": [null, ["ink_dim", 6], ["dim", 1]],
-          "hover": [null, ["ink_dim", 6], ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "row_list": {
-          "rest": [null, ["ink_dim", 6], ["dim", 1]],
-          "hover": [null, ["ink_dim", 6], ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "row_chrome": {
-          "rest": [null, ["title_ink", 0], ["dim", 1]],
-          "hover": [null, ["title_ink", 0], ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "row_cta": {
-          "rest": [null, ["title_ink", 0], ["accent", 10]],
-          "hover": [null, ["title_ink", 0], ["focus", "accent", 10]],
-          "on": [["accent", 10], 0, ["accent", 10]],
-          "hot": [["danger", 8], 7, ["danger", 8]],
-          "pressed": [["accent", 10], 0, ["accent", 10]],
-          "disabled": [null, ["ink_dim", 6], ["ink_dim", 6]]
-        },
-        "status": {
-          "rest": [["panel", 60], ["ink_dim", 6], ["accent", 10]]
-        },
-        "panel": {
-          "rest": [["surface", "panel", 60], null, ["accent", 10]]
-        },
-        "panel_title": {
-          "rest": [["hilite", "selection", 13], ["title_ink", 0], null]
-        },
-        "toolbar": {
-          "rest": [["panel", 60], null, null]
-        },
-        "scrollbar": {
-          "rest": [null, ["accent", 10], null]
-        },
-        "focus": {
-          "rest": [null, null, ["focus", "accent", 10]]
-        }
-      },
-      "metrics": {
-        "button": {"pad": 2, "icon": 16, "glyph": 12, "edge": 2, "align": 0},
-        "chip": {"clip": 4, "min_x": 2, "min_y": 1, "edge": 2, "align": 0},
-        "row": {"pad": 4, "icon": 16, "glyph": 14, "gap": 1, "edge": 2},
-        "game_btn": {"pad": 6, "ring": 10, "ink": 0},
-        "game_icon_btn": {"pad": 2, "glyph": 16, "label": 19, "ring": 10, "ink": 0},
-        "mini_btn": {"pad_x": 2, "pad_y": 2, "ink": 0},
-        "dialog": {"edge": 2, "fill": 2, "ring": 10},
-        "text_field": {"pad_x": 4, "pad_y": 3, "caret_w": 6, "caret_h": 8, "field": 0, "ring": 10, "ink": 7, "hint": 5, "caret": 10}
-      }
-    }
-  },
-  "skin_order": ["default", "outline"],
   "glyph_size": 12,
   "glyphs": {
     "run": [
@@ -1177,7 +1041,7 @@
   "theme": {
     "about": "Theme packages, format 1 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on the MOY64 table. 'bytes' caps a theme.json, 'depth' the inherits chain. A package's 'text' and 'surfaces' are keyed by part, then state: the parts are the kinds, then 'parts' (the chrome the WMs and the bar draw); the states are the style's, then 'states' (a window's), and a state a part does not name follows 'chain' to rest. A surface is one line of the grammar (docs/theming_2026-09.md \u00a74.4): an edge of 'edges', a fill of 'fills' with its colours, 'border' with an optional colour, 'shadow'; a colour is a token or a palette index. A package holds at most 'surfaces_cap' surfaces of at most 'surface_len' bytes each. A package's 'frame' chooses a window frame: 'style' one of 'frames', 'title_align' one of 'title_aligns', 'buttons' each letter of 'frame_buttons' once (close, minimise, maximise, the title), a '|' between them allowed; what it leaves out is its style's.",
     "format": 1,
-    "seeds": ["night", "indigo", "berry", "forest", "slate", "machine", "platinum", "win95"],
+    "seeds": ["night", "indigo", "berry", "forest", "slate", "machine", "platinum", "win95", "outline"],
     "bytes": 4096,
     "depth": 4,
     "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment", "code_builtin", "block_events", "block_control", "block_actors", "block_looks", "block_draw", "block_input", "block_variables", "block_lists", "block_operators", "block_sound", "block_myblocks"],
@@ -1198,7 +1062,7 @@
     "derive": {
       "dark": [
         ["code_text", 6], ["code_keyword", 12], ["code_string", 11],
-        ["code_number", 9], ["code_comment", 5], ["code_builtin", 14]
+        ["code_number", 9], ["code_comment", 22], ["code_builtin", 14]
       ],
       "light": [
         ["surface", 7], ["surface_alt", 52], ["ink", 0], ["ink_dim", 53],

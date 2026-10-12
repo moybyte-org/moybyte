@@ -146,8 +146,7 @@ def _mu_note_name(pitch):
 
 def _mu_pad_rect(col, row):
     """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..5 -- #92 added rows
-    4-5) -- the frozen 320x240 baseline (MusicLayout.pad_rect is the responsive
-    equivalent)."""
+    4-5) at 320x240, as MusicLayout.pad_rect lays it out there."""
     x = _MU_PAD_X + col * (_MU_PAD_W + _MU_PAD_GAP)
     y = _MU_PAD_Y + row * (_MU_PAD_H + _MU_PAD_GAP)
     return (x, y, _MU_PAD_W, _MU_PAD_H)
@@ -159,32 +158,13 @@ class MusicLayout(LayoutBase):
     pad and the bottom PLAY/LOOP bar, derived from the SYSTEM canvas size (w, h) +
     font scale.
 
-    The single hard contract (mirrors Layout/CodeLayout/PaintLayout/MapLayout): at
-    (w, h, fs) == (320, 240, 1) every field equals the frozen `_MU_*` module
-    constant, byte for byte (the `_base` branch); the responsive formulas only run
-    on a larger canvas / bigger font. The LIST is the star of the reflow: a bigger
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas. The LIST is the star of the reflow: a bigger
     panel shows more steps/slots at once."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        if self._base:
-            self.title_y = _MU_TITLE_Y
-            self.view_btn = _MU_VIEW
-            self.obj_prev, self.obj_next = _MU_OBJ_PREV, _MU_OBJ_NEXT
-            self.title_x = 74
-            self.spd_x = 160
-            self.speed_dn, self.speed_up = _MU_SPEED_DN, _MU_SPEED_UP
-            self.status_x = 250
-            self.list_x, self.list_y0 = _MU_LIST_X, _MU_LIST_Y0
-            self.row_h, self.rows, self.list_w = _MU_ROW_H, _MU_ROWS, _MU_LIST_W
-            self.list_area = _MU_LIST_AREA
-            self.pad_x, self.pad_y = _MU_PAD_X, _MU_PAD_Y
-            self.pad_w, self.pad_h, self.pad_gap = _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP
-            self.play_btn, self.loop_btn = _MU_PLAY, _MU_LOOP
-            self.undo_btn, self.redo_btn = _MU_UNDO, _MU_REDO
-            return
         # -- responsive: the control row hangs under the bar, the bottom bar anchors
         # to the canvas floor, and the list gains rows to fill the band between ----
         bar_h = 18 * self.cs          # the OS bar's own height (#203)

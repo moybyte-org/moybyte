@@ -346,7 +346,7 @@ console needs while no Python app runs is OS.
 | `runtime/input.py` | input | 3 | the host's eight names over the native input table (`HostInputTable`) |
 | `runtime/launcher_layer.py` | app | — | the launcher stays Python unless the return-budget measurement fails (§3); `EditorPickerLayer` rides in it |
 | `runtime/layers.py` | split | 7, rest stays | the `Layer` protocol stays as the apps' base; the draw-only overlays and the object-surface adapters go with the WMs |
-| `runtime/layout_base.py` | toolkit | 6 | the baseline predicate every `*Layout` derives from, the apps' layouts included |
+| `runtime/layout_base.py` | toolkit | 6 | the common head every `*Layout` derives from |
 | `runtime/lua_binding.py` | host-only | — | the host's ctypes binding of `moycore_lua.c` and the kernel's Player |
 | `runtime/lua_ext.py` | cart path | 4 | the Lua superset's shared glue: the per-name rulings of §2.3 are made here |
 | `runtime/moycore.py` | host-only | — | `moycore` on CPython: the host's Lua runs through `device/moycore_glue.py` itself (sprint 4) |
@@ -672,9 +672,8 @@ it), geometry pure and separate from
 drawing, drawing through canvas verbs that are already C. The cost is iteration
 speed on widgets; style changes stay free. The theme data the toolkit consumes,
 and which theming pieces are built ahead of this sprint, are
-`docs/theming_2026-09.md` §8. The net is the pixel goldens on the
-rows that exercise the toolkit — not the 320×240/1× row
-(`.claude/rules/rendering.md`).
+`docs/theming_2026-09.md` §8. The net is the pixel goldens, every row of
+which draws through the toolkit (`.claude/rules/rendering.md`).
 
 ### 4.6 Internal SRAM
 

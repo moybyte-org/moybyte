@@ -1,8 +1,8 @@
 // The surface painter (moy_ui.h, docs/theming_2026-09.md §4.4): a compiled
 // surface into a box, through the target every primitive fills through.
 //
-// Order: the shadow (the box's last column and row, the body shrinking by
-// one), the fill under the corner mask, then the outlines from the outside
+// Order: the shadow (the box's last MOY_UI_SHADOW columns and rows, a hard
+// shadow of the body offset that far, the body shrinking by as much), the fill under the corner mask, then the outlines from the outside
 // in -- the border, then the edge's levels. An outline is one pixel; its
 // top and left take the edge's light colour, its bottom and right the dark,
 // so a raised box is lit from the top left. A pattern fill is fillp's
@@ -178,14 +178,16 @@ int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[64], int
     }
     if (sf->flags & MOY_UI_SURF_SHADOW) {
         int dk = moy_ui_token(look, MOY_UI_T_SHADE_DARK);
-        b.w--;
-        b.h--;
-        moy_ui_box_t sh = {(int16_t)(b.x + 1), (int16_t)(b.y + 1), b.w, b.h};
-        int rs = radius;
-        rs = rs > sh.w / 2 ? sh.w / 2 : rs;
-        rs = rs > sh.h / 2 ? sh.h / 2 : rs;
-        if (sh.w > 0 && sh.h > 0) {
-            outline(&p, sh, rs, -1, dk);
+        b.w = (int16_t)(b.w - MOY_UI_SHADOW);
+        b.h = (int16_t)(b.h - MOY_UI_SHADOW);
+        for (int k = 1; k <= MOY_UI_SHADOW; k++) {
+            moy_ui_box_t sh = {(int16_t)(b.x + k), (int16_t)(b.y + k), b.w, b.h};
+            int rs = radius;
+            rs = rs > sh.w / 2 ? sh.w / 2 : rs;
+            rs = rs > sh.h / 2 ? sh.h / 2 : rs;
+            if (sh.w > 0 && sh.h > 0) {
+                outline(&p, sh, rs, -1, dk);
+            }
         }
         if (b.w <= 0 || b.h <= 0) {
             return p.fills;

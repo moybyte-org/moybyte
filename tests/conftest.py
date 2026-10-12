@@ -186,3 +186,17 @@ def _audio_console_level_back():
     na = audio_session._NA[0]
     if na:
         na.volume(7)
+
+
+@pytest.fixture(autouse=True)
+def _theme_shape_back():
+    """The toolkit's installed shape is one per process (native/moy_ui), as it
+    is one per board, and a workstation installs its theme's at boot. A test
+    that built one would restyle every widget a later test on the worker
+    draws, so the empty shape goes back after each."""
+    yield
+    try:
+        from runtime import ui
+    except ImportError:
+        return
+    ui.use_shape(None)

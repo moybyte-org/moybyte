@@ -31,7 +31,6 @@ PINNED = {
     "cards_layer.py": (26, 0),
     "code_layer.py": (17, 0),
     "console.py": (9, 0),
-    "editor_app.py": (2, 0),
     "launcher_layer.py": (39, 0),
     "map_editor_ui.py": (44, 0),
     "music_editor_ui.py": (34, 0),
@@ -43,7 +42,7 @@ PINNED = {
     "update_ui.py": (2, 0),
     "wallpaper.py": (4, 0),
     "web_console_ui.py": (3, 0),
-    "wm_chrome.py": (2, 0),
+    "wm_chrome.py": (1, 0),
 }
 
 

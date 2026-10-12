@@ -358,20 +358,20 @@ def test_block_authored_cart_runs_normally(tmp_path):
 def test_pointer_taps_insert_and_action_bar(tmp_path):
     """The outline is fully pointer/touch-drivable (no dragging): a tap selects a
     row, a second tap on an insert opens the menu, and the action-bar buttons fire."""
-    import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     drv = _driver(ws)
     drv.frame(1 / 30)
+    lay = ws.block_ui.block_layout
     # tap ADD -> the category menu opens
-    drv.click(C._BLK_ADD[0] + 2, C._BLK_ADD[1] + 2)
+    drv.click(lay.add_btn[0] + 2, lay.add_btn[1] + 2)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_menu is not None
     # tap a menu row (DRAW) then dismiss back out
     # (drill: pick category by tapping its row)
-    my = C._BLK_MENU[1] + 16
+    my = lay.menu[1] + 16
     draw_i = ws.block_ui.blk_menu["items"].index(blocks.CAT_DRAW)
-    drv.click(C._BLK_MENU[0] + 20, my + draw_i * C._BLK_MENU_ROW_H + 2)
+    drv.click(lay.menu[0] + 20, my + draw_i * lay.menu_row_h + 2)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_menu["mode"] == "blk"
 

@@ -349,7 +349,7 @@ game canvas, and the opaque rects the shell draws over it are declared as in
 
 pygame; buffers are cheap, so this backend implements the contract in its
 plainest form and serves as the test bed: golden pixel-parity before/after
-Phase A **including windowed-size goldens** (the 320×240 `_base` goldens
+Phase A **including windowed-size goldens** (the 320×240 goldens
 structurally cannot catch windowed-tier staleness — ui_damage §0.2.4), and
 both L8 directions live here (pixel-hash harness mode; the
 placement-only-frame zero-ship assertion).

@@ -5,7 +5,7 @@ nets hold the shipped toolkit (`runtime/ui.py` and what it calls) to it:
 
 * **The fuzz.** Every widget, drawn over random cases -- boxes smaller than
   their label, negative and float coordinates, ASCII and UTF-8 labels, font
-  scales 1 to 3, both skins, every state -- once through the twin and once
+  scales 1 to 3, every state -- once through the twin and once
   through the toolkit, each case on its own canvas, compared pixel by pixel
   and op count by op count. A failure names the widget, the case and the
   bounding box of the pixels that differ.
@@ -85,7 +85,6 @@ def _case(r):
     name, variant = r.choice(THEME_SETS)
     return {
         "th": (name, variant), "fs": r.randint(1, 3),
-        "skin": r.choice(("default", "outline")),
         "box": _box(r), "box2": _box(r), "label": r.choice(LABELS),
         "label2": r.choice(LABELS), "on": r.random() < 0.3,
         "hot": r.random() < 0.2, "disabled": r.random() < 0.2,
@@ -244,8 +243,7 @@ def _truncated(c):
     return t
 
 
-def _draw(m, use, widget, c):
-    use(c["skin"])
+def _draw(m, widget, c):
     th = theme_colors(*c["th"])
     cv = SystemCanvas(128, 72, font_scale=c["fs"])
     cv.gate_counts_reset()
@@ -262,20 +260,13 @@ def _bbox(a, b, w=128):
     return (min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
 
 
-@pytest.fixture
-def _skins():
-    yield
-    ui.use_skin("default")
-    twin.use(twin.DEFAULT)
-
-
 @pytest.mark.parametrize("widget", sorted(WIDGETS))
-def test_the_toolkit_draws_what_the_twin_drew(widget, _skins):
+def test_the_toolkit_draws_what_the_twin_drew(widget):
     r = random.Random("ui-twin:" + widget)
     for i in range(CASES):
         c = _case(r)
-        want, want_ops, want_ret = _draw(twin, twin.use, widget, _truncated(c))
-        got, got_ops, got_ret = _draw(ui, ui.use_skin, widget,
+        want, want_ops, want_ret = _draw(twin, widget, _truncated(c))
+        got, got_ops, got_ret = _draw(ui, widget,
                                       c if widget in FACE_TRUNCATES else _truncated(c))
         if got != want:
             raise AssertionError("%s case %d %r: pixels differ in %r (hash %s, "

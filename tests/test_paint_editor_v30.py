@@ -229,14 +229,13 @@ def test_release_resets_stroke_so_taps_dont_connect(tmp_path):
 
 
 def test_size_button_cycles_through_the_ui(tmp_path):
-    from runtime import console as C
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
     assert ws.paint.size == 1
-    bx, by, bw, bh = C._PAINT_SIZE
+    bx, by, bw, bh = ws.paint_layer.layout.size_btn
     drv.touch(bx + bw // 2, by + bh // 2)
     drv.frame(1 / 30)
     drv.touch_up()

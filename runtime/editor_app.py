@@ -468,12 +468,11 @@ class EditorApp:
         query ws.history.can_undo()/can_redo() -- an SD-backed journal read, but one
         that only runs HERE, inside a cache-miss re-render (never per-frame)."""
         ws = self.ws
-        NAMES = self._NAMES
-        if not ws.layout._base:
+        th = ws.theme_colors
+        if not self._compact(rect):
             # SHELF density (visual identity v1 Phase 3): labeled tabs + a labeled
             # PLAY button -- the Studio mockup's tab row, on the zoned bar (SAVE
             # dropped, #111).
-            th = ws.theme_colors
             proj, tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             _ui.button(cv, th, proj, "", glyph="projects", kind="normal",
@@ -484,25 +483,41 @@ class EditorApp:
             _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run",
                        glyph_draw=ws._glyph)
             return
-        x0, y0, w, h = rect
-        ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
-        stride = ic                         # 0-gap ladder (#88) -- see _ZONE_STRIDE
-        for i, (tab, glyph) in enumerate(self._ladder()):
-            x = x0 + i * stride
-            if x + ic > x0 + w:
-                break                       # ran out of lent width -- draw what fits
+        # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
+        # one framed in the tab's ON field, then UNDO, REDO and PLAY.
+        for tab, glyph, r in self._ladder_rects(rect):
+            x, y0, w, ic = r
             if tab is not None and tab == self.tab:
-                # Frozen indigo on the dark bar; the theme hilite on a light band
-                # (the base ladder under a light variant, owner 2026-07-23).
-                cv.rect(x, y0, ic, ic,
-                        ws.theme_colors["hilite"]
-                        if ws.theme_colors.get("bar_light") else NAMES["indigo"])
+                _ui.tab(cv, th, r, True)
+                x += (w - ic) // 2
             if tab == _ZONE_UNDO:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
             elif tab == _ZONE_REDO:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
             else:
                 ws._icon(glyph, x, y0, cv)
+
+    def _compact(self, rect):
+        """Whether the zone takes the narrow bar: the labeled row drops a tab."""
+        _proj, tabs_area, _play = self._zone_parts(rect)
+        slim = [(tid, label) for tid, label, _ic in self._chips()]
+        return len(_ui.tab_row_rects(tabs_area, slim, self._zone_scale())) < len(slim)
+
+    def _ladder_rects(self, rect):
+        """The narrow bar's icons, (tab, glyph, rect), as many as `rect` holds:
+        square and flush, as tall as the lent band, the open tab's widened by
+        the tab's pad each side."""
+        x, y0, w, h = rect
+        ic = h if h > 0 else _BAR_ICON
+        pad = _ui.metrics("tab")[_ui.TAB_PAD] * self._zone_scale()
+        out = []
+        for tab, glyph in self._ladder():
+            cw = ic + 2 * pad if tab is not None and tab == self.tab else ic
+            if x + cw > rect[0] + w:
+                break
+            out.append((tab, glyph, (x, y0, cw, ic)))
+            x += cw
+        return out
 
     def _has_code(self):
         """Whether the open cart has a Code tab: every cart whose main is text
@@ -532,10 +547,7 @@ class EditorApp:
         if enabled:
             ws._icon(glyph, x, y, cv)
         else:
-            th = ws.theme_colors
-            ws._glyph(glyph, (x, y, ic, ic),
-                      th["chrome_ink_dim"] if th.get("bar_light")
-                      else self._NAMES["dark_blue"], cv)
+            ws._glyph(glyph, (x, y, ic, ic), ws.theme_colors["dim"], cv)
 
     def _zone_scale(self):
         """The scale the shelf zone is laid out on: the FONT scale, which is also
@@ -573,7 +585,9 @@ class EditorApp:
         in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged. The icon
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
-        if rect is not None and not self.ws.layout._base:
+        if rect is None:
+            rect = _ZONE_LEFT_GAME
+        if not self._compact(rect):
             proj, tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, proj):
                 return self._activate_zone_tab(_ZONE_PROJECTS)
@@ -585,14 +599,8 @@ class EditorApp:
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False
-        x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
-        ic = h if h > 0 else _BAR_ICON
-        stride = ic                         # 0-gap ladder (#88) -- matches draw_zone
-        for i, (tab, _glyph) in enumerate(self._ladder()):
-            x = x0 + i * stride
-            if x + ic > x0 + w:
-                break
-            if _in(px, py, (x, y0, ic, ic)):
+        for tab, _glyph, r in self._ladder_rects(rect):
+            if _in(px, py, r):
                 return self._activate_zone_tab(tab)
         return False
 

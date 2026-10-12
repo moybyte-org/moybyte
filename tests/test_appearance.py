@@ -58,16 +58,16 @@ def _stored(ws):
 # -- the state moved, with no mirror behind it --------------------------------
 
 def test_the_kernel_keeps_no_look_state(tmp_path):
-    """Six attributes moved and none was left as a second copy. A mirror here
+    """Five attributes moved and none was left as a second copy. A mirror here
     would be worse than in landing C's roster: these are written by SETTERS a
     caller can reach directly, so two copies would diverge on the first pick."""
     ws = build_ws(tmp_path)
-    for name in ("theme_name", "theme_variant", "skin_name", "font_scale",
+    for name in ("theme_name", "theme_variant", "font_scale",
                  "wallpaper_id", "icon_sheet"):
         assert not hasattr(ws, name), name
         assert getattr(ws.look, name) is not None or name in ("icon_sheet",)
     src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
-    for gone in ("self.theme_name", "self.theme_variant", "self.skin_name",
+    for gone in ("self.theme_name", "self.theme_variant",
                  "self.wallpaper_id", "self.icon_sheet"):
         assert gone not in src, gone
 
@@ -167,46 +167,11 @@ def test_persist_false_writes_nothing(tmp_path):
     try:
         ws.look.set_theme("berry", persist=False)
         ws.look.set_theme_variant("light", persist=False)
-        ws.look.set_skin("outline", persist=False)
         ws.look.set_font_scale(2, persist=False)
         ws.look.select_wallpaper("fill:black", persist=False)
         assert _stored(ws) == {}
     finally:
-        ui.use_skin("default")      # process-wide state: never leak it
-
-
-# -- skin ---------------------------------------------------------------------
-
-def test_set_skin_installs_into_ui_and_stores_the_RESOLVED_name(tmp_path):
-    """Storing the name and forgetting to install it would look identical from
-    the settings dict, so this asserts through `ui` as well."""
-    ws = build_ws(tmp_path)
-    th = theme_colors("night")
-    plain = ui.state_colors(th, "row", ui.REST)
-    try:
-        ws.look.set_skin("outline")
-        assert ws.look.skin_name == "outline" and ui.active_skin() == "outline"
-        assert ui.state_colors(th, "row", ui.REST) != plain
-        assert _stored(ws)["skin"] == "outline"
-        ws.look.set_skin("no-such-skin")
-        assert ws.look.skin_name == "default"
-        assert _stored(ws)["skin"] == "default"
-    finally:
-        ui.use_skin("default")
-
-
-def test_skin_names_is_the_catalog_order(tmp_path):
-    ws = build_ws(tmp_path)
-    assert list(ws.look.skin_names()) == list(ui.skin_names())
-
-
-def test_appearance_is_the_one_module_that_installs_a_skin():
-    """The owner half of tests/test_skin.py's two-way ratchet, from this side:
-    `ui.use_skin` is called here and nowhere else in the shell."""
-    src = ROOT.joinpath("runtime/appearance.py").read_text(encoding="utf-8")
-    assert "_uimod.use_skin(" in src
-    console_src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
-    assert "use_skin(" not in console_src
+        ui.use_shape(None)          # process-wide state: never leak it
 
 
 # -- font scale ---------------------------------------------------------------
@@ -410,7 +375,7 @@ def test_the_boot_cascade_calls_the_collaborator_directly(tmp_path):
     """3b: the kernel calls collaborators, it does not keep forwards for its own
     use. `load_system` names `self.look` five times and `self.set_*` never."""
     src = inspect.getsource(type(build_ws(tmp_path)).load_system)
-    for verb in ("set_font_scale", "select_wallpaper", "set_theme", "set_skin"):
+    for verb in ("set_font_scale", "select_wallpaper", "set_theme"):
         assert ("self.look." + verb) in src, verb
         assert ("self." + verb) not in src.replace("self.look." + verb, "")
 
@@ -424,15 +389,13 @@ def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):
     ws.look.set_font_scale(2)
     ws.look.select_wallpaper("fill:indigo")
     try:
-        ws.look.set_skin("outline")
         ws2 = build_ws(tmp_path)
         assert (ws2.look.theme_name, ws2.look.theme_variant) == ("forest", "light")
         assert ws2.look.font_scale == 2
         assert ws2.look.wallpaper_id == "fill:indigo"
-        assert ws2.look.skin_name == "outline"
         assert ws2.theme_colors == theme_colors("forest", "light")
     finally:
-        ui.use_skin("default")
+        ui.use_shape(None)
 
 
 def test_the_look_is_built_before_anything_reads_it(tmp_path):

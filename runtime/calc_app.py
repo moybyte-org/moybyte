@@ -125,8 +125,8 @@ class CalcAppLayer:
         fs = lay.fs
         light = theme.light()
         cv.cls(th["surface"] if light else th["panel"])
-        # The display: a dark field with the value right-aligned (readable on
-        # either chrome), showing the pending operator as a small left cue.
+        # The display: an LCD, black with the value right-aligned in green on
+        # every theme, showing the pending operator as a small left cue.
         x, y, w, h = lay.display
         cv.rect(x, y, w, h, NAMES["black"])
         cv.rectb(x, y, w, h, th["border"] if light else th["dim"])
@@ -135,7 +135,7 @@ class CalcAppLayer:
         text = self.entry[-14:]
         fw = 8 * fs
         cv.print(text, x + w - 3 * fs - len(text) * fw,
-                 y + (h - 8 * fs) // 2, NAMES["white"], 1)
+                 y + (h - 8 * fs) // 2, NAMES["green"], 1)
         # The key grid through the toolkit's button vocabulary; every key rect
         # registers in the SAME pass the pixels land (draw == tap).
         self.hits.clear()

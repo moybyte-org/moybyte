@@ -82,8 +82,9 @@ Each was mocked and judged worse (§11).
   `(field, ink, edge)` triple of token specs, and each kind's metric slots),
   with the state ladder `disabled > pressed > hot > on > hover > rest` and the
   quirks it lists, resolved in C by `native/moy_ui` against the live token row
-  (sprint 6). A skin is a delta in the same file, installed by name
-  (`ui.use_skin`); two ship, `default` and `outline`.
+  (sprint 6). What a theme changes beyond colours is its shape (§4.2-§4.5),
+  installed with the theme; the skin axis folded into it (phase 3 step 4), and
+  `outline`, once the second skin, is a seed package.
 - **Text:** one text call, `moy_text` (`native/moy_gfx/moy_text.h`), for every
   UI string: UTF-8, a font argument (one font today, petme128, id 0), `align`
   and `maxw`, and it returns the drawn width. Chrome text at every scale is
@@ -95,17 +96,18 @@ Each was mocked and judged worse (§11).
 - **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`; apps reach the backdrop
   through `ctx.wallpaper`.
 - **Who reads tokens:** shipped apps through `ctx.theme` (`colors()`, `light()`,
-  `name()`, `variant()`, `set()`, `set_variant()`, `skin`, `set_skin`;
+  `name()`, `variant()`, `set()`, `set_variant()`;
   `runtime/app_context.py`). App carts (`"moybyte": {"type": "app"}`) through the ungated
   `theme()` global, which returns today's token dict (`runtime/system_api.py`;
   `system_carts/moybyte.notes.moy` reads `th["panel"]` and `th["ink_dim"]`).
   Compiled apps read the token row through their `theme` imports
   (`native/moy_app/roles.json`). **Games have no `theme()`**, and giving them
   one would be a cart-verb change in moy-spec's SPEC.md.
-- **Persisted settings:** `theme`, `theme_variant`, `skin` and `wallpaper` in
+- **Persisted settings:** `theme`, `theme_variant` and `wallpaper` in
   `system.json`.
 
-What stops a Platinum or Win95 theme today:
+What stopped a Platinum or Win95 theme on 2026-10-11, which phases 2 to 4
+answer:
 
 1. **Most chrome is drawn by hand, in literal colours.** ESTIMATED (grep of
    `runtime/`, 2026-10-11): about 375 canvas `rect`/`print`/`line`/`circ` calls
@@ -277,9 +279,10 @@ fill role that lacks one comes when a surface first paints text on it.
 
 The six shipped families are seed packages in format 1 (§2). There is no
 reader for the old settings beyond that: under the no-migrations rule a stored
-name that no package provides reads as absent and resolves to the default. The
-`outline` skin stays a skin until phase 3, when a theme's `surfaces` can say
-what it says and the skin axis folds into the theme (§9).
+name that no package provides reads as absent and resolves to the default, and
+a stored `skin` is not read at all. `outline`, once the second skin, is a seed
+package of surfaces over the default's colours (phase 3 step 4), and the skin
+axis is gone: its rows, its verbs in the app ABI and its persisted setting.
 
 ### 4.2 Metrics
 
@@ -382,8 +385,9 @@ first like the text effects (§5).
 
 **How the painter draws one** (`native/moy_ui/moy_ui_paint.c`; ruled
 2026-10-12, each the pick that builds least). Everything stays inside the
-part's box. `shadow` takes the box's last column and row in `shade_dark`, and
-the rest is the body. The fill goes under the corner mask of the theme's
+part's box. `shadow` takes the box's last two columns and rows in `shade_dark`
+(D1's hard shadow, `MOY_UI_SHADOW`: the body offset two pixels down and
+right), and the rest is the body. The fill goes under the corner mask of the theme's
 `radius` (§4.2); then one-pixel outlines from the outside in: the `border`,
 then the edge's levels, each with its top and left in one colour and its
 bottom and right in another (square, the top-right and bottom-left corners
@@ -441,8 +445,12 @@ chooses. SerenityOS and xfwm4 work this way (§10). On the fullscreen tiers the
 
 **As built** (`native/moy_ui/moy_ui_draw.c`'s `moy_ui_frame`, reached through
 `ui.frame` from `runtime/wm_chrome.py`; phase 3 step 3, 2026-10-12). `classic`
-is the frame the WM drew in Python, op for op. `flat` is classic without the
-strip's bottom line and the red close. `win9x` lights the ring from the top
+is D1's (phase 3 step 4): a one-pixel ring and the strip's bottom line in
+`shade_dark`, the hard black shadow, the app's identity stripe at the strip's
+left with the title beside it, and a square close (its glyph boxed in the
+title's ink). `flat` is the frame the WM drew in Python before D1, less the
+strip's bottom line: a ring in `chrome_ink` (`dim` when inactive), no stripe,
+the plain close glyph; `tab` keeps that ring and a red close. `win9x` lights the ring from the top
 left, sets a title bar inside a frame of `panel`, and boxes each button as
 Win95's `bevel2` with its glyph in `chrome_ink`. `platinum` centres the title,
 pinstripes the active strip in `shade_lo` either side of it, and draws small
@@ -470,7 +478,14 @@ Ruled 2026-10-12, each the pick that builds least:
   does not, and the strip beyond its tab is `panel`, the window's own, since a
   see-through strip would need the WM's damage to cover the desk under it.
 - **The shadow is `shade_dark`** in every style but `classic`, which keeps its
-  black.
+  black. It stays the footprint's three pixels in `classic` too: D1's two-pixel
+  hard shadow is the surfaces' (`shadow`, §4.4), and a window's two-pixel one
+  would leave the footprint's third column to the desk under it (ruled
+  2026-10-12).
+- **The identity stripe's colour is the title's** (ruled 2026-10-12, the pick
+  that builds least): no app declares a colour, so `classic` picks one of the
+  six PICO-8 accents (blue, green, orange, pink, yellow, red) by a hash of the
+  title's bytes; the stripe is `3 * fs` wide and the title moves right of it.
 - **`window`'s own surface is not read**: the ring is the style's, and a
   surface under the content would be filled and then covered every chrome draw.
 
@@ -654,9 +669,15 @@ Kids will trade themes, so a theme is untrusted input:
   must clear `theme.contrast` (a WCAG ratio of 3.0, the floor for large text
   and UI parts) on the MOY64 table; a failing pair sets its bit in the report
   and never refuses the theme. For a dither or pinstripe fill the ink is
-  checked against **both** colours (phase 3, step 4: ruled 2026-10-12, since
-  the check needs each part's ink, which the style resolves in the look). The editor offers the nearest
-  passing index (phase 6). Every seed passes in both variants.
+  checked against **both** colours, in the look, since the check needs each
+  part's ink, which the style resolves there (ruled 2026-10-12):
+  `moy_ui_pattern_unreadable` (`ui.pattern_unreadable`) answers the installed
+  shape's pattern surfaces whose label ink misses the floor against either
+  colour, a kind's ink as the style resolves it and the chrome parts' as the
+  frame and the bar draw them; a part that paints no label is not checked.
+  Its reader, as the pairs' report's, is the editor, which offers the nearest
+  passing index (phase 6). Every seed passes both checks in both variants
+  (`tests/test_theme_loader.py`).
 - **Persist only after it has rendered once.** A theme that fails to draw is never
   saved, so it cannot return after a reboot, as a malformed SerenityOS theme did
   (§10).
@@ -823,18 +844,52 @@ count falls.
      P4 as shipped, light); the chrome-literal ratchet falls; `gate_counts`
      budgets hold on every existing config; p4_bench on the P4 and the
      T-Deck.
-  4. **D1 lands.** D1's tokens and shapes become the default seed, the
-     hand-drawn surfaces it restyles move onto the toolkit as it does, the
-     `_base` geometry retires as each surface gets its 320×240 layout (2b's
-     reverted half: the Editor's bar against the Studio's T-Deck mockup, the
-     Sprites tab's grid and tool rows), and `outline` becomes a seed package
-     (the skin axis folds into the theme). The readability check learns the
-     dither and pinstripe fills (§7). The Code tab's `code_comment` on
-     its 320×240 background is fixed here (2b left grey on blue; owner,
-     2026-10-12).
+  4. **D1 lands** (landed 2026-10-12). D1's tokens and shapes become the
+     default seed, the hand-drawn surfaces it restyles move onto the toolkit
+     as it does, the `_base` geometry retires as each surface gets its
+     320×240 layout (2b's reverted half: the Editor's bar against the Studio's
+     T-Deck mockup, the Sprites tab's grid and tool rows), and `outline`
+     becomes a seed package (the skin axis folds into the theme). The
+     readability check learns the dither and pinstripe fills (§7). The Code
+     tab's `code_comment` on its 320×240 background is fixed here (2b left
+     grey on blue; owner, 2026-10-12).
      Gate: **one re-baseline, named and rendered** against the mockups in
      `docs/media/theming_2026-09/`; p4_bench on the P4 and the T-Deck; the
      ratchet's count falls.
+     As built: `night` carries D1 as data, one surface set over its two
+     colour tables: black (`shade_dark`) outlines and the two-pixel hard
+     shadow on buttons, chips and panels, the desk's icon tiles
+     (`desk.icon`) and their labels in a pill the label's width (`desk`, in
+     the bar's colours); calm chrome in the light table (cream panels, grey
+     buttons and inactive strips, black outlines, a blue accent); the
+     `classic` frame is D1's (§4.5). A theme that names none of these
+     inherits them, as every seed does but `platinum` and `win95` where they
+     name their own. Every `*Layout` lays the T-Deck out through the formulas
+     every tier runs, and the formulas that did not fit it were fixed: the
+     Sprites tab puts its tool rows under the grid and the palette, clear of
+     the button column, whenever that leaves a bigger grid (144px at
+     320×240), and stacks GET, PUT and FILE tighter where CLOSE is close; the
+     Editor's bar takes the narrow form where its labelled row would drop a
+     tab: one icon a tab, the open one framed in the tab's `on` field, then
+     UNDO, REDO and PLAY. The dark `code_comment` derives to periwinkle (22).
+     The skin's rows, its verbs in the app ABI (`theme.skin`,
+     `theme.set_skin`) and its persisted setting are deleted; a compiled
+     app's library of its own (the host's) installs the theme's shape by name
+     where it installed the skin.
+     Ruled 2026-10-12, each the pick that builds least:
+       - **The open tab's name is not on the 320×240 bar.** The mockup fits it
+         by dropping the bar's ≡, wifi and battery, an OS-zone change this
+         step does not make; beside them and UNDO/REDO, 26px are left, so the
+         open tab is told by its frame.
+       - **`outline` draws one-pixel rings.** A surface's border is one pixel
+         (§4.4), so the skin's two-pixel rings, its unfilled rows and its
+         left-aligned labels are not kept; its rings are `dim` at rest and
+         `focus` on hover, its panels `accent`.
+       - **The Calc display stays an LCD**, black with green digits in every
+         theme: a theme's darkest shade is grey in `platinum`.
+       - **Tiny5 and Moy's night stay phase 4's and the wallpaper's**: the
+         chrome keeps petme128, and the default wallpaper is the one already
+         shipped.
 
 **Phase 4 — type** (three steps, one re-baseline).
   1. **The font format and its lane.** The aligned bitmap format (§4.7), read
@@ -930,9 +985,6 @@ Each is corrected in place by the phase that falsifies it:
 
 | sentence | in | fixed by |
 |---|---|---|
-| a skin is colours and pads | `native/moy_ui/style.json`'s `about`, `runtime/ui.py`'s header | phase 3 |
-| the 320×240 row is frozen `_base`-verbatim and does not exercise the toolkit | `.claude/rules/shell.md`, `.claude/rules/rendering.md`, `CLAUDE.md`, `tests/test_shell_goldens.py`, `runtime/layout_base.py` | phase 3, step 4 (the geometry; 2b retired the colours) |
-| the default look is the "night" token set; "Avoid: bevels and fake plastic controls" as a rule for every look | `docs/visual_identity_v1.md`, `docs/shell_ux_v1.md` | phase 3, scoped to the default theme |
 | "Petme128 remains the canonical runtime glyph source for v1" | `docs/visual_identity_v1.md` §5.4 | phase 4 (carts keep it; the chrome moves) |
 | `bar_h()` as the whole content contract | `docs/app_api_v1.md`, `runtime/system_api.py` | the shell-layout doc |
 | the windowed tier's games-only Library (#105) | `docs/shell_ux_v1.md` | the shell-layout doc: the desk's PLAY opens D7's home |

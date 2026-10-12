@@ -74,7 +74,7 @@ def _paint(th, text, w, h, x=2, y=2, metrics=None, use=None):
     ("etched, fill 7", ["LLLLLH", "LHHHLH", "LHFFLH", "LLLLLH", "HHHHHH"]),
     ("bevel2, fill 7", ["FFFFFD", "FHHHLD", "FHFFLD", "FLLLLD", "DDDDDD"]),
     ("raised, fill 7, border 12", ["BBBBBB", "BHHHLB", "BHFFLB", "BLLLLB", "BBBBBB"]),
-    ("fill 7, shadow", ["FFFFF.", "FFFFFD", "FFFFFD", "FFFFFD", ".DDDDD"]),
+    ("fill 7, shadow", ["FFFF..", "FFFFD.", "FFFFDD", ".DDDDD", "..DDDD"]),
 ])
 def test_each_edge(theme, text, want):
     th = theme()

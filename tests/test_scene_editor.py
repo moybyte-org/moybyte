@@ -140,29 +140,10 @@ def test_world_size_covers_viewport_map_and_actors():
     assert empty.world_size(None) == (640, 480)      # viewport + one-viewport margin
 
 
-# -- SceneLayout: the #39 frozen-baseline contract ----------------------------
-
-def test_scene_layout_base_reproduces_frozen_constants():
-    lay = SU.SceneLayout(320, 240, 1)
-    assert lay._base
-    assert (lay.sv_x0, lay.sv_y0) == (SU._SV_X0, SU._SV_Y0)
-    assert (lay.sv_avail_w, lay.sv_avail_h) == (SU._SV_AVAIL_W, SU._SV_AVAIL_H)
-    assert lay.tp_area == SU._TP_AREA
-    assert lay.tp_prev == SU._TP_PREV and lay.tp_next == SU._TP_NEXT
-    assert lay.zoom_btn == SU._SC_ZOOM and lay.flip_btn == SU._SC_FLIP
-    assert (lay.pan_up, lay.pan_lf, lay.pan_rt, lay.pan_dn) == \
-        (SU._PAN_UP, SU._PAN_LF, SU._PAN_RT, SU._PAN_DN)
-    assert (lay.tag_btn, lay.del_btn, lay.snap_btn) == \
-        (SU._SC_TAG, SU._SC_DEL, SU._SC_SNAP)
-    assert (lay.undo_btn, lay.redo_btn, lay.front_btn, lay.back_btn) == \
-        (SU._SC_UNDO, SU._SC_REDO, SU._SC_FRONT, SU._SC_BACK)
-    assert lay.pan_thresh == SU._SC_PAN_THRESH
-    assert lay.zooms == SU._SV_ZOOMS
-
+# -- SceneLayout ----------------------------------------------------------------
 
 def test_scene_layout_reflows_bigger_panel():
     lay = SU.SceneLayout(1024, 600, 1)
-    assert not lay._base
     # The world view grows to fill the panel: a desk-size panel shows the whole
     # 320x240 game viewport at 1x with no panning.
     assert lay.sv_avail_w >= 320 and lay.sv_avail_h >= 240

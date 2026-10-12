@@ -128,7 +128,7 @@ class AchievementsUI:
         # fs=1 deliberately: this popup is sized in 8px glyph units (`w` above),
         # so its clip budget is the frozen one, not the canvas font scale. The
         # ink is a literal white on a literal black dialog -- an off-token
-        # surprise banner that no theme and no skin colours.
+        # surprise banner that no theme colours.
         _ui.row(cv, self.ws.theme_colors, (x + 24, y, w - 24, h), line,
                 colors=(None, NAMES["white"], None), edge=False, pad=0,
                 text_dy=11, fs=1)
@@ -189,9 +189,9 @@ class AchievementsUI:
             # beside quiet text), which `row`'s single-ink leading slot cannot
             # express -- so the caller draws the badge and `row` takes the rect
             # after it. `disabled` IS the locked semantics, and since #207 it is
-            # also where the colour comes from: the skin's "row_chrome" kind
+            # also where the colour comes from: the style's "row_chrome" kind
             # reads bright at rest and dims when unusable, which is exactly this
-            # list. fs=1: this view is frozen 320x240 geometry.
+            # list. fs=1: this view's geometry is fixed.
             self.ws._glyph(glyph, (x, y, 14, 14), g_col, cv)
             _ui.row(cv, th, (x + 16, y, col_w - 16, 14), label,
                     kind="row_chrome", disabled=not got,

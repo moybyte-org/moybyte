@@ -75,10 +75,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
 #
-# Mirrors CodeLayout in console.py (same responsive-reflow contract, #39 step
-# 2): at (320, 240, 1) every field below equals the frozen `_BLK_*` constant
-# verbatim (the `_base` branch), so the reflow is pixel-identical to the
-# pre-#39 fixed layout. _BASE_W/_BASE_H come from the layout_base leaf above;
+# Mirrors CodeLayout in console.py (#39 step 2): the formulas lay out every
+# canvas, the T-Deck's 320x240 included. _BASE_W/_BASE_H come from the
+# layout_base leaf above;
 # _FONT_W is duplicated (not imported) from console.py's own copy -- a
 # foundational, unchanging screen constant, and importing it back would be the
 # same circular import BlockEditorUI's __init__ comment explains below.
@@ -265,20 +264,17 @@ class BlockLayout(LayoutBase):
     Y0, row height + indent, visible ROWS), the bottom action bar, and the modal
     insert menu -- derived from the SYSTEM canvas size (w, h) + font scale instead of
     the 320x240 `_BLK_*` constants. A larger panel shows MORE rows + WIDER blocks; a
-    bigger font scales the rows/text/buttons.
-
-    Same hard contract as `Layout`: at (320, 240, 1) every field equals the frozen
-    `_BLK_*` constant verbatim (the `_base` branch), so the degradation path is
-    pixel-identical to today."""
+    bigger font scales the rows/text/buttons, and the T-Deck's 320x240 is laid
+    out by the same formulas."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None,
                  chrome_scale=None):
         # `bounds` (bx, by, bw, bh) confines the OUTLINE + action bar to a sub-rect
         # -- the left pane of the combined Blocks+Scene workspace (blocks-left /
         # objects-right). The modal overlays (insert menu / prompts) stay centered
-        # on the full canvas. A bounded layout never takes the frozen 320x240 branch
-        # (big-screen feature), so `_base` excludes it and the T-Deck is unchanged.
-        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None,
+        # on the full canvas. Bounds are a big-screen feature: the T-Deck's
+        # Blocks tab is never bounded.
+        LayoutBase.__init__(self, w, h, font_scale,
                             chrome_scale=chrome_scale)
         fs = self.fs
         self.cell = _FONT_W * fs
@@ -293,54 +289,35 @@ class BlockLayout(LayoutBase):
         # -- action bar: a row of buttons anchored to the bottom -----------------
         # SAVE/CLOSE moved to the unified bar (Stage-4 rollout); only ADD / DEL / up /
         # dn + CODE (the #29 graduation action) stay in the body.
-        if self._base:
-            self.bar_y = 196
-            self.bar_h = 22
-            self.add_btn, self.del_btn = _BLK_ADD, _BLK_DEL
-            self.up_btn, self.dn_btn = _BLK_UP, _BLK_DN
-            self.code_btn = _BLK_CODE
-            # #93 edit cluster (frozen constants at base).
-            self.act_btn = _BLK_ACT
-            self.undo_btn = _BLK_UNDO
-            self.redo_btn = _BLK_REDO
-        else:
-            self.bar_h = 22 * fs
-            self.bar_y = self.h - self.bar_h - 2 * fs
-            by, bh = self.bar_y, self.bar_h
-            # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them; then the
-            # #93 edit cluster ("..." / UNDO / REDO) packed after CODE.
-            x = self.x0
-            self.add_btn = (x, by, 40 * fs, bh); x += 42 * fs
-            self.del_btn = (x, by, 34 * fs, bh); x += 36 * fs
-            self.up_btn = (x, by, 22 * fs, bh); x += 24 * fs
-            self.dn_btn = (x, by, 22 * fs, bh); x += 24 * fs
-            self.code_btn = (x, by, 56 * fs, bh); x += 58 * fs
-            self.act_btn = (x, by, 30 * fs, bh); x += 32 * fs
-            self.undo_btn = (x, by, 42 * fs, bh); x += 44 * fs
-            self.redo_btn = (x, by, 40 * fs, bh)
+        self.bar_h = 22 * fs
+        self.bar_y = self.h - self.bar_h - 2 * fs
+        by, bh = self.bar_y, self.bar_h
+        # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them; then the
+        # #93 edit cluster ("..." / UNDO / REDO) packed after CODE.
+        x = self.x0
+        self.add_btn = (x, by, 40 * fs, bh); x += 42 * fs
+        self.del_btn = (x, by, 34 * fs, bh); x += 36 * fs
+        self.up_btn = (x, by, 22 * fs, bh); x += 24 * fs
+        self.dn_btn = (x, by, 22 * fs, bh); x += 24 * fs
+        self.code_btn = (x, by, 56 * fs, bh); x += 58 * fs
+        self.act_btn = (x, by, 30 * fs, bh); x += 32 * fs
+        self.undo_btn = (x, by, 42 * fs, bh); x += 44 * fs
+        self.redo_btn = (x, by, 40 * fs, bh)
         # -- outline width + visible rows ----------------------------------------
-        if self._base:
-            self.outline_w = _BLK_W              # 308
-            self.rows = _BLK_ROWS                # 11
-        else:
-            self.outline_w = self.w - 2 * self.x0
-            avail_h = self.bar_y - self.y0
-            self.rows = max(3, avail_h // self.row_h)
+        self.outline_w = self.w - 2 * self.x0
+        avail_h = self.bar_y - self.y0
+        self.rows = max(3, avail_h // self.row_h)
         # -- modal insert menu (centered, scales with the canvas/font) -----------
         self.menu_row_h = _BLK_MENU_ROW_H * fs
-        if self._base:
-            self.menu = _BLK_MENU                # (40, 24, 240, 192)
-            self.menu_rows = _BLK_MENU_ROWS      # 10
-        else:
-            mw = min(self.w - 16 * fs, 240 * fs)
-            mh = min(self.h - 24 * fs, self.bar_y - 24 * fs)
-            mx = (self.w - mw) // 2
-            my = 24 * fs
-            self.menu = (mx, my, mw, mh)
-            self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)
+        mw = min(self.w - 16 * fs, 240 * fs)
+        mh = min(self.h - 24 * fs, self.bar_y - 24 * fs)
+        mx = (self.w - mw) // 2
+        my = 24 * fs
+        self.menu = (mx, my, mw, mh)
+        self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)
         # Confine the outline + action bar to the workspace's left pane (the modals
         # above keep full-canvas centering, so they float over both panes).
-        if bounds is not None and not self._base:
+        if bounds is not None:
             self._apply_bounds(bounds)
 
     def _apply_bounds(self, bounds):

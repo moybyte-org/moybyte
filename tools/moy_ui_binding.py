@@ -31,14 +31,13 @@ _SIGS = (
     ("moy_ui_kind_known", [_P, _Z], _I),
     ("moy_ui_button_kind", [_P, _Z], _I),
     ("moy_ui_state", [_P, _Z], _I),
-    ("moy_ui_skin_use", [_P, _Z], _I),
-    ("moy_ui_skin", [], _I),
-    ("moy_ui_gen", [], c.c_uint32),
     ("moy_theme_resolve", [_P, _Z, _I, c.c_void_p, c.POINTER(c.c_uint32)], _I),
     ("moy_theme_install", [_P, _Z, c.POINTER(c.c_uint8)], _I),
     ("moy_theme_shape", [_P, _Z, c.c_void_p], _I),
     ("moy_theme_surface", [_P, _Z, c.c_void_p, c.POINTER(c.c_uint8)], _I),
     ("moy_ui_shape_use", [c.c_void_p], _I),
+    ("moy_ui_shape", [], c.c_void_p),
+    ("moy_ui_pattern_unreadable", [_I, c.c_void_p, c.c_void_p, _I], _I),
     ("moy_theme_installed", [], c.c_char_p),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
@@ -69,7 +68,8 @@ def _shape_type(metrics, parts, states, stids):
                     ("effect", ((c.c_uint8 * 2) * states) * parts),
                     ("stid", (c.c_uint8 * states) * parts),
                     ("surf", _Surface * stids),
-                    ("frame", c.c_uint8 * 6)]
+                    ("frame", c.c_uint8 * 6),
+                    ("name", c.c_char * 25)]
     return _Shape
 
 
@@ -195,12 +195,11 @@ def binding():
         fn.argtypes = args
         fn.restype = res
     counts = {}
-    for key in ("TOKENS", "STATES", "KINDS", "COLOR_KINDS", "SKINS", "GLYPHS"):
+    for key in ("TOKENS", "STATES", "KINDS", "COLOR_KINDS", "GLYPHS"):
         counts[key] = c.c_int.in_dll(lib, "moy_ui_n_" + key.lower()).value
     tokens = _names(lib, "moy_ui_token_names", counts["TOKENS"])
     states = _names(lib, "moy_ui_state_names", counts["STATES"])
     kinds = _names(lib, "moy_ui_kind_names", counts["KINDS"])
-    skins = _names(lib, "moy_ui_skin_names", counts["SKINS"])
     glyphs = _names(lib, "moy_ui_glyph_names", counts["GLYPHS"])
     m = types.ModuleType("moy_ui")
 
@@ -214,12 +213,6 @@ def binding():
     def button_kind(name):
         b = _b(name)
         return lib.moy_ui_button_kind(b, len(b))
-
-    def skin(*name):
-        if name:
-            b = _b(name[0])
-            return skins[lib.moy_ui_skin_use(b, len(b))]
-        return skins[lib.moy_ui_skin()]
 
     def look(slot, row):
         if len(row) != len(tokens):
@@ -627,9 +620,6 @@ def binding():
     m.metric_kinds = lambda: tuple(k for k in kinds if metrics(k) is not None)
     m.kind = kind
     m.button_kind = button_kind
-    m.skins = lambda: skins
-    m.skin = skin
-    m.gen = lambda: lib.moy_ui_gen()
     seeds = _names(lib, "moy_theme_seed_names", c.c_int.in_dll(lib, "moy_ui_n_themes").value)
     m.themes = lambda: seeds
     n_roles = c.c_int.in_dll(lib, "moy_theme_n_roles").value
@@ -682,6 +672,12 @@ def binding():
         lib.moy_ui_shape_use(c.byref(sh))
         return rc
 
+    def pattern_unreadable(look):
+        bad = ((c.c_uint8 * 2) * 16)()
+        n = min(16, lib.moy_ui_pattern_unreadable(look, lib.moy_ui_shape(), bad, 16))
+        return [(parts[bad[i][0]], th_states[bad[i][1]]) for i in range(n)]
+
+    m.pattern_unreadable = pattern_unreadable
     m.theme_shape = theme_shape
     m.surface = surface
     m.use_shape = use_shape

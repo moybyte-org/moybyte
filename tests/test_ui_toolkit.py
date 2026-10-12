@@ -136,17 +136,18 @@ def test_chip_clip_follows_the_system_font_scale():
 
 def test_apps_button_delegates_to_chip(tmp_path):
     """The Appearance app's toolbar button (one of the four migrated copies)
-    still paints its exact legacy pixels through the delegate."""
+    paints through the chip, in the default theme's chip surface: the chip's
+    field, ringed in shade_dark."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     cv = ws.sys_canvas
     ws.appearance_app._button(cv, "CARTS", (10, 100, 60, 16), on=True)
     th = ws.theme_colors
     assert cv.pix(12, 102) == th["accent"]
-    assert cv.pix(10, 100) == th["edge"]
+    assert cv.pix(10, 100) == th["shade_dark"]
     ws.appearance_app._button(cv, "CARTS", (10, 120, 60, 16), on=False)
     assert cv.pix(12, 122) == th["panel"]
-    assert cv.pix(10, 120) == th["dim"]
+    assert cv.pix(10, 120) == th["shade_dark"]
 
 
 def test_tab_row_geometry_and_overflow():

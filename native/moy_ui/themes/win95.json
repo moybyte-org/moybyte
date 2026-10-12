@@ -23,7 +23,7 @@
   "surfaces": {
     "button": { "rest": "bevel2, fill panel",
                 "pressed": "sunken, border shade_dark, fill panel" },
-    "chip": { "rest": "raised, fill panel", "on": "sunken, dither shade_hi/panel" },
+    "chip": { "rest": "raised, fill panel", "on": "sunken, dither shade_hi/6" },
     "tab": { "rest": "raised, fill panel" },
     "toolbar": { "rest": "raised, fill panel" },
     "panel": { "rest": "etched" },

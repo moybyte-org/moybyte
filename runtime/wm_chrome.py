@@ -223,7 +223,7 @@ class WindowChrome:
             focused = (key == self._focus and not win.minimized)
             bg = th["accent"] if focused else th["panel"]
             if focused:
-                fg = NAMES["black"]                # ink on the accent CTA chip
+                fg = _ui.state_colors(th, "chip", _ui.ON)[1]
             else:
                 fg = th["edge"] if win.minimized else th["chrome_ink"]
             state = _ui.ON if focused else (_ui.DISABLED if win.minimized else _ui.REST)

@@ -423,8 +423,8 @@ the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
 surface / ink / focus / play / author / danger etc., resolved for every theme
 with the frozen literals as fallbacks — and an opt-in **"machine"** theme ships
 the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
-grape identity, green PLAY / orange authoring / yellow focus. "night" stays the
-byte-identical default. 2026-07-23: every theme family ships a **dark AND a
+grape identity, green PLAY / orange authoring / yellow focus. "night" is the
+default, in D1's look since 2026-10-12 (`docs/theming_2026-09.md` §1). 2026-07-23: every theme family ships a **dark AND a
 light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
 `theme_variant`), and the tokens now reach the whole system: the OS bar,
 Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,

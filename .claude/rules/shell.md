@@ -37,9 +37,9 @@ to whoever called it.
   - **There is NO SAVE and no dirty star** (#111). Commits ride a typing-idle
     debounce plus every exit path; a commit also appends the undo journal and runs
     graduation detection.
-  - **All seven Editor tabs are `_base`-verbatim byte-identical at 320×240/1×**, so
-    the Editor reflows to any panel or window size — **only a RUNNING CART is
-    fixed at 320×240**.
+  - **All seven Editor tabs lay out through their `*Layout` formulas on every
+    canvas, the T-Deck's 320×240 included**, so the Editor reflows to any panel
+    or window size — **only a RUNNING CART is fixed at 320×240**.
   - **`ws.screen` is a read-only PROJECTION of the WM back-stack top**, not state.
     The visible/draw stack is memoized (zero per-frame list churn, #66).
   - **`WindowedWM` is host/P4 only and deliberately NOT staged to the S3.**
@@ -268,7 +268,7 @@ Record and gates: #206, #207, #208.
   both WMs read `ws.show_fps` on every painted game frame on every board.
 - **The `colors=` hatch is 14 sites and each has a written reason** (`ui.row`/
   `ui.cell` take `kind=`, like `ui.button`). `row_menu` and `row_list` are
-  deliberately two skin entries: `ink_dim` and `chrome_ink_dim` resolve differently
+  deliberately two style entries: `ink_dim` and `chrome_ink_dim` resolve differently
   on machine/dark, so collapsing them passes every golden and moves a pixel.
 - **The on-glass suites share one fixture** (`tests/on_glass.py`), and
   reset-vs-attach is read from `board.toml`, never chosen in a suite.

@@ -111,11 +111,12 @@ and `shell_decoupling_2026-08.md`, and CUT about half the combined program on
 evidence — read its Section 1 before proposing any cut part again). The rules it
 left:
 
-- **The 320×240/1× baseline does NOT exercise the toolkit.** `editor_app._draw_zone`
-  and siblings are guarded `if not ws.layout._base`, so perturbing a widget turns
-  the Guition/fs3/windowed configs red and leaves BOTH T-Deck rows green.
-  **Verify a widget change on the non-`_base` configs; a green T-Deck row proves
-  nothing.** The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
+- **Every golden row draws through the toolkit, the T-Deck's 320×240 included.**
+  The frozen 320×240 branches (`_base`) retired with theming phase 3 step 4
+  (`docs/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
+  from the formulas every tier runs, so a widget or a layout formula change
+  moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
+  coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
 - **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
   an `"app"` block in the identity cart's manifest, and `runtime/app_decls.py`, its
   generated frozen copy. The five hand-lists it replaced failed silently and on
@@ -131,8 +132,10 @@ left:
 - **Style is data** — `native/moy_ui/style.json`, resolved by `native/moy_ui`'s
   C, with `runtime/ui.py` its face (sprint 6, `docs/kernel_toolkit_2026-10.md`).
   A data edit is the JSON plus `tools/gen_ui_tables.py`'s committed output
-  (`tests/test_ui_tables.py` fails a stale one). `tests/test_skin.py` pins skin
-  knowledge to its two owner modules in both directions.
+  (`tests/test_ui_tables.py` fails a stale one). There is no skin: what a look
+  changes beyond colours is its theme's shape (surfaces, frame, metrics, text
+  effects), installed with the theme, and `tests/test_style.py` holds the style
+  tables and the `colors=` hatch.
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
   roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
   `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not

@@ -248,8 +248,10 @@ def painter_matches_host(board):
         got = board.pyval("ws._g['_paint_scene'](%r, %r)" % (_painter_src(text, metrics), rect),
                           strict=True)
         assert bytes.fromhex(got) == frame, (text, metrics, rect)
-    assert board.pyval("__import__('moy_ui').theme_shape(ws.look.theme_name)[2]",
-                       strict=True) == ()
+    import moy_ui
+    name = board.pyval("ws.look.theme_name", strict=True)
+    assert board.pyval("__import__('moy_ui').theme_shape(%r)[2]" % name,
+                       strict=True) == moy_ui.theme_shape(name)[2]
 
 
 def py_probe_reaches_the_console(board):
@@ -1813,7 +1815,7 @@ _UI_LIST_XY = (200, 150)
 
 def _app_ui_host_pmem(look):
     """The fixture's pmem after its first frames on the host's WAMR in the
-    board's look (theme, variant, skin): the widgets' pixel hashes the
+    board's look (theme, variant): the widgets' pixel hashes the
     board's must equal."""
     import tempfile
     from runtime import host_app, wasm_host
@@ -1828,7 +1830,6 @@ def _app_ui_host_pmem(look):
     ws = host_app.build_workstation(root)
     ws.pointer.visible = False
     ws.look.set_theme(look[0], persist=False, variant=look[1])
-    ws.look.set_skin(look[2], persist=False)
     open_cart(ws, APP_UI[1])
     for _ in range(9):
         ws._dirty = True
@@ -1848,7 +1849,7 @@ def wasm_app_draws_the_toolkit(board, root):
     scrolls the list through the run's snapshot. Leaves the desk as it found
     it."""
     host = _app_ui_host_pmem(board.pyval(
-        "(ws.look.theme_name, ws.look.theme_variant, ws.look.skin_name)", strict=True))
+        "(ws.look.theme_name, ws.look.theme_variant)", strict=True))
     pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
                "(__import__('array').array('i', bytearray(1024)))")
     line = board.cmd("run %s" % APP_UI[1].lower(), wait_for="REMOTE run")

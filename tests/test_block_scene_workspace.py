@@ -2,11 +2,9 @@
 
 Scratch-style: on a wide canvas the Blocks tab grows an INTERACTIVE scene pane on
 the right ("objects on the right, their programming on the left"). Big-screen only
-by design -- below the gate (notably the 320x240 T-Deck) the tab renders exactly
-as before (blocks-only), so the frozen `_base` path is untouched.
+by design -- below the gate (notably the 320x240 T-Deck) the tab is blocks-only.
 
-Covers: the width gate, both editors' layouts BOUND to their panes (and the
-320x240 `_base` still frozen), a tap in the right pane driving the real
+Covers: the width gate, both editors' layouts BOUND to their panes, a tap in the right pane driving the real
 SceneEditor, a tap in the left pane driving the outline (not the scene), and the
 scene pane persisting through the Blocks tab's commit path.
 """
@@ -71,12 +69,11 @@ def test_gate_active_on_wide_canvas(tmp_path):
     assert ws.block_ui._workspace_active()
 
 
-def test_gate_off_on_tdeck_and_base_layout_frozen(tmp_path):
-    # The 320x240 T-Deck: blocks-only, no scene pane, and the block layout stays
-    # on the frozen `_base` branch (byte-identical to before this feature).
+def test_gate_off_on_tdeck(tmp_path):
+    # The 320x240 T-Deck: blocks-only, no scene pane, the outline the canvas's.
     ws = _open_blocks_ws(tmp_path, (320, 240))
     assert not ws.block_ui._workspace_active()
-    assert ws.block_ui.block_layout._base
+    assert ws.block_ui.block_layout.x0 + ws.block_ui.block_layout.outline_w <= 320
     # The Blocks tab never builds the scene editor at this size.
     assert ws.scene_ui.sceneedit is None
 
@@ -102,7 +99,6 @@ def test_block_layout_bound_to_left_pane(tmp_path):
     ws = _open_blocks_ws(tmp_path, WIDE)
     left, _right = ws.block_ui._workspace_panes()
     lay = ws.block_ui.block_layout
-    assert not lay._base                            # bounded -> never the frozen branch
     assert left[0] <= lay.x0 < left[0] + left[2]
     assert lay.x0 + lay.outline_w <= left[0] + left[2]
     # the action bar sits inside the left pane too
@@ -114,7 +110,6 @@ def test_scene_layout_bound_to_right_pane(tmp_path):
     ws = _open_blocks_ws(tmp_path, WIDE)
     _left, right = ws.block_ui._workspace_panes()
     lay = ws.scene_ui.layout
-    assert not lay._base
     px, py, pw, ph = lay.panel
     assert px >= right[0] and px + pw <= right[0] + right[2] + 1
     assert py >= right[1] and py + ph <= right[1] + right[3] + 1
@@ -318,24 +313,12 @@ def test_tapping_the_second_argument_selects_that_slot(tmp_path):
 def test_bounded_layouts_confine_to_rect():
     bounds = (500, 18, 420, 560)
     bl = BU.BlockLayout(1024, 600, 1, bounds=bounds)
-    assert not bl._base
     assert bounds[0] <= bl.x0 < bounds[0] + bounds[2]
     assert bl.x0 + bl.outline_w <= bounds[0] + bounds[2]
     assert bl.bar_y + bl.bar_h <= bounds[1] + bounds[3]
     sl = SU.SceneLayout(1024, 600, 1, bounds=bounds)
-    assert not sl._base
     assert sl.body_fill == bounds
     assert sl.panel[0] >= bounds[0]
-
-
-def test_base_layouts_ignore_bounds_and_stay_frozen():
-    # A 320x240/1x layout is byte-identical whether or not bounds is passed.
-    a = BU.BlockLayout(320, 240, 1)
-    b = BU.BlockLayout(320, 240, 1)
-    assert a._base and b._base
-    assert (a.x0, a.y0, a.outline_w, a.rows) == (b.x0, b.y0, b.outline_w, b.rows)
-    sa = SU.SceneLayout(320, 240, 1)
-    assert sa._base
 
 
 # -- the split is memoised (perf, #58) ----------------------------------------

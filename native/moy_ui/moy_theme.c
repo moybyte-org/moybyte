@@ -1044,9 +1044,13 @@ static int resolve_shape(const char *name, size_t n, moy_ui_shape_t *sh) {
 int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out) {
     int rc = resolve_shape(name, n, out);
     if (rc != MOY_THEME_OK) {
-        const char *def = moy_theme_seed_names[0];
-        resolve_shape(def, strlen(def), out);
+        name = moy_theme_seed_names[0];
+        n = strlen(name);
+        resolve_shape(name, n, out);
     }
+    n = n < MOY_UI_SHAPE_NAME - 1 ? n : MOY_UI_SHAPE_NAME - 1;
+    memcpy(out->name, name, n);
+    out->name[n] = 0;
     return rc;
 }
 

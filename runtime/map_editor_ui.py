@@ -208,10 +208,7 @@ class MapLayout(LayoutBase):
     the paged tile palette + pan d-pad + zoom column, and the ERASE/CLOSE/SKY
     bottom row, derived from the SYSTEM canvas size (w, h) + font scale.
 
-    The single hard contract (mirrors Layout/CodeLayout/PaintLayout): at (w, h, fs)
-    == (320, 240, 1) every field equals the frozen `_MV_*`/`_TP_*`/`_PAN_*`/`_MAP_*`
-    module constant, byte for byte (the `_base` branch); the responsive formulas only
-    run on a larger canvas / bigger font.
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas.
 
     The map VIEW is the star of the reflow: its available rectangle grows to fill
     the panel (so a big screen shows far more of the map at once), and larger
@@ -223,30 +220,6 @@ class MapLayout(LayoutBase):
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        if self._base:
-            self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
-            self.panel = (8, 16, 304, 204)
-            self.title_xy = (14, 18)
-            self.mv_x0, self.mv_y0 = _MV_X0, _MV_Y0
-            self.mv_avail_w, self.mv_avail_h = _MV_AVAIL_W, _MV_AVAIL_H
-            self.zooms = tuple(_MV_ZOOMS) + (_MV_OVERVIEW,)
-            self.tp_x0, self.tp_y0 = _TP_X0, _TP_Y0
-            self.tp_cell, self.tp_cols, self.tp_rows = _TP_CELL, _TP_COLS, _TP_ROWS
-            self.tp_page = _TP_PAGE
-            self.tp_area = _TP_AREA
-            self.tp_prev, self.tp_next = _TP_PREV, _TP_NEXT
-            self.sky_btn = _TP_SKY
-            self.zoom_btn = _MAP_ZOOM
-            self.size_btn = _MAP_SIZE
-            self.pan_up, self.pan_lf, self.pan_rt, self.pan_dn = \
-                _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN
-            self.erase_btn, self.close_btn = _MAP_ERASE, _MAP_CLOSE
-            # UNDO/REDO left the strip in #111 (the ONE bar pair is now THE undo,
-            # routed to this editor's op-history) -- TOOL + DIM keep their slots,
-            # the freed middle is spacing.
-            self.tool_btn, self.dim_btn = _MAP_TOOL, _MAP_DIM
-            self.pan_thresh = _MAP_PAN_THRESH
-            return
         # -- responsive: anchor the palette/d-pad column to the panel's right edge,
         # the button row to its bottom, and grow the map view to fill the rest ----
         bar_h = 18 * self.cs          # the OS bar's own height (#203)
@@ -1052,7 +1025,7 @@ class MapEditorUI:
                     cv.rectb(rpx + 1, rpy + 1, rpw - 2, rph - 2, NAMES["yellow"])
         # SELECT overlay (#91): the committed selection is a solid white box, a live
         # marquee drag a yellow box (like the RECT preview). Both clamp to the visible
-        # window. Drawn only in select mode, so the frozen baseline is untouched.
+        # window. Drawn only in select mode.
         if self.map_tool == "select":
             if me.sel is not None:
                 self._draw_map_box(cv, x0, y0, cell, cols, rows, me.cam_x, me.cam_y,

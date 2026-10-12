@@ -65,27 +65,6 @@ static mp_obj_t ui_button_kind(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_button_kind_obj, ui_button_kind);
 
-static mp_obj_t ui_skins(void) {
-    return names_tuple(moy_ui_skin_names, MOY_UI_SKINS);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(ui_skins_obj, ui_skins);
-
-// skin([name]): install `name` (an unknown one installs the default); the
-// installed skin's name either way.
-static mp_obj_t ui_skin(size_t n_args, const mp_obj_t *args) {
-    int s;
-    if (n_args > 0) {
-        size_t n;
-        const char *name = mp_obj_str_get_data(args[0], &n);
-        s = moy_ui_skin_use(name, n);
-    } else {
-        s = moy_ui_skin();
-    }
-    const char *name = moy_ui_skin_names[s];
-    return mp_obj_new_str(name, strlen(name));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_skin_obj, 0, 1, ui_skin);
-
 // -- themes (moy_theme.h) ----------------------------------------------------------
 
 // themes(): the seed packages' names, the default first.
@@ -212,6 +191,23 @@ static mp_obj_t ui_use_shape(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_use_shape_obj, ui_use_shape);
 
+// pattern_unreadable(look): the installed shape's pattern fills whose label
+// ink misses the contrast floor in `look`, as (part, state) name pairs.
+static mp_obj_t ui_pattern_unreadable(mp_obj_t look) {
+    uint8_t bad[16][2];
+    int n = moy_ui_pattern_unreadable(mp_obj_get_int(look), moy_ui_shape(), bad, 16);
+    n = n > 16 ? 16 : n;
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < n; i++) {
+        const char *p = moy_theme_part_names[bad[i][0]];
+        const char *st = moy_theme_state_names[bad[i][1]];
+        mp_obj_t pair[2] = {mp_obj_new_str(p, strlen(p)), mp_obj_new_str(st, strlen(st))};
+        mp_obj_list_append(out, mp_obj_new_tuple(2, pair));
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_pattern_unreadable_obj, ui_pattern_unreadable);
+
 // parts(), theme_states(): what a theme's `text` and `surfaces` are keyed by.
 static mp_obj_t ui_parts(void) {
     return names_tuple(moy_theme_part_names, MOY_THEME_PARTS);
@@ -240,11 +236,6 @@ static mp_obj_t ui_theme_installed(void) {
     return s == NULL ? mp_const_none : mp_obj_new_str(s, strlen(s));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_installed_obj, ui_theme_installed);
-
-static mp_obj_t ui_gen(void) {
-    return mp_obj_new_int_from_uint(moy_ui_gen());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(ui_gen_obj, ui_gen);
 
 static void check(int rc) {
     if (rc == MOY_UI_NOMEM) {
@@ -284,7 +275,7 @@ static mp_obj_t ui_colors(mp_obj_t look, mp_obj_t kind, mp_obj_t state) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_colors_obj, ui_colors);
 
-// metrics(kind) -> the active skin's tuple for a kind's name, or None.
+// metrics(kind) -> the tuple for a kind's name, or None.
 static mp_obj_t ui_metrics(mp_obj_t name) {
     size_t n;
     const char *s = mp_obj_str_get_data(name, &n);
@@ -1121,15 +1112,13 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_metric_kinds), MP_ROM_PTR(&ui_metric_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_kind), MP_ROM_PTR(&ui_kind_obj) },
     { MP_ROM_QSTR(MP_QSTR_button_kind), MP_ROM_PTR(&ui_button_kind_obj) },
-    { MP_ROM_QSTR(MP_QSTR_skins), MP_ROM_PTR(&ui_skins_obj) },
-    { MP_ROM_QSTR(MP_QSTR_skin), MP_ROM_PTR(&ui_skin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&ui_gen_obj) },
     { MP_ROM_QSTR(MP_QSTR_themes), MP_ROM_PTR(&ui_themes_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme), MP_ROM_PTR(&ui_theme_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_roles), MP_ROM_PTR(&ui_theme_roles_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_shape), MP_ROM_PTR(&ui_theme_shape_obj) },
     { MP_ROM_QSTR(MP_QSTR_surface), MP_ROM_PTR(&ui_surface_obj) },
     { MP_ROM_QSTR(MP_QSTR_use_shape), MP_ROM_PTR(&ui_use_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pattern_unreadable), MP_ROM_PTR(&ui_pattern_unreadable_obj) },
     { MP_ROM_QSTR(MP_QSTR_parts), MP_ROM_PTR(&ui_parts_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_states), MP_ROM_PTR(&ui_theme_states_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_install), MP_ROM_PTR(&ui_theme_install_obj) },

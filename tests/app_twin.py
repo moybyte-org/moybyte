@@ -30,7 +30,7 @@ _ROWS = ("damage.all", "damage.again",
          "surface.chrome_scale", "surface.windowed", "surface.bar_h",
          "surface.pointer",
          "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
-         "theme.variant", "theme.skin",
+         "theme.variant",
          "files.readable", "files.ready", "files.begin", "files.end", "files.list",
          "files.count", "files.load", "files.save", "files.delete",
          "files.duplicate", "files.rename", "files.new_name", "files.trash_list",
@@ -108,7 +108,7 @@ class App:
         self._servers = {}
         self._served = {}
         self._tokens = {}
-        self._names = ["", "", ""]  # theme, variant, skin
+        self._names = ["", ""]      # theme, variant
         self._tgen = 0
         self._colors = None
         self._colors_gen = 0
@@ -193,12 +193,6 @@ class App:
             raise ValueError("an argument the role refuses")
         self._tokens = tok
         self._names[0], self._names[1] = name, variant
-        self._tgen += 1
-
-    def theme_write_skin(self, skin):
-        if len(skin.encode()) > NAME_MAX:
-            raise ValueError("an argument the role refuses")
-        self._names[2] = skin
         self._tgen += 1
 
     def serve(self, role, server):
@@ -323,18 +317,11 @@ class Theme(_Role):
         self._app._hold(self._g, "theme", "theme.variant")
         return self._app._names[1]
 
-    def skin(self):
-        self._app._hold(self._g, "theme", "theme.skin")
-        return self._app._names[2]
-
     def set(self, *a, **kw):
         return self._app._serve(self._g, "theme", "set")(self._g, *a, **kw)
 
     def set_variant(self, *a, **kw):
         return self._app._serve(self._g, "theme", "set_variant")(self._g, *a, **kw)
-
-    def set_skin(self, *a, **kw):
-        return self._app._serve(self._g, "theme", "set_skin")(self._g, *a, **kw)
 
 
 class Prefs(_Role):

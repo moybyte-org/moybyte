@@ -4,6 +4,7 @@
 
 #include "moy.h"
 #include "moy_canvas.h"
+#include "moy_theme.h"
 #include "moy_ui_wasm.h"
 
 // The RUN sink lends an RGB565 canvas as a row (a compile-time check, not a
@@ -21,8 +22,13 @@ void moy_ui_wasm_theme_from(moy_ui_theme_fn fn) {
     s_gen = 0;
 }
 
-uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *skin,
+uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
                             uint32_t cap) __attribute__((weak));
+
+// The shape a library of its own (the host's) installs to draw as the shell
+// does; on an image the shell's is already this theme's, and nothing is
+// written.
+static moy_ui_shape_t s_shape;
 
 // What every drawing row opens with: the RUN sink over the run's target, lent
 // as `row`, the look current, the run's draw state saved in `saved` and reset.
@@ -40,17 +46,16 @@ static int open_run(run_t *r) {
         return -MOY_UI_STALE;
     }
     int32_t tok[MOY_UI_TOKENS];
-    char skin[32];
-    uint32_t gen = theme(tok, s_gen, skin, sizeof(skin));
+    char name[MOY_UI_SHAPE_NAME];
+    uint32_t gen = theme(tok, s_gen, name, sizeof(name));
     if (gen == 0u) {
         return -MOY_UI_STALE;
     }
     if (gen != s_gen) {
-        // The skin is the shell's on an image (one toolkit); a library of its
-        // own (the host's) takes it by name.
-        const char *now = moy_ui_skin_names[moy_ui_skin()];
-        if (skin[0] && strcmp(skin, now) != 0) {
-            moy_ui_skin_use(skin, strlen(skin));
+        const moy_ui_shape_t *now = moy_ui_shape();
+        if (name[0] && now != NULL && strcmp(name, now->name) != 0) {
+            moy_theme_shape(name, strlen(name), &s_shape);
+            moy_ui_shape_use(&s_shape);
         }
         moy_ui_look_set(MOY_UI_LOOK_RUN, tok);
         s_gen = gen;

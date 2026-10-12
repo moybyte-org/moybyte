@@ -186,12 +186,11 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
 
 
 def test_settings_back_returns_home(tmp_path):
-    from runtime import console as C
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)
+    drv.click(ws.layout.set_back[0] + 2, ws.layout.set_back[1] + 2)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -216,7 +215,7 @@ def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
         drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
     drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)     # activate SETTINGS
     assert ws.screen == "settings"
-    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)        # Back resumes the cart...
+    drv.click(ws.layout.set_back[0] + 2, ws.layout.set_back[1] + 2)  # Back resumes the cart...
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                             # ...not the launcher
 
@@ -285,7 +284,6 @@ def test_settings_panel_keeps_the_freed_dock_band_as_its_bottom_inset(tmp_path):
         ws = host_app.build_workstation(str(tmp_path / ("c%dx%d" % size)),
                                         sys_size=size, font_scale=fs)
         lay = ws.layout
-        assert not lay._base
         px, py, pw, ph = lay.settings_panel
         assert py == lay.status_h + 2 * fs                 # top inset, unchanged
         assert py + ph == lay.h - 24 * fs                  # the KEPT dock band
