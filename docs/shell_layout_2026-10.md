@@ -352,9 +352,10 @@ coordinates: the part of the surface the host neither paints over nor swallows
 taps in — the glass minus every bar, top and bottom first, then left and
 right. Under today's bar it is `(0, bar, w, h - bar)`; in a window `(0, 0,
 w, h)` (the title strip is the WM's, outside the content buffer, which is why
-`windowed` apps already use 0). Each bar's rect is the host's,
-`bar_layer.bar_rect(i)`, the one author of where a bar is for drawing AND
-hit-testing.
+`windowed` apps use 0). Each bar's rect is the host's,
+`BarLayer.bar_rect(i, where)`, the one author of where a bar is for drawing
+AND hit-testing; the bar's own rects are in bar coordinates, and
+`BarLayer.handle_bar_tap` translates a tap into them.
 
 **`bar_h()` is derived**: `content_rect()[1]`, the rows ABOVE the content.
 Under a top bar it is what it is today; in a window 0, as today; under a
@@ -365,16 +366,31 @@ leave the top rows empty AND lose the bottom ones), and a clipped sub-canvas
 handed to the app (a new surface mechanism, which `docs/surface_model_v1.md`
 §8 closes).
 
-**Where the value comes from.** `moy_app_surface_t` gains `cx, cy, cw, ch`
-beside `bar_h`, written by the same two writers (`console._surface_write`,
-`_LayoutCtx.install`); `roles.json` gains `surface.content_rect` (`server:
-c`, `grant: never`, `wasm: null`, as `bar_h` is); the generated role table
-and its drift test move with it (`docs/kernel_toolkit_2026-10.md` §12);
-`runtime/system_api.py` publishes `content_rect()` ungated beside `bar_h()`,
-and `docs/app_api_v1.md`'s bar-band paragraph becomes a content-rect
-paragraph. `LayoutBase` (`runtime/layout_base.py`) gains the four fields;
-`ListShellLayout._init_frame` takes them instead of computing `18 * cs`, and
+**Where the value comes from** (step 3, landed 2026-10-13). One leaf places
+the bar and derives what it leaves: `runtime/layout_base.py`'s `place_bar`,
+`bar_y` and `content_of(w, h, rows)`, imported by the bar, every layout and the
+app heads alike. `BarLayer.bar_rects(where)` and `content_rect(where)` answer it
+per surface; `LayoutBase` carries `cx, cy, cw, ch`;
+`ListShellLayout._init_frame` and the calc/appearance/artwork heads take
+`content_of` (rows 0 in a window) instead of computing `18 * cs`; and
 `console.py`'s band check reads the bar rects, never the app's layout.
+`moy_app_surface_t` holds `cx, cy, cw, ch` where it held `bar_h`, written by
+the same two writers (`console._surface_write`, `_LayoutCtx.install`) with
+`Workstation.app_content_rect()`, the rect the exitable strip leaves the
+RUNNING app's screen; the C answers `bar_h` as its `cy`. `roles.json` carries
+`surface.content_rect` (`server: c`, `grant: never`, `wasm: null`, as `bar_h`
+is) and the role table's drift tests (`tests/test_roles.py`) move with it.
+`runtime/system_api.py` publishes `content_rect()` ungated beside `bar_h()` —
+an app-API global, not a cart verb (the verb table and moy-spec are
+untouched) — and a Lua app gets its four values as four results, the host's
+binding fanning a tuple of ints out as moycore does. The shipped apps place by
+`content_of` rather than reading the row because a row is one value for every
+grant: it answers the running user app, whose strip can be the game canvas's
+18 rows while a shipped app on the system canvas sits under `18 * cs`, and a
+desk window has none. The hook step 4's resolver calls is
+`Workstation.place_bar(edge)` (`"top"` or `"bottom"`; the sides arrive with
+step 5's strips); `tests/test_content_rect.py` moves the bar to the bottom
+through it and checks every layout, the bar's band, the taps and the desk.
 
 **Bars are global** (owner, 2026-10-13: it saves the most space, and L0):
 every surface, the running tool/app bar included, lays out off the content
@@ -646,8 +662,8 @@ every step; the steps that ADD a config say which.
 |---|---|---|
 | 1 — console mode as state | `wm.mode`, `_parked`, `enter_console`/`leave_console`, the route's restore op; every branch of §3 reads the mode; PLAY ends a playtest and parks the rest; the fit-check stamp release; `go_home` split by mode; the HOME key and `show_desk()` (L11) | `tools/mem_census.py p4 offheap` before the commit, to #58; NEW config `p4_1024x600_cs2_fs1_console` (a P4 in console mode, equal to the T-Deck row's layout at the P4's size); `tests/test_wm_windowed.py` covers enter, exit with windows restored unrendered, exit with a released stamp re-rendered once, a parked kind reopened fullscreen and found in place on return, the playtest ended, and each branch of §3 by name; `tests/test_wm_stack_memo.py` holds; `library drag-scroll` re-pinned here (its meaning moves: the home is now above a parked desk) with the before number beside it; PLAY and X single-frame maxima recorded; the P4's on-glass suite drives PLAY and the X; the T-Deck row unchanged |
 | 2 — the Guition P4's strips and the home's damage (landed 2026-10-13) | the compositor's one boot-time strip becomes a rect LIST in `native/moy_glass` set on relayout, each rotated only when its strip's generation moved; the fullscreen home hands its band to `note_damage` | the Guition P4's on-glass suite; its shelf-drag and play rows re-measured, to #66 and #58 (a cut from today, since an unchanged strip no longer rotates per play frame); `MOY_ROT_RECTS` budgeted: game, damage, up to four bars, coalesced, with a test that five rects never exceed it |
-| 3 — the content rectangle | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
-| 3b — the fixed geometry | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | the tool/app golden rows re-baselined by name with renders; the rest identical; the P4 and T-Deck suites |
+| 3 — the content rectangle (landed 2026-10-13) | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
+| 3b — the fixed geometry (landed 2026-10-13) | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers (now `_desk_rect()`) and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | every golden row identical (the fixed geometry moved without a pixel); the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
 | 5 — bars on any edge, slots, cells | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
 | 6 — the popover layer and the components | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_calendar_popover`, `..._docked_calendar`, `tdeck_320x240_fs1_calendar_full`; `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |

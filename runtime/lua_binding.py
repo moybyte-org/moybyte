@@ -441,7 +441,9 @@ class HostLuaRun:
         self._lrs_ref = ref
 
     def _dispatch(self, idx, argc, kinds, iargs, sargs, out, sout):
-        """C -> Python. 0 nil, 1 the int in out, 2 the string, 3 the boolean."""
+        """C -> Python. 0 nil, 1 the int in out, 2 the string, 3 the boolean,
+        5 a tuple of up to eight ints: its length in out[0], then the ints
+        (Lua gets them as that many results, as modmoycore.c fans one out)."""
         try:
             fn = self._ext[idx]
             args = []
@@ -463,6 +465,16 @@ class HostLuaRun:
         if r is True or r is False:
             out[0] = 1 if r else 0
             return 3
+        if isinstance(r, tuple):
+            if len(r) > 8:
+                return 0
+            try:
+                for i, v in enumerate(r):
+                    out[1 + i] = int(v)
+            except (TypeError, ValueError):
+                return 0
+            out[0] = len(r)
+            return 5
         if isinstance(r, str):
             # PINNED on the instance: sout[0] points into this bytes object
             # until hl_tramp copies it, during this same call.

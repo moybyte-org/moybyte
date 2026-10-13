@@ -7,7 +7,7 @@
 //                        are the kernel's settings; `fresh` ends RUN grants
 //   app.grant(id, roles, kind=None, ns=None, run=False) -> handle
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
-//   app.surface_write(canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0)
+//   app.surface_write(canvas, w, h, fs, cs, windowed, content, ox=0, oy=0)
 //   app.bind_pointer(pointer), app.theme_write(name, variant, colors),
 //   app.serve(role, server),
 //   app.store_bind(root, readable, writable, no_store)   the shell's writes
@@ -295,8 +295,9 @@ static uint32_t canvas_handle(mp_obj_t cv) {
     return (uint32_t)mp_obj_get_int_truncated(h[0]);
 }
 
-// surface_write(canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0): the surface
-// row of every grant holding the role, and the canvas object each answers.
+// surface_write(canvas, w, h, fs, cs, windowed, content, ox=0, oy=0): the
+// surface row of every grant holding the role, and the canvas object each
+// answers. `content` is the content rect, (x, y, w, h).
 static mp_obj_t app_surface_write(size_t n_args, const mp_obj_t *args) {
     app_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     app_of(args[0]);
@@ -308,7 +309,12 @@ static mp_obj_t app_surface_write(size_t n_args, const mp_obj_t *args) {
     s.font_scale = (uint8_t)mp_obj_get_int(args[4]);
     s.chrome_scale = (uint8_t)mp_obj_get_int(args[5]);
     s.windowed = mp_obj_is_true(args[6]) ? 1u : 0u;
-    s.bar_h = (int32_t)mp_obj_get_int(args[7]);
+    mp_obj_t *cr;
+    mp_obj_get_array_fixed_n(args[7], 4, &cr);
+    s.cx = (int32_t)mp_obj_get_int(cr[0]);
+    s.cy = (int32_t)mp_obj_get_int(cr[1]);
+    s.cw = (int32_t)mp_obj_get_int(cr[2]);
+    s.ch = (int32_t)mp_obj_get_int(cr[3]);
     s.ox = n_args > 8 ? (int32_t)mp_obj_get_int(args[8]) : 0;
     s.oy = n_args > 9 ? (int32_t)mp_obj_get_int(args[9]) : 0;
     uint32_t mask = moy_app_surface_write(self->a, &s);
@@ -681,6 +687,19 @@ static mp_obj_t surface_bar_h(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_bar_h_obj, surface_bar_h);
 
+static mp_obj_t surface_content_rect(mp_obj_t self) {
+    uint32_t g;
+    int32_t r[4];
+    moy_appabi_t *a = role_app(self, &g);
+    check(moy_app_surface_content_rect(a, g, r));
+    mp_obj_t items[4] = {
+        mp_obj_new_int(r[0]), mp_obj_new_int(r[1]),
+        mp_obj_new_int(r[2]), mp_obj_new_int(r[3]),
+    };
+    return mp_obj_new_tuple(4, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(surface_content_rect_obj, surface_content_rect);
+
 static const qstr POINTER_FIELDS[5] = {
     MP_QSTR_x, MP_QSTR_y, MP_QSTR_down, MP_QSTR_click, MP_QSTR_visible,
 };
@@ -709,6 +728,7 @@ static const mp_rom_map_elem_t surface_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_chrome_scale), MP_ROM_PTR(&surface_chrome_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_windowed), MP_ROM_PTR(&surface_windowed_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_h), MP_ROM_PTR(&surface_bar_h_obj) },
+    { MP_ROM_QSTR(MP_QSTR_content_rect), MP_ROM_PTR(&surface_content_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_pointer), MP_ROM_PTR(&surface_pointer_obj) },
 };
 static MP_DEFINE_CONST_DICT(surface_locals, surface_locals_table);

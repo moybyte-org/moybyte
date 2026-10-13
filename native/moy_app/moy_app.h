@@ -67,7 +67,7 @@ enum {
     MOY_ROW_DAMAGE_ALL = 0, MOY_ROW_DAMAGE_AGAIN,
     MOY_ROW_SURFACE_CANVAS, MOY_ROW_SURFACE_SIZE, MOY_ROW_SURFACE_FONT_SCALE,
     MOY_ROW_SURFACE_CHROME_SCALE, MOY_ROW_SURFACE_WINDOWED, MOY_ROW_SURFACE_BAR_H,
-    MOY_ROW_SURFACE_POINTER,
+    MOY_ROW_SURFACE_CONTENT_RECT, MOY_ROW_SURFACE_POINTER,
     MOY_ROW_THEME_COLORS, MOY_ROW_THEME_TOKEN, MOY_ROW_THEME_GEN,
     MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
     MOY_ROW_FILES_READABLE, MOY_ROW_FILES_READY, MOY_ROW_FILES_BEGIN,
@@ -110,13 +110,14 @@ enum { MOY_CLIP_EMPTY = 0, MOY_CLIP_TEXT = 1 };
 typedef struct moy_app moy_appabi_t;
 
 // What an app's surface row holds: where it draws, at what size and scales,
-// whether it is a window on the desk, the host strip's rows over it, and its
-// origin on the glass (what the pointer is offset by).
+// whether it is a window on the desk, the content rect the host's strip leaves
+// a running app (docs/shell_layout_2026-10.md §7), and its origin on the glass
+// (what the pointer is offset by).
 typedef struct {
     uint32_t canvas;            // the CANVAS row it draws on (native/moy_glass), or 0
     int32_t w, h;
     int32_t ox, oy;
-    int32_t bar_h;
+    int32_t cx, cy, cw, ch;     // the content rect; bar_h is cy
     uint8_t font_scale, chrome_scale, windowed;
 } moy_app_surface_t;
 
@@ -217,7 +218,9 @@ void moy_app_pointer_bind(moy_appabi_t *a, const moy_input_ptr_t *p);
 
 // The rows, each the grant's own surface row. canvas: the CANVAS handle (0
 // for a canvas that has none). size: its width and height. The scalar rows
-// answer the value, or the code negated. pointer: x and y in the surface's
+// answer the value, or the code negated. content_rect: x, y, w and h of the
+// part of the surface the host neither paints over nor swallows taps in;
+// bar_h is its y, the rows above it. pointer: x and y in the surface's
 // coordinates, then down, click and visible as 0/1; ABSENT with no pointer.
 int moy_app_surface_canvas(moy_appabi_t *a, uint32_t g, uint32_t *canvas);
 int moy_app_surface_size(moy_appabi_t *a, uint32_t g, int32_t *w, int32_t *h);
@@ -225,6 +228,7 @@ int32_t moy_app_surface_font_scale(moy_appabi_t *a, uint32_t g);
 int32_t moy_app_surface_chrome_scale(moy_appabi_t *a, uint32_t g);
 int32_t moy_app_surface_windowed(moy_appabi_t *a, uint32_t g);
 int32_t moy_app_surface_bar_h(moy_appabi_t *a, uint32_t g);
+int moy_app_surface_content_rect(moy_appabi_t *a, uint32_t g, int32_t out[4]);
 int moy_app_surface_pointer(moy_appabi_t *a, uint32_t g, int32_t out[5]);
 
 // -- theme ----------------------------------------------------------------------------
@@ -415,7 +419,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 117u
+#define MOY_APP_TABLE_N 118u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.
@@ -434,8 +438,9 @@ const char *moy_app_table_name(uint32_t row);
 // length and its bytes; a number is a 4-byte field (int32, little-endian), a
 // text field its UTF-8 (a name at most MOY_UF_NAME_MAX bytes), an empty text
 // field "none" where the row takes an optional one. A missing or extra field,
-// or a number field not 4 bytes long, is BAD. surface.size and surface.pointer
-// answer their numbers as little-endian int32s; artwork.current its kind and
+// or a number field not 4 bytes long, is BAD. surface.size,
+// surface.content_rect and surface.pointer answer their numbers as
+// little-endian int32s; artwork.current its kind and
 // its name as two fields. A list answers its names NUL-separated, as the row's
 // buffer holds them.
 //

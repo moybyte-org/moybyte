@@ -846,11 +846,11 @@ def test_the_scoped_handle_degrades_to_NO_STORE_rather_than_raising(tmp_path):
 # manifest; nothing called them.
 
 def test_the_ungated_verbs_answer_for_every_app_cart(tmp_path):
-    """`ui`/`theme()`/`screen()`/`bar_h()` are published with no permission at
-    all, because they are not capabilities -- they are how an app draws.
-    `bar_h` exists so a cart stops hardcoding 18 (a documented defect in
-    several seed carts), so it has to answer a number where the host passes no
-    strip rather than raise."""
+    """`ui`/`theme()`/`screen()`/`content_rect()`/`bar_h()` are published with
+    no permission at all, because they are not capabilities -- they are how an
+    app draws. `content_rect` and `bar_h` exist so a cart stops hardcoding 18
+    (a documented defect in several seed carts), so they have to answer where
+    the host passes no strip rather than raise."""
     ws = _ws(tmp_path)
     canvas = ws.sys_canvas
     ns = _api.make_system_api(ws.app_context, {"title": "Plain"}, canvas=canvas)
@@ -859,6 +859,8 @@ def test_the_ungated_verbs_answer_for_every_app_cart(tmp_path):
     # The grant's surface row's bar: the host strip's rows, what the shell
     # draws, whichever the strip is now.
     assert ns["bar_h"]() == ws.app_bar_h() > 0
+    assert ns["content_rect"]() == ws.app_content_rect()
+    assert ns["content_rect"]()[1] == ns["bar_h"]()
     assert ns["theme"]() == ws.theme_colors
     ws.look.set_theme("berry")
     assert ns["theme"]() == ws.theme_colors      # live tokens, never a snapshot
@@ -874,7 +876,8 @@ def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
     ws = _ws(tmp_path)
     ns = _api.make_system_api(ws.app_context,
                               {"title": "Skinner", "permissions": ["appearance"]})
-    assert sorted(ns) == ["bar_h", "screen", "set_theme", "theme", "themes", "ui"]
+    assert sorted(ns) == ["bar_h", "content_rect", "screen", "set_theme", "theme",
+                          "themes", "ui"]
     # NAMES, one per installed theme -- the round trip the docstring promises,
     # since `set_theme` takes a name and falls back to DEFAULT_THEME silently on
     # anything else. Feeding the picker's own output back is the case that used

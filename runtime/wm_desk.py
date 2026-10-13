@@ -196,14 +196,14 @@ class _BackdropLayer(Layer):
         wrapping into further columns; recomputed per call from live geometry."""
         ws = self.ws
         fs = ws.look.effective_font_scale()
-        bar_h = self.wm._bar_h()
+        _dx, dy, _dw, dh = self.wm._desk_rect()
         box = 40 * fs
         gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
         catalog = self._icon_catalog()
         cell_h = 62 * fs
         x0 = 14 * fs
-        y0 = bar_h + 12 * fs
-        bottom = ws.sys_canvas.h - 6 * fs
+        y0 = dy + 12 * fs
+        bottom = dy + dh - 6 * fs
         # The pill must hold the longest catalog label or the chip clips it
         # (#174: a fixed 66*fs cell cut PROJECTS/STORYBOOK) -- but only as wide
         # as the columns it takes still fit the canvas, or a long app title
@@ -285,7 +285,7 @@ class _BackdropLayer(Layer):
 
     def handle_pointer(self, px, py, click):
         if click:
-            if py < self.wm._bar_h():
+            if self.ws.bar_layer.bar_at("desk", px, py):
                 self.ws.bar_layer.handle_bar_tap("desk", px, py)
                 return True
             for key, box, pill, _label, _cart in self._icon_rects():

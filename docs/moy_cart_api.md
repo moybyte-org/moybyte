@@ -733,10 +733,12 @@ level, a console reads them as absent):
 | `launch` | `open_app(id)` |
 | `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/moybyte.notes.moy` is that cart |
 
-Every app cart also gets four names with no permission needed, because they are
+Every app cart also gets five names with no permission needed, because they are
 how an app draws rather than what it may touch: **`screen()`** (the canvas),
-**`theme()`** (the console's live colors), **`bar_h()`** (how many rows the top
-bar owns — draw below them) and **`ui`**, the console's own widget toolkit
+**`theme()`** (the console's live colors), **`content_rect()`** (`x, y, w, h`:
+the part of the screen the console's bar leaves you, wherever the bar sits —
+lay out inside it; in Lua it answers four values), **`bar_h()`** (its `y`, the
+rows above it) and **`ui`**, the console's own widget toolkit
 (buttons, rows, panels, rect maths, `ui.Hits`). Storage answers `(value, error)`
 and never crashes, so there is no `try` to write.
 
@@ -808,7 +810,8 @@ def _init():
 
 def _draw():
     cls(0)
-    ed.draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+    x, y, w, h = content_rect()
+    ed.draw(x + 4, y + 4, w - 8, h - 8)
 
 def _update(dt):
     t = touch()
@@ -825,7 +828,8 @@ end
 
 function _draw()
   cls(0)
-  ed:draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+  local x, y, w, h = content_rect()
+  ed:draw(x + 4, y + 4, w - 8, h - 8)
 end
 
 function _update(dt)

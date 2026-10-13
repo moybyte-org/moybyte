@@ -788,9 +788,9 @@ def test_maximize_toggle_fills_desktop_and_restores(tmp_path):
     mx = dict(ws.wm._strip_buttons(win))["max"]
     drv.touch(mx[0] + 2, mx[1] + 2)
     drv.frame(1 / 30)
-    bar_h = ws.wm._bar_h()
-    assert (win.x, win.y) == (0, bar_h)         # fills below the OS bar
-    assert win.w == 1024 and win.h == 600 - bar_h
+    dx, dy, dw, dh = ws.wm._desk_rect()
+    assert (dx, dy, dw, dh) == (0, ws.layout.status_h, 1024, 600 - ws.layout.status_h)
+    assert (win.x, win.y, win.w, win.h) == (dx, dy, dw, dh)   # the desk, bar left
     assert win.ctx.layout.w == win.buf.w        # content relaid out to the new size
     mx = dict(ws.wm._strip_buttons(win))["max"]
     drv.touch(mx[0] + 2, mx[1] + 2)             # toggle back

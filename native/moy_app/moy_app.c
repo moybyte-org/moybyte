@@ -58,7 +58,7 @@ static const char *const ROLE_NAMES[MOY_ROLE_N] = {
 static const char *const ROW_NAMES[MOY_ROW_N] = {
     "damage.all", "damage.again",
     "surface.canvas", "surface.size", "surface.font_scale", "surface.chrome_scale",
-    "surface.windowed", "surface.bar_h", "surface.pointer",
+    "surface.windowed", "surface.bar_h", "surface.content_rect", "surface.pointer",
     "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
     "theme.variant",
     "files.readable", "files.ready", "files.begin", "files.end", "files.list",
@@ -498,7 +498,19 @@ int32_t moy_app_surface_windowed(moy_appabi_t *a, uint32_t g) {
 int32_t moy_app_surface_bar_h(moy_appabi_t *a, uint32_t g) {
     int rc;
     const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_BAR_H, &rc);
-    return s != NULL ? s->bar_h : -rc;
+    return s != NULL ? s->cy : -rc;
+}
+
+int moy_app_surface_content_rect(moy_appabi_t *a, uint32_t g, int32_t out[4]) {
+    int rc;
+    const moy_app_surface_t *s = surf_of(a, g, MOY_ROW_SURFACE_CONTENT_RECT, &rc);
+    if (s != NULL) {
+        out[0] = s->cx;
+        out[1] = s->cy;
+        out[2] = s->cw;
+        out[3] = s->ch;
+    }
+    return rc;
 }
 
 int moy_app_surface_pointer(moy_appabi_t *a, uint32_t g, int32_t out[5]) {
@@ -1413,6 +1425,7 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"surface.chrome_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CHROME_SCALE},
     {"surface.windowed", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_WINDOWED},
     {"surface.bar_h", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_BAR_H},
+    {"surface.content_rect", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CONTENT_RECT},
     {"surface.pointer", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_POINTER},
     {"theme.colors", MOY_ROLE_THEME, MOY_ROW_THEME_COLORS},
     {"theme.token", MOY_ROLE_THEME, MOY_ROW_THEME_TOKEN},
@@ -1677,6 +1690,18 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return moy_app_surface_windowed(a, g);
         case MOY_ROW_SURFACE_BAR_H:
             return moy_app_surface_bar_h(a, g);
+        case MOY_ROW_SURFACE_CONTENT_RECT: {
+            int32_t r[4] = {0, 0, 0, 0};
+            uint8_t q[16];
+            rc = moy_app_surface_content_rect(a, g, r);
+            if (rc != MOY_APP_OK) {
+                return -rc;
+            }
+            for (int i = 0; i < 4; i++) {
+                le32(q + 4 * i, (uint32_t)r[i]);
+            }
+            return ans_put(ans, cap, q, sizeof q);
+        }
         case MOY_ROW_SURFACE_POINTER: {
             int32_t p[5] = {0, 0, 0, 0, 0};
             uint8_t q[20];

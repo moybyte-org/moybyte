@@ -11,6 +11,11 @@ every tier -- the monitor scales from the 320x240 shelf to the desktop.
 """
 
 try:
+    from layout_base import BAR_ROWS, content_of
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import BAR_ROWS, content_of
+
+try:
     from moy_store_base import builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name
@@ -38,15 +43,17 @@ class AppearanceLayout:
         self.h = int(h)
         self.fs = max(1, int(fs))
         fs = self.fs
-        # The chrome scale (#203) sizes only the OS bar band above this app.
+        # The chrome scale (#203) sizes only the OS bar band above this app;
+        # a window has no bar over its content.
         self.cs = max(fs, int(cs)) if cs else fs
-        self.bar_h = 0 if windowed else 18 * self.cs
+        self.cx, self.cy, self.cw, self.ch = content_of(
+            self.w, self.h, 0 if windowed else BAR_ROWS * self.cs)
         self.tabs_h = 30 * fs
         # Side-by-side: the catalog COLUMN on the left, the preview pane on the
         # right. `wide` only picks the chunkier paddings/bezels of big surfaces.
         self.wide = self.w >= 420 * fs and self.h >= 240 * fs
-        band_y = self.bar_h + self.tabs_h
-        band_h = max(1, self.h - band_y)
+        band_y = self.cy + self.tabs_h
+        band_h = max(1, self.cy + self.ch - band_y)
         self.catalog_w = max(150 * fs, self.w * 2 // 5)
         self.catalog = (0, band_y, self.catalog_w, band_h)
         self.preview = (self.catalog_w, band_y,
@@ -56,7 +63,7 @@ class AppearanceLayout:
         x = 6 * fs
         for i in range(3):
             bw = widths[i] * fs
-            self.tabs.append((x, self.bar_h + 3 * fs, bw, self.tabs_h - 6 * fs))
+            self.tabs.append((x, self.cy + 3 * fs, bw, self.tabs_h - 6 * fs))
             x += bw + 4 * fs
         # Preview-pane geometry. `field` = the inset desk area the THEMES mock
         # windows draw over; `screen`/`bezel`/`stand_h` = the monitor. The
@@ -308,8 +315,8 @@ class AppearanceAppLayer:
         th = self._theme.colors()
         # A flat panel field -- the wallpaper renders ONLY inside the monitor's
         # screen (owner call: never doubled as a full-bleed backdrop here).
-        cv.rect(0, lay.bar_h, lay.w, lay.h - lay.bar_h, th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.tabs_h, 48)
+        cv.rect(lay.cx, lay.cy, lay.cw, lay.ch, th["panel"])
+        cv.rect(0, lay.cy, lay.w, lay.tabs_h, 48)
         for i, r in enumerate(lay.tabs):
             self._button(cv, ("IMAGES", "CARTS", "THEMES")[i], r,
                          self.mode == self.MODES[i])

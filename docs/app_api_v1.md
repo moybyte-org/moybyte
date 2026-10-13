@@ -84,7 +84,7 @@ roles it declared:
 | role | what it is | verbs |
 |---|---|---|
 | `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
-| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the host strip's rows (`bar_h()`, what a user app's ungated `bar_h()` reads), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `pointer()` |
+| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
 | `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; and the verbs that change the look | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()` |
 | `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made with a files kind (a user app's) reaches that kind alone | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal, its deck, code and images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `load_deck()`, `save_deck()`, `save_code()`, `images()`, `save_image()`, `encode_image()` |
@@ -182,11 +182,14 @@ shipped apps, through the same assertion).
 
 Two things follow for an app author:
 
-- **Leave the bar band alone.** It is the top `layout.bar_h` rows of your own
-  layout (`0` when windowed — the `ListShellLayout._init_frame` convention every
-  app already follows); the host paints over it and swallows taps inside it, so
-  `handle_pointer` never sees one. An app with no `layout` gets the bar's own
-  band height instead.
+- **Lay out in the content rect.** The bar may sit on any edge the console's
+  layout puts it (docs/shell_layout_2026-10.md §7); the host paints over its
+  band and swallows taps inside it, so `handle_pointer` never sees one. Your
+  layout's `cx, cy, cw, ch` is the rest of your surface — the whole of it in a
+  window, where the WM's title strip is outside your buffer.
+  `ListShellLayout._init_frame` sets them, and the calc/appearance/artwork
+  heads the same way, from `layout_base.content_of`, the function the bar
+  itself is placed by.
 - **Optional `commit(self)`** — the host calls it just before routing a bar
   tap, because the X there is an exit path. An app that persists on an idle
   debounce (#111) implements it (`storybook_app` does); forgetting it costs an
@@ -233,7 +236,7 @@ capabilities in its own `manifest.json` and gets them as cart globals.
     "moybyte": {"type": "app",
                 "permissions": ["graphics", "input", "files:docs", "prefs"]}
 
-The mechanism is `make_system_api(ctx_factory, cart, canvas, bar_h)`
+The mechanism is `make_system_api(ctx_factory, cart, canvas, ...)`
 (`runtime/system_api.py` -- READ IT, it is the authority and carries the policy
 argument for each entry). It is a FILTER over the `AppContext` above and not a
 second interface: it maps each declared permission to a role, calls the same
@@ -262,12 +265,15 @@ construction; a test asserts every role in `app_context.ROLES` is classified as
 one or the other, so ADDING a role forces the decision. A user app's grant is
 its run's and ends with it; its crash-guard strikes are keyed by the same id.
 
-Four globals every `type: "app"` cart gets with no permission, because they are
+Five globals every `type: "app"` cart gets with no permission, because they are
 how an app draws rather than what it may reach: **`ui`** (`runtime/ui.py`, the
 face of the toolkit's C in `native/moy_ui`, the same widgets a compiled app
 draws), **`screen()`** (the canvas -- `ui`'s `cv`), **`theme()`** (the
-live tokens -- its `th`), and **`bar_h()`** (rows the host's exitable strip owns;
-draw below them, never hardcode 18).
+live tokens -- its `th`), **`content_rect()`** (`(x, y, w, h)`, the part of
+the surface the host's exitable strip leaves you; lay out inside it, never
+hardcode 18) with **`bar_h()`**, its `y` -- what an app that knows only a top
+strip draws below. Under a strip at the bottom `bar_h()` is 0 and the strip
+covers your last rows, so a new app reads `content_rect()`.
 
 ### A compiled user app (#224)
 

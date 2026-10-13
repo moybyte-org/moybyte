@@ -41,7 +41,7 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 62, 4, 34
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 63, 4, 34
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
@@ -69,7 +69,8 @@ Pointer = collections.namedtuple("Pointer", ("x", "y", "down", "click", "visible
 
 class _Surf(c.Structure):
     _fields_ = [("canvas", c.c_uint32), ("w", c.c_int32), ("h", c.c_int32),
-                ("ox", c.c_int32), ("oy", c.c_int32), ("bar_h", c.c_int32),
+                ("ox", c.c_int32), ("oy", c.c_int32), ("cx", c.c_int32),
+                ("cy", c.c_int32), ("cw", c.c_int32), ("ch", c.c_int32),
                 ("font_scale", c.c_uint8), ("chrome_scale", c.c_uint8),
                 ("windowed", c.c_uint8)]
 
@@ -111,6 +112,7 @@ _SIGS = (
     ("moy_app_surface_chrome_scale", [_P, _U32], c.c_int32),
     ("moy_app_surface_windowed", [_P, _U32], c.c_int32),
     ("moy_app_surface_bar_h", [_P, _U32], c.c_int32),
+    ("moy_app_surface_content_rect", [_P, _U32, c.POINTER(c.c_int32)], c.c_int),
     ("moy_app_surface_pointer", [_P, _U32, c.POINTER(c.c_int32)], c.c_int),
     ("moy_app_token_name", [c.c_int], _PCHAR),
     ("moy_app_token_flag", [c.c_int], c.c_int),
@@ -345,9 +347,11 @@ def binding(sanitize=False):
 
         # -- the shell's writes
 
-        def surface_write(self, canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0):
+        def surface_write(self, canvas, w, h, fs, cs, windowed, content, ox=0, oy=0):
+            cx, cy, cw, ch = content
             s = _Surf(_canvas_handle(canvas), int(w), int(h), int(ox), int(oy),
-                      int(bar_h), int(fs), int(cs), 1 if windowed else 0)
+                      int(cx), int(cy), int(cw), int(ch), int(fs), int(cs),
+                      1 if windowed else 0)
             mask = lib.moy_app_surface_write(self._p, c.byref(s))
             for slot in range(SLOTS):
                 if mask & (1 << slot):
@@ -486,6 +490,11 @@ def binding(sanitize=False):
 
         def bar_h(self):
             return _scalar(lib.moy_app_surface_bar_h(self._app._p, self._g))
+
+        def content_rect(self):
+            v = (c.c_int32 * 4)()
+            _check(lib.moy_app_surface_content_rect(self._app._p, self._g, v))
+            return (v[0], v[1], v[2], v[3])
 
         def pointer(self):
             v = (c.c_int32 * 5)()

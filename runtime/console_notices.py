@@ -110,14 +110,14 @@ class Notices:
         return True
 
     def _draw_notice(self):
-        """The system banner: a wide strip under the top bar, title + one small
+        """The system banner: a wide strip atop the content rect, title + one small
         line, sized off `layout` so it looks deliberate on a 1024x600 desktop
         too. The kernel's one body (moy_chrome_banner)."""
         cv = self.sys_canvas
         lay = self.layout
         title, sub, kind = self._notice
         mp = _ch.chrome_inks(self.theme_colors, NAMES)
-        _ch.replay(mp.chrome_banner(lay.w, lay.fs, lay.status_h, title, sub, kind == "ok"),
+        _ch.replay(mp.chrome_banner(lay.w, lay.fs, lay.cy, title, sub, kind == "ok"),
                    cv, self)
 
     def _draw_toast(self):

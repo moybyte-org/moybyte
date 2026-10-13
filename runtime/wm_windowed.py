@@ -469,10 +469,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _fs(self):
         return self.ws.look.effective_font_scale()
 
-    def _bar_h(self):
-        """The desktop OS bar's height -- windows never overlap it (the taskbar
-        row is OS-owned, chips included)."""
-        return self._root_ctx.layout.status_h
+    def _desk_rect(self):
+        """The desk's content rect, (x, y, w, h) on the root canvas: the glass
+        less the OS bar. Windows size, cascade, maximise and move inside it and
+        never overlap the bar (the taskbar row is OS-owned, chips included)."""
+        lay = self._root_ctx.layout
+        return (lay.cx, lay.cy, lay.cw, lay.ch)
 
     def desk_open(self):
         return self.mode == "desktop"
@@ -489,7 +491,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 p.stale[g] = True
         if self.mode != self._mode_was:
             # MODE SWITCH: windowed_chrome just changed, and every app layout
-            # bakes it into its bar_h at construction. Rebuild all layouts +
+            # bakes it into its content rect at construction. Rebuild all layouts +
             # recapture the root ctx NOW, so the visible mode is never
             # presented through the other mode's chrome (repro without this: a
             # font-scale change on the desk would strip console mode's
@@ -690,7 +692,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # every machine for no benefit the grip doesn't already give.
             s = (1 if self._play_intent == "dev" else
                  max(1, min((full.w - 24) // self.ws.canvas.w,
-                            (full.h - 24 - th - self._bar_h()) // self.ws.canvas.h)))
+                            (self._desk_rect()[3] - 24 - th) // self.ws.canvas.h)))
             return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
         if key in ("make", "menu", "picker"):
             return (full.w - full.w // 8, full.h - full.h // 10)
@@ -707,25 +709,25 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         fs = self._fs()
         w, h = self._win_size(key, full, fs)
         title_h = 18 * fs
-        bar_h = self._bar_h()
+        dx, dy, dw, dh = self._desk_rect()
         # A default can exceed a small desktop (e.g. the fs-scaled Settings minimum
         # at font 2x on 600px) -- clamp so the whole window, grip included, fits
-        # below the OS bar.
-        w = min(w, full.w - 4 * fs)
-        h = min(h, full.h - bar_h - 8 * fs)
+        # the desk beside the OS bar.
+        w = min(w, dw - 4 * fs)
+        h = min(h, dh - 8 * fs)
         if key == "desktop" and self._play_intent == "dev":
             # A dev playtest is small so the editor stays workable (#178) -- so put
             # it where the editor needs least: the bottom-right corner. Centered,
             # it would land squarely on the code column it is meant to sit beside.
-            x = max(0, full.w - w - 8 * fs)
-            y = max(bar_h, full.h - h - 8 * fs)
+            x = max(dx, dx + dw - w - 8 * fs)
+            y = max(dy, dy + dh - h - 8 * fs)
         else:
             # Cascade: centered, each deeper window stepping down-right, clamped so
-            # the title strip always stays reachable below the OS bar.
-            x = (full.w - w) // 2 + depth * 12 * fs
-            y = bar_h + (full.h - bar_h - h) * 2 // 5 + depth * 10 * fs
-            x = max(0, min(x, full.w - w // 2))
-            y = max(bar_h, min(y, full.h - 24 * fs))
+            # the title strip always stays reachable on the desk.
+            x = dx + (dw - w) // 2 + depth * 12 * fs
+            y = dy + (dh - h) * 2 // 5 + depth * 10 * fs
+            x = max(dx, min(x, dx + dw - w // 2))
+            y = max(dy, min(y, dy + dh - 24 * fs))
         win = _Win(kind, x, y, w, h, title_h)
         self._build_content(win)
         # Prewarm: render the content ONCE into the fresh buffer, so a window
@@ -783,8 +785,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         usable minimum, then rebuild the content buffer + layout context so the
         app reflows to the new window size."""
         fs = self._fs()
-        max_w = self._root_canvas.w
-        max_h = self._root_canvas.h - self._bar_h()
+        _dx, _dy, max_w, max_h = self._desk_rect()
         min_w = 160 * fs
         min_h = 90 * fs + win.title_h
         # Min-size convention (ui.py + the app API): a registered app declares
@@ -802,14 +803,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self.ws._dirty = True
 
     def _toggle_max(self, win):
-        """Maximize <-> restore: fill the desktop below the OS bar (the taskbar
+        """Maximize <-> restore: fill the desk's content rect (the taskbar
         stays visible), remembering the rect to restore to."""
-        full = self._root_canvas
-        bar_h = self._bar_h()
+        dx, dy, dw, dh = self._desk_rect()
         if win.saved is None:
             win.saved = (win.x, win.y, win.w, win.h)
-            win.x, win.y = 0, bar_h
-            self._resize_window(win, full.w, full.h - bar_h)
+            win.x, win.y = dx, dy
+            self._resize_window(win, dw, dh)
         else:
             x, y, w, h = win.saved
             win.saved = None
@@ -2185,5 +2185,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # other windows SKIP during a drag (the 70ms->3ms wasm frame class).
         full = self._root_canvas
         fs = self._fs()
+        _dx, dy, _dw, dh = self._desk_rect()
         win.x = max(-win.w + 40 * fs, min(nx, full.w - 40 * fs))
-        win.y = max(self._bar_h(), min(ny, full.h - 24 * fs))
+        win.y = max(dy, min(ny, dy + dh - 24 * fs))

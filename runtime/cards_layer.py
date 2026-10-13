@@ -180,19 +180,19 @@ class CardsLayout(LayoutBase):
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        bar_h = 18 * self.cs          # the OS bar's own height (#203)
-        self.body = (0, bar_h, self.w, self.h - bar_h)
-        self.head_glyph = (8 * fs, bar_h + 4 * fs, 14 * fs, 14 * fs)
-        self.head_xy = (26 * fs, bar_h + 4 * fs)
+        top = self.cy                 # the content rect, under any bar
+        self.body = (self.cx, top, self.cw, self.ch)
+        self.head_glyph = (8 * fs, top + 4 * fs, 14 * fs, 14 * fs)
+        self.head_xy = (26 * fs, top + 4 * fs)
         self.card_x = _CARD_X * fs
         self.card_w = self.w - 34 * fs
-        self.card_y0 = bar_h + 26 * fs
+        self.card_y0 = top + 26 * fs
         self.card_h = _CARD_H * fs
-        self.view_bottom = self.h - 8 * fs
+        self.view_bottom = self.cy + self.ch - 8 * fs
         self.scroll_up = (self.w - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
         self.scroll_dn = (self.w - 20 * fs, self.view_bottom - 18 * fs,
                           16 * fs, 14 * fs)
-        self.info_btn = (self.w - 44 * fs, bar_h + 3 * fs, 40 * fs, 14 * fs)
+        self.info_btn = (self.w - 44 * fs, top + 3 * fs, 40 * fs, 14 * fs)
         self.gap = 2 * fs
         # Per-display card heights (#15): sprite/bg picker cells, icon choices,
         # gauge/count meters -- all scale with the font so the pictures stay tappable.

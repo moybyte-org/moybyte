@@ -397,15 +397,16 @@ class TextConsole:
         fw = 8 * fs
         lh = 10 * fs
         bg, out_ink, in_ink, accent = self._tones(th)
-        top = self.ws.app_bar_h()
+        _cx, top, _cw, ch = self.ws.app_content_rect()   # under the host's strip
+        bottom = top + ch
         pad = 3 * fs
-        cv.rect(0, top, cv.w, cv.h - top, bg)
+        cv.rect(0, top, cv.w, ch, bg)
         # The band the prompt + its symbol palette own, reserved whether or not
         # a line is being read so the log does not jump as a script starts and
         # stops asking.
         sym_h = 12 * fs + 2 * pad
         band = lh + 2 * pad + sym_h
-        body_h = cv.h - top - band
+        body_h = ch - band
         self.cols = max(self.MIN_COLS, (cv.w - 2 * pad) // fw)
         self.rows = max(self.MIN_ROWS, body_h // lh)
         self.ed.set_view_size(self.cols, 1)
@@ -416,14 +417,14 @@ class TextConsole:
             cv.print(self.row(i), pad, y, out_ink, 1)
             y += lh
         self._sym_rects = ()
-        py = cv.h - band + pad
+        py = bottom - band + pad
         if not self.reading():
             return
         line = self._prompt + self.ed.text()
         show = line[-self.cols:] if len(line) > self.cols else line
         cv.print(show, pad, py, in_ink, 1)
         cv.rect(pad + len(show) * fw, py, fw, 8 * fs, accent)
-        self._draw_symbols(cv, cv.h - sym_h, sym_h, fs)
+        self._draw_symbols(cv, bottom - sym_h, sym_h, fs)
 
     def _draw_symbols(self, cv, y, h, fs):
         """The Code tab's tappable symbol palette, under the prompt: the same

@@ -1336,8 +1336,9 @@ def fill_uncovered(cv, inner, outer, col):
     PSRAM's write-allocate doubles a fill's traffic. Settings hit the identical bug
     and deleting its duplicate fill was worth ~9ms (see settings_layer.draw).
 
-    The panel is NOT contained in the body -- its top edge sits `2 * fs` px above
-    (`panel = (8fs, bar_h - 2fs, ...)` vs `body_fill = (0, bar_h, ...)`) -- so the
+    The panel is NOT contained in the body -- under a top bar its top edge sits
+    `2 * fs` px above (`panel = (8fs, cy - 2fs, ...)` vs `body_fill = (cx, cy,
+    ...)`, the content rect) -- so the
     fill cannot simply be dropped; that would leave a stale strip under the bar.
     This paints the overhang and nothing else, which is pixel-identical to the two
     full fills whenever the colours match. Emits nothing at all when `inner` is

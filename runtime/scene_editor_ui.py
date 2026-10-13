@@ -122,7 +122,6 @@ class SceneLayout(LayoutBase):
         self.zooms = _SV_ZOOMS
         # -- responsive: the MapLayout formulas (right column anchored to the
         # panel's right edge, button row to its bottom, view fills the rest) ----
-        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         if bounds is not None:
             # Confined to the workspace's right pane: the panel fills the pane
             # (minus a hair of inset), and every rect below derives from px/py/
@@ -133,9 +132,10 @@ class SceneLayout(LayoutBase):
             pw, ph = bw - 4 * fs, bh - 4 * fs
             self.body_fill = (bx, by, bw, bh)
         else:
-            px, py = 8 * fs, bar_h - 2 * fs
-            pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
-            self.body_fill = (0, bar_h, self.w, self.h - bar_h)
+            # The content rect, its top edge tucked 2fs under a top bar's.
+            px, py = 8 * fs, max(0, self.cy - 2 * fs)
+            pw, ph = self.w - 16 * fs, self.cy + self.ch - py - 20 * fs
+            self.body_fill = (self.cx, self.cy, self.cw, self.ch)
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph

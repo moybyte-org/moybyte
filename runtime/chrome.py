@@ -63,10 +63,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import _SET_ROW_H
 
 try:
-    from code_layer import (_CODE_LEAD, _CODE_X0, _CODE_Y0,
+    from code_layer import (_CODE_LEAD, _CODE_X0,
                             _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LEAD, _CODE_X0, _CODE_Y0,
+    from runtime.code_layer import (_CODE_LEAD, _CODE_X0,
                                     _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 
 try:
@@ -266,8 +266,11 @@ class Layout(LayoutBase):
         self.font_w = fw * fs
         self.line_h = line * fs
 
-        # -- status strip (height/position scales with the CHROME scale) --------
+        # -- status strip (its rows scale with the CHROME scale; where it sits
+        # is the content rect's business: everything below lays out in
+        # cx/cy/cw/ch, never under the bar) ------------------------------------
         self.status_h = _STATUS_H * cs
+        bottom = self.cy + self.ch
         # The bar's clock/title print at a hand-tuned y=3 inside an fs-tall bar;
         # this re-centers that band when the bar is taller than the font asked for.
         self.bar_text_dy = (self.status_h - _STATUS_H * fs) // 2
@@ -282,8 +285,8 @@ class Layout(LayoutBase):
         self.icon_gap_x = _ICON_GAP_X * fs
         self.icon_gap_y = _ICON_GAP_Y * fs
         self.icon_box = _ICON_BOX * fs
-        self.icon_y0 = self.status_h + 8 * fs
-        self.grid_bottom = self.h - 4 * fs           # launcher grid floor
+        self.icon_y0 = self.cy + 8 * fs
+        self.grid_bottom = bottom - 4 * fs           # launcher grid floor
         self.icon_x0 = _ICON_X0 * fs
         # The Library SHELF (visual identity v1's library concept mockup) on EVERY
         # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
@@ -300,9 +303,9 @@ class Layout(LayoutBase):
         # Settings font never gets clipped chrome. At 1024x600 the geometry
         # is near-identical at fs 1 and 2; fs 1 just fits crisper text.
         mx = max(16 * fs, self.w // 20)
-        pt = self.status_h + max(8 * fs, self.h // 24)
+        pt = self.cy + max(8 * fs, self.h // 24)
         pb = max(16 * fs, self.h // 14)
-        self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - pb)
+        self.lib_panel = (mx, pt, self.w - 2 * mx, bottom - pt - pb)
         self.lib_header_h = max(26 * fs, self.h // 12)
         self.lib_footer_h = max(20 * fs, self.h // 15)
         self.lib_gap = max(6 * fs, self.w // 64)
@@ -401,8 +404,8 @@ class Layout(LayoutBase):
         self.row_text_dy = (self.set_row_h - _SET_ROW_H * fs) // 2
         # The Settings panel fills the band between the status strip and the
         # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
-        py0 = self.status_h + 2 * fs
-        ph = self.h - _PANEL_FLOOR * fs - py0
+        py0 = self.cy + 2 * fs
+        ph = bottom - _PANEL_FLOOR * fs - py0
         self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
         self.set_x = self.settings_panel[0] + 10 * fs
         self.set_w = self.settings_panel[2] - 20 * fs
@@ -483,7 +486,8 @@ class Layout(LayoutBase):
         return last_col * (cw + gap) + cw
 
     def clock_hit(self):
-        # The clock-text region in the top bar's right cluster (Time Traveler egg #21).
+        # The clock-text region in the bar's right cluster (Time Traveler egg
+        # #21), in bar coordinates like every bar rect here.
         return (self.clock_x, 0, self.clock_w, self.status_h)
 
 
@@ -520,15 +524,14 @@ class CodeLayout(LayoutBase):
         self.sym_h = _SYM_H * cs
         self.sym_text_dx = (self.sym_cell - _SYM_CELL * fs) // 2
         self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
-        self.sym_y = self.h - self.sym_h
+        self.sym_y = self.cy + self.ch - self.sym_h
         self.sym_area = (0, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
-        # -- code area origin (below the unified 18px bar) -----------------------
-        # The old RUN/SAVE/CLOSE top-band icons are gone (Stage-4 bar rollout): the
-        # unified zoned bar owns the top 18px, so CodeLayout no longer carries their
-        # rects. y0 is the BAR's height (_CODE_Y0 == _STATUS_H), so the body is
-        # fullscreen text + the symbol palette with no chrome of its own.
+        # -- code area origin (the content rect's top) --------------------------
+        # The zoned bar carries the editor's controls, so CodeLayout has no
+        # chrome of its own: the body is text + the symbol palette, filling the
+        # content rect.
         self.x0 = _CODE_X0 * fs
-        self.y0 = _CODE_Y0 * cs
+        self.y0 = self.cy
         # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
         avail_w = self.w - self.x0
         self.cols = max(8, avail_w // self.cell)

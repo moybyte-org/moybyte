@@ -598,7 +598,7 @@ class SceneWorld:
 # The cursor (`sel`) only ever lands on "item" rows (move()/_clamp skip the rest);
 # activate() runs the selected item's action then closes (close-on-select).
 _POPUP_X = 0                  # panel left edge (flush to the screen left, x = 0)
-_POPUP_Y = 18                 # top edge flush under the 18px bar (== bar_layer._STATUS_H)
+_POPUP_Y = 18                 # the hang edge with no anchor: under an 18px top bar
 _POPUP_W = 128                # panel width (~120-140px band; 128 keeps it clear of clock)
 _POPUP_ROW_H = 12             # per-row height (selectable + header rows alike)
 _POPUP_PAD_X = 4              # text inset from the panel left
@@ -620,6 +620,11 @@ class Popup:
         # opening; it defaults to _POPUP_X so a Popup opened without an anchor (tests /
         # any future caller) still lands flush-left.
         self.anchor_x = _POPUP_X
+        # The edge the panel hangs from: the bar's content-side edge, set by
+        # toggle_sysmenu from the bar's rect. `up` grows it upward (a bar at the
+        # bottom). None is `_POPUP_Y * cs`, a top bar's.
+        self.anchor_y = None
+        self.up = False
         # Geometry scale (#39/#58): the popup's rows hold fs-scaled petme128 text,
         # so the panel/row/hit geometry must scale WITH the system font or the rows
         # overlap (glass-found on the P4 at font scale 2). toggle_sysmenu sets this
@@ -701,7 +706,10 @@ class Popup:
         h = 0
         for it in self.items:
             h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
-        return (self.anchor_x, _POPUP_Y * cs, _POPUP_W * fs, h)
+        y = _POPUP_Y * cs if self.anchor_y is None else self.anchor_y
+        if self.up:
+            y -= h
+        return (self.anchor_x, y, _POPUP_W * fs, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
@@ -711,7 +719,7 @@ class Popup:
         if not _in(px, py, (x, y, w, h)):
             return None
         cs = self.cs
-        cy = _POPUP_Y * cs
+        cy = y
         for i in range(len(self.items)):
             rh = _POPUP_SEP_H * cs if self.items[i][0] == "sep" else _POPUP_ROW_H * cs
             if cy <= py < cy + rh:

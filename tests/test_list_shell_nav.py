@@ -18,7 +18,7 @@ from runtime.app_shell import ListShellApp, ListShellLayout
 class _Layout(ListShellLayout):
     def __init__(self, h=240, fs=1):
         self._init_frame(320, h, fs, False)
-        self._init_list(self.bar_h)
+        self._init_list(self.cy)
 
 
 class _List(ListShellApp):

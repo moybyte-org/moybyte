@@ -222,10 +222,11 @@ class MapLayout(LayoutBase):
         fs = self.fs
         # -- responsive: anchor the palette/d-pad column to the panel's right edge,
         # the button row to its bottom, and grow the map view to fill the rest ----
-        bar_h = 18 * self.cs          # the OS bar's own height (#203)
-        px, py = 8 * fs, bar_h - 2 * fs
-        pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
-        self.body_fill = (0, bar_h, self.w, self.h - bar_h)
+        # The panel fills the content rect, its top edge tucked 2fs under a
+        # top bar's (row 0 when nothing is above it).
+        px, py = 8 * fs, max(0, self.cy - 2 * fs)
+        pw, ph = self.w - 16 * fs, self.cy + self.ch - py - 20 * fs
+        self.body_fill = (self.cx, self.cy, self.cw, self.ch)
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph

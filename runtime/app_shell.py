@@ -3,7 +3,8 @@
 # scaffolding). Two small bases, extracted MECHANICALLY so every derived
 # number and drawn pixel stays byte-identical (#39):
 #
-#   ListShellLayout -- the chrome-inset frame head (w/h/fs/bar_h) + the
+#   ListShellLayout -- the frame head (w/h/fs/cs and the content rect
+#                      cx/cy/cw/ch under the host's bar) + the
 #                      notebook-list geometry (row_h/list_y/list_rows +
 #                      the ONE row_rect formula).
 #   ListShellApp    -- the app-layer scaffolding: the shipped-identity gate
@@ -24,6 +25,11 @@
 # module. The apps keep their own views, draw code and store verbs.
 
 import json
+
+try:
+    from layout_base import BAR_ROWS, content_of
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import BAR_ROWS, content_of
 
 try:
     from moy_store_base import builtin_name
@@ -56,16 +62,19 @@ class ListShellLayout:
         self.h = int(h)
         self.fs = max(1, int(fs))
         # The chrome scale (#203) sizes only the OS bar band this app sits under;
-        # everything the app itself draws stays on `fs`.
+        # everything the app itself draws stays on `fs`. A window has no bar
+        # over its content (the WM's title strip is outside it).
         self.cs = max(self.fs, int(cs)) if cs else self.fs
-        self.bar_h = 0 if windowed else 18 * self.cs
+        self.cx, self.cy, self.cw, self.ch = content_of(
+            self.w, self.h, 0 if windowed else BAR_ROWS * self.cs)
 
     def _init_list(self, top):
         """The notebook-list rows below `top` (the title/toolbar band's bottom)."""
         fs = self.fs
         self.row_h = 20 * fs
         self.list_y = top
-        self.list_rows = max(1, (self.h - self.list_y - 2 * fs) // self.row_h)
+        self.list_rows = max(1, (self.cy + self.ch - self.list_y - 2 * fs)
+                             // self.row_h)
 
     def row_rect(self, i):
         return (4 * self.fs, self.list_y + i * self.row_h,

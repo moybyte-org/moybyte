@@ -2148,7 +2148,8 @@ def roles_trace(ws):
     s = ctx.surface
     cv = s.canvas()
     say("surface", cv is ws.sys_canvas, s.size() == (cv.w, cv.h), s.font_scale(),
-        s.chrome_scale(), s.windowed(), s.bar_h() == ws.app_bar_h())
+        s.chrome_scale(), s.windowed(), s.bar_h() == ws.app_bar_h(),
+        tuple(s.content_rect()) == ws.app_content_rect())
     ptr, pt = ws.pointer, s.pointer()
     say("pointer", ptr is not None, pt is None if ptr is None else
         tuple(pt) == (ptr.x, ptr.y, bool(ptr.down), bool(ptr.click),
@@ -2432,7 +2433,7 @@ def _roles_trace_board(exe, tmp_path):
 ROLES_TRACE = """\
 roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
 damage 1 2 0
-surface True True 1 1 False True
+surface True True 1 1 False True True
 pointer True True
 theme night dark False True True True True
 theme set forest light True True True

@@ -211,9 +211,9 @@ def _draw():
     th = theme()
     cls(th["panel"])
     hits.clear()
-    # The shell paints its bar over the top bar_h() rows and swallows taps
-    # there, so lay out below it and never hardcode 18.
-    body = ui.inset((0, bar_h(), W, H - bar_h()), 4)
+    # The shell paints its bar over its band and swallows taps there, so lay
+    # out in the rest of the screen, wherever the bar sits.
+    body = ui.inset(content_rect(), 4)
     if ed is None:
         _draw_shelf(cv, th, body)
         if naming:

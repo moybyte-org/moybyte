@@ -12,6 +12,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
 
 try:
+    from layout_base import bar_y as _bar_y
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import bar_y as _bar_y
+
+try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -192,7 +197,7 @@ class WindowChrome:
         total = sum(widths) + (len(widths) - 1) * 2 * fs
         left_edge = self._root_canvas.w // 4          # clear of the selected name
         x = max(left_edge, (self._root_canvas.w - total) // 2)
-        y = 1 * fs
+        y = _bar_y(self._root_canvas.h, lay.status_h) + 1 * fs   # on the OS bar
         h = lay.status_h - 2 * fs
         for i, k in enumerate(self._order):
             if x + widths[i] > lay.clock_x - 4 * fs:
@@ -214,7 +219,8 @@ class WindowChrome:
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
-            self.ws.bar_layer._strip_moved(sc, 0, 0, sc.w, self._root_ctx.layout.status_h)
+            bh = self._root_ctx.layout.status_h
+            self.ws.bar_layer._strip_moved(sc, 0, _bar_y(sc.h, bh), sc.w, bh)
         if not quiet or sig != self._chip_sig:
             self._chip_sig = sig
             self._chip_streak = 0

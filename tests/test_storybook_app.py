@@ -192,4 +192,4 @@ def test_layout_reflows():
     big = StorybookLayout(960, 600, 1)
     assert big.list_rows > small.list_rows
     assert big.preview[3] > small.preview[3]
-    assert StorybookLayout(480, 300, 1, windowed=True).bar_h == 0
+    assert StorybookLayout(480, 300, 1, windowed=True).cy == 0

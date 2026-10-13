@@ -29,6 +29,11 @@ and cannot reach the store through this object.
 """
 
 try:
+    from layout_base import BAR_ROWS, content_of
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import BAR_ROWS, content_of
+
+try:
     from moy_store_base import builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name
@@ -362,18 +367,21 @@ class PaintAppLayout:
         # Physical surface threshold: a 894x502 P4 window at font-scale 2 still has
         # room for the full 512x300 document plus desktop rails, so it is WIDE.
         self.compact = self.w < 700 or self.h < 420
-        # The chrome scale (#203) sizes only the OS bar band above this app.
+        # The chrome scale (#203) sizes only the OS bar band above this app;
+        # a window has no bar over its content.
         self.cs = max(fs, int(cs)) if cs else fs
-        self.bar_h = 0 if windowed else 18 * self.cs
+        self.cx, self.cy, self.cw, self.ch = content_of(
+            self.w, self.h, 0 if windowed else BAR_ROWS * self.cs)
         self.top_h = 28 * fs
         self.status_h = 18 * fs
         self.left_w = (36 if self.compact else 52) * fs
         self.right_w = (62 if self.compact else 128) * fs
-        vy = self.bar_h + self.top_h + 4 * fs
-        vh = max(40, self.h - vy - self.status_h - 4 * fs)
+        vy = self.cy + self.top_h + 4 * fs
+        bottom = self.cy + self.ch
+        vh = max(40, bottom - vy - self.status_h - 4 * fs)
         self.view = (self.left_w + 4 * fs, vy,
                      max(40, self.w - self.left_w - self.right_w - 8 * fs), vh)
-        self.status_y = self.h - self.status_h
+        self.status_y = bottom - self.status_h
 
         labels = ("N", "U", "R", "OPEN", "WALL", "GAME", "SHOW", "FIT")
         widths = (22, 22, 22, 44, 44, 44, 44, 38)
@@ -381,7 +389,7 @@ class PaintAppLayout:
         x = 4 * fs
         for i in range(len(labels)):
             bw = widths[i] * fs
-            self.actions.append((x, self.bar_h + 2 * fs, bw, self.top_h - 4 * fs))
+            self.actions.append((x, self.cy + 2 * fs, bw, self.top_h - 4 * fs))
             x += bw + 2 * fs
 
         self.tools = []
@@ -401,7 +409,7 @@ class PaintAppLayout:
             self.pal_cols = 8
             self.pal_rows = 8
             by_w = (self.right_w - 10 * fs) // 8
-            by_h = max(8, (self.h - self.pal_y - self.status_h - 82 * fs) // 8)
+            by_h = max(8, (bottom - self.pal_y - self.status_h - 82 * fs) // 8)
             self.pal_cell = max(8, min(16 * fs, by_w, by_h))
         py = self.pal_y + self.pal_rows * self.pal_cell + 6 * fs
         if self.compact:
@@ -859,7 +867,7 @@ class PaintAppLayer:
 
     def _open_tap(self, x, y):
         lay = self.layout
-        if y < lay.bar_h + lay.top_h:
+        if y < lay.cy + lay.top_h:
             self.mode = "paint"
             self._damage.all()
             return
@@ -880,13 +888,13 @@ class PaintAppLayer:
 
     def _project_tap(self, x, y):
         lay = self.layout
-        if y < lay.bar_h + lay.top_h:
+        if y < lay.cy + lay.top_h:
             self.mode = "paint"
             self._damage.all()
             return
         row_h = 26 * lay.fs
-        y0 = lay.bar_h + lay.top_h + 8 * lay.fs
-        rows = max(1, (lay.h - y0 - 30 * lay.fs) // row_h)
+        y0 = lay.cy + lay.top_h + 8 * lay.fs
+        rows = max(1, (lay.cy + lay.ch - y0 - 30 * lay.fs) // row_h)
         for row in range(rows):
             idx = self.project_top + row
             if idx >= len(self.project_names):
@@ -923,7 +931,7 @@ class PaintAppLayer:
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
+        cv.rect(0, lay.cy, lay.w, lay.top_h, 48)
         action_labels = ("N", "U", "R", "OPEN", "WALL", "GAME", "SHOW",
                          "FIT" if self.view_mode == 0 else str(self.view_mode) + "X")
         # N/U/R lead as icons (new/undo/redo); the word buttons stay words.
@@ -997,26 +1005,26 @@ class PaintAppLayer:
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
+        cv.rect(0, lay.cy, lay.w, lay.top_h, 48)
         self._button(cv, "< PAINT", lay.actions[0], True)
         cv.print("OPEN DRAWING", lay.actions[0][0] + lay.actions[0][2] + 12 * lay.fs,
-                 lay.bar_h + 9 * lay.fs, self.names["black"], 1)
-        y0 = lay.bar_h + lay.top_h + 4 * lay.fs
+                 lay.cy + 9 * lay.fs, self.names["black"], 1)
+        y0 = lay.cy + lay.top_h + 4 * lay.fs
         self.grid.set_rect((6 * lay.fs, y0, lay.w - 12 * lay.fs,
-                            lay.h - y0 - 4 * lay.fs), lay.fs)
+                            lay.cy + lay.ch - y0 - 4 * lay.fs), lay.fs)
         self.grid.draw(cv, th)
 
     def _draw_projects(self, cv):
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
+        cv.rect(0, lay.cy, lay.w, lay.top_h, 48)
         self._button(cv, "< PAINT", lay.actions[0], True)
         cv.print("ADD AS BG", lay.actions[0][0] + lay.actions[0][2] + 12 * lay.fs,
-                 lay.bar_h + 9 * lay.fs, self.names["black"], 1)
+                 lay.cy + 9 * lay.fs, self.names["black"], 1)
         row_h = 26 * lay.fs
-        y0 = lay.bar_h + lay.top_h + 8 * lay.fs
-        rows = max(1, (lay.h - y0 - 30 * lay.fs) // row_h)
+        y0 = lay.cy + lay.top_h + 8 * lay.fs
+        rows = max(1, (lay.cy + lay.ch - y0 - 30 * lay.fs) // row_h)
         for row in range(rows):
             idx = self.project_top + row
             if idx >= len(self.project_names):

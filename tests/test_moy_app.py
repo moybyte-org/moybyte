@@ -131,18 +131,21 @@ def run(sp, ap, say, mi, root):
     sg = app.grant("paint", ("surface", "theme"))
     s = ap.Surface(app, sg)
     say("unwritten", s.canvas(), s.size(), s.font_scale(), s.chrome_scale(),
-        s.windowed(), s.bar_h(), s.pointer())
+        s.windowed(), s.bar_h(), s.content_rect(), s.pointer())
     cv = _Canvas()
-    say("write", app.surface_write(cv, 320, 240, 2, 3, True, 18, 10, 20))
+    say("write", app.surface_write(cv, 320, 240, 2, 3, True, (0, 18, 320, 222),
+                                   10, 20))
     say("surface", s.canvas() is cv, s.size(), s.font_scale(), s.chrome_scale(),
-        s.windowed(), s.bar_h())
+        s.windowed(), s.bar_h(), s.content_rect())
+    app.surface_write(cv, 320, 240, 2, 3, False, (0, 0, 320, 222), 10, 20)
+    say("bottom", s.bar_h(), s.content_rect())
     late = app.grant("late", ("surface",))
     say("late", ap.Surface(app, late).canvas(), ap.Surface(app, late).size())
     plain = _Plain()
-    app.surface_write(plain, 800, 480, 1, 1, False, 0)
+    app.surface_write(plain, 800, 480, 1, 1, False, (0, 0, 800, 480))
     say("plain", ap.Surface(app, late).canvas() is plain, s.canvas() is plain,
         s.size(), s.windowed(), ap.Surface(app, g).__class__ is ap.Surface)
-    app.surface_write(cv, 320, 240, 2, 3, True, 18, 10, 20)
+    app.surface_write(cv, 320, 240, 2, 3, True, (0, 18, 320, 222), 10, 20)
     ptr = mi.Pointer(320, 240)
     ptr.place(50, 60)
     ptr.down = True

@@ -13,12 +13,12 @@ Several families of the moybyte cart API return objects: `make_layer` (a
 Layer), `image` (a paint image), the placement verbs of #85/#109 (`scene`,
 `actors` and the actor they hand out), and `open_editor` (#112, a text editor
 over one document). No Lua runtime here marshals objects across its boundary --
-moycore passes scalars and tuples, and the host's ctypes binding passes ints
-and strings -- so all of them solve it the same way: Lua wrappers in the
-prelude that hide a handle from the cart. The placement rows are plain Lua
-tables over C (native/moycore/moycore_scene.h); the editor is an int handle
-into a Python registry, and a verb of it that answers a PAIR encodes it as one
-string and splits it in Lua.
+moycore passes scalars and tuples, and the host's ctypes binding passes ints,
+strings and tuples of ints -- so all of them solve it the same way: Lua
+wrappers in the prelude that hide a handle from the cart. The placement rows
+are plain Lua tables over C (native/moycore/moycore_scene.h); the editor is an
+int handle into a Python registry, and a verb of it that answers a PAIR encodes
+it as one string and splits it in Lua.
 
 This module is that solution, once, for EVERY runtime: a second copy is how a
 host runtime once registered the raw closures, whose Layer return marshalled to
@@ -289,9 +289,9 @@ LIBMOY_VERBS = frozenset((
 #
 # make_layer/draw_layer/image/Image are object-valued, and objects do not cross
 # any of these bindings -- moy_lua passed scalars, moycore passes scalars and
-# tuples, the host's ctypes binding passes ints and strings. They ride
-# install_handles + PRELUDE_HANDLES below instead, which is also why a moybyte
-# layer can take an Image (`lay:spr(image("bg"), ...)`) where libmoy's
+# tuples, the host's ctypes binding passes ints, strings and tuples of ints.
+# They ride install_handles + PRELUDE_HANDLES below instead, which is also why
+# a moybyte layer can take an Image (`lay:spr(image("bg"), ...)`) where libmoy's
 # sheet-tile pair cannot.
 #
 # The placement verbs (#214) are the prelude's Lua over the run's C
@@ -550,7 +550,8 @@ do
   -- route as a layer: an int handle Python-side, a wrapper table here, and only
   -- numbers and strings across the boundary. The two verbs that answer a PAIR
   -- -- tap and save -- encode it as one comma-joined string and split it here,
-  -- because a tuple crosses moycore and does not cross the other two bindings.
+  -- because a pair holding a string crosses moycore and not the host binding,
+  -- whose tuples carry ints only.
   --
   -- Defined ONLY when the cart earned it. `open_editor` rides the `files`
   -- permission; without it there is no trampoline and therefore no global, so a

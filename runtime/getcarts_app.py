@@ -128,13 +128,14 @@ class GetCartsLayout(ListShellLayout):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.top_h = 24 * fs
-        hy, hh = self.bar_h + 2 * fs, self.top_h - 4 * fs
+        hy, hh = self.cy + 2 * fs, self.top_h - 4 * fs
         self.head = (4 * fs, hy, 50 * fs, hh)
         self.head2 = (self.w - 70 * fs, hy, 66 * fs, hh)
         self.status_h = 14 * fs
-        body_y = self.bar_h + self.top_h + 2 * fs
+        body_y = self.cy + self.top_h + 2 * fs
         self.body = (4 * fs, body_y, self.w - 8 * fs,
-                     max(60 * fs, self.h - self.status_h - body_y - 4 * fs))
+                     max(60 * fs, self.cy + self.ch - self.status_h - body_y
+                         - 4 * fs))
         bx, by, bw, bh = self.body
         self.btn_h = 26 * fs
         self.btns = (bx, by + bh - self.btn_h, bw, self.btn_h)
@@ -990,10 +991,10 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         self.hits.clear()
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.top_h))
+        _ui.toolbar(cv, th, (0, lay.cy, lay.w, lay.top_h))
         ph = self.phase
         if ph == "list":
-            cv.print("PICK A CART", 8 * fs, lay.bar_h + 8 * fs, th["title_ink"], 1)
+            cv.print("PICK A CART", 8 * fs, lay.cy + 8 * fs, th["title_ink"], 1)
             self._chip(cv, th, "CHECK", lay.head2, "check")
             self._draw_list(cv, th)
         else:
@@ -1003,7 +1004,7 @@ class GetCartsAppLayer(ListShellApp):
             title = self.cur["cart"]["name"] if self.cur is not None else "GET CARTS"
             x = lay.head[0] + lay.head[2] + 8 * fs
             cv.print(title[:max(1, (lay.w - x) // (8 * fs) - 1)], x,
-                     lay.bar_h + 8 * fs, th["title_ink"], 1)
+                     lay.cy + 8 * fs, th["title_ink"], 1)
             if ph == "cart":
                 self._draw_cart(cv, th)
             elif ph == "licence":
@@ -1011,9 +1012,10 @@ class GetCartsAppLayer(ListShellApp):
             else:
                 self._draw_message(cv, th)
             self._draw_buttons(cv, th)
-        cv.rect(0, lay.h - lay.status_h, lay.w, lay.status_h, self.names["black"])
+        sy = lay.cy + lay.ch - lay.status_h
+        cv.rect(0, sy, lay.w, lay.status_h, self.names["black"])
         cv.print(self._status_text()[:max(1, lay.w // (8 * fs) - 1)], 4 * fs,
-                 lay.h - lay.status_h + 3 * fs, self.names["yellow"], 1)
+                 sy + 3 * fs, self.names["yellow"], 1)
 
     def _chip(self, cv, th, label, rect, verb):
         _ui.chip(cv, th, rect, label, fs=self.layout.fs,

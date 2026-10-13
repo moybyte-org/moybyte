@@ -165,11 +165,12 @@ class MusicLayout(LayoutBase):
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        # -- responsive: the control row hangs under the bar, the bottom bar anchors
-        # to the canvas floor, and the list gains rows to fill the band between ----
-        bar_h = 18 * self.cs          # the OS bar's own height (#203)
-        ctl_y = bar_h + 1 * fs
-        self.title_y = bar_h + 3 * fs
+        # -- responsive: the control row hangs from the content rect's top, the
+        # PLAY/LOOP row anchors to its floor, and the list gains rows to fill the
+        # band between ----------------------------------------------------------
+        top = self.cy
+        ctl_y = top + 1 * fs
+        self.title_y = top + 3 * fs
         self.view_btn = (2 * fs, ctl_y, 46 * fs, 14 * fs)
         self.obj_prev = (52 * fs, ctl_y, 16 * fs, 14 * fs)
         self.obj_next = (134 * fs, ctl_y, 16 * fs, 14 * fs)
@@ -178,9 +179,9 @@ class MusicLayout(LayoutBase):
         self.speed_dn = (206 * fs, ctl_y, 16 * fs, 14 * fs)
         self.speed_up = (228 * fs, ctl_y, 16 * fs, 14 * fs)
         self.status_x = 250 * fs
-        bot_y = self.h - 42 * fs                  # PLAY/LOOP row (base 198)
+        bot_y = self.cy + self.ch - 42 * fs       # PLAY/LOOP row (base 198)
         self.list_x = _MU_LIST_X * fs
-        self.list_y0 = bar_h + 16 * fs
+        self.list_y0 = top + 16 * fs
         self.row_h = _MU_ROW_H * fs
         self.rows = max(4, (bot_y - 4 * fs - self.list_y0) // self.row_h)
         self.list_w = _MU_LIST_W * fs

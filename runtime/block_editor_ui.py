@@ -67,10 +67,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _gbtn as _chrome_gbtn
 
 try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
+                             BAR_ROWS as _BAR_ROWS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
+                                     BASE_H as _BASE_H, BAR_ROWS as _BAR_ROWS)
 
 
 # --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
@@ -278,19 +279,22 @@ class BlockLayout(LayoutBase):
                             chrome_scale=chrome_scale)
         fs = self.fs
         self.cell = _FONT_W * fs
-        # The hint + SAVE-status strip sits just below the 18px unified bar (the old
-        # title row was dissolved into the bar, Stage-4 rollout).
-        self.hint_y = _BLK_HINT_Y * fs
+        # The hint + SAVE-status strip, then the outline. The _BLK_* rows count
+        # from the canvas top past a top bar's 18 rows at the FONT scale, so
+        # under a top bar drawn at a larger chrome scale the strip starts inside
+        # the bar's band; with no bar above, it starts 2fs down.
+        top = max(self.cy - _BAR_ROWS * self.cs, -_BAR_ROWS * fs)
+        self.hint_y = top + _BLK_HINT_Y * fs
         self.status_x = 198 * fs                  # the SAVE-status text x (right side)
         self.row_h = _BLK_ROW_H * fs
         self.indent = _BLK_INDENT * fs
         self.x0 = _BLK_X0 * fs
-        self.y0 = _BLK_Y0 * fs
+        self.y0 = top + _BLK_Y0 * fs
         # -- action bar: a row of buttons anchored to the bottom -----------------
         # SAVE/CLOSE moved to the unified bar (Stage-4 rollout); only ADD / DEL / up /
         # dn + CODE (the #29 graduation action) stay in the body.
         self.bar_h = 22 * fs
-        self.bar_y = self.h - self.bar_h - 2 * fs
+        self.bar_y = self.cy + self.ch - self.bar_h - 2 * fs
         by, bh = self.bar_y, self.bar_h
         # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them; then the
         # #93 edit cluster ("..." / UNDO / REDO) packed after CODE.
@@ -426,8 +430,8 @@ class BlockEditorUI:
         action bar always fits -- the scene gets whatever's left over."""
         sc = self.ws.sys_canvas
         fs = max(1, getattr(sc, "font_scale", 1))
-        top = 18 * self.block_layout.cs        # the OS bar's own height (#203)
-        body_h = sc.h - top
+        top = self.block_layout.cy             # the content rect, under the bar
+        body_h = self.block_layout.ch
         gap = 3 * fs
         scene_w = (sc.w * _WORKSPACE_SCENE_PCT) // 100
         scene_w = min(scene_w, sc.w - _WORKSPACE_MIN_BLOCK_W * fs - gap)

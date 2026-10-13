@@ -60,6 +60,14 @@ to whoever called it.
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
   still editable via the picker.
+- **Lay out in the content rect, never under a bar's rows.** A surface under
+  the host's bar takes its geometry from its layout's `cx`/`cy`/`cw`/`ch`
+  (`layout_base.content_of`, the function the bar itself is placed by), never
+  `18 * cs` as its top or `h` as its floor; the bar's own rects (right zone,
+  lent zone, the fixed game-canvas cluster) are BAR coordinates, which
+  `BarLayer.handle_bar_tap` translates a tap into. Bars are global
+  (docs/shell_layout_2026-10.md §7): `tests/test_content_rect.py` moves the bar
+  to the bottom and fails a surface that stayed behind.
 - **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, 18px ×
   the CHROME scale — `chrome.Layout`'s `cs` (#203), which equals the font scale
   unless a board declared a panel diagonal small enough that a 16px icon falls

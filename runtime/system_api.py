@@ -67,10 +67,11 @@ the cart can never NAME a kind -- it gets the one it was granted, or the one
 the console was already asked to open (the Files router's door). The engine
 behind it stays in the shell; `runtime/editor_handle.py` is the whole of it.
 
-Every `type: "app"` cart also gets `ui`, `theme()`, `screen()` and `bar_h()` --
-see UNGATED below. Everything else a manifest lists (`"graphics"`, `"input"`,
-`"audio"`, an app's own marker permission like `"calc"`) is not a grant here and
-is silently ignored, which is correct: the kid API is already the ungated floor.
+Every `type: "app"` cart also gets `ui`, `theme()`, `screen()`,
+`content_rect()` and `bar_h()` -- see UNGATED below. Everything else a
+manifest lists (`"graphics"`, `"input"`, `"audio"`, an app's own marker
+permission like `"calc"`) is not a grant here and is silently ignored, which
+is correct: the kid API is already the ungated floor.
 
 ## What is NEVER grantable, and why the list is a positive one
 
@@ -95,8 +96,8 @@ lost feature rather than a granted capability.)
   * `damage` / `surface` -- the shell's invalidation epoch and its live canvas
     plumbing. A cart repaints because the Player ticked it; a cart that could
     dirty the shell every frame would defeat the redraw gate on every tier.
-    A cart's context holds `surface` for the ungated `bar_h()` alone, and no
-    other surface verb has a name in its namespace.
+    A cart's context holds `surface` for the ungated `content_rect()` and
+    `bar_h()` alone, and no other surface verb has a name in its namespace.
   * `notify` -- not refused on principle, just not mapped yet. A grant with no
     consumer is a capability granted for nothing. `clipboard` sat here for the
     same reason until the editor handle became its consumer; it is mapped now,
@@ -105,9 +106,9 @@ lost feature rather than a granted capability.)
   * Firmware update and reboot are not roles at all -- they live on
     `ws.updater` / `machine`, and no role hands out the console.
 
-## UNGATED: `ui`, `theme()`, `screen()`, `bar_h()`
+## UNGATED: `ui`, `theme()`, `screen()`, `content_rect()`, `bar_h()`
 
-These four are published to every `type: "app"` cart with no permission,
+These five are published to every `type: "app"` cart with no permission,
 because they are not capabilities -- they are how an app draws.
 
   * `ui` is `runtime/ui.py`, the same leaf the shipped apps use: the face of
@@ -123,12 +124,16 @@ because they are not capabilities -- they are how an app draws.
     rest of the console and follows a theme change without knowing one
     happened. READING the theme is not a privilege; CHANGING it is
     (`"appearance"`).
-  * `bar_h()` is the height of the exitable strip the HOST paints over the top
-    of the app's surface (`docs/app_api_v1.md` "the bar contract"): the
-    grant's surface row's `bar_h`, the value the shipped apps' `ctx.surface`
-    reads. An app draws below it. This is published because the alternative is what the seed carts
-    actually did: hardcode 18 and get it wrong at font scale 2, which is a
-    documented defect in several of them.
+  * `content_rect()` is `(x, y, w, h)`, the part of the app's surface the
+    HOST neither paints its exitable strip over nor swallows taps in
+    (`docs/app_api_v1.md` "the bar contract"): the grant's surface row's
+    content rect. An app lays out inside it, wherever the strip is.
+  * `bar_h()` is `content_rect()[1]`, the rows above the content: what an app
+    that only knows a top strip draws below. Under a strip at the bottom it is
+    0 and the strip covers the app's last rows, so new apps read
+    `content_rect()`. Both are published because the alternative is what the
+    seed carts actually did: hardcode 18 and get it wrong at font scale 2,
+    which is a documented defect in several of them.
 
 ## Storage returns `(value, err)` and never raises
 
@@ -286,10 +291,10 @@ def make_system_api(ctx_factory, cart, canvas=None,
     handed the context so the run can end its grant when it ends."""
     perms = cart.get("permissions") if cart else None
     roles, kind = _moy_app.policy(perms)
-    # `theme` and `surface` are always held: `theme()` and `bar_h()` are
-    # ungated reads of their rows. Requesting one twice is harmless (AppContext
-    # just attaches the role), but keep the tuple clean so a test can read the
-    # grant back off it.
+    # `theme` and `surface` are always held: `theme()`, `content_rect()` and
+    # `bar_h()` are ungated reads of their rows. Requesting one twice is
+    # harmless (AppContext just attaches the role), but keep the tuple clean so
+    # a test can read the grant back off it.
     needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
@@ -315,7 +320,8 @@ def make_system_api(ctx_factory, cart, canvas=None,
 
     ns["screen"] = _screen
 
-    ns["bar_h"] = ctx.surface.bar_h     # the strip's rows; draw below them
+    ns["content_rect"] = ctx.surface.content_rect   # lay out inside it
+    ns["bar_h"] = ctx.surface.bar_h     # content_rect()[1]
 
     # -- GATED ----------------------------------------------------------------
     if "files" in roles:

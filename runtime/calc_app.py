@@ -25,6 +25,11 @@ the app stays open (a real calculator's feel), and resets on a fresh open.
 """
 
 try:
+    from layout_base import BAR_ROWS, content_of
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import BAR_ROWS, content_of
+
+try:
     from moy_store_base import builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name
@@ -49,10 +54,12 @@ class CalcLayout:
         self.h = int(h)
         self.fs = max(1, int(fs))
         fs = self.fs
-        # The chrome scale (#203) sizes only the OS bar band above this app.
+        # The chrome scale (#203) sizes only the OS bar band above this app;
+        # a window has no bar over its content.
         self.cs = max(fs, int(cs)) if cs else fs
-        self.bar_h = 0 if windowed else 18 * self.cs
-        body = _ui.inset((0, self.bar_h, self.w, self.h - self.bar_h), 6 * fs)
+        self.cx, self.cy, self.cw, self.ch = content_of(
+            self.w, self.h, 0 if windowed else BAR_ROWS * self.cs)
+        body = _ui.inset((self.cx, self.cy, self.cw, self.ch), 6 * fs)
         self.display, grid = _ui.cut_top(body, 26 * fs)
         _pad, grid = _ui.cut_top(grid, 4 * fs)
         self.keys = [_ui.hsplit(row, 4, gap=3 * fs)

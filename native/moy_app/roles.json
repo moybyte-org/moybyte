@@ -9,6 +9,7 @@
     {"role": "surface", "verb": "chrome_scale", "server": "c", "grant": "never", "wasm": null},
     {"role": "surface", "verb": "windowed", "server": "c", "grant": "never", "wasm": null},
     {"role": "surface", "verb": "bar_h", "server": "c", "grant": "never", "wasm": null},
+    {"role": "surface", "verb": "content_rect", "server": "c", "grant": "never", "wasm": null},
     {"role": "surface", "verb": "pointer", "server": "c", "grant": "never", "wasm": null},
     {"role": "theme", "verb": "colors", "server": "c", "grant": "appearance", "wasm": null},
     {"role": "theme", "verb": "token", "server": "c", "grant": "appearance", "wasm": "(i)i"},

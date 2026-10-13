@@ -1558,8 +1558,9 @@ class Player:
         # exactly like `wifi` above. Same AppContext the shipped apps get,
         # through the same `ws.app_context` factory; only the source of the
         # `needs` tuple differs (a manifest here, a class constant there). The
-        # ungated riders (`ui`, `theme()`, `screen()`, `bar_h()`) are how an app
-        # draws, not what it may reach -- see runtime/system_api.py.
+        # ungated riders (`ui`, `theme()`, `screen()`, `content_rect()`,
+        # `bar_h()`) are how an app draws, not what it may reach -- see
+        # runtime/system_api.py.
         # A SCRIPT is handed the same filter by the same call: its permissions
         # come from the manifest `run_script` synthesized, so the refusing is
         # the machinery that already refuses, and `carts` is not grantable to

@@ -52,9 +52,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_code import CodeEditor
 
 try:
-    from bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
+    from bar_layer import _BAR_ICON
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
+    from runtime.bar_layer import _BAR_ICON
 
 
 # The Editor's lent left zone (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46
@@ -577,16 +577,12 @@ class EditorApp:
         tabs_area = (rest[0] + gap, rest[1], max(0, rest[2] - 2 * gap), rest[3])
         return proj, tabs_area, play_r
 
-    def zone_tap(self, px, py, rect=None):
+    def zone_tap(self, px, py, rect):
         """Hit-test the tab ladder + PLAY and dispatch. `rect` is the lent
-        left-zone rect BarLayer drew into -- the fixed game-canvas _ZONE_LEFT_GAME
-        for a game-canvas tab, or the responsive layout.zone_left for the
-        system-canvas tabs (both hit-test in the same coord space the bar drew
-        in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged. The icon
+        left-zone rect BarLayer drew into, and (px, py) are in the same bar
+        coordinates (`BarLayer.handle_bar_tap` translates them). The icon
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
-        if rect is None:
-            rect = _ZONE_LEFT_GAME
         if not self._compact(rect):
             proj, tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, proj):

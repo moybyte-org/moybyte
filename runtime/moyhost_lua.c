@@ -304,8 +304,10 @@ void hl_retarget(host_lua *r, void *pix)
 /* -- register()'s verbs: one dispatch back into Python ------------------------
  *
  * Up to eight arguments, each an integer, a string, a boolean or nil, WHERE
- * THE CART PUT IT, and an integer, a string, a boolean or nothing back:
- * modmoycore.c's trampoline marshals the same kinds. Objects never cross. */
+ * THE CART PUT IT, and an integer, a string, a boolean, up to eight integers
+ * (a tuple, fanned out as that many results: `content_rect()`) or nothing
+ * back: modmoycore.c's trampoline marshals the same kinds. Objects never
+ * cross. */
 #define HL_MAX_IARGS 8
 #define HL_NUM  0
 #define HL_STR  1
@@ -346,15 +348,19 @@ static int hl_tramp(lua_State *L)
     }
     if (CUR_DISPATCH == NULL) return 0;
     moy_loop_count(MOY_UPC_APP);
-    int out = 0;
+    int out[HL_MAX_IARGS + 1] = {0};
     const char *sout = NULL;
-    int has = CUR_DISPATCH(idx, ic, kinds, iargs, sargs, &out, &sout);
-    if (has == 1) { lua_pushinteger(L, out); return 1; }
+    int has = CUR_DISPATCH(idx, ic, kinds, iargs, sargs, out, &sout);
+    if (has == 1) { lua_pushinteger(L, out[0]); return 1; }
     if (has == 2 && sout != NULL) {
-        lua_pushlstring(L, sout, (size_t)out);
+        lua_pushlstring(L, sout, (size_t)out[0]);
         return 1;
     }
-    if (has == 3) { lua_pushboolean(L, out); return 1; }
+    if (has == 3) { lua_pushboolean(L, out[0]); return 1; }
+    if (has == 5 && out[0] >= 0 && out[0] <= HL_MAX_IARGS) {   /* a tuple */
+        for (int i = 1; i <= out[0]; i++) lua_pushinteger(L, out[i]);
+        return out[0];
+    }
     return 0;
 }
 

@@ -258,20 +258,22 @@ class Wallpaper:
                     rb()            # #63: restore the wallpaper's declared backdrop
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
-                sh = ws.layout.status_h
-                safe = sh if ws.screen in ("launcher", "settings") else 0
+                # The safe area is the layout's content rect: the wallpaper
+                # cart draws its world there, clear of the bar.
+                lay = ws.layout
+                safe = ws.screen in ("launcher", "settings")
                 # Two-domain tiers (#39/#58): the wallpaper cart draws on the 320x240
-                # GAME canvas but status_h is SYSTEM-layout units (36px at font 2) --
-                # shifting 240 game rows by that cut the scene's bottom clean off
-                # (glass-found on the P4). The cover-crop composite + the bar drawn
-                # OVER the backdrop make the safe area moot there anyway.
+                # GAME canvas but the content rect is SYSTEM-layout units (36px bar
+                # at font 2) -- shifting 240 game rows by that cut the scene's bottom
+                # clean off (glass-found on the P4). The cover-crop composite + the
+                # bar drawn OVER the backdrop make the safe area moot there anyway.
                 if ws.sys_canvas is not ws.canvas:
-                    safe = 0
+                    safe = False
                 if safe:
-                    # camera(0, -sh): a draw at world y lands at screen y + sh (below
-                    # the strip); clip keeps the art inside the safe rows.
-                    ws.canvas.camera(0, -safe)
-                    ws.canvas.clip(0, safe, ws.canvas.w, ws.canvas.h - safe)
+                    # camera(-cx, -cy): a draw at world (x, y) lands at screen
+                    # (x + cx, y + cy); clip keeps the art inside the content rect.
+                    ws.canvas.camera(-lay.cx, -lay.cy)
+                    ws.canvas.clip(lay.cx, lay.cy, lay.cw, lay.ch)
                 # COMMAND-ONLY GAME CANVAS (#175, web/wasm): there are no pixels to
                 # composite afterwards -- _backdrop_blit needs gc.buf and returns
                 # early -- so the cart's commands ARE the backdrop and must be

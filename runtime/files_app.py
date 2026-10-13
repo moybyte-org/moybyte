@@ -89,13 +89,14 @@ class FilesLayout(ListShellLayout):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.top_h = 24 * fs
-        self.head = (4 * fs, self.bar_h + 2 * fs, 58 * fs, self.top_h - 4 * fs)
+        self.head = (4 * fs, self.cy + 2 * fs, 58 * fs, self.top_h - 4 * fs)
         self.head2 = (self.head[0] + self.head[2] + 4 * fs, self.head[1],
                       58 * fs, self.head[3])
-        body_y = self.bar_h + self.top_h + 2 * fs
+        body_y = self.cy + self.top_h + 2 * fs
         self.action_h = 20 * fs
         self.status_h = 14 * fs
-        self.action_y = self.h - self.status_h - self.action_h - 2 * fs
+        self.action_y = (self.cy + self.ch - self.status_h - self.action_h
+                         - 2 * fs)
         self.body = (4 * fs, body_y, self.w - 8 * fs,
                      max(40, self.action_y - body_y - 2 * fs))
         # Kind tiles: two columns of big buttons in the body.
@@ -588,7 +589,7 @@ class FilesAppLayer(ListShellApp):
         th = self._theme.colors()
         fs = lay.fs
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.top_h))
+        _ui.toolbar(cv, th, (0, lay.cy, lay.w, lay.top_h))
         crumb = "FILES"
         if self.mode in ("grid", "rename", "game", "used"):
             crumb = "FILES > " + self.grid.kind.upper()
@@ -601,7 +602,7 @@ class FilesAppLayer(ListShellApp):
         self._chip(cv, "<" if self.mode != "kinds" else "FILES", lay.head,
                    self.mode != "kinds")
         cv.print(crumb, lay.head[0] + lay.head[2] + 8 * fs,
-                 lay.bar_h + 8 * fs, th["title_ink"], 1)
+                 lay.cy + 8 * fs, th["title_ink"], 1)
         if self.mode == "trash":
             self._chip(cv, "EMPTY", lay.head2, hot=bool(self.trash))
         if self.mode == "rename":
@@ -619,9 +620,10 @@ class FilesAppLayer(ListShellApp):
         else:                          # the row-list modes: projects | trash | game
             self._draw_rows(cv)
 
-        cv.rect(0, lay.h - lay.status_h, lay.w, lay.status_h, self.names["black"])
+        sy = lay.cy + lay.ch - lay.status_h
+        cv.rect(0, sy, lay.w, lay.status_h, self.names["black"])
         cv.print(self.status[:max(1, lay.w // (8 * fs) - 1)], 4 * fs,
-                 lay.h - lay.status_h + 3 * fs, self.names["yellow"], 1)
+                 sy + 3 * fs, self.names["yellow"], 1)
 
     def _draw_kinds(self, cv):
         shown = self._shown_kinds()

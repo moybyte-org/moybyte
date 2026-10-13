@@ -28,7 +28,7 @@ _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
 _ROWS = ("damage.all", "damage.again",
          "surface.canvas", "surface.size", "surface.font_scale",
          "surface.chrome_scale", "surface.windowed", "surface.bar_h",
-         "surface.pointer",
+         "surface.content_rect", "surface.pointer",
          "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
          "theme.variant",
          "files.readable", "files.ready", "files.begin", "files.end", "files.list",
@@ -102,7 +102,7 @@ class App:
         self._clip = None
         self._seq = 0
         self._counts = [0] * len(_ROWS)
-        self._surf = {}             # handle -> (canvas row, w, h, ox, oy, bar_h, fs, cs, win)
+        self._surf = {}             # handle -> (canvas row, w, h, ox, oy, content, fs, cs, win)
         self._canvases = [None] * SLOTS
         self._ptr = None
         self._servers = {}
@@ -149,7 +149,7 @@ class App:
             if not any((h & 0xFF) == slot for h in self._grants):
                 h = self._gen[slot] << 12 | 12 << 8 | slot
                 self._grants[h] = [app_id, bool(run), set(mask), kind, ns]
-                self._surf[h] = (0, 0, 0, 0, 0, 0, 0, 0, False)
+                self._surf[h] = (0, 0, 0, 0, 0, (0, 0, 0, 0), 0, 0, False)
                 return h
         raise OSError(_ENOSPC, "the grant table is full")
 
@@ -171,12 +171,13 @@ class App:
     def damage_drop(self):
         self._damage &= ~_ALL
 
-    def surface_write(self, canvas, w, h, fs, cs, windowed, bar_h, ox=0, oy=0):
+    def surface_write(self, canvas, w, h, fs, cs, windowed, content, ox=0, oy=0):
         row = getattr(canvas, "_crow", None)
         ch = getattr(row, "h", 0) if row is not None else 0
         for g, grant in self._grants.items():
             if "surface" in grant[2]:
-                self._surf[g] = (ch, w, h, ox, oy, bar_h, fs, cs, bool(windowed))
+                self._surf[g] = (ch, w, h, ox, oy, tuple(content), fs, cs,
+                                 bool(windowed))
                 self._canvases[g & 0xFF] = canvas
 
     def bind_pointer(self, p):
@@ -270,7 +271,10 @@ class Surface(_Role):
         return self._row("surface.windowed")[8]
 
     def bar_h(self):
-        return self._row("surface.bar_h")[5]
+        return self._row("surface.bar_h")[5][1]
+
+    def content_rect(self):
+        return self._row("surface.content_rect")[5]
 
     def pointer(self):
         r = self._row("surface.pointer")

@@ -135,7 +135,7 @@ class StorybookLayout(ListShellLayout):
         fs = self.fs
         self.band_h = 24 * fs
         x = 6 * fs
-        y = self.bar_h + 3 * fs
+        y = self.cy + 3 * fs
         bh = self.band_h - 6 * fs
         # Band buttons (which show depends on the view).
         self.btn1 = (x, y, 58 * fs, bh)                      # SHELF / PAGES
@@ -144,13 +144,13 @@ class StorybookLayout(ListShellLayout):
         self.btn4 = (x + 194 * fs, y, 66 * fs, bh)           # NO ART / TEAR OUT
         self.status_x = x
         # Row lists (shelf + pages); geometry: ListShellLayout.
-        self._init_list(self.bar_h + self.band_h)
+        self._init_list(self.cy + self.band_h)
         # Page view: the text box (the kid types the page's words here) above a
         # live-ish preview strip.
         self.cell = 8 * fs
         self.lh = 10 * fs
         self.tx = 8 * fs
-        self.ty = self.bar_h + self.band_h * 2 + 3 * fs
+        self.ty = self.cy + self.band_h * 2 + 3 * fs
         self.cols = min(MAX_LINE, max(1, (self.w - 2 * self.tx) // self.cell))
         self.rows = MAX_TEXT_LINES
         self.text_area = (self.tx - 2 * fs, self.ty - 2 * fs,
@@ -159,7 +159,7 @@ class StorybookLayout(ListShellLayout):
         pv_y = self.ty + self.rows * self.lh + 6 * fs
         self.preview = (self.tx - 2 * fs, pv_y,
                         self.w - 2 * (self.tx - 2 * fs),
-                        max(20 * fs, self.h - pv_y - 4 * fs))
+                        max(20 * fs, self.cy + self.ch - pv_y - 4 * fs))
 
 class StorybookAppLayer(ListShellApp):
     """Shelf of story carts -> a story's pages -> one page's words/art/bg."""
@@ -585,11 +585,11 @@ class StorybookAppLayer(ListShellApp):
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.band_h))
+        _ui.toolbar(cv, th, (0, lay.cy, lay.w, lay.band_h))
         fs = lay.fs
         if self.mode == "shelf":
             cv.print(self.status[:max(1, lay.w // (8 * fs) - 2)],
-                     lay.status_x, lay.bar_h + 8 * fs, th["title_ink"], 1)
+                     lay.status_x, lay.cy + 8 * fs, th["title_ink"], 1)
             self._draw_rows(cv, self._stories(), "+ NEW STORY",
                             lambda c: (c.get("title") or "STORY").upper())
         elif self.mode == "pages":
@@ -597,7 +597,7 @@ class StorybookAppLayer(ListShellApp):
             if not self.read_only:
                 self._button(cv, "PLAY", lay.btn2)
             cv.print(self.status[:max(1, (lay.w - lay.btn3[0]) // (8 * fs))],
-                     lay.btn3[0], lay.bar_h + 8 * fs, th["title_ink"], 1)
+                     lay.btn3[0], lay.cy + 8 * fs, th["title_ink"], 1)
             self._draw_rows(cv, self._pages(),
                             None if self.read_only else "+ NEW PAGE",
                             self._page_label)

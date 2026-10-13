@@ -341,6 +341,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.appearance import Appearance
 
+try:
+    import layout_base as _layout_base
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import layout_base as _layout_base
+
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
 # over AppContext that a `type: "app"` CART is handed. The shell needs only its
 # identity helper here; the Player is what builds the namespace.
@@ -1399,11 +1404,24 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self.editor_app.set_tab("cards")
         self._dirty = True
 
+    def app_content_rect(self):
+        """What the exitable "tool" strip leaves of a running app cart's
+        surface, (x, y, w, h) -- what `content_rect()` reports to a USER APP
+        so it lays out around the chrome instead of hardcoding 18."""
+        return self.bar_layer.content_rect("tool")
+
     def app_bar_h(self):
-        """Rows the exitable "tool" strip owns on top of a running app cart's
-        surface -- what `bar_h()` reports to a USER APP so it can draw below the
-        chrome instead of hardcoding 18 and breaking at font scale 2."""
-        return self.bar_layer._bar_h("tool")
+        """`bar_h()`: the rows of `app_content_rect()` above the content."""
+        return self.app_content_rect()[1]
+
+    def place_bar(self, edge):
+        """Put the host's bar on `edge` ("top" or "bottom") of every surface
+        and relayout the shell around it (layout_base.place_bar). The theme
+        layout's resolver is the caller this exists for
+        (docs/shell_layout_2026-10.md §13 step 4)."""
+        _layout_base.place_bar(edge)
+        self.bar_layer.invalidate()
+        self._relayout()
 
     def set_pointer(self, pointer):
         """The console's pointer (a `moy_input.Pointer`, or None): what
@@ -1416,8 +1434,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _surface_write(self, ox=0, oy=0):
         """Write what an app's surface shows NOW into every surface grant's row
         (native/moy_app): the system canvas, its size, the effective scales,
-        the world's window flag, the host strip's rows and the origin the
-        pointer is offset by. Called wherever one of them changes -- a
+        the world's window flag, the content rect the host strip leaves a
+        running app (`app_content_rect`) and the origin the pointer is offset
+        by. Called wherever one of them changes -- a
         relayout, a layout context's install (wm_windowed), the canvas promote
         and degrade, a responsive app cart's canvas, a new grant -- so a row
         always answers what the shell would."""
@@ -1426,10 +1445,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return
         cv = self.sys_canvas
         look = self.look
-        bar = self.app_bar_h() if getattr(self, "bar_layer", None) is not None else 0
+        content = (self.app_content_rect()
+                   if getattr(self, "bar_layer", None) is not None
+                   else (0, 0, cv.w, cv.h))
         abi.surface_write(cv, cv.w, cv.h, look.effective_font_scale(),
                           look.effective_chrome_scale(), self.windowed_chrome,
-                          bar, ox, oy)
+                          content, ox, oy)
 
     def _relayout(self):
         """Rebuild the responsive layout from the live system-canvas size + the
@@ -1649,6 +1670,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         pw = _POPUP_W * fs
         ax = bx + bw - pw
         self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
+        # ...and from the bar's content-side edge: under a top bar, over a
+        # bottom one.
+        bh = self.layout.status_h
+        by = _layout_base.bar_y(self.sys_canvas.h, bh)
+        self.sysmenu.up = by > 0
+        self.sysmenu.anchor_y = by if by > 0 else bh
         self.sysmenu.toggle(self.menu_ui._sysmenu_items())
 
     # -- firmware update screen (#53) -----------------------------------------
@@ -2122,15 +2149,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _app_bar_route(self, app, px, py):
         """Route a click at (px, py) against registered `app`'s bar band.
 
-        Returns None when the tap is BELOW the band (the app sees it as usual),
+        Returns None when the tap is off the bar (the app sees it as usual),
         True when the bar consumed it, and False when it did not -- the band
         belongs to the bar either way, so a miss inside it is swallowed rather
-        than handed down, which is what each app's `return bool(...)` did."""
-        lay = getattr(app, "layout", None)
-        band = getattr(lay, "bar_h", None)
-        if band is None:                    # an app with no layout of its own
-            band = self.bar_layer._bar_h("app")
-        if py >= band:
+        than handed down, which is what each app's `return bool(...)` did.
+        The band is the bar's own rects (`bar_layer.bar_rects("app")`), never
+        the app's layout."""
+        if not self.bar_layer.bar_at("app", px, py):
             return None
         # The context-X in that band is an EXIT path, so hard-commit first: an
         # app that persists on an idle debounce (#111) would otherwise lose the
