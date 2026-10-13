@@ -1286,3 +1286,47 @@ def test_the_console_level_is_the_settings_row_and_outlives_a_cart_start(tmp_pat
     ws.system.set("volume", 2)
     host_app.build_workstation(str(tmp_path / "carts"))
     assert audio_session.console_volume() == 2, "the boot reads the row"
+
+
+class _Keys:
+    """An input with `names` pressed this frame and `key` as the typed byte."""
+
+    def __init__(self, names=(), key=0):
+        self.names = set(names)
+        self.last_key = key
+
+    def pressed(self, n):
+        return n in self.names
+
+    def held(self, n):
+        return False
+
+
+def test_the_music_tab_repaints_on_input_and_never_at_rest(tmp_path):
+    """MusicLayer hands every frame's keys to `_music_input`: a frame with no
+    key must leave the console clean (an idle Music tab paints nothing), and
+    every key it acts on must mark it dirty."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    real = ws.input
+
+    def frame(inp):
+        ws.input = real
+        ws._open_music()
+        ws.frame(1 / 30)
+        ws._dirty = False
+        ws.input = inp
+        ws.music_ui._music_input()
+        dirty = ws._dirty
+        ws.input = real
+        ws.music_ui._stop_music_preview()
+        return dirty
+
+    for _ in range(3):
+        assert frame(_Keys()) is False, "an idle Music frame marked the console dirty"
+    for name in ("up", "down", "left", "right", "a", "b", "home"):
+        assert frame(_Keys((name,))) is True, name
+    ws.music_ui.musicedit.nudge_pitch(1)
+    assert frame(_Keys(key=0x1A)) is True, "Ctrl+Z"

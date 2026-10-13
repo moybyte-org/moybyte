@@ -297,16 +297,21 @@ class MusicEditorUI:
         ws = self.ws
         i = ws.input
         me = self.musicedit
+        changed = False
         if me is not None:
             if i.pressed("up"):
                 me.move_cursor(-1)
+                changed = True
             if i.pressed("down"):
                 me.move_cursor(1)
+                changed = True
             song = me.view == MusicEditor.SONG_VIEW
             if i.pressed("left"):
                 (me.nudge_slot if song else me.nudge_pitch)(-1)
+                changed = True
             if i.pressed("right"):
                 (me.nudge_slot if song else me.nudge_pitch)(1)
+                changed = True
             if i.pressed("a"):
                 if self.music_preview is not None:
                     self._stop_music_preview()
@@ -321,10 +326,13 @@ class MusicEditorUI:
             # _ekey_prev pattern): a LEVEL key source that holds last_key across
             # frames (e.g. a BLE keyboard) must fire ONE undo per press, not one
             # per frame -- a held Ctrl+Z would otherwise drain the whole stack.
-            k = i.last_key
-            self._mkey.undo_redo(k, me.undo, me.redo)
+            if self._mkey.undo_redo(i.last_key, me.undo, me.redo):
+                changed = True
+        if i.pressed("b") or i.pressed("home"):
+            changed = True
         ws._leave_or_home(ws._leave_menu)
-        ws._dirty = True
+        if changed:
+            ws._dirty = True
 
     def _music_click(self, px, py):
         """Route a tap in the music editor: the step/slot list places the cursor; the

@@ -55,12 +55,16 @@ class KeyEdge:
 
     def undo_redo(self, k, on_undo, on_redo):
         """The Ctrl+Z/Y shortcut: on a fresh edge fire on_undo (0x1A) / on_redo
-        (0x19). Records the edge like hit(), so a held key fires once."""
+        (0x19), and answer whether one fired. Records the edge like hit(), so a
+        held key fires once."""
         if self.hit(k):
             if k == 0x1A:
                 on_undo()
-            elif k == 0x19:
+                return True
+            if k == 0x19:
                 on_redo()
+                return True
+        return False
 
 
 # The events one typed byte can mean to a text field.
