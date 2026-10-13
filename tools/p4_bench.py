@@ -151,11 +151,20 @@ def win_geom(b, key):
     return (w[0] + 1, w[1] + 1 + w[4], w)
 
 
+def home(b):
+    """Home, and on a windowed tier the desk: there home is the fullscreen
+    Library, where an app opens without a window."""
+    pyexec(b, "ws.go_home()"); b.drain(2.0)
+    if b.state().get("desk") is False:
+        pyexec(b, "ws.open_desk()"); b.drain(1.0)
+
+
 def bench_all(b, out_path):
     bench = Bench(b)
     print("\n=== P4 panel benchmark (end-to-end frame ms) ===")
 
     # -- desk ---------------------------------------------------------------
+    home(b)
     bench.start(); b.drain(3.0); bench.stop("desk idle")
 
     # -- picker (PROJECTS) --------------------------------------------------
@@ -222,10 +231,16 @@ def bench_all(b, out_path):
             w = st["wins"][key[-1]]
             ox, oy = w[0] + 1, w[1] + 1 + w[4]
             cx, cy = ox + w[2] // 2, oy + (w[3] - w[4]) // 2
-            bench.start()
-            b.swipe(cx + 150, cy, cx - 150, cy, frames=20); b.drain(1.5)
-            bench.stop("app drag: %s" % app)
-        pyexec(b, "ws.go_home()"); b.drain(2.0)
+            if app != "artwork":    # a drag over Paint is a stroke: an edit
+                bench.start()
+                b.swipe(cx + 150, cy, cx - 150, cy, frames=20); b.drain(1.5)
+                bench.stop("app drag: %s" % app)
+            # the app's own window by its title strip: its frame, outline
+            # and shadow repainted at every step
+            bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
+            b.drain(1.0)
+            bench.stop("window drag: %s" % app)
+        home(b)
 
     # -- fullscreen Library (the smooth reference) --------------------------
     pyexec(b, "ws.open_library()"); b.drain(12.0)
@@ -254,6 +269,7 @@ def bench_repaint(b, surfaces, seconds, out_path):
     so the S3s take it with the P4s."""
     bench = Bench(b)
     print("\n=== repaint benchmark (painted-frame ms) ===")
+    home(b)
     for name in surfaces:
         if name == "settings":
             b.open("settings")
@@ -266,10 +282,11 @@ def bench_repaint(b, surfaces, seconds, out_path):
             print("  %-34s (app not available)" % name)
             continue
         b.drain(2.5)
+        bench.start(); b.drain(3.0); bench.stop("idle: %s" % name)
         b.cmd("py setattr(ws, '_force', True) or 1", wait_for="PY")
         bench.start(); b.drain(seconds); bench.stop("repaint: %s" % name)
         b.cmd("py setattr(ws, '_force', False) or 1", wait_for="PY")
-        pyexec(b, "ws.go_home()"); b.drain(2.0)
+        home(b)
     table = bench.table()
     print("\n" + table)
     if out_path:
