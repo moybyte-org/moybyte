@@ -172,6 +172,88 @@ def every_app_claims_one_cart(board):
     assert not wrong, "app cart claims off (seed/title drift?): %r" % wrong
 
 
+def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
+    """One stroke on a blank page, then home: Paint saves it, in time, and the
+    console that drew it is the one still running. A blank page is the
+    picture encoder's worst case -- every window position matches to the end
+    -- and a matcher that walked its whole window per position held the VM
+    past the task watchdog there and restarted the console. Every save the
+    drawing takes (the leave's, or the idle autosave's if it came first) is
+    timed on the board, and the file must read back as the page."""
+    _home_desk(board)
+    assert board.pyval("ws.open_app(ws._apps_by_id['artwork'])", strict=True)
+    board.drain(2.5)
+    board.pyexec(
+        "import time\n"
+        "a = ws.artwork_app\n"
+        "a._fresh_doc(a.doc.W, a.doc.H)\n"
+        "a.display = a._display_spec()\n"
+        "ws._paint_probe = 1\n"
+        "ws._paint_saves = []\n"
+        "def _paint_timed(*args, _save=a._art.save):\n"
+        "    t = time.ticks_ms()\n"
+        "    ok = _save(*args)\n"
+        "    ws._paint_saves.append((ok, time.ticks_diff(time.ticks_ms(), t)))\n"
+        "    return ok\n"
+        "a._art.save = _paint_timed\n"
+        "def _paint_leave():\n"
+        "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
+        "    ws.go_home()\n"
+        "    return 1\n"
+        "ws.mark_dirty()", strict=True)
+    board.drain(1.0)
+    try:
+        assert board.pyval("bytes(ws.artwork_app.doc.pix) == bytes((ws.artwork_app.doc.pix[0],))"
+                           " * len(ws.artwork_app.doc.pix)", strict=True), "the page is not blank"
+        st = board.state()
+        wins = [k for k in st.get("order") or [] if k != "desktop"]
+        ox = oy = 0
+        if wins:
+            w = st["wins"][wins[-1]]
+            ox, oy = w[0] + 1, w[1] + 1 + w[4]
+        (x0, y0), (x1, y1) = board.pyval(
+            "(lambda a: (a._art_to_screen((a.doc.W // 3, a.doc.H // 2)), "
+            "a._art_to_screen((2 * a.doc.W // 3, a.doc.H // 2))))(ws.artwork_app)",
+            strict=True)
+        board.swipe(ox + x0, oy + y0, ox + x1, oy + y1, frames=20)
+        board.pyval("ws._g['_paint_leave']()", timeout=60)
+        board.drain(1.0)
+        assert board.pyval("getattr(ws, '_paint_probe', 0)") == 1, (
+            "the console restarted while Paint saved")
+        saves = board.pyval("ws._paint_saves", strict=True)
+        assert saves and all(ok for ok, _ms in saves), "Paint did not save: %r" % (saves,)
+        worst = max(ms for _ok, ms in saves)
+        assert worst < budget_ms, "a save held the console %d ms" % worst
+        kind, name = board.pyval("(ws.artwork_app._art.doc_kind(), "
+                                 "ws.artwork_app._art.doc_name())", strict=True)
+        assert name, "the stroke was not saved under a name"
+        assert board.pyval("ws._paint_pix != bytes((ws._paint_pix[0],)) * len(ws._paint_pix)",
+                           strict=True), "the swipe drew nothing"
+        same = board.pyval(
+            "(lambda f: (lambda d: d is not None and bytes(d[2]) == ws._paint_pix)"
+            "(f.decode_image(f.load(%r, %r)[0])))(ws.artwork_app._art._files)" % (kind, name),
+            strict=True)
+        assert same, "the saved drawing does not read back as the page"
+        board.pyval("ws.artwork_app._art._files.delete(%r, %r) and None" % (kind, name),
+                    strict=True)
+        return worst
+    finally:
+        board.pyval("[delattr(o, k) for o, k in ((ws.artwork_app._art, 'save'), "
+                    "(ws, '_paint_pix'), (ws, '_paint_probe'), (ws, '_paint_saves')) "
+                    "if k in o.__dict__] and None")
+        _home_desk(board)
+
+
+def _home_desk(board):
+    """Home, and on a windowed tier the desk again: there home is the
+    fullscreen Library, and the next test expects the desk it booted to."""
+    board.pyexec("ws.go_home()", strict=True)
+    board.drain(1.5)
+    if board.state().get("desk") is False:
+        board.pyexec("ws.open_desk()", strict=True)
+        board.drain(1.0)
+
+
 # The painter (docs/theming_2026-09.md §4.4): tests/test_ui_painter.py's
 # scenes without text, each (surface, metrics, rect) on a 16x12 canvas
 # cleared to 9, as one installed package's `desk` surface.

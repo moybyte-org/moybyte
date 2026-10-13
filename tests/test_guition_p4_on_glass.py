@@ -326,6 +326,10 @@ def test_every_system_app_claims_exactly_one_cart(board):
     on_glass.every_app_claims_one_cart(board)
 
 
+def test_leaving_paint_saves_a_stroke(board):
+    on_glass.paint_saves_a_stroke_on_leaving(board)
+
+
 def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 

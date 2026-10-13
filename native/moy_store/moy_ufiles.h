@@ -180,6 +180,9 @@ int moy_uf_provenance(const char *blob, size_t n, moy_buf_t *src, int64_t *sig);
 
 // -- the codecs ------------------------------------------------------------------------
 
+// `n` bytes as a ZLIB stream at MOY_UF_WBITS: the compressor every picture and
+// cover is written through, and the one a board's Python codecs reach.
+int moy_uf_deflate(const uint8_t *p, size_t n, moy_buf_t *out);
 int moy_uf_encode_image(uint32_t w, uint32_t h, const uint8_t *pix, size_t n,
                         moy_buf_t *out);
 // The picture's w*h indices (NONE: not a picture).

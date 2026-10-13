@@ -320,6 +320,11 @@ def test_every_system_app_claims_exactly_one_cart(board):
     on_glass.every_app_claims_one_cart(board)
 
 
+def test_leaving_paint_saves_a_stroke(board):
+    """A stroke on a blank page, then home: saved, read back, no reset."""
+    on_glass.paint_saves_a_stroke_on_leaving(board)
+
+
 def test_open_settings_window(board):
     board.open("settings")
     board.drain(0.5)

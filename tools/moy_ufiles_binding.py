@@ -4,8 +4,8 @@ runtime package registers it under that name (runtime/__init__.py), so
 `moy_carts`' user-files names are the C every image runs.
 
 The library is built the first time a name is used, not at import: it needs
-the MicroPython tree's inflater and compressor (lib/uzlib, `make
-unix-micropython`), and a tool that never touches a user file never builds it.
+the MicroPython tree's inflater (lib/uzlib, `make unix-micropython`), and a
+tool that never touches a user file never builds it.
 tools/moy_app_binding.py hands this same library's verb table (`ops()`) to the
 files and wallpaper rows, so one process has one publish marker and one prune
 counter.
@@ -39,11 +39,10 @@ _NAMES = ("moy_ufiles.h", "moy_ufiles.c", "moy_fs.h", "moy_fs.c", "moy_vol.h",
           "moy_vol.c", "moy_journal.h", "moy_journal.c", "moy_cat.h", "moy_cat.c",
           "moy_load.h", "moy_arena.h", "moy_img.h", "moy_img.c", "moy_json.h",
           "moy_json.c", "moy_png.h", "moy_png.c", "uzlib.h", "uzlib_conf.h",
-          "tinflate.c", "header.c", "adler32.c", "crc32.c", "lz77.c",
-          "defl_static.c")
+          "tinflate.c", "header.c", "adler32.c", "crc32.c")
 _COMPILE = ("moy_store_host.c", "moy_ufiles.c", "moy_fs.c", "moy_vol.c",
             "moy_journal.c", "moy_cat.c", "moy_img.c", "moy_json.c", "moy_png.c",
-            "tinflate.c", "header.c", "adler32.c", "crc32.c", "lz77.c")
+            "tinflate.c", "header.c", "adler32.c", "crc32.c")
 
 
 class _Buf(c.Structure):
@@ -109,8 +108,8 @@ def library():
         return _LIB[0]
     from runtime import native_build
     if not os.path.isdir(UZLIB):
-        raise ImportError("moy_ufiles: no MicroPython tree for its inflater and "
-                          "compressor (make unix-micropython)")
+        raise ImportError("moy_ufiles: no MicroPython tree for its inflater "
+                          "(make unix-micropython)")
     path = native_build.build(
         "moy_ufiles", os.path.join(STORE, "moy_store_host.c"), _NAMES, CACHE,
         compile_names=_COMPILE, libmoy_dir=(STORE, SPINE, PNG, UZLIB))

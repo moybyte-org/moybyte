@@ -12,16 +12,6 @@
 #include "moy_png.h"
 #include "moy_ufiles.h"
 
-#if defined(__has_include)
-#if __has_include("lib/uzlib/uzlib.h")
-#include "lib/uzlib/uzlib.h"
-#else
-#include "uzlib.h"
-#endif
-#else
-#include "lib/uzlib/uzlib.h"
-#endif
-
 // -- the registry ---------------------------------------------------------------------
 
 static const struct {
@@ -1924,54 +1914,183 @@ const uint8_t *moy_uf_palette(void) {
     return MOY64;
 }
 
-// A ZLIB stream at MOY_UF_WBITS, as the boards' `deflate.DeflateIO` writes
-// it: the header, uzlib's LZ77 over a window of its own, the Adler-32.
+// A ZLIB stream at MOY_UF_WBITS: the header, one fixed-Huffman deflate block,
+// the Adler-32. The matcher is a hash chain over the whole raster (the encoder
+// is handed all of it at once), walked nearest-first, at most ZW_CHAIN links,
+// and stopped by a match as long as deflate allows. That bounds a picture's
+// encode by its size: uzlib's LZ77 compares every position against the whole
+// window, and on flat paper every candidate matches to the end, so a blank
+// 512x300 drawing took tens of seconds on a P4 and tripped the task watchdog.
+#define ZW_WIN (1u << MOY_UF_WBITS)
+#define ZW_HASH_BITS 12
+#define ZW_CHAIN 64
+#define ZW_MIN 3
+#define ZW_MAX 258
+
 typedef struct {
     sink_t *out;
-    uzlib_lz77_state_t lz;
-    uint32_t a, b;
-    uint8_t hist[1u << MOY_UF_WBITS];
+    uint32_t bits;
+    unsigned nbits;
+    int32_t head[1u << ZW_HASH_BITS];
+    uint16_t prev[ZW_WIN];   // distance back to the same hash, 0: none in the window
 } zw_t;
 
-static void zw_byte(void *data, uint8_t byte) {
-    zw_t *z = data;
-    char c = (char)byte;
-    sink_put(z->out, &c, 1);
+static const uint16_t ZW_LBASE[29] = {
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+    35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258,
+};
+static const uint8_t ZW_LEXT[29] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
+    3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+};
+static const uint16_t ZW_DBASE[30] = {
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+    257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+};
+static const uint8_t ZW_DEXT[30] = {
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
+    7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
+};
+
+static void zw_bits(zw_t *z, uint32_t v, unsigned n) {
+    z->bits |= v << z->nbits;
+    z->nbits += n;
+    while (z->nbits >= 8u) {
+        char c = (char)(z->bits & 0xffu);
+        sink_put(z->out, &c, 1);
+        z->bits >>= 8;
+        z->nbits -= 8u;
+    }
 }
 
-static zw_t *zw_begin(sink_t *out) {
+// A Huffman code goes out most-significant bit first.
+static void zw_code(zw_t *z, uint32_t code, unsigned n) {
+    uint32_t r = 0;
+    for (unsigned i = 0; i < n; i++) {
+        r = r << 1 | (code >> i & 1u);
+    }
+    zw_bits(z, r, n);
+}
+
+static void zw_sym(zw_t *z, unsigned s) {
+    if (s < 144u) {
+        zw_code(z, 0x30u + s, 8);
+    } else if (s < 256u) {
+        zw_code(z, 0x190u + s - 144u, 9);
+    } else if (s < 280u) {
+        zw_code(z, s - 256u, 7);
+    } else {
+        zw_code(z, 0xc0u + s - 280u, 8);
+    }
+}
+
+static void zw_match(zw_t *z, unsigned len, unsigned dist) {
+    unsigned i = 28;
+    while (ZW_LBASE[i] > len) {
+        i--;
+    }
+    zw_sym(z, 257u + i);
+    zw_bits(z, len - ZW_LBASE[i], ZW_LEXT[i]);
+    unsigned j = 29;
+    while (ZW_DBASE[j] > dist) {
+        j--;
+    }
+    zw_code(z, j, 5);
+    zw_bits(z, dist - ZW_DBASE[j], ZW_DEXT[j]);
+}
+
+static uint32_t zw_hash(const uint8_t *p) {
+    uint32_t v = (uint32_t)p[0] << 16 | (uint32_t)p[1] << 8 | p[2];
+    return (v * 2654435761u) >> (32 - ZW_HASH_BITS);
+}
+
+static void zw_insert(zw_t *z, const uint8_t *p, size_t q) {
+    uint32_t h = zw_hash(p + q);
+    int32_t old = z->head[h];
+    z->prev[q & (ZW_WIN - 1u)] = (old >= 0 && q - (size_t)old < ZW_WIN) ? (uint16_t)(q - (size_t)old) : 0;
+    z->head[h] = (int32_t)q;
+}
+
+static int zw_deflate(sink_t *out, const uint8_t *p, size_t n) {
     zw_t *z = moy_store_alloc(sizeof(zw_t));
     if (z == NULL) {
-        return NULL;
+        return MOY_ENOMEM;
     }
     z->out = out;
-    z->a = 1;
-    z->b = 0;
-    uzlib_lz77_init(&z->lz, z->hist, sizeof z->hist);
-    z->lz.dest_write_data = z;
-    z->lz.dest_write_cb = zw_byte;
+    z->bits = 0;
+    z->nbits = 0;
+    for (size_t k = 0; k < (1u << ZW_HASH_BITS); k++) {
+        z->head[k] = -1;
+    }
     char head[2] = { 0x08, (char)0x80 };
     head[0] = (char)(head[0] | (MOY_UF_WBITS - 8) << 4);
     head[1] = (char)(head[1] | (31 - (((uint8_t)head[0] * 256 + 0x80) % 31)));
     sink_put(out, head, 2);
-    uzlib_start_block(&z->lz);
-    return z;
-}
-
-static void zw_write(zw_t *z, const uint8_t *p, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        z->a = (z->a + p[i]) % 65521u;
-        z->b = (z->b + z->a) % 65521u;
+    zw_bits(z, 1, 1);                    // BFINAL
+    zw_bits(z, 1, 2);                    // BTYPE 01: the fixed codes
+    size_t i = 0;
+    while (i < n) {
+        size_t best = 0, dist = 0;
+        if (i + ZW_MIN <= n) {
+            size_t maxl = n - i < ZW_MAX ? n - i : ZW_MAX;
+            int32_t c = z->head[zw_hash(p + i)];
+            for (unsigned chain = ZW_CHAIN; c >= 0 && i - (size_t)c < ZW_WIN && chain; chain--) {
+                size_t cand = (size_t)c;
+                if (p[cand + best] == p[i + best]) {
+                    size_t l = 0;
+                    while (l < maxl && p[cand + l] == p[i + l]) {
+                        l++;
+                    }
+                    if (l > best) {
+                        best = l;
+                        dist = i - cand;
+                        if (l == maxl) {
+                            break;
+                        }
+                    }
+                }
+                uint16_t d = z->prev[cand & (ZW_WIN - 1u)];
+                if (d == 0) {
+                    break;
+                }
+                c -= d;
+            }
+        }
+        size_t step = 1;
+        if (best >= ZW_MIN) {
+            zw_match(z, (unsigned)best, (unsigned)dist);
+            step = best;
+        } else {
+            zw_sym(z, p[i]);
+        }
+        for (size_t q = i; q < i + step && q + ZW_MIN <= n; q++) {
+            zw_insert(z, p, q);
+        }
+        i += step;
     }
-    uzlib_lz77_compress(&z->lz, p, (unsigned)n);
+    zw_sym(z, 256);
+    zw_bits(z, 0, 7);                    // the last byte's padding
+    uint32_t a = 1, b = 0;
+    for (size_t k = 0; k < n; k++) {
+        a = (a + p[k]) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    uint32_t sum = b << 16 | a;
+    char tail[4] = { (char)(sum >> 24), (char)(sum >> 16), (char)(sum >> 8), (char)sum };
+    sink_put(out, tail, 4);
+    moy_store_free(z, sizeof(zw_t));
+    return 0;
 }
 
-static void zw_end(zw_t *z) {
-    uzlib_finish_block(&z->lz);
-    uint32_t sum = z->b << 16 | z->a;
-    char tail[4] = { (char)(sum >> 24), (char)(sum >> 16), (char)(sum >> 8), (char)sum };
-    sink_put(z->out, tail, 4);
-    moy_store_free(z, sizeof(zw_t));
+int moy_uf_deflate(const uint8_t *p, size_t n, moy_buf_t *out) {
+    out->p = NULL;
+    out->n = 0;
+    sink_t z = { NULL, 0, 0, 0 };
+    int rc = zw_deflate(&z, p, n);
+    if (rc != 0) {
+        return rc;
+    }
+    return sink_take(&z, out);
 }
 
 static const char B64[] =
@@ -1985,12 +2104,10 @@ int moy_uf_encode_image(uint32_t w, uint32_t h, const uint8_t *pix, size_t n,
         return MOY_UF_BAD;
     }
     sink_t z = { NULL, 0, 0, 0 };
-    zw_t *zw = zw_begin(&z);
-    if (zw == NULL) {
-        return MOY_ENOMEM;
+    int zrc = zw_deflate(&z, pix, n);
+    if (zrc != 0) {
+        return zrc;
     }
-    zw_write(zw, pix, n);
-    zw_end(zw);
     if (z.rc != 0) {
         if (z.p != NULL) {
             moy_store_free(z.p, z.cap);
@@ -2079,17 +2196,21 @@ int moy_uf_encode_cover(const uint8_t *pix, size_t n, moy_buf_t *out) {
     if (n != (size_t)MOY_UF_COVER_SIDE * MOY_UF_COVER_SIDE) {
         return MOY_UF_BAD;
     }
-    sink_t z = { NULL, 0, 0, 0 };
-    zw_t *zw = zw_begin(&z);
-    if (zw == NULL) {
+    const size_t row = MOY_UF_COVER_SIDE + 1u;     // filter byte 0, then the row
+    uint8_t *raw = moy_store_alloc(row * MOY_UF_COVER_SIDE);
+    if (raw == NULL) {
         return MOY_ENOMEM;
     }
-    static const uint8_t ZERO = 0;
-    for (int y = 0; y < MOY_UF_COVER_SIDE; y++) {
-        zw_write(zw, &ZERO, 1);
-        zw_write(zw, pix + (size_t)y * MOY_UF_COVER_SIDE, MOY_UF_COVER_SIDE);
+    for (size_t y = 0; y < MOY_UF_COVER_SIDE; y++) {
+        raw[y * row] = 0;
+        memcpy(raw + y * row + 1u, pix + y * MOY_UF_COVER_SIDE, MOY_UF_COVER_SIDE);
     }
-    zw_end(zw);
+    sink_t z = { NULL, 0, 0, 0 };
+    int zrc = zw_deflate(&z, raw, row * MOY_UF_COVER_SIDE);
+    moy_store_free(raw, row * MOY_UF_COVER_SIDE);
+    if (zrc != 0) {
+        return zrc;
+    }
     sink_t s = { NULL, 0, 0, 0 };
     sink_put(&s, "\x89PNG\r\n\x1a\n", 8);
     static const char IHDR[13] = { 0, 0, 0, MOY_UF_COVER_SIDE, 0, 0, 0,

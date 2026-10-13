@@ -46,10 +46,11 @@ def _b64_decode(text):
 # retired codec reads as an absent picture (None), which every caller on every
 # tier already draws as a placeholder.
 #
-# The compressor is the same two-tier seam the packed seed roster reads through
-# (`moy_carts._packed_stream`): MicroPython replaced `zlib` with `deflate` in
-# v1.21, so a board has DeflateIO and no zlib, and CPython has zlib and no
-# deflate. Unlike the roster's raw stream this one is standard ZLIB-framed,
+# The compressor is native/moy_store's (`moy_ufiles.deflate`) on a board that
+# carries it. Without it the seam is the two tiers the packed seed roster reads
+# through (`moy_carts._packed_stream`): MicroPython replaced `zlib` with
+# `deflate` in v1.21, so a board has DeflateIO and no zlib, and CPython has
+# zlib and no deflate. Unlike the roster's raw stream this one is standard ZLIB-framed,
 # which is what makes the pre-2026-09 assets already in this format rather than
 # a legacy of it -- nothing had to be rewritten to make them the one form.
 #
@@ -64,10 +65,27 @@ def _b64_decode(text):
 MOYIMG_WBITS = 12
 
 
+def _board_deflate():
+    """The C compressor (`moy_ufiles.deflate`, native/moy_store) where the
+    image carries it. MicroPython's own DeflateIO compares every position
+    against its whole window, and on a flat picture every candidate matches to
+    the end: a blank 320x240 page holds the VM for longer than the task
+    watchdog allows. The C one is a bounded hash-chain matcher."""
+    try:
+        import moy_ufiles
+    except ImportError:
+        return None
+    return getattr(moy_ufiles, "deflate", None)
+
+
 def _deflate(data):
-    """`data` -> a zlib stream at MOYIMG_WBITS. `deflate` first: it is the one
-    a board has, and the browser build freezes a decompress-only `zlib` shim
-    that would answer the import and then have no `compress`."""
+    """`data` -> a zlib stream at MOYIMG_WBITS: the board's C compressor, then
+    `deflate` (a board without one), then CPython's zlib. `deflate` before
+    `zlib`: the browser build freezes a decompress-only `zlib` shim that would
+    answer the import and then have no `compress`."""
+    fast = _board_deflate()
+    if fast is not None:
+        return fast(data)
     try:
         import deflate
     except ImportError:                  # CPython (host suites, the tools)
@@ -83,13 +101,15 @@ def _deflate(data):
 
 
 def _deflate_pieces(pieces):
-    """The same stream from a raster handed over PIECE BY PIECE.
-
-    A compressor is a stream on both tiers -- DeflateIO takes repeated writes,
-    compressobj repeated compress() calls -- so a writer that can produce its
-    raster incrementally never has to hold one. That is what lets the picture
-    migration rewrite a 320x240 drawing without the 76,800-byte block whose
-    absence, on a store-loaded S3 heap, is what took a boot down."""
+    """The same stream from a raster handed over PIECE BY PIECE. The C
+    compressor takes the raster whole, so on that path the pieces are joined
+    first; the streaming compressors take them as they come."""
+    fast = _board_deflate()
+    if fast is not None:
+        raster = bytearray()
+        for piece in pieces:
+            raster.extend(piece)
+        return fast(raster)
     try:
         import deflate
     except ImportError:                  # CPython (host suites, the tools)

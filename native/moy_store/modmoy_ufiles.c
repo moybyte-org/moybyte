@@ -573,6 +573,18 @@ static mp_obj_t pixels(mp_obj_t pix, mp_buffer_info_t *bi) {
     return pix;
 }
 
+static mp_obj_t mod_deflate(mp_obj_t data) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(data, &bi, MP_BUFFER_READ);
+    moy_buf_t b = { NULL, 0 };
+    int rc = moy_uf_deflate(bi.buf, bi.len, &b);
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_deflate_obj, mod_deflate);
+
 static mp_obj_t mod_encode_image(mp_obj_t w, mp_obj_t h, mp_obj_t pix) {
     mp_buffer_info_t bi;
     pix = pixels(pix, &bi);
@@ -699,6 +711,7 @@ static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_content_sig), MP_ROM_PTR(&mod_content_sig_obj) },
     { MP_ROM_QSTR(MP_QSTR_stamp_provenance), MP_ROM_PTR(&mod_stamp_provenance_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_provenance), MP_ROM_PTR(&mod_read_provenance_obj) },
+    { MP_ROM_QSTR(MP_QSTR_deflate), MP_ROM_PTR(&mod_deflate_obj) },
     { MP_ROM_QSTR(MP_QSTR_encode_image), MP_ROM_PTR(&mod_encode_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_decode_image), MP_ROM_PTR(&mod_decode_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_encode_cover), MP_ROM_PTR(&mod_encode_cover_obj) },
