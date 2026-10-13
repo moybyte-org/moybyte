@@ -18,18 +18,28 @@
 //   * a QUIET game frame -- the game composite was the frame's only write
 //     (the canvas's draw gates did not move; both the windowed WM's quiet
 //     stack and a fullscreen play frame look like this) -- is ONE PPA op: the
-//     game canvas scaled AND rotated straight into the scan buffer, plus the
-//     top bar's strip rotated from the paint buffer. A few ms, not tens.
+//     game canvas scaled AND rotated straight into the scan buffer, plus any
+//     bar strip that changed since it was last presented, rotated from the
+//     paint buffer. A few ms, not tens.
 //   * a DAMAGE frame -- the WM painted, and said WHAT it painted
 //     (`note_damage`: a drag's gesture union, the window a keystroke or a
 //     scroll re-rendered) -- rotates those landscape rects from the paint
-//     buffer, plus the bar strip and the game rect if a game drew. The paint
+//     buffer, plus the moved bar strips and the game rect if a game drew. The paint
 //     buffer is ONE persistent picture, so "what this frame changed" is
 //     exactly what the WM wrote, and the WM already reasons about that set
 //     for its own backdrop restore. A frame the WM cannot describe -- a
 //     window opening, a theme change, a toast -- notes nothing and pays the
 //     full rotate; a description that would cost more than the full rotate
 //     is declined for one.
+//
+// THE BAR STRIPS are a rect list the shell sets on relayout (`set_strips`,
+// at most MOY_ROT_STRIPS after coalescing), each with a moved bit the shell
+// sets when it paints new pixels into that strip (`strip_moved`: a bar
+// re-rendered, a chip or the clock changed). A moved strip rides the next
+// described frame and its bit clears; a still strip is not rotated, because
+// the scan buffers already hold it and the stale lists carry it between them.
+// A frame's rect list is the game, the coalesced damage and the strips:
+// MOY_ROT_RECTS bounds all three at once.
 //
 // The catch is ping-pong: a rect-only frame lands in a scan buffer that was
 // last shown two frames ago and may lack what the frame between painted. So
@@ -74,6 +84,10 @@
 #include <string.h>
 
 #include "moy_present.h"
+
+_Static_assert(MOY_ROT_RECTS >= 1 + MOY_ROT_DAMAGE_RECTS + MOY_ROT_STRIPS,
+               "a frame's rects: the game, the coalesced damage and every strip");
+_Static_assert(MOY_ROT_STRIPS <= 8, "strip_moved is one bit a strip");
 
 static int iabs_area(const moy_rect_t *r) {
     return (int)r->w * (int)r->h;
@@ -140,7 +154,6 @@ void moy_rot_init(moy_rot_t *r, const moy_rot_ops_t *ops, int pw, int ph, int an
     r->w = ph;
     r->h = pw;
     r->angle = angle;
-    r->strip_h = 18;
     r->async = async;
     r->bounce = bounce;
     r->bounce_min_px = (int32_t)MOY_ROT_BOUNCE_MIN_PX;
@@ -163,20 +176,87 @@ void moy_rot_set_angle(moy_rot_t *r, int angle) {
     }
 }
 
-void moy_rot_note_damage(moy_rot_t *r, int x, int y, int w, int h) {
+static bool clip_rect(const moy_rot_t *r, int x, int y, int w, int h, moy_rect_t *out) {
     int x0 = x > 0 ? x : 0;
     int y0 = y > 0 ? y : 0;
     int x1 = x + w < r->w ? x + w : r->w;
     int y1 = y + h < r->h ? y + h : r->h;
     if (x1 <= x0 || y1 <= y0) {
+        return false;
+    }
+    *out = (moy_rect_t){ (int16_t)x0, (int16_t)y0, (int16_t)(x1 - x0), (int16_t)(y1 - y0) };
+    return true;
+}
+
+void moy_rot_note_damage(moy_rot_t *r, int x, int y, int w, int h) {
+    moy_rect_t d;
+    if (!clip_rect(r, x, y, w, h, &d)) {
         return;
     }
-    moy_rect_t d = { (int16_t)x0, (int16_t)y0, (int16_t)(x1 - x0), (int16_t)(y1 - y0) };
     if (r->ndamage < MOY_ROT_DAMAGE) {
         r->damage[r->ndamage++] = d;
     } else {
         // Past the list: the last slot grows to cover it -- a superset.
         r->damage[MOY_ROT_DAMAGE - 1] = bbox(&r->damage[MOY_ROT_DAMAGE - 1], &d);
+    }
+}
+
+// The bar strips, clipped; a rect another covers is dropped, and past
+// MOY_ROT_STRIPS the pair whose bounding box adds the least area is merged
+// until they fit. Every strip starts moved: the frame after a relayout
+// presents them all.
+void moy_rot_set_strips(moy_rot_t *r, const moy_rect_t *rects, int n) {
+    moy_rect_t s[MOY_ROT_STRIPS + 1];
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        moy_rect_t c;
+        if (!clip_rect(r, rects[i].x, rects[i].y, rects[i].w, rects[i].h, &c)
+            || covered(&c, s, k)) {
+            continue;
+        }
+        int m = 0;
+        for (int j = 0; j < k; j++) {
+            if (!covered(&s[j], &c, 1)) {
+                s[m++] = s[j];
+            }
+        }
+        k = m;
+        s[k++] = c;
+        if (k > MOY_ROT_STRIPS) {
+            int bi = 0, bj = 1;
+            long best = -1;
+            for (int a = 0; a < k; a++) {
+                for (int b = a + 1; b < k; b++) {
+                    moy_rect_t u = bbox(&s[a], &s[b]);
+                    long grow = (long)iabs_area(&u) - iabs_area(&s[a]) - iabs_area(&s[b]);
+                    if (best < 0 || grow < best) {
+                        best = grow;
+                        bi = a;
+                        bj = b;
+                    }
+                }
+            }
+            s[bi] = bbox(&s[bi], &s[bj]);
+            s[bj] = s[--k];
+        }
+    }
+    memcpy(r->strips, s, sizeof(moy_rect_t) * (size_t)k);
+    r->nstrips = k;
+    r->strip_moved = (uint8_t)((1u << k) - 1u);
+}
+
+// The shell painted new pixels into (x, y, w, h) of the bar strips: every
+// strip it touches rides the next described frame.
+void moy_rot_strip_moved(moy_rot_t *r, int x, int y, int w, int h) {
+    moy_rect_t c;
+    if (!clip_rect(r, x, y, w, h, &c)) {
+        return;
+    }
+    for (int i = 0; i < r->nstrips; i++) {
+        const moy_rect_t *s = &r->strips[i];
+        if (c.x < s->x + s->w && s->x < c.x + c.w && c.y < s->y + s->h && s->y < c.y + c.h) {
+            r->strip_moved |= (uint8_t)(1u << i);
+        }
     }
 }
 
@@ -426,11 +506,20 @@ void moy_rot_flush(moy_rot_t *r) {
             r->dmg_rects += (uint32_t)n;
         }
     }
-    if (nrects >= 0 && r->strip_h > 0) {
-        moy_rect_t s = { 0, 0, (int16_t)r->w,
-                         (int16_t)(r->strip_h < r->h ? r->strip_h : r->h) };
-        rects[nrects++] = s;
+    if (nrects >= 0) {
+        for (int i = 0; i < r->nstrips; i++) {
+            if (!(r->strip_moved & (1u << i))) {
+                continue;
+            }
+            if (covered(&r->strips[i], rects, nrects)) {
+                r->strip_covered++;
+                continue;
+            }
+            rects[nrects++] = r->strips[i];
+            r->strip_n++;
+        }
     }
+    r->strip_moved = 0;             // presented: in the rects, or in a full rotate
     moy_rect_t changed[MOY_ROT_RECTS];
     for (int i = 0; i < nrects; i++) {
         changed[i] = moy_rot_rect(rects[i].x, rects[i].y, rects[i].w, rects[i].h,

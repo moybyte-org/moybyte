@@ -146,7 +146,8 @@ enum {
 #define MOY_ROT_DAMAGE 32               // noted rects a frame keeps
 #define MOY_ROT_DAMAGE_RECTS 3          // above this many, their bounding box
 #define MOY_ROT_DAMAGE_TENTHS 6         // a description over 6/10 of the frame: full
-#define MOY_ROT_RECTS 8                 // game + damage + strip, after coalescing
+#define MOY_ROT_STRIPS 4                // bar strips a quiet frame may carry
+#define MOY_ROT_RECTS 8                 // game + damage + strips, after coalescing
 #define MOY_ROT_BOUNCE_MIN_PX (384L * 1024L)
 
 typedef struct {
@@ -190,7 +191,7 @@ typedef struct {
 
 typedef struct {
     const moy_rot_ops_t *ops;
-    int pw, ph, w, h, angle, strip_h;
+    int pw, ph, w, h, angle;
     int32_t seq[3], rseq[3], shows;
     int front, back, pi, pending, keep;
     bool async, bounce, has_game, has_stamp;
@@ -200,11 +201,15 @@ typedef struct {
     moy_rect_t stale[3][MOY_ROT_STALE_CAP];
     int ndamage;
     moy_rect_t damage[MOY_ROT_DAMAGE];
+    int nstrips;
+    uint8_t strip_moved;        // bit i: strips[i] changed since it was last presented
+    moy_rect_t strips[MOY_ROT_STRIPS];
     moy_rot_game_t game;
     moy_rot_stamp_t stamp;
     uint32_t vsync_waits, full_n, full_us, rect_n, rect_us, copies, grown;
     uint32_t dmg_n, dmg_rects, dmg_declined, bounced, stamp_n, refused;
     uint32_t def_n, pres_n, late_n, fences, fence_us, wait_n, wait_us;
+    uint32_t strip_n, strip_covered;
 } moy_rot_t;
 
 moy_rect_t moy_rot_rect(int x, int y, int w, int h, int angle, int lw, int lh);
@@ -213,6 +218,8 @@ void moy_rot_init(moy_rot_t *r, const moy_rot_ops_t *ops, int pw, int ph, int an
                   bool async, bool bounce);
 void moy_rot_set_angle(moy_rot_t *r, int angle);
 void moy_rot_note_damage(moy_rot_t *r, int x, int y, int w, int h);
+void moy_rot_set_strips(moy_rot_t *r, const moy_rect_t *rects, int n);
+void moy_rot_strip_moved(moy_rot_t *r, int x, int y, int w, int h);
 int moy_rot_on_glass(const moy_rot_t *r);
 void moy_rot_flush(moy_rot_t *r);
 void moy_rot_present_pending(moy_rot_t *r);

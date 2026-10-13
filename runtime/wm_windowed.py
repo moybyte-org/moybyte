@@ -833,6 +833,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._focus_win()
         return win is not None and win.kind == "desktop"
 
+    def hand_content_damage(self, cv, x, y, w, h):
+        """Console mode presents fullscreen and describes like the fullscreen
+        tier; a desktop-mode frame is described by its windows
+        (`_hand_damage`), whose content draws in window coordinates."""
+        if self.mode == "console":
+            FullscreenStackWM.hand_content_damage(self, cv, x, y, w, h)
+
     def keys_to_cart(self):
         """Console hook (#44 redraw gate), focus-aware like player_has_pointer:
         keyboard follows _focus (decoupled from the back-stack), so keys reach
@@ -1584,8 +1591,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._draw_app_window(win, focused, dt)
             if self._win_touched:
                 touched.append(self._win_extent(win))
-        # The chips live on the OS bar, which the compositor carries as its
-        # strip on every partial frame; the resize outline lies inside the
+        # The chips live on the OS bar, whose strip the compositor carries
+        # when the chip draw says it moved; the resize outline lies inside the
         # gesture union. Neither is a rect of its own.
         self._hand_damage(touched)
         if _skip is not None and not self._kf_active:

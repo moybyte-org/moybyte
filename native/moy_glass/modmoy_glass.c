@@ -1362,7 +1362,9 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 // its portrait panel, the frame state machine in C, its transport the two
 // modules passed in. The canvas hands each frame's game composite in with
 // mark_game (its buffers and its paint()/quiet() callables) and the WM its
-// damage with note_damage; the deferred window stamp is `_stamp_pending`.
+// damage with note_damage; the shell sets the bar strips with set_strips and
+// says which it repainted with strip_moved; the deferred window stamp is
+// `_stamp_pending`.
 
 typedef struct {
     mp_obj_base_t base;
@@ -1653,6 +1655,53 @@ static mp_obj_t rot_note_damage(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_note_damage_obj, 5, 5, rot_note_damage);
 
+// set_strips([(x, y, w, h), ...]): the bar strips, set on relayout.
+static mp_obj_t rot_set_strips(mp_obj_t self_in, mp_obj_t rects_in) {
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(rects_in, &n, &it);
+    moy_rect_t rs[MOY_ROT_DAMAGE];
+    if (n > MOY_ROT_DAMAGE) {
+        mp_raise_ValueError(MP_ERROR_TEXT("strips"));
+    }
+    for (size_t i = 0; i < n; i++) {
+        size_t m;
+        mp_obj_t *v;
+        mp_obj_get_array(it[i], &m, &v);
+        if (m != 4) {
+            mp_raise_ValueError(MP_ERROR_TEXT("strip"));
+        }
+        rs[i] = (moy_rect_t){ (int16_t)mp_obj_get_int(v[0]), (int16_t)mp_obj_get_int(v[1]),
+                              (int16_t)mp_obj_get_int(v[2]), (int16_t)mp_obj_get_int(v[3]) };
+    }
+    moy_rot_set_strips(&c->r, rs, (int)n);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(rot_set_strips_obj, rot_set_strips);
+
+static mp_obj_t rot_strip_moved(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    moy_rot_strip_moved(&c->r, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                        mp_obj_get_int(a[3]), mp_obj_get_int(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_strip_moved_obj, 5, 5, rot_strip_moved);
+
+// The strips as set, after coalescing.
+static mp_obj_t rot_strips(mp_obj_t self_in) {
+    moy_rot_t *r = &((glass_rot_obj_t *)MP_OBJ_TO_PTR(self_in))->r;
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < r->nstrips; i++) {
+        const moy_rect_t *s = &r->strips[i];
+        mp_obj_t t[4] = { I(s->x), I(s->y), I(s->w), I(s->h) };
+        mp_obj_list_append(out, mp_obj_new_tuple(4, t));
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(rot_strips_obj, rot_strips);
+
 static mp_obj_t rot_flush(mp_obj_t self_in) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
     moy_rot_flush(&c->r);
@@ -1724,6 +1773,14 @@ static mp_obj_t rot_damage_stats(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(rot_damage_stats_obj, rot_damage_stats);
 
+// (strip rects rotated, moved strips a damage rect already covered)
+static mp_obj_t rot_strip_stats(mp_obj_t self_in) {
+    moy_rot_t *r = &((glass_rot_obj_t *)MP_OBJ_TO_PTR(self_in))->r;
+    const uint32_t *v[2] = { &r->strip_n, &r->strip_covered };
+    return rot_tuple(v, 2);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(rot_strip_stats_obj, rot_strip_stats);
+
 // OVERLAP_FIELDS: obsolete is None -- this path never drops a queued show.
 static mp_obj_t rot_overlap_stats(mp_obj_t self_in) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
@@ -1761,10 +1818,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_set_backlight_obj, 1, 2, rot_set_
 static void rot_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
     if (dest[0] == MP_OBJ_SENTINEL) {           // a store
-        if (attr == MP_QSTR_strip_h) {
-            c->r.strip_h = mp_obj_get_int(dest[1]);
-            dest[0] = MP_OBJ_NULL;
-        } else if (attr == MP_QSTR__stamp_pending) {
+        if (attr == MP_QSTR__stamp_pending) {
             mp_obj_t st = dest[1];
             if (st == mp_const_none) {
                 c->r.has_stamp = false;
@@ -1799,9 +1853,6 @@ static void rot_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     switch (attr) {
         case MP_QSTR_angle:
             dest[0] = I(c->r.angle);
-            return;
-        case MP_QSTR_strip_h:
-            dest[0] = I(c->r.strip_h);
             return;
         case MP_QSTR_rotated:
             dest[0] = mp_const_true;
@@ -1853,6 +1904,10 @@ static const mp_rom_map_elem_t rot_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_angle), MP_ROM_PTR(&rot_set_angle_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_game), MP_ROM_PTR(&rot_mark_game_obj) },
     { MP_ROM_QSTR(MP_QSTR_note_damage), MP_ROM_PTR(&rot_note_damage_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_strips), MP_ROM_PTR(&rot_set_strips_obj) },
+    { MP_ROM_QSTR(MP_QSTR_strip_moved), MP_ROM_PTR(&rot_strip_moved_obj) },
+    { MP_ROM_QSTR(MP_QSTR_strips), MP_ROM_PTR(&rot_strips_obj) },
+    { MP_ROM_QSTR(MP_QSTR_strip_stats), MP_ROM_PTR(&rot_strip_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&rot_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_present_pending), MP_ROM_PTR(&rot_present_pending_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&rot_sync_obj) },

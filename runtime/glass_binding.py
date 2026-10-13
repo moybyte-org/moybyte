@@ -667,12 +667,12 @@ class _RotStamp(ctypes.Structure):
 _ROT_METERS = ("vsync_waits", "full_n", "full_us", "rect_n", "rect_us", "copies",
                "grown", "dmg_n", "dmg_rects", "dmg_declined", "bounced", "stamp_n",
                "refused", "def_n", "pres_n", "late_n", "fences", "fence_us",
-               "wait_n", "wait_us")
+               "wait_n", "wait_us", "strip_n", "strip_covered")
 
 
 class _Rot(ctypes.Structure):
     _fields_ = ([("ops", ctypes.POINTER(_RotOps))]
-                + [(n, ctypes.c_int) for n in ("pw", "ph", "w", "h", "angle", "strip_h")]
+                + [(n, ctypes.c_int) for n in ("pw", "ph", "w", "h", "angle")]
                 + [("seq", _I32 * 3), ("rseq", _I32 * 3), ("shows", _I32)]
                 + [(n, ctypes.c_int) for n in ("front", "back", "pi", "pending", "keep")]
                 + [(n, ctypes.c_bool) for n in ("async_", "bounce", "has_game",
@@ -680,7 +680,9 @@ class _Rot(ctypes.Structure):
                 + [("bounce_min_px", _I32)]
                 + [("stale_full", ctypes.c_bool * 3), ("nstale", ctypes.c_uint8 * 3),
                    ("stale", (_Rect * 8) * 3), ("ndamage", ctypes.c_int),
-                   ("damage", _Rect * 32), ("game", _RotGame), ("stamp", _RotStamp)]
+                   ("damage", _Rect * 32), ("nstrips", ctypes.c_int),
+                   ("strip_moved", ctypes.c_uint8), ("strips", _Rect * 4),
+                   ("game", _RotGame), ("stamp", _RotStamp)]
                 + [(n, ctypes.c_uint32) for n in _ROT_METERS])
 
 
@@ -693,6 +695,8 @@ def _rot_lib():
                                               ctypes.c_bool]),
                            ("moy_rot_set_angle", [R, ctypes.c_int]),
                            ("moy_rot_note_damage", [R] + [ctypes.c_int] * 4),
+                           ("moy_rot_strip_moved", [R] + [ctypes.c_int] * 4),
+                           ("moy_rot_set_strips", [R, ctypes.POINTER(_Rect), ctypes.c_int]),
                            ("moy_rot_flush", [R]), ("moy_rot_present_pending", [R]),
                            ("moy_rot_fence", [R])):
             f = getattr(lib, name)
@@ -857,13 +861,21 @@ class RotatedCompositor:
     def BOUNCE_MIN_PX(self, n):
         self._r.bounce_min_px = int(n)
 
-    @property
-    def strip_h(self):
-        return self._r.strip_h
+    def set_strips(self, rects):
+        rs = (_Rect * max(1, len(rects)))(*[_Rect(*map(int, r)) for r in rects])
+        _rot_lib().moy_rot_set_strips(ctypes.byref(self._r), rs, len(rects))
 
-    @strip_h.setter
-    def strip_h(self, h):
-        self._r.strip_h = int(h)
+    def strip_moved(self, x, y, w, h):
+        _rot_lib().moy_rot_strip_moved(ctypes.byref(self._r), int(x), int(y), int(w),
+                                       int(h))
+
+    def strips(self):
+        r = self._r
+        return [(s.x, s.y, s.w, s.h) for s in r.strips[:r.nstrips]]
+
+    @property
+    def _strip_moved(self):
+        return self._r.strip_moved
 
     def set_angle(self, angle):
         rotate_rect(0, 0, 1, 1, angle, self._w, self._h)
@@ -936,6 +948,9 @@ class RotatedCompositor:
 
     def damage_stats(self):
         return self._m("dmg_n", "dmg_rects", "dmg_declined", "grown")
+
+    def strip_stats(self):
+        return self._m("strip_n", "strip_covered")
 
     def overlap_stats(self):
         try:

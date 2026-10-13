@@ -212,6 +212,9 @@ class WindowChrome:
         th = self.ws.theme_colors
         sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized)
                     for k, r, lb in self._chip_rects())
+        if sig != self._chip_sig:
+            # New chip pixels on the OS bar: the compositor's strip carries them.
+            self.ws.bar_layer._strip_moved(sc, 0, 0, sc.w, self._root_ctx.layout.status_h)
         if not quiet or sig != self._chip_sig:
             self._chip_sig = sig
             self._chip_streak = 0

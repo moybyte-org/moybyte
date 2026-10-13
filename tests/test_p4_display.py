@@ -585,7 +585,6 @@ def rotated(angle=90):
         light = dsi.backlight
         dsi.backlight = lambda on: (lit.append(bool(on)), light(on))
         comp = mod.RotatedCompositor(dsi, ppa, angle=angle)
-        comp.strip_h = 0                          # the strip has its own test
         yield mod, comp, dsi, ppa, lit
     finally:
         for k, v in saved.items():
@@ -727,17 +726,114 @@ def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
         assert comp.rotate_stats()[2] == 1
 
 
-def test_the_chrome_strip_rides_every_quiet_frame():
+BAR = (0, 0, 1280, 18)
+
+
+def _strip_rotates(ppa):
+    return [r for r in ppa.rotates if r[4:] == BAR + (90,)]
+
+
+def test_a_still_strip_rides_no_quiet_frame_and_a_moved_one_rides_the_next():
+    """The bar strip is presented when its pixels move, never per frame: a
+    full rotate carries it, quiet game frames after it rotate the game alone,
+    and a strip_moved puts it on the next frame, once."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.strip_h = 18
-        step(comp)
-        game(comp)
-        step(comp)
+        comp.set_strips([BAR])
+        assert comp._strip_moved == 1, "a strip set on relayout starts moved"
+        step(comp)                                     # full: carries the strip
+        assert comp._strip_moved == 0
+        for _ in range(4):
+            game(comp)
+            step(comp)
+        assert _strip_rotates(ppa) == [], "a still strip is never rotated"
+        comp.strip_moved(1200, 2, 40, 10)              # the clock cell
         game(comp)
         comp.flush()                                   # direct + the strip
-        strip = [r for r in ppa.rotates if r[4:] == (0, 0, 1280, 18, 90)]
-        assert len(strip) == 1 and strip[0][0] is dsi.fb(1)
+        strip = _strip_rotates(ppa)
+        assert len(strip) == 1
         assert strip[0][1:3] == (0, 0)                 # 90 CCW: the top bar lands at the panel's left
+        comp.present_pending()
+        game(comp)
+        step(comp)
+        assert len(_strip_rotates(ppa)) == 1, "presented once, then still again"
+        assert comp.strip_stats() == (1, 0)
+
+
+def test_a_moved_strip_a_damage_rect_covers_is_not_rotated_twice():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([BAR])
+        step(comp)
+        comp.note_damage(0, 0, 1, 1)
+        step(comp)                                     # both buffers current
+        comp.strip_moved(0, 0, 1280, 18)
+        comp.note_damage(0, 0, 1280, 100)
+        step(comp)
+        assert _strip_rotates(ppa) == []
+        assert comp.strip_stats() == (0, 1)
+
+
+def test_strip_moved_marks_only_the_strips_it_touches():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([BAR, (0, 782, 1280, 18)])     # a top and a bottom bar
+        step(comp)
+        assert comp._strip_moved == 0
+        comp.strip_moved(600, 790, 10, 4)
+        assert comp._strip_moved == 2
+        comp.strip_moved(-50, -50, 10, 10)             # off the frame: nothing
+        assert comp._strip_moved == 2
+        comp.strip_moved(0, 0, 1280, 800)
+        assert comp._strip_moved == 3
+
+
+def test_set_strips_clips_drops_the_covered_and_the_empty():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([(-10, -4, 1300, 22), (100, 0, 50, 10), (0, 900, 10, 10),
+                         (0, 400, 0, 50)])
+        assert comp.strips() == [(0, 0, 1280, 18)]
+
+
+def test_five_bars_coalesce_into_the_strip_budget_and_a_frame_fits_its_rects():
+    """MOY_ROT_RECTS is the game, the coalesced damage and every strip: four
+    edge bars and a fifth coalesce into MOY_ROT_STRIPS (4) by the cheapest
+    merge, and a frame carrying the game, three damage rects and every strip
+    moved stays inside the budget -- each rect presented, none dropped."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        top, bottom = (0, 0, 1280, 18), (0, 782, 1280, 18)
+        left, right = (0, 18, 24, 764), (1256, 18, 24, 764)
+        second_top = (0, 18, 1280, 18)                 # a second bar under the first
+        comp.set_strips([top, bottom, left, right, second_top])
+        strips = comp.strips()
+        assert len(strips) == 4
+        assert (0, 0, 1280, 36) in strips, "the two top bars merged: the cheapest pair"
+        assert bottom in strips and left in strips and right in strips
+        assert comp._strip_moved == 0b1111
+        step(comp)
+        game(comp)
+        step(comp)
+        game(comp)
+        step(comp)                                     # converged: direct
+        n = len(ppa.rotates)
+        game(comp, quiet=False)
+        comp.note_damage(300, 300, 50, 50)
+        comp.note_damage(500, 500, 50, 50)
+        comp.note_damage(700, 600, 50, 50)
+        comp.strip_moved(0, 0, 1280, 800)              # every strip
+        comp.flush()
+        rects = sorted(r[4:8] for r in ppa.rotates[n:] if r[8] == 90)
+        want = sorted([(100, 50, 640, 480), (300, 300, 50, 50), (500, 500, 50, 50),
+                       (700, 600, 50, 50)] + strips)
+        assert rects == want, "eight rects: game + three damage + four strips"
+        assert comp.strip_stats() == (4, 0)
+
+
+def test_many_strips_never_overflow_the_list():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([(i * 40, 0, 20, 18) for i in range(30)])
+        strips = comp.strips()
+        assert len(strips) == 4
+        x0 = min(s[0] for s in strips)
+        x1 = max(s[0] + s[2] for s in strips)
+        assert (x0, x1) == (0, 29 * 40 + 20), "every bar is inside some strip"
 
 
 def test_a_stale_rect_the_new_frame_does_not_cover_is_copied_from_the_front():
@@ -816,12 +912,13 @@ def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
     that rect (and the bar strip) from the paint buffer instead of 4MB."""
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         step(comp)                                     # full -> fb1
         comp.note_damage(200, 100, 700, 500)
         step(comp)                                     # fb0 missed a full: full
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
         comp.note_damage(210, 100, 700, 500)
+        comp.strip_moved(*BAR)                         # the bar re-rendered too
         comp.flush()                                   # fb1: rect frame
         assert comp._pending == 1 and comp._keep == 2, "two ops may fly: the rect and the strip"
         rot = [r for r in ppa.rotates if r[0] is dsi.fb(1) and r[8] == 90]
@@ -931,11 +1028,12 @@ def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other()
 
 def test_a_quiet_frame_queues_strip_then_copy_then_rotate_and_presents_later():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         step(comp)
         game(comp)
         step(comp)
         game(comp)
+        comp.strip_moved(*BAR)
         n = len(ppa.rotates)
         comp.flush()                                   # the async direct frame
         tail = ppa.rotates[n:]
@@ -1070,9 +1168,9 @@ def test_a_frame_is_painted_into_the_other_buffer_while_the_last_one_flies():
         b = comp.framebuffer()
         assert b is not a
         comp.note_damage(10, 10, 100, 100)
-        comp.flush()                                   # frame 2 from B, two ops (rect... no strip: 0)
+        comp.flush()                                   # frame 2 from B: the rect alone
         assert comp.framebuffer() is a
-        assert comp._keep == 1, "one op this frame (strip_h is 0 in the fixture)"
+        assert comp._keep == 1, "one op this frame (the fixture sets no strips)"
         comp.present_pending()
         assert ppa.waits[-1] == 1, "wait until at most this frame's ops fly"
         assert dsi.shown[-1] == 0
@@ -1085,10 +1183,11 @@ def test_a_frame_is_painted_into_the_other_buffer_while_the_last_one_flies():
 def test_the_deferred_window_stamp_is_the_frames_first_op_into_the_paint_buffer():
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         step(comp)
         comp.note_damage(0, 0, 1, 1)
         step(comp)                                     # both scan buffers current
+        comp.strip_moved(*BAR)
         paint = comp.framebuffer()
         comp._stamp_pending = (paint, 1280, 800, 300, 200, WIN, 512, 480)
         comp.note_damage(298, 198, 519, 487)
@@ -1338,7 +1437,7 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
     (0) is never asked again."""
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         ppa.bands = 5
         step(comp)                                  # full rotate: 5 bands
         assert comp._keep == 5 and comp._bounced == 5
@@ -1347,11 +1446,12 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
         assert comp._bounced == 10
         n = len(ppa.rotates)
         comp.note_damage(10, 20, 400, 300)          # 120K px: bounced
+        comp.strip_moved(*BAR)
         step(comp)                                  # a damage frame
         new = ppa.rotates[n:]
         big = [r for r in new if r[6] * r[7] >= comp.BOUNCE_MIN_PX]
         assert big, "the damage rect went through the bounce"
-        strip = [r for r in new if r[7] == comp.strip_h and r[6] == comp._w]
+        strip = [r for r in new if r[4:8] == BAR]
         assert strip, "the strip is a plain rotate"
         assert comp.async_stats()[6] == 15
         # five bands plus the strip: the 1px stale rect was grown over, not copied
@@ -1489,7 +1589,6 @@ def refreshing_rotated(angle=90):
     mod = ROTATED
     try:
         comp = mod.RotatedCompositor(dsi, ppa, angle=angle)
-        comp.strip_h = 0
         yield mod, comp, dsi, ppa
     finally:
         for k, v in saved.items():

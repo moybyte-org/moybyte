@@ -35,8 +35,12 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
     the canvas's draw gates can tell (rect/rectb/print/pix are gated; a play
     frame moves none of them — measured over 34 frames) — is ONE PPA op: the
     320×240 game canvas scaled AND rotated straight into the scan buffer,
-    plus the top bar's strip (an ungated blit every play frame) rotated from
-    the paint buffer. Both the windowed player and fullscreen play take it,
+    plus any bar strip whose pixels moved since it was last presented,
+    rotated from the paint buffer. The strips are a rect list the shell
+    publishes on relayout (`BarLayer.publish_strips`), and every repaint
+    that changes one says so (`strip_moved`: a bar re-render, a chip, the
+    clock); a still strip is not rotated, so a play frame under still bars
+    rotates the game alone. Both the windowed player and fullscreen play take it,
     and a compiled cart's direct-colour frame takes it from the GDMA
     snapshot of the cart's memory (`P4SystemCanvas.present_frame`); crisp
     pixels, which apply to the palette-based frames alone (bilinear PPA
@@ -45,8 +49,9 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   - a DAMAGE frame (2026-09-08) — the WM painted and DESCRIBED what: a
     drag's gesture union, the window a scroll or a keystroke re-rendered
     (`WindowedWM._hand_damage` → the root canvas's `note_damage`, which only
-    this compositor exposes) — rotates those landscape rects from the paint
-    buffer plus the bar strip. The paint buffer is one persistent picture,
+    this compositor exposes), or the fullscreen home's shelf drag (its band,
+    `FullscreenStackWM.hand_content_damage`) — rotates those landscape rects
+    from the paint buffer plus the moved bar strips. The paint buffer is one persistent picture,
     so what the frame changed is exactly what the WM wrote, the same trust
     the WM's own backdrop restore places in its union. A frame the WM cannot
     describe (a window opening, a theme change, a toast in the stack, a

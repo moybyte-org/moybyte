@@ -330,11 +330,14 @@ placement-changed cell above is *the same* backdrop restore followed by a
 rect rotate instead of a full one — provided the compositor knows the rect.
 `WindowedWM._hand_damage` hands it the gesture union and the extents of the
 windows it rendered live (`note_damage` on the root canvas, absent on every
-other backend), the same set the union restore already trusts; a frame it
-cannot describe is a full rotate. This is not a second invalidation
-mechanism: no new dirty state, no new producer class — the backdrop layer
-and the window loop say what they painted, once, on the frame they painted
-it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
+other backend), the same set the union restore already trusts; the
+fullscreen home's shelf drag hands its band the same way
+(`hand_content_damage`), and the bar says when it painted new pixels into
+one of the compositor's strips (`strip_moved`), so a still bar is not
+rotated; a frame nobody describes is a full rotate. This is not a second
+invalidation mechanism: no new dirty state, no new producer class — the
+backdrop layer, the window loop, the shelf and the bar say what they
+painted, once, on the frame they painted it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
 rotate is queued at flush and fenced at the next present, before the cart's
 tick can write the canvas it was copied from.
 

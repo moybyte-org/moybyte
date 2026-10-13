@@ -320,10 +320,9 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                      panel_diagonal_in=panel_diagonal_in)
     _census("workstation")
     _stamp(kernel, 3)               # MOY_STAMP_WS
-    # The chrome strip a quiet frame rotates beside the game rect on a
-    # rotated compositor: the TALLEST bar the layout can draw.
-    if getattr(comp, "rotated", False):
-        comp.strip_h = max(ws.layout.status_h, ws.bar_layer._bar_h("desktop"))
+    # The bar strips a rotated compositor presents as rects of their own,
+    # republished on every relayout.
+    ws.bar_layer.publish_strips(sys_canvas)
 
     def _mk_game_canvas(w, h, owner=None):
         # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller

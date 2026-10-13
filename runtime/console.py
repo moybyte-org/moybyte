@@ -1457,6 +1457,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             if _relay is not None:
                 _relay(w, h, fs, cs)
         self._surface_write()             # the new layout's bar
+        _bl = getattr(self, "bar_layer", None)
+        if _bl is not None:
+            _bl.publish_strips()          # the bar strips' rects, on a rotated root
         # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
         # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None

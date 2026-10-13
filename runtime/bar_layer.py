@@ -208,11 +208,39 @@ class BarLayer:
         # Clock-text cache (#66): (second, string) -- see _clock_text.
         self._clock_at = -1
         self._clock_cache = ""
+        # The root canvas the bar strips are published to (publish_strips),
+        # and the clock text redraw_clock last painted there.
+        self._strip_cv = None
+        self._clock_drawn = None
 
     def invalidate(self):
         """Repaint the cached running-cart bar on the next frame (a theme/IconSheet
         swap changed its pixels). Called by ws.look.set_icon_sheet."""
         self._bar_cache_gen += 1
+
+    # -- the strips a rotated compositor presents ------------------------------
+
+    def publish_strips(self, cv=None):
+        """Hand the bar strips to a root canvas that presents them as rects of
+        their own (the rotated compositor's `set_strips`; absent elsewhere):
+        the tallest top bar the layout draws. `cv` is the root, kept for the
+        relayouts that publish again; every repaint that changes a strip's
+        pixels on it says so through `_strip_moved`."""
+        if cv is not None:
+            self._strip_cv = cv
+        cv = self._strip_cv
+        ss = getattr(cv, "set_strips", None)
+        if ss is None:
+            return
+        ss([(0, 0, cv.w, max(self.ws.layout.status_h, self._bar_h("desktop")))])
+
+    def _strip_moved(self, cv, x, y, w, h):
+        """New pixels landed in (x, y, w, h) of the bar on `cv`: when that is
+        the published root, the strips there ride its next presented frame."""
+        if cv is self._strip_cv:
+            sm = getattr(cv, "strip_moved", None)
+            if sm is not None:
+                sm(x, y, w, h)
 
     # -- draw ----------------------------------------------------------------
 
@@ -378,7 +406,8 @@ class BarLayer:
         # resize.
         canvas_changed = slot[2] is not cv
         size_changed = strip is None or strip.w != cv.w or strip.h != bar_h
-        if size_changed or canvas_changed or slot[1] != key:
+        fresh = size_changed or canvas_changed or slot[1] != key
+        if fresh:
             # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
             # bar body draws into at the SAME coords (the bar lives at y in [0, bar_h),
             # which maps 1:1 onto the strip's rows), so the cached pixels are byte-identical
@@ -394,6 +423,8 @@ class BarLayer:
             self._render_cart_bar(strip, key)
             slot[1] = key
         cv.blit_strip(strip, 0, 0)
+        if fresh:
+            self._strip_moved(cv, 0, 0, cv.w, bar_h)
 
     def _cart_bar_key(self, where="desktop"):
         """The cache key for the bar: every piece of state that changes ANY `where`
@@ -518,8 +549,11 @@ class BarLayer:
         cv.clip(x, y, w, min(h, max(0, bar_h - 1)))
         _ui.frame_band(cv, th, (0, 0, cv.w, bar_h), self.zone_band_light(where))
         cv.clip()
-        cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
-                 th["chrome_ink_dim"], 1)
+        text = self._clock_text()
+        cv.print(text, lay.clock_x, 3 + lay.bar_text_dy, th["chrome_ink_dim"], 1)
+        if text != self._clock_drawn:
+            self._clock_drawn = text
+            self._strip_moved(cv, x, y, w, h)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss

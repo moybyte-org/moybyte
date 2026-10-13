@@ -100,6 +100,12 @@ class P4SystemCanvas(SystemCanvas):
         nd = getattr(comp, "note_damage", None)
         if nd is not None:
             self.note_damage = nd
+        # ...and the bar strips it presents as rects of their own: set on
+        # relayout, each rotated when the shell says its pixels moved.
+        ss = getattr(comp, "set_strips", None)
+        if ss is not None:
+            self.set_strips = ss
+            self.strip_moved = comp.strip_moved
         # The quiet-frame snapshot (sync_back / _gates_unchanged): the two
         # native gate counters and this surface's clears, as three ints so a
         # play frame builds no tuple. -1 = no frame yet, never "unchanged".

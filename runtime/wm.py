@@ -169,6 +169,21 @@ class FullscreenStackWM:
         frame. True when something was freed."""
         return self.ws.launcher_layer.release_retained()
 
+    def hand_content_damage(self, cv, x, y, w, h):
+        """The fullscreen content layer painted only (x, y, w, h) of the root
+        this frame (the shelf's drag partial): hand it to a root that presents
+        described frames (`note_damage`, the rotated compositor's). Nothing is
+        handed when anything else drew -- an overlay, the splash, the perf HUD,
+        the visible cursor, an owed LOADING pill -- and the whole frame is
+        presented."""
+        nd = getattr(cv, "note_damage", None)
+        if nd is None or self._cache_sig != 0:
+            return
+        ws = self.ws
+        if getattr(ws.pointer, "visible", False) or (ws._deferred and ws._toast_owed()):
+            return
+        nd(x, y, w, h)
+
     def keys_to_cart(self):
         """Console hook (#44 redraw gate): this frame's keys are consumed by a
         healthy RUNNING cart, not by any system surface -- so a key press/hold

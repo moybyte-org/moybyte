@@ -940,6 +940,8 @@ def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
                         _cursor_stamp(ws))
     _t1 = _ticks_ms() if _t0 is not None else None
     ws.bar_layer._draw_status_strip(strip)
+    # The band is the frame's damage; the bar strip carries its own word.
+    ws.wm.hand_content_damage(cv, bx, by, bw, bh)
     if _t0 is not None:
         ws._pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
     return True

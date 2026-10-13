@@ -460,13 +460,21 @@ def test_a_quiet_game_frame_rotates_one_rect(board):
     st = board.state()
     assert st.get("cart"), "the cart never started: %r" % st
     before = board.pyval("comp.rotate_stats()", strict=True)
+    strips0 = board.pyval("comp.strip_stats()", strict=True)
     board.drain(2.0)
     after = board.pyval("comp.rotate_stats()", strict=True)
+    strips1 = board.pyval("comp.strip_stats()", strict=True)
     # rotate_stats: (full frames, full_us, rect frames, rect_us, copies).
     full = after[0] - before[0]
     rect = after[2] - before[2]
     assert rect >= 20, (before, after)
     assert full <= 3, (before, after)
+    # The bar strips are a rect list published at boot; a still bar rides no
+    # play frame (a clock minute may land in the window: one).
+    w, h = board.pyval("comp.size()", strict=True)
+    strips = board.pyval("comp.strips()", strict=True)
+    assert len(strips) == 1 and tuple(strips[0][:3]) == (0, 0, w), strips
+    assert strips1[0] - strips0[0] <= 1, (strips0, strips1)
     board.cmd("py ws.exit()", wait_for="PY")
     board.drain(1.5)
     assert not board.state().get("cart")

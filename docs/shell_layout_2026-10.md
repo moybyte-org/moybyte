@@ -92,14 +92,17 @@ memory and compositors); this doc cites, it does not copy.
   `moybyte.wifi.moy` tool cart the fullscreen bar tap launches
   (`runtime/console.py`). Settings draws the VOLUME and BRIGHTNESS rows.
 - **The Guition P4's compositor** (`native/moy_glass/moy_present_rot.c`)
-  rotates, per quiet play frame, the game rect, the described damage rects
-  and ONE chrome strip `{0, 0, w, strip_h}` whose height
-  `device/desktop_spine.py` sets once at boot; `MOY_ROT_RECTS`
-  (`native/moy_glass/moy_present.h`) is 8 after coalescing. Narrow rotated
-  blocks have wedged the PPA (`firmware/guition_jc8012p4a1c/README.md`). The
-  only damage caller is `WindowedWM._hand_damage`; the fullscreen home hands
-  none, so every moving home frame there is a whole-buffer rotate (#66's
-  shelf-drag rows per board).
+  rotates, per described frame, the game rect, the damage rects and the bar
+  strips that moved: the strips are a rect list (`MOY_ROT_STRIPS`, 4 after
+  coalescing) that `BarLayer.publish_strips` sets at boot and on every
+  relayout, one strip today, the tallest top bar; a bar re-render, a chip
+  change and a clock tick mark theirs moved (`strip_moved`). `MOY_ROT_RECTS`
+  (`native/moy_glass/moy_present.h`) is 8: the game, three coalesced damage
+  rects and four strips. Narrow rotated blocks have wedged the PPA
+  (`firmware/guition_jc8012p4a1c/README.md`). Two callers describe a frame:
+  `WindowedWM._hand_damage` (desktop mode's windows) and the fullscreen
+  home's shelf drag, which hands its band through
+  `FullscreenStackWM.hand_content_damage` (§12).
 - **The surface row** (`native/moy_app/moy_app.h`, `moy_app_surface_t`) holds
   the canvas, `w`, `h`, the origin, `bar_h` and the two scales; the shell
   writes it in `console._surface_write` and per window in
@@ -572,11 +575,12 @@ the drag's glide, run through the same `flinging` path as a touch fling
 the tab row, where left/right switch tabs and down or enter returns; the
 trackball is the same four directions.
 
-**Damage first.** Before the carousel exists, the fullscreen home hands its
-band rect to the compositor's `note_damage`, which today only
-`WindowedWM._hand_damage` calls: on the Guition P4 every moving home frame is
-a whole-buffer rotate for want of that call (#66's shelf-drag rows, that
-board against the Waveshare). It is §13's step 2 and the carousel's floor.
+**Damage first.** The fullscreen home's drag partial hands its band rect to
+the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
+nothing handed while an overlay, the cursor or an owed LOADING pill also
+drew), so a moving home frame on the Guition P4 rotates the band, not the
+whole buffer (§13 step 2; #66's shelf-drag rows). It is the carousel's
+floor: the carousel's focus band hands the same way.
 
 **The carousel, animated** (owner, 2026-10-13: the centre card is larger and
 grows and shrinks as cards pass through the centre, in motion as well as at
@@ -641,7 +645,7 @@ every step; the steps that ADD a config say which.
 | step | lands | gate beyond the common one |
 |---|---|---|
 | 1 — console mode as state | `wm.mode`, `_parked`, `enter_console`/`leave_console`, the route's restore op; every branch of §3 reads the mode; PLAY ends a playtest and parks the rest; the fit-check stamp release; `go_home` split by mode; the HOME key and `show_desk()` (L11) | `tools/mem_census.py p4 offheap` before the commit, to #58; NEW config `p4_1024x600_cs2_fs1_console` (a P4 in console mode, equal to the T-Deck row's layout at the P4's size); `tests/test_wm_windowed.py` covers enter, exit with windows restored unrendered, exit with a released stamp re-rendered once, a parked kind reopened fullscreen and found in place on return, the playtest ended, and each branch of §3 by name; `tests/test_wm_stack_memo.py` holds; `library drag-scroll` re-pinned here (its meaning moves: the home is now above a parked desk) with the before number beside it; PLAY and X single-frame maxima recorded; the P4's on-glass suite drives PLAY and the X; the T-Deck row unchanged |
-| 2 — the Guition P4's strips and the home's damage | the compositor's one boot-time strip becomes a rect LIST in `native/moy_glass` set on relayout, each rotated only when its strip's generation moved; the fullscreen home hands its band to `note_damage` | the Guition P4's on-glass suite; its shelf-drag and play rows re-measured, to #66 and #58 (a cut from today, since an unchanged strip no longer rotates per play frame); `MOY_ROT_RECTS` budgeted: game, damage, up to four bars, coalesced, with a test that five rects never exceed it |
+| 2 — the Guition P4's strips and the home's damage (landed 2026-10-13) | the compositor's one boot-time strip becomes a rect LIST in `native/moy_glass` set on relayout, each rotated only when its strip's generation moved; the fullscreen home hands its band to `note_damage` | the Guition P4's on-glass suite; its shelf-drag and play rows re-measured, to #66 and #58 (a cut from today, since an unchanged strip no longer rotates per play frame); `MOY_ROT_RECTS` budgeted: game, damage, up to four bars, coalesced, with a test that five rects never exceed it |
 | 3 — the content rectangle | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
 | 3b — the fixed geometry | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | the tool/app golden rows re-baselined by name with renders; the rest identical; the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
@@ -664,7 +668,7 @@ both modes in one re-baseline.
 | both WMs and the mode state, the bar layer (a list of bars), the popover layer, the home layer, Settings rows, the resolver, slot packing (arithmetic once per relayout, cached on the layout object) | **Python** | `docs/native_kernel_2026-09.md` §10 question 8: sprint 7 does not run; the WMs are policy, and this doc adds policy, not kernels |
 | the widget painters, the band, the tab row, the chips, the pill, the frames, the calendar grid | **C, existing and extended in place** | `moy_chrome_strip_band`, `chrome_strip_right` and the `ui` kinds are C already; a widget painter is one more op of the toolkit's sink, the calendar a grid of `ui.cell`s |
 | the RGB565 scaled blit | **C, new kernel** in `moy_gfx` | no arbitrary-ratio RGB565 blit exists (§2); benched before the home uses it |
-| the compositor's strip rect list | **C, `native/moy_glass`** | the one strip is set at boot today; a list set on relayout and rotated per generation is the Guition P4's lever (§13 step 2) |
+| the compositor's strip rect list | **C, `native/moy_glass`** | a list set on relayout, each strip rotated only when it moved, is the Guition P4's lever (§13 step 2); step 5 feeds it one strip a bar |
 | the route's restore op | **C, `native/moy_spine`** | the back-stack is the kernel's; parked kinds come back without re-opening |
 | the surface row's content rect, the loader's layout bytes | **C, additive** | the row is `native/moy_app`'s and the package reader is `native/moy_ui`'s; no new module, no new handle kind |
 
