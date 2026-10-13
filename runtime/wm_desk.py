@@ -209,11 +209,12 @@ class _BackdropLayer(Layer):
         # as the columns it takes still fit the canvas, or a long app title
         # marches the last column off the right edge and out of reach. The last
         # column draws no gutter, so its width is not charged against the fit.
-        maxc = max((len(label) for _k, label, _c in catalog), default=0)
+        maxw = max((_ui.text_width(label, fs, "ui") for _k, label, _c in catalog),
+                   default=0)
         rows = max(1, (bottom - y0) // cell_h)
         cols = max(1, (len(catalog) + rows - 1) // rows)
         fit_w = (ws.sys_canvas.w - x0 + gut) // cols
-        cell_w = max(66 * fs, maxc * 8 * fs + gut + 4)
+        cell_w = max(66 * fs, maxw + gut + 4)
         cell_w = max(box + gut, min(cell_w, fit_w))
         x = x0
         y = y0
@@ -255,7 +256,7 @@ class _BackdropLayer(Layer):
     def label_rect(pill, label, fs):
         """The pill a label is drawn in: the label's width, centred in the
         cell's label band `pill` (the hit-test keeps the whole band)."""
-        w = min(pill[2], len(label) * 8 * fs + 6 * fs)
+        w = min(pill[2], _ui.text_width(label, fs, "ui") + 6 * fs)
         return (pill[0] + (pill[2] - w) // 2, pill[1], w, pill[3])
 
     @classmethod

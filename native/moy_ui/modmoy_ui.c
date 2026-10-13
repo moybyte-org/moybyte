@@ -289,6 +289,37 @@ static mp_obj_t ui_font_info(mp_obj_t font) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_info_obj, ui_font_info);
 
+// A font role's index by name (style.json's theme.font_roles); ValueError
+// for another name.
+static int font_role(mp_obj_t name) {
+    const char *r = mp_obj_str_get_str(name);
+    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+        if (strcmp(r, moy_theme_font_roles[i]) == 0) {
+            return i;
+        }
+    }
+    mp_raise_ValueError(MP_ERROR_TEXT("font role"));
+}
+
+// use_font(role, font) -> bool: the toolkit's `role` text draws in `font`
+// (0: petme128); False for a font that is not loaded, which installs nothing.
+static mp_obj_t ui_use_font(mp_obj_t role, mp_obj_t font) {
+    return mp_obj_new_bool(
+        moy_ui_font_use(font_role(role), (uint32_t)mp_obj_get_int_truncated(font)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_use_font_obj, ui_use_font);
+
+// font(role) -> (font, w, line, ascent): the font `role` draws in, its glyph
+// box's width, its line advance and its baseline.
+static mp_obj_t ui_font(mp_obj_t role) {
+    moy_font_info_t f;
+    uint32_t id = moy_ui_font(font_role(role), &f);
+    mp_obj_t t[4] = {mp_obj_new_int_from_uint(id), MP_OBJ_NEW_SMALL_INT(f.w),
+                     MP_OBJ_NEW_SMALL_INT(f.line), MP_OBJ_NEW_SMALL_INT(f.ascent)};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_obj, ui_font);
+
 static void check(int rc) {
     if (rc == MOY_UI_NOMEM) {
         mp_raise_type(&mp_type_MemoryError);
@@ -1181,6 +1212,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_free), MP_ROM_PTR(&ui_font_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_info), MP_ROM_PTR(&ui_font_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_use_font), MP_ROM_PTR(&ui_use_font_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font), MP_ROM_PTR(&ui_font_obj) },
     { MP_ROM_QSTR(MP_QSTR_look), MP_ROM_PTR(&ui_look_obj) },
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&ui_colors_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },

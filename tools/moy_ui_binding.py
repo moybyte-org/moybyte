@@ -46,6 +46,8 @@ _SIGS = (
     ("moy_font_load", [_P, _Z, c.POINTER(c.c_uint32)], _I),
     ("moy_font_free", [c.c_uint32], _I),
     ("moy_font_info", [c.c_uint32, c.c_void_p], _I),
+    ("moy_ui_font_use", [_I, c.c_uint32], _I),
+    ("moy_ui_font", [_I, c.c_void_p], c.c_uint32),
     ("moy_theme_fonts", [_P, _Z, c.c_void_p], _I),
     ("moy_ui_glyph_id", [_P, _Z], _I),
     ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
@@ -727,6 +729,19 @@ def binding():
             return None
         return tuple(out)
 
+    def font_role(role):
+        if role not in font_roles:
+            raise ValueError("font role")
+        return font_roles.index(role)
+
+    def use_font(role, font):
+        return bool(lib.moy_ui_font_use(font_role(role), int(font) & 0xFFFFFFFF))
+
+    def font(role):
+        out = (c.c_int * 6)()
+        fid = lib.moy_ui_font(font_role(role), out)
+        return (fid, out[0], out[2], out[3])
+
     m.theme = theme
     m.theme_install = theme_install
     m.theme_installed = theme_installed
@@ -734,6 +749,8 @@ def binding():
     m.font_load = font_load
     m.font_free = font_free
     m.font_info = font_info
+    m.use_font = use_font
+    m.font = font
     m.look = look
     m.colors = colors
     m.metrics = metrics

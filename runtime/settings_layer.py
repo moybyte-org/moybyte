@@ -762,7 +762,7 @@ class SettingsLayer:
                        (("ON" if enabled else "OFF"), state.upper(), name or "NO DEVICE"))
         _ui.row(cv, th, msg_r, self.bt_msg[:max(1, msg_r[2] // fw - 1)],
                 kind="row_list", edge=False,
-                pad=3 * fs, text_dy=(msg_r[3] - 8 * fs) // 2, fs=fs)
+                pad=3 * fs, text_dy=(msg_r[3] - lay.line_h) // 2, fs=fs)
 
         self._bt_hits.clear()
         row_h = 24 * fs
@@ -900,7 +900,7 @@ class SettingsLayer:
         lines = _ui.wrap_words(text, max(1, tw // fw))
         for n in range(len(lines)):
             y = ty + n * lh
-            if y + 8 * fs > ty + th_h:
+            if y + lay.line_h > ty + th_h:
                 break
             cv.print(lines[n], tx, y, th["ink"], 1)
         self._confirm_hits.clear()
@@ -954,7 +954,7 @@ class SettingsLayer:
         y = ty
         for line in crash_lines(last_crash()):
             for part in _ui.wrap_words(line, max(1, tw // fw)):
-                if y + 8 * fs > ty + th_h:
+                if y + lay.line_h > ty + th_h:
                     break
                 cv.print(part, tx, y, th["ink"], 1)
                 y += lh

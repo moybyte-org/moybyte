@@ -214,6 +214,27 @@ int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale) {
     return w * scale;
 }
 
+size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale) {
+    const mg_font_t *f = font_row(font);
+    if (f == NULL || maxw < 0) {
+        return 0;
+    }
+    if (scale < 1) {
+        scale = 1;
+    }
+    if (f->adv == NULL) {
+        return moy_text_fit(s, n, (size_t)(maxw / (f->w * scale)));
+    }
+    size_t k = 0;
+    for (int at = 0; k < n; k++) {
+        at += advance(f, s[k]) * scale;
+        if (at > maxw) {
+            break;
+        }
+    }
+    return moy_text_fit(s, n, k);
+}
+
 void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col) {
     int stride = t->dw;
     if (stride <= 0 || t->px == NULL) {
@@ -256,26 +277,10 @@ int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
     if (scale < 1) {
         scale = 1;
     }
-    int w;
-    if (f->adv == NULL) {
-        int adv = f->w * scale;
-        if (maxw >= 0) {
-            n = moy_text_fit(s, n, (size_t)(maxw / adv));
-        }
-        w = (int)n * adv;
-    } else {
-        if (maxw >= 0) {
-            size_t k = 0;
-            for (int at = 0; k < n; k++) {
-                at += advance(f, s[k]) * scale;
-                if (at > maxw) {
-                    break;
-                }
-            }
-            n = moy_text_fit(s, n, k);
-        }
-        w = moy_text_width(font, s, n, scale);
+    if (maxw >= 0) {
+        n = moy_text_fit_px(font, s, n, maxw, scale);
     }
+    int w = f->adv == NULL ? (int)n * f->w * scale : moy_text_width(font, s, n, scale);
     if (maxw >= 0) {
         if (align == MOY_TEXT_CENTER) {
             int d = maxw - w;

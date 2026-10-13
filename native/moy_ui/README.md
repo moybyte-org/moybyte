@@ -16,7 +16,7 @@ calls here.
 | `moy_ui_paint.c` | the surface painter: a compiled surface into a box, under the corner mask of the theme's radius |
 | `moy_ui_sink.c` | the ROW sink: a glass canvas row by its CANVAS handle |
 | `moy_ui_wasm.h`, `moy_ui_wasm.c` | the RUN sink and the `ui` rows a compiled app imports (roles.json's `ui` role) |
-| `modmoy_ui.c` | the module `moy_ui` the boards and the browser import (its `themes`, `theme_roles`, `theme`, `theme_shape`, `surface`, `parts`, `theme_states`, `theme_install`, `theme_installed` and `theme_fonts` face the loader, `font_load`, `font_free` and `font_info` the font rows behind `moy_text` (`native/moy_gfx/moy_text.h`), `use_shape` installs a theme's shape, `paint` is the painter's sink op and `frame`, `frame_buttons` and `frame_band` draw and lay out a window frame); its `s`, `str_set` and `str_reset` read and write the spine's string table |
+| `modmoy_ui.c` | the module `moy_ui` the boards and the browser import (its `themes`, `theme_roles`, `theme`, `theme_shape`, `surface`, `parts`, `theme_states`, `theme_install`, `theme_installed` and `theme_fonts` face the loader, `font_load`, `font_free` and `font_info` the font rows behind `moy_text` (`native/moy_gfx/moy_text.h`), `use_font` and `font` the font each role's text draws in (`docs/theming_2026-09.md` §4.7), `use_shape` installs a theme's shape, `paint` is the painter's sink op and `frame`, `frame_buttons` and `frame_band` draw and lay out a window frame); its `s`, `str_set` and `str_reset` read and write the spine's string table |
 
 The strings C draws are the spine's (`native/moy_spine/moy_str.h`), not this
 module's: the kernel's floor draws them on an image with no toolkit.

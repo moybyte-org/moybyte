@@ -110,6 +110,11 @@ int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);
 // codepoint boundary.
 size_t moy_text_fit(const uint8_t *s, size_t n, size_t cells);
 
+// The longest prefix of `s` that draws in at most `maxw` pixels at `scale`
+// in `font` and ends on a codepoint boundary; 0 for an unknown font or a
+// negative width.
+size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale);
+
 // Word wrap into lines of at most `cols` bytes, for any known font.
 //
 // MOY_WRAP_WORDS (the toolkit's): words split on whitespace; a line is its

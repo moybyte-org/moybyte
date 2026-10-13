@@ -679,7 +679,7 @@ class Launcher:
         if len(name) > maxc:
             name = name[:maxc]
         cv.print(name, x + (w - len(name) * fw) // 2,
-                 y + cover_h + (band_h - 8 * fs) // 2, NAMES["white"], 1)
+                 y + cover_h + (band_h - lay.line_h) // 2, NAMES["white"], 1)
         # PLAY / CHANGE (mockup: green PLAY, warm-light CHANGE, both dark-edged).
         if ar is not None:
             bx, by, bw, bh = ar["play"]
@@ -688,12 +688,12 @@ class Launcher:
             tw = 4 * fw + 14 * fs                    # run glyph + "PLAY"
             if tw > bw - 2 * fs:                     # narrow card -> text only
                 cv.print("PLAY", bx + max(fs, (bw - 4 * fw) // 2),
-                         by + (bh - 8 * fs) // 2, NAMES["white"], 1)
+                         by + (bh - lay.line_h) // 2, NAMES["white"], 1)
             else:
                 tx = bx + (bw - tw) // 2
                 self._blit_glyph(cv, "run", (tx, by, 12 * fs, bh),
                                  NAMES["white"], fs)
-                cv.print("PLAY", tx + 14 * fs, by + (bh - 8 * fs) // 2,
+                cv.print("PLAY", tx + 14 * fs, by + (bh - lay.line_h) // 2,
                          NAMES["white"], 1)
             bx, by, bw, bh = ar["change"]
             cv.rect(bx, by, bw, bh, NAMES["white"])
@@ -703,7 +703,7 @@ class Launcher:
             if len(label) > maxc:
                 label = label[:maxc]
             cv.print(label, bx + max(fs, (bw - len(label) * fw) // 2),
-                     by + (bh - 8 * fs) // 2, NAMES["black"], 1)
+                     by + (bh - lay.line_h) // 2, NAMES["black"], 1)
         # Favorite star (#105): a corner badge on the SELECTED card only, mirroring
         # the pseudo card's corner-pushpin idiom rather than inventing new chrome
         # (LauncherHomeLayer.handle_pointer hit-tests the identical geometry via
@@ -763,7 +763,7 @@ class Launcher:
                 ty += 10 * fs
             else:
                 _print_scaled(cv, line, x + (w - tw) // 2, ty, NAMES["black"], mult)
-                ty += 8 * fs * mult + 2 * fs
+                ty += lay.line_h * mult + 2 * fs
         ty += 2 * fs
         maxc = max(6, (w - 4 * fs) // lay.font_w)
         for line in _ui.wrap_words(caption, maxc):
@@ -1208,7 +1208,7 @@ class LauncherHomeLayer:
         mult = getattr(lay, "lib_mult", 2)
         hx = x + max(10 * fs, 20)
         moy = getattr(ws, "_icon_image_keyed", lambda kind: None)("moy")
-        isc = max(1, (8 * fs * mult) // 16)          # mascot ~= the type height
+        isc = max(1, (lay.line_h * mult) // 16)          # mascot ~= the type height
         if moy is not None:
             cv.spr(moy, hx, y + (lay.lib_header_h - 16 * isc) // 2, isc)
         else:
@@ -1226,10 +1226,10 @@ class LauncherHomeLayer:
             maxc = max(6, (x + w - tx0) // lay.font_w)
             if len(label) > maxc:
                 label = label[:maxc]
-            cv.print(label, tx0, y + (lay.lib_header_h - 8 * fs) // 2, th["ink"], 1)
+            cv.print(label, tx0, y + (lay.lib_header_h - lay.line_h) // 2, th["ink"], 1)
         else:
             _print_scaled(cv, "LIBRARY", hx + 16 * isc + 6 * fs,
-                          y + (lay.lib_header_h - 8 * fs * mult) // 2, th["ink"], mult)
+                          y + (lay.lib_header_h - lay.line_h * mult) // 2, th["ink"], mult)
         # Footer: "N CARTRIDGES" centered between thin rules.
         n = 0
         for it in ws.launcher.items:
@@ -1238,7 +1238,7 @@ class LauncherHomeLayer:
         label = str(n) + (" CARTRIDGE" if n == 1 else " CARTRIDGES")
         fw = lay.font_w
         tw = len(label) * fw
-        ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - 8 * fs) // 2
+        ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - lay.line_h) // 2
         tx = x + (w - tw) // 2
         cv.print(label, tx, ty, th["ink_dim"], 1)
         ly = ty + 4 * fs
@@ -1423,7 +1423,7 @@ class LauncherHomeLayer:
             cs = lay.cs
             ws._icon("moy", rect[0] + 2, rect[1], cv, cs)
             cv.print("moybyte", rect[0] + 2 + 20 * cs,
-                     rect[1] + (rect[3] - 8 * fs) // 2, ink, 1)
+                     rect[1] + (rect[3] - lay.line_h) // 2, ink, 1)
             return
         sel = ws.launcher.selected()
         if sel is None:

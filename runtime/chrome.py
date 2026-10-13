@@ -63,10 +63,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import _SET_ROW_H
 
 try:
-    from code_layer import (_CODE_LH, _CODE_X0, _CODE_Y0,
+    from code_layer import (_CODE_LEAD, _CODE_X0, _CODE_Y0,
                             _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LH, _CODE_X0, _CODE_Y0,
+    from runtime.code_layer import (_CODE_LEAD, _CODE_X0, _CODE_Y0,
                                     _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 
 try:
@@ -159,7 +159,6 @@ _CURSOR_ACCEL = 2
 
 # (_BASE_W/_BASE_H -- the T-Deck's canvas, every layout's default size -- come
 # from the layout_base leaf above; console.py still imports them back from here.)
-_FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 # (The letterbox/bezel fill _VIEWPORT_BEZEL (#39) moved to wm.py with the viewport
 # composite it belongs to -- FullscreenStackWM.composite_game is its only user.)
 
@@ -221,8 +220,9 @@ class Layout(LayoutBase):
 
     The T-Deck's 320x240 is laid out by the same formulas as every canvas. The editors' geometry is their own `*Layout`'s.
 
-    `font_w` is the on-screen char-cell width (8 * fs) so callers center/space text
-    that the SystemCanvas renders at `fs`.
+    `font_w` and `line_h` are the `ui` font's glyph-box width and line advance
+    at `fs` (docs/theming_2026-09.md §4.7: 8 and 8 for petme128), so callers
+    center and space text that the SystemCanvas renders at `fs`.
 
     TWO scales, since #203: `fs` sizes TEXT and `cs` (>= fs, equal by default)
     sizes what a finger lands on -- the bar and its buttons, the Settings rows,
@@ -235,7 +235,9 @@ class Layout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        self.font_w = _FONT_W * fs
+        _fid, fw, line, _asc = _ui.font("ui")
+        self.font_w = fw * fs
+        self.line_h = line * fs
 
         # -- status strip (height/position scales with the CHROME scale) --------
         self.status_h = _STATUS_H * cs
@@ -468,7 +470,8 @@ class CodeLayout(LayoutBase):
 
     The T-Deck's 320x240 is laid out by the same formulas as every canvas: the text grid, the status band and the symbol palette.
 
-    `cell` is the on-screen char-cell width (8 * fs); `lh` the line height. `cols` /
+    `cell` is the `mono` font's glyph-box width at fs; `lh` its line advance and
+    `_CODE_LEAD` rows (10 at fs 1 with petme128). `cols` /
     `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
     the right span."""
 
@@ -476,8 +479,9 @@ class CodeLayout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        self.cell = _FONT_W * fs                  # char-cell width (8*fs)
-        self.lh = _CODE_LH * fs                   # line height
+        _fid, fw, line, _asc = _ui.font("mono")
+        self.cell = fw * fs
+        self.lh = (line + _CODE_LEAD) * fs
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
         # A key is TAPPED (on a board with no keyboard this strip IS the keyboard),
         # so it takes the chrome scale and the symbol re-centers inside it. WIDTH is

@@ -188,7 +188,7 @@ class WindowChrome:
         for k in self._order:
             label = self._win_title(self._wins[k])[:8]
             labels.append(label)
-            widths.append(len(label) * lay.font_w + 8 * fs)
+            widths.append(_ui.text_width(label, fs, "ui") + 2 * 4 * fs)
         total = sum(widths) + (len(widths) - 1) * 2 * fs
         left_edge = self._root_canvas.w // 4          # clear of the selected name
         x = max(left_edge, (self._root_canvas.w - total) // 2)
@@ -218,6 +218,7 @@ class WindowChrome:
         elif self._chip_streak >= self._retained_n():
             return
         self._chip_streak += 1
+        line_h = self._root_ctx.layout.line_h
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
             focused = (key == self._focus and not win.minimized)
@@ -230,7 +231,7 @@ class WindowChrome:
             if not _ui.paint(sc, th, (x, y, w, h), "bar.item", state):
                 sc.rect(x, y, w, h, bg)
                 sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
-            sc.print(label, x + 4 * fs, y + (h - 8 * fs) // 2, fg, 1)
+            sc.print(label, x + 4 * fs, y + (h - line_h) // 2, fg, 1)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a

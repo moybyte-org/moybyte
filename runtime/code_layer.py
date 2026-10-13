@@ -100,7 +100,8 @@ def _chip_rect(r):
 # button rects + symbol palette are the fixed 320x240 baseline CodeLayout starts from.
 _CODE_X0 = 4
 _CODE_Y0 = 18
-_CODE_LH = 10
+_CODE_LEAD = 2          # rows between two code lines, under the font's line
+_CODE_LH = 8 + _CODE_LEAD   # petme128's line and the lead: the baseline grid
 _CODE_AREA = (_CODE_X0, _CODE_Y0, CodeEditor.COLS * 8, CodeEditor.ROWS * _CODE_LH)
 # The T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%` keys, so the code editor shows a
 # tappable palette of them along the bottom. A lua cart (#67 Phase 5) swaps in the

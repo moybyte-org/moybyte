@@ -1,6 +1,7 @@
 # Map (grep -n a name to jump there):
 #   is_light                          the theme's tool-surface presentation class
 #   wrap_words                        the text path's wrap (C); text_width beside it
+#   font                              the font each role's text draws in (C); use_font beside it
 #   -- rect algebra                   inset, cut_top, cut_bottom, cut_left, split
 #   -- interaction state              widget_state
 #   -- the style                      metrics, state_colors (C)
@@ -122,11 +123,30 @@ def wrap_words(text, maxc):
     return _C.wrap(text, maxc)
 
 
-def text_width(s, scale=1):
-    """The pixels `s` draws at `scale`: UTF-8 bytes, a cell each."""
+def text_width(s, scale=1, role=None):
+    """The pixels `s` draws at `scale`, the sum of its UTF-8 bytes' advances:
+    in `role`'s font (`font`), or petme128's 8px cell with no role."""
     if type(s) is not str:
         s = str(s)
-    return _C.text_width(s, scale)
+    if role is None:
+        return _C.text_width(s, scale)
+    return _C.text_width(s, scale, _C.font(role)[0])
+
+
+def font(role="ui"):
+    """(font, w, line, ascent): the font the toolkit's `role` text draws in
+    (docs/theming_2026-09.md §4.7; roles `ui`, `title`, `mono`), its glyph
+    box's width, its line advance and its baseline, unscaled. Petme128's,
+    (0, 8, 8, 7), until a font is installed for the role."""
+    return _C.font(role)
+
+
+def use_font(role, fid):
+    """Draw the toolkit's `role` text in font `fid` (a `font_load` id, 0 for
+    petme128). False, installing nothing, for a font that is not loaded. A
+    layout reads the metrics when it is built, so one built before keeps
+    the old font's."""
+    return _C.use_font(role, fid)
 
 
 # --- rect algebra (pure tuple math; every rect is (x, y, w, h)) --------------

@@ -329,8 +329,13 @@ close, the panel list, a splitter, a drop zone, the completion popup:
 
 **The quirks stay code** (ruled 2026-10-11, phase 1; style.json's `quirks`):
 `game_btn` and `text_field` draw on the game canvas, which a theme does not
-reach (§6), and `mini_btn`'s and `chip`'s unscaled label pads are revisited
-by phase 4, when layout reads line metrics instead of the 8px cell.
+reach (§6). `mini_btn`'s and `chip`'s unscaled label pads were re-ruled
+2026-10-13 by phase 4 step 2, when layout came to read line metrics (§4.7),
+and stay unscaled pixels: a chip's clip and minimum pads inset a label box
+that is now the `ui` font's (its drawn width, its line advance at the
+scale), and a mini button's label is placed from its rect's corner, not
+centred, so no metric enters it. A pad is a pixel inset, as `radius` is
+(§4.2); scaling either would move pixels at font scale 2 and up.
 
 States are the ladder native/moy_ui resolves (`rest`, `hover`, `on`, `hot`,
 `pressed`, `disabled`), plus `active`/`inactive` for windows (style.json's
@@ -525,7 +530,8 @@ The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
   libmoy's `moy_print`.
 - **Measuring is C.** `moy_text` takes `align` and `maxw` and returns the drawn
   width, and `moy_text_width` and `moy_text_wrap` measure in the same raster.
-  What phase 4 adds is line metrics a layout reads in place of the 8px cell.
+  A layout reads the line metrics of the font its text draws in, never an
+  8px cell (phase 4 step 2, below).
   Scaled text emits per-row runs through the span fill, not per-pixel stores.
 - **The format is aligned.** Its header and tables are naturally aligned, and
   the parser assembles multi-byte fields from bytes or requires a `moybuf`
@@ -577,8 +583,36 @@ Ruled 2026-10-13, each the pick that builds least:
     makes a proportional font (Tiny5, step 3) one format with petme128; a
     glyph keeps the box's width, so no per-glyph offsets.
   - **A wrap still counts bytes.** `moy_text_wrap` takes any loaded font
-    and wraps in `cols`; a wrap in pixels arrives with the line metrics
-    layout reads (step 2).
+    and wraps in `cols`. Every wrapped text prints in petme128, whose bytes
+    are its cells, so a wrap in pixels arrives with the first wrapped text
+    that draws in a theme font (re-ruled by step 2).
+
+Ruled 2026-10-13 by step 2 (layout reads line metrics), each the pick that
+builds least:
+  - **A font per role, read where its text draws.** `moy_ui` holds the font
+    each role draws in (`moy_ui_font_use`; `ui.use_font` and `ui.font`, which
+    answers the id, the glyph box's width, the line advance and the
+    baseline), petme128's until one is installed and again once it is
+    freed. The toolkit's primitives draw and measure their labels in it: the
+    `ui` role for every kind, `title` for `panel_title` and `window.title`.
+    A compiled run's canvas and the game canvas (`game_btn`,
+    `game_icon_btn`, `text_field`) stay petme128. A width is
+    `moy_text_width`'s, a fit `moy_text_fit_px`'s, a line box the line
+    advance at the scale, and a gap counted in cells the glyph box's width.
+  - **The shell's layouts read the same numbers when they are built.**
+    `Layout.font_w` and `line_h` are the `ui` role's, `CodeLayout.cell` and
+    `lh` the `mono` role's (`lh` with `_CODE_LEAD` rows); the bar's window
+    chips and the desk's label pills measure with `ui.text_width`'s role.
+    The shell's own `print`s still draw petme128, so a font installed now
+    moves their boxes and not their glyphs. Nothing installs one: loading a
+    theme's `fonts` files, routing those prints through the role's row and
+    the app-cart boundary below arrive with the first font a seed names
+    (step 3). The app bodies that lay their own text out in 8px cells (the
+    editors' content, Files, Get Carts, the Storybook) keep them.
+  - **The measure is the draw.** `tests/test_line_metrics.py` installs the
+    step-1 sample font for every role and holds each primitive's label
+    inside its box, centred by the font's own width and line, the frame's
+    title clear of its buttons and the game canvas unchanged.
 - **App carts.** `ui` is the real toolkit, handed to every `type: "app"` cart,
   and those carts lay out in 8px cells and `print` in petme128. A theme font
   therefore reaches app carts **only together with** a published `text_w()` and
@@ -950,7 +984,7 @@ count falls.
      argument; the `fonts` key defined. Gate: goldens byte-identical (no seed
      names a font); the cart `print` path and the Lua C API byte-identical; an
      S3 A/B of the lane on the T-Deck; a fuzzed-font load on T-Deck glass.
-  2. **Layout reads line metrics.** The `8 * fs` arithmetic reads the font's
+  2. **Layout reads line metrics** (landed 2026-10-13). The `8 * fs` arithmetic reads the font's
      line metrics, and `mini_btn`'s and `chip`'s quirks are re-ruled (§4.3).
      Gate: goldens byte-identical (petme128's metrics are the 8px cell).
   3. **Tiny5 lands** as the UI font, with #135's glyph coverage and the OFL

@@ -241,6 +241,28 @@ const moy_ui_shape_t *moy_ui_shape(void) {
     return u != NULL ? &u->shape : NULL;
 }
 
+// -- the fonts the roles draw in --------------------------------------------------
+
+static uint32_t s_font[MOY_THEME_FONT_ROLES];   // 0, petme128, where none is installed
+
+int moy_ui_font_use(int role, uint32_t font) {
+    moy_font_info_t fi;
+    if (role < 0 || role >= MOY_THEME_FONT_ROLES || !moy_font_info(font, &fi)) {
+        return 0;
+    }
+    s_font[role] = font;
+    return 1;
+}
+
+uint32_t moy_ui_font(int role, moy_font_info_t *out) {
+    uint32_t id = role >= 0 && role < MOY_THEME_FONT_ROLES ? s_font[role] : MOY_FONT_PETME128;
+    if (!moy_font_info(id, out)) {
+        id = MOY_FONT_PETME128;
+        moy_font_info(id, out);
+    }
+    return id;
+}
+
 const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state) {
     if (sh == NULL || sh->n_surf == 0 || part < 0 || part >= MOY_THEME_PARTS || state < 0
         || state >= MOY_THEME_STATES) {

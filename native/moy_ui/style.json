@@ -163,8 +163,8 @@
   "quirks": {
     "game_btn": "at font scale 1 the label prints with the legacy scale-2 argument but centres with height 8 -- an off-by-one-scale mismatch the shipped pixels bake in. It is a BRANCH on fs, not a number.",
     "text_field": "fixed 1x metrics: both block prompts draw on the game canvas, so the pads, the caret box and the 8px caret advance never scale. The numbers are data (TF_*), the absence of `* fs` is the quirk.",
-    "mini_btn": "unscaled label pads (2, 2): the Settings steppers' vocabulary predates font scaling and its pads never grew. Data (MB_*), unscaled by branch.",
-    "chip": "unscaled label clip/min pads (4, 2, 1): a chip's label geometry is in raw pixels while its glyph box is not. Data (CHIP_*), unscaled."
+    "mini_btn": "unscaled label pads (2, 2), re-ruled 2026-10-13 (theming phase 4, step 2) to stay: the label is placed from its rect's corner, not centred, so no line metric enters it, and a pad is a pixel inset as the chip's are. Data (MB_*), unscaled by branch.",
+    "chip": "unscaled label clip/min pads (4, 2, 1), re-ruled 2026-10-13 (theming phase 4, step 2) to stay: they inset the label's box, which is the ui font's (its drawn width, its line advance at the scale), in pixels, as a theme's radius is. Data (CHIP_*), unscaled."
   },
   "glyph_size": 12,
   "glyphs": {
