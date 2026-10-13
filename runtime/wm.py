@@ -36,9 +36,11 @@ into console (no circular import).
 try:
     from widgets import _Blit, _ticks_ms, _ticks_diff
     from moy_spine import BackStack, STAYED
+    from shell_layout import WIDGETS as _LAYOUT_WIDGETS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
     from runtime.moy_spine import BackStack, STAYED
+    from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
@@ -136,6 +138,16 @@ class FullscreenStackWM:
 
     has_desk = False                   # capability probe: only WindowedWM has a desk
     mode = "console"                   # this WM has console mode alone
+
+    # What a theme's bars may place here (docs/shell_layout_2026-10.md §10):
+    # per mode, the widgets this WM has a value for, and the edges a bar may
+    # take. The composer (shell_layout.resolve) drops the rest.
+    LAYOUT_CATALOGUE = {"console": tuple(w for w in _LAYOUT_WIDGETS if w != "chips")}
+    LAYOUT_EDGES = ("top", "bottom")
+
+    def layout_catalogue(self):
+        """The widgets a bar places in the current mode."""
+        return self.LAYOUT_CATALOGUE[self.mode]
 
     def desk_open(self):
         """True in DESKTOP mode -- `ws.windowed_chrome` projects this. Always

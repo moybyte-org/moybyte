@@ -257,6 +257,42 @@ static mp_obj_t ui_theme_fonts(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_fonts_obj, ui_theme_fonts);
 
+// theme_layout(name) -> (refused, bars): theme `name`'s layout, whole, from
+// the nearest package that sets one (moy_theme_layout); refused is True when
+// the default's stands in. A bar is (edge, size, left, center, right,
+// texts): each slot a tuple of widget names, texts its `text` widgets'
+// strings in slot order.
+static mp_obj_t ui_theme_layout(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    moy_theme_layout_t lay;
+    moy_theme_layout(s, n, &lay);
+    mp_obj_t bars[MOY_THEME_BARS];
+    for (int i = 0; i < lay.n_bars; i++) {
+        const moy_theme_bar_t *b = &lay.bar[i];
+        mp_obj_t t[3 + MOY_THEME_SLOTS];
+        t[0] = name_obj(moy_theme_bar_edges[b->edge]);
+        t[1] = MP_OBJ_NEW_SMALL_INT(b->size);
+        for (int sl = 0; sl < MOY_THEME_SLOTS; sl++) {
+            mp_obj_t w[MOY_THEME_SLOT_CAP];
+            for (int k = 0; k < b->n[sl]; k++) {
+                w[k] = name_obj(moy_theme_widget_names[b->w[sl][k]]);
+            }
+            t[2 + sl] = mp_obj_new_tuple(b->n[sl], w);
+        }
+        mp_obj_t tx[MOY_THEME_WIDGET_CAP];
+        for (int k = 0; k < b->n_text; k++) {
+            tx[k] = name_obj(lay.text[b->text0 + k]);
+        }
+        t[2 + MOY_THEME_SLOTS] = mp_obj_new_tuple(b->n_text, tx);
+        bars[i] = mp_obj_new_tuple(3 + MOY_THEME_SLOTS, t);
+    }
+    mp_obj_t out[2] = {mp_obj_new_bool(lay.set == MOY_THEME_LAYOUT_REFUSED),
+                       mp_obj_new_tuple(lay.n_bars, bars)};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_layout_obj, ui_theme_layout);
+
 // font_load(src) -> (rc, font): src a font file's bytes (moy_text.h); font
 // the loaded row's id, or None when refused.
 static mp_obj_t ui_font_load(mp_obj_t src) {
@@ -1245,6 +1281,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_install), MP_ROM_PTR(&ui_theme_install_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },

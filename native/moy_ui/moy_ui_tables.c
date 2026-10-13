@@ -620,6 +620,34 @@ const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES] = {
     "mono",
 };
 
+const char *const moy_theme_bar_edges[MOY_THEME_BARS] = {
+    "top",
+    "bottom",
+    "left",
+    "right",
+};
+
+const char *const moy_theme_slot_names[MOY_THEME_SLOTS] = {
+    "left",
+    "center",
+    "right",
+};
+
+const char *const moy_theme_widget_names[MOY_THEME_WIDGETS] = {
+    "menu",
+    "close",
+    "zone",
+    "title",
+    "clock",
+    "calendar",
+    "wifi",
+    "battery",
+    "chips",
+    "text",
+    "spacer",
+    "separator",
+};
+
 const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {5, 2, 5, 5, 5, 255, 5, 6};
 
 const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
@@ -648,7 +676,6 @@ const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
     "icons",
     "images",
     "wallpapers",
-    "layout",
     "sounds",
     "editor",
 };
@@ -673,6 +700,12 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  \"frame\": { \"style\": \"classic\" },\012"
     "  \"fonts\": { \"ui\": \"tiny5.fnt\", \"title\": \"tiny5.fnt\" },\012"
     "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
+    "  \"layout\": {\012"
+    "    \"bars\": [\012"
+    "      { \"edge\": \"top\", \"size\": 18, \"left\": [\"zone\"], \"center\": [],\012"
+    "        \"right\": [\"clock\", \"close\", \"menu\", \"wifi\", \"battery\"] }\012"
+    "    ]\012"
+    "  },\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
     "      \"panel\": 60, \"edge\": 13, \"title\": 13, \"title_ink\": 0, \"accent\": 10,\012"
@@ -881,7 +914,7 @@ const int moy_theme_n_effects = MOY_THEME_EFFECTS;
 const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1327, 364, 360, 397, 390, 779, 1388, 1296, 860};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1498, 364, 360, 397, 390, 779, 1388, 1296, 860};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

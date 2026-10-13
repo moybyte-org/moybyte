@@ -208,6 +208,18 @@ def theme_fonts(name):
     return _C.theme_fonts(name)
 
 
+def theme_layout(name):
+    """(refused, bars): theme `name`'s layout along its `inherits`, as the
+    loader checked it (docs/shell_layout_2026-10.md §5); refused when the
+    default's stands in. A bar is (edge, size, left, center, right, texts)."""
+    return _C.theme_layout(name)
+
+
+def theme_installed():
+    """The installed theme package's name (the one beside the seeds), or None."""
+    return _C.theme_installed()
+
+
 def font_load(src):
     """(rc, font): load a font file's bytes into a row of its own
     (native/moy_gfx/moy_text.h); font is None when refused."""

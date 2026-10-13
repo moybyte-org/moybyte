@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   Appearance                       `ws.look`: theme, variant, font scale, wallpaper, icons, layout
+#   -- the wallpaper CHOICE          select_wallpaper, the coordinator
+#   -- the top-bar icon sheet        the bar's IconSheet
+#   Appearance.set_font_scale        the system font scale, relayout
+#   Appearance.set_theme             the panel theme: tokens, shape, fonts, layout
+#   -- the shell layout              the bars in force: the pick, resolve, place
+#   Appearance.apply_layout          resolve and move the host's bar
+#   -- the per-draw gate             what a draw reads
 """The LOOK (#209 landing D) -- `Workstation.look`.
 
 Every verb that changes how the desktop looks: the panel theme and its
@@ -85,7 +94,17 @@ try:
     import ui as _uimod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _uimod
+try:
+    import shell_layout as _shell_layout
+    import layout_base as _layout_base
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import shell_layout as _shell_layout
+    from runtime import layout_base as _layout_base
 _ui_is_light = _uimod.is_light
+
+def _ui_text_w(t):
+    return _uimod.text_width(t, 1, "ui")
+
 
 _FONT_ROLES = ("ui", "title", "mono")
 _FONT_FULL = 6          # moy_font_load's MOY_FONT_FULL: every slot holds a font
@@ -150,6 +169,14 @@ class Appearance:
         # (from system_icons.moygfx, else the baked default theme); None falls back to
         # the kernel's _glyph.
         self.icon_sheet = None
+        # The shell layout (docs/shell_layout_2026-10.md §9-§11): the bars as
+        # this tier, glass and mode resolved them, what the composer noted,
+        # and the loader's answers per package (cleared by a theme switch).
+        self.bars = _shell_layout.FALLBACK
+        self.layout_notes = ()
+        self._layouts = {}
+        self._choices = None
+        self.layout_gen = 0             # moves with every resolve: the Settings row's memo
 
     # -- wallpaper discovery -------------------------------------------------
 
@@ -447,6 +474,85 @@ class Appearance:
         if persist:
             ws.system.set("theme", self.theme_name, persist=False)
             ws.system.set("theme_variant", self.theme_variant)
+        self._layouts = {}
+        self._choices = None
+        self.apply_layout()
+
+    # -- the shell layout (docs/shell_layout_2026-10.md §9-§11) ---------------
+
+    def layout_theme(self):
+        """The `layout_theme` row, read strictly: the name of an installed
+        package (a seed, or the one installed beside them), else None -- the
+        active theme's layout. A value of any other shape reads as absent."""
+        v = self.ws.system.get("layout_theme")
+        if type(v) is str and (v in THEME_NAMES or v == _uimod.theme_installed()):
+            return v
+        return None
+
+    def _theme_layout(self, name):
+        got = self._layouts.get(name)
+        if got is None:
+            got = self._layouts[name] = _uimod.theme_layout(name)
+        return got
+
+    def layout(self):
+        """(bars, notes): the bars in force -- the `layout_theme` package's
+        if the row names one, else the active theme's, else the default's
+        (the loader's precedence along `inherits`) -- resolved for this
+        tier's WM in its current mode, on its glass at the chrome scale
+        (shell_layout.resolve). Never read per frame."""
+        ws = self.ws
+        wm = ws.wm
+        refused, bars = self._theme_layout(self.layout_theme() or self.theme_name)
+        notes = ("the theme's layout was refused",) if refused else ()
+        root = getattr(wm, "_root_canvas", None) or ws.sys_canvas
+        return _shell_layout.resolve(
+            bars, self._theme_layout(DEFAULT_THEME)[1], root.w, root.h,
+            self.effective_chrome_scale(), wm.layout_catalogue(), wm.LAYOUT_EDGES,
+            _ui_text_w, notes)
+
+    def apply_layout(self):
+        """Resolve `layout()` and put the host's bar where its first bar
+        sits (`Workstation.place_bar`, which relayouts). Runs at a theme
+        switch, a `layout_theme` write and a mode switch; a no-op before the
+        WM and the bar exist."""
+        ws = self.ws
+        self.layout_gen += 1
+        if getattr(ws, "wm", None) is None or getattr(ws, "bar_layer", None) is None:
+            return
+        bars, self.layout_notes = self.layout()
+        if bars != self.bars:
+            self.bars = bars
+            ws._dirty = True
+        if bars[0][0] != _layout_base.bar_edge():
+            ws.place_bar(bars[0][0])
+
+    def layout_choices(self):
+        """The packages whose layout differs from the active theme's: the
+        values the Settings LAYOUT row steps through after THEME. Cached until
+        the next theme switch."""
+        if self._choices is None:
+            mine = self._theme_layout(self.theme_name)[1]
+            names = THEME_NAMES
+            extra = _uimod.theme_installed()
+            if extra is not None and extra not in names:
+                names = names + (extra,)
+            self._choices = tuple(n for n in names if self._theme_layout(n)[1] != mine)
+        return self._choices
+
+    def cycle_layout_theme(self, d):
+        """Step the `layout_theme` row by d through THEME (the row deleted),
+        then each of `layout_choices()`; applies and persists."""
+        pick = self.layout_theme()
+        vals = (None,) + self.layout_choices()
+        if pick is not None and pick not in vals:
+            vals = vals + (pick,)
+        nxt = vals[(vals.index(pick) + d) % len(vals)]
+        if nxt is None:
+            self.ws.system.delete("layout_theme")
+        else:
+            self.ws.system.set("layout_theme", nxt)
+        self.apply_layout()
 
     def _install_fonts(self, name):
         """Load theme `name`'s font files, install each for its role and the

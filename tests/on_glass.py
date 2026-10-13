@@ -422,6 +422,75 @@ def fonts_match_host(board, n=48):
     assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
 
 
+# -- the theme layout (docs/shell_layout_2026-10.md §5) ---------------------------
+
+def layout_corpus(n, seed=5):
+    """Theme packages around `layout`: §5's fuzz cases (a string for bars,
+    five bars, two on one edge, a size of 0 and of 10000, an unknown widget,
+    a 200-character text, no `menu`, `zone` in a vertical bar only), a full
+    two-bar layout, and byte mutants of them."""
+    import json
+    import random
+    req = ["menu", "zone", "close"]
+    cases = ["top",
+             [{"edge": e, "left": req} for e in ("top", "bottom", "left", "right", "top")],
+             [{"edge": "top", "left": req}, {"edge": "top", "right": ["clock"]}],
+             [{"edge": "bottom", "size": 0, "left": req}],
+             [{"edge": "right", "size": 10000, "left": ["calendar"] + req}],
+             [{"edge": "top", "left": req + ["teapot", "text"], "text": ["x" * 200]}],
+             [{"edge": "top", "left": ["zone", "close"]}],
+             [{"edge": "top", "left": ["menu", "close"]}, {"edge": "left", "left": ["zone"]}],
+             [{"edge": "top", "size": 20, "left": ["title", "text"], "right": req,
+               "text": ["moy"]},
+              {"edge": "bottom", "size": 22,
+               "left": ["menu", "separator", "chips", "zone", "spacer", "text"],
+               "right": ["close", "wifi", "battery", "clock"], "text": ["a!"]}]]
+    good = [json.dumps({"format": 1, "name": "fz", "inherits": "berry",
+                        "layout": {"bars": c}}).encode() for c in cases]
+    rng = random.Random(seed)
+    out = list(good)
+    while len(out) < n:
+        b = bytearray(rng.choice(good))
+        for _m in range(rng.randint(1, 3)):
+            i = rng.randrange(len(b))
+            op = rng.randrange(3)
+            if op == 0:
+                b[i] = rng.choice(b'{}[]":,0123456789-x ')
+            elif op == 1:
+                del b[i]
+            else:
+                b = b[:i]
+        out.append(bytes(b))
+    return out
+
+
+_LAYOUT_HELPER = """
+import moy_ui, binascii
+def _layout_probe(hx):
+    rc, notes = moy_ui.theme_install(binascii.unhexlify(hx))
+    return (rc, notes, moy_ui.theme_layout(moy_ui.theme_installed()) if rc == 0 else None)
+"""
+
+
+def layouts_match_host(board, n=40):
+    """A fuzzed corpus of theme layouts installed by this board's moy_ui
+    answers as the host's does: the same refusal or the same notes, and the
+    same bars after the loader's caps, clamps and required-set rule."""
+    import binascii
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    board.pyexec(_LAYOUT_HELPER, strict=True)
+    for src in layout_corpus(n):
+        rc, notes = moy_ui.theme_install(src)
+        want = (rc, notes, moy_ui.theme_layout(moy_ui.theme_installed()) if rc == 0 else None)
+        got = board.pyval("ws._g['_layout_probe'](%r)" % binascii.hexlify(src).decode(),
+                          strict=True)
+        assert got == want, (src, got, want)
+    for name in moy_ui.themes():
+        assert board.pyval("__import__('moy_ui').theme_layout(%r)" % name,
+                           strict=True) == moy_ui.theme_layout(name), name
+
+
 def the_theme_font_is_installed(board):
     """The default theme's Tiny5 (docs/theming_2026-09.md §4.7) is what this
     board's shell draws in: the seed font file byte for byte the host's,

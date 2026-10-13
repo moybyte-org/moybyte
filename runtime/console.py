@@ -1417,8 +1417,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def place_bar(self, edge):
         """Put the host's bar on `edge` ("top" or "bottom") of every surface
         and relayout the shell around it (layout_base.place_bar). The theme
-        layout's resolver is the caller this exists for
-        (docs/shell_layout_2026-10.md §13 step 4)."""
+        layout's resolver (`Appearance.apply_layout`) calls it."""
         _layout_base.place_bar(edge)
         self.bar_layer.invalidate()
         self._relayout()

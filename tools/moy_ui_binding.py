@@ -49,6 +49,7 @@ _SIGS = (
     ("moy_ui_font_use", [_I, c.c_uint32], _I),
     ("moy_ui_font", [_I, c.c_void_p], c.c_uint32),
     ("moy_theme_fonts", [_P, _Z, c.c_void_p], _I),
+    ("moy_theme_layout", [_P, _Z, c.c_void_p], _I),
     ("moy_theme_font_file", [_P, _Z, c.c_void_p], c.c_void_p),
     ("moy_text_print_font", [], c.c_uint32),
     ("moy_font_reset", [], None),
@@ -83,6 +84,18 @@ def _shape_type(metrics, parts, states, stids):
                     ("frame", c.c_uint8 * 6),
                     ("name", c.c_char * 25)]
     return _Shape
+
+
+def _layout_type(bars, slots, slot_cap, widget_cap, text_max):
+    class _Bar(c.Structure):
+        _fields_ = [("edge", c.c_uint8), ("size", c.c_uint8), ("n", c.c_uint8 * slots),
+                    ("w", (c.c_uint8 * slot_cap) * slots),
+                    ("text0", c.c_uint8), ("n_text", c.c_uint8)]
+
+    class _Layout(c.Structure):
+        _fields_ = [("set", c.c_uint8), ("n_bars", c.c_uint8), ("bar", _Bar * bars),
+                    ("n_text", c.c_uint8), ("text", (c.c_char * (text_max + 1)) * widget_cap)]
+    return _Layout
 
 
 class _Span(c.Structure):
@@ -721,6 +734,25 @@ def binding():
         lib.moy_theme_fonts(b, len(b), files)
         return tuple((r, f.value.decode()) for r, f in zip(font_roles, files) if f.value)
 
+    dims = (c.c_int * 7).in_dll(lib, "moy_theme_layout_dims")
+    Layout = _layout_type(*dims[:5])
+    assert c.sizeof(Layout) == dims[6]
+    bar_edges = _names(lib, "moy_theme_bar_edges", dims[0])
+    widgets = _names(lib, "moy_theme_widget_names", dims[5])
+
+    def theme_layout(name):
+        b = _b(name)
+        lay = Layout()
+        lib.moy_theme_layout(b, len(b), c.byref(lay))
+        bars = []
+        for i in range(lay.n_bars):
+            bar = lay.bar[i]
+            slots = tuple(tuple(widgets[bar.w[s][k]] for k in range(bar.n[s]))
+                          for s in range(dims[1]))
+            texts = tuple(lay.text[bar.text0 + k].value.decode() for k in range(bar.n_text))
+            bars.append((bar_edges[bar.edge], bar.size) + slots + (texts,))
+        return lay.set == 2, tuple(bars)
+
     def font_file(name):
         b = _b(name)
         n = c.c_size_t()
@@ -768,6 +800,7 @@ def binding():
     m.theme_install = theme_install
     m.theme_installed = theme_installed
     m.theme_fonts = theme_fonts
+    m.theme_layout = theme_layout
     m.font_load = font_load
     m.font_file = font_file
     m.font_reset = lib.moy_font_reset

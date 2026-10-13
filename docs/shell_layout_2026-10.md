@@ -125,8 +125,8 @@ memory and compositors); this doc cites, it does not copy.
   (`tests/test_frame_alloc.py`).
 - **Persisted choices** are rows of `ws.system` (`runtime/system_store.py`);
   a Settings row per choice in `runtime/settings_layer.py`. **Format 1**
-  accepts `layout` and reads nothing from it (`native/moy_ui/style.json`
-  `theme.reserved`; `native/moy_ui/moy_theme.c` `reserved()`).
+  reads `layout` (§5, step 4): `native/moy_ui/moy_theme.c` checks it and
+  `runtime/shell_layout.py` resolves it.
 
 ## 3. The two modes, and the switch as explicit state
 
@@ -283,12 +283,25 @@ PLAY is the switch).
 | `bars[].text` | a string per `text` widget, by position | 1 to 24 characters of printable ASCII; longer is cut, empty is dropped |
 
 The flattened package carries it in a few dozen bytes, well inside
-`theme.bytes` (4096). `style.json` gains a `theme.layout` table of edges and
-widget names (data, as `font_roles` is) and drops `layout` from
-`theme.reserved`; `tests/test_theme_loader.py`'s fuzz corpus grows the cases
-(a string for `bars`, five bars, two on one edge, a size of 0 and of 10000,
-an unknown widget, a 200-character text, a layout with no `menu`, one with
-`zone` in a vertical bar only).
+`theme.bytes` (4096). `style.json`'s `theme.layout` holds the edges, the
+slots, the widget names, the required and repeatable sets and the caps (data,
+as `font_roles` is); `tests/test_theme_loader.py`'s fuzz corpus carries the
+cases (a string for `bars`, five bars, two on one edge, a size of 0 and of
+10000, an unknown widget, a 200-character text, a layout with no `menu`, one
+with `zone` in a vertical bar only), and the boards' module answers it as the
+host's does (`tests/on_glass.py`'s `layouts_match_host`).
+
+**As the loader reads it** (step 4, 2026-10-13). A drop or a clamp sets the
+package's existing note bits (§7 of the theming doc): an unknown widget is
+`unknown`, a size clamped or a text cut is `clamped`, every other drop
+`dropped`. "First placement" is placement order: bars in the list's order,
+slots left, center, right. A bar's `text` is a list of strings, the i-th going
+to the bar's i-th `text` widget; a `text` widget with no string, or an empty
+or non-printable one, is dropped, and a string with no widget is dropped. A
+layout that then lacks a widget of the required set is refused whole:
+`moy_ui.theme_layout(name)` answers the default seed's bars in its place with
+the refusal flagged, as it does when the chain will not resolve. A package
+that sets no `bars` (none, `{}`, or `bars` that is not a list) inherits.
 
 **Prior art, read for the shape and nothing else.** Polybar and waybar place
 named modules in `modules-left/center/right` of a bar whose `bottom`/`position`
@@ -387,9 +400,10 @@ binding fanning a tuple of ints out as moycore does. The shipped apps place by
 `content_of` rather than reading the row because a row is one value for every
 grant: it answers the running user app, whose strip can be the game canvas's
 18 rows while a shipped app on the system canvas sits under `18 * cs`, and a
-desk window has none. The hook step 4's resolver calls is
-`Workstation.place_bar(edge)` (`"top"` or `"bottom"`; the sides arrive with
-step 5's strips); `tests/test_content_rect.py` moves the bar to the bottom
+desk window has none. The resolver (`Appearance.apply_layout`, §11) moves
+the bar through `Workstation.place_bar(edge)` (`"top"` or `"bottom"`; the
+sides arrive with step 5's strips), to the edge of the first resolved bar --
+the host draws one bar until step 5 draws each; `tests/test_content_rect.py` moves the bar to the bottom
 through it and checks every layout, the bar's band, the taps and the desk.
 
 **Bars are global** (owner, 2026-10-13: it saves the most space, and L0):
@@ -476,8 +490,11 @@ cells are at least 16 logical × chrome scale, so #203's tap floor holds
 without a layout saying so; every bar is edge-anchored and clamped, so
 nothing is off-screen by construction; and the content rectangle keeps **at
 least 75% of each axis of the glass**, or the layout is replaced by the tier
-default and noted. The composer never raises; both halves are fuzzed and the
-boards' module answers the host's corpus (`tests/test_theme_loader.py`).
+default and noted. The tier default is the default seed's layout resolved
+the same way, and where even that does not resolve on a glass, today's one
+top bar (`runtime/shell_layout.py`'s `FALLBACK`). The composer never raises;
+both halves are fuzzed (`tests/test_shell_layout.py`) and the boards' module
+answers the host's corpus (`tests/test_theme_loader.py`).
 
 **Recovery, and what waits on theming phase 6.** The per-board reset key,
 the strike ledger and installed theme packages are theming phase 6's
@@ -494,7 +511,10 @@ The tier is each board.toml's `[board] tier`; the WM is the only tier-specific
 layer (`docs/shell_ux_v1.md` §3), so **the WM class carries** `LAYOUT_CATALOGUE`
 (the widgets it has a value for, per mode) and `has_desk` already says
 which modes a board has. Settings shows a row for what the WM lists and none
-for what it does not (absence, never a disabled row).
+for what it does not (absence, never a disabled row). Beside it,
+`LAYOUT_EDGES` names the edges a bar may take on this tier (top and bottom in
+step 4, the sides from step 5), and the composer is `runtime/shell_layout.py`'s
+`resolve`.
 
 | board | glass, input | modes (default first) | WM | widgets placeable |
 |---|---|---|---|---|
@@ -550,7 +570,9 @@ switch (the catalogue changes), and on a change marks `ws._dirty` and runs
 
 **Settings.** One row after FONT SIZE, `LAYOUT: THEME / <package names>`,
 stepping through the seeds and installed themes whose layout differs from
-the active theme's; THEME deletes the row.
+the active theme's; THEME deletes the row. The row is absent while no
+package's layout differs and none is picked, so a console with only the
+seeds' one layout shows no row.
 
 Rejected: scalar rows per lever (a package name covers the list in one
 strict read), and storing the pick inside a user theme that `inherits` the
@@ -664,7 +686,7 @@ every step; the steps that ADD a config say which.
 | 2 — the Guition P4's strips and the home's damage (landed 2026-10-13) | the compositor's one boot-time strip becomes a rect LIST in `native/moy_glass` set on relayout, each rotated only when its strip's generation moved; the fullscreen home hands its band to `note_damage` | the Guition P4's on-glass suite; its shelf-drag and play rows re-measured, to #66 and #58 (a cut from today, since an unchanged strip no longer rotates per play frame); `MOY_ROT_RECTS` budgeted: game, damage, up to four bars, coalesced, with a test that five rects never exceed it |
 | 3 — the content rectangle (landed 2026-10-13) | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
 | 3b — the fixed geometry (landed 2026-10-13) | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers (now `_desk_rect()`) and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | every golden row identical (the fixed geometry moved without a pixel); the P4 and T-Deck suites |
-| 4 — the format, the loader, the resolver | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
+| 4 — the format, the loader, the resolver (landed 2026-10-13) | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
 | 5 — bars on any edge, slots, cells | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
 | 6 — the popover layer and the components | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_calendar_popover`, `..._docked_calendar`, `tdeck_320x240_fs1_calendar_full`; `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
 | 7a — the scaled-blit kernel | the nearest-neighbour RGB565 scaled blit in `moy_gfx`, host and boards | a micro-bench of the focus band's three blits on all four boards, to #66, before 7b starts; the board module answers the host's pixels |

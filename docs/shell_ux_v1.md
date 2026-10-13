@@ -365,7 +365,8 @@ either restricts the code editor or corrupts kid code — both worse.
 ## 9. The exit model — taskbar-context-dependent
 
 The rule in one line: **taskbar shown → an X in the OS right zone exits (a tap);
-fullscreen game → hold-BACKSPACE exits.**
+fullscreen game → hold-BACKSPACE exits.** The X is the `close` widget of a
+theme's layout, which every layout places (`docs/shell_layout_2026-10.md` §9).
 
 | App | Presentation | Exit affordance | BACKSPACE is… |
 |---|---|---|---|

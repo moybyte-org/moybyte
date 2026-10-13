@@ -11,8 +11,10 @@
 // effect and the role it paints with) and `surfaces` (part -> state -> one
 // line of the surface grammar, compiled here into a record the painter
 // draws), `frame` (the window frame's style, title alignment and button
-// order: moy_ui.h's moy_ui_frame) and `fonts` (font role -> a font file of
-// the package, read by the font loader, moy_text.h). The keys style.json's theme section
+// order: moy_ui.h's moy_ui_frame), `fonts` (font role -> a font file of
+// the package, read by the font loader, moy_text.h) and `layout` (its `bars`:
+// docs/shell_layout_2026-10.md §5, each capped and clamped here and the
+// required widgets checked on the data). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
 // and noted. A reader refuses a newer `format`; a key a later phase defines
 // is additive and needs no bump.
@@ -22,7 +24,8 @@
 // nearest package that sets it, then fills what is still unset from the
 // derivation rules, so every role of the row is set; metrics, text
 // effects and surfaces resolve the same way, nearest package first, the
-// default seed setting every metric. The chain is capped at
+// default seed setting every metric. A layout resolves whole, from the
+// nearest package that sets one; a bar list is never merged. The chain is capped at
 // MOY_THEME_DEPTH and a cycle is refused. Readability is a report, never a
 // refusal: each (background, ink) pair under MOY_THEME_CONTRAST sets its bit.
 //
@@ -65,6 +68,29 @@ enum {
 
 enum { MOY_THEME_DARK = 0, MOY_THEME_LIGHT = 1 };
 
+// A layout's state: no `bars` (it inherits), bars, or bars the required-set
+// rule refused (the default's stand in at resolve).
+enum { MOY_THEME_LAYOUT_SILENT = 0, MOY_THEME_LAYOUT_SET = 1, MOY_THEME_LAYOUT_REFUSED = 2 };
+
+// One bar: its edge, its size in logical pixels and its slots' widgets
+// (left, center, right), each an index of moy_theme_widget_names. Its `text`
+// widgets' strings are the layout's text[text0 .. text0 + n_text), in slot order.
+typedef struct {
+    uint8_t edge;                                    // index of moy_theme_bar_edges
+    uint8_t size;
+    uint8_t n[MOY_THEME_SLOTS];
+    uint8_t w[MOY_THEME_SLOTS][MOY_THEME_SLOT_CAP];
+    uint8_t text0, n_text;
+} moy_theme_bar_t;
+
+typedef struct {
+    uint8_t set;                                     // MOY_THEME_LAYOUT_*
+    uint8_t n_bars;
+    moy_theme_bar_t bar[MOY_THEME_BARS];             // in the package's order
+    uint8_t n_text;
+    char text[MOY_THEME_WIDGET_CAP][MOY_THEME_TEXT_MAX + 1];
+} moy_theme_layout_t;
+
 typedef struct {
     char name[MOY_THEME_NAME_MAX + 1];
     char inherits[MOY_THEME_NAME_MAX + 1];  // "" : the default
@@ -77,6 +103,7 @@ typedef struct {
     uint8_t n_surfaces;
     uint8_t frame[MOY_UI_FRAME_FIELDS];     // moy_ui_shape_t's frame, 0 where silent
     char font[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1];  // a file per role, "" where silent
+    moy_theme_layout_t layout;
     uint8_t notes;
 } moy_theme_pkg_t;
 
@@ -112,6 +139,16 @@ int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out);
 // resolve's.
 int moy_theme_fonts(const char *name, size_t n,
                     char out[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1]);
+
+// Theme `name`'s layout, whole, from the nearest package that sets one.
+// Where that one was refused by the required-set rule, or the chain does not
+// resolve, the default seed's stands in and out->set is
+// MOY_THEME_LAYOUT_REFUSED; MOY_THEME_LAYOUT_SILENT (no bars) when the
+// default sets none. The return is as resolve's.
+int moy_theme_layout(const char *name, size_t n, moy_theme_layout_t *out);
+// Bars, slots, slot cap, widget cap, text max, widgets, sizeof(moy_theme_layout_t):
+// the bindings' layout check.
+extern const int moy_theme_layout_dims[7];
 
 // A seed package's font file by name (the tables embed every file a seed's
 // `fonts` names): its bytes and *len, or NULL.

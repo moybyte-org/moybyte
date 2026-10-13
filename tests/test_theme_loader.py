@@ -372,6 +372,129 @@ def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
         assert rc == CHAIN and row == night
 
 
+# -- the layout (docs/shell_layout_2026-10.md §5, §9) -----------------------------
+
+LAY = TH["layout"]
+TODAY = ("top", 18, ("zone",), (), ("clock", "close", "menu", "wifi", "battery"), ())
+
+
+def _bar(edge="top", **kw):
+    b = {"edge": edge}
+    b.update(kw)
+    return b
+
+
+def _lay(name, bars, **kw):
+    rc, notes = moy_ui.theme_install(_src(name, layout={"bars": bars}, **kw))
+    assert rc == OK
+    return notes, moy_ui.theme_layout(name)
+
+
+def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
+    for name in TH["seeds"]:
+        assert moy_ui.theme_layout(name) == (False, (TODAY,)), name
+    assert "layout" not in TH["reserved"]
+    assert set(LAY["required"]) <= set(LAY["widgets"])
+    from runtime import shell_layout
+    assert shell_layout.WIDGETS == tuple(LAY["widgets"])
+    assert shell_layout.EDGES == tuple(LAY["edges"])
+    assert shell_layout.REQUIRED == tuple(LAY["required"])
+
+
+def test_a_layout_is_read_whole_and_inherited_whole():
+    notes, got = _lay("dock", [_bar("bottom", size=22, left=["menu", "separator", "chips", "zone"],
+                                    right=["close", "wifi", "battery", "clock"])])
+    assert notes == 0
+    assert got == (False, (("bottom", 22, ("menu", "separator", "chips", "zone"), (),
+                            ("close", "wifi", "battery", "clock"), ()),))
+    # A child that sets no layout takes its parent's, and one that sets bars
+    # replaces the list whole: a bar list is never merged by position.
+    assert moy_ui.theme_install(_src("dock2", inherits="slate"))[0] == OK
+    assert moy_ui.theme_layout("dock2") == (False, (TODAY,))
+    notes, got = _lay("two", [_bar("top", left=["title"], right=["clock", "close", "menu"]),
+                              _bar("bottom", left=["zone"])])
+    assert got[1][1] == ("bottom", 18, ("zone",), (), (), ())
+
+
+def test_the_caps_and_clamps_drop_and_note():
+    # size: absent 18, clamped to 16..160, a non-integer dropped
+    for size, want, note in ((0, 16, N_CLAMPED), (10000, 160, N_CLAMPED), (40, 40, 0),
+                             ("big", 18, N_DROPPED), (2.5, 18, N_DROPPED)):
+        notes, got = _lay("t", [_bar(size=size, left=["menu", "zone", "close"])])
+        assert (notes, got[1][0][1]) == (note, want), size
+    # two bars on one edge, an unknown edge and a bar that is not an object
+    notes, got = _lay("t", [_bar(left=["menu", "zone", "close"]), _bar(left=["clock"]),
+                            _bar("middle"), "bar", {"left": ["wifi"]}])
+    assert notes == N_DROPPED and [b[0] for b in got[1]] == ["top"]
+    # five bars: one per edge at most
+    notes, got = _lay("t", [_bar(e, left=["menu", "zone", "close"] if e == "top" else [])
+                            for e in ("top", "bottom", "left", "right", "top")])
+    assert notes == N_DROPPED and [b[0] for b in got[1]] == ["top", "bottom", "left", "right"]
+    # an unknown widget, a slot over its cap, a widget placed twice
+    notes, got = _lay("t", [_bar(left=["menu", "zone", "close", "teapot"])])
+    assert notes == N_UNKNOWN and got[1][0][2] == ("menu", "zone", "close")
+    notes, got = _lay("t", [_bar(left=["menu", "zone", "close", "spacer", "spacer",
+                                       "spacer", "spacer"])])
+    assert notes == N_DROPPED and len(got[1][0][2]) == LAY["slot_cap"]
+    notes, got = _lay("t", [_bar(left=["menu", "zone"], right=["close", "menu", "spacer",
+                                                               "separator", "spacer"])])
+    assert notes == N_DROPPED and got[1][0][4] == ("close", "spacer", "separator", "spacer")
+    # at most widget_cap per layout, in placement order
+    full = ["menu", "zone", "close", "spacer", "spacer", "spacer"]
+    notes, got = _lay("t", [_bar("top", left=full, right=["spacer"] * 6),
+                            _bar("bottom", left=["clock", "wifi"])])
+    assert notes == N_DROPPED and sum(len(s) for b in got[1] for s in b[2:5]) == LAY["widget_cap"]
+    assert got[1][1][2] == ()
+    # slots and bars of the wrong type
+    notes, got = _lay("t", [_bar(left="menu", right=["menu", "zone", "close", 7])])
+    assert notes == N_DROPPED and got[1][0][2:5] == ((), (), ("menu", "zone", "close"))
+    rc, notes = moy_ui.theme_install(_src("t", layout={"bars": "top"}))
+    assert (rc, notes) == (OK, N_DROPPED) and moy_ui.theme_layout("t") == (False, (TODAY,))
+    rc, notes = moy_ui.theme_install(_src("t", layout=[1], extra=1))
+    assert (rc, notes) == (OK, N_DROPPED | N_UNKNOWN)
+    rc, notes = moy_ui.theme_install(_src("t", layout={"windows": "max"}))
+    assert (rc, notes) == (OK, N_UNKNOWN) and moy_ui.theme_layout("t") == (False, (TODAY,))
+
+
+def test_a_text_widget_takes_its_string_by_position():
+    req = ["menu", "zone", "close"]
+    notes, got = _lay("t", [_bar(left=req + ["text"], right=["text"], text=["hi", "there"])])
+    assert notes == 0 and got[1][0][2:] == (tuple(req) + ("text",), (), ("text",), ("hi", "there"))
+    # 200 characters are cut to text_max; an empty or non-printable string
+    # drops its widget, a string with no widget is dropped
+    notes, got = _lay("t", [_bar(left=req + ["text"], text=["x" * 200])])
+    assert notes == N_CLAMPED and got[1][0][5] == ("x" * LAY["text_max"],)
+    notes, got = _lay("t", [_bar(left=req + ["text", "text"], text=["", "ok", "spare"])])
+    assert notes == N_DROPPED and got[1][0][2] == tuple(req) + ("text",)
+    assert got[1][0][5] == ("ok",)
+    notes, got = _lay("t", [_bar(left=req + ["text"], text=["tab\there"])])
+    assert notes == N_DROPPED and got[1][0][5] == ()
+    notes, got = _lay("t", [_bar(left=req + ["text"])])
+    assert notes == N_DROPPED and got[1][0][2] == tuple(req)
+
+
+def test_the_required_set_rule_runs_on_the_data():
+    for missing in LAY["required"]:
+        left = [w for w in LAY["required"] if w != missing]
+        notes, got = _lay("t", [_bar(left=left + ["clock"])])
+        assert notes == N_DROPPED and got == (True, (TODAY,)), missing
+    notes, got = _lay("t", [])
+    assert notes == N_DROPPED and got == (True, (TODAY,))
+    # a widget dropped by a cap counts as never placed
+    notes, got = _lay("t", [_bar(left=["spacer"] * 6, center=["spacer"] * 6,
+                                 right=["menu", "zone", "close"])])
+    assert got == (True, (TODAY,))
+    # a `zone` in a vertical bar passes the loader: the composer drops it
+    notes, got = _lay("t", [_bar("top", left=["menu", "close"]), _bar("left", left=["zone"])])
+    assert notes == 0 and got[0] is False
+
+
+def test_a_refused_layout_in_the_chain_stands_in_with_the_default():
+    rc, _n = moy_ui.theme_install(_src("t", inherits="berry",
+                                       layout={"bars": [_bar(left=["clock"])]}))
+    assert rc == OK and moy_ui.theme_layout("t") == (True, (TODAY,))
+
+
 def _corpus(n):
     rng = random.Random(224)
     seeds = []
@@ -388,6 +511,22 @@ def _corpus(n):
                       surfaces={"button": {"rest": "bevel2, fill surface, shadow",
                                            "pressed": "sunken, dither shade_lo/7"},
                                 "window.title": {"active": "pinstripe shade_lo/shade_hi"}}))
+    # The layout cases (docs/shell_layout_2026-10.md §5): a string for bars,
+    # five bars, two on one edge, a size of 0 and of 10000, an unknown
+    # widget, a 200-character text, no menu, `zone` in a vertical bar only.
+    req = ["menu", "zone", "close"]
+    for bars in ("top",
+                 [{"edge": e, "left": req} for e in ("top", "bottom", "left", "right", "top")],
+                 [{"edge": "top", "left": req}, {"edge": "top", "right": ["clock"]}],
+                 [{"edge": "bottom", "size": 0, "left": req, "right": ["wifi", "battery"]}],
+                 [{"edge": "right", "size": 10000, "left": ["calendar"] + req}],
+                 [{"edge": "top", "left": req + ["teapot", "text"], "text": ["x" * 200]}],
+                 [{"edge": "top", "left": ["zone", "close"], "center": ["clock"]}],
+                 [{"edge": "top", "left": ["menu", "close"]}, {"edge": "left", "left": ["zone"]}],
+                 [{"edge": "bottom", "size": 22,
+                   "left": ["menu", "separator", "chips", "zone", "text", "spacer"],
+                   "right": ["close", "wifi", "battery", "clock"], "text": ["moy", "!"]}]):
+        seeds.append(_src("fz", inherits="berry", layout={"bars": bars}))
     alphabet = b'{}[]":,0123456789-.eE truefalsnl\\/ '
     out = list(seeds)
     while len(out) < n:
@@ -411,8 +550,9 @@ def _answer(mod, src):
     rc, notes = mod.theme_install(src)
     if rc != 0:
         return rc, notes, None, None
-    return rc, notes, mod.theme(mod.theme_installed(), False), \
-        (mod.theme_shape(mod.theme_installed()), mod.theme_fonts(mod.theme_installed()))
+    n = mod.theme_installed()
+    return rc, notes, mod.theme(n, False), \
+        (mod.theme_shape(n), mod.theme_fonts(n), mod.theme_layout(n))
 
 
 def test_mutated_themes_never_break_the_reader():
@@ -437,7 +577,8 @@ while i < len(data):
     rc, notes = moy_ui.theme_install(src)
     if rc == 0:
         n = moy_ui.theme_installed()
-        print(repr((rc, notes, moy_ui.theme(n, False), (moy_ui.theme_shape(n), moy_ui.theme_fonts(n)))))
+        print(repr((rc, notes, moy_ui.theme(n, False),
+                    (moy_ui.theme_shape(n), moy_ui.theme_fonts(n), moy_ui.theme_layout(n)))))
     else:
         print(repr((rc, notes, None, None)))
 """

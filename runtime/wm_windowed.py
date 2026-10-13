@@ -82,6 +82,7 @@ try:
     from wm_desk import _BackdropLayer
     from wm_chrome import WindowChrome, _SHADOW
     from moy_spine import EDITOR
+    from shell_layout import WIDGETS as _LAYOUT_WIDGETS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
@@ -90,6 +91,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm_desk import _BackdropLayer
     from runtime.wm_chrome import WindowChrome, _SHADOW
     from runtime.moy_spine import EDITOR
+    from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
 
 import time as _time                  # the bar clock's minute (localtime)
 
@@ -271,6 +273,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     canvas bigger than the 320x240 game canvas."""
 
     has_desk = True
+    # `chips` (the taskbar's window chips) has a value in desktop mode only.
+    LAYOUT_CATALOGUE = {"desktop": _LAYOUT_WIDGETS,
+                        "console": FullscreenStackWM.LAYOUT_CATALOGUE["console"]}
 
     def __init__(self, ws):
         FullscreenStackWM.__init__(self, ws)
@@ -499,6 +504,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._mode_was = self.mode
             self._mode_switch = True
             try:
+                self.ws.look.apply_layout()     # the catalogue is the mode's
                 self.ws._relayout()
             finally:
                 self._mode_switch = False

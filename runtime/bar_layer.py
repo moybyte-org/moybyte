@@ -553,8 +553,10 @@ class BarLayer:
 
     def _render_right_zone(self, cv, where, mp=None):
         """The OS-owned right zone: clock, wifi, batt, the ≡ toggle and the
-        context X (`_show_x`). The fixed game-canvas cluster, or the responsive
-        Layout's rects at its chrome scale (#203)."""
+        context X (`_show_x`) -- a theme's `layout` names them as the
+        `clock`, `wifi`, `battery`, `menu` and `close` widgets
+        (docs/shell_layout_2026-10.md §4). The fixed game-canvas cluster, or
+        the responsive Layout's rects at its chrome scale (#203)."""
         ws = self.ws
         if mp is None:
             mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)

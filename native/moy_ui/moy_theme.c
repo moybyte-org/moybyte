@@ -774,6 +774,272 @@ static int each_surface(rd_t *r, moy_theme_pkg_t *out, int part, int unused) {
     }
 }
 
+// -- the layout (docs/shell_layout_2026-10.md §5, §9) ------------------------------
+
+// One bar as written, before the layout's caps: its strings by position, ""
+// where one was dropped, so the strings after it keep their widgets.
+typedef struct {
+    int edge;              // index of moy_theme_bar_edges, or -1: none it takes
+    int size;
+    uint8_t n[MOY_THEME_SLOTS];
+    uint8_t w[MOY_THEME_SLOTS][MOY_THEME_SLOT_CAP];
+    uint8_t n_text;
+    char text[MOY_THEME_WIDGET_CAP][MOY_THEME_TEXT_MAX + 1];
+} raw_bar_t;
+
+// A slot's list of widget names, at most MOY_THEME_SLOT_CAP. 0, or -1: malformed.
+static int slot_list(rd_t *r, moy_theme_pkg_t *out, raw_bar_t *b, int slot) {
+    b->n[slot] = 0;
+    if (eat(r, ']')) {
+        return 0;
+    }
+    r->depth++;
+    for (;;) {
+        int i = name_field(r, moy_theme_widget_names, MOY_THEME_WIDGETS);
+        if (i == -1) {
+            return -1;
+        }
+        if (i == -2) {
+            out->notes |= MOY_THEME_N_UNKNOWN;
+        } else if (i < 0 || b->n[slot] == MOY_THEME_SLOT_CAP) {
+            out->notes |= MOY_THEME_N_DROPPED;
+        } else {
+            b->w[slot][b->n[slot]++] = (uint8_t)i;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        r->depth--;
+        return eat(r, ']') ? 0 : -1;
+    }
+}
+
+// A bar's `text`: its strings, 1 to MOY_THEME_TEXT_MAX of printable ASCII,
+// longer cut. 0, or -1: malformed.
+static int text_list(rd_t *r, moy_theme_pkg_t *out, raw_bar_t *b) {
+    b->n_text = 0;
+    if (eat(r, ']')) {
+        return 0;
+    }
+    r->depth++;
+    for (;;) {
+        char buf[MOY_THEME_TEXT_MAX + 1];
+        int over;
+        int32_t iv;
+        int len = peek(r) == '"' ? str(r, buf, sizeof(buf), &over) : -2;
+        if (len == -1 || (len == -2 && value(r, &iv) < 0)) {
+            return -1;
+        }
+        int ok = len > 0;
+        for (int i = 0; ok && i < len && i < MOY_THEME_TEXT_MAX; i++) {
+            ok = buf[i] >= 0x20 && buf[i] < 0x7f;
+        }
+        if (!ok) {
+            buf[0] = 0;
+            out->notes |= MOY_THEME_N_DROPPED;
+        } else if (over) {
+            out->notes |= MOY_THEME_N_CLAMPED;
+        }
+        if (b->n_text == MOY_THEME_WIDGET_CAP) {
+            out->notes |= MOY_THEME_N_DROPPED;
+        } else {
+            memcpy(b->text[b->n_text++], buf, sizeof(buf));
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        r->depth--;
+        return eat(r, ']') ? 0 : -1;
+    }
+}
+
+// One bar object into *b. 0, or -1: malformed.
+static int bar_obj(rd_t *r, moy_theme_pkg_t *out, raw_bar_t *b) {
+    memset(b, 0, sizeof(*b));
+    b->edge = -1;
+    b->size = MOY_THEME_BAR_SIZE;
+    if (eat(r, '}')) {
+        return 0;
+    }
+    r->depth++;
+    for (;;) {
+        char key[16];
+        int over;
+        int32_t iv = 0;
+        if (str(r, key, sizeof(key), &over) < 0 || !eat(r, ':')) {
+            return -1;
+        }
+        int slot = over ? -1 : find_name(moy_theme_slot_names, MOY_THEME_SLOTS, key);
+        int rc = 0;
+        if (!over && strcmp(key, "edge") == 0) {
+            int i = name_field(r, moy_theme_bar_edges, MOY_THEME_BARS);
+            if (i == -1) {
+                return -1;
+            }
+            b->edge = i < 0 ? -1 : i;
+        } else if (!over && strcmp(key, "size") == 0) {
+            int kind = value(r, &iv);
+            if (kind < 0) {
+                return -1;
+            }
+            if (kind != V_INT) {
+                out->notes |= MOY_THEME_N_DROPPED;
+            } else {
+                int v = iv < MOY_THEME_BAR_MIN ? MOY_THEME_BAR_MIN
+                        : iv > MOY_THEME_BAR_MAX ? MOY_THEME_BAR_MAX : (int)iv;
+                if (v != iv) {
+                    out->notes |= MOY_THEME_N_CLAMPED;
+                }
+                b->size = v;
+            }
+        } else if (slot >= 0 && eat(r, '[')) {
+            rc = slot_list(r, out, b, slot);
+        } else if (!over && strcmp(key, "text") == 0 && eat(r, '[')) {
+            rc = text_list(r, out, b);
+        } else {
+            rc = value(r, &iv);
+            out->notes |= (slot >= 0 || (!over && strcmp(key, "text") == 0))
+                          ? MOY_THEME_N_DROPPED : MOY_THEME_N_UNKNOWN;
+        }
+        if (rc < 0) {
+            return -1;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        r->depth--;
+        return eat(r, '}') ? 0 : -1;
+    }
+}
+
+// Commit a bar to the layout in placement order: a second bar on an edge is
+// dropped; a widget placed twice keeps its first placement (but the
+// repeatable ones), the layout holds at most MOY_THEME_WIDGET_CAP, and a
+// `text` widget takes its string by position or is dropped. *seen collects
+// the placed widgets, a bit each.
+static void bar_commit(moy_theme_pkg_t *out, const raw_bar_t *b, uint16_t *seen, int *count) {
+    moy_theme_layout_t *lay = &out->layout;
+    int taken = b->edge < 0;
+    for (int i = 0; i < lay->n_bars; i++) {
+        taken |= lay->bar[i].edge == b->edge;
+    }
+    if (taken) {
+        out->notes |= MOY_THEME_N_DROPPED;
+        return;
+    }
+    moy_theme_bar_t *bar = &lay->bar[lay->n_bars++];
+    memset(bar, 0, sizeof(*bar));
+    bar->edge = (uint8_t)b->edge;
+    bar->size = (uint8_t)b->size;
+    bar->text0 = lay->n_text;
+    int ti = 0;
+    for (int s = 0; s < MOY_THEME_SLOTS; s++) {
+        for (int k = 0; k < b->n[s]; k++) {
+            int wid = b->w[s][k];
+            uint16_t bit = (uint16_t)(1u << wid);
+            const char *t = NULL;
+            if (wid == MOY_THEME_W_TEXT) {
+                t = ti < b->n_text ? b->text[ti] : "";
+                ti++;
+                if (!t[0]) {
+                    out->notes |= MOY_THEME_N_DROPPED;
+                    continue;
+                }
+            }
+            if ((*seen & bit) && !(MOY_THEME_W_REPEATABLE & bit)) {
+                out->notes |= MOY_THEME_N_DROPPED;
+                continue;
+            }
+            if (*count == MOY_THEME_WIDGET_CAP) {
+                out->notes |= MOY_THEME_N_DROPPED;
+                continue;
+            }
+            *seen |= bit;
+            (*count)++;
+            bar->w[s][bar->n[s]++] = (uint8_t)wid;
+            if (t != NULL) {
+                memcpy(lay->text[lay->n_text++], t, MOY_THEME_TEXT_MAX + 1);
+                bar->n_text++;
+            }
+        }
+    }
+    if (ti < b->n_text) {
+        out->notes |= MOY_THEME_N_DROPPED;     // strings without a `text` widget
+    }
+}
+
+// `bars`: the list, then the required-set rule on what it placed. 0, or -1.
+static int bars_list(rd_t *r, moy_theme_pkg_t *out) {
+    moy_theme_layout_t *lay = &out->layout;
+    memset(lay, 0, sizeof(*lay));
+    lay->set = MOY_THEME_LAYOUT_SET;
+    uint16_t seen = 0;
+    int count = 0;
+    if (!eat(r, ']')) {
+        r->depth++;
+        for (;;) {
+            if (eat(r, '{')) {
+                raw_bar_t b;
+                if (bar_obj(r, out, &b) < 0) {
+                    return -1;
+                }
+                bar_commit(out, &b, &seen, &count);
+            } else {
+                int32_t iv;
+                if (value(r, &iv) < 0) {
+                    return -1;
+                }
+                out->notes |= MOY_THEME_N_DROPPED;
+            }
+            if (eat(r, ',')) {
+                continue;
+            }
+            r->depth--;
+            if (!eat(r, ']')) {
+                return -1;
+            }
+            break;
+        }
+    }
+    if ((seen & MOY_THEME_W_REQUIRED) != MOY_THEME_W_REQUIRED) {
+        lay->set = MOY_THEME_LAYOUT_REFUSED;
+        out->notes |= MOY_THEME_N_DROPPED;
+    }
+    return 0;
+}
+
+// `layout`: {"bars": [...]}. 0, or -1: malformed.
+static int layout_key(rd_t *r, moy_theme_pkg_t *out) {
+    if (eat(r, '}')) {
+        return 0;
+    }
+    r->depth++;
+    for (;;) {
+        char key[16];
+        int over;
+        int32_t iv;
+        if (str(r, key, sizeof(key), &over) < 0 || !eat(r, ':')) {
+            return -1;
+        }
+        int is_bars = !over && strcmp(key, "bars") == 0;
+        int rc;
+        if (is_bars && eat(r, '[')) {
+            rc = bars_list(r, out);
+        } else {
+            rc = value(r, &iv);
+            out->notes |= is_bars ? MOY_THEME_N_DROPPED : MOY_THEME_N_UNKNOWN;
+        }
+        if (rc < 0) {
+            return -1;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        r->depth--;
+        return eat(r, '}') ? 0 : -1;
+    }
+}
+
 static int reserved(const char *key) {
     for (int i = 0; i < MOY_THEME_RESERVED; i++) {
         if (strcmp(moy_theme_reserved[i], key) == 0) {
@@ -843,10 +1109,13 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
                 kind = frame_key(&r, out);
             } else if (strcmp(key, "fonts") == 0 && eat(&r, '{')) {
                 kind = fonts_key(&r, out);
+            } else if (strcmp(key, "layout") == 0 && eat(&r, '{')) {
+                kind = layout_key(&r, out);
             } else {
                 if (strcmp(key, "colors") == 0 || strcmp(key, "metrics") == 0
                     || strcmp(key, "text") == 0 || strcmp(key, "surfaces") == 0
-                    || strcmp(key, "frame") == 0 || strcmp(key, "fonts") == 0) {
+                    || strcmp(key, "frame") == 0 || strcmp(key, "fonts") == 0
+                    || strcmp(key, "layout") == 0) {
                     out->notes |= MOY_THEME_N_DROPPED;
                 } else if (!reserved(key)) {
                     out->notes |= MOY_THEME_N_UNKNOWN;
@@ -1134,6 +1403,42 @@ int moy_theme_fonts(const char *name, size_t n,
         const char *def = moy_theme_seed_names[0];
         memset(out, 0, MOY_THEME_FONT_ROLES * (MOY_THEME_NAME_MAX + 1));
         chain(def, strlen(def), apply_fonts, out);
+    }
+    return rc;
+}
+
+typedef struct {
+    moy_theme_layout_t *out;
+    int found;
+} layout_ctx_t;
+
+static void apply_layout(const moy_theme_pkg_t *pkg, void *ctx) {
+    layout_ctx_t *c = ctx;
+    if (!c->found && pkg->layout.set != MOY_THEME_LAYOUT_SILENT) {
+        memcpy(c->out, &pkg->layout, sizeof(pkg->layout));
+        c->found = 1;
+    }
+}
+
+const int moy_theme_layout_dims[7] = {
+    MOY_THEME_BARS, MOY_THEME_SLOTS, MOY_THEME_SLOT_CAP, MOY_THEME_WIDGET_CAP,
+    MOY_THEME_TEXT_MAX, MOY_THEME_WIDGETS, (int)sizeof(moy_theme_layout_t),
+};
+
+int moy_theme_layout(const char *name, size_t n, moy_theme_layout_t *out) {
+    layout_ctx_t c = {out, 0};
+    memset(out, 0, sizeof(*out));
+    int rc = chain(name, n, apply_layout, &c);
+    if (rc != MOY_THEME_OK || out->set == MOY_THEME_LAYOUT_REFUSED) {
+        const char *def = moy_theme_seed_names[0];
+        memset(out, 0, sizeof(*out));
+        c.found = 0;
+        chain(def, strlen(def), apply_layout, &c);
+        if (out->set == MOY_THEME_LAYOUT_SET) {
+            out->set = MOY_THEME_LAYOUT_REFUSED;
+        } else {
+            memset(out, 0, sizeof(*out));
+        }
     }
     return rc;
 }

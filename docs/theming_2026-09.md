@@ -51,7 +51,7 @@ for them from format 1.
 | D2 | Themes change the OS **extensively** (§0's range), not only colours. |
 | D3 | A theme can carry **paintable sprites** (9-slice frames, glyphs, a desktop tile), in the first or second version; the format reserves them from format 1. |
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
-| D5 | **Layout: both.** A theme sets the default bar layout and window mode; the user can override either in Settings, and the override survives a theme switch. Designed in the shell-layout doc (§4.8). |
+| D5 | **Layout: both.** A theme sets the default bar layout (its `layout`'s bars, §3); the user can override it in Settings, and the override survives a theme switch. A window's mode is its own button, not a theme's (`docs/shell_layout_2026-10.md` §15, owner 2026-10-13). Designed in the shell-layout doc (§4.8). |
 | D6 | **Themes bring wallpapers**, per **slot** (`desk`, `home`), which may differ; the user can override each slot. A theme ships static images and may name installed wallpaper carts (§4.9). |
 | D7 | **The home is one layout on every board**: the cover carousel with tabs (Games / Mine / Apps / Make), themeable, with its own wallpaper slot. **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 | D8 | **Format 1 carries four more keys** (owner, 2026-10-11, before phase 1 froze it): **content colour roles** for code syntax and the block editor's block colours (§4.1); a **corner radius of 0 to 3** (§4.2); a **pressed-label offset** (§4.2); and a **text effect** per part and state, `none`, `shadow` or `emboss` with the role it paints in (§4.3). Their defaults reproduce today's pixels. The Paint, sprite, map and scene canvases stay exempt. |
@@ -138,7 +138,7 @@ icon sheets. It never holds a cart or a script.
 
 **Format 1, as the loader reads it** (`native/moy_ui/moy_theme.h`; frozen
 2026-10-11 by phase 1, `surfaces` and `frame` defined 2026-10-12 by phase 3,
-`fonts` 2026-10-13 by phase 4):
+`fonts` 2026-10-13 by phase 4, `layout` 2026-10-13 by phase 5's step 4):
 
 ```json
 {
@@ -190,8 +190,13 @@ icon sheets. It never holds a cart or a script.
   `a-z`, `0-9`, `_`, `-`, `.`, not starting with `.`, so it never names a
   path. Each role comes from the nearest package that names one; an unknown
   role is ignored and an ill-formed name dropped. The file is §4.7's format.
+- **`layout`**: `bars`, a list of up to four bars, at most one per edge, each
+  a `size` and three slots of built-in widgets (style.json's `theme.layout`);
+  it resolves whole from the nearest package that sets it, never merged.
+  The caps, the clamps and the required-set rule are
+  `docs/shell_layout_2026-10.md` §5 and §9, which owns it.
 - **Reserved:** `sprites`, `icons`,
-  `images`, `wallpapers`, `layout`, `sounds`, `editor` (style.json's
+  `images`, `wallpapers`, `sounds`, `editor` (style.json's
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
 - Any other key or role is ignored, a value of the wrong type is dropped and an
@@ -207,7 +212,6 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
   "icons":    "icons.moygfx",
   "images":   { "desk": "desk.moyimg", "home": "home.moyimg" },
   "wallpapers": { "desk": "platinum_desk" },
-  "layout":   {},
   "sounds":   {},
   "editor":   {}
 }
@@ -220,8 +224,8 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
 - **`images`** are static pictures the theme ships. **`wallpapers`** name
   installed wallpaper carts by id. An id that is not installed falls back to
   the image, then to the default (§4.9).
-- **`layout`**, **`sounds`** and **`editor`** have no defined keys yet.
-  `layout` is filled by the shell-layout doc; `sounds` waits for #141; `editor`
+- **`sounds`** and **`editor`** have no defined keys yet. `sounds` waits for
+  #141; `editor`
   is where code colour schemes go when they come
   (`docs/studio_2026-09.md` §12), since syntax colours are content (§4.3).
 
@@ -687,8 +691,9 @@ from rev 1's review:
 - **Its own kernel mapping.** Bar presets, a dock and tiling grow the WMs, which
   stay Python (the kernel doc's §10 question 8: its sprint 7 does not run).
 
-Format 1 reserves `layout` with no keys, so no theme written before that doc
-lands is broken by it.
+Format 1 reserved `layout` with no keys until the shell-layout doc's step 4
+defined it additively (2026-10-13, §3), so no theme written before then is
+broken by it.
 
 ### 4.9 Images and wallpapers (D6)
 

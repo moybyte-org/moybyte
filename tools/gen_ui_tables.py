@@ -266,6 +266,9 @@ def generate_theme(style, t):
     limits, the derivation rules, the readability pairs, MOY64's luminance and
     the seed packages' bytes."""
     th = style["theme"]
+    lay = th["layout"]
+    if len(lay["widgets"]) > 16 or len(lay["edges"]) > 4 or lay["size"][1] > 255:
+        raise SystemExit("theme.layout: a widget is a bit of 16, an edge one of 4, a size a byte")
     seeds = []
     for name in th["seeds"]:
         with open(os.path.join(t.dir, "themes", name + ".json"), "rb") as f:
@@ -353,6 +356,24 @@ def generate_theme(style, t):
          "#define MOY_THEME_FRAMES %d" % len(th["frames"]),
          "#define MOY_THEME_ALIGNS %d" % len(th["title_aligns"]),
          "#define MOY_THEME_FRAME_BUTTONS %s" % _c_str(th["frame_buttons"]),
+         "// A layout (docs/shell_layout_2026-10.md \u00a75): its bars' edges, their",
+         "// slots and the widget catalogue; the caps and the size clamp.",
+         "#define MOY_THEME_BARS %d  // one per edge" % len(lay["edges"]),
+         "#define MOY_THEME_SLOTS %d" % len(lay["slots"]),
+         "#define MOY_THEME_WIDGETS %d" % len(lay["widgets"]),
+         "#define MOY_THEME_SLOT_CAP %d" % lay["slot_cap"],
+         "#define MOY_THEME_WIDGET_CAP %d" % lay["widget_cap"],
+         "#define MOY_THEME_BAR_MIN %d" % lay["size"][0],
+         "#define MOY_THEME_BAR_MAX %d" % lay["size"][1],
+         "#define MOY_THEME_BAR_SIZE %d" % lay["size_default"],
+         "#define MOY_THEME_TEXT_MAX %d" % lay["text_max"],
+         "#define MOY_THEME_W_REQUIRED 0x%xu  // a bit per widget" % sum(
+             1 << lay["widgets"].index(w) for w in lay["required"]),
+         "#define MOY_THEME_W_REPEATABLE 0x%xu" % sum(
+             1 << lay["widgets"].index(w) for w in lay["repeatable"]),
+         "enum {",
+         *["    MOY_THEME_W_%s = %d," % (_ident(w), i) for i, w in enumerate(lay["widgets"])],
+         "};",
          "enum {",
          *["    MOY_THEME_FRAME_%s = %d," % (_ident(f), i) for i, f in enumerate(th["frames"])],
          "};",
@@ -400,6 +421,9 @@ def generate_theme(style, t):
          "extern const uint16_t moy_theme_lum[64];",
          "extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];",
          "extern const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES];",
+         "extern const char *const moy_theme_bar_edges[MOY_THEME_BARS];",
+         "extern const char *const moy_theme_slot_names[MOY_THEME_SLOTS];",
+         "extern const char *const moy_theme_widget_names[MOY_THEME_WIDGETS];",
          "extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];",
          "extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];",
          "extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];",
@@ -433,7 +457,10 @@ def generate_theme(style, t):
                       ("moy_theme_fill_names[MOY_THEME_FILLS]", th["fills"]),
                       ("moy_theme_frame_names[MOY_THEME_FRAMES]", th["frames"]),
                       ("moy_theme_align_names[MOY_THEME_ALIGNS]", th["title_aligns"]),
-                      ("moy_theme_font_roles[MOY_THEME_FONT_ROLES]", th["font_roles"])):
+                      ("moy_theme_font_roles[MOY_THEME_FONT_ROLES]", th["font_roles"]),
+                      ("moy_theme_bar_edges[MOY_THEME_BARS]", lay["edges"]),
+                      ("moy_theme_slot_names[MOY_THEME_SLOTS]", lay["slots"]),
+                      ("moy_theme_widget_names[MOY_THEME_WIDGETS]", lay["widgets"])):
         c.append("const char *const %s = {" % decl)
         c.extend("    %s," % _c_str(n) for n in seq)
         c.append("};\n")

@@ -263,6 +263,7 @@ class SettingsLayer:
         self._rows_web = False
         self._rows_c6 = False
         self._rows_idle = None
+        self._rows_lgen = -1
         self._rows_tog = None
         # _toggle_rows' own memo: the registry block, plus the gate answer it
         # was built from held in a PREALLOCATED list compared element-wise --
@@ -1009,7 +1010,8 @@ class SettingsLayer:
         injected updater supports them. Built on demand so the rows appear/disappear with
         the updater without re-statting per draw.
 
-        MEMOIZED on the service capability flags plus the toggle block, because "on
+        MEMOIZED on the service capability flags, the toggle block and the
+        look's `layout_gen` (the LAYOUT row's presence), because "on
         demand" turned out to mean ~15 times per FRAME -- the draw loop asks once per
         ROW, and the pointer/scroll paths ask again -- and each call rebuilt the tuple
         through up to four
@@ -1030,7 +1032,9 @@ class SettingsLayer:
         c6u = getattr(ws, "c6_updater", None) is not None
         idle = getattr(ws, "idle_ladder", None)
         tog = self._toggle_rows()
-        if (self._rows_cache is not None and bt == self._rows_bt
+        lgen = ws.look.layout_gen
+        if (self._rows_cache is not None and lgen == self._rows_lgen
+                and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
                 and web == self._rows_web and c6u == self._rows_c6
                 and tog is self._rows_tog and idle is self._rows_idle):
@@ -1038,6 +1042,11 @@ class SettingsLayer:
         # The registry block sits directly after EDIT ICONS, which is where the
         # hand-spliced FRAMESKIP/PERF DIAG rows were: same order, same indices.
         rows = self._SETTINGS_ROWS + tog
+        if ws.look.layout_choices() or ws.look.layout_theme() is not None:
+            # LAYOUT (docs/shell_layout_2026-10.md §11): after FONT SIZE, and
+            # only where a package's layout differs from the theme's.
+            i = rows.index(("font_scale", "FONT SIZE", "font")) + 1
+            rows = rows[:i] + (("layout_theme", "LAYOUT", "layout"),) + rows[i:]
         if bt:
             # Keep network/input together. Dynamic capability gating preserves
             # the non-P4 Settings row indices.
@@ -1077,6 +1086,7 @@ class SettingsLayer:
         self._rows_web = web
         self._rows_c6 = c6u
         self._rows_idle = idle
+        self._rows_lgen = lgen
         self._rows_tog = tog
         self._rows_cache = rows
         return rows
@@ -1146,6 +1156,9 @@ class SettingsLayer:
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.look.cycle_font_scale(d)
+            return
+        if kind == "layout":                    # LAYOUT: THEME / a package's bars
+            ws.look.cycle_layout_theme(d)
             return
         if key == "name":
             cur = ws.system.get("name", self._MOCK_NAMES[0])
@@ -1638,6 +1651,9 @@ class SettingsLayer:
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
         if kind == "font":                 # system-UI font size (#39): 1x / 2x / 3x
             cv.print("%dx" % ws.look.font_scale, vx, y + 5, th["play"], 1)
+        elif kind == "layout":             # LAYOUT: THEME, or the package picked
+            pick = ws.look.layout_theme()
+            cv.print("THEME" if pick is None else pick.upper()[:8], vx, y + 5, th["play"], 1)
         elif kind == "mock-gauge":
             lvl = int(ws.system.get(key, 3))
             for s in range(5):

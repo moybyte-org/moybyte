@@ -186,7 +186,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_RULES 69
 #define MOY_THEME_PAIRS 7
 #define MOY_THEME_CONTRAST 30
-#define MOY_THEME_RESERVED 7
+#define MOY_THEME_RESERVED 6
 #define MOY_THEME_FONT_ROLES 3
 #define MOY_THEME_FONT_FILES 1  // the seeds' font files
 #define MOY_THEME_ROLES 51  // the tokens, then the content roles
@@ -205,6 +205,33 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_FRAMES 5
 #define MOY_THEME_ALIGNS 3
 #define MOY_THEME_FRAME_BUTTONS "CMZT"
+// A layout (docs/shell_layout_2026-10.md §5): its bars' edges, their
+// slots and the widget catalogue; the caps and the size clamp.
+#define MOY_THEME_BARS 4  // one per edge
+#define MOY_THEME_SLOTS 3
+#define MOY_THEME_WIDGETS 12
+#define MOY_THEME_SLOT_CAP 6
+#define MOY_THEME_WIDGET_CAP 12
+#define MOY_THEME_BAR_MIN 16
+#define MOY_THEME_BAR_MAX 160
+#define MOY_THEME_BAR_SIZE 18
+#define MOY_THEME_TEXT_MAX 24
+#define MOY_THEME_W_REQUIRED 0x7u  // a bit per widget
+#define MOY_THEME_W_REPEATABLE 0xe00u
+enum {
+    MOY_THEME_W_MENU = 0,
+    MOY_THEME_W_CLOSE = 1,
+    MOY_THEME_W_ZONE = 2,
+    MOY_THEME_W_TITLE = 3,
+    MOY_THEME_W_CLOCK = 4,
+    MOY_THEME_W_CALENDAR = 5,
+    MOY_THEME_W_WIFI = 6,
+    MOY_THEME_W_BATTERY = 7,
+    MOY_THEME_W_CHIPS = 8,
+    MOY_THEME_W_TEXT = 9,
+    MOY_THEME_W_SPACER = 10,
+    MOY_THEME_W_SEPARATOR = 11,
+};
 enum {
     MOY_THEME_FRAME_CLASSIC = 0,
     MOY_THEME_FRAME_TAB = 1,
@@ -266,6 +293,9 @@ extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];
 extern const uint16_t moy_theme_lum[64];
 extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];
 extern const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES];
+extern const char *const moy_theme_bar_edges[MOY_THEME_BARS];
+extern const char *const moy_theme_slot_names[MOY_THEME_SLOTS];
+extern const char *const moy_theme_widget_names[MOY_THEME_WIDGETS];
 extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];
 extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];
 extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];
