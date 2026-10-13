@@ -427,6 +427,56 @@ static int frame_key(rd_t *r, moy_theme_pkg_t *out) {
     }
 }
 
+// A font file's name: 1 to MOY_THEME_NAME_MAX of [a-z0-9_.-], not starting with '.'.
+static int file_ok(const char *s, int n, int over) {
+    if (n < 1 || over || n > MOY_THEME_NAME_MAX || s[0] == '.') {
+        return 0;
+    }
+    for (int i = 0; i < n; i++) {
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+              || c == '.')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// `fonts`: role -> a font file of the package. 0, or -1: malformed.
+static int fonts_key(rd_t *r, moy_theme_pkg_t *out) {
+    if (eat(r, '}')) {
+        return 0;
+    }
+    r->depth++;
+    for (;;) {
+        char key[16];
+        char file[MOY_THEME_NAME_MAX + 1];
+        int over;
+        int32_t iv;
+        if (str(r, key, sizeof(key), &over) < 0 || !eat(r, ':')) {
+            return -1;
+        }
+        int role = over ? -1 : find_name(moy_theme_font_roles, MOY_THEME_FONT_ROLES, key);
+        int len = peek(r) == '"' ? str(r, file, sizeof(file), &over) : -2;
+        if (len == -1 || (len == -2 && value(r, &iv) < 0)) {
+            return -1;
+        }
+        if (role < 0) {
+            out->notes |= MOY_THEME_N_UNKNOWN;
+        } else if (len >= 0 && file_ok(file, len, over)) {
+            memcpy(out->font[role], file, (size_t)len);
+            out->font[role][len] = 0;
+        } else {
+            out->notes |= MOY_THEME_N_DROPPED;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        r->depth--;
+        return eat(r, '}') ? 0 : -1;
+    }
+}
+
 // One state's effect: {"effect": NAME, "color": ROLE}. 0, or -1: malformed.
 static int effect(rd_t *r, moy_theme_pkg_t *out, int kind, int state) {
     int eff = -1, role = -1, bad = 0;
@@ -791,10 +841,12 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
                 kind = keyed(&r, out, moy_theme_part_names, MOY_THEME_PARTS, each_surface, 0);
             } else if (strcmp(key, "frame") == 0 && eat(&r, '{')) {
                 kind = frame_key(&r, out);
+            } else if (strcmp(key, "fonts") == 0 && eat(&r, '{')) {
+                kind = fonts_key(&r, out);
             } else {
                 if (strcmp(key, "colors") == 0 || strcmp(key, "metrics") == 0
                     || strcmp(key, "text") == 0 || strcmp(key, "surfaces") == 0
-                    || strcmp(key, "frame") == 0) {
+                    || strcmp(key, "frame") == 0 || strcmp(key, "fonts") == 0) {
                     out->notes |= MOY_THEME_N_DROPPED;
                 } else if (!reserved(key)) {
                     out->notes |= MOY_THEME_N_UNKNOWN;
@@ -1051,6 +1103,27 @@ int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out) {
     n = n < MOY_UI_SHAPE_NAME - 1 ? n : MOY_UI_SHAPE_NAME - 1;
     memcpy(out->name, name, n);
     out->name[n] = 0;
+    return rc;
+}
+
+static void apply_fonts(const moy_theme_pkg_t *pkg, void *ctx) {
+    char (*out)[MOY_THEME_NAME_MAX + 1] = ctx;
+    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+        if (out[i][0] == 0) {
+            memcpy(out[i], pkg->font[i], sizeof(pkg->font[i]));
+        }
+    }
+}
+
+int moy_theme_fonts(const char *name, size_t n,
+                    char out[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1]) {
+    memset(out, 0, MOY_THEME_FONT_ROLES * (MOY_THEME_NAME_MAX + 1));
+    int rc = chain(name, n, apply_fonts, out);
+    if (rc != MOY_THEME_OK) {
+        const char *def = moy_theme_seed_names[0];
+        memset(out, 0, MOY_THEME_FONT_ROLES * (MOY_THEME_NAME_MAX + 1));
+        chain(def, strlen(def), apply_fonts, out);
+    }
     return rc;
 }
 

@@ -384,6 +384,7 @@ def _corpus(n):
                                        "pressed": {"effect": "shadow", "color": "dim"}},
                             "tab": {"on": {"effect": "shadow", "color": "code_text"}}},
                       colors={"dark": {"block_sound": 3, "accent": 9}},
+                      fonts={"ui": "ui.fnt", "mono": "mono-8.fnt"},
                       surfaces={"button": {"rest": "bevel2, fill surface, shadow",
                                            "pressed": "sunken, dither shade_lo/7"},
                                 "window.title": {"active": "pinstripe shade_lo/shade_hi"}}))
@@ -411,7 +412,7 @@ def _answer(mod, src):
     if rc != 0:
         return rc, notes, None, None
     return rc, notes, mod.theme(mod.theme_installed(), False), \
-        mod.theme_shape(mod.theme_installed())
+        (mod.theme_shape(mod.theme_installed()), mod.theme_fonts(mod.theme_installed()))
 
 
 def test_mutated_themes_never_break_the_reader():
@@ -436,7 +437,7 @@ while i < len(data):
     rc, notes = moy_ui.theme_install(src)
     if rc == 0:
         n = moy_ui.theme_installed()
-        print(repr((rc, notes, moy_ui.theme(n, False), moy_ui.theme_shape(n))))
+        print(repr((rc, notes, moy_ui.theme(n, False), (moy_ui.theme_shape(n), moy_ui.theme_fonts(n)))))
     else:
         print(repr((rc, notes, None, None)))
 """

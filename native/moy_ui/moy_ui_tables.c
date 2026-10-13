@@ -614,6 +614,12 @@ const char *const moy_theme_align_names[MOY_THEME_ALIGNS] = {
     "right",
 };
 
+const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES] = {
+    "ui",
+    "title",
+    "mono",
+};
+
 const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {5, 2, 5, 5, 5, 255, 5, 6};
 
 const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
@@ -638,7 +644,6 @@ const uint16_t moy_theme_lum[64] = {
 };
 
 const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
-    "fonts",
     "sprites",
     "icons",
     "images",
@@ -874,4 +879,5 @@ const int moy_theme_n_metrics = MOY_THEME_METRICS;
 const int moy_theme_n_effects = MOY_THEME_EFFECTS;
 const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
+const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1271, 364, 360, 397, 390, 779, 1388, 1296, 860};

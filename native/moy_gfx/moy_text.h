@@ -7,20 +7,24 @@
 // `moy_print` at 8 px on every cart runtime (SPEC.md §6) and does not come
 // here.
 //
-// TEXT IS UTF-8 BYTES, MEASURED IN BYTES: the font advances one cell per byte,
-// so a width, a fit and a wrap count bytes, and a truncation NEVER cuts a
-// UTF-8 sequence -- it backs up to the last whole codepoint. For ASCII a byte
-// is a character; anything else draws as the font's first glyph, a cell per
-// byte, until a font covers it.
+// TEXT IS UTF-8 BYTES, MEASURED IN BYTES: the font draws one glyph per byte,
+// so a width is the bytes' advances (petme128's are all one 8px cell), a wrap
+// counts bytes, and a truncation NEVER cuts a UTF-8 sequence -- it backs up to
+// the last whole codepoint. For ASCII a byte is a character; anything else
+// draws as the font's first glyph, a glyph per byte, until a font covers it.
 //
 // EVERY CALL CARRIES ITS SOURCE: TABLE (a string id's text), PY (text a
 // runtime passed in), DATA (a number or a user's text formatted into a table
 // entry) or LIT (a literal in C). LIT never reaches the raster: moy_text
 // refuses it.
 //
-// THE FONT is a handle-shaped uint32. There is one, petme128, id 0: libmoy's
-// compiled-in copy, byte-identical to runtime/font.py's (SPEC.md §6 requires
-// it, and the spec's text scenes hold it).
+// THE FONT is a handle-shaped uint32: a row behind every call's font argument.
+// Row 0 is petme128, libmoy's compiled-in copy, byte-identical to
+// runtime/font.py's (SPEC.md §6 requires it, and the spec's text scenes hold
+// it). A theme font is another row: moy_font_load checks a font file
+// (docs/theming_2026-09.md §4.7 has the format) and copies it into a buffer
+// the row owns, and its id names the slot and the slot's generation, so an id
+// outlives its font only as a refusal.
 
 #ifndef MOY_TEXT_H
 #define MOY_TEXT_H
@@ -33,6 +37,47 @@ enum { MOY_TEXT_LEFT = 0, MOY_TEXT_CENTER = 1, MOY_TEXT_RIGHT = 2 };
 
 #define MOY_FONT_PETME128 0u
 #define MOY_TEXT_CELL 8         // petme128's advance and height, in pixels
+#define MOY_TEXT_ASCENT 7       // petme128's baseline: its capitals' rows
+
+// The font file (docs/theming_2026-09.md §4.7): a 16-byte header, the
+// advance table padded to 4 bytes, the glyphs. Every field is a byte but
+// `size`, which the reader assembles from its four bytes.
+#define MOY_FONT_MAGIC "MFNT"
+#define MOY_FONT_VERSION 1
+#define MOY_FONT_HEADER 16
+#define MOY_FONT_CELL_MAX 16    // a glyph box's width and height, in pixels
+#define MOY_FONT_LINE_MAX 32
+#define MOY_FONT_BYTES 8192     // the largest file the reader takes
+#define MOY_FONT_SLOTS 4        // loaded fonts at once, beside petme128
+
+// What moy_font_load answers: OK, or why the file was refused.
+enum {
+    MOY_FONT_OK = 0,
+    MOY_FONT_BIG = 1,           // over MOY_FONT_BYTES
+    MOY_FONT_SHORT = 2,         // under its header, or not the length its header says
+    MOY_FONT_MAGIC_BAD = 3,     // not a font file
+    MOY_FONT_NEWER = 4,         // a version this reader does not take
+    MOY_FONT_BAD = 5,           // a field out of its range, a reserved byte or a padding byte set, a bit below the glyph box
+    MOY_FONT_FULL = 6,          // every slot holds a font
+    MOY_FONT_NOMEM = 7,
+};
+
+// A font's metrics: its glyph box, its line advance, its baseline (rows from
+// the box's top) and the bytes its glyphs cover.
+typedef struct {
+    int w, h, line, ascent, first, count;
+} moy_font_info_t;
+
+// Check font file `src` (n bytes, at any address) and load it into a row of
+// its own. MOY_FONT_OK with *id set, or a refusal with nothing loaded.
+int moy_font_load(const uint8_t *src, size_t n, uint32_t *id);
+
+// Free a loaded font's row; its id is refused from then on. 1, or 0 for an id
+// that names no loaded font (petme128 is never freed).
+int moy_font_free(uint32_t font);
+
+// Font `font`'s metrics into *out: 1, or 0 for an unknown font.
+int moy_font_info(uint32_t font, moy_font_info_t *out);
 
 // Where text lands: an RGB565 buffer `dw` pixels wide holding `cap` pixels,
 // the camera and the clip (buffer space, exclusive right and bottom).
@@ -57,14 +102,15 @@ int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw);
 
-// The width `s` draws at `scale`, in pixels (0 for an unknown font).
+// The width `s` draws at `scale`, in pixels (0 for an unknown font): the sum
+// of its glyphs' advances.
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);
 
 // The longest prefix of `s` that is at most `cells` bytes and ends on a
 // codepoint boundary.
 size_t moy_text_fit(const uint8_t *s, size_t n, size_t cells);
 
-// Word wrap into lines of at most `cols` bytes.
+// Word wrap into lines of at most `cols` bytes, for any known font.
 //
 // MOY_WRAP_WORDS (the toolkit's): words split on whitespace; a line is its
 // words joined by single spaces; a word longer than a line gets a line of

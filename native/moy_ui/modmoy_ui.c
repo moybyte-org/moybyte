@@ -237,6 +237,58 @@ static mp_obj_t ui_theme_installed(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_installed_obj, ui_theme_installed);
 
+// theme_fonts(name) -> ((role, file), ...): theme `name`'s font files, each
+// from the nearest package that names one, in style.json's role order.
+static mp_obj_t ui_theme_fonts(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    char files[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1];
+    moy_theme_fonts(s, n, files);
+    mp_obj_t out[MOY_THEME_FONT_ROLES];
+    size_t k = 0;
+    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+        if (files[i][0]) {
+            mp_obj_t t[2] = {name_obj(moy_theme_font_roles[i]),
+                             mp_obj_new_str(files[i], strlen(files[i]))};
+            out[k++] = mp_obj_new_tuple(2, t);
+        }
+    }
+    return mp_obj_new_tuple(k, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_fonts_obj, ui_theme_fonts);
+
+// font_load(src) -> (rc, font): src a font file's bytes (moy_text.h); font
+// the loaded row's id, or None when refused.
+static mp_obj_t ui_font_load(mp_obj_t src) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(src, &b, MP_BUFFER_READ);
+    uint32_t id = 0;
+    int rc = moy_font_load(b.buf, b.len, &id);
+    mp_obj_t out[2] = {MP_OBJ_NEW_SMALL_INT(rc),
+                       rc == MOY_FONT_OK ? mp_obj_new_int_from_uint(id) : mp_const_none};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_load_obj, ui_font_load);
+
+// font_free(font) -> bool: False for an id that names no loaded font.
+static mp_obj_t ui_font_free(mp_obj_t font) {
+    return mp_obj_new_bool(moy_font_free((uint32_t)mp_obj_get_int_truncated(font)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_free_obj, ui_font_free);
+
+// font_info(font) -> (w, h, line, ascent, first, count), or None.
+static mp_obj_t ui_font_info(mp_obj_t font) {
+    moy_font_info_t f;
+    if (!moy_font_info((uint32_t)mp_obj_get_int_truncated(font), &f)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[6] = {MP_OBJ_NEW_SMALL_INT(f.w), MP_OBJ_NEW_SMALL_INT(f.h),
+                     MP_OBJ_NEW_SMALL_INT(f.line), MP_OBJ_NEW_SMALL_INT(f.ascent),
+                     MP_OBJ_NEW_SMALL_INT(f.first), MP_OBJ_NEW_SMALL_INT(f.count)};
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_info_obj, ui_font_info);
+
 static void check(int rc) {
     if (rc == MOY_UI_NOMEM) {
         mp_raise_type(&mp_type_MemoryError);
@@ -293,14 +345,16 @@ static mp_obj_t ui_metrics(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_metrics_obj, ui_metrics);
 
-// text_width(s, scale=1): the pixels `s` draws at `scale` (moy_text.h: bytes).
+// text_width(s, scale=1, font=0): the pixels `s` draws at `scale` in `font`
+// (moy_text.h: bytes; 0 for an unknown font).
 static mp_obj_t ui_text_width(size_t n_args, const mp_obj_t *args) {
     size_t n;
     const char *s = mp_obj_str_get_data(args[0], &n);
     int scale = n_args > 1 ? (int)mp_obj_get_int(args[1]) : 1;
-    return MP_OBJ_NEW_SMALL_INT(moy_text_width(MOY_FONT_PETME128, (const uint8_t *)s, n, scale));
+    uint32_t font = n_args > 2 ? (uint32_t)mp_obj_get_int_truncated(args[2]) : MOY_FONT_PETME128;
+    return MP_OBJ_NEW_SMALL_INT(moy_text_width(font, (const uint8_t *)s, n, scale));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_width_obj, 1, 2, ui_text_width);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_width_obj, 1, 3, ui_text_width);
 
 // wrap(s, cols) -> [line, ...]: the toolkit's word wrap (moy_text_wrap's
 // words mode), each line its words joined by single spaces.
@@ -1123,6 +1177,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_states), MP_ROM_PTR(&ui_theme_states_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_install), MP_ROM_PTR(&ui_theme_install_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font_free), MP_ROM_PTR(&ui_font_free_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font_info), MP_ROM_PTR(&ui_font_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_look), MP_ROM_PTR(&ui_look_obj) },
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&ui_colors_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },

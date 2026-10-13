@@ -254,6 +254,92 @@ def painter_matches_host(board):
                        strict=True) == moy_ui.theme_shape(name)[2]
 
 
+# -- the font lane (docs/theming_2026-09.md §4.7) ---------------------------------
+
+FONT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "fixtures", "fonts", "sample6x9.fnt")
+FONT_PROBE = "Hi, there! 0123 ~{|}"
+
+
+def font_corpus(n, seed=7):
+    """The sample font, its cuts and a mutant per draw: truncations, a byte
+    flipped anywhere (header, advances, glyphs), bytes inserted or dropped
+    (every table then lands off its aligned offset)."""
+    import random
+    with open(FONT_FIXTURE, "rb") as f:
+        good = f.read()
+    rng = random.Random(seed)
+    out = [good, good[:15], good[:16], good[:-1], b"", b"MFNT", good + b"\0"]
+    while len(out) < n:
+        b = bytearray(good)
+        for _m in range(rng.randint(1, 3)):
+            if len(b) < 16:
+                break
+            op = rng.randrange(5)
+            i = rng.randrange(len(b))
+            if op == 0:
+                b[i] = rng.randrange(256)
+            elif op == 1:
+                b[rng.randrange(16)] = rng.randrange(256)
+            elif op == 2:
+                del b[i]
+            elif op == 3:
+                b[i:i] = bytes([rng.randrange(256)])
+            else:
+                b = b[:i]
+        out.append(bytes(b))
+    return out
+
+
+def font_answer(mod, src):
+    """What a moy_ui answers for one font file: the load's code, then for a
+    loaded font its metrics and the probe's width at scales 1 and 2, the
+    font freed again. The id is left out: a slot's generation is history."""
+    rc, fid = mod.font_load(src)
+    if rc != 0:
+        return (rc, None, None)
+    try:
+        return (rc, mod.font_info(fid),
+                (mod.text_width(FONT_PROBE, 1, fid), mod.text_width(FONT_PROBE, 2, fid)))
+    finally:
+        mod.font_free(fid)
+
+
+_FONT_HELPER = """
+import moy_ui, binascii
+def _font_probe(hx, off):
+    b = bytearray(off) + binascii.unhexlify(hx)
+    rc, fid = moy_ui.font_load(memoryview(b)[off:])
+    if rc != 0:
+        return (rc, None, None)
+    try:
+        return (rc, moy_ui.font_info(fid), (moy_ui.text_width(%r, 1, fid),
+                                            moy_ui.text_width(%r, 2, fid)))
+    finally:
+        moy_ui.font_free(fid)
+""" % (FONT_PROBE, FONT_PROBE)
+
+
+def fonts_match_host(board, n=48):
+    """A fuzzed font corpus loaded by this board's moy_ui answers as the
+    host's does: every malformed, truncated or misaligned file refused with
+    the host's code and no fault, every good one measured alike. Each file
+    is handed over at an odd offset as well, so the reader meets a source
+    that is not word-aligned (an S3 faults on an unaligned 16- or 32-bit
+    load; the host and wasm do not)."""
+    import binascii
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    board.pyexec(_FONT_HELPER, strict=True)
+    for src in font_corpus(n):
+        want = font_answer(moy_ui, src)
+        hx = binascii.hexlify(src).decode()
+        for off in (0, 1):
+            got = board.pyval("ws._g['_font_probe'](%r, %d)" % (hx, off), strict=True)
+            assert got == want, (off, len(src), got, want)
+    assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
+
+
 def py_probe_reaches_the_console(board):
     line = board.cmd("py ws._frames_drawn", wait_for="PY ")
     assert line is not None and line.startswith("PY "), line

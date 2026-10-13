@@ -342,6 +342,60 @@ void mg_text_raw(uint16_t *dst, size_t dcap, int dw,
     }
 }
 
+/* A loaded font's row (mg_font_t): its column bytes and its advance table.
+ * Petme128 stays on mg_text_raw's cell loop: this loop drew petme128's chrome
+ * text 1.3x slower on the T-Deck, and still 1.06x with mg_text_raw's own loop
+ * behind a row dispatch (S3 A/Bs, 2026-10-13), so petme128's lane is the
+ * function it was and a loaded font is a lane of its own. */
+void mg_text_font(uint16_t *dst, size_t dcap, int dw,
+                  const uint8_t *s, size_t slen, int x, int y, uint16_t col,
+                  const mg_font_t *f, int scale,
+                  int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || f->count == 0) return;
+    if (scale < 1) scale = 1;
+    mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    x -= cam_x;
+    y -= cam_y;
+    if (y >= cy1 || y + f->h * scale <= cy0) return;   /* whole line off-clip */
+    const int w = f->w, bpc = f->bpc, first = f->first, count = f->count;
+    const int gw = w * scale;                    /* a glyph's box */
+    const uint8_t *adv = f->adv;
+    for (size_t i = 0; i < slen; i++) {
+        if (x >= cx1) break;                     /* rest is right of the clip */
+        int gi = (int)s[i] - first;
+        if (gi < 0 || gi >= count) gi = 0;       /* out of range -> first glyph */
+        int step = adv[gi] * scale;
+        if (x + gw <= cx0) {                     /* this glyph entirely left */
+            x += step;
+            continue;
+        }
+        const uint8_t *g = f->glyphs + (size_t)gi * (size_t)(w * bpc);
+        for (int j = 0; j < w; j++) {
+            int bx = x + j * scale;
+            if (bx >= cx1 || bx + scale <= cx0) continue;
+            for (int b = 0; b < bpc; b++) {
+                uint8_t bits = g[j * bpc + b];
+                for (int row = 8 * b; bits != 0; bits >>= 1, row++) {
+                    if (!(bits & 1)) continue;
+                    int by = y + row * scale;
+                    for (int sub_y = 0; sub_y < scale; sub_y++) {
+                        int ty = by + sub_y;
+                        if (ty < cy0 || ty >= cy1) continue;
+                        uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                        for (int sub_x = 0; sub_x < scale; sub_x++) {
+                            int tx = bx + sub_x;
+                            if (tx < cx0 || tx >= cx1) continue;
+                            drow[tx] = col;
+                        }
+                    }
+                }
+            }
+        }
+        x += step;
+    }
+}
+
 /* The scale-1 lane crossed into libmoy, was REVERTED on an S3 number of 1.21x,
  * and crossed again when that number was re-measured at 1.04x against current
  * libmoy -- the 1.21x had been taken before moy_print grew its whole-column

@@ -186,7 +186,8 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_RULES 69
 #define MOY_THEME_PAIRS 7
 #define MOY_THEME_CONTRAST 30
-#define MOY_THEME_RESERVED 8
+#define MOY_THEME_RESERVED 7
+#define MOY_THEME_FONT_ROLES 3
 #define MOY_THEME_ROLES 51  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3
@@ -263,10 +264,11 @@ extern const char *const moy_theme_align_names[MOY_THEME_ALIGNS];
 extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];
 extern const uint16_t moy_theme_lum[64];
 extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];
+extern const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES];
 extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];
 extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];
 extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];
 extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,
-    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states;
+    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles;
 
 #endif // MOY_UI_TABLES_H

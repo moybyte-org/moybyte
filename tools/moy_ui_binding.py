@@ -43,6 +43,10 @@ _SIGS = (
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
     ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
+    ("moy_font_load", [_P, _Z, c.POINTER(c.c_uint32)], _I),
+    ("moy_font_free", [c.c_uint32], _I),
+    ("moy_font_info", [c.c_uint32, c.c_void_p], _I),
+    ("moy_theme_fonts", [_P, _Z, c.c_void_p], _I),
     ("moy_ui_glyph_id", [_P, _Z], _I),
     ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
     ("moy_str", [_I], c.c_char_p),
@@ -234,9 +238,9 @@ def binding():
             return None
         return tuple(p[i] for i in range(n.value))
 
-    def text_width(text, scale=1):
+    def text_width(text, scale=1, font=0):
         b = _b(text)
-        return lib.moy_text_width(0, b, len(b), int(scale))
+        return lib.moy_text_width(int(font) & 0xFFFFFFFF, b, len(b), int(scale))
 
     def wrap(text, cols):
         b = _b(text)
@@ -699,9 +703,37 @@ def binding():
         s = lib.moy_theme_installed()
         return None if s is None else s.decode()
 
+    font_roles = _names(lib, "moy_theme_font_roles",
+                        c.c_int.in_dll(lib, "moy_theme_n_font_roles").value)
+
+    def theme_fonts(name):
+        b = _b(name)
+        files = ((c.c_char * 25) * len(font_roles))()
+        lib.moy_theme_fonts(b, len(b), files)
+        return tuple((r, f.value.decode()) for r, f in zip(font_roles, files) if f.value)
+
+    def font_load(src):
+        b = bytes(src)
+        fid = c.c_uint32()
+        rc = lib.moy_font_load(b, len(b), c.byref(fid))
+        return rc, (fid.value if rc == 0 else None)
+
+    def font_free(font):
+        return bool(lib.moy_font_free(int(font) & 0xFFFFFFFF))
+
+    def font_info(font):
+        out = (c.c_int * 6)()
+        if not lib.moy_font_info(int(font) & 0xFFFFFFFF, out):
+            return None
+        return tuple(out)
+
     m.theme = theme
     m.theme_install = theme_install
     m.theme_installed = theme_installed
+    m.theme_fonts = theme_fonts
+    m.font_load = font_load
+    m.font_free = font_free
+    m.font_info = font_info
     m.look = look
     m.colors = colors
     m.metrics = metrics

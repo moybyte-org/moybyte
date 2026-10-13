@@ -8,7 +8,8 @@
   (its transcription below is the oracle), and the toolkit's is the twin's.
 * A literal never reaches the raster.
 * A host golden pins a non-ASCII heading and wrap.
-* The ratchet: one rasterizer entry, no second wrap, no draw_scaled.
+* The ratchet: the rasterizer's two lanes (petme128's cells, a loaded font's
+  rows) entered from moy_text alone, no second wrap, no draw_scaled.
 """
 
 import ctypes
@@ -208,12 +209,13 @@ def test_one_rasterizer_entry_and_no_second_wrap():
     calls = []
     for rel, src in _sources(("native", "runtime"), (".c", ".h", ".py")):
         src = re.sub(r"//[^\n]*|/\*.*?\*/", "", src, flags=re.S)
-        for m in re.finditer(r"\bmg_text_raw\s*\(", src):
-            calls.append(rel)
-    # its declaration, its definition, and moy_text's one call
-    assert sorted(calls) == ["native/moy_gfx/moy_gfx_kernels.c",
-                             "native/moy_gfx/moy_gfx_kernels.h",
-                             "native/moy_gfx/moy_text.c"], calls
+        for m in re.finditer(r"\b(mg_text_raw|mg_text_font)\s*\(", src):
+            calls.append((m.group(1), rel))
+    # each lane's declaration, its definition, and moy_text's one call
+    assert sorted(calls) == sorted(
+        (lane, rel) for lane in ("mg_text_font", "mg_text_raw")
+        for rel in ("native/moy_gfx/moy_gfx_kernels.c", "native/moy_gfx/moy_gfx_kernels.h",
+                    "native/moy_gfx/moy_text.c")), calls
     for rel, src in _sources(("native", "runtime", "device"), (".c", ".h", ".py")):
         assert "draw_scaled" not in src, rel
     chrome_c = open(os.path.join(ROOT, "native/moy_play/moy_chrome.c")).read()

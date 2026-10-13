@@ -10,8 +10,9 @@
 // numbers, each clamped to its range), `text` (part -> state -> a text
 // effect and the role it paints with) and `surfaces` (part -> state -> one
 // line of the surface grammar, compiled here into a record the painter
-// draws) and `frame` (the window frame's style, title alignment and button
-// order: moy_ui.h's moy_ui_frame). The keys style.json's theme section
+// draws), `frame` (the window frame's style, title alignment and button
+// order: moy_ui.h's moy_ui_frame) and `fonts` (font role -> a font file of
+// the package, read by the font loader, moy_text.h). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
 // and noted. A reader refuses a newer `format`; a key a later phase defines
 // is additive and needs no bump.
@@ -75,6 +76,7 @@ typedef struct {
     moy_ui_surface_t surface_rec[MOY_THEME_SURFACES_CAP];
     uint8_t n_surfaces;
     uint8_t frame[MOY_UI_FRAME_FIELDS];     // moy_ui_shape_t's frame, 0 where silent
+    char font[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1];  // a file per role, "" where silent
     uint8_t notes;
 } moy_theme_pkg_t;
 
@@ -104,6 +106,12 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
 // surfaces, each from the nearest package that sets it (moy_ui.h's
 // moy_ui_shape_t). The return is as resolve's.
 int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out);
+
+// Theme `name`'s font files, one per role of moy_theme_font_roles, each from
+// the nearest package that names one ("" where none does). The return is as
+// resolve's.
+int moy_theme_fonts(const char *name, size_t n,
+                    char out[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1]);
 
 // Compile one surface's text (docs/theming_2026-09.md §4.4) into *out.
 // MOY_THEME_OK, or -1 for text the grammar does not take; *notes gets

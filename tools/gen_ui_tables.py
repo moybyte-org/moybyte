@@ -327,6 +327,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_PAIRS %d" % len(th["pairs"]),
          "#define MOY_THEME_CONTRAST %d" % th["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
+         "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
          "#define MOY_THEME_ROLES %d  // the tokens, then the content roles" % len(roles),
          "#define MOY_THEME_METRICS %d" % len(metrics),
          "#define MOY_THEME_EFFECTS %d" % len(th["effects"]),
@@ -389,11 +390,12 @@ def generate_theme(style, t):
          "extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];",
          "extern const uint16_t moy_theme_lum[64];",
          "extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];",
+         "extern const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES];",
          "extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];",
          "extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];",
          "extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];",
          "extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,",
-         "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states;"]
+         "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles;"]
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
     for r, k, v in rules:
         c.append("    {%d, %d, %d},  // %s" % (r, k, v, roles[r]))
@@ -418,7 +420,8 @@ def generate_theme(style, t):
                       ("moy_theme_edge_names[MOY_THEME_EDGES]", th["edges"]),
                       ("moy_theme_fill_names[MOY_THEME_FILLS]", th["fills"]),
                       ("moy_theme_frame_names[MOY_THEME_FRAMES]", th["frames"]),
-                      ("moy_theme_align_names[MOY_THEME_ALIGNS]", th["title_aligns"])):
+                      ("moy_theme_align_names[MOY_THEME_ALIGNS]", th["title_aligns"]),
+                      ("moy_theme_font_roles[MOY_THEME_FONT_ROLES]", th["font_roles"])):
         c.append("const char *const %s = {" % decl)
         c.extend("    %s," % _c_str(n) for n in seq)
         c.append("};\n")
@@ -452,6 +455,7 @@ def generate_theme(style, t):
     c.append("const int moy_theme_n_effects = MOY_THEME_EFFECTS;")
     c.append("const int moy_theme_n_parts = MOY_THEME_PARTS;")
     c.append("const int moy_theme_n_states = MOY_THEME_STATES;")
+    c.append("const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;")
     c.append("const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {%s};\n"
              % ", ".join(str(len(s)) for _n, s in seeds))
     return h, c

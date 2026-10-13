@@ -86,10 +86,10 @@ Each was mocked and judged worse (§11).
   installed with the theme; the skin axis folded into it (phase 3 step 4), and
   `outline`, once the second skin, is a seed package.
 - **Text:** one text call, `moy_text` (`native/moy_gfx/moy_text.h`), for every
-  UI string: UTF-8, a font argument (one font today, petme128, id 0), `align`
-  and `maxw`, and it returns the drawn width. Chrome text at every scale is
-  `mg_text_raw` over the staged petme128 blob; a cart's `print` is libmoy's
-  `moy_print`.
+  UI string: UTF-8, a font argument (a row: petme128 is id 0, a loaded font
+  file another, §4.7), `align` and `maxw`, and it returns the drawn width.
+  Chrome text at every scale is `mg_text_raw` drawing petme128's row; a cart's
+  `print` is libmoy's `moy_print`.
 - **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
   from `chrome._ICON_ART`, or the user's own edited sheet, `system_icons.moygfx`
   (Settings → EDIT ICONS).
@@ -137,7 +137,8 @@ It holds a `theme.json` and optional **data** assets: images, fonts, sprite and
 icon sheets. It never holds a cart or a script.
 
 **Format 1, as the loader reads it** (`native/moy_ui/moy_theme.h`; frozen
-2026-10-11 by phase 1, `surfaces` and `frame` defined 2026-10-12 by phase 3):
+2026-10-11 by phase 1, `surfaces` and `frame` defined 2026-10-12 by phase 3,
+`fonts` 2026-10-13 by phase 4):
 
 ```json
 {
@@ -150,6 +151,7 @@ icon sheets. It never holds a cart or a script.
   },
   "metrics": { "radius": 2, "press_dx": 1, "press_dy": 1 },
   "frame": { "style": "platinum", "title_align": "center", "buttons": "C|T|ZM" },
+  "fonts": { "ui": "ui.fnt", "title": "title.fnt" },
   "text": {
     "button": { "disabled": { "effect": "emboss", "color": "ink" } }
   },
@@ -183,7 +185,12 @@ icon sheets. It never holds a cart or a script.
   (close), `M` (minimise), `Z` (maximise) and `T` (the title) once, a `|`
   between them allowed. What a theme leaves out is its style's own (§4.5); a
   value the key does not take is dropped.
-- **Reserved:** `fonts`, `sprites`, `icons`,
+- **`fonts`**: role → a font file in the package, the roles `ui`, `title`
+  and `mono` (style.json's `theme.font_roles`); a file name is 1 to 24 of
+  `a-z`, `0-9`, `_`, `-`, `.`, not starting with `.`, so it never names a
+  path. Each role comes from the nearest package that names one; an unknown
+  role is ignored and an ill-formed name dropped. The file is §4.7's format.
+- **Reserved:** `sprites`, `icons`,
   `images`, `wallpapers`, `layout`, `sounds`, `editor` (style.json's
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
@@ -196,7 +203,6 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
 ```json
 {
   "metrics":  { "border": 1, "title_h": 14, "button": 11, "pad": 4, "gap": 4, "shadow": 1 },
-  "fonts":    { "ui": "ui.fnt", "title": "title.fnt" },
   "sprites":  "parts.moygfx",
   "icons":    "icons.moygfx",
   "images":   { "desk": "desk.moyimg", "home": "home.moyimg" },
@@ -526,6 +532,53 @@ The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
   (64-byte aligned) buffer. GCC on the S3 faults on an unaligned 16- or 32-bit
   load, which host and wasm do not reproduce, so phase 4 includes an on-glass
   load of a fuzzed font on an S3.
+
+**The font file, version 1** (`native/moy_gfx/moy_text.h`; defined
+2026-10-13 by phase 4 step 1). Little-endian; every field is a byte but
+`size`:
+
+| offset | bytes | field |
+|---|---|---|
+| 0 | 4 | `MFNT` |
+| 4 | 1 | version, 1 (a newer one is refused) |
+| 5 | 1 | glyph box width, 1-16 |
+| 6 | 1 | glyph box height, 1-16 |
+| 7 | 1 | line advance, the height to 32 |
+| 8 | 1 | ascent: the baseline, in rows from the box's top, 0 to the height |
+| 9 | 1 | the first byte the glyphs cover |
+| 10 | 1 | how many glyphs, 1 up, ending at or before byte 255 |
+| 11 | 1 | reserved, 0 |
+| 12 | 4 | `size`: the file's length |
+| 16 | count, padded to 4 | each glyph's advance in pixels, 0-32; padding 0 |
+| then | count × width × ⌈height / 8⌉ | the glyphs: a glyph's columns left to right, a column's bytes top down, bit 0 of each its top row (petme128's layout at 8×8) |
+
+A byte the glyphs do not cover draws glyph 0. The reader refuses a file over
+8192 bytes, shorter than its header or than `size` says, with another magic or
+a newer version, a field out of range, a reserved or padding byte set, tables
+that do not fill `size` exactly, or a bit set below the glyph box, each by its
+own code; a refused file loads nothing. A loaded file is copied into a buffer
+its row owns; four rows load at once beside petme128, and an id names its slot
+and the slot's generation, so a freed font's id is refused everywhere it is
+passed. Petme128's row keeps `mg_text_raw`'s cell loop and a loaded font
+draws through `mg_text_font`, a lane of its own: the S3 A/B that gated this
+step is recorded in `moy_gfx_kernels.c`.
+`moy_ui` faces it: `font_load`, `font_free`, `font_info` (box, line, ascent,
+range), `text_width`'s font argument, and `theme_fonts` for the `fonts` key
+(§3). `tests/test_font_lane.py` holds both rows to a reference raster, the
+refusals to their codes and a fuzz to the target, and the boards' module to
+the host's answers; `tests/on_glass.py`'s `fonts_match_host` loads the fuzz
+corpus on glass at an odd address.
+
+Ruled 2026-10-13, each the pick that builds least:
+  - **Bytes, not a `moybuf`.** The reader assembles `size` from its bytes
+    and every other field is one, so a source at any address is read alike
+    and no caller aligns anything.
+  - **Advances in the file, the glyph box fixed.** A per-glyph advance
+    makes a proportional font (Tiny5, step 3) one format with petme128; a
+    glyph keeps the box's width, so no per-glyph offsets.
+  - **A wrap still counts bytes.** `moy_text_wrap` takes any loaded font
+    and wraps in `cols`; a wrap in pixels arrives with the line metrics
+    layout reads (step 2).
 - **App carts.** `ui` is the real toolkit, handed to every `type: "app"` cart,
   and those carts lay out in 8px cells and `print` in petme128. A theme font
   therefore reaches app carts **only together with** a published `text_w()` and
@@ -892,7 +945,7 @@ count falls.
          shipped.
 
 **Phase 4 — type** (three steps, one re-baseline).
-  1. **The font format and its lane.** The aligned bitmap format (§4.7), read
+  1. **The font format and its lane** (landed 2026-10-13). The aligned bitmap format (§4.7), read
      by the loader into a buffer it owns; a font row behind `moy_text`'s font
      argument; the `fonts` key defined. Gate: goldens byte-identical (no seed
      names a font); the cart `print` path and the Lua C API byte-identical; an

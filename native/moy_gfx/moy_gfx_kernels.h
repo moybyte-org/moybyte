@@ -309,6 +309,23 @@ void mg_text_raw(uint16_t *dst, size_t dcap, int dw,
                  const uint8_t *font, int nglyphs, int first, int scale,
                  int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
+/* A loaded bitmap font as mg_text_font reads it: `count` glyphs from byte
+ * `first`, each `w` columns of `bpc` bytes, bit 0 of a column's first byte its
+ * top row; `adv` each glyph's advance in pixels. A byte outside the range
+ * draws glyph 0. moy_text.c holds the rows and checks a loaded one. */
+typedef struct {
+    const uint8_t *glyphs;
+    const uint8_t *adv;
+    uint8_t w, h, bpc, first, count;
+} mg_font_t;
+
+/* mg_text_raw for a loaded font: every set pixel a scale x scale block, each
+ * glyph advancing its own width. Bounds-safe as mg_text_raw is. */
+void mg_text_font(uint16_t *dst, size_t dcap, int dw,
+                  const uint8_t *s, size_t slen, int x, int y, uint16_t col,
+                  const mg_font_t *f, int scale,
+                  int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
 /* text (#62): a whole string in ONE call, camera and clip honoured per pixel.
  * Scale 1 is a CART's text, which SPEC.md 6 fixes at 8px, so it goes through
  * libmoy's moy_print and libmoy's own compiled-in font -- the `font` blob is
