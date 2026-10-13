@@ -200,7 +200,7 @@ class FileGridView:
         x, y, w, h = self._rect
         if not self.names:
             msg = "NOTHING HERE YET"
-            cv.print(msg, x + (w - len(msg) * 8 * fs) // 2,
+            cv.print(msg, x + (w - _ui.print_width(msg, fs)) // 2,
                      y + (h - 8 * fs) // 2, th.get("dim", 1), 1)
             return
         start = self.page * self._per_page()
@@ -226,7 +226,7 @@ class FileGridView:
             cv.print("<", prev_r[0] + 8 * fs, prev_r[1] + 3 * fs, ink, 1)
             cv.print(">", next_r[0] + 8 * fs, next_r[1] + 3 * fs, ink, 1)
             label = str(self.page + 1) + "/" + str(self._pages())
-            cv.print(label, x + (w - len(label) * 8 * fs) // 2,
+            cv.print(label, x + (w - _ui.print_width(label, fs)) // 2,
                      prev_r[1] + 3 * fs, th.get("dim", 1), 1)
 
     def _index_at(self, px, py):

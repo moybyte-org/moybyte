@@ -4,7 +4,7 @@ navigation loop between them (PLAY icon <-> Make tile / CHANGE)."""
 
 import pytest
 
-from runtime import host_app
+from runtime import host_app, ui
 from runtime.host_canvas import make_system_canvas
 
 
@@ -46,7 +46,7 @@ def test_desk_icon_labels_fit_their_pills(tmp_path):
     _drv(ws)
     fs = ws.look.effective_font_scale()
     for _key, _box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
-        assert len(label) * 8 * fs + 4 <= pill[2], label
+        assert ui.text_width(label, fs, "ui") + 4 <= pill[2], label
 
 
 # -- #174: the desk column, DRAWN, on the wallpaper that hid the bug ----------
@@ -85,7 +85,8 @@ def _ink(cv, rect, col):
 def _label_ink(label, fs, ink, field):
     """The ink a WHOLE label costs, rasterized outside ui.chip -- comparing a
     chip against a chip would only prove the clip agrees with itself."""
-    cv = make_system_canvas(len(label) * 8 * fs + 8, 8 * fs + 8, font_scale=fs)
+    cv = make_system_canvas(ui.print_width(label, fs) + 8, ui.font("ui")[2] * fs + 8,
+                            font_scale=fs)
     cv.cls(field)
     cv.print(label, 4, 4, ink, 1)
     return _ink(cv, (0, 0, cv.w, cv.h), ink)
@@ -144,7 +145,7 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
         seen.append(pill)
         field, ink = _label_colors(ws)
         drawn = ws.wm._backdrop_layer.label_rect(pill, label, fs)
-        fits = drawn[2] // (8 * fs)
+        fits = len(ui.print_fit(label, drawn[2], fs))
         assert _ink(cv, drawn, ink) == _label_ink(label[:fits], fs, ink, field), label
 
 

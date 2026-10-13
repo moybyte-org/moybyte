@@ -119,6 +119,13 @@ enum { MOY_UI_FONT_UI = 0, MOY_UI_FONT_TITLE = 1, MOY_UI_FONT_MONO = 2 };
 int moy_ui_font_use(int role, uint32_t font);
 // The font `role` draws in, its metrics into *out.
 uint32_t moy_ui_font(int role, moy_font_info_t *out);
+// The app-cart boundary (§4.7): while a cart's code runs, every role draws in
+// petme128 and so does the print font (moy_text.h), which comes back when the
+// cart's code returns. Answers whether it was on.
+int moy_ui_cart_text(int on);
+// The shell's print font (moy_text_print_font_use), the one put aside while a
+// cart's code runs: the font it replaced, or -1 for one not loaded.
+int64_t moy_ui_print_font(uint32_t font);
 // The record and the effect `part` paints in `state` under an installed
 // shape: NULL / 0 where it names none.
 const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state);

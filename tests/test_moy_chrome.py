@@ -9,6 +9,7 @@ import ctypes
 import pytest
 
 from runtime import chrome_ops as ui, moy_play
+from runtime import ui as toolkit
 from runtime.chrome import NAMES
 from ws_helpers import build_ws
 
@@ -29,7 +30,12 @@ def _both(ws, piece, *args):
     cv.cls(0)
     mp = ui.chrome_inks(ws.theme_colors, NAMES)
     ops = getattr(mp, piece)(*args)
+    # The raster draws petme128, the kernel's own font, with no VM and no
+    # theme; the replay prints in the shell's print font, so it is compared
+    # in petme128.
+    was = toolkit.print_font(0)
     ui.replay(ops, cv, ws)
+    toolkit.print_font(was)
     got = bytes(cv._buf)
     pal = [cv._wire[cv._pal_map[i]] for i in range(64)]
     raw = (ctypes.c_uint16 * (cv.w * cv.h))(*([pal[0]] * (cv.w * cv.h)))

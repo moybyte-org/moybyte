@@ -166,6 +166,12 @@ except ImportError:                     # host: the runtime package
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 try:
+    from ui import cart_text as _cart_text      # the app-cart boundary (§4.7)
+    from ui import print_font as _print_font
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.ui import cart_text as _cart_text
+    from runtime.ui import print_font as _print_font
+try:
     from system_api import make_system_api, wants_layout
 except ImportError:                     # host: the runtime package
     from runtime.system_api import make_system_api, wants_layout
@@ -1263,19 +1269,23 @@ class Player:
             _CODE_CACHE[_ckey] = (_csig, code, self._native_ins, self._native_fail)
             t_compile = t_compile_native + _ticks_diff(_ticks_ms(), t4)
             t5 = _ticks_ms()
-            exec(code, ns)
-            t_exec = _ticks_diff(_ticks_ms(), t5)
-            t6 = _ticks_ms()
-            # A RESPONSIVE app cart (#181) is told its geometry BEFORE _init, so
-            # the cart's own state is built against the size it will draw at
-            # rather than against a default it then has to correct.
-            if self._app_id is not None:
-                self._app_layout = ns.get("_layout")
-                if self._app_layout is not None:
-                    self._app_wh = self._layout_args()
-                    self._app_layout(*self._app_wh)
-            if ns.get("_init"):
-                ns["_init"]()
+            _was = _cart_text(True)
+            try:
+                exec(code, ns)
+                t_exec = _ticks_diff(_ticks_ms(), t5)
+                t6 = _ticks_ms()
+                # A RESPONSIVE app cart (#181) is told its geometry BEFORE _init, so
+                # the cart's own state is built against the size it will draw at
+                # rather than against a default it then has to correct.
+                if self._app_id is not None:
+                    self._app_layout = ns.get("_layout")
+                    if self._app_layout is not None:
+                        self._app_wh = self._layout_args()
+                        self._app_layout(*self._app_wh)
+                if ns.get("_init"):
+                    ns["_init"]()
+            finally:
+                _cart_text(_was)
             t_init = _ticks_diff(_ticks_ms(), t6)
         except Exception as exc:  # noqa: BLE001
             # The device's native run loop starves USB, so a print() never reaches
@@ -2062,6 +2072,9 @@ class Player:
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
             self._tick_keys(ws)
+            # The cart's code prints and measures in petme128, whatever the
+            # theme names (docs/theming_2026-09.md §4.7).
+            _was = _cart_text(True)
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window
                 # resize, a font-scale change or a world flip re-runs `_layout`
@@ -2114,6 +2127,7 @@ class Player:
                 _tm = _ticks_us() if _perf else 0
                 if render and self._draw:
                     self._draw()
+                _cart_text(_was)
                 _td = _ticks_us() if _perf else 0
                 if ws.audio_out is not None:
                     ws.audio_out.tick(dt)  # pull the mix where no feeder task does (#16)
@@ -2152,6 +2166,7 @@ class Player:
                 if render and self._app_id is not None:
                     ws.app_guard.frame()
             except Exception as exc:  # noqa: BLE001
+                _cart_text(_was)
                 if self._capture_frame_error(ws, exc):
                     return
         self._tick_tail(ws, render)
@@ -2447,9 +2462,13 @@ class Player:
         title = (self._notice_title if notice
                  else _ch.crash_title(self.cart_error, self.crash_line))
         mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
+        # The panel and the pill are the kernel's pictures, laid out in its
+        # cells and drawn in petme128 with no VM too (moy_chrome.c).
+        was = _print_font(0)
         _ch.replay(mp.chrome_panel(cv.w, cv.h, notice, title or "",
                                    self.cart_error or "",
                                    _compiled(self.ws.cart)), cv, self.ws)
+        _print_font(was)
 
     def _draw_hold_progress(self):
         """The TRANSIENT hold-to-exit pill (spec Section 12), filling as
@@ -2463,7 +2482,9 @@ class Player:
             if held < 0:
                 held = 0
         mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
+        was = _print_font(0)
         _ch.replay(mp.chrome_pill(cv.w, cv.h, held, _HOLD_EXIT_MS), cv, self.ws)
+        _print_font(was)
 
     def _hold_frac(self):
         """0..1 progress of the current BACKSPACE hold toward _HOLD_EXIT_MS (0 when no

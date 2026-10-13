@@ -1053,7 +1053,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_g
 // same chrome glyphs through it); what stayed here are its MicroPython callers.
 
 // text(dst, dw, dh, s, x, y, color, font, first, scale, cam_x, cam_y,
-//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62): the
+//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62), in
+// the print font (moy_text.h) when the shell has named one, else as follows: the
 // text analogue of blit_batch. `font` is a petme128-layout glyph blob (8 bytes per
 // glyph, column-major, LSB = top row -- exactly runtime/font.py's _FONT, the SAME
 // bytes the host rasterizes), `first` its first codepoint. Each set glyph pixel
@@ -1421,7 +1422,9 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
     if (kind == GATE_PRINT) {
         // print(s, x, y, c[, scale]) -- the legacy per-call `scale` is IGNORED
         // (system-UI scaling is the #39 font_scale path), exactly like the
-        // Python DeviceCanvas.print / P4SystemCanvas.print it replaces.
+        // Python DeviceCanvas.print / P4SystemCanvas.print it replaces. It
+        // draws in the print font (moy_text.h): petme128 unless the shell
+        // named one, and petme128 while a cart's code runs.
         if (n_args < 4 || n_args > 5 || !mp_obj_is_str(args[0])) {
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
@@ -1433,7 +1436,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         size_t slen;
         const char *s = mp_obj_str_get_data(args[0], &slen);
         moy_text_target_t tt = ctx_text_target(c);
-        moy_text(&tt, MOY_FONT_PETME128, MOY_TEXT_PY, (const uint8_t *)s, slen, x, y,
+        moy_text(&tt, moy_text_print_font(), MOY_TEXT_PY, (const uint8_t *)s, slen, x, y,
                  c->pal[(size_t)(ci & 63) % c->npal], st[ST_FONT_SCALE],
                  MOY_TEXT_LEFT, -1);
         st[ST_N_TEXT]++;

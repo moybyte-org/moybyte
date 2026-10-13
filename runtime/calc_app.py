@@ -133,8 +133,7 @@ class CalcAppLayer:
         if self.op is not None:
             cv.print(self.op, x + 3 * fs, y + (h - 8 * fs) // 2, th["author"], 1)
         text = self.entry[-14:]
-        fw = 8 * fs
-        cv.print(text, x + w - 3 * fs - len(text) * fw,
+        cv.print(text, x + w - 3 * fs - _ui.print_width(text, fs),
                  y + (h - 8 * fs) // 2, NAMES["green"], 1)
         # The key grid through the toolkit's button vocabulary; every key rect
         # registers in the SAME pass the pixels land (draw == tap).

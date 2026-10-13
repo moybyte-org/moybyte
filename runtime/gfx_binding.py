@@ -412,6 +412,30 @@ def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
                            ctypes.cast(parr, _P), len(pmv) // 2)
 
 
+_TEXT = [None]
+
+
+def _text_fn():
+    """mg_text from the toolkit's library (runtime/glass_binding.py), which
+    holds the loaded fonts and the print font (moy_text.h); this library's
+    own copy of the text path would see neither. On a board the two modules
+    are one image and share them."""
+    if _TEXT[0] is None:
+        fn = None
+        try:
+            from . import glass_binding
+            fn = glass_binding._lib().mg_text
+        except (ImportError, OSError, AttributeError):
+            fn = None
+        if fn is None:
+            fn = _lib().mg_text
+        else:
+            fn.argtypes = dict((n, a) for n, a, _r in _SIGS)["mg_text"]
+            fn.restype = None
+        _TEXT[0] = fn
+    return _TEXT[0]
+
+
 def text(dst, dw, dh, s, x, y, color, font, first, scale,
          cam_x, cam_y, cx0, cy0, cx1, cy1):
     """petme128 in one call, with the camera and the clip rect honoured.
@@ -433,7 +457,7 @@ def text(dst, dw, dh, s, x, y, color, font, first, scale,
     darr, dcap = _buf(dst)
     sarr, _ = _rbuf(s.encode("utf-8") if isinstance(s, str) else s)
     farr, _ = _rbuf(font)
-    _lib().mg_text(ctypes.cast(darr, _P), dcap, int(dw),
+    _text_fn()(ctypes.cast(darr, _P), dcap, int(dw),
                    ctypes.cast(sarr, _P), len(sarr),
                    int(x), int(y), int(color) & 0xFFFF,
                    ctypes.cast(farr, _P), len(farr) // 8, int(first), int(scale),

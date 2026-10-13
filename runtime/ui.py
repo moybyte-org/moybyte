@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   is_light                          the theme's tool-surface presentation class
-#   wrap_words                        the text path's wrap (C); text_width beside it
-#   font                              the font each role's text draws in (C); use_font beside it
+#   wrap_words                        the text path's wrap (C); wrap_px, print_fit, text_width beside it
+#   font                              the font each role's text draws in (C); use_font, print_font, cart_text beside it
 #   -- rect algebra                   inset, cut_top, cut_bottom, cut_left, split
 #   -- interaction state              widget_state
 #   -- the style                      metrics, state_colors (C)
@@ -123,6 +123,27 @@ def wrap_words(text, maxc):
     return _C.wrap(text, maxc)
 
 
+def wrap_px(text, maxw, scale=1):
+    """`wrap_words` by pixels: lines that draw in at most `maxw` pixels at
+    `scale` through a canvas's `print` (the print font, `print_font`)."""
+    if type(text) is not str:
+        text = str(text)
+    return _C.wrap(text, max(1, maxw // max(1, scale)), _C.print_font())
+
+
+def print_fit(s, maxw, scale=1):
+    """The longest prefix of `s` that draws in at most `maxw` pixels at
+    `scale` through a canvas's `print`, cut at a codepoint."""
+    if type(s) is not str:
+        s = str(s)
+    if _C.text_width(s, scale, _C.print_font()) <= maxw:
+        return s
+    n = len(s)
+    while n > 0 and _C.text_width(s[:n], scale, _C.print_font()) > maxw:
+        n -= 1
+    return s[:n]
+
+
 def text_width(s, scale=1, role=None):
     """The pixels `s` draws at `scale`, the sum of its UTF-8 bytes' advances:
     in `role`'s font (`font`), or petme128's 8px cell with no role."""
@@ -147,6 +168,65 @@ def use_font(role, fid):
     layout reads the metrics when it is built, so one built before keeps
     the old font's."""
     return _C.use_font(role, fid)
+
+
+def print_font(fid=None):
+    """Draw a canvas's `print` in font `fid` (0 for petme128): the font the
+    shell's own text draws in. Answers the font it replaced, or None, and
+    installs nothing, for a font that is not loaded. While a cart's code
+    runs (`cart_text`) prints are petme128's and this names the font they
+    come back to. With no `fid`, the font prints draw in now."""
+    if fid is None:
+        return _C.print_font()
+    return _C.print_font(fid)
+
+
+def print_width(s, scale=1):
+    """The pixels `s` draws at `scale` through a canvas's `print` now: in the
+    print font (`print_font`)."""
+    if type(s) is not str:
+        s = str(s)
+    return _C.text_width(s, scale, _C.print_font())
+
+
+def cart_text(on):
+    """The app-cart boundary (docs/theming_2026-09.md §4.7): on while a
+    cart's code runs, so its `print` and its `ui` draw in petme128 whatever
+    the theme names; off puts the shell's fonts back. Answers whether it
+    was on."""
+    return _C.cart_text(on)
+
+
+def font_file(name):
+    """A seed theme package's font file by name, as bytes, or None."""
+    return _C.font_file(name)
+
+
+def theme_fonts(name):
+    """((role, file), ...): theme `name`'s font files, role by role along
+    its `inherits`."""
+    return _C.theme_fonts(name)
+
+
+def font_load(src):
+    """(rc, font): load a font file's bytes into a row of its own
+    (native/moy_gfx/moy_text.h); font is None when refused."""
+    return _C.font_load(src)
+
+
+def font_info(fid):
+    """(w, h, line, ascent, first, count) of a loaded font, or None."""
+    return _C.font_info(fid)
+
+
+def font_reset():
+    """Free every loaded font: the loader's slots outlive a VM."""
+    _C.font_reset()
+
+
+def font_free(fid):
+    """Free a loaded font's row; False for an id that names none."""
+    return _C.font_free(fid)
 
 
 # --- rect algebra (pure tuple math; every rect is (x, y, w, h)) --------------

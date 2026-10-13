@@ -344,7 +344,13 @@ class CodeLayer:
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):
-        self._draw_code()
+        # The code and its popup are laid out in the `mono` font's cells, so
+        # they print in it (docs/theming_2026-09.md §4.7).
+        was = _ui.print_font(_ui.font("mono")[0])
+        try:
+            self._draw_code()
+        finally:
+            _ui.print_font(was)
         # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + X (no SAVE,
         # #111), drawn LAST (chrome over the full-screen text) so the code editor shows
         # the SAME bar every other tab does. System canvas + responsive layout, like the
@@ -352,8 +358,11 @@ class CodeLayer:
         # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
         self.ws.bar_layer._draw_status_strip("menu")
         if self.ws.crash_popup:
-            self._draw_crash_popup()   # crash-to-code (owner 2026-07-23): the
-                                       # dismissible error popup over the marked line
+            was = _ui.print_font(_ui.font("mono")[0])
+            try:
+                self._draw_crash_popup()   # crash-to-code (owner 2026-07-23): the
+            finally:                       # dismissible error popup over the marked line
+                _ui.print_font(was)
 
     def _draw_crash_popup(self):
         """The crash-to-code popup: the full error text in a danger-framed panel

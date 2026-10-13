@@ -76,8 +76,23 @@ int moy_font_load(const uint8_t *src, size_t n, uint32_t *id);
 // that names no loaded font (petme128 is never freed).
 int moy_font_free(uint32_t font);
 
+// Free every loaded font. The slots are the process's and outlive a VM.
+void moy_font_reset(void);
+// The kernel's stop hook (native/moy_kernel): every font goes with the VM
+// that loaded it.
+void moy_text_vm_stop(void);
+
 // Font `font`'s metrics into *out: 1, or 0 for an unknown font.
 int moy_font_info(uint32_t font, moy_font_info_t *out);
+
+// THE PRINT FONT: the font a canvas's print draws in (the print gate and the
+// `text` op; docs/theming_2026-09.md §4.7). Petme128 until the shell names
+// one, and again while a cart's code runs and once the font is freed; the
+// Lua C API and libmoy's moy_print never read it. moy_text_print_font_use
+// installs `font` (0 for petme128) and answers the one it replaced, or
+// installs nothing and answers -1 for a font that is not loaded.
+uint32_t moy_text_print_font(void);
+int64_t moy_text_print_font_use(uint32_t font);
 
 // Where text lands: an RGB565 buffer `dw` pixels wide holding `cap` pixels,
 // the camera and the clip (buffer space, exclusive right and bottom).
@@ -115,7 +130,7 @@ size_t moy_text_fit(const uint8_t *s, size_t n, size_t cells);
 // negative width.
 size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale);
 
-// Word wrap into lines of at most `cols` bytes, for any known font.
+// Word wrap into lines of at most `cols` bytes (or pixels), for any known font.
 //
 // MOY_WRAP_WORDS (the toolkit's): words split on whitespace; a line is its
 // words joined by single spaces; a word longer than a line gets a line of
@@ -128,8 +143,11 @@ size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int 
 // word longer than a line is broken across lines. Every line is the exact
 // source span.
 //
+// MOY_WRAP_WORDS_PX: MOY_WRAP_WORDS with `cols` a line's width in pixels of
+// the font's advances at scale 1 (a space's advance joins two words).
+//
 // Writes up to `cap` lines; returns how many there are in all.
-enum { MOY_WRAP_WORDS = 0, MOY_WRAP_PANEL = 1 };
+enum { MOY_WRAP_WORDS = 0, MOY_WRAP_PANEL = 1, MOY_WRAP_WORDS_PX = 2 };
 typedef struct {
     uint16_t off, len;
     uint8_t collapse;

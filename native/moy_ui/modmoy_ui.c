@@ -276,6 +276,13 @@ static mp_obj_t ui_font_free(mp_obj_t font) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_free_obj, ui_font_free);
 
+// font_reset(): free every loaded font (moy_text.h).
+static mp_obj_t ui_font_reset(void) {
+    moy_font_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_font_reset_obj, ui_font_reset);
+
 // font_info(font) -> (w, h, line, ascent, first, count), or None.
 static mp_obj_t ui_font_info(mp_obj_t font) {
     moy_font_info_t f;
@@ -319,6 +326,33 @@ static mp_obj_t ui_font(mp_obj_t role) {
     return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_obj, ui_font);
+
+// font_file(name) -> bytes, or None: a seed package's font file.
+static mp_obj_t ui_font_file(mp_obj_t name) {
+    size_t n, len;
+    const char *s = mp_obj_str_get_data(name, &n);
+    const uint8_t *p = moy_theme_font_file(s, n, &len);
+    return p == NULL ? mp_const_none : mp_obj_new_bytes(p, len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_file_obj, ui_font_file);
+
+// print_font() -> the font a canvas's print draws in now; print_font(font) ->
+// the font it replaced, or None for a font that is not loaded (which installs
+// nothing).
+static mp_obj_t ui_print_font(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 0) {
+        return mp_obj_new_int_from_uint(moy_text_print_font());
+    }
+    int64_t was = moy_ui_print_font((uint32_t)mp_obj_get_int_truncated(args[0]));
+    return was < 0 ? mp_const_none : mp_obj_new_int_from_uint((uint32_t)was);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_print_font_obj, 0, 1, ui_print_font);
+
+// cart_text(on) -> bool: the app-cart boundary (moy_ui.h); whether it was on.
+static mp_obj_t ui_cart_text(mp_obj_t on) {
+    return mp_obj_new_bool(moy_ui_cart_text(mp_obj_is_true(on)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_cart_text_obj, ui_cart_text);
 
 static void check(int rc) {
     if (rc == MOY_UI_NOMEM) {
@@ -388,19 +422,21 @@ static mp_obj_t ui_text_width(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_width_obj, 1, 3, ui_text_width);
 
 // wrap(s, cols) -> [line, ...]: the toolkit's word wrap (moy_text_wrap's
-// words mode), each line its words joined by single spaces.
+// words mode), each line its words joined by single spaces. wrap(s, px,
+// font): lines of at most `px` pixels of `font`'s advances.
 #define WRAP_LINES 32
-static mp_obj_t ui_wrap(mp_obj_t text, mp_obj_t cols_in) {
+static mp_obj_t ui_wrap(size_t n_args, const mp_obj_t *args) {
     size_t n;
-    const uint8_t *s = (const uint8_t *)mp_obj_str_get_data(text, &n);
-    int cols = (int)mp_obj_get_int(cols_in);
+    const uint8_t *s = (const uint8_t *)mp_obj_str_get_data(args[0], &n);
+    int cols = (int)mp_obj_get_int(args[1]);
+    uint32_t font = n_args > 2 ? (uint32_t)mp_obj_get_int_truncated(args[2]) : MOY_FONT_PETME128;
+    int mode = n_args > 2 ? MOY_WRAP_WORDS_PX : MOY_WRAP_WORDS;
     moy_text_line_t stack[WRAP_LINES];
     moy_text_line_t *lines = stack;
-    int count = moy_text_wrap(MOY_FONT_PETME128, s, n, cols, MOY_WRAP_WORDS, lines,
-                              WRAP_LINES);
+    int count = moy_text_wrap(font, s, n, cols, mode, lines, WRAP_LINES);
     if (count > WRAP_LINES) {
         lines = m_new(moy_text_line_t, count);
-        moy_text_wrap(MOY_FONT_PETME128, s, n, cols, MOY_WRAP_WORDS, lines, count);
+        moy_text_wrap(font, s, n, cols, mode, lines, count);
     }
     mp_obj_t out = mp_obj_new_list(0, NULL);
     for (int i = 0; i < count; i++) {
@@ -419,7 +455,7 @@ static mp_obj_t ui_wrap(mp_obj_t text, mp_obj_t cols_in) {
     }
     return out;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_wrap_obj, ui_wrap);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_wrap_obj, 2, 3, ui_wrap);
 
 static mp_obj_t ui_glyph_names(void) {
     mp_obj_t items[MOY_UI_GLYPHS];
@@ -1210,6 +1246,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
+    { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_print_font), MP_ROM_PTR(&ui_print_font_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cart_text), MP_ROM_PTR(&ui_cart_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_free), MP_ROM_PTR(&ui_font_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_info), MP_ROM_PTR(&ui_font_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_use_font), MP_ROM_PTR(&ui_use_font_obj) },

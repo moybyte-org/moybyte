@@ -123,9 +123,13 @@ def test_the_widgets_are_the_python_faces_and_ignore_the_carts_state(ws):
     cv = make_system_canvas(run.w, run.h)
     cv._wire = run._wire
     th = ws.theme_colors
+    # As a Python app cart's `ui` draws them: in petme128, whatever the theme
+    # names (docs/theming_2026-09.md §4.7).
+    was = ui.cart_text(True)
     ui.button(cv, th, BUTTON, "PRESS", kind="normal", glyph="gear")
     ui.list(cv, th, LIST, ITEMS, ui.ScrollRegion(), ROW_H)
     ui.label(cv, LABEL, "UI", 7, ui.ALIGN_CENTER)
+    ui.cart_text(was)
     for rect in (BUTTON, LIST, LABEL):
         assert _region(run, rect) == _region(cv, rect), "the RUN sink drew %r otherwise" % (
             rect,)

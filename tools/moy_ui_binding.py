@@ -49,6 +49,12 @@ _SIGS = (
     ("moy_ui_font_use", [_I, c.c_uint32], _I),
     ("moy_ui_font", [_I, c.c_void_p], c.c_uint32),
     ("moy_theme_fonts", [_P, _Z, c.c_void_p], _I),
+    ("moy_theme_font_file", [_P, _Z, c.c_void_p], c.c_void_p),
+    ("moy_text_print_font", [], c.c_uint32),
+    ("moy_font_reset", [], None),
+    ("moy_text_print_font_use", [c.c_uint32], c.c_int64),
+    ("moy_ui_cart_text", [_I], _I),
+    ("moy_ui_print_font", [c.c_uint32], c.c_int64),
     ("moy_ui_glyph_id", [_P, _Z], _I),
     ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
     ("moy_str", [_I], c.c_char_p),
@@ -244,11 +250,12 @@ def binding():
         b = _b(text)
         return lib.moy_text_width(int(font) & 0xFFFFFFFF, b, len(b), int(scale))
 
-    def wrap(text, cols):
+    def wrap(text, cols, font=None):
         b = _b(text)
-        n = lib.moy_text_wrap(0, b, len(b), int(cols), 0, None, 0)
+        fid, mode = (0, 0) if font is None else (int(font) & 0xFFFFFFFF, 2)
+        n = lib.moy_text_wrap(fid, b, len(b), int(cols), mode, None, 0)
         lines = (_Line * max(1, n))()
-        lib.moy_text_wrap(0, b, len(b), int(cols), 0, lines, n)
+        lib.moy_text_wrap(fid, b, len(b), int(cols), mode, lines, n)
         out = []
         for ln in lines[:n]:
             seg = b[ln.off:ln.off + ln.len]
@@ -714,6 +721,21 @@ def binding():
         lib.moy_theme_fonts(b, len(b), files)
         return tuple((r, f.value.decode()) for r, f in zip(font_roles, files) if f.value)
 
+    def font_file(name):
+        b = _b(name)
+        n = c.c_size_t()
+        p = lib.moy_theme_font_file(b, len(b), c.byref(n))
+        return c.string_at(p, n.value) if p else None
+
+    def print_font(font=None):
+        if font is None:
+            return lib.moy_text_print_font()
+        was = lib.moy_ui_print_font(int(font) & 0xFFFFFFFF)
+        return None if was < 0 else was
+
+    def cart_text(on):
+        return bool(lib.moy_ui_cart_text(1 if on else 0))
+
     def font_load(src):
         b = bytes(src)
         fid = c.c_uint32()
@@ -747,6 +769,10 @@ def binding():
     m.theme_installed = theme_installed
     m.theme_fonts = theme_fonts
     m.font_load = font_load
+    m.font_file = font_file
+    m.font_reset = lib.moy_font_reset
+    m.print_font = print_font
+    m.cart_text = cart_text
     m.font_free = font_free
     m.font_info = font_info
     m.use_font = use_font

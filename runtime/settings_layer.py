@@ -692,7 +692,7 @@ class SettingsLayer:
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
             shown = self.wifi_pw.text[-max(4, bw2 // fw - 3):]
             cv.print(shown, bx + 4, by + 5 + dy, NAMES["yellow"], 1)
-            cv.rect(bx + 4 + len(shown) * fw, by + 3 + dy, fs,
+            cv.rect(bx + 4 + _ui.print_width(shown, fs), by + 3 + dy, fs,
                     bh2 - 8 - 2 * dy, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
             _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
@@ -888,7 +888,6 @@ class SettingsLayer:
         th = ws.theme_colors
         lay = ws.layout
         fs = lay.fs
-        fw = lay.font_w
         _px, py, _pw, ph = lay.settings_panel
         title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
         body = (lay.set_x, lay.set_row_y0, lay.set_w,
@@ -896,8 +895,8 @@ class SettingsLayer:
         content = _ui.panel(cv, th, body, title=title, fs=fs)
         actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
         tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
-        lh = 12 * fs
-        lines = _ui.wrap_words(text, max(1, tw // fw))
+        lh = lay.line_h + 4 * fs
+        lines = _ui.wrap_px(text, tw, fs)
         for n in range(len(lines)):
             y = ty + n * lh
             if y + lay.line_h > ty + th_h:
@@ -943,17 +942,16 @@ class SettingsLayer:
         th = ws.theme_colors
         lay = ws.layout
         fs = lay.fs
-        fw = lay.font_w
         _px, py, _pw, ph = lay.settings_panel
         body = (lay.set_x, lay.set_row_y0, lay.set_w,
                 max(1, py + ph - lay.set_row_y0 - 4 * fs))
         content = _ui.panel(cv, th, body, title="LAST CRASH", fs=fs)
         actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
         tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
-        lh = 12 * fs
+        lh = lay.line_h + 4 * fs
         y = ty
         for line in crash_lines(last_crash()):
-            for part in _ui.wrap_words(line, max(1, tw // fw)):
+            for part in _ui.wrap_px(line, tw, fs):
                 if y + lay.line_h > ty + th_h:
                     break
                 cv.print(part, tx, y, th["ink"], 1)
@@ -1495,7 +1493,7 @@ class SettingsLayer:
         if not getattr(ws, "windowed_chrome", False):
             ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
                       th["accent"], cv)
-            cv.print("SETTINGS", px + 24, py + 4 + hd, p_ink, 2)
+            cv.print("SETTINGS", px + 8 + 16 * fs, py + 4 + hd, p_ink, 2)
             # The X's chip is the TAP TARGET and paints all of it; its 8px letter
             # sits in the fs-sized box at the middle of it (#203), not the corner.
             ws._mini_btn("X", lay.set_back, th["danger"], cv,
@@ -1635,8 +1633,8 @@ class SettingsLayer:
             ws._glyph(g, (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs), c, cv)
             return
         # < value > stepper at the right (the chevrons print at double size = 2*fw).
-        cv.print("<", x + w - 11 * fw - 2, y + 5, th["author"], 2)
-        cv.print(">", x + w - 2 * fw + 2, y + 5, th["author"], 2)
+        cv.print("<", x + w - 88 * lay.fs - 2, y + 5, th["author"], 2)
+        cv.print(">", x + w - 16 * lay.fs + 2, y + 5, th["author"], 2)
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
         if kind == "font":                 # system-UI font size (#39): 1x / 2x / 3x
             cv.print("%dx" % ws.look.font_scale, vx, y + 5, th["play"], 1)
@@ -1682,7 +1680,7 @@ class SettingsLayer:
             lbl = ws.webhost_label()
             col = (NAMES["orange"] if ws.webhost_serving()
                    else NAMES["dark_grey"])
-            tx = x + w - len(lbl) * fw - 2
+            tx = x + w - _ui.print_width(lbl, lay.fs) - 2
             if tx < x + 84 * lay.fs:       # still too long: keep the tail, which
                 tx = x + 84 * lay.fs       # is the part that varies (the host)
             cv.print(lbl, tx, y + 5, col, 1)

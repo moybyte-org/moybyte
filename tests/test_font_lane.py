@@ -13,8 +13,8 @@ font file is untrusted data a kid may trade.
   target, and the boards' module (the desktop MicroPython's `moy_ui`)
   answers the corpus as the host's does (tests/on_glass.py runs the same
   corpus on glass).
-* The theme's `fonts` key: roles, file names, inheritance, notes; no seed
-  names a font.
+* The theme's `fonts` key: roles, file names, inheritance, notes; every
+  seed draws `ui` and `title` in Tiny5, `night`'s.
 """
 
 import ctypes
@@ -212,6 +212,7 @@ def test_a_source_at_any_address_is_read_alike():
 
 def test_the_slots_fill_and_a_freed_id_is_refused_everywhere():
     lib = _lib()
+    moy_ui.font_reset()             # the slots are the process's: a theme's font may hold one
     ids = [moy_ui.font_load(_sample()) for _ in range(SLOTS)]
     try:
         assert all(rc == OK for rc, _f in ids) and len({f for _rc, f in ids}) == SLOTS
@@ -303,9 +304,14 @@ def _theme(name, **keys):
     return json.dumps(dict({"format": 1, "name": name}, **keys)).encode()
 
 
-def test_no_seed_names_a_font():
+NIGHT_FONTS = (("ui", "tiny5.fnt"), ("title", "tiny5.fnt"))
+
+
+def test_every_seed_draws_in_tiny5():
+    """`night` names Tiny5 for `ui` and `title`, and every other seed
+    inherits it; `mono` stays petme128 (phase 4 step 3)."""
     for name in moy_ui.themes():
-        assert moy_ui.theme_fonts(name) == (), name
+        assert moy_ui.theme_fonts(name) == NIGHT_FONTS, name
 
 
 def test_the_fonts_key_names_a_file_per_role():
@@ -317,14 +323,14 @@ def test_the_fonts_key_names_a_file_per_role():
     rc, notes = moy_ui.theme_install(_theme("typed2", fonts={
         "ui": ".hidden", "title": "../up.fnt", "mono": 3, "bold": "b.fnt"}))
     assert rc == OK and notes == 2 | 4          # an unknown role; dropped names
-    assert moy_ui.theme_fonts("typed2") == ()
+    assert moy_ui.theme_fonts("typed2") == NIGHT_FONTS     # the default's, inherited
     rc, notes = moy_ui.theme_install(_theme("typed3", fonts={"ui": "x" * 25}))
-    assert rc == OK and notes == 4 and moy_ui.theme_fonts("typed3") == ()
+    assert rc == OK and notes == 4 and moy_ui.theme_fonts("typed3") == NIGHT_FONTS
     assert moy_ui.theme_install(_theme("typed4", fonts=["ui.fnt"]))[1] == 4
 
 
 def test_a_package_over_a_seed_keeps_its_own_roles():
     rc, _n = moy_ui.theme_install(_theme("kid", inherits="berry",
                                          fonts={"title": "t.fnt"}))
-    assert rc == OK and moy_ui.theme_fonts("kid") == (("title", "t.fnt"),)
-    assert moy_ui.theme_fonts("no-such-theme") == moy_ui.theme_fonts("night") == ()
+    assert rc == OK and moy_ui.theme_fonts("kid") == (("ui", "tiny5.fnt"), ("title", "t.fnt"))
+    assert moy_ui.theme_fonts("no-such-theme") == moy_ui.theme_fonts("night") == NIGHT_FONTS

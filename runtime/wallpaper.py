@@ -34,6 +34,10 @@ try:
 except ImportError:  # pragma: no cover - no proof: every compile arms
     crc32 = None
 try:
+    from ui import cart_text as _cart_text
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.ui import cart_text as _cart_text
+try:
     from widgets import Pmem, _Blit, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, _Blit, _err_text
@@ -211,9 +215,11 @@ class Wallpaper:
 
     def draw(self, dt):
         b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
+        was = _cart_text(True)          # a wallpaper is a cart: petme128 (§4.7)
         try:
             self._paint(dt)
         finally:
+            _cart_text(was)
             self._stock_unbracket(b)
 
     def _paint(self, dt):

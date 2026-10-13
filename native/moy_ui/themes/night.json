@@ -2,6 +2,7 @@
   "format": 1,
   "name": "night",
   "frame": { "style": "classic" },
+  "fonts": { "ui": "tiny5.fnt", "title": "tiny5.fnt" },
   "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },
   "colors": {
     "dark": {

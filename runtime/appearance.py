@@ -70,11 +70,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                         DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
-                        theme_content, THEME_NAMES, THEME_VARIANTS)
+                        theme_content, THEME_NAMES, THEME_VARIANTS,
+                        text_scale_floor)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                                 DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
-                                theme_content, THEME_NAMES, THEME_VARIANTS)
+                                theme_content, THEME_NAMES, THEME_VARIANTS,
+                                text_scale_floor)
 try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -84,6 +86,12 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _uimod
 _ui_is_light = _uimod.is_light
+
+_FONT_ROLES = ("ui", "title", "mono")
+_FONT_FULL = 6          # moy_font_load's MOY_FONT_FULL: every slot holds a font
+# The theme fonts loaded, file -> id: one table for the process, as the
+# loader's four slots are.
+_FONTS = {}
 
 
 class Appearance:
@@ -123,6 +131,10 @@ class Appearance:
         # 8px text actually drawn. The requested value is still kept + persisted, so a
         # bigger panel later honours it.
         self.font_scale = max(1, int(font_scale))
+        # The text-size floor (chrome.text_scale_floor): the font scale the
+        # theme's `ui` font needs on this board's glass, 1 for petme128. It
+        # lifts the effective scale, never the requested one.
+        self.text_floor = 1
         # Panel THEME (Appearance -> THEMES): the chrome token set the panels/window
         # chrome/selection accents read each draw. Default = the moybyte "night"
         # colorway (today's exact colors); load_system applies the persisted pick.
@@ -322,7 +334,9 @@ class Appearance:
         render scaled text); in the degradation case (the T-Deck / a shared 320x240
         canvas, whose framebuf text can't scale) it is 1, so the chrome geometry
         always matches the 8px text actually drawn -- no mis-laid-out desktop."""
-        return self.font_scale if self.ws._sys_canvas is not None else 1
+        if self.ws._sys_canvas is None:
+            return 1
+        return self.font_scale if self.font_scale > self.text_floor else self.text_floor
 
     def effective_chrome_scale(self):
         """The scale INTERACTIVE CHROME geometry is laid out at (#203) -- the bar
@@ -407,6 +421,7 @@ class Appearance:
                 else DEFAULT_VARIANT
         self.theme_name = name
         _uimod.use_shape(name)
+        refont = self._install_fonts(name)
         # REBOUND, never mutated in place: the launcher's statics keys fold
         # id(ws.theme_colors), so the new dict IS the invalidation.
         ws.theme_colors = theme_colors(name, self.theme_variant)
@@ -420,10 +435,74 @@ class Appearance:
         # the explicit generation so a theme switch repaints it.
         if getattr(ws, "bar_layer", None) is not None:
             ws.bar_layer.invalidate()
+        # The layouts read the fonts' metrics when they are built, and the
+        # floor can move the effective font scale.
+        if refont and getattr(ws, "layout", None) is not None \
+                and getattr(ws, "launcher", None) is not None:
+            target = self._font_scale_canvas()
+            if target is not None:
+                target.set_font_scale(self.effective_font_scale())
+            ws._relayout()
         ws._dirty = True
         if persist:
             ws.system.set("theme", self.theme_name, persist=False)
             ws.system.set("theme_variant", self.theme_variant)
+
+    def _install_fonts(self, name):
+        """Load theme `name`'s font files, install each for its role and the
+        `ui` role's as the print font, free every font no role keeps, and
+        take the text-size floor the `ui` font asks of this board's glass
+        (`chrome.text_scale_floor`; docs/theming_2026-09.md §4.7). A font
+        that will not load leaves its role on petme128. True when a role's
+        font or the floor changed."""
+        files = {}
+        for role, f in _uimod.theme_fonts(name):
+            files[role] = f
+        ids = {}
+        for role in _FONT_ROLES:
+            f = files.get(role)
+            ids[role] = self._font_id(f) if f else 0
+        changed = False
+        for role in _FONT_ROLES:
+            if _uimod.font(role)[0] != ids[role]:
+                changed = True
+            _uimod.use_font(role, ids[role])
+        _uimod.print_font(ids["ui"])
+        keep = set(ids.values())
+        for key in list(_FONTS):
+            if _FONTS[key] not in keep:
+                _uimod.font_free(_FONTS.pop(key))
+        ws = self.ws
+        floor = 1
+        if ids["ui"]:
+            panel = ws._sys_canvas if ws._sys_canvas is not None else ws.canvas
+            floor = text_scale_floor(panel.w, panel.h, ws.panel_diagonal_in,
+                                     _uimod.font("ui")[3])
+        if floor != self.text_floor:
+            self.text_floor = floor
+            changed = True
+        return changed
+
+    def _font_id(self, f):
+        """The loaded id of seed font file `f`, loading it once; 0 when it
+        cannot be."""
+        fid = _FONTS.get(f)
+        if fid is not None and _uimod.font_info(fid) is not None:
+            return fid
+        src = _uimod.font_file(f)
+        if src is None:
+            return 0
+        rc, fid = _uimod.font_load(src)
+        if rc == _FONT_FULL:
+            # The slots are the process's: where no kernel frees them with
+            # the VM (a host, a test), the theme's are all they keep.
+            _uimod.font_reset()
+            _FONTS.clear()
+            rc, fid = _uimod.font_load(src)
+        if fid is None:
+            return 0
+        _FONTS[f] = fid
+        return fid
 
     def set_theme_variant(self, variant, persist=True):
         """Flip the current theme between its dark and light presentation

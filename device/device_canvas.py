@@ -1990,7 +1990,8 @@ class DeviceCanvas:
         self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
 
     def print(self, s, x, y, c, scale=2):
-        # Native petme128 text (#62): the whole string in ONE moy_gfx.text call,
+        # Native text (#62) in the print font (moy_text.h), petme128 unless the
+        # shell names one: the whole string in ONE moy_gfx.text call,
         # camera + clip + pal honoured in C -- and pixel parity with the host at
         # last (same glyph bytes, staged from runtime/font.py). The legacy per-call
         # `scale` arg stays IGNORED, exactly like the host Canvas.print (system-UI
@@ -2331,7 +2332,8 @@ class SystemCanvas(DeviceCanvas):
             st[_ST_FONT_SCALE] = self.font_scale
 
     def print(self, s, x, y, c, scale=1):
-        # petme128 at font_scale. The legacy per-call `scale` arg stays IGNORED
+        # The print font (moy_text.h; petme128 unless the shell names one) at
+        # font_scale. The legacy per-call `scale` arg stays IGNORED
         # on every tier (SPEC.md 6: cart text is always 8px; system-UI scaling
         # is the #39 font_scale path, not this argument).
         fs = self.font_scale

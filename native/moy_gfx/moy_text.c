@@ -37,6 +37,7 @@ typedef struct {
 } font_slot_t;
 
 static font_slot_t s_fonts[MOY_FONT_SLOTS];
+static uint32_t s_print = MOY_FONT_PETME128;
 
 static font_slot_t *slot_of(uint32_t font) {
     uint32_t k = font & 0xffu;
@@ -151,7 +152,35 @@ int moy_font_free(uint32_t font) {
     FONT_FREE(sl->buf);
     sl->buf = NULL;
     memset(&sl->f, 0, sizeof(sl->f));
+    if (s_print == font) {
+        s_print = MOY_FONT_PETME128;
+    }
     return 1;
+}
+
+void moy_font_reset(void) {
+    for (int k = 0; k < MOY_FONT_SLOTS; k++) {
+        if (s_fonts[k].buf != NULL) {
+            moy_font_free((s_fonts[k].gen << 8) | (uint32_t)(k + 1));
+        }
+    }
+}
+
+void moy_text_vm_stop(void) {
+    moy_font_reset();
+}
+
+uint32_t moy_text_print_font(void) {
+    return s_print;
+}
+
+int64_t moy_text_print_font_use(uint32_t font) {
+    if (font_row(font) == NULL) {
+        return -1;
+    }
+    uint32_t was = s_print;
+    s_print = font;
+    return was;
 }
 
 int moy_font_info(uint32_t font, moy_font_info_t *out) {
@@ -303,6 +332,23 @@ int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
 
 // --- wrap ----------------------------------------------------------------------
 
+// One byte's advance in pixels, for petme128's row (a cell, no table) too.
+static size_t adv_px(const mg_font_t *f, uint8_t b) {
+    return f->adv == NULL ? (size_t)f->w : (size_t)advance(f, b);
+}
+
+// How many leading bytes of s[0..n) fit in `maxw` pixels of f's advances.
+static size_t fit_bytes(const mg_font_t *f, const uint8_t *s, size_t n, size_t maxw) {
+    size_t k = 0, at = 0;
+    for (; k < n; k++) {
+        at += adv_px(f, s[k]);
+        if (at > maxw) {
+            break;
+        }
+    }
+    return k;
+}
+
 // The whitespace str.split() splits on, in ASCII.
 static int space(uint8_t b) {
     return b == ' ' || (b >= '\t' && b <= '\r') || (b >= 0x1c && b <= 0x1f);
@@ -323,11 +369,26 @@ static void emit(sink_t *k, size_t off, size_t len, int collapse) {
     k->count++;
 }
 
-static void wrap_words(sink_t *k, const uint8_t *s, size_t n, size_t cols) {
+// The width of s[0..n): its bytes, or with `f` its advances in pixels.
+static size_t span_w(const mg_font_t *f, const uint8_t *s, size_t n) {
+    if (f == NULL) {
+        return n;
+    }
+    size_t w = 0;
+    for (size_t i = 0; i < n; i++) {
+        w += adv_px(f, s[i]);
+    }
+    return w;
+}
+
+// `cols` is a line's width: in bytes, or with `f` in pixels of f's advances.
+static void wrap_words(sink_t *k, const uint8_t *s, size_t n, size_t cols,
+                       const mg_font_t *f) {
     size_t i = 0;
     int have = 0;               // a line is open
     size_t ls = 0, le = 0;      // its span
     size_t lw = 0;              // its width, words joined by single spaces
+    size_t sp = f == NULL ? 1 : adv_px(f, ' ');
     int collapse = 0;
     for (;;) {
         while (i < n && space(s[i])) {
@@ -340,20 +401,20 @@ static void wrap_words(sink_t *k, const uint8_t *s, size_t n, size_t cols) {
         while (i < n && !space(s[i])) {
             i++;
         }
-        size_t wn = i - ws;
-        if (have && lw + 1 + wn <= cols) {
+        size_t ww = span_w(f, s + ws, i - ws);
+        if (have && lw + sp + ww <= cols) {
             if (ws - le != 1 || s[le] != ' ') {
                 collapse = 1;
             }
             le = i;
-            lw += 1 + wn;
+            lw += sp + ww;
             continue;
         }
-        if (!have && wn <= cols) {
+        if (!have && ww <= cols) {
             have = 1;
             ls = ws;
             le = i;
-            lw = wn;
+            lw = ww;
             collapse = 0;
             continue;
         }
@@ -361,17 +422,19 @@ static void wrap_words(sink_t *k, const uint8_t *s, size_t n, size_t cols) {
             emit(k, ls, le - ls, collapse);
             have = 0;
         }
-        if (wn <= cols) {
+        if (ww <= cols) {
             have = 1;
             ls = ws;
             le = i;
-            lw = wn;
+            lw = ww;
             collapse = 0;
         } else {
             // A word longer than a line: a line of its own, cut at a codepoint.
-            size_t f = moy_text_fit(s + ws, wn, cols);
-            if (f > 0) {
-                emit(k, ws, f, 0);
+            size_t wn = i - ws;
+            size_t fit = f == NULL ? moy_text_fit(s + ws, wn, cols)
+                                   : moy_text_fit(s + ws, wn, fit_bytes(f, s + ws, wn, cols));
+            if (fit > 0) {
+                emit(k, ws, fit, 0);
             }
         }
     }
@@ -449,7 +512,7 @@ int moy_text_wrap(uint32_t font, const uint8_t *s, size_t n, int cols, int mode,
     if (mode == MOY_WRAP_PANEL) {
         wrap_panel(&k, s, n, (size_t)cols);
     } else {
-        wrap_words(&k, s, n, (size_t)cols);
+        wrap_words(&k, s, n, (size_t)cols, mode == MOY_WRAP_WORDS_PX ? font_row(font) : NULL);
     }
     return k.count;
 }

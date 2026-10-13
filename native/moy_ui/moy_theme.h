@@ -113,6 +113,10 @@ int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out);
 int moy_theme_fonts(const char *name, size_t n,
                     char out[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1]);
 
+// A seed package's font file by name (the tables embed every file a seed's
+// `fonts` names): its bytes and *len, or NULL.
+const uint8_t *moy_theme_font_file(const char *name, size_t n, size_t *len);
+
 // Compile one surface's text (docs/theming_2026-09.md §4.4) into *out.
 // MOY_THEME_OK, or -1 for text the grammar does not take; *notes gets
 // MOY_THEME_N_CLAMPED for an index clamped to 0..63.

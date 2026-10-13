@@ -582,10 +582,10 @@ Ruled 2026-10-13, each the pick that builds least:
   - **Advances in the file, the glyph box fixed.** A per-glyph advance
     makes a proportional font (Tiny5, step 3) one format with petme128; a
     glyph keeps the box's width, so no per-glyph offsets.
-  - **A wrap still counts bytes.** `moy_text_wrap` takes any loaded font
-    and wraps in `cols`. Every wrapped text prints in petme128, whose bytes
-    are its cells, so a wrap in pixels arrives with the first wrapped text
-    that draws in a theme font (re-ruled by step 2).
+  - **A wrap counts bytes, or pixels.** `moy_text_wrap`'s words mode wraps
+    in `cols` bytes, the cells a body laid out in 8px cells counts; its
+    pixel mode (`MOY_WRAP_WORDS_PX`, `ui.wrap_px`) wraps in a font's
+    advances, for wrapped text drawn in a theme font (step 3).
 
 Ruled 2026-10-13 by step 2 (layout reads line metrics), each the pick that
 builds least:
@@ -603,11 +603,8 @@ builds least:
     `Layout.font_w` and `line_h` are the `ui` role's, `CodeLayout.cell` and
     `lh` the `mono` role's (`lh` with `_CODE_LEAD` rows); the bar's window
     chips and the desk's label pills measure with `ui.text_width`'s role.
-    The shell's own `print`s still draw petme128, so a font installed now
-    moves their boxes and not their glyphs. Nothing installs one: loading a
-    theme's `fonts` files, routing those prints through the role's row and
-    the app-cart boundary below arrive with the first font a seed names
-    (step 3). The app bodies that lay their own text out in 8px cells (the
+    A theme switch installs the fonts and rebuilds the layouts (step 3,
+    below). The app bodies that lay their own text out in 8px cells (the
     editors' content, Files, Get Carts, the Storybook) keep them.
   - **The measure is the draw.** `tests/test_line_metrics.py` installs the
     step-1 sample font for every role and holds each primitive's label
@@ -616,13 +613,61 @@ builds least:
 - **App carts.** `ui` is the real toolkit, handed to every `type: "app"` cart,
   and those carts lay out in 8px cells and `print` in petme128. A theme font
   therefore reaches app carts **only together with** a published `text_w()` and
-  line metrics. Until then, app-cart `ui` stays on petme128.
-- **Legibility.** Tiny5 at scale 1 on a 3.5" 480×320 panel is small. Themes get
-  a text-size floor tied to #203's chrome floor, and phase 4 checks legibility on
-  the T-Deck and the Guition S3 glass (`docs/visual_identity_v1.md` §5.4 asks
-  for on-glass font tests).
-- **Licence:** Tiny5 is OFL; phase 4 adds it to `THIRD_PARTY.md` and to the
-  generated site webfont's notices.
+  line metrics; until then a cart's code runs inside the app-cart boundary
+  (`ui.cart_text`, below), so its `ui` and its `print` draw petme128.
+- **Legibility.** A theme font has a text-size floor tied to #203's chrome
+  floor: `chrome.text_scale_floor` reads the same declared diagonal, with the
+  same opt-in, and answers the font scale at which the `ui` font's ascent
+  reaches `MIN_TEXT_MM`; the floor lifts the effective font scale and never the
+  setting. `docs/visual_identity_v1.md` §5.4 asks for on-glass font tests;
+  phase 4 step 3 took them on the T-Deck and the Guition S3.
+- **Licence:** Tiny5 is OFL-1.1; `THIRD_PARTY.md` §3.1a carries its notice,
+  its pinned source and what the conversion changed.
+
+Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
+  - **The file.** `tools/make_tiny5_font.py` samples the pinned Google Fonts
+    TrueType (default instance) onto its 128-unit pixel grid into
+    `native/moy_ui/themes/tiny5.txt`, the glyphs as rows, and builds
+    `tiny5.fnt` from that: a 6×7 box, ascent 6, line 8 (the font's own
+    ascender and descender add up to 9; 8 is petme128's rhythm and centres
+    its five-row capitals in the line). GPOS kerning is not carried. A seed
+    package's font files sit beside it in `themes/`, and the tables embed
+    every file a seed names (`ui.font_file`).
+  - **Coverage: ASCII.** The font covers `0x20`–`0x7E`. Format 1 indexes a
+    glyph by byte and text is UTF-8, so #135's accented Latin and Cyrillic,
+    which Tiny5 draws, cannot be addressed until a codepoint map does it
+    (#135's work); a byte the font does not cover draws glyph 0, the space,
+    as petme128's row does.
+  - **`night` names Tiny5 for `ui` and `title`**, as D1's pictures draw it,
+    and every seed inherits it; `mono` stays petme128.
+  - **The print font.** A canvas's `print` draws in one process-wide font
+    (`moy_text_print_font`; `ui.print_font`), the `ui` role's, through the
+    print gate and the `text` op; `ui.print_width`, `ui.print_fit` and
+    `ui.wrap_px` measure in it. The Code tab and its popup print in `mono`.
+    The bodies laid out in 8px cells keep their cells and draw in the `ui`
+    font, narrower than the cells. The kernel's chrome
+    (`native/moy_play/moy_chrome.c`) rasterises in petme128 with no VM, and
+    the run's crash panel and hold pill, its pictures on the game canvas,
+    replay in petme128 too; the strips, menus, toasts and banners replay in
+    the print font.
+  - **The app-cart boundary** is `ui.cart_text`: on while a cart's code runs
+    (its body, `_layout`, `_init`, `_update`, `_draw`; a wallpaper cart's
+    frame), every role and the print font read petme128, and the shell's
+    come back after. A compiled run's canvas is petme128 already (step 2).
+  - **The floor is the smallest text the owner kept at 1x**: `MIN_TEXT_MM`
+    is Tiny5's six rows on the 7" 1024×600 Waveshare P4 (0.89mm; that panel
+    runs font scale 1 by the owner's call of 2026-07-12), under the 3.5"
+    Guition S3's 0.92mm (#203: its 1x text "reads fine"). It lifts nothing
+    in the lineup and guards denser glass, as the tap floor does; petme128
+    clears it on every panel.
+  - **The fonts go with the VM.** The kernel's stop frees every font row
+    (`moy_text_vm_stop`), so a restarted VM loads its theme's into empty
+    slots; where nothing frees them (a host process), a load that finds
+    every slot full frees them all (`moy_font_reset`) and loads again.
+  - **The site carries no Tiny5.** Its display face stays petme128's webfont
+    (`site/petme128.woff2`), the carts' font, so it has no Tiny5 notice to
+    carry; the firmware images and the web runner carry the font, and
+    `THIRD_PARTY.md` its notice.
 
 ### 4.8 Layout — reserved here, designed in the shell-layout doc
 
@@ -987,10 +1032,15 @@ count falls.
   2. **Layout reads line metrics** (landed 2026-10-13). The `8 * fs` arithmetic reads the font's
      line metrics, and `mini_btn`'s and `chip`'s quirks are re-ruled (§4.3).
      Gate: goldens byte-identical (petme128's metrics are the 8px cell).
-  3. **Tiny5 lands** as the UI font, with #135's glyph coverage and the OFL
-     notices. Gate: **one re-baseline, named and rendered**; `moy_prof` on the
-     T-Deck home and Settings; legibility on T-Deck glass (and on the Guition
-     S3's when it is on a desk).
+  3. **Tiny5 lands** (landed 2026-10-13) as the UI font, with the glyph
+     coverage format 1 can address and the OFL notices. Gate: **one
+     re-baseline, named and rendered**; `moy_prof` on the T-Deck home and
+     Settings; legibility on T-Deck glass (and on the Guition S3's when it is
+     on a desk).
+     As built: `night` names Tiny5 for `ui` and `title`; a theme switch
+     loads the files, installs the roles and the print font, frees the rest
+     and rebuilds the layouts; the app-cart boundary, the pixel wrap and the
+     text-size floor are §4.7's, with this step's rulings there.
 
 | phase | builds | gate |
 |---|---|---|
@@ -1072,7 +1122,6 @@ Each is corrected in place by the phase that falsifies it:
 
 | sentence | in | fixed by |
 |---|---|---|
-| "Petme128 remains the canonical runtime glyph source for v1" | `docs/visual_identity_v1.md` §5.4 | phase 4 (carts keep it; the chrome moves) |
 | `bar_h()` as the whole content contract | `docs/app_api_v1.md`, `runtime/system_api.py` | the shell-layout doc |
 | the windowed tier's games-only Library (#105) | `docs/shell_ux_v1.md` | the shell-layout doc: the desk's PLAY opens D7's home |
 

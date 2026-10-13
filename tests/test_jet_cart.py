@@ -331,7 +331,10 @@ def test_the_hud_is_the_frames_and_what_the_verbs_would_draw(tmp_path, jet):
     cv = off.sys_canvas
     cv.reset_state()
     cv.rect(0, 0, W, HUD_H, 0)
+    from runtime import ui
+    was = ui.print_font(0)            # a cart's text is petme128's
     cv.print(line, 2, 1, 7)
+    ui.print_font(was)
     assert bytes(cv._buf) == a
 
 

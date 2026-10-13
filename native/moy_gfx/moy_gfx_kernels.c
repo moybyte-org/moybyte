@@ -411,7 +411,8 @@ void mg_text(uint16_t *dst, size_t dcap, int dw,
              const uint8_t *font, int nglyphs, int first, int scale,
              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    if (scale == 1) {
+    uint32_t pf = moy_text_print_font();
+    if (scale == 1 && pf == MOY_FONT_PETME128) {
         moy_canvas c;
         if (dw <= 0) return;
         mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
@@ -420,13 +421,13 @@ void mg_text(uint16_t *dst, size_t dcap, int dw,
         moy_print(&c, s, slen, x, y, 0);
         return;
     }
-    // Above scale 1 this is system text: the one UI text path (moy_text.h),
-    // whose font is libmoy's same petme128.
+    // Above scale 1, or in the shell's print font (moy_text.h), this is system
+    // text: the one UI text path, whose petme128 is libmoy's same font.
     (void)font;
     (void)nglyphs;
     (void)first;
     moy_text_target_t t = {dst, dcap, dw, cam_x, cam_y, cx0, cy0, cx1, cy1};
-    moy_text(&t, MOY_FONT_PETME128, MOY_TEXT_PY, s, slen, x, y, (uint16_t)(col & 0xFFFF),
+    moy_text(&t, pf, MOY_TEXT_PY, s, slen, x, y, (uint16_t)(col & 0xFFFF),
              scale, MOY_TEXT_LEFT, -1);
 }
 

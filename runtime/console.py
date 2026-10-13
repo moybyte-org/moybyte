@@ -3246,7 +3246,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         cv = self.sys_canvas
         fs = self.look.effective_font_scale()
         label = "LOADING..."
-        w = (len(label) * 8 + 16) * fs
+        w = _uimod.print_width(label, fs) + 16 * fs
         h = 16 * fs
         x = (cv.w - w) // 2
         y = 24 * fs                    # clear of the 18px-per-fs top bar

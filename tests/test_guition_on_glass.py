@@ -289,6 +289,10 @@ def test_a_fuzzed_font_corpus_loads_as_on_the_host(board):
     on_glass.fonts_match_host(board)
 
 
+def test_the_theme_font_is_installed(board):
+    on_glass.the_theme_font_is_installed(board)
+
+
 def test_a_stale_handle_is_refused_loudly(board):
     on_glass.stale_handle_is_refused_loudly(board)
 

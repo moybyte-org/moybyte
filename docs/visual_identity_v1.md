@@ -388,8 +388,9 @@ color.
 
 ### 5.4 Typography
 
-- Petme128 remains the canonical runtime glyph source for v1 until a second bitmap UI
-  face is explicitly approved and implemented identically on host and device.
+- The shell draws in its theme's font (Tiny5 in the default theme, D1 of
+  `docs/theming_2026-09.md`, §4.7 there) and carts in petme128, every glyph from
+  one font file read by the same C on host and device.
 - Do not base layouts on antialiased mockup type or fractional metrics.
 - Prefer short verbs and concrete nouns: PLAY, CHANGE, MAKE, SAVE, PROJECTS,
   LIBRARY.

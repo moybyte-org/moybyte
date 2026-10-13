@@ -945,6 +945,12 @@ __attribute__((weak)) void moy_glass_vm_stop(void) {
 __attribute__((weak)) void moy_glass_vm_swept(void) {
 }
 
+// The theme fonts' teardown (native/moy_gfx/moy_text.h): the rows a theme
+// switch loaded are heap_caps memory the next VM would load again. Weak, so
+// an image without the text path links.
+__attribute__((weak)) void moy_text_vm_stop(void) {
+}
+
 // The cart path's teardown (native/moy_play, native/moycore): a run the
 // console never closed -- a Ctrl-C that reached the REPL mid-run, a
 // SystemExit -- ends with the VM, or the next VM's first run is refused as
@@ -1550,6 +1556,7 @@ soft_reset_exit:
     moy_kernel_kstop_line("before");
     moy_play_vm_stop();
     moy_glass_vm_stop();
+    moy_text_vm_stop();
     moy_net_vm_stop();
     if (moy_app_vm_stop != NULL) {
         moy_app_vm_stop();

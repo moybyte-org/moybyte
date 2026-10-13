@@ -58,7 +58,8 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     assert not ws._deferred
     # The canvas still shows the acknowledgment frame: the toast's border.
     fs = ws.look.effective_font_scale()
-    tw = (len("LOADING...") * 8 + 16) * fs
+    from runtime import ui
+    tw = ui.print_width("LOADING...", fs) + 16 * fs
     tx = (ws.sys_canvas.w - tw) // 2
     assert ws.sys_canvas.pix(tx, 24 * fs) == NAMES["light_grey"]
     # The NEXT frame paints the transitioned world (no toast left).

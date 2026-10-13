@@ -675,19 +675,18 @@ class Launcher:
         cv.rect(x, y + cover_h, w, band_h, NAMES["black"])
         name = it["title"]
         fw = lay.font_w
-        maxc = max(3, (w - 4 * fs) // fw)
-        if len(name) > maxc:
-            name = name[:maxc]
-        cv.print(name, x + (w - len(name) * fw) // 2,
+        name = _ui.print_fit(name, max(3 * fw, w - 4 * fs), fs)
+        cv.print(name, x + (w - _ui.print_width(name, fs)) // 2,
                  y + cover_h + (band_h - lay.line_h) // 2, NAMES["white"], 1)
         # PLAY / CHANGE (mockup: green PLAY, warm-light CHANGE, both dark-edged).
         if ar is not None:
             bx, by, bw, bh = ar["play"]
             cv.rect(bx, by, bw, bh, th.get("play", NAMES["green"]))
             cv.rectb(bx, by, bw, bh, NAMES["black"])
-            tw = 4 * fw + 14 * fs                    # run glyph + "PLAY"
+            pw = _ui.print_width("PLAY", fs)
+            tw = pw + 14 * fs                        # run glyph + "PLAY"
             if tw > bw - 2 * fs:                     # narrow card -> text only
-                cv.print("PLAY", bx + max(fs, (bw - 4 * fw) // 2),
+                cv.print("PLAY", bx + max(fs, (bw - pw) // 2),
                          by + (bh - lay.line_h) // 2, NAMES["white"], 1)
             else:
                 tx = bx + (bw - tw) // 2
@@ -699,10 +698,8 @@ class Launcher:
             cv.rect(bx, by, bw, bh, NAMES["white"])
             cv.rectb(bx, by, bw, bh, NAMES["black"])
             label = "CHANGE"
-            maxc = max(2, (bw - 2 * fs) // fw)
-            if len(label) > maxc:
-                label = label[:maxc]
-            cv.print(label, bx + max(fs, (bw - len(label) * fw) // 2),
+            label = _ui.print_fit(label, max(2 * fw, bw - 2 * fs), fs)
+            cv.print(label, bx + max(fs, (bw - _ui.print_width(label, fs)) // 2),
                      by + (bh - lay.line_h) // 2, NAMES["black"], 1)
         # Favorite star (#105): a corner badge on the SELECTED card only, mirroring
         # the pseudo card's corner-pushpin idiom rather than inventing new chrome
@@ -760,16 +757,15 @@ class Launcher:
             if tw > w - 4 * fs:                      # narrow card -> body size
                 tw = _text_w(cv, line, 1)
                 cv.print(line, x + (w - tw) // 2, ty, NAMES["black"], 1)
-                ty += 10 * fs
+                ty += lay.line_h + 2 * fs
             else:
                 _print_scaled(cv, line, x + (w - tw) // 2, ty, NAMES["black"], mult)
                 ty += lay.line_h * mult + 2 * fs
         ty += 2 * fs
-        maxc = max(6, (w - 4 * fs) // lay.font_w)
-        for line in _ui.wrap_words(caption, maxc):
+        for line in _ui.wrap_px(caption, max(6 * lay.font_w, w - 4 * fs), fs):
             tw = _text_w(cv, line, 1)
             cv.print(line, x + (w - tw) // 2, ty, NAMES["dark_grey"], 1)
-            ty += 10 * fs
+            ty += lay.line_h + 2 * fs
         self._card_frame(cv, rect, selected, ring=th.get("author", NAMES["orange"]))
 
     def _card_frame(self, cv, rect, selected, ring=None):
@@ -1223,9 +1219,7 @@ class LauncherHomeLayer:
         if query or typing:
             label = "SEARCH: " + query + ("_" if typing else "")
             tx0 = hx + 16 * isc + 6 * fs
-            maxc = max(6, (x + w - tx0) // lay.font_w)
-            if len(label) > maxc:
-                label = label[:maxc]
+            label = _ui.print_fit(label, max(6 * lay.font_w, x + w - tx0), fs)
             cv.print(label, tx0, y + (lay.lib_header_h - lay.line_h) // 2, th["ink"], 1)
         else:
             _print_scaled(cv, "LIBRARY", hx + 16 * isc + 6 * fs,
@@ -1236,8 +1230,7 @@ class LauncherHomeLayer:
             if it.get("path"):
                 n += 1
         label = str(n) + (" CARTRIDGE" if n == 1 else " CARTRIDGES")
-        fw = lay.font_w
-        tw = len(label) * fw
+        tw = _ui.print_width(label, fs)
         ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - lay.line_h) // 2
         tx = x + (w - tw) // 2
         cv.print(label, tx, ty, th["ink_dim"], 1)
@@ -1416,7 +1409,6 @@ class LauncherHomeLayer:
             # Wide-card tiers: the OS wordmark (the mockup's top-left "moybyte") --
             # the selected cart's name reads on the card itself, and the verbs
             # are the card's own PLAY/CHANGE row.
-            fs = lay.fs
             th = ws.theme_colors
             ink = th["ink"] if ws.bar_layer.zone_band_light("home") \
                 else th["chrome_ink"]
@@ -1433,9 +1425,7 @@ class LauncherHomeLayer:
         if chips is not None:
             limit = chips["play"][0] - 4 - rect[0]
         name = sel["title"]
-        maxc = max(4, limit // lay.font_w)
-        if len(name) > maxc:
-            name = name[:maxc]
+        name = _ui.print_fit(name, max(4 * lay.font_w, limit), lay.fs)
         th_ = ws.theme_colors
         cv.print(name, rect[0] + 2, 3 + lay.bar_text_dy,
                  th_["ink"] if ws.bar_layer.zone_band_light("home")

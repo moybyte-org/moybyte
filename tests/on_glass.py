@@ -340,6 +340,26 @@ def fonts_match_host(board, n=48):
     assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
 
 
+def the_theme_font_is_installed(board):
+    """The default theme's Tiny5 (docs/theming_2026-09.md §4.7) is what this
+    board's shell draws in: the seed font file byte for byte the host's,
+    loaded once, installed for `ui`, `title` and the print font, with `mono`
+    on petme128."""
+    import binascii
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    host = binascii.hexlify(moy_ui.font_file("tiny5.fnt")).decode()
+    got = board.pyval("__import__('binascii').hexlify(__import__('moy_ui').font_file("
+                      "'tiny5.fnt')).decode()", strict=True)
+    assert got == host
+    ui_id, title_id, mono_id, pf = board.pyval(
+        "[__import__('moy_ui').font(r)[0] for r in ('ui', 'title', 'mono')]"
+        " + [__import__('moy_ui').print_font()]", strict=True)
+    assert ui_id != 0 and title_id == ui_id and mono_id == 0 and pf == ui_id
+    info = board.pyval("__import__('moy_ui').font_info(%d)" % ui_id, strict=True)
+    assert tuple(info) == (6, 7, 8, 6, 0x20, 95)
+
+
 def py_probe_reaches_the_console(board):
     line = board.cmd("py ws._frames_drawn", wait_for="PY ")
     assert line is not None and line.startswith("PY "), line

@@ -275,6 +275,14 @@ def generate_theme(style, t):
             raise SystemExit("themes/%s.json: named %s, within %d bytes"
                              % (name, name, th["bytes"]))
         seeds.append((name, src))
+    # The seed packages' font files: every file a seed's `fonts` names, from
+    # themes/, in name order.
+    font_files = sorted({f for _n, src in seeds
+                         for f in json.loads(src).get("fonts", {}).values()})
+    fonts = []
+    for name in font_files:
+        with open(os.path.join(t.dir, "themes", name), "rb") as f:
+            fonts.append((name, f.read()))
     root_pkg = json.loads(seeds[0][1])
     root = root_pkg["colors"]
     roles = t.tokens + list(th["content"])
@@ -328,6 +336,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_CONTRAST %d" % th["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
          "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
+         "#define MOY_THEME_FONT_FILES %d  // the seeds' font files" % len(fonts),
          "#define MOY_THEME_ROLES %d  // the tokens, then the content roles" % len(roles),
          "#define MOY_THEME_METRICS %d" % len(metrics),
          "#define MOY_THEME_EFFECTS %d" % len(th["effects"]),
@@ -394,6 +403,9 @@ def generate_theme(style, t):
          "extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];",
          "extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];",
          "extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];",
+         "extern const char *const moy_theme_font_names[MOY_THEME_FONT_FILES + 1];",
+         "extern const uint8_t *const moy_theme_font_data[MOY_THEME_FONT_FILES + 1];",
+         "extern const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1];",
          "extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,",
          "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles;"]
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
@@ -458,6 +470,18 @@ def generate_theme(style, t):
     c.append("const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;")
     c.append("const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {%s};\n"
              % ", ".join(str(len(s)) for _n, s in seeds))
+    for i, (name, data) in enumerate(fonts):
+        c.append("// themes/%s" % name)
+        c.append("static const uint8_t font_%d[%d] = {" % (i, len(data)))
+        for k in range(0, len(data), 16):
+            c.append("    %s," % ", ".join("0x%02x" % b for b in data[k:k + 16]))
+        c.append("};")
+    c.append("const char *const moy_theme_font_names[MOY_THEME_FONT_FILES + 1] = {%s0};"
+             % "".join("%s, " % _c_str(n) for n, _d in fonts))
+    c.append("const uint8_t *const moy_theme_font_data[MOY_THEME_FONT_FILES + 1] = {%s0};"
+             % "".join("font_%d, " % i for i in range(len(fonts))))
+    c.append("const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1] = {%s0};\n"
+             % "".join("%d, " % len(d) for _n, d in fonts))
     return h, c
 
 

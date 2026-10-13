@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   color                             a colour name or palette index -> index
 #   -- Pointer UI layout              the 320x240 pointer-UI constants
-#   -- Desktop shell                  chrome_scale_floor, Layout, CodeLayout
+#   -- Desktop shell                  chrome_scale_floor, text_scale_floor, Layout, CodeLayout
 #   Layout                            responsive desktop-shell geometry
 #   CodeLayout                        responsive code-editor geometry
 #   -- Button icon glyphs             the pre-literate icon vocabulary
@@ -205,6 +205,33 @@ def chrome_scale_floor(w, h, diagonal_in=None):
     if icon_mm <= 0:
         return 1
     need = MIN_TAP_MM / icon_mm
+    n = int(need)
+    if need > n:
+        n += 1
+    return max(1, n)
+
+
+# The text-size floor (docs/theming_2026-09.md §4.7), #203's twin for text: the
+# smallest a theme font's ascent may be ON GLASS. A CONFIGURATION number, read
+# off the same declared diagonal as the tap floor and with the same opt-in. It
+# is the smallest text the owner has kept at 1x: Tiny5's six rows on the 7"
+# 1024x600 P4 (font scale 1, owner call 2026-07-12), under its six rows on the
+# 3.5" Guition S3 (whose 1x text "reads fine", #203). It lifts nothing in the
+# lineup and guards denser glass; petme128 clears it on every panel.
+MIN_TEXT_MM = 0.89
+
+
+def text_scale_floor(w, h, diagonal_in, ascent):
+    """The smallest font scale at which a font whose ascent is `ascent` rows
+    reaches MIN_TEXT_MM on a `diagonal_in`-inch panel of `w` x `h` pixels.
+    1 when no diagonal is declared (the T-Deck, a host window)."""
+    if not diagonal_in or ascent <= 0:
+        return 1
+    diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5
+    if diag_px <= 0:
+        return 1
+    mm = ascent * 25.4 * float(diagonal_in) / diag_px
+    need = MIN_TEXT_MM / mm
     n = int(need)
     if need > n:
         n += 1
@@ -555,11 +582,11 @@ def _print_scaled(cv, s, x, y, c, mult=2):
 
 def _text_w(cv, s, mult=1):
     """The on-screen width of `s` printed at `mult` x the canvas font scale, as
-    the text path measures it (UTF-8 bytes)."""
+    the text path measures it in the print font (`ui.print_width`)."""
     fs = getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
-    return _ui.text_width(s, fs * max(1, int(mult)))
+    return _ui.print_width(s, fs * max(1, int(mult)))
 
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------

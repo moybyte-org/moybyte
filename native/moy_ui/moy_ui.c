@@ -254,8 +254,37 @@ int moy_ui_font_use(int role, uint32_t font) {
     return 1;
 }
 
+static int s_cart;                              // a cart's code is running
+static uint32_t s_cart_print;                   // the print font it put aside
+
+int moy_ui_cart_text(int on) {
+    int was = s_cart;
+    if (on && !s_cart) {
+        s_cart_print = moy_text_print_font();
+        moy_text_print_font_use(MOY_FONT_PETME128);
+    } else if (!on && s_cart) {
+        moy_text_print_font_use(s_cart_print);    // refused if freed meanwhile
+    }
+    s_cart = on != 0;
+    return was;
+}
+
+int64_t moy_ui_print_font(uint32_t font) {
+    if (!s_cart) {
+        return moy_text_print_font_use(font);
+    }
+    moy_font_info_t fi;
+    if (!moy_font_info(font, &fi)) {
+        return -1;
+    }
+    uint32_t was = s_cart_print;
+    s_cart_print = font;
+    return was;
+}
+
 uint32_t moy_ui_font(int role, moy_font_info_t *out) {
-    uint32_t id = role >= 0 && role < MOY_THEME_FONT_ROLES ? s_font[role] : MOY_FONT_PETME128;
+    uint32_t id = !s_cart && role >= 0 && role < MOY_THEME_FONT_ROLES ? s_font[role]
+                                                                      : MOY_FONT_PETME128;
     if (!moy_font_info(id, out)) {
         id = MOY_FONT_PETME128;
         moy_font_info(id, out);

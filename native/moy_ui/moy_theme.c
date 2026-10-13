@@ -1115,6 +1115,17 @@ static void apply_fonts(const moy_theme_pkg_t *pkg, void *ctx) {
     }
 }
 
+const uint8_t *moy_theme_font_file(const char *name, size_t n, size_t *len) {
+    for (int i = 0; i < MOY_THEME_FONT_FILES; i++) {
+        if (strlen(moy_theme_font_names[i]) == n && memcmp(moy_theme_font_names[i], name, n) == 0) {
+            *len = moy_theme_font_len[i];
+            return moy_theme_font_data[i];
+        }
+    }
+    *len = 0;
+    return NULL;
+}
+
 int moy_theme_fonts(const char *name, size_t n,
                     char out[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1]) {
     memset(out, 0, MOY_THEME_FONT_ROLES * (MOY_THEME_NAME_MAX + 1));
