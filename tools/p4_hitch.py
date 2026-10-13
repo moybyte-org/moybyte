@@ -123,10 +123,10 @@ def main():
         def fresh():
             """Boot into the DESK world with the probe loaded.
 
-            Deliberately a RESET between surfaces, not ws.go_home(): go_home lands
-            in the fullscreen Library (the play world), where the picker is not a
-            window at all -- so ws.wm._wins has no 'make' and the measurement died
-            with a KeyError. A reset also keeps the two surfaces from contaminating
+            Deliberately a RESET between surfaces, not ws.go_home(): go_home on
+            the desk closes every window, the Make window with it -- so
+            ws.wm._wins has no 'make' and the measurement dies with a
+            KeyError. A reset also keeps the two surfaces from contaminating
             each other's caches."""
             b.reset()
             b.pyexec(PROBE)

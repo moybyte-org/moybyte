@@ -10,7 +10,7 @@ what this file drives through the real frame walk on the host:
 
   * the composite point hands an owed frame to the system canvas
     (`present_frame`) and, when that takes it, composites nothing -- the
-    fullscreen composite, the play world's over its bezel, and a windowed
+    fullscreen composite, console mode's over its bezel, and a windowed
     desk's player window;
   * a frame the system canvas declines is SETTLED into the game canvas
     first, so the ordinary composite reads the pixels the blit would have
@@ -215,8 +215,8 @@ def test_the_hold_to_exit_toast_settles_the_frame_first(tmp_path):
     assert drawn and drawn[0][-1] == "settle"
 
 
-def test_the_desk_world_leaves_the_frame_to_the_player_window():
-    wm = SimpleNamespace(_order=["desktop"])
+def test_desktop_mode_leaves_the_frame_to_the_player_window():
+    wm = SimpleNamespace(mode="desktop")
     assert WindowedWM.present_frame(wm, FakeCartFrame(), memoryview(b"")) is False
 
 
@@ -454,15 +454,15 @@ def test_a_window_with_nothing_shown_composites_the_canvas(tmp_path):
     assert calls == [("blit_game",)] and cf.log == ["take"]
 
 
-def test_the_play_world_shows_the_frame_over_its_bezel(tmp_path):
-    """From the fullscreen Library the game is the play world's: the frame
+def test_console_mode_shows_the_frame_over_its_bezel(tmp_path):
+    """From console mode's home the game is fullscreen: the frame
     goes where composite_game would have composited the canvas, and the
     letterbox bezel is painted the same way first."""
     from ws_helpers import build_desktop_ws, open_cart
     ws = build_desktop_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(DT)
-    ws.go_home()
+    ws.open_library()
     open_cart(ws, "Star Catcher")
     ws._toast_until = 0
     ws.show_fps = False

@@ -209,6 +209,31 @@ def test_remove_takes_one_kind_and_never_the_root(sp):
     assert st.remove("launcher") is False and st.top() == "settings"
 
 
+def test_restore_puts_parked_kinds_back_above_the_root(sp):
+    """The route's restore op (docs/shell_layout_2026-10.md §3): the stack
+    becomes the root and the kinds given, whatever stood above the root
+    before, and a refused list changes nothing."""
+    st = sp.BackStack()
+    for k in ("settings", "desktop"):
+        st.goto(k)
+    assert st.restore(["desk", "picker", "menu"]) is None
+    assert st.kinds() == ["launcher", "desk", "picker", "menu"]
+    assert st.top() == "menu" and st.index("picker") == 2
+    st.restore([])
+    assert st.kinds() == ["launcher"]
+    st.restore(("desk", "files"))
+    for bad, exc in ((["desk", "desk"], ValueError),
+                     (["launcher"], ValueError),
+                     (["desk", ""], ValueError),
+                     (["desk", None], TypeError),
+                     (["k%d" % i for i in range(st.DEPTH)], OSError)):
+        with pytest.raises(exc):
+            st.restore(bad)
+        assert st.kinds() == ["launcher", "desk", "files"]
+    st.restore(["k%d" % i for i in range(st.DEPTH - 1)])
+    assert st.depth() == st.DEPTH
+
+
 def test_the_back_stack_refuses_what_it_cannot_hold(sp):
     st = sp.BackStack()
     for bad, exc in ((None, TypeError), ("", ValueError),

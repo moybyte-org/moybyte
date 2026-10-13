@@ -72,6 +72,7 @@ _SIGS = (
     ("moy_back_free", [_P], None),
     ("moy_back_goto", [_P, _PCHAR, _SIZE, _PINT], c.c_int),
     ("moy_back_remove", [_P, _PCHAR, _SIZE, _PINT], c.c_int),
+    ("moy_back_restore", [_P, c.POINTER(_Kind), _U32], c.c_int),
     ("moy_back_top", [_P], c.POINTER(_Kind)),
     ("moy_back_depth", [_P], _U32),
     ("moy_back_at", [_P, _U32], c.POINTER(_Kind)),
@@ -328,6 +329,20 @@ def binding(sanitize=False):
             removed = c.c_int()
             lib.moy_back_remove(self._p, b, len(b), c.byref(removed))
             return bool(removed.value)
+
+        def restore(self, kinds):
+            kinds = [kind(k) for k in kinds]
+            if len(kinds) >= self.DEPTH:
+                raise OSError(_ENOSPC, "back-stack full")
+            arr = (_Kind * max(1, len(kinds)))()
+            for i, b in enumerate(kinds):
+                arr[i].len = len(b)
+                arr[i].s = b
+            rc = lib.moy_back_restore(self._p, arr, len(kinds))
+            if rc == BAD:
+                raise ValueError("the root, or a kind twice")
+            if rc != OK:
+                alloc_error(rc, "back-stack")
 
         def top(self):
             return kind_str(lib.moy_back_top(self._p).contents)

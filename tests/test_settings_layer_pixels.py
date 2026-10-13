@@ -186,6 +186,8 @@ def _build(cfg, carts_dir):
 def capture(cfg, carts_dir):
     """{sub_surface: sha256} for one configuration."""
     ws = _build(cfg, carts_dir)
+    if cfg.get("console"):
+        ws.open_library()          # the desk's PLAY: console mode
     blank = blank_digest(ws)
     ws.open_settings()
     sl = ws.settings_layer
@@ -271,8 +273,11 @@ def capture(cfg, carts_dir):
         sl.close_confirm()
 
     # The = dropdown, one shot per highlighted row (headers + separators move
-    # with it), and the ABOUT modal.
+    # with it), and the ABOUT modal. Over the home, which on the windowed
+    # tier is console mode's.
     ws.go_home()
+    if cfg["windowed"]:
+        ws.open_library()
     ws.toggle_sysmenu()
     m = ws.sysmenu
     for sel in range(len(m.items)):

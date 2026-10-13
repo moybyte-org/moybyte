@@ -403,6 +403,12 @@ def _cart_fit(make, cart):
         return None
 
 
+def _fits(fit):
+    """A `_cart_fit` answer's verdict: the total and the largest block each
+    within what the console has free."""
+    return fit[0][0] <= fit[1][0] and fit[0][1] <= fit[1][1]
+
+
 def _cart_missing(make, cart):
     """What the cart imports that the runtime's table lacks, from a runtime
     that can say (`missing`), or None: a runtime with no such report, a cart
@@ -1973,8 +1979,14 @@ class Player:
                     raise _Refused(newer_notice(cart.get("title"), missing),
                                    _ch.say_title(_ch.SAY_NEWER))
                 fit = _cart_fit(make, cart)
-                if fit is not None and (fit[0][0] > fit[1][0]
-                                        or fit[0][1] > fit[1][1]):
+                # A failed fit gets back what the WM holds as caches -- parked
+                # window stamps oldest-first, then the home's retained frame
+                # -- one at a time, until the check passes or nothing is left
+                # (docs/shell_layout_2026-10.md §3).
+                while (fit is not None and not _fits(fit)
+                       and ws.wm.release_cache()):
+                    fit = _cart_fit(make, cart)
+                if fit is not None and not _fits(fit):
                     raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
                                    _ch.say_title(_ch.SAY_FIT))
             if runtime == "wasm":
@@ -2077,7 +2089,7 @@ class Player:
             _was = _cart_text(True)
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window
-                # resize, a font-scale change or a world flip re-runs `_layout`
+                # resize, a font-scale change or a mode switch re-runs `_layout`
                 # BEFORE the frame that would draw against the new geometry.
                 # Costs a game exactly one `is not None`, and an app one tuple
                 # build plus a compare -- there is no clock and no probe here.

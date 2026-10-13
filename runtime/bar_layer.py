@@ -467,15 +467,26 @@ class BarLayer:
         if owner is not None:
             owner.draw_zone(cv, self._zone_rect(where))
 
+    def _show_x(self, where):
+        """The context X: wherever something is beneath the surface. The desk
+        is desktop mode's floor and never has one; the home has one when the
+        back-stack is deeper than its mode's floor -- console mode on a P4,
+        whose desk waits beneath it -- and none where it is the floor."""
+        if where == "desk":
+            return False
+        if where == "home":
+            wm = self.ws.wm
+            return wm.stack.depth() > wm.floor()
+        return True
+
     def _render_right_zone(self, cv, where, mp=None):
-        """The OS-owned right zone: clock, wifi, batt, the ≡ toggle and -- not on
-        the launcher root or the desk, which never exit -- the context X. The
-        fixed game-canvas cluster, or the responsive Layout's rects at its
-        chrome scale (#203)."""
+        """The OS-owned right zone: clock, wifi, batt, the ≡ toggle and the
+        context X (`_show_x`). The fixed game-canvas cluster, or the responsive
+        Layout's rects at its chrome scale (#203)."""
         ws = self.ws
         if mp is None:
             mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
-        show_x = where not in ("home", "desk")
+        show_x = self._show_x(where)
         lay = None
         if not self._zone_is_game(where):
             L = ws.layout
@@ -576,14 +587,17 @@ class BarLayer:
             else:
                 ws.launch_wifi_tool()
             return True
-        # Context X (Stage 5, spec Section 9): tap to EXIT the active app back toward the
-        # launcher root. The launcher draws no X (where == "home") so it's not tested
-        # there -- it is the root and never exits. A running TOOL (Part 4) pops to its RUN
-        # caller (spec Section 6's test-play round trip -- go_home for a launcher-launched
-        # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
-        # taskbar app (Editor/Settings) uses the screen-string exit.
-        if where not in ("home", "desk") and _in(px, py, x_hit):
-            if where in ("tool", "app"):
+        # Context X (Stage 5, spec Section 9): tap to EXIT the active surface back toward
+        # its mode's root. On the home it leaves console mode for the desk beneath
+        # (docs/shell_layout_2026-10.md §3); where the home is the floor it draws no X
+        # and is not tested. A running TOOL (Part 4) pops to its RUN caller (spec
+        # Section 6's test-play round trip -- go_home for a launcher-launched tool, but
+        # the Editor tab if a tool is ever PLAYed from the editor); every other taskbar
+        # app (Editor/Settings) uses the screen-string exit.
+        if self._show_x(where) and _in(px, py, x_hit):
+            if where == "home":
+                ws.open_desk()
+            elif where in ("tool", "app"):
                 ws._exit_to_caller()
             else:
                 ws.exit()

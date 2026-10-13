@@ -153,7 +153,7 @@ SCENARIOS = {
     # revisit must present as ONE stamp. This is the common kid loop (play ->
     # home -> pick next), which the reset-per-scenario harness otherwise
     # never measures.
-    "home_revisit":  (["ws.go_home()", "ws.open_settings()"], "ws.go_home()"),
+    "home_revisit":  (["ws.open_library()", "ws.open_settings()"], "ws.go_home()"),
 }
 
 rows = []

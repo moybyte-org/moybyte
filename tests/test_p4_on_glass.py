@@ -362,6 +362,33 @@ def test_picker_opens(board):
     assert "make" in st.get("order", ())
 
 
+def test_play_parks_the_windows_and_the_x_brings_them_back(board):
+    """Console mode on glass (docs/shell_layout_2026-10.md §3): the desk's
+    PLAY parks the open windows and truncates the route to the home; the
+    home's X, tapped where the bar draws it, puts every window back; the
+    HOME key shows the desktop and brings the windows back."""
+    before = board.state().get("order")
+    assert before, "no window open to park"
+    board.pyexec("ws.open_library()", strict=True)
+    st = board._settle(lambda s: s.get("desk") is False, 0.5)
+    assert st.get("stack") == ["launcher"], st.get("stack")
+    assert not st.get("order") and st.get("parked") == before, st
+    x, y, w, h = board.pyval("ws.layout.context_x_btn", strict=True)
+    board.tap(x + w // 2, y + h // 2)
+    st = board._settle(lambda s: s.get("desk") is True, 0.5)
+    assert st.get("order") == before and not st.get("parked"), st
+    # The HOME key on the desk minimises every window and closes none; HOME
+    # again brings them back (owner, 2026-10-13).
+    mins = "[ws.wm._wins[k].minimized for k in ws.wm._order]"
+    board.pyexec("ws.home_key()", strict=True)
+    board.drain(0.5)
+    assert board.pyval(mins, strict=True) == [True] * len(before)
+    assert board.state().get("order") == before
+    board.pyexec("ws.home_key()", strict=True)
+    board.drain(0.5)
+    assert board.pyval(mins, strict=True) == [False] * len(before)
+
+
 def test_window_buffers_are_single_retained_surfaces(board):
     """(#113) A window buffer holds the LAST paint, so it must advertise
     RETAINED_FRAMES = 1. The class default 2 describes the root DPI ping-pong;

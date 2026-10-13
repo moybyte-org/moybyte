@@ -553,6 +553,34 @@ static mp_obj_t back_remove(mp_obj_t self, mp_obj_t kind) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(back_remove_obj, back_remove);
 
+// The root and then the kinds of the sequence `kinds`, bottom to top.
+static mp_obj_t back_restore(mp_obj_t self, mp_obj_t kinds) {
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(kinds, &n, &items);
+    moy_kind_t ks[MOY_BACK_DEPTH];
+    for (size_t i = 0; i < n; i++) {
+        size_t len;
+        const char *s = kind_arg(items[i], &len);
+        if (i < MOY_BACK_DEPTH) {
+            ks[i].len = (uint8_t)len;
+            memcpy(ks[i].s, s, len);
+        }
+    }
+    if (n >= MOY_BACK_DEPTH) {
+        no_space();
+    }
+    int rc = moy_back_restore(back_of(self), ks, (uint32_t)n);
+    if (rc == MOY_ROUTE_BAD) {
+        mp_raise_ValueError(MP_ERROR_TEXT("the root, or a kind twice"));
+    }
+    if (rc != MOY_ROUTE_OK) {
+        raise_alloc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(back_restore_obj, back_restore);
+
 static mp_obj_t back_top(mp_obj_t self) {
     return kind_obj(moy_back_top(back_of(self)));
 }
@@ -608,6 +636,7 @@ static const mp_rom_map_elem_t back_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_DEPTH), MP_ROM_INT(MOY_BACK_DEPTH) },
     { MP_ROM_QSTR(MP_QSTR_goto), MP_ROM_PTR(&back_goto_obj) },
     { MP_ROM_QSTR(MP_QSTR_remove), MP_ROM_PTR(&back_remove_obj) },
+    { MP_ROM_QSTR(MP_QSTR_restore), MP_ROM_PTR(&back_restore_obj) },
     { MP_ROM_QSTR(MP_QSTR_top), MP_ROM_PTR(&back_top_obj) },
     { MP_ROM_QSTR(MP_QSTR_has), MP_ROM_PTR(&back_has_obj) },
     { MP_ROM_QSTR(MP_QSTR_index), MP_ROM_PTR(&back_index_obj) },

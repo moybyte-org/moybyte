@@ -552,13 +552,13 @@ def test_the_desk_world_keeps_a_responsive_cart_on_the_fixed_raster(tmp_path):
     assert ws.player.ns["seen"] == [(320, 240, 1)]
 
 
-def test_the_play_world_gives_a_responsive_cart_the_whole_surface(tmp_path):
-    """From the fullscreen Library the desk is POPPED (`windowed_chrome` False),
-    so the same cart gets the desktop-sized surface it asked for."""
+def test_console_mode_gives_a_responsive_cart_the_whole_surface(tmp_path):
+    """In console mode (`windowed_chrome` False) the same cart gets the
+    desktop-sized surface it asked for."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
     ws = build_ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.go_home()                          # the play world's Library
+    ws.open_library()                     # the desk's PLAY: console mode
     assert ws.windowed_chrome is False
     _open(ws, "Flexy")
     _frames(ws)

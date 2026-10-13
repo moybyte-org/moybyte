@@ -218,6 +218,31 @@ int moy_back_remove(moy_back_t *b, const char *kind, size_t n, int *removed) {
     return MOY_ROUTE_OK;
 }
 
+int moy_back_restore(moy_back_t *b, const moy_kind_t *kinds, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        const moy_kind_t *k = &kinds[i];
+        if (!kind_ok(k->len) || moy_kind_is(k, MOY_ROOT, sizeof MOY_ROOT - 1u)) {
+            return MOY_ROUTE_BAD;
+        }
+        for (uint32_t j = 0; j < i; j++) {
+            if (moy_kind_is(&kinds[j], k->s, k->len)) {
+                return MOY_ROUTE_BAD;
+            }
+        }
+    }
+    if (n >= MOY_BACK_DEPTH) {
+        return MOY_ROUTE_FULL;
+    }
+    for (uint32_t i = 1; i < b->depth; i++) {
+        memset(&b->k[i], 0, sizeof b->k[i]);
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        kind_set(&b->k[i + 1u], kinds[i].s, kinds[i].len);
+    }
+    b->depth = n + 1u;
+    return MOY_ROUTE_OK;
+}
+
 const moy_kind_t *moy_back_top(const moy_back_t *b) {
     return &b->k[b->depth - 1u];
 }

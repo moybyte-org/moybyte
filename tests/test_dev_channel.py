@@ -107,6 +107,7 @@ def test_state_carries_both_tiers_shapes(capsys):
     windowed = _remote_state(FakeWS(wm=WindowedWM()))
     assert windowed["desk"] is True
     assert windowed["order"] == ["settings"]
+    assert windowed["parked"] == []
     assert windowed["wins"]["settings"][:4] == [100, 80, 640, 400]
     assert "stack" not in windowed
 

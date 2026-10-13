@@ -11,7 +11,7 @@
 #   -- cart-run forwards             Player forwards
 #   -- run / exit                    launch_named, run_script, go_home (run and exit: console_spine)
 #   -- the app bar contract          the bar every app gets
-#   -- the desk                      the windowed tier's make world
+#   -- the desk                      desktop mode's root, and PLAY into console mode
 #   -- cart management               create, duplicate, delete
 #   -- pointer                       handle_pointer
 #   -- frame + drawing               frame: one console frame
@@ -701,9 +701,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # which the Player hands the kernel's stop verdict.
         self._home_launch = False
         self.wm = FullscreenStackWM(self)
-        # windowed_chrome is a PROPERTY (world-aware, two-worlds #105): it is
-        # True only while the windowed WM's DESK (the make world) is open --
-        # see the property below the screen projection.
+        # windowed_chrome is a PROPERTY (mode-aware): it is True only in the
+        # windowed WM's DESKTOP mode -- see the property below the screen
+        # projection.
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self.look.effective_font_scale(),
                              self.look.effective_chrome_scale())
@@ -1273,12 +1273,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     @property
     def windowed_chrome(self):
-        """True while the MAKE world (the windowed WM's desk, #105 two-worlds)
-        is open: in-window app bars suppress the OS right zone, and
-        the bar's wifi icon deep-links to the Settings window. Always False in
-        the PLAY world (fullscreen Library/games -- even on the windowed tier)
-        and on the fullscreen-stack tiers, where the fullscreen chrome rules
-        apply verbatim."""
+        """True in DESKTOP mode (the windowed WM's desk, docs/shell_layout_2026-10.md
+        §3): in-window app bars suppress the OS right zone, and the bar's wifi
+        icon deep-links to the Settings window. False in console mode -- on
+        every board, a P4 included -- where the fullscreen chrome rules apply
+        verbatim."""
         wm = getattr(self, "wm", None)
         return wm is not None and wm.desk_open()
 
@@ -1599,8 +1598,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _exit_settings(self):
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
-        # open (a running game, the Make window) stays. Desk world only (#105):
-        # play-world Settings is fullscreen and takes the resume-or-home rules.
+        # open (a running game, the Make window) stays. Desktop mode only:
+        # console-mode Settings is fullscreen and takes the resume-or-home rules.
         if self.settings_layer.wifi_view:
             self.settings_layer.close_wifi()   # its radio lease ends with the visit
         _ck = getattr(self.wm, "close_window_kind", None)
@@ -2276,7 +2275,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (spec Section 6). The cart is started (ready for PLAY) but not shown; the Editor
         # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
         # passes the PICKED cart -- never a launcher tap (a launcher tap always RUNS).
-        self._ensure_desk()            # make verbs live in the make world (#105)
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
@@ -2287,16 +2285,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def launch_selected(self):
         """A launcher TAP RUNS the selected cart (spec shell_ux_v1.md, the locked model:
         launcher tap = RUN, always, for every cart type). The one exception is the pinned
-        "Make" pseudo tile (slot 0): authoring lives in the MAKE world -- on the windowed
-        tier that is the DESK (two-worlds #105), on the fullscreen tiers the Editor's
-        PROJECT-PICKER. Both Play and Edit stay reachable -- Play here, Edit through
-        the Make tile."""
+        "Make" pseudo tile (slot 0): it opens the Editor's PROJECT-PICKER, fullscreen in
+        console mode on every board (no tile flips the mode). Both Play and Edit stay
+        reachable -- Play here, Edit through the Make tile."""
         sel = self.launcher.selected()
         if sel is not None and sel.get("type") == MAKE_TILE_TYPE:
-            if getattr(self.wm, "has_desk", False):
-                self.open_desk()
-            else:
-                self.open_picker()
+            self.open_picker()
             return
         self.open()
 
@@ -2393,34 +2387,33 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         except (ValueError, TypeError, AttributeError) as exc:
             print("Moybyte resume: %s" % exc)
 
-    # -- the desk (two-worlds #105: the windowed tier's MAKE world) ----------
+    # -- the desk (the windowed tier's DESKTOP mode, and the way to console) --
 
     def open_desk(self):
-        """Enter the DESK -- the windowed tier's make world: wallpaper + system
-        icons + taskbar, every app a window. The desk is the FLOOR of that
-        world (its bar has no X); the PLAY icon is the way back to the
-        fullscreen Library. Fullscreen tiers never call this (no has_desk)."""
+        """Show the DESK -- desktop mode's root: wallpaper + system icons +
+        taskbar, every app a window, and no X (nothing is beneath it). From
+        console mode it is the home's X (`wm.leave_console`), which brings the
+        parked windows back; on the desk it closes every window. The boot's
+        landing on the windowed tier; fullscreen tiers never call this."""
         self._dirty = True
-        self.search_typing = False     # #105: leaving the run-grid ends any query typing
+        self.search_typing = False     # leaving the home ends any query typing
         self._set_text_mode(False)
-        # Re-derive the shelf under the two-worlds filter (system apps are
-        # desk-only here): the first call runs before the WM swap finished
+        # Re-derive the shelf under the desk-tier filter (system apps are
+        # desk icons here): the first call runs before the WM swap finished
         # populating anything, so the boot-time entry settles the filter.
         self.launcher.set_items(self._launcher_view_items())
-        self.wm.goto("desk")
+        if self.wm.mode == "console":
+            self.wm.leave_console()
+        else:
+            self.wm.goto("desk")
 
     def open_library(self):
-        """The desk's PLAY icon: drop to the fullscreen Library (the play
-        world). Leaving the desk closes its windows (v1 -- autosave means
-        nothing is lost); go_home also runs the leave-make-world cleanup
-        (flushes the open app, releases the world, re-slims the cart)."""
+        """The desk's PLAY icon: console mode over the home
+        (docs/shell_layout_2026-10.md §3). The WM ends a running playtest
+        and parks the desk's windows, and go_home lands on the home without
+        touching them. On a console-only WM it is go_home."""
+        self.wm.enter_console()
         self.go_home()
-
-    def _ensure_desk(self):
-        """Route a make verb (CHANGE / pick) through the desk on the windowed
-        tier; a no-op when the desk is already open or on fullscreen tiers."""
-        if getattr(self.wm, "has_desk", False) and not self.wm.desk_open():
-            self.wm.goto("desk")
 
     def change_selected(self):
         """CHANGE (visual identity v1 Sections 1.2-1.3): open the launcher's selected
@@ -2699,7 +2692,27 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # this stays reachable (PaintLayer's CLOSE tap dispatches ws._leave_theme()).
         self.theme_layer.leave()
 
+    def home_key(self):
+        """The HOME key (owner, 2026-10-13: back out one level, everywhere).
+        In desktop mode it shows the desktop -- every window minimised to its
+        chip, kept, and HOME again brings them back (`wm.show_desk`); it never
+        closes a window. In console mode it goes home, and from the home on a
+        board whose desk waits beneath it, to the desktop."""
+        wm = self.wm
+        if wm.mode == "desktop":
+            wm.show_desk()
+            self._dirty = True
+        elif not wm.top_is("launcher"):
+            self.go_home()
+        elif self.bar_layer._show_x("home"):
+            self.open_desk()
+
     def go_home(self):
+        """Land on this mode's root (`wm.root_kind`): the home in console mode,
+        the desk in desktop mode, closing what stood above it. Every leaving
+        surface is persisted first. In console mode a parked Editor that still
+        holds the workspace is not torn down -- go_home touches no parked
+        window (docs/shell_layout_2026-10.md §3)."""
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
         # The launcher root ends every return path: an app-to-app return that
@@ -2729,34 +2742,41 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             _editor_app.save_current()
         if self._editing_icons:
             self.look.save_icons()     # the theme editor has no bar of its own
-        self.editor = None
-        self.paint = None
-        self._editing_icons = False    # never carry the theme-editing flag home
         if self.settings_layer.wifi_view:
             self.settings_layer.close_wifi()   # its radio lease ends with the visit
-        for _ui in ("map_ui", "scene_ui", "block_ui"):
-            _ui = self.built(_ui)        # one never built is fresh already
-            if _ui is not None:
-                _ui.reset()
-        self.wm.goto("launcher")       # Stage 6e: pop back to the launcher root
-        self.cart = None
-        # #66 fragmentation fix: ns = None alone kept the world alive through
-        # player._update's closure; release clears the dict in place + collects.
-        self.player.release_world()
-        # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
-        # the whole workspace. The fat cart re-slims NOW (not at the next open --
-        # reopening the SAME cart otherwise stays fat forever, and its rehydrated
-        # src/sprites strings are mid-heap pins that fragment every later run's
-        # churn arena; reopen costs one SD read) and a FRESH empty Project
-        # replaces the old one's sheet/tilemap/images/pmem (ws.project is
-        # never-None by design, so surfaces keep their invariant). The EDITOR
-        # return path (\_exit_to_caller -> menu) keeps both -- that's live
-        # editing state, not a corpse.
-        _fat = getattr(self, "_fat_cart", None)
-        if _fat is not None:
-            self.carts.reslim(_fat)
-            self._fat_cart = None
-        self.project = Project(self)
+        # The parked Editor's workspace (console mode): its window comes back
+        # to it, so neither it nor the run state it holds is torn down.
+        keep = self.wm.is_parked("menu") and (
+            self._editing_icons or (_editor_app is not None
+                                    and _editor_app.project is self.project))
+        if not keep:
+            self.editor = None
+            self.paint = None
+            self._editing_icons = False    # never carry the theme-editing flag home
+            for _ui in ("map_ui", "scene_ui", "block_ui"):
+                _ui = self.built(_ui)        # one never built is fresh already
+                if _ui is not None:
+                    _ui.reset()
+        self.wm.goto(self.wm.root_kind())   # this mode's root, everything above it gone
+        if not keep:
+            self.cart = None
+            # #66 fragmentation fix: ns = None alone kept the world alive through
+            # player._update's closure; release clears the dict in place + collects.
+            self.player.release_world()
+            # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
+            # the whole workspace. The fat cart re-slims NOW (not at the next open --
+            # reopening the SAME cart otherwise stays fat forever, and its rehydrated
+            # src/sprites strings are mid-heap pins that fragment every later run's
+            # churn arena; reopen costs one SD read) and a FRESH empty Project
+            # replaces the old one's sheet/tilemap/images/pmem (ws.project is
+            # never-None by design, so surfaces keep their invariant). The EDITOR
+            # return path (\_exit_to_caller -> menu) keeps both -- that's live
+            # editing state, not a corpse.
+            _fat = getattr(self, "_fat_cart", None)
+            if _fat is not None:
+                self.carts.reslim(_fat)
+                self._fat_cart = None
+            self.project = Project(self)
         self.cart_error = None
         self.save_status = None
         self.show_achievements = False
@@ -2778,10 +2798,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _launcher_items(self, carts):
         """The LAUNCHER run-grid entries: the pinned "Make" tile first (spec shell_ux_v1.md
-        -- tap it to enter the MAKE world), then the runnable carts. WALLPAPERS
+        -- tap it for the Editor's project picker), then the runnable carts. WALLPAPERS
         are excluded -- they're a backdrop category chosen in Settings -> wallpaper, not
         run-grid apps (they stay in the Editor picker + the Settings wallpaper picker).
-        On the windowed tier (#105 two worlds) SYSTEM-APP carts are excluded too: the
+        On the windowed tier (#105) SYSTEM-APP carts are excluded too: the
         Library is the game launcher; the tools live as desk icons/windows -- one rule
         a kid can hold ("apps are windows, games are fullscreen"). Kid-made "app"-type
         carts are NOT system apps and stay on the shelf (they run under the Player)."""
@@ -2934,16 +2954,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             pass
 
     def _leave_or_home(self, leave):
-        """The B-leaves-the-sub-view / HOME-goes-all-the-way-home shape shared by
+        """The B-leaves-the-sub-view / HOME-backs-out (`home_key`) shape shared by
         several menu_view input branches (theme/map/music/the default card editor)
         and the block-editor outline: B calls the view's own `leave` callback (it
         differs per view -- e.g. `_leave_theme` vs `_leave_menu`), HOME always goes
-        to `go_home`. Verified identical at every call site before extracting."""
+        to the HOME key's verb (`home_key`). Verified identical at every call site
+        before extracting."""
         i = self.input
         if i.pressed("b"):
             leave()
         elif i.pressed("home"):
-            self.go_home()
+            self.home_key()
 
     def handle_input(self):
         # Router (docs/history/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
@@ -3414,10 +3435,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         screen into a rectangle OF that screen and the desktop renders as a
         recursive smear of its own bar. Giving a cart its own window surface is a
         `wm_windowed` change, which `docs/history/ui_refactor_2026-08.md` Section 6 puts
-        out of scope -- so in the desk world a responsive cart keeps the fixed
-        raster and is told (320, 240) by `_layout`, which is the truth. From the
-        fullscreen Library (the play world, where `windowed_chrome` is False
-        because the desk is popped) it gets the whole surface."""
+        out of scope -- so in desktop mode a responsive cart keeps the fixed
+        raster and is told (320, 240) by `_layout`, which is the truth. In
+        console mode (`windowed_chrome` False) it gets the whole surface."""
         sc = self._sys_canvas
         if self.windowed_chrome:
             return False
@@ -3786,7 +3806,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # FULLSCREEN GAME-DOMAIN PLACEMENT on a COMMAND-ONLY game canvas (#175).
         # There the cart's frame has no pixels for _composite_game to scale up,
         # so its draw span must be BRACKETED instead -- otherwise every
-        # fullscreen cart (and the play-world Library, which is game-domain
+        # fullscreen cart (and console mode's Library, which is game-domain
         # content) lands 1:1 at the desktop origin: the owner's "play menu loads
         # all games in the upper left corner". The bracket uses the WM's own
         # viewport geometry, i.e. exactly what the pixel composite would have
@@ -3866,7 +3886,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 # LETTERBOX FIRST. The pixel composite fills the bezel AFTER the
                 # cart draws (it owns the framebuffer); a command-only canvas
                 # cannot -- that fill would wipe the frame already recorded, so
-                # composite_game bails and the play world showed the LIBRARY
+                # composite_game bails and console mode showed the LIBRARY
                 # behind the game (owner, 2026-07-31). Painting it here, before
                 # the bracket opens, is the same pixels in the right order.
                 self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black

@@ -292,9 +292,9 @@ def test_windowed_ignored_at_320x240(tmp_path):
 
 
 def test_root_only_defers_to_fullscreen_shape(tmp_path):
-    """The PLAY world (#105): with no desk on the stack there are no windows --
-    the visible stack is [launcher] + overlays, exactly the fullscreen tier's
-    shape. Boot lands on the DESK, so drop to the Library first."""
+    """Console mode: no windows -- the visible stack is [launcher] +
+    overlays, exactly the fullscreen tier's shape. Boot lands on the DESK, so
+    the desk's PLAY enters console mode first."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     drv.frame(1 / 30)
@@ -1937,11 +1937,11 @@ def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
     assert stale == 0, "stale cursor pixels remained on skipped desk frames"
 
 
-def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_flip(tmp_path):
+def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(tmp_path):
     """Window buffers are off-heap layers on a board and nothing collects
     them: the WM releases one when its window dies, when a resize rebuilds
     it, and when a relayout drops every window. The drag backdrop is kept
-    across a world flip (same root size) instead of being re-minted at 2MB
+    across a relayout (same root size) instead of being re-minted at 2MB
     a round. Measured leak this closes: ~3.6MB of PSRAM per Library ->
     CHANGE -> home round on the Guition P4 (2026-09-09)."""
     ws = _ws(tmp_path)
@@ -1961,13 +1961,13 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_fli
     drv.frame(1 / 30)
     assert ws.wm._wins == {}
     assert comp2._buf is None
-    # The drag backdrop: minted once, invalidated (not dropped) by a world flip.
+    # The drag backdrop: minted once, invalidated (not dropped) by a relayout.
     ws.open_settings()
     drv.frame(1 / 30)
     cache = ws.wm._ensure_backdrop()
     assert ws.wm._backdrop is cache
     comp3 = ws.wm._wins["settings"].buf._comp
-    ws._relayout()                                  # the world-flip hook
+    ws._relayout()                                  # the relayout hook
     assert ws.wm._wins == {} and comp3._buf is None
     assert ws.wm._backdrop is cache and not ws.wm._backdrop_valid
     assert cache._comp._buf is not None
@@ -2015,3 +2015,411 @@ def test_two_app_windows_of_different_sizes_match_their_golden(tmp_path):
     assert ws.wm._order[-1] == "calc"
     got.append(_render(ws, "two windows, calc on top", "desk"))
     assert tuple(got) == TWO_WINDOWS
+
+
+# -- console mode as WM state (docs/shell_layout_2026-10.md §3, step 1) ---------
+#
+# The desk's PLAY enters console mode: the windows park outside the back-stack,
+# the route truncates to its root and the home presents fullscreen; the home's X
+# leaves it, and the route's restore op puts the parked kinds back. Every branch
+# §3 names reads the mode, and each is pinned here by name.
+
+def _center(r):
+    return r[0] + r[2] // 2, r[1] + r[3] // 2
+
+
+def _desk_with_three(ws, drv):
+    """The desk with Settings, Calc and the Make window (the Editor), the
+    Make window on top and focused."""
+    ws.open_settings()
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.open_picker()
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["settings", "calc", "make"]
+    return {k: ws.wm._wins[k] for k in ws.wm._order}
+
+
+def _content_draws(ws, monkeypatch):
+    """Count each content layer's draws by window kind."""
+    seen = []
+    for kind in ("settings", "calc", "picker"):
+        layer = ws.wm._content_for(kind)
+        orig = layer.draw
+        monkeypatch.setattr(layer, "draw",
+                            lambda dt, _k=kind, _o=orig: (seen.append(_k), _o(dt))[1])
+    menu = ws.wm._content_for("menu")
+    orig_menu = menu.draw
+    monkeypatch.setattr(menu, "draw",
+                        lambda dt: (seen.append("menu"), orig_menu(dt))[1])
+    return seen
+
+
+def test_play_enters_console_mode_and_parks_the_windows(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    bufs = {k: w.buf._comp for k, w in wins.items()}
+    rects = {k: (w.x, w.y, w.w, w.h) for k, w in wins.items()}
+    ws.open_library()                            # the desk's PLAY
+    drv.frame(1 / 30)
+    wm = ws.wm
+    assert wm.mode == "console"
+    assert wm.stack.kinds() == ["launcher"]      # the route at its root
+    assert wm._order == [] and wm._wins == {}
+    assert wm.visible_stack()[0] is ws.launcher_layer
+    p = wm._parked
+    assert p.kinds == ["settings", "calc", "picker", "menu"]
+    assert p.order == ["settings", "calc", "make"] and p.focus == "make"
+    for k, w in wins.items():                    # the records, stamps and all
+        assert p.wins[k] is w
+        assert (w.x, w.y, w.w, w.h) == rects[k]
+        assert w.buf._comp is bufs[k] and bufs[k]._buf is not None
+    assert wm.is_parked("menu") and not wm.is_parked("desk")
+
+
+def test_the_x_leaves_console_mode_with_the_windows_unrendered(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    bufs = {k: w.buf for k, w in wins.items()}
+    ws.open_library()
+    drv.frame(1 / 30)
+    assert ws.bar_layer._show_x("home")          # the desk is beneath the home
+    seen = _content_draws(ws, monkeypatch)
+    x, y = _center(ws.layout.context_x_btn)
+    assert ws.bar_layer.handle_bar_tap("home", x, y)   # the home's X
+    wm = ws.wm
+    assert wm.mode == "desktop"
+    assert wm.stack.kinds() == ["launcher", "desk", "settings", "calc",
+                                "picker", "menu"]
+    assert seen == [], "a restored window re-rendered on the way back"
+    assert wm._order == ["settings", "calc", "make"] and wm._focus == "make"
+    for k, w in wins.items():
+        assert wm._wins[k] is w and w.buf is bufs[k]
+    assert wm._parked is None
+    drv.frame(1 / 30)
+    assert "settings" not in seen and "calc" not in seen   # stamped, not drawn
+
+
+def test_a_released_stamp_re_renders_once_on_return(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.open_library()
+    drv.frame(1 / 30)
+    old = wins["settings"].buf._comp
+    assert ws.wm.release_cache()                  # the oldest parked stamp
+    assert wins["settings"].buf is None and old._buf is None
+    assert wins["calc"].buf is not None
+    seen = _content_draws(ws, monkeypatch)
+    ws.open_desk()                               # the X's verb
+    assert seen == ["settings"]                  # once, the path a resize takes
+    w = wins["settings"]
+    assert w.buf is not None and w.ctx is not None and not w._buf_stale
+    assert ws.wm._wins["settings"] is w
+
+
+def test_the_fit_release_goes_oldest_first_then_the_home_frame(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.open_library()
+    drv.frame(1 / 30)
+    ws.launcher_layer.prealloc_retained()
+    assert ws.launcher_layer._lib_cache is not None
+    freed = []
+    while ws.wm.release_cache():
+        freed.append([k for k in ("settings", "calc", "make")
+                      if wins[k].buf is None])
+    assert freed[:3] == [["settings"], ["settings", "calc"],
+                         ["settings", "calc", "make"]]
+    assert len(freed) == 4 and ws.launcher_layer._lib_cache is None
+    assert not ws.wm.release_cache()
+    ws.open_desk()
+    assert all(w.buf is not None for w in wins.values())
+
+
+def test_a_parked_kind_reopened_fullscreen_is_found_in_place(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    rect = (wins["settings"].x, wins["settings"].y)
+    ws.open_library()
+    ws.open_settings()                           # the one Settings process
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm._order == []
+    assert ws.wm.stack.kinds() == ["launcher", "settings"]
+    assert ws.wm._parked.wins["settings"] is wins["settings"]
+    ws.exit()                                    # its X: back to the home
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"] and ws.wm.mode == "console"
+    seen = _content_draws(ws, monkeypatch)
+    ws.open_desk()
+    assert seen == ["settings"]                  # shows what the process holds now
+    w = ws.wm._wins["settings"]
+    assert w is wins["settings"] and (w.x, w.y) == rect
+
+
+def test_play_ends_a_running_playtest(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    ws._leave_menu()                             # the Editor's PLAY
+    drv.frame(1 / 30)
+    assert "desktop" in ws.wm._wins
+    released = []
+    orig = ws.player.release_world
+    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    ws.open_library()
+    assert not ws.wm.stack.has("desktop") and released
+    assert "desktop" not in ws.wm._parked.kinds
+    assert "desktop" not in ws.wm._parked.wins
+    assert ws.wm._parked.kinds == ["picker", "menu"]
+
+
+def test_branch_slots_reads_the_mode(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    assert [g for g, _k in ws.wm._slots()] == ["settings", "calc", "make"]
+    ws.open_library()
+    ws.wm.stack.goto("desk")                     # a stack shape no longer asks
+    assert ws.wm._slots() == []
+    ws.wm.stack.goto("launcher")
+
+
+def test_branch_keeps_animating_reads_the_mode(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    monkeypatch.setattr(ws.wallpaper, "is_animating", lambda dt: True)
+    assert ws.wm.keeps_animating(1 / 30)
+    ws.open_library()
+    assert not ws.wm.keeps_animating(1 / 30)     # a parked desk is not drawn
+
+
+def test_branch_desk_open_and_windowed_chrome_read_the_mode(tmp_path):
+    ws = _ws(tmp_path)
+    assert ws.wm.desk_open() and ws.windowed_chrome
+    ws.open_library()
+    assert not ws.wm.desk_open() and not ws.windowed_chrome
+    ws.open_desk()
+    assert ws.wm.desk_open() and ws.windowed_chrome
+
+
+def test_branch_the_mode_switch_relayouts_and_never_drops_a_window(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    drops = []
+    relayouts = []
+    monkeypatch.setattr(ws.wm, "_drop_wins", lambda: drops.append(1))
+    orig = ws._relayout
+    monkeypatch.setattr(ws, "_relayout", lambda: (relayouts.append(1), orig())[1])
+    ws.open_library()
+    assert relayouts == [1]
+    ws.open_desk()
+    assert relayouts == [1, 1]
+    assert drops == []
+    assert ws.wm._root_ctx.layout is ws.layout
+
+
+def test_branch_focus_and_sync_windows_come_back_as_parked(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.wm._focus = "calc"                        # a lower window held focus
+    ws.open_library()
+    ws.open_desk()
+    ws.wm._sync_windows()
+    assert ws.wm._focus == "calc"
+    assert ws.wm._order == ["settings", "calc", "make"]
+    assert ws.wm._wins["make"] is wins["make"] and wins["make"].kind == "menu"
+
+
+def test_branch_a_relayout_in_console_mode_releases_the_parked_stamps(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.open_library()
+    ws._relayout()                               # a font-scale or theme relayout
+    assert all(w.buf is None for w in wins.values())
+    assert ws.wm._parked.order == ["settings", "calc", "make"]
+    ws.open_desk()
+    for w in wins.values():                      # rebuilt at the new layout
+        assert w.buf is not None and w.ctx.layout.w == w.buf.w
+
+
+def test_branch_go_home_in_console_mode_touches_no_parked_window(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    project, cart = ws.project, ws.cart
+    assert ws.editor_app.project is project
+    ws.open_library()
+    ws.open_settings()
+    ws.go_home()                                 # HOME from a console surface
+    assert ws.wm.stack.kinds() == ["launcher"] and ws.wm.mode == "console"
+    assert ws.project is project and ws.cart is cart
+    assert ws.editor_app.project is project
+    ws.open_desk()
+    assert ws.wm._wins["make"].kind == "menu"
+
+
+def test_branch_go_home_in_desktop_mode_lands_on_the_desk(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    ws.go_home()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop"
+    assert ws.wm.stack.kinds() == ["launcher", "desk"]
+    assert ws.wm._order == [] and ws.cart is None
+
+
+def test_branch_a_console_run_closes_the_parked_editors_project(tmp_path):
+    """A cart run from the home swaps the workspace -- the Editor's exit path
+    (#111) -- so its parked window comes back as the picker, its entry state,
+    in the same place."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    rect = (wins["make"].x, wins["make"].y)
+    ws.open_library()
+    ws.open()                                    # a game, fullscreen
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm._order == []
+    ws._exit_to_caller()
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"]
+    ws.open_desk()
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "settings", "calc",
+                                   "picker"]
+    w = ws.wm._wins["make"]
+    assert w is wins["make"] and w.kind == "picker" and (w.x, w.y) == rect
+
+
+def test_branch_exit_doors_in_console_mode(tmp_path):
+    """The Make tile and CHANGE open the Editor fullscreen; B on the home
+    leaves; no door flips the mode but the X and its keyboard twin."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_library()
+    ws.launcher.sel = 0                          # the pinned Make tile
+    ws.launch_selected()
+    assert ws.wm.mode == "console" and ws.wm.top_is("picker")
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    assert ws.wm.top_is("menu") and ws.wm._order == []
+    ws.go_home()
+    ws.launcher.sel = 1
+    ws.change_selected()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm.top_is("menu")
+    ws.go_home()
+    drv.frame(1 / 30)
+    drv.press("b")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm.top_is("desk")
+
+
+def test_branch_presentation_reads_the_mode(tmp_path):
+    ws = _ws(tmp_path)
+    wm = ws.wm
+    assert not wm.game_is_fullscreen() and not wm.player_has_pointer()
+    ws.open_library()
+    assert wm.game_is_fullscreen() and wm.player_has_pointer()
+
+
+def test_the_home_x_follows_the_floor(tmp_path):
+    """Console mode's home has an X on a P4 (the desk is beneath it) and none
+    on the fullscreen tier, where the home is the floor."""
+    from ws_helpers import build_ws
+    ws = _ws(tmp_path / "p4")
+    assert not ws.bar_layer._show_x("desk")
+    ws.open_library()
+    assert ws.bar_layer._show_x("home")
+    drv = _drv(ws)
+    drv.frame(1 / 30)
+    drv.click(*_center(ws.layout.context_x_btn))
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and not ws.bar_layer._show_x("desk")
+    small = build_ws(tmp_path / "tdeck")
+    assert small.wm.mode == "console" and small.wm.floor() == 1
+    assert not small.bar_layer._show_x("home")
+    small.open_library()
+    assert small.wm.stack.kinds() == ["launcher"]
+
+
+# -- the HOME key: back out one level, everywhere (owner, 2026-10-13) -----------
+
+def test_home_on_the_desk_minimises_every_window_and_home_again_restores(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    bufs = {k: w.buf for k, w in wins.items()}
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    wm = ws.wm
+    assert wm.mode == "desktop" and wm._order == ["settings", "calc", "make"]
+    assert all(w.minimized for w in wins.values())       # kept, as chips
+    assert wm._focus is None
+    assert wm.stack.kinds()[-1] == "menu"                # nothing closed
+    assert all(w.buf is bufs[k] for k, w in wins.items())
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert not any(w.minimized for w in wins.values())
+    assert wm._focus == "make"
+
+
+def test_home_never_minimises_a_running_game(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    ws._leave_menu()                             # a playtest window
+    drv.frame(1 / 30)
+    ws.home_key()
+    assert ws.wm._wins["make"].minimized
+    assert not ws.wm._wins["desktop"].minimized
+    assert ws.wm._focus == "desktop" and ws.wm.stack.has("desktop")
+
+
+def test_home_in_console_mode_backs_out_one_level(tmp_path):
+    """From a console-mode surface HOME goes home; from the home on a P4 it
+    goes to the desktop, its windows where they were."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    ws.open_library()
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm.stack.kinds() == ["launcher"]
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop"
+    assert ws.wm._order == ["settings", "calc", "make"]
+    assert not any(w.minimized for w in ws.wm._wins.values())
+
+
+def test_home_on_the_fullscreen_tier_is_unchanged(tmp_path):
+    from ws_helpers import build_ws
+    ws = build_ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"]
+    drv.press("home")                            # the home is the floor
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"]

@@ -152,8 +152,8 @@ def win_geom(b, key):
 
 
 def home(b):
-    """Home, and on a windowed tier the desk: there home is the fullscreen
-    Library, where an app opens without a window."""
+    """Home, and on a windowed tier the desk: go_home in console mode lands
+    on the fullscreen Library, where an app opens without a window."""
     pyexec(b, "ws.go_home()"); b.drain(2.0)
     if b.state().get("desk") is False:
         pyexec(b, "ws.open_desk()"); b.drain(1.0)
@@ -252,6 +252,36 @@ def bench_all(b, out_path):
         bench.start()
         b.swipe(bx + bw - 40, cy, bx + 60, cy, frames=30); b.drain(2.0)
         bench.stop("library drag-scroll  [reference]")
+
+    # -- console mode (docs/shell_layout_2026-10.md §3): the switch's spikes,
+    # read as the rows' max (the single-frame maximum) --------------------
+    home(b)
+    pyexec(b, "ws.open_settings()\n"
+              "ws.open_app(ws._apps_by_id['calc'])\n"
+              "ws.open_app(ws._apps_by_id['files'])")
+    b.drain(4.0)
+    bench.start(); pyexec(b, "ws.defer(ws.open_library)"); b.drain(4.0)
+    bench.stop("PLAY, three windows parked")
+    bench.start(); pyexec(b, "ws.defer(ws.open_desk)"); b.drain(4.0)
+    bench.stop("X, three windows back")
+    pyexec(b, "ws.open_library()"); b.drain(3.0)
+    pyexec(b, "ws.wm.release_cache()")
+    bench.start(); pyexec(b, "ws.defer(ws.open_desk)"); b.drain(4.0)
+    bench.stop("X, one stamp released")
+    # A live wallpaper behind the parked desk: the home's own backdrop is the
+    # only one that may animate.
+    live = pyval(b, "[ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]") or []
+    was = pyval(b, "ws.look.wallpaper_id")
+    for wp in live:
+        pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % wp)
+        if pyval(b, "ws.wallpaper.is_animating(0.03)"):
+            pyexec(b, "ws.open_library()"); b.drain(3.0)
+            bench.start(); b.drain(3.0)
+            bench.stop("library idle, live wallpaper %s (desk parked)" % wp)
+            pyexec(b, "ws.open_desk()"); b.drain(1.0)
+            break
+    pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % was)
+    home(b)
 
     table = bench.table()
     print("\n" + table)

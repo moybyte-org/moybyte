@@ -862,7 +862,7 @@ class SettingsLayer:
             self.close_confirm()
         elif i.pressed("home") or i.pressed("stop"):
             self.close_confirm()
-            ws.go_home()
+            ws.home_key()
         return True
 
     def _confirm_pointer(self, px, py, click):
@@ -924,7 +924,7 @@ class SettingsLayer:
         """A / B / left / right close the panel; home leaves Settings."""
         if i.pressed("home") or i.pressed("stop"):
             self.close_crash()
-            self.ws.go_home()
+            self.ws.home_key()
         elif (i.pressed("a") or i.pressed("run") or i.pressed("b")
                 or i.pressed("left") or i.pressed("right")):
             self.close_crash()
@@ -1357,7 +1357,7 @@ class SettingsLayer:
         if i.pressed("b"):
             ws._exit_settings()          # back -> resume the cart if opened from one
         elif i.pressed("home") or i.pressed("stop"):
-            ws.go_home()
+            ws.home_key()
         return True
 
     def handle_pointer(self, px, py, click):

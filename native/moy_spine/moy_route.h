@@ -100,6 +100,12 @@ void moy_back_reset(moy_back_t *b);                     // the launcher alone
 int moy_back_goto(moy_back_t *b, const char *kind, size_t n, int *answer);
 // OK with `removed` 1 when the kind was open and not the root; BAD.
 int moy_back_remove(moy_back_t *b, const char *kind, size_t n, int *removed);
+// The stack becomes the root and then `kinds[0 .. n)`, bottom to top -- the
+// restore op that puts parked kinds back without re-opening any
+// (docs/shell_layout_2026-10.md §3). OK; BAD for a kind that is empty, too
+// long, the root or repeated; FULL past MOY_BACK_DEPTH. Nothing changes
+// unless it answers OK.
+int moy_back_restore(moy_back_t *b, const moy_kind_t *kinds, uint32_t n);
 const moy_kind_t *moy_back_top(const moy_back_t *b);
 uint32_t moy_back_depth(const moy_back_t *b);
 const moy_kind_t *moy_back_at(const moy_back_t *b, uint32_t depth);

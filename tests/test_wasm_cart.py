@@ -794,6 +794,61 @@ def test_a_console_whose_largest_block_is_too_small_says_so(tmp_path):
                                 "enough."), ws.player.notice
 
 
+def _parked_desk(tmp_path):
+    """A P4-shaped console in console mode over three parked windows."""
+    ws = host_app.build_workstation(_store(tmp_path, _hello), sys_size=(1024, 600),
+                                    font_scale=2, windowed=True)
+    for app in ("settings", "calc", "files"):
+        if app == "settings":
+            ws.open_settings()
+        else:
+            ws.open_app(ws._apps_by_id[app])
+    ws.wm._sync_windows()
+    wins = dict(ws.wm._wins)
+    ws.open_library()                            # the desk's PLAY
+    ws.launcher_layer.prealloc_retained()
+    return ws, wins
+
+
+def test_a_failed_fit_releases_parked_stamps_until_it_passes(tmp_path):
+    """A compiled cart that does not fit gets back the parked window stamps,
+    oldest first and one at a time, and stops releasing once it fits
+    (docs/shell_layout_2026-10.md §3); the released window re-renders once
+    when the desk comes back."""
+    _binding_or_skip()
+    ws, wins = _parked_desk(tmp_path)
+    rt = ws.runtimes["wasm"]
+
+    def freed():
+        return sum(1 for w in wins.values() if w.buf is None)
+
+    class Growing(_Runtime):
+        def memory(self):
+            need = self.real.footprint(ws.cart)
+            n = freed()
+            return (need[0], need[1]) if n >= 2 else (n, n)
+
+    ws.runtimes["wasm"] = Growing(rt)
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice is None and ws.player.cart_error is None
+    assert [k for k, w in wins.items() if w.buf is None] == ["settings", "calc"]
+    assert wins["files"].buf is not None
+    assert ws.launcher_layer._lib_cache is not None
+    ws._exit_to_caller()
+    ws.open_desk()
+    assert all(w.buf is not None for w in wins.values())
+
+
+def test_a_fit_that_never_passes_releases_everything_then_says_so(tmp_path):
+    _binding_or_skip()
+    ws, wins = _parked_desk(tmp_path)
+    ws.runtimes["wasm"] = _Runtime(ws.runtimes["wasm"], memory=(1, 1))
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice is not None
+    assert all(w.buf is None for w in wins.values())
+    assert ws.launcher_layer._lib_cache is None
+
+
 def test_the_notice_never_reads_as_a_fit():
     """What a cart needs rounds up and what the console has rounds down, so
     a refusal can never print the same two numbers."""

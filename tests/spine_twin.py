@@ -244,6 +244,17 @@ class BackStack:
         st.remove(kind)
         return True
 
+    def restore(self, kinds):
+        """The root, then `kinds` bottom to top: the parked kinds put back
+        without re-opening any. ValueError for the root or a kind twice,
+        OSError past DEPTH; nothing changes on an error."""
+        ks = [_kind(k) for k in kinds]
+        if len(ks) >= self.DEPTH:
+            raise OSError(_ENOSPC, "back-stack full")
+        if ROOT in ks or len(set(ks)) != len(ks):
+            raise ValueError("the root, or a kind twice")
+        self._k = [ROOT] + ks
+
     def top(self):
         return self._k[-1]
 

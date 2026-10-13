@@ -383,5 +383,5 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # which meaning it serves.
         ws._sys_canvas.letterbox_composite = False
         ws.wm = WindowedWM(ws)
-        ws.open_desk()                 # two worlds (#105): boot onto the DESK
+        ws.open_desk()                 # boot onto the DESK (desktop mode)
     return ws

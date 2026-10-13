@@ -132,15 +132,42 @@ class FullscreenStackWM:
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
         return self.stack.top() == "desktop"
 
-    # -- the two worlds (#105): play (fullscreen) vs make (the windowed desk) --
+    # -- the two modes (docs/shell_layout_2026-10.md §3) ----------------------
 
     has_desk = False                   # capability probe: only WindowedWM has a desk
+    mode = "console"                   # this WM has console mode alone
 
     def desk_open(self):
-        """True while the MAKE world (the windowed tier's desk) is open --
-        `ws.windowed_chrome` projects this. Always False on this fullscreen
-        tier: there is one world here and it is the fullscreen stack."""
+        """True in DESKTOP mode -- `ws.windowed_chrome` projects this. Always
+        False here: this WM is console mode only."""
         return False
+
+    def floor(self):
+        """The back-stack depth of this mode's root when nothing is beneath
+        it. The home's X shows when the stack is deeper; here the home is
+        the root and the floor, so it never does."""
+        return 1
+
+    def root_kind(self):
+        """The kind `go_home` lands on: this mode's root."""
+        return "launcher"
+
+    def enter_console(self):
+        """The desk's PLAY. Already in console mode here."""
+
+    def leave_console(self):
+        """The home's X. Nothing is beneath the home here."""
+
+    def is_parked(self, kind):
+        """True when `kind`'s window waits outside the stack for desktop
+        mode; nothing does on this WM."""
+        return False
+
+    def release_cache(self):
+        """The fit check's release (shell_layout §3): free one retained
+        cache a failed fit check can have back -- here the home's retained
+        frame. True when something was freed."""
+        return self.ws.launcher_layer.release_retained()
 
     def keys_to_cart(self):
         """Console hook (#44 redraw gate): this frame's keys are consumed by a

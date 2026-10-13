@@ -30,11 +30,13 @@ memory and compositors); this doc cites, it does not copy.
 | L3 | A layout is **up to four bars**, one per edge, each with a size and three slots holding **built-in widgets** from a fixed catalogue; `layout` holds `bars` and nothing else | §4, §5 |
 | L4 | **The content rectangle is derived from the bars**; `content_rect()` is the app-cart contract, `bar_h()` a shim; the surface row grows additively; bars are global, every surface lays out off them; compiled apps and games are untouched | §7 |
 | L5 | **One popover mechanism**, desktop mode only: the system-menu `Popup` generalised, riding the quiet stack with its own rect as damage. Its contents are **components** that draw in a popover, in a bar cell, or fullscreen in console mode | §8 |
-| L6 | **One safety rule**: `menu`, `home`, `zone` and `close` placed after every drop, else the tier default; caps, the tap floor and a minimum content area checked once, deterministically | §9 |
+| L6 | **One safety rule**: `menu`, `zone` and `close` placed after every drop, else the tier default; caps, the tap floor and a minimum content area checked once, deterministically | §9 |
 | L7 | **Precedence: user, then theme, then default.** The user's override is one strict-read row, `layout_theme`; `set_theme` never touches it (D5) | §11 |
 | L8 | **A bar is a cached strip re-rendered whole when its key moves**, as today, and blitted otherwise; a layout change is a relayout; no per-cell repaint and no new invalidation mechanism | §14 |
 | L9 | **The home is the carousel with the animated centre card**, console mode's root; its scale is a function of position, never of time; the fullscreen home hands its band to the compositor as damage; a board degrades by measurement, never by data | §12 |
 | L10 | Pixels move only where a step restyles on purpose: new bar, popover and console-mode rows are NEW golden configs; the home is one named re-baseline; every other step holds every golden byte-identical | §13 |
+| L11 | **The HOME key backs out one level, everywhere** (owner, 2026-10-13). In desktop mode it shows the desktop, `show_desk()`: every window minimised to its chip and kept, HOME again restores them, and it never closes a window (Win+D's shape). In console mode it goes home, and from the home on a P4 to the desktop | §3 |
+| L12 | **The input model assumes a keyboard on every board** (owner, 2026-10-13): the T-Deck's own, a BLE keyboard on the Guition S3 and both P4s. Touch is supplementary -- a fullscreen game on a P4 is left by the keyboard alone -- and there is no on-screen home button: it would spend bar space on what the HOME key does | §4, §15 |
 
 ## 2. What exists, read against this doc
 
@@ -229,7 +231,6 @@ thing in both modes; what differs is only the container a component opens in
 | widget | draws | value | tap | min cell, horizontal / vertical |
 |---|---|---|---|---|
 | `menu` | the ≡ glyph | — | the system menu (the popup it is today, in both modes) | 16×16 / 16×16 |
-| `home` | the home glyph | — | console mode: `go_home()`; desktop mode: `show_desk()`, a new verb that minimises every window to its chip (`goto("desk")` would truncate them) | 16×16 / 16×16 |
 | `close` | the context-X | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status) | the surface's zone generation | the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8 / dropped |
@@ -245,8 +246,8 @@ thing in both modes; what differs is only the container a component opens in
 `menu`, `zone`, `close`, `title`, `clock`, `wifi` and `battery` are today's
 bar as widgets — the X becomes its own widget so that a layout can place it
 and the safety rule can require it (§9), instead of riding inside the right
-zone; `home`, `chips`, `text`, `spacer`, `separator` and `calendar` are new
-cells. There is no `settings` widget: Settings is a row of the system menu
+zone; `chips`, `text`, `spacer`, `separator` and `calendar` are new
+cells. There is no `home` widget: the HOME key is the way home (L11, L12). There is no `settings` widget: Settings is a row of the system menu
 (L0). The home's verbs ride in `zone` wherever a theme puts it, so D7's
 mockup — a top strip and a bottom verb strip — is two bars in data (§6,
 example 4).
@@ -305,28 +306,28 @@ is §3's switch, from memory.
    button at the left, the chips beside it, status and clock hard right.
    ```json
    "bars": [ { "edge": "bottom", "size": 22,
-               "left": ["menu", "home", "separator", "chips", "zone"], "center": [],
+               "left": ["menu", "separator", "chips", "zone"], "center": [],
                "right": ["close", "wifi", "battery", "clock"] } ]
    ```
 3. **A GNOME-style top bar** (desktop mode): the surface's verbs left, the
    clock centred (tap → the calendar popover), status and the ≡ right.
    ```json
    "bars": [ { "edge": "top", "size": 18,
-               "left": ["home", "zone"], "center": ["clock"],
+               "left": ["zone"], "center": ["clock"],
                "right": ["wifi", "battery", "close", "menu"] } ]
    ```
 4. **D7's mockup** (either mode): the OS bar on top, the home's verbs in a
    bottom strip. `zone` is the verb strip; on the Editor it holds the title
    and status there instead.
    ```json
-   "bars": [ { "edge": "top", "size": 18, "left": ["home", "title"], "center": [],
+   "bars": [ { "edge": "top", "size": 18, "left": ["title"], "center": [],
                "right": ["clock", "close", "menu", "wifi", "battery"] },
              { "edge": "bottom", "size": 18, "left": ["zone"], "center": [], "right": [] } ]
    ```
 5. **A docked calendar** (a P4, either mode): the month grid lives in a
    right-hand bar; the popover and this cell are one painter.
    ```json
-   "bars": [ { "edge": "top", "size": 18, "left": ["home", "zone"], "center": [],
+   "bars": [ { "edge": "top", "size": 18, "left": ["zone"], "center": [],
                "right": ["clock", "close", "menu", "wifi", "battery"] },
              { "edge": "right", "size": 120, "left": ["calendar"], "center": [], "right": ["spacer"] } ]
    ```
@@ -334,11 +335,11 @@ is §3's switch, from memory.
    content keeps 76% of the width, which clears §9's floor; on a 320- or
    480-wide glass the same bar fails the floor and the layout resolves to the
    default — the one rule, no board exception needed.
-6. **A T-Deck layout** (console mode): a bottom strip, the home button
+6. **A T-Deck layout** (console mode): a bottom strip, the surface's verbs
    beside the ≡; the same data on a P4 in console mode draws the same bar.
    ```json
    "bars": [ { "edge": "bottom", "size": 18,
-               "left": ["menu", "home", "zone"], "center": [], "right": ["clock", "close", "battery"] } ]
+               "left": ["menu", "zone"], "center": [], "right": ["clock", "close", "battery"] } ]
    ```
 
 ## 7. The content rectangle
@@ -434,16 +435,16 @@ mode's, not the board's. No component is a registered app or a desk icon.
 
 ## 9. The safety rule, and what the loader checks
 
-**The rule.** A layout places `menu`, `home`, `zone` and `close` somewhere
+**The rule.** A layout places `menu`, `zone` and `close` somewhere
 **after every drop of §10** — a `zone` in a vertical bar is dropped, and a
 layout that then has no `zone` or no `close` has lost its verbs or its exit
 — or it is replaced by the tier default and the replacement is noted in the
 theme's report (`docs/theming_2026-09.md` §7). The rule therefore runs
 twice: in the loader on the data, and in the composer on the resolved bars.
-`home` is the way to the mode's root by a tap; `close` the way out of
-anything (and of console mode on a P4), with hold-BACKSPACE and B as its
-keyboard twins (`docs/shell_ux_v1.md` §9); `menu` the system menu. No menu
-row duplicates any of them (L0).
+`close` is the way out of anything (and of console mode on a P4), with
+hold-BACKSPACE and B as its keyboard twins (`docs/shell_ux_v1.md` §9);
+`menu` the system menu; the way to the mode's root is the HOME key (L11),
+which no widget doubles. No menu row duplicates any of them (L0).
 
 **Checked once, deterministically.** In the C loader
 (`native/moy_ui/moy_theme.c`), as the theme is: the caps and clamps of §5, the
@@ -639,12 +640,12 @@ every step; the steps that ADD a config say which.
 
 | step | lands | gate beyond the common one |
 |---|---|---|
-| 1 — console mode as state | `wm.mode`, `_parked`, `enter_console`/`leave_console`, the route's restore op; every branch of §3 reads the mode; PLAY ends a playtest and parks the rest; the fit-check stamp release; `go_home` split by mode | `tools/mem_census.py p4 offheap` before the commit, to #58; NEW config `p4_1024x600_cs2_fs1_console` (a P4 in console mode, equal to the T-Deck row's layout at the P4's size); `tests/test_wm_windowed.py` covers enter, exit with windows restored unrendered, exit with a released stamp re-rendered once, a parked kind reopened fullscreen and found in place on return, the playtest ended, and each branch of §3 by name; `tests/test_wm_stack_memo.py` holds; `library drag-scroll` re-pinned here (its meaning moves: the home is now above a parked desk) with the before number beside it; PLAY and X single-frame maxima recorded; the P4's on-glass suite drives PLAY and the X; the T-Deck row unchanged |
+| 1 — console mode as state | `wm.mode`, `_parked`, `enter_console`/`leave_console`, the route's restore op; every branch of §3 reads the mode; PLAY ends a playtest and parks the rest; the fit-check stamp release; `go_home` split by mode; the HOME key and `show_desk()` (L11) | `tools/mem_census.py p4 offheap` before the commit, to #58; NEW config `p4_1024x600_cs2_fs1_console` (a P4 in console mode, equal to the T-Deck row's layout at the P4's size); `tests/test_wm_windowed.py` covers enter, exit with windows restored unrendered, exit with a released stamp re-rendered once, a parked kind reopened fullscreen and found in place on return, the playtest ended, and each branch of §3 by name; `tests/test_wm_stack_memo.py` holds; `library drag-scroll` re-pinned here (its meaning moves: the home is now above a parked desk) with the before number beside it; PLAY and X single-frame maxima recorded; the P4's on-glass suite drives PLAY and the X; the T-Deck row unchanged |
 | 2 — the Guition P4's strips and the home's damage | the compositor's one boot-time strip becomes a rect LIST in `native/moy_glass` set on relayout, each rotated only when its strip's generation moved; the fullscreen home hands its band to `note_damage` | the Guition P4's on-glass suite; its shelf-drag and play rows re-measured, to #66 and #58 (a cut from today, since an unchanged strip no longer rotates per play frame); `MOY_ROT_RECTS` budgeted: game, damage, up to four bars, coalesced, with a test that five rects never exceed it |
 | 3 — the content rectangle | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
 | 3b — the fixed geometry | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | the tool/app golden rows re-baselined by name with renders; the rest identical; the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
-| 5 — bars on any edge, slots, cells | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`home` with `show_desk()`, `chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
+| 5 — bars on any edge, slots, cells | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
 | 6 — the popover layer and the components | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_calendar_popover`, `..._docked_calendar`, `tdeck_320x240_fs1_calendar_full`; `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
 | 7a — the scaled-blit kernel | the nearest-neighbour RGB565 scaled blit in `moy_gfx`, host and boards | a micro-bench of the focus band's three blits on all four boards, to #66, before 7b starts; the board module answers the host's pixels |
 | 7b — the home | the tab row and four sources; the carousel with the animated centre card; `sel` out of the moving shift key; the key glide as a fling; the Make tile and the Library exclusion go; the per-board motion verdict | ONE named re-baseline of the home rows on every config, with before/after renders; `library idle` zero; the fling, flick, glide and tab-switch scenarios on every board with absolute p90s named per board; the Guition P4 with the band damage of step 2; `tests/test_launcher_scroll.py`, `test_home_retained_frame.py`, `test_launcher_search_favorites.py` hold; `tests/test_desktop_shell.py` gains PLAY reaching the tabbed home in console mode |
@@ -720,7 +721,12 @@ and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
 - **A `mode` key, a DESKTOP row in the system menu, a `settings` widget, a
   HOME row, a calendar app or desk icon, a `grid` home**: each is a second
   way to a thing that has one — PLAY and the X, the menu's Settings row, the
-  `home` widget, the calendar component, D7's one home (L0).
+  HOME key, the calendar component, D7's one home (L0).
+- **An on-screen home button, and touch buttons for what a key does**
+  (owner, 2026-10-13): out of scope for now, and may be added if requested;
+  a bar cell is precious space, and every board has a keyboard (L12). Input
+  to come -- BLE joysticks, a USB keyboard, mouse or joystick -- maps onto the
+  same key verbs (HOME, back, menu), so the key is the extension point.
 - **Per-widget cell repaint inside a strip** (review, 2026-10-13): the
   whole-strip re-render is one C paint and already inside the frame-alloc
   rule; a cell path would be a second render path for the same pixels.
@@ -757,6 +763,7 @@ The step named in the last column corrects the claim where it stands:
 
 | claim | where | step |
 |---|---|---|
+| "HOME-goes-all-the-way-home" | `runtime/console.py`'s `_leave_or_home` docstring | step 1 (L11) |
 | "Leaving the desk closes its windows"; "the PLAY icon drops to the fullscreen Library"; the fullscreen branches as "the desk is not in the stack"; the desk bar "draws no X (nothing is beneath it)" as the home's rule on a P4 | `runtime/console.py`'s `open_library`, `open_desk` and `windowed_chrome` docstrings, `runtime/wm.py`'s header, `runtime/wm_windowed.py`'s header, `runtime/wm_desk.py`, `.claude/rules/shell.md`'s "windows exist ONLY above the desk kind", `docs/shell_ux_v1.md` §3's two-worlds paragraph and §9's desk row | step 1 |
 | the compositor rotates "the top bar's strip" set once at boot | `firmware/guition_jc8012p4a1c/README.md`, `device/desktop_spine.py`, `native/moy_glass/moy_present_rot.c`'s comments | step 2 |
 | `bar_h()` as the whole bar contract; "the top `layout.bar_h` rows" | `docs/app_api_v1.md`, `runtime/system_api.py` | step 3 |
@@ -804,7 +811,7 @@ where it landed; a finding both made is marked.
 | A, P | overlays disable the quiet stack and damage | accepted: the popover rides the quiet stack with its rect as damage; the menu takes the same path | §8, §13 step 6 |
 | A, P | `--repaint home` does not exist; `library drag-scroll` changes meaning; gates need deltas plus absolutes and the missing scenarios | accepted | §13 |
 | A | the X must be its own widget in the required set; the rule must re-run after drops | accepted: `close`; the rule runs twice | §4, §9 |
-| A | the desktop `home` widget needs a show-desktop verb; `goto("desk")` truncates | accepted: `show_desk()` | §4 |
+| A | the desktop `home` widget needs a show-desktop verb; `goto("desk")` truncates | accepted: `show_desk()`; the owner then dropped the widget and gave the verb to the HOME key (2026-10-13) | L11, L12, §15 |
 | A | wifi exists twice; the lease must release on an outside tap; the battery rows are Settings' | accepted; the owner ruled the Settings panel the one implementation | §8, §13 step 6, §17 |
 | A | `content_rect` reaches fixed geometry the doc missed; scope is a product choice | accepted: the owner ruled bars global; step 3b moves the fixed geometry | §7, §13, §17 |
 | A | Make's "tap edits" contradicts shell_ux §4 and D5's window mode; Games ⊇ Mine | accepted: both listed in §16; the tabs defined without overlap | §12, §16 |

@@ -311,6 +311,13 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
             if rnd.random() < 0.02:
                 for i in range(40):
                     agree(both(back, "goto", "z%d" % i), (step, i))
+            if rnd.random() < 0.05:                      # the restore op
+                n = rnd.choice((0, 1, 2, 3, 5, 31, 32))
+                ks = [rnd.choice(KINDS[1:12] if rnd.random() < 0.9 else KINDS)
+                      for _ in range(n)]
+                if n > 5 and rnd.random() < 0.8:
+                    ks = ["r%d" % i for i in range(n)]
+                agree(both(back, "restore", ks), (step, "restore", ks))
             agree(both(back, op, kind), step)
             if step % 7 == 0:
                 assert back[0].kinds() == back[1].kinds(), step

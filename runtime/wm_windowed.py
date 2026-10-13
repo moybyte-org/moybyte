@@ -8,15 +8,21 @@
 #   WindowedWM.keys_to_cart       focus-aware key routing
 #   WindowedWM.surface_skip       the skip-draw probe
 #   WindowedWM.close_window_kind  close one window by its kind
+#   WindowedWM.enter_console      the desk's PLAY: park the windows, the home fullscreen
+#   WindowedWM.leave_console      the home's X: the route's restore op, the windows back
+#   WindowedWM.release_cache      the fit check's release: parked stamps, then the home's
+#   WindowedWM.show_desk          the HOME key on the desk: minimise all, or restore all
 """The WINDOWED window manager -- the big-screen / P4 "One" presentation tier
 (#73 / #58 "Desktop look"; spec docs/shell_ux_v1.md §3's tier table).
 
 `WindowedWM` presents the SAME everything-is-a-process shell as an OS desktop,
 Picotron-style (owner direction, 2026-07-08):
 
-  * with no processes open, the LIBRARY is the full-screen launch surface. Once
-    PLAY/CHANGE opens a process, it gives way to the DESKTOP root (live wallpaper
-    + the ONE full-width OS bar) beneath the process windows;
+  * two modes, `mode` (docs/shell_layout_2026-10.md §3): DESKTOP mode is the
+    DESKTOP root (live wallpaper + the ONE full-width OS bar) beneath the
+    process windows; CONSOLE mode is the fullscreen tier's presentation over
+    the Library, the desk's windows parked outside the back-stack until the
+    Library's X brings them back;
   * every process pushed above it (picker / Editor / Settings / update / a running
     cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
     maximize / close), a border + drop shadow, draggable by the strip and
@@ -182,6 +188,20 @@ class _Win:
                 self.w - 2, self.h - 2 - self.title_h)
 
 
+class _Parked:
+    """The desk's window records while console mode runs (shell_layout §3):
+    the kinds that stood above the desk, the window slots bottom -> top, the
+    records with their stamps, the focus, and the slots whose content moved
+    while parked (re-opened fullscreen, or an Editor whose project went)."""
+
+    def __init__(self, kinds, order, wins, focus):
+        self.kinds = kinds
+        self.order = order
+        self.wins = wins
+        self.focus = focus
+        self.stale = {}
+
+
 class _WindowStackLayer(Layer):
     """The single Layer that presents the whole window stack: draws every open
     window (retained buffers + the live top) + the taskbar chips, owns pointer
@@ -238,13 +258,14 @@ class _PlayerWindowLayer(Layer):
 
 
 class WindowedWM(WindowChrome, FullscreenStackWM):
-    """The TWO-WORLDS presentation of the back-stack (#105, spec shell_ux_v1.md
-    §3): the DESK (stack kind "desk") is the make world's floor -- wallpaper +
-    system icons + taskbar, every process above it a floating window; without
-    the desk on the stack this tier presents FULLSCREEN exactly like the small
-    tiers (the Library and launcher-launched games own the whole screen -- the
-    play world). Boot lands on the desk; the PLAY icon drops to the Library;
-    the Library's Make tile / CHANGE come back to the desk. Install with
+    """The TWO-MODE presentation of the back-stack (docs/shell_layout_2026-10.md
+    §3): in DESKTOP mode the DESK (stack kind "desk") is the floor --
+    wallpaper + system icons + taskbar, every process above it a floating
+    window; in CONSOLE mode this tier presents FULLSCREEN exactly like the
+    small tiers (the Library and everything opened from it own the whole
+    screen) while the desk's windows wait in `_parked`. Boot lands on the
+    desk; the desk's PLAY enters console mode (`enter_console`), the
+    Library's X leaves it (`leave_console`). Install with
     `ws.wm = WindowedWM(ws)` right after construction
     (host_app.build_workstation(windowed=True)); requires a DISTINCT system
     canvas bigger than the 320x240 game canvas."""
@@ -255,9 +276,20 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         FullscreenStackWM.__init__(self, ws)
         if ws._sys_canvas is None:
             raise ValueError("WindowedWM needs a distinct (big) system canvas")
-        # (ws.windowed_chrome is a world-aware PROPERTY now -- it follows
-        # desk_open(); nothing to set here.)
-        self._desk_was = False        # world-flip edge detector (_on_nav)
+        # THE MODE (docs/shell_layout_2026-10.md §3): "desktop" -- the desk
+        # and its windows -- or "console", FullscreenStackWM's presentation
+        # over the home. Every tier-sensitive branch reads it, never the stack
+        # shape. Console until the boot's open_desk; the desk's PLAY enters
+        # console mode and the home's X leaves it. ws.windowed_chrome follows
+        # it through desk_open().
+        self.mode = "console"
+        self._mode_was = "console"    # mode-switch edge detector (_on_nav)
+        self._mode_switch = False     # on_relayout: this relayout is a switch
+        # The desk's window records while console mode runs: outside the
+        # back-stack, so the kernel route can truncate to its root, and put
+        # back by its restore op on the way out (None in desktop mode).
+        self._parked = None
+        self._shown_focus = None      # the focus show_desk minimised away
         self._root_canvas = ws._sys_canvas
         self._root_ctx = _LayoutCtx.capture(ws)
         self._win_layer = _WindowStackLayer(self)
@@ -372,10 +404,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # -- layout-context plumbing ----------------------------------------------
 
     def on_relayout(self):
-        """Hook called by ws._relayout() (a font-scale change / future resize).
-        Re-anchors the relayout to the ROOT canvas if it ran while a window
-        context was ambient, recaptures the root context, and drops every window
-        so it rebuilds at the new scale on the next frame."""
+        """Hook called by ws._relayout() (a font-scale change / future resize,
+        or a mode switch). Re-anchors the relayout to the ROOT canvas if it ran
+        while a window context was ambient and recaptures the root context. A
+        mode switch stops there: it relayouts the bars and the root context and
+        never drops a window. Anything else drops every window so it rebuilds
+        at the new scale on the next frame, and releases the parked stamps,
+        which re-render at it on the way back to the desk."""
         if self._ctx_switching:
             return                    # an internal (window-building) relayout
         ws = self.ws
@@ -385,11 +420,18 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             ws._relayout()
             self._ctx_switching = False
         self._root_ctx = _LayoutCtx.capture(ws)
+        if self._mode_switch:
+            self.content_gen += 1
+            self._backdrop_valid = False
+            return
+        if self._parked is not None:
+            for win in self._parked.wins.values():
+                self._drop_win(win)
         self._drop_wins()
         self._order = []
         self._focus = None
         self.content_gen += 1
-        # The drag cache stays minted (a world flip does not change the root's
+        # The drag cache stays minted (a mode switch does not change the root's
         # size; _ensure_backdrop re-makes it if one ever does) -- re-minting
         # it here cost a 2MB layer per PLAY/CHANGE round. Its pixels are stale.
         self._backdrop_valid = False
@@ -433,28 +475,163 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return self._root_ctx.layout.status_h
 
     def desk_open(self):
-        return self.stack.has("desk")
+        return self.mode == "desktop"
 
     def _on_nav(self):
         FullscreenStackWM._on_nav(self)
-        desk = self.stack.has("desk")
-        if desk != self._desk_was:
-            # WORLD FLIP (#105): windowed_chrome just changed, and every app
-            # layout bakes it into its bar_h at construction. Rebuild all
-            # layouts + recapture the root ctx NOW, so the visible world is
-            # never presented through the other world's chrome (repro without
-            # this: a font-scale change inside the desk would strip the play
-            # world's fullscreen app bars).
-            self._desk_was = desk
-            self.ws._relayout()
+        p = self._parked
+        if p is not None:
+            # A parked kind re-opened fullscreen is the one process: its
+            # window shows what that process holds now when the desk returns.
+            top = self.stack.top()
+            g = _GROUP.get(top, top)
+            if g in p.wins:
+                p.stale[g] = True
+        if self.mode != self._mode_was:
+            # MODE SWITCH: windowed_chrome just changed, and every app layout
+            # bakes it into its bar_h at construction. Rebuild all layouts +
+            # recapture the root ctx NOW, so the visible mode is never
+            # presented through the other mode's chrome (repro without this: a
+            # font-scale change on the desk would strip console mode's
+            # fullscreen app bars). on_relayout keeps every window record.
+            self._mode_was = self.mode
+            self._mode_switch = True
+            try:
+                self.ws._relayout()
+            finally:
+                self._mode_switch = False
+            self.ws.bar_layer.invalidate()      # the home's X follows the floor
+
+    # -- the two modes (docs/shell_layout_2026-10.md §3) ----------------------
+
+    def floor(self):
+        """Console mode's home has the desk beneath it (the X shows there);
+        desktop mode's floor is the desk itself."""
+        return 0 if self.mode == "console" else 2
+
+    def root_kind(self):
+        return "launcher" if self.mode == "console" else "desk"
+
+    def is_parked(self, kind):
+        p = self._parked
+        return p is not None and kind in p.kinds
+
+    def enter_console(self):
+        """The desk's PLAY: end a running playtest as its window's X would,
+        move the window records -- rect, focus, the retained stamp -- off the
+        stack into `_parked`, truncate the route to its root (the home) and
+        present it fullscreen. The processes behind the records keep running:
+        a kind has one process, and re-opening it here shows that process."""
+        if self.mode == "console":
+            return
+        ws = self.ws
+        if self.stack.has("desktop"):
+            ws._exit_to_caller()
+        self._sync_windows()
+        st = self.stack.kinds()
+        at = self.stack.index("desk")
+        self._parked = _Parked(st[at + 1:] if at >= 0 else [], self._order,
+                               self._wins, self._focus)
+        self._wins = {}
+        self._order = []
+        self._focus = None
+        self._drag = self._drag_armed = self._resize = None
+        self._content_gesture = False
+        self._gesture_hist = []
+        if self._recording:
+            _glass.sync([])
+        self.mode = "console"
+        self.stack.goto("launcher")
+        self._on_nav()
+        ws._dirty = True
+
+    def leave_console(self):
+        """The home's X: put the parked kinds back above the desk with the
+        route's restore op (no process re-opens) and the window records with
+        them. A record whose stamp was released re-renders once, the path a
+        resize takes; one whose kind was re-opened in console mode re-renders
+        once to show what that process holds now. The Editor's project is the
+        workspace, and a run in console mode swaps it: a parked Editor whose
+        project went that way comes back as its entry state, the picker."""
+        if self.mode != "console":
+            return
+        ws = self.ws
+        if self.stack.depth() > 1:
+            ws.go_home()                  # what stood on the home leaves first
+        p = self._parked or _Parked([], [], {}, None)
+        self._parked = None
+        kinds = list(p.kinds)
+        if ("menu" in kinds and not ws._editing_icons
+                and ws.editor_app.project is not ws.project):
+            i = kinds.index("menu")
+            if "picker" in kinds:
+                del kinds[i]
+            else:
+                kinds[i] = "picker"
+            p.stale["make"] = True
+        self.stack.restore(["desk"] + kinds)
+        self._wins = p.wins
+        self._order = p.order
+        self._focus = p.focus
+        self.mode = "desktop"
+        self._on_nav()
+        self._sync_windows()
+        for g in self._order:
+            win = self._wins[g]
+            win._stamp_streak = 0
+            if win.kind == "desktop":
+                continue
+            if win.buf is None:
+                self._build_content(win)
+                self._prewarm(win)
+            elif p.stale.get(g):
+                self._prewarm(win)
+        self._win_sig = None
+        self._desk_sig = None
+        ws._dirty = True
+
+    def show_desk(self):
+        """The HOME key in desktop mode (owner, 2026-10-13), Win+D's shape:
+        minimise every window to its chip, kept with its stamp; when every
+        window already is, restore them and the focus they had. A running
+        game's window never minimises (the chips' rule)."""
+        wins = [self._wins[g] for g in self._order
+                if self._wins[g].kind != "desktop"]
+        if not wins:
+            return
+        if all(w.minimized for w in wins):
+            for w in wins:
+                w.minimized = False
+            focus = self._shown_focus
+            self._focus = focus if focus in self._wins else self._order[-1]
+            return
+        self._shown_focus = self._focus
+        for w in wins:
+            w.minimized = True
+        if self._focus is not None and self._wins[self._focus].minimized:
+            self._focus = "desktop" if "desktop" in self._wins else None
+
+    def release_cache(self):
+        """The fit check's release: the parked stamps oldest-first, one per
+        call, then the home's retained frame."""
+        p = self._parked
+        if p is not None:
+            for g in p.order:
+                win = p.wins[g]
+                if win.buf is not None:
+                    self._drop_win(win)
+                    return True
+        return FullscreenStackWM.release_cache(self)
 
     def _slots(self):
         """Collapse the back-stack ABOVE THE DESK into window SLOTS: consecutive
         kinds in the same _GROUP share one slot, and the slot's content is the
         TOPMOST of its kinds (picker+menu -> one "make" window showing whichever
-        is up). Returns [[slot_key, kind], ...] bottom -> top. In the play world
-        (no desk on the stack) there are NO windows, ever -- every `not
-        self._order` deferral then presents fullscreen (#105 two worlds)."""
+        is up). Returns [[slot_key, kind], ...] bottom -> top. In console mode
+        there are NO windows, ever: the desk's records are parked and every
+        kind presents fullscreen."""
+        if self.mode == "console":
+            return []
         base = self.stack.index("desk") + 1
         if not base:
             return []
@@ -651,7 +828,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         live click/down state. False while a window OTHER than the playtest holds
         focus, so a background running cart never eats the taps meant for the
         editor beside it."""
-        if not self._order:
+        if self.mode == "console":
             return True
         win = self._focus_win()
         return win is not None and win.kind == "desktop"
@@ -668,7 +845,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         if ws.cart_error is not None or (ws._update is None and ws._draw is None):
             return False
-        if not self._order:                    # launcher root: fullscreen shape
+        if self.mode == "console":             # the fullscreen shape
             return FullscreenStackWM.keys_to_cart(self)
         win = self._focus_win()
         return win is not None and win.kind == "desktop"
@@ -697,8 +874,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         wallpaper's desk pixels really do change every frame, which is exactly
         the case the backdrop cache is not for."""
         ws = self.ws
-        if self.desk_open() and ws.wallpaper.is_animating(dt):
-            return True
+        if self.mode == "desktop" and ws.wallpaper.is_animating(dt):
+            return True                 # a parked desk's wallpaper is not drawn
         return (self.stack.has("desktop") and ws.cart_error is None
                 and (ws._update is not None or ws._draw is not None))
 
@@ -714,13 +891,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     # -- the memoized stacks (parent memo, windowed shape) ---------------------
 
     def _rebuild(self, content, sig):
-        if not self.stack.has("desk"):
-            # The PLAY world (#105): no desk -> byte-identical to the
-            # fullscreen tier, for the whole stack (Library, fullscreen games,
-            # play-world Settings/tools) -- not just the launcher root.
-            if self._wins:
-                self._drop_wins()
-                self._order = []
+        if self.mode == "console":
+            # Console mode: byte-identical to the fullscreen tier for the
+            # whole stack (the home, fullscreen games, Settings, apps). The
+            # desk's windows are parked, not dropped.
             FullscreenStackWM._rebuild(self, content, sig)
             return
         self._sync_windows()
@@ -1040,13 +1214,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return (ox, oy, scale)
 
     def game_is_fullscreen(self):
-        """Only in the PLAY world (#105). In the desk world the game lives in a
+        """Only in console mode. In desktop mode the game lives in a
         WINDOW -- _draw_player_window emits its own placement bracket around the
         cart's draw -- so the router must NOT also letterbox the whole desktop.
         It briefly did, and because the FPS overlay ("perf") is a GAME-domain
         layer, a windowed playtest blacked out the desk and re-placed the game:
         the owner saw "the project launcher games also go fullscreen"."""
-        return not self._order
+        return self.mode == "console"
 
     def viewport(self):
         win = self._wins.get("desktop")
@@ -1056,11 +1230,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
 
     def present_frame(self, cf, view):
-        # Desk world: the player WINDOW shows the frame itself
+        # Desktop mode: the player WINDOW shows the frame itself
         # (_draw_player_window), so a frame shown full-viewport here would
-        # land on the desktop. The play world shows it where composite_game
+        # land on the desktop. Console mode shows it where composite_game
         # would have composited the canvas, over the same bezel.
-        if self._order:
+        if self.mode == "desktop":
             return False
         ws = self.ws
         sc = ws.sys_canvas
@@ -1099,13 +1273,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return False
 
     def composite_game(self):
-        # Desk world: a no-op -- the window layer blits the game canvas into
+        # Desktop mode: a no-op -- the window layer blits the game canvas into
         # the player WINDOW itself, and stamping it full-viewport would paint
-        # over the desktop. PLAY world (#105): the fullscreen composite, routed
+        # over the desktop. Console mode: the fullscreen composite, routed
         # through the polymorphic _blit_game so the P4's native RGB565 path and
         # the web's b64-spr path both work (the parent's index loops need an
         # indexed system buffer this tier's canvases may not have).
-        if self._order:
+        if self.mode == "desktop":
             return
         ws = self.ws
         gc = ws.canvas
@@ -1132,7 +1306,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._blit_game(sc, gc, ox, oy, scale, src=src)
 
     def play_viewport(self):
-        """The play world's fullscreen game rect, (ox, oy, scale): what a run
+        """Console mode's fullscreen game rect, (ox, oy, scale): what a run
         the kernel drives in front composes (native/moy_play's front). None in
         the desk world and for a cart-declared view, which the console
         composes."""
@@ -1141,7 +1315,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return FullscreenStackWM.viewport(self)
 
     def _play_bezel(self, sc, ox, oy, scale, src):
-        """The play world's letterbox bezel, at most once a frame.
+        """Console mode's letterbox bezel, at most once a frame.
 
         It is STATIC: fill it only until every framebuffer holds it (the
         stale-by-N rule) -- it was a full-screen fill EVERY play frame
@@ -1295,7 +1469,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             _glass.touch(_glass.surface("launcher"))
         # Class B for the non-window surfaces: the desk under a live wallpaper,
         # the visible cursor (its stream follows the pointer position) -- and
-        # the PLAY-world Library while its grid coasts on a kinetic fling.
+        # console mode's Library while its grid coasts on a kinetic fling.
         # Fling frames paint via request_frame() (no dirty, no pointer), so
         # without this declaration every gen read clean and skip-draw FROZE the
         # coasting grid until the next real signal -- the owner's "fast drags
@@ -1750,10 +1924,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """Keyboard goes to the FOCUSED window's content -- focus moves on click,
         independent of the back-stack, so typing lands in the editor while a
         playtest keeps running beside it. No focused window (the desktop root) ->
-        return False and the launcher layer takes the keys."""
+        return False and the launcher layer takes the keys. The HOME key is the
+        desk's, whatever holds focus but a game (`ws.home_key`: show the
+        desktop, or bring the windows back)."""
         if not self._order:
             return False
         win = self._focus_win()
+        if i.pressed("home") and (win is None or win.kind != "desktop"):
+            self.ws.home_key()
+            return True
         if win is None or win.minimized:
             return False
         content = self._content_for(win.kind)

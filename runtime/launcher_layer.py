@@ -1069,6 +1069,20 @@ class LauncherHomeLayer:
             self._lib_cache = None
             self._lib_unsupported = True
 
+    def release_retained(self):
+        """Free the retained-frame layer (the fit check's release, after any
+        parked window stamps): True when there was one. The next settled
+        visit re-mints and re-captures it."""
+        cache = self._lib_cache
+        if cache is None:
+            return False
+        self._lib_cache = None
+        self._lib_key = None
+        rel = getattr(cache, "release", None)
+        if rel is not None:
+            rel()
+        return True
+
     def _capture_retained(self, cv, dt):
         """Capture the frame just painted into the retained cache -- called at
         the END of a live draw, while cv is still the back buffer being painted
@@ -1293,6 +1307,12 @@ class LauncherHomeLayer:
             # in place in the Studio/Editor, landing on Config. The keyboard route
             # to the second verb; PLAY stays the primary activation above.
             ws.defer(ws.change_selected)
+        if (i.pressed("b") and ws.ach_ui._konami_pos == 0
+                and ws.bar_layer._show_x("home")):
+            ws.open_desk()                   # the home's X, from a keyboard
+                                             # (a B inside the Konami code is the code's)
+        elif i.pressed("home"):
+            ws.home_key()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1601,9 +1621,12 @@ class EditorPickerLayer:
             self._delete.disarm()
             # #184: deferred -- the workspace open runs behind the next paint
             ws.defer(ws.pick_selected)       # open the picked cart in the Editor (or + New)
-        if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
+        if i.pressed("b"):
             self._delete.disarm()
-            ws.exit()                        # back to the launcher root
+            ws.exit()                        # back one level
+        elif i.pressed("home") or i.pressed("stop"):
+            self._delete.disarm()
+            ws.home_key()
         return True
 
     def handle_pointer(self, px, py, click):

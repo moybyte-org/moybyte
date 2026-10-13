@@ -221,7 +221,7 @@ class UpdateUI:
         if i.pressed("home") or i.pressed("stop"):
             if ph != "done":                   # "done" is past the point of no return
                 self._exit_update()
-                self.ws.go_home()
+                self.ws.home_key()
             return
         if ph == "confirm":
             if i.pressed("a") or i.pressed("run"):

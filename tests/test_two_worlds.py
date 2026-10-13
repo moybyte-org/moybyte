@@ -1,6 +1,7 @@
-"""The two-worlds windowed tier (#105): the DESK (make world -- wallpaper +
-icons + windows) vs the fullscreen PLAY world (Library + games), and the
-navigation loop between them (PLAY icon <-> Make tile / CHANGE)."""
+"""The windowed tier's two modes (docs/shell_layout_2026-10.md §3): DESKTOP
+mode -- the desk, wallpaper + icons + windows -- and CONSOLE mode -- the home
+and everything fullscreen above it -- and the one way between them (the desk's
+PLAY icon in, the home's X out)."""
 
 import pytest
 
@@ -161,7 +162,7 @@ def test_desk_bar_has_no_context_x(tmp_path):
     assert ws.wm.desk_open()
 
 
-def test_play_icon_drops_to_the_fullscreen_library(tmp_path):
+def test_play_icon_enters_console_mode(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_settings()                            # an open desk window
@@ -169,9 +170,9 @@ def test_play_icon_drops_to_the_fullscreen_library(tmp_path):
     assert ws.wm._order == ["settings"]
     ws.wm._backdrop_layer._open_icon("play")
     drv.frame(1 / 30)
-    assert ws.wm.stack.kinds() == ["launcher"]           # leaving closes the desk's windows
+    assert ws.wm.stack.kinds() == ["launcher"]    # the route at its root
     assert not ws.windowed_chrome
-    assert ws.wm._order == []
+    assert ws.wm._order == [] and ws.wm._parked.order == ["settings"]
     assert ws.wm.visible_stack()[0] is ws.launcher_layer
 
 
@@ -311,7 +312,9 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     assert sc.pix(px, py) != 42, "the letterbox kept the previous screen's pixels"
 
 
-def test_make_tile_and_change_return_to_the_desk(tmp_path):
+def test_make_tile_and_change_stay_in_console_mode(tmp_path):
+    """Console mode is the same everywhere: the Make tile opens the picker
+    and CHANGE the Editor, both fullscreen, as on the T-Deck."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_library()
@@ -319,15 +322,16 @@ def test_make_tile_and_change_return_to_the_desk(tmp_path):
     ws.launcher.sel = 0                           # the pinned Make tile
     ws.launch_selected()
     drv.frame(1 / 30)
-    assert ws.wm.stack.kinds() == ["launcher", "desk"]
-    ws.open_library()
+    assert ws.wm.stack.kinds() == ["launcher", "picker"]
+    assert not ws.wm.desk_open() and ws.wm._order == []
+    ws.go_home()
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
-    ws.change_selected()                          # CHANGE = desk + Editor window
+    ws.change_selected()                          # CHANGE = the Editor, fullscreen
     drv.frame(1 / 30)
-    assert ws.wm.desk_open()
-    assert ws.wm._order == ["make"]
-    assert ws.wm._wins["make"].kind == "menu"
+    assert not ws.wm.desk_open()
+    assert ws.wm.stack.kinds() == ["launcher", "menu"]
+    assert ws.wm._order == []
 
 
 def test_desk_icons_open_windows(tmp_path):
@@ -350,18 +354,18 @@ def test_desk_icons_open_windows(tmp_path):
 
 def test_font_scale_flip_inside_desk_never_leaks_chrome(tmp_path):
     """The F4 regression: layouts rebuilt inside the desk carry desk chrome;
-    the world flip must rebuild them for the play world on the way out."""
+    the mode switch must rebuild them for console mode on the way out."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.look.set_font_scale(1)                          # relayout INSIDE the desk
     drv.frame(1 / 30)
     ws.open_library()
-    drv.frame(1 / 30)                             # world flip relayouts again
+    drv.frame(1 / 30)                             # the mode switch relayouts again
     assert not ws.windowed_chrome
     assert _select(ws, "Star Catcher")
     ws.open()
     drv.frame(1 / 30)
-    assert ws.cart_error is None                  # play world renders cleanly
+    assert ws.cart_error is None                  # console mode renders cleanly
     ws._exit_to_caller()
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]

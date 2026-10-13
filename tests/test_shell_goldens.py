@@ -21,7 +21,7 @@ which is exactly the risk of transcribing hand-rolled widgets onto a toolkit.
 
 The matrix, and why it is this one
 ----------------------------------
-Ten configurations, each ONE axis away from the T-Deck row or from
+Eleven configurations, each ONE axis away from the T-Deck row or from
 the windowed row, so a red golden names the axis by itself. Every configuration renders the SAME surface
 list (plus the two desk surfaces that only exist on the windowed tier), which
 keeps the matrix a clean product instead of a pile of special cases.
@@ -79,6 +79,11 @@ keeps the matrix a clean product instead of a pile of special cases.
                            code of their own (docs/theming_2026-09.md §9, phase
                            3 step 3). One axis (theme) from the as-shipped row
                            in the light variant.
+  p4_1024x600_cs2_fs1_console  the P4 as shipped in CONSOLE mode
+                           (docs/shell_layout_2026-10.md §3): the desk's PLAY,
+                           then the T-Deck row's surfaces, every one
+                           fullscreen at the P4's size. One axis (the mode)
+                           from the as-shipped row.
 
 The last two were added before theming's first phase
 (`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
@@ -298,6 +303,9 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_win95_light": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
         diagonal_in=7.0, theme="win95"),
+    "p4_1024x600_cs2_fs1_console": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, console=True),
 }
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every
@@ -311,7 +319,8 @@ def _axes(cfg):
     w, h = cfg["sys_size"] or (320, 240)
     return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s theme=%s" % (
         w, h, cfg["font_scale"], cfg["variant"],
-        "windowed" if cfg["windowed"] else "fullscreen",
+        ("console" if cfg.get("console") else "windowed") if cfg["windowed"]
+        else "fullscreen",
         cfg["diagonal_in"] or "-", cfg.get("theme", "night"))
 
 
@@ -407,12 +416,21 @@ def _surface_plan(ws, cfg):
     a pure function of the list -- a fresh workstation per surface would be
     ~35 seed copies each and buy nothing a fixed order does not."""
     plan = []
-    if cfg["windowed"]:
-        # The desk (the make world's floor) and the desk with ONE app window.
+    desktop = cfg["windowed"] and not cfg.get("console")
+    if desktop:
+        # The desk (desktop mode's floor) and the desk with ONE app window.
         plan.append(("desk", lambda: ws.open_desk()))
         plan.append(("desk_window_calc",
                      lambda: ws.open_app(ws._apps_by_id["calc"])))
-    plan.append(("launcher", lambda: ws.go_home()))
+
+    def home():
+        # The home, with nothing parked beneath it: go_home closes the desk's
+        # windows, and on the windowed tier PLAY then enters console mode.
+        ws.go_home()
+        if cfg["windowed"]:
+            ws.open_library()
+
+    plan.append(("launcher", home))
     plan.append(("picker", lambda: ws.open_picker()))
     plan.append(("settings", lambda: ws.open_settings()))
     cart = _cart_by_title(ws, _EDITOR_CART)
@@ -420,7 +438,10 @@ def _surface_plan(ws, cfg):
         def enter(tab=tab):
             # Re-open per tab. That alone does NOT buy independence -- the layouts
             # are ws singletons another tab can bind (#216); what pins it is
-            # test_editor_tabs_render_independently.
+            # test_editor_tabs_render_independently. The desktop rows draw the
+            # Editor as a window, so they come back to the desk first.
+            if desktop:
+                ws.wm.leave_console()
             ws.open_in_editor(cart)
             ws.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
@@ -446,10 +467,10 @@ def _surface_plan(ws, cfg):
         ws.web.ui.show_address = True
 
     def run_script():
-        # From HOME, so the windowed tier runs it in the play world (where a
+        # From HOME, so the windowed tier runs it in console mode (where a
         # script takes the whole responsive surface) rather than cascaded under
         # the six app windows every surface before this one left open.
-        ws.go_home()
+        home()
         # Written through the store the workstation was built on: the script
         # lives in the vault like any note, and RUN synthesizes its manifest.
         ws.carts_store.save_file("docs", GOLDEN_SCRIPT_NAME, GOLDEN_SCRIPT,
@@ -480,7 +501,7 @@ def surface_names(config_name):
     """The surfaces a config covers -- the key set its goldens must carry."""
     cfg = CONFIGS[config_name]
     names = []
-    if cfg["windowed"]:
+    if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc"]
     names += ["launcher", "picker", "settings"]
     names += ["editor_" + t for t in TABS]

@@ -165,9 +165,9 @@ class _BackdropLayer(Layer):
         self._draw_desk_icons()
         self.ws.bar_layer._draw_status_strip("desk")
 
-    # -- desk icons (#105: the make world's launch surface) --------------------
+    # -- desk icons (#105: desktop mode's launch surface) ---------------------
     #
-    # A static v1 column: PLAY (drop to the fullscreen Library), PROJECTS (the
+    # A static v1 column: PLAY (console mode, over the Library), PROJECTS (the
     # picker), then every desktop-only system app. Geometry is deterministic
     # (the _chip_rects pattern -- computed per call, no stored state), so draw
     # and hit-test can never disagree, and the icons render before the drag

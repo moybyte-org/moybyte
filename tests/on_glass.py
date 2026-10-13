@@ -697,6 +697,19 @@ def web_console_is_baked_into_the_image(board):
         assert b"Content-Encoding: gzip" in head, head
 
 
+def _clear_to_console(board, clear):
+    """`clear` ws.exit()s to shut what the tour left open, then -- on the
+    windowed tier, the only one that clears -- the desk's PLAY: a launcher
+    run goes fullscreen from console mode's home and exits back to it
+    (docs/shell_layout_2026-10.md §3), whatever windows are left parked."""
+    for _ in range(clear):
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
+    if clear:
+        board.cmd("py ws.open_library()", wait_for="PY")
+        board.drain(0.5)
+
+
 def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     """THE test the 2026-08-17 _GATE_SEQ regression bought: a staged-constant
     deletion broke make_spr_gate -- and therefore EVERY cart start -- while
@@ -711,12 +724,11 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     the desk's own close: on the windowed tier a run started from a
     picker/Settings arrangement does not pop through the flag, so those boards
     pin the launch and the close instead. `clear` ws.exit()s that many times
-    first, to shut whatever windows the tour above left open -- a `run` from a
-    picker arrangement opens the cart under it.
+    first, to shut whatever windows the tour above left open, and then enters
+    console mode (`_clear_to_console`), so the run is the fullscreen one a
+    kid starts from the home.
     """
-    for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
+    _clear_to_console(board, clear)
     # SERVICE and REFUSED from before the launch: a cart's load -- a compiled
     # cart's _init reading its own files -- is in them too.
     before = board.state()["upcall_totals"][3:]
@@ -768,9 +780,7 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
     the console's frame drives the same Player -- its CONSOLE crossing a
     frame is the only one, and the run is left by the shell."""
     import time
-    for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
+    _clear_to_console(board, clear)
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     board.drain(2.0)
@@ -830,9 +840,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
     frame is the one the Ctrl-C interrupts; the same REPL, and the cart runs
     again after the soft reset."""
     import time
-    for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
+    _clear_to_console(board, clear)
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     board.drain(2.0)
@@ -859,9 +867,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
             "the run did not end with why SERIAL: %r" % (why,)
     # The soft reset closed the run the console never closed: the next VM's
     # first Lua run opens (it was refused as "a run is already open").
-    for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
+    _clear_to_console(board, clear)
     board.cmd("run %s" % spec, wait_for="REMOTE run")
     board.drain(2.0)
     st = board.state()
@@ -890,9 +896,7 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
     each read is a different frame of the run. `door` and `clear` are
     cart_runs_and_exits's."""
     import time
-    for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
+    _clear_to_console(board, clear)
     # APP, SERVICE and REFUSED from before the launch: a cart's load -- a
     # Lua cart's _init reading its scene, a compiled cart's reading its own
     # files -- is in them too, and in the run's own books.

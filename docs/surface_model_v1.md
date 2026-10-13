@@ -82,13 +82,13 @@ content kind `"picker"`), which disabled its drag content-freeze everywhere
 (`wm_windowed.py`, the identity-resolution fix). sids are world-qualified: the
 fullscreen Library layer and the windowed desk backdrop both carry the layer
 id `"launcher"` today (`launcher_layer.py` vs `wm_windowed.py`) — one sid,
-two contents across a world flip is exactly the aliasing §3 forbids.
+two contents across a mode switch is exactly the aliasing §3 forbids.
 
 **Gen minting (no per-object counters, ever).** Both gens are stamped from
 **one monotonic counter, the kernel's** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
 increments, never restarts), which §2's L3 cites as prior art and which this
 rule generalizes; one counter per console, whichever WM is up. Rationale: surfaces are destroyed wholesale in the real code
-(`on_relayout` does `_wins.clear()`; every world flip rebuilds all windows)
+(`on_relayout` does `_wins.clear()`; console mode drops every window's surface while the windows wait parked)
 while per-client caches (`SurfaceDelta._last`) persist per connection. A
 per-object counter restarting at 0 can collide with a client's stored gen and
 alias into a wrong `{"same":1}` — the browser would replay a **dead window's**
@@ -315,12 +315,12 @@ machinery: `_BackdropLayer` retained cache, dirty-union restore
 (`blit_strip_rect`), body-subtract, and the async-PPA stamp-defer expressed
 through §4's `end_frame()`. Its last-seen state is per-buffer N-deep (§4) —
 the streak/sig fields are absorbed and deleted (§7). **Buffer ownership:**
-`moy_alloc` has no `free()`, and resize/world-flip/relayout rebuild window
+`moy_alloc` has no `free()`, and resize/relayout rebuild window
 buffers today — Surface buffers are minted with an owner, reused per slot,
 never evict-and-reallocate. Phase C claims **no perf change** — the gate is
 "drag fps not regressed" on the #156 on-glass suite, **naming the make-group
 window's drag explicitly** (the last silent-disable bug lived exactly there).
-Games: fullscreen in the play world; windowed via the PPA upscale composite
+Games: fullscreen in console mode; windowed via the PPA upscale composite
 (PPA is upscale-only — §8).
 
 **The rotated P4 (Guition 10.1″, 2026-09-08) adds nothing to the contract
@@ -340,7 +340,7 @@ tick can write the canvas it was copied from.
 
 **A compiled cart's direct-colour frame adds nothing here either**
 (`device/p4_canvas.py`'s `present_frame`): the composite at the game
-boundary -- the play world's and the player window's -- hands the PPA the
+boundary -- console mode's and the player window's -- hands the PPA the
 cart's frame, or the DMA snapshot of it, where it would have handed it the
 game canvas, and the opaque rects the shell draws over it are declared as in
 §5.1. Nothing decides what changed.

@@ -306,7 +306,7 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
    Presenter is per-canvas and process-long; §4's last-seen is per **physical
    buffer** on the P4 and per **connection** on the web (`WsClientState` is
    re-minted on reconnect); the gen mint is per **WM** and destroyed wholesale
-   on a world flip. Merging is buildable but is a **redesign of a locked doc**,
+   on a mode switch. Merging is buildable but is a **redesign of a locked doc**,
    which its own rules say must start there. Re-open after its Phase C.
 3. Do the layer/`Image` probes (`reclaim_layers`, 4 sites, both boards) belong
    on the Presenter or on a separate layer-allocator contract?

@@ -212,8 +212,8 @@ class SpineVerbs:
             return
         # Windowed WM (#73): closing the playtest must never truncate unrelated
         # windows stacked above it (e.g. Settings) -- the WM removes ONLY the
-        # player and refocuses the caller's window. Desk world only (#105): a
-        # play-world game (launched from the fullscreen Library) pops by the
+        # player and refocuses the caller's window. Desktop mode only: a
+        # console-mode game (launched from the fullscreen Library) pops by the
         # fullscreen rules below, landing back in the Library via go_home.
         _cp = getattr(self.wm, "close_player", None)
         route = rt.route(_cp is not None and self.wm.desk_open())

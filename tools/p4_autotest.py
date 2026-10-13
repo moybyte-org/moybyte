@@ -602,12 +602,12 @@ class P4Board:
 
     def leave_cart(self, settle=0.8):
         """End a running cart and leave the board where it was found. On the
-        windowed tier `ws.exit()` from a cart pops through to the bare
-        launcher and the DESK goes with it (measured on the Guition P4,
-        2026-09-22: `['launcher', 'desk', 'desktop']` -> `['launcher']`), so an
-        attach-only board -- nothing resets it at open -- then reads `desk`
-        False on every test of its suite, six failures from one leftover. So:
-        exit only when a cart is up, and reopen the desk if there was one.
+        windowed tier `ws.exit()` from a cart goes home, which in console mode
+        is the bare launcher with the desk parked beneath it, so an attach-only
+        board -- nothing resets it at open -- would read `desk` False on every
+        test of its suite (six failures from one leftover on the Guition P4,
+        2026-09-22). So: exit only when a cart is up, and reopen the desk if
+        there was one.
         `desk` is None on a fullscreen tier, which is the "no desk to put
         back" answer and never a 0."""
         st = self.state()

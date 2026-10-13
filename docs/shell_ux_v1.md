@@ -128,19 +128,21 @@ and only an explicit exit ends a run); and closes are surgical (closing one
 window never closes another). One cart still runs at a time (#73's multi-cart
 boundary). The P4 device port of this tier rides #58.)*
 
-*(Status 2026-07-20 — TWO WORLDS, #105: the windowed tier now splits play from
-make. It BOOTS onto the **desktop** — wallpaper + a static icon column (PLAY,
-PROJECTS, and the system apps) + the one OS bar with taskbar chips — which is
-the make world's floor: everything opened there is a window, and the desk bar
-draws no X (nothing is beneath it). The **PLAY icon** drops to the fullscreen
-**Library**, purely the game launcher: system-app carts leave its shelf on
-this tier (they are desk icons instead — "apps are windows, games are
-fullscreen"), a tap runs the game FULLSCREEN exactly like the small tiers
-(hold-BACKSPACE exits back to the Library), and the Make tile / a card's
-CHANGE drop back to the desk (CHANGE with that project's Editor open).
-Leaving the desk closes its windows — autosave (§7) makes that free. The
-fullscreen tiers are untouched: the Player tier only ever gets the
-launcher; its desktop story is the web view.)*
+*(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
+`docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
+**desktop** — wallpaper + a static icon column (PLAY, PROJECTS, and the
+system apps) + the one OS bar with taskbar chips — desktop mode's floor:
+everything opened there is a window, and the desk bar draws no X (nothing is
+beneath it). The **PLAY icon** enters console mode: the desk's windows wait
+parked, off the back-stack, and the fullscreen **Library** shows, purely the
+game launcher: system-app carts leave its shelf on this tier (they are desk
+icons instead — "apps are windows, games are fullscreen"), a tap runs the
+game FULLSCREEN exactly like the small tiers (hold-BACKSPACE exits back to
+the Library), and the Make tile and a card's CHANGE open the Editor
+fullscreen, as there. The Library's X — B from a keyboard — is the way back
+to the desk, its windows where they were. The fullscreen tiers are
+untouched: the Player tier only ever gets the launcher; its desktop story is
+the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
 windowed tier reads WHY it was called to pick the playtest window's default
@@ -367,8 +369,8 @@ fullscreen game → hold-BACKSPACE exits.**
 
 | App | Presentation | Exit affordance | BACKSPACE is… |
 |---|---|---|---|
-| Launcher (back-stack root) | taskbar | **no X** — it's home; nothing beneath it | a plain key |
-| Desk (windowed tier's make-world floor, #105) | taskbar + windows | **no X** — the PLAY icon drops to the Library | a plain key |
+| Launcher (back-stack root) | taskbar | **no X** where it is its mode's floor (nothing beneath it); on the windowed tier's console mode, X → back to the desk beneath | a plain key |
+| Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **no X** — the PLAY icon enters console mode | a plain key |
 | Editor | taskbar | X → pop back (picker → launcher) | a plain key |
 | Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
 | Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |

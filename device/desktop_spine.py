@@ -158,7 +158,7 @@ def _front_binder(ws, comp, game, sys_canvas, glass):
     """`ws.front_bind`: give the kernel's Player this compositor as the ends
     of a run in the loop's foreground (moy_glass.front), answering whether it
     took. A banded board whose game canvas IS the panel presents it as is; a
-    DSI board scales the game canvas into the play world's rect, which the
+    DSI board scales the game canvas into console mode's rect, which the
     desk world (a window's run) and a cart-declared view leave to the
     console."""
     if game is sys_canvas:

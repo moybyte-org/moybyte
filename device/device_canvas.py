@@ -1275,7 +1275,7 @@ class DeviceCanvas:
     #
     # The WINDOWED tier means the opposite by the same call.
     # `WindowedWM._blit_game` passes a WINDOW's content origin and paints the
-    # play world's own bezel itself; bands there cover the desk, its icon
+    # console mode's own bezel itself; bands there cover the desk, its icon
     # column, the OS bar and every other window. That is not hypothetical: the
     # host inherited this method when `runtime/canvas.py` was deleted
     # (2026-08-15) and its desktop went black behind the first game window, and

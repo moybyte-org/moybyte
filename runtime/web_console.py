@@ -144,11 +144,12 @@ class WebConsole:
         cleared) is reset here too -- nothing in the router calls a Layer's
         `on_enter`.
 
-        On the windowed tier `go_home` also leaves the desk, which is what makes
-        this fullscreen there: windows exist only above the desk (#105), so the
-        play world presents every kind full-screen with no special case."""
+        On the windowed tier it enters console mode first, which is what makes
+        this fullscreen there: the desk's windows wait parked, and console mode
+        presents every kind full-screen with no special case."""
         self.parked = True
         self.ui.on_enter()
+        self.ws.wm.enter_console()
         self.ws.go_home()
 
     @staticmethod
@@ -197,16 +198,15 @@ class WebConsole:
             self.unpark()
 
     def unpark(self):
-        """Give the console back. The desk is home on the windowed tier; the
-        launcher root everywhere else."""
+        """Give the console back. The desk is home on the windowed tier, with
+        the windows parked when the console was taken; the launcher root
+        everywhere else."""
         ws = self.ws
         self.parked = False
         ws._dirty = True
+        ws.wm.goto("launcher")          # out of the screen, not over it
         if getattr(ws.wm, "has_desk", False):
-            ws.wm.goto("launcher")      # out of the screen, not over it
             ws.open_desk()
-        else:
-            ws.wm.goto("launcher")
 
     def serving(self):
         wh = self.ws.webhost

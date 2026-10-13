@@ -428,6 +428,42 @@ static void bk_remove(input_t *in) {
     bk_verify();
 }
 
+static void bk_restore(input_t *in) {
+    moy_kind_t ks[MOY_BACK_DEPTH + 2u];
+    uint32_t n = next(in) % (MOY_BACK_DEPTH + 2u);
+    int bad = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        char k[17];
+        size_t len = kind_of(in, k);
+        memset(&ks[i], 0, sizeof ks[i]);
+        ks[i].len = (uint8_t)len;
+        memcpy(ks[i].s, k, len < MOY_ID_MAX ? len : MOY_ID_MAX);
+        if (len < 1u || len > MOY_ID_MAX
+            || (len == sizeof MOY_ROOT - 1u && memcmp(k, MOY_ROOT, len) == 0)) {
+            bad = 1;
+        }
+        for (uint32_t j = 0; j < i && !bad; j++) {
+            if (ks[j].len == len && memcmp(ks[j].s, k, len) == 0) {
+                bad = 1;
+            }
+        }
+    }
+    int rc = moy_back_restore(bk.b, ks, n);
+    if (bad) {
+        CHECK(rc == MOY_ROUTE_BAD);
+    } else if (n >= MOY_BACK_DEPTH) {
+        CHECK(rc == MOY_ROUTE_FULL);
+    } else {
+        CHECK(rc == MOY_ROUTE_OK);
+        for (uint32_t i = 0; i < n; i++) {
+            memcpy(bk.k[i + 1u], ks[i].s, ks[i].len);
+            bk.len[i + 1u] = ks[i].len;
+        }
+        bk.depth = n + 1u;
+    }
+    bk_verify();
+}
+
 // -- the return records -------------------------------------------------------------------
 
 static struct {
@@ -1027,7 +1063,7 @@ static void run(const uint8_t *data, size_t size) {
     tm_new(&in);
     unsigned ops = 0;
     while (in.i < in.n) {
-        uint8_t op = next(&in) % 27u;
+        uint8_t op = next(&in) % 28u;
         switch (op) {
             case 0: case 1:
                 tm_add();
@@ -1108,6 +1144,9 @@ static void run(const uint8_t *data, size_t size) {
                 break;
             case 26:
                 led_edit(&in);
+                break;
+            case 27:
+                bk_restore(&in);
                 break;
             case 24:                            // towards a full registry
                 for (unsigned k = 0; k < 70u; k++) {

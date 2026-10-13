@@ -1028,7 +1028,7 @@ class CardsLayer:
         if i.pressed("b") or i.pressed("home"):
             self._close_files()
             if i.pressed("home"):
-                ws.go_home()
+                ws.home_key()
             return True
         if not n:
             return True

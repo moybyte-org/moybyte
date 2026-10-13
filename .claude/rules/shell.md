@@ -43,8 +43,10 @@ to whoever called it.
   - **`ws.screen` is a read-only PROJECTION of the WM back-stack top**, not state.
     The visible/draw stack is memoized (zero per-frame list churn, #66).
   - **`WindowedWM` is host/P4 only and deliberately NOT staged to the S3.**
-    Windows exist ONLY above the `"desk"` stack kind, so every `not _order`
-    deferral presents fullscreen.
+    Windows exist only in DESKTOP mode (`wm.mode`,
+    `docs/shell_layout_2026-10.md` §3); console mode parks them outside the
+    back-stack and presents every kind fullscreen, and every tier-sensitive
+    branch reads the mode, never the stack shape.
   - **Input focus is decoupled from the back-stack**: clicking a window or its chip
     moves keyboard focus WITHOUT popping, so a playtest keeps ticking while the
     Editor beside it is typed in — its pointer feed click-stripped so the
@@ -64,7 +66,8 @@ to whoever called it.
   under `chrome.MIN_TAP_MM` (which boards do is pinned in
   `tests/test_board_toml.py`). RIGHT
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
-  the launcher root draws no X). LEFT zone = LENT to the active app (`draw_zone`):
+  the launcher root draws one only above its mode's floor -- console mode over a
+  P4's parked desk). LEFT zone = LENT to the active app (`draw_zone`):
   the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/
   UNDO/REDO/PLAY icons. Icons stay 16×16 sprites from the editable `IconSheet`
   (Settings → EDIT ICONS). **The bar hides entirely while a GAME plays** (the cart
