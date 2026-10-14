@@ -26,3 +26,6 @@ seed carts as covers. They show the look, not finished layouts.
 | `home_wallpaper_clash_320x240.png` | a home wallpaper (Space Desktop) that clashes: its own text and character sit under the carousel (§4.9, §12.1) |
 
 Light and dark are the same drawing with a different colour table (D1).
+
+The Appearance page's mockups (theming phase 6, 2026-10-14) are in
+`appearance/`, with their own README and the script that draws them.

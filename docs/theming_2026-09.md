@@ -52,7 +52,7 @@ for them from format 1.
 | D3 | A theme can carry **paintable sprites** (9-slice frames, glyphs, a desktop tile), in the first or second version; the format reserves them from format 1. |
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
 | D5 | **Layout: both.** A theme sets the default bar layout (its `layout`'s bars, §3); the user can override it in Settings, and the override survives a theme switch. A window's mode is its own button, not a theme's (`docs/shell_layout_2026-10.md` §15, owner 2026-10-13). Designed in the shell-layout doc (§4.8). |
-| D6 | **Themes bring wallpapers**: one wallpaper for the desk and the home (owner, 2026-10-14, replacing the per-slot wallpapers of 2026-09-27: a screen-sized bake per slot is memory a board does not have, and the home already shows the desk's wallpaper behind its cards); the user can override it. A theme ships a static image and may name an installed wallpaper cart (§4.9). |
+| D6 | **Themes bring wallpapers**: one wallpaper for the desk and the home (owner, 2026-10-14, replacing the per-slot wallpapers of 2026-09-27: a screen-sized bake per slot is memory a board does not have, and the home already shows the desk's wallpaper behind its cards). **The wallpaper is the theme's** (owner, 2026-10-14, the modern-Windows rule, replacing 2026-09-27's separate user override): picking a theme brings its wallpaper, and the user's pick is a change to the theme like any other, landing in `custom` and travelling with it; the persisted `wallpaper` setting goes (phase 6 step 5). A theme ships a static image and may name an installed wallpaper cart (§4.9). |
 | D7 | **The home is one component on every board**: tabs (Games / Mine / Apps / Make) over the carts, themeable, over the one wallpaper (D6), in an arrangement a theme or the user picks (the layout's `home`: the cover carousel by default, or the grid; owner, 2026-10-14, `docs/shell_layout_2026-10.md` §12). **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 | D8 | **Format 1 carries four more keys** (owner, 2026-10-11, before phase 1 froze it): **content colour roles** for code syntax and the block editor's block colours (§4.1); a **corner radius of 0 to 3** (§4.2); a **pressed-label offset** (§4.2); and a **text effect** per part and state, `none`, `shadow` or `emboss` with the role it paints in (§4.3). Their defaults reproduce today's pixels. The Paint, sprite, map and scene canvases stay exempt. |
 
@@ -104,7 +104,8 @@ Each was mocked and judged worse (§11).
   (`native/moy_app/roles.json`). **Games have no `theme()`**, and giving them
   one would be a cart-verb change in moy-spec's SPEC.md.
 - **Persisted settings:** `theme`, `theme_variant` and `wallpaper` in
-  `system.json`.
+  `system.json`; `wallpaper` goes in phase 6 step 5, when the wallpaper
+  becomes the theme's (D6).
 
 What stopped a Platinum or Win95 theme on 2026-10-11, which phases 2 to 4
 answer:
@@ -518,18 +519,18 @@ Ruled 2026-10-12, each the pick that builds least:
   any paint program (§10). A part with a sprite draws the sprite; a part without
   one draws its surface — a cell left empty is no sprite.
 - **The sheet is a role sheet in the cart sheet's format** (ruled 2026-10-14,
-  phase 6 step 7): `.moygfx`'s nibble names a slot — transparent, a role of
+  phase 6 step 9): `.moygfx`'s nibble names a slot — transparent, a role of
   the row, or black or white — resolved through the variant's table at the
-  blit, so one sheet follows light and dark and the Editor's Sprites tab
-  edits it as it edits the icon sheet (EDIT ICONS). A tinted glyph is a
-  sheet in two slots. The slots and the cell map are style.json's.
+  blit, so one sheet follows light and dark, an accent and a tint. No page
+  edits it: the package carries it and `theme.json` names it (EDIT FILE,
+  phase 6). A tinted glyph is a sheet in two slots. The slots and the cell map are style.json's.
 - **Drawn in C, in one call each.** A 9-slice is one C call, not nine `spr`
   wrapper calls, scaled by the chrome scale as a glyph is. Glyph sprites are
   masks tinted by a role through a C mask-blit, with **no per-tint RGB bake
   cache**.
 - **Icons:** a theme may ship an icon sheet. **The user's own edited sheet
   (`system_icons.moygfx`) is an override slot** that wins over the theme's, like
-  the layout and wallpaper overrides (D5, D6).
+  the layout override (D5).
 
 ### 4.7 Fonts
 
@@ -712,8 +713,12 @@ broken by it.
 ### 4.9 Images and wallpapers (D6)
 
 A theme ships one static **image** and may name one installed **wallpaper
-cart**, for the desk and the home alike (D6, one slot: `desk`). The user can
-override it.
+cart**, for the desk and the home alike (D6, one slot: `desk`). The
+wallpaper is the theme's: the user's pick (Appearance's WALLPAPER, Paint's
+WALL, `ctx.wallpaper`) is a change to the theme, written into `custom` (a
+cart by id, a My Art picture copied into the package, NONE as neither key,
+the desk then `desktop`'s fill), and there is no setting beside it (owner,
+2026-10-14; phase 6 step 5).
 
 - **Nothing executable rides in a theme.** Installing a cart is exactly what
   `system_api.py` never grants (`carts`, "the single most important entry"). A
@@ -728,7 +733,7 @@ override it.
   mid-screen fights the carousel (mocked 2026-09-27 with Space Desktop). The
   home's card band is a part, `home.band`, whose surface the theme sets like
   any part's: `none` where the wallpaper is readable by construction (the
-  default), or a dither scrim (ruled 2026-10-14, §12.1; phase 6 step 8). A
+  default), or a dither scrim (ruled 2026-10-14, §12.1; phase 6 step 10). A
   scrim is baked into the wallpaper's bake, keyed on `look_gen` and the
   band's rect, before `_band_bg`'s capture, so no home frame paints it; a
   live wallpaper's bake is at its source resolution, a picture's (My Art) is
@@ -738,14 +743,94 @@ override it.
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
   charged as such.
 
+### 4.10 Accent and tint: every colour role derived
+
+**The rule** (owner, 2026-10-14: every colour role, the code and block
+colours with them, follows from a source theme, MODE, one ACCENT and one
+TINT, readable by construction). It runs in C (`moy_theme_derive`, phase 6
+step 4), integer only, on the loader's luminance table (`moy_theme_lum`)
+and the loader's own predicate: `clears(a, b)` is
+`(hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500)` over the two
+luminances, the pair check §7 already makes. Its inputs are the source's
+two resolved rows (the token row and the content set, both variants), an
+**accent** — one of sixteen pairs (A, deep) in style.json's
+`theme.accents`, or the source's own — and a **tint** — NONE or one of
+eight ramps of MOY64 indices in `theme.tints`, dark to light, never black
+(0) or white (7). The lists are data, as `font_roles` is; the mockups'
+`derive()` (`docs/media/theming_2026-09/appearance/mockups.py`) carries
+today's. **Every accent is one black clears** (`clears(A, 0)`), because
+style.json's kinds paint a literal black label on an accent fill (`chip`,
+`button` and `row_cta` in `on`); that is what lets the accent fill every
+accent role with no new ink role.
+
+Per variant, with B the source's row and R the result, R starting as B:
+
+1. **Tint** (none on NONE). Each background role — `panel`, `surface`,
+   `surface_alt`, `desktop`, `desktop_pattern`, `title_inactive`, `bar`,
+   `dim`, `hilite`, `shade_hi`, `shade_lo` — and each line role — `edge`,
+   `border`, `bar_edge`, `shade_dark` — whose B value is not 0 or 7 (D1's
+   black outlines stay) takes the ramp entry nearest B's value in
+   luminance among the entries that clear, against black and against
+   white, every floor B's value clears; with none, B's value. Keeping each
+   background on its side is what keeps the literal inks of the kinds
+   readable and the flags `surface_light`, `bar_light` and `band_light`
+   true.
+2. **Accent** (none when the source's own is kept). `accent`, `title`,
+   `title_active` and `selection` take A. Each of `edge`, `border`,
+   `hilite`, `shade_hi`, `bar_edge` and `desktop_pattern` whose B value is
+   B's `title` or B's `accent` — a role the source tied to its identity
+   colour — takes A. `focus` and `ink_accent` take the first of A, deep and
+   R's `ink` that clears R's `surface`.
+3. **Inks.** Each ink of `theme.pairs` against its backgrounds — `ink`
+   (`surface`, `surface_alt`), `chrome_ink` (`panel`, `bar`), `title_ink`
+   (`title`, `title_active`), `selection_ink` (`selection`) — keeps B's
+   value if it clears every one, else takes black or white, whichever has
+   the larger least ratio. Black or white clears any single MOY64 colour,
+   and step 1 keeps the backgrounds a source pairs with one ink on one
+   side, so this lands; `+tests/test_theme_derive.py` holds it for every
+   seed, accent, tint and variant.
+4. **Dim inks.** `ink_dim` (`surface`) and `chrome_ink_dim` (`panel`,
+   `bar`) keep B's value if it clears them, else take the dimmest that does
+   of the ramp and the greys 5, 6, 13, 49, 50 and 53, else `ink` or
+   `chrome_ink`.
+5. **Content.** Each `code_*` role and `ink_note` keeps B's value if it
+   clears R's `surface`, else takes its value in style.json's derive set
+   for a surface of that side (the `light` set where black beats white on
+   R's `surface`, the `dark` set else) if that clears, else R's `ink`.
+   `block_*`, `play`, `author` and `danger` keep B's: they are meanings, not
+   looks, and the kinds paint their labels in literal inks they already
+   clear.
+
+The flags keep B's. NONE with the source's own accent answers B exactly. A
+source a hand edit made unreadable stays reported as any hand edit is (§7).
+
+**Where the result lives: plain roles in `custom`'s `theme.json`.** Both
+variants, every role, written by `ui.theme_custom` (phase 6 step 4), so the
+loader stays format 1 and unchanged, EDIT FILE shows the colours the
+console draws, and a console without the step, the web console and the
+carts repository read the same row. The inputs ride in the package's
+manifest, `"moybyte": {"type": "theme", "look": {"from": "night", "accent":
+14, "tint": "plum"}}`, read by Appearance alone: ACCENT and TINT show them,
+and each change re-derives from `from`'s resolved rows, never from the last
+result, since a ramp quantises and quantising a quantised row drifts. A
+colour saved through EDIT FILE drops `from`, and the file as saved is the
+source from then on. A package whose whole rows would pass `theme.bytes` (a
+source with many surfaces) is written without the roles whose value §5's
+rule gives back, which resolves to the same row. Declined: `accent` and
+`tint` keys the loader derives from, smaller on the card, because the
+derivation would then run in the boot path and in every resolve, a console
+without it would draw the source's colours under the kid's name, EDIT FILE
+would show two numbers in place of the colours, and a role set by hand
+would need a precedence over the rule.
+
 ## 5. Fallback and inheritance, resolved once
 
 Every key but `format` and `name` is optional. A theme resolves through
 `inherits` (one parent; a theme that names none inherits the default) and ends
 at the default seed, `night`, which sets every role nothing derives.
 **Inheritance is the seeds'** (`platinum` and `win95` on `night`); a user
-theme is a standalone copy, flattened by the editor, with no `inherits` (owner,
-2026-10-14; phase 6 steps 2 and 4), and a role a copy lacks — one a later
+theme is a standalone copy, flattened when `custom` is made, with no `inherits` (owner,
+2026-10-14; phase 6 steps 2 and 5), and a role a copy lacks — one a later
 format added — derives as any unset role does. The chain
 is **capped at four links and a cycle is refused**, at install and at resolve
 (style.json's `theme.depth`). Each role comes from the nearest package that
@@ -762,7 +847,7 @@ part; a missing state follows §4.3's chain.
 against that row lazily, per kind, into three palette indices per state, and
 again only when the skin's or the row's generation moves
 (`native/moy_ui/moy_ui.c`). A widget pays an array read. `theme_colors` caches
-the row's dict per (theme, variant). The Appearance editor's previews use
+the row's dict per (theme, variant). The THEME grid's previews use
 colours only, resolved from a package's bytes without installing it
 (`ui.theme_resolve`, phase 6 step 2); they do not load other themes' assets,
 since the face's preview ring holds four looks and would thrash.
@@ -845,8 +930,9 @@ Kids will trade themes, so a theme is untrusted input:
   shape's pattern surfaces whose label ink misses the floor against either
   colour, a kind's ink as the style resolves it and the chrome parts' as the
   frame and the bar draw them; a part that paints no label is not checked.
-  Its reader, as the pairs' report's, is the editor, which offers the nearest
-  passing index (phase 6). Every seed passes both checks in both variants
+  The derivation (§4.10) never writes a pair under the floor; a hand edit
+  through EDIT FILE can, and its reader is the loader's note at the save
+  (phase 6 step 6). Every seed passes both checks in both variants
   (`tests/test_theme_loader.py`).
 - **The loader is the safety** (owner, 2026-10-14). A theme cannot run code,
   so the validation above, the readability report, the layout's required set
@@ -1084,27 +1170,75 @@ planned below (2026-10-14).
 
 **Phase 6 — sprites and sharing** (planned 2026-10-14; the owner's rulings
 of that day and two adversarial reviews — architecture and performance —
-folded in the same day: nine steps, the last one the owner may drop; no
-re-baseline). What the phase makes true: a theme is a package a kid makes on
-a board, edits live, saves, carries to another board and gets from the store;
-a part may be a painted sprite. **The safety is the loader's** (owner,
+folded in the same day; re-planned the same day around the Appearance page:
+twelve steps, the icon home droppable and EDIT TASKBAR, the last, deferrable;
+no re-baseline beyond the Appearance page's own). What the phase makes true:
+a kid changes the look from one page of rows on any board, the change lands
+in one theme, `custom`, that saves as they go, NAME… keeps it as a theme of
+its own, and a theme is a package that moves between consoles and comes from
+the store; a part may be a painted sprite. **The safety is the loader's** (owner,
 2026-10-14): a theme is data the C loader validates and clamps (§7), the
 readability check reports, the layout's required set holds, and the fuzz
 gates run on the host and on every board — a theme cannot run code, every
 board has a reset button, and the shell boots the default when the row's
 package will not load. No ledger, no persist-after-render, no reset input
-(§11). **A user theme is a standalone copy** (owner, 2026-10-14): EDIT
-flattens the picked theme into a self-contained package with no `inherits`;
-inheritance stays among the seeds (§5). **Six more picks are rulings**
-(owner, 2026-10-14; §12): `runtime: "theme"` as the refusal, the band's
-surface over `home_safe`, the layout page in this phase, fonts only from the
-package's folder, the one-line form as minified JSON, and step 9 droppable.
+(§11). **A user theme is a standalone copy** (owner, 2026-10-14): `custom`
+is the picked theme flattened into a self-contained package with no
+`inherits`; inheritance stays among the seeds (§5). **Six more picks were
+rulings** (owner, 2026-10-14; §12): `runtime: "theme"` as the refusal, the
+band's surface over `home_safe`, fonts only from the package's folder and the
+icon home droppable stand; the layout page and the one-line form were
+replaced the same day by the Appearance rulings below.
+
+**The Appearance rulings** (owner, 2026-10-14). The six-page theme editor
+designed that morning (COLOURS FRAME SHAPES FONTS SPRITES LAYOUT, mockups on
+the unmerged branch `editordesign`, `937863c7`) was rejected as too complex
+for what a kid wants to change; the design is Windows' Personalization
+instead:
+
+- **Settings → APPEARANCE is one page of rows**, a window on the desk and a
+  fullscreen page in console mode: THEME (a grid of previews: the seeds, the
+  installed packages, `custom`), MODE (dark or light), ACCENT (one swatch of
+  sixteen), TINT (one background tint), WALLPAPER (the wallpaper picker, out
+  of the old tabs), WINDOW STYLE (the frame presets), FONT (the font
+  presets), CHROME SIZE (out of Settings, where the board has more than one
+  scale), EDIT FILE… and, on `custom` only, NAME…. A picker opens as a
+  popover in desktop mode and as a page in console mode
+  (`docs/shell_layout_2026-10.md` L5); ←→ on a row steps it in place.
+- **The first change on a seed or an installed theme copies it to one theme
+  named `custom` and switches to it**; a change on `custom` edits it. It
+  saves as it goes: no SAVE and no name page. A change started from another
+  theme replaces `custom`. MODE, CHROME SIZE and THEME are not changes to a
+  theme; ACCENT, TINT, WALLPAPER, WINDOW STYLE, FONT, a save through EDIT
+  FILE and EDIT TASKBAR are.
+- **Every colour role is derived** from the source theme, MODE, ACCENT and
+  TINT, readable by construction (§4.10): no per-role picker and no "fails
+  its pair" mark.
+- **ADVANCED is EDIT FILE**: the theme's `theme.json` in the Editor's text
+  editor, a save reloading the look live. Every role, the surfaces, the
+  sprites and the layout are reachable there and only there; no page edits a
+  role, a shape or a sprite visually.
+- **NAME… renames `custom`** to a name of the kid's, so it is a theme of its
+  own in the grid (a package like any in the store) and `custom` is free.
+  There is no SHARE and no PASTE (owner, the same day): moving a theme to
+  another console or publishing it is the store's, because the folder is a
+  package (Files, the Zero's sync, the browser console's export and import,
+  the carts repository).
+- **The wallpaper is the theme's** (owner, the same day, the modern-Windows
+  rule): WALLPAPER is a change like any other, picking a theme brings its
+  wallpaper, and the separate persisted `wallpaper` setting goes (D6).
+- **EDIT TASKBAR** edits the live bar and writes the theme's `layout`; it is
+  the last step and deferrable, and until it lands a layout is edited
+  through EDIT FILE.
+
 The order puts the invalidation first (every later step edits a theme in
-place), then the package (every later step installs one), then the editor's
-design and its pages in the owner's order — colours and the frame first,
-surfaces and fonts after, the layout, then sprites. Each step names the
-alternative it declined and the `tools/p4_bench.py` scenario it adds; a
-scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
+place), then the package (every later step installs one), then the design,
+the derivation, `custom` and EDIT FILE as mechanisms the host tests drive
+with no page, then the page in one re-baseline, NAME…, and the steps that
+draw new things: sprites, the home's band, the icon home and EDIT TASKBAR.
+Each step names the alternative it declined and the `tools/p4_bench.py`
+scenario it adds; a scenario's numbers go to #66 (frames) or #58 (the P4
+port), never here.
 
   1. **`look_gen` in the caches that read the look** (§6; landed
      2026-10-14). `look_gen` is a plain small integer on `ws.look`, set in
@@ -1165,16 +1299,16 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      resolves. **Resolve from bytes**: `ui.theme_resolve` (+ in
      `native/moy_ui/modmoy_ui.c`) parses and derives a package against the
      default without installing it, cached per package and store generation;
-     it serves the THEMES cards (`appearance_app.py`'s theme card draws a
-     package's colours), `layout_theme` naming a package other than the
-     active one (`appearance.py`'s `_theme_layout`; step 6 stands on it) and
-     PASTE's preview, so the one install slot (`ui.theme_install`, the
+     it serves the theme cards (`appearance_app.py`'s theme card draws a
+     package's colours; step 7's THEME grid) and `layout_theme` naming a
+     package other than the active one (`appearance.py`'s `_theme_layout`),
+     so the one install slot (`ui.theme_install`, the
      memory rule's, `native/moy_ui/moy_theme.h`) holds the active theme
      alone. The store reads the type where it reads `wallpaper`: the home's
      tab sources (`runtime/console.py`) skip it, the Make tab too, and
      `nav.projects()` (`runtime/shell_servers.py`) leaves it out, so the
      Files app never opens it in the Editor: Files lists it as a kind of its
-     own, THEMES, whose door is the Appearance app (its EDIT from step 4). `Appearance.set_theme` takes a
+     own, THEMES, whose door is the Appearance app (its EDIT FILE from step 6). `Appearance.set_theme` takes a
      package's name: it reads the folder's `theme.json` into the slot, its
      fonts from the folder (`font_load` takes bytes, each at most
      `MOY_FONT_BYTES`; `_font_id` keyed on the package and the file) and, from
@@ -1232,158 +1366,196 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      list); a package whose bytes a re-scan moved is re-installed, and one
      removed falls back to the default seed, persisted. `contrast` keeps
      `ink_dim` and `chrome_ink_dim` light grey (6), so a disabled part still
-     reads as disabled. Files' rename of a theme moved to step 4, beside the
-     name the editor types: Files renames no project row either.
+     reads as disabled. Files' rename of a theme moved to step 8, beside
+     NAME…: Files renames no project row either.
 
-  3. **Theme editor design** (owner, 2026-10-14). Before a page is built:
-     hand-drawn mockups — MOY64, the D1 look, bitmap fonts — of every editor
-     page at 320×240 and 1024×600, the keyboard navigation (every board has
-     a keyboard; the T-Deck's is the floor), the live preview (the shell
-     itself, step 4), the byte budget's place on the page, and the main
-     flow, pick → EDIT → change a colour → see it live → leave → SHARE →
-     PASTE on another board (no SAVE anywhere: the editor autosaves, step
-     4), into `docs/media/theming_2026-09/` beside the
-     look's mockups (its README says which are mockups), for the owner's
-     review. The editor steps build against them, as phase 3 step 4 built
-     against D1's. Declined: designing each page as it is built (the owner
-     reviews one flow, not five). Changes no file a board image carries.
+  3. **The Appearance design** (owner, 2026-10-14). Before a row is built:
+     hand-drawn mockups — MOY64, the D1 look, bitmap fonts — of the page at
+     320×240 and 1024×600 in `night` dark and a light theme, the THEME grid,
+     the ACCENT and TINT pickers, an accent change before and after across
+     the shell with its derived roles as a table, EDIT TASKBAR at both sizes,
+     and the flow built-in → ACCENT → `custom` appears → NAME… → it is in the
+     grid, in `docs/media/theming_2026-09/appearance/` (its README lists
+     them; `mockups.py` there draws them and carries §4.10's rule in Python,
+     checking every seed × accent × tint × variant on each run). The steps
+     below build against them, as phase 3 step 4 built against D1's. The
+     six-page editor's mockups that came first were rejected (the Appearance
+     rulings above) and never merged. Changes no file a board image carries.
      Gate: the owner's review; `tools/check_docs.py`.
 
-  4. **The editor: colours and the frame.** The Appearance app's THEMES tab
-     gets EDIT beside the variant chips (NEW is EDIT on the default). EDIT
-     duplicates the picked theme into a user package in the store —
-     flattened, **writing only the roles the source chain sets** and leaving
-     derivation the rest (`moy_theme_resolve`'s dump is the whole row and
-     would not fit; the flatten walks the chain's packages), always
-     minified; the metrics, text effects, surfaces, frame and layout as set;
-     fonts named from files copied into the folder with their notices (a
-     copy of `tiny5.fnt` brings `native/moy_ui/themes/tiny5.txt`, the OFL);
-     no `inherits`. `name` is typed in `ui.text_field` on the keyboard every
-     board has (1-24 characters; a seed's name, or a stem any cart folder
-     holds, is refused with the reason), and a Files rename of a theme
-     renames the stem and the `name` together. The page shows the package's
-     **byte budget** against `theme.bytes`. **Live edit**: an edit mutates
-     the in-memory package and sets one look-dirty flag, applied at most
-     once per frame, the latest edit winning, by an install from bytes
-     (`ui.theme_install`; the folder is never re-read). **No SAVE** (owner,
-     2026-10-14: "it breaks the idea of not having old-school save for
-     everything"): the editor autosaves as the rest of the OS does, through
-     the one mechanism Paint uses (`runtime/artwork.py`, #108: a mark sets
-     `_unsaved`, the layer's `draw` writes once the idle debounce
-     `AUTOSAVE_S` has passed, and every exit path — leaving the editor, a
-     tab or app switch — commits, #111); a held key never writes per press,
-     and a card write on the T-Deck is tens of milliseconds (#66), so the
-     debounce is the only write path. EDIT makes the kid's own copy, so the
-     original is untouched and re-picking it is the undo. `_install_fonts`
-     runs only on a FONTS edit
-     and a relayout only on a LAYOUT or font edit; step 1 repaints the
-     shell, so the whole shell is the preview and the pane's four-look ring
-     (§5) is not drawn while editing. Two pages, each a list of rows in the
-     app's catalogue column, built to step 3's mockups: COLOURS — one row per
-     role of §4.1 for the current variant (the chips switch tables); a tap
-     opens a 64-swatch picker (`+ui.swatches`, the Paint app's palette
-     strip's shape); a role whose pair misses `theme.contrast` carries the
-     pairs' report's mark and the picker offers the nearest passing index
-     first. FRAME — `style`, `title_align` and `buttons` as cycle rows (the
-     Settings row's shape, `runtime/settings_layer.py`). The autosave writes
-     the folder (manifest, `theme.json`, the copied files) and the copy is
-     the selected theme from EDIT on. SHARE copies the
-     package's `theme.json`, minified, to the clipboard (`_moy_app.Clipboard`,
-     `ws.clipboard`; a test pins `MOY_APP_CLIP_MAX` at or above
-     `theme.bytes`), and PASTE previews one through `ui.theme_resolve` and
-     installs it as a package: that is the one-line form (§12.3) — JSON and
-     nothing else, so the C loader reads a shared line unchanged; a line
-     carries no font or sheet, and a role it lacks derives (§5). A pasted
-     `name` that collides with a package or a cart folder is auto-suffixed
-     (`-2`, `-3`, …), stem and `name` together. Declined: a grammar of its
-     own for the line (a second parser on every tier), editing a seed in
-     place (EDIT on a seed makes a copy), a diff over a parent (ruled
-     2026-10-14: a copy stands alone), and refusing a pasted collision (a
-     shared line must land). Scenario: `edit thrash` — a held key on a
-     COLOURS row, the painted-frame ms per edit and the frames after
-     release, on all four console boards, asserting zero store writes while
-     the key is held and exactly one after it settles. Gate: **the round
-     trip** — a theme made in the editor on the T-Deck, written by the
-     autosave, its folder taken off that board's
-     store and put in the P4's (the card, or the sync through a page a board
-     serves), selected on the P4, resolves to the same row on both
-     (`moy_theme_resolve`'s dumps equal) and to the same golden hash on the
-     host from the saved folder; SHARE then PASTE on the host yields an
-     equal row; a maximal theme (every role of both variants set, 32
-     surfaces, 32 effects, a layout) flattens under `theme.bytes` and
-     round-trips; the pairs' mark shows for a failing pair; goldens
-     byte-identical, the editor's own surfaces pinned once as goldens on the
-     P4-as-shipped config; `app idle` captures zero frames on the P4 and
-     the T-Deck with the editor open; `edit thrash` within §9's thresholds.
+  4. **The derivation, in C** (§4.10). `moy_theme_derive` in
+     `native/moy_ui/moy_theme.c`: a source's two resolved rows, an accent
+     and a tint in, two rows out, integer only on `moy_theme_lum` and the
+     loader's own predicate. style.json gains `theme.accents` (sixteen
+     pairs), `theme.tints` (eight ramps) and the role classes §4.10 names,
+     generated into `moy_ui_tables.c` by `tools/gen_ui_tables.py` as the
+     derive table is. `ui.theme_custom(source, accent, tint)` (+, in
+     `native/moy_ui/modmoy_ui.c`) answers the bytes of `custom`'s
+     `theme.json`: the source's chain flattened — metrics, text effects,
+     surfaces, frame, fonts, layout, the wallpaper keys — with both derived
+     variants written whole, `name` `custom`, no `inherits`, minified, under
+     `theme.bytes` (§4.10's fallback when not). Declined: the derivation in
+     Python (the T-Deck pays it per held key) and in the loader (§4.10).
+     Test net: `+tests/test_theme_derive.py` — every seed × accent × tint
+     × variant: no pair of `theme.pairs` under `theme.contrast`, `clears(A,
+     0)` for every accent, the bytes parse with no note and resolve to the
+     rows the derivation answered; tint NONE with the theme's own accent
+     answers the source's rows exactly; a table of the seeds' derived rows
+     pins the C to the mockups' `derive()`; a maximal fixture (every role,
+     32 surfaces, 32 effects, a layout) stays under `theme.bytes`; and the
+     boards' module answers the host's table (`tests/on_glass.py`, as
+     `layouts_match_host` does). No golden moves (nothing draws it yet).
 
-  5. **The editor: shapes and fonts.** SHAPES — one row per part and state
-     of style.json's kinds and `parts`, each surface composed from the
-     grammar's words as cycle rows (an edge of `edges`, a fill of `fills`
-     with its one or two colours from the picker, `border`, `shadow`), never
-     typed: the row writes §4.4's line and the loader's parse is the check;
-     `ui.pattern_unreadable` marks a dither or pinstripe row as the pairs'
-     report marks a colour. `radius`, `press_dx` and `press_dy` are three
-     cycle rows on the page and D8's text effect per part and state one
-     more. **The frame's footprint stays fixed** (owner, 2026-10-14; §4.5):
-     a user draws their own frame look within it through SHAPES and, from
-     step 7, the 9-slice title strip and button tiles of SPRITES. FONTS — a
-     row per role (`ui`, `title`, `mono`) cycling through every `.fnt` file
-     in the package's folder, each at most `MOY_FONT_BYTES` (the copied ones,
-     and any put there by the Files app, the sync or the card: a package
-     names no path, §3). Declined: a font library across packages (a package
-     would name a file outside itself); `border` and `title_h` as metrics
-     now (§4.5's "later, if asked"). Scenario: `edit thrash` on a SHAPES row
-     and on FONTS (the one edit that reinstalls fonts and relayouts). Gate:
-     goldens byte-identical; step 1's test grows a surface and a font
-     edited in place; `app idle` zero; every page holds #203's tap floor at
-     320×240 on T-Deck glass (the composer's rule); the scenarios within
-     §9's thresholds.
+  5. **`custom`, saved as it goes, and the wallpaper in the theme.**
+     `Appearance.change(...)` (`runtime/appearance.py`, `ws.look`) is the one
+     write path every row of step 7 calls. On a seed or an installed package
+     it writes `ui.theme_custom` of the active theme into `custom.moy`
+     (manifest type `theme`, `runtime` `theme`, `look` per §4.10; any
+     `custom` before it is replaced), installs it and sets the `theme` row
+     to `custom`; on `custom` it re-derives from `look.from` and installs in
+     place. **Live**: a change sets one look-dirty flag, applied at most
+     once per frame by an install from bytes (`ui.theme_install`; the
+     folder is never re-read), the latest change winning; `_install_fonts`
+     runs only on a FONT change and a relayout only on FONT. **Saved as it
+     goes** (owner, 2026-10-14: "it breaks the idea of not having
+     old-school save for everything"): through the one mechanism Paint uses
+     (`runtime/artwork.py`, #108 — a mark sets `_unsaved`, the write lands
+     once the idle debounce `AUTOSAVE_S` has passed, and every exit path, a
+     tab or app switch or leaving the page, commits, #111); a held key never
+     writes per press, and a card write on the T-Deck costs tens of
+     milliseconds (#66). Re-picking the source in the grid is the undo; the
+     source is never written. **The wallpaper moves into the theme** (D6):
+     the `wallpapers` and `images` keys are read (one slot, `desk`, §4.9);
+     `select_wallpaper` — the Appearance picker, Paint's WALL, the cycle
+     verb, `ctx.wallpaper` — becomes a change: a wallpaper cart is named by
+     id, a My Art picture is copied into the package as `desk.moyimg`, and
+     NONE names neither, so the desk is `desktop`'s fill (the built-in
+     `fill:` options go). The `wallpaper` row of `system.json` and its
+     reader are deleted: under the store rule (CLAUDE.md, 2026-09-07) a
+     stored `wallpaper` reads as nothing and the seed version is bumped; no
+     pass rewrites it. `set_theme` brings the theme's wallpaper; a named
+     cart that is not installed falls back to the image, then to the
+     default. Scenario: `edit thrash` (+) — a held key on ACCENT through the
+     verb, the painted-frame ms per change and the frames after release, on
+     all four console boards, asserting zero store writes while held and
+     exactly one after it settles. Test net: `tests/test_appearance.py`
+     grows the first change on a seed (the seed untouched, `custom` written
+     and active), a second change in place, a change started from another
+     theme replacing `custom`, ten changes landing where one would, MODE
+     and CHROME SIZE making no `custom`; `tests/test_theme_look_gen.py`'s
+     in-place install holds through the verb; the wallpaper tests
+     (`tests/test_appearance.py`, `tests/test_wallpaper_guard.py`,
+     `tests/test_open_machine_wallpaper.py`) move to the theme's keys. No
+     golden moves: no seed names a wallpaper, and an unnamed one resolves to
+     the default the setting's absence gives today; the configs set none.
 
-  6. **The editor: the layout** (D5; `docs/shell_layout_2026-10.md` §5,
-     §11). LAYOUT — a row per edge cycling `none` and a size, under an edge
-     its three slots, each a list picked from the catalogue
-     (`theme.layout.widgets`), and `home` cycling `theme.layout.homes`; the
-     composer's rule (§9 there) runs on every change, and a layout it would
-     replace shows the note instead of applying. The package's `layout` is
-     saved whole with the theme (never merged, §3) and picked by
-     `layout_theme` like any package's through step 2's resolve from bytes,
-     so "keep my own" and "pick one" stay one row. Declined: a layout editor
-     of its own (the key was shaped for this page). Scenario: `edit thrash`
-     on a LAYOUT row (the one edit that relayouts). Gate: the layout doc's
-     §9 fuzz holds on edited layouts; idle zero on every console board on
-     the desk under an edited layout with a side bar; goldens
-     byte-identical.
+  6. **EDIT FILE.** `Appearance.edit_file()` opens the active theme's
+     `theme.json` in the Editor's text editor (`edit_file`,
+     `runtime/shell_servers.py`; the `json` mode of `runtime/text_modes.py`,
+     whose soft save refuses a file that does not parse and badges it), on a
+     seed or an installed package making `custom` first, since a seed is
+     firmware. A save of the active theme's file installs it live (step 2's
+     re-install of a package whose bytes moved, at the save rather than at
+     the next scan); a file the loader refuses leaves the look as it was and
+     shows the loader's note in the editor's badge, and the hard exit writes
+     it anyway, as for any document (#154). A saved colour drops
+     `look.from` (§4.10). Declined: a JSON form of rows (it is the six-page
+     editor again). Test net: `tests/test_appearance.py` — a saved role
+     moves the look and `look_gen`; a refused file keeps the look and badges;
+     EDIT FILE on a seed writes `custom` and opens its file. No golden
+     moves (no door yet).
 
-  7. **Sprites (D3).** `"sprites": "<file>.moygfx"`, the cart sheet's hex
+  7. **The Appearance page.** `runtime/appearance_app.py`'s IMAGES / CARTS
+     / THEMES tabs are replaced by the one page of rows (the Appearance
+     rulings above), built to step 3's mockups through the toolkit: the
+     THEME grid of cards (`ui.theme_resolve`'s colours for a package, the
+     row for a seed; selected, focus, a STORE tag for an installed package),
+     MODE, ACCENT and TINT (each a row whose ←→ steps it and whose ENTER
+     opens its picker, the sixteen swatches and the eight ramps, live behind
+     it, ESC restoring what was there), WALLPAPER (the existing catalogue as
+     its picker), WINDOW STYLE (the frame presets: CLASSIC, TABS, PLATINUM,
+     WIN9X, FLAT, each a whole `frame`), FONT (Tiny5, the built-in
+     petme128 — `petme128`, a reserved name in `fonts` the loader answers
+     with font row 0, additive — and every `.fnt` in the package's folder), CHROME SIZE (moved
+     from Settings, present where `ws.chrome_scales` has more than one) and
+     EDIT FILE…. Every row but THEME, MODE and CHROME SIZE calls step 5's
+     change. Settings keeps APPEARANCE as the page's door. Scenario: `edit
+     thrash` on the ACCENT row by keys. Test net:
+     `tests/test_appearance_app.py` rewritten — every row reached and
+     changed by keys alone and by a tap on each; a picker's ESC restores;
+     #203's tap floor at 320×240. Goldens: ONE named re-baseline — the
+     `app_appearance` row on every config; the `settings` row on the configs
+     whose glass takes more than one chrome scale (CHROME SIZE leaves it);
+     NEW `app_appearance_accent` rows (the picker open) on the P4-as-shipped
+     and 320×240 configs. `app idle` zero with the page open on the P4 and
+     the T-Deck.
+
+  8. **NAME…, and moving a theme.** NAME… shows on `custom` only: a name in
+     `ui.text_field` on the keyboard every board has (1 to 24 of the name
+     grammar, §3), refused with the reason for a seed's name, `custom`
+     itself and a stem a cart folder holds; a name an installed theme holds
+     arms REPLACE? and a second ENTER replaces it (the Make tab's DEL arms
+     SURE? the same way). It renames `custom.moy` to `<name>.moy`, rewrites
+     `theme.json`'s `name`, keeps the manifest's `look`, sets the `theme`
+     row, and `custom` no longer exists until the next change. A Files
+     rename of a theme renames the stem and `name` together (from step 2).
+     **Moving a theme between consoles** is the store's: the folder is a
+     package, carried by the card, the Zero's sync (step 2) and, for now,
+     the browser console's cart export and import (owner, 2026-10-14:
+     `firmware/web_runner/page_tail.js`'s `pzDownload`, the `export` and
+     `import` messages of `firmware/web_runner/worker.js`, which zip a
+     folder of the carts root). As built that import does not land a theme:
+     `importZip` names the folder through `cartBase` and `uniqueCartDir`
+     (`firmware/web_runner/moy_store.mjs`), which give it an author part
+     (`sunset.moy.zip` lands as `local.sunset.moy`) and a taken name a `_2`,
+     so the stem no longer equals `name` and the loader refuses it (§3).
+     This step makes the import read the manifest's type: a theme lands as
+     `<name>.moy`, a taken name as the store's next `_2` stem with `name`
+     rewritten to match. Test net: `tests/test_appearance.py` — NAME…
+     renames, the grid lists the name, `custom` is gone, the next change on
+     the named theme makes a new `custom`, each refusal and REPLACE;
+     `tests/test_web_persist_e2e.py`'s `test_a_cart_exports_and_imports_as_a_zip`
+     is the generic round trip, and a `test_a_theme_exports_and_imports_as_a_zip`
+     (+) beside it exports a theme package and imports it into a fresh
+     profile (the same name, the same resolved rows) and into the same one
+     (the `_2` stem, `name` rewritten, installed and selectable). Gate:
+     **the round trip** — a theme made on the T-Deck through the page,
+     named, its folder carried to the P4's store (the card, or the sync
+     through a page a board serves), selected there, resolves to the same
+     rows on both (`moy_theme_resolve`'s dumps equal) and to the same golden
+     hash on the host. Goldens: a NEW `app_appearance_custom` row (the page
+     on a `custom` made from `night` with one accent, NAME… showing) on the
+     P4-as-shipped and 320×240 configs; every other row identical.
+
+  9. **Sprites (D3).** `"sprites": "<file>.moygfx"`, the cart sheet's hex
      format (`runtime/editors_sheet.py`: one nibble a pixel) read as a **role
      sheet**: a nibble is a slot of style.json's `theme.sprite_slots` — slot 0
      transparent, then roles of the row (`ink`, `surface`, `shade_hi`,
      `shade_lo`, `shade_dark`, `edge`, `accent`, `focus`, `title`,
      `title_ink`, `panel`, `dim`, `hilite`) and two fixed indices, black and
-     white — so one sheet follows both tables and §4.6's tinted glyph is a
-     sheet in two slots. The sheet is user data: its reader joins the
-     loader's validation (`native/moy_ui/moy_theme.c`) with a size cap of
-     its own, the fuzz corpus grows sheets, and the decoded sheet lives in a
-     buffer the loader owns. The slot-to-colour table and the empty-cell
-     flags are computed once per `look_gen` at install; the blit resolves a
-     slot in C through that table, never per pixel in Python. The cells are
-     fixed: `theme.sprite_cells` maps each spritable part and state (the
-     title buttons, checkbox and radio, the `window` and `button` 9-slices,
-     `desk.icon`'s tile) to a rect in 8px tiles of one 128-wide sheet; a
-     cell that is all slot 0 is no sprite, and the part draws its surface
-     (§5). In C (`native/moy_ui/moy_ui_draw.c`): one sink op per sprite and
-     one per 9-slice, scaled by the chrome scale as `moy_ui_glyph.c` scales
-     a glyph (integer, per run), corners whole and edges tiled, inside
-     §4.5's footprint; nine calls never. `"icons": "<file>.moygfx"` is read
-     the same step: a theme's bar icons in the `IconSheet` shape, under the
-     user's `system_icons.moygfx` (§4.6). The editor's SPRITES page opens
-     the Editor's Sprites tab on the package's sheet exactly as EDIT ICONS
-     opens it on the icon sheet (`ThemeLayer` in `runtime/paint_layer.py`,
-     the one `PaintLayer`; a second sheet target), the cell map drawn as
-     guides and the palette strip showing the slots' current colours.
+     white — so one sheet follows both tables, an accent and a tint, and
+     §4.6's tinted glyph is a sheet in two slots. The sheet is user data:
+     its reader joins the loader's validation (`native/moy_ui/moy_theme.c`)
+     with a size cap of its own, the fuzz corpus grows sheets, and the
+     decoded sheet lives in a buffer the loader owns. The slot-to-colour
+     table and the empty-cell flags are computed once per `look_gen` at
+     install; the blit resolves a slot in C through that table, never per
+     pixel in Python. The cells are fixed: `theme.sprite_cells` maps each
+     spritable part and state (the title buttons, checkbox and radio, the
+     `window` and `button` 9-slices, `desk.icon`'s tile) to a rect in 8px
+     tiles of one 128-wide sheet; a cell that is all slot 0 is no sprite,
+     and the part draws its surface (§5). In C
+     (`native/moy_ui/moy_ui_draw.c`): one sink op per sprite and one per
+     9-slice, scaled by the chrome scale as `moy_ui_glyph.c` scales a glyph
+     (integer, per run), corners whole and edges tiled, inside §4.5's
+     footprint; nine calls never. `"icons": "<file>.moygfx"` is read the
+     same step: a theme's bar icons in the `IconSheet` shape, under the
+     user's `system_icons.moygfx` (§4.6). No page edits a sheet (the
+     Appearance rulings): a package carries its sheets, `theme.json` names
+     them (EDIT FILE), and EDIT ICONS stays the user's icon sheet's.
      Declined: a MOY64 `.moyimg` sheet (one sheet per variant, and the Paint
      canvas has no cells), per-part sprite keys in `theme.json` (the
-     empty-cell rule needs none), a second editor, and **the cursor** (its
+     empty-cell rule needs none), a sprite page, and **the cursor** (its
      footprint is hard-coded in the launcher's damage stamps as `8 * fs`
      boxes; a themed cursor waits for one shared constant there, a later
      item). Scenarios: `sprite chrome drag` — chrome painted every frame
@@ -1400,42 +1572,73 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      the host (`painter_matches_host`'s pattern); `gate_counts` budgets
      hold.
 
-  8. **The wallpaper, and the home's readability** (D6, D7, §4.9). **One
-     wallpaper for the desk and the home** (owner, 2026-10-14; per-slot
-     wallpapers declined, §11): `wallpapers` names one installed wallpaper
-     cart and `images` one `.moyimg` in the package, the slot `desk`, read
-     for the desk and the home alike; an absent cart falls back to the
-     image, then to the default; the `wallpaper` row overrides it as today
-     and no second row exists. **Readability is the band's surface, not a
-     flag** (ruled 2026-10-14, §12.1): the home's card band is a part,
-     `home.band`, whose surface a theme sets as any part's — `none` in
-     `night`, whose wallpaper is readable by construction, a dither of
-     `panel` where a theme wants one — baked into the wallpaper's bake,
-     keyed on `look_gen` and the band's rect, before `_band_bg`'s capture,
-     so the home's frames never paint it (§4.9). Declined: a `home_safe`
-     manifest flag — the cart author's claim about every theme's home, which
-     no check reads. Scenario: `home idle` under a theme that names a
-     wallpaper cart and one that ships an image. Gate: goldens
+  10. **The home's readability** (D7, §4.9). **Readability is the band's
+     surface, not a flag** (ruled 2026-10-14, §12.1): the home's card band
+     is a part, `home.band`, whose surface a theme sets as any part's —
+     `none` in `night`, whose wallpaper is readable by construction, a
+     dither of `panel` where a theme wants one — baked into the wallpaper's
+     bake, keyed on `look_gen` and the band's rect, before `_band_bg`'s
+     capture, so the home's frames never paint it (§4.9). Declined: a
+     `home_safe` manifest flag — the cart author's claim about every theme's
+     home, which no check reads. Scenario: `home idle` under a theme that
+     names a wallpaper cart and one that ships an image. Gate: goldens
      byte-identical (`night` sets `none`); `home idle` zero on every console
-     board on the desk; a theme naming an absent wallpaper cart renders its
-     image; the bake's memory is the one wallpaper's, as before this step
-     (the off-heap census, #66).
+     board on the desk; the bake's memory is the one wallpaper's, as before
+     this step (the off-heap census, #66).
 
-  9. **The icon home** (`home: icons`; the shell-layout doc §12, the owner's
+  11. **The icon home** (`home: icons`; the shell-layout doc §12, the owner's
      "we don't have to do it now", 2026-10-14). The `grid` arrangement with
      one-tile cards: each cart's icon (the cover's reduction,
      `SpriteSheet.icon_from_hex`) in the theme's `desk.icon` tile and
      sprite, no title under it, the name in the pill for the focused card
-     only, the tab row and the verbs the grid's. Last, because the tile sprite
-     is step 7's, and the one step the owner may drop. Scenarios: `icon home
-     drag`, `fling` and `tab` (the moving frames, as the carousel's). Gate:
-     an `icons` golden pinned on the P4-as-shipped and 320×240 configs;
-     `home idle` zero; the moving scenarios within §9's thresholds on every
-     console board on the desk; the carousel's and the grid's goldens hold.
+     only, the tab row and the verbs the grid's. After step 9, because the
+     tile sprite is that step's, and the owner may drop it. Scenarios: `icon
+     home drag`, `fling` and `tab` (the moving frames, as the carousel's).
+     Gate: an `icons` golden pinned on the P4-as-shipped and 320×240
+     configs; `home idle` zero; the moving scenarios within §9's thresholds
+     on every console board on the desk; the carousel's and the grid's
+     goldens hold.
+
+  12. **EDIT TASKBAR** (owner, 2026-10-14; deferrable: nothing before it
+     depends on it, and until it lands the page has no taskbar row and a
+     layout is edited through EDIT FILE). Its doors are a row of the bar's
+     menu and an Appearance row, EDIT TASKBAR…. It is a mode of the LIVE
+     bar, not a page: the items draw boxed, and ←→ (↑↓ on a side bar)
+     select an item, the bar's own edge first; SPACE grabs and drops the
+     selection — a grabbed item moves one place per arrow along the bar and
+     across its slots, the perpendicular arrow sends it to the other end,
+     and the grabbed bar moves to the edge the arrow names; ⌫ removes the
+     selected item; TAB opens the tray, the catalogue's widgets the bar
+     lacks (the repeatable `text`, `spacer` and `separator` always), and
+     ENTER on one adds it beside the selection; `menu`, `zone` and `close`
+     move and are never removed, a refused ⌫ saying why; ENTER or ESC
+     leaves. Touch is ENTER on the tapped thing: a tap selects, a second
+     grabs, a tap on the bar drops. Every change runs the composer's rule
+     (`docs/shell_layout_2026-10.md` §9) before it shows, so the bar never
+     shows a layout the rule would replace, and a move that would leave
+     `zone` on a side bar (it is horizontal only, §4 there) keeps a slim
+     top bar holding `zone` alone — four bars at most, one per edge, sizes
+     16 to 32 (§5 there). It writes the theme's `layout` whole, making
+     `custom` first on a seed or an installed theme (step 5), and clears
+     the `layout_theme` override (§11 there), since the edited bars are
+     the theme's from then on. Console mode (the T-Deck, the Guition S3, a
+     P4 in console mode) runs the same mode on its bar, with the tray and
+     the edges as the page under it, limited to its catalogue (no `chips`)
+     and `LAYOUT_EDGES`. Declined: a LAYOUT page of rows (the six-page
+     editor's) and a drag-only mode (every board has a keyboard, L12).
+     Scenario: `bar edit thrash` (+) — a held arrow moving a grabbed item:
+     the frame per move and the store writes, zero while held and one after
+     it settles. Test net: `tests/test_shell_layout.py`'s fuzz grows key
+     streams through the mode (none yields a layout the rule replaces, none
+     removes a required widget); `tests/test_appearance.py` holds the write
+     into `custom` and the cleared override. Goldens: byte-identical
+     outside the mode; NEW rows of the mode on the P4-as-shipped and
+     320×240 configs; `app idle` zero after leaving it.
 
   Ruled 2026-10-14 and folded in: standalone copies over inheritance, the
-  safety as the loader's, the fixed frame footprint, the design step, the six
-  picks above, no SAVE (the autosave) and one wallpaper.
+  safety as the loader's, the fixed frame footprint, the design step, the
+  picks above, no SAVE (`custom` saves as it goes), one wallpaper and then
+  the wallpaper as the theme's, and the Appearance rulings.
 
 ## 10. What other systems taught (research, 2026-09-27)
 
@@ -1485,8 +1688,20 @@ About eighteen systems were studied; the lessons that shaped this doc:
   and the default seed are the way out (§7).
 - **User themes that inherit** (owner, 2026-10-14) — a user theme is a
   flattened copy; inheritance stays among the seeds (§5).
-- **A SAVE in the theme editor** (owner, 2026-10-14) — the OS has no save;
-  the editor autosaves through Paint's mechanism (phase 6 step 4).
+- **A SAVE in Appearance** (owner, 2026-10-14) — the OS has no save;
+  `custom` saves as it goes through Paint's mechanism (phase 6 step 5).
+- **The six-page theme editor** (owner, 2026-10-14) — COLOURS, FRAME,
+  SHAPES, FONTS, SPRITES and LAYOUT pages, a per-role picker with
+  "fails its pair" marks, a name page and a byte budget (mockups on the
+  unmerged branch `editordesign`, `937863c7`): too complex for what a kid
+  changes. One page of rows, every colour derived (§4.10), and EDIT FILE
+  for the rest.
+- **SHARE and PASTE, the one-line form** (owner, 2026-10-14) — a theme
+  travels as its package through the store (Files, the Zero's sync, the
+  browser console's export and import, the carts repository); NAME… is how
+  a kid keeps one.
+- **A wallpaper setting beside the theme** (owner, 2026-10-14) — the
+  wallpaper is the theme's (D6).
 - **Per-slot wallpapers** (owner, 2026-10-14) — one screen-sized bake per
   slot is memory a board does not have, and the home already shows the
   desk's wallpaper behind its cards; one wallpaper, D6.
@@ -1505,7 +1720,7 @@ reach for hand-drawn rows waits for phase 3 and `look_gen` for phase 6, and
 
 1. **Home readability: `home_safe` or a scrim (§4.9)?** A scrim, as the
    surface of the home's band part, which a theme sets like any part's and
-   the default leaves `none` (ruled 2026-10-14, phase 6 step 8). No manifest
+   the default leaves `none` (ruled 2026-10-14, phase 6 step 10). No manifest
    flag: it would be the cart author's claim about every theme's home, and
    nothing reads it. The default home wallpaper is a still image that is
    readable by construction.
@@ -1513,19 +1728,22 @@ reach for hand-drawn rows waits for phase 3 and `look_gen` for phase 6, and
    surfaces; a sprite part then only replaces a surface, so nothing in phases
    3-5 depends on it, and format 1 already reserves `sprites`.
 3. **A generator** (a theme derived from a wallpaper or one picked colour)?
-   No generator. The derivation rules (§5) already make a few roles a whole
-   theme, and phase 6's one-line form covers the rest: a package's
-   `theme.json`, minified, shared and pasted through the clipboard (step 4),
-   and there is no second grammar.
+   Ruled no generator on 2026-10-11; the owner's Appearance ruling of
+   2026-10-14 made one picked colour the way a kid recolours: ACCENT and
+   TINT derive every role of a source theme (§4.10), and the result is
+   plain roles in a package, so there is still no second grammar. A
+   wallpaper's colours derive nothing.
 4. **Theme sounds: with #141 or earlier?** With #141. `sounds` stays reserved.
 
 Phase 6's picks, accepted by the owner on 2026-10-14 (§9): `runtime:
 "theme"` is the refusal that keeps a theme off other hosts; the home's band
-surface over a `home_safe` flag; the layout page is this phase's; a theme's
-fonts come only from the package's folder; the one-line form is the
-package's minified `theme.json`; the icon home (step 9) is droppable. The
-same day: no SAVE in the theme editor, which autosaves as Paint does (step
-4), and one wallpaper for the desk and the home (step 8, D6).
+surface over a `home_safe` flag; a theme's fonts come only from the
+package's folder; the icon home (step 11) is droppable. Two more were
+replaced later that day by the Appearance rulings (§9): the layout page
+(now EDIT TASKBAR, step 12, deferrable) and the one-line form (no SHARE or
+PASTE; a theme travels as its package). The same day: no SAVE, `custom`
+saving as Paint does (step 5); one wallpaper for the desk and the home, and
+then the wallpaper as the theme's (D6, step 5).
 
 ## 13. Sentences this doc will make false
 
@@ -1536,8 +1754,11 @@ Each is corrected in place by the phase that falsifies it:
 | `bar_h()` as the whole content contract | `docs/app_api_v1.md`, `runtime/system_api.py` | the shell-layout doc |
 | the windowed tier's games-only Library (#105) | `docs/shell_ux_v1.md` | the shell-layout doc: the desk's PLAY opens D7's home |
 | "it installs only what a sandbox runs (RUNTIMES)" | `runtime/cart_index.py` | phase 6 step 2: or data the loader validates |
-| `icons` "planned, not built" | `docs/shell_layout_2026-10.md` §5, §12 | phase 6 step 9 |
+| `icons` "planned, not built" | `docs/shell_layout_2026-10.md` §5, §12 | phase 6 step 11 |
 | the per-board reset key, the strike ledger as "theming phase 6's" | `docs/shell_layout_2026-10.md` §9 | phase 6 step 2: the loader's refusal is the recovery |
+| the wallpaper as a persisted choice of its own (`prefs` persist, the fills, the look's choice) | `runtime/README.md` (`appearance.py`), `docs/app_api_v1.md` (`ctx.wallpaper`), `runtime/appearance.py` | phase 6 step 5: the wallpaper is the theme's |
+| the Appearance app's IMAGES / CARTS / THEMES tabs and its monitor preview; CHROME SIZE as a Settings row | `runtime/README.md` (`appearance_app.py`), `runtime/appearance_app.py`, `runtime/settings_layer.py` | phase 6 step 7: one page of rows |
+| the browser import landing every folder as an `author.name` cart | `firmware/web_runner/worker.js`, `firmware/web_runner/moy_store.mjs` | phase 6 step 8: a theme lands under its own name |
 
 ## 14. Review ledger
 

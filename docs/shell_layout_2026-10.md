@@ -579,9 +579,12 @@ theme's". The reader is strict: a name that is not installed reads as absent
 (`None`); there is no legacy shape, so the store rule costs nothing
 (CLAUDE.md, 2026-09-07). `set_theme` writes `theme` and `theme_variant` and
 nothing else, which is why the pick survives a switch: it is stored beside
-the theme, not in it. A layout the user edits in phase 6's Appearance editor
-is saved as a user package and picked the same way, so "keep my own" and
-"pick one" are one row.
+the theme, not in it. A layout the user edits is the theme's own: EDIT
+TASKBAR (theming phase 6's last step, deferrable) edits the live bar, writes
+the edited bars into the theme's `layout`, making the theme `custom` first
+when it is a seed or an installed package, and clears this row, so what was
+edited is what shows; until it lands a layout is edited through Appearance's
+EDIT FILE (`docs/theming_2026-09.md` §9, phase 6).
 
 **Precedence, in one function.** `Appearance.layout()` (`runtime/appearance.py`,
 `ws.look`) resolves the picked package's `bars` if the row is set and
