@@ -7,7 +7,7 @@ and the whole risk is in the second half of it. A second scale threaded through
 that has to be executable is not "the Guition got bigger buttons" (the pixel
 goldens show that) but "nothing else moved at all".
 
-So this file is in three parts:
+So this file is in four parts:
 
   * the DERIVATION -- millimetres in, an integer scale out, on the real panels.
     It is arithmetic, so it is pinned as arithmetic rather than as a rendered
@@ -18,6 +18,10 @@ So this file is in three parts:
   * the GROWTH -- at cs > fs the tap targets grow and the TEXT metrics do not,
     which is the claim the issue makes and the one a reader will want checked
     without opening a PNG.
+  * CHROME SIZE -- the Settings row that lifts chrome above the floor where a
+    panel can take more than one scale: where it shows, how it persists, what
+    a stored value it did not write reads as, and that it never goes under the
+    floor.
 
 The pixel proof is `tests/test_shell_goldens.py`: `guition_480x320_fs1_dark`
 and `guition_tapfloor_dark` are the same tier one axis apart, and every one of
@@ -289,3 +293,105 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
         rects = _ui.tab_row_rects(tabs_area, slim, ed._zone_scale())
         assert [t for t, _r, _l in rects] == [t for t, _l, _i in _ea._TAB_CHIPS]
         assert rects[0][1][3] == ws.layout.bar_icon      # ...as tall as the band
+
+
+# -- CHROME SIZE: the user's chrome scale, above the floor ---------------------
+
+@pytest.mark.parametrize("w, floor, choices", [
+    (320, 1, (1,)),          # T-Deck / handheld web tier: 2x would leave 160px
+    (480, 2, (2,)),          # Guition S3: the floor already is the top
+    (1024, 2, (2,)),         # P4, declared 7"
+    (1280, 2, (2,)),         # Guition P4
+    (1024, 1, (1, 2)),       # the browser's desk and the simulator: no glass
+])
+def test_the_choices_are_what_the_panel_can_take(w, floor, choices):
+    assert chrome.chrome_scale_choices(w, floor) == choices
+
+
+def _desk(path, **kw):
+    kw.setdefault("sys_size", (1024, 600))
+    kw.setdefault("font_scale", 1)
+    kw.setdefault("windowed", True)
+    return host_app.build_workstation(str(path / "carts"), **kw)
+
+
+def _row_keys(ws):
+    return [r[0] for r in ws.settings_layer._settings_rows()]
+
+
+def test_settings_offers_chrome_size_only_where_there_is_a_choice(tmp_path):
+    desk = _desk(tmp_path / "desk")
+    keys = _row_keys(desk)
+    assert keys[keys.index("font_scale") + 1] == "chrome_scale"
+    for name, kw in (("handheld", {"sys_size": None, "windowed": False}),
+                     ("p4", {"panel_diagonal_in": 7.0}),
+                     ("guition_s3", {"sys_size": (480, 320), "windowed": False,
+                                     "panel_diagonal_in": 3.5})):
+        assert "chrome_scale" not in _row_keys(_desk(tmp_path / name, **kw)), name
+
+
+def test_chrome_size_steps_live_and_persists(tmp_path):
+    ws = _desk(tmp_path)
+    assert ws.look.chrome_scale == 0 and ws.layout.cs == 1     # the board's default
+    ws.settings_layer.step_row("chrome_scale", 1)
+    assert ws.layout.cs == 2 and ws.layout.fs == 1             # text stays 1x
+    assert ws.system.get("chrome_scale") == 2
+    again = _desk(tmp_path)                                    # the same store, rebooted
+    assert again.look.chrome_scale == 2 and again.layout.cs == 2
+    again.settings_layer.step_row("chrome_scale", 1)
+    assert again.layout.cs == 1 and again.system.get("chrome_scale") == 1
+
+
+@pytest.mark.parametrize("stored", ["2", 3, 2.0, True, None, [2]])
+def test_a_stored_chrome_scale_it_did_not_write_reads_as_absent(tmp_path, stored):
+    ws = _desk(tmp_path)
+    ws.system.set("chrome_scale", stored)
+    assert _desk(tmp_path).layout.cs == 1
+
+
+def test_no_stored_choice_takes_chrome_under_the_floor_or_past_the_panel(tmp_path):
+    p4 = _desk(tmp_path / "p4", panel_diagonal_in=7.0)
+    p4.system.set("chrome_scale", 1)
+    p4 = _desk(tmp_path / "p4", panel_diagonal_in=7.0)
+    assert p4.layout.cs == 2
+    p4.look.set_chrome_scale(1, persist=False)
+    assert p4.layout.cs == 2
+
+    hh = _desk(tmp_path / "hh", sys_size=None, windowed=False)
+    hh.system.set("chrome_scale", 2)
+    hh = _desk(tmp_path / "hh", sys_size=None, windowed=False)
+    assert hh.look.chrome_scale == 0 and hh.layout.cs == 1
+
+
+def test_switching_chrome_size_matches_booting_at_it(tmp_path):
+    """The relayout contract on the browser's desk (1024x600, no declared
+    glass): CHROME SIZE 2x changed from the Settings window renders exactly
+    what a desk that boots with 2x stored renders."""
+    from runtime.host_app import ConsoleDriver
+
+    def settle(ws, drv):
+        for _ in range(30):
+            ws.mark_dirty()
+            drv.frame(1 / 30)
+
+    _desk(tmp_path / "boot").system.set("chrome_scale", 2)
+    ref = _desk(tmp_path / "boot")
+    ref.bar_layer._clock_text = lambda: "10:30"
+    drv = ConsoleDriver(ref)
+    ref.open_settings()
+    settle(ref, drv)
+    reference = bytes(ref.sys_canvas._buf)
+
+    ws = _desk(tmp_path / "live")
+    ws.bar_layer._clock_text = lambda: "10:30"
+    drv = ConsoleDriver(ws)
+    ws.open_settings()
+    settle(ws, drv)
+    ws.wm._install(ws.wm._wins["settings"].ctx)     # what input dispatch does
+    try:
+        ws.settings_layer.step_row("chrome_scale", 1)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
+    settle(ws, drv)
+    assert ws.layout.cs == 2
+    assert bytes(ws.sys_canvas._buf) == reference

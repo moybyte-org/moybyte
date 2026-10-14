@@ -3,6 +3,7 @@
 #   -- the wallpaper CHOICE          select_wallpaper, the coordinator
 #   -- the top-bar icon sheet        the bar's IconSheet
 #   Appearance.set_font_scale        the system font scale, relayout
+#   Appearance.set_chrome_scale      the chrome scale above the tap floor, relayout
 #   Appearance.set_theme             the panel theme: tokens, shape, fonts, layout
 #   -- the shell layout              the bars in force: the pick, resolve, place
 #   Appearance.apply_layout          resolve and move the host's bar
@@ -154,6 +155,10 @@ class Appearance:
         # theme's `ui` font needs on this board's glass, 1 for petme128. It
         # lifts the effective scale, never the requested one.
         self.text_floor = 1
+        # The REQUESTED chrome scale (Settings -> CHROME SIZE, persisted), one
+        # of `ws.chrome_scales` or 0 for the board's default. It lifts chrome
+        # above the tap floor; it can never take it below.
+        self.chrome_scale = 0
         # Panel THEME (Appearance -> THEMES): the chrome token set the panels/window
         # chrome/selection accents read each draw. Default = the moybyte "night"
         # colorway (today's exact colors); load_system applies the persisted pick.
@@ -373,14 +378,42 @@ class Appearance:
         below the board's tap-target floor.
 
         It sits beside `effective_font_scale` because every caller needs both and
-        `_relayout` is the one cascade that applies them -- but it is NOT a look
-        SETTING: nothing here writes it, no Settings row cycles it, and its floor
-        comes from `ws.chrome_floor`, resolved once from the board's declared
-        glass. That is deliberate. `font_scale` is persisted, so a device whose
-        store already says 1 would ignore a changed default, and the whole point
-        of #203 is a size a kid's finger can rely on rather than one a setting
-        can lose."""
-        return max(self.effective_font_scale(), self.ws.chrome_floor)
+        `_relayout` is the one cascade that applies them. The user's CHROME SIZE
+        (`chrome_scale`) can lift it; the FLOOR is not a setting: it comes from
+        `ws.chrome_floor`, resolved once from the board's declared glass, so the
+        whole point of #203 -- a size a kid's finger can rely on -- is not one a
+        stored choice can lose."""
+        return max(self.effective_font_scale(), self.ws.chrome_floor,
+                   self.chrome_scale)
+
+    def valid_chrome_scale(self, scale):
+        """`scale` if it is an int this panel can take (`ws.chrome_scales`),
+        else 0 -- the board's default. The one reader of a stored or requested
+        chrome scale, and a strict one: the store holds what `set_chrome_scale`
+        wrote, so anything else reads as absent."""
+        if type(scale) is not int or scale not in self.ws.chrome_scales:
+            return 0
+        return scale
+
+    def set_chrome_scale(self, scale, persist=True):
+        """Set the requested chrome scale (Settings -> CHROME SIZE), relayout the
+        desktop through the same cascade a font-scale change takes, and (by
+        default) persist it. Text is untouched: the system canvas keeps its font
+        scale."""
+        self.chrome_scale = self.valid_chrome_scale(scale)
+        self.ws._relayout()
+        if persist:
+            self.ws.system.set("chrome_scale", self.chrome_scale)
+
+    def cycle_chrome_scale(self, d):
+        """Step CHROME SIZE by d through the panel's choices, from the scale the
+        chrome is at now; applies + persists immediately."""
+        opts = self.ws.chrome_scales
+        if not opts:
+            return
+        cur = self.effective_chrome_scale()
+        i = opts.index(cur) if cur in opts else 0
+        self.set_chrome_scale(opts[(i + d) % len(opts)], persist=True)
 
     def set_font_scale(self, scale, persist=True):
         """Set the system-UI font scale (clamped to FONT_SCALES), relay the effective

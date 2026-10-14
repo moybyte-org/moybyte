@@ -121,6 +121,9 @@ class SpineVerbs:
         # System font scale (#39): apply the persisted choice (1/2/3) so the desktop
         # boots at the saved text size. look.set_font_scale relays it into the system
         # canvas + relayouts; persist=False so loading doesn't re-write the store.
+        # The chrome scale is read first so that one relayout carries both.
+        self.look.chrome_scale = self.look.valid_chrome_scale(
+            self.system.get("chrome_scale", 0))
         self.look.set_font_scale(self.system.get("font_scale", self.look.font_scale),
                                  persist=False)
         # Paint's shared document lives outside the re-seeded built-in cart. Restore

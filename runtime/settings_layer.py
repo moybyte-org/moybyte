@@ -16,10 +16,10 @@ settings-only constants (_SET_*).
 
 Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. Every
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
-system.json rows), ws.look.font_scale, ws.diag_live, the
+system.json rows), ws.look.font_scale / chrome_scale, ws.diag_live, the
 updater queries -- and every mutation goes through the ws setters (
-ws.look.cycle_font_scale / _cycle_channel / ws.system.set / the SETTINGS_TOGGLES
-verbs). The module-level SETTINGS_TOGGLES registry is the one exception, and only
+ws.look.cycle_font_scale / cycle_chrome_scale / _cycle_channel / ws.system.set /
+the SETTINGS_TOGGLES verbs). The module-level SETTINGS_TOGGLES registry is the one exception, and only
 in the sense the _SET_* geometry already is: it DECLARES the ON/OFF settings --
 name, label, default, verb, capability gate, serial word -- and console.py and
 dev_channel.py import it back rather than each keeping a hand copy (#209 section
@@ -1076,6 +1076,11 @@ class SettingsLayer:
             # only where a package's layout differs from the theme's.
             i = rows.index(("font_scale", "FONT SIZE", "font")) + 1
             rows = rows[:i] + (("layout_theme", "LAYOUT", "layout"),) + rows[i:]
+        if len(ws.chrome_scales) > 1:
+            # CHROME SIZE: after FONT SIZE, on a panel that can take more than
+            # one chrome scale (chrome.chrome_scale_choices).
+            i = rows.index(("font_scale", "FONT SIZE", "font")) + 1
+            rows = rows[:i] + (("chrome_scale", "CHROME SIZE", "chrome"),) + rows[i:]
         if bt:
             # Keep network/input together. Dynamic capability gating preserves
             # the non-P4 Settings row indices.
@@ -1229,6 +1234,9 @@ class SettingsLayer:
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.look.cycle_font_scale(d)
+            return
+        if key == "chrome_scale":               # CHROME SIZE: live + persisted
+            ws.look.cycle_chrome_scale(d)
             return
         if kind == "layout":                    # LAYOUT: THEME / a package's bars
             ws.look.cycle_layout_theme(d)
@@ -1727,6 +1735,8 @@ class SettingsLayer:
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
         if kind == "font":                 # system-UI font size (#39): 1x / 2x / 3x
             cv.print("%dx" % ws.look.font_scale, vx, y + 5, th["play"], 1)
+        elif kind == "chrome":             # CHROME SIZE: the scale chrome is at
+            cv.print("%dx" % ws.look.effective_chrome_scale(), vx, y + 5, th["play"], 1)
         elif kind == "layout":             # LAYOUT: THEME, or the package picked
             pick = ws.look.layout_theme()
             cv.print("THEME" if pick is None else pick.upper()[:8], vx, y + 5, th["play"], 1)
@@ -1778,8 +1788,8 @@ class SettingsLayer:
             cv.print(lbl, tx, y + 5, col, 1)
         # Mark not-yet-functional rows clearly (wifi + font + channel +
         # diag + actions work).
-        if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
-                        "diag", "webhost", "crash", "idle"):
+        if kind not in ("wifi-net", "bluetooth", "font", "chrome", "action",
+                        "channel", "diag", "webhost", "crash", "idle"):
             # A second label line inside the SAME row rect (one font row below
             # the title), so it is the row kind again with its own text_dy. Its
             # grey is a frozen literal, not `ink_dim` -- off-token on every

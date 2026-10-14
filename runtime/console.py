@@ -461,14 +461,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR, NAMES,
                         _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
-                        _ICON, _ICON_ART, _nibble, chrome_scale_floor, _cursor_delta,
+                        _ICON, _ICON_ART, _nibble, chrome_scale_floor,
+                        chrome_scale_choices, _cursor_delta,
                         _clamp_scroll, _in, _SPLASH_MS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
                                 NAMES, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
                                 _ICON, _ICON_ART, _nibble,
-                                chrome_scale_floor, _cursor_delta, _clamp_scroll,
-                                _in, _SPLASH_MS)
+                                chrome_scale_floor, chrome_scale_choices,
+                                _cursor_delta, _clamp_scroll, _in, _SPLASH_MS)
 
 
 # The Workstation's four mixins -- what a kernel does not need to be in the
@@ -656,6 +657,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         _panel = sys_canvas if sys_canvas is not None else canvas
         self.chrome_floor = chrome_scale_floor(_panel.w, _panel.h,
                                                panel_diagonal_in)
+        # What Settings' CHROME SIZE may pick on this panel, resolved with the
+        # floor and for the same reason: from the panel, never a window.
+        self.chrome_scales = chrome_scale_choices(_panel.w, self.chrome_floor)
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
         # canvas is the panel/window surface the desktop/launcher/settings + status
