@@ -33,6 +33,9 @@ PICTURE_FILE = "desk.moyimg"
 MANIFEST = "manifest.json"
 OVER_KEYS = ("frame", "fonts", "wallpapers", "images")
 DROP = object()
+# The reserved name in `fonts` for the built-in petme128 (font row 0): a
+# file no package carries and none is copied for.
+PETME128 = "petme128"
 
 
 class Custom:
@@ -162,12 +165,12 @@ def wall_keys(src):
 
 def font_files(fonts):
     """The files a `fonts` value names, each once, with each X.fnt's
-    licence X.txt beside it."""
+    licence X.txt beside it; `petme128` names none."""
     out = []
     if type(fonts) is dict:
         for role in fonts:
             f = fonts[role]
-            if type(f) is str and f not in out:
+            if type(f) is str and f != PETME128 and f not in out:
                 out.append(f)
                 if f.endswith(".fnt"):
                     out.append(f[:-4] + ".txt")

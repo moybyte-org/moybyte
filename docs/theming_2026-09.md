@@ -1510,11 +1510,13 @@ port), never here.
      other key the derivation writes (a metric, a text effect, a surface,
      the layout), so a later ACCENT or TINT derives from the file as saved;
      a save that moves only `frame`, `fonts`, `wallpapers` or `images`
-     keeps them, those keys set over the source's as a change sets them. The write is a project-file save (`moy_ufiles`), so the
-     package keeps a `journal/` like any project folder. **The door**: none
-     in the Appearance app yet, which reaches the look only through
-     `ctx.theme`; step 7's EDIT FILE… row needs a `theme.edit_file` row in
-     `native/moy_app/roles.json` and its shell server. Declined: a JSON
+     keeps them, those keys set over the source's as a change sets them. The
+     write is the look's (`Appearance.file_write`, step 7), into the
+     package's folder as a change's commit writes it, never the project-file
+     save, whose `journal/` a package must not carry: a theme package is flat
+     data (the carts repository refuses any other file, and the browser's
+     export zips the folder). **The door** is the Appearance page's EDIT
+     FILE… row (step 7), through `ctx.theme.edit_file`. Declined: a JSON
      form of rows (it is the six-page editor again). Test net:
      `tests/test_appearance.py` — EDIT FILE on a seed makes `custom` and
      opens its file in the text app, not as a project; on `custom` writes
@@ -1527,7 +1529,7 @@ port), never here.
      byte, what a boot of the file as saved draws, every cache moving once.
      No golden moves (no door yet).
 
-  7. **The Appearance page.** `runtime/appearance_app.py`'s IMAGES / CARTS
+  7. **The Appearance page** (landed 2026-10-15). `runtime/appearance_app.py`'s IMAGES / CARTS
      / THEMES tabs are replaced by the one page of rows (the Appearance
      rulings above), built to step 3's mockups through the toolkit: the
      THEME grid of cards (`ui.theme_resolve`'s colours for a package, the
@@ -1553,6 +1555,49 @@ port), never here.
      NEW `app_appearance_accent` rows (the picker open) on the P4-as-shipped
      and 320×240 configs. `app idle` zero with the page open on the P4 and
      the T-Deck.
+     As built: the page is wide — THEME's grid of cards above the rows —
+     where it is a window with room for four cards a row and two rows of
+     them above the rows (`AppearanceLayout.wide`); otherwise THEME is the
+     first row and its picker is the grid. Rows a page cannot fit scroll to
+     the focus. A picker is drawn by the page over its own rows, under its
+     row, in desktop mode, and as a page of its own in console mode: it never
+     leaves the window, so the window's damage carries it and §8's popover
+     layer, anchored to a bar's widget, is not used. The cursor of ACCENT,
+     TINT and WALLPAPER tries its value live; THEME's grid only moves its
+     cursor until ENTER. B undoes a try: a picker opened on another theme
+     sets that theme back (the try's `custom` stays, as a change started
+     from another theme replaces it), one opened on `custom` changes the
+     value back; a tap outside a popover closes it and keeps the try. The
+     source theme's own picture is the catalogue's THEME'S PICTURE,
+     never My Art, and the change that puts it back is `change("wallpaper",
+     THEIRS)` (`Appearance.THEIRS`, the source's own wallpaper). The look
+     answers the rows in one read, `Appearance.choices()`, once per token
+     generation; four `theme` role rows are the page's
+     (`native/moy_app/roles.json`): `change` (a WINDOW STYLE or FONT preset
+     by name, `Appearance.FRAMES` and `FONTS`), `choices`,
+     `set_chrome_scale` and `edit_file` (a compiled app imports it,
+     `theme_edit_file`). `petme128` in `fonts` is font row 0 in the look's
+     font loader (`Appearance._font_id`), and names no file a package copies
+     (`theme_custom.font_files`). The Settings CHROME SIZE row and
+     `cycle_chrome_scale` went. Closing the page's window writes a change
+     still settling, as an app switch does. **EDIT FILE beside the rows**
+     (ruled 2026-10-15, the simpler of the two rules offered): a change made
+     in the page while custom's `theme.json` is open moves the look's
+     `file_gen`, and the editor reloads a buffer with no edits of its own
+     (with a new undo history); a buffer with edits keeps them, and its save
+     is the last write. The editor's saves go through the look
+     (`Appearance.file_write`), never the project-file save, so the package
+     carries no `journal/` (step 6). `edit thrash` drives the ACCENT row's
+     key handler once a frame (`tools/p4_bench.py --edit`). Goldens moved:
+     `app_appearance` on every config; `settings` on `big_800x480_fs3_dark`
+     and `guition_480x320_fs1_dark` and their Settings sub-surfaces
+     (`tests/shell_goldens/subsurfaces.json`); and on the nine desktop
+     configs `app_calc`, `app_files`, `app_storybook`, `app_getcarts` and
+     `app_notes`, whose frames show the Appearance window's left edge from
+     under the later windows; new `app_appearance_accent` on
+     `tdeck_320x240_fs1_dark`, `tdeck_320x240_fs1_light` and
+     `p4_1024x600_cs2_fs1_windowed`. The seed version stays: the cart's
+     body is the shell's, and its manifest did not move.
 
   8. **NAME…, and moving a theme.** NAME… shows on `custom` only: a name in
      `ui.text_field` on the keyboard every board has (1 to 24 of the name

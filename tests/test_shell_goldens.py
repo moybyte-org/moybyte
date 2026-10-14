@@ -309,10 +309,10 @@ _DEFAULT_BARS = [{"edge": "top", "size": 18, "left": ["zone"], "center": ["chips
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
-        diagonal_in=None),
+        diagonal_in=None, accent=True),
     "tdeck_320x240_fs1_light": dict(
         sys_size=None, font_scale=1, windowed=False, variant="light",
-        diagonal_in=None),
+        diagonal_in=None, accent=True),
     "guition_480x320_fs1_dark": dict(
         sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
         diagonal_in=None),
@@ -327,7 +327,7 @@ CONFIGS = {
         diagonal_in=7.0),
     "p4_1024x600_cs2_fs1_windowed": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
-        diagonal_in=7.0),
+        diagonal_in=7.0, accent=True),
     "p4_1024x600_fs2_windowed_light": dict(
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="light",
         diagonal_in=7.0),
@@ -561,11 +561,18 @@ def _surface_plan(ws, cfg):
             ws.open_in_editor(cart)
             ws.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
+    picker = False
     for app in APPS:
         enter = (lambda app=app: ws.open_app(ws._apps_by_id[app]))
         if app == "getcarts":
             enter = _open_get_carts(ws)
+        if picker:
+            enter = _after_picker(ws, enter)
+            picker = False
         plan.append(("app_" + app, enter))
+        if app == "appearance" and cfg.get("accent"):
+            plan.append(("app_appearance_accent", _accent_picker(ws)))
+            picker = True
     for surface, title in APP_CARTS:
         plan.append(("app_" + surface,
                      lambda title=title: open_cart(ws, title)))
@@ -598,6 +605,39 @@ def _surface_plan(ws, cfg):
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))
     return plan
+
+
+class _Key:
+    last_key = 0
+
+    def __init__(self, n):
+        self.n = n
+
+    def pressed(self, n):
+        return n == self.n
+
+
+def _accent_picker(ws):
+    """The Appearance page with its ACCENT picker open on the theme's own
+    accent (docs/theming_2026-09.md §9 phase 6 step 7): a popover on the
+    desk, a page in console mode. Nothing is tried until the cursor moves."""
+    def enter():
+        app = ws.appearance_app
+        app.zone = "rows"
+        app.row = app._rows().index("accent")
+        app.handle_input(_Key("a"))
+        assert app.pick == "accent"
+    return enter
+
+
+def _after_picker(ws, enter):
+    """`enter`, after the picker the surface before it opened is closed (B,
+    which restores nothing: nothing was tried)."""
+    def go():
+        ws.appearance_app.handle_input(_Key("b"))
+        assert ws.appearance_app.pick is None
+        enter()
+    return go
 
 
 def _popover_plan(ws):
@@ -678,7 +718,10 @@ def surface_names(config_name):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
     names += ["launcher", "settings"]
     names += ["editor_" + t for t in TABS]
-    names += ["app_" + a for a in APPS]
+    for a in APPS:
+        names.append("app_" + a)
+        if a == "appearance" and cfg.get("accent"):
+            names.append("app_appearance_accent")
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
     names += ["web_console", "web_console_address"]

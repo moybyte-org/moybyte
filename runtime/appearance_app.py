@@ -1,13 +1,36 @@
-"""Responsive visual wallpaper + theme picker system app.
+# Map (grep -n a name to jump there):
+#   AppearanceLayout                 the page's geometry: wide (THEME's grid) or not
+#   AppearanceAppLayer.choices       what the rows show, once per token generation
+#   AppearanceAppLayer._step         ←→ on a row
+#   AppearanceAppLayer._activate     ENTER on a row
+#   AppearanceAppLayer._try          a picker's cursor: tried live
+#   AppearanceAppLayer._undo         B in a picker: what was there
+#   AppearanceAppLayer.handle_input  keys
+#   AppearanceAppLayer.handle_pointer  taps
+#   AppearanceAppLayer._pick_frame   a picker's rect: popover or page
+#   AppearanceAppLayer.draw          the page
+"""The Appearance page: one page of rows (docs/theming_2026-09.md §9 phase
+6 step 7, built to the mockups in docs/media/theming_2026-09/appearance/).
 
-A nod to the classic Display Properties dialog, simplified to the moybyte
-vocabulary and arranged side-by-side (the owner's space verdict): the
-selectable catalog is a LEFT column, and the RIGHT pane previews the choice --
-the IMAGES/CARTS tabs draw a little MONITOR whose screen shows the wallpaper
-IN FULL (the ONLY place it renders; the app sits on a flat panel, never the
-live backdrop), and the THEMES tab draws how moybyte windows will LOOK (an
-inactive strip behind an active window, real WM token roles). One layout,
-every tier -- the monitor scales from the 320x240 shelf to the desktop.
+THEME, MODE, ACCENT, TINT, WALLPAPER, WINDOW STYLE, FONT, CHROME SIZE (where
+the panel takes more than one scale) and EDIT FILE…, Settings-shaped. A page
+with the room draws THEME as a grid of cards above the rows; a small one
+draws it as a row whose picker is the grid. ↑↓ walk the rows, ←→ step the
+focused one in place, ENTER opens its picker (or acts), B (Backspace, Esc)
+backs out of a picker restoring what was there; a tap is ENTER on the thing
+tapped.
+
+A picker -- THEME's grid, ACCENT's sixteen swatches, TINT's ramps,
+WALLPAPER's catalogue -- is a popover the page draws over its own rows in
+desktop mode, under its row, and a page of its own in console mode
+(`docs/shell_layout_2026-10.md` L5's rule for which). It never leaves the
+window, so the window's own damage carries it. Moving the cursor in ACCENT,
+TINT or WALLPAPER tries the value live; ENTER keeps it, B restores what was
+there (the theme the picker opened on, when the try made `custom` of it).
+
+Every row but THEME, MODE, CHROME SIZE and EDIT FILE… is a change to the
+theme (`ctx.theme.change`), which lands in `custom`. The rows read
+`ctx.theme.choices()` once per token generation.
 """
 
 try:
@@ -16,14 +39,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import BAR_ROWS, content_of
 
 try:
-    from moy_store_base import builtin_name
+    from moy_store_base import BUILTIN_NS, builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name
+    from runtime.moy_store_base import BUILTIN_NS, builtin_name
 
 try:
-    from chrome import THEME_VARIANTS, theme_colors, theme_names
+    from chrome import THEME_NAMES, theme_colors, theme_names
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import THEME_VARIANTS, theme_colors, theme_names
+    from runtime.chrome import THEME_NAMES, theme_colors, theme_names
 
 try:
     import ui as _ui
@@ -31,10 +54,37 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
+# The theme's picture's wallpaper id (`Appearance.PICTURE`), and the change
+# value that puts the source theme's own wallpaper back (`Appearance.change`).
+PICTURE = BUILTIN_NS + ".my_art"
+THEIRS = ""
+
+LABELS = {"theme": "THEME", "mode": "MODE", "accent": "ACCENT",
+          "tint": "TINT", "wallpaper": "WALLPAPER", "frame": "WINDOW STYLE",
+          "font": "FONT", "chrome": "CHROME SIZE", "file": "EDIT FILE..."}
+# The WINDOW STYLE and FONT presets in their stepping order (the look's
+# FRAMES and FONTS), and their labels.
+FRAMES = ("classic", "tab", "platinum", "win9x", "flat")
+FONTS = ("tiny5", "petme128")
+FRAME_NAMES = {"classic": "CLASSIC", "tab": "TABS", "platinum": "PLATINUM",
+               "win9x": "WIN9X", "flat": "FLAT"}
+FONT_NAMES = {"tiny5": "TINY5", "petme128": "PETME128"}
+HINTS = {"accent": "ONE COLOUR FOR TITLES, SELECTION AND FOCUS.",
+         "tint": "ONE TINT FOR PANELS, DESK AND BAR.",
+         "wallpaper": "THE WALLPAPER IS PART OF THE THEME.",
+         "theme": "PICK A THEME."}
+ROW_KEYS = "UP/DN row  L/R change  ENTER open"
+PICK_KEYS = "ARROWS try  ENTER keep  B undo"
+GRID_KEYS = "ARROWS move  ENTER use  B back"
+
 
 class AppearanceLayout:
+    """The page's geometry for one content size. `wide` puts THEME's grid
+    above the rows; otherwise THEME is the first row and its picker is the
+    grid. Rows that do not fit scroll (`AppearanceAppLayer._scroll_to`)."""
+
     # Min-size convention (ui.py): the WM clamps window resizes to these
-    # (fs-scaled) -- the visual rails/catalog need the room at font scale 2.
+    # (fs-scaled).
     MIN_W = 310
     MIN_H = 230
 
@@ -43,112 +93,56 @@ class AppearanceLayout:
         self.h = int(h)
         self.fs = max(1, int(fs))
         fs = self.fs
-        # The chrome scale (#203) sizes only the OS bar band above this app;
-        # a window has no bar over its content.
+        # The chrome scale (#203) sizes the rows (a tap target) and the OS
+        # bar band above a fullscreen page; a window has no bar over it.
         self.cs = max(fs, int(cs)) if cs else fs
+        cs = self.cs
+        self.windowed = bool(windowed)
         self.cx, self.cy, self.cw, self.ch = content_of(
-            self.w, self.h, 0 if windowed else BAR_ROWS * self.cs)
-        self.tabs_h = 30 * fs
-        # Side-by-side: the catalog COLUMN on the left, the preview pane on the
-        # right. `wide` only picks the chunkier paddings/bezels of big surfaces.
-        self.wide = self.cw >= 420 * fs and self.h >= 240 * fs
-        band_y = self.cy + self.tabs_h
-        band_h = max(1, self.cy + self.ch - band_y)
-        self.catalog_w = max(150 * fs, self.cw * 2 // 5)
-        self.catalog = (self.cx, band_y, self.catalog_w, band_h)
-        self.preview = (self.cx + self.catalog_w, band_y,
-                        max(1, self.cw - self.catalog_w), band_h)
-        widths = (70, 62, 70)
-        self.tabs = []
-        x = self.cx + 6 * fs
-        for i in range(3):
-            bw = widths[i] * fs
-            self.tabs.append((x, self.cy + 3 * fs, bw, self.tabs_h - 6 * fs))
-            x += bw + 4 * fs
-        # Preview-pane geometry. `field` = the inset desk area the THEMES mock
-        # windows draw over; `screen`/`bezel`/`stand_h` = the monitor. The
-        # screen SNAPS to clean half-frame multiples (160x120 * k) when it can,
-        # else to the exact 4:3 fit -- either way a cart frame fills it edge to
-        # edge (the fit blit resamples below native size).
-        cap = 18 * fs                       # the status caption strip at pane bottom
-        px_, py_, pw_, ph_ = self.preview
-        pad = 8 * fs if self.wide else 4 * fs
-        self.field = (px_ + pad, py_ + pad // 2,
-                      pw_ - pad * 2, max(1, ph_ - cap - pad))
-        self.bezel = 6 * fs if self.wide else 4 * fs
-        self.stand_h = 10 * fs if self.wide else 8 * fs
-        avail_h = ph_ - cap - self.stand_h - 2 * pad - 2 * self.bezel
-        avail_w = pw_ - 2 * pad - 2 * self.bezel
-        if avail_h >= 24 * fs and avail_w >= 32 * fs:
-            k = min(avail_w // 160, avail_h // 120)
-            if k >= 1:
-                sw, sh = 160 * k, 120 * k      # clean half-frame multiple
-            else:
-                sh = max(24, min(avail_h, avail_w * 3 // 4))
-                sh -= sh % 3                   # exact 4:3 (the game canvas aspect)
-                sw = sh * 4 // 3
-            block_h = sh + 2 * self.bezel + self.stand_h
-            sx = px_ + (pw_ - sw) // 2
-            sy = py_ + max(0, (ph_ - cap - block_h) // 2) + self.bezel
-            self.screen = (sx, sy, sw, sh)
-        else:
-            self.screen = None              # no room for a monitor: caption only
+            self.w, self.h, 0 if windowed else BAR_ROWS * cs)
+        self.row_h = max(20 * fs, 13 * cs)
+        self.strip_h = 12 * fs if self.cw < 480 * fs else 16 * fs
+        self.pad = 4 * fs
+        # THEME's grid cards: the mockups' 86x54 on a wide page.
+        self.card_w = 86 * fs
+        self.card_h = 54 * fs
+        self.gap = 7 * fs
+        self.cols = max(1, (self.cw - 20 * fs + self.gap)
+                        // (self.card_w + self.gap))
+        self.label_h = 12 * fs
+        grid_h = self.label_h + 2 * (self.card_h + self.gap) + 4 * fs
+        self.wide = (self.windowed and self.cols >= 4
+                     and 8 * fs + grid_h + 9 * self.row_h + self.strip_h
+                     <= self.ch)
+        self.grid_rows = 2
+        top = self.cy + (8 * fs if self.wide else 0)
+        self.grid_y = top + self.label_h
+        self.rows_y = top + (grid_h if self.wide else 0)
+        self.strip_y = self.cy + self.ch - self.strip_h
+        self.rows_h = max(1, self.strip_y - self.rows_y)
+        self.theme_h = max(34 * fs, self.row_h)    # the compact THEME row
 
-    # A card is a 4:3 preview (the game-canvas aspect every wallpaper draws at)
-    # plus the 17px label strip _draw_wall_card paints along its bottom.
-    LABEL_H = 17
-    CARD_PAD = 3
-
-    def card_ideal_h(self, card_w):
-        """The height that shows a card's preview at its native 4:3 without
-        letterboxing: the image box is (card_w - 2*pad) wide."""
-        fs = self.fs
-        img_w = max(1, card_w - 2 * self.CARD_PAD * fs)
-        return img_w * 3 // 4 + (self.LABEL_H + self.CARD_PAD) * fs
-
-    def cards(self, count):
-        fs = self.fs
-        x, y, w, h = self.catalog
-        gap = 6 * fs
-        min_w = 116 * fs
-        cols = max(1, min(count if count else 1, (w - gap) // (min_w + gap)))
-        card_w = (w - gap * (cols + 1)) // cols
-        rows = max(1, (count + cols - 1) // cols)
-        # Divide the available band exactly. On the 320x240 tier five themes use
-        # three compact rows; a fixed minimum would push the last row off-screen.
-        card_h = max(1, (h - gap * (rows + 1)) // rows)
-        # ...but NEVER stretch a card past its 4:3 preview (owner screenshot
-        # 2026-07-31: at 1024x600 / font 1 the band split into two rows of
-        # 276px-tall cells holding 4:3 art -- tall, empty, and the previews
-        # overflowed their boxes). Dividing the band exactly is only right when
-        # the rows would otherwise OVERFLOW it; when there is spare room the
-        # cards keep their natural proportion and the column simply ends early.
-        # The cap only ever SHRINKS a card, so a band too small for `rows` still
-        # divides exactly (the 320x240 tier's three compact rows are unchanged);
-        # spare height just leaves the column ending early, which is what the
-        # host tier already looked like.
-        card_h = min(card_h, self.card_ideal_h(card_w))
-        out = []
-        for i in range(count):
-            out.append((x + gap + (i % cols) * (card_w + gap),
-                        y + gap + (i // cols) * (card_h + gap),
-                        card_w, card_h))
-        return out
+    def card_rect(self, i, top=0):
+        """Grid card `i`'s rect on a wide page, `top` the first grid row
+        shown; None for a card scrolled out."""
+        r = i // self.cols - top
+        if r < 0 or r >= self.grid_rows:
+            return None
+        return (self.cx + 10 * self.fs + (i % self.cols) * (self.card_w + self.gap),
+                self.grid_y + r * (self.card_h + self.gap),
+                self.card_w, self.card_h)
 
 
 class AppearanceAppLayer:
-    """Display-Properties-style picker: monitor/window-mock preview on top,
-    visual Images/Carts/Themes catalogs below."""
+    """The Appearance page (see the module doc)."""
 
     id = "appearance"
     domain = "system"
     TITLE = "APPEARANCE"
-    MODES = ("images", "carts", "themes")
     # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
     # CAPABILITY, not a core role: this app and the two that copy a drawing
-    # into it (Paint, Files) are its only consumers. My Art's card is Paint's
-    # picture, scaled (`wallpaper.thumbnail`). A pick is a change to the theme
-    # (docs/theming_2026-09.md D6), so it lands in `custom`.
+    # into it (Paint, Files) are its only consumers. A pick is a change to
+    # the theme (docs/theming_2026-09.md D6), so it lands in `custom`.
     NEEDS = ("surface", "theme", "damage", "wallpaper")
 
     def __init__(self, ctx, names):
@@ -163,9 +157,21 @@ class AppearanceAppLayer:
         self.layout = AppearanceLayout(cv.w, cv.h, self._surf.font_scale(),
                                        self._surf.windowed(),
                                        self._surf.chrome_scale())
-        self.mode = "images"
-        self.sel = 0
-        self.status = "IMAGE WALLPAPERS"
+        self.zone = "rows"          # "grid" (a wide page's cards) or "rows"
+        self.row = 0
+        self.card = 0
+        self.top = 0                # the first grid row a wide page shows
+        self.scroll = 0             # the rows' scroll, px
+        self.pick = None            # the open picker's row key
+        self.cur = 0                # its cursor
+        self.orig = None            # what it opened on: (choices, colours)
+        self.tried = False
+        self._ch = None
+        self._gen = None
+        self._stale = 0
+        self._dt = 0
+        self._accents = tuple(_ui.theme_accents())
+        self._tints = tuple(_ui.theme_tints())
 
     @staticmethod
     def is_app(cart):
@@ -179,303 +185,834 @@ class AppearanceAppLayer:
 
     def relayout(self, w, h, fs, cs=None):
         self.layout = AppearanceLayout(w, h, fs, self._surf.windowed(), cs)
+        self._stale = 2
 
     def open(self):
-        # Land on the current wallpaper's source category. NONE (the theme's
-        # `desktop` fill) lives on the IMAGES tab beside My Art.
-        wp = self._wall.current()
-        my_art = self._wall.title(wp) == "My Art"
-        self.mode = "images" if (my_art or wp is None) else "carts"
-        self.sel = self._selected_index()
-        self.status = self.mode.upper()
+        self.pick = None
+        self.zone = "rows"
+        self.row = self._rows().index("accent")
+        self.scroll = 0
+        self._stale = 2
         self._damage.all()
 
-    def _image_items(self):
-        # My Art (Paint's picture) + NONE (None: the theme's `desktop` fill) --
-        # everything that isn't a live wallpaper CART.
-        wall = next((c for c in self._wall.carts()
-                     if c.get("title") == "My Art"), None)
-        items = [wall] if wall is not None else []
-        items.append(None)
-        return items
+    # -- what the rows show ----------------------------------------------------
 
-    def _cart_items(self):
-        return [c for c in self._wall.carts() if c.get("title") != "My Art"]
+    def choices(self):
+        """What the rows show (`ctx.theme.choices()`), as `_refresh` last
+        read it."""
+        if self._ch is None:
+            self._refresh()
+        return self._ch
 
-    def _items(self):
-        if self.mode == "images":
-            return self._image_items()
-        if self.mode == "carts":
-            return self._cart_items()
-        return list(theme_names())
+    def _refresh(self):
+        """Read `ctx.theme.choices()` again when the token generation moved,
+        and for the two frames after an action of the page's own (a change
+        shows at the next frame). Once per draw and per event."""
+        g = self._theme.gen()
+        if self._ch is None or g != self._gen or self._stale:
+            self._ch = self._theme.choices()
+            self._gen = g
+            if self._stale:
+                self._stale -= 1
 
-    def _wall_id(self, item):
-        """The selectable wallpaper id: NONE's is None."""
-        return None if item is None else self._wall.id_for(item)
-
-    def _selected_index(self):
-        items = self._items()
-        if self.mode == "themes":
-            for i, item in enumerate(items):
-                if item == self._theme.name():
-                    return i
-            return 0
-        for i, item in enumerate(items):
-            if self._wall_id(item) == self._wall.current():
-                return i
-        return 0
-
-    def _set_mode(self, mode):
-        self.mode = mode
-        self.sel = self._selected_index()
-        self.status = mode.upper()
-        self._damage.all()
-
-    def _apply(self, index):
-        items = self._items()
-        if not items:
-            return
-        self.sel = max(0, min(int(index), len(items) - 1))
-        item = items[self.sel]
-        if self.mode == "themes":
-            self._theme.set(item)
-            self.status = (item + " " + self._theme.variant()).upper()
-        else:
-            self._wall.select(self._wall_id(item))
-            self.status = self._wall_title(item).upper()
-        self._damage.all()
-
-    @staticmethod
-    def _wall_title(item):
-        if item is None:
-            return "None"
-        return item.get("title", "WALLPAPER")
-
-    def handle_input(self, inp):
-        # The catalog is a vertical column now: up/down walks (and applies) the
-        # list, left/right steps the horizontal tab row.
-        items = self._items()
-        if inp.pressed("up") and items:
-            self._apply((self.sel - 1) % len(items))
-        elif inp.pressed("down") and items:
-            self._apply((self.sel + 1) % len(items))
-        elif inp.pressed("left"):
-            self._set_mode(self.MODES[(self.MODES.index(self.mode) - 1) % 3])
-        elif inp.pressed("right"):
-            self._set_mode(self.MODES[(self.MODES.index(self.mode) + 1) % 3])
-        return True
-
-    def _variant_chip_rects(self):
-        """The THEMES tab's DARK/LIGHT toggle chips, along the top of the
-        preview field (same rects for draw and hit-test)."""
-        fs = self.layout.fs
-        x, y, w, _h = self.layout.field
-        cw, ch = 42 * fs, 13 * fs
-        out = []
-        cx = x + w - (cw + 3 * fs) * len(THEME_VARIANTS)
-        for v in THEME_VARIANTS:
-            out.append((v, (cx, y + 2 * fs, cw, ch)))
-            cx += cw + 3 * fs
+    def _rows(self):
+        out = [] if self.layout.wide else ["theme"]
+        out += ["mode", "accent", "tint", "wallpaper", "frame", "font"]
+        if len(self.choices()["chromes"]) > 1:
+            out.append("chrome")
+        out.append("file")
         return out
 
-    def _set_variant(self, variant):
-        self._theme.set_variant(variant)
-        self.status = (self._theme.name() + " " + variant).upper()
+    def _themes(self):
+        """The THEME grid's names: `custom` first, then the seeds and the
+        store's packages (`chrome.theme_names`)."""
+        names = list(theme_names())
+        if "custom" in names:
+            names.remove("custom")
+            names.insert(0, "custom")
+        return names
+
+    def _accent_at(self, a):
+        for i, acc in enumerate(self._accents):
+            if acc[1] == a:
+                return i
+        return -1
+
+    def _accent_shown(self, ch, th):
+        """(index into the accents, or -1 for the theme's own, A shown)."""
+        a = ch["accent"]
+        if a is None:
+            a = th["accent"]
+        return self._accent_at(a), th["accent"]
+
+    def _tint_at(self, name):
+        for i, t in enumerate(self._tints):
+            if t[0] == name:
+                return i
+        return -1
+
+    def _walls(self):
+        """The WALLPAPER catalogue: (value, label, kind, title), kind "cart",
+        "art" (Paint's picture), "theirs" (the source theme's own picture)
+        or "none"."""
+        ch = self.choices()
+        out = []
+        if ch["picture"] == "theme":
+            out.append((THEIRS, "THEME'S PICTURE", "theirs", ""))
+        art = None
+        for c in self._wall.carts():
+            wid = self._wall.id_for(c)
+            title = str(c.get("title", "WALLPAPER"))
+            if title == "My Art":
+                art = (wid, "MY ART", "art", title)
+            else:
+                out.append((wid, title.upper(), "cart", title))
+        if art is not None:
+            out.append(art)
+        out.append((None, "NONE", "none", ""))
+        return out
+
+    def _wall_at(self, ch):
+        wp = ch["wallpaper"]
+        walls = self._walls()
+        for i, w in enumerate(walls):
+            if w[2] == "theirs" and wp == PICTURE:
+                return i
+            if w[2] == "art" and wp == PICTURE and ch["picture"] == "mine":
+                return i
+            if w[2] in ("cart", "none") and w[0] == wp:
+                return i
+        return -1
+
+    def _wall_title(self, ch):
+        wp = ch["wallpaper"]
+        if wp is None:
+            return "NONE"
+        if wp == PICTURE:
+            return "MY ART" if ch["picture"] == "mine" else "THEME'S PICTURE"
+        t = self._wall.title(wp)
+        return str(t).upper() if t else "WALLPAPER"
+
+    # -- acting ----------------------------------------------------------------
+
+    def _acted(self):
+        self._stale = 2
         self._damage.all()
 
-    def handle_pointer(self, px, py, click):
-        lay = self.layout
-        if not click:
+    def _change(self, kind, value):
+        rc = self._theme.change(kind, value)
+        self._acted()
+        return rc
+
+    def _step(self, key, d):
+        """←→ on row `key`: step its value in place."""
+        ch = self.choices()
+        if key == "theme":
+            names = self._themes()
+            at = names.index(ch["theme"]) if ch["theme"] in names else 0
+            self._theme.set(names[(at + d) % len(names)])
+        elif key == "mode":
+            self._theme.set_variant("light" if ch["variant"] == "dark" else "dark")
+        elif key == "accent":
+            at = self._accent_shown(ch, self._theme.colors())[0]
+            at = (at + d) % len(self._accents) if at >= 0 else 0
+            self._change("accent", self._accents[at][1])
+            return
+        elif key == "tint":
+            opts = [None] + [t[0] for t in self._tints]
+            at = opts.index(ch["tint"]) if ch["tint"] in opts else 0
+            self._change("tint", opts[(at + d) % len(opts)])
+            return
+        elif key == "wallpaper":
+            walls = self._walls()
+            at = self._wall_at(ch)
+            for _ in range(len(walls)):
+                at = (at + d) % len(walls)
+                if self._change("wallpaper", walls[at][0]) == 0:
+                    break
+            return
+        elif key == "frame":
+            opts = FRAMES
+            at = opts.index(ch["frame"]) if ch["frame"] in opts else 0
+            self._change("frame", opts[(at + d) % len(opts)])
+            return
+        elif key == "font":
+            opts = FONTS
+            at = opts.index(ch["font"]) if ch["font"] in opts else -1
+            self._change("font", opts[(at + d) % len(opts)])
+            return
+        elif key == "chrome":
+            opts = ch["chromes"]
+            at = opts.index(ch["chrome"]) if ch["chrome"] in opts else 0
+            self._theme.set_chrome_scale(opts[(at + d) % len(opts)])
+        else:
+            return
+        self._acted()
+
+    def _activate(self, key):
+        """ENTER on row `key`."""
+        if key in ("theme", "accent", "tint", "wallpaper"):
+            self._open_picker(key)
+        elif key == "file":
+            self._theme.edit_file()
+            self._acted()
+        else:
+            self._step(key, 1)
+
+    def _open_picker(self, key):
+        ch = self.choices()
+        th = self._theme.colors()
+        if key == "theme":
+            names = self._themes()
+            self.cur = names.index(ch["theme"]) if ch["theme"] in names else 0
+        elif key == "accent":
+            self.cur = max(0, self._accent_shown(ch, th)[0])
+        elif key == "tint":
+            self.cur = self._tint_at(ch["tint"]) + 1
+        else:
+            self.cur = max(0, self._wall_at(ch))
+        self.pick = key
+        self.orig = dict(ch)
+        self.tried = False
+        self._damage.all()
+
+    def _pick_count(self):
+        if self.pick == "theme":
+            return len(self._themes())
+        if self.pick == "accent":
+            return len(self._accents)
+        if self.pick == "tint":
+            return len(self._tints) + 1
+        return len(self._walls())
+
+    def _pick_cols(self):
+        if self.pick == "accent":
+            return 8
+        if self.pick == "theme":
+            return self._grid_cols()
+        return 3
+
+    def _try(self, i):
+        """The picker's cursor moved to `i`: ACCENT, TINT and WALLPAPER try
+        it live; THEME's grid only moves its cursor."""
+        self.cur = i
+        if self.pick == "accent":
+            self._change("accent", self._accents[i][1])
+            self.tried = True
+        elif self.pick == "tint":
+            self._change("tint", None if i == 0 else self._tints[i - 1][0])
+            self.tried = True
+        elif self.pick == "wallpaper":
+            self._change("wallpaper", self._walls()[i][0])
+            self.tried = True
+        self._damage.all()
+
+    def _keep(self, i=None):
+        """ENTER in a picker: keep (THEME: use) the value under the cursor."""
+        if i is not None and i != self.cur:
+            self._try(i)
+        if self.pick == "theme":
+            names = self._themes()
+            if 0 <= self.cur < len(names):
+                self._theme.set(names[self.cur])
+        self.pick = None
+        self._acted()
+
+    def _undo(self):
+        """B in a picker: what was there before it opened. A try that made
+        `custom` of another theme goes back to that theme; on `custom` the
+        tried value is changed back."""
+        o, key = self.orig, self.pick
+        self.pick = None
+        if self.tried and o is not None:
+            if o["theme"] != "custom":
+                self._theme.set(o["theme"])
+            elif key == "accent" or key == "tint":
+                self._theme.change(key, o[key])
+            elif key == "wallpaper":
+                wp = o["wallpaper"]
+                if wp == PICTURE and o["picture"] == "theme":
+                    wp = THEIRS
+                self._theme.change("wallpaper", wp)
+        self._acted()
+
+    # -- input -----------------------------------------------------------------
+
+    def handle_input(self, inp):
+        self._refresh()
+        if self.pick is not None:
+            return self._picker_input(inp)
+        if inp.pressed("b"):
             return True
-        for i, r in enumerate(lay.tabs):
-            if _in(px, py, r):
-                self._set_mode(self.MODES[i])
+        rows = self._rows()
+        if self.zone == "grid":
+            n = len(self._themes())
+            cols = self.layout.cols
+            if inp.pressed("left"):
+                self.card = (self.card - 1) % n
+            elif inp.pressed("right"):
+                self.card = (self.card + 1) % n
+            elif inp.pressed("up") and self.card >= cols:
+                self.card -= cols
+            elif inp.pressed("down"):
+                if self.card + cols < n:
+                    self.card += cols
+                elif self.card // cols < (n - 1) // cols:
+                    self.card = n - 1
+                else:
+                    self.zone = "rows"
+                    self.row = 0
+            elif inp.pressed("a"):
+                self._theme.set(self._themes()[self.card])
+                self._acted()
                 return True
-        if self.mode == "themes":
-            for v, r in self._variant_chip_rects():
-                if _in(px, py, r):
-                    self._set_variant(v)
-                    return True
-        for i, r in enumerate(lay.cards(len(self._items()))):
-            if _in(px, py, r):
-                self._apply(i)
+            else:
                 return True
+            self._show_card()
+            self._damage.all()
+            return True
+        self.row = min(self.row, len(rows) - 1)
+        if inp.pressed("up"):
+            if self.row > 0:
+                self.row -= 1
+            elif self.layout.wide:
+                self.zone = "grid"
+                names = self._themes()
+                at = names.index(self.choices()["theme"]) \
+                    if self.choices()["theme"] in names else 0
+                self.card = at
+                self._show_card()
+        elif inp.pressed("down"):
+            self.row = min(len(rows) - 1, self.row + 1)
+        elif inp.pressed("left"):
+            self._step(rows[self.row], -1)
+        elif inp.pressed("right"):
+            self._step(rows[self.row], 1)
+        elif inp.pressed("a"):
+            self._activate(rows[self.row])
+        else:
+            return True
+        self._damage.all()
         return True
 
+    def _picker_input(self, inp):
+        n = self._pick_count()
+        cols = self._pick_cols()
+        i = self.cur
+        if inp.pressed("b"):
+            self._undo()
+            return True
+        if inp.pressed("a"):
+            self._keep()
+            return True
+        if inp.pressed("left"):
+            i = (i - 1) % n
+        elif inp.pressed("right"):
+            i = (i + 1) % n
+        elif inp.pressed("up"):
+            i = i - cols if i >= cols else i
+        elif inp.pressed("down"):
+            i = i + cols if i + cols < n else i
+        else:
+            return True
+        if i != self.cur:
+            self._try(i)
+        return True
+
+    def _show_card(self):
+        r = self.card // self.layout.cols
+        if r < self.top:
+            self.top = r
+        elif r >= self.top + self.layout.grid_rows:
+            self.top = r - self.layout.grid_rows + 1
+
+    def handle_pointer(self, px, py, click):
+        if not click:
+            return True
+        self._refresh()
+        if self.pick is not None:
+            rects = self._pick_rects()
+            for i, r in enumerate(rects):
+                if r is not None and _in(px, py, r):
+                    self._keep(i)
+                    return True
+            if not _in(px, py, self._pick_frame()):
+                self._keep()                   # a tap outside: closed, kept
+            return True
+        lay = self.layout
+        if lay.wide:
+            for i in range(len(self._themes())):
+                r = lay.card_rect(i, self.top)
+                if r is not None and _in(px, py, r):
+                    self.zone, self.card = "grid", i
+                    self._theme.set(self._themes()[i])
+                    self._acted()
+                    return True
+        for key, r in self._row_rects():
+            if not _in(px, py, r):
+                continue
+            self.zone = "rows"
+            self.row = self._rows().index(key)
+            if key == "mode":
+                for v, cr in self._mode_chips(r):
+                    if _in(px, py, cr):
+                        if v != self.choices()["variant"]:
+                            self._theme.set_variant(v)
+                        self._acted()
+                        return True
+                self._acted()
+                return True
+            if key in ("frame", "font", "chrome") and px < self._cycle_x(r) + 8 * lay.fs:
+                self._step(key, -1)
+                return True
+            self._activate(key)
+            return True
+        return True
+
+    # -- geometry --------------------------------------------------------------
+
+    def _row_h(self, key):
+        return self.layout.theme_h if key == "theme" else self.layout.row_h
+
+    def _row_rects(self):
+        """(key, rect) of every row on screen, after the scroll."""
+        lay = self.layout
+        out = []
+        y = lay.rows_y - self.scroll
+        x, w = lay.cx + lay.pad, lay.cw - 2 * lay.pad
+        for key in self._rows():
+            h = self._row_h(key)
+            if y + h > lay.rows_y and y < lay.strip_y:
+                out.append((key, (x, y, w, h)))
+            y += h
+        return out
+
+    def _scroll_to(self):
+        """Keep the focused row inside the rows' band."""
+        lay = self.layout
+        y = 0
+        for i, key in enumerate(self._rows()):
+            h = self._row_h(key)
+            if i == self.row:
+                if y < self.scroll:
+                    self.scroll = y
+                elif y + h > self.scroll + lay.rows_h:
+                    self.scroll = y + h - lay.rows_h
+                return
+            y += h
+
+    def _mode_chips(self, r):
+        fs = self.layout.fs
+        x, y, w, h = r
+        cw, chh = 36 * fs, 13 * fs
+        cx = x + w - 8 * fs - 2 * cw - 4 * fs
+        cy = y + (h - chh) // 2
+        return (("dark", (cx, cy, cw, chh)), ("light", (cx + cw + 4 * fs, cy, cw, chh)))
+
+    def _cycle_x(self, r):
+        """The left edge of a stepped row's `< value >`."""
+        return r[0] + r[2] - 8 * self.layout.fs - self._cycle_w(r)
+
+    def _cycle_w(self, r):
+        return min(92 * self.layout.fs, r[2] // 3)
+
+    def _grid_cols(self):
+        lay = self.layout
+        if self._console():
+            return max(1, (lay.cw - 8 * lay.fs) // (98 * lay.fs + 6 * lay.fs))
+        return 3
+
+    def _console(self):
+        """A picker is a page (console mode), not a popover (desktop mode)."""
+        return not self.layout.windowed
+
+    def _pick_size(self):
+        """(w, h) of the open picker's popover."""
+        fs = self.layout.fs
+        if self.pick == "accent":
+            return 296 * fs, 168 * fs
+        if self.pick == "tint":
+            return 326 * fs, 196 * fs
+        if self.pick == "theme":
+            return 3 * 98 * fs + 4 * 6 * fs, 3 * 64 * fs + 30 * fs
+        rows = (len(self._walls()) + 2) // 3
+        return 3 * 100 * fs + 16 * fs, rows * 76 * fs + 36 * fs
+
+    def _pick_frame(self):
+        """The picker's rect: the content (less the strip) as a page, else
+        a popover under its row, above it when it does not fit below,
+        clamped inside the page."""
+        lay = self.layout
+        if self._console():
+            return (lay.cx, lay.cy, lay.cw, lay.strip_y - lay.cy)
+        w, h = self._pick_size()
+        w, h = min(w, lay.cw - 2 * lay.pad), min(h, lay.strip_y - lay.cy)
+        anchor = None
+        for key, r in self._row_rects():
+            if key == self.pick:
+                anchor = r
+        if anchor is None:
+            anchor = (lay.cx, lay.rows_y, lay.cw, 0)
+        x = anchor[0] + anchor[2] - w
+        y = anchor[1] + anchor[3]
+        if y + h > lay.strip_y:
+            y = max(lay.cy, anchor[1] - h)
+        return (max(lay.cx, x), max(lay.cy, min(y, lay.strip_y - h)), w, h)
+
+    def _pick_body(self):
+        """The picker's inner rect, under its title (a popover) or its hint
+        line (a page)."""
+        fs = self.layout.fs
+        x, y, w, h = self._pick_frame()
+        top = 12 * fs if self._console() else 13 * fs
+        return (x + 8 * fs, y + top + 6 * fs, w - 16 * fs, h - top - 12 * fs)
+
+    def _pick_rects(self):
+        """Each picker item's rect, None for one scrolled out of view."""
+        fs = self.layout.fs
+        bx, by, bw, bh = self._pick_body()
+        n = self._pick_count()
+        cols = self._pick_cols()
+        if self.pick == "accent":
+            gap = 8 * fs
+            s = min(28 * fs, (bw - 7 * gap) // 8)
+            return [(bx + (i % 8) * (s + gap), by + (i // 8) * (s + 16 * fs), s, s)
+                    for i in range(n)]
+        if self.pick == "tint":
+            gap = 8 * fs
+            tw = (bw - 2 * gap) // 3
+            th = min(40 * fs, (bh - 3 * 14 * fs) // 3 - gap)
+            return [(bx + (i % 3) * (tw + gap), by + (i // 3) * (th + 14 * fs + gap),
+                     tw, th) for i in range(n)]
+        if self.pick == "theme":
+            gap = 6 * fs
+            cw = (bw - (cols - 1) * gap) // cols
+            ch = min(58 * fs, cw * 3 // 5)
+            per = max(1, (bh + gap) // (ch + gap))
+            first = max(0, self.cur // cols - per + 1) * cols
+            out = []
+            for i in range(n):
+                r = (i - first) // cols
+                out.append(None if i < first or r >= per else
+                           (bx + (i % cols) * (cw + gap), by + r * (ch + gap), cw, ch))
+            return out
+        gap = 10 * fs
+        tw = (bw - 2 * gap) // 3
+        th = tw * 9 // 16
+        cell = th + 22 * fs
+        per = max(1, (bh + 4 * fs) // cell)
+        first = max(0, self.cur // 3 - per + 1) * 3
+        out = []
+        for i in range(n):
+            r = (i - first) // 3
+            out.append(None if i < first or r >= per else
+                       (bx + (i % 3) * (tw + gap), by + r * cell, tw, th))
+        return out
+
+    # -- drawing ---------------------------------------------------------------
+
     def _button(self, cv, label, r, on=False):
-        # One shared implementation now (ui.chip) -- pixel-identical delegate.
         _ui.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs)
 
-    # -- drawing --------------------------------------------------------------
+    def _text(self, cv, s, x, y, h, c):
+        """`s` at x, centred in a band of height `h` from y."""
+        fs = self.layout.fs
+        cv.print(s, x, y + (h - _ui.font("ui")[3] * fs) // 2, c, 1)
+
+    def _right(self, cv, s, rx, y, h, c):
+        """`s` ending at rx; answers its left edge."""
+        x = rx - _ui.print_width(s) * self.layout.fs
+        self._text(cv, s, x, y, h, c)
+        return x
 
     def draw(self, dt):
+        self._dt = dt
+        self._refresh()
         cv = self._surf.canvas()
         lay = self.layout
         th = self._theme.colors()
-        # A flat panel field -- the wallpaper renders ONLY inside the monitor's
-        # screen (owner call: never doubled as a full-bleed backdrop here).
+        ch = self._ch
+        fs = lay.fs
+        if self.pick is not None and self._console():
+            self._draw_page(cv, th, ch)
+            return
         cv.rect(lay.cx, lay.cy, lay.cw, lay.ch, th["panel"])
-        cv.rect(0, lay.cy, lay.w, lay.tabs_h, 48)
-        for i, r in enumerate(lay.tabs):
-            self._button(cv, ("IMAGES", "CARTS", "THEMES")[i], r,
-                         self.mode == self.MODES[i])
+        if lay.wide:
+            self._text(cv, "THEME", lay.cx + 10 * fs, lay.cy + 6 * fs, 8 * fs, th["ink"])
+            names = self._themes()
+            for i, name in enumerate(names):
+                r = lay.card_rect(i, self.top)
+                if r is not None:
+                    self._draw_card(cv, th, r, name, name == ch["theme"],
+                                    self.zone == "grid" and i == self.card)
+            more = len(names) - (self.top + lay.grid_rows) * lay.cols
+            if more > 0:
+                self._right(cv, "%d MORE" % more, lay.cx + lay.cw - 10 * fs,
+                            lay.cy + 6 * fs, 8 * fs, th["ink_dim"])
+        self._scroll_to()
+        cv.clip(lay.cx, lay.rows_y, lay.cw, lay.rows_h)
+        for key, r in self._row_rects():
+            self._draw_row(cv, th, ch, key, r,
+                           self.zone == "rows" and self._rows()[self.row] == key)
+        cv.clip()
+        self._draw_strip(cv, th, ch)
+        if self.pick is not None:
+            self._draw_popover(cv, th, ch)
 
-        if self.mode == "themes":
-            fs = lay.fs
-            fx, fy, fw, fh = lay.field
-            # The theme's dark/light variant over the preview: it restyles
-            # what the mock windows below are made of, so it belongs on the
-            # same tab as the theme.
-            band = 17 * fs
-            for v, r in self._variant_chip_rects():
-                self._button(cv, v.upper(), r, self._theme.variant() == v)
-            self._draw_theme_preview(cv, (fx, fy + band, fw, max(1, fh - band)))
-        elif lay.screen is not None:
-            self._draw_monitor(cv, dt)
-
-        # A quiet preview caption along the pane's bottom.
-        px, py, pw, ph = lay.preview
-        label = self.status[:max(1, pw // (8 * lay.fs) - 2)]
-        cv.rect(px, py + ph - 18 * lay.fs, pw, 18 * lay.fs, self.names["black"])
-        cv.print(label, px + 8 * lay.fs, py + ph - 13 * lay.fs,
-                 self.names["white"], 1)
-
-        cx, cy, cw, ch = lay.catalog
-        cv.rect(cx, cy, cw, ch, th["panel"])
-        cv.rect(cx + cw - 2 * lay.fs, cy, 2 * lay.fs, ch, th["edge"])
-        items = self._items()
-        cards = lay.cards(len(items))
-        for i, r in enumerate(cards):
-            if self.mode == "themes":
-                self._draw_theme_card(cv, r, items[i], i == self.sel)
-            else:
-                self._draw_wall_card(cv, r, items[i], i == self.sel,
-                                     self.mode == "images")
-
-    def _draw_monitor(self, cv, dt):
-        """The Background-tab nod: a little monitor whose 4:3 screen shows the
-        FULL wallpaper -- a cart frame fills it edge to edge, the theme's
-        picture letterboxes to its own aspect, NONE floods it."""
-        lay = self.layout
-        n = self.names
-        fs = lay.fs
-        sx, sy, sw, sh = lay.screen
-        bz = lay.bezel
-        mx, my = sx - bz, sy - bz
-        mw, mh = sw + 2 * bz, sh + 2 * bz
-        cv.rect(mx, my, mw, mh, n["light_grey"])              # the case
-        cv.rectb(mx, my, mw, mh, n["dark_grey"])
-        cv.rectb(sx - 1, sy - 1, sw + 2, sh + 2, n["dark_grey"])  # screen inset
-        self._wall.preview(cv, lay.screen, dt)
-        # power LED on the bezel's bottom-right
-        cv.rect(mx + mw - 5 * fs, my + mh - bz + bz // 2 - fs, 2 * fs, 2 * fs,
-                n["green"])
-        # stand: neck + base
-        neck_w = max(4 * fs, mw // 6)
-        base_w = max(neck_w, mw // 2)
-        neck_h = lay.stand_h // 2
-        cv.rect(mx + (mw - neck_w) // 2, my + mh, neck_w, neck_h, n["light_grey"])
-        cv.rect(mx + (mw - base_w) // 2, my + mh + neck_h, base_w,
-                lay.stand_h - neck_h, n["light_grey"])
-        cv.rect(mx + (mw - base_w) // 2, my + mh + lay.stand_h - fs, base_w, fs,
-                n["dark_grey"])
-
-    def _draw_theme_preview(self, cv, field):
-        """The Appearance-tab nod: how moybyte windows will look in the chosen
-        theme -- an inactive window behind, the active one in front, over the
-        theme's desk field. Token roles mirror the windowed WM's strip drawing
-        (focused = title/title_ink, unfocused = panel + light-grey ink)."""
-        th = self._theme.colors()
-        n = self.names
-        fs = self.layout.fs
-        x, y, w, h = field
-        # The desk field behind the mock windows: the theme's desktop token, but
-        # when that resolves to the window panel tone (most themes alias it),
-        # drop to "dim" so the windows actually stand out against the desk.
-        bg = th.get("desktop", th["panel"])
-        if bg == th["panel"]:
-            bg = th["dim"]
-        cv.rect(x, y, w, h, bg)
-        cv.rectb(x, y, w, h, th["edge"])
-        strip = 10 * fs
-        gap_x, gap_y = w // 12, h // 10
-        ww = w - w // 3
-        wh = h - h // 3
-        # inactive window (back, up-left)
-        ix, iy = x + gap_x, y + gap_y
-        cv.rect(ix, iy, ww, wh, th["panel"])
-        cv.rectb(ix, iy, ww, wh, th["dim"])
-        cv.rect(ix + 1, iy + 1, ww - 2, strip, th["panel"])
-        cv.rect(ix + 1, iy + strip, ww - 2, 1, th["dim"])
-        if ww >= 70 * fs:
-            cv.print("WINDOW", ix + 3 * fs, iy + 2 * fs, th["ink_dim"], 1)
-        # active window (front, down-right)
-        ax, ay = x + w - gap_x - ww, y + h - gap_y - wh
-        cv.rect(ax, ay, ww, wh, th["panel"])
-        cv.rectb(ax, ay, ww, wh, th["edge"])
-        cv.rect(ax + 1, ay + 1, ww - 2, strip, th["title"])
-        if ww >= 70 * fs:
-            cv.print("MOYBYTE", ax + 3 * fs, ay + 2 * fs, th["title_ink"], 1)
-        _ui.glyph(cv, "close", (ax + ww - strip, ay + 1, strip - 1, strip - 1),
-                  th["title_ink"])
-        # body: a text line, a selected row, an accent button
-        body_y = ay + strip + 2 * fs
-        body_h = wh - strip - 3 * fs
-        if body_h >= 22 * fs:
-            cv.print("AA", ax + 4 * fs, body_y + fs, th["ink"], 1)
-            cv.rect(ax + 3 * fs, body_y + 10 * fs, ww - 6 * fs, 9 * fs,
-                    th["hilite"])
-            cv.print("PICK", ax + 5 * fs, body_y + 11 * fs, th["ink"], 1)
-        bw_, bh_ = 26 * fs, 11 * fs
-        if body_h >= 36 * fs:
-            cv.rect(ax + ww - bw_ - 4 * fs, ay + wh - bh_ - 3 * fs, bw_, bh_,
-                    th["accent"])
-            cv.print("OK", ax + ww - bw_ + 1 * fs, ay + wh - bh_ - 1 * fs,
-                     n["black"], 1)
-
-    def _draw_wall_card(self, cv, r, cart, selected, image_kind):
-        # A grid CELL whose picture is a wallpaper preview and whose caption is
-        # a filled band -- ui.cell's own second example. The picture rect is the
-        # toolkit's (ui.cell_art_rect, the pure half); the frame below is NOT,
-        # and deliberately: this card's caption baseline is the frozen literal
-        # `y + h - 13*fs`, which sits one pixel above the band's true centre at
-        # font scale 2 and 3, and ui.cell -- unlike ui.row -- exposes no
-        # `text_dy` to say so. Converting it would move the Appearance app in
-        # two golden configs for no gain. See the report / ui.py's `cell`.
-        x, y, w, h = r
-        th = self._theme.colors()
+    def _draw_strip(self, cv, th, ch):
         lay = self.layout
         fs = lay.fs
-        pad = lay.CARD_PAD * fs
-        ix, iy, iw, _ih = _ui.cell_art_rect(r, fs, pad, lay.LABEL_H * fs)
-        ih = max(12, _ih)
-        title = self._wall_title(cart)
-        if cart is None:                       # NONE: the theme's desk fill
-            cv.rect(ix, iy, iw, ih, th["desktop"])
-        elif image_kind:
-            preview = self._wall.thumbnail(iw, ih)
-            if preview is not None:
-                cv.spr(preview, ix, iy)
-            else:
-                cv.rect(ix, iy, iw, ih, self.names["light_grey"])
-                cv.circ(ix + iw * 3 // 4, iy + ih // 3,
-                        max(2, min(iw, ih) // 8), self.names["yellow"])
+        y, h = lay.strip_y, lay.strip_h
+        cv.rect(lay.cx, y, lay.cw, h, th["bar"])
+        cv.rect(lay.cx, y, lay.cw, fs, th["bar_edge"])
+        name = ch["theme"]
+        if name == "custom":
+            left = "custom - saved as you go"
+        elif ch["store"]:
+            left = name + " - store"
         else:
-            self._cart_scene(cv, ix, iy, iw, ih, title)
-        cv.rect(x, y + h - lay.LABEL_H * fs, w, lay.LABEL_H * fs,
-                th["accent"] if selected else th["title"])
-        cv.print(title[:max(1, w // (8 * fs) - 2)], x + 5 * fs, y + h - 13 * fs,
-                 self.names["black"] if selected else th["title_ink"], 1)
-        cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+            left = name + " - built in"
+        keys = ROW_KEYS
+        if self.pick == "theme":
+            keys = GRID_KEYS
+        elif self.pick is not None:
+            keys = PICK_KEYS
+        kx = lay.cx + lay.cw - 5 * fs - _ui.print_width(keys) * fs
+        lx = lay.cx + 5 * fs
+        if lx + _ui.print_width(left) * fs > kx - 8 * fs:
+            keys = ""
+        self._text(cv, left, lx, y + fs, h - fs, th["chrome_ink"])
+        if keys:
+            self._text(cv, keys, kx, y + fs, h - fs, th["chrome_ink_dim"])
+
+    def _draw_row(self, cv, th, ch, key, r, focused):
+        lay = self.layout
+        fs = lay.fs
+        x, y, w, h = r
+        if focused:
+            cv.rect(x, y, w, h, th["surface_alt"])
+            cv.rect(x, y, 2 * fs, h, th["focus"])
+        cv.rect(x, y + h - fs, w, fs, th["shade_lo"])
+        self._text(cv, LABELS[key], x + 8 * fs, y, h, th["ink"])
+        rx = x + w - 8 * fs
+        if key == "mode":
+            for v, cr in self._mode_chips(r):
+                self._button(cv, v.upper(), cr, ch["variant"] == v)
+            return
+        if key in ("frame", "font", "chrome"):
+            cw = self._cycle_w(r)
+            cx = rx - cw
+            ink = th["accent"] if focused else th["ink_dim"]
+            self._text(cv, "<", cx, y, h, ink)
+            self._right(cv, ">", rx, y, h, ink)
+            if key == "frame":
+                val = FRAME_NAMES.get(ch["frame"], str(ch["frame"]).upper())
+            elif key == "font":
+                val = FONT_NAMES.get(ch["font"], "THEME'S OWN")
+            else:
+                val = "%dx" % ch["chrome"]
+            vw = _ui.print_width(val) * fs
+            self._text(cv, val, cx + (cw - vw) // 2, y, h, th["ink"])
+            if key == "frame":
+                sw, sh = 38 * fs, h - 6 * fs
+                _ui.frame(cv, th, (cx - sw - 8 * fs, y + 3 * fs, sw, sh - 2 * fs),
+                          5 * fs, "", True, False, 1)
+            elif key == "font":
+                self._right(cv, "Aa", cx - 8 * fs, y, h, th["ink_dim"])
+            return
+        self._right(cv, ">", rx, y, h, th["ink_dim"])
+        vx = rx - 8 * fs
+        th_ = h - 8 * fs
+        if key == "accent":
+            at, a = self._accent_shown(ch, th)
+            name = self._accents[at][0].upper() if at >= 0 else "THEME'S OWN"
+            nx = self._right(cv, name, vx, y, h, th["ink"])
+            s = th_
+            cv.rect(nx - s - 6 * fs, y + 4 * fs, s, s, a)
+            cv.rectb(nx - s - 6 * fs, y + 4 * fs, s, s, th["shade_dark"])
+        elif key == "tint":
+            name = ch["tint"].upper() if ch["tint"] else "NONE"
+            nx = self._right(cv, name, vx, y, h, th["ink"])
+            self._draw_ramp(cv, th, (nx - 34 * fs, y + 4 * fs, 28 * fs, th_),
+                            self._ramp(ch["tint"]))
+        elif key == "wallpaper":
+            nx = self._right(cv, self._wall_title(ch), vx, y, h, th["ink"])
+            # The wallpaper shown, as the backdrop's own still (a cart's
+            # computed preview, the picture fitted, the fill).
+            tw = th_ * 4 // 3
+            r = (nx - tw - 6 * fs, y + 4 * fs, tw, th_)
+            self._wall.preview(cv, r, self._dt)
+            cv.rectb(r[0], r[1], r[2], r[3], th["shade_dark"])
+        elif key == "file":
+            self._right(cv, "theme.json", vx, y, h, th["ink_dim"])
+        elif key == "theme":
+            name = ch["theme"]
+            nx = self._right(cv, name, vx, y, h, th["ink"])
+            if ch["from"]:
+                nx = self._right(cv, "from " + ch["from"], nx - 8 * fs, y, h,
+                                 th["ink_dim"])
+            self._draw_card(cv, th, (x + 70 * fs, y + 3 * fs, 52 * fs, h - 6 * fs),
+                            name, False, False, label=False)
+
+    def _ramp(self, name):
+        i = self._tint_at(name)
+        return self._tints[i][1] if i >= 0 else None
+
+    def _draw_ramp(self, cv, th, r, ramp):
+        """A tint's ramp as stripes; None (NONE) the theme's own field
+        colours, crossed."""
+        x, y, w, h = r
+        cols = ramp if ramp is not None else (
+            th["desktop"], th["panel"], th["surface_alt"], th["dim"])
+        n = len(cols)
+        for i, c in enumerate(cols):
+            x0 = x + i * w // n
+            cv.rect(x0, y, x + (i + 1) * w // n - x0, h, c)
+        if ramp is None:
+            cv.line(x, y + h - 1, x + w - 1, y, th["ink_dim"])
+        cv.rectb(x, y, w, h, th["shade_dark"])
+
+    def _draw_wall(self, cv, th, r, item):
+        x, y, w, h = r
+        kind = item[2]
+        if kind == "none":
+            cv.rect(x, y, w, h, th["desktop"])
+        elif kind == "art":
+            pic = self._wall.thumbnail(w, h)
+            if pic is not None:
+                cv.spr(pic, x, y)
+            else:
+                self._picture(cv, r)
+        elif kind == "theirs":
+            self._picture(cv, r)
+        else:
+            self._cart_scene(cv, x, y, w, h, item[3])
+        cv.rectb(x, y, w, h, th["shade_dark"])
+
+    def _picture(self, cv, r):
+        x, y, w, h = r
+        n = self.names
+        cv.rect(x, y, w, h, n["light_grey"])
+        cv.circ(x + w * 3 // 4, y + h // 3, max(2, min(w, h) // 8), n["yellow"])
+
+    def _draw_card(self, cv, th, r, name, selected, focused, label=True):
+        """A theme card: a little desk in theme `name`'s colours, its bar,
+        an inactive window behind an active one; its name in a band, the
+        page's accent when it is the theme in use, and a tag for `custom`
+        and a store package."""
+        tok = theme_colors(name, self.choices()["variant"])
+        fs = self.layout.fs
+        x, y, w, h = r
+        band = 9 * fs if label else 0
+        cv.rect(x, y, w, h, tok["desktop"])
+        iw, ih = w - 2 * fs, h - 2 * fs - band
+        cv.rect(x + fs, y + fs, iw, 3 * fs, tok["bar"])
+        wx, wy, ww, wh = x + 4 * fs, y + 7 * fs, iw * 5 // 9, ih - 11 * fs
+        if wh > 4 * fs:
+            cv.rect(wx, wy, ww, wh, tok["panel"])
+            cv.rectb(wx, wy, ww, wh, tok["shade_dark"])
+            cv.rect(wx + fs, wy + fs, ww - 2 * fs, 3 * fs, tok["title_inactive"])
+            ax, ay = x + iw * 3 // 8, y + 10 * fs
+            cv.rect(ax + fs, ay + fs, ww, wh, 0)
+            cv.rect(ax, ay, ww, wh, tok["surface"])
+            cv.rectb(ax, ay, ww, wh, tok["shade_dark"])
+            cv.rect(ax + fs, ay + fs, ww - 2 * fs, 3 * fs, tok["title"])
+            cv.rect(ax + 3 * fs, ay + 6 * fs, ww // 3, 3 * fs, tok["accent"])
+            if wh > 14 * fs:
+                cv.rect(ax + 3 * fs, ay + 11 * fs, ww - 6 * fs, fs, tok["ink_dim"])
+        if label:
+            ly = y + h - band - fs
+            cv.rect(x + fs, ly, w - 2 * fs, band, th["accent"] if selected else th["bar"])
+            ink = 0 if selected else th["chrome_ink"]
+            cv.print(_ui.print_fit(name, (w - 8 * fs) // fs), x + 4 * fs,
+                     ly + (band - _ui.font("ui")[3] * fs) // 2, ink, 1)
+            tag = "CUSTOM" if name == "custom" else (
+                "STORE" if name in self._stores() else None)
+            if tag and w >= 80 * fs:
+                tw = (_ui.print_width(tag) + 4) * fs
+                cv.rect(x + w - fs - tw, ly, tw, band,
+                        th["play"] if tag == "CUSTOM" else th["dim"])
+                cv.print(tag, x + w - fs - tw + 2 * fs,
+                         ly + (band - _ui.font("ui")[3] * fs) // 2,
+                         0 if tag == "CUSTOM" else th["chrome_ink"], 1)
+        edge = th["accent"] if selected else th["shade_dark"]
+        cv.rectb(x, y, w, h, edge)
+        if focused:
+            _ui.focus_ring(cv, th, r, fs)
+
+    def _stores(self):
+        """The THEME grid's installed packages: every name that is no seed
+        and not `custom`."""
+        return [n for n in theme_names() if n not in THEME_NAMES and n != "custom"]
+
+    # -- pickers ---------------------------------------------------------------
+
+    def _draw_popover(self, cv, th, ch):
+        fs = self.layout.fs
+        x, y, w, h = self._pick_frame()
+        cv.rect(x + 2 * fs, y + 2 * fs, w, h, 0)
+        _ui.panel(cv, th, (x, y, w, h), LABELS[self.pick], fs)
+        self._draw_items(cv, th, ch)
+
+    def _draw_page(self, cv, th, ch):
+        lay = self.layout
+        fs = lay.fs
+        cv.rect(lay.cx, lay.cy, lay.cw, lay.ch, th["panel"])
+        hint = HINTS[self.pick]
+        self._text(cv, LABELS[self.pick] + ": " + hint, lay.cx + 8 * fs,
+                   lay.cy + 4 * fs, 8 * fs, th["ink_dim"])
+        self._draw_items(cv, th, ch)
+        self._draw_strip(cv, th, ch)
+
+    def _draw_items(self, cv, th, ch):
+        fs = self.layout.fs
+        rects = self._pick_rects()
+        for i, r in enumerate(rects):
+            if r is None:
+                continue
+            x, y, w, h = r
+            on = i == self.cur
+            if self.pick == "accent":
+                cv.rect(x, y, w, h, self._accents[i][1])
+                cv.rectb(x, y, w, h, th["shade_dark"])
+                if self._accents[i][1] == th["accent"]:
+                    cv.rect(x + w // 2 - fs, y + h // 2 - fs, 2 * fs, 2 * fs, 0)
+                if on:
+                    _ui.focus_ring(cv, th, r, fs)
+                    name = self._accents[i][0].upper()
+                    nw = _ui.print_width(name) * fs
+                    cv.print(name, x + (w - nw) // 2, y + h + 4 * fs, th["ink"], 1)
+                continue
+            if self.pick == "theme":
+                names = self._themes()
+                self._draw_card(cv, th, r, names[i], names[i] == ch["theme"], on)
+                continue
+            if self.pick == "tint":
+                ramp = None if i == 0 else self._tints[i - 1][1]
+                name = "NONE" if i == 0 else self._tints[i - 1][0].upper()
+                self._draw_ramp(cv, th, r, ramp)
+                kept = (ch["tint"] is None) if i == 0 else \
+                    (ch["tint"] == self._tints[i - 1][0])
+            else:
+                item = self._walls()[i]
+                self._draw_wall(cv, th, r, item)
+                name = item[1]
+                kept = i == self._wall_at(ch)
+            cv.print(_ui.print_fit(name, w // fs - 10), x, y + h + 4 * fs,
+                     th["ink"] if on else th["ink_dim"], 1)
+            if kept:
+                self._right(cv, "*", x + w, y + h + 2 * fs, 10 * fs, th["ink"])
+            if on:
+                _ui.focus_ring(cv, th, r, fs)
 
     def _cart_scene(self, cv, x, y, w, h, title):
-        # Distinct miniature visual identities; the large area above is the real preview.
+        # Distinct miniature visual identities of the wallpaper carts.
+        fs = self.layout.fs
         if "Ocean" in title:
             cv.rect(x, y, w, h, self.names["blue"])
             for row in range(3):
-                cv.line(x, y + h // 2 + row * 5 * self.layout.fs,
-                        x + w - 1, y + h // 2 + row * 5 * self.layout.fs,
-                        21 + row)
+                cv.line(x, y + h // 2 + row * 5 * fs,
+                        x + w - 1, y + h // 2 + row * 5 * fs, 21 + row)
             cv.circ(x + w * 3 // 4, y + h // 3, max(2, h // 10), 7)
         elif "Sakura" in title:
             cv.rect(x, y, w, h, 22)
@@ -484,55 +1021,20 @@ class AppearanceAppLayer:
             cv.circ(x + w * 2 // 3, y + h // 3, max(2, h // 6), self.names["peach"])
         elif "Machine" in title:
             cv.rect(x, y, w, h, self.names["black"])
-            step = max(4 * self.layout.fs, min(w, h) // 6)
+            step = max(4 * fs, min(w, h) // 6)
             for gy in range(y + step // 2, y + h, step):
                 for gx in range(x + step // 2, x + w, step):
-                    cv.rect(gx, gy, self.layout.fs, self.layout.fs,
-                            self.names["dark_blue"])
-            cv.line(x + w * 2 // 3, y, x + w - 1, y + h // 3,
-                    self.names["indigo"])
+                    cv.rect(gx, gy, fs, fs, self.names["dark_blue"])
+            cv.line(x + w * 2 // 3, y, x + w - 1, y + h // 3, self.names["indigo"])
             cv.line(x + w - 1, y + h // 3, x + w * 2 // 3, y + h - 1,
                     self.names["indigo"])
-            cv.line(x + 3 * self.layout.fs, y + 3 * self.layout.fs,
-                    x + 9 * self.layout.fs, y + 3 * self.layout.fs,
-                    self.names["yellow"])
-            cv.line(x + 6 * self.layout.fs, y,
-                    x + 6 * self.layout.fs, y + 6 * self.layout.fs,
-                    self.names["yellow"])
         elif "Space" in title or "Night" in title:
             cv.rect(x, y, w, h, 60)
             for i in range(12):
                 cv.rect(x + (i * 37) % max(1, w), y + (i * 19) % max(1, h),
-                        self.layout.fs, self.layout.fs, 7 if i % 3 else 10)
+                        fs, fs, 7 if i % 3 else 10)
             cv.circ(x + w * 3 // 4, y + h // 3, max(3, h // 6), 10)
         else:
             cv.rect(x, y, w, h, self._theme.colors()["hilite"])
             cv.rect(x, y + h * 2 // 3, w, h // 3, self.names["dark_green"])
             cv.circ(x + w * 3 // 4, y + h // 3, max(2, h // 8), self.names["yellow"])
-
-    def _draw_theme_card(self, cv, r, item, selected):
-        # Cards preview the theme in the ACTIVE variant, so flipping DARK/LIGHT
-        # repaints the whole catalog in that presentation.
-        name = item
-        tok = theme_colors(name, self._theme.variant())
-        x, y, w, h = r
-        fs = self.layout.fs
-        # NOT ui.cell, and the reason is draw ORDER, not colour: this card's
-        # own caption is placed at `y + h - 14*fs`, which at font scale 3 lands
-        # ABOVE the card (h can be 35px there) -- and the frozen pixels depend
-        # on the border being painted AFTER it, clipping the escaped glyph row.
-        # ui.cell's order is fixed field -> caption -> edge -> art, so it cannot
-        # put the border on top of the picture. Measured: converting this moved
-        # 144 of 720 A/B renders, all at fs=3. See the report / ui.py's `cell`.
-        cv.rect(x, y, w, h, tok["panel"])
-        compact = h < 46 * fs
-        band_h = max(6 * fs, h - 18 * fs) if compact else 16 * fs
-        cv.rect(x + 3 * fs, y + 3 * fs, w - 6 * fs, band_h, tok["title"])
-        if compact:
-            cv.rect(x + w - 17 * fs, y + 6 * fs, 10 * fs,
-                    max(3 * fs, band_h - 6 * fs), tok["accent"])
-        else:
-            cv.rect(x + 8 * fs, y + 25 * fs, w * 3 // 5, 12 * fs, tok["hilite"])
-            cv.rect(x + w - 25 * fs, y + 25 * fs, 17 * fs, 12 * fs, tok["accent"])
-        cv.print(name.upper(), x + 6 * fs, y + h - 14 * fs, tok["ink"], 1)
-        cv.rectb(x, y, w, h, tok["accent"] if selected else tok["dim"])

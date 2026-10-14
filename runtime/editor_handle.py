@@ -222,6 +222,10 @@ class EditorHandle:
         self._geom = (0, 0, CELL, LH, 1)   # x, y, cell, lh, scale
         self._drag = None            # last pointer cell-origin of a live drag
         self._caret_at = None        # the caret the last draw scrolled to see
+        # The watch's `file_gen` this buffer last matched: a change made
+        # elsewhere (the Appearance rows) reloads a buffer with no edits; one
+        # with edits keeps them, and its save is the last write.
+        self._wgen = watch.file_gen if watch is not None else None
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -452,16 +456,21 @@ class EditorHandle:
         if not good and soft:
             self._edit_ms = _ticks_ms()   # re-check on the next window, not next frame
             return (False, self._badge)
-        _, err = self._files.save(self.kind, self._name,
-                                  self._files.encode_text(out))
+        if self._watch is not None:
+            err = self._watch.file_write(out)
+        else:
+            _, err = self._files.save(self.kind, self._name,
+                                      self._files.encode_text(out))
         if err is not None:
             return (False, str(err))
         self.ed.dirty = False
         self._unsaved = False
         self._edit_ms = None
         self._commit_history()
-        if good and self._watch is not None:
-            self._watch.file_saved(out)
+        if self._watch is not None:
+            self._wgen = self._watch.file_gen   # the last write is the buffer's
+            if good:
+                self._watch.file_saved(out)
         return (True, self._badge)
 
     def close(self):
@@ -501,6 +510,7 @@ class EditorHandle:
         self._geom = (int(x), int(y), cell, lh, scale)
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
+        self._follow_watch()
         self._autosave()
         self._keep_caret(cols, rows)
         # Clipped to the rect the skin gave: a long line, a tall embed and the
@@ -619,6 +629,22 @@ class EditorHandle:
         # An EDIT always re-shows the caret, wherever the reader had panned to:
         # the text just changed under it, and an undo can drop lines out from
         # under the view entirely.
+        self._caret_at = None
+
+    def _follow_watch(self):
+        """Reload the watched document when it moved elsewhere and this
+        buffer has no edits of its own (a new undo history with it)."""
+        w = self._watch
+        if w is None or w.file_gen == self._wgen or self.dirty():
+            return
+        self._wgen = w.file_gen
+        body = w.file_text()
+        if body is None:
+            return
+        self.ed.set_text(_modes.pretty(self._mode, body)[:MAX_CHARS])
+        self.history = History(self.ed, TextEditCodec())
+        self._memo = {}
+        self._memo_old = {}
         self._caret_at = None
 
     def _autosave(self):

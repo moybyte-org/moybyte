@@ -7,7 +7,7 @@
 #   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
 #   bench_home       --home: the home's carousel scenarios (step 7b)
 #   idle_edit        --edit: an in-place theme re-install on an idle screen
-#   edit_thrash      --edit: a held key on ACCENT through the change verb
+#   edit_thrash      --edit: a held key on the Appearance page's ACCENT row
 #   store_switch     --store: a switch to a store theme package, and its boot delta
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
@@ -46,10 +46,11 @@ phase 6 step 1; also the default run's, after desk idle): a package over the
 live theme is installed and picked, then re-installed under its own name with
 one role changed on the idle screen -- one repaint, then idle zero. An image
 without `install_theme` re-applies its live theme under the same name instead.
-Then `edit thrash` (phase 6 step 5): a held key on ACCENT through the verb,
-`ws.look.change("accent", ...)` once a frame for three seconds from the live
-theme, so the first change makes `custom`: the verb's ms and the painted
-frames per change, then the frames after release; it counts the store's
+Then `edit thrash` (phase 6 steps 5 and 7): a held key on the Appearance
+page's ACCENT row, its `right` handled once a frame for three seconds from
+the live theme (an image without the page calls `ws.look.change("accent",
+...)` instead), so the first change makes `custom`: the key's ms and the
+painted frames per change, then the frames after release; it counts the store's
 writes (the package and system.json) and asserts none while held and exactly
 one package write once it settles. The live theme is put back after, and
 `custom` stays on the store.
@@ -254,6 +255,14 @@ ws._edit = _edit
 
 THRASH_SETUP = """
 import time, moy_ui
+class _TK:
+    last_key = 0
+    def pressed(self, n):
+        return n == 'right'
+ws._th_key = _TK()
+ws._th_app = getattr(ws, 'appearance_app', None)
+if ws._th_app is not None and not hasattr(ws._th_app, '_rows'):
+    ws._th_app = None
 ws._th_acc = [a for _n, a, _d in moy_ui.theme_accents()]
 ws._th_i = 0
 ws._th_on = False
@@ -276,7 +285,10 @@ if not hasattr(ws, '_th_frame'):
         if ws._th_on:
             ws._th_i += 1
             t = time.ticks_us()
-            ws.look.change('accent', ws._th_acc[ws._th_i % len(ws._th_acc)])
+            if ws._th_app is not None:
+                ws._th_app.handle_input(ws._th_key)
+            else:
+                ws.look.change('accent', ws._th_acc[ws._th_i % len(ws._th_acc)])
             ws._th_ms.append(time.ticks_diff(time.ticks_us(), t) / 1000)
         return _of(dt)
     ws.frame = _thr
@@ -285,14 +297,22 @@ if not hasattr(ws, '_th_frame'):
 
 
 def edit_thrash(b, bench):
-    """`edit thrash`: a held key on ACCENT through the verb, from the live
-    theme (so the first change makes `custom`), the painted frames per
+    """`edit thrash`: a held key on the Appearance page's ACCENT row (the
+    verb on an image without the page), from the live theme (so the first change makes `custom`), the painted frames per
     change and after release; zero store writes while held, one package
     write once it settles. Puts the live theme back."""
     pyexec(b, THRASH_SETUP)
     if not pyval(b, "hasattr(ws.look, 'change')"):
         print("  edit thrash: this image has no change verb")
         return
+    keys = bool(pyval(b, "ws._th_app is not None"))
+    if keys:
+        pyexec(b, "ws.open_app(ws._th_app)\n"
+                  "ws._th_app.zone = 'rows'\n"
+                  "ws._th_app.row = ws._th_app._rows().index('accent')")
+        b.drain(2.0)
+    print("  edit thrash: %s" % ("the ACCENT row by keys" if keys
+                                 else "the verb (no Appearance page)"))
     b.drain(1.0)
     pyexec(b, "ws._th_writes[0] = ws._th_writes[1] = 0")
     bench.start()
@@ -304,7 +324,8 @@ def edit_thrash(b, bench):
     ms = sorted(pyval(b, "ws._th_ms") or [])
     verb = ms[len(ms) // 2] if ms else None
     bench.stop("edit thrash (held, %s changes)" % n,
-               "change() median %s ms" % (None if verb is None else round(verb, 2)))
+               "%s median %s ms" % ("key" if keys else "change()",
+                                    None if verb is None else round(verb, 2)))
     bench.start()
     b.drain(4.0)
     bench.stop("edit thrash (after release)")
@@ -313,6 +334,9 @@ def edit_thrash(b, bench):
     print("  edit thrash: writes held=%r settled=%r (package, system.json) -> %s"
           % (held, after, "PASS" if ok else "FAIL"))
     pyexec(b, "ws.look.set_theme(ws._th_was)")
+    if keys:
+        pyexec(b, "if hasattr(ws.wm, 'close_window_kind'): ws.wm.close_window_kind('appearance')\n"
+                  "else: ws.go_home()")
     b.drain(2.0)
 
 

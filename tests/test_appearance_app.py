@@ -1,28 +1,74 @@
-"""Visual Appearance app: image/cart wallpaper sources and panel themes."""
+"""The Appearance page (docs/theming_2026-09.md §9 phase 6 step 7): one page
+of rows, every row reached and changed by keys alone and by a tap, the
+pickers' undo, the tap floor, and the rows' writes."""
 
 import json
 from pathlib import Path
 
-from runtime import chrome, host_app, moy_carts
+import pytest
+
+from runtime import host_app, ui
 from ws_helpers import select_on_home  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
+DESK = dict(sys_size=(1024, 600), font_scale=1, windowed=True,
+            panel_diagonal_in=7.0)
+
+
+class K:
+    """One key press, as the page's handler reads it."""
+    last_key = 0
+
+    def __init__(self, n):
+        self.n = n
+
+    def pressed(self, n):
+        return n == self.n
 
 
 def _open_appearance(ws):
     if select_on_home(ws, "Appearance") is None:
         # Not on the home: Appearance is one of the WM's HIDDEN_APPS.
         assert ws.open_app(ws.appearance_app)
-        ws.input.begin_frame()
-        ws.frame(1 / 30)
-        assert ws.wm.top_kind() == "appearance"
-        return ws.appearance_app
-    ws.open()
+    else:
+        ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert ws.wm.top_kind() == "appearance"
+    return _app(ws)
+
+
+def _app(ws):
     return ws.appearance_app
+
+
+def _frame(ws, n=2):
+    for _ in range(n):
+        ws.input.begin_frame()
+        ws._dirty = True
+        ws.frame(1 / 30)
+
+
+def _press(ws, app, *keys):
+    for k in keys:
+        app.handle_input(K(k))
+        _frame(ws, 1)
+    _frame(ws)
+
+
+def _ws(tmp_path, **kw):
+    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+
+
+def _focus(app, key):
+    app.zone = "rows"
+    app.row = app._rows().index(key)
+
+
+def _custom(tmp_path):
+    p = tmp_path / "carts" / "custom.moy" / "theme.json"
+    return json.loads(p.read_text()) if p.exists() else None
 
 
 def test_appearance_cart_is_versioned_system_app():
@@ -35,273 +81,370 @@ def test_appearance_cart_is_versioned_system_app():
             str(folder / "main.py"), "exec")
 
 
-def test_picker_separates_image_and_cart_wallpapers(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+def test_the_rows_are_the_rulings_on_a_small_and_a_wide_page(tmp_path):
+    small = _open_appearance(_ws(tmp_path / "s"))
+    assert not small.layout.wide
+    assert small._rows() == ["theme", "mode", "accent", "tint", "wallpaper",
+                             "frame", "font", "file"]
+    wide = _open_appearance(_ws(tmp_path / "w", **DESK))
+    assert wide.layout.wide                  # THEME is the grid above the rows
+    assert wide._rows()[0] == "mode" and "theme" not in wide._rows()
+    assert "chrome" not in wide._rows()       # the P4's glass takes one scale
+    sim = _open_appearance(_ws(tmp_path / "b", sys_size=(1024, 600),
+                               windowed=True))
+    assert "chrome" in sim._rows()            # the simulator's desk takes two
+
+
+@pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
+def test_every_row_changes_by_keys_alone(tmp_path, kw):
+    ws = _ws(tmp_path, **kw)
     app = _open_appearance(ws)
-    items = app._image_items()
-    # My Art first, then NONE (None: the theme's `desktop` fill).
-    assert items[0]["title"] == "My Art"
-    assert items[1:] == [None]
-    cart_titles = [c["title"] for c in app._cart_items()]
-    assert "My Art" not in cart_titles
-    assert {"Moy Night", "Sakura", "Ocean Desktop"}.issubset(set(cart_titles))
+    look = ws.look
+    # MODE: not a change to the theme.
+    _focus(app, "mode")
+    _press(ws, app, "right")
+    assert look.theme_variant == "light" and look.theme_name == "night"
+    _press(ws, app, "left")
+    assert look.theme_variant == "dark" and _custom(tmp_path) is None
+    # ACCENT: the first change makes custom.
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    assert look.theme_name == "custom"
+    a = look.custom_look()["accent"]
+    assert a == ui.theme_accents()[1][1]      # night's own is yellow, the first
+    _press(ws, app, "left")
+    assert look.custom_look()["accent"] == ui.theme_accents()[0][1]
+    # TINT, WALLPAPER, WINDOW STYLE, FONT.
+    _focus(app, "tint")
+    _press(ws, app, "right")
+    assert look.custom_look()["tint"] == ui.theme_tints()[0][0]
+    _focus(app, "wallpaper")
+    was = look.wallpaper_id
+    _press(ws, app, "right")
+    assert look.wallpaper_id != was
+    _focus(app, "frame")
+    _press(ws, app, "right")
+    assert app.choices()["frame"] == "tab"
+    _focus(app, "font")
+    _press(ws, app, "right")
+    assert app.choices()["font"] == "petme128" and ui.font("ui")[0] == 0
+    look.commit()
+    pkg = _custom(tmp_path)
+    assert pkg["frame"] == {"style": "tab"}
+    assert pkg["fonts"]["ui"] == "petme128"
+    folder = tmp_path / "carts" / "custom.moy"
+    assert not (folder / "petme128").exists()   # a reserved name, no file
+    _press(ws, app, "left")
+    assert app.choices()["font"] == "tiny5" and ui.font("ui")[0] != 0
+    # THEME: ←→ steps the theme in place (a row on the small page, the grid
+    # on the wide one).
+    if not app.layout.wide:
+        _focus(app, "theme")
+        _press(ws, app, "right")
+        assert look.theme_name == app._themes()[1]
+    else:
+        _focus(app, "mode")
+        _press(ws, app, "up", "right", "a")
+        assert look.theme_name == app._themes()[app.card]
 
 
-def test_none_selectable_from_images_tab(tmp_path):
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
+def test_every_picker_opens_tries_and_keeps_by_keys(tmp_path):
+    ws = _ws(tmp_path)
     app = _open_appearance(ws)
-    app._set_mode("images")
-    items = app._items()
-    none_i = items.index(None)
-    app._apply(none_i)
-    ws.look.tick(0.0)                      # the change shows at the next frame
-    assert ws.look.wallpaper_id is None
-    assert ws.look.theme_name == "custom"  # a pick is a change to the theme
-    assert app.status == "NONE"
-    # Reopening lands back on the IMAGES tab with NONE selected.
-    app.open()
-    assert app.mode == "images"
-    assert app._items()[app.sel] is None
+    _focus(app, "accent")
+    _press(ws, app, "a")
+    assert app.pick == "accent" and app.cur == 0
+    _press(ws, app, "right", "down")            # tried live
+    assert ws.look.custom_look()["accent"] == ui.theme_accents()[9][1]
+    _press(ws, app, "a")                        # kept
+    assert app.pick is None and ws.look.theme_name == "custom"
+    _focus(app, "tint")
+    _press(ws, app, "a", "right", "right", "a")
+    assert ws.look.custom_look()["tint"] == ui.theme_tints()[1][0]
+    _focus(app, "wallpaper")
+    _press(ws, app, "a")
+    walls = app._walls()
+    _press(ws, app, "right", "a")
+    assert ws.look.wallpaper_id == walls[1][0]
+    _focus(app, "theme")
+    _press(ws, app, "a")
+    assert app.pick == "theme"
+    names = app._themes()
+    _press(ws, app, "right")
+    assert ws.look.theme_name == "custom"       # the grid's cursor tries nothing
+    _press(ws, app, "a")
+    assert ws.look.theme_name == names[(names.index("custom") + 1) % len(names)]
 
 
-def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
+def test_a_pickers_undo_restores_what_was_there(tmp_path):
+    ws = _ws(tmp_path)
     app = _open_appearance(ws)
-
-    app._set_mode("carts")
-    ocean_i = [c["title"] for c in app._cart_items()].index("Ocean Desktop")
-    app._apply(ocean_i)
-    ws.look.tick(0.0)
-    assert ws.look.wallpaper_id == "moybyte.ocean_desktop"
-    ws.look.commit()
-    pkg = json.loads((Path(carts) / "custom.moy" / "theme.json").read_text())
-    assert pkg["wallpapers"] == {"desk": "moybyte.ocean_desktop"}
-    # The monitor shows a COMPUTED still on every tier (no live/static drift),
-    # so the appearance screen closes the redraw gate even for a live cart
-    # (once the "Home Decorator" unlock toast this pick raised has cleared).
-    ws._toast_until = 0
-    assert ws._animating(1 / 30) is False
-
-    app._set_mode("themes")
-    berry_i = list(app._items()).index("berry")
-    app._apply(berry_i)
-    assert ws.look.theme_name == "berry"
-    assert ws.theme_colors["title"] == 14
-    assert moy_carts.load_system(carts)["theme"] == "berry"
+    _focus(app, "accent")
+    _press(ws, app, "a", "right", "right")
+    assert ws.look.theme_name == "custom"
+    _press(ws, app, "b")                        # the try made custom of night
+    assert app.pick is None and ws.look.theme_name == "night"
+    # On custom, the tried value is changed back.
+    _press(ws, app, "right")
+    a = ws.look.custom_look()["accent"]
+    _press(ws, app, "a", "right", "down")
+    assert ws.look.custom_look()["accent"] != a
+    _press(ws, app, "b")
+    assert ws.look.theme_name == "custom" and ws.look.custom_look()["accent"] == a
+    _focus(app, "tint")
+    _press(ws, app, "a", "right", "b")
+    assert ws.look.custom_look().get("tint") is None
+    _focus(app, "wallpaper")
+    was = ws.look.wallpaper_id
+    _press(ws, app, "a", "right", "b")
+    assert ws.look.wallpaper_id == was
 
 
-def test_my_art_image_thumbnail_and_live_preview_draw(tmp_path, monkeypatch):
-    # STOP THE CLOCK FIRST. The always-on bar prints HH:MM from wall time
-    # (bar_layer._clock_text) onto sys_canvas, and it is in the bar's cache KEY
-    # -- so a MINUTE ROLLOVER between the snapshot below and the frame after it
-    # repaints the clock, and this redraw-free assertion loses a coin flip. It
-    # lost one in CI on 2026-09-11 after months of green: pixel row 3, inside
-    # the 18px bar, at the clock's x. 261 local runs did not reproduce it (the
-    # window is the millisecond between the two lines, once a minute), but
-    # forcing the roll in this exact state does, every time.
-    #
-    # The claim being made is about the PREVIEW, so freeze the clock rather than
-    # quarantine the test -- and freeze it BEFORE the workstation draws
-    # anything, or the first repaint under the frozen time IS the change. The
-    # redraw suite proper is tests/test_redraw_on_change.py, which CI runs alone
-    # for this same reason; this assertion is the one of its kind outside it
-    # that watches sys_canvas (the others watch the game canvas, which has no
-    # clock on it).
-    import runtime.bar_layer as bar_layer
-    monkeypatch.setattr(bar_layer.time, "localtime",
-                        lambda *a: (2026, 9, 11, 4, 30, 0, 0, 0, 0))
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts, sys_size=(1024, 600), font_scale=2,
-                                    windowed=True)
+def test_the_wallpaper_undo_puts_a_store_themes_picture_back(tmp_path):
+    """A theme shipping its own picture shows it as THE THEME'S PICTURE,
+    never My Art, and a try's undo on custom puts it back (THEIRS)."""
+    ws = _ws(tmp_path)
+    look = ws.look
     raw = bytearray(512 * 300)
-    for y in range(300):
-        raw[y * 512:(y + 1) * 512] = bytes((22 if y < 150 else 3,)) * 512
-    assert ws.artwork.save(raw, 512, 300)
-    assert ws.artwork.set_wallpaper()
-    ws.look.tick(0.0)
-
+    assert ws.artwork.save(raw, 512, 300) and ws.artwork.set_wallpaper()
+    look.tick(0.0)
+    look.commit()
+    src = json.loads((tmp_path / "carts" / "custom.moy" / "theme.json").read_text())
+    assert src["images"] == {"desk": "desk.moyimg"}
+    # Make that package a store theme of its own, then a custom from it.
+    folder = tmp_path / "carts" / "pic.moy"
+    folder.mkdir()
+    src["name"] = "pic"
+    (folder / "theme.json").write_text(json.dumps(src))
+    (folder / "desk.moyimg").write_bytes(
+        (tmp_path / "carts" / "custom.moy" / "desk.moyimg").read_bytes())
+    man = json.loads((tmp_path / "carts" / "custom.moy" / "manifest.json").read_text())
+    man["moybyte"].pop("look", None)
+    (folder / "manifest.json").write_text(json.dumps(man))
+    ws.carts.adopt(str(folder))
+    look.set_theme("pic")
+    look.tick(0.0)
     app = _open_appearance(ws)
-    assert app.mode == "images"
-    thumb = ws.artwork.thumbnail(120, 72)
-    assert (thumb.w, thumb.h) == (120, 72)
-    assert set(thumb.pix) == {3, 22}
+    assert app.choices()["picture"] == "theme"
+    assert app._wall_title(app.choices()) == "THEME'S PICTURE"
+    assert app._walls()[0][2] == "theirs"
+    _focus(app, "accent")
+    _press(ws, app, "right")                     # custom from pic
+    assert look.theme_name == "custom" and app.choices()["picture"] == "theme"
+    _focus(app, "wallpaper")
+    _press(ws, app, "a", "right")
+    assert look.wallpaper_id != look.PICTURE
+    _press(ws, app, "b")
+    assert look.wallpaper_id == look.PICTURE and app.choices()["picture"] == "theme"
+
+
+@pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
+def test_every_row_answers_a_tap(tmp_path, kw):
+    ws = _ws(tmp_path, **kw)
+    app = _open_appearance(ws)
+    _frame(ws)
+
+    def tap(key, dx=None):
+        r = dict(app._row_rects())[key]
+        x = r[0] + r[2] - 12 if dx is None else r[0] + dx
+        app.handle_pointer(x, r[1] + r[3] // 2, True)
+        _frame(ws)
+
+    light = dict(app._mode_chips(dict(app._row_rects())["mode"]))["light"]
+    app.handle_pointer(light[0] + 2, light[1] + 2, True)
+    _frame(ws)
+    assert ws.look.theme_variant == "light"
+    for key in ("accent", "tint", "wallpaper"):
+        tap(key)
+        assert app.pick == key
+        r = app._pick_rects()[2]
+        app.handle_pointer(r[0] + 2, r[1] + 2, True)   # ENTER on the swatch
+        _frame(ws)
+        assert app.pick is None
+    assert ws.look.custom_look()["accent"] == ui.theme_accents()[2][1]
+    assert ws.look.custom_look()["tint"] == ui.theme_tints()[1][0]
+    tap("frame")
+    assert app.choices()["frame"] == "tab"
+    r = dict(app._row_rects())["frame"]
+    app.handle_pointer(app._cycle_x(r) + 2, r[1] + r[3] // 2, True)   # the "<"
+    _frame(ws)
+    assert app.choices()["frame"] == "classic"
+    tap("font")
+    assert app.choices()["font"] == "petme128"
+    if not app.layout.wide:
+        tap("theme")
+        assert app.pick == "theme"
+        r = app._pick_rects()[app._themes().index("berry")]
+        app.handle_pointer(r[0] + 2, r[1] + 2, True)
+        _frame(ws)
+        assert ws.look.theme_name == "berry"
+    else:
+        r = app.layout.card_rect(app._themes().index("berry"), app.top)
+        app.handle_pointer(r[0] + 2, r[1] + 2, True)
+        _frame(ws)
+        assert ws.look.theme_name == "berry"
+    tap("file")
+    assert ws.look._editing is not None         # the text app holds the file
+
+
+def test_a_tap_outside_a_popover_closes_it_keeping_the_try(tmp_path):
+    ws = _ws(tmp_path, **DESK)
+    app = _open_appearance(ws)
+    _focus(app, "accent")
+    _press(ws, app, "a", "right")
+    a = ws.look.custom_look()["accent"]
+    x, y, w, h = app._pick_frame()
+    app.handle_pointer(app.layout.cx + 4, app.layout.strip_y - 4, True)
+    _frame(ws)
+    assert app.pick is None and ws.look.custom_look()["accent"] == a
+
+
+def test_the_tap_floor_holds_at_320x240(tmp_path):
+    """#203: every row and every picker item a finger takes is at least the
+    floor's 16 logical pixels at the chrome scale."""
+    ws = _ws(tmp_path)
+    app = _open_appearance(ws)
+    floor = 16 * app.layout.cs
+    for _key, r in app._row_rects():
+        assert r[3] >= floor
+    for key in ("theme", "accent", "tint", "wallpaper"):
+        _focus(app, key)
+        _press(ws, app, "a")
+        for r in app._pick_rects():
+            if r is not None:
+                assert r[2] >= floor and r[3] >= floor, (key, r)
+        _press(ws, app, "b")
+
+
+def test_rows_that_do_not_fit_scroll_to_the_focus(tmp_path):
+    ws = _ws(tmp_path, sys_size=(800, 480), font_scale=3)
+    app = _open_appearance(ws)
+    _focus(app, "file")
+    _frame(ws)
+    keys = [k for k, _r in app._row_rects()]
+    assert "file" in keys and app.scroll > 0
+    r = dict(app._row_rects())["file"]
+    assert r[1] + r[3] <= app.layout.strip_y
+
+
+def test_chrome_size_steps_live_and_persists(tmp_path):
+    ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
+    app = _open_appearance(ws)
+    assert ws.look.chrome_scale == 0 and ws.layout.cs == 1
+    _focus(app, "chrome")
+    _press(ws, app, "right")
+    assert ws.layout.cs == 2 and ws.system.get("chrome_scale") == 2
+    assert ws.look.theme_name == "night"        # not a change to the theme
+    again = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
+    assert again.look.chrome_scale == 2 and again.layout.cs == 2
+
+
+def test_the_page_is_idle_once_drawn(tmp_path):
+    ws = _ws(tmp_path)
+    app = _open_appearance(ws)
+    _frame(ws)
+    ws._toast_until = 0
     before = bytes(ws.sys_canvas._buf)
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    assert bytes(ws.sys_canvas._buf) == before  # static preview is redraw-free when idle
+    assert bytes(ws.sys_canvas._buf) == before
+    assert ws._animating(1 / 30) is False
+    calls = []
+    real = app._theme.choices
+    app._theme.choices = lambda *a: calls.append(1) or real(*a)
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws._dirty = True
+        ws.frame(1 / 30)
+    assert not calls                            # read once per generation
 
 
-def test_desktop_appearance_window_rebuilds_responsive_context(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"),
-                                    sys_size=(1024, 600), font_scale=2,
-                                    windowed=True)
-    _open_appearance(ws)
-    win = ws.wm._wins["appearance"]
-    assert win.ctx.appearance_layout.w == win.buf.w
-    old_w = win.ctx.appearance_layout.w
-    ws.wm._resize_window(win, 720, 430)
-    assert win.ctx.appearance_layout.w == win.buf.w
-    assert win.ctx.appearance_layout.w != old_w
-    assert win.w >= 620
-    assert win.h >= 460
-
-
-def test_wide_monitor_shows_full_wallpaper_letterboxed(tmp_path):
-    """The Display-Properties nod: on big surfaces the preview is a monitor
-    whose 4:3 screen shows the WHOLE cart frame (fit, black bars) -- never the
-    desktop's cover-crop."""
-    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
+def test_a_window_close_writes_a_change_still_settling(tmp_path):
+    ws = _ws(tmp_path, **DESK)
     app = _open_appearance(ws)
-    lay = app.layout
-    assert lay.wide and lay.screen is not None
-    sx, sy, sw, sh = lay.screen
-    assert sw * 3 == sh * 4                      # the game canvas aspect
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
-    app._set_mode("carts")
-    ws.wallpaper.draw_preview(ws.sys_canvas, (10, 20, 500, 380), 1 / 30)
-    sc = ws.sys_canvas
-    # The computed 320x240 still centers in 500x380: bars around, frame inside.
-    # pix() reads back a palette INDEX on every tier, so 0 still means black.
-    assert sc.pix(12, 22) == 0 and sc.pix(12, 200) == 0             # left/top bars
-    assert any(sc.pix(xx, 200) != 0 for xx in range(110, 420))      # frame content
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    assert _custom(tmp_path) is None            # the debounce has not run
+    ws.wm.close_window_kind("appearance")
+    assert _custom(tmp_path) is not None
 
 
-def test_fill_and_image_previews_fill_or_fit_the_screen(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
-    ws.look.select_wallpaper(None, persist=False)
-    ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 100, 80), 0)
-    sc = ws.sys_canvas
-    desk = ws.theme_colors["desktop"]
-    assert sc.pix(0, 0) == desk and sc.pix(99, 79) == desk  # NONE floods it
+# -- EDIT FILE: the editor beside the rows -----------------------------------------
+
+def _edit(ws, app):
+    _focus(app, "file")
+    _press(ws, app, "a")
+    look = ws.look
+    assert look._editing is not None
+    h = look.file_watch(*look._editing)
+    assert h is look
+    return look
 
 
-def test_theme_preview_draws_mock_windows(tmp_path):
-    """The Appearance-tab nod: the THEMES preview draws how windows will look --
-    an active title strip in the theme's title token over the desk field."""
-    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
+def _handle(ws):
+    """The text app's editor handle on custom's theme.json."""
+    hs = [h for h in ws.player._editors if h._watch is ws.look]
+    assert hs, "EDIT FILE opened no watched editor"
+    return hs[-1]
+
+
+def test_an_editor_save_writes_no_journal_into_the_package(tmp_path):
+    """A theme package stays flat data: the editor's saves land through the
+    look (`file_write`), never the project-file save and its journal."""
+    ws = _ws(tmp_path)
     app = _open_appearance(ws)
-    app._set_mode("themes")
-    ws.mark_dirty()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    th = ws.theme_colors
-    x, y, w, h = app.layout.field
-    sc = ws.sys_canvas
-    field_px = set()
-    for yy in range(y, y + h, 7):
-        field_px.update(sc.pix(xx, yy) for xx in range(x, x + w))
-    assert th["title"] in field_px               # the active window's strip
-    assert th["accent"] in field_px              # the OK button
-    assert th["panel"] in field_px               # the window bodies
+    _edit(ws, app)
+    _frame(ws)
+    h = _handle(ws)
+    folder = tmp_path / "carts" / "custom.moy"
+    d = json.loads(h.text())
+    d["colors"]["dark"]["panel"] = 3
+    h.set_text(json.dumps(d, indent=1))
+    ok, _badge = h.save()
+    assert ok
+    assert json.loads((folder / "theme.json").read_text())["colors"]["dark"]["panel"] == 3
+    h.set_text("{ not json")
+    h.save()                                    # the hard exit writes anyway
+    names = sorted(p.name for p in folder.iterdir())
+    assert "journal" not in names and "journal.jsonl" not in names, names
+    assert set(names) <= {"manifest.json", "theme.json", "desk.moyimg",
+                          "tiny5.fnt", "tiny5.txt"}, names
 
 
-def test_small_tier_monitor_shows_whole_my_art_image(tmp_path):
-    """The phone/320x240 tier: My Art is cover-cropped as the backdrop, so the
-    monitor's screen is where the WHOLE drawing is visible (aspect-fit with
-    bars) -- the 'I can't see the whole image' fix."""
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    raw = bytearray(512 * 300)
-    for y in range(300):                       # top half color 22, bottom 3
-        raw[y * 512:(y + 1) * 512] = bytes((22 if y < 150 else 3,)) * 512
-    assert ws.artwork.save(raw, 512, 300)
-    assert ws.artwork.set_wallpaper()
-    ws.look.tick(0.0)
+def test_a_clean_buffer_follows_a_change_and_an_edited_one_keeps_its_text(tmp_path):
+    """The rule for a change made beside an open EDIT FILE: a buffer with no
+    edits reloads (the look moved, `file_gen`); one with edits keeps them,
+    and its save is the last write."""
+    ws = _ws(tmp_path)
     app = _open_appearance(ws)
-    assert app.mode == "images"
-    ws._toast_until = 0        # the unlock toast would overlap the top rows
-    ws.mark_dirty()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    sx, sy, sw, sh = app.layout.screen
-    sc = ws.sys_canvas
-    # 512x300 aspect-fit in the 4:3 screen -> full width, letterbox bars: the
-    # top band (22) AND the bottom band (3) are both visible, bars are black.
-    mid_x = sx + sw // 2
-    col = [sc.pix(mid_x, yy) for yy in range(sy, sy + sh)]
-    assert 22 in col and 3 in col              # the WHOLE image, both halves
-    assert col[0] == 0 and col[-1] == 0        # letterbox bars
-
-
-def test_small_tier_stays_narrow_with_compact_theme_mock(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    look = _edit(ws, app)
+    _frame(ws)
+    h = _handle(ws)
+    start = h.text()
+    ws.open_app(ws.appearance_app)
     app = _open_appearance(ws)
-    assert not app.layout.wide and app.layout.screen is not None
-    app._set_mode("themes")
-    ws.mark_dirty()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)                             # compact mock draws without error
-    th = ws.theme_colors
-    x, y, w, h = app.layout.field
-    sc = ws.sys_canvas
-    row = {sc.pix(xx, y + 2) for xx in range(x, x + w)}
-    assert th["edge"] in row or th.get("desktop", th["panel"]) in row
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    h.draw(0, 0, 200, 100)
+    assert h.text() != start
+    assert json.loads(h.text()) == json.loads(look.file_text())
+    assert not h.dirty()
+    h.ed.insert(" ")
+    mine = h.text()
+    _press(ws, app, "right")
+    h.draw(0, 0, 200, 100)
+    assert h.text() == mine                    # an edited buffer keeps its text
+    h.save()
+    assert json.loads((tmp_path / "carts" / "custom.moy" / "theme.json")
+                      .read_text()) == json.loads(mine)
 
 
-def test_preview_runner_leaves_the_game_canvas_alone(tmp_path):
-    """The preview compiles the cart onto an OFFSCREEN canvas -- a running
-    game's frame on ws.canvas must survive a monitor redraw untouched."""
-    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
-    ws.canvas.cls(9)                              # stand-in for a game's frame
-    before = bytes(ws.canvas._buf)
-    ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 480, 360), 1 / 30)
-    assert bytes(ws.canvas._buf) == before
-
-
-def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
-    """The ONE preview behavior, every tier: the monitor's frame is COMPUTED --
-    rendered once through the preview runner, persisted as a
-    thumbs/wp<w>x<h>.mct sidecar stamped with cover_sig(src), and a later
-    session draws from the sidecar WITHOUT the runner."""
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
-    rect = (10, 10, 152, 114)
-    ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
-    assert ws.sys_canvas.pix(86, 67) != 0      # the rendered still landed
-    side = Path(carts) / "moybyte.moy_night.moy" / "thumbs" / "wp152x114.mct"
-    assert side.exists()                       # ...and persisted as a sidecar
-
-    # A fresh session with NO runner (a board, which has no offscreen canvas
-    # factory) still shows the frame -- straight from the sidecar.
-    ws2 = host_app.build_workstation(carts)
-    ws2.wallpaper._ensure_preview = lambda: False
-    ws2.look.select_wallpaper("moybyte.moy_night", persist=False)
-    ws2.sys_canvas.cls(0)
-    ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
-    assert ws2.sys_canvas.pix(86, 67) != 0
-
-
-def test_static_preview_recomputes_when_the_source_changes(tmp_path):
-    """The sidecar is stamped against the cart SOURCE: an edit invalidates it
-    (with no runner available, a stale sidecar draws nothing rather than the
-    old frame)."""
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
-    rect = (10, 10, 152, 114)
-    ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
-    main = Path(carts) / "moybyte.moy_night.moy" / "main.py"
-    main.write_text(main.read_text(encoding="utf-8") + "\n# edited\n",
-                    encoding="utf-8")
-    ws2 = host_app.build_workstation(carts)
-    ws2.wallpaper._ensure_preview = lambda: False   # no runner: stale = nothing
-    ws2.look.select_wallpaper("moybyte.moy_night", persist=False)
-    ws2.sys_canvas.cls(0)
-    ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
-    scr = ws2.sys_canvas
-    assert all(scr.pix(xx, yy) == 0
-               for yy in range(12, 122, 13) for xx in range(12, 160, 17))
-
-
-def test_small_theme_grid_stays_inside_catalog(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_appearance(ws)
-    app._set_mode("themes")
-    cards = app.layout.cards(len(app._items()))
-    assert len(cards) == len(chrome.THEME_NAMES)     # one card per shipped theme
-    bottom = app.layout.catalog[1] + app.layout.catalog[3]
-    assert max(y + h for _x, y, _w, h in cards) <= bottom
+def test_the_pages_copies_of_the_looks_names_agree():
+    """The page cannot import the look (a shell module), so it carries the
+    names it passes: held to the look's here."""
+    from runtime import appearance_app as page
+    from runtime.appearance import Appearance
+    assert page.FRAMES == Appearance.FRAMES and page.FONTS == Appearance.FONTS
+    assert page.PICTURE == Appearance.PICTURE and page.THEIRS == Appearance.THEIRS
+    assert set(page.FRAME_NAMES) == set(page.FRAMES)
+    assert set(page.FONT_NAMES) == set(page.FONTS)

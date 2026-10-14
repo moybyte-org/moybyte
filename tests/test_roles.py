@@ -198,8 +198,8 @@ def test_the_doc_table_lists_exactly_the_rows():
 
 BUDGETS = {
     "artwork": {"surface.canvas": 1, "theme.colors": 25},
-    "appearance": {"surface.canvas": 1, "theme.colors": 9,
-                   "wallpaper.preview": 1, "wallpaper.carts": 1},
+    "appearance": {"surface.canvas": 1, "theme.colors": 3, "theme.gen": 1,
+                   "wallpaper.preview": 1, "wallpaper.title": 1},
     "storybook": {"surface.canvas": 1, "theme.colors": 2, "carts.all": 1},
     "files": {"surface.canvas": 1, "theme.colors": 6},
     "calc": {"surface.canvas": 1, "theme.colors": 1, "theme.light": 1},

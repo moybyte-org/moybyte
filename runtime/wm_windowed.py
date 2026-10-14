@@ -2417,6 +2417,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             ws.storybook_app._commit_deck()   # same rule for an open story
         if kind == "artwork":
             ws.artwork_app._save()            # same rule for the open drawing
+        if kind == "appearance":
+            ws.look.commit()                  # and for a change still settling
         if kind == "menu":
             # The "menu" WM kind is shared by the Editor AND the icon-theme editor
             # (Settings -> EDIT ICONS, paint_layer.ThemeLayer -- it spawns on the

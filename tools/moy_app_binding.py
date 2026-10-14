@@ -543,6 +543,18 @@ def binding(sanitize=False):
         def set_variant(self, *a, **kw):
             return self._app._serve(self._g, "theme", "set_variant")(self._g, *a, **kw)
 
+        def change(self, *a, **kw):
+            return self._app._serve(self._g, "theme", "change")(self._g, *a, **kw)
+
+        def choices(self, *a, **kw):
+            return self._app._serve(self._g, "theme", "choices")(self._g, *a, **kw)
+
+        def set_chrome_scale(self, *a, **kw):
+            return self._app._serve(self._g, "theme", "set_chrome_scale")(self._g, *a, **kw)
+
+        def edit_file(self, *a, **kw):
+            return self._app._serve(self._g, "theme", "edit_file")(self._g, *a, **kw)
+
     class Prefs(_Role):
         def get(self, key, default=None):
             kb = _str(key)

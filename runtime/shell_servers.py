@@ -73,6 +73,28 @@ class ThemeServer:
     def set_variant(self, g, variant):
         self.__ws.look.set_theme_variant(variant)
 
+    def change(self, g, kind, value=None):
+        """A change to the theme (`Appearance.change`), landing in `custom`:
+        `accent` an accent's A, `tint` a tint's name, `wallpaper` an id,
+        `frame` a WINDOW STYLE preset and `font` a FONT preset by name
+        (`Appearance.FRAMES`, `FONTS`); None the source's own. 0, else the
+        refusal."""
+        look = self.__ws.look
+        return look.change(kind, look.preset(kind, value))
+
+    def choices(self, g):
+        """What the Appearance rows show (`Appearance.choices`)."""
+        return self.__ws.look.choices()
+
+    def set_chrome_scale(self, g, scale):
+        """CHROME SIZE: live and persisted; not a change to the theme."""
+        self.__ws.look.set_chrome_scale(scale)
+
+    def edit_file(self, g):
+        """EDIT FILE: the active theme's theme.json in the text app
+        (`Appearance.edit_file`). True when it opened."""
+        return self.__ws.look.edit_file()
+
 
 
 # -- the storage servers' shared machinery --------------------------------------
@@ -490,7 +512,7 @@ _DOOR_ABSENT, _DOOR_BAD = -8, -7
 # None, `i` a number, `c` a cart named by its folder. A shell row not here (an
 # object, a callable, the cart store's and the installer's) answers BAD.
 DOOR_ARGS = {
-    "theme.set": "so", "theme.set_variant": "s",
+    "theme.set": "so", "theme.set_variant": "s", "theme.edit_file": "",
     "nav.open_app": "s", "nav.is_system_app": "c", "nav.projects": "",
     "nav.edit": "co", "nav.open_image": "so", "nav.open_text": "soo",
     "nav.edit_file": "cso", "nav.play": "c", "nav.run_script": "ss",

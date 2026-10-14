@@ -187,8 +187,10 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.top_kind() == "appearance"
     before = ws.look.wallpaper_id
-    drv.press("down")          # the catalog column: down applies the next item
-    drv.frame(1 / 30)
+    for key in ("down", "down", "right"):   # ACCENT -> TINT -> WALLPAPER, step it
+        drv.press(key)
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)      # released: the next press is an edge of its own
     drv.frame(1 / 30)          # the change shows at the frame after the pick
     assert ws.look.wallpaper_id != before
     ws.look.commit()

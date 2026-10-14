@@ -209,7 +209,7 @@ static int32_t run(int how, int row, const int32_t *num, const span_t *s, int ns
 
 enum {
     N_THEME_TOKEN, N_THEME_GEN, N_THEME_LIGHT, N_THEME_NAME, N_THEME_VARIANT,
-    N_THEME_SET, N_THEME_SET_VARIANT,
+    N_THEME_SET, N_THEME_SET_VARIANT, N_THEME_EDIT_FILE,
     N_FILES_READABLE, N_FILES_READY, N_FILES_LIST, N_FILES_COUNT, N_FILES_LOAD,
     N_FILES_SAVE, N_FILES_DELETE,
     N_NAV_OPEN_APP,
@@ -223,7 +223,7 @@ enum {
 // Each native's "role.verb", in the table's order.
 static const char *const ROW_OF[N_COUNT] = {
     "theme.token", "theme.gen", "theme.light", "theme.name", "theme.variant",
-    "theme.set", "theme.set_variant",
+    "theme.set", "theme.set_variant", "theme.edit_file",
     "files.readable", "files.ready", "files.list", "files.count", "files.load",
     "files.save", "files.delete",
     "nav.open_app",
@@ -287,6 +287,10 @@ static int32_t w_theme_set_variant(void *e, const uint8_t *v, uint32_t vn) {
     (void)e;
     span_t s[1] = { { v, vn } };
     return run(HOP, R(N_THEME_SET_VARIANT), NULL, s, 1, NULL, 0);
+}
+static int32_t w_theme_edit_file(void *e) {
+    (void)e;
+    return run(HOP, R(N_THEME_EDIT_FILE), NULL, NULL, 0, NULL, 0);
 }
 static int32_t w_files_readable(void *e) {
     (void)e;
@@ -403,6 +407,7 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "theme_variant", FN(w_theme_variant), "(*~)i", NULL },
     { "theme_set", FN(w_theme_set), "(*~*~)i", NULL },
     { "theme_set_variant", FN(w_theme_set_variant), "(*~)i", NULL },
+    { "theme_edit_file", FN(w_theme_edit_file), "()i", NULL },
     { "files_readable", FN(w_files_readable), "()i", NULL },
     { "files_ready", FN(w_files_ready), "()i", NULL },
     { "files_list", FN(w_files_list), "(*~*~)i", NULL },

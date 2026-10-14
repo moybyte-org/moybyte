@@ -216,7 +216,7 @@ def chrome_scale_floor(w, h, diagonal_in=None):
     return max(1, n)
 
 
-# The chrome scales a user may pick in Settings (CHROME SIZE), and the narrowest
+# The chrome scales a user may pick in Appearance (CHROME SIZE), and the narrowest
 # logical shell a scale may leave: 240px is the Guition S3's 480px at 2x, the
 # narrowest chrome-2 shell in the lineup. The T-Deck's 320px at 2x (160) is the
 # arrangement its board.toml declined.
@@ -227,7 +227,7 @@ MIN_CHROME_W = 240
 def chrome_scale_choices(w, floor):
     """The chrome scales a `w`-pixel-wide panel whose tap floor is `floor` can
     take: never under the floor, never leaving the shell narrower than
-    MIN_CHROME_W. Fewer than two means there is nothing to choose and Settings
+    MIN_CHROME_W. Fewer than two means there is nothing to choose and Appearance
     shows no CHROME SIZE row."""
     return tuple(s for s in CHROME_SCALES
                  if s >= floor and int(w) // s >= MIN_CHROME_W)

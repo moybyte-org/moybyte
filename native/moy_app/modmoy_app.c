@@ -828,6 +828,10 @@ static MP_DEFINE_CONST_FUN_OBJ_1(theme_variant_obj, theme_variant);
 
 SERVED(theme, THEME, set)
 SERVED(theme, THEME, set_variant)
+SERVED(theme, THEME, change)
+SERVED(theme, THEME, choices)
+SERVED(theme, THEME, set_chrome_scale)
+SERVED(theme, THEME, edit_file)
 
 static const mp_rom_map_elem_t theme_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&theme_colors_obj) },
@@ -838,6 +842,10 @@ static const mp_rom_map_elem_t theme_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_variant), MP_ROM_PTR(&theme_variant_obj) },
     { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&theme_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_variant), MP_ROM_PTR(&theme_set_variant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_change), MP_ROM_PTR(&theme_change_obj) },
+    { MP_ROM_QSTR(MP_QSTR_choices), MP_ROM_PTR(&theme_choices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_chrome_scale), MP_ROM_PTR(&theme_set_chrome_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_edit_file), MP_ROM_PTR(&theme_edit_file_obj) },
 };
 static MP_DEFINE_CONST_DICT(theme_locals, theme_locals_table);
 

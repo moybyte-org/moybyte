@@ -18,7 +18,7 @@ So this file is in four parts:
   * the GROWTH -- at cs > fs the tap targets grow and the TEXT metrics do not,
     which is the claim the issue makes and the one a reader will want checked
     without opening a PNG.
-  * CHROME SIZE -- the Settings row that lifts chrome above the floor where a
+  * CHROME SIZE -- the Appearance row that lifts chrome above the floor where a
     panel can take more than one scale: where it shows, how it persists, what
     a stored value it did not write reads as, and that it never goes under the
     floor.
@@ -315,30 +315,36 @@ def _desk(path, **kw):
     return host_app.build_workstation(str(path / "carts"), **kw)
 
 
+def _appearance(ws):
+    assert ws.open_app(ws.appearance_app)
+    return ws.appearance_app
+
+
 def _row_keys(ws):
-    return [r[0] for r in ws.settings_layer._settings_rows()]
+    return _appearance(ws)._rows()
 
 
-def test_settings_offers_chrome_size_only_where_there_is_a_choice(tmp_path):
+def test_appearance_offers_chrome_size_only_where_there_is_a_choice(tmp_path):
     desk = _desk(tmp_path / "desk")
     keys = _row_keys(desk)
-    assert keys[keys.index("font_scale") + 1] == "chrome_scale"
+    assert keys[keys.index("font") + 1] == "chrome"
+    assert "chrome_scale" not in [r[0] for r in desk.settings_layer._settings_rows()]
     for name, kw in (("handheld", {"sys_size": None, "windowed": False}),
                      ("p4", {"panel_diagonal_in": 7.0}),
                      ("guition_s3", {"sys_size": (480, 320), "windowed": False,
                                      "panel_diagonal_in": 3.5})):
-        assert "chrome_scale" not in _row_keys(_desk(tmp_path / name, **kw)), name
+        assert "chrome" not in _row_keys(_desk(tmp_path / name, **kw)), name
 
 
 def test_chrome_size_steps_live_and_persists(tmp_path):
     ws = _desk(tmp_path)
     assert ws.look.chrome_scale == 0 and ws.layout.cs == 1     # the board's default
-    ws.settings_layer.step_row("chrome_scale", 1)
+    _appearance(ws)._step("chrome", 1)
     assert ws.layout.cs == 2 and ws.layout.fs == 1             # text stays 1x
     assert ws.system.get("chrome_scale") == 2
     again = _desk(tmp_path)                                    # the same store, rebooted
     assert again.look.chrome_scale == 2 and again.layout.cs == 2
-    again.settings_layer.step_row("chrome_scale", 1)
+    _appearance(again)._step("chrome", 1)
     assert again.layout.cs == 1 and again.system.get("chrome_scale") == 1
 
 
@@ -365,8 +371,8 @@ def test_no_stored_choice_takes_chrome_under_the_floor_or_past_the_panel(tmp_pat
 
 def test_switching_chrome_size_matches_booting_at_it(tmp_path):
     """The relayout contract on the browser's desk (1024x600, no declared
-    glass): CHROME SIZE 2x changed from the Settings window renders exactly
-    what a desk that boots with 2x stored renders."""
+    glass): CHROME SIZE 2x changed from the Appearance window renders
+    exactly what a desk that boots with 2x stored renders."""
     from runtime.host_app import ConsoleDriver
 
     def settle(ws, drv):
@@ -378,18 +384,18 @@ def test_switching_chrome_size_matches_booting_at_it(tmp_path):
     ref = _desk(tmp_path / "boot")
     ref.bar_layer._clock_text = lambda: "10:30"
     drv = ConsoleDriver(ref)
-    ref.open_settings()
+    _appearance(ref)
     settle(ref, drv)
     reference = bytes(ref.sys_canvas._buf)
 
     ws = _desk(tmp_path / "live")
     ws.bar_layer._clock_text = lambda: "10:30"
     drv = ConsoleDriver(ws)
-    ws.open_settings()
+    app = _appearance(ws)
     settle(ws, drv)
-    ws.wm._install(ws.wm._wins["settings"].ctx)     # what input dispatch does
+    ws.wm._install(ws.wm._wins["appearance"].ctx)   # what input dispatch does
     try:
-        ws.settings_layer.step_row("chrome_scale", 1)
+        app._step("chrome", 1)
     finally:
         ws.wm._install(ws.wm._root_ctx)
     settle(ws, drv)

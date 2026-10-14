@@ -103,13 +103,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 adopt_packages, package, theme_names,
                                 forget_package)
 try:
-    from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PICTURE_FILE,
-                              derived_of, font_files, keys_of,
+    from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
+                              PICTURE_FILE, derived_of, font_files, keys_of,
                               manifest, minified, overlay, read_look, wall_keys)
     from moy_store_base import cart_path
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
-                                      PICTURE_FILE, derived_of, font_files,
+                                      PETME128, PICTURE_FILE, derived_of, font_files,
                                       keys_of, manifest, minified, overlay,
                                       read_look, wall_keys)
     from runtime.moy_store_base import cart_path
@@ -169,6 +169,9 @@ class Appearance:
     # The wallpaper id of the theme's picture: the My Art entry, which stands
     # for Paint's picture (the wallpaper copy) wherever wallpapers are picked.
     PICTURE = BUILTIN_NS + ".my_art"
+    # change()'s wallpaper value for the source theme's own wallpaper: its
+    # cart or its picture, whichever it names (the page's undo of a try).
+    THEIRS = ""
 
     # Paint's idle debounce (artwork.PaintAppLayer.AUTOSAVE_S, #108): `custom`
     # is written once the changes have settled this long; a failing store
@@ -201,7 +204,7 @@ class Appearance:
         # theme's `ui` font needs on this board's glass, 1 for petme128. It
         # lifts the effective scale, never the requested one.
         self.text_floor = 1
-        # The REQUESTED chrome scale (Settings -> CHROME SIZE, persisted), one
+        # The REQUESTED chrome scale (Appearance -> CHROME SIZE, persisted), one
         # of `ws.chrome_scales` or 0 for the board's default. It lifts chrome
         # above the tap floor; it can never take it below.
         self.chrome_scale = 0
@@ -257,6 +260,10 @@ class Appearance:
         self._refused = set()
         self.theme_note = None          # the last refusal: (name, rc)
         self._editing = None            # (kind, name) EDIT FILE opened
+        # Moves with every change to custom's bytes but the editor's own
+        # save: an open EDIT FILE buffer with no edits reloads on it.
+        self.file_gen = 0
+        self._styles = {}               # (source, store gen) -> frame style
 
     # -- wallpaper discovery -------------------------------------------------
 
@@ -418,7 +425,8 @@ class Appearance:
           "accent"     an accent's A (`ui.theme_accents`), None the source's own
           "tint"       a tint's name (`ui.theme_tints`), None for none
           "wallpaper"  a wallpaper cart's id, PICTURE (Paint's picture,
-                       copied into the package) or None (NONE)
+                       copied into the package), None (NONE) or THEIRS
+                       (the source's own)
           "frame"      a `frame` value, None the source's
           "font"       a `fonts` value (role -> file), None the source's;
                        the files it names are copied in
@@ -451,6 +459,9 @@ class Appearance:
                 over.pop(key, None)
             else:
                 over[key] = value
+        elif value == self.THEIRS:
+            over.pop("wallpapers", None)
+            over.pop("images", None)
         elif value == self.PICTURE:
             pic = self._paint_picture()
             if pic is None:
@@ -465,7 +476,7 @@ class Appearance:
             return rc
         if kind == "wallpaper":
             ws = self.ws
-            if value is not None and value != self.PICTURE:
+            if value not in (None, self.PICTURE, self.THEIRS):
                 # A deliberate pick is the kid's "try again" (#160): a
                 # struck-out wallpaper gets a fresh three strikes.
                 guard = getattr(ws, "wallpaper_guard", None)
@@ -500,6 +511,7 @@ class Appearance:
                 c.put(n, fetched[n])
             c.files = need
         c.dirty = True
+        self.file_gen += 1
         c.font_moved = c.font_moved or kind == "font"
         c.wall_moved = c.wall_moved or kind == "wallpaper"
         self._unsaved = True
@@ -519,6 +531,84 @@ class Appearance:
                 return {}
             self._adopt_custom(c)
         return dict(c.look)
+
+    # The WINDOW STYLE and FONT rows' presets (phase 6 step 7), each a whole
+    # `frame` or `fonts` value; a package's own `.fnt` is EDIT FILE's.
+    FRAMES = ("classic", "tab", "platinum", "win9x", "flat")
+    FONTS = ("tiny5", PETME128)
+    _FONT_VALUES = {"tiny5": {"ui": "tiny5.fnt", "title": "tiny5.fnt"},
+                    PETME128: {"ui": PETME128, "title": PETME128}}
+
+    def preset(self, kind, name):
+        """change()'s value for preset `name` of the WINDOW STYLE (`frame`)
+        or FONT (`font`) row; None stays None (the source's own)."""
+        if name is None:
+            return None
+        if kind == "frame":
+            if name not in self.FRAMES:
+                raise ValueError(name)
+            return {"style": name}
+        if kind == "font":
+            return dict(self._FONT_VALUES[name])
+        return name
+
+    def choices(self):
+        """What the Appearance page's rows show, a dict: `theme` and
+        `variant`; `store`, the active theme is an installed package;
+        `from`, custom's source (None off custom, or once the file as saved
+        is the source); `accent` an accent's A and `tint` a tint's name,
+        each None for the theme's own; `frame`, the style its windows draw;
+        `font`, the FONTS preset its `ui` font is, None for a font of its
+        own; `wallpaper`, the wallpaper shown; `picture`, for the theme's
+        picture, "mine" (Paint's, copied by a pick) or "theme" (the
+        package's own); `chrome`, the chrome scale, and `chromes`, the
+        panel's choices. The page reads it when `look_gen` moves."""
+        name = self.theme_name
+        lk = (self.custom_look() or {}) if name == CUSTOM else {}
+        c = self._cust if name == CUSTOM else None
+        pic = None
+        if self.wallpaper_id == self.PICTURE:
+            mine = c is not None and c.over.get("images", DROP) is not DROP
+            pic = "mine" if mine else "theme"
+        return {"theme": name, "variant": self.theme_variant,
+                "store": name not in THEME_NAMES and name != CUSTOM,
+                "from": lk.get("from"), "accent": lk.get("accent"),
+                "tint": lk.get("tint"), "frame": self._frame_style(c, lk),
+                "font": self._font_preset(), "wallpaper": self.wallpaper_id,
+                "picture": pic, "chrome": self.effective_chrome_scale(),
+                "chromes": tuple(self.ws.chrome_scales)}
+
+    def _frame_style(self, c, lk):
+        """The `style` of the active theme's `frame`: custom's own where a
+        change set it, else its source's, read once per source."""
+        if c is not None:
+            f = c.over.get("frame", DROP)
+            if f is DROP and "from" not in lk:
+                f = keys_of(c.theme)["frame"]
+            if f is not DROP:
+                return f.get("style", "classic") if type(f) is dict else "classic"
+        src = lk.get("from") or self.theme_name
+        key = (src, self._pkg_gen)
+        got = self._styles.get(key)
+        if got is None:
+            b = self._source(src)
+            if b is not None and src in THEME_NAMES:
+                b = _uimod.theme_custom(b, None, None)[1]
+            f = keys_of(b)["frame"] if b is not None else DROP
+            got = f.get("style", "classic") if type(f) is dict else "classic"
+            self._styles = {key: got}
+        return got
+
+    def _font_preset(self):
+        """The FONTS preset the live `ui` font is, None for a font of the
+        theme's own."""
+        fid = _uimod.font("ui")[0]
+        if not fid:
+            return PETME128
+        for key in _FONTS:
+            if _FONTS[key] == fid:
+                return "tiny5" if key[1] == "tiny5.fnt" else None
+        return None
 
     def tick(self, dt):
         """Once per frame, before the redraw gate (`Workstation.frame`): apply
@@ -609,6 +699,35 @@ class Appearance:
         """This look when (kind, name) is the file EDIT FILE opened, else
         None: what the text app's editor handle reports its saves to."""
         return self if self._editing == (kind, name) else None
+
+    def file_text(self):
+        """custom's theme.json as the look holds it, unwritten change and
+        all: what an open buffer with no edits reloads when `file_gen`
+        moves. None off custom."""
+        c = self._cust
+        if self.theme_name != CUSTOM or c is None or c.theme is None:
+            return None
+        return c.theme.decode()
+
+    def file_write(self, text):
+        """Write custom's theme.json as `text`, the editor's save whether
+        its gate passed it or not: into the package's folder, as a change's
+        commit writes it. Never the project-file save, whose journal a
+        package must not carry -- a theme package is flat data (the carts
+        repository refuses any other file, and the browser's export zips
+        the folder). None, else the error."""
+        ws = self.ws
+        store = getattr(ws, "store", None)
+        save = getattr(ws.carts_store, "save_package", None)
+        if store is None or save is None or not store.writable():
+            return "no store"
+        files = {_THEME_MAIN: text.encode() if isinstance(text, str) else text}
+        path = self._custom_path()
+        try:
+            store.call(lambda: save(path, files, (), False))
+        except Exception as exc:  # noqa: BLE001 -- the editor badges it
+            return _err_text(exc)
+        return None
 
     def file_check(self, text):
         """The editor's gate for custom's theme.json: (ok, note, text), the
@@ -953,7 +1072,7 @@ class Appearance:
         return scale
 
     def set_chrome_scale(self, scale, persist=True):
-        """Set the requested chrome scale (Settings -> CHROME SIZE), relayout the
+        """Set the requested chrome scale (Appearance -> CHROME SIZE), relayout the
         desktop through the same cascade a font-scale change takes, and (by
         default) persist it. Text is untouched: the system canvas keeps its font
         scale."""
@@ -961,16 +1080,6 @@ class Appearance:
         self.ws._relayout()
         if persist:
             self.ws.system.set("chrome_scale", self.chrome_scale)
-
-    def cycle_chrome_scale(self, d):
-        """Step CHROME SIZE by d through the panel's choices, from the scale the
-        chrome is at now; applies + persists immediately."""
-        opts = self.ws.chrome_scales
-        if not opts:
-            return
-        cur = self.effective_chrome_scale()
-        i = opts.index(cur) if cur in opts else 0
-        self.set_chrome_scale(opts[(i + d) % len(opts)], persist=True)
 
     def set_font_scale(self, scale, persist=True):
         """Set the system-UI font scale (clamped to FONT_SCALES), relay the effective
@@ -1361,6 +1470,8 @@ class Appearance:
         if fid is not None and _uimod.font_info(fid) is not None:
             return fid
         pkg, f = key
+        if f == PETME128:
+            return 0
         if pkg is None:
             src = _uimod.font_file(f)
         else:

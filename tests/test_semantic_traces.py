@@ -2319,6 +2319,19 @@ def roles_trace(ws):
     say("engine", type(i.runtimes()).__name__, i.memory() is None or len(i.memory()) == 2,
         i.fit("wasm", 0, 0, False), len(i.chip()))
 
+    # -- the Appearance page's rows (docs/theming_2026-09.md §9 phase 6 step 7)
+    t = ctx.theme
+    ch = t.choices()
+    say("choices", ch["theme"], ch["variant"], ch["frame"], ch["tint"],
+        tuple(ch["chromes"]) == tuple(ws.chrome_scales))
+    say("change", t.change("tint", "grey"), t.change("frame", "flat"))
+    ws.look.tick(0.0)
+    ch = t.choices()
+    say("changed", t.name(), ch["tint"], ch["frame"])
+    t.set_chrome_scale(ch["chrome"])
+    say("chrome", t.choices()["chrome"] == ch["chrome"])
+    say("edit file", t.edit_file())
+
     _c_called(ws.app_abi, c_before)
     uncalled = [r + "." + v for r, v in ROWS if (r + "." + v) not in CALLED]
     say("uncalled", " ".join(uncalled) or "-")
@@ -2499,6 +2512,11 @@ op 7
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2
+choices custom dark classic None True
+change 0 0
+changed custom grey flat
+chrome True
+edit file True
 uncalled -
 """
 
