@@ -22,6 +22,11 @@ def _ema(cur, sample):
     return float(sample) if cur <= 0 else cur + (sample - cur) * 0.15
 
 
+# The PERF fields the console's own frame measures (perf_push).
+_CONSOLE_METERS = ("draw", "flush", "logic", "render", "chrome", "wmr", "wmw",
+                   "wms", "home", "tick", "miss")
+
+
 class PerfMeters:
 
     def _init_perf(self):
@@ -214,7 +219,7 @@ class PerfMeters:
         name = cart.get("title") or cart.get("path") or "?"
         return (name, self._fps, self._flush_ms, self._draw_ms)
 
-    def perf_push(self, loop):
+    def perf_push(self, loop, front=False):
         """The console's half of the PERF line into the kernel's sampler
         (native/moy_kernel/moy_perf.c), on the frame a sample is due: the
         cart, the phase EMAs, the windowed WM's and the launcher's splits,
@@ -225,10 +230,19 @@ class PerfMeters:
         this window may answer, so a fullscreen cart never inherits the
         desktop's last number. `net` is spent by its one reader, here. The
         tick model's misses are this window's, against a baseline that
-        belongs to the scheduler that counted them (a new run counts from 0)."""
+        belongs to the scheduler that counted them (a new run counts from 0).
+
+        `front`: a kernel run took the frame (moy_play's front), so no
+        console frame runs to measure: the half names the cart and leaves
+        every meter of the console's absent."""
         ws = self
         cart = self.cart
         loop.perf_cart(cart.get("title") if cart else None)
+        if front:
+            for name in _CONSOLE_METERS:
+                loop.perf(name, None)
+            loop.perf("net", self.perf_net())
+            return
         loop.perf("draw", self._draw_ms)
         loop.perf("flush", self._flush_ms)
         loop.perf("logic", self._upd_ms)

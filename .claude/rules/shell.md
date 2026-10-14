@@ -271,7 +271,9 @@ Record and gates: #206, #207, #208.
 
 - **ONE `PERF` line, one producer, every board.** The kernel writes it
   (`native/moy_kernel/moy_perf.c`, from its loop's account stage, the
-  console pushing its half with `ws.perf_push` when a sample is due) and
+  console pushing its half with `ws.perf_push` when a sample is due, and once
+  when a kernel run takes the frame, whose PERF names the cart and leaves the
+  console's meters `-`) and
   `runtime/perf_line.py` holds the field table and the parser; it is written
   only under PERF DIAG, like every periodic line (kid mode writes none). **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with

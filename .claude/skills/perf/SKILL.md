@@ -32,7 +32,8 @@ equal across an A/B:
   With it off a board writes no periodic line at all -- no PERF, no diag tick,
   no AUDIORATE, no SD trace (owner call 2026-09-30: every line is garbage the
   collector stops the frame for) -- so that fps is read off the drawn-frame
-  counter (`ws._frames_drawn`, the one PERF's `fps=` is taken from) across 2 s
+  counter (`pump.drawn`, the kernel loop's, the one PERF's `fps=` is taken
+  from: the console's frames and a kernel run's in front) across 2 s
   windows. `--diag` turns the diag on and reads the PERF lines for the phase
   ms; the on-glass helpers (`tests/on_glass.py`'s `perf_diag`) arm it too,
   because the suites' floors were set with it on. Say which. DIAG SD LOG stays

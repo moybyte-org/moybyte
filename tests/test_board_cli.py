@@ -320,15 +320,21 @@ class WS:
 
 
 class Pump:
-    """FramePump.last: the board's ticks_ms at the top of the current frame,
-    which is where a dev command runs."""
+    """The board's `pump`: `last`, its ticks_ms at the top of the current
+    frame, which is where a dev command runs, and `drawn`, the frames drawn
+    (here the console's own)."""
 
-    def __init__(self, clock):
+    def __init__(self, clock, ws):
         self.clock = clock
+        self.ws = ws
 
     @property
     def last(self):
         return int(self.clock.now * 1000)
+
+    @property
+    def drawn(self):
+        return self.ws._frames_drawn
 
 
 class Wire:
@@ -343,7 +349,7 @@ class Wire:
         self.ws, self.clock = ws, clock
         self.ch = DevChannel(ws, types.SimpleNamespace(
             place=lambda x, y: None, down=False),
-            env={"comp": comp, "pump": Pump(clock)})
+            env={"comp": comp, "pump": Pump(clock, ws)})
         self.to_host = b""
         self.pending = b""
         self.sent = []
@@ -587,7 +593,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
                  for t in moy_loop.trace_log().split() if t.startswith("say[PERF")]
         if lines:
             out += lines
-            reads.append((f * 1000 // 60, ws._frames_drawn))
+            reads.append((f * 1000 // 60, moy_loop.drawn()))
     moy_loop.unregister()
     perf = [parse_perf(l)["fps"][0] for l in out]
     counter = [p4_perf.window_fps(a, b) for a, b in zip(reads, reads[1:])]

@@ -53,3 +53,32 @@ def test_the_frame_and_flush_brackets_use_the_microsecond_clock():
     assert "self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)" in body
     assert "self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)" in body
 
+
+
+def test_a_run_in_front_names_its_cart_and_leaves_the_console_meters_absent(tmp_path):
+    """A kernel run in front (moy_play's front) makes no console frame, so the
+    console's half of the PERF line is pushed once, at the bind: it names the
+    cart, and every meter only a console frame takes reads absent, never a
+    stale launcher number."""
+    from ws_helpers import build_ws, open_cart
+    ws = build_ws(tmp_path)
+    open_cart(ws, "Coin Quest")
+    ws._draw_ms = ws._flush_ms = 5.0
+
+    class Loop:
+        def __init__(self):
+            self.v = {}
+
+        def perf_cart(self, title):
+            self.v["cart"] = title
+
+        def perf(self, name, value):
+            self.v[name] = value
+
+    loop = Loop()
+    ws.perf_push(loop, front=True)
+    assert loop.v.pop("cart") == "Coin Quest"
+    assert loop.v.pop("net") is None
+    assert loop.v == {k: None for k in ("draw", "flush", "logic", "render",
+                                        "chrome", "wmr", "wmw", "wms", "home",
+                                        "tick", "miss")}

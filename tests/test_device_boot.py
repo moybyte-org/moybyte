@@ -839,7 +839,8 @@ def test_every_board_emits_through_the_one_sampler(board):
     """No board writes a PERF line of its own. It had three producers with three
     shapes; the one writer is the kernel's (moy_perf.c), sampled from the
     loop's account stage on every board, and the console only pushes its half
-    (`ws.perf_push`) on the frame a sample is due."""
+    (`ws.perf_push`) on the frame a sample is due, and once when a kernel run
+    takes the frame."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
     src = runtime_text(path)
     # A FORMAT is a string literal starting "PERF " -- AST, so the prose about

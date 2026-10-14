@@ -6,7 +6,7 @@ there is no line at all, and whatever reads one turns the diag on for its
 measurement and puts it back. The writer is the kernel's
 (native/moy_kernel/moy_perf.c); this file is the reader.
 `tools/p4_perf.py --diag` reads the line for #66's per-phase numbers (its
-default, the shipping fps, reads the same `_frames_drawn` counter with the diag
+default, the shipping fps, reads the same drawn-frame counter with the diag
 off), so the line is a CONTRACT -- and until 2026-08-28 it was three contracts
 wearing one name:
 

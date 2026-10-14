@@ -94,7 +94,8 @@ class Desktop:
                             kick_at_tail=kick_at_tail)
         moy_glass.loop_bind(self.comp)
         if hasattr(moy_glass, "front"):
-            ws.front_bind = _front_binder(ws, self.comp, game, sys_canvas, moy_glass)
+            ws.front_bind = _front_binder(ws, self.comp, game, sys_canvas, moy_glass,
+                                          moy_loop)
         cursor = _cursor_delta
 
         def handle_input():
@@ -154,29 +155,35 @@ class Desktop:
         return self
 
 
-def _front_binder(ws, comp, game, sys_canvas, glass):
+def _front_binder(ws, comp, game, sys_canvas, glass, loop):
     """`ws.front_bind`: give the kernel's Player this compositor as the ends
     of a run in the loop's foreground (moy_glass.front), answering whether it
     took. A banded board whose game canvas IS the panel presents it as is; a
     DSI board scales the game canvas into console mode's rect, which the
     desk world (a window's run) and a cart-declared view leave to the
-    console."""
-    if game is sys_canvas:
-        return lambda: glass.front(comp)
-
+    console. A bind that took pushes the console's half of the PERF line
+    once for the run: the console's frame does not run while it is in front."""
     def bind():
-        vp = getattr(ws.wm, "play_viewport", None)
-        g = vp() if vp is not None else None
-        if g is None:
-            return False
-        ox, oy, scale = g
-        smooth = bool(getattr(type(sys_canvas), "_smooth", True))
-        return glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+        if game is sys_canvas:
+            took = glass.front(comp)
+        else:
+            vp = getattr(ws.wm, "play_viewport", None)
+            g = vp() if vp is not None else None
+            if g is None:
+                return False
+            ox, oy, scale = g
+            smooth = bool(getattr(type(sys_canvas), "_smooth", True))
+            took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+        if took:
+            ws.perf_push(loop, front=True)
+        return took
     return bind
 
 
 class _FrameClock:
-    """`pump.last` for the tools: the kernel loop's frame-top clock."""
+    """`pump.last` and `pump.drawn` for the tools: the kernel loop's
+    frame-top clock, and its drawn frames -- the console's and a kernel run's
+    in front, the count PERF's `fps=` is taken from."""
 
     def __init__(self, loop):
         self._loop = loop
@@ -184,6 +191,10 @@ class _FrameClock:
     @property
     def last(self):
         return self._loop.frame_at()
+
+    @property
+    def drawn(self):
+        return self._loop.drawn()
 
 
 def make_service(ws, loop):
