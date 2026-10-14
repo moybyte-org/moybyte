@@ -210,3 +210,37 @@ def test_files_lists_a_package_as_a_theme_whose_door_is_appearance(tmp_path):
     files._enter_rows("projects")
     assert "dusk.moy" not in files._rows
     assert files.route("dusk.moy", "themes") == "appearance"
+
+
+def test_an_installed_package_as_the_carts_repository_ships_it(tmp_path):
+    """The fixture is shaped as moybyte-org/carts publishes a theme: the
+    manifest, theme.json, its font, the font's licence beside it (`X.txt`
+    beside `X.fnt`), the theme's licence naming the font, and a cover. The
+    roster lists it once, as a theme; Files lists it under THEMES; the
+    store's sweep leaves it whole; picking it loads its font and nothing
+    else of the folder."""
+    names = sorted(p.name for p in FIXTURE.iterdir())
+    assert names == ["LICENSES.txt", "cover.png", "manifest.json", "theme.json",
+                     "tiny5.fnt", "tiny5.txt"]
+    for fnt in FIXTURE.glob("*.fnt"):
+        assert "SIL OPEN FONT LICENSE Version 1.1" in fnt.with_suffix(".txt").read_text()
+        assert fnt.name in (FIXTURE / "LICENSES.txt").read_text()
+    ws = build_ws(tmp_path)
+    dst = _put(ws)
+    rows = [c for c in ws.carts.all
+            if str(c.get("path", "")).replace("\\", "/").endswith("/dusk.moy")]
+    assert len(rows) == 1 and rows[0].get("type") == "theme"
+    assert ws.look.theme_names().count(NAME) == 1
+    files = ws._apps_by_id["files"]
+    assert ws.open_app(files)
+    files.open()
+    files._enter_rows("themes")
+    assert files._rows == ("dusk.moy",)
+    from runtime import moy_seed
+    before = {p.name: p.read_bytes() for p in dst.iterdir()}
+    moy_seed.sweep_store(ws.carts_root)
+    assert {p.name: p.read_bytes() for p in dst.iterdir()} == before
+    ws.carts.rescan()
+    ws.look.set_theme(NAME)
+    assert ws.look.theme_name == NAME and moy_ui.theme_installed() == NAME
+    assert [k for k in appearance._FONTS if k[0] == NAME] == [(NAME, "tiny5.fnt")]

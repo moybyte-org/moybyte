@@ -3,8 +3,8 @@ phase 4 step 3).
 
 * The committed font is what tools/make_tiny5_font.py builds from its
   committed glyph source, and that source names its pinned upstream.
-* The tables embed the file; `night` names it for `ui` and `title`, and
-  `mono` stays petme128.
+* The tables embed the file and its licence text; `night` names it for `ui`
+  and `title`, and `mono` stays petme128.
 * The text-size floor: what it answers across the lineup, and the effective
   font scale it lifts.
 * A theme switch installs the roles and the print font, rebuilds the layout,
@@ -40,14 +40,14 @@ def _fnt():
 # -- the file -------------------------------------------------------------------
 
 def test_the_committed_font_is_what_the_tool_builds():
-    with open(tool.TXT) as f:
+    with open(tool.GLYPHS) as f:
         assert tool.build(f.read()) == _fnt(), (
             "native/moy_ui/themes/tiny5.fnt is not what tools/make_tiny5_font.py "
-            "builds from tiny5.txt; run `python tools/make_tiny5_font.py`")
+            "builds from tiny5.glyphs; run `python tools/make_tiny5_font.py`")
 
 
 def test_the_glyph_source_names_its_pinned_upstream():
-    with open(tool.TXT) as f:
+    with open(tool.GLYPHS) as f:
         head = f.read(600)
     assert tool.SOURCE in head and tool.SHA256 in head
     assert re.search(r"google/fonts/blob/[0-9a-f]{40}/ofl/tiny5/", tool.SOURCE)
@@ -75,6 +75,24 @@ def test_the_tables_embed_the_file_and_night_names_it():
     assert dict(ui.theme_fonts("night")) == {"ui": "tiny5.fnt", "title": "tiny5.fnt"}
     with open(os.path.join(THEMES, "night.json")) as f:
         assert "mono" not in json.load(f)["fonts"]
+
+
+def test_every_seed_font_ships_its_licence_in_the_image():
+    """As in a published theme package, `X.txt` beside a font `X.fnt` is
+    its licence's full text; the tables embed it with the font, so every
+    image that carries the font carries its licence."""
+    seeds = [f for f in os.listdir(THEMES) if f.endswith(".json")]
+    fonts = set()
+    for name in seeds:
+        with open(os.path.join(THEMES, name)) as f:
+            fonts |= set(json.load(f).get("fonts", {}).values())
+    assert fonts
+    for fnt in fonts:
+        with open(os.path.join(THEMES, fnt[:-len(".fnt")] + ".txt"), "rb") as f:
+            text = f.read()
+        assert ui.font_file(fnt[:-len(".fnt")] + ".txt") == text
+    assert b"SIL OPEN FONT LICENSE Version 1.1" in ui.font_file("tiny5.txt")
+    assert b"Copyright 2022-2024 The Tiny5 Project Authors" in ui.font_file("tiny5.txt")
 
 
 # -- the text-size floor -----------------------------------------------------------

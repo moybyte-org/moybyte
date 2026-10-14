@@ -165,8 +165,9 @@ icon sheets. It never holds a cart or a script.
   a role a later phase defines is additive: an older reader ignores it, so it
   needs no bump. Renaming or removing a key, a role or a value's meaning bumps
   `format`. There is no migration pass, which is the store rule.
-- **`name`** (required): 1 to 24 of `a-z`, `0-9`, `_`, `-`. A seed's name is
-  reserved.
+- **`name`** (required): 1 to 24 of `a-z`, `0-9`, `_`, `-`, starting with a
+  letter or a digit (the carts repository's theme ids, so a theme made on a
+  console can be published). A seed's name is reserved.
 - **`inherits`**: one parent, by name (§5). A theme that names none inherits
   the default. A seed's key: a user package is a standalone copy and carries
   none (owner, 2026-10-14).
@@ -643,12 +644,13 @@ builds least:
 Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
   - **The file.** `tools/make_tiny5_font.py` samples the pinned Google Fonts
     TrueType (default instance) onto its 128-unit pixel grid into
-    `native/moy_ui/themes/tiny5.txt`, the glyphs as rows, and builds
+    `native/moy_ui/themes/tiny5.glyphs`, the glyphs as rows, and builds
     `tiny5.fnt` from that: a 6×7 box, ascent 6, line 8 (the font's own
     ascender and descender add up to 9; 8 is petme128's rhythm and centres
     its five-row capitals in the line). GPOS kerning is not carried. A seed
-    package's font files sit beside it in `themes/`, and the tables embed
-    every file a seed names (`ui.font_file`).
+    package's font files sit beside it in `themes/`, each font `X.fnt` with
+    its licence's full text `X.txt`, and the tables embed every font a seed
+    names and its licence (`ui.font_file`).
   - **Coverage: ASCII.** The font covers `0x20`–`0x7E`. Format 1 indexes a
     glyph by byte and text is UTF-8, so #135's accented Latin and Cyrillic,
     which Tiny5 draws, cannot be addressed until a codepoint map does it
@@ -1210,7 +1212,14 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      `win95` are; goldens byte-identical otherwise.
      As built: the folder's stem is the name, so a theme folder is
      `<name>.moy` with no author part (the name grammar has no dot), as the
-     carts repository's folders are. `ui.theme_resolve(src)` answers (rc,
+     carts repository's folders are. An installed package holds
+     `manifest.json`, `theme.json`, its fonts and sheets, licence texts
+     (`*.txt`: `X.txt` beside a font `X.fnt` is that font's licence, as the
+     carts repository's validator holds it) and optionally `cover.png`;
+     the loader reads only the files `theme.json` names. The seeds keep the
+     same rule: `native/moy_ui/themes/tiny5.txt` is Tiny5's OFL text, and
+     the tables embed it beside `tiny5.fnt` (`ui.font_file("tiny5.txt")`).
+     `ui.theme_resolve(src)` answers (rc,
      notes, name, dark, light, fonts, layout) -- the package's own fonts, the
      rest as `theme`, `theme_layout` and `theme_home` would after an install
      -- by parsing the bytes into the caller's buffer and resolving them as

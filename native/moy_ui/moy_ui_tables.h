@@ -188,7 +188,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_CONTRAST 30
 #define MOY_THEME_RESERVED 6
 #define MOY_THEME_FONT_ROLES 3
-#define MOY_THEME_FONT_FILES 1  // the seeds' font files
+#define MOY_THEME_FONT_FILES 2  // the seeds' fonts and their licence texts
 #define MOY_THEME_ROLES 51  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3

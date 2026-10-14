@@ -278,13 +278,18 @@ def generate_theme(style, t):
             raise SystemExit("themes/%s.json: named %s, within %d bytes"
                              % (name, name, th["bytes"]))
         seeds.append((name, src))
-    # The seed packages' font files: every file a seed's `fonts` names, from
-    # themes/, in name order.
+    # The seed packages' files: every font a seed's `fonts` names and, as
+    # in a published package, its licence's full text X.txt beside X.fnt,
+    # from themes/, in name order.
     font_files = sorted({f for _n, src in seeds
                          for f in json.loads(src).get("fonts", {}).values()})
     fonts = []
-    for name in font_files:
-        with open(os.path.join(t.dir, "themes", name), "rb") as f:
+    for name in sorted(font_files + [f[:-len(".fnt")] + ".txt" for f in font_files]):
+        path = os.path.join(t.dir, "themes", name)
+        if not os.path.isfile(path):
+            raise SystemExit("themes/%s: a seed's font ships its licence's full text "
+                             "beside it, and this is missing" % name)
+        with open(path, "rb") as f:
             fonts.append((name, f.read()))
     root_pkg = json.loads(seeds[0][1])
     root = root_pkg["colors"]
@@ -339,7 +344,8 @@ def generate_theme(style, t):
          "#define MOY_THEME_CONTRAST %d" % th["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
          "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
-         "#define MOY_THEME_FONT_FILES %d  // the seeds' font files" % len(fonts),
+         "#define MOY_THEME_FONT_FILES %d  // the seeds' fonts and their licence texts"
+         % len(fonts),
          "#define MOY_THEME_ROLES %d  // the tokens, then the content roles" % len(roles),
          "#define MOY_THEME_METRICS %d" % len(metrics),
          "#define MOY_THEME_EFFECTS %d" % len(th["effects"]),
@@ -505,6 +511,12 @@ def generate_theme(style, t):
              % ", ".join(str(len(s)) for _n, s in seeds))
     for i, (name, data) in enumerate(fonts):
         c.append("// themes/%s" % name)
+        if name.endswith(".txt"):
+            lines = data.decode("ascii").splitlines(True)
+            c.append("static const uint8_t font_%d[%d] =" % (i, len(data) + 1))
+            c.extend("    %s" % _c_str(ln) for ln in lines[:-1])
+            c.append("    %s;" % _c_str(lines[-1]))
+            continue
         c.append("static const uint8_t font_%d[%d] = {" % (i, len(data)))
         for k in range(0, len(data), 16):
             c.append("    %s," % ", ".join("0x%02x" % b for b in data[k:k + 16]))

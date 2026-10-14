@@ -48,7 +48,8 @@ enum {
     MOY_THEME_BIG = 1,        // over MOY_THEME_BYTES
     MOY_THEME_SYNTAX = 2,     // not JSON this reader takes, or nested too deep
     MOY_THEME_NEWER = 3,      // `format` missing, not an integer, or newer than ours
-    MOY_THEME_NAME = 4,       // `name` missing, too long, or outside [a-z0-9_-]
+    MOY_THEME_NAME = 4,       // `name` missing, too long, outside [a-z0-9_-], or not
+                              // starting with a letter or a digit
     MOY_THEME_TAKEN = 5,      // an install under a seed's name
     MOY_THEME_CHAIN = 6,      // `inherits` names no package, cycles, or runs too deep
     MOY_THEME_NOMEM = 7,
@@ -168,8 +169,8 @@ const char *moy_theme_probe_name(void);
 const char *moy_theme_probe_font(int role);
 extern const size_t moy_theme_pkg_bytes;
 
-// A seed package's font file by name (the tables embed every file a seed's
-// `fonts` names): its bytes and *len, or NULL.
+// A seed package's file by name (the tables embed every font a seed's `fonts`
+// names, and each font X.fnt's licence text X.txt): its bytes and *len, or NULL.
 const uint8_t *moy_theme_font_file(const char *name, size_t n, size_t *len);
 
 // Compile one surface's text (docs/theming_2026-09.md §4.4) into *out.

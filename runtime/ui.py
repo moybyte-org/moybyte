@@ -198,7 +198,8 @@ def cart_text(on):
 
 
 def font_file(name):
-    """A seed theme package's font file by name, as bytes, or None."""
+    """A seed theme package's file by name -- a font, or font X.fnt's licence
+    text X.txt -- as bytes, or None."""
     return _C.font_file(name)
 
 

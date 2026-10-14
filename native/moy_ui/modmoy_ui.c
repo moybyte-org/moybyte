@@ -431,7 +431,7 @@ static mp_obj_t ui_font(mp_obj_t role) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_obj, ui_font);
 
-// font_file(name) -> bytes, or None: a seed package's font file.
+// font_file(name) -> bytes, or None: a seed package's font, or a font's licence text.
 static mp_obj_t ui_font_file(mp_obj_t name) {
     size_t n, len;
     const char *s = mp_obj_str_get_data(name, &n);

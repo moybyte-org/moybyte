@@ -5,12 +5,12 @@
 Two steps, so the font in the tree rebuilds from the tree alone:
 
   extract  Tiny5's TrueType file (Google Fonts, pinned below by commit and
-           SHA-256) -> native/moy_ui/themes/tiny5.txt, its glyphs as rows of
+           SHA-256) -> native/moy_ui/themes/tiny5.glyphs, its glyphs as rows of
            `#` and `.`. Samples each pixel's centre against the outline of the
            default instance (wght 400, wdth 100, BLED/JITT/ROND 0), whose
            points sit on a 128-unit grid: one unit square is one pixel. Needs
            fontTools (install on demand; in no extra).
-  build    tiny5.txt -> native/moy_ui/themes/tiny5.fnt. The default; Python
+  build    tiny5.glyphs -> native/moy_ui/themes/tiny5.fnt. The default; Python
            alone. tests/test_tiny5_font.py holds the committed file to it.
 
 The font covers ASCII 0x20-0x7E, the bytes the format can name that UTF-8
@@ -27,7 +27,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-TXT = os.path.join(ROOT, "native", "moy_ui", "themes", "tiny5.txt")
+GLYPHS = os.path.join(ROOT, "native", "moy_ui", "themes", "tiny5.glyphs")
 FNT = os.path.join(ROOT, "native", "moy_ui", "themes", "tiny5.fnt")
 
 SOURCE = ("https://github.com/google/fonts/blob/"
@@ -74,12 +74,12 @@ def extract(ttf):
                 glyphs[name].draw(pen)
                 row += "#" if pen.getResult() else "."
             out.append(row)
-    with open(TXT, "w") as f:
+    with open(GLYPHS, "w") as f:
         f.write("\n".join(out) + "\n")
 
 
 def parse(text):
-    """(w, h, line, ascent, [(byte, advance, rows)]) from tiny5.txt's text."""
+    """(w, h, line, ascent, [(byte, advance, rows)]) from tiny5.glyphs' text."""
     head = {}
     glyphs = []
     cur = None
@@ -101,7 +101,7 @@ def parse(text):
 
 
 def build(text):
-    """The font file tiny5.txt's text describes."""
+    """The font file tiny5.glyphs' text describes."""
     w, h, line, ascent, glyphs = parse(text)
     first = glyphs[0][0]
     count = len(glyphs)
@@ -130,10 +130,10 @@ def main(argv):
     if cmd == "extract":
         extract(argv[2])
         cmd = "build"
-    data = build(open(TXT).read())
+    data = build(open(GLYPHS).read())
     if cmd == "check":
         if open(FNT, "rb").read() != data:
-            raise SystemExit("%s is not what %s builds" % (FNT, TXT))
+            raise SystemExit("%s is not what %s builds" % (FNT, GLYPHS))
         return
     with open(FNT, "wb") as f:
         f.write(data)

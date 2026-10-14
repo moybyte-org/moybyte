@@ -37,7 +37,7 @@ separate question from what is committed.
 | AXS15231B init register values (Guition panel) | `firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c` | [esphome/esphome](https://github.com/esphome/esphome) | MIT (their Python half) | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
-| Tiny5 (the default theme's UI font) | `native/moy_ui/themes/tiny5.txt`, `native/moy_ui/themes/tiny5.fnt` | [Google Fonts `ofl/tiny5`](https://github.com/google/fonts/tree/main/ofl/tiny5), from [Gissio/font_tiny5](https://github.com/Gissio/font_tiny5) | OFL-1.1 | **Yes** — rasterised to a bitmap font |
+| Tiny5 (the default theme's UI font) | `native/moy_ui/themes/tiny5.glyphs`, `native/moy_ui/themes/tiny5.fnt`, its licence `native/moy_ui/themes/tiny5.txt`; `tests/fixtures/themes/dusk.moy/tiny5.fnt` | [Google Fonts `ofl/tiny5`](https://github.com/google/fonts/tree/main/ofl/tiny5), from [Gissio/font_tiny5](https://github.com/Gissio/font_tiny5) | OFL-1.1 | **Yes** — rasterised to a bitmap font |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
@@ -341,10 +341,14 @@ The MIT permission notice, reproduced in full so it travels with the data:
 
 ### 3.1a Tiny5 — the default theme's UI font
 
-`native/moy_ui/themes/tiny5.txt` (the glyphs as pixel rows) and
+`native/moy_ui/themes/tiny5.glyphs` (the glyphs as pixel rows),
 `native/moy_ui/themes/tiny5.fnt` (the font file the console loads, built from
-it), embedded in `native/moy_ui/moy_ui_tables.c` and so in every firmware
-image and the web runner.
+them) and `native/moy_ui/themes/tiny5.txt` (the licence below, verbatim from
+Google Fonts' `ofl/tiny5/OFL.txt` at the same commit). The font and its
+licence text are embedded in `native/moy_ui/moy_ui_tables.c`, and so in every
+firmware image and the web runner (`moy_ui.font_file("tiny5.txt")` reads the
+licence back). `tests/fixtures/themes/dusk.moy/` carries the same pair, as a
+theme package does.
 
 - **Upstream:** Tiny5 by Stefan Schmidt, the Google Fonts copy at commit
   `8dc5b4fcbbf3303402a6f3b587976c73cf4e212e`:
@@ -356,7 +360,8 @@ image and the web runner.
 - **Modified: yes** — a Modified Version in the OFL's sense (its format
   changed): `tools/make_tiny5_font.py` samples the default instance's ASCII
   glyphs (`0x20`–`0x7E`) onto their pixel grid and writes them as the console's
-  bitmap font format. The two files stay under the OFL, with the notice below.
+  bitmap font format. The glyph source and the font file stay under the OFL,
+  with the notice below.
 
 The licence, reproduced in full so it travels with the font:
 

@@ -213,8 +213,10 @@ static int role_of(const char *name) {
     return find_name(moy_theme_role_names, MOY_THEME_ROLES, name);
 }
 
+// A theme's name: 1 to MOY_THEME_NAME_MAX of [a-z0-9_-], starting with a letter or
+// a digit (the carts repository's theme ids, so a console's theme can be published).
 static int name_ok(const char *s, int n, int over) {
-    if (n < 1 || over || n > MOY_THEME_NAME_MAX) {
+    if (n < 1 || over || n > MOY_THEME_NAME_MAX || s[0] == '_' || s[0] == '-') {
         return 0;
     }
     for (int i = 0; i < n; i++) {

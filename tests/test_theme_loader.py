@@ -127,6 +127,8 @@ def test_a_recolour_inherits_the_rest():
     (b'{"format": 1, "name": "Has Caps"}', NAME),
     (b'{"format": 1, "name": "' + b"x" * 25 + b'"}', NAME),
     (b'{"format": 1, "name": 7}', NAME),
+    (b'{"format": 1, "name": "_t"}', NAME),
+    (b'{"format": 1, "name": "-t"}', NAME),
     (b'{"format": 1, "name": "night"}', TAKEN),
     (b'{"format": 1, "name": "t", "inherits": "nowhere"}', CHAIN),
     (b'{"format": 1, "name": "t", "inherits": "t"}', CHAIN),
@@ -136,6 +138,17 @@ def test_what_the_reader_refuses(src, rc):
     assert moy_ui.theme_install(_src("kept"))[0] == OK
     assert moy_ui.theme_install(src)[0] == rc
     assert moy_ui.theme_installed() == "kept"
+
+
+def test_a_name_is_the_carts_repositorys_theme_id():
+    """1 to 24 of [a-z0-9_-], starting with a letter or a digit: what
+    moybyte-org/carts' validator takes as a theme's id, so any theme the
+    loader takes can be published."""
+    for name in ("9", "a-b_c", "0" + "x" * 23):
+        assert moy_ui.theme_install(_src(name))[0] == OK, name
+        assert moy_ui.theme_installed() == name
+    for name in ("_a", "-a", "a.b", "a b", "\u00e9", "x" * 25):
+        assert moy_ui.theme_install(_src(name))[0] == NAME, name
 
 
 def test_a_theme_over_the_byte_cap_is_refused():
