@@ -33,6 +33,7 @@
 #include "py/objstr.h"
 #include "py/objtuple.h"
 #include "py/qstr.h"
+#include "py/objmodule.h"
 #include "py/runtime.h"
 
 // ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
@@ -954,8 +955,11 @@ static const char *settings_key(mp_obj_t key, size_t *len) {
     return s;
 }
 
+// The builtin json, straight from the module table: an import of an
+// extensible built-in searches every sys.path entry first, a filesystem
+// stat each (15 ms on a T-Deck, 32 ms on a card-booted Guition S3).
 static mp_obj_t json_call(qstr name, mp_obj_t arg) {
-    mp_obj_t json = mp_import_name(MP_QSTR_json, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+    mp_obj_t json = mp_module_get_builtin(MP_QSTR_json, true);
     return mp_call_function_1(mp_load_attr(json, name), arg);
 }
 

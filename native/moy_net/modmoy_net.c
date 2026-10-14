@@ -8,6 +8,7 @@
 #include "py/objlist.h"
 #include "py/objstr.h"
 #include "py/mperrno.h"
+#include "py/objmodule.h"
 #include "py/runtime.h"
 
 #include "moy_json.h"
@@ -169,6 +170,13 @@ static mp_obj_t mod_encode_batch(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_encode_batch_obj, 3, 4,
                                            mod_encode_batch);
 
+// The builtin json, straight from the module table: an import of an
+// extensible built-in searches every sys.path entry first, a filesystem
+// stat each (15 ms on a T-Deck, 32 ms on a card-booted Guition S3).
+static mp_obj_t json_module(void) {
+    return mp_module_get_builtin(MP_QSTR_json, true);
+}
+
 static mp_obj_t loads(mp_obj_t fn, const char *a, const char *b) {
     if (a == NULL) {
         return mp_const_none;
@@ -183,8 +191,7 @@ static mp_obj_t mod_decode_batch(mp_obj_t body) {
     if (moy_sync_decode(b.buf, b.len, &e) != MOY_SYNC_OK) {
         return mp_const_none;
     }
-    mp_obj_t json = mp_import_name(MP_QSTR_json, mp_const_none,
-                                   MP_OBJ_NEW_SMALL_INT(0));
+    mp_obj_t json = json_module();
     mp_obj_t fn = mp_load_attr(json, MP_QSTR_loads);
     mp_obj_t t[4] = {loads(fn, e.v, e.v_end), loads(fn, e.root, e.root_end),
                      loads(fn, e.ops, e.ops_end), loads(fn, e.pin, e.pin_end)};
@@ -554,9 +561,7 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
     if (moy_sync_batch(b.buf, b.len, &bt) != MOY_SYNC_OK) {
         return mp_const_none;
     }
-    mp_obj_t fn = mp_load_attr(mp_import_name(MP_QSTR_json, mp_const_none,
-                                              MP_OBJ_NEW_SMALL_INT(0)),
-                               MP_QSTR_loads);
+    mp_obj_t fn = mp_load_attr(json_module(), MP_QSTR_loads);
     mp_obj_t t[3] = {
         MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files : MP_QSTR_carts),
         loads(fn, bt.pin, bt.pin_end),
