@@ -134,7 +134,7 @@ class StorybookLayout(ListShellLayout):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.band_h = 24 * fs
-        x = 6 * fs
+        x = self.cx + 6 * fs
         y = self.cy + 3 * fs
         bh = self.band_h - 6 * fs
         # Band buttons (which show depends on the view).
@@ -149,16 +149,16 @@ class StorybookLayout(ListShellLayout):
         # live-ish preview strip.
         self.cell = 8 * fs
         self.lh = 10 * fs
-        self.tx = 8 * fs
+        self.tx = self.cx + 8 * fs
         self.ty = self.cy + self.band_h * 2 + 3 * fs
-        self.cols = min(MAX_LINE, max(1, (self.w - 2 * self.tx) // self.cell))
+        self.cols = min(MAX_LINE, max(1, (self.cw - 16 * fs) // self.cell))
         self.rows = MAX_TEXT_LINES
         self.text_area = (self.tx - 2 * fs, self.ty - 2 * fs,
                           self.cols * self.cell + 4 * fs,
                           self.rows * self.lh + 4 * fs)
         pv_y = self.ty + self.rows * self.lh + 6 * fs
         self.preview = (self.tx - 2 * fs, pv_y,
-                        self.w - 2 * (self.tx - 2 * fs),
+                        self.cw - 12 * fs,
                         max(20 * fs, self.cy + self.ch - pv_y - 4 * fs))
 
 class StorybookAppLayer(ListShellApp):
@@ -585,10 +585,10 @@ class StorybookAppLayer(ListShellApp):
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (0, lay.cy, lay.w, lay.band_h))
+        _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
         fs = lay.fs
         if self.mode == "shelf":
-            cv.print(self.status[:max(1, lay.w // (8 * fs) - 2)],
+            cv.print(self.status[:max(1, lay.cw // (8 * fs) - 2)],
                      lay.status_x, lay.cy + 8 * fs, th["title_ink"], 1)
             self._draw_rows(cv, self._stories(), "+ NEW STORY",
                             lambda c: (c.get("title") or "STORY").upper())
@@ -596,7 +596,7 @@ class StorybookAppLayer(ListShellApp):
             self._button(cv, "SHELF", lay.btn1)
             if not self.read_only:
                 self._button(cv, "PLAY", lay.btn2)
-            cv.print(self.status[:max(1, (lay.w - lay.btn3[0]) // (8 * fs))],
+            cv.print(self.status[:max(1, (lay.cx + lay.cw - lay.btn3[0]) // (8 * fs))],
                      lay.btn3[0], lay.cy + 8 * fs, th["title_ink"], 1)
             self._draw_rows(cv, self._pages(),
                             None if self.read_only else "+ NEW PAGE",

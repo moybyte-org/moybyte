@@ -141,9 +141,12 @@ class FullscreenStackWM:
 
     # What a theme's bars may place here (docs/shell_layout_2026-10.md §10):
     # per mode, the widgets this WM has a value for, and the edges a bar may
-    # take. The composer (shell_layout.resolve) drops the rest.
-    LAYOUT_CATALOGUE = {"console": tuple(w for w in _LAYOUT_WIDGETS if w != "chips")}
-    LAYOUT_EDGES = ("top", "bottom")
+    # take. The composer (shell_layout.resolve) drops the rest. No bar draws
+    # the month grid, so `calendar` has a value on no WM; `chips` (the
+    # taskbar's window chips) has none in console mode.
+    LAYOUT_CATALOGUE = {"console": tuple(w for w in _LAYOUT_WIDGETS
+                                         if w not in ("chips", "calendar"))}
+    LAYOUT_EDGES = ("top", "bottom", "left", "right")
 
     def layout_catalogue(self):
         """The widgets a bar places in the current mode."""

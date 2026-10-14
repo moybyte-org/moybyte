@@ -129,11 +129,11 @@ class GetCartsLayout(ListShellLayout):
         fs = self.fs
         self.top_h = 24 * fs
         hy, hh = self.cy + 2 * fs, self.top_h - 4 * fs
-        self.head = (4 * fs, hy, 50 * fs, hh)
-        self.head2 = (self.w - 70 * fs, hy, 66 * fs, hh)
+        self.head = (self.cx + 4 * fs, hy, 50 * fs, hh)
+        self.head2 = (self.cx + self.cw - 70 * fs, hy, 66 * fs, hh)
         self.status_h = 14 * fs
         body_y = self.cy + self.top_h + 2 * fs
-        self.body = (4 * fs, body_y, self.w - 8 * fs,
+        self.body = (self.cx + 4 * fs, body_y, self.cw - 8 * fs,
                      max(60 * fs, self.cy + self.ch - self.status_h - body_y
                          - 4 * fs))
         bx, by, bw, bh = self.body
@@ -991,7 +991,7 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         self.hits.clear()
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (0, lay.cy, lay.w, lay.top_h))
+        _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         ph = self.phase
         if ph == "list":
             cv.print("PICK A CART", 8 * fs, lay.cy + 8 * fs, th["title_ink"], 1)
@@ -1003,7 +1003,7 @@ class GetCartsAppLayer(ListShellApp):
                 self._chip(cv, th, "<", lay.head, "back")
             title = self.cur["cart"]["name"] if self.cur is not None else "GET CARTS"
             x = lay.head[0] + lay.head[2] + 8 * fs
-            cv.print(title[:max(1, (lay.w - x) // (8 * fs) - 1)], x,
+            cv.print(title[:max(1, (lay.cx + lay.cw - x) // (8 * fs) - 1)], x,
                      lay.cy + 8 * fs, th["title_ink"], 1)
             if ph == "cart":
                 self._draw_cart(cv, th)
@@ -1013,8 +1013,8 @@ class GetCartsAppLayer(ListShellApp):
                 self._draw_message(cv, th)
             self._draw_buttons(cv, th)
         sy = lay.cy + lay.ch - lay.status_h
-        cv.rect(0, sy, lay.w, lay.status_h, self.names["black"])
-        cv.print(self._status_text()[:max(1, lay.w // (8 * fs) - 1)], 4 * fs,
+        cv.rect(lay.cx, sy, lay.cw, lay.status_h, self.names["black"])
+        cv.print(self._status_text()[:max(1, lay.cw // (8 * fs) - 1)], lay.cx + 4 * fs,
                  sy + 3 * fs, self.names["yellow"], 1)
 
     def _chip(self, cv, th, label, rect, verb):

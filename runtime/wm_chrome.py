@@ -12,11 +12,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
 
 try:
-    from layout_base import bar_y as _bar_y
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_y as _bar_y
-
-try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -178,16 +173,43 @@ class WindowChrome:
 
     # -- the taskbar chips (open windows in the desktop bar) --------------------
 
+    def _chips_cell(self):
+        """(bar, cell) of the desk's `chips` widget in the root layout's
+        packing (shell_layout.pack), or None where no bar places it."""
+        for bar in self._root_ctx.layout.bars:
+            for c in bar[3]:
+                if c[0] == "chips":
+                    return bar, c
+        return None
+
     def _chip_rects(self):
-        """One chip per open window, centered in the OS bar between the launcher's
-        selected-name zone and the right status cluster. Returns
-        [(kind, rect, label)] in stack order; deterministic, so draw + hit-test
-        share it without stored state."""
+        """One chip per open window, in the `chips` widget's cell: across a
+        top or bottom bar a labelled chip each, packed from the cell's start
+        in a left slot, its end in a right one, and centred on the bar in the
+        centre slot (today's taskbar); down a side bar a square chip each
+        with the label's first letter. They stop short of the cell's end.
+        Returns [(kind, rect, label)] in stack order, on the root canvas;
+        deterministic, so draw + hit-test share it without stored state."""
         if not self._order:
             return []
+        got = self._chips_cell()
+        if got is None:
+            return []
+        (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
         lay = self._root_ctx.layout
         fs = lay.fs
         out = []
+        if edge in ("left", "right"):
+            side = 16 * lay.cs
+            x = bx + (bw - side) // 2
+            y = by + cy
+            end = by + cy + ch - 4 * fs
+            for k in self._order:
+                if y + side > end:
+                    break                              # out of bar space -- stop
+                out.append((k, (x, y, side, side), self._win_title(self._wins[k])[:1]))
+                y += side + 2 * fs
+            return out
         widths = []
         labels = []
         for k in self._order:
@@ -195,12 +217,18 @@ class WindowChrome:
             labels.append(label)
             widths.append(_ui.text_width(label, fs, "ui") + 2 * 4 * fs)
         total = sum(widths) + (len(widths) - 1) * 2 * fs
-        left_edge = self._root_canvas.w // 4          # clear of the selected name
-        x = max(left_edge, (self._root_canvas.w - total) // 2)
-        y = _bar_y(self._root_canvas.h, lay.status_h) + 1 * fs   # on the OS bar
-        h = lay.status_h - 2 * fs
+        if slot == 1:
+            x = max(cx, (bw - total) // 2)
+        elif slot == 2:
+            x = max(cx, cx + cw - total)
+        else:
+            x = cx
+        x += bx
+        y = by + 1 * fs
+        h = bh - 2 * fs
+        end = bx + cx + cw - 4 * fs
         for i, k in enumerate(self._order):
-            if x + widths[i] > lay.clock_x - 4 * fs:
+            if x + widths[i] > end:
                 break                                  # out of bar space -- stop
             out.append((k, (x, y, widths[i], h), labels[i]))
             x += widths[i] + 2 * fs
@@ -219,8 +247,10 @@ class WindowChrome:
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
-            bh = self._root_ctx.layout.status_h
-            self.ws.bar_layer._strip_moved(sc, 0, _bar_y(sc.h, bh), sc.w, bh)
+            got = self._chips_cell()
+            if got is not None:
+                bx, by, bw, bh = got[0][1]
+                self.ws.bar_layer._strip_moved(sc, bx, by, bw, bh)
         if not quiet or sig != self._chip_sig:
             self._chip_sig = sig
             self._chip_streak = 0
@@ -240,7 +270,8 @@ class WindowChrome:
             if not _ui.paint(sc, th, (x, y, w, h), "bar.item", state):
                 sc.rect(x, y, w, h, bg)
                 sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
-            sc.print(label, x + 4 * fs, y + (h - line_h) // 2, fg, 1)
+            tx = x + (w - _ui.text_width(label, fs, "ui")) // 2
+            sc.print(label, tx, y + (h - line_h) // 2, fg, 1)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a

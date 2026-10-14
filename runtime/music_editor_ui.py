@@ -169,18 +169,19 @@ class MusicLayout(LayoutBase):
         # PLAY/LOOP row anchors to its floor, and the list gains rows to fill the
         # band between ----------------------------------------------------------
         top = self.cy
+        x0 = self.cx
         ctl_y = top + 1 * fs
         self.title_y = top + 3 * fs
-        self.view_btn = (2 * fs, ctl_y, 46 * fs, 14 * fs)
-        self.obj_prev = (52 * fs, ctl_y, 16 * fs, 14 * fs)
-        self.obj_next = (134 * fs, ctl_y, 16 * fs, 14 * fs)
-        self.title_x = 74 * fs
-        self.spd_x = 160 * fs
-        self.speed_dn = (206 * fs, ctl_y, 16 * fs, 14 * fs)
-        self.speed_up = (228 * fs, ctl_y, 16 * fs, 14 * fs)
-        self.status_x = 250 * fs
+        self.view_btn = (x0 + 2 * fs, ctl_y, 46 * fs, 14 * fs)
+        self.obj_prev = (x0 + 52 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.obj_next = (x0 + 134 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.title_x = x0 + 74 * fs
+        self.spd_x = x0 + 160 * fs
+        self.speed_dn = (x0 + 206 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.speed_up = (x0 + 228 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.status_x = x0 + 250 * fs
         bot_y = self.cy + self.ch - 42 * fs       # PLAY/LOOP row (base 198)
-        self.list_x = _MU_LIST_X * fs
+        self.list_x = x0 + _MU_LIST_X * fs
         self.list_y0 = top + 16 * fs
         self.row_h = _MU_ROW_H * fs
         self.rows = max(4, (bot_y - 4 * fs - self.list_y0) // self.row_h)
@@ -190,10 +191,10 @@ class MusicLayout(LayoutBase):
         self.pad_x = self.list_x + self.list_w + 10 * fs
         self.pad_y = self.list_y0
         self.pad_w, self.pad_h, self.pad_gap = 68 * fs, 22 * fs, 4 * fs
-        self.play_btn = (8 * fs, bot_y, 100 * fs, 24 * fs)
-        self.loop_btn = (116 * fs, bot_y, 100 * fs, 24 * fs)
-        self.undo_btn = (220 * fs, bot_y, 46 * fs, 24 * fs)
-        self.redo_btn = (268 * fs, bot_y, 46 * fs, 24 * fs)
+        self.play_btn = (x0 + 8 * fs, bot_y, 100 * fs, 24 * fs)
+        self.loop_btn = (x0 + 116 * fs, bot_y, 100 * fs, 24 * fs)
+        self.undo_btn = (x0 + 220 * fs, bot_y, 46 * fs, 24 * fs)
+        self.redo_btn = (x0 + 268 * fs, bot_y, 46 * fs, 24 * fs)
 
     def pad_rect(self, col, row):
         """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..5)."""

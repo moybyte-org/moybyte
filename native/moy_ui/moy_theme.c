@@ -1166,6 +1166,10 @@ const char *moy_theme_installed(void) {
     return s_have ? s_slot->name : NULL;
 }
 
+void moy_theme_uninstall(void) {
+    s_have = 0;
+}
+
 static int seed_of(const char *name, size_t n) {
     for (int i = 0; i < MOY_THEME_SEEDS; i++) {
         if (strlen(moy_theme_seed_names[i]) == n

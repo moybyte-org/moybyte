@@ -945,13 +945,6 @@ class _ChList(ctypes.Structure):
                 ("text", ctypes.c_char * 1536)]
 
 
-class _ChLay(ctypes.Structure):
-    _fields_ = [("clock_x", ctypes.c_int16), ("text_dy", ctypes.c_int16),
-                ("cs", ctypes.c_int16), ("wifi", ctypes.c_int16 * 4),
-                ("batt", ctypes.c_int16 * 4), ("menu", ctypes.c_int16 * 4),
-                ("close", ctypes.c_int16 * 4)]
-
-
 _CP, _CI, _CS = ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p
 _CSIGS = (
     ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B, _CI], None),
@@ -962,8 +955,7 @@ _CSIGS = (
     ("moy_chrome_banner", [_CP, _CI, _CI, _CI, _CS, _CS, _B], None),
     ("moy_chrome_strip_crash", [_CP, _CI, _CI, _CS, _CS], None),
     ("moy_chrome_strip_band", [_CP, _CI, _CI, _B], None),
-    ("moy_chrome_strip_right", [_CP, _CP, _CS, _CS, _B], None),
-    ("moy_chrome_strip_title", [_CP, _CS, _CI, _CI, _CI], None),
+    ("moy_chrome_strip_cell", [_CP, _CS, _CI, _CI, _CI, _CI, _CI, _CI, _CS, _B], None),
     ("moy_chrome_menu", [_CP, _CP, _CP, _CI, _CI, _CI, _CI, _CI, _CI, _CI, _CI], None),
     ("moy_chrome_about", [_CP, _CI, _CI, _CI, _CS], None),
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
@@ -1071,23 +1063,10 @@ def chrome_strip_band(cw, bar_h, light):
     return _chrome("moy_chrome_strip_band", int(cw), int(bar_h), bool(light))
 
 
-def chrome_strip_right(lay, clock, wifi, show_x):
-    """`lay` None: the fixed game-canvas cluster; else (clock_x, text_dy, cs,
-    wifi_rect, batt_rect, menu_rect, close_rect)."""
-    lp = None
-    if lay is not None:
-        lp = _ChLay()
-        lp.clock_x, lp.text_dy, lp.cs = int(lay[0]), int(lay[1]), int(lay[2])
-        for k, r in zip(("wifi", "batt", "menu", "close"), lay[3:7]):
-            a = getattr(lp, k)
-            for i in range(4):
-                a[i] = int(r[i])
-        lp = ctypes.cast(ctypes.byref(lp), ctypes.c_void_p)
-    return _chrome("moy_chrome_strip_right", lp, _b(clock), _b(wifi), bool(show_x))
-
-
-def chrome_strip_title(title, zx, zw, dy):
-    return _chrome("moy_chrome_strip_title", _b(title), int(zx), int(zw), int(dy))
+def chrome_strip_cell(kind, rect, cs, dy, s, across):
+    x, y, w, h = rect
+    return _chrome("moy_chrome_strip_cell", _b(kind), int(x), int(y), int(w), int(h),
+                   int(cs), int(dy), _b(s), bool(across))
 
 
 def chrome_menu(rows, sel, x, y, w, h, fs, cs):

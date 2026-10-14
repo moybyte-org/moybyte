@@ -329,9 +329,9 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     drv.frame(1 / 30)
     assert calls[0] == 0                        # unchanged state -> cache reused
@@ -420,9 +420,9 @@ def test_cart_bar_reuses_cache_when_state_unchanged(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     # Several more frames at the same state -> the strip is already built + clean.
     for _ in range(5):
@@ -437,9 +437,9 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     ws.look.set_icon_sheet(ws.look.icon_sheet)              # bumps _bar_cache_gen -> key changes
     drv.frame(1 / 30)
@@ -458,9 +458,9 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
@@ -530,9 +530,9 @@ def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     for _ in range(5):
         ws._dirty = True            # force a screen repaint (#44's own gate is not
@@ -551,9 +551,9 @@ def test_zoned_bar_rerenders_on_app_switch(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     ws.launcher.sel = 0
     ws.open_in_editor()              # maker landing -> screen "menu"
@@ -579,9 +579,9 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     ws._open_paint()                 # EditorApp.set_tab bumps zone_gen
     ws._dirty = True
@@ -605,9 +605,9 @@ def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     ws.launcher.nav2d(1, 0)           # move the selection -> zone_gen bumps
     ws._dirty = True
@@ -1120,7 +1120,7 @@ def test_bar_strip_slots_stay_bounded(tmp_path):
     for _ in range(6):                          # six distinct destinations
         ws._sys_canvas = root.new_layer(root.w, root.h)
         ws.bar_layer._draw_status_strip("settings")
-    slots = ws.bar_layer._bar_strips["settings"]
+    slots = ws.bar_layer._bar_strips["settings"][0]
     assert len(slots) <= _bl._BAR_STRIP_SLOTS
 
 

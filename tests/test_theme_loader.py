@@ -375,7 +375,7 @@ def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
 # -- the layout (docs/shell_layout_2026-10.md §5, §9) -----------------------------
 
 LAY = TH["layout"]
-TODAY = ("top", 18, ("zone",), (), ("clock", "close", "menu", "wifi", "battery"), ())
+TODAY = ("top", 18, ("zone",), ("chips",), ("clock", "close", "menu", "wifi", "battery"), ())
 
 
 def _bar(edge="top", **kw):

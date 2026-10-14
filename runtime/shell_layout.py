@@ -17,8 +17,17 @@ half runs here, on the bars it hands over:
 Each drop and replacement is noted. Nothing here raises. Runs at a theme
 switch, a `layout_theme` write and a mode switch -- never per frame.
 
-A LEAF: it imports nothing from the runtime tree.
+`pack` is the other half: the cells of every bar on one surface, the
+arithmetic a relayout runs once and the layout object keeps (§14).
+
+A LEAF beside `layout_base`, the one module it imports, whose bar rects it
+packs.
 """
+
+try:
+    from layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars as _bars
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars as _bars
 
 EDGES = ("top", "bottom", "left", "right")
 REQUIRED = ("menu", "zone", "close")
@@ -43,10 +52,12 @@ CELLS = {
 }
 WIDGETS = tuple(CELLS)
 _TEXT_H = 8
+# The widgets that take their bar's slack beyond their minimum cell.
+FLEX = ("zone", "title", "chips", "spacer")
 
 # The last resort when even the default seed's layout does not resolve on
 # this glass: today's one top bar, placed as is.
-FALLBACK = (("top", 18, ("zone",), (), ("clock", "close", "menu", "wifi", "battery"), ()),)
+FALLBACK = DEFAULT_BARS
 
 
 def _place(bars, w, h, cs, catalogue, edges, text_w, notes):
@@ -125,3 +136,139 @@ def resolve(bars, default, w, h, cs, catalogue, edges, text_w=None, notes=None):
         notes.append("the default does not fit: today's bar")
         got = FALLBACK
     return got, tuple(notes)
+
+
+# -- packing: the cells of a surface's bars ------------------------------------
+
+def _along(name, horiz, cs, fs, clock_w, text):
+    """A widget's minimum length along its bar, in pixels."""
+    if name == "text":
+        return text if horiz else _TEXT_H * fs
+    if name == "clock" and horiz:
+        return clock_w
+    cell = CELLS[name][0 if horiz else 1]
+    if cell is None:
+        return 0
+    return (cell[0] if horiz else cell[1]) * cs
+
+
+def _run(items, start, gap):
+    for it in items:
+        it[3] = start
+        start += it[1] + gap
+
+
+def _ends(items, gap):
+    n = 0
+    for it in items:
+        n += it[1]
+    return n + gap * (len(items) - 1) if items else 0
+
+
+def _grow(items, slack):
+    """Share `slack` among the flex widgets of `items`, the remainder to the
+    last of them."""
+    flex = [it for it in items if it[2]]
+    if not flex or slack <= 0:
+        return
+    each = slack // len(flex)
+    for it in flex:
+        it[1] += each
+    flex[-1][1] += slack - each * len(flex)
+
+
+def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None):
+    """The bars of `of` (default: the bars in force) on a `w` x `h` surface
+    whose BAR_ROWS-row bar is `rows` tall, at chrome scale `cs` and font
+    scale `fs`: ((edge, rect, dy, cells), ...), the rect on the surface,
+    `dy` what re-centres the bar's text line in it, and each cell
+    (name, (x, y, w, h), text, slot) in BAR coordinates, `text` a `text`
+    widget's string and None for the rest, `slot` 0, 1 or 2 for left,
+    center and right.
+
+    Along a bar, `left` packs from its start and `right` from its end, a
+    `2 * cs` margin at each end and gap between cells; `center` centres on
+    the middle. The flex widgets (`FLEX`) share the slack of the run they
+    face: up to the centre's cells when the centre holds a fixed one, else
+    the whole gap between the two ends. A centre of flex widgets alone
+    bounds nothing: its cell runs from the bar's first quarter to the right
+    slot, and what it holds centres on the bar (today's taskbar chips).
+    Across, a 16-pixel icon sits 1 pixel in on an 18-row bar and keeps that
+    inset centred on a thicker one; a side bar centres it."""
+    if of is None:
+        of = _bars()
+    rects = bar_rects_of(w, h, rows, of)
+    m = g = 2 * cs
+    ic = 16 * cs
+    out = []
+    for bar, rect in zip(of, rects):
+        edge = bar[0]
+        horiz = edge in ("top", "bottom")
+        length = rect[2] if horiz else rect[3]
+        thick = rect[3] if horiz else rect[2]
+        texts = list(bar[5]) if len(bar) > 5 else []
+        slots = []
+        for slot in bar[2:5]:
+            items = []
+            for name in slot:
+                text = None
+                tw = 0
+                if name == "text":
+                    text = texts.pop(0) if texts else ""
+                    tw = (text_w(text) if text_w is not None else 8 * len(text)) * fs
+                # [name, length, flex, position, text, slot]
+                items.append([name, _along(name, horiz, cs, fs, clock_w, tw),
+                              name in FLEX, 0, text, len(slots)])
+            slots.append(items)
+        left, center, right = slots
+        floats = bool(center) and all(it[2] for it in center)
+        if center and not floats:
+            cstart = (length - _ends(center, g)) // 2
+            if left:
+                _grow(left, cstart - g - (m + _ends(left, g)))
+            if right:
+                cend = cstart + _ends(center, g)
+                _grow(right, (length - m - _ends(right, g)) - g - cend)
+        else:
+            a = m + _ends(left, g) + (g if left and right else 0)
+            slack = length - m - _ends(right, g) - a
+            both = left + right
+            _grow(both, slack)
+        _run(left, m, g)
+        _run(right, length - m - _ends(right, g), g)
+        rstart = right[0][3] if right else length - m
+        if floats:
+            q = length // 4
+            for it in center:
+                it[1] = max(0, rstart - q)
+                it[3] = q
+        else:
+            _run(center, (length - _ends(center, g)) // 2, g)
+        dy = (thick - BAR_ROWS * fs) // 2
+        iy = 1 + (thick - BAR_ROWS * cs) // 2 if horiz else (thick - ic) // 2
+        cells = []
+        for it in left + center + right:
+            name, n, _flex, at, text, slot = it
+            if horiz:
+                if name in ("menu", "close", "wifi", "battery"):
+                    r = (at, iy, ic, ic)
+                elif name in ("zone", "title", "separator"):
+                    r = (at, iy, n, ic)
+                else:
+                    r = (at, 0, n, thick)
+            elif name in ("menu", "close", "wifi", "battery"):
+                r = (iy, at, ic, ic)
+            else:
+                r = (0, at, thick, n)
+            cells.append((name, r, text, slot))
+        out.append((edge, rect, dy, tuple(cells)))
+    return tuple(out)
+
+
+def cell_of(packed, name):
+    """(bar index, cell rect) of the first `name` cell in `packed`, or None."""
+    for i in range(len(packed)):
+        for c in packed[i][3]:
+            if c[0] == name:
+                return i, c[1]
+    return None

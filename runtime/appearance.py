@@ -512,20 +512,22 @@ class Appearance:
             _ui_text_w, notes)
 
     def apply_layout(self):
-        """Resolve `layout()` and put the host's bar where its first bar
-        sits (`Workstation.place_bar`, which relayouts). Runs at a theme
-        switch, a `layout_theme` write and a mode switch; a no-op before the
-        WM and the bar exist."""
+        """Resolve `layout()` and put the host's bars where it says
+        (`Workstation.place_bars`, which relayouts). Runs at a theme switch,
+        a `layout_theme` write and a mode switch; a no-op before the WM and
+        the bar exist. True when the bars moved (the shell relayouted)."""
         ws = self.ws
         self.layout_gen += 1
         if getattr(ws, "wm", None) is None or getattr(ws, "bar_layer", None) is None:
-            return
+            return False
         bars, self.layout_notes = self.layout()
         if bars != self.bars:
             self.bars = bars
             ws._dirty = True
-        if bars[0][0] != _layout_base.bar_edge():
-            ws.place_bar(bars[0][0])
+        if bars != _layout_base.bars_in_force():
+            ws.place_bars(bars)
+            return True
+        return False
 
     def layout_choices(self):
         """The packages whose layout differs from the active theme's: the

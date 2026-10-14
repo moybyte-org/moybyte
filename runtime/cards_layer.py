@@ -182,17 +182,18 @@ class CardsLayout(LayoutBase):
         fs = self.fs
         top = self.cy                 # the content rect, under any bar
         self.body = (self.cx, top, self.cw, self.ch)
-        self.head_glyph = (8 * fs, top + 4 * fs, 14 * fs, 14 * fs)
-        self.head_xy = (26 * fs, top + 4 * fs)
-        self.card_x = _CARD_X * fs
-        self.card_w = self.w - 34 * fs
+        x0, r = self.cx, self.cx + self.cw
+        self.head_glyph = (x0 + 8 * fs, top + 4 * fs, 14 * fs, 14 * fs)
+        self.head_xy = (x0 + 26 * fs, top + 4 * fs)
+        self.card_x = x0 + _CARD_X * fs
+        self.card_w = self.cw - 34 * fs
         self.card_y0 = top + 26 * fs
         self.card_h = _CARD_H * fs
         self.view_bottom = self.cy + self.ch - 8 * fs
-        self.scroll_up = (self.w - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
-        self.scroll_dn = (self.w - 20 * fs, self.view_bottom - 18 * fs,
+        self.scroll_up = (r - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
+        self.scroll_dn = (r - 20 * fs, self.view_bottom - 18 * fs,
                           16 * fs, 14 * fs)
-        self.info_btn = (self.w - 44 * fs, top + 3 * fs, 40 * fs, 14 * fs)
+        self.info_btn = (r - 44 * fs, top + 3 * fs, 40 * fs, 14 * fs)
         self.gap = 2 * fs
         # Per-display card heights (#15): sprite/bg picker cells, icon choices,
         # gauge/count meters -- all scale with the font so the pictures stay tappable.

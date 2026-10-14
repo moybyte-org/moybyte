@@ -220,6 +220,11 @@ def theme_installed():
     return _C.theme_installed()
 
 
+def theme_uninstall():
+    """Drop the installed theme package: only the seeds remain."""
+    _C.theme_uninstall()
+
+
 def font_load(src):
     """(rc, font): load a font file's bytes into a row of its own
     (native/moy_gfx/moy_text.h); font is None when refused."""
@@ -1286,9 +1291,14 @@ def frame_buttons(rect, title_h, title, has_min, fs):
             for b in _C.frame_buttons(rect, title_h, title, has_min, fs)]
 
 
-def frame_band(cv, th, rect, light=False):
-    """The bar's band in the frame's style; `light`: a window's light toolbar."""
-    _C.frame_band(cv, _LOOK if th is _TH else _look(th), rect, light)
+# frame_band's `side`: where the band's edge line goes, facing the content.
+BAND_BOTTOM, BAND_TOP, BAND_RIGHT, BAND_LEFT = 0, 1, 2, 3
+
+
+def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
+    """The bar's band in the frame's style; `light`: a window's light toolbar;
+    `side` the edge line's (a top bar's is its bottom row)."""
+    _C.frame_band(cv, _LOOK if th is _TH else _look(th), rect, light, side)
 
 
 def toolbar(cv, th, rect):

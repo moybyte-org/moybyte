@@ -84,6 +84,16 @@ keeps the matrix a clean product instead of a pile of special cases.
                            then the T-Deck row's surfaces, every one
                            fullscreen at the P4's size. One axis (the mode)
                            from the as-shipped row.
+  p4_1024x600_cs2_fs1_win95bar, p4_1024x600_cs2_fs1_gnomebar,
+  p4_1024x600_cs2_fs1_twobars, tdeck_320x240_fs1_bottombar
+                           the worked examples of docs/shell_layout_2026-10.md
+                           §6 (2, 3, 4 and 6), each a package whose `layout`
+                           the console picks (`layout_theme`): a bottom
+                           taskbar with the chips beside the ≡, a top bar with
+                           the clock centred, a top bar over a bottom verb
+                           strip, and the T-Deck's bottom strip. One axis (the
+                           layout) from the as-shipped P4 row and the T-Deck
+                           row.
 
 The last two were added before theming's first phase
 (`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
@@ -306,6 +316,28 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_console": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, console=True),
+    "p4_1024x600_cs2_fs1_win95bar": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, layout=[
+            {"edge": "bottom", "size": 22,
+             "left": ["menu", "separator", "chips", "zone"],
+             "right": ["close", "wifi", "battery", "clock"]}]),
+    "p4_1024x600_cs2_fs1_gnomebar": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, layout=[
+            {"edge": "top", "size": 18, "left": ["zone"], "center": ["clock"],
+             "right": ["wifi", "battery", "close", "menu"]}]),
+    "p4_1024x600_cs2_fs1_twobars": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, layout=[
+            {"edge": "top", "size": 18, "left": ["title"],
+             "right": ["clock", "close", "menu", "wifi", "battery"]},
+            {"edge": "bottom", "size": 18, "left": ["zone"]}]),
+    "tdeck_320x240_fs1_bottombar": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, layout=[
+            {"edge": "bottom", "size": 18, "left": ["menu", "zone"],
+             "right": ["clock", "close", "battery"]}]),
 }
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every
@@ -317,11 +349,19 @@ _INDEPENDENCE_CONFIG = "big_800x480_fs3_dark"
 def _axes(cfg):
     """The one-line axis description quoted in a failure message."""
     w, h = cfg["sys_size"] or (320, 240)
-    return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s theme=%s" % (
+    return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s theme=%s layout=%s" % (
         w, h, cfg["font_scale"], cfg["variant"],
         ("console" if cfg.get("console") else "windowed") if cfg["windowed"]
         else "fullscreen",
-        cfg["diagonal_in"] or "-", cfg.get("theme", "night"))
+        cfg["diagonal_in"] or "-", cfg.get("theme", "night"),
+        _layout_name(cfg) or "the theme's")
+
+
+def _layout_name(cfg):
+    """The package a config's `layout` is installed as, or None."""
+    if "layout" not in cfg:
+        return None
+    return [k for k, v in CONFIGS.items() if v is cfg][0].rsplit("_", 1)[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +439,7 @@ def _build(cfg, carts_dir):
         str(carts_dir), sys_size=cfg["sys_size"],
         font_scale=cfg["font_scale"], windowed=cfg["windowed"],
         panel_diagonal_in=cfg["diagonal_in"])
+    pick_layout(ws, cfg)
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
     ws.look.set_theme(cfg.get("theme", ws.look.theme_name), persist=False,
@@ -407,6 +448,20 @@ def _build(cfg, carts_dir):
     if len(keep) != len(ws.carts.all):
         ws.carts.apply(keep)            # pin the roster -- see GOLDEN_EXCLUDE
     return ws
+
+
+def pick_layout(ws, cfg):
+    """A config's `layout` is a package beside the seeds that the console
+    picks, the way a kid would (docs/shell_layout_2026-10.md §11); it takes
+    effect at the next theme set."""
+    name = _layout_name(cfg)
+    if name is None:
+        return
+    import moy_ui                      # registered by the runtime package
+    rc, _notes = moy_ui.theme_install(json.dumps(
+        {"format": 1, "name": name, "layout": {"bars": cfg["layout"]}}).encode())
+    assert rc == 0, name
+    ws.system.set("layout_theme", name)
 
 
 def _surface_plan(ws, cfg):
@@ -532,6 +587,7 @@ def capture(config_name, carts_dir):
             out[name] = _render(ws, name, config_name)
     finally:
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
+        _ui().theme_uninstall()        # ...as is the installed package
     return out
 
 

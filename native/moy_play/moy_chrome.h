@@ -134,16 +134,14 @@ void moy_chrome_strip_crash(moy_chrome_list_t *l, int cw, int edit, const char *
 // The band every other bar starts with: `light` is a light band (a window's
 // toolbar under a light theme, or a light theme's bar).
 void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light);
-// The OS-owned right zone. `lay` NULL: the fixed game-canvas cluster; else
-// the responsive layout's rects (each x, y, w, h) and its chrome scale.
-typedef struct {
-    int16_t clock_x, text_dy, cs;
-    int16_t wifi[4], batt[4], menu[4], close[4];
-} moy_chrome_lay_t;
-void moy_chrome_strip_right(moy_chrome_list_t *l, const moy_chrome_lay_t *lay,
-                            const char *clock, const char *wifi, bool show_x);
-// A tool's title in its lent zone (x, w), `dy` below the fixed text line.
-void moy_chrome_strip_title(moy_chrome_list_t *l, const char *title, int zx, int zw, int dy);
+// One bar widget's cell (docs/shell_layout_2026-10.md §4), at (x, y, w, h)
+// of its strip and chrome scale `cs` (0: the canvas's own): `menu`, `close`,
+// `wifi` (`s` its glyph's kind), `battery`, `clock` (`s` "HH:MM"; on a side
+// bar, `across`, two lines in the cell from (x, y)), `title` (`s` cut to the
+// cell's 8px columns), `text` (`s`) and `separator`. A horizontal bar's text
+// sits on its line, `dy` below the 18-row bar's.
+void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y, int w, int h,
+                           int cs, int dy, const char *s, bool across);
 
 // The system menu: `n` rows of `kind` (0 item, 1 header, 2 separator) and
 // `label`, the panel at (x, y, w, h), `sel` the selected row, `fs` its text

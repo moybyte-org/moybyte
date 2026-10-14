@@ -327,9 +327,6 @@ void moy_chrome_banner(moy_chrome_list_t *l, int lw, int fs, int status_h, const
 #define BAR_BATT_X (320 - 2 - BAR_ICON)
 #define BAR_WIFI_X (BAR_BATT_X - BAR_STRIDE)
 #define BAR_CLOCK_X (BAR_WIFI_X - 2 - 5 * 8)
-#define ZONE_GEAR_X (BAR_WIFI_X - BAR_STRIDE)
-#define ZONE_X_X (ZONE_GEAR_X - BAR_STRIDE)
-#define ZONE_CLOCK_X (ZONE_X_X - 2 - 5 * 8)
 
 void moy_chrome_strip_crash(moy_chrome_list_t *l, int cw, int edit, const char *clock,
                             const char *wifi) {
@@ -361,33 +358,44 @@ void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light) 
     }
 }
 
-void moy_chrome_strip_right(moy_chrome_list_t *l, const moy_chrome_lay_t *lay,
-                            const char *clock, const char *wifi, bool show_x) {
-    if (lay == NULL) {
-        print(l, MOY_TEXT_PY, clock, -1, ZONE_CLOCK_X, 3, ink(MOY_INK_CHROME_DIM), 1);
-        icon(l, wifi, BAR_WIFI_X, BAR_Y, 0);
-        icon(l, "batt", BAR_BATT_X, BAR_Y, 0);
-        glyph(l, "menu", ZONE_GEAR_X, BAR_Y, BAR_ICON, BAR_ICON, ink(MOY_INK_CHROME), 0);
-        if (show_x) {
-            icon(l, "close", ZONE_X_X, BAR_Y, 0);
+void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y, int w, int h,
+                           int cs, int dy, const char *s, bool across) {
+    if (strcmp(kind, "menu") == 0) {
+        glyph(l, "menu", x, y, w, h, ink(MOY_INK_CHROME), cs);
+    } else if (strcmp(kind, "close") == 0) {
+        icon(l, "close", x, y, cs);
+    } else if (strcmp(kind, "wifi") == 0) {
+        icon(l, s, x, y, cs);
+    } else if (strcmp(kind, "battery") == 0) {
+        icon(l, "batt", x, y, cs);
+    } else if (strcmp(kind, "clock") == 0 || strcmp(kind, "title") == 0
+               || strcmp(kind, "text") == 0) {
+        // One line on its bar's text row; a title cut to the cell's 8px
+        // columns; on a side bar the clock's hours over its minutes.
+        const char *t = s != NULL ? s : "";
+        bool title = strcmp(kind, "title") == 0, clock = strcmp(kind, "clock") == 0;
+        int lines = 1, max = -1, ty = across ? y : 3 + dy;
+        if (title) {
+            max = w / 8;
+            if (max <= 0) {
+                return;
+            }
+        } else if (clock && across) {
+            if (strlen(t) < 5) {
+                return;
+            }
+            lines = 2;
+            max = 2;
         }
-        return;
-    }
-    int cs = lay->cs;
-    print(l, MOY_TEXT_PY, clock, -1, lay->clock_x, 3 + lay->text_dy, ink(MOY_INK_CHROME_DIM), 1);
-    icon(l, wifi, lay->wifi[0], lay->wifi[1], cs);
-    icon(l, "batt", lay->batt[0], lay->batt[1], cs);
-    glyph(l, "menu", lay->menu[0], lay->menu[1], lay->menu[2], lay->menu[3],
-          ink(MOY_INK_CHROME), cs);
-    if (show_x) {
-        icon(l, "close", lay->close[0], lay->close[1], cs);
-    }
-}
-
-void moy_chrome_strip_title(moy_chrome_list_t *l, const char *title, int zx, int zw, int dy) {
-    int maxc = zw / 8;                          // 8px cells in the lent rect
-    if (maxc > 0) {
-        print(l, MOY_TEXT_PY, title, maxc, zx, 3 + dy, ink(MOY_INK_CHROME_DIM), 1);
+        for (int i = 0; i < lines; i++) {
+            print(l, MOY_TEXT_PY, t + 3 * i, max, x, ty + i * (h / 2), ink(MOY_INK_CHROME_DIM), 1);
+        }
+    } else if (strcmp(kind, "separator") == 0) {
+        if (across) {
+            rect(l, x + 2 * cs, y + h / 2, w - 4 * cs, 1, ink(MOY_INK_CHROME_DIM));
+        } else {
+            rect(l, x + w / 2, y, 1, h, ink(MOY_INK_CHROME_DIM));
+        }
     }
 }
 

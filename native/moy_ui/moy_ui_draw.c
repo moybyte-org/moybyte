@@ -1251,7 +1251,7 @@ static void line_row(draw_t *d, int x, int y, int w, int ci) {
     }
 }
 
-int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light) {
+int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light, int side) {
     draw_t d;
     open_draw(s, &d);
     int look = d.look;
@@ -1263,9 +1263,23 @@ int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light) {
     const moy_ui_shape_t *sh = d.sh;
     int style = sh != NULL && sh->frame[0] ? sh->frame[0] - 1 : MOY_THEME_FRAME_CLASSIC;
     fill(&d, b.x, b.y, b.w, b.h, bg);
+    int across = side == MOY_UI_BAND_LEFT || side == MOY_UI_BAND_RIGHT;
     if (style == MOY_THEME_FRAME_WIN9X) {
-        line_row(&d, b.x, b.y, b.w, moy_ui_token(look, MOY_UI_T_SHADE_HI));
-        line_row(&d, b.x, b.y + b.h - 1, b.w, moy_ui_token(look, MOY_UI_T_SHADE_DARK));
+        int hi = moy_ui_token(look, MOY_UI_T_SHADE_HI);
+        int dark = moy_ui_token(look, MOY_UI_T_SHADE_DARK);
+        if (across) {
+            fill(&d, b.x, b.y, 1, b.h, hi);
+            fill(&d, b.x + b.w - 1, b.y, 1, b.h, dark);
+        } else {
+            line_row(&d, b.x, b.y, b.w, hi);
+            line_row(&d, b.x, b.y + b.h - 1, b.w, dark);
+        }
+    } else if (side == MOY_UI_BAND_TOP) {
+        line_row(&d, b.x, b.y, b.w, line);
+    } else if (side == MOY_UI_BAND_LEFT) {
+        fill(&d, b.x, b.y, 1, b.h, line);
+    } else if (side == MOY_UI_BAND_RIGHT) {
+        fill(&d, b.x + b.w - 1, b.y, 1, b.h, line);
     } else {
         line_row(&d, b.x, b.y + b.h - 1, b.w, line);
     }

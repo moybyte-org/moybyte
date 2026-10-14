@@ -77,14 +77,14 @@ class ListShellLayout:
                              // self.row_h)
 
     def row_rect(self, i):
-        return (4 * self.fs, self.list_y + i * self.row_h,
-                self.w - 8 * self.fs, self.row_h - 2 * self.fs)
+        return (self.cx + 4 * self.fs, self.list_y + i * self.row_h,
+                self.cw - 8 * self.fs, self.row_h - 2 * self.fs)
 
     def rows_view(self):
         """The list's VIEWPORT -- the band row_rect fills, as one rect. The
         scroll model needs the whole band where the draw needs a slot, and both
         must come off the same numbers."""
-        return (4 * self.fs, self.list_y, self.w - 8 * self.fs,
+        return (self.cx + 4 * self.fs, self.list_y, self.cw - 8 * self.fs,
                 self.list_rows * self.row_h)
 
 

@@ -236,7 +236,7 @@ thing in both modes; what differs is only the container a component opens in
 | `menu` | the ≡ glyph | — | the system menu (the popup it is today, in both modes) | 16×16 / 16×16 |
 | `close` | the context-X | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status) | the surface's zone generation | the surface's `zone_tap` | 64×16, flexes / horizontal only |
-| `title` | the surface's title | the title string | — | 24×8 / dropped |
+| `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
 | `clock` | `HH:MM` | the minute | the calendar component | 40×8 / 16×16 (two lines) |
 | `calendar` | the month grid, today marked | the day | — (display) | 112×80 / 112×80 |
 | `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8): the Settings panel as a popover in desktop mode, the Settings page scrolled to it in console mode | 16×16 / 16×16 |
@@ -261,7 +261,8 @@ Additive to format 1 (`docs/theming_2026-09.md` §3: a key the loader did not
 read is additive, no `format` bump). `layout` holds `bars` and resolves
 whole through `inherits` from the nearest package that sets it (§5 there);
 the default seed sets today's bar (example 1; owner, 2026-10-13: one bar is
-the default look). A bar list is never merged by position. There is no
+the default look), the taskbar's chips floating over its middle in desktop
+mode as they always have. A bar list is never merged by position. There is no
 `windows` key (§15), no `home` key (D7: one home) and no `mode` key (§3:
 PLAY is the switch).
 
@@ -269,7 +270,7 @@ PLAY is the switch).
 "layout": {
   "bars": [
     { "edge": "top", "size": 18,
-      "left": ["zone"], "center": [], "right": ["clock", "close", "menu", "wifi", "battery"] }
+      "left": ["zone"], "center": ["chips"], "right": ["clock", "close", "menu", "wifi", "battery"] }
   ]
 }
 ```
@@ -379,10 +380,13 @@ leave the top rows empty AND lose the bottom ones), and a clipped sub-canvas
 handed to the app (a new surface mechanism, which `docs/surface_model_v1.md`
 §8 closes).
 
-**Where the value comes from** (step 3, landed 2026-10-13). One leaf places
-the bar and derives what it leaves: `runtime/layout_base.py`'s `place_bar`,
-`bar_y` and `content_of(w, h, rows)`, imported by the bar, every layout and the
-app heads alike. `BarLayer.bar_rects(where)` and `content_rect(where)` answer it
+**Where the value comes from** (steps 3 and 5, landed 2026-10-13 and
+2026-10-14). One leaf places the bars and derives what they leave:
+`runtime/layout_base.py`'s `place_bars`, `bar_rects_of` and `content_of(w, h,
+rows)` (each bar `size * rows // 18` thick, `rows` the 18-row bar at the
+surface's scale), imported by the bars, every layout and the app heads alike;
+a window's layouts take its band instead (`in_window`: today's bar at the
+window's top, whose zone alone draws, whatever the theme's layout). `BarLayer.bar_rects(where)` and `content_rect(where)` answer it
 per surface; `LayoutBase` carries `cx, cy, cw, ch`;
 `ListShellLayout._init_frame` and the calc/appearance/artwork heads take
 `content_of` (rows 0 in a window) instead of computing `18 * cs`; and
@@ -400,11 +404,13 @@ binding fanning a tuple of ints out as moycore does. The shipped apps place by
 `content_of` rather than reading the row because a row is one value for every
 grant: it answers the running user app, whose strip can be the game canvas's
 18 rows while a shipped app on the system canvas sits under `18 * cs`, and a
-desk window has none. The resolver (`Appearance.apply_layout`, §11) moves
-the bar through `Workstation.place_bar(edge)` (`"top"` or `"bottom"`; the
-sides arrive with step 5's strips), to the edge of the first resolved bar --
-the host draws one bar until step 5 draws each; `tests/test_content_rect.py` moves the bar to the bottom
-through it and checks every layout, the bar's band, the taps and the desk.
+desk window has none. The resolver (`Appearance.apply_layout`, §11) places
+every resolved bar through `Workstation.place_bars`, which relayouts;
+`tests/test_content_rect.py` moves today's bar to the bottom through it and
+checks every layout, the bar's band, the taps and the desk, and
+`tests/test_bars.py` does the same under four bars at once, side bars
+included: every layout's rects inside what they leave, each bar's strip at
+its rect, taps routed by the bar they land on.
 
 **Bars are global** (owner, 2026-10-13: it saves the most space, and L0):
 every surface, the running tool/app bar included, lays out off the content
@@ -512,16 +518,17 @@ layer (`docs/shell_ux_v1.md` §3), so **the WM class carries** `LAYOUT_CATALOGUE
 (the widgets it has a value for, per mode) and `has_desk` already says
 which modes a board has. Settings shows a row for what the WM lists and none
 for what it does not (absence, never a disabled row). Beside it,
-`LAYOUT_EDGES` names the edges a bar may take on this tier (top and bottom in
-step 4, the sides from step 5), and the composer is `runtime/shell_layout.py`'s
-`resolve`.
+`LAYOUT_EDGES` names the edges a bar may take on this tier (all four on both
+WMs), and the composer is `runtime/shell_layout.py`'s `resolve`. No bar draws
+the month grid, so `calendar` is in no WM's catalogue: it is placeable when
+its component (§8) is.
 
 | board | glass, input | modes (default first) | WM | widgets placeable |
 |---|---|---|---|---|
 | T-Deck | 320×240, keyboard and trackball | console | `FullscreenStackWM` | all but `chips` |
 | Guition S3 | 480×320, touch | console | `FullscreenStackWM` | all but `chips` |
 | Waveshare P4 | 1024×600, touch | desktop, console | `WindowedWM` | all; `chips` in desktop mode |
-| Guition P4 | 1280×800 landscape desk rotated onto 800×1280 portrait glass (`firmware/guition_jc8012p4a1c/README.md`), touch | desktop, console | `WindowedWM` | all; `chips` in desktop mode; a side bar only after its on-glass check (§14) |
+| Guition P4 | 1280×800 landscape desk rotated onto 800×1280 portrait glass (`firmware/guition_jc8012p4a1c/README.md`), touch | desktop, console | `WindowedWM` | all; `chips` in desktop mode; side bars since their on-glass check (§14) |
 | browser | the arrangement picked at boot | handheld arrangement: console; desktop arrangement: desktop, console | as the arrangement | as the arrangement |
 | host | `tools/simulate_desktop.py`; `--windowed` | without the flag: console; with it: desktop, console | as the flag | as the flag |
 | Zero | no glass | — | none | — |
@@ -535,7 +542,7 @@ consistent where the hardware allows):
 | `battery` draws nothing on a board without a gauge | the board reports `None` (CLAUDE.md's rule) and the widget is dropped at resolve, noted once |
 | a docked `calendar` fits only the big glass | §9's 75% floor, arithmetic on the glass, not a board rule |
 | the carousel's motion may degrade on a board | measured frame cost (§12), recorded in #66, never theme data |
-| the Guition P4 rotates each bar strip per play frame, and a side bar needs an on-glass check | its scan-out is portrait and the desk landscape (`native/moy_glass/moy_present_rot.c`); narrow rotated blocks have wedged the PPA (§14) |
+| the Guition P4 rotates a bar strip when its pixels moved, side bars included since their on-glass check | its scan-out is portrait and the desk landscape (`native/moy_glass/moy_present_rot.c`); narrow rotated blocks have wedged the PPA (§14) |
 
 **The resolution rule, per element.** A widget outside the WM's catalogue
 for the current mode, without a value on this board, or not fitting its bar,
@@ -687,7 +694,7 @@ every step; the steps that ADD a config say which.
 | 3 — the content rectangle (landed 2026-10-13) | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
 | 3b — the fixed geometry (landed 2026-10-13) | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers (now `_desk_rect()`) and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | every golden row identical (the fixed geometry moved without a pixel); the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver (landed 2026-10-13) | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
-| 5 — bars on any edge, slots, cells | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
+| 5 — bars on any edge, slots, cells (landed 2026-10-14) | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
 | 6 — the popover layer and the components | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_calendar_popover`, `..._docked_calendar`, `tdeck_320x240_fs1_calendar_full`; `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
 | 7a — the scaled-blit kernel | the nearest-neighbour RGB565 scaled blit in `moy_gfx`, host and boards | a micro-bench of the focus band's three blits on all four boards, to #66, before 7b starts; the board module answers the host's pixels |
 | 7b — the home | the tab row and four sources; the carousel with the animated centre card; `sel` out of the moving shift key; the key glide as a fling; the Make tile and the Library exclusion go; the per-board motion verdict | ONE named re-baseline of the home rows on every config, with before/after renders; `library idle` zero; the fling, flick, glide and tab-switch scenarios on every board with absolute p90s named per board; the Guition P4 with the band damage of step 2; `tests/test_launcher_scroll.py`, `test_home_retained_frame.py`, `test_launcher_search_favorites.py` hold; `tests/test_desktop_shell.py` gains PLAY reaching the tabbed home in console mode |
@@ -718,9 +725,10 @@ root context only. Nothing here invents an invalidation mechanism.
 
 | cache | keyed on | on a change |
 |---|---|---|
-| a bar's strip (`bar_layer._bar_strips`, per bar, `where` and canvas) | the look, the bar's rect, and every widget's value (the minute, the wifi kind, the zone generation, the chip signature, the depth for `close`) | the strip is re-rendered WHOLE and blitted, as today; a per-cell repaint was reviewed and declined — the whole strip is one C paint once a minute for the clock, inside the frame-allocation rule `tests/test_frame_alloc.py` holds; idle frames paint nothing |
+| a bar's strip (`bar_layer._bar_strips`, per bar, `where` and canvas) | the look, the bar's rect, and the value of every widget it holds (the minute, the wifi kind, the zone generation; the depth for `close` moves with a navigation's invalidate) — a bar without the clock keeps its strip on the minute | the strip is re-rendered WHOLE and blitted, as today; a per-cell repaint was reviewed and declined — the whole strip is one C paint once a minute for the clock, inside the frame-allocation rule `tests/test_frame_alloc.py` holds; idle frames paint nothing |
 | the home statics and retained stamp (`_statics_key`: size, fs, theme) | plus the content rect and the active tab | one re-stamp; a tab switch is a key change; in motion §12's bands paint, at rest the stamp holds |
 | the home's `_lib_cache` | the cart list and cover generation | lives across mode switches; released by the fit-check path after the parked stamps (§3) |
+| the taskbar chips (`wm_chrome._chip_sig`) | the chip signature, in the `chips` cell | painted by the WM over the strip, frozen on quiet frames like the window chrome; a change re-paints them and tells the compositor the bar's rect moved |
 | the desk backdrop drag cache (`wm_desk._BackdropLayer`) | captured per gesture from the live desk | nothing to key: the next gesture captures the relayouted desk |
 | a parked window's content stamp (`win.buf`) | the window's content, as today | kept across console mode; released oldest-first when the Player's fit check fails, re-rendered once on return |
 | `wm_chrome`'s frozen chrome and `_content_static` (`docs/surface_model_v1.md` §14.1) | theme name, variant, window rects | the re-anchor moves the rects, the freeze re-arms on the next quiet frame |
@@ -736,8 +744,10 @@ flat strip blit per bar (up to four) instead of one; a left or right bar is a
 column blit, a per-row copy rather than a band, and the T-Deck's and the
 Waveshare's `--repaint` deltas in step 5 say what that costs. On the Guition
 P4 a bar strip is a rect the compositor rotates when its generation moved;
-a narrow rotated block has wedged the PPA before, so a side bar is placed on
-that board only after step 5's on-glass check, and `MOY_ROT_RECTS` (8) is
+a narrow rotated block has wedged the PPA before, so a side bar was placed on
+that board after step 5's on-glass check (2026-10-14: a 40-column left strip
+handed over as moved on every play frame for some nine hundred frames, no
+wedge; #58 has the run), and `MOY_ROT_RECTS` (8) is
 budgeted as game + damage + four bars with coalescing, tested. The mode
 switch's two spikes — entry (the world release's collect, the strip layer's
 pre-collect, cover decodes, the relayout) and exit (the desk re-render, the

@@ -316,8 +316,11 @@ int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int
 int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_span_t title,
                  int active, int has_min, int fs);
 // The bar's band in the frame's style (`bar`'s surface where the theme names
-// one): `light` is a window's light toolbar.
-int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light);
+// one): `light` is a window's light toolbar; `side` the band's edge line, on
+// the side that faces the content (a top bar's bottom row, a left bar's
+// right column); a Win9x frame shades both long sides instead.
+enum { MOY_UI_BAND_BOTTOM = 0, MOY_UI_BAND_TOP = 1, MOY_UI_BAND_RIGHT = 2, MOY_UI_BAND_LEFT = 3 };
+int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light, int side);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 

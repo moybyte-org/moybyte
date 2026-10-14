@@ -89,7 +89,7 @@ class FilesLayout(ListShellLayout):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.top_h = 24 * fs
-        self.head = (4 * fs, self.cy + 2 * fs, 58 * fs, self.top_h - 4 * fs)
+        self.head = (self.cx + 4 * fs, self.cy + 2 * fs, 58 * fs, self.top_h - 4 * fs)
         self.head2 = (self.head[0] + self.head[2] + 4 * fs, self.head[1],
                       58 * fs, self.head[3])
         body_y = self.cy + self.top_h + 2 * fs
@@ -97,7 +97,7 @@ class FilesLayout(ListShellLayout):
         self.status_h = 14 * fs
         self.action_y = (self.cy + self.ch - self.status_h - self.action_h
                          - 2 * fs)
-        self.body = (4 * fs, body_y, self.w - 8 * fs,
+        self.body = (self.cx + 4 * fs, body_y, self.cw - 8 * fs,
                      max(40, self.action_y - body_y - 2 * fs))
         # Kind tiles: two columns of big buttons in the body.
         cols = 2
@@ -113,7 +113,7 @@ class FilesLayout(ListShellLayout):
     def action_rects(self, labels):
         fs = self.fs
         out = []
-        x = 4 * fs
+        x = self.cx + 4 * fs
         for label in labels:
             w = (len(label) * 8 + 12) * fs
             out.append((x, self.action_y, w, self.action_h))
@@ -589,7 +589,7 @@ class FilesAppLayer(ListShellApp):
         th = self._theme.colors()
         fs = lay.fs
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (0, lay.cy, lay.w, lay.top_h))
+        _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         crumb = "FILES"
         if self.mode in ("grid", "rename", "game", "used"):
             crumb = "FILES > " + self.grid.kind.upper()
@@ -621,8 +621,8 @@ class FilesAppLayer(ListShellApp):
             self._draw_rows(cv)
 
         sy = lay.cy + lay.ch - lay.status_h
-        cv.rect(0, sy, lay.w, lay.status_h, self.names["black"])
-        cv.print(self.status[:max(1, lay.w // (8 * fs) - 1)], 4 * fs,
+        cv.rect(lay.cx, sy, lay.cw, lay.status_h, self.names["black"])
+        cv.print(self.status[:max(1, lay.cw // (8 * fs) - 1)], lay.cx + 4 * fs,
                  sy + 3 * fs, self.names["yellow"], 1)
 
     def _draw_kinds(self, cv):

@@ -702,7 +702,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
     "  \"layout\": {\012"
     "    \"bars\": [\012"
-    "      { \"edge\": \"top\", \"size\": 18, \"left\": [\"zone\"], \"center\": [],\012"
+    "      { \"edge\": \"top\", \"size\": 18, \"left\": [\"zone\"], \"center\": [\"chips\"],\012"
     "        \"right\": [\"clock\", \"close\", \"menu\", \"wifi\", \"battery\"] }\012"
     "    ]\012"
     "  },\012"
@@ -914,7 +914,7 @@ const int moy_theme_n_effects = MOY_THEME_EFFECTS;
 const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1498, 364, 360, 397, 390, 779, 1388, 1296, 860};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1388, 1296, 860};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

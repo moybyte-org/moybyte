@@ -12,8 +12,7 @@
 //   chrome_toast(title, glyph)
 //   chrome_banner(lw, fs, status_h, title, sub, ok)
 //   chrome_strip_crash(cw, edit, clock, wifi), chrome_strip_band(cw, bar_h,
-//   light), chrome_strip_right(lay|None, clock, wifi, show_x),
-//   chrome_strip_title(title, zx, zw, dy)
+//   light), chrome_strip_cell(kind, rect, cs, dy, s|None, across)
 //   chrome_menu(rows, sel, x, y, w, h, fs, cs), chrome_about(cw, ch, fs, ver)
 //   chrome_notice(title, sub, ok, until_ms),
 //   chrome_toast_arm(title, glyph, until_ms)
@@ -161,45 +160,17 @@ static mp_obj_t ch_band(mp_obj_t cw, mp_obj_t bar_h, mp_obj_t light) {
 }
 MP_DEFINE_CONST_FUN_OBJ_3(moy_chrome_band_obj, ch_band);
 
-static void rect4(mp_obj_t r, int16_t out[4]) {
-    size_t n;
-    mp_obj_t *items;
-    mp_obj_get_array(r, &n, &items);
-    for (size_t i = 0; i < 4; i++) {
-        out[i] = (int16_t)(i < n ? mp_obj_get_int(items[i]) : 0);
-    }
-}
-
-static mp_obj_t ch_right(size_t n, const mp_obj_t *a) {
+static mp_obj_t ch_cell(size_t n, const mp_obj_t *a) {
     (void)n;
     moy_chrome_list_t *l = list();
-    moy_chrome_lay_t lay;
-    const moy_chrome_lay_t *lp = NULL;
-    if (a[0] != mp_const_none) {
-        mp_obj_t *it;
-        mp_obj_get_array_fixed_n(a[0], 7, &it);
-        lay.clock_x = (int16_t)mp_obj_get_int(it[0]);
-        lay.text_dy = (int16_t)mp_obj_get_int(it[1]);
-        lay.cs = (int16_t)mp_obj_get_int(it[2]);
-        rect4(it[3], lay.wifi);
-        rect4(it[4], lay.batt);
-        rect4(it[5], lay.menu);
-        rect4(it[6], lay.close);
-        lp = &lay;
-    }
-    moy_chrome_strip_right(l, lp, s_of(a[1]), s_of(a[2]), mp_obj_is_true(a[3]));
+    mp_obj_t *r;
+    mp_obj_get_array_fixed_n(a[1], 4, &r);
+    moy_chrome_strip_cell(l, mp_obj_str_get_str(a[0]), mp_obj_get_int(r[0]), mp_obj_get_int(r[1]),
+                          mp_obj_get_int(r[2]), mp_obj_get_int(r[3]), mp_obj_get_int(a[2]),
+                          mp_obj_get_int(a[3]), s_of(a[4]), mp_obj_is_true(a[5]));
     return ops(l);
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_right_obj, 4, 4, ch_right);
-
-static mp_obj_t ch_title(size_t n, const mp_obj_t *a) {
-    (void)n;
-    moy_chrome_list_t *l = list();
-    moy_chrome_strip_title(l, s_of(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
-                           mp_obj_get_int(a[3]));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_title_obj, 4, 4, ch_title);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_cell_obj, 6, 6, ch_cell);
 
 static mp_obj_t ch_menu(size_t n, const mp_obj_t *a) {
     (void)n;

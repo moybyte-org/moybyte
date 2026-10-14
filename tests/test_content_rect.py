@@ -245,7 +245,7 @@ def test_the_bar_draws_in_its_band_at_the_bottom(tmp_path, size, where):
     with_bar = _settle(ws)
     rect = ws.bar_layer.bar_rect(0, where)
     assert rect[1] + rect[3] == ws.sys_canvas.h
-    strip = ws.bar_layer._bar_strips[where][0][0]
+    strip = ws.bar_layer._bar_strips[where][0][0][0]
     stride = ws.sys_canvas.w * 2
     band = with_bar[stride * rect[1]:stride * (rect[1] + rect[3])]
     assert band == bytes(strip._buf), where + ": the band is not the bar"
@@ -314,8 +314,9 @@ def test_an_editor_tab_routes_its_bottom_bar(tmp_path):
     by = ws.bar_layer.bar_rect(0, "menu")[1]
     _tap(ws, zx + 3, by + zy + 2)
     assert got[-1] == (zx + 3, zy + 2, ws.layout.zone_left)
+    n = len(got)
     assert ws.bar_layer.handle_bar_tap("menu", zx + 3, zy + 2) is False
-    assert got[-1][1] < 0                         # the old top band: not the bar
+    assert len(got) == n                          # the old top band: not a bar
 
 
 # -- a running app cart reads the content rect --------------------------------

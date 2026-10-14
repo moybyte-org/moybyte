@@ -120,6 +120,8 @@ const char *moy_theme_name(int i);
 int moy_theme_install(const uint8_t *src, size_t n, uint8_t *notes);
 // The installed package's name, or NULL.
 const char *moy_theme_installed(void);
+// Drop the installed package: only the seeds remain.
+void moy_theme_uninstall(void);
 
 // The role row of theme `name` in `variant` (the MOY_UI_TOKENS tokens, then
 // the content roles): every role set (a flag 0 or 1).

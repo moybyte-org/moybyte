@@ -220,9 +220,10 @@ every screen a kid starts on.
 
 ## 5. The zoned top bar — the macOS menu-bar model
 
-There is a single OS-owned 18px bar with two zones. This is the current #46 unified
-bar, re-framed: it stops being a hardcoded strip of mode buttons and becomes an OS
-shell with an app-populated region.
+The default layout is a single OS-owned 18px top bar with two zones; a theme's
+layout places the same widgets in bars on any edge (`docs/shell_layout_2026-10.md`
+§4). This is the #46 bar, re-framed: it stopped being a hardcoded strip of mode
+buttons and became an OS shell with an app-populated region.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
   Editor loads PROJECTS + its tab ladder + PLAY here (§6, no SAVE -- #111); the launcher shows
@@ -364,7 +365,7 @@ either restricts the code editor or corrupts kid code — both worse.
 
 ## 9. The exit model — taskbar-context-dependent
 
-The rule in one line: **taskbar shown → an X in the OS right zone exits (a tap);
+The rule in one line: **taskbar shown → the X on its bar exits (a tap);
 fullscreen game → hold-BACKSPACE exits.** The X is the `close` widget of a
 theme's layout, which every layout places (`docs/shell_layout_2026-10.md` §9).
 

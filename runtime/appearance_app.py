@@ -51,16 +51,16 @@ class AppearanceLayout:
         self.tabs_h = 30 * fs
         # Side-by-side: the catalog COLUMN on the left, the preview pane on the
         # right. `wide` only picks the chunkier paddings/bezels of big surfaces.
-        self.wide = self.w >= 420 * fs and self.h >= 240 * fs
+        self.wide = self.cw >= 420 * fs and self.h >= 240 * fs
         band_y = self.cy + self.tabs_h
         band_h = max(1, self.cy + self.ch - band_y)
-        self.catalog_w = max(150 * fs, self.w * 2 // 5)
-        self.catalog = (0, band_y, self.catalog_w, band_h)
-        self.preview = (self.catalog_w, band_y,
-                        max(1, self.w - self.catalog_w), band_h)
+        self.catalog_w = max(150 * fs, self.cw * 2 // 5)
+        self.catalog = (self.cx, band_y, self.catalog_w, band_h)
+        self.preview = (self.cx + self.catalog_w, band_y,
+                        max(1, self.cw - self.catalog_w), band_h)
         widths = (70, 62, 70)
         self.tabs = []
-        x = 6 * fs
+        x = self.cx + 6 * fs
         for i in range(3):
             bw = widths[i] * fs
             self.tabs.append((x, self.cy + 3 * fs, bw, self.tabs_h - 6 * fs))

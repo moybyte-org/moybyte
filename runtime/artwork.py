@@ -379,14 +379,14 @@ class PaintAppLayout:
         vy = self.cy + self.top_h + 4 * fs
         bottom = self.cy + self.ch
         vh = max(40, bottom - vy - self.status_h - 4 * fs)
-        self.view = (self.left_w + 4 * fs, vy,
-                     max(40, self.w - self.left_w - self.right_w - 8 * fs), vh)
+        self.view = (self.cx + self.left_w + 4 * fs, vy,
+                     max(40, self.cw - self.left_w - self.right_w - 8 * fs), vh)
         self.status_y = bottom - self.status_h
 
         labels = ("N", "U", "R", "OPEN", "WALL", "GAME", "SHOW", "FIT")
         widths = (22, 22, 22, 44, 44, 44, 44, 38)
         self.actions = []
-        x = 4 * fs
+        x = self.cx + 4 * fs
         for i in range(len(labels)):
             bw = widths[i] * fs
             self.actions.append((x, self.cy + 2 * fs, bw, self.top_h - 4 * fs))
@@ -396,10 +396,10 @@ class PaintAppLayout:
         bw = (self.left_w - 6 * fs) // 2
         bh = 22 * fs
         for i in range(10):
-            self.tools.append((3 * fs + (i & 1) * (bw + fs),
+            self.tools.append((self.cx + 3 * fs + (i & 1) * (bw + fs),
                                vy + (i // 2) * (bh + 2 * fs), bw, bh))
 
-        self.pal_x = self.w - self.right_w + 5 * fs
+        self.pal_x = self.cx + self.cw - self.right_w + 5 * fs
         self.pal_y = vy + 2 * fs
         if self.compact:
             self.pal_cols = 4
@@ -899,8 +899,8 @@ class PaintAppLayer:
             idx = self.project_top + row
             if idx >= len(self.project_names):
                 break
-            if _in(x, y, (10 * lay.fs, y0 + row * row_h,
-                               lay.w - 20 * lay.fs, row_h - 2 * lay.fs)):
+            if _in(x, y, (lay.cx + 10 * lay.fs, y0 + row * row_h,
+                               lay.cw - 20 * lay.fs, row_h - 2 * lay.fs)):
                 art = self._art
                 name = art.attach(idx)
                 self.status = "BG ADDED TO " + name if name else art.last_error
@@ -931,7 +931,7 @@ class PaintAppLayer:
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        cv.rect(0, lay.cy, lay.w, lay.top_h, 48)
+        cv.rect(lay.cx, lay.cy, lay.cw, lay.top_h, 48)
         action_labels = ("N", "U", "R", "OPEN", "WALL", "GAME", "SHOW",
                          "FIT" if self.view_mode == 0 else str(self.view_mode) + "X")
         # N/U/R lead as icons (new/undo/redo); the word buttons stay words.
@@ -954,12 +954,12 @@ class PaintAppLayer:
         self._draw_preview(cv)
         self._draw_palette(cv)
 
-        cv.rect(0, lay.status_y, lay.w, lay.status_h, self.names["black"])
+        cv.rect(lay.cx, lay.status_y, lay.cw, lay.status_h, self.names["black"])
         left = self.TOOLS[self.tool] + " C" + str(self.color) + " S" + str(self.size)
-        cv.print(left, 4 * lay.fs, lay.status_y + 5 * lay.fs, self.names["white"], 1)
-        maxc = max(1, (lay.w // (8 * lay.fs)) - len(left) - 3)
+        cv.print(left, lay.cx + 4 * lay.fs, lay.status_y + 5 * lay.fs, self.names["white"], 1)
+        maxc = max(1, (lay.cw // (8 * lay.fs)) - len(left) - 3)
         msg = self.status[:maxc]
-        cv.print(msg, lay.w - (len(msg) + 1) * 8 * lay.fs,
+        cv.print(msg, lay.cx + lay.cw - (len(msg) + 1) * 8 * lay.fs,
                  lay.status_y + 5 * lay.fs, self.names["yellow"], 1)
 
     def _draw_palette(self, cv):
@@ -1005,12 +1005,12 @@ class PaintAppLayer:
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        cv.rect(0, lay.cy, lay.w, lay.top_h, 48)
+        cv.rect(lay.cx, lay.cy, lay.cw, lay.top_h, 48)
         self._button(cv, "< PAINT", lay.actions[0], True)
         cv.print("OPEN DRAWING", lay.actions[0][0] + lay.actions[0][2] + 12 * lay.fs,
                  lay.cy + 9 * lay.fs, self.names["black"], 1)
         y0 = lay.cy + lay.top_h + 4 * lay.fs
-        self.grid.set_rect((6 * lay.fs, y0, lay.w - 12 * lay.fs,
+        self.grid.set_rect((lay.cx + 6 * lay.fs, y0, lay.cw - 12 * lay.fs,
                             lay.cy + lay.ch - y0 - 4 * lay.fs), lay.fs)
         self.grid.draw(cv, th)
 
@@ -1018,7 +1018,7 @@ class PaintAppLayer:
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        cv.rect(0, lay.cy, lay.w, lay.top_h, 48)
+        cv.rect(lay.cx, lay.cy, lay.cw, lay.top_h, 48)
         self._button(cv, "< PAINT", lay.actions[0], True)
         cv.print("ADD AS BG", lay.actions[0][0] + lay.actions[0][2] + 12 * lay.fs,
                  lay.cy + 9 * lay.fs, self.names["black"], 1)
@@ -1029,8 +1029,8 @@ class PaintAppLayer:
             idx = self.project_top + row
             if idx >= len(self.project_names):
                 break
-            r = (10 * lay.fs, y0 + row * row_h,
-                 lay.w - 20 * lay.fs, row_h - 2 * lay.fs)
+            r = (lay.cx + 10 * lay.fs, y0 + row * row_h,
+                 lay.cw - 20 * lay.fs, row_h - 2 * lay.fs)
             cv.rect(r[0], r[1], r[2], r[3], th["title"] if row & 1 else th["panel"])
             cv.rectb(r[0], r[1], r[2], r[3], th["dim"])
             cv.print(self.project_names[idx], r[0] + 6 * lay.fs,

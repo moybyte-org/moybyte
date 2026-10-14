@@ -343,8 +343,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import layout_base as _layout_base
+    import shell_layout as _shell_layout
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import layout_base as _layout_base
+    from runtime import shell_layout as _shell_layout
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
 # over AppContext that a `type: "app"` CART is handed. The shell needs only its
@@ -709,6 +711,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # windowed_chrome is a PROPERTY (mode-aware): it is True only in the
         # windowed WM's DESKTOP mode -- see the property below the screen
         # projection.
+        # The bars start as the default's until the theme's layout resolves
+        # (Appearance.apply_layout): they are one per process, as the glass is.
+        _layout_base.place_bars(_layout_base.DEFAULT_BARS)
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self.look.effective_font_scale(),
                              self.look.effective_chrome_scale())
@@ -1279,7 +1284,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     @property
     def windowed_chrome(self):
         """True in DESKTOP mode (the windowed WM's desk, docs/shell_layout_2026-10.md
-        §3): in-window app bars suppress the OS right zone, and the bar's wifi
+        §3): in-window app bars suppress the OS widgets, and the bar's wifi
         icon deep-links to the Settings window. False in console mode -- on
         every board, a P4 included -- where the fullscreen chrome rules apply
         verbatim."""
@@ -1414,13 +1419,21 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """`bar_h()`: the rows of `app_content_rect()` above the content."""
         return self.app_content_rect()[1]
 
-    def place_bar(self, edge):
-        """Put the host's bar on `edge` ("top" or "bottom") of every surface
-        and relayout the shell around it (layout_base.place_bar). The theme
-        layout's resolver (`Appearance.apply_layout`) calls it."""
-        _layout_base.place_bar(edge)
+    def place_bars(self, bars):
+        """Put the host's bars on every surface and relayout the shell around
+        them (layout_base.place_bars). The theme layout's resolver
+        (`Appearance.apply_layout`) calls it."""
+        moved = [b[:2] for b in bars] != [b[:2] for b in _layout_base.bars_in_force()]
+        _layout_base.place_bars(bars)
         self.bar_layer.invalidate()
         self._relayout()
+        if moved and getattr(self, "picker", None) is not None:
+            # The Editor picker's grid lays out in what the bars leave, too.
+            self.picker.set_layout(self.layout)
+
+    def place_bar(self, edge):
+        """Today's one bar, moved to `edge` ("top" or "bottom")."""
+        self.place_bars(((edge,) + _layout_base.DEFAULT_BARS[0][1:],))
 
     def set_pointer(self, pointer):
         """The console's pointer (a `moy_input.Pointer`, or None): what
@@ -1657,24 +1670,35 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         The rows + their action callbacks live on self.menu_ui
         (console_notices.SystemMenuUI); this stays here as the tested ws. entry point."""
         self._dirty = True             # overlay open/close repaints (#44)
-        # Anchor the dropdown under the ≡ button's NEW right-zone position (Stage 4
-        # moved ≡ off the left edge): right-align the panel to the button so it hangs
-        # down-LEFT and stays on screen, clamped to [0, canvas_w - _POPUP_W]. The
-        # sysmenu draws on the SYSTEM canvas, so anchor to the responsive Layout's
-        # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
-        bx, _by, bw, _bh = self.layout.sysmenu_btn
+        # Anchor the dropdown at the ≡ widget's cell, opening into the content
+        # side of its bar: down from a top bar, up from a bottom one, inward
+        # from a side bar. Across a horizontal bar the panel right-aligns to the
+        # button so it hangs toward the glass's middle; every anchor is clamped
+        # to the canvas. The sysmenu draws on the SYSTEM canvas, so anchor to
+        # the responsive Layout's packing (the launcher/Settings/Editor bars),
+        # not the fixed crash-bar slot.
+        bars = self.layout.bars
+        got = _shell_layout.cell_of(bars, "menu")
+        i, (bx, by, bw, bh) = got if got is not None else (0, self.layout.zone_left)
+        edge, (rx, ry, rw, rh) = bars[i][0], bars[i][1]
         fs = self.look.effective_font_scale()
         self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled width
         self.sysmenu.cs = self.layout.cs      # ...and cs-scaled rows (#203)
         pw = _POPUP_W * fs
-        ax = bx + bw - pw
+        if edge == "left":
+            ax = rx + rw
+        elif edge == "right":
+            ax = rx - pw
+        else:
+            ax = rx + bx + bw - pw
         self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
-        # ...and from the bar's content-side edge: under a top bar, over a
-        # bottom one.
-        bh = self.layout.status_h
-        by = _layout_base.bar_y(self.sys_canvas.h, bh)
-        self.sysmenu.up = by > 0
-        self.sysmenu.anchor_y = by if by > 0 else bh
+        self.sysmenu.up = edge == "bottom"
+        if edge == "top":
+            self.sysmenu.anchor_y = ry + rh
+        elif edge == "bottom":
+            self.sysmenu.anchor_y = ry
+        else:
+            self.sysmenu.anchor_y = ry + by
         self.sysmenu.toggle(self.menu_ui._sysmenu_items())
 
     # -- firmware update screen (#53) -----------------------------------------

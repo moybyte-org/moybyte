@@ -11,6 +11,11 @@ content-draw and 181ms by real frame). So every number here is measured around
 Usage:
     python tools/p4_bench.py --board p4 [--out bench.md]
     python tools/p4_bench.py --board tdeck --repaint settings,files,editor:code
+    python tools/p4_bench.py --board p4 --layout '[{"edge": "left", ...}]'
+
+`--layout` benches under a theme layout's bars (docs/shell_layout_2026-10.md
+§5): installed as a package beside the seeds and picked, as Settings does,
+after the board is reset or attached, and unpicked at the end.
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -19,6 +24,7 @@ median split, so the worst offender in a slow frame is named, not guessed.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
@@ -157,6 +163,24 @@ def home(b):
     pyexec(b, "ws.go_home()"); b.drain(2.0)
     if b.state().get("desk") is False:
         pyexec(b, "ws.open_desk()"); b.drain(1.0)
+
+
+def pick_layout(b, bars):
+    """Install `bars` (a JSON list of bar objects) as the package `bench`
+    and pick it; None unpicks it. The pick is a settings row, a flash write:
+    its own short `cmd`, never inside a `pyexec` upload. What the console
+    resolved goes to stdout."""
+    if bars is not None:
+        pkg = json.dumps({"format": 1, "name": "bench",
+                          "layout": {"bars": json.loads(bars)}})
+        pyexec(b, "import moy_ui\nws._bench_rc = moy_ui.theme_install(%r)"
+               % pkg.encode())
+    b.cmd("py ws.system.set('layout_theme', %r) or 1"
+          % ("bench" if bars is not None else None), wait_for="PY")
+    b.cmd("py ws.look.set_theme(ws.look.theme_name, persist=False) or 1",
+          wait_for="PY")
+    b.drain(2.0)
+    print("  layout: %r" % (pyval(b, "ws.look.bars"),))
 
 
 def bench_all(b, out_path):
@@ -334,15 +358,21 @@ def main():
                          " editor:TAB, ...) to repaint every frame instead of"
                          " the panel run")
     ap.add_argument("--seconds", type=float, default=6.0)
+    ap.add_argument("--layout", default=None, metavar="BARS",
+                    help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     b = board_from_args(args)
     try:
+        if not args.repaint and not b.attach_only:
+            b.reset()               # an attach-only board is benched as found
+        if args.layout:
+            pick_layout(b, args.layout)
         if args.repaint:
             bench_repaint(b, args.repaint.split(","), args.seconds, args.out)
-            return 0
-        if not b.attach_only:       # an attach-only board is benched as found
-            b.reset()
-        bench_all(b, args.out)
+        else:
+            bench_all(b, args.out)
+        if args.layout:
+            pick_layout(b, None)
     finally:
         b.close()
     return 0

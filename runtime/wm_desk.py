@@ -196,12 +196,12 @@ class _BackdropLayer(Layer):
         wrapping into further columns; recomputed per call from live geometry."""
         ws = self.ws
         fs = ws.look.effective_font_scale()
-        _dx, dy, _dw, dh = self.wm._desk_rect()
+        dx, dy, dw, dh = self.wm._desk_rect()
         box = 40 * fs
         gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
         catalog = self._icon_catalog()
         cell_h = 62 * fs
-        x0 = 14 * fs
+        x0 = dx + 14 * fs
         y0 = dy + 12 * fs
         bottom = dy + dh - 6 * fs
         # The pill must hold the longest catalog label or the chip clips it
@@ -213,7 +213,7 @@ class _BackdropLayer(Layer):
                    default=0)
         rows = max(1, (bottom - y0) // cell_h)
         cols = max(1, (len(catalog) + rows - 1) // rows)
-        fit_w = (ws.sys_canvas.w - x0 + gut) // cols
+        fit_w = (dx + dw - x0 + gut) // cols
         cell_w = max(66 * fs, maxw + gut + 4)
         cell_w = max(box + gut, min(cell_w, fit_w))
         x = x0

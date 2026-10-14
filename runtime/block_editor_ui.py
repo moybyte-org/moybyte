@@ -285,10 +285,10 @@ class BlockLayout(LayoutBase):
         # the bar's band; with no bar above, it starts 2fs down.
         top = max(self.cy - _BAR_ROWS * self.cs, -_BAR_ROWS * fs)
         self.hint_y = top + _BLK_HINT_Y * fs
-        self.status_x = 198 * fs                  # the SAVE-status text x (right side)
+        self.status_x = self.cx + 198 * fs        # the SAVE-status text x (right side)
         self.row_h = _BLK_ROW_H * fs
         self.indent = _BLK_INDENT * fs
-        self.x0 = _BLK_X0 * fs
+        self.x0 = self.cx + _BLK_X0 * fs
         self.y0 = top + _BLK_Y0 * fs
         # -- action bar: a row of buttons anchored to the bottom -----------------
         # SAVE/CLOSE moved to the unified bar (Stage-4 rollout); only ADD / DEL / up /
@@ -308,14 +308,14 @@ class BlockLayout(LayoutBase):
         self.undo_btn = (x, by, 42 * fs, bh); x += 44 * fs
         self.redo_btn = (x, by, 40 * fs, bh)
         # -- outline width + visible rows ----------------------------------------
-        self.outline_w = self.w - 2 * self.x0
+        self.outline_w = self.cw - 2 * _BLK_X0 * fs
         avail_h = self.bar_y - self.y0
         self.rows = max(3, avail_h // self.row_h)
         # -- modal insert menu (centered, scales with the canvas/font) -----------
         self.menu_row_h = _BLK_MENU_ROW_H * fs
-        mw = min(self.w - 16 * fs, 240 * fs)
+        mw = min(self.cw - 16 * fs, 240 * fs)
         mh = min(self.h - 24 * fs, self.bar_y - 24 * fs)
-        mx = (self.w - mw) // 2
+        mx = self.cx + (self.cw - mw) // 2
         my = 24 * fs
         self.menu = (mx, my, mw, mh)
         self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)

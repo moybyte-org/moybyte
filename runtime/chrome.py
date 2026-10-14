@@ -53,9 +53,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
 # same way console.py imports them, so Layout/CodeLayout reflow off the same numbers.
 try:
-    from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
+    from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
+    from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
 
 try:
     from settings_layer import _SET_ROW_H
@@ -68,6 +68,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (_CODE_LEAD, _CODE_X0,
                                     _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
+
+try:
+    import shell_layout as _shell_layout
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import shell_layout as _shell_layout
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
@@ -119,7 +124,7 @@ def color(name_or_index):
 # this file so console._X still resolves for Layout + the golden harness/tests.
 # --- Desktop shell (#28): home = wallpaper + cart icon grid -----------------
 # The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
-# grid of tappable cart icons and the unified 18px top bar (clock + wifi/batt/gear
+# grid of tappable cart icons and the theme layout's bars (clock + wifi/batt/≡
 # + NEW/DUP/DEL management icons). The top bar's icons are 16x16 sprites from the
 # editable IconSheet (Stage 1); the rest of the chrome uses the indexed API +
 # petme128 font + the _glyph vocabulary, so host == device. (_STATUS_H lives in
@@ -287,7 +292,7 @@ class Layout(LayoutBase):
         self.icon_box = _ICON_BOX * fs
         self.icon_y0 = self.cy + 8 * fs
         self.grid_bottom = bottom - 4 * fs           # launcher grid floor
-        self.icon_x0 = _ICON_X0 * fs
+        self.icon_x0 = self.cx + _ICON_X0 * fs
         # The Library SHELF (visual identity v1's library concept mockup) on EVERY
         # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
         # one launcher look everywhere). A framed panel (header "LIBRARY" + footer
@@ -302,26 +307,27 @@ class Layout(LayoutBase):
         # with fs-multiples only as floors so a kid who picks a bigger
         # Settings font never gets clipped chrome. At 1024x600 the geometry
         # is near-identical at fs 1 and 2; fs 1 just fits crisper text.
-        mx = max(16 * fs, self.w // 20)
+        cx, cw = self.cx, self.cw
+        mx = max(16 * fs, cw // 20)
         pt = self.cy + max(8 * fs, self.h // 24)
         pb = max(16 * fs, self.h // 14)
-        self.lib_panel = (mx, pt, self.w - 2 * mx, bottom - pt - pb)
+        self.lib_panel = (cx + mx, pt, cw - 2 * mx, bottom - pt - pb)
         self.lib_header_h = max(26 * fs, self.h // 12)
         self.lib_footer_h = max(20 * fs, self.h // 15)
-        self.lib_gap = max(6 * fs, self.w // 64)
+        self.lib_gap = max(6 * fs, cw // 64)
         # Display-type multiplier: the shelf's headings hold ~32px at desktop
         # widths regardless of the body font scale (petme128 x4 at fs1, x2 at
         # fs2), and never wider than the tier can hold -- the 320-wide baseline
         # renders them at body size.
-        self.lib_mult = max(1, min(4 // fs, self.w // 256))
-        inset = max(10 * fs, self.w // 42)
+        self.lib_mult = max(1, min(4 // fs, cw // 256))
+        inset = max(10 * fs, cw // 42)
         px_, py_, pw_, ph_ = self.lib_panel
         gx = px_ + inset
         gy = py_ + self.lib_header_h
         gw = pw_ - 2 * inset
         gh = ph_ - self.lib_header_h - self.lib_footer_h - 4 * fs
         self.cols = max(3, min(6, (gw + self.lib_gap) //
-                               (self.w // 5 + self.lib_gap)))
+                               (cw // 5 + self.lib_gap)))
         self.rows = 2                                # VISIBLE rows (grid look)
         self.lib_card_w = (gw - (self.cols - 1) * self.lib_gap) // self.cols
         self.lib_card_h = (gh - self.lib_gap) // 2
@@ -338,7 +344,7 @@ class Layout(LayoutBase):
         self.lib_card_actions = (
             self.lib_card_h - band_h - btn_area >= self.lib_card_h // 2)
 
-        # -- unified top bar: icon size + clusters (Stage 1) -------------------
+        # -- the bars: icon size + stride (Stage 1) ----------------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
         # 18px bar -> y = _BAR_Y). Icons scale with the CHROME scale (#203) -- with the
         # font by default, and past it on a panel dense enough that 16px is under
@@ -349,40 +355,34 @@ class Layout(LayoutBase):
         self.bar_stride = stride
         edge = 2 * cs                                 # margin from the canvas edges
 
-        # -- right zone (OS-owned, Stage 4 #46 zoned bar -- the macOS-menu-bar
-        # model): batt hard against the right edge, then wifi, then the ≡ system-
-        # menu toggle (moved off the left edge so every OS control lives on ONE
-        # side), then a slot RESERVED for the Stage-5 context X (not drawn/tapped
-        # yet -- carved out now so its arrival doesn't reflow the rest of this
-        # cluster again), then the clock text filling the remaining space to
-        # their left.
-        self.batt_btn = (self.w - edge - ic, _BAR_Y, ic, ic)
-        self.wifi_btn = (self.batt_btn[0] - stride, _BAR_Y, ic, ic)
-        self.sysmenu_btn = (self.wifi_btn[0] - stride, _BAR_Y, ic, ic)
-        self.context_x_btn = (self.sysmenu_btn[0] - stride, _BAR_Y, ic, ic)  # reserved
+        # -- the bars (docs/shell_layout_2026-10.md §4): every bar this surface
+        # takes, packed into cells once here (shell_layout.pack) -- the rects
+        # the bar layer draws and hit-tests, each in its own bar's coordinates.
+        # The named rects below are views of the first bar that places each
+        # widget (None where none does): batt hard right, then wifi, the ≡,
+        # the context X and the clock in today's bar; its lent left zone runs
+        # from the left edge to just before the clock.
         self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
-        self.clock_x = max(edge, self.context_x_btn[0] - edge - self.clock_w)
+        self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
+                                       self.clock_w, _bar_text_w)
+        self.batt_btn = self._cell("battery")
+        self.wifi_btn = self._cell("wifi")
+        self.sysmenu_btn = self._cell("menu")
+        self.context_x_btn = self._cell("close")
+        clock = self._cell("clock")
+        self.clock_x = clock[0] if clock is not None else None
+        zone = self._cell("zone") or (edge, _BAR_Y, 0, ic)
+        self.zone_left = zone
 
-        # -- left zone (Stage 4: fully LENT to the active app's draw_zone/zone_tap
-        # -- launcher/Settings/the Editor): a row of icon slots starting right at the
-        # left edge now that ≡ isn't there any more. Cart management (create/copy/
-        # delete) now lives in the Editor picker's zone, not the launcher's -- DUP/DEL
-        # are drawn at dup_btn/del_btn there (new_btn's slot is unused: "+ New" is a
-        # pinned grid tile, not a bar icon).
-        self.new_btn = (edge, _BAR_Y, ic, ic)
-        self.dup_btn = (self.new_btn[0] + stride, _BAR_Y, ic, ic)
-        self.del_btn = (self.dup_btn[0] + stride, _BAR_Y, ic, ic)
-
-        # -- title/selected-name slot: between the (picker's) DUP/DEL cluster and the
-        # clock. Used by EditorPickerLayer's zone title ("PICK A PROJECT"); the
-        # launcher's zone (just the selected cart's name, no icons) starts at
-        # zone_left's own edge instead (see LauncherHomeLayer.draw_zone).
+        # -- in the lent left zone: the Editor picker's DUP/DEL over its
+        # selected cart (new_btn's slot is unused: "+ New" is a pinned grid
+        # tile, not a bar icon), then its title up to the zone's end.
+        self.new_btn = (zone[0], zone[1], ic, ic)
+        self.dup_btn = (self.new_btn[0] + stride, zone[1], ic, ic)
+        self.del_btn = (self.dup_btn[0] + stride, zone[1], ic, ic)
         self.status_name_x = self.del_btn[0] + self.del_btn[2] + edge
         self.status_name_maxc = max(
-            4, (self.clock_x - edge - self.status_name_x) // self.font_w)
-        # The full lent left zone (Stage 4): from the left edge to just before the
-        # right zone's clock text -- the rect BarLayer hands to draw_zone/zone_tap.
-        self.zone_left = (edge, _BAR_Y, max(0, self.clock_x - 2 * edge), ic)
+            4, (zone[0] + zone[2] - self.status_name_x) // self.font_w)
 
         # -- scroll nudge arrows (the pager's successors) ----------------------
         # Boxed left/right arrow buttons in the Library panel footer's corners:
@@ -406,7 +406,7 @@ class Layout(LayoutBase):
         # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
         py0 = self.cy + 2 * fs
         ph = bottom - _PANEL_FLOOR * fs - py0
-        self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
+        self.settings_panel = (cx + 8 * fs, py0, cw - 16 * fs, ph)
         self.set_x = self.settings_panel[0] + 10 * fs
         self.set_w = self.settings_panel[2] - 20 * fs
         # The title band holds the X / trophy buttons, so it takes the chrome
@@ -485,10 +485,14 @@ class Layout(LayoutBase):
         _row, last_col = self.tile_cell(n - 1)
         return last_col * (cw + gap) + cw
 
+    def _cell(self, name):
+        got = _shell_layout.cell_of(self.bars, name)
+        return got[1] if got is not None else None
+
     def clock_hit(self):
-        # The clock-text region in the bar's right cluster (Time Traveler egg
-        # #21), in bar coordinates like every bar rect here.
-        return (self.clock_x, 0, self.clock_w, self.status_h)
+        # The clock's cell (Time Traveler egg #21), in its bar's coordinates
+        # like every bar rect here; None where no bar places a clock.
+        return self._cell("clock")
 
 
 class CodeLayout(LayoutBase):
@@ -520,24 +524,24 @@ class CodeLayout(LayoutBase):
         # edge is a key that cannot be pressed at all -- never below the fs width,
         # which is what keeps the existing tiers (fs 3 already overflows) unmoved.
         self.sym_cell = max(_SYM_CELL * fs,
-                            min(_SYM_CELL * cs, self.w // len(_CODE_SYMBOLS)))
+                            min(_SYM_CELL * cs, self.cw // len(_CODE_SYMBOLS)))
         self.sym_h = _SYM_H * cs
         self.sym_text_dx = (self.sym_cell - _SYM_CELL * fs) // 2
         self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
         self.sym_y = self.cy + self.ch - self.sym_h
-        self.sym_area = (0, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
+        self.sym_area = (self.cx, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
         # -- code area origin (the content rect's top) --------------------------
         # The zoned bar carries the editor's controls, so CodeLayout has no
         # chrome of its own: the body is text + the symbol palette, filling the
         # content rect.
-        self.x0 = _CODE_X0 * fs
+        self.x0 = self.cx + _CODE_X0 * fs
         self.y0 = self.cy
         # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
-        avail_w = self.w - self.x0
+        avail_w = self.cx + self.cw - self.x0
         self.cols = max(8, avail_w // self.cell)
         # Status band (visual identity v1 Phase 3, the Studio mockup's
         # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
-        self.status_band = (0, self.sym_y - 12 * fs, self.w, 12 * fs)
+        self.status_band = (self.cx, self.sym_y - 12 * fs, self.cw, 12 * fs)
         avail_h = self.status_band[1] - self.y0
         self.rows = max(4, avail_h // self.lh)
 

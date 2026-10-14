@@ -830,8 +830,8 @@ class CodeLayer:
         pw = (w + 1) * cell
         plen = len(ed.word_prefix()) if ed is not None else 0
         x = self._text_x0(lay, ed) + (ed.col - ed.left - plen) * cell
-        if x + pw > lay.w:
-            x = lay.w - pw
+        if x + pw > lay.cx + lay.cw:
+            x = lay.cx + lay.cw - pw
         if x < 0:
             x = 0
         ph = n * lh
@@ -858,10 +858,10 @@ class CodeLayer:
             if L > w:
                 w = L
         pw = (w + 1) * cell
-        if pw > lay.w:
-            pw = lay.w
+        if pw > lay.cw:
+            pw = lay.cw
         ph = (n + 1) * lh                          # +1 header row
-        x = (lay.w - pw) // 2
+        x = lay.cx + (lay.cw - pw) // 2
         y = lay.y0 + lh
         panel = (x, y, pw, ph)
         rects = [(x, y + (i + 1) * lh, pw, lh) for i in range(n)]
@@ -874,7 +874,7 @@ class CodeLayer:
         # the far-right of line 0, which is usually blank). Off the frozen constants,
         # so the baseline code_area()/sym_area geometry is untouched.
         w = self._TLS_COLS * lay.cell
-        return (lay.w - w, lay.y0, w, lay.lh)
+        return (lay.cx + lay.cw - w, lay.y0, w, lay.lh)
 
     # -- the cart's FILE (SPEC.md 4, #89) ------------------------------------
     #
@@ -897,7 +897,7 @@ class CodeLayer:
         if len(self.ws.code_sources()) < 2:
             return None
         w = self._FILE_COLS * lay.cell
-        return (lay.w - w - self._TLS_COLS * lay.cell, lay.y0, w, lay.lh)
+        return (lay.cx + lay.cw - w - self._TLS_COLS * lay.cell, lay.y0, w, lay.lh)
 
     def _file_label(self):
         """The open file as the chip shows it: its bare name, upper-cased into
@@ -918,9 +918,9 @@ class CodeLayer:
             if len(names[i]) > w:
                 w = len(names[i])
         pw = (w + 1) * lay.cell
-        if pw > lay.w:
-            pw = lay.w
-        x = (lay.w - pw) // 2
+        if pw > lay.cw:
+            pw = lay.cw
+        x = lay.cx + (lay.cw - pw) // 2
         y = lay.y0 + lh
         return (x, y, pw, (n + 1) * lh), [(x, y + (i + 1) * lh, pw, lh)
                                           for i in range(n)]
@@ -940,12 +940,12 @@ class CodeLayer:
         # The tool palette row, just above the status band / symbol palette.
         h = lay.lh
         top = lay.status_band[1] if lay.status_band is not None else lay.sym_y
-        return (0, top - h, lay.w, h)
+        return (lay.cx, top - h, lay.cw, h)
 
     def _find_rect(self, lay):
         # The SECOND visible row, so the find bar's right-edge buttons never sit
         # under the always-visible TLS toggle (which owns the top-right of row 0).
-        return (0, lay.y0 + lay.lh, lay.w, lay.lh)
+        return (lay.cx, lay.y0 + lay.lh, lay.cw, lay.lh)
 
     def _find_btns(self, lay):
         # prev / next / case / close, packed against the right edge of the find bar.

@@ -45,7 +45,7 @@ import pytest
 # The matrix lives in ONE place. pytest puts tests/ on sys.path, so this is a
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
-from test_shell_goldens import CONFIGS, REBASELINE_CMD, UPDATE_ENV, _axes
+from test_shell_goldens import CONFIGS, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_FILE = Path(__file__).resolve().parent / "shell_goldens" / "subsurfaces.json"
@@ -173,6 +173,9 @@ def _build(cfg, carts_dir):
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"], font_scale=cfg["font_scale"],
         windowed=cfg["windowed"], panel_diagonal_in=cfg["diagonal_in"])
+    pick_layout(ws, cfg)
+    if "layout" in cfg:
+        ws.look.set_theme(ws.look.theme_name, persist=False)
     ws.look.set_theme_variant(cfg["variant"], persist=False)
     ws.wifi = _Wifi(True)
     ws.updater = _Updater()

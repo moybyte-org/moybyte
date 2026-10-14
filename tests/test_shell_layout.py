@@ -1,11 +1,13 @@
-"""The shell layout's resolver (docs/shell_layout_2026-10.md §9-§11, §13 step 4).
+"""The shell layout's resolver (docs/shell_layout_2026-10.md §9-§11, §13 steps 4
+and 5).
 
 The loader's half (caps, clamps, the required set on the data, inheritance)
 is `tests/test_theme_loader.py`'s. Here: the composer's drops per tier and
 mode, the 75% floor, the required set again after the drops, §6's worked
 examples resolved per tier, the user's `layout_theme` pick (its precedence,
-its strict reader, the Settings row) and the host bar following the
-resolved layout through `Workstation.place_bar`.
+its strict reader, the Settings row) and the host's bars following the
+resolved layout through `Workstation.place_bars`. What the bars draw and
+where their taps go is `tests/test_bars.py`'s.
 """
 
 import json
@@ -17,13 +19,19 @@ import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import layout_base, shell_layout
 from runtime.shell_layout import FALLBACK, resolve
+from runtime.wm import FullscreenStackWM
+from runtime.wm_windowed import WindowedWM
 from test_shell_goldens import CONFIGS
 from ws_helpers import build_desktop_ws, build_ws
 
 TODAY = FALLBACK[0]
+# Today's bar in console mode: the taskbar's chips have no value there.
+TODAY_C = TODAY[:3] + ((),) + TODAY[4:]
 ALL = shell_layout.WIDGETS
-CONSOLE = tuple(w for w in ALL if w != "chips")
-STEP4 = ("top", "bottom")
+DESKTOP = WindowedWM.LAYOUT_CATALOGUE["desktop"]
+CONSOLE = FullscreenStackWM.LAYOUT_CATALOGUE["console"]
+EDGES = shell_layout.EDGES
+TOP_BOTTOM = ("top", "bottom")
 
 
 @pytest.fixture(autouse=True)
@@ -52,45 +60,55 @@ EXAMPLES = {
 TIERS = {
     "tdeck": (320, 240, 1, CONSOLE),
     "guition_s3": (480, 320, 2, CONSOLE),
-    "p4_desktop": (1024, 600, 2, ALL),
+    "p4_desktop": (1024, 600, 2, DESKTOP),
     "p4_console": (1024, 600, 2, CONSOLE),
-    "guition_p4_desktop": (1280, 800, 2, ALL),
+    "guition_p4_desktop": (1280, 800, 2, DESKTOP),
 }
 
 
-def _res(bars, tier, edges=STEP4):
-    w, h, cs, cat = TIERS[tier]
-    return resolve(bars, (TODAY,), w, h, cs, cat, edges)
+def _today(tier):
+    return TODAY if TIERS[tier][3] is DESKTOP else TODAY_C
+
+
+def _res(bars, tier, edges=EDGES, cat=None):
+    w, h, cs, tcat = TIERS[tier]
+    return resolve(bars, (TODAY,), w, h, cs, cat or tcat, edges)
 
 
 @pytest.mark.parametrize("tier", sorted(TIERS))
 def test_the_worked_examples_resolve_per_tier(tier):
-    desktop = TIERS[tier][3] is ALL
-    assert _res(EXAMPLES[1], tier) == ((TODAY,), ())
+    desktop = TIERS[tier][3] is DESKTOP
+    if desktop:
+        assert _res(EXAMPLES[1], tier) == ((TODAY,), ())
+    else:
+        # `chips` has no value in console mode: dropped, the bar stays
+        assert _res(EXAMPLES[1], tier) == ((TODAY_C,), ("chips: not in this mode",))
     bars, notes = _res(EXAMPLES[2], tier)
     if desktop:
         assert (bars, notes) == (EXAMPLES[2], ())
     else:
-        # `chips` has no value in console mode: dropped, the bar stays
         assert bars == (_bar("bottom", 22, ["menu", "separator", "zone"], [],
                              ["close", "wifi", "battery", "clock"]),)
         assert notes == ("chips: not in this mode",)
     assert _res(EXAMPLES[3], tier) == (EXAMPLES[3], ())
     assert _res(EXAMPLES[4], tier) == (EXAMPLES[4], ())
-    # Side bars wait for step 5: the right bar is dropped, the top bar stands.
-    assert _res(EXAMPLES[5], tier) == ((TODAY,), ("right bar: not on this tier",))
     assert _res(EXAMPLES[6], tier) == (EXAMPLES[6], ())
 
 
-def test_a_docked_calendar_clears_the_floor_on_the_big_glass_only():
-    # With the side edges open (step 5), example 5 keeps 76% of the P4's
-    # width and resolves; on a 320- or 480-wide glass it fails the floor and
-    # the default stands in -- one rule, no board exception.
-    edges = shell_layout.EDGES
+def test_a_docked_calendar_waits_for_its_painter_and_the_floor_holds():
+    # No bar draws the month grid yet, so `calendar` is in no WM's catalogue:
+    # on the P4 example 5's right bar stays (it clears the floor, 76% of the
+    # width) and holds its spacer; on a 320- or 480-wide glass it fails the
+    # floor and the default stands in -- one rule, no board exception.
     for tier in ("p4_desktop", "p4_console", "guition_p4_desktop"):
-        assert _res(EXAMPLES[5], tier, edges) == (EXAMPLES[5], ()), tier
+        bars, notes = _res(EXAMPLES[5], tier)
+        assert bars == (_today(tier), _bar("right", 120, [], [], ["spacer"])), tier
+        assert "calendar: not in this mode" in notes
+    # with the catalogue that places it, the floor alone decides
+    for tier in ("p4_desktop", "guition_p4_desktop"):
+        assert _res(EXAMPLES[5], tier, cat=ALL) == (EXAMPLES[5], ()), tier
     for tier in ("tdeck", "guition_s3"):
-        bars, notes = _res(EXAMPLES[5], tier, edges)
+        bars, notes = _res(EXAMPLES[5], tier, cat=ALL)
         assert bars == (TODAY,) and notes[-1] == "replaced by the default", tier
         assert "the bars leave the content under 75% of the glass" in notes
 
@@ -99,23 +117,24 @@ def test_the_rule_runs_again_after_the_drops():
     # The loader passes `zone` in a vertical bar; the composer drops it there
     # and the required set fails, so the default stands in.
     lay = (_bar("top", 18, ["menu", "close"]), _bar("left", 40, ["zone"]))
-    bars, notes = _res(lay, "p4_desktop", shell_layout.EDGES)
+    bars, notes = _res(lay, "p4_desktop")
     assert bars == (TODAY,)
     assert notes == ("zone: not on a left bar", "no zone after the drops",
                      "replaced by the default")
-    bars, notes = _res(lay, "p4_desktop")
+    # a tier that places no side bar drops the bar first
+    bars, notes = _res(lay, "p4_desktop", TOP_BOTTOM)
     assert bars == (TODAY,) and notes[0] == "left bar: not on this tier"
     # a required widget that does not fit is a drop like any other
     lay = (_bar("top", 18, ["text"], [], ["clock", "wifi", "battery", "zone", "menu", "close"],
                 text=["x" * 24]),)
     bars, notes = _res(lay, "tdeck")
-    assert bars == (TODAY,)
+    assert bars == (TODAY_C,)
     assert notes[:2] == ("zone: does not fit the top bar", "no zone after the drops")
 
 
 def test_a_widget_that_does_not_fit_its_bar_is_dropped():
     lay = (_bar("top", 18, ["zone", "calendar", "title"], [], ["menu", "close", "clock"]),)
-    bars, notes = _res(lay, "tdeck")
+    bars, notes = _res(lay, "tdeck", cat=ALL)
     assert bars == (_bar("top", 18, ["zone", "title"], [], ["menu", "close", "clock"]),)
     assert notes == ("calendar: does not fit the top bar",)
     # a bar's length is the glass at the chrome scale: the Guition S3's 480
@@ -132,7 +151,7 @@ def test_a_widget_that_does_not_fit_its_bar_is_dropped():
 def test_the_content_keeps_three_quarters_of_each_axis():
     tall = (_bar("top", 160, ["zone"], [], ["menu", "close"]),)
     bars, notes = _res(tall, "tdeck")
-    assert bars == (TODAY,) and notes[0] == "the bars leave the content under 75% of the glass"
+    assert bars == (TODAY_C,) and notes[0] == "the bars leave the content under 75% of the glass"
     ok = (_bar("top", 30, ["zone"], [], ["menu", "close"]),)   # 210 of 240 rows stay
     assert _res(ok, "tdeck") == (ok, ())
 
@@ -149,8 +168,9 @@ def test_the_composer_never_raises():
                         + (tuple("t" * rng.randint(1, 24) for _t in range(n_text)),))
         w, h = rng.choice(((320, 240), (480, 320), (1024, 600), (64, 64), (1280, 800)))
         cs = rng.randint(1, 3)
-        edges = rng.choice((STEP4, shell_layout.EDGES))
-        got, notes = resolve(tuple(bars), (TODAY,), w, h, cs, rng.choice((ALL, CONSOLE)), edges)
+        edges = rng.choice((TOP_BOTTOM, EDGES))
+        got, notes = resolve(tuple(bars), (TODAY,), w, h, cs,
+                             rng.choice((ALL, DESKTOP, CONSOLE)), edges)
         assert got and all(b[0] in edges or got is FALLBACK for b in got)
         assert all(type(n) is str for n in notes)
 
@@ -173,8 +193,12 @@ def _rows(ws):
 
 
 def test_the_default_layout_is_todays_bar_on_every_tier(tmp_path):
-    for ws in (build_ws(tmp_path / "a"), build_desktop_ws(tmp_path / "b")):
-        assert ws.look.bars == (TODAY,) and ws.look.layout_notes == ()
+    ws = build_ws(tmp_path / "a")
+    assert ws.look.bars == (TODAY_C,)
+    assert ws.look.layout_notes == ("chips: not in this mode",)
+    ws2 = build_desktop_ws(tmp_path / "b")
+    assert ws2.look.bars == (TODAY,) and ws2.look.layout_notes == ()
+    for ws in (ws, ws2):
         assert layout_base.bar_edge() == "top"
         assert ws.look.layout_theme() is None
         assert "layout_theme" not in _rows(ws)     # every seed's layout is the default's
@@ -200,7 +224,7 @@ def test_a_picked_layout_survives_two_theme_switches(tmp_path):
     # THEME deletes the row and the active theme's bars come back
     ws.look.cycle_layout_theme(-1)
     assert ws.system.get("layout_theme") is None
-    assert layout_base.bar_edge() == "top" and ws.look.bars == (TODAY,)
+    assert layout_base.bar_edge() == "top" and ws.look.bars == (TODAY_C,)
 
 
 @pytest.mark.parametrize("value", ["nowhere", 7, "", None, ["dock"], "NIGHT"])
@@ -209,7 +233,7 @@ def test_the_reader_is_strict(tmp_path, value):
     ws.system.set("layout_theme", value)
     assert ws.look.layout_theme() is None
     ws.look.apply_layout()
-    assert ws.look.bars == (TODAY,) and layout_base.bar_edge() == "top"
+    assert ws.look.bars == (TODAY_C,) and layout_base.bar_edge() == "top"
 
 
 def test_an_uninstalled_pick_reads_as_absent_at_boot(tmp_path):
@@ -255,12 +279,13 @@ def test_a_mode_switch_resolves_the_catalogue_again(tmp_path):
 
 
 # One fixture layout that triggers each drop of §10 at once: a widget outside
-# the console catalogue (`chips`), one that does not fit its bar (`calendar`)
-# and a bar on an edge this step does not place (`left`).
+# the console catalogue (`chips`), one no WM places (`calendar`: no bar draws
+# the month grid), one with no cell on a side bar (`title`) and one that does
+# not fit its bar (a `text` wider than the 16-row side bar).
 FIXTURE = {"format": 1, "name": "drops", "layout": {"bars": [
     {"edge": "top", "left": ["zone", "chips", "calendar"],
      "right": ["clock", "close", "menu", "wifi", "battery"]},
-    {"edge": "left", "size": 40, "left": ["title"]}]}}
+    {"edge": "left", "size": 16, "left": ["title", "text"], "text": ["abcdefgh"]}]}}
 VERTICAL_ZONE = {"format": 1, "name": "vzone", "layout": {"bars": [
     {"edge": "top", "right": ["clock", "close", "menu"]},
     {"edge": "left", "size": 40, "left": ["zone"]}]}}
@@ -289,17 +314,17 @@ def test_the_fixture_layouts_drop_as_specified_on_every_config(tmp_path, config_
     ws.look.apply_layout()
     bars, notes = ws.look.bars, ws.look.layout_notes
     want_left = ("zone", "chips") if desktop else ("zone",)
-    assert bars == (TODAY[:2] + (want_left,) + TODAY[3:],), config_name
-    want = ["left bar: not on this tier"]
-    if not desktop:
-        want.append("chips: not in this mode")
-    want.append("calendar: does not fit the top bar")
+    assert bars == (TODAY[:2] + (want_left, ()) + TODAY[4:],
+                    _bar("left", 16)), config_name
+    want = [] if desktop else ["chips: not in this mode"]
+    want += ["calendar: not in this mode", "title: not on a left bar",
+             "text: does not fit the left bar"]
     assert list(notes) == want
     _install(VERTICAL_ZONE)
     ws.look.set_theme(ws.look.theme_name, persist=False)
     ws.system.set("layout_theme", "vzone")
     ws.look.apply_layout()
-    assert ws.look.bars == (TODAY,)
-    assert ws.look.layout_notes == ("left bar: not on this tier", "no zone after the drops",
-                                    "replaced by the default")
+    assert ws.look.bars == ((TODAY if desktop else TODAY_C),)
+    want = ("zone: not on a left bar", "no zone after the drops", "replaced by the default")
+    assert ws.look.layout_notes == want + (() if desktop else ("chips: not in this mode",))
     assert layout_base.bar_edge() == "top"

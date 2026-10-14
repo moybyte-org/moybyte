@@ -237,6 +237,13 @@ static mp_obj_t ui_theme_installed(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_installed_obj, ui_theme_installed);
 
+// theme_uninstall(): drop the installed package.
+static mp_obj_t ui_theme_uninstall(void) {
+    moy_theme_uninstall();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_uninstall_obj, ui_theme_uninstall);
+
 // theme_fonts(name) -> ((role, file), ...): theme `name`'s font files, each
 // from the nearest package that names one, in style.json's role order.
 static mp_obj_t ui_theme_fonts(mp_obj_t name) {
@@ -995,15 +1002,15 @@ static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_buttons_obj, 5, 5, ui_frame_buttons);
 
-// frame_band(cv, look, rect, light): the bar's band
+// frame_band(cv, look, rect, light, side): the bar's band
 static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
-    check(moy_ui_frame_band(&s, box_of(a[2]), mp_obj_is_true(a[3])));
+    check(moy_ui_frame_band(&s, box_of(a[2]), mp_obj_is_true(a[3]), mp_obj_get_int(a[4])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 4, 4, ui_frame_band);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 5, 5, ui_frame_band);
 
 // dialog(cv, rect, ring, fill)
 static mp_obj_t ui_dialog(size_t n_args, const mp_obj_t *a) {
@@ -1280,6 +1287,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_states), MP_ROM_PTR(&ui_theme_states_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_install), MP_ROM_PTR(&ui_theme_install_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_uninstall), MP_ROM_PTR(&ui_theme_uninstall_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },

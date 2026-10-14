@@ -39,6 +39,7 @@ _SIGS = (
     ("moy_ui_shape", [], c.c_void_p),
     ("moy_ui_pattern_unreadable", [_I, c.c_void_p, c.c_void_p, _I], _I),
     ("moy_theme_installed", [], c.c_char_p),
+    ("moy_theme_uninstall", [], None),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
@@ -485,9 +486,9 @@ def binding():
                                      int(fs), out)
         return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
 
-    def frame_band(cv, look, rect, light):
+    def frame_band(cv, look, rect, light, side):
         _check(lib.moy_ui_frame_band(c.byref(sink(cv, look)), box_of(rect),
-                                     1 if light else 0))
+                                     1 if light else 0, int(side)))
 
     def dialog(cv, rect, ring, fill):
         _check(lib.moy_ui_dialog(c.byref(sink(cv, None)), box_of(rect),
@@ -799,6 +800,7 @@ def binding():
     m.theme = theme
     m.theme_install = theme_install
     m.theme_installed = theme_installed
+    m.theme_uninstall = lib.moy_theme_uninstall
     m.theme_fonts = theme_fonts
     m.theme_layout = theme_layout
     m.font_load = font_load

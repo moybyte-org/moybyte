@@ -28,7 +28,7 @@ Picotron-style (owner direction, 2026-07-08):
     maximize / close), a border + drop shadow, draggable by the strip and
     resizable by the bottom-right grip;
   * a window's body is PURELY the app: in windowed mode the zoned bar suppresses
-    its OS right zone (ws.windowed_chrome -- see bar_layer.py), so
+    its OS widgets (ws.windowed_chrome -- see bar_layer.py), so
     an app window's own bar row is just its toolbar (the Editor's tab ladder),
     never a copied taskbar;
   * a RUNNING CART composites integer-scaled and centered in its window -- the
@@ -83,6 +83,7 @@ try:
     from wm_chrome import WindowChrome, _SHADOW
     from moy_spine import EDITOR
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
@@ -92,6 +93,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm_chrome import WindowChrome, _SHADOW
     from runtime.moy_spine import EDITOR
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from runtime import layout_base as _layout_base
 
 import time as _time                  # the bar clock's minute (localtime)
 
@@ -274,7 +276,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     has_desk = True
     # `chips` (the taskbar's window chips) has a value in desktop mode only.
-    LAYOUT_CATALOGUE = {"desktop": _LAYOUT_WIDGETS,
+    LAYOUT_CATALOGUE = {"desktop": tuple(w for w in _LAYOUT_WIDGETS if w != "calendar"),
                         "console": FullscreenStackWM.LAYOUT_CATALOGUE["console"]}
 
     def __init__(self, ws):
@@ -463,7 +465,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         self._ctx_switching = True
         ws._sys_canvas = buf
-        ws._relayout()
+        _layout_base.in_window(True)          # a window's layouts take its band
+        try:
+            ws._relayout()
+        finally:
+            _layout_base.in_window(False)
         ctx = _LayoutCtx.capture(ws)
         self._root_ctx.install(ws)
         self._ctx_switching = False
@@ -504,8 +510,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._mode_was = self.mode
             self._mode_switch = True
             try:
-                self.ws.look.apply_layout()     # the catalogue is the mode's
-                self.ws._relayout()
+                # The catalogue is the mode's: bars that move relayout there.
+                if not self.ws.look.apply_layout():
+                    self.ws._relayout()
             finally:
                 self._mode_switch = False
             self.ws.bar_layer.invalidate()      # the home's X follows the floor
@@ -791,7 +798,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         usable minimum, then rebuild the content buffer + layout context so the
         app reflows to the new window size."""
         fs = self._fs()
-        _dx, _dy, max_w, max_h = self._desk_rect()
+        dx, dy, max_w, max_h = self._desk_rect()
+        full = self._root_canvas
+        # A right or bottom bar is a wall the grip stops at.
+        if dx + max_w < full.w:
+            max_w = max(1, min(max_w, dx + max_w - win.x))
+        if dy + max_h < full.h:
+            max_h = max(1, min(max_h, dy + max_h - win.y))
         min_w = 160 * fs
         min_h = 90 * fs + win.title_h
         # Min-size convention (ui.py + the app API): a registered app declares
@@ -2189,8 +2202,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # gesture leg + the pointer leg, and _surface_signals attributes the
         # gesture to the moving window's sid. This is what lets the desk/bar/
         # other windows SKIP during a drag (the 70ms->3ms wasm frame class).
+        # The content rect clamps it: a window may hang off the glass's left
+        # or right edge with 40 columns still on the desk, and never crosses
+        # a bar -- a side bar is a wall, as the top and bottom ones are.
         full = self._root_canvas
         fs = self._fs()
-        _dx, dy, _dw, dh = self._desk_rect()
-        win.x = max(-win.w + 40 * fs, min(nx, full.w - 40 * fs))
+        dx, dy, dw, dh = self._desk_rect()
+        lo = dx if dx > 0 else -win.w + 40 * fs
+        hi = dx + dw - win.w if dx + dw < full.w else full.w - 40 * fs
+        win.x = max(lo, min(nx, max(lo, hi)))
         win.y = max(dy, min(ny, dy + dh - 24 * fs))

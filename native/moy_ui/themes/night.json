@@ -6,7 +6,7 @@
   "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },
   "layout": {
     "bars": [
-      { "edge": "top", "size": 18, "left": ["zone"], "center": [],
+      { "edge": "top", "size": 18, "left": ["zone"], "center": ["chips"],
         "right": ["clock", "close", "menu", "wifi", "battery"] }
     ]
   },

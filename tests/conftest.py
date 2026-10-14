@@ -193,14 +193,16 @@ def _theme_shape_back():
     """The toolkit's installed shape is one per process (native/moy_ui), as it
     is one per board, and a workstation installs its theme's at boot. A test
     that built one would restyle every widget a later test on the worker
-    draws, so the empty shape goes back after each, and every font role and
-    the print font back to petme128."""
+    draws, so the empty shape goes back after each, the installed theme
+    package is dropped (a later test's Settings would list its layout), and
+    every font role and the print font go back to petme128."""
     yield
     try:
         from runtime import ui
     except ImportError:
         return
     ui.use_shape(None)
+    ui.theme_uninstall()
     ui.cart_text(False)
     for role in ("ui", "title", "mono"):
         ui.use_font(role, 0)

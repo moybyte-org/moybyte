@@ -133,8 +133,8 @@ class SceneLayout(LayoutBase):
             self.body_fill = (bx, by, bw, bh)
         else:
             # The content rect, its top edge tucked 2fs under a top bar's.
-            px, py = 8 * fs, max(0, self.cy - 2 * fs)
-            pw, ph = self.w - 16 * fs, self.cy + self.ch - py - 20 * fs
+            px, py = self.cx + 8 * fs, max(0, self.cy - 2 * fs)
+            pw, ph = self.cw - 16 * fs, self.cy + self.ch - py - 20 * fs
             self.body_fill = (self.cx, self.cy, self.cw, self.ch)
         self.panel = (px, py, pw, ph)
         p_right = px + pw
