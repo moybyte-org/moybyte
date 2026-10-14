@@ -756,9 +756,10 @@ two resolved rows (the token row and the content set, both variants), an
 **accent** — one of sixteen pairs (A, deep) in style.json's
 `theme.accents`, or the source's own — and a **tint** — NONE or one of
 eight ramps of MOY64 indices in `theme.tints`, dark to light, never black
-(0) or white (7). The lists are data, as `font_roles` is; the mockups'
-`derive()` (`docs/media/theming_2026-09/appearance/mockups.py`) carries
-today's. **Every accent is one black clears** (`clears(A, 0)`), because
+(0) or white (7). The lists are data, as `font_roles` is, and the sixteen
+accents and eight tints the mockups draw are the set (owner, 2026-10-14);
+the mockups' `derive()` (`docs/media/theming_2026-09/appearance/mockups.py`)
+carries them. **Every accent is one black clears** (`clears(A, 0)`), because
 style.json's kinds paint a literal black label on an accent fill (`chip`,
 `button` and `row_cta` in `on`); that is what lets the accent fill every
 accent role with no new ink role.
@@ -1201,14 +1202,16 @@ instead:
   installed packages, `custom`), MODE (dark or light), ACCENT (one swatch of
   sixteen), TINT (one background tint), WALLPAPER (the wallpaper picker, out
   of the old tabs), WINDOW STYLE (the frame presets), FONT (the font
-  presets), CHROME SIZE (out of Settings, where the board has more than one
+  presets, Tiny5 and petme128 only, owner 2026-10-14), CHROME SIZE (out of Settings, where the board has more than one
   scale), EDIT FILE… and, on `custom` only, NAME…. A picker opens as a
   popover in desktop mode and as a page in console mode
   (`docs/shell_layout_2026-10.md` L5); ←→ on a row steps it in place.
 - **The first change on a seed or an installed theme copies it to one theme
   named `custom` and switches to it**; a change on `custom` edits it. It
   saves as it goes: no SAVE and no name page. A change started from another
-  theme replaces `custom`. MODE, CHROME SIZE and THEME are not changes to a
+  theme replaces `custom`. A theme the kid has NAMED is an installed theme
+  like any other (owner, 2026-10-14): a change on it copies to `custom`,
+  and NAME… → REPLACE keeps the change under the name. MODE, CHROME SIZE and THEME are not changes to a
   theme; ACCENT, TINT, WALLPAPER, WINDOW STYLE, FONT, a save through EDIT
   FILE and EDIT TASKBAR are.
 - **Every colour role is derived** from the source theme, MODE, ACCENT and
@@ -1474,9 +1477,10 @@ port), never here.
      opens its picker, the sixteen swatches and the eight ramps, live behind
      it, ESC restoring what was there), WALLPAPER (the existing catalogue as
      its picker), WINDOW STYLE (the frame presets: CLASSIC, TABS, PLATINUM,
-     WIN9X, FLAT, each a whole `frame`), FONT (Tiny5, the built-in
-     petme128 — `petme128`, a reserved name in `fonts` the loader answers
-     with font row 0, additive — and every `.fnt` in the package's folder), CHROME SIZE (moved
+     WIN9X, FLAT, each a whole `frame`), FONT (the two presets, Tiny5 and
+     the built-in petme128 — `petme128`, a reserved name in `fonts` the
+     loader answers with font row 0, additive; owner, 2026-10-14: these two
+     only, a package's own `.fnt` set through EDIT FILE), CHROME SIZE (moved
      from Settings, present where `ws.chrome_scales` has more than one) and
      EDIT FILE…. Every row but THEME, MODE and CHROME SIZE calls step 5's
      change. Settings keeps APPEARANCE as the page's door. Scenario: `edit
@@ -1619,9 +1623,11 @@ port), never here.
      `zone` on a side bar (it is horizontal only, §4 there) keeps a slim
      top bar holding `zone` alone — four bars at most, one per edge, sizes
      16 to 32 (§5 there). It writes the theme's `layout` whole, making
-     `custom` first on a seed or an installed theme (step 5), and clears
-     the `layout_theme` override (§11 there), since the edited bars are
-     the theme's from then on. Console mode (the T-Deck, the Guition S3, a
+     `custom` first on a seed or an installed theme (step 5), and retires
+     the Settings LAYOUT row and its `layout_theme` override (§11 there;
+     owner, 2026-10-14: the row stays where it is until this step), since
+     the bars are the theme's from then on: under the store rule a stored
+     `layout_theme` reads as nothing, and the seed version is bumped. Console mode (the T-Deck, the Guition S3, a
      P4 in console mode) runs the same mode on its bar, with the tray and
      the edges as the page under it, limited to its catalogue (no `chips`)
      and `LAYOUT_EDGES`. Declined: a LAYOUT page of rows (the six-page
@@ -1631,14 +1637,17 @@ port), never here.
      it settles. Test net: `tests/test_shell_layout.py`'s fuzz grows key
      streams through the mode (none yields a layout the rule replaces, none
      removes a required widget); `tests/test_appearance.py` holds the write
-     into `custom` and the cleared override. Goldens: byte-identical
+     into `custom` and that no `layout_theme` is read. Goldens: byte-identical
      outside the mode; NEW rows of the mode on the P4-as-shipped and
      320×240 configs; `app idle` zero after leaving it.
 
   Ruled 2026-10-14 and folded in: standalone copies over inheritance, the
   safety as the loader's, the fixed frame footprint, the design step, the
   picks above, no SAVE (`custom` saves as it goes), one wallpaper and then
-  the wallpaper as the theme's, and the Appearance rulings.
+  the wallpaper as the theme's, the Appearance rulings, and the four answers
+  of the design's review (a NAMED theme copies to `custom` like any other;
+  FONT's presets are Tiny5 and petme128; the Settings LAYOUT row stays until
+  EDIT TASKBAR retires it; the sixteen accents and eight tints as drawn).
 
 ## 10. What other systems taught (research, 2026-09-27)
 
@@ -1758,6 +1767,7 @@ Each is corrected in place by the phase that falsifies it:
 | the per-board reset key, the strike ledger as "theming phase 6's" | `docs/shell_layout_2026-10.md` §9 | phase 6 step 2: the loader's refusal is the recovery |
 | the wallpaper as a persisted choice of its own (`prefs` persist, the fills, the look's choice) | `runtime/README.md` (`appearance.py`), `docs/app_api_v1.md` (`ctx.wallpaper`), `runtime/appearance.py` | phase 6 step 5: the wallpaper is the theme's |
 | the Appearance app's IMAGES / CARTS / THEMES tabs and its monitor preview; CHROME SIZE as a Settings row | `runtime/README.md` (`appearance_app.py`), `runtime/appearance_app.py`, `runtime/settings_layer.py` | phase 6 step 7: one page of rows |
+| the `layout_theme` override and the Settings LAYOUT row (D5) | `docs/shell_layout_2026-10.md` L7, §11 | phase 6 step 12: the bars are the theme's |
 | the browser import landing every folder as an `author.name` cart | `firmware/web_runner/worker.js`, `firmware/web_runner/moy_store.mjs` | phase 6 step 8: a theme lands under its own name |
 
 ## 14. Review ledger
