@@ -80,6 +80,29 @@ def overlay(src, over):
     return dumps(d)
 
 
+def minified(text):
+    """JSON text `text` as `dumps` writes it, or None when it is not JSON."""
+    try:
+        return dumps(json.loads(text)).decode()
+    except ValueError:
+        return None
+
+
+def derived_of(src):
+    """theme.json bytes `src` but the keys in OVER_KEYS, as a dict: what
+    the derivation writes (the colours, the source's metrics, text effects,
+    surfaces and layout). None when it is not a JSON object."""
+    try:
+        d = json.loads(src)
+    except ValueError:
+        return None
+    if type(d) is not dict:
+        return None
+    for k in OVER_KEYS:
+        d.pop(k, None)
+    return d
+
+
 def keys_of(src):
     """{key: value} of `src`'s keys in OVER_KEYS, an absent one DROP."""
     try:

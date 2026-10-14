@@ -181,8 +181,15 @@ class EditorHandle:
     taps X never loses a note."""
 
     def __init__(self, files, kind, name, mode, canvas, theme,
-                 clip=None, host=None, images=None):
+                 clip=None, host=None, images=None, watch=None):
         self._files = files          # the (kind, name)-taking Files role
+        # The document's own reader, or None: an object whose
+        # `file_check(text)` is a second gate after the mode's, answering
+        # (ok, note, text to write) -- a note on a text it passes is the
+        # badge as it stands -- and whose `file_saved(text)` is told of
+        # a write that passed it -- custom's theme.json under EDIT FILE
+        # (`appearance.Appearance.file_watch`).
+        self._watch = watch
         self._images = images or files   # the role a note's embedded drawings load through
         self._canvas = canvas
         self._theme = theme          # () -> the live token dict
@@ -203,7 +210,7 @@ class EditorHandle:
         self.history = History(self.ed, TextEditCodec())
         self.history.seed(files.history_ops(kind, self._name)[0] or [])
         self._burst = None           # text() at the live typing burst's start
-        self._badge = ""             # the mode gate's refusal, "" when clean
+        self._badge = ""             # a gate's refusal or the watch's note, "" when clean
         self._unsaved = False
         self._edit_ms = None         # when the idle autosave window opened
         self._focus = False
@@ -231,7 +238,8 @@ class EditorHandle:
         return bool(self._unsaved or self.ed.dirty or self._burst is not None)
 
     def badge(self):
-        """The mode gate's refusal for the current text, "" when it parses."""
+        """The gates' refusal for the text last saved, or the watch's note
+        on one it passed; "" when there is nothing to say."""
         return self._badge
 
     def caret(self):
@@ -435,18 +443,25 @@ class EditorHandle:
         self._close_burst()
         body = self.ed.text()[:MAX_CHARS]
         good, why = _modes.check(self._mode, body)
-        self._badge = "" if good else (INVALID + " " + why).rstrip()
+        out = body
+        if good and self._watch is not None:
+            good, why, out = self._watch.file_check(body)
+            if not good:
+                out = body
+        self._badge = why if good else (INVALID + " " + why).rstrip()
         if not good and soft:
             self._edit_ms = _ticks_ms()   # re-check on the next window, not next frame
             return (False, self._badge)
         _, err = self._files.save(self.kind, self._name,
-                                  self._files.encode_text(body))
+                                  self._files.encode_text(out))
         if err is not None:
             return (False, str(err))
         self.ed.dirty = False
         self._unsaved = False
         self._edit_ms = None
         self._commit_history()
+        if good and self._watch is not None:
+            self._watch.file_saved(out)
         return (True, self._badge)
 
     def close(self):

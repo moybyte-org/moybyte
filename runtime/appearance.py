@@ -2,6 +2,7 @@
 #   Appearance                       `ws.look`: theme, variant, font scale, wallpaper, icons, layout
 #   -- the wallpaper: the theme's    theme_wallpaper, the picture, the coordinator
 #   -- custom: a change              change / tick / commit, the one write path
+#   -- EDIT FILE                     edit_file, and the text app's saves (file_check / file_saved)
 #   -- the top-bar icon sheet        the bar's IconSheet
 #   Appearance.set_font_scale        the system font scale, relayout
 #   Appearance.set_chrome_scale      the chrome scale above the tap floor, relayout
@@ -18,6 +19,8 @@ happened to share a Settings screen. And `custom`, the theme a change makes
 (`change`, docs/theming_2026-09.md §9 phase 6 step 5): the one write path of
 the Appearance rows, applied once a frame (`tick`) and written once the
 changes settle or at an exit (`commit`), through Paint's mechanism (#108).
+And EDIT FILE (`edit_file`, step 6): custom's theme.json in the text app, a
+save the loader takes installed at the next frame.
 
 Not to be confused with `appearance_app.py`, which is the PICKER a kid taps --
 that app keeps its name and its place in the app registry, and reaches these
@@ -101,13 +104,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 forget_package)
 try:
     from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PICTURE_FILE,
-                              font_files, keys_of, manifest, overlay,
-                              read_look, wall_keys)
+                              derived_of, font_files, keys_of,
+                              manifest, minified, overlay, read_look, wall_keys)
     from moy_store_base import cart_path
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
-                                      PICTURE_FILE, font_files, keys_of,
-                                      manifest, overlay, read_look, wall_keys)
+                                      PICTURE_FILE, derived_of, font_files,
+                                      keys_of, manifest, minified, overlay,
+                                      read_look, wall_keys)
     from runtime.moy_store_base import cart_path
 try:
     from editors_sheet import IconSheet
@@ -138,6 +142,8 @@ _PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spar
 _CHANGES = ("accent", "tint", "wallpaper", "frame", "font")
 # The loader's refusals (moy_theme.h), by rc from 1: each one's string.
 _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
+# The note of a saved theme.json one of whose pairs misses the contrast floor.
+UNREADABLE = "SOME COLOURS ARE HARD TO READ"
 # The theme fonts loaded, (package, file) -> id, the package None for a
 # seed's file: one table for the process, as the loader's four slots are.
 _FONTS = {}
@@ -250,6 +256,7 @@ class Appearance:
         self._slot_gen = None
         self._refused = set()
         self.theme_note = None          # the last refusal: (name, rc)
+        self._editing = None            # (kind, name) EDIT FILE opened
 
     # -- wallpaper discovery -------------------------------------------------
 
@@ -453,6 +460,26 @@ class Appearance:
         else:
             over["wallpapers"] = {"desk": value} if value is not None else {}
             over["images"] = DROP
+        rc = self._take(c, look, over, kind, pic)
+        if rc != 0:
+            return rc
+        if kind == "wallpaper":
+            ws = self.ws
+            if value is not None and value != self.PICTURE:
+                # A deliberate pick is the kid's "try again" (#160): a
+                # struck-out wallpaper gets a fresh three strikes.
+                guard = getattr(ws, "wallpaper_guard", None)
+                if guard is not None:
+                    guard.forgive(value)
+            ach = getattr(ws, "ach", None)
+            if ach is not None:
+                ach.note("wallpaper_change")   # "Home Decorator" (#21)
+        return 0
+
+    def _take(self, c, look, over, kind, pic):
+        """Make `look` and `over` custom's: derive its bytes, gather the files
+        they name, mark it to apply at the next frame and to be written. 0,
+        else the loader's refusal or NO_FILE, custom as it was."""
         rc, theme = self._derive(c, look, over)
         if rc != 0:
             return rc
@@ -477,17 +504,6 @@ class Appearance:
         c.wall_moved = c.wall_moved or kind == "wallpaper"
         self._unsaved = True
         self._idle = 0.0
-        if kind == "wallpaper":
-            ws = self.ws
-            if value is not None and value != self.PICTURE:
-                # A deliberate pick is the kid's "try again" (#160): a
-                # struck-out wallpaper gets a fresh three strikes.
-                guard = getattr(ws, "wallpaper_guard", None)
-                if guard is not None:
-                    guard.forgive(value)
-            ach = getattr(ws, "ach", None)
-            if ach is not None:
-                ach.note("wallpaper_change")   # "Home Decorator" (#21)
         return 0
 
     def custom_look(self):
@@ -561,6 +577,83 @@ class Appearance:
             rows.set("theme", CUSTOM, persist=False)
             rows.set("theme_variant", self.theme_variant)
         return True
+
+    # -- EDIT FILE: the theme's theme.json in the text app (phase 6 step 6) --
+
+    def edit_file(self):
+        """Open the active theme's theme.json in the console's text app. On a
+        seed or an installed package `custom` is made from it first and
+        switched to (a seed is firmware); on `custom` its unwritten change is
+        written first, so the file opened is the look shown. The editor's
+        saves come back through `file_check` and `file_saved`. False when
+        there is no store, no text app, or `custom` cannot be made."""
+        ws = self.ws
+        if self.theme_name != CUSTOM:
+            c = Custom({"from": self.theme_name}, fresh=True)
+            if self._take(c, dict(c.look), {}, None, None) != 0:
+                return False
+            self._apply_custom(c)              # an action, not a held key: now
+        elif self._cust is None:
+            c = self._load_custom()
+            if c is None:
+                return False
+            self._adopt_custom(c)
+        store = getattr(ws, "store", None)
+        if store is None or not store.writable() or not self.commit():
+            return False
+        kind = ws.carts_store.project_kind(self._custom_path())
+        self._editing = (kind, _THEME_MAIN)
+        return bool(ws.open_text_cart(_THEME_MAIN, kind, "json"))
+
+    def file_watch(self, kind, name):
+        """This look when (kind, name) is the file EDIT FILE opened, else
+        None: what the text app's editor handle reports its saves to."""
+        return self if self._editing == (kind, name) else None
+
+    def file_check(self, text):
+        """The editor's gate for custom's theme.json: (ok, note, text), the
+        text to write -- as typed, or minified when only that fits
+        `theme.bytes`. A file the loader refuses, or one whose `name` is not
+        custom's, answers the loader's note; one it takes with a pair under
+        the contrast floor answers UNREADABLE and is written."""
+        body = text
+        if len(body.encode()) > _THEME_BYTES:
+            body = minified(text) or text
+        rc = 1
+        if len(body.encode()) <= _THEME_BYTES:
+            got = _uimod.theme_resolve(body.encode())
+            rc = got[0]
+            if rc == 0 and got[2] != CUSTOM:
+                rc = 4                         # NAME: not its folder's
+        if rc != 0:
+            return (False, _uimod.s("theme.why_"
+                                    + _THEME_WHY[min(max(rc, 1), 7) - 1]), None)
+        # A pair of theme.pairs under the floor never refuses (§7): it is
+        # the note a save that passed shows.
+        return (True, UNREADABLE if got[3][1] | got[4][1] else "", body)
+
+    def file_saved(self, text):
+        """custom's theme.json was saved as `text`, which `file_check`
+        passed: it is custom from now on, installed at the next frame. A
+        hand edit of what the derivation writes -- a colour, a metric, a
+        surface -- drops the manifest's `from` (and the accent and tint with
+        it), so the file as saved is the source a later ACCENT or TINT
+        derives from (§4.10); one of `frame`, `fonts`, `wallpapers` or
+        `images` alone keeps it, those keys set over the source's."""
+        if self.theme_name != CUSTOM:
+            return
+        src = text.encode()
+        old = self._cust or self._load_custom()
+        look = dict(old.look) if old is not None else {}
+        if old is None or derived_of(src) != derived_of(old.theme):
+            look = {}
+        c = self._custom_of(src, look)
+        self._adopt_custom(c)
+        c.dirty = c.font_moved = c.wall_moved = True
+        self._unsaved = old is None or c.look != old.look
+        self._idle = 0.0
+        if self._unsaved:
+            self.commit()                      # the manifest's `look`
 
     def _custom_path(self):
         return cart_path(self.ws.carts_root, CUSTOM + ".moy")
@@ -658,6 +751,12 @@ class Appearance:
         if src is None or len(src) > _THEME_BYTES:
             return None
         look = read_look(self._package_file(CUSTOM, MANIFEST, _THEME_BYTES))
+        return self._custom_of(src, look)
+
+    def _custom_of(self, src, look):
+        """custom whose theme.json is `src` and whose manifest's `look` is
+        `look` (which this edits): its files, and what its keys set over its
+        source's."""
         c = Custom(look)
         c.theme = src
         mine = keys_of(src)

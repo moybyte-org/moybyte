@@ -193,6 +193,55 @@ def test_a_change_through_the_verb_draws_what_a_boot_of_custom_draws(tmp_path, d
 
 
 @pytest.mark.parametrize("desk", [False, True], ids=["console", "desk"])
+def test_a_save_through_edit_file_draws_what_a_boot_of_it_draws(tmp_path, desk):
+    """Phase 6 step 6: custom's theme.json saved by hand is the same
+    in-place install at the next frame -- every cache moves once, idle
+    paints nothing after it, and a boot of the file as saved draws the
+    same. The handle's two calls (`file_check`, the write, `file_saved`)
+    are made here directly, so the text app's window is not in the
+    picture."""
+    def boot():
+        ws = (build_desktop_ws if desk else build_ws)(tmp_path)
+        _quiet(ws)
+        if desk:
+            ws.open_desk()
+            ws.open_settings()
+        return ws
+
+    ws = boot()
+    ws.look.change("tint", "plum")
+    ws.look.tick(0.0)
+    ws.look.commit()
+    before = _settle(ws)
+    keys = _keys(ws, desk)
+    gen = ws.look.look_gen
+    path = tmp_path / "carts" / "custom.moy" / "theme.json"
+    d = json.loads(path.read_bytes())
+    for role in ("panel", "bar", "accent", "title_active", "title_ink"):
+        d["colors"]["dark"][role] = (d["colors"]["dark"][role] + 9) % 64
+    ok, _note, text = ws.look.file_check(json.dumps(d, indent=2))
+    assert ok
+    path.write_text(text)
+    ws.look.file_saved(text)
+    drawn = ws._frames_drawn
+    after = _settle(ws, force=False)      # the save's own repaint
+    assert ws.look.look_gen > gen and ws._frames_drawn > drawn and after != before
+    for name, key in _keys(ws, desk).items():
+        assert key != keys[name], name
+    drawn = ws._frames_drawn
+    for _ in range(4):
+        _quiet(ws)
+        ws.frame(1 / 30)
+    assert ws._frames_drawn == drawn
+
+    moy_ui.theme_uninstall()
+    chrome.forget_themes()
+    cold = boot()
+    assert cold.look.theme_name == "custom"
+    assert _settle(cold) == after
+
+
+@pytest.mark.parametrize("desk", [False, True], ids=["console", "desk"])
 def test_re_installing_replaces_every_cache_entry(tmp_path, desk):
     """N re-installs under one name: each cache keeps what one look needs."""
     ws = _world(tmp_path, desk)

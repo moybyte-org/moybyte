@@ -826,8 +826,8 @@ manifest, `"moybyte": {"type": "theme", "look": {"from": "night", "accent":
 14, "tint": "plum"}}`, read by Appearance alone: ACCENT and TINT show them,
 and each change re-derives from `from`'s resolved rows, never from the last
 result, since a ramp quantises and quantising a quantised row drifts. A
-colour saved through EDIT FILE drops `from`, and the file as saved is the
-source from then on. A package whose whole rows would pass `theme.bytes` (a
+colour (or any key the derivation writes) saved through EDIT FILE drops
+`from`, and the file as saved is the source from then on. A package whose whole rows would pass `theme.bytes` (a
 source with many surfaces) is written without the roles whose value §5's
 rule gives back, which resolves to the same row, and one that does not fit
 even so is refused (`MOY_THEME_BIG`). Declined: `accent` and
@@ -945,7 +945,7 @@ Kids will trade themes, so a theme is untrusted input:
   colour, a kind's ink as the style resolves it and the chrome parts' as the
   frame and the bar draw them; a part that paints no label is not checked.
   The derivation (§4.10) never writes a pair under the floor; a hand edit
-  through EDIT FILE can, and its reader is the loader's note at the save
+  through EDIT FILE can, and its reader is the editor's badge at the save
   (phase 6 step 6). Every seed passes both checks in both variants
   (`tests/test_theme_loader.py`).
 - **The loader is the safety** (owner, 2026-10-14). A theme cannot run code,
@@ -1230,7 +1230,7 @@ instead:
 - **Every colour role is derived** from the source theme, MODE, ACCENT and
   TINT, readable by construction (§4.10): no per-role picker and no "fails
   its pair" mark.
-- **ADVANCED is EDIT FILE**: the theme's `theme.json` in the Editor's text
+- **ADVANCED is EDIT FILE**: the theme's `theme.json` in the console's text
   editor, a save reloading the look live. Every role, the surfaces, the
   sprites and the layout are reachable there and only there; no page edits a
   role, a shape or a sprite visually.
@@ -1324,7 +1324,7 @@ port), never here.
      tab sources (`runtime/console.py`) skip it, the Make tab too, and
      `nav.projects()` (`runtime/shell_servers.py`) leaves it out, so the
      Files app never opens it in the Editor: Files lists it as a kind of its
-     own, THEMES, whose door is the Appearance app (its EDIT FILE from step 6). `Appearance.set_theme` takes a
+     own, THEMES, whose door is the Appearance app (its EDIT FILE… row from step 7). `Appearance.set_theme` takes a
      package's name: it reads the folder's `theme.json` into the slot, its
      fonts from the folder (`font_load` takes bytes, each at most
      `MOY_FONT_BYTES`; `_font_id` keyed on the package and the file) and, from
@@ -1482,21 +1482,50 @@ port), never here.
      golden moves: no seed names a wallpaper, and an unnamed one resolves to
      the default the setting's absence gives today; the configs set none.
 
-  6. **EDIT FILE.** `Appearance.edit_file()` opens the active theme's
-     `theme.json` in the Editor's text editor (`edit_file`,
-     `runtime/shell_servers.py`; the `json` mode of `runtime/text_modes.py`,
-     whose soft save refuses a file that does not parse and badges it), on a
-     seed or an installed package making `custom` first, since a seed is
-     firmware. A save of the active theme's file installs it live (step 2's
-     re-install of a package whose bytes moved, at the save rather than at
-     the next scan); a file the loader refuses leaves the look as it was and
-     shows the loader's note in the editor's badge, and the hard exit writes
-     it anyway, as for any document (#154). A saved colour drops
-     `look.from` (§4.10). Declined: a JSON form of rows (it is the six-page
-     editor again). Test net: `tests/test_appearance.py` — a saved role
-     moves the look and `look_gen`; a refused file keeps the look and badges;
-     EDIT FILE on a seed writes `custom` and opens its file. No golden
-     moves (no door yet).
+  6. **EDIT FILE** (landed 2026-10-14). `Appearance.edit_file()`
+     (`runtime/appearance.py`, `ws.look`) opens the active theme's
+     `theme.json` in the console's text app (`Workstation.open_text_cart`
+     on the package's project kind, in the `json` mode of
+     `runtime/text_modes.py`, whose soft save refuses a file that does not
+     parse and badges it). It is not `nav.edit_file`: that door opens a
+     cart project's Editor first, and a theme package is not a project. On
+     a seed or an installed package `custom` is made from it and switched
+     to first, since a seed is firmware; on `custom` its unwritten change
+     is written first, so the file opened is the look shown. The text
+     app's editor handle reports its saves to the look
+     (`Appearance.file_watch`, handed to `EditorHandle` by
+     `Player._open_cart_editor`): `file_check` is a second gate after the
+     mode's — the text as typed, minified when only that fits
+     `theme.bytes`, refused with the loader's note
+     (`notice.theme_refused`'s `theme.why_*`) when the loader refuses it or
+     its `name` is not `custom` (NAME) — and `file_saved` makes the file
+     as saved `custom` and installs it at the next frame, the full switch
+     (fonts, layout, wallpaper). A refused file leaves the look, the
+     running `custom` and the manifest as they were; the hard exit writes
+     it anyway, as for any document (#154), and the next change in
+     Appearance writes over it. A file the loader takes with a pair of
+     `theme.pairs` under the floor is written and badged
+     `SOME COLOURS ARE HARD TO READ` (§7). A saved colour drops
+     `look.from`, with the accent and the tint (§4.10), and so does any
+     other key the derivation writes (a metric, a text effect, a surface,
+     the layout), so a later ACCENT or TINT derives from the file as saved;
+     a save that moves only `frame`, `fonts`, `wallpapers` or `images`
+     keeps them, those keys set over the source's as a change sets them. The write is a project-file save (`moy_ufiles`), so the
+     package keeps a `journal/` like any project folder. **The door**: none
+     in the Appearance app yet, which reaches the look only through
+     `ctx.theme`; step 7's EDIT FILE… row needs a `theme.edit_file` row in
+     `native/moy_app/roles.json` and its shell server. Declined: a JSON
+     form of rows (it is the six-page editor again). Test net:
+     `tests/test_appearance.py` — EDIT FILE on a seed makes `custom` and
+     opens its file in the text app, not as a project; on `custom` writes
+     the change first; a saved role moves the look and `look_gen` and drops
+     `from`, and so does a metric; a `frame` alone keeps it; a file over the cap as
+     typed is written minified; a refused save (bad JSON, over 4096 bytes,
+     `inherits`, a name not `custom`'s) badges the note and moves nothing,
+     its hard exit too; an unreadable pair saves and badges; idle frames
+     write nothing. `tests/test_theme_look_gen.py` — a save draws, byte for
+     byte, what a boot of the file as saved draws, every cache moving once.
+     No golden moves (no door yet).
 
   7. **The Appearance page.** `runtime/appearance_app.py`'s IMAGES / CARTS
      / THEMES tabs are replaced by the one page of rows (the Appearance
@@ -1512,8 +1541,9 @@ port), never here.
      loader answers with font row 0, additive; owner, 2026-10-14: these two
      only, a package's own `.fnt` set through EDIT FILE), CHROME SIZE (moved
      from Settings, present where `ws.chrome_scales` has more than one) and
-     EDIT FILE…. Every row but THEME, MODE and CHROME SIZE calls step 5's
-     change. Settings keeps APPEARANCE as the page's door. Scenario: `edit
+     EDIT FILE… (step 6's `edit_file`, through a `theme.edit_file` role
+     row). Every row but THEME, MODE, CHROME SIZE and EDIT FILE… calls step
+     5's change. Settings keeps APPEARANCE as the page's door. Scenario: `edit
      thrash` on the ACCENT row by keys. Test net:
      `tests/test_appearance_app.py` rewritten — every row reached and
      changed by keys alone and by a tap on each; a picker's ESC restores;

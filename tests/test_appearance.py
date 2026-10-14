@@ -21,6 +21,11 @@ they cannot see is everything below, and it is most of what this object does:
     theme replaces it, it carries its fonts and picture, and it is written
     once the changes settle or at an exit -- never per press, never idle.
 
+  * **EDIT FILE (phase 6 step 6).** It opens custom's theme.json in the
+    text app (a seed made into `custom` first); a save the loader takes is
+    shown at the next frame and a hand-edited colour drops `from`; a refused
+    one is badged with the loader's note and moves nothing.
+
   * **`set_font_scale` must land on the ROOT canvas**, not on whatever window
     buffer is installed while Settings draws (2026-07-26: "changing it while
     running messes it up, if I change and reboot it looks great").
@@ -39,6 +44,8 @@ import ast
 import inspect
 import textwrap
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -611,6 +618,212 @@ def test_a_theme_switch_writes_custom_before_it_leaves(tmp_path):
     ws.look.set_theme(CUSTOM)
     assert ws.theme_colors["accent"] == _accent(7)
     assert ws.look.custom_look() == {"from": "night", "accent": _accent(7)}
+
+
+# -- EDIT FILE (phase 6 step 6) -----------------------------------------------
+
+def _edit(ws):
+    """EDIT FILE, and the frame the text app opens its document on: the
+    handle over custom's theme.json."""
+    assert ws.look.edit_file()
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
+    return ws.player.ns["ed"]
+
+
+def _hand_edit(ed, **dark):
+    import json
+    d = json.loads(ed.text())
+    d["colors"]["dark"].update(dark)
+    ed.set_text(json.dumps(d, indent=2))
+    return d
+
+
+def _custom_files(ws):
+    d = Path(ws.carts_root) / "custom.moy"
+    return {p.name: p.read_bytes() for p in d.iterdir() if p.is_file()}
+
+
+def test_edit_file_on_a_seed_makes_custom_and_opens_its_file(tmp_path):
+    """A seed is firmware: EDIT FILE copies it to `custom`, switches to it
+    and opens custom's theme.json -- in the text app, not as a project."""
+    import json
+    ws = build_ws(tmp_path)
+    ws.look.set_theme("forest")
+    forest = theme_colors("forest")
+    ed = _edit(ws)
+    assert ws.look.theme_name == CUSTOM == ui.theme_installed()
+    assert theme_colors("forest") == forest, "the seed moved"
+    assert _look(ws) == {"from": "forest"}
+    assert _stored(ws)["theme"] == CUSTOM
+    assert (ed.name(), ed.mode()) == ("theme.json", "json")
+    assert ed.kind == moy_carts.project_kind(str(Path(ws.carts_root) / "custom.moy"))
+    assert json.loads(ed.text()) == _package(ws)
+    assert ws.project.cart is not None and ws.project.cart.get("title") == "Notes"
+    ws._exit_to_caller()
+    assert ws.wm.top_kind() != "menu", "the package opened as a project"
+
+
+def test_edit_file_on_custom_writes_its_change_first(tmp_path):
+    import json
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(5))
+    ws.look.tick(0.0)
+    ed = _edit(ws)
+    assert _look(ws) == {"from": "night", "accent": _accent(5)}
+    assert json.loads(ed.text())["colors"]["dark"]["accent"] == _accent(5)
+
+
+def test_a_saved_role_moves_the_look_and_drops_from(tmp_path):
+    """A colour saved by hand is custom from then on: shown at the next
+    frame, `from` (and the accent and tint with it) dropped, and a later
+    TINT derived from the file as saved, not from the old source."""
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(2))
+    ws.look.tick(0.0)
+    ed = _edit(ws)
+    panel = (ws.theme_colors["panel"] + 5) % 64
+    _hand_edit(ed, panel=panel)
+    gen = ws.look.look_gen
+    assert ed.save(soft=True) == (True, "")
+    ws.frame(1 / 30)
+    assert ws.look.look_gen > gen
+    assert ws.theme_colors["panel"] == panel
+    assert _look(ws) == {}
+    saved = (Path(ws.carts_root) / "custom.moy" / "theme.json").read_bytes()
+    assert saved == ed.text().encode()
+    assert ws.look.custom_look() == {}
+
+    ws._exit_to_caller()
+    assert ws.look.change("tint", "plum") == 0
+    _settle(ws)
+    rc, want = ui.theme_custom(saved, None, "plum")
+    assert rc == 0 and _package(ws) == __import__("json").loads(want)
+    assert _look(ws) == {"tint": "plum"}
+
+
+def test_a_save_of_a_key_over_the_source_keeps_it(tmp_path):
+    """`frame`, `fonts`, `wallpapers` and `images` are set over the source,
+    so a hand edit of one alone keeps `from`, and a later ACCENT keeps it."""
+    import json
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(9))
+    ws.look.tick(0.0)
+    ed = _edit(ws)
+    d = json.loads(ed.text())
+    d["frame"] = {"style": "platinum"}
+    ed.set_text(json.dumps(d, indent=2))
+    assert ed.save(soft=True)[0]
+    ws.frame(1 / 30)
+    assert _look(ws) == {"from": "night", "accent": _accent(9)}
+    ws._exit_to_caller()
+    assert ws.look.change("accent", _accent(1)) == 0
+    _settle(ws)
+    assert _package(ws)["frame"] == {"style": "platinum"}
+    assert _look(ws) == {"from": "night", "accent": _accent(1)}
+
+
+def test_a_save_of_a_metric_drops_the_source(tmp_path):
+    import json
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(9))
+    ws.look.tick(0.0)
+    ed = _edit(ws)
+    d = json.loads(ed.text())
+    d.setdefault("metrics", {})["radius"] = 3
+    ed.set_text(json.dumps(d, indent=2))
+    assert ed.save(soft=True)[0]
+    ws.frame(1 / 30)
+    assert _look(ws) == {}
+
+
+def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
+    import json
+    ws = build_ws(tmp_path)
+    ed = _edit(ws)
+    d = json.loads(ed.text())
+    ed.set_text(json.dumps(d, indent=6))
+    assert 4096 < len(ed.text()) < 8000         # the handle's MAX_CHARS
+    assert ed.save(soft=True) == (True, "")
+    saved = (Path(ws.carts_root) / "custom.moy" / "theme.json").read_bytes()
+    assert len(saved) <= 4096 and json.loads(saved) == d
+
+
+def _big(d):
+    d["notes"] = "x" * 4200
+    return d
+
+
+def _inherits(d):
+    d["inherits"] = "night"
+    return d
+
+
+def _renamed(d):
+    d["name"] = "mine"
+    return d
+
+
+@pytest.mark.parametrize("edit,note", [
+    (None, None),
+    (_big, "theme.why_big"),
+    (_inherits, "theme.why_chain"),
+    (_renamed, "theme.why_name"),
+], ids=["bad-json", "over-4096", "inherits", "bad-name"])
+def test_a_refused_save_shows_the_note_and_changes_nothing(tmp_path, edit, note):
+    """The soft save refuses and badges; the hard exit writes the text as
+    typed (#154) and still leaves the running look, its `custom` and the
+    manifest as they were."""
+    import json
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(4))
+    ws.look.tick(0.0)
+    ed = _edit(ws)
+    before = _custom_files(ws)
+    colors, gen = dict(ws.theme_colors), ws.look.look_gen
+    held = ws.look._cust.theme
+    text = "{" + ed.text() if edit is None else json.dumps(edit(json.loads(ed.text())))
+    ed.set_text(text)
+    ok, badge = ed.save(soft=True)
+    assert not ok and badge.startswith("INVALID ")
+    if note is not None:
+        assert badge == "INVALID " + ui.s(note)
+    assert ed.badge() == badge
+    ws.frame(1 / 30)
+    assert _custom_files(ws) == before
+    assert ed.save() == (True, badge)            # the hard exit writes it
+    ws.frame(1 / 30)
+    after = _custom_files(ws)
+    assert after["theme.json"] == text.encode()
+    assert after["manifest.json"] == before["manifest.json"]
+    assert ws.theme_colors == colors and ws.look.look_gen == gen
+    assert ws.look._cust.theme == held and ui.theme_installed() == CUSTOM
+
+
+def test_an_unreadable_pair_is_saved_and_noted(tmp_path):
+    """A pair under the contrast floor never refuses (§7): the save lands
+    and the badge says so."""
+    ws = build_ws(tmp_path)
+    ed = _edit(ws)
+    ink = ws.theme_colors["panel"]
+    _hand_edit(ed, ink=ink)
+    assert ed.save(soft=True) == (True, appearance.UNREADABLE)
+    ws.frame(1 / 30)
+    assert ws.theme_colors["ink"] == ink
+
+
+def test_idle_frames_after_a_hand_edit_write_nothing(tmp_path, monkeypatch):
+    ws = build_ws(tmp_path)
+    ed = _edit(ws)
+    _hand_edit(ed, panel=(ws.theme_colors["panel"] + 3) % 64)
+    assert ed.save(soft=True)[0]
+    for _ in range(100):
+        ws.frame(1 / 30)                     # the wallpaper guard heals
+    n = _writes(ws, monkeypatch)
+    for _ in range(200):
+        ws.frame(1 / 30)
+    assert n == {"package": 0, "system": 0}
 
 
 # -- the icon sheet -----------------------------------------------------------
