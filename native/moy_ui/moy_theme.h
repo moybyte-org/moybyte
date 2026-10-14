@@ -153,6 +153,21 @@ int moy_theme_layout(const char *name, size_t n, moy_theme_layout_t *out);
 // the bindings' layout check.
 extern const int moy_theme_layout_dims[7];
 
+// Resolve a stored package from its bytes without installing it (the
+// Appearance cards, a layout row naming a package, a paste's preview): parse
+// `src` into the caller's `buf` (moy_theme_pkg_bytes) and, on MOY_THEME_OK,
+// make it the PROBE, which the calls above resolve by its name ahead of the
+// installed package until moy_theme_probe_end. A stored package is standalone:
+// one naming `inherits` is refused (MOY_THEME_CHAIN), as is a seed's name
+// (MOY_THEME_TAKEN). *notes gets the parse's notes.
+int moy_theme_probe(const uint8_t *src, size_t n, moy_theme_pkg_t *buf, uint8_t *notes);
+void moy_theme_probe_end(void);
+// The probe's name, and the font file it names itself for role i of
+// moy_theme_font_roles (its folder provides it): NULL where none.
+const char *moy_theme_probe_name(void);
+const char *moy_theme_probe_font(int role);
+extern const size_t moy_theme_pkg_bytes;
+
 // A seed package's font file by name (the tables embed every file a seed's
 // `fonts` names): its bytes and *len, or NULL.
 const uint8_t *moy_theme_font_file(const char *name, size_t n, size_t *len);

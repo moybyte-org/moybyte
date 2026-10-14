@@ -59,8 +59,10 @@ class ThemeServer:
     table the look writes at every switch (`Appearance.publish`).
 
     A theme PICKER wants the OTHER themes' tokens too. That is not a role:
-    `chrome.THEME_NAMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
-    module an app imports directly, exactly as `ui` is imported directly."""
+    `chrome.theme_names()` (the seeds and the store's packages, which the
+    look adopts at every store change) / `THEME_VARIANTS` / `theme_colors()`
+    are a pure leaf module an app imports directly, exactly as `ui` is
+    imported directly."""
 
     def __init__(self, ws):
         self.__ws = ws
@@ -237,10 +239,12 @@ class NavServer:
 
     def projects(self, g):
         """The editable PROJECTS: every scanned cart a system app does not
-        claim, the home's Make roster. Navigation and not `carts`:
+        claim, the home's Make roster, but a theme package (the Appearance
+        app's, never the Editor's). Navigation and not `carts`:
         a list of places to GO is not permission to author one."""
         ws = self.__ws
-        return [c for c in ws.carts.all if not ws.is_system_app(c)]
+        return [c for c in ws.carts.all
+                if c.get("type") != "theme" and not ws.is_system_app(c)]
 
     def edit(self, g, cart, tab=None):
         """Open `cart` in the project EDITOR, optionally on one tab. False when

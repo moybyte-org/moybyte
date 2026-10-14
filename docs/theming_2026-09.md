@@ -801,8 +801,9 @@ since the face's preview ring holds four looks and would thrash.
   along `inherits` to the default and one install can move any name's row,
   then re-applies the live theme; the layout answers are cleared by that
   re-apply. A cache that reads no theme — the covers, the bar's kind images,
-  the font table (keyed on the file, and a file is read only from the seeds'
-  folder, whose bytes an install cannot move) — folds nothing. The web head
+  the font table (keyed on the package that provides a file and the file: a
+  seed's from the image, whose bytes an install cannot move, a store
+  package's from its folder, dropped at every store change) — folds nothing. The web head
   runs this same console and re-rasters its frames, so it holds no cache of
   its own.
 
@@ -1136,7 +1137,8 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      installs in place on an idle screen and counts the repaint, then the
      idle frames.
 
-  2. **Theme packages in the store, and the `contrast` seed.** A theme is a
+  2. **Theme packages in the store, and the `contrast` seed** (landed
+     2026-10-14). A theme is a
      cart folder, `<id>.moy`, whose manifest says `"moybyte": {"type":
      "theme"}` and `"runtime": "theme"`, its `main` naming `theme.json`. The
      `runtime` is the refusal every host already has: SPEC.md's rule that a
@@ -1170,8 +1172,7 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      tab sources (`runtime/console.py`) skip it, the Make tab too, and
      `nav.projects()` (`runtime/shell_servers.py`) leaves it out, so the
      Files app never opens it in the Editor: Files lists it as a kind of its
-     own whose door is the Appearance app's EDIT, and a Files rename renames
-     the stem and the `name` together. `Appearance.set_theme` takes a
+     own, THEMES, whose door is the Appearance app (its EDIT from step 4). `Appearance.set_theme` takes a
      package's name: it reads the folder's `theme.json` into the slot, its
      fonts from the folder (`font_load` takes bytes, each at most
      `MOY_FONT_BYTES`; `_font_id` keyed on the package and the file) and, from
@@ -1207,6 +1208,23 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      passes both readability checks in both variants and is pinned as a
      golden of its own on the P4-as-shipped light config, as `platinum` and
      `win95` are; goldens byte-identical otherwise.
+     As built: the folder's stem is the name, so a theme folder is
+     `<name>.moy` with no author part (the name grammar has no dot), as the
+     carts repository's folders are. `ui.theme_resolve(src)` answers (rc,
+     notes, name, dark, light, fonts, layout) -- the package's own fonts, the
+     rest as `theme`, `theme_layout` and `theme_home` would after an install
+     -- by parsing the bytes into the caller's buffer and resolving them as
+     the loader's PROBE for that one call, ahead of the slot, so the slot is
+     never borrowed and never doubled. The look reads the roster's packages
+     when its generation (`CartManager.gen`, moved by every `apply`) moves
+     and hands them to `chrome.adopt_packages`, which resolves each on first
+     ask (`chrome.package`) and lists those that resolve
+     (`chrome.theme_names`, which an app imports as it imports the seeds'
+     list); a package whose bytes a re-scan moved is re-installed, and one
+     removed falls back to the default seed, persisted. `contrast` keeps
+     `ink_dim` and `chrome_ink_dim` light grey (6), so a disabled part still
+     reads as disabled. Files' rename of a theme moved to step 4, beside the
+     name the editor types: Files renames no project row either.
 
   3. **Theme editor design** (owner, 2026-10-14). Before a page is built:
      hand-drawn mockups — MOY64, the D1 look, bitmap fonts — of every editor
@@ -1233,7 +1251,8 @@ scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
      copy of `tiny5.fnt` brings `native/moy_ui/themes/tiny5.txt`, the OFL);
      no `inherits`. `name` is typed in `ui.text_field` on the keyboard every
      board has (1-24 characters; a seed's name, or a stem any cart folder
-     holds, is refused with the reason). The page shows the package's
+     holds, is refused with the reason), and a Files rename of a theme
+     renames the stem and the `name` together. The page shows the package's
      **byte budget** against `theme.bytes`. **Live edit**: an edit mutates
      the in-memory package and sets one look-dirty flag, applied at most
      once per frame, the latest edit winning, by an install from bytes

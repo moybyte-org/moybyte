@@ -1167,6 +1167,9 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
 
 static moy_theme_pkg_t *s_slot;     // allocated at the first install
 static int s_have;
+static const moy_theme_pkg_t *s_probe;  // a package resolved from its bytes, between probe and probe_end
+
+const size_t moy_theme_pkg_bytes = sizeof(moy_theme_pkg_t);
 
 int moy_theme_count(void) {
     return MOY_THEME_SEEDS;
@@ -1195,7 +1198,15 @@ static int seed_of(const char *name, size_t n) {
 }
 
 // The package called `name` into *out: the installed one or a seed. 0, or -1.
+static int is_named(const moy_theme_pkg_t *pkg, const char *name, size_t n) {
+    return pkg != NULL && strlen(pkg->name) == n && memcmp(pkg->name, name, n) == 0;
+}
+
 static int load(const char *name, size_t n, moy_theme_pkg_t *out) {
+    if (is_named(s_probe, name, n)) {
+        memcpy(out, s_probe, sizeof(*out));
+        return 0;
+    }
     if (s_have && strlen(s_slot->name) == n && memcmp(s_slot->name, name, n) == 0) {
         memcpy(out, s_slot, sizeof(*out));
         return 0;
@@ -1209,7 +1220,7 @@ static int load(const char *name, size_t n, moy_theme_pkg_t *out) {
 }
 
 static int known(const char *name, size_t n) {
-    return seed_of(name, n) >= 0
+    return seed_of(name, n) >= 0 || is_named(s_probe, name, n)
            || (s_have && strlen(s_slot->name) == n && memcmp(s_slot->name, name, n) == 0);
 }
 
@@ -1491,4 +1502,38 @@ int moy_theme_install(const uint8_t *src, size_t n, uint8_t *notes) {
         return MOY_THEME_CHAIN;
     }
     return MOY_THEME_OK;
+}
+
+int moy_theme_probe(const uint8_t *src, size_t n, moy_theme_pkg_t *buf, uint8_t *notes) {
+    s_probe = NULL;
+    int rc = moy_theme_parse(src, n, buf);
+    if (notes != NULL) {
+        *notes = buf->notes;
+    }
+    if (rc != MOY_THEME_OK) {
+        return rc;
+    }
+    if (buf->inherits[0]) {
+        return MOY_THEME_CHAIN;
+    }
+    if (seed_of(buf->name, strlen(buf->name)) >= 0) {
+        return MOY_THEME_TAKEN;
+    }
+    s_probe = buf;
+    return MOY_THEME_OK;
+}
+
+void moy_theme_probe_end(void) {
+    s_probe = NULL;
+}
+
+const char *moy_theme_probe_name(void) {
+    return s_probe != NULL ? s_probe->name : NULL;
+}
+
+const char *moy_theme_probe_font(int role) {
+    if (s_probe == NULL || role < 0 || role >= MOY_THEME_FONT_ROLES || !s_probe->font[role][0]) {
+        return NULL;
+    }
+    return s_probe->font[role];
 }

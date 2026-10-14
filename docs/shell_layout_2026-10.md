@@ -523,14 +523,12 @@ top bar (`runtime/shell_layout.py`'s `FALLBACK`). The composer never raises;
 both halves are fuzzed (`tests/test_shell_layout.py`) and the boards' module
 answers the host's corpus (`tests/test_theme_loader.py`).
 
-**Recovery, and what waits on theming phase 6.** The per-board reset key,
-the strike ledger and installed theme packages are theming phase 6's
-(`docs/theming_2026-09.md` §7, §9). Until it lands every layout a console
-can select is a seed's, firmware, and `layout_theme` (§11) picks among the
-seeds; the reset key then clears `layout_theme` with the theme rows, and
-the ledger's fallback to the default theme covers a layout because a layout
-is part of a theme. With seed-only layouts the risk phase 6 guards against
-is small, and this phase does not wait for it.
+**Recovery.** The loader is the recovery (`docs/theming_2026-09.md` §7,
+owner, 2026-10-14): a layout is part of a theme, a theme package from the
+store is data the loader validates, and a `theme` or `layout_theme` row
+naming a package that will not load reads as the default seed's, the
+loader's note shown once (theming phase 6 step 2). There is no per-board
+reset key and no strike ledger for a theme (theming §11).
 
 ## 10. Boards: modes, what each can place, and the resolution rule
 

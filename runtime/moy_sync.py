@@ -94,9 +94,11 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     compiled `<main>.<chip>.aot` beside it): a "runtime": "wasm" cart's
     manifest, assets and `src/` cross like any cart's and its module does not,
     so a compiled cart does NOT sync between a browser and a board. It plays
-    where its module was put (docs/wasm_tier_plan_2026-09.md). The one binary
-    file that DOES cross is a cart's cover, `cover.png` (SPEC.md 3.6,
-    BINARY_FILES): as base64, `"b"` where text rides as `"t"`.
+    where its module was put (docs/wasm_tier_plan_2026-09.md). The binary
+    files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6,
+    BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
+    `*.moygfx` (BINARY_SUFFIXES; docs/theming_2026-09.md §9 phase 6 step 2):
+    as base64, `"b"` where text rides as `"t"`.
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB
 request cap; the client sends ONE batch at a time and waits for the answer,
@@ -186,20 +188,31 @@ FILES_ROOT_ID = "files"
 PART_MAX = 16 * 1024
 BATCH_BUDGET = 32 * 1024
 
-# The binary files that DO cross, by name: a cart's cover (SPEC.md 3.6), in
-# base64 -- `"b"` in a batch op where text is `"t"`, `{"b": ...}` as a value in a
-# pull bundle. A binary chunk is BINARY_PART bytes, which is PART_MAX characters
-# of base64 exactly, so every piece decodes on its own. Every other binary file
-# stays home (the module docstring says why). firmware/web_runner/moy_store.mjs
-# carries the JS mirror, pinned by tests/test_web_store.py.
+# The binary files that DO cross: a cart's cover by name (SPEC.md 3.6), and a
+# theme package's font and sheet files by suffix (a font is at most moy_text.h's
+# MOY_FONT_BYTES, 8192), in base64 -- `"b"` in a batch op where text is `"t"`,
+# `{"b": ...}` as a value in a pull bundle. A binary chunk is BINARY_PART bytes,
+# which is PART_MAX characters of base64 exactly, so every piece decodes on its
+# own. Every other binary file stays home (the module docstring says why). The
+# rule has three more copies, each pinned to this one by its test:
+# native/moy_net/moy_sync_apply.c and moy_webhost.c (tests/test_moy_sync.py,
+# tests/test_moy_webhost.py) and firmware/web_runner/moy_store.mjs
+# (tests/test_web_store.py).
 BINARY_FILES = ("cover.png",)
+BINARY_SUFFIXES = (".fnt", ".moygfx")
 BINARY_PART = PART_MAX * 3 // 4
 
 
 def is_binary(path):
     """True when the file at `path` (a name, a rel or a full path) crosses the
     wire as bytes."""
-    return path[path.rfind("/") + 1:] in BINARY_FILES
+    name = path[path.rfind("/") + 1:]
+    if name in BINARY_FILES:
+        return True
+    for suf in BINARY_SUFFIXES:
+        if name.endswith(suf) and len(name) > len(suf):
+            return True
+    return False
 
 
 def b64(data):

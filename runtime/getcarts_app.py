@@ -23,7 +23,10 @@ The screens, in the order a kid meets them:
              (the file itself is not kept); one that does not come, or does
              not decode, leaves the row as it is without one.
   CART       one cart: where it comes from, its licence, what it takes and
-             needs, and its verbs -- GET or UPDATE, PLAY, REMOVE. A cart that
+             needs, and its verbs -- GET or UPDATE, PLAY, REMOVE; a theme
+             package's ("runtime": "theme") USE in PLAY's place, which makes
+             it the console's theme (removing the active one falls back to the
+             default seed, the look's `store_moved`). A cart that
              will not fit in the store, that the engine would refuse to load
              (the Player's check, asked of the index before the download), or
              that this console cannot play says why and offers no GET.
@@ -497,7 +500,7 @@ class GetCartsAppLayer(ListShellApp):
                 out.append({"cart": c, "plan": p,
                             "state": _ci.cart_state(c, p, entry, present, man),
                             "runs": c["runtime"] in _ci.RUNTIMES
-                            and c["runtime"] in have,
+                            and (c["runtime"] in have or c["runtime"] == "theme"),
                             "fit": None})
             return out, (inst.free() if root is not None else None)
         try:
@@ -533,14 +536,19 @@ class GetCartsAppLayer(ListShellApp):
             self.status = ""
             self._go("cart")
 
+    def _go_verb(self):
+        """PLAY, or USE for a theme package: what an installed cart does."""
+        cur = self.cur
+        return "USE" if cur is not None and cur["cart"]["runtime"] == "theme" else "PLAY"
+
     def _verbs(self):
         st = self.cur["state"] if self.cur is not None else None
         if st == "get":
             return ("GET",)
         if st == "installed":
-            return ("PLAY", "REMOVE")
+            return (self._go_verb(), "REMOVE")
         if st == "update":
-            return ("UPDATE", "PLAY", "REMOVE")
+            return ("UPDATE", self._go_verb(), "REMOVE")
         return ()
 
     def _fit_why(self, row):
@@ -577,7 +585,7 @@ class GetCartsAppLayer(ListShellApp):
     def _enabled(self, verb):
         if verb in ("GET", "UPDATE"):
             return self.blocker(self.cur) is None
-        if verb == "PLAY":
+        if verb in ("PLAY", "USE"):
             return self._inst.find(self.cur["cart"]["folder"]) is not None
         return True
 
@@ -588,6 +596,8 @@ class GetCartsAppLayer(ListShellApp):
                 self._start()
             elif verb == "PLAY":
                 self._play()
+            elif verb == "USE":
+                self._use()
             elif verb == "REMOVE":
                 self._remove()
         elif ph == "licence":
@@ -603,6 +613,8 @@ class GetCartsAppLayer(ListShellApp):
         elif ph == "done":
             if verb == "PLAY":
                 self._play()
+            elif verb == "USE":
+                self._use()
             else:
                 self._go("list")
         elif ph in ("nowifi", "unreached", "nomemory"):
@@ -811,6 +823,17 @@ class GetCartsAppLayer(ListShellApp):
         self._release()
         self._nav.play(cart)
 
+    def _use(self):
+        """Make the installed theme package the console's theme: its name is
+        its folder's stem."""
+        folder = self.cur["cart"]["folder"]
+        if self._inst.find(folder) is None:
+            return
+        name = folder[:-4] if folder.endswith(".moy") else folder
+        self._theme.set(name)
+        self.status = ("USING " + self.cur["cart"]["name"]).upper()
+        self._damage.all()
+
     def _remove(self):
         if not self.arm_remove:
             self.arm_remove = True
@@ -857,7 +880,7 @@ class GetCartsAppLayer(ListShellApp):
         if ph in BUSY or ph == "pick":
             return ("CANCEL",)
         if ph == "done":
-            return ("PLAY", "OK")
+            return (self._go_verb(), "OK")
         if ph in ("nowifi", "unreached", "nomemory"):
             return ("TRY AGAIN",)
         if ph == "failed":
@@ -1248,7 +1271,7 @@ class GetCartsAppLayer(ListShellApp):
         for k, verb in enumerate(verbs):
             enabled = self.phase != "cart" or self._enabled(verb)
             kind = "normal"
-            if verb in ("GET", "UPDATE", "PLAY", "I AGREE", "TRY AGAIN"):
+            if verb in ("GET", "UPDATE", "PLAY", "USE", "I AGREE", "TRY AGAIN"):
                 kind = "play"
             elif verb in ("REMOVE", "CANCEL"):
                 kind = "danger"

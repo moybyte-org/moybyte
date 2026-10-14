@@ -55,8 +55,21 @@ static int is_shelf(const char *name) {
     return 0;
 }
 
+// runtime/moy_sync.py's is_binary: a cart's cover by name, a theme package's
+// fonts and sheets by suffix.
 static int is_binary(const char *name) {
-    return strcmp(name, "cover.png") == 0;
+    static const char *const suffixes[] = {".fnt", ".moygfx"};
+    size_t n = strlen(name);
+    if (strcmp(name, "cover.png") == 0) {
+        return 1;
+    }
+    for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+        size_t k = strlen(suffixes[i]);
+        if (n > k && strcmp(name + n - k, suffixes[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 // The code points in n bytes of UTF-8, as Python's len(str) counts them.

@@ -79,6 +79,11 @@ keeps the matrix a clean product instead of a pile of special cases.
                            code of their own (docs/theming_2026-09.md §9, phase
                            3 step 3). One axis (theme) from the as-shipped row
                            in the light variant.
+  p4_1024x600_cs2_fs1_contrast_light  the same, under the high-contrast seed
+                           `contrast` (phase 6 step 2): black panels and white
+                           ink in both variants, a yellow accent, a border on
+                           every part. One axis (theme) from the as-shipped
+                           row in the light variant.
   p4_1024x600_cs2_fs1_console  the P4 as shipped in CONSOLE mode
                            (docs/shell_layout_2026-10.md §3): the desk's PLAY,
                            then the T-Deck row's surfaces, every one
@@ -332,6 +337,9 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_win95_light": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
         diagonal_in=7.0, theme="win95"),
+    "p4_1024x600_cs2_fs1_contrast_light": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="contrast"),
     "p4_1024x600_cs2_fs1_console": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, console=True),

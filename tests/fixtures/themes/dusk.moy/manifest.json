@@ -1,0 +1,7 @@
+{
+  "format": "moy-1",
+  "title": "Dusk",
+  "runtime": "theme",
+  "main": "theme.json",
+  "moybyte": {"type": "theme"}
+}

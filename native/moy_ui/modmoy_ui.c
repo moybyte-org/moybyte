@@ -311,6 +311,56 @@ static mp_obj_t ui_theme_home(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 
+// theme_resolve(src) -> (rc, notes, name, dark, light, fonts, layout): a
+// stored package resolved from its bytes without installing it
+// (moy_theme_probe). dark and light are theme()'s answers, fonts the
+// package's OWN (role, file) pairs (its folder provides them), layout
+// (refused, bars, home) as theme_layout and theme_home answer. On a refusal
+// every field after notes is None.
+static mp_obj_t ui_theme_resolve(mp_obj_t src) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(src, &b, MP_BUFFER_READ);
+    moy_theme_pkg_t *pkg = m_new(moy_theme_pkg_t, 1);
+    uint8_t notes = 0;
+    int rc = moy_theme_probe(b.buf, b.len, pkg, &notes);
+    mp_obj_t out[7] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
+                       mp_const_none, mp_const_none, mp_const_none,
+                       mp_const_none, mp_const_none};
+    if (rc == MOY_THEME_OK) {
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            mp_obj_t name = mp_obj_new_str(pkg->name, strlen(pkg->name));
+            out[2] = name;
+            out[3] = ui_theme(name, mp_const_false);
+            out[4] = ui_theme(name, mp_const_true);
+            mp_obj_t fonts[MOY_THEME_FONT_ROLES];
+            size_t k = 0;
+            for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+                if (pkg->font[i][0]) {
+                    mp_obj_t t[2] = {name_obj(moy_theme_font_roles[i]),
+                                     mp_obj_new_str(pkg->font[i], strlen(pkg->font[i]))};
+                    fonts[k++] = mp_obj_new_tuple(2, t);
+                }
+            }
+            out[5] = mp_obj_new_tuple(k, fonts);
+            mp_obj_t lay = ui_theme_layout(name);
+            mp_obj_t *l;
+            mp_obj_get_array_fixed_n(lay, 2, &l);
+            mp_obj_t t[3] = {l[0], l[1], ui_theme_home(name)};
+            out[6] = mp_obj_new_tuple(3, t);
+            nlr_pop();
+        } else {
+            moy_theme_probe_end();
+            m_del(moy_theme_pkg_t, pkg, 1);
+            nlr_jump(nlr.ret_val);
+        }
+    }
+    moy_theme_probe_end();
+    m_del(moy_theme_pkg_t, pkg, 1);
+    return mp_obj_new_tuple(7, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
+
 // font_load(src) -> (rc, font): src a font file's bytes (moy_text.h); font
 // the loaded row's id, or None when refused.
 static mp_obj_t ui_font_load(mp_obj_t src) {
@@ -1302,6 +1352,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_home), MP_ROM_PTR(&ui_theme_home_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_resolve), MP_ROM_PTR(&ui_theme_resolve_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },

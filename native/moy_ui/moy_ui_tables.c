@@ -694,6 +694,7 @@ const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {
     "platinum",
     "win95",
     "outline",
+    "contrast",
 };
 
 const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
@@ -909,6 +910,48 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"panel\": { \"rest\": \"border accent\" }\012"
     "  }\012"
     "}\012",
+    // themes/contrast.json
+    "{\012"
+    "  \"format\": 1,\012"
+    "  \"name\": \"contrast\",\012"
+    "  \"frame\": { \"style\": \"classic\" },\012"
+    "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": 0, \"edge\": 7, \"title\": 0, \"title_ink\": 7, \"title_inactive\": 0,\012"
+    "      \"accent\": 10, \"hilite\": 10, \"dim\": 7, \"desktop\": 0, \"desktop_pattern\": 0,\012"
+    "      \"surface\": 0, \"surface_alt\": 0, \"ink\": 7, \"ink_dim\": 6, \"border\": 7,\012"
+    "      \"selection\": 10, \"selection_ink\": 0, \"focus\": 10, \"bar\": 0, \"bar_edge\": 7,\012"
+    "      \"chrome_ink\": 7, \"chrome_ink_dim\": 6, \"shade_hi\": 7, \"shade_lo\": 0,\012"
+    "      \"shade_dark\": 7, \"ink_accent\": 10, \"ink_note\": 10\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": 0, \"edge\": 7, \"title\": 0, \"title_ink\": 7, \"title_inactive\": 0,\012"
+    "      \"accent\": 10, \"hilite\": 10, \"dim\": 7, \"desktop\": 0, \"desktop_pattern\": 0,\012"
+    "      \"surface\": 0, \"surface_alt\": 0, \"ink\": 7, \"ink_dim\": 6, \"border\": 7,\012"
+    "      \"selection\": 10, \"selection_ink\": 0, \"focus\": 10, \"bar\": 0, \"bar_edge\": 7,\012"
+    "      \"chrome_ink\": 7, \"chrome_ink_dim\": 6, \"shade_hi\": 7, \"shade_lo\": 0,\012"
+    "      \"shade_dark\": 7, \"ink_accent\": 10, \"ink_note\": 10,\012"
+    "      \"surface_light\": false, \"bar_light\": false, \"band_light\": false,\012"
+    "      \"code_text\": 7, \"code_keyword\": 12, \"code_string\": 11, \"code_number\": 9,\012"
+    "      \"code_comment\": 22, \"code_builtin\": 14\012"
+    "    }\012"
+    "  },\012"
+    "  \"surfaces\": {\012"
+    "    \"button\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
+    "    \"button_play\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
+    "    \"button_author\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
+    "    \"button_danger\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
+    "    \"chip\": { \"rest\": \"border\" },\012"
+    "    \"tab\": { \"rest\": \"border\" },\012"
+    "    \"toggle\": { \"rest\": \"border\" },\012"
+    "    \"panel\": { \"rest\": \"border\" },\012"
+    "    \"toolbar\": { \"rest\": \"border\" },\012"
+    "    \"bar.item\": { \"rest\": \"border\" },\012"
+    "    \"desk.icon\": { \"rest\": \"fill panel, border\" },\012"
+    "    \"desk\": { \"rest\": \"fill bar\" }\012"
+    "  }\012"
+    "}\012",
 };
 
 const int moy_ui_n_themes = MOY_THEME_SEEDS;
@@ -919,7 +962,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1388, 1296, 860};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1388, 1296, 860, 1847};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

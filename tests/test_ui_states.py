@@ -161,6 +161,14 @@ SHIPPED_WIDGET_HASHES = (
     "outline/light 480x320@1 66b148010a402929",
     "outline/light 1024x600@2 49ed8f11eea607a1",
     "outline/light 320x240@3 f8b0be4bf8b6e201",
+    "contrast/dark 320x240@1 816046c908da7dc5",
+    "contrast/dark 480x320@1 5cd15878b3580423",
+    "contrast/dark 1024x600@2 45f10ec962450667",
+    "contrast/dark 320x240@3 4072bd830263dce5",
+    "contrast/light 320x240@1 f937177586880117",
+    "contrast/light 480x320@1 46b084a179d19d20",
+    "contrast/light 1024x600@2 5924c0f489038677",
+    "contrast/light 320x240@3 5942b4fa6b9631fb",
 )
 
 _SIZES = ((320, 240, 1), (480, 320, 1), (1024, 600, 2), (320, 240, 3))
@@ -891,6 +899,8 @@ WIDGET_MATRIX_HASHES = (
     "win95/light 5204d3df66f989fa",
     "outline/dark 844142682b826775",
     "outline/light bee9c0d4e95446e2",
+    "contrast/dark 6d47857478385750",
+    "contrast/light dca56b7c9b56fedb",
 )
 
 

@@ -58,14 +58,18 @@ function skipIn(name, dirs, files) {
 
 export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
 
-// The binary files that cross by name -- a cart's cover (SPEC.md 3.6) -- the
-// JS mirror of runtime/moy_sync's BINARY_FILES. They travel as base64: `b`
-// where text rides as `t` in a batch op, `{b: ...}` as a value in a served
-// bundle, and as BYTES once they are in the VFS or this store.
+// The binary files that cross -- a cart's cover (SPEC.md 3.6) by name, a theme
+// package's fonts and sheets by suffix -- the JS mirror of runtime/moy_sync's
+// BINARY_FILES and BINARY_SUFFIXES. They travel as base64: `b` where text
+// rides as `t` in a batch op, `{b: ...}` as a value in a served bundle, and as
+// BYTES once they are in the VFS or this store.
 const BINARY_FILES = ["cover.png"];
+const BINARY_SUFFIXES = [".fnt", ".moygfx"];
 
 export function isBinary(rel) {
-    return BINARY_FILES.indexOf(String(rel).slice(String(rel).lastIndexOf("/") + 1)) >= 0;
+    const name = String(rel).slice(String(rel).lastIndexOf("/") + 1);
+    return BINARY_FILES.indexOf(name) >= 0
+        || BINARY_SUFFIXES.some((s) => name.length > s.length && name.endsWith(s));
 }
 
 export function fromBase64(b) {

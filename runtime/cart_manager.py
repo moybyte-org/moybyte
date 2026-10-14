@@ -95,6 +95,8 @@ class CartManager:
         # lookup read the FULL list rather than either display grid (the
         # Make/New pseudo tiles never leak out).
         self.all = list(carts) if carts else []
+        # Moves with every `apply`: what a reader of the roster keys on.
+        self.gen = 0
         # The favorites as `is_favorite` last decoded them, with the row's text
         # it decoded them from: a card asks per paint, a decode is per change.
         self._fav_text = None
@@ -110,6 +112,7 @@ class CartManager:
         browser sync's re-scan, and `app_context`'s `Carts.apply`."""
         if items:
             self.all = list(items)
+            self.gen += 1
             ws = self.ws
             # Cover bitmaps, parsed sources, the cover-less set AND the icon
             # cache: a re-scan may carry new or changed art and may take a cart
@@ -125,6 +128,9 @@ class CartManager:
             ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
             if ws.projects_grid is not None:
                 ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
+            look = getattr(ws, "look", None)
+            if look is not None:
+                look.store_moved()      # the theme packages are carts too
 
     def rescan(self):
         """Re-read the store and rebuild both shelves -- the sync push's board

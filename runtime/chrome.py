@@ -797,9 +797,12 @@ _ICON_VERSION = 5
 # docs/visual_identity_v1.md Section 4.3's. Colour roles are MOY64 indices;
 # `surface_light`, `bar_light` and `band_light` are presentation flags
 # (booleans here).
-# The default is the first seed ("night", the moybyte site palette); the one
-# installed package beside the seeds is a theme too (`theme_known`), and a
-# name no package provides resolves as the default.
+# The default is the first seed ("night", the moybyte site palette). The
+# store's theme packages are themes too (`adopt_packages`, which the look
+# calls at every store change), each resolved from its bytes without
+# installing it (`moy_ui.theme_resolve`), as is the one installed package
+# beside the seeds (`theme_known`); a name no package provides resolves as the
+# default.
 THEME_NAMES = _ui._C.themes()
 DEFAULT_THEME = THEME_NAMES[0]
 THEME_VARIANTS = ("dark", "light")
@@ -807,11 +810,70 @@ DEFAULT_VARIANT = "dark"
 _THEME_FLAGS = ("surface_light", "bar_light", "band_light")
 _THEME_CACHE = {}
 _CONTENT_CACHE = {}
+# The store's packages: name -> theme_resolve's answer, None until first read.
+_PACKAGES = {}
+_PKG_READ = [None]          # name -> its theme.json's bytes, or None
+
+
+def adopt_packages(names, read):
+    """The store's theme packages are `names` now, each read through
+    `read(name)` (its theme.json's bytes, or None) the first time it is
+    asked for: the look calls this at every store change."""
+    _PACKAGES.clear()
+    for n in names:
+        _PACKAGES[n] = None
+    _PKG_READ[0] = read
+    forget_themes()
+
+
+def package(name):
+    """`moy_ui.theme_resolve`'s answer for store package `name`, read once
+    per store change: (rc, notes, name, dark, light, fonts, layout). None
+    when `name` is no store package. A package whose `name` is not its
+    folder's is refused (rc 4, the loader's NAME)."""
+    if name not in _PACKAGES:
+        return None
+    got = _PACKAGES[name]
+    if got is None:
+        read = _PKG_READ[0]
+        src = read(name) if read is not None else None
+        if src is None:
+            got = (_ui._C.theme_resolve(b"")[0], 0, None, None, None, None, None)
+        else:
+            got = _ui._C.theme_resolve(src)
+            if got[0] == 0 and got[2] != name:
+                got = (4, got[1], None, None, None, None, None)
+        _PACKAGES[name] = got
+    return got
+
+
+def package_ok(name):
+    """True for a store package that resolves."""
+    got = package(name)
+    return got is not None and got[0] == 0
+
+
+def theme_names():
+    """The seeds, then the store's packages that resolve: every list of
+    themes reads this (THEME_NAMES stays the seeds)."""
+    return THEME_NAMES + tuple(n for n in sorted(_PACKAGES) if package_ok(n))
 
 
 def theme_known(name):
-    """True for a seed's name or the installed package's."""
-    return name in THEME_NAMES or name == _ui._C.theme_installed()
+    """True for a seed's name, a store package that resolves, or the
+    installed package's."""
+    return (name in THEME_NAMES or name == _ui._C.theme_installed()
+            or package_ok(name))
+
+
+def _row(name, light):
+    """`name`'s role row: the installed slot's or a seed's from the loader,
+    a store package's from its resolved bytes."""
+    if name not in THEME_NAMES and name != _ui._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            return got[4 if light else 3][0]
+    return _ui._C.theme(name, light)[0]
 
 
 def theme_colors(name, variant=DEFAULT_VARIANT):
@@ -826,7 +888,7 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
     key = (name, variant)
     cached = _THEME_CACHE.get(key)
     if cached is None:
-        row = _ui._C.theme(name, variant == "light")[0]
+        row = _row(name, variant == "light")
         cached = {}
         for role, v in zip(_ui._C.tokens(), row):
             cached[role] = bool(v) if role in _THEME_FLAGS else v
@@ -852,7 +914,7 @@ def theme_content(name, variant=DEFAULT_VARIANT):
     key = (name, variant)
     cached = _CONTENT_CACHE.get(key)
     if cached is None:
-        row = _ui._C.theme(name, variant == "light")[0]
+        row = _row(name, variant == "light")
         roles = _ui._C.theme_roles()
         n = len(_ui._C.tokens())
         cached = {}

@@ -582,6 +582,40 @@ def test_mutated_themes_never_break_the_reader():
             _check_row(row[0])
 
 
+def _installed_answer(name):
+    """What the install slot answers for `name`, in theme_resolve's shape."""
+    fonts = moy_ui.theme_fonts(name)
+    return (moy_ui.theme(name, False), moy_ui.theme(name, True),
+            moy_ui.theme_layout(name) + (moy_ui.theme_home(name),), fonts)
+
+
+def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
+    """`theme_resolve` (phase 6 step 2) answers what an install would, and
+    leaves the slot as it was; a package naming `inherits` is refused, as a
+    stored package is standalone, and so is a seed's name."""
+    assert moy_ui.theme_install(_src("kept"))[0] == OK
+    seen = 0
+    for src in _corpus(600):
+        got = moy_ui.theme_resolve(src)
+        assert moy_ui.theme_installed() == "kept"
+        parsed = moy_ui.theme_install(src)
+        if got[0] != OK:
+            assert got[2:] == (None,) * 5
+            assert got[0] == parsed[0] or (parsed[0] == OK and got[0] == CHAIN
+                                           and b"inherits" in src)
+        else:
+            seen += 1
+            assert parsed == (OK, got[1])
+            dark, light, layout, fonts = _installed_answer(got[2])
+            assert (got[3], got[4], got[6]) == (dark, light, layout)
+            assert set(got[5]) <= set(fonts)
+        moy_ui.theme_install(_src("kept"))
+    assert seen > 40
+    assert moy_ui.theme_resolve(_src("t", inherits="berry"))[0] == CHAIN
+    assert moy_ui.theme_resolve(_src("night"))[0] == TAKEN
+    assert moy_ui.theme_installed() == "kept"
+
+
 _MP_DRIVER = """
 import moy_ui
 f = open(@CORPUS@, "rb")
@@ -592,6 +626,7 @@ while i < len(data):
     n = data[i] | data[i + 1] << 8
     src = data[i + 2:i + 2 + n]
     i += 2 + n
+    got = moy_ui.theme_resolve(src)
     rc, notes = moy_ui.theme_install(src)
     if rc == 0:
         n = moy_ui.theme_installed()
@@ -599,6 +634,7 @@ while i < len(data):
                     (moy_ui.theme_shape(n), moy_ui.theme_fonts(n), moy_ui.theme_layout(n)))))
     else:
         print(repr((rc, notes, None, None)))
+    print(repr(got))
 """
 
 
@@ -614,11 +650,13 @@ def test_the_boards_module_answers_as_the_host_does(tmp_path):
     script.write_text(_MP_DRIVER.replace("@CORPUS@", repr(str(tmp_path / "corpus.bin"))))
     out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=120)
     lines = out.stdout.splitlines()
-    assert len(lines) == len(corpus), out.stdout[-500:] + out.stderr
-    for src, line in zip(corpus, lines):
+    assert len(lines) == 2 * len(corpus), out.stdout[-500:] + out.stderr
+    for i, src in enumerate(corpus):
+        got = moy_ui.theme_resolve(src)
         rc, notes, row, shape = _answer(moy_ui, src)
         want = (rc, notes, None if row is None else (tuple(row[0]), row[1], row[2]), shape)
-        assert repr(want) == line, src
+        assert repr(want) == lines[2 * i], src
+        assert repr(got) == lines[2 * i + 1], src
 
 
 # -- the readability check of a pattern fill (§7) ---------------------------------

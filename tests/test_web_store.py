@@ -56,6 +56,19 @@ def test_the_two_skip_predicates_agree():
     assert arr("SITE_SKIP_FILES") == moy_sync.SITE_SKIP_FILES
 
 
+def test_the_binary_rule_agrees_across_languages():
+    """The wire's binary predicate has a JS copy (and two C ones, held by
+    tests/test_moy_webhost.py): a font a theme package carries must cross
+    as bytes from every side."""
+    from runtime import moy_sync
+    js = _read("firmware", "web_runner", "moy_store.mjs")
+    for name, want in (("BINARY_FILES", moy_sync.BINARY_FILES),
+                       ("BINARY_SUFFIXES", moy_sync.BINARY_SUFFIXES)):
+        m = re.search(r"const %s = \[([^\]]*)\]" % name, js)
+        assert m, "no %s in moy_store.mjs" % name
+        assert tuple(re.findall(r'"([^"]*)"', m.group(1))) == want
+
+
 def test_the_sync_root_registry_agrees_across_languages():
     """A static host has no server to hand the page the root list, so
     moy_store.mjs carries a MIRROR of moy_sync.SYNC_ROOTS. The mirror can rot --

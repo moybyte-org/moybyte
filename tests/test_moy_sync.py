@@ -845,6 +845,32 @@ def test_a_cover_crosses_the_wire_as_its_bytes(tmp_path):
             p.read_text(errors="replace") for p in journal.rglob("*") if p.is_file())
 
 
+_THEME = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
+
+
+def test_a_theme_packages_fonts_and_sheets_cross_as_their_bytes(tmp_path):
+    """A theme package crosses as a cart does (docs/theming_2026-09.md §9
+    phase 6 step 2): its theme.json and manifest as text, a font and a sheet
+    as bytes (BINARY_SUFFIXES, the rule's four copies), byte-equal."""
+    import shutil
+    root = _store(tmp_path)
+    shutil.copytree(_THEME, root / "dusk.moy")
+    sheet = bytes((i * 29 + 3) & 255 for i in range(3000))
+    (root / "dusk.moy" / "parts.moygfx").write_bytes(sheet)
+    dst = tmp_path / "board"
+    dst.mkdir()
+    ops, _dirty = _push_all(root, dst)
+    for name in ("tiny5.fnt", "parts.moygfx"):
+        got = [o for o in ops if o["p"] == "dusk.moy/" + name]
+        assert got and "b" in got[0] and "t" not in got[0], name
+    assert [o for o in ops if o["p"] == "dusk.moy/theme.json"][0].get("t")
+    for f in (root / "dusk.moy").iterdir():
+        assert (dst / "dusk.moy" / f.name).read_bytes() == f.read_bytes(), f.name
+    assert moy_sync.is_binary("dusk.moy/ui.fnt") and moy_sync.is_binary("a.moygfx")
+    assert not moy_sync.is_binary(".fnt") and not moy_sync.is_binary("fnt")
+    assert not moy_sync.is_binary("dusk.moy/theme.json")
+
+
 def test_a_big_cover_crosses_in_parts_each_its_own_base64(tmp_path):
     """A cover past one part (any RGB cover in stored blocks is) is sent
     BINARY_PART bytes at a time -- PART_MAX characters of base64, so every

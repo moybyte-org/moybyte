@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "name": "contrast",
+  "frame": { "style": "classic" },
+  "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },
+  "colors": {
+    "dark": {
+      "panel": 0, "edge": 7, "title": 0, "title_ink": 7, "title_inactive": 0,
+      "accent": 10, "hilite": 10, "dim": 7, "desktop": 0, "desktop_pattern": 0,
+      "surface": 0, "surface_alt": 0, "ink": 7, "ink_dim": 6, "border": 7,
+      "selection": 10, "selection_ink": 0, "focus": 10, "bar": 0, "bar_edge": 7,
+      "chrome_ink": 7, "chrome_ink_dim": 6, "shade_hi": 7, "shade_lo": 0,
+      "shade_dark": 7, "ink_accent": 10, "ink_note": 10
+    },
+    "light": {
+      "panel": 0, "edge": 7, "title": 0, "title_ink": 7, "title_inactive": 0,
+      "accent": 10, "hilite": 10, "dim": 7, "desktop": 0, "desktop_pattern": 0,
+      "surface": 0, "surface_alt": 0, "ink": 7, "ink_dim": 6, "border": 7,
+      "selection": 10, "selection_ink": 0, "focus": 10, "bar": 0, "bar_edge": 7,
+      "chrome_ink": 7, "chrome_ink_dim": 6, "shade_hi": 7, "shade_lo": 0,
+      "shade_dark": 7, "ink_accent": 10, "ink_note": 10,
+      "surface_light": false, "bar_light": false, "band_light": false,
+      "code_text": 7, "code_keyword": 12, "code_string": 11, "code_number": 9,
+      "code_comment": 22, "code_builtin": 14
+    }
+  },
+  "surfaces": {
+    "button": { "rest": "border", "pressed": "border" },
+    "button_play": { "rest": "border", "pressed": "border" },
+    "button_author": { "rest": "border", "pressed": "border" },
+    "button_danger": { "rest": "border", "pressed": "border" },
+    "chip": { "rest": "border" },
+    "tab": { "rest": "border" },
+    "toggle": { "rest": "border" },
+    "panel": { "rest": "border" },
+    "toolbar": { "rest": "border" },
+    "bar.item": { "rest": "border" },
+    "desk.icon": { "rest": "fill panel, border" },
+    "desk": { "rest": "fill bar" }
+  }
+}

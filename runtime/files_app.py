@@ -53,6 +53,10 @@ except ImportError:  # pragma: no cover - direct host import
 # are `.moy` FOLDERS, each shown as ONE item and opened as a project, because
 # a project is a thing you edit and not a directory you browse.
 PROJECTS = "projects"
+# The store's theme packages, a tile of their own beside PROJECTS: a theme
+# is data the Appearance app picks, never a project the Editor opens, so a
+# row's door is that app (docs/theming_2026-09.md §9 phase 6 step 2).
+THEMES = "themes"
 
 # Root tiles, in shelf order. The three a person actually touches come first
 # (docs/text_editing_2026-09.md): PROJECTS, NOTES (the flat Markdown vault) and
@@ -63,6 +67,7 @@ KIND_LABELS = (
     (PROJECTS, "PROJECTS"),
     ("docs", "NOTES"),
     ("drawings", "DRAWINGS"),
+    (THEMES, "THEMES"),
     ("sprites", "SPRITES"),
     ("music", "MUSIC"),
     ("recordings", "RECORDINGS"),
@@ -155,6 +160,7 @@ class FilesAppLayer(ListShellApp):
         self._store = ctx.files       # ListShellApp's storage role
         self._nav = ctx.nav
         self._art = ctx.artwork
+        self._carts = ctx.carts
         self._copies = PictureCopies(ctx)
         self.names = names
         cv = ctx.surface.canvas()
@@ -190,7 +196,7 @@ class FilesAppLayer(ListShellApp):
         self.trash = ()
         counts = {}
         for kind, _label in KIND_LABELS:
-            if kind != PROJECTS:              # not a files kind -- see above
+            if kind not in (PROJECTS, THEMES):    # not a files kind -- see above
                 n, err = self._store.count(kind)
                 if err is not None:           # an unreadable store lists nothing
                     return self._count_projects()
@@ -202,6 +208,12 @@ class FilesAppLayer(ListShellApp):
 
     def _count_projects(self):
         self.counts[PROJECTS] = len(self._nav.projects())
+        self.counts[THEMES] = len(self._themes())
+
+    def _themes(self):
+        """The store's theme packages, by folder."""
+        return tuple(_folder_of(c) for c in self._carts.all()
+                     if c.get("type") == "theme")
 
     def open(self):
         self.mode = "kinds"
@@ -234,6 +246,9 @@ class FilesAppLayer(ListShellApp):
             self.project_carts = tuple(self._nav.projects())
             self._rows = tuple(_folder_of(c) for c in self.project_carts)
             self._rows_empty = "NO PROJECTS"
+        elif mode == THEMES:
+            self._rows = self._themes()
+            self._rows_empty = "NO THEMES"
         elif mode == "used":
             # A drawing's consumers (#108 phase 2): a "*" marks a stale copy
             # (the drawing changed since) -- tapping it re-sends (UPDATE).
@@ -280,6 +295,11 @@ class FilesAppLayer(ListShellApp):
         door, subject = self.door(name, kind, cart)
         if door == "editor":
             return self._to_editor(subject)
+        if door == "appearance":
+            if not self._nav.open_app("appearance"):
+                self.status = "NO APPEARANCE APP"
+                return None
+            return door
         if door == "code" and cart is not None:
             # The cart-main door, NOT the `code` MODE a standalone `.py` edits
             # in -- `text_modes.CODE` is the same string, and only a project
@@ -297,6 +317,8 @@ class FilesAppLayer(ListShellApp):
         what that door opens."""
         if kind == PROJECTS:
             return "editor", (cart or self._project(name))
+        if kind == THEMES:
+            return "appearance", name
         fname = name if cart is not None else _modes.file_name(kind, name)
         if cart is not None and fname == cart.get("main", "main.py"):
             return "code", cart
@@ -433,6 +455,9 @@ class FilesAppLayer(ListShellApp):
                 # `kind` positionally: tests/test_skin.py reads a constant
                 # reaching a `kind=` keyword as a widget-catalog kind.
                 self.route(self._rows[i], PROJECTS, self.project_carts[i])
+        elif self.mode == THEMES:
+            if 0 <= i < len(self._rows):
+                self.route(self._rows[i], THEMES)
         elif self.mode == "trash":
             self._restore(i)
         elif self.mode == "game":
@@ -470,7 +495,7 @@ class FilesAppLayer(ListShellApp):
         if self.mode == "rename":
             self._typed_rename(inp)
             return True
-        if self.mode in ("trash", "game", "used", PROJECTS):
+        if self.mode in ("trash", "game", "used", PROJECTS, THEMES):
             # B leads, because a row list that swallows it is a room with no
             # door on a keyboard board -- the `<` chip was the only way out.
             if inp.pressed("b"):
@@ -513,7 +538,7 @@ class FilesAppLayer(ListShellApp):
             self._damage.all()
         # ...and so does the row list's drag: a scroll is made of samples that
         # are not clicks, and the tap it may end in fires on the RELEASE.
-        if self.mode in ("trash", "game", "used", PROJECTS) \
+        if self.mode in ("trash", "game", "used", PROJECTS, THEMES) \
                 and not _in(px, py, lay.head) and not _in(px, py, lay.head2):
             row = self._rows_pointer(px, py, click, len(self._rows))
             if row is not None:
@@ -545,9 +570,9 @@ class FilesAppLayer(ListShellApp):
         shown = self._shown_kinds()
         for i, (kind, _label) in enumerate(shown):
             if _in(px, py, self.layout.tiles[i]):
-                if kind == PROJECTS:
-                    self._enter_rows(PROJECTS)
-                    self.status = "PROJECTS"
+                if kind in (PROJECTS, THEMES):
+                    self._enter_rows(kind)
+                    self.status = kind.upper()
                 else:
                     self._enter_kind(kind)
                 return
@@ -597,8 +622,8 @@ class FilesAppLayer(ListShellApp):
                 crumb = "FILES > USED IN"
         elif self.mode == "trash":
             crumb = "FILES > TRASH"
-        elif self.mode == PROJECTS:
-            crumb = "FILES > PROJECTS"
+        elif self.mode in (PROJECTS, THEMES):
+            crumb = "FILES > " + self.mode.upper()
         self._chip(cv, "<" if self.mode != "kinds" else "FILES", lay.head,
                    self.mode != "kinds")
         cv.print(crumb, lay.head[0] + lay.head[2] + 8 * fs,

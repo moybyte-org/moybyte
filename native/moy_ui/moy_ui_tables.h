@@ -180,7 +180,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 // Theme packages, format 1 (moy_theme.c): the limits, the derivation
 // rules, the readability pairs, MOY64's luminance and the seeds.
 #define MOY_THEME_FORMAT 1
-#define MOY_THEME_SEEDS 9
+#define MOY_THEME_SEEDS 10
 #define MOY_THEME_BYTES 4096
 #define MOY_THEME_DEPTH 4
 #define MOY_THEME_RULES 69

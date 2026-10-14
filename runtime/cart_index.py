@@ -52,10 +52,13 @@ What it does differently, because a console is not a PC:
     the files a compiled cart wrote live beside the store
     (runtime/cart_files.py), so an update never touches them, and REMOVE
     takes them with the cart.
-  * it installs only what a sandbox runs (RUNTIMES): a compiled cart, whose
-    native module a board loads only by its signature, or a Lua cart. A board
-    fetches over TLS without checking certificates (the OTA's arrangement),
-    so an index is not proof of anything; what lands is sandboxed or signed.
+  * it installs only what a sandbox runs or the loader validates (RUNTIMES):
+    a compiled cart, whose native module a board loads only by its
+    signature, a Lua cart, or a theme package ("runtime": "theme"), data
+    the theme loader parses, validates and clamps (docs/theming_2026-09.md
+    §7) and nothing runs. A board fetches over TLS without checking
+    certificates (the OTA's arrangement), so an index is not proof of
+    anything; what lands is sandboxed, signed or validated data.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
@@ -151,7 +154,7 @@ DEFAULT_INDEXES = (
 INDEXES_NAME = "indexes.json"
 RECORD_NAME = "installed.json"
 STAGE_DIR = "install"
-RUNTIMES = ("wasm", "lua")
+RUNTIMES = ("wasm", "lua", "theme")
 
 INDEX_LIMIT = 262144          # an index read whole into RAM
 TEXT_LIMIT = 65536            # a licence text, likewise

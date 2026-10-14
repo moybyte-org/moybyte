@@ -39,6 +39,10 @@ _SIGS = (
     ("moy_ui_shape", [], c.c_void_p),
     ("moy_ui_pattern_unreadable", [_I, c.c_void_p, c.c_void_p, _I], _I),
     ("moy_theme_installed", [], c.c_char_p),
+    ("moy_theme_probe", [_P, _Z, c.c_void_p, c.POINTER(c.c_uint8)], _I),
+    ("moy_theme_probe_end", [], None),
+    ("moy_theme_probe_name", [], c.c_char_p),
+    ("moy_theme_probe_font", [_I], c.c_char_p),
     ("moy_theme_uninstall", [], None),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
@@ -764,6 +768,25 @@ def binding():
         lib.moy_theme_layout(b, len(b), c.byref(lay))
         return homes[lay.home]
 
+    pkg_bytes = c.c_size_t.in_dll(lib, "moy_theme_pkg_bytes").value
+
+    def theme_resolve(src):
+        b = bytes(src)
+        buf = c.create_string_buffer(pkg_bytes)
+        notes = c.c_uint8()
+        rc = lib.moy_theme_probe(b, len(b), buf, c.byref(notes))
+        if rc != OK:
+            return (rc, notes.value, None, None, None, None, None)
+        try:
+            name = lib.moy_theme_probe_name().decode()
+            fonts = tuple((r, lib.moy_theme_probe_font(i).decode())
+                          for i, r in enumerate(font_roles)
+                          if lib.moy_theme_probe_font(i))
+            return (rc, notes.value, name, theme(name, False), theme(name, True),
+                    fonts, theme_layout(name) + (theme_home(name),))
+        finally:
+            lib.moy_theme_probe_end()
+
     def font_file(name):
         b = _b(name)
         n = c.c_size_t()
@@ -810,6 +833,7 @@ def binding():
     m.theme = theme
     m.theme_install = theme_install
     m.theme_installed = theme_installed
+    m.theme_resolve = theme_resolve
     m.theme_uninstall = lib.moy_theme_uninstall
     m.theme_fonts = theme_fonts
     m.theme_layout = theme_layout

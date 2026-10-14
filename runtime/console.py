@@ -2928,7 +2928,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
           make   "+ New" first, then every editable cart (`_make_items`).
 
         WALLPAPERS play in none of the first three: they are a backdrop chosen
-        in Settings (Make lists them). An empty Mine holds
+        in Settings (Make lists them). THEMES are in none of the four: a theme
+        is data the Appearance app picks (docs/theming_2026-09.md §9 phase 6
+        step 2). An empty Mine holds
         one "+ New" card. No "+ New" on a read-only store (#151: the web
         runner's can_manage=False, where project management is out of scope)."""
         if tab is None:
@@ -2955,7 +2957,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return out
         out = []
         for c in carts:
-            if c.get("type") == "wallpaper" or self.is_system_app(c):
+            if c.get("type") in ("wallpaper", "theme") or self.is_system_app(c):
                 continue
             if tab == "mine":
                 if own(c):
@@ -3138,6 +3140,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         kid-made cart of type "app" -- which no shell app claims -- still shows.
         Note this departs from shell_ux_v1's "everything is editable"; the spec
         line is right again once #181 lands."""
+        carts = [c for c in carts if c.get("type") != "theme"]
         apps = getattr(self, "_apps", ())
         if apps:
             keep = []

@@ -21,9 +21,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name
 
 try:
-    from chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
+    from chrome import THEME_VARIANTS, theme_colors, theme_names
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
+    from runtime.chrome import THEME_VARIANTS, theme_colors, theme_names
 
 try:
     import ui as _ui
@@ -207,7 +207,7 @@ class AppearanceAppLayer:
             return self._image_items()
         if self.mode == "carts":
             return self._cart_items()
-        return list(THEME_NAMES)
+        return list(theme_names())
 
     def _wall_id(self, item):
         """The selectable wallpaper id: a fill item IS its id string."""

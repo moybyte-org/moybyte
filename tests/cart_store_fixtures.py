@@ -78,7 +78,7 @@ class Repo:
     def add(self, cid, version=1, runtime="wasm", name=None, spdx="MIT",
             modules=(("esp32s3", 2), ("esp32p4", 2)), extra=None, external=None,
             config=b'{"speed": 2}\n', main=b"\0asm\x01\0\0\0 main", cover=None,
-            release=None, mirror=False):
+            release=None, mirror=False, files=None):
         """`release` puts the release asset on another host (a GitHub release
         download's base URL) instead of under `base`; `mirror` serves a copy
         under `base` too and names it in the index, the way moy-spec's
@@ -87,12 +87,17 @@ class Repo:
         also serves bare at files/<id>/<path>, named as its mirror."""
         folder = cid + ".moy"
         name = name or cid.replace("_", " ").title()
-        files = {"manifest.json": json.dumps({"format": "moy-1", "title": name,
-                                              "runtime": runtime, "main": "main.wasm",
-                                              "memory": 4}).encode(),
-                 "config.json": config,
-                 "main.wasm": main + str(version).encode(),
-                 "LICENSES.txt": b"MIT License\n\nfor " + cid.encode()}
+        if files is not None:
+            # A folder as it is (a theme package): its own files, no modules.
+            files = dict(files)
+            modules = ()
+        else:
+            files = {"manifest.json": json.dumps({"format": "moy-1", "title": name,
+                                                  "runtime": runtime, "main": "main.wasm",
+                                                  "memory": 4}).encode(),
+                     "config.json": config,
+                     "main.wasm": main + str(version).encode(),
+                     "LICENSES.txt": b"MIT License\n\nfor " + cid.encode()}
         for chip, fmt in modules:
             files["main.%s.f%s.aot" % (chip, fmt)] = module_bytes(chip, fmt,
                                                                  str(version).encode())

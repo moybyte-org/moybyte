@@ -1622,3 +1622,49 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
     assert (Path(root) / "wm.moy" / "level.wad").read_bytes() == wad
     assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []
+
+
+def _theme_shelf():
+    """A repository carrying the fixture theme package, `dusk.moy`."""
+    folder = ROOT / "tests" / "fixtures" / "themes" / "dusk.moy"
+    files = dict((p.name, p.read_bytes()) for p in sorted(folder.iterdir()))
+    repo = Repo("https://themes.example/carts", "Test themes")
+    repo.add("dusk", name="Dusk", runtime="theme", files=files)
+    return repo, MemNet(repo.routes())
+
+
+def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
+    """docs/theming_2026-09.md §9 phase 6 step 2: GET, then USE and REMOVE;
+    removing the active theme falls back to the default seed."""
+    import moy_ui
+    from runtime import chrome
+    repo, net = _theme_shelf()
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    try:
+        _open(ws, app)
+        assert [r["runs"] for r in app.rows] == [True]
+        app._tap_row(0)
+        ws.frame(1 / 30)
+        assert app._current_verbs() == ("GET",)
+        app._press("GET")
+        _frames(ws, app)
+        assert app.phase == "done" and app._current_verbs() == ("USE", "OK")
+        assert "dusk" in ws.look.theme_names()
+        assert not [c for c in ws._launcher_items(ws.carts.all, "games")
+                    if c.get("type") == "theme"]
+        app._press("OK")
+        app._tap_row(0)
+        ws._dirty = True
+        ws.frame(1 / 30)
+        assert app._current_verbs() == ("USE", "REMOVE")
+        _tap(ws, app, "btn", "USE")
+        assert ws.look.theme_name == "dusk" and moy_ui.theme_installed() == "dusk"
+        _tap(ws, app, "btn", "REMOVE")
+        _tap(ws, app, "btn", "REMOVE")
+        assert not (tmp_path / "carts" / "dusk.moy").exists()
+        assert ws.look.theme_name == chrome.DEFAULT_THEME
+        assert ws.system.get("theme") == chrome.DEFAULT_THEME
+        assert "dusk" not in ws.look.theme_names()
+    finally:
+        moy_ui.theme_uninstall()
+        chrome.adopt_packages((), None)

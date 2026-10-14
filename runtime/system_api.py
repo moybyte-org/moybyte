@@ -375,7 +375,7 @@ def make_system_api(ctx_factory, cart, canvas=None,
                 from runtime import chrome
             # NAMES: `set_theme` beside this takes a name and falls back to
             # DEFAULT_THEME on anything else.
-            return list(chrome.THEME_NAMES)
+            return list(chrome.theme_names())
 
         ns["themes"] = _themes
     if "nav" in roles:

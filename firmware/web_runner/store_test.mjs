@@ -247,6 +247,21 @@ for (const sync of [true, false]) {
        JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
 }
 
+// ---- a theme package's fonts and sheets cross as BYTES -----------------------
+{
+    ok("a theme package's font and sheet are binary, its theme.json is not",
+       store.isBinary("dusk.moy/ui.fnt") && store.isBinary("dusk.moy/parts.moygfx")
+       && !store.isBinary("dusk.moy/theme.json") && !store.isBinary(".fnt"));
+    const s = await store.openStore(fakeNav(true));
+    const fnt = new Uint8Array(700);
+    for (let i = 0; i < fnt.length; i++) fnt[i] = (i * 29 + 3) & 255;
+    await store.seed(s, { "dusk.moy/theme.json": "{}", "dusk.moy/ui.fnt": { b: store.toBase64(fnt) } });
+    const all = await store.readAll(s);
+    ok("a seeded font reads back byte-equal",
+       store.fileData(all["dusk.moy/ui.fnt"]).every((v, i) => v === fnt[i])
+       && all["dusk.moy/theme.json"] === "{}");
+}
+
 // ---- a cart's cover crosses as BYTES (SPEC.md 3.6) ---------------------------
 {
     const s = await store.openStore(fakeNav(true));

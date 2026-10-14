@@ -170,6 +170,29 @@ def test_a_carts_cover_crosses_the_wire_as_its_bytes(tmp_path):
     assert "hop.moy/main.wasm" not in b
 
 
+def test_a_theme_packages_font_crosses_both_ways_as_its_bytes(tmp_path):
+    """The kernel's two copies of the wire's binary rule (moy_webhost.c's
+    pull, moy_sync_apply.c's apply) take a theme package's fonts and sheets
+    by suffix, as runtime/moy_sync's BINARY_SUFFIXES does."""
+    import base64
+    import shutil
+    fixture = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
+    root = _store(tmp_path)
+    shutil.copytree(fixture, root / "dusk.moy")
+    font = (fixture / "tiny5.fnt").read_bytes()
+    b = _pull(root)
+    assert base64.b64decode(b["dusk.moy/tiny5.fnt"]["b"]) == font
+    assert b["dusk.moy/theme.json"] == (fixture / "theme.json").read_text()
+    h = wh.WebHost(str(root), port=0)
+    sheet = bytes((i * 29 + 3) & 255 for i in range(3000))
+    resp = h.handle_http("POST", "/sync", _batch(
+        {"p": "dusk.moy/ui.fnt", "b": base64.b64encode(font).decode()},
+        {"p": "dusk.moy/parts.moygfx", "b": base64.b64encode(sheet).decode()}))
+    assert _json(resp) == {"ok": 2, "err": []}, resp
+    assert (root / "dusk.moy" / "ui.fnt").read_bytes() == font
+    assert (root / "dusk.moy" / "parts.moygfx").read_bytes() == sheet
+
+
 def test_a_loose_file_beside_the_carts_is_not_a_cart(tmp_path):
     b = _pull(_store(tmp_path))
     assert not any(k.startswith("loose") for k in b)

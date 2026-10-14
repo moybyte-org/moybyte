@@ -85,12 +85,14 @@ try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                         DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                         theme_colors, theme_content, theme_known, THEME_NAMES,
-                        THEME_VARIANTS, text_scale_floor)
+                        THEME_VARIANTS, text_scale_floor, adopt_packages,
+                        package, theme_names)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                                 DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                                 theme_colors, theme_content, theme_known,
-                                THEME_NAMES, THEME_VARIANTS, text_scale_floor)
+                                THEME_NAMES, THEME_VARIANTS, text_scale_floor,
+                                adopt_packages, package, theme_names)
 try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -113,8 +115,13 @@ def _ui_text_w(t):
 
 _FONT_ROLES = ("ui", "title", "mono")
 _FONT_FULL = 6          # moy_font_load's MOY_FONT_FULL: every slot holds a font
-# The theme fonts loaded, file -> id: one table for the process, as the
-# loader's four slots are.
+_FONT_BYTES = 8192      # moy_text.h's MOY_FONT_BYTES: the largest font file
+_THEME_BYTES = 4096     # style.json's theme.bytes: the largest theme.json
+_THEME_MAIN = "theme.json"
+# The loader's refusals (moy_theme.h), by rc from 1: each one's string.
+_THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
+# The theme fonts loaded, (package, file) -> id, the package None for a
+# seed's file: one table for the process, as the loader's four slots are.
 _FONTS = {}
 
 
@@ -188,6 +195,17 @@ class Appearance:
         self._choices = None
         self.layout_gen = 0             # moves with every resolve: the Settings row's memo
         self.look_gen = 0               # moves with every publish(); see the module doc
+        # The store's theme packages (docs/theming_2026-09.md §9 phase 6 step
+        # 2): stem -> folder, as of the roster generation `_pkg_gen`; the
+        # bytes the install slot holds when a store package filled it (None
+        # for an install from bytes, `install_theme`); the packages whose
+        # refusal was shown.
+        self._pkg_paths = {}
+        self._pkg_gen = None
+        self._slot_src = None
+        self._slot_gen = None
+        self._refused = set()
+        self.theme_note = None          # the last refusal: (name, rc)
 
     # -- wallpaper discovery -------------------------------------------------
 
@@ -481,8 +499,9 @@ class Appearance:
         `variant` picks the theme's dark/light presentation (None keeps the
         current variant, so existing name-only callers are untouched)."""
         ws = self.ws
-        if not theme_known(name):
-            name = DEFAULT_THEME
+        self._packages()
+        if name not in THEME_NAMES:
+            name = self._take_package(name)
         if variant is not None:
             self.theme_variant = variant if variant in THEME_VARIANTS \
                 else DEFAULT_VARIANT
@@ -518,13 +537,131 @@ class Appearance:
         (rc, notes), the loader's; a refusal leaves everything as it was."""
         rc, notes = _uimod.theme_install(src)
         if rc == 0:
+            self._slot_src = None
             self._packages_moved()
         return rc, notes
 
     def uninstall_theme(self):
         """Drop the installed theme package: only the seeds remain."""
         _uimod.theme_uninstall()
+        self._slot_src = None
         self._packages_moved()
+
+    # -- the store's theme packages ---------------------------------------------
+
+    def theme_names(self):
+        """The seeds, then the store's theme packages that resolve, read once
+        per store change (`chrome.theme_names`; THEME_NAMES stays the
+        seeds')."""
+        self._packages()
+        return theme_names()
+
+    def _packages(self):
+        """stem -> folder of every theme package the roster holds: a cart
+        whose manifest's type is "theme", named by its folder's stem. Re-read
+        when the roster's generation moves, which drops every answer read
+        from the old store (chrome's resolved packages, their fonts, the
+        layouts)."""
+        carts = getattr(self.ws, "carts", None)
+        gen = getattr(carts, "gen", None)
+        if carts is None or gen == self._pkg_gen:
+            return self._pkg_paths
+        self._pkg_gen = gen
+        paths = {}
+        for c in carts.all:
+            if c.get("type") != "theme":
+                continue
+            path = str(c.get("path") or "").replace("\\", "/")
+            stem = path.rsplit("/", 1)[-1]
+            if stem.endswith(".moy"):
+                stem = stem[:-4]
+            if stem and stem not in THEME_NAMES:
+                paths[stem] = path
+        self._pkg_paths = paths
+        adopt_packages(tuple(paths), self._theme_src)
+        for key in list(_FONTS):
+            if key[0] is not None:
+                _uimod.font_free(_FONTS.pop(key))
+        self._layouts = {}
+        self._choices = None
+        return paths
+
+    def _package_file(self, name, file, cap):
+        """Up to cap + 1 bytes of file `file` of store package `name` (one
+        over the cap, so the loader refuses an oversized file as BIG), or
+        None when it cannot be read."""
+        path = self._pkg_paths.get(name)
+        store = getattr(self.ws, "store", None)
+        if path is None or store is None or not store.ready():
+            return None
+
+        def read():
+            with open(path + "/" + file, "rb") as f:
+                return f.read(cap + 1)
+
+        try:
+            return store.call(read)
+        except Exception:  # noqa: BLE001 -- an unreadable package resolves as refused
+            return None
+
+    def _theme_src(self, name):
+        return self._package_file(name, _THEME_MAIN, _THEME_BYTES)
+
+    def store_moved(self):
+        """The roster changed (`CartManager.apply`): re-read the packages and,
+        when the active theme is one, re-take it -- its bytes may have moved
+        with a sync or an update, or it may be gone (then the default seed)."""
+        self._packages()
+        if self.theme_name not in THEME_NAMES and self._slot_src is not None \
+                and self._slot_gen != self._pkg_gen:
+            if self.theme_name not in self._pkg_paths:
+                self.set_theme(DEFAULT_THEME)       # removed: the default, kept
+            elif self._theme_src(self.theme_name) == self._slot_src:
+                self._slot_gen = self._pkg_gen
+            else:
+                self.set_theme(self.theme_name, persist=False)
+
+    def _take_package(self, name):
+        """Put store package `name` in the install slot and answer the name
+        set_theme switches to: `name`, or the default seed when the package
+        will not load (its refusal noted once). A slot an install from bytes
+        filled under `name` is kept: an in-place edit outlives a re-apply."""
+        if type(name) is not str:
+            return DEFAULT_THEME
+        self._packages()
+        if name == _uimod.theme_installed() and (
+                self._slot_src is None or self._slot_gen == self._pkg_gen):
+            return name
+        got = package(name)
+        if got is None:
+            return DEFAULT_THEME
+        rc = got[0]
+        src = self._theme_src(name) if rc == 0 else None
+        if src is not None and src == self._slot_src \
+                and _uimod.theme_installed() == name:
+            self._slot_gen = self._pkg_gen
+            return name
+        if src is not None:
+            rc = _uimod.theme_install(src)[0]
+        if rc != 0 or src is None:
+            self._refuse(name, rc or 2)
+            return DEFAULT_THEME
+        self._slot_src = src
+        self._slot_gen = self._pkg_gen
+        forget_themes()
+        return name
+
+    def _refuse(self, name, rc):
+        """A package that will not load: the row falls back to the default
+        seed, and the loader's reason is shown once per package."""
+        self.theme_note = (name, rc)
+        if name in self._refused:
+            return
+        self._refused.add(name)
+        notice = getattr(self.ws, "notice", None)
+        if notice is not None:
+            notice(_uimod.s("notice.theme_refused") % name.upper(),
+                   _uimod.s("theme.why_" + _THEME_WHY[min(max(rc, 1), 7) - 1]), "warn")
 
     def _packages_moved(self):
         # Every theme resolves along `inherits` to the default, so an install
@@ -535,19 +672,31 @@ class Appearance:
     # -- the shell layout (docs/shell_layout_2026-10.md §9-§11) ---------------
 
     def layout_theme(self):
-        """The `layout_theme` row, read strictly: the name of an installed
-        package (a seed, or the one installed beside them), else None -- the
-        active theme's layout. A value of any other shape reads as absent."""
+        """The `layout_theme` row, read strictly: the name of a theme (a
+        seed, a store package that resolves, or the one installed beside
+        them), else None -- the active theme's layout. A value of any other
+        shape reads as absent."""
         v = self.ws.system.get("layout_theme")
-        if type(v) is str and theme_known(v):
-            return v
+        if type(v) is str:
+            self._packages()
+            if theme_known(v):
+                return v
         return None
 
     def _theme_layout(self, name):
+        """(refused, bars, home): theme `name`'s layout as the loader resolves
+        it -- a store package's from its bytes (`chrome.package`), so a row
+        naming one other than the active theme needs no install."""
         got = self._layouts.get(name)
         if got is None:
-            got = self._layouts[name] = _uimod.theme_layout(name) + (
-                _uimod.theme_home(name),)
+            pkg = None
+            if name not in THEME_NAMES and name != _uimod.theme_installed():
+                pkg = package(name)
+            if pkg is not None and pkg[0] == 0:
+                got = pkg[6]
+            else:
+                got = _uimod.theme_layout(name) + (_uimod.theme_home(name),)
+            self._layouts[name] = got
         return got
 
     def layout(self):
@@ -593,7 +742,7 @@ class Appearance:
         values the Settings LAYOUT row steps through after THEME. Cached until
         the next theme switch."""
         if self._choices is None:
-            names = THEME_NAMES
+            names = self.theme_names()
             extra = _uimod.theme_installed()
             if extra is not None and extra not in names:
                 names = names + (extra,)
@@ -624,7 +773,11 @@ class Appearance:
         font or the floor changed."""
         files = {}
         for role, f in _uimod.theme_fonts(name):
-            files[role] = f
+            files[role] = (None, f)
+        if self._slot_src is not None and name == _uimod.theme_installed():
+            got = package(name)
+            for role, f in (got[5] if got is not None and got[0] == 0 else ()):
+                files[role] = (name, f)
         ids = {}
         for role in _FONT_ROLES:
             f = files.get(role)
@@ -650,13 +803,18 @@ class Appearance:
             changed = True
         return changed
 
-    def _font_id(self, f):
-        """The loaded id of seed font file `f`, loading it once; 0 when it
-        cannot be."""
-        fid = _FONTS.get(f)
+    def _font_id(self, key):
+        """The loaded id of font `key`, (package, file): a store package's
+        file from its folder, a seed's (package None) from the image; loaded
+        once, 0 when it cannot be."""
+        fid = _FONTS.get(key)
         if fid is not None and _uimod.font_info(fid) is not None:
             return fid
-        src = _uimod.font_file(f)
+        pkg, f = key
+        if pkg is None:
+            src = _uimod.font_file(f)
+        else:
+            src = self._package_file(pkg, f, _FONT_BYTES)
         if src is None:
             return 0
         rc, fid = _uimod.font_load(src)
@@ -668,7 +826,7 @@ class Appearance:
             rc, fid = _uimod.font_load(src)
         if fid is None:
             return 0
-        _FONTS[f] = fid
+        _FONTS[key] = fid
         return fid
 
     def set_theme_variant(self, variant, persist=True):
@@ -677,9 +835,9 @@ class Appearance:
         self.set_theme(self.theme_name, persist=persist, variant=variant)
 
     def cycle_theme(self, d):
-        """Step the panel theme through chrome.THEME_NAMES (programmatic verb; the UI
+        """Step the panel theme through `theme_names()` (programmatic verb; the UI
         pick is the Appearance app). Applies + persists."""
-        names = THEME_NAMES
+        names = self.theme_names()
         cur = self.theme_name if self.theme_name in names else names[0]
         self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
 

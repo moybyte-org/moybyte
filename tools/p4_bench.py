@@ -7,6 +7,7 @@
 #   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
 #   bench_home       --home: the home's carousel scenarios (step 7b)
 #   idle_edit        --edit: an in-place theme re-install on an idle screen
+#   store_switch     --store: a switch to a store theme package, and its boot delta
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -45,6 +46,14 @@ live theme is installed and picked, then re-installed under its own name with
 one role changed on the idle screen -- one repaint, then idle zero. An image
 without `install_theme` re-applies its live theme under the same name instead.
 
+`--store` benches a switch to a theme package from the store (phase 6 step
+2): tests/fixtures/themes/dusk.moy is pushed onto the board's store
+(tools/push_cart.py), then the console switches to it from the live theme --
+the call (its folder's theme.json and fonts read, the install) and the frames
+it paints -- and back to the seed, beside it. The boot delta is the same call
+cold, as boot makes it (the store's packages unread, the slot empty, the
+package's fonts unloaded), less a seed's cold switch.
+
 `--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
 size and a synthetic focus-band frame into the canvas the home draws into,
 the shelf's drag frame beside them, and the board's pixels for a fixed set of
@@ -59,6 +68,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from p4_autotest import add_board_args, board_from_args  # noqa: E402
@@ -250,6 +260,87 @@ def idle_edit(b, bench):
     b.drain(2.0)
 
 
+STORE_THEME = "dusk"
+STORE_FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / \
+    "themes" / (STORE_THEME + ".moy")
+
+STORE_SETUP = """
+import time, moy_ui
+def _sw(name, cold):
+    look = ws.look
+    if cold:
+        look._pkg_gen = None
+        if name not in moy_ui.themes():
+            moy_ui.theme_uninstall()
+            look._slot_src = None
+        look._packages()
+        import chrome
+        chrome.forget_themes()
+    t = time.ticks_ms()
+    look.set_theme(name, persist=False)
+    ws._sw_ms = time.ticks_diff(time.ticks_ms(), t)
+ws._sw = _sw
+"""
+
+
+def store_switch(b, bench):
+    """A switch to the store package and back to a seed (the live theme
+    when it is one, else the default), each the call and the frames it
+    paints, then both cold (the boot delta); the live theme is put back.
+    The package is on the store already (`push_store_fixture`)."""
+    pyexec(b, STORE_SETUP)
+    was = pyval(b, "ws.look.theme_name")
+    seeds = pyval(b, "__import__('moy_ui').themes()") or ()
+    base = was if was in seeds else seeds[0]
+    pyexec(b, "ws.look.set_theme(%r, persist=False)" % base)
+    names = pyval(b, "ws.look.theme_names()") or ()
+    if STORE_THEME not in names:
+        print("  %s is not on this board's store: %r" % (STORE_THEME, names))
+        return
+    out = {}
+    for label, name, cold in (("switch from store", STORE_THEME, False),
+                              ("switch to a seed", base, False),
+                              ("cold switch from store", STORE_THEME, True),
+                              ("cold switch to a seed", base, True)):
+        b.drain(2.0)
+        bench.start()
+        pyexec(b, "ws._sw(%r, %r)" % (name, cold))
+        b.drain(3.0)
+        ms = pyval(b, "ws._sw_ms")
+        out[label] = ms
+        row = bench.stop(label, "set_theme %s ms" % ms)
+        st = row["stats"]
+        if st:
+            print("    %s: set_theme %s ms + first painted frame <= %d ms"
+                  % (label, ms, st["max"]))
+    if None not in (out["cold switch from store"], out["cold switch to a seed"]):
+        print("  boot delta (store package over a seed): %d ms"
+              % (out["cold switch from store"] - out["cold switch to a seed"]))
+    pyexec(b, "ws.look.set_theme(%r, persist=False)" % was)
+    b.drain(2.0)
+
+
+def push_store_fixture(args):
+    """Put the fixture package on the board's store (push_cart rescans)."""
+    import subprocess
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
+           str(STORE_FIXTURE), "--board", args.board, "--port", args.port]
+    subprocess.run(cmd, check=True)
+
+
+def bench_store(b, out_path):
+    bench = Bench(b)
+    print("\n=== switch from the store (painted frames) ===")
+    home(b)
+    store_switch(b, bench)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
 def bench_edit(b, out_path):
     bench = Bench(b)
     print("\n=== in-place theme edit (painted frames) ===")
@@ -272,6 +363,7 @@ def bench_all(b, out_path):
     home(b)
     bench.start(); b.drain(3.0); bench.stop("desk idle")
     idle_edit(b, bench)
+    store_switch(b, bench)
 
     # -- the desk's PROJECTS: the home in a window, on Make -----------------
     b.open("projects"); b.drain(1.0)
@@ -834,13 +926,19 @@ def main():
     ap.add_argument("--edit", action="store_true",
                     help="the in-place theme edit alone: one repaint, then "
                          "idle zero")
+    ap.add_argument("--store", action="store_true",
+                    help="a switch to a store theme package, and its boot "
+                         "delta, alone (pushes tests/fixtures/themes/dusk.moy)")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
+    if args.store or not (args.repaint or args.popovers or args.kernel
+                          or args.home or args.edit):
+        push_store_fixture(args)
     b = board_from_args(args)
     try:
         if (not args.repaint and not args.kernel and not args.home
-                and not args.edit and not b.attach_only):
+                and not args.edit and not args.store and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -854,6 +952,8 @@ def main():
             bench_home(b, args.out)
         elif args.edit:
             bench_edit(b, args.out)
+        elif args.store:
+            bench_store(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:
