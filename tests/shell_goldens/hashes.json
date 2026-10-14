@@ -85,9 +85,9 @@
   },
   "p4_1024x600_cs2_fs1_contrast_light": {
     "app_appearance": "2d58773e638dba5bc8f2d565474779c25346e2bb9a4f165276dbe889ec56a1e3",
-    "app_artwork": "cdf25cc58e0cff49af70a083fdf2a22d0bf1c42ae9bab2e45785562abc134a6c",
+    "app_artwork": "4851d5c3c6c485819a0c21dbd08f267d6d7bc235c01b1918cd2fefcca1298956",
     "app_calc": "2b90e70fe208036ac001d3df9355a82b1afd382c9f115808bbc13f171b4dd85e",
-    "app_files": "d6675ab825e3a51e990e76d832b1b135a20b56abd21d026cb419952350e2fd57",
+    "app_files": "76d7d0c962831ac16607e7f74f9fada3621ea113fceeb8dd096f652da0193b7b",
     "app_getcarts": "ace9b607a06bf77f33cc98460153fed8d5bf0c5fa7f86d2d5bf5ebf6211e9553",
     "app_notes": "80120aed57c5f0f19459f7136a7f628a70489778afb203ee334ac592a72cb5ce",
     "app_storybook": "983af74c52f7cea7584dae8af503f42c5a2f34774643c1357898148366384ee4",
@@ -103,7 +103,7 @@
     "editor_scene": "ea67eb8cbcab574feba5b0c2614bec069d796fcecfb5bd67a529fa2faeafc3c4",
     "launcher": "a81c73867d56ad4562aab2531d52f7ab51eded29a5464097ca570de277ee1763",
     "script_console": "206ff346b98c444e54f8494b169f70f3c2da011706e7817265d2c081be7054b5",
-    "settings": "3d8f2ac325e6097399cf6d25a30536de0d1eb0ec9c89aadf8421d001b84b0a84",
+    "settings": "8d886c11111d09492cd2da9e6da7fd535d740c6ffcd0a92178cb833e308bd5a9",
     "web_console": "73d12cabe01a8a02c7f0e9d7d225b4756a58b3bb9f3c25cf53bbaf3c0a583896",
     "web_console_address": "647235b272363b8a4c1042fef703c92ad07f32e03ecc79d63830446e35340c20"
   },
