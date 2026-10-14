@@ -8,7 +8,7 @@
 //   app.grant(id, roles, kind=None, ns=None, run=False) -> handle
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
 //   app.surface_write(canvas, w, h, fs, cs, windowed, content, ox=0, oy=0)
-//   app.bind_pointer(pointer), app.theme_write(name, variant, colors),
+//   app.bind_pointer(pointer), app.theme_write(name, variant, colors) -> gen,
 //   app.serve(role, server),
 //   app.store_bind(root, readable, writable, no_store)   the shell's writes
 //   app.files_end_all(), app.copy_gen()   the store's sessions and copy
@@ -344,7 +344,8 @@ static mp_obj_t app_bind_pointer(mp_obj_t self_in, mp_obj_t p) {
 static MP_DEFINE_CONST_FUN_OBJ_2(app_bind_pointer_obj, app_bind_pointer);
 
 // theme_write(name, variant, colors): the live token table from the look's
-// dict; a key outside the vocabulary is refused (ValueError).
+// dict, and the table's new generation; a key outside the vocabulary is
+// refused (ValueError).
 static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
     moy_appabi_t *a = app_of(args[0]);
@@ -369,7 +370,7 @@ static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
         tokens[role] = (int32_t)mp_obj_get_int(map->table[i].value);
     }
     check(moy_app_theme_write(a, name, n, variant, vn, tokens));
-    return mp_const_none;
+    return MP_OBJ_NEW_SMALL_INT(moy_app_theme_read(a, tokens) & 0x3fffffffu);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_theme_write_obj, 4, 4, app_theme_write);
 

@@ -778,37 +778,41 @@ since the face's preview ring holds four looks and would thrash.
   it goes to moy-spec as a proposal if it is ever wanted. The Player surface
   stays the cart's. That is the "don't theme our apps" lesson turned around: the
   chrome is fully themeable, game pixels are not.
-- **A switch is one Class A dirty plus one integer.** A theme load, switch or
-  in-place edit is an un-attributed Class A dirty (`ws._dirty`, the global
-  epoch; `docs/surface_model_v1.md` §3) and bumps one monotonic integer,
-  `look_gen`: native/moy_app's token-table generation, which every write of
-  the live row already moves (sprint 5). Every cache that outlives a frame
-  folds `look_gen` into its key:
-  - the launcher statics (today keyed on `id(theme_colors)`);
-  - the bar strip (today poked by `invalidate()`);
-  - `wm_chrome`'s frozen chrome (today keyed on theme name and variant, so an
-    in-place edit under the same name would go stale);
-  - the toolkit's look ring and the font ids (`ui._bind_theme`,
-    `Appearance._FONTS`);
-  - the P4 backdrop;
-  - the web's layer re-ship.
+- **A switch is one Class A dirty plus one integer.** A theme load, switch,
+  install or in-place edit is an un-attributed Class A dirty (`ws._dirty`, the
+  global epoch; `docs/surface_model_v1.md` §3) and moves one monotonic
+  integer, `ws.look.look_gen`: a plain attribute `publish()` sets from
+  native/moy_app's token-table generation (`theme_write` answers it), which
+  every write of the live row moves — an icon sheet's adoption publishes too.
+  Every cache whose pixels read the look folds `look_gen` into its key and
+  replaces its entry when it moves:
+  - the home statics and retained stamp (`launcher_layer._statics_base`);
+  - the bar strips (`bar_layer._cart_bar_key`);
+  - `wm_chrome`'s frozen chrome, the focused window's content freeze
+    (`_content_static`) and every window buffer behind it (each `_Win`
+    carries the generation its buffer was drawn under);
+  - the desk backdrop the windowed tier restores from (`wm_desk._desk_sig`);
+  - the toolkit's look ring (`ui._bind_theme`, keyed on the theme dict and
+    an epoch `ui.look_moved()` bumps: an entry from an older one is
+    re-resolved in its own slot).
 
-  A cache that reads no theme — the covers, the bar's kind images — folds
-  nothing, and a generation-keyed cache replaces its entry, never
-  accumulates (phase 6 step 1).
+  An install or uninstall (`Appearance.install_theme`) drops every shared
+  token and content dict (`chrome.forget_themes`), since every theme resolves
+  along `inherits` to the default and one install can move any name's row,
+  then re-applies the live theme; the layout answers are cleared by that
+  re-apply. A cache that reads no theme — the covers, the bar's kind images,
+  the font table (keyed on the file, and a file is read only from the seeds'
+  folder, whose bytes an install cannot move) — folds nothing. The web head
+  runs this same console and re-rasters its frames, so it holds no cache of
+  its own.
 
   **No cache keys on object identity.** A freed theme's `id()` can be reused by
   MicroPython, and identity keying is what `docs/surface_model_v1.md` §7 retired.
   The kernel ABI's theme handle carries the same generation (index plus
   generation, kernel doc §4.3). This is the existing dirty protocol, not a new
-  mechanism, and `set_theme`'s per-cache pokes are deleted. A test edits a theme
-  in place and asserts every cached surface repaints.
-
-  **The fold is phase 6's step 1**, before the first in-place edit (the theme
-  editor) and the first re-install under one name. Until then a (theme,
-  variant) names one row for the life of the image, `theme_colors` hands out
-  one dict per pair and never frees it, so today's keys cannot go stale and no
-  `id()` is reused.
+  mechanism; `set_theme` pokes no cache. `tests/test_theme_look_gen.py`
+  re-installs a package under its own name with one role changed and holds the
+  live console's pixels to a console booted under the edited package.
 
 ## 7. Safety
 
@@ -1099,34 +1103,38 @@ surfaces and fonts after, the layout, then sprites. Each step names the
 alternative it declined and the `tools/p4_bench.py` scenario it adds; a
 scenario's numbers go to #66 (frames) or #58 (the P4 port), never here.
 
-  1. **`look_gen` in the caches that read the look** (§6). `look_gen` is a
-     plain small integer on `ws.look`, set in `publish()` from
-     `native/moy_app`'s token-table generation (`moy_app.h`: "it bumps the
-     generation"), never a property that calls the ABI per key build. A
-     generation-keyed cache REPLACES its entry on a change, never
-     accumulates. The keys that fold it: the home statics and retained
-     stamp (`_statics_base`, which drops its `id(ws.theme_colors)`), the bar
-     strips (`bar_layer._bar_strips`; `_cart_bar_key` drops its
-     `id(ws.look.icon_sheet)`), `wm_chrome`'s frozen chrome and
-     `_content_static`, the toolkit's look ring (`runtime/ui.py`'s
-     `_bind_theme`, keyed on the dict's identity and `_FLAT` today: keyed on
-     the dict and `look_gen`), `Appearance._FONTS` (keyed on a bare file name
-     today: on the package and the file), `Appearance._layouts` (cleared),
-     the P4 backdrop and the web's layer re-ship. `chrome._THEME_CACHE` and
-     `_CONTENT_CACHE` (keyed on name and variant) are purged for a name on
-     its install. Not folded, since they read no theme: the covers
-     (`runtime/cover_cache.py`) and `ws._bar_img_cache` (keyed on kind and
-     `bar_light` only). `set_theme`'s per-cache pokes go
-     (`ws.bar_layer.invalidate()`, the rebinding of `ws.theme_colors` as the
-     invalidation), since no key reads a dict's identity. Declined: a
-     generation of the editor's own (the row's is bumped by every install).
-     No pixel moves. Gate: goldens byte-identical; a host test re-installs a
-     package under the same name with one role changed and asserts every
-     cache above repaints (`+tests/test_theme_look_gen.py`); a bench
-     scenario, `p4 idle edit`, installs in place on an idle P4 desk and
-     counts one repaint, then zero frames — the P4 backdrop's and the web
-     re-ship's claim are made by that scenario and the web golden, or not
-     made.
+  1. **`look_gen` in the caches that read the look** (§6; landed
+     2026-10-14). `look_gen` is a plain small integer on `ws.look`, set in
+     `publish()` from `native/moy_app`'s token-table generation, which
+     `theme_write` answers, never a property that calls the ABI per key
+     build. A generation-keyed cache REPLACES its entry on a change, never
+     accumulates; §6 lists the keys that fold it. `_statics_base` dropped
+     its `id(ws.theme_colors)`, `_cart_bar_key` and the desk's signature
+     their `id(ws.look.icon_sheet)` (adopting a sheet publishes), and the
+     window chrome and the desk their theme name and variant. Three of the
+     plan's entries were wrong and went: the font table stays keyed on the
+     file, since a file comes only from the seeds' folder until step 2 keys
+     it on the package that provides it (keyed on the theme instead, every
+     switch would reload Tiny5 and relayout the shell); the token dicts are
+     dropped whole on an install, not by name, since a name's row moves
+     with any package along its `inherits`; and the web's layer re-ship has
+     not existed since the recording stack went (the wasm head re-rasters).
+     The windows behind the focused one were added: their buffers kept the
+     old look until focused. `Appearance.install_theme` /
+     `uninstall_theme` are the install path, and the installed package's
+     name is a theme `set_theme` takes (`chrome.theme_known`), the least of
+     step 2 an in-place edit needs to show. `set_theme`'s per-cache pokes
+     are gone (`ws.bar_layer.invalidate()`, the rebinding of
+     `ws.theme_colors` as the invalidation). Declined: a generation of the
+     editor's own (the row's is bumped by every install). No pixel moves.
+     Gate: goldens byte-identical; `tests/test_theme_look_gen.py`
+     re-installs a package under its own name with one role changed, holds
+     the live console's pixels to a console booted under the edit on the
+     console and desk tiers, checks each key moved, and re-installs a dozen
+     times with every cache's size unchanged; a bench scenario,
+     `p4 idle edit` (`tools/p4_bench.py --edit`, and in the default run),
+     installs in place on an idle screen and counts the repaint, then the
+     idle frames.
 
   2. **Theme packages in the store, and the `contrast` seed.** A theme is a
      cart folder, `<id>.moy`, whose manifest says `"moybyte": {"type":

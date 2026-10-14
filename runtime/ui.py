@@ -221,6 +221,12 @@ def theme_home(name):
     return _C.theme_home(name)
 
 
+def theme_install(src):
+    """(rc, notes): install theme.json bytes `src` as the one package beside
+    the seeds, replacing the last; a refusal leaves it as it was."""
+    return _C.theme_install(src)
+
+
 def theme_installed():
     """The installed theme package's name (the one beside the seeds), or None."""
     return _C.theme_installed()
@@ -389,10 +395,11 @@ for _i, _s in enumerate(_C.states()):
 _REST_ID = _STATE_ID[REST]
 _KIND_ID = {}                         # kind name -> id, interned at first use
 _METRICS = {}                         # kind -> its metric tuple
-_RING = []                            # [theme dict, look slot, cache], newest first
+_RING = []                            # [theme dict, look slot, cache, look gen], newest first
 _RING_MAX = 4
 _TH = None                            # the theme dict _FLAT caches for
 _LOOK = 0
+_GEN = 0                              # bumped by look_moved: the ring's epoch
 _FLAT = {}                            # kind -> {state: (field, ink, edge)}
 
 
@@ -442,9 +449,19 @@ def _pack(th):
     return row
 
 
+def look_moved():
+    """The look moved (`Appearance.publish`, with its `look_gen`): every ring
+    entry resolved before re-resolves at its next bind. The ring's epoch is
+    the process's own, since every console in it shares this module."""
+    global _GEN, _TH
+    _GEN += 1
+    _TH = None
+
+
 def _bind_theme(th):
     """Make `th` the theme the cache answers for, reusing its look when the
-    ring still has it."""
+    ring holds it under the current generation; an entry from an older one is
+    re-resolved in its own slot."""
     global _TH, _FLAT, _LOOK
     ring = _RING
     for i in range(len(ring)):
@@ -453,6 +470,10 @@ def _bind_theme(th):
             if i:
                 del ring[i]
                 ring.insert(0, ent)
+            if ent[3] != _GEN:
+                _C.look(ent[1], _pack(th))
+                ent[2] = {}
+                ent[3] = _GEN
             _TH, _LOOK, _FLAT = th, ent[1], ent[2]
             return
     if len(ring) < _RING_MAX:
@@ -460,7 +481,7 @@ def _bind_theme(th):
     else:
         slot = ring.pop()[1]
     _C.look(slot, _pack(th))
-    ent = [th, slot, {}]
+    ent = [th, slot, {}, _GEN]
     ring.insert(0, ent)
     _TH, _LOOK, _FLAT = th, slot, ent[2]
 

@@ -5,13 +5,11 @@ hashes x 5 configs plus 298 sub-surface hashes are, between them, a very
 thorough test of "does the shell still draw the night colorway at 1x". What
 they cannot see is everything below, and it is most of what this object does:
 
-  * **the token dict is REBOUND, never mutated in place.** `ws.system` could
-    stay a plain alias through landing B because `SystemStore.load()` clears and
-    updates one dict; `ws.theme_colors` is the opposite case and must stay so --
-    `launcher_layer._statics_key` and `_pseudo_key` fold `id(ws.theme_colors)`,
-    so the NEW dict IS the shelf's invalidation. A tidy-minded in-place update
-    would leave the launcher painting the old colorway until something else
-    happened to dirty it, which no single-frame hash would catch.
+  * **a switch moves `look_gen`.** Every cache whose pixels read the look
+    folds that one integer (docs/theming_2026-09.md §6), so a switch that
+    forgot to publish would leave the launcher painting the old colorway until
+    something else happened to dirty it, which no single-frame hash would
+    catch. tests/test_theme_look_gen.py walks every cache it reaches.
 
   * **`select_wallpaper` coordinates four owners.** Roster (rehydrate/re-slim),
     backdrop component (clear/compile), settings funnel (persist) and
@@ -92,33 +90,31 @@ def test_the_tokens_stay_a_flat_kernel_attribute_with_one_author(tmp_path):
 
 def test_set_theme_swaps_the_tokens_pushes_the_grids_and_persists(tmp_path):
     ws = build_ws(tmp_path)
-    before = ws.theme_colors
-    ws.bar_layer._bar_cache_gen = 0
+    gen = ws.look.look_gen
+    key = ws.bar_layer._cart_bar_key("home")
     ws.look.set_theme("berry")
     assert ws.look.theme_name == "berry"
-    assert ws.theme_colors is not before                 # REBOUND, see below
     assert ws.theme_colors == theme_colors("berry", "dark")
     assert ws.launcher.theme is ws.theme_colors          # the selection accent
-    assert ws.bar_layer._bar_cache_gen != 0              # the cached strip repaints
+    assert ws.look.look_gen > gen                        # the look moved
+    assert ws.bar_layer._cart_bar_key("home") != key     # the cached strip repaints
     assert ws._dirty
     assert _stored(ws)["theme"] == "berry"
 
 
-def test_the_token_dict_is_rebound_so_the_shelf_key_changes(tmp_path):
-    """The invariant an in-place update would silently break: both home
-    layers' statics keys (one shared base, `_statics_base`) fold
-    `id(ws.theme_colors)`, so a theme swap invalidates them BECAUSE the dict
-    is a new object."""
+def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
+    """Both home layers' statics keys (one shared base, `_statics_base`) fold
+    `look_gen`, and no key in the shell reads a theme dict's or an icon
+    sheet's identity (docs/theming_2026-09.md §6: a freed object's id() is
+    reused)."""
     ws = build_ws(tmp_path)
-    keyed = [ln for ln in ROOT.joinpath("runtime/launcher_layer.py").read_text(
-        encoding="utf-8").split("\n") if "id(ws.theme_colors)" in ln]
-    assert len(keyed) == 1, keyed
+    for f in sorted(ROOT.joinpath("runtime").glob("*.py")):
+        src = f.read_text(encoding="utf-8")
+        assert "id(ws.theme_colors)" not in src and "id(ws.look." not in src, f.name
     cv = ws.sys_canvas
     ws.projects_grid = ws._home_grid("grid", [])
     before = (ws.launcher_layer._statics_key(cv), ws.projects_layer._statics_key(cv))
-    was = id(ws.theme_colors)
     ws.look.set_theme("forest", persist=False)
-    assert id(ws.theme_colors) != was
     assert ws.launcher_layer._statics_key(cv) != before[0]
     assert ws.projects_layer._statics_key(cv) != before[1]
 

@@ -41,11 +41,15 @@ only thing in the tree that ever writes it -- which is the same shape rev 3
 gave the achievement overlays: the collaborator generates the value, the kernel
 holds the flat field the frame path reads.
 
-`ws.system`'s never-rebound trick is not available here and must not be attempted:
-`launcher_layer._statics_key` and `_pseudo_key` fold `id(ws.theme_colors)` into
-their cache keys, so a theme swap invalidates the shelf statics BECAUSE the
-dict is rebound. Mutating it in place would leave the launcher painting the old
-colorway until something else happened to dirty it.
+## A switch is one dirty plus one integer
+
+`look_gen` is the look's generation: a plain small int, set by `publish()`
+from native/moy_app's token-table generation, which every write of the live
+look moves (a switch, a variant, an install, an icon sheet). Every cache whose
+pixels read the look folds it into its key and REPLACES its entry when it
+moves (docs/theming_2026-09.md §6); none keys on a dict's or a sheet's
+identity. The token dicts are shared and read-only: `chrome.theme_colors`
+hands out one per (theme, variant) until an install drops them.
 
 ## What stays on the kernel, and why
 
@@ -79,14 +83,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
-                        DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
-                        theme_content, THEME_NAMES, THEME_VARIANTS,
-                        text_scale_floor)
+                        DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
+                        theme_colors, theme_content, theme_known, THEME_NAMES,
+                        THEME_VARIANTS, text_scale_floor)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
-                                DEFAULT_THEME, DEFAULT_VARIANT, theme_colors,
-                                theme_content, THEME_NAMES, THEME_VARIANTS,
-                                text_scale_floor)
+                                DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
+                                theme_colors, theme_content, theme_known,
+                                THEME_NAMES, THEME_VARIANTS, text_scale_floor)
 try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -183,6 +187,7 @@ class Appearance:
         self._layouts = {}
         self._choices = None
         self.layout_gen = 0             # moves with every resolve: the Settings row's memo
+        self.look_gen = 0               # moves with every publish(); see the module doc
 
     # -- wallpaper discovery -------------------------------------------------
 
@@ -279,7 +284,8 @@ class Appearance:
         # The kernel's cache, cleared from here: it backs ws._bar_image/_icon, the
         # shared draw toolkit, and a stale entry would keep blitting old pixels.
         self.ws._bar_img_cache = {}
-        self.ws.bar_layer.invalidate()   # repaint the cached cart bar with the new theme (#43)
+        self.publish()
+        self.ws._dirty = True
 
     def load_icon_sheet(self):
         """Build the top-bar IconSheet (Stage 1): use the saved system_icons.moygfx theme
@@ -475,7 +481,7 @@ class Appearance:
         `variant` picks the theme's dark/light presentation (None keeps the
         current variant, so existing name-only callers are untouched)."""
         ws = self.ws
-        if name not in THEME_NAMES:
+        if not theme_known(name):
             name = DEFAULT_THEME
         if variant is not None:
             self.theme_variant = variant if variant in THEME_VARIANTS \
@@ -483,19 +489,12 @@ class Appearance:
         self.theme_name = name
         _uimod.use_shape(name)
         refont = self._install_fonts(name)
-        # REBOUND, never mutated in place: the launcher's statics keys fold
-        # id(ws.theme_colors), so the new dict IS the invalidation.
         ws.theme_colors = theme_colors(name, self.theme_variant)
         self.publish()
         # The launcher grids read the accent for their selection ring/pill.
         ws.launcher.theme = ws.theme_colors
         if getattr(ws, "projects_grid", None) is not None:
             ws.projects_grid.theme = ws.theme_colors
-        # The cached bar strip now paints theme-colored pixels (the launcher zone's
-        # PLAY/CHANGE chips), and its cache key doesn't fold the theme name -- bump
-        # the explicit generation so a theme switch repaints it.
-        if getattr(ws, "bar_layer", None) is not None:
-            ws.bar_layer.invalidate()
         # The layouts read the fonts' metrics when they are built, and the
         # floor can move the effective font scale.
         if refont and getattr(ws, "layout", None) is not None \
@@ -512,6 +511,27 @@ class Appearance:
         self._choices = None
         self.apply_layout()
 
+    def install_theme(self, src):
+        """Install theme package `src` (a theme.json's bytes) as the one
+        beside the seeds (`moy_ui.theme_install`) and re-apply the live
+        theme over it: an in-place edit is a re-install under its own name.
+        (rc, notes), the loader's; a refusal leaves everything as it was."""
+        rc, notes = _uimod.theme_install(src)
+        if rc == 0:
+            self._packages_moved()
+        return rc, notes
+
+    def uninstall_theme(self):
+        """Drop the installed theme package: only the seeds remain."""
+        _uimod.theme_uninstall()
+        self._packages_moved()
+
+    def _packages_moved(self):
+        # Every theme resolves along `inherits` to the default, so an install
+        # can move any (theme, variant)'s tokens: the shared dicts all go.
+        forget_themes()
+        self.set_theme(self.theme_name, persist=False)
+
     # -- the shell layout (docs/shell_layout_2026-10.md §9-§11) ---------------
 
     def layout_theme(self):
@@ -519,7 +539,7 @@ class Appearance:
         package (a seed, or the one installed beside them), else None -- the
         active theme's layout. A value of any other shape reads as absent."""
         v = self.ws.system.get("layout_theme")
-        if type(v) is str and (v in THEME_NAMES or v == _uimod.theme_installed()):
+        if type(v) is str and theme_known(v):
             return v
         return None
 
@@ -672,8 +692,13 @@ class Appearance:
         its colour dict is rebuilt from. The console calls it once its app
         state exists; every switch after that comes through here."""
         abi = getattr(self.ws, "app_abi", None)
+        gen = 0
         if abi is not None:
-            abi.theme_write(self.theme_name, self.theme_variant, self.ws.theme_colors)
+            gen = abi.theme_write(self.theme_name, self.theme_variant,
+                                  self.ws.theme_colors)
+        # Strictly rising: the console's look may move before its ABI exists.
+        self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
+        _uimod.look_moved()
 
     def content_colors(self):
         """The live theme's CONTENT roles (code syntax, block colours):

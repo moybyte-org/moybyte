@@ -157,8 +157,7 @@ class _BackdropLayer(Layer):
         compute -- no per-frame scan of the cart list."""
         ws = self.ws
         cv = ws.sys_canvas
-        return (cv.w, cv.h, ws.look.theme_name, ws.look.theme_variant,
-                ws.look.effective_font_scale(), id(ws.look.icon_sheet),
+        return (cv.w, cv.h, ws.look.look_gen, ws.look.effective_font_scale(),
                 ws.look.wallpaper_id,
                 len(getattr(ws, "_apps", ())), len(ws.carts.all))
 

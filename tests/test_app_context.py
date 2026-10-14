@@ -728,9 +728,9 @@ def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
 def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     """The DARK/LIGHT half of the theme (visual_identity_v1 4.3). Three things
     have to happen together: `light()` -- the gate every surface's light branch
-    reads -- follows; `ws.theme_colors` is REBOUND, because the launcher's cache
-    keys fold `id(ws.theme_colors)` and the rebind IS the invalidation; and the
-    choice reaches system.json or it is gone at the next boot."""
+    reads -- follows; the app's colour dict is a new one, rebuilt at the
+    table's new generation; and the choice reaches system.json or it is gone
+    at the next boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
     assert theme.variant() == "dark" and theme.light() is False

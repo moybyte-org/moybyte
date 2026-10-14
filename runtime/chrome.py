@@ -797,7 +797,8 @@ _ICON_VERSION = 5
 # docs/visual_identity_v1.md Section 4.3's. Colour roles are MOY64 indices;
 # `surface_light`, `bar_light` and `band_light` are presentation flags
 # (booleans here).
-# The default is the first seed ("night", the moybyte site palette), and a
+# The default is the first seed ("night", the moybyte site palette); the one
+# installed package beside the seeds is a theme too (`theme_known`), and a
 # name no package provides resolves as the default.
 THEME_NAMES = _ui._C.themes()
 DEFAULT_THEME = THEME_NAMES[0]
@@ -808,12 +809,17 @@ _THEME_CACHE = {}
 _CONTENT_CACHE = {}
 
 
+def theme_known(name):
+    """True for a seed's name or the installed package's."""
+    return name in THEME_NAMES or name == _ui._C.theme_installed()
+
+
 def theme_colors(name, variant=DEFAULT_VARIANT):
     """The full token dict for theme `name` in `variant` ("dark"/"light"),
     flattened by the C loader: every role set, an unknown name or variant
     resolving as the default's. Returns a shared cached dict (treat as
     read-only)."""
-    if name not in THEME_NAMES:
+    if not theme_known(name):
         name = DEFAULT_THEME
     if variant not in THEME_VARIANTS:
         variant = DEFAULT_VARIANT
@@ -828,11 +834,18 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
     return cached
 
 
+def forget_themes():
+    """Drop every shared token and content dict: an install or uninstall
+    moved what the names resolve to."""
+    _THEME_CACHE.clear()
+    _CONTENT_CACHE.clear()
+
+
 def theme_content(name, variant=DEFAULT_VARIANT):
     """The CONTENT roles of theme `name` in `variant` -- code syntax and block
     colours (style.json's `theme.content`), which are not in the live token
     row apps read. A shared cached dict, resolved as `theme_colors` is."""
-    if name not in THEME_NAMES:
+    if not theme_known(name):
         name = DEFAULT_THEME
     if variant not in THEME_VARIANTS:
         variant = DEFAULT_VARIANT

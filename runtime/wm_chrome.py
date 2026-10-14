@@ -55,9 +55,7 @@ class WindowChrome:
         theme -- restarts it and all buffers are refreshed before skipping
         resumes."""
         sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
-               self._win_title(win), self.ws.look.theme_name,
-               self.ws.look.theme_variant,
-               self._fs())
+               self._win_title(win), self.ws.look.look_gen, self._fs())
         if sig != getattr(win, "_chrome_sig", None):
             self._win_touched = True      # the chrome's pixels differ from last frame's
         if not quiet or sig != getattr(win, "_chrome_sig", None):

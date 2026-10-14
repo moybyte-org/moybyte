@@ -166,8 +166,9 @@ def run(sp, ap, say, mi, root):
     d = t.colors()
     say("theme", sorted(d.items()), t.colors() is d, t.gen(), t.light(), t.name(),
         t.variant(), t.token(0), t.token(1), t.token(9), t.token(20))
-    app.theme_write("machine", "light", {"surface_light": True, "panel": 1,
-                                         "bar_light": True})
+    wrote = app.theme_write("machine", "light", {"surface_light": True, "panel": 1,
+                                                 "bar_light": True})
+    say("wrote gen", wrote == t.gen())
     say("light", t.light(), sorted(t.colors().items()), t.name(), t.variant())
     for bad in ({"nope": 1}, ):
         try:

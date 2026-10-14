@@ -1352,13 +1352,12 @@ def _paint_continuity(layer, ws):
 
 def _statics_base(ws, cv, grid):
     """What BOTH grid layers' static chrome is a pure function of: the canvas,
-    the font scale, the theme (its dict identity: `theme_colors` is rebound on
-    every swap, so the new dict IS the invalidation), the grid rect (#113:
+    the font scale, the look (`look_gen`), the grid rect (#113:
     set_layout no longer invalidates the ring eagerly, since the windowed tier
     re-applies layouts several times per frame, so this key is what makes a
     paint recorded under a different layout unmatchable) and the item count.
     The home shelf folds its own extras on top."""
-    return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
+    return (cv.w, cv.h, ws.layout.fs, ws.look.look_gen,
             grid.band_rect(), len(grid.items))
 
 

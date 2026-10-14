@@ -372,6 +372,7 @@ def binding(sanitize=False):
                 tok[token_names.index(k)] = int(v)
             nb, vb = _str(name), _str(variant)
             _check(lib.moy_app_theme_write(self._p, nb, len(nb), vb, len(vb), tok))
+            return lib.moy_app_theme_read(self._p, tok) & 0x3fffffff
 
         def serve(self, role, server):
             self._servers[role] = server

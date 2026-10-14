@@ -197,8 +197,9 @@ class BarLayer:
       * The shared draw toolkit (ws._glyph / ws._icon / ws._mini_btn / ws._bar_image)
         stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
       * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
-        `_bar_cache_gen` (the strip cache generation) lives here and
-        ws.look.set_icon_sheet bumps it via invalidate().
+        `_bar_cache_gen` (the strip cache generation) lives here, bumped
+        through invalidate(); the look's changes reach the strips through
+        `ws.look.look_gen` in their key.
 
     The bar is CHROME the content composes, not a standalone stack layer: it's
     SYSTEM-domain on the launcher, Settings and every Editor tab (drawn on
@@ -228,7 +229,7 @@ class BarLayer:
         # the state key it holds (None = stale) and the canvas it was built on (a
         # web-view swap, OR switching between the game canvas and the system canvas,
         # forces a rebuild); `_bar_cache_gen` is bumped by the explicit invalidators
-        # (invalidate(), from ws.look.set_icon_sheet) so a theme swap repaints. Keyed per
+        # (invalidate()), and `ws.look.look_gen` in the key repaints a look change. Keyed per
         # `where` (was one shared slot) because the windowed WM (wm_windowed.py)
         # draws TWO bars per frame -- the desktop root's "home" bar and the focused
         # window's own -- and a shared slot would rebuild both every frame. On the
@@ -258,8 +259,8 @@ class BarLayer:
         self._fields = ()
 
     def invalidate(self):
-        """Repaint the cached running-cart bar on the next frame (a theme/IconSheet
-        swap changed its pixels). Called by ws.look.set_icon_sheet."""
+        """Repaint every cached bar strip on the next frame: something its key
+        does not carry moved its pixels (a bar placement, a journal flip)."""
         self._bar_cache_gen += 1
 
     # -- the strips a rotated compositor presents ------------------------------
@@ -578,18 +579,19 @@ class BarLayer:
         variant's PIXELS. A different key forces a strip re-render; an unchanged key
         reuses the cached strip. `where` is key[0] (so a screen switch always
         invalidates); then the clock text (ticks ~once/min), whether the open cart
-        has an edit schema (EDIT vs CODE icon, "desktop" only), the icon theme
-        identity + the glyph font scale (a theme edit / resize must repaint),
+        has an edit schema (EDIT vs CODE icon, "desktop" only), the look's
+        generation + the glyph font scale (a theme or icon edit / resize must
+        repaint),
         whether writes are enabled (the launcher's NEW/DUP/DEL visibility), the
         active app's OWN `zone_gen` (Stage 4: an int the app bumps whenever ITS
         lent zone's content changes -- e.g. EditorApp.set_tab, Launcher.sel/
         set_items -- so a real zone-content change is the ONLY thing that forces a
         re-render beyond the shared dimensions here), and a generation counter the
-        explicit invalidators bump (look.set_icon_sheet, etc.)."""
+        explicit invalidators bump (a bar placement, a journal flip)."""
         ws = self.ws
         owner = self._zone_owner(where)
         has_edit = _edit_kind(ws.cart)
-        return (where, self._clock_text(), has_edit, id(ws.look.icon_sheet),
+        return (where, self._clock_text(), has_edit, ws.look.look_gen,
                 getattr(self._bar_canvas(where), "font_scale", 1),
                 bool(ws.can_manage),
                 owner.zone_gen if owner is not None else 0,

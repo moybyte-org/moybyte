@@ -1052,7 +1052,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The unified top bar (#46) is its own surface now (BarLayer, Phase 2
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
-        # on self.bar_layer; look.set_icon_sheet bumps its cache gen via bar_layer.invalidate().
+        # on self.bar_layer; a look change reaches its strips through ws.look.look_gen.
         self.bar_layer = BarLayer(self, NAMES)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.

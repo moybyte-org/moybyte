@@ -448,7 +448,7 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
         calls[0] += 1
         return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
-    ws.look.set_icon_sheet(ws.look.icon_sheet)              # bumps _bar_cache_gen -> key changes
+    ws.look.set_icon_sheet(ws.look.icon_sheet)              # moves look_gen -> key changes
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
     for _ in range(3):

@@ -6,6 +6,7 @@
 #   bench_repaint    --repaint: surfaces repainted every frame
 #   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
 #   bench_home       --home: the home's carousel scenarios (step 7b)
+#   idle_edit        --edit: an in-place theme re-install on an idle screen
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -37,6 +38,12 @@ any board: idle, a slow drag, a fling and the frames it paints until idle,
 short flicks, the held-key glide (a key press every 120 ms through the home
 layer's own handler), a tab switch where the home has tabs, and idle and a
 drag over a live home wallpaper.
+
+`--edit` benches the in-place theme edit alone (docs/theming_2026-09.md §9,
+phase 6 step 1; also the default run's, after desk idle): a package over the
+live theme is installed and picked, then re-installed under its own name with
+one role changed on the idle screen -- one repaint, then idle zero. An image
+without `install_theme` re-applies its live theme under the same name instead.
 
 `--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
 size and a synthetic focus-band frame into the canvas the home draws into,
@@ -211,6 +218,52 @@ def pick_layout(b, bars):
     print("  layout: %r" % (pyval(b, "ws.look.bars"),))
 
 
+EDIT_SETUP = """
+import json
+ws._edit_base = ws.look.theme_name
+ws._edit_ink = ws.theme_colors['accent']
+def _edit(k):
+    src = json.dumps({'format': 1, 'name': 'bench-edit', 'inherits': ws._edit_base,
+                      'colors': {ws.look.theme_variant: {'accent': (ws._edit_ink + k) % 64}}})
+    if hasattr(ws.look, 'install_theme'):
+        ws._edit_rc = ws.look.install_theme(src.encode())[0]
+    else:
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+        ws._edit_rc = None
+ws._edit = _edit
+"""
+
+
+def idle_edit(b, bench):
+    """The in-place edit on the screen the board stands on: one repaint, then
+    idle zero. Puts the live theme back after."""
+    pyexec(b, EDIT_SETUP)
+    pyexec(b, "ws._edit(9)\nif ws._edit_rc == 0: ws.look.set_theme('bench-edit', persist=False)")
+    b.drain(2.0)
+    bench.start()
+    pyexec(b, "ws._edit(18)")
+    b.drain(3.0)
+    bench.stop("p4 idle edit", "rc=%r" % (pyval(b, "ws._edit_rc"),))
+    bench.start(); b.drain(3.0); bench.stop("idle after the edit")
+    pyexec(b, "ws.look.set_theme(ws._edit_base, persist=False)\n"
+              "if hasattr(ws.look, 'uninstall_theme'): ws.look.uninstall_theme()")
+    b.drain(2.0)
+
+
+def bench_edit(b, out_path):
+    bench = Bench(b)
+    print("\n=== in-place theme edit (painted frames) ===")
+    home(b)
+    bench.start(); b.drain(3.0); bench.stop("idle before the edit")
+    idle_edit(b, bench)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
 def bench_all(b, out_path):
     bench = Bench(b)
     print("\n=== P4 panel benchmark (end-to-end frame ms) ===")
@@ -218,6 +271,7 @@ def bench_all(b, out_path):
     # -- desk ---------------------------------------------------------------
     home(b)
     bench.start(); b.drain(3.0); bench.stop("desk idle")
+    idle_edit(b, bench)
 
     # -- the desk's PROJECTS: the home in a window, on Make -----------------
     b.open("projects"); b.drain(1.0)
@@ -777,13 +831,16 @@ def main():
     ap.add_argument("--home", action="store_true",
                     help="the home's scenarios: idle, drag, fling, flicks, "
                          "the key glide, tabs, a live wallpaper")
+    ap.add_argument("--edit", action="store_true",
+                    help="the in-place theme edit alone: one repaint, then "
+                         "idle zero")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     b = board_from_args(args)
     try:
         if (not args.repaint and not args.kernel and not args.home
-                and not b.attach_only):
+                and not args.edit and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -795,6 +852,8 @@ def main():
             bench_kernel(b, args.out)
         elif args.home:
             bench_home(b, args.out)
+        elif args.edit:
+            bench_edit(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

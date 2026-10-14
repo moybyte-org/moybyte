@@ -219,9 +219,11 @@ and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
 - **The achievement overlays are EVENT-PUSH**: an unlock writes the flat kernel
   deadlines from the arm site; `_animating` and both WMs read plain ints and never
   call into `ach`/`ach_ui`.
-- **`theme_colors` stays a flat kernel REBIND on purpose** — the launcher's cache
-  keys fold `id(ws.theme_colors)`, so the rebind IS the shelf invalidation. An
-  in-place alias there would be a live bug.
+- **A look change is `ws.look.look_gen`, never an identity** — every cache whose
+  pixels read the look folds that one int (`docs/theming_2026-09.md` §6), set by
+  `Appearance.publish()`; a new cache that reads a role and keys on a dict's or
+  a sheet's `id()` goes stale on an in-place edit. `ws.theme_colors` is the flat
+  kernel attribute `set_theme` assigns; the token dicts are shared, read-only.
 - **The frame loop reaches collaborators directly, never through a forward**;
   per-card grid paths use injected BOUND methods.
 - **`_icon_cache` is CoverCache's and invalidates on a rescan**, BEFORE

@@ -179,6 +179,7 @@ class _Win:
                                       # painted past it) -> the next paint must
                                       # render live before the content freeze
                                       # (_content_static) may reuse it
+        self._look_gen = -1           # the look buf's content was drawn under
 
     def content_rect(self):
         """The inner rect the content occupies (below the WM title strip)."""
@@ -811,6 +812,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         try:
             content.draw(0)
             win._buf_stale = False
+            win._look_gen = self.ws.look.look_gen
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -1940,8 +1942,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win._buf_stale guards the buffer itself: a fresh/rebuilt buffer or a
         gesture's _direct_render (which paints past the buffer straight into
         the framebuffer) leaves buf behind the truth, so the next paint
-        renders live to refill it before the freeze may resume."""
+        renders live to refill it before the freeze may resume, and
+        win._look_gen against `look_gen` re-renders a buffer drawn under an
+        older look."""
         ws = self.ws
+        gen = ws.look.look_gen
+        if win._look_gen != gen:
+            win._look_gen = gen
+            return False
         if ws._dirty or win.buf is None or win._buf_stale:
             return False
         cur = ws._ptr_state()
@@ -1985,6 +1993,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                       and self._wins.get(self._resize[0]) is win))
         if moving:
             self._win_touched = True
+        elif not focused and win._look_gen != self.ws.look.look_gen:
+            # A background window's retained buffer under an older look.
+            win._look_gen = self.ws.look.look_gen
+            self._win_touched = True
+            self._prewarm(win)
         if focused and not moving:
             # DIRECT RENDER (#155): while this window's content is being scrolled
             # or flung, draw it STRAIGHT into the framebuffer through a viewport

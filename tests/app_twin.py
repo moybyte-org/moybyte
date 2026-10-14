@@ -195,6 +195,7 @@ class App:
         self._tokens = tok
         self._names[0], self._names[1] = name, variant
         self._tgen += 1
+        return self._tgen
 
     def serve(self, role, server):
         self._servers[role] = server
