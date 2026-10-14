@@ -176,9 +176,10 @@ class Bench:
         self.rows.append(row)
         if st:
             worst = sorted(layers.items(), key=lambda kv: -kv[1])[:3]
-            print("  %-34s n=%-4d median=%-5d p90=%-5d max=%-5d  %s"
+            print("  %-34s n=%-4d median=%-5d p90=%-5d max=%-5d  %s%s"
                   % (name, st["n"], st["median"], st["p90"], st["max"],
-                     " ".join("%s=%d" % (k, v) for k, v in worst)))
+                     " ".join("%s=%d" % (k, v) for k, v in worst),
+                     "  (" + note + ")" if note else ""))
         else:
             print("  %-34s (no frames captured) %s" % (name, note))
         return row
