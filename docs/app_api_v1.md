@@ -16,7 +16,7 @@ A system APP is two artifacts:
    `"calc"`); `main.py` is a small *fallback* body an older shell runs as a
    plain cart ("UPDATE MOYBYTE TO OPEN"). The cart gives the app its launcher
    tile, title, versioned re-seed (#47), and — because it is just a cart — it
-   stays editable through the project picker like everything else.
+   stays editable on the home's Make tab like everything else.
 
 2. **A content Layer class** (one module in `runtime/`, staged to the firmware
    builds like every shared module) implementing the Layer facets plus the app
@@ -230,7 +230,7 @@ hardware while working perfectly on the host.
 
 Everything above describes a SHIPPED app -- a Layer class in `runtime/`, frozen
 into the firmware, registered from a manifest. A USER APP is the other kind: an
-ordinary `.moy` cart, editable in the project picker, that asks for shell
+ordinary `.moy` cart, editable on the home's Make tab, that asks for shell
 capabilities in its own `manifest.json` and gets them as cart globals.
 
     "moybyte": {"type": "app",
@@ -364,7 +364,7 @@ itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id i
 painted frames (a compiled app whose frames the kernel's Player drew clears it
 at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
 the next tap on the ordinary error panel whose top bar carries EDIT/CODE. The
-cart stays in the picker, because editing it is how it gets fixed.
+cart stays on Make, because editing it is how it gets fixed.
 
 The Player arms it for `type: "app"` carts only. Two small settings writes per
 open is not free, and a game that always crashes shows the panel and is not a

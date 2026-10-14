@@ -7,7 +7,7 @@ frames punctuated by hitches is exactly what reads as "smoother but not smooth".
 Averages hide that, so this records EVERY painted frame with a per-phase
 breakdown and reports the slowest ones with what dominated them.
 
-Usage:  python tools/p4_hitch.py --board p4 [--surface settings|picker]
+Usage:  python tools/p4_hitch.py --board p4 [--surface settings|projects]
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ def main():
 
             Deliberately a RESET between surfaces, not ws.go_home(): go_home on
             the desk closes every window, the Make window with it -- so
-            ws.wm._wins has no 'make' and the measurement dies with a
+            ws.wm._wins has no 'projects' and the measurement dies with a
             KeyError. A reset also keeps the two surfaces from contaminating
             each other's caches."""
             b.reset()
@@ -155,14 +155,14 @@ def main():
         report(b, "settings scroll")
 
         fresh()
-        b.open("picker")
+        b.open("projects")
         b.drain(14.0)
         b.pyexec(HOOK)
-        g = b.pyval("ws.wm._wins['make'].ctx.layout.lib_grid")
-        if g is None or "make" not in b.state()["wins"]:
-            print("\n  picker did not open as a window -- skipped")
+        g = b.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+        if g is None or "projects" not in b.state()["wins"]:
+            print("\n  the projects window did not open -- skipped")
             return 0
-        w = b.state()["wins"]["make"]
+        w = b.state()["wins"]["projects"]
         ox, oy = w[0] + 1, w[1] + 1 + w[4]
         gx, gy, gw, gh = g
         cy = oy + gy + gh // 2
@@ -172,7 +172,7 @@ def main():
         b.cmd("py setattr(ws, '_rec', True) or 1", wait_for="PY")
         for _ in range(3):
             gesture(ox + gx + gw - 40, cy, ox + gx + 60, cy)
-        report(b, "picker drag")
+        report(b, "projects window drag")
     finally:
         b.close()
     return 0

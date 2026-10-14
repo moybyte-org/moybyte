@@ -21,7 +21,7 @@ the web runner's boot + re-scan.
 
 ## What stays on the kernel, and why
 
-`_launcher_items` / `_launcher_view_items` / `_picker_items` / `_real_selected`
+`_launcher_items` / `_launcher_view_items` / `_make_items`
 are GRID PRESENTATION, not roster: each is keyed on kernel state this object has
 no business knowing -- `can_manage`, `wm.has_desk`, the registered-app list, the
 search query, the pinned pseudo tiles. They read `carts.all` like every other
@@ -123,7 +123,8 @@ class CartManager:
             ws.covers.invalidate_all()
             self.slim()                    # #66: bake the new entries' icons, mark them lazy
             ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
-            ws.picker.set_items(ws._picker_items(items))
+            if ws.projects_grid is not None:
+                ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
 
     def rescan(self):
         """Re-read the store and rebuild both shelves -- the sync push's board
@@ -256,12 +257,11 @@ class CartManager:
         self.apply(items)
         return new
 
-    def dup(self):
-        # DUP now fires from the Editor picker's zone (docs/shell_ux_v1.md: the picker
-        # manages projects, the launcher only plays) -- so it acts on the PICKER's
-        # selection, not the launcher's.
+    def dup(self, sel):
+        """COPY on the home's Make tab: duplicate the cart `sel` as the kid's own."""
         ws = self.ws
-        sel = ws._real_selected(ws.picker)
+        if sel is not None and not sel.get("path"):
+            sel = None                     # the "+ New" card is not a cart
         if not self.store.writable() or sel is None:
             return
         try:
@@ -287,15 +287,14 @@ class CartManager:
         if full is not None and full(exc):
             self.ws.notice(refusal, _ui.s("notice.store_full"), "warn")
 
-    def delete(self):
-        # Delete the OPEN cart when one is open (the sysmenu DELETE CART -- a cart opened
-        # from the picker is NOT necessarily the picker's current selection), else the
-        # picker's selection (the picker-zone DEL, docs/shell_ux_v1.md -- moved off the
-        # launcher, which no longer has a management cluster at all). Keep at least one
-        # real cart on the device.
+    def delete(self, cart=None):
+        """Delete `cart` (the Make tab's DEL, armed and confirmed), else the OPEN
+        cart (the sysmenu's DELETE CART). Keep at least one real cart on the
+        device."""
         ws = self.ws
-        target = ws.cart if (ws.cart is not None and ws.cart.get("path")) \
-            else ws._real_selected(ws.picker)
+        target = cart if cart is not None else ws.cart
+        if target is not None and not target.get("path"):
+            target = None
         if not self.store.writable() or target is None or len(self.all) <= 1:
             return
         try:

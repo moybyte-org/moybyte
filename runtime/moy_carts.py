@@ -1723,7 +1723,7 @@ def save_achievements(unlocked, root=CARTS_DIR):
 # --- cart management (create / duplicate / delete) --------------------------
 
 # A friendly starter cartridge: an editable colored dot, as a GAME project. The
-# Editor's project-picker "+ New" tile creates one of these and opens it in the Editor
+# home's Make "+ New" card creates one of these and opens it in the Editor
 # (spec shell_ux_v1.md) -- `type=="game"` so a kid's brand-new creation is a real
 # game project with "Make it mine" cards, not a wallpaper.
 NEW_TEMPLATE = {
@@ -1919,7 +1919,7 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
     # blocks.json, images/, docs/ -- lived only in the source FOLDER, so
-    # a copy used to arrive with just its code: the picker's COPY silently threw
+    # a copy used to arrive with just its code: COPY silently threw
     # away the sprite sheet, tilemap, sounds and cover art of every project it
     # duplicated. Copying the files (rather than re-serialising the loaded dict)
     # also keeps assets this module doesn't model, which is the only lossless

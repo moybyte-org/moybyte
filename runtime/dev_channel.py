@@ -1000,7 +1000,7 @@ class DevChannel:
       tap <x> <y>     a synthetic tap at canvas coords
       tap <name>      tap a named bar button (any ws.layout.<name>_btn rect)
       run [name]      select the first cart whose title matches, and run it
-      open <what>     settings|picker|appearance|wifi -- deterministic app open
+      open <what>     settings|projects|appearance|wifi -- deterministic app open
       swipe x0 y0 x1 y1 [frames]   a touch gesture through the real pointer
                       feed: press edge, held interpolation, real release
       drag [frames] [step]         grab the TOP window's title strip and
@@ -1986,7 +1986,7 @@ class DevChannel:
                 print("REMOTE open wifi")
                 return
             fn = {"settings": getattr(ws, "open_settings", None),
-                  "picker": getattr(ws, "open_picker", None)}.get(what)
+                  "projects": getattr(ws, "open_projects", None)}.get(what)
             if fn is not None:
                 fn()
                 print("REMOTE open %s" % what)

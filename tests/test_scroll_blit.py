@@ -11,7 +11,7 @@ proxy is DISPATCH COUNT, which models the device verdict and cannot flake):
   * ui.ScrollRegion's paint ring -- blit_shift only fires when the target
     framebuffer provably holds this view's pixels (consecutive paints, same
     key, canvas capability).
-  * The Library shelf + Editor picker pilots -- a blitted drag frame is
+  * The home's carousel + shelf pilots -- a blitted drag frame is
     byte-identical to a full repaint of the same state, and draws strictly
     fewer cards.
 
@@ -175,7 +175,7 @@ def test_blit_shift_rejects_a_full_view_shift_and_invalidate_clears():
     assert r.blit_shift(_Cv(), 11, key="k") is None
 
 
-# -- the shelf + picker pilots (the shared console, end to end) --------------
+# -- the carousel + shelf pilots (the shared console, end to end) ------------
 
 def _spy_scroll_rect(ws):
     calls = [0]
@@ -282,47 +282,49 @@ def test_carousel_moving_frame_restores_only_around_the_cards(tmp_path, monkeypa
     assert bw * bh - cards <= area[0] < bw * bh
 
 
-def test_picker_blit_frame_is_pixel_faithful(tmp_path):
-    """The same band contract on the second pilot surface: the Editor project
-    picker (the SAME Launcher grid over its dotted tool backdrop)."""
+def test_shelf_blit_frame_is_pixel_faithful(tmp_path):
+    """The same band contract on the second pilot surface: the home in its
+    grid arrangement (the shelf on its panel)."""
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
+    ws.set_home_arrangement("grid")
+    ws.set_home_tab("make")
     for _ in range(80):                       # settle covers; arm streak + ring
         drv.frame(1 / 30)
-    assert ws.screen == "picker"
+    assert ws.screen == "launcher"
     calls = _spy_scroll_rect(ws)
     gx, gy, gw, gh = ws.layout.lib_grid
     cx, cy = gx + gw - 10, gy + gh // 2
     lastx = _drag_frames(drv, cx, cy, 7)
-    assert ws.picker.dragging
+    assert ws.launcher.dragging
     assert calls[0] > 0
     partial = bytes(ws.sys_canvas._buf)
-    scroll = ws.picker.scroll
-    ws.editor_picker._full_streak = 0
-    ws.picker._region.invalidate()
+    scroll = ws.launcher.scroll
+    ws.launcher_layer._full_streak = 0
+    ws.launcher._region.invalidate()
     ws.mark_dirty()
     drv.touch_drag(lastx, cy)
     drv.frame(1 / 30)
-    assert ws.picker.scroll == scroll
+    assert ws.launcher.scroll == scroll
     full = bytes(ws.sys_canvas._buf)
     row = ws.sys_canvas.w * ws.layout.status_h
     assert full[row:] == partial[row:]
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.screen == "picker"              # the drag opened nothing
+    assert ws.screen == "launcher"            # the drag opened nothing
 
 
 # -- the web transport (#113 Phase 6: the scr op) ----------------------------
 
-def test_picker_blit_arms_in_a_window(tmp_path):
-    """The desktop tier's picker drag must actually SHIFT, not repaint every
+def test_shelf_blit_arms_in_a_window(tmp_path):
+    """The desk's PROJECTS window drag must actually SHIFT, not repaint every
     card (on-glass P4 regression, 2026-07-25).
 
     `WindowedWM._install` swaps a window's layout context in to draw its
-    content and swaps the ROOT context back afterwards -- for BOTH grids, so
+    content and swaps the ROOT context back afterwards -- for both card
+    models, so
     `Launcher.set_layout` runs several times per frame (measured: 1040 calls in
     4 idle seconds). It used to `invalidate()` the paint ring on every call, so
     the ring was ALWAYS empty here, blit_shift never returned a shift, and each
@@ -337,17 +339,17 @@ def test_picker_blit_arms_in_a_window(tmp_path):
                                     sys_size=(1024, 600), font_scale=2,
                                     windowed=True)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(80):                      # settle covers; arm streak + ring
         drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
-    assert win.kind == "picker"
+    win = ws.wm._wins["projects"]
+    grid = ws.projects_grid
 
     # The ring must be non-empty AFTER a frame -- the bug left it wiped.
-    assert ws.picker._region._painted, "the paint ring never survives a frame"
+    assert grid._region._painted, "the paint ring never survives a frame"
 
     shifts = [0]
-    region = ws.picker._region
+    region = grid._region
     orig = region.blit_shift
 
     def spy(cv, frame_no, key=None):
@@ -363,7 +365,7 @@ def test_picker_blit_arms_in_a_window(tmp_path):
     ox, oy = win.x + 1, win.y + 1 + win.title_h
     cx, cy = ox + gx + gw - 12, oy + gy + gh // 2
     _drag_frames(drv, cx, cy, 10)
-    assert ws.picker.dragging
+    assert grid.dragging
     assert shifts[0] > 0, "no drag frame used the scroll-as-blit path"
     drv.touch_up()
     drv.frame(1 / 30)
@@ -377,27 +379,29 @@ def test_set_layout_keeps_the_paint_ring(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
+    ws.set_home_arrangement("grid")
     for _ in range(60):
         drv.frame(1 / 30)
-    region = ws.picker._region
+    grid = ws.launcher
+    region = grid._region
     assert region._painted
     before = list(region._painted)
-    ws.picker.set_layout(ws.picker.layout)   # the per-frame context swap
+    grid.set_layout(grid.layout)             # the per-frame context swap
     assert region._painted == before, "set_layout wiped the ring"
     # ... but the geometry IS pinned: the statics key carries the grid rect.
-    key = ws.editor_picker._statics_key(ws.sys_canvas)
-    assert ws.picker.band_rect() in key
+    key = ws.launcher_layer._statics_key(ws.sys_canvas)
+    assert grid.band_rect() in key
 
 
 # -- the shared streak-advance body (#209 W3) --------------------------------
 
 def _streak_layers(tmp_path):
-    """The two grid layers that keep a consecutive-full-paint streak: the home
-    shelf and the Editor picker. Same helper, own `_statics_key`/`_statics`/
-    `_full_streak` each."""
+    """The two home layers that keep a consecutive-full-paint streak: the
+    fullscreen home and the home window. Same helper, own `_statics_key`/
+    `_statics`/`_full_streak` each."""
     ws = _ws_with_carts(tmp_path, 0)
-    return ws, (ws.launcher_layer, ws.editor_picker)
+    ws.projects_grid = ws._home_grid("grid", [])
+    return ws, (ws.launcher_layer, ws.projects_layer)
 
 
 def test_advance_streak_counts_up_to_the_retained_horizon(tmp_path):

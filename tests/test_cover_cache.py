@@ -329,7 +329,7 @@ def test_both_grids_are_wired_to_the_collaborators_bound_method(tmp_path):
     """A card's paint costs ONE call, exactly what it cost with the method on
     the kernel -- no forward, no lookup chain (architecture doc 3e)."""
     ws = build_ws(tmp_path)
-    for grid in (ws.launcher, ws.picker):
+    for grid in (ws.launcher, ws._home_grid("grid", [])):
         assert grid.cover_for.__self__ is ws.covers
         assert grid.cover_for.__func__ is type(ws.covers).cover_for
 

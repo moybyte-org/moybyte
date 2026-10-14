@@ -171,7 +171,8 @@ ws._g['_countverbs'] = _countverbs
 
 HELPER = """
 def _edit(tab, want=''):
-    items = ws.picker.items
+    ws.open_projects()
+    items = ws.projects_grid.items
     pick = -1
     for i in range(len(items)):
         if items[i].get('type') == 'new':
@@ -186,9 +187,8 @@ def _edit(tab, want=''):
             if items[i].get('type') != 'new':
                 pick = i
                 break
-    ws.picker.sel = pick
-    ws.open_picker()
-    ws.pick_selected()
+    ws.projects_grid.sel = pick
+    ws.launch_selected(ws.projects_grid)
     ws.editor_app.set_tab(tab)
     return str(items[pick].get('title'))
 def _litpx(sh, n):
@@ -298,7 +298,7 @@ def run(b, name, verb, wraps, verbs=False, reps=2, frames=30, cart=""):
     st = b.state()
     wins = st.get("wins") or {}
     if wins:
-        k = "make" if "make" in wins else list(wins)[0]
+        k = "menu" if "menu" in wins else list(wins)[0]
         w = wins[k]
         cx = w[0] + 1 + w[2] // 2
         ct = w[1] + 1 + w[4]

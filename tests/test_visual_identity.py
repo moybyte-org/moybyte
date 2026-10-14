@@ -252,7 +252,6 @@ def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
         home = _home_layer(ws)
         _select_real_cart(ws)
         assert ws.launcher.action_rects() is None
-        assert ws.picker.action_rects() is None
         assert home.zone_verbs() == ("play", "change", "search")
         ws.set_home_tab("mine")                   # nothing made yet: "+ New"
         assert home.zone_verbs() == ("new",)
@@ -261,9 +260,9 @@ def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
         ws.set_home_tab("make")
         assert home.zone_verbs() == ("new",)      # "+ New" first
         ws.launcher.sel = 1
-        assert home.zone_verbs() == ("new", "change")
+        assert home.zone_verbs() == ("new", "change", "copy", "delete")
         chips = home._zone_action_rects(ws.layout.zone_left)
-        assert set(chips) == {"new", "change"}
+        assert set(chips) == {"new", "change", "copy", "delete"}
 
 
 def test_base_tier_zone_chips_dispatch(tmp_path):
@@ -290,8 +289,9 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert set(home._zone_action_rects(ws.layout.zone_left)) == {"new"}
 
 
-def test_picker_shelf_geometry(tmp_path):
-    """The picker's shelf (the library-concept mockup): a framed panel whose
+def test_shelf_geometry(tmp_path):
+    """The home's shelf (the grid arrangement; the library-concept mockup): a
+    framed panel whose
     grid SCROLLS left-right with one TALL featured slot (column 0, spanning
     both visible rows -- the pinned "+ New" card); every other card stacks the
     columns marching right, two per column."""
@@ -313,11 +313,13 @@ def test_picker_shelf_geometry(tmp_path):
     px, py, pw, ph = lay.lib_panel                               # panel frames grid
     assert px <= gx and py <= gy and gx + gw <= px + pw and gy + gh <= py + ph
     # Vertical nav steps within a card column (the tall slot spans both rows).
-    ws.picker.sel = 1
-    ws.picker.nav2d(0, 1)
-    assert ws.picker.sel == 2
-    ws.picker.nav2d(0, -1)
-    assert ws.picker.sel == 1
+    ws.set_home_arrangement("grid")
+    ws.set_home_tab("make")
+    ws.launcher.sel = 1
+    ws.launcher.nav2d(0, 1)
+    assert ws.launcher.sel == 2
+    ws.launcher.nav2d(0, -1)
+    assert ws.launcher.sel == 1
 
 
 def test_the_home_shows_its_wallpaper_behind_the_cards(tmp_path):
@@ -536,13 +538,13 @@ class _BlitLog:
 @pytest.mark.parametrize("board", sorted(BOARD_SHELVES))
 def test_selecting_a_card_never_changes_its_covers_scale(tmp_path, board):
     """A cover that shrank on selection would read as a glitch: on every
-    board a picker card's cover is the same decode at the same scale selected
+    board a shelf card's cover is the same decode at the same scale selected
     or not (the HALF on the S3s too). Its prefetch spec does not move with the
     selection either."""
     ws = _ws(tmp_path, **BOARD_SHELVES[board])
-    ws.open_picker()
+    ws.set_home_arrangement("grid")
     ws.frame(1 / 30)
-    la = ws.picker
+    la = ws.launcher
     covered, _bare = _covered_and_bare(ws)
     i = la.items.index(covered)
     _cover_sync(ws, covered, 1)

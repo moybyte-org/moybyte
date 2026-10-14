@@ -359,11 +359,11 @@ def test_appearance_opens(board):
     assert "appearance" in st.get("order", ()), (line, st.get("order"))
 
 
-def test_picker_opens(board):
-    board.open("picker")
+def test_projects_opens(board):
+    board.open("projects")
     board.drain(6.0)              # first-open cover pop-in settles
     st = board.state()
-    assert "make" in st.get("order", ())
+    assert "projects" in st.get("order", ())
 
 
 def test_play_parks_the_windows_and_the_x_brings_them_back(board):
@@ -518,11 +518,11 @@ def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
         once per frame.
 
     Counted on the build/read side only, so this net costs nothing when healthy."""
-    board.open("picker")
+    board.open("projects")
     board.drain(16.0)                    # let the idle prefetch finish the store
-    g = board.pyval("ws.wm._wins['make'].ctx.layout.lib_grid")
-    assert g is not None, "picker did not open as a window"
-    w = board.state()["wins"]["make"]
+    g = board.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+    assert g is not None, "the projects window did not open"
+    w = board.state()["wins"]["projects"]
     ox, oy = w[0] + 1, w[1] + 1 + w[4]
     gx, gy, gw, gh = g
     cy = oy + gy + gh // 2
@@ -732,7 +732,7 @@ def test_a_lua_cart_runs_and_exits(board):
 
 def test_a_cart_runs_and_exits(board):
     """The desk tier's door: ws.exit() out, not the cart-quit flag. A `run`
-    from the tour's picker arrangement opens the cart under it, where the
+    from the tour's projects arrangement opens the cart under it, where the
     first draft's cart-quit exit did not pop -- so this board pins the launch
     and the shell's own close, while the fullscreen tiers pin the kid-facing
     flag."""

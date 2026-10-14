@@ -363,8 +363,8 @@ class ConsoleDriver:
         self.input.last_key = 0
         if self._tap:
             # click()'s release pass: lift the synthetic finger and route one
-            # more pointer pass so release-activated surfaces (the launcher/
-            # picker card grids) complete the tap within this frame() call.
+            # more pointer pass so release-activated surfaces (the home's
+            # card grids) complete the tap within this frame() call.
             # The #44 gate's pointer snapshot never samples this intermediate
             # state (the next click restores it exactly), so mark the repaint
             # explicitly -- whatever the release changed must reach the pixels.

@@ -245,50 +245,46 @@ def test_launcher_bar_menu_opens_settings(tmp_path):
     assert ws.screen == "settings"
 
 
-# NEW/DUP/DEL moved off the launcher bar into the Editor picker's zone
-# (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for MANAGING
-# projects) -- see tests/test_desktop_shell.py::test_launcher_home_no_longer_manages_carts
-# for the launcher-side regression guard.
+# NEW/CHANGE/COPY/DEL are the home's Make-tab verbs (docs/shell_layout_2026-10.md
+# §12: Make is the one projects list) -- chips in the lent zone, tapped
+# through the bar.
 
-def test_picker_bar_dup_del_when_manageable(tmp_path):
-    """Cart management moved off the launcher home into the Editor picker's lent
-    zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for
-    MANAGING projects). DUP/DEL icons fire there when can_manage: DUP duplicates
-    the picker's SELECTED cart immediately (a copy only ADDS, so it needs no
-    guard); DEL is two-tap guarded -- the first tap arms, only the second deletes
-    (see test_editor_picker.py for the "DELETE? TAP AGAIN" prompt + disarm rules)."""
+def _make_chip(ws, verb):
+    return _center(ws.launcher_layer._zone_action_rects(ws.layout.zone_left)[verb])
+
+
+def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
+    """COPY duplicates the selected project at once (a copy only ADDS); DEL is
+    two-tap guarded -- the first tap arms SURE?, only the second deletes."""
     from runtime import host_app
     ws = _ws(tmp_path)
     assert ws.can_manage
     drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
-    n0 = len(ws.picker.items)
-    drv.click(*_center(ws.layout.dup_btn))           # DUP
+    ws.set_home_tab("make")
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0 + 1
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
-    drv.click(*_center(ws.layout.del_btn))           # DEL tap 1: arms, does NOT delete
+    n0 = len(ws.launcher.items)
+    drv.click(*_make_chip(ws, "copy"))
     drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0 + 1
-    drv.click(*_center(ws.layout.del_btn))           # DEL tap 2: confirms
+    assert len(ws.launcher.items) == n0 + 1
+    drv.click(*_make_chip(ws, "delete"))             # DEL tap 1: arms
     drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0
+    assert len(ws.launcher.items) == n0 + 1
+    drv.click(*_make_chip(ws, "sure"))               # DEL tap 2: confirms
+    drv.frame(1 / 30)
+    assert len(ws.launcher.items) == n0
 
 
-def test_picker_bar_management_hidden_when_read_only(tmp_path):
-    """With writes disabled (can_manage False), a tap on the picker's DUP icon
-    position does nothing -- the management cluster isn't active (it's not drawn
-    either)."""
-    from runtime import host_app
+def test_make_tab_management_hidden_when_read_only(tmp_path):
+    """With writes disabled (can_manage False) Make carries no verb: nothing
+    to make, copy or delete, and no "+ New" card."""
     ws = _ws(tmp_path)
     ws.can_manage = False
-    drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
-    n0 = len(ws.picker.items)
-    drv.click(*_center(ws.layout.dup_btn))
-    drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0
+    ws.set_home_tab("make")
+    assert all(it.get("path") for it in ws.launcher.items)
+    for i in range(min(3, len(ws.launcher.items))):
+        ws.launcher.sel = i
+        assert ws.launcher_layer.zone_verbs() == ()
 
 
 # -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the WIFI panel ----
@@ -643,15 +639,10 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
     ws.launcher.sel = 0
     ws.open_in_editor()
     drv.frame(1 / 30)
-    paint_i = [t for t, _g in EA._ZONE_TABS].index("paint")
-    x = BL._ZONE_LEFT_GAME[0] + paint_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
-    y = BL._ZONE_LEFT_GAME[1] + BL._BAR_ICON // 2
-    drv.click(x, y)
+    drv.click(*_game_zone_center("paint", ws))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "paint"
-    play_i = [t for t, _g in EA._ZONE_TABS].index(None)   # PLAY (the ladder's last icon)
-    x = BL._ZONE_LEFT_GAME[0] + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
-    drv.click(x, y)
+    drv.click(*_game_zone_center(None, ws))   # PLAY (the ladder's last icon)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
 
@@ -662,13 +653,19 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
 # layout.zone_left), so the tab-ladder icons hit-test in system coords (no
 # _game_xy translation).
 
+def _ladder_center(ws, rect, target):
+    """Center of the ladder icon `target` in the lent `rect`, through the
+    geometry the draw and the tap share (the open tab's chip is wider)."""
+    for tab, _g, (x, y, w, h) in ws.editor_app._ladder_rects(rect):
+        if tab == target:
+            return (x + w // 2, y + h // 2)
+    raise AssertionError("not on the ladder: %r" % (target,))
+
+
 def _sys_zone_center(ws, target):
     """Center of the tab-ladder / PLAY icon `target` on the SYSTEM-canvas bar
     (the code + blocks tabs). `target` is a tab name or None (PLAY)."""
-    from runtime import editor_app as EA, bar_layer as BL
-    i = [t for t, _g in EA._ZONE_TABS].index(target)
-    zx, zy, _zw, _zh = ws.layout.zone_left
-    return (zx + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2, zy + BL._BAR_ICON // 2)
+    return _ladder_center(ws, ws.layout.zone_left, target)
 
 
 def test_code_tab_shows_unified_bar_ladder_switches(tmp_path):
@@ -852,13 +849,11 @@ def test_blocks_tab_play_hard_commits_via_save_blocks(tmp_path):
     assert calls == [1], "PLAY on the blocks tab must reach save_blocks"
 
 
-def _game_zone_center(target):
+def _game_zone_center(target, ws):
     """Center of the ladder/PLAY icon `target` on the GAME-canvas bar
     (cards/paint/map/music). `target` is a tab name or None (PLAY)."""
-    from runtime import editor_app as EA, bar_layer as BL
-    i = [t for t, _g in EA._ZONE_TABS].index(target)
-    return (BL._ZONE_LEFT_GAME[0] + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2,
-            BL._ZONE_LEFT_GAME[1] + BL._BAR_ICON // 2)
+    from runtime import bar_layer as BL
+    return _ladder_center(ws, BL._ZONE_LEFT_GAME, target)
 
 
 def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
@@ -872,12 +867,12 @@ def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     ws._open_music()
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "music"
-    drv.click(*_game_zone_center("paint"))       # ladder: music -> paint
+    drv.click(*_game_zone_center("paint", ws))       # ladder: music -> paint
     drv.frame(1 / 30)
     assert ws.menu_view == "paint"
     ws._open_music()
     drv.frame(1 / 30)
-    drv.click(*_game_zone_center(None))          # PLAY
+    drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
     assert ws.screen == "desktop"
 
@@ -898,7 +893,7 @@ def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
     calls = []
     orig = ws.save_sounds
     ws.save_sounds = lambda: (calls.append(1), orig())[-1]
-    drv.click(*_game_zone_center(None))          # PLAY
+    drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
     assert calls == [1], "PLAY on the music tab must reach save_sounds"
 
@@ -946,7 +941,7 @@ def test_config_tab_play_runs_and_persists_config(tmp_path):
     saved = []
     orig = ws._save_config
     ws._save_config = lambda: (saved.append(1), orig())[-1]
-    drv.click(*_game_zone_center(None))          # PLAY (game-canvas bar)
+    drv.click(*_game_zone_center(None, ws))          # PLAY (game-canvas bar)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
     assert saved == [1], "PLAY on Config must persist config (the old GO)"

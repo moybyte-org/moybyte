@@ -32,7 +32,7 @@ SIZES = {
 
 # Fields of chrome.Layout that are BAR rects, in bar coordinates.
 BAR_LOCAL = {"batt_btn", "wifi_btn", "sysmenu_btn", "context_x_btn",
-             "new_btn", "dup_btn", "del_btn", "zone_left"}
+             "zone_left"}
 
 EDITOR_TABS = ("code", "blocks", "paint", "map", "music", "cards")
 

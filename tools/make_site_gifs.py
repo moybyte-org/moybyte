@@ -41,7 +41,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from runtime import host_app            # noqa: E402
 from runtime import host_canvas         # noqa: E402  (the 565 -> index readout)
-from runtime import bar_layer as BAR    # noqa: E402  (the bar's lent-zone rect)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
 from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
 from runtime import ui as UI            # noqa: E402  (labeled tab-row geometry)
@@ -54,7 +53,7 @@ BACKSPACE = 0x08
 # The WINDOWED desktop tier (--windowed): where the Editor window is parked so the
 # desk's icon column, the wallpaper and the taskbar all stay in frame -- the whole
 # point of recording this tier is the desktop AROUND the app, so the default
-# near-fullscreen "Make" window is nudged in. And where the playtest window lands
+# near-fullscreen Editor window is nudged in. And where the playtest window lands
 # on PLAY, so the Editor stays readable beside it (spec Section 3's canonical
 # picture) instead of the cascade burying it.
 # The size is chosen, not arbitrary: below ~660px of window width the Editor's
@@ -201,14 +200,14 @@ class Recorder:
 
     def open_editor(self, cart):
         """The Make tab -> pick destination, without the home: land the Editor on the cart's Config tab (spec Section 6).
-        On the windowed tier this also parks the "Make" window off the desk's
+        On the windowed tier this also parks the Editor's window off the desk's
         icon column so the desktop stays in frame."""
         self.ws.open_in_editor(cart)
         if not self.windowed:
             return
         wm = self.ws.wm
         wm._sync_windows()
-        win = wm._wins["make"]
+        win = wm._wins["menu"]
         x, y, w, h = _EDITOR_WIN
         win.x, win.y = x, y
         wm._resize_window(win, w, h)     # rebuilds the buffer + layout context
@@ -224,7 +223,7 @@ class Recorder:
     # place that seam lives -- every helper goes through it, so the scenes below
     # are written once and run on both tiers.
 
-    def local(self, fn, key="make"):
+    def local(self, fn, key="menu"):
         """Resolve `fn()` -> (x, y) (or a rect) in the active window's layout
         context and translate it to desktop coordinates. A pass-through on the
         fullscreen tier."""
@@ -245,23 +244,19 @@ class Recorder:
 
     def _zone_rect_local(self, tab):
         """The Editor's lent top-bar zone resolves two ways: the frozen 320x240
-        icon LADDER (PROJECTS / the seven tabs / UNDO / REDO / PLAY), or -- on any
+        icon LADDER (the seven tabs / UNDO / REDO / PLAY), or -- on any
         roomier surface, which is every window on the desktop tier -- the labeled
         CHIP row (`ui.tab_row`). Ask the same geometry the tap dispatch uses."""
         ws = self.ws
         rect = ws.bar_layer._zone_rect("menu")
         if getattr(ws.layout, "_base", True):
-            x0, y0, _w, h = rect
-            ic = h if h > 0 else BAR._BAR_ICON
-            for i, (name, _glyph) in enumerate(EDA._ZONE_TABS):
+            for name, _glyph, r in ws.editor_app._ladder_rects(rect):
                 if name == tab:
-                    return (x0 + i * ic, y0, ic, ic)
+                    return r
             raise KeyError(tab)
-        proj, tabs_area, play_r = ws.editor_app._zone_parts(rect)
+        tabs_area, play_r = ws.editor_app._zone_parts(rect)
         if tab is None:
             return play_r
-        if tab == EDA._ZONE_PROJECTS:
-            return proj
         fs = max(1, rect[3] // 16)
         slim = [(tid, label) for tid, label, _ic in EDA._TAB_CHIPS]
         for tid, r, _labels_on in UI.tab_row_rects(tabs_area, slim, fs):
@@ -364,7 +359,7 @@ class Recorder:
 
     def _win_code_rows(self):
         wm = self.ws.wm
-        wm._install(wm._wins["make"].ctx)
+        wm._install(wm._wins["menu"].ctx)
         try:
             return self.ws.code_layout.rows
         finally:

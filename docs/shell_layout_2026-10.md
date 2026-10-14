@@ -39,6 +39,9 @@ memory and compositors); this doc cites, it does not copy.
 | L12 | **The input model assumes a keyboard on every board** (owner, 2026-10-13): the T-Deck's own, a BLE keyboard on the Guition S3 and both P4s. Touch is supplementary -- a fullscreen game on a P4 is left by the keyboard alone -- and there is no on-screen home button: it would spend bar space on what the HOME key does | §4, §15 |
 | L13 | **Every bar widget is compact** (owner, 2026-10-14: "I only want the calendar to pop out"; "that should be the default for every widget, why would we want giant bars?"): an icon or a short value. Anything bigger opens as its component -- the popover in desktop mode, the fullscreen page in console mode -- and no widget is ever docked large in a bar, so a bar's `size` is a slim range, 16..32. Side bars stay, as thin bars | §4, §5, §8 |
 | L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default) or `grid`, `icons` planned | §5, §12 |
+| L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
+| L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
+| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, always the `grid` arrangement whatever the fullscreen home's, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window | §3, §12 |
 
 ## 2. What exists, read against this doc
 
@@ -120,7 +123,8 @@ memory and compositors); this doc cites, it does not copy.
   the `_lib_cache` of decoded covers, the pinned Make tile; covers are
   RGB565 bakes blitted at an integer scale, `_draw_cover`/`_cover_scale`).
   `Launcher.sel` bumps the zone generation, so a selection change re-renders
-  the bar. `ws.picker` is a second `Launcher` over the editable carts.
+  the bar. The home window's card model, `ws.projects_grid`, is a second
+  `Launcher`, minted on the desk's first PROJECTS (step 7c).
   `sspr` (`device/device_canvas.py`) scales INDEX sheets; the
   arbitrary-ratio RGB565 blit is `moy_gfx.blit565_resize` (step 7a).
 - **One cart runs at a time** (#73): moycore's single run slot
@@ -605,10 +609,10 @@ active one (a switch would rewrite its `inherits`).
 has no home of its own — its root is the desk, and PLAY enters console mode
 (§3). So there is one home component on every board, drawn by one layer, in
 an **arrangement** the layout's `home` key picks (L14, owner 2026-10-14): the
-`carousel` (the default, below) or the `grid` -- the shelf the picker draws,
-its old two-row card grid on a panel, with the same tab row (in the panel's
-header), the same sources, taps and bar-zone verbs, and no Make tile (a tall
-"+ New" heads the Make tab, as on the picker). A small icon-only grid
+`carousel` (the default, below) or the `grid` -- the shelf, its two-row card
+grid on a panel, with the same tab row (in the panel's header), the same
+sources, taps and bar-zone verbs, and no Make tile (a tall "+ New" heads the
+Make tab). A small icon-only grid
 (`icons`, Nintendo-style) is planned, not built. The carousel:
 `LauncherHomeLayer` becomes it, the `Launcher` shelf engine under a **tab
 row** (`ui.tab_row`, a toolkit kind, drawn through C) with four sources. One
@@ -620,18 +624,38 @@ layouts; L0: not set in stone) are at
 | tab | source | tap (console mode, every board) | verbs in `zone` |
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
-| Mine | the kid's own carts — `ws.picker`'s list | run | PLAY, CHANGE |
+| Mine | the kid's own carts | run | PLAY, CHANGE |
 | Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
-| Make | `ws.picker`'s list with its "+ New" first (owner, 2026-10-13) | the Editor fullscreen, pushed | NEW, CHANGE |
+| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor fullscreen, pushed | NEW, CHANGE, COPY, DEL (two taps: DEL arms SURE?) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
 is Mine's, not Games'. Mine and Make hold the same carts under the two
 personas of `docs/shell_ux_v1.md` §4 — a tap on Mine plays, a tap on Make
 edits (owner, 2026-10-13) — which narrows that section's "a launcher tap
-always RUNS" to the three tabs that launch (§16). The picker instance stays
-as the desk's Make window content in desktop mode. The windowed tier's
+always RUNS" to the three tabs that launch (§16). The windowed tier's
 separate games-only Library is gone: the Games tab excludes apps and the
 Apps tab holds them, on every board.
+
+**One projects list** (owner, 2026-10-14; L15-L17). The project picker is
+deleted on every tier: the Make tab is the list, and COPY and DEL, which
+were the picker's, are Make's verbs. The Editor's bar carries no way to
+another project; its X is the back-stack's pop, so it lands on the home on
+the tab and card the Editor was opened from (CHANGE works from any tab). On
+the T-Deck's narrow bar the room the button left goes to the open tab's
+name, on its chip, where the whole ladder still fits the zone.
+
+**The home in a window.** The desk's PROJECTS opens the same component in a
+desktop-mode window (`HomeWindowLayer`, kind `projects`): on its Make tab
+on every open, always the `grid` arrangement whatever the layout's `home`,
+over its own card model (`ws.projects_grid`), so the fullscreen home's tab
+and card are untouched. It is a normal window -- it moves, resizes,
+minimises to a chip; its X and B close it alone and never switch modes. It
+lays out in the window's content rect through the window's layout context
+(step 3's machinery), its backdrop the panel field rather than the
+wallpaper, and its drag rides `_drag_partial` and the WM's content-gesture
+path. Every pick opens what it opens as a window above it: a Make project
+the Editor, a Games cart the player, an Apps entry its app; the Editor's
+window X closes back to it. SEARCH is the fullscreen home's verb alone.
 
 **Navigation.** Touch: tap a tab, drag or fling the carousel, tap the centre
 card or a `zone` chip. T-Deck: left/right move the carousel by a card with
@@ -719,7 +743,8 @@ every step; the steps that ADD a config say which.
 | 5 — bars on any edge, slots, cells (landed 2026-10-14) | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
 | 6 — the popover layer and the components (landed 2026-10-14) | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their two containers; the wifi lease released on every close; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_popovers` (each widget's popover over the desk), `tdeck_320x240_fs1_widget_pages` (console mode's page for each); `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
 | 7a — the scaled-blit kernel (landed 2026-10-14) | the nearest-neighbour RGB565 scaled blit in `moy_gfx`, host and boards | a micro-bench of the focus band's three blits on all four boards, to #66, before 7b starts; the board module answers the host's pixels |
-| 7b — the home | the tab row and four sources; the carousel with the animated centre card; `sel` out of the moving shift key; the key glide as a fling; the Make tile and the Library exclusion go; the per-board motion verdict | ONE named re-baseline of the home rows on every config, with before/after renders; `library idle` zero; the fling, flick, glide and tab-switch scenarios on every board with absolute p90s named per board; the Guition P4 with the band damage of step 2; `tests/test_launcher_scroll.py`, `test_home_retained_frame.py`, `test_launcher_search_favorites.py` hold; `tests/test_desktop_shell.py` gains PLAY reaching the tabbed home in console mode |
+| 7b — the home (landed 2026-10-14) | the tab row and four sources; the carousel with the animated centre card; `sel` out of the moving shift key; the key glide as a fling; the Make tile and the Library exclusion go; the per-board motion verdict | ONE named re-baseline of the home rows on every config, with before/after renders; `library idle` zero; the fling, flick, glide and tab-switch scenarios on every board with absolute p90s named per board; the Guition P4 with the band damage of step 2; `tests/test_launcher_scroll.py`, `test_home_retained_frame.py`, `test_launcher_search_favorites.py` hold; `tests/test_desktop_shell.py` gains PLAY reaching the tabbed home in console mode |
+| 7c — one projects list (L15-L17) | the project picker deleted on every tier (`EditorPickerLayer`, `ws.picker`, the `picker` kind and its goldens); COPY and DEL onto Make; the Editor bar's PROJECTS button gone, the narrow bar naming the open tab; the window groups gone (one window per kind); the desk's PROJECTS opening `HomeWindowLayer` | ONE named re-baseline: the `picker` row deleted on the 15 configs that had it; every `editor_*` row (the bar); the `app_*` rows of the 8 desktop-mode P4 configs (the Editor's window shows beneath their cascade); a NEW `desk_window_projects` row on those 8; `tdeck_320x240_fs1_homegrid`'s four home rows (the grid arrangement's tab plate moved clear of the shelf band, which a drag frame refills); `tests/test_projects_list.py`; the P4 desk bench's "projects window drag-scroll" against the picker's drag row, and the T-Deck `--repaint` Editor tabs, to #66 |
 | phase end | — | a board pass on every attached board (`tools/board.py pass tdeck guition_s3 p4 guition_p4`), the web through `tools/preflight.sh --web`; a board this desk lacks is recorded as not run |
 
 The order: 1 makes the mode real before anything lays out against it; 2 is
@@ -856,13 +881,14 @@ The step named in the last column corrects the claim where it stands:
 | "a minimal left-anchored dropdown … the primitive the top-bar system menu is built on"; an overlay disables the quiet stack | `runtime/widgets.py`'s `Popup` comment, `runtime/layers.py`'s `sysmenu` layer, `runtime/wm_windowed.py`'s quiet-frame comments | step 6 |
 | "the standalone moybyte.wifi.moy tool cart remains the launcher-grid path"; "on the fullscreen tiers it launches the moybyte.wifi.moy tool"; `launch_wifi_tool`'s "find the moybyte.wifi.moy tool in the launcher store, SELECT it, and RUN it"; the cart in the seed set and the lists that name it | `docs/shell_ux_v1.md` §10, `runtime/bar_layer.py`'s wifi-tap comment, `runtime/console.py`'s `launch_wifi_tool` docstring, `runtime/moy_carts.py`, `runtime/player.py`, `tests/test_top_bar.py`, `tests/test_wm_windowed.py`, `system_carts/` | step 6 |
 | "the LIBRARY is the full-screen launch surface"; the games-only Library and "system-app carts leave its shelf"; "the pinned Make tile"; covers at an integer scale; "a launcher tap always RUNS" (true of three tabs, not Make) | `runtime/wm_windowed.py`, `runtime/README.md` rows for `wm_windowed.py` and `launcher_layer.py`, `runtime/launcher_layer.py`, `docs/shell_ux_v1.md` §4 | step 7b |
+| "the picker"/"the project picker" as the place projects are managed; the Editor's PROJECTS button; "the picker + Editor share one Make window"; the `open picker` dev-channel word | `docs/shell_ux_v1.md` §4, §6 and §9, `docs/app_api_v1.md`, `docs/os_voice_v1.md`, `docs/visual_identity_v1.md`, `docs/native_kernel_2026-09.md`, `runtime/README.md`, `.claude/rules/shell.md`, `.claude/rules/testing.md`, `firmware/esp32_p4_wifi6_touch_lcd_7b/README.md`, `runtime/wm_windowed.py`, `runtime/editor_app.py` | step 7c |
 | D5's "a theme sets the default … window mode" | `docs/theming_2026-09.md` §1 | this doc: the window mode is the per-window button, and D5's layout half is the bars (corrected there by step 4) |
 
 ## 17. The owner's answers (2026-10-13)
 
 | question | ruling | applied in |
 |---|---|---|
-| the Make tab | the picker's list, a tap edits | §12 |
+| the Make tab | "+ New" and every editable cart, a tap edits | §12 |
 | the carousel's centre card | larger, and animated through the centre in motion, not only at rest | §12, L9 |
 | the default seed's bars | today's one bar | §5, example 1 |
 | the desk icon column | kept beside the home | §3 |
@@ -878,6 +904,9 @@ The step named in the last column corrects the claim where it stands:
 | the home's arrangements (2026-10-14) | carousel (default), the old big grid, later a small icon-only grid; "we don't have to do it now": `home: carousel | grid` built, `icons` planned | L14, §5, §12 |
 | giant bars (2026-10-14) | "that should be the default for every widget": every widget is compact, anything bigger opens; `size` capped at 32 | L13, §5, §15 |
 | how far the bars reach | global: every surface, the running tool/app included, lays out off `content_rect()`, migrated in step 3b; it saves the most space | §7, §13 step 3b, §15 |
+| the project picker (2026-10-14) | deleted on every tier; the Make tab is the one projects list | L15, §12, §13 step 7c |
+| the Editor's PROJECTS button (2026-10-14) | removed; the X backs out one level, to wherever the Editor was opened from | L16, §12 |
+| the desk's PROJECTS (2026-10-14) | the home in a normal window, on Make, always the grid arrangement; picks open as windows | L17, §12 |
 
 Nothing is pending the owner.
 

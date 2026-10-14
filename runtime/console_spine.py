@@ -69,9 +69,9 @@ class SpineVerbs:
         returning False, which is the same answer taken on the path that also
         records the strike. This is the shell-vocabulary query (is_user_app +
         the title-slug id in one call): `tests/test_user_apps.py` asserts
-        against it, and it is half of what the deferred picker BADGE needs
-        (docs/history/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays in
-        the Editor picker either way, because editing it is how it gets
+        against it, and it is half of what the deferred Make-tab BADGE needs
+        (docs/history/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays on
+        the home's Make tab either way, because editing it is how it gets
         fixed."""
         if not self.is_user_app(cart):
             return False
@@ -357,14 +357,12 @@ class SpineVerbs:
         hook = getattr(self.wm, "on_app_registered", None)
         if hook is not None:
             hook(app)
-        # The picker HIDES carts an app claims (_picker_items, temporary until
-        # #181), but apps register AFTER the store scan builds the grid -- so
-        # re-derive it here or the first-built grid keeps the app carts it was
-        # built without knowing about. Cheap: a handful of app registrations at
-        # boot, each a list rebuild over the already-scanned carts.
-        _carts = getattr(self, "carts", None)
-        if _carts is not None and _carts.all and getattr(self, "picker", None):
-            self.picker.set_items(self._picker_items(_carts.all))
+        # Make HIDES carts an app claims (_make_items, temporary until #181),
+        # and an app can register after the home window's grid was built: re-
+        # derive it, or it keeps the app carts it was built without knowing about.
+        _g = getattr(self, "projects_grid", None)
+        if _g is not None:
+            _g.set_items(self._launcher_view_items(_g))
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None."""

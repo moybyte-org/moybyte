@@ -597,7 +597,7 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
     ws.frame(1 / 60)                              # no tick: the edge is kept
     assert "a" in ws.input.kept_names()
     ws.input.set_held("a", False)
-    ws.open_picker()                              # a shell surface over the game
+    ws.open_settings()                            # a shell surface over the game
     assert not ws.wm.top_is_player()
     ws.input.begin_frame()
     ws.frame(1 / 60)

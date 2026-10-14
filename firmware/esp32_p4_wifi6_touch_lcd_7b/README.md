@@ -73,7 +73,7 @@ starves under the desktop, unlike the T-Deck), so a host script can drive the
 UI while watching the glass:
 
 - `tap <x> <y>` / `tap sysmenu` — synthetic tap at system coords / a named bar button
-- `open settings|picker` — pop an app window deterministically
+- `open settings|projects` — pop an app window deterministically
 - `run <name>` — select the first cart whose title matches and RUN it
 - `drag [frames] [step]` — grab the top window's title strip and oscillate it (step = px/frame amplitude scale, default 6; 30 ≈ a violent finger drag)
 - `cache 0|1` — A/B the drag backdrop cache

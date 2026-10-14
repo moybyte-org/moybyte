@@ -387,11 +387,11 @@ def test_settings_rows_fit_or_scroll(board):
         assert (st["settings"]["set_top"] or 0) > 0, st["settings"]
 
 
-def test_picker_opens(board):
-    board.open("picker")
+def test_projects_opens(board):
+    board.open("projects")
     board.drain(6.0)              # first-open cover pop-in settles
     st = board.state()
-    assert "make" in st.get("order", ())
+    assert "projects" in st.get("order", ())
 
 
 def test_window_buffers_are_single_retained_surfaces(board):

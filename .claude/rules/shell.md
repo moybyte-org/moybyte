@@ -54,13 +54,16 @@ to whoever called it.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
   (`docs/shell_layout_2026-10.md` §12) has four tabs, and a tap on Games, Mine or
   Apps **always RUNS the cart** (an app's opens the app) — no mode, no type
-  dispatch; a tap on **Make** EDITS (the picker's list, ＋New first). The Editor
-  **project-picker** (the desk's PROJECTS) owns project management (＋New / Copy /
-  Delete — delete is a two-tap confirm); the home has no copy/delete.
+  dispatch; a tap on **Make** EDITS. **Make is the ONE projects list** (owner,
+  2026-10-14): there is no project picker on any tier and no PROJECTS button
+  on the Editor's bar (its X pops back to where it was opened from); Make's
+  verbs are ＋New / CHANGE / COPY / DEL (DEL a two-tap confirm). The desk's
+  PROJECTS is the same home in a window (`HomeWindowLayer`), always the grid
+  arrangement, on Make; a pick there opens its window above it.
   **Wallpapers are backdrop-only**: on none of the tabs that run, chosen in the **Appearance app**
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
-  still editable via the picker.
+  still editable on Make.
 - **Lay out in the content rect, never under a bar's rows.** A surface under
   the host's bar takes its geometry from its layout's `cx`/`cy`/`cw`/`ch`
   (`layout_base.content_of`, the function the bar itself is placed by), never
@@ -116,7 +119,7 @@ to whoever called it.
     to read, so it caches to disk; a cover (`cover.png`, SPEC.md 3.6) is a few KB
     of file and a native decode, so `runtime/cover_cache.py` keeps the FILE and
     ONE decoded 128x128 base in RAM (and its 64x64 half) and draws it scaled --
-    the picker at a whole-number scale, the home's cards at any ratio through
+    the shelf at a whole-number scale, the carousel's cards at any ratio through
     `blit565_resize`, one call a card -- with no per-size variants
     (docs/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**

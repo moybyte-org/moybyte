@@ -310,8 +310,8 @@ class Layout(LayoutBase):
         self.icon_y0 = self.cy + 8 * fs
         self.grid_bottom = bottom - 4 * fs           # launcher grid floor
         self.icon_x0 = self.cx + _ICON_X0 * fs
-        # The picker's SHELF (visual identity v1's library concept mockup) on
-        # EVERY tier -- the T-Deck's 320x240 baseline included (the home's
+        # The home's grid arrangement, the SHELF (visual identity v1's library
+        # concept mockup), on EVERY tier -- the T-Deck's 320x240 baseline included (the home's
         # carousel lays itself out in launcher_layer.Carousel). A card grid that
         # SCROLLS continuously LEFT-RIGHT (owner call, 2026-07-13: a shelf slides
         # sideways; no pages): slot 0 is the ONE tall
@@ -390,16 +390,6 @@ class Layout(LayoutBase):
         self.clock_x = clock[0] if clock is not None else None
         zone = self._cell("zone") or (edge, _BAR_Y, 0, ic)
         self.zone_left = zone
-
-        # -- in the lent left zone: the Editor picker's DUP/DEL over its
-        # selected cart (new_btn's slot is unused: "+ New" is a pinned grid
-        # tile, not a bar icon), then its title up to the zone's end.
-        self.new_btn = (zone[0], zone[1], ic, ic)
-        self.dup_btn = (self.new_btn[0] + stride, zone[1], ic, ic)
-        self.del_btn = (self.dup_btn[0] + stride, zone[1], ic, ic)
-        self.status_name_x = self.del_btn[0] + self.del_btn[2] + edge
-        self.status_name_maxc = max(
-            4, (zone[0] + zone[2] - self.status_name_x) // self.font_w)
 
         # -- scroll nudge arrows (the pager's successors) ----------------------
         # Boxed left/right arrow buttons in the Library panel footer's corners:

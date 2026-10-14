@@ -345,12 +345,12 @@ def test_picking_it_again_is_try_again(tmp_path, capsys):
 
 def test_a_struck_out_wallpaper_stays_playable_and_editable(tmp_path):
     """The strikes are the WALLPAPER role's: tapped, the cart runs (and shows
-    its own crash), and the picker still offers it for editing."""
+    its own crash), and Make still offers it for editing."""
     ws = _strike_out(tmp_path, "boom", CRASH_SRC)
     cart = _cart(ws, "boom")
     assert ws.app_guard.strikes("boom") == 0
     assert ws.cart_broken(cart) is False
-    titles = [it.get("title") for it in ws._picker_items(ws.carts.all)]
+    titles = [it.get("title") for it in ws._make_items(ws.carts.all)]
     assert "Boom" in titles
     open_cart(ws, "Boom")
     assert ws.player.cart_error is not None

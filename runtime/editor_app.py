@@ -58,17 +58,19 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 # The Editor's lent left zone (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46
-# zoned bar): PROJECTS (back to the picker) + the tab ladder + UNDO/REDO + PLAY, in
-# the spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map
-# -> Music -> UNDO -> REDO -> PLAY), rendered as icons inside the rect the bar lends
-# it. Each entry is (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what
-# EditorApp.tab equals when that icon's destination is showing (so draw_zone can
-# highlight it). PROJECTS (_ZONE_PROJECTS -> open_picker, edit another project) and
+# zoned bar): the tab ladder + UNDO/REDO + PLAY, in the spec Section 6 order
+# (Config -> Blocks -> Code -> Sprites -> Map -> Scene -> Music -> UNDO -> REDO ->
+# PLAY), rendered as icons inside the rect the bar lends it. Each entry is
+# (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what EditorApp.tab equals
+# when that icon's destination is showing (so draw_zone can highlight it).
 # UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.history.undo()/redo(), #88) are ACTIONS, not
-# destinations, so they're never highlighted; so is PLAY (None).
+# destinations, so they're never highlighted; so is PLAY (None). There is no way to
+# another project on the bar: the Editor's X backs out one level, to wherever it
+# was opened from -- the home's Make tab is the one projects list
+# (docs/shell_layout_2026-10.md §12).
 #
 # SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
-# an idle-typing debounce commits mid-edit, and every hard exit (PLAY, PROJECTS, a
+# an idle-typing debounce commits mid-edit, and every hard exit (PLAY, a
 # window/context-X, a workspace swap, going home) hard-commits whichever tab was
 # showing via save_current() -- the exact verb the SAVE icon used to dispatch, now
 # called automatically instead of from a tap. A TAB SWITCH owes its commit instead
@@ -76,14 +78,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # that paints the destination pays, and every hard exit pays the debt first. See
 # set_tab/leave below and the exit-path call sites in console.py/wm_windowed.py.
 #
-# Fits 320px: 11 icons * 16px = 176px inside the ~202px lent zone -- UNDO/REDO (#88)
-# pushed the ladder to 11, well inside budget; _ZONE_STRIDE keeps the 0-gap stride
-# (icons flush) that #88 settled on for the (then 12-icon) ladder.
-_ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
+# Fits 320px: 10 icons * 16px = 160px inside the ~202px lent zone; _ZONE_STRIDE keeps
+# the 0-gap stride (icons flush) that #88 settled on for the (then 12-icon) ladder.
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
 _ZONE_TABS = (
-    (_ZONE_PROJECTS, "projects"),  # <- back to the PROJECT-PICKER (edit another project)
     ("cards", "edit"),
     ("blocks", "blocks"),
     ("code", "code"),
@@ -99,16 +98,15 @@ _ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment ab
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
-# sentinels (PROJECTS/UNDO/REDO) and PLAY (None) are actions; "theme" is the
+# sentinels (UNDO/REDO) and PLAY (None) are actions; "theme" is the
 # EDIT-ICONS reuse of the paint renderer and commits through its own leave, so
 # it is not a tab here either.
 COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
                     if isinstance(t, str) and not t.startswith("\x00"))
 
-# The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
-# tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
-# the left, PLAY a labeled button on the right (SAVE dropped, #111). The 320x240
-# baseline keeps the frozen 9-icon ladder above, byte-identical.
+# The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the seven
+# tabs as LABELED chips (icon + name) via ui.tab_row, PLAY a labeled button on the
+# right (SAVE dropped, #111). The 320x240 baseline keeps the icon ladder above.
 _TAB_CHIPS = (
     ("cards", "CONFIG", "edit"),
     ("blocks", "BLOCKS", "blocks"),
@@ -473,10 +471,8 @@ class EditorApp:
             # SHELF density (visual identity v1 Phase 3): labeled tabs + a labeled
             # PLAY button -- the Studio mockup's tab row, on the zoned bar (SAVE
             # dropped, #111).
-            proj, tabs_area, play_r = self._zone_parts(rect)
+            tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-            _ui.button(cv, th, proj, "", glyph="projects", kind="normal",
-                       glyph_draw=ws._glyph)
             _ui.tab_row(cv, th, tabs_area, self._chips(), self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
                         ink=band_ink)
@@ -484,10 +480,17 @@ class EditorApp:
                        glyph_draw=ws._glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
-        # one framed in the tab's ON field, then UNDO, REDO and PLAY.
+        # one in the tab's ON field with its name where the bar has the room,
+        # then UNDO, REDO and PLAY.
+        label = self._open_label(rect)
         for tab, glyph, r in self._ladder_rects(rect):
             x, y0, w, ic = r
             if tab is not None and tab == self.tab:
+                if label:
+                    band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
+                    _ui.tab(cv, th, r, True, label, True, band_ink,
+                            ws._icon_image_keyed(glyph))
+                    continue
                 _ui.tab(cv, th, r, True)
                 x += (w - ic) // 2
             if tab == _ZONE_UNDO:
@@ -499,20 +502,46 @@ class EditorApp:
 
     def _compact(self, rect):
         """Whether the zone takes the narrow bar: the labeled row drops a tab."""
-        _proj, tabs_area, _play = self._zone_parts(rect)
+        tabs_area, _play = self._zone_parts(rect)
         slim = [(tid, label) for tid, label, _ic in self._chips()]
         return len(_ui.tab_row_rects(tabs_area, slim, self._zone_scale())) < len(slim)
+
+    def _open_label(self, rect):
+        """The open tab's name for the narrow bar, or "" when the whole ladder
+        with that tab labeled does not fit `rect`."""
+        label = ""
+        for tid, name, _ic in self._chips():
+            if tid == self.tab:
+                label = name
+        if not label:
+            return ""
+        x, y0, w, h = rect
+        ic = h if h > 0 else _BAR_ICON
+        chip = _ui.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
+                                 self._zone_scale())
+        if not chip or not chip[0][2]:
+            return ""
+        if (len(self._ladder()) - 1) * ic + chip[0][1][2] > w:
+            return ""
+        return label
 
     def _ladder_rects(self, rect):
         """The narrow bar's icons, (tab, glyph, rect), as many as `rect` holds:
         square and flush, as tall as the lent band, the open tab's widened by
-        the tab's pad each side."""
+        the tab's pad each side -- or, where the ladder has the room, to a
+        labeled chip with the tab's name (`_open_label`)."""
         x, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON
         pad = _ui.metrics("tab")[_ui.TAB_PAD] * self._zone_scale()
+        label = self._open_label(rect)
+        if label:
+            wide = _ui.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
+                                     self._zone_scale())[0][1][2]
+        else:
+            wide = ic + 2 * pad
         out = []
         for tab, glyph in self._ladder():
-            cw = ic + 2 * pad if tab is not None and tab == self.tab else ic
+            cw = wide if tab is not None and tab == self.tab else ic
             if x + cw > rect[0] + w:
                 break
             out.append((tab, glyph, (x, y0, cw, ic)))
@@ -566,16 +595,15 @@ class EditorApp:
 
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
-        cached draw and a later tap can't desync): PROJECTS chip | labeled tab row
-        | PLAY, the button right-aligned (SAVE dropped, #111). Widths scale with
-        the font (`_zone_scale`); every part is as tall as the lent band."""
+        cached draw and a later tap can't desync): the labeled tab row | PLAY,
+        the button right-aligned (SAVE dropped, #111). Widths scale with the
+        font (`_zone_scale`); every part is as tall as the lent band."""
         fs = self._zone_scale()
         gap = 4 * fs
-        proj, rest = _ui.cut_left(rect, 22 * fs)
-        play_r, rest = _ui.cut_right(rest, 54 * fs)
+        play_r, rest = _ui.cut_right(rect, 54 * fs)
         _pad, rest = _ui.cut_right(rest, gap)
         tabs_area = (rest[0] + gap, rest[1], max(0, rest[2] - 2 * gap), rest[3])
-        return proj, tabs_area, play_r
+        return tabs_area, play_r
 
     def zone_tap(self, px, py, rect):
         """Hit-test the tab ladder + PLAY and dispatch. `rect` is the lent
@@ -584,9 +612,7 @@ class EditorApp:
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
         if not self._compact(rect):
-            proj, tabs_area, play_r = self._zone_parts(rect)
-            if _in(px, py, proj):
-                return self._activate_zone_tab(_ZONE_PROJECTS)
+            tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
             slim = [(tid, label) for tid, label, _ic in self._chips()]
@@ -602,9 +628,7 @@ class EditorApp:
 
     def _activate_zone_tab(self, tab):
         ws = self.ws
-        if tab == _ZONE_PROJECTS:   # <- back to the PROJECT-PICKER (edit another project)
-            ws.open_picker()
-        elif tab == "cards":
+        if tab == "cards":
             ws._open_menu()
         elif tab == "code":
             ws.set_menu_view("code")
@@ -744,7 +768,7 @@ class EditorApp:
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
         SAVE was a tap dispatching here; now every exit path calls this directly:
         PLAY (leave), a workspace swap (console.py's _open_workspace, reached from
-        PROJECTS -> pick a project) and going home (console.py's go_home), a
+        another project's CHANGE) and going home (console.py's go_home), a
         window/context-X close (wm_windowed.py's close_window_kind), the OTA reboot
         (update_ui) and the idle debounce (history_router). A TAB SWITCH owes its
         commit instead -- see commit_later -- and this pays that debt first, so a

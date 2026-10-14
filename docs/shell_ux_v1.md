@@ -120,9 +120,9 @@ sibling app stealing milliseconds. "One fullscreen app + a back-stack" is not a
 compromise UI; it is the mechanism by which games hit their #66 numbers.
 
 *(Status 2026-07-08: the windowed tier is IMPLEMENTED host-side —
-`runtime/wm_windowed.py`, also served over the web transport — with three
-owner-directed refinements to this section's sketch: the picker + Editor share
-ONE "Make" window; INPUT FOCUS is decoupled from the back-stack (clicking a
+`runtime/wm_windowed.py`, also served over the web transport — with two
+owner-directed refinements to this section's sketch: INPUT FOCUS is decoupled
+from the back-stack (clicking a
 window never pops anything — a playtest keeps running beside a focused editor,
 and only an explicit exit ends a run); and closes are surgical (closing one
 window never closes another). One cart still runs at a time (#73's multi-cart
@@ -130,8 +130,8 @@ boundary). The P4 device port of this tier rides #58.)*
 
 *(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
 `docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
-**desktop** — wallpaper + a static icon column (PLAY, PROJECTS, and the
-system apps) + the one OS bar with taskbar chips — desktop mode's floor:
+**desktop** — wallpaper + a static icon column (PLAY, PROJECTS — the home in
+a window, on Make — and the system apps) + the one OS bar with taskbar chips — desktop mode's floor:
 everything opened there is a window, and the desk bar draws no X (nothing is
 beneath it). The **PLAY icon** enters console mode: the desk's windows wait
 parked, off the back-stack, and the fullscreen **home** shows — the same
@@ -171,22 +171,23 @@ door — no setting, no mode:
 
 - **A tap on the home's Games, Mine and Apps tabs RUNS the cart** (an app's
   cart opens the app). Every cart type, no per-device default, no type
-  dispatch. The fourth tab, **Make**, holds the same projects as the picker
-  and a tap there EDITS (owner, 2026-10-13) — the one tab whose tap makes
-  rather than plays (`docs/shell_layout_2026-10.md` §12).
+  dispatch. The fourth tab, **Make**, is the one list of projects (owner,
+  2026-10-14) and a tap there EDITS (owner, 2026-10-13) — the one tab whose
+  tap makes rather than plays (`docs/shell_layout_2026-10.md` §12).
 - **The home is a carousel** (2026-10, `docs/shell_layout_2026-10.md` §12):
   one row of cover cards slides sideways under the tab row, the centre card
   larger; a card tap activates on RELEASE (tap-vs-drag slop, the shared
   `ui.DragTap` machine the Settings rows ride too), so a scroll can never
   launch a cart. The SAME home renders on every tier, the 320×240 T-Deck
-  included. The picker keeps the earlier **shelf**: a grid of two rows that
-  scrolls continuously LEFT-RIGHT (2026-07-13 — paging retired), its pinned
-  ＋New card heading the list.
+  included. Its other arrangement, and the one the desk's PROJECTS window
+  always shows, is the **shelf**: a grid of two rows that scrolls
+  continuously LEFT-RIGHT (2026-07-13 — paging retired), Make's ＋New card
+  heading its list.
 - **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the row,
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
-  Editor project-picker grid flings identically; scroll/fling frames repaint via
+  shelf flings identically; scroll/fling frames repaint via
   the scroll-as-blit band path (shift the retained pixels, redraw only the
   exposed strip), which is what makes a 60Hz coast affordable on every backend.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
@@ -194,26 +195,26 @@ door — no setting, no mode:
   Editor landing on Config — the bridge from playing to making, in place, never a
   surprise duplicate. The verbs ride the lent bar zone as chips on every tier,
   the active tab's set. The `C` (code) key is the keyboard route.
-- **Making is an app you launch:** the home's **Make** tab, and on the desk the
-  Editor's **project-picker** — EVERY editable cart (wallpapers and built-ins
-  included) plus a pinned **＋New** card. Picking a project opens it in the
+- **Making is an app you launch:** the home's **Make** tab — fullscreen, or on
+  the desk in the PROJECTS window — lists EVERY editable cart (wallpapers and
+  built-ins included) after a **＋New** card. Picking a project opens it in the
   Editor, **landing on Config first** — the
   "Make it mine" cards, intrigue-first: a kid customizes a game before ever seeing a
   line of code, and the path from "I changed the color" to "what else can I change?"
   runs straight through the Editor's tab ladder (§6).
-- **The picker manages projects:** ＋New (create a game and open it), Copy, and
-  Delete (a two-tap confirm) live in the picker — copy and delete are OFF the
-  home, whose one management verb is NEW (Make's, and an empty Mine's).
+- **Make manages projects:** ＋New (create a game and open it), COPY, and DEL
+  (a two-tap confirm: the first tap arms SURE?) are Make's verbs; the tabs
+  that play carry none of them but an empty Mine's ＋New.
 - **Wallpapers are backdrop-only:** they are on none of the tabs that run. The backdrop
   (and the panel theme) is chosen in the **Appearance app** — the ONE appearance
   surface, reachable from Settings' APPEARANCE row; wallpaper carts stay editable
-  through the picker.
-- **The picker sits on a static black backdrop** (2026-07-08): the launcher home is
-  the kid's decorated desk (live wallpaper), the Make space is the workbench —
-  "it's software". Side effect: with no animated backdrop forcing repaints, an idle
-  picker costs zero under the redraw-on-change gate.
+  on Make.
+- **The PROJECTS window sits on a static backdrop** (the panel field): the
+  desk is the kid's decorated wallpaper, a window is software. With no
+  animated backdrop forcing repaints, an idle window costs zero under the
+  redraw-on-change gate.
 
-Nothing is ever locked away: Play is a tap, Make is a tile, and both are visible from
+Nothing is ever locked away: Play is a tap, Make is a tab, and both are visible from
 every screen a kid starts on.
 
 ---
@@ -226,8 +227,8 @@ layout places the same widgets in bars on any edge (`docs/shell_layout_2026-10.m
 buttons and became an OS shell with an app-populated region.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
-  Editor loads PROJECTS + its tab ladder + PLAY here (§6, no SAVE -- #111); the launcher shows
-  the selected cart's name (its management verbs live in the picker, §4); Settings
+  Editor loads its tab ladder + PLAY here (§6, no SAVE -- #111); the home puts
+  the active tab's chips there for its selected card (§4); Settings
   fills it with its sections. The app owns the pixels and the taps inside the zone;
   the OS owns the zone's existence and bounds.
 - **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
@@ -254,7 +255,7 @@ ladder**, ordered easy → deep, so the leftmost thing a kid sees is always the
 gentlest:
 
 ```
-[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
+Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 ```
 
 - **Config** — the default landing tab (§4) and the intrigue rung: the "Make it mine"
@@ -289,11 +290,13 @@ gentlest:
 - **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen; exit
   returns to the Editor **on the tab you were on**. Test-play is a round trip, not a
   context switch.
-- **PROJECTS** — back to the project-picker (§4): switch projects without going home.
+- **The X** backs out one level (owner, 2026-10-14): to wherever the Editor
+  was opened from, the home's tab and card included. Another project is the
+  home's Make tab (§4); the bar has no way there of its own.
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
-stood for. Every hard exit (PLAY, PROJECTS, a window/context-X close, a workspace
+stood for. Every hard exit (PLAY, a window/context-X close, a workspace
 swap, going home) hard-commits whichever tab was showing, on top of the idle
 debounce -- exactly what SAVE used to do, just automatic. Switching tabs OWES the
 commit rather than taking it inside the tap (#154): the frame that paints the
@@ -313,7 +316,7 @@ Two guarantees, stated as UX law:
 - **Save is never required — there is no SAVE.** No "unsaved changes" state, no save
   prompt on exit, no SAVE button anywhere (#111): edits persist continuously — a
   an idle autosave debounce on every tab -- armed by typing on the code tab and by
-  touch on the drawn ones -- plus hard commits on every hard exit (PLAY, PROJECTS,
+  touch on the drawn ones -- plus hard commits on every hard exit (PLAY,
   a window/context-X close, a workspace swap, going home, and the reboot into a new
   firmware image), and a tab switch's commit paid by the frame that paints the
   destination. A
@@ -375,7 +378,7 @@ theme's layout, which every layout places (`docs/shell_layout_2026-10.md` §9).
 |---|---|---|---|
 | Launcher (back-stack root) | taskbar | **no X** where it is its mode's floor (nothing beneath it); on the windowed tier's console mode, X → back to the desk beneath | a plain key |
 | Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **no X** — the PLAY icon enters console mode | a plain key |
-| Editor | taskbar | X → pop back (picker → launcher) | a plain key |
+| Editor | taskbar | X → pop back, to where it was opened from | a plain key |
 | Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
 | Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |
 | Running tool/app cart | minimal bar (title + status + X) | X → return to caller | a plain key — delete in text fields |

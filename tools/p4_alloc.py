@@ -42,7 +42,7 @@ Reports collects per frame, garbage between them, and ms + KB histograms.
 
 Usage
 -----
-  python tools/p4_alloc.py                        # settings + picker, default wraps
+  python tools/p4_alloc.py                        # settings + projects, default wraps
   python tools/p4_alloc.py --cadence --frames 5
   python tools/p4_alloc.py --drill                # + fine-grained settings wraps
   python tools/p4_alloc.py --extra "ws.layout::settings_panel::lay.panel"
@@ -452,7 +452,7 @@ def main():
     ap = argparse.ArgumentParser()
     add_board_args(ap)
     ap.add_argument("--surface", default="both",
-                    choices=("settings", "picker", "both"))
+                    choices=("settings", "projects", "both"))
     ap.add_argument("--drill", action="store_true",
                     help="add the fine-grained Settings wraps")
     ap.add_argument("--pregrow", type=int, default=0, metavar="MB",
@@ -559,24 +559,24 @@ def main():
             lo, hi = ct + (w[3] - w[4]) - 50, ct + 50
             record("settings scroll", lambda: gesture(cx, lo, cx, hi))
             # A reset, not go_home: go_home lands in the fullscreen Library
-            # where the picker is not a window (no 'make' key), and it would carry
-            # Settings' warm caches into the picker's numbers.
+            # where the home is not a window (no 'projects' key), and it would carry
+            # Settings' warm caches into the projects window's numbers.
             b.reset()
             for _s in (PROBE, CAL, HOOK, AGG, WRAPS, CADENCE, PREGROW):
                 b.pyexec(_s)
 
-        if args.surface in ("picker", "both"):
-            b.open("picker")
+        if args.surface in ("projects", "both"):
+            b.open("projects")
             b.drain(14.0)                            # cover pop-in (#155)
-            g = b.pyval("ws.wm._wins['make'].ctx.layout.lib_grid")
-            if g is None or "make" not in b.state()["wins"]:
-                print("\n  picker did not open (no 'make' window) -- skipped")
+            g = b.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+            if g is None or "projects" not in b.state()["wins"]:
+                print("\n  the projects window did not open -- skipped")
                 return 0
-            w = b.state()["wins"]["make"]
+            w = b.state()["wins"]["projects"]
             ox, oy = w[0] + 1, w[1] + 1 + w[4]
             gx, gy, gw, gh = g
             cy = oy + gy + gh // 2
-            record("picker drag",
+            record("projects window drag",
                    lambda: gesture(ox + gx + gw - 40, cy, ox + gx + 60, cy))
     finally:
         b.close()

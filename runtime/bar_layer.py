@@ -138,7 +138,7 @@ _PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separ
 # three that open a component (§8).
 _TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
-_TITLES = {"picker": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
+_TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "calendar": "CALENDAR"}
 # _cart_bar_key's fields every bar folds, and the ones a widget adds.
 _KEY_ALWAYS = (0, 2, 3, 4, 10)
@@ -207,7 +207,7 @@ class BarLayer:
     at their rects (`bar_rects`), LAST inside each content's paint, which lays
     out in what the bars leave (`content_rect`). So the content draws call
     _draw_status_strip(where) and the pointer methods delegate their bar slice to
-    handle_bar_tap(where, ...) / handle_home_tap / handle_cart_tap, which take
+    handle_bar_tap(where, ...) / handle_cart_tap, which take
     canvas coordinates and hit-test in the coordinates of the bar they land on.
     An app's zone_tap takes the lent rect as a parameter: the zone's cell, in
     the game canvas's packing or the responsive layout's. Inside a window the
@@ -309,8 +309,8 @@ class BarLayer:
         ws = self.ws
         if where == "home":
             return ws.launcher_layer
-        if where == "picker":
-            return ws.editor_picker
+        if where == "projects":
+            return ws.projects_layer
         if where == "settings":
             return ws.settings_layer
         if where == "menu":
@@ -857,12 +857,6 @@ class BarLayer:
         if owner is None or zone is None:
             return False
         return bool(owner.zone_tap(px, py, zone))
-
-    def handle_home_tap(self, px, py):
-        """Backward-compatible name for the launcher's tap slice (launcher_layer.py
-        is the one caller outside this file) -- the launcher's own zone_tap (NEW/
-        DUP/DEL) now lives on LauncherHomeLayer, reached through handle_bar_tap."""
-        return self.handle_bar_tap("home", px, py)
 
     def handle_cart_tap(self, px, py):
         """The running-cart top-bar tap slice (px, py in GAME coords): the TIC-80

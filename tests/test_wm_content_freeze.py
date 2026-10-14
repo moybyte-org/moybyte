@@ -152,18 +152,18 @@ def test_music_preview_excluded_from_freeze(tmp_path):
     PLAY/STOP) without marking dirty -- _content_static must exclude it."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
+    ws.open_projects()
     drv.frame(0.0)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("type") != "new")
-    ws.pick_selected()
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("type") != "new")
+    ws.launch_selected(g)
     drv.frame(0.0)
     ws.editor_app.set_tab("music")
     drv.frame(0.0)
     _quiesce(ws)
     ws._dirty = True
     drv.frame(0.0)                         # settle
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     assert win.kind == "menu"
     assert ws.wm._content_static(win) is True
     ws.music_ui.music_preview = object()

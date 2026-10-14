@@ -40,6 +40,15 @@ def _drv(ws):
     return host_app.ConsoleDriver(ws)
 
 
+def _open_editor(ws):
+    """The desk's PROJECTS, then its first project: the Editor in a window of
+    its own above the home window."""
+    ws.open_projects()
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
+    ws.launch_selected(g)
+
+
 def _quiesce(ws):
     ws.pointer.visible = False
     ws._toast_until = 0
@@ -323,30 +332,26 @@ def test_push_opens_window_pop_closes_it(tmp_path):
     assert ws.wm._wins == {}
 
 
-def test_picker_and_editor_share_one_make_window(tmp_path):
-    """The project picker and the Editor are ONE window (the Make flow, owner
-    call): picking a project swaps the window's CONTENT to the Editor -- no
-    second window spawns -- and PROJECTS swaps it back. The back-stack still
-    holds both kinds (exit pops one level at a time)."""
+def test_the_editor_opens_in_its_own_window_above_projects(tmp_path):
+    """The desk's PROJECTS is the home in a window; a Make pick opens the
+    Editor in a window of its own above it, laid out at the window's size."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
+    ws.open_projects()
     drv.frame(1 / 30)
-    assert ws.wm._order == ["make"]
-    win = ws.wm._wins["make"]
-    assert win.kind == "picker"
-    ws.pick_selected()
+    assert ws.wm._order == ["projects"]
+    home = ws.wm._wins["projects"]
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
+    ws.launch_selected(g)
     drv.frame(1 / 30)
-    assert ws.wm._order == ["make"]              # STILL one window
-    assert ws.wm._wins["make"] is win            # the same record
-    assert win.kind == "menu"                    # showing the Editor now
-    assert ws.wm.stack.kinds() == ["launcher", "desk", "picker", "menu"]   # stack unchanged
+    assert ws.wm._order == ["projects", "menu"]
+    assert ws.wm._wins["projects"] is home
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu"]
+    win = ws.wm._wins["menu"]
     assert win.buf is not None and win.ctx is not None
     # The window's layout context is sized to the window, not the desktop.
     assert win.ctx.layout.w == win.buf.w and win.ctx.layout.w < 1024
-    ws.open_picker()                             # PROJECTS: back in the same window
-    drv.frame(1 / 30)
-    assert ws.wm._order == ["make"] and win.kind == "picker"
 
 
 def test_change_leaves_library_for_desktop_backdrop(tmp_path):
@@ -366,7 +371,7 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
     _quiesce(ws)
     drv.frame(1 / 30)
     assert ws.screen == "menu"
-    assert ws.wm._order == ["make"]
+    assert ws.wm._order == ["menu"]
     assert launcher_draws == []       # wallpaper + OS bar, no hidden Library grid
     assert ws.layout.w == 1024      # ambient (root) layout after the frame
     assert ws.launcher.layout.w == 1024
@@ -392,20 +397,19 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
 def test_play_opens_playtest_window_and_exit_returns(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.set_menu_view("code")
     drv.frame(1 / 30)
     ws._leave_menu()                # PLAY: run the cart, caller = the Editor
     drv.frame(1 / 30)
     assert ws.wm._order[-1] == "desktop"
-    assert "make" in ws.wm._order   # the editor window is still open beneath
+    assert "menu" in ws.wm._order   # the editor window is still open beneath
     win = ws.wm._wins["desktop"]
     assert win.buf is None                       # the game canvas IS its content
     assert ws.wm._player_view(win)[2] >= 1       # integer viewport scale
     ws._exit_to_caller()
     drv.frame(1 / 30)
-    assert ws.wm._order[-1] == "make"
+    assert ws.wm._order[-1] == "menu"
     assert ws.menu_view == "code"   # back on the tab PLAY left
 
 
@@ -423,8 +427,7 @@ def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
     ws._exit_to_caller()
     drv.frame(1 / 30)
 
-    ws.open_picker()                # Editor PLAY: dev-sized
-    ws.pick_selected()
+    _open_editor(ws)                # Editor PLAY: dev-sized
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
@@ -481,8 +484,7 @@ def test_game_viewport_is_the_player_window(tmp_path):
 def test_player_window_x_exits_to_caller(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
@@ -490,8 +492,8 @@ def test_player_window_x_exits_to_caller(tmp_path):
     xr = dict(ws.wm._strip_buttons(win))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._order[-1] == "make"     # back to the editor window
-    assert ws.wm._wins["make"].kind == "menu"
+    assert ws.wm._order[-1] == "menu"     # back to the editor window
+    assert ws.wm._wins["menu"].kind == "menu"
 
 
 # ---------------------------------------------------------------------------
@@ -503,11 +505,10 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     app's zone -- switching tabs via the ladder works at the WINDOW's position."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     assert ws.menu_view == "cards"        # Config-first landing
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     # The Editor's lent zone at shelf density: the labeled CODE tab chip (visual
     # identity v1 Phase 3) -- resolve its rect through the SAME geometry the
     # draw/tap path uses (editor_app._zone_parts + ui.tab_row_rects), so this
@@ -516,7 +517,7 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     from runtime import ui as _ui
     from runtime import editor_app as _ea
     zone = win.ctx.layout.zone_left
-    _proj, tabs_area, _play = ws.editor_app._zone_parts(zone)
+    tabs_area, _play = ws.editor_app._zone_parts(zone)
     slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
     rects = dict((tid, r) for tid, r, _l in
                  _ui.tab_row_rects(tabs_area, slim, max(1, zone[3] // 16)))
@@ -633,26 +634,25 @@ def test_click_moves_focus_without_popping_the_playtest(tmp_path):
     an explicit exit ends the run. Typing then lands in the editor."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.set_menu_view("code")
     drv.frame(1 / 30)
     ws._leave_menu()                       # PLAY
     drv.frame(1 / 30)
     assert ws.wm._focus == "desktop"
-    make = ws.wm._wins["make"]
+    make = ws.wm._wins["menu"]
     # Drag the playtest window aside so a corner of the editor is exposed, then
     # click that corner.
     player = ws.wm._wins["desktop"]
     ws.wm._move_window(player, 600, 300)
     drv.frame(1 / 30)
     px, py = make.x + 4, make.y + 4
-    assert ws.wm._win_at(px, py) == "make"
+    assert ws.wm._win_at(px, py) == "menu"
     drv.touch(px, py)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.wm._focus == "make"
+    assert ws.wm._focus == "menu"
     assert ws.wm.stack.top() == "desktop"   # the playtest was NOT popped
     assert "desktop" in ws.wm._order       # its window is still up
     # The game-pointer gate: a background cart must not see live taps.
@@ -675,12 +675,11 @@ def test_player_keeps_ticking_while_editor_is_focused(tmp_path):
     the running cart's frame counter keeps advancing."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                       # PLAY
     drv.frame(1 / 30)
-    ws.wm._focus = "make"                  # focus the editor beside it
+    ws.wm._focus = "menu"                  # focus the editor beside it
     ws._dirty = True
     before = ws.player.frames if hasattr(ws.player, "frames") else None
     ticks = [0]
@@ -733,11 +732,10 @@ def test_keyboard_goes_to_focused_window(tmp_path):
     WINDOW's layout (not the desktop's)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.set_menu_view("code")
     drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     assert ws.editor.COLS == win.ctx.code_layout.cols
     ws.editor.set_text("")
     for ch in "ok":
@@ -851,45 +849,42 @@ def test_chip_click_is_focus_only_never_a_pop(tmp_path):
     changes from the taskbar (nothing closes by looking at it)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                             # PLAY: playtest above the editor
     drv.frame(1 / 30)
     chips = {k: r for k, r, _l in ws.wm._chip_rects()}
-    assert set(chips) == {"make", "desktop"}
+    assert set(chips) == {"projects", "menu", "desktop"}
     stack_before = ws.wm.stack.kinds()
     # Clicking the editor's chip FOCUSES it -- no pop, the playtest stays up.
-    r = chips["make"]
+    r = chips["menu"]
     drv.touch(r[0] + 2, r[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._focus == "make"
+    assert ws.wm._focus == "menu"
     assert ws.wm.stack.kinds() == stack_before
     # Clicking the (now focused) editor chip minimizes it; again restores+focuses.
     drv.touch(r[0] + 2, r[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._wins["make"].minimized
+    assert ws.wm._wins["menu"].minimized
     drv.touch(r[0] + 2, r[1] + 2)
     drv.frame(1 / 30)
-    assert not ws.wm._wins["make"].minimized and ws.wm._focus == "make"
+    assert not ws.wm._wins["menu"].minimized and ws.wm._focus == "menu"
     assert ws.wm.stack.kinds() == stack_before         # still nothing popped
 
 
-def test_editor_close_pops_one_level_to_picker(tmp_path):
-    """The Make window's X on the EDITOR pops one level -- the SAME window flips
-    back to the picker (not a jump all the way home, not a second window)."""
+def test_editor_close_returns_to_the_projects_window(tmp_path):
+    """The Editor window's X closes it alone -- back to the home window it was
+    opened from (not a jump all the way to the desk)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     assert win.kind == "menu"
     xr = dict(ws.wm._strip_buttons(win))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._order == ["make"]
-    assert ws.wm._wins["make"].kind == "picker"
+    assert ws.wm._order == ["projects"]
 
 
 def test_font_scale_change_rebuilds_windows(tmp_path):
@@ -989,20 +984,19 @@ def test_closing_make_never_takes_settings_with_it(tmp_path):
     surgical now: only the closed process leaves the stack."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.open_settings()                          # Settings ABOVE the Make flow
     drv.frame(1 / 30)
-    assert ws.wm.stack.kinds() == ["launcher", "desk", "picker", "menu", "settings"]
-    make = ws.wm._wins["make"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "settings"]
+    make = ws.wm._wins["menu"]
     xr = dict(ws.wm._strip_buttons(make))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)             # X on the Make window (the EDITOR)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
     assert "settings" in ws.wm._order           # Settings SURVIVED
-    assert ws.wm._wins["make"].kind == "picker"  # make popped one level only
-    assert ws.wm.stack.kinds() == ["launcher", "desk", "picker", "settings"]
+    assert "menu" not in ws.wm._order           # the Editor alone closed
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "settings"]
 
 
 def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
@@ -1011,18 +1005,17 @@ def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
     caller's window (the Editor)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                            # PLAY (caller = the Editor)
     ws.open_settings()                          # Settings over the running game
     drv.frame(1 / 30)
-    assert ws.wm.stack.kinds() == ["launcher", "desk", "picker", "menu", "desktop", "settings"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "desktop", "settings"]
     ws._exit_to_caller()                        # the hold-BACKSPACE exit path
     drv.frame(1 / 30)
-    assert ws.wm.stack.kinds() == ["launcher", "desk", "picker", "menu", "settings"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "settings"]
     assert "settings" in ws.wm._order           # Settings SURVIVED
-    assert ws.wm._focus == "make"               # back to the Editor's window
+    assert ws.wm._focus == "menu"               # back to the Editor's window
 
 
 def test_settings_keyboard_close_is_surgical_too(tmp_path):
@@ -1220,15 +1213,14 @@ def test_held_key_to_focused_playtest_stays_quiet(tmp_path):
     the playtest must keep repainting as before."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                        # PLAY: playtest window, focused
     drv.frame(1 / 30)
     assert ws.wm._focus == "desktop"
     assert ws.wm.keys_to_cart()
     assert not _held_key_frame(ws), "cart-bound key repainted the desktop"
-    ws.wm._focus = "make"                   # the editor beside it takes keys
+    ws.wm._focus = "menu"                   # the editor beside it takes keys
     assert not ws.wm.keys_to_cart()
     assert _held_key_frame(ws), "editor typing must still repaint"
 
@@ -1238,8 +1230,7 @@ def test_crash_panel_keys_repaint_again(tmp_path):
     dirty mark must return on the crash panel."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
@@ -1248,31 +1239,27 @@ def test_crash_panel_keys_repaint_again(tmp_path):
     assert _held_key_frame(ws)
 
 
-def test_group_window_drag_freezes_its_content(tmp_path):
-    """#113: gesture tuples carry the window REGISTRY key ("make" for the
-    shared picker/Editor group window) while win.kind is the CONTENT kind
-    ("picker") -- the old `key == win.kind` freeze test never matched the
-    group, so a make-window drag re-rendered the picker/Editor content every
-    frame (pure waste on the P4; on the web transport it also re-shipped the
-    window's whole recorded stream per frame -- the payload autopsy that
-    found this). The freeze must resolve gestures through _wins identity."""
+def test_window_drag_freezes_its_content(tmp_path):
+    """#113: gesture tuples carry the window REGISTRY key; the freeze resolves
+    gestures through _wins identity, so a window dragged by its strip renders
+    no content mid-drag (on the web transport a re-render also re-shipped the
+    window's whole recorded stream per frame -- the payload autopsy)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     drv.frame(1 / 30)
     _quiesce(ws)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(4):
         drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
-    assert win.kind == "picker"            # the content kind, NOT the key
+    win = ws.wm._wins["projects"]
     calls = [0]
-    orig = ws.editor_picker.draw
+    orig = ws.projects_layer.draw
 
     def spy(dt):
         calls[0] += 1
         return orig(dt)
 
-    ws.editor_picker.draw = spy
+    ws.projects_layer.draw = spy
     sx, sy = win.x + win.w // 2, win.y + win.title_h // 2
     drv.touch(sx, sy)
     drv.frame(1 / 30)
@@ -1281,7 +1268,7 @@ def test_group_window_drag_freezes_its_content(tmp_path):
         x += 8
         drv.touch_drag(x, sy)
         drv.frame(1 / 30)
-    assert ws.wm._drag is not None and ws.wm._drag[0] == "make"
+    assert ws.wm._drag is not None and ws.wm._drag[0] == "projects"
     calls[0] = 0
     drv.touch_drag(x + 8, sy)
     drv.frame(1 / 30)
@@ -1296,7 +1283,7 @@ def test_group_window_drag_freezes_its_content(tmp_path):
 def _open_two_windows(ws, drv):
     ws.open_settings()
     drv.frame(1 / 30)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(40):            # settle covers + the stamp streaks
         drv.frame(1 / 30)
     assert len(ws.wm._order) >= 2
@@ -1597,7 +1584,7 @@ def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
         ws.look.set_font_scale(1, persist=False)
     finally:
         ws.wm._install(ws.wm._root_ctx)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(20):
         ws.mark_dirty()
         drv.frame(1 / 30)
@@ -1720,7 +1707,7 @@ def test_a_clock_tick_does_not_re_render_the_desk(tmp_path):
 
 
 def test_the_desk_sig_excludes_the_cover_generation(tmp_path):
-    """Covers landing in the picker must not invalidate the desk: those are
+    """Covers landing in the home window must not invalidate the desk: those are
     exactly the frames a scroll is trying to keep cheap."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
@@ -1883,21 +1870,21 @@ def test_view_scales_the_windowed_player_too(tmp_path):
     assert scale == max(1, min(cw // 128, ch // 128))
     assert scale > max(1, min(cw // 320, ch // 240))   # bigger than full-canvas
     assert ws.wm.game_xy(ox, oy) == (96, 56)
-def test_picker_hover_select_marks_dirty_inside_the_window(tmp_path):
-    """#177: the picker's hover-preview predates the content freeze -- it moved
-    sel WITHOUT marking dirty, so inside the make window the retained buffer
-    never repainted (state moved, pixels didn't: dead on desktop + web)."""
+def test_hover_select_marks_dirty_inside_the_projects_window(tmp_path):
+    """#177: a hover-preview that moves sel WITHOUT marking dirty never
+    repaints inside a window -- the content freeze reuses the retained buffer
+    (state moved, pixels didn't: dead on desktop + web)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
+    ws.open_projects()
     drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["projects"]
     p = ws.pointer
     p.visible = True
     p.down = False
     ws.wm._install(win.ctx)
     try:
-        t2 = ws.picker.tile_rect(2)
+        t2 = ws.projects_grid.tile_rect(2)
     finally:
         ws.wm._install(ws.wm._root_ctx)
     cx, cy, _cw, _ch = win.content_rect()
@@ -1907,7 +1894,7 @@ def test_picker_hover_select_marks_dirty_inside_the_window(tmp_path):
     tx, ty = cx + t2[0] + 8, cy + t2[1] + 8
     p.x, p.y = tx, ty
     ws.wm._route_pointer(tx, ty, False)
-    assert ws.picker.sel == 2
+    assert ws.projects_grid.sel == 2
     assert ws._dirty, "hover-select must mark dirty or the window never repaints"
 
 
@@ -2031,21 +2018,20 @@ def _center(r):
 
 
 def _desk_with_three(ws, drv):
-    """The desk with Settings, Calc and the Make window (the Editor), the
-    Make window on top and focused."""
+    """The desk with Settings, Calc and the Editor (CHANGE on the home's
+    selected cart), the Editor on top and focused."""
     ws.open_settings()
     ws.open_app(ws._apps_by_id["calc"])
-    ws.open_picker()
-    ws.pick_selected()
+    ws.change_selected()
     drv.frame(1 / 30)
-    assert ws.wm._order == ["settings", "calc", "make"]
+    assert ws.wm._order == ["settings", "calc", "menu"]
     return {k: ws.wm._wins[k] for k in ws.wm._order}
 
 
 def _content_draws(ws, monkeypatch):
     """Count each content layer's draws by window kind."""
     seen = []
-    for kind in ("settings", "calc", "picker"):
+    for kind in ("settings", "calc"):
         layer = ws.wm._content_for(kind)
         orig = layer.draw
         monkeypatch.setattr(layer, "draw",
@@ -2071,8 +2057,8 @@ def test_play_enters_console_mode_and_parks_the_windows(tmp_path):
     assert wm._order == [] and wm._wins == {}
     assert wm.visible_stack()[0] is ws.launcher_layer
     p = wm._parked
-    assert p.kinds == ["settings", "calc", "picker", "menu"]
-    assert p.order == ["settings", "calc", "make"] and p.focus == "make"
+    assert p.kinds == ["settings", "calc", "menu"]
+    assert p.order == ["settings", "calc", "menu"] and p.focus == "menu"
     for k, w in wins.items():                    # the records, stamps and all
         assert p.wins[k] is w
         assert (w.x, w.y, w.w, w.h) == rects[k]
@@ -2094,9 +2080,9 @@ def test_the_x_leaves_console_mode_with_the_windows_unrendered(tmp_path, monkeyp
     wm = ws.wm
     assert wm.mode == "desktop"
     assert wm.stack.kinds() == ["launcher", "desk", "settings", "calc",
-                                "picker", "menu"]
+                                "menu"]
     assert seen == [], "a restored window re-rendered on the way back"
-    assert wm._order == ["settings", "calc", "make"] and wm._focus == "make"
+    assert wm._order == ["settings", "calc", "menu"] and wm._focus == "menu"
     for k, w in wins.items():
         assert wm._wins[k] is w and w.buf is bufs[k]
     assert wm._parked is None
@@ -2132,10 +2118,10 @@ def test_the_fit_release_goes_oldest_first_then_the_home_frame(tmp_path):
     assert ws.launcher_layer._lib_cache is not None
     freed = []
     while ws.wm.release_cache():
-        freed.append([k for k in ("settings", "calc", "make")
+        freed.append([k for k in ("settings", "calc", "menu")
                       if wins[k].buf is None])
     assert freed[:3] == [["settings"], ["settings", "calc"],
-                         ["settings", "calc", "make"]]
+                         ["settings", "calc", "menu"]]
     assert len(freed) == 4 and ws.launcher_layer._lib_cache is None
     assert not ws.wm.release_cache()
     ws.open_desk()
@@ -2166,8 +2152,7 @@ def test_a_parked_kind_reopened_fullscreen_is_found_in_place(tmp_path, monkeypat
 def test_play_ends_a_running_playtest(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                             # the Editor's PLAY
     drv.frame(1 / 30)
@@ -2179,14 +2164,14 @@ def test_play_ends_a_running_playtest(tmp_path):
     assert not ws.wm.stack.has("desktop") and released
     assert "desktop" not in ws.wm._parked.kinds
     assert "desktop" not in ws.wm._parked.wins
-    assert ws.wm._parked.kinds == ["picker", "menu"]
+    assert ws.wm._parked.kinds == ["projects", "menu"]
 
 
 def test_branch_slots_reads_the_mode(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _desk_with_three(ws, drv)
-    assert [g for g, _k in ws.wm._slots()] == ["settings", "calc", "make"]
+    assert ws.wm._slots() == ["settings", "calc", "menu"]
     ws.open_library()
     ws.wm.stack.goto("desk")                     # a stack shape no longer asks
     assert ws.wm._slots() == []
@@ -2236,8 +2221,8 @@ def test_branch_focus_and_sync_windows_come_back_as_parked(tmp_path):
     ws.open_desk()
     ws.wm._sync_windows()
     assert ws.wm._focus == "calc"
-    assert ws.wm._order == ["settings", "calc", "make"]
-    assert ws.wm._wins["make"] is wins["make"] and wins["make"].kind == "menu"
+    assert ws.wm._order == ["settings", "calc", "menu"]
+    assert ws.wm._wins["menu"] is wins["menu"] and wins["menu"].kind == "menu"
 
 
 def test_branch_a_relayout_in_console_mode_releases_the_parked_stamps(tmp_path):
@@ -2247,7 +2232,7 @@ def test_branch_a_relayout_in_console_mode_releases_the_parked_stamps(tmp_path):
     ws.open_library()
     ws._relayout()                               # a font-scale or theme relayout
     assert all(w.buf is None for w in wins.values())
-    assert ws.wm._parked.order == ["settings", "calc", "make"]
+    assert ws.wm._parked.order == ["settings", "calc", "menu"]
     ws.open_desk()
     for w in wins.values():                      # rebuilt at the new layout
         assert w.buf is not None and w.ctx.layout.w == w.buf.w
@@ -2266,7 +2251,7 @@ def test_branch_go_home_in_console_mode_touches_no_parked_window(tmp_path):
     assert ws.project is project and ws.cart is cart
     assert ws.editor_app.project is project
     ws.open_desk()
-    assert ws.wm._wins["make"].kind == "menu"
+    assert ws.wm._wins["menu"].kind == "menu"
 
 
 def test_branch_go_home_in_desktop_mode_lands_on_the_desk(tmp_path):
@@ -2282,12 +2267,12 @@ def test_branch_go_home_in_desktop_mode_lands_on_the_desk(tmp_path):
 
 def test_branch_a_console_run_closes_the_parked_editors_project(tmp_path):
     """A cart run from the home swaps the workspace -- the Editor's exit path
-    (#111) -- so its parked window comes back as the picker, its entry state,
-    in the same place."""
+    (#111) -- so its parked window does not come back; the others do, in
+    their places."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     wins = _desk_with_three(ws, drv)
-    rect = (wins["make"].x, wins["make"].y)
+    rect = (wins["calc"].x, wins["calc"].y)
     ws.open_library()
     ws.open()                                    # a game, fullscreen
     drv.frame(1 / 30)
@@ -2296,10 +2281,11 @@ def test_branch_a_console_run_closes_the_parked_editors_project(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]
     ws.open_desk()
-    assert ws.wm.stack.kinds() == ["launcher", "desk", "settings", "calc",
-                                   "picker"]
-    w = ws.wm._wins["make"]
-    assert w is wins["make"] and w.kind == "picker" and (w.x, w.y) == rect
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "settings", "calc"]
+    assert ws.wm._order == ["settings", "calc"]
+    assert "menu" not in ws.wm._wins and wins["menu"].buf is None
+    w = ws.wm._wins["calc"]
+    assert w is wins["calc"] and (w.x, w.y) == rect
 
 
 def test_branch_exit_doors_in_console_mode(tmp_path):
@@ -2366,7 +2352,7 @@ def test_home_on_the_desk_minimises_every_window_and_home_again_restores(tmp_pat
     drv.press("home")
     drv.frame(1 / 30)
     wm = ws.wm
-    assert wm.mode == "desktop" and wm._order == ["settings", "calc", "make"]
+    assert wm.mode == "desktop" and wm._order == ["settings", "calc", "menu"]
     assert all(w.minimized for w in wins.values())       # kept, as chips
     assert wm._focus is None
     assert wm.stack.kinds()[-1] == "menu"                # nothing closed
@@ -2375,19 +2361,18 @@ def test_home_on_the_desk_minimises_every_window_and_home_again_restores(tmp_pat
     drv.press("home")
     drv.frame(1 / 30)
     assert not any(w.minimized for w in wins.values())
-    assert wm._focus == "make"
+    assert wm._focus == "menu"
 
 
 def test_home_never_minimises_a_running_game(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                             # a playtest window
     drv.frame(1 / 30)
     ws.home_key()
-    assert ws.wm._wins["make"].minimized
+    assert ws.wm._wins["menu"].minimized
     assert not ws.wm._wins["desktop"].minimized
     assert ws.wm._focus == "desktop" and ws.wm.stack.has("desktop")
 
@@ -2409,7 +2394,7 @@ def test_home_in_console_mode_backs_out_one_level(tmp_path):
     drv.press("home")
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
-    assert ws.wm._order == ["settings", "calc", "make"]
+    assert ws.wm._order == ["settings", "calc", "menu"]
     assert not any(w.minimized for w in ws.wm._wins.values())
 
 

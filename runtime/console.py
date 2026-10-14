@@ -362,15 +362,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The home (docs/shell_layout_2026-10.md §12, see launcher_layer.py): its
 # Carousel (the instance is ws.launcher, the single source everything reads) +
 # LauncherHomeLayer (the "launcher" content Layer -- the tab row, the carousel
-# and their input), and the picker's Launcher grid. Both take NAMES + ui.glyph
-# injected for their card art; ws.open() stays.
+# and their input), and HomeWindowLayer, the same home in a desk window. The
+# card models take NAMES + ui.glyph injected for their card art; ws.open() stays.
 try:
     from launcher_layer import (Launcher, Carousel, LauncherHomeLayer,
-                                EditorPickerLayer, new_tile, NEW_TILE_TYPE,
+                                HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                 PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import (Launcher, Carousel, LauncherHomeLayer,
-                                        EditorPickerLayer, new_tile, NEW_TILE_TYPE,
+                                        HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                         PSEUDO_TILE_TYPES, HOME_TABS,
                                         tab_count_title)
 
@@ -904,17 +904,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.search_query = ""
         self.search_typing = False
         # The home's carousel over the Games tab; each tab remembers its card.
-        self._home_sel = {}
         self.launcher = self._home_grid("carousel",
                                         self._launcher_items(self.carts.all, "games"))
-        # The Editor's project-picker grid (spec shell_ux_v1.md): its own Launcher
-        # instance so it keeps an independent selection/page, reusing the SAME tile
-        # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
-        # opens the chosen cart in the Editor.
-        self.picker = Launcher(self._picker_items(self.carts.all),
-                               self.layout, NAMES, _uimod.glyph)
-        self.picker.icon_for = self._icon_image_keyed
-        self.picker.cover_for = self.covers.cover_for
+        # The home window's card model (the desk's PROJECTS, `open_projects`):
+        # minted on its first open, so a console-only board never holds one.
+        self.projects_grid = None
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -1199,10 +1193,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The desktop home / launcher (#28): the home composition + grid nav. The Launcher
         # GRID instance stays ws.launcher (the single source); this Layer draws it.
         self.launcher_layer = LauncherHomeLayer(self, NAMES)
-        # The Editor's project-picker content Layer (spec shell_ux_v1.md): reuses the
-        # card grid over ws.picker (the Editor's PROJECTS); picking a cart opens
-        # the Editor above it.
-        self.editor_picker = EditorPickerLayer(self, NAMES)
+        # The same home in a desktop-mode window (the desk's PROJECTS) over
+        # ws.projects_grid.
+        self.projects_layer = HomeWindowLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is its own Layer/component -- the running-cart "desktop" is the
         # _PlayerLayer adapter over ws.player, "theme" the ThemeLayer over the paint
@@ -1212,7 +1205,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # adds each one's kind to this table.
         self._content_layers = {
             "launcher": self.launcher_layer,
-            "picker": self.editor_picker,
+            "projects": self.projects_layer,
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
@@ -1419,13 +1412,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """Put the host's bars on every surface and relayout the shell around
         them (layout_base.place_bars). The theme layout's resolver
         (`Appearance.apply_layout`) calls it."""
-        moved = [b[:2] for b in bars] != [b[:2] for b in _layout_base.bars_in_force()]
         _layout_base.place_bars(bars)
         self.bar_layer.invalidate()
         self._relayout()
-        if moved and getattr(self, "picker", None) is not None:
-            # The Editor picker's grid lays out in what the bars leave, too.
-            self.picker.set_layout(self.layout)
 
     def place_bar(self, edge):
         """Today's one bar, moved to `edge` ("top" or "bottom")."""
@@ -2156,10 +2145,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.project = Project(self)   # a fresh workspace for the cart being opened
         if cart is None:
             cart = self.launcher.selected()
-        # INVARIANT: a workspace only ever opens a REAL cart. The launcher's pinned "Make"
-        # pseudo tile is dispatched to the picker (launch_selected), never run -- but guard
-        # the RUN/EDIT path anyway so a stray open() on the Make selection resolves to the
-        # first real cart instead of crashing on a non-cart (path/cfg-less) tile.
+        # INVARIANT: a workspace only ever opens a REAL cart. The "+ New" pseudo card
+        # is dispatched to new_cart_and_edit (launch_selected), never run -- but guard
+        # the RUN/EDIT path anyway so a stray open() on it resolves to the first real
+        # cart instead of crashing on a non-cart (path/cfg-less) tile.
         if cart is None or cart.get("path") is None:
             cart = next((c for c in self.launcher.items if c.get("path")), cart)
         prev = getattr(self, "_fat_cart", None)
@@ -2249,7 +2238,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     #
     # SCOPE, deliberately narrow: this owns the "app" strip for REGISTERED APPS
     # ONLY. The other strip kinds -- "menu" (the Editor surfaces), "settings",
-    # "home"/"picker" (launcher_layer), "desk" (wm_windowed), "tool" (a running
+    # "home"/"projects" (launcher_layer), "desk" (wm_windowed), "tool" (a running
     # TOOL CART's bar, _draw_tool_bar above) and "desktop" (the running cart's
     # crash chrome) -- stay with their surfaces. Collapsing the kinds would pick one and
     # silently break the context-X on the rest.
@@ -2272,14 +2261,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             commit()
         return bool(self.bar_layer.handle_bar_tap("app", px, py))
 
-    def open(self):
+    def open(self, cart=None):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
-        # cart on the desktop, recording the launcher home as the caller so QUIT pops
-        # home. Open to the desktop even if the cart failed to start: frame() shows the
-        # error panel there so the kid isn't stranded (a silent stay-on-launcher would
-        # be a dead end on the device). Authoring is a separate app (the Editor), reached
-        # through the home's Make tab or CHANGE, not a tap-mode on the played tabs.
-        selected = self.launcher.selected()
+        # cart (`cart`, else the home's selected one) on the desktop, recording the
+        # launcher home as the caller so QUIT pops home. Open to the desktop even if
+        # the cart failed to start: frame() shows the error panel there so the kid
+        # isn't stranded (a silent stay-on-launcher would be a dead end on the
+        # device). Authoring is a separate app (the Editor), reached through the
+        # home's Make tab or CHANGE, not a tap-mode on the played tabs.
+        selected = cart if cart is not None else self.launcher.selected()
         self.carts.note_recent(selected)   # #105 desk_mru: every launcher-tap run counts
         self.search_typing = False     # a RUN always ends any in-progress query typing
         # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
@@ -2300,7 +2290,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # kernel stop the VM for it (docs/kernel_cartpath_2026-10.md 5.1).
         self._home_launch = True
         try:
-            self._open_workspace()
+            self._open_workspace(selected)
         finally:
             self._home_launch = False
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
@@ -2417,21 +2407,23 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return
         self.editor_app.open(self.project)
 
-    def launch_selected(self):
-        """The home's tap on the selected card, by tab (docs/shell_layout_2026-10.md
-        §12): Games and Mine RUN it, Apps opens the app fullscreen (`open`
-        dispatches an app's cart to it), Make opens it in the Editor. The
-        "+ New" card -- Make's first, an empty Mine's only -- makes a game and
-        opens it in the Editor."""
-        sel = self.launcher.selected()
+    def launch_selected(self, grid=None):
+        """The home's tap on `grid`'s selected card (the home's, ws.launcher,
+        by default), by tab (docs/shell_layout_2026-10.md §12): Games and
+        Mine RUN it, Apps opens the app (`open` dispatches an app's cart to
+        it), Make opens it in the Editor -- fullscreen in console mode, a
+        window of its own in desktop mode. The "+ New" card -- Make's first,
+        an empty Mine's only -- makes a game and opens it in the Editor."""
+        grid = grid or self.launcher
+        sel = grid.selected()
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
-            self.new_cart_and_edit()
+            self.new_cart_and_edit(grid)
             return
-        if self.launcher.tab == "make":
+        if grid.tab == "make":
             if sel is not None:
                 self.open_in_editor(sel)
             return
-        self.open()
+        self.open(sel)
 
     def launch_named(self, name):
         """Run the cart `name` names, and return its TITLE (None if none match).
@@ -2556,55 +2548,59 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.wm.enter_console()
         self.go_home()
 
-    def change_selected(self):
-        """CHANGE (visual identity v1 Sections 1.2-1.3): open the launcher's selected
-        cartridge IN PLACE in the Studio/Editor, landing on Config (or the gentlest
-        editable tab when the cart has no edit schema -- editor_app.open decides,
-        deterministically per project). The bridge from playing to making: same
-        Project, same persistence path, never a surprise duplicate (Copy stays an
-        explicit picker verb). No-op for the "+ New" card (one verb: its tap)."""
-        sel = self.launcher.selected()
+    def change_selected(self, grid=None):
+        """CHANGE (visual identity v1 Sections 1.2-1.3): open `grid`'s (the home's
+        by default) selected cartridge IN PLACE in the Studio/Editor, landing on
+        Config (or the gentlest editable tab when the cart has no edit schema --
+        editor_app.open decides, deterministically per project). The bridge from
+        playing to making: same Project, same persistence path, never a surprise
+        duplicate (COPY stays an explicit Make verb). No-op for the "+ New" card
+        (one verb: its tap)."""
+        sel = (grid or self.launcher).selected()
         if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
             return
         self.open_in_editor(sel)
 
-    # -- the Editor's project-picker (spec shell_ux_v1.md) -------------------
+    # -- the home in a window (the desk's PROJECTS) --------------------------
 
-    def open_picker(self):
-        """Open the Editor's PROJECT-PICKER (the Editor's PROJECTS): a cart grid of every
-        editable project + a "+ New" tile. Pushed on the back-stack, so its X pops home and
-        picking a cart pushes the Editor above it (so the Editor's "projects" affordance
-        returns HERE). Resets the picker's armed delete-confirm (if any) so a stale
-        "DELETE? TAP AGAIN" from a previous visit never carries into a fresh one."""
-        self._dirty = True             # screen change repaints (#44)
-        self.search_typing = False     # #105: leaving the run-grid ends any query typing
-        self._set_text_mode(False)     # a grid, not the code editor
-        self.editor_picker.reset()
-        self.wm.goto("picker")
-
-    def pick_selected(self):
-        """Open the picker's selected entry: a real cart -> open it in the Editor; the
-        pinned "+ New" tile -> create a game + open it (spec shell_ux_v1.md)."""
-        sel = self.picker.selected()
-        if sel is not None and sel.get("type") == NEW_TILE_TYPE:
-            self.new_cart_and_edit()
+    def open_projects(self):
+        """The desk's PROJECTS (docs/shell_layout_2026-10.md §12): the home in a
+        window on its Make tab, always the `grid` arrangement whatever the
+        fullscreen home's. Its card model is minted on the first open; a later
+        open brings the window back to Make on the card that tab last had.
+        Where no desk is open (console mode, a console-only board) it is the
+        home's own Make tab."""
+        if not self.wm.desk_open():
+            self.go_home()
+            self.set_home_tab("make")
             return
-        if sel is not None:
-            self.open_in_editor(sel)
+        self._dirty = True             # screen change repaints (#44)
+        self.search_typing = False     # the query is the fullscreen home's
+        self._set_text_mode(False)     # a grid, not the code editor
+        g = self.projects_grid
+        if g is None:
+            g = self.projects_grid = self._home_grid(
+                "grid", self._launcher_items(self.carts.all, "make"))
+            g.tab = "make"
+        else:
+            self.set_home_tab("make", g)
+        self.projects_layer._tab_focus = False
+        self.wm.goto("projects")
 
-    def new_cart_and_edit(self):
-        """The picker's "+ New": create a fresh GAME cart (`carts.new()` does the
-        create, the re-scan and both grids), then open it in the Editor. A no-op
+    def new_cart_and_edit(self, grid=None):
+        """The "+ New" card: create a fresh GAME cart (`carts.new()` does the
+        create, the re-scan and the grids), then open it in the Editor. A no-op
         on a read-only store (a device without SD writes) or a failed write --
-        `carts.new()` returns None and the picker simply stays up."""
+        `carts.new()` returns None and the home simply stays up."""
         new = self.carts.new()
         if new is None:
             return
-        # Select the new cart in the picker so returning to it (the Editor's "projects"
-        # affordance) lands on the freshly-created project, then open it in the Editor.
-        for i, it in enumerate(self.picker.items):
+        # Select the new cart on the home that made it, so backing out of the
+        # Editor lands on the freshly-created project.
+        grid = grid or self.launcher
+        for i, it in enumerate(grid.items):
             if it.get("path") == new.get("path"):
-                self.picker.sel = i
+                grid.sel = i
                 break
         self.open_in_editor(new)
 
@@ -2929,17 +2925,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
           mine   the kid's own carts (made, or taken to make their own);
           apps   the registered apps' carts (minus the WM's HIDDEN_APPS),
                  then the installed app- and tool-typed carts no app claims;
-          make   the picker's list -- "+ New" first, then every editable cart.
+          make   "+ New" first, then every editable cart (`_make_items`).
 
         WALLPAPERS play in none of the first three: they are a backdrop chosen
-        in Settings (Make lists them, as the picker does). An empty Mine holds
+        in Settings (Make lists them). An empty Mine holds
         one "+ New" card. No "+ New" on a read-only store (#151: the web
         runner's can_manage=False, where project management is out of scope)."""
         if tab is None:
             tab = getattr(getattr(self, "launcher", None), "tab", "games")
         manage = getattr(self, "can_manage", True)
         if tab == "make":
-            items = self._picker_items(carts)
+            items = self._make_items(carts)
             return items if manage else items[1:]
         own = self.carts.is_own
         if tab == "apps":
@@ -2981,12 +2977,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     out.append(c)
         return out
 
-    def _launcher_view_items(self):
-        """The home's current contents: the active tab narrowed by the search
-        query (#105), if any -- a plain case-insensitive substring match on the
-        title; a "+ New" card survives it. The single place a rescan
-        (carts.apply), a query edit (set_search_query) and a tab switch all
-        call, so they can never desync on which list is "current"."""
+    def _launcher_view_items(self, grid=None):
+        """`grid`'s (the home's by default) current contents: its active tab,
+        the home's narrowed by the search query (#105), if any -- a plain
+        case-insensitive substring match on the title; a "+ New" card survives
+        it. The single place a rescan (carts.apply), a query edit
+        (set_search_query) and a tab switch all call, so they can never desync
+        on which list is "current"."""
+        if grid is not None and grid is not self.launcher:
+            return self._launcher_items(self.carts.all, grid.tab)
         base = self._launcher_items(self.carts.all)
         q = self.search_query.strip().lower()
         if not q:
@@ -2997,15 +2996,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _home_grid(self, arrangement, items):
         """The home's card model for `arrangement` (docs/shell_layout_2026-10.md
-        §12): the Carousel, or the shelf grid the picker draws too."""
+        §12): the Carousel, or the shelf grid (the home window's, always)."""
         cls = Launcher if arrangement == "grid" else Carousel
         g = cls(items, self.layout, NAMES, _uimod.glyph)
         # The "+ New" card draws the real themeable IconSheet plus sprite big --
         # keyed so the sheet's 0-filled backdrop doesn't plate the card.
         g.icon_for = self._icon_image_keyed
         g.cover_for = self.covers.cover_for
-        # The favorite-star badge on the selected card (#105): only the home
-        # plays, so only ws.launcher (not the Editor's picker) gets the toggle.
+        # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
         g.theme = getattr(self, "theme_colors", None)
         return g
@@ -3018,21 +3016,23 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return
         g = self._home_grid(arrangement, old.items)
         g.tab = old.tab
+        g.tab_sel = old.tab_sel
         g.sel = old.sel
         g._scroll_to_sel()
         self.launcher = g
         self._dirty = True
 
-    def set_home_tab(self, tab):
-        """Switch the home to `tab`, back on the card it last had."""
-        lw = self.launcher
+    def set_home_tab(self, tab, grid=None):
+        """Switch the home (`grid`, ws.launcher by default) to `tab`, back on
+        the card it last had."""
+        lw = grid or self.launcher
         if tab == lw.tab:
             return
         sel = lw.selected()
-        self._home_sel[lw.tab] = sel.get("path") if sel else None
+        lw.tab_sel[lw.tab] = sel.get("path") if sel else None
         lw.tab = tab
-        lw.set_items(self._launcher_view_items())
-        want = self._home_sel.get(tab)
+        lw.set_items(self._launcher_view_items(lw))
+        want = lw.tab_sel.get(tab)
         i = 0
         for k in range(len(lw.items)):
             if want and lw.items[k].get("path") == want:
@@ -3042,11 +3042,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         lw._scroll_to_sel()
         self._dirty = True
 
-    def step_home_tab(self, d):
+    def step_home_tab(self, d, grid=None):
         """The tab `d` steps from the active one, clamped (the keys' tab row)."""
+        grid = grid or self.launcher
         ids = [t for t, _l in HOME_TABS]
-        i = ids.index(self.launcher.tab) + d
-        self.set_home_tab(ids[max(0, min(len(ids) - 1, i))])
+        i = ids.index(grid.tab) + d
+        self.set_home_tab(ids[max(0, min(len(ids) - 1, i))], grid)
 
     def select_cart(self, cart):
         """Bring `cart` up on the home: the tab whose list holds it, then its
@@ -3069,13 +3070,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                             return True
         return False
 
-    def home_title(self):
-        """The bar's title on the home: the active tab's count."""
+    def home_title(self, grid=None):
+        """The bar's title on the home (`grid`, ws.launcher by default): the
+        active tab's count."""
+        grid = grid or self.launcher
         n = 0
-        for it in self.launcher.items:
+        for it in grid.items:
             if it.get("path"):
                 n += 1
-        return tab_count_title(self.launcher.tab, n)
+        return tab_count_title(grid.tab, n)
 
     def open_search(self):
         """Enter the launcher search box (≡ -> SEARCH, #105): capture ASCII
@@ -3116,9 +3119,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.launcher.set_items(self._launcher_view_items())
         self._dirty = True
 
-    def _picker_items(self, carts):
-        """The Editor PROJECT-PICKER grid entries: the pinned "+ New" tile first (create a
-        game + open it), then every editable cart (wallpapers + built-ins included).
+    def _make_items(self, carts):
+        """The Make tab's entries: the "+ New" card first (create a game + open
+        it), then every editable cart (wallpapers + built-ins included).
 
         SYSTEM-APP carts are the one exclusion, and it is TEMPORARY (owner call
         2026-07-31). Files/Paint/Calc/Appearance are not really
@@ -3151,12 +3154,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     keep.append(c)
             carts = keep
         return [new_tile()] + list(carts)
-
-    def _real_selected(self, grid):
-        """The selected cart on `grid`, or None if it's a pinned pseudo tile (Make/New)
-        -- so cart management (dup/del) never acts on a non-cart."""
-        sel = grid.selected()
-        return sel if (sel and sel.get("path")) else None
 
     def adjust(self, d):
         # Config mutation stays on Workstation (ws.config is the single source of cart

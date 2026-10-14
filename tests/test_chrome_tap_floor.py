@@ -135,7 +135,7 @@ def test_the_tap_targets_grow_and_the_text_does_not():
     assert floored.bar_stride == 2 * plain.bar_stride
     assert floored.set_row_h == 2 * plain.set_row_h
     for rect in ("sysmenu_btn", "wifi_btn", "batt_btn", "context_x_btn",
-                 "new_btn", "dup_btn", "del_btn", "set_back", "set_ach"):
+                 "set_back", "set_ach"):
         was = getattr(plain, rect)
         now = getattr(floored, rect)
         assert now[2] == 2 * was[2] and now[3] == 2 * was[3], rect
@@ -288,7 +288,7 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
         ws.open_in_editor(cart)
         ed = ws.editor_app
         assert ed._zone_scale() == ws.sys_canvas.font_scale
-        _proj, tabs_area, _play = ed._zone_parts(ws.layout.zone_left)
+        tabs_area, _play = ed._zone_parts(ws.layout.zone_left)
         slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
         rects = _ui.tab_row_rects(tabs_area, slim, ed._zone_scale())
         assert [t for t, _r, _l in rects] == [t for t, _l, _i in _ea._TAB_CHIPS]

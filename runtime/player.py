@@ -1417,7 +1417,7 @@ class Player:
         # -- USER APPS (#181, ui_refactor_2026-08 Phases 7 + 8) ---------------
         #
         # A `type: "app"` cart no shell app claims is a USER APP: written by
-        # whoever owns the console, editable in the picker, and handed shell
+        # whoever owns the console, editable on Make, and handed shell
         # capabilities by MANIFEST PERMISSION (make_system_api, below).
         if ws.is_user_app(cart):
             # A manifest this build cannot honour AS WRITTEN is refused by

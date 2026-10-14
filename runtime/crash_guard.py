@@ -337,7 +337,7 @@ class CrashGuard:
     def broken_ids(self):
         """Every disabled id.
 
-        Nothing calls it yet: the picker BADGE is Phase 8's recorded open tail
+        Nothing calls it yet: the Make-tab BADGE is Phase 8's recorded open tail
         (docs/history/ui_refactor_2026-08.md), which needs a `launcher_layer` chrome
         idiom and a visual-identity call, not more guard state. Kept because
         that doc names this as the half already built, and pinned by

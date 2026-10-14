@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Map (grep -n a name to jump there):
 #   Bench            frame recording around ws.frame(), the per-layer split
-#   bench_all        the panel run (desk, picker, editor, settings, apps, console)
+#   bench_all        the panel run (desk, projects, editor, settings, apps, console)
 #   bench_popovers   --popovers: the bar widgets' popovers
 #   bench_repaint    --repaint: surfaces repainted every frame
 #   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
@@ -11,8 +11,8 @@
 
 Why end-to-end: timing a layer's draw() in isolation is misleading -- it misses
 the window stamp, the desk backdrop under it, and the compositor flush. The
-2026-07-26 session learned this the hard way (a picker drag measured 26ms by
-content-draw and 181ms by real frame). So every number here is measured around
+2026-07-26 session learned this the hard way (a shelf drag in a window measured
+26ms by content-draw and 181ms by real frame). So every number here is measured around
 `ws.frame()`, the whole loop iteration the glass actually shows.
 
 Usage:
@@ -217,21 +217,21 @@ def bench_all(b, out_path):
     home(b)
     bench.start(); b.drain(3.0); bench.stop("desk idle")
 
-    # -- picker (PROJECTS) --------------------------------------------------
-    b.open("picker"); b.drain(1.0)
-    bench.start(); b.drain(12.0); bench.stop("picker open+settle")
-    g = pyval(b, "ws.wm._wins['make'].ctx.layout.lib_grid")
-    o = win_geom(b, "make")
+    # -- the desk's PROJECTS: the home in a window, on Make -----------------
+    b.open("projects"); b.drain(1.0)
+    bench.start(); b.drain(12.0); bench.stop("projects window open+settle")
+    g = pyval(b, "ws.wm._wins['projects'].ctx.layout.lib_grid")
+    o = win_geom(b, "projects")
     if g and o:
         gx, gy, gw, gh = g
         cy = o[1] + gy + gh // 2
         bench.start()
         b.swipe(o[0] + gx + gw - 40, cy, o[0] + gx + 60, cy, frames=30)
         b.drain(2.0)
-        bench.stop("picker drag-scroll")
+        bench.stop("projects window drag-scroll")
         bench.start()
         b.tap(o[0] + gx + 120, cy, settle=0.2); b.drain(2.5)
-        bench.stop("picker tap card (opens Editor)")
+        bench.stop("projects window tap card (opens Editor)")
 
     # -- editor tabs --------------------------------------------------------
     if pyval(b, "ws.screen") == "menu":
@@ -241,7 +241,7 @@ def bench_all(b, out_path):
             b.drain(2.0)
             bench.stop("editor tab: %s" % tab)
         bench.start(); b.drain(3.0); bench.stop("editor idle (blocks)")
-        pyexec(b, "ws.open_picker()"); b.drain(2.0)
+        pyexec(b, "ws.open_projects()"); b.drain(2.0)
 
     # -- settings -----------------------------------------------------------
     b.open("settings"); b.drain(2.0)

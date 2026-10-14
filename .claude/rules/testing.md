@@ -102,7 +102,7 @@ paths:
     the others. A tier difference is an ARGUMENT to the shared body, never a
     second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves by
     (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk boards
-    pin `ws.exit()`, because a run started from a picker arrangement does not
+    pin `ws.exit()`, because a run started from a desk window does not
     pop through the flag), and `draw_gates_are_installed(windowed=…)` adds the
     window-buffer half only where windows exist.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
@@ -151,7 +151,7 @@ paths:
   - Waits and staleness: **wait for `REMOTE drag done`/`swipe done`** before the
     next command; PERF's `wmr/wmw/wms` are TAKEN per sample, `-` when their pass
     did not run in it; allow ~10s
-    after a first `open picker` (cover pop-in, #155). `state`'s
+    after a first `open projects` (cover pop-in, #155). `state`'s
     `uncap` is the RUNNING cart's; the switch the next run takes is `ws._uncap`.
   - **Look system-app carts up by TITLE, never folder name** — the device seeds
     from the title slug, the host copies the source folder, and that mismatch is

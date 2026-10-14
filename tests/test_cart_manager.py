@@ -1,7 +1,7 @@
 """`CartManager` direct (#209 landing C, docs/history/console_architecture_2026-08.md).
 
 The roster is the shell's most-read piece of state, and what the extraction put
-at risk is not "does a cart appear" -- the goldens and `test_editor_picker`
+at risk is not "does a cart appear" -- the goldens and `test_projects_list`
 already draw that -- but four things a whole-screen hash cannot see:
 
   * **`all` is REBOUND, never mutated in place.** `ws.system` could stay a plain
@@ -86,19 +86,22 @@ def test_apply_invalidates_covers_before_slimming_and_re_derives_both_grids(tmp_
     """The four steps, in order. `slim` bakes each icon and then DELETES the
     sprite art, so an invalidation after it leaves a slimmed cart with no icon
     and nothing to rebuild one from (test_cover_cache runs that mutant end to
-    end); the two grid rebuilds must both read the SAME scan."""
+    end); the two grid rebuilds -- the home's and the home window's -- must
+    both read the SAME scan."""
     ws = build_ws(tmp_path)
+    ws.projects_grid = ws._home_grid("grid", [])
+    ws.projects_grid.tab = "make"
     order = []
     real_slim = ws.carts.slim
     ws.covers.invalidate_all = lambda: order.append("invalidate")
     ws.carts.slim = lambda: (order.append("slim"), real_slim())[1]
     ws.launcher.set_items = lambda items: order.append(("launcher", len(items)))
-    ws.picker.set_items = lambda items: order.append(("picker", len(items)))
+    ws.projects_grid.set_items = lambda items: order.append(("projects", len(items)))
 
     ws.carts.apply(shelf(str(ws.carts_root)))
     assert order[0] == "invalidate"
     assert order[1] == "slim"
-    assert [o[0] for o in order[2:]] == ["launcher", "picker"]
+    assert [o[0] for o in order[2:]] == ["launcher", "projects"]
 
 
 def test_the_grids_follow_a_create_through_apply(tmp_path):
@@ -108,7 +111,8 @@ def test_the_grids_follow_a_create_through_apply(tmp_path):
     ws.carts.apply(shelf(root))
     ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Freshly" in _titles(ws.launcher)
-    assert "Freshly" in _titles(ws.picker)
+    ws.set_home_tab("make")
+    assert "Freshly" in _titles(ws.launcher)
 
 
 # -- rescan + the one forward -------------------------------------------------
@@ -195,13 +199,12 @@ def test_a_read_only_store_refuses_every_write_verb(tmp_path):
     ws = build_ws(tmp_path)
     _mk(str(ws.carts_root), "Second")
     ws.carts.apply(shelf(str(ws.carts_root)))
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("title") == "Second")
+    second = next(c for c in ws.carts.all if c.get("title") == "Second")
     before = list(ws.carts.all)
     ws.can_manage = False
     assert ws.carts.new() is None
-    ws.carts.dup()
-    ws.carts.delete()
+    ws.carts.dup(second)
+    ws.carts.delete(second)
     assert [c["title"] for c in ws.carts.all] == [c["title"] for c in before]
 
 
@@ -210,7 +213,7 @@ def test_a_read_only_store_refuses_every_write_verb(tmp_path):
 def test_new_creates_a_cart_adopts_it_and_hands_it_back(tmp_path):
     """ONE body where there were two: `new_cart` and the first half of
     `new_cart_and_edit` were the same six lines, and `new_cart` had no caller
-    anywhere. The RETURN is what let the second one keep its picker-select +
+    anywhere. The RETURN is what let the second one keep its select-on-Make +
     open-in-editor tail as kernel policy."""
     ws = build_ws(tmp_path)
     n0 = len(ws.carts.all)
@@ -218,18 +221,20 @@ def test_new_creates_a_cart_adopts_it_and_hands_it_back(tmp_path):
     assert made is not None and made.get("path")
     assert len(ws.carts.all) == n0 + 1
     assert any(c["path"] == made["path"] for c in ws.carts.all)
-    assert made["path"] in [it.get("path") for it in ws.picker.items]
+    ws.set_home_tab("make")
+    assert made["path"] in [it.get("path") for it in ws.launcher.items]
 
 
 def test_new_cart_and_edit_opens_the_cart_new_returned(tmp_path):
-    """The kernel half: select the fresh project in the picker, then open it in
+    """The kernel half: select the fresh project on Make, then open it in
     the Editor. It reads the cart off `carts.new()` rather than re-deriving it
     from the roster, which is what keeps the two halves from disagreeing about
     WHICH cart was just made."""
     ws = build_ws(tmp_path)
+    ws.set_home_tab("make")
     ws.new_cart_and_edit()
     assert ws.cart is not None
-    assert ws.picker.selected().get("path") == ws.cart["path"]
+    assert ws.launcher.selected().get("path") == ws.cart["path"]
 
 
 def test_new_cart_and_edit_stays_put_on_a_read_only_store(tmp_path):
@@ -239,16 +244,14 @@ def test_new_cart_and_edit_stays_put_on_a_read_only_store(tmp_path):
     assert ws.cart is None
 
 
-def test_dup_reads_the_pickers_selection(tmp_path):
+def test_dup_copies_the_cart_it_is_given(tmp_path):
     ws = build_ws(tmp_path)
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("path"))
-    other = ws.launcher.selected()["path"]
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("path") and it["path"] != other)
-    target = ws.picker.selected()
-    ws.carts.dup()
+    target = next(c for c in ws.carts.all if c.get("path"))
+    ws.carts.dup(target)
     assert any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
+    n = len(ws.carts.all)
+    ws.carts.dup(None)                       # nothing given: nothing copied
+    assert len(ws.carts.all) == n
 
 
 def test_dup_rehydrates_the_source_first(tmp_path):
@@ -256,12 +259,10 @@ def test_dup_rehydrates_the_source_first(tmp_path):
     already deleted them off a slimmed cart -- so the rehydrate is what stops a
     duplicate coming out empty."""
     ws = build_ws(tmp_path)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("path"))
-    target = ws.picker.selected()
+    target = next(c for c in ws.carts.all if c.get("path"))
     ws.carts.slim()
     assert target.get("lazy") is True and "src" not in target
-    ws.carts.dup()
+    ws.carts.dup(target)
     copy = next(c for c in ws.carts.all
                 if c["title"] == target["title"] + " copy")
     assert moy_carts.load(copy["path"]).get("src")
@@ -283,25 +284,24 @@ def _full_after(monkeypatch, n):
     monkeypatch.setattr(moy_carts, "_write", _write)
 
 
-def _first_real(grid):
-    grid.sel = next(i for i, it in enumerate(grid.items) if it.get("path"))
-    return grid.selected()
+def _first_real(ws):
+    return next(c for c in ws.carts.all if c.get("path"))
 
 
 def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
         tmp_path, monkeypatch):
-    """The picker's COPY on a full store: the half-written copy goes (a cart
+    """Make's COPY on a full store: the half-written copy goes (a cart
     whose manifest landed and whose main did not is a tile that can never
     run), the roster is as it was, and the system banner says why nothing
     appeared -- where it used to be a line on a serial port nobody reads."""
     import os
     ws = build_ws(tmp_path)
-    target = _first_real(ws.picker)
+    target = _first_real(ws)
     root = str(ws.carts_root)
     before = sorted(os.listdir(root))
     n0 = len(ws.carts.all)
     _full_after(monkeypatch, 1)            # the manifest lands, then no room
-    ws.carts.dup()
+    ws.carts.dup(target)
     assert sorted(os.listdir(root)) == before
     assert len(ws.carts.all) == n0
     assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
@@ -324,12 +324,12 @@ def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch)
     """Only a full store is the banner: an unreadable asset is still skipped
     (degrade-don't-throw), and an unexpected failure prints, as before."""
     ws = build_ws(tmp_path)
-    _first_real(ws.picker)
+    target = _first_real(ws)
 
     def _broken(cart, root):
         raise OSError(5, "I/O error")
     monkeypatch.setattr(moy_carts, "duplicate", _broken)
-    ws.carts.dup()
+    ws.carts.dup(target)
     assert ws._notice is None
 
 
@@ -341,9 +341,9 @@ def test_the_store_knows_a_full_store_from_every_other_failure():
     assert not moy_carts.store_full(ValueError(28))
 
 
-def test_delete_prefers_the_open_cart_over_the_pickers_selection(tmp_path):
-    """The sysmenu DELETE CART path: a cart opened from the picker is not
-    necessarily still the picker's selection."""
+def test_delete_with_no_cart_given_deletes_the_open_one(tmp_path):
+    """The sysmenu DELETE CART path: the open cart, never the home's
+    selection; Make's DEL names its cart."""
     ws = build_ws(tmp_path)
     root = str(ws.carts_root)
     _mk(root, "Opened")
@@ -351,11 +351,11 @@ def test_delete_prefers_the_open_cart_over_the_pickers_selection(tmp_path):
     ws.carts.apply(shelf(root))
     opened = next(c for c in ws.carts.all if c["title"] == "Opened")
     ws._open_workspace(opened)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("title") == "Selected")
     ws.carts.delete()
     titles = [c["title"] for c in ws.carts.all]
     assert "Opened" not in titles and "Selected" in titles
+    ws.carts.delete(next(c for c in ws.carts.all if c["title"] == "Selected"))
+    assert "Selected" not in [c["title"] for c in ws.carts.all]
 
 
 def test_delete_keeps_the_last_cart(tmp_path):
@@ -363,16 +363,14 @@ def test_delete_keeps_the_last_cart(tmp_path):
     ws = build_ws(tmp_path)
     only = next(c for c in ws.carts.all if c.get("type") == "game")
     ws.carts.all = [only]
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("path") == only.get("path"))
-    ws.carts.delete()
+    ws.carts.delete(only)
     assert ws.carts.all == [only]
 
 
 # -- the #66 live-set diet ----------------------------------------------------
 
 def test_slim_strips_the_heavy_keys_and_rehydrate_refills_the_same_dict(tmp_path):
-    """IN PLACE is the contract: the launcher and the picker hold the same dict,
+    """IN PLACE is the contract: the home's tabs and window hold the same dict,
     so one load fattens every reference at once."""
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c.get("path"))
@@ -435,7 +433,6 @@ def test_the_launcher_takes_the_collaborators_bound_method(tmp_path):
     fn = ws.launcher.favorite_for
     assert fn.__self__ is ws.carts
     assert fn.__func__ is cart_manager.CartManager.is_favorite
-    assert ws.picker.favorite_for is None       # only the RUN grid plays
 
 
 def test_toggling_a_favorite_persists_through_prefs(tmp_path):

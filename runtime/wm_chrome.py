@@ -22,7 +22,7 @@ _SHADOW = NAMES["black"]
 
 # Shell-process title strips (registered apps contribute TITLE through the app
 # registry instead; the player shows the live cart title).
-_TITLES = {"menu": "EDITOR", "picker": "PROJECTS",
+_TITLES = {"menu": "EDITOR", "projects": "PROJECTS",
            "settings": "SETTINGS", "update": "UPDATE"}
 
 

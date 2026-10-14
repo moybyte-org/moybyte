@@ -12,7 +12,7 @@ code a tap runs, minus the touch plumbing), records every painted frame with
 p4_alloc's zero-retention CADENCE hook, and reports the transition's cost as the
 frames it took and the worst one.
 
-  python tools/p4_clicks.py --board p4 [--only tab_map,open_picker]
+  python tools/p4_clicks.py --board p4 [--only tab_map,open_projects]
 
 READ THE COLUMNS AS: `frames` is how many painted frames the transition spanned
 (the settle), `worst` the single most expensive one, `sum` the total wall the kid
@@ -100,7 +100,8 @@ from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 HELPER = """
 def _pick(want=''):
-    items = ws.picker.items
+    ws.open_projects()
+    items = ws.projects_grid.items
     pick = -1
     for i in range(len(items)):
         if items[i].get('type') == 'new':
@@ -115,7 +116,7 @@ def _pick(want=''):
             if items[i].get('type') != 'new':
                 pick = i
                 break
-    ws.picker.sel = pick
+    ws.projects_grid.sel = pick
     return str(items[pick].get('title'))
 def _launch(want=''):
     items = ws.launcher.items
@@ -131,21 +132,21 @@ ws._g['_launch'] = _launch
 
 # name -> (setup verbs run BEFORE recording, the click verb itself)
 SCENARIOS = {
-    "open_picker":   ([], "ws.open_picker()"),
+    "open_projects": ([], "ws.open_projects()"),
     "open_settings": ([], "ws.open_settings()"),
-    "open_project":  (["ws.open_picker()", "ws._g['_pick']('coin')"],
-                      "ws.pick_selected()"),
-    "tab_map":       (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()"],
+    "open_project":  (["ws._g['_pick']('coin')"],
+                      "ws.launch_selected(ws.projects_grid)"),
+    "tab_map":       (["ws._g['_pick']('coin')",
+                       "ws.launch_selected(ws.projects_grid)"],
                       "ws.editor_app.set_tab('map')"),
-    "tab_sprites":   (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()"],
+    "tab_sprites":   (["ws._g['_pick']('coin')",
+                       "ws.launch_selected(ws.projects_grid)"],
                       "ws.editor_app.set_tab('paint')"),
-    "tab_blocks":    (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()"],
+    "tab_blocks":    (["ws._g['_pick']('coin')",
+                       "ws.launch_selected(ws.projects_grid)"],
                       "ws.editor_app.set_tab('blocks')"),
-    "tab_code":      (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()", "ws.editor_app.set_tab('map')"],
+    "tab_code":      (["ws._g['_pick']('coin')",
+                       "ws.launch_selected(ws.projects_grid)", "ws.editor_app.set_tab('map')"],
                       "ws.editor_app.set_tab('code')"),
     "back_to_desk":  (["ws.open_settings()"], "ws.go_home()"),
     # The SECOND home visit (2026-07-27): the first visit paints live and the

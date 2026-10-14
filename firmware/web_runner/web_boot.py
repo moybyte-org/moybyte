@@ -548,8 +548,8 @@ def edit_cart(name, tab=None):
     the "open in editor" half of the p8 drop (#194).
 
     The tap that RUNS a cart and the one that EDITS it are different verbs in
-    the shell (shell_ux_v1.md: a launcher tap always runs), and this is the
-    edit one -- the same entry the Editor's project picker uses, so an imported
+    the shell (shell_ux_v1.md §4: a tap on Make edits, on the other tabs it
+    runs), and this is the edit one -- the same entry Make uses, so an imported
     cart arrives in the Sprites / Map / Music tabs exactly like an authored one.
     `tab` lands on one of them ("paint"/"map"/"music"/...) instead of the
     default Config landing.

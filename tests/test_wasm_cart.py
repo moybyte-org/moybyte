@@ -601,9 +601,7 @@ def test_a_copy_the_store_has_no_room_for_leaves_no_half_cart(tmp_path, monkeypa
             f.write(b"\0" * 100)
         raise OSError(28, "No space left on device")
     monkeypatch.setattr(host_app.moy_carts, "_copy_bytes", _full)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("title") == "Hello Wasm")
-    ws.carts.dup()
+    ws.carts.dup(next(c for c in ws.carts.all if c.get("title") == "Hello Wasm"))
     assert sorted(os.listdir(root)) == before
     assert not any(c["title"] == "Hello Wasm copy" for c in ws.carts.all)
     assert ws._notice == ("CAN'T COPY", "the store is full", "warn")

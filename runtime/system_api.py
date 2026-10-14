@@ -6,7 +6,7 @@ permissions its manifest declares (#181, ui_refactor_2026-08 Phase 7).
 A SHIPPED system app (Calc, Files, Paint ...) is shell code: a Layer class in
 `runtime/` that declares a `NEEDS` tuple and is handed an `AppContext`
 (`runtime/app_context.py`) carrying exactly those roles. A USER APP is a
-`.moy` CART -- editable in the project picker like any other cart, written by
+`.moy` CART -- editable on the home's Make tab like any other cart, written by
 whoever owns the console -- that asks for shell capabilities in its
 `manifest.json`, in its `"moybyte"` object (Moybyte's own fields):
 

@@ -826,7 +826,7 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     cart API's quit() verb sets), and on a fullscreen tier it pops all the way
     to the launcher, which is what those boards pin. "shell" is `ws.exit()`,
     the desk's own close: on the windowed tier a run started from a
-    picker/Settings arrangement does not pop through the flag, so those boards
+    projects/Settings arrangement does not pop through the flag, so those boards
     pin the launch and the close instead. `clear` ws.exit()s that many times
     first, to shut whatever windows the tour above left open, and then enters
     console mode (`_clear_to_console`), so the run is the fullscreen one a
@@ -1541,7 +1541,7 @@ def _wm_meters_measured(board, win):
     # TOP window's title strip and oscillates it "so the PERF sampler reports
     # DRAG-time fps". Hand-aiming a swipe at a window by NAME is what a tour
     # cannot do -- the P4 suite leaves one window up and the Guition P4 suite
-    # leaves the picker stacked over it, so the swipe landed on the picker and
+    # leaves the projects window stacked over it, so the swipe landed on it and
     # settings never moved. Oscillating also returns the window to where it
     # started, so nothing has to be put back.
     n0 = len(board.lines)

@@ -68,7 +68,7 @@ re-slimmed.
 Same rule the other four collaborators follow (doc 3c). This object is built in
 `Workstation.__init__`, before the store is wired, before `system.json` is
 read, before the layer stack exists -- so `carts_store`, `carts_root`,
-`_with_sd`, `launcher`, `picker` and `bar_layer` are all reached through `ws`
+`_with_sd`, `launcher`, `projects_grid` and `bar_layer` are all reached through `ws`
 at the moment of use and never captured here.
 """
 
@@ -489,8 +489,8 @@ class Appearance:
         self.publish()
         # The launcher grids read the accent for their selection ring/pill.
         ws.launcher.theme = ws.theme_colors
-        if getattr(ws, "picker", None) is not None:
-            ws.picker.theme = ws.theme_colors
+        if getattr(ws, "projects_grid", None) is not None:
+            ws.projects_grid.theme = ws.theme_colors
         # The cached bar strip now paints theme-colored pixels (the launcher zone's
         # PLAY/CHANGE chips), and its cache key doesn't fold the theme name -- bump
         # the explicit generation so a theme switch repaints it.

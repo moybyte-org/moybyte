@@ -89,7 +89,7 @@ from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 OPEN = {
     "settings":  "ws.open_settings()",
-    "picker":    "ws.open_picker()",
+    "projects":  "ws.open_projects()",
     "code":      "ws._g['_edit']('code')",
     "blocks":    "ws._g['_edit']('blocks')",
     "sprites":   "ws._g['_edit']('paint')",
@@ -99,13 +99,13 @@ OPEN = {
 }
 HELPER = """
 def _edit(tab):
-    items = ws.picker.items
-    for i in range(len(items)):
-        if items[i].get('type') != 'new':
-            ws.picker.sel = i
+    ws.open_projects()
+    g = ws.projects_grid
+    for i in range(len(g.items)):
+        if g.items[i].get('type') != 'new':
+            g.sel = i
             break
-    ws.open_picker()
-    ws.pick_selected()
+    ws.launch_selected(g)
     ws.editor_app.set_tab(tab)
     return True
 ws._g['_edit'] = _edit
@@ -124,7 +124,7 @@ def run(b, name, verb):
     top = b.pyval("ws.wm.top_kind()")
     if wins:
         k = list(wins.keys())[0]
-        for cand in ("make", name):
+        for cand in ("menu", name):
             if cand in wins:
                 k = cand
         w = wins[k]

@@ -23,8 +23,8 @@ Picotron-style (owner direction, 2026-07-08):
     process windows; CONSOLE mode is the fullscreen tier's presentation over
     the home, the desk's windows parked outside the back-stack until the
     home's X brings them back;
-  * every process pushed above it (picker / Editor / Settings / update / a running
-    cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
+  * every process pushed above it (the home window / Editor / Settings / update /
+    a running cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
     maximize / close), a border + drop shadow, draggable by the strip and
     resizable by the bottom-right grip;
   * a window's body is PURELY the app: in windowed mode the zoned bar suppresses
@@ -34,9 +34,10 @@ Picotron-style (owner direction, 2026-07-08):
   * a RUNNING CART composites integer-scaled and centered in its window -- the
     game itself never draws chrome, exactly as on the fullscreen tiers, and the
     editor stays VISIBLE beneath a playtest (spec §3's canonical picture);
-  * the PICKER and the EDITOR share one "Make" window (_GROUP): picking a
-    project swaps that window's content to the Editor, PROJECTS / its X swap it
-    back -- the back-stack keeps both kinds, only the presentation merges;
+  * the desk's PROJECTS is the home in a window ("projects", always its grid
+    arrangement, opened on Make); a Make pick opens the Editor in a window of
+    its own above it, and the Editor's X closes back to it -- one window per
+    back-stack kind;
   * INPUT FOCUS is decoupled from the back-stack: clicking a window (or its
     taskbar chip) moves the keyboard + highlight there WITHOUT popping anything
     -- a playtest keeps ticking (it stays the stack top, the running process)
@@ -99,14 +100,6 @@ import time as _time                  # the bar clock's minute (localtime)
 
 _DRAG_MIN = 4                         # px of travel before a press becomes a drag
 
-# Window GROUPS: back-stack kinds that share ONE window slot. The project picker
-# and the Editor are one "Make" flow (spec shell_ux_v1.md §4/§6 -- the picker IS
-# the Editor's entry state), so picking a project swaps the window's CONTENT to
-# the Editor instead of stacking a second window, and PROJECTS / the editor's X
-# swap it back. The back-stack itself is untouched (launcher -> picker -> menu
-# still pops one level at a time); only the presentation merges.
-_GROUP = {"picker": "make", "menu": "make"}
-
 
 class _LayoutCtx:
     """A snapshot of every layout object the responsive surfaces read, plus the
@@ -157,7 +150,8 @@ class _LayoutCtx:
             if _lay is not None:
                 _app.layout = _lay
         ws.launcher.set_layout(self.layout)
-        ws.picker.set_layout(self.layout)
+        if ws.projects_grid is not None:
+            ws.projects_grid.set_layout(self.layout)
         ws._surface_write(origin[0], origin[1])
 
 
@@ -552,9 +546,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # A parked kind re-opened fullscreen is the one process: its
             # window shows what that process holds now when the desk returns.
             top = self.stack.top()
-            g = _GROUP.get(top, top)
-            if g in p.wins:
-                p.stale[g] = True
+            if top in p.wins:
+                p.stale[top] = True
         if self.mode != self._mode_was:
             # MODE SWITCH: windowed_chrome just changed, and every app layout
             # bakes it into its content rect at construction. Rebuild all layouts +
@@ -622,7 +615,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         resize takes; one whose kind was re-opened in console mode re-renders
         once to show what that process holds now. The Editor's project is the
         workspace, and a run in console mode swaps it: a parked Editor whose
-        project went that way comes back as its entry state, the picker."""
+        project went that way does not come back."""
         if self.mode != "console":
             return
         ws = self.ws
@@ -633,12 +626,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         kinds = list(p.kinds)
         if ("menu" in kinds and not ws._editing_icons
                 and ws.editor_app.project is not ws.project):
-            i = kinds.index("menu")
-            if "picker" in kinds:
-                del kinds[i]
-            else:
-                kinds[i] = "picker"
-            p.stale["make"] = True
+            kinds.remove("menu")
+            win = p.wins.pop("menu", None)
+            if win is not None:
+                p.order.remove("menu")
+                self._drop_win(win)
+                if p.focus == "menu":
+                    p.focus = p.order[-1] if p.order else None
         self.stack.restore(["desk"] + kinds)
         self._wins = p.wins
         self._order = p.order
@@ -708,49 +702,34 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return FullscreenStackWM.release_cache(self)
 
     def _slots(self):
-        """Collapse the back-stack ABOVE THE DESK into window SLOTS: consecutive
-        kinds in the same _GROUP share one slot, and the slot's content is the
-        TOPMOST of its kinds (picker+menu -> one "make" window showing whichever
-        is up). Returns [[slot_key, kind], ...] bottom -> top. In console mode
-        there are NO windows, ever: the desk's records are parked and every
-        kind presents fullscreen."""
+        """The back-stack's kinds ABOVE THE DESK, one window each, bottom ->
+        top. In console mode there are NO windows, ever: the desk's records
+        are parked and every kind presents fullscreen."""
         if self.mode == "console":
             return []
         base = self.stack.index("desk") + 1
         if not base:
             return []
         st = self.stack.kinds()
-        slots = []
-        for i in range(base, len(st)):
-            k = st[i]
-            g = _GROUP.get(k, k)
-            if slots and slots[-1][0] == g:
-                slots[-1][1] = k        # the higher kind takes the window over
-            else:
-                slots.append([g, k])
-        return slots
+        return st[base:]
 
     def _sync_windows(self):
-        """Mirror the back-stack into window records: drop windows whose slot was
-        popped, create records (buffer + layout context + cascade position) for
-        newly-pushed ones, and keep each shared slot pointed at its TOP kind (so
-        the Make window's content follows picker <-> editor navigation)."""
-        slots = self._slots()
-        keys = [g for g, _k in slots]
+        """Mirror the back-stack into window records: drop windows whose kind
+        was popped, create records (buffer + layout context + cascade
+        position) for newly-pushed ones."""
+        keys = self._slots()
         if keys != self._order:
             alive = set(keys)
             for g in list(self._wins):
                 if g not in alive:
                     self._drop_win(self._wins.pop(g))
-            for depth, (g, k) in enumerate(slots):
+            for depth, g in enumerate(keys):
                 if g not in self._wins:
-                    self._wins[g] = self._make_window(g, k, depth)
+                    self._wins[g] = self._make_window(g, g, depth)
             self._order = keys
             # A stack change (spawn/pop) moves focus to the newest top window --
             # the one navigation just revealed/opened. Click moves it after that.
             self._focus = keys[-1] if keys else None
-        for g, k in slots:              # content follows the group's top kind
-            self._wins[g].kind = k
         # Surface model: window records mirror the slot set. A dropped slot's
         # surface goes with it; a re-opened one is REBORN with fresh gens from
         # the monotonic mint, so no client cache can alias it (§2).
@@ -776,7 +755,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                  max(1, min((full.w - 24) // self.ws.canvas.w,
                             (self._desk_rect()[3] - 24 - th) // self.ws.canvas.h)))
             return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
-        if key in ("make", "menu", "picker"):
+        if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key in ("artwork", "appearance", "storybook"):
             return (full.w - full.w // 8, full.h - full.h // 10)
@@ -813,8 +792,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = _Win(kind, x, y, w, h, title_h)
         self._build_content(win)
         # Prewarm: render the content ONCE into the fresh buffer, so a window
-        # created BEHIND another (e.g. the picker when picker+editor spawn in one
-        # navigation) shows its app instead of a black retained buffer.
+        # created BEHIND another (e.g. the home window when it and the Editor
+        # spawn in one navigation) shows its app instead of a black retained
+        # buffer.
         self._prewarm(win)
         return win
 
@@ -1338,12 +1318,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win is None:
             return None
         w, h = win.w, win.h
-        # NOTE gesture tuples carry the window REGISTRY key (g[0], e.g. "make"
-        # for the shared picker/Editor group), which is NOT win.kind (the
-        # CONTENT kind, e.g. "picker") -- comparing g[0] == win.kind silently
-        # never matched for the make group, so its drag content-freeze and
-        # stamp-defer never engaged (found via the web payload autopsy, #113).
-        # Every gesture-vs-window test below resolves through _wins identity.
+        # Gesture tuples carry the window REGISTRY key (g[0]); every
+        # gesture-vs-window test below resolves through _wins identity.
         if g is self._resize:
             w = max(w, self._resize[5])
             h = max(h, self._resize[6])
@@ -1993,11 +1969,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # the editor-tab layout every drag frame is pure waste -- blit the retained
         # buffer at the new position instead. A drag of ANOTHER window still lets
         # this one render live (it's not the one moving).
-        # Gesture keys are the window REGISTRY key (e.g. "make"), not win.kind
-        # (the CONTENT kind, e.g. "picker") -- resolve through _wins identity
-        # (see _gesture_extent's note; the == win.kind form never matched the
-        # shared make group, so its drag froze nothing and re-rendered the
-        # picker/Editor content every frame).
+        # Gesture keys are the window REGISTRY key -- resolve through _wins
+        # identity (see _gesture_extent's note).
         if self._resize is not None \
                 and self._wins.get(self._resize[0]) is win \
                 and self._live_resize_ok():
@@ -2250,7 +2223,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         the live desk render and the fling frames measured ~180ms against the
         drag's ~100ms (on glass, 2026-07-26)."""
         ws = self.ws
-        for grid in (getattr(ws, "picker", None), getattr(ws, "launcher", None)):
+        for grid in (ws.projects_grid, ws.launcher):
             if grid is not None and getattr(grid, "flinging", False):
                 return True
         return False
@@ -2411,23 +2384,20 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._remove_kind("desktop")
         self._sync_windows()
         if (ws.returns.caller() == EDITOR
-                and "make" in self._order):
-            self._focus = "make"
+                and "menu" in self._order):
+            self._focus = "menu"
         ws._dirty = True
 
     def close_window_kind(self, kind):
         """Close one window by its process kind -- the console's windowed exit
         hook (_exit_to_caller / _exit_settings route here) and the title-strip
-        X's dispatch. Closing the Make window's EDITOR pops one level (the same
-        window flips back to the picker); everything else just closes.
+        X's dispatch: that window alone closes.
 
         (#111) autosave-only: the strip X is an exit path like any other, so
         every persistent surface hard-commits here BEFORE its window/level pops
         -- otherwise a kid mid-idle-debounce who drags-closes the window (rather
         than using the app's own CLOSE/context-X) would silently lose the last
-        edit. `kind` is the window's RESOLVED top (e.g. "menu" for the make
-        window showing the Editor, never the "make" group key), so this keys on
-        the same real kinds close_window_kind always has."""
+        edit."""
         ws = self.ws
         ws._dirty = True
         if kind == "storybook":

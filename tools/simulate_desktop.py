@@ -295,8 +295,8 @@ def _force_autoplay_on_open(ws):
     re-start it so the GIF/tour stays lively."""
     _orig_open = ws.open
 
-    def _open():
-        _orig_open()
+    def _open(cart=None):
+        _orig_open(cart)
         if ws.cart and isinstance(ws.config, dict) and "autoplay" in ws.config:
             ws.config["autoplay"] = 1
             ws._start()

@@ -344,7 +344,7 @@ console needs while no Python app runs is OS.
 | `runtime/host_app.py` | host-only | — | the simulator's harness; it becomes the host driver of the native loop (§4.2) as sprints 3 to 7 land |
 | `runtime/host_canvas.py` | host-only | — | the boards' canvas class on CPython; rebinds with `device/device_canvas.py` in 3 |
 | `runtime/input.py` | input | 3 | the host's eight names over the native input table (`HostInputTable`) |
-| `runtime/launcher_layer.py` | app | — | the launcher stays Python unless the return-budget measurement fails (§3); `EditorPickerLayer` rides in it |
+| `runtime/launcher_layer.py` | app | — | the launcher stays Python unless the return-budget measurement fails (§3); `HomeWindowLayer` rides in it |
 | `runtime/layers.py` | split | 7, rest stays | the `Layer` protocol stays as the apps' base; the draw-only overlays and the object-surface adapters go with the WMs |
 | `runtime/layout_base.py` | toolkit | 6 | the common head every `*Layout` derives from |
 | `runtime/lua_binding.py` | host-only | — | the host's ctypes binding of `moycore_lua.c` and the kernel's Player |

@@ -125,7 +125,7 @@ dt is INJECTED, never read from a clock -- `ScrollRegion` is the precedent):
   * every transient overlay is cleared each frame (`_quiesce`): the toast, the
     confetti/egg timers, the achievements list, the system menu, About, the
     notice banner, the FPS/perf HUDs, the cursor.
-  * `cover_cache._COVER_SLICE_MS` is raised so every launcher/picker cover builds
+  * `cover_cache._COVER_SLICE_MS` is raised so every home and home-window cover builds
     within its frame. This is load-bearing, not belt-and-braces: the cover
     build is a per-frame TIME budget, and the launcher home hashes differently
     at a 1ms slice than at 5ms. Left alone, these goldens would be a function
@@ -156,7 +156,7 @@ What moves these goldens (so a red one is diagnosable)
 -----------------------------------------------------
 Three things, in descending order of likelihood: a shell DRAW change; a
 `system_carts/` edit (the surfaces show real seeded content -- the shelf, the
-picker grid and every Editor tab render the seeded store, and the Editor tabs
+home window and every Editor tab render the seeded store, and the Editor tabs
 render `Star Catcher` specifically); and a font/palette change.
 
 Every row draws through the toolkit and the `*Layout` formulas, the T-Deck's
@@ -209,7 +209,7 @@ _EDITOR_CART = "Star Catcher"
 
 # Seed carts the golden matrix deliberately does NOT show.
 #
-# The launcher shelf, the picker grid and the desk icon column render REAL
+# The home, the home window and the desk icon column render REAL
 # seeded content (see "What moves these goldens" above), so without this list
 # these 116 goldens are a function of `system_carts/` and merely ADDING a cart
 # turns six configurations red for a reason that is not a pixel. That is the
@@ -521,10 +521,16 @@ def _surface_plan(ws, cfg):
         return _home_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
-        # The desk (desktop mode's floor) and the desk with ONE app window.
+        # The desk (desktop mode's floor), the desk with ONE app window, and
+        # the desk's PROJECTS: the home in a window, on Make, alone on the desk.
         plan.append(("desk", lambda: ws.open_desk()))
         plan.append(("desk_window_calc",
                      lambda: ws.open_app(ws._apps_by_id["calc"])))
+
+        def projects():
+            ws.open_desk()
+            ws.open_projects()
+        plan.append(("desk_window_projects", projects))
 
     def home():
         # The home, with nothing parked beneath it: go_home closes the desk's
@@ -534,7 +540,6 @@ def _surface_plan(ws, cfg):
             ws.open_library()
 
     plan.append(("launcher", home))
-    plan.append(("picker", lambda: ws.open_picker()))
     plan.append(("settings", lambda: ws.open_settings()))
     cart = _cart_by_title(ws, _EDITOR_CART)
     for tab in TABS:
@@ -662,8 +667,8 @@ def surface_names(config_name):
         return ["launcher" if t == "games" else "launcher_" + t for t in HOME_TAB_IDS]
     names = []
     if cfg["windowed"] and not cfg.get("console"):
-        names += ["desk", "desk_window_calc"]
-    names += ["launcher", "picker", "settings"]
+        names += ["desk", "desk_window_calc", "desk_window_projects"]
+    names += ["launcher", "settings"]
     names += ["editor_" + t for t in TABS]
     names += ["app_" + a for a in APPS]
     names += ["script_console"]

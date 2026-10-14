@@ -281,14 +281,14 @@ word — it's a deliberate mapping that mirrors the product journey:
 | Word | When | Example surfaces |
 |---|---|---|
 | **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, `CART INFO`, `RESTART CART`, crash panel |
-| **project** | The *same* cartridge while open in the Studio — yours, in progress | Picker (`PICK A PROJECT`), `YOUR PROJECTS`, MAKE captions |
+| **project** | The *same* cartridge while open in the Studio — yours, in progress | the home's Make tab (`N PROJECTS`), `YOUR PROJECTS`, MAKE captions |
 | **game** | Only cartridges that are actually games (attach-to-game flows, `NO GAMES YET`) | Files app verbs |
 | **app** | System tools (Files, Paint, Settings) | Docs, taskbar |
 
 A cartridge *becomes* a project when you open it and goes back to being a
 cartridge on the shelf — that's the See→Play→Open→Change story told through
-nouns. What's forbidden is crossing the map (a picker that says "DELETE CART"
-next to "PICK A PROJECT").
+nouns. What's forbidden is crossing the map (a Make tab that says "DELETE CART"
+next to "N PROJECTS").
 
 Auto-names stay boring on purpose (`New Cart`, `drawings_2`) — boring defaults
 invite renaming; a cute auto-name colonizes the kid's naming moment.

@@ -708,8 +708,8 @@ def test_the_strikes_survive_a_reboot(tmp_path):
     assert ws.cart_broken(boomy) is True
 
 
-def test_a_broken_app_stays_editable_in_the_picker(tmp_path):
-    """Editing it is how it gets fixed, so the picker must still offer it --
+def test_a_broken_app_stays_editable_on_make(tmp_path):
+    """Editing it is how it gets fixed, so Make must still offer it --
     which also means the temporary #181 app-cart hide must not catch it."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
@@ -718,7 +718,7 @@ def test_a_broken_app_stays_editable_in_the_picker(tmp_path):
         ws.go_home()
         _open(ws, "Boomy")
     ws.go_home()
-    titles = [it.get("title") for it in ws._picker_items(ws.carts.all)]
+    titles = [it.get("title") for it in ws._make_items(ws.carts.all)]
     assert "Boomy" in titles
 
 

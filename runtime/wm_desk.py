@@ -169,8 +169,8 @@ class _BackdropLayer(Layer):
 
     # -- desk icons (#105: desktop mode's launch surface) ---------------------
     #
-    # A static v1 column: PLAY (console mode, over the Library), PROJECTS (the
-    # picker), then every desktop-only system app. Geometry is deterministic
+    # A static v1 column: PLAY (console mode, over the home), PROJECTS (the
+    # home in a window, on Make), then every desktop-only system app. Geometry is deterministic
     # (the _chip_rects pattern -- computed per call, no stored state), so draw
     # and hit-test can never disagree, and the icons render before the drag
     # backdrop capture, so the drag cache carries them for free.
@@ -280,7 +280,7 @@ class _BackdropLayer(Layer):
         if key == "play":
             ws.open_library()
         elif key == "projects":
-            ws.open_picker()
+            ws.open_projects()
         else:
             app = ws._apps_by_id.get(key)
             if app is not None:

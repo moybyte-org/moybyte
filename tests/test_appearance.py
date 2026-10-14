@@ -99,14 +99,13 @@ def test_set_theme_swaps_the_tokens_pushes_the_grids_and_persists(tmp_path):
     assert ws.theme_colors is not before                 # REBOUND, see below
     assert ws.theme_colors == theme_colors("berry", "dark")
     assert ws.launcher.theme is ws.theme_colors          # the selection accent
-    assert ws.picker.theme is ws.theme_colors
     assert ws.bar_layer._bar_cache_gen != 0              # the cached strip repaints
     assert ws._dirty
     assert _stored(ws)["theme"] == "berry"
 
 
 def test_the_token_dict_is_rebound_so_the_shelf_key_changes(tmp_path):
-    """The invariant an in-place update would silently break: both grid
+    """The invariant an in-place update would silently break: both home
     layers' statics keys (one shared base, `_statics_base`) fold
     `id(ws.theme_colors)`, so a theme swap invalidates them BECAUSE the dict
     is a new object."""
@@ -115,12 +114,13 @@ def test_the_token_dict_is_rebound_so_the_shelf_key_changes(tmp_path):
         encoding="utf-8").split("\n") if "id(ws.theme_colors)" in ln]
     assert len(keyed) == 1, keyed
     cv = ws.sys_canvas
-    before = (ws.launcher_layer._statics_key(cv), ws.editor_picker._statics_key(cv))
+    ws.projects_grid = ws._home_grid("grid", [])
+    before = (ws.launcher_layer._statics_key(cv), ws.projects_layer._statics_key(cv))
     was = id(ws.theme_colors)
     ws.look.set_theme("forest", persist=False)
     assert id(ws.theme_colors) != was
     assert ws.launcher_layer._statics_key(cv) != before[0]
-    assert ws.editor_picker._statics_key(cv) != before[1]
+    assert ws.projects_layer._statics_key(cv) != before[1]
 
 
 def test_an_unknown_theme_falls_back_and_an_unknown_variant_too(tmp_path):

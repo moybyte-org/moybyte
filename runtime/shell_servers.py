@@ -237,7 +237,7 @@ class NavServer:
 
     def projects(self, g):
         """The editable PROJECTS: every scanned cart a system app does not
-        claim, the Editor's project-picker roster. Navigation and not `carts`:
+        claim, the home's Make roster. Navigation and not `carts`:
         a list of places to GO is not permission to author one."""
         ws = self.__ws
         return [c for c in ws.carts.all if not ws.is_system_app(c)]

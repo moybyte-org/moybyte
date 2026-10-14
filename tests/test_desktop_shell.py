@@ -290,21 +290,17 @@ def test_settings_panel_keeps_the_freed_dock_band_as_its_bottom_inset(tmp_path):
         assert py + ph == lay.h - 24 * fs                  # the KEPT dock band
 
 
-def test_launcher_home_no_longer_manages_carts(tmp_path):
-    """Cart management (create/copy/delete) moved off the launcher home into the
-    Editor picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the
-    picker is for MANAGING projects) -- a tap at the old NEW/DUP/DEL bar positions
-    on the launcher screen is now a no-op (see tests/test_top_bar.py for the
-    picker's DUP/DEL coverage)."""
-    from runtime import host_app
+def test_only_make_manages_carts(tmp_path):
+    """Cart management (create/copy/delete) is the Make tab's
+    (docs/shell_layout_2026-10.md §12); the tabs that play carry none of it
+    but an empty Mine's "+ New"."""
     ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    n0 = len(ws.launcher.items)
-    for rect in (ws.layout.new_btn, ws.layout.dup_btn, ws.layout.del_btn):
-        x, y, w, h = rect
-        drv.click(x + w // 2, y + h // 2)
-        drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0
+    for tab in ("games", "mine", "apps"):
+        ws.set_home_tab(tab)
+        real = [i for i, it in enumerate(ws.launcher.items) if it.get("path")]
+        ws.launcher.sel = real[0] if real else 0
+        verbs = ws.launcher_layer.zone_verbs()
+        assert not {"copy", "delete", "sure"} & set(verbs), tab
 
 
 def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):

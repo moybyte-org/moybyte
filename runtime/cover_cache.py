@@ -616,7 +616,7 @@ class CoverCache:
         the picture LRU is capped, so a set larger than the cap evicts its own
         head and an uncached test never runs out of work."""
         ws = self.ws
-        grids = (ws.launcher, ws.picker)
+        grids = (ws.launcher, ws.projects_grid)
         cap = self._COVER_PREBUILD_PER_GRID
         at = self._pb_i
         pos = 0

@@ -143,14 +143,15 @@ def test_the_s3_build_stages_no_windowed_tier():
 
 
 # ---------------------------------------------------------------------------
-# System-app carts are hidden from the Editor picker (TEMPORARY -- see
-# _picker_items; #181 editable system apps removes this).
+# System-app carts are hidden from the Make tab (TEMPORARY -- see
+# _make_items; #181 editable system apps removes this).
 # ---------------------------------------------------------------------------
 
-def test_picker_hides_claimed_system_apps(tmp_path):
+def test_make_hides_claimed_system_apps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True)
-    titles = [c.get("title") for c in ws.picker.items if c.get("path")]
+    ws.open_projects()
+    titles = [c.get("title") for c in ws.projects_grid.items if c.get("path")]
     claimed = []
     for cart in ws.carts.all:
         for app, _t in getattr(ws, "_apps", ()):
@@ -160,13 +161,13 @@ def test_picker_hides_claimed_system_apps(tmp_path):
     assert claimed, "fixture has no system-app carts -- test proves nothing"
     for t in claimed:
         assert t not in titles, "%r is a shell app, not an editable project" % t
-    # ...and the picker still offers real projects + the New tile.
-    assert any(not c.get("path") for c in ws.picker.items), "the + New tile"
+    # ...and Make still offers real projects + the New card.
+    assert any(not c.get("path") for c in ws.projects_grid.items), "the + New card"
     assert titles, "non-app carts must still be listed"
 
 
 def test_desk_still_offers_system_apps(tmp_path):
-    """Hiding is PICKER-only: the DESK icon column still opens them (on this
+    """Hiding is MAKE-only: the DESK icon column still opens them (on this
     tier apps leave the shelf by design -- "apps are windows, games are
     fullscreen" -- so the desk is their access path), and the filter must not
     cost a kid access to Files or Paint."""

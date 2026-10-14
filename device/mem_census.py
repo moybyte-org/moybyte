@@ -406,7 +406,7 @@ def referrers(addr, depth=8, width=3):
 CUTS = None
 
 # Cut last, so what the attributes before them share is charged to them.
-LATE = ("covers", "launcher", "picker", "wm", "carts", "store", "carts_store",
+LATE = ("covers", "launcher", "projects_grid", "wm", "carts", "store", "carts_store",
         "prefs", "system", "look", "layout")
 
 

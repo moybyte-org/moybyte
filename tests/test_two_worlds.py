@@ -342,7 +342,7 @@ def test_desk_icons_open_windows(tmp_path):
     assert ws.wm._order == ["files"]
     ws.wm._backdrop_layer._open_icon("projects")
     drv.frame(1 / 30)
-    assert ws.wm._order == ["files", "make"]
+    assert ws.wm._order == ["files", "projects"]
     # Pointer path: a tap on the PLAY icon box through the desk root layer.
     for key, box, _pill, _label, _cart in ws.wm._backdrop_layer._icon_rects():
         if key == "play":

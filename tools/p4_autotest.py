@@ -669,7 +669,7 @@ class P4Board:
         self.ser.flush()
 
     def open(self, what, timeout=8.0):
-        """`open settings|picker|appearance|wifi`; returns the echo line."""
+        """`open settings|projects|appearance|wifi`; returns the echo line."""
         return self.cmd("open %s" % what, timeout=timeout)
 
     # -- the `py` probe hook ----------------------------------------------
@@ -857,10 +857,10 @@ def _tour(board):
     check("appearance opens", "appearance" in st.get("order", ()),
           "%s | cart=%s" % (line, st.get("appearance_cart")))
 
-    board.open("picker")
+    board.open("projects")
     board.drain(6.0)              # cover pop-in settles
     st = board.state()
-    check("picker opens", "make" in st.get("order", ()), str(st.get("order")))
+    check("projects opens", "projects" in st.get("order", ()), str(st.get("order")))
 
     n0 = len(board.lines)
     board.drain(4.0)

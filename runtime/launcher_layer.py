@@ -10,14 +10,14 @@
 #   LauncherHomeLayer           the home: wallpaper, tab row, carousel, zone
 #   LauncherHomeLayer.draw      the home frame
 #   LauncherHomeLayer.zone_tap  the active tab's verb chips
-#   EditorPickerLayer           the Editor's project picker
-"""The home and the Editor's project picker (#28), extracted from Workstation
-(runtime/console.py) as Layers -- docs/history/shell_layers_refactor_v1.md (Move 1b).
+#   HomeWindowLayer             the home in a desktop-mode window (PROJECTS)
+"""The home (#28), extracted from Workstation (runtime/console.py) as a Layer
+-- docs/history/shell_layers_refactor_v1.md (Move 1b).
 
   * `Launcher`     -- the card GRID model + draw: items/sel/scroll/nav + the card
                       rendering, a shelf of two rows that scrolls sideways. Its
-                      instances are ws.picker, the Editor's PROJECT-PICKER grid,
-                      and ws.launcher in the home's `grid` arrangement.
+                      instances are ws.launcher in the home's `grid`
+                      arrangement and ws.projects_grid, the home window's.
   * `Carousel`     -- the home's row (docs/shell_layout_2026-10.md §12): the
                       same selection model over one row of square cover cards,
                       the centre card larger by a function of its distance
@@ -28,10 +28,10 @@
                       bar), its four tabs (Games / Mine / Apps / Make, the lists
                       ws._launcher_items builds) and their input. A tap on the
                       centre card is the active tab's (ws.launch_selected).
-  * `EditorPickerLayer` -- the "picker" content Layer (spec shell_ux_v1.md): the
-                      grid over ws.picker (a "+ New" card followed by every
-                      EDITABLE cart); picking a cart opens it in the Editor
-                      (ws.pick_selected).
+  * `HomeWindowLayer` -- the "projects" content Layer: the SAME home in a
+                      desktop-mode window (docs/shell_layout_2026-10.md §12, the
+                      desk's PROJECTS), always the `grid` arrangement over
+                      ws.projects_grid, opened on its Make tab.
 
 Boundary (single source of truth): ws.launcher (the instance) + ws.open() (open the
 selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The card
@@ -41,11 +41,11 @@ INJECTED at construction (`self._blit_glyph`), and the card-type maps
 circular import: this is a leaf (the only console touch is a lazy Layout fallback
 for a bare Launcher() that no caller ever constructs).
 
-The lent bar zone (#46): each grid layer draws and taps it (`draw_zone`/`zone_tap`)
+The lent bar zone (#46): each home layer draws and taps it (`draw_zone`/`zone_tap`)
 and proxies its grid's `zone_gen` -- an int the grid bumps whenever its `sel` (a
 property) or `items` changes, so BarLayer's strip cache trusts one int instead of
-re-deriving "did the selection move". On the home the zone carries the active
-tab's verbs on the selected card; on the picker, NEW/DUP/DEL.
+re-deriving "did the selection move". The zone carries the active tab's verbs
+on the selected card.
 """
 
 
@@ -70,7 +70,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
 
 
-# The "+ New" card (the picker's and Make's first, an empty Mine's only) is a
+# The "+ New" card (Make's first, an empty Mine's only) is a
 # PSEUDO entry (not a real cart): a plain dict with a marker `type` + a title,
 # flowing through the SAME grid (nav/sel/tile_at) as real carts, dispatched by its
 # type at tap time (create a game + open the Editor). `path` is None so cart
@@ -184,7 +184,7 @@ def _draw_star_badge(cv, names, blit_glyph, rect, on):
 
 
 class Launcher:
-    """The picker's grid (#28): carts laid out as a SHELF -- a card grid that
+    """The home's grid arrangement (#28): carts laid out as a SHELF -- a card grid that
     SCROLLS continuously LEFT-RIGHT (a shelf slides sideways; no pages) with
     the ONE tall featured card (the pinned "+ New") at the head of the list. Keeps the selection model (items/sel/selected/move) the rest of the
     console relies on; `scroll` is the grid's pixel offset, owned here and
@@ -204,10 +204,10 @@ class Launcher:
         self.items = items
         # Visual identity v1 (docs/visual_identity_v1.md Section 1.2): the HOME grid
         # exposes PLAY/CHANGE on the selected card on the desktop-density tiers
-        # (console sets this True on ws.launcher). The picker keeps it False -- a
-        # pick has ONE meaning there (open in the Editor).
+        # (console sets this True where a grid wants them).
         self.actions = False
         self.tab = HOME_TABS[0][0]   # the home's active tab (ws.set_home_tab)
+        self.tab_sel = {}            # tab -> the path its card was on when left
         # Stage 4 (#46 zoned bar): bumped whenever anything the lent left zone
         # shows (the selected cart's title) changes -- the `sel` property below
         # covers nav/tap/hover; set_items bumps it too (a NEW/DUP/DEL/rename can
@@ -513,13 +513,17 @@ class Launcher:
 
     def tabs_rect(self):
         """The home's tab row in the grid arrangement: in the panel's header
-        band, where the shelf's heading was."""
+        band, where the shelf's heading was, its plate (`_draw_home_chrome`:
+        2*fs out, an fs-thick border) clear of the shelf band -- a drag frame
+        shifts and refills the band, so chrome reaching into it would be torn."""
         lay = self.layout
         px, py, pw, _ph = lay.lib_panel
         fs = lay.fs
         inset = max(10 * fs, lay.cw // 42)
         h = min(_TAB_H * lay.cs, lay.lib_header_h - 4 * fs)
-        return (px + inset, py + (lay.lib_header_h - h) // 2, pw - 2 * inset, h)
+        y = py + (lay.lib_header_h - h) // 2
+        y = min(y, self.band_rect()[1] - h - 3 * fs)
+        return (px + inset, y, pw - 2 * inset, h)
 
     def repaint_band(self, cv, sheet_for, fill):
         """The whole band again: its backdrop (`fill(cv, rect)`), then the
@@ -867,7 +871,8 @@ HOME_SCALE_MAX = 1.5
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
 _VERB_LABEL = {"play": "PLAY", "open": "OPEN", "change": "CHANGE",
-               "new": "NEW", "search": "SEARCH"}
+               "new": "NEW", "search": "SEARCH", "copy": "COPY",
+               "delete": "DEL", "sure": "SURE?"}
 
 
 def tab_count_title(tab, n):
@@ -1428,19 +1433,25 @@ def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
 
 
 class LauncherHomeLayer:
-    """The "launcher" content Layer (system domain): the home desktop. draw composes
-    the wallpaper backdrop -> the cart icon grid (ws.launcher) -> the top bar; input is
-    the grid nav / selection, dispatching an open to ws.open(). Owns only the trackball
-    hover state (_lhover); ws.launcher is the single source it reads."""
+    """The "launcher" content Layer (system domain): the home, console mode's root.
+    draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
+    ws.launcher) -> the top bar; input is the grid nav / selection, dispatching
+    the active tab's tap (ws.launch_selected). Owns the trackball hover state
+    (_lhover), the tab-row focus and the armed DEL; `grid` is the single source
+    it reads. `HomeWindowLayer` is the same home in a window."""
 
     id = "launcher"
     domain = "system"
+    strip = "home"            # the bar strip it draws and taps (BarLayer's `where`)
+    searchable = True         # Games carries SEARCH (the query is the home's)
 
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
         self._lhover = (-1, -1)       # the last pointer sample (a release is not a move)
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
+        self._delete = ConfirmTap()   # Make's DEL: the first tap arms, the second deletes
+        self._delete_path = None      # ...the card it was armed on
         # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
         # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
         # stack megabytes of writes -- capping a shelf drag at ~7fps). During a
@@ -1480,16 +1491,22 @@ class LauncherHomeLayer:
         self._band_bg = None          # cv.new_layer sized to the band
         self._band_key = None
 
+    @property
+    def grid(self):
+        """The card model this home draws: ws.launcher, whose class is the
+        layout's arrangement."""
+        return self.ws.launcher
+
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
         Library panel fill/header/footer) is a pure function of: the shared
         base plus the wallpaper and the search field. A key change forces
         full paints until the streak re-arms."""
         ws = self.ws
-        return _statics_base(ws, cv, ws.launcher) + (
+        return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id,
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
-            ws.launcher.tab, self._tab_focus)
+            self.grid.tab, self._tab_focus)
 
     def _retained_key(self, cv):
         """Everything the WHOLE home frame's pixels are a pure function of: the
@@ -1502,9 +1519,9 @@ class LauncherHomeLayer:
         surface_model_v1.md §14.2 documents -- so additions to the home draw
         must extend this key."""
         ws = self.ws
-        return (self._statics_key(cv), ws.launcher.sel, ws.launcher.scroll,
+        return (self._statics_key(cv), self.grid.sel, self.grid.scroll,
                 ws.covers.gen, self._lhover,
-                tuple(it.get("title") for it in ws.launcher.items),
+                tuple(it.get("title") for it in self.grid.items),
                 ws.system.text("favorites"),
                 ws.bar_layer._cart_bar_key("home"))
 
@@ -1517,7 +1534,7 @@ class LauncherHomeLayer:
         ws = self.ws
         cache = self._lib_cache
         if (cache is None or self._lib_unsupported
-                or ws.launcher.dragging or ws.launcher.flinging
+                or self.grid.dragging or self.grid.flinging
                 or ws._animating(dt)):
             return False
         # A RECORDING canvas (the wasm head's CommandCanvas root) can't replay
@@ -1564,7 +1581,7 @@ class LauncherHomeLayer:
     def _band_layer(self, cv):
         """The band backdrop's layer, minted (or re-minted for a new band
         size) on demand."""
-        bx, by, bw, bh = self.ws.launcher.band_rect()
+        bx, by, bw, bh = self.grid.band_rect()
         bg = self._band_bg
         if bg is None or bg.w != bw or bg.h != bh:
             if bg is not None and getattr(bg, "release", None) is not None:
@@ -1593,7 +1610,7 @@ class LauncherHomeLayer:
 
     def _band_key_of(self, cv):
         ws = self.ws
-        return _statics_base(ws, cv, ws.launcher) + (ws.look.wallpaper_id,)
+        return _statics_base(ws, cv, self.grid) + (ws.look.wallpaper_id,)
 
     def _capture_band_backdrop(self, cv, dt):
         """Copy the band's rect of the wallpaper just drawn -- before any
@@ -1611,7 +1628,7 @@ class LauncherHomeLayer:
         key = self._band_key_of(cv)
         try:
             bg = self._band_layer(cv)
-            bx, by, _bw, _bh = ws.launcher.band_rect()
+            bx, by, _bw, _bh = self.grid.band_rect()
             bg.blit_strip(cv, -bx, -by)
             self._band_key = key
         except Exception:  # noqa: BLE001 -- forfeit, as the retained frame does
@@ -1622,7 +1639,7 @@ class LauncherHomeLayer:
     def _backdrop_fill(self, cv, r):
         """The band's backdrop inside rect `r`: the wallpaper, restored from
         the captured band."""
-        bx, by, _bw, _bh = self.ws.launcher.band_rect()
+        bx, by, _bw, _bh = self.grid.band_rect()
         cv.blit_strip_rect(self._band_bg, bx, by, r[0], r[1], r[2], r[3])
 
     def _capture_retained(self, cv, dt):
@@ -1636,8 +1653,8 @@ class LauncherHomeLayer:
         carries the scroll offset, so every frame would re-capture) and while
         anything animates (those pixels are not a pure function of the key)."""
         ws = self.ws
-        if (self._lib_unsupported or ws.launcher.dragging
-                or ws.launcher.flinging or ws._animating(dt)):
+        if (self._lib_unsupported or self.grid.dragging
+                or self.grid.flinging or ws._animating(dt)):
             return
         if (getattr(cv, "begin_surface", None) is not None
                 or getattr(cv, "RETAINED_FRAMES", 0) < 1):
@@ -1662,7 +1679,7 @@ class LauncherHomeLayer:
 
     def _carousel(self):
         """Whether the home shows the carousel (else the grid arrangement)."""
-        return isinstance(self.ws.launcher, Carousel)
+        return isinstance(self.grid, Carousel)
 
     def _surface_fill(self, cv, r):
         """The grid arrangement's band backdrop: its panel's surface."""
@@ -1673,12 +1690,12 @@ class LauncherHomeLayer:
         diag's HITCH split. The carousel's only once the band's backdrop holds
         this frame's wallpaper; the grid's band lies on its panel."""
         if not self._carousel():
-            return _drag_partial(self, cv, dt, self.ws.launcher, "launcher",
-                                 self._surface_fill, "home", timed=True)
+            return _drag_partial(self, cv, dt, self.grid, self.id,
+                                 self._surface_fill, self.strip, timed=True)
         if self._band_bg is None or self._band_key != self._band_key_of(cv):
             return False
-        return _drag_partial(self, cv, dt, self.ws.launcher, "launcher",
-                             self._backdrop_fill, "home", timed=True)
+        return _drag_partial(self, cv, dt, self.grid, self.id,
+                             self._backdrop_fill, self.strip, timed=True)
 
     def draw(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
@@ -1698,13 +1715,13 @@ class LauncherHomeLayer:
         wm = ws.wm
         carousel = self._carousel()
         if carousel:
-            ws.launcher.motion = getattr(wm, "HOME_MOTION", "full")
-            ws.launcher.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_MAX)
+            self.grid.motion = getattr(wm, "HOME_MOTION", "full")
+            self.grid.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_MAX)
         # Kinetic fling (#113) and the glide to the centre card: advance the
         # row BEFORE painting, and keep the redraw gate open until it rests.
         # Both ride the partial path (its gate includes flinging).
-        ws.launcher.anim_frame(dt)
-        if ws.launcher.flinging:
+        self.grid.anim_frame(dt)
+        if self.grid.flinging:
             ws.request_frame()
         if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#58/#66)
             return
@@ -1713,9 +1730,9 @@ class LauncherHomeLayer:
         # matches a full paint exactly -- pixel-wise it IS one -- so the scroll
         # ring and the drag partial's streak stay honest.
         if self._try_stamp_retained(cv, dt):
-            ws.launcher._scroll_region().note_painted(
+            self.grid._scroll_region().note_painted(
                 ws._frames_drawn,
-                (ws.launcher.paint_key(), self._statics_key(cv), ws.covers.gen),
+                (self.grid.paint_key(), self._statics_key(cv), ws.covers.gen),
                 _cursor_stamp(ws))
             _advance_streak(self, cv)
             return
@@ -1741,13 +1758,13 @@ class LauncherHomeLayer:
         # The tab row and the carousel's band (docs/shell_layout_2026-10.md
         # §12) over the wallpaper; the cards draw inside the band.
         self._draw_home_chrome(cv)
-        ws.launcher.draw(cv, ws.covers.sheet_icon)
+        self.grid.draw(cv, ws.covers.sheet_icon)
         # #113: record this full paint in the shelf's blit ring (offset + the
         # state the pixels depend on + the cursor stamp about to land on top),
         # so an eligible drag frame can shift instead of repainting every card.
-        ws.launcher._scroll_region().note_painted(
+        self.grid._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.launcher.paint_key(), self._statics_key(cv), ws.covers.gen),
+            (self.grid.paint_key(), self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
         _t2 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
@@ -1764,7 +1781,7 @@ class LauncherHomeLayer:
     def tab_rects(self):
         """[(tab id, rect, labels_on)] of the home's tab row."""
         fs = self.ws.layout.fs
-        return _ui.tab_row_rects(self.ws.launcher.tabs_rect(), HOME_TABS, fs)
+        return _ui.tab_row_rects(self.grid.tabs_rect(), HOME_TABS, fs)
 
     def _draw_grid_panel(self, cv):
         """The grid arrangement's framed panel: the surface the shelf's cards
@@ -1778,7 +1795,7 @@ class LauncherHomeLayer:
         cv.rect(x, y, w, h, th["surface"])
         for i in range(fs):
             cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th["border"])
-        label = ws.home_title()
+        label = ws.home_title(self.grid)
         tw = _ui.print_width(label, fs)
         ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - lay.line_h) // 2
         tx = x + (w - tw) // 2
@@ -1798,7 +1815,7 @@ class LauncherHomeLayer:
         th = ws.theme_colors
         lay = ws.layout
         fs = lay.fs
-        grid = ws.launcher
+        grid = self.grid
         rects = self.tab_rects()
         tx, ty, tw, tht = grid.tabs_rect()
         p = 2 * fs
@@ -1819,7 +1836,7 @@ class LauncherHomeLayer:
                                  th["focus"])
         query = getattr(ws, "search_query", "")
         typing = getattr(ws, "search_typing", False)
-        if query or typing:
+        if self.searchable and (query or typing):
             label = "SEARCH: " + query + ("_" if typing else "")
             sx = x1 + 4 * p
             label = _ui.print_fit(label, max(6 * lay.font_w, tx + tw - sx - p), fs)
@@ -1865,9 +1882,9 @@ class LauncherHomeLayer:
             # The tab row (up from the carousel): left/right switch tabs,
             # down or enter returns to the row.
             if i.pressed("left"):
-                ws.step_home_tab(-1)
+                ws.step_home_tab(-1, self.grid)
             if i.pressed("right"):
-                ws.step_home_tab(1)
+                ws.step_home_tab(1, self.grid)
             if i.pressed("down") or i.pressed("a") or i.pressed("run"):
                 self._tab_focus = False
                 ws.mark_dirty()
@@ -1880,7 +1897,7 @@ class LauncherHomeLayer:
         # The carousel (§12): left/right glide by a card, a held key one
         # motion; up takes the keys to the tab row. The grid: the arrows
         # step its cells, and up from its top row takes them to the tabs.
-        grid = ws.launcher
+        grid = self.grid
         if i.pressed("left"):
             grid.nav2d(-1, 0)
             ws.mark_dirty()
@@ -1899,21 +1916,37 @@ class LauncherHomeLayer:
         if i.pressed("a") or i.pressed("run"):
             # #184: DEFERRED -- the cart start runs behind the next painted
             # frame (LOADING toast), never inside this input dispatch.
-            ws.defer(ws.launch_selected)     # the active tab's tap
+            ws.defer(self._launch)           # the active tab's tap
         if i.pressed("code"):
             # CHANGE (visual identity v1 Section 1.2): open the selected cartridge
             # in place in the Studio/Editor, landing on Config.
-            ws.defer(ws.change_selected)
-        if (i.pressed("b") and ws.ach_ui._konami_pos == 0
-                and ws.bar_layer._show_x("home")):
-            ws.open_desk()                   # the home's X, from a keyboard
-                                             # (a B inside the Konami code is the code's)
+            ws.defer(self._change)
+        if i.pressed("b") and ws.ach_ui._konami_pos == 0:
+            self._back()                     # (a B inside the Konami code is the code's)
         elif i.pressed("home"):
             ws.home_key()
         return True
 
+    def _back(self):
+        """B: the home's X, from a keyboard -- where the X shows."""
+        if self.ws.bar_layer._show_x(self.strip):
+            self.ws.open_desk()
+
+    # The doors out of the home; each leaves DEL disarmed behind it.
+    def _launch(self):
+        self._delete.disarm()
+        self.ws.launch_selected(self.grid)
+
+    def _change(self):
+        self._delete.disarm()
+        self.ws.change_selected(self.grid)
+
+    def _new(self):
+        self._delete.disarm()
+        self.ws.new_cart_and_edit(self.grid)
+
     def _grid_top_row(self):
-        grid = self.ws.launcher
+        grid = self.grid
         if not grid.items:
             return True
         return grid.layout.tile_cell(grid.sel, grid._featured())[0] == 0
@@ -1924,7 +1957,7 @@ class LauncherHomeLayer:
         clean RELEASE (ui.DragTap), so a drag never launches; the trackball's
         cursor selects the card it moves onto."""
         ws = self.ws
-        grid = ws.launcher
+        grid = self.grid
         lay = ws.layout
         down = ws.pointer.down
         if click:
@@ -1937,7 +1970,7 @@ class LauncherHomeLayer:
         i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
         if i is not None:
             grid.sel = i
-            ws.defer(ws.launch_selected)     # #184: start behind the paint
+            ws.defer(self._launch)           # #184: start behind the paint
             return True
         if click or down:
             self._lhover = (px, py)
@@ -1947,8 +1980,11 @@ class LauncherHomeLayer:
         elif (px, py) != self._lhover:
             self._lhover = (px, py)
             i = grid.tile_at(px, py)
-            if i is not None:
+            if i is not None and i != grid.sel:
                 grid.sel = i
+                # A selection move MARKS DIRTY (#177): in a window the content
+                # freeze reuses the retained buffer on position-only frames.
+                ws._dirty = True
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1959,14 +1995,14 @@ class LauncherHomeLayer:
         # centre. The favorite star on the centre card fires on the press.
         ws = self.ws
         down = ws.pointer.down
-        grid = ws.launcher
+        grid = self.grid
         if click:
-            if ws.bar_layer.handle_home_tap(px, py):
+            if ws.bar_layer.handle_bar_tap(self.strip, px, py):
                 return True
             for tid, r, _on in self.tab_rects():
                 if _in(px, py, r):
                     self._tab_focus = False
-                    ws.set_home_tab(tid)
+                    ws.set_home_tab(tid, grid)
                     return True
             frect = grid.favorite_rect(grid.sel)
             if frect is not None and _in(px, py, frect):
@@ -1981,7 +2017,7 @@ class LauncherHomeLayer:
             self._tab_focus = False
             if i == grid.sel and not grid.moving:
                 # #184: the tap frame paints first; the start runs behind it.
-                ws.defer(ws.launch_selected)
+                ws.defer(self._launch)
             else:
                 grid.glide_to(i)
                 ws.mark_dirty()
@@ -1994,18 +2030,25 @@ class LauncherHomeLayer:
 
     @property
     def zone_gen(self):
-        """Proxy onto ws.launcher.zone_gen -- the launcher GRID owns sel/items
-        (the state that actually varies the zone's pixels), so this just gives
-        BarLayer a uniform `owner.zone_gen` regardless of which app owns a zone."""
-        return self.ws.launcher.zone_gen
+        """Proxy onto the grid's zone_gen -- the GRID owns sel/items (the state
+        that actually varies the zone's pixels) -- plus the DEL guard's
+        generation, so BarLayer's strip cache repaints the armed prompt."""
+        return self.grid.zone_gen + self._delete.gen
+
+    def _armed(self):
+        """Whether DEL is armed on the selected card."""
+        sel = self.grid.selected()
+        return (self._delete.armed and sel is not None
+                and sel.get("path") == self._delete_path)
 
     def zone_verbs(self):
         """The active tab's verbs on the selected card (§12's table): Games
-        PLAY, CHANGE, SEARCH; Mine PLAY, CHANGE; Apps OPEN; Make NEW, CHANGE.
-        CHANGE needs a real cart and a store that manages projects; the
-        "+ New" card's verb is NEW."""
+        PLAY, CHANGE, SEARCH; Mine PLAY, CHANGE; Apps OPEN; Make NEW, CHANGE,
+        COPY, DEL. CHANGE, COPY and DEL need a real cart and a store that
+        manages projects; the "+ New" card's verb is NEW. DEL reads SURE?
+        once armed. SEARCH is the fullscreen home's alone."""
         ws = self.ws
-        grid = ws.launcher
+        grid = self.grid
         tab = grid.tab
         sel = grid.selected()
         real = sel is not None and sel.get("path") \
@@ -2014,11 +2057,16 @@ class LauncherHomeLayer:
         if tab == "apps":
             return ("open",) if real else ()
         if tab == "make":
-            return ("new", "change") if change else ("new",)
+            if not getattr(ws, "can_manage", True):
+                return ()                        # a read-only store makes nothing
+            if not change:
+                return ("new",)
+            return ("new", "change", "copy",
+                    "sure" if self._armed() else "delete")
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
             return ("new",)
         out = ("play", "change") if change else (("play",) if real else ())
-        if tab == "games":
+        if tab == "games" and self.searchable:
             out = out + ("search",)
         return out
 
@@ -2048,7 +2096,9 @@ class LauncherHomeLayer:
         th = ws.theme_colors
         lay = ws.layout
         fill = {"play": th["play"], "open": th["play"], "change": th["author"],
-                "new": th["author"], "search": NAMES["light_grey"]}
+                "new": th["author"], "search": NAMES["light_grey"],
+                "copy": th["author"], "delete": NAMES["light_grey"],
+                "sure": th["danger"]}
         for verb, (x, y, w, h) in self._zone_action_rects(rect).items():
             cv.rect(x, y, w, h, fill[verb])
             cv.rectb(x, y, w, h, NAMES["black"])
@@ -2062,265 +2112,75 @@ class LauncherHomeLayer:
             rect if rect is not None else ws.layout.zone_left)
         for verb, r in chips.items():
             if _in(px, py, r):
+                if verb != "sure":
+                    self._delete.disarm()
                 if verb in ("play", "open"):
-                    ws.defer(ws.launch_selected)   # #184: start behind the paint
+                    ws.defer(self._launch)   # #184: start behind the paint
                 elif verb == "change":
-                    ws.defer(ws.change_selected)
+                    ws.defer(self._change)
                 elif verb == "new":
-                    ws.defer(ws.new_cart_and_edit)
+                    ws.defer(self._new)
+                elif verb == "copy":
+                    ws.carts.dup(self.grid.selected())
+                elif verb == "delete":
+                    self._delete_path = self.grid.selected().get("path")
+                    self._delete.arm()
+                elif verb == "sure":
+                    self._delete.disarm()
+                    ws.carts.delete(self.grid.selected())
                 else:
                     ws.toggle_search()
                 return True
         return False
 
 
-class EditorPickerLayer:
-    """The Editor's PROJECT-PICKER content Layer (spec shell_ux_v1.md, the Editor's
-    entry state when no project is chosen). It reuses the launcher's cart-grid look --
-    the SAME `Launcher` tile rendering, over `ws.picker` (a second grid instance whose
-    items are the "+ New" pseudo tile followed by every EDITABLE cart: games, tools,
-    apps, wallpapers, built-ins). Picking a cart opens it in the Editor (ws.pick_selected
-    -> ws.open_in_editor); the "+ New" tile creates a game + opens it. Exit (the bar X /
-    B) pops back to the launcher; the Editor's own "projects" affordance returns HERE.
+class HomeWindowLayer(LauncherHomeLayer):
+    """The "projects" content Layer: the home in a desktop-mode window, the
+    desk's PROJECTS (docs/shell_layout_2026-10.md §12). The same tabs,
+    sources, taps and verbs over its own card model, ws.projects_grid, always
+    the `grid` arrangement whatever the fullscreen home's, opened on Make.
 
-    Mirrors LauncherHomeLayer (grid nav + trackball hover + page chevrons) but dispatches
-    to the picker verbs instead of RUN, and lends the bar a "PICK A PROJECT" title (or
-    DUP/DEL, see below). Owns the trackball hover state; ws.picker is the single source
-    of truth for items/selection.
+    A window is a tool space: the panel field around the grid's own panel,
+    never the wallpaper (the desk shows its own around the window), so nothing
+    in it animates and an idle window draws nothing. The WM retains the
+    window's buffer, so it keeps no retained frame of its own; a drag rides
+    the shared `_drag_partial` and the WM's content-gesture path."""
 
-    Cart management lives HERE now (docs/shell_ux_v1.md: the launcher is for PLAYING,
-    the picker is for MANAGING projects) -- DUP/DEL act on the picker's SELECTED cart
-    via the lent zone (ws.carts.dup/ws.carts.delete, which read `ws.picker`'s selection
-    instead of the launcher's -- see console.py). "+ New" was already picker-only (the
-    pinned grid tile). DEL is two-tap guarded (a `ConfirmTap`): a project sits right next
-    to its icon in this grid, so a single accidental tap must not delete it -- the
-    first DEL tap arms a "DELETE? TAP AGAIN" prompt (folded into `zone_gen` so the bar
-    cache repaints), the second confirms. Any navigation/selection change (nav2d, a
-    tile tap/hover, paging, exiting) disarms it, and `reset()` (called by
-    ws.open_picker()) clears it fresh on every visit."""
+    id = "projects"
+    strip = "projects"
+    searchable = False
 
-    id = "picker"
-    domain = "system"
+    @property
+    def grid(self):
+        return self.ws.projects_grid
 
-    def __init__(self, ws, names):
-        self.ws = ws
-        self._NAMES = names
-        self._phover = (-1, -1)       # trackball hover pos (like LauncherHomeLayer._lhover)
-        self._delete = ConfirmTap()   # DEL: first tap arms, second confirms
-        # Drag-scroll partial repaint (#113): the picker grid rides the same
-        # streak/statics machinery as the home shelf (LauncherHomeLayer), so a
-        # drag frame can blit the band instead of repainting every card.
-        self._full_streak = 0
-        self._statics = None
-        self._last_pf = None          # paint-continuity guard (see the home
-                                      # layer's __init__: foreign paints void
-                                      # the retained ping-pong buffers)
+    def _back(self):
+        """B closes this window alone, as its title strip's X does."""
+        self.ws.wm.close_window_kind(self.id)
 
-    def reset(self):
-        """Clear any armed delete-confirm state -- called by ws.open_picker() so a
-        stale "DELETE? TAP AGAIN" from a previous visit never carries into a fresh
-        one."""
-        self._delete.disarm()
+    def prealloc_retained(self):
+        return
 
-    def _statics_key(self, cv):
-        """Everything the picker's STATIC backdrop (panel fill + dot grid) and
-        band chrome are a pure function of: exactly the shared base."""
-        return _statics_base(self.ws, cv, self.ws.picker)
-
-    def _dots(self, cv, r, xoff):
-        """Dot-grid pixels inside rect `r`, x-lattice shifted by `xoff`. The
-        #113 band contract requires everything inside a scrolled band to be a
-        pure function of the offset, so the dots INSIDE the shelf band ride
-        the scroll (xoff = -(scroll % step); at rest they sit on the static
-        lattice) while the rest of the screen keeps the fixed lattice."""
-        th = self.ws.theme_colors
-        fs = self.ws.layout.fs
-        step = 24 * fs
-        base = 8 * fs
-        if r[2] <= 0 or r[3] <= 0:
-            return
-        x0 = r[0] + ((base + xoff - r[0]) % step)   # first lattice x >= r.x
-        y0 = r[1] + ((base - r[1]) % step)
-        for gy in range(y0, r[1] + r[3], step):
-            for gx in range(x0, r[0] + r[2], step):
-                cv.pix(gx, gy, th["dim"])
-
-    def _dot_xoff(self):
-        """The in-band dot lattice's scroll offset."""
-        lay = self.ws.layout
-        return -(self.ws.picker.scroll % (24 * lay.fs))
-
-    def _backdrop_fill(self, cv, r):
-        """The picker's band backdrop restricted to rect `r`: the theme panel
-        fill plus the scroll-riding dot grid -- byte-identical to the band
-        slice the full draw() paints at the same offset."""
-        th = self.ws.theme_colors
-        cv.rect(r[0], r[1], r[2], r[3], th["panel"])
-        self._dots(cv, r, self._dot_xoff())
-
-    def _try_drag_partial(self, cv, dt):
-        """The picker grid's drag fast path (`_drag_partial`) over its static
-        backdrop."""
-        return _drag_partial(self, cv, dt, self.ws.picker, "picker",
-                             self._backdrop_fill, "picker")
+    def release_retained(self):
+        return False
 
     def draw(self, dt):
         ws = self.ws
         cv = ws.sys_canvas
+        grid = self.grid
         _paint_continuity(self, ws)           # foreign paints void the buffers
-        # Kinetic fling (#113): tick before painting; keep frames coming.
-        ws.picker.anim_frame(dt)
-        if ws.picker.flinging:
+        grid.anim_frame(dt)
+        if grid.flinging:
             ws.request_frame()
         if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#113)
             return
-        # The picker is a TOOL space (owner call, 2026-07-08): a STATIC backdrop
-        # instead of the animated wallpaper -- "it's software". Besides the look,
-        # this makes the screen FREE under the redraw gate (#44): nothing here
-        # animates, so an idle picker draws only on input. Styled to the panel
-        # THEME (Settings -> THEME; the "night" default is the moybyte site
-        # colorway): the theme's panel field with a faint dot-grid texture,
-        # matching the desktop shell + Settings (still one fill + a few hundred
-        # pix -- static, so effectively free).
-        th = ws.theme_colors
-        cv.cls(th["panel"])
-        # Dot grid: fixed lattice outside the shelf band, scroll-riding inside
-        # it (#113: the band must be a pure function of the offset so a drag
-        # frame can blit-shift it; at scroll 0 both lattices coincide, so the
-        # rest-state picker is byte-identical to the pre-#113 look).
-        bx, by, bw, bh = ws.picker.band_rect()
-        W, H = cv.w, cv.h
-        self._dots(cv, (0, 0, W, by), 0)
-        self._dots(cv, (0, by + bh, W, H - (by + bh)), 0)
-        self._dots(cv, (0, by, bx, bh), 0)
-        self._dots(cv, (bx + bw, by, W - (bx + bw), bh), 0)
-        self._dots(cv, (bx, by, bw, bh), self._dot_xoff())
-        ws.picker.draw(cv, ws.covers.sheet_icon)
-        # #113: record this full paint in the blit ring + advance the streak.
-        ws.picker._scroll_region().note_painted(
+        cv.cls(ws.theme_colors["panel"])
+        self._draw_grid_panel(cv)
+        self._draw_home_chrome(cv)
+        grid.draw(cv, ws.covers.sheet_icon)
+        grid._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.picker.sel, self._statics_key(cv), ws.covers.gen),
+            (grid.paint_key(), self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
+        ws.bar_layer._draw_status_strip(self.strip)
         _advance_streak(self, cv)
-        ws.bar_layer._draw_status_strip("picker")
-
-    def handle_input(self, i):
-        ws = self.ws
-        if i.pressed("left"):
-            self._delete.disarm(); ws.picker.nav2d(-1, 0)
-        if i.pressed("right"):
-            self._delete.disarm(); ws.picker.nav2d(1, 0)
-        if i.pressed("up"):
-            self._delete.disarm(); ws.picker.nav2d(0, -1)
-        if i.pressed("down"):
-            self._delete.disarm(); ws.picker.nav2d(0, 1)
-        if i.pressed("a") or i.pressed("run"):
-            self._delete.disarm()
-            # #184: deferred -- the workspace open runs behind the next paint
-            ws.defer(ws.pick_selected)       # open the picked cart in the Editor (or + New)
-        if i.pressed("b"):
-            self._delete.disarm()
-            ws.exit()                        # back one level
-        elif i.pressed("home") or i.pressed("stop"):
-            self._delete.disarm()
-            ws.home_key()
-        return True
-
-    def handle_pointer(self, px, py, click):
-        ws = self.ws
-        down = ws.pointer.down
-        if click:
-            if ws.bar_layer.handle_bar_tap("picker", px, py):   # clock/≡/wifi/X + lent zone
-                return True
-            lay = ws.layout
-            if ws.picker.max_scroll() > 0 and _in(px, py, lay.scroll_lt):
-                self._delete.disarm(); ws.picker.scroll_cols(-1); return True
-            if ws.picker.max_scroll() > 0 and _in(px, py, lay.scroll_rt):
-                self._delete.disarm(); ws.picker.scroll_cols(1); return True
-        # The grid's press/drag/release machine (mirrors LauncherHomeLayer): a
-        # clean tap release picks; a drag scrolls and disarms the DEL confirm.
-        i = ws.picker.pointer_frame(px, py, click, down,
-                                    dt_ms=ws._pointer_dt_ms)
-        if i is not None:
-            self._delete.disarm()
-            ws.picker.sel = i
-            # #184: the tap frame paints the moved selection + LOADING first;
-            # the workspace open + Editor build runs behind it.
-            ws.defer(ws.pick_selected)
-            return True
-        if click or down:
-            if ws.picker.dragging:
-                self._delete.disarm()
-            self._phover = (px, py)   # track the finger so the release frame
-            return True               # isn't read as a hover "move" below
-        # Trackball hover (pointer up, no click): preview the tile the cursor moved
-        # onto (mirrors LauncherHomeLayer -- seed to the live pos so the first
-        # centered frame isn't a move).
-        if self._phover == (-1, -1):
-            self._phover = (px, py)
-        elif (px, py) != self._phover:
-            self._phover = (px, py)
-            i = ws.picker.tile_at(px, py)
-            if i is not None:
-                self._delete.disarm()
-                if i != ws.picker.sel:
-                    ws.picker.sel = i
-                    # A real selection move must MARK DIRTY (#177): inside the
-                    # make window the content freeze reuses the retained buffer
-                    # on position-only frames, so an unmarked hover-select
-                    # painted nothing (dead on the desktop tier + web).
-                    ws._dirty = True
-        return True
-
-    # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
-
-    @property
-    def zone_gen(self):
-        """Proxy onto ws.picker.zone_gen PLUS the local delete-confirm generation --
-        the picker GRID owns sel/items (same trick LauncherHomeLayer uses), but
-        arming/disarming DELETE changes the zone's pixels (the title <-> "DELETE? TAP
-        AGAIN") without necessarily touching sel/items, so it needs its own counter
-        folded in so BarLayer's cache repaints on that transition too."""
-        return self.ws.picker.zone_gen + self._delete.gen
-
-    def draw_zone(self, cv, rect):
-        """The picker's lent left zone: DUP/DEL icons over the picker's SELECTED cart
-        (when can_manage and a real cart -- not the pinned "+ New" tile -- is picked),
-        then a title: "DELETE? TAP AGAIN" while a delete is armed, else "PICK A
-        PROJECT" -- the picker is the one place a kid creates/copies/deletes/edits a
-        project (docs/shell_ux_v1.md)."""
-        ws = self.ws
-        NAMES = self._NAMES
-        lay = ws.layout
-        real = ws._real_selected(ws.picker)
-        if ws.can_manage and real is not None:
-            ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv, lay.cs)
-            ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv, lay.cs)
-        armed = self._delete.armed and real is not None
-        title = "DELETE? TAP AGAIN" if armed else "PICK A PROJECT"
-        th = ws.theme_colors
-        if ws.bar_layer.zone_band_light("picker"):
-            ink = th["danger"] if armed else th["ink"]
-        else:
-            ink = NAMES["yellow"] if armed else NAMES["white"]
-        cv.print(title, lay.status_name_x, 3 + lay.bar_text_dy, ink, 1)
-
-    def zone_tap(self, px, py, rect=None):
-        """The picker's lent left-zone tap slice: DUP (copy) fires immediately on the
-        picker's selected cart -- a copy only ADDS, so it needs no guard. DEL is
-        two-tap guarded: the first tap arms "DELETE? TAP AGAIN" (draw_zone shows it),
-        the second (while still armed) confirms and deletes; nothing lower ever sees a
-        raw one-tap delete. Both no-op when read-only or the selection is the pinned
-        "+ New" tile."""
-        ws = self.ws
-        lay = ws.layout
-        real = ws._real_selected(ws.picker)
-        if ws.can_manage and real is not None and _in(px, py, lay.dup_btn):
-            self._delete.disarm()
-            ws.carts.dup()
-            return True
-        if ws.can_manage and real is not None and _in(px, py, lay.del_btn):
-            if self._delete.tap():
-                ws.carts.delete()
-            return True
-        return False

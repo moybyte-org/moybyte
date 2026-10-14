@@ -33,9 +33,11 @@ show the moybyte wordmark). Phase 3's shared `ui` toolkit, warm-light Studio
 surfaces, responsive app seam, and reference Calc app are also implemented.
 Phases 4-5 and on-glass validation on the P4 panel remain open.
 The home is no longer this shelf: it is the tabbed carousel of
-`docs/shell_layout_2026-10.md` §12, with no MAKE card (the Make tab holds the
-projects) and the verbs as bar-zone chips on every tier; the shelf above is the
-Editor picker's.
+`docs/shell_layout_2026-10.md` §12, with no MAKE card and the verbs as bar-zone
+chips on every tier; the shelf above is the home's `grid` arrangement and the
+desk's PROJECTS window. There is no project picker (owner, 2026-10-14): the
+home's Make tab is the one projects list, and where this doc says "MAKE" or
+"the project picker" below, read the Make tab.
 
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen
@@ -88,7 +90,7 @@ the shared Open Machine chrome. It predates several decisions in this document:
 - Library is Home, so the bottom Home/Library navigation is removed;
 - Settings exists once in the upper-right OS system area;
 - the generated `OPTIONS`, `FAVORITES`, and `NEW` toolbar actions are not approved;
-  MAKE and the project picker own creation and management.
+  the Make tab owns creation and management.
 
 ### Studio concept
 
@@ -125,7 +127,7 @@ navigation and keeps the model shallow:
 Library
   |-- cartridge / PLAY --> Player --> exit --> Library
   |-- cartridge / CHANGE --> Studio, project open on Config
-  `-- MAKE --> Studio, project picker
+  `-- Make tab / tap --> Studio, project open
 
 Studio
   |-- PLAY --> playtest --> exit --> same Studio project and tab
@@ -144,8 +146,8 @@ returns to its caller. Library is not renamed to Player.
   - **CHANGE** — secondary action; opens the project in Studio on Config.
 - Use **CHANGE**, not Customize or Edit. It is short, kid-readable, broad enough for
   logic as well as cosmetics, and matches the product promise.
-- The pinned **MAKE** tile opens the Studio project picker. New, Copy, and Delete stay
-  with project management there; they do not become competing Library actions.
+- The **Make** tab is project management: New, Copy, and Delete are its verbs;
+  they do not become competing actions on the tabs that play.
 - **Settings has one global home:** the OS-owned upper-right system area, in the same
   position in Library and Studio. Do not duplicate it as a bottom navigation item or
   add a page-local `OPTIONS` button that leads to the same place.
@@ -182,7 +184,7 @@ tab. That fallback must be deterministic per project rather than inferred from a
   picture is **one Make/Editor window plus one playtest window**.
 - The Editor remains one tabbed app. Concept art that shows separate Code, Map, and
   Sprites windows is visual exploration, not the v1 process model.
-- The project picker and Editor continue to share one Make window/group.
+- The Editor is a window of its own, above the home window it was opened from.
 - A playtest launched from Studio returns to the same project and tab.
 - Library remains the explicit route back to the play shelf.
 
@@ -578,7 +580,7 @@ Do not restyle every system app at once. Build one vertical slice:
 ```text
 Library -> PLAY Brick Siege -> Player -> exit -> Library
 Library -> CHANGE Brick Siege -> Studio/Config
-Library -> MAKE -> Studio/project picker
+Library -> Make tab -> Studio
 Studio -> PLAY -> playtest -> exit -> same Studio tab
 ```
 
@@ -635,7 +637,7 @@ unchanged.
 
 **Decision: edit in place.** This preserves the current action and mental model:
 CHANGE opens the existing cart's `Project`, and normal commit/undo persistence applies
-there. It never creates a surprise duplicate. Copy remains an explicit project-picker
+there. It never creates a surprise duplicate. COPY remains an explicit Make-tab
 verb. The vertical slice must regression-test how built-in re-seeding interacts with
 authored code, but changing the copy model is not part of this visual redesign.
 
