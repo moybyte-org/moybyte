@@ -175,9 +175,11 @@ class Bench:
 
 
 def win_geom(b, key):
-    """(origin_x, origin_y, window-local layout) for an open window."""
+    """(origin_x, origin_y, window-local layout) for an open window; None
+    when it is not open or the tier has no windows (`state` carries no
+    `wins` on a fullscreen tier)."""
     st = b.state()
-    w = st["wins"].get(key)
+    w = st.get("wins", {}).get(key)
     if w is None:
         return None
     return (w[0] + 1, w[1] + 1 + w[4], w)
