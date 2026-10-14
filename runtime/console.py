@@ -901,15 +901,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.search_typing = False
         # The home's carousel over the Games tab; each tab remembers its card.
         self._home_sel = {}
-        self.launcher = Carousel(self._launcher_items(self.carts.all, "games"),
-                                 self.layout, NAMES, _uimod.glyph)
-        # The "+ New" card draws the real themeable IconSheet plus sprite big --
-        # keyed so the sheet's 0-filled backdrop doesn't plate the card.
-        self.launcher.icon_for = self._icon_image_keyed
-        self.launcher.cover_for = self.covers.cover_for
-        # The favorite-star badge on the centre card (#105): only the home
-        # plays, so only ws.launcher (not the Editor's picker) gets the toggle.
-        self.launcher.favorite_for = self.carts.is_favorite
+        self.launcher = self._home_grid("carousel",
+                                        self._launcher_items(self.carts.all, "games"))
         # The Editor's project-picker grid (spec shell_ux_v1.md): its own Launcher
         # instance so it keeps an independent selection/page, reusing the SAME tile
         # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
@@ -2997,6 +2990,34 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return [it for it in base
                 if it.get("type") in PSEUDO_TILE_TYPES
                 or q in it.get("title", "").lower()]
+
+    def _home_grid(self, arrangement, items):
+        """The home's card model for `arrangement` (docs/shell_layout_2026-10.md
+        §12): the Carousel, or the shelf grid the picker draws too."""
+        cls = Launcher if arrangement == "grid" else Carousel
+        g = cls(items, self.layout, NAMES, _uimod.glyph)
+        # The "+ New" card draws the real themeable IconSheet plus sprite big --
+        # keyed so the sheet's 0-filled backdrop doesn't plate the card.
+        g.icon_for = self._icon_image_keyed
+        g.cover_for = self.covers.cover_for
+        # The favorite-star badge on the selected card (#105): only the home
+        # plays, so only ws.launcher (not the Editor's picker) gets the toggle.
+        g.favorite_for = self.carts.is_favorite
+        g.theme = getattr(self, "theme_colors", None)
+        return g
+
+    def set_home_arrangement(self, arrangement):
+        """Show the home as `arrangement` -- "carousel" or "grid", the layout's
+        `home` key (look.apply_layout) -- on the same tab and card."""
+        old = self.launcher
+        if (arrangement == "grid") == (type(old) is Launcher):
+            return
+        g = self._home_grid(arrangement, old.items)
+        g.tab = old.tab
+        g.sel = old.sel
+        g._scroll_to_sel()
+        self.launcher = g
+        self._dirty = True
 
     def set_home_tab(self, tab):
         """Switch the home to `tab`, back on the card it last had."""

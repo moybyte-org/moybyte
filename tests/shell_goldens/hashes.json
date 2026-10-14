@@ -111,6 +111,12 @@
     "web_console": "dbb7330a09022f98ac2399b43f9e7843af06d7bbd149bec6064af718c96fb902",
     "web_console_address": "6495deb3b13458d7c0fdd41b9cd8645af01fdec5965a15d17478dc5d66805cbc"
   },
+  "p4_1024x600_cs2_fs1_homegrid": {
+    "launcher": "fb3cf39d72a37e1062c5e5cd0987e71b089fdc80704dd8ef3e83530bd6b86c6a",
+    "launcher_apps": "95cf92d0b646f9112233f0e60390137f2acba936e1c5cf84e22c367ff1405ef1",
+    "launcher_make": "0f65543e6590a56a330eca42a20317c63d54356e07a1b967e8cd472173839d9a",
+    "launcher_mine": "3b48d7eee92365b4487518662b9491ade2f1e224050d4bf0510b65e5460df9b6"
+  },
   "p4_1024x600_cs2_fs1_platinum_light": {
     "app_appearance": "339ed39c6f50ec84d2b387c3ec3031379f4b0e3be762c1dbde860f00a5c3eaa3",
     "app_artwork": "7b34fd6f91f7d4cc5d8afb2b9ff0615740206c5020f67e2fd79a8ed415c3317d",
@@ -329,6 +335,12 @@
     "settings": "f3ffbcf9e0ee336e22fa40b02147b5fd28545a9a2fa26c9123b1e2ee81982cad",
     "web_console": "ff6638dfcd15664557385056de7ae82d2ba676518888d167b97cd0736faea18e",
     "web_console_address": "9e3b31f7447ad52be22c22318bf03f22765b316b55f50f67f15790d84734c303"
+  },
+  "tdeck_320x240_fs1_homegrid": {
+    "launcher": "c06dd6e1e0b74f7670bd7cc611b21cea92531efd74cac1957cf48c99034aef3d",
+    "launcher_apps": "fed87cb8e6dcba53dc7dac9cda5b70f5f02d3919cafec87ccb09af4d7c5d1102",
+    "launcher_make": "e7186400b056b0e636aa45e074e8bd5ffb55554725ed7bf71b5ef9506f68f8cf",
+    "launcher_mine": "24fa6705edc81cdd00c9690ee2e0dda8bb1a295d3ea7ef6989612a13ccfbf37a"
   },
   "tdeck_320x240_fs1_light": {
     "app_appearance": "410d6754057f499141b243a2093853e4eb76d85d0f494a0e0607a208ecabda33",

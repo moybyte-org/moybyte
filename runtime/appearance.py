@@ -174,6 +174,7 @@ class Appearance:
         # and the loader's answers per package (cleared by a theme switch).
         self.bars = _shell_layout.FALLBACK
         self.layout_notes = ()
+        self.home = "carousel"          # the home's arrangement the layout names
         self._layouts = {}
         self._choices = None
         self.layout_gen = 0             # moves with every resolve: the Settings row's memo
@@ -492,7 +493,8 @@ class Appearance:
     def _theme_layout(self, name):
         got = self._layouts.get(name)
         if got is None:
-            got = self._layouts[name] = _uimod.theme_layout(name)
+            got = self._layouts[name] = _uimod.theme_layout(name) + (
+                _uimod.theme_home(name),)
         return got
 
     def layout(self):
@@ -503,7 +505,7 @@ class Appearance:
         (shell_layout.resolve). Never read per frame."""
         ws = self.ws
         wm = ws.wm
-        refused, bars = self._theme_layout(self.layout_theme() or self.theme_name)
+        refused, bars, _home = self._theme_layout(self.layout_theme() or self.theme_name)
         notes = ("the theme's layout was refused",) if refused else ()
         root = getattr(wm, "_root_canvas", None) or ws.sys_canvas
         return _shell_layout.resolve(
@@ -521,6 +523,10 @@ class Appearance:
         if getattr(ws, "wm", None) is None or getattr(ws, "bar_layer", None) is None:
             return False
         bars, self.layout_notes = self.layout()
+        home = self._theme_layout(self.layout_theme() or self.theme_name)[2]
+        if home != self.home:
+            self.home = home
+            ws.set_home_arrangement(home)
         if bars != self.bars:
             self.bars = bars
             ws._dirty = True
@@ -534,12 +540,12 @@ class Appearance:
         values the Settings LAYOUT row steps through after THEME. Cached until
         the next theme switch."""
         if self._choices is None:
-            mine = self._theme_layout(self.theme_name)[1]
             names = THEME_NAMES
             extra = _uimod.theme_installed()
             if extra is not None and extra not in names:
                 names = names + (extra,)
-            self._choices = tuple(n for n in names if self._theme_layout(n)[1] != mine)
+            mine = self._theme_layout(self.theme_name)[1:]
+            self._choices = tuple(n for n in names if self._theme_layout(n)[1:] != mine)
         return self._choices
 
     def cycle_layout_theme(self, d):

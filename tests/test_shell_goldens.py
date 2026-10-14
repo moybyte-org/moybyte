@@ -102,6 +102,12 @@ keeps the matrix a clean product instead of a pile of special cases.
                            system menu; on the T-Deck, console mode's
                            fullscreen container for each -- the calendar page,
                            Settings at the WIFI panel, Settings at VOLUME.
+  tdeck_320x240_fs1_homegrid, p4_1024x600_cs2_fs1_homegrid
+                           the home in its GRID arrangement (the layout's
+                           `home`, docs/shell_layout_2026-10.md §12), one
+                           surface a tab -- Games, Mine, Apps, Make -- on the
+                           T-Deck and on the as-shipped P4 in console mode.
+                           One axis (the arrangement) from those rows.
 
 The last two were added before theming's first phase
 (`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
@@ -290,6 +296,11 @@ class _GoldenWebHost:
 
 # `diagonal_in` is the board fact behind the #203 tap-target floor; None is
 # every tier that does not declare one, i.e. chrome on the font scale.
+# The default seed's bar, for a config that changes only the home's
+# arrangement (a layout is set whole, its bars with it).
+_DEFAULT_BARS = [{"edge": "top", "size": 18, "left": ["zone"], "center": ["chips"],
+                  "right": ["clock", "close", "menu", "wifi", "battery"]}]
+
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
@@ -346,6 +357,12 @@ CONFIGS = {
         diagonal_in=None, layout=[
             {"edge": "bottom", "size": 18, "left": ["menu", "zone"],
              "right": ["clock", "close", "battery"]}]),
+    "tdeck_320x240_fs1_homegrid": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, layout=_DEFAULT_BARS, home="grid", plan="home"),
+    "p4_1024x600_cs2_fs1_homegrid": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, layout=_DEFAULT_BARS, home="grid", plan="home"),
     "p4_1024x600_cs2_fs1_popovers": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="popovers"),
@@ -358,6 +375,7 @@ CONFIGS = {
 # the order the two `plan` configs render them: a popover each over the desk
 # (`popovers`), and console mode's fullscreen page each (`widget_pages`).
 WIDGETS = ("clock", "wifi", "battery", "menu")
+HOME_TAB_IDS = ("games", "mine", "apps", "make")
 _DATE = (2026, 10, 14)    # the pinned calendar day
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every
@@ -481,7 +499,9 @@ def pick_layout(ws, cfg):
         return
     import moy_ui                      # registered by the runtime package
     rc, _notes = moy_ui.theme_install(json.dumps(
-        {"format": 1, "name": name, "layout": {"bars": cfg["layout"]}}).encode())
+        {"format": 1, "name": name, "layout": dict(
+            {"bars": cfg["layout"]}, **({"home": cfg["home"]} if "home" in cfg else {}))}
+         ).encode())
     assert rc == 0, name
     ws.system.set("layout_theme", name)
 
@@ -497,6 +517,8 @@ def _surface_plan(ws, cfg):
         return _popover_plan(ws)
     if cfg.get("plan") == "widget_pages":
         return _widget_page_plan(ws)
+    if cfg.get("plan") == "home":
+        return _home_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor) and the desk with ONE app window.
@@ -586,6 +608,21 @@ def _popover_plan(ws):
     return plan
 
 
+def _home_plan(ws, cfg):
+    """The home alone, one surface a tab -- a config that changes only its
+    arrangement (the layout's `home`)."""
+    def tab(t):
+        def enter():
+            ws.go_home()
+            if cfg["windowed"]:
+                ws.open_library()
+            ws.set_home_tab(t)
+        return enter
+
+    return [("launcher" if t == "games" else "launcher_" + t, tab(t))
+            for t in HOME_TAB_IDS]
+
+
 def _widget_page_plan(ws):
     """Console mode's container for each widget, entered from the home: the
     calendar's own page, Settings at the WIFI panel, Settings at VOLUME, and
@@ -621,6 +658,8 @@ def surface_names(config_name):
         return ["desk_window_calc"] + ["popover_" + w for w in WIDGETS]
     if cfg.get("plan") == "widget_pages":
         return ["page_" + w for w in WIDGETS]
+    if cfg.get("plan") == "home":
+        return ["launcher" if t == "games" else "launcher_" + t for t in HOME_TAB_IDS]
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc"]

@@ -445,44 +445,50 @@ class Layout(LayoutBase):
         return (rect[0] + (rect[2] - bw) // 2, rect[1] + (rect[3] - bh) // 2,
                 bw, bh)
 
-    def tile_cell(self, i):
-        """(row, col) of grid slot `i` in the shelf packing. Slot 0 is the ONE
-        tall featured card -- column 0 spanning BOTH visible rows (its row
-        reads 0); slots 1.. stack the columns marching right, `rows` cards per
-        column, top to bottom."""
+    def tile_cell(self, i, featured=True):
+        """(row, col) of grid slot `i` in the shelf packing. With `featured`,
+        slot 0 is the ONE tall featured card -- column 0 spanning BOTH visible
+        rows (its row reads 0) -- and slots 1.. stack the columns marching
+        right; without it every slot stacks, `rows` cards per column, top to
+        bottom."""
+        if not featured:
+            return (i % self.rows, i // self.rows)
         if i <= 0:
             return (0, 0)
         j = i - 1
         return (j % self.rows, 1 + j // self.rows)
 
-    def tile_index(self, row, col):
-        """Inverse of tile_cell: the grid slot at (row, col) -- column 0 is
-        the tall slot 0 at any row. No bounds check (callers clamp to n)."""
+    def tile_index(self, row, col, featured=True):
+        """Inverse of tile_cell: the grid slot at (row, col) -- with
+        `featured`, column 0 is the tall slot 0 at any row. No bounds check
+        (callers clamp to n)."""
+        if not featured:
+            return col * self.rows + row
         if col <= 0:
             return 0
         return 1 + (col - 1) * self.rows + row
 
-    def tile_rect(self, i, scroll=0):
+    def tile_rect(self, i, scroll=0, featured=True):
         """Grid-cell rect for cart index `i` at pixel scroll offset `scroll`, or
         None when the cell lies fully outside the grid viewport (the card list
         SCROLLS continuously left-right -- there are no pages). Partially
         visible cells DO return their rect; the draw clips them."""
         gx, gy, gw, gh = self.lib_grid
         cw, ch, gap = self.lib_card_w, self.lib_card_h, self.lib_gap
-        row, col = self.tile_cell(i)
-        hh = 2 * ch + gap if i == 0 else ch
+        row, col = self.tile_cell(i, featured)
+        hh = 2 * ch + gap if featured and i == 0 else ch
         x = gx + col * (cw + gap) - scroll
         if x + cw <= gx or x >= gx + gw:
             return None
         return (x, gy + row * (ch + gap), cw, hh)
 
-    def grid_content_w(self, n):
+    def grid_content_w(self, n, featured=True):
         """Total scrollable content width for n grid items (at least the tall
         slot 0's own column)."""
         if n <= 0:
             return 0
         cw, gap = self.lib_card_w, self.lib_gap
-        _row, last_col = self.tile_cell(n - 1)
+        _row, last_col = self.tile_cell(n - 1, featured)
         return last_col * (cw + gap) + cw
 
     def _cell(self, name):

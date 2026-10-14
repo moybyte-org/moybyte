@@ -95,7 +95,8 @@ def _layout_type(bars, slots, slot_cap, widget_cap, text_max):
 
     class _Layout(c.Structure):
         _fields_ = [("set", c.c_uint8), ("n_bars", c.c_uint8), ("bar", _Bar * bars),
-                    ("n_text", c.c_uint8), ("text", (c.c_char * (text_max + 1)) * widget_cap)]
+                    ("n_text", c.c_uint8), ("text", (c.c_char * (text_max + 1)) * widget_cap),
+                    ("home", c.c_uint8)]
     return _Layout
 
 
@@ -754,6 +755,15 @@ def binding():
             bars.append((bar_edges[bar.edge], bar.size) + slots + (texts,))
         return lay.set == 2, tuple(bars)
 
+    homes = _names(lib, "moy_theme_home_names",
+                   c.c_int.in_dll(lib, "moy_theme_n_homes").value)
+
+    def theme_home(name):
+        b = _b(name)
+        lay = Layout()
+        lib.moy_theme_layout(b, len(b), c.byref(lay))
+        return homes[lay.home]
+
     def font_file(name):
         b = _b(name)
         n = c.c_size_t()
@@ -803,6 +813,7 @@ def binding():
     m.theme_uninstall = lib.moy_theme_uninstall
     m.theme_fonts = theme_fonts
     m.theme_layout = theme_layout
+    m.theme_home = theme_home
     m.font_load = font_load
     m.font_file = font_file
     m.font_reset = lib.moy_font_reset

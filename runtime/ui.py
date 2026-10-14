@@ -215,6 +215,12 @@ def theme_layout(name):
     return _C.theme_layout(name)
 
 
+def theme_home(name):
+    """The home's arrangement in theme `name`'s layout (docs/shell_layout_2026-10.md
+    §12): "carousel" (the default) or "grid"."""
+    return _C.theme_home(name)
+
+
 def theme_installed():
     """The installed theme package's name (the one beside the seeds), or None."""
     return _C.theme_installed()

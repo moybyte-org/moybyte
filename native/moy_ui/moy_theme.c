@@ -1008,11 +1008,14 @@ static int bars_list(rd_t *r, moy_theme_pkg_t *out) {
     return 0;
 }
 
-// `layout`: {"bars": [...]}. 0, or -1: malformed.
+// `layout`: {"bars": [...], "home": "<arrangement>"}. The home rides the
+// layout, which a package sets whole with its bars: an unknown arrangement
+// is noted and the first, the default, stands. 0, or -1: malformed.
 static int layout_key(rd_t *r, moy_theme_pkg_t *out) {
     if (eat(r, '}')) {
         return 0;
     }
+    int home = 0;
     r->depth++;
     for (;;) {
         char key[16];
@@ -1022,12 +1025,22 @@ static int layout_key(rd_t *r, moy_theme_pkg_t *out) {
             return -1;
         }
         int is_bars = !over && strcmp(key, "bars") == 0;
+        int is_home = !over && strcmp(key, "home") == 0;
         int rc;
         if (is_bars && eat(r, '[')) {
             rc = bars_list(r, out);
+        } else if (is_home && peek(r) == '"') {
+            char name[16];
+            rc = str(r, name, sizeof(name), &over);
+            int h = over ? -1 : find_name(moy_theme_home_names, MOY_THEME_HOMES, name);
+            if (h < 0) {
+                out->notes |= MOY_THEME_N_UNKNOWN;
+            } else {
+                home = h;
+            }
         } else {
             rc = value(r, &iv);
-            out->notes |= is_bars ? MOY_THEME_N_DROPPED : MOY_THEME_N_UNKNOWN;
+            out->notes |= (is_bars || is_home) ? MOY_THEME_N_DROPPED : MOY_THEME_N_UNKNOWN;
         }
         if (rc < 0) {
             return -1;
@@ -1036,6 +1049,7 @@ static int layout_key(rd_t *r, moy_theme_pkg_t *out) {
             continue;
         }
         r->depth--;
+        out->layout.home = (uint8_t)home;
         return eat(r, '}') ? 0 : -1;
     }
 }

@@ -367,6 +367,8 @@ def generate_theme(style, t):
          "#define MOY_THEME_BAR_MAX %d" % lay["size"][1],
          "#define MOY_THEME_BAR_SIZE %d" % lay["size_default"],
          "#define MOY_THEME_TEXT_MAX %d" % lay["text_max"],
+         "#define MOY_THEME_HOMES %d  // the home's arrangements, the first the default"
+         % len(lay["homes"]),
          "#define MOY_THEME_W_REQUIRED 0x%xu  // a bit per widget" % sum(
              1 << lay["widgets"].index(w) for w in lay["required"]),
          "#define MOY_THEME_W_REPEATABLE 0x%xu" % sum(
@@ -424,6 +426,7 @@ def generate_theme(style, t):
          "extern const char *const moy_theme_bar_edges[MOY_THEME_BARS];",
          "extern const char *const moy_theme_slot_names[MOY_THEME_SLOTS];",
          "extern const char *const moy_theme_widget_names[MOY_THEME_WIDGETS];",
+         "extern const char *const moy_theme_home_names[MOY_THEME_HOMES];",
          "extern const char *const moy_theme_seed_names[MOY_THEME_SEEDS];",
          "extern const char *const moy_theme_seed_src[MOY_THEME_SEEDS];",
          "extern const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS];",
@@ -431,7 +434,8 @@ def generate_theme(style, t):
          "extern const uint8_t *const moy_theme_font_data[MOY_THEME_FONT_FILES + 1];",
          "extern const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1];",
          "extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,",
-         "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles;"]
+         "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles,"
+         "\n    moy_theme_n_homes;"]
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
     for r, k, v in rules:
         c.append("    {%d, %d, %d},  // %s" % (r, k, v, roles[r]))
@@ -460,7 +464,8 @@ def generate_theme(style, t):
                       ("moy_theme_font_roles[MOY_THEME_FONT_ROLES]", th["font_roles"]),
                       ("moy_theme_bar_edges[MOY_THEME_BARS]", lay["edges"]),
                       ("moy_theme_slot_names[MOY_THEME_SLOTS]", lay["slots"]),
-                      ("moy_theme_widget_names[MOY_THEME_WIDGETS]", lay["widgets"])):
+                      ("moy_theme_widget_names[MOY_THEME_WIDGETS]", lay["widgets"]),
+                      ("moy_theme_home_names[MOY_THEME_HOMES]", lay["homes"])):
         c.append("const char *const %s = {" % decl)
         c.extend("    %s," % _c_str(n) for n in seq)
         c.append("};\n")
@@ -495,6 +500,7 @@ def generate_theme(style, t):
     c.append("const int moy_theme_n_parts = MOY_THEME_PARTS;")
     c.append("const int moy_theme_n_states = MOY_THEME_STATES;")
     c.append("const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;")
+    c.append("const int moy_theme_n_homes = MOY_THEME_HOMES;")
     c.append("const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {%s};\n"
              % ", ".join(str(len(s)) for _n, s in seeds))
     for i, (name, data) in enumerate(fonts):

@@ -390,6 +390,22 @@ def _lay(name, bars, **kw):
     return notes, moy_ui.theme_layout(name)
 
 
+def test_the_home_rides_the_layout_carousel_by_default():
+    # `home` names the home's arrangement (docs/shell_layout_2026-10.md
+    # §12): every seed's is the carousel; a package sets it with its bars;
+    # an unknown name is noted and the default stands; a non-string dropped.
+    assert LAY["homes"][0] == "carousel"
+    for name in TH["seeds"]:
+        assert moy_ui.theme_home(name) == "carousel", name
+    req = ["menu", "zone", "close"]
+    for home, want, note in (("grid", "grid", 0), ("carousel", "carousel", 0),
+                             ("icons", "carousel", N_UNKNOWN),
+                             (7, "carousel", N_DROPPED)):
+        rc, notes = moy_ui.theme_install(_src("hm", layout={"bars": [{"edge": "top", "left": req}],
+                                                            "home": home}))
+        assert rc == OK and (notes, moy_ui.theme_home("hm")) == (note, want), home
+
+
 def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
     for name in TH["seeds"]:
         assert moy_ui.theme_layout(name) == (False, (TODAY,)), name

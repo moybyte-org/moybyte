@@ -16,11 +16,13 @@
 
   * `Launcher`     -- the card GRID model + draw: items/sel/scroll/nav + the card
                       rendering, a shelf of two rows that scrolls sideways. Its
-                      instance is ws.picker, the Editor's PROJECT-PICKER grid.
+                      instances are ws.picker, the Editor's PROJECT-PICKER grid,
+                      and ws.launcher in the home's `grid` arrangement.
   * `Carousel`     -- the home's row (docs/shell_layout_2026-10.md §12): the
                       same selection model over one row of square cover cards,
                       the centre card larger by a function of its distance
-                      from the centre. Its instance is ws.launcher.
+                      from the centre. Its instance is ws.launcher in the
+                      `carousel` arrangement, the default (the layout's `home`).
   * `LauncherHomeLayer` -- the "launcher" content Layer: the home, console mode's
                       root on every board (wallpaper -> tab row -> carousel ->
                       bar), its four tabs (Games / Mine / Apps / Make, the lists
@@ -205,6 +207,7 @@ class Launcher:
         # (console sets this True on ws.launcher). The picker keeps it False -- a
         # pick has ONE meaning there (open in the Editor).
         self.actions = False
+        self.tab = HOME_TABS[0][0]   # the home's active tab (ws.set_home_tab)
         # Stage 4 (#46 zoned bar): bumped whenever anything the lent left zone
         # shows (the selected cart's title) changes -- the `sel` property below
         # covers nav/tap/hover; set_items bumps it too (a NEW/DUP/DEL/rename can
@@ -311,16 +314,17 @@ class Launcher:
         if not n:
             return
         lay = self.layout
-        row, col = lay.tile_cell(self.sel)
+        f = self._featured()
+        row, col = lay.tile_cell(self.sel, f)
         if dx:
             col += dx
-            if col <= 0:
+            if col <= 0 and f:
                 self.sel = 0               # back onto the tall card
             else:
-                self.sel = max(0, min(n - 1, lay.tile_index(row, col)))
-        elif dy and self.sel > 0:          # the tall card spans both rows
+                self.sel = max(0, min(n - 1, lay.tile_index(row, max(0, col), f)))
+        elif dy and (self.sel > 0 or not f):   # the tall card spans both rows
             row = max(0, min(lay.rows - 1, row + dy))
-            self.sel = max(0, min(n - 1, lay.tile_index(row, col)))
+            self.sel = max(0, min(n - 1, lay.tile_index(row, col, f)))
         self._scroll_to_sel()
 
     # -- continuous scroll (no pages) ----------------------------------------
@@ -361,7 +365,8 @@ class Launcher:
 
     def max_scroll(self):
         lay = self.layout
-        return max(0, lay.grid_content_w(len(self.items)) - lay.lib_grid[2])
+        return max(0, lay.grid_content_w(len(self.items), self._featured())
+                   - lay.lib_grid[2])
 
     def scroll_cols(self, d):
         """Nudge the grid by d card columns (the footer arrow buttons)."""
@@ -371,7 +376,7 @@ class Launcher:
         """Keep the selected card fully inside the grid viewport (keyboard nav)."""
         lay = self.layout
         gw = lay.lib_grid[2]
-        _row, col = lay.tile_cell(self.sel)
+        _row, col = lay.tile_cell(self.sel, self._featured())
         x = col * lay.lib_step                   # content-relative card left
         cw = lay.lib_card_w
         s = self.scroll
@@ -387,7 +392,8 @@ class Launcher:
         while a touch drag is active (the Settings-rows pattern -- re-snapping
         every sample would discard sub-slop finger travel)."""
         lay = self.layout
-        self._region.set(lay.lib_grid, lay.grid_content_w(len(self.items)))
+        self._region.set(lay.lib_grid, lay.grid_content_w(len(self.items),
+                                                          self._featured()))
         if not (self._region.drag_active or self._region.animating):
             self._region.offset = self.scroll
         return self._region
@@ -495,6 +501,26 @@ class Launcher:
     def selected(self):
         return self.items[self.sel] if self.items else None
 
+    def _featured(self):
+        """Whether slot 0 is the tall featured card: a "+ New" heading the
+        list. Every other list packs uniform columns."""
+        items = self.items
+        return bool(items) and items[0].get("type") in PSEUDO_TILE_TYPES
+
+    @property
+    def moving(self):
+        return self._taps.dragging or self.flinging
+
+    def tabs_rect(self):
+        """The home's tab row in the grid arrangement: in the panel's header
+        band, where the shelf's heading was."""
+        lay = self.layout
+        px, py, pw, _ph = lay.lib_panel
+        fs = lay.fs
+        inset = max(10 * fs, lay.cw // 42)
+        h = min(_TAB_H * lay.cs, lay.lib_header_h - 4 * fs)
+        return (px + inset, py + (lay.lib_header_h - h) // 2, pw - 2 * inset, h)
+
     def repaint_band(self, cv, sheet_for, fill):
         """The whole band again: its backdrop (`fill(cv, rect)`), then the
         cards."""
@@ -512,8 +538,9 @@ class Launcher:
         current scroll (partially clipped cards included -- the draw clips)."""
         s = self.scroll
         lay = self.layout
+        f = self._featured()
         for i in range(len(self.items)):
-            r = lay.tile_rect(i, s)
+            r = lay.tile_rect(i, s, f)
             if r is not None:
                 yield i, r
 
@@ -521,7 +548,7 @@ class Launcher:
         """The grid-cell rect for cart index i at the current scroll, or None if
         it's outside the grid viewport (geometry from the live Layout, so it
         reflows with the system canvas / font scale)."""
-        return self.layout.tile_rect(i, self.scroll)
+        return self.layout.tile_rect(i, self.scroll, self._featured())
 
     def tile_at(self, px, py):
         gx, gy, gw, _gh = self.layout.lib_grid
@@ -869,7 +896,6 @@ class Carousel(Launcher):
     at 1.0, so no two cards overlap."""
 
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
-        self.tab = HOME_TABS[0][0]
         self.motion = "full"
         self.scale = HOME_SCALE_MAX
         self._glide = None            # the offset a glide is carrying the row to
@@ -1634,10 +1660,21 @@ class LauncherHomeLayer:
             self._lib_key = None       # session rather than retry every paint
             self._lib_unsupported = True
 
+    def _carousel(self):
+        """Whether the home shows the carousel (else the grid arrangement)."""
+        return isinstance(self.ws.launcher, Carousel)
+
+    def _surface_fill(self, cv, r):
+        """The grid arrangement's band backdrop: its panel's surface."""
+        cv.rect(r[0], r[1], r[2], r[3], self.ws.theme_colors["surface"])
+
     def _try_drag_partial(self, cv, dt):
-        """The carousel's moving frame (`_drag_partial`), timed for the home
-        diag's HITCH split -- only once the band's backdrop holds this
-        frame's wallpaper."""
+        """The home's moving frame (`_drag_partial`), timed for the home
+        diag's HITCH split. The carousel's only once the band's backdrop holds
+        this frame's wallpaper; the grid's band lies on its panel."""
+        if not self._carousel():
+            return _drag_partial(self, cv, dt, self.ws.launcher, "launcher",
+                                 self._surface_fill, "home", timed=True)
         if self._band_bg is None or self._band_key != self._band_key_of(cv):
             return False
         return _drag_partial(self, cv, dt, self.ws.launcher, "launcher",
@@ -1659,8 +1696,10 @@ class LauncherHomeLayer:
         _paint_continuity(self, ws)           # foreign paints void the buffers
         # The board's motion verdict (a WM constant, §12's degradation order).
         wm = ws.wm
-        ws.launcher.motion = getattr(wm, "HOME_MOTION", "full")
-        ws.launcher.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_MAX)
+        carousel = self._carousel()
+        if carousel:
+            ws.launcher.motion = getattr(wm, "HOME_MOTION", "full")
+            ws.launcher.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_MAX)
         # Kinetic fling (#113) and the glide to the centre card: advance the
         # row BEFORE painting, and keep the redraw gate open until it rests.
         # Both ride the partial path (its gate includes flinging).
@@ -1692,7 +1731,10 @@ class LauncherHomeLayer:
         # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
         ws.wallpaper.draw(dt)
-        self._capture_band_backdrop(cv, dt)
+        if carousel:
+            self._capture_band_backdrop(cv, dt)
+        else:
+            self._draw_grid_panel(cv)
         _t1 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
             _surf("home-grid", "system")
@@ -1723,6 +1765,30 @@ class LauncherHomeLayer:
         """[(tab id, rect, labels_on)] of the home's tab row."""
         fs = self.ws.layout.fs
         return _ui.tab_row_rects(self.ws.launcher.tabs_rect(), HOME_TABS, fs)
+
+    def _draw_grid_panel(self, cv):
+        """The grid arrangement's framed panel: the surface the shelf's cards
+        lie on, the tab row in its header band, the active tab's count in its
+        footer between thin rules (the scroll arrows are the grid's)."""
+        ws = self.ws
+        th = ws.theme_colors
+        lay = ws.layout
+        fs = lay.fs
+        x, y, w, h = lay.lib_panel
+        cv.rect(x, y, w, h, th["surface"])
+        for i in range(fs):
+            cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th["border"])
+        label = ws.home_title()
+        tw = _ui.print_width(label, fs)
+        ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - lay.line_h) // 2
+        tx = x + (w - tw) // 2
+        cv.print(label, tx, ty, th["ink_dim"], 1)
+        ly = ty + 4 * fs
+        lx0 = lay.scroll_lt[0] + lay.scroll_lt[2] + 10 * fs
+        lx1 = lay.scroll_rt[0] - 10 * fs
+        cv.rect(lx0, ly, max(0, tx - 8 * fs - lx0), fs, th["ink_dim"])
+        cv.rect(tx + tw + 8 * fs, ly, max(0, lx1 - (tx + tw + 8 * fs)), fs,
+                th["ink_dim"])
 
     def _draw_home_chrome(self, cv):
         """The tab row on its plate (with the search query beside it while one
@@ -1812,15 +1878,23 @@ class LauncherHomeLayer:
                 ws.home_key()
             return True
         # The carousel (§12): left/right glide by a card, a held key one
-        # motion; up takes the keys to the tab row.
+        # motion; up takes the keys to the tab row. The grid: the arrows
+        # step its cells, and up from its top row takes them to the tabs.
+        grid = ws.launcher
         if i.pressed("left"):
-            ws.launcher.nav2d(-1, 0)
+            grid.nav2d(-1, 0)
             ws.mark_dirty()
         if i.pressed("right"):
-            ws.launcher.nav2d(1, 0)
+            grid.nav2d(1, 0)
             ws.mark_dirty()
         if i.pressed("up"):
-            self._tab_focus = True
+            if self._carousel() or self._grid_top_row():
+                self._tab_focus = True
+            else:
+                grid.nav2d(0, -1)
+            ws.mark_dirty()
+        if i.pressed("down") and not self._carousel():
+            grid.nav2d(0, 1)
             ws.mark_dirty()
         if i.pressed("a") or i.pressed("run"):
             # #184: DEFERRED -- the cart start runs behind the next painted
@@ -1836,6 +1910,45 @@ class LauncherHomeLayer:
                                              # (a B inside the Konami code is the code's)
         elif i.pressed("home"):
             ws.home_key()
+        return True
+
+    def _grid_top_row(self):
+        grid = self.ws.launcher
+        if not grid.items:
+            return True
+        return grid.layout.tile_cell(grid.sel, grid._featured())[0] == 0
+
+    def _grid_pointer(self, px, py, click):
+        """The grid arrangement's pointer: the footer arrows and the selected
+        card's star fire on the press; a card fires the active tab's tap on a
+        clean RELEASE (ui.DragTap), so a drag never launches; the trackball's
+        cursor selects the card it moves onto."""
+        ws = self.ws
+        grid = ws.launcher
+        lay = ws.layout
+        down = ws.pointer.down
+        if click:
+            if grid.max_scroll() > 0 and _in(px, py, lay.scroll_lt):
+                grid.scroll_cols(-1)
+                return True
+            if grid.max_scroll() > 0 and _in(px, py, lay.scroll_rt):
+                grid.scroll_cols(1)
+                return True
+        i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
+        if i is not None:
+            grid.sel = i
+            ws.defer(ws.launch_selected)     # #184: start behind the paint
+            return True
+        if click or down:
+            self._lhover = (px, py)
+            return True
+        if self._lhover == (-1, -1):
+            self._lhover = (px, py)
+        elif (px, py) != self._lhover:
+            self._lhover = (px, py)
+            i = grid.tile_at(px, py)
+            if i is not None:
+                grid.sel = i
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1859,6 +1972,8 @@ class LauncherHomeLayer:
             if frect is not None and _in(px, py, frect):
                 ws.carts.toggle_favorite(grid.selected())
                 return True
+        if not self._carousel():
+            return self._grid_pointer(px, py, click)
         i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
         if grid.moving:
             ws.mark_dirty()

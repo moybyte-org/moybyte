@@ -300,6 +300,17 @@ static mp_obj_t ui_theme_layout(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_layout_obj, ui_theme_layout);
 
+// theme_home(name) -> the home's arrangement in theme `name`'s layout (the
+// one moy_theme_layout resolves), a name of moy_theme_home_names.
+static mp_obj_t ui_theme_home(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    moy_theme_layout_t lay;
+    moy_theme_layout(s, n, &lay);
+    return name_obj(moy_theme_home_names[lay.home]);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
+
 // font_load(src) -> (rc, font): src a font file's bytes (moy_text.h); font
 // the loaded row's id, or None when refused.
 static mp_obj_t ui_font_load(mp_obj_t src) {
@@ -1290,6 +1301,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_uninstall), MP_ROM_PTR(&ui_theme_uninstall_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_home), MP_ROM_PTR(&ui_theme_home_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },

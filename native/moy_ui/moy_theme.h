@@ -89,6 +89,7 @@ typedef struct {
     moy_theme_bar_t bar[MOY_THEME_BARS];             // in the package's order
     uint8_t n_text;
     char text[MOY_THEME_WIDGET_CAP][MOY_THEME_TEXT_MAX + 1];
+    uint8_t home;                                    // index of moy_theme_home_names
 } moy_theme_layout_t;
 
 typedef struct {

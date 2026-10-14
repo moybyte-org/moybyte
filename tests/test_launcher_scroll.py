@@ -343,6 +343,71 @@ def test_tap_another_card_brings_it_to_the_centre(tmp_path):
     assert ws.launcher.items[ws.launcher.sel]["title"] == target
 
 
+# -- the grid arrangement (the layout's `home`) -------------------------------
+
+def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
+    from runtime import host_app
+    from runtime.launcher_layer import Carousel, Launcher
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    assert type(ws.launcher) is Carousel                 # the default
+    ws.set_home_tab("apps")
+    ws.launcher.sel = 2
+    want = ws.launcher.selected()
+    ws.set_home_arrangement("grid")
+    g = ws.launcher
+    assert type(g) is Launcher and g.tab == "apps" and g.selected() is want
+    home = ws.launcher_layer
+    assert home.zone_verbs() == ("open",)                # the same bar verbs
+    assert [t for t, _r, _on in home.tab_rects()] == ["games", "mine", "apps", "make"]
+    ws.set_home_tab("games")
+    drv.frame(1 / 30)
+    assert not g._featured()                             # no Make tile: uniform columns
+    drv.press("down")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert g.sel == 1                                    # down a row
+    drv.press("up")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    drv.press("up")                                      # the top row: up to the tabs
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert home._tab_focus
+    home._tab_focus = False
+    game = next(i for i, it in enumerate(g.items) if it.get("type") == "game")
+    r = g.tile_rect(game)
+    drv.touch(r[0] + r[2] // 2, r[1] + r[3] // 2)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop" and g.sel == game     # a card's tap runs it
+    ws._exit_to_caller()
+    ws.set_home_tab("make")
+    assert g._featured() and g.tile_rect(0)[3] > g.tile_rect(1)[3]   # "+ New" tall
+
+
+def test_a_layouts_home_picks_the_arrangement(tmp_path):
+    import json
+
+    import moy_ui
+    from runtime.launcher_layer import Carousel, Launcher
+
+    ws = _ws_with_carts(tmp_path, 4)
+    rc, _n = moy_ui.theme_install(json.dumps({"format": 1, "name": "hg", "layout": {
+        "home": "grid", "bars": [{"edge": "top", "left": ["zone"],
+                                  "right": ["clock", "close", "menu"]}]}}).encode())
+    assert rc == 0
+    ws.system.set("layout_theme", "hg")
+    ws.look.apply_layout()
+    assert ws.look.home == "grid" and type(ws.launcher) is Launcher
+    ws.system.set("layout_theme", None)
+    ws.look.apply_layout()
+    assert ws.look.home == "carousel" and type(ws.launcher) is Carousel
+    moy_ui.theme_uninstall()
+
+
 # -- trackball sensitivity (#2) --------------------------------------------
 
 def test_cursor_delta_is_faster_and_accelerates():

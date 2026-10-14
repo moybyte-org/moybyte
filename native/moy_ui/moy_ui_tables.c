@@ -647,6 +647,11 @@ const char *const moy_theme_widget_names[MOY_THEME_WIDGETS] = {
     "separator",
 };
 
+const char *const moy_theme_home_names[MOY_THEME_HOMES] = {
+    "carousel",
+    "grid",
+};
+
 const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {5, 2, 5, 5, 5, 255, 5, 6};
 
 const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
@@ -913,6 +918,7 @@ const int moy_theme_n_effects = MOY_THEME_EFFECTS;
 const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
+const int moy_theme_n_homes = MOY_THEME_HOMES;
 const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1388, 1296, 860};
 
 // themes/tiny5.fnt
