@@ -3,6 +3,7 @@
 #   -- the wallpaper: the theme's    theme_wallpaper, the picture, the coordinator
 #   -- custom: a change              change / tick / commit, the one write path
 #   -- EDIT FILE                     edit_file, and the text app's saves (file_check / file_saved)
+#   Appearance.name_custom           NAME…: custom renamed into a theme of its own
 #   -- the top-bar icon sheet        the bar's IconSheet
 #   Appearance.set_font_scale        the system font scale, relayout
 #   Appearance.set_chrome_scale      the chrome scale above the tap floor, relayout
@@ -20,7 +21,9 @@ happened to share a Settings screen. And `custom`, the theme a change makes
 the Appearance rows, applied once a frame (`tick`) and written once the
 changes settle or at an exit (`commit`), through Paint's mechanism (#108).
 And EDIT FILE (`edit_file`, step 6): custom's theme.json in the text app, a
-save the loader takes installed at the next frame.
+save the loader takes installed at the next frame. And NAME… (`name_custom`,
+step 8): custom renamed to a name of the kid's, a package of its own in the
+THEME grid, `custom` free until the next change.
 
 Not to be confused with `appearance_app.py`, which is the PICKER a kid taps --
 that app keeps its name and its place in the app registry, and reaches these
@@ -105,13 +108,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
                               PICTURE_FILE, derived_of, font_files, keys_of,
-                              manifest, minified, overlay, read_look, wall_keys)
+                              manifest, minified, name_ok, named, overlay,
+                              read_look, wall_keys)
     from moy_store_base import cart_path
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
                                       PETME128, PICTURE_FILE, derived_of, font_files,
-                                      keys_of, manifest, minified, overlay,
-                                      read_look, wall_keys)
+                                      keys_of, manifest, minified, name_ok,
+                                      named, overlay, read_look, wall_keys)
     from runtime.moy_store_base import cart_path
 try:
     from editors_sheet import IconSheet
@@ -774,6 +778,68 @@ class Appearance:
         if self._unsaved:
             self.commit()                      # the manifest's `look`
 
+    # -- NAME…: custom kept as a theme of its own (phase 6 step 8) -------------
+
+    def name_check(self, name):
+        """Why `name` cannot be custom's name, else None: "grammar" (not the
+        loader's name, §3), "seed", "custom", "cart" (a cart's folder has
+        the stem), "taken" (an installed theme has it: NAME… replaces it
+        only when asked)."""
+        if not name_ok(name):
+            return "grammar"
+        if name in THEME_NAMES:
+            return "seed"
+        if name == CUSTOM:
+            return "custom"
+        folder = name + ".moy"
+        for cart in self.ws.carts.all:
+            path = str(cart.get("path") or "").replace("\\", "/")
+            if path.rsplit("/", 1)[-1] == folder:
+                return "taken" if cart.get("type") == "theme" else "cart"
+        return None
+
+    def name_custom(self, name, replace=False):
+        """NAME…: rename `custom` to `name` -- its folder to `<name>.moy`,
+        theme.json's `name` with it, the manifest's `look` kept -- so it is
+        a theme of its own in the THEME grid, and switch to it; `custom` no
+        longer exists until the next change. An installed theme of that name
+        is replaced only with `replace`. None, else `name_check`'s reason,
+        "none" (the theme is not custom) or "store" (no store, or the store
+        refused: custom is as it was)."""
+        if self.theme_name != CUSTOM:
+            return "none"
+        why = self.name_check(name)
+        if why is not None and not (why == "taken" and replace):
+            return why
+        ws = self.ws
+        store = getattr(ws, "store", None)
+        move = getattr(ws.carts_store, "rename_package", None)
+        if store is None or move is None or not store.writable() \
+                or not self.commit():
+            return "store"
+        c = self._cust or self._load_custom()
+        if c is None or c.theme is None:
+            return "store"
+        theme = named(c.theme, name)
+        if _uimod.theme_resolve(theme)[0] != 0:
+            return "grammar"
+        files = {_THEME_MAIN: theme, MANIFEST: manifest(c.look, name)}
+        src = self._custom_path()
+        dest = cart_path(ws.carts_root, name + ".moy")
+        try:
+            store.call(lambda: move(src, dest, files, why == "taken"))
+        except Exception as exc:  # noqa: BLE001 -- custom stays as it was
+            print("Moybyte NAME failed:", _err_text(exc))
+            return "store"
+        self._cust = None
+        self._unsaved = False
+        self._editing = None
+        self._slot_src = None                  # store_moved leaves the look alone
+        self.theme_name = name
+        ws.carts.moved(src, dest)
+        self.set_theme(name)
+        return None
+
     def _custom_path(self):
         return cart_path(self.ws.carts_root, CUSTOM + ".moy")
 
@@ -1235,6 +1301,29 @@ class Appearance:
         self._layouts = {}
         self._choices = None
         return paths
+
+    def package_rows(self):
+        """{name: [rc, rows]} of every store package: the loader's answer
+        and an FNV-1a digest of the dark and light rows it resolves to --
+        the same on every console that holds the same bytes (the dev
+        channel's `state`, a theme carried between consoles)."""
+        out = {}
+        for name in self._packages():
+            got = package(name)
+            if got is None:
+                continue
+            h = 0x811C9DC5
+            if got[0] == 0:
+                for row in (got[3], got[4]):
+                    stack = [row]
+                    while stack:
+                        v = stack.pop()
+                        if type(v) is tuple:
+                            stack.extend(v)
+                        else:
+                            h = ((h ^ (int(v) & 0xFF)) * 0x01000193) & 0xFFFFFFFF
+            out[name] = [got[0], "%08x" % h]
+        return out
 
     def _package_file(self, name, file, cap):
         """Up to cap + 1 bytes of file `file` of store package `name` (one

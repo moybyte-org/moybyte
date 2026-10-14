@@ -555,6 +555,12 @@ def binding(sanitize=False):
         def edit_file(self, *a, **kw):
             return self._app._serve(self._g, "theme", "edit_file")(self._g, *a, **kw)
 
+        def name_custom(self, *a, **kw):
+            return self._app._serve(self._g, "theme", "name_custom")(self._g, *a, **kw)
+
+        def name_check(self, *a, **kw):
+            return self._app._serve(self._g, "theme", "name_check")(self._g, *a, **kw)
+
     class Prefs(_Role):
         def get(self, key, default=None):
             kb = _str(key)

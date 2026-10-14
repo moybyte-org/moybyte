@@ -737,13 +737,23 @@ function walkVfs(path, prefix, out, depth) {
 
 // Unzip into the store under a collision-safe name, then re-scan the shelf
 // WITHOUT rebasing the watcher: the imported files must stay pending so the
-// very next sweep writes them to the local store like any other commit.
+// very next sweep writes them to the local store like any other commit. A
+// theme package lands under its own name (`store.themeOf`); a taken one under
+// the next `_2` stem, its theme.json's `name` rewritten to match.
 async function importZip(name, buf) {
     const entries = await store.unzip(new Uint8Array(buf));
     if (!entries.length) throw new Error("no files in that zip");
     const top = store.zipTopDir(entries);
-    const dir = store.uniqueCartDir((n) => vfsExists(CARTS_ROOT + "/" + n),
-                                    store.cartBase(top || name));
+    const exists = (n) => vfsExists(CARTS_ROOT + "/" + n);
+    const theme = store.themeOf(entries, top);
+    let dir, rename = null;
+    if (theme) {
+        const t = store.uniqueThemeDir(exists, theme.name);
+        dir = t.dir;
+        rename = t.name;
+    } else {
+        dir = store.uniqueCartDir(exists, store.cartBase(top || name));
+    }
     let n = 0;
     for (const e of entries) {
         const rel = top ? e.name.slice(top.length + 1) : e.name;
@@ -752,7 +762,8 @@ async function importZip(name, buf) {
         if (!parts) continue;                 // traversal, or a skip-listed name
         const full = CARTS_ROOT + "/" + parts.join("/");
         mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, e.data);
+        mp.FS.writeFile(full, rel === (theme && theme.file)
+            ? store.renamedTheme(e.data, rename) : e.data);
         n++;
     }
     if (!n) throw new Error("nothing in that zip looked like a cart");

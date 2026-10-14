@@ -81,7 +81,7 @@ try:
                                 _has, _cwd, _enter, _leave, CART_EXT,
                                 cart_path, cart_folder, store_path,
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
-                                is_cart_id)
+                                is_cart_id, THEME_NAME_MAX, theme_name_ok)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (FILE_KIND_NAMES, files_root,
                                         CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
@@ -95,7 +95,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _cwd, _enter, _leave, CART_EXT,
                                         cart_path, cart_folder, store_path,
                                         USER_NS, BUILTIN_NS, VENDOR_KEY,
-                                        vendor, is_cart_id)
+                                        vendor, is_cart_id, THEME_NAME_MAX,
+                                        theme_name_ok)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -1985,6 +1986,21 @@ def save_package(path, files, remove=(), fresh=False):
         _remove(path + "/" + name)
 
 
+def rename_package(path, dest, files, replace=False):
+    """A theme package's folder `path` moved to `dest` by one rename (NAME…,
+    docs/theming_2026-09.md §9 phase 6 step 8), then each of `files` written
+    whole into it. A folder at `dest` is replaced only with `replace`
+    (`adopt`'s aside-and-remove), else OSError(EEXIST)."""
+    if _exists(dest):
+        if not replace:
+            raise OSError(17, "exists")
+        adopt(path, dest)
+    else:
+        os.rename(path, dest)
+    for name in files:
+        _write_bytes(dest + "/" + name, files[name])
+
+
 # --- a cart as it travels (#127, #122): the archive and adopt ---------------
 #
 # A `.moy` archive is the browser's codec (firmware/web_runner/moy_store.mjs's
@@ -2135,13 +2151,52 @@ def import_archive(archive, root=CARTS_DIR, stage=None):
         ok = ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or c in "_-"
         out += c if ok else ("" if out.endswith("_") else "_")
     base = out.strip("_") or "cart"
+    theme = _theme_of(stage, base)
+    if theme is not None:
+        base = theme[0]
     target = cart_path(root, base + CART_EXT)
     i = 2
     while _exists(target):
-        target = cart_path(root, base + "_" + str(i) + CART_EXT)
+        stem = base
+        if theme is not None:
+            stem = base[:THEME_NAME_MAX - len(str(i)) - 1]
+        target = cart_path(root, stem + "_" + str(i) + CART_EXT)
         i += 1
+    if theme is not None:
+        name = target.rsplit("/", 1)[-1][:-len(CART_EXT)]
+        if name != theme[0] or theme[2]:
+            d = json.loads(theme[3])
+            d["name"] = name
+            _write(stage + "/" + theme[1], json.dumps(d))
     adopt(stage, target)
     return target
+
+
+def _theme_of(folder, stem):
+    """A theme package's (name, file, renamed, text) in unpacked `folder`,
+    or None for a cart: the browser's `themeOf` (moy_store.mjs). A theme
+    lands under its theme.json's `name`, else its folder's `stem` in the
+    grammar (`renamed`), since the loader takes it only from `<name>.moy`."""
+    try:
+        man = json.loads(_read(folder + "/manifest.json"))
+        if man["moybyte"]["type"] != "theme":
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    main = man.get("main")
+    file = main if type(main) is str and main else "theme.json"
+    try:
+        text = _read(folder + "/" + file)
+        name = json.loads(text).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if theme_name_ok(name):
+        return (name, file, False, text)
+    alt = ""
+    for c in stem.lower():
+        alt += c if ("a" <= c <= "z" or "0" <= c <= "9" or c in "_-") else "_"
+    alt = alt.lstrip("_-")[:24]
+    return (alt if theme_name_ok(alt) else "theme", file, True, text)
 
 
 # --- the modules split off this file, re-exported under their old names -------

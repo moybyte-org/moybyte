@@ -243,6 +243,7 @@
   "p4_1024x600_cs2_fs1_windowed": {
     "app_appearance": [136, 7],
     "app_appearance_accent": [52, 5],
+    "app_appearance_custom": [136, 7],
     "app_artwork": [92, 5],
     "app_calc": [268, 13],
     "app_files": [224, 11],
@@ -337,6 +338,7 @@
   "tdeck_320x240_fs1_dark": {
     "app_appearance": [84, 29],
     "app_appearance_accent": [38, 4],
+    "app_appearance_custom": [85, 33],
     "app_artwork": [314, 13],
     "app_calc": [146, 17],
     "app_files": [27, 7],
@@ -365,6 +367,7 @@
   "tdeck_320x240_fs1_light": {
     "app_appearance": [84, 29],
     "app_appearance_accent": [38, 4],
+    "app_appearance_custom": [85, 33],
     "app_artwork": [314, 13],
     "app_calc": [146, 17],
     "app_files": [27, 7],

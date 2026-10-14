@@ -542,5 +542,34 @@ ok("a zip named for a cart's id keeps it",
    store.cartBase("kenny.Star Catcher.moy.zip") === "kenny.star_catcher",
    store.cartBase("kenny.Star Catcher.moy.zip"));
 
+// ---- a theme lands under its own name (theming phase 6 step 8) --------------
+{
+    const enc = (o) => new TextEncoder().encode(JSON.stringify(o));
+    const pkg = (top, name) => [
+        { name: top + "/manifest.json", data: enc({ format: "moy-1", title: "Sunset",
+            runtime: "theme", main: "theme.json", moybyte: { type: "theme" } }) },
+        { name: top + "/theme.json", data: enc({ format: 1, name }) }];
+    const t = store.themeOf(pkg("sunset.moy", "sunset"), "sunset.moy");
+    ok("a theme archive is read as a theme", t && t.name === "sunset" && t.file === "theme.json",
+       JSON.stringify(t));
+    ok("a cart archive is no theme", store.themeOf([{ name: "x.moy/manifest.json",
+        data: enc({ moybyte: { type: "game" } }) }], "x.moy") === null);
+    ok("a theme whose name is not the grammar takes its folder's",
+       store.themeOf(pkg("Night Owl.moy", "Bad Name"), "Night Owl.moy").name === "night_owl");
+    ok("a free theme name is its folder",
+       store.uniqueThemeDir(() => false, "sunset").dir === "sunset.moy");
+    const taken = { "sunset.moy": 1 };
+    const u = store.uniqueThemeDir((n) => n in taken, "sunset");
+    ok("a taken theme name takes the next _2 stem", u.dir === "sunset_2.moy" && u.name === "sunset_2",
+       JSON.stringify(u));
+    const long = "a".repeat(24);
+    const l = store.uniqueThemeDir((n) => n === long + ".moy", long);
+    ok("the _2 stem stays inside the name's 24", l.name.length === 24 && store.themeName(l.name),
+       l.name);
+    const back = JSON.parse(new TextDecoder().decode(
+        store.renamedTheme(enc({ format: 1, name: "sunset", colors: {} }), "sunset_2")));
+    ok("theme.json's name is rewritten to the folder's", back.name === "sunset_2" && back.format === 1);
+}
+
 console.log("\n" + (fail ? fail + " FAILED" : "all store checks passed"));
 process.exit(fail ? 1 : 0);

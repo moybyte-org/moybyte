@@ -168,6 +168,20 @@ class CartManager:
         if e:
             self.apply([c for c in self.all if c.get("path") != path] + [e])
 
+    def moved(self, old, path):
+        """Cart folder `old` renamed to `path` (NAME…, `Appearance.name_custom`):
+        the entry at `old` and any at `path` give way to `path` read again."""
+        if not self.store.ready():
+            return
+        try:
+            e = self.store.call(
+                lambda: moy_catalogue.entry(moy_catalogue.handle(path)))
+        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
+            print("Moybyte adopt failed:", exc)
+            e = None
+        keep = [c for c in self.all if c.get("path") not in (old, path)]
+        self.apply(keep + [e] if e else keep)
+
     # -- the #66 live-set diet -----------------------------------------------
 
     def slim(self):

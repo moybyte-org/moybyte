@@ -95,6 +95,16 @@ class ThemeServer:
         (`Appearance.edit_file`). True when it opened."""
         return self.__ws.look.edit_file()
 
+    def name_custom(self, g, name, replace=False):
+        """NAME…: `custom` renamed to `name`, a theme of its own
+        (`Appearance.name_custom`). None, else why not."""
+        return self.__ws.look.name_custom(name, bool(replace))
+
+    def name_check(self, g, name):
+        """Why `name` cannot be custom's name, else None
+        (`Appearance.name_check`)."""
+        return self.__ws.look.name_check(name)
+
 
 
 # -- the storage servers' shared machinery --------------------------------------

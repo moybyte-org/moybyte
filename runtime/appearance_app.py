@@ -28,9 +28,15 @@ window, so the window's own damage carries it. Moving the cursor in ACCENT,
 TINT or WALLPAPER tries the value live; ENTER keeps it, B restores what was
 there (the theme the picker opened on, when the try made `custom` of it).
 
-Every row but THEME, MODE, CHROME SIZE and EDIT FILE… is a change to the
-theme (`ctx.theme.change`), which lands in `custom`. The rows read
+Every row but THEME, MODE, CHROME SIZE, EDIT FILE… and NAME… is a change to
+the theme (`ctx.theme.change`), which lands in `custom`. The rows read
 `ctx.theme.choices()` once per token generation.
+
+NAME… (on `custom` only) opens a text field on the keyboard in text mode
+(`ctx.nav.text_mode`): ENTER renames `custom` to the name typed
+(`ctx.theme.name_custom`), a theme of its own in the grid; a name an
+installed theme has arms REPLACE? and a second ENTER replaces it; ESC backs
+out.
 """
 
 try:
@@ -49,6 +55,11 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime.chrome import THEME_NAMES, theme_colors, theme_names
 
 try:
+    from editors_base import TE_CANCEL, TE_COMMIT, TE_EDIT, TextEntry
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors_base import TE_CANCEL, TE_COMMIT, TE_EDIT, TextEntry
+
+try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -61,7 +72,8 @@ THEIRS = ""
 
 LABELS = {"theme": "THEME", "mode": "MODE", "accent": "ACCENT",
           "tint": "TINT", "wallpaper": "WALLPAPER", "frame": "WINDOW STYLE",
-          "font": "FONT", "chrome": "CHROME SIZE", "file": "EDIT FILE..."}
+          "font": "FONT", "chrome": "CHROME SIZE", "file": "EDIT FILE...",
+          "name": "NAME..."}
 # The WINDOW STYLE and FONT presets in their stepping order (the look's
 # FRAMES and FONTS), and their labels.
 FRAMES = ("classic", "tab", "platinum", "win9x", "flat")
@@ -72,10 +84,20 @@ FONT_NAMES = {"tiny5": "TINY5", "petme128": "PETME128"}
 HINTS = {"accent": "ONE COLOUR FOR TITLES, SELECTION AND FOCUS.",
          "tint": "ONE TINT FOR PANELS, DESK AND BAR.",
          "wallpaper": "THE WALLPAPER IS PART OF THE THEME.",
-         "theme": "PICK A THEME."}
+         "theme": "PICK A THEME.",
+         "name": "NAME YOUR THEME."}
 ROW_KEYS = "UP/DN row  L/R change  ENTER open"
 PICK_KEYS = "ARROWS try  ENTER keep  B undo"
 GRID_KEYS = "ARROWS move  ENTER use  B back"
+NAME_KEYS = "TYPE  ENTER keep  ESC back"
+# NAME…'s refusals (`ctx.theme.name_check`), and the REPLACE? arm.
+NAME_WHY = {"grammar": "a-z 0-9 _ -, A LETTER OR DIGIT FIRST",
+            "seed": "A BUILT-IN THEME HAS THAT NAME",
+            "custom": "CUSTOM IS THE ONE BEING CHANGED",
+            "cart": "A CART HAS THAT NAME",
+            "store": "CAN'T SAVE HERE",
+            "none": "ONLY CUSTOM IS NAMED"}
+NAME_HINT = "a-z 0-9 _ -, UP TO 24"
 
 
 class AppearanceLayout:
@@ -143,7 +165,7 @@ class AppearanceAppLayer:
     # CAPABILITY, not a core role: this app and the two that copy a drawing
     # into it (Paint, Files) are its only consumers. A pick is a change to
     # the theme (docs/theming_2026-09.md D6), so it lands in `custom`.
-    NEEDS = ("surface", "theme", "damage", "wallpaper")
+    NEEDS = ("surface", "theme", "damage", "wallpaper", "nav")
 
     def __init__(self, ctx, names):
         self.ctx = ctx
@@ -152,6 +174,7 @@ class AppearanceAppLayer:
         self._theme = ctx.theme
         self._damage = ctx.damage
         self._wall = ctx.wallpaper
+        self._nav = ctx.nav
         self.names = names
         cv = ctx.surface.canvas()
         self.layout = AppearanceLayout(cv.w, cv.h, self._surf.font_scale(),
@@ -166,6 +189,12 @@ class AppearanceAppLayer:
         self.cur = 0                # its cursor
         self.orig = None            # what it opened on: (choices, colours)
         self.tried = False
+        # NAME…'s field, the name REPLACE? is armed for, the refusal shown,
+        # and the strip's note once a name is kept.
+        self.entry = TextEntry(24, self._name_char)
+        self.armed = None
+        self.why = None
+        self.note = None
         self._ch = None
         self._gen = None
         self._stale = 0
@@ -221,16 +250,20 @@ class AppearanceAppLayer:
         if len(self.choices()["chromes"]) > 1:
             out.append("chrome")
         out.append("file")
+        if self.choices()["theme"] == "custom":
+            out.append("name")
         return out
 
     def _themes(self):
-        """The THEME grid's names: `custom` first, then the seeds and the
-        store's packages (`chrome.theme_names`)."""
+        """The THEME grid's names: `custom` first, then the store's
+        packages (a named theme among them), then the seeds
+        (`chrome.theme_names`)."""
         names = list(theme_names())
-        if "custom" in names:
-            names.remove("custom")
-            names.insert(0, "custom")
-        return names
+        mine = [n for n in names if n not in THEME_NAMES]
+        if "custom" in mine:
+            mine.remove("custom")
+            mine.insert(0, "custom")
+        return mine + [n for n in names if n in THEME_NAMES]
 
     def _accent_at(self, a):
         for i, acc in enumerate(self._accents):
@@ -296,6 +329,7 @@ class AppearanceAppLayer:
     # -- acting ----------------------------------------------------------------
 
     def _acted(self):
+        self.note = None
         self._stale = 2
         self._damage.all()
 
@@ -349,15 +383,82 @@ class AppearanceAppLayer:
             return
         self._acted()
 
-    def _activate(self, key):
+    def _activate(self, key, seed=0):
         """ENTER on row `key`."""
         if key in ("theme", "accent", "tint", "wallpaper"):
             self._open_picker(key)
         elif key == "file":
             self._theme.edit_file()
             self._acted()
+        elif key == "name":
+            self._open_name(seed)
         else:
             self._step(key, 1)
+
+    # -- NAME… -----------------------------------------------------------------
+
+    @staticmethod
+    def _name_char(c, text):
+        """The name grammar's characters (§3), a letter or a digit first."""
+        if "A" <= c <= "Z":
+            return False
+        if c in "_-":
+            return bool(text)
+        return "a" <= c <= "z" or "0" <= c <= "9"
+
+    def _open_name(self, seed=0):
+        """NAME…: the field, empty, its edge guarded so the ENTER that
+        opened it is not its first key; the keyboard types."""
+        self.entry.open("", seed, guard=True)
+        self.armed = None
+        self.why = None
+        self.pick = "name"
+        self.orig = None
+        self.tried = False
+        self._nav.text_mode(True)
+        self._damage.all()
+
+    def _close_name(self):
+        self.pick = None
+        self.armed = None
+        self.why = None
+        self._nav.text_mode(False)
+        self._acted()
+
+    def _name_input(self, inp):
+        ev = self.entry.feed(inp)
+        if ev == TE_COMMIT:
+            self._name_commit()
+        elif ev == TE_CANCEL:
+            self._close_name()
+        elif ev == TE_EDIT:
+            self.armed = None
+            self.why = None
+            self._damage.all()
+        return True
+
+    def _name_commit(self):
+        """ENTER in NAME…: rename `custom` to the name typed; a name an
+        installed theme has arms REPLACE?, and a second ENTER on the same
+        name replaces it."""
+        name = self.entry.text
+        why = self._theme.name_check(name)
+        replace = why == "taken" and self.armed == name
+        if why == "taken" and not replace:
+            self.armed = name
+            self.why = None
+            self._damage.all()
+            return
+        if why is None or replace:
+            why = self._theme.name_custom(name, replace)
+        if why is not None:
+            self.armed = None
+            self.why = why
+            self._damage.all()
+            return
+        self._close_name()
+        self.note = name + ".moy IS A THEME NOW"
+        self.row = min(self.row, len(self._rows()) - 1)
 
     def _open_picker(self, key):
         ch = self.choices()
@@ -440,6 +541,8 @@ class AppearanceAppLayer:
 
     def handle_input(self, inp):
         self._refresh()
+        if self.pick == "name":
+            return self._name_input(inp)
         if self.pick is not None:
             return self._picker_input(inp)
         if inp.pressed("b"):
@@ -489,7 +592,7 @@ class AppearanceAppLayer:
         elif inp.pressed("right"):
             self._step(rows[self.row], 1)
         elif inp.pressed("a"):
-            self._activate(rows[self.row])
+            self._activate(rows[self.row], inp.last_key)
         else:
             return True
         self._damage.all()
@@ -530,6 +633,10 @@ class AppearanceAppLayer:
         if not click:
             return True
         self._refresh()
+        if self.pick == "name":
+            if not _in(px, py, self._pick_frame()):
+                self._close_name()             # a tap outside: backed out
+            return True
         if self.pick is not None:
             rects = self._pick_rects()
             for i, r in enumerate(rects):
@@ -635,6 +742,8 @@ class AppearanceAppLayer:
             return 326 * fs, 196 * fs
         if self.pick == "theme":
             return 3 * 98 * fs + 4 * 6 * fs, 3 * 64 * fs + 30 * fs
+        if self.pick == "name":
+            return 320 * fs, 162 * fs
         rows = (len(self._walls()) + 2) // 3
         return 3 * 100 * fs + 16 * fs, rows * 76 * fs + 36 * fs
 
@@ -671,6 +780,8 @@ class AppearanceAppLayer:
         """Each picker item's rect, None for one scrolled out of view."""
         fs = self.layout.fs
         bx, by, bw, bh = self._pick_body()
+        if self.pick == "name":
+            return []
         n = self._pick_count()
         cols = self._pick_cols()
         if self.pick == "accent":
@@ -766,7 +877,9 @@ class AppearanceAppLayer:
         cv.rect(lay.cx, y, lay.cw, h, th["bar"])
         cv.rect(lay.cx, y, lay.cw, fs, th["bar_edge"])
         name = ch["theme"]
-        if name == "custom":
+        if self.note:
+            left = self.note
+        elif name == "custom":
             left = "custom - saved as you go"
         elif ch["store"]:
             left = name + " - store"
@@ -775,6 +888,8 @@ class AppearanceAppLayer:
         keys = ROW_KEYS
         if self.pick == "theme":
             keys = GRID_KEYS
+        elif self.pick == "name":
+            keys = NAME_KEYS
         elif self.pick is not None:
             keys = PICK_KEYS
         kx = lay.cx + lay.cw - 5 * fs - _ui.print_width(keys) * fs
@@ -845,6 +960,8 @@ class AppearanceAppLayer:
             cv.rectb(r[0], r[1], r[2], r[3], th["shade_dark"])
         elif key == "file":
             self._right(cv, "theme.json", vx, y, h, th["ink_dim"])
+        elif key == "name":
+            self._right(cv, "KEEP IT AS ITS OWN THEME", vx, y, h, th["ink_dim"])
         elif key == "theme":
             name = ch["theme"]
             nx = self._right(cv, name, vx, y, h, th["ink"])
@@ -895,7 +1012,53 @@ class AppearanceAppLayer:
         cv.rect(x, y, w, h, n["light_grey"])
         cv.circ(x + w * 3 // 4, y + h // 3, max(2, min(w, h) // 8), n["yellow"])
 
-    def _draw_card(self, cv, th, r, name, selected, focused, label=True):
+    def _draw_name(self, cv, th):
+        """NAME…'s field, under its two lines, the grammar or the refusal
+        under it, and the theme's card as it will be in the grid beside
+        where its folder goes."""
+        fs = self.layout.fs
+        bx, by, bw, bh = self._pick_body()
+        ink, dim = th["ink"], th["ink_dim"]
+        lh = _ui.font("ui")[3] * fs + 3 * fs
+        y = by
+        if not self._console():
+            cv.print("NAME YOUR THEME", bx, y, ink, 1)
+            y += lh + 2 * fs
+        for line in ("IT JOINS THE THEME GRID AS ITS OWN.",
+                     "CUSTOM IS FREE FOR THE NEXT CHANGE."):
+            cv.print(_ui.print_fit(line, bw // fs), bx, y, dim, 1)
+            y += lh
+        y += 3 * fs
+        fh = 16 * fs
+        _ui.text_field(cv, (bx, y, bw, fh), self.entry.text, "",
+                       (th["surface"], th["accent"], ink, dim, th["focus"]), fs)
+        y += fh + 4 * fs
+        name = self.entry.text
+        if self.armed is not None and self.armed == name:
+            msg, c = "REPLACE " + name + "? ENTER AGAIN", th["accent"]
+        elif self.why is not None:
+            msg, c = NAME_WHY.get(self.why, str(self.why).upper()), th["accent"]
+        else:
+            msg, c = NAME_HINT, dim
+        cv.print(_ui.print_fit(msg, bw // fs), bx, y, c, 1)
+        y += lh + 4 * fs
+        cw, chh = 86 * fs, 54 * fs
+        if y + chh > by + bh:
+            return
+        self._draw_card(cv, th, (bx, y, cw, chh), "custom", True, False,
+                        title=name or "custom")
+        tx = bx + cw + 10 * fs
+        tw = (bx + bw - tx) // fs
+        ty = y + 4 * fs
+        for line, c in (("THE THEME FOLDER", dim),
+                        ((name or "...") + ".moy", ink),
+                        ("TRAVELS LIKE A CART:", dim),
+                        ("FILES, EXPORT, THE STORE.", dim)):
+            cv.print(_ui.print_fit(line, tw), tx, ty, c, 1)
+            ty += lh
+
+    def _draw_card(self, cv, th, r, name, selected, focused, label=True,
+                   title=None):
         """A theme card: a little desk in theme `name`'s colours, its bar,
         an inactive window behind an active one; its name in a band, the
         page's accent when it is the theme in use, and a tag for `custom`
@@ -924,9 +1087,9 @@ class AppearanceAppLayer:
             ly = y + h - band - fs
             cv.rect(x + fs, ly, w - 2 * fs, band, th["accent"] if selected else th["bar"])
             ink = 0 if selected else th["chrome_ink"]
-            cv.print(_ui.print_fit(name, (w - 8 * fs) // fs), x + 4 * fs,
+            cv.print(_ui.print_fit(title or name, (w - 8 * fs) // fs), x + 4 * fs,
                      ly + (band - _ui.font("ui")[3] * fs) // 2, ink, 1)
-            tag = "CUSTOM" if name == "custom" else (
+            tag = None if title else "CUSTOM" if name == "custom" else (
                 "STORE" if name in self._stores() else None)
             if tag and w >= 80 * fs:
                 tw = (_ui.print_width(tag) + 4) * fs
@@ -965,6 +1128,9 @@ class AppearanceAppLayer:
         self._draw_strip(cv, th, ch)
 
     def _draw_items(self, cv, th, ch):
+        if self.pick == "name":
+            self._draw_name(cv, th)
+            return
         fs = self.layout.fs
         rects = self._pick_rects()
         for i, r in enumerate(rects):

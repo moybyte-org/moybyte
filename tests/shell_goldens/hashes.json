@@ -243,6 +243,7 @@
   "p4_1024x600_cs2_fs1_windowed": {
     "app_appearance": "b2e2e4fc362a66b7538ccee26cd1955d69eb3fb219ccb87e0d717de168944b38",
     "app_appearance_accent": "c23aaf0c759ffac1338b1759fce0b8238d764093c5452867130ab08714ad534d",
+    "app_appearance_custom": "2307ec9229f7ec5a85eaff85a6c365cd5a0669a8eb276bfc91ffe51de314f675",
     "app_artwork": "73fbe4095e05b67adcb47076ce33a7a29e6aa73e7069d88f582417c6ea7665a2",
     "app_calc": "c3c178253870156414b75e0ce34877bb4dc40140cdf8e118f09ace6e99687e09",
     "app_files": "f786b76f5af339816c0efde2f1dda9d8653c619719122c7c8ec1092a6ab3fe70",
@@ -337,6 +338,7 @@
   "tdeck_320x240_fs1_dark": {
     "app_appearance": "0c7b08e6d98d86b8246b4ade7ef838fcaee816cdd7a110d881e0bf37d0608328",
     "app_appearance_accent": "8e41e126498b277653571cff62dfb2663b8f3e0d8356cb56b29312ed1122137c",
+    "app_appearance_custom": "9097a5b1ddf0e9c21143c55172a5b2820a0302593a6964af9727455bed4ed093",
     "app_artwork": "61bf6341530c945d09ba502462c91ab39327caeb00d8aad145522901ade6a388",
     "app_calc": "9781c550f2f9e606b84edb6c966ef8a3e15d94254d6059332a42a86c7e48f2d4",
     "app_files": "d57a514e4fc0587bc94da2b17a6ec5bbf7b44b547fce3f6ce73ea42bbd9d8901",
@@ -365,6 +367,7 @@
   "tdeck_320x240_fs1_light": {
     "app_appearance": "319d4c16ff6c3b5a99dbda86b32ae959cd5475895b8221973a9fff0dc0bc8eb8",
     "app_appearance_accent": "363d8ac594c71650425623d566713f59c4db18c9e65cce41dd6182d4cf4f59c7",
+    "app_appearance_custom": "5f86edef51dbc213c7b230a5259cbeace994f00d3d40a5edb2b7f9b4d12f7c9f",
     "app_artwork": "c0bf39712b89ac1f880bbae62260c953b6383dc6ddf8cd13eab2961bb6394480",
     "app_calc": "17499e292f29d3143318c54eeb5953404423e6eddfad5a0ebfdaebcf3f4b5573",
     "app_files": "97ca881112228b6b7e9b6f48325e44cf1c5ae9e65b861192ed821eb7f85df0c3",

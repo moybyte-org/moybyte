@@ -1439,6 +1439,8 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"theme.choices", MOY_ROLE_THEME, MOY_APP_SHELL},
     {"theme.set_chrome_scale", MOY_ROLE_THEME, MOY_APP_SHELL},
     {"theme.edit_file", MOY_ROLE_THEME, MOY_APP_SHELL},
+    {"theme.name_custom", MOY_ROLE_THEME, MOY_APP_SHELL},
+    {"theme.name_check", MOY_ROLE_THEME, MOY_APP_SHELL},
     {"files.readable", MOY_ROLE_FILES, MOY_ROW_FILES_READABLE},
     {"files.ready", MOY_ROLE_FILES, MOY_ROW_FILES_READY},
     {"files.begin", MOY_ROLE_FILES, MOY_ROW_FILES_BEGIN},

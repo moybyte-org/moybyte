@@ -2331,6 +2331,8 @@ def roles_trace(ws):
     t.set_chrome_scale(ch["chrome"])
     say("chrome", t.choices()["chrome"] == ch["chrome"])
     say("edit file", t.edit_file())
+    say("name", t.name_check("night"), t.name_custom("traced"), t.name(),
+        t.choices()["store"])
 
     _c_called(ws.app_abi, c_before)
     uncalled = [r + "." + v for r, v in ROWS if (r + "." + v) not in CALLED]
@@ -2517,6 +2519,7 @@ change 0 0
 changed custom grey flat
 chrome True
 edit file True
+name seed None traced True
 uncalled -
 """
 

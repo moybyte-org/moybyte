@@ -572,6 +572,8 @@ def _surface_plan(ws, cfg):
         plan.append(("app_" + app, enter))
         if app == "appearance" and cfg.get("accent"):
             plan.append(("app_appearance_accent", _accent_picker(ws)))
+            plan.append(("app_appearance_custom",
+                         _after_picker(ws, _custom_page(ws))))
             picker = True
     for surface, title in APP_CARTS:
         plan.append(("app_" + surface,
@@ -630,12 +632,37 @@ def _accent_picker(ws):
     return enter
 
 
+def _custom_page(ws):
+    """The Appearance page on a `custom` made from night with one accent
+    (ACCENT stepped once), NAME… showing and focused (§9 phase 6 step 8)."""
+    def enter():
+        app = ws.appearance_app
+        app.zone = "rows"
+        app.row = app._rows().index("accent")
+        app.handle_input(_Key("right"))
+        ws.look.tick(0.0)
+        assert ws.look.theme_name == "custom"
+        app._refresh()
+        app.row = app._rows().index("name")
+    return enter
+
+
 def _after_picker(ws, enter):
-    """`enter`, after the picker the surface before it opened is closed (B,
-    which restores nothing: nothing was tried)."""
+    """`enter`, after the surface before it is put back: a picker closed (B,
+    which restores nothing: nothing was tried), and a `custom` the page made
+    gone, the page on night with ACCENT focused, as the picker left it."""
     def go():
-        ws.appearance_app.handle_input(_Key("b"))
-        assert ws.appearance_app.pick is None
+        app = ws.appearance_app
+        if app.pick is not None:
+            app.handle_input(_Key("b"))
+            assert app.pick is None
+        if ws.look.theme_name == "custom":
+            ws.look.set_theme("night")
+            ws.carts_store.delete({"path": os.path.join(ws.carts_root,
+                                                        "custom.moy")})
+            ws.carts.rescan()
+            app._refresh()
+            app.row = app._rows().index("accent")
         enter()
     return go
 
@@ -721,7 +748,7 @@ def surface_names(config_name):
     for a in APPS:
         names.append("app_" + a)
         if a == "appearance" and cfg.get("accent"):
-            names.append("app_appearance_accent")
+            names += ["app_appearance_accent", "app_appearance_custom"]
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
     names += ["web_console", "web_console_address"]

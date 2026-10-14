@@ -448,3 +448,92 @@ def test_the_pages_copies_of_the_looks_names_agree():
     assert page.PICTURE == Appearance.PICTURE and page.THEIRS == Appearance.THEIRS
     assert set(page.FRAME_NAMES) == set(page.FRAMES)
     assert set(page.FONT_NAMES) == set(page.FONTS)
+
+
+# -- NAME… (phase 6 step 8) -----------------------------------------------------
+
+class T:
+    """One typed byte (0 between bytes: the keyboard's edge)."""
+
+    def __init__(self, k):
+        self.last_key = k
+
+    def pressed(self, n):
+        return False
+
+
+def _type(ws, app, text):
+    for ch in text:
+        app.handle_input(T(ord(ch) if isinstance(ch, str) else ch))
+        app.handle_input(T(0))
+    _frame(ws)
+
+
+@pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
+def test_name_shows_on_custom_only_and_keeps_it_by_keys(tmp_path, kw):
+    ws = _ws(tmp_path, **kw)
+    app = _open_appearance(ws)
+    assert "name" not in app._rows()
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    assert app._rows()[-1] == "name"
+    _focus(app, "name")
+    app.handle_input(T(13))                     # held from the ENTER that opens
+    _press(ws, app, "a")
+    assert app.pick == "name" and ws.input.text_mode
+    app.handle_input(T(0))
+    _type(ws, app, "BubbleGum!")                # capitals and ! are not the grammar
+    assert app.entry.text == "ubbleum"
+    _type(ws, app, [8] * 7 + list("bubblegum"))
+    assert app.entry.text == "bubblegum"
+    _type(ws, app, [13])
+    assert app.pick is None and not ws.input.text_mode
+    assert ws.look.theme_name == "bubblegum"
+    assert "name" not in app._rows()
+    assert app._themes()[0] == "bubblegum" and "custom" not in app._themes()
+    assert (tmp_path / "carts" / "bubblegum.moy" / "theme.json").exists()
+    assert not (tmp_path / "carts" / "custom.moy").exists()
+
+
+def test_name_refuses_with_the_reason_and_arms_replace(tmp_path):
+    ws = _ws(tmp_path)
+    app = _open_appearance(ws)
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    _focus(app, "name")
+    _press(ws, app, "a")
+    app.handle_input(T(0))
+    _type(ws, app, "night\r")
+    assert app.pick == "name" and app.why == "seed"
+    _type(ws, app, [8] * 5 + list("mine\r"))
+    assert ws.look.theme_name == "mine"
+    _focus(app, "tint")
+    _press(ws, app, "right")                    # a change on mine: a new custom
+    assert ws.look.theme_name == "custom"
+    _focus(app, "name")
+    _press(ws, app, "a")
+    app.handle_input(T(0))
+    _type(ws, app, "mine\r")
+    assert app.pick == "name" and app.armed == "mine"
+    assert ws.look.theme_name == "custom"
+    _type(ws, app, "\r")
+    assert app.pick is None and ws.look.theme_name == "mine"
+    assert ws.look.choices()["tint"] is None    # off custom: the package's own
+
+
+def test_esc_and_a_tap_outside_back_out_of_name(tmp_path):
+    ws = _ws(tmp_path, **DESK)
+    app = _open_appearance(ws)
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    _focus(app, "name")
+    _press(ws, app, "a")
+    app.handle_input(T(0))
+    _type(ws, app, "ab\x1b")
+    assert app.pick is None and not ws.input.text_mode
+    assert ws.look.theme_name == "custom"
+    _press(ws, app, "a")
+    assert app.pick == "name"
+    app.handle_pointer(app.layout.cx + 4, app.layout.strip_y - 4, True)
+    _frame(ws)
+    assert app.pick is None and not ws.input.text_mode

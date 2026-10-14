@@ -28,6 +28,11 @@ naming neither key leaves the desk to the console's default.
 
 import json
 
+try:                    # the name grammar, re-exported for the look
+    from moy_store_base import theme_name_ok as name_ok  # noqa: F401
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import theme_name_ok as name_ok  # noqa: F401
+
 CUSTOM = "custom"
 PICTURE_FILE = "desk.moyimg"
 MANIFEST = "manifest.json"
@@ -117,10 +122,17 @@ def keys_of(src):
     return {k: d.get(k, DROP) for k in OVER_KEYS}
 
 
-def manifest(look):
-    return dumps({"format": "moy-1", "title": "Custom", "runtime": "theme",
+def manifest(look, title="Custom"):
+    return dumps({"format": "moy-1", "title": title, "runtime": "theme",
                   "main": "theme.json",
                   "moybyte": {"type": "theme", "look": look}})
+
+
+def named(src, name):
+    """theme.json bytes `src` with its `name` set to `name`."""
+    d = json.loads(src)
+    d["name"] = name
+    return dumps(d)
 
 
 def read_look(src):

@@ -23,6 +23,8 @@
     {"role": "theme", "verb": "choices", "server": "shell", "grant": "appearance", "wasm": null},
     {"role": "theme", "verb": "set_chrome_scale", "server": "shell", "grant": "appearance", "wasm": null},
     {"role": "theme", "verb": "edit_file", "server": "shell", "grant": "appearance", "wasm": "()i"},
+    {"role": "theme", "verb": "name_custom", "server": "shell", "grant": "appearance", "wasm": null},
+    {"role": "theme", "verb": "name_check", "server": "shell", "grant": "appearance", "wasm": null},
     {"role": "files", "verb": "readable", "server": "c", "grant": "files", "wasm": "()i"},
     {"role": "files", "verb": "ready", "server": "c", "grant": "files", "wasm": "()i"},
     {"role": "files", "verb": "begin", "server": "c", "grant": "files", "wasm": null},

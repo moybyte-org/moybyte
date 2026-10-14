@@ -844,6 +844,61 @@ export function cartBase(name, author = "local") {
     return part(who) + "." + (part(dot < 0 ? n : n.slice(dot + 1)) || "cart");
 }
 
+// A theme package in an archive's entries (`top` its folder, or null), or
+// null: {name, file}, the name its folder must have and its theme.json's
+// entry name. The loader takes a theme only from `<name>.moy` whose
+// theme.json says `name` (docs/theming_2026-09.md §3), so a theme lands under
+// its own name, never under the author-part base a cart takes. `name` is
+// theme.json's when it is the grammar's, else the folder's stem in it.
+export function themeOf(entries, top) {
+    const rel = (e) => top ? e.name.slice(top.length + 1) : e.name;
+    const text = (n) => {
+        const e = entries.find((x) => rel(x) === n);
+        if (!e) return null;
+        try { return JSON.parse(new TextDecoder().decode(e.data)); } catch (_) { return null; }
+    };
+    const man = text("manifest.json");
+    if (!man || !man.moybyte || man.moybyte.type !== "theme") return null;
+    const file = typeof man.main === "string" && man.main ? man.main : "theme.json";
+    const theme = text(file);
+    let name = theme && typeof theme.name === "string" ? theme.name : "";
+    if (!themeName(name)) {
+        name = String(top || "").replace(/\.moy$/i, "").toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, "_").replace(/^[_-]+/, "").slice(0, THEME_NAME_MAX);
+        if (!themeName(name)) name = "theme";
+    }
+    return { name, file };
+}
+
+// A theme's name by the loader's grammar: 1 to 24 of a-z, 0-9, `_` and `-`,
+// a letter or a digit first.
+export const THEME_NAME_MAX = 24;
+export function themeName(s) {
+    return typeof s === "string" && /^[a-z0-9][a-z0-9_-]*$/.test(s)
+        && s.length <= THEME_NAME_MAX;
+}
+
+// A theme's folder: `<name>.moy`, else the store's next `_2` stem, cut so the
+// name stays the grammar's -- {dir, name}, the theme.json `name` it must say.
+export function uniqueThemeDir(exists, name) {
+    if (!exists(name + ".moy")) return { dir: name + ".moy", name };
+    for (let i = 2; ; i++) {
+        const tail = "_" + i;
+        const n = name.slice(0, THEME_NAME_MAX - tail.length) + tail;
+        if (!exists(n + ".moy")) return { dir: n + ".moy", name: n };
+    }
+}
+
+// theme.json bytes with `name` set to `name`; the bytes as they were when
+// they are not a JSON object.
+export function renamedTheme(bytes, name) {
+    let d;
+    try { d = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { return bytes; }
+    if (!d || typeof d !== "object" || Array.isArray(d)) return bytes;
+    d.name = name;
+    return new TextEncoder().encode(JSON.stringify(d));
+}
+
 // moy_carts._unique_dir's rule, so an imported cart is named the way a
 // duplicated one is: `base.moy`, then `base_2.moy`, `base_3.moy`...
 export function uniqueCartDir(exists, base) {

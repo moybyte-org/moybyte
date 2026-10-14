@@ -828,6 +828,133 @@ def test_idle_frames_after_a_hand_edit_write_nothing(tmp_path, monkeypatch):
 
 # -- the icon sheet -----------------------------------------------------------
 
+# -- NAME… (phase 6 step 8) -----------------------------------------------------
+
+def _named(ws, name, accent=6):
+    """`custom` made from night with one accent, then NAME… `name`."""
+    assert ws.look.change("accent", _accent(accent)) == 0
+    ws.look.tick(0.0)
+    assert ws.look.name_custom(name) is None
+    return Path(ws.carts_root) / (name + ".moy")
+
+
+def test_name_renames_custom_into_a_theme_of_its_own(tmp_path):
+    import json
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(6))
+    ws.look.tick(0.0)
+    colors = dict(ws.theme_colors)
+    d = _named(ws, "bubblegum")
+    assert not (Path(ws.carts_root) / "custom.moy").exists()
+    assert _package(ws, "bubblegum")["name"] == "bubblegum"
+    man = json.loads((d / "manifest.json").read_bytes())
+    assert man["moybyte"] == {"type": "theme",
+                              "look": {"from": "night", "accent": _accent(6)}}
+    assert man["title"] == "bubblegum"
+    assert ws.look.theme_name == "bubblegum" == ui.theme_installed()
+    assert ws.theme_colors == colors, "naming moved the look"
+    assert _stored(ws)["theme"] == "bubblegum"
+    names = ws.look.theme_names()
+    assert "bubblegum" in names and CUSTOM not in names
+    paths = [c.get("path") for c in ws.carts.all]
+    assert str(d) in paths and not any(
+        str(p).endswith("/custom.moy") for p in paths)
+    ch = ws.look.choices()
+    assert (ch["theme"], ch["store"], ch["from"]) == ("bubblegum", True, None)
+
+
+def test_a_change_on_a_named_theme_makes_a_new_custom(tmp_path):
+    ws = build_ws(tmp_path)
+    _named(ws, "bubblegum")
+    assert ws.look.change("tint", "plum") == 0
+    _settle(ws)
+    assert ws.look.theme_name == CUSTOM
+    assert _look(ws) == {"from": "bubblegum", "tint": "plum"}
+    assert _package(ws, "bubblegum")["name"] == "bubblegum"
+    assert set(ws.look.theme_names()) >= {"bubblegum", CUSTOM}
+
+
+def test_a_named_theme_survives_a_reboot(tmp_path):
+    ws = build_ws(tmp_path)
+    _named(ws, "bubblegum")
+    colors = dict(ws.theme_colors)
+    ws2 = build_ws(tmp_path)
+    assert ws2.look.theme_name == "bubblegum"
+    assert ws2.theme_colors == colors
+
+
+@pytest.mark.parametrize("name,why", [
+    ("", "grammar"), ("Bubble", "grammar"), ("_x", "grammar"),
+    ("a" * 25, "grammar"), ("a b", "grammar"), ("night", "seed"),
+    ("custom", "custom"), ("moybyte.calc", "grammar")])
+def test_a_name_the_grammar_or_a_seed_refuses(tmp_path, name, why):
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(3))
+    _settle(ws)
+    before = _package(ws)
+    assert ws.look.name_custom(name) == why
+    assert ws.look.theme_name == CUSTOM and _package(ws) == before
+
+
+def test_a_cart_folders_stem_refuses(tmp_path):
+    import json
+    ws = build_ws(tmp_path)
+    d = Path(ws.carts_root) / "pong.moy"
+    d.mkdir()
+    (d / "manifest.json").write_text(json.dumps(
+        {"format": "moy-1", "title": "Pong", "main": "main.py"}))
+    (d / "main.py").write_text("def _draw():\n    pass\n")
+    ws.carts.rescan()
+    ws.look.change("accent", _accent(3))
+    _settle(ws)
+    assert ws.look.name_custom("pong") == "cart"
+    assert ws.look.theme_name == CUSTOM
+
+
+def test_a_name_off_custom_is_refused(tmp_path):
+    ws = build_ws(tmp_path)
+    assert ws.look.name_custom("bubblegum") == "none"
+
+
+def test_an_installed_name_arms_replace(tmp_path):
+    ws = build_ws(tmp_path)
+    _store_package(ws, "sunset", {})
+    ws.look.change("accent", _accent(9))
+    _settle(ws)
+    assert ws.look.name_check("sunset") == "taken"
+    assert ws.look.name_custom("sunset") == "taken"
+    assert _package(ws, "sunset")["colors"] == {"dark": {"panel": 2}}
+    assert ws.look.name_custom("sunset", replace=True) is None
+    assert ws.look.theme_name == "sunset"
+    assert ws.theme_colors["accent"] == _accent(9)
+    assert _package(ws, "sunset")["name"] == "sunset"
+    assert not (Path(ws.carts_root) / "custom.moy").exists()
+    assert [c for c in ws.carts.all
+            if str(c.get("path")).endswith("/sunset.moy")].__len__() == 1
+
+
+def test_a_change_on_a_named_theme_kept_by_replace(tmp_path):
+    """The owner's ruling: a named theme copies like any other, and NAME…
+    -> REPLACE keeps the change under its name."""
+    ws = build_ws(tmp_path)
+    _named(ws, "bubblegum")
+    assert ws.look.change("tint", "plum") == 0
+    _settle(ws)
+    tinted = dict(ws.theme_colors)
+    assert ws.look.name_custom("bubblegum", replace=True) is None
+    assert ws.look.theme_name == "bubblegum"
+    assert ws.theme_colors == tinted
+
+
+def test_named_fonts_and_picture_travel_with_the_folder(tmp_path):
+    ws = build_ws(tmp_path)
+    assert ws.look.change("font", ws.look.preset("font", "tiny5")) == 0
+    _settle(ws)
+    d = _named(ws, "tiny")
+    assert (d / "tiny5.fnt").exists()
+    assert ws.look.choices()["font"] == "tiny5"
+
+
 def test_set_icon_sheet_clears_the_kernels_bar_image_cache(tmp_path):
     """`_bar_img_cache` stays on the Workstation (it backs the shared draw
     toolkit `ws._icon`), so this is the one kernel field the look writes -- and
@@ -924,3 +1051,23 @@ def test_the_look_is_built_before_anything_reads_it(tmp_path):
         assert src.index(reader) > built, reader
     ws = build_ws(tmp_path)
     assert ws.look.ws is ws
+
+
+def test_an_archived_theme_imports_under_its_own_name(tmp_path):
+    """The store's archive import lands a theme as `<name>.moy` (the loader
+    takes it from no other folder), a taken name as the next `_2` stem with
+    theme.json's `name` rewritten: the browser's rule (moy_store.mjs)."""
+    import json
+    ws = build_ws(tmp_path)
+    d = _named(ws, "bubblegum")
+    arc = str(tmp_path / "bubblegum.moy.zip")
+    moy_carts.pack(str(d), arc)
+    other = tmp_path / "other"
+    (other / "carts").mkdir(parents=True)
+    got = moy_carts.import_archive(arc, str(other / "carts"))
+    assert got.endswith("/bubblegum.moy")
+    assert json.loads(Path(got, "theme.json").read_bytes())["name"] == "bubblegum"
+    again = moy_carts.import_archive(arc, str(other / "carts"))
+    assert again.endswith("/bubblegum_2.moy")
+    assert json.loads(Path(again, "theme.json").read_bytes())["name"] == "bubblegum_2"
+    assert ui.theme_resolve(Path(again, "theme.json").read_bytes())[0] == 0

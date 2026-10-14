@@ -1382,8 +1382,8 @@ port), never here.
      list); a package whose bytes a re-scan moved is re-installed, and one
      removed falls back to the default seed, persisted. `contrast` keeps
      `ink_dim` and `chrome_ink_dim` light grey (6), so a disabled part still
-     reads as disabled. Files' rename of a theme moved to step 8, beside
-     NAME…: Files renames no project row either.
+     reads as disabled. Files renames no theme row, as it renames no
+     project row: a theme's name is NAME…'s (step 8).
 
   3. **The Appearance design** (owner, 2026-10-14). Before a row is built:
      hand-drawn mockups — MOY64, the D1 look, bitmap fonts — of the page at
@@ -1599,43 +1599,61 @@ port), never here.
      `p4_1024x600_cs2_fs1_windowed`. The seed version stays: the cart's
      body is the shell's, and its manifest did not move.
 
-  8. **NAME…, and moving a theme.** NAME… shows on `custom` only: a name in
-     `ui.text_field` on the keyboard every board has (1 to 24 of the name
-     grammar, §3), refused with the reason for a seed's name, `custom`
-     itself and a stem a cart folder holds; a name an installed theme holds
-     arms REPLACE? and a second ENTER replaces it (the Make tab's DEL arms
-     SURE? the same way). It renames `custom.moy` to `<name>.moy`, rewrites
-     `theme.json`'s `name`, keeps the manifest's `look`, sets the `theme`
-     row, and `custom` no longer exists until the next change. A Files
-     rename of a theme renames the stem and `name` together (from step 2).
-     **Moving a theme between consoles** is the store's: the folder is a
-     package, carried by the card, the Zero's sync (step 2) and, for now,
-     the browser console's cart export and import (owner, 2026-10-14:
-     `firmware/web_runner/page_tail.js`'s `pzDownload`, the `export` and
-     `import` messages of `firmware/web_runner/worker.js`, which zip a
-     folder of the carts root). As built that import does not land a theme:
-     `importZip` names the folder through `cartBase` and `uniqueCartDir`
-     (`firmware/web_runner/moy_store.mjs`), which give it an author part
-     (`sunset.moy.zip` lands as `local.sunset.moy`) and a taken name a `_2`,
-     so the stem no longer equals `name` and the loader refuses it (§3).
-     This step makes the import read the manifest's type: a theme lands as
-     `<name>.moy`, a taken name as the store's next `_2` stem with `name`
-     rewritten to match. Test net: `tests/test_appearance.py` — NAME…
-     renames, the grid lists the name, `custom` is gone, the next change on
-     the named theme makes a new `custom`, each refusal and REPLACE;
-     `tests/test_web_persist_e2e.py`'s `test_a_cart_exports_and_imports_as_a_zip`
-     is the generic round trip, and a `test_a_theme_exports_and_imports_as_a_zip`
-     (+) beside it exports a theme package and imports it into a fresh
-     profile (the same name, the same resolved rows) and into the same one
-     (the `_2` stem, `name` rewritten, installed and selectable). Gate:
-     **the round trip** — a theme made on the T-Deck through the page,
-     named, its folder carried to the P4's store (the card, or the sync
-     through a page a board serves), selected there, resolves to the same
-     rows on both (`moy_theme_resolve`'s dumps equal) and to the same golden
-     hash on the host. Goldens: a NEW `app_appearance_custom` row (the page
-     on a `custom` made from `night` with one accent, NAME… showing) on the
-     P4-as-shipped and 320×240 configs; every other row identical.
-
+  8. **NAME…, and moving a theme** (landed 2026-10-15). NAME… is the
+     page's last row on `custom` only: a name in `ui.text_field` on the
+     keyboard every board has, the page holding the keyboard in text mode
+     (`ctx.nav.text_mode`, as Storybook's page editor does) while it is
+     open, and a character outside the name grammar (§3) never typed. ENTER
+     asks `Appearance.name_check`: a seed's name, `custom` itself, a stem a
+     cart folder holds and a name outside the grammar are refused with the
+     reason under the field; a name an installed theme holds arms REPLACE?
+     and a second ENTER on the same name replaces it (the Make tab's DEL
+     arms SURE? the same way). `Appearance.name_custom` writes a change
+     still settling, renames `custom.moy` to `<name>.moy` by one rename
+     (`moy_carts.rename_package`; `adopt`'s aside-and-remove when it
+     replaces), rewrites `theme.json`'s `name`, keeps the manifest's `look`
+     with the name as its `title`, moves the roster entry
+     (`CartManager.moved`) and switches to the named theme, persisted;
+     `custom` no longer exists until the next change, and a change on the
+     named theme copies to `custom` as on any installed one. ESC or a tap
+     outside backs out. The THEME grid lists `custom`, then the store's
+     packages (a named theme among them), then the seeds. Two `theme` role
+     rows serve it, `name_custom` and `name_check`. A Files rename of a
+     theme was not built: Files lists the store's themes and opens the page
+     on one, and a theme's name is NAME…'s. **Moving a theme between
+     consoles** is the store's: the folder is a package, carried by the
+     card, the Zero's sync (step 2) and the browser console's cart export
+     and import (owner, 2026-10-14: `firmware/web_runner/page_tail.js`'s
+     `pzDownload`, the `export` and `import` messages of
+     `firmware/web_runner/worker.js`, which zip a folder of the carts root).
+     The import reads the manifest's type (`themeOf` in
+     `firmware/web_runner/moy_store.mjs`): a theme lands as `<name>.moy`,
+     never through `cartBase`'s author part, and a taken name as the next
+     `_2` stem (cut so the name stays 24) with `theme.json`'s `name`
+     rewritten to match; the store's own archive import,
+     `moy_carts.import_archive`, lands a theme the same way. The dev
+     channel's `state` reports the theme in force and each store package as
+     the loader resolves it (`Appearance.package_rows`: its refusal code and
+     a digest of its dark and light rows), which is what a carried theme is
+     compared by. Test net: `tests/test_appearance.py` (NAME… renames, the
+     grid lists the name, `custom` is gone, a reboot keeps it, the next
+     change on the named theme makes a new `custom`, each refusal, REPLACE,
+     the fonts travelling with the folder, the archive import's name and
+     `_2`), `tests/test_appearance_app.py` (the row on `custom` only, typed
+     by keys, the refusal and the REPLACE? arm, ESC and a tap outside),
+     `firmware/web_runner/store_test.mjs`, and
+     `tests/test_web_persist_e2e.py`'s `test_a_theme_exports_and_imports_as_a_zip`
+     beside `test_a_cart_exports_and_imports_as_a_zip`: a theme named on
+     the host, imported, exported and imported into a fresh profile (the
+     same name, the same resolved rows) and into the same one (the `_2`
+     stem, `name` rewritten, resolving). Gate: **the round trip** — a theme
+     made on the T-Deck through the page, named, its folder carried to the
+     P4's store, selected there, resolves to the same rows on both (the
+     `state` digests equal) and to the same golden hash on the host.
+     Goldens: NEW `app_appearance_custom` (the page on a `custom` made from
+     `night` with ACCENT stepped once, NAME… showing and focused) on
+     `tdeck_320x240_fs1_dark`, `tdeck_320x240_fs1_light` and
+     `p4_1024x600_cs2_fs1_windowed`; every other row identical.
   9. **Sprites (D3).** `"sprites": "<file>.moygfx"`, the cart sheet's hex
      format (`runtime/editors_sheet.py`: one nibble a pixel) read as a **role
      sheet**: a nibble is a slot of style.json's `theme.sprite_slots` — slot 0

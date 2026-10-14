@@ -184,6 +184,21 @@ def files_root(root):
 # tests/test_store_paths.py fails any other module that composes one.
 CART_EXT = ".moy"
 
+# A theme's name, the loader's grammar (docs/theming_2026-09.md §3): 1 to
+# THEME_NAME_MAX of a-z, 0-9, `_` and `-`, starting with a letter or a digit.
+# A theme package's folder is `<name>.moy`.
+THEME_NAME_MAX = 24
+
+
+def theme_name_ok(name):
+    if type(name) is not str or not 0 < len(name) <= THEME_NAME_MAX \
+            or name[0] in "_-":
+        return False
+    for ch in name:
+        if not ("a" <= ch <= "z" or "0" <= ch <= "9" or ch in "_-"):
+            return False
+    return True
+
 
 def cart_path(root, folder):
     """The path of the cart folder named `folder` in the store `root`."""

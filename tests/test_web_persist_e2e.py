@@ -130,6 +130,70 @@ def test_a_cart_exports_and_imports_as_a_zip(tmp_path):
         server.wait(timeout=10)
 
 
+def _tagged(js, tag):
+    """The js step result that starts with `tag`, past the tag (its quotes
+    unescaped: `_run` keeps the step's JSON text)."""
+    for j in js:
+        if j.startswith(tag + " "):
+            return j[len(tag) + 1:].replace('\\"', '"')
+    raise AssertionError("no %s step in %r" % (tag, js))
+
+
+def _host_theme(tmp_path):
+    """A theme package named on the host through NAME… (`sunset`, from night
+    with one accent), zipped as the store archives a cart: (zip path, its
+    resolved rows as `Appearance.package_rows` reports them)."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from ws_helpers import build_ws
+    from runtime import moy_carts, ui
+    ws = build_ws(tmp_path / "host")
+    assert ws.look.change("accent", ui.theme_accents()[4][1]) == 0
+    ws.look.tick(0.0)
+    assert ws.look.name_custom("sunset") is None
+    folder = os.path.join(ws.carts_root, "sunset.moy")
+    arc = str(tmp_path / "sunset.moy.zip")
+    moy_carts.pack(folder, arc)
+    return arc, ws.look.package_rows()["sunset"]
+
+
+def test_a_theme_exports_and_imports_as_a_zip(tmp_path, monkeypatch):
+    """A theme package travels as a cart does (docs/theming_2026-09.md §9
+    phase 6 step 8), but lands under its own name: the loader takes a theme
+    only from `<name>.moy`. Into a fresh profile it keeps its name and
+    resolves to the rows it had; into the same profile it takes the `_2`
+    stem with theme.json's `name` rewritten, installed and selectable."""
+    import base64
+    import json
+    web_e2e.require("store")
+    arc, rows = _host_theme(tmp_path)
+    port = web_e2e.free_port()
+    server, base = _serve(port)
+    try:
+        monkeypatch.setenv("MOY_THEME_ZIP", arc)
+        out, js = _run("persist_theme_zip", base, tmp_path / "chrome", tmp_path / "s1")
+        assert "imported sunset.moy" in _tagged(js, "IMPORTED"), out[-3000:]
+        st = json.loads(_tagged(js, "STATE"))
+        assert st["packages"]["sunset"] == rows, (st, rows)
+        assert "imported sunset_2.moy" in _tagged(js, "IMPORTED2"), out[-3000:]
+        st2 = json.loads(_tagged(js, "STATE2"))
+        assert st2["packages"]["sunset"] == rows
+        assert st2["packages"]["sunset_2"] == rows, \
+            "the _2 copy did not resolve as the theme it is: %r" % st2
+        name, b64 = _tagged(js, "ZIP").split(" ", 1)
+        assert name == "sunset.moy.zip", name
+        exported = tmp_path / name
+        exported.write_bytes(base64.b64decode(b64))
+
+        monkeypatch.setenv("MOY_THEME_ZIP", str(exported))
+        out, js = _run("persist_theme_fresh", base, tmp_path / "chrome2", tmp_path / "s2")
+        assert "imported sunset.moy" in _tagged(js, "IMPORTED"), out[-3000:]
+        st = json.loads(_tagged(js, "STATE"))
+        assert st["packages"] == {"sunset": rows}, (st, rows)
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
 def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     """The other half of a total split: serve.py --carts answers GET /sync, so
     the page must stay in BOARD mode and open no local store.

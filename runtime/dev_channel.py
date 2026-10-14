@@ -776,6 +776,15 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["wm_err"] = str(exc)
     try:
+        # The theme in force and the store's theme packages as the loader
+        # resolves them (`Appearance.package_rows`): what a theme carried
+        # from another console is compared by.
+        look = ws.look
+        st["theme"] = {"name": look.theme_name, "variant": look.theme_variant,
+                       "packages": look.package_rows()}
+    except Exception as exc:  # noqa: BLE001
+        st["theme_err"] = str(exc)
+    try:
         sl = ws.settings_layer
         sr = sl.scroll
         st["settings"] = {
