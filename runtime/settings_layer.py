@@ -282,6 +282,15 @@ class SettingsLayer:
         # panel that replaces the rows, on a board whose kernel keeps one.
         self.crash_view = False
         self._crash_hits = _ui.Hits()
+        # The panel geometry a popover lends while it holds the WIFI panel or
+        # the power rows (popover.PanelGeom); None is this layout's own.
+        self._geom = None
+
+    def _lay(self):
+        """The geometry the WIFI panel and a row draw in: the layout's
+        Settings panel, or the popover's while it holds them."""
+        g = self._geom
+        return g if g is not None else self.ws.layout
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -459,24 +468,44 @@ class SettingsLayer:
     # -- the WIFI panel (#38; spec shell_ux_v1.md §10) -------------------------
 
     def open_wifi(self):
-        """Open the wifi panel (the WIFI row / the bar wifi icon's windowed
-        deep-link). Rescans on entry so the list is fresh."""
-        ws = self.ws
+        """Open the wifi panel in place of the rows (the WIFI row, and the
+        bar's wifi widget in console mode). Rescans on entry so the list is
+        fresh."""
         self.wifi_view = True
-        self.wifi_pick = None
-        self.wifi_pw.open("")
-        ws.wifi_hold("settings")      # the radio lease: close_wifi lets go
-        self._wifi_rescan()
-        ws._dirty = True
+        self.wifi_enter()
+        self.ws._dirty = True
 
     def close_wifi(self):
         """Back from the wifi panel to the Settings rows (NOT out of Settings)."""
-        ws = self.ws
         self.wifi_view = False
+        self.wifi_leave()
+        self.ws._dirty = True
+
+    def wifi_enter(self):
+        """The panel's entry, wherever it is held (these rows, or the wifi
+        popover): a fresh password field, the radio lease, a rescan."""
+        self.wifi_pick = None
+        self.wifi_pw.open("")
+        self.ws.wifi_hold("settings")  # the radio lease: wifi_leave lets go
+        self._wifi_rescan()
+
+    def wifi_leave(self):
+        """The panel's exit: the typing ends and the lease goes, unless the
+        other container still shows the panel."""
+        ws = self.ws
         self.wifi_pick = None
         ws._set_text_mode(False)
-        ws.wifi_release("settings")
-        ws._dirty = True
+        pop = ws.sysmenu
+        if not self.wifi_view and not (pop.open and pop.widget == "wifi"):
+            ws.wifi_release("settings")
+
+    def _wifi_back(self):
+        """BACK out of the panel: to the Settings rows, or out of the popover
+        that holds it."""
+        if self._geom is not None:
+            self.ws.sysmenu.close()
+        else:
+            self.close_wifi()
 
     def _wifi_rescan(self):
         ws = self.ws
@@ -583,13 +612,13 @@ class SettingsLayer:
         if i.pressed("a") or i.pressed("run"):
             self._wifi_activate()
         if i.pressed("b") or i.pressed("stop"):
-            self.close_wifi()
+            self._wifi_back()
         return True
 
     # wifi panel geometry (panel-derived; per-call, no stored rects)
     def _wifi_btns(self):
         """The bottom action row: CONNECT / FORGET / RESCAN / BACK rects."""
-        lay = self.ws.layout
+        lay = self._lay()
         fs = lay.fs
         px, py, pw, ph = lay.settings_panel
         bw = (pw - 10 * fs * 5) // 4
@@ -603,7 +632,7 @@ class SettingsLayer:
         return out
 
     def _wifi_row_rect(self, slot):
-        return self.ws.layout.settings_row_rect(slot + 1)   # slot 0 = the status line
+        return self._lay().settings_row_rect(slot + 1)   # slot 0 = the status line
 
     def _wifi_pointer(self, px, py, click):
         ws = self.ws
@@ -627,7 +656,7 @@ class SettingsLayer:
                         ws._set_text_mode(False)
                         ws._dirty = True
                     else:
-                        self.close_wifi()
+                        self._wifi_back()
                 return True
         if self.wifi_pick is None:
             for k in range(len(self.wifi_nets)):
@@ -647,7 +676,7 @@ class SettingsLayer:
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
-        lay = ws.layout
+        lay = self._lay()
         fs = lay.fs
         fw = lay.font_w
         # Every offset below is inside the row's fs-tall band (#203): 0 unless
@@ -1123,13 +1152,57 @@ class SettingsLayer:
                 getattr(ws, t[3])(on)
                 return
 
-    def settings_adjust(self, d):
-        """Step the selected Settings row by d. Font applies + persists; the
-        mock rows just move a cosmetic value held in ws.system (not acted on); an
-        "action" row (APPEARANCE / EDIT ICONS) fires its action regardless of
-        direction."""
+    def row_index(self, key):
+        """The index of the row `key` in this session's rows, or None."""
+        rows = self._settings_rows()
+        for i in range(len(rows)):
+            if rows[i][0] == key:
+                return i
+        return None
+
+    def step_row(self, key, d):
+        """Step the row `key` by d, the cursor where it was (the power
+        popover's rows)."""
+        i = self.row_index(key)
+        if i is not None:
+            self.settings_adjust(d, i)
+
+    def show_row(self, key):
+        """Put the cursor on the row `key`, scrolled into view (the battery
+        widget's console-mode page)."""
+        i = self.row_index(key)
+        if i is not None:
+            self.set_msel = i
+            self._settings_scroll()
+
+    def draw_power(self, sel):
+        """The power rows in the panel geometry a popover lends: the level
+        line, then VOLUME and BRIGHTNESS through the row painter, `sel` (0
+        or 1) the row with the cursor."""
         ws = self.ws
-        key, _label, kind = self._settings_rows()[self.set_msel]
+        cv = ws.sys_canvas
+        lay = self._lay()
+        fs = lay.fs
+        th = ws.theme_colors
+        x, y, w, h = lay.settings_row_rect(0)
+        lvl = ws.battery_level()
+        ws._icon("batt", x, y + lay.row_text_dy, cv)
+        _ui.row(cv, th, (x, y, w, h),
+                "BATTERY  " + ("--" if lvl is None else "%d%%" % lvl),
+                kind="row_list", edge=False, pad=20 * fs,
+                text_dy=5 + lay.row_text_dy, fs=fs)
+        for k, key in enumerate(("volume", "brightness")):
+            i = self.row_index(key)
+            if i is not None:
+                self._draw_settings_row(i, lay.settings_row_rect(k + 1), k == sel)
+
+    def settings_adjust(self, d, i=None):
+        """Step the selected Settings row (or row `i`) by d. Font applies +
+        persists; the mock rows just move a cosmetic value held in ws.system
+        (not acted on); an "action" row (APPEARANCE / EDIT ICONS) fires its
+        action regardless of direction."""
+        ws = self.ws
+        key, _label, kind = self._settings_rows()[self.set_msel if i is None else i]
         if kind == "wifi-net":                  # WIFI: any step/tap opens the panel (#38)
             self.open_wifi()
             return
@@ -1568,16 +1641,19 @@ class SettingsLayer:
             th_["ink"] if th_.get("bar_light", False) else th_["chrome_ink"])
         self._scroll_region().draw_bar(cv, ws.theme_colors)
 
-    def _draw_settings_row(self, i):
+    def _draw_settings_row(self, i, rect=None, sel=None):
+        """Row `i` at its scrolled slot, or at `rect` (the power popover's
+        rows), selected as the list's cursor says or as `sel` does."""
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
-        lay = ws.layout
+        lay = self._lay()
         fw = lay.font_w
         th = ws.theme_colors
         key, label, kind = self._settings_rows()[i]
-        x, y, w, h = self._settings_row_rect(i)
-        sel = (i == self.set_msel)
+        x, y, w, h = self._settings_row_rect(i) if rect is None else rect
+        if sel is None:
+            sel = (i == self.set_msel)
         # ui.row owns the ROW CHROME -- the selection fill, the label ink and its
         # frozen (4, 5) placement, and the clip that keeps a long label inside the
         # rect (#174). Everything below is this row's per-KIND content, drawn by

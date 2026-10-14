@@ -1,11 +1,12 @@
-"""WiFi manager (#38): the capability-permission-gated `wifi` API, the host fake
-backend, the credential store, and the WiFi-manager system cart running headlessly
-through the shared console -- the same console the device runs.
+"""WiFi (#38): the capability-permission-gated `wifi` API, the host fake
+backend, the credential store, and the radio lease -- the same console the
+device runs.
 
 The injection is permission-gated: a cart whose manifest grants "network" gets a
 `wifi` name in its namespace; a normal cart does NOT (sandbox preserved). These
-tests pin that gate, the FakeWifi behavior, persistence + reload, and that the
-manager cart loads + runs a few frames without error.
+tests pin that gate, the FakeWifi behavior, persistence + reload, and who holds
+the radio. Setting a network up is Settings' WIFI panel, the one wifi
+implementation (docs/shell_layout_2026-10.md §8).
 """
 
 import sys
@@ -176,92 +177,6 @@ def test_network_cart_gets_wifi_non_network_cart_does_not(tmp_path):
     assert ws.cart_error is None
     assert "wifi" in ws.ns                          # capability granted
     assert ws.ns["wifi"] is ws.wifi                 # the shared system service
-
-
-# -- the WiFi-manager system cart loads + runs headlessly ----------------------
-
-def test_wifi_manager_cart_loads_and_runs(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "WiFi")
-    assert ws.screen == "desktop" and ws.cart_error is None
-    assert "wifi" in ws.ns                          # it got the gated API
-
-    # It scanned on _init -> the cart sees networks in its module namespace.
-    assert ws.ns.get("nets")                        # non-empty scan list
-    # Run a handful of frames; a crash would set cart_error.
-    for _ in range(5):
-        ws.frame(1.0 / 30)
-    assert ws.cart_error is None
-
-
-def test_wifi_manager_cart_connects_via_touch_and_persists(tmp_path):
-    from runtime import host_app
-    from runtime import moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    _open_cart(ws, "WiFi")
-    assert ws.cart_error is None
-
-    # Pick the first OPEN network (no password screen) and tap CONNECT.
-    nets = ws.ns["nets"]
-    open_idx = next(i for i, n in enumerate(nets) if not n[2])
-    ws.ns["sel"] = open_idx
-    ssid = nets[open_idx][0]
-
-    # Drive a tap on the CONNECT button through the pointer (mouse == touch).
-    bx, by, bw, bh = ws.ns["CONNECT_BTN"]
-    ws.pointer.place(bx + bw // 2, by + bh // 2)
-    ws.pointer.click = True
-    ws.frame(1.0 / 30)
-    ws.pointer.click = False
-
-    # The shared system service now reports connected to that SSID + an IP.
-    connected, got_ssid, ip = ws.wifi.status()
-    assert connected and got_ssid == ssid and ip
-
-    # Persisted: a reload of the store sees the joined network.
-    assert ssid in [n["ssid"] for n in moy_carts.load_wifi(carts_dir)]
-
-
-def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
-    from runtime import host_app
-    from runtime import moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    _open_cart(ws, "WiFi")
-
-    # Pick a LOCKED network and tap CONNECT -> the cart switches to the password
-    # screen (it does NOT connect yet, since it needs a password).
-    nets = ws.ns["nets"]
-    locked_idx = next(i for i, n in enumerate(nets) if n[2])
-    ws.ns["sel"] = locked_idx
-    ssid = nets[locked_idx][0]
-    bx, by, bw, bh = ws.ns["CONNECT_BTN"]
-    ws.pointer.place(bx + bw // 2, by + bh // 2)
-    ws.pointer.click = True
-    ws.frame(1.0 / 30)
-    ws.pointer.click = False
-    assert ws.ns["mode"] == "pass" and ws.ns["pick"] == ssid
-    assert ws.wifi.status() == (False, None, None)   # not connected on the password screen
-
-    # Type a password byte-by-byte via the keyboard (key()), then ENTER to connect.
-    for ch in "wonderland":
-        ws.input.last_key = ord(ch)
-        ws.frame(1.0 / 30)
-        ws.input.last_key = 0
-        ws.frame(1.0 / 30)                  # release edge so the next char registers
-    ws.input.last_key = 10                  # ENTER
-    ws.frame(1.0 / 30)
-    ws.input.last_key = 0
-
-    connected, got_ssid, _ip = ws.wifi.status()
-    assert connected and got_ssid == ssid
-    nets_saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts_dir)}
-    assert nets_saved.get(ssid) == "wonderland"
 
 
 # -- reconnect to a SAVED network (the on-glass P4 bug, 2026-07-25) -----------
@@ -635,14 +550,28 @@ def test_a_console_with_no_wifi_service_takes_no_lease(tmp_path):
     ws.wifi_release("web")                  # and never raises
 
 
+def _network_cart(carts_dir):
+    """A cart that declares the "network" permission."""
+    import json
+    from runtime import moy_carts
+    moy_carts.ensure_dirs(carts_dir)
+    c = moy_carts.create("Net Cart", carts_dir,
+                         src="def _init():\n    wifi.scan()\ndef _draw():\n    cls(0)\n")
+    man_path = c["path"] + "/manifest.json"
+    man = json.loads(Path(man_path).read_text())
+    man["moybyte"]["permissions"] = ["graphics", "input", "network"]
+    Path(man_path).write_text(json.dumps(man))
+
+
 def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
-    """The WiFi tool is the one cart with the "network" permission: its scan
-    needs the radio, and leaving it is the moment the console goes back to
-    radio-off. The credential it saved is what the next holder replays."""
+    """A cart with the "network" permission holds the radio for its run, and
+    leaving it is the moment the console goes back to radio-off."""
     from runtime import host_app
 
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "WiFi")
+    carts_dir = str(tmp_path / "carts")
+    _network_cart(carts_dir)
+    ws = host_app.build_workstation(carts_dir)
+    _open_cart(ws, "Net Cart")
     assert ws.cart_error is None
     assert "cart" in ws.leases.holders()
     assert ws.wifi.radio is True

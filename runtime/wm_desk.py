@@ -60,6 +60,8 @@ class _BackdropLayer(Layer):
         # every gesture RELEASE. The desk's own content is a pure function of the
         # signature below; the clock is the one live part and it is repainted
         # over the cached blit instead of invalidating it.
+        if wm._pop_live():
+            wm._pop_restore(False)            # start as if no popover were drawn
         sig = self._desk_sig()
         stale = sig != wm._desk_sig
         wm._damage_rects = None               # opened below where describable
@@ -158,7 +160,8 @@ class _BackdropLayer(Layer):
         return (cv.w, cv.h, ws.look.theme_name, ws.look.theme_variant,
                 ws.look.effective_font_scale(), id(ws.look.icon_sheet),
                 ws.look.wallpaper_id,
-                len(getattr(ws, "_apps", ())), len(ws.carts.all))
+                len(getattr(ws, "_apps", ())), len(ws.carts.all),
+                ws.bar_layer._today())        # a docked calendar's day
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt)

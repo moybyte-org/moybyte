@@ -85,7 +85,8 @@ keeps the matrix a clean product instead of a pile of special cases.
                            fullscreen at the P4's size. One axis (the mode)
                            from the as-shipped row.
   p4_1024x600_cs2_fs1_win95bar, p4_1024x600_cs2_fs1_gnomebar,
-  p4_1024x600_cs2_fs1_twobars, tdeck_320x240_fs1_bottombar
+  p4_1024x600_cs2_fs1_twobars, tdeck_320x240_fs1_bottombar,
+  p4_1024x600_cs2_fs1_docked_calendar
                            the worked examples of docs/shell_layout_2026-10.md
                            §6 (2, 3, 4 and 6), each a package whose `layout`
                            the console picks (`layout_theme`): a bottom
@@ -93,7 +94,16 @@ keeps the matrix a clean product instead of a pile of special cases.
                            the clock centred, a top bar over a bottom verb
                            strip, and the T-Deck's bottom strip. One axis (the
                            layout) from the as-shipped P4 row and the T-Deck
-                           row.
+                           row. The fifth is example 5: the month grid docked
+                           in a right-hand bar.
+  p4_1024x600_cs2_fs1_popovers, tdeck_320x240_fs1_widget_pages
+                           the bar widgets' components (§8), and only those
+                           surfaces (a config's `plan`): over the as-shipped
+                           P4 desk with a window, each widget's popover open
+                           -- the calendar, the WIFI panel, the power rows, the
+                           system menu; on the T-Deck, console mode's
+                           fullscreen container for each -- the calendar page,
+                           Settings at the WIFI panel, Settings at VOLUME.
 
 The last two were added before theming's first phase
 (`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
@@ -338,7 +348,26 @@ CONFIGS = {
         diagonal_in=None, layout=[
             {"edge": "bottom", "size": 18, "left": ["menu", "zone"],
              "right": ["clock", "close", "battery"]}]),
+    "p4_1024x600_cs2_fs1_docked_calendar": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, layout=[
+            {"edge": "top", "size": 18, "left": ["zone"],
+             "right": ["clock", "close", "menu", "wifi", "battery"]},
+            {"edge": "right", "size": 120, "left": ["calendar"],
+             "right": ["spacer"]}]),
+    "p4_1024x600_cs2_fs1_popovers": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="popovers"),
+    "tdeck_320x240_fs1_widget_pages": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="widget_pages"),
 }
+
+# The bar widgets that open a component (docs/shell_layout_2026-10.md §8), in
+# the order the two `plan` configs render them: a popover each over the desk
+# (`popovers`), and console mode's fullscreen page each (`widget_pages`).
+WIDGETS = ("clock", "wifi", "battery", "menu")
+_DATE = (2026, 10, 14)    # the pinned calendar day
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every
 # cross-tab bounding an editor layout can suffer is a big-screen feature, and #216
@@ -382,7 +411,8 @@ def _quiesce(ws):
     ws.show_fps = False
     ws.perf_hud = False
     ws.perf_capture = False
-    ws.sysmenu.open = False
+    if not getattr(ws, "_golden_popover", False):
+        ws.sysmenu.open = False
     ws._about = False
     ws._notice = None
     ws._notice_until = 0
@@ -390,6 +420,7 @@ def _quiesce(ws):
     # cache does NOT work (bar_layer compares `now_s == self._clock_at`, so a
     # sentinel forces a recompute every frame).
     ws.bar_layer._clock_text = lambda: _CLOCK
+    ws.bar_layer._today = lambda: _DATE
 
 
 _DRAWN = {}             # (config, surface) -> (fills, texts) of the settled frame
@@ -471,6 +502,10 @@ def _surface_plan(ws, cfg):
     a pure function of the list -- a fresh workstation per surface would be
     ~35 seed copies each and buy nothing a fixed order does not."""
     plan = []
+    if cfg.get("plan") == "popovers":
+        return _popover_plan(ws)
+    if cfg.get("plan") == "widget_pages":
+        return _widget_page_plan(ws)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor) and the desk with ONE app window.
@@ -539,6 +574,42 @@ def _surface_plan(ws, cfg):
     return plan
 
 
+def _popover_plan(ws):
+    """The desk with a Calc window, then each widget's popover over it. The
+    popover stays open through the render (`_golden_popover`)."""
+    def desk():
+        ws.open_desk()
+        ws.open_app(ws._apps_by_id["calc"])
+
+    def popover(widget):
+        def enter():
+            ws.sysmenu.close()
+            ws._golden_popover = True
+            ws.widget_tap(widget)
+            assert ws.sysmenu.open and ws.sysmenu.widget == widget, widget
+        return enter
+
+    plan = [("desk_window_calc", desk)]
+    for w in WIDGETS:
+        plan.append(("popover_" + w, popover(w)))
+    return plan
+
+
+def _widget_page_plan(ws):
+    """Console mode's container for each widget, entered from the home: the
+    calendar's own page, Settings at the WIFI panel, Settings at VOLUME, and
+    the system menu (a popup in both modes) over the home."""
+    def page(widget):
+        def enter():
+            ws.sysmenu.close()
+            ws.go_home()
+            ws._golden_popover = widget == "menu"
+            ws.widget_tap(widget)
+        return enter
+
+    return [("page_" + w, page(w)) for w in WIDGETS]
+
+
 def _open_get_carts(ws):
     """Get Carts over the carts repository's index snapshot (tests/fixtures/carts)
     through an in-memory transport, so its golden is the LIST a kid sees on a
@@ -555,6 +626,10 @@ def _open_get_carts(ws):
 def surface_names(config_name):
     """The surfaces a config covers -- the key set its goldens must carry."""
     cfg = CONFIGS[config_name]
+    if cfg.get("plan") == "popovers":
+        return ["desk_window_calc"] + ["popover_" + w for w in WIDGETS]
+    if cfg.get("plan") == "widget_pages":
+        return ["page_" + w for w in WIDGETS]
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc"]
@@ -684,7 +759,8 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
     got = capture(config_name, tmp_path / "carts")
     cap = json.loads((ROOT / "native" / "moy_ui" / "style.json").read_text())[
         "hits_capacity"]
-    assert 0 < peak[0] and 2 * peak[0] <= cap, (
+    # (a `plan` config's few surfaces need not register any)
+    assert (0 < peak[0] or "plan" in CONFIGS[config_name]) and 2 * peak[0] <= cap, (
         "a surface registers %d hit rects in the goldens' frames; the hit "
         "buffer's capacity (style.json's hits_capacity, %d) is twice the most "
         "any surface registers (docs/kernel_toolkit_2026-10.md §3.4)"

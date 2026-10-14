@@ -509,7 +509,7 @@ def _lua_cart_where(text, cart):
 #     and the pop fires at the threshold.
 # A single quick BACKSPACE tap is NOT the gesture -- it just reaches the cart as a
 # key/button. In TEXT mode "home" is never asserted (BACKSPACE arrives as a typed 0x08
-# the cart's key() reads -- e.g. the wifi password field's DELETE), so the gesture
+# the cart's key() reads -- e.g. a password field's DELETE), so the gesture
 # never fires there: exactly the "backspace = delete, zero special-casing" the spec
 # wants. (The old triple-tap fw-independent alias was DROPPED after on-device testing --
 # tools/apps now run WITH a minimal bar whose context-X exits them, so a cart is never

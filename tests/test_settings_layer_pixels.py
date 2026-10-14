@@ -45,7 +45,11 @@ import pytest
 # The matrix lives in ONE place. pytest puts tests/ on sys.path, so this is a
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
-from test_shell_goldens import CONFIGS, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
+from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
+
+# The sub-surfaces are rendered on every config that renders the whole
+# surface list; a `plan` config holds a few named surfaces alone.
+CONFIGS = {k: v for k, v in _ALL.items() if "plan" not in v}
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_FILE = Path(__file__).resolve().parent / "shell_goldens" / "subsurfaces.json"

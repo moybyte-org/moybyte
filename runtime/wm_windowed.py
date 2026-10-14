@@ -261,6 +261,40 @@ class _PlayerWindowLayer(Layer):
             wm._draw_player_window(win, True, wm._focus == "desktop", dt, full=False)
 
 
+def _overlap(a, b):
+    return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
+            and a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+class _PopoverUnderLayer(Layer):
+    """A popover frame's first half (docs/shell_layout_2026-10.md §8): put
+    back the pixels a closed (or moved) popover covered, from the snapshot
+    taken when it opened -- before the player window repaints over them."""
+
+    id = "popover_under"
+    domain = "system"
+
+    def __init__(self, wm):
+        self.wm = wm
+
+    def draw(self, dt):
+        self.wm._pop_restore(True)
+
+
+class _PopoverOverLayer(Layer):
+    """A popover frame's second half: the open popover painted over the
+    retained frame (its snapshot taken first), its rect the frame's damage."""
+
+    id = "popover_over"
+    domain = "system"
+
+    def __init__(self, wm):
+        self.wm = wm
+
+    def draw(self, dt):
+        self.wm._pop_paint(True)
+
+
 class WindowedWM(WindowChrome, FullscreenStackWM):
     """The TWO-MODE presentation of the back-stack (docs/shell_layout_2026-10.md
     §3): in DESKTOP mode the DESK (stack kind "desk") is the floor --
@@ -276,7 +310,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     has_desk = True
     # `chips` (the taskbar's window chips) has a value in desktop mode only.
-    LAYOUT_CATALOGUE = {"desktop": tuple(w for w in _LAYOUT_WIDGETS if w != "calendar"),
+    LAYOUT_CATALOGUE = {"desktop": _LAYOUT_WIDGETS,
                         "console": FullscreenStackWM.LAYOUT_CATALOGUE["console"]}
 
     def __init__(self, ws):
@@ -346,6 +380,26 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         _pw = _PlayerWindowLayer(self)
         self._quiet_stack = [_pw]
         self._full_debt = 0
+        # THE POPOVER ON THE QUIET STACK (docs/shell_layout_2026-10.md §8): a
+        # frame whose only change is the popover's -- it opened, a row moved,
+        # it closed -- draws the popover's rect alone over the retained frame
+        # and hands that rect as the frame's damage; with a playtest the
+        # player window repaints between the two halves. Two snapshot slots,
+        # [layer, rect, debt, captured]: the open popover's (the pixels under
+        # it, taken before its first paint) and a closing one's, whose rect is
+        # put back into each retained buffer (`debt` frames) -- two, because
+        # a popover may open while the last one's restore is still owed.
+        _pu = _PopoverUnderLayer(self)
+        _po = _PopoverOverLayer(self)
+        self._pop_stack = [_pu, _po]
+        self._quiet_pop_stack = [_pu, _pw, _po]
+        self._pop_slots = [[None, None, 0, False], [None, None, 0, False]]
+        self._pop_cur = None          # the open popover's slot, or None
+        self._pop_over_game = False   # ...and does it overlap the playtest's window
+        # Its face, copied once painted while it overlaps a playtest: the
+        # quiet frames put it back over the game instead of painting it.
+        self._pop_face = None
+        self._pop_face_ok = False
         # Retained desktop-backdrop cache (#58 drag perf): during a DRAG/RESIZE the
         # wallpaper + OS bar are invariant, so the first such frame captures
         # their composite and every later one blits it (see _BackdropLayer). Its
@@ -427,6 +481,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             ws._relayout()
             self._ctx_switching = False
         self._root_ctx = _LayoutCtx.capture(ws)
+        self._pop_reset()             # a relayout repaints what a popover covered
         if self._mode_switch:
             self.content_gen += 1
             self._backdrop_valid = False
@@ -628,7 +683,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def release_cache(self):
         """The fit check's release: the parked stamps oldest-first, one per
-        call, then the home's retained frame."""
+        call, then the popover's snapshots when none is live, then the home's
+        retained frame."""
         p = self._parked
         if p is not None:
             for g in p.order:
@@ -636,6 +692,19 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if win.buf is not None:
                     self._drop_win(win)
                     return True
+        if not self._pop_live():
+            held = False
+            for s in self._pop_slots:
+                if s[0] is not None:
+                    self._release_layer(s[0])
+                    s[0] = None
+                    held = True
+            if self._pop_face is not None:
+                self._release_layer(self._pop_face)
+                self._pop_face = None
+                held = True
+            if held:
+                return True
         return FullscreenStackWM.release_cache(self)
 
     def _slots(self):
@@ -949,6 +1018,167 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._cache_gen = self.content_gen
         self._cache_sig = sig
 
+    # -- the popover on the quiet stack (docs/shell_layout_2026-10.md §8) -------
+
+    def _pop_rides(self):
+        """True where a popover change paints its rect alone: desktop mode on
+        a raster root (the recording tier's surfaces replay by layer)."""
+        return self.mode == "desktop" and not self._recording
+
+    def _pop_n(self):
+        """The root's real buffer count: what a popover's rect is owed to."""
+        n = getattr(self._root_canvas, "RETAINED_FRAMES", 1)
+        return n if n > 1 else 1
+
+    def popover_changed(self):
+        """The popover opened, moved its cursor or closed. Riding: owe its
+        rect to every retained buffer -- a paint while it is open, the
+        snapshot put back once it is closed. Otherwise the frame repaints."""
+        if not self._pop_rides():
+            self.ws._dirty = True
+            return
+        m = self.ws.sysmenu
+        n = self._pop_n()
+        self._pop_face_ok = False
+        slots = self._pop_slots
+        cur = self._pop_cur
+        rect = m.panel_rect() if m.open else None
+        if cur is not None and slots[cur][1] != rect:
+            slots[cur][2] = n             # closing (or moved): restore owed
+            cur = self._pop_cur = None
+        if rect is None:
+            return
+        if cur is None:
+            j = 0 if slots[0][1] is None or slots[0][2] <= 0 else 1
+            if slots[j][1] is not None and slots[j][2] > 0:
+                self.ws._dirty = True     # both slots owed: repaint whole
+                self._pop_reset()
+                j = 0
+            s = slots[j]
+            s[1] = rect
+            s[3] = False
+            cur = self._pop_cur = j
+        slots[cur][2] = n
+
+    def popover_owed(self):
+        """True while a retained buffer is owed the popover's rect."""
+        for s in self._pop_slots:
+            if s[2] > 0:
+                return True
+        return False
+
+    def popover_takes_keys(self):
+        """The open popover owns the keyboard and paints its own change, so
+        a key press does not mark the frame dirty (console.handle_input)."""
+        return self.ws.sysmenu.open and self._pop_rides()
+
+    def _pop_live(self):
+        """True while a popover is open or owed to a retained buffer."""
+        if self._pop_cur is not None:
+            return True
+        for s in self._pop_slots:
+            if s[1] is not None:
+                return True
+        return False
+
+    def _pop_reset(self):
+        self._pop_face_ok = False
+        for s in self._pop_slots:
+            s[1] = None
+            s[2] = 0
+            s[3] = False
+        self._pop_cur = None
+
+    def _pop_note(self, r):
+        nd = getattr(self._root_canvas, "note_damage", None)
+        if nd is not None:
+            nd(r[0], r[1], r[2], r[3])
+
+    def _pop_restore(self, ride):
+        """Put back each closing popover's rect (and, on a full frame, the
+        open one's, so the frame starts as if no popover were drawn)."""
+        root = self._root_canvas
+        cur = self._pop_cur
+        for i in range(2):
+            s = self._pop_slots[i]
+            r = s[1]
+            if r is None:
+                continue
+            if i == cur:
+                if not ride and s[3]:
+                    root.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
+                continue
+            if s[3]:
+                root.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
+                if ride:
+                    self._pop_note(r)
+            s[2] -= 1
+            if s[2] <= 0:
+                s[1] = None
+                s[2] = 0
+                s[3] = False
+
+    def _pop_capture(self, s):
+        """Snapshot the pixels under slot `s`'s rect from the root canvas."""
+        x, y, w, h = s[1]
+        lay = s[0]
+        if lay is None or lay.w < w or lay.h < h:
+            root = self._root_canvas
+            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
+            self._release_layer(lay)
+            lay = s[0] = root.new_layer(max(w, ow), max(h, oh))
+        lay.blit_strip(self._root_canvas, -x, -y)
+        s[3] = True
+        # Whether the playtest's window repaints under it, read once here:
+        # nothing moves a window while a popover is open (a tap outside
+        # closes it), and a play frame allocates nothing.
+        win = self._wins.get("desktop")
+        self._pop_over_game = (win is not None and not win.minimized
+                               and _overlap(s[1], self._win_extent(win)))
+
+    def _pop_paint(self, ride):
+        """Paint the open popover: snapshot what it covers first (always on
+        a full frame, whose stack just repainted it), then the panel. A ride
+        paints it while a buffer is owed it, or every frame it overlaps the
+        playtest's window, which repaints beneath it."""
+        cur = self._pop_cur
+        m = self.ws.sysmenu
+        if cur is None or not m.open:
+            if not ride:
+                self.ws.menu_ui._draw_sysmenu()
+            return
+        s = self._pop_slots[cur]
+        if not ride or not s[3]:
+            self._pop_capture(s)
+        r = s[1]
+        if ride and s[2] <= 0:
+            if "desktop" not in self._wins:
+                self._pop_note(r)         # a still frame: say so, not "all"
+                return
+            if not self._pop_over_game:
+                return
+            if self._pop_face_ok:
+                # The playtest repainted under it: put its face back, one
+                # copy, rather than paint the component again every frame.
+                root = self._root_canvas
+                root.blit_strip_rect(self._pop_face, r[0], r[1], r[0], r[1], r[2], r[3])
+                self._pop_note(r)
+                return
+        self.ws.menu_ui._draw_sysmenu()
+        if self._pop_over_game and not self._pop_face_ok:
+            face = self._pop_face
+            if face is None or face.w < r[2] or face.h < r[3]:
+                ow, oh = (face.w, face.h) if face is not None else (0, 0)
+                self._release_layer(face)
+                face = self._pop_face = self._root_canvas.new_layer(
+                    max(r[2], ow), max(r[3], oh))
+            face.blit_strip(self._root_canvas, -r[0], -r[1])
+            self._pop_face_ok = True
+        if ride:
+            self._pop_note(r)
+        if s[2] > 0:
+            s[2] -= 1
+
     # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
 
     def _retained_n(self):
@@ -967,10 +1197,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """The frame router's draw list. QUIET frames -- a running game window is
         the only animation: no dirty flag, no pointer change, no cursor, no
         overlays/splash, no drag/resize in flight -- return the one-layer partial
-        stack (just the player window; see _PlayerWindowLayer). Everything else
-        falls through to the full memoized stack, and every full paint leaves a
-        one-frame debt so BOTH ping-pong buffers carry the change before partial
-        frames resume."""
+        stack (just the player window; see _PlayerWindowLayer), with the
+        popover's two halves around it while one is open or owed. A still
+        frame whose only change is the popover's takes the popover's layers
+        alone (docs/shell_layout_2026-10.md §8). Everything else falls through
+        to the full memoized stack, and every full paint leaves a debt so every
+        retained buffer carries the change before partial frames resume."""
         ws = self.ws
         self._ensure_stack()
         # Surface-model signals run BEFORE any layer draws or skip-decides
@@ -983,15 +1215,26 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # hover feedback while the cursor is hidden -- real UI reactions all set
         # ws._dirty. Requiring a still pointer would forfeit the fast path for
         # exactly the games that need it.
-        quiet = (not ws._dirty
-                 and "desktop" in self._wins
-                 and (self._cache_sig & ~2) == 0    # FPS chip (bit 2) rides along
+        # The popover (bit 64) rides the quiet stack too: its rect is the
+        # frame's damage, never a reason to repaint the desk.
+        pop = self._pop_live()
+        still = (not ws._dirty
+                 and (self._cache_sig & ~66) == 0   # FPS chip (bit 2), popover (64)
                  and ws.cart_error is None
                  and self._drag is None and self._drag_armed is None
                  and self._resize is None
                  and not getattr(ws.pointer, "visible", False))
+        quiet = still and "desktop" in self._wins
         if quiet and self._full_debt <= 0:
+            if pop:
+                return self._quiet_pop_stack
             return self._quiet_stack        # the FPS chip rides the player window
+        if (still and pop and not quiet and self.mode == "desktop"
+                and not self._recording and not ws._animating(1 / 60)):
+            # A persistent root (one buffer) owes no other buffer anything.
+            if self._full_debt <= 0 or self._pop_n() == 1:
+                return self._pop_stack
+            quiet = True                    # a full paint that pays the debt
         if quiet:
             self._full_debt -= 1      # paying the other-buffer debt: full paint
         else:
@@ -1202,9 +1445,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """Close this frame's damage description: hand the backdrop's rects and
         the touched windows' extents to a root canvas that takes them. Nothing
         is handed when the frame cannot be described -- the backdrop painted
-        live, an overlay (toast/notice/menu/splash) is in the stack, or the
-        cursor sprite is visible (it moves every frame and is drawn by a layer
-        above this one) -- and the compositor then presents the whole frame."""
+        live, an overlay other than the popover (toast/notice/About/splash) is
+        in the stack, or the cursor sprite is visible (it moves every frame and
+        is drawn by a layer above this one) -- and the compositor then presents
+        the whole frame. The popover's rects, open or closing, ride along."""
         rects = self._damage_rects
         self._damage_rects = None
         if rects is None:
@@ -1212,16 +1456,23 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         nd = getattr(self._root_canvas, "note_damage", None)
         if nd is None:
             return
-        if (self._cache_sig & ~2) != 0:
-            return
+        if (self._cache_sig & ~66) != 0:
+            return                        # the popover (64) is described below
         if getattr(self.ws.pointer, "visible", False):
             return
-        if not rects and not touched:
+        pops = False
+        for s in self._pop_slots:
+            if s[1] is not None:
+                pops = True
+        if not rects and not touched and not pops:
             return                        # nothing to say: the safe full frame
         for r in rects:
             nd(*r)
         for r in touched:
             nd(*r)
+        for s in self._pop_slots:
+            if s[1] is not None:
+                nd(*s[1])
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
@@ -2082,9 +2333,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     return True
         key = self._win_at(px, py)
         if key is None:
-            # Clicking the desktop moves focus to it. Only its OS bar is
-            # interactive; the Library is not invisibly present underneath.
-            if click and self._focus is not None:
+            # Clicking the desktop moves focus to it; a bar is not the desk,
+            # so a widget's tap (a popover over the focused window) keeps it.
+            # Only its OS bar is interactive; the Library is not invisibly
+            # present underneath.
+            if (click and self._focus is not None
+                    and not ws.bar_layer.bar_at("desk", px, py)):
                 self._focus = None
                 ws._dirty = True
             return bool(self._backdrop_layer.handle_pointer(px, py, click))

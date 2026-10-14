@@ -95,21 +95,18 @@ def test_the_worked_examples_resolve_per_tier(tier):
     assert _res(EXAMPLES[6], tier) == (EXAMPLES[6], ())
 
 
-def test_a_docked_calendar_waits_for_its_painter_and_the_floor_holds():
-    # No bar draws the month grid yet, so `calendar` is in no WM's catalogue:
-    # on the P4 example 5's right bar stays (it clears the floor, 76% of the
-    # width) and holds its spacer; on a 320- or 480-wide glass it fails the
-    # floor and the default stands in -- one rule, no board exception.
+def test_a_docked_calendar_resolves_where_the_floor_holds():
+    # `calendar` is in both modes' catalogues: on the P4s example 5's right
+    # bar clears the floor (76% of the width) and docks the month grid; on a
+    # 320- or 480-wide glass it fails the floor and the default stands in --
+    # one rule, no board exception.
+    assert "calendar" in DESKTOP and "calendar" in CONSOLE
     for tier in ("p4_desktop", "p4_console", "guition_p4_desktop"):
         bars, notes = _res(EXAMPLES[5], tier)
-        assert bars == (_today(tier), _bar("right", 120, [], [], ["spacer"])), tier
-        assert "calendar: not in this mode" in notes
-    # with the catalogue that places it, the floor alone decides
-    for tier in ("p4_desktop", "guition_p4_desktop"):
-        assert _res(EXAMPLES[5], tier, cat=ALL) == (EXAMPLES[5], ()), tier
+        assert bars == (_today(tier), EXAMPLES[5][1]), tier
     for tier in ("tdeck", "guition_s3"):
-        bars, notes = _res(EXAMPLES[5], tier, cat=ALL)
-        assert bars == (TODAY,) and notes[-1] == "replaced by the default", tier
+        bars, notes = _res(EXAMPLES[5], tier)
+        assert bars == (_today(tier),) and "replaced by the default" in notes, tier
         assert "the bars leave the content under 75% of the glass" in notes
 
 
@@ -279,8 +276,8 @@ def test_a_mode_switch_resolves_the_catalogue_again(tmp_path):
 
 
 # One fixture layout that triggers each drop of §10 at once: a widget outside
-# the console catalogue (`chips`), one no WM places (`calendar`: no bar draws
-# the month grid), one with no cell on a side bar (`title`) and one that does
+# the console catalogue (`chips`), one whose cell does not fit an 18-row bar
+# (`calendar`), one with no cell on a side bar (`title`) and one that does
 # not fit its bar (a `text` wider than the 16-row side bar).
 FIXTURE = {"format": 1, "name": "drops", "layout": {"bars": [
     {"edge": "top", "left": ["zone", "chips", "calendar"],
@@ -317,7 +314,7 @@ def test_the_fixture_layouts_drop_as_specified_on_every_config(tmp_path, config_
     assert bars == (TODAY[:2] + (want_left, ()) + TODAY[4:],
                     _bar("left", 16)), config_name
     want = [] if desktop else ["chips: not in this mode"]
-    want += ["calendar: not in this mode", "title: not on a left bar",
+    want += ["calendar: does not fit the top bar", "title: not on a left bar",
              "text: does not fit the left bar"]
     assert list(notes) == want
     _install(VERTICAL_ZONE)

@@ -9,8 +9,8 @@
 #   Actor                      one placed actor from a scene
 #   Scenes                     a cart's scenes, parsed
 #   SceneWorld                 the live actor world a cart mutates
-#   -- reusable overlay popup  Popup
-#   Popup                      a self-contained dropdown overlay
+#   -- the popover             Popup
+#   Popup                      the one popover: rows or a component
 """Self-contained console support widgets, extracted from Workstation
 (runtime/console.py) -- the cohesive, boundaried little classes with their own state
 that don't belong to any one surface Layer or the router:
@@ -21,8 +21,8 @@ that don't belong to any one surface Layer or the router:
   * `Pmem`         -- a cart's persistent 256x uint32 memory (TIC-80 pmem()).
   * `Actor`/`Scenes` -- a cart's placed-actor scenes (#85): read-only data rows +
                       the scene()/load_scene() accessor over the .moyscene blobs.
-  * `Popup`        -- the reusable dropdown overlay primitive (#52) the ≡ menu is
-                      built on.
+  * `Popup`        -- the one popover (#52, docs/shell_layout_2026-10.md §8): the
+                      system menu's rows, or a bar widget's component.
   * `ConfirmTap`   -- the two-tap guard every destructive button shares.
   * `arm_prompt`   -- the input-edge neutraliser a modal prompt opens with.
 
@@ -584,14 +584,15 @@ class SceneWorld:
                 a.y < b.y + 8 and b.y < a.y + 8)
 
 
-# --- reusable overlay popup (#52) -------------------------------------------
-# A minimal left-anchored dropdown drawn ON TOP of whatever screen is up, with its
-# OWN open/selected state. It's the primitive the top-bar system menu is built on,
-# and is reusable for #55 (system-as-cart) / future menus. Index-only drawing (the
-# existing cls/rect/rectb/print verbs -- host == device, no new native primitive),
-# petme128 8x8 text, the _glyph fallback contract for an optional per-row icon.
+# --- the popover (#52; docs/shell_layout_2026-10.md §8) ----------------------
+# The ONE popover: a panel anchored to a bar widget's cell, opening into the
+# content side of its bar, drawn ON TOP of whatever screen is up, with its OWN
+# open/selected state. Its contents are either ROWS -- the system menu, its
+# first content -- or a COMPONENT (popover.py: the calendar, the wifi panel,
+# the power rows), one at a time. Index-only drawing (the existing verbs --
+# host == device, no new native primitive).
 #
-# Items are tuples; the first element is a kind:
+# Rows are tuples; the first element is a kind:
 #   ("header", text)               -- a dim section title; NOT cursor-selectable
 #   ("sep",)                        -- a 1px separator line between groups
 #   ("item", text, action)         -- a selectable row; `action` is called on activate
@@ -606,9 +607,10 @@ _POPUP_SEP_H = 1              # separator line height
 
 
 class Popup:
-    """A self-contained dropdown overlay (#52): owns open/closed + the moving cursor,
-    dismisses on outside-tap / ESC, and draws on top. Backend-agnostic -- the host and
-    the device drive it through the same indexed canvas."""
+    """The popover (#52, docs/shell_layout_2026-10.md §8): owns open/closed, what
+    it holds (rows or a component) and the cursor; dismisses on an outside tap,
+    B or ESC. Backend-agnostic -- the host and the device drive it through the
+    same indexed canvas. `widget` names the bar widget it hangs from."""
 
     def __init__(self):
         self.open = False
@@ -636,16 +638,45 @@ class Popup:
         # what keeps every tier byte-identical; the panel WIDTH stays on `fs`
         # because it is sized to hold text, not to be hit.
         self.cs = 1
+        # A COMPONENT in place of the rows (popover.py), its panel size fixed
+        # at open; `widget` the bar widget the panel hangs from.
+        self.comp = None
+        self.widget = None
+        self.size = (0, 0)
+        # The width the anchor was placed for (toggle_popover); 0 is the rows'
+        # own `_POPUP_W * fs`.
+        self.w = 0
 
     # -- open/close ----------------------------------------------------------
-    def show(self, items):
+    def show(self, items, widget="menu"):
         """Open with `items`, cursor on the first selectable row."""
+        self._drop_comp()
         self.items = list(items)
+        self.widget = widget
         self.open = True
         self.sel = self._first_selectable()
 
+    def show_component(self, comp, widget, size):
+        """Open holding `comp` (a popover.py component) in a `size` panel."""
+        self._drop_comp()
+        self.items = []
+        self.comp = comp
+        self.widget = widget
+        self.size = size
+        self.open = True
+        self.sel = 0
+
+    def _drop_comp(self):
+        comp = self.comp
+        self.comp = None
+        if comp is not None:
+            self.widget = None        # it no longer holds what it held
+            comp.closed()
+
     def close(self):
         self.open = False
+        self.widget = None
+        self._drop_comp()
 
     def toggle(self, items):
         """≡ pressed: open with `items` if closed, else close (the same control
@@ -703,13 +734,17 @@ class Popup:
         defaults to _POPUP_X (flush left). Rows and the drop under the bar scale by
         `cs`, the text-sized width by `fs`; equal is the byte-identical baseline."""
         fs, cs = self.fs, self.cs
-        h = 0
-        for it in self.items:
-            h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
+        if self.comp is not None:
+            w, h = self.size
+        else:
+            w = self.w or _POPUP_W * fs
+            h = 0
+            for it in self.items:
+                h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
         y = _POPUP_Y * cs if self.anchor_y is None else self.anchor_y
         if self.up:
             y -= h
-        return (self.anchor_x, y, _POPUP_W * fs, h)
+        return (self.anchor_x, y, w, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
@@ -734,6 +769,13 @@ class Popup:
         True when the tap was consumed (so the caller stops dispatching it)."""
         if not self.open:
             return False
+        if self.comp is not None:
+            r = self.panel_rect()
+            if _in(px, py, r):
+                self.comp.click(px, py, r)
+            else:
+                self.close()          # tap OUTSIDE dismisses
+            return True
         i = self.row_at(px, py)
         if i is None:
             self.close()              # tap OUTSIDE dismisses

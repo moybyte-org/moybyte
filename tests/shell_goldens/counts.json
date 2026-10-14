@@ -87,6 +87,30 @@
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
+  "p4_1024x600_cs2_fs1_docked_calendar": {
+    "app_appearance": [130, 4],
+    "app_artwork": [88, 3],
+    "app_calc": [256, 7],
+    "app_files": [214, 6],
+    "app_getcarts": [298, 8],
+    "app_notes": [429, 15],
+    "app_storybook": [172, 5],
+    "desk": [1, 1],
+    "desk_window_calc": [46, 2],
+    "editor_blocks": [46, 2],
+    "editor_cards": [46, 2],
+    "editor_code": [4, 1],
+    "editor_map": [4, 1],
+    "editor_music": [4, 1],
+    "editor_paint": [4, 1],
+    "editor_scene": [4, 1],
+    "launcher": [0, 0],
+    "picker": [1101, 10],
+    "script_console": [34, 19],
+    "settings": [64, 34],
+    "web_console": [192, 4],
+    "web_console_address": [192, 6]
+  },
   "p4_1024x600_cs2_fs1_gnomebar": {
     "app_appearance": [130, 4],
     "app_artwork": [88, 3],
@@ -134,6 +158,13 @@
     "settings": [64, 33],
     "web_console": [212, 4],
     "web_console_address": [216, 6]
+  },
+  "p4_1024x600_cs2_fs1_popovers": {
+    "desk_window_calc": [48, 3],
+    "popover_battery": [17, 10],
+    "popover_clock": [112, 42],
+    "popover_menu": [8, 8],
+    "popover_wifi": [65, 11]
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "app_appearance": [130, 4],
@@ -344,5 +375,11 @@
     "settings": [449, 28],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
+  },
+  "tdeck_320x240_fs1_widget_pages": {
+    "page_battery": [449, 28],
+    "page_clock": [63, 39],
+    "page_menu": [3, 5],
+    "page_wifi": [473, 16]
   }
 }

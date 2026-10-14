@@ -162,6 +162,39 @@ def wifi_is_off_at_rest(board):
     assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
 
 
+def the_bar_wifi_widget_opens_the_wifi_panel(board):
+    """A tap on the bar's wifi widget reaches Settings' WIFI panel -- the one
+    wifi implementation (docs/shell_layout_2026-10.md §8): fullscreen in
+    console mode, a popover in desktop mode -- holding the radio, and leaving
+    it lets the radio go."""
+    _home_desk(board)
+    cells = board.pyval("[(b[1], [(c[0], c[1]) for c in b[3]]) for b in ws.layout.bars]",
+                        strict=True)
+    xy = None
+    for rect, cs in cells:
+        for name, (x, y, w, h) in cs:
+            if name == "wifi" and xy is None:
+                xy = (rect[0] + x + w // 2, rect[1] + y + h // 2)
+    assert xy is not None, "no wifi widget on the bar: %r" % (cells,)
+    board.tap(*xy, settle=0.6)
+    board.drain(1.5)
+    try:
+        desk = board.pyval("ws.wm.desk_open()", strict=True)
+        if desk:
+            got = board.pyval("(ws.sysmenu.open, ws.sysmenu.widget)", strict=True)
+            assert got == [True, "wifi"] or got == (True, "wifi"), got
+        else:
+            got = board.pyval("(ws.screen, ws.settings_layer.wifi_view)", strict=True)
+            assert tuple(got) == ("settings", True), got
+        assert "settings" in (board.state().get("wifi_held") or []), \
+            "the panel does not hold the radio"
+    finally:
+        board.pyval("ws.sysmenu.close() if ws.wm.desk_open() else ws.exit()")
+        board.drain(1.0)
+    assert board.state().get("wifi_held") == [], "the radio outlived the panel"
+    _home_desk(board)
+
+
 def every_app_claims_one_cart(board):
     """Every registered system app claims exactly one cart. Naming the wrong
     ones is the point: the failure this catches is seed/title drift in ONE

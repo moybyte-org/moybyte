@@ -230,8 +230,10 @@ buttons and became an OS shell with an app-populated region.
   the selected cart's name (its management verbs live in the picker, §4); Settings
   fills it with its sections. The app owns the pixels and the taps inside the zone;
   the OS owns the zone's existence and bounds.
-- **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable as a
-  shortcut into the matching Settings page — **plus a context X** that exits the
+- **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
+  opening its component (the WIFI panel, the calendar, the power rows) as a popover
+  in desktop mode and fullscreen in console mode (`docs/shell_layout_2026-10.md`
+  §8) — **plus a context X** that exits the
   current app (§9). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
@@ -419,9 +421,11 @@ works with no carve-out. The wifi keyboard problem is not solved by Settings —
 
 *(Status 2026-07-08: implemented — Settings carries a WIFI row + panel
 (scan/pick/password/connect/forget over the injected wifi service), and because
-Settings is an app, wifi setup works while a game keeps running; the bar's wifi
-status icon deep-links here on the windowed tier, exactly this section's model.
-The standalone moybyte.wifi.moy tool cart remains the launcher-grid path. Settings also
+Settings is an app, wifi setup works while a game keeps running. The panel is
+the one wifi implementation: the bar's wifi widget opens it as a popover in
+desktop mode and as the Settings page opened at it in console mode
+(`docs/shell_layout_2026-10.md` §8; the wifi tool cart was deleted for it on
+2026-10-14). Settings also
 gained a THEME row — selectable panel colorways, `chrome.THEMES`. 2026-07-11:
 the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
 surface / ink / focus / play / author / danger etc., resolved for every theme

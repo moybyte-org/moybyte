@@ -118,6 +118,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
+    from popover import draw_month as _draw_month
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.popover import draw_month as _draw_month
+try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -133,12 +137,18 @@ _BAND_SIDE = {"top": _ui.BAND_BOTTOM, "bottom": _ui.BAND_TOP,
               "left": _ui.BAND_RIGHT, "right": _ui.BAND_LEFT}
 # The OS widgets a bar paints itself (the zone is its owner's, the chips the
 # WM's, a spacer nothing).
-_PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator")
+_PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator",
+            "calendar")
+# The widgets whose tap is the OS's (§4): the system menu, the X, and the
+# three that open a component (§8).
+_TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
-_TITLES = {"home": "LIBRARY", "picker": "PROJECTS", "settings": "SETTINGS", "desk": "DESK"}
+_TITLES = {"home": "LIBRARY", "picker": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
+           "calendar": "CALENDAR"}
 # _cart_bar_key's fields every bar folds, and the ones a widget adds.
 _KEY_ALWAYS = (0, 2, 3, 4, 10)
-_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (8,), "wifi": (7,)}
+_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (8,), "wifi": (7,),
+           "calendar": (11,)}
 
 
 def _edit_kind(cart):
@@ -240,6 +250,7 @@ class BarLayer:
         # Clock-text cache (#66): (second, string) -- see _clock_text.
         self._clock_at = -1
         self._clock_cache = ""
+        self._date_cache = (0, 0, 0)
         # The root canvas the bar strips are published to (publish_strips),
         # and the clock text redraw_clock last painted there.
         self._strip_cv = None
@@ -593,7 +604,8 @@ class BarLayer:
                 ws.history.bar_undo_bits(),   # #111: local op-history dim state
                                               # (RAM-only; journal flips
                                               # invalidate explicitly)
-                self._bar_cache_gen)
+                self._bar_cache_gen,
+                self._today())             # the docked calendar's day
 
     def _render_cart_bar(self, cv, key, i=0):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
@@ -673,6 +685,16 @@ class BarLayer:
             if across:
                 tw = _bar_text_w(s) * (1 if game else ws.layout.fs)
                 r = (r[0] + (r[2] - tw) // 2, r[1], tw, r[3])
+        elif name == "calendar":
+            # The docked month grid: the popover's painter in the cell.
+            y, m, d = self._today()
+            if y and not game:
+                th = ws.theme_colors
+                p = 2 * ws.layout.cs
+                _draw_month(cv, th, (r[0] + p, r[1] + p, r[2] - 2 * p, r[3] - 2 * p),
+                            y, m, d, ws.layout.fs, th["chrome_ink"],
+                            th["chrome_ink_dim"])
+            return
         _ch.replay(mp.chrome_strip_cell(name, r, cs, dy, s, across), cv, ws)
 
     def _title(self, where):
@@ -760,12 +782,19 @@ class BarLayer:
         try:
             lt = time.localtime()
             s = "%02d:%02d" % (lt[3], lt[4])
+            self._date_cache = (lt[0], lt[1], lt[2])
         except Exception:  # noqa: BLE001
             secs = _ticks_diff(_ticks_ms(), 0) // 1000
             s = "%02d:%02d" % ((secs // 60) % 100, secs % 60)
         self._clock_at = now_s
         self._clock_cache = s
         return s
+
+    def _today(self):
+        """(year, month, day) from the clock's per-second read, (0, 0, 0)
+        where there is no wall clock."""
+        self._clock_text()
+        return self._date_cache
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bars' tap slice (Stage 4), shared by every screen they draw
@@ -802,31 +831,24 @@ class BarLayer:
                 if owner is not None and zone is not None else False
         hit = None
         for c in cells:
-            if c[0] in ("clock", "menu", "wifi", "close") and _in(px, py, c[1]):
+            if c[0] in _TAPPED and _in(px, py, c[1]):
                 hit = c
                 break
-        # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
-        # wakes the Time Traveler. Checked before the ≡/X/zone so a tap on the clock
-        # never falls through to a button.
-        if hit is not None and hit[0] == "clock":
-            ws.ach_ui._tap_clock()
-            return True
-        ws.ach_ui._clock_taps = 0                # any other bar tap resets the run
         name = hit[0] if hit is not None else None
-        if name == "menu":                  # ≡ -> system menu (Settings/About/Reboot, #52)
-            ws.toggle_sysmenu()
-            return True
-        # WiFi status icon: on the WINDOWED desktop it deep-links into Settings ->
-        # WIFI (spec Section 5's "status icons shortcut into Settings" -- Settings is
-        # a system APP, so wifi setup coexists with a running cart, #38); on the
-        # fullscreen tiers it launches the moybyte.wifi.moy tool (Part 3, unchanged device
-        # behavior). Consumes the tap either way so it never leaks to the lent zone.
-        if name == "wifi":
-            if getattr(ws, "windowed_chrome", False):
-                ws.open_settings()
-                ws.settings_layer.open_wifi()
-            else:
-                ws.launch_wifi_tool()
+        # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
+        # wakes the Time Traveler; every tap also opens (or closes) its calendar.
+        # Checked before the ≡/X/zone so a tap on the clock never falls through.
+        if name == "clock":
+            ws.ach_ui._tap_clock()
+        else:
+            ws.ach_ui._clock_taps = 0            # any other bar tap resets the run
+        # The ≡, the clock, wifi and battery open their component
+        # (docs/shell_layout_2026-10.md §8): a popover in desktop mode, the
+        # system menu as the popup it is and the rest fullscreen in console
+        # mode -- wifi the Settings WIFI panel either way, the one wifi
+        # implementation. Consumed, so a tap never leaks to the lent zone.
+        if name in ("clock", "menu", "wifi", "battery"):
+            ws.widget_tap(name)
             return True
         # Context X (Stage 5, spec Section 9): tap to EXIT the active surface back toward
         # its mode's root. On the home it leaves console mode for the desk beneath

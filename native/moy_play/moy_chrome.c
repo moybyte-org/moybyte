@@ -399,8 +399,7 @@ void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y,
     }
 }
 
-// The system menu's frozen geometry (runtime/console.py's _POPUP_*).
-#define POPUP_Y 18
+// The system menu's frozen geometry (runtime/widgets.py's _POPUP_*).
 #define POPUP_ROW_H 12
 #define POPUP_PAD_X 4
 #define POPUP_SEP_H 1
@@ -416,7 +415,7 @@ static void dialog(moy_chrome_list_t *l, int x, int y, int w, int h) {
 void moy_chrome_menu(moy_chrome_list_t *l, const uint8_t *kind, const char *const *label,
                      int n, int sel, int x, int y, int w, int h, int fs, int cs) {
     dialog(l, x, y, w, h);
-    int cy = POPUP_Y * cs;
+    int cy = y;                     // the rows start at the panel's top edge
     int row_h = POPUP_ROW_H * cs;
     // Rows sit 1px inside the ring, so the label's inset from the PANEL edge
     // is one less from the row's.

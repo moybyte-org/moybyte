@@ -12,10 +12,18 @@ Usage:
     python tools/p4_bench.py --board p4 [--out bench.md]
     python tools/p4_bench.py --board tdeck --repaint settings,files,editor:code
     python tools/p4_bench.py --board p4 --layout '[{"edge": "left", ...}]'
+    python tools/p4_bench.py --board p4 --popovers [--layout ...]
 
 `--layout` benches under a theme layout's bars (docs/shell_layout_2026-10.md
 §5): installed as a package beside the seeds and picked, as Settings does,
 after the board is reset or attached, and unpicked at the end.
+
+`--popovers` benches the bar widgets' popovers alone (docs/shell_layout_2026-10.md
+§8): open, navigate, idle and close, over three desk windows and over a
+playtest, and a frame on a minute boundary (with a docked calendar when the
+layout places one). The open and close are real taps on the widget's cell;
+a key is the popover layer's own handler, with the router's dirty mark where
+the image's WM does not let the popover take keys.
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -316,6 +324,107 @@ def bench_all(b, out_path):
         print("\nwrote %s" % out_path)
     return bench
 
+KEY = """
+class _PK:
+    last_key = 0
+    def __init__(self, n):
+        self.n = n
+    def pressed(self, n):
+        return n == self.n
+def _pk(n):
+    ws._sysmenu_layer.handle_input(_PK(n))
+    if not getattr(ws.wm, 'popover_takes_keys', lambda: False)():
+        ws.mark_dirty()
+ws._pk = _pk
+"""
+
+
+MINUTE = """
+ws._bl = ws.bar_layer
+ws._bl._clock_text = lambda: '12:00'
+ws._rn = [0]
+def _rc(cv, key, i=0, _or=ws._bl._render_cart_bar):
+    ws._rn[0] += 1
+    return _or(cv, key, i)
+ws._bl._render_cart_bar = _rc
+"""
+
+
+def widget_cell(b, name):
+    """The screen centre of the bar widget `name`'s cell, or None."""
+    bars = pyval(b, "[(x[1], [(c[0], c[1]) for c in x[3]]) for x in ws.layout.bars]")
+    for rect, cells in bars or ():
+        for n, (x, y, w, h) in cells:
+            if n == name:
+                return rect[0] + x + w // 2, rect[1] + y + h // 2
+    return None
+
+
+def popover_rows(b, bench, where):
+    for widget, key in (("menu", "down"), ("clock", "right"), ("battery", "down")):
+        xy = widget_cell(b, widget)
+        if xy is None:
+            print("  %-34s (not on this layout)" % ("popover: " + widget))
+            continue
+        tag = "%s, %s" % (widget, where)
+        bench.start(); b.tap(*xy, settle=0.2); b.drain(1.5)
+        bench.stop("popover open: " + tag)
+        if not pyval(b, "ws.sysmenu.open"):
+            print("  %-34s (opens no popover on this image)" % tag)
+            continue
+        bench.start()
+        for _ in range(4):
+            pyexec(b, "ws._pk(%r)" % key); b.drain(0.4)
+        b.drain(1.0)
+        bench.stop("popover navigate x4: " + tag)
+        bench.start(); b.drain(3.0); bench.stop("popover idle: " + tag)
+        bench.start(); b.tap(*xy, settle=0.2); b.drain(1.5)
+        bench.stop("popover close: " + tag)
+
+
+def bench_popovers(b, out_path):
+    bench = Bench(b)
+    pyexec(b, KEY)
+    print("\n=== popover benchmark (end-to-end frame ms) ===")
+    home(b)
+    pyexec(b, "ws.open_settings()\n"
+              "ws.open_app(ws._apps_by_id['calc'])\n"
+              "ws.open_app(ws._apps_by_id['files'])")
+    b.drain(4.0)
+    bench.start(); b.drain(3.0); bench.stop("desk idle, three windows")
+    popover_rows(b, bench, "over windows")
+    bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
+    bench.stop("window drag (files)  [reference]")
+    # a playtest beside them: the quiet stack is the reference
+    pyexec(b, "ws.launcher.sel = [i for i, c in enumerate(ws.launcher.items) "
+              "if c.get('title') == 'Star Catcher'][0]\nws.open()")
+    b.drain(4.0)
+    bench.start(); b.drain(3.0); bench.stop("playtest alone  [reference]")
+    popover_rows(b, bench, "over playtest")
+    pyexec(b, "ws.wm.close_window_kind('desktop')"); b.drain(2.0)
+    # a minute boundary: the next painted frame re-renders the clock's strip
+    # (and nothing else's -- a docked calendar keeps its strip on the minute)
+    pyexec(b, MINUTE)
+    b.drain(1.0)
+    bench.start(); pyexec(b, "ws._rn[0] = 0\nws.mark_dirty()"); b.drain(1.0)
+    bench.stop("dirty frame, same minute")
+    same = pyval(b, "ws._rn[0]")
+    bench.start()
+    pyexec(b, "ws._rn[0] = 0\nws._bl._clock_text = lambda: '12:01'\nws.mark_dirty()")
+    b.drain(1.0)
+    bench.stop("minute boundary frame")
+    tick = pyval(b, "ws._rn[0]")
+    print("  strip renders: same minute %s, minute boundary %s" % (same, tick))
+    bench.rows[-1]["note"] = "strip renders %s" % tick
+    pyexec(b, "del ws._bl._render_cart_bar\ndel ws._bl._clock_text")
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
 
 def bench_repaint(b, surfaces, seconds, out_path):
     """The widget A/B (docs/kernel_toolkit_2026-10.md §10): each surface open
@@ -358,6 +467,8 @@ def main():
                          " editor:TAB, ...) to repaint every frame instead of"
                          " the panel run")
     ap.add_argument("--seconds", type=float, default=6.0)
+    ap.add_argument("--popovers", action="store_true",
+                    help="the popover scenarios alone")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
@@ -369,6 +480,8 @@ def main():
             pick_layout(b, args.layout)
         if args.repaint:
             bench_repaint(b, args.repaint.split(","), args.seconds, args.out)
+        elif args.popovers:
+            bench_popovers(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

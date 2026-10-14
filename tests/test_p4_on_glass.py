@@ -306,6 +306,10 @@ def test_wifi_is_off_at_rest(board):
     on_glass.wifi_is_off_at_rest(board)
 
 
+def test_the_bar_wifi_widget_opens_the_wifi_panel(board):
+    on_glass.the_bar_wifi_widget_opens_the_wifi_panel(board)
+
+
 def test_appearance_cart_is_claimed(board):
     """The Appearance app must claim its cart on the DEVICE store, or Settings'
     APPEARANCE row silently does nothing."""

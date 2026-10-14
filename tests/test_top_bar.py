@@ -290,7 +290,7 @@ def test_picker_bar_management_hidden_when_read_only(tmp_path):
     assert len(ws.picker.items) == n0
 
 
-# -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the wifi tool ----
+# -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the WIFI panel ----
 
 def test_wifi_off_glyph_is_a_distinct_nonblank_tile():
     """The new "wifi_off" (wifi-with-a-red-slash) icon is a real, non-blank 16x16 tile
@@ -341,31 +341,41 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     assert calls[0] == 1, "a wifi status change must re-render the bar once"
 
 
-def test_tapping_the_wifi_icon_launches_the_wifi_tool(tmp_path):
-    """Part 3: the right-zone wifi icon is a shortcut -- tapping it LAUNCHES the moybyte.wifi.moy
-    tool (runs it; never the editor). From the launcher home the tap lands on the running
-    tool (screen "desktop", cart type "tool")."""
+def test_tapping_the_wifi_icon_opens_the_settings_wifi_panel(tmp_path):
+    """The wifi widget's target is the Settings WIFI panel, the one wifi
+    implementation (docs/shell_layout_2026-10.md §8): in console mode the
+    Settings page opened at the panel, over whatever ran; never a cart."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     drv.click(*_center(ws.layout.wifi_btn))     # tap the wifi status icon
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"               # launched the wifi tool (ran it)
-    assert ws.cart is not None and ws.cart.get("type") == "tool"
-    assert (ws.cart.get("path") or "").endswith("moybyte.wifi.moy")
-
-
-def test_launch_wifi_tool_is_a_noop_when_absent(tmp_path):
-    """launch_wifi_tool() degrades cleanly (returns False, no crash, no screen change)
-    when no wifi tool is installed -- so the shortcut is safe on a stripped device."""
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    # Drop every wifi tool from the launcher store view.
-    ws.launcher.set_items([it for it in ws.launcher.items
-                           if not (it.get("path") or "").endswith("moybyte.wifi.moy")])
-    assert ws.launch_wifi_tool() is False
+    assert ws.screen == "settings"
+    assert ws.settings_layer.wifi_view
+    assert ws.cart is None                      # nothing was launched
+    assert "settings" in ws.leases.holders()    # the panel holds the radio
+    drv.click(*_center(ws.layout.context_x_btn))
+    drv.frame(1 / 30)
     assert ws.screen == "launcher"
+    assert ws.leases.holders() == []            # ...and lets it go on the way out
+
+
+def test_tapping_the_wifi_icon_on_the_desk_opens_the_panel_as_a_popover(tmp_path):
+    """The same tap in desktop mode: the panel in a popover anchored at the
+    widget, no Settings window, the lease held while it is open."""
+    from ws_helpers import build_desktop_ws
+    from runtime import host_app
+    ws = build_desktop_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    lay = ws.wm._root_ctx.layout
+    drv.click(*_center(lay.wifi_btn))
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+    assert not ws.wm.top_is("settings")
+    assert "settings" in ws.leases.holders()
+    assert not any(c.get("path", "").endswith("wifi.moy") for c in ws.carts.all)
 
 
 # -- cached running-cart top bar (#43): render once, blit each frame ---------

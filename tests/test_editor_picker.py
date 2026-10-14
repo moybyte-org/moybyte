@@ -39,9 +39,10 @@ def test_picker_lists_the_new_tile_then_every_editable_cart(tmp_path):
     items = ws.picker.items
     assert items[0]["type"] == NEW_TILE_TYPE   # "+ New" pinned first
     real = [c for c in items if c.get("path")]
-    # Every editable cart is listed -- games, tools AND wallpapers.
+    # Every editable cart is listed -- games AND wallpapers (the seed set
+    # carries no tool cart).
     types = {c.get("type") for c in real}
-    assert {"game", "tool", "wallpaper"} <= types
+    assert {"game", "wallpaper"} <= types
     # ...MINUS the carts a shell APP claims as its identity (Files/Paint/...).
     # Those are not really projects: the app is a frozen shell module and the
     # cart holds only identity + icon + a few-line fallback body, so offering it
@@ -74,7 +75,7 @@ def test_wallpapers_leave_the_launcher_grid(tmp_path):
     assert all(c.get("type") != "wallpaper" for c in ws.launcher.items)
     # ...but the run-grid still carries the runnable cart types + the Make tile
     grid_types = {c.get("type") for c in ws.launcher.items}
-    assert "make" in grid_types and {"game", "tool", "app"} <= grid_types
+    assert "make" in grid_types and {"game", "app"} <= grid_types
     # PRESENT in the Editor picker (editable) and the Settings wallpaper picker (backdrop)
     assert any(c.get("type") == "wallpaper" for c in ws.picker.items if c.get("path"))
     assert any(c.get("type") == "wallpaper" for c in ws.look.wallpaper_carts())

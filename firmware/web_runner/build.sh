@@ -329,7 +329,7 @@ echo "== packing carts"
 # ride along even though they never appear on the run-grid: they are the
 # Appearance app's CARTS catalog, and shipping only moy_night left that tab
 # with one choice, owner report 2026-07-31. Excluded here are the dev/test
-# carts and moybyte.wifi.moy, each by a `"targets"` line in its OWN manifest.)
+# carts, each by a `"targets"` line in its OWN manifest.)
 ROSTER="${MOYBYTE_WEB_CARTS:-$("${PY}" "${REPO_ROOT}/tools/gen_device_carts.py" --roster web)}"
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import base64, json, os, sys

@@ -84,13 +84,14 @@ memory and compositors); this doc cites, it does not copy.
   `sysmenu` layer (`runtime/layers.py`): up/down move, A or Enter activates
   and closes, B or stop dismisses, a tap outside dismisses. Its rows
   (`runtime/console_notices.py`, `_sysmenu_items`) are the cart's restart and
-  delete, search, Settings, About and Reboot. **Overlays disable the quiet
-  stack** and the damage description (`wm_windowed.py`: the quiet-frame path
-  and `_hand_damage`), so a frame with the menu open is a full frame.
-- **Wifi exists twice**: the WIFI panel in Settings (`runtime/settings_layer.py`,
-  `open_wifi`, which holds a radio lease while open) and the
-  `moybyte.wifi.moy` tool cart the fullscreen bar tap launches
-  (`runtime/console.py`). Settings draws the VOLUME and BRIGHTNESS rows.
+  delete, search, Settings, About and Reboot. Other overlays (the toast,
+  the notice, About) disable the quiet stack and the damage description
+  (`wm_windowed.py`: the quiet-frame path and `_hand_damage`); the popover
+  rides them since step 6 (§8).
+- **Wifi is one implementation**: the WIFI panel in Settings
+  (`runtime/settings_layer.py`, `open_wifi`, which holds a radio lease while
+  open); the `moybyte.wifi.moy` tool cart the fullscreen bar tap launched
+  was deleted in step 6. Settings draws the VOLUME and BRIGHTNESS rows.
 - **The Guition P4's compositor** (`native/moy_glass/moy_present_rot.c`)
   rotates, per described frame, the game rect, the damage rects and the bar
   strips that moved: the strips are a rect list (`MOY_ROT_STRIPS`, 4 after
@@ -442,16 +443,26 @@ Enter activates — exactly the `sysmenu` layer's rules. That layer becomes
 the one popover layer, with the system menu as its first content; the system
 menu keeps being a popup in console mode too, as it is today on the T-Deck.
 
-**A popover rides the quiet stack.** Today an overlay disables the quiet
-frame path and the damage description (§2), so a frame with the menu open
-over a desk of windows is a full frame, and on the Guition P4 a whole-buffer
-rotate. The popover layer instead keeps the quiet stack live and hands its
-own rect (plus the rect it uncovers on close) to `_hand_damage`, so a frame
-with a popover open over frozen windows is the popover's rect, and a
-navigation inside it the same rect. The system menu takes the same path,
-which cuts its cost today. A popover over a running playtest: the playtest
-keeps ticking (it is the stack top) and the popover's rect is added to the
-frame's damage; the bench scenarios of §13 step 6 say what both cost.
+**A popover rides the quiet stack** (step 6, `runtime/wm_windowed.py`).
+A change that stays inside the panel -- it opened, a row moved, it closed --
+does not mark the frame dirty: the WM owes the popover's rect to each of the
+root's real buffers (`RETAINED_FRAMES`; one on a persistent root, so the
+Guition P4 pays one frame), and such a frame draws the popover's layers
+alone over the retained one, its rect the frame's damage. Before the
+panel's first paint the pixels under it are snapshotted; a close puts them
+back into each buffer. Two snapshot slots, because a popover may open while
+the last one's restore is still owed. A frame that does repaint (a dirty
+mark, an animation, the full-paint debt of a triple-buffered root) restores
+the snapshot first, so it starts as if no popover were drawn, and takes the
+snapshot again before painting it; its damage carries the popover's rect.
+With a playtest the quiet stack is the popover's restore, the player window,
+the popover: the game keeps ticking, and while the popover overlaps the
+game's window its face -- copied once it is painted -- is put back over each
+game frame, one copy rather than a paint. The snapshots and the face are
+released by the fit check (§3) once no popover is live. A change outside the panel (a connect, a stepped
+setting, a row's action) marks the frame dirty as before. The system menu
+takes the same path. The bench scenarios of §13 step 6 say what each costs
+(#58, #66).
 
 **Four components, fixed per widget, nothing to configure.** A component is
 one painter, one minimum size and one navigation handler; where it draws is
@@ -471,6 +482,10 @@ popover in desktop mode; (c) fullscreen in console mode, pushed on the
 back-stack as a kind so back pops it: the calendar as its own kind, the wifi
 and power rows as the Settings page scrolled to them. (b) versus (c) is the
 mode's, not the board's. No component is a registered app or a desk icon.
+The components are `runtime/popover.py`'s; the wifi panel and the rows draw
+through Settings' own painters over the popover's rect (`PanelGeom`), the
+calendar's one painter is `draw_month`, and the battery's level reads None on
+every board today (no board measures one), drawn as `--`.
 
 ## 9. The safety rule, and what the loader checks
 
@@ -519,9 +534,9 @@ layer (`docs/shell_ux_v1.md` §3), so **the WM class carries** `LAYOUT_CATALOGUE
 which modes a board has. Settings shows a row for what the WM lists and none
 for what it does not (absence, never a disabled row). Beside it,
 `LAYOUT_EDGES` names the edges a bar may take on this tier (all four on both
-WMs), and the composer is `runtime/shell_layout.py`'s `resolve`. No bar draws
-the month grid, so `calendar` is in no WM's catalogue: it is placeable when
-its component (§8) is.
+WMs), and the composer is `runtime/shell_layout.py`'s `resolve`. `calendar`
+is in both modes' catalogues; its 112×80 cell fits a bar only as thick as
+that, and §9's floor keeps such a bar off a small glass.
 
 | board | glass, input | modes (default first) | WM | widgets placeable |
 |---|---|---|---|---|
@@ -695,7 +710,7 @@ every step; the steps that ADD a config say which.
 | 3b — the fixed geometry (landed 2026-10-13) | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers (now `_desk_rect()`) and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | every golden row identical (the fixed geometry moved without a pixel); the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver (landed 2026-10-13) | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
 | 5 — bars on any edge, slots, cells (landed 2026-10-14) | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
-| 6 — the popover layer and the components | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_calendar_popover`, `..._docked_calendar`, `tdeck_320x240_fs1_calendar_full`; `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
+| 6 — the popover layer and the components (landed 2026-10-14) | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_popovers` (each widget's popover over the desk), `..._docked_calendar` (example 5), `tdeck_320x240_fs1_widget_pages` (console mode's page for each); `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
 | 7a — the scaled-blit kernel | the nearest-neighbour RGB565 scaled blit in `moy_gfx`, host and boards | a micro-bench of the focus band's three blits on all four boards, to #66, before 7b starts; the board module answers the host's pixels |
 | 7b — the home | the tab row and four sources; the carousel with the animated centre card; `sel` out of the moving shift key; the key glide as a fling; the Make tile and the Library exclusion go; the per-board motion verdict | ONE named re-baseline of the home rows on every config, with before/after renders; `library idle` zero; the fling, flick, glide and tab-switch scenarios on every board with absolute p90s named per board; the Guition P4 with the band damage of step 2; `tests/test_launcher_scroll.py`, `test_home_retained_frame.py`, `test_launcher_search_favorites.py` hold; `tests/test_desktop_shell.py` gains PLAY reaching the tabbed home in console mode |
 | phase end | — | a board pass on every attached board (`tools/board.py pass tdeck guition_s3 p4 guition_p4`), the web through `tools/preflight.sh --web`; a board this desk lacks is recorded as not run |

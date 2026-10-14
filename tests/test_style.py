@@ -381,10 +381,10 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
     assert named == {
         "achievements_ui.py": 1,        # the achievements list
         "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
-        "settings_layer.py": 6,         # the rows, the wifi list, the notes
+        "settings_layer.py": 7,         # the rows, the wifi list, the notes, the power line
         "storybook_app.py": 1,          # the + NEW row
     }, named
-    assert sum(named.values()) == 11
+    assert sum(named.values()) == 12
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():

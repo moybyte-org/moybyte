@@ -322,6 +322,10 @@ def test_wifi_is_off_at_rest(board):
     on_glass.wifi_is_off_at_rest(board)
 
 
+def test_the_bar_wifi_widget_opens_the_wifi_panel(board):
+    on_glass.the_bar_wifi_widget_opens_the_wifi_panel(board)
+
+
 def test_every_system_app_claims_exactly_one_cart(board):
     on_glass.every_app_claims_one_cart(board)
 

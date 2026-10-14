@@ -334,34 +334,85 @@ class _AchOverlayLayer(Layer):
 
 
 class _SysMenuLayer(Layer):
-    """The ≡ dropdown system menu (#52): a modal overlay. Up/Down move (skipping
-    headers), Enter/A/RUN select (close-on-select), ESC/B dismiss; a row tap
-    moves+selects, a tap outside dismisses. Always consumes the event + clears the
-    game pointer's tap so a running cart underneath never also sees it."""
+    """The popover layer (#52, docs/shell_layout_2026-10.md §8): the ONE modal
+    panel a bar widget opens -- the system menu's rows, or a component. Rows:
+    Up/Down move (skipping headers), Enter/A/RUN select (close-on-select). A
+    component takes the keys itself, every key while it is typing. B, STOP,
+    ESC and HOME close it; a tap outside closes it, a tap inside is the panel's.
+    Always consumes the event + clears the game pointer's tap so a running
+    cart underneath never also sees it.
+
+    A change that stays inside the panel tells the WM (`popover_touch`),
+    which paints the panel's rect alone where it can; one that reaches
+    outside it (an action, a connect, a stepped setting) marks the frame
+    dirty."""
 
     id = "sysmenu"
     domain = "system"
 
     def draw(self, dt):
-        self.ws.menu_ui._draw_sysmenu()
+        paint = getattr(self.ws.wm, "_pop_paint", None)
+        if paint is not None:
+            paint(False)              # the windowed WM snapshots what it covers
+        else:
+            self.ws.menu_ui._draw_sysmenu()
+
+    def _comp(self, fn, *args):
+        """Run a component's handler: a change inside the panel is the
+        popover's (whatever dirty mark the handler left), one outside it
+        marks the frame."""
+        ws = self.ws
+        was = ws._dirty
+        got = fn(*args)
+        if got == "global":
+            ws._dirty = True
+        elif got == "local":
+            ws._dirty = was
+            ws.popover_touch()
 
     def handle_input(self, i):
-        m = self.ws.sysmenu
-        if i.pressed("b") or i.pressed("stop"):
+        ws = self.ws
+        m = ws.sysmenu
+        comp = m.comp
+        if comp is not None and comp.typing():
+            self._comp(comp.handle_input, i)
+        elif (i.pressed("b") or i.pressed("stop") or i.pressed("home")
+              or i.last_key == 27):
             m.close()
+            ws.popover_touch()
+        elif comp is not None:
+            self._comp(comp.handle_input, i)
         elif i.pressed("up"):
             m.move(-1)
+            ws.popover_touch()
         elif i.pressed("down"):
             m.move(1)
+            ws.popover_touch()
         elif i.pressed("a") or i.pressed("run"):
             m.activate()
+            ws.popover_touch()
+            ws._dirty = True
         return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if click:
-            ws._dirty = True
-            ws.sysmenu.click(px, py)   # row -> move+select; outside -> dismiss
+            m = ws.sysmenu
+            comp = m.comp
+            if comp is not None:
+                r = m.panel_rect()
+                if px >= r[0] and py >= r[1] and px < r[0] + r[2] and py < r[1] + r[3]:
+                    self._comp(comp.click, px, py, r)
+                else:
+                    m.close()             # outside dismisses
+                    ws.popover_touch()
+            elif m.row_at(px, py) is None:
+                m.close()                 # outside dismisses
+                ws.popover_touch()
+            else:
+                m.click(px, py)           # a row: move+select
+                ws.popover_touch()
+                ws._dirty = True
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
         return True

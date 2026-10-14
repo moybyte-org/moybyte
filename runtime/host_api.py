@@ -29,10 +29,11 @@ PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
 # --- WiFi (#38): host fake backend ------------------------------------------
 # The device wraps network.WLAN; on the PC there is no radio, so this fake gives
-# the WiFi-manager cart something to drive in the simulator. It mirrors the
-# device backend's interface exactly -- scan/connect/status/forget/known -- with
-# canned scan results, a fake connect (records creds + reports connected), and a
-# fake IP, so the manager cart is fully assertable headlessly.
+# the Settings WIFI panel and a "network" cart something to drive in the
+# simulator. It mirrors the device backend's interface exactly --
+# scan/connect/status/forget/known -- with canned scan results, a fake connect
+# (records creds + reports connected), and a fake IP, so both are fully
+# assertable headlessly.
 #
 # Credentials persist through the SAME store the device uses (moy_carts
 # load_wifi/remember_wifi/forget_wifi over wifi.json), so a connect() the kid

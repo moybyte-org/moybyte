@@ -267,8 +267,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # imported back here.
 try:
     from settings_layer import SettingsLayer
+    from popover import CalendarLayer, component_for as _component_for
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import SettingsLayer
+    from runtime.popover import CalendarLayer, component_for as _component_for
 
 # The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
 # the full-screen text view + drawing + code-UI state; the shared ws.editor
@@ -285,7 +287,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # Self-contained support widgets (see widgets.py): the Achievements milestone
 # tracker (+ its ACHIEVEMENTS catalog), Pmem (cart persistent RAM) and the
-# reusable Popup dropdown and the Pointer cursor (moy_input.py). Leaves;
+# Popup, the one popover, and the Pointer cursor (moy_input.py). Leaves;
 # imported back here so
 # console.Pointer / console.Popup / console.ACHIEVEMENTS / ... resolve for
 # Workstation + host_app + tests.
@@ -1135,11 +1137,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # is no screen it could otherwise report to.
         self._notice = None            # (title, sub, kind) while up
         self._notice_until = 0
-        # Top-bar system menu (#52): the ≡ dropdown. A reusable Popup owns its own
-        # open/selected state; the SYSTEM group (Settings/About/Reboot) is always
-        # present, a CART group (Restart/Delete) is prepended only while a cart is
-        # open. `_about` is a tiny dismissible info modal the About row pops.
+        # The popover (#52, docs/shell_layout_2026-10.md §8): ONE Popup owns
+        # its open/selected state and what it holds -- the system menu's rows
+        # (the SYSTEM group always, a CART group prepended while a cart is
+        # open) or a bar widget's component. `_about` is a tiny dismissible
+        # info modal the About row pops. `popover` names the same object.
         self.sysmenu = Popup()
+        self.popover = self.sysmenu
         self._about = False
         # The ≡ dropdown / system menu's UI (#52, console_notices.SystemMenuUI):
         # the row builder + per-item actions; the drawing is the kernel's chrome.
@@ -1221,6 +1225,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
+            "calendar": CalendarLayer(self),   # the clock's console-mode page
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
             "code": self.code_layer,
@@ -1669,37 +1674,125 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if open. Rebuilds the item list so the cart group reflects the current state.
         The rows + their action callbacks live on self.menu_ui
         (console_notices.SystemMenuUI); this stays here as the tested ws. entry point."""
-        self._dirty = True             # overlay open/close repaints (#44)
-        # Anchor the dropdown at the ≡ widget's cell, opening into the content
-        # side of its bar: down from a top bar, up from a bottom one, inward
-        # from a side bar. Across a horizontal bar the panel right-aligns to the
-        # button so it hangs toward the glass's middle; every anchor is clamped
-        # to the canvas. The sysmenu draws on the SYSTEM canvas, so anchor to
-        # the responsive Layout's packing (the launcher/Settings/Editor bars),
-        # not the fixed crash-bar slot.
+        m = self.sysmenu
+        m.fs = self.look.effective_font_scale()   # rows hold fs-scaled text
+        m.cs = self.layout.cs                     # ...and cs-scaled rows (#203)
+        if m.open and m.widget == "menu":
+            m.close()
+        else:
+            m.w = 0
+            self._place_popover("menu", _POPUP_W * m.fs, 0)
+            m.show(self.menu_ui._sysmenu_items())
+        self.popover_touch()
+
+    def _place_popover(self, widget, pw, ph):
+        """Anchor the popover at `widget`'s cell, opening into the content side
+        of its bar: down from a top bar, up from a bottom one, inward from a
+        side bar. Across a horizontal bar the panel right-aligns to the cell
+        so it hangs toward the glass's middle; every anchor is clamped to the
+        canvas, a `ph`-tall panel kept on it. The popover draws on the SYSTEM
+        canvas, so it anchors to the responsive Layout's packing, not the
+        fixed crash-bar slot."""
+        m = self.sysmenu
         bars = self.layout.bars
-        got = _shell_layout.cell_of(bars, "menu")
+        got = _shell_layout.cell_of(bars, widget)
         i, (bx, by, bw, bh) = got if got is not None else (0, self.layout.zone_left)
         edge, (rx, ry, rw, rh) = bars[i][0], bars[i][1]
-        fs = self.look.effective_font_scale()
-        self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled width
-        self.sysmenu.cs = self.layout.cs      # ...and cs-scaled rows (#203)
-        pw = _POPUP_W * fs
+        cw, ch = self.sys_canvas.w, self.sys_canvas.h
         if edge == "left":
             ax = rx + rw
         elif edge == "right":
             ax = rx - pw
         else:
             ax = rx + bx + bw - pw
-        self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
-        self.sysmenu.up = edge == "bottom"
+        m.anchor_x = max(0, min(ax, cw - pw))
+        m.up = edge == "bottom"
         if edge == "top":
-            self.sysmenu.anchor_y = ry + rh
+            m.anchor_y = ry + rh
         elif edge == "bottom":
-            self.sysmenu.anchor_y = ry
+            m.anchor_y = ry
         else:
-            self.sysmenu.anchor_y = ry + by
-        self.sysmenu.toggle(self.menu_ui._sysmenu_items())
+            m.anchor_y = ry + by
+            if ph:
+                m.anchor_y = max(0, min(m.anchor_y, ch - ph))
+
+    def toggle_popover(self, widget):
+        """A bar widget's popover (desktop mode): open its component anchored
+        at the widget's cell -- one at a time, so another one closes -- or, on
+        the anchor tapped again, close it."""
+        m = self.sysmenu
+        if m.open and m.widget == widget:
+            m.close()
+            self.popover_touch()
+            return
+        comp = _component_for(self, widget)
+        if comp is None:
+            return
+        m.fs = self.look.effective_font_scale()
+        m.cs = self.layout.cs
+        w, h = comp.size()
+        w = min(max(w, _POPUP_W * m.fs), self.sys_canvas.w)
+        h = min(h, self.sys_canvas.h)
+        self._place_popover(widget, w, h)
+        m.show_component(comp, widget, (w, h))
+        opened = getattr(comp, "opened", None)
+        if opened is not None:
+            opened()
+        self.popover_touch()
+
+    def popover_touch(self):
+        """The popover's pixels changed (opened, navigated, closed): the WM
+        paints its rect alone where it can, else the frame repaints."""
+        self.wm.popover_changed()
+
+    def widget_tap(self, widget):
+        """A bar widget's tap (docs/shell_layout_2026-10.md §8): the system
+        menu is the popup it is in both modes; another widget opens its
+        component in a popover in desktop mode, and fullscreen in console
+        mode -- the calendar as its own kind, the wifi and power rows as the
+        Settings page opened at them."""
+        if widget == "menu":
+            self.toggle_sysmenu()
+        elif self.wm.desk_open():
+            self.toggle_popover(widget)
+        elif widget == "clock":
+            self.open_calendar()
+        elif widget == "wifi":
+            self.open_wifi_panel()
+        elif widget == "battery":
+            self.open_settings()
+            self.settings_layer.show_row("volume")
+
+    def open_wifi_panel(self):
+        """The wifi widget's target: the Settings WIFI panel, the one wifi
+        implementation -- in desktop mode as the popover, in console mode as
+        the Settings page opened at it."""
+        if self.wm.desk_open():
+            if not (self.sysmenu.open and self.sysmenu.widget == "wifi"):
+                self.toggle_popover("wifi")
+            return
+        self.open_settings()
+        self.settings_layer.open_wifi()
+
+    def open_calendar(self):
+        """The clock's console-mode page: the month calendar pushed as its own
+        kind; the clock tapped again, back, B and HOME pop it."""
+        if self.wm.top_is("calendar"):
+            self.close_calendar()
+            return
+        self._calendar_return = self.wm.top_kind()
+        self.layer_of("calendar").view.off = 0
+        self.wm.goto("calendar")
+        self._dirty = True
+
+    def close_calendar(self):
+        self.wm.goto(getattr(self, "_calendar_return", None) or self.wm.root_kind())
+        self._dirty = True
+
+    def battery_level(self):
+        """The battery's charge in percent, or None where the board reads none
+        (every board today: the glyph is the widget's whole value)."""
+        return None
 
     # -- firmware update screen (#53) -----------------------------------------
     #
@@ -2027,8 +2120,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _tool_bar_tap(self, px, py):
         """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
-        context-X exits the tool, the wifi icon launches the wifi tool, the ≡ opens the
-        system menu, the clock is the Easter egg. Returns True iff the bar consumed the tap
+        context-X exits the tool, the wifi icon opens the Settings WIFI panel, the ≡ opens
+        the system menu, the clock its calendar. Returns True iff the bar consumed the tap
         (so the tool underneath doesn't also act on it). Reuses handle_bar_tap("tool") --
         owner is None for "tool", so a non-button tap falls through to the tool."""
         return self.bar_layer.handle_bar_tap("tool", px, py)
@@ -2517,24 +2610,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 self.picker.sel = i
                 break
         self.open_in_editor(new)
-
-    def launch_wifi_tool(self):
-        """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):
-        find the moybyte.wifi.moy tool in the launcher store, SELECT it, and RUN it (tools always
-        launch, never the editor -- like launch_selected on a tool). Returns True iff it
-        was found + launched; a no-op (False) when the tool isn't installed, so a device
-        without it just doesn't respond to the tap rather than crashing. The launcher home
-        is the run caller, so exiting the tool (its bar X) returns to wherever we were is
-        NOT guaranteed -- it pops home, which is the safe default for an OS shortcut."""
-        for i in range(len(self.launcher.items)):
-            it = self.launcher.items[i]
-            path = it.get("path") or ""
-            if it.get("type") == "tool" and (path.endswith("moybyte.wifi.moy")
-                                             or path.endswith("wifi")):
-                self.launcher.sel = i
-                self.open()            # tools always LAUNCH (Part 2)
-                return True
-        return False
 
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper
@@ -3048,7 +3123,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # from ~30fps to ~10 (measured; the "every keypress slows the game" bug).
         pressed = i.any_pressed()
         if pressed or i.last_key:
-            if not self.wm.keys_to_cart():
+            if not self.wm.keys_to_cart() and not self.wm.popover_takes_keys():
                 self._dirty = True
         # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
         # autosave-commit debounce -- frame() fires the durable commit once the kid
@@ -3643,6 +3718,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True
         if self._dirty:
             return True
+        if self.wm.popover_owed():
+            return True               # the popover's rect, owed to a buffer
         if self._animating(dt):
             return True
         if self._ptr_changed():

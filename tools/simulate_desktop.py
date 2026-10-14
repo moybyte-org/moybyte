@@ -253,7 +253,7 @@ def run_live(driver, dt, scale):
                 # A running cart that asked for text input via textmode(True) (#38/#42):
                 # route typed unicode + Enter/Backspace/Esc to the cart's key() exactly
                 # as the code editor does. The cart owns the meaning of those keys (e.g.
-                # the wifi cart: Enter=connect, Backspace=delete, Esc=back to the list),
+                # a password field: Enter=connect, Backspace=delete, Esc=back),
                 # so Esc does NOT quit the simulator here -- the cart handles it.
                 if ev.key == pygame.K_RETURN:
                     driver.type_char(0x0D)

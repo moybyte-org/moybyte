@@ -204,12 +204,20 @@ class SystemMenuUI:
         self.ws.go_home()                 # safe stub when no reboot hook is wired
 
     def _draw_sysmenu(self):
-        """The ≡ dropdown: a panel flush under the bar, one row per item, the
-        selected one on the accent fill, headers dim, a 1px line between
-        groups. `fs` (#39/#58) scales the text and `cs` (#203) the rows."""
+        """The popover: the ≡ dropdown's rows -- a panel flush against the
+        bar, one row per item, the selected one on the accent fill, headers
+        dim, a 1px line between groups; `fs` (#39/#58) scales the text and
+        `cs` (#203) the rows -- or a component in the same dialog shell."""
         ws = self.ws
         m = ws.sysmenu
         x, y, w, h = m.panel_rect()
+        if m.comp is not None:
+            # A component's panel: the menu's dialog shell, its painter inside.
+            cv = ws.sys_canvas
+            th = ws.theme_colors
+            _ui.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
+            m.comp.draw(cv, (x, y, w, h))
+            return
         rows = []
         for it in m.items:
             kind = it[0]

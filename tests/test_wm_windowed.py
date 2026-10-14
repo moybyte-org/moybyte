@@ -963,9 +963,10 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
     assert ws.wm.stack.kinds()[2] == "desktop"   # above the desk (#105)
 
 
-def test_bar_wifi_icon_deep_links_to_settings_wifi(tmp_path):
-    """On the windowed desktop the bar's wifi icon opens Settings -> WIFI (a
-    window over whatever runs) instead of launching the moybyte.wifi.moy tool cart."""
+def test_bar_wifi_icon_opens_the_wifi_panel_as_a_popover(tmp_path):
+    """On the desk the bar's wifi widget opens the Settings WIFI panel as a
+    popover over whatever runs (docs/shell_layout_2026-10.md §8): the game
+    keeps its slot, no Settings window opens."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()                                  # a game is running
@@ -976,8 +977,9 @@ def test_bar_wifi_icon_deep_links_to_settings_wifi(tmp_path):
                                           lay.wifi_btn[1] + 1)
     drv.frame(1 / 30)
     assert handled
-    assert ws.wm.top_is("settings")
-    assert ws.settings_layer.wifi_view
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+    assert not ws.wm.stack.has("settings")
+    assert ws.settings_layer.wifi_nets         # the panel scanned
     assert ws.cart.get("title") == cart_title  # the game was NOT replaced
 
 
@@ -1985,7 +1987,7 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "7387ca8e4eb3e6fb05952571a105a8b945c8886cc5774ceef53ae1a936c0bb01",
+    "a26bf142418ec89760242eaf46d215f38d219665ae653b42c149b33a88ebadda",
     "e08a1a522adc6234abd2374092c4d96b115d8c4d829cc2cca0031829d89bba41",
 )
 
@@ -2423,3 +2425,295 @@ def test_home_on_the_fullscreen_tier_is_unchanged(tmp_path):
     drv.press("home")                            # the home is the floor
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]
+
+
+# -- the popover (docs/shell_layout_2026-10.md §8, step 6) ----------------------
+#
+# One popover at a time, anchored at the widget's cell, closed by a tap outside,
+# B, ESC or HOME. A change that stays inside it -- open, a row moved, close --
+# rides the quiet stack: the frame draws the popover's rect alone over the
+# retained one (the pixels under it put back from a snapshot on close) and hands
+# that rect as its damage.
+
+class _Key:
+    """One frame's key press, as the popover layer reads it."""
+
+    last_key = 0
+
+    def __init__(self, name):
+        self.name = name
+
+    def pressed(self, n):
+        return n == self.name
+
+
+class _Ring:
+    """N physical buffers behind the root canvas: each drawn frame lands in the
+    next one, which still holds what was drawn N frames before -- the Waveshare
+    P4's triple buffer, on the host's one."""
+
+    def __init__(self, ws, n):
+        self.ws, self.cv, self.n = ws, ws.sys_canvas, n
+        self.cv.RETAINED_FRAMES = n
+        self.bufs = [bytes(self.cv._buf)] * n
+        self.k = 0
+        self.stacks = []
+
+    def frame(self, drv):
+        ws, wm = self.ws, self.ws.wm
+        before = ws._frames_drawn
+        got = []
+        real = wm.draw_stack
+        wm.draw_stack = lambda: got.append(real()) or got[-1]
+        try:
+            drv.frame(1 / 30)
+        finally:
+            del wm.draw_stack
+        if ws._frames_drawn == before:
+            return None
+        st = got[-1]
+        self.stacks.append("pop" if st is wm._pop_stack else
+                           "qpop" if st is wm._quiet_pop_stack else
+                           "quiet" if st is wm._quiet_stack else "full")
+        self.bufs[self.k] = bytes(self.cv._buf)
+        self.k = (self.k + 1) % self.n
+        self.cv._buf[:] = self.bufs[self.k]
+        return self.stacks[-1]
+
+    def settle(self, drv, n=10):
+        self.stacks = []
+        for _ in range(n):
+            self.frame(drv)
+        return self.stacks
+
+    def full(self, drv):
+        """Every buffer after N forced full repaints of the state as it is."""
+        wm = self.ws.wm
+        for _ in range(self.n):
+            wm._win_sig = None
+            wm._desk_painted = True
+            wm._backdrop_valid = False
+            self.ws._dirty = True
+            self.frame(drv)
+        return list(self.bufs)
+
+
+def _popover_desk(tmp_path, game=False):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["calc"])
+    if game:
+        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                               if it.get("title") == "Star Catcher")
+        ws.open()
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    return ws, drv
+
+
+def _tap_widget(ws, drv, name):
+    from runtime import shell_layout
+    lay = ws.wm._root_ctx.layout
+    i, (x, y, w, h) = shell_layout.cell_of(lay.bars, name)
+    bx, by = lay.bars[i][1][:2]
+    drv.click(bx + x + w // 2, by + y + h // 2)
+
+
+def test_a_widget_tap_opens_its_popover_at_its_cell(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    for name in ("clock", "wifi", "battery", "menu"):
+        _tap_widget(ws, drv, name)
+        drv.frame(1 / 30)
+        m = ws.sysmenu
+        assert m.open and m.widget == name
+        x, y, w, h = m.panel_rect()
+        assert y == ws.layout.bars[0][1][3]           # hangs from the top bar
+        assert 0 <= x and x + w <= ws.sys_canvas.w
+        assert (m.comp is None) == (name == "menu")
+        _tap_widget(ws, drv, name)                    # the anchor again closes it
+        drv.frame(1 / 30)
+        assert not m.open
+
+
+def test_a_tap_outside_closes_the_popover_and_reaches_nothing(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    _tap_widget(ws, drv, "clock")
+    drv.frame(1 / 30)
+    calc = ws.wm._wins["calc"]
+    focus = ws.wm._focus
+    drv.click(calc.x + calc.w // 2, calc.y + calc.h // 2)
+    drv.frame(1 / 30)
+    assert not ws.sysmenu.open
+    assert ws.wm._focus == focus                      # the tap was the popover's
+
+
+def test_b_esc_and_home_close_the_popover(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    for key in ("b", "stop", "home"):
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open
+        ws._sysmenu_layer.handle_input(_Key(key))
+        assert not ws.sysmenu.open, key
+    ws.widget_tap("battery")
+    esc = _Key(None)
+    esc.last_key = 27
+    ws._sysmenu_layer.handle_input(esc)
+    assert not ws.sysmenu.open
+    assert ws.wm.mode == "desktop"                    # HOME did not show the desk
+
+
+def test_one_popover_at_a_time(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    ws.widget_tap("clock")
+    ws.widget_tap("wifi")                             # another widget replaces it
+    assert ws.sysmenu.widget == "wifi"
+    assert "settings" in ws.leases.holders()
+    ws.widget_tap("menu")
+    assert ws.sysmenu.widget == "menu" and ws.sysmenu.comp is None
+    assert ws.leases.holders() == []                  # the wifi panel let go
+
+
+def test_the_wifi_popover_releases_the_radio_on_every_close(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    closes = (
+        lambda: _tap_widget(ws, drv, "wifi"),                         # the anchor
+        lambda: drv.click(5, ws.sys_canvas.h - 5),                    # outside
+        lambda: ws._sysmenu_layer.handle_input(_Key("b")),            # B
+        lambda: ws._sysmenu_layer.handle_input(_Key("home")),         # HOME
+    )
+    for close in closes:
+        _tap_widget(ws, drv, "wifi")
+        drv.frame(1 / 30)
+        assert ws.sysmenu.widget == "wifi"
+        assert ws.leases.holders() == ["settings"] and ws.wifi.radio is True
+        close()
+        drv.frame(1 / 30)
+        assert not ws.sysmenu.open
+        assert ws.leases.holders() == [] and ws.wifi.radio is False
+    # the panel's own BACK button closes the popover the same way
+    _tap_widget(ws, drv, "wifi")
+    drv.frame(1 / 30)
+    sl = ws.settings_layer
+    rect = ws.sysmenu.panel_rect()
+    ws.sysmenu.comp._run(rect, lambda: None)
+    back = [r for n, r in ws.sysmenu.comp._run(rect, sl._wifi_btns) if n == "back"][0]
+    drv.click(back[0] + 2, back[1] + 2)
+    drv.frame(1 / 30)
+    assert not ws.sysmenu.open and ws.leases.holders() == []
+
+
+def test_the_wifi_popover_runs_the_password_step_in_place(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    ws.widget_tap("wifi")
+    drv.frame(1 / 30)
+    sl = ws.settings_layer
+    sl.wifi_sel = next(i for i, n in enumerate(sl.wifi_nets) if n[2])   # locked
+    ws._sysmenu_layer.handle_input(_Key("a"))
+    assert sl.wifi_pick is not None and ws.sysmenu.comp.typing()
+    for ch in "hunter2":
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+    assert ws.sysmenu.open                          # "b" was typed, not B
+    drv.type_char(13)
+    drv.frame(1 / 30)
+    assert ws.wifi.status()[0]
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+
+
+def test_a_popover_change_paints_its_rect_alone(tmp_path):
+    """Open, a row moved, close: on a persistent root each is ONE frame of the
+    popover layers alone, its rect the frame's damage -- never the desk."""
+    ws, drv = _popover_desk(tmp_path)
+    damage = []
+    ws.sys_canvas.note_damage = lambda *r: damage.append(r)
+    ring = _Ring(ws, 1)
+    ring.settle(drv)
+    for step in (lambda: ws.widget_tap("battery"),
+                 lambda: ws._sysmenu_layer.handle_input(_Key("down")),
+                 lambda: ws.widget_tap("battery")):
+        rect = ws.sysmenu.panel_rect() if ws.sysmenu.open else None
+        damage.clear()
+        step()
+        rect = rect or ws.sysmenu.panel_rect()
+        assert ring.settle(drv) == ["pop"]
+        assert damage == [rect]
+    assert ring.settle(drv) == []                     # idle: no frame at all
+
+
+def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
+    """On a triple-buffered root, after the popover opens, moves and closes,
+    every buffer equals a full repaint of the same state."""
+    for name in ("clock", "wifi", "menu"):
+        ws, drv = _popover_desk(tmp_path / name)
+        ring = _Ring(ws, 3)
+        for _ in range(3):
+            ws._dirty = True
+            ring.frame(drv)
+        ring.settle(drv)
+        ws.widget_tap(name)
+        ring.settle(drv)
+        ws._sysmenu_layer.handle_input(_Key("right" if name == "clock" else "down"))
+        assert ring.settle(drv) == ["pop"] * 3
+        assert ring.bufs[(ring.k - 1) % 3] == ring.full(drv)[(ring.k - 1) % 3]
+        ring.settle(drv)
+        ws.widget_tap(name)
+        ring.settle(drv)
+        seen = list(ring.bufs)
+        assert seen == ring.full(drv), name
+
+
+def test_a_popover_over_a_playtest_keeps_the_quiet_stack(tmp_path):
+    ws, drv = _popover_desk(tmp_path, game=True)
+    ring = _Ring(ws, 1)
+    assert set(ring.settle(drv, 4)) == {"quiet"}
+    ws.widget_tap("clock")
+    assert set(ring.settle(drv, 4)) == {"qpop"}
+    assert ws.wm._pop_over_game and ws.wm._pop_face_ok   # its face rides the game
+    _game_only_moved(ws, drv, ring, ws.sysmenu.panel_rect())
+    assert ring.settle(drv, 4)[1:] == ["qpop"] * 3    # the repaint's debt paid
+    ws.widget_tap("clock")
+    assert ring.settle(drv, 4) == ["qpop", "quiet", "quiet", "quiet"]
+    _game_only_moved(ws, drv, ring)
+
+
+def _game_only_moved(ws, drv, ring, over=None):
+    """The retained frame equals a full repaint everywhere but the game's
+    own pixels (it moved between the two); `over`, a rect drawn above it,
+    must match too."""
+    win = ws.wm._wins["desktop"]
+    seen = ring.bufs[0]
+    full = ring.full(drv)[0]
+    w = ws.sys_canvas.w
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, ow, oh = over or (0, 0, 0, 0)
+    for i in range(0, len(seen), 2):
+        if seen[i:i + 2] != full[i:i + 2]:
+            x, y = (i // 2) % w, (i // 2) // w
+            assert not (ox <= x < ox + ow and oy <= y < oy + oh), (x, y)
+            assert cx <= x < cx + cw and cy <= y < cy + ch, (x, y)
+
+
+def test_the_fit_check_releases_a_closed_popovers_snapshots(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    ws.widget_tap("battery")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    wm = ws.wm
+    snap = wm._pop_slots[wm._pop_cur][0]
+    assert snap is not None and snap._comp._buf is not None
+    while wm.release_cache():
+        pass
+    assert wm._pop_slots[wm._pop_cur][0] is snap         # live: kept
+    ws.widget_tap("battery")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    while wm.release_cache():
+        pass
+    assert all(s[0] is None for s in wm._pop_slots)
+    assert snap._comp._buf is None

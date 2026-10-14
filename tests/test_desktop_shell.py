@@ -1189,3 +1189,62 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     assert p.visible
     p.place(5, 5)
     assert not p.visible and (p.x, p.y) == (5, 5)
+
+
+# -- the bar widgets' fullscreen container (docs/shell_layout_2026-10.md §8) ---
+
+def test_console_mode_opens_each_widget_fullscreen_and_back_pops_it(tmp_path):
+    """No popovers in console mode: the clock pushes the calendar as its own
+    kind (the clock again, B, HOME and the bar's X pop it); wifi and battery
+    open the Settings page at the WIFI panel and at VOLUME; the system menu
+    stays the popup it is."""
+    from ws_helpers import build_ws
+    from runtime import host_app
+    ws = build_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+
+    class _K:
+        last_key = 0
+
+        def __init__(self, n):
+            self.n = n
+
+        def pressed(self, n):
+            return n == self.n
+
+    pops = (lambda: ws.widget_tap("clock"),
+            lambda: ws.layer_of("calendar").handle_input(_K("b")),
+            lambda: ws.layer_of("calendar").handle_input(_K("home")),
+            lambda: ws.exit())
+    for pop in pops:
+        ws.widget_tap("clock")
+        drv.frame(1 / 30)
+        assert ws.wm.stack.kinds() == ["launcher", "calendar"]
+        assert not ws.sysmenu.open
+        pop()
+        drv.frame(1 / 30)
+        assert ws.wm.stack.kinds() == ["launcher"]
+    cal = ws.layer_of("calendar")
+    ws.widget_tap("clock")
+    cal.handle_input(_K("right"))
+    assert cal.view.off == 1
+    ws.exit()
+    ws.widget_tap("clock")
+    assert cal.view.off == 0                       # a fresh visit opens on today
+    ws.exit()
+
+    ws.widget_tap("wifi")
+    assert ws.screen == "settings" and ws.settings_layer.wifi_view
+    ws.exit()
+    assert ws.screen == "launcher" and ws.leases.holders() == []
+    ws.widget_tap("battery")
+    sl = ws.settings_layer
+    assert ws.screen == "settings"
+    assert sl._settings_rows()[sl.set_msel][0] == "volume"
+    ws.exit()
+    ws.widget_tap("menu")
+    assert ws.sysmenu.open and ws.sysmenu.comp is None
+    ws.widget_tap("menu")
+    assert not ws.sysmenu.open

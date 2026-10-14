@@ -292,6 +292,8 @@ class SpineVerbs:
         Files shelf, not to the launcher)."""
         if self.wm.top_is("settings"):            # Stage 6d: ask the stack top
             self._exit_settings()
+        elif self.wm.top_is("calendar"):
+            self.close_calendar()
         elif not self.wm.top_is("launcher"):
             self._go_home_or_back()
 

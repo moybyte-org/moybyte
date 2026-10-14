@@ -126,7 +126,7 @@ def test_backspace_is_a_plain_key_zero_special_casing(tmp_path):
     # Stage 5 exit model (spec Section 9): the #71 pause frame is GONE, and with it the
     # text-mode carve-out + the _bks_prev edge-detect. BACKSPACE is a PLAIN key
     # everywhere, with ZERO special-casing:
-    #   * a running text-mode TOOL (the wifi cart's password field) receives BACKSPACE as
+    #   * a running text-mode TOOL (a password field) receives BACKSPACE as
     #     a typed 0x08 -> DELETE, and it NEVER exits (the input backend routes 0x08 as a
     #     typed key, not the "home" button, in text mode -- so the exit gesture, which
     #     watches "home", simply never fires here);
