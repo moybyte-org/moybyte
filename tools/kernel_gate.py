@@ -184,7 +184,7 @@ def step_safe(name, dirs):
     bd.wait_for_desk(name, dirs, quiet=True)
     mode, wp = _vals(name, dirs, "__import__('moy_kernel').mode()", "ws.look.wallpaper_id")
     _reboot(name, dirs)
-    if mode != "safe" or not str(wp).startswith("fill:"):
+    if mode != "safe" or wp is not None:
         raise GateError("%s: SAFE started %r with wallpaper %r" % (name, mode, wp))
     return "SAFE -> safe, wallpaper %s; rebooted to start" % wp
 

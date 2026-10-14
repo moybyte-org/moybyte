@@ -77,7 +77,7 @@ class CartManager:
     # -- favorites + recents (#105) -------------------------------------------
     #
     # Both ride the SAME system.json persistence Settings already uses for
-    # theme/wallpaper/font/OTA channel (ws.system.set, which persists) -- no new
+    # theme/font/OTA channel (ws.system.set, which persists) -- no new
     # store surface. `favorites` is a plain path list (order = the order a kid
     # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
     # capped most-recently-run path list, newest first. Cart identity is the
@@ -152,6 +152,21 @@ class CartManager:
         except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
             print("Moybyte rescan failed:", exc)
         ws._dirty = True
+
+    def adopt(self, path):
+        """Read cart folder `path` (new, or written again whole) into the
+        roster: one entry read, not a scan (`custom`'s first write,
+        `Appearance.commit`)."""
+        if not self.store.ready():
+            return
+        try:
+            e = self.store.call(
+                lambda: moy_catalogue.entry(moy_catalogue.handle(path)))
+        except Exception as exc:  # noqa: BLE001 -- a failed read keeps the old shelf
+            print("Moybyte adopt failed:", exc)
+            return
+        if e:
+            self.apply([c for c in self.all if c.get("path") != path] + [e])
 
     # -- the #66 live-set diet -----------------------------------------------
 

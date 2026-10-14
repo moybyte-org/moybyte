@@ -79,7 +79,6 @@
     {"role": "notify", "verb": "achieve", "server": "shell", "grant": "never", "wasm": null},
     {"role": "wallpaper", "verb": "current", "server": "shell", "grant": "never", "wasm": null},
     {"role": "wallpaper", "verb": "carts", "server": "shell", "grant": "never", "wasm": null},
-    {"role": "wallpaper", "verb": "fills", "server": "shell", "grant": "never", "wasm": null},
     {"role": "wallpaper", "verb": "id_for", "server": "shell", "grant": "never", "wasm": null},
     {"role": "wallpaper", "verb": "title", "server": "shell", "grant": "never", "wasm": null},
     {"role": "wallpaper", "verb": "select", "server": "shell", "grant": "never", "wasm": null},

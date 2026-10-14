@@ -110,8 +110,9 @@ class SpineVerbs:
         return self.wallpaper_guard.forgive(self.look.wp_id_for(cart))
 
     def load_system(self):
-        """Read the system settings (`self.prefs`) and APPLY them -- the saved
-        wallpaper, font scale, theme and every persisted toggle (#39).
+        """Read the system settings (`self.prefs`) and APPLY them -- the font
+        scale, the theme (which brings its wallpaper, D6) and every persisted
+        toggle (#39).
 
         The read is the store's; this cascade is kernel policy and stays here.
         What a setting MEANS is the shell's business -- each one relays through
@@ -126,16 +127,12 @@ class SpineVerbs:
             self.system.get("chrome_scale", 0))
         self.look.set_font_scale(self.system.get("font_scale", self.look.font_scale),
                                  persist=False)
-        # Paint's shared document lives outside the re-seeded built-in cart. Restore
-        # My Art's bg asset before compiling a persisted My Art wallpaper.
+        # Paint's shared document lives outside the re-seeded built-in cart:
+        # restore My Art's bg asset (its cover on the shelf) from it.
         if self.artwork is not None:
             self.artwork.sync_wallpaper()
-        # A SAFE start (the kernel's recovery screen) runs no wallpaper cart:
-        # the settings' absence would fall back to the first one there is.
-        wallpaper = self.system.get("wallpaper")
-        if getattr(self.prefs, "safe", False):
-            wallpaper = self.look.FILL_WALLPAPERS[0]
-        self.look.select_wallpaper(wallpaper, persist=False)
+        # The theme brings the wallpaper (`Appearance.theme_wallpaper`); a SAFE
+        # start (the kernel's recovery screen) runs no wallpaper cart.
         self.look.set_theme(self.system.get("theme", self.look.theme_name),
                             persist=False,
                             variant=self.system.get("theme_variant",
@@ -391,6 +388,7 @@ class SpineVerbs:
                 return False
         h = self.apps.find(app.id)
         text = self.apps.text_mode(h) if h else False
+        self.look.commit()             # an app switch is an exit: `custom` is written
         self._note_app_caller()        # a jump OUT of an app comes back to it
         self.cart = cart
         self.input.text_mode = False

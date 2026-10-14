@@ -896,6 +896,14 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
     return cached
 
 
+def forget_package(name):
+    """Store package `name`'s bytes moved (a change to `custom`): its answer
+    is read again at the next ask, and the shared dicts go."""
+    if name in _PACKAGES:
+        _PACKAGES[name] = None
+    forget_themes()
+
+
 def forget_themes():
     """Drop every shared token and content dict: an install or uninstall
     moved what the names resolve to."""

@@ -3,7 +3,7 @@
 #   PaintAppLayout                responsive Paint chrome for one window rect
 #   PaintAppLayer                 the Paint app process: layout, input, draw
 #   PaintAppLayer.is_app          the app-API matcher
-#   ArtworkService                Paint's document model and the My Art backdrop
+#   ArtworkService                Paint's document model and the wallpaper copy
 #   ArtworkService.load           the open drawing as (w, h, index bytes)
 #   ArtworkService.save           persist the canvas to its named drawing
 #   ArtworkService.set_wallpaper  a drawing as the desktop wallpaper
@@ -12,9 +12,10 @@
 
 PaintAppLayer owns the editor, pixels and interaction; ArtworkService, which
 Paint builds over its own roles, owns the open picture (persisting it) and
-the ``My Art`` backdrop drawn from the wallpaper copy. Publishing a drawing
-through ``My Art`` or into a project as ``images/bg.moyimg`` is
-runtime/picture_copies.py's, which Files uses too.
+the wallpaper copy (``My Art``). Publishing a drawing through ``My Art``
+(copied into the theme as its picture, docs/theming_2026-09.md §4.9) or
+into a project as ``images/bg.moyimg`` is runtime/picture_copies.py's, which
+Files uses too.
 
 Drawings are USER FILES (#108): named ``files/drawings/*.moyimg`` items in the
 store, auto-named (naming is never a gate), browsed by the Files app, and
@@ -72,18 +73,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # A cart's cover is this square, always (SPEC.md 3.6).
 COVER_SIDE = 128
 
-# #186: the desktop backdrop's resampled indices. Off-heap for the same reason
-# its RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices
-# is 153,600 bytes on the Guition's 480x320 desk, and that board's largest
-# contiguous gc run at the launcher is 107,584. alloc() degrades to a plain
-# bytearray on the host and wherever PSRAM is out, so this stays one code path.
-try:
-    import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    try:
-        from runtime import moybuf as _moybuf
-    except ImportError:
-        _moybuf = None
 
 
 def _invalidate_bitmap(img):
@@ -1043,7 +1032,7 @@ class PaintAppLayer:
 
 class ArtworkService:
     """Paint's DOCUMENT model: the open picture, its load and save, and the
-    desktop backdrop drawn from the wallpaper copy (My Art). Paint builds it
+    wallpaper copy (My Art), which a pick copies into the theme. Paint builds it
     over Paint's own context and keeps it as `PaintAppLayer.service`, which
     is how the console reaches it; the copy-on-use verbs are Paint's
     `PictureCopies` (runtime/picture_copies.py), over the same roles. The open
@@ -1061,13 +1050,6 @@ class ArtworkService:
     MAX_W = 512
     MAX_H = 300
     PAINT_TITLE = "Paint"
-    # The off-heap loan key for the DESKTOP BACKDROP (#186). Its own key, not
-    # PaintDocument's "artwork" and not the wallpaper cart's "wallpaper":
-    # release_bakes(owner) frees everything an owner holds, so a shared key
-    # would mean Paint's leaving hook drops the desktop's backdrop, and
-    # wallpaper.clear() drops a compiled cart's images. One key, one buffer,
-    # one thing to reason about.
-    WALL_OWNER = "wallpaper_bg"
 
     def __init__(self, ctx):
         self.ctx = ctx
@@ -1080,10 +1062,6 @@ class ArtworkService:
         self.last_error = ""
         self._cached = None            # the OPEN doc's decoded (w, h, bytes)
         self._wall_decoded = None      # the wallpaper COPY's decoded tuple
-        self._wall_bitmap = None
-        self._wall_key = None
-        self._wall_pix = None          # the backdrop's off-heap indices (#186)
-        self._wall_canvas = None       # ...and the canvas its bake is lent by
         self._thumb_bitmap = None
         self._thumb_key = None
         # The copy's generation (the wallpaper role's save_copy bumps it, from
@@ -1289,12 +1267,12 @@ class ArtworkService:
 
     # -- the wallpaper copy (#108 copy-on-set) --------------------------------
     #
-    # The legacy artwork.moyimg sibling is now the WALLPAPER COPY's backing
-    # store: set_wallpaper snapshots a named drawing into it (and into My
-    # Art's images/bg for the launcher shelf). Editing the drawing afterwards
-    # changes nothing until it is set again -- so deleting/renaming drawings
-    # can never break the desktop, and sync_wallpaper's re-seed-proof restore
-    # keeps working unchanged.
+    # The artwork.moyimg sibling is the WALLPAPER COPY: set_wallpaper snapshots
+    # a named drawing into it (and into My Art's images/bg for the launcher
+    # shelf), and picking My Art copies it into the theme as its picture
+    # (`Appearance.change`). Editing the drawing afterwards changes nothing
+    # until it is set again -- so deleting/renaming drawings can never break
+    # the desktop.
 
     def sync_wallpaper(self):
         """Restore ``My Art/bg`` from the re-seed-proof wallpaper-copy file."""
@@ -1319,18 +1297,17 @@ class ArtworkService:
 
     def set_wallpaper(self, name=None):
         """Copy the named drawing (default: the open one) into the wallpaper
-        slot and make it the active desktop backdrop."""
+        slot and make it the theme's picture."""
         ok = self.copies.set_wallpaper(name or self._open_drawing())
         self.last_error = self.copies.last_error
-        self._copy_check()          # the replaced screen's loans go now
+        self._copy_check()
         return ok
 
     def copy_changed(self):
         """The wallpaper copy was written (the wallpaper role's `save_copy`,
-        from any app, which moves the copy's generation): the backdrop's
-        decode, its loans and the thumbnail go, read again at the next draw."""
+        from any app, which moves the copy's generation): its decode and the
+        thumbnail go, read again at the next ask."""
         self._wall_decoded = None
-        self._drop_wall_bitmap()
         self._thumb_bitmap = None
         self._thumb_key = None
 
@@ -1344,16 +1321,13 @@ class ArtworkService:
                     self.copy_changed()
                 self._copy_seen = gen
 
-    def owns_wallpaper(self, wp_id):
-        return wp_id is not None and wp_id == self.copies.wallpaper_id()
-
     def _wall_data(self):
         """The wallpaper copy's decoded (w, h, indices), cached in RAM after
         the first read; invalidated by copy_changed when the copy's generation
         has moved since (one integer read a call). A clean miss caches as
-        False so an absent/oversize copy never costs a per-frame SD read
-        (draw_wallpaper runs every drawn frame); read ERRORS stay uncached --
-        a transient SD hiccup should not hide the wallpaper for the session."""
+        False so an absent/oversize copy never costs a repeated SD read;
+        read ERRORS stay uncached -- a transient SD hiccup should not hide
+        the thumbnail for the session."""
         self._copy_check()
         if self._wall_decoded is not None:
             return self._wall_decoded or None
@@ -1368,80 +1342,6 @@ class ArtworkService:
             data = None
         self._wall_decoded = data if data is not None else False
         return data
-
-    def _drop_wall_bitmap(self):
-        """Drop the cached backdrop and give back BOTH of its off-heap loans.
-
-        Called where the cached bitmap is genuinely being discarded -- a new
-        wallpaper published, or a source/canvas size the cache does not match.
-        The canvas nulls the bake as it frees, so a draw that raced this would
-        re-bake rather than read returned RAM (moybuf's rule: never free what
-        something still reads)."""
-        self.release_wall_bake()
-        if self._wall_pix is not None and _moybuf is not None:
-            _moybuf.free(self._wall_pix)
-        self._wall_pix = None
-        self._wall_bitmap = None
-        self._wall_key = None
-
-    def release_wall_bake(self):
-        """Give back the backdrop's RGB565 bake, keeping the resampled indices.
-
-        The backdrop is neither a cart RUN nor a document, so it has neither of
-        the deaths the other two loans hang off. What it has is a SELECTION:
-        the bake is only ever read while My Art is the chosen wallpaper, so the
-        wallpaper component's `clear()` -- the one seam every wallpaper change
-        funnels through -- is where it goes back. Coming back to My Art costs one
-        native re-bake (~8ms) and no resample, which is why this returns the
-        bake and NOT the indices: the resample is a Python loop over a whole
-        screen, and paying it per selection would be a visible hitch."""
-        cv = self._wall_canvas
-        rel = getattr(cv, "release_bakes", None) if cv is not None else None
-        if rel is not None:
-            rel(self.WALL_OWNER)
-
-    def draw_wallpaper(self, canvas):
-        """Draw My Art directly in the SYSTEM domain (512x300 -> P4 exact 2x).
-
-        ONE screen-sized bitmap drawn 1:1, whatever the source size (#186).
-        The old integer-cover branch handed the canvas a source-sized bitmap
-        and a scale, and `spr` bakes a PRE-SCALED RGB565 copy for any scale but
-        1 -- so a 320x240 drawing on the Guition's 480x320 desk asked the gc
-        heap for 640*480*2 = 614,400 contiguous bytes, four times the screen it
-        was about to fill, and got `MemoryError` at an untouched launcher.
-        Resampling to the canvas instead bakes exactly one screen (307,200
-        there), and 1:1 is the only placement that reaches the owner-lent
-        `_bake_indices` path at all. Pixels are unchanged wherever the cover is
-        an exact integer multiple -- the P4's 512x300 -> 1024x600 included --
-        because cover_indices reduces to nearest-neighbour replication there."""
-        data = self._wall_data()
-        if data is None:
-            return False
-        sw, sh, src = data
-        cw, ch = canvas.w, canvas.h
-        key = (id(src), cw, ch)
-        if self._wall_key != key:
-            self._drop_wall_bitmap()
-            if sw == cw and sh == ch:
-                pix = src              # already the screen: no resample, no loan
-            else:
-                if _moybuf is not None:
-                    self._wall_pix = pix = _moybuf.alloc(cw * ch)
-                else:                  # pragma: no cover - every tier has moybuf
-                    pix = bytearray(cw * ch)
-                cover_indices(src, sw, sh, cw, ch, pix)
-            self._wall_bitmap = Bitmap(cw, ch, pix, self.WALL_OWNER)
-            self._wall_key = key
-        self._wall_canvas = canvas
-        canvas.spr(self._wall_bitmap, 0, 0)
-        return True
-
-    def wall_size(self):
-        """The wallpaper copy's (w, h) in pixels, or None -- the Appearance
-        preview uses it to aspect-FIT the full image (thumbnail cover-crops
-        at the image's own aspect = no crop)."""
-        data = self._wall_data()
-        return (data[0], data[1]) if data else None
 
     def thumbnail(self, width, height):
         """A current My Art cover thumbnail for the visual Appearance picker."""

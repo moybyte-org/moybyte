@@ -41,7 +41,7 @@ grants a subset to a `type: "app"` cart by its manifest permissions.
 | `nav` | `app`, `open_app`, `is_system_app`, `projects`, `edit`, `edit_file`, `open_image`, `open_text`, `play`, `run_script`, `text_mode` | Files, Storybook, Get Carts, `ArtworkService` | `launch` grants `open_app` |
 | `prefs` | `get`, `set`, `clear`, namespaced | `ArtworkService` (namespace `paint`) | `prefs` |
 | `notify` | `achieve` | `ArtworkService` | never |
-| `wallpaper` | `current`, `carts`, `fills`, `id_for`, `cart_by_id`, `select`, `preview`, `load_copy`, `save_copy` | Appearance, `ArtworkService` | never |
+| `wallpaper` | `current`, `carts`, `id_for`, `cart_by_id`, `select`, `preview`, `load_copy`, `save_copy` | Appearance, `ArtworkService` | never |
 | `artwork` | the `ArtworkService` object itself | Files, Paint, Appearance, Storybook | never |
 | `clipboard` | the `Clipboard` object itself (`runtime/widgets.py`: `put_text`, `text`, `kind`, `seq`) | Storybook; the code editor's lane (`runtime/editors_code.py`) | `clipboard` |
 | `install` | `net`, `home`, `keep`, `can_pick`, `pick`, `hold`, `release`, `root`, `writable`, `session`, `rescan`, `free`, `find`, `runtimes`, `fit`, `memory`, `chip` | Get Carts | never |
@@ -187,8 +187,8 @@ only the shell's own calls (boot restore, cycling) reach the look's
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
 | `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default. On a board the rows are the kernel's (`moy_spine_kernel`'s, viewed by `moy_spine.kernel_settings`), and a write flushes through the rows' own saver (`moy_settings_flush`), which the console's store registers while its VM runs; a write made with no VM stays dirty in the rows, and the next start flushes them before it reads the file |
 | `notify` | `achieve(kind, key)` | shell | the `Achievements` object is the console's |
-| `wallpaper` | `current(buf)`, `fills(out)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)`, `thumbnail(w, h)` | shell | `current` is the look's live `wallpaper_id`, which differs from the settings row after a boot fallback that does not persist (`runtime/appearance.py`); `preview` is a Python callable on the frame path; `thumbnail` is My Art's card, the backdrop's own decode scaled (§6) |
-| `wallpaper` | `load_copy`, `save_copy` | C | the backdrop's backing file, with the user-files layer whose store it is; a write moves the copy's generation, which the backdrop's decode is keyed on |
+| `wallpaper` | `current(buf)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)`, `thumbnail(w, h)` | shell | `current` is the look's live `wallpaper_id`, the active theme's (`runtime/appearance.py`, docs/theming_2026-09.md D6), and `select` is a change to the theme; `preview` is a Python callable on the frame path; `thumbnail` is My Art's card, Paint's decode of the copy scaled (§6) |
+| `wallpaper` | `load_copy`, `save_copy` | C | Paint's picture as WALL leaves it, which a My Art pick copies into the theme, with the user-files layer whose store it is; a write moves the copy's generation, which the thumbnail's decode is keyed on |
 | `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open picture, its settings rows `paint_doc_kind` and `paint_doc` (JSON strings, no kind row the drawings kind); `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the picture through `files` |
 | `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD (the Python binding's False) and keeps the old text, and the code editor keeps that copy as its own until another lands. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
 | `install` | `hold()`, `release()`, `fit(...)`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick(name, size, host)`, `root()`, `writable()`, `rescan()`, `free()`, `find(folder)` | shell | the lease's radio bring-up and the engine objects are the console's; the role is never granted, so no compiled app imports a row and none is C (§11, step 6) |
@@ -379,14 +379,16 @@ launcher, Settings and the WMs, and their state is caches those draw.
 **`runtime/wallpaper.py`** runs a wallpaper cart (every seed wallpaper is a
 Python cart) compiled into its own namespace through `make_api` and drawn
 behind the launcher and the desk. That is a Python run beside Python chrome and
-stays. Its backing copy and preview sidecar become the C `wallpaper` rows; the
-choice is a settings row already; the crash guard arms through the kernel's
-record already. Everything else in the role is shell-served.
+stays, and so does its drawing of the theme's picture. Its backing copy and
+preview sidecar become the C `wallpaper` rows; the choice is the theme's
+(docs/theming_2026-09.md D6), a key of its package; the crash guard arms
+through the kernel's record already. Everything else in the role is
+shell-served.
 
 **`runtime/appearance.py`** (the look) stays the coordinator: `set_theme`
 writes the live token table and then rebuilds `ws.theme_colors` and the caches
-keyed on it, and installs the theme's shape in the toolkit;
-`select_wallpaper` drives the Python component; the scales go into the surface
+keyed on it, and installs the theme's shape in the toolkit; it shows the
+theme's wallpaper through the Python component; the scales go into the surface
 rows through the relayout. The theme catalogue (the seed packages native/moy_ui's
 loader flattens, read through `runtime/chrome.py`'s `theme_colors`) is what the
 look reads; only the live table crosses.
@@ -394,16 +396,14 @@ look reads; only the live table crosses.
 **`ArtworkService`** (`runtime/artwork.py`) is Paint's document model and
 stops being a role: Paint builds it over its own grant
 (`PaintAppLayer.service`), and the console's three reaches into it (the image
-door, `sync_wallpaper`, the Paint cart's identity) and the backdrop's My Art
-go through Paint's registered app (`ws.artwork`). Storybook reads Paint's
+door, `sync_wallpaper`, the Paint cart's identity) go through Paint's
+registered app (`ws.artwork`). Storybook reads Paint's
 picture through `artwork.current()` and `files`; Files' rename repoint is
 `artwork.follow`. The copy verbs (WALL, GAME, "used in" and its UPDATE) are
 `runtime/picture_copies.py`'s, over each consumer's own roles -- `files`,
 `wallpaper.save_copy` and `select`, `carts.save_image`, `nav.is_system_app` --
 so Files holds `carts` and `wallpaper`. Appearance's My Art card is
-`wallpaper.thumbnail`: the backdrop already holds the copy decoded, and a
-second decode in Appearance would hold another screen of indices on the
-T-Deck.
+`wallpaper.thumbnail`, Paint's decode of the copy, scaled.
 
 ## 7. The crossing table
 

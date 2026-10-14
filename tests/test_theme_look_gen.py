@@ -151,6 +151,48 @@ def test_the_toolkit_ring_re_resolves_a_dict_it_holds(tmp_path):
 
 
 @pytest.mark.parametrize("desk", [False, True], ids=["console", "desk"])
+def test_a_change_through_the_verb_draws_what_a_boot_of_custom_draws(tmp_path, desk):
+    """Phase 6 step 5: `Appearance.change` is the same in-place install, from
+    bytes at the next frame -- the caches move with `look_gen`, idle paints
+    nothing after it, and a boot of the `custom` it wrote draws the same. The
+    desk holds Settings alone: a Files window would list the package the
+    change wrote, which is the store's news, not the look's."""
+    def boot():
+        ws = (build_desktop_ws if desk else build_ws)(tmp_path)
+        _quiet(ws)
+        if desk:
+            ws.open_desk()
+            ws.open_settings()
+        return ws
+
+    ws = boot()
+    before = _settle(ws)
+    keys = _keys(ws, desk)
+    gen = ws.look.look_gen
+    accent = next(a for _n, a, _d in moy_ui.theme_accents()
+                  if a != ws.theme_colors["accent"])
+    assert ws.look.change("accent", accent) == 0
+    drawn = ws._frames_drawn
+    after = _settle(ws, force=False)      # the change's own repaint
+    assert ws.look.theme_name == "custom" and ws.look.look_gen > gen
+    assert ws._frames_drawn > drawn and after != before
+    for name, key in _keys(ws, desk).items():
+        assert key != keys[name], name
+    drawn = ws._frames_drawn
+    for _ in range(4):
+        _quiet(ws)
+        ws.frame(1 / 30)
+    assert ws._frames_drawn == drawn
+    ws.look.commit()
+
+    moy_ui.theme_uninstall()
+    chrome.forget_themes()
+    cold = boot()
+    assert cold.look.theme_name == "custom"
+    assert _settle(cold) == after
+
+
+@pytest.mark.parametrize("desk", [False, True], ids=["console", "desk"])
 def test_re_installing_replaces_every_cache_entry(tmp_path, desk):
     """N re-installs under one name: each cache keeps what one look needs."""
     ws = _world(tmp_path, desk)

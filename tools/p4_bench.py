@@ -7,6 +7,7 @@
 #   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
 #   bench_home       --home: the home's carousel scenarios (step 7b)
 #   idle_edit        --edit: an in-place theme re-install on an idle screen
+#   edit_thrash      --edit: a held key on ACCENT through the change verb
 #   store_switch     --store: a switch to a store theme package, and its boot delta
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
@@ -45,6 +46,13 @@ phase 6 step 1; also the default run's, after desk idle): a package over the
 live theme is installed and picked, then re-installed under its own name with
 one role changed on the idle screen -- one repaint, then idle zero. An image
 without `install_theme` re-applies its live theme under the same name instead.
+Then `edit thrash` (phase 6 step 5): a held key on ACCENT through the verb,
+`ws.look.change("accent", ...)` once a frame for three seconds from the live
+theme, so the first change makes `custom`: the verb's ms and the painted
+frames per change, then the frames after release; it counts the store's
+writes (the package and system.json) and asserts none while held and exactly
+one package write once it settles. The live theme is put back after, and
+`custom` stays on the store.
 
 `--store` benches a switch to a theme package from the store (phase 6 step
 2): tests/fixtures/themes/dusk.moy is pushed onto the board's store
@@ -244,6 +252,70 @@ ws._edit = _edit
 """
 
 
+THRASH_SETUP = """
+import time, moy_ui
+ws._th_acc = [a for _n, a, _d in moy_ui.theme_accents()]
+ws._th_i = 0
+ws._th_on = False
+ws._th_ms = []
+ws._th_writes = [0, 0]
+ws._th_was = ws.look.theme_name
+_cs = ws.carts_store
+if not hasattr(_cs, '_th_wrapped'):
+    def _count(f, i):
+        def g(*a):
+            ws._th_writes[i] += 1
+            return f(*a)
+        return g
+    _cs.save_package = _count(_cs.save_package, 0)
+    _cs.save_system = _count(_cs.save_system, 1)
+    _cs._th_wrapped = True
+if not hasattr(ws, '_th_frame'):
+    _of = ws.frame
+    def _thr(dt, _of=_of):
+        if ws._th_on:
+            ws._th_i += 1
+            t = time.ticks_us()
+            ws.look.change('accent', ws._th_acc[ws._th_i % len(ws._th_acc)])
+            ws._th_ms.append(time.ticks_diff(time.ticks_us(), t) / 1000)
+        return _of(dt)
+    ws.frame = _thr
+    ws._th_frame = True
+"""
+
+
+def edit_thrash(b, bench):
+    """`edit thrash`: a held key on ACCENT through the verb, from the live
+    theme (so the first change makes `custom`), the painted frames per
+    change and after release; zero store writes while held, one package
+    write once it settles. Puts the live theme back."""
+    pyexec(b, THRASH_SETUP)
+    if not pyval(b, "hasattr(ws.look, 'change')"):
+        print("  edit thrash: this image has no change verb")
+        return
+    b.drain(1.0)
+    pyexec(b, "ws._th_writes[0] = ws._th_writes[1] = 0")
+    bench.start()
+    pyexec(b, "ws._th_on = True")
+    b.drain(3.0)
+    pyexec(b, "ws._th_on = False")
+    held = pyval(b, "list(ws._th_writes)") or [None, None]
+    n = pyval(b, "ws._th_i")
+    ms = sorted(pyval(b, "ws._th_ms") or [])
+    verb = ms[len(ms) // 2] if ms else None
+    bench.stop("edit thrash (held, %s changes)" % n,
+               "change() median %s ms" % (None if verb is None else round(verb, 2)))
+    bench.start()
+    b.drain(4.0)
+    bench.stop("edit thrash (after release)")
+    after = pyval(b, "list(ws._th_writes)") or [None, None]
+    ok = held == [0, 0] and after[0] == 1
+    print("  edit thrash: writes held=%r settled=%r (package, system.json) -> %s"
+          % (held, after, "PASS" if ok else "FAIL"))
+    pyexec(b, "ws.look.set_theme(ws._th_was)")
+    b.drain(2.0)
+
+
 def idle_edit(b, bench):
     """The in-place edit on the screen the board stands on: one repaint, then
     idle zero. Puts the live theme back after."""
@@ -347,6 +419,7 @@ def bench_edit(b, out_path):
     home(b)
     bench.start(); b.drain(3.0); bench.stop("idle before the edit")
     idle_edit(b, bench)
+    edit_thrash(b, bench)
     table = bench.table()
     print("\n" + table)
     if out_path:
@@ -363,6 +436,7 @@ def bench_all(b, out_path):
     home(b)
     bench.start(); b.drain(3.0); bench.stop("desk idle")
     idle_edit(b, bench)
+    edit_thrash(b, bench)
     store_switch(b, bench)
 
     # -- the desk's PROJECTS: the home in a window, on Make -----------------
@@ -924,8 +998,8 @@ def main():
                     help="the home's scenarios: idle, drag, fling, flicks, "
                          "the key glide, tabs, a live wallpaper")
     ap.add_argument("--edit", action="store_true",
-                    help="the in-place theme edit alone: one repaint, then "
-                         "idle zero")
+                    help="the in-place theme edit (one repaint, then idle "
+                         "zero) and the edit thrash, alone")
     ap.add_argument("--store", action="store_true",
                     help="a switch to a store theme package, and its boot "
                          "delta, alone (pushes tests/fixtures/themes/dusk.moy)")

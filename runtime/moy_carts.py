@@ -1631,8 +1631,8 @@ def forget_wifi(ssid, root=CARTS_DIR):
 
 # --- system settings (desktop shell, #28) -----------------------------------
 #
-# A single system-level config (wallpaper choice, later volume/brightness/name/
-# theme) that is NOT tied to any one cart -- today config is per-cart only
+# A single system-level config (the theme, the font scale, the toggles, later
+# volume/brightness/name) that is NOT tied to any one cart -- today config is per-cart only
 # (cart["cfg"] / save_config). It lives BESIDE the carts dir (a sibling of
 # `root`, like wifi.json and the shared sheet) so it is system state. Written
 # atomically (same crash-safe path as the cart saves) so an interrupted write can
@@ -1969,6 +1969,20 @@ def _copy_bytes(src, dst, chunk=4096):
 
 def delete(cart):
     _rmtree(cart["path"])
+
+
+def save_package(path, files, remove=(), fresh=False):
+    """Publish a theme package's folder (`custom`, docs/theming_2026-09.md
+    §9 phase 6 step 5): each of `files` (name -> bytes) written whole, each
+    of `remove` deleted. `fresh` empties the folder first, so a package
+    replaced by another keeps nothing of the one before."""
+    if fresh:
+        _rmtree(path)
+    _mkdir(path)
+    for name in files:
+        _write_bytes(path + "/" + name, files[name])
+    for name in remove:
+        _remove(path + "/" + name)
 
 
 # --- a cart as it travels (#127, #122): the archive and adopt ---------------

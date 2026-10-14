@@ -238,6 +238,30 @@ def theme_uninstall():
     _C.theme_uninstall()
 
 
+def theme_resolve(src):
+    """The loader's answer for theme.json bytes `src`, installing nothing:
+    (rc, notes, name, dark, light, fonts, layout)."""
+    return _C.theme_resolve(src)
+
+
+def theme_custom(source, accent, tint):
+    """(rc, bytes): `custom`'s theme.json derived from `source` (a seed's
+    name or a stored package's bytes), `accent` (an accent's A, None for
+    the source's own) and `tint` (a tint's name, None for none);
+    docs/theming_2026-09.md §4.10."""
+    return _C.theme_custom(source, accent, tint)
+
+
+def theme_accents():
+    """((name, A, deep), ...): the sixteen accents, style.json's."""
+    return _C.theme_accents()
+
+
+def theme_tints():
+    """((name, ramp), ...): the eight tints, style.json's."""
+    return _C.theme_tints()
+
+
 def font_load(src):
     """(rc, font): load a font file's bytes into a row of its own
     (native/moy_gfx/moy_text.h); font is None when refused."""

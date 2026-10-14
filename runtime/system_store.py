@@ -74,8 +74,8 @@ def safe_mode():
 class StoreHandle:
     """The (store, root, can_manage, with_sd) guard 4-tuple, as an object.
 
-    Four bodies re-derived it before this landing (`_persist_system`,
-    `_persist_wallpaper`, `_save_achievements`, `rescan_carts`) -- which is why
+    Four bodies re-derived it before this landing (`_persist_system`, the
+    wallpaper's, `_save_achievements`, `rescan_carts`) -- which is why
     this is a standalone object and not private to `SystemStore`: CartManager
     and the storage roles' servers (runtime/shell_servers.py) take one too.
 
@@ -145,8 +145,8 @@ class SystemStore:
 
     Holds the `Settings` `ws.system` aliases (see the module docstring) plus the
     achievements list's two store halves. What it deliberately does NOT own is
-    what the settings MEAN: `load_system`'s apply cascade -- eight `set_*` verbs
-    and `select_wallpaper` -- stays kernel policy, and so does the unlock beep
+    what the settings MEAN: `load_system`'s apply cascade -- the `set_*` verbs,
+    the theme bringing its wallpaper -- stays kernel policy, and so does the unlock beep
     and the icon-sheet bake."""
 
     def __init__(self, ws, handle):

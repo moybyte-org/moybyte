@@ -9,6 +9,8 @@ variant (a clock-pinning quiesce, a frame-first driver) keeps its local
 wrapper, ideally calling these.
 """
 
+from pathlib import Path
+
 from runtime import host_app
 
 
@@ -166,3 +168,29 @@ def select_first_game(ws):
             ws.launcher.sel = i
             return it
     raise AssertionError("no game cart seeded")
+
+
+def wallpaper_on_store(carts, wp_id):
+    """The store a kid's wallpaper pick leaves (docs/theming_2026-09.md D6):
+    `custom`, the default seed's look naming `wp_id` (None: NONE), its fonts
+    beside it, and the `theme` row on it -- what the next boot shows."""
+    import json
+    import moy_ui
+    from runtime import moy_carts
+    from runtime.theme_custom import font_files, manifest
+    rc, src = moy_ui.theme_custom("night", None, None)
+    assert rc == 0
+    pkg = json.loads(src)
+    pkg["wallpapers"] = {"desk": wp_id} if wp_id is not None else {}
+    d = Path(carts) / "custom.moy"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "theme.json").write_text(json.dumps(pkg))
+    (d / "manifest.json").write_bytes(manifest({"from": "night"}))
+    for f in font_files(pkg.get("fonts")):
+        data = moy_ui.font_file(f)
+        if data is not None:
+            (d / f).write_bytes(data)
+    settings = moy_carts.load_system(carts) or {}
+    settings["theme"] = "custom"
+    moy_carts.save_system(settings, carts)
+    return d

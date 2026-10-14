@@ -318,34 +318,32 @@ class NotifyServer:
 # -- the desktop backdrop ----------------------------------------------------------
 
 class WallpaperServer(_Store):
-    """The desktop backdrop (#28): the look's choice, the wallpaper carts and
-    the built-in fills. Its backing copy (`artwork.moyimg`, which Paint's and
-    Files' WALL write) is the role's C rows; the copy's decoded picture is
-    the backdrop's own (Paint's model draws My Art from it), keyed on the copy's
-    generation (`app.copy_gen`), and the thumbnail is that same decode's."""
+    """The desktop backdrop (#28): the theme's wallpaper (D6) and the
+    wallpaper carts. Its copy (`artwork.moyimg`, which Paint's and Files'
+    WALL write, and which a My Art pick copies into the theme) is the role's
+    C rows; the thumbnail is Paint's decode of it (`wallpaper.thumbnail`),
+    keyed on the copy's generation (`app.copy_gen`)."""
 
     def current(self, g):
-        """The active wallpaper id (a cart slug or `fill:<color>`): the
-        look's, which a boot fallback may hold apart from the settings row."""
+        """The wallpaper in force: a cart's id, My Art's for the theme's
+        picture, or None for the theme's `desktop` fill."""
         return self._ws.look.wallpaper_id
 
     def carts(self, g):
         """The wallpaper-type carts available as backdrops."""
         return self._ws.look.wallpaper_carts()
 
-    def fills(self, g):
-        """The built-in solid fills, always present."""
-        return self._ws.look.FILL_WALLPAPERS
-
     def id_for(self, g, cart):
         return self._ws.look.wp_id_for(cart)
 
     def title(self, g, wp_id):
-        """The title of wallpaper `wp_id`'s cart, or None (a fill, or none)."""
+        """The title of wallpaper `wp_id`'s cart, or None (NONE, or no cart)."""
         cart = self._ws.look.wp_cart_by_id(wp_id)
         return cart.get("title") if cart else None
 
-    def select(self, g, wp_id):
+    def select(self, g, wp_id=None):
+        """Pick wallpaper `wp_id` (None: NONE): a change to the theme, landing
+        in `custom` (`Appearance.change`)."""
         self._ws.look.select_wallpaper(wp_id)
 
     def preview(self, g, cv, rect, dt):
@@ -498,8 +496,8 @@ DOOR_ARGS = {
     "nav.edit_file": "cso", "nav.play": "c", "nav.run_script": "ss",
     "nav.text_mode": "i",
     "notify.achieve": "so",
-    "wallpaper.current": "", "wallpaper.carts": "", "wallpaper.fills": "",
-    "wallpaper.id_for": "c", "wallpaper.title": "s", "wallpaper.select": "s",
+    "wallpaper.current": "", "wallpaper.carts": "",
+    "wallpaper.id_for": "c", "wallpaper.title": "s", "wallpaper.select": "o",
 }
 
 

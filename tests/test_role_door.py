@@ -217,8 +217,8 @@ def test_the_shell_rows_reach_the_consoles_servers(tmp_path):
         t0 = moy_loop.upcalls()[1][5]
         r, cur = app.role(g, row["wallpaper.current"], b"", 64)
         assert r == len(ws.look.wallpaper_id) and cur == ws.look.wallpaper_id.encode()
-        r, fills = app.role(g, row["wallpaper.fills"], b"", 256)
-        assert fills.split(b"\0")[:-1] == [f.encode() for f in ws.look.FILL_WALLPAPERS]
+        r, carts = app.role(g, row["wallpaper.carts"], b"", 256)
+        assert r >= 0
         r, projects = app.role(g, row["nav.projects"], b"", 4096)
         assert r >= 0
         folders = [p for p in projects.split(b"\0") if p]

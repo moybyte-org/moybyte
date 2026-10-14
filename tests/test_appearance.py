@@ -11,10 +11,15 @@ they cannot see is everything below, and it is most of what this object does:
     something else happened to dirty it, which no single-frame hash would
     catch. tests/test_theme_look_gen.py walks every cache it reaches.
 
-  * **`select_wallpaper` coordinates four owners.** Roster (rehydrate/re-slim),
-    backdrop component (clear/compile), settings funnel (persist) and
-    achievements (note) in nine lines -- including the #66 diet's fat-cart
-    exception and the rule that only a PERSISTED pick earns "Home Decorator".
+  * **the wallpaper is the theme's (D6).** Showing one coordinates the roster
+    (rehydrate/re-slim, with the #66 diet's fat-cart exception) and the
+    backdrop component (clear/compile); a pick is a change to the theme,
+    landing in `custom`, and only a pick earns "Home Decorator".
+
+  * **`custom` (phase 6 step 5).** The first change on a seed or a package
+    makes it, a change on it re-derives from its source, a change from another
+    theme replaces it, it carries its fonts and picture, and it is written
+    once the changes settle or at an exit -- never per press, never idle.
 
   * **`set_font_scale` must land on the ROOT canvas**, not on whatever window
     buffer is installed while Settings draws (2026-07-26: "changing it while
@@ -39,6 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import appearance, moy_carts, ui  # noqa: E402
 from runtime.chrome import THEME_NAMES, theme_colors  # noqa: E402
+from runtime.theme_custom import CUSTOM  # noqa: E402
 from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
 
 
@@ -164,7 +170,7 @@ def test_persist_false_writes_nothing(tmp_path):
         ws.look.set_theme("berry", persist=False)
         ws.look.set_theme_variant("light", persist=False)
         ws.look.set_font_scale(2, persist=False)
-        ws.look.select_wallpaper("fill:black", persist=False)
+        ws.look.select_wallpaper(None, persist=False)
         assert _stored(ws) == {}
     finally:
         ui.use_shape(None)          # process-wide state: never leak it
@@ -227,17 +233,26 @@ def test_the_font_scale_lands_on_the_root_canvas_not_a_window_buffer(tmp_path):
     assert ws.look.effective_font_scale() == 3
 
 
-# -- wallpaper ----------------------------------------------------------------
+# -- wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) ---------------
 
-def test_wallpaper_options_are_the_carts_then_the_built_in_fills(tmp_path):
+def test_wallpaper_options_are_the_wallpaper_carts(tmp_path):
     ws = build_ws(tmp_path)
     opts = ws.look.wallpaper_options()
-    assert opts[-len(ws.look.FILL_WALLPAPERS):] == list(ws.look.FILL_WALLPAPERS)
-    carts = {ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()}
-    assert carts and carts == set(opts[:-len(ws.look.FILL_WALLPAPERS)])
-    for wp_id in carts:
+    assert opts == [ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]
+    assert not hasattr(ws.look, "FILL_WALLPAPERS")
+    assert ws.look.PICTURE in opts               # My Art stands for the picture
+    for wp_id in opts:
         assert ws.look.wp_cart_by_id(wp_id) is not None
     assert ws.look.wp_cart_by_id("no-such-wallpaper") is None
+
+
+def test_a_seed_brings_the_default_wallpaper(tmp_path):
+    """No seed names a wallpaper, so the desk shows the first wallpaper cart,
+    as an absent setting did -- which is why no golden moves."""
+    ws = build_ws(tmp_path)
+    assert ws.look.theme_name in THEME_NAMES
+    assert ws.look.wallpaper_id == ws.look.wallpaper_options()[0]
+    assert ws.look.wallpaper_id != ws.look.PICTURE
 
 
 def test_select_wallpaper_falls_back_on_an_unknown_id(tmp_path):
@@ -245,7 +260,7 @@ def test_select_wallpaper_falls_back_on_an_unknown_id(tmp_path):
     ws.look.select_wallpaper("no-such-wallpaper", persist=False)
     assert ws.look.wallpaper_id == ws.look.wallpaper_options()[0]
     ws.look.select_wallpaper(None, persist=False)
-    assert ws.look.wallpaper_id == ws.look.wallpaper_options()[0]
+    assert ws.look.wallpaper_id is None          # NONE: the theme's fill
 
 
 def test_select_wallpaper_rehydrates_for_the_compile_then_re_slims(tmp_path):
@@ -253,7 +268,8 @@ def test_select_wallpaper_rehydrates_for_the_compile_then_re_slims(tmp_path):
     into the wallpaper's own namespace, so the cart is fat for exactly that
     call and slim again afterwards."""
     ws = build_ws(tmp_path)
-    cart = next(c for c in ws.look.wallpaper_carts() if c.get("path"))
+    cart = next(c for c in ws.look.wallpaper_carts()
+                if c.get("path") and ws.look.wp_id_for(c) != ws.look.PICTURE)
     ws.carts.reslim(cart)
     assert cart.get("lazy") is True and "src" not in cart
     seen = []
@@ -268,42 +284,333 @@ def test_select_wallpaper_leaves_the_open_projects_cart_fat(tmp_path):
     """The exception in the diet: re-slimming the cart the Editor has open would
     empty the workspace under it."""
     ws = build_ws(tmp_path)
-    cart = next(c for c in ws.look.wallpaper_carts() if c.get("path"))
+    cart = next(c for c in ws.look.wallpaper_carts()
+                if c.get("path") and ws.look.wp_id_for(c) != ws.look.PICTURE)
     ws._open_workspace(cart)
     assert ws._fat_cart is cart
     ws.look.select_wallpaper(ws.look.wp_id_for(cart), persist=False)
     assert cart.get("lazy") is not True and "src" in cart
 
 
-def test_a_fill_choice_clears_the_backdrop_and_compiles_nothing(tmp_path):
+def test_none_clears_the_backdrop_and_compiles_nothing(tmp_path):
     ws = build_ws(tmp_path)
     seen = []
     ws.wallpaper.compile = lambda c: seen.append(c)
-    ws.look.select_wallpaper("fill:indigo", persist=False)
+    ws.look.select_wallpaper(None, persist=False)
     assert seen == []
-    assert ws.look.wallpaper_id == "fill:indigo"
+    assert ws.look.wallpaper_id is None
 
 
-def test_only_a_persisted_pick_earns_home_decorator(tmp_path):
-    """`load_system` restores the saved wallpaper with persist=False on every
-    boot; noting there would hand out the achievement for switching the console
-    on."""
+def test_only_a_pick_earns_home_decorator_and_it_lands_in_the_theme(tmp_path):
+    """The boot shows the theme's wallpaper with nothing noted; a pick is a
+    change to the theme, noted, and written into `custom` -- never into a
+    setting of its own."""
     ws = build_ws(tmp_path)
     seen = _notes(ws)
-    ws.look.select_wallpaper("fill:black", persist=False)
+    ws.look.select_wallpaper(None, persist=False)
     assert seen == []
-    ws.look.select_wallpaper("fill:indigo", persist=True)
+    assert ws.look.select_wallpaper(None) == 0
+    _settle(ws)
     assert seen == ["wallpaper_change"]
-    assert _stored(ws)["wallpaper"] == "fill:indigo"
+    assert ws.look.theme_name == CUSTOM and ws.look.wallpaper_id is None
+    assert "wallpaper" not in _stored(ws)
+    assert _package(ws)["wallpapers"] == {}
 
 
-def test_cycle_wallpaper_steps_the_options_and_persists(tmp_path):
+def test_cycle_wallpaper_steps_the_carts_and_none(tmp_path):
     ws = build_ws(tmp_path)
     opts = ws.look.wallpaper_options()
     ws.look.select_wallpaper(opts[-1], persist=False)
     ws.look.cycle_wallpaper(1)
+    _settle(ws)
+    assert ws.look.wallpaper_id is None
+    ws.look.cycle_wallpaper(1)
+    _settle(ws)
     assert ws.look.wallpaper_id == opts[0]
-    assert _stored(ws)["wallpaper"] == opts[0]
+    assert _package(ws)["wallpapers"] == {"desk": opts[0]}
+
+
+def test_a_stored_wallpaper_row_reads_as_nothing(tmp_path):
+    """The `wallpaper` row is gone with its reader (CLAUDE.md, no store
+    migrations): a store that still carries one boots the theme's."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_system({"wallpaper": "moybyte.sakura"}, ws.carts_root)
+    ws2 = build_ws(tmp_path)
+    assert ws2.look.wallpaper_id == ws2.look.wallpaper_options()[0]
+    assert ws2.look.wallpaper_id != "moybyte.sakura"
+    src = inspect.getsource(appearance) + inspect.getsource(
+        type(ws2).load_system)
+    assert '"wallpaper")' not in src and "'wallpaper')" not in src
+
+
+def test_picking_a_theme_brings_its_wallpaper(tmp_path):
+    """The wallpaper travels with the theme: a package naming a cart shows it,
+    one naming a cart that is not installed falls back to its picture, then to
+    the default; switching back to a seed brings the seed's."""
+    ws = build_ws(tmp_path)
+    opts = ws.look.wallpaper_options()
+    _store_package(ws, "sunset", {"wallpapers": {"desk": opts[-1]}})
+    _store_package(ws, "gone", {"wallpapers": {"desk": "nobody.no_such"}})
+    ws.look.set_theme("sunset")
+    assert ws.look.wallpaper_id == opts[-1]
+    ws.look.set_theme("gone")
+    assert ws.look.wallpaper_id == opts[0]
+    ws.look.set_theme("night")
+    assert ws.look.wallpaper_id == opts[0]
+
+
+def test_a_picture_is_copied_into_the_package_and_drawn(tmp_path):
+    """My Art is Paint's picture: picking it copies the wallpaper copy into
+    `custom` as desk.moyimg, the theme names it in `images`, and the desk
+    draws it from the package."""
+    ws = build_ws(tmp_path)
+    blob = _blob(8, 6)
+    moy_carts.save_copy(blob, ws.carts_root)
+    assert ws.look.select_wallpaper(ws.look.PICTURE) == 0
+    _settle(ws)
+    pkg = Path(ws.carts_root) / "custom.moy"
+    assert (pkg / "desk.moyimg").read_bytes() == blob
+    assert _package(ws)["images"] == {"desk": "desk.moyimg"}
+    assert "wallpapers" not in _package(ws)
+    assert ws.look.wallpaper_id == ws.look.PICTURE
+    assert ws.look.picture() == blob
+    assert ws.wallpaper.draw_picture(ws.sys_canvas) is True
+    # A cart picked after drops the picture from the package.
+    ws.look.select_wallpaper(ws.look.wallpaper_options()[0])
+    _settle(ws)
+    assert not (pkg / "desk.moyimg").exists()
+    assert "images" not in _package(ws)
+
+
+def test_no_picture_yet_refuses_the_pick(tmp_path):
+    ws = build_ws(tmp_path)
+    assert ws.look.select_wallpaper(ws.look.PICTURE) == ws.look.NO_FILE
+    assert ws.look.theme_name == "night"
+
+
+# -- custom: a change to the theme (phase 6 step 5) -----------------------------
+
+def _settle(ws, dt=0.0):
+    """One frame's apply, then the debounce run out: the change shown and
+    written, as a kid's would be once their hands leave the keys."""
+    ws.look.tick(dt)
+    ws.look.tick(ws.look.AUTOSAVE_S)
+
+
+def _package(ws, name=CUSTOM):
+    import json
+    return json.loads((Path(ws.carts_root) / (name + ".moy") / "theme.json").read_bytes())
+
+
+def _look(ws):
+    import json
+    return json.loads((Path(ws.carts_root) / "custom.moy" / "manifest.json")
+                      .read_bytes())["moybyte"]["look"]
+
+
+def _store_package(ws, name, keys):
+    import json
+    d = Path(ws.carts_root) / (name + ".moy")
+    d.mkdir()
+    (d / "manifest.json").write_text(json.dumps(
+        {"format": "moy-1", "title": name.title(), "runtime": "theme",
+         "main": "theme.json", "moybyte": {"type": "theme"}}))
+    pkg = {"format": 1, "name": name, "colors": {"dark": {"panel": 2}}}
+    pkg.update(keys)
+    (d / "theme.json").write_text(json.dumps(pkg))
+    ws.carts.rescan()
+    return d
+
+
+def _blob(w, h):
+    b = moy_carts.encode_image(w, h, bytes(i % 60 for i in range(w * h)))
+    return b.encode() if isinstance(b, str) else b
+
+
+def _accent(i):
+    return ui.theme_accents()[i][1]
+
+
+def _writes(ws, monkeypatch):
+    """Count the store's writes: custom's package and system.json."""
+    n = {"package": 0, "system": 0}
+    real_pkg, real_sys = moy_carts.save_package, moy_carts.save_system
+
+    def pkg(*a):
+        n["package"] += 1
+        return real_pkg(*a)
+
+    def sys_(*a):
+        n["system"] += 1
+        return real_sys(*a)
+    monkeypatch.setattr(moy_carts, "save_package", pkg)
+    monkeypatch.setattr(moy_carts, "save_system", sys_)
+    return n
+
+
+def test_the_first_change_on_a_seed_makes_custom_and_switches_to_it(tmp_path):
+    ws = build_ws(tmp_path)
+    night = theme_colors("night")
+    assert ws.look.change("accent", _accent(3)) == 0
+    assert ws.look.theme_name == "night"          # shown at the next frame
+    ws.look.tick(0.0)
+    assert ws.look.theme_name == CUSTOM == ui.theme_installed()
+    assert ws.theme_colors["accent"] == _accent(3)
+    assert theme_colors("night") == night, "the seed moved"
+    assert not (Path(ws.carts_root) / "custom.moy").exists(), "written per change"
+    ws.look.tick(ws.look.AUTOSAVE_S)
+    assert _look(ws) == {"from": "night", "accent": _accent(3)}
+    assert _package(ws)["name"] == CUSTOM and "inherits" not in _package(ws)
+    assert CUSTOM in ws.look.theme_names()
+    assert _stored(ws)["theme"] == CUSTOM
+    ws2 = build_ws(tmp_path)
+    assert ws2.look.theme_name == CUSTOM
+    assert ws2.theme_colors["accent"] == _accent(3)
+
+
+def test_theme_mode_and_chrome_size_are_no_change(tmp_path):
+    ws = build_desktop_ws(tmp_path)
+    ws.look.set_theme("forest")
+    ws.look.set_theme_variant("light")
+    scales = ws.chrome_scales
+    if len(scales) > 1:
+        ws.look.set_chrome_scale(scales[-1])
+    _settle(ws)
+    assert ws.look.theme_name == "forest"
+    assert not (Path(ws.carts_root) / "custom.moy").exists()
+    assert ws.look._cust is None
+
+
+def test_a_change_on_custom_edits_it_in_place_from_its_source(tmp_path):
+    """Each change re-derives from `from`'s rows, never from the last result:
+    a tint quantises, and quantising a quantised row drifts."""
+    ws = build_ws(tmp_path)
+    ws.look.change("tint", "plum")
+    _settle(ws)
+    once = _package(ws)
+    ws.look.change("tint", "sand")
+    ws.look.change("tint", "plum")
+    _settle(ws)
+    assert _package(ws) == once
+    assert _look(ws) == {"from": "night", "tint": "plum"}
+    rc, want = ui.theme_custom("night", None, "plum")
+    assert rc == 0 and _package(ws) == __import__("json").loads(want)
+
+
+def test_a_change_from_another_theme_replaces_custom(tmp_path):
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(1))
+    _settle(ws)
+    pkg = Path(ws.carts_root) / "custom.moy"
+    assert (pkg / "tiny5.fnt").exists()            # night names its fonts
+    ws.look.set_theme("forest")
+    ws.look.change("tint", "grey")
+    _settle(ws)
+    assert _look(ws) == {"from": "forest", "tint": "grey"}
+    assert ws.theme_colors["accent"] == theme_colors("forest")["accent"]
+    # forest takes its fonts through the default seed, as custom does now:
+    # nothing of the custom before it is left in the folder.
+    assert "fonts" not in _package(ws) and not (pkg / "tiny5.fnt").exists()
+    assert ui.theme_fonts(CUSTOM) == ui.theme_fonts("forest")
+
+
+def test_custom_carries_the_font_files_its_fonts_name(tmp_path):
+    """A theme's fonts come only from its own folder (§4.7): every file
+    custom's `fonts` names is copied in with its licence -- a seed's from the
+    image, a package's from its folder -- and a file it stops naming goes."""
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(2))
+    _settle(ws)
+    pkg = Path(ws.carts_root) / "custom.moy"
+    names = {f for _r, f in ui.theme_fonts("night")}
+    assert names and _package(ws)["fonts"]
+    for f in names:
+        assert (pkg / f).read_bytes() == ui.font_file(f)
+        lic = f[:-4] + ".txt"
+        assert (pkg / lic).read_bytes() == ui.font_file(lic)
+    d = _store_package(ws, "pixel", {"fonts": {"ui": "pixel.fnt"}})
+    (d / "pixel.fnt").write_bytes(ui.font_file("tiny5.fnt"))
+    ws.look.set_theme("pixel")
+    ws.look.change("tint", "sand")
+    _settle(ws)
+    assert (pkg / "pixel.fnt").exists() and not (pkg / "tiny5.fnt").exists()
+    ws.look.change("font", {"ui": "tiny5.fnt", "title": "tiny5.fnt"})
+    _settle(ws)
+    assert not (pkg / "pixel.fnt").exists()
+    assert (pkg / "tiny5.fnt").exists() and (pkg / "tiny5.txt").exists()
+    assert _package(ws)["fonts"] == {"ui": "tiny5.fnt", "title": "tiny5.fnt"}
+    assert ws.look.change("font", {"ui": "nowhere.fnt"}) == ws.look.NO_FILE
+
+
+def test_a_change_from_a_store_package_copies_its_files(tmp_path):
+    from runtime.theme_custom import PICTURE_FILE
+    ws = build_ws(tmp_path)
+    d = _store_package(ws, "sunset", {"fonts": {"ui": "tiny5.fnt"},
+                                      "images": {"desk": PICTURE_FILE}})
+    blob = _blob(4, 4)
+    (d / "tiny5.fnt").write_bytes(ui.font_file("tiny5.fnt"))
+    (d / PICTURE_FILE).write_bytes(blob)
+    ws.look.set_theme("sunset")
+    assert ws.look.wallpaper_id == ws.look.PICTURE
+    ws.look.change("accent", _accent(5))
+    _settle(ws)
+    pkg = Path(ws.carts_root) / "custom.moy"
+    assert (pkg / "tiny5.fnt").exists() and (pkg / PICTURE_FILE).read_bytes() == blob
+    assert _look(ws) == {"from": "sunset", "accent": _accent(5)}
+    assert (d / "theme.json").exists(), "the source is never written"
+    assert ws.look.wallpaper_id == ws.look.PICTURE
+
+
+def test_ten_changes_land_where_one_would(tmp_path, monkeypatch):
+    """A held key: a change per press, one install per frame, no store write
+    while it is held, and exactly one once it settles."""
+    ws = build_ws(tmp_path)
+    n = _writes(ws, monkeypatch)
+    installs = []
+    real = ui.theme_install
+    monkeypatch.setattr(ui, "theme_install", lambda b: installs.append(1) or real(b))
+    for i in range(10):
+        ws.look.change("accent", _accent(i))
+        ws.look.change("accent", _accent(i + 1))
+        ws.look.tick(1.0 / 30)
+    assert len(installs) == 10, "one install a frame"
+    assert n == {"package": 0, "system": 0}, "a write while held"
+    for _ in range(int(ws.look.AUTOSAVE_S * 30) + 2):
+        ws.look.tick(1.0 / 30)
+    assert n["package"] == 1 and n["system"] == 1
+    assert _look(ws)["accent"] == _accent(10)
+
+
+def test_idle_frames_write_nothing(tmp_path, monkeypatch):
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(4))
+    _settle(ws)
+    for _ in range(100):
+        ws.frame(1.0 / 30)                     # the wallpaper guard heals
+    n = _writes(ws, monkeypatch)
+    for _ in range(200):
+        ws.frame(1.0 / 30)
+    assert n == {"package": 0, "system": 0}
+
+
+def test_an_exit_writes_a_change_still_settling(tmp_path):
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(6))
+    ws.look.tick(0.0)
+    assert not (Path(ws.carts_root) / "custom.moy").exists()
+    ws.go_home()
+    assert _look(ws)["accent"] == _accent(6)
+
+
+def test_a_theme_switch_writes_custom_before_it_leaves(tmp_path):
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(7))
+    ws.look.tick(0.0)
+    ws.look.set_theme("berry")
+    assert _look(ws)["accent"] == _accent(7)
+    ws.look.set_theme(CUSTOM)
+    assert ws.theme_colors["accent"] == _accent(7)
+    assert ws.look.custom_look() == {"from": "night", "accent": _accent(7)}
 
 
 # -- the icon sheet -----------------------------------------------------------
@@ -369,9 +676,9 @@ def test_no_look_member_is_a_property():
 
 def test_the_boot_cascade_calls_the_collaborator_directly(tmp_path):
     """3b: the kernel calls collaborators, it does not keep forwards for its own
-    use. `load_system` names `self.look` five times and `self.set_*` never."""
+    use. `load_system` names `self.look` and `self.set_*` never."""
     src = inspect.getsource(type(build_ws(tmp_path)).load_system)
-    for verb in ("set_font_scale", "select_wallpaper", "set_theme"):
+    for verb in ("set_font_scale", "set_theme"):
         assert ("self.look." + verb) in src, verb
         assert ("self." + verb) not in src.replace("self.look." + verb, "")
 
@@ -383,12 +690,11 @@ def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):
     ws = build_ws(tmp_path)
     ws.look.set_theme("forest", variant="light")
     ws.look.set_font_scale(2)
-    ws.look.select_wallpaper("fill:indigo")
     try:
         ws2 = build_ws(tmp_path)
         assert (ws2.look.theme_name, ws2.look.theme_variant) == ("forest", "light")
         assert ws2.look.font_scale == 2
-        assert ws2.look.wallpaper_id == "fill:indigo"
+        assert ws2.look.wallpaper_id == ws2.look.wallpaper_options()[0]
         assert ws2.theme_colors == theme_colors("forest", "light")
     finally:
         ui.use_shape(None)

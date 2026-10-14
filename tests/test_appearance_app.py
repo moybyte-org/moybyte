@@ -39,30 +39,30 @@ def test_picker_separates_image_and_cart_wallpapers(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_appearance(ws)
     items = app._image_items()
-    # My Art first, then the built-in solid fills (kept selectable here now that
-    # the Settings WALLPAPER stepper is gone -- the app is the ONE surface).
+    # My Art first, then NONE (None: the theme's `desktop` fill).
     assert items[0]["title"] == "My Art"
-    assert items[1:] == list(ws.look.FILL_WALLPAPERS)
+    assert items[1:] == [None]
     cart_titles = [c["title"] for c in app._cart_items()]
     assert "My Art" not in cart_titles
     assert {"Moy Night", "Sakura", "Ocean Desktop"}.issubset(set(cart_titles))
 
 
-def test_solid_fill_selectable_from_images_tab(tmp_path):
+def test_none_selectable_from_images_tab(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
     app = _open_appearance(ws)
     app._set_mode("images")
     items = app._items()
-    fill_i = items.index("fill:black")
-    app._apply(fill_i)
-    assert ws.look.wallpaper_id == "fill:black"
-    assert moy_carts.load_system(carts)["wallpaper"] == "fill:black"
-    assert app.status == "BLACK"
-    # Reopening lands back on the IMAGES tab with the fill selected.
+    none_i = items.index(None)
+    app._apply(none_i)
+    ws.look.tick(0.0)                      # the change shows at the next frame
+    assert ws.look.wallpaper_id is None
+    assert ws.look.theme_name == "custom"  # a pick is a change to the theme
+    assert app.status == "NONE"
+    # Reopening lands back on the IMAGES tab with NONE selected.
     app.open()
     assert app.mode == "images"
-    assert app._items()[app.sel] == "fill:black"
+    assert app._items()[app.sel] is None
 
 
 def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
@@ -73,8 +73,11 @@ def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
     app._set_mode("carts")
     ocean_i = [c["title"] for c in app._cart_items()].index("Ocean Desktop")
     app._apply(ocean_i)
+    ws.look.tick(0.0)
     assert ws.look.wallpaper_id == "moybyte.ocean_desktop"
-    assert moy_carts.load_system(carts)["wallpaper"] == "moybyte.ocean_desktop"
+    ws.look.commit()
+    pkg = json.loads((Path(carts) / "custom.moy" / "theme.json").read_text())
+    assert pkg["wallpapers"] == {"desk": "moybyte.ocean_desktop"}
     # The monitor shows a COMPUTED still on every tier (no live/static drift),
     # so the appearance screen closes the redraw gate even for a live cart
     # (once the "Home Decorator" unlock toast this pick raised has cleared).
@@ -117,6 +120,7 @@ def test_my_art_image_thumbnail_and_live_preview_draw(tmp_path, monkeypatch):
         raw[y * 512:(y + 1) * 512] = bytes((22 if y < 150 else 3,)) * 512
     assert ws.artwork.save(raw, 512, 300)
     assert ws.artwork.set_wallpaper()
+    ws.look.tick(0.0)
 
     app = _open_appearance(ws)
     assert app.mode == "images"
@@ -166,12 +170,11 @@ def test_wide_monitor_shows_full_wallpaper_letterboxed(tmp_path):
 
 def test_fill_and_image_previews_fill_or_fit_the_screen(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
-    ws.look.select_wallpaper("fill:indigo", persist=False)
+    ws.look.select_wallpaper(None, persist=False)
     ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 100, 80), 0)
     sc = ws.sys_canvas
-    from runtime import console as C
-    indigo = C.NAMES["indigo"]
-    assert sc.pix(0, 0) == indigo and sc.pix(99, 79) == indigo  # a fill floods it
+    desk = ws.theme_colors["desktop"]
+    assert sc.pix(0, 0) == desk and sc.pix(99, 79) == desk  # NONE floods it
 
 
 def test_theme_preview_draws_mock_windows(tmp_path):
@@ -205,6 +208,7 @@ def test_small_tier_monitor_shows_whole_my_art_image(tmp_path):
         raw[y * 512:(y + 1) * 512] = bytes((22 if y < 150 else 3,)) * 512
     assert ws.artwork.save(raw, 512, 300)
     assert ws.artwork.set_wallpaper()
+    ws.look.tick(0.0)
     app = _open_appearance(ws)
     assert app.mode == "images"
     ws._toast_until = 0        # the unlock toast would overlap the top rows

@@ -525,8 +525,8 @@ def main():
     ap.add_argument("--font-scale", type=int, default=1, dest="font_scale")
     ap.add_argument("--wallpaper", default=None, metavar="SLUG",
                     help="desktop backdrop: a wallpaper cart's slug (its folder name "
-                         "without .moy, e.g. open_machine / moy_night) or a "
-                         "\"fill:<color>\" built-in; default = the store's first")
+                         "without .moy, e.g. open_machine / moy_night); default = "
+                         "the store's first")
     args = ap.parse_args()
     size = None
     if args.size:

@@ -136,8 +136,13 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     assert app._save()
 
     assert ws.artwork.set_wallpaper()
-    assert ws.look.wallpaper_id == "moybyte.my_art"
-    assert moy_carts.load_system(carts)["wallpaper"] == "moybyte.my_art"
+    ws.look.tick(0.0)                          # the change shows at the next frame
+    assert ws.look.wallpaper_id == "moybyte.my_art" == ws.look.PICTURE
+    ws.look.commit()
+    # The picture is the theme's: copied into `custom` (docs/theming_2026-09.md D6).
+    assert moy_carts.load_system(carts)["theme"] == "custom"
+    pic = Path(carts) / "custom.moy" / "desk.moyimg"
+    assert pic.read_bytes() == moy_carts.load_artwork(carts).encode()
 
     titles = ws.artwork.targets()
     target_i = titles.index("Star Catcher")
@@ -187,6 +192,7 @@ def test_desktop_paint_reflows_and_wallpaper_maps_512x300_exactly_2x(tmp_path):
 
     assert app._save()
     assert ws.artwork.set_wallpaper()
+    ws.look.tick(0.0)
     ws.wallpaper.draw(0)
     src = app.doc.pix
     out = ws.sys_canvas
@@ -343,8 +349,8 @@ class _Loans:
         return (len(self.live), sum(self.live.values()))
 
 
-def _lending(monkeypatch, art):
-    """Point the artwork service and the device canvas at one tracked
+def _lending(monkeypatch, wall):
+    """Point the wallpaper component and the device canvas at one tracked
     allocator -- the boards' moy_alloc, with its rules kept.
 
     Both modules are resolved through the objects under test rather than by the
@@ -360,7 +366,7 @@ def _lending(monkeypatch, art):
     import importlib
     # The live module when one is loaded; otherwise this import makes it so.
     dc = importlib.import_module("device_canvas")
-    aw = _sys.modules[type(art).__module__]
+    aw = _sys.modules[type(wall).__module__]
     dc._owner_done("wallpaper_bg")     # an earlier test's backdrop: its own lifetime
     loans = _Loans()
     monkeypatch.setattr(dc, "_moybuf", loans)
@@ -369,9 +375,9 @@ def _lending(monkeypatch, art):
 
 
 class _Ledger:
-    """Every off-heap buffer the backdrop holds: the artwork service's
+    """Every off-heap buffer the picture holds: the wallpaper component's
     indices through moybuf's tracked allocator, and the canvas's bake, which
-    is the glass's loan to the backdrop's owner."""
+    is the glass's loan to the picture's owner."""
 
     def __init__(self, loans, dc):
         self.loans = loans
@@ -405,7 +411,8 @@ def _device_canvas(ws, w, h):
 
 
 def _published(tmp_path, dw=512, dh=300):
-    """A workstation whose desktop backdrop is a saved drawing (the WALL verb)."""
+    """A workstation whose desktop backdrop is a saved drawing (the WALL verb),
+    copied into the theme as its picture; answers (ws, ws.wallpaper)."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     art = ws.artwork
     pix = bytearray(dw * dh)
@@ -415,8 +422,9 @@ def _published(tmp_path, dw=512, dh=300):
             pix[o + x] = (x // 7 + y // 5) % 63
     assert art.save(pix, dw, dh), art.last_error
     assert art.set_wallpaper(), art.last_error
-    assert art.owns_wallpaper(ws.look.wallpaper_id)
-    return ws, art
+    ws.look.tick(0.0)
+    assert ws.look.wallpaper_id == ws.look.PICTURE
+    return ws, ws.wallpaper
 
 
 def test_the_backdrop_is_one_screen_sized_bake_the_register_lends(tmp_path,
@@ -435,9 +443,9 @@ def test_the_backdrop_is_one_screen_sized_bake_the_register_lends(tmp_path,
     placement `spr` bakes through the owner-lent path (any other scale bakes a
     pre-scaled scale^2 copy through _cache_rgb, which the register does not
     reach), and screen-sized is the smallest bake that can fill the screen."""
-    ws, art = _published(tmp_path)
-    loans, device_canvas = _lending(monkeypatch, art)
-    from runtime.artwork import ArtworkService, PaintDocument
+    ws, wall = _published(tmp_path)
+    loans, device_canvas = _lending(monkeypatch, wall)
+    from runtime.artwork import PaintDocument
 
     cv = _device_canvas(ws, 320, 240)
     placed = []
@@ -449,12 +457,12 @@ def test_the_backdrop_is_one_screen_sized_bake_the_register_lends(tmp_path,
 
     cv.spr = _spy
 
-    assert art.draw_wallpaper(cv) is True
+    assert wall.draw_picture(cv) is True
     assert placed == [(0, 0)], "the backdrop is placed 1:1 at the origin"
 
-    m = art._wall_bitmap
+    m = wall._pic_bitmap
     assert (m.w, m.h) == (320, 240), "the bitmap is the SCREEN, not the source"
-    assert m._owner == ArtworkService.WALL_OWNER == "wallpaper_bg"
+    assert m._owner == type(wall).PIC_OWNER == "wallpaper_bg"
     # Its own key. release_bakes(owner) frees everything an owner holds, so a
     # shared one would make Paint's leaving hook drop the desktop's backdrop.
     assert m._owner != PaintDocument.OWNER
@@ -470,9 +478,9 @@ def test_the_backdrop_is_one_screen_sized_bake_the_register_lends(tmp_path,
 
     # Redrawing reuses both -- the desktop draws this every frame it paints.
     for _ in range(5):
-        art.draw_wallpaper(cv)
+        wall.draw_picture(cv)
     assert loans.stats() == (2, 320 * 240 * 3)
-    assert art._wall_bitmap is m
+    assert wall._pic_bitmap is m
 
 
 def test_the_backdrops_loan_comes_back_on_every_wallpaper_change(tmp_path,
@@ -489,27 +497,29 @@ def test_the_backdrops_loan_comes_back_on_every_wallpaper_change(tmp_path,
     The ledger is the assertion. Repeated switches must come back to the same
     numbers -- a loan taken per change and never given back is the leak this
     mechanism is one wrong line away from being."""
-    ws, art = _published(tmp_path)
-    loans, device_canvas = _lending(monkeypatch, art)
+    ws, wall = _published(tmp_path)
+    loans, device_canvas = _lending(monkeypatch, wall)
 
     cv = _device_canvas(ws, 320, 240)
-    art.draw_wallpaper(cv)
-    on_my_art = loans.stats()
-    indices = art._wall_bitmap.pix
-    assert on_my_art == (2, 320 * 240 * 3)
+    wall.draw_picture(cv)
+    on_picture = loans.stats()
+    indices = wall._pic_bitmap.pix
+    assert on_picture == (2, 320 * 240 * 3)
 
     for _ in range(6):
-        ws.look.select_wallpaper("fill:black", persist=False)
+        ws.look.set_theme_variant("light")       # MODE keeps the picture shown
+        assert wall._pic_bitmap.pix is indices and loans.stats() == on_picture
+        ws.look.set_theme_variant("dark")
+        ws.look.select_wallpaper(None, persist=False)
         # The bake is back; the indices, and the bitmap, are still cached.
         assert loans.stats() == (1, 320 * 240), "the bake outlived its backdrop"
         assert loans.bakes() == []
-        assert art._wall_bitmap is not None and art._wall_bitmap.pix is indices
-        assert art._wall_bitmap._rgb_i is None, "a stale draw must re-bake"
+        assert wall._pic_bitmap is not None and wall._pic_bitmap.pix is indices
+        assert wall._pic_bitmap._rgb_i is None, "a stale draw must re-bake"
 
-        ws.look.select_wallpaper("moybyte.my_art", persist=False)
-        art.draw_wallpaper(cv)
-        assert loans.stats() == on_my_art, "the ledger drifted across a switch"
-        assert art._wall_bitmap.pix is indices, "the resample was paid twice"
+        ws.look.select_wallpaper(ws.look.PICTURE, persist=False)
+        wall.draw_picture(cv)
+        assert loans.stats() == on_picture, "the ledger drifted across a switch"
     assert loans.loans.freed == 0, "the bake came back each change, and nothing else"
 
 
@@ -519,20 +529,23 @@ def test_publishing_a_new_drawing_returns_both_of_the_backdrops_loans(
     -- indices and bake both. set_wallpaper releases them itself rather than
     leaning on the select it ends with, because it can still answer False after
     clearing the cache and never reach one."""
-    ws, art = _published(tmp_path)
-    loans, _dc = _lending(monkeypatch, art)
+    ws, wall = _published(tmp_path)
+    loans, _dc = _lending(monkeypatch, wall)
+    art = ws.artwork
 
     cv = _device_canvas(ws, 320, 240)
-    art.draw_wallpaper(cv)
+    wall.draw_picture(cv)
     assert loans.stats() == (2, 320 * 240 * 3)
 
     art.new_doc(512, 300)
     assert art.save(bytearray(512 * 300), 512, 300), art.last_error
     assert art.set_wallpaper(), art.last_error
+    ws.look.tick(0.0)
+    assert wall._picture() is not None
     assert loans.stats() == (0, 0), "the replaced screen kept its buffers"
-    assert art._wall_bitmap is None and art._wall_pix is None
+    assert wall._pic_bitmap is None and wall._pic_pix is None
 
-    art.draw_wallpaper(cv)
+    wall.draw_picture(cv)
     assert loans.stats() == (2, 320 * 240 * 3), "the new backdrop took no loan"
 
 
@@ -562,13 +575,13 @@ def test_a_backdrop_that_already_fits_the_screen_takes_no_resample(tmp_path,
     """A drawing the size of the desk is drawn from its own decoded indices --
     one loan (the bake), not two. The release path has to cope with the
     half-set state that leaves."""
-    ws, art = _published(tmp_path, 320, 240)
-    loans, _dc = _lending(monkeypatch, art)
+    ws, wall = _published(tmp_path, 320, 240)
+    loans, _dc = _lending(monkeypatch, wall)
 
     cv = _device_canvas(ws, 320, 240)
-    art.draw_wallpaper(cv)
-    assert art._wall_pix is None, "a screen-sized source needs no copy"
+    wall.draw_picture(cv)
+    assert wall._pic_pix is None, "a screen-sized source needs no copy"
     assert loans.stats() == (1, 153600)
 
-    art._drop_wall_bitmap()
+    wall.drop_picture()
     assert loans.stats() == (0, 0)

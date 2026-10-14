@@ -32,7 +32,7 @@ def _ws(tmp_path):
     """A console with every self-animating source stilled, so `_animating` is
     answering about the overlays and nothing else."""
     ws = build_ws(tmp_path)
-    ws.look.select_wallpaper("fill:dark_blue", persist=False)
+    ws.look.select_wallpaper(None, persist=False)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0
@@ -136,7 +136,7 @@ def test_a_safe_start_ignores_the_file_and_leaves_it_alone(tmp_path, monkeypatch
     moy_carts.save_system({"wallpaper": "aurora", "marker": 1}, ws.carts_root)
     ws.load_system()
     assert ws.system.get("marker") is None and ws.system.get("wallpaper") is None
-    assert ws.look.wallpaper_id == ws.look.FILL_WALLPAPERS[0]
+    assert ws.look.wallpaper_id is None            # no wallpaper cart runs
     ws.system.set("theme", "berry")
     assert moy_carts.load_system(ws.carts_root) == {"wallpaper": "aurora", "marker": 1}
     kernel.mode = lambda: "start"

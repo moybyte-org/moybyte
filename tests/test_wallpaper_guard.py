@@ -16,7 +16,7 @@ from pathlib import Path
 from runtime import moy_carts
 from runtime.crash_guard import KEY, WALLPAPER_KEY, CrashGuard
 from runtime.moy_spine import Settings
-from ws_helpers import build_desktop_ws, build_ws, open_cart
+from ws_helpers import build_desktop_ws, build_ws, open_cart, wallpaper_on_store
 
 DT = 1.0 / 30
 
@@ -69,7 +69,8 @@ def _carts(tmp_path):
 
 def _wallpaper(tmp_path, slug, src, title=None):
     """A wallpaper cart in the store, chosen as the backdrop the next boot
-    restores (what a kid's earlier Appearance pick left in system.json)."""
+    restores: what a kid's earlier Appearance pick left, `custom` naming it
+    (docs/theming_2026-09.md D6)."""
     carts = _carts(tmp_path)
     d = Path(carts) / (slug + ".moy")
     d.mkdir(parents=True, exist_ok=True)
@@ -78,9 +79,7 @@ def _wallpaper(tmp_path, slug, src, title=None):
     (d / "manifest.json").write_text(json.dumps(man))
     (d / "main.py").write_text(src)
     (d / "config.json").write_text("{}")
-    settings = moy_carts.load_system(carts) or {}
-    settings["wallpaper"] = slug
-    moy_carts.save_system(settings, carts)
+    wallpaper_on_store(carts, slug)
     return d
 
 
@@ -338,6 +337,7 @@ def test_picking_it_again_is_try_again(tmp_path, capsys):
     ws = _strike_out(tmp_path, "boom", CRASH_SRC)
     capsys.readouterr()
     ws.look.select_wallpaper("boom")               # the Appearance pick
+    ws.look.tick(0.0)                              # shown at the next frame
     assert "wallpaper always broken" in capsys.readouterr().out
     assert ws.wallpaper_guard.strikes("boom") == 1  # a fresh three, one spent
     assert ws.wallpaper_guard.disabled("boom") is False

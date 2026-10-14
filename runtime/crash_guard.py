@@ -47,8 +47,8 @@ roles: `Project.commit_code` -> `Workstation.forgive_app` /
 `Workstation.forgive_wallpaper` -> `forgive` here. Code and nothing else,
 because code is the only edit that can change whether the cart hangs or faults;
 the reasoning is in `forgive_app`. A wallpaper has one more way back: picking it
-again in Appearance is the kid saying "try again", and `select_wallpaper`
-forgives it before it compiles.
+again in Appearance is the kid saying "try again", and the pick
+(`Appearance.change`) forgives it before it compiles.
 
 ## What it costs, stated plainly
 
@@ -317,8 +317,8 @@ class CrashGuard:
         """Clear `cid`'s strikes -- re-enable a cart the owner has fixed.
 
         Reached from `Workstation.forgive_app` / `forgive_wallpaper` when a
-        code commit lands, and from `Appearance.select_wallpaper` on a
-        deliberate pick.
+        code commit lands, and from `Appearance.change` on a deliberate
+        wallpaper pick.
 
         An arming of `cid` still held in RAM is dropped with the mark it stood
         for, so the next `arm` writes a fresh one rather than reading as the

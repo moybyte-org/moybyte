@@ -1495,7 +1495,6 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"notify.achieve", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
     {"wallpaper.current", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
     {"wallpaper.carts", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.fills", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
     {"wallpaper.id_for", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
     {"wallpaper.title", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
     {"wallpaper.select", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},

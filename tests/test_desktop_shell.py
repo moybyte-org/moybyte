@@ -1,6 +1,6 @@
 """Tests for the Picotron/TIC-80-style desktop shell (#28): a wallpaper backdrop,
 a cart icon grid, a top status strip, and a Settings app with
-FUNCTIONAL, persisted wallpaper switching.
+FUNCTIONAL wallpaper switching that lands in the theme.
 
 All driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==device
@@ -92,8 +92,8 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
 
 
 def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
-    """With zero wallpaper carts installed, the built-in solid fills are still
-    selectable so there is always a valid backdrop (zero-cart fallback)."""
+    """With zero wallpaper carts installed the desk is the theme's `desktop`
+    fill, so there is always a backdrop (zero-cart fallback)."""
     from runtime import console, moy_carts, host_app, host_canvas
     # A store with only a non-wallpaper cart.
     carts_dir = str(tmp_path / "carts")
@@ -109,8 +109,10 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     ws.set_pointer(console.Pointer(320, 240))
     ws.load_system()
     assert ws.look.wallpaper_carts() == []                     # none installed
-    assert ws.look.wallpaper_id.startswith("fill:")            # fell back to a solid fill
+    assert ws.look.wallpaper_id is None                        # the theme's fill
     ws.frame(1 / 30)                                       # renders without error
+    assert host_canvas.indices_of(ws.sys_canvas)[200 * 320 + 160] == \
+        ws.theme_colors["desktop"]
 
 
 # -- wallpaper switching is functional + persists --------------------------
@@ -121,6 +123,7 @@ def test_wallpaper_switch_changes_backdrop(tmp_path):
     assert len(opts) >= 2
     before = ws.look.wallpaper_id
     ws.look.cycle_wallpaper(1)
+    ws.look.tick(0.0)                          # a change shows at the next frame
     assert ws.look.wallpaper_id != before
     assert ws.look.wallpaper_id in opts
 
@@ -130,9 +133,13 @@ def test_wallpaper_choice_persists_across_reboot(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     ws.look.cycle_wallpaper(1)
+    ws.look.tick(0.0)
+    ws.look.commit()
     chosen = ws.look.wallpaper_id
-    # It lands in system.json beside the carts dir.
-    assert moy_carts.load_system(carts_dir).get("wallpaper") == chosen
+    # It lands in the theme, `custom` (docs/theming_2026-09.md D6), and the
+    # theme row names it; there is no wallpaper row.
+    stored = moy_carts.load_system(carts_dir)
+    assert stored.get("theme") == "custom" and "wallpaper" not in stored
     # A fresh boot restores it.
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.look.wallpaper_id == chosen
@@ -182,8 +189,10 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     before = ws.look.wallpaper_id
     drv.press("down")          # the catalog column: down applies the next item
     drv.frame(1 / 30)
+    drv.frame(1 / 30)          # the change shows at the frame after the pick
     assert ws.look.wallpaper_id != before
-    assert moy_carts.load_system(carts_dir).get("wallpaper") == ws.look.wallpaper_id
+    ws.look.commit()
+    assert moy_carts.load_system(carts_dir).get("theme") == "custom"
 
 
 def test_settings_back_returns_home(tmp_path):
@@ -826,7 +835,7 @@ def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
     ws = _ws(tmp_path)
     # Pick a real animated wallpaper cart (the shipped ones print a title at y=10,
     # which is inside the strip band -- the bug #46 fixes).
-    cart_wp = [o for o in ws.look.wallpaper_options() if not str(o).startswith("fill:")]
+    cart_wp = ws.look.wallpaper_options()
     assert cart_wp, "expected at least one wallpaper cart seeded"
     ws.look.select_wallpaper(cart_wp[0], persist=False)
     drv = host_app.ConsoleDriver(ws)

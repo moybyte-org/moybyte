@@ -1651,7 +1651,6 @@ SERVED_ROLE(notify, Notify)
 
 SERVED(wallpaper, WALLPAPER, current)
 SERVED(wallpaper, WALLPAPER, carts)
-SERVED(wallpaper, WALLPAPER, fills)
 SERVED(wallpaper, WALLPAPER, id_for)
 SERVED(wallpaper, WALLPAPER, title)
 SERVED(wallpaper, WALLPAPER, select)
@@ -1693,7 +1692,6 @@ static MP_DEFINE_CONST_FUN_OBJ_2(wallpaper_save_copy_obj, wallpaper_save_copy);
 static const mp_rom_map_elem_t wallpaper_locals_table[] = {
     ROW(wallpaper, current)
     ROW(wallpaper, carts)
-    ROW(wallpaper, fills)
     ROW(wallpaper, id_for)
     ROW(wallpaper, title)
     ROW(wallpaper, select)

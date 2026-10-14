@@ -52,7 +52,7 @@ for them from format 1.
 | D3 | A theme can carry **paintable sprites** (9-slice frames, glyphs, a desktop tile), in the first or second version; the format reserves them from format 1. |
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
 | D5 | **Layout: both.** A theme sets the default bar layout (its `layout`'s bars, §3); the user can override it in Settings, and the override survives a theme switch. A window's mode is its own button, not a theme's (`docs/shell_layout_2026-10.md` §15, owner 2026-10-13). Designed in the shell-layout doc (§4.8). |
-| D6 | **Themes bring wallpapers**: one wallpaper for the desk and the home (owner, 2026-10-14, replacing the per-slot wallpapers of 2026-09-27: a screen-sized bake per slot is memory a board does not have, and the home already shows the desk's wallpaper behind its cards). **The wallpaper is the theme's** (owner, 2026-10-14, the modern-Windows rule, replacing 2026-09-27's separate user override): picking a theme brings its wallpaper, and the user's pick is a change to the theme like any other, landing in `custom` and travelling with it; the persisted `wallpaper` setting goes (phase 6 step 5). A theme ships a static image and may name an installed wallpaper cart (§4.9). |
+| D6 | **Themes bring wallpapers**: one wallpaper for the desk and the home (owner, 2026-10-14, replacing the per-slot wallpapers of 2026-09-27: a screen-sized bake per slot is memory a board does not have, and the home already shows the desk's wallpaper behind its cards). **The wallpaper is the theme's** (owner, 2026-10-14, the modern-Windows rule, replacing 2026-09-27's separate user override): picking a theme brings its wallpaper, and the user's pick is a change to the theme like any other, landing in `custom` and travelling with it; there is no persisted `wallpaper` setting (phase 6 step 5). A theme ships a static image and may name an installed wallpaper cart (§4.9). |
 | D7 | **The home is one component on every board**: tabs (Games / Mine / Apps / Make) over the carts, themeable, over the one wallpaper (D6), in an arrangement a theme or the user picks (the layout's `home`: the cover carousel by default, or the grid; owner, 2026-10-14, `docs/shell_layout_2026-10.md` §12). **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 | D8 | **Format 1 carries four more keys** (owner, 2026-10-11, before phase 1 froze it): **content colour roles** for code syntax and the block editor's block colours (§4.1); a **corner radius of 0 to 3** (§4.2); a **pressed-label offset** (§4.2); and a **text effect** per part and state, `none`, `shadow` or `emboss` with the role it paints in (§4.3). Their defaults reproduce today's pixels. The Paint, sprite, map and scene canvases stay exempt. |
 
@@ -93,8 +93,9 @@ Each was mocked and judged worse (§11).
 - **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
   from `chrome._ICON_ART`, or the user's own edited sheet, `system_icons.moygfx`
   (Settings → EDIT ICONS).
-- **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`; apps reach the backdrop
-  through `ctx.wallpaper`.
+- **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`, or the
+  theme's picture; which one the desk shows is the theme's (D6, §4.9), and
+  apps reach the backdrop through `ctx.wallpaper`.
 - **Who reads tokens:** shipped apps through `ctx.theme` (`colors()`, `light()`,
   `name()`, `variant()`, `set()`, `set_variant()`;
   `runtime/app_context.py`). App carts (`"moybyte": {"type": "app"}`) through the ungated
@@ -103,9 +104,8 @@ Each was mocked and judged worse (§11).
   Compiled apps read the token row through their `theme` imports
   (`native/moy_app/roles.json`). **Games have no `theme()`**, and giving them
   one would be a cart-verb change in moy-spec's SPEC.md.
-- **Persisted settings:** `theme`, `theme_variant` and `wallpaper` in
-  `system.json`; `wallpaper` goes in phase 6 step 5, when the wallpaper
-  becomes the theme's (D6).
+- **Persisted settings:** `theme` and `theme_variant` in `system.json`; the
+  wallpaper is the theme's (D6), with no row of its own since phase 6 step 5.
 
 What stopped a Platinum or Win95 theme on 2026-10-11, which phases 2 to 4
 answer:
@@ -715,10 +715,17 @@ broken by it.
 A theme ships one static **image** and may name one installed **wallpaper
 cart**, for the desk and the home alike (D6, one slot: `desk`). The
 wallpaper is the theme's: the user's pick (Appearance's WALLPAPER, Paint's
-WALL, `ctx.wallpaper`) is a change to the theme, written into `custom` (a
-cart by id, a My Art picture copied into the package, NONE as neither key,
-the desk then `desktop`'s fill), and there is no setting beside it (owner,
-2026-10-14; phase 6 step 5).
+WALL, `ctx.wallpaper`) is a change to the theme, written into `custom`, and
+there is no setting beside it (owner, 2026-10-14; phase 6 step 5). A cart is
+`"wallpapers": {"desk": id}`; a picture is `"images": {"desk":
+"desk.moyimg"}` with the file in the package (a My Art pick copies Paint's
+picture, the wallpaper copy WALL wrote); NONE is `"wallpapers": {}` with no
+`images`, the theme naming its wallpapers and none of them, so the desk is
+`desktop`'s fill. A theme naming neither key -- every seed -- shows the
+console's default, the first wallpaper cart (Moy's night on a seeded store).
+The look reads the keys at every switch (`Appearance.theme_wallpaper`): the
+named cart where it is installed, else the picture, else NONE or the
+default; a SAFE start runs no cart.
 
 - **Nothing executable rides in a theme.** Installing a cart is exactly what
   `system_api.py` never grants (`carts`, "the single most important entry"). A
@@ -1235,7 +1242,7 @@ instead:
   the carts repository).
 - **The wallpaper is the theme's** (owner, the same day, the modern-Windows
   rule): WALLPAPER is a change like any other, picking a theme brings its
-  wallpaper, and the separate persisted `wallpaper` setting goes (D6).
+  wallpaper, and there is no separate persisted `wallpaper` setting (D6).
 - **EDIT TASKBAR** edits the live bar and writes the theme's `layout`; it is
   the last step and deferrable, and until it lands a layout is edited
   through EDIT FILE.
@@ -1424,8 +1431,10 @@ port), never here.
      `moy_ui` there, and `theme_custom_matches_host` in
      `tests/on_glass.py` on every console board). No golden moves (nothing draws it yet).
 
-  5. **`custom`, saved as it goes, and the wallpaper in the theme.**
-     `Appearance.change(...)` (`runtime/appearance.py`, `ws.look`) is the one
+  5. **`custom`, saved as it goes, and the wallpaper in the theme** (landed
+     2026-10-14). `Appearance.change(kind, value)` (`runtime/appearance.py`,
+     `ws.look`; `kind` one of `accent`, `tint`, `wallpaper`, `frame`, `font`,
+     the package's data in `runtime/theme_custom.py`) is the one
      write path every row of step 7 calls. On a seed or an installed package
      it writes `ui.theme_custom` of the active theme into `custom.moy`
      (manifest type `theme`, `runtime` `theme`, `look` per §4.10; any
@@ -1453,10 +1462,16 @@ port), never here.
      stored `wallpaper` reads as nothing and the seed version is bumped; no
      pass rewrites it. `set_theme` brings the theme's wallpaper; a named
      cart that is not installed falls back to the image, then to the
-     default. Scenario: `edit thrash` (+) — a held key on ACCENT through the
-     verb, the painted-frame ms per change and the frames after release, on
-     all four console boards, asserting zero store writes while held and
-     exactly one after it settles. Test net: `tests/test_appearance.py`
+     default. The look's per-frame `tick` applies a change and runs the
+     debounce, `commit` writes (the debounce, going home, an app switch, a
+     theme switch); the `theme` row is written with the package, once, and a
+     custom's fonts and picture are copied into its folder from the image or
+     the source package. The seed version bump is the Appearance cart's
+     (`moybyte.appearance.moy` 6), whose picker's fills became NONE.
+     Scenario: `edit thrash` (+, `tools/p4_bench.py --edit`) — a held key on
+     ACCENT through the verb, the painted-frame ms per change and the frames
+     after release, on all four console boards, asserting zero store writes
+     while held and exactly one after it settles. Test net: `tests/test_appearance.py`
      grows the first change on a seed (the seed untouched, `custom` written
      and active), a second change in place, a change started from another
      theme replacing `custom`, ten changes landing where one would, MODE

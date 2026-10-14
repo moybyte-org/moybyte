@@ -146,8 +146,9 @@ class AppearanceAppLayer:
     MODES = ("images", "carts", "themes")
     # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
     # CAPABILITY, not a core role: this app and the two that copy a drawing
-    # into it (Paint, Files) are its only consumers. My Art's card is the
-    # backdrop's own decode, scaled (`wallpaper.thumbnail`).
+    # into it (Paint, Files) are its only consumers. My Art's card is Paint's
+    # picture, scaled (`wallpaper.thumbnail`). A pick is a change to the theme
+    # (docs/theming_2026-09.md D6), so it lands in `custom`.
     NEEDS = ("surface", "theme", "damage", "wallpaper")
 
     def __init__(self, ctx, names):
@@ -180,23 +181,22 @@ class AppearanceAppLayer:
         self.layout = AppearanceLayout(w, h, fs, self._surf.windowed(), cs)
 
     def open(self):
-        # Land on the current wallpaper's source category. Solid fills live on
-        # the IMAGES tab beside My Art.
+        # Land on the current wallpaper's source category. NONE (the theme's
+        # `desktop` fill) lives on the IMAGES tab beside My Art.
         wp = self._wall.current()
         my_art = self._wall.title(wp) == "My Art"
-        fill = isinstance(wp, str) and wp.startswith("fill:")
-        self.mode = "images" if (my_art or fill) else "carts"
+        self.mode = "images" if (my_art or wp is None) else "carts"
         self.sel = self._selected_index()
         self.status = self.mode.upper()
         self._damage.all()
 
     def _image_items(self):
-        # My Art (the paint document) + the built-in solid fills ("fill:<color>"
-        # id strings) -- everything that isn't a live wallpaper CART.
+        # My Art (Paint's picture) + NONE (None: the theme's `desktop` fill) --
+        # everything that isn't a live wallpaper CART.
         wall = next((c for c in self._wall.carts()
                      if c.get("title") == "My Art"), None)
         items = [wall] if wall is not None else []
-        items.extend(self._wall.fills())
+        items.append(None)
         return items
 
     def _cart_items(self):
@@ -210,8 +210,8 @@ class AppearanceAppLayer:
         return list(theme_names())
 
     def _wall_id(self, item):
-        """The selectable wallpaper id: a fill item IS its id string."""
-        return item if isinstance(item, str) else self._wall.id_for(item)
+        """The selectable wallpaper id: NONE's is None."""
+        return None if item is None else self._wall.id_for(item)
 
     def _selected_index(self):
         items = self._items()
@@ -247,9 +247,8 @@ class AppearanceAppLayer:
 
     @staticmethod
     def _wall_title(item):
-        if isinstance(item, str):              # "fill:dark_blue" -> "Dark Blue"
-            return " ".join(p[:1].upper() + p[1:]
-                            for p in item[5:].split("_") if p)
+        if item is None:
+            return "None"
         return item.get("title", "WALLPAPER")
 
     def handle_input(self, inp):
@@ -355,8 +354,8 @@ class AppearanceAppLayer:
 
     def _draw_monitor(self, cv, dt):
         """The Background-tab nod: a little monitor whose 4:3 screen shows the
-        FULL wallpaper -- a cart frame fills it edge to edge, My Art letterboxes
-        to its own aspect, a fill floods it."""
+        FULL wallpaper -- a cart frame fills it edge to edge, the theme's
+        picture letterboxes to its own aspect, NONE floods it."""
         lay = self.layout
         n = self.names
         fs = lay.fs
@@ -451,8 +450,8 @@ class AppearanceAppLayer:
         ix, iy, iw, _ih = _ui.cell_art_rect(r, fs, pad, lay.LABEL_H * fs)
         ih = max(12, _ih)
         title = self._wall_title(cart)
-        if isinstance(cart, str):              # solid fill: the color itself
-            cv.rect(ix, iy, iw, ih, self.names.get(cart[5:], 0))
+        if cart is None:                       # NONE: the theme's desk fill
+            cv.rect(ix, iy, iw, ih, th["desktop"])
         elif image_kind:
             preview = self._wall.thumbnail(iw, ih)
             if preview is not None:

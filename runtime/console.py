@@ -306,8 +306,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
-# the rendering + the compiled-cart cache; the CHOICE + the picker/query API are
-# ws.look's (appearance.py -- select_wallpaper drives the component).
+# the rendering + the compiled-cart cache; the CHOICE is the theme's, and it and
+# the picker/query API are ws.look's (appearance.py drives the component).
 try:
     from wallpaper import Wallpaper
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -334,8 +334,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard, WALLPAPER_KEY
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
-# -- theme + variant, the system font scale, the wallpaper choice and the
-# top-bar icon sheet. It also installs the theme's shape (`ui.use_shape`): the
+# -- theme + variant, the system font scale, the theme's wallpaper, `custom`
+# (the theme a change makes) and the top-bar icon sheet. It also installs the theme's shape (`ui.use_shape`): the
 # choice is a persisted setting and the installed shape is process-wide state
 # inside `ui`. Every surface just draws through `ui`.
 try:
@@ -696,7 +696,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # is what keeps the pixel goldens where they are.
         self.app_full_canvas = False
         # The LOOK (#209 landing D, appearance.py): theme + variant, the widget
-        # skin, the requested system font scale, the wallpaper choice and the
+        # skin, the requested system font scale, the theme's wallpaper and the
         # top-bar icon sheet. Built FIRST of the collaborators because the two
         # lines under it already need it -- the system canvas takes the font
         # scale and the responsive Layout takes the EFFECTIVE one.
@@ -1028,7 +1028,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. The
         # component owns the RENDERING + the compiled-cart cache; the CHOICE
-        # (`ws.look.wallpaper_id`) and the picker verbs are the look's.
+        # (`ws.look.wallpaper_id`, the theme's, D6) and the picker verbs are
+        # the look's.
         self.wallpaper = Wallpaper(self, NAMES)
         # The idle ladder's SAVER rung (idle_ladder.py): the screen it shows
         # while the kernel's ladder sits there, None otherwise.
@@ -2861,6 +2862,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             _editor_app.save_current()
         if self._editing_icons:
             self.look.save_icons()     # the theme editor has no bar of its own
+        self.look.commit()             # a change to the theme still settling
         if self.settings_layer.wifi_view:
             self.settings_layer.close_wifi()   # its radio lease ends with the visit
         # The parked Editor's workspace (console mode): its window comes back
@@ -3906,6 +3908,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # bound to a local -- one call site, so a local would be one store more
         # than the two attribute loads it saves nothing on.
         self.history.idle_tick()
+        # The look's change, applied once a frame, and `custom`'s autosave
+        # debounce (theming phase 6 step 5): one attribute read when idle.
+        self.look.tick(dt)
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an _animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.
@@ -4404,7 +4409,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         inp.players = PlayerRouter(inp)
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
-    ws.load_system()                # #28: system.json + the saved wallpaper
+    ws.load_system()                # #28: system.json, the theme and its wallpaper
     try:                            # the console's level, the Settings row
         console_volume(int(ws.system.get("volume", 7)))
     except (TypeError, ValueError):

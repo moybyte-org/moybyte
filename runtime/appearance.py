@@ -1,6 +1,7 @@
 # Map (grep -n a name to jump there):
 #   Appearance                       `ws.look`: theme, variant, font scale, wallpaper, icons, layout
-#   -- the wallpaper CHOICE          select_wallpaper, the coordinator
+#   -- the wallpaper: the theme's    theme_wallpaper, the picture, the coordinator
+#   -- custom: a change              change / tick / commit, the one write path
 #   -- the top-bar icon sheet        the bar's IconSheet
 #   Appearance.set_font_scale        the system font scale, relayout
 #   Appearance.set_chrome_scale      the chrome scale above the tap floor, relayout
@@ -13,22 +14,26 @@
 Every verb that changes how the desktop looks: the panel theme and its
 dark/light variant, the system font scale, the desktop wallpaper and the
 top-bar icon sheet. Two axes plus a backdrop plus the bar art, which until this landing were five unrelated stretches of the kernel that
-happened to share a Settings screen.
+happened to share a Settings screen. And `custom`, the theme a change makes
+(`change`, docs/theming_2026-09.md §9 phase 6 step 5): the one write path of
+the Appearance rows, applied once a frame (`tick`) and written once the
+changes settle or at an exit (`commit`), through Paint's mechanism (#108).
 
 Not to be confused with `appearance_app.py`, which is the PICKER a kid taps --
 that app keeps its name and its place in the app registry, and reaches these
 verbs through `ctx.theme` / `ctx.wallpaper` like any other app.
 
-## `select_wallpaper` is why this object exists
+## The wallpaper is the theme's, shown by a coordinator
 
-It is the one verb in the shell that crosses four owners in nine lines: it asks
-the ROSTER for the wallpaper carts and rehydrates the chosen one out of the #66
+The wallpaper is a key of the active theme (`wallpapers` names a cart,
+`images` a picture in its folder; docs/theming_2026-09.md D6), so a theme
+switch brings it and a pick is a change to the theme, landing in `custom`;
+there is no setting beside it. Showing one crosses four owners: it asks the
+ROSTER for the wallpaper carts and rehydrates the chosen one out of the #66
 live-set diet (`ws.carts`), drives the backdrop COMPONENT's compile
-(`ws.wallpaper`), writes the choice through the settings funnel (`ws.prefs`),
-and notes an achievement (`ws.ach`). Rev 1 of the architecture doc left it
-unassigned for exactly that reason. It lands here as a COORDINATOR: it calls
-the other four objects and owns none of them, which is what "the look" is --
-policy over components, not a component.
+(`ws.wallpaper`), and a pick notes an achievement (`ws.ach`). It lives here as
+a COORDINATOR: it calls the other objects and owns none of them, which is what
+"the look" is -- policy over components, not a component.
 
 ## The tokens stay on the kernel, and they are written from here
 
@@ -63,7 +68,7 @@ are the shared DRAW TOOLKIT (doc 4 keeps that on the kernel by decision), and
 bar_layer's own header already says so. `set_icon_sheet` clears it, the one
 kernel field this object writes besides the tokens.
 
-`_fat_cart` is the OPEN WORKSPACE's cart, not a look setting; `select_wallpaper`
+`_fat_cart` is the OPEN WORKSPACE's cart, not a look setting; `_show_wallpaper`
 reads it through `ws` to decide whether a compiled wallpaper cart may be
 re-slimmed.
 
@@ -86,13 +91,24 @@ try:
                         DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                         theme_colors, theme_content, theme_known, THEME_NAMES,
                         THEME_VARIANTS, text_scale_floor, adopt_packages,
-                        package, theme_names)
+                        package, theme_names, forget_package)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                                 DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                                 theme_colors, theme_content, theme_known,
                                 THEME_NAMES, THEME_VARIANTS, text_scale_floor,
-                                adopt_packages, package, theme_names)
+                                adopt_packages, package, theme_names,
+                                forget_package)
+try:
+    from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PICTURE_FILE,
+                              font_files, keys_of, manifest, overlay,
+                              read_look, wall_keys)
+    from moy_store_base import cart_path
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
+                                      PICTURE_FILE, font_files, keys_of,
+                                      manifest, overlay, read_look, wall_keys)
+    from runtime.moy_store_base import cart_path
 try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -118,6 +134,8 @@ _FONT_FULL = 6          # moy_font_load's MOY_FONT_FULL: every slot holds a font
 _FONT_BYTES = 8192      # moy_text.h's MOY_FONT_BYTES: the largest font file
 _THEME_BYTES = 4096     # style.json's theme.bytes: the largest theme.json
 _THEME_MAIN = "theme.json"
+_PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spare
+_CHANGES = ("accent", "tint", "wallpaper", "frame", "font")
 # The loader's refusals (moy_theme.h), by rc from 1: each one's string.
 _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
 # The theme fonts loaded, (package, file) -> id, the package None for a
@@ -133,21 +151,32 @@ class Appearance:
     per-draw surface is `light_chrome()` and the `ws.theme_colors` dict it
     reads, both of which stay one cheap call and one flat attribute."""
 
-    # -- desktop wallpaper (#28) ---------------------------------------------
+    # -- the wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) --------
     #
-    # The home screen renders a chosen wallpaper-type cart as a live backdrop:
-    # exactly the Picotron model where a wallpaper is just a fullscreen cart. We
-    # reuse the cart-run machinery (compile + _init/_update/_draw) but in a SEPARATE
-    # namespace so it never collides with the foreground cart. Fallback options are
-    # plain solid MOY64 fills ("fill:<color>"), so there's always a valid choice
-    # even with zero wallpaper carts installed (and a cheap option for the device).
+    # The desk and the home draw a wallpaper-type cart as a live backdrop (the
+    # Picotron model: a wallpaper is a fullscreen cart, compiled into its own
+    # namespace), the theme's picture, or the theme's `desktop` fill. Which one
+    # is the active theme's: its `wallpapers` names a cart, its `images` a
+    # picture in its folder. A pick is a change to the theme (`change`), so it
+    # lands in `custom` and travels with it.
 
-    FILL_WALLPAPERS = ("fill:dark_blue", "fill:black", "fill:indigo", "fill:dark_purple")
+    # The wallpaper id of the theme's picture: the My Art entry, which stands
+    # for Paint's picture (the wallpaper copy) wherever wallpapers are picked.
+    PICTURE = BUILTIN_NS + ".my_art"
+
+    # Paint's idle debounce (artwork.PaintAppLayer.AUTOSAVE_S, #108): `custom`
+    # is written once the changes have settled this long; a failing store
+    # retries slowly.
+    AUTOSAVE_S = 2.5
+    RETRY_S = 30.0
+    # change()'s refusal when a file the change needs cannot be read (Paint's
+    # picture before a save, a font no package carries).
+    NO_FILE = -1
 
     # -- system font scale (#39) ---------------------------------------------
     #
     # The system-UI font is settings-resizable (petme128 nearest-neighbor x1/x2/x3),
-    # persisted in system.json (mirroring the #28 wallpaper setting) and applied live.
+    # persisted in system.json and applied live.
     # The GAME canvas keeps plain 8x8 text regardless -- scaling lives in the system
     # canvas + the responsive Layout, so a cart is never affected.
 
@@ -178,8 +207,23 @@ class Appearance:
         # The live token dict lives on the KERNEL, not here -- see the module
         # docstring. `set_theme` is its only author; this is the first write.
         ws.theme_colors = theme_colors(DEFAULT_THEME)
-        self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
-                                      # the single source; select_wallpaper drives it.
+        # The wallpaper in force: a wallpaper cart's id, PICTURE, or None for
+        # the theme's `desktop` fill -- the theme's (`_apply_wallpaper`),
+        # shown by `_show_wallpaper`. A picture is named (theme, epoch), the
+        # epoch moving when a theme's picture may have; `_pic_key` is the one
+        # shown, `_pic_last` the last one shown, and `picture_gen` moves when
+        # a picture other than that one is shown.
+        self.wallpaper_id = None
+        self.picture_gen = 0
+        self._pic_key = None
+        self._pic_last = None
+        self._pic_epoch = 0
+        self._wall_force = False
+        # `custom` while it is the theme being changed (theme_custom.Custom),
+        # whether its last change is unwritten, and the debounce's clock.
+        self._cust = None
+        self._unsaved = False
+        self._idle = 0.0
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Loaded by `load_icon_sheet` at the end of the boot wiring
         # (from system_icons.moygfx, else the baked default theme); None falls back to
@@ -218,13 +262,9 @@ class Appearance:
         return [c for c in self.ws.carts.all if c.get("type") == "wallpaper"]
 
     def wallpaper_options(self):
-        """All selectable wallpaper ids: each wallpaper cart's slug, then the
-        built-in solid fills (always present so there's a valid pick)."""
-        out = []
-        for c in self.wallpaper_carts():
-            out.append(self.wp_id_for(c))
-        out.extend(self.FILL_WALLPAPERS)
-        return out
+        """Every wallpaper cart's id (My Art's is PICTURE). NONE, the
+        theme's `desktop` fill, is None."""
+        return [self.wp_id_for(c) for c in self.wallpaper_carts()]
 
     def wp_id_for(self, cart):
         # A stable id for a wallpaper cart: its folder name without the
@@ -247,25 +287,111 @@ class Appearance:
     # -- the wallpaper CHOICE (the coordinator) ------------------------------
 
     def select_wallpaper(self, wp_id, persist=True):
-        """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
-        "fill:<color>" built-in; an unknown/None id falls back to the first
-        available option. Compiles the chosen cart into its own namespace (or sets
-        a solid fill) and, when persist, writes the choice to system.json."""
+        """Pick the desk's wallpaper: a wallpaper cart's id, PICTURE (Paint's
+        picture, copied into the theme) or None (NONE: the theme's `desktop`
+        fill). A pick is a change to the theme (`change`), shown at the next
+        frame; persist=False only shows `wp_id` now, until the next theme
+        switch (a bench, a test), an id no cart has showing the default. 0,
+        or change()'s refusal."""
+        if persist:
+            return self.change("wallpaper", wp_id)
+        if wp_id is not None and wp_id != self.PICTURE \
+                and self.wp_cart_by_id(wp_id) is None:
+            wp_id = self._default_wallpaper()
+        self._show_wallpaper(wp_id)
+        return 0
+
+    def cycle_wallpaper(self, d):
+        """Step the wallpaper by d through the carts and NONE (programmatic
+        verb; the UI pick is the Appearance app): a change, like a pick. A
+        step that is refused (My Art before Paint has a picture) is passed."""
+        opts = self.wallpaper_options() + [None]
+        at = opts.index(self.wallpaper_id) if self.wallpaper_id in opts else 0
+        rc = self.NO_FILE
+        for _ in range(len(opts) - 1):
+            at = (at + d) % len(opts)
+            rc = self.select_wallpaper(opts[at])
+            if rc == 0:
+                break
+        return rc
+
+    def _default_wallpaper(self):
+        """The wallpaper of a theme that names none: the first wallpaper cart
+        (Moy's night on a seeded store), else the fill."""
+        for wp in self.wallpaper_options():
+            if wp != self.PICTURE:
+                return wp
+        return None
+
+    def theme_wallpaper(self):
+        """The wallpaper the active theme gives: the cart its `wallpapers`
+        names where it is installed, else its picture, else None where it
+        names its wallpapers and no cart among them (NONE), else the
+        default. A SAFE start runs no wallpaper cart."""
+        cart, img, said = wall_keys(self._theme_bytes())
+        safe = getattr(getattr(self.ws, "prefs", None), "safe", False)
+        if cart is not None and cart != self.PICTURE and not safe \
+                and self.wp_cart_by_id(cart) is not None:
+            return cart
+        if img is not None:
+            return self.PICTURE
+        if (said and cart is None) or safe:
+            return None
+        return self._default_wallpaper()
+
+    def _theme_bytes(self):
+        """The active theme's theme.json bytes where it is a package (the
+        installed slot's, or custom's as changed), else None: a seed names
+        no wallpaper."""
+        if self.theme_name in THEME_NAMES:
+            return None
+        c = self._cust
+        if c is not None and self.theme_name == CUSTOM:
+            return c.theme
+        if self._slot_src is not None:
+            return self._slot_src
+        return self._theme_src(self.theme_name)
+
+    def picture(self):
+        """The active theme's picture (the file its `images` names for the
+        desk) as bytes, or None."""
+        img = wall_keys(self._theme_bytes())[1]
+        if img is None:
+            return None
+        got = self._package_file(self.theme_name, img, _PICTURE_BYTES)
+        return got if got is not None and len(got) <= _PICTURE_BYTES else None
+
+    def _apply_wallpaper(self):
+        """Show the active theme's wallpaper (`theme_wallpaper`) when it is not
+        what is shown -- a theme switch, a re-take -- and at a wallpaper pick
+        always (a pick of a struck-out one is the kid's "try again", #160).
+        A MODE switch keeps the same one and costs nothing."""
+        if getattr(self.ws, "wallpaper", None) is None:
+            return
+        wp = self.theme_wallpaper()
+        key = (self.theme_name, self._pic_epoch) if wp == self.PICTURE else None
+        force, self._wall_force = self._wall_force, False
+        if not force and wp == self.wallpaper_id and key == self._pic_key:
+            return
+        self._show_wallpaper(wp)
+
+    def _show_wallpaper(self, wp):
+        """Put wallpaper `wp` on the desk: compile its cart into the backdrop
+        component, or the picture or the fill, which need none."""
         ws = self.ws
-        opts = self.wallpaper_options()
-        if wp_id not in opts:
-            wp_id = opts[0] if opts else self.FILL_WALLPAPERS[0]
-        self.wallpaper_id = wp_id
+        self.wallpaper_id = wp
+        if wp == self.PICTURE:
+            key = (self.theme_name, self._pic_epoch)
+            if key != self._pic_last:
+                self._pic_last = key
+                self.picture_gen += 1          # a picture the desk has not decoded
+            self._pic_key = key
+        else:
+            self._pic_key = None
         ws.wallpaper.clear()
-        if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
-            cart = self.wp_cart_by_id(wp_id)
+        if wp is not None and wp != self.PICTURE:
+            cart = self.wp_cart_by_id(wp)
             if cart is not None:
-                if persist:
-                    # A deliberate pick is the kid's "try again" (#160): a
-                    # struck-out wallpaper gets a fresh three strikes.
-                    guard = getattr(ws, "wallpaper_guard", None)
-                    if guard is not None:
-                        guard.forgive(wp_id)
                 # #66 live-set diet: a slimmed wallpaper cart rehydrates for the
                 # compile (which bakes src/sheet into the wallpaper's own ns), then
                 # re-slims -- unless it IS the open project's cart (stays fat).
@@ -273,24 +399,332 @@ class Appearance:
                 ws.wallpaper.compile(cart)   # compile into the backdrop component (#28)
                 if cart is not getattr(ws, "_fat_cart", None):
                     ws.carts.reslim(cart)
-        if persist:
-            self._persist_wallpaper()
-            # "Home Decorator": any persisted pick counts -- the Appearance app,
-            # Paint's WALL, the cycle verb. Boot restore (persist=False) doesn't.
-            ws.ach.note("wallpaper_change")   # (#21)
+        ws._dirty = True
 
-    def _persist_wallpaper(self):
-        self.ws.system.set("wallpaper", self.wallpaper_id)
+    # -- custom: a change to the theme (docs/theming_2026-09.md §9 phase 6
+    #    step 5, §4.10) -----------------------------------------------------
 
-    def cycle_wallpaper(self, d):
-        """Step the wallpaper choice by d (programmatic verb; the UI pick is the
-        Appearance app); applies + persists immediately."""
-        opts = self.wallpaper_options()
-        if not opts:
+    def change(self, kind, value):
+        """Change the theme, the one write path of every Appearance row but
+        THEME, MODE and CHROME SIZE. `kind` and `value`:
+
+          "accent"     an accent's A (`ui.theme_accents`), None the source's own
+          "tint"       a tint's name (`ui.theme_tints`), None for none
+          "wallpaper"  a wallpaper cart's id, PICTURE (Paint's picture,
+                       copied into the package) or None (NONE)
+          "frame"      a `frame` value, None the source's
+          "font"       a `fonts` value (role -> file), None the source's;
+                       the files it names are copied in
+
+        On a seed or an installed package the first change makes `custom`
+        from it (any `custom` before replaced) and switches to it; on
+        `custom` it changes it in place, re-derived from its source, never
+        from its last result. The look moves at the next frame (`tick`),
+        once however many changes came, and the package is written once the
+        changes settle (AUTOSAVE_S) or at an exit (`commit`). 0, else the
+        loader's refusal or NO_FILE, the theme as it was."""
+        if kind not in _CHANGES:
+            raise ValueError(kind)
+        c = self._cust
+        if c is None:
+            c = self._load_custom() if self.theme_name == CUSTOM \
+                else Custom({"from": self.theme_name}, fresh=True)
+            if c is None:
+                return self.NO_FILE
+        look, over = dict(c.look), dict(c.over)
+        pic = None
+        if kind == "accent" or kind == "tint":
+            if value is None:
+                look.pop(kind, None)
+            else:
+                look[kind] = value
+        elif kind == "frame" or kind == "font":
+            key = "frame" if kind == "frame" else "fonts"
+            if value is None:
+                over.pop(key, None)
+            else:
+                over[key] = value
+        elif value == self.PICTURE:
+            pic = self._paint_picture()
+            if pic is None:
+                return self.NO_FILE
+            over["images"] = {"desk": PICTURE_FILE}
+            over["wallpapers"] = DROP
+        else:
+            over["wallpapers"] = {"desk": value} if value is not None else {}
+            over["images"] = DROP
+        rc, theme = self._derive(c, look, over)
+        if rc != 0:
+            return rc
+        files = None
+        if kind in ("wallpaper", "font") or c.theme is None:
+            files = self._gather(c, look, theme, pic)
+            if files is None:
+                return self.NO_FILE
+        if self._cust is not c:
+            self._adopt_custom(c)
+        c.look, c.over, c.theme = look, over, theme
+        if files is not None:
+            need, fetched = files
+            for n in c.files:
+                if n not in need:
+                    c.drop(n)
+            for n in fetched:
+                c.put(n, fetched[n])
+            c.files = need
+        c.dirty = True
+        c.font_moved = c.font_moved or kind == "font"
+        c.wall_moved = c.wall_moved or kind == "wallpaper"
+        self._unsaved = True
+        self._idle = 0.0
+        if kind == "wallpaper":
+            ws = self.ws
+            if value is not None and value != self.PICTURE:
+                # A deliberate pick is the kid's "try again" (#160): a
+                # struck-out wallpaper gets a fresh three strikes.
+                guard = getattr(ws, "wallpaper_guard", None)
+                if guard is not None:
+                    guard.forgive(value)
+            ach = getattr(ws, "ach", None)
+            if ach is not None:
+                ach.note("wallpaper_change")   # "Home Decorator" (#21)
+        return 0
+
+    def custom_look(self):
+        """custom's `look` ({"from", "accent", "tint"}, each absent for the
+        source's own) while `custom` is the active theme, else None: what
+        the ACCENT and TINT rows show."""
+        if self.theme_name != CUSTOM:
+            return None
+        c = self._cust
+        if c is None:
+            c = self._load_custom()
+            if c is None:
+                return {}
+            self._adopt_custom(c)
+        return dict(c.look)
+
+    def tick(self, dt):
+        """Once per frame, before the redraw gate (`Workstation.frame`): apply
+        the latest change -- one install from bytes however many came since
+        the last frame -- and write `custom` once the changes have settled
+        AUTOSAVE_S. A frame with nothing changed costs one attribute read."""
+        c = self._cust
+        if c is None:
             return
-        cur = self.wallpaper_id if self.wallpaper_id in opts else opts[0]
-        nxt = opts[(opts.index(cur) + d) % len(opts)]
-        self.select_wallpaper(nxt, persist=True)
+        if c.dirty:
+            self._apply_custom(c)
+        if self._unsaved:
+            self._idle += dt
+            if self._idle >= self.AUTOSAVE_S:
+                self.commit()
+
+    def commit(self):
+        """Write `custom` now if a change is unwritten: the debounce's write
+        and every exit path's (going home, an app switch, a theme switch),
+        so a change is never lost to an exit. The package's folder, then the
+        roster (once, when the folder is new) and the `theme` row. False
+        when the store refused; the change stays unwritten."""
+        c = self._cust
+        if c is None or not self._unsaved:
+            return True
+        ws = self.ws
+        store = getattr(ws, "store", None)
+        save = getattr(ws.carts_store, "save_package", None)
+        if store is None or save is None or not store.writable():
+            self._unsaved = False              # a store-less console keeps it live
+            return True
+        path = self._custom_path()
+        files = dict(c.pending)
+        files[_THEME_MAIN] = c.theme
+        files[MANIFEST] = manifest(c.look)
+        stale = tuple(c.stale)
+        fresh = c.fresh
+        try:
+            store.call(lambda: save(path, files, stale, fresh))
+        except Exception as exc:  # noqa: BLE001 -- a failed write is retried
+            print("Moybyte custom save failed:", _err_text(exc))
+            self._idle = self.AUTOSAVE_S - self.RETRY_S
+            return False
+        c.pending = {}
+        c.stale = set()
+        c.fresh = False
+        self._unsaved = False
+        self._idle = 0.0
+        if fresh or self._pkg_paths.get(CUSTOM) is None \
+                or not self._in_roster(path):
+            ws.carts.adopt(path)
+        rows = ws.system
+        if (self.theme_name == CUSTOM or c.dirty) and (
+                rows.get("theme") != CUSTOM
+                or rows.get("theme_variant") != self.theme_variant):
+            rows.set("theme", CUSTOM, persist=False)
+            rows.set("theme_variant", self.theme_variant)
+        return True
+
+    def _custom_path(self):
+        return cart_path(self.ws.carts_root, CUSTOM + ".moy")
+
+    def _in_roster(self, path):
+        for cart in self.ws.carts.all:
+            if cart.get("path") == path:
+                return True
+        return False
+
+    def _source(self, name):
+        """What `ui.theme_custom` derives from for source `name`: a seed's
+        name, a store package's bytes, or None."""
+        if name in THEME_NAMES:
+            return name
+        if name != CUSTOM and name in self._packages():
+            return self._theme_src(name)
+        return None
+
+    def _derive(self, c, look, over):
+        """(rc, bytes): custom's theme.json for `look` and `over`, from the
+        source `look` names (else c.src, the file as it was saved)."""
+        src = self._source(look["from"]) if "from" in look else c.src
+        if src is None:
+            return 6, None                     # the loader's CHAIN: no source
+        rc, b = _uimod.theme_custom(src, look.get("accent"), look.get("tint"))
+        if rc != 0:
+            return rc, None
+        b = overlay(b, over)
+        if len(b) > _THEME_BYTES:
+            return 1, None                     # BIG
+        rc = _uimod.theme_resolve(b)[0]
+        return rc, (b if rc == 0 else None)
+
+    def _gather(self, c, look, theme, pic):
+        """(need, fetched): the files custom's `theme` names (its fonts with
+        their licences, its picture), and those of them it does not carry
+        yet, read from where they come from -- `pic` for the picture a pick
+        copies, a seed's from the image, else the source package's folder.
+        None when a font or the picture cannot be read."""
+        keys = keys_of(theme)
+        names = font_files(keys["fonts"] if keys["fonts"] is not DROP else None)
+        img = wall_keys(theme)[1]
+        if img is not None:
+            names.append(img)
+        need = set()
+        fetched = {}
+        for n in names:
+            if n == img and pic is not None:
+                fetched[n] = pic
+                need.add(n)
+                continue
+            if n in c.files:
+                need.add(n)
+                continue
+            data = self._fetch(look, n)
+            if data is None:
+                if n.endswith(".txt"):
+                    continue                   # a font with no licence beside it
+                return None
+            fetched[n] = data
+            need.add(n)
+        return need, fetched
+
+    def _fetch(self, look, name):
+        data = _uimod.font_file(name)
+        if data is None and look.get("from") not in (None, CUSTOM) \
+                and look.get("from") not in THEME_NAMES:
+            data = self._package_file(look["from"], name, _PICTURE_BYTES)
+        return data if data is None or len(data) <= _PICTURE_BYTES else None
+
+    def _paint_picture(self):
+        """Paint's picture, the wallpaper copy WALL wrote (stamped with where
+        it came from), as bytes; None before there is one."""
+        ws = self.ws
+        load = getattr(ws.carts_store, "load_copy", None)
+        store = getattr(ws, "store", None)
+        if load is None or store is None or not store.ready():
+            return None
+        try:
+            blob = store.call(lambda: load(ws.carts_root))
+        except Exception:  # noqa: BLE001 -- an unreadable copy is no picture
+            return None
+        if isinstance(blob, str):
+            blob = blob.encode()
+        return blob or None
+
+    def _load_custom(self):
+        """custom as the store holds it: its bytes, its manifest's `look`, and
+        what its keys set over its source's. A `from` that no longer resolves
+        is dropped: the file as saved is the source from then on. None when
+        its theme.json cannot be read."""
+        self._packages()
+        src = self._theme_src(CUSTOM)
+        if src is None or len(src) > _THEME_BYTES:
+            return None
+        look = read_look(self._package_file(CUSTOM, MANIFEST, _THEME_BYTES))
+        c = Custom(look)
+        c.theme = src
+        mine = keys_of(src)
+        files = font_files(mine["fonts"] if mine["fonts"] is not DROP else None)
+        img = wall_keys(src)[1]
+        if img is not None:
+            files.append(img)
+        c.files = set(files)
+        base = None
+        if "from" in look:
+            frm = self._source(look["from"])
+            if frm is not None:
+                rc, base = _uimod.theme_custom(frm, None, None)
+                if rc != 0:
+                    base = None
+        if base is None:
+            look.pop("from", None)
+            look.pop("accent", None)
+            look.pop("tint", None)
+            c.src = src
+            return c
+        theirs = keys_of(base)
+        for k in mine:
+            if mine[k] != theirs[k]:
+                c.over[k] = mine[k]
+        return c
+
+    def _adopt_custom(self, c):
+        """Make `c` the custom being changed: a new one drops the fonts the
+        one before it loaded, and the store's packages are read again with
+        it among them (it reads from memory until it is written)."""
+        if c.fresh:
+            self._pic_epoch += 1               # a new custom, maybe a new picture
+            for key in list(_FONTS):
+                if key[0] == CUSTOM:
+                    _uimod.font_free(_FONTS.pop(key))
+        self._cust = c
+        self._pkg_gen = None
+        self._packages()
+
+    def _apply_custom(self, c):
+        """Install custom's bytes and put the look on them: the full switch
+        the first time and on a FONT change (fonts, relayout, the layout),
+        else the shape and the tokens alone."""
+        c.dirty = False
+        if _uimod.theme_install(c.theme)[0] != 0:
+            return
+        self._slot_src = c.theme
+        self._slot_gen = self._pkg_gen
+        forget_package(CUSTOM)
+        if c.wall_moved:
+            c.wall_moved = False
+            self._pic_epoch += 1
+            self._wall_force = True
+        if self.theme_name != CUSTOM or c.font_moved:
+            c.font_moved = False
+            self.set_theme(CUSTOM, persist=False)
+            return
+        ws = self.ws
+        _uimod.use_shape(CUSTOM)
+        ws.theme_colors = theme_colors(CUSTOM, self.theme_variant)
+        self.publish()
+        ws.launcher.theme = ws.theme_colors
+        if getattr(ws, "projects_grid", None) is not None:
+            ws.projects_grid.theme = ws.theme_colors
+        ws._dirty = True
+        self._apply_wallpaper()
 
     # -- the top-bar icon sheet (#52) ----------------------------------------
 
@@ -499,6 +933,10 @@ class Appearance:
         `variant` picks the theme's dark/light presentation (None keeps the
         current variant, so existing name-only callers are untouched)."""
         ws = self.ws
+        if name != CUSTOM and self._cust is not None:
+            self.commit()                      # leaving custom is an exit
+            self._cust = None
+            self._pkg_gen = None
         self._packages()
         if name not in THEME_NAMES:
             name = self._take_package(name)
@@ -529,6 +967,7 @@ class Appearance:
         self._layouts = {}
         self._choices = None
         self.apply_layout()
+        self._apply_wallpaper()
 
     def install_theme(self, src):
         """Install theme package `src` (a theme.json's bytes) as the one
@@ -577,10 +1016,13 @@ class Appearance:
                 stem = stem[:-4]
             if stem and stem not in THEME_NAMES:
                 paths[stem] = path
+        if self._cust is not None and CUSTOM not in paths:
+            paths[CUSTOM] = self._custom_path()   # changed, not yet written
         self._pkg_paths = paths
         adopt_packages(tuple(paths), self._theme_src)
+        used = [_uimod.font(role)[0] for role in _FONT_ROLES]
         for key in list(_FONTS):
-            if key[0] is not None:
+            if key[0] is not None and _FONTS[key] not in used:
                 _uimod.font_free(_FONTS.pop(key))
         self._layouts = {}
         self._choices = None
@@ -589,7 +1031,15 @@ class Appearance:
     def _package_file(self, name, file, cap):
         """Up to cap + 1 bytes of file `file` of store package `name` (one
         over the cap, so the loader refuses an oversized file as BIG), or
-        None when it cannot be read."""
+        None when it cannot be read. `custom` while it is being changed reads
+        its unwritten files from memory."""
+        c = self._cust
+        if name == CUSTOM and c is not None:
+            got = c.theme if file == _THEME_MAIN else c.pending.get(file)
+            if got is not None:
+                return got[:cap + 1]
+            if c.fresh:
+                return None
         path = self._pkg_paths.get(name)
         store = getattr(self.ws, "store", None)
         if path is None or store is None or not store.ready():
@@ -646,6 +1096,7 @@ class Appearance:
         if rc != 0 or src is None:
             self._refuse(name, rc or 2)
             return DEFAULT_THEME
+        self._pic_epoch += 1                   # its picture may have moved too
         self._slot_src = src
         self._slot_gen = self._pkg_gen
         forget_themes()

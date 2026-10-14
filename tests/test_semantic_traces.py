@@ -2264,11 +2264,12 @@ def roles_trace(ws):
 
     # -- wallpaper
     w = ctx.wallpaper
-    say("wallpaper", w.current(), len(w.fills()) > 0, _n(w.id_for({"title": "Wall Z"})))
-    say("wallpaper carts", len(w.carts()) >= 0, w.title("fill:nope"),
+    say("wallpaper", w.current(), _n(w.id_for({"title": "Wall Z"})))
+    say("wallpaper carts", len(w.carts()) >= 0, w.title("nobody.nope"),
         w.title(w.id_for(w.carts()[0])) == w.carts()[0].get("title"))
-    w.select("fill:black")
-    say("selected", w.current(), ws.system.get("wallpaper"))
+    w.select(None)
+    ws.look.tick(0)
+    say("selected", w.current(), ws.look.theme_name)
     w.preview(cv, (0, 0, 32, 24), 0)
     say("copy", _n(w.load_copy()), _n(w.save_copy(px)),
         _n(f.decode_image(w.load_copy()[0])))
@@ -2478,9 +2479,9 @@ run_script [False,"CAN'T READ IT"]
 text_mode True False
 play desktop
 notify
-wallpaper moybyte.moy_night True 'moybyte.wall_z'
+wallpaper moybyte.moy_night 'moybyte.wall_z'
 wallpaper carts True None True
-selected fill:black fill:black
+selected None custom
 copy [None,None] [None,None] [2,2,b4]
 artwork False ['drawings','pic'] True ''
 artwork new ['drawings','drawing_1'] False
