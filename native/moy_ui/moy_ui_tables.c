@@ -1108,3 +1108,59 @@ static const uint8_t font_1[4390] =
 const char *const moy_theme_font_names[MOY_THEME_FONT_FILES + 1] = {"tiny5.fnt", "tiny5.txt", 0};
 const uint8_t *const moy_theme_font_data[MOY_THEME_FONT_FILES + 1] = {font_0, font_1, 0};
 const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1] = {682, 4389, 0};
+
+const char *const moy_theme_accent_names[MOY_THEME_ACCENTS] = {
+    "yellow",
+    "orange",
+    "coral",
+    "red",
+    "pink",
+    "magenta",
+    "violet",
+    "lavender",
+    "blue",
+    "azure",
+    "cyan",
+    "mint",
+    "green",
+    "lime",
+    "peach",
+    "silver",
+};
+
+const uint8_t moy_theme_accents[MOY_THEME_ACCENTS][2] = {{10, 30}, {9, 57}, {36, 56}, {8, 56}, {14, 63}, {45, 62}, {44, 61}, {13, 61}, {12, 60}, {42, 60}, {41, 59}, {40, 58}, {11, 58}, {47, 32}, {15, 33}, {6, 5}};
+
+const char *const moy_theme_tint_names[MOY_THEME_TINTS] = {
+    "grey",
+    "sand",
+    "navy",
+    "plum",
+    "rose",
+    "forest",
+    "teal",
+    "earth",
+};
+
+const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1] = {
+    {7, 55, 54, 51, 50, 49, 6, 48},  // grey
+    {7, 55, 5, 34, 53, 29, 31, 52},  // sand
+    {6, 1, 60, 51, 50, 22, 48},  // navy
+    {5, 61, 2, 13, 23, 24},  // plum
+    {7, 56, 63, 2, 46, 26, 17, 52},  // rose
+    {5, 58, 32, 3, 19, 20},  // forest
+    {4, 59, 58, 21, 27},  // teal
+    {7, 33, 57, 30, 28, 35, 31, 15},  // earth
+};
+
+const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX] = {
+    {0, 9, 10, 7, 8, 27, 21, 6, 5, 28, 29},  // background
+    {1, 13, 22, 30, 255, 255, 255, 255, 255, 255, 255},  // line
+    {4, 2, 26, 14, 255, 255, 255, 255, 255, 255, 255},  // accent
+    {1, 13, 5, 28, 22, 8, 255, 255, 255, 255, 255},  // tied
+    {16, 31, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // accent_ink
+    {34, 35, 36, 37, 38, 39, 32, 255, 255, 255, 255},  // content
+};
+
+const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4] = {{12, 11, 9, 255}, {25, 24, 0, 21}};
+
+const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS] = {5, 6, 13, 49, 50, 53};

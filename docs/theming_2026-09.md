@@ -756,7 +756,8 @@ two resolved rows (the token row and the content set, both variants), an
 **accent** — one of sixteen pairs (A, deep) in style.json's
 `theme.accents`, or the source's own — and a **tint** — NONE or one of
 eight ramps of MOY64 indices in `theme.tints`, dark to light, never black
-(0) or white (7). The lists are data, as `font_roles` is, and the sixteen
+(0) or white (7). The role classes each step names below are
+`theme.recolour`. The lists are data, as `font_roles` is, and the sixteen
 accents and eight tints the mockups draw are the set (owner, 2026-10-14);
 the mockups' `derive()` (`docs/media/theming_2026-09/appearance/mockups.py`)
 carries them. **Every accent is one black clears** (`clears(A, 0)`), because
@@ -768,11 +769,12 @@ Per variant, with B the source's row and R the result, R starting as B:
 
 1. **Tint** (none on NONE). Each background role — `panel`, `surface`,
    `surface_alt`, `desktop`, `desktop_pattern`, `title_inactive`, `bar`,
-   `dim`, `hilite`, `shade_hi`, `shade_lo` — and each line role — `edge`,
-   `border`, `bar_edge`, `shade_dark` — whose B value is not 0 or 7 (D1's
-   black outlines stay) takes the ramp entry nearest B's value in
-   luminance among the entries that clear, against black and against
-   white, every floor B's value clears; with none, B's value. Keeping each
+   `dim`, `hilite`, `shade_hi`, `shade_lo` — whatever its B value, and each
+   line role — `edge`, `border`, `bar_edge`, `shade_dark` — whose B value is
+   not 0 or 7 (D1's black outlines stay), takes the ramp entry nearest B's
+   value in luminance (the lower index on a tie) among the entries that
+   clear, against black and against white, every floor B's value clears;
+   with none, B's value. Keeping each
    background on its side is what keeps the literal inks of the kinds
    readable and the flags `surface_light`, `bar_light` and `band_light`
    true.
@@ -786,14 +788,14 @@ Per variant, with B the source's row and R the result, R starting as B:
    (`surface`, `surface_alt`), `chrome_ink` (`panel`, `bar`), `title_ink`
    (`title`, `title_active`), `selection_ink` (`selection`) — keeps B's
    value if it clears every one, else takes black or white, whichever has
-   the larger least ratio. Black or white clears any single MOY64 colour,
+   the larger least ratio (black on a tie). Black or white clears any single MOY64 colour,
    and step 1 keeps the backgrounds a source pairs with one ink on one
-   side, so this lands; `+tests/test_theme_derive.py` holds it for every
+   side, so this lands; `tests/test_theme_derive.py` holds it for every
    seed, accent, tint and variant.
 4. **Dim inks.** `ink_dim` (`surface`) and `chrome_ink_dim` (`panel`,
    `bar`) keep B's value if it clears them, else take the dimmest that does
-   of the ramp and the greys 5, 6, 13, 49, 50 and 53, else `ink` or
-   `chrome_ink`.
+   (the least ratio, the lower index on a tie) of the ramp and the greys 5,
+   6, 13, 49, 50 and 53, else R's `ink` or `chrome_ink`.
 5. **Content.** Each `code_*` role and `ink_note` keeps B's value if it
    clears R's `surface`, else takes its value in style.json's derive set
    for a surface of that side (the `light` set where black beats white on
@@ -802,8 +804,11 @@ Per variant, with B the source's row and R the result, R starting as B:
    looks, and the kinds paint their labels in literal inks they already
    clear.
 
-The flags keep B's. NONE with the source's own accent answers B exactly. A
-source a hand edit made unreadable stays reported as any hand edit is (§7).
+The flags keep B's. NONE with the source's own accent answers B but for a
+dim ink or a content colour B itself leaves under the floor, which steps 4
+and 5 repair as they would under any tint (several seeds' light variants
+carry one; their pairs of `theme.pairs` all clear). A source a hand edit
+made unreadable in `theme.pairs` stays reported as any hand edit is (§7).
 
 **Where the result lives: plain roles in `custom`'s `theme.json`.** Both
 variants, every role, written by `ui.theme_custom` (phase 6 step 4), so the
@@ -817,7 +822,8 @@ result, since a ramp quantises and quantising a quantised row drifts. A
 colour saved through EDIT FILE drops `from`, and the file as saved is the
 source from then on. A package whose whole rows would pass `theme.bytes` (a
 source with many surfaces) is written without the roles whose value §5's
-rule gives back, which resolves to the same row. Declined: `accent` and
+rule gives back, which resolves to the same row, and one that does not fit
+even so is refused (`MOY_THEME_BIG`). Declined: `accent` and
 `tint` keys the loader derives from, smaller on the card, because the
 derivation would then run in the boot path and in every resolve, a console
 without it would draw the source's colours under the kid's name, EDIT FILE
@@ -1386,28 +1392,37 @@ port), never here.
      rulings above) and never merged. Changes no file a board image carries.
      Gate: the owner's review; `tools/check_docs.py`.
 
-  4. **The derivation, in C** (§4.10). `moy_theme_derive` in
+  4. **The derivation, in C** (§4.10; landed 2026-10-14). `moy_theme_derive` in
      `native/moy_ui/moy_theme.c`: a source's two resolved rows, an accent
      and a tint in, two rows out, integer only on `moy_theme_lum` and the
      loader's own predicate. style.json gains `theme.accents` (sixteen
-     pairs), `theme.tints` (eight ramps) and the role classes §4.10 names,
+     pairs), `theme.tints` (eight ramps) and the role classes §4.10 names
+     (`theme.recolour`),
      generated into `moy_ui_tables.c` by `tools/gen_ui_tables.py` as the
-     derive table is. `ui.theme_custom(source, accent, tint)` (+, in
-     `native/moy_ui/modmoy_ui.c`) answers the bytes of `custom`'s
-     `theme.json`: the source's chain flattened — metrics, text effects,
-     surfaces, frame, fonts, layout, the wallpaper keys — with both derived
-     variants written whole, `name` `custom`, no `inherits`, minified, under
-     `theme.bytes` (§4.10's fallback when not). Declined: the derivation in
+     derive table is. `ui.theme_custom(source, accent, tint)` (in
+     `native/moy_ui/modmoy_ui.c`, over `moy_theme_custom`; `source` a
+     seed's name or a stored package's bytes, `accent` an accent's A or
+     `None` for the source's own, `tint` a tint's name or `None`) answers
+     the bytes of `custom`'s `theme.json`: the source's chain flattened —
+     metrics, text effects, surfaces, frame, fonts and layout, each from
+     the nearest package that sets it and the default seed's own only where
+     it is the source (every package resolves through it anyway), and the
+     source's own wallpaper keys — with both derived variants written
+     whole, `name` `custom`, no `inherits`, minified, under `theme.bytes`
+     (§4.10's fallback when not); `ui.theme_accents()` and
+     `ui.theme_tints()` answer the two lists. Declined: the derivation in
      Python (the T-Deck pays it per held key) and in the loader (§4.10).
-     Test net: `+tests/test_theme_derive.py` — every seed × accent × tint
+     Test net: `tests/test_theme_derive.py` — every seed × accent × tint
      × variant: no pair of `theme.pairs` under `theme.contrast`, `clears(A,
      0)` for every accent, the bytes parse with no note and resolve to the
      rows the derivation answered; tint NONE with the theme's own accent
-     answers the source's rows exactly; a table of the seeds' derived rows
-     pins the C to the mockups' `derive()`; a maximal fixture (every role,
+     answers the source's rows but for the dim inks and content colours
+     the source leaves under the floor (steps 4 and 5 repair them); the
+     seeds' derived rows equal the mockups' `derive()` role for role; a maximal fixture (every role,
      32 surfaces, 32 effects, a layout) stays under `theme.bytes`; and the
-     boards' module answers the host's table (`tests/on_glass.py`, as
-     `layouts_match_host` does). No golden moves (nothing draws it yet).
+     boards' module answers the host's bytes (the desktop MicroPython's
+     `moy_ui` there, and `theme_custom_matches_host` in
+     `tests/on_glass.py` on every console board). No golden moves (nothing draws it yet).
 
   5. **`custom`, saved as it goes, and the wallpaper in the theme.**
      `Appearance.change(...)` (`runtime/appearance.py`, `ws.look`) is the one

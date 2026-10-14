@@ -306,5 +306,31 @@ extern const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1];
 extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,
     moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles,
     moy_theme_n_homes;
+// Accent and tint (docs/theming_2026-09.md §4.10, moy_theme_derive): the
+// accents [A, deep], the tints' ramps ([0] the length, then dark to
+// light), and the role classes, each 0xff past its end.
+#define MOY_THEME_ACCENTS 16
+#define MOY_THEME_TINTS 8
+#define MOY_THEME_RAMP_MAX 7
+#define MOY_THEME_CLASS_MAX 11
+#define MOY_THEME_DIM_INKS 2
+#define MOY_THEME_DIM_GREYS 6
+enum {
+    MOY_THEME_CL_BACKGROUND = 0,
+    MOY_THEME_CL_LINE = 1,
+    MOY_THEME_CL_ACCENT = 2,
+    MOY_THEME_CL_TIED = 3,
+    MOY_THEME_CL_ACCENT_INK = 4,
+    MOY_THEME_CL_CONTENT = 5,
+    MOY_THEME_CLASSES = 6,
+};
+extern const char *const moy_theme_accent_names[MOY_THEME_ACCENTS];
+extern const uint8_t moy_theme_accents[MOY_THEME_ACCENTS][2];
+extern const char *const moy_theme_tint_names[MOY_THEME_TINTS];
+extern const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1];
+extern const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX];
+// Each dim ink: the role, its fallback, its backgrounds (0xff past the end).
+extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4];
+extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 
 #endif // MOY_UI_TABLES_H

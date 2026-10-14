@@ -361,6 +361,99 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
 
+// theme_custom(source, accent, tint) -> (rc, bytes or None): the bytes of
+// `custom`'s theme.json (moy_theme_custom) derived from `source`, a seed's
+// name or a stored package's bytes; accent the A of a theme_accents() entry
+// or None for the source's own, tint a theme_tints() name or None. A name
+// that is no seed answers MOY_THEME_CHAIN.
+static mp_obj_t ui_theme_custom(mp_obj_t source, mp_obj_t accent, mp_obj_t tint) {
+    const uint8_t *src;
+    size_t n;
+    if (mp_obj_is_str(source)) {
+        size_t sn;
+        const char *s = mp_obj_str_get_data(source, &sn);
+        int seed = -1;
+        for (int i = 0; i < MOY_THEME_SEEDS; i++) {
+            if (strlen(moy_theme_seed_names[i]) == sn && memcmp(moy_theme_seed_names[i], s, sn) == 0) {
+                seed = i;
+            }
+        }
+        if (seed < 0) {
+            mp_obj_t out[2] = {MP_OBJ_NEW_SMALL_INT(MOY_THEME_CHAIN), mp_const_none};
+            return mp_obj_new_tuple(2, out);
+        }
+        src = (const uint8_t *)moy_theme_seed_src[seed];
+        n = moy_theme_seed_len[seed];
+    } else {
+        mp_buffer_info_t b;
+        mp_get_buffer_raise(source, &b, MP_BUFFER_READ);
+        src = b.buf;
+        n = b.len;
+    }
+    int ai = -1, ti = -1;
+    if (accent != mp_const_none) {
+        mp_int_t a = mp_obj_get_int(accent);
+        for (int i = 0; i < MOY_THEME_ACCENTS && ai < 0; i++) {
+            ai = moy_theme_accents[i][0] == a ? i : -1;
+        }
+        if (ai < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("no such accent"));
+        }
+    }
+    if (tint != mp_const_none) {
+        size_t tn;
+        const char *t = mp_obj_str_get_data(tint, &tn);
+        for (int i = 0; i < MOY_THEME_TINTS && ti < 0; i++) {
+            ti = strlen(moy_theme_tint_names[i]) == tn && memcmp(moy_theme_tint_names[i], t, tn) == 0
+                 ? i : -1;
+        }
+        if (ti < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("no such tint"));
+        }
+    }
+    moy_theme_pkg_t *scratch = m_new(moy_theme_pkg_t, 2);
+    uint8_t *buf = m_new(uint8_t, MOY_THEME_BYTES);
+    size_t len = 0;
+    int rc = moy_theme_custom(src, n, ai, ti, scratch, buf, MOY_THEME_BYTES, &len);
+    m_del(moy_theme_pkg_t, scratch, 2);
+    mp_obj_t out[2] = {MP_OBJ_NEW_SMALL_INT(rc), mp_const_none};
+    if (rc == MOY_THEME_OK) {
+        out[1] = mp_obj_new_bytes(buf, len);
+    }
+    m_del(uint8_t, buf, MOY_THEME_BYTES);
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_theme_custom_obj, ui_theme_custom);
+
+// theme_accents() -> ((name, A, deep), ...): style.json's theme.accents.
+static mp_obj_t ui_theme_accents(void) {
+    mp_obj_t items[MOY_THEME_ACCENTS];
+    for (int i = 0; i < MOY_THEME_ACCENTS; i++) {
+        mp_obj_t t[3] = {name_obj(moy_theme_accent_names[i]),
+                         MP_OBJ_NEW_SMALL_INT(moy_theme_accents[i][0]),
+                         MP_OBJ_NEW_SMALL_INT(moy_theme_accents[i][1])};
+        items[i] = mp_obj_new_tuple(3, t);
+    }
+    return mp_obj_new_tuple(MOY_THEME_ACCENTS, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_accents_obj, ui_theme_accents);
+
+// theme_tints() -> ((name, (ramp...)), ...): style.json's theme.tints.
+static mp_obj_t ui_theme_tints(void) {
+    mp_obj_t items[MOY_THEME_TINTS];
+    for (int i = 0; i < MOY_THEME_TINTS; i++) {
+        mp_obj_t ramp[MOY_THEME_RAMP_MAX];
+        for (int k = 0; k < moy_theme_tints[i][0]; k++) {
+            ramp[k] = MP_OBJ_NEW_SMALL_INT(moy_theme_tints[i][1 + k]);
+        }
+        mp_obj_t t[2] = {name_obj(moy_theme_tint_names[i]),
+                         mp_obj_new_tuple(moy_theme_tints[i][0], ramp)};
+        items[i] = mp_obj_new_tuple(2, t);
+    }
+    return mp_obj_new_tuple(MOY_THEME_TINTS, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_tints_obj, ui_theme_tints);
+
 // font_load(src) -> (rc, font): src a font file's bytes (moy_text.h); font
 // the loaded row's id, or None when refused.
 static mp_obj_t ui_font_load(mp_obj_t src) {
@@ -1353,6 +1446,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_home), MP_ROM_PTR(&ui_theme_home_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_resolve), MP_ROM_PTR(&ui_theme_resolve_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_custom), MP_ROM_PTR(&ui_theme_custom_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_accents), MP_ROM_PTR(&ui_theme_accents_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_tints), MP_ROM_PTR(&ui_theme_tints_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },

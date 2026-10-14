@@ -44,6 +44,7 @@ _SIGS = (
     ("moy_theme_probe_name", [], c.c_char_p),
     ("moy_theme_probe_font", [_I], c.c_char_p),
     ("moy_theme_uninstall", [], None),
+    ("moy_theme_custom", [_P, _Z, _I, _I, c.c_void_p, c.c_void_p, _Z, c.POINTER(_Z)], _I),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
@@ -787,6 +788,35 @@ def binding():
         finally:
             lib.moy_theme_probe_end()
 
+    rdims = (c.c_int * 4).in_dll(lib, "moy_theme_custom_dims")
+    theme_bytes = rdims[3]
+    acc = ((c.c_uint8 * 2) * rdims[0]).in_dll(lib, "moy_theme_accents")
+    accents = tuple((n, acc[i][0], acc[i][1]) for i, n in
+                    enumerate(_names(lib, "moy_theme_accent_names", rdims[0])))
+    ramps = ((c.c_uint8 * (rdims[2] + 1)) * rdims[1]).in_dll(lib, "moy_theme_tints")
+    tints = tuple((n, tuple(ramps[i][1:1 + ramps[i][0]])) for i, n in
+                  enumerate(_names(lib, "moy_theme_tint_names", rdims[1])))
+    seed_src = (c.c_char_p * len(seeds)).in_dll(lib, "moy_theme_seed_src")
+
+    def theme_custom(source, accent, tint):
+        if isinstance(source, str):
+            if source not in seeds:
+                return 6, None
+            b = seed_src[seeds.index(source)]
+        else:
+            b = bytes(source)
+        ai = -1 if accent is None else next(
+            (i for i, a in enumerate(accents) if a[1] == accent), None)
+        ti = -1 if tint is None else next(
+            (i for i, t in enumerate(tints) if t[0] == tint), None)
+        if ai is None or ti is None:
+            raise ValueError("theme_custom: no such accent or tint")
+        scratch = c.create_string_buffer(2 * pkg_bytes)
+        out = c.create_string_buffer(theme_bytes)
+        n = c.c_size_t()
+        rc = lib.moy_theme_custom(b, len(b), ai, ti, scratch, out, theme_bytes, c.byref(n))
+        return rc, (out.raw[:n.value] if rc == OK else None)
+
     def font_file(name):
         b = _b(name)
         n = c.c_size_t()
@@ -834,6 +864,9 @@ def binding():
     m.theme_install = theme_install
     m.theme_installed = theme_installed
     m.theme_resolve = theme_resolve
+    m.theme_custom = theme_custom
+    m.theme_accents = lambda: accents
+    m.theme_tints = lambda: tints
     m.theme_uninstall = lib.moy_theme_uninstall
     m.theme_fonts = theme_fonts
     m.theme_layout = theme_layout

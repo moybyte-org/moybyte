@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   Tables            style.json's toolkit half resolved: kinds, states, tokens, specs
+#   generate          moy_ui_tables.h and .c from style.json
+#   generate_theme    the theme loader's tables: limits, rules, pairs, luminance, seeds
+#   _recolour         the accent-and-tint derivation's tables (accents, tints, classes)
+#   generate_strings  the string table (strings/en.json)
+#   outputs           every generated file and its text (the drift test reads it)
 """Write the toolkit's tables from their data (docs/kernel_toolkit_2026-10.md
 §2.1): native/moy_ui's `style.json` in, its `moy_ui_tables.h` and
 `moy_ui_tables.c` out, the seed theme packages (`themes/*.json`) embedded in
@@ -442,6 +449,8 @@ def generate_theme(style, t):
          "extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,",
          "    moy_theme_n_effects, moy_theme_n_parts, moy_theme_n_states, moy_theme_n_font_roles,"
          "\n    moy_theme_n_homes;"]
+    rh, rc = _recolour(th, roles, flags)
+    h.extend(rh)
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
     for r, k, v in rules:
         c.append("    {%d, %d, %d},  // %s" % (r, k, v, roles[r]))
@@ -527,6 +536,90 @@ def generate_theme(style, t):
              % "".join("font_%d, " % i for i in range(len(fonts))))
     c.append("const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1] = {%s0};\n"
              % "".join("%d, " % len(d) for _n, d in fonts))
+    c.extend(rc)
+    return h, c
+
+
+def _recolour(th, roles, flags):
+    """The accent-and-tint derivation's tables (docs/theming_2026-09.md
+    §4.10, moy_theme_derive): the accents, the tints' ramps and the role
+    classes its steps rewrite."""
+    lum = _luminance()
+    rc = th["recolour"]
+
+    def clears(a, b):
+        hi, lo = max(lum[a], lum[b]), min(lum[a], lum[b])
+        return (hi + 500) * 10 >= th["contrast"] * (lo + 500)
+
+    def role(name):
+        if name not in roles or flags[roles.index(name)]:
+            raise SystemExit("theme.recolour: %r is no colour role" % name)
+        return roles.index(name)
+
+    accents, tints = th["accents"], th["tints"]
+    for name, a, deep in accents:
+        if not (0 <= a < 64 and 0 <= deep < 64 and clears(a, 0)):
+            raise SystemExit("theme.accents: %s is two palette indices, A one black clears"
+                             % name)
+    for name, ramp in tints:
+        if not ramp or any(not 0 < v < 64 or v == 7 for v in ramp):
+            raise SystemExit("theme.tints: %s's ramp is palette indices, never 0 or 7" % name)
+    names = [n for n, *_ in accents] + [n for n, _r in tints]
+    if len(set(n for n, *_ in accents)) != len(accents) or \
+            len(set(n for n, _r in tints)) != len(tints) or \
+            len(set(a for _n, a, _d in accents)) != len(accents):
+        raise SystemExit("theme.accents / theme.tints: a name or an accent twice")
+    if any(len(n) > 15 for n in names):
+        raise SystemExit("theme.accents / theme.tints: a name of at most 15 characters")
+    classes = ("background", "line", "accent", "tied", "accent_ink", "content")
+    lists = [[role(r) for r in rc[k]] for k in classes]
+    cmax = max(len(v) for v in lists)
+    rmax = max(len(r) for _n, r in tints)
+    greys = rc["dim_greys"]
+    dims = [(role(r), role(f), [role(b) for b in bgs]) for r, f, bgs in rc["dim_ink"]]
+    if any(not 1 <= len(b) <= 2 for _r, _f, b in dims):
+        raise SystemExit("theme.recolour.dim_ink: one or two backgrounds each")
+    h = ["// Accent and tint (docs/theming_2026-09.md §4.10, moy_theme_derive): the",
+         "// accents [A, deep], the tints' ramps ([0] the length, then dark to",
+         "// light), and the role classes, each 0xff past its end.",
+         "#define MOY_THEME_ACCENTS %d" % len(accents),
+         "#define MOY_THEME_TINTS %d" % len(tints),
+         "#define MOY_THEME_RAMP_MAX %d" % rmax,
+         "#define MOY_THEME_CLASS_MAX %d" % cmax,
+         "#define MOY_THEME_DIM_INKS %d" % len(dims),
+         "#define MOY_THEME_DIM_GREYS %d" % len(greys),
+         "enum {",
+         *["    MOY_THEME_CL_%s = %d," % (_ident(k), i) for i, k in enumerate(classes)],
+         "    MOY_THEME_CLASSES = %d," % len(classes),
+         "};",
+         "extern const char *const moy_theme_accent_names[MOY_THEME_ACCENTS];",
+         "extern const uint8_t moy_theme_accents[MOY_THEME_ACCENTS][2];",
+         "extern const char *const moy_theme_tint_names[MOY_THEME_TINTS];",
+         "extern const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1];",
+         "extern const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX];",
+         "// Each dim ink: the role, its fallback, its backgrounds (0xff past the end).",
+         "extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4];",
+         "extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];"]
+    c = ["const char *const moy_theme_accent_names[MOY_THEME_ACCENTS] = {"]
+    c.extend("    %s," % _c_str(n) for n, _a, _d in accents)
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_accents[MOY_THEME_ACCENTS][2] = {%s};\n"
+             % ", ".join("{%d, %d}" % (a, d) for _n, a, d in accents))
+    c.append("const char *const moy_theme_tint_names[MOY_THEME_TINTS] = {")
+    c.extend("    %s," % _c_str(n) for n, _r in tints)
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1] = {")
+    c.extend("    {%s},  // %s" % (", ".join(map(str, [len(r)] + r)), n) for n, r in tints)
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX] = {")
+    for k, v in zip(classes, lists):
+        c.append("    {%s},  // %s" % (", ".join(map(str, v + [255] * (cmax - len(v)))), k))
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4] = {%s};\n"
+             % ", ".join("{%s}" % ", ".join(map(str, [r, f] + b + [255] * (2 - len(b))))
+                         for r, f, b in dims))
+    c.append("const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS] = {%s};\n"
+             % ", ".join(map(str, greys)))
     return h, c
 
 

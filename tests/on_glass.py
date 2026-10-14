@@ -526,6 +526,57 @@ def layouts_match_host(board, n=40):
                            strict=True) == moy_ui.theme_layout(name), name
 
 
+_CUSTOM_HELPER = """
+import moy_ui
+def _custom_digest(src, accents, tints):
+    try:
+        from binascii import crc32
+        h, kind = 0, 'crc'
+    except ImportError:
+        import hashlib
+        h, kind = hashlib.sha256(), 'sha'
+    n = 0
+    for a in accents:
+        for t in tints:
+            rc, b = moy_ui.theme_custom(src, a, t)
+            chunk = bytes([rc]) + (b or b'')
+            n += len(chunk)
+            if kind == 'crc':
+                h = crc32(chunk, h)
+            else:
+                h.update(chunk)
+    return (kind, n, h & 0xffffffff if kind == 'crc' else __import__('binascii').hexlify(h.digest()).decode())
+"""
+
+
+def theme_custom_matches_host(board):
+    """Every seed x accent x tint (docs/theming_2026-09.md §4.10): this
+    board's moy_ui writes `custom`'s theme.json byte for byte as the host's
+    does, each seed's answers digested on the board."""
+    import binascii
+    import hashlib
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    for verb in ("theme_accents", "theme_tints"):
+        assert board.pyval("__import__('moy_ui').%s()" % verb, strict=True) == \
+            getattr(moy_ui, verb)(), verb
+    board.pyexec(_CUSTOM_HELPER, strict=True)
+    accents = [None] + [a for _n, a, _d in moy_ui.theme_accents()]
+    tints = [None] + [n for n, _r in moy_ui.theme_tints()]
+    for name in moy_ui.themes():
+        kind, n, got = board.pyval("ws._g['_custom_digest'](%r, %r, %r)" % (name, accents, tints),
+                                   strict=True, timeout=120)
+        chunks = [bytes([rc]) + (b or b"") for rc, b in
+                  (moy_ui.theme_custom(name, a, t) for a in accents for t in tints)]
+        if kind == "crc":
+            want = 0
+            for ch in chunks:
+                want = binascii.crc32(ch, want)
+        else:
+            want = hashlib.sha256(b"".join(chunks)).hexdigest()
+        assert (n, got) == (sum(map(len, chunks)), want), name
+
+
 def the_theme_font_is_installed(board):
     """The default theme's Tiny5 (docs/theming_2026-09.md §4.7) is what this
     board's shell draws in: the seed font file byte for byte the host's,

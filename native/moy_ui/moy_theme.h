@@ -169,6 +169,40 @@ const char *moy_theme_probe_name(void);
 const char *moy_theme_probe_font(int role);
 extern const size_t moy_theme_pkg_bytes;
 
+// Accent and tint (docs/theming_2026-09.md §4.10): every colour role of a
+// source's two resolved rows (moy_theme_resolve's, [MOY_THEME_DARK] and
+// [MOY_THEME_LIGHT]) derived from an accent, an index of moy_theme_accents or
+// -1 for the source's own, and a tint, an index of moy_theme_tints or -1 for
+// none, readable by construction: no pair of theme.pairs under the floor
+// where the source's own pairs clear. Integer only, on moy_theme_lum and the
+// loader's predicate. Tint and accent -1 answer the source's rows where they
+// are readable.
+void moy_theme_derive(const int32_t src[2][MOY_THEME_ROLES], int accent, int tint,
+                      int32_t out[2][MOY_THEME_ROLES]);
+
+// The theme a change in Appearance makes (§4.10, phase 6 step 5).
+#define MOY_THEME_CUSTOM "custom"
+
+// The bytes of `custom`'s theme.json, derived from the package `src` (a
+// stored package's theme.json, standalone, or a seed's, moy_theme_seed_src):
+// both variants' rows from moy_theme_derive written whole, the source's chain
+// flattened into the rest (its metrics, text effects, surfaces, frame, fonts
+// and layout, each from the nearest package that sets it, the default seed's
+// own only where it is the source, which every package resolves through
+// anyway), the source's own `wallpapers` and `images`, `name` custom, no
+// `inherits`, minified. Over MOY_THEME_BYTES, the roles whose value the
+// resolution (§5) gives back are left out. `scratch` holds two packages.
+// MOY_THEME_OK with *len bytes in `out`; a parse's refusal, MOY_THEME_TAKEN for
+// a seed's name on bytes that are not that seed's, MOY_THEME_CHAIN for a
+// stored package naming `inherits`, or MOY_THEME_BIG (*len the size it needed)
+// where it does not fit `cap` or MOY_THEME_BYTES, or the flattened chain holds
+// more text effects or surfaces than a package may.
+int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
+                     moy_theme_pkg_t scratch[2], uint8_t *out, size_t cap, size_t *len);
+
+// Accents, tints, the longest ramp, MOY_THEME_BYTES: the bindings' table check.
+extern const int moy_theme_custom_dims[4];
+
 // A seed package's file by name (the tables embed every font a seed's `fonts`
 // names, and each font X.fnt's licence text X.txt): its bytes and *len, or NULL.
 const uint8_t *moy_theme_font_file(const char *name, size_t n, size_t *len);

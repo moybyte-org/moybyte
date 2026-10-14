@@ -1539,3 +1539,669 @@ const char *moy_theme_probe_font(int role) {
     }
     return s_probe->font[role];
 }
+
+// -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
+
+// The loader's predicate: (a, b) reaches MOY_THEME_CONTRAST.
+static int clears(int32_t a, int32_t b) {
+    int32_t la = moy_theme_lum[a & 63], lb = moy_theme_lum[b & 63];
+    int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
+    return (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
+}
+
+// A contrast ratio as a fraction, compared exactly.
+typedef struct {
+    int32_t num, den;
+} ratio_t;
+
+static ratio_t ratio(int32_t a, int32_t b) {
+    int32_t la = moy_theme_lum[a & 63], lb = moy_theme_lum[b & 63];
+    ratio_t r = {(la > lb ? la : lb) + 500, (la > lb ? lb : la) + 500};
+    return r;
+}
+
+static int ratio_cmp(ratio_t x, ratio_t y) {
+    int64_t l = (int64_t)x.num * y.den, r = (int64_t)y.num * x.den;
+    return l < r ? -1 : l > r;
+}
+
+// The least ratio of colour c against each role of `bgs` (0xff past the end) in row.
+static ratio_t least(int32_t c, const uint8_t *bgs, int nb, const int32_t *row) {
+    ratio_t m = {0, 1};
+    for (int i = 0; i < nb && bgs[i] != 0xff; i++) {
+        ratio_t r = ratio(c, row[bgs[i]]);
+        if (i == 0 || ratio_cmp(r, m) < 0) {
+            m = r;
+        }
+    }
+    return m;
+}
+
+static int clears_all(int32_t c, const uint8_t *bgs, int nb, const int32_t *row) {
+    for (int i = 0; i < nb && bgs[i] != 0xff; i++) {
+        if (!clears(c, row[bgs[i]])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Step 1's map: the ramp entry nearest v in luminance among those that clear
+// black and white wherever v does (the lower index on a tie); none: v.
+static int32_t tint_map(int32_t v, const uint8_t *ramp, int n) {
+    int need0 = clears(v, 0), need7 = clears(v, 7);
+    int32_t best = -1, bestd = 0;
+    for (int i = 0; i < n; i++) {
+        int32_t c = ramp[i];
+        if ((need0 && !clears(c, 0)) || (need7 && !clears(c, 7))) {
+            continue;
+        }
+        int32_t d = moy_theme_lum[c] - moy_theme_lum[v];
+        d = d < 0 ? -d : d;
+        if (best < 0 || d < bestd || (d == bestd && c < best)) {
+            best = c;
+            bestd = d;
+        }
+    }
+    return best < 0 ? v : best;
+}
+
+// A content role's value in the derive set of one side (0 dark, 1 light):
+// that side's palette value, else `both`'s; -1 where neither gives one.
+static int32_t set_value(int role, int side) {
+    const int at[2] = {side, 2};
+    for (int k = 0; k < 2; k++) {
+        const uint8_t *span = moy_theme_rules_at[at[k]];
+        for (int i = span[0]; i < span[0] + span[1]; i++) {
+            const moy_theme_rule_t *u = &moy_theme_rules[i];
+            if (u->role == role && !u->is_role) {
+                return u->v;
+            }
+        }
+    }
+    return -1;
+}
+
+#define CLASS(k, i) moy_theme_classes[k][i]
+#define EACH(k, i) for (int i = 0; i < MOY_THEME_CLASS_MAX && CLASS(k, i) != 0xff; i++)
+
+static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
+    memcpy(r, b, MOY_THEME_ROLES * sizeof(int32_t));
+    const uint8_t *ramp = tint >= 0 ? &moy_theme_tints[tint][1] : NULL;
+    int rn = tint >= 0 ? moy_theme_tints[tint][0] : 0;
+    // 1. the tint
+    if (ramp != NULL) {
+        EACH(MOY_THEME_CL_BACKGROUND, i) {
+            r[CLASS(MOY_THEME_CL_BACKGROUND, i)] = tint_map(b[CLASS(MOY_THEME_CL_BACKGROUND, i)],
+                                                            ramp, rn);
+        }
+        EACH(MOY_THEME_CL_LINE, i) {
+            int role = CLASS(MOY_THEME_CL_LINE, i);
+            if (b[role] != 0 && b[role] != 7) {
+                r[role] = tint_map(b[role], ramp, rn);
+            }
+        }
+    }
+    // 2. the accent
+    if (accent >= 0) {
+        int32_t a = moy_theme_accents[accent][0], deep = moy_theme_accents[accent][1];
+        EACH(MOY_THEME_CL_TIED, i) {
+            int role = CLASS(MOY_THEME_CL_TIED, i);
+            if (b[role] == b[MOY_UI_T_TITLE] || b[role] == b[MOY_UI_T_ACCENT]) {
+                r[role] = a;
+            }
+        }
+        EACH(MOY_THEME_CL_ACCENT, i) {
+            r[CLASS(MOY_THEME_CL_ACCENT, i)] = a;
+        }
+        EACH(MOY_THEME_CL_ACCENT_INK, i) {
+            const int32_t cand[3] = {a, deep, r[MOY_UI_T_INK]};
+            for (int k = 0; k < 3; k++) {
+                if (clears(cand[k], r[MOY_UI_T_SURFACE])) {
+                    r[CLASS(MOY_THEME_CL_ACCENT_INK, i)] = cand[k];
+                    break;
+                }
+            }
+        }
+    }
+    // 3. the inks of theme.pairs: B's where it clears every background it
+    // pairs with, else black or white, the larger least ratio (black on a tie)
+    for (int p = 0; p < MOY_THEME_PAIRS; p++) {
+        int ink = moy_theme_pairs[p][1], first = 1;
+        uint8_t bgs[MOY_THEME_PAIRS];
+        int nb = 0;
+        for (int q = 0; q < MOY_THEME_PAIRS; q++) {
+            if (moy_theme_pairs[q][1] == ink) {
+                first &= q >= p;
+                bgs[nb++] = moy_theme_pairs[q][0];
+            }
+        }
+        if (!first) {
+            continue;
+        }
+        if (clears_all(b[ink], bgs, nb, r)) {
+            r[ink] = b[ink];
+        } else {
+            r[ink] = ratio_cmp(least(7, bgs, nb, r), least(0, bgs, nb, r)) > 0 ? 7 : 0;
+        }
+    }
+    // 4. the dim inks: B's where it clears, else the dimmest of the ramp and
+    // the greys that does (the lower index on a tie), else the fallback ink
+    for (int d = 0; d < MOY_THEME_DIM_INKS; d++) {
+        const uint8_t *e = moy_theme_dim_inks[d];
+        const uint8_t *bgs = &e[2];
+        if (clears_all(b[e[0]], bgs, 2, r)) {
+            continue;
+        }
+        int32_t best = -1;
+        ratio_t bestr = {0, 1};
+        for (int k = 0; k < rn + MOY_THEME_DIM_GREYS; k++) {
+            int32_t c = k < rn ? ramp[k] : moy_theme_dim_greys[k - rn];
+            if (!clears_all(c, bgs, 2, r)) {
+                continue;
+            }
+            ratio_t m = least(c, bgs, 2, r);
+            int o = best < 0 ? -1 : ratio_cmp(m, bestr);
+            if (o < 0 || (o == 0 && c < best)) {
+                best = c;
+                bestr = m;
+            }
+        }
+        r[e[0]] = best >= 0 ? best : r[e[1]];
+    }
+    // 5. content: B's where it clears R's surface, else the derive set's for
+    // the surface's side where that clears, else R's ink
+    int32_t s = r[MOY_UI_T_SURFACE];
+    int side = ratio_cmp(ratio(s, 0), ratio(s, 7)) >= 0;
+    EACH(MOY_THEME_CL_CONTENT, i) {
+        int role = CLASS(MOY_THEME_CL_CONTENT, i);
+        if (!clears(r[role], s)) {
+            int32_t alt = set_value(role, side);
+            r[role] = alt >= 0 && clears(alt, s) ? alt : r[MOY_UI_T_INK];
+        }
+    }
+}
+
+#undef EACH
+#undef CLASS
+
+void moy_theme_derive(const int32_t src[2][MOY_THEME_ROLES], int accent, int tint,
+                      int32_t out[2][MOY_THEME_ROLES]) {
+    accent = accent >= 0 && accent < MOY_THEME_ACCENTS ? accent : -1;
+    tint = tint >= 0 && tint < MOY_THEME_TINTS ? tint : -1;
+    for (int v = 0; v < 2; v++) {
+        derive_variant(src[v], accent, tint, out[v]);
+    }
+}
+
+// -- custom's theme.json -------------------------------------------------------------
+
+// A bounded writer: what does not fit is counted, never written.
+typedef struct {
+    uint8_t *p;
+    size_t cap, n;
+} wr_t;
+
+static void put(wr_t *w, const char *s, size_t n) {
+    if (w->n + n <= w->cap) {
+        memcpy(w->p + w->n, s, n);
+    }
+    w->n += n;
+}
+
+static void put_s(wr_t *w, const char *s) {
+    put(w, s, strlen(s));
+}
+
+static void put_int(wr_t *w, int32_t v) {
+    char buf[12];
+    int k = sizeof(buf);
+    int neg = v < 0;
+    uint32_t u = neg ? (uint32_t)(-(int64_t)v) : (uint32_t)v;
+    do {
+        buf[--k] = (char)('0' + u % 10);
+        u /= 10;
+    } while (u);
+    if (neg) {
+        buf[--k] = '-';
+    }
+    put(w, buf + k, sizeof(buf) - (size_t)k);
+}
+
+static void put_str(wr_t *w, const char *s) {
+    put(w, "\"", 1);
+    for (; *s; s++) {
+        if (*s == '"' || *s == '\\') {
+            put(w, "\\", 1);
+        }
+        put(w, s, 1);
+    }
+    put(w, "\"", 1);
+}
+
+static void put_key(wr_t *w, const char *k) {
+    put_str(w, k);
+    put(w, ":", 1);
+}
+
+// The source's chain flattened: each field from the nearest package that sets
+// it, the default seed's own only where it is the source.
+typedef struct {
+    moy_theme_pkg_t *flat;
+    int depth, over, layout_found;
+} flat_ctx_t;
+
+static void apply_flat(const moy_theme_pkg_t *pkg, void *ctx) {
+    flat_ctx_t *c = ctx;
+    moy_theme_pkg_t *f = c->flat;
+    if (c->depth++ > 0 && strcmp(pkg->name, moy_theme_seed_names[0]) == 0) {
+        return;
+    }
+    for (int i = 0; i < MOY_THEME_METRICS; i++) {
+        if (f->metric[i] == MOY_THEME_NO_METRIC) {
+            f->metric[i] = pkg->metric[i];
+        }
+    }
+    for (int i = 0; i < pkg->n_effects; i++) {
+        int k = 0;
+        while (k < f->n_effects && memcmp(f->effect[k], pkg->effect[i], 2) != 0) {
+            k++;
+        }
+        if (k < f->n_effects) {
+            continue;
+        }
+        if (f->n_effects == MOY_THEME_EFFECTS_CAP) {
+            c->over = 1;
+            continue;
+        }
+        memcpy(f->effect[f->n_effects++], pkg->effect[i], 4);
+    }
+    for (int i = 0; i < pkg->n_surfaces; i++) {
+        int k = 0;
+        while (k < f->n_surfaces && memcmp(f->surface[k], pkg->surface[i], 2) != 0) {
+            k++;
+        }
+        if (k < f->n_surfaces) {
+            continue;
+        }
+        if (f->n_surfaces == MOY_THEME_SURFACES_CAP) {
+            c->over = 1;
+            continue;
+        }
+        memcpy(f->surface[f->n_surfaces], pkg->surface[i], 2);
+        f->surface_rec[f->n_surfaces++] = pkg->surface_rec[i];
+    }
+    for (int i = 0; i < 2; i++) {
+        if (f->frame[i] == 0) {
+            f->frame[i] = pkg->frame[i];
+        }
+    }
+    if (f->frame[2] == 0) {
+        memcpy(&f->frame[2], &pkg->frame[2], 4);
+    }
+    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+        if (f->font[i][0] == 0) {
+            memcpy(f->font[i], pkg->font[i], sizeof(pkg->font[i]));
+        }
+    }
+    // A refused layout resolves as the default's, so it flattens to none.
+    if (!c->layout_found && pkg->layout.set != MOY_THEME_LAYOUT_SILENT) {
+        c->layout_found = 1;
+        if (pkg->layout.set == MOY_THEME_LAYOUT_SET) {
+            memcpy(&f->layout, &pkg->layout, sizeof(pkg->layout));
+        }
+    }
+}
+
+static void put_term(char *buf, size_t *k, int8_t t) {
+    if (t >= 0) {
+        if (t >= 10) {
+            buf[(*k)++] = (char)('0' + t / 10);
+        }
+        buf[(*k)++] = (char)('0' + t % 10);
+    } else {
+        const char *s = moy_ui_token_names[-1 - t];
+        size_t n = strlen(s);
+        memcpy(buf + *k, s, n);
+        *k += n;
+    }
+}
+
+// A surface record as the grammar's text, its clauses split by `sep`.
+static size_t surface_text(const moy_ui_surface_t *s, const char *sep, char *buf) {
+    size_t k = 0, ns = strlen(sep);
+    const char *w;
+#define CLAUSE(word) do { if (k) { memcpy(buf + k, sep, ns); k += ns; } \
+                          w = (word); memcpy(buf + k, w, strlen(w)); k += strlen(w); } while (0)
+    if (s->edge != MOY_UI_EDGE_FLAT) {
+        CLAUSE(moy_theme_edge_names[s->edge]);
+    }
+    if (s->fill != MOY_UI_FILL_STYLE) {
+        CLAUSE(moy_theme_fill_names[s->fill - 1]);
+        buf[k++] = ' ';
+        put_term(buf, &k, s->a);
+        if (s->fill != MOY_UI_FILL_SOLID) {
+            buf[k++] = '/';
+            put_term(buf, &k, s->b);
+        }
+    }
+    if (s->flags & MOY_UI_SURF_BORDER) {
+        CLAUSE("border");
+        if (s->line != MOY_UI_TERM_STYLE) {
+            buf[k++] = ' ';
+            put_term(buf, &k, s->line);
+        }
+    }
+    if (s->flags & MOY_UI_SURF_SHADOW) {
+        CLAUSE("shadow");
+    }
+    if (k == 0) {
+        CLAUSE(moy_theme_edge_names[MOY_UI_EDGE_FLAT]);
+    }
+#undef CLAUSE
+    buf[k] = 0;
+    return k;
+}
+
+// `text` (effects) or `surfaces`, by part then state.
+static void put_parts(wr_t *w, const moy_theme_pkg_t *f, int surfaces) {
+    int n = surfaces ? f->n_surfaces : f->n_effects;
+    if (n == 0) {
+        return;
+    }
+    put_s(w, surfaces ? ",\"surfaces\":{" : ",\"text\":{");
+    int first_part = 1;
+    for (int part = 0; part < MOY_THEME_PARTS; part++) {
+        int first = 1;
+        for (int st = 0; st < MOY_THEME_STATES; st++) {
+            for (int i = 0; i < n; i++) {
+                const uint8_t *at = surfaces ? f->surface[i] : f->effect[i];
+                if (at[0] != part || at[1] != st) {
+                    continue;
+                }
+                if (first) {
+                    put_s(w, first_part ? "" : ",");
+                    put_key(w, moy_theme_part_names[part]);
+                    put(w, "{", 1);
+                    first_part = 0;
+                } else {
+                    put(w, ",", 1);
+                }
+                first = 0;
+                put_key(w, moy_theme_state_names[st]);
+                if (surfaces) {
+                    char buf[2 * MOY_THEME_SURFACE_LEN + 1];
+                    if (surface_text(&f->surface_rec[i], ", ", buf) > MOY_THEME_SURFACE_LEN) {
+                        surface_text(&f->surface_rec[i], ",", buf);
+                    }
+                    put_str(w, buf);
+                } else {
+                    put_s(w, "{\"effect\":");
+                    put_str(w, moy_theme_effect_names[at[2]]);
+                    if (at[2] != 0) {
+                        put_s(w, ",\"color\":");
+                        put_str(w, moy_theme_role_names[at[3]]);
+                    }
+                    put(w, "}", 1);
+                }
+            }
+        }
+        if (!first) {
+            put(w, "}", 1);
+        }
+    }
+    put(w, "}", 1);
+}
+
+static void put_layout(wr_t *w, const moy_theme_layout_t *lay) {
+    if (lay->set != MOY_THEME_LAYOUT_SET) {
+        return;
+    }
+    put_s(w, ",\"layout\":{\"bars\":[");
+    for (int b = 0; b < lay->n_bars; b++) {
+        const moy_theme_bar_t *bar = &lay->bar[b];
+        put_s(w, b ? ",{\"edge\":" : "{\"edge\":");
+        put_str(w, moy_theme_bar_edges[bar->edge]);
+        if (bar->size != MOY_THEME_BAR_SIZE) {
+            put_s(w, ",\"size\":");
+            put_int(w, bar->size);
+        }
+        for (int s = 0; s < MOY_THEME_SLOTS; s++) {
+            if (bar->n[s] == 0) {
+                continue;
+            }
+            put(w, ",", 1);
+            put_key(w, moy_theme_slot_names[s]);
+            for (int k = 0; k < bar->n[s]; k++) {
+                put(w, k ? "," : "[", 1);
+                put_str(w, moy_theme_widget_names[bar->w[s][k]]);
+            }
+            put(w, "]", 1);
+        }
+        for (int t = 0; t < bar->n_text; t++) {
+            put_s(w, t ? "," : ",\"text\":[");
+            put_str(w, lay->text[bar->text0 + t]);
+        }
+        put_s(w, bar->n_text ? "]}" : "}");
+    }
+    put(w, "]", 1);
+    if (lay->home != 0) {
+        put_s(w, ",\"home\":");
+        put_str(w, moy_theme_home_names[lay->home]);
+    }
+    put(w, "}", 1);
+}
+
+// The source's own wallpaper keys (§4.9), each value minified.
+static void put_wallpaper_keys(wr_t *w, const uint8_t *src, size_t n) {
+    static const char *const keys[] = {"wallpapers", "images"};
+    rd_t r = {src, src + n, 1};
+    if (!eat(&r, '{') || eat(&r, '}')) {
+        return;
+    }
+    for (;;) {
+        char key[16];
+        int over;
+        int32_t iv;
+        if (str(&r, key, sizeof(key), &over) < 0 || !eat(&r, ':')) {
+            return;
+        }
+        peek(&r);
+        const uint8_t *v0 = r.p;
+        if (value(&r, &iv) < 0) {
+            return;
+        }
+        for (size_t k = 0; !over && k < sizeof(keys) / sizeof(keys[0]); k++) {
+            if (strcmp(key, keys[k]) != 0) {
+                continue;
+            }
+            put(w, ",", 1);
+            put_key(w, keys[k]);
+            int in = 0, esc = 0;
+            for (const uint8_t *p = v0; p < r.p; p++) {
+                char ch = (char)*p;
+                if (!in && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')) {
+                    continue;
+                }
+                put(w, &ch, 1);
+                if (esc) {
+                    esc = 0;
+                } else if (in && ch == '\\') {
+                    esc = 1;
+                } else if (ch == '"') {
+                    in = !in;
+                }
+            }
+        }
+        if (!eat(&r, ',')) {
+            return;
+        }
+    }
+}
+
+static void put_custom(wr_t *w, const moy_theme_pkg_t *f, const int32_t rows[2][MOY_THEME_ROLES],
+                       const uint8_t omit[2][MOY_THEME_ROLES], const uint8_t *src, size_t n) {
+    put_s(w, "{\"format\":");
+    put_int(w, MOY_THEME_FORMAT);
+    put_s(w, ",\"name\":");
+    put_str(w, MOY_THEME_CUSTOM);
+    int colors = 0;
+    for (int v = 0; v < 2; v++) {
+        int first = 1;
+        for (int i = 0; i < MOY_THEME_ROLES; i++) {
+            if (omit[v][i]) {
+                continue;
+            }
+            if (first) {
+                put_s(w, colors ? ",\"" : ",\"colors\":{\"");
+                put_s(w, v ? "light\":{" : "dark\":{");
+                colors = 1;
+            } else {
+                put(w, ",", 1);
+            }
+            first = 0;
+            put_key(w, moy_theme_role_names[i]);
+            if (moy_theme_flag[i]) {
+                put_s(w, rows[v][i] ? "true" : "false");
+            } else {
+                put_int(w, rows[v][i]);
+            }
+        }
+        put_s(w, first ? "" : "}");
+    }
+    put_s(w, colors ? "}" : "");
+    int any = 0;
+    for (int i = 0; i < MOY_THEME_METRICS; i++) {
+        if (f->metric[i] == MOY_THEME_NO_METRIC) {
+            continue;
+        }
+        put_s(w, any ? "," : ",\"metrics\":{");
+        any = 1;
+        put_key(w, moy_theme_metric_names[i]);
+        put_int(w, f->metric[i]);
+    }
+    put_s(w, any ? "}" : "");
+    if (f->frame[0] || f->frame[1] || f->frame[2]) {
+        const char *sep = "";
+        put_s(w, ",\"frame\":{");
+        if (f->frame[0]) {
+            put_key(w, "style");
+            put_str(w, moy_theme_frame_names[f->frame[0] - 1]);
+            sep = ",";
+        }
+        if (f->frame[1]) {
+            put_s(w, sep);
+            put_key(w, "title_align");
+            put_str(w, moy_theme_align_names[f->frame[1] - 1]);
+            sep = ",";
+        }
+        if (f->frame[2]) {
+            char order[5] = {0};
+            memcpy(order, &f->frame[2], 4);
+            put_s(w, sep);
+            put_key(w, "buttons");
+            put_str(w, order);
+        }
+        put(w, "}", 1);
+    }
+    any = 0;
+    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+        if (f->font[i][0] == 0) {
+            continue;
+        }
+        put_s(w, any ? "," : ",\"fonts\":{");
+        any = 1;
+        put_key(w, moy_theme_font_roles[i]);
+        put_str(w, f->font[i]);
+    }
+    put_s(w, any ? "}" : "");
+    put_parts(w, f, 0);
+    put_parts(w, f, 1);
+    put_layout(w, &f->layout);
+    put_wallpaper_keys(w, src, n);
+    put(w, "}", 1);
+}
+
+int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
+                     moy_theme_pkg_t scratch[2], uint8_t *out, size_t cap, size_t *len) {
+    moy_theme_pkg_t *pkg = &scratch[0], *flat = &scratch[1];
+    const moy_theme_pkg_t *was = s_probe;
+    *len = 0;
+    int rc = moy_theme_parse(src, n, pkg);
+    if (rc != MOY_THEME_OK) {
+        return rc;
+    }
+    char name[MOY_THEME_NAME_MAX + 1];
+    strcpy(name, pkg->name);
+    size_t nn = strlen(name);
+    int seed = seed_of(name, nn);
+    if (seed >= 0) {
+        if (n != moy_theme_seed_len[seed] || memcmp(src, moy_theme_seed_src[seed], n) != 0) {
+            return MOY_THEME_TAKEN;
+        }
+    } else if (pkg->inherits[0]) {
+        return MOY_THEME_CHAIN;
+    } else {
+        s_probe = pkg;
+    }
+    int32_t base[2][MOY_THEME_ROLES], rows[2][MOY_THEME_ROLES];
+    static const uint8_t keep[2][MOY_THEME_ROLES];
+    flat_ctx_t c = {flat, 0, 0, 0};
+    memset(flat, 0, sizeof(*flat));
+    memset(flat->metric, MOY_THEME_NO_METRIC, sizeof(flat->metric));
+    rc = resolve_row(name, nn, MOY_THEME_DARK, base[0]);
+    if (rc == MOY_THEME_OK) {
+        rc = resolve_row(name, nn, MOY_THEME_LIGHT, base[1]);
+    }
+    if (rc == MOY_THEME_OK) {
+        rc = chain(name, nn, apply_flat, &c);
+    }
+    s_probe = was;
+    if (rc != MOY_THEME_OK) {
+        return rc;
+    }
+    if (c.over) {
+        return MOY_THEME_BIG;
+    }
+    moy_theme_derive((const int32_t(*)[MOY_THEME_ROLES])base, accent, tint, rows);
+    wr_t w = {out, cap, 0};
+    put_custom(&w, flat, (const int32_t(*)[MOY_THEME_ROLES])rows, keep, src, n);
+    if (w.n > MOY_THEME_BYTES) {
+        // Over the cap: leave out each role whose value §5's resolution
+        // gives back, checked by resolving what is left.
+        uint8_t omit[2][MOY_THEME_ROLES];
+        moy_theme_pkg_t *probe = &scratch[0];
+        memset(omit, 0, sizeof(omit));
+        memset(probe, 0, sizeof(*probe));
+        strcpy(probe->name, MOY_THEME_CUSTOM);
+        memset(probe->metric, MOY_THEME_NO_METRIC, sizeof(probe->metric));
+        for (int v = 0; v < 2; v++) {
+            for (int i = 0; i < MOY_THEME_ROLES; i++) {
+                probe->role[v][i] = (int8_t)rows[v][i];
+            }
+        }
+        s_probe = probe;
+        for (int v = 0; v < 2; v++) {
+            for (int i = 0; i < MOY_THEME_ROLES; i++) {
+                int32_t got[MOY_THEME_ROLES];
+                probe->role[v][i] = MOY_THEME_UNSET;
+                if (resolve_row(MOY_THEME_CUSTOM, strlen(MOY_THEME_CUSTOM), v, got) == MOY_THEME_OK
+                    && memcmp(got, rows[v], sizeof(got)) == 0) {
+                    omit[v][i] = 1;
+                } else {
+                    probe->role[v][i] = (int8_t)rows[v][i];
+                }
+            }
+        }
+        s_probe = was;
+        w.n = 0;
+        put_custom(&w, flat, (const int32_t(*)[MOY_THEME_ROLES])rows,
+                   (const uint8_t(*)[MOY_THEME_ROLES])omit, src, n);
+    }
+    *len = w.n;
+    return w.n > MOY_THEME_BYTES || w.n > cap ? MOY_THEME_BIG : MOY_THEME_OK;
+}
+
+const int moy_theme_custom_dims[4] = {
+    MOY_THEME_ACCENTS, MOY_THEME_TINTS, MOY_THEME_RAMP_MAX, MOY_THEME_BYTES,
+};
