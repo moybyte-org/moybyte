@@ -6,8 +6,9 @@
  * sides CALL them -- see libmoy/UPSTREAM.md. What libmoy has no counterpart for
  * is this console's compositor: a viewport-aware fill and fill_rect, the RGB565
  * blit with its opaque memcpy lane, the integer-upscale blit the windowed WM
- * composites through, blit_window, scroll_rect, blit_indices, and the
- * system-font (scale > 1) text rasterizer. These loops were once written
+ * composites through, the any-ratio resize the home's cards scale by,
+ * blit_window, scroll_rect, blit_indices, and the system-font (scale > 1)
+ * text rasterizer. These loops were once written
  * twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
  * the one copy.
  *
@@ -287,6 +288,20 @@ void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh,
                       int dx, int dy,
                       const uint16_t *src, size_t scap, int sw, int sh,
                       int scale);
+
+/* Scale an RGB565 sw x sh source to a tw x th rect at (dx, dy), nearest-
+ * neighbour at any ratio, up or down, in one call: a home card's cover at its
+ * distance-from-centre scale (docs/shell_layout_2026-10.md section 12). Opaque.
+ * The target column i samples source column (i * sx + sx / 2) >> 16 with
+ * sx = (sw << 16) / tw, rows alike -- tests/test_gfx_binding.py holds the
+ * Python statement of it. The clip rect is intersected with the buffer; a
+ * source shorter than `scap` holds leaves the rows that would sample past it
+ * as they were; a side over MG_RESIZE_MAX draws nothing. */
+#define MG_RESIZE_MAX 32767
+void mg_blit565_resize(uint16_t *dst, size_t dcap, int dw, int dh,
+                       int dx, int dy, int tw, int th,
+                       const uint16_t *src, size_t scap, int sw, int sh,
+                       int cx0, int cy0, int cx1, int cy1);
 
 /* Copy a dw x dh window from an RGB565 source into dst (dw px/row): the
  * scroll engine's core op (#43), clamped to BOTH buffers. A source narrower

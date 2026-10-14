@@ -256,6 +256,80 @@ void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh,
     }
 }
 
+/* One target row of mg_blit565_resize: `n` pixels sampled from `srow` at the
+ * 16.16 column `u`, stepping `step`, written as pairs packed into 32-bit
+ * stores (mg_fill_run's reason) once `out` is 4-byte aligned. The packing
+ * puts the lower address in the low half: every tier is little-endian. */
+static void mg_resize_row(uint16_t *out, int n, const uint16_t *srow,
+                          uint32_t u, uint32_t step)
+{
+    if (((uintptr_t)out & 2u) != 0) {
+        *out++ = srow[u >> 16];
+        u += step;
+        n--;
+    }
+    uint32_t *w = (uint32_t *)out;
+    while (n >= 4) {
+        uint32_t a = srow[u >> 16]; u += step;
+        uint32_t b = srow[u >> 16]; u += step;
+        uint32_t c = srow[u >> 16]; u += step;
+        uint32_t d = srow[u >> 16]; u += step;
+        w[0] = a | (b << 16);
+        w[1] = c | (d << 16);
+        w += 2;
+        n -= 4;
+    }
+    if (n >= 2) {
+        uint32_t a = srow[u >> 16]; u += step;
+        uint32_t b = srow[u >> 16]; u += step;
+        *w++ = a | (b << 16);
+        n -= 2;
+    }
+    if (n) *((uint16_t *)w) = srow[u >> 16];
+}
+
+void mg_blit565_resize(uint16_t *dst, size_t dcap, int dw, int dh,
+                       int dx, int dy, int tw, int th,
+                       const uint16_t *src, size_t scap, int sw, int sh,
+                       int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || dh <= 0 || tw <= 0 || th <= 0) return;
+    if (sw <= 0 || sh <= 0 || sw > MG_RESIZE_MAX || sh > MG_RESIZE_MAX) return;
+    if ((size_t)dw * (size_t)dh > dcap) dh = (int)(dcap / (size_t)dw);
+    int srows = (int)(scap / (size_t)sw);        /* source rows that exist */
+    if (srows > sh) srows = sh;
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > dw) cx1 = dw;
+    if (cy1 > dh) cy1 = dh;
+    int x0 = dx > cx0 ? dx : cx0;
+    int x1 = (dx + tw) < cx1 ? (dx + tw) : cx1;
+    int y0 = dy > cy0 ? dy : cy0;
+    int y1 = (dy + th) < cy1 ? (dy + th) : cy1;
+    if (x1 <= x0 || y1 <= y0) return;
+    /* Pixel-centre sampling in 16.16: target column i reads source column
+     * (i * sx + sx / 2) >> 16. i * sx stays under sw << 16, so a source side
+     * up to MG_RESIZE_MAX keeps it in 32 bits. */
+    uint32_t sx = ((uint32_t)sw << 16) / (uint32_t)tw;
+    uint32_t sy = ((uint32_t)sh << 16) / (uint32_t)th;
+    uint32_t u0 = (uint32_t)(x0 - dx) * sx + (sx >> 1);
+    uint32_t v = (uint32_t)(y0 - dy) * sy + (sy >> 1);
+    int n = x1 - x0;
+    int last = -1;                               /* the source row just drawn */
+    for (int ty = y0; ty < y1; ty++, v += sy) {
+        int row = (int)(v >> 16);
+        uint16_t *out = dst + (size_t)ty * (size_t)dw + x0;
+        if (row >= srows) { last = -1; continue; }
+        if (row == last) {
+            /* An upscale repeats a source row: copy the target row above. */
+            memcpy(out, out - dw, (size_t)n * 2u);
+            continue;
+        }
+        mg_resize_row(out, n, src + (size_t)row * (size_t)sw, u0, sx);
+        last = row;
+    }
+}
+
 void mg_blit_window(uint16_t *dst, size_t dcap, int dw, int dh,
                     const uint16_t *src, size_t scap, int src_w, int sx, int sy)
 {

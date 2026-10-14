@@ -159,6 +159,28 @@ static mp_obj_t moy_gfx_blit565_scale(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_scale_obj, 9, 9, moy_gfx_blit565_scale);
 
+// blit565_resize(dst, dw, dh, dx, dy, tw, th, src, sw, sh[, cx0, cy0, cx1, cy1])
+// -- scale an RGB565 sw x sh source to a tw x th rect at (dx, dy), nearest-
+// neighbour at any ratio, opaque, clipped (moy_gfx_kernels.h). A home card's
+// cover at its scale, one call per card.
+static mp_obj_t moy_gfx_blit565_resize(size_t n_args, const mp_obj_t *a) {
+    size_t dcap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    const uint16_t *src = moy_gfx_buf_r(a[7], &scap);
+    mg_blit565_resize(dst, dcap, dw, dh,
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                      src, scap, mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                      (n_args > 10) ? mp_obj_get_int(a[10]) : 0,
+                      (n_args > 11) ? mp_obj_get_int(a[11]) : 0,
+                      (n_args > 12) ? mp_obj_get_int(a[12]) : dw,
+                      (n_args > 13) ? mp_obj_get_int(a[13]) : dh);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_resize_obj, 10, 14, moy_gfx_blit565_resize);
+
 // blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
 //          sheet, sheetw, sheeth, lut, palt, colorkey, scale, cx0, cy0, cx1, cy1)
 // -- blit a (rw x rh) cell region of a tilemap in ONE C call (issue #32), through
@@ -1995,6 +2017,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&moy_gfx_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&moy_gfx_blit565_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565_scale), MP_ROM_PTR(&moy_gfx_blit565_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit565_resize), MP_ROM_PTR(&moy_gfx_blit565_resize_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&moy_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&moy_gfx_blit_batch_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },

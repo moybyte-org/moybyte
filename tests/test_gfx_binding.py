@@ -133,6 +133,9 @@ blit565_scale(buf, 16, 8, -4, -2, src, 4, 4, 3)
 blit565_scale(buf, 16, 8, 11, 5, src, 4, 4, 2)
 blit565_scale(buf, 16, 8, 3, 1, src, 4, 4, 1)
 blit565_scale(buf, 16, 8, 1, 2, src, 4, 4, 0)
+blit565_resize(buf, 16, 8, 1, 1, 6, 6, src, 4, 4, 0, 0, 16, 8)
+blit565_resize(buf, 16, 8, 2, 0, 5, 3, src, 4, 4, 0, 0, 16, 8)
+blit565_resize(buf, 16, 8, 9, 2, 7, 5, src, 4, 4, 1, 1, 15, 7)
 text(buf, 16, 8, msg, 0, 0, 0xf81f, font, 65, 1, 0, 0, 0, 0, 16, 8)
 text(buf, 16, 8, msg, -3, 1, 0x07e0, font, 65, 1, 0, 0, 0, 0, 16, 8)
 text(buf, 16, 8, msg, 4, 1, 0x8f1f, font, 65, 1, 2, 1, 3, 2, 12, 6)
@@ -205,6 +208,16 @@ blit565_scale(buf, 16, 8, 20, 2, src, 4, 4, 2)
 blit565_scale(buf, 16, 8, 1, 1, src, 4, 4, -3)
 blit565_scale(buf, 16, 8, -1, 6, src, 4, 4, 4)
 blit565_scale(buf, 16, 8, 1, 0, src, 4, 4, 4)
+# -- blit565_resize: odd alignment, the capacity guards, a short source ----
+blit565_resize(buf, 16, 8, -3, -2, 9, 9, src, 4, 4, 0, 0, 16, 8)
+blit565_resize(buf, 16, 99, 0, 0, 16, 99, src, 4, 4, 0, 0, 16, 99)
+blit565_resize(buf, 16, 8, 0, 0, 16, 8, src, 4, 99)
+blit565_resize(buf, 16, 8, 2, 2, 3, 3, src, 4, 4, -5, -5, 20, 20)
+blit565_resize(buf, 16, 8, 20, 2, 4, 4, src, 4, 4)
+blit565_resize(buf, 16, 8, 1, 1, 0, 4, src, 4, 4)
+blit565_resize(buf, 16, 8, 15, 7, 2, 2, src, 4, 4)
+blit565_resize(buf, 16, 8, 1, 1, 14, 6, src, 4, 4, 5, 2, 6, 7)
+blit565_resize(buf, 16, 8, 0, 0, 16, 8, src, 0, 4)
 # -- blit_window: the window clamped to BOTH buffers ------------------------
 blit_window(buf, 16, 8, big, 32, 4, 2)
 blit_window(buf, 16, 8, big, 32, -3, -3)
@@ -577,6 +590,67 @@ def test_blit565_colorkey_skips_only_the_keyed_pixel():
     assert _px(buf)[:4] == (1, 0, 3, 4)
 
 
+def _resize_ref(px, dw, dh, dx, dy, tw, th, src, sw, sh, cx0, cy0, cx1, cy1):
+    """blit565_resize stated in Python: each target pixel inside the rect,
+    the clip and the buffer takes the source pixel under its centre, in the
+    kernel's 16.16 steps (moy_gfx_kernels.h)."""
+    px = list(px)
+    if tw <= 0 or th <= 0 or sw <= 0 or sh <= 0:
+        return px
+    sx = (sw << 16) // tw
+    sy = (sh << 16) // th
+    for ty in range(max(dy, cy0, 0), min(dy + th, cy1, dh)):
+        row = ((ty - dy) * sy + (sy >> 1)) >> 16
+        if row * sw + sw > len(src):
+            continue
+        for tx in range(max(dx, cx0, 0), min(dx + tw, cx1, dw)):
+            col = ((tx - dx) * sx + (sx >> 1)) >> 16
+            px[ty * dw + tx] = src[row * sw + col]
+    return px
+
+
+# (dx, dy, tw, th, sw, sh, clip): up, down, odd and even starts, a clip that
+# cuts each side, origins off every edge -- what a card in the focus band
+# meets as it slides through the band's clip.
+_RESIZE_CASES = [
+    (0, 0, 40, 24, 13, 9, None),
+    (3, 1, 33, 31, 16, 16, None),
+    (-7, -5, 50, 40, 16, 16, None),
+    (1, 2, 12, 7, 31, 23, None),
+    (2, 3, 20, 20, 20, 20, None),
+    (5, 4, 25, 25, 20, 20, (6, 5, 27, 19)),
+    (30, 20, 50, 50, 7, 5, None),
+    (-60, 0, 61, 40, 9, 9, None),
+    (0, -39, 64, 40, 9, 9, (1, 0, 63, 40)),
+    (11, 0, 1, 40, 4, 4, None),
+]
+
+
+@pytest.mark.parametrize("case", _RESIZE_CASES)
+def test_blit565_resize_matches_its_python_statement(case):
+    dx, dy, tw, th, sw, sh, clip = case
+    dw, dh = 64, 40
+    cx0, cy0, cx1, cy1 = clip or (0, 0, dw, dh)
+    src = [(i * 2654435761) & 0xFFFF for i in range(sw * sh)]
+    before = [0x5A5A] * (dw * dh)
+    buf = bytearray(struct.pack("<%dH" % len(before), *before))
+    g.blit565_resize(buf, dw, dh, dx, dy, tw, th,
+                     bytearray(struct.pack("<%dH" % len(src), *src)), sw, sh,
+                     cx0, cy0, cx1, cy1)
+    expect = _resize_ref(before, dw, dh, dx, dy, tw, th, src, sw, sh,
+                         cx0, cy0, cx1, cy1)
+    assert list(_px(buf)) == expect
+
+
+def test_blit565_resize_at_one_to_one_is_a_copy():
+    src = bytearray(struct.pack("<16H", *range(1, 17)))
+    buf = _blank()
+    g.blit565_resize(buf, W, H, 3, 2, 4, 4, src, 4, 4)
+    ref = _blank()
+    g.blit565(ref, W, H, 3, 2, src, 4, 4, -1)
+    assert bytes(buf) == bytes(ref)
+
+
 def test_scroll_rect_moves_pixels_and_leaves_the_vacated_span():
     buf = bytearray(struct.pack("<%dH" % (W * H), *range(W * H)))
     g.scroll_rect(buf, W, 0, 0, W, H, 2, 0)
@@ -702,6 +776,7 @@ def layer_drain(*a): moy_gfx.layer_drain(*a); _shot()
 def layer_meter(*a): moy_gfx.layer_meter(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()
 def blit565_scale(*a): moy_gfx.blit565_scale(*a); _shot()
+def blit565_resize(*a): moy_gfx.blit565_resize(*a); _shot()
 def text(*a): moy_gfx.text(*a); _shot()
 def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()

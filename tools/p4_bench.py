@@ -13,6 +13,7 @@ Usage:
     python tools/p4_bench.py --board tdeck --repaint settings,files,editor:code
     python tools/p4_bench.py --board p4 --layout '[{"edge": "left", ...}]'
     python tools/p4_bench.py --board p4 --popovers [--layout ...]
+    python tools/p4_bench.py --board tdeck --kernel
 
 `--layout` benches under a theme layout's bars (docs/shell_layout_2026-10.md
 §5): installed as a package beside the seeds and picked, as Settings does,
@@ -24,6 +25,11 @@ playtest, and a frame on a minute boundary (with a docked calendar when the
 layout places one). The open and close are real taps on the widget's cell;
 a key is the popover layer's own handler, with the router's dirty mark where
 the image's WM does not let the popover take keys.
+
+`--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
+size and a synthetic focus-band frame into the canvas the home draws into,
+the shelf's drag frame beside them, and the board's pixels for a fixed set of
+calls against the host binding's.
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -458,6 +464,209 @@ def bench_repaint(b, surfaces, seconds, out_path):
     return bench
 
 
+# -- --kernel: the home's scaled-blit kernel (docs/shell_layout_2026-10.md
+# section 12, step 7a) ---------------------------------------------------------
+
+# The scales a card is benched at, relative to the cover's size on today's
+# card: 1.0 is the outer cards, the rest bracket the centre card's.
+KERNEL_SCALES = (1.0, 1.25, 1.5, 2.0)
+
+# The cases the board must answer with the host's pixels: (dx, dy, tw, th,
+# sw, sh), into a 64 x 40 target, each hashed after the call.
+KERNEL_PIXEL_CASES = ((0, 0, 40, 24, 13, 9), (-7, -5, 50, 40, 16, 16),
+                      (1, 2, 12, 7, 31, 23), (5, 4, 25, 25, 20, 20),
+                      (30, 20, 50, 50, 7, 5), (-60, 0, 61, 40, 9, 9))
+
+KERNEL_PIXELS = """
+def _kb_pixels(gfx, cases):
+    out = []
+    for dx, dy, tw, th, sw, sh in cases:
+        src = bytearray(sw * sh * 2)
+        for i in range(sw * sh):
+            v = (i * 40503 + 7) & 0xFFFF
+            src[2 * i] = v & 0xFF
+            src[2 * i + 1] = v >> 8
+        dst = bytearray(64 * 40 * 2)
+        gfx.blit565_resize(dst, 64, 40, dx, dy, tw, th, src, sw, sh)
+        h = 0
+        for b in dst:
+            h = (h * 31 + b) & 0xFFFFFFFF
+        out.append(h)
+    return out
+"""
+
+KERNEL_BENCH = """
+import gc, time, moy_gfx
+import launcher_layer as _ll
+_T, _D = time.ticks_us, time.ticks_diff
+
+def _kb_med(f, n=15):
+    ts = []
+    for _ in range(n):
+        a = _T()
+        f()
+        ts.append(_D(_T(), a))
+    ts.sort()
+    return ts[len(ts) // 2]
+
+def _kb_run(scales):
+    cv = ws.sys_canvas            # the home's canvas; ws.canvas is the game's
+    buf, W, H = cv._buf, cv._stride, cv.h
+    lay = ws.launcher.layout
+    fs = lay.fs
+    band_h = max(14 * fs, 20)
+    cw, ch = lay.lib_card_w, lay.lib_card_h
+    art = ch - band_h
+    side = _ll._COVER_SIDE if _ll._cover_scale(_ll._COVER_SIDE, cw, art) \\
+        else _ll._COVER_SIDE // 2
+    s = max(1, _ll._cover_scale(side, cw, art))
+    base = side * s
+    src = None
+    for img in ws.covers._cache.values():
+        if img is not None and img.w == side and img.h == side:
+            src = img.pix
+            break
+    real = src is not None
+    if src is None:
+        src = bytearray(side * side * 2)
+        for i in range(0, len(src), 2):
+            src[i] = i & 0xFF
+            src[i + 1] = (i >> 7) & 0xFF
+    bx, by, bw, bh = ws.launcher.band_rect()
+    pitch = lay.lib_step
+    if bx < 0 or by < 0 or bx + bw > W or by + bh > H:
+        raise ValueError("the band %r is off the %dx%d canvas" % ((bx, by, bw, bh), W, H))
+    gc.collect()
+    r = {"canvas": (W, H), "card": (cw, ch), "pitch": pitch,
+         "band_rect": (bx, by, bw, bh), "bake": side, "cover_scale": s,
+         "base": base, "real_cover": real}
+    # today's draw of one cover: blit565 at 1x, blit565_scale above it
+    if s == 1:
+        r["today_us"] = _kb_med(lambda: moy_gfx.blit565(
+            buf, W, H, bx, by, src, side, side, -1, bx, by, bx + bw, by + bh))
+    else:
+        r["today_us"] = _kb_med(lambda: moy_gfx.blit565_scale(
+            buf, W, H, bx, by, src, side, side, s))
+    cy = by + bh // 2
+    cards = []
+    for k in scales:
+        t = int(base * k + 0.5)
+        x, y = bx + bw // 2 - t // 2, cy - t // 2
+        us = _kb_med(lambda: moy_gfx.blit565_resize(
+            buf, W, H, x, y, t, t, src, side, side, bx, by, bx + bw, by + bh))
+        vis = (min(x + t, bx + bw) - max(x, bx)) * (min(y + t, by + bh) - max(y, by))
+        cards.append((k, t, vis, us))
+    r["cards"] = cards
+    # the moving frame at each centre scale (docs/shell_layout_2026-10.md
+    # section 12): the focus band -- the centre +- 1.5 pitches -- cleared, the
+    # centre card at k and its two neighbours at 1.0 (the most the three
+    # cards cover), each with its title band, the centre's outline and pill;
+    # and the outer rects either side of it shifted by #113's scroll-as-blit
+    mid = bx + bw // 2
+    fx0 = max(bx, mid - 3 * pitch // 2)
+    fx1 = min(bx + bw, mid + 3 * pitch // 2)
+    r["focus"] = (fx0, by, fx1 - fx0, bh)
+    clear = _kb_med(lambda: moy_gfx.fill_rect(buf, W, fx0, by, fx1 - fx0, bh,
+                                              0x2104))
+    def shift():
+        if fx0 > bx:
+            moy_gfx.scroll_rect(buf, W, bx, by, fx0 - bx, bh, 8, 0)
+        if bx + bw > fx1:
+            moy_gfx.scroll_rect(buf, W, fx1, by, bx + bw - fx1, bh, 8, 0)
+    sh = _kb_med(shift)
+    band = []
+    for k in scales:
+        t = int(base * k + 0.5)
+        def frame(t=t):
+            moy_gfx.fill_rect(buf, W, fx0, by, fx1 - fx0, bh, 0x2104)
+            for i, tt in ((-1, base), (1, base), (0, t)):
+                x = mid + i * pitch - tt // 2
+                y = cy - tt // 2
+                moy_gfx.blit565_resize(buf, W, H, x, y, tt, tt, src, side,
+                                       side, fx0, by, fx1, by + bh)
+                x0, x1 = max(x, fx0), min(x + tt, fx1)
+                if x1 > x0:
+                    moy_gfx.fill_rect(buf, W, x0, min(y + tt, by + bh - band_h),
+                                      x1 - x0, band_h, 0)
+            x = mid - t // 2
+            y = cy - t // 2
+            y0, y1 = max(y, by), min(y + t, by + bh)
+            x0, x1 = max(x, fx0), min(x + t, fx1)
+            o = 2 * fs
+            moy_gfx.fill_rect(buf, W, x0, y0, x1 - x0, o, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, x0, y1 - o, x1 - x0, o, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, x0, y0, o, y1 - y0, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, x1 - o, y0, o, y1 - y0, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, mid - t // 4, y0 + 4 * fs, t // 2,
+                              10 * fs, 0x07E0)
+        band.append((k, clear, _kb_med(frame), sh))
+    r["band"] = band
+    return r
+"""
+
+
+def bench_kernel(b, out_path):
+    """The step-7a micro-bench: the scaled-blit kernel per call at the card
+    sizes the home draws, and a synthetic focus-band frame, into the canvas
+    the home draws into, beside the shelf's drag frame today; and the board's
+    pixels against the host's for the same calls."""
+    sys.path.insert(0, __file__.rsplit("/", 2)[0])
+    from runtime import gfx_binding
+    ns = {}
+    exec(KERNEL_PIXELS, ns)                    # noqa: S102 -- fixed text
+    host = ns["_kb_pixels"](gfx_binding, KERNEL_PIXEL_CASES)
+    pyexec(b, KERNEL_PIXELS + "import moy_gfx\n"
+              "ws._kbp = _kb_pixels(moy_gfx, %r)" % (KERNEL_PIXEL_CASES,))
+    dev = pyval(b, "ws._kbp")
+    print("  pixels: %s" % ("board == host" if dev == host
+                             else "DIFFER board %r host %r" % (dev, host)))
+    bench = Bench(b)
+    home(b)
+    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    band = pyval(b, "ws.launcher.band_rect()")
+    if band:
+        bx, by, bw, bh = band
+        cy = by + bh // 2
+        bench.start()
+        b.swipe(bx + bw - 40, cy, bx + 60, cy, frames=30); b.drain(2.0)
+        bench.stop("library drag-scroll")
+    pyexec(b, KERNEL_BENCH)
+    # two lines: a one-line upload is evaluated as an expression
+    pyexec(b, "ws._kb = None\nws._kb = _kb_run(%r)" % (KERNEL_SCALES,),
+           timeout=120)
+    r = pyval(b, "ws._kb", timeout=30)
+    pyexec(b, "ws.mark_dirty()"); b.drain(1.0)
+    if not r:
+        print("  kernel bench: no answer")
+        return None
+    lines = ["canvas %dx%d, card %dx%d, pitch %d, band %r; cover bake %d^2 "
+             "drawn at %dx = %d px (%s); today's cover draw %d us"
+             % (r["canvas"] + r["card"] + (r["pitch"], r["band_rect"], r["bake"],
+                r["cover_scale"], r["base"],
+                "a real cover" if r["real_cover"] else "synthetic",
+                r["today_us"])),
+             "",
+             "| scale | card px | visible px | blit565_resize us | ns/px |",
+             "|---|---|---|---|---|"]
+    for k, t, vis, us in r["cards"]:
+        lines.append("| %.2f | %d^2 | %d | %d | %.1f |"
+                     % (k, t, vis, us, 1000.0 * us / max(1, vis)))
+    lines += ["", "focus band %r" % (r["focus"],), "",
+              "| centre scale | band clear us | focus band frame us (clear + "
+              "3 cards + fills) | outer shift us | moving frame us |",
+              "|---|---|---|---|---|"]
+    for k, clear, us, sh in r["band"]:
+        lines.append("| %.2f | %d | %d | %d | %d |"
+                     % (k, clear, us, sh, us + sh))
+    lines += ["", bench.table()]
+    text = "\n".join(lines)
+    print(text)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text + "\n")
+    return r
+
+
 def main():
     ap = argparse.ArgumentParser()
     add_board_args(ap)
@@ -469,12 +678,15 @@ def main():
     ap.add_argument("--seconds", type=float, default=6.0)
     ap.add_argument("--popovers", action="store_true",
                     help="the popover scenarios alone")
+    ap.add_argument("--kernel", action="store_true",
+                    help="the home's scaled-blit kernel and a focus-band "
+                         "frame, beside the shelf's drag frame")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     b = board_from_args(args)
     try:
-        if not args.repaint and not b.attach_only:
+        if not args.repaint and not args.kernel and not b.attach_only:
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -482,6 +694,8 @@ def main():
             bench_repaint(b, args.repaint.split(","), args.seconds, args.out)
         elif args.popovers:
             bench_popovers(b, args.out)
+        elif args.kernel:
+            bench_kernel(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

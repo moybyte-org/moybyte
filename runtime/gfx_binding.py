@@ -89,6 +89,8 @@ _SIGS = (
     ("mg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
                     _I, _I, _I, _I], None),
     ("mg_blit565_scale", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I], None),
+    ("mg_blit565_resize", [_P, _Z, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
+                           _I, _I, _I, _I], None),
     ("mg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
     ("mg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
     ("mg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _I, _I, _I, _I, _I,
@@ -253,6 +255,20 @@ def blit565_scale(dst, dw, dh, dx, dy, src, sw, sh, scale):
                             int(dx), int(dy),
                             ctypes.cast(sarr, _P), scap, int(sw), int(sh),
                             int(scale))
+
+
+def blit565_resize(dst, dw, dh, dx, dy, tw, th, src, sw, sh,
+                   cx0=0, cy0=0, cx1=None, cy1=None):
+    """Scale an RGB565 sw x sh source to a tw x th rect at (dx, dy):
+    nearest-neighbour at any ratio, opaque, clipped (moy_gfx_kernels.h)."""
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_blit565_resize(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                             int(dx), int(dy), int(tw), int(th),
+                             ctypes.cast(sarr, _P), scap, int(sw), int(sh),
+                             int(cx0), int(cy0),
+                             int(dw) if cx1 is None else int(cx1),
+                             int(dh) if cy1 is None else int(cy1))
 
 
 def blit_window(dst, dw, dh, src, src_w, sx, sy):
