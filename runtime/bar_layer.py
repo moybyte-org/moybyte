@@ -140,9 +140,13 @@ _TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "calendar": "CALENDAR"}
-# _cart_bar_key's fields every bar folds, and the ones a widget adds.
-_KEY_ALWAYS = (0, 2, 3, 4, 10)
+# _cart_bar_key's fields every bar folds, and the ones a widget adds. Field 2
+# (the EDIT|CODE slot) is drawn by the crash chrome alone, which folds all.
+_KEY_ALWAYS = (0, 3, 4, 10)
 _KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,)}
+_KEY_N = 11
+_KEY_ALL = (1 << _KEY_N) - 1
+_KEY_UNDO = 1 << 9          # drawn only by the Editor's zone ("menu")
 
 
 def _edit_kind(cart):
@@ -257,6 +261,9 @@ class BarLayer:
         self._game_pack = None
         self._fields_of = None
         self._fields = ()
+        self._need = _KEY_ALL
+        # Each `where`'s frame key, filled in place (_fill_key).
+        self._keys = {}
 
     def invalidate(self):
         """Repaint every cached bar strip on the next frame: something its key
@@ -341,10 +348,15 @@ class BarLayer:
             return ws.sys_canvas is ws.canvas
         return where == "tool" and not getattr(ws, "app_full_canvas", False)
 
-    def _bar_canvas(self, where):
-        if where == "app":
-            return self.ws.sys_canvas
-        if where == "desktop" or self._zone_is_game(where):
+    def _bar_canvas(self, where, game=None):
+        """`where`'s canvas; `game` is `_zone_is_game(where)` where the caller
+        has it already (each read of `ws.sys_canvas` is a property call)."""
+        if game is None:
+            if where == "app":
+                return self.ws.sys_canvas
+            game = self._zone_is_game(where)
+        # an "app" strip on the game canvas: that canvas IS the system one
+        if where == "desktop" or game:
             return self.ws.canvas
         return self.ws.sys_canvas
 
@@ -366,14 +378,18 @@ class BarLayer:
     # crash panel, which lays out below a top strip, so it stays one bar at
     # row 0.
 
-    def _packed(self, where):
+    def _packed(self, where, game=None):
         if where == "desktop":
             # The crash chrome: one strip across the top of the game canvas.
             return (("top", (0, 0, self.ws.canvas.w, _STATUS_H), 0, ()),)
-        if self._zone_is_game(where):
+        if game is None:
+            game = self._zone_is_game(where)
+        if game:
             of = bars_in_force()
             cv = self.ws.canvas
-            if self._game_of is not of or self._game_size != (cv.w, cv.h):
+            gs = self._game_size
+            if (self._game_of is not of or gs is None
+                    or gs[0] != cv.w or gs[1] != cv.h):
                 self._game_of = of
                 self._game_size = (cv.w, cv.h)
                 self._game_pack = _pack(cv.w, cv.h, _STATUS_H, 1, 1, 5 * 8, _bar_text_w, of)
@@ -456,9 +472,14 @@ class BarLayer:
         WHOLE, then reused; a bar without the clock never re-renders on its
         tick. The strips are purely the DRAW; hit-testing goes through the
         packed cells / zone_tap, so caching can't desync taps."""
-        cv = self._bar_canvas(where)
-        packed = self._packed(where)
-        key = self._cart_bar_key(where)
+        game = self._zone_is_game(where)
+        cv = self._bar_canvas(where, game)
+        packed = self._packed(where, game)
+        fields = self._key_fields(packed)
+        key = self._keys.get(where)
+        if key is None:
+            key = self._keys[where] = [None] * _KEY_N
+        self._fill_key(key, where, cv, self._shown(where))
         if hasattr(cv, "_lr"):
             # The canvas is itself a RecordingLayer (a windowed-WM window buffer on
             # the web console): a strip cache NESTED in a recorded layer can't ship
@@ -479,15 +500,16 @@ class BarLayer:
             self._bar_strips[where] = bars
         while len(bars) < len(packed):
             bars.append([])
-        fields = self._key_fields(packed)
         for i in range(len(packed)):
             self._draw_bar(cv, bars[i], packed[i][1], key, fields[i], i)
 
     def _key_fields(self, packed):
         """For each bar of `packed`, the `_cart_bar_key` fields its pixels show:
-        the shared ones, then each of its widgets' values. Once per packing."""
+        the shared ones, then each of its widgets' values, and their union as
+        a bit per field (`_need`). Once per packing."""
         if self._fields_of is not packed:
             out = []
+            need = 0
             for b in packed:
                 f = list(_KEY_ALWAYS)
                 for c in b[3]:
@@ -497,9 +519,29 @@ class BarLayer:
                 if not b[3]:                # the crash chrome: everything
                     f = list(range(11))
                 out.append(tuple(f))
+                for k in f:
+                    need |= 1 << k
+            self._need = need
             self._fields_of = packed
             self._fields = tuple(out)
         return self._fields
+
+    def _shown(self, where):
+        """The key fields `where`'s bars draw, as `_need`'s bits (after
+        `_key_fields` of its packing): the undo/redo dims only in the
+        Editor's zone."""
+        return self._need if where == "menu" else self._need & ~_KEY_UNDO
+
+    def shown_key(self, where):
+        """`_cart_bar_key` narrowed to what `where`'s bars draw, the fields
+        a skipped one leaves None: the key a cache over a whole frame that
+        includes the bar folds."""
+        game = self._zone_is_game(where)
+        cv = self._bar_canvas(where, game)
+        self._key_fields(self._packed(where, game))
+        key = [None] * _KEY_N
+        self._fill_key(key, where, cv, self._shown(where))
+        return tuple(key)
 
     def _draw_bar(self, cv, slots, rect, key, fields, i):
         """Bar `i`'s strip at `rect` on `cv`, from the slot that holds it for
@@ -569,7 +611,7 @@ class BarLayer:
                 slot[2] = cv
             self.ws.note_cost("bar.strip.render")
             self._render_cart_bar(strip, key, i)
-        slot[1] = key
+            slot[1] = tuple(key)
         cv.blit_strip(strip, bx, by)
         if fresh:
             self._strip_moved(cv, bx, by, bw, bh)
@@ -588,19 +630,39 @@ class BarLayer:
         set_items -- so a real zone-content change is the ONLY thing that forces a
         re-render beyond the shared dimensions here), and a generation counter the
         explicit invalidators bump (a bar placement, a journal flip)."""
+        key = [None] * _KEY_N
+        self._fill_key(key, where, self._bar_canvas(where), _KEY_ALL)
+        return tuple(key)
+
+    def _fill_key(self, key, where, cv, need):
+        """Write `_cart_bar_key`'s fields into `key` in place: the ones `need`
+        names (a bit per field), plus the shared ones every bar folds. The
+        frame's draw fills `where`'s one list with only what the bars on show
+        draw, so a painted frame allocates no key and reads no state it does
+        not show; a field it skips keeps the value no bar compares."""
         ws = self.ws
-        owner = self._zone_owner(where)
-        has_edit = _edit_kind(ws.cart)
-        return (where, self._clock_text(), has_edit, ws.look.look_gen,
-                getattr(self._bar_canvas(where), "font_scale", 1),
-                bool(ws.can_manage),
-                owner.zone_gen if owner is not None else 0,
-                ws._wifi_icon_kind(),      # Part 3: wifi status glyph (connect/disconnect repaints)
-                (ws.cart.get("title") if ws.cart else None),   # Part 4: the tool bar's left-zone title
-                ws.history.bar_undo_bits(),   # #111: local op-history dim state
-                                              # (RAM-only; journal flips
-                                              # invalidate explicitly)
-                self._bar_cache_gen)
+        key[0] = where
+        if need & 2:
+            key[1] = self._clock_text()
+        if need & 4:
+            key[2] = _edit_kind(ws.cart)
+        key[3] = ws.look.look_gen
+        key[4] = getattr(cv, "font_scale", 1)
+        if need & 32:
+            key[5] = bool(ws.can_manage)
+        if need & 64:
+            owner = self._zone_owner(where)
+            key[6] = owner.zone_gen if owner is not None else 0
+        if need & 128:
+            key[7] = ws._wifi_icon_kind()      # the wifi status glyph
+        if need & 256:
+            cart = ws.cart
+            key[8] = cart.get("title") if cart else None   # the tool bar's title
+        if need & _KEY_UNDO:
+            # #111: the local op-history dim state (RAM-only; journal flips
+            # invalidate explicitly)
+            key[9] = ws.history.bar_undo_bits()
+        key[10] = self._bar_cache_gen
 
     def _render_cart_bar(self, cv, key, i=0):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)

@@ -548,6 +548,31 @@ def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
     assert calls[0] == 0, "an unchanged zoned bar should reuse its cached strip"
 
 
+def test_a_warm_bar_frame_fills_one_key_with_only_what_it_shows(tmp_path):
+    """A painted frame's bar key is `where`'s one list, refilled in place (no
+    key tuple a frame), and reads only the fields its bars draw: the home's
+    zone is the launcher's, so the Editor's undo/redo dim state is never
+    asked for there."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    _pin_clock(ws, drv)
+    bl = ws.bar_layer
+    key = bl._keys["home"]
+    asked = [0]
+
+    def undo_bits():
+        asked[0] += 1
+        return (False, False)
+    ws.history.bar_undo_bits = undo_bits
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert bl._keys["home"] is key
+    assert asked[0] == 0
+    assert bl._cart_bar_key("home")[9] == (False, False) and asked[0] == 1
+
+
 def test_zoned_bar_rerenders_on_app_switch(tmp_path):
     """Switching the active app (launcher -> the Editor) must re-render the bar
     exactly once (a new `where` is always a key change), then reuse the new strip."""

@@ -1511,8 +1511,8 @@ class LauncherHomeLayer:
         """Everything the WHOLE home frame's pixels are a pure function of: the
         chrome statics plus the grid's dynamics (selection, scroll offset, the
         cover-cache generation, trackball hover, per-item titles, favorites)
-        and the bar's own pixel key (_cart_bar_key -- clock minute, wifi state,
-        icon theme; reusing it means the bar's cache discipline IS this cache's
+        and the bar's own pixel key (`shown_key` -- clock minute, wifi state,
+        the look; reusing it means the bar's cache discipline IS this cache's
         discipline). Anything that draws a pixel of the home frame and is NOT
         derivable from this tuple is a staleness bug -- the silent-cache family
         surface_model_v1.md §14.2 documents -- so additions to the home draw
@@ -1522,7 +1522,7 @@ class LauncherHomeLayer:
                 ws.covers.gen, self._lhover,
                 tuple(it.get("title") for it in self.grid.items),
                 ws.system.text("favorites"),
-                ws.bar_layer._cart_bar_key("home"))
+                ws.bar_layer.shown_key("home"))
 
     def _try_stamp_retained(self, cv, dt):
         """Present the retained home frame when nothing it depends on changed:
