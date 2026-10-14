@@ -12,7 +12,7 @@ import pytest
 
 from runtime import moy_play as tick_model
 from runtime.moy_play import Tick as TickScheduler, MAX_CATCHUP, MAX_DIV
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, select_on_home
 
 
 # -- the scheduler, as arithmetic ---------------------------------------------
@@ -434,12 +434,10 @@ def test_switching_steady_live_keeps_n_and_the_costs():
 # -- the Player, through ws.frame ---------------------------------------------
 
 def _open(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            assert ws.player.cart_error is None, ws.player.cart_error
-            return
+    if select_on_home(ws, title) is not None:
+        ws.open()
+        assert ws.player.cart_error is None, ws.player.cart_error
+        return
     raise AssertionError("no seed cart titled " + title)
 
 
@@ -509,6 +507,7 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
     ws = _ws(tmp_path)
     # A tool/app cart the PLAYER runs -- one a registered system app claims
     # opens that app's layer instead, and ticks nothing here.
+    ws.set_home_tab("apps")
     tool = next(c["title"] for c in ws.launcher.items
                 if c.get("type") in ("tool", "app")
                 and not ws.is_system_app(c))

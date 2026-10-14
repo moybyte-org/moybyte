@@ -6,7 +6,7 @@ editor UI is exercised here (that's Part 2)."""
 
 import ast
 from pathlib import Path
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -394,10 +394,7 @@ def test_block_cart_runs_through_workstation(tmp_path):
     status, msg = moy_carts.save_blocks(cart, _the_little_game())
     assert status == moy_carts.SAVE_OK, msg
     ws.launcher.items = shelf(str(tmp_path / "carts"))
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "My Block Game":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "My Block Game")
     ws.open()
     assert ws.cart_error is None and ws.ns is not None  # compiled cleanly + started
     for _ in range(10):

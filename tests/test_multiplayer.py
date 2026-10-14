@@ -13,7 +13,7 @@ in-process LoopbackNet + a fake extra-controller source.
 import json
 import sys
 from pathlib import Path
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -230,8 +230,7 @@ def _mp_cart(carts_dir, title, src):
 
 
 def _run_cart(ws, title):
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it["title"] == title)
+    select_on_home(ws, title)
     ws.open()
 
 

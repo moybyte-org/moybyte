@@ -12,13 +12,15 @@
 A cart's cover is its `cover.png` (SPEC.md 3.6), read by runtime/cover_png.py
 -- the native `moy_png` on a board and in the browser, its Python twin on the
 host. What is cached is ONE decoded picture per cover, the BASE: its 128 x 128
-pixels as RGB565 in the system canvas's byte order, which the shelf draws at a
-whole-number scale through `DeviceCanvas.blit565` (docs/theming_2026-09.md,
-P8: one cached base size per cover, an integer upscale at draw, no per-size
-variants). Two other decodes of the same file exist, each for one consumer:
+pixels as RGB565 in the system canvas's byte order, which the picker's shelf
+draws at a whole-number scale through `DeviceCanvas.blit565` and the home's
+carousel at any ratio through `DeviceCanvas.blit565_resize`
+(docs/theming_2026-09.md, P8: one cached base size per cover, scaled at draw,
+no per-size variants). Two other decodes of the same file exist, each for one
+consumer:
 
-  * HALF, 64 x 64, its box-filtered reduction: the Library GRID's interim need,
-    for a card whose art slot is under 128 and whose cart names no icon;
+  * HALF, 64 x 64, its box-filtered reduction: the card whose art slot is
+    under 128 and whose cart names no icon (the T-Deck's home cards);
   * ICON, 16 x 16, a reduction in palette indices: the desktop icon of a cart
     that names no SPEC.md 3.4 icon (`icon_sheet_for`).
 

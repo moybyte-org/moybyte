@@ -8,6 +8,7 @@ tail could be backspaced away but never typed back."""
 from runtime import host_app, moy_carts
 from runtime.app_shell import ListShellApp
 from runtime.files_app import FilesAppLayer
+from ws_helpers import select_on_home  # noqa: E402
 
 
 LONG = "a_very_long_user_file_name_indeed"
@@ -22,10 +23,7 @@ class _FakeInp:
 
 
 def _open(ws, title):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   Bench            frame recording around ws.frame(), the per-layer split
+#   bench_all        the panel run (desk, picker, editor, settings, apps, console)
+#   bench_popovers   --popovers: the bar widgets' popovers
+#   bench_repaint    --repaint: surfaces repainted every frame
+#   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
+#   bench_home       --home: the home's carousel scenarios (step 7b)
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -25,6 +32,12 @@ playtest, and a frame on a minute boundary (with a docked calendar when the
 layout places one). The open and close are real taps on the widget's cell;
 a key is the popover layer's own handler, with the router's dirty mark where
 the image's WM does not let the popover take keys.
+
+`--home` benches the home (docs/shell_layout_2026-10.md §12, step 7b) on
+any board: idle, a slow drag, a fling and the frames it paints until idle,
+short flicks, the held-key glide (a key press every 120 ms through the home
+layer's own handler), a tab switch where the home has tabs, and idle and a
+drag over a live home wallpaper.
 
 `--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
 size and a synthetic focus-band frame into the canvas the home draws into,
@@ -667,6 +680,85 @@ def bench_kernel(b, out_path):
     return r
 
 
+HOME_KEY = """
+class _PK:
+    last_key = 0
+    def __init__(self, n):
+        self.n = n
+    def pressed(self, n):
+        return n == self.n
+def _hk(n):
+    ws.launcher_layer.handle_input(_PK(n))
+    ws.mark_dirty()
+ws._hk = _hk
+"""
+
+
+def bench_home(b, out_path):
+    """The home's scenarios (step 7b), the same on every board and on the
+    images before and after it: what the eye sees of the carousel's motion
+    is the painted-frame cadence, and a settled row paints nothing."""
+    bench = Bench(b)
+    pyexec(b, HOME_KEY)
+    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    tabs = bool(pyval(b, "hasattr(ws, 'set_home_tab')"))
+    bench.start(); b.drain(3.0); bench.stop("home idle")
+    band = pyval(b, "ws.launcher.band_rect()")
+    bx, by, bw, bh = band
+    cy = by + bh // 2
+    bench.start()
+    b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(3.0)
+    bench.stop("home drag-scroll (slow)")
+    pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+    b.drain(1.5)
+    b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+    bench.start(); b.drain(4.0)
+    bench.stop("fling: frames until idle")
+    bench.start(); b.drain(2.0); bench.stop("idle after the fling")
+    bench.start()
+    for k in range(5):
+        x0, x1 = (bx + bw * 3 // 5, bx + bw * 2 // 5) if k % 2 == 0 \
+            else (bx + bw * 2 // 5, bx + bw * 3 // 5)
+        b.swipe(x0, cy, x1, cy, frames=4); b.drain(0.8)
+    b.drain(1.5)
+    bench.stop("five short flicks")
+    pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+    b.drain(1.5)
+    bench.start()
+    for _k in range(12):
+        b.cmd("py ws._hk('right') or 1", wait_for="PY")
+        b.drain(0.12)
+    b.drain(2.0)
+    bench.stop("held-key glide (12 presses right)")
+    bench.start(); b.drain(2.0); bench.stop("idle after the glide")
+    if tabs:
+        bench.start()
+        for t in ("mine", "apps", "make", "games"):
+            pyexec(b, "ws.set_home_tab(%r)" % t); b.drain(1.2)
+        bench.stop("tab switch (x4)")
+    live = pyval(b, "[ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]") or []
+    was = pyval(b, "ws.look.wallpaper_id")
+    for wp in live:
+        pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % wp)
+        if pyval(b, "ws.wallpaper.is_animating(0.03)"):
+            pyexec(b, "ws.mark_dirty()"); b.drain(2.0)
+            bench.start(); b.drain(3.0)
+            bench.stop("home idle, live wallpaper %s" % wp)
+            bench.start()
+            b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(2.0)
+            bench.stop("home drag, live wallpaper %s" % wp)
+            break
+    pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % was)
+    pyexec(b, "ws.mark_dirty()"); b.drain(1.0)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
 def main():
     ap = argparse.ArgumentParser()
     add_board_args(ap)
@@ -681,12 +773,16 @@ def main():
     ap.add_argument("--kernel", action="store_true",
                     help="the home's scaled-blit kernel and a focus-band "
                          "frame, beside the shelf's drag frame")
+    ap.add_argument("--home", action="store_true",
+                    help="the home's scenarios: idle, drag, fling, flicks, "
+                         "the key glide, tabs, a live wallpaper")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     b = board_from_args(args)
     try:
-        if not args.repaint and not args.kernel and not b.attach_only:
+        if (not args.repaint and not args.kernel and not args.home
+                and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -696,6 +792,8 @@ def main():
             bench_popovers(b, args.out)
         elif args.kernel:
             bench_kernel(b, args.out)
+        elif args.home:
+            bench_home(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

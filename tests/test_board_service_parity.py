@@ -107,7 +107,7 @@ SERVICES = {
     "make_game_canvas": "per-run canvas factory for a cart with a small raster",
     "carts_store": "the moy_carts module the shell reads/writes the store with",
     "carts_root": "where that store lives on this target",
-    "can_manage": "are writes to the store enabled (Make tile, editors)",
+    "can_manage": "are writes to the store enabled (the + New card, editors)",
     "wifi": "the #38 WiFi service behind Settings -> WIFI",
     "pointer": "the cursor model, sized to the SYSTEM canvas",
     "keyboard": "the physical keyboard, for the code editor's text/raw flip",

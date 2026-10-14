@@ -13,7 +13,7 @@ and the prompt is fed by whichever one the tier has.
 
 from pathlib import Path
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, select_on_home
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -252,10 +252,7 @@ def test_run_script_refuses_what_is_not_a_script(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _files_app(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Files")
     ws.open()
     _frame(ws)
     return ws.files_app

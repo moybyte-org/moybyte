@@ -144,6 +144,7 @@ def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     ws.load_system()
     assert ws.look.icon_sheet is None              # never wired
     ws.frame(1 / 30)                          # launcher bar renders (glyph fallback)
+    ws.set_home_tab("mine")                   # Plain is the kid's own
     ws.launcher.sel = 0
     ws.open()
     ws.frame(1 / 30)                          # running-cart bar renders too
@@ -604,10 +605,10 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
 
 
 def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
-    """Moving the launcher selection bumps Launcher.zone_gen (via the `sel`
-    property), so the cached strip picks up the new cart name -- proving the
-    zone_gen wiring covers a raw `.sel = i` assignment (nav/tap/hover), not just a
-    dedicated setter method."""
+    """Moving the home's selection bumps zone_gen (via the `sel` property), so
+    the cached strip picks up the new card's verbs -- ONCE: the carousel's
+    glide leaves `sel` alone until the row settles (docs/shell_layout_2026-10.md
+    §12), so the moving frames reuse the strip."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -619,9 +620,11 @@ def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
         calls[0] += 1
         return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
-    ws.launcher.nav2d(1, 0)           # move the selection -> zone_gen bumps
+    ws.launcher.nav2d(1, 0)           # glide a card -> zone_gen bumps on settle
     ws._dirty = True
-    drv.frame(1 / 30)
+    for _ in range(60):
+        drv.frame(1 / 30)
+    assert not ws.launcher.moving and ws.launcher.sel == 1
     assert calls[0] == 1, "a selection change must re-render the zoned bar once"
     for _ in range(3):
         ws._dirty = True

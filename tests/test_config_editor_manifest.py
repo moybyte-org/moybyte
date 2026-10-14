@@ -14,7 +14,7 @@ this only covers the unambiguous title/author half of the gap.
 """
 
 from pathlib import Path
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -97,8 +97,7 @@ def test_project_commit_manifest_persists_and_syncs_ram(tmp_path):
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
     ws.launcher.set_items(shelf(root))
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c["title"] == "Tune Me")
+    select_on_home(ws, "Tune Me")
     ws.open_in_editor()
     assert ws.menu_view == "cards"
 
@@ -122,8 +121,7 @@ def test_project_commit_manifest_rejects_blank_title(tmp_path):
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
     ws.launcher.set_items(shelf(root))
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c["title"] == "Tune Me")
+    select_on_home(ws, "Tune Me")
     ws.open_in_editor()
 
     assert ws.project.commit_manifest(title="   ", author="Someone") is True
@@ -148,8 +146,7 @@ def test_project_commit_manifest_noop_without_a_real_cart():
 # ----------------------------------------------------------------------------
 
 def _open_cards_for(ws, title):
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c["title"] == title)
+    select_on_home(ws, title)
     ws.open_in_editor()
     assert ws.menu_view == "cards"
 

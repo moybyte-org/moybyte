@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from ws_helpers import select_on_home
+
 ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_CARTS = ROOT / "system_carts"
 
@@ -27,11 +29,7 @@ def _run_bench(tmp_path, title, frames):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("title") == title:
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, title) is None:
         raise AssertionError(title + " not seeded")
     ws.open()
     assert ws.cart_error is None, ws.cart_error

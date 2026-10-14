@@ -33,8 +33,6 @@ def test_search_filters_the_grid(tmp_path):
     ws.set_search_query("star")
     titles = [it.get("title") for it in ws.launcher.items if it.get("path")]
     assert titles == ["Star Catcher"]
-    # The pinned Make tile always survives a filter (it's not a cart).
-    assert ws.launcher.items[0].get("type") == "make"
     assert len(ws.launcher.items) < len(full)
 
 
@@ -46,11 +44,13 @@ def test_search_is_case_insensitive_substring(tmp_path):
     assert [it["title"] for it in _real_items(ws)] == ["Star Catcher"]
 
 
-def test_search_no_matches_keeps_only_the_make_tile(tmp_path):
+def test_search_no_matches_empties_the_tab_but_keeps_the_new_card(tmp_path):
     ws = _ws(tmp_path)
     ws.set_search_query("zzzznotacart")
-    assert len(ws.launcher.items) == 1
-    assert ws.launcher.items[0].get("type") == "make"
+    assert ws.launcher.items == []             # Games: no match, no card
+    ws.set_home_tab("make")                    # the filter follows the tab...
+    assert len(ws.launcher.items) == 1         # ...and "+ New" survives it
+    assert ws.launcher.items[0].get("type") == "new"
 
 
 def test_empty_query_restores_the_full_grid(tmp_path):
@@ -174,10 +174,11 @@ def test_favorite_star_badge_tap_toggles_without_launching(tmp_path):
     assert ws.carts.is_favorite(cart) is True
 
 
-def test_favorite_rect_is_none_for_the_make_tile(tmp_path):
+def test_favorite_rect_is_none_for_the_new_card(tmp_path):
     ws = _ws(tmp_path)
-    ws.launcher.sel = 0                        # the pinned Make pseudo tile
-    assert ws.launcher.selected().get("type") == "make"
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                        # Make's "+ New" pseudo card
+    assert ws.launcher.selected().get("type") == "new"
     assert ws.launcher.favorite_rect(0) is None
 
 
@@ -240,6 +241,7 @@ def test_recents_cap_at_mru_limit(tmp_path):
         moy_carts.create("Pad%d" % k, carts_dir, src="def _draw():\n    cls(1)\n",
                           type="game")
     ws.carts.apply(shelf(carts_dir))
+    ws.set_home_tab("mine")                    # made here: the kid's own
     pads = [it for it in ws.launcher.items if it.get("title", "").startswith("Pad")]
     assert len(pads) == n
     for it in pads:

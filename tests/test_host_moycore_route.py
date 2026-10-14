@@ -14,6 +14,8 @@ pin that the route is taken, by asking the carts rather than the gate.
 
 import pytest
 
+from ws_helpers import select_on_home
+
 from runtime import lua_binding
 
 import canvas_probe as probe  # pixel-width-agnostic "it drew" probes
@@ -53,8 +55,7 @@ def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
               if c.get("runtime") == "lua"]
     assert len(titles) >= 3, "no lua seeds to check -- the roster moved"
     for title in titles:
-        ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                               if c["title"] == title)
+        select_on_home(ws, title)
         ws.open()                       # the real launch path, so the project
         assert ws.player.cart_error is None, title   # (and its sheet) is live
         assert type(ws.player._lua).__name__ == "MoycoreRun", \

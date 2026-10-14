@@ -9,6 +9,7 @@ import ast
 import re
 import sys
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
@@ -98,11 +99,7 @@ def test_python_cart_writes_what_the_tool_reads(tmp_path):
     # own pmem verb -- byte-for-byte what the synthetic block above encodes.
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("title") == "Bench":
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, "Bench") is None:
         raise AssertionError("Bench not seeded")
     ws.open()
     assert ws.cart_error is None, ws.cart_error

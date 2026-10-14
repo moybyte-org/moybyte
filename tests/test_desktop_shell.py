@@ -7,7 +7,7 @@ ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==devic
 behavior, not a host-only path."""
 
 from pathlib import Path
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -242,7 +242,7 @@ def test_the_pre_2026_07_bottom_dock_is_gone(tmp_path):
     """The six-slot HOME/CODE/DRAW/MAP/RUN/SET bottom dock was DELETED on
     2026-08-21. It was the pre-2026-07 tool-switcher shell's navigation, and its
     slots still routed into that shell's entry points (ws._open_menu /
-    ws._open_paint); the 2026-07 shell navigates by the zoned bar, the Make tile
+    ws._open_paint); the 2026-07 shell navigates by the zoned bar, the Make tab
     and the context-X. The launcher had dropped it in #46, the windowed WM
     suppressed it, so `settings_layer` was its last caller -- which is why it was
     still visible on the fullscreen tiers (T-Deck/Guition) and nowhere else.
@@ -311,7 +311,7 @@ def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
     """The launcher's LOCKED primary action (spec shell_ux_v1.md): tapping ANY cart's
     icon tile RUNS it (screen == "desktop"), caller = the launcher home (so its QUIT pops
     home). There is no maker/player tap_mode: authoring is a separate Editor app reached
-    via the Make tile -> project-picker, never a tap on the launcher grid."""
+    via the Make tab, never a tap on the launcher grid."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -324,19 +324,41 @@ def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
     assert ws.cart is not None and ws.cart.get("path")  # ...a real cart loaded
 
 
-def test_tapping_the_make_tile_opens_the_project_picker(tmp_path):
-    """The pinned "Make" tile (launcher slot 0, distinctive) opens the Editor's
-    PROJECT-PICKER (screen == "picker"), NOT a running cart (spec shell_ux_v1.md)."""
+def test_the_make_tabs_new_card_starts_a_project(tmp_path):
+    """The home's Make tab (a tap on its chip) puts "+ New" at the centre; a
+    tap on it makes a game and opens it in the Editor, NOT a running cart."""
     from runtime import host_app
-    from runtime.launcher_layer import MAKE_TILE_TYPE
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    assert ws.launcher.items[0].get("type") == MAKE_TILE_TYPE   # pinned first, a pseudo tile
-    assert ws.launcher.items[0].get("path") is None             # not a real cart
+    r = next(r for tid, r, _on in ws.launcher_layer.tab_rects() if tid == "make")
+    drv.click(r[0] + r[2] // 2, r[1] + r[3] // 2)
+    drv.frame(1 / 30)
+    assert ws.launcher.tab == "make"
+    assert ws.launcher.selected().get("type") == "new"
     x, y, w, h = ws.launcher.tile_rect(0)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.screen == "picker"                # opened the project-picker, did NOT run
+    assert ws.screen == "menu"                  # a new project, in the Editor
+
+
+def test_play_reaches_the_tabbed_home_in_console_mode(tmp_path):
+    """The desk's PLAY enters console mode, whose root is the home with its
+    four tabs (docs/shell_layout_2026-10.md §3, §12)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    windowed=True, panel_diagonal_in=7.0)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    assert ws.screen == "desk"
+    ws.open_library()                           # the desk's PLAY
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+    assert [tid for tid, _r, _on in ws.launcher_layer.tab_rects()] == [
+        "games", "mine", "apps", "make"]
+    assert ws.launcher.tab == "games"
+    assert all(c.get("type") != "app" for c in ws.launcher.items)
+    ws.set_home_tab("apps")
+    assert "Calc" in [c.get("title") for c in ws.launcher.items]
 
 
 _ONE_CARD = [{"key": "c", "type": "choice", "choices": ["red", "blue"], "card": "C IS {value}"}]
@@ -346,7 +368,7 @@ def test_launcher_tap_runs_every_cart_type(tmp_path):
     """The locked model: a launcher tap RUNS the cart regardless of manifest TYPE -- a
     tool, an app, AND a game all land on the running cart (screen == "desktop"), never the
     Editor. The retired interim `tap_mode` used to send a game to the Editor on a maker tap;
-    that type-dispatch is gone -- tap always runs, edit is the Make tile's job."""
+    that type-dispatch is gone -- tap always runs, edit is the Make tab's job."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -358,8 +380,7 @@ def test_launcher_tap_runs_every_cart_type(tmp_path):
                          type=ctype, edit=edit)
         ws.go_home()
         ws.launcher.set_items(shelf(carts_dir))
-        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                               if it.get("title") == title)
+        select_on_home(ws, title)
         ws.launch_selected()                        # the launcher tap
         assert ws.screen == "desktop", title        # RAN, never the Editor
         assert ws.cart is not None and ws.cart.get("type") == ctype
@@ -369,7 +390,7 @@ def test_new_template_is_an_editable_game(tmp_path):
     """A kid's brand-new cart (moy_carts.NEW_TEMPLATE) is `type=="game"` WITH "Make it
     mine" cards -- the project the "+ New" picker tile creates + opens in the Editor (spec
     shell_ux_v1.md). It's a real game project, not a wallpaper. (Tapping it in the launcher
-    RUNS it like any cart; editing is reached via the Make tile -> picker.)"""
+    RUNS it like any cart; editing is reached via the Make tab.)"""
     import os
     from runtime import moy_carts
     carts_dir = str(tmp_path / "carts")
@@ -595,8 +616,7 @@ def _make_tool_ws(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
     ws.launcher.set_items(shelf(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "MyTool")
+    select_on_home(ws, "MyTool")
     ws.launch_selected()                             # a tool always LAUNCHES (Part 2)
     assert ws.screen == "desktop"
     return ws, drv
@@ -687,8 +707,7 @@ def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
            "def _draw():\n    cls(1)\n")
     moy_carts.create("Quitter", carts_dir, src=src, type="game")
     ws.launcher.set_items(shelf(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "Quitter")
+    select_on_home(ws, "Quitter")
     ws.open()                                # PLAY it
     assert ws.screen == "desktop"
     drv.frame(1 / 30)                        # frame 1: _n -> 1, quit() not yet called
@@ -709,8 +728,7 @@ def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
                      src="def _update(dt):\n    pass\ndef _draw():\n    cls(2)\n",
                      type="game")
     ws.launcher.set_items(shelf(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "Plain")
+    select_on_home(ws, "Plain")
     ws.input.cart_quit = True                # a leftover flag from some prior run
     ws.open()                                # opening must clear it
     assert getattr(ws.input, "cart_quit", False) is False
@@ -721,7 +739,7 @@ def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
 def test_tap_mode_is_retired_from_settings(tmp_path):
     """The maker/player `tap_mode` is GONE (spec shell_ux_v1.md, the locked model): no
     Settings row, no ws.tap_mode/cycle_tap_mode verbs. A launcher tap always RUNS; the
-    only authoring path is the Make tile -> Editor project-picker."""
+    only authoring path is the Make tab and CHANGE."""
     from runtime import host_app
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)

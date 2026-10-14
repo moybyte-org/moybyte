@@ -234,4 +234,6 @@ def test_eggs_do_not_block_normal_nav(tmp_path):
     start = ws.launcher.sel
     _press(drv, "right")                     # first key is "up", so this resets to 0
     assert ws.ach_ui._konami_pos == 0
+    for _ in range(60):                      # the row glides, then settles
+        drv.frame(1 / 30)
     assert ws.launcher.sel != start or len(ws.launcher.items) == 1

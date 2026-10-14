@@ -18,15 +18,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, select_on_home
 
 
 def _open_in_editor_by_title(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c.get("title") == title:
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, title) is None:
         raise AssertionError("cart not found: " + title)
     ws.open_in_editor()
 

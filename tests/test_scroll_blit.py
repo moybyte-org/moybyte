@@ -201,35 +201,45 @@ def _drag_frames(drv, cx, cy, steps, step_px=9):
     return x
 
 
-def test_shelf_blit_frame_is_pixel_faithful(tmp_path):
-    """A blitted drag frame's composed screen must be byte-identical to a FULL
-    repaint of the identical state -- the #113 band contract, proven on the
-    real console (the test_launcher_scroll golden pattern)."""
+def test_carousel_moving_frame_keeps_the_wallpaper_still(tmp_path):
+    """The home's cards lie on its wallpaper (docs/shell_layout_2026-10.md
+    §12), so a moving frame never shifts the band -- the wallpaper would
+    slide with the cards. It restores the wallpaper around the cards and
+    paints them, and the composed screen is byte-identical to a FULL repaint
+    of the same state (the night sky is no flat fill: a slid backdrop would
+    show)."""
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    for _ in range(80):                       # settle covers; arm streak + ring
+    for _ in range(80):                       # settle covers; arm the streak
         drv.frame(1 / 30)
     calls = _spy_scroll_rect(ws)
-    gx, gy, gw, gh = ws.layout.lib_grid
-    cx, cy = gx + gw - 10, gy + gh // 2
+    walls = [0]
+    orig = ws.wallpaper.draw
+
+    def spy(dt):
+        walls[0] += 1
+        return orig(dt)
+
+    ws.wallpaper.draw = spy
+    bx, by, bw, bh = ws.launcher.band_rect()
+    cx, cy = bx + bw - 10, by + bh // 2
     lastx = _drag_frames(drv, cx, cy, 7)
     assert ws.launcher.dragging
-    assert calls[0] > 0                       # the blit path actually engaged
-    n_blit = calls[0]
+    n = walls[0]
     lastx -= 9
-    drv.touch_drag(lastx, cy)                 # one more eligible blit frame
+    drv.touch_drag(lastx, cy)                 # one more moving frame
     drv.frame(1 / 30)
-    assert calls[0] > n_blit
+    assert walls[0] == n                      # the partial: no wallpaper draw
+    assert calls[0] == 0                      # ...and the band never shifted
     partial = bytes(ws.sys_canvas._buf)
     scroll = ws.launcher.scroll
-    # Force the FULL path for the identical state and compare the pixels.
-    ws.launcher_layer._full_streak = 0
-    ws.launcher._region.invalidate()
+    ws.launcher_layer._full_streak = 0        # force the FULL path, same state
     ws.mark_dirty()
     drv.touch_drag(lastx, cy)                 # same pos: scroll unchanged
     drv.frame(1 / 30)
+    assert walls[0] == n + 1
     assert ws.launcher.scroll == scroll
     full = bytes(ws.sys_canvas._buf)
     row = ws.sys_canvas.w * ws.layout.status_h * 2  # compare below the bar (the
@@ -239,49 +249,37 @@ def test_shelf_blit_frame_is_pixel_faithful(tmp_path):
     assert ws.screen == "launcher"            # and the release opened nothing
 
 
-def test_shelf_blit_frame_draws_fewer_cards(tmp_path, monkeypatch):
-    """The point of #113: an eligible drag frame draws only the cards touching
-    the exposed strip (+ cursor damage), strictly fewer than the full path's
-    every-visible-card -- dispatch count is the host's flake-free perf proxy."""
-    import runtime.launcher_layer as LL
+def test_carousel_moving_frame_restores_only_around_the_cards(tmp_path, monkeypatch):
+    """Every card paints its whole square opaque, so a moving frame restores
+    the wallpaper only around them: less than the band, and at least the band
+    less the cards."""
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
     for _ in range(80):
         drv.frame(1 / 30)
-    cards = [0]
-    orig_real = LL.Launcher._draw_cart_card
-    orig_pseudo = LL.Launcher._draw_pseudo_card
+    area = [0]
+    home = ws.launcher_layer
+    orig = home._backdrop_fill
 
-    def spy_real(self, *a, **k):
-        cards[0] += 1
-        return orig_real(self, *a, **k)
+    def spy(cv, r):
+        area[0] += r[2] * r[3]
+        return orig(cv, r)
 
-    def spy_pseudo(self, *a, **k):
-        cards[0] += 1
-        return orig_pseudo(self, *a, **k)
-
-    monkeypatch.setattr(LL.Launcher, "_draw_cart_card", spy_real)
-    monkeypatch.setattr(LL.Launcher, "_draw_pseudo_card", spy_pseudo)
-    calls = _spy_scroll_rect(ws)
-    gx, gy, gw, gh = ws.layout.lib_grid
-    cx, cy = gx + gw - 10, gy + gh // 2
+    monkeypatch.setattr(home, "_backdrop_fill", spy)
+    bx, by, bw, bh = ws.launcher.band_rect()
+    cx, cy = bx + bw - 10, by + bh // 2
     lastx = _drag_frames(drv, cx, cy, 6)
-    assert ws.launcher.dragging and calls[0] > 0
-    cards[0] = 0
-    drv.touch_drag(lastx - 9, cy)             # one blitted drag frame
+    assert ws.launcher.dragging
+    area[0] = 0
+    drv.touch_drag(lastx - 9, cy)             # one moving frame
     drv.frame(1 / 30)
-    n_blit = cards[0]
-    ws.launcher_layer._full_streak = 0        # force the full path, same state
-    ws.launcher._region.invalidate()
-    ws.mark_dirty()
-    cards[0] = 0
-    drv.touch_drag(lastx - 9, cy)
-    drv.frame(1 / 30)
-    n_full = cards[0]
-    assert n_blit < n_full                    # strictly fewer draws per frame
-    assert n_full >= 4                        # sanity: the shelf was populated
+    cards = 0
+    for _i, r in ws.launcher._visible():
+        w = min(r[0] + r[2], bx + bw) - max(r[0], bx)
+        cards += max(0, w) * r[3]
+    assert bw * bh - cards <= area[0] < bw * bh
 
 
 def test_picker_blit_frame_is_pixel_faithful(tmp_path):
@@ -389,7 +387,7 @@ def test_set_layout_keeps_the_paint_ring(tmp_path):
     assert region._painted == before, "set_layout wiped the ring"
     # ... but the geometry IS pinned: the statics key carries the grid rect.
     key = ws.editor_picker._statics_key(ws.sys_canvas)
-    assert ws.picker.layout.lib_grid in key
+    assert ws.picker.band_rect() in key
 
 
 # -- the shared streak-advance body (#209 W3) --------------------------------

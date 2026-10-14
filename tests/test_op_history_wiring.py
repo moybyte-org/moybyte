@@ -11,7 +11,7 @@ commit re-baselines the History, so the two never double-count a stroke)."""
 from pathlib import Path
 
 from blocks_helpers import go_to_insert
-from ws_helpers import build_ws_with_cart
+from ws_helpers import build_ws_with_cart, select_on_home
 from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -503,10 +503,7 @@ def _make_ws_with_config_cart(tmp_path, title="Cfg"):
         edit=[{"key": "spd", "type": "int", "min": 0, "max": 10, "default": 3,
               "card": "SPD {value}"}])
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open_in_editor()
     assert ws.menu_view == "cards"
     return ws

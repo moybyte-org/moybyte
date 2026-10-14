@@ -8,13 +8,11 @@ console ended up, not which method was called."""
 
 from runtime import (files_app, host_app, moy_carts, system_api,
                      text_modes)
+from ws_helpers import select_on_home  # noqa: E402
 
 
 def _open_files(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Files")
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)

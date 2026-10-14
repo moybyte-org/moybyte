@@ -4,17 +4,14 @@ import json
 from pathlib import Path
 
 from runtime import host_app, moy_carts
+from ws_helpers import select_on_home  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _open_paint(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Paint":
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, "Paint") is None:
         # Windowed tier (#105): system apps are desk-only, not on the shelf.
         assert ws.open_app(ws.artwork_app)
         ws.input.begin_frame()

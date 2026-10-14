@@ -4,6 +4,7 @@
 attached behaves exactly as before (the local-only contract)."""
 
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -104,10 +105,7 @@ def test_select_all_spans_the_whole_buffer():
 def test_code_tab_editor_rides_the_workstation_clipboard(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     title = next(c["title"] for c in ws.launcher.items if c.get("path"))
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open_in_editor()
     ws.set_menu_view("code")
     assert ws.editor is not None

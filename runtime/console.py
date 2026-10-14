@@ -359,18 +359,20 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import system_api
 
 
-# The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
-# Launcher grid CLASS (its instance stays ws.launcher, the single source everything
-# reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
-# nav). Launcher takes NAMES + ui.glyph injected for its tile art; ws.open() stays.
+# The home (docs/shell_layout_2026-10.md §12, see launcher_layer.py): its
+# Carousel (the instance is ws.launcher, the single source everything reads) +
+# LauncherHomeLayer (the "launcher" content Layer -- the tab row, the carousel
+# and their input), and the picker's Launcher grid. Both take NAMES + ui.glyph
+# injected for their card art; ws.open() stays.
 try:
-    from launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
-                                make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE,
-                                PSEUDO_TILE_TYPES)
+    from launcher_layer import (Launcher, Carousel, LauncherHomeLayer,
+                                EditorPickerLayer, new_tile, NEW_TILE_TYPE,
+                                PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
-                                        make_tile, new_tile, MAKE_TILE_TYPE,
-                                        NEW_TILE_TYPE, PSEUDO_TILE_TYPES)
+    from runtime.launcher_layer import (Launcher, Carousel, LauncherHomeLayer,
+                                        EditorPickerLayer, new_tile, NEW_TILE_TYPE,
+                                        PSEUDO_TILE_TYPES, HOME_TABS,
+                                        tab_count_title)
 
 try:
     import ui as _uimod
@@ -897,25 +899,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # capture sub-state. See _launcher_view_items/open_search/close_search.
         self.search_query = ""
         self.search_typing = False
-        self.launcher = Launcher(self._launcher_items(self.carts.all),
+        # The home's carousel over the Games tab; each tab remembers its card.
+        self._home_sel = {}
+        self.launcher = Carousel(self._launcher_items(self.carts.all, "games"),
                                  self.layout, NAMES, _uimod.glyph)
-        # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
-        # density tiers (visual identity v1 Section 1.2); the picker below keeps the
-        # single-verb pick, so the flag stays off there.
-        self.launcher.actions = True
-        # The shelf's pseudo cards (MAKE STUDIO / + New) draw the real themeable
-        # IconSheet pencil/plus sprite big -- keyed so the sheet's 0-filled
-        # backdrop doesn't plate the card.
+        # The "+ New" card draws the real themeable IconSheet plus sprite big --
+        # keyed so the sheet's 0-filled backdrop doesn't plate the card.
         self.launcher.icon_for = self._icon_image_keyed
         self.launcher.cover_for = self.covers.cover_for
-        # The favorite-star corner badge (#105): only the RUN grid plays, so only
-        # ws.launcher (not the Editor's project-picker) gets the toggle.
+        # The favorite-star badge on the centre card (#105): only the home
+        # plays, so only ws.launcher (not the Editor's picker) gets the toggle.
         self.launcher.favorite_for = self.carts.is_favorite
-        # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
-        # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
-        # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
-        self.launcher.sel = next((i for i, it in enumerate(self.launcher.items)
-                                  if it.get("path")), 0)
         # The Editor's project-picker grid (spec shell_ux_v1.md): its own Launcher
         # instance so it keeps an independent selection/page, reusing the SAME tile
         # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
@@ -1209,7 +1203,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # GRID instance stays ws.launcher (the single source); this Layer draws it.
         self.launcher_layer = LauncherHomeLayer(self, NAMES)
         # The Editor's project-picker content Layer (spec shell_ux_v1.md): reuses the
-        # launcher grid look over ws.picker; the Make tile opens it, picking a cart opens
+        # card grid over ws.picker (the Editor's PROJECTS); picking a cart opens
         # the Editor above it.
         self.editor_picker = EditorPickerLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
@@ -2287,7 +2281,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # home. Open to the desktop even if the cart failed to start: frame() shows the
         # error panel there so the kid isn't stranded (a silent stay-on-launcher would
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
-        # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
+        # through the home's Make tab or CHANGE, not a tap-mode on the played tabs.
         selected = self.launcher.selected()
         self.carts.note_recent(selected)   # #105 desk_mru: every launcher-tap run counts
         self.search_typing = False     # a RUN always ends any in-progress query typing
@@ -2418,7 +2412,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Open `cart` (default: the launcher selection) in the Editor, landing on Config
         # (spec Section 6). The cart is started (ready for PLAY) but not shown; the Editor
         # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
-        # passes the PICKED cart -- never a launcher tap (a launcher tap always RUNS).
+        # passes the PICKED cart -- never a tap on a played tab (that RUNS).
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
@@ -2427,14 +2421,18 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.editor_app.open(self.project)
 
     def launch_selected(self):
-        """A launcher TAP RUNS the selected cart (spec shell_ux_v1.md, the locked model:
-        launcher tap = RUN, always, for every cart type). The one exception is the pinned
-        "Make" pseudo tile (slot 0): it opens the Editor's PROJECT-PICKER, fullscreen in
-        console mode on every board (no tile flips the mode). Both Play and Edit stay
-        reachable -- Play here, Edit through the Make tile."""
+        """The home's tap on the selected card, by tab (docs/shell_layout_2026-10.md
+        §12): Games and Mine RUN it, Apps opens the app fullscreen (`open`
+        dispatches an app's cart to it), Make opens it in the Editor. The
+        "+ New" card -- Make's first, an empty Mine's only -- makes a game and
+        opens it in the Editor."""
         sel = self.launcher.selected()
-        if sel is not None and sel.get("type") == MAKE_TILE_TYPE:
-            self.open_picker()
+        if sel is not None and sel.get("type") == NEW_TILE_TYPE:
+            self.new_cart_and_edit()
+            return
+        if self.launcher.tab == "make":
+            if sel is not None:
+                self.open_in_editor(sel)
             return
         self.open()
 
@@ -2453,13 +2451,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             folder substring, in shelf order
 
         An empty `name` runs the first real cart, which is the dev channel's
-        established `run` with no argument. Pseudo tiles (the pinned Make/New
-        cards, which carry no store path) are never candidates."""
+        established `run` with no argument. The "+ New" card (it carries no
+        store path) is never a candidate."""
         # str(): `name` comes off a JSON body a browser wrote, so it is only a
         # string by convention -- a number there must miss, not raise inside the
         # frame loop's tail.
         want = str(name or "").strip().lower()
-        items = getattr(self.launcher, "items", []) or []
+        items = self._runnable_items()
         exact_title = None
         exact_folder = None
         partial = None
@@ -2487,8 +2485,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             pick = partial
         if pick is None:
             return None
-        self.launcher.sel = pick
-        self.launch_selected()
+        self.select_cart(items[pick])
+        self.open()
         # Return something TRUTHY whenever a launch actually happened, so a
         # caller (moy_webhost's /run) can tell "nothing matched" (None, above)
         # from "launched a cart whose title is empty" -- a titleless cart used to
@@ -2505,7 +2503,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         import json
         lw = self.launcher
         sel = lw.selected() or {}
-        return json.dumps({"sel": int(lw.sel), "scroll": int(lw._scroll),
+        return json.dumps({"tab": lw.tab, "sel": int(lw.sel),
                            "search": self.search_query, "path": sel.get("path")})
 
     def resume_launcher(self, text):
@@ -2514,6 +2512,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         import json
         try:
             rec = json.loads(text)
+            tab = rec.get("tab")
+            if tab in [t for t, _l in HOME_TABS]:
+                self.set_home_tab(tab)
             q = rec.get("search") or ""
             if q:
                 self.set_search_query(q)
@@ -2526,7 +2527,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                         sel = i
                         break
             self.launcher.sel = max(0, min(sel, len(items) - 1))
-            self.launcher._scroll = max(0, int(rec.get("scroll", 0)))
             self._dirty = True
         except (ValueError, TypeError, AttributeError) as exc:
             print("Moybyte resume: %s" % exc)
@@ -2565,7 +2565,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         editable tab when the cart has no edit schema -- editor_app.open decides,
         deterministically per project). The bridge from playing to making: same
         Project, same persistence path, never a surprise duplicate (Copy stays an
-        explicit picker verb). No-op for the pseudo Make tile (one verb: its tap)."""
+        explicit picker verb). No-op for the "+ New" card (one verb: its tap)."""
         sel = self.launcher.selected()
         if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
             return
@@ -2574,7 +2574,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # -- the Editor's project-picker (spec shell_ux_v1.md) -------------------
 
     def open_picker(self):
-        """Open the Editor's PROJECT-PICKER (the Make tile's target): a cart grid of every
+        """Open the Editor's PROJECT-PICKER (the Editor's PROJECTS): a cart grid of every
         editable project + a "+ New" tile. Pushed on the back-stack, so its X pops home and
         picking a cart pushes the Editor above it (so the Editor's "projects" affordance
         returns HERE). Resets the picker's armed delete-confirm (if any) so a stale
@@ -2922,37 +2922,74 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # Each action mounts the SD card, mutates, and re-scans within a single
     # _with_sd session, then the card is unmounted before the next flush.
 
-    def _launcher_items(self, carts):
-        """The LAUNCHER run-grid entries: the pinned "Make" tile first (spec shell_ux_v1.md
-        -- tap it for the Editor's project picker), then the runnable carts. WALLPAPERS
-        are excluded -- they're a backdrop category chosen in Settings -> wallpaper, not
-        run-grid apps (they stay in the Editor picker + the Settings wallpaper picker).
-        On the windowed tier (#105) SYSTEM-APP carts are excluded too: the
-        Library is the game launcher; the tools live as desk icons/windows -- one rule
-        a kid can hold ("apps are windows, games are fullscreen"). Kid-made "app"-type
-        carts are NOT system apps and stay on the shelf (they run under the Player)."""
-        # No Make tile on a read-only store (#151: the web runner/spec player
-        # runs can_manage=False -- project management, and with it the whole
-        # Editor entry point, is out of scope there). can_manage is wired
-        # after construction, so runner boots rebuild launcher.items once
-        # wiring is done (web_boot does).
-        out = [make_tile()] if getattr(self, "can_manage", True) else []
-        desk = getattr(self.wm, "has_desk", False)
+    def _launcher_items(self, carts, tab=None):
+        """The home's `tab` (the active one by default) over `carts`
+        (docs/shell_layout_2026-10.md §12), the four without overlap:
+
+          games  the installed carts that play -- the seeds and the store's --
+                 that are not the kid's own (`CartManager.is_own`), not a
+                 registered app's and not app- or tool-typed;
+          mine   the kid's own carts (made, or taken to make their own);
+          apps   the registered apps' carts (minus the WM's HIDDEN_APPS),
+                 then the installed app- and tool-typed carts no app claims;
+          make   the picker's list -- "+ New" first, then every editable cart.
+
+        WALLPAPERS play in none of the first three: they are a backdrop chosen
+        in Settings (Make lists them, as the picker does). An empty Mine holds
+        one "+ New" card. No "+ New" on a read-only store (#151: the web
+        runner's can_manage=False, where project management is out of scope)."""
+        if tab is None:
+            tab = getattr(getattr(self, "launcher", None), "tab", "games")
+        manage = getattr(self, "can_manage", True)
+        if tab == "make":
+            items = self._picker_items(carts)
+            return items if manage else items[1:]
+        own = self.carts.is_own
+        if tab == "apps":
+            hidden = getattr(self.wm, "HIDDEN_APPS", ())
+            out = []
+            for app, _t in getattr(self, "_apps", ()):
+                if app.id in hidden:
+                    continue
+                for c in carts:
+                    if app.is_app(c):
+                        out.append(c)
+                        break
+            for c in carts:
+                if (c.get("type") in ("app", "tool") and not own(c)
+                        and not self.is_system_app(c)):
+                    out.append(c)
+            return out
+        out = []
         for c in carts:
-            if c.get("type") == "wallpaper":
+            if c.get("type") == "wallpaper" or self.is_system_app(c):
                 continue
-            if desk and self.is_system_app(c):
-                continue
-            out.append(c)
+            if tab == "mine":
+                if own(c):
+                    out.append(c)
+            elif not own(c) and c.get("type") not in ("app", "tool"):
+                out.append(c)
+        if tab == "mine" and not out and manage:
+            out.append(new_tile())
+        return out
+
+    def _runnable_items(self):
+        """Every cart a tap on the home RUNS or opens -- Games, Mine and Apps,
+        in that order: what a remote run (`launch_named`) chooses from."""
+        carts = self.carts.all
+        out = []
+        for tab in ("games", "mine", "apps"):
+            for c in self._launcher_items(carts, tab):
+                if c.get("path"):
+                    out.append(c)
         return out
 
     def _launcher_view_items(self):
-        """The launcher grid's current contents: `_launcher_items` narrowed by the
-        active search query (#105), if any -- a plain case-insensitive substring
-        match on the title. The pinned Make tile always survives a filter (it's
-        not a cart to search for, it's the way to keep making one). The single
-        place a rescan (carts.apply) and a query edit (set_search_query) both
-        call, so the two can never desync on which list is "current"."""
+        """The home's current contents: the active tab narrowed by the search
+        query (#105), if any -- a plain case-insensitive substring match on the
+        title; a "+ New" card survives it. The single place a rescan
+        (carts.apply), a query edit (set_search_query) and a tab switch all
+        call, so they can never desync on which list is "current"."""
         base = self._launcher_items(self.carts.all)
         q = self.search_query.strip().lower()
         if not q:
@@ -2960,6 +2997,60 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return [it for it in base
                 if it.get("type") in PSEUDO_TILE_TYPES
                 or q in it.get("title", "").lower()]
+
+    def set_home_tab(self, tab):
+        """Switch the home to `tab`, back on the card it last had."""
+        lw = self.launcher
+        if tab == lw.tab:
+            return
+        sel = lw.selected()
+        self._home_sel[lw.tab] = sel.get("path") if sel else None
+        lw.tab = tab
+        lw.set_items(self._launcher_view_items())
+        want = self._home_sel.get(tab)
+        i = 0
+        for k in range(len(lw.items)):
+            if want and lw.items[k].get("path") == want:
+                i = k
+                break
+        lw.sel = i
+        lw._scroll_to_sel()
+        self._dirty = True
+
+    def step_home_tab(self, d):
+        """The tab `d` steps from the active one, clamped (the keys' tab row)."""
+        ids = [t for t, _l in HOME_TABS]
+        i = ids.index(self.launcher.tab) + d
+        self.set_home_tab(ids[max(0, min(len(ids) - 1, i))])
+
+    def select_cart(self, cart):
+        """Bring `cart` up on the home: the tab whose list holds it, then its
+        card. False when no tab holds it."""
+        path = cart.get("path") if cart else None
+        tabs = [self.launcher.tab] + [t for t, _l in HOME_TABS
+                                      if t != self.launcher.tab and t != "make"]
+        for tab in tabs:
+            items = self._launcher_items(self.carts.all, tab)
+            for k in range(len(items)):
+                if items[k] is cart or (path and items[k].get("path") == path):
+                    if tab != self.launcher.tab or self.search_query:
+                        self.search_query = ""
+                        self.set_home_tab(tab)
+                        self.launcher.set_items(self._launcher_view_items())
+                    lw = self.launcher
+                    for j in range(len(lw.items)):
+                        if lw.items[j] is cart or (path and lw.items[j].get("path") == path):
+                            lw.sel = j
+                            return True
+        return False
+
+    def home_title(self):
+        """The bar's title on the home: the active tab's count."""
+        n = 0
+        for it in self.launcher.items:
+            if it.get("path"):
+                n += 1
+        return tab_count_title(self.launcher.tab, n)
 
     def open_search(self):
         """Enter the launcher search box (≡ -> SEARCH, #105): capture ASCII

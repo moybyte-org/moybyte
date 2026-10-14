@@ -4,18 +4,15 @@ import json
 from pathlib import Path
 
 from runtime import chrome, host_app, moy_carts
+from ws_helpers import select_on_home  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _open_appearance(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Appearance":
-            ws.launcher.sel = i
-            break
-    else:
-        # Windowed tier (#105): system apps are desk-only, not on the shelf.
+    if select_on_home(ws, "Appearance") is None:
+        # Not on the home: Appearance is one of the WM's HIDDEN_APPS.
         assert ws.open_app(ws.appearance_app)
         ws.input.begin_frame()
         ws.frame(1 / 30)

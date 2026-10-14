@@ -404,7 +404,7 @@ class SpineVerbs:
         """True when a registered system app's identity claims `cart` -- the
         registry-side predicate (services use it to keep app carts out of
         project lists)."""
-        for app, _text in self._apps:
+        for app, _text in getattr(self, "_apps", ()):
             if app.is_app(cart):
                 return True
         return False

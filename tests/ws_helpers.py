@@ -25,17 +25,30 @@ def build_desktop_ws(tmp_path, **kw):
     return host_app.build_workstation(str(tmp_path / "carts"), **kw)
 
 
-def open_cart(ws, title):
-    """Open a seeded cart by TITLE. Games/tools/apps live in the launcher
-    run-grid; a WALLPAPER leaves it (spec shell_ux_v1.md) but stays a real
-    editable cart in the store, so fall back to opening it by reference (as
-    ws.open() does). A missing title is an AssertionError, never a silent
-    open of whatever the launcher had selected."""
+def select_on_home(ws, title):
+    """Bring the cart titled `title` up on the home -- the tab that holds it
+    (Games, Mine or Apps, docs/shell_layout_2026-10.md §12), then its card --
+    and return it; None when no tab holds it. A list a test set on the
+    launcher itself is searched first."""
     for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
+        if c.get("title") == title:
             ws.launcher.sel = i
-            ws.open()
-            return
+            return c
+    cart = next((c for c in ws.carts.all if c["title"] == title), None)
+    if cart is None or not ws.select_cart(cart):
+        return None
+    return ws.launcher.selected()
+
+
+def open_cart(ws, title):
+    """Open a seeded cart by TITLE. Games, the kid's carts and apps live in
+    the home's tabs; a WALLPAPER leaves them (spec shell_ux_v1.md) but stays
+    a real editable cart in the store, so fall back to opening it by
+    reference (as ws.open() does). A missing title is an AssertionError,
+    never a silent open of whatever the launcher had selected."""
+    if select_on_home(ws, title) is not None:
+        ws.open()
+        return
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
     ws._open_workspace(cart)
@@ -72,10 +85,8 @@ def build_ws_with_cart(tmp_path, src, title="Cart", type="app", edit=None,
     host_app.moy_carts.create(title, carts_dir, src=src, type=type,
                               edit=edit or [])
     ws = host_app.build_workstation(carts_dir)
-    sel = next((i for i, c in enumerate(ws.launcher.items)
-                if c["title"] == title), None)
-    assert sel is not None, "created cart not on the launcher: " + title
-    ws.launcher.sel = sel
+    assert select_on_home(ws, title) is not None, \
+        "created cart not on the launcher: " + title
     if editor:
         ws.open_in_editor()
     else:

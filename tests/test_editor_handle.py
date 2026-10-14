@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe                              # noqa: E402
-from ws_helpers import build_ws, device_frames as _dframe  # noqa: E402
+from ws_helpers import build_ws, device_frames as _dframe, select_on_home  # noqa: E402
 from runtime import editor_handle, moy_carts, text_modes  # noqa: E402
 
 DT = 1.0 / 30
@@ -124,10 +124,7 @@ def _device_ws(tmp_path):
     inp = DeviceInputState()
     inp.cart_start_ms = 0
     ws.input = inp
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Notes":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Notes")
     ws.open()
     return ws, inp.source("kbd")
 
@@ -306,10 +303,7 @@ def test_leaving_the_cart_writes_a_dirty_handle(tmp_path):
     passes -- the X, the hold gesture, quit(), a crash -- so a kid who taps X
     never loses a note."""
     ws = build_ws(tmp_path)
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Notes":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Notes")
     ws.open()
     ws.input.begin_frame()
     ws.frame(DT)

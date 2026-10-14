@@ -18,7 +18,7 @@ import pytest
 
 from runtime import layout_base
 from runtime.layout_base import LayoutBase
-from ws_helpers import build_ws, build_desktop_ws
+from ws_helpers import build_ws, build_desktop_ws, select_on_home
 
 DT = 1.0 / 30.0
 
@@ -375,9 +375,7 @@ def test_an_app_cart_reads_the_content_rect(tmp_path, edge, lua):
     _write_app(tmp_path / "carts", "Rect", APP_LUA if lua else APP_PY, lua)
     ws = build_ws(tmp_path)
     ws.place_bar(edge)
-    sel = next(i for i, c in enumerate(ws.launcher.items)
-               if c.get("title") == "Rect")
-    ws.launcher.sel = sel
+    assert select_on_home(ws, "Rect") is not None
     ws.open()
     for _ in range(3):
         ws.input.begin_frame()
@@ -395,8 +393,7 @@ def test_a_tool_cart_exits_on_the_bottom_bars_x(tmp_path):
     _write_app(tmp_path / "carts", "Rect", APP_PY)
     ws = build_ws(tmp_path)
     _bottom(ws)
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c.get("title") == "Rect")
+    select_on_home(ws, "Rect")
     ws.open()
     ws.frame(DT)
     x, y, w, h = _ZONE_CONTEXT_X

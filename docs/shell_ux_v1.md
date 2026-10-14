@@ -134,15 +134,14 @@ boundary). The P4 device port of this tier rides #58.)*
 system apps) + the one OS bar with taskbar chips — desktop mode's floor:
 everything opened there is a window, and the desk bar draws no X (nothing is
 beneath it). The **PLAY icon** enters console mode: the desk's windows wait
-parked, off the back-stack, and the fullscreen **Library** shows, purely the
-game launcher: system-app carts leave its shelf on this tier (they are desk
-icons instead — "apps are windows, games are fullscreen"), a tap runs the
-game FULLSCREEN exactly like the small tiers (hold-BACKSPACE exits back to
-the Library), and the Make tile and a card's CHANGE open the Editor
-fullscreen, as there. The Library's X — B from a keyboard — is the way back
-to the desk, its windows where they were. The fullscreen tiers are
-untouched: the Player tier only ever gets the launcher; its desktop story is
-the web view.)*
+parked, off the back-stack, and the fullscreen **home** shows — the same
+home every board has (`docs/shell_layout_2026-10.md` §12: its Games / Mine /
+Apps / Make tabs, the Games tab holding no app): a tap runs a game
+FULLSCREEN exactly like the small tiers (hold-BACKSPACE exits back to the
+home), and a tap on the Make tab and a card's CHANGE open the Editor
+fullscreen, as there. The home's X — B from a keyboard — is the way back to
+the desk, its windows where they were. The Player tier only ever gets the
+home; its desktop story is the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
 windowed tier reads WHY it was called to pick the playtest window's default
@@ -159,7 +158,7 @@ memory remain open on #178.)*
 
 ---
 
-## 4. Two personas — making is an app, a tap always plays
+## 4. Two personas — making is an app, a tap on a played tab plays
 
 *(As originally locked, this section was a per-device "tap-mode" setting — maker vs
 player. That was built, then RETIRED during implementation: a modal tap is invisible
@@ -170,18 +169,20 @@ The console serves two kids (often the same kid at different hours): the one who
 to **play** and the one who wants to **make**. Both get a first-class, always-visible
 door — no setting, no mode:
 
-- **A launcher tap always RUNS the cart.** Every cart type, no per-device default,
-  no type dispatch. The launcher home is for playing.
-- **The Library shelf scrolls continuously LEFT-RIGHT** (2026-07-13 — paging
-  retired; a shelf slides sideways): the ONE tall pinned MAKE card heads the list
-  and scrolls away with it; every other card stacks the columns marching right.
-  Touch drag scrolls the grid — a card tap activates on RELEASE (tap-vs-drag slop,
-  the shared `ui.DragTap` machine the Settings rows ride too), so a scroll can
-  never launch a cart — with footer left/right arrows (one column per tap), a slim
-  scrollbar along the grid's bottom edge, and keyboard nav pulling the view along.
-  The SAME shelf renders on every tier, the 320×240 T-Deck included (its frozen
-  icon-tile grid is retired).
-- **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the shelf,
+- **A tap on the home's Games, Mine and Apps tabs RUNS the cart** (an app's
+  cart opens the app). Every cart type, no per-device default, no type
+  dispatch. The fourth tab, **Make**, holds the same projects as the picker
+  and a tap there EDITS (owner, 2026-10-13) — the one tab whose tap makes
+  rather than plays (`docs/shell_layout_2026-10.md` §12).
+- **The home is a carousel** (2026-10, `docs/shell_layout_2026-10.md` §12):
+  one row of cover cards slides sideways under the tab row, the centre card
+  larger; a card tap activates on RELEASE (tap-vs-drag slop, the shared
+  `ui.DragTap` machine the Settings rows ride too), so a scroll can never
+  launch a cart. The SAME home renders on every tier, the 320×240 T-Deck
+  included. The picker keeps the earlier **shelf**: a grid of two rows that
+  scrolls continuously LEFT-RIGHT (2026-07-13 — paging retired), its pinned
+  ＋New card heading the list.
+- **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the row,
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
@@ -189,22 +190,21 @@ door — no setting, no mode:
   the scroll-as-blit band path (shift the retained pixels, redraw only the
   exposed strip), which is what makes a 60Hz coast affordable on every backend.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
-  v1 §1.2, the Library contract): PLAY runs it (same as the tap), CHANGE opens the
-  SAME project in the Editor landing on Config — the bridge from playing to making,
-  in place, never a surprise duplicate. On the 320×240 tier the verbs ride the
-  lent bar zone as chips; on the desktop-density tiers they draw on the selected
-  card itself (`Launcher.action_rects`). The `C` (code) key is the keyboard route.
-- **Making is an app you launch:** the launcher's first tile is a pinned
-  **"Make ✏️" tile** → the Editor's **project-picker** — the same launcher-grid look
-  over EVERY editable cart (wallpapers and built-ins included) plus a pinned **＋New**
-  tile. Picking a project opens it in the Editor, **landing on Config first** — the
+  v1 §1.2): PLAY runs it (same as the tap), CHANGE opens the SAME project in the
+  Editor landing on Config — the bridge from playing to making, in place, never a
+  surprise duplicate. The verbs ride the lent bar zone as chips on every tier,
+  the active tab's set. The `C` (code) key is the keyboard route.
+- **Making is an app you launch:** the home's **Make** tab, and on the desk the
+  Editor's **project-picker** — EVERY editable cart (wallpapers and built-ins
+  included) plus a pinned **＋New** card. Picking a project opens it in the
+  Editor, **landing on Config first** — the
   "Make it mine" cards, intrigue-first: a kid customizes a game before ever seeing a
   line of code, and the path from "I changed the color" to "what else can I change?"
   runs straight through the Editor's tab ladder (§6).
 - **The picker manages projects:** ＋New (create a game and open it), Copy, and
-  Delete (a two-tap confirm) live in the picker — cart management moved OFF the
-  launcher home, which no longer has new/dup/del.
-- **Wallpapers are backdrop-only:** they are not run-grid tiles at all. The backdrop
+  Delete (a two-tap confirm) live in the picker — copy and delete are OFF the
+  home, whose one management verb is NEW (Make's, and an empty Mine's).
+- **Wallpapers are backdrop-only:** they are on none of the tabs that run. The backdrop
   (and the panel theme) is chosen in the **Appearance app** — the ONE appearance
   surface, reachable from Settings' APPEARANCE row; wallpaper carts stay editable
   through the picker.

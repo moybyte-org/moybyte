@@ -9,7 +9,7 @@ from runtime import host_app, ui
 from runtime.host_canvas import make_system_canvas
 
 
-from ws_helpers import build_desktop_ws as _ws
+from ws_helpers import build_desktop_ws as _ws, select_on_home
 
 
 def _drv(ws):
@@ -19,10 +19,8 @@ def _drv(ws):
 
 
 def _select(ws, title):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            return True
+    if select_on_home(ws, title) is not None:
+        return True
     return False
 
 
@@ -176,18 +174,18 @@ def test_play_icon_enters_console_mode(tmp_path):
     assert ws.wm.visible_stack()[0] is ws.launcher_layer
 
 
-def test_library_shelf_hides_system_apps_but_keeps_kid_carts(tmp_path):
-    ws = _ws(tmp_path)
-    _drv(ws)
-    titles = [c.get("title") for c in ws.launcher.items]
-    for app_cart in ("Files", "Paint", "Storybook", "Calc"):
-        assert app_cart not in titles
-    assert "Star Catcher" in titles               # games stay
-    assert "Notes" in titles                      # kid-style app carts stay
-    # The fullscreen tier keeps EVERYTHING on its launcher.
-    ws2 = host_app.build_workstation(str(tmp_path / "carts2"))
-    titles2 = [c.get("title") for c in ws2.launcher.items]
-    assert "Paint" in titles2 and "Files" in titles2
+def test_the_home_splits_games_and_apps_the_same_on_every_tier(tmp_path):
+    for ws in (_ws(tmp_path), host_app.build_workstation(str(tmp_path / "c2"))):
+        titles = [c.get("title") for c in ws.launcher.items]
+        for app_cart in ("Files", "Paint", "Storybook", "Calc", "Notes"):
+            assert app_cart not in titles             # Games holds no app
+        assert "Star Catcher" in titles
+        ws.set_home_tab("apps")
+        titles = [c.get("title") for c in ws.launcher.items]
+        for app_cart in ("Files", "Paint", "Storybook", "Calc", "Notes"):
+            assert app_cart in titles                 # the Apps tab holds them
+        assert "Appearance" not in titles             # one of HIDDEN_APPS
+        assert "Star Catcher" not in titles
 
 
 def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
@@ -312,19 +310,21 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     assert sc.pix(px, py) != 42, "the letterbox kept the previous screen's pixels"
 
 
-def test_make_tile_and_change_stay_in_console_mode(tmp_path):
-    """Console mode is the same everywhere: the Make tile opens the picker
-    and CHANGE the Editor, both fullscreen, as on the T-Deck."""
+def test_make_and_change_stay_in_console_mode(tmp_path):
+    """Console mode is the same everywhere: a tap on the Make tab and CHANGE
+    both open the Editor fullscreen, as on the T-Deck."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_library()
     drv.frame(1 / 30)
-    ws.launcher.sel = 0                           # the pinned Make tile
-    ws.launch_selected()
+    ws.set_home_tab("make")
+    assert _select(ws, "Star Catcher")
+    ws.launch_selected()                          # Make's tap edits
     drv.frame(1 / 30)
-    assert ws.wm.stack.kinds() == ["launcher", "picker"]
+    assert ws.screen == "menu"
     assert not ws.wm.desk_open() and ws.wm._order == []
     ws.go_home()
+    ws.set_home_tab("games")
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
     ws.change_selected()                          # CHANGE = the Editor, fullscreen
@@ -375,6 +375,7 @@ def test_fullscreen_tiers_are_untouched(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert not getattr(ws.wm, "has_desk", False)
     assert not ws.windowed_chrome
-    ws.launcher.sel = 0                           # Make tile
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                           # Make's "+ New"
     ws.launch_selected()
-    assert ws.wm.top_kind() == "picker"           # fullscreen Make -> picker
+    assert ws.wm.top_kind() == "menu"             # a new game, in the Editor

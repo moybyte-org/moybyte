@@ -640,7 +640,7 @@ the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
 nothing handed while an overlay, the cursor or an owed LOADING pill also
 drew), so a moving home frame on the Guition P4 rotates the band, not the
 whole buffer (§13 step 2; #66's shelf-drag rows). It is the carousel's
-floor: the carousel's focus band hands the same way.
+floor: the carousel's band hands the same way.
 
 **The carousel, animated** (owner, 2026-10-13: the centre card is larger and
 grows and shrinks as cards pass through the centre, in motion as well as at
@@ -650,29 +650,31 @@ card pitch or more, rising to the centre scale at distance 0 — so there is no
 animation clock, a settled row is a still row, and "settled" is the kinetic
 scroll's own condition (#113). The frame in motion:
 
-- the **outer rects**, every card at scale 1.0, move by #113's scroll-as-blit;
-  only they are shifted, and **`sel` leaves the shift key while the row
-  moves** — today `grid.sel` is in it and `Launcher.sel` bumps the zone
-  generation, so every card crossing would re-render the band and the bar;
-  `sel` and the zone update once, on settle;
-- the **focus band**, the centre ± 1.5 pitches (at most three cards), is
-  cleared and repainted every moving frame: each card one scaled blit of its
-  RGB565 cover bake at its scale, the outline frame and the pill on the
-  centre one. Covers are RGB565 bakes and `sspr` scales index sheets, so this
-  is **a new nearest-neighbour RGB565 scaled-blit kernel** in `moy_gfx`,
-  benched on all four boards before the home commits (§13 step 7a). The
-  band's rect is the frame's damage; on the T-Deck and the Guition S3 the
-  band is most of the row, so it is costed as a full band repaint, not a
-  blit.
+- **`sel` leaves the band's key while the row moves** — `Launcher.sel` bumps
+  the zone generation, so every card crossing would re-render the bar; `sel`
+  and the zone update once, on settle;
+- the cards lie on the home's **wallpaper**: the band has no backdrop of its
+  own (owner, 2026-10-14: "why is the background white? instead of showing
+  the wallpaper"), so its pixels cannot shift as #113's scroll-as-blit does
+  — the wallpaper would slide with the cards. Every full paint copies the
+  wallpaper under the band (`LauncherHomeLayer._band_bg`, an owned layer the
+  fit check releases with the retained frame), and a moving frame restores
+  it only around the cards, every card painting its whole square opaque:
+  each card one scaled blit of its RGB565 cover bake at its scale, the
+  outline frame and the name plate on the centre one. Covers are RGB565
+  bakes and `sspr` scales index sheets, so this is **a nearest-neighbour
+  RGB565 scaled-blit kernel** in `moy_gfx`, benched on all four boards
+  before the home committed (§13 step 7a). The band's rect is the frame's
+  damage.
 
-What it costs per moving frame is a clear and up to three scaled blits into
-the focus band plus the outer shift; what it costs per settled frame is
-nothing. Step 7 measures it on every board (§13) against #66's per-cart fps
-as the control. **If a board's drag frames do not fit its budget it
-degrades**, by this order and only as far as the measurement says: (1) the
-centre scale is reduced; (2) the focus band repaints at scale 1.0 while
-moving and the centre card scales up only once settled; (3) one card size
-with the frame and the pill. The verdict is a per-board constant on the WM,
+What it costs per moving frame is the wallpaper restored around the cards
+and their scaled blits; what it costs per settled frame is nothing. Step 7
+measures it on every board (§13) against #66's per-cart fps as the control.
+**If a board's drag frames do not fit its budget it degrades**, by this order
+and only as far as the measurement says: (1) the centre scale is reduced;
+(2) every card is at scale 1.0 while moving and the centre card scales up
+only once settled; (3) one card size with the frame and the plate. The
+verdict is a per-board constant on the WM (`HOME_MOTION`, `HOME_SCALE`),
 recorded in #66, never a theme key.
 
 **The wallpaper slot.** The home draws the `home` slot's wallpaper

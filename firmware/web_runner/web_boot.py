@@ -513,20 +513,19 @@ def reload_cart(name=None):
 
 
 def _select_cart(name):
-    """Point the launcher at the cart `name` names (folder name with or without
-    `.moy`, or manifest title). True when it landed on one."""
+    """Bring the cart `name` names (folder name with or without `.moy`, or
+    manifest title) up on the home -- the tab that holds it, then its card.
+    True when it landed on one."""
     ws = _S["ws"]
     want = str(name).lower()
     if want.endswith(".moy"):
         want = want[:-4]
-    for i, c in enumerate(ws.launcher.items):
-        path = c.get("path") or ""       # synthetic tiles (Make) carry no path
-        folder = path.rsplit("/", 1)[-1].lower()
+    for c in ws._runnable_items():
+        folder = c.get("path", "").rsplit("/", 1)[-1].lower()
         if folder.endswith(".moy"):
             folder = folder[:-4]
         if want in (folder, c.get("title", "").lower()):
-            ws.launcher.sel = i
-            return True
+            return ws.select_cart(c)
     return False
 
 

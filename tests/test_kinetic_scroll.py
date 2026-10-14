@@ -169,20 +169,21 @@ def test_shelf_fling_coasts_after_release(tmp_path):
     assert ws.screen == "launcher"         # the gesture opened nothing
 
 
-def test_fling_frames_ride_the_blit_path(tmp_path):
+def test_fling_frames_take_the_partial(tmp_path):
     ws, drv = _fling_setup(tmp_path)
     assert ws.launcher.flinging
     calls = [0]
-    orig = ws.sys_canvas.scroll_rect
+    orig = ws.wallpaper.draw
 
-    def spy(*a):
+    def spy(dt):
         calls[0] += 1
-        return orig(*a)
+        return orig(dt)
 
-    ws.sys_canvas.scroll_rect = spy
+    ws.wallpaper.draw = spy
     for _ in range(5):
         drv.frame(1 / 30)
-    assert calls[0] >= 3                   # coasting frames blit, not repaint
+    assert ws.launcher.flinging
+    assert calls[0] == 0                   # coasting frames repaint the band only
 
 
 def test_fling_frame_is_pixel_faithful(tmp_path):
@@ -192,7 +193,10 @@ def test_fling_frame_is_pixel_faithful(tmp_path):
     assert ws.launcher.flinging
     partial = bytes(ws.sys_canvas._buf)
     off = ws.launcher.scroll
-    ws.launcher._region.stop()             # freeze the coast at this offset
+    lz = ws.launcher                       # freeze the coast at this offset,
+    lz._region.stop()                      # still MOVING (a frame in motion
+    lz._glide = lz.max_scroll()            # draws no rest-only pixels)
+    lz.anim_frame = lambda dt: False
     ws.launcher_layer._full_streak = 0     # force the FULL path, same state
     ws.launcher._region.invalidate()
     ws.mark_dirty()

@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from ws_helpers import select_on_home
+
 
 class _FakeGpio:
     """Stands in for whichever backend the tier supplied. Two exist by design:
@@ -53,8 +55,7 @@ def _cart(carts_dir, title, perms):
 
 
 def _run(ws, title):
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it["title"] == title)
+    select_on_home(ws, title)
     ws.open()
 
 

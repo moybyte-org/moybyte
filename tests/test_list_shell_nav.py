@@ -12,6 +12,8 @@ its own `handle_input`.
 
 import pytest
 
+from ws_helpers import select_on_home
+
 from runtime.app_shell import ListShellApp, ListShellLayout
 
 
@@ -141,10 +143,7 @@ def test_storybooks_shelf_scrolls_through_the_shared_body(tmp_path):
     from runtime.storybook_app import StorybookAppLayer
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Storybook":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Storybook")
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)

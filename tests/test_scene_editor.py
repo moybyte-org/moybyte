@@ -12,6 +12,7 @@ workspace, the Editor tab-ladder wiring, and the firmware staging pins."""
 import json
 import os
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -163,10 +164,7 @@ def _open_ws(tmp_path, scenes=None, src="def _draw():\n    cls(0)\n"):
     host_app.moy_carts.create("Scene Cart", carts_dir, src=src, type="game",
                               scenes=scenes, scene_order=list(scenes) if scenes else None)
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "Scene Cart":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Scene Cart")
     ws.open()
     return ws
 

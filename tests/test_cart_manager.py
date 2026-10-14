@@ -106,6 +106,7 @@ def test_the_grids_follow_a_create_through_apply(tmp_path):
     root = str(ws.carts_root)
     _mk(root, "Freshly")
     ws.carts.apply(shelf(root))
+    ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Freshly" in _titles(ws.launcher)
     assert "Freshly" in _titles(ws.picker)
 
@@ -120,8 +121,9 @@ def test_rescan_adopts_what_landed_on_the_store_and_marks_dirty(tmp_path):
     _mk(str(ws.carts_root), "Synced")
     ws._dirty = False
     ws.carts.rescan()
-    assert "Synced" in _titles(ws.launcher)
     assert ws._dirty is True
+    ws.set_home_tab("mine")                   # made here: the kid's own
+    assert "Synced" in _titles(ws.launcher)
 
 
 def test_rescan_is_a_no_op_with_no_store_wired(tmp_path):
@@ -155,6 +157,7 @@ def test_the_webhosts_on_sync_lambda_still_finds_the_shelf(tmp_path):
     on_sync = lambda: ws.rescan_carts()          # noqa: E731 -- the webhost's shape
     _mk(str(ws.carts_root), "Pushed")
     on_sync()
+    ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Pushed" in _titles(ws.launcher)
 
 
@@ -450,9 +453,10 @@ def test_toggling_a_favorite_persists_through_prefs(tmp_path):
 
 
 def test_a_pseudo_tile_is_never_starred_or_recorded(tmp_path):
-    """The pinned Make / + New tiles carry no path, and a path is the identity
+    """The "+ New" card carries no path, and a path is the identity
     everything here keys on."""
     ws = build_ws(tmp_path)
+    ws.set_home_tab("make")
     make = ws.launcher.items[0]
     assert make.get("path") is None
     assert ws.carts.is_favorite(make) is False

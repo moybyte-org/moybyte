@@ -15,10 +15,10 @@
   {"js": "JSON.stringify({at:'opened',overlay:getComputedStyle(document.getElementById('pin')).display,search:location.search,status:document.getElementById('s').textContent,stored:localStorage.getItem('moybyte.pin:'+location.origin)})"},
   {"shot": "shelf"},
 
-  {"note": "and the shelf is REAL: Make -> +New, which must reach the store"},
-  {"click": [63, 120]},
+  {"note": "and the home is REAL: Make -> +New, which must reach the store"},
+  {"click": [152, 30]},
   {"wait": 1500},
-  {"click": [63, 120]},
+  {"click": [160, 129]},
   {"wait": 8000},
   {"shot": "after_new"}
 ]}

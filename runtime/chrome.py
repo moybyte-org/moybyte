@@ -293,12 +293,12 @@ class Layout(LayoutBase):
         self.icon_y0 = self.cy + 8 * fs
         self.grid_bottom = bottom - 4 * fs           # launcher grid floor
         self.icon_x0 = self.cx + _ICON_X0 * fs
-        # The Library SHELF (visual identity v1's library concept mockup) on EVERY
-        # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
-        # one launcher look everywhere). A framed panel (header "LIBRARY" + footer
-        # count) whose card grid SCROLLS continuously LEFT-RIGHT (owner call,
-        # 2026-07-13: a shelf slides sideways; no pages): slot 0 is the ONE tall
-        # FEATURED card (the pinned MAKE/+New, column 0 spanning both visible
+        # The picker's SHELF (visual identity v1's library concept mockup) on
+        # EVERY tier -- the T-Deck's 320x240 baseline included (the home's
+        # carousel lays itself out in launcher_layer.Carousel). A card grid that
+        # SCROLLS continuously LEFT-RIGHT (owner call, 2026-07-13: a shelf slides
+        # sideways; no pages): slot 0 is the ONE tall
+        # FEATURED card (the pinned "+ New", column 0 spanning both visible
         # rows at the head of the list); every other cartridge card stacks the
         # columns marching right, `rows` per column.
         # RESOLUTION-driven, not font-scale-driven (owner call, 2026-07-12:

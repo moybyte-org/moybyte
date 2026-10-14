@@ -25,12 +25,16 @@ def _first_real(grid):
 
 # -- the pinned tiles -------------------------------------------------------
 
-def test_make_tile_is_pinned_first_and_is_a_pseudo_entry(tmp_path):
-    from runtime.launcher_layer import MAKE_TILE_TYPE
+def test_the_make_tab_is_the_pickers_list(tmp_path):
+    """The home's Make tab (docs/shell_layout_2026-10.md §12) holds the
+    picker's list: "+ New" first, a pseudo entry, then every editable cart."""
+    from runtime.launcher_layer import NEW_TILE_TYPE
     ws = _ws(tmp_path)
-    make = ws.launcher.items[0]
-    assert make["type"] == MAKE_TILE_TYPE      # first slot (spec: distinctive Make tile)
-    assert make["path"] is None                # a pseudo entry, not a real cart
+    ws.set_home_tab("make")
+    new = ws.launcher.items[0]
+    assert new["type"] == NEW_TILE_TYPE and new["path"] is None
+    assert ([c.get("path") for c in ws.launcher.items]
+            == [c.get("path") for c in ws.picker.items])
 
 
 def test_picker_lists_the_new_tile_then_every_editable_cart(tmp_path):
@@ -67,15 +71,18 @@ def test_wallpaper_is_present_in_the_picker(tmp_path):
 
 
 def test_wallpapers_leave_the_launcher_grid(tmp_path):
-    """Wallpapers are a backdrop category (spec shell_ux_v1.md): they leave the launcher
-    RUN-grid, but stay in the Editor PICKER (editable) AND the Settings wallpaper picker
-    (choose as backdrop). The launcher grid = Make tile + games/tools/apps only."""
+    """Wallpapers are a backdrop category (spec shell_ux_v1.md): they leave the home's
+    tabs that RUN (Games, Mine, Apps), but stay in the Editor PICKER (editable, and
+    so the Make tab) AND the Settings wallpaper picker (choose as backdrop)."""
     ws = _ws(tmp_path)
-    # ABSENT from the launcher run-grid...
-    assert all(c.get("type") != "wallpaper" for c in ws.launcher.items)
-    # ...but the run-grid still carries the runnable cart types + the Make tile
-    grid_types = {c.get("type") for c in ws.launcher.items}
-    assert "make" in grid_types and {"game", "app"} <= grid_types
+    # ABSENT from the tabs that run...
+    for tab in ("games", "mine", "apps"):
+        ws.set_home_tab(tab)
+        assert all(c.get("type") != "wallpaper" for c in ws.launcher.items), tab
+    # ...which still carry the runnable cart types
+    assert "app" in {c.get("type") for c in ws.launcher.items}
+    ws.set_home_tab("games")
+    assert "game" in {c.get("type") for c in ws.launcher.items}
     # PRESENT in the Editor picker (editable) and the Settings wallpaper picker (backdrop)
     assert any(c.get("type") == "wallpaper" for c in ws.picker.items if c.get("path"))
     assert any(c.get("type") == "wallpaper" for c in ws.look.wallpaper_carts())
@@ -85,16 +92,21 @@ def test_wallpapers_leave_the_launcher_grid(tmp_path):
     assert store_wp and store_wp == picker_wp
 
 
-# -- tap: Make -> picker -> pick -> Editor ----------------------------------
+# -- tap: the Make tab, and the picker -> pick -> Editor ----------------------
 
-def test_tapping_make_tile_opens_the_picker(tmp_path):
+def test_a_tap_on_the_make_tab_edits(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    x, y, w, h = ws.launcher.tile_rect(0)      # slot 0 is the Make tile
+    ws.set_home_tab("make")
+    ws.launcher.sel = _first_real(ws.launcher)  # at the centre
+    target = ws.launcher.selected()
+    drv.frame(1 / 30)
+    x, y, w, h = ws.launcher.tile_rect(ws.launcher.sel)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.screen == "picker"
+    assert ws.screen == "menu"                 # the Editor, not a run
+    assert ws.cart.get("path") == target.get("path")
 
 
 def test_picking_a_cart_opens_it_in_the_editor(tmp_path):

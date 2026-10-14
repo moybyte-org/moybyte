@@ -338,7 +338,7 @@ def test_a_broken_manifest_keeps_the_project_openable_with_a_way_back(tmp_path):
 
     # a launcher TAP does not run it (there is no manifest to run it BY) -- it
     # opens where it can be fixed.
-    ws.launcher.sel = ws.launcher.items.index(cart)
+    assert ws.select_cart(cart)
     ws.open()
     assert ws.wm.top_kind() == "menu"
     assert ws.editor_app.tab == "cards"              # Config, whatever the schema

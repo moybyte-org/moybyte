@@ -17,7 +17,7 @@ end-to-end `test_*` below.
 
 import json
 from pathlib import Path
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -164,10 +164,8 @@ def test_journal_entry_without_grad_leaves_flag_untouched(tmp_path):
 # ----------------------------------------------------------------------------
 
 def _select(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            return
+    if select_on_home(ws, title) is not None:
+        return
 
 
 def _block_cart(tmp_path, title="Grad Cart"):

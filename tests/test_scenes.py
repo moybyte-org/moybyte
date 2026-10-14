@@ -10,6 +10,7 @@ editor) is out of scope here.
 
 import json
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -203,10 +204,7 @@ def _open_scene_cart(tmp_path, scenes=None, src="def _draw():\n    cls(0)\n"):
     host_app.moy_carts.create("Journaled Scene", carts_dir, src=src, type="game",
                               scenes=scenes, scene_order=list(scenes) if scenes else None)
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "Journaled Scene":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Journaled Scene")
     ws.open()                                    # runs _init -> ws.ns is populated
     return ws
 

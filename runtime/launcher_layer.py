@@ -1,50 +1,49 @@
 # Map (grep -n a name to jump there):
-#   make_tile                   one launcher tile for a cart
-#   Launcher                    the desktop home: carts laid out as the library grid
+#   new_tile                    the "+ New" card
+#   Launcher                    the picker's grid: carts laid out as a shelf
 #   Launcher.nav2d              grid navigation
 #   Launcher.pointer_frame      one pointer sample over the grid
 #   Launcher.cover_specs        every cover the next full draw needs
-#   LauncherHomeLayer           the launcher content layer: wallpaper, grid, zone
-#   LauncherHomeLayer.draw      the home desktop
-#   LauncherHomeLayer.zone_tap  the lent left zone's taps
+#   Carousel                    the home's row: the centre card scaled by its distance
+#   Carousel.anim_frame         the fling, the glide to the centre, the settle
+#   Carousel.draw_shift         the moving frame: the wallpaper restored around the cards
+#   LauncherHomeLayer           the home: wallpaper, tab row, carousel, zone
+#   LauncherHomeLayer.draw      the home frame
+#   LauncherHomeLayer.zone_tap  the active tab's verb chips
 #   EditorPickerLayer           the Editor's project picker
-"""The desktop home / launcher (#28), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md (Move 1b,
-the last surface). Three classes:
+"""The home and the Editor's project picker (#28), extracted from Workstation
+(runtime/console.py) as Layers -- docs/history/shell_layers_refactor_v1.md (Move 1b).
 
-  * `Launcher`     -- the cart icon GRID model + draw: items/sel/paging/nav + the
-                      tile rendering. Two instances: ws.launcher (the home RUN-grid)
-                      and ws.picker (the Editor's PROJECT-PICKER grid); both reuse the
-                      same class + tile draw. This file just holds the class.
-  * `LauncherHomeLayer` -- the "launcher" content Layer: the home composition
-                      (wallpaper backdrop -> icon grid -> top bar) + the grid nav /
-                      selection input. It reaches everything through self.ws and
-                      dispatches a cart open to ws.launch_selected() (tap = RUN, or the
-                      pinned Make tile -> the Editor project-picker).
-  * `EditorPickerLayer` -- the "picker" content Layer (spec shell_ux_v1.md): the SAME
-                      grid look over ws.picker (every editable cart + a "+ New" tile);
-                      picking a cart opens it in the Editor (ws.pick_selected).
+  * `Launcher`     -- the card GRID model + draw: items/sel/scroll/nav + the card
+                      rendering, a shelf of two rows that scrolls sideways. Its
+                      instance is ws.picker, the Editor's PROJECT-PICKER grid.
+  * `Carousel`     -- the home's row (docs/shell_layout_2026-10.md §12): the
+                      same selection model over one row of square cover cards,
+                      the centre card larger by a function of its distance
+                      from the centre. Its instance is ws.launcher.
+  * `LauncherHomeLayer` -- the "launcher" content Layer: the home, console mode's
+                      root on every board (wallpaper -> tab row -> carousel ->
+                      bar), its four tabs (Games / Mine / Apps / Make, the lists
+                      ws._launcher_items builds) and their input. A tap on the
+                      centre card is the active tab's (ws.launch_selected).
+  * `EditorPickerLayer` -- the "picker" content Layer (spec shell_ux_v1.md): the
+                      grid over ws.picker (a "+ New" card followed by every
+                      EDITABLE cart); picking a cart opens it in the Editor
+                      (ws.pick_selected).
 
 Boundary (single source of truth): ws.launcher (the instance) + ws.open() (open the
-selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The Launcher
-CLASS needs the palette + the shared glyph raster for its tile art -- `NAMES` and
-`ui.glyph` are INJECTED at construction (the established pattern; kept as
-`self._blit_glyph`), and the launcher-only tile-type maps `_TYPE_GLYPH`/`_TYPE_COLOR`
-live here. The rect hit-test is `ui.rect_in`. LauncherHomeLayer takes NAMES injected
-too. No circular import: this is a leaf (the only console
-touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).
+selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The card
+draw needs the palette + the shared glyph raster -- `NAMES` and `ui.glyph` are
+INJECTED at construction (`self._blit_glyph`), and the card-type maps
+`_TYPE_GLYPH`/`_TYPE_COLOR` live here. The rect hit-test is `ui.rect_in`. No
+circular import: this is a leaf (the only console touch is a lazy Layout fallback
+for a bare Launcher() that no caller ever constructs).
 
-Stage 4 (#46 zoned bar, docs/history/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
-`draw_zone`/`zone_tap` (the lent left zone -- originally NEW/DUP/DEL + the selected
-cart's name, the old where=="home" branch of BarLayer._draw_status_strip) and a
-`zone_gen` property proxying `Launcher.zone_gen` -- an int the GRID bumps whenever its
-`sel` (a property now) or `items` changes, so BarLayer's strip cache can trust one int
-instead of re-deriving "did the selection move" itself.
-
-Cart management moves off the launcher home (docs/shell_ux_v1.md's "Editor-as-an-app"
-model: the launcher is for PLAYING, the Editor picker is for MANAGING projects): the
-launcher's lent zone now only shows the selected cart's name. NEW/DUP/DEL move to
-`EditorPickerLayer`'s zone (a later stage).
+The lent bar zone (#46): each grid layer draws and taps it (`draw_zone`/`zone_tap`)
+and proxies its grid's `zone_gen` -- an int the grid bumps whenever its `sel` (a
+property) or `items` changes, so BarLayer's strip cache trusts one int instead of
+re-deriving "did the selection move". On the home the zone carries the active
+tab's verbs on the selected card; on the picker, NEW/DUP/DEL.
 """
 
 
@@ -69,14 +68,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
 
 
-# The launcher's pinned "Make" tile + the picker's pinned "+ New" tile are PSEUDO-
-# entries (not real carts): a plain dict with a marker `type` + a title, flowing
-# through the SAME grid (nav/sel/tile_at) as real carts, dispatched by their type at
-# tap time. `path` is None so cart management (dup/del) + the icon-sheet loader skip
-# them, and a fresh dict per call avoids aliasing one shared mutable tile.
-MAKE_TILE_TYPE = "make"          # launcher slot 0: tap -> Editor project-picker
-NEW_TILE_TYPE = "new"            # picker slot 0: tap -> create a game + open the Editor
-PSEUDO_TILE_TYPES = (MAKE_TILE_TYPE, NEW_TILE_TYPE)
+# The "+ New" card (the picker's and Make's first, an empty Mine's only) is a
+# PSEUDO entry (not a real cart): a plain dict with a marker `type` + a title,
+# flowing through the SAME grid (nav/sel/tile_at) as real carts, dispatched by its
+# type at tap time (create a game + open the Editor). `path` is None so cart
+# management (dup/del) + the icon-sheet loader skip it, and a fresh dict per call
+# avoids aliasing one shared mutable tile.
+NEW_TILE_TYPE = "new"
+PSEUDO_TILE_TYPES = (NEW_TILE_TYPE,)
 
 # A cover's side (SPEC.md 3.6) and the two decodes of it a card draws:
 # CoverCache's BASE and HALF (cover_cache.py names them).
@@ -150,30 +149,42 @@ def _draw_cover(cv, img, x, y, w, h, art_h, outer=None):
             cv.clip(*outer)
 
 
-def make_tile():
-    return {"type": MAKE_TILE_TYPE, "title": "Make", "path": None}
-
-
 def new_tile():
     return {"type": NEW_TILE_TYPE, "title": "New", "path": None}
 
 
 # Per-type icon glyph + art-box color for a cart tile on the desktop (the pre-literate
-# cue), used when a cart has no sprite of its own. The two pseudo tiles get a
-# distinctive bright box + a clear glyph (pencil = Make, plus = New).
+# cue), used when a cart has no sprite of its own. The "+ New" card gets a
+# distinctive bright box + a clear plus glyph.
 _TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear",
-               "story": "run",
-               MAKE_TILE_TYPE: "edit", NEW_TILE_TYPE: "plus"}
+               "story": "run", NEW_TILE_TYPE: "plus"}
 _TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9,
                "story": 15,     # a kid's Storybook cart (#78): peach, playable
-               MAKE_TILE_TYPE: 10, NEW_TILE_TYPE: 14}  # index by type
+               NEW_TILE_TYPE: 14}  # index by type
+
+
+def _draw_new_icon(cv, names, img, x, y, sc):
+    """The IconSheet plus at `sc`, pal-remapped so it reads on the yellow
+    "+ New" field (white outline -> black, yellow body -> orange)."""
+    cv.pal(names["white"], names["black"])
+    cv.pal(names["yellow"], names["orange"])
+    cv.spr(img, x, y, sc)
+    cv.pal()
+
+
+def _draw_star_badge(cv, names, blit_glyph, rect, on):
+    """The favorite star's corner badge (#105), lit when `on`."""
+    fx, fy, fw, fh = rect
+    ink = names["yellow"] if on else names["light_grey"]
+    cv.rect(fx, fy, fw, fh, names["black"])
+    cv.rectb(fx, fy, fw, fh, ink)
+    blit_glyph(cv, "star", rect, ink)
 
 
 class Launcher:
-    """The desktop home (#28): carts laid out as the Library SHELF -- a card grid
-    that SCROLLS continuously LEFT-RIGHT (a shelf slides sideways; no pages)
-    with the ONE tall featured card (the pinned MAKE/+New) at the head of the
-    list. Keeps the selection model (items/sel/selected/move) the rest of the
+    """The picker's grid (#28): carts laid out as a SHELF -- a card grid that
+    SCROLLS continuously LEFT-RIGHT (a shelf slides sideways; no pages) with
+    the ONE tall featured card (the pinned "+ New") at the head of the list. Keeps the selection model (items/sel/selected/move) the rest of the
     console relies on; `scroll` is the grid's pixel offset, owned here and
     ridden through a ui.ScrollRegion + ui.DragTap (touch drag + the slim
     scrollbar + tap-vs-drag disambiguation).
@@ -484,6 +495,18 @@ class Launcher:
     def selected(self):
         return self.items[self.sel] if self.items else None
 
+    def repaint_band(self, cv, sheet_for, fill):
+        """The whole band again: its backdrop (`fill(cv, rect)`), then the
+        cards."""
+        fill(cv, self.band_rect())
+        self.draw(cv, sheet_for)
+
+    def paint_key(self):
+        """What a recorded paint's band pixels depend on besides the offset
+        and the statics (#113's shift key): the selection, whose card wears
+        the ring."""
+        return self.sel
+
     def _visible(self):
         """(index, rect) for every card intersecting the grid viewport at the
         current scroll (partially clipped cards included -- the draw clips)."""
@@ -579,7 +602,7 @@ class Launcher:
     # -- the Library shelf cards (visual identity v1) ---------------------------
 
     def _draw_shelf(self, cv, sheet_for):
-        """The mockup's card grid: the tall featured slot (MAKE STUDIO / +New) at
+        """The mockup's card grid: the tall featured slot ("+ New") at
         the head of the list + cover-art cartridge cards, continuously SCROLLED
         left-right -- cards clip to the grid viewport (clip is a v0.4 canvas
         verb: host, device and web all honor it), with the footer scroll arrows
@@ -706,39 +729,29 @@ class Launcher:
         # (LauncherHomeLayer.handle_pointer hit-tests the identical geometry via
         # favorite_rect, so draw and tap can't desync).
         if selected and self.favorite_for is not None:
-            fx, fy, fw2, fh2 = self._favorite_badge_geom(rect)
-            fav = bool(self.favorite_for(it))
-            cv.rect(fx, fy, fw2, fh2, NAMES["black"])
-            cv.rectb(fx, fy, fw2, fh2, NAMES["yellow"] if fav else NAMES["light_grey"])
-            self._blit_glyph(cv, "star", (fx, fy, fw2, fh2),
-                              NAMES["yellow"] if fav else NAMES["light_grey"])
+            _draw_star_badge(cv, NAMES, self._blit_glyph,
+                             self._favorite_badge_geom(rect),
+                             bool(self.favorite_for(it)))
         self._card_frame(cv, rect, selected)
 
     def _draw_pseudo_card(self, cv, it, rect, selected):
-        """The pinned tall card: MAKE STUDIO on the home shelf (the mockup's yellow
-        pencil card), + New on the picker. Focus-yellow field, big tool glyph, a
-        display-type heading and a small caption, and the corner pin."""
+        """The picker's pinned tall "+ New" card. Focus-yellow field, big plus
+        glyph, a display-type heading and a small caption, and the corner pin."""
         NAMES = self._NAMES
         th = self.theme or {}
         lay = self.layout
         fs = lay.fs
         x, y, w, h = rect
-        make = it.get("type") == MAKE_TILE_TYPE
         cv.rect(x, y, w, h, th.get("focus", NAMES["yellow"]))
-        # Big tool art in the card's upper half: the real themeable IconSheet
-        # PENCIL (Make) / plus (New) sprite when the console wired icon_for --
-        # pal-remapped so it reads on the yellow field (white outline -> black,
-        # yellow body -> the orange of the mockup's pencil). The 12x12 glyph
-        # stays as the no-sheet fallback.
-        img = self.icon_for("edit" if make else "new") \
-            if self.icon_for is not None else None
+        # Big plus in the card's upper half: the real themeable IconSheet sprite
+        # when the console wired icon_for -- pal-remapped so it reads on the
+        # yellow field (white outline -> black, yellow body -> orange). The
+        # 12x12 glyph stays as the no-sheet fallback.
+        img = self.icon_for("new") if self.icon_for is not None else None
         if img is not None:
             sc = max(fs, min((w - 12 * fs) // 16, (h // 2 - 4 * fs) // 16))
-            cv.pal(NAMES["white"], NAMES["black"])
-            cv.pal(NAMES["yellow"], NAMES["orange"])
-            cv.spr(img, x + (w - 16 * sc) // 2,
-                   y + 4 * fs + (h // 2 - 16 * sc) // 2, sc)
-            cv.pal()
+            _draw_new_icon(cv, NAMES, img, x + (w - 16 * sc) // 2,
+                           y + 4 * fs + (h // 2 - 16 * sc) // 2, sc)
         else:
             gs = max(fs, min((w - 16 * fs) // 12, (h // 2 - 8 * fs) // 12))
             self._blit_glyph(cv, _TYPE_GLYPH[it["type"]],
@@ -748,8 +761,8 @@ class Launcher:
         cv.circ(px_, py_, 2 * fs, NAMES["black"])
         cv.line(px_, py_ + 2 * fs, px_ - 2 * fs, py_ + 5 * fs, NAMES["black"])
         # Heading (display type) + caption, centered in the lower half.
-        heading = ("MAKE", "STUDIO") if make else ("NEW",)
-        caption = "Open or create a project" if make else "Start a fresh project"
+        heading = ("NEW",)
+        caption = "Start a fresh project"
         ty = y + h * 11 // 20
         mult = getattr(lay, "lib_mult", 2)           # ~32px display type at any fs
         for line in heading:
@@ -814,6 +827,447 @@ class Launcher:
         self._scroll_region().draw_bar(cv, self.theme or {})
 
 
+# The home's tabs (docs/shell_layout_2026-10.md §12), in tab-row order, and
+# the noun the bar's title counts each in.
+HOME_TABS = (("games", "Games"), ("mine", "Mine"), ("apps", "Apps"),
+             ("make", "Make"))
+_TAB_ICON = {"games": "run", "mine": "moy", "apps": "gear", "make": "edit"}
+_TAB_NOUN = {"games": ("GAME", "GAMES"), "mine": ("CART", "CARTS"),
+             "apps": ("APP", "APPS"), "make": ("PROJECT", "PROJECTS")}
+# The centre card's scale the home is laid out for: a board's verdict
+# (FullscreenStackWM.HOME_SCALE) draws it at most this large.
+HOME_SCALE_MAX = 1.5
+_TAB_H = 16          # the tab row's height, in chrome-scale units
+_GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
+_VERB_LABEL = {"play": "PLAY", "open": "OPEN", "change": "CHANGE",
+               "new": "NEW", "search": "SEARCH"}
+
+
+def tab_count_title(tab, n):
+    """The bar's title on the home: the active tab's count."""
+    one, many = _TAB_NOUN.get(tab, ("CART", "CARTS"))
+    return "%d %s" % (n, one if n == 1 else many)
+
+
+class Carousel(Launcher):
+    """The home's carousel (docs/shell_layout_2026-10.md §12): one row of
+    square cover cards sliding sideways under the tab row, the card at the
+    centre larger. A card's size is a function of its distance from the
+    centre and of nothing else -- 1.0 at one pitch or more, rising to the
+    centre scale at distance 0 -- so a settled row is a still row. The row
+    rests with a card at the centre: a drag, a fling or a key moves the
+    offset, and once the motion is spent a GLIDE carries the nearest card
+    the rest of the way (`flinging` covers both, so every moving frame takes
+    the drag partial). `sel` changes only on settle, and so does the bar's
+    zone (`zone_gen`).
+
+    The cards lie on the home's wallpaper, so a moving frame cannot shift the
+    band's pixels (the wallpaper would slide with them): it restores the
+    wallpaper around the cards from the band's capture
+    (`LauncherHomeLayer._backdrop_fill`) and paints the cards over it. The
+    pitch leaves room for the centre card at full scale beside a neighbour
+    at 1.0, so no two cards overlap."""
+
+    def __init__(self, items, layout=None, names=None, blit_glyph=None):
+        self.tab = HOME_TABS[0][0]
+        self.motion = "full"
+        self.scale = HOME_SCALE_MAX
+        self._glide = None            # the offset a glide is carrying the row to
+        self._was_drag = False
+        self._g_lay = None            # the layout _g was computed for
+        self._g = None
+        self.layout = None
+        Launcher.__init__(self, items, layout, names, blit_glyph)
+
+    # -- geometry ------------------------------------------------------------
+
+    def _geom(self):
+        """(tabs, band, card, pitch, ring, gap, plate_h, centre_y), from the
+        content rect: the tab row along its top, then the band, centred in
+        what is left. A card is square (a cover is, SPEC.md 3.6) and its side
+        a multiple of the cover bakes where it can be -- 64, else 128 and up
+        in 128s -- so a resting card shows its cover at a whole-number
+        ratio."""
+        lay = self.layout
+        if self._g_lay is lay:
+            return self._g
+        fs = lay.fs
+        cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
+        pad = max(4 * fs, cw // 80)
+        tab_h = _TAB_H * lay.cs
+        tabs = (cx + pad, cy + pad, cw - 2 * pad, tab_h)
+        plate_h = lay.line_h + 6 * fs
+        ring = 2 * fs + 2
+        gap = max(6 * fs, cw // 64)
+        top = cy + 2 * pad + tab_h
+        avail = cy + ch - pad - top
+        raw = min((avail - 2 * ring - gap - plate_h) * 2 // 3, cw * 7 // 25)
+        if raw >= 128:
+            card = raw // 128 * 128
+        elif raw >= 64:
+            card = 64
+        else:
+            card = max(16, raw)
+        big = card * 3 // 2
+        pitch = card * 5 // 4 + gap
+        bh = 2 * ring + big + gap + plate_h
+        by = top + max(0, (avail - bh) // 2)
+        self._g = (tabs, (cx, by, cw, bh), card, pitch, ring, gap, plate_h,
+                   by + ring + big // 2)
+        self._g_lay = lay
+        return self._g
+
+    def tabs_rect(self):
+        return self._geom()[0]
+
+    def band_rect(self):
+        """The carousel band: every card at any scale, the centre's ring and
+        its title plate. The rect the drag partial fills and hands as damage."""
+        return self._geom()[1]
+
+    def card_side(self):
+        return self._geom()[2]
+
+    def pitch(self):
+        return self._geom()[3]
+
+    # -- the offset, the motion, the selection ---------------------------------
+
+    @property
+    def sel(self):
+        return self._sel
+
+    @sel.setter
+    def sel(self, value):
+        if value != getattr(self, "_sel", None):
+            self.zone_gen += 1
+        self._sel = value
+        # A selection made from outside (a tab switch, a resume, a remote
+        # run) brings its card to the centre; the settle's own assignment
+        # lands where the row already rests.
+        if self.layout is not None and not self.moving:
+            self._glide = None
+            self._scroll = max(0, value) * self.pitch()
+
+    @property
+    def flinging(self):
+        """True while the row coasts on its own: a released fling, or the
+        glide that carries the nearest card to the centre (a key's motion
+        too) -- the frames that take the drag partial."""
+        return self._region.animating or self._glide is not None
+
+    @property
+    def moving(self):
+        return self._taps.dragging or self.flinging
+
+    def max_scroll(self):
+        return max(0, (len(self.items) - 1) * self.pitch())
+
+    def nearest(self):
+        """The card nearest the centre at the current offset."""
+        n = len(self.items)
+        if not n:
+            return 0
+        p = self.pitch()
+        return max(0, min(n - 1, (self.scroll + p // 2) // p))
+
+    def set_items(self, items):
+        self._glide = None
+        self._region.stop()
+        Launcher.set_items(self, items)
+
+    def _scroll_to_sel(self):
+        self._glide = None
+        self._scroll = max(0, min(self.sel * self.pitch(), self.max_scroll()))
+
+    def _scroll_region(self):
+        band = self.band_rect()
+        self._region.set(band, self.max_scroll() + band[2])
+        if not (self._region.drag_active or self._region.animating):
+            self._region.offset = self.scroll
+        return self._region
+
+    def glide_to(self, i):
+        """Carry card `i` to the centre, frame by frame (`anim_frame`)."""
+        n = len(self.items)
+        if not n:
+            return
+        self._region.stop()
+        t = max(0, min(n - 1, i)) * self.pitch()
+        self._glide = t if t != self._scroll else None
+
+    def nav2d(self, dx, dy):
+        """Left/right move the row by a card with the glide; a key held is one
+        motion, each repeat pushing the target a card further."""
+        if not self.items or not dx:
+            return
+        p = self.pitch()
+        base = self._glide if self._glide is not None else self.nearest() * p
+        self.glide_to(base // p + dx)
+
+    def _snap(self):
+        self.glide_to(self.nearest())
+
+    def anim_frame(self, dt):
+        """Advance the fling or the glide one frame (dt in SECONDS), and
+        settle the selection once the row is still. True when the view moved."""
+        moved = False
+        if self._region.animating:
+            moved = Launcher.anim_frame(self, dt)
+            if not self._region.animating:
+                self._snap()
+        elif self._glide is not None:
+            # An ease-out in TIME (half the distance left every
+            # _GLIDE_HALF_MS), so a slow board shows the same motion in
+            # fewer frames rather than a jump.
+            rem = self._glide - self._scroll
+            ms = max(1, min(200, int(dt * 1000)))
+            step = int(rem * (1.0 - 0.5 ** (ms / _GLIDE_HALF_MS)))
+            lo = min(abs(rem), 2)
+            if abs(step) < lo:
+                step = lo if rem > 0 else -lo
+            if abs(step) > abs(rem):
+                step = rem
+            self._scroll += step
+            moved = step != 0
+            if self._scroll == self._glide:
+                self._glide = None
+        if not self.moving:
+            c = self.nearest()
+            if c != self._sel:
+                self.sel = c
+        return moved
+
+    def pointer_frame(self, px, py, click, down, dt_ms=None):
+        i = Launcher.pointer_frame(self, px, py, click, down, dt_ms)
+        drag = self._taps.dragging
+        if self._was_drag and not drag and not self._region.animating:
+            self._snap()
+        self._was_drag = drag
+        return i
+
+    def scroll_cols(self, d):
+        self.nav2d(d, 0)
+
+    # -- cards -----------------------------------------------------------------
+
+    def _side(self, d, moving):
+        """A card's side at distance `d` px from the centre."""
+        g = self._geom()
+        card, pitch = g[2], g[3]
+        if (d >= pitch or self.motion == "one"
+                or (moving and self.motion == "rest")):
+            return card
+        big = int(card * min(self.scale, HOME_SCALE_MAX) + 0.5)
+        return card + (big - card) * (pitch - d) // pitch
+
+    def _rect_at(self, i, moving):
+        g = self._geom()
+        bx, _by, bw, _bh = g[1]
+        mid = bx + bw // 2
+        xc = mid + i * g[3] - self.scroll
+        t = self._side(abs(xc - mid), moving)
+        return (xc - t // 2, g[7] - t // 2, t, t)
+
+    def _visible(self):
+        """(index, rect) for every card in the band, smallest first -- the
+        order they paint in, so the centre card lands on top."""
+        n = len(self.items)
+        if not n:
+            return []
+        g = self._geom()
+        bx, _by, bw, _bh = g[1]
+        pitch = g[3]
+        s = self.scroll
+        reach = bw // 2 + g[2]
+        i0 = max(0, (s - reach) // pitch)
+        i1 = min(n - 1, (s + reach) // pitch + 1)
+        moving = self.moving
+        out = []
+        for i in range(i0, i1 + 1):
+            r = self._rect_at(i, moving)
+            if r[0] + r[2] > bx and r[0] < bx + bw:
+                out.append((i, r))
+        out.sort(key=lambda e: e[1][2])
+        return out
+
+    def tile_rect(self, i):
+        if not (0 <= i < len(self.items)):
+            return None
+        r = self._rect_at(i, self.moving)
+        bx, _by, bw, _bh = self.band_rect()
+        if r[0] + r[2] <= bx or r[0] >= bx + bw:
+            return None
+        return r
+
+    def tile_at(self, px, py):
+        bx, by, bw, bh = self.band_rect()
+        if not (bx <= px < bx + bw):
+            return None
+        vis = self._visible()
+        for k in range(len(vis) - 1, -1, -1):
+            if _in(px, py, vis[k][1]):
+                return vis[k][0]
+        return None
+
+    def plate_rect(self):
+        """The title plate under the centre card: as wide as the centre card
+        at full scale, at the foot of the band, under the card nearest the
+        centre."""
+        g = self._geom()
+        bx, by, bw, bh = g[1]
+        big = g[2] * 3 // 2
+        xc = bx + bw // 2 + self.nearest() * g[3] - self.scroll
+        return (xc - big // 2, by + bh - g[6], big, g[6])
+
+    def action_rects(self):
+        return None
+
+    def paint_key(self):
+        """No selection in the key: the band never shifts (`draw_shift`
+        repaints it whole), and `sel` changes only on settle."""
+        return 0
+
+    def favorite_rect(self, i):
+        """The centre card's favorite-star badge, at rest."""
+        if (self.favorite_for is None or not self.items or i is None
+                or self.moving or i != self.nearest()):
+            return None
+        if not (0 <= i < len(self.items)):
+            return None
+        it = self.items[i]
+        if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
+            return None
+        r = self.tile_rect(i)
+        return None if r is None else self._favorite_badge_geom(r)
+
+    def cover_specs(self):
+        card = self.card_side()
+        out = []
+        for it in self.items:
+            if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
+                continue
+            div = _cover_div(it, card, card)
+            if div:
+                out.append((it, div))
+        return out
+
+    def draw(self, cv, sheet_for=None):
+        self._paint(cv, sheet_for, self.band_rect())
+
+    def draw_shift(self, cv, sheet_for, delta, damage, fill):
+        """The moving frame. The band's pixels cannot shift: the cards lie on
+        the wallpaper, which must stay put while they move. So the band is
+        repainted whole -- `fill` restores the wallpaper around the cards,
+        then the cards -- whatever the ring offers to shift."""
+        self.repaint_band(cv, sheet_for, fill)
+
+    def repaint_band(self, cv, sheet_for, fill):
+        band = self.band_rect()
+        self._fill_around_cards(cv, fill, band)
+        self._paint(cv, sheet_for, band)
+
+    def _fill_around_cards(self, cv, fill, r):
+        """Restore rect `r`'s backdrop except where a card lies: every card
+        paints its whole square opaque, so the backdrop is owed only around
+        them -- on a big panel most of the band's pixels are the cards'."""
+        x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
+        x = x0
+        for _i, c in sorted(self._visible(), key=lambda e: e[1][0]):
+            cx0 = max(c[0], x)
+            cx1 = min(c[0] + c[2], x1)
+            if cx1 <= cx0:
+                continue
+            if cx0 > x:
+                fill(cv, (x, y0, cx0 - x, y1 - y0))
+            ct = max(c[1], y0)
+            cb = min(c[1] + c[3], y1)
+            if ct > y0:
+                fill(cv, (cx0, y0, cx1 - cx0, ct - y0))
+            if cb < y1:
+                fill(cv, (cx0, cb, cx1 - cx0, y1 - cb))
+            x = cx1
+        if x < x1:
+            fill(cv, (x, y0, x1 - x, y1 - y0))
+
+    def _paint(self, cv, sheet_for, r):
+        """Every card meeting rect `r`, clipped to it, and the centre card's
+        ring and plate."""
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            self._card_clip = r
+            clip(*r)
+        x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
+        c = self.nearest()
+        d = 2 * self.layout.fs + 2
+        for i, t in self._visible():
+            if (t[0] - d < x1 and x0 < t[0] + t[2] + d
+                    and t[1] - d < y1 and y0 < t[1] + t[3] + d):
+                self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
+        if self.items:
+            p = self.plate_rect()
+            if p[0] < x1 and x0 < p[0] + p[2] and p[1] < y1 and y0 < p[1] + p[3]:
+                self._draw_plate(cv, self.items[c], p)
+        if clip is not None:
+            self._card_clip = None
+            clip()
+
+    def _draw_home_card(self, cv, it, rect, centre, sheet_for):
+        NAMES = self._NAMES
+        th = self.theme or {}
+        x, y, w, h = rect
+        if it.get("type") in PSEUDO_TILE_TYPES:
+            cv.rect(x, y, w, h, th.get("focus", 0))
+            img = self.icon_for("new") if self.icon_for is not None else None
+            sc = max(1, (w * 5 // 8) // 16)
+            if img is not None:
+                _draw_new_icon(cv, NAMES, img, x + (w - 16 * sc) // 2,
+                               y + (h - 16 * sc) // 2, sc)
+            else:
+                self._blit_glyph(cv, _TYPE_GLYPH[NEW_TILE_TYPE], (x, y, w, h),
+                                 th.get("ink", 0), max(1, (w * 5 // 8) // 12))
+        else:
+            cv.rect(x, y, w, h, th.get("dim", 0))
+            card = self.card_side()
+            div = _cover_div(it, card, card) if self.cover_for is not None else 0
+            cover = self.cover_for(it, div) if div else None
+            if cover is not None:
+                cv.blit565_resize(cover.pix, cover.w, cover.h, x, y, w, h)
+            else:
+                img = sheet_for(it) if sheet_for is not None else None
+                if img is not None:
+                    sc = max(1, (w * 5 // 8) // 16)
+                    cv.spr(img, x + (w - 16 * sc) // 2, y + (h - 16 * sc) // 2, sc)
+                else:
+                    self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"),
+                                     (x, y, w, h), _TYPE_COLOR.get(it["type"], 0),
+                                     max(1, (w * 5 // 8) // 12))
+        if centre and self.favorite_for is not None and not self.moving \
+                and it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES:
+            _draw_star_badge(cv, NAMES, self._blit_glyph,
+                             self._favorite_badge_geom(rect),
+                             bool(self.favorite_for(it)))
+        ring = th.get("author", 0) if it.get("type") in PSEUDO_TILE_TYPES \
+            else None
+        self._card_frame(cv, rect, centre, ring=ring)
+
+    def _draw_plate(self, cv, it, p):
+        """The centre card's name on a plate, in the bar's colours."""
+        th = self.theme or {}
+        lay = self.layout
+        fs = lay.fs
+        x, y, w, h = p
+        cv.rect(x, y, w, h, th.get("bar", 0))
+        for k in range(fs):
+            cv.rectb(x - k, y - k, w + 2 * k, h + 2 * k, th.get("border", 0))
+        name = it.get("title") or ""
+        if it.get("type") == NEW_TILE_TYPE:
+            name = "NEW"
+        name = _ui.print_fit(name, max(3 * lay.font_w, w - 4 * fs), fs)
+        cv.print(name, x + (w - _ui.print_width(name, fs)) // 2,
+                 y + (h - lay.line_h) // 2, th.get("chrome_ink", 7), 1)
+
+
 def _retained_n(cv):
     """The canvas's physical-buffer rotation -- the staleness horizon the
     drag-partial streaks must respect (a back buffer on an N-buffer root is N
@@ -874,7 +1328,7 @@ def _statics_base(ws, cv, grid):
     paint recorded under a different layout unmatchable) and the item count.
     The home shelf folds its own extras on top."""
     return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
-            grid.layout.lib_grid, len(grid.items))
+            grid.band_rect(), len(grid.items))
 
 
 def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
@@ -920,7 +1374,7 @@ def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
             return False
     _t0 = _ticks_ms() if timed and getattr(ws, "perf_capture", False) else None
     region = grid._scroll_region()
-    key = (grid.sel, layer._statics, ws.covers.gen)
+    key = (grid.paint_key(), layer._statics, ws.covers.gen)
     shift = region.blit_shift(cv, ws._frames_drawn, key)
     if shift is not None:
         delta, old_stamp = shift
@@ -932,11 +1386,11 @@ def _drag_partial(layer, cv, dt, grid, kind, fill, strip, timed=False):
                                old_stamp[2], old_stamp[3]))
         grid.draw_shift(cv, ws.covers.sheet_icon, delta, damage, fill)
     else:
-        fill(cv, (bx, by, bw, bh))
-        grid.draw(cv, ws.covers.sheet_icon)
+        grid.repaint_band(cv, ws.covers.sheet_icon, fill)
     # Re-pin the cover gen POST-draw: a cover landing during the card draw
     # is in these pixels, so the recorded key must carry the new gen.
-    region.note_painted(ws._frames_drawn, (grid.sel, layer._statics, ws.covers.gen),
+    region.note_painted(ws._frames_drawn,
+                        (grid.paint_key(), layer._statics, ws.covers.gen),
                         _cursor_stamp(ws))
     _t1 = _ticks_ms() if _t0 is not None else None
     ws.bar_layer._draw_status_strip(strip)
@@ -959,7 +1413,8 @@ class LauncherHomeLayer:
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
+        self._lhover = (-1, -1)       # the last pointer sample (a release is not a move)
+        self._tab_focus = False       # keys drive the tab row (up from the carousel)
         # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
         # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
         # stack megabytes of writes -- capping a shelf drag at ~7fps). During a
@@ -991,6 +1446,13 @@ class LauncherHomeLayer:
         # the previous visit and the first drag partially repainted over the
         # PREVIOUS screen's chrome in the second buffer.
         self._last_pf = None
+        # The wallpaper under the carousel band, captured on every full paint
+        # right after the wallpaper drew: a moving frame restores the band's
+        # backdrop from it (the cards lie on the wallpaper, so the band cannot
+        # shift). The key is what the capture was taken under -- the canvas,
+        # the theme, the wallpaper and the band rect.
+        self._band_bg = None          # cv.new_layer sized to the band
+        self._band_key = None
 
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
@@ -1000,7 +1462,8 @@ class LauncherHomeLayer:
         ws = self.ws
         return _statics_base(ws, cv, ws.launcher) + (
             ws.look.wallpaper_id,
-            getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
+            getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
+            ws.launcher.tab, self._tab_focus)
 
     def _retained_key(self, cv):
         """Everything the WHOLE home frame's pixels are a pure function of: the
@@ -1062,28 +1525,79 @@ class LauncherHomeLayer:
                 or getattr(cv, "RETAINED_FRAMES", 0) < 1):
             return
         cache = self._lib_cache
-        if cache is not None and cache.w == cv.w and cache.h == cv.h:
-            return
         try:
-            self._lib_cache = cv.new_layer(cv.w, cv.h)
-            self._lib_key = None          # freshly minted: no captured pixels
+            if cache is None or cache.w != cv.w or cache.h != cv.h:
+                self._lib_cache = cv.new_layer(cv.w, cv.h)
+                self._lib_key = None      # freshly minted: no captured pixels
+            self._band_layer(cv)
         except Exception:  # noqa: BLE001
             self._lib_cache = None
+            self._band_bg = None
             self._lib_unsupported = True
+
+    def _band_layer(self, cv):
+        """The band backdrop's layer, minted (or re-minted for a new band
+        size) on demand."""
+        bx, by, bw, bh = self.ws.launcher.band_rect()
+        bg = self._band_bg
+        if bg is None or bg.w != bw or bg.h != bh:
+            if bg is not None and getattr(bg, "release", None) is not None:
+                bg.release()
+            self._band_bg = bg = cv.new_layer(bw, bh)
+            self._band_key = None
+        return bg
 
     def release_retained(self):
         """Free the retained-frame layer (the fit check's release, after any
         parked window stamps): True when there was one. The next settled
-        visit re-mints and re-captures it."""
-        cache = self._lib_cache
-        if cache is None:
-            return False
-        self._lib_cache = None
+        visit re-mints and re-captures it. The band's backdrop goes with it."""
+        freed = False
+        for name in ("_lib_cache", "_band_bg"):
+            cache = getattr(self, name)
+            if cache is None:
+                continue
+            setattr(self, name, None)
+            rel = getattr(cache, "release", None)
+            if rel is not None:
+                rel()
+            freed = True
         self._lib_key = None
-        rel = getattr(cache, "release", None)
-        if rel is not None:
-            rel()
-        return True
+        self._band_key = None
+        return freed
+
+    def _band_key_of(self, cv):
+        ws = self.ws
+        return _statics_base(ws, cv, ws.launcher) + (ws.look.wallpaper_id,)
+
+    def _capture_band_backdrop(self, cv, dt):
+        """Copy the band's rect of the wallpaper just drawn -- before any
+        chrome or card -- on every full paint, so an edited wallpaper (the
+        Paint app's document keeps its id) is never restored stale. Not while
+        the wallpaper animates (those frames are full paints anyway) and not
+        on a canvas that retains nothing."""
+        ws = self.ws
+        self._band_key = None
+        if self._lib_unsupported or ws._animating(dt):
+            return
+        if (getattr(cv, "begin_surface", None) is not None
+                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+            return
+        key = self._band_key_of(cv)
+        try:
+            bg = self._band_layer(cv)
+            bx, by, _bw, _bh = ws.launcher.band_rect()
+            bg.blit_strip(cv, -bx, -by)
+            self._band_key = key
+        except Exception:  # noqa: BLE001 -- forfeit, as the retained frame does
+            self._band_bg = None
+            self._band_key = None
+            self._lib_unsupported = True
+
+    def _backdrop_fill(self, cv, r):
+        """The band's backdrop inside rect `r`: the wallpaper, restored from
+        the captured band."""
+        bx, by, _bw, _bh = self.ws.launcher.band_rect()
+        cv.blit_strip_rect(self._band_bg, bx, by, r[0], r[1], r[2], r[3])
 
     def _capture_retained(self, cv, dt):
         """Capture the frame just painted into the retained cache -- called at
@@ -1120,15 +1634,14 @@ class LauncherHomeLayer:
             self._lib_key = None       # session rather than retry every paint
             self._lib_unsupported = True
 
-    def _surface_fill(self, cv, r):
-        """The shelf band's backdrop: the Library panel's surface fill."""
-        cv.rect(r[0], r[1], r[2], r[3], self.ws.theme_colors["surface"])
-
     def _try_drag_partial(self, cv, dt):
-        """The shelf drag fast path (`_drag_partial`), timed for the home
-        diag's HITCH split."""
+        """The carousel's moving frame (`_drag_partial`), timed for the home
+        diag's HITCH split -- only once the band's backdrop holds this
+        frame's wallpaper."""
+        if self._band_bg is None or self._band_key != self._band_key_of(cv):
+            return False
         return _drag_partial(self, cv, dt, self.ws.launcher, "launcher",
-                             self._surface_fill, "home", timed=True)
+                             self._backdrop_fill, "home", timed=True)
 
     def draw(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
@@ -1144,9 +1657,13 @@ class LauncherHomeLayer:
         ws = self.ws
         cv = ws.sys_canvas
         _paint_continuity(self, ws)           # foreign paints void the buffers
-        # Kinetic fling (#113): advance a coasting shelf BEFORE painting, and
-        # keep the redraw gate open until it rests. Fling frames ride the same
-        # partial/blit path as finger drags (its gate includes flinging).
+        # The board's motion verdict (a WM constant, §12's degradation order).
+        wm = ws.wm
+        ws.launcher.motion = getattr(wm, "HOME_MOTION", "full")
+        ws.launcher.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_MAX)
+        # Kinetic fling (#113) and the glide to the centre card: advance the
+        # row BEFORE painting, and keep the redraw gate open until it rests.
+        # Both ride the partial path (its gate includes flinging).
         ws.launcher.anim_frame(dt)
         if ws.launcher.flinging:
             ws.request_frame()
@@ -1159,7 +1676,7 @@ class LauncherHomeLayer:
         if self._try_stamp_retained(cv, dt):
             ws.launcher._scroll_region().note_painted(
                 ws._frames_drawn,
-                (ws.launcher.sel, self._statics_key(cv), ws.covers.gen),
+                (ws.launcher.paint_key(), self._statics_key(cv), ws.covers.gen),
                 _cursor_stamp(ws))
             _advance_streak(self, cv)
             return
@@ -1175,21 +1692,20 @@ class LauncherHomeLayer:
         # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
         ws.wallpaper.draw(dt)
+        self._capture_band_backdrop(cv, dt)
         _t1 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
             _surf("home-grid", "system")
-        # The Library shelf panel (visual identity v1's library mockup) on every
-        # tier: the warm tool surface framed over the construction field, with
-        # the "LIBRARY" header and the footer cartridge count. The scrolling
-        # card grid + its scroll arrows/bar draw inside it (Launcher._draw_shelf).
-        self._draw_shelf_panel(cv)
+        # The tab row and the carousel's band (docs/shell_layout_2026-10.md
+        # §12) over the wallpaper; the cards draw inside the band.
+        self._draw_home_chrome(cv)
         ws.launcher.draw(cv, ws.covers.sheet_icon)
         # #113: record this full paint in the shelf's blit ring (offset + the
         # state the pixels depend on + the cursor stamp about to land on top),
         # so an eligible drag frame can shift instead of repainting every card.
         ws.launcher._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.launcher.sel, self._statics_key(cv), ws.covers.gen),
+            (ws.launcher.paint_key(), self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
         _t2 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
@@ -1203,59 +1719,47 @@ class LauncherHomeLayer:
         _advance_streak(self, cv)
         self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
 
-    def _draw_shelf_panel(self, cv):
-        """The framed Library panel: surface fill + border, the Moy + "LIBRARY"
-        header, and the footer's centered cartridge count between thin rules
-        (the scroll arrows are drawn by the grid, at the layout's footer rects)."""
+    def tab_rects(self):
+        """[(tab id, rect, labels_on)] of the home's tab row."""
+        fs = self.ws.layout.fs
+        return _ui.tab_row_rects(self.ws.launcher.tabs_rect(), HOME_TABS, fs)
+
+    def _draw_home_chrome(self, cv):
+        """The tab row on its plate (with the search query beside it while one
+        is held). The carousel's band has no backdrop of its own: the cards
+        lie on the wallpaper."""
         ws = self.ws
         th = ws.theme_colors
         lay = ws.layout
         fs = lay.fs
-        x, y, w, h = lay.lib_panel
-        cv.rect(x, y, w, h, th["surface"])
-        for i in range(fs):
-            cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th["border"])
-        # Header: the mascot + display-type "LIBRARY", both sized by the shelf's
-        # display multiplier (resolution-locked ~32px, whatever the body fs).
-        mult = getattr(lay, "lib_mult", 2)
-        hx = x + max(10 * fs, 20)
-        moy = getattr(ws, "_icon_image_keyed", lambda kind: None)("moy")
-        isc = max(1, (lay.line_h * mult) // 16)          # mascot ~= the type height
-        if moy is not None:
-            cv.spr(moy, hx, y + (lay.lib_header_h - 16 * isc) // 2, isc)
-        else:
-            ws._icon("moy", hx, y + (lay.lib_header_h - 16 * fs) // 2, cv)
-        # Search (#105): while a query is being typed/held, the header swaps to
-        # "SEARCH: <query>" (plain 1x text, since a typed string can run longer
-        # than the display-type "LIBRARY" heading ever needs to fit) -- the ONE
-        # visual change search makes to an otherwise-untouched idle frame, so a
-        # quiet (no search) launcher repaints byte-identical to before.
+        grid = ws.launcher
+        rects = self.tab_rects()
+        tx, ty, tw, tht = grid.tabs_rect()
+        p = 2 * fs
+        x1 = rects[-1][1][0] + rects[-1][1][2] if rects else tx
+        cv.rect(tx - p, ty - p, x1 - tx + 2 * p, tht + 2 * p, th["surface"])
+        for k in range(fs):
+            cv.rectb(tx - p - k, ty - p - k, x1 - tx + 2 * (p + k),
+                     tht + 2 * (p + k), th["border"])
+        tabs = [(tid, label, _TAB_ICON[tid]) for tid, label in HOME_TABS]
+        _ui.tab_row(cv, th, grid.tabs_rect(), tabs, grid.tab,
+                    icon_for=getattr(ws, "_icon_image_keyed", None), ink=th["ink"])
+        if self._tab_focus:
+            for tid, r, _on in rects:
+                if tid == grid.tab:
+                    for k in range(max(2, fs)):
+                        d = fs + k
+                        cv.rectb(r[0] - d, r[1] - d, r[2] + 2 * d, r[3] + 2 * d,
+                                 th["focus"])
         query = getattr(ws, "search_query", "")
         typing = getattr(ws, "search_typing", False)
         if query or typing:
             label = "SEARCH: " + query + ("_" if typing else "")
-            tx0 = hx + 16 * isc + 6 * fs
-            label = _ui.print_fit(label, max(6 * lay.font_w, x + w - tx0), fs)
-            cv.print(label, tx0, y + (lay.lib_header_h - lay.line_h) // 2, th["ink"], 1)
-        else:
-            _print_scaled(cv, "LIBRARY", hx + 16 * isc + 6 * fs,
-                          y + (lay.lib_header_h - lay.line_h * mult) // 2, th["ink"], mult)
-        # Footer: "N CARTRIDGES" centered between thin rules.
-        n = 0
-        for it in ws.launcher.items:
-            if it.get("path"):
-                n += 1
-        label = str(n) + (" CARTRIDGE" if n == 1 else " CARTRIDGES")
-        tw = _ui.print_width(label, fs)
-        ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - lay.line_h) // 2
-        tx = x + (w - tw) // 2
-        cv.print(label, tx, ty, th["ink_dim"], 1)
-        ly = ty + 4 * fs
-        lx0 = lay.scroll_lt[0] + lay.scroll_lt[2] + 10 * fs
-        lx1 = lay.scroll_rt[0] - 10 * fs
-        cv.rect(lx0, ly, max(0, tx - 8 * fs - lx0), fs, th["ink_dim"])
-        cv.rect(tx + tw + 8 * fs, ly, max(0, lx1 - (tx + tw + 8 * fs)), fs,
-                th["ink_dim"])
+            sx = x1 + 4 * p
+            label = _ui.print_fit(label, max(6 * lay.font_w, tx + tw - sx - p), fs)
+            w = _ui.print_width(label, fs) + 2 * p
+            cv.rect(sx - p, ty - p, w + p, tht + 2 * p, th["surface"])
+            cv.print(label, sx, ty + (tht - lay.line_h) // 2, th["ink"], 1)
 
     def _handle_search_typing(self, i):
         """Keyboard while a search query is being TYPED (ws.search_typing, entered
@@ -1291,23 +1795,40 @@ class LauncherHomeLayer:
             if i.pressed(_b):
                 ws.ach_ui._konami_step(_b)
                 break
-        # Grid nav (#28): left/right slide a card column, up/down step within it.
+        if self._tab_focus:
+            # The tab row (up from the carousel): left/right switch tabs,
+            # down or enter returns to the row.
+            if i.pressed("left"):
+                ws.step_home_tab(-1)
+            if i.pressed("right"):
+                ws.step_home_tab(1)
+            if i.pressed("down") or i.pressed("a") or i.pressed("run"):
+                self._tab_focus = False
+                ws.mark_dirty()
+            if i.pressed("b") and ws.ach_ui._konami_pos == 0:
+                self._tab_focus = False
+                ws.mark_dirty()
+            elif i.pressed("home"):
+                ws.home_key()
+            return True
+        # The carousel (§12): left/right glide by a card, a held key one
+        # motion; up takes the keys to the tab row.
         if i.pressed("left"):
             ws.launcher.nav2d(-1, 0)
+            ws.mark_dirty()
         if i.pressed("right"):
             ws.launcher.nav2d(1, 0)
+            ws.mark_dirty()
         if i.pressed("up"):
-            ws.launcher.nav2d(0, -1)
-        if i.pressed("down"):
-            ws.launcher.nav2d(0, 1)
+            self._tab_focus = True
+            ws.mark_dirty()
         if i.pressed("a") or i.pressed("run"):
             # #184: DEFERRED -- the cart start runs behind the next painted
             # frame (LOADING toast), never inside this input dispatch.
-            ws.defer(ws.launch_selected)     # launcher tap = RUN the selected cart
+            ws.defer(ws.launch_selected)     # the active tab's tap
         if i.pressed("code"):
             # CHANGE (visual identity v1 Section 1.2): open the selected cartridge
-            # in place in the Studio/Editor, landing on Config. The keyboard route
-            # to the second verb; PLAY stays the primary activation above.
+            # in place in the Studio/Editor, landing on Config.
             ws.defer(ws.change_selected)
         if (i.pressed("b") and ws.ach_ui._konami_pos == 0
                 and ws.bar_layer._show_x("home")):
@@ -1318,69 +1839,40 @@ class LauncherHomeLayer:
         return True
 
     def handle_pointer(self, px, py, click):
-        # Desktop home (#28): the bar / scroll arrows / the selected card's
-        # PLAY-CHANGE row fire on the press edge; a tap on a CARD selects + runs
-        # on RELEASE (Launcher.pointer_frame), so drag-to-scroll on the grid can
-        # never launch a cart. Trackball hover still previews the icon under it
-        # (pointer-up only -- a touch drag must not re-select under the finger).
-        # There is no bottom dock to hit-test (#46 dropped it here, 2026-08-21
-        # deleted it); Settings is reached via the gear in the status strip.
+        # The home (§12): the bar and the tab row fire on the press edge; the
+        # carousel rides ui.DragTap, so a tap fires on a clean RELEASE and a
+        # drag can never launch a cart. A tap on the centre card is the
+        # active tab's tap; on any other card it glides that card to the
+        # centre. The favorite star on the centre card fires on the press.
         ws = self.ws
         down = ws.pointer.down
+        grid = ws.launcher
         if click:
-            # The top-bar tap slice (clock egg / ≡ / NEW / DUP / DEL) is owned by the
-            # bar surface now (#46 BarLayer); it also runs the clock-run reset for any
-            # non-clock tap, so arrow/tile taps that fall through stay byte-identical.
             if ws.bar_layer.handle_home_tap(px, py):
                 return True
-            lay = ws.layout
-            if ws.launcher.max_scroll() > 0 and _in(px, py, lay.scroll_lt):
-                ws.launcher.scroll_cols(-1); return True
-            if ws.launcher.max_scroll() > 0 and _in(px, py, lay.scroll_rt):
-                ws.launcher.scroll_cols(1); return True
-            # The selected card's favorite star badge (#105) -- checked before the
-            # PLAY/CHANGE row and the grid press, same reason: a button tap must
-            # never fall through to the card's primary activation underneath it.
-            frect = ws.launcher.favorite_rect(ws.launcher.sel)
+            for tid, r, _on in self.tab_rects():
+                if _in(px, py, r):
+                    self._tab_focus = False
+                    ws.set_home_tab(tid)
+                    return True
+            frect = grid.favorite_rect(grid.sel)
             if frect is not None and _in(px, py, frect):
-                ws.carts.toggle_favorite(ws.launcher.selected())
+                ws.carts.toggle_favorite(grid.selected())
                 return True
-            # The selected card's PLAY / CHANGE buttons (wide-card tiers).
-            # Checked before the grid press so a button tap never falls through to
-            # the card's primary activation underneath it.
-            ar = ws.launcher.action_rects()
-            if ar is not None:
-                if _in(px, py, ar["play"]):
-                    ws.defer(ws.launch_selected)   # #184: start behind the paint
-                    return True
-                if _in(px, py, ar["change"]):
-                    ws.defer(ws.change_selected)
-                    return True
-        # The grid's press/drag/release machine: returns an index only on a clean
-        # tap release -- the launcher tap = RUN the selected cart.
-        i = ws.launcher.pointer_frame(px, py, click, down,
-                                      dt_ms=ws._pointer_dt_ms)
+        i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
+        if grid.moving:
+            ws.mark_dirty()
         if i is not None:
-            ws.launcher.sel = i
-            # #184: the tap frame paints the moved selection + LOADING first;
-            # the cart start (the launcher's 1.5-2.3s stall) runs behind it.
-            ws.defer(ws.launch_selected)
+            self._tab_focus = False
+            if i == grid.sel and not grid.moving:
+                # #184: the tap frame paints first; the start runs behind it.
+                ws.defer(ws.launch_selected)
+            else:
+                grid.glide_to(i)
+                ws.mark_dirty()
             return True
         if click or down:
-            self._lhover = (px, py)   # track the finger so the release frame
-            return True               # isn't read as a hover "move" below
-        # Trackball cursor hover (pointer up, no click): highlight the icon the
-        # cursor MOVED onto. Only when the position actually changed frame-to-
-        # frame, so a parked cursor doesn't fight keyboard nav. _lhover seeds to
-        # the live pointer position on the first frame so the initial centered
-        # cursor isn't treated as a move (which would clobber the first arrow step).
-        if self._lhover == (-1, -1):
             self._lhover = (px, py)
-        elif (px, py) != self._lhover:
-            self._lhover = (px, py)
-            i = ws.launcher.tile_at(px, py)
-            if i is not None:
-                ws.launcher.sel = i
         return True
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
@@ -1392,89 +1884,77 @@ class LauncherHomeLayer:
         BarLayer a uniform `owner.zone_gen` regardless of which app owns a zone."""
         return self.ws.launcher.zone_gen
 
+    def zone_verbs(self):
+        """The active tab's verbs on the selected card (§12's table): Games
+        PLAY, CHANGE, SEARCH; Mine PLAY, CHANGE; Apps OPEN; Make NEW, CHANGE.
+        CHANGE needs a real cart and a store that manages projects; the
+        "+ New" card's verb is NEW."""
+        ws = self.ws
+        grid = ws.launcher
+        tab = grid.tab
+        sel = grid.selected()
+        real = sel is not None and sel.get("path") \
+            and sel.get("type") not in PSEUDO_TILE_TYPES
+        change = bool(real) and bool(getattr(ws, "can_manage", True))
+        if tab == "apps":
+            return ("open",) if real else ()
+        if tab == "make":
+            return ("new", "change") if change else ("new",)
+        if sel is not None and sel.get("type") == NEW_TILE_TYPE:
+            return ("new",)
+        out = ("play", "change") if change else (("play",) if real else ())
+        if tab == "games":
+            out = out + ("search",)
+        return out
+
     def _zone_action_rects(self, rect):
-        """PLAY / CHANGE chip rects inside the lent bar zone -- the narrow-card
-        tiers' home of the selected card's two verbs (visual identity v1 Section 7:
-        on the small tier 'selected actions use the zoned bar'; the wide-card tiers
-        draw them on the card itself, Launcher.action_rects -- lay.lib_card_actions
-        is the one predicate both read). None on wide-card tiers, with no real cart
-        selected (the Make tile has one verb, its tap), or when the zone is too
-        narrow to keep any room for the name."""
+        """{verb: rect} of the verb chips in the lent bar zone, flush left in
+        it, as many as fit."""
         ws = self.ws
         lay = ws.layout
-        if lay.lib_card_actions:
-            return None
-        sel = ws.launcher.selected()
-        if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
-            return None
-        fw = lay.font_w
-        pw = 4 * fw + 6                     # "PLAY"
-        cw = 6 * fw + 6                     # "CHANGE"
-        cx = rect[0] + rect[2] - cw         # CHANGE flush right, PLAY beside it
-        px_ = cx - 4 - pw
-        if px_ < rect[0] + 6 * fw:          # keep some room for the name
-            return None
-        return {"play": (px_, 2, pw, 13), "change": (cx, 2, cw, 13)}
+        fs, cs = lay.fs, lay.cs
+        x = rect[0] + 2 * cs
+        y = rect[1] + cs
+        h = max(lay.line_h + 4 * fs, rect[3] - 3 * cs)
+        out = {}
+        for verb in self.zone_verbs():
+            w = _ui.print_width(_VERB_LABEL[verb], fs) + 6 * fs
+            if x + w > rect[0] + rect[2]:
+                break
+            out[verb] = (x, y, w, h)
+            x += w + 4 * cs
+        return out
 
     def draw_zone(self, cv, rect):
-        """The launcher's lent left zone: the selected cart's name (or empty when
-        there is none) -- cart management (create/copy/delete) moved to the Editor
-        picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker
-        is for MANAGING projects), so NEW/DUP/DEL no longer draw here. On the
-        narrow-card tiers (the 320x240 baseline) the zone also carries the selected
-        card's PLAY / CHANGE chips (visual identity v1 Section 1.2), right-aligned
-        so the name keeps its flush-left spot."""
+        """The home's lent left zone: the active tab's verb chips on the
+        selected card -- the selected card's name is on its plate."""
         ws = self.ws
         NAMES = self._NAMES
+        th = ws.theme_colors
         lay = ws.layout
-        if lay.lib_card_actions:
-            # Wide-card tiers: the OS wordmark (the mockup's top-left "moybyte") --
-            # the selected cart's name reads on the card itself, and the verbs
-            # are the card's own PLAY/CHANGE row.
-            th = ws.theme_colors
-            ink = th["ink"] if ws.bar_layer.zone_band_light("home") \
-                else th["chrome_ink"]
-            cs = lay.cs
-            ws._icon("moy", rect[0] + 2, rect[1], cv, cs)
-            cv.print("moybyte", rect[0] + 2 + 20 * cs,
-                     rect[1] + (rect[3] - lay.line_h) // 2, ink, 1)
-            return
-        sel = ws.launcher.selected()
-        if sel is None:
-            return
-        chips = self._zone_action_rects(rect)
-        limit = rect[2]
-        if chips is not None:
-            limit = chips["play"][0] - 4 - rect[0]
-        name = sel["title"]
-        name = _ui.print_fit(name, max(4 * lay.font_w, limit), lay.fs)
-        th_ = ws.theme_colors
-        cv.print(name, rect[0] + 2, 3 + lay.bar_text_dy,
-                 th_["ink"] if ws.bar_layer.zone_band_light("home")
-                 else th_["chrome_ink"], 1)
-        if chips is not None:
-            th = ws.theme_colors
-            for verb, label, bg in (("play", "PLAY", th["play"]),
-                                    ("change", "CHANGE", th["author"])):
-                x, y, w, h = chips[verb]
-                cv.rect(x, y, w, h, bg)
-                cv.rectb(x, y, w, h, NAMES["black"])
-                cv.print(label, x + 3, y + 3, NAMES["black"], 1)
+        fill = {"play": th["play"], "open": th["play"], "change": th["author"],
+                "new": th["author"], "search": NAMES["light_grey"]}
+        for verb, (x, y, w, h) in self._zone_action_rects(rect).items():
+            cv.rect(x, y, w, h, fill[verb])
+            cv.rectb(x, y, w, h, NAMES["black"])
+            cv.print(_VERB_LABEL[verb], x + 3 * lay.fs, y + (h - lay.line_h) // 2,
+                     NAMES["black"], 1)
 
     def zone_tap(self, px, py, rect=None):
-        """The launcher's lent left-zone tap slice: the PLAY / CHANGE chips on the
-        320x240 baseline (visual identity v1 Section 1.2 -- PLAY runs the selected
-        cart, CHANGE opens it in the Studio/Editor on Config). Anything else falls
-        through (the rest of the zone is display-only)."""
+        """The zone's verb chips; anything else falls through."""
         ws = self.ws
         chips = self._zone_action_rects(
             rect if rect is not None else ws.layout.zone_left)
-        if chips is not None:
-            if _in(px, py, chips["play"]):
-                ws.defer(ws.launch_selected)   # #184: start behind the paint
-                return True
-            if _in(px, py, chips["change"]):
-                ws.defer(ws.change_selected)
+        for verb, r in chips.items():
+            if _in(px, py, r):
+                if verb in ("play", "open"):
+                    ws.defer(ws.launch_selected)   # #184: start behind the paint
+                elif verb == "change":
+                    ws.defer(ws.change_selected)
+                elif verb == "new":
+                    ws.defer(ws.new_cart_and_edit)
+                else:
+                    ws.toggle_search()
                 return True
         return False
 

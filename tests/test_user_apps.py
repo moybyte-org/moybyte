@@ -33,7 +33,7 @@ from runtime import crash_guard, moy_carts, system_api  # noqa: E402
 import moy_app                                 # noqa: E402
 from runtime.crash_guard import CrashGuard    # noqa: E402
 from runtime.moy_spine import Settings        # noqa: E402
-from ws_helpers import build_ws                # noqa: E402
+from ws_helpers import build_ws, select_on_home  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -59,12 +59,9 @@ def _write_cart(carts_dir, name, src, perms=(), type="app", canvas="320x240"):
 
 def _open(ws, title):
     """Run a cart from the launcher shelf, the way a kid reaches it."""
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("title") == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
-    raise AssertionError("cart not on the launcher: " + title)
+    if select_on_home(ws, title) is None:
+        raise AssertionError("cart not on the launcher: " + title)
+    ws.open()
 
 
 def _frames(ws, n=3):

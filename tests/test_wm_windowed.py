@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_desktop_ws
+from ws_helpers import build_desktop_ws, select_on_home
 
 
 def _ws(tmp_path, **kw):
@@ -2303,18 +2303,19 @@ def test_branch_a_console_run_closes_the_parked_editors_project(tmp_path):
 
 
 def test_branch_exit_doors_in_console_mode(tmp_path):
-    """The Make tile and CHANGE open the Editor fullscreen; B on the home
+    """The Make tab and CHANGE open the Editor fullscreen; B on the home
     leaves; no door flips the mode but the X and its keyboard twin."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_library()
-    ws.launcher.sel = 0                          # the pinned Make tile
+    ws.set_home_tab("make")
+    ws.launcher.sel = 1                          # a project: Make's tap edits
     ws.launch_selected()
-    assert ws.wm.mode == "console" and ws.wm.top_is("picker")
-    ws.pick_selected()
     drv.frame(1 / 30)
-    assert ws.wm.top_is("menu") and ws.wm._order == []
+    assert ws.wm.mode == "console" and ws.wm.top_is("menu")
+    assert ws.wm._order == []
     ws.go_home()
+    ws.set_home_tab("games")
     ws.launcher.sel = 1
     ws.change_selected()
     drv.frame(1 / 30)
@@ -2506,8 +2507,7 @@ def _popover_desk(tmp_path, game=False):
     ws.open_desk()
     ws.open_app(ws._apps_by_id["calc"])
     if game:
-        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                               if it.get("title") == "Star Catcher")
+        select_on_home(ws, "Star Catcher")
         ws.open()
     for _ in range(20):
         _quiesce(ws)

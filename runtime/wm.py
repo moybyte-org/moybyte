@@ -54,6 +54,19 @@ class FullscreenStackWM:
     back-stack `screen` projects onto (`self.stack`, moy_spine.BackStack). One instance
     per Workstation, built in `Workstation.__init__`."""
 
+    # The home carousel's motion verdict (docs/shell_layout_2026-10.md §12),
+    # a per-board constant: a board whose drag frames do not fit its budget
+    # degrades down this order, only as far as its measurement says (#66) --
+    # "full" (the centre card scales with its distance from the centre, in
+    # motion and at rest; HOME_SCALE lowered is the order's "reduced scale"),
+    # "rest" (every card at 1.0 while the row moves, the centre scaled once
+    # settled), "one" (one card size). Every board runs "full" at 1.5.
+    HOME_MOTION = "full"
+    HOME_SCALE = 1.5
+    # Registered apps the home's Apps tab and the desk leave out: reached
+    # through Settings instead.
+    HIDDEN_APPS = ("appearance",)
+
     def __init__(self, ws):
         self.ws = ws
         # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool,

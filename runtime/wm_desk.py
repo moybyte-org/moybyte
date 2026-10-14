@@ -17,8 +17,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 class _BackdropLayer(Layer):
     """The real desktop root (wallpaper + ONE OS bar) with a DRAG cache (#58).
-    The Library is a launch surface only while the process stack has no windows;
-    as soon as PLAY/CHANGE pushes one, this layer replaces it so the Library
+    The home is a launch surface only while the process stack has no windows;
+    as soon as PLAY/CHANGE pushes one, this layer replaces it so the home
     never reads as wallpaper behind Studio. During a drag/resize only the window
     position changes, so the first frame captures the desktop and later frames
     blit the retained backdrop.
@@ -177,7 +177,11 @@ class _BackdropLayer(Layer):
     # backdrop capture, so the drag cache carries them for free.
 
     ICON_GLYPHS = {"play": "run", "projects": "edit"}
-    HIDDEN_APPS = ("appearance",)     # reachable via Settings, not a desk tool
+
+    @property
+    def HIDDEN_APPS(self):
+        """The WM's: reached through Settings, not a desk tool."""
+        return self.wm.HIDDEN_APPS
 
     def _icon_catalog(self):
         ws = self.ws

@@ -196,15 +196,11 @@ class Recorder:
         self.ws.carts.apply(items)
         cart = next(c for c in self.ws.carts.all
                     if os.path.basename(c["path"]) == name)
-        for i, it in enumerate(self.ws.launcher.items):
-            if it.get("path") == cart.get("path"):
-                self.ws.launcher.sel = i
-                break
+        self.ws.select_cart(cart)
         return cart
 
     def open_editor(self, cart):
-        """The Make tile -> project-picker -> pick destination, without the two
-        grid screens: land the Editor on the cart's Config tab (spec Section 6).
+        """The Make tab -> pick destination, without the home: land the Editor on the cart's Config tab (spec Section 6).
         On the windowed tier this also parks the "Make" window off the desk's
         icon column so the desktop stays in frame."""
         self.ws.open_in_editor(cart)

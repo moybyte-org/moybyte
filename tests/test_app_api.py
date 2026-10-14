@@ -8,14 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, select_on_home
 
 
 def _select(ws, title):
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("title") == title:
-            ws.launcher.sel = i
-            return it
+    it = select_on_home(ws, title)
+    if it is not None:
+        return it
     raise AssertionError(title + " not on the launcher")
 
 

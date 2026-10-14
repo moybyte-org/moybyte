@@ -60,11 +60,8 @@ def _deny_source(monkeypatch, cart, times):
 
 
 def _select(ws, cart):
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("path") == cart.get("path"):
-            ws.launcher.sel = i
-            return
-    raise AssertionError("cart not on the shelf: " + cart["title"])
+    if not ws.select_cart(cart):
+        raise AssertionError("cart not on the shelf: " + cart["title"])
 
 
 def test_run_refuses_a_cart_whose_source_will_not_read(tmp_path, monkeypatch):

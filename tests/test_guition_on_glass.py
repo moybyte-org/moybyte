@@ -453,7 +453,7 @@ def _skip_unparked(board, why):
 def test_sync_push_writes_the_store_and_the_shelf_follows(board):
     """The 3.4 sync RPC against the REAL board: bring the webhost up, POST a
     batch from this machine over the LAN, and read the result back over
-    serial -- the file on the TF card, the cart on the LIVE launcher (the
+    serial -- the file on the TF card, the cart on the LIVE home's tabs (the
     shelf rescan, with no reboot anywhere), then a dc batch that removes it
     again. Skips rather than fails when the bench has no shared network:
     everything up to the HTTP hop is the other tests' job.
@@ -520,7 +520,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         board.drain(0.5)
         line = board.cmd(
             "py print('SYNCED=' + repr(any((c.get('path') or '')"
-            ".endswith('pytest_sync.moy') for c in ws.launcher.items)))",
+            ".endswith('pytest_sync.moy') for c in ws._runnable_items())))",
             wait_for="SYNCED=", timeout=8.0)
         assert line is not None and "SYNCED=True" in line, line
         # ...and the dc op takes it back off the card AND the shelf.
@@ -535,7 +535,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         line = board.cmd(
             "py import os; print('GONE=' + repr("
             "any((c.get('path') or '').endswith('pytest_sync.moy') "
-            "for c in ws.launcher.items) is False "
+            "for c in ws._runnable_items()) is False "
             "and 'pytest_sync.moy' not in os.listdir(ws.carts_root)))",
             wait_for="GONE=", timeout=8.0)
         assert line is not None and "GONE=True" in line, line

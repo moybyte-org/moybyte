@@ -11,6 +11,7 @@ scene pane persisting through the Blocks tab's commit path.
 
 import json
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -43,10 +44,7 @@ def _open_blocks_ws(tmp_path, size=WIDE, scenes=None):
                               src=src, type="game",
                               scenes=scenes, scene_order=list(scenes))
     ws = host_app.build_workstation(carts_dir, sys_size=size)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "WS Cart":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "WS Cart")
     ws.open()
     ws._open_blocks()
     ws.frame(0.016)                 # the tab draws headlessly -> lays out the panes

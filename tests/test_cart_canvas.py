@@ -12,6 +12,7 @@ the wm viewport/composite, and the touch mapping through view()."""
 
 import json
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -72,8 +73,7 @@ def _open(tmp_path, name, src, canvas="128x128"):
     _write_cart(carts_dir, name, src, canvas)
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == name)
+    select_on_home(ws, name)
     ws.open()
     return ws, drv
 
@@ -210,8 +210,7 @@ def test_failed_load_restores_the_palette_on_the_swapped_canvas(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     default = list(ws.canvas.palette)
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "badpal")
+    select_on_home(ws, "badpal")
     ws.open()
     for _ in range(2):
         drv.frame(DT)

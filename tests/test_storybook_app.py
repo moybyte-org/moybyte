@@ -6,16 +6,14 @@ from pathlib import Path
 from runtime import host_app, moy_carts
 from runtime.storybook_app import (StorybookAppLayer, StorybookLayout,
                                    deck_to_code, _fit_art, MAX_PAGES)
+from ws_helpers import select_on_home  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _open_storybook(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Storybook":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Storybook")
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -73,7 +71,8 @@ def test_new_story_becomes_a_launcher_cart_and_plays(tmp_path):
     cart = app.cart
     assert cart["type"] == "story"
     assert (Path(cart["path"]) / "deck.json").exists()
-    # The story is a REAL cart on the launcher run grid.
+    # The story is a REAL cart on the home: the kid's own, in Mine.
+    ws.set_home_tab("mine")
     assert "Story 1" in [c.get("title") for c in ws.launcher.items]
     # Type more words onto page 1, then PLAY it under the real Player.
     app._tap_row(1)

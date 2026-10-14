@@ -5,7 +5,7 @@ OPEN picker + autosave riding the same layer."""
 from pathlib import Path
 
 from runtime import moy_carts
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,10 +15,7 @@ from ws_helpers import build_ws as _ws
 
 
 def _open_app(ws, title):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)

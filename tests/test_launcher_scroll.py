@@ -1,10 +1,10 @@
-"""Tests for the desktop home (#28): the cart launcher is the Library SHELF --
-a card grid that SCROLLS continuously LEFT-RIGHT (a shelf slides sideways; no
-pages) with the one tall featured MAKE card pinned at the head of the list, on
-EVERY tier (the 320x240 baseline included). With more carts than fit the
-viewport, touch drag / footer arrows / keyboard nav must reveal the last cart,
-a clean tap must open a card, and a drag must NEVER open one. Also covers the
-trackball cursor sensitivity tweak (#2).
+"""Tests for the home's carousel (docs/shell_layout_2026-10.md §12): one row of
+square cards that slides sideways under the tab row, the card at the centre
+larger, on EVERY tier (the 320x240 baseline included). With more carts than fit
+the band, touch drag / a fling / keyboard nav must reveal the last cart, the
+row must come to rest with a card at the centre, a clean tap on the centre card
+must open it and a tap on another card bring it to the centre, and a drag must
+NEVER open one. Also covers the trackball cursor sensitivity tweak (#2).
 
 These build the SAME shared console the device runs (runtime.host_app) and drive
 it through ConsoleDriver -- mouse == touch, arrows == trackball -- exactly like
@@ -22,93 +22,155 @@ def test_more_carts_than_one_viewport_seeded(tmp_path):
     assert ws.launcher.max_scroll() > 0              # the scrolling precondition
 
 
-# -- grid layout (the shelf packing) ----------------------------------------
+def _settle(drv, n=120):
+    """Frames until the row is still (the glide and any fling spent)."""
+    ws = drv.ws
+    for _ in range(n):
+        drv.frame(1 / 30)
+        if not ws.launcher.moving:
+            drv.frame(1 / 30)
+            return
+    raise AssertionError("the carousel never came to rest")
 
-def test_tile_rects_lay_out_in_the_shelf_packing(tmp_path):
+
+# -- the row ------------------------------------------------------------------
+
+def test_cards_lay_out_in_one_row_the_centre_card_largest(tmp_path):
     ws = _ws_with_carts(tmp_path, 10)
     lz = ws.launcher
-    lay = lz.layout
-    # Slot 0 is the ONE tall featured card (column 0, spanning both rows).
-    r0 = lz.tile_rect(0)
-    assert r0[3] == 2 * lay.lib_card_h + lay.lib_gap
-    # Slot 1 tops the next column; slot 2 sits below it in the SAME column.
+    bx, by, bw, bh = lz.band_rect()
+    r0 = lz.tile_rect(0)                       # scroll 0: card 0 at the centre
     r1 = lz.tile_rect(1)
-    assert r1[0] > r0[0] and r1[1] == r0[1]              # next column, same row
-    r2 = lz.tile_rect(2)
-    assert r2[1] > r1[1] and r2[0] == r1[0]              # below, same column
-    # Slot 3 starts the following column, back at the top row.
-    r3 = lz.tile_rect(3)
-    assert r3 is None or (r3[0] > r1[0] and r3[1] == r1[1])
+    assert r0[0] + r0[2] // 2 == bx + bw // 2
+    assert r0[2] == r0[3] and r1[2] == r1[3]   # square cards
+    assert r1[2] == lz.card_side()             # one pitch away: scale 1.0
+    assert r0[2] == lz.card_side() * 3 // 2    # the centre at the board's 1.5
+    assert r0[1] + r0[3] // 2 == r1[1] + r1[3] // 2   # one centre line
+    assert r1[0] >= r0[0] + r0[2]              # neighbours never overlap it
+    for r in (r0, r1):
+        assert by <= r[1] and r[1] + r[3] <= by + bh
 
 
-def test_tile_at_hit_tests_the_grid(tmp_path):
+def test_a_cards_size_is_a_function_of_its_distance_alone(tmp_path):
     ws = _ws_with_carts(tmp_path, 10)
     lz = ws.launcher
-    for i in range(len(lz.items)):                       # every visible card
+    p = lz.pitch()
+    sizes = []
+    for off in (0, p // 4, p // 2, p):
+        lz._scroll = 2 * p + off
+        sizes.append(lz.tile_rect(2)[2])
+    assert sizes == sorted(sizes, reverse=True)
+    assert sizes[0] == lz.card_side() * 3 // 2 and sizes[-1] == lz.card_side()
+    lz._scroll = 2 * p - p // 4                # the same distance the other side
+    assert lz.tile_rect(2)[2] == sizes[1]
+
+
+def test_the_degradation_order_is_the_wms_constant(tmp_path):
+    """§12's order, a per-board WM constant: "rest" draws every card at 1.0
+    while the row moves and scales the centre once settled; "one" never
+    scales; a lower HOME_SCALE is the reduced scale."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    lz = ws.launcher
+    card = lz.card_side()
+    drv.frame(1 / 30)
+    assert (lz.motion, lz.scale) == ("full", 1.5)        # every board's verdict
+    ws.wm.HOME_SCALE = 1.25
+    ws.mark_dirty()
+    drv.frame(1 / 30)
+    assert lz.tile_rect(0)[2] == int(card * 1.25 + 0.5)
+    ws.wm.HOME_SCALE = 1.5
+    ws.wm.HOME_MOTION = "rest"
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert lz.moving
+    assert all(r[2] == card for _i, r in lz._visible())
+    _settle(drv)
+    assert lz.tile_rect(1)[2] == card * 3 // 2
+    ws.wm.HOME_MOTION = "one"
+    ws.mark_dirty()
+    drv.frame(1 / 30)
+    assert lz.tile_rect(1)[2] == card
+
+
+def test_tile_at_hit_tests_the_row(tmp_path):
+    ws = _ws_with_carts(tmp_path, 10)
+    lz = ws.launcher
+    bx, by, bw, bh = lz.band_rect()
+    for i in range(len(lz.items)):             # every visible card
         r = lz.tile_rect(i)
         if r is None:
             continue
-        gx, gy, gw, gh = lz.layout.lib_grid
         cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
-        if not (gx <= cx < gx + gw):
-            continue                                     # centre clipped away
+        if not (bx <= cx < bx + bw):
+            continue                           # centre clipped away
         assert lz.tile_at(cx, cy) == i
 
 
-# -- continuous scrolling ----------------------------------------------------
+# -- scrolling -------------------------------------------------------------------
 
 def test_scroll_reveals_later_carts(tmp_path):
     ws = _ws_with_carts(tmp_path, 14)
     lz = ws.launcher
     assert lz.scroll == 0
     last = len(lz.items) - 1
-    assert lz.tile_rect(last) is None                    # right of the viewport
+    assert lz.tile_rect(last) is None                    # right of the band
     lz.scroll = lz.max_scroll()
     assert lz.tile_rect(last) is not None                # now visible
 
 
 def test_scroll_clamps_at_both_ends(tmp_path):
+    from runtime import host_app
+
     ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
     lz = ws.launcher
     lz.scroll_cols(-5)
+    ws.mark_dirty()
+    _settle(drv)
     assert lz.scroll == 0
     lz.scroll_cols(99)
+    ws.mark_dirty()
+    _settle(drv)
     assert lz.scroll == lz.max_scroll()
+    assert lz.sel == len(lz.items) - 1                   # settled on the last card
 
 
-def test_footer_arrow_taps_nudge_the_scroll(tmp_path):
+def test_touch_drag_scrolls_the_row_and_rests_on_a_card(tmp_path):
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    lay = ws.layout
-    assert ws.launcher.scroll == 0
-    x, y, w, h = lay.scroll_rt
-    drv.click(x + w // 2, y + h // 2)
-    drv.frame(1 / 30)
-    assert ws.launcher.scroll == min(lay.lib_step, ws.launcher.max_scroll())
-    x, y, w, h = lay.scroll_lt
-    drv.click(x + w // 2, y + h // 2)
-    drv.frame(1 / 30)
-    assert ws.launcher.scroll == 0
-
-
-def test_touch_drag_scrolls_the_grid(tmp_path):
-    from runtime import host_app
-
-    ws = _ws_with_carts(tmp_path, 14)
-    drv = host_app.ConsoleDriver(ws)
-    gx, gy, gw, gh = ws.layout.lib_grid
-    cx, cy = gx + gw - 10, gy + gh // 2
-    drv.touch(cx, cy)                                    # finger down on a card
+    bx, by, bw, bh = ws.launcher.band_rect()
+    cx, cy = bx + bw - 10, by + bh // 2
+    drv.touch(cx, cy)                                    # finger down on the row
     drv.frame(1 / 30)
     for step in range(1, 6):                             # drag LEFT past the slop
         drv.touch_drag(cx - step * 12, cy)
         drv.frame(1 / 30)
     drv.touch_up()
-    drv.frame(1 / 30)
-    assert ws.launcher.scroll > 0                        # the grid followed the finger
+    _settle(drv)
+    lz = ws.launcher
+    assert lz.scroll > 0                                 # the row followed the finger
+    assert lz.scroll % lz.pitch() == 0                   # and rests on a card
+    assert lz.sel == lz.scroll // lz.pitch()             # the one at the centre
     assert ws.screen == "launcher"                       # and the drag opened NOTHING
+
+
+def test_sel_and_the_zone_change_only_on_settle(tmp_path):
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 14)
+    drv = host_app.ConsoleDriver(ws)
+    lz = ws.launcher
+    gen = lz.zone_gen
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert lz.moving and lz.sel == 0 and lz.zone_gen == gen
+    _settle(drv)
+    assert lz.sel == 1 and lz.zone_gen == gen + 1
 
 
 def test_drag_never_launches_the_pressed_card(tmp_path):
@@ -116,7 +178,7 @@ def test_drag_never_launches_the_pressed_card(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    r = ws.launcher.tile_rect(1)                         # a real cart's card
+    r = ws.launcher.tile_rect(0)                         # the centre card
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
     drv.touch(cx, cy)
     drv.frame(1 / 30)
@@ -129,8 +191,8 @@ def test_drag_never_launches_the_pressed_card(tmp_path):
 
 def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     """The drag fast path (#58/#66): once the statics streak is armed, mid-drag
-    frames skip the wallpaper + panel chrome (the ~100ms of a full home repaint
-    on glass) and repaint only the grid band + bar -- and the composed frame
+    frames skip the wallpaper + tab row (the ~100ms of a full home repaint on
+    glass) and repaint only the carousel band + bar -- and the composed frame
     must be byte-identical to a FULL repaint of the same state."""
     from runtime import host_app
 
@@ -146,8 +208,8 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
         return orig(dt)
 
     ws.wallpaper.draw = spy
-    gx, gy, gw, gh = ws.layout.lib_grid
-    cx, cy = gx + gw - 10, gy + gh // 2
+    bx, by, bw, bh = ws.launcher.band_rect()
+    cx, cy = bx + bw - 10, by + bh // 2
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     lastx = cx
@@ -178,7 +240,7 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     assert ws.screen == "launcher"            # and the release opened nothing
 
 
-# -- grid keyboard / trackball nav -----------------------------------------
+# -- keyboard / trackball nav ---------------------------------------------------
 
 def test_arrows_nav_reveals_last_cart(tmp_path):
     from runtime import host_app
@@ -187,108 +249,96 @@ def test_arrows_nav_reveals_last_cart(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     last = len(ws.launcher.items) - 1
 
-    # Step right repeatedly; the grid clamps at the last cart and the scroll follows.
+    # Step right repeatedly; the row clamps at the last cart and rests there.
     for _ in range(len(ws.launcher.items) + 4):
         drv.press("right")
         drv.frame(1 / 30)
         drv.frame(1 / 30)        # release frame: each press is a discrete edge
-        if ws.launcher.sel == last:
-            break
-
+    _settle(drv)
     assert ws.launcher.sel == last
-    assert ws.launcher.tile_rect(last) is not None       # the scroll followed the cursor
+    assert ws.launcher.tile_rect(last) is not None       # the row followed
     assert ws.launcher.scroll == ws.launcher.max_scroll()
 
 
-def test_down_arrow_steps_within_a_column(tmp_path):
-    from runtime import host_app
-
-    ws = _ws_with_carts(tmp_path, 10)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 1                                  # top of the first cart column
-    drv.press("down")
-    drv.frame(1 / 30)
-    assert ws.launcher.sel == 2                          # same column, row 1
-    drv.press("up")
-    drv.frame(1 / 30)
-    drv.frame(1 / 30)
-    assert ws.launcher.sel == 1                           # back up a row
-
-
-def test_vertical_arrows_stay_on_the_tall_card(tmp_path):
-    from runtime import host_app
-
-    ws = _ws_with_carts(tmp_path, 14)
-    drv = host_app.ConsoleDriver(ws)
-    assert ws.launcher.sel == 0                          # the tall MAKE card
-    drv.press("down")
-    drv.frame(1 / 30)
-    # The tall card spans both rows, so up/down have nowhere to go.
-    assert ws.launcher.sel == 0
-    drv.press("right")                                   # right hops a column
-    drv.frame(1 / 30)
-    drv.frame(1 / 30)
-    assert ws.launcher.sel == 1
-    drv.press("left")                                    # and left comes back
-    drv.frame(1 / 30)
-    drv.frame(1 / 30)
-    assert ws.launcher.sel == 0
-
-
-def test_right_arrow_hops_a_column(tmp_path):
+def test_right_arrow_glides_one_card(tmp_path):
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
     drv.press("right")
     drv.frame(1 / 30)
-    drv.frame(1 / 30)        # release frame: each press is a discrete edge
+    assert ws.launcher.flinging                          # the glide runs as a fling
+    _settle(drv)
     assert ws.launcher.sel == 1
-    drv.press("right")                                   # next column's TOP card
+    drv.press("right")
     drv.frame(1 / 30)
+    _settle(drv)
+    assert ws.launcher.sel == 2
+    drv.press("left")
     drv.frame(1 / 30)
-    assert ws.launcher.sel == 3
+    _settle(drv)
+    assert ws.launcher.sel == 1
 
 
-# -- tap still opens a cart ------------------------------------------------
-
-def test_tap_icon_opens_cart(tmp_path):
+def test_up_takes_the_keys_to_the_tab_row(tmp_path):
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
-    # Tap a game's card -> RUNS it on RELEASE. The locked model (spec
-    # shell_ux_v1.md): a launcher tap RUNS the cart, always, for every type --
-    # no maker/player tap_mode dispatch.
-    game = next(i for i, it in enumerate(ws.launcher.items)
-                if it.get("path") and it.get("type") == "game")
-    r = ws.launcher.tile_rect(game)
+    drv.press("up")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.launcher_layer._tab_focus
+    drv.press("right")                                   # the next tab
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.launcher.tab == "mine"
+    drv.press("down")                                    # back to the row
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert not ws.launcher_layer._tab_focus
+    assert ws.launcher.tab == "mine"
+
+
+# -- a tap -----------------------------------------------------------------------
+
+def _tap_card(drv, i):
+    r = drv.ws.launcher.tile_rect(i)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
+
+
+def test_tap_the_centre_card_opens_it(tmp_path):
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    game = next(i for i, it in enumerate(ws.launcher.items)
+                if it.get("path") and it.get("type") == "game")
+    ws.launcher.sel = game                               # at the centre
+    drv.frame(1 / 30)
+    _tap_card(drv, game)
     assert ws.screen == "desktop"                        # the tap RAN the cart
     assert ws.launcher.sel == game
 
 
-def test_tap_a_scrolled_to_card_opens_the_right_cart(tmp_path):
+def test_tap_another_card_brings_it_to_the_centre(tmp_path):
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.scroll = ws.launcher.max_scroll()        # end of the shelf
+    ws.launcher.sel = len(ws.launcher.items) - 2
+    drv.frame(1 / 30)
     last = len(ws.launcher.items) - 1
     target = ws.launcher.items[last]["title"]
-    r = ws.launcher.tile_rect(last)
-    cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
-    # The locked model (spec shell_ux_v1.md): a launcher tap RUNS the cart, always.
-    drv.touch(cx, cy)
-    drv.frame(1 / 30)
-    drv.touch_up()
-    drv.frame(1 / 30)
-    # The RIGHT card opened (a game runs as "desktop"; a system app cart opens
-    # as its own screen kind -- either way the launcher was left).
+    _tap_card(drv, last)
+    assert ws.screen == "launcher"                       # it glides, it does not run
+    _settle(drv)
+    assert ws.launcher.sel == last
+    _tap_card(drv, last)                                 # now at the centre: open
     assert ws.screen != "launcher"
     assert ws.launcher.items[ws.launcher.sel]["title"] == target
 

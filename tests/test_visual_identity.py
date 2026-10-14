@@ -203,12 +203,13 @@ def test_change_selected_opens_editor_on_config(tmp_path):
     assert ws.editor_app.tab == ("cards" if ws.cart.get("edit") else "code")
 
 
-def test_change_selected_ignores_the_make_tile(tmp_path):
+def test_change_selected_ignores_the_new_card(tmp_path):
     ws = _ws(tmp_path)
-    ws.launcher.sel = 0                           # the pinned Make pseudo tile
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                           # Make's "+ New" pseudo card
     assert ws.launcher.selected().get("path") is None
     ws.change_selected()
-    assert ws.screen == "launcher"                # no-op: Make has one verb, its tap
+    assert ws.screen == "launcher"                # no-op: "+ New" has one verb, its tap
 
 
 def test_primary_activation_still_always_plays(tmp_path):
@@ -243,50 +244,30 @@ def test_studio_play_returns_to_same_tab(tmp_path):
     assert ws.cart["path"] == cart["path"]
 
 
-def test_action_rects_only_on_desktop_density(tmp_path):
-    """320x240 baseline: no on-card buttons (the zoned bar carries the verbs);
-    desktop density: the selected real card exposes both rects."""
-    ws = _ws(tmp_path)
-    _select_real_cart(ws)
-    assert ws.launcher.action_rects() is None     # base tier
-    ws2 = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    _select_real_cart(ws2)
-    ar = ws2.launcher.action_rects()
-    assert ar is not None and set(ar) == {"play", "change"}
-    tile = ws2.launcher.tile_rect(ws2.launcher.sel)
-    for x, y, w, h in ar.values():
-        assert y >= tile[1] and y + h <= tile[1] + tile[3]   # inside the card row
-    # The pinned Make tile exposes no PLAY/CHANGE row (one verb: its tap).
-    ws2.launcher.sel = 0
-    assert ws2.launcher.action_rects() is None
-    # The picker grid never grows the row (a pick has one meaning there).
-    assert ws2.picker.action_rects() is None
-
-
-def test_desktop_card_buttons_dispatch(tmp_path):
-    """Clicking the selected card's PLAY / CHANGE rects dispatches the verbs
-    (#184: a tap SCHEDULES the transition; the next frame lands it behind the
-    LOADING paint, so the assert follows a frame pump)."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    _select_real_cart(ws)
-    ar = ws.launcher.action_rects()
-    home = _home_layer(ws)
-    x, y, w, h = ar["change"]
-    home.handle_pointer(x + w // 2, y + h // 2, True)
-    ws.frame(1 / 30)
-    assert ws.screen == "menu"                    # CHANGE -> Studio/Editor
-    # Back out, then PLAY via the button.
-    ws.go_home()
-    _select_real_cart(ws)
-    ar = ws.launcher.action_rects()
-    x, y, w, h = ar["play"]
-    home.handle_pointer(x + w // 2, y + h // 2, True)
-    ws.frame(1 / 30)
-    assert ws.screen == "desktop"                 # PLAY -> Player
+def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
+    """docs/shell_layout_2026-10.md §12: no card carries a verb row; the lent bar
+    zone carries the active tab's verbs on the selected card, on every tier."""
+    for ws in (_ws(tmp_path / "a"), _ws(tmp_path / "b", sys_size=(1024, 600),
+                                         font_scale=2)):
+        home = _home_layer(ws)
+        _select_real_cart(ws)
+        assert ws.launcher.action_rects() is None
+        assert ws.picker.action_rects() is None
+        assert home.zone_verbs() == ("play", "change", "search")
+        ws.set_home_tab("mine")                   # nothing made yet: "+ New"
+        assert home.zone_verbs() == ("new",)
+        ws.set_home_tab("apps")
+        assert home.zone_verbs() == ("open",)
+        ws.set_home_tab("make")
+        assert home.zone_verbs() == ("new",)      # "+ New" first
+        ws.launcher.sel = 1
+        assert home.zone_verbs() == ("new", "change")
+        chips = home._zone_action_rects(ws.layout.zone_left)
+        assert set(chips) == {"new", "change"}
 
 
 def test_base_tier_zone_chips_dispatch(tmp_path):
-    """On the 320x240 baseline the lent bar zone carries the PLAY / CHANGE chips."""
+    """The lent bar zone's PLAY / CHANGE chips dispatch their verbs."""
     ws = _ws(tmp_path)
     _select_real_cart(ws)
     home = _home_layer(ws)
@@ -302,18 +283,18 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
     ws.frame(1 / 30)
     assert ws.screen == "desktop"
-    # With the Make tile selected there are no chips (nothing to claim).
+    # On Make's "+ New" card the one chip is NEW: no PLAY to tap.
     ws._exit_to_caller()
+    ws.set_home_tab("make")
     ws.launcher.sel = 0
-    assert home._zone_action_rects(ws.layout.zone_left) is None
-    assert not home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
+    assert set(home._zone_action_rects(ws.layout.zone_left)) == {"new"}
 
 
-def test_library_shelf_geometry(tmp_path):
-    """The desktop-density Library shelf (the library-concept mockup): a framed
-    panel whose grid SCROLLS left-right with one TALL featured slot (column 0,
-    spanning both visible rows -- the pinned MAKE card); every other card
-    stacks the columns marching right, two per column."""
+def test_picker_shelf_geometry(tmp_path):
+    """The picker's shelf (the library-concept mockup): a framed panel whose
+    grid SCROLLS left-right with one TALL featured slot (column 0, spanning
+    both visible rows -- the pinned "+ New" card); every other card stacks the
+    columns marching right, two per column."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
     lay = ws.layout
     gx, gy, gw, gh = lay.lib_grid
@@ -332,24 +313,26 @@ def test_library_shelf_geometry(tmp_path):
     px, py, pw, ph = lay.lib_panel                               # panel frames grid
     assert px <= gx and py <= gy and gx + gw <= px + pw and gy + gh <= py + ph
     # Vertical nav steps within a card column (the tall slot spans both rows).
-    ws.launcher.sel = 1
-    ws.launcher.nav2d(0, 1)
-    assert ws.launcher.sel == 2
-    ws.launcher.nav2d(0, -1)
-    assert ws.launcher.sel == 1
+    ws.picker.sel = 1
+    ws.picker.nav2d(0, 1)
+    assert ws.picker.sel == 2
+    ws.picker.nav2d(0, -1)
+    assert ws.picker.sel == 1
 
 
-def test_library_shelf_panel_paints_surface(tmp_path):
-    """The machine theme's Library panel is the warm-light tool surface (cream)
-    over the dark construction field."""
+def test_the_home_shows_its_wallpaper_behind_the_cards(tmp_path):
+    """The carousel's band has no backdrop of its own (D7: the home has its
+    own wallpaper slot): beside the cards the wallpaper shows, never the
+    theme's surface."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
     ws.look.set_theme("machine")
     ws.frame(1 / 30)
-    px, py, pw, ph = ws.layout.lib_panel
+    bx, by, bw, bh = ws.launcher.band_rect()
     th = ws.theme_colors
     assert th["surface"] == 7
-    # A point in the panel header band (left of the LIBRARY heading's start).
-    assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
+    cv = ws.sys_canvas
+    # The band's left edge: card 0 rests at the centre, nothing left of it.
+    assert all(cv.pix(bx + 2, y) != th["surface"] for y in range(by, by + bh, 7))
 
 
 def _cover_sync(ws, cart, div=1):
@@ -553,14 +536,13 @@ class _BlitLog:
 @pytest.mark.parametrize("board", sorted(BOARD_SHELVES))
 def test_selecting_a_card_never_changes_its_covers_scale(tmp_path, board):
     """A cover that shrank on selection would read as a glitch: on every
-    board a card's cover is the same decode at the same scale selected or
-    not (the HALF on the S3s too), and the selected card's shorter slot only
-    crops it. Its prefetch spec does not move with the selection either."""
+    board a picker card's cover is the same decode at the same scale selected
+    or not (the HALF on the S3s too). Its prefetch spec does not move with the
+    selection either."""
     ws = _ws(tmp_path, **BOARD_SHELVES[board])
-    if BOARD_SHELVES[board]["windowed"]:
-        ws.open_library()
+    ws.open_picker()
     ws.frame(1 / 30)
-    la = ws.launcher
+    la = ws.picker
     covered, _bare = _covered_and_bare(ws)
     i = la.items.index(covered)
     _cover_sync(ws, covered, 1)
@@ -606,16 +588,15 @@ def test_a_cover_that_fits_draws_centred_and_leaves_the_clip_alone():
     assert left == (10, 25, 300, 295)
 
 
-def test_home_draw_includes_action_row_desktop(tmp_path):
-    """The desktop-density home frame actually paints the PLAY row (signal green
-    is reserved for PLAY, so its presence is a faithful marker)."""
+def test_home_draw_rings_and_names_the_centre_card(tmp_path):
+    """The centre card wears the focus ring (signal yellow), and its plate
+    under it names it."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
     _select_real_cart(ws)
     ws.frame(1 / 30)
-    ar = ws.launcher.action_rects()
-    x, y, w, h = ar["play"]
+    x, y, w, h = ws.launcher.tile_rect(ws.launcher.sel)
+    fs = ws.layout.fs
     th = ws.theme_colors
-    assert ws.sys_canvas.pix(x + 2, y + 2) == th["play"]
-    # CHANGE is the mockup's warm-light button (cream field, dark ink).
-    x, y, w, h = ar["change"]
-    assert ws.sys_canvas.pix(x + 2, y + 2) == 7
+    assert ws.sys_canvas.pix(x - fs - 1, y + h // 2) == th["focus"]
+    px, py, pw, ph = ws.launcher.plate_rect()
+    assert px <= x + w // 2 < px + pw and py > y + h

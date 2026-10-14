@@ -9,7 +9,7 @@ index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
 at the canvas's real pixel width."""
 
 from pathlib import Path
-from ws_helpers import shelf  # noqa: E402
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -528,10 +528,8 @@ def test_console_runs_game_cart_and_scores(tmp_path):
 
 
 def _select_by_title(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            return
+    if select_on_home(ws, title) is not None:
+        return
     raise AssertionError("no seed cart titled " + title)
 
 
@@ -588,8 +586,7 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
                      type="game", edit=[{"key": "c", "type": "int", "min": 0, "max": 9,
                                          "card": "C {value}"}])
     ws.launcher.set_items(shelf(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it["title"] == "Flood")
+    select_on_home(ws, "Flood")
     ws.open_in_editor()                        # starts the cart, lands on the cards tab
     # The leak zones: 8px left/right strips (in the content area) + the 20px bottom strip.
     strips = [(3, 100), (316, 100), (3, 230), (160, 235)]

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import audio  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
-from ws_helpers import StubInput  # noqa: E402
+from ws_helpers import StubInput, select_on_home  # noqa: E402
 import audio_synth  # noqa: E402
 from audio_synth import Synth  # noqa: E402
 
@@ -348,11 +348,7 @@ def test_a_cart_plays_music_sfx_and_a_raw_tone_through_the_console(tmp_path):
     cart = moy_carts.create("Noise Maker", root, src=_NOISY_SRC)
     moy_carts.save_sounds(cart, audio.AudioBank.default().to_dict())
     ws = host_app.build_workstation(root)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "Noise Maker":
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, "Noise Maker") is None:
         raise AssertionError("the fixture cart was not scanned")
     na = audio_session.native()
     na.trace(True)
@@ -386,6 +382,7 @@ def test_cart_without_audio_backend_still_runs(tmp_path, monkeypatch):
     ws = console.Workstation(host_app._NullComp(), Canvas(320, 240), InputState(),
                              moy_carts.scan(root))
     ws.make_api = host_app.make_api
+    ws.set_home_tab("mine")                  # Noisy is the kid's own
     ws.open()
     ws.frame(1 / 30)
     assert ws.cart_error is None             # silent no-op, not a crash

@@ -51,7 +51,7 @@ def _seeded_store(tmp_path):
     store = tmp_path / "store"
     store.mkdir()
     # Two carts, deliberately: a single-cart store trips worker.js's one-cart
-    # kiosk path (the game IS the page, no shell, no Make tile).
+    # kiosk path (the game IS the page, no shell, no Make tab).
     for cart in ("moybyte.star_catcher.moy", "moybyte.sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
     return store

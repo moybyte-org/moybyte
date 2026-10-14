@@ -32,6 +32,10 @@ and the home bar's lent zone shows the selected cart's name (wide-card tiers
 show the moybyte wordmark). Phase 3's shared `ui` toolkit, warm-light Studio
 surfaces, responsive app seam, and reference Calc app are also implemented.
 Phases 4-5 and on-glass validation on the P4 panel remain open.
+The home is no longer this shelf: it is the tabbed carousel of
+`docs/shell_layout_2026-10.md` §12, with no MAKE card (the Make tab holds the
+projects) and the verbs as bar-zone chips on every tier; the shelf above is the
+Editor picker's.
 
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen

@@ -2092,6 +2092,49 @@ class DeviceCanvas:
                 o = 2 * (ty * stride + x0)
                 d[o:o + 2 * (x1 - x0)] = row[2 * (x0 - x):2 * (x1 - x)]
 
+    def blit565_resize(self, buf, w, h, x, y, tw, th):
+        """Place a w x h picture of RGB565 words (this canvas's byte order,
+        as `blit565`) scaled to tw x th at (x, y): nearest-neighbour at any
+        ratio, opaque, camera and clip honoured. One kernel call: the home's
+        cards at their scale (docs/shell_layout_2026-10.md §12)."""
+        self.flush_batch()
+        w = int(w)
+        h = int(h)
+        tw = int(tw)
+        th = int(th)
+        if w <= 0 or h <= 0 or tw <= 0 or th <= 0:
+            return
+        x = int(x) - self._cam_x
+        y = int(y) - self._cam_y
+        cx0 = self._clip_x0
+        cy0 = self._clip_y0
+        cx1 = self._clip_x1
+        cy1 = self._clip_y1
+        g = self._gfx
+        if g is not None and getattr(g, "blit565_resize", None) is not None:
+            g.blit565_resize(self._buf, self._stride, self._bh, x, y, tw, th,
+                             buf, w, h, cx0, cy0, cx1, cy1)
+            return
+        # No kernel: the same sampling (each target pixel's centre in the
+        # source), a target row at a time.
+        x0 = max(x, cx0)
+        x1 = min(x + tw, cx1)
+        if x1 <= x0:
+            return
+        cols = [((2 * (tx - x) + 1) * w) // (2 * tw) for tx in range(x0, x1)]
+        d = self._buf
+        stride = self._stride
+        row = bytearray(2 * (x1 - x0))
+        for ty in range(max(y, cy0), min(y + th, cy1)):
+            sy = ((2 * (ty - y) + 1) * h) // (2 * th)
+            base = 2 * w * sy
+            for k in range(len(cols)):
+                s = base + 2 * cols[k]
+                row[2 * k] = buf[s]
+                row[2 * k + 1] = buf[s + 1]
+            o = 2 * (ty * stride + x0)
+            d[o:o + len(row)] = row
+
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index
         # to RGB565 via the panel-wire-order PAL565_WIRE table. The "images are data, not draw calls"

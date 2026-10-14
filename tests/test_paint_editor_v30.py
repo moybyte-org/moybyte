@@ -10,7 +10,7 @@ lives in runtime.editors, shared with the frozen device modules.
 
 from pathlib import Path
 
-from ws_helpers import StubInput
+from ws_helpers import StubInput, select_on_home
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -279,11 +279,7 @@ _MAP_CART = "Hop Quest"
 
 
 def _open_map_cart(ws):
-    for i, c in enumerate(ws.launcher.items):
-        if c.get("title") == _MAP_CART:
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, _MAP_CART) is None:
         raise AssertionError("no seed cart titled " + _MAP_CART)
     ws.open_in_editor()
     ws._open_map()

@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from ws_helpers import build_ws, device_frames as _dframe  # noqa: E402
+from ws_helpers import build_ws, device_frames as _dframe, select_on_home  # noqa: E402
 from runtime import moy_carts, system_api       # noqa: E402
 
 DT = 1.0 / 30
@@ -32,21 +32,16 @@ def _frames(ws, n=2):
 
 
 def _open_notes(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Notes":
-            ws.launcher.sel = i
-            ws.open()
-            _frames(ws)
-            return ws.player.ns
+    if select_on_home(ws, "Notes") is not None:
+        ws.open()
+        _frames(ws)
+        return ws.player.ns
     raise AssertionError("Notes is not on the launcher shelf")
 
 
 def _open_files(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            ws.open()
-            break
+    if select_on_home(ws, "Files") is not None:
+        ws.open()
     _frames(ws)
     return ws.files_app
 

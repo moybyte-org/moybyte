@@ -51,12 +51,13 @@ to whoever called it.
     moves keyboard focus WITHOUT popping, so a playtest keeps ticking while the
     Editor beside it is typed in — its pointer feed click-stripped so the
     background cart never eats editor taps. Only an explicit exit ends a run.
-- **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
-  **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
-  tile** opens the Editor **project-picker** (the same grid over every editable cart
-  + a ＋New tile), which owns project management (＋New / Copy / Delete — delete is
-  a two-tap confirm); the launcher home has no new/dup/del. **Wallpapers are
-  backdrop-only**: excluded from the run-grid, chosen in the **Appearance app**
+- **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
+  (`docs/shell_layout_2026-10.md` §12) has four tabs, and a tap on Games, Mine or
+  Apps **always RUNS the cart** (an app's opens the app) — no mode, no type
+  dispatch; a tap on **Make** EDITS (the picker's list, ＋New first). The Editor
+  **project-picker** (the desk's PROJECTS) owns project management (＋New / Copy /
+  Delete — delete is a two-tap confirm); the home has no copy/delete.
+  **Wallpapers are backdrop-only**: on none of the tabs that run, chosen in the **Appearance app**
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
   still editable via the picker.
@@ -76,7 +77,7 @@ to whoever called it.
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
   the launcher root draws one only above its mode's floor -- console mode over a
   P4's parked desk). LEFT zone = LENT to the active app (`draw_zone`):
-  the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/
+  the home shows the active tab's verbs on the selected card, the Editor its PROJECTS/tab-ladder/
   UNDO/REDO/PLAY icons. Icons stay 16×16 sprites from the editable `IconSheet`
   (Settings → EDIT ICONS). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
@@ -114,8 +115,10 @@ to whoever called it.
     contrast is the point. A computed preview FRAME is far dearer to rebuild than
     to read, so it caches to disk; a cover (`cover.png`, SPEC.md 3.6) is a few KB
     of file and a native decode, so `runtime/cover_cache.py` keeps the FILE and
-    ONE decoded 128x128 base in RAM and draws it at a whole-number scale (no
-    per-size variants, docs/theming_2026-09.md P8). **Do not re-add cover
+    ONE decoded 128x128 base in RAM (and its 64x64 half) and draws it scaled --
+    the picker at a whole-number scale, the home's cards at any ratio through
+    `blit565_resize`, one call a card -- with no per-size variants
+    (docs/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**
   - **`files/trash/` is restorable and never confirms**, and WALL/GAME/wallpaper
     are **copy-on-use** — a kid's drawing is never mutated by being used
@@ -189,7 +192,7 @@ to whoever called it.
   (probe-attributed on glass; #66). The
   perf_capture-gated `PMEM save=<ms>` diag line shows the deferred cadence.
 - `runtime/font.py` — petme128 8×8 font, byte-identical to libmoy's compiled-in copy (#62): every canvas passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build), and UI text above scale 1 goes through the one UI text path, `native/moy_gfx/moy_text.h` (sprint 6).
-- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots). **The row slot is never the whole scroll state**: Settings' rows travel by PIXELS (#113 Phase 5) — `set_top` stays the row-slot state of record that the cues and the keyboard clamp read, while the region underneath carries what the finger moved, and `_scroll_px()` is the sub-row remainder the rows draw at. The pushes go ONE way each: a finger pulls `set_top` from the region, and only the row-minded movers (a d-pad step, a reset, the range clamp) push back via `_sync_scroll_from_top`, which also kills a live fling. A per-sample re-snap is what ate the remainder before. The shared list shell (`app_shell.py`, Files/Storybook) still row-snaps and feeds its `DragTap` no dt, so it has no fling — that is the remaining Phase 5 rollout. The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws.covers.gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). The windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
+- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` for the Editor picker; the home never shifts: its cards lie on the wallpaper and change size with the offset, so `Carousel.draw_shift` restores the wallpaper around them from the band's capture and repaints them). **The row slot is never the whole scroll state**: Settings' rows travel by PIXELS (#113 Phase 5) — `set_top` stays the row-slot state of record that the cues and the keyboard clamp read, while the region underneath carries what the finger moved, and `_scroll_px()` is the sub-row remainder the rows draw at. The pushes go ONE way each: a finger pulls `set_top` from the region, and only the row-minded movers (a d-pad step, a reset, the range clamp) push back via `_sync_scroll_from_top`, which also kills a live fling. A per-sample re-snap is what ate the remainder before. The shared list shell (`app_shell.py`, Files/Storybook) still row-snaps and feeds its `DragTap` no dt, so it has no fling — that is the remaining Phase 5 rollout. The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws.covers.gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). The windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
 - `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (maps `ws.runtimes` -- "lua" and "wasm" -- for each native binding that builds, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
 (The pre-unification host UI — `shell.py`/`workstation.py`/`engine.py`/`api.py`/

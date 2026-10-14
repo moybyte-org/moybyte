@@ -21,8 +21,8 @@ Picotron-style (owner direction, 2026-07-08):
   * two modes, `mode` (docs/shell_layout_2026-10.md §3): DESKTOP mode is the
     DESKTOP root (live wallpaper + the ONE full-width OS bar) beneath the
     process windows; CONSOLE mode is the fullscreen tier's presentation over
-    the Library, the desk's windows parked outside the back-stack until the
-    Library's X brings them back;
+    the home, the desk's windows parked outside the back-stack until the
+    home's X brings them back;
   * every process pushed above it (picker / Editor / Settings / update / a running
     cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
     maximize / close), a border + drop shadow, draggable by the strip and
@@ -300,10 +300,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     §3): in DESKTOP mode the DESK (stack kind "desk") is the floor --
     wallpaper + system icons + taskbar, every process above it a floating
     window; in CONSOLE mode this tier presents FULLSCREEN exactly like the
-    small tiers (the Library and everything opened from it own the whole
+    small tiers (the home and everything opened from it own the whole
     screen) while the desk's windows wait in `_parked`. Boot lands on the
     desk; the desk's PLAY enters console mode (`enter_console`), the
-    Library's X leaves it (`leave_console`). Install with
+    home's X leaves it (`leave_console`). Install with
     `ws.wm = WindowedWM(ws)` right after construction
     (host_app.build_workstation(windowed=True)); requires a DISTINCT system
     canvas bigger than the 320x240 game canvas."""
@@ -759,7 +759,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def set_play_intent(self, intent):
         """Record WHY the next cart run is starting -- "dev" (a playtest launched
-        from the Editor) or "play" (the desk/Library). Only the player window's
+        from the Editor) or "play" (the desk/home). Only the player window's
         DEFAULT size reads it; see _win_size."""
         self._play_intent = intent if intent == "dev" else "play"
 
@@ -1627,7 +1627,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         window isn't even re-rendered, just copied. Each extra open window cost
         ~44ms a frame (1 window 56ms, 2 windows 99ms, 3 windows 144ms), which is
         what made a desktop with a few things open feel far worse than the
-        fullscreen Library.
+        fullscreen home.
 
         The z-order rule that makes skipping SOUND: windows are painted bottom to
         top, so a repainting window overwrites the overlap of everything below
@@ -1746,12 +1746,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             _glass.touch(_glass.surface("launcher"))
         # Class B for the non-window surfaces: the desk under a live wallpaper,
         # the visible cursor (its stream follows the pointer position) -- and
-        # console mode's Library while its grid coasts on a kinetic fling.
+        # console mode's home while its row coasts on a kinetic fling or glide.
         # Fling frames paint via request_frame() (no dirty, no pointer), so
         # without this declaration every gen read clean and skip-draw FROZE the
         # coasting grid until the next real signal -- the owner's "fast drags
         # lag" (a fast drag flings; a slow one doesn't). In the desk world the
-        # Library grid isn't visible, so launcher.flinging is False there and
+        # home's row isn't visible, so launcher.flinging is False there and
         # the desk backdrop keeps skipping.
         _glass.animating(_glass.surface("launcher"), (
             ws.wallpaper.is_animating(dt)
@@ -2335,7 +2335,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if key is None:
             # Clicking the desktop moves focus to it; a bar is not the desk,
             # so a widget's tap (a popover over the focused window) keeps it.
-            # Only its OS bar is interactive; the Library is not invisibly
+            # Only its OS bar is interactive; the home is not invisibly
             # present underneath.
             if (click and self._focus is not None
                     and not ws.bar_layer.bar_at("desk", px, py)):

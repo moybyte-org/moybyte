@@ -307,6 +307,16 @@ class CartManager:
 
     # -- favorites + recents (#105) ------------------------------------------
 
+    def is_own(self, cart):
+        """Whether `cart` is the kid's own -- made here, or taken to make their
+        own (a copy): its id's author is the one the store gives a made cart
+        (`_ns`, #162). The home's Mine tab, never its Games."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return False
+        folder = path.rsplit("/", 1)[-1]
+        return folder.startswith(self._ns() + ".")
+
     def is_favorite(self, cart):
         path = cart.get("path") if cart else None
         if not path:

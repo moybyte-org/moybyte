@@ -24,7 +24,7 @@ block_editor_ui.py uses for its `_BLK_*`.
 The BOTTOM DOCK this module used to own is GONE (2026-08-21): a six-slot
 HOME/CODE/DRAW/MAP/RUN/SET tool switcher left over from the pre-2026-07 shell,
 whose slots still routed into that shell's entry points. The 2026-07 shell
-navigates by the zoned bar, the Make tile and the context-X, and the launcher had
+navigates by the zoned bar, the home's tabs and the context-X, and the launcher had
 already stopped drawing the dock in #46 -- Settings was its last caller, on the
 fullscreen tiers only (the windowed WM suppressed it). Do not re-grow it;
 `tests/test_desktop_shell.py::test_the_pre_2026_07_bottom_dock_is_gone` is the
@@ -143,11 +143,11 @@ _PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separ
 # three that open a component (§8).
 _TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
-_TITLES = {"home": "LIBRARY", "picker": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
+_TITLES = {"picker": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "calendar": "CALENDAR"}
 # _cart_bar_key's fields every bar folds, and the ones a widget adds.
 _KEY_ALWAYS = (0, 2, 3, 4, 10)
-_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (8,), "wifi": (7,),
+_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
            "calendar": (11,)}
 
 
@@ -703,6 +703,8 @@ class BarLayer:
         ws = self.ws
         if where in ("tool", "app", "menu") and ws.cart:
             return ws.cart.get("title") or ""
+        if where == "home":
+            return ws.home_title()
         return _TITLES.get(where, "")
 
     def _show_x(self, where):

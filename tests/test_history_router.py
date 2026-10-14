@@ -17,7 +17,7 @@ StoreHandle guard the walk re-derived by hand until this landing.
 import ast
 from pathlib import Path
 
-from ws_helpers import build_ws, quiesce
+from ws_helpers import build_ws, quiesce, select_on_home
 from runtime import history_router
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,10 +32,7 @@ def _cart_ws(tmp_path, src=SRC, title="Router", **kw):
     host_app.moy_carts.ensure_dirs(carts_dir)
     host_app.moy_carts.create(title, carts_dir, src=src, **kw)
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open_in_editor()
     return ws
 
