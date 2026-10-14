@@ -639,7 +639,6 @@ const char *const moy_theme_widget_names[MOY_THEME_WIDGETS] = {
     "zone",
     "title",
     "clock",
-    "calendar",
     "wifi",
     "battery",
     "chips",

@@ -469,7 +469,7 @@ def layout_corpus(n, seed=5):
              [{"edge": e, "left": req} for e in ("top", "bottom", "left", "right", "top")],
              [{"edge": "top", "left": req}, {"edge": "top", "right": ["clock"]}],
              [{"edge": "bottom", "size": 0, "left": req}],
-             [{"edge": "right", "size": 10000, "left": ["calendar"] + req}],
+             [{"edge": "right", "size": 10000, "left": ["clock"] + req}],
              [{"edge": "top", "left": req + ["teapot", "text"], "text": ["x" * 200]}],
              [{"edge": "top", "left": ["zone", "close"]}],
              [{"edge": "top", "left": ["menu", "close"]}, {"edge": "left", "left": ["zone"]}],
@@ -485,6 +485,8 @@ def layout_corpus(n, seed=5):
     while len(out) < n:
         b = bytearray(rng.choice(good))
         for _m in range(rng.randint(1, 3)):
+            if not b:
+                break                  # truncated to nothing: nothing to mutate
             i = rng.randrange(len(b))
             op = rng.randrange(3)
             if op == 0:

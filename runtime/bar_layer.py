@@ -118,10 +118,6 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
-    from popover import draw_month as _draw_month
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.popover import draw_month as _draw_month
-try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
@@ -137,8 +133,7 @@ _BAND_SIDE = {"top": _ui.BAND_BOTTOM, "bottom": _ui.BAND_TOP,
               "left": _ui.BAND_RIGHT, "right": _ui.BAND_LEFT}
 # The OS widgets a bar paints itself (the zone is its owner's, the chips the
 # WM's, a spacer nothing).
-_PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator",
-            "calendar")
+_PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator")
 # The widgets whose tap is the OS's (§4): the system menu, the X, and the
 # three that open a component (§8).
 _TAPPED = ("clock", "menu", "wifi", "battery", "close")
@@ -147,8 +142,7 @@ _TITLES = {"picker": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "calendar": "CALENDAR"}
 # _cart_bar_key's fields every bar folds, and the ones a widget adds.
 _KEY_ALWAYS = (0, 2, 3, 4, 10)
-_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
-           "calendar": (11,)}
+_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,)}
 
 
 def _edit_kind(cart):
@@ -604,8 +598,7 @@ class BarLayer:
                 ws.history.bar_undo_bits(),   # #111: local op-history dim state
                                               # (RAM-only; journal flips
                                               # invalidate explicitly)
-                self._bar_cache_gen,
-                self._today())             # the docked calendar's day
+                self._bar_cache_gen)
 
     def _render_cart_bar(self, cv, key, i=0):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
@@ -685,16 +678,6 @@ class BarLayer:
             if across:
                 tw = _bar_text_w(s) * (1 if game else ws.layout.fs)
                 r = (r[0] + (r[2] - tw) // 2, r[1], tw, r[3])
-        elif name == "calendar":
-            # The docked month grid: the popover's painter in the cell.
-            y, m, d = self._today()
-            if y and not game:
-                th = ws.theme_colors
-                p = 2 * ws.layout.cs
-                _draw_month(cv, th, (r[0] + p, r[1] + p, r[2] - 2 * p, r[3] - 2 * p),
-                            y, m, d, ws.layout.fs, th["chrome_ink"],
-                            th["chrome_ink_dim"])
-            return
         _ch.replay(mp.chrome_strip_cell(name, r, cs, dy, s, across), cv, ws)
 
     def _title(self, where):

@@ -209,28 +209,27 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 // slots and the widget catalogue; the caps and the size clamp.
 #define MOY_THEME_BARS 4  // one per edge
 #define MOY_THEME_SLOTS 3
-#define MOY_THEME_WIDGETS 12
+#define MOY_THEME_WIDGETS 11
 #define MOY_THEME_SLOT_CAP 6
 #define MOY_THEME_WIDGET_CAP 12
 #define MOY_THEME_BAR_MIN 16
-#define MOY_THEME_BAR_MAX 160
+#define MOY_THEME_BAR_MAX 32
 #define MOY_THEME_BAR_SIZE 18
 #define MOY_THEME_TEXT_MAX 24
 #define MOY_THEME_W_REQUIRED 0x7u  // a bit per widget
-#define MOY_THEME_W_REPEATABLE 0xe00u
+#define MOY_THEME_W_REPEATABLE 0x700u
 enum {
     MOY_THEME_W_MENU = 0,
     MOY_THEME_W_CLOSE = 1,
     MOY_THEME_W_ZONE = 2,
     MOY_THEME_W_TITLE = 3,
     MOY_THEME_W_CLOCK = 4,
-    MOY_THEME_W_CALENDAR = 5,
-    MOY_THEME_W_WIFI = 6,
-    MOY_THEME_W_BATTERY = 7,
-    MOY_THEME_W_CHIPS = 8,
-    MOY_THEME_W_TEXT = 9,
-    MOY_THEME_W_SPACER = 10,
-    MOY_THEME_W_SEPARATOR = 11,
+    MOY_THEME_W_WIFI = 5,
+    MOY_THEME_W_BATTERY = 6,
+    MOY_THEME_W_CHIPS = 7,
+    MOY_THEME_W_TEXT = 8,
+    MOY_THEME_W_SPACER = 9,
+    MOY_THEME_W_SEPARATOR = 10,
 };
 enum {
     MOY_THEME_FRAME_CLASSIC = 0,

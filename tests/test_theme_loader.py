@@ -417,8 +417,10 @@ def test_a_layout_is_read_whole_and_inherited_whole():
 
 
 def test_the_caps_and_clamps_drop_and_note():
-    # size: absent 18, clamped to 16..160, a non-integer dropped
-    for size, want, note in ((0, 16, N_CLAMPED), (10000, 160, N_CLAMPED), (40, 40, 0),
+    # size: absent 18, clamped to 16..32 (every widget is compact), a
+    # non-integer dropped
+    for size, want, note in ((0, 16, N_CLAMPED), (10000, 32, N_CLAMPED), (40, 32, N_CLAMPED),
+                             (24, 24, 0),
                              ("big", 18, N_DROPPED), (2.5, 18, N_DROPPED)):
         notes, got = _lay("t", [_bar(size=size, left=["menu", "zone", "close"])])
         assert (notes, got[1][0][1]) == (note, want), size
@@ -519,7 +521,7 @@ def _corpus(n):
                  [{"edge": e, "left": req} for e in ("top", "bottom", "left", "right", "top")],
                  [{"edge": "top", "left": req}, {"edge": "top", "right": ["clock"]}],
                  [{"edge": "bottom", "size": 0, "left": req, "right": ["wifi", "battery"]}],
-                 [{"edge": "right", "size": 10000, "left": ["calendar"] + req}],
+                 [{"edge": "right", "size": 10000, "left": ["clock"] + req}],
                  [{"edge": "top", "left": req + ["teapot", "text"], "text": ["x" * 200]}],
                  [{"edge": "top", "left": ["zone", "close"], "center": ["clock"]}],
                  [{"edge": "top", "left": ["menu", "close"]}, {"edge": "left", "left": ["zone"]}],

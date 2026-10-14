@@ -160,8 +160,7 @@ class _BackdropLayer(Layer):
         return (cv.w, cv.h, ws.look.theme_name, ws.look.theme_variant,
                 ws.look.effective_font_scale(), id(ws.look.icon_sheet),
                 ws.look.wallpaper_id,
-                len(getattr(ws, "_apps", ())), len(ws.carts.all),
-                ws.bar_layer._today())        # a docked calendar's day
+                len(getattr(ws, "_apps", ())), len(ws.carts.all))
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt)

@@ -25,11 +25,11 @@ memory and compositors); this doc cites, it does not copy.
 | # | ruling (2026-10-13) | section |
 |---|---|---|
 | L0 | **The owner's governing principle:** the mockups are not set in stone; the UI should make sense; in doubt, strive towards a real OS, less a game console; no duplication; things are consistent. Every ruling below is read against it: one mechanism per job, one way to each thing, and a board differs only where its hardware says so (§10) | all |
-| L1 | **Two modes.** CONSOLE mode: one app fullscreen at a time over a back-stack rooted at the animated home. DESKTOP mode: the desk, windows, bars, popovers, a dockable calendar. They are the two WMs that exist; console mode on a P4 is `FullscreenStackWM`'s presentation, the one the handheld boards run, never a third variant | §3 |
+| L1 | **Two modes.** CONSOLE mode: one app fullscreen at a time over a back-stack rooted at the animated home. DESKTOP mode: the desk, windows, bars, popovers. They are the two WMs that exist; console mode on a P4 is `FullscreenStackWM`'s presentation, the one the handheld boards run, never a third variant | §3 |
 | L2 | **The mode is explicit WM state**, `wm.mode`, that every tier-sensitive branch consults; the desk's PLAY enters console mode, the `close` widget on the home leaves it; parked windows live outside the back-stack and survive the switch; nothing else switches and no boot setting exists | §3 |
 | L3 | A layout is **up to four bars**, one per edge, each with a size and three slots holding **built-in widgets** from a fixed catalogue; `layout` holds `bars` and nothing else | §4, §5 |
 | L4 | **The content rectangle is derived from the bars**; `content_rect()` is the app-cart contract, `bar_h()` a shim; the surface row grows additively; bars are global, every surface lays out off them; compiled apps and games are untouched | §7 |
-| L5 | **One popover mechanism**, desktop mode only: the system-menu `Popup` generalised, riding the quiet stack with its own rect as damage. Its contents are **components** that draw in a popover, in a bar cell, or fullscreen in console mode | §8 |
+| L5 | **One popover mechanism**, desktop mode only: the system-menu `Popup` generalised, riding the quiet stack with its own rect as damage. Its contents are **components** that draw in a popover, or fullscreen in console mode | §8 |
 | L6 | **One safety rule**: `menu`, `zone` and `close` placed after every drop, else the tier default; caps, the tap floor and a minimum content area checked once, deterministically | §9 |
 | L7 | **Precedence: user, then theme, then default.** The user's override is one strict-read row, `layout_theme`; `set_theme` never touches it (D5) | §11 |
 | L8 | **A bar is a cached strip re-rendered whole when its key moves**, as today, and blitted otherwise; a layout change is a relayout; no per-cell repaint and no new invalidation mechanism | §14 |
@@ -37,6 +37,7 @@ memory and compositors); this doc cites, it does not copy.
 | L10 | Pixels move only where a step restyles on purpose: new bar, popover and console-mode rows are NEW golden configs; the home is one named re-baseline; every other step holds every golden byte-identical | §13 |
 | L11 | **The HOME key backs out one level, everywhere** (owner, 2026-10-13). In desktop mode it shows the desktop, `show_desk()`: every window minimised to its chip and kept, HOME again restores them, and it never closes a window (Win+D's shape). In console mode it goes home, and from the home on a P4 to the desktop | §3 |
 | L12 | **The input model assumes a keyboard on every board** (owner, 2026-10-13): the T-Deck's own, a BLE keyboard on the Guition S3 and both P4s. Touch is supplementary -- a fullscreen game on a P4 is left by the keyboard alone -- and there is no on-screen home button: it would spend bar space on what the HOME key does | §4, §15 |
+| L13 | **Every bar widget is compact** (owner, 2026-10-14: "I only want the calendar to pop out"; "that should be the default for every widget, why would we want giant bars?"): an icon or a short value. Anything bigger opens as its component -- the popover in desktop mode, the fullscreen page in console mode -- and no widget is ever docked large in a bar, so a bar's `size` is a slim range, 16..32. Side bars stay, as thin bars | §4, §5, §8 |
 
 ## 2. What exists, read against this doc
 
@@ -239,7 +240,6 @@ thing in both modes; what differs is only the container a component opens in
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status) | the surface's zone generation | the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
 | `clock` | `HH:MM` | the minute | the calendar component | 40×8 / 16×16 (two lines) |
-| `calendar` | the month grid, today marked | the day | — (display) | 112×80 / 112×80 |
 | `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8): the Settings panel as a popover in desktop mode, the Settings page scrolled to it in console mode | 16×16 / 16×16 |
 | `battery` | the battery glyph | the level bucket | the power component: Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings (owner, 2026-10-13) | 16×16 / 16×16 |
 | `chips` | the taskbar's window chips (desktop mode) | `_chip_sig` | focus, minimise, restore as today | one chip 24×16, flexes / icon chips 16×16 each |
@@ -250,8 +250,10 @@ thing in both modes; what differs is only the container a component opens in
 `menu`, `zone`, `close`, `title`, `clock`, `wifi` and `battery` are today's
 bar as widgets — the X becomes its own widget so that a layout can place it
 and the safety rule can require it (§9), instead of riding inside the right
-zone; `chips`, `text`, `spacer`, `separator` and `calendar` are new
-cells. There is no `home` widget: the HOME key is the way home (L11, L12). There is no `settings` widget: Settings is a row of the system menu
+zone; `chips`, `text`, `spacer` and `separator` are new
+cells. Every widget is compact (L13): the tallest cell any of them needs is
+16 logical pixels, the clock's two lines on a side bar and an icon across a
+top bar, which is why §5 caps a bar at 32. There is no `home` widget: the HOME key is the way home (L11, L12). There is no `settings` widget: Settings is a row of the system menu
 (L0). The home's verbs ride in `zone` wherever a theme puts it, so D7's
 mockup — a top strip and a bottom verb strip — is two bars in data (§6,
 example 4).
@@ -280,7 +282,7 @@ PLAY is the switch).
 |---|---|---|
 | `bars` | a list of bar objects | at most 4, at most one per edge; a second on the same edge is dropped and noted |
 | `bars[].edge` | `top`, `bottom`, `left`, `right` | required; an unknown edge drops the bar |
-| `bars[].size` | an integer, logical pixels | clamped to 16..160; absent is 18 |
+| `bars[].size` | an integer, logical pixels | clamped to 16..32 (L13: the compact widgets' 16-pixel cells, an icon's margins, a taskbar of chips at 22 or so; the tap floor is the chrome scale's, #203, not the size's); absent is 18 |
 | `bars[].left`, `center`, `right` | lists of catalogue names | at most 6 per slot, 12 per layout; an unknown name is dropped and noted; a widget placed twice keeps its first placement, except `text`, `spacer`, `separator` |
 | `bars[].text` | a string per `text` widget, by position | 1 to 24 characters of printable ASCII; longer is cut, empty is dropped |
 
@@ -342,17 +344,16 @@ is §3's switch, from memory.
                "right": ["clock", "close", "menu", "wifi", "battery"] },
              { "edge": "bottom", "size": 18, "left": ["zone"], "center": [], "right": [] } ]
    ```
-5. **A docked calendar** (a P4, either mode): the month grid lives in a
-   right-hand bar; the popover and this cell are one painter.
+5. **A thin side bar** (any board, either mode): the ≡ at the top of a left
+   bar, the clock in two lines and the battery at its foot, beside a top bar
+   that keeps the zone, the X and the wifi. A side bar is as thin as a top
+   bar (L13); the clock's tap opens the calendar, never docks it.
    ```json
    "bars": [ { "edge": "top", "size": 18, "left": ["zone"], "center": [],
-               "right": ["clock", "close", "menu", "wifi", "battery"] },
-             { "edge": "right", "size": 120, "left": ["calendar"], "center": [], "right": ["spacer"] } ]
+               "right": ["close", "wifi"] },
+             { "edge": "left", "size": 24, "left": ["menu", "separator"], "center": [],
+               "right": ["clock", "battery"] } ]
    ```
-   On the P4 at chrome scale 2 the right bar is 240 px of 1024 and the
-   content keeps 76% of the width, which clears §9's floor; on a 320- or
-   480-wide glass the same bar fails the floor and the layout resolves to the
-   default — the one rule, no board exception needed.
 6. **A T-Deck layout** (console mode): a bottom strip, the surface's verbs
    beside the ≡; the same data on a P4 in console mode draws the same bar.
    ```json
@@ -475,13 +476,11 @@ the container's business, not the component's.
 | `wifi` | the Settings WIFI panel's rows, the one implementation (owner, 2026-10-13: the `moybyte.wifi.moy` tool cart goes, §13 step 6) — its radio lease is released whenever the container closes, a tap outside included | rows; picking one runs the password step in the same container |
 | `battery` | Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings — one implementation, the popover a container for it | rows |
 
-**Three containers, one rule for which.** A component draws (a) in a bar cell
-when a layout places it — the calendar is the one component whose minimum
-size makes that sensible, so `calendar` is the one dockable widget; (b) in a
-popover in desktop mode; (c) fullscreen in console mode, pushed on the
-back-stack as a kind so back pops it: the calendar as its own kind, the wifi
-and power rows as the Settings page scrolled to them. (b) versus (c) is the
-mode's, not the board's. No component is a registered app or a desk icon.
+**Two containers, one rule for which.** A component draws (a) in a popover
+in desktop mode; (b) fullscreen in console mode, pushed on the back-stack as
+a kind so back pops it: the calendar as its own kind, the wifi and power rows
+as the Settings page scrolled to them. (a) versus (b) is the mode's, not the
+board's. No component is docked in a bar (L13). No component is a registered app or a desk icon.
 The components are `runtime/popover.py`'s; the wifi panel and the rows draw
 through Settings' own painters over the popover's rect (`PanelGeom`), the
 calendar's one painter is `draw_month`, and the battery's level reads None on
@@ -534,9 +533,7 @@ layer (`docs/shell_ux_v1.md` §3), so **the WM class carries** `LAYOUT_CATALOGUE
 which modes a board has. Settings shows a row for what the WM lists and none
 for what it does not (absence, never a disabled row). Beside it,
 `LAYOUT_EDGES` names the edges a bar may take on this tier (all four on both
-WMs), and the composer is `runtime/shell_layout.py`'s `resolve`. `calendar`
-is in both modes' catalogues; its 112×80 cell fits a bar only as thick as
-that, and §9's floor keeps such a bar off a small glass.
+WMs), and the composer is `runtime/shell_layout.py`'s `resolve`.
 
 | board | glass, input | modes (default first) | WM | widgets placeable |
 |---|---|---|---|---|
@@ -555,7 +552,6 @@ consistent where the hardware allows):
 |---|---|
 | the T-Deck and the Guition S3 have no desktop mode | §3's last paragraph: one canvas that is the game raster; a 3.5" glass at the tap floor; the S3's PSRAM reserve |
 | `battery` draws nothing on a board without a gauge | the board reports `None` (CLAUDE.md's rule) and the widget is dropped at resolve, noted once |
-| a docked `calendar` fits only the big glass | §9's 75% floor, arithmetic on the glass, not a board rule |
 | the carousel's motion may degrade on a board | measured frame cost (§12), recorded in #66, never theme data |
 | the Guition P4 rotates a bar strip when its pixels moved, side bars included since their on-glass check | its scan-out is portrait and the desk landscape (`native/moy_glass/moy_present_rot.c`); narrow rotated blocks have wedged the PPA (§14) |
 
@@ -712,7 +708,7 @@ every step; the steps that ADD a config say which.
 | 3b — the fixed geometry (landed 2026-10-13) | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers (now `_desk_rect()`) and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | every golden row identical (the fixed geometry moved without a pixel); the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver (landed 2026-10-13) | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
 | 5 — bars on any edge, slots, cells (landed 2026-10-14) | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |
-| 6 — the popover layer and the components (landed 2026-10-14) | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their three containers; the wifi lease released on every close; example 5 placeable; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_popovers` (each widget's popover over the desk), `..._docked_calendar` (example 5), `tdeck_320x240_fs1_widget_pages` (console mode's page for each); `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
+| 6 — the popover layer and the components (landed 2026-10-14) | the `sysmenu` layer becomes the popover layer on the quiet stack with its rect as damage; the calendar, wifi and power components in their two containers; the wifi lease released on every close; **`system_carts/moybyte.wifi.moy` deleted** and `console.launch_wifi_tool` re-routed — console mode opens the Settings page scrolled to the WIFI panel, desktop mode the panel as a popover — so the bar's wifi tap, the launcher store and the Player no longer know the cart | NEW configs: `p4_1024x600_cs2_fs1_popovers` (each widget's popover over the desk), `tdeck_320x240_fs1_widget_pages` (console mode's page for each); `tests/test_wm_windowed.py` covers open, close-outside, close-on-B, one-at-a-time and the lease release; `tests/test_desktop_shell.py` covers the fullscreen container's push and pop; `tests/test_top_bar.py`'s wifi-tap test asserts the Settings route on both tiers; the popover scenarios over windows and over a playtest, with the system menu's before numbers beside them; `app idle` zero with a popover open; the T-Deck's on-glass suite reaches the WIFI panel from the bar |
 | 7a — the scaled-blit kernel (landed 2026-10-14) | the nearest-neighbour RGB565 scaled blit in `moy_gfx`, host and boards | a micro-bench of the focus band's three blits on all four boards, to #66, before 7b starts; the board module answers the host's pixels |
 | 7b — the home | the tab row and four sources; the carousel with the animated centre card; `sel` out of the moving shift key; the key glide as a fling; the Make tile and the Library exclusion go; the per-board motion verdict | ONE named re-baseline of the home rows on every config, with before/after renders; `library idle` zero; the fling, flick, glide and tab-switch scenarios on every board with absolute p90s named per board; the Guition P4 with the band damage of step 2; `tests/test_launcher_scroll.py`, `test_home_retained_frame.py`, `test_launcher_search_favorites.py` hold; `tests/test_desktop_shell.py` gains PLAY reaching the tabbed home in console mode |
 | phase end | — | a board pass on every attached board (`tools/board.py pass tdeck guition_s3 p4 guition_p4`), the web through `tools/preflight.sh --web`; a board this desk lacks is recorded as not run |
@@ -825,6 +821,12 @@ and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
   horizontal bar; the clock's vertical form is two lines, not a rotation.
 - **Configurable popover contents, a popover a theme adds**: fixed per
   widget, four of them.
+- **Large bars and docked widgets** (owner, 2026-10-14; L13): a `calendar`
+  widget docking the month grid in a side bar, and any bar thicker than the
+  compact widgets need. It was built (step 6's example 5, a 120-row right
+  bar) and removed the same day: a widget is an icon or a short value, and
+  what is bigger opens as its popover or its page -- one way to the
+  calendar, not two. `size` is capped at 32 (§5).
 
 ## 16. Sentences this doc will make false
 
@@ -862,6 +864,8 @@ The step named in the last column corrects the claim where it stands:
 | the way back from console mode | the existing X, now the `close` widget | §3, §4 |
 | a running windowed playtest when PLAY is pressed | ended; the simplest to build | §3 |
 | wifi: one implementation | the Settings WIFI panel stays and `moybyte.wifi.moy` is deleted (step 6). The cart was one of the first "the OS is carts" carts; where the line between system carts and built-in apps sits is not settled and can move later — today one implementation wins | §8, §13 step 6, §16 |
+| the docked calendar (2026-10-14) | "I don't want bars, I only want the calendar to pop out": `calendar` leaves the catalogue; the calendar is the clock's popover and page only | L13, §4, §8, §15 |
+| giant bars (2026-10-14) | "that should be the default for every widget": every widget is compact, anything bigger opens; `size` capped at 32 | L13, §5, §15 |
 | how far the bars reach | global: every surface, the running tool/app included, lays out off `content_rect()`, migrated in step 3b; it saves the most space | §7, §13 step 3b, §15 |
 
 Nothing is pending the owner.

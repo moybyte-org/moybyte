@@ -28,8 +28,7 @@ after the board is reset or attached, and unpicked at the end.
 
 `--popovers` benches the bar widgets' popovers alone (docs/shell_layout_2026-10.md
 §8): open, navigate, idle and close, over three desk windows and over a
-playtest, and a frame on a minute boundary (with a docked calendar when the
-layout places one). The open and close are real taps on the widget's cell;
+playtest, and a frame on a minute boundary. The open and close are real taps on the widget's cell;
 a key is the popover layer's own handler, with the router's dirty mark where
 the image's WM does not let the popover take keys.
 
@@ -422,7 +421,7 @@ def bench_popovers(b, out_path):
     popover_rows(b, bench, "over playtest")
     pyexec(b, "ws.wm.close_window_kind('desktop')"); b.drain(2.0)
     # a minute boundary: the next painted frame re-renders the clock's strip
-    # (and nothing else's -- a docked calendar keeps its strip on the minute)
+    # and nothing else's
     pyexec(b, MINUTE)
     b.drain(1.0)
     bench.start(); pyexec(b, "ws._rn[0] = 0\nws.mark_dirty()"); b.drain(1.0)

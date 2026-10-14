@@ -1,11 +1,11 @@
 """The popover's components (docs/shell_layout_2026-10.md §8).
 
 A component is one painter, one panel size and one navigation handler; where
-it draws is its container's business. Three containers hold them: a bar cell
-(the calendar alone, `calendar` being the one dockable widget), the popover
+it draws is its container's business. Two containers hold them: the popover
 (`widgets.Popup`, desktop mode, one at a time) and a fullscreen page in
 console mode (the calendar as its own kind, `CalendarLayer`; the wifi and
-power rows as the Settings page opened at them).
+power rows as the Settings page opened at them). No component is docked in
+a bar: a bar widget is compact, and what is bigger opens (§1, 2026-10-14).
 
   `clock`    MonthView   the month calendar, today marked; left/right page
   `wifi`     WifiPanel   the Settings WIFI panel, the one implementation

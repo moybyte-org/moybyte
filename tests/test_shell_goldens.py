@@ -85,8 +85,7 @@ keeps the matrix a clean product instead of a pile of special cases.
                            fullscreen at the P4's size. One axis (the mode)
                            from the as-shipped row.
   p4_1024x600_cs2_fs1_win95bar, p4_1024x600_cs2_fs1_gnomebar,
-  p4_1024x600_cs2_fs1_twobars, tdeck_320x240_fs1_bottombar,
-  p4_1024x600_cs2_fs1_docked_calendar
+  p4_1024x600_cs2_fs1_twobars, tdeck_320x240_fs1_bottombar
                            the worked examples of docs/shell_layout_2026-10.md
                            §6 (2, 3, 4 and 6), each a package whose `layout`
                            the console picks (`layout_theme`): a bottom
@@ -94,8 +93,7 @@ keeps the matrix a clean product instead of a pile of special cases.
                            the clock centred, a top bar over a bottom verb
                            strip, and the T-Deck's bottom strip. One axis (the
                            layout) from the as-shipped P4 row and the T-Deck
-                           row. The fifth is example 5: the month grid docked
-                           in a right-hand bar.
+                           row.
   p4_1024x600_cs2_fs1_popovers, tdeck_320x240_fs1_widget_pages
                            the bar widgets' components (§8), and only those
                            surfaces (a config's `plan`): over the as-shipped
@@ -348,13 +346,6 @@ CONFIGS = {
         diagonal_in=None, layout=[
             {"edge": "bottom", "size": 18, "left": ["menu", "zone"],
              "right": ["clock", "close", "battery"]}]),
-    "p4_1024x600_cs2_fs1_docked_calendar": dict(
-        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
-        diagonal_in=7.0, layout=[
-            {"edge": "top", "size": 18, "left": ["zone"],
-             "right": ["clock", "close", "menu", "wifi", "battery"]},
-            {"edge": "right", "size": 120, "left": ["calendar"],
-             "right": ["spacer"]}]),
     "p4_1024x600_cs2_fs1_popovers": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="popovers"),

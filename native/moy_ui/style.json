@@ -1062,13 +1062,13 @@
     "layout": {
       "edges": ["top", "bottom", "left", "right"],
       "slots": ["left", "center", "right"],
-      "widgets": ["menu", "close", "zone", "title", "clock", "calendar", "wifi", "battery",
+      "widgets": ["menu", "close", "zone", "title", "clock", "wifi", "battery",
                   "chips", "text", "spacer", "separator"],
       "required": ["menu", "zone", "close"],
       "repeatable": ["text", "spacer", "separator"],
       "slot_cap": 6,
       "widget_cap": 12,
-      "size": [16, 160],
+      "size": [16, 32],
       "size_default": 18,
       "text_max": 24
     },
