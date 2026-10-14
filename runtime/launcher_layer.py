@@ -1258,13 +1258,14 @@ class Carousel(Launcher):
                 self._blit_glyph(cv, _TYPE_GLYPH[NEW_TILE_TYPE], (x, y, w, h),
                                  th.get("ink", 0), max(1, (w * 5 // 8) // 12))
         else:
-            cv.rect(x, y, w, h, th.get("dim", 0))
             card = self.card_side()
             div = _cover_div(it, card, card) if self.cover_for is not None else 0
             cover = self.cover_for(it, div) if div else None
             if cover is not None:
+                # opaque over the whole card: no backdrop under it
                 cv.blit565_resize(cover.pix, cover.w, cover.h, x, y, w, h)
             else:
+                cv.rect(x, y, w, h, th.get("dim", 0))
                 img = sheet_for(it) if sheet_for is not None else None
                 if img is not None:
                     sc = max(1, (w * 5 // 8) // 16)
