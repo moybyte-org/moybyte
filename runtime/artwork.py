@@ -621,7 +621,11 @@ class PaintAppLayer:
     def close(self):
         """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
         this app comes off the screen by ANY route. `_save` is change-gated, so
-        an untouched drawing costs no write."""
+        an untouched drawing costs no write. A document never built (Paint
+        never opened) has nothing to write and lent no bake: go_home's sweep
+        calls this on every return home."""
+        if self._doc is None:
+            return
         self._save()
         self._return_bakes()
 

@@ -68,6 +68,19 @@ def test_moyimg_roundtrip_handles_long_runs_and_all_palette_indices():
     assert host_app._decode_moyimg(blob) == (40, 20, bytes(raw))
 
 
+def test_going_home_with_paint_never_opened_writes_nothing(tmp_path):
+    """go_home's close sweep reaches Paint on every return home. With its
+    document never built there is nothing to save: no blank drawing lands in
+    the gallery, no first-save achievement, and the document stays unbuilt."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = ws.artwork_app
+    ws.go_home()
+    ws.go_home()
+    assert app._doc is None
+    assert not list(tmp_path.rglob("drawing_*"))
+    assert not ws.ach.has("first_paint")       # the paint_save event's award
+
+
 def test_touch_stroke_undo_redo_and_shared_save(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)

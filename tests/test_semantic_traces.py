@@ -2483,8 +2483,8 @@ wallpaper carts True None True
 selected fill:black fill:black
 copy [None,None] [None,None] [2,2,b4]
 artwork False ['drawings','pic'] True ''
-artwork new ['drawings','drawing_2'] False
-artwork save True ['drawings','drawing_2']
+artwork new ['drawings','drawing_1'] False
+artwork save True ['drawings','drawing_1']
 artwork follow False True ['drawings','pic2'] 'pic2'
 copies [] True True
 copies wall True True
