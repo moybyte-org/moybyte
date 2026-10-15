@@ -47,7 +47,7 @@ for them from format 1.
 
 | # | decision |
 |---|---|
-| D1 | The default look is **"Open Machine, refined"**: the Workbench structure (1px black outlines, 2px hard shadows, calm light/dark chrome over the PICO-8 base colours), the **Tiny5** UI font, desk icons as tiles with the **label in a pill under the tile**, window title strips **left-aligned with the app's identity stripe and a square close on the right**, and **Moy's night** (stars, a low hill, a moon, Moy on the hill) as the default wallpaper. Light and dark are ONE drawing routine and two token tables. |
+| D1 | The default look is **"Open Machine, refined"**: the Workbench structure (1px black outlines, 2px hard shadows, calm light/dark chrome over the PICO-8 base colours), the **Tiny5** UI font, desk icons as tiles with the **label in a pill under the tile**, window title strips **left-aligned with the app's identity stripe and a square close on the right**, and **Moy's night** (stars, a low hill, a moon, Moy on the hill) as the default wallpaper. Light and dark are ONE drawing routine and two token tables. The 2026-10 look replaces D1 as the default (2026-10-15, the owner's delegate; `docs/look_2026-10.md`). |
 | D2 | Themes change the OS **extensively** (§0's range), not only colours. |
 | D3 | A theme can carry **paintable sprites** (9-slice frames, glyphs, a desktop tile), in the first or second version; the format reserves them from format 1. |
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
@@ -252,7 +252,8 @@ below, three of them the flags `surface_light`, `bar_light` and
 `band_light`). They are the names `theme()`, `ctx.theme.colors()` and a
 compiled app's `theme` imports answer; a role a phase adds is appended to the
 row, so a compiled app's role ids do not move. Every value is a **MOY64
-index**; per-theme RGB palettes are declined (§11).
+index**; per-theme RGB values were ruled in on 2026-10-15 (§11), and
+`docs/look_2026-10.md` step 2 builds them.
 
 A role a package leaves unset is **derived by a rule** (style.json's
 `theme.derive`, §5): `surface` from `panel`, `focus` from `accent`, the inks
@@ -1864,8 +1865,13 @@ About eighteen systems were studied; the lessons that shaped this doc:
 
 - **Code in themes** in any form (scripts, carts inside a theme, plug-in
   decorators, callbacks) — §7.
-- **Per-theme RGB palettes**, for now: MOY64 subsets cover the target looks, and
-  on the shared-canvas tier the shell and the game are one raster.
+- **Per-theme RGB palettes** were declined here on 2026-09-27 (MOY64 subsets
+  covered the target looks, and on the shared-canvas tier the shell and the
+  game are one raster). The decline is reversed (2026-10-15, the owner's
+  delegate for the 2026-10 look): MOY64 has no ramp for that look's tinted
+  neutrals, amber or lavender, and a shell-only block at indices 64–127
+  leaves a cart's colours at `& 63`, so the game's raster cannot change
+  (`docs/look_2026-10.md` step 2).
 - **Absolute placement** in themes — §4.2.
 - **Theming games' pixels**, and `theme()` for games without a moy-spec proposal — §6.
 - **Identity-keyed theme caches** — §6.

@@ -158,7 +158,7 @@ sheet that is remapped at draw time. 2 days.
 **9. Homes.**
 
 - **Handheld carousel:** tabs in the bar, a 2× hero, a title and metadata,
-  page dots and a keycap hint strip. 2–3 days.
+  and a keycap hint strip, with no page dots. 2–3 days.
 - **The 1024×600 console home:**
   - a 2× hero beside a detail pane: title at ×2, metadata, a description,
     stats, and Play / Change / Copy;

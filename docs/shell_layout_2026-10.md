@@ -623,7 +623,10 @@ row** (`ui.tab_row`, a toolkit kind, drawn through C) with four sources. One
 class, four lists; the pinned Make tile goes, its job is the Make tab. The
 mockups (`docs/media/theming_2026-09/README.md`: the look, not finished
 layouts; L0: not set in stone) are at
-`docs/media/theming_2026-09/home_dark_480x320.png` and the 320×240 pair.
+`docs/media/theming_2026-09/home_dark_480x320.png` and the 320×240 pair. The
+2026-10 look restyles this component (`docs/look_2026-10.md` steps 12 and 13):
+a 2× hero between 1× neighbours on the handheld, and on wide glass the hero,
+a details pane and a shelf, still the `carousel` arrangement.
 
 | tab | source | tap (console mode, every board) | verbs in `zone` |
 |---|---|---|---|
