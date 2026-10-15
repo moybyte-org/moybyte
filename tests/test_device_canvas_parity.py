@@ -713,6 +713,31 @@ def test_text_bytes_parity():
     _assert_same(host, dev, "text bytes")
 
 
+def test_text_in_an_anti_aliased_print_font_parity():
+    """A 2 bpp print font blends (the glyph lane, docs/look_2026-10.md step
+    4): both sides draw the same words over a mixed background, camera and
+    clip on, and some are no palette colour."""
+    import moy_ui
+    with open(ROOT / "native" / "moy_ui" / "fonts" / "jbmono-11-400-2.fnt", "rb") as f:
+        rc, fid = moy_ui.font_load(f.read())
+    assert rc == 0
+    was = moy_ui.print_font(fid)
+    try:
+        m, host, dev = _both()
+        for c in (host, dev):
+            c.cls(1)
+            c.rect(10, 8, 40, 14, 8)
+            c.camera(2, -1)
+            c.clip(4, 4, 100, 40)
+            c.print("AVTa yo 0123", 3, 6, 7)
+        _assert_same(host, dev, "aa text")
+        pal = {((v << 8) | (v >> 8)) & 0xFFFF for v in m.PAL565_WIRE}
+        assert set(_host_rgb565(host)) - pal
+    finally:
+        moy_ui.print_font(was)
+        moy_ui.font_free(fid)
+
+
 def test_text_bytes_do_not_shift_what_follows():
     """The cursor keeps step: a byte with no glyph costs exactly one cell, so
     the text after it lands where it would have anyway. A tier that dropped the

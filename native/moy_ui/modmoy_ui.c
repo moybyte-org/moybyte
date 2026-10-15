@@ -722,6 +722,27 @@ static mp_obj_t ui_font_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_font_reset_obj, ui_font_reset);
 
+// text_wire() -> bool: whether the glyph lane blends byte-swapped words;
+// text_wire(swapped) sets it (moy_text.h) and answers what it was.
+static mp_obj_t ui_text_wire(size_t n_args, const mp_obj_t *a) {
+    int was = moy_text_wire_swapped();
+    if (n_args > 0) {
+        moy_text_wire(mp_obj_is_true(a[0]));
+    }
+    return mp_obj_new_bool(was);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_wire_obj, 0, 1, ui_text_wire);
+
+// text_lanes() -> (store, read): the version 2 glyphs drawn since boot that
+// read nothing and that read the target (moy_text_lanes).
+static mp_obj_t ui_text_lanes(void) {
+    uint32_t n[2];
+    moy_text_lanes(n);
+    mp_obj_t t[2] = {mp_obj_new_int_from_uint(n[0]), mp_obj_new_int_from_uint(n[1])};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_text_lanes_obj, ui_text_lanes);
+
 // font_info(font) -> (w, h, line, ascent, first, count), or None.
 static mp_obj_t ui_font_info(mp_obj_t font) {
     moy_font_info_t f;
@@ -1152,15 +1173,33 @@ static mp_obj_t ui_cell(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cell_obj, 17, 17, ui_cell);
 
-// label(cv, rect, text, ink, align) -> the drawn width
+// label(cv, rect, text, ink, align, bg=None, shadow=None) -> the drawn width:
+// bg the colour index filling the whole rect, shadow (ci, alpha, dx, dy)
+// (moy_ui_label_paint).
 static mp_obj_t ui_label(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], mp_const_none);
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_label(&s, box_of(a[1]), span_if(a[2]),
-                                             mp_obj_get_int(a[3]), mp_obj_get_int(a[4])));
+    moy_ui_label_paint_t lp = {-1, -1, 0, 0, 0};
+    if (n_args > 5 && a[5] != mp_const_none) {
+        lp.bg = (int16_t)mp_obj_get_int(a[5]);
+    }
+    if (n_args > 6 && a[6] != mp_const_none) {
+        size_t n;
+        mp_obj_t *it;
+        mp_obj_get_array(a[6], &n, &it);
+        if (n != 4) {
+            mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: shadow is (ci, alpha, dx, dy)"));
+        }
+        lp.shadow = (int16_t)mp_obj_get_int(it[0]);
+        lp.shadow_a = (int16_t)mp_obj_get_int(it[1]);
+        lp.dx = (int16_t)mp_obj_get_int(it[2]);
+        lp.dy = (int16_t)mp_obj_get_int(it[3]);
+    }
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_label_paint(&s, box_of(a[1]), span_if(a[2]),
+                                                   mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                                                   &lp));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_label_obj, 5, 5, ui_label);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_label_obj, 5, 7, ui_label);
 
 // bar_rect(view, content, offset, horizontal, fs, bar_w) -> the thumb, or None
 static mp_obj_t ui_bar_rect(size_t n_args, const mp_obj_t *a) {
@@ -1708,6 +1747,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_wire), MP_ROM_PTR(&ui_text_wire_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_lanes), MP_ROM_PTR(&ui_text_lanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_print_font), MP_ROM_PTR(&ui_print_font_obj) },
     { MP_ROM_QSTR(MP_QSTR_cart_text), MP_ROM_PTR(&ui_cart_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_free), MP_ROM_PTR(&ui_font_free_obj) },

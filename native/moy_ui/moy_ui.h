@@ -236,6 +236,15 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
 // centred vertically. Answers the drawn width.
 int moy_ui_label(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink, int align);
 
+// What a label meets (moy_text.h's paint, docs/look_2026-10.md step 4): `bg`
+// the colour index the caller has filled the whole box with (-1: not known,
+// the glyph lane reads), and a shadow in colour index `shadow` (-1: none) at
+// `shadow_a` (1..255) of the coverage, (dx, dy) pixels at the font scale
+// from the text. moy_ui_label is this with neither.
+typedef struct { int16_t bg, shadow, shadow_a, dx, dy; } moy_ui_label_paint_t;
+int moy_ui_label_paint(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink,
+                       int align, const moy_ui_label_paint_t *lp);
+
 // The scrollbar's thumb over a scroll state (0: everything fits), and the bar.
 int moy_ui_bar_rect(moy_ui_box_t view, int content, int offset, int horizontal, int fs,
                     int bar_w, moy_ui_box_t *out);

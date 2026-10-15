@@ -366,6 +366,10 @@ def test_the_font_set_is_the_tiers(board):
     on_glass.the_font_set_is_the_tiers(board, 'desktop')
 
 
+def test_the_glyph_lane_draws_the_hosts_bytes(board):
+    on_glass.glyph_lane_matches_host(board, 'desktop')
+
+
 def test_a_stale_handle_is_refused_loudly(board):
     on_glass.stale_handle_is_refused_loudly(board)
 

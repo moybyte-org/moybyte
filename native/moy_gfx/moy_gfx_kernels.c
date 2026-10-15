@@ -470,31 +470,65 @@ void mg_text_font(uint16_t *dst, size_t dcap, int dw,
     }
 }
 
+void mg_ink(mg_ink_t *k, uint16_t col, int bpp, int alpha, int32_t bg, int swap)
+{
+    const int top = (1 << bpp) - 1;
+    if (alpha < 0) alpha = 0;
+    if (alpha > 256) alpha = 256;
+    k->col = col;
+    k->swap = swap ? 1 : 0;
+    k->colc = swap ? mg_bswap16(col) : col;
+    uint16_t bgc = bg < 0 ? 0 : (swap ? mg_bswap16((uint16_t)bg) : (uint16_t)bg);
+    for (int v = 0; v < 16; v++) {
+        int wt = v > top ? alpha : (v * alpha + (top >> 1)) / top;
+        k->wt[v] = (uint16_t)wt;
+        uint16_t p = bg < 0 ? k->colc : mg_blend565(k->colc, bgc, wt);
+        k->ramp[v] = swap ? mg_bswap16(p) : p;
+    }
+}
+
 void mg_glyph_cov(uint16_t *dst, size_t dcap, int dw, const uint8_t *cov, int w, int h,
-                  int bpp, int x, int y, uint16_t col, int scale,
+                  int bpp, int x, int y, const mg_ink_t *k, int known, int scale,
                   int cx0, int cy0, int cx1, int cy1)
 {
     if (dw <= 0 || w <= 0 || h <= 0) return;
     if (scale < 1) scale = 1;
     mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     if (x >= cx1 || y >= cy1 || x + w * scale <= cx0 || y + h * scale <= cy0) return;
-    const int top = (1 << bpp) - 1, half = (top + 2) >> 1;
+    const int top = (1 << bpp) - 1;
+    const uint16_t col = k->col, colc = k->colc;
     for (int r = 0; r < h; r++) {
         int by = y + r * scale;
         if (by >= cy1) break;
         if (by + scale <= cy0) continue;
+        int y0 = by < cy0 ? cy0 : by, y1 = by + scale > cy1 ? cy1 : by + scale;
         size_t bit = (size_t)r * (size_t)w * (size_t)bpp;
         for (int c = 0; c < w; c++, bit += (size_t)bpp) {
             int v = (cov[bit >> 3] >> (8 - bpp - (int)(bit & 7))) & top;
-            if (v < half) continue;
+            int wt = k->wt[v];
+            if (wt == 0) continue;
             int bx = x + c * scale;
             if (bx >= cx1) break;
             if (bx + scale <= cx0) continue;
             int x0 = bx < cx0 ? cx0 : bx, x1 = bx + scale > cx1 ? cx1 : bx + scale;
-            int y0 = by < cy0 ? cy0 : by, y1 = by + scale > cy1 ? cy1 : by + scale;
-            for (int ty = y0; ty < y1; ty++) {
-                uint16_t *drow = dst + (size_t)ty * (size_t)dw;
-                for (int tx = x0; tx < x1; tx++) drow[tx] = col;
+            if (known || wt == 256) {
+                uint16_t p = known ? k->ramp[v] : col;
+                for (int ty = y0; ty < y1; ty++) {
+                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                    for (int tx = x0; tx < x1; tx++) drow[tx] = p;
+                }
+            } else if (k->swap) {
+                for (int ty = y0; ty < y1; ty++) {
+                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                    for (int tx = x0; tx < x1; tx++) {
+                        drow[tx] = mg_bswap16(mg_blend565(colc, mg_bswap16(drow[tx]), wt));
+                    }
+                }
+            } else {
+                for (int ty = y0; ty < y1; ty++) {
+                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                    for (int tx = x0; tx < x1; tx++) drow[tx] = mg_blend565(colc, drow[tx], wt);
+                }
             }
         }
     }

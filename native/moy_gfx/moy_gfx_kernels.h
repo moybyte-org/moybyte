@@ -341,13 +341,52 @@ void mg_text_font(uint16_t *dst, size_t dcap, int dw,
                   const mg_font_t *f, int scale,
                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
+/* The glyph lane's ink (docs/look_2026-10.md step 4): `col` at a weight for
+ * each coverage value of a `bpp`-bit glyph, 0 (none) to 256 (all of it), and
+ * `col` over a known solid background at each of those weights, the ramp.
+ * mg_ink builds both: `alpha` (0..256, 256 opaque) scales every weight, and
+ * a `bg` below 0 builds no ramp. `col`, `bg`, the ramp and the target are in
+ * the buffer's wire order, byte-swapped RGB565 when `swap` is set (the S3
+ * panels, the host and the browser; the P4's DPI scans canonical words);
+ * every blend runs on the canonical channels. */
+typedef struct {
+    uint16_t col, colc;         // the ink in wire order, and canonical
+    uint8_t swap;
+    uint16_t wt[16];
+    uint16_t ramp[16];
+} mg_ink_t;
+
+void mg_ink(mg_ink_t *k, uint16_t col, int bpp, int alpha, int32_t bg, int swap);
+
+static inline uint16_t mg_bswap16(uint16_t v)
+{
+    return (uint16_t)((v << 8) | (v >> 8));
+}
+
+/* f over b at weight wt (0..256), each RGB565 channel apart:
+ * (f * wt + b * (256 - wt) + 128) >> 8, computed as b + (((f - b) * wt +
+ * 128) >> 8), one multiply a channel (the shift is arithmetic on every
+ * compiler the tiers use). */
+static inline uint16_t mg_blend565(uint16_t f, uint16_t b, int wt)
+{
+    int br = (b >> 11) & 31, bg = (b >> 5) & 63, bb = b & 31;
+    int r = br + (((((f >> 11) & 31) - br) * wt + 128) >> 8);
+    int g = bg + (((((f >> 5) & 63) - bg) * wt + 128) >> 8);
+    int bl = bb + ((((f & 31) - bb) * wt + 128) >> 8);
+    return (uint16_t)((r << 11) | (g << 5) | bl);
+}
+
 /* One glyph of a version 2 font (moy_text.c walks the string): a w x h box
  * of `bpp`-bit coverage, row-major, the first pixel in the high bits of its
  * byte, its top left at (x, y) in buffer space, every pixel a scale x scale
- * block. A pixel at half coverage or more stores `col`; the rest keep what is
- * under them. Bounds-safe as mg_text_raw is. */
+ * block. A pixel of weight 0 keeps what is under it. With `known` every
+ * other pixel stores its ramp entry and the target is never read (the
+ * caller holds that every pixel the glyph reaches is the ramp's
+ * background); without it a pixel of weight 256 stores `col` and the rest
+ * read the target and store `col` blended over it. Bounds-safe as
+ * mg_text_raw is. */
 void mg_glyph_cov(uint16_t *dst, size_t dcap, int dw, const uint8_t *cov, int w, int h,
-                  int bpp, int x, int y, uint16_t col, int scale,
+                  int bpp, int x, int y, const mg_ink_t *k, int known, int scale,
                   int cx0, int cy0, int cx1, int cy1);
 
 /* text (#62): a whole string in ONE call, camera and clip honoured per pixel.

@@ -65,6 +65,9 @@ _SIGS = (
     ("moy_theme_font_file", [_P, _Z, c.c_void_p], c.c_void_p),
     ("moy_text_print_font", [], c.c_uint32),
     ("moy_font_reset", [], None),
+    ("moy_text_wire", [_I], None),
+    ("moy_text_wire_swapped", [], _I),
+    ("moy_text_lanes", [c.c_void_p], None),
     ("moy_text_print_font_use", [c.c_uint32], c.c_int64),
     ("moy_ui_cart_text", [_I], _I),
     ("moy_ui_cmask", [], _I),
@@ -163,6 +166,7 @@ _DRAW_SIGS = (
     ("moy_ui_cell", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Cell), _I,
                      c.POINTER(_Box)], _I),
     ("moy_ui_label", [c.POINTER(_Sink), _Box, _Span, _I, _I], _I),
+    ("moy_ui_label_paint", [c.POINTER(_Sink), _Box, _Span, _I, _I, c.c_void_p], _I),
     ("moy_ui_bar_rect", [_Box, _I, _I, _I, _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_scrollbar", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I], _I),
     ("moy_ui_scroll_cues", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
@@ -388,10 +392,12 @@ def binding():
                                int(interact), c.byref(k), int(phase), c.byref(art)))
         return (art.x, art.y, art.w, art.h)
 
-    def label(cv, rect, text, ink, align):
+    def label(cv, rect, text, ink, align, bg=None, shadow=None):
         sp, keep = span_if(text)
-        return lib.moy_ui_label(c.byref(sink(cv, None)), box_of(rect), sp, int(ink),
-                                int(align))
+        lp = (c.c_int16 * 5)(-1 if bg is None else int(bg),
+                             *((-1, 0, 0, 0) if shadow is None else (int(v) for v in shadow)))
+        return lib.moy_ui_label_paint(c.byref(sink(cv, None)), box_of(rect), sp, int(ink),
+                                      int(align), c.addressof(lp))
 
     def bar_rect(view, content, offset, horizontal, fs, bar_w):
         out = _Box()
@@ -1005,6 +1011,21 @@ def binding():
     m.font_load = font_load
     m.font_file = font_file
     m.font_reset = lib.moy_font_reset
+
+    def text_wire(*swapped):
+        was = bool(lib.moy_text_wire_swapped())
+        if swapped:
+            lib.moy_text_wire(1 if swapped[0] else 0)
+        return was
+
+    m.text_wire = text_wire
+
+    def text_lanes():
+        n = (c.c_uint32 * 2)()
+        lib.moy_text_lanes(c.addressof(n))
+        return (n[0], n[1])
+
+    m.text_lanes = text_lanes
     m.print_font = print_font
     m.cart_text = cart_text
     m.font_free = font_free

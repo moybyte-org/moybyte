@@ -668,8 +668,9 @@ font's id is refused everywhere it is passed. Petme128's row keeps
 `mg_text_raw`'s cell loop and a version 1 font draws through
 `mg_text_font`, a lane of its own: the S3 A/B that gated this step is
 recorded in `moy_gfx_kernels.c`. A version 2 font draws a glyph at a time
-through `mg_glyph_cov`, which stores the ink at half coverage or more; the
-2 and 4 bpp ramp is the look's step 4.
+through `mg_glyph_cov`, which blends its coverage into the target, from a
+ramp over a known background or reading what is under it
+(`docs/look_2026-10.md` step 4).
 `moy_ui` faces it: `font_load`, `font_free`, `font_info` (box or cell, height, line,
 ascent, range), `text_width`'s font argument, and `theme_fonts` for the `fonts` key
 (§3). `tests/test_font_lane.py` holds both rows to a reference raster, the

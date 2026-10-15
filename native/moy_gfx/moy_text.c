@@ -55,6 +55,8 @@ typedef struct {
 
 static font_slot_t s_fonts[MOY_FONT_SLOTS];
 static uint32_t s_print = MOY_FONT_PETME128;
+static int s_wire_swapped = 1;
+static uint32_t s_lanes[2];     // glyphs that read nothing, and that read
 
 static font_slot_t *slot_of(uint32_t font) {
     uint32_t k = font & 0xffu;
@@ -289,6 +291,19 @@ void moy_text_vm_stop(void) {
     moy_font_reset();
 }
 
+void moy_text_wire(int swapped) {
+    s_wire_swapped = swapped ? 1 : 0;
+}
+
+int moy_text_wire_swapped(void) {
+    return s_wire_swapped;
+}
+
+void moy_text_lanes(uint32_t out[2]) {
+    out[0] = s_lanes[0];
+    out[1] = s_lanes[1];
+}
+
 uint32_t moy_text_print_font(void) {
     return s_print;
 }
@@ -466,19 +481,42 @@ static size_t fit2(const font2_t *f, const uint8_t *s, size_t n, int maxw, int *
     return keep;
 }
 
+// One pass of a version 2 font's string through the glyph lane: its ink, the
+// known background's box in buffer space (kx0 > kx1 for none), and the right
+// edge of the glyphs the pass has drawn, which a glyph left of it overlaps.
+typedef struct {
+    const moy_text_target_t *t;
+    const row_t *r;
+    mg_ink_t ink;
+    int scale;
+    int kx0, ky0, kx1, ky1;
+    int xr;
+    int whole;                  // every weight 0 or 256: 1 bpp opaque ink, never a read
+} pass_t;
+
 // Draw one glyph of byte b with its pen at (x, y + ascent), unscaled offsets
-// at `scale`, through the target.
-static void glyph2(const moy_text_target_t *t, const row_t *r, int b, int x, int y,
-                   uint16_t col, int scale) {
-    const font2_t *f = &r->f2;
+// at the pass's scale: from the ramp when the part of it the clip keeps lies
+// in the known box and right of every glyph before it, else reading.
+static void glyph2(pass_t *p, int b, int x, int y) {
+    const moy_text_target_t *t = p->t;
+    const font2_t *f = &p->r->f2;
     const uint8_t *g = rec_of(f, b);
     if (g[3] == 0) {
         return;
     }
+    int scale = p->scale;
     int gx = x + (int8_t)g[5] * scale - t->cam_x;
-    int gy = y + ((int)r->ascent - (int8_t)g[6]) * scale - t->cam_y;
-    mg_glyph_cov(t->px, t->cap, t->dw, f->cov + u24_at(g), g[3], g[4], f->bpp, gx, gy, col,
-                 scale, t->cx0, t->cy0, t->cx1, t->cy1);
+    int gy = y + ((int)p->r->ascent - (int8_t)g[6]) * scale - t->cam_y;
+    int gx1 = gx + g[3] * scale, gy1 = gy + g[4] * scale;
+    int x0 = gx > t->cx0 ? gx : t->cx0, x1 = gx1 < t->cx1 ? gx1 : t->cx1;
+    int y0 = gy > t->cy0 ? gy : t->cy0, y1 = gy1 < t->cy1 ? gy1 : t->cy1;
+    int known = gx >= p->xr && x0 >= p->kx0 && x1 <= p->kx1 && y0 >= p->ky0 && y1 <= p->ky1;
+    mg_glyph_cov(t->px, t->cap, t->dw, f->cov + u24_at(g), g[3], g[4], f->bpp, gx, gy, &p->ink,
+                 known, scale, t->cx0, t->cy0, t->cx1, t->cy1);
+    s_lanes[known || p->whole ? 0 : 1]++;
+    if (gx1 > p->xr) {
+        p->xr = gx1;
+    }
 }
 
 // --- measuring -----------------------------------------------------------------
@@ -629,24 +667,56 @@ void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uin
     }
 }
 
-// A version 2 font's text at (x, y), with the ellipsis after it when `ell`.
+// A version 2 font's text at (x, y) in `col` at `alpha` (0..256), with the
+// ellipsis after it when `ell`; the known background `bg` (below 0 for none)
+// in box k (buffer space).
 static void draw2(const moy_text_target_t *t, const row_t *r, const uint8_t *s, size_t n,
-                  int x, int y, uint16_t col, int scale, int ell) {
+                  int x, int y, uint16_t col, int alpha, int scale, int ell, int32_t bg,
+                  const int k[4]) {
+    pass_t p = {t, r, {0}, scale, k[0], k[1], k[2], k[3], INT32_MIN,
+                r->f2.bpp == 1 && alpha == 256};
+    mg_ink(&p.ink, col, r->f2.bpp, alpha, bg, s_wire_swapped);
+    if (bg < 0) {
+        p.kx0 = 1;
+        p.kx1 = 0;
+    }
     walk_t w;
     int at, b;
     walk_start(&w, &r->f2, s, n);
     while ((b = walk_next(&w, &at)) >= 0) {
-        glyph2(t, r, b, x + at * scale, y, col, scale);
+        glyph2(&p, b, x + at * scale, y);
     }
     if (ell) {
-        int k = w.prev >= 0 && r->f2.nkern ? kern(&r->f2, w.prev, MOY_FONT_ELLIPSIS) : 0;
-        glyph2(t, r, MOY_FONT_ELLIPSIS, x + (w.pen + k) * scale, y, col, scale);
+        int kp = w.prev >= 0 && r->f2.nkern ? kern(&r->f2, w.prev, MOY_FONT_ELLIPSIS) : 0;
+        glyph2(&p, MOY_FONT_ELLIPSIS, x + (w.pen + kp) * scale, y);
+    }
+}
+
+// One pass of the string in whichever lane its row draws.
+static void draw_row(const moy_text_target_t *t, const row_t *r, const uint8_t *s, size_t n,
+                     int x, int y, uint16_t col, int alpha, int scale, int ell, int32_t bg,
+                     const int k[4]) {
+    const mg_font_t *f = &r->f;
+    if (r->version == 2) {
+        draw2(t, r, s, n, x, y, col, alpha, scale, ell, bg, k);
+    } else if (f->adv == NULL) {
+        mg_text_raw(t->px, t->cap, t->dw, s, n, x, y, col, moy_font_data, FONT_GLYPHS,
+                    FONT_FIRST, scale, t->cam_x, t->cam_y, t->cx0, t->cy0, t->cx1, t->cy1);
+    } else {
+        mg_text_font(t->px, t->cap, t->dw, s, n, x, y, col, f, scale, t->cam_x, t->cam_y,
+                     t->cx0, t->cy0, t->cx1, t->cy1);
     }
 }
 
 int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw) {
+    return moy_text_paint(t, font, source, s, n, x, y, col, scale, align, maxw, NULL);
+}
+
+int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
+                   const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
+                   int align, int maxw, const moy_text_paint_t *p) {
     const row_t *r = font_row(font);
     if (source > MOY_TEXT_DATA || r == NULL) {
         return -1;          // a literal never reaches the raster
@@ -674,15 +744,22 @@ int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
         }
     }
     if ((n > 0 || ell) && t != NULL && t->px != NULL) {
-        if (r->version == 2) {
-            draw2(t, r, s, n, x, y, col, scale, ell);
-        } else if (f->adv == NULL) {
-            mg_text_raw(t->px, t->cap, t->dw, s, n, x, y, col, moy_font_data, FONT_GLYPHS,
-                        FONT_FIRST, scale, t->cam_x, t->cam_y, t->cx0, t->cy0, t->cx1, t->cy1);
-        } else {
-            mg_text_font(t->px, t->cap, t->dw, s, n, x, y, col, f, scale, t->cam_x, t->cam_y,
-                         t->cx0, t->cy0, t->cx1, t->cy1);
+        int32_t bg = MOY_TEXT_BG_READ;
+        int k[4] = {0, 0, 0, 0};
+        if (p != NULL && p->bg >= 0 && p->bw > 0 && p->bh > 0) {
+            bg = p->bg & 0xFFFF;
+            k[0] = p->bx - t->cam_x;
+            k[1] = p->by - t->cam_y;
+            k[2] = k[0] + p->bw;
+            k[3] = k[1] + p->bh;
         }
+        if (p != NULL && p->shadow >= 0 && p->shadow_a > 0) {
+            int a = p->shadow_a > 255 ? 255 : p->shadow_a;
+            draw_row(t, r, s, n, x + p->shadow_dx * scale, y + p->shadow_dy * scale,
+                     (uint16_t)p->shadow, a + (a >> 7), scale, ell, bg, k);
+            bg = MOY_TEXT_BG_READ;
+        }
+        draw_row(t, r, s, n, x, y, col, 256, scale, ell, bg, k);
     }
     return w;
 }

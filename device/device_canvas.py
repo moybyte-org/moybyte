@@ -278,6 +278,12 @@ except ImportError:
 # byte first -- the S3 boards, and the host and the browser, which keep that order
 # -- and False on the P4's DPI.
 WIRE_SWAPPED = PAL565_WIRE is PAL565_SW
+# The glyph lane blends in that order too (moy_text.h's moy_text_wire).
+try:
+    import moy_ui as _moy_ui_wire
+    _moy_ui_wire.text_wire(WIRE_SWAPPED)
+except (ImportError, AttributeError):
+    pass
 
 # Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with

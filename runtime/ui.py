@@ -835,11 +835,13 @@ def _look(th):
     return _LOOK
 
 
-def label(cv, rect, text, ink, align=ALIGN_LEFT):
+def label(cv, rect, text, ink, align=ALIGN_LEFT, bg=None, shadow=None):
     """Text in a box at the canvas's font scale: truncated to what fits (at a
     codepoint), placed by `align`, centred vertically. Returns the drawn
-    width."""
-    return _C.label(cv, rect, text, ink, align)
+    width. `bg` is the colour index the caller has filled the whole box with
+    (the glyph lane then need not read it); `shadow` is (ci, alpha 1..255,
+    dx, dy), drawn under the text at the font scale."""
+    return _C.label(cv, rect, text, ink, align, bg, shadow)
 
 
 def list(cv, th, rect, items, region, row_h, sel=-1, kind="row_list"):

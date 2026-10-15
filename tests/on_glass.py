@@ -593,6 +593,121 @@ def fonts_match_host(board, n=48):
     assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
 
 
+# -- the glyph lane (docs/look_2026-10.md step 4) ---------------------------------
+
+# A fuzzed run of prints and labels in version 2 fonts, `glyph_cases(make, out,
+# sources)`: `make(w, h, fs)` a system canvas, `out(i, bytes)` each case's
+# buffer, `sources` the font files' bytes. Python both interpreters run alike
+# (its generator is its own), so the host and a board draw the same cases.
+GLYPH_CASES = r'''
+class _GlyphLcg:
+    """One generator both interpreters step alike."""
+
+    def __init__(self, seed):
+        self.s = seed
+
+    def getrandbits(self, n):
+        self.s = (self.s * 1103515245 + 12345) & 0x7FFFFFFF
+        return (self.s >> 8) & ((1 << n) - 1)
+
+
+_grng = _GlyphLcg(@SEED@)
+GLYPH_TEXTS = ("AVTa yo., 0123", "Hi \u00e9\u2212\u2026", "Wi-Fi  Tray", "x")
+
+
+def glyph_cases(make, out, sources):
+    was_ui, was_print = moy_ui.font("ui")[0], moy_ui.print_font()
+    fids = [moy_ui.font_load(src)[1] for src in sources]
+    for i in range(@N@):
+        fs = 1 + _grng.getrandbits(1)
+        cv = make(96, 32, fs)
+        cv.cls(_grng.getrandbits(6))
+        for _k in range(3):
+            cv.rect(_grng.getrandbits(6), _grng.getrandbits(5), 30, 12, _grng.getrandbits(6))
+        fid = fids[_grng.getrandbits(8) % len(fids)]
+        moy_ui.use_font("ui", fid)
+        moy_ui.print_font(fid)
+        s = GLYPH_TEXTS[_grng.getrandbits(8) % len(GLYPH_TEXTS)]
+        cv.camera(_grng.getrandbits(4) - 8, _grng.getrandbits(3) - 4)
+        if _grng.getrandbits(1):
+            cv.clip(_grng.getrandbits(4), _grng.getrandbits(3), 70, 24)
+        cv.print(s, _grng.getrandbits(5) - 8, _grng.getrandbits(4) - 4, _grng.getrandbits(6))
+        cv.camera()
+        cv.clip()
+        bg = _grng.getrandbits(6)
+        cv.rect(2, 10, 90, 20, bg)
+        shadow = None
+        if _grng.getrandbits(1):
+            shadow = (_grng.getrandbits(6), 1 + _grng.getrandbits(8) % 255, 1, 1)
+        moy_ui.label(cv, (2, 10, 90, 20), s, _grng.getrandbits(6), 0,
+                     bg if _grng.getrandbits(1) else None, shadow)
+        cv.flush_batch()
+        out(i, bytes(cv._buf))
+    moy_ui.print_font(was_print)
+    moy_ui.use_font("ui", was_ui)
+    for f in fids:
+        moy_ui.font_free(f)
+'''
+
+
+def glyph_lane_matches_host(board, tier, n=24):
+    """The board's glyph lane draws the host's bytes: GLYPH_CASES over three
+    faces of the tier's set, each case's buffer by CRC, the host's words
+    byte-swapped where the board's wire order is canonical (the P4's DPI)."""
+    import json
+    import zlib
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import appearance
+    from runtime.host_canvas import make_system_canvas
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "native", "moy_ui", "fonts", "set.json")) as f:
+        names = [n + ".fnt" for n in json.load(f)["tiers"][tier][:3]]
+    cases = GLYPH_CASES.replace("@SEED@", "11").replace("@N@", str(n))
+    swapped = board.pyval("__import__('device_canvas').WIRE_SWAPPED", strict=True)
+    board.pyexec(cases + """
+import device_canvas as _dc, appearance as _ap, binascii as _ba
+
+
+class _GlyphComp:
+    def __init__(self, w, h):
+        self._w, self._h = w, h
+        self._buf = bytearray(w * h * 2)
+
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._buf
+
+    def gfx(self):
+        import moy_gfx
+        return moy_gfx
+
+
+def _glyph_run():
+    got = []
+    glyph_cases(lambda w, h, fs: _dc.SystemCanvas(_GlyphComp(w, h), font_scale=fs),
+        lambda i, b: got.append(_ba.crc32(b)), [_ap.font_file(n) for n in %r])
+    return got
+""" % (names,), strict=True)
+    got = board.pyval("ws._g['_glyph_run']()", strict=True, timeout=120)
+    want = []
+
+    def crc(i, b):
+        if not swapped:
+            w = bytearray(b)
+            w[0::2], w[1::2] = b[1::2], b[0::2]
+            b = bytes(w)
+        want.append(zlib.crc32(b))
+
+    g = {"moy_ui": moy_ui}
+    exec(cases, g)
+    g["glyph_cases"](lambda w, h, fs: make_system_canvas(w, h, font_scale=fs), crc,
+             [appearance.font_file(n) for n in names])
+    assert list(got) == want
+
+
 # -- the theme layout (docs/shell_layout_2026-10.md §5) ---------------------------
 
 def layout_corpus(n, seed=5):

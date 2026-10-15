@@ -115,6 +115,18 @@ int moy_font_info(uint32_t font, moy_font_info_t *out);
 uint32_t moy_text_print_font(void);
 int64_t moy_text_print_font_use(uint32_t font);
 
+// The byte order of every target's words, which the glyph lane blends in:
+// byte-swapped RGB565 (1, the default: the S3 panels, the host and the
+// browser) or canonical (0: the P4's DPI scan-out). The canvas sets it from
+// its wire palette (device_canvas.WIRE_SWAPPED).
+void moy_text_wire(int swapped);
+int moy_text_wire_swapped(void);
+
+// The version 2 glyphs drawn since boot: out[0] those that read nothing (from
+// a ramp, or 1 bpp opaque ink), out[1] those that read the target (the glyph
+// lane's op count, docs/look_2026-10.md step 4).
+void moy_text_lanes(uint32_t out[2]);
+
 // Where text lands: an RGB565 buffer `dw` pixels wide holding `cap` pixels,
 // the camera and the clip (buffer space, exclusive right and bottom).
 typedef struct {
@@ -139,6 +151,31 @@ void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uin
 int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw);
+
+// How the text meets what is under it (docs/look_2026-10.md step 4). A
+// version 2 font's 2 and 4 bpp coverage blends its ink into the target: by
+// default it reads each partly covered pixel and blends over it. With `bg`
+// the caller holds that every pixel of the box (bx, by, bw, bh, in the
+// text's coordinates: the camera applies) is that RGB565 colour, and a glyph
+// that lies inside the box and over no glyph drawn before it stores from a
+// ramp built once a pass and reads nothing; every other glyph reads. With a
+// `shadow` colour the whole string draws first at (shadow_dx, shadow_dy)
+// unscaled pixels from the text (the scale applies) in that colour at
+// `shadow_a` (1..255) of its coverage, and the text over it reads. Petme128
+// and version 1 fonts store a whole pixel: their shadow is solid.
+#define MOY_TEXT_BG_READ (-1)       // bg: no known background
+#define MOY_TEXT_NO_SHADOW (-1)     // shadow: none
+typedef struct {
+    int32_t bg;
+    int bx, by, bw, bh;
+    int32_t shadow;
+    int shadow_a, shadow_dx, shadow_dy;
+} moy_text_paint_t;
+
+// moy_text with a paint; NULL is moy_text's: no known background, no shadow.
+int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
+                   const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
+                   int align, int maxw, const moy_text_paint_t *p);
 
 // The width `s` draws at `scale`, in pixels (0 for an unknown font): the sum
 // of its glyphs' advances and, in a version 2 font, its kerning pairs'.

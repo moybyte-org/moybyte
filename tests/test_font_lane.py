@@ -400,11 +400,12 @@ class _Font2:
         return self.pens(self.bytes_of(s))[1]
 
     def raster(self, bs, x, y, scale, w, h, clip=None, cam=(0, 0)):
+        """1 where any coverage lands (tests/test_glyph_lane.py holds what it
+        blends to)."""
         cx0, cy0, cx1, cy1 = clip or (0, 0, w, h)
         out = [0] * (w * h)
         pens, _w = self.pens(bs)
         top = (1 << self.bpp) - 1
-        half = (top + 2) >> 1
         for b, pen in zip(bs, pens):
             off, gw, gh, gx, gy, _adv = self.rec(b)
             ox = x + (pen + gx) * scale - cam[0]
@@ -413,7 +414,7 @@ class _Font2:
                 for c in range(gw):
                     bit = (r * gw + c) * self.bpp
                     v = self.cov[off + (bit >> 3)] >> (8 - self.bpp - (bit & 7)) & top
-                    if v < half:
+                    if not v:
                         continue
                     for sy in range(scale):
                         for sx in range(scale):

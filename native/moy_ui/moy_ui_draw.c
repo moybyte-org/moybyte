@@ -142,10 +142,15 @@ static void rings(draw_t *d, int x, int y, int w, int h, int ci, int n) {
     }
 }
 
-static void text_at(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
-    moy_text(&d->t, d->f.id, MOY_TEXT_PY, s, n, x, y, d->row->pal[ci & moy_ui_cmask()],
-             d->tfs, MOY_TEXT_LEFT, -1);
+static void text_paint(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci,
+                       const moy_text_paint_t *p) {
+    moy_text_paint(&d->t, d->f.id, MOY_TEXT_PY, s, n, x, y, d->row->pal[ci & moy_ui_cmask()],
+                   d->tfs, MOY_TEXT_LEFT, -1, p);
     d->row->st[MOY_ST_N_TEXT]++;
+}
+
+static void text_at(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
+    text_paint(d, s, n, x, y, ci, NULL);
 }
 
 // A label in the part's effect (docs/theming_2026-09.md §4.3): `shadow` is
@@ -162,6 +167,32 @@ static void text(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
         text_at(d, s, n, x + 1, y + 1, ci);
     }
     text_at(d, s, n, x, y, ci);
+}
+
+// Text over a field this primitive has just filled solid in colour index
+// `field`, `box` the part of it the text may take (moy_text.h's paint: a
+// glyph that lies in it stores from the ramp and reads nothing). A part with
+// a text effect draws its text over itself, and a field of -1 is no fill:
+// both are text().
+static void text_over(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci, int field,
+                      moy_ui_box_t box) {
+    if (d->fx || field < 0) {
+        text(d, s, n, x, y, ci);
+        return;
+    }
+    moy_text_paint_t p = {d->row->pal[field & moy_ui_cmask()], box.x, box.y, box.w, box.h,
+                          MOY_TEXT_NO_SHADOW, 0, 0, 0};
+    text_paint(d, s, n, x + d->pdx, y + d->pdy, ci, &p);
+}
+
+// The columns x0..x1 of the field `b` (inset by `edge` rings), for text_over.
+static moy_ui_box_t span_box(int x0, int x1, moy_ui_box_t b, int edge) {
+    int bx0 = b.x + edge, bx1 = b.x + b.w - edge;
+    x0 = x0 > bx0 ? x0 : bx0;
+    x1 = x1 < bx1 ? x1 : bx1;
+    moy_ui_box_t r = {(int16_t)x0, (int16_t)(b.y + edge), (int16_t)(x1 > x0 ? x1 - x0 : 0),
+                      (int16_t)(b.h > 2 * edge ? b.h - 2 * edge : 0)};
+    return r;
 }
 
 static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scale) {
@@ -348,13 +379,16 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
     int state = moy_ui_state_of(flags, interact);
     colours(&d, kind, state, r->colors, c);
     int field = c[0], ink = c[1], edge = c[2];
+    int on = -1, ring = 0;      // the field this call filled under the text, its rings
     if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, field, edge)) {
         if (field >= 0) {
             fill(&d, x, y, w, h, field);
+            on = field;
         }
         int n = metric(MOY_UI_K_ROW, MOY_UI_M_ROW_EDGE);
         if ((flags & MOY_UI_F_EDGE) && edge >= 0 && n > 0) {
             rings(&d, x, y, w, h, edge, n);
+            ring = n;
         }
     }
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
@@ -381,15 +415,16 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
         size_t vn = (size_t)t_fit(&d.f, r->value, right - tx, ts);
         if (vn) {
             int vw = t_w(&d.f, r->value.p, vn, ts);
-            text(&d, r->value.p, vn, right - vw, ty,
-                 r->value_ink == MOY_UI_FROM_STYLE ? ink : r->value_ink);
+            text_over(&d, r->value.p, vn, right - vw, ty,
+                      r->value_ink == MOY_UI_FROM_STYLE ? ink : r->value_ink, on,
+                      span_box(right - vw, right, b, ring));
             right -= vw + metric(MOY_UI_K_ROW, MOY_UI_M_ROW_GAP) * d.f.w * ts;
         }
     }
     if (r->label.n) {
         size_t ln = (size_t)t_fit(&d.f, r->label, right - tx, ts);
         if (ln) {
-            text(&d, r->label.p, ln, tx, ty, ink);
+            text_over(&d, r->label.p, ln, tx, ty, ink, on, span_box(tx, right, b, ring));
         }
     }
     return MOY_UI_OK;
@@ -481,6 +516,11 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
 
 int moy_ui_label(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink,
                  int align) {
+    return moy_ui_label_paint(s, b, t, ink, align, NULL);
+}
+
+int moy_ui_label_paint(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink,
+                       int align, const moy_ui_label_paint_t *lp) {
     draw_t d;
     open_draw(s, &d);
     size_t n = (size_t)t_fit(&d.f, t, b.w, d.tfs);
@@ -492,7 +532,18 @@ int moy_ui_label(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int in
         x += b.w - w;
     }
     if (n) {
-        text(&d, t.p, n, x, b.y + moy_ui_fdiv(b.h - d.f.line * d.tfs, 2), ink);
+        int y = b.y + moy_ui_fdiv(b.h - d.f.line * d.tfs, 2);
+        moy_text_paint_t p = {MOY_TEXT_BG_READ, b.x, b.y, b.w, b.h, MOY_TEXT_NO_SHADOW, 0, 0, 0};
+        if (lp != NULL && lp->bg >= 0) {
+            p.bg = d.row->pal[lp->bg & moy_ui_cmask()];
+        }
+        if (lp != NULL && lp->shadow >= 0 && lp->shadow_a > 0) {
+            p.shadow = d.row->pal[lp->shadow & moy_ui_cmask()];
+            p.shadow_a = lp->shadow_a;
+            p.shadow_dx = lp->dx;
+            p.shadow_dy = lp->dy;
+        }
+        text_paint(&d, t.p, n, x, y, ink, &p);
     }
     return w;
 }
@@ -687,11 +738,14 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     int state = moy_ui_state_of(flags & ~MOY_UI_F_HOT, interact);
     colours(&d, kind, state, NULL, c);
     int bg = c[0], ink = c[1], edge = c[2];
+    int on = -1, ring = 0;      // the field this call filled under the text, its rings
     if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, bg, edge)) {
         fill(&d, x, y, w, h, bg);
+        on = bg;
         int n = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
         if (n > 0) {
             rings(&d, x, y, w, h, edge, n);
+            ring = n;
         }
     }
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
@@ -707,7 +761,9 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
               d.tfs);
     }
     if (ln) {
-        text(&d, k->label.p, (size_t)ln, tx + iw, y + moy_ui_fdiv(h - d.f.line * fs, 2), ink);
+        int lw = t_w(&d.f, k->label.p, (size_t)ln, fs);
+        text_over(&d, k->label.p, (size_t)ln, tx + iw, y + moy_ui_fdiv(h - d.f.line * fs, 2), ink,
+                  on, span_box(tx + iw, tx + iw + lw, b, ring));
     }
     return MOY_UI_OK;
 }
