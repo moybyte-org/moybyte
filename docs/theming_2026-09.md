@@ -328,11 +328,10 @@ frozen on 2026-10-12 with the first package key that names parts
 `panel_title`, `toolbar`, `scrollbar`, `focus`, `text_field`, `game_btn`,
 `game_icon_btn`, `mini_btn`, `dialog`; then the chrome the WMs and the bar
 draw, style.json's `theme.parts`: `window`, `window.title`, `window.button`,
-`bar`, `bar.item`, `desk`, `desk.icon`, `home.band` (the home carousel's
-card band, §4.9; added 2026-10-15 by phase 6 step 10). A window's buttons are one part
+`bar`, `bar.item`, `desk`, `desk.icon`. A window's buttons are one part
 (ruled 2026-10-12, the pick that builds least: the frame style tells them
 apart, §4.5). `tests/test_theme_loader.py` holds this paragraph to the
-tables. A part added later is additive (§3): the home's other parts once the
+tables. A part added later is additive (§3): the home's parts once the
 shell-layout doc names them, and the Studio's pane parts (a pane tab with a
 close, the panel list, a splitter, a drop zone, the completion popup:
 `docs/studio_2026-09.md` §8), which join the style file as kinds.
@@ -754,17 +753,14 @@ default; a SAFE start runs no cart.
   rects.
 - **Readability at home.** A wallpaper with its own text or characters
   mid-screen fights the carousel (mocked 2026-09-27 with Space Desktop). The
-  home's card band is a part, `home.band`, whose surface the theme sets like
-  any part's: `none` where the wallpaper is readable by construction (the
-  default), or a dither scrim (ruled 2026-10-14, §12.1; phase 6 step 10). The
-  surface paints with the wallpaper, on the canvas the wallpaper drew on
-  (`Wallpaper.draw`'s `band`): a wallpaper cart's on the game canvas before
-  the cover composite, so at its source resolution, a picture's (My Art) and
-  the fill's 1:1 on the system canvas. It lands before `_band_bg`'s capture,
-  keyed on `look_gen` and the band's rect, so a moving frame restores it and
-  a settled frame stamps it: only a full paint, the wallpaper's own, paints
-  it (a live wallpaper's every frame, at its source resolution). A pattern
-  is opaque (§4.4), so a scrim covers the wallpaper under the band.
+  home's card band has no surface of its own: the cards lie on the
+  wallpaper. A band surface (`home.band`, a dither scrim a theme could set,
+  phase 6 step 10) was removed on 2026-10-15 (owner): no seed used it; it
+  could not reach the real case, a kid's own busy picture as the wallpaper
+  in `custom`, which turns nothing on; and an opaque scrim hides the
+  wallpaper the home exists to show. Where a carousel title proves hard to
+  read on glass, the planned answer is the desk's label pill
+  (`ui.icon_label`) under the focused card's title; it is not built.
 - **Prefer wallpapers that need no VM.** A live Python wallpaper keeps the
   Python VM up, against the kernel doc's memory goal (§4.4 there). Images and
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
@@ -1219,9 +1215,10 @@ package will not load. No ledger, no persist-after-render, no reset input
 (§11). **A user theme is a standalone copy** (owner, 2026-10-14): `custom`
 is the picked theme flattened into a self-contained package with no
 `inherits`; inheritance stays among the seeds (§5). **Six more picks were
-rulings** (owner, 2026-10-14; §12): `runtime: "theme"` as the refusal, the
-band's surface over `home_safe`, fonts only from the package's folder and the
-icon home droppable stand; the layout page and the one-line form were
+rulings** (owner, 2026-10-14; §12): `runtime: "theme"` as the refusal, no
+`home_safe` flag (the band's surface that replaced it was removed on
+2026-10-15, §4.9), fonts only from the package's folder and the icon home
+droppable stand; the layout page and the one-line form were
 replaced the same day by the Appearance rulings below.
 
 **The Appearance rulings** (owner, 2026-10-14). The six-page theme editor
@@ -1741,31 +1738,10 @@ port), never here.
      cleared on the same image and theme, and `--painter` is the per-call
      mode; the numbers are #66's.
 
-  10. **The home's readability** (D7, §4.9; landed 2026-10-15). **Readability is the band's
-     surface, not a flag** (ruled 2026-10-14, §12.1): the home's card band
-     is a part, `home.band`, whose surface a theme sets as any part's —
-     `none` in `night`, whose wallpaper is readable by construction, a
-     dither of `panel` where a theme wants one — baked into the wallpaper's
-     bake, keyed on `look_gen` and the band's rect, before `_band_bg`'s
-     capture, so the home's frames never paint it (§4.9). Declined: a
-     `home_safe` manifest flag — the cart author's claim about every theme's
-     home, which no check reads. Scenario: `home idle` under a theme that
-     names a wallpaper cart and one that ships an image. Gate: goldens
-     byte-identical (`night` sets `none`); `home idle` zero on every console
-     board on the desk; the bake's memory is the one wallpaper's, as before
-     this step (the off-heap census, #66).
-     **As built.** `home.band` is a chrome part after `desk.icon`
-     (style.json's `theme.parts`), painted through `ui.paint`, so a sprite
-     cell for it draws as any part's. The home's full paint hands
-     `Wallpaper.draw` the carousel's band rect, and the wallpaper paints the
-     surface where §4.9 says; the grid arrangement's band lies on its panel
-     and takes none. No seed names the part, so every golden holds; nothing
-     new is allocated (the capture is the band backdrop's own layer). The
-     fixture is `tests/fixtures/themes/band.moy` (an opaque dither of
-     `panel` over a busy picture); `tools/p4_bench.py --band` runs `home
-     idle` and the slow drag over its picture, the default wallpaper cart
-     and a live one, with the scrim and without it on the same image; the
-     numbers are #66's. Net: `tests/test_home_band.py`.
+  10. **The home's readability** (D7, §4.9) — removed 2026-10-15: the band
+     surface `home.band` landed that day (`b1f4a91c`) and the owner removed
+     it, because no seed used it, it could not reach a kid's own picture in
+     `custom`, and an opaque scrim hides the wallpaper (§4.9).
 
   11. **The icon home** (`home: icons`; the shell-layout doc §12, the owner's
      "we don't have to do it now", 2026-10-14; landed 2026-10-15). The `grid` arrangement with
@@ -1784,8 +1760,7 @@ port), never here.
      layout: square tiles with a label band under each, two or three rows
      sized from the content width, the columns spread across the grid's
      viewport -- so the grid's selection, keys, taps, scroll, fling and
-     drag partial run unchanged, on its panel and band (no `home.band`
-     under it, as the grid). A cell's icon is the cover's ICON reduction
+     drag partial run unchanged, on its panel and band. A cell's icon is the cover's ICON reduction
      where the cart names no icon, else its sheet's tile, else its type
      glyph, at a whole-number scale; the focused cell wears the ring, the
      favourite star and the label pill, which reaches half a column past
@@ -1911,6 +1886,11 @@ About eighteen systems were studied; the lessons that shaped this doc:
   slot is memory a board does not have, and the home already shows the
   desk's wallpaper behind its cards; one wallpaper, D6.
 - **Painter fills on the PPA** — §4.4.
+- **A surface for the home's band** (`home.band`, a scrim; owner,
+  2026-10-15) — no seed used it, it cannot reach a kid's own picture in
+  `custom`, and an opaque scrim hides the wallpaper the home shows (§4.9).
+  Nor a `home_safe` manifest flag — the cart author's claim about every
+  theme's home, which no check reads (§12.1).
 - From the look sessions (D1): MOY64 grey chrome instead of the PICO-8 base
   colours, cartridge-shell or notched cards, labels inside the desk tiles, and
   Pixel Operator replacing Tiny5.
@@ -1923,12 +1903,13 @@ sequencing picks: the 320×240 layout code retires in phase 3 step 4, toolkit
 reach for hand-drawn rows waits for phase 3 and `look_gen` for phase 6, and
 `outline` stays a skin until phase 3 step 4.
 
-1. **Home readability: `home_safe` or a scrim (§4.9)?** A scrim, as the
-   surface of the home's band part, which a theme sets like any part's and
-   the default leaves `none` (ruled 2026-10-14, phase 6 step 10). No manifest
-   flag: it would be the cart author's claim about every theme's home, and
-   nothing reads it. The default home wallpaper is a still image that is
-   readable by construction.
+1. **Home readability: `home_safe` or a scrim (§4.9)?** Neither. A scrim,
+   as the surface of the home's band part, was ruled 2026-10-14 and built
+   in phase 6 step 10; the owner removed it on 2026-10-15 (§4.9). No
+   manifest flag: it would be the cart author's claim about every theme's
+   home, and nothing reads it. The default home wallpaper is a still image
+   that is readable by construction; a hard-to-read title's planned answer
+   is the label pill (§4.9).
 2. **Sprites in phase 3 or phase 6 (D3)?** Phase 6. Phase 3's parts draw
    surfaces; a sprite part then only replaces a surface, so nothing in phases
    3-5 depends on it, and format 1 already reserves `sprites`.
@@ -1942,7 +1923,7 @@ reach for hand-drawn rows waits for phase 3 and `look_gen` for phase 6, and
 
 Phase 6's picks, accepted by the owner on 2026-10-14 (§9): `runtime:
 "theme"` is the refusal that keeps a theme off other hosts; the home's band
-surface over a `home_safe` flag; a theme's fonts come only from the
+surface over a `home_safe` flag (the surface removed 2026-10-15, §4.9); a theme's fonts come only from the
 package's folder; the icon home (step 11) is droppable. Two more were
 replaced later that day by the Appearance rulings (§9): the layout page
 (now EDIT TASKBAR, step 12, deferrable) and the one-line form (no SHARE or
@@ -1995,7 +1976,7 @@ CASE STANDS WITH FIXES).
 | P3 | dither and pinstripe exist in C (`fillp`) but per pixel; `_shape` is a Python wrapper | accepted | §4.4: the painter on `fillp` semantics, a pattern lane upstream, one gated `surface()` verb |
 | P4 | surface text must never reach a draw; flattened keys allocate | accepted | §4.3 nested tables; §4.4 compiled `stid` records |
 | P5 | fallback per draw; inherits cycles; preview thrash | accepted | §5: resolved at flatten, depth cap and cycle rejection, colour-only previews |
-| P7 | the default home as the live-wallpaper defect; scrim cost | accepted | §4.9: a static default, the scrim at source resolution, idle-home gate |
+| P7 | the default home as the live-wallpaper defect; scrim cost | accepted | §4.9: a static default and the idle-home gate (the scrim, removed 2026-10-15) |
 | P8 | carousel covers on every board | accepted, deferred | the home's structure is the shell-layout doc's (§4.8); its rules carry: one cached base size per cover, an integer upscale at draw, no per-size variants, a T-Deck carousel scenario in p4_bench |
 | P10 | GCC on the S3 faults on unaligned loads | accepted | §4.7: an aligned format, byte assembly or `moybuf`, a fuzzed-font load on S3 glass |
 | P11 | `malloc_dma` has no free; the PSRAM reserve; bakes | accepted | §8 memory rule; §4.6 no per-tint bakes, one-call 9-slice |

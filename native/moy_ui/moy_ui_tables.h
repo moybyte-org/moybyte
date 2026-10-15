@@ -216,7 +216,7 @@ extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_EFFECTS_CAP 32
 // What `text` and `surfaces` are keyed by: the kinds, then the chrome's
 // parts; the style's states, then a window's.
-#define MOY_THEME_PARTS 33
+#define MOY_THEME_PARTS 32
 #define MOY_THEME_STATES 8
 #define MOY_THEME_EDGES 5
 #define MOY_THEME_FILLS 4
@@ -284,7 +284,6 @@ enum {
     MOY_THEME_P_BAR_ITEM = 29,
     MOY_THEME_P_DESK = 30,
     MOY_THEME_P_DESK_ICON = 31,
-    MOY_THEME_P_HOME_BAND = 32,
 };
 // The states past the style's.
 enum {

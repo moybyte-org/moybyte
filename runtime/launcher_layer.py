@@ -1666,11 +1666,10 @@ class LauncherHomeLayer:
         # PREVIOUS screen's chrome in the second buffer.
         self._last_pf = None
         # The wallpaper under the carousel band, captured on every full paint
-        # right after the wallpaper drew with the theme's `home.band` surface
-        # over it: a moving frame restores the band's backdrop from it (the
-        # cards lie on the wallpaper, so the band cannot shift). The key is
-        # what the capture was taken under -- the canvas, the theme (its
-        # `look_gen`), the wallpaper and the band rect.
+        # right after the wallpaper drew: a moving frame restores the band's
+        # backdrop from it (the cards lie on the wallpaper, so the band cannot
+        # shift). The key is what the capture was taken under -- the canvas,
+        # the theme, the wallpaper and the band rect.
         self._band_bg = None          # cv.new_layer sized to the band
         self._band_key = None
 
@@ -1796,8 +1795,7 @@ class LauncherHomeLayer:
         return _statics_base(ws, cv, self.grid) + (ws.look.wallpaper_id,)
 
     def _capture_band_backdrop(self, cv, dt):
-        """Copy the band's rect of the wallpaper just drawn (with the band's
-        surface the theme gives it) -- before any
+        """Copy the band's rect of the wallpaper just drawn -- before any
         chrome or card -- on every full paint, so an edited wallpaper (the
         Paint app's document keeps its id) is never restored stale. Not while
         the wallpaper animates (those frames are full paints anyway) and not
@@ -1931,9 +1929,7 @@ class LauncherHomeLayer:
         # three sections so a slow launcher frame names its eater (PERF's
         # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
-        # The carousel's band takes the theme's `home.band` surface with the
-        # wallpaper, so its capture holds it and no moving frame paints it.
-        ws.wallpaper.draw(dt, self.grid.band_rect() if carousel else None)
+        ws.wallpaper.draw(dt)
         if carousel:
             self._capture_band_backdrop(cv, dt)
         else:
@@ -1995,8 +1991,8 @@ class LauncherHomeLayer:
 
     def _draw_home_chrome(self, cv):
         """The tab row on its plate (with the search query beside it while one
-        is held). The carousel's band draws with the wallpaper (`home.band`,
-        `Wallpaper.draw`): the cards lie on it."""
+        is held). The carousel's band has no backdrop of its own: the cards
+        lie on the wallpaper."""
         ws = self.ws
         th = ws.theme_colors
         lay = ws.layout

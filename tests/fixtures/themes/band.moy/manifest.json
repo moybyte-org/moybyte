@@ -1,7 +1,0 @@
-{
-  "format": "moy-1",
-  "title": "Band",
-  "runtime": "theme",
-  "main": "theme.json",
-  "moybyte": {"type": "theme"}
-}

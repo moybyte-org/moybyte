@@ -203,9 +203,9 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     calls = [0]
     orig = ws.wallpaper.draw
 
-    def spy(dt, band=None):
+    def spy(dt):
         calls[0] += 1
-        return orig(dt, band)
+        return orig(dt)
 
     ws.wallpaper.draw = spy
     bx, by, bw, bh = ws.launcher.band_rect()

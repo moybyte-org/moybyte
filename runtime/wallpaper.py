@@ -37,9 +37,9 @@ try:
 except ImportError:  # pragma: no cover - no proof: every compile arms
     crc32 = None
 try:
-    from ui import cart_text as _cart_text, paint as _ui_paint
+    from ui import cart_text as _cart_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui import cart_text as _cart_text, paint as _ui_paint
+    from runtime.ui import cart_text as _cart_text
 try:
     from widgets import Pmem, _Blit, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -350,36 +350,16 @@ class Wallpaper:
         return (self._wp_live and self._wp_update is not None
                 and self._wp_draw is not None and dt > 0)
 
-    def draw(self, dt, band=None):
-        """Paint the backdrop; `band`, a rect of the system canvas, gets the
-        theme's `home.band` surface over the wallpaper (the home's card band,
-        docs/theming_2026-09.md §4.9)."""
+    def draw(self, dt):
         b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
         was = _cart_text(True)          # a wallpaper is a cart: petme128 (§4.7)
         try:
-            self._paint(dt, band)
+            self._paint(dt)
         finally:
             _cart_text(was)
             self._stock_unbracket(b)
 
-    def _band(self, cv, rect):
-        """The theme's `home.band` surface into `rect` of `cv`, the canvas
-        the wallpaper drew on: nothing where the theme gives the band none."""
-        _ui_paint(cv, self.ws.theme_colors, rect, "home.band")
-
-    def _cart_band(self, sc, gc, band):
-        """`band` (system-canvas units) on the game canvas, before the cover
-        composite: a wallpaper cart's band is at its source resolution, the
-        frame's cells that the composite places under `band`."""
-        s, ox, oy = _cover(sc.w, sc.h, gc.w, gc.h)
-        x0 = max(0, (band[0] - ox) // s)
-        y0 = max(0, (band[1] - oy) // s)
-        x1 = min(gc.w, (band[0] + band[2] - ox + s - 1) // s)
-        y1 = min(gc.h, (band[1] + band[3] - oy + s - 1) // s)
-        if x1 > x0 and y1 > y0:
-            self._band(gc, (x0, y0, x1 - x0, y1 - y0))
-
-    def _paint(self, dt, band=None):
+    def _paint(self, dt):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
         backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
@@ -399,8 +379,6 @@ class Wallpaper:
         if ws.look.wallpaper_id == ws.look.PICTURE:
             try:
                 if self.draw_picture(ws.sys_canvas):
-                    if band is not None:
-                        self._band(ws.sys_canvas, band)
                     ws._reset_canvas_state()
                     self._painted(False)
                     return
@@ -458,11 +436,7 @@ class Wallpaper:
                 # pixels). One object on the 320x240 tiers -> this never runs there.
                 sc = ws.sys_canvas
                 if sc is not ws.canvas:
-                    if band is not None and not _wv:
-                        self._cart_band(sc, ws.canvas, band)
                     self._backdrop_blit(sc, ws.canvas)
-                if band is not None and (_wv or sc is ws.canvas):
-                    self._band(sc, band)
                 self._painted(self._wp_live and self._wp_update is not None)
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
@@ -485,8 +459,6 @@ class Wallpaper:
         # surface the desktop actually shows (#39; the same object as the game
         # canvas on the 320x240 tiers, so byte-identical there).
         ws.sys_canvas.cls(ws.theme_colors["desktop"])
-        if band is not None:
-            self._band(ws.sys_canvas, band)
 
     def _enter_pointer(self, ws, bracketed):
         """Re-map the pointer into the WALLPAPER's own space for the duration of
