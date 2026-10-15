@@ -1485,6 +1485,71 @@ static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 5, 5, ui_frame_band);
 
+// -- depth (moy_ui.h, docs/look_2026-10.md step 6) -------------------------------
+
+static mp_obj_t depth_tuple(void) {
+    const moy_ui_depth_t *d = moy_ui_depth();
+    mp_obj_t t[14] = {
+        MP_OBJ_NEW_SMALL_INT(d->on), MP_OBJ_NEW_SMALL_INT(d->win_r),
+        MP_OBJ_NEW_SMALL_INT(d->card_r), MP_OBJ_NEW_SMALL_INT(d->key_r),
+        MP_OBJ_NEW_SMALL_INT(d->corners), MP_OBJ_NEW_SMALL_INT(d->stepped),
+        MP_OBJ_NEW_SMALL_INT(d->shadow), MP_OBJ_NEW_SMALL_INT(d->edges),
+        MP_OBJ_NEW_SMALL_INT(d->alpha), MP_OBJ_NEW_SMALL_INT(d->blur),
+        MP_OBJ_NEW_SMALL_INT(d->dx), MP_OBJ_NEW_SMALL_INT(d->dy),
+        MP_OBJ_NEW_SMALL_INT(d->back), MP_OBJ_NEW_SMALL_INT(d->frames)};
+    return mp_obj_new_tuple(14, t);
+}
+
+// use_depth(name, light): install theme `name`'s depth in a mode (None: off);
+// the depth as (on, win_r, card_r, key_r, corners, stepped, shadow, edges,
+// alpha, blur, dx, dy, back, frames).
+static mp_obj_t ui_use_depth(mp_obj_t name, mp_obj_t light) {
+    if (name == mp_const_none) {
+        moy_ui_depth_use(NULL, 0, 0);
+    } else {
+        size_t n;
+        const char *s = mp_obj_str_get_data(name, &n);
+        moy_ui_depth_use(s, n, mp_obj_is_true(light));
+    }
+    return depth_tuple();
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_use_depth_obj, ui_use_depth);
+
+// frame_geom(w, h, title_h, active, mode) -> (r, foot, pad_l, pad_t, pad_r, pad_b)
+static mp_obj_t ui_frame_geom(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int g[MOY_UI_GEOM];
+    moy_ui_frame_geom(mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_is_true(a[3]), mp_obj_get_int(a[4]), g);
+    mp_obj_t t[MOY_UI_GEOM];
+    for (int i = 0; i < MOY_UI_GEOM; i++) {
+        t[i] = MP_OBJ_NEW_SMALL_INT(g[i]);
+    }
+    return mp_obj_new_tuple(MOY_UI_GEOM, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_geom_obj, 5, 5, ui_frame_geom);
+
+// frame_under(cv, look, rect, title_h, active, mode)
+static mp_obj_t ui_frame_under(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_frame_under(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_is_true(a[4]),
+                             mp_obj_get_int(a[5])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_under_obj, 6, 6, ui_frame_under);
+
+// cast(cv, look, rect, part, mode) -> whether the theme casts a shadow
+static mp_obj_t ui_cast(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    return mp_obj_new_bool(moy_ui_cast(&s, box_of(a[2]), mp_obj_get_int(a[3]),
+                                       mp_obj_get_int(a[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cast_obj, 5, 5, ui_cast);
+
 // dialog(cv, rect, ring, fill)
 static mp_obj_t ui_dialog(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -1755,6 +1820,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_shape), MP_ROM_PTR(&ui_theme_shape_obj) },
     { MP_ROM_QSTR(MP_QSTR_surface), MP_ROM_PTR(&ui_surface_obj) },
     { MP_ROM_QSTR(MP_QSTR_use_shape), MP_ROM_PTR(&ui_use_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_use_depth), MP_ROM_PTR(&ui_use_depth_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_geom), MP_ROM_PTR(&ui_frame_geom_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_under), MP_ROM_PTR(&ui_frame_under_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cast), MP_ROM_PTR(&ui_cast_obj) },
     { MP_ROM_QSTR(MP_QSTR_pattern_unreadable), MP_ROM_PTR(&ui_pattern_unreadable_obj) },
     { MP_ROM_QSTR(MP_QSTR_parts), MP_ROM_PTR(&ui_parts_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_states), MP_ROM_PTR(&ui_theme_states_obj) },

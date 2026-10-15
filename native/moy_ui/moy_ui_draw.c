@@ -1358,14 +1358,20 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     int dark = L.style == MOY_THEME_FRAME_CLASSIC ? FRAME_BLACK
                                                   : moy_ui_token(look, MOY_UI_T_SHADE_DARK);
     moy_ui_box_t strip = {(int16_t)(w.x + 1), (int16_t)(w.y + 1), (int16_t)(w.w - 2), (int16_t)th};
-    fill(&d, w.x + 3, w.y + w.h, w.w, 3, dark);
-    fill(&d, w.x + w.w, w.y + 3, 3, w.h, dark);
+    int depth = moy_ui_depth()->frames;
+    if (!depth) {
+        fill(&d, w.x + 3, w.y + w.h, w.w, 3, dark);
+        fill(&d, w.x + w.w, w.y + 3, 3, w.h, dark);
+    }
     // The window's 9-slice is the frame above the content: the ring's top
     // row and the strip, in place of the style's, its slot 0 leaving what is
     // under the window; the ring's sides and foot and the shadow stay the
     // style's.
     int top = moy_theme_sheet_cell(MOY_THEME_P_WINDOW, st, 0);
-    if (top >= 0) {
+    if (depth) {
+        // the theme's depth: a rounded frame, its shadow and fringe the desk's
+        moy_ui_depth_frame(s, w, th, active);
+    } else if (top >= 0) {
         int y0 = w.y + th + 1, sides = w.h - th - 2;
         int lc = L.style == MOY_THEME_FRAME_WIN9X ? moy_ui_token(look, MOY_UI_T_SHADE_HI) : edge;
         int rc = L.style == MOY_THEME_FRAME_WIN9X ? dark : edge;
@@ -1433,6 +1439,10 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
         int id = L.b[i].id;
         int ink = fg;
         if (sprite(&d, b, moy_theme_sheet_cell(MOY_THEME_P_WINDOW_BUTTON, st, id), fs)) {
+            continue;
+        }
+        if (depth) {
+            glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
             continue;
         }
         if (L.style == MOY_THEME_FRAME_WIN9X) {

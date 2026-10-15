@@ -192,6 +192,46 @@ int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h,
 void moy_ui_count_call(void);
 uint32_t moy_ui_calls(void);
 
+// -- depth (moy_ui_depth.c, docs/look_2026-10.md step 6) -------------------------
+//
+// The theme's look as the shapes draw it: radii, the shadow and the edges,
+// resolved once per theme and mode (moy_ui_depth_use) and read by the window
+// frame and the casts. A theme with no `look` installs depth off, and its
+// frame draws as its style always has. Colours are look values (moy_theme.h):
+// an index, a slot, or RGB.
+typedef struct {
+    uint8_t on, win_r, card_r, key_r, corners, stepped, shadow, edges;
+    uint8_t frames;                 // the window frame is the depth's
+                                    // (moy_theme_look_frames)
+    uint16_t shadow_565;            // canonical RGB565
+    int16_t alpha, blur, dx, dy, back;  // alpha 0..255; back: a back window's share, %
+    int16_t line, line_back;        // win.frame's and win.frame_back's widths
+    int32_t line_c, line_back_c, body;
+} moy_ui_depth_t;
+// Install theme `name`'s depth in a mode (light 1: its `light` look). Answers on.
+int moy_ui_depth_use(const char *name, size_t n, int light);
+const moy_ui_depth_t *moy_ui_depth(void);
+// A shadow's size: the theme's, a smaller one (a quarter of the blur, half the
+// offset: a window being dragged), or none.
+enum { MOY_UI_UNDER_FULL = 0, MOY_UI_UNDER_SMALL = 1, MOY_UI_UNDER_NONE = 2 };
+enum { MOY_UI_CAST_WINDOW = 0, MOY_UI_CAST_CARD = 1, MOY_UI_CAST_KEY = 2 };
+// A w x h window's frame geometry under the depth: [0] its corners' radius,
+// [1] its foot (the rows under the content its bottom corners need), [2..5]
+// how far its shadow at `mode`'s size reaches left, up, right and down. All
+// zero unless the depth draws the frame (`frames`).
+#define MOY_UI_GEOM 6
+void moy_ui_frame_geom(int w, int h, int th, int active, int mode, int out[MOY_UI_GEOM]);
+// The frame's own pixels under the depth (moy_ui_frame draws it): the strip,
+// the sides and the foot inside the rounded outline, the ring, the rule.
+void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active);
+// What a window leaves to the layer under it: its shadow at `mode`'s size and
+// its outline's partly covered pixels, blended over what that layer just
+// painted (runtime/wm_desk.py draws it, clipped to what it repainted).
+int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode);
+// The shadow box `b` casts as a part (MOY_UI_CAST_*), its own pixels left
+// alone. Answers whether the theme casts one.
+int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);
+
 #define MOY_UI_DEFAULT INT16_MIN
 #define MOY_UI_FROM_STYLE (-2)
 

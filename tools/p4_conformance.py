@@ -11,6 +11,11 @@ Speaks moy-spec's player protocol (conformance/run.py --player), so:
 checks the BOARD against the same golden frames the WebAssembly player is
 checked against.
 
+    python tools/p4_conformance.py --shapes --board p4
+
+runs the 2026-10 look's shape cases (SHAPE_CASES below) through the board's
+moy_gfx beside the host binding, one line a case.
+
 WHY THIS IS THE INTERESTING ONE. The web player and moycore both rasterize in
 software the suite can reach easily; the board is where the C moy_gfx kernel,
 the RGB565 framebuffer and SPEC.md 1.1's memory floor actually live, and none
@@ -427,6 +432,87 @@ def via_server(sock_path, cart, out):
     return True
 
 
+# -- the 2026-10 look's shapes (docs/look_2026-10.md step 6) -----------------
+#
+# Not a cart: the shapes are the system canvas's verbs and blend into RGB565
+# words no palette index names, so a frame capture cannot carry them. Each
+# case instead draws through the board's own moy_gfx into a buffer of its own
+# over a fixed pattern and answers its CRC, beside the host binding's for the
+# same call (runtime/gfx_binding.py). One case per primitive; both sides blend
+# in the high-byte-first order, the board's own put back after.
+SHAPE_W, SHAPE_H = 48, 32
+SHAPE_CASES = (
+    ("rounded fill", "rrect(buf, 48, 3, 2, 40, 26, 10, 15, 0, -1, 0x7bef, 0, 0, 0, 0, 48, 32)"),
+    ("stepped corners", "rrect(buf, 48, 3, 2, 40, 26, 10, 31, 0, -1, 0x7bef, 0, 0, 0, 0, 48, 32)"),
+    ("per-corner radii", "rrect(buf, 48, 3, 2, 40, 26, 10, 3, 0, -1, 0x18e3, 0, 0, 0, 0, 48, 32)"),
+    ("circle", "rrect(buf, 48, 10, 4, 24, 24, 12, 15, 0, -1, 0xffff, 0, 0, 0, 0, 48, 32)"),
+    ("pill", "rrect(buf, 48, 2, 10, 44, 12, 99, 15, 0, -1, 0x07e0, 0, 0, 0, 0, 48, 32)"),
+    ("ring", "rrect(buf, 48, 3, 2, 40, 26, 10, 527, 0xf800, -1, None, 0, 0, 0, 0, 48, 32)"),
+    ("ring and fill", "rrect(buf, 48, 3, 2, 40, 26, 10, 271, 0xf800, -1, 0x4a69, 0, 0, 0, 0, 48, 32)"),
+    ("bevel", "rrect(buf, 48, 3, 2, 40, 26, 6, 271, 0xffff, 0x0000, 0x9cd3, 0, 0, 0, 0, 48, 32)"),
+    ("inner mask", "rrect(buf, 48, 3, 2, 40, 26, 10, 47, 0, -1, 0x4a69, 0, 0, 0, 0, 48, 32)"),
+    ("fringe mask", "rrect(buf, 48, 3, 2, 40, 26, 10, 79, 0, -1, 0x4a69, 0, 0, 0, 0, 48, 32)"),
+    ("smooth paint", "rrect(buf, 48, 0, 0, 48, 32, 8, 15, 0, -1, "
+                     "(0, 0, 0, 32, 0, 0x001f, 1000, 0xf800), 0, 0, 0, 0, 48, 32)"),
+    ("stepped paint", "rrect(buf, 48, 0, 0, 48, 32, 8, 15, 0, -1, "
+                      "(1, 4, 0, 32, 0, 0x0000, 1000, 0xffff), 0, 0, 0, 0, 48, 32)"),
+    ("dithered paint", "rrect(buf, 48, 0, 0, 48, 32, 8, 15, 0, -1, "
+                       "(2, 0, 0, 32, 0, 0x1234, 500, 0x4321, 1000, 0x7777), 0, 0, 0, 0, 48, 32)"),
+    ("camera and clip", "rrect(buf, 48, 9, 6, 40, 26, 10, 271, 0xf800, -1, 0x4a69, "
+                        "4, 3, 5, 4, 40, 28)"),
+    ("soft shadow", "shadow(buf, 48, 8, 6, 30, 16, 6, 8, 0, 4, 0x18a8, 120, 0, "
+                    "(8, 6, 30, 16, 6), 0, 0, 0, 0, 48, 32)"),
+    ("hard shadow", "shadow(buf, 48, 8, 6, 30, 16, 6, 0, 3, 3, 0x0000, 255, 1, None, "
+                    "0, 0, 0, 0, 48, 32)"),
+)
+
+SHAPE_RUN = """
+import moy_gfx, binascii
+_SHAPE_CASES = %r
+def _shapes(order):
+    out = []
+    moy_gfx.shape_order(1)
+    try:
+        for src in _SHAPE_CASES:
+            buf = bytearray((i * 37 + 11) & 255 for i in range(%d))
+            eval(src, {'buf': buf, 'rrect': moy_gfx.rrect, 'shadow': moy_gfx.shadow})
+            out.append(binascii.crc32(buf) & 0xffffffff)
+    finally:
+        moy_gfx.shape_order(order)
+    return out
+""" % ([c[1] for c in SHAPE_CASES], SHAPE_W * SHAPE_H * 2)
+
+
+def shapes_host():
+    """The cases' CRCs through the host binding."""
+    sys.path.insert(0, ROOT)
+    from runtime import gfx_binding
+    out = []
+    gfx_binding.shape_order(1)
+    for _name, src in SHAPE_CASES:
+        buf = bytearray((i * 37 + 11) & 255 for i in range(SHAPE_W * SHAPE_H * 2))
+        eval(src, {"buf": buf, "rrect": gfx_binding.rrect,   # noqa: S307 -- fixed text
+                   "shadow": gfx_binding.shadow})
+        out.append(binascii.crc32(buf) & 0xFFFFFFFF)
+    return out
+
+
+def run_shapes(board, log=print):
+    """Each case on the board beside the host; the number that differ."""
+    if not board.pyexec(SHAPE_RUN):
+        raise RuntimeError("could not install the shape cases")
+    got = board.pyval("_shapes(__import__('device_canvas').WIRE_SWAPPED)", timeout=60.0)
+    want = shapes_host()
+    if not isinstance(got, list) or len(got) != len(want):
+        raise RuntimeError("the board answered %r" % (got,))
+    bad = 0
+    for (name, _src), g, w in zip(SHAPE_CASES, got, want):
+        ok = g == w
+        bad += not ok
+        log("  %-18s %s" % (name, "ok" if ok else "DIFFERS (board %08x, host %08x)" % (g, w)))
+    return bad
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cart", nargs="?", help="the conformance cart folder")
@@ -445,6 +531,9 @@ def main(argv=None):
     ap.add_argument("--socket", default=SOCKET)
     ap.add_argument("--no-server", action="store_true",
                     help="ignore a running server and drive the board directly")
+    ap.add_argument("--shapes", action="store_true",
+                    help="the look's shape cases (SHAPE_CASES) on the board "
+                         "beside the host binding, instead of a cart")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
 
@@ -452,6 +541,14 @@ def main(argv=None):
     board_dir = os.path.join(ROOT, BOARDS[a.board])
     if a.serve:
         return serve(a.port, a.socket, log, board_dir)
+    if a.shapes:
+        board = P4Board(a.port, board_dir=board_dir)
+        try:
+            board.drain(0.4)
+            bad = run_shapes(board)
+        finally:
+            board.close()
+        return 1 if bad else 0
     if not a.cart or not a.out:
         ap.error("cart and out are required unless --serve")
 

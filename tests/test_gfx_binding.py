@@ -356,7 +356,28 @@ shape(buf, 16, 8, 99, 0, 0, 4, 4, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
 
 """
 
-OPS = OPS + CLAMP_OPS
+# The 2026-10 look's shapes (native/moy_gfx/moy_shape.c): both corner kinds,
+# rings and bevels, the masks, the three paints, clipping and the camera, and
+# shadows soft and hard with and without a hole. Each blends over what the
+# ops before it drew, so the two sides must agree on every read.
+SHAPE_OPS = """
+rrect(buf, 16, 1, 1, 14, 6, 3, 15, 0, -1, 0x7bef, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 4, 31, 0, -1, 0x18e3, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 2, 0, 12, 8, 3, 271, 0xf800, -1, 0x07e0, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 1, 1, 14, 6, 2, 517, 0xffff, 0x0000, None, 1, 1, 1, 1, 15, 7)
+rrect(buf, 16, 0, 0, 16, 8, 3, 47, 0, -1, 0x4a69, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 3, 79, 0, -1, 0x9cd3, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, -3, -2, 20, 12, 6, 15, 0, -1, (0, 0, -2, 12, 0, 0xf800, 1000, 0x001f), 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 2, 15, 0, -1, (1, 3, 0, 8, 0, 0x0000, 1000, 0xffff), 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 2, 15, 0, -1, (2, 0, 0, 8, 0, 0x1234, 500, 0x4321, 1000, 0x7777), 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 4, 4, 0, 5, 3, 15, 0, -1, 0x0f0f, 0, 0, 0, 0, 16, 8)
+shadow(buf, 16, 3, 2, 8, 4, 2, 3, 1, 1, 0x0000, 128, 0, None, 0, 0, 0, 0, 16, 8)
+shadow(buf, 16, 3, 2, 8, 4, 2, 3, 1, 1, 0x0000, 200, 0, (3, 2, 8, 4, 2), 0, 0, 0, 0, 16, 8)
+shadow(buf, 16, 2, 1, 10, 5, 3, 0, 2, 1, 0xf800, 255, 1, None, 1, 0, 1, 1, 15, 7)
+shadow(buf, 16, 0, 0, 16, 8, 0, 64, 0, 0, 0x001f, 255, 0, None, 0, 0, 0, 0, 16, 8)
+"""
+
+OPS = OPS + CLAMP_OPS + SHAPE_OPS
 
 
 def _op_lines(text):
@@ -541,7 +562,8 @@ def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
 
 
 # Every verb the canvas calls is in the op script.
-_NO_PIXELS = frozenset()
+# Called by the canvas and drawing nothing: the word order the shapes blend in.
+_NO_PIXELS = frozenset({"shape_order"})
 
 
 def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
@@ -802,6 +824,8 @@ def blit_indices(*a): moy_gfx.blit_indices(*a); _shot()
 def sspr(*a): moy_gfx.sspr(*a); _shot()
 def tline(*a): moy_gfx.tline(*a); _shot()
 def shape(*a): moy_gfx.shape(*a); _shot()
+def rrect(*a): moy_gfx.rrect(*a); _shot()
+def shadow(*a): moy_gfx.shadow(*a); _shot()
 
 @OPS@
 '''

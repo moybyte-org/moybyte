@@ -230,6 +230,11 @@ int moy_theme_backdrop(const char *name, size_t n, int variant, int surface,
 // name's and a text's longest, texts, the first button leaf: the bindings' check.
 extern const int moy_theme_look_dims[10];
 
+// Whether theme `name`'s window frame is its look's (docs/look_2026-10.md
+// step 6): the nearest package of its chain that carries a `look` or names a
+// frame style carries a look and names none.
+int moy_theme_look_frames(const char *name, size_t n);
+
 // -- RGB (docs/look_2026-10.md step 5) ------------------------------------------
 //
 // A colour value's RGB565 word (canonical order), its WCAG luminance (x10000,

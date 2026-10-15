@@ -1,6 +1,8 @@
 """The windowed desk's ROOT layer: the wallpaper + the one OS bar + the desk
 icon column, with the retained-backdrop cache a gesture blits instead of
-re-rendering the desk (#58/#155). `WindowedWM` holds one as `_backdrop_layer`
+re-rendering the desk (#58/#155), and under the theme's depth the windows'
+shadows and outline fringes over whatever of it was just painted (the cache
+holds the desk without them). `WindowedWM` holds one as `_backdrop_layer`
 and hands it the cache state; the layer decides per frame whether to render
 live, blit the cache, or skip the restore outright.
 """
@@ -88,7 +90,9 @@ class _BackdropLayer(Layer):
         # and only a discrete change (open/close/min/max) invalidates. Focus
         # is deliberately NOT in this sig: focus moves no desk pixels.
         s = wm._shape_sig()
-        wsig = (s[0], s[2])               # order + geometry, no focus
+        # order + geometry; focus too under the depth, whose shadows and
+        # outline fringes (drawn here, _draw_unders) follow it
+        wsig = (s[0], s[2], s[1]) if _ui.depth()[13] else (s[0], s[2])
         if wsig != wm._desk_win_sig:
             wm._desk_win_sig = wsig
             if wm._drag is None and wm._resize is None:
@@ -104,6 +108,7 @@ class _BackdropLayer(Layer):
                 wm._gesture_hist = []         # gesture over: drop the damage trail
             self._draw_desktop(dt)
             wm._capture_backdrop()
+            wm._draw_unders()
             return
         if wm._backdrop_valid:
             # CONTENT gesture: the window is STATIONARY, so the desk outside it
@@ -137,6 +142,8 @@ class _BackdropLayer(Layer):
             _perf = getattr(self.ws, "perf_capture", False)
             _t0 = _ticks_ms() if _perf else 0
             union = wm._blit_backdrop_cache()
+            if wm._restored is not False:
+                wm._draw_unders(wm._restored)
             if _perf:
                 self.ws._pf_wm_restore = _ticks_ms() - _t0
             if union is not None:
@@ -147,6 +154,7 @@ class _BackdropLayer(Layer):
         wm._desk_painted = True
         self._draw_desktop(dt)                # cache lost: render + re-snapshot
         wm._capture_backdrop()
+        wm._draw_unders()
 
     def _desk_sig(self):
         """Everything the desk's wallpaper + icon column depends on.

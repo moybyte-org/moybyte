@@ -2980,6 +2980,30 @@ int moy_theme_backdrop(const char *name, size_t n, int variant, int surface,
     return (int)k;
 }
 
+// -- whose window frame (docs/look_2026-10.md step 6) ------------------------------
+
+typedef struct {
+    int done, frames;
+} frames_ctx_t;
+
+static void apply_frames(const moy_theme_pkg_t *pkg, void *ctx) {
+    frames_ctx_t *c = ctx;
+    if (c->done) {
+        return;
+    }
+    if (pkg->frame[0] != 0) {
+        c->done = 1;
+    } else if (pkg->n_entries || pkg->n_paints || pkg->n_tiles || pkg->n_appbtn) {
+        c->done = 1;
+        c->frames = 1;
+    }
+}
+
+int moy_theme_look_frames(const char *name, size_t n) {
+    frames_ctx_t c = {0, 0};
+    return chain(name, n, apply_frames, &c) == MOY_THEME_OK && c.frames;
+}
+
 // -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
 
 // The loader's predicate: (a, b) reaches MOY_THEME_CONTRAST.

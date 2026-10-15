@@ -542,6 +542,8 @@ class DeviceCanvas:
         self._crow = _glass_mod.Canvas(self.w, self.h)
         self._crow.point(self._buf, getattr(compositor, "buf_h", 0))
         self._gfx = compositor.gfx()                  # the native kernel, every tier
+        # The shapes blend over the buffer, so they read its word order.
+        self._gfx.shape_order(WIRE_SWAPPED)
         # Native petme128 text (#62): the kernel's text op over the staged
         # moy_font glyph blob.
         self._gfx_text = self._gfx.text
@@ -1601,6 +1603,59 @@ class DeviceCanvas:
         # The ellipse OUTLINE -- oval()'s own rim, pixel for pixel, because one
         # walk produces both. That is why they are not a fill plus a stroke.
         self._shape(_MG_OVALB, x, y, w, h, 0, 0, c)
+
+    # -- the 2026-10 look's shapes (native/moy_gfx/moy_shape.h) -------------
+    #
+    # System-canvas verbs, not cart verbs: the shell draws its windows, cards
+    # and keys with them. Colours are indices (the theme's block included);
+    # every pixel they write is RGB565 between them, so a corner blends.
+
+    def _paint_arg(self, fill, y, h):
+        # None, a colour index, or a paint (mode, steps, stops): mode 0 smooth,
+        # 1 steps, 2 dither (moy_shape.h), stops ((t thousandths, colour), ...)
+        # down the rect's rows.
+        if fill is None:
+            return None
+        if isinstance(fill, int):
+            return self._col(fill)
+        mode, steps, stops = fill
+        out = [int(mode), int(steps), int(y), int(h)]
+        for t, c in stops:
+            out.append(int(t))
+            out.append(self._col(c))
+        return tuple(out)
+
+    def rrect(self, x, y, w, h, r, fill, ring=None, line=1, ring_lo=None,
+              corners=15, stepped=False, mask=0):
+        """A rect with corners of radius `r` (the `corners` bits: 1 top left,
+        2 top right, 4 bottom right, 8 bottom left), anti-aliased or
+        `stepped`: `fill` (a colour or a paint, above) and a `ring` of width
+        `line` in one composition; `ring_lo` makes the ring a bevel (`ring`
+        top and left). `mask` 1 draws only the fully covered pixels, 2 only
+        the partly covered ones."""
+        self.flush_batch()
+        line = int(line) if ring is not None else 0
+        opts = (int(corners) & 15) | (16 if stepped else 0) | ((int(mask) & 3) << 5) \
+            | ((line & 255) << 8)
+        hi = self._col(ring) if ring is not None else 0
+        lo = self._col(ring_lo) if ring_lo is not None else -1
+        return self._gfx.rrect(self._buf, self._stride, int(x), int(y), int(w), int(h),
+                               int(r), opts, hi, lo, self._paint_arg(fill, y, h),
+                               self._cam_x, self._cam_y, self._clip_x0, self._clip_y0,
+                               self._clip_x1, self._clip_y1)
+
+    def shadow(self, x, y, w, h, r, c, alpha, blur, dx=0, dy=0, hole=None,
+               stepped=False):
+        """The shadow the rect (x, y, w, h) with corners `r` casts: colour `c`
+        at `alpha` (0..255), blurred `blur` pixels either side of its edge
+        (0: a hard shadow), offset (dx, dy). `hole` (x, y, w, h, r) is left
+        alone: the caster's body, drawn over it."""
+        self.flush_batch()
+        return self._gfx.shadow(self._buf, self._stride, int(x), int(y), int(w), int(h),
+                                int(r), int(blur), int(dx), int(dy), self._col(c),
+                                int(alpha), stepped, hole, self._cam_x, self._cam_y,
+                                self._clip_x0, self._clip_y0, self._clip_x1,
+                                self._clip_y1)
 
     def fillp(self, p=None, c=None):
         # SPEC.md 6: a 4x4 dither for the nine SHAPE verbs. `p` is sixteen bits

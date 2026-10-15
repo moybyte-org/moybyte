@@ -551,6 +551,12 @@ Ruled 2026-10-12, each the pick that builds least:
 - **`window`'s own surface is not read**: the ring is the style's, and a
   surface under the content would be filled and then covered every chrome draw.
 
+A theme whose `look` is nearer in its chain than any frame style draws the
+2026-10 look's frame instead (`docs/look_2026-10.md` step 6): rounded, with
+the look's shadow and outline, and a footprint of its own that the WM reads
+from `ui.frame_geom` (the corners' radius, a foot under the content, the
+shadow's reach).
+
 ### 4.6 Sprites and icons (D3)
 
 - **One sheet per theme at fixed cells** (style.json's `theme.sprite_cells`,

@@ -79,7 +79,17 @@ and no cursor: its drag is the Settings scroll. The live theme is put back.
 `--painter` times one part three ways on the board, into a scratch layer: a
 `button` painted from a surface (`raised, fill surface, border edge`), the
 same part from the sheet's 9-slice, and a window frame with and without the
-sheet's `window` 9-slice and title buttons -- µs per call, N calls each.
+sheet's `window` 9-slice and title buttons -- µs per call, N calls each; then
+the 2026-10 look's shapes under Moy Day (docs/look_2026-10.md step 6): the
+depth's window frame, what it leaves to the desk at each shadow size, a
+card's shadow and the canvas's `rrect` and `shadow` bare.
+
+`--shadows` is step 8's shadow run: on a windowed tier Calc dragged over
+Files under the live theme and under Moy's Day and Night, the dragged
+window's shadow at the theme's size, smaller and none (`ws.wm.drag_shadow`),
+each with the idle desk after it; on every tier the carousel under the same
+themes (home idle, the key glide, idle after it, a fling), where the hero
+casts its shadow only at rest. The live theme is put back.
 
 `--icons` benches the icon home (phase 6 step 11) beside the grid
 arrangement it is drawn from, on the same image and store: each set on the
@@ -607,9 +617,47 @@ def _pb(n, sheet):
     "button": {"rest": "raised, fill surface, border edge"}}}).encode(),)
 
 
+# The 2026-10 look's shapes (docs/look_2026-10.md step 6) under Moy Day: a
+# window frame drawn by the depth and what it leaves to the desk (its shadow
+# at each size and its fringe), a card's shadow, and the canvas verbs bare.
+SHAPES_BENCH = """
+import time, ui
+def _ps(n):
+    cv = (ws.sys_canvas or ws.canvas).new_layer(320, 200)
+    th = ws.theme_colors
+    try:
+        ui.use_shape('moy')
+        ui.use_depth('moy', True)
+        out = {}
+        def t(label, fn):
+            fn()
+            t0 = time.ticks_us()
+            for _i in range(n):
+                fn()
+            out[label] = time.ticks_diff(time.ticks_us(), t0) // n
+        r = (40, 30, 230, 140)
+        t('frame (depth)', lambda: ui.frame(cv, th, r, 18, 'BENCH', True, True, 1))
+        for name, mode in (('full', 0), ('small', 1), ('none', 2)):
+            t('frame_under ' + name, lambda: ui.frame_under(cv, th, r, 18, True, mode))
+        t('cast card 96x96', lambda: ui.cast(cv, th, (60, 40, 96, 96), 1))
+        t('rrect 230x140 r12', lambda: cv.rrect(40, 30, 230, 140, 12, 7))
+        t('rrect ring 230x140 r12', lambda: cv.rrect(40, 30, 230, 140, 12, None, ring=0))
+        t('rrect smooth paint 230x140', lambda: cv.rrect(40, 30, 230, 140, 12,
+                                                       (0, 0, ((0, 7), (1000, 1)))))
+        t('shadow 230x140 blur16', lambda: cv.shadow(40, 30, 230, 140, 12, 0, 46, 16, 0, 8,
+                                                   hole=(40, 30, 230, 140, 12)))
+        return out
+    finally:
+        cv.release()
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+        ws.mark_dirty()
+"""
+
+
 def bench_painter(b, out_path, n=50):
     """µs per call of a part painted from its surface and from the sheet,
-    and of a window frame without and with the sheet's 9-slice."""
+    of a window frame without and with the sheet's 9-slice, and of the
+    look's shapes (SHAPES_BENCH)."""
     sheet = (SPRITE_FIXTURE / "parts.moygfx").read_bytes()
     pyexec(b, "_PB_SHEET = %r\n" % sheet + PAINTER_BENCH)
     pyexec(b, "ws._pbr = None\nws._pbr = _pb(%d, _PB_SHEET)" % n, timeout=120)
@@ -622,12 +670,86 @@ def bench_painter(b, out_path, n=50):
              "| button 96x32 (9-slice) | %d | %d |" % (r["button surface"], r["button sprite"]),
              "| window frame 230x110 (9-slice + 3 title buttons) | %d | %d |"
              % (r["frame surface"], r["frame sprite"])]
+    pyexec(b, SHAPES_BENCH)
+    pyexec(b, "ws._psr = None\nws._psr = _ps(%d)" % n, timeout=120)
+    sh = pyval(b, "ws._psr", timeout=30)
+    b.drain(1.0)
+    if sh:
+        lines += ["", "| shape (Moy Day) | us/call |", "|---|---|"]
+        lines += ["| %s | %d |" % (k, sh[k]) for k in sorted(sh)]
     text = "\n".join(lines)
     print(text)
     if out_path:
         with open(out_path, "w") as f:
             f.write(text + "\n")
     return r
+
+
+def _set_moy(b, variant):
+    pyexec(b, "ws.look.set_theme('moy', persist=False, variant=%r)\nws.mark_dirty()"
+           % variant)
+    b.drain(2.0)
+
+
+def bench_shadows(b, out_path):
+    """Step 8's shadow scenarios (docs/look_2026-10.md): on a windowed tier
+    a window dragged over the desk beside a still one, under the live theme
+    and under Moy's Day and Night with the dragged window's shadow at the
+    theme's size, smaller and none (`ws.wm.drag_shadow`), each with the desk
+    idle after, which paints zero; on every tier the home's carousel under
+    the same themes: idle, the key glide (the hero casts no shadow while the
+    row moves), idle after it and a fling. The live theme is put back."""
+    bench = Bench(b)
+    pyexec(b, HOME_KEY)
+    was = pyval(b, "(ws.look.theme_name, ws.look.theme_variant)")
+    windowed = bool(pyval(b, "hasattr(ws.wm, 'drag_shadow')"))
+    themes = [("live", None), ("moy day", "light"), ("moy night", "dark")]
+    for tag, variant in themes:
+        if variant is not None:
+            _set_moy(b, variant)
+        if windowed:
+            home(b)
+            for app in ("files", "calc"):
+                pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % app)
+                b.drain(2.5)
+            for knob, size in ((0, "full"), (1, "small"), (2, "none")):
+                pyexec(b, "ws.wm.drag_shadow = %d" % knob)
+                bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
+                b.drain(1.0)
+                bench.stop("window drag (calc over files), %s, drag shadow %s"
+                           % (tag, size))
+                bench.start(); b.drain(2.0)
+                bench.stop("desk idle after it, %s" % tag)
+            pyexec(b, "ws.wm.drag_shadow = 1")
+        pyexec(b, "ws.open_library()"); b.drain(6.0)
+        bench.start(); b.drain(2.0); bench.stop("home idle, %s" % tag)
+        pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+        b.drain(1.5)
+        bench.start()
+        for _k in range(12):
+            b.cmd("py ws._hk('right') or 1", wait_for="PY")
+            b.drain(0.12)
+        b.drain(2.0)
+        bench.stop("held-key glide (12 presses right), %s" % tag)
+        bench.start(); b.drain(2.0); bench.stop("idle after the glide, %s" % tag)
+        band = pyval(b, "ws.launcher.band_rect()")
+        if band:
+            bx, by, bw, bh = band
+            cy = by + bh // 2
+            b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+            bench.start(); b.drain(4.0)
+            bench.stop("fling: frames until idle, %s" % tag)
+        home(b)
+    if was:
+        pyexec(b, "ws.look.set_theme(%r, persist=False, variant=%r)\nws.mark_dirty()"
+               % (was[0], was[1]))
+        b.drain(1.5)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
 
 
 def push_sprite_fixture(args):
@@ -1357,12 +1479,16 @@ def main():
                     help="a theme's backdrop: its raster, the theme load and "
                          "mode switch, the home and desk idle and the "
                          "carousel over it")
+    ap.add_argument("--shadows", action="store_true",
+                    help="a window drag under Moy's soft shadows at each drag "
+                         "size, and the carousel's hero at rest and moving")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     if args.store or not (args.repaint or args.popovers or args.kernel
                           or args.home or args.edit or args.sprites or args.painter
-                          or args.icons or args.backdrop):
+                          or args.icons or args.backdrop
+                          or args.shadows):
         push_store_fixture(args)
     if args.sprites:
         push_sprite_fixture(args)
@@ -1371,6 +1497,7 @@ def main():
         if (not args.repaint and not args.kernel and not args.home
                 and not args.edit and not args.store and not args.sprites
                 and not args.painter and not args.icons and not args.backdrop
+                and not args.shadows
                 and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
@@ -1395,6 +1522,8 @@ def main():
             bench_icons(b, args.out)
         elif args.backdrop:
             bench_backdrop(b, args.out)
+        elif args.shadows:
+            bench_shadows(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

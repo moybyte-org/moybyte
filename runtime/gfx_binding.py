@@ -64,7 +64,7 @@ _CFLAGS = native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"]
 # stale copy.
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
            "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
-           "moy_backdrop.h", "moy_backdrop.c")
+           "moy_backdrop.h", "moy_backdrop.c", "moy_shape.h", "moy_shape.c")
 
 # ...and where to find them. One tuple rather than a literal at the call site,
 # because a caller that reconstructs the build (tests/test_native_build_no_
@@ -100,6 +100,16 @@ _SIGS = (
                  _I, _I, _I, _I], None),
     ("mg_shape", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
                   _I, _I, _I, _I, _I, _I], None),
+    # The 2026-10 look's shapes (native/moy_gfx/moy_shape.c), flat as the
+    # usermod's wrappers call them.
+    ("mg_rrect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, ctypes.c_int32,
+                  _P, _I, _I, _I, _I, _I, _I], _I),
+    ("mg_shadow", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, _I, _I,
+                   _P, _I, _I, _I, _I, _I, _I], _I),
+    ("moy_shape_stats", [_P], None),
+    ("moy_shape_reset", [_I], None),
+    ("moy_shape_wire_swapped", [_I], None),
+    ("moy_shape_coverage", [_I, _I, _I], _I),
     # ...and the host-side rest.
     ("hg_lr_size", [], _Z),
     ("hg_lr_engine", [_I], None),
@@ -233,6 +243,75 @@ def shape(buf, dw, dh, kind, a0, a1, a2, a3, a4, a5, color, pat, hole,
                     int(color) & 0xFFFF, int(pat) & 0xFFFF, int(hole),
                     int(cam_x), int(cam_y),
                     int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+class _Paint(ctypes.Structure):
+    _fields_ = [("n", ctypes.c_uint8), ("mode", ctypes.c_uint8), ("steps", ctypes.c_uint8),
+                ("pad", ctypes.c_uint8), ("t", ctypes.c_int16 * 6), ("c", ctypes.c_uint16 * 6),
+                ("y0", ctypes.c_int), ("h", ctypes.c_int)]
+
+
+class _Hole(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_int) for n in ("x", "y", "w", "h", "r")]
+
+
+def _paint(fill):
+    """moy_shape_paint_t from what modmoy_gfx.c's rrect takes: None, a wire
+    colour, or (mode, steps, y0, h, t0, c0, t1, c1, ...)."""
+    if fill is None:
+        return None
+    p = _Paint()
+    if isinstance(fill, int):
+        p.n = 1
+        p.c[0] = fill & 0xFFFF
+        return p
+    if len(fill) < 6:
+        return None
+    p.mode, p.steps, p.y0, p.h = (int(v) for v in fill[:4])
+    k = min((len(fill) - 4) // 2, 6)
+    for i in range(k):
+        p.t[i] = int(fill[4 + 2 * i])
+        p.c[i] = int(fill[5 + 2 * i]) & 0xFFFF
+    p.n = k
+    return p
+
+
+def rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    p = _paint(fill)
+    return _lib().mg_rrect(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
+                           int(h), int(r), int(opts), int(hi), int(lo),
+                           None if p is None else ctypes.cast(ctypes.pointer(p), _P),
+                           int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
+           cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    hp = None if hole is None else _Hole(*(int(v) for v in hole))
+    return _lib().mg_shadow(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
+                            int(h), int(r), int(blur), int(dx), int(dy), int(col),
+                            int(alpha), int(bool(stepped)),
+                            None if hp is None else ctypes.cast(ctypes.pointer(hp), _P),
+                            int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def shape_stats():
+    out = (ctypes.c_uint32 * 5)()
+    _lib().moy_shape_stats(ctypes.cast(out, _P))
+    return tuple(out)
+
+
+def shape_reset(caches):
+    _lib().moy_shape_reset(int(bool(caches)))
+
+
+def shape_order(swapped):
+    _lib().moy_shape_wire_swapped(int(bool(swapped)))
+
+
+def shape_coverage(r, i, j):
+    return _lib().moy_shape_coverage(int(r), int(i), int(j))
 
 
 def scroll_rect(buf, stride, rx, ry, rw, rh, dx, dy):

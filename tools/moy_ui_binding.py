@@ -127,6 +127,15 @@ class _Span(c.Structure):
     _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
 
 
+class _Depth(c.Structure):
+    _fields_ = ([(n, c.c_uint8) for n in ("on", "win_r", "card_r", "key_r", "corners",
+                                          "stepped", "shadow", "edges", "frames")]
+                + [("shadow_565", c.c_uint16)]
+                + [(n, c.c_int16) for n in ("alpha", "blur", "dx", "dy", "back", "line",
+                                            "line_back")]
+                + [(n, c.c_int32) for n in ("line_c", "line_back_c", "body")])
+
+
 class _FrameButton(c.Structure):
     _fields_ = [("box", _Box), ("id", c.c_uint8), ("right", c.c_uint8)]
 
@@ -189,6 +198,11 @@ _DRAW_SIGS = (
     ("moy_ui_frame", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
     ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
+    ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
+    ("moy_ui_depth", [], c.c_void_p),
+    ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
+    ("moy_ui_frame_under", [c.POINTER(_Sink), _Box, _I, _I, _I], _I),
+    ("moy_ui_cast", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_dialog", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_text_field", [c.POINTER(_Sink), _Box, _Span, _Span, c.c_void_p, _I], _I),
     ("moy_ui_panel", [c.POINTER(_Sink), _Box, _Span, _I, c.POINTER(_Box)], _I),
@@ -515,6 +529,19 @@ def binding():
                                      int(fs), out)
         return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
 
+    def frame_geom(w, h, title_h, active, mode):
+        out = (_I * 6)()
+        lib.moy_ui_frame_geom(int(w), int(h), int(title_h), 1 if active else 0, int(mode), out)
+        return tuple(out)
+
+    def frame_under(cv, look, rect, title_h, active, mode):
+        _check(lib.moy_ui_frame_under(c.byref(sink(cv, look)), box_of(rect), int(title_h),
+                                      1 if active else 0, int(mode)))
+
+    def cast(cv, look, rect, part, mode):
+        return bool(lib.moy_ui_cast(c.byref(sink(cv, look)), box_of(rect), int(part),
+                                    int(mode)))
+
     def frame_band(cv, look, rect, light, side):
         _check(lib.moy_ui_frame_band(c.byref(sink(cv, look)), box_of(rect),
                                      1 if light else 0, int(side)))
@@ -576,7 +603,8 @@ def binding():
 
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
-              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, dialog, text_field, panel, focus_ring, inset, cut,
+              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom,
+              frame_under, cast, dialog, text_field, panel, focus_ring, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
     m.list = list_
@@ -737,6 +765,18 @@ def binding():
     m.theme_shape = theme_shape
     m.surface = surface
     m.use_shape = use_shape
+
+    def use_depth(name, light):
+        if name is None:
+            lib.moy_ui_depth_use(None, 0, 0)
+        else:
+            b = _b(name)
+            lib.moy_ui_depth_use(b, len(b), 1 if light else 0)
+        d = _Depth.from_address(lib.moy_ui_depth())
+        return (d.on, d.win_r, d.card_r, d.key_r, d.corners, d.stepped, d.shadow, d.edges,
+                d.alpha, d.blur, d.dx, d.dy, d.back, d.frames)
+
+    m.use_depth = use_depth
 
     def theme(name, light):
         b = _b(name)

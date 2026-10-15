@@ -70,6 +70,72 @@ class WindowChrome:
                   self._fs())
         self._win_grip(win, focused)
 
+    # -- depth: rounded frames and shadows (ui.use_depth) ---------------------
+
+    def _win_radius(self, win):
+        """The depth's corner radius for `win` (0 with depth off)."""
+        if not _ui.depth()[13]:
+            return 0
+        return _ui.frame_geom(win.w, win.h, win.title_h)[0]
+
+    def _win_foot(self, win):
+        """The rows under `win`'s content its rounded bottom corners take."""
+        if not _ui.depth()[13]:
+            return 0
+        return _ui.frame_geom(win.w, win.h, win.title_h)[1]
+
+    def _pad_extent(self, win, x, y, w, h):
+        """(x, y, w, h) grown by what its draw touches beyond it: the border,
+        the classic 3px shadow, or the depth's shadow at its full size."""
+        if _ui.depth()[13]:
+            g = _ui.frame_geom(w, h, win.title_h)
+            return (x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4, h + g[3] + g[5] + 4)
+        return (x - 2, y - 2, w + 7, h + 7)
+
+    def _draw_unders(self, clip=None):
+        """Every visible window's shadow and outline fringe, bottom to top,
+        over the desk the backdrop layer just painted: the whole desk, or only
+        `clip`, the rect a cache restore covered -- and never over the bar,
+        which the windows stay off too. Nothing else draws them, so each lands
+        once on freshly painted pixels. A window being dragged or resized casts
+        `drag_shadow`'s size."""
+        if not _ui.depth()[13]:
+            return
+        rc = self._root_canvas
+        g = self._drag if self._drag is not None else self._resize
+        moving = self._wins.get(g[0]) if g is not None else None
+        th = self.ws.theme_colors
+        x0, y0, w, h = self._desk_rect()
+        x1, y1 = x0 + w, y0 + h
+        if clip is not None:
+            x0, y0 = max(x0, clip[0]), max(y0, clip[1])
+            x1, y1 = min(x1, clip[0] + clip[2]), min(y1, clip[1] + clip[3])
+        if x1 <= x0 or y1 <= y0:
+            return
+        rc.clip(x0, y0, x1 - x0, y1 - y0)
+        try:
+            for key in self._order:
+                win = self._wins.get(key)
+                if win is None or win.minimized:
+                    continue
+                mode = self.drag_shadow if win is moving else _ui.UNDER_FULL
+                _ui.frame_under(rc, th, (win.x, win.y, win.w, win.h), win.title_h,
+                                key == self._focus, mode)
+        finally:
+            rc.clip()
+
+    def _resize_feet(self):
+        """A look that moves the depth re-sizes every window's foot (its
+        content rect, and so its buffer)."""
+        gen = self.ws.look.look_gen
+        if gen == self._foot_gen:
+            return
+        self._foot_gen = gen
+        for key in self._order:
+            win = self._wins.get(key)
+            if win is not None and win.foot != self._win_foot(win):
+                self._resize_window(win, win.w, win.h)
+
     def _win_title(self, win):
         ws = self.ws
         if win.kind == "desktop":

@@ -1703,8 +1703,9 @@ class Appearance:
     def _go_live(self, name):
         """Make theme `name` (in the live variant) the colours the shell
         draws: its block onto every canvas's indices 64.. and the readability
-        check's, its placed tokens `ws.theme_colors`."""
+        check's, its placed tokens `ws.theme_colors`; and its depth (`ui.use_depth`)."""
         live = live_colors(name, self.theme_variant)
+        _uimod.use_depth(name, self.theme_variant == "light")
         put = getattr(getattr(self.ws, "canvas", None), "theme_block", None)
         if put is not None:
             put(live.block)

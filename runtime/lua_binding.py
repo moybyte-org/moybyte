@@ -95,6 +95,7 @@ def build(verbose=False, wasm=None):
         "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
         "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
         "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+        "moy_shape.h", "moy_shape.c",
         "moy_json.h", "moy_json.c", "moy_htab.h", "moy_htab.c",
         "moy_play.h", "moy_play.c", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
         "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
@@ -119,8 +120,8 @@ def build(verbose=False, wasm=None):
         inc, lib = got
         # ...and the toolkit's rows a compiled app imports, over the RUN sink
         # (native/moy_ui/moy_ui_wasm.h)
-        names += ["moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_interact.c",
-                  "moy_ui_wasm.h", "moy_ui_wasm.c", "moy_theme.h", "moy_theme.c"]
+        names += ["moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+                  "moy_ui_interact.c", "moy_ui_wasm.h", "moy_ui_wasm.c", "moy_theme.h", "moy_theme.c"]
         names += ["moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c",
                   "moy_audio.h", "moy_files.h", "moy_files.c", "moyhost_wasm.c"]
         cflags += ["-DMOY_WASM=1", "-isystem", inc,

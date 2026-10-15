@@ -57,6 +57,7 @@
 #include "moy_gfx_kernels.h"
 #include "moy_text.h"
 #include "moy_backdrop.h"
+#include "moy_shape.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
@@ -916,6 +917,109 @@ static mp_obj_t moy_gfx_shape(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shape_obj, 19, 19, moy_gfx_shape);
+
+// -- the 2026-10 look's shapes (moy_shape.h) --------------------------------------
+//
+// rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0,
+// cx1, cy1): `fill` is None, a wire colour, or a paint as a flat tuple
+// (mode, steps, y0, h, t0, c0, t1, c1, ...).
+static int shape_paint(mp_obj_t o, moy_shape_paint_t *p) {
+    if (o == mp_const_none) {
+        return 0;
+    }
+    memset(p, 0, sizeof(*p));
+    if (mp_obj_is_int(o)) {
+        p->n = 1;
+        p->c[0] = (uint16_t)mp_obj_get_int(o);
+        return 1;
+    }
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(o, &n, &it);
+    if (n < 6) {
+        return 0;
+    }
+    p->mode = (uint8_t)mp_obj_get_int(it[0]);
+    p->steps = (uint8_t)mp_obj_get_int(it[1]);
+    p->y0 = mp_obj_get_int(it[2]);
+    p->h = mp_obj_get_int(it[3]);
+    size_t k = (n - 4) / 2;
+    k = k > MOY_SHAPE_STOPS ? MOY_SHAPE_STOPS : k;
+    for (size_t i = 0; i < k; i++) {
+        p->t[i] = (int16_t)mp_obj_get_int(it[4 + 2 * i]);
+        p->c[i] = (uint16_t)mp_obj_get_int(it[5 + 2 * i]);
+    }
+    p->n = (uint8_t)k;
+    return 1;
+}
+
+static mp_obj_t moy_gfx_rrect(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    moy_shape_paint_t p;
+    int has = shape_paint(a[10], &p);
+    int n = mg_rrect(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                     mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                     mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                     has ? &p : NULL, mp_obj_get_int(a[11]), mp_obj_get_int(a[12]),
+                     mp_obj_get_int(a[13]), mp_obj_get_int(a[14]), mp_obj_get_int(a[15]),
+                     mp_obj_get_int(a[16]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_rrect_obj, 17, 17, moy_gfx_rrect);
+
+// shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
+// cam_x, cam_y, cx0, cy0, cx1, cy1): `hole` None or (x, y, w, h, r).
+static mp_obj_t moy_gfx_shadow(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    moy_shape_hole_t hole = {0, 0, 0, 0, 0}, *hp = NULL;
+    if (a[13] != mp_const_none) {
+        mp_obj_t *it;
+        mp_obj_get_array_fixed_n(a[13], 5, &it);
+        hole.x = mp_obj_get_int(it[0]);
+        hole.y = mp_obj_get_int(it[1]);
+        hole.w = mp_obj_get_int(it[2]);
+        hole.h = mp_obj_get_int(it[3]);
+        hole.r = mp_obj_get_int(it[4]);
+        hp = &hole;
+    }
+    int n = mg_shadow(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                      mp_obj_get_int(a[6]), mp_obj_get_int(a[7]), mp_obj_get_int(a[8]),
+                      mp_obj_get_int(a[9]), mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+                      mp_obj_get_int(a[12]), hp, mp_obj_get_int(a[14]), mp_obj_get_int(a[15]),
+                      mp_obj_get_int(a[16]), mp_obj_get_int(a[17]), mp_obj_get_int(a[18]),
+                      mp_obj_get_int(a[19]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shadow_obj, 20, 20, moy_gfx_shadow);
+
+// shape_stats() -> moy_shape.h's counters; shape_reset(caches); shape_order(swapped).
+static mp_obj_t moy_gfx_shape_stats(void) {
+    uint32_t st[MOY_SHAPE_STATS];
+    moy_shape_stats(st);
+    mp_obj_t o[MOY_SHAPE_STATS];
+    for (int i = 0; i < MOY_SHAPE_STATS; i++) {
+        o[i] = mp_obj_new_int_from_uint(st[i]);
+    }
+    return mp_obj_new_tuple(MOY_SHAPE_STATS, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_shape_stats_obj, moy_gfx_shape_stats);
+
+static mp_obj_t moy_gfx_shape_reset(mp_obj_t caches) {
+    moy_shape_reset(mp_obj_is_true(caches));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_reset_obj, moy_gfx_shape_reset);
+
+static mp_obj_t moy_gfx_shape_order(mp_obj_t swapped) {
+    moy_shape_wire_swapped(mp_obj_is_true(swapped));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_order_obj, moy_gfx_shape_order);
 
 // circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
 // circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
@@ -2049,6 +2153,11 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_sspr),       MP_ROM_PTR(&moy_gfx_sspr_obj) },
     { MP_ROM_QSTR(MP_QSTR_tline),      MP_ROM_PTR(&moy_gfx_tline_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape),      MP_ROM_PTR(&moy_gfx_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rrect),      MP_ROM_PTR(&moy_gfx_rrect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shadow),     MP_ROM_PTR(&moy_gfx_shadow_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape_order), MP_ROM_PTR(&moy_gfx_shape_order_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },

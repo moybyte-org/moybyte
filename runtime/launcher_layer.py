@@ -1254,8 +1254,8 @@ class Carousel(Launcher):
             fill(cv, (x, y0, x1 - x, y1 - y0))
 
     def _paint(self, cv, sheet_for, r):
-        """Every card meeting rect `r`, clipped to it, and the centre card's
-        ring and plate."""
+        """Every card meeting rect `r`, clipped to it, the centre card's ring
+        and plate, and at rest its shadow (the theme's depth, `ui.cast`)."""
         clip = getattr(cv, "clip", None)
         if clip is not None:
             self._card_clip = r
@@ -1263,6 +1263,12 @@ class Carousel(Launcher):
         x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
         c = self.nearest()
         d = 2 * self.layout.fs + 2
+        if self.items and not self.moving:
+            # The hero's shadow, at rest only: a moving frame repaints the band
+            # whole and draws none, so a glide never pays it.
+            hero = self.tile_rect(c)
+            if hero is not None:
+                _ui.cast(cv, self.theme, hero, _ui.CAST_CARD)
         for i, t in self._visible():
             if (t[0] - d < x1 and x0 < t[0] + t[2] + d
                     and t[1] - d < y1 and y0 < t[1] + t[3] + d):

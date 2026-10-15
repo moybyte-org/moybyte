@@ -119,6 +119,11 @@ class _FakeGfx:
     circb = staticmethod(gfx_binding.circb)
     line = staticmethod(gfx_binding.line)
     shape = staticmethod(gfx_binding.shape)
+    rrect = staticmethod(gfx_binding.rrect)
+    shadow = staticmethod(gfx_binding.shadow)
+    shape_order = staticmethod(gfx_binding.shape_order)
+    shape_stats = staticmethod(gfx_binding.shape_stats)
+    shape_reset = staticmethod(gfx_binding.shape_reset)
     blit565_scale = staticmethod(gfx_binding.blit565_scale)
 
     @staticmethod
@@ -586,6 +591,55 @@ def test_fill_pattern_and_ovals_match():
     _draw_shapes(host)
     _draw_shapes(dev)
     _assert_same(host, dev, "shapes")
+
+
+def _draw_look_shapes(c):
+    """The 2026-10 look's verbs (native/moy_gfx/moy_shape.h): under a camera,
+    a clip and a pal remap, a rounded fill, a ring, a bevel, a stepped
+    corner, the three paints and a shadow soft and hard."""
+    c.cls(1)
+    c.pal(8, 12)
+    c.camera(2, 1)
+    c.clip(3, 2, 56, 42)
+    c.rrect(4, 3, 30, 20, 8, 8)
+    c.rrect(20, 14, 30, 22, 9, 7, ring=2, line=2)
+    c.rrect(6, 26, 24, 16, 5, None, ring=7, ring_lo=0, corners=5)
+    c.rrect(36, 2, 20, 12, 6, 11, stepped=True)
+    c.rrect(2, 2, 60, 40, 12, (0, 0, ((0, 1), (1000, 12))), mask=2)
+    c.rrect(40, 20, 20, 20, 4, (1, 3, ((0, 0), (1000, 7))))
+    c.rrect(30, 30, 30, 14, 3, (2, 0, ((0, 8), (500, 9), (1000, 10))))
+    c.shadow(10, 10, 24, 14, 6, 0, 140, 6, 0, 3, hole=(10, 10, 24, 14, 6))
+    c.shadow(40, 4, 14, 10, 3, 2, 255, 0, 2, 2, stepped=True)
+    c.clip()
+    c.camera()
+    c.pal()
+
+
+def test_the_look_shapes_match():
+    m, host, dev = _both()
+    _draw_look_shapes(host)
+    _draw_look_shapes(dev)
+    _assert_same(host, dev, "look shapes")
+
+
+def test_the_look_shapes_are_the_kernel_under_the_canvas_state():
+    """The verbs hand the kernel what the canvas holds: the pal remap through
+    `_col`, the camera and the clip in buffer space -- the same pixels as the
+    kernel called with them directly."""
+    _, host, _ = _both()
+    host.cls(1)
+    ref = bytearray(host._buf)
+    host.pal(8, 12)
+    host.camera(2, 1)
+    host.clip(3, 2, 56, 42)
+    host.rrect(4, 3, 30, 20, 8, 8, ring=7, line=1)
+    host.shadow(10, 10, 24, 14, 6, 0, 140, 6, 0, 3)
+    want = host._wire[12]
+    gfx_binding.rrect(ref, W, 4, 3, 30, 20, 8, 15 | (1 << 8), host._wire[7], -1, want,
+                      2, 1, 3, 2, 59, 44)
+    gfx_binding.shadow(ref, W, 10, 10, 24, 14, 6, 6, 0, 3, host._wire[0], 140, False, None,
+                       2, 1, 3, 2, 59, 44)
+    assert bytes(host._buf) == bytes(ref)
 
 
 def test_the_fill_pattern_is_screen_anchored_under_a_camera():

@@ -170,6 +170,8 @@ class _Win:
         self.w = w                    # outer size (incl. border + title strip)
         self.h = h
         self.title_h = title_h        # the WM strip (title + min/max/X)
+        self.foot = 0                 # rows under the content: the depth's
+                                      # rounded bottom corners (ui.frame_geom)
         self.buf = buf                # SystemCanvas (apps) | None (player)
         self.ctx = ctx                # _LayoutCtx (apps) | None (player)
         self.minimized = False        # hidden; lives on as a taskbar chip
@@ -184,7 +186,7 @@ class _Win:
     def content_rect(self):
         """The inner rect the content occupies (below the WM title strip)."""
         return (self.x + 1, self.y + 1 + self.title_h,
-                self.w - 2, self.h - 2 - self.title_h)
+                self.w - 2, self.h - 2 - self.title_h - self.foot)
 
 
 class _Parked:
@@ -361,6 +363,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # the kid has since resized is never re-sized under them.
         self._play_intent = "play"
         self._drag = None             # (kind, grab_dx, grab_dy) while dragging
+        # The shadow a window being dragged or resized casts (ui.UNDER_*): the
+        # theme's own, a smaller one, or none. tools/p4_bench.py measures each.
+        self.drag_shadow = 1
+        self._restored = False        # what the last cache restore covered: a
+                                      # rect, None (all of it) or False (nothing)
+        self._foot_gen = None         # the look the windows' feet were sized under
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
         self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
@@ -832,13 +840,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         #54/#43 deflayer mechanism: a retained background window blits by
         reference, only a live window re-ships) -- and the P4's device system
         canvas (#58) returns an RGB565 layer sharing its native moy_gfx kernel."""
+        win.foot = self._win_foot(win)
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
             return
         full = self._root_canvas
         cw = max(64, win.w - 2)
-        ch = max(40, win.h - 2 - win.title_h)
+        ch = max(40, win.h - 2 - win.title_h - win.foot)
         self._drop_win(win)             # a resize's old buffer, freed first
         win.buf = full.new_layer(cw, ch)
         win.ctx = self._make_ctx(win.buf)
@@ -1325,7 +1334,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if g is self._resize:
             w = max(w, self._resize[5])
             h = max(h, self._resize[6])
-        return (win.x - 2, win.y - 2, w + 7, h + 7)
+        return self._pad_extent(win, win.x, win.y, w, h)
 
     def _seed_gesture_hist(self):
         """Prime the damage history at gesture START: every physical buffer
@@ -1345,6 +1354,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         the bar strip, the chips), so the partial restore is pixel-safe. Falls
         back to the full copy when the canvas lacks blit_strip_rect (the web
         RecordingLayer) or via the `union` A/B knob."""
+        self._restored = False
         if self._backdrop is None:
             return
         rc = self._root_canvas
@@ -1354,6 +1364,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if (stamp is None or self._union_disabled or ext is None
                 or not self._gesture_hist):
             rc.blit_strip(self._backdrop, 0, 0)
+            self._restored = None
             if ext is not None:
                 self._gesture_hist = (self._gesture_hist + [ext])[-n:] \
                     if self._gesture_hist else [ext] * n
@@ -1385,10 +1396,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if g is self._resize \
                     and self._live_resize_ok() and win.kind != "desktop":
                 bw, bh = self._resize[5], self._resize[6]
+            # The rows the depth's rounded corners leave partly uncovered are
+            # restored with the margin: only the square middle is opaque.
+            r = self._win_radius(win)
             bx0 = max(x0, win.x)
-            by0 = max(y0, win.y)
+            by0 = max(y0, win.y + r)
             bx1 = min(x1, win.x + bw)
-            by1 = min(y1, win.y + bh)
+            by1 = min(y1, win.y + bh - r)
         if win is None or bx0 >= bx1 or by0 >= by1:
             stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, y1 - y0)
         else:
@@ -1401,7 +1415,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if bx1 < x1:                                       # right strip
                 stamp(self._backdrop, 0, 0, bx1, by0, x1 - bx1, by1 - by0)
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
-        return (x0, y0, x1 - x0, y1 - y0)
+        self._restored = (x0, y0, x1 - x0, y1 - y0)
+        return self._restored
 
     @staticmethod
     def _union_bbox(rects):
@@ -1413,11 +1428,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         y1 = max(r[1] + r[3] for r in rects)
         return (x0, y0, x1 - x0, y1 - y0)
 
-    @staticmethod
-    def _win_extent(win):
-        """Everything a window's draw touches: body, border, the 3px drop
-        shadow, padded like _gesture_extent."""
-        return (win.x - 2, win.y - 2, win.w + 7, win.h + 7)
+    def _win_extent(self, win):
+        """Everything a window's draw touches: body, border and shadow, padded
+        like _gesture_extent."""
+        return self._pad_extent(win, win.x, win.y, win.w, win.h)
 
     def _hand_damage(self, touched):
         """Close this frame's damage description: hand the backdrop's rects and
@@ -1776,6 +1790,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _draw_windows(self, dt):
         self._sync_windows()
+        self._resize_feet()
         self._surface_windows()
         # Per-window surface marks (§2: this is the Stage 9 re-partition -- the
         # one "windows" span becomes one span per window + a "chips" residual).
