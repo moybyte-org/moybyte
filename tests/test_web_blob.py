@@ -70,7 +70,7 @@ def _generate(tmp_path, dist, **kw):
 
 def test_what_is_baked_is_what_the_server_serves():
     """Two lists would be one 404 on a board that has the bytes, or dead weight
-    in a 5MB slot. The generator reads the webhost's own table
+    in an app slot. The generator reads the webhost's own table
     (native/moy_net/moy_webhost.c); this pins that every name it bakes is one
     the server answers with its bytes."""
     from runtime import net_binding as nb
@@ -508,7 +508,7 @@ def test_the_p4_usermod_list_includes_the_module():
 
 @pytest.mark.parametrize("name,path", BOARDS, ids=[b for b, _ in BOARDS])
 def test_an_image_too_big_for_its_slot_fails_the_build(name, path):
-    """Baking ~573KB into the app leaves the T-Deck ~188KB of its 5MB slot. An
+    """The baked browser console is a large share of every app image. An
     overflow used to be a WARNING that still produced a full set of artifacts
     -- an image esptool refuses and no board can take over OTA. It fails now,
     on both boards (the P4 had no guard at all).

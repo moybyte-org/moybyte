@@ -855,7 +855,7 @@ board stands against each value, are #224's.
   | image | why |
   |---|---|
   | Waveshare P4, Guition P4 | the 6 MiB slots (owner, 2026-10-05; `f738797`) were cut for the kernel; the floor leaves it about half of their headroom, so the store never pays for a second table change |
-  | T-Deck, Guition S3 | no table change is planned; the floor leaves the kernel about two-thirds of their headroom |
+  | T-Deck, Guition S3 | the 6 MiB slots (owner, 2026-10-15) were cut when the 2026-10 look's font set took these images near the floor: the theme fonts stay in the image, so the slots grow and the vfs (the store's fallback without a card) gives the room |
   | Zero | the baked web bundle took it under its first floor (256 KiB), and the 3 MiB slots (owner, 2026-10-07) re-tabled it rather than take the bundle off its image. The floor is **200 KB since 2026-10-15** (owner): the baked browser console's phase-6 growth left 236 KB (`bc073f04`), and the kernel's networking already crossed onto the Zero on 2026-10-08, so the floor guards general growth out of an 8 MB flash whose store pays for every slot byte twice |
 
 - **The heap after boot** (sprint 1b's gate): the GC heap the boot leaves at the

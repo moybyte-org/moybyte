@@ -72,7 +72,7 @@ def asset_names():
 
     Not a second list. The allowlist the server serves from and the set the
     image bakes have to be the same set -- an asset in one and not the other is
-    either a 404 on a board that has the bytes, or dead weight in a 5 MB slot.
+    either a 404 on a board that has the bytes, or dead weight in an app slot.
     """
     with open(WEBHOST_C) as f:
         text = f.read()

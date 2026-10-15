@@ -152,8 +152,7 @@ moybyte_stage_native
 
 #    The OTA identity stamp (#53). BOARD "tdeck" is the same id the deleted
 #    fork build stamped, kept on purpose: an OTA payload is an app-partition
-#    image on a byte-identical partition table, so boards that took their last
-#    update from the fork build move onto this one over plain OTA.
+#    image and the manifest is per board.
 moybyte_ota_identity tdeck "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
