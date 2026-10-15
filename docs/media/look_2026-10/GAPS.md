@@ -29,7 +29,7 @@ carousel frame.
   `sunk`, `lcd`, `lcd_ink`. §7 holds every non-text role to 3:1 against
   what it marks, and warns when `primary` and `tonal` resolve alike.
 - **New fields:** the theme model's groups (`THEMES.md`): `render`, the
-  radii, the ring, `shadow`, `edges`, `backdrop`, `win`, `bar`, `hhbar`,
+  radii, `focus`, `shadow`, `edges`, `backdrop`, `win`, `bar`, `hhbar`,
   `current`, the launcher and list fields, `buttons`, the display and keycap
   fields. An absent field takes the model's default.
 - **Cost:** 6–8 days. **Frame:** none; 128 bytes per table.
@@ -160,14 +160,23 @@ one PPA doubling pass on the P4.
 
 ## Parts
 
-**12. The three marks** as three parts: `focus` (the ring, after the part,
-from `ring_w`, `ring_gap`, `ring_alpha`), `current` (`bar` or `fill`, with
-`sel`, `sel_ink` and a colour in a window behind) and `primary` (gap 13).
-Every part draws its state through them and nothing else; a test in
-`tests/test_ui_style_data.py` holds that `accent` appears only in `focus`.
-A part under 28 px takes the hugging ring (DESIGN, the marks): the focus
-part draws a tinted plate and a thin ring inside the part's own box, before
-the part's glyph. **Cost:** 3.5 days. **Frame:** none.
+**12. The three marks** (DESIGN, the marks): `focus` and `current` as theme
+properties, and `primary` (gap 13). The loader takes `focus = {style, card,
+small, color, ink, ring, plate, lift, edge, underline}` and `current =
+{style, color, alpha}` with the model's defaults. One focus part draws the
+mark by size class (`card` 48 px and up, `small` under 28 px, any other
+part) with six renderers: `ring` (today's, with the in-box ring on a small
+part), and five new ones, `plate`, `lift`, `edge`, `underline` and `invert`;
+each draws after the part's fill and before its content and returns the
+content's ink. One current part draws `plate`, `fill` or `bar`. Every part
+draws its state through them and nothing else; a test in
+`tests/test_ui_style_data.py` holds that `accent` appears only in `focus`,
+and the readability check holds `accent` 3:1 or better on a `plate`
+current. **Cost:** 5 days (the property and its loader 1, the five new
+renderers 2, the current plate 0.5, the callers that drew a ring or a bar
+1.5). **Frame:** none, but `lift` on the carousel's hero grows the card and
+its shadow over the 3 focus frames, so the card layer redraws them:
+`--home` on tdeck.
 
 **13. Button kinds** (DESIGN, "Button kinds"): `play` becomes `primary` and
 `author` `tonal` in `style.json` and the ten callers; `cell` is the `toggle`
@@ -238,10 +247,10 @@ cover. **Cost:** 1.5 days.
 | layout | cost |
 |---|---|
 | Settings: only working rows, the About facts, a caption on every group | 1 day |
-| Appearance: one preview size on both boards, a fixed caption line, the current bar | 1 day |
+| Appearance: one preview size on both boards, a fixed caption line, the current mark | 1 day |
 | Calc: a tape history (new behaviour), the display inset, the 4×5 keypad in kinds | 2 days |
 | Files: Places (Projects, Carts, Art, Music, Trash), file pictures, ellipsis | 3 days |
-| the sprite editor: the grey checker, the ring cursor, the bar on tool and colour | 1 day |
+| the sprite editor: the grey checker, the ring cursor, the current mark on tool and colour | 1 day |
 | the editors in today's layout: the tab row with a bare Play, the playtest window, the code overflow fade | 1.5 days |
 | the `code_*` roles as theme roles: out of the content exemption, held to 4.5:1 on the code surface | 1 day |
 | desk icons as tiles with labels | 0.5 day |
@@ -315,5 +324,5 @@ mode (now gap 11, a theme's choice); the 14 and 17 px desk rows; dimming a
 window behind by 25%; the 12×12 two-tone icons; the redrawn default
 wallpaper (the default theme draws a backdrop).
 
-**Total:** about 94–102 developer days for gaps 1–26; gaps 27–30 add
+**Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
 about 6.

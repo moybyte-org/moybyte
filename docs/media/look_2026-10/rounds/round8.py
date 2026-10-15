@@ -254,7 +254,9 @@ def ladder_bar(cv, T, cur):
     for tab, slot, label in LADDER:
         if tab == cur:
             tw = s + 4 + lf.width(label)
-            if T["tabs"]["style"] == "pill":
+            if M.cur_style(T) == "plate":
+                c = M.current_mark(cv, T, x - 3, mid - 10, tw + 6, 20, 5)
+            elif T["tabs"]["style"] == "pill":
                 cv.rrect(x - 3, mid - 10, tw + 6, 20, 5, T["tabs"]["pill"])
                 c = T["tabs"]["pill_ink"]
             else:
@@ -327,7 +329,7 @@ def sprite_body(cv, T, x, y, w, h, desk):
                 cv.rect(cx + c * cell, cy + r * cell, cell - 1, cell - 1, PAL[v])
     fx, fy = cx + 3 * cell, cy + 2 * cell
     cv.ring(fx - 1, fy - 1, cell + 1, cell + 1, 0, 1, "#000000")
-    M.focus_ring(cv, T, fx - 1, fy - 1, cell + 1, cell + 1, 0)
+    M.ring_mark(cv, T, fx - 1, fy - 1, cell + 1, cell + 1, 0)
     # the palette column: 2 x 8
     px0 = cx + 8 * cell + gap
     for i in range(16):
@@ -378,8 +380,8 @@ def sprite_body(cv, T, x, y, w, h, desk):
         bx = cx + i * tw_
         on = i == 0
         if on:
-            if T["current"] == "fill":
-                cv.rrect(bx + 1, ty, tw_ - 2, t - 4, 6 if cv.aa else 0, T["sel"])
+            if M.cur_style(T) != "bar":
+                M.current_mark(cv, T, bx + 1, ty, tw_ - 2, t - 4, 6 if cv.aa else 0)
             else:
                 cv.rrect(bx + 1, ty, tw_ - 2, t - 4, 6 if cv.aa else 0,
                          T["sunk"] if T["mode"] == "light" else T["raised"])
@@ -421,9 +423,11 @@ def desk_tabs(cv, T, x, y, w, cur):
         tw = s + 6 + lf.width(label)
         c = T["text"] if on else T["dim"]
         if on:
-            if T["tabs"]["style"] == "pill" or T["current"] == "fill":
-                cv.rrect(cx - 8, y + 9, tw + 16, h - 18, 8, T["sel"] if T["current"] == "fill" else T["tabs"]["pill"])
-                c = T["sel_ink"] if T["current"] == "fill" else T["tabs"]["pill_ink"]
+            if M.cur_style(T) != "bar":
+                c = M.current_mark(cv, T, cx - 8, y + 9, tw + 16, h - 18, 8)
+            elif T["tabs"]["style"] == "pill":
+                cv.rrect(cx - 8, y + 9, tw + 16, h - 18, 8, T["tabs"]["pill"])
+                c = T["tabs"]["pill_ink"]
             else:
                 cv.rrect(cx - 8, y + 9, tw + 16, h - 18, 8, T["sunk"] if T["mode"] == "light" else T["raised"])
                 cv.rrect(cx, y + h - 6, tw, 3, 1.5, T["value"])
@@ -499,7 +503,8 @@ def chips_bar(cv, T, chips):
         c = T["text"] if i == 0 else T["dim"]
         if i == 0:
             cv.rrect(x, 6, w, 28, 8, b["chip_cur"])
-            cv.rrect(x + 10, 31, w - 20, 3, 1.5, T["value"])
+            if M.current_mark(cv, T, x, 6, w, 28, 8) is None:
+                cv.rrect(x + 10, 31, w - 20, 3, 1.5, T["value"])
         R7.draw_icon(cv, T, slot, x + 12, 11, 18, c)
         cv.text(x + 38, 25, name, fc, c)
         x += w + 6

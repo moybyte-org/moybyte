@@ -572,7 +572,7 @@ def sprites_panel(cv, T, x, y, w, h, desk):
                 cv.rect(cx + c * cell, cy + r * cell, cell - 1, cell - 1, PAL[v])
     fx, fy = cx + 3 * cell, cy + 2 * cell
     cv.ring(fx - 1, fy - 1, cell + 1, cell + 1, 0, 1, "#000000")
-    M.focus_ring(cv, T, fx - 1, fy - 1, cell + 1, cell + 1, 0)
+    M.ring_mark(cv, T, fx - 1, fy - 1, cell + 1, cell + 1, 0)
     # palette: the first 16, true colours, 0 is clear
     px0, py0 = cx + 8 * cell + gap, cy
     p = m["pal"]
@@ -597,8 +597,8 @@ def sprites_panel(cv, T, x, y, w, h, desk):
         bx, by = tx0 + (i % 4) * t, ty0 + (i // 4) * t
         on = i == 0
         if on:
-            if T["current"] == "fill":
-                cv.rrect(bx + 1, by + 1, t - 2, t - 2, 6, T["sel"])
+            if M.cur_style(T) != "bar":
+                M.current_mark(cv, T, bx + 1, by + 1, t - 2, t - 2, 6)
             else:
                 cv.rrect(bx + 1, by + 1, t - 2, t - 2, 6 if cv.aa else 0, T["sunk"] if T["mode"] == "light" else T["raised"])
                 cv.rect(bx + 4, by + t - 4, t - 8, 2, T["value"])
@@ -644,9 +644,9 @@ def sprites_panel(cv, T, x, y, w, h, desk):
         bx, by = bx0 + (i % 4) * (pw_ + 4), sy0 + (i // 4) * (ph_ + 4)
         st = M.bstyle(T, "editor", "toggle")
         on = i == 0
-        if on and T["current"] == "fill":
-            cv.rrect(bx, by, pw_, ph_, 5 if cv.aa else 0, T["sel"])
-            ink = T["sel_ink"]
+        if on and M.cur_style(T) != "bar":
+            cv.rrect(bx, by, pw_, ph_, 5 if cv.aa else 0, M.paint(st["fill"], by, ph_))
+            ink = M.current_mark(cv, T, bx, by, pw_, ph_, 5 if cv.aa else 0)
         else:
             cv.rrect(bx, by, pw_, ph_, 5 if cv.aa else 0, M.paint(st["fill"], by, ph_))
             if st["border"]:
@@ -687,7 +687,9 @@ def files_bar(cv, T, open_name, h=26):
     for slot, name in FILES:
         if name == open_name:
             tw = s + 4 + lf.width(name)
-            if T["tabs"]["style"] == "pill":
+            if M.cur_style(T) == "plate":
+                c = M.current_mark(cv, T, x - 4, mid - 10, tw + 8, 20, 5)
+            elif T["tabs"]["style"] == "pill":
                 cv.rrect(x - 4, mid - 10, tw + 8, 20, 5, T["tabs"]["pill"])
                 c = T["tabs"]["pill_ink"]
             else:
@@ -750,7 +752,8 @@ def os_bar(cv, T):
     fc = F(T, "chip", DK)
     w = 18 + 8 + fc.width("Studio") + 24
     cv.rrect(52, 6, w, 28, 8, b["chip_cur"])
-    cv.rrect(62, 31, w - 20, 3, 1.5, T["value"])
+    if M.current_mark(cv, T, 52, 6, w, 28, 8) is None:
+        cv.rrect(62, 31, w - 20, 3, 1.5, T["value"])
     draw_icon(cv, T, "code", 64, 11, 18, T["text"])
     cv.text(90, 25, "Studio", fc, T["text"])
     fs = F(T, "status", DK)
@@ -853,11 +856,10 @@ def preset_picker(cv, T, x, y):
         cur = kind == "csr"
         if cur:
             M.current_row(cv, T, x + 8, yy + 3, w - 16, rh - 6, 8, True)
-        preset_glyph(cv, T, x + 18, yy + 11, 44, 28, kind, T["text"] if cur else T["dim"])
-        cv.text(x + 76, M.mid_base(fr, yy, rh), name, fr, T["text"])
+        ink = M.focus_mark(cv, T, (x + 8, yy + 3, w - 16, rh - 6, 8), "part") if kind == "cr" else None
+        preset_glyph(cv, T, x + 18, yy + 11, 44, 28, kind, ink or (T["text"] if cur else T["dim"]))
+        cv.text(x + 76, M.mid_base(fr, yy, rh), name, fr, ink or T["text"])
         M.keycap(cv, T, x + w - 36, M.mid_base(fm, yy, rh) + 2, str(i + 1), F(T, "key", HH), T["surface"])
-        if kind == "cr":
-            M.focus_ring(cv, T, x + 8, yy + 3, w - 16, rh - 6, 8)
         yy += rh
     cv.text(x + 16, yy + 22, "Ctrl+L cycles the layouts", fm, T["dim"])
 

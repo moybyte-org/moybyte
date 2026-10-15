@@ -20,7 +20,7 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
   pale halo behind the hero and mint and coral discs at its edges, each app
   owns a tile colour (Play coral, Paint sunflower, Files sky, Calc
   tangerine), the Calc display is mint and the operators sunflower. Keys
-  have no outline, so the ring is the only outline on the keypad.
+  have no outline; a focused key inverts to ink.
 - **Contrast:** every size of Calc and the window titles two to six pixels
   larger, 2 px white borders on `normal`, `tonal` and `danger`, a #262626
   `tonal` fill, a black bar ruled in white.
@@ -44,10 +44,10 @@ start-style button carries Moy and "moy", and the menu bar carries Moy.
   - desk: 14 rows, 13 meta, 16 bold window titles.
 - **Theme fields it sets:**
   - the ramp, with `surface` #ece9d8;
-  - accent #c86400 for focus, a 3 px ring with gap 0 (3.2:1 on the window
-    body);
+  - accent #c86400 for focus: `invert` on parts, a 3 px ring with gap 0 on
+    cards (3.2:1 on the window body);
   - value #2f63d6 for "=";
-  - `current: fill`: selection #316ac5 with white text, and #d6d2c2 in a
+  - `current.style: fill`: selection #316ac5 with white text, and #d6d2c2 in a
     window behind;
   - `win_r` 8 with `win_corners` on the top only;
   - `win.header: grad`, five stops focused and three behind, with white
@@ -80,9 +80,10 @@ start-style button carries Moy and "moy", and the menu bar carries Moy.
   result is Inter Light at 52 px; the rest uses the desk sizes above.
 - **Theme fields it sets:**
   - the ramp, with the window body #f6f6f8 and the list white;
-  - accent #3a86ff as a 3.5 px halo at 60% alpha with gap 0;
+  - accent #3a86ff for focus: `invert` on rows and buttons, a 3.5 px halo
+    at 60% alpha with gap 0 on cards and small parts;
   - value #0a6cff;
-  - `current: fill`, grey in a window behind;
+  - `current.style: fill`, grey in a window behind;
   - `win.align: center` with no title icon;
   - `win.controls: lights`, grey when unfocused;
   - large soft shadows (blur 22, offset 14, 38%, and half that behind);
@@ -146,7 +147,8 @@ pixel look through the same fields on the same two screens.
 - **Fields used:**
   - `render.*`, `fam`, `sizes` (per role, in logical px);
   - the ramp, `accent`, `value`, `value_ink`;
-  - `shadow` (hard), `ring_w`/`ring_gap` in whole logical px;
+  - `shadow` (hard), `focus.style: invert` (`focus.ring.w` and `.gap` in
+    whole logical px);
   - `win.header: fill` with `fill_back`, `win.frame`/`frame_back`,
     `win.rule`, `win.icon` off;
   - `bar` (flat black, `sysbtn: glyph`, tab chips), `hhbar: flat`;
@@ -168,7 +170,7 @@ pixel look through the same fields on the same two screens.
   - `edges: bevel` in white and black;
   - grey #aaaaaa, with blue #6688bb for current, primary, and the focused
     window's frame and title strip;
-  - a black focus ring with a 1 px gap.
+  - focus as `invert`, Workbench's complement highlight.
 - **Window controls:** `amiga`, a close gadget at the left and a depth
   gadget at the right.
 - **Screen bar:** white with a black rule. It shows a screen title
@@ -184,7 +186,7 @@ pixel look through the same fields on the same two screens.
 - **Fields used:**
   - everything Pico uses, plus `edges`, `hi`, `lo`;
   - `win.controls: amiga`, `bar.app_title`, `lcd_bevel`;
-  - `keycap.bevel`, `current: fill`, `layout`;
+  - `keycap.bevel`, `current.style: fill`, `layout`;
   - a `steps` paint;
   - `icons.swap`, which takes the pixel set's light-blue base to dark blue
     on the white bar.
@@ -202,13 +204,14 @@ pixel look through the same fields on the same two screens.
   - header-bar windows: white, a centred bold title and a round close
     button (`win.controls: adw`), a soft shadow and a 1 px outline;
   - a grey sidebar, and the current row as an accent-tinted fill;
-  - a 2.5 px focus ring in the accent at 80% alpha.
+  - focus as an accent `plate` on rows and a 2 px ring at 50% alpha with
+    no gap on cards and small parts (libadwaita's outline).
 - **Calc:** flat grey `normal`, darker `tonal`, `danger` with red ink (the
   theme's `danger` role), blue `primary`.
 - **Fields used:**
   - `bar.sysbtn: workspaces`, `bar.clock`, the `dock.*` fields,
     `win.fill`/`fill_back`;
-  - `ring_alpha`, `sel*`, `sidebar` as a colour;
+  - `focus.ring.alpha`, `sel*`, `sidebar` as a colour;
   - `danger`, `buttons`;
   - `backdrop` (different lists for the home and the desk).
 - **Gaps:**
@@ -233,13 +236,13 @@ is absent. This is the input to the format spec. Colours are `#rrggbb`
 | edges | `edges` (`flat`/`bevel`), `hi`, `lo` | flat |
 | type | `fam`; `w_body`, `w_med`, `w_semi`, `w_bold` and a per-role `w_<role>`; `sizes.hh` and `sizes.dk` per role | the size tables in the script (HH, DK) |
 | rendering | `render.text` (`aa`/`crisp`), `render.shapes` (`smooth`/`stepped`), `render.scale` (1/2) | aa, smooth, 1 |
-| focus ring | `ring_w`, `ring_gap`, `ring_alpha` | 2.5, 3, 1 |
+| focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.ring.w`, `.gap`, `.alpha`, `.keyline`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.shadow` (`ink`/`accent`), `focus.edge.w`, `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; 2.5, 3, 1, no keyline; (0.14, 0.22); 5, 3, ink; 4; 3 |
 | radii | `win_r`, `card_r`, `key_r`, `win_corners` (four flags) | 12, 10, 10, all |
 | elevation | `shadow` (`soft`, colour, alpha, blur, dy; or `hard`, colour, dx, dy), `shadow_back` | no shadow |
 | backdrop | `backdrop.home`, `backdrop.desk`: lists of shapes (gap 9); `home_bg` | `bg` |
 | home | `dim_neighbours`; `on_backdrop.ink`, `.dim`, `.shadow` | no veil; `text`, `dim` |
 | window | `win.header` (`plain`/`fill`/`bar`/`grad`), `win.h`, `win.align`, `win.ink`, `win.ink_back`, `win.tshadow`, `win.controls` (`three`/`close`/`lights`/`xp`/`amiga`/`adw`), `win.grad`, `win.grad_back`, `win.fill`, `win.fill_back`, `win.frame`, `win.frame_back`, `win.body`, `win.rule`, `win.icon` | plain, 44, left, three (minimize, maximize, close) |
-| current | `current` (`bar`/`fill`), `sel`, `sel_ink`, `sel_back` | bar |
+| current | `current.style` (`plate`/`fill`/`bar`), `current.color` (a role), `current.alpha` (light, dark); `sel`, `sel_ink`, `sel_back` for `fill` | bar, `value`, (0.14, 0.24) |
 | desk bar | `bar.edge`, `bar.h`, `bar.style` (`flat`/`grad`/`glass`), `bar.fill`, `bar.alpha`, `bar.line`, `bar.grad`, `bar.sysbtn` (`tile`/`start`/`glyph`/`workspaces`), `bar.sys`, `bar.chips` (`tab`/`button`/`none`), `bar.chip_cur`, `bar.app_title`, `bar.ink`, `bar.dim`, `bar.tray`, `bar.clock` (`right`/`center`) | top, 40, flat |
 | handheld bar | `hhbar.style` (`none`/`flat`/`grad`/`glass`), `hhbar.h`, `hhbar.fill`, `hhbar.line`, `hhbar.ink`, `hhbar.dim`, `hhbar.sys`; `tabs.style` (`bar`/`pill`), `tabs.pill`, `tabs.pill_ink` | none, bar |
 | launcher | `launcher` (`column`/`dock`); `dock.fill`, `dock.alpha`, `dock.frost`, `dock.ring`, `dock.r`; `tiles` (per app), `tile_r`, `tile_fill`, `tile_outline`, `tile_ink`, `tile_grad`; `label.ink`, `label.shadow` | column, `raised` tiles |

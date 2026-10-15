@@ -169,10 +169,9 @@ def menu_popover(cv, T, x, y, w, desk):
         if slot == "header":
             cv.text(x + 12, M.mid_base(fc, yy, rh), label, fc, T["dim"])
         else:
-            R7.draw_icon(cv, T, slot, x + 12, yy + (rh - s) // 2, s, T["dim"])
-            cv.text(x + 20 + s, M.mid_base(fr, yy, rh), label, fr, T["text"])
-            if i == 1:
-                M.focus_ring(cv, T, x + 9, yy + 2, w - 18, rh - 4, 5 if desk else 4)
+            ink = M.focus_mark(cv, T, (x + 9, yy + 2, w - 18, rh - 4, 5 if desk else 4), "part") if i == 1 else None
+            R7.draw_icon(cv, T, slot, x + 12, yy + (rh - s) // 2, s, ink or T["dim"])
+            cv.text(x + 20 + s, M.mid_base(fr, yy, rh), label, fr, ink or T["text"])
         yy += rh
 
 
@@ -181,7 +180,7 @@ def sys_states(cv, T, tile_box, state):
     bar under it (the menu is the button's own open state)."""
     x, y, w, h, r = tile_box
     if state == "focus":
-        M.focus_ring(cv, T, x, y, w, h, r)
+        M.focus_mark(cv, T, (x, y, w, h, r), "small" if h < 28 else "part")
     elif state == "open":
         cv.rrect(x, y, w, h, r, T["sunk"])
         M.moy(cv, x + (w - 16) // 2 if w < 30 else x + (w - 32) // 2, y + 1 + ((h - 16) // 2 if w < 30 else (h - 32) // 2),
@@ -203,10 +202,8 @@ def hint_strip(cv, T, items, right=None):
 
 def handheld_menu(state):
     T = LIGHT
-    ra = T["ring_alpha"]
-    T["ring_alpha"] = 0.0
-    cv = M.hh_home(T)
-    T["ring_alpha"] = ra
+    with M.focus_off():
+        cv = M.hh_home(T)
     sys_states(cv, T, (5, 4, 22, 20, 7), state)
     if state == "focus":
         hint_strip(cv, T, (("enter", "Open menu"), ("Esc", "Menu, from anywhere")))
@@ -220,10 +217,8 @@ def handheld_menu(state):
 
 def desk_menu(state):
     T = LIGHT
-    ra = T["ring_alpha"]
-    T["ring_alpha"] = 0.0
-    cv = M.desktop(T)
-    T["ring_alpha"] = ra
+    with M.focus_off():
+        cv = M.desktop(T)
     box = (8, 4, 36, 32, 9)
     sys_states(cv, T, box, state)
     if state == "open":

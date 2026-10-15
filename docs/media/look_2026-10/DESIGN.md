@@ -30,31 +30,71 @@ picture that `index.txt` lists, through `mockups.py` and `rounds/`;
 The hugging ring is the orchestrator's (2026-10-15, under the owner's
 "taste is the orchestrator's").
 
-## The marks: ring, bar, fill
+## The marks: focus, current, primary
 
-Three marks, each with one meaning, in every theme and on both sizes.
+Three marks, each with one meaning, in every theme and on both sizes. Focus
+and current are theme properties (`THEMES.md`); the engine draws them, so no
+button kind styles them, and a theme changes its marks by changing two
+fields (owner, 2026-10-15: "make it a property, easy to change later").
 
-| mark | means | default shape | colour |
+| mark | means | drawn by | colour |
 |---|---|---|---|
-| **ring** | **focus**: where the keys act; exactly one per screen | 2.5–3 px, anti-aliased, a 3 px gap | `accent` |
-| **bar** | **current**: the chosen tab, row, Places entry, swatch, tool, window | a 3 px rounded bar under or beside (`current: bar`), or a selection fill (`current: fill`) | `value` |
-| **fill** | **primary**: Play, Run, "=" | the `primary` kind; on a bar, a bare glyph in `value` | `value` |
+| **focus** | where the keys act; exactly one per screen | `focus.style` per size class | `accent` |
+| **current** | the chosen tab, row, Places entry, file, tool, window chip | `current.style` | `value` |
+| **primary** | Play, Run, "=" | the `primary` kind; on a bar, a bare glyph in `value` | `value` |
 
-The ring is the engine's: drawn after the part, from the theme's ring
-fields; no button kind styles it. A focused window's current mark is its
-title strip filled in `value` (Night, Blocks) or a 4 px `value` bar along
-its top (Day). The readability check keeps every kind's fill off `accent`.
+**Focus** is `focus = {style, card, small, color, ink, ring, plate, lift,
+edge, underline}`. The engine picks the style by the part's size class: a
+`card` (a carousel card, a desk tile: 48 px and up), a `small` part (under
+28 px: bar icons, title buttons, tool cells) or any other part (rows,
+buttons, fields), which takes `style`; `card` and `small` absent mean
+`style`. The six styles:
 
-**Small parts take the hugging ring.** Around a 16 px bar icon the ring is
-27 px across: taller than the 26 px bar, over its neighbours, and heavy. On
-a part under 28 px (bar icons, title buttons, tool cells) the focus is a
-plate in `accent` at 14% (light) or 22% (dark) with a 1.5 px `accent` ring
-on its edge, no gap, inside the part's own box, under the glyph
-(`focus_marks.png`). It is still the one ring on the screen.
+| style | draws | parameters |
+|---|---|---|
+| `ring` | an outline outside the part; on a small part, a tinted plate and a 1.5 px ring inside its own box | `ring.w`, `ring.gap`, `ring.alpha`, `ring.keyline` |
+| `plate` | the part tinted in `accent` | `plate.alpha` (light, dark) |
+| `lift` | the part grown and raised over a soft shadow; on a card, its picture | `lift.grow`, `lift.rise`, `lift.shadow` (`ink`, or `accent` for a glow) |
+| `edge` | a bar the full height of a row on its leading edge; under a part not three times wider than tall | `edge.w` |
+| `underline` | a bar under the glyph, inside the part's box | `underline.w` |
+| `invert` | the part filled in `accent`, its ink flipped | — |
+
+`ink` (`keep` or `accent`) is what a focused glyph or label does; `invert`
+always flips it. Every style but `lift` on a card is drawn after the part's
+fill and before its content.
+
+**Current** is `current = {style, color, alpha}`: a `plate` (`color`, by
+default `value`, at `alpha` for light and dark, 0.6 of it in a window
+behind), a `fill` (`sel` and `sel_ink`, `sel_back` behind) or a `bar` (the
+3 px `value` bar under a tab or beside a row). On an inverted part a current
+bar takes the flipped ink. Focus and current on one part stack, and the
+shapes tell them apart, not the colours: `accent` against `value` is 1.9:1
+in Day and 1.3:1 in Night.
+
+| theme | focus: card / part / small | current |
+|---|---|---|
+| Moy Day | `lift` / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.14 |
+| Moy Night | `lift` with an `accent` glow / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.24 |
+| Blocks | `ring` 3 px / `invert` / `invert` | `bar` |
+| Contrast | `ring` 3 px, gap 2, the light mode's black keyline / `invert` / `invert` | `bar` |
+| Luna | `ring` 3 px, gap 0 / `invert` / `invert` | `fill` (XP's blue) |
+| Coast | `ring` 3.5 px at 0.6 / `invert` / `ring` | `fill` (macOS's selection) |
+| Pico | `invert` / `invert` / `invert` | `bar` |
+| Bench | `invert` / `invert` / `invert` | `fill` (Workbench's complement) |
+| Adw | `ring` 2 px at 0.5, gap 0 / `plate` / `ring` | `fill` |
+
+**Visibility.** WCAG 2.2's Focus Appearance (2.4.13) asks for a change of
+3:1 over at least a 2 px perimeter's area. On Moy's marks it scores 2.45
+for Day's lifted card and 0.80 for Night's, 0.12 for the 4 px edge bar and
+0.25 for the underline on a bar icon (`focus_marks.png`): quieter marks
+than a ring, found at a glance by their shape and colour (`accent` against
+the surface is 3.9:1 in Day and 10.7:1 in Night). `invert` passes on every
+part (5.5 on a row, 2.5 on a bar icon): Contrast, the accessible
+choice, keeps it, with a ring on cards.
 
 **The Moy button is not in the focus order;** Super reaches it. Open, it
 shows the current mark as a plate (`sel`, or `value` mixed into its tile),
-never a ring.
+never a focus mark.
 
 ## Colour
 
@@ -76,6 +116,8 @@ primary) with its `value_ink`, and optionally `danger`.
 **Contrast:** text 12:1, `dim` 5.1:1, every mark 3.4:1 or better
 (`draw.py` prints every pair); syntax colours are theme roles at 4.5:1.
 Bright colour lives in content. Contrast's light ring has a black keyline.
+`accent` against the current plate is 3:1 or better wherever a theme's
+current is a `plate` (Day 3.2, Night 6.8).
 
 ## Type
 
@@ -181,8 +223,8 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 ## Components
 
 - **Bar:** the Moy button, then tabs or ‹ and a title; Wi-Fi, battery and
-  clock at the right. The current desk chip is `raised` with a `value`
-  underline.
+  clock at the right. The current desk chip is `raised` and takes the
+  current mark.
 - **Window:** a 44 px header, a line icon, the title, then minimize,
   maximize and close; the chip and a title double-tap still minimise and
   maximise. A window behind keeps its frame, drops its current mark and
@@ -202,10 +244,10 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
   labelled, then undo, redo and Play. Code's current line takes the `sel`
   tint and the `value` bar; a long line fades over 12 px. Sprite
   transparency is a grey checker (#6e6e78 / #9a9aa4); the cursor is the
-  ring around a black keyline. Playtest is its own window at an integer
-  scale.
-- **Motion:** the carousel slides in 6 frames, focus in 3, with no colour
-  tweens.
+  theme's ring around a black keyline. Playtest is its own window at an
+  integer scale.
+- **Motion:** the carousel slides in 6 frames, focus in 3 (a lift grows
+  over them), with no colour tweens.
 
 ## The themes
 

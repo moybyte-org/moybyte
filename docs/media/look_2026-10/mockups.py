@@ -21,6 +21,7 @@ This is the renderer and the base scenes; `draw.py` layers the rounds over
 it and draws every picture `index.txt` names. Running this file runs it.
 The fonts download once into ~/.cache/moybyte-look-fonts (see FONT_FILES).
 """
+import contextlib
 import copy
 import io
 import os
@@ -697,13 +698,16 @@ BASE = dict(
     mode="light", danger=None, hi=None, lo=None, edges="flat",
     fam="inter", sizes={}, w_body=400, w_med=500, w_semi=600, w_bold=700,
     render=dict(text="aa", shapes="smooth", scale=1),
-    ring_w=2.5, ring_gap=3, ring_alpha=1.0, shadow=None, shadow_back=0.55,
+    focus=dict(style="ring", card=None, small=None, color="accent", ink="keep",
+               ring=dict(w=2.5, gap=3, alpha=1.0, keyline=None), plate=dict(alpha=(0.14, 0.22)),
+               lift=dict(grow=5, rise=3, shadow="ink"), edge=dict(w=4), underline=dict(w=3)),
+    shadow=None, shadow_back=0.55,
     win_r=12, card_r=10, key_r=10, win_corners=None, dim_neighbours=0,
     home_bg=None, backdrop={},
     win=dict(header="plain", h=44, align="left", ink=None, ink_back=None, tshadow=None,
              controls="close", grad=None, grad_back=None, fill=None, fill_back=None,
              frame=None, frame_back=None, body=None, rule=1, icon=True),
-    current="bar", sel=None, sel_ink=None, sel_back=None,
+    current=dict(style="bar", color="value", alpha=(0.14, 0.24)), sel=None, sel_ink=None, sel_back=None,
     bar=dict(edge="top", h=40, style="flat", fill=None, alpha=1.0, line=None, grad=None,
              sysbtn="tile", sys=None, chips="tab", chip_cur=None, app_title=None,
              ink=None, dim=None, tray=None, clock="right"),
@@ -719,7 +723,8 @@ BASE = dict(
     keycap=dict(fill=None, alpha=1.0, border=None, grad=None, ink=None, r=4, bevel=False),
     layout=dict(files=(112, 54, 548, 534), calc=(648, 96, 344, 488)),
 )
-NESTED = ("render", "win", "bar", "hhbar", "tabs", "dock", "label", "on_backdrop", "keycap", "layout")
+NESTED = ("render", "win", "bar", "hhbar", "tabs", "dock", "label", "on_backdrop", "keycap", "layout",
+          "current")
 
 
 def theme(**kw):
@@ -727,6 +732,12 @@ def theme(**kw):
     for k, v in kw.items():
         if k in NESTED:
             T[k].update(v)
+        elif k == "focus":
+            for fk, fv in v.items():
+                if isinstance(fv, dict):
+                    T[k][fk].update(fv)
+                else:
+                    T[k][fk] = fv
         else:
             T[k] = v
     return T
@@ -807,6 +818,8 @@ A = theme(
     bar=dict(fill="#0b0d1e", alpha=0.85, sys=("#23274b", "#b6a8f7", "#23274b"), chip_cur="#23274b"),
     tile_fill="#23274b",
     lcd="#0b0d1e", lcd_ink="#b6a8f7",
+    focus=dict(style="edge", card="lift", small="underline", lift=dict(shadow="accent")),
+    current=dict(style="plate"),
 )
 B = theme(
     key="moy", name="Moy Day (light, the default)",
@@ -820,12 +833,15 @@ B = theme(
     tile_fill="#ffffff",
     buttons={"tonal": {"fill": "#e3e6ed"}},
     lcd="#f1f2f6", lcd_ink="#4c3fd6",
+    focus=dict(style="edge", card="lift", small="underline"),
+    current=dict(style="plate"),
 )
 C = theme(
     key="blocks", name="Blocks (light, colour-blocked, for kids and makers)",
     bg="#fff3dc", surface="#ffffff", raised="#fff8ec", sunk="#f6ead2", line="#eadcc0",
     dim="#5b5167", text="#1a1530", accent="#1a1530", value="#6a2cff", value_ink="#ffffff",
-    win_r=16, card_r=14, key_r=12, ring_w=3, fam="atkinson", w_semi=700, w_bold=800,
+    win_r=16, card_r=14, key_r=12, fam="atkinson",
+    focus=dict(style="invert", card="ring", small="invert", ring=dict(w=3)), w_semi=700, w_bold=800,
     home_bg="#ffd23f", backdrop=BD_C,
     win=dict(header="fill", frame=(2, "#1a1530"), frame_back=(2, "#5b5167"), rule=2),
     bar=dict(fill="#ffffff", line=(2, "#1a1530"), sys=("#6a2cff", "#ffffff", "#6a2cff"),
@@ -843,7 +859,8 @@ LUNA = theme(
     key="luna", name="Luna (in the style of Windows XP)",
     bg="#3a6ea5", surface="#ece9d8", raised="#ffffff", sunk="#d6d2c2", line="#aca899",
     dim="#4d4b44", text="#000000", accent="#c86400", value="#2f63d6", value_ink="#ffffff",
-    ring_w=3, ring_gap=0, win_r=8, card_r=4, key_r=3, win_corners=(True, True, False, False),
+    focus=dict(style="invert", card="ring", ring=dict(w=3, gap=0)),
+    win_r=8, card_r=4, key_r=3, win_corners=(True, True, False, False),
     shadow=("soft", "#000000", 0.35, 6, 4), shadow_back=0.6, fam="dejavu", w_med=400, w_semi=700,
     w_bold=700, backdrop={"home": _BLISS, "desk": _BLISS},
     sizes={"hh": {"tab": 12, "status": 11, "meta": 11, "hint": 11, "key": 10, "title": 18},
@@ -855,7 +872,7 @@ LUNA = theme(
                    (1, "#0846bb")],
              grad_back=[(0, "#b0c6f2"), (0.35, "#8ba8e8"), (1, "#7a96df")],
              frame=(4, "#0846bb"), frame_back=(4, "#7a96df"), rule=0),
-    current="fill", sel="#316ac5", sel_ink="#ffffff", sel_back="#d6d2c2",
+    current=dict(style="fill"), sel="#316ac5", sel_ink="#ffffff", sel_back="#d6d2c2",
     bar=dict(edge="bottom", style="grad", sysbtn="start", chips="button",
              grad=[(0, "#3f8cf3"), (0.1, "#2b70e0"), (0.5, "#245edb"), (0.9, "#1f50c8"),
                    (1, "#1941a5")],
@@ -882,12 +899,13 @@ COAST = theme(
     key="coast", name="Coast (in the style of macOS)",
     bg="#d9d4ee", surface="#ffffff", raised="#ffffff", sunk="#e9e9ee", line="#dcdce2",
     dim="#6e6e76", text="#1d1d1f", accent="#3a86ff", value="#0a6cff", value_ink="#ffffff",
-    ring_w=3.5, ring_gap=0, ring_alpha=0.6, win_r=12, card_r=12, key_r=99,
+    focus=dict(style="invert", card="ring", small="ring", ring=dict(w=3.5, gap=0, alpha=0.6)),
+    win_r=12, card_r=12, key_r=99,
     shadow=("soft", "#0b0a2a", 0.38, 22, 14), shadow_back=0.5, fam="inter",
     backdrop={"home": _DUNES, "desk": _DUNES},
     sizes={"dk": {"result": 52}}, w_result=300,
     win=dict(align="center", controls="lights", body="#f6f6f8", icon=False, ink_back="#a1a1a8"),
-    current="fill", sel="#0a6cff", sel_ink="#ffffff", sel_back="#dcdce1",
+    current=dict(style="fill"), sel="#0a6cff", sel_ink="#ffffff", sel_back="#dcdce1",
     bar=dict(h=30, style="glass", fill="#ffffff", alpha=0.55, sysbtn="glyph", chips="none",
              app_title="Calc"),
     hhbar=dict(style="glass", h=22, dim="#2c2c33"),
@@ -916,7 +934,8 @@ PICO = theme(
                   "hkey": 12, "hop": 12, "hres": 24, "htape": 10, "htitle": 12},
            "dk": {r: 8 for r in ("chip", "status", "label", "wtitle", "row", "col", "meta", "tape")}
            | {"keypad": 12, "op": 12, "result": 24, "wtitle": 10}},
-    ring_w=2, ring_gap=2, win_r=4, card_r=4, key_r=4, shadow=("hard", "#000000", 2, 2),
+    focus=dict(style="invert", card="invert", ring=dict(w=2, gap=2)),
+    win_r=4, card_r=4, key_r=4, shadow=("hard", "#000000", 2, 2),
     shadow_back=1.0, backdrop={"home": _PICO_HOME, "desk": _PICO},
     win=dict(header="fill", h=28, fill_back=P8["lgrey"], frame=(2, "#000000"),
              frame_back=(2, "#000000"), rule=2, ink="#000000", icon=False),
@@ -945,11 +964,12 @@ WB = theme(
                   "hkey": 8, "hop": 8, "hres": 16, "htape": 8, "htitle": 8},
            "dk": {r: 8 for r in ("chip", "status", "label", "wtitle", "row", "col", "meta", "tape")}
            | {"keypad": 16, "op": 16, "result": 24}},
-    ring_w=2, ring_gap=2, win_r=0, card_r=0, key_r=0, shadow=None,
+    focus=dict(style="invert", card="invert", ring=dict(w=2, gap=2)),
+    win_r=0, card_r=0, key_r=0, shadow=None,
     backdrop={"home": _COPPER, "desk": _COPPER},
     win=dict(header="fill", h=30, fill_back="#aaaaaa", ink="#000000", controls="amiga",
              frame=(6, "#6688bb"), frame_back=(6, "#aaaaaa"), rule=0, icon=False),
-    current="fill", sel="#6688bb", sel_ink="#000000", sel_back="#6688bb",
+    current=dict(style="fill"), sel="#6688bb", sel_ink="#000000", sel_back="#6688bb",
     layout=dict(files=(176, 54, 500, 534), calc=(664, 96, 340, 488)),
     bar=dict(h=24, fill="#ffffff", line=(2, "#000000"), ink="#000000", dim="#333333",
              sysbtn="glyph", chips="none", app_title="Moybyte Workbench"),
@@ -971,11 +991,12 @@ ADW = theme(
     dim="#5e5c64", text="#1f1f23", accent="#3584e4", value="#3584e4", value_ink="#ffffff",
     danger="#c01c28", fam="cantarell", w_med=400, w_semi=700, w_bold=700,
     sizes={"hh": {"tab": 12}},
-    ring_w=2.5, ring_gap=1, ring_alpha=0.8, win_r=12, card_r=12, key_r=8,
+    focus=dict(style="plate", card="ring", small="ring", ring=dict(w=2, gap=0, alpha=0.5)),
+    win_r=12, card_r=12, key_r=8,
     shadow=("soft", "#000000", 0.30, 14, 4), shadow_back=0.5, backdrop={"home": _ADW_HOME, "desk": _ADW},
     win=dict(align="center", controls="adw", body="#fafafb", fill="#ffffff", fill_back="#f6f6f7",
              icon=False, frame=(1, "#d4d4d8"), frame_back=(1, "#d4d4d8")),
-    current="fill", sel="#d8e5fa", sel_ink="#1f1f23", sel_back="#e3e3e6",
+    current=dict(style="fill"), sel="#d8e5fa", sel_ink="#1f1f23", sel_back="#e3e3e6",
     bar=dict(h=32, fill="#000000", ink="#ffffff", dim="#c0bfbc", sysbtn="workspaces",
              chips="none", clock="center"),
     hhbar=dict(style="flat", h=24, fill="#000000", ink="#ffffff", dim="#bdbdc4"),
@@ -999,7 +1020,8 @@ CONTRAST = theme(
     danger="#ff8f8f", fam="atkinson", w_med=600, w_semi=700, w_bold=800,
     sizes={"dk": {"keypad": 26, "op": 28, "result": 50, "tape": 17, "wtitle": 17},
            "hh": {"hkey": 18, "hop": 19, "hres": 30, "htape": 13, "htitle": 15}},
-    ring_w=3, ring_gap=2, win_r=4, card_r=4, key_r=4,
+    focus=dict(style="invert", card="ring", small="invert", ring=dict(w=3, gap=2)),
+    win_r=4, card_r=4, key_r=4,
     win=dict(header="fill", frame=(2, "#ffffff"), frame_back=(2, "#ffffff"), rule=2),
     bar=dict(fill="#000000", line=(2, "#ffffff"), chip_cur="#1a1a1a"),
     buttons={"normal": {"border": (2, "#ffffff")}, "tonal": {"border": (2, "#ffffff"), "fill": "#262626",
@@ -1046,13 +1068,112 @@ def mid_base(face, y, h):
     return y + (h + face.cap) // 2
 
 
-def focus_ring(cv, T, x, y, w, h, r):
-    """The focus mark: the engine's, around any part, whatever its kind."""
-    g, t = T["ring_gap"], T["ring_w"]
+def ring_mark(cv, T, x, y, w, h, r):
+    """The theme's ring around a part: `focus.ring`'s width, gap and alpha."""
+    rg = T["focus"]["ring"]
+    g, t = rg["gap"], rg["w"]
     o = g + t
     ox = int(-(-o // 1))
-    cv.ring(x - ox, y - ox, w + 2 * ox, h + 2 * ox, r + ox if r else 0, t, T["accent"],
-            T["ring_alpha"], inset=ox - o)
+    c = T[T["focus"]["color"]]
+    cv.ring(x - ox, y - ox, w + 2 * ox, h + 2 * ox, r + ox if r else 0, t, c, rg["alpha"], inset=ox - o)
+    if rg["keyline"]:
+        cv.ring(x - ox, y - ox, w + 2 * ox, h + 2 * ox, r + ox if r else 0, 1, rg["keyline"],
+                inset=ox - o + t)
+
+
+FOCUS_ON = [True]
+
+
+@contextlib.contextmanager
+def focus_off():
+    """Draw a scene with nothing focused (focus is elsewhere, or on a menu)."""
+    FOCUS_ON[0] = False
+    try:
+        yield
+    finally:
+        FOCUS_ON[0] = True
+
+
+def ink_on(c):
+    return "#15161d" if ratio("#15161d", c) >= ratio("#ffffff", c) else "#ffffff"
+
+
+def focus_mark(cv, T, box, size, image=None):
+    """The focus mark: the engine's, by size class (`card`, `part` or
+    `small`) from the theme's `focus`. Call it after the part's own fill and
+    before its content; it returns the ink the content takes, or None to keep
+    it. `image` is a card's picture, which the mark pastes (lifted or not)."""
+    x, y, w, h, r = box
+    fo = T["focus"]
+    st = (fo[size] if size in ("card", "small") else None) or fo["style"]
+    c = T[fo["color"]]
+    if not FOCUS_ON[0]:
+        if image is not None:
+            cv.paste(image, x, y, w=w, r=r)
+        return None
+    ink = c if fo["ink"] == "accent" else None
+    if st == "ring":
+        if size == "small":
+            a = fo["plate"]["alpha"][T["mode"] == "dark"]
+            cv.rrect(x, y, w, h, r, c, a)
+            cv.ring(x, y, w, h, r, 1.5, c)
+        else:
+            ring_mark(cv, T, x, y, w, h, r)
+    elif st == "plate":
+        a = fo["plate"]["alpha"][T["mode"] == "dark"]
+        if image is not None:
+            cv.rrect(x - 6, y - 6, w + 12, h + 12, r + 6, c, a)
+        else:
+            cv.rrect(x, y, w, h, r, c, a)
+    elif st == "lift":
+        lf = fo["lift"]
+        d, up = (lf["grow"], lf["rise"]) if image is not None else (1, 1)
+        sh = c if lf["shadow"] == "accent" else "#000000"
+        dark = T["mode"] == "dark"
+        a = 0.55 if lf["shadow"] == "accent" else (0.8 if dark else 0.45)
+        cv.shadow(x - d, y - d - up, w + 2 * d, h + 2 * d, r, ("soft", sh, a, 12, 2 if sh == c else 6))
+        if image is not None:
+            cv.paste(image, x - d, y - d - up, w=w + 2 * d, r=r + 1)
+            return None
+        cv.rrect(x - d, y - d - up, w + 2 * d, h + 2 * d, r, "#ffffff" if not dark else mix(T["raised"], "#ffffff", 0.08))
+    elif st == "edge":
+        t = fo["edge"]["w"]
+        if w >= 3 * h:
+            cv.rrect(x, y, t, h, t / 2, c)
+        else:
+            cv.rrect(x + 2, y + h - t, w - 4, t, t / 2, c)
+    elif st == "underline":
+        t = fo["underline"]["w"]
+        cv.rrect(x + 3, y + h - t - 1, w - 6, t, t / 2, c)
+    elif st == "invert":
+        if image is not None:
+            cv.rrect(x - 5, y - 5, w + 10, h + 10, r + 5, c)
+        else:
+            cv.rrect(x, y, w, h, r, c)
+        ink = ink_on(c)
+    if image is not None:
+        cv.paste(image, x, y, w=w, r=r)
+    return ink
+
+
+def cur_style(T):
+    return T["current"]["style"]
+
+
+def current_mark(cv, T, x, y, w, h, r, back=False):
+    """The current mark under a part: a `plate` (the theme's `current.color`
+    at `current.alpha`) or a `fill` (`sel`, `sel_back` in a window behind).
+    Returns the ink the part takes, or None for a `bar` theme, whose caller
+    draws its bar."""
+    cu = T["current"]
+    if cu["style"] == "fill":
+        cv.rrect(x, y, w, h, r, T["sel_back"] if back else T["sel"])
+        return T["text"] if back else T["sel_ink"]
+    if cu["style"] == "plate":
+        a = cu["alpha"][T["mode"] == "dark"]
+        cv.rrect(x, y, w, h, r, T[cu["color"]], a * (0.6 if back else 1.0))
+        return T["text"]
+    return None
 
 
 def soft(cv, T, x, y, w, h, r, k=1.0, corners=None):
@@ -1192,6 +1313,9 @@ def button(cv, T, app, kind, x, y, w, h, label, fonts, focus=False):
         cv.ring(bx, by, bw, bh, r, st["border"][0], st["border"][1])
     if st["bevel"]:
         bevel_of(cv, T, bx, by, bw, bh)
+    st = dict(st)
+    if focus:
+        st["ink"] = focus_mark(cv, T, (bx, by, bw, bh, r), "small" if min(bw, bh) < 28 else "part") or st["ink"]
     f = fonts[st["font"]]
     if label == "⌫":
         s = max(12, int(f.cap * 1.6))
@@ -1202,8 +1326,6 @@ def button(cv, T, app, kind, x, y, w, h, label, fonts, focus=False):
         gm, _, gy, _ = f.glyph(label)
         cv.text(bx + bw // 2, by + (bh - gm.size[1] * cv.k) // 2 - gy * cv.k, label, f, st["ink"],
                 align="center")
-    if focus:
-        focus_ring(cv, T, bx, by, bw, bh, r)
 
 
 # ==========================================================================
@@ -1290,7 +1412,9 @@ def hh_bar(cv, T, title=None):
         for t in TABS:
             cur = t == "Games"
             tw = ft.width(t)
-            if cur and T["tabs"]["style"] == "pill":
+            if cur and cur_style(T) == "plate":
+                cv.text(x, base, t, ft, current_mark(cv, T, x - 6, (hh - 18) // 2, tw + 12, 18, 5))
+            elif cur and T["tabs"]["style"] == "pill":
                 cv.rrect(x - 6, (hh - 18) // 2, tw + 12, 18, 5 if hb["style"] == "glass" else 3,
                          T["tabs"]["pill"])
                 cv.text(x, base, t, ft, T["tabs"]["pill_ink"])
@@ -1341,8 +1465,7 @@ def hh_home(T):
         if T["dim_neighbours"]:
             cv._blend(nx, ny, cv.rmask(n, n, cr * 0.7), bg, T["dim_neighbours"])
     soft(cv, T, hx, hy, hero, hero, cr, 0.8)
-    cv.paste(cover("sky_run", n, 2), hx, hy, r=cr)
-    focus_ring(cv, T, hx, hy, hero, hero, cr)
+    focus_mark(cv, T, (hx, hy, hero, hero, cr), "card", image=cover("sky_run", n, 2))
     ink, dim, sh = ob["ink"] or T["text"], ob["dim"] or T["dim"], ob["shadow"]
     T["_under_title"] = cv.img.crop((60, 176, 260, 236)).resize((1, 1), Image.BOX).getpixel((0, 0))
     cv.text(W // 2, 190, "Sky Run", F(T, "title", HH), ink, align="center", shadow=sh)
@@ -1420,7 +1543,10 @@ def desk_bar(cv, T):
             w = 18 + 8 + fc.width(name) + 24
             ch = min(28, h - 8) if cv.aa else h - 4
             cy = y0 + (h - ch) // 2
-            if cur:
+            if cur and cur_style(T) == "plate":
+                cv.rrect(x, cy, w, ch, 8 if cv.aa else 2 * k, b["chip_cur"])
+                current_mark(cv, T, x, cy, w, ch, 8 if cv.aa else 2 * k)
+            elif cur:
                 cv.rrect(x, cy, w, ch, 8 if cv.aa else 2 * k, b["chip_cur"])
                 uy = cy + ch - 3 if cv.aa else y0 + h - 2 * k
                 cv.rrect(x + 10, uy, w - 20, 3 if cv.aa else 2 * k, 1.5, T["value"])
@@ -1622,10 +1748,11 @@ def file_thumb(cv, T, name, x, y, n=22):
 
 
 def current_row(cv, T, x, y, w, h, r, focus):
-    """The current mark on a row: a raised row with the value bar, or a fill."""
-    if T["current"] == "fill":
-        cv.rrect(x, y, w, h, r, T["sel"] if focus else T["sel_back"])
-        return T["sel_ink"] if focus else T["text"]
+    """The current mark on a row: a plate or a fill, or a raised row with the
+    value bar."""
+    ink = current_mark(cv, T, x, y, w, h, r, back=not focus)
+    if ink:
+        return ink
     cv.rrect(x, y, w, h, r, T["raised"] if T["mode"] == "dark" else T["sunk"])
     cv.rrect(x, y + (h - 16) // 2, 3 if cv.aa else 2 * cv.k, 16, 1.5, T["value"])
     return T["text"]
@@ -1636,7 +1763,7 @@ def files_window(cv, T, x, y, w, h, vib=None):
     top = window(cv, T, x, y, w, h, "Files", "folder", False)
     fr_ = T["win"]["frame_back"]
     fw = fr_[0] if fr_ else 0
-    side = 160 if T["current"] == "bar" else 176
+    side = 160 if cur_style(T) == "bar" else 176
     bottom = y + h - fw
     corners = (False, False, True, True) if T["win_r"] and not T["win_corners"] else None
     rr = T["win_r"] if corners else 0
@@ -1853,13 +1980,17 @@ def contrast_report():
             "value/surface": (T["value"], T["surface"]), "value/home": (T["value"], bg),
             "value_ink/value": (T["value_ink"], T["value"]),
         }
+        if cur_style(T) == "plate":
+            plate = mix(T["surface"], T[T["current"]["color"]], T["current"]["alpha"][T["mode"] == "dark"])
+            pairs["focus/current plate"] = (T[T["focus"]["color"]], plate)
         if T["backdrop"].get("home") and "_under_title" in T:
             u = T["_under_title"]
             ob = T["on_backdrop"]
             pairs = {"title/backdrop": (ob["ink"] or T["text"], u), "meta/backdrop": (ob["dim"] or T["dim"], u),
                      "text/surface": pairs["text/surface"], "dim/surface": pairs["dim/surface"],
                      "ring/surface": pairs["ring/surface"], "value/surface": pairs["value/surface"],
-                     "value_ink/value": pairs["value_ink/value"]}
+                     "value_ink/value": pairs["value_ink/value"],
+                     **{k: v for k, v in pairs.items() if k == "focus/current plate"}}
         print(T["key"], "  ".join(f"{k} {ratio(*v):.1f}" for k, v in pairs.items()))
 
 
