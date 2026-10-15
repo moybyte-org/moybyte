@@ -170,8 +170,9 @@ part), and five new ones, `plate`, `lift`, `edge`, `underline` and `invert`;
 each draws after the part's fill and before its content and returns the
 content's ink. One current part draws `plate`, `fill` or `bar`. Every part
 draws its state through them and nothing else; a test in
-`tests/test_ui_style_data.py` holds that `accent` appears only in `focus`,
-and the readability check holds `accent` 3:1 or better on a `plate`
+`tests/test_ui_style_data.py` holds that `accent` reaches a part only
+through `focus` and through `value`, which defaults to it, and the
+readability check holds `accent` 3:1 or better on a `plate`
 current. **Cost:** 5 days (the property and its loader 1, the five new
 renderers 2, the current plate 0.5, the callers that drew a ring or a bar
 1.5). **Frame:** none, but `lift` on the carousel's hero grows the card and

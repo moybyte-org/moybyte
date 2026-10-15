@@ -9,12 +9,16 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
 
 ## The shipped themes, beyond their colours
 
+- **Moy, both modes:** one `accent` and no `value` of its own, so focus,
+  current and primary are one colour. The focused window's header stays
+  the window's colour under a 4 px `value` bar across its top
+  (`win.header: bar`); `tonal` keys sit one step off `raised`; the lift
+  has a rim (`focus.lift.rim`).
 - **Moy, Day:** the desk is two pale discs (`backdrop.desk`), with no
-  gradient. The focused window stays white; its current mark is a 4 px
-  `value` bar across its top (`win.header: bar`). `tonal` keys are `sunk`.
+  gradient. `tonal` keys are `sunk`; the lift's rim is white.
 - **Moy, Night:** the desk carries a flat crescent one tone above the sky.
-  The focused window's title strip is filled in `value` (`win.header:
-  fill`), windows have a 1 px `line` frame, and the bar is 85% `sunk`.
+  Windows have a 1 px `line` frame, the bar is 85% `sunk`, `tonal` keys
+  are #2e3360, and the lift's rim is `accent` at 0.6.
 - **Blocks:** colour lives in blocks, not marks: the home is sunflower
   (`home_bg`), the desk cream with four flat Bauhaus shapes, the home has a
   pale halo behind the hero and mint and coral discs at its edges, each app
@@ -23,7 +27,11 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
   have no outline; a focused key inverts to ink.
 - **Contrast:** every size of Calc and the window titles two to six pixels
   larger, 2 px white borders on `normal`, `tonal` and `danger`, a #262626
-  `tonal` fill, a black bar ruled in white.
+  `tonal` fill, a black bar ruled in white, keycaps ringed in white, and
+  the current mark a `plate` at 0.40. Its light mode is the mirror (white
+  ground, black text, lines, borders and `value`, a #e6e6e6 `tonal` fill,
+  the plate at 0.42), and its yellow focus takes a 2 px black
+  `focus.outline`.
 
 ## Ricing proof: Luna and Coast
 
@@ -241,11 +249,11 @@ In the package format (`docs/theming_2026-09.md` §3, style.json's
 |---|---|---|
 | identity | `key`, `name`, `mode` (`dark`/`light`) | — |
 | ramp | `bg`, `surface`, `raised`, `sunk`, `line`, `dim`, `text` | — (required) |
-| marks | `accent` (focus), `value` (current, primary), `value_ink`, `danger` | `danger`: the `normal` ink |
+| marks | `accent` (focus), `value` (current, primary), `value_ink`, `danger` | `value`: `accent`; `danger`: the `normal` ink |
 | edges | `edges` (`flat`/`bevel`), `hi`, `lo` | flat |
 | type | `fam`; `w_body`, `w_med`, `w_semi`, `w_bold` and a per-role `w_<role>`; `sizes.hh` and `sizes.dk` per role | the size tables in the script (HH, DK) |
 | rendering | `render.text` (`aa`/`crisp`), `render.shapes` (`smooth`/`stepped`), `render.scale` (1/2) | aa, smooth, 1 |
-| focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.ring.w`, `.gap`, `.alpha`, `.keyline`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.shadow` (`ink`/`accent`), `focus.edge.w`, `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; 2.5, 3, 1, no keyline; (0.14, 0.22); 5, 3, ink; 4; 3 |
+| focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.outline` (width, colour), `focus.ring.w`, `.gap`, `.alpha`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.rim` (colour or role, alpha), `focus.edge.w`, `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; no outline; 2.5, 3, 1; (0.14, 0.22); 5, 3, no rim; 4; 3 |
 | radii | `win_r`, `card_r`, `key_r`, `win_corners` (four flags) | 12, 10, 10, all |
 | elevation | `shadow` (`soft`, colour, alpha, blur, dy; or `hard`, colour, dx, dy), `shadow_back` | no shadow |
 | backdrop | `backdrop.home`, `backdrop.desk`: lists of shapes (gap 9); `home_bg` | `bg` |

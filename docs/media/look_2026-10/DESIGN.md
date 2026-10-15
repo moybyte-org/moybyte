@@ -39,9 +39,14 @@ fields (owner, 2026-10-15: "make it a property, easy to change later").
 
 | mark | means | drawn by | colour |
 |---|---|---|---|
-| **focus** | where the keys act; exactly one per screen | `focus.style` per size class | `accent` |
+| **focus** | where the keys act; exactly one per screen, never in a window behind | `focus.style` per size class | `accent` |
 | **current** | the chosen tab, row, Places entry, file, tool, window chip | `current.style` | `value` |
 | **primary** | Play, Run, "=" | the `primary` kind; on a bar, a bare glyph in `value` | `value` |
+
+**One accent.** `value` is `accent` unless a theme sets its own: Moy sets
+only `accent`, so its focus, current plates and primary fills are one
+colour, the Accent setting's (owner, 2026-10-15). Blocks and Contrast keep
+a `value` of their own, and picking an accent sets both roles.
 
 **Focus** is `focus = {style, card, small, color, ink, ring, plate, lift,
 edge, underline}`. The engine picks the style by the part's size class: a
@@ -52,15 +57,17 @@ buttons, fields), which takes `style`; `card` and `small` absent mean
 
 | style | draws | parameters |
 |---|---|---|
-| `ring` | an outline outside the part; on a small part, a tinted plate and a 1.5 px ring inside its own box | `ring.w`, `ring.gap`, `ring.alpha`, `ring.keyline` |
+| `ring` | an outline outside the part; on a small part, a tinted plate and a 1.5 px ring inside its own box | `ring.w`, `ring.gap`, `ring.alpha`; `outline` |
 | `plate` | the part tinted in `accent` | `plate.alpha` (light, dark) |
-| `lift` | the part grown and raised over a soft shadow; on a card, its picture | `lift.grow`, `lift.rise`, `lift.shadow` (`ink`, or `accent` for a glow) |
+| `lift` | the part grown and raised over a neutral offset shadow, with a 1 px rim; on a card, its picture | `lift.grow`, `lift.rise`, `lift.rim` (a colour or role, and its alpha) |
 | `edge` | a bar the full height of a row on its leading edge; under a part not three times wider than tall | `edge.w` |
 | `underline` | a bar under the glyph, inside the part's box | `underline.w` |
 | `invert` | the part filled in `accent`, its ink flipped | — |
 
 `ink` (`keep` or `accent`) is what a focused glyph or label does; `invert`
-always flips it. Every style but `lift` on a card is drawn after the part's
+always flips it. `outline` (a width and a colour) rings a ring from outside
+and an inverted part from inside, for an accent that alone would not hold
+3:1 on its ground. Every style but `lift` on a card is drawn after the part's
 fill and before its content.
 
 **Current** is `current = {style, color, alpha}`: a `plate` (`color`, by
@@ -68,15 +75,14 @@ default `value`, at `alpha` for light and dark, 0.6 of it in a window
 behind), a `fill` (`sel` and `sel_ink`, `sel_back` behind) or a `bar` (the
 3 px `value` bar under a tab or beside a row). On an inverted part a current
 bar takes the flipped ink. Focus and current on one part stack, and the
-shapes tell them apart, not the colours: `accent` against `value` is 1.9:1
-in Day and 1.3:1 in Night.
+shapes tell them apart, not the colours: in Moy they are one colour.
 
 | theme | focus: card / part / small | current |
 |---|---|---|
-| Moy Day | `lift` / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.14 |
-| Moy Night | `lift` with an `accent` glow / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.24 |
+| Moy Day | `lift`, a white rim / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.14 |
+| Moy Night | `lift`, an `accent` rim at 0.6 / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.24 |
 | Blocks | `ring` 3 px / `invert` / `invert` | `bar` |
-| Contrast | `ring` 3 px, gap 2, the light mode's black keyline / `invert` / `invert` | `bar` |
+| Contrast | `ring` 3 px, gap 2 / `invert` / `invert`; the light mode's 2 px black `outline` | `plate` at 0.42 (light), 0.40 (dark) |
 | Luna | `ring` 3 px, gap 0 / `invert` / `invert` | `fill` (XP's blue) |
 | Coast | `ring` 3.5 px at 0.6 / `invert` / `ring` | `fill` (macOS's selection) |
 | Pico | `invert` / `invert` / `invert` | `bar` |
@@ -84,13 +90,13 @@ in Day and 1.3:1 in Night.
 | Adw | `ring` 2 px at 0.5, gap 0 / `plate` / `ring` | `fill` |
 
 **Visibility.** WCAG 2.2's Focus Appearance (2.4.13) asks for a change of
-3:1 over at least a 2 px perimeter's area. On Moy's marks it scores 2.45
-for Day's lifted card and 0.80 for Night's, 0.12 for the 4 px edge bar and
-0.25 for the underline on a bar icon (`focus_marks.png`): quieter marks
-than a ring, found at a glance by their shape and colour (`accent` against
-the surface is 3.9:1 in Day and 10.7:1 in Night). `invert` passes on every
-part (5.5 on a row, 2.5 on a bar icon): Contrast, the accessible
-choice, keeps it, with a ring on cards.
+3:1 over at least a 2 px perimeter's area. Moy's edge bar, underline and
+lift are quieter marks than a ring, found at a glance by their shape and
+colour (`accent` against the surface is 7.2:1 in Day and 8.2:1 in Night,
+`focus_marks.png`); the lift's rim carries it over a dark wallpaper, its
+shadow over a light ground. `invert` passes on every part: Contrast, the
+accessible choice, keeps it, with a ring on cards, and in light mode a
+black outline round both, as its yellow alone is 1.3:1 on white.
 
 **The Moy button is not in the focus order;** Super reaches it. Open, it
 shows the current mark as a plate (`sel`, or `value` mixed into its tile),
@@ -99,8 +105,9 @@ never a focus mark.
 ## Colour
 
 Each theme sets a neutral ramp (`bg`, `surface`, `raised`, `sunk`, `line`,
-`dim`, `text`), an **accent** (focus only), a **value** (current and
-primary) with its `value_ink`, and optionally `danger`.
+`dim`, `text`), an **accent** (focus, and by default current and
+primary), a **value** (current and primary; `accent` where unset) with its
+`value_ink`, and optionally `danger`.
 
 | role | Moy Day | Moy Night | Blocks | Contrast (dark) |
 |---|---|---|---|---|
@@ -110,14 +117,14 @@ primary) with its `value_ink`, and optionally `danger`.
 | `line` | #e2e5ec | #2b2f57 | #eadcc0 | #ffffff |
 | `dim` | #5f6478 | #a1a6cc | #5b5167 | #e6e6e6 |
 | `text` | #15161d | #eef0fb | #1a1530 | #ffffff |
-| `accent` | #d45f00 moon orange | #ffc23d amber | #1a1530 ink | #ffe600 |
-| `value` | #4c3fd6 indigo | #b6a8f7 lavender | #6a2cff violet | #ffffff |
+| `accent` | #4c3fd6 indigo | #b6a8f7 lavender | #1a1530 ink | #ffe600 |
+| `value` | `accent` | `accent` | #6a2cff violet | #ffffff |
 
-**Contrast:** text 12:1, `dim` 5.1:1, every mark 3.4:1 or better
+**Contrast:** text 12:1, `dim` 5.1:1, every mark 6.3:1 or better
 (`draw.py` prints every pair); syntax colours are theme roles at 4.5:1.
-Bright colour lives in content. Contrast's light ring has a black keyline.
+Bright colour lives in content. Contrast's light focus has a black outline.
 `accent` against the current plate is 3:1 or better wherever a theme's
-current is a `plate` (Day 3.2, Night 6.8).
+current is a `plate` (Day 5.9, Night 5.2).
 
 ## Type
 
@@ -151,8 +158,8 @@ and Calc larger. JetBrains Mono 11 gives 45 columns on the handheld.
 
 | theme | radii (window, card, key) | shadow | outlines |
 |---|---|---|---|
-| Moy Day | 12, 10, 10 | soft, indigo-tinted, 18%, blur 16, offset 8 | none; operators sit on a sunk key |
-| Moy Night | 12, 10, 10 | soft, black, 55%, blur 14, offset 6 | 1 px `line` on windows |
+| Moy Day | 12, 10, 10 | soft, indigo-tinted, 18%, blur 16, offset 8 | none; operators sit on a `sunk` key |
+| Moy Night | 12, 10, 10 | soft, black, 55%, blur 14, offset 6 | 1 px `line` on windows; operators sit on a key one step above `raised` |
 | Blocks | 16, 14, 12 | none | 2 px ink on windows, desk tiles and the display; keys flat |
 | Contrast | 4, 4, 4 | none | 2 px white on every part |
 
@@ -233,7 +240,9 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 - **Pause menu:** a card over the veiled, frozen game: Moy, the title and
   "Paused"; Resume, Restart, Options, Quit; the game keeps its integer
   scale behind it.
-- **Keycap hints** name only keys that are not self-evident.
+- **Keycap hints** name only keys that are not self-evident, and what they
+  do to the focused part (a stepper's ←→ Change, a link's Enter Open); on
+  the desk the legends are 13 px on 20 px caps beside 14 px text.
 - **Rows:** link, info, cycle, toggle (with On/Off), slider, segmented,
   swatches; a caption heads every group; only working settings show.
   Settings ends in an About group; CHROME SIZE is Appearance's.
@@ -254,8 +263,8 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 
 | theme | ships | identity |
 |---|---|---|
-| **Moy**, Day | built in, the default | two pale discs on cool grey, indigo current, moon-orange focus, Plex |
-| **Moy**, Night | built in | a night sky with a crescent, lavender current and title strips, amber focus, Inter |
+| **Moy**, Day | built in, the default | two pale discs on cool grey, an indigo accent, Plex |
+| **Moy**, Night | built in | a night sky with a crescent, a lavender accent, Inter |
 | **Blocks** (light) | built in | a sunflower home, a Bauhaus desk, a colour per app tile, ink outlines and focus, Atkinson |
 | **Contrast** (dark, light) | built in | black or white, 2 px outlines, yellow focus, larger type |
 | Luna, Coast | later | in the style of Windows XP and macOS |

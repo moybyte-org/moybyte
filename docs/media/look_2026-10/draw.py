@@ -26,7 +26,7 @@ M = R11.M
 
 def main():
     del M.INDEX[:]
-    for T in M.VARIANTS + (M.CONTRAST, R11.CONTRAST_LIGHT) + M.RICED + M.STYLES:
+    for T in M.VARIANTS + (M.CONTRAST, M.CONTRAST_LIGHT) + M.RICED + M.STYLES:
         M.hh_home(T).save(f"{T['key']}-{T['mode']}_handheld_home",
                           f"Handheld home, Games tab, carousel on Sky Run; {T['name']}", x3=True)
         M.desktop(T).save(f"{T['key']}-{T['mode']}_desktop",

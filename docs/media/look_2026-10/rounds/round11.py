@@ -4,15 +4,15 @@
 
 - Settings on the handheld: the working rows and an About group, a caption
   on every group. CHROME SIZE is Appearance's.
-- Appearance on the handheld and as a desk window: the theme cards, each
-  the theme's own home (handheld) or desk in miniature, named in its own
-  face; then the rows.
+- Appearance on the handheld and as a desk window: a swatch card per
+  built-in theme (its ground, bar, surface, accent and primary, and "Aa"
+  in its face), named in its own face; then the rows.
 - Calc on the handheld: the tape on a display inset beside the 4x5 keypad.
 - The console home on the 1024x600 board at 1x: hero, details, shelf.
 - The home and the desk over the default wallpaper, Moy's night: the
   wallpaper cart's pixel art at whole scales. A light theme's on-backdrop
   ink turns light over it, and the handheld bar takes the desk bar's fill.
-- Contrast's light mode.
+- Hints name what the focused part does; the desk's are desk-sized.
 
 A layer of the target, not an entry point: `../draw.py` draws every picture.
 """
@@ -31,33 +31,19 @@ R9, R8, R7, M = R10.R9, R10.R8, R10.R7, R10.M
 Face, F, HH, DK, mix = M.Face, M.F, M.HH, M.DK, M.mix
 LIGHT, DARK = R10.LIGHT, R10.DARK
 
-
-CONTRAST_LIGHT = M.theme(
-    key="contrast", name="Contrast (light)",
-    bg="#ffffff", surface="#ffffff", raised="#ffffff", sunk="#e6e6e6", line="#000000",
-    dim="#333333", text="#000000", accent="#ffe600", value="#000000", value_ink="#ffffff",
-    danger="#b3261e", fam="atkinson", w_med=600, w_semi=700, w_bold=800,
-    sizes=copy.deepcopy(M.CONTRAST["sizes"]),
-    focus=dict(style="invert", card="ring", small="invert",
-               ring=dict(w=3, gap=2, keyline="#000000")),
-    win_r=4, card_r=4, key_r=4,
-    win=dict(header="fill", frame=(2, "#000000"), frame_back=(2, "#000000"), rule=2),
-    bar=dict(fill="#ffffff", line=(2, "#000000"), chip_cur="#e6e6e6"),
-    buttons={"normal": {"border": (2, "#000000")},
-             "tonal": {"border": (2, "#000000"), "fill": "#e6e6e6", "ink": "#000000"},
-             "danger": {"border": (2, "#000000")}},
-    lcd="#ffffff", lcd_border=(2, "#000000"), lcd_ink="#000000",
-)
+# The real version label the shell shows (moy_ota.FIRMWARE_NAME).
+FIRMWARE = "0.8"
 
 
 # ==========================================================================
 # rows: link, info, cycle, segmented, swatches
 # ==========================================================================
 def _sw_list(T):
+    """The Accent picker's swatches, the theme's own accent first."""
     if T["mode"] == "light":
-        return (T["accent"], "#d13f2a", "#c2306f", "#6f4fd8", "#0a72bd", "#0d8160", "#4c8417",
+        return (T["accent"], "#d45f00", "#d13f2a", "#c2306f", "#0a72bd", "#0d8160", "#4c8417",
                 T["text"])
-    return (T["accent"], "#ff7a59", "#f2719f", "#a98bff", "#5cc4ff", "#55d6a6", "#9fd36a",
+    return (T["accent"], "#ffc23d", "#ff7a59", "#f2719f", "#5cc4ff", "#55d6a6", "#9fd36a",
             T["text"])
 
 
@@ -78,16 +64,14 @@ def _value(cv, T, kind, val, xr, y, h, fv, desk):
     elif kind == "seg":
         opts, cur = val
         g, ph = (18, h - 8) if desk else (12, h - 4)
-        x = xr
+        x = xr - g // 2
         for i, o in reversed(list(enumerate(opts))):
             ow = fv.width(o)
             x -= ow
-            c = ink if i == cur else dim
+            c = dim
             if i == cur:
                 c = M.current_mark(cv, T, x - g // 2, y + (h - ph) // 2, ow + g, ph,
-                                   6 if desk else 4) or c
-                if M.cur_style(T) == "bar":
-                    cv.rrect(x, y + h - 4, ow, 3, 1.5, T["value"])
+                                   6 if desk else 4) or ink
             cv.text(x, base, o, fv, c)
             x -= g + (4 if desk else 2)
     elif kind == "swatch":
@@ -121,18 +105,68 @@ def rows(cv, T, x, y, w, rh, items, focus_i, fl, fv, desk, group=True):
     return y + rh * len(items)
 
 
-def hints(cv, T, items, base, x=8, bg=None):
-    fk, fh = F(T, "key", HH), F(T, "hint", HH)
-    for k, label in items:
-        x += M.keycap(cv, T, x, base, k, fk, bg or T["bg"]) + 4
-        x += cv.text(x, base, label, fh, T["dim"]) + 11
+# ==========================================================================
+# hints: handheld sizes, and the desk's (13 px legends on 20 px caps, 14 px text)
+# ==========================================================================
+def _hint_faces(T, desk):
+    if desk:
+        return Face(T["fam"], 13, T["w_semi"], 4), Face(T["fam"], 14, T["w_med"], 4), 20
+    return F(T, "key", HH), F(T, "hint", HH), 15
+
+
+def _cap_w(face, label, h):
+    return h + 3 if label == "enter" else max(h, face.width(label) + (10 if h > 15 else 8))
+
+
+def keycap(cv, T, x, base, label, face, bg, h):
+    if h == 15:
+        return M.keycap(cv, T, x, base, label, face, bg)
+    K = T["keycap"]
+    y = base - h + 4
+    w = _cap_w(face, label, h)
+    fill = K["fill"] or mix(bg, T["text"], 0.16 if T["mode"] == "dark" else 0.10)
+    cv.rrect(x, y, w, h, K["r"] + 1, fill, K["alpha"])
+    if K["border"]:
+        cv.ring(x, y, w, h, K["r"] + 1, K["border"][0], K["border"][1])
+    ink = K["ink"] or T["text"]
+    if label == "enter":
+        M.icon(cv, "enter", x + 4, y + 2, h - 4, ink, stroke=2.2)
+    else:
+        cv.text(x + w // 2, M.mid_base(face, y, h), label, face, ink, align="center")
+    return w
+
+
+def _keys(k):
+    return k if isinstance(k, tuple) else (k,)
+
+
+def hints_width(T, items, desk):
+    fk, fh, kh = _hint_faces(T, desk)
+    gap = 14 if desk else 11
+    return sum(sum(_cap_w(fk, k, kh) + 3 for k in _keys(ks)) + 1 + fh.width(lb) + gap
+               for ks, lb in items) - gap
+
+
+def hints(cv, T, items, base, x=8, bg=None, desk=False):
+    """Key hints: (key or keys, what it does) for the focused part."""
+    fk, fh, kh = _hint_faces(T, desk)
+    for ks, label in items:
+        for k in _keys(ks):
+            x += keycap(cv, T, x, base, k, fk, bg or T["bg"], kh) + 3
+        x += 1
+        x += cv.text(x, base, label, fh, T["dim"]) + (14 if desk else 11)
     return x
 
 
+def caption_dk(T):
+    return Face(T["fam"], 13, T["w_semi"], 4)
+
+
 def hh_page(T, title, body=None):
+    """A handheld page: the bar on `bg`, the page's body under it."""
     cv = M.new_cv(T, False, body or T["bg"])
-    if T["hhbar"]["style"] == "none" and body:
-        cv.rect(0, 0, 320, 28, T["bg"] if T["mode"] == "dark" else T["surface"])
+    if body:
+        cv.rect(0, 0, 320, 28, T["bg"])
     M.hh_bar(cv, T, title=title)
     return cv
 
@@ -152,7 +186,7 @@ def hh_settings(T):
                                  ("Appearance", "link", f"Moy {mode_name(T)}"),
                                  ("Text size", "cycle", "Medium")), 1, fl, fv, False)
     cv.text(16, 124, "About", fc, T["dim"])
-    rows(cv, T, 6, 129, 308, 20, (("Firmware", "info", "5"), ("Board", "info", "T-Deck Plus"),
+    rows(cv, T, 6, 129, 308, 20, (("Firmware", "info", FIRMWARE), ("Board", "info", "T-Deck Plus"),
                                   ("Storage", "info", "1.2 MB free"), ("Battery", "info", "82%")),
          None, fl, fv, False)
     hints(cv, T, (("enter", "Open"), ("Esc", "Back")), 233)
@@ -167,19 +201,47 @@ def card_themes(T):
     the page's mode where it has one."""
     dark = T["mode"] == "dark"
     return (("Moy", T, "Day · Night"), ("Blocks", M.C, "Light"),
-            ("Contrast", M.CONTRAST if dark else CONTRAST_LIGHT, "Dark · Light"))
+            ("Contrast", M.CONTRAST if dark else M.CONTRAST_LIGHT, "Light · Dark"))
 
 
-_PREVIEW = {}
+def _dot(cv, x, y, d, c, ring=None):
+    cv.shape(x, y, d, d, lambda dr, s: dr.ellipse((0, 0, d * s - 1, d * s - 1), fill=255), c)
+    if ring:
+        cv.ring(x, y, d, d, d / 2, ring[0], ring[1])
 
 
-def preview(Tc, desk, w, h):
-    key = (id(Tc), desk, w, h)
-    if key not in _PREVIEW:
-        with M.focus_off():
-            src = (M.desktop(Tc) if desk else M.hh_home(Tc)).image()
-        _PREVIEW[key] = src.resize((w, h), Image.LANCZOS)
-    return _PREVIEW[key]
+def swatch_card(cv, T, Tc, x, y, w, h, desk):
+    """A theme as a swatch: its ground and bar, a surface panel with "Aa"
+    in its face, its accent and its primary."""
+    r = 8 if desk else 6
+    bg = Tc["home_bg"] or Tc["bg"]
+    cv.rrect(x, y, w, h, r, bg)
+    bh = 14 if desk else 8
+    b = Tc["bar"]
+    cv.rrect(x, y, w, bh, r, b["fill"] or Tc["surface"], corners=(True, True, False, False))
+    if b["line"]:
+        cv.rect(x, y + bh - min(2, b["line"][0]), w, min(2, b["line"][0]), b["line"][1])
+    px, py = x + (14 if desk else 6), y + bh + (10 if desk else 5)
+    pw, ph = w - 2 * (px - x), h - (py - y) - (10 if desk else 5)
+    pr = min(Tc["win_r"], 10 if desk else 5)
+    if Tc["shadow"]:
+        cv.shadow(px, py, pw, ph, pr, Tc["shadow"], 0.4)
+    cv.rrect(px, py, pw, ph, pr, Tc["surface"])
+    frame = Tc["win"]["frame"]
+    if frame:
+        cv.ring(px, py, pw, ph, pr, min(frame[0], 2 if desk else 1), frame[1])
+    fa = Face(Tc["fam"], 34 if desk else 16, Tc["w_semi"], 4 if desk else 2)
+    cv.text(px + (14 if desk else 6), M.mid_base(fa, py, ph), "Aa", fa, Tc["text"])
+    d = 16 if desk else 8
+    ol = Tc["focus"]["outline"]
+    xr = px + pw - (14 if desk else 6) - d
+    if Tc["value"] != Tc["accent"]:
+        _dot(cv, xr, py + ph // 2 - d - 2, d, Tc["accent"], ol)
+        _dot(cv, xr, py + ph // 2 + 2, d, Tc["value"], (1, Tc["line"]))
+    else:
+        _dot(cv, xr, py + (ph - d) // 2, d, Tc["accent"], ol)
+    edge = T["line"] if T["mode"] == "dark" else mix(T["line"], T["dim"], 0.25)
+    cv.ring(x, y, w, h, r, 1, edge)
 
 
 def theme_cards(cv, T, x0, y, cw, ch, gap, desk):
@@ -194,9 +256,7 @@ def theme_cards(cv, T, x0, y, cw, ch, gap, desk):
         if i == 0:
             M.current_mark(cv, T, x - p - 1, y - p, cw + 2 * p + 2, ch + (58 if desk else 22),
                            12 if desk else 8)
-        r = 8 if desk else 6
-        cv.paste(preview(Tc, desk, cw, ch), x, y, r=r)
-        cv.ring(x, y, cw, ch, r, 1, T["line"] if T["mode"] == "dark" else mix(T["line"], T["dim"], 0.25))
+        swatch_card(cv, T, Tc, x, y, cw, ch, desk)
         cv.text(x + cw // 2, y + ch + (24 if desk else 14), name, fn, T["text"], align="center")
         if desk:
             cv.text(x + cw // 2, y + ch + 43, modes, fm, T["dim"], align="center")
@@ -206,7 +266,7 @@ def appearance_rows(T, desk):
     dark = T["mode"] == "dark"
     out = [("Mode", "seg", (("Day", "Night"), 1 if dark else 0)),
            ("Accent", "swatch", (_sw_list(T), 0)),
-           ("Tint", "cycle", "Indigo" if dark else "Cool"),
+           ("Tint", "cycle", "Cool"),
            ("Wallpaper", "link", "Backdrop")]
     if desk:
         out.append(("Window style", "cycle", "Soft"))
@@ -216,6 +276,9 @@ def appearance_rows(T, desk):
     return out
 
 
+STEP_HINTS = ((("←", "→"), "Change"),)
+
+
 def hh_appearance(T):
     cv = hh_page(T, "Appearance")
     fc = F(T, "status", HH)
@@ -223,7 +286,7 @@ def hh_appearance(T):
     theme_cards(cv, T, 30, 46, 66, 50, 31, False)
     fl, fv = Face(T["fam"], 13, T["w_med"], 2), F(T, "status", HH)
     rows(cv, T, 6, 117, 308, 20, appearance_rows(T, False), 2, fl, fv, False)
-    hints(cv, T, (("enter", "Open"), ("Esc", "Back")), 234)
+    hints(cv, T, STEP_HINTS + (("Esc", "Back"),), 234)
     return cv
 
 
@@ -231,22 +294,23 @@ def desk_appearance(T):
     cv = M.new_cv(T, True)
     M.backdrop(cv, T, "desk")
     M.desk_icons(cv, T)
-    x, y, w, h = 152, 58, 680, 514
+    w, h = 680, 510
+    x, y = 108 + (1024 - 108 - w) // 2, 40 + (600 - 40 - h) // 2
     top = M.window(cv, T, x, y, w, h, "Appearance", "settings", True)
     R7.draw_icon(cv, T, "settings", x + 16, y + (T["win"]["h"] - 20) // 2, 20, R8.title_ink(T, True))
-    fc = F(T, "col", DK)
-    cv.text(x + 24, top + 26, "Theme", fc, T["dim"])
+    cv.text(x + 24, top + 26, "Theme", caption_dk(T), T["dim"])
     cw, ch, gap = 192, 112, 24
     x0 = x + (w - 3 * cw - 2 * gap) // 2
     theme_cards(cv, T, x0, top + 40, cw, ch, gap, True)
     ry = rows(cv, T, x + 16, top + 214, w - 32, 28, appearance_rows(T, True), 2,
               F(T, "row", DK), F(T, "meta", DK), True, group=False)
     fy = y + h - 44
+    assert ry <= fy
     cv.rect(x + 16, fy, w - 32, 1, T["line"])
-    fm = F(T, "meta", DK)
-    cv.text(x + 26, fy + 28, f"Moy {mode_name(T)} · built in", fm, T["dim"])
-    hints(cv, T, (("enter", "Open"), ("Esc", "Close")), fy + 28, x=x + w - 176, bg=T["surface"])
-    assert ry < fy
+    cv.text(x + 26, fy + 28, f"Moy {mode_name(T)} · built in", F(T, "meta", DK), T["dim"])
+    items = STEP_HINTS + (("Esc", "Close"),)
+    hints(cv, T, items, fy + 29, x=x + w - 26 - hints_width(T, items, True), bg=T["surface"],
+          desk=True)
     R8.chips_bar(cv, T, (("settings", "Appearance"), ("folder", "Files")))
     return cv
 
@@ -254,13 +318,13 @@ def desk_appearance(T):
 # ==========================================================================
 # Calc, handheld: the tape beside the keypad
 # ==========================================================================
-TAPE = (("120 − 36", "84"), ("36 + 48", "84"), ("84 ÷ 7", "12"), ("12 × 12", "144"))
+TAPE = (("48 + 72", "120"), ("120 − 36", "84"), ("84 ÷ 7", "12"))
 
 
 def hh_calc(T):
     cv = hh_page(T, "Calc", T["win"]["body"] or T["surface"])
     ft, fr = F(T, "htape", HH), F(T, "hres", HH)
-    lx, ly, lw, lh = 8, 32, 112, 200
+    lx, ly, lw, lh = 8, 32, 112, 180
     lr = min(8, T["key_r"])
     cv.rrect(lx, ly, lw, lh, lr, T["lcd"] or T["sunk"])
     if T["lcd_border"]:
@@ -271,10 +335,9 @@ def hh_calc(T):
     for i, (expr, res) in enumerate(TAPE):
         cv.text(xr, y + 13, expr, ft, dim, align="right")
         cv.text(xr, y + 27, "= " + res, ft, T["text"], align="right")
-        if i < len(TAPE) - 1:
-            cv.rect(lx + 10, y + 32, lw - 20, 1, T["line"])
+        cv.rect(lx + 10, y + 32, lw - 20, 1, T["line"])
         y += 35
-    cv.text(xr, ly + lh - 44, "12 × 7", ft, dim, align="right")
+    cv.text(xr, ly + lh - 44, "12 × 7 =", ft, dim, align="right")
     cv.text(xr, ly + lh - 10, "84", fr, ink, align="right")
     kx, kw_all, g = 128, 184, 6
     kw = (kw_all - 3 * g) // 4
@@ -287,6 +350,7 @@ def hh_calc(T):
             ww = kw * 2 + g if lab == "0" else kw
             M.button(cv, T, "calc", M.key_kind(lab), kx + c * (kw + g), ly + r * (kh + g), ww, kh,
                      lab, fonts, focus=lab == "5")
+    hints(cv, T, (("enter", "Press"), ("Esc", "Back")), 233, bg=T["win"]["body"] or T["surface"])
     return cv
 
 
@@ -324,13 +388,19 @@ def console_bar(cv, T):
 
 
 def home_button(cv, T, kind, x, y, w, h, label, slot=None):
+    """A home button: a `normal` one on the home's ground carries an
+    outline at 3:1 or better against it."""
     st = M.bstyle(T, "home", kind)
     r = min(st["r"], h / 2)
-    if kind != "primary":
-        M.soft(cv, T, x, y, w, h, r, 0.35)
     cv.rrect(x, y, w, h, r, M.paint(st["fill"], y, h))
-    if st["border"]:
-        cv.ring(x, y, w, h, r, st["border"][0], st["border"][1])
+    border = st["border"]
+    if kind != "primary" and not border:
+        ground = T["home_bg"] or T["bg"]
+        oc = mix(T["dim"], ground, 0.2)
+        assert M.ratio(oc, ground) >= 3.0, (T["name"], M.ratio(oc, ground))
+        border = (1.5, oc)
+    if border:
+        cv.ring(x, y, w, h, r, border[0], border[1])
     f = F(T, "wtitle", DK) if kind == "primary" else F(T, "chip", DK)
     lw = f.width(label) + (26 if slot else 0)
     lx = x + (w - lw) // 2
@@ -353,7 +423,7 @@ def console_home(T):
     cv.text(x, 130, "Platformer  ·  Built in  ·  Played today", fm, dim)
     cv.text(x, 164, "Run and jump across the hills, grab every coin before the", fr, ink)
     cv.text(x, 186, "clouds roll in, and find the flag at the end of the day.", fr, ink)
-    fh, fv = F(T, "col", DK), F(T, "chip", DK)
+    fh, fv = caption_dk(T), F(T, "chip", DK)
     for i, (k, v) in enumerate((("Played", "12 times"), ("Last", "Today"), ("Size", "21 KB"),
                                 ("By", "Moybyte"))):
         cv.text(x + i * 150, 224, k, fh, dim)
@@ -370,12 +440,9 @@ def console_home(T):
             M.focus_mark(cv, T, (sx, 392, 128, 128, cr), "card", image=M.cover(name, 64, 2))
         else:
             cv.paste(M.cover(name, 64, 2), sx, 392, r=cr)
-    hints(cv, T, (("enter", "Play"), ("C", "Change"), ("/", "Search")), 584, x=24)
-    fhh, fk = F(T, "hint", HH), F(T, "key", HH)
-    rx = 1000 - fhh.width("Tabs")
-    cv.text(rx, 584, "Tabs", fhh, T["dim"])
-    M.keycap(cv, T, rx - 19, 584, "R", fk, T["bg"])
-    M.keycap(cv, T, rx - 37, 584, "L", fk, T["bg"])
+    hints(cv, T, (("enter", "Play"), ("C", "Change"), ("/", "Search")), 582, x=24, desk=True)
+    right = ((("L", "R"), "Tabs"),)
+    hints(cv, T, right, 582, x=1000 - hints_width(T, right, True), desk=True)
     console_bar(cv, T)
     return cv
 
@@ -493,7 +560,7 @@ def hh_home_wallpaper(T):
 
 def desk_wallpaper(T):
     T2 = on_wallpaper(T, WALL_DK)
-    T2["layout"]["calc"] = (592, 96, 344, 488)
+    T2["layout"]["calc"] = (592, 96, 344, 492)
     return M.desktop(T2)
 
 

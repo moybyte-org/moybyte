@@ -698,9 +698,9 @@ BASE = dict(
     mode="light", danger=None, hi=None, lo=None, edges="flat",
     fam="inter", sizes={}, w_body=400, w_med=500, w_semi=600, w_bold=700,
     render=dict(text="aa", shapes="smooth", scale=1),
-    focus=dict(style="ring", card=None, small=None, color="accent", ink="keep",
-               ring=dict(w=2.5, gap=3, alpha=1.0, keyline=None), plate=dict(alpha=(0.14, 0.22)),
-               lift=dict(grow=5, rise=3, shadow="ink"), edge=dict(w=4), underline=dict(w=3)),
+    focus=dict(style="ring", card=None, small=None, color="accent", ink="keep", outline=None,
+               ring=dict(w=2.5, gap=3, alpha=1.0), plate=dict(alpha=(0.14, 0.22)),
+               lift=dict(grow=5, rise=3, rim=None), edge=dict(w=4), underline=dict(w=3)),
     shadow=None, shadow_back=0.55,
     win_r=12, card_r=10, key_r=10, win_corners=None, dim_neighbours=0,
     home_bg=None, backdrop={},
@@ -740,6 +740,7 @@ def theme(**kw):
                     T[k][fk] = fv
         else:
             T[k] = v
+    T.setdefault("value", T["accent"])
     return T
 
 
@@ -812,19 +813,20 @@ P8 = dict(black="#000000", navy="#1d2b53", plum="#7e2553", green="#008751", brow
 A = theme(
     key="moy", name="Moy Night (dark)", mode="dark",
     bg="#0f1127", surface="#181b38", raised="#23274b", sunk="#0b0d1e", line="#2b2f57",
-    dim="#a1a6cc", text="#eef0fb", accent="#ffc23d", value="#b6a8f7", value_ink="#15123a",
+    dim="#a1a6cc", text="#eef0fb", accent="#b6a8f7", value_ink="#15123a",
     shadow=("soft", "#000000", 0.55, 14, 6), dim_neighbours=0.30, fam="inter", backdrop=BD_A,
-    win=dict(header="fill", frame=(1, "#2b2f57"), frame_back=(1, "#2b2f57")),
+    win=dict(header="bar", frame=(1, "#2b2f57"), frame_back=(1, "#2b2f57")),
     bar=dict(fill="#0b0d1e", alpha=0.85, sys=("#23274b", "#b6a8f7", "#23274b"), chip_cur="#23274b"),
     tile_fill="#23274b",
+    buttons={"tonal": {"fill": "#2e3360"}},
     lcd="#0b0d1e", lcd_ink="#b6a8f7",
-    focus=dict(style="edge", card="lift", small="underline", lift=dict(shadow="accent")),
+    focus=dict(style="edge", card="lift", small="underline", lift=dict(rim=("accent", 0.6))),
     current=dict(style="plate"),
 )
 B = theme(
     key="moy", name="Moy Day (light, the default)",
     bg="#eceef3", surface="#ffffff", raised="#f4f5f8", sunk="#e3e6ed", line="#e2e5ec",
-    dim="#5f6478", text="#15161d", accent="#d45f00", value="#4c3fd6", value_ink="#ffffff",
+    dim="#5f6478", text="#15161d", accent="#4c3fd6", value_ink="#ffffff",
     shadow=("soft", "#1b2040", 0.18, 16, 8), fam="plex", backdrop=BD_B,
     win=dict(header="bar"),
     bar=dict(fill="#ffffff", alpha=0.92, line=(1, "#e2e5ec"), sys=("#f4f5f8", "#4c3fd6", "#f4f5f8"),
@@ -833,7 +835,7 @@ B = theme(
     tile_fill="#ffffff",
     buttons={"tonal": {"fill": "#e3e6ed"}},
     lcd="#f1f2f6", lcd_ink="#4c3fd6",
-    focus=dict(style="edge", card="lift", small="underline"),
+    focus=dict(style="edge", card="lift", small="underline", lift=dict(rim=("#ffffff", 1.0))),
     current=dict(style="plate"),
 )
 C = theme(
@@ -1021,13 +1023,33 @@ CONTRAST = theme(
     sizes={"dk": {"keypad": 26, "op": 28, "result": 50, "tape": 17, "wtitle": 17},
            "hh": {"hkey": 18, "hop": 19, "hres": 30, "htape": 13, "htitle": 15}},
     focus=dict(style="invert", card="ring", small="invert", ring=dict(w=3, gap=2)),
+    current=dict(style="plate", alpha=(0.42, 0.40)),
     win_r=4, card_r=4, key_r=4,
+    keycap=dict(border=(1.25, "#ffffff")),
     win=dict(header="fill", frame=(2, "#ffffff"), frame_back=(2, "#ffffff"), rule=2),
     bar=dict(fill="#000000", line=(2, "#ffffff"), chip_cur="#1a1a1a"),
     buttons={"normal": {"border": (2, "#ffffff")}, "tonal": {"border": (2, "#ffffff"), "fill": "#262626",
                                                               "ink": "#ffffff"},
              "danger": {"border": (2, "#ffffff")}},
     lcd="#000000", lcd_border=(2, "#ffffff"), lcd_ink="#ffffff",
+)
+CONTRAST_LIGHT = theme(
+    key="contrast", name="Contrast (light)",
+    bg="#ffffff", surface="#ffffff", raised="#ffffff", sunk="#e6e6e6", line="#000000",
+    dim="#333333", text="#000000", accent="#ffe600", value="#000000", value_ink="#ffffff",
+    danger="#b3261e", fam="atkinson", w_med=600, w_semi=700, w_bold=800,
+    sizes=copy.deepcopy(CONTRAST["sizes"]),
+    focus=dict(style="invert", card="ring", small="invert", ring=dict(w=3, gap=2),
+               outline=(2, "#000000")),
+    current=dict(style="plate", alpha=(0.42, 0.40)),
+    win_r=4, card_r=4, key_r=4,
+    keycap=dict(border=(1.25, "#000000")),
+    win=dict(header="fill", frame=(2, "#000000"), frame_back=(2, "#000000"), rule=2),
+    bar=dict(fill="#ffffff", line=(2, "#000000"), chip_cur="#e6e6e6"),
+    buttons={"normal": {"border": (2, "#000000")},
+             "tonal": {"border": (2, "#000000"), "fill": "#e6e6e6", "ink": "#000000"},
+             "danger": {"border": (2, "#000000")}},
+    lcd="#ffffff", lcd_border=(2, "#000000"), lcd_ink="#000000",
 )
 VARIANTS = (A, B, C)
 RICED = (LUNA, COAST)
@@ -1076,9 +1098,10 @@ def ring_mark(cv, T, x, y, w, h, r):
     ox = int(-(-o // 1))
     c = T[T["focus"]["color"]]
     cv.ring(x - ox, y - ox, w + 2 * ox, h + 2 * ox, r + ox if r else 0, t, c, rg["alpha"], inset=ox - o)
-    if rg["keyline"]:
-        cv.ring(x - ox, y - ox, w + 2 * ox, h + 2 * ox, r + ox if r else 0, 1, rg["keyline"],
-                inset=ox - o + t)
+    ol = T["focus"]["outline"]
+    if ol:
+        e = ox + ol[0]
+        cv.ring(x - e, y - e, w + 2 * e, h + 2 * e, r + e if r else 0, ol[0], ol[1], inset=ox - o)
 
 
 FOCUS_ON = [True]
@@ -1128,14 +1151,18 @@ def focus_mark(cv, T, box, size, image=None):
     elif st == "lift":
         lf = fo["lift"]
         d, up = (lf["grow"], lf["rise"]) if image is not None else (1, 1)
-        sh = c if lf["shadow"] == "accent" else "#000000"
         dark = T["mode"] == "dark"
-        a = 0.55 if lf["shadow"] == "accent" else (0.8 if dark else 0.45)
-        cv.shadow(x - d, y - d - up, w + 2 * d, h + 2 * d, r, ("soft", sh, a, 12, 2 if sh == c else 6))
+        bx, by, bw, bh = x - d, y - d - up, w + 2 * d, h + 2 * d
+        cv.shadow(bx, by, bw, bh, r, ("soft", "#000000", 0.7 if dark else 0.32, 10, 5))
         if image is not None:
-            cv.paste(image, x - d, y - d - up, w=w + 2 * d, r=r + 1)
+            cv.paste(image, bx, by, w=bw, r=r + 1)
+        else:
+            cv.rrect(bx, by, bw, bh, r, "#ffffff" if not dark else mix(T["raised"], "#ffffff", 0.08))
+        if lf["rim"]:
+            rc, ra = lf["rim"]
+            cv.ring(bx - 1, by - 1, bw + 2, bh + 2, r + 2, 1, T.get(rc, rc), ra)
+        if image is not None:
             return None
-        cv.rrect(x - d, y - d - up, w + 2 * d, h + 2 * d, r, "#ffffff" if not dark else mix(T["raised"], "#ffffff", 0.08))
     elif st == "edge":
         t = fo["edge"]["w"]
         if w >= 3 * h:
@@ -1150,6 +1177,10 @@ def focus_mark(cv, T, box, size, image=None):
             cv.rrect(x - 5, y - 5, w + 10, h + 10, r + 5, c)
         else:
             cv.rrect(x, y, w, h, r, c)
+        if fo["outline"]:
+            ow, oc = fo["outline"]
+            g = 5 if image is not None else 0
+            cv.ring(x - g, y - g, w + 2 * g, h + 2 * g, r + g, ow, oc)
         ink = ink_on(c)
     if image is not None:
         cv.paste(image, x, y, w=w, r=r)
@@ -1875,7 +1906,7 @@ def calc_body(cv, T, x, y, w, h, desk):
     tape_y, res_y = (30, 84) if desk else (14, 40)
     if T["fam"] == "petme" or T["render"]["text"] == "crisp":
         res_y -= 4 if desk else 2
-    cv.text(lx + lw - 14, ly + tape_y, "12 × 7", ftape, T["lcd_dim"] or T["dim"], align="right")
+    cv.text(lx + lw - 14, ly + tape_y, "12 × 7 =", ftape, T["lcd_dim"] or T["dim"], align="right")
     cv.text(lx + lw - 12, ly + res_y, "84", fres, T["lcd_ink"] or T["value"], align="right")
     ky = ly + lh + (pad if desk else 8)
     kw = (lw - 3 * g) // 4

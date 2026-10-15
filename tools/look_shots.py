@@ -63,7 +63,7 @@ CONSOLE = "p4_1024x600_cs2_fs1_console"
 CLOCK = "14:32"
 
 # Calc's keys for the target's tape, then the expression on its display.
-CALC_TAPE = ("120-36=", "36+48=", "84/7=", "12*12=", "12*7=")
+CALC_TAPE = ("48+72=", "120-36=", "84/7=", "12*7=")
 
 
 def _setup_table():
