@@ -892,10 +892,10 @@ def binding():
         return bool(lib.moy_font_free(int(font) & 0xFFFFFFFF))
 
     def font_info(font):
-        out = (c.c_int * 6)()
+        out = (c.c_int * 8)()           # moy_font_info_t
         if not lib.moy_font_info(int(font) & 0xFFFFFFFF, out):
             return None
-        return tuple(out)
+        return tuple(out[:6])
 
     def font_role(role):
         if role not in font_roles:
@@ -906,7 +906,7 @@ def binding():
         return bool(lib.moy_ui_font_use(font_role(role), int(font) & 0xFFFFFFFF))
 
     def font(role):
-        out = (c.c_int * 6)()
+        out = (c.c_int * 8)()
         fid = lib.moy_ui_font(font_role(role), out)
         return (fid, out[0], out[2], out[3])
 

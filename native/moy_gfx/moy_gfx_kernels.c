@@ -470,6 +470,36 @@ void mg_text_font(uint16_t *dst, size_t dcap, int dw,
     }
 }
 
+void mg_glyph_cov(uint16_t *dst, size_t dcap, int dw, const uint8_t *cov, int w, int h,
+                  int bpp, int x, int y, uint16_t col, int scale,
+                  int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || w <= 0 || h <= 0) return;
+    if (scale < 1) scale = 1;
+    mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    if (x >= cx1 || y >= cy1 || x + w * scale <= cx0 || y + h * scale <= cy0) return;
+    const int top = (1 << bpp) - 1, half = (top + 2) >> 1;
+    for (int r = 0; r < h; r++) {
+        int by = y + r * scale;
+        if (by >= cy1) break;
+        if (by + scale <= cy0) continue;
+        size_t bit = (size_t)r * (size_t)w * (size_t)bpp;
+        for (int c = 0; c < w; c++, bit += (size_t)bpp) {
+            int v = (cov[bit >> 3] >> (8 - bpp - (int)(bit & 7))) & top;
+            if (v < half) continue;
+            int bx = x + c * scale;
+            if (bx >= cx1) break;
+            if (bx + scale <= cx0) continue;
+            int x0 = bx < cx0 ? cx0 : bx, x1 = bx + scale > cx1 ? cx1 : bx + scale;
+            int y0 = by < cy0 ? cy0 : by, y1 = by + scale > cy1 ? cy1 : by + scale;
+            for (int ty = y0; ty < y1; ty++) {
+                uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                for (int tx = x0; tx < x1; tx++) drow[tx] = col;
+            }
+        }
+    }
+}
+
 /* The scale-1 lane crossed into libmoy, was REVERTED on an S3 number of 1.21x,
  * and crossed again when that number was re-measured at 1.04x against current
  * libmoy -- the 1.21x had been taken before moy_print grew its whole-column

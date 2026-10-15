@@ -556,7 +556,7 @@ Ruled 2026-10-12, each the pick that builds least:
 
 ### 4.7 Fonts
 
-Up to three roles: `ui`, `title`, `mono`. A theme font is a bitmap font file.
+Up to four roles: `ui`, `title`, `mono`, `caption`. A theme font is a bitmap font file.
 The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
 `print` path is byte-identical, including the Lua C API that shares
 `mg_text_raw`. The one text path for every app runtime is sprint 6's
@@ -598,18 +598,52 @@ The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
 | 16 | count, padded to 4 | each glyph's advance in pixels, 0-32; padding 0 |
 | then | count × width × ⌈height / 8⌉ | the glyphs: a glyph's columns left to right, a column's bytes top down, bit 0 of each its top row (petme128's layout at 8×8) |
 
-A byte the glyphs do not cover draws glyph 0. The reader refuses a file over
-8192 bytes, shorter than its header or than `size` says, with another magic or
-a newer version, a field out of range, a reserved or padding byte set, tables
-that do not fill `size` exactly, or a bit set below the glyph box, each by its
-own code; a refused file loads nothing. A loaded file is copied into a buffer
-its row owns; four rows load at once beside petme128, and an id names its slot
-and the slot's generation, so a freed font's id is refused everywhere it is
-passed. Petme128's row keeps `mg_text_raw`'s cell loop and a loaded font
-draws through `mg_text_font`, a lane of its own: the S3 A/B that gated this
-step is recorded in `moy_gfx_kernels.c`.
-`moy_ui` faces it: `font_load`, `font_free`, `font_info` (box, line, ascent,
-range), `text_width`'s font argument, and `theme_fonts` for the `fonts` key
+A byte the glyphs do not cover draws glyph 0.
+
+**The font file, version 2** (defined 2026-10-15 by the 2026-10 look's step 3,
+`docs/look_2026-10.md`): one size of one weight pre-rasterised on the host
+(`tools/make_font.py`), each glyph its own box, at 1, 2 or 4 bpp, kerned by
+pair. Little-endian; every field is a byte but those named:
+
+| offset | bytes | field |
+|---|---|---|
+| 0 | 4 | `MFNT` |
+| 4 | 1 | version, 2 |
+| 5 | 1 | bpp: 1, 2 or 4 |
+| 6 | 1 | line advance, 1 up |
+| 7 | 1 | ascent: the baseline, in rows from the line's top, 0 to the line |
+| 8 | 1 | cell: the advance a gap counted in cells takes, 1 up (the converter writes `0`'s) |
+| 9 | 1 | records, 1 up |
+| 10 | 2 | kerning pairs |
+| 12 | 4 | `size`: the file's length |
+| 16 | 256 | the index: each byte's record; a byte the font does not cover is 0, so record 0 (the converter's space) is the fallback |
+| 272 | records × 8 | a record: its coverage's offset (3 bytes), box width, box height (both 0 for no ink, else both 1 up), the box's left from the pen and its top above the baseline (signed), the advance |
+| then | pairs × 3 | a pair: left byte, right byte, its signed adjustment (never 0), ascending by (left, right) |
+| then | the rest | each record's coverage in record order: its box's pixels row-major at `bpp` bits, the first pixel in the high bits of its byte, a glyph starting on a byte, its pad bits 0 |
+
+A version 2 font decodes text as UTF-8: Latin-1 draws at its own byte, the
+byte map's symbols (`MOY_FONT_BYTE_MAP`: − ← → ↑ ↓ … • “ ” ‘ ’ – —) at `0x80`
+up, anything else and a malformed sequence at byte 0. Widths add the pairs.
+`moy_text`'s fitted text cuts with "…" in a version 2 font that covers it
+(`moy_text_cut_px`); petme128 and version 1 cut as they did.
+
+The reader refuses a file over 65536 bytes, shorter than its header or than
+`size` says, with another magic or a newer version, a field out of range, a
+reserved or padding byte or pad bit set, an index past the records, a record
+whose coverage does not follow the one before, pairs out of order or of 0,
+tables that do not fill `size` exactly, or a bit set below a version 1 glyph
+box, each by its own code; a refused file loads nothing. A loaded file is
+copied into a buffer its row owns (PSRAM on the boards, so drawing never
+shares the S3's flash cache with code); ten rows load at once beside
+petme128, and an id names its slot and the slot's generation, so a freed
+font's id is refused everywhere it is passed. Petme128's row keeps
+`mg_text_raw`'s cell loop and a version 1 font draws through
+`mg_text_font`, a lane of its own: the S3 A/B that gated this step is
+recorded in `moy_gfx_kernels.c`. A version 2 font draws a glyph at a time
+through `mg_glyph_cov`, which stores the ink at half coverage or more; the
+2 and 4 bpp ramp is the look's step 4.
+`moy_ui` faces it: `font_load`, `font_free`, `font_info` (box or cell, height, line,
+ascent, range), `text_width`'s font argument, and `theme_fonts` for the `fonts` key
 (§3). `tests/test_font_lane.py` holds both rows to a reference raster, the
 refusals to their codes and a fuzz to the target, and the boards' module to
 the host's answers; `tests/on_glass.py`'s `fonts_match_host` loads the fuzz
@@ -663,6 +697,15 @@ builds least:
   phase 4 step 3 took them on the T-Deck and the Guition S3.
 - **Licence:** Tiny5 is OFL-1.1; `THIRD_PARTY.md` §3.1a carries its notice,
   its pinned source and what the conversion changed.
+- **The font set** (the 2026-10 look's step 3): `native/moy_ui/fonts/` holds
+  the faces `tools/make_font.py` builds from four OFL-1.1 families (Day Sans,
+  from IBM Plex Sans, whose name "Plex" is reserved; Inter; Atkinson
+  Hyperlegible Next; JetBrains Mono), each `FAMILY-SIZE-WEIGHT-BPP.fnt` with
+  its family's licence `FAMILY.txt`, and `set.json` names the faces each tier
+  takes. A board image freezes its tier's (`fonts_data`, chosen by
+  board.toml's `tier`); `runtime/fontset.py` reads them, and
+  `appearance.font_file` answers a face, and `X.txt` beside it, after the
+  seeds' files. `THIRD_PARTY.md` §3.1b carries the notices.
 
 Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
   - **The file.** `tools/make_tiny5_font.py` samples the pinned Google Fonts

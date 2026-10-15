@@ -85,7 +85,7 @@ PATH_RE = re.compile(
 # bare `.c`/`.h` is almost always upstream MicroPython or ESP-IDF, which lives
 # in the untracked .build/ clones and cannot be resolved here.
 # Generated at build time -- real on a built tree, absent in a clean checkout.
-GENERATED_RE = re.compile(r"^(_ota_build|carts_data|app_decls)\.py$")
+GENERATED_RE = re.compile(r"^(_ota_build|carts_data|app_decls|fonts_data)\.py$")
 
 # "deleted", "removed", "gone"... -- the vocabulary of a removal note.
 BURIED_RE = re.compile(

@@ -349,6 +349,10 @@ def test_the_theme_font_is_installed(board):
     on_glass.the_theme_font_is_installed(board)
 
 
+def test_the_font_set_is_the_tiers(board):
+    on_glass.the_font_set_is_the_tiers(board, 'handheld')
+
+
 def test_a_leaked_session_leaves_the_panel_flushing(board):
     on_glass.a_leaked_session_leaves_the_panel_flushing(board)
 

@@ -218,10 +218,10 @@ HOST_ONLY = {
 # staged by a `cp`, so the extraction cannot see them -- but they are real, and
 # leaving them out would report every importer of them as broken.
 GENERATED = {
-    "tdeck-mainline": {"carts_data", "_ota_build"},
-    "p4": {"carts_data", "_ota_build"},
-    "guition-s3": {"carts_data", "_ota_build"},
-    "guition-p4": {"carts_data", "_ota_build"},
+    "tdeck-mainline": {"carts_data", "_ota_build", "fonts_data"},
+    "p4": {"carts_data", "_ota_build", "fonts_data"},
+    "guition-s3": {"carts_data", "_ota_build", "fonts_data"},
+    "guition-p4": {"carts_data", "_ota_build", "fonts_data"},
     # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
     # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
     # fallback for a missing card), and this board freezes the PACKED form

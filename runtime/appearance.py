@@ -128,6 +128,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _uimod
 try:
+    import fontset as _fontset
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import fontset as _fontset
+try:
     import shell_layout as _shell_layout
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -139,9 +143,17 @@ def _ui_text_w(t):
     return _uimod.text_width(t, 1, "ui")
 
 
-_FONT_ROLES = ("ui", "title", "mono")
+_FONT_ROLES = ("ui", "title", "mono", "caption")
 _FONT_FULL = 6          # moy_font_load's MOY_FONT_FULL: every slot holds a font
-_FONT_BYTES = 8192      # moy_text.h's MOY_FONT_BYTES: the largest font file
+_FONT_BYTES = 65536     # moy_text.h's MOY_FONT_BYTES: the largest font file
+
+
+def font_file(name):
+    """A font file the image carries, by name, as bytes, or None: a seed
+    package's (ui.font_file), else a face of the font set (runtime/fontset.py);
+    X.txt beside a font X.fnt is its licence."""
+    data = _uimod.font_file(name)
+    return data if data is not None else _fontset.file(name)
 _THEME_BYTES = 4096     # style.json's theme.bytes: the largest theme.json
 _THEME_MAIN = "theme.json"
 _PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spare
@@ -917,7 +929,7 @@ class Appearance:
         return need, fetched
 
     def _fetch(self, look, name):
-        data = _uimod.font_file(name)
+        data = font_file(name)
         if data is None and look.get("from") not in (None, CUSTOM) \
                 and look.get("from") not in THEME_NAMES:
             data = self._package_file(look["from"], name, _PICTURE_BYTES)
@@ -1628,7 +1640,7 @@ class Appearance:
         if f == PETME128:
             return 0
         if pkg is None:
-            src = _uimod.font_file(f)
+            src = font_file(f)
         else:
             src = self._package_file(pkg, f, _FONT_BYTES)
         if src is None:

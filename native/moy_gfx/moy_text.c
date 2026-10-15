@@ -21,18 +21,35 @@
 
 // --- the font rows -------------------------------------------------------------
 
-// Petme128's row: no advance table, every glyph one 8px cell, drawn by
-// mg_text_raw's cell loop (moy_gfx_kernels.c says why it keeps its own).
-static const mg_font_t PETME128 = {moy_font_data, NULL, MOY_TEXT_CELL, MOY_TEXT_CELL, 1,
-                                   FONT_FIRST, FONT_GLYPHS};
+// A version 2 font's tables, pointing into its file.
+typedef struct {
+    const uint8_t *index;       // MOY_FONT_INDEX bytes: a byte's record
+    const uint8_t *rec;         // count records of MOY_FONT_RECORD bytes
+    const uint8_t *kern;        // nkern pairs of MOY_FONT_PAIR bytes, ascending
+    const uint8_t *cov;         // the glyphs' coverage
+    int nkern, bpp, cell, h;
+} font2_t;
+
+// A row: petme128's (version 0: no advance table, every glyph one 8px cell,
+// drawn by mg_text_raw's cell loop, which moy_gfx_kernels.c says why it keeps),
+// a version 1 font's (mg_font_t, drawn by mg_text_font) or a version 2
+// font's (font2_t, drawn a glyph at a time by mg_glyph_cov).
+typedef struct {
+    mg_font_t f;
+    font2_t f2;
+    uint8_t version, line, ascent;
+} row_t;
+
+static const row_t PETME128 = {{moy_font_data, NULL, MOY_TEXT_CELL, MOY_TEXT_CELL, 1,
+                                FONT_FIRST, FONT_GLYPHS},
+                               {0}, 0, MOY_TEXT_CELL, MOY_TEXT_ASCENT};
 
 // A loaded font: the file, owned, and the row read out of it. An id is the
 // slot's number (1 up) in its low byte and the slot's generation above, which
 // moves on every free, so an id outlives its font only as a refusal.
 typedef struct {
-    mg_font_t f;
+    row_t r;
     uint8_t *buf;
-    uint8_t line, ascent;
     uint32_t gen;
 } font_slot_t;
 
@@ -48,39 +65,29 @@ static font_slot_t *slot_of(uint32_t font) {
     return sl->buf != NULL && sl->gen == font >> 8 ? sl : NULL;
 }
 
-static const mg_font_t *font_row(uint32_t font) {
+static const row_t *font_row(uint32_t font) {
     if (font == MOY_FONT_PETME128) {
         return &PETME128;
     }
     font_slot_t *sl = slot_of(font);
-    return sl != NULL ? &sl->f : NULL;
+    return sl != NULL ? &sl->r : NULL;
 }
 
-// Check a font file (moy_text.h; docs/theming_2026-09.md §4.7 has the format).
-// Every field is read a byte at a time, so `src` may sit at any address.
-static int font_check(const uint8_t *src, size_t n) {
-    if (n > MOY_FONT_BYTES) {
-        return MOY_FONT_BIG;
-    }
-    if (n < MOY_FONT_HEADER) {
-        return MOY_FONT_SHORT;
-    }
-    if (memcmp(src, MOY_FONT_MAGIC, 4) != 0) {
-        return MOY_FONT_MAGIC_BAD;
-    }
-    if (src[4] > MOY_FONT_VERSION) {
-        return MOY_FONT_NEWER;
-    }
-    uint32_t size = (uint32_t)src[12] | (uint32_t)src[13] << 8 | (uint32_t)src[14] << 16
-                    | (uint32_t)src[15] << 24;
-    if (size != n) {
-        return MOY_FONT_SHORT;
-    }
+static uint32_t u16_at(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8;
+}
+
+static uint32_t u24_at(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16;
+}
+
+// Check a version 1 file whose magic, version and size are checked.
+static int font_check1(const uint8_t *src, size_t n) {
     int w = src[5], h = src[6], line = src[7], ascent = src[8];
     int first = src[9], count = src[10];
-    if (src[4] != MOY_FONT_VERSION || w < 1 || w > MOY_FONT_CELL_MAX || h < 1
-        || h > MOY_FONT_CELL_MAX || line < h || line > MOY_FONT_LINE_MAX || ascent > h
-        || count < 1 || first + count > 256 || src[11] != 0) {
+    if (w < 1 || w > MOY_FONT_CELL_MAX || h < 1 || h > MOY_FONT_CELL_MAX || line < h
+        || line > MOY_FONT_LINE_MAX || ascent > h || count < 1 || first + count > 256
+        || src[11] != 0) {
         return MOY_FONT_BAD;
     }
     size_t bpc = ((size_t)h + 7) / 8;
@@ -105,12 +112,134 @@ static int font_check(const uint8_t *src, size_t n) {
     return MOY_FONT_OK;
 }
 
+// Check a version 2 file whose magic, version and size are checked: every
+// table inside the file and filling it exactly, each record's coverage laid
+// after the one before, a glyph's pad bits clear, the pairs ascending.
+static int font_check2(const uint8_t *src, size_t n) {
+    int bpp = src[5], line = src[6], ascent = src[7], cell = src[8], count = src[9];
+    size_t nkern = u16_at(src + 10);
+    if ((bpp != 1 && bpp != 2 && bpp != 4) || line < 1 || ascent > line || cell < 1
+        || count < 1) {
+        return MOY_FONT_BAD;
+    }
+    size_t recs = MOY_FONT_HEADER + MOY_FONT_INDEX;
+    size_t pairs = recs + (size_t)count * MOY_FONT_RECORD;
+    size_t cov = pairs + nkern * MOY_FONT_PAIR;
+    if (cov > n) {
+        return MOY_FONT_BAD;
+    }
+    for (int b = 0; b < MOY_FONT_INDEX; b++) {
+        if (src[MOY_FONT_HEADER + b] >= count) {
+            return MOY_FONT_BAD;
+        }
+    }
+    size_t at = 0;
+    for (int i = 0; i < count; i++) {
+        const uint8_t *r = src + recs + (size_t)i * MOY_FONT_RECORD;
+        int w = r[3], h = r[4];
+        if ((w == 0) != (h == 0) || u24_at(r) != at) {
+            return MOY_FONT_BAD;
+        }
+        size_t bits = (size_t)w * (size_t)h * (size_t)bpp;
+        size_t bytes = (bits + 7) / 8;
+        if (bytes > n - cov - at) {
+            return MOY_FONT_BAD;
+        }
+        if (bits % 8 && src[cov + at + bytes - 1] & (0xffu >> (bits % 8))) {
+            return MOY_FONT_BAD;
+        }
+        at += bytes;
+    }
+    if (cov + at != n) {
+        return MOY_FONT_BAD;
+    }
+    uint32_t prev = 0;
+    for (size_t k = 0; k < nkern; k++) {
+        const uint8_t *p = src + pairs + k * MOY_FONT_PAIR;
+        uint32_t key = (uint32_t)p[0] << 8 | p[1];
+        if ((k > 0 && key <= prev) || p[2] == 0) {
+            return MOY_FONT_BAD;
+        }
+        prev = key;
+    }
+    return MOY_FONT_OK;
+}
+
+// Check a font file (moy_text.h; docs/theming_2026-09.md §4.7 has the format).
+// Every field is read a byte at a time, so `src` may sit at any address.
+static int font_check(const uint8_t *src, size_t n) {
+    if (n > MOY_FONT_BYTES) {
+        return MOY_FONT_BIG;
+    }
+    if (n < MOY_FONT_HEADER) {
+        return MOY_FONT_SHORT;
+    }
+    if (memcmp(src, MOY_FONT_MAGIC, 4) != 0) {
+        return MOY_FONT_MAGIC_BAD;
+    }
+    if (src[4] > MOY_FONT_VERSION) {
+        return MOY_FONT_NEWER;
+    }
+    uint32_t size = (uint32_t)src[12] | (uint32_t)src[13] << 8 | (uint32_t)src[14] << 16
+                    | (uint32_t)src[15] << 24;
+    if (size != n) {
+        return MOY_FONT_SHORT;
+    }
+    if (src[4] == 1) {
+        return font_check1(src, n);
+    }
+    if (src[4] == 2) {
+        return font_check2(src, n);
+    }
+    return MOY_FONT_BAD;
+}
+
+// A checked file's row, pointing into `buf`.
+static void read_row(row_t *r, const uint8_t *buf) {
+    memset(r, 0, sizeof(*r));
+    r->version = buf[4];
+    if (r->version == 1) {
+        int count = buf[10];
+        size_t advs = ((size_t)count + 3) & ~(size_t)3;
+        r->f.adv = buf + MOY_FONT_HEADER;
+        r->f.glyphs = buf + MOY_FONT_HEADER + advs;
+        r->f.w = buf[5];
+        r->f.h = buf[6];
+        r->f.bpc = (uint8_t)((buf[6] + 7) / 8);
+        r->f.first = buf[9];
+        r->f.count = (uint8_t)count;
+        r->line = buf[7];
+        r->ascent = buf[8];
+        return;
+    }
+    font2_t *f = &r->f2;
+    int count = buf[9];
+    f->index = buf + MOY_FONT_HEADER;
+    f->rec = f->index + MOY_FONT_INDEX;
+    f->kern = f->rec + (size_t)count * MOY_FONT_RECORD;
+    f->nkern = (int)u16_at(buf + 10);
+    f->cov = f->kern + (size_t)f->nkern * MOY_FONT_PAIR;
+    f->bpp = buf[5];
+    f->cell = buf[8];
+    r->line = buf[6];
+    r->ascent = buf[7];
+    r->f.count = (uint8_t)count;
+    int deep = 0;               // the most rows any glyph's ink reaches below the baseline
+    for (int i = 0; i < count; i++) {
+        const uint8_t *g = f->rec + (size_t)i * MOY_FONT_RECORD;
+        int below = (int)g[4] - (int8_t)g[6];
+        if (g[4] && below > deep) {
+            deep = below;
+        }
+    }
+    f->h = r->ascent + deep;
+}
+
 int moy_font_load(const uint8_t *src, size_t n, uint32_t *id) {
     int rc = font_check(src, n);
     if (rc != MOY_FONT_OK) {
         return rc;
     }
-    font_slot_t *sl = NULL;
     int k = 0;
     while (k < MOY_FONT_SLOTS && s_fonts[k].buf != NULL) {
         k++;
@@ -118,24 +247,14 @@ int moy_font_load(const uint8_t *src, size_t n, uint32_t *id) {
     if (k == MOY_FONT_SLOTS) {
         return MOY_FONT_FULL;
     }
-    sl = &s_fonts[k];
+    font_slot_t *sl = &s_fonts[k];
     uint8_t *buf = FONT_ALLOC(n);
     if (buf == NULL) {
         return MOY_FONT_NOMEM;
     }
     memcpy(buf, src, n);
-    int count = buf[10];
-    size_t advs = ((size_t)count + 3) & ~(size_t)3;
     sl->buf = buf;
-    sl->f.adv = buf + MOY_FONT_HEADER;
-    sl->f.glyphs = buf + MOY_FONT_HEADER + advs;
-    sl->f.w = buf[5];
-    sl->f.h = buf[6];
-    sl->f.bpc = (uint8_t)((buf[6] + 7) / 8);
-    sl->f.first = buf[9];
-    sl->f.count = (uint8_t)count;
-    sl->line = buf[7];
-    sl->ascent = buf[8];
+    read_row(&sl->r, buf);
     sl->gen = (sl->gen + 1) & 0xffffffu;
     if (sl->gen == 0) {
         sl->gen = 1;
@@ -151,7 +270,7 @@ int moy_font_free(uint32_t font) {
     }
     FONT_FREE(sl->buf);
     sl->buf = NULL;
-    memset(&sl->f, 0, sizeof(sl->f));
+    memset(&sl->r, 0, sizeof(sl->r));
     if (s_print == font) {
         s_print = MOY_FONT_PETME128;
     }
@@ -184,21 +303,30 @@ int64_t moy_text_print_font_use(uint32_t font) {
 }
 
 int moy_font_info(uint32_t font, moy_font_info_t *out) {
-    const mg_font_t *f = font_row(font);
-    if (f == NULL) {
+    const row_t *r = font_row(font);
+    if (r == NULL) {
         return 0;
     }
-    font_slot_t *sl = font == MOY_FONT_PETME128 ? NULL : slot_of(font);
-    out->w = f->w;
-    out->h = f->h;
-    out->line = sl != NULL ? sl->line : MOY_TEXT_CELL;
-    out->ascent = sl != NULL ? sl->ascent : MOY_TEXT_ASCENT;
-    out->first = f->first;
-    out->count = f->count;
+    out->line = r->line;
+    out->ascent = r->ascent;
+    out->version = r->version;
+    if (r->version == 2) {
+        out->w = r->f2.cell;
+        out->h = r->f2.h;
+        out->first = 0;
+        out->count = r->f.count;
+        out->bpp = r->f2.bpp;
+        return 1;
+    }
+    out->w = r->f.w;
+    out->h = r->f.h;
+    out->first = r->f.first;
+    out->count = r->f.count;
+    out->bpp = 1;
     return 1;
 }
 
-// One byte's advance in font `f`, unscaled.
+// One byte's advance in a version 1 font, unscaled.
 static int advance(const mg_font_t *f, uint8_t b) {
     int gi = (int)b - f->first;
     if (gi < 0 || gi >= f->count) {
@@ -207,12 +335,153 @@ static int advance(const mg_font_t *f, uint8_t b) {
     return f->adv[gi];
 }
 
-// --- measuring -----------------------------------------------------------------
+// --- a version 2 font's glyphs ---------------------------------------------------
+
+static const uint16_t BYTE_MAP[] = MOY_FONT_BYTE_MAP;
 
 // A byte that continues a UTF-8 sequence (10xxxxxx).
 static int cont(uint8_t b) {
     return (b & 0xC0) == 0x80;
 }
+
+// The byte the codepoint at s[*i] draws at (moy_text.h), *i moved past it: a
+// malformed sequence is its first byte alone, at byte 0.
+static int next_byte(const uint8_t *s, size_t n, size_t *i) {
+    uint8_t b = s[(*i)++];
+    if (b < 0x80) {
+        return b;
+    }
+    int len = b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3
+              : b >= 0xF0 && b <= 0xF4 ? 4 : 0;
+    if (len == 0 || *i + (size_t)(len - 1) > n) {
+        return 0;
+    }
+    uint32_t cp = b & (0x7Fu >> len);
+    for (int k = 1; k < len; k++) {
+        if (!cont(s[*i + (size_t)k - 1])) {
+            return 0;
+        }
+        cp = cp << 6 | (s[*i + (size_t)k - 1] & 0x3Fu);
+    }
+    if ((len == 3 && cp < 0x800) || (len == 4 && (cp < 0x10000 || cp > 0x10FFFF))) {
+        return 0;       // an overlong form, or past Unicode
+    }
+    *i += (size_t)(len - 1);
+    if (cp >= 0xA0 && cp <= 0xFF) {
+        return (int)cp;
+    }
+    for (size_t k = 0; k < sizeof(BYTE_MAP) / sizeof(BYTE_MAP[0]); k++) {
+        if (BYTE_MAP[k] == cp) {
+            return 0x80 + (int)k;
+        }
+    }
+    return 0;
+}
+
+static const uint8_t *rec_of(const font2_t *f, int b) {
+    return f->rec + (size_t)f->index[b] * MOY_FONT_RECORD;
+}
+
+// The kerning between bytes a and b, unscaled: a binary search of the pairs.
+static int kern(const font2_t *f, int a, int b) {
+    uint32_t key = (uint32_t)a << 8 | (uint32_t)b;
+    int lo = 0, hi = f->nkern;
+    while (lo < hi) {
+        int mid = (lo + hi) >> 1;
+        const uint8_t *p = f->kern + (size_t)mid * MOY_FONT_PAIR;
+        uint32_t k = (uint32_t)p[0] << 8 | p[1];
+        if (k == key) {
+            return (int8_t)p[2];
+        }
+        if (k < key) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return 0;
+}
+
+// A walk over a version 2 font's glyphs: each step's byte and the pen's
+// position before it, kerning applied, unscaled.
+typedef struct {
+    const font2_t *f;
+    const uint8_t *s;
+    size_t n, i;
+    int prev, pen;
+} walk_t;
+
+static void walk_start(walk_t *w, const font2_t *f, const uint8_t *s, size_t n) {
+    w->f = f;
+    w->s = s;
+    w->n = n;
+    w->i = 0;
+    w->prev = -1;
+    w->pen = 0;
+}
+
+// The next glyph's byte, *at the pen's x for it; -1 at the end. The pen then
+// stands past its advance.
+static int walk_next(walk_t *w, int *at) {
+    if (w->i >= w->n) {
+        return -1;
+    }
+    int b = next_byte(w->s, w->n, &w->i);
+    if (w->prev >= 0 && w->f->nkern) {
+        w->pen += kern(w->f, w->prev, b);
+    }
+    *at = w->pen;
+    w->pen += rec_of(w->f, b)[7];
+    w->prev = b;
+    return b;
+}
+
+static int width2(const font2_t *f, const uint8_t *s, size_t n) {
+    walk_t w;
+    int at;
+    walk_start(&w, f, s, n);
+    while (walk_next(&w, &at) >= 0) {
+    }
+    return w.pen;
+}
+
+// The bytes of the longest run of whole glyphs that draws in maxw pixels,
+// unscaled; its width into *wout.
+static size_t fit2(const font2_t *f, const uint8_t *s, size_t n, int maxw, int *wout) {
+    walk_t w;
+    int at;
+    size_t keep = 0;
+    int kept = 0;
+    walk_start(&w, f, s, n);
+    while (walk_next(&w, &at) >= 0) {
+        if (w.pen > maxw) {
+            break;
+        }
+        keep = w.i;
+        kept = w.pen;
+    }
+    if (wout != NULL) {
+        *wout = kept;
+    }
+    return keep;
+}
+
+// Draw one glyph of byte b with its pen at (x, y + ascent), unscaled offsets
+// at `scale`, through the target.
+static void glyph2(const moy_text_target_t *t, const row_t *r, int b, int x, int y,
+                   uint16_t col, int scale) {
+    const font2_t *f = &r->f2;
+    const uint8_t *g = rec_of(f, b);
+    if (g[3] == 0) {
+        return;
+    }
+    int gx = x + (int8_t)g[5] * scale - t->cam_x;
+    int gy = y + ((int)r->ascent - (int8_t)g[6]) * scale - t->cam_y;
+    mg_glyph_cov(t->px, t->cap, t->dw, f->cov + u24_at(g), g[3], g[4], f->bpp, gx, gy, col,
+                 scale, t->cx0, t->cy0, t->cx1, t->cy1);
+}
+
+// --- measuring -----------------------------------------------------------------
 
 size_t moy_text_fit(const uint8_t *s, size_t n, size_t cells) {
     if (n <= cells) {
@@ -226,13 +495,17 @@ size_t moy_text_fit(const uint8_t *s, size_t n, size_t cells) {
 }
 
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale) {
-    const mg_font_t *f = font_row(font);
-    if (f == NULL) {
+    const row_t *r = font_row(font);
+    if (r == NULL) {
         return 0;
     }
     if (scale < 1) {
         scale = 1;
     }
+    if (r->version == 2) {
+        return width2(&r->f2, s, n) * scale;
+    }
+    const mg_font_t *f = &r->f;
     if (f->adv == NULL) {
         return (int)n * f->w * scale;
     }
@@ -244,13 +517,17 @@ int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale) {
 }
 
 size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale) {
-    const mg_font_t *f = font_row(font);
-    if (f == NULL || maxw < 0) {
+    const row_t *r = font_row(font);
+    if (r == NULL || maxw < 0) {
         return 0;
     }
     if (scale < 1) {
         scale = 1;
     }
+    if (r->version == 2) {
+        return fit2(&r->f2, s, n, maxw / scale, NULL);
+    }
+    const mg_font_t *f = &r->f;
     if (f->adv == NULL) {
         return moy_text_fit(s, n, (size_t)(maxw / (f->w * scale)));
     }
@@ -262,6 +539,62 @@ size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int 
         }
     }
     return moy_text_fit(s, n, k);
+}
+
+// The ellipsis's advance in a version 2 font, unscaled, with the pair before
+// it from byte `last`; 0 where the font does not cover it.
+static int ellipsis_w(const font2_t *f, int last) {
+    if (f->index[MOY_FONT_ELLIPSIS] == 0) {
+        return 0;
+    }
+    int k = last >= 0 && f->nkern ? kern(f, last, MOY_FONT_ELLIPSIS) : 0;
+    return k + rec_of(f, MOY_FONT_ELLIPSIS)[7];
+}
+
+// The last glyph byte of s[0..n) in a version 2 font, -1 for none.
+static int last_byte(const uint8_t *s, size_t n) {
+    size_t i = 0;
+    int b = -1;
+    while (i < n) {
+        b = next_byte(s, n, &i);
+    }
+    return b;
+}
+
+size_t moy_text_cut_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale,
+                       int *ellipsis) {
+    *ellipsis = 0;
+    const row_t *r = font_row(font);
+    if (r == NULL || maxw < 0) {
+        return 0;
+    }
+    if (scale < 1) {
+        scale = 1;
+    }
+    size_t all = moy_text_fit_px(font, s, n, maxw, scale);
+    if (all == n || r->version != 2 || r->f2.index[MOY_FONT_ELLIPSIS] == 0) {
+        return all;
+    }
+    const font2_t *f = &r->f2;
+    int room = maxw / scale;
+    size_t k = fit2(f, s, n, room, NULL);
+    for (;;) {
+        while (k > 0 && s[k - 1] == ' ') {
+            k--;
+        }
+        if (k == 0 || width2(f, s, k) + ellipsis_w(f, last_byte(s, k)) <= room) {
+            break;
+        }
+        k--;                    // one glyph back: to the codepoint before s[k]
+        while (k > 0 && cont(s[k])) {
+            k--;
+        }
+    }
+    if (ellipsis_w(f, last_byte(s, k)) + (k ? width2(f, s, k) : 0) > room) {
+        return all;             // not even the ellipsis fits
+    }
+    *ellipsis = 1;
+    return k;
 }
 
 void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col) {
@@ -296,20 +629,42 @@ void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uin
     }
 }
 
+// A version 2 font's text at (x, y), with the ellipsis after it when `ell`.
+static void draw2(const moy_text_target_t *t, const row_t *r, const uint8_t *s, size_t n,
+                  int x, int y, uint16_t col, int scale, int ell) {
+    walk_t w;
+    int at, b;
+    walk_start(&w, &r->f2, s, n);
+    while ((b = walk_next(&w, &at)) >= 0) {
+        glyph2(t, r, b, x + at * scale, y, col, scale);
+    }
+    if (ell) {
+        int k = w.prev >= 0 && r->f2.nkern ? kern(&r->f2, w.prev, MOY_FONT_ELLIPSIS) : 0;
+        glyph2(t, r, MOY_FONT_ELLIPSIS, x + (w.pen + k) * scale, y, col, scale);
+    }
+}
+
 int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw) {
-    const mg_font_t *f = font_row(font);
-    if (source > MOY_TEXT_DATA || f == NULL) {
+    const row_t *r = font_row(font);
+    if (source > MOY_TEXT_DATA || r == NULL) {
         return -1;          // a literal never reaches the raster
     }
     if (scale < 1) {
         scale = 1;
     }
+    int ell = 0;
     if (maxw >= 0) {
-        n = moy_text_fit_px(font, s, n, maxw, scale);
+        n = moy_text_cut_px(font, s, n, maxw, scale, &ell);
     }
-    int w = f->adv == NULL ? (int)n * f->w * scale : moy_text_width(font, s, n, scale);
+    const mg_font_t *f = &r->f;
+    int w;
+    if (r->version == 2) {
+        w = (width2(&r->f2, s, n) + (ell ? ellipsis_w(&r->f2, last_byte(s, n)) : 0)) * scale;
+    } else {
+        w = f->adv == NULL ? (int)n * f->w * scale : moy_text_width(font, s, n, scale);
+    }
     if (maxw >= 0) {
         if (align == MOY_TEXT_CENTER) {
             int d = maxw - w;
@@ -318,8 +673,10 @@ int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
             x += maxw - w;
         }
     }
-    if (n > 0 && t != NULL && t->px != NULL) {
-        if (f->adv == NULL) {
+    if ((n > 0 || ell) && t != NULL && t->px != NULL) {
+        if (r->version == 2) {
+            draw2(t, r, s, n, x, y, col, scale, ell);
+        } else if (f->adv == NULL) {
             mg_text_raw(t->px, t->cap, t->dw, s, n, x, y, col, moy_font_data, FONT_GLYPHS,
                         FONT_FIRST, scale, t->cam_x, t->cam_y, t->cx0, t->cy0, t->cx1, t->cy1);
         } else {
@@ -337,8 +694,12 @@ static size_t adv_px(const mg_font_t *f, uint8_t b) {
     return f->adv == NULL ? (size_t)f->w : (size_t)advance(f, b);
 }
 
-// How many leading bytes of s[0..n) fit in `maxw` pixels of f's advances.
-static size_t fit_bytes(const mg_font_t *f, const uint8_t *s, size_t n, size_t maxw) {
+// How many leading bytes of s[0..n) fit in `maxw` pixels of r's advances.
+static size_t fit_bytes(const row_t *r, const uint8_t *s, size_t n, size_t maxw) {
+    if (r->version == 2) {
+        return fit2(&r->f2, s, n, maxw > 0x7fffffff ? 0x7fffffff : (int)maxw, NULL);
+    }
+    const mg_font_t *f = &r->f;
     size_t k = 0, at = 0;
     for (; k < n; k++) {
         at += adv_px(f, s[k]);
@@ -369,11 +730,15 @@ static void emit(sink_t *k, size_t off, size_t len, int collapse) {
     k->count++;
 }
 
-// The width of s[0..n): its bytes, or with `f` its advances in pixels.
-static size_t span_w(const mg_font_t *f, const uint8_t *s, size_t n) {
-    if (f == NULL) {
+// The width of s[0..n): its bytes, or with `r` its advances in pixels.
+static size_t span_w(const row_t *r, const uint8_t *s, size_t n) {
+    if (r == NULL) {
         return n;
     }
+    if (r->version == 2) {
+        return (size_t)width2(&r->f2, s, n);
+    }
+    const mg_font_t *f = &r->f;
     size_t w = 0;
     for (size_t i = 0; i < n; i++) {
         w += adv_px(f, s[i]);
@@ -383,12 +748,12 @@ static size_t span_w(const mg_font_t *f, const uint8_t *s, size_t n) {
 
 // `cols` is a line's width: in bytes, or with `f` in pixels of f's advances.
 static void wrap_words(sink_t *k, const uint8_t *s, size_t n, size_t cols,
-                       const mg_font_t *f) {
+                       const row_t *f) {
     size_t i = 0;
     int have = 0;               // a line is open
     size_t ls = 0, le = 0;      // its span
     size_t lw = 0;              // its width, words joined by single spaces
-    size_t sp = f == NULL ? 1 : adv_px(f, ' ');
+    size_t sp = span_w(f, (const uint8_t *)" ", 1);
     int collapse = 0;
     for (;;) {
         while (i < n && space(s[i])) {

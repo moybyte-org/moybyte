@@ -619,6 +619,7 @@ const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES] = {
     "ui",
     "title",
     "mono",
+    "caption",
 };
 
 const char *const moy_theme_bar_edges[MOY_THEME_BARS] = {

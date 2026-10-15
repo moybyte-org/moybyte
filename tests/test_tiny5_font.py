@@ -8,7 +8,7 @@ phase 4 step 3).
 * The text-size floor: what it answers across the lineup, and the effective
   font scale it lifts.
 * A theme switch installs the roles and the print font, rebuilds the layout,
-  and frees what no role keeps: four slots never leak.
+  and frees what no role keeps: the slots never leak.
 * The print font: a canvas's print draws in it; a freed font falls back.
 * The pixel wrap.
 * The game domain -- a Python cart, a Lua cart, a wallpaper cart -- draws
@@ -30,6 +30,8 @@ from tools import make_tiny5_font as tool          # noqa: E402
 from runtime import ui                             # noqa: E402
 from runtime import appearance                     # noqa: E402
 from runtime.chrome import text_scale_floor        # noqa: E402
+
+SLOTS = 10      # moy_text.h's MOY_FONT_SLOTS
 
 
 def _fnt():
@@ -137,16 +139,16 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
         for name in appearance.THEME_NAMES:
             ws.look.set_theme(name, persist=False)
             assert len(appearance._FONTS) == 1
-    assert _free_slots() == 3
+    assert _free_slots() == SLOTS - 1
     # A theme that names no font: every role and the print font on petme128,
     # nothing left loaded, the layout rebuilt on petme128's cell.
     real = ui.theme_fonts
     monkeypatch.setattr(appearance._uimod, "theme_fonts",
                         lambda n: () if n == "slate" else real(n))
     ws.look.set_theme("slate", persist=False)
-    assert [ui.font(r)[0] for r in ("ui", "title", "mono")] == [0, 0, 0]
+    assert [ui.font(r)[0] for r in ("ui", "title", "mono", "caption")] == [0, 0, 0, 0]
     assert ui.print_font() == 0 and appearance._FONTS == {}
-    assert ws.layout.font_w == 8 and _free_slots() == 4
+    assert ws.layout.font_w == 8 and _free_slots() == SLOTS
     ws.look.set_theme("night", persist=False)
     assert ui.font("ui")[0] != 0 and ws.layout.font_w == 6
 
@@ -309,4 +311,4 @@ def test_a_full_set_of_slots_is_taken_back(tmp_path):
     appearance._FONTS.clear()                  # a console that knows none of them
     build_ws(tmp_path)
     assert ui.font("ui")[0] not in (0, None) and len(appearance._FONTS) == 1
-    assert _free_slots() == 3
+    assert _free_slots() == SLOTS - 1

@@ -117,7 +117,7 @@ const moy_ui_shape_t *moy_ui_shape(void);
 // The font each role's text draws in (docs/theming_2026-09.md §4.7), the
 // roles in style.json's theme.font_roles order. A role draws in petme128
 // until a font is installed for it, and again once that font is freed.
-enum { MOY_UI_FONT_UI = 0, MOY_UI_FONT_TITLE = 1, MOY_UI_FONT_MONO = 2 };
+enum { MOY_UI_FONT_UI = 0, MOY_UI_FONT_TITLE = 1, MOY_UI_FONT_MONO = 2, MOY_UI_FONT_CAPTION = 3 };
 // Install `font` (an id moy_font_load gave, or 0 for petme128) for `role`:
 // 1, or 0 for an unknown role or font, which installs nothing.
 int moy_ui_font_use(int role, uint32_t font);

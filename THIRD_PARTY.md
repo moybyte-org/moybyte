@@ -38,6 +38,7 @@ separate question from what is committed.
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | Tiny5 (the default theme's UI font) | `native/moy_ui/themes/tiny5.glyphs`, `native/moy_ui/themes/tiny5.fnt`, its licence `native/moy_ui/themes/tiny5.txt`; `tests/fixtures/themes/dusk.moy/tiny5.fnt` | [Google Fonts `ofl/tiny5`](https://github.com/google/fonts/tree/main/ofl/tiny5), from [Gissio/font_tiny5](https://github.com/Gissio/font_tiny5) | OFL-1.1 | **Yes** — rasterised to a bitmap font |
+| The font set (Day Sans from IBM Plex Sans, Inter, Atkinson Hyperlegible Next, JetBrains Mono) | `native/moy_ui/fonts/*.fnt`, each family's licence beside them (`native/moy_ui/fonts/inter.txt` and its three siblings); the fixture `tests/fixtures/fonts/inter_subset.ttf` with `inter_subset.txt` and its `sample_v2_*.fnt` | [Google Fonts `ofl/`](https://github.com/google/fonts/tree/954e256c4277419b5e48bffa51be069b2bd01bde/ofl) | OFL-1.1 | **Yes** — subset and rasterised to bitmap fonts |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
@@ -458,6 +459,41 @@ The licence, reproduced in full so it travels with the font:
 > DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 > FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 > OTHER DEALINGS IN THE FONT SOFTWARE.
+
+### 3.1b The font set — the 2026-10 look's faces
+
+`native/moy_ui/fonts/` holds the faces `tools/make_font.py` builds, one size of
+one weight a file (`FAMILY-SIZE-WEIGHT-BPP.fnt`), and each family's licence,
+verbatim from Google Fonts' `OFL.txt` at the same commit, as
+`FAMILY.txt`. A board image freezes its tier's faces and their licences
+(`fonts_data`, `runtime/fontset.py`), and `appearance.font_file("X.txt")`
+reads a face's licence back. `tests/fixtures/fonts/inter_subset.ttf` is a
+subset of Inter (static, weight 500) with Inter's licence beside it as
+`inter_subset.txt`; the `sample_v2_*.fnt` beside it are built from it.
+
+- **Upstream:** every file from <https://github.com/google/fonts> at commit
+  `954e256c4277419b5e48bffa51be069b2bd01bde`, each TrueType file pinned by
+  SHA-256 in `tools/make_font.py` (`FAMILIES`):
+  - IBM Plex Sans, `ofl/ibmplexsans/IBMPlexSans[wdth,wght].ttf`. **Copyright
+    © 2017 IBM Corp. with Reserved Font Name "Plex".** Its faces are named
+    **Day Sans** (`daysans-*`): a Modified Version may not carry a Reserved
+    Font Name.
+  - Inter, `ofl/inter/Inter[opsz,wght].ttf`. **Copyright 2020 The Inter
+    Project Authors** (https://github.com/rsms/inter).
+  - Atkinson Hyperlegible Next,
+    `ofl/atkinsonhyperlegiblenext/AtkinsonHyperlegibleNext[wght].ttf`.
+    **Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors**
+    (https://github.com/googlefonts/atkinson-hyperlegible-next).
+  - JetBrains Mono, `ofl/jetbrainsmono/JetBrainsMono[wght].ttf`. **Copyright
+    2020 The JetBrains Mono Project Authors**
+    (https://github.com/JetBrains/JetBrainsMono).
+- **Licence:** SIL Open Font License 1.1, its full text in each
+  `FAMILY.txt` (and §3.1a reproduces it).
+- **Modified: yes** — Modified Versions in the OFL's sense: each face is the
+  variable font's instance at one weight, subset to Latin-1 and the byte map's
+  symbols (Calc's faces to its keypad's glyphs), hinted and rasterised by
+  FreeType at one size into the console's font format, version 2, with
+  kerning pairs among ASCII and the byte map. The faces stay under the OFL.
 
 ### 3.2 The MOY64 palette — indices 0–15
 

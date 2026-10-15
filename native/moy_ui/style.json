@@ -1058,7 +1058,7 @@
     "frames": ["classic", "tab", "platinum", "win9x", "flat"],
     "title_aligns": ["left", "center", "right"],
     "frame_buttons": "CMZT",
-    "font_roles": ["ui", "title", "mono"],
+    "font_roles": ["ui", "title", "mono", "caption"],
     "layout": {
       "edges": ["top", "bottom", "left", "right"],
       "slots": ["left", "center", "right"],

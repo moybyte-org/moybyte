@@ -501,24 +501,32 @@ def sheet_corpus(n, seed=11):
 
 FONT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "fixtures", "fonts", "sample6x9.fnt")
-FONT_PROBE = "Hi, there! 0123 ~{|}"
+# Version 2 cuts of tests/fixtures/fonts/inter_subset.ttf at 13 px, 1, 2 and 4
+# bpp (tools/make_font.py face; tests/test_make_font.py rebuilds them).
+FONT_FIXTURES_V2 = tuple(os.path.join(os.path.dirname(FONT_FIXTURE), "sample_v2_%d.fnt" % b)
+                         for b in (1, 2, 4))
+FONT_PROBE = "Hi, there! 0123 ~{|} AVTa \u00e9\u2212\u2026"
 
 
 def font_corpus(n, seed=7):
-    """The sample font, its cuts and a mutant per draw: truncations, a byte
-    flipped anywhere (header, advances, glyphs), bytes inserted or dropped
-    (every table then lands off its aligned offset)."""
+    """The sample fonts (version 1 and 2), their cuts and a mutant per draw:
+    truncations, a byte flipped anywhere (header, tables, glyphs) or in the
+    header, the index and the records, bytes inserted or dropped (every
+    table then lands off its offset)."""
     import random
-    with open(FONT_FIXTURE, "rb") as f:
-        good = f.read()
+    goods = []
+    for p in (FONT_FIXTURE,) + FONT_FIXTURES_V2:
+        with open(p, "rb") as f:
+            goods.append(f.read())
     rng = random.Random(seed)
-    out = [good, good[:15], good[:16], good[:-1], b"", b"MFNT", good + b"\0"]
+    out = [goods[0], goods[0][:15], goods[0][:16], goods[0][:-1], b"", b"MFNT",
+           goods[0] + b"\0"] + goods[1:] + [g[:-1] for g in goods[1:]]
     while len(out) < n:
-        b = bytearray(good)
+        b = bytearray(goods[len(out) % len(goods)])
         for _m in range(rng.randint(1, 3)):
             if len(b) < 16:
                 break
-            op = rng.randrange(5)
+            op = rng.randrange(6)
             i = rng.randrange(len(b))
             if op == 0:
                 b[i] = rng.randrange(256)
@@ -528,6 +536,8 @@ def font_corpus(n, seed=7):
                 del b[i]
             elif op == 3:
                 b[i:i] = bytes([rng.randrange(256)])
+            elif op == 4:
+                b[rng.randrange(min(len(b), 16 + 256 + 8 * 32))] = rng.randrange(256)
             else:
                 b = b[:i]
         out.append(bytes(b))
@@ -723,6 +733,43 @@ def the_theme_font_is_installed(board):
     assert ui_id != 0 and title_id == ui_id and mono_id == 0 and pf == ui_id
     info = board.pyval("__import__('moy_ui').font_info(%d)" % ui_id, strict=True)
     assert tuple(info) == (6, 7, 8, 6, 0x20, 95)
+
+
+def the_font_set_is_the_tiers(board, tier):
+    """The image carries its tier's font set (docs/look_2026-10.md step 3):
+    the faces set.json names for `tier`, each byte for byte the host's, with
+    its family's licence, and each one loads and measures as on the host."""
+    import binascii
+    import json
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import appearance
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "native", "moy_ui", "fonts", "set.json")) as f:
+        want = json.load(f)["tiers"][tier]
+    got = board.pyval("list(__import__('fontset').names())", strict=True)
+    assert list(got) == want
+    for n in want:
+        host = appearance.font_file(n + ".fnt")
+        crc = board.pyval("__import__('binascii').crc32(__import__('appearance').font_file(%r))"
+                          % (n + ".fnt"), strict=True)
+        assert crc == binascii.crc32(host), n
+    lic = board.pyval("len(__import__('appearance').font_file(%r))" % (want[0] + ".txt"),
+                      strict=True)
+    assert lic == len(appearance.font_file(want[0] + ".txt"))
+    probe = FONT_PROBE
+    got = board.pyval(
+        "[(lambda r: (r[0], __import__('moy_ui').font_info(r[1]), __import__('moy_ui')"
+        ".text_width(%r, 1, r[1]), __import__('moy_ui').font_free(r[1])))"
+        "(__import__('moy_ui').font_load(__import__('appearance').font_file(n + '.fnt')))"
+        " for n in %r]" % (probe, want[:3]), strict=True, timeout=60)
+    for n, (rc, info, w, _freed) in zip(want, got):
+        rc2, fid = moy_ui.font_load(appearance.font_file(n + ".fnt"))
+        try:
+            assert (rc, tuple(info), w) == (rc2, moy_ui.font_info(fid),
+                                            moy_ui.text_width(probe, 1, fid)), n
+        finally:
+            moy_ui.font_free(fid)
 
 
 def py_probe_reaches_the_console(board):

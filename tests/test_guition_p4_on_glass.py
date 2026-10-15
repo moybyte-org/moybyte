@@ -362,6 +362,10 @@ def test_the_theme_font_is_installed(board):
     on_glass.the_theme_font_is_installed(board)
 
 
+def test_the_font_set_is_the_tiers(board):
+    on_glass.the_font_set_is_the_tiers(board, 'desktop')
+
+
 def test_a_stale_handle_is_refused_loudly(board):
     on_glass.stale_handle_is_refused_loudly(board)
 

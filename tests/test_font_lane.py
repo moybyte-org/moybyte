@@ -31,11 +31,12 @@ from runtime import font as petme
 from runtime import glass_binding
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from on_glass import FONT_FIXTURE, FONT_PROBE, font_answer, font_corpus  # noqa: E402
+from on_glass import (FONT_FIXTURE, FONT_FIXTURES_V2, FONT_PROBE, font_answer,  # noqa: E402
+                      font_corpus)
 from unix_mp import require_unix_mp  # noqa: E402
 
 OK, BIG, SHORT, MAGIC, NEWER, BAD, FULL = 0, 1, 2, 3, 4, 5, 6
-SLOTS = 4
+SLOTS = 10
 
 
 class _Target(ctypes.Structure):
@@ -185,7 +186,8 @@ def test_the_reader_refuses_by_its_code():
     resized = good + b"\0\0\0\0"
     cases = [
         (b"", SHORT), (good[:15], SHORT), (good[:-1], SHORT), (good + b"\0", SHORT),
-        (b"x" * 8193, BIG), (b"MFNX" + good[4:], MAGIC), (_with(good, b4=2), NEWER),
+        (b"x" * 65537, BIG), (b"MFNX" + good[4:], MAGIC), (_with(good, b4=3), NEWER),
+        (_with(good, b4=2), BAD),                              # a version 1 file read as 2
         (_with(good, b4=0), BAD), (_with(good, b5=0), BAD), (_with(good, b5=17), BAD),
         (_with(good, b6=0), BAD), (_with(good, b6=17), BAD), (_with(good, b7=8), BAD),
         (_with(good, b7=33), BAD), (_with(good, b8=10), BAD), (_with(good, b10=0), BAD),
@@ -248,7 +250,10 @@ def test_mutated_fonts_never_break_the_reader_or_the_target():
         taken += 1
         try:
             info = moy_ui.font_info(fid)
-            assert 1 <= info[0] <= 16 and 1 <= info[1] <= info[2] <= 32
+            if src[4] == 1:
+                assert 1 <= info[0] <= 16 and 1 <= info[1] <= info[2] <= 32
+            else:
+                assert info[0] >= 1 and info[2] >= 1 and info[4] == 0 and info[5] >= 1
             buf = (ctypes.c_uint16 * (w * h + 2 * guard))(*([0x1234] * (w * h + 2 * guard)))
             t = _Target(ctypes.addressof(buf) + 2 * guard, w * h, w, 0, 0, -50, -50, 500, 500)
             for x, y, sc in ((-3, -2, 1), (40, 10, 2), (0, 20, 3)):
@@ -334,3 +339,330 @@ def test_a_package_over_a_seed_keeps_its_own_roles():
                                          fonts={"title": "t.fnt"}))
     assert rc == OK and moy_ui.theme_fonts("kid") == (("ui", "tiny5.fnt"), ("title", "t.fnt"))
     assert moy_ui.theme_fonts("no-such-theme") == moy_ui.theme_fonts("night") == NIGHT_FONTS
+
+
+# --- version 2: per-glyph boxes, 1/2/4 bpp, kerning, the byte map -------------------
+
+FONTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "native", "moy_ui", "fonts")
+BYTE_MAP = (0x2212, 0x2190, 0x2192, 0x2191, 0x2193, 0x2026, 0x2022,
+            0x201C, 0x201D, 0x2018, 0x2019, 0x2013, 0x2014)
+
+
+def _read(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+class _Font2:
+    """A version 2 file read by Python, as the format says (the oracle)."""
+
+    def __init__(self, data):
+        self.bpp, self.line, self.ascent, self.cell, self.count = data[5:10]
+        nk = int.from_bytes(data[10:12], "little")
+        self.index = data[16:272]
+        r0 = 272
+        self.recs = [data[r0 + 8 * i:r0 + 8 * i + 8] for i in range(self.count)]
+        k0 = r0 + 8 * self.count
+        self.kern = {(data[k0 + 3 * i], data[k0 + 3 * i + 1]):
+                     ctypes.c_int8(data[k0 + 3 * i + 2]).value for i in range(nk)}
+        self.cov = data[k0 + 3 * nk:]
+
+    def bytes_of(self, s):
+        out = []
+        for ch in s.decode("utf-8", "replace") if isinstance(s, bytes) else s:
+            cp = ord(ch)
+            if cp < 0x80 or 0xA0 <= cp <= 0xFF:
+                out.append(cp)
+            elif cp in BYTE_MAP:
+                out.append(0x80 + BYTE_MAP.index(cp))
+            else:
+                out.append(0)
+        return out
+
+    def rec(self, b):
+        r = self.recs[self.index[b]]
+        return (int.from_bytes(r[:3], "little"), r[3], r[4], ctypes.c_int8(r[5]).value,
+                ctypes.c_int8(r[6]).value, r[7])
+
+    def pens(self, bs):
+        """Each glyph's pen x, and the width."""
+        at, out, prev = 0, [], None
+        for b in bs:
+            if prev is not None:
+                at += self.kern.get((prev, b), 0)
+            out.append(at)
+            at += self.rec(b)[5]
+            prev = b
+        return out, at
+
+    def width(self, s):
+        return self.pens(self.bytes_of(s))[1]
+
+    def raster(self, bs, x, y, scale, w, h, clip=None, cam=(0, 0)):
+        cx0, cy0, cx1, cy1 = clip or (0, 0, w, h)
+        out = [0] * (w * h)
+        pens, _w = self.pens(bs)
+        top = (1 << self.bpp) - 1
+        half = (top + 2) >> 1
+        for b, pen in zip(bs, pens):
+            off, gw, gh, gx, gy, _adv = self.rec(b)
+            ox = x + (pen + gx) * scale - cam[0]
+            oy = y + (self.ascent - gy) * scale - cam[1]
+            for r in range(gh):
+                for c in range(gw):
+                    bit = (r * gw + c) * self.bpp
+                    v = self.cov[off + (bit >> 3)] >> (8 - self.bpp - (bit & 7)) & top
+                    if v < half:
+                        continue
+                    for sy in range(scale):
+                        for sx in range(scale):
+                            tx, ty = ox + c * scale + sx, oy + r * scale + sy
+                            if cx0 <= tx < cx1 and cy0 <= ty < cy1:
+                                out[ty * w + tx] = 1
+        return out
+
+
+def _v2_files():
+    return list(FONT_FIXTURES_V2) + [os.path.join(FONTS, n) for n in (
+        "inter-12-400-2.fnt", "daysans-19-700-4.fnt", "jbmono-11-400-2.fnt")]
+
+
+@pytest.fixture(params=_v2_files(), ids=os.path.basename)
+def v2(request):
+    data = _read(request.param)
+    rc, fid = moy_ui.font_load(data)
+    assert rc == OK
+    yield fid, _Font2(data)
+    moy_ui.font_free(fid)
+
+
+PROBE2 = "AVTa yo., 0123 Hi é−…x"
+
+
+@pytest.mark.parametrize("scale", [1, 2])
+def test_a_v2_font_draws_its_coverage(v2, scale):
+    lib = _lib()
+    fid, ref = v2
+    s = PROBE2.encode()
+    for at, clip, cam in (((3, 2), None, (0, 0)), ((-5, 4), (2, 3, 150, 30), (0, 0)),
+                          ((10, 6), None, (4, -3))):
+        drawn, got = _draw(lib, fid, s, at[0], at[1], scale, w=160, h=40, clip=clip, cam=cam)
+        assert drawn == ref.width(PROBE2) * scale
+        assert got == ref.raster(ref.bytes_of(PROBE2), at[0], at[1], scale, 160, 40, clip, cam)
+        assert any(got)
+
+
+def test_a_v2_font_measures_kerned_widths_and_fits_whole_codepoints(v2):
+    fid, ref = v2
+    assert moy_ui.text_width(PROBE2, 1, fid) == ref.width(PROBE2)
+    assert moy_ui.text_width(PROBE2, 3, fid) == 3 * ref.width(PROBE2)
+    lib = glass_binding._lib()
+    lib.moy_text_fit_px.restype = ctypes.c_size_t
+    lib.moy_text_fit_px.argtypes = [ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t,
+                                    ctypes.c_int, ctypes.c_int]
+    s = PROBE2.encode()
+    for maxw in range(0, ref.width(PROBE2) + 2):
+        k = lib.moy_text_fit_px(fid, s, len(s), maxw, 1)
+        head = s[:k].decode()                        # never mid-codepoint
+        assert ref.width(head) <= maxw
+        if k < len(s):
+            nxt = s[:k + len(PROBE2[len(head)].encode())].decode()
+            assert ref.width(nxt) > maxw
+
+
+def test_the_byte_map_and_malformed_utf8():
+    data = _read(FONT_FIXTURES_V2[2])
+    ref = _Font2(data)
+    rc, fid = moy_ui.font_load(data)
+    try:
+        minus, dots = ref.rec(0x80), ref.rec(0x85)
+        assert minus[1] and dots[1]                   # the fixture carries both
+        assert moy_ui.text_width("−", 1, fid) == minus[5]
+        assert moy_ui.text_width("…", 1, fid) == dots[5]
+        sp = ref.rec(0x20)[5]
+        lib = _lib()
+        lib.moy_text_width.argtypes = [ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t,
+                                       ctypes.c_int]
+        for raw, glyphs in ((b"\x80", 1), (b"\xc3", 1), (b"\xe2\x88", 2), (b"\xc0\xaf", 2),
+                            (b"\xe0\x80\x80", 3), (b"\xf0\x9f\x98\x80", 1)):
+            assert lib.moy_text_width(fid, raw, len(raw), 1) == glyphs * sp, raw
+    finally:
+        moy_ui.font_free(fid)
+
+
+def test_a_v2_cut_ends_in_an_ellipsis():
+    lib = _lib()
+    lib.moy_text_cut_px.restype = ctypes.c_size_t
+    lib.moy_text_cut_px.argtypes = [ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t,
+                                    ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    data = _read(os.path.join(FONTS, "inter-15-500-4.fnt"))
+    ref = _Font2(data)
+    rc, fid = moy_ui.font_load(data)
+    assert rc == OK
+    try:
+        s = "A long window title".encode()
+        full = ref.width(s)
+        ell = ctypes.c_int()
+        assert lib.moy_text_cut_px(fid, s, len(s), full, 1, ctypes.byref(ell)) == len(s)
+        assert ell.value == 0
+        for maxw in (full - 1, full // 2, 40, 26):
+            k = lib.moy_text_cut_px(fid, s, len(s), maxw, 1, ctypes.byref(ell))
+            assert ell.value == 1 and k < len(s) and not s[:k].endswith(b" ")
+            drawn, px = _draw(lib, fid, s, 0, 0, 1, w=200, h=24, maxw=maxw)
+            assert drawn <= maxw and drawn == ref.width(s[:k].decode() + "…")
+        # petme128 and a version 1 font cut as they did: no ellipsis.
+        p = b"petme128 cuts"
+        assert lib.moy_text_cut_px(0, p, len(p), 40, 1, ctypes.byref(ell)) == 5
+        assert ell.value == 0
+    finally:
+        moy_ui.font_free(fid)
+
+
+def _v2_good():
+    return _read(FONT_FIXTURES_V2[1])
+
+
+def test_the_v2_reader_refuses_by_its_code():
+    good = _v2_good()
+    n = len(good)
+    ref = _Font2(good)
+    nk = len(ref.kern)
+    rec0 = 272
+    k0 = rec0 + 8 * ref.count
+    cov0 = k0 + 3 * nk
+    assert nk >= 2                         # the 2 bpp cut kerns AV, Ta, ...
+    cases = [
+        (_with(good, b5=3), BAD), (_with(good, b5=0), BAD), (_with(good, b5=8), BAD),
+        (_with(good, b6=0), BAD), (_with(good, b7=good[6] + 1), BAD), (_with(good, b8=0), BAD),
+        (_with(good, b9=0), BAD),
+        (_with(good, **{"b%d" % 16: ref.count}), BAD),           # an index past the records
+        (_with(good, **{"b%d" % (rec0 + 8): good[rec0 + 8] + 1}), BAD),   # an offset off its run
+        (_with(good, **{"b%d" % (k0 + 2): 0}), BAD),             # a pair of 0
+        (good[:k0] + good[k0 + 3:k0 + 6] + good[k0:k0 + 3] + good[k0 + 6:], BAD),  # out of order
+        (good[:10] + (nk + 1).to_bytes(2, "little") + good[12:], BAD),   # tables past size
+        (good[:12] + (n + 1).to_bytes(4, "little") + good[16:] + b"\0", BAD),
+        (good[:-1], SHORT),
+    ]
+    # a pad bit set: the last byte of the first glyph whose bits leave some
+    r = next(r for r in ref.recs if r[3] * r[4] * ref.bpp % 8)
+    last = cov0 + int.from_bytes(r[:3], "little") + (r[3] * r[4] * ref.bpp + 7) // 8 - 1
+    cases.append((_with(good, **{"b%d" % last: good[last] | 1}), BAD))
+    for data, want in cases:
+        assert moy_ui.font_load(data)[0] == want, (data[:16], want)
+    rc, fid = moy_ui.font_load(good)
+    assert rc == OK and moy_ui.font_free(fid)
+
+
+def test_version_2_font_info():
+    for path in FONT_FIXTURES_V2:
+        data = _read(path)
+        ref = _Font2(data)
+        rc, fid = moy_ui.font_load(data)
+        try:
+            w, h, line, ascent, first, count = moy_ui.font_info(fid)
+            deep = max(r[4] - ctypes.c_int8(r[6]).value for r in ref.recs if r[4])
+            assert (w, line, ascent, first, count) == (ref.cell, ref.line, ref.ascent, 0,
+                                                       ref.count)
+            assert h == ascent + deep
+        finally:
+            moy_ui.font_free(fid)
+
+
+# --- the font set (tools/make_font.py, native/moy_ui/fonts/) --------------------------
+
+def _set():
+    with open(os.path.join(FONTS, "set.json")) as f:
+        return json.load(f)
+
+
+def test_every_face_of_the_set_loads_with_its_licence():
+    meta = _set()
+    names = set(meta["faces"])
+    on_disk = {f[:-4] for f in os.listdir(FONTS) if f.endswith(".fnt")}
+    assert names == on_disk == set(ui_font_set())
+    for tier, faces in meta["tiers"].items():
+        assert faces and set(faces) <= names, tier
+    for n, f in meta["faces"].items():
+        data = ui_font_file(n + ".fnt")
+        assert len(data) == f["bytes"] <= 65536
+        assert data[4] == 2 and data[5] == f["bpp"]
+        lic = ui_font_file(n + ".txt")
+        assert lic == _read(os.path.join(FONTS, f["family"] + ".txt"))
+        assert b"SIL Open Font License" in lic
+        rc, fid = moy_ui.font_load(data)
+        assert rc == OK, n
+        try:
+            assert moy_ui.text_width("Moybyte", 1, fid) > 0
+        finally:
+            moy_ui.font_free(fid)
+    assert ui_font_file("nope-1-1-1.fnt") is None and ui_font_file("../set.json") is None
+
+
+def ui_font_set():
+    from runtime import fontset
+    return fontset.names()
+
+
+def ui_font_file(name):
+    from runtime import appearance
+    return appearance.font_file(name)
+
+
+def test_the_mono_face_has_the_code_tabs_7px_cell():
+    rc, fid = moy_ui.font_load(_read(os.path.join(FONTS, "jbmono-11-400-2.fnt")))
+    try:
+        assert moy_ui.font_info(fid)[0] == 7
+        assert moy_ui.text_width("x" * 45, 1, fid) == 315
+    finally:
+        moy_ui.font_free(fid)
+
+
+def test_ten_roles_of_faces_load_at_once():
+    moy_ui.font_reset()
+    meta = _set()
+    faces = meta["tiers"]["desktop"][:SLOTS]
+    ids = []
+    try:
+        for n in faces:
+            rc, fid = moy_ui.font_load(ui_font_file(n + ".fnt"))
+            assert rc == OK
+            ids.append(fid)
+        assert moy_ui.font_load(_sample())[0] == FULL
+        for role in ("ui", "title", "mono", "caption"):
+            assert moy_ui.use_font(role, ids[0]) and moy_ui.font(role)[0] == ids[0]
+    finally:
+        for role in ("ui", "title", "mono", "caption"):
+            moy_ui.use_font(role, 0)
+        moy_ui.font_reset()
+
+
+def test_the_code_tab_hit_tests_at_the_mono_faces_7px_cell(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    rc, fid = moy_ui.font_load(_read(os.path.join(FONTS, "jbmono-11-400-2.fnt")))
+    assert rc == OK
+    try:
+        assert moy_ui.use_font("mono", fid)
+        ws._relayout_code()
+        ws.screen = "menu"
+        ws.set_menu_view("code")
+        drv = host_app.ConsoleDriver(ws)
+        lay, ed, cl = ws.code_layout, ws.editor, ws.code_layer
+        from runtime.chrome import _CODE_LEAD
+        assert lay.cell == 7 and lay.lh == moy_ui.font_info(fid)[2] + _CODE_LEAD
+        assert lay.cols == (lay.w - lay.x0) // 7
+        ed.set_text("\n".join("%02d " % i + "abcdefghij" * 4 for i in range(12)))
+        drv.frame(1 / 30)
+        tx0 = cl._text_x0(lay, ed)
+        for col, row in ((0, 0), (3, 1), (17, 2), (min(30, lay.cols - 1), 4)):
+            for dx in (0, 6):                         # either edge of the 7 px cell
+                drv.touch(tx0 + (col - ed.left) * 7 + dx, lay.y0 + (row - ed.top) * lay.lh + 1)
+                drv.frame(1 / 30)
+                drv.frame(1 / 30)
+                assert (ed.row, ed.col) == (row, col), (col, row, dx)
+    finally:
+        moy_ui.use_font("mono", 0)
+        moy_ui.font_free(fid)

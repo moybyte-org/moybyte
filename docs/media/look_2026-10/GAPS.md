@@ -43,7 +43,7 @@ carousel frame.
   bearing, advance) with row-major packed coverage; a kern-pair table of 3
   bytes per pair. It stays one glyph per byte: Latin-1 plus a byte map into
   0x80–0x9F for `− × ÷ … ← → ↑ ↓ •`.
-- **The converter,** `+tools/make_font.py`: FreeType through Pillow, hinted,
+- **The converter,** `tools/make_font.py`: FreeType through Pillow, hinted,
   at fixed sizes, as `mockups.py` rasterises. 2 bpp at 13 px and below, 4 bpp
   at 15 and above, 1 bpp for a crisp face at any size. A family that lacks a
   glyph gets an ASCII stand-in, and the converter says so (Cantarell has no

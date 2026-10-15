@@ -341,6 +341,15 @@ void mg_text_font(uint16_t *dst, size_t dcap, int dw,
                   const mg_font_t *f, int scale,
                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
+/* One glyph of a version 2 font (moy_text.c walks the string): a w x h box
+ * of `bpp`-bit coverage, row-major, the first pixel in the high bits of its
+ * byte, its top left at (x, y) in buffer space, every pixel a scale x scale
+ * block. A pixel at half coverage or more stores `col`; the rest keep what is
+ * under them. Bounds-safe as mg_text_raw is. */
+void mg_glyph_cov(uint16_t *dst, size_t dcap, int dw, const uint8_t *cov, int w, int h,
+                  int bpp, int x, int y, uint16_t col, int scale,
+                  int cx0, int cy0, int cx1, int cy1);
+
 /* text (#62): a whole string in ONE call, camera and clip honoured per pixel.
  * Scale 1 is a CART's text, which SPEC.md 6 fixes at 8px, so it goes through
  * libmoy's moy_print and libmoy's own compiled-in font -- the `font` blob is

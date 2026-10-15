@@ -67,6 +67,7 @@ prune = true
 keep  = [
   # Generated later in build.sh, into the same directory.
   "carts_data.py",   # tools/gen_device_carts.py, from system_carts/
+  "fonts_data.py",   # tools/make_font.py, the tier's font set
   "_ota_build.py",   # the OTA channel/version/label/board stamp (#53)
 ]
 

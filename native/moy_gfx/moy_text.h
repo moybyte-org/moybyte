@@ -7,12 +7,16 @@
 // `moy_print` at 8 px on every cart runtime (SPEC.md §6) and does not come
 // here.
 //
-// TEXT IS UTF-8 BYTES, MEASURED IN BYTES: the font draws one glyph per byte,
-// so a width is the bytes' advances (petme128's are all one 8px cell), a wrap
-// counts bytes, and a truncation NEVER cuts a UTF-8 sequence -- it backs up to
-// the last whole codepoint. For ASCII a byte is a character; anything else
-// draws as the font's first glyph, a glyph per byte, until a font covers it.
-//
+// TEXT IS UTF-8 BYTES, cut only at codepoint boundaries: a wrap counts bytes
+// and a truncation NEVER cuts a UTF-8 sequence -- it backs up to the last
+// whole codepoint. How text meets glyphs is the font's: petme128 and a
+// version 1 font draw one glyph per byte (petme128's are all one 8px cell),
+// so anything past ASCII draws as the font's first glyph, a glyph a byte; a
+// version 2 font decodes the UTF-8, and a codepoint draws at its byte:
+// Latin-1 at its own value, MOY_FONT_BYTE_MAP's symbols at 0x80 up, any
+// other codepoint (or a malformed sequence) at byte 0, the font's first
+// record.
+
 // EVERY CALL CARRIES ITS SOURCE: TABLE (a string id's text), PY (text a
 // runtime passed in), DATA (a number or a user's text formatted into a table
 // entry) or LIT (a literal in C). LIT never reaches the raster: moy_text
@@ -39,16 +43,28 @@ enum { MOY_TEXT_LEFT = 0, MOY_TEXT_CENTER = 1, MOY_TEXT_RIGHT = 2 };
 #define MOY_TEXT_CELL 8         // petme128's advance and height, in pixels
 #define MOY_TEXT_ASCENT 7       // petme128's baseline: its capitals' rows
 
-// The font file (docs/theming_2026-09.md §4.7): a 16-byte header, the
-// advance table padded to 4 bytes, the glyphs. Every field is a byte but
-// `size`, which the reader assembles from its four bytes.
+// The font file (docs/theming_2026-09.md §4.7 has both versions). Version 1:
+// a 16-byte header, the advance table padded to 4 bytes, the glyphs in one
+// box of at most 16x16 at 1 bpp. Version 2: a 16-byte header, the byte
+// index, an 8-byte record a glyph (its own box, bearing and advance), the
+// kerning pairs and the glyphs' coverage at 1, 2 or 4 bpp. Every field is
+// read a byte at a time.
 #define MOY_FONT_MAGIC "MFNT"
-#define MOY_FONT_VERSION 1
+#define MOY_FONT_VERSION 2      // the newest version the reader takes
 #define MOY_FONT_HEADER 16
-#define MOY_FONT_CELL_MAX 16    // a glyph box's width and height, in pixels
-#define MOY_FONT_LINE_MAX 32
-#define MOY_FONT_BYTES 8192     // the largest file the reader takes
-#define MOY_FONT_SLOTS 4        // loaded fonts at once, beside petme128
+#define MOY_FONT_CELL_MAX 16    // version 1: a glyph box's width and height, in pixels
+#define MOY_FONT_LINE_MAX 32    // version 1: the line advance and an advance
+#define MOY_FONT_INDEX 256      // version 2: the byte index, a record a byte
+#define MOY_FONT_RECORD 8       // version 2: offset (3), w, h, x, y, advance
+#define MOY_FONT_PAIR 3         // version 2: left byte, right byte, dx
+#define MOY_FONT_BYTES 65536    // the largest file the reader takes
+#define MOY_FONT_SLOTS 10       // loaded fonts at once, beside petme128
+
+// The byte map: the codepoints a version 2 font draws at bytes 0x80 up, in
+// order (tools/make_font.py reads this line).
+#define MOY_FONT_BYTE_MAP {0x2212, 0x2190, 0x2192, 0x2191, 0x2193, 0x2026, 0x2022, \
+                           0x201C, 0x201D, 0x2018, 0x2019, 0x2013, 0x2014}
+#define MOY_FONT_ELLIPSIS 0x85  // U+2026's byte: a version 2 cut ends in it
 
 // What moy_font_load answers: OK, or why the file was refused.
 enum {
@@ -57,15 +73,20 @@ enum {
     MOY_FONT_SHORT = 2,         // under its header, or not the length its header says
     MOY_FONT_MAGIC_BAD = 3,     // not a font file
     MOY_FONT_NEWER = 4,         // a version this reader does not take
-    MOY_FONT_BAD = 5,           // a field out of its range, a reserved byte or a padding byte set, a bit below the glyph box
+    MOY_FONT_BAD = 5,           // a field out of its range, a reserved, padding or pad bit set, tables that do not fill the file
     MOY_FONT_FULL = 6,          // every slot holds a font
     MOY_FONT_NOMEM = 7,
 };
 
-// A font's metrics: its glyph box, its line advance, its baseline (rows from
-// the box's top) and the bytes its glyphs cover.
+// A font's metrics. Version 1 and petme128: its glyph box, its line advance,
+// its baseline (rows from the box's top) and the bytes its glyphs cover.
+// Version 2: `w` its cell (the advance a gap counted in cells takes), `h`
+// the rows from the line's top to its deepest ink, the line, the baseline
+// (rows from the line's top), `first` 0 and `count` its records. `bpp` is
+// its coverage's bits a pixel, `version` its file's (0 for petme128).
 typedef struct {
     int w, h, line, ascent, first, count;
+    int bpp, version;
 } moy_font_info_t;
 
 // Check font file `src` (n bytes, at any address) and load it into a row of
@@ -109,16 +130,18 @@ typedef struct {
 // primitives draw their fields and glyphs with it).
 void moy_target_fill(const moy_text_target_t *t, int x, int y, int w, int h, uint16_t col);
 
-// Draw `s` (n bytes) at (x, y) in `col` at `scale`. With maxw >= 0 the text
-// fits the box: it truncates to what fits in maxw pixels, at a codepoint
-// boundary, and `align` places it in the box. The drawn width, or -1 when
-// refused (a LIT source, an unknown font).
+// Draw `s` (n bytes) at (x, y), the line's top left, in `col` at `scale`.
+// With maxw >= 0 the text fits the box: it truncates to what fits in maxw
+// pixels, at a codepoint boundary (in a version 2 font that covers U+2026,
+// to what fits with "\xe2\x80\xa6" after it: moy_text_cut_px), and `align`
+// places it in the box. The drawn width, or -1 when refused (a LIT source,
+// an unknown font).
 int moy_text(const moy_text_target_t *t, uint32_t font, uint8_t source,
              const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
              int align, int maxw);
 
 // The width `s` draws at `scale`, in pixels (0 for an unknown font): the sum
-// of its glyphs' advances.
+// of its glyphs' advances and, in a version 2 font, its kerning pairs'.
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);
 
 // The longest prefix of `s` that is at most `cells` bytes and ends on a
@@ -129,6 +152,14 @@ size_t moy_text_fit(const uint8_t *s, size_t n, size_t cells);
 // in `font` and ends on a codepoint boundary; 0 for an unknown font or a
 // negative width.
 size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale);
+
+// A cut with an ellipsis: what moy_text draws for a box `maxw` wide. Where `s`
+// fits, all of it and *ellipsis 0. Where it does not and `font` is a version 2
+// font that covers U+2026, the longest prefix that draws in maxw with the
+// ellipsis after it, its trailing spaces dropped, and *ellipsis 1. Otherwise
+// moy_text_fit_px's prefix and *ellipsis 0.
+size_t moy_text_cut_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale,
+                       int *ellipsis);
 
 // Word wrap into lines of at most `cols` bytes (or pixels), for any known font.
 //

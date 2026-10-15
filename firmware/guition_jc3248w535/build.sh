@@ -114,6 +114,10 @@ moybyte_stage_native
 #    decoder off the roster's FORM, so nothing else in the boot changed.
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
 
+#    fonts_data.py: the font set this board's tier takes (tools/make_font.py,
+#    native/moy_ui/fonts/), frozen so its bytes stay in flash.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/make_font.py" module "${SCRIPT_DIR}" "${MODULES_DIR}/fonts_data.py"
+
 #    The OTA identity stamp (#53): a fresh board id -- an OTA payload is an
 #    app-partition image and the manifest is per board.
 moybyte_ota_identity guition_s3 "${REPO_ROOT}/device/moy_ota.py"

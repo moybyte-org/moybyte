@@ -23,7 +23,7 @@ from runtime.wm_desk import _BackdropLayer as Desk
 ROOT = runtime.__path__[0] + "/.."
 STYLE = json.loads(open(ROOT + "/native/moy_ui/style.json").read())
 SAMPLE = ROOT + "/tests/fixtures/fonts/sample6x9.fnt"
-ROLES = ("ui", "title", "mono")
+ROLES = ("ui", "title", "mono", "caption")
 PETME = (0, 8, 8, 7)
 BG = 9
 TH = theme_colors("night")
