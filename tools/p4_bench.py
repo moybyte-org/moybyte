@@ -12,6 +12,7 @@
 #   bench_sprites    --sprites: chrome painted from a theme's role sheet, and without it
 #   bench_painter    --painter: a surface's, a sprite's and a 9-slice's us per call
 #   bench_icons      --icons: the icon home beside the grid it is drawn from
+#   bench_backdrop   --backdrop: a theme's backdrop raster, and the home and desk over it
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -92,6 +93,16 @@ layout's own arrangement is put back.
 size and a synthetic focus-band frame into the canvas the home draws into,
 the shelf's drag frame beside them, and the board's pixels for a fixed set of
 calls against the host binding's.
+
+`--backdrop` benches a theme's backdrop (docs/look_2026-10.md step 7, run at
+step 8) on any board: the package `bench-bd` (the `moy` seed with a home
+backdrop of a dither fill, a translucent disc and a wave beside its desk
+discs) is installed and picked. `backdrop raster` is the C raster alone into
+the bake, timed on the board per surface; `backdrop theme load` and
+`backdrop mode switch` the switch call and the frames it paints, with the
+rasters the switch made; then `home idle` and, on a desk, `desk idle` (both
+paint zero), and the home's drag, fling and held-key glide over the backdrop,
+which raster nothing. The live theme is put back and the package dropped.
 
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
@@ -624,6 +635,103 @@ def push_sprite_fixture(args):
     cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
            str(SPRITE_FIXTURE), "--board", args.board, "--port", args.port]
     subprocess.run(cmd, check=True)
+
+
+BACKDROP_HOME = [
+    {"k": "fill", "p": ["#1d2b53", "#1d2b53", "#7e2553"], "mode": "dither"},
+    {"k": "circle", "at": [500, 470, 520], "p": "#ffe066", "a": 0.35},
+    {"k": "wave", "at": [[0, 760], [300, 700], [650, 780], [1000, 720]],
+     "p": ["#6252bd", "#43389c"]},
+]
+BACKDROP_PKG = json.dumps({"format": 2, "name": "bench-bd", "inherits": "moy",
+                           "look": {"backdrop": {"home": BACKDROP_HOME}}}).encode()
+
+BACKDROP_SETUP = """
+import time, moy_ui
+ws._bd_was = (ws.look.theme_name, ws.look.theme_variant)
+ws._bd_rc = ws.look.install_theme(%r)
+def _bd_raster(surface, n=3):
+    wp = ws.wallpaper
+    cv = ws.sys_canvas
+    rec = ws.look.backdrop(surface)
+    img = wp._bd_img
+    if not rec or img is None:
+        return None
+    bg = ws.theme_colors['desktop']
+    t = time.ticks_us()
+    for _i in range(n):
+        cv.backdrop(rec, bg, img)
+    us = time.ticks_diff(time.ticks_us(), t) // n
+    wp._bd_key = None
+    return (len(rec), us)
+def _bd_switch(name=None, variant=None):
+    r0 = ws.wallpaper.rasters
+    t = time.ticks_us()
+    if name is not None:
+        ws.look.set_theme(name, persist=False, variant=variant)
+    else:
+        ws.look.set_theme_variant(variant, persist=False)
+    ws._bd_call = time.ticks_diff(time.ticks_us(), t) // 1000
+    ws._bd_r0 = r0
+""" % (BACKDROP_PKG,)
+
+
+def bench_backdrop(b, out_path):
+    """A theme's backdrop (step 7, measured at step 8): its raster, the
+    switches that make one, and the home and desk over it."""
+    bench = Bench(b)
+    print("\n=== backdrop: the raster, the switches, the home and desk over it ===")
+    pyexec(b, BACKDROP_SETUP)
+    pyexec(b, HOME_KEY)
+    print("  install: %r" % (pyval(b, "ws._bd_rc"),))
+    desk = bool(pyval(b, "ws.wm is not None and ws.wm.mode == 'desk'"))
+    rows = []
+
+    def switch(label, code):
+        bench.start()
+        pyexec(b, code); b.drain(3.0)
+        made = pyval(b, "ws.wallpaper.rasters - ws._bd_r0")
+        bench.stop(label, "call %sms, rasters %s" % (pyval(b, "ws._bd_call"), made))
+
+    home(b)
+    switch("backdrop theme load", "_bd_switch('bench-bd', 'light')")
+    for variant in ("dark", "light"):
+        switch("backdrop mode switch (%s)" % variant, "_bd_switch(None, %r)" % variant)
+    if desk:
+        bench.start(); b.drain(3.0); bench.stop("desk idle over the backdrop")
+        rows.append(("desk", pyval(b, "_bd_raster('desk')", timeout=60)))
+    pyexec(b, "ws.open_library()"); b.drain(4.0)
+    rows.append(("home", pyval(b, "_bd_raster('home')", timeout=60)))
+    b.drain(2.0)
+    bench.start(); b.drain(3.0); bench.stop("home idle over the backdrop")
+    r0 = pyval(b, "ws.wallpaper.rasters")
+    bx, by, bw, bh = pyval(b, "ws.launcher.band_rect()")
+    cy = by + bh // 2
+    bench.start()
+    b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(3.0)
+    bench.stop("home drag over the backdrop")
+    b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+    bench.start(); b.drain(4.0)
+    bench.stop("home fling over the backdrop: frames until idle")
+    bench.start()
+    for _k in range(12):
+        b.cmd("py ws._hk('right') or 1", wait_for="PY")
+        b.drain(0.12)
+    b.drain(2.0)
+    bench.stop("home glide over the backdrop (12 presses right)",
+               "rasters %s" % (pyval(b, "ws.wallpaper.rasters") - r0))
+    pyexec(b, "ws.look.set_theme(ws._bd_was[0], persist=False, variant=ws._bd_was[1])\n"
+              "ws.look.uninstall_theme()")
+    home(b)
+    lines = ["| surface | records (bytes) | raster us |", "|---|---|---|"]
+    for surface, got in rows:
+        lines.append("| %s | %s | %s |" % ((surface,) + (tuple(got) if got else ("-", "-"))))
+    table = bench.table() + "\n\n" + "\n".join(lines)
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
 
 
 def bench_all(b, out_path):
@@ -1245,12 +1353,16 @@ def main():
                     help="a surface's, a sprite's and a 9-slice's us per call")
     ap.add_argument("--icons", action="store_true",
                     help="the icon home beside the grid: idle, drag, fling, tab")
+    ap.add_argument("--backdrop", action="store_true",
+                    help="a theme's backdrop: its raster, the theme load and "
+                         "mode switch, the home and desk idle and the "
+                         "carousel over it")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     if args.store or not (args.repaint or args.popovers or args.kernel
                           or args.home or args.edit or args.sprites or args.painter
-                          or args.icons):
+                          or args.icons or args.backdrop):
         push_store_fixture(args)
     if args.sprites:
         push_sprite_fixture(args)
@@ -1258,7 +1370,7 @@ def main():
     try:
         if (not args.repaint and not args.kernel and not args.home
                 and not args.edit and not args.store and not args.sprites
-                and not args.painter and not args.icons
+                and not args.painter and not args.icons and not args.backdrop
                 and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
@@ -1281,6 +1393,8 @@ def main():
             bench_painter(b, args.out)
         elif args.icons:
             bench_icons(b, args.out)
+        elif args.backdrop:
+            bench_backdrop(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

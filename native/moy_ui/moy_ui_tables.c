@@ -1946,7 +1946,6 @@ const char *const moy_theme_btn_kinds[MOY_THEME_BTN_KINDS] = {
 };
 
 const char *const moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED] = {
-    "backdrop",
     "icons.swap",
 };
 
@@ -1955,6 +1954,23 @@ const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES] = {
     "steps",
     "dither",
 };
+
+const char *const moy_theme_bd_surfaces[MOY_THEME_BD_SURFACES] = {
+    "home",
+    "desk",
+};
+
+const char *const moy_theme_bd_kinds[MOY_THEME_BD_KINDS] = {
+    "fill",
+    "band",
+    "circle",
+    "ellipse",
+    "rrect",
+    "pie",
+    "wave",
+};
+
+const int8_t moy_theme_bd_at[MOY_THEME_BD_KINDS] = {0, 2, 3, 4, 5, 5, -1};
 
 const uint32_t moy_theme_moy64[64] = {
     0x000000, 0x1d2b53, 0x7e2553, 0x008751, 0xab5236, 0x5f574f, 0xc2c3c7, 0xfff1e8,

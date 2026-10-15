@@ -11,8 +11,8 @@ EXACTLY, because the whole point is that `device_canvas.py` does not know which
 one it got. `tests/test_gfx_binding.py` pins that two ways: it reads the verb
 names `device_canvas.py` actually reaches for out of its source and asserts each
 one exists here (so a verb the canvas calls and this surface lacks fails on the
-day it is added, not at a call site months later), and it drives 131 ops through
-both this binding and the REAL native module, comparing byte for byte.
+day it is added, not at a call site months later), and it drives its op script
+through both this binding and the REAL native module, comparing byte for byte.
 
 TWO C PREFIXES, AND THE DIFFERENCE MATTERS. `mg_*` is
 `native/moy_gfx/moy_gfx_kernels.c` -- the compositor, ONE copy, linked by this
@@ -63,7 +63,8 @@ _CFLAGS = native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"]
 # and refuses a name that appears in each, so this cannot silently pick up a
 # stale copy.
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
-           "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c")
+           "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+           "moy_backdrop.h", "moy_backdrop.c")
 
 # ...and where to find them. One tuple rather than a literal at the call site,
 # because a caller that reconstructs the build (tests/test_native_build_no_
@@ -83,6 +84,8 @@ _SIGS = (
     # forwarder in between.
     ("mg_fill", [_P, _Z, _I, _I], None),
     ("mg_fill_rect", [_P, _Z, _I, _I, _I, _I, _I, _I], None),
+    ("mg_backdrop", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, ctypes.c_uint16, _I,
+                     _I, _I, _I, _I], _I),
     ("mg_fill_spans", [_P, _Z, _I, _P, _I, _I, _I, _I, _P,
                        _I, _I, _I, _I, _I, _I], None),
     ("mg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
@@ -190,6 +193,14 @@ def fill_rect(buf, stride, x, y, w, h, color):
     arr, cap = _buf(buf)
     _lib().mg_fill_rect(ctypes.cast(arr, _P), cap, int(stride), int(x), int(y),
                         int(w), int(h), int(color) & 0xFFFF)
+
+
+def backdrop(buf, stride, ox, oy, w, h, rec, bg, swap, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(buf)
+    rec = bytes(rec)
+    return _lib().mg_backdrop(ctypes.cast(arr, _P), cap, int(stride), int(ox), int(oy),
+                              int(w), int(h), rec, len(rec), int(bg) & 0xFFFF,
+                              1 if swap else 0, int(cx0), int(cy0), int(cx1), int(cy1))
 
 
 def fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y,

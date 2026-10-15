@@ -866,6 +866,217 @@ static int btn_app_key(rd_t *r, const char *key, int over, void *ctx) {
     return keys(r, &b, btn_kind_key);
 }
 
+// -- the backdrop (docs/media/look_2026-10/GAPS.md gap 9) ----------------------
+
+// A coordinate: a number in thousandths of the surface, clamped. 1, or 0.
+static int bd_num(const item_t *it, int16_t *v, uint8_t *notes) {
+    int32_t x;
+    if (it->k == I_NUM) {
+        x = it->iv;
+    } else if (it->k == I_FIX) {
+        x = (it->fix + (it->fix < 0 ? -50 : 50)) / 100;
+    } else {
+        return 0;
+    }
+    *v = (int16_t)clamp_note(x, MOY_THEME_BD_LO, MOY_THEME_BD_HI, notes);
+    return 1;
+}
+
+typedef struct {
+    moy_theme_pkg_t *pkg;
+    moy_theme_shape_t s;
+    moy_theme_paint_t p;
+    int kind, pts, ok, have_p;
+} bd_shape_t;
+
+// A shape's `at`, its '[' eaten: numbers, or [x, y] points (b->pts 1).
+// 0, or -1: malformed.
+static int bd_coords(rd_t *r, bd_shape_t *b) {
+    if (eat(r, ']')) {
+        return 0;
+    }
+    for (;;) {
+        item_t it[2];
+        int n = 1, pts = 0;
+        if (item(r, &it[0], 1) < 0) {
+            return -1;
+        }
+        if (it[0].k == I_ARR) {
+            if (items(r, it, 2, &n) < 0) {
+                return -1;
+            }
+            pts = 1;
+            b->ok &= n == 2;
+        }
+        b->ok &= b->pts < 0 || b->pts == pts;
+        b->pts = pts;
+        for (int j = 0; j < n && j < 2 && b->ok; j++) {
+            b->ok &= b->s.n_at < MOY_THEME_BD_AT
+                     && bd_num(&it[j], &b->s.at[b->s.n_at++], &b->pkg->notes);
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        return eat(r, ']') ? 0 : -1;
+    }
+}
+
+static int bd_shape_key(rd_t *r, const char *key, int over, void *ctx) {
+    bd_shape_t *b = ctx;
+    moy_theme_pkg_t *pkg = b->pkg;
+    item_t it;
+    if (over) {
+        return skip_note(r, pkg, MOY_THEME_N_UNKNOWN);
+    }
+    if (strcmp(key, "at") == 0) {
+        if (peek(r) != '[') {
+            b->ok = 0;
+            return skip_note(r, pkg, 0);
+        }
+        r->p++;
+        if (++r->depth > JSON_DEPTH || bd_coords(r, b) < 0) {
+            return -1;
+        }
+        r->depth--;
+        return 0;
+    }
+    if (strcmp(key, "p") == 0) {
+        int ok = 1;
+        if (peek(r) == '[') {
+            r->p++;
+            if (paint_stops(r, pkg, &b->p, &ok) < 0) {
+                return -1;
+            }
+        } else {
+            if (item(r, &it, 0) < 0) {
+                return -1;
+            }
+            b->p.n = 1;
+            b->p.t[0] = 0;
+            ok = colour_of(&it, 0, &b->p.c[0], &pkg->notes);
+        }
+        b->ok &= ok && b->p.n <= MOY_THEME_BD_STOPS;
+        b->have_p = 1;
+        return 0;
+    }
+    if (item(r, &it, 0) < 0) {
+        return -1;
+    }
+    if (strcmp(key, "k") == 0) {
+        b->kind = it.k == I_STR && !it.over
+                  ? find_name(moy_theme_bd_kinds, MOY_THEME_BD_KINDS, it.s) : -1;
+    } else if (strcmp(key, "mode") == 0) {
+        moy_theme_paint_t m;
+        if (it.k == I_STR && !it.over && paint_mode(it.s, &m)) {
+            b->s.mode = m.mode;
+            b->s.steps = m.steps;
+        } else {
+            b->ok = 0;
+        }
+    } else if (strcmp(key, "a") == 0) {
+        if (it.k == I_NUM || it.k == I_FIX) {
+            int32_t a = clamp_note(it.fix, 0, 100, &pkg->notes);
+            b->s.alpha = (uint8_t)((a * 255 + 50) / 100);
+        } else {
+            b->ok = 0;
+        }
+    } else {
+        pkg->notes |= MOY_THEME_N_UNKNOWN;
+    }
+    return 0;
+}
+
+// A shape read whole: its kind's coordinates, a paint. 1, or 0.
+static int bd_shape_ok(bd_shape_t *b) {
+    if (!b->ok || b->kind < 0 || !b->have_p || b->p.n < 1) {
+        return 0;
+    }
+    int want = moy_theme_bd_at[b->kind], n = b->s.n_at;
+    if (want < 0 ? b->pts != 1 || n < 2 * MOY_THEME_BD_POINTS_MIN || n > 2 * MOY_THEME_BD_POINTS
+                 : n != want || (n && b->pts != 0)) {
+        return 0;
+    }
+    b->s.kind = (uint8_t)b->kind;
+    b->s.n_stops = b->p.n;
+    for (int i = 0; i < b->p.n; i++) {
+        b->s.t[i] = b->p.t[i];
+        b->s.c[i] = b->p.c[i];
+    }
+    return 1;
+}
+
+// One surface's list into the package's pool. Past MOY_THEME_BD_SHAPES the
+// rest are dropped; a malformed list, or one the pool cannot hold, is set as
+// no backdrop. 0, or -1: malformed JSON.
+static int bd_list(rd_t *r, moy_theme_pkg_t *pkg, int section, int surface) {
+    int first = pkg->n_bd, n = 0, ok = 1;
+    if (peek(r) != '[') {
+        ok = 0;
+        if (skip_note(r, pkg, 0) < 0) {
+            return -1;
+        }
+    } else {
+        r->p++;
+        if (++r->depth > JSON_DEPTH) {
+            return -1;
+        }
+        for (int done = eat(r, ']'); !done;) {
+            if (peek(r) != '{') {
+                ok = 0;
+                if (skip_note(r, pkg, 0) < 0) {
+                    return -1;
+                }
+            } else {
+                r->p++;
+                bd_shape_t b;
+                memset(&b, 0, sizeof(b));
+                b.pkg = pkg;
+                b.s.alpha = 255;
+                b.kind = b.pts = -1;
+                b.ok = 1;
+                if (keys(r, &b, bd_shape_key) < 0) {
+                    return -1;
+                }
+                if (!bd_shape_ok(&b)) {
+                    ok = 0;
+                } else if (n >= MOY_THEME_BD_SHAPES) {
+                    pkg->notes |= MOY_THEME_N_DROPPED;
+                } else if (pkg->n_bd >= MOY_THEME_BD_POOL) {
+                    ok = 0;
+                } else {
+                    pkg->bd[pkg->n_bd++] = b.s;
+                    n++;
+                }
+            }
+            if (eat(r, ',')) {
+                continue;
+            }
+            if (!eat(r, ']')) {
+                return -1;
+            }
+            done = 1;
+        }
+        r->depth--;
+    }
+    if (!ok) {
+        pkg->n_bd = (uint8_t)first;
+        n = 0;
+        pkg->notes |= MOY_THEME_N_DROPPED;
+    }
+    pkg->bd_at[section][surface] = (uint8_t)first;
+    pkg->bd_n[section][surface] = (uint8_t)n;
+    return 0;
+}
+
+static int bd_key(rd_t *r, const char *key, int over, void *ctx) {
+    lk_t *c = ctx;
+    int s = over ? -1 : find_name(moy_theme_bd_surfaces, MOY_THEME_BD_SURFACES, key);
+    if (s < 0) {
+        return skip_note(r, c->pkg, MOY_THEME_N_UNKNOWN);
+    }
+    return bd_list(r, c->pkg, c->section, s);
+}
+
 // A key of `look` or of one of its groups: a field, a group, a map, a
 // variant's own object (at the top of the shared one), or an accepted key.
 typedef struct {
@@ -918,6 +1129,12 @@ static int look_key(rd_t *r, const char *key, int over, void *ctx) {
             return skip_note(r, pkg, MOY_THEME_N_DROPPED);
         }
         return keys(r, c, path[0] == 't' ? tile_key : btn_app_key);
+    }
+    if (strcmp(path, "backdrop") == 0) {
+        if (!eat(r, '{')) {
+            return skip_note(r, pkg, MOY_THEME_N_DROPPED);
+        }
+        return keys(r, c, bd_key);
     }
     if (find_name(moy_theme_look_accepted, MOY_THEME_LOOK_ACCEPTED, path) >= 0) {
         return skip_note(r, pkg, 0);
@@ -1811,6 +2028,7 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
         }
     }
     memset(out->metric, MOY_THEME_NO_METRIC, sizeof(out->metric));
+    memset(out->bd_n, MOY_THEME_BD_SILENT, sizeof(out->bd_n));
     if (n > MOY_THEME_BYTES) {
         return MOY_THEME_BIG;
     }
@@ -2672,6 +2890,96 @@ int moy_theme_look(const char *name, size_t n, int variant, int defaults,
     return rc;
 }
 
+// -- the backdrop resolved -------------------------------------------------------
+
+typedef struct {
+    int section, surface, n;
+    moy_theme_shape_t *out;
+} bd_ctx_t;
+
+static void apply_bd(const moy_theme_pkg_t *pkg, void *ctx) {
+    bd_ctx_t *c = ctx;
+    for (int pass = 0; pass < 2 && c->n < 0; pass++) {
+        int sec = pass ? 0 : c->section;
+        int n = pkg->bd_n[sec][c->surface];
+        if (n != MOY_THEME_BD_SILENT) {
+            memcpy(c->out, &pkg->bd[pkg->bd_at[sec][c->surface]], (size_t)n * sizeof(*c->out));
+            c->n = n;
+        }
+    }
+}
+
+// `name`'s list for `surface` in `variant` into out: its count, or -1 where
+// no package in the chain sets one.
+static int bd_resolve(const char *name, size_t n, int variant, int surface,
+                      moy_theme_shape_t out[MOY_THEME_BD_SHAPES]) {
+    bd_ctx_t c = {variant == MOY_THEME_LIGHT ? 2 : 1, surface, -1, out};
+    if (chain(name, n, apply_bd, &c) != MOY_THEME_OK) {
+        const char *def = moy_theme_seed_names[0];
+        c.n = -1;
+        chain(def, strlen(def), apply_bd, &c);
+    }
+    return c.n;
+}
+
+static uint32_t bd_rgb(int32_t v) {
+    if (MOY_THEME_IS_RGB(v)) {
+        return (uint32_t)v & 0xffffff;
+    }
+    return v >= 0 && v < 64 ? moy_theme_moy64[v] : 0;
+}
+
+static void bd_le(uint8_t *p, int v) {
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+// One list's room, allocated at the first ask.
+static moy_theme_shape_t *bd_scratch(void) {
+    static moy_theme_shape_t *sh;
+    if (sh == NULL) {
+        sh = THEME_ALLOC(MOY_THEME_BD_SHAPES * sizeof(*sh));
+    }
+    return sh;
+}
+
+int moy_theme_backdrop(const char *name, size_t n, int variant, int surface,
+                       uint8_t *out, size_t cap) {
+    moy_theme_shape_t *sh = bd_scratch();
+    if (sh == NULL || surface < 0 || surface >= MOY_THEME_BD_SURFACES) {
+        return 0;
+    }
+    int count = bd_resolve(name, n, variant, surface, sh);
+    size_t k = 0;
+    for (int i = 0; i < count; i++) {
+        const moy_theme_shape_t *s = &sh[i];
+        size_t need = 6 + 5 * (size_t)s->n_stops + 2 * (size_t)s->n_at;
+        if (k + need > cap) {
+            return -1;
+        }
+        uint8_t *p = out + k;
+        p[0] = s->kind;
+        p[1] = s->mode;
+        p[2] = s->steps;
+        p[3] = s->alpha;
+        p[4] = s->n_stops;
+        p[5] = s->n_at;
+        p += 6;
+        for (int j = 0; j < s->n_stops; j++, p += 5) {
+            uint32_t rgb = bd_rgb(s->c[j]);
+            bd_le(p, s->t[j]);
+            p[2] = (uint8_t)(rgb >> 16);
+            p[3] = (uint8_t)(rgb >> 8);
+            p[4] = (uint8_t)rgb;
+        }
+        for (int j = 0; j < s->n_at; j++, p += 2) {
+            bd_le(p, s->at[j]);
+        }
+        k += need;
+    }
+    return (int)k;
+}
+
 // -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
 
 // The loader's predicate: (a, b) reaches MOY_THEME_CONTRAST.
@@ -3469,9 +3777,77 @@ static int put_look_part(wr_t *w, const moy_theme_look_t *lk, const moy_theme_lo
     return keys;
 }
 
+// The flattened backdrop lists of `section` as `"backdrop":{...}`, after a
+// comma where `comma`. 1, or 0: none set.
+static int put_bd(wr_t *w, const moy_theme_pkg_t *f, int section, int comma) {
+    int any = 0;
+    for (int s = 0; s < MOY_THEME_BD_SURFACES; s++) {
+        int n = f->bd_n[section][s];
+        if (n == MOY_THEME_BD_SILENT) {
+            continue;
+        }
+        put_s(w, any ? "," : comma ? ",\"backdrop\":{" : "\"backdrop\":{");
+        any = 1;
+        put_key(w, moy_theme_bd_surfaces[s]);
+        put(w, "[", 1);
+        for (int i = 0; i < n; i++) {
+            const moy_theme_shape_t *sh = &f->bd[f->bd_at[section][s] + i];
+            put_s(w, i ? ",{" : "{");
+            put_key(w, "k");
+            put_str(w, moy_theme_bd_kinds[sh->kind]);
+            int pts = moy_theme_bd_at[sh->kind] < 0;
+            if (sh->n_at) {
+                put_s(w, ",\"at\":[");
+                for (int j = 0; j < sh->n_at; j++) {
+                    put_s(w, j == 0 ? (pts ? "[" : "") : pts && j % 2 == 0 ? ",[" : ",");
+                    put_int(w, sh->at[j]);
+                    put_s(w, pts && j % 2 ? "]" : "");
+                }
+                put(w, "]", 1);
+            }
+            put_s(w, ",\"p\":");
+            int even = 1;
+            for (int j = 0; j < sh->n_stops; j++) {
+                even &= sh->n_stops > 1 ? sh->t[j] == j * 1000 / (sh->n_stops - 1) : 1;
+            }
+            put_s(w, sh->n_stops > 1 ? "[" : "");
+            for (int j = 0; j < sh->n_stops; j++) {
+                put_s(w, j ? "," : "");
+                if (!even) {
+                    put(w, "[", 1);
+                    put_fix(w, sh->t[j] / 10);
+                    put(w, ",", 1);
+                }
+                put_colour(w, sh->c[j]);
+                put_s(w, even ? "" : "]");
+            }
+            put_s(w, sh->n_stops > 1 ? "]" : "");
+            if (sh->mode) {
+                put_s(w, ",\"mode\":\"");
+                put_s(w, moy_theme_paint_modes[sh->mode]);
+                if (sh->steps) {
+                    put(w, ":", 1);
+                    put_int(w, sh->steps);
+                }
+                put(w, "\"", 1);
+            }
+            if (sh->alpha != 255) {
+                put_s(w, ",\"a\":");
+                put_fix(w, (sh->alpha * 100 + 127) / 255);
+            }
+            put(w, "}", 1);
+        }
+        put(w, "]", 1);
+    }
+    if (any) {
+        put(w, "}", 1);
+    }
+    return any;
+}
+
 // `look` from both variants' looks (silent leaves left out): what they share,
-// then each one's own.
-static void put_look(wr_t *w, const moy_theme_look_t lk[2]) {
+// then each one's own, with each one's backdrop.
+static void put_look(wr_t *w, const moy_theme_look_t lk[2], const moy_theme_pkg_t *f) {
     size_t at = w->n;
     put_s(w, ",\"look\":{");
     size_t inner = w->n;
@@ -3480,7 +3856,8 @@ static void put_look(wr_t *w, const moy_theme_look_t lk[2]) {
         size_t mark = w->n;
         put_s(w, keys ? "," : "");
         put_s(w, v ? "\"light\":{" : "\"dark\":{");
-        if (put_look_part(w, &lk[v], &lk[1 - v], 0)) {
+        int got = put_look_part(w, &lk[v], &lk[1 - v], 0);
+        if (put_bd(w, f, v + 1, got) | got) {
             put(w, "}", 1);
             keys++;
         } else {
@@ -3526,7 +3903,7 @@ static void put_custom(wr_t *w, const moy_theme_pkg_t *f, const int32_t rows[2][
         put_s(w, first ? "" : "}");
     }
     put_s(w, colors ? "}" : "");
-    put_look(w, looks);
+    put_look(w, looks, f);
     int any = 0;
     for (int i = 0; i < MOY_THEME_METRICS; i++) {
         if (f->metric[i] == MOY_THEME_NO_METRIC) {
@@ -3640,6 +4017,24 @@ int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
     }
     for (int v = 0; v < 2 && rc == MOY_THEME_OK; v++) {
         rc = resolve_look(name, nn, v, 0, &looks[v]);
+    }
+    memset(flat->bd_n, MOY_THEME_BD_SILENT, sizeof(flat->bd_n));
+    flat->n_bd = 0;
+    for (int v = 0; v < 2 && rc == MOY_THEME_OK; v++) {
+        for (int s = 0; s < MOY_THEME_BD_SURFACES; s++) {
+            moy_theme_shape_t *sh = bd_scratch();
+            int k = sh == NULL ? -1 : bd_resolve(name, nn, v, s, sh);
+            if (k < 0) {
+                continue;
+            }
+            if (flat->n_bd + k > MOY_THEME_BD_POOL) {
+                k = 0;
+            }
+            memcpy(&flat->bd[flat->n_bd], sh, (size_t)k * sizeof(*sh));
+            flat->bd_at[v + 1][s] = flat->n_bd;
+            flat->bd_n[v + 1][s] = (uint8_t)k;
+            flat->n_bd = (uint8_t)(flat->n_bd + k);
+        }
     }
     s_probe = was;
     if (rc != MOY_THEME_OK) {

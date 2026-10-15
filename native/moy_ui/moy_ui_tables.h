@@ -375,8 +375,23 @@ extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 #define MOY_THEME_APPBTN_CAP 8
 #define MOY_THEME_MAPNAME_MAX 12
 #define MOY_THEME_LOOK_TEXT_MAX 24
-#define MOY_THEME_LOOK_ACCEPTED 2
+#define MOY_THEME_LOOK_ACCEPTED 1
 #define MOY_THEME_PAINT_MODES 3
+// A backdrop (docs/media/look_2026-10/GAPS.md gap 9): per surface a list
+// of shapes, each kind's coordinate count (-1: [x, y] points).
+#define MOY_THEME_BD_SURFACES 2
+#define MOY_THEME_BD_KINDS 7
+#define MOY_THEME_BD_SHAPES 16
+#define MOY_THEME_BD_STOPS 4
+#define MOY_THEME_BD_POOL 32
+#define MOY_THEME_BD_POINTS_MIN 2
+#define MOY_THEME_BD_POINTS 8
+#define MOY_THEME_BD_AT 16
+#define MOY_THEME_BD_LO (-1000)
+#define MOY_THEME_BD_HI 2000
+extern const char *const moy_theme_bd_surfaces[MOY_THEME_BD_SURFACES];
+extern const char *const moy_theme_bd_kinds[MOY_THEME_BD_KINDS];
+extern const int8_t moy_theme_bd_at[MOY_THEME_BD_KINDS];
 // The leaves whose default differs in a dark variant: (leaf, value).
 #define MOY_THEME_DARK_DEFS 2
 extern const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2];

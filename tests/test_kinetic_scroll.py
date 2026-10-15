@@ -175,9 +175,9 @@ def test_fling_frames_take_the_partial(tmp_path):
     calls = [0]
     orig = ws.wallpaper.draw
 
-    def spy(dt):
+    def spy(dt, **kw):
         calls[0] += 1
-        return orig(dt)
+        return orig(dt, **kw)
 
     ws.wallpaper.draw = spy
     for _ in range(5):

@@ -1569,7 +1569,7 @@ class SettingsLayer:
             # takes the ring alone rather than the whole ui.dialog shell.)
             cv.rectb(px, py, pw, ph, th["edge"])
         else:
-            ws.wallpaper.draw(dt)
+            ws.wallpaper.draw(dt, home=True)
             _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["panel"])
         # Inside a WM window (#73) the title strip already says SETTINGS and carries
         # the closing X, so the panel's own header + X are suppressed (no doubled

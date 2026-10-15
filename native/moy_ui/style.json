@@ -1170,7 +1170,17 @@
       "app_buttons_cap": 8,
       "name_max": 12,
       "text_max": 24,
-      "accepted": ["backdrop", "icons.swap"]
+      "accepted": ["icons.swap"],
+      "backdrop": {
+        "surfaces": ["home", "desk"],
+        "kinds": ["fill", "band", "circle", "ellipse", "rrect", "pie", "wave"],
+        "at": [0, 2, 3, 4, 5, 5, null],
+        "points": [2, 8],
+        "shapes": 16,
+        "stops": 4,
+        "pool": 32,
+        "coord": [-1000, 2000]
+      }
     },
     "derive": {
       "dark": [

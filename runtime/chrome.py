@@ -834,7 +834,8 @@ def adopt_packages(names, read):
 
 def package(name):
     """`moy_ui.theme_resolve`'s answer for store package `name`, read once
-    per store change: (rc, notes, name, dark, light, fonts, layout, sheets). None
+    per store change: (rc, notes, name, dark, light, fonts, layout, sheets,
+    looks, backdrops). None
     when `name` is no store package. A package whose `name` is not its
     folder's is refused (rc 4, the loader's NAME)."""
     if name not in _PACKAGES:
@@ -844,11 +845,11 @@ def package(name):
         read = _PKG_READ[0]
         src = read(name) if read is not None else None
         if src is None:
-            got = (_ui._C.theme_resolve(b"")[0], 0, None, None, None, None, None, None, None)
+            got = (_ui._C.theme_resolve(b"")[0], 0) + (None,) * 8
         else:
             got = _ui._C.theme_resolve(src)
             if got[0] == 0 and got[2] != name:
-                got = (4, got[1], None, None, None, None, None, None, None)
+                got = (4, got[1]) + (None,) * 8
         _PACKAGES[name] = got
     return got
 
@@ -924,6 +925,20 @@ def _look_raw(name, light):
         if got is not None and got[0] == 0:
             return got[8][1 if light else 0]
     return _ui._C.theme_look(name, light)
+
+
+def backdrop(name, variant, surface):
+    """Theme `name`'s backdrop for `surface` ("home" or "desk") in `variant`:
+    the records `moy_gfx.backdrop` draws (`moy_ui.theme_backdrop`), b"" where
+    the surface has none and is its `desktop` fill."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    light = variant == "light"
+    if name not in THEME_NAMES and name != _ui._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            return got[9][1 if light else 0][0 if surface == "home" else 1]
+    return _ui._C.theme_backdrop(name, light, surface)
 
 
 _LOOK_FIELDS = []

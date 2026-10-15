@@ -1927,7 +1927,7 @@ class LauncherHomeLayer:
         # three sections so a slow launcher frame names its eater (PERF's
         # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
-        ws.wallpaper.draw(dt)
+        ws.wallpaper.draw(dt, home=True)
         if carousel:
             self._capture_band_backdrop(cv, dt)
         else:

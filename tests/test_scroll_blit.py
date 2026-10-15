@@ -218,9 +218,9 @@ def test_carousel_moving_frame_keeps_the_wallpaper_still(tmp_path):
     walls = [0]
     orig = ws.wallpaper.draw
 
-    def spy(dt):
+    def spy(dt, **kw):
         walls[0] += 1
-        return orig(dt)
+        return orig(dt, **kw)
 
     ws.wallpaper.draw = spy
     bx, by, bw, bh = ws.launcher.band_rect()

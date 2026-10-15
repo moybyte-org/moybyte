@@ -565,8 +565,17 @@ LOOK_SAMPLE = {
                 "tonal": {"ink": "#c4231b", "font": "op", "bevel": True}},
     "app_buttons": {"calc": {"normal": {"ink": "#1a3fcf"}, "primary": {"shape": "circle"}}},
     "lcd_bevel": "in", "keycap": {"alpha": 0.28, "r": 5},
-    "backdrop": {"desk": [{"k": "circle", "at": [1, 2, 3], "p": "#191c3e"}]},
-    "dark": {"shadow": ["soft", "#000000", 0.55, 14, 6], "win": {"header": "fill"}},
+    "backdrop": {"desk": [{"k": "circle", "at": [1, 2, 3], "p": "#191c3e"},
+                          {"k": "band", "at": [0, 720.5], "p": ["#1b5ad3", 4, "#86b9ef"]},
+                          {"k": "pie", "at": [996, 433, 233, 180, 270], "p": "#7cc8ff"},
+                          {"k": "rrect", "at": [586, 73, 234, 150, 75], "p": 12, "a": 0.4}],
+                 "home": [{"k": "fill", "p": [[0, "#1d2b53"], [0.6, "#7e2553"]],
+                           "mode": "dither"},
+                          {"k": "wave", "at": [[0, 600], [560, 610], [1000, 580]],
+                           "p": ["#8fd04e", "#5aa12a"], "mode": "steps:4"}]},
+    "dark": {"shadow": ["soft", "#000000", 0.55, 14, 6], "win": {"header": "fill"},
+             "backdrop": {"desk": [{"k": "ellipse", "at": [270, 170, 120, 48],
+                                    "p": "#ffffff", "a": 0.85}]}},
     "light": {"bar": {"fill": "#ffffff"}, "teapot": 1},
 }
 
@@ -634,7 +643,8 @@ def _answer(mod, src):
         return rc, notes, None, None
     n = mod.theme_installed()
     return rc, notes, mod.theme(n, False), \
-        (mod.theme_shape(n), mod.theme_fonts(n), mod.theme_layout(n), mod.theme_sheets(n))
+        (mod.theme_shape(n), mod.theme_fonts(n), mod.theme_layout(n), mod.theme_sheets(n),
+         mod.theme_backdrop(n, False, "desk"), mod.theme_backdrop(n, True, "home"))
 
 
 def test_mutated_themes_never_break_the_reader():
@@ -664,7 +674,7 @@ def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
         assert moy_ui.theme_installed() == "kept"
         parsed = moy_ui.theme_install(src)
         if got[0] != OK:
-            assert got[2:] == (None,) * 7
+            assert got[2:] == (None,) * 8
             assert got[0] == parsed[0] or (parsed[0] == OK and got[0] == CHAIN
                                            and b"inherits" in src)
         else:
@@ -673,6 +683,8 @@ def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
             dark, light, layout, fonts = _installed_answer(got[2])
             assert (got[3], got[4], got[6]) == (dark, light, layout)
             assert set(got[5]) <= set(fonts)
+            assert got[9] == tuple(tuple(moy_ui.theme_backdrop(got[2], lt, s)
+                                         for s in ("home", "desk")) for lt in (False, True))
         moy_ui.theme_install(_src("kept"))
     assert seen > 40
     assert moy_ui.theme_resolve(_src("t", inherits="berry"))[0] == CHAIN
@@ -696,7 +708,8 @@ while i < len(data):
         n = moy_ui.theme_installed()
         print(repr((rc, notes, moy_ui.theme(n, False),
                     (moy_ui.theme_shape(n), moy_ui.theme_fonts(n), moy_ui.theme_layout(n),
-                     moy_ui.theme_sheets(n)))))
+                     moy_ui.theme_sheets(n), moy_ui.theme_backdrop(n, False, "desk"),
+                     moy_ui.theme_backdrop(n, True, "home")))))
     else:
         print(repr((rc, notes, None, None)))
     print(repr(got))

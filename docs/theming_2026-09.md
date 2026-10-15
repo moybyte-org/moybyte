@@ -191,8 +191,11 @@ step 4; format 2, RGB colours and `look`, 2026-10-15 by
   of those (`[width, colour]` for a line, `["soft", colour, alpha, blur,
   dy]` or `["hard", colour, dx, dy]` for a shadow); `null` is explicitly
   none. `tiles` maps an app to a colour and `app_buttons` an app and a
-  button kind to a button's fields, each capped; `backdrop` and
-  `icons.swap` are accepted and read by steps 7 and 16. A field nothing sets takes the model's default, which for
+  button kind to a button's fields, each capped; `backdrop` holds the
+  home's and the desk's lists of shapes (docs/look_2026-10.md step 7,
+  `native/moy_gfx/moy_backdrop.h`: at most 16 a surface, coordinates clamped,
+  a malformed list read as no backdrop); `icons.swap` is accepted and read by
+  step 16. A field nothing sets takes the model's default, which for
   most colours is silent: the renderer derives it.
 - **`metrics`**: `radius` (0-3), `press_dx` and `press_dy` (-3 to 3), each
   clamped to its range (§4.2); the default seed sets every one to 0.
@@ -815,11 +818,15 @@ there is no setting beside it (owner, 2026-10-14; phase 6 step 5). A cart is
 "desk.moyimg"}` with the file in the package (a My Art pick copies Paint's
 picture, the wallpaper copy WALL wrote); NONE is `"wallpapers": {}` with no
 `images`, the theme naming its wallpapers and none of them, so the desk is
-`desktop`'s fill. A theme naming neither key -- every seed -- shows the
-console's default, the first wallpaper cart (Moy's night on a seeded store).
-The look reads the keys at every switch (`Appearance.theme_wallpaper`): the
-named cart where it is installed, else the picture, else NONE or the
-default; a SAFE start runs no cart.
+`desktop`'s fill under the theme's backdrop. A theme naming neither key shows
+its backdrop where its `look` has one (`moy`), and else the console's default,
+the first wallpaper cart (Moy's night on a seeded store). The look reads the
+keys at every switch (`Appearance.theme_wallpaper`): the named cart where it
+is installed, else the picture, else NONE or the backdrop, else the default;
+a SAFE start runs no cart. The backdrop is rastered once per theme load and
+mode switch into the picture's own bake (`Wallpaper._draw_backdrop`): the
+desk draws `backdrop.desk`, the home and the handheld's every screen
+`backdrop.home`.
 
 - **Nothing executable rides in a theme.** Installing a cart is exactly what
   `system_api.py` never grants (`carts`, "the single most important entry"). A

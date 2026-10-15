@@ -73,8 +73,8 @@ the spec said. The device inherits it through `test_device_canvas_parity.py`
 reaches the real C kernel on real glass — run it when the raster changes.
 
 **The compiled-vs-compiled check is a `make` target now (2026-08-15).**
-`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx` drives **131 ops
-across 16 verbs** through the host's ctypes binding AND through the real native
+`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx` drives **an op
+script across every compositor verb** through the host's ctypes binding AND through the real native
 `moy_gfx` under a desktop MicroPython — the only lane in `make test` where two
 independently COMPILED rasters meet. It used to point at a hand-built binary
 nothing produced, so it passed on one machine and silently SKIPPED in CI.

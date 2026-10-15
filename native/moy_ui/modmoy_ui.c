@@ -399,13 +399,14 @@ static mp_obj_t ui_theme_home(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 
-// theme_resolve(src) -> (rc, notes, name, dark, light, fonts, layout, sheets): a
-// stored package resolved from its bytes without installing it
-// (moy_theme_probe). dark and light are theme()'s answers, fonts the
-// package's OWN (role, file) pairs (its folder provides them), layout
+// theme_resolve(src) -> (rc, notes, name, dark, light, fonts, layout, sheets,
+// looks, backdrops): a stored package resolved from its bytes without
+// installing it (moy_theme_probe). dark and light are theme()'s answers, fonts
+// the package's OWN (role, file) pairs (its folder provides them), layout
 // (refused, bars, home) as theme_layout and theme_home answer, sheets the
-// package's OWN (sprites, icons) files, None where it names none. On a refusal
-// every field after notes is None.
+// package's OWN (sprites, icons) files, None where it names none, looks
+// theme_look's (dark, light) and backdrops theme_backdrop's ((dark home, dark
+// desk), (light home, light desk)). On a refusal every field after notes is None.
 // -- the look and RGB (docs/look_2026-10.md step 5) ---------------------------
 
 static mp_obj_t ints(const int32_t *v, int n) {
@@ -469,6 +470,31 @@ static mp_obj_t ui_theme_look(mp_obj_t name, mp_obj_t light) {
     return mp_obj_new_tuple(6, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_look_obj, ui_theme_look);
+
+// theme_backdrop(name, light, surface) -> bytes: the backdrop of `surface`
+// ("home" or "desk") as moy_gfx.backdrop's records (moy_theme_backdrop);
+// empty where the surface has none.
+static mp_obj_t ui_theme_backdrop(mp_obj_t name, mp_obj_t light, mp_obj_t surface) {
+    size_t n, sn;
+    const char *s = mp_obj_str_get_data(name, &n);
+    const char *sf = mp_obj_str_get_data(surface, &sn);
+    int k = -1;
+    for (int i = 0; i < MOY_THEME_BD_SURFACES; i++) {
+        if (strlen(moy_theme_bd_surfaces[i]) == sn && memcmp(moy_theme_bd_surfaces[i], sf, sn) == 0) {
+            k = i;
+        }
+    }
+    if (k < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("surface"));
+    }
+    uint8_t *out = m_new(uint8_t, MOY_THEME_BD_BYTES);
+    int got = moy_theme_backdrop(s, n, mp_obj_is_true(light) ? MOY_THEME_LIGHT : MOY_THEME_DARK,
+                                 k, out, MOY_THEME_BD_BYTES);
+    mp_obj_t b = mp_obj_new_bytes(out, got > 0 ? (size_t)got : 0);
+    m_del(uint8_t, out, MOY_THEME_BD_BYTES);
+    return b;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_theme_backdrop_obj, ui_theme_backdrop);
 
 // theme_look_fields() -> (leaf names, leaf kinds, app_buttons leaf names):
 // the look's vocabulary, what theme_look's tuples are in the order of.
@@ -557,9 +583,9 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     moy_theme_pkg_t *pkg = m_new(moy_theme_pkg_t, 1);
     uint8_t notes = 0;
     int rc = moy_theme_probe(b.buf, b.len, pkg, &notes);
-    mp_obj_t out[9] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
-                       mp_const_none, mp_const_none, mp_const_none,
-                       mp_const_none, mp_const_none, mp_const_none, mp_const_none};
+    mp_obj_t out[10] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
+                        mp_const_none, mp_const_none, mp_const_none, mp_const_none,
+                        mp_const_none, mp_const_none, mp_const_none, mp_const_none};
     if (rc == MOY_THEME_OK) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
@@ -590,6 +616,16 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
             mp_obj_t lk[2] = {ui_theme_look(name, mp_const_false),
                               ui_theme_look(name, mp_const_true)};
             out[8] = mp_obj_new_tuple(2, lk);
+            mp_obj_t bd[2];
+            for (int v = 0; v < 2; v++) {
+                mp_obj_t sf[MOY_THEME_BD_SURFACES];
+                for (int i = 0; i < MOY_THEME_BD_SURFACES; i++) {
+                    sf[i] = ui_theme_backdrop(name, mp_obj_new_bool(v),
+                                              name_obj(moy_theme_bd_surfaces[i]));
+                }
+                bd[v] = mp_obj_new_tuple(MOY_THEME_BD_SURFACES, sf);
+            }
+            out[9] = mp_obj_new_tuple(2, bd);
             nlr_pop();
         } else {
             moy_theme_probe_end();
@@ -599,7 +635,7 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     }
     moy_theme_probe_end();
     m_del(moy_theme_pkg_t, pkg, 1);
-    return mp_obj_new_tuple(9, out);
+    return mp_obj_new_tuple(10, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
 
@@ -1737,6 +1773,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_home), MP_ROM_PTR(&ui_theme_home_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_resolve), MP_ROM_PTR(&ui_theme_resolve_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_look), MP_ROM_PTR(&ui_theme_look_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_backdrop), MP_ROM_PTR(&ui_theme_backdrop_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_look_fields), MP_ROM_PTR(&ui_theme_look_fields_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_place), MP_ROM_PTR(&ui_theme_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_block), MP_ROM_PTR(&ui_theme_block_obj) },

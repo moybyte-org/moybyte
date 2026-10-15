@@ -270,6 +270,9 @@ def test_custom_carries_the_look_and_rgb():
     for light in (False, True):
         assert got[3 + light][0] == moy_ui.theme("moy", light)[0]
         assert got[8][light][:5] == moy_ui.theme_look("moy", light)[:5]
+        assert got[9][light] == tuple(moy_ui.theme_backdrop("moy", light, s)
+                                      for s in ("home", "desk"))
+        assert got[9][light][1]
 
 
 # -- the app ABI ----------------------------------------------------------------------

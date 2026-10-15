@@ -18,12 +18,14 @@
 # runtime/moyhost_gfx.c both run, extracted so there is one copy. It carries its
 # own -O3 pragma for the same reason libmoy_kernels.c does. moy_text.c is the
 # one UI text path (its header), over that compositor's rasterizer.
+# moy_backdrop.c rasterises a theme's backdrop (its header).
 
 MOY_GFX_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/modmoy_gfx.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_gfx_kernels.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_text.c
+SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_backdrop.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/libmoy_kernels.c
 
 # MOY_PIXEL_RGB565 changes sizeof(moy_pixel) and therefore the layout of

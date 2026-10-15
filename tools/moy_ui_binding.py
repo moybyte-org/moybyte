@@ -73,6 +73,7 @@ _SIGS = (
     ("moy_ui_cmask", [], _I),
     ("moy_canvas_cart", [_I], None),
     ("moy_theme_look", [_P, _Z, _I, _I, c.c_void_p], _I),
+    ("moy_theme_backdrop", [_P, _Z, _I, _I, c.c_void_p, _Z], _I),
     ("moy_theme_place", [c.c_void_p, _I, c.c_void_p, c.c_void_p, c.c_void_p], _I),
     ("moy_theme_block_use", [c.c_void_p, _I], None),
     ("moy_theme_rgb565", [c.c_int32], c.c_uint16),
@@ -881,6 +882,15 @@ def binding():
         texts = tuple(t.value.decode() for t in lk.text[:lk.n_text])
         return tuple(lk.v), paints, tiles, ab, texts, rc
 
+    bd_surfaces = _names(lib, "moy_theme_bd_surfaces", 2)
+
+    def theme_backdrop(name, light, surface):
+        b = _b(name)
+        out = (c.c_uint8 * 4096)()
+        n = lib.moy_theme_backdrop(b, len(b), 1 if light else 0,
+                                   bd_surfaces.index(surface), out, 4096)
+        return bytes(out[:max(0, n)])
+
     def theme_place(values):
         n = len(values)
         arr = (c.c_int32 * max(1, n))(*[int(v) for v in values])
@@ -904,7 +914,7 @@ def binding():
         notes = c.c_uint8()
         rc = lib.moy_theme_probe(b, len(b), buf, c.byref(notes))
         if rc != OK:
-            return (rc, notes.value, None, None, None, None, None, None, None)
+            return (rc, notes.value, None, None, None, None, None, None, None, None)
         try:
             name = lib.moy_theme_probe_name().decode()
             fonts = tuple((r, lib.moy_theme_probe_font(i).decode())
@@ -915,7 +925,9 @@ def binding():
                            for i in range(sdims[5]))
             return (rc, notes.value, name, theme(name, False), theme(name, True),
                     fonts, theme_layout(name) + (theme_home(name),), sheets,
-                    (theme_look(name, False), theme_look(name, True)))
+                    (theme_look(name, False), theme_look(name, True)),
+                    tuple(tuple(theme_backdrop(name, lt, s) for s in bd_surfaces)
+                          for lt in (False, True)))
         finally:
             lib.moy_theme_probe_end()
 
@@ -997,6 +1009,7 @@ def binding():
     m.theme_installed = theme_installed
     m.theme_resolve = theme_resolve
     m.theme_look = theme_look
+    m.theme_backdrop = theme_backdrop
     m.theme_look_fields = theme_look_fields
     m.theme_place = theme_place
     m.theme_block = theme_block

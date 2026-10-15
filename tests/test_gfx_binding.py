@@ -164,6 +164,11 @@ text(buf, 16, 8, msg, 2, 1, 0x9cd3, font, 65, 3, 0, 0, 1, 1, 15, 7)
 #
 # Comments are allowed from here on; both sides skip them (`_op_lines`).
 CLAMP_OPS = """
+# -- backdrop: the whole surface, an origin with a clip, a refusal, an overhang
+backdrop(buf, 16, 0, 0, 16, 8, bdrec, 0x1234, 0, 0, 0, 16, 8)
+backdrop(buf, 16, 3, 2, 10, 5, bdrec, 0x4321, 1, 2, 1, 15, 7)
+backdrop(buf, 16, 0, 0, 16, 8, bdbad, 0x1111, 0, 0, 0, 16, 8)
+backdrop(buf, 16, -4, -3, 24, 12, bdrec, 0x2222, 0, 0, 0, 17, 9)
 # -- fill: the whole point of its `cap` argument -----------------------------
 fill(buf, 999, 0x0777)
 fill(buf, -5, 0x1111)
@@ -368,6 +373,14 @@ def _op_lines(text):
 # SPEC convention in a map and a fixture made only of it would compare two
 # empty framebuffers and call that agreement.
 FIXTURES = """
+# A backdrop (moy_backdrop.h): a dithered fill, a translucent circle, a
+# stepped wave and a wide pie; then the same with a kind the kernel refuses.
+bdrec = bytes([0, 2, 0, 255, 2, 0, 0, 0, 29, 43, 83, 232, 3, 126, 37, 83,
+               2, 0, 0, 128, 1, 0, 0, 255, 224, 102, 244, 1, 244, 1, 144, 1,
+               6, 1, 4, 255, 2, 6, 0, 0, 143, 208, 78, 232, 3, 90, 161, 42,
+               0, 0, 88, 2, 48, 2, 98, 2, 232, 3, 68, 2,
+               5, 0, 0, 255, 1, 5, 0, 0, 124, 200, 255, 244, 1, 244, 1, 44, 1, 30, 0, 44, 1])
+bdbad = bytes([9]) + bdrec[1:]
 sheet = bytearray(128 * 256)
 for _y in range(8):
     for _x in range(8):
@@ -432,12 +445,12 @@ lr = bytearray(64)
 
 _FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
-                  "no_quads", "over_quads", "lr")
+                  "no_quads", "over_quads", "lr", "bdrec", "bdbad")
 
 
 def _fixtures():
     ns = {"array": __import__("array"), "bytearray": bytearray, "range": range,
-          "len": len}
+          "len": len, "bytes": bytes}
     exec(FIXTURES, ns)                         # noqa: S102 -- fixed text
     return {k: ns[k] for k in _FIXTURE_NAMES}
 
@@ -766,6 +779,7 @@ def _shot():
 
 def fill(*a): moy_gfx.fill(*a); _shot()
 def fill_rect(*a): moy_gfx.fill_rect(*a); _shot()
+def backdrop(*a): moy_gfx.backdrop(*a); _shot()
 def fill_spans(*a): moy_gfx.fill_spans(*a); _shot()
 def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
 def blit_window(*a): moy_gfx.blit_window(*a); _shot()

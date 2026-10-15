@@ -1,8 +1,9 @@
 # Map (grep -n a name to jump there):
-#   Wallpaper               the desktop backdrop: the desk's fill, the theme's picture or live
-#   Wallpaper.draw_picture  the theme's picture, one screen-sized bitmap
-#   Wallpaper.is_animating  a live wallpaper is running
-#   Wallpaper.draw_preview  the Appearance monitor's screen
+#   Wallpaper                 the desktop backdrop: the desk's fill, the theme's picture or live
+#   Wallpaper.draw_picture    the theme's picture, one screen-sized bitmap
+#   Wallpaper._draw_backdrop  the theme's backdrop, rastered once into the bake
+#   Wallpaper.is_animating    a live wallpaper is running
+#   Wallpaper.draw_preview    the Appearance monitor's screen
 """The desktop wallpaper backdrop (#28), extracted from Workstation
 (runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
 
@@ -133,6 +134,11 @@ class Wallpaper:
         self._pic_canvas = None
         self._pic_thumb = None
         self._pic_thumb_key = None
+        # The theme's backdrop: the image its bake is lent to, the key it was
+        # rastered for, and how many rasters this component has made.
+        self._bd_img = None
+        self._bd_key = None
+        self.rasters = 0
 
     def clear(self):
         """Drop the compiled wallpaper (back to the fill). Called by the look
@@ -350,14 +356,57 @@ class Wallpaper:
         return (self._wp_live and self._wp_update is not None
                 and self._wp_draw is not None and dt > 0)
 
-    def draw(self, dt):
+    def draw(self, dt, home=False):
+        """Paint the backdrop of the desk, or with `home` of the home (the
+        handheld's every screen): the surface a theme's backdrop names."""
         b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
         try:
-            self._paint(dt)
+            self._paint(dt, home)
         finally:
             self._stock_unbracket(b)
 
-    def _paint(self, dt):
+    # -- the theme's backdrop (docs/media/look_2026-10/GAPS.md gap 9) ----------
+
+    def _fill(self, home):
+        """The fill a wallpaper of None draws: the theme's backdrop for the
+        surface over `desktop`, or `desktop` alone."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        bg = ws.theme_colors["desktop"]
+        rec = ws.look.backdrop("home" if home else "desk")
+        if rec:
+            try:
+                self._draw_backdrop(cv, rec, bg)
+                return
+            except Exception as exc:  # noqa: BLE001 -- a bad backdrop draws the fill
+                print("Moybyte backdrop error:", _err_text(exc))
+        cv.cls(bg)
+
+    def _draw_backdrop(self, cv, rec, bg):
+        """Rasterise the backdrop once per (records, fill, size, look) into
+        the one wallpaper bake -- the picture's slot, PIC_OWNER (D6) -- and
+        blit it 1:1 after. Where the bake cannot be had it is drawn onto the
+        canvas inside its clip, each paint."""
+        img = self._bd_img
+        key = (rec, bg, cv.w, cv.h, self.ws.look.look_gen)
+        if img is None:
+            img = self._bd_img = Bitmap(cv.w, cv.h, None, self.PIC_OWNER)
+        if key != self._bd_key or getattr(img, "_rgb_i", None) is None:
+            img.w = cv.w
+            img.h = cv.h
+            self._bd_key = None
+            self._pic_canvas = cv
+            self.rasters += 1
+            try:
+                cv.backdrop(rec, bg, img)
+            except MemoryError:
+                img._rgb_i = None
+                cv.backdrop(rec, bg)
+                return
+            self._bd_key = key
+        cv.blit565(img._rgb_i, img.w, img.h, 0, 0)
+
+    def _paint(self, dt, home=False):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
         backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
@@ -458,11 +507,11 @@ class Wallpaper:
             note = getattr(ws, "notice", None)
             if note is not None:
                 note("WALLPAPER OFF", "%s couldn't start" % title, "warn")
-        # The desk's fill: the theme's `desktop` (NONE, a picture or cart that
-        # draws nothing, a struck-out wallpaper). Fill the SYSTEM canvas -- the
-        # surface the desktop actually shows (#39; the same object as the game
-        # canvas on the 320x240 tiers, so byte-identical there).
-        ws.sys_canvas.cls(ws.theme_colors["desktop"])
+        # The desk's fill: the theme's backdrop over its `desktop` (NONE, a
+        # picture or cart that draws nothing, a struck-out wallpaper), on the
+        # SYSTEM canvas -- the surface the desktop actually shows (#39; the
+        # same object as the game canvas on the 320x240 tiers).
+        self._fill(home)
 
     def _enter_pointer(self, ws, bracketed):
         """Re-map the pointer into the WALLPAPER's own space for the duration of

@@ -122,7 +122,7 @@ def test_every_combination_is_the_reference_and_reads(name):
             b = _custom(name, accent, tint)
             pkg = json.loads(b)
             assert pkg["name"] == "custom" and "inherits" not in pkg
-            rc, notes, got_name, dark, light, _fonts, _lay, _sh, _look = moy_ui.theme_resolve(b)
+            rc, notes, got_name, dark, light, _fonts, _lay, _sh, _look, _bd = moy_ui.theme_resolve(b)
             assert (rc, notes, got_name) == (OK, 0, "custom"), (name, accent, tint)
             for v, resolved in (("dark", dark), ("light", light)):
                 want = _reference(name, v, accent, tint)
@@ -298,7 +298,7 @@ def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
                 assert rc == OK and len(b) <= TH["bytes"]
                 cols = json.loads(b).get("colors", {})
                 assert all(len(c) < len(ROLES) for c in cols.values())
-                _rc, notes, _name, dark, light, _f, _l, _s, _lk = moy_ui.theme_resolve(b)
+                _rc, notes, _name, dark, light, _f, _l, _s, _lk, _bd = moy_ui.theme_resolve(b)
                 assert notes == 0
                 for v, resolved in (("dark", dark), ("light", light)):
                     want = _reference("night", v, accent, tint)

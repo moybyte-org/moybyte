@@ -121,6 +121,18 @@ typedef struct {
     int32_t c[MOY_THEME_PAINT_STOPS];
 } moy_theme_paint_t;
 
+// A backdrop shape (docs/media/look_2026-10/GAPS.md gap 9): a kind of
+// moy_theme_bd_kinds, its coordinates in thousandths of the surface (a wave's
+// as x, y pairs), a paint of up to MOY_THEME_BD_STOPS stops and an alpha.
+typedef struct {
+    uint8_t kind, mode, steps, alpha, n_stops, n_at;
+    int16_t t[MOY_THEME_BD_STOPS];
+    int32_t c[MOY_THEME_BD_STOPS];
+    int16_t at[MOY_THEME_BD_AT];
+} moy_theme_shape_t;
+
+#define MOY_THEME_BD_SILENT 0xff   // a list no section sets
+
 // A package's look: what it sets, leaf by leaf, in a section (0 shared,
 // 1 `dark`, 2 `light`); its tiles (app -> colour) and app_buttons (app and
 // kind -> a button's leaves, MOY_THEME_NONE where silent).
@@ -156,6 +168,11 @@ typedef struct {
     moy_theme_mapent_t tile[MOY_THEME_TILES_CAP];
     moy_theme_mapent_t appbtn[MOY_THEME_APPBTN_CAP];
     char text[MOY_THEME_LOOK_TEXTS][MOY_THEME_LOOK_TEXT_MAX + 1];
+    moy_theme_shape_t bd[MOY_THEME_BD_POOL];
+    uint8_t n_bd;
+    // [section][surface]: the list's first shape in bd and its count, the
+    // count MOY_THEME_BD_SILENT where the section is silent (0: no backdrop).
+    uint8_t bd_at[3][MOY_THEME_BD_SURFACES], bd_n[3][MOY_THEME_BD_SURFACES];
     int8_t metric[MOY_THEME_METRICS];       // MOY_THEME_NO_METRIC where silent
     uint8_t effect[MOY_THEME_EFFECTS_CAP][4];   // part, state, effect, role
     uint8_t n_effects;
@@ -199,6 +216,16 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
 int moy_theme_look(const char *name, size_t n, int variant, int defaults,
                    moy_theme_look_t *out);
 extern const size_t moy_theme_look_bytes;
+
+// Theme `name`'s backdrop for `surface` (an index of moy_theme_bd_surfaces)
+// in `variant`: the nearest package's list, its variant's before its shared
+// one, as the records mg_backdrop (native/moy_gfx/moy_backdrop.h) draws, each
+// colour as 0xrrggbb. The bytes written (0: no backdrop, the surface is its
+// `desktop` fill), or -1 where `cap` is short.
+int moy_theme_backdrop(const char *name, size_t n, int variant, int surface,
+                       uint8_t *out, size_t cap);
+// The most bytes moy_theme_backdrop writes for one surface.
+#define MOY_THEME_BD_BYTES (MOY_THEME_BD_SHAPES * (6 + 5 * MOY_THEME_BD_STOPS + 2 * MOY_THEME_BD_AT))
 // Leaves, paint stops, paints, tiles, app_buttons, a button's leaves, a map
 // name's and a text's longest, texts, the first button leaf: the bindings' check.
 extern const int moy_theme_look_dims[10];

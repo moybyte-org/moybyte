@@ -723,6 +723,7 @@ def _look(th, roles):
     theme model): every field, its leaves, their kinds, ranges and
     defaults, the enum names and the object groups."""
     lk = th["look"]
+    bd = lk["backdrop"]
     fields, dark = _look_fields(lk, roles)
     paths = [f[0] for f in fields]
     if len(set(paths)) != len(paths):
@@ -782,6 +783,21 @@ def _look(th, roles):
          "#define MOY_THEME_LOOK_TEXT_MAX %d" % lk["text_max"],
          "#define MOY_THEME_LOOK_ACCEPTED %d" % len(lk["accepted"]),
          "#define MOY_THEME_PAINT_MODES %d" % len(lk["paint_modes"]),
+         "// A backdrop (docs/media/look_2026-10/GAPS.md gap 9): per surface a list",
+         "// of shapes, each kind's coordinate count (-1: [x, y] points).",
+         "#define MOY_THEME_BD_SURFACES %d" % len(bd["surfaces"]),
+         "#define MOY_THEME_BD_KINDS %d" % len(bd["kinds"]),
+         "#define MOY_THEME_BD_SHAPES %d" % bd["shapes"],
+         "#define MOY_THEME_BD_STOPS %d" % bd["stops"],
+         "#define MOY_THEME_BD_POOL %d" % bd["pool"],
+         "#define MOY_THEME_BD_POINTS_MIN %d" % bd["points"][0],
+         "#define MOY_THEME_BD_POINTS %d" % bd["points"][1],
+         "#define MOY_THEME_BD_AT %d" % max([2 * bd["points"][1]] + [a for a in bd["at"] if a]),
+         "#define MOY_THEME_BD_LO (%d)" % bd["coord"][0],
+         "#define MOY_THEME_BD_HI %d" % bd["coord"][1],
+         "extern const char *const moy_theme_bd_surfaces[MOY_THEME_BD_SURFACES];",
+         "extern const char *const moy_theme_bd_kinds[MOY_THEME_BD_KINDS];",
+         "extern const int8_t moy_theme_bd_at[MOY_THEME_BD_KINDS];",
          "// The leaves whose default differs in a dark variant: (leaf, value).",
          "#define MOY_THEME_DARK_DEFS %d" % len(dark),
          "extern const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2];",
@@ -836,10 +852,14 @@ def _look(th, roles):
                       ("moy_theme_enum_names[MOY_THEME_ENUM_NAMES]", enums),
                       ("moy_theme_btn_kinds[MOY_THEME_BTN_KINDS]", lk["button_kinds"]),
                       ("moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED]", lk["accepted"]),
-                      ("moy_theme_paint_modes[MOY_THEME_PAINT_MODES]", lk["paint_modes"])):
+                      ("moy_theme_paint_modes[MOY_THEME_PAINT_MODES]", lk["paint_modes"]),
+                      ("moy_theme_bd_surfaces[MOY_THEME_BD_SURFACES]", bd["surfaces"]),
+                      ("moy_theme_bd_kinds[MOY_THEME_BD_KINDS]", bd["kinds"])):
         c.append("const char *const %s = {" % decl)
         c.extend("    %s," % _c_str(n) for n in seq)
         c.append("};\n")
+    c.append("const int8_t moy_theme_bd_at[MOY_THEME_BD_KINDS] = {%s};\n" % ", ".join(
+        "-1" if a is None else "%d" % a for a in bd["at"]))
     m = _moy64()
     c.append("const uint32_t moy_theme_moy64[64] = {")
     for i in range(0, 64, 8):

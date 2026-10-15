@@ -97,14 +97,16 @@ try:
                         DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                         theme_known, THEME_NAMES,
                         THEME_VARIANTS, text_scale_floor, adopt_packages,
-                        package, theme_names, forget_package, live_colors)
+                        package, theme_names, forget_package, live_colors,
+                        backdrop as _backdrop)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                                 DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                                 theme_known,
                                 THEME_NAMES, THEME_VARIANTS, text_scale_floor,
                                 adopt_packages, package, theme_names,
-                                forget_package, live_colors)
+                                forget_package, live_colors,
+                                backdrop as _backdrop)
 try:
     from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
                               PICTURE_FILE, derived_of, font_files, keys_of,
@@ -368,9 +370,10 @@ class Appearance:
 
     def theme_wallpaper(self):
         """The wallpaper the active theme gives: the cart its `wallpapers`
-        names where it is installed, else its picture, else None where it
-        names its wallpapers and no cart among them (NONE), else the
-        default. A SAFE start runs no wallpaper cart."""
+        names where it is installed, else its picture, else None (its
+        backdrop, or its fill) where it names its wallpapers and no cart among
+        them (NONE) or it has a backdrop, else the default. A SAFE start runs
+        no wallpaper cart."""
         cart, img, said = wall_keys(self._theme_bytes())
         safe = getattr(getattr(self.ws, "prefs", None), "safe", False)
         if cart is not None and cart != self.PICTURE and not safe \
@@ -378,9 +381,19 @@ class Appearance:
             return cart
         if img is not None:
             return self.PICTURE
-        if (said and cart is None) or safe:
+        if (said and cart is None) or safe or self._has_backdrop():
             return None
         return self._default_wallpaper()
+
+    def backdrop(self, surface):
+        """The active theme's backdrop for `surface` ("home" or "desk") in the
+        mode shown: `chrome.backdrop`'s records, b"" where the surface is its
+        `desktop` fill. The fill a wallpaper of None draws (`theme_wallpaper`)."""
+        return _backdrop(self.theme_name, self.theme_variant, surface)
+
+    def _has_backdrop(self):
+        return any(_backdrop(self.theme_name, v, s)
+                   for v in THEME_VARIANTS for s in ("home", "desk"))
 
     def _theme_bytes(self):
         """The active theme's theme.json bytes where it is a package (the

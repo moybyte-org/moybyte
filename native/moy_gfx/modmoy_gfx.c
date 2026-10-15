@@ -56,6 +56,7 @@
 // header pulled in at -O2 would turn the per-row fill into a per-row call.
 #include "moy_gfx_kernels.h"
 #include "moy_text.h"
+#include "moy_backdrop.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
@@ -104,6 +105,24 @@ static mp_obj_t moy_gfx_fill_rect(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_fill_rect_obj, 7, 7, moy_gfx_fill_rect);
+
+// backdrop(buf, stride, ox, oy, w, h, rec, bg, swap, cx0, cy0, cx1, cy1) -> the
+// shapes drawn, or -1: a theme's backdrop records over the bg fill
+// (moy_backdrop.h).
+static mp_obj_t moy_gfx_backdrop(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *px = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t rec;
+    mp_get_buffer_raise(a[6], &rec, MP_BUFFER_READ);
+    int got = mg_backdrop(px, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                          mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                          rec.buf, rec.len, (uint16_t)mp_obj_get_int(a[7]),
+                          mp_obj_is_true(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
+                          mp_obj_get_int(a[11]), mp_obj_get_int(a[12]));
+    return MP_OBJ_NEW_SMALL_INT(got);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_backdrop_obj, 13, 13, moy_gfx_backdrop);
 
 // blit565(dst, dw, dh, dx, dy, src, sw, sh, key[, cx0, cy0, cx1, cy1]) -- key=-1
 // opaque, else skip source pixels equal to `key` (transparent color). The optional
@@ -2015,6 +2034,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_native_code_free_all), MP_ROM_PTR(&moy_gfx_native_code_free_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill),       MP_ROM_PTR(&moy_gfx_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&moy_gfx_fill_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_backdrop),  MP_ROM_PTR(&moy_gfx_backdrop_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&moy_gfx_blit565_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565_scale), MP_ROM_PTR(&moy_gfx_blit565_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565_resize), MP_ROM_PTR(&moy_gfx_blit565_resize_obj) },

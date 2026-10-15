@@ -2150,6 +2150,27 @@ class DeviceCanvas:
                 o = 2 * (ty * stride + x0)
                 d[o:o + 2 * (x1 - x0)] = row[2 * (x0 - x):2 * (x1 - x)]
 
+    def backdrop(self, rec, c, img=None):
+        """A theme's backdrop (`moy_gfx.backdrop`, native/moy_gfx/moy_backdrop.h):
+        the records `rec` over colour `c`, across the whole surface. Into
+        `img`'s one RGB565 bake (`_rgb_i`, img.w x img.h, lent to img's owner
+        as a picture's bake is: _paint_bake_buf), or, with no img, onto this
+        canvas inside its clip. The shapes drawn, or -1 where `rec` is
+        malformed and the fill alone is drawn."""
+        self.flush_batch()
+        col = self._col(c)
+        g = self._gfx
+        if img is not None:
+            w = img.w
+            h = img.h
+            buf = _paint_bake_buf(img, w * h * 2)
+            n = g.backdrop(buf, w, 0, 0, w, h, rec, col, WIRE_SWAPPED, 0, 0, w, h)
+            img._rgb_i = buf
+            return n
+        return g.backdrop(self._buf, self._stride, self._ox, self._oy, self.w, self.h,
+                          rec, col, WIRE_SWAPPED, self._clip_x0, self._clip_y0,
+                          self._clip_x1, self._clip_y1)
+
     def blit565_resize(self, buf, w, h, x, y, tw, th):
         """Place a w x h picture of RGB565 words (this canvas's byte order,
         as `blit565`) scaled to tw x th at (x, y): nearest-neighbour at any

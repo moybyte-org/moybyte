@@ -91,7 +91,7 @@ class _FakeGfx:
     # aa22c41, d6c405c, b9783f2).
     #
     # What replaced it is a STRONGER check, not a weaker one:
-    # tests/test_gfx_binding.py::test_matches_the_native_moy_gfx drives 131 ops
+    # tests/test_gfx_binding.py::test_matches_the_native_moy_gfx drives its ops
     # through this same binding AND through the real native module under a
     # desktop MicroPython, byte for byte -- two independently compiled kernels,
     # including the clamping regimes (negative origins, oversize rects,
