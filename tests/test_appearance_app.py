@@ -495,6 +495,38 @@ def test_name_shows_on_custom_only_and_keeps_it_by_keys(tmp_path, kw):
     assert not (tmp_path / "carts" / "custom.moy").exists()
 
 
+@pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
+def test_the_frame_after_name_draws_without_its_row(tmp_path, kw):
+    """The ENTER that names custom is the last event before the next draw
+    (a phone's keyboard sends no key-up after it): NAME…'s row is gone
+    then, and the focus is on a row that exists."""
+    ws = _ws(tmp_path, **kw)
+    app = _open_appearance(ws)
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    _focus(app, "name")
+    _press(ws, app, "a")
+    app.handle_input(T(0))
+    _type(ws, app, "nikola")
+    app.handle_input(T(13))
+    _frame(ws)
+    assert ws.look.theme_name == "nikola"
+    assert app._rows()[app.row] == "file"
+
+
+def test_a_theme_set_elsewhere_moves_the_focus_off_name(tmp_path):
+    """custom left by another hand (the gen moves under the page) takes
+    NAME…'s row with it; the next draw focuses the row above."""
+    ws = _ws(tmp_path, **DESK)
+    app = _open_appearance(ws)
+    _focus(app, "accent")
+    _press(ws, app, "right")
+    _focus(app, "name")
+    ws.look.set_theme("night")
+    _frame(ws)
+    assert app._rows()[app.row] == "file"
+
+
 def test_name_refuses_with_the_reason_and_arms_replace(tmp_path):
     ws = _ws(tmp_path)
     app = _open_appearance(ws)

@@ -201,6 +201,27 @@ def test_a_theme_exports_and_imports_as_a_zip(tmp_path, monkeypatch):
         server.wait(timeout=10)
 
 
+def test_name_on_the_desk_survives_a_phone_keyboards_enter(tmp_path):
+    """Appearance → NAME… on the desk, the name typed and ENTERed the way a
+    phone's on-screen keyboard delivers them (#kbin's input event, then its
+    keydown): `custom` becomes the theme and the console keeps running. The
+    ENTER is the last event before the next draw, which then drew a focus
+    on NAME…'s row after the row had gone (an IndexError, the page's
+    "console crash")."""
+    import json
+    web_e2e.require("store")
+    port = web_e2e.free_port()
+    server, base = _serve(port)
+    try:
+        out, js = _run("appearance_name", base, tmp_path / "chrome", tmp_path / "s1")
+        assert "Traceback" not in out, out[-3000:]
+        assert js[-2] == "live", "the console stopped: %r\n%s" % (js[-2], out[-3000:])
+        assert json.loads(_tagged(js, "THEME"))["name"] == "nikola", out[-3000:]
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
 def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     """The other half of a total split: serve.py --carts answers GET /sync, so
     the page must stay in BOARD mode and open no local store.

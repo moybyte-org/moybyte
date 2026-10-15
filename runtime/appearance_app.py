@@ -236,13 +236,15 @@ class AppearanceAppLayer:
     def _refresh(self):
         """Read `ctx.theme.choices()` again when the token generation moved,
         and for the two frames after an action of the page's own (a change
-        shows at the next frame). Once per draw and per event."""
+        shows at the next frame). Once per draw and per event. The focused
+        row stays a row: NAME… goes with `custom`, under any change."""
         g = self._theme.gen()
         if self._ch is None or g != self._gen or self._stale:
             self._ch = self._theme.choices()
             self._gen = g
             if self._stale:
                 self._stale -= 1
+            self.row = min(self.row, len(self._rows()) - 1)
 
     def _rows(self):
         out = [] if self.layout.wide else ["theme"]
@@ -458,7 +460,7 @@ class AppearanceAppLayer:
             return
         self._close_name()
         self.note = name + ".moy IS A THEME NOW"
-        self.row = min(self.row, len(self._rows()) - 1)
+        self._refresh()
 
     def _open_picker(self, key):
         ch = self.choices()

@@ -1,0 +1,19 @@
+{"query": "?dev=1", "boot_ms": 30000, "steps": [
+  {"note": "the desk; Settings from the system menu, then its APPEARANCE row", "wait": 3000},
+  {"click": [977, 7]}, {"wait": 600},
+  {"click": [920, 35]}, {"wait": 1200},
+  {"click": [360, 203]}, {"wait": 1500},
+  {"note": "ACCENT's picker, a tap on orange: the look is custom, NAME... appears"},
+  {"click": [955, 239]}, {"wait": 1200},
+  {"click": [730, 282]}, {"wait": 1200},
+  {"click": [100, 379]}, {"wait": 1000},
+  {"shot": "name_open"},
+  {"note": "a phone's keyboard: the typed text arrives as #kbin's input event, ENTER as its keydown"},
+  {"js": "(function(){var k=document.getElementById('kbin');k.focus();k.value=' nikola';k.dispatchEvent(new Event('input'));return k.value;})()"},
+  {"wait": 800},
+  {"js": "(function(){var k=document.getElementById('kbin');k.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return 'enter';})()"},
+  {"wait": 2500},
+  {"shot": "named"},
+  {"js": "document.getElementById('s').textContent"},
+  {"js": "window.__moyState().then(s => 'THEME ' + JSON.stringify(s.theme))"}
+]}
