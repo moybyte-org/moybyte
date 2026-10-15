@@ -21,7 +21,8 @@ A scene is BUILT when the shell holds its theme and every step of
 Until then it is rendered as the nearest current screen (a missing theme
 becomes FALLBACK's) and marked "not built yet" with what is missing.
 
-FILTER keeps the scenes whose name contains it (shell globs work too);
+FILTER keeps the scene it names, else the scenes whose name contains it
+(shell globs work too);
 `--step N` keeps the scenes step N targets. `--theme`/`--variant` render
 every kept scene in that theme instead of its own.
 """
@@ -175,12 +176,17 @@ def scene_steps(scene, theme):
 
 
 def select(scenes, filters, step):
+    names = {sc[0] for sc in scenes}
+
+    def hit(f, name):
+        if any(c in f for c in "*?["):
+            return fnmatch.fnmatch(name, f)
+        return f == name if f in names else f in name
+
     keep = []
     for sc in scenes:
         name = sc[0]
-        if filters and not any(
-                fnmatch.fnmatch(name, f) if any(c in f for c in "*?[")
-                else f in name for f in filters):
+        if filters and not any(hit(f, name) for f in filters):
             continue
         if step is not None and step not in scene_steps(name, sc[2]):
             continue

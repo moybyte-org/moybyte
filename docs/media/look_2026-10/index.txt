@@ -10,6 +10,9 @@ blocks-light_desktop.png — Desk: Calc focused, Files behind, bar; Blocks (ligh
 contrast-dark_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Contrast (dark); 320x240
 contrast-dark_handheld_home@3x.png — same, enlarged 3x (nearest)
 contrast-dark_desktop.png — Desk: Calc focused, Files behind, bar; Contrast (dark); 1024x600
+contrast-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Contrast (light); 320x240
+contrast-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+contrast-light_desktop.png — Desk: Calc focused, Files behind, bar; Contrast (light); 1024x600
 luna-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Luna (in the style of Windows XP); 320x240
 luna-light_handheld_home@3x.png — same, enlarged 3x (nearest)
 luna-light_desktop.png — Desk: Calc focused, Files behind, bar; Luna (in the style of Windows XP); 1024x600
@@ -63,3 +66,25 @@ moy_mark.png — Moy, the canonical pixel Moy: handheld bar (16 px) and desk but
 icons_sheet.png — Icon sets: the default smooth set at 16 and 24 px on light and dark, the pixel set at 1x and 2x, and Luna's and Coast's own sets; 812x2492
 icons_sheet@2x.png — same, enlarged 2x (nearest)
 icons_pixel.png — The pixel icon set: today's art and the refined set for every slot, at 1x and 4x, on Pico's and Bench's bar colours; 610x4146
+moy-light_handheld_settings.png — Settings: the working rows and About, a caption on every group; focus on Appearance; Moy Day; 320x240
+moy-light_handheld_settings@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_appearance.png — Appearance: the theme cards (Moy current), then the rows; focus on Tint; Moy Day; 320x240
+moy-light_handheld_appearance@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_appearance.png — Appearance as a window on the desk, with Chrome size; focus on Tint; Moy Day; 1024x600
+moy-light_handheld_calc.png — Calc fullscreen: the tape on a display inset beside the 4x5 keypad in kinds; focus on 5; Moy Day; 320x240
+moy-light_handheld_calc@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_home.png — The console-mode home on the 1024x600 board at 1x: hero, details, shelf; the bar's X returns to the desk; Moy Day; 1024x600
+moy-light_handheld_home_wallpaper.png — Handheld home over the default wallpaper, Moy's night; Moy Day; 320x240
+moy-light_handheld_home_wallpaper@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_wallpaper.png — Desk over the default wallpaper, Moy's night: Calc keeps clear of the sleeping Moy; Moy Day; 1024x600
+moy-dark_handheld_settings.png — Settings: the working rows and About, a caption on every group; focus on Appearance; Moy Night; 320x240
+moy-dark_handheld_settings@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_appearance.png — Appearance: the theme cards (Moy current), then the rows; focus on Tint; Moy Night; 320x240
+moy-dark_handheld_appearance@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_appearance.png — Appearance as a window on the desk, with Chrome size; focus on Tint; Moy Night; 1024x600
+moy-dark_handheld_calc.png — Calc fullscreen: the tape on a display inset beside the 4x5 keypad in kinds; focus on 5; Moy Night; 320x240
+moy-dark_handheld_calc@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_home.png — The console-mode home on the 1024x600 board at 1x: hero, details, shelf; the bar's X returns to the desk; Moy Night; 1024x600
+moy-dark_handheld_home_wallpaper.png — Handheld home over the default wallpaper, Moy's night; Moy Night; 320x240
+moy-dark_handheld_home_wallpaper@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_wallpaper.png — Desk over the default wallpaper, Moy's night: Calc keeps clear of the sleeping Moy; Moy Night; 1024x600

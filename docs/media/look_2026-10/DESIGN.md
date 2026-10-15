@@ -236,6 +236,7 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 - **Keycap hints** name only keys that are not self-evident.
 - **Rows:** link, info, cycle, toggle (with On/Off), slider, segmented,
   swatches; a caption heads every group; only working settings show.
+  Settings ends in an About group; CHROME SIZE is Appearance's.
 - **Calc:** a tape on a display inset, the result in `value`, a 4×5 keypad
   in kinds.
 - **Files:** Places, each file's picture, Name, Kind and Size; names cut
@@ -262,10 +263,11 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 
 No theme uses Microsoft or Apple artwork, logos or fonts. A theme's home
 and desk are a `backdrop`, a few flat shapes (GAPS 9); a user's wallpaper
-replaces it.
+replaces it. Over a dark wallpaper a light theme's on-backdrop ink turns
+light and its handheld bar takes the desk bar's fill.
 
 ## The pictures
 
 `index.txt` names every target. Settings, Appearance, the handheld Calc,
-the console home and the wallpaper scenes have only `pixel_round3/`
-layouts until plan step 2.
+the console home and the wallpaper scenes follow `pixel_round3/`'s
+layouts (`rounds/round11.py`).
