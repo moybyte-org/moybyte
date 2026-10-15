@@ -1,235 +1,276 @@
 # What the 2026-10 look needs that the engine lacks
 
-Each gap gives the capability, why the design needs it, its cost in developer
-days (excluding golden re-bakes, which come once at the end), and its effect
-on frame time and memory. "Owner call" marks a gap that reverses a ruling or
-touches moy-spec.
+Each gap gives the capability, its shape, its cost in developer days
+(excluding golden re-bakes, which come with each step) and its frame-time
+risk. Frame figures here are estimates of what to measure; the measurements
+go to **#66** for the S3 boards and **#58** for the P4 boards.
+"Owner call" marks a choice that is the owner's.
+
+**Frame-time risk in one line per tier.** P4 desk: bandwidth-bound, so
+text and corners stay in the noise on the known-background path, and soft
+shadows during a window drag, text over a backdrop and the backdrop raster
+are what to measure (gap 6, 9). S3 boards: CPU-bound by calls, so a string
+stays one call into C, and the hero's shadow and title never redraw on a
+carousel frame.
 
 ## Foundation
 
-**1. Theme colours in RGB: a shell-only palette block. Owner call:
-`docs/theming_2026-09.md` §11 declines per-theme RGB palettes.**
+**1. Theme colours in RGB, and the theme fields.**
 
-- **Why:** MOY64 has no ramp for this look. Moy dark's neutrals map to
-  indices 0, 55, 55, 54, 50 and 48. That maps `surface` and `raised` onto the
-  same index and loses the indigo tint that is half of Moy's signature. Light
-  mode's nearest white is index 7, which is cream. The lavender value colour
-  (#b3a6f2) and the amber accent (#ffc53d) have no index either.
-- **Shape:** roles take `#rrggbb`. The loader quantises each value to RGB565
-  into indices 64–127, which only the shell can name. A cart's colour stays
-  `& 63`, so cart pixels cannot change.
-- **Work:**
-  - `moy_theme.c` clamps colour indices to 63 in three places, and those
-    clamps move.
-  - `PAL565` grows to 128 entries; the host and web tables follow.
-  - The §4.10 derivation moves to RGB arithmetic.
-  - The §7 readability check runs on RGB.
-  - The package `format` is bumped.
-- **New roles, additive:** `value`, `value_ink`, `edge` (the moonlit top),
-  `group_edge`, `under`, `lcd`, `lcd_ink` and `sel`, each with a derivation
-  rule. The readability check (§7) holds every non-text role to 3:1 against
-  the background it marks.
-- **Cost:** 5–7 days.
-- **Frame and memory:** no frame cost. Memory is 128 bytes per table.
+- **Shape:** roles take `#rrggbb`; the loader quantises each to RGB565 into
+  indices 64–127, which only the shell names. A cart's colour stays `& 63`,
+  so cart pixels cannot change. `moy_theme.c`'s three clamps to 63 move,
+  `PAL565` grows to 128 entries in every copy, `docs/theming_2026-09.md`
+  §4.10's derivation and §7's readability check run on RGB, and the package
+  `format` is bumped.
+- **Roles:** the mockups' names are vocabulary, not new roles: `bg`,
+  `text`, `line`, `dim`, `danger` and `sel` (`selection`) map onto roles
+  that exist. New, each with a derivation rule: `value`, `value_ink`,
+  `sunk`, `lcd`, `lcd_ink`. §7 holds every non-text role to 3:1 against
+  what it marks, and warns when `primary` and `tonal` resolve alike.
+- **New fields:** the theme model's groups (`THEMES.md`): `render`, the
+  radii, the ring, `shadow`, `edges`, `backdrop`, `win`, `bar`, `hhbar`,
+  `current`, the launcher and list fields, `buttons`, the display and keycap
+  fields. An absent field takes the model's default.
+- **Cost:** 6–8 days. **Frame:** none; 128 bytes per table.
 
-**2. Fonts: Galmuri7, Galmuri9, Galmuri11 Bold and GalmuriMono9.** Contrast
-also uses Galmuri11.
+**2. A font file with 1, 2 and 4 bpp glyphs (MFNT version 2).**
 
-- **Licence and source:** SIL OFL-1.1, © Lee Minseo,
-  github.com/quiple/galmuri v2.40.4. The sampled glyphs and the licence ship
-  here.
-- **Fit in MFNT v1:** every box is at most 12 wide and 14 tall, and the fonts
-  are proportional.
-- **Work:**
-  - Generalise `tools/make_tiny5_font.py`. Galmuri sits on a 100-unit grid,
-    so it samples cleanly.
-  - Add a `THIRD_PARTY.md` notice.
-  - Add the fonts to the `tests/test_font_lane.py` rasters.
-  - Add a codepoint-to-byte table in `moy_text` for `− ← → ↑ ↓`, which are
-    not Latin-1. They map into the unused 0x80–0x9F slots.
-- **Roles:** a new `caption` role joins `ui`, `title` and `mono`. Tiny5 leaves
-  the chrome.
-- **Slots:** five loaded fonts with Contrast's, so `MOY_FONT_SLOTS` goes from
-  4 to 6. Each slot's buffer is capped at 8 KB, and a Galmuri file is 2–4 KB.
-- **The Code tab on GalmuriMono9:** a 5 px cell instead of 8, which gives 57
-  columns. Checking the cursor, selection and tap hit-tests at a 5 px cell
-  takes 1 day. Petme128 stays the carts' `print` font.
-- **The Moybyte cut:** Mono's `l` and `1`, and Bold's `−`, are redrawn so
-  `l 1 I | ( )` never read alike (`_patch_glyphs` in `mockups.py`). The OFL
-  allows modified versions; Galmuri declares no Reserved Font Name, but the
-  cut is named "Galmuri Mono (Moybyte cut)" in `THIRD_PARTY.md`. 0.5 day.
-- **Ellipsis:** names cut to fit with "…". It builds on `moy_text_fit_px`,
-  which exists, and needs `…` in the byte map. 0.5 day.
-- **Cost:** about 5.5 days.
-- **Frame:** no new lane. A full Code-tab redraw draws about 40% more glyphs,
-  so measure a scroll on the T-Deck and record it in #66.
+- **Where version 1 stops** (`native/moy_gfx/moy_text.h`): one glyph box of
+  at most 16×16 (the 22 and 44 px Calc faces and petme128 at 3× exceed it),
+  1 bpp only, an 8 KB file cap, 4 slots.
+- **Version 2:** a bpp field; an 8-byte record per glyph (offset, box,
+  bearing, advance) with row-major packed coverage; a kern-pair table of 3
+  bytes per pair. It stays one glyph per byte: Latin-1 plus a byte map into
+  0x80–0x9F for `− × ÷ … ← → ↑ ↓ •`.
+- **The converter,** `+tools/make_font.py`: FreeType through Pillow, hinted,
+  at fixed sizes, as `mockups.py` rasterises. 2 bpp at 13 px and below, 4 bpp
+  at 15 and above, 1 bpp for a crisp face at any size. A family that lacks a
+  glyph gets an ASCII stand-in, and the converter says so (Cantarell has no
+  U+2212).
+- **Cost:** 6 days: the converter 2, the reader and validator with fuzzing
+  of the new fields 2.5, tests and rasters 1.5. **Frame:** none.
 
-**3. Text at 2× on the 7–10″ boards** (`chrome.text_scale_floor` already
-answers 2).
+**3. The alpha glyph lane.**
 
-- **Work:** the bodies that still lay out in 8 px cells move to line metrics:
-  Files, Get Carts, the Storybook and the editors. Default window sizes are
-  re-planned for 512×300.
-- **Cost:** 3–5 days.
-- **Frame:** a full-desk repaint covers the same pixels. Measure a window drag
-  on both P4 boards and record it in #58.
+- **Over a known solid background** (rows, keys, the bar, chips: almost all
+  chrome): the lane builds a 4- or 16-entry RGB565 ramp from ink to
+  background once per string; each pixel is a lookup and a store, the cost
+  class of today's 1 bpp lane. The toolkit passes the surface it paints.
+- **Over unknown pixels** (desk labels and the home's text over a backdrop,
+  overlays on a cart): a read, a three-channel blend and a store.
+- **Text shadow:** the lane runs again at an offset and an alpha, for the
+  strings that ask.
+- The P4's PPA blends A4/A8 masks in hardware with a fixed setup cost per
+  transaction: for the 44 px result and shadows, never single glyphs.
+- **Cost:** 4 days with the host, web and device twins, a
+  `tools/p4_conformance.py` case and goldens. **Frame:** a full desk of text
+  is about 80 KB of PSRAM traffic over unknown pixels, under a millisecond
+  on the P4; on the S3 boards a string stays one call. A chrome text lane is
+  gated on an S3 A/B (`docs/theming_2026-09.md` §4.7).
 
-## Chrome and parts
+**4. The font set.**
 
-**4. A `soft` frame style**, with `paper` and `studio` as its parameters.
+- **Families:** Plex (Daylight), Inter (Moy Night), Atkinson Hyperlegible
+  Next (Blocks, Contrast), JetBrains Mono (the Code tab), each with a
+  `THIRD_PARTY.md` notice. A board takes only its size set: about 40 KB per
+  family on the handheld boards, 85–100 KB on the desk boards, 5 KB for the
+  mono. Calc's 22 and 44 px faces ship only the keypad's 20 glyphs.
+- **Image:** the build prints the headroom; where a board cannot hold the
+  set, its partition grows or the image sheds weight, the Zero first (owner,
+  2026-10-15).
+- **RAM:** each file is copied into PSRAM once, at boot or theme change.
+  Drawing from memory-mapped flash would share the S3's cache with code.
+- **Slots and roles:** `MOY_FONT_SLOTS` goes from 4 to 10; a `caption` role
+  joins `ui`, `title` and `mono`; names cut with "…" on `moy_text_fit_px`.
+- **The Code tab** on JetBrains Mono 11 px: a 7 px cell, 45 columns (10 px
+  gives 6 px and 53 columns: owner call). Cursor, selection and tap
+  hit-tests at the new cell: 1 day.
+- **Cost:** 4 days. **Frame:** a Code-tab redraw draws fewer, larger
+  glyphs; measure a scroll on the T-Deck.
 
-- **What it draws:**
-  - a 20 px strip, filled in `value` when focused and in `surface` with a
-    `dim` title when not;
-  - an outline title icon and one ×;
-  - the moonlit top edge;
-  - Studio's 1 px frame and its inverted white strip;
-  - Paper's inverted strip.
-- **Minimise and maximise:** move to the window chip and a title double-tap.
-- **Cost:** about 3 days.
+## Rendering
 
-**5. Elevation and the unfocused window.**
+**5. Anti-aliased shapes.**
 
-- **A `drop N` surface clause:** a hard offset fill in `shadow_c`. 0.5 day.
-  The frame cost is two thin spans, so nothing.
-- **A `lit` edge** (top row only, in `edge`) for the moonlit edge. 0.5 day.
-  No frame cost.
-- **Dimming an unfocused window's body by 25%:** done once on the retained
-  `win.buf` stamp when focus changes, never per frame. That adds a blend
-  kernel (gap 6) plus an undimmed copy, or a redraw on refocus. 1.5 days.
-- **Frame and memory:** one blend pass over a window at each focus change.
-  The P4 desk is bandwidth-bound, so measure a focus switch and record it in
-  #58. If it is too slow, the fallback is the dimmed strip and title alone.
+- **Shape:** a 4 bpp quarter-circle coverage table per radius (128 bytes at
+  r = 16). A ring is the outer table minus the inner, so widths can be
+  fractional. Interiors are the span fill; only corner pixels blend, over a
+  known background through gap 3's ramp.
+- **Variants:** per-corner flags (a window rounded on top only); `stepped`
+  corners, the table thresholded at theme load; `circle`, the largest circle
+  in a cell, a pill past 1.5 cells.
+- **Cost:** 4 days in `moy_gfx` with the canvas twins. **Frame:** negligible.
 
-**6. Carousel dimming: a darken kernel**, with cached dimmed covers.
+**6. Shadows.**
 
-- **Cost:** 1 day.
-- **Frame:** zero during motion.
-- **Memory:** 32–75 KB. On the T-Deck the Player's fit check must be able to
-  release them (#66).
-- **Light themes:** never veil art. Only dark themes darken their
-  neighbours (toward black); light themes, Paper and Contrast show them
-  undimmed, so they need no cache.
+- **Soft:** a 9-slice 4 bpp mask per (radius, blur), baked at theme load
+  and blended in a ramp tinted to the background's hue. **Hard:** an offset
+  fill.
+- **Cost:** 2.5 days.
+- **Frame, the P4's real risk:** a soft shadow is a read-modify-write band
+  about three blurs wide; for the Calc window that is about 280 KB of PSRAM
+  traffic, a few milliseconds whenever the window moves. At rest it belongs
+  on the cached desk layer; during a drag it may drop to a smaller blur or
+  none. On the handheld the hero card's shadow lives in the card layer,
+  redrawn when the carousel settles, not on its 6 frames.
 
-**7. Parts.**
+**7. Paints.** A paint is a colour or up to four stops, in `smooth` (one
+RGB565 colour per row), `steps:N` or `dither` (the ordered pattern lane,
+libmoy's `fillp`, with two colours per row) mode, on title strips, bars,
+buttons, keys, tiles and backdrops. A gradient spans at least one 565 step
+per 8 rows or reads as stepped. **Cost:** 2.5 days. **Frame:** a span fill;
+cached with its strip.
 
-- **New parts:** `slider`, `seg` (current segment = bar), an outlined
-  `keycap`, a track-and-knob `toggle` with its On/Off word, and an `info` row
-  (a value with no chevron, not focusable).
-- **There is no inert state.** A setting that is not built has no row.
-- **The ring, bar, fill rule:** `DESIGN.md`'s three marks as three parts:
-  - `focus` (the 2 px accent ring, with a 1 px gap; on a list row, around the
-    raised row);
-  - `current` (the 2 px value bar, under or beside);
-  - `primary` (the value fill).
+**8. Bevel edges:** `hi`/`lo` lines on windows, buttons, tiles, keycaps and
+the display, from `style.json`'s `shade_hi` and `shade_lo`. **Cost:** 0.5
+day. **Frame:** none.
 
-  Every kind draws its state through them and through nothing else. A test
-  in `tests/test_ui_style_data.py` can hold that the accent appears only in
-  `focus` and `value` only in `current`, `primary` and window strips.
-- **The moon-glow halo** is a pattern-lane ring outside the focus ring, in Moy
-  only.
-- **Cost:** 3.5 days.
-- **Frame:** none. The halo is a single 1-pixel dithered ring, and only the
-  focused item has one.
+**9. Backdrops: a `backdrop` theme field.**
 
-**7b. Moy's star field: a `stars` desk pattern**, beside Paper's `dots`.
+- **Shape:** `backdrop.home` and `backdrop.desk` are lists of up to 16
+  shapes (`fill`, `band`, `circle`, `ellipse`, `rrect`, `pie`, `wave`), in
+  thousandths of the surface, each with a paint and an alpha. A record is a
+  few bytes; the seed themes' lists are 22–57 bytes.
+- **No new buffer:** the shapes draw into the one wallpaper bake
+  (`docs/theming_2026-09.md` D6), and the home's band copy is filled from
+  it as now. A malformed list reads as no backdrop; the loader caps shapes
+  and colours and clamps coordinates, fuzzed with `tests/test_theme_loader.py`'s
+  corpus.
+- **Cost:** 3 days with the host and web twins. **Frame:** none at rest; a
+  full raster on theme load and mode switch (about 1.2 MB of PSRAM writes on
+  the P4); where a board keeps no full bake, the damage under the carousel's
+  cards is redrawn clipped.
 
-- **What it is:** a 96 px tile of 14 points drawn on `bg`, laid down once into
-  the cached background. It is a solid fill plus 14 single-pixel writes per
-  tile.
-- **Cost:** 0.5 day.
-- **Frame:** carousel motion re-fills `bg` behind the moving cards, so the
-  restore draws those few pixels too. That is negligible, but include it in
-  the #66 carousel number.
+**10. Native 1× layout on the big boards.**
 
-**7c. Desk density: row metrics per tier.**
+- **Shape:** the P4 boards lay the chrome out at 1× with per-class metrics
+  (handheld, desk) instead of one scale factor: the bar 40, rows 28, Places
+  34, title strips 44. `chrome.text_scale_floor` answers 1 there. Files, Get
+  Carts, the Storybook and the editors move from 8 px cells to line metrics,
+  and default window sizes are re-planned. Pixel content keeps whole-number
+  scaling; carts keep their canvas.
+- **Cost:** 6–9 days. **Frame:** the same framebuffer and bandwidth, with
+  more, smaller glyphs: a call-count question for gap 3.
 
-- **What changes:** in windowed apps, list rows are 14 and settings rows 17,
-  against the handheld's 20. Text stays at 2×.
-- **Shape:** a WM-tier entry in the layout metrics. The handheld goldens do
-  not move.
-- **Cost:** 1.5 days.
+**11. Whole-chrome 2× per theme** (`render.scale: 2`): the desk keeps its
+1024×600 metrics and draws into a 512×300 system surface the compositor
+doubles. **Cost:** 2–3 days. **Frame:** a quarter of the fill bandwidth and
+one PPA doubling pass on the P4.
 
-**8. Icons: a 12×12 two-tone set of 32**, drawn in `mockups.py`, as a role
-sheet that is remapped at draw time. 2 days.
+## Parts
+
+**12. The three marks** as three parts: `focus` (the ring, after the part,
+from `ring_w`, `ring_gap`, `ring_alpha`), `current` (`bar` or `fill`, with
+`sel`, `sel_ink` and a colour in a window behind) and `primary` (gap 13).
+Every part draws its state through them and nothing else; a test in
+`tests/test_ui_style_data.py` holds that `accent` appears only in `focus`.
+**Cost:** 3 days. **Frame:** none.
+
+**13. Button kinds** (DESIGN, "Button kinds"): `play` becomes `primary` and
+`author` `tonal` in `style.json` and the ten callers; `cell` is the `toggle`
+kind; `fill`, `ink`, `border`, `shape`, `r`, `font` and `bevel` per kind in
+`moy_ui`'s draw; the `app_buttons` lookup by app id; at most one `primary`
+per surface, held on the goldens. **Cost:** 2.5 days. **Frame:** none.
+
+**14. New parts:** `slider`, `seg`, `keycap`, a `toggle` with its On/Off
+word, an `info` row and a group caption. A setting that is not built has no
+row. **Cost:** 3.5 days. **Frame:** none.
+
+**15. Window parts:** header styles `plain`, `fill`, `bar`, `grad`; control
+sets `close`, `lights`, `xp`, `amiga`, `adw`; frame width; title alignment
+and icon. Minimise moves to the window chip and maximise to a title
+double-tap. **Cost:** 4 days. **Frame:** cached with the window strip.
+
+**16. Bar parts:** the tile, start-style, glyph and workspaces system
+buttons; `tab`, `button` and no chips; a tray segment; an `app_title`
+widget; a centred clock slot; the handheld bar styles and pill tabs.
+**Cost:** 3 days. **Frame:** none.
+
+**17. Neighbour dimming:** a darken kernel with cached dimmed covers, for a
+theme with `dim_neighbours` (Moy Night). **Cost:** 1 day. **Frame:** zero
+during motion; 32–75 KB of covers, which the Player's fit check must be
+able to release on the T-Deck.
+
+**18. Icons as alpha masks:** the 24-unit line icons pre-rendered at the
+sizes in use as 4 bpp masks in an MFNT version 2 file (about 20 KB),
+replacing the 16×16 `IconSheet` sprites. A mask is not editable in the
+sprite editor as `IconSheet` is: owner call. **Cost:** 2.5 days.
+
+**19. Adaptive columns:** a list drops its optional column (Kind) when
+names would show fewer than 11 characters, on every theme. **Cost:** 0.5
+day.
 
 ## Layouts
 
-**9. Homes.**
+**20. Homes.** The handheld carousel: tabs in the bar, a 2× hero, title and
+metadata, a keycap hint strip, no page dots (2–3 days). The desk's console
+home: the hero beside a details pane (source, last played, play count, and
+Play, Change, Copy) over a shelf that bleeds off the right edge, the bar's
+× back to the desk (3 days). Last played and play count are new store
+records (0.5 day). A manifest description and genre, and a best score, are
+moy-spec's: owner call.
 
-- **Handheld carousel:** tabs in the bar, a 2× hero, a title and metadata,
-  and a keycap hint strip, with no page dots. 2–3 days.
-- **The 1024×600 console home:**
-  - a 2× hero beside a detail pane: title at ×2, metadata, a description,
-    stats, and Play / Change / Copy;
-  - a shelf below that bleeds off the right edge, with the ring on the
-    focused shelf card;
-  - the bar's × is the one way back to the desk.
-  - 3 days.
-- **Data the details need:**
-  - **Last played and play count:** store records. 0.5 day.
-  - **A description and a genre in the manifest:** moy-spec's SPEC.md, so an
-    **owner call**.
-  - **A best score:** carts do not report one. A `score()` verb would be
-    moy-spec's, so an **owner call**.
-  - Without these, the pane shows the source, the last-played date and the
-    play count.
+**21. Covers:** a 64 px crop per cover for the hero, a 48 px shelf crop
+(`CROPS`), anti-aliased clipped corners, a title tile for a cart without a
+cover. **Cost:** 1.5 days.
 
-**10. Covers.**
-
-- **Per-cart crops:** one 64 px crop per cover, used by the hero at 2× on
-  both sizes, plus a 48 px shelf crop (`CROPS`, no HUD). 0.5 day.
-- **A title-tile fallback** for carts without a cover. 0.5 day.
-- **Drawn label art:** about 3 hours per game, as art.
-
-**11. App relayouts:**
+**22. App relayouts:**
 
 | layout | cost |
 |---|---|
-| Settings (only working rows, About facts, a caption on every group) | 1 day |
-| Appearance (one 64×48 preview at both sizes in the current mode or the theme's only mode, a fixed caption line, the current bar; accent swatches in the mode's values) | 1 day |
-| Calc as an object: a tape history (new behaviour), the LCD inset, 2× legends, the 4×5 keypad with focus | 2 days |
-| Files with Places (Projects, Carts, Art, Music, Trash are new filters), file pictures, desk density, ellipsis, and Kind dropped at large type | 3 days |
-| sprite editor: the grey transparency checker (owner allows), the ring cursor, the bar on the tool and the colour | 1 day |
-| the editors' bar, and the code overflow marker | 1 day |
-| desk icons (26×20 tiles, plates over the wallpaper) | 0.5 day |
+| Settings: only working rows, the About facts, a caption on every group | 1 day |
+| Appearance: one preview size on both boards, a fixed caption line, the current bar | 1 day |
+| Calc: a tape history (new behaviour), the display inset, the 4×5 keypad in kinds | 2 days |
+| Files: Places (Projects, Carts, Art, Music, Trash), file pictures, ellipsis | 3 days |
+| the sprite editor: the grey checker, the ring cursor, the bar on tool and colour | 1 day |
+| the editors' bar and the code overflow fade | 1 day |
+| desk icons as tiles with labels | 0.5 day |
 
-**12. Wallpaper per glass.**
-
-- **Why:** the wallpaper cart reads W and H instead of being cover-cropped
-  from 320×240, and it receives the shell's **quiet rectangles** (the bar, the
-  home's text zone, the icon column) so it keeps stars and detail out of
-  them.
-- **The bar band:** the shell lays the bar band in `bg` over any wallpaper.
-- **The subject rectangle:** the wallpaper declares where its subject is (Moy
-  and the moon). The WM's default window placement keeps clear of it when the
-  window fits elsewhere.
-- **Cost:** the cart 0.5 day, the host API 1 day, the bar band and the
-  placement 1 day.
-- **Frame:** none (static).
+**23. Wallpaper per glass:** a wallpaper cart reads W and H, receives the
+shell's quiet rectangles (the bar, the home's text, the icon column) and
+declares a subject rectangle the WM's default placement keeps clear of.
+**Cost:** 2.5 days. **Frame:** none.
 
 ## Themes
 
-**13. The seed set:** Moy (dark, light), Paper (light only), Studio (dark
-only), and Contrast (dark, plus a new light that is kept for
-polarity-dependent low vision).
+**24. The seed set:** Daylight (default), Moy Night, Blocks, and Contrast
+(dark and light). `night`, `platinum`, `win95`, `machine`, `outline`,
+`indigo`, `berry`, `forest` and `slate` are deleted; a stored name of a
+deleted seed falls back to the default, and nothing migrates. Indigo, Berry, Forest and Slate return as accent presets with
+a dark and a light value each. **Cost:** 4 days, plus the goldens.
 
-- **Accents have two values each.** Moon is #ffc53d dark and #d45f00 light,
-  and likewise for the other seven presets. The light value clears 3:1 on
-  light surfaces, and the picker shows the current mode's.
+## Later: the ricing themes (moybyte-org/carts)
 
-- **Renames and deletions:**
-  - `night` is renamed `moy`. Under the no-migrations rule a stored `night`
-    reads as absent and resolves to the default, which is Moy.
-  - Platinum, Machine, Win95, Outline and Indigo are deleted, as are Berry,
-    Forest and Slate as themes.
-  - The last four become Moy accent and tint presets.
-- **Studio:** one accent (orange, focus only), white for current and
-  primary, and every chrome label in capitals through a theme flag that the
-  toolkit's label path reads.
-- **Cost:** 4 days.
+Luna, Coast, Pico, Bench and Adw ship as installable theme packages, each
+bringing its own font family, so they cost the image nothing. They need, on
+top of gaps 1–24:
 
-**Golden re-bake:** every shell golden moves, on both sizes. 2 days.
+**25. Theme packages with fonts** from the store: the package carries its
+MFNT files, the loader validates them as it validates a seed's. **Cost:**
+1.5 days.
 
-**Total:** about 57–67 developer days. Gaps 1–3 come first, then 4–8, then
-9–13.
+**26. Frosted glass over a static backdrop:** the backdrop under a bar's
+rect blurred once at load, in place in the bake, then tinted. No window
+passes under a bar. **Cost:** 1.5 days. **Frame:** none.
+
+**27. Vibrancy as a tint:** a sidebar takes the backdrop's mean colour
+mixed toward white, computed at load. **Cost:** 0.5 day.
+
+**28. A dock:** a floating, inset, centred, rounded bottom bar with launcher
+tiles and a running dot per open app; the inset, centring and radius are
+new layout fields (`docs/shell_layout_2026-10.md`). **Cost:** 2–3 days.
+
+Live blur behind moving windows is declined: every window move on the P4
+desk would recompose it.
+
+## Moot in this rendering
+
+The pixel round's star field, moonlit edge and focus halo; the Galmuri
+chrome fonts and their Moybyte cut; text at 2× as the big boards' only
+mode (now gap 11, a theme's choice); the 14 and 17 px desk rows; dimming a
+window behind by 25%; the 12×12 two-tone icons; the redrawn default
+wallpaper (the default theme draws a backdrop).
+
+**Total:** about 84–91 developer days for gaps 1–24; gaps 25–28 add about
+6.

@@ -28,16 +28,16 @@ def test_every_scene_has_a_setup_and_known_steps():
 
 
 def test_a_step_keeps_the_scenes_it_targets():
-    kept = [s[0] for s in L.select(L.read_index(), (), "17")]
-    assert "moy-dark_handheld_calc" in kept and "moy-light_desktop" in kept
-    assert "moy-dark_handheld_settings" not in kept
+    kept = [s[0] for s in L.select(L.read_index(), (), "22")]
+    assert "calc_all_themes" in kept and "daylight-light_desktop" in kept
+    assert "daylight-light_handheld_home" not in kept
 
 
 def test_scenes_render_and_pair(tmp_path):
-    rows = L.run(str(tmp_path), ["moy-dark_handheld_calc",
-                                 "moy-light_handheld_settings"], quiet=True)
-    assert sorted(r[0] for r in rows) == ["moy-dark_handheld_calc",
-                                          "moy-light_handheld_settings"]
+    rows = L.run(str(tmp_path), ["daylight-light_handheld_home",
+                                 "moy-dark_handheld_home"], quiet=True)
+    assert sorted(r[0] for r in rows) == ["daylight-light_handheld_home",
+                                          "moy-dark_handheld_home"]
     index = (tmp_path / "index.txt").read_text()
     for name, built, _missing in rows:
         mock = Image.open(tmp_path / (name + ".mockup.png"))
@@ -56,5 +56,5 @@ def test_a_run_puts_the_pins_back(tmp_path):
     from runtime import cover_cache
     g = L._goldens()
     before = cover_cache._COVER_SLICE_MS, g._CLOCK
-    L.run(str(tmp_path), ["moy-dark_handheld_settings"], quiet=True)
+    L.run(str(tmp_path), ["daylight-light_handheld_home"], quiet=True)
     assert (cover_cache._COVER_SLICE_MS, g._CLOCK) == before

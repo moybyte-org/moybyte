@@ -222,6 +222,9 @@ reason, and its PSRAM outside the Python heap is the cart-runtime reserve
 
 **A bar** has an `edge`, a `size` (logical pixels, multiplied by the chrome
 scale as every metric is, `docs/theming_2026-09.md` §4.2) and three slots.
+The 2026-10 look designs the P4 desk at a chrome scale of 1 with per-class
+metrics and a 40-pixel bar, 2 being a theme's choice (owner, 2026-10-15;
+`docs/look_2026-10.md` step 9 builds it).
 Widgets in `left` pack from the bar's start, `right` from its end, `center`
 around its middle (polybar's `modules-left/center/right`, waybar's the same
 names; both open 2026-10-13). On a `left` or `right` bar the slots run top to
@@ -624,7 +627,7 @@ class, four lists; the pinned Make tile goes, its job is the Make tab. The
 mockups (`docs/media/theming_2026-09/README.md`: the look, not finished
 layouts; L0: not set in stone) are at
 `docs/media/theming_2026-09/home_dark_480x320.png` and the 320×240 pair. The
-2026-10 look restyles this component (`docs/look_2026-10.md` steps 12 and 13):
+2026-10 look restyles this component (`docs/look_2026-10.md` steps 17 and 18):
 a 2× hero between 1× neighbours on the handheld, and on wide glass the hero,
 a details pane and a shelf, still the `carousel` arrangement.
 

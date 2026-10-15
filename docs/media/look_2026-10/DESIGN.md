@@ -1,183 +1,219 @@
-# The 2026-10 look: modern pixel
+# The 2026-10 look
 
-Restraint in the chrome, colour in the carts. References: Playdate,
-Switch/3DS home, AnalogueOS, OP-1. The pictures are drawn by `mockups.py`
-(see `index.txt`); what the engine lacks is in `GAPS.md`.
+Anti-aliased type, smooth shapes and soft depth in the chrome; pixel art in
+the content (covers, sprites, carts). `mockups.py` draws every picture that
+`index.txt` lists; `THEMES.md` holds each theme's fields and the theme model;
+`GAPS.md` is what the engine lacks; `docs/look_2026-10.md` orders the build.
+
+## Decisions (owner, 2026-10-15)
+
+- **The rendering is modern.** The third pixel round (`cb195ae9`, kept in
+  `pixel_round3/`) was "better and coherent but hand-drawn, still retro".
+  Text is pre-rasterised anti-aliased coverage at 2 or 4 bpp (as LVGL's and
+  the Nintendo DS's fonts are), shapes have smooth corners, depth is a soft
+  shadow, and the big boards lay the chrome out at native 1×. That round's
+  structure stands: its layouts, the three marks and its components.
+- **Daylight is the default.** Moy Night, Blocks and Contrast ship beside it.
+- **The engine is a superset.** Smooth or pixel is each theme's choice, field
+  by field. "The point of the engine is to look good and be customizable."
+- **Luna, Coast, Pico, Bench and Adw are the ricing proofs.** They ship
+  later as installable themes in the moybyte-org/carts repo, not built in.
+- **Fonts are not economised.** Three to five families are fine. Where an
+  image cannot hold them, the partition grows or the image sheds weight (the
+  Zero first).
+- **Button kinds replace per-app roles.**
+- **Theme colours are RGB**, quantised to RGB565 (GAPS 1).
+- **Dither is allowed anywhere, chrome included,** where it looks good.
+- **The handheld text sizes stand**; the owner checked them at real size.
 
 ## The rule: ring, bar, fill
 
-There are three marks, each with one meaning. They hold in every theme and on
-both sizes, and nothing else uses these colours as marks.
+Three marks, each with one meaning, in every theme and on both sizes.
 
-| mark | means | colour | where |
+| mark | means | default shape | colour |
 |---|---|---|---|
-| **ring**: 2 px, with a 1 px gap | **focus**: where the keys act; exactly one per screen | accent | cards, keys, previews, the sprite cell; on a list row, the ring sits around a raised row |
-| **bar**: 2 px | **current or selected**: the chosen theme, swatch, tab, tool, Places entry, file or code line | value | under a tab, a swatch, a preview or a segment; left of a row or a tool |
-| **fill** | **primary action**: Play, Run, "=" | value | the one primary button on a surface |
+| **ring** | **focus**: where the keys act; exactly one per screen | 2.5–3 px, anti-aliased, a 3 px gap | `accent` |
+| **bar** | **current**: the chosen tab, row, Places entry, swatch, tool, window | a 3 px rounded bar under or beside (`current: bar`), or a selection fill (`current: fill`) | `value` |
+| **fill** | **primary**: Play, Run, "=" | the `primary` button kind | `value` |
 
-The current window's title strip is the window's bar, filled in `value`. A
-toggle's track is that control's own state, not a mark. In Paper the ring and
-the fill are both ink but keep their different shapes, so a focused "5" (a
-ring with a gap) never looks like "=" (a filled key).
+The ring is the engine's: it is drawn after the part, from the theme's ring
+fields, and no button kind styles it. A focused window's "current" is its
+title strip filled in `value` (Moy Night, Blocks) or a 4 px `value` bar
+along its top edge (Daylight). The readability check keeps every kind's
+fill off `accent`; where the ring is the ink colour (Blocks), the ring and
+the fill share no shape.
 
 ## Colour
 
-Each theme has six neutral steps, an **accent** (focus) and a **value**
-(current and primary). The values are RGB targets quantised to RGB565
-(GAPS 1).
+Each theme sets a neutral ramp (`bg`, `surface`, `raised`, `sunk`, `line`,
+`dim`, `text`), an **accent** (focus only), a **value** (current and
+primary) with its `value_ink`, and optionally `danger`.
 
-| role | Moy dark | Moy light |
-|---|---|---|
-| `bg` | #11122a | #efecf8 |
-| `surface` | #1c1e40 | #faf9fd |
-| `raised` | #2a2d55 | #ffffff |
-| `group_edge` | #5c5f96, the moonlit top | #8a80c4, the shadow line below |
-| `line` | #30335c | #dcd7ee |
-| `dim` | #9196c2 | #5a5487 |
-| `text` | #eceaf8 | #1d1747 |
-| `accent` | #ffc53d moon amber | #d45f00 moon orange |
-| `value` | #b3a6f2 Moy lavender | #4b3bb8 deep violet |
+| role | Daylight | Moy Night | Blocks | Contrast (dark) |
+|---|---|---|---|---|
+| `bg` | #eceef3 | #0f1127 | #fff3dc (home #ffd23f) | #000000 |
+| `surface` | #ffffff | #181b38 | #ffffff | #000000 |
+| `raised` | #f4f5f8 | #23274b | #fff8ec | #000000 |
+| `line` | #e2e5ec | #2b2f57 | #eadcc0 | #ffffff |
+| `dim` | #5f6478 | #a1a6cc | #5b5167 | #e6e6e6 |
+| `text` | #15161d | #eef0fb | #1a1530 | #ffffff |
+| `accent` | #d45f00 moon orange | #ffc23d amber | #1a1530 ink | #ffe600 |
+| `value` | #4c3fd6 indigo | #b6a8f7 lavender | #6a2cff violet | #ffffff |
 
-**Each accent has a dark and a light value.** The Accent row's swatches show
-the current mode's values, so the checked swatch is the colour the ring draws
-in. In light mode, Moon is #d45f00: 3.4–3.9:1 on light surfaces, orange and
-not ochre.
-
-**Contrast:** text 4.5:1 or better (measured 11–17:1, `dim` 4.7–6.8:1,
-comments 5.5:1); every non-text mark 3:1 or better (rings, bars, keycap
-outlines, tracks, group edges 3.0–3.2:1). `mockups.py` prints them. Bright
-colour lives only in covers, sprites, syntax, Moy, the wallpaper and games.
-
-## Moy's identity, without a wallpaper
-
-Paper wins by committing to a material. Moy commits to the night sky:
-
-1. **Sky:** `bg` carries a sparse star tile (96 px, 14 points) on every
-   screen.
-2. **Moonlight:** raised things and groups catch a 1 px lit top edge.
-3. **Moon glow:** the focus ring has a dithered halo; only Moy's glows.
-4. **Moy himself:** the mascot is the system button in every bar.
-5. **Lavender is Moy's, amber the moon's:** one amber mark per screen.
-
-**Moy light is dawn, not dark mode with the lights on.** Its paper is pale
-lavender and its ink deep indigo. The stars stay as lavender sparkles, groups
-sit on an indigo shadow line, and the moon's focus turns orange. Game art is
-never veiled.
+**Contrast:** text 12:1 or better, `dim` 5.1:1 or better, every mark 3.4:1
+or better against what it sits on; `mockups.py` prints every pair. Bright
+colour lives in covers, sprites, syntax, the backdrops and games. Contrast
+keeps a light mode (low-vision needs split by polarity); its light ring
+carries a black keyline.
 
 ## Type
 
-| step | font | cap | use |
+Each theme brings its family, all SIL OFL-1.1: **IBM Plex Sans** (Daylight),
+**Inter** (Moy Night), **Atkinson Hyperlegible Next** (Blocks and Contrast:
+letters that look alike elsewhere differ, and its zero is slashed) and
+**JetBrains Mono** for the Code tab. Pixel themes use 1 bpp faces (Galmuri,
+petme128). Fonts are hinted at rasterisation, placed at whole pixels, and
+kerned by pair.
+
+| handheld 320×240 (143 ppi) | size | weight | bpp |
 |---|---|---|---|
-| title | Galmuri11 Bold | 11 (×2 for the big-home title and keypad legends, ×3 for the Calc result) | names, numerals |
-| body | Galmuri9 | 9 | rows, tabs, titles, buttons, files |
-| caption | Galmuri7 | 7, `dim` | metadata, headers, keycap legends |
-| code | GalmuriMono9, Moybyte cut | 9, 5 px advance | the Code tab: 57 columns |
+| title | 19 | Bold | 4 |
+| tabs | 13 | SemiBold | 2 |
+| status, hints, meta | 12 | Medium, Regular | 2 |
+| keycap legends | 11 | SemiBold | 2 |
 
-All Galmuri (OFL-1.1, Lee Minseo), mixed case; petme128 stays the carts'
-`print`. **The Moybyte cut** gives Mono's `l` a flag and tail and `1` a base
-(`l 1 I | ( )` never alike) and Bold's `−` the width of `+`.
+| desk 1024×600 at 1× (170 ppi) | size | weight | bpp |
+|---|---|---|---|
+| bar chips and clock, window titles, rows, Calc tape | 15 | Medium, SemiBold, Regular | 4 |
+| Kind and Size columns | 14 | Regular | 4 |
+| desk labels | 13 | Medium | 4 |
+| column heads | 12 | SemiBold | 4 |
+| Calc keys, operators | 22, 24 | Medium | 4 |
+| Calc result | 44 | SemiBold | 4 |
 
-**Contrast** sets body in Galmuri11 and captions in Galmuri9. Its keycaps
-grow to 15 px, its file names cut with an ellipsis, and its Files window
-drops the Kind column. **Studio** sets every chrome label in capitals:
-tabs, titles, places, kinds, hints and buttons. Content (file names and
-code) keeps its case.
+**2 bpp on the handheld, not a 1 bpp bitmap** (`type_specimen.png`): at
+11–13 px a hinted outline puts its stems on whole pixels, so 2 bpp matches
+4 bpp and an 8-bit reference, while 1 bpp has uneven stems and reads as the
+retro look the owner rejected. 11 px is the floor, for keycap legends only,
+in SemiBold. Contrast sets its titles and Calc two to six pixels larger. The Code
+tab's JetBrains Mono at 11 px has a 7 px advance: 45 columns on the handheld.
+The desk is Android's mdpi (1 dp is 1 px); the 10.1″ shows more of it.
 
-## Surfaces, elevation, corners
+## Shapes and depth
 
-- **Lines are rare.** A list is one surface with inset hairlines, and boxes
-  are never nested.
-- **Elevation is a hard pixel drop:** 3 px under the current window and the
-  focused card, 2 px under a window behind. Paper uses a dithered drop.
-  Studio and Contrast are flat and framed.
-- **Corners:** radius 3 for cards, windows and groups, 2 for keys and
-  buttons. Studio uses 0.
+| theme | radii (window, card, key) | shadow | outlines |
+|---|---|---|---|
+| Daylight | 12, 10, 10 | soft, indigo-tinted, 18%, blur 16, offset 8 | none; operators sit on a sunk key |
+| Moy Night | 12, 10, 10 | soft, black, 55%, blur 14, offset 6 | 1 px `line` on windows |
+| Blocks | 16, 14, 12 | none | 2 px ink on windows, desk tiles and the display; keys flat |
+| Contrast | 4, 4, 4 | none | 2 px white on every part |
 
-## What differs between the sizes
+Corners are anti-aliased; a ring's coverage allows fractional widths.
+Shadow ramps are tinted toward the background's hue, so their RGB565 steps
+do not wobble. Moy Night dims the handheld's neighbour cards 30%; the light
+themes never veil art.
 
-**The same on both:** tokens, fonts and their sizes, icons, components, the
-focus language and the 2× drawing scale on big glass.
+## The superset
 
-| | handheld 320×240 | 1024×600, 512×300 logical |
+Every choice below is a theme field (`THEMES.md`), and every theme is drawn
+by the same renderer.
+
+| choice | field | values |
 |---|---|---|
-| list rows | 20 | 14 in windows (Files: 16 rows, Places sidebar, Name/Kind/Size), 17 in a settings window |
-| apps | fullscreen pages | windows sized to their content (Calc 166×214, Files 282×268) |
-| home | carousel: a 2× hero and 1× neighbours, no page dots | the same hero crop, a details pane, and a 64 px shelf that bleeds off the right edge |
-| exit | ‹ back | the × in the bar (console mode) or the window's × |
-| desk | none | icon column and window chips |
+| text | `render.text` | `aa` (2 or 4 bpp); `crisp` (1 bpp, a pixel face at its design size or a whole multiple) |
+| corners | `render.shapes`, the radii | `smooth`; `stepped` (the same coverage thresholded); square is radius 0 |
+| shadows | `shadow` | `soft` (colour, alpha, blur, offset); `hard` (colour, whole-pixel offset); none |
+| big-board scale | `render.scale` | 1: native layout; 2: the desk in 1024×600 metrics drawn at 512×300 and doubled. The handheld is always 1 |
+| edges | `edges`, `hi`, `lo` | `flat`; `bevel` |
+| paints | a paint's `mode` | `smooth` (a colour per row); `steps:N` (N flat bands); `dither` (an ordered 4×4 blend of the two nearest stops) |
+
+## Button kinds
+
+Five kinds, one per meaning; an app chooses a kind per button, a theme
+styles each kind.
+
+| kind | means | Calc's keys | derived default |
+|---|---|---|---|
+| `normal` | a plain action | digits, `.`, ⌫ | `raised` fill, `text` ink, the key radius |
+| `primary` | the one primary action on a surface: the fill mark | `=` | `value` fill, `value_ink`, no border |
+| `tonal` | a secondary emphasis | ÷ × − + % | `normal` with `value` ink and the operator size |
+| `danger` | clears or destroys | C | `normal` with the theme's `danger` ink |
+| `toggle` | a two-state part; its `on` is the current mark | Paint's tools | as `normal` |
+
+Per kind a theme sets `fill` (a paint), `ink`, `border`, `shape` (`round`,
+`circle`, `square`), `r`, `font` and `bevel`; each keeps the six states.
+Resolution is the theme's `buttons[kind]`, then the optional
+`app_buttons[app][kind]`; every kind derives from the resolved `normal`. An
+app has at most one `primary` per surface. `calc_all_themes.png` is the
+proof: one Calc body, one kind table, nine themes.
+
+## The sizes
+
+**The same on both:** the marks, the kinds, the type roles and the icons.
+
+| | handheld 320×240 | desk 1024×600 and 1280×800, 1× |
+|---|---|---|
+| bar | tabs or ‹ and a title, then status | 40 px: the system button, window chips, status |
+| rows | 20 | 28 in lists, 34 in Places; title strips 44 |
+| apps | fullscreen pages | windows sized to their content; Calc keys about 75×61 |
+| home | carousel: a 2× hero, 1× neighbours, no page dots | the hero, a details pane, and a shelf that bleeds off the right edge |
+| exit | ‹ back | the window's ×, or the bar's × in console mode |
+
+Pixel content scales by whole numbers, nearest-neighbour, its corners
+clipped with anti-aliasing.
 
 ## Components
 
 - **Bar:** the Moy button, then tabs or ‹ and a title; Wi-Fi, battery and
-  clock on the right. On the desk it holds window chips: the current chip is
-  `raised` with a value underline.
-- **Keycap:** an outlined cap, its edge in `dim` with a heavier bottom, a
-  Galmuri7 legend, and a caption label after it. Hints name only keys that
-  are not self-evident; the trackball's arrows are not shown.
-- **Row:** link (value and ›), info (a value with no chevron), cycle (‹ value
-  ›), toggle (with its On/Off word), slider, segmented control or swatches. A caption heads every
-  group.
-- **Settings shows only settings that work.** Unbuilt settings are absent,
-  not disabled, and the About group lists real facts.
-- **Window:** a 20 px strip, outline icon, title and one ×. The current
-  window's strip is filled in `value`; a window behind has a sunk strip, a
-  `dim` title and a body dimmed 25%.
-- **Calc:** a paper tape on an LCD inset, with the result at ×3 in `value`.
-  The keypad is 4×5, with legends at about 50% of the key's height and gaps
-  of 6. Digits, C and ⌫ are in `text`, operators in `value`, "=" is the
-  primary fill, and focus is the ring.
-- **Sprite editor:** transparency is a mid-grey checker (#6e6e78 / #9a9aa4,
-  neither a palette colour), and swatch 0 is that checker with a slash. The
-  cursor is the focus ring around a black keyline; the current tool and
-  colour carry the bar.
-- **Code:** the current line takes the `sel` tint and the value bar. A line
-  that runs past the edge fades out over 12 px, with no glyph that could be
-  read as code. The symbol keys use Galmuri11 Bold.
-- **Files:** each file shows its own picture: its cover, its app icon, a
-  wallpaper miniature, or a title tile. Every column has data on every row.
+  clock at the right. The current desk chip is `raised` with a `value`
+  underline.
+- **Window:** a 44 px header, a line icon, the title and one ×. Minimise is
+  the window's chip, maximise a title double-tap. A window behind keeps its
+  frame, drops its current mark and casts a smaller shadow.
+- **Keycap hints:** a cap, its legend, then a label; only keys that are not
+  self-evident are named.
+- **Rows:** link (value and ›), info (a value, not focusable), cycle
+  (‹ value ›), toggle (with its On/Off word), slider, segmented control,
+  swatches. A caption heads every group. Settings shows only settings that
+  work.
+- **Calc:** a tape on a display inset with the result in `value`, a 4×5
+  keypad in the button kinds.
+- **Files:** Places (Projects, Carts, Art, Music, Trash), each file's own
+  picture, Name, Kind and Size; a name cuts with "…", and Kind drops when
+  names would show fewer than 11 characters.
+- **Code:** the current line takes the `sel` tint and the `value` bar; a
+  line past the edge fades over 12 px.
+- **Sprite editor:** transparency is a mid-grey checker (#6e6e78 / #9a9aa4)
+  and swatch 0 that checker with a slash; the cursor is the ring around a
+  black keyline; the current tool and colour carry the bar.
+- **Icons:** 24-unit line glyphs with a 2-unit stroke, drawn at 14–16 px on
+  the handheld and 18–24 on the desk. **Motion:** the carousel slides in 6
+  frames, focus in 3, with no colour tweens.
 
-**Icons:** a 12×12 grid, 1 px strokes, two tones plus one value cluster (32
-in `system_sheet.png`). **Motion:** the carousel slides in 6 frames, focus in
-3, with no colour tweens.
+## The themes
 
-## Themes: four, each the same on both sizes
+| theme | ships | identity |
+|---|---|---|
+| **Daylight** (light) | built in, the default | a cool grey desk with two pale discs, white surfaces, indigo current and primary, moon-orange focus, Plex |
+| **Moy Night** (dark) | built in | a night-sky ramp, a flat crescent on the desk, lavender current and filled title strips, amber focus, Moy on the system button, Inter |
+| **Blocks** (light) | built in | colour in blocks: a sunflower home, a cream desk with Bauhaus shapes, a colour per app tile, ink outlines and ink focus, violet current, Atkinson |
+| **Contrast** (dark, light) | built in | black or white, 2 px outlines, yellow focus, larger type |
+| Luna, Coast | moybyte-org/carts, later | in the style of Windows XP and macOS: gradients, a dock, frosted glass, per-app button colours |
+| Pico, Bench, Adw | moybyte-org/carts, later | in the style of Picotron, Amiga Workbench and GNOME: the pixel look (1 bpp faces, stepped corners, hard shadows, dither, copper bands, bevels, 2× chrome) and a header-bar desk |
 
-| theme | identity |
-|---|---|
-| **Moy** (dark, light; default) | night-sky field with stars, moonlit edges, moon-glow focus, the Moy button, lavender for current |
-| **Paper** (light only) | 1-bit ink on paper, cartridge plates, inverted current strips, dithered drops, a dot grid, undimmed neighbours; windows behind cast no drop |
-| **Studio** (dark only) | OP-1: true black, square, flat, 1 px frames, white for current and primary, one orange for focus, every chrome label in capitals |
-| **Contrast** (dark, light) | 2 px outlines, yellow focus, larger type, white or black current fills |
+No theme uses Microsoft or Apple artwork, logos or fonts.
 
-**Contrast keeps its light mode:** low-vision needs split by polarity, so one
-polarity fails half its users. In light mode its yellow ring carries a black
-keyline.
+## Backdrops
 
-**Dropped:** Platinum (its identity is windows, which the handheld never
-shows), Machine, Win95 and Outline. Indigo, Berry, Forest and Slate become
-Moy accent and tint presets.
+A theme draws its home and desk as a short list of flat shapes
+(`backdrop`, GAPS 9), not an image, measured in thousandths of the surface
+so one list fits every glass, and drawn into the one wallpaper bake the
+shell keeps. A user's wallpaper still replaces it.
 
-**Paper is light only:** a dark Paper would be a second Contrast.
+## The pictures
 
-**The picker** uses the same 64×48 preview on both sizes, drawn in the
-current mode, or in the theme's only mode with "Light only" or "Dark only".
-Every preview has a caption line, so the layout never shifts. The current
-theme follows the rule: its name in `text` and the value bar under it. A
-ring appears only when the strip has focus.
-
-## The default wallpaper
-
-The wallpaper is a cart, in MOY64 only, laid out per glass (GAPS 12). The
-wordmark is gone.
-
-- **The bar stays on `bg`** over any wallpaper.
-- **Sky:** black, dithering to blue only at a low horizon under the title,
-  so it never cuts behind the card or its text; the hints sit on the hill.
-- **Stars** keep out of the bar and the shell's quiet rectangles.
-- **Moy sleeps on the ridge in a corner nothing covers:**
-  - **Handheld:** bottom-left, below the left neighbour card and clear of the
-    metadata.
-  - **Desk:** bottom-right, whole. The WM's default window placement keeps
-    clear of the wallpaper's declared subject rectangle (GAPS 12).
-- **The moon** sits top-right.
-- **Desk labels** sit on `bg` plates.
+`index.txt` names every target: the home and the desk in each of the nine
+themes, `calc_all_themes.png` and `type_specimen.png`. Settings, Appearance,
+the Code and sprite editors, the desk's console home and the wallpaper
+scenes have no modern picture yet; their layouts are `pixel_round3/`'s, and
+plan step 2 draws them in this rendering.

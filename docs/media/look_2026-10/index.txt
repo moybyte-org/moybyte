@@ -1,46 +1,30 @@
-moy-dark_handheld_home.png — Handheld home (console mode), Games tab, carousel on Sky Run, 320x240 T-Deck; Moy theme, dark; 320x240
+moy-dark_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Moy Night (dark); 320x240
 moy-dark_handheld_home@3x.png — same, enlarged 3x (nearest)
-moy-dark_desktop.png — Desktop, 1024x600 board at 2x: Calc current, Files behind (desk density); Moy theme, dark; 1024x600
-moy-dark_desktop_home.png — Home on the 1024x600 board in console mode (2x): hero, details, shelf; the X returns to the desk; Moy theme, dark; 1024x600
-moy-dark_handheld_settings.png — Settings page, 320x240; Moy theme, dark; 320x240
-moy-dark_handheld_settings@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_appearance.png — Appearance page, 320x240; Moy theme, dark; 320x240
-moy-dark_handheld_appearance@3x.png — same, enlarged 3x (nearest)
-moy-dark_desktop_appearance.png — Appearance as a window on the desk, 1024x600 at 2x; Moy theme, dark; 1024x600
-moy-dark_handheld_code-editor.png — Code editor on Star Catcher, 320x240; Moy theme, dark; 320x240
-moy-dark_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_sprite-editor.png — Sprite editor on Star Catcher's frog, 320x240; Moy theme, dark; 320x240
-moy-dark_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_calc.png — Calc fullscreen, 320x240; Moy theme, dark; 320x240
-moy-dark_handheld_calc@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_home.png — Handheld home (console mode), Games tab, carousel on Sky Run, 320x240 T-Deck; Moy theme, light; 320x240
-moy-light_handheld_home@3x.png — same, enlarged 3x (nearest)
-moy-light_desktop.png — Desktop, 1024x600 board at 2x: Calc current, Files behind (desk density); Moy theme, light; 1024x600
-moy-light_desktop_home.png — Home on the 1024x600 board in console mode (2x): hero, details, shelf; the X returns to the desk; Moy theme, light; 1024x600
-moy-light_handheld_settings.png — Settings page, 320x240; Moy theme, light; 320x240
-moy-light_handheld_settings@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_appearance.png — Appearance page, 320x240; Moy theme, light; 320x240
-moy-light_handheld_appearance@3x.png — same, enlarged 3x (nearest)
-moy-light_desktop_appearance.png — Appearance as a window on the desk, 1024x600 at 2x; Moy theme, light; 1024x600
-moy-light_handheld_code-editor.png — Code editor on Star Catcher, 320x240; Moy theme, light; 320x240
-moy-light_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_sprite-editor.png — Sprite editor on Star Catcher's frog, 320x240; Moy theme, light; 320x240
-moy-light_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_calc.png — Calc fullscreen, 320x240; Moy theme, light; 320x240
-moy-light_handheld_calc@3x.png — same, enlarged 3x (nearest)
-paper-light_handheld_home.png — Handheld home, 320x240; Paper theme, light; 320x240
-paper-light_handheld_home@3x.png — same, enlarged 3x (nearest)
-paper-light_desktop.png — Desktop, Calc current, Files behind, 1024x600 at 2x; Paper theme, light; 1024x600
-studio-dark_handheld_home.png — Handheld home, 320x240; Studio theme, dark; 320x240
-studio-dark_handheld_home@3x.png — same, enlarged 3x (nearest)
-studio-dark_desktop.png — Desktop, Calc current, Files behind, 1024x600 at 2x; Studio theme, dark; 1024x600
-contrast-dark_handheld_home.png — Handheld home, 320x240; Contrast theme, dark; 320x240
+moy-dark_desktop.png — Desk: Calc focused, Files behind, bar; Moy Night (dark); 1024x600
+daylight-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Daylight (light, the default); 320x240
+daylight-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+daylight-light_desktop.png — Desk: Calc focused, Files behind, bar; Daylight (light, the default); 1024x600
+blocks-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Blocks (light, colour-blocked, for kids and makers); 320x240
+blocks-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+blocks-light_desktop.png — Desk: Calc focused, Files behind, bar; Blocks (light, colour-blocked, for kids and makers); 1024x600
+contrast-dark_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Contrast (dark); 320x240
 contrast-dark_handheld_home@3x.png — same, enlarged 3x (nearest)
-contrast-dark_desktop.png — Desktop, Calc current, Files behind, 1024x600 at 2x; Contrast theme, dark; 1024x600
-contrast-light_handheld_home.png — Handheld home, 320x240; Contrast theme, light; 320x240
-contrast-light_handheld_home@3x.png — same, enlarged 3x (nearest)
-contrast-light_desktop.png — Desktop, Calc current, Files behind, 1024x600 at 2x; Contrast theme, light; 1024x600
-moy-dark_handheld_home_wallpaper.png — Handheld home over the reworked default wallpaper (Moy's night), 320x240; Moy theme, dark; 320x240
-moy-dark_handheld_home_wallpaper@3x.png — same, enlarged 3x (nearest)
-moy-dark_desktop_wallpaper.png — Desktop over the reworked default wallpaper, 1024x600 at 2x; Moy theme, dark; 1024x600
-system_sheet.png — The system on one page: every theme's ramp, focus and value colours; type; components; the 12px icons; window states; all themes; 1024x600
+contrast-dark_desktop.png — Desk: Calc focused, Files behind, bar; Contrast (dark); 1024x600
+luna-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Luna (in the style of Windows XP); 320x240
+luna-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+luna-light_desktop.png — Desk: Calc focused, Files behind, bar; Luna (in the style of Windows XP); 1024x600
+coast-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Coast (in the style of macOS); 320x240
+coast-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+coast-light_desktop.png — Desk: Calc focused, Files behind, bar; Coast (in the style of macOS); 1024x600
+pico-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Pico (in the style of Picotron); 320x240
+pico-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+pico-light_desktop.png — Desk: Calc focused, Files behind, bar; Pico (in the style of Picotron); 1024x600
+bench-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Bench (in the style of Amiga Workbench 3.x); 320x240
+bench-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+bench-light_desktop.png — Desk: Calc focused, Files behind, bar; Bench (in the style of Amiga Workbench 3.x); 1024x600
+adw-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Adw (in the style of GNOME's Adwaita); 320x240
+adw-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+adw-light_desktop.png — Desk: Calc focused, Files behind, bar; Adw (in the style of GNOME's Adwaita); 1024x600
+calc_all_themes.png — Calc in all nine themes through one body and one kind table: the desk window over the theme's backdrop, and the handheld page below it; 1220x2600
+type_specimen.png — Type specimen: handheld sizes, the Code tab's mono and the desk body at 1, 2, 4 bpp and an 8-bit reference, on dark and on light; 860x336
+type_specimen@3x.png — same, enlarged 3x (nearest)

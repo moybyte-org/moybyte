@@ -1,43 +1,68 @@
-"""Draws the 2026-10 look's mockups (hand-drawn, not engine renders).
+#!/usr/bin/env python3
+"""The 2026-10 look, modern rendering: the theme set, as data over one renderer.
 
-usage: .venv/bin/python docs/media/look_2026-10/mockups.py [OUTDIR]
+Draws the handheld home (320x240) and the desk (1024x600) per theme, a Calc
+sheet across every theme, and a type specimen, as an RGB565 panel would show
+them. Every theme is a dict of fields over `BASE`; the renderer reads only
+fields. What each pixel costs follows the pipeline in NOTES.md:
 
-Every screen is drawn at its LOGICAL size: 320x240 for the T-Deck, 512x300 for
-the 1024x600 boards (chrome AND text at 2x, nearest-neighbour). Colours are the
-design's RGB targets quantised to RGB565, as the panels show them; the carts'
-art (covers, sprites, syntax colours, the wallpaper) stays MOY64. Fonts:
-Galmuri 7/9/11/11-Bold and GalmuriMono9 (OFL-1.1, sampled into
-galmuri_glyphs.json). The seed carts' real cover.png files are the art.
+- text: glyphs pre-rasterised from the font at fixed sizes, their coverage
+  at the face's bpp (1, 2 or 4), placed at whole pixels with a kern table,
+  blended over the pixels below;
+- shapes: corner coverage at 4 bpp (smooth) or thresholded (stepped); soft
+  shadows as a blurred 4 bpp mask, hard shadows as an offset fill;
+- a theme with `render.scale` 2 lays the desk out at 1024x600 and draws it
+  at 512x300, doubled;
+- paints: a colour, a gradient (one colour per row), a stepped gradient, or
+  an ordered-dither blend of two colours;
+- every blend lands in RGB565.
+
+Run: .venv/bin/python docs/media/look_2026-10/mockups_modern.py
+The fonts download once into ~/.cache/moybyte-look-fonts (see FONT_FILES).
 """
-import json
+import copy
+import io
 import os
 import sys
+import urllib.request
+import zipfile
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-sys.path.insert(0, os.path.join(ROOT, "runtime"))
-from palette import MOY64          # noqa: E402
-import font as petme               # noqa: E402
-
 OUT = sys.argv[1] if len(sys.argv) > 1 else HERE
+CACHE = os.environ.get("MOY_LOOK_FONTS", os.path.expanduser("~/.cache/moybyte-look-fonts"))
+GF = "https://github.com/google/fonts/raw/main/ofl/"
+FONT_FILES = {  # every one SIL OFL-1.1
+    "inter": ("Inter.ttf", GF + "inter/Inter%5Bopsz,wght%5D.ttf"),
+    "plex": ("IBMPlexSans.ttf", GF + "ibmplexsans/IBMPlexSans%5Bwdth,wght%5D.ttf"),
+    "jbmono": ("JetBrainsMono.ttf", GF + "jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf"),
+    "atkinson": ("AtkinsonHyperlegibleNext.ttf",
+                 GF + "atkinsonhyperlegiblenext/AtkinsonHyperlegibleNext%5Bwght%5D.ttf"),
+    "micro5": ("Micro5.ttf", GF + "micro5/Micro5-Regular.ttf"),
+    "cantarell": ("Cantarell-Regular.ttf", GF + "cantarell/Cantarell-Regular.ttf"),
+    "cantarell-bold": ("Cantarell-Bold.ttf", GF + "cantarell/Cantarell-Bold.ttf"),
+}
+DEJAVU = ("/usr/share/fonts/truetype/dejavu",
+          "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/"
+          "dejavu-fonts-ttf-2.37.zip")
+GALMURI = "https://github.com/quiple/galmuri/releases/download/v2.40.4/Galmuri-v2.40.4.zip"
 INDEX = []
 
 
 # ==========================================================================
-# colour
+# RGB565
 # ==========================================================================
 def q(c):
-    """RGB565 as the panel shows it."""
     if isinstance(c, str):
         c = (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
     r, g, b = c[0] >> 3, c[1] >> 2, c[2] >> 3
     return ((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2))
 
 
-def P(i):
-    return q(MOY64[i])
+LUT565 = ([q((v, 0, 0))[0] for v in range(256)] + [q((0, v, 0))[1] for v in range(256)]
+          + [q((0, 0, v))[2] for v in range(256)])
 
 
 def mix(a, b, t):
@@ -60,1553 +85,1289 @@ def ratio(a, b):
     return (la + 0.05) / (lb + 0.05)
 
 
-# ==========================================================================
-# fonts
-# ==========================================================================
-GAL = json.load(open(os.path.join(HERE, "galmuri_glyphs.json")))
-
-
-def _tiny5():
-    d = open(os.path.join(ROOT, "native", "moy_ui", "themes", "tiny5.fnt"), "rb").read()
-    w, h, first, count = d[5], d[6], d[9], d[10]
-    adv = d[16:16 + count]
-    off = 16 + ((count + 3) // 4) * 4
-    cb = (h + 7) // 8
-    return {first + i: (d[off + i * w * cb: off + (i + 1) * w * cb], adv[i], w, h)
-            for i in range(count)}
-
-
-TINY5 = _tiny5()
-FONTS = {"cap": "Galmuri7", "body": "Galmuri9", "body11": "Galmuri11",
-         "title": "Galmuri11-Bold", "code": "GalmuriMono9"}
-LINE = {"cap": 9, "body": 11, "body11": 14, "title": 14, "key": 7, "mono": 8}
-EXTRA = {  # glyphs Galmuri lacks
-    "⏎": ("....#", "....#", ".#..#", "#####", ".#...", "....."),
-    "✓": (".....", "....#", "...#.", "#.#..", ".#...", "....."),
-    "⌫": ("..###", ".#..#", "#.#.#", ".#..#", "..###", "....."),
-}
+def levels(mask, n):
+    """Quantise a coverage mask to n levels (n = 2**bpp)."""
+    if n >= 256:
+        return mask
+    if n == 2:
+        return mask.point(lambda a: 255 if a >= 112 else 0)
+    return mask.point([round(round(a * (n - 1) / 255) * 255 / (n - 1)) for a in range(256)])
 
 
 # ==========================================================================
-# icons: 12x12, '#' ink, '+' second tone, 'a' accent
+# fonts: glyphs at fixed sizes, n-bpp coverage, kern pairs
 # ==========================================================================
-ICONS = {
-    "wifi": """
-............
-............
-...######...
-.##......##.
-#...####...#
-..##....##..
-.#...##...#.
-....#..#....
-............
-.....##.....
-.....##.....
-............""",
-    "batt": """
-............
-............
-............
-##########..
-#........#..
-#.######.##.
-#.######.##.
-#.######.##.
-#........#..
-##########..
-............
-............""",
-    "back": """
-............
-............
-......#.....
-.....##.....
-....##......
-...##.......
-...##.......
-....##......
-.....##.....
-......#.....
-............
-............""",
-    "close": """
-............
-............
-..#......#..
-..##....##..
-...##..##...
-....####....
-.....##.....
-....####....
-...##..##...
-..##....##..
-..#......#..
-............""",
-    "more": """
-............
-............
-............
-............
-............
-.##..##..##.
-.##..##..##.
-............
-............
-............
-............
-............""",
-    "moy": """
-............
-..#######...
-.#+++++++#..
-.#+#+++#+#..
-.#+#+++#+##.
-.#+++++++++#
-.#++###++++#
-.#+++++++++#
-.#+++++++++#
-..#########.
-..#.#...#.#.
-............""",
-    "play": """
-............
-............
-...#........
-...###......
-...#####....
-...#######..
-...#######..
-...#####....
-...###......
-...#........
-............
-............""",
-    "folder": """
-............
-............
-.####.......
-#++++#......
-#+++++######
-############
-#..........#
-#..........#
-#..........#
-#..........#
-############
-............""",
-    "projects": """
-............
-.........##.
-........#aa#
-.####..#aa#.
-#++++##aa#..
-#+++++#a#.##
-#######+##.#
-#.....#.#..#
-#.....##...#
-#..........#
-############
-............""",
-    "brush": """
-............
-.........###
-........##a#
-.......##a#.
-......##a#..
-.....##a#...
-....#.##....
-...###......
-..####......
-.####.......
-.##.........
-............""",
-    "book": """
-............
-.####..####.
-#+++#..#+++#
-#+++.##.+++#
-#+++.##.+++#
-#+++.##.+++#
-#+++.##.+++#
-#+++.##.+++#
-#####..#####
-.....##.....
-............
-............""",
-    "calc": """
-............
-.##########.
-.#++++++++#.
-.#+######+#.
-.#++++++++#.
-.#+##+##a+#.
-.#++++++++#.
-.#+##+##a+#.
-.#++++++++#.
-.#+##+##a+#.
-.##########.
-............""",
-    "download": """
-............
-.....##.....
-.....##.....
-.....##.....
-..#..##..#..
-...#.##.#...
-....####....
-.....##.....
-#..........#
-#..........#
-############
-............""",
-    "code": """
-............
-............
-...#....#...
-..#.....#...
-.#.....#..#.
-#......#...#
-#.....#....#
-.#....#...#.
-..#..#...#..
-...#.#..#...
-............
-............""",
-    "sprite": """
-............
-.##########.
-.#........#.
-.#.##..##.#.
-.#.##..##.#.
-.#........#.
-.#.#....#.#.
-.#..####..#.
-.#........#.
-.##########.
-............
-............""",
-    "map": """
-............
-############
-#...#...#..#
-#.+.#...#..#
-#+++#.a.#+.#
-#####.#.####
-#...#...#..#
-#..+#...#+.#
-#.+++...+++#
-#####...####
-############
-............""",
-    "note": """
-............
-......#####.
-......#...#.
-......#...#.
-......#...#.
-......#...#.
-......#...#.
-...####.###.
-..#####.###.
-..####......
-............
-............""",
-    "undo": """
-............
-............
-...#........
-..##........
-.#########..
-..##......#.
-...#.......#
-...........#
-..........#.
-......####..
-............
-............""",
-    "redo": """
-............
-............
-........#...
-........##..
-..#########.
-.#......##..
-#.......#...
-#...........
-.#..........
-..####......
-............
-............""",
-    "pencil": """
-............
-.........##.
-........#..#
-.......#..#.
-......#..#..
-.....#..#...
-....#..#....
-...#..#.....
-..#..#......
-.###.#......
-.####.......
-............""",
-    "bucket": """
-............
-....#.......
-...#.#......
-..#...#.....
-.#.....#....
-#.......#...
-.#.....##...
-..#...#.#...
-...#.#..#.#.
-....#...###.
-.........#..
-............""",
-    "line": """
-............
-..........#.
-.........#..
-........#...
-.......#....
-......#.....
-.....#......
-....#.......
-...#........
-..#.........
-.#..........
-............""",
-    "rect": """
-............
-............
-.##########.
-.#........#.
-.#........#.
-.#........#.
-.#........#.
-.#........#.
-.#........#.
-.##########.
-............
-............""",
-    "oval": """
-............
-............
-...######...
-..#......#..
-.#........#.
-.#........#.
-.#........#.
-.#........#.
-..#......#..
-...######...
-............
-............""",
-    "select": """
-............
-............
-.##.##.##.#.
-.#........#.
-..........#.
-.#..........
-.#........#.
-..........#.
-.#..........
-.#.##.##.##.
-............
-............""",
-    "flip": """
-............
-.....##.....
-..#..##..#..
-.##..##..##.
-###.....###.
-###..##.###.
-.##..##..##.
-..#.....##..
-.....##.....
-.....##.....
-............
-............""",
-    "rotate": """
-............
-....####....
-...#....#...
-..#......#..
-..#......#..
-#####....#..
-.###.....#..
-..#......#..
-.........#..
-....#####...
-............
-............""",
-    "search": """
-............
-...####.....
-..#....#....
-.#......#...
-.#......#...
-.#......#...
-..#....#....
-...#####....
-.......###..
-........###.
-.........##.
-............""",
-    "gear": """
-............
-.....##.....
-..#.####.#..
-..########..
-...##..##...
-.###....###.
-.###....###.
-...##..##...
-..########..
-..#.####.#..
-.....##.....
-............""",
-    "get": """
-............
-.....##.....
-.....##.....
-...######...
-....####....
-.....##.....
-............
-.##########.
-.#........#.
-.##########.
-............
-............""",
-    "doc": """
-............
-.#######....
-.#.....##...
-.#.###.#.#..
-.#.....####.
-.#.#####..#.
-.#........#.
-.#.######.#.
-.#........#.
-.#.####...#.
-.#........#.
-.##########.""",
-    "trash": """
-............
-....####....
-.##########.
-............
-..########..
-..#.#..#.#..
-..#.#..#.#..
-..#.#..#.#..
-..#.#..#.#..
-..#.#..#.#..
-...######...
-............""",
-    "put": """
-............
-.....##.....
-....####....
-...######...
-.....##.....
-.....##.....
-............
-.##########.
-.#........#.
-.##########.
-............
-............""",
-}
-ICONS = {k: [r for r in v.strip("\n").split("\n")] for k, v in ICONS.items()}
+def _dejavu(name):
+    """DejaVu (Bitstream Vera licence): the system copy, or the release zip."""
+    for d in (DEJAVU[0], CACHE):
+        if os.path.exists(os.path.join(d, name)):
+            return os.path.join(d, name)
+    os.makedirs(CACHE, exist_ok=True)
+    z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(DEJAVU[1]).read()))
+    for n in z.namelist():
+        if n.endswith(".ttf"):
+            with open(os.path.join(CACHE, os.path.basename(n)), "wb") as fh:
+                fh.write(z.read(n))
+    return os.path.join(CACHE, name)
 
 
-# ==========================================================================
-# the canvas
-# ==========================================================================
-class Cv:
-    def __init__(self, w, h, bg):
-        self.w, self.h = w, h
-        self.img = Image.new("RGB", (w, h), q(bg))
-        self.px = self.img.load()
-
-    def put(self, x, y, c):
-        if 0 <= x < self.w and 0 <= y < self.h:
-            self.px[x, y] = q(c)
-
-    def get(self, x, y):
-        return self.px[x, y]
-
-    def rect(self, x, y, w, h, c):
-        x0, y0, x1, y1 = max(0, x), max(0, y), min(self.w, x + w), min(self.h, y + h)
-        if x1 > x0 and y1 > y0:
-            self.img.paste(q(c), (x0, y0, x1, y1))
-
-    def rrect(self, x, y, w, h, c, r=2):
-        """A filled box with r pixels cut from each corner (the C corner mask)."""
-        cut = {0: [], 1: [1], 2: [2, 1], 3: [3, 1, 1], 4: [4, 2, 1, 1]}[min(r, 4)]
-        for i in range(h):
-            k = 0
-            if i < len(cut):
-                k = cut[i]
-            elif h - 1 - i < len(cut):
-                k = cut[h - 1 - i]
-            self.rect(x + k, y + i, w - 2 * k, 1, c)
-
-    def rbox(self, x, y, w, h, c, r=2, t=1):
-        """A ring the same shape as rrect, t pixels thick."""
-        tmp = Cv(w, h, (1, 2, 3))
-        tmp.rrect(0, 0, w, h, (250, 0, 250), r)
-        tmp.rrect(t, t, w - 2 * t, h - 2 * t, (1, 2, 3), max(0, r - t))
-        for yy in range(h):
-            for xx in range(w):
-                if tmp.px[xx, yy] == q((250, 0, 250)):
-                    self.put(x + xx, y + yy, c)
-
-    def shade(self, x, y, w, h, f, toward=(0, 0, 0)):
-        """Blend a region toward a colour (the darken op GAPS.md names)."""
-        for yy in range(max(0, y), min(self.h, y + h)):
-            for xx in range(max(0, x), min(self.w, x + w)):
-                self.px[xx, yy] = mix(self.px[xx, yy], toward, f)
-
-    def dither(self, x, y, w, h, c, phase=0):
-        for yy in range(y, y + h):
-            for xx in range(x, x + w):
-                if (xx + yy + phase) & 1 == 0:
-                    self.put(xx, yy, c)
-
-    # -- text ----------------------------------------------------------------
-    def text(self, x, y, s, c, font="body", scale=1, upper=False):
-        if upper:
-            s = s.upper()
-        for ch in s:
-            x += self._glyph(x, y, ch, c, font, scale)
-        return x
-
-    def tw(self, s, font="body", scale=1):
-        return sum(self._adv(ch, font) for ch in s) * scale
-
-    def _adv(self, ch, font):
-        if ch in EXTRA:
-            return 6 if font != "code" else 5
-        if font == "mono":
-            return 8
-        if font == "key":
-            g = TINY5.get(ord(ch))
-            return (g[1] if g else 3) + 1
-        g = GAL[FONTS[font]]["glyphs"].get(ch)
-        return g[0] if g else 4
-
-    def _glyph(self, x, y, ch, c, font, s):
-        if ch in EXTRA:
-            base = {"cap": 2, "body": 3, "body11": 4, "title": 4, "key": 0, "code": 3}.get(font, 1)
-            for yy, r in enumerate(EXTRA[ch]):
-                for xx, b in enumerate(r):
-                    if b == "#":
-                        self.rect(x + xx * s, y + (yy + base) * s, s, s, c)
-            return 6 * s
-        if font == "mono":
-            cols = petme.glyph(ch)
-            for j in range(8):
-                for i in range(8):
-                    if (cols[j] >> i) & 1:
-                        self.rect(x + j * s, y + i * s, s, s, c)
-            return 8 * s
-        if font == "key":
-            g = TINY5.get(ord(ch))
-            if not g:
-                return 4 * s
-            cols, adv, w, h = g
-            for j in range(w):
-                for i in range(h):
-                    if (cols[j] >> i) & 1:
-                        self.rect(x + j * s, y + (i - 1) * s, s, s, c)
-            return (adv + 1) * s
-        g = GAL[FONTS[font]]["glyphs"].get(ch)
-        if not g:
-            return 4 * s
-        adv, x0, y0, rows = g
-        for yy, r in enumerate(rows):
-            for xx, b in enumerate(r):
-                if b == "#":
-                    self.rect(x + (x0 + xx) * s, y + (y0 + yy) * s, s, s, c)
-        return adv * s
-
-    def ctext(self, x, y, w, s, c, font="body", scale=1):
-        return self.text(x + (w - self.tw(s, font, scale)) // 2, y, s, c, font, scale)
-
-    def rtext(self, x, y, s, c, font="body", scale=1):
-        return self.text(x - self.tw(s, font, scale), y, s, c, font, scale)
-
-    def icon(self, name, x, y, ink, second=None, accent=None, s=1):
-        for yy, row in enumerate(ICONS[name]):
-            for xx, ch in enumerate(row):
-                c = {"#": ink, "+": second, "a": accent if accent is not None else ink}.get(ch)
-                if c is not None:
-                    self.rect(x + xx * s, y + yy * s, s, s, c)
-
-    def paste(self, img, x, y):
-        self.img.paste(img, (x, y))
-
-    def save(self, name, what, theme, size, x3=False, up=1):
-        img = self.img
-        if up > 1:
-            img = img.resize((self.w * up, self.h * up), Image.NEAREST)
-        path = os.path.join(OUT, name + ".png")
-        img.save(path)
-        INDEX.append(f"{name}.png — {what}; {theme}; {img.width}x{img.height}")
-        if x3:
-            img.resize((img.width * 3, img.height * 3), Image.NEAREST).save(
-                os.path.join(OUT, name + "@3x.png"))
-            INDEX.append(f"{name}@3x.png — same, enlarged 3x (nearest)")
-        print("wrote", path)
+def _galmuri(name):
+    """Galmuri (SIL OFL-1.1, Lee Minseo): the release zip, unpacked once."""
+    path = os.path.join(CACHE, name)
+    if not os.path.exists(path):
+        os.makedirs(CACHE, exist_ok=True)
+        z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(GALMURI).read()))
+        for n in z.namelist():
+            if n.endswith(".ttf") and "Bitmap" not in n:
+                with open(os.path.join(CACHE, os.path.basename(n)), "wb") as fh:
+                    fh.write(z.read(n))
+    return path
 
 
-# ==========================================================================
-# themes: six neutral steps, one accent (focus and the primary action) and a
-# value colour (sliders, toggles, the current tab, the calculator's display)
-# ==========================================================================
-def theme(name, mode, **kw):
-    T = dict(name=name, mode=mode, radius=3, shadow="hard", outline=0, frame="soft",
-             tabs="underline", body="body", cap="cap", title="title", sections=None,
-             upper=False, desk_pattern=None, edge=None, modes=("dark", "light"),
-             syn=None, dim_cards=0.4, halo=False)
-    T.update(kw)
-    T.setdefault("desk", T["bg"])
-    T.setdefault("inset", T["bg"])
-    T.setdefault("on_accent", T["bg"] if mode == "dark" else T["text"])
-    T.setdefault("accent_text", T["accent"])
-    T.setdefault("value", T["accent"])
-    T.setdefault("value_ink", T["bg"])
-    T.setdefault("sel_rest", T["raised"])
-    T.setdefault("lcd", T["inset"])
-    T.setdefault("lcd_ink", T["value"])
-    T.setdefault("strip_on", T["value"])
-    T.setdefault("strip_on_ink", T["value_ink"])
-    T.setdefault("under", mix(T["surface"], "#000000", 0.45) if mode == "dark" else T["line"])
-    T.setdefault("group_edge", None)
-    T.setdefault("cur_line", T["sel_rest"])
-    return T
+def font_path(key, weight=400, size=None):
+    if key == "galmuri":  # each cut is crisp at its design size and its multiples
+        if size % 12 == 0:
+            return _galmuri("Galmuri11-Bold.ttf" if weight >= 600 else "Galmuri11.ttf")
+        return _galmuri("Galmuri9.ttf" if size % 10 == 0 else "Galmuri7.ttf")
+    if key == "dejavu":
+        return _dejavu("DejaVuSansCondensed-Bold.ttf" if weight >= 600 else "DejaVuSansCondensed.ttf")
+    if key == "dejavu-oblique":
+        return _dejavu("DejaVuSans-BoldOblique.ttf")
+    if key == "cantarell" and weight >= 600:
+        key = "cantarell-bold"
+    name, url = FONT_FILES[key]
+    path = os.path.join(CACHE, name)
+    if not os.path.exists(path):
+        os.makedirs(CACHE, exist_ok=True)
+        urllib.request.urlretrieve(url, path)
+    return path
 
 
-SYN_DARK = {"t": "#eceaf8", "c": "#8a90c0", "k": "#c9a2ff", "f": "#7fd0ff", "n": "#ffa64d",
-            "s": "#8ee08e"}
-SYN_LIGHT = {"t": "#1b1934", "c": "#5f6385", "k": "#6a35c4", "f": "#1662a8", "n": "#a8510a",
-             "s": "#23793a"}
-
-MOY_DARK = theme(
-    "Moy", "dark", bg="#11122a", surface="#1c1e40", raised="#2a2d55", edge="#4a4e86",
-    line="#30335c", dim="#9196c2", text="#eceaf8", accent="#ffc53d", value="#b3a6f2",
-    value_ink="#11122a", shadow_c="#06071a", lcd="#0b0c20", syn=SYN_DARK,
-    group_edge="#5c5f96", sel_rest="#2c2f5c", desk_pattern="stars", halo=True,
-    stars=("#30335c", "#5c5f96"))
-MOY_LIGHT = theme(
-    "Moy", "light", bg="#efecf8", surface="#faf9fd", raised="#ffffff", line="#dcd7ee",
-    dim="#5a5487", text="#1d1747", accent="#d45f00", on_accent="#ffffff",
-    accent_text="#a34800", value="#4b3bb8", value_ink="#ffffff", shadow_c="#cdc6ea",
-    lcd="#e6e1f7", lcd_ink="#2b2470", syn=SYN_LIGHT, under="#8a80c4",
-    group_edge="#8a80c4", sel_rest="#e6e1f8", desk_pattern="stars", halo=True,
-    stars=("#d6cff0", "#a99de0"), dim_cards=0)
-PAPER = theme(
-    "Paper", "light", bg="#c4c6c0", surface="#e9eae6", raised="#f6f6f3", line="#1a1a1a",
-    dim="#4f514a", text="#121212", accent="#121212", on_accent="#f6f6f3", value="#121212",
-    value_ink="#f6f6f3", shadow_c="#121212", shadow="dither", outline=1, frame="paper",
-    desk_pattern="dots", sel_rest="#d3d4ce", under="#121212", syn=SYN_LIGHT, dim_cards=0,
-    lcd="#d3d5cd", lcd_ink="#121212", modes=("light",))
-STUDIO = theme(
-    "Studio", "dark", bg="#000000", surface="#101010", raised="#1e1e1e", line="#555555",
-    dim="#8f8f8f", text="#f2f2f2", accent="#ff5a1f", on_accent="#000000", value="#f2f2f2",
-    value_ink="#000000", shadow="none", radius=0, frame="studio", upper=True,
-    modes=("dark",), syn=SYN_DARK, sel_rest="#262626", dim_cards=0.45)
-CONTRAST = theme(
-    "Contrast", "dark", bg="#000000", surface="#000000", raised="#000000", line="#ffffff",
-    dim="#d6d6d6", text="#ffffff", accent="#ffe500", on_accent="#000000", value="#ffffff",
-    value_ink="#000000", shadow="none", outline=2, radius=2, frame="contrast",
-    body="body11", cap="body", sel_rest="#3a3a3a", syn=SYN_DARK, strip_on="#ffffff",
-    strip_on_ink="#000000", under="#ffffff", dim_cards=0)
-CONTRAST_LIGHT = theme(
-    "Contrast", "light", bg="#ffffff", surface="#ffffff", raised="#ffffff", line="#000000",
-    dim="#2a2a2a", text="#000000", accent="#ffe500", on_accent="#000000", value="#000000",
-    value_ink="#ffffff", shadow="none", outline=2, radius=2, frame="contrast",
-    body="body11", cap="body", sel_rest="#d8d8d8", syn=SYN_LIGHT, strip_on="#000000",
-    strip_on_ink="#ffffff", under="#000000", dim_cards=0)
-KEPT = (MOY_DARK, PAPER, STUDIO, CONTRAST)
-VARIANTS = {("Moy", "dark"): MOY_DARK, ("Moy", "light"): MOY_LIGHT,
-            ("Paper", "light"): PAPER, ("Studio", "dark"): STUDIO,
-            ("Contrast", "dark"): CONTRAST, ("Contrast", "light"): CONTRAST_LIGHT}
-
-
-# ==========================================================================
-# components
-# ==========================================================================
-def top_edge(cv, x, y, w, c, r):
-    k = {0: 0, 1: 1, 2: 2, 3: 3}[min(r, 3)]
-    cv.rect(x + k, y, w - 2 * k, 1, c)
-
-
-def drop(cv, x, y, w, h, T, r=3, depth=2):
-    """Elevation: a hard pixel drop (Moy), a dithered one (Paper); Studio and
-    Contrast are flat and carry an edge instead."""
-    if T["shadow"] == "hard":
-        cv.rrect(x + depth, y + depth, w, h, T["shadow_c"], r)
-    elif T["shadow"] == "dither":
-        cv.dither(x + depth, y + h, w, depth, T["shadow_c"])
-        cv.dither(x + w, y + depth, depth, h, T["shadow_c"])
-
-
-def raised_box(cv, x, y, w, h, T, fill=None, r=None):
-    r = max(0, T["radius"] - 1) if r is None else r
-    fill = fill or T["raised"]
-    if not T["outline"] and T["frame"] != "studio":
-        cv.rrect(x, y + 1, w, h, T["under"], r)
-    cv.rrect(x, y, w, h, fill, r)
-    if T["edge"] and fill == T["raised"]:
-        top_edge(cv, x, y, w, T["edge"], r)
-    if T["outline"]:
-        cv.rbox(x, y, w, h, T["line"], r, T["outline"] if T["frame"] != "paper" else 1)
-    elif T["frame"] == "studio":
-        cv.rbox(x, y, w, h, T["line"], 0, 1)
-
-
-def group(cv, x, y, w, h, T):
-    """A group of rows: one surface. Moy dark catches the moon on its top edge,
-    Moy light sits on a shadow line: either edge is 3:1 against the screen."""
-    cv.rrect(x, y, w, h, T["surface"], T["radius"])
-    if T["outline"]:
-        cv.rbox(x, y, w, h, T["line"], T["radius"], T["outline"] if T["frame"] != "paper" else 1)
-    elif T["frame"] == "studio":
-        cv.rbox(x, y, w, h, T["line"], 0, 1)
-    elif T["group_edge"]:
-        if T["mode"] == "dark":
-            top_edge(cv, x, y, w, T["group_edge"], T["radius"])
+def _vary(f, size, weight):
+    try:
+        axes = f.get_variation_axes()
+    except OSError:
+        return
+    vals = []
+    for ax in axes:
+        n = ax["name"].decode() if isinstance(ax["name"], bytes) else ax["name"]
+        if "Weight" in n:
+            vals.append(max(ax["minimum"], min(ax["maximum"], weight)))
+        elif "Optical" in n:
+            vals.append(max(ax["minimum"], min(ax["maximum"], size)))
         else:
-            top_edge(cv, x, y + h - 1, w, T["group_edge"], T["radius"])
+            vals.append(ax["default"])
+    f.set_variation_by_axes(vals)
 
 
-def keycap(cv, x, y, label, T):
-    """A key legend: an outlined cap (its edge 3:1 or better) with a heavier
-    bottom, grown to the legend's font."""
-    f = T["cap"]
-    h = 11 if f == "cap" else 15
-    w = max(h, cv.tw(label, f) + 6)
-    ring = T["dim"] if not T["outline"] else T["line"]
-    cv.rbox(x, y, w, h, ring, 1, 1)
-    cv.rect(x + 1, y + h - 1, w - 2, 1, ring)
-    cv.rect(x + 1, y + h - 2, w - 2, 1, ring)
-    cv.ctext(x, y + (0 if f == "cap" else 1), w, label, T["text"], f)
-    return w
+class _FaceBase:
+    """Metrics in layout pixels (the logical size times the canvas scale k);
+    glyphs in logical pixels."""
+    _all = {}
+
+    def lwidth(self, s):
+        w, prev = 0, None
+        for ch in s:
+            if prev:
+                w += self.kerning(prev, ch)
+            w += self.glyph(ch)[3]
+            prev = ch
+        return w
+
+    def width(self, s):
+        return self.lwidth(s) * self.k
+
+    @property
+    def cap(self):
+        return self.lcap * self.k
+
+    def mfnt_bytes(self, chars):
+        """A v2 file: 16-byte header, per glyph 8 bytes (offset, box, bearing,
+        advance) and its packed coverage, plus 3 bytes per kern pair."""
+        body = 0
+        for ch in chars:
+            m = self.glyph(ch)[0]
+            body += 8
+            if m:
+                body += (m.size[0] * m.size[1] * self.bpp + 7) // 8
+        pairs = sum(1 for a in KERN_PAIRS for b in KERN_PAIRS if self.kerning(a, b))
+        return 16 + body + 3 * pairs
 
 
-def hints(cv, x, y, items, T, right=()):
-    f = T["cap"]
-    h = 11 if f == "cap" else 15
-    if f != "cap":
-        y -= 4
+class Face(_FaceBase):
+    """One size of one weight of an outline font: what one MFNT v2 file holds."""
 
-    def run(x, items, draw=True):
-        for k, label in items:
-            k, label = U(T, k), U(T, label)
-            x += (keycap(cv, x, y, k, T) if draw else max(h, cv.tw(k, f) + 6)) + 3
-            if label:
-                if draw:
-                    cv.text(x, y + (0 if f == "cap" else 2), label, T["dim"], f)
-                x += cv.tw(label, f) + 8
-        return x
-    run(x, items)
-    if right:
-        w = run(0, right, draw=False)
-        run(cv.w - 8 - w + 8, right)
+    def __new__(cls, fam, size, weight=400, bpp=4, k=1):
+        key = (fam, size, weight, bpp, k)
+        if key not in cls._all:
+            self = super().__new__(cls)
+            self.fam, self.size, self.weight, self.bpp, self.k = key
+            p = font_path(fam, weight, size)
+            self.f = ImageFont.truetype(p, size, layout_engine=ImageFont.Layout.BASIC)
+            _vary(self.f, size, weight)
+            try:
+                self.fk = ImageFont.truetype(p, size, layout_engine=ImageFont.Layout.RAQM)
+                _vary(self.fk, size, weight)
+            except Exception:
+                self.fk = None
+            self.g, self.kern = {}, {}
+            self.lcap = -self.f.getbbox("H", anchor="ls")[1]
+            cls._all[key] = self
+        return cls._all[key]
 
+    SUBST = {"−": "-", "×": "x", "÷": "/", "…": "...", "·": "-"}
 
-def status(cv, T, right_x, y=4, ink=None):
-    ink = ink or T["text"]
-    x = cv.rtext(right_x, y, "14:32", ink, "body") - cv.tw("14:32", "body") - 6
-    cv.icon("batt", x - 12, y, ink, ink)
-    cv.icon("wifi", x - 28, y, ink)
+    def _ink(self, ch):
+        im = Image.new("L", (4 * self.size, 2 * self.size))
+        ImageDraw.Draw(im).text((self.size, self.size * 3 // 2), ch, font=self.f, anchor="ls", fill=255)
+        return im.tobytes()
 
+    def _missing(self, ch):
+        if ch not in self.SUBST:
+            return False
+        if not hasattr(self, "_tofu"):
+            self._tofu = self._ink("\uffff")
+        return self._ink(ch) == self._tofu
 
-def tab_row(cv, x, y, names, cur, T, gap=12):
-    for n in names:
-        on = n == cur
-        label = U(T, n)
-        w = cv.tw(label, "body")
-        cv.text(x, y, label, T["text"] if on else T["dim"], "body")
-        if on:
-            cur_bar(cv, x, y + 13, w, T)
-        x += w + gap
-    return x
+    def glyph(self, ch):
+        if ch not in self.g and self._missing(ch):
+            sub = self.SUBST[ch]
+            self.g[ch] = self.glyph(sub[0]) if len(sub) == 1 else self.glyph(sub[0])
+        if ch not in self.g:
+            x0, y0, x1, y1 = self.f.getbbox(ch, anchor="ls")
+            adv = round(self.f.getlength(ch))
+            if x1 <= x0 or y1 <= y0:
+                self.g[ch] = (None, 0, 0, adv)
+            else:
+                m = Image.new("L", (x1 - x0, y1 - y0), 0)
+                d = ImageDraw.Draw(m)
+                if self.bpp == 1:
+                    d.fontmode = "1"
+                d.text((-x0, -y0), ch, font=self.f, anchor="ls", fill=255)
+                self.g[ch] = (levels(m, 1 << self.bpp), x0, y0, adv)
+        return self.g[ch]
 
-
-def _chev(cv, x, y, c, left=False):
-    for dx, dy in ((0, 0), (1, 1), (2, 2), (3, 3), (2, 4), (1, 5), (0, 6)):
-        cv.put(x + (3 - dx if left else dx), y + dy, c)
-
-
-def toggle(cv, x, y, on, T, inv=False):
-    track = T["value"] if on else T["line"]
-    knob = T["value_ink"] if on else T["text"]
-    if inv:
-        track, knob = (T["on_accent"], T["accent"]) if on else (mix(T["accent"], T["on_accent"], 0.4), T["on_accent"])
-    cv.rrect(x, y, 20, 10, track, 4)
-    if T["mode"] == "light" and not on and not inv:
-        knob = "#ffffff"
-    cv.rrect(x + (11 if on else 1), y + 1, 8, 8, knob, 3)
-
-
-def slider(cv, x, y, w, v, T, inv=False):
-    base, fill, knob = T["line"] if T["mode"] == "dark" else "#b9b3d3", T["value"], T["text"]
-    if inv:
-        base, fill, knob = mix(T["accent"], T["on_accent"], 0.35), T["on_accent"], T["on_accent"]
-    cv.rrect(x, y, w, 3, base, 1)
-    cv.rrect(x, y, int(w * v), 3, fill, 1)
-    kx = x + int(w * v) - 3
-    cv.rrect(kx, y - 3, 7, 9, knob if T["mode"] == "dark" or inv else T["value"], 2)
+    def kerning(self, a, b):
+        if self.fk is None or self.bpp == 1:
+            return 0
+        if (a, b) not in self.kern:
+            fk = self.fk
+            self.kern[(a, b)] = round(fk.getlength(a + b) - fk.getlength(a) - fk.getlength(b))
+        return self.kern[(a, b)]
 
 
-def seg(cv, rx, y, opts, cur, T):
-    ws = [cv.tw(o, T["body"]) + 14 for o in opts]
-    x = rx - sum(ws)
-    for o, w in zip(opts, ws):
-        on = o == cur
-        cv.ctext(x, y + 2, w, o, T["text"] if on else T["dim"], T["body"])
-        if on:
-            cur_bar(cv, x + 5, y + 14, w - 10, T)
-        x += w
+class Petme(_FaceBase):
+    """petme128, the engine's own 8x8 print font (runtime/font.py, MIT), at a
+    whole-number scale: an MFNT v1 face, 1 bpp, fixed 8 px advance."""
+    SUBST = {"×": "x", "÷": "/", "−": "-", "…": "~", "·": "-", "‹": "<", "›": ">"}
+
+    def __new__(cls, scale=1, k=1):
+        key = ("petme", scale, k)
+        if key not in cls._all:
+            sys.path.insert(0, os.path.join(ROOT, "runtime"))
+            import font as petme
+            self = super().__new__(cls)
+            self.data, self.first = petme.DATA, petme.FIRST
+            self.s, self.k, self.bpp, self.size = scale, k, 1, 8 * scale
+            self.g = {}
+            self.lcap = 7 * scale
+            cls._all[key] = self
+        return cls._all[key]
+
+    def glyph(self, ch):
+        if ch not in self.g:
+            c = ord(self.SUBST.get(ch, ch))
+            if not 0x20 <= c < 0x80:
+                c = 0x3F
+            m = Image.new("L", (8, 8), 0)
+            for col in range(8):
+                b = self.data[(c - self.first) * 8 + col]
+                for row in range(8):
+                    if b >> row & 1:
+                        m.putpixel((col, row), 255)
+            s = self.s
+            if s != 1:
+                m = m.resize((8 * s, 8 * s), Image.NEAREST)
+            self.g[ch] = (m, 0, -7 * s, 8 * s)
+        return self.g[ch]
+
+    def kerning(self, a, b):
+        return 0
 
 
-def soon_tag(cv, x, y, T):
-    w = cv.tw("Soon", "cap") + 8
-    cv.rbox(x, y, w, 11, T["dim"], 1)
-    cv.text(x + 4, y, "Soon", T["dim"], "cap")
-
-
-def row(cv, x, y, w, label, T, value=None, kind="link", focus=False, h=20, last=False):
-    """FOCUS on a row: the row is raised and ringed in the accent; ink stays ink."""
-    ink, dimk = T["text"], T["dim"]
-    if focus:
-        cv.rrect(x + 3, y + 3, w - 6, h - 6, T["raised"] if T["frame"] != "paper"
-                 else T["raised"], max(0, T["radius"] - 1))
-        cv.rbox(x + 1, y + 1, w - 2, h - 2, T["accent"], max(0, T["radius"]), 2)
-        if T["frame"] == "contrast" and T["mode"] == "light":
-            cv.rbox(x, y, w, h, "#000000", max(0, T["radius"]) + 1, 1)
-    elif not last:
-        cv.rect(x + 8, y + h - 1, w - 16, 1, T["line"] if T["frame"] not in ("paper",)
-                else "#9d9e98")
-    ty = y + (h - 11) // 2 + (0 if T["body"] == "body" else -1)
-    cv.text(x + 8, ty, U(T, label), ink, T["body"])
-    rx = x + w - 8
-    if kind == "link":
-        _chev(cv, rx - 4, ty + 2, dimk)
-        if value:
-            cv.rtext(rx - 10, ty, value, dimk, T["body"])
-    elif kind == "info":
-        cv.rtext(rx, ty, value, dimk, T["body"])
-    elif kind == "cycle":
-        vw = cv.tw(value, T["body"])
-        _chev(cv, rx - 4, ty + 2, ink)
-        cv.text(rx - 12 - vw, ty, value, ink, T["body"])
-        _chev(cv, rx - 22 - vw, ty + 2, ink, left=True)
-    elif kind == "toggle":
-        cv.rtext(rx - 26, ty, "On" if value else "Off", dimk, T["body"])
-        toggle(cv, rx - 20, ty + 1, value, T)
-    elif kind == "slider":
-        slider(cv, rx - 84, ty + 4, 84, value, T)
-    elif kind == "seg":
-        seg(cv, rx, ty - 2, value[0], value[1], T)
-    elif kind == "swatches":
-        sw, cur = value
-        xx = rx - len(sw) * 14 + 4
-        for i, c in enumerate(sw):
-            cv.rrect(xx, ty - 1, 11, 11, c, 2)
-            if ratio(c, T["surface"]) < 3:
-                cv.rbox(xx, ty - 1, 11, 11, T["dim"], 2)
-            if i == cur:
-                cur_bar(cv, xx, ty + 12, 11, T)
-            xx += 14
-
-
-def button(cv, x, y, w, h, label, T, kind="secondary", icon=None):
-    """Primary is the value colour, never amber: amber is focus alone."""
-    if kind == "primary":
-        fill, ink = T["value"], T["value_ink"]
-        if not T["outline"] and T["frame"] != "studio":
-            cv.rrect(x, y + 1, w, h, mix(fill, "#000000", 0.4), max(0, T["radius"] - 1))
-        cv.rrect(x, y, w, h, fill, max(0, T["radius"] - 1))
-        if T["outline"]:
-            cv.rbox(x, y, w, h, T["line"], max(0, T["radius"] - 1), T["outline"])
-    else:
-        raised_box(cv, x, y, w, h, T)
-        ink = T["text"]
-    tw = cv.tw(label, T["body"]) + (14 if icon else 0)
-    tx = x + (w - tw) // 2
-    if icon:
-        cv.icon(icon, tx, y + (h - 12) // 2, ink)
-        tx += 14
-    cv.text(tx, y + (h - 11) // 2 - (1 if T["body"] != "body" else 0), label, ink, T["body"])
+CHARSET = ([chr(c) for c in range(0x20, 0x7F)] + [chr(c) for c in range(0xA0, 0x100)]
+           + list("−←→↑↓…•“”‘’"))
+KERN_PAIRS = "AFKLPRTVWYafkrtvwy.,-ceosa"
 
 
 # ==========================================================================
-# covers, thumbnails, file icons
+# paints
 # ==========================================================================
+S = 4  # supersampling for shape coverage
+BAYER = (0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5)
+
+
+def grad(stops, y0=None, h=None, mode="smooth"):
+    """A vertical gradient: stops [(t, colour)] over rows y0..y0+h (the
+    shape's own rows when None). mode: smooth (one colour per row), steps:N
+    (N flat bands) or dither (an ordered 4x4 blend of the two nearest stops)."""
+    return ("grad", tuple(stops), y0, h, mode)
+
+
+def grad_row(stops, t):
+    t = min(1.0, max(0.0, t))
+    for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
+        if t <= t1:
+            return mix(c0, c1, 0 if t1 == t0 else (t - t0) / (t1 - t0))
+    return q(stops[-1][1])
+
+
+def _pair(stops, t):
+    t = min(1.0, max(0.0, t))
+    for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
+        if t <= t1:
+            return q(c0), q(c1), 0 if t1 == t0 else (t - t0) / (t1 - t0)
+    return q(stops[-1][1]), q(stops[-1][1]), 0
+
+
+def _bayer(w, h, x0, y0):
+    tile = Image.new("L", (4, 4))
+    tile.putdata([v * 16 + 8 for v in BAYER])
+    big = Image.new("L", (w + 4, h + 4))
+    for yy in range(0, h + 4, 4):
+        for xx in range(0, w + 4, 4):
+            big.paste(tile, (xx, yy))
+    return big.crop((x0 % 4, y0 % 4, x0 % 4 + w, y0 % 4 + h))
+
+
+# ==========================================================================
+# the canvas: layout pixels in, logical pixels drawn, RGB565 out
+# ==========================================================================
+def _rad(w, h, r, i):
+    return max(0, min(r * S, (min(w, h) * S - 1 - 2 * i) / 2 - 1))
+
+
+class Cv:
+    """A surface laid out in W x H layout pixels and drawn at W/k x H/k.
+    `aa` False thresholds every shape's coverage: stepped pixel corners."""
+
+    def __init__(self, w, h, bg, k=1, aa=True):
+        self.W, self.H, self.k, self.aa = w, h, k, aa
+        self.img = Image.new("RGB", (w // k, h // k), q(bg))
+        self.clip = None
+
+    def L(self, v):
+        return int(round(v / self.k))
+
+    def box(self, x, y, w, h):
+        x0, y0 = self.L(x), self.L(y)
+        return x0, y0, max(1, self.L(x + w) - x0), max(1, self.L(y + h) - y0)
+
+    def _src(self, c, box, gy, gh):
+        bx0, by0, bx1, by1 = box
+        w, h = bx1 - bx0, by1 - by0
+        if isinstance(c, tuple) and c and c[0] == "grad":
+            _, stops, sy0, sh, mode = c
+            sy0 = gy if sy0 is None else self.L(sy0)
+            sh = gh if sh is None else max(1, self.L(sh))
+            ts = [(yy - sy0) / max(1, sh - 1) for yy in range(by0, by1)]
+            if mode.startswith("steps"):
+                n = int(mode.split(":")[1])
+                ts = [min(n - 1, int(t * n)) / (n - 1) for t in ts]
+            if mode == "dither":
+                pairs = [_pair(stops, t) for t in ts]
+                a = Image.new("RGB", (1, h))
+                a.putdata([p[0] for p in pairs])
+                b = Image.new("RGB", (1, h))
+                b.putdata([p[1] for p in pairs])
+                f = Image.new("L", (1, h))
+                f.putdata([round(p[2] * 255) for p in pairs])
+                a, b, f = (im.resize((w, h), Image.NEAREST) for im in (a, b, f))
+                m = ImageChops.subtract(f, _bayer(w, h, bx0, by0)).point(lambda v: 255 if v else 0)
+                return Image.composite(b, a, m)
+            src = Image.new("RGB", (1, h))
+            src.putdata([grad_row(stops, t) for t in ts])
+            return src.resize((w, h), Image.NEAREST)
+        return Image.new("RGB", (w, h), q(c))
+
+    def _blend(self, x, y, mask, c, alpha=1.0, gy=None, gh=None):
+        """Logical coordinates."""
+        if alpha < 1:
+            mask = mask.point([round(a * alpha) for a in range(256)])
+        w, h = mask.size
+        cx0, cy0, cx1, cy1 = self.clip or (0, 0, self.img.width, self.img.height)
+        bx0, by0 = max(x, cx0, 0), max(y, cy0, 0)
+        bx1, by1 = min(x + w, cx1, self.img.width), min(y + h, cy1, self.img.height)
+        if bx1 <= bx0 or by1 <= by0:
+            return
+        mask = mask.crop((bx0 - x, by0 - y, bx1 - x, by1 - y))
+        box = (bx0, by0, bx1, by1)
+        dst = self.img.crop(box)
+        src = self._src(c, box, y if gy is None else gy, h if gh is None else gh)
+        self.img.paste(Image.composite(src, dst, mask).point(LUT565), box)
+
+    def set_clip(self, x, y, w, h):
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        self.clip = (x0, y0, x0 + wl, y0 + hl)
+
+    def rect(self, x, y, w, h, c, alpha=1.0):
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        self._blend(x0, y0, Image.new("L", (wl, hl), 255), c, alpha)
+
+    def _rmask(self, w, h, r, inset=0.0, corners=None):
+        m = Image.new("L", (w * S, h * S), 0)
+        i = inset * S
+        ImageDraw.Draw(m).rounded_rectangle((i, i, w * S - 1 - i, h * S - 1 - i),
+                                            radius=_rad(w, h, r - inset, i), fill=255,
+                                            corners=corners)
+        return levels(m.resize((w, h), Image.BOX), 16 if self.aa else 2)
+
+    def rmask(self, w, h, r, corners=None):
+        """A mask in logical pixels for a w x h layout box."""
+        _, _, wl, hl = self.box(0, 0, w, h)
+        return self._rmask(wl, hl, r / self.k, corners=corners)
+
+    def rrect(self, x, y, w, h, r, c, alpha=1.0, corners=None):
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        self._blend(x0, y0, self._rmask(wl, hl, r / self.k, corners=corners), c, alpha)
+
+    def ring(self, x, y, w, h, r, t, c, alpha=1.0, inset=0.0, corners=None):
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        k = self.k
+        r, t, inset = r / k, max(t / k, 1 if not self.aa else 0), inset / k
+        m = Image.new("L", (wl * S, hl * S), 0)
+        d = ImageDraw.Draw(m)
+        o = inset * S
+        d.rounded_rectangle((o, o, wl * S - 1 - o, hl * S - 1 - o), radius=_rad(wl, hl, r - inset, o),
+                            fill=255, corners=corners)
+        ti = (inset + t) * S
+        d.rounded_rectangle((ti, ti, wl * S - 1 - ti, hl * S - 1 - ti),
+                            radius=_rad(wl, hl, r - inset - t, ti), fill=0, corners=corners)
+        self._blend(x0, y0, levels(m.resize((wl, hl), Image.BOX), 16 if self.aa else 2), c, alpha)
+
+    def bevel(self, x, y, w, h, hi, lo, t=1):
+        """A 1 logical px raised edge: light top and left, dark bottom and right."""
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        for c, rects in ((hi, ((x0, y0, wl, t), (x0, y0, t, hl))),
+                         (lo, ((x0, y0 + hl - t, wl, t), (x0 + wl - t, y0, t, hl)))):
+            for rx, ry, rw, rh in rects:
+                self._blend(rx, ry, Image.new("L", (rw, rh), 255), c)
+
+    def frost(self, x, y, w, h, r, blur, tint, alpha, corners=None):
+        """Glass over a static backdrop: blur the pixels below once, then tint."""
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        blur = max(1, blur // self.k)
+        box = (max(0, x0), max(0, y0), min(self.img.width, x0 + wl), min(self.img.height, y0 + hl))
+        pad = blur * 2
+        big = self.img.crop((max(0, box[0] - pad), max(0, box[1] - pad),
+                             min(self.img.width, box[2] + pad), min(self.img.height, box[3] + pad)))
+        big = big.filter(ImageFilter.GaussianBlur(blur))
+        ox, oy = box[0] - max(0, box[0] - pad), box[1] - max(0, box[1] - pad)
+        bl = big.crop((ox, oy, ox + box[2] - box[0], oy + box[3] - box[1]))
+        m = self._rmask(wl, hl, r / self.k, corners=corners).crop(
+            (box[0] - x0, box[1] - y0, box[2] - x0, box[3] - y0))
+        self.img.paste(Image.composite(bl, self.img.crop(box), m).point(LUT565), box)
+        self.rrect(x, y, w, h, r, tint, alpha, corners)
+
+    def shadow(self, x, y, w, h, r, spec, k=1.0, corners=None):
+        """spec: ("soft", colour, alpha, blur, dy) or ("hard", colour, dx, dy)."""
+        if spec[0] == "hard":
+            _, c, dx, dy = spec
+            self.rrect(x + dx, y + dy, w, h, r, c, corners=corners)
+            return
+        _, c, a, blur, dy = spec
+        blur, dy, a = max(2, int(blur * k)), int(dy * k), a * k
+        x0, y0, wl, hl = self.box(x, y + dy, w, h)
+        bl = max(1, blur // self.k)
+        pad = bl * 3
+        m = Image.new("L", (wl + 2 * pad, hl + 2 * pad), 0)
+        m.paste(self._rmask(wl, hl, r / self.k, corners=corners), (pad, pad))
+        m = levels(m.filter(ImageFilter.GaussianBlur(bl)), 16)
+        self._blend(x0 - pad, y0 - pad, m, c, a)
+
+    def shape(self, x, y, w, h, fn, c, alpha=1.0, thin=False):
+        """fn(draw, s) draws in layout units times s on a supersampled canvas."""
+        x0, y0, wl, hl = self.box(x, y, w, h)
+        m = Image.new("L", (wl * S, hl * S), 0)
+        fn(ImageDraw.Draw(m), S / self.k)
+        m = m.resize((wl, hl), Image.BOX)
+        if self.aa:
+            m = levels(m, 16)
+        else:
+            m = m.point(lambda a: 255 if a >= (64 if thin else 112) else 0)
+        self._blend(x0, y0, m, c, alpha)
+
+    def text(self, x, base, s, face, c, align="left", maxw=None, shadow=None):
+        """shadow: (colour, alpha, dx, dy) in logical pixels, drawn first."""
+        if maxw and face.width(s) > maxw:
+            while s and face.width(s + "…") > maxw:
+                s = s[:-1]
+            s = s.rstrip() + "…"
+        wl = face.lwidth(s)
+        xl, bl = self.L(x), self.L(base)
+        if align == "center":
+            xl -= wl // 2
+        elif align == "right":
+            xl -= wl
+        for sh in ([shadow] if shadow else []) + [None]:
+            px, prev = xl, None
+            for ch in s:
+                if prev:
+                    px += face.kerning(prev, ch)
+                m, bx, by, adv = face.glyph(ch)
+                if m:
+                    if sh:
+                        self._blend(px + bx + sh[2], bl + by + sh[3], m, sh[0], sh[1])
+                    else:
+                        self._blend(px + bx, bl + by, m, c)
+                px += adv
+                prev = ch
+        return wl * self.k
+
+    def paste(self, im, x, y, w=None, r=0):
+        """An image laid out at w x w layout pixels (its own size when None)."""
+        x0, y0, wl, hl = self.box(x, y, w or im.width * self.k, w or im.height * self.k)
+        if im.size != (wl, hl):
+            im = im.resize((wl, hl), Image.NEAREST)
+        box = (x0, y0, x0 + wl, y0 + hl)
+        m = self._rmask(wl, hl, r / self.k) if r else Image.new("L", (wl, hl), 255)
+        dst = self.img.crop(box)
+        self.img.paste(Image.composite(im, dst, m).point(LUT565), box)
+
+    def image(self):
+        im = self.img.point(LUT565)
+        if self.k != 1:
+            im = im.resize((self.W, self.H), Image.NEAREST)
+        return im
+
+    def save(self, name, what, x3=False):
+        im = self.image()
+        im.save(os.path.join(OUT, name + ".png"), optimize=True)
+        INDEX.append(f"{name}.png — {what}; {self.W}x{self.H}")
+        if x3:
+            im.resize((self.W * 3, self.H * 3), Image.NEAREST).save(
+                os.path.join(OUT, name + "@3x.png"), optimize=True)
+            INDEX.append(f"{name}@3x.png — same, enlarged 3x (nearest)")
+
+
+# ==========================================================================
+# icons: 24-unit line glyphs, drawn at any pixel size
+# ==========================================================================
+def icon(cv, name, x, y, px, c, stroke=2.0, alpha=1.0):
+    k = px / 24.0
+
+    def fn(d, s):
+        u = k * s
+        sw = max(1, round(stroke * u))
+
+        def P(*pts):
+            return [(a * u, b * u) for a, b in pts]
+
+        def line(*pts):
+            d.line(P(*pts), fill=255, width=sw, joint="curve")
+            for p in P(pts[0], pts[-1]):
+                d.ellipse((p[0] - sw / 2, p[1] - sw / 2, p[0] + sw / 2, p[1] + sw / 2), fill=255)
+
+        def rr(x0, y0, x1, y1, r, fill=False):
+            if fill:
+                d.rounded_rectangle((x0 * u, y0 * u, x1 * u, y1 * u), r * u, fill=255)
+            else:
+                d.rounded_rectangle((x0 * u, y0 * u, x1 * u, y1 * u), r * u, outline=255, width=sw)
+
+        def arc(cx, cy, r, a0, a1):
+            d.arc(((cx - r) * u, (cy - r) * u, (cx + r) * u, (cy + r) * u), a0, a1, fill=255, width=sw)
+
+        def dot(cx, cy, r):
+            d.ellipse(((cx - r) * u, (cy - r) * u, (cx + r) * u, (cy + r) * u), fill=255)
+
+        if name == "wifi":
+            for r in (10, 6.5):
+                arc(12, 19, r, 225, 315)
+            dot(12, 18.5, 1.9)
+        elif name == "battery":
+            rr(2, 7, 20, 17, 3)
+            rr(5, 10, 14, 14, 1, fill=True)
+            rr(21, 10, 23, 14, 1, fill=True)
+        elif name == "play":
+            d.polygon(P((7, 4.5), (19.5, 12), (7, 19.5)), fill=255)
+        elif name == "projects":
+            rr(3, 5, 19, 21, 3)
+            line((10, 14), (20, 4))
+            line((19, 3), (21, 5))
+        elif name == "brush":
+            line((20, 4), (11, 13))
+            d.ellipse(P((5, 13), (12, 20)), fill=255)
+            d.polygon(P((5, 17), (4, 21), (8, 20)), fill=255)
+        elif name == "book":
+            line((12, 6), (12, 20))
+            d.line(P((12, 6), (8, 4.5), (3, 5), (3, 18), (8, 17.5), (12, 20)), fill=255, width=sw, joint="curve")
+            d.line(P((12, 6), (16, 4.5), (21, 5), (21, 18), (16, 17.5), (12, 20)), fill=255, width=sw, joint="curve")
+        elif name == "folder":
+            d.line(P((3, 18), (3, 6), (4, 5), (9, 5), (11, 7.5), (20, 7.5), (21, 8.5), (21, 18), (20, 19), (4, 19), (3, 18)),
+                   fill=255, width=sw, joint="curve")
+        elif name == "calc":
+            rr(4.5, 2.5, 19.5, 21.5, 3)
+            rr(8, 6, 16, 9.5, 1, fill=True)
+            for cx in (8.75, 12, 15.25):
+                for cy in (13.5, 17.5):
+                    dot(cx, cy, 1.25)
+        elif name == "download":
+            line((12, 3), (12, 15))
+            line((7, 10), (12, 15), (17, 10))
+            line((4, 15), (4, 20), (20, 20), (20, 15))
+        elif name == "close":
+            line((6, 6), (18, 18))
+            line((18, 6), (6, 18))
+        elif name == "cart":
+            d.line(P((5, 21), (5, 3), (16, 3), (19, 6), (19, 21), (5, 21)), fill=255, width=sw, joint="curve")
+            rr(8, 7, 16, 13, 1)
+            line((9, 17), (15, 17))
+        elif name == "note":
+            line((9, 18), (9, 5), (20, 3), (20, 16))
+            d.ellipse(P((3.5, 15), (9.5, 21)), fill=255)
+            d.ellipse(P((14.5, 13), (20.5, 19)), fill=255)
+        elif name == "trash":
+            line((3, 6), (21, 6))
+            line((9, 6), (9, 3), (15, 3), (15, 6))
+            d.line(P((5.5, 6), (6.5, 21), (17.5, 21), (18.5, 6)), fill=255, width=sw, joint="curve")
+        elif name == "enter":
+            line((19, 5), (19, 14), (6, 14))
+            line((10, 10), (6, 14), (10, 18))
+        elif name == "backspace":
+            d.line(P((8, 5), (21, 5), (21, 19), (8, 19), (2, 12), (8, 5)), fill=255, width=sw, joint="curve")
+            line((11, 9), (17, 15))
+            line((17, 9), (11, 15))
+        elif name == "search":
+            arc(10.5, 10.5, 6.5, 0, 360)
+            line((15.5, 15.5), (20.5, 20.5))
+        elif name == "chev":
+            line((9, 5), (16, 12), (9, 19))
+        elif name == "back":
+            line((15, 5), (8, 12), (15, 19))
+
+    cv.shape(x, y, px, px, fn, c, alpha, thin=True)
+
+
+def moy(cv, x, y, px, body, eye):
+    """Moy: a rounded ghost with two eyes and three feet, as a flat glyph."""
+    def fn(d, s):
+        u = px / 24.0 * s
+        d.rounded_rectangle((3 * u, 2.5 * u, 21 * u, 20 * u), 8 * u, fill=255)
+        for i in range(3):
+            cx = (6.5 + i * 5.5) * u
+            d.ellipse((cx - 3.0 * u, 16.5 * u, cx + 3.0 * u, 22 * u), fill=255)
+    cv.shape(x, y, px, px, fn, body)
+
+    def eyes(d, s):
+        u = px / 24.0 * s
+        for cx in (9, 15):
+            d.rounded_rectangle(((cx - 1.4) * u, 8 * u, (cx + 1.4) * u, 13.5 * u), 1.4 * u, fill=255)
+    cv.shape(x, y, px, px, eyes, eye)
+
+
+# ==========================================================================
+
+
+# ==========================================================================
+# content: covers stay pixel art, scaled by whole numbers
+# ==========================================================================
+CROPS = {
+    "star_catcher": {64: (43, 52)}, "sky_run": {64: (8, 44)}, "hop_quest": {64: (52, 36)},
+    "pixel_pet": {64: (24, 50)}, "harpoon_pop": {64: (18, 64)}, "brick_siege": {64: (2, 20)},
+    "bullet_storm": {64: (32, 8)}, "letter_blitz": {64: (2, 18)}, "tiny_runner": {64: (0, 60)},
+}
+
+
 def _src(name):
     return os.path.join(ROOT, "system_carts", f"moybyte.{name}.moy", "cover.png")
 
 
-def cover(name, n=64):
+def cover(name, n=64, scale=1):
     img = Image.open(_src(name)).convert("RGB")
     x, y = CROPS.get(name, {}).get(n, ((128 - n) // 2, (128 - n) // 2))
-    c = img.crop((x, y, x + n, y + n))
-    out = Image.new("RGB", c.size)
-    out.putdata([q(p) for p in list(c.getdata())])
-    return out
-
-
-# the curated window of each cover, per crop size (no HUD, the subject centred)
-CROPS = {
-    "star_catcher": {64: (43, 52), 48: (48, 64)},
-    "sky_run": {64: (8, 44), 48: (24, 60)},
-    "hop_quest": {64: (52, 36), 48: (72, 36)},
-    "pixel_pet": {64: (24, 50), 48: (32, 56)},
-    "harpoon_pop": {64: (18, 64), 48: (16, 80)},
-    "brick_siege": {64: (2, 20), 48: (10, 24)},
-    "bullet_storm": {64: (32, 8), 48: (40, 12)},
-    "letter_blitz": {64: (2, 18), 48: (10, 24)},
-    "tiny_runner": {64: (0, 60), 48: (0, 76)},
-}
-
-
-def card(cv, name, x, y, size, T, focus=False, dimmed=False, n=64):
-    """Neighbours keep their colours: dark themes darken them a step, light
-    themes leave the art alone and let size and position carry depth."""
-    img = cover(name, n)
-    if size != n:
-        img = img.resize((size, size), Image.NEAREST)
-    r = 3 if T["radius"] else 0
-    if T["frame"] == "paper":
-        m = 4 if focus else 3
-        d = 3 if focus else 2
-        cv.dither(x - m + d, y + size + m, size + 2 * m, d, T["shadow_c"])
-        cv.dither(x + size + m, y - m + d, d, size + 2 * m, T["shadow_c"])
-        cv.rrect(x - m, y - m, size + 2 * m, size + 2 * m, T["raised"], 3)
-        cv.rbox(x - m, y - m, size + 2 * m, size + 2 * m, T["line"], 3, 1)
-        r = 0
-    elif focus:
-        drop(cv, x, y, size, size, T, r, 3)
-    mask = Image.new("L", (size, size), 255)
-    for i, k in enumerate({0: [], 1: [1], 2: [2, 1], 3: [3, 1, 1]}[r]):
-        for xx in list(range(k)) + list(range(size - k, size)):
-            mask.putpixel((xx, i), 0)
-            mask.putpixel((xx, size - 1 - i), 0)
-    cv.img.paste(img, (x, y), mask)
-    if dimmed and T["dim_cards"] and T["mode"] == "dark":
-        cv.shade(x, y, size, size, T["dim_cards"], "#000000")
-    if T["frame"] == "studio":
-        cv.rbox(x, y, size, size, T["line"], 0, 1)
-    if T["outline"] and T["frame"] != "paper":
-        cv.rbox(x, y, size, size, T["line"], r, 1)
-    if focus:
-        m = 4 if T["frame"] == "paper" else 0
-        focus_ring(cv, x - m, y - m, size + 2 * m, size + 2 * m, T, 3 if r or m else 0)
-
-
-FALLBACK = {"coin_quest": (10, 0), "pin_light": (8, 7)}
-
-
-def file_icon(cv, name, x, y, T):
-    """Each file's own picture: its cover, its app icon, or a title tile."""
-    if os.path.exists(_src(name)):
-        img = cover(name, 64).resize((12, 12), Image.BOX)
-        img.putdata([q(p) for p in list(img.getdata())])
-        cv.paste(img, x, y)
-        for xx, yy in ((0, 0), (11, 0), (0, 11), (11, 11)):
-            cv.put(x + xx, y + yy, cv.get(x - 1, y))
-        return
-    if name in FALLBACK:
-        bgc, ink = FALLBACK[name]
-        cv.rrect(x, y, 12, 12, P(bgc), 1)
-        cv.ctext(x, y + 1, 12, name[0].upper(), P(ink), "cap")
-        return
-    if name == "moy_night":
-        cv.rrect(x, y, 12, 12, P(1), 1)
-        for dx, dy in ((7, 2), (8, 2), (6, 3), (6, 4), (6, 5), (7, 6), (8, 6)):
-            cv.put(x + dx, y + dy, P(10))
-        cv.rect(x, y + 9, 12, 3, P(0))
-        cv.put(x + 2, y + 3, P(7))
-        return
-    ic = {"calc": "calc", "notes": "doc", "my_art": "brush"}.get(name, "doc")
-    raised_box(cv, x, y, 12, 12, T, r=1)
-    cv.icon(ic, x, y, T["text"], T["dim"], T["accent"])
+    c = img.crop((x, y, x + n, y + n)).point(LUT565)
+    return c.resize((n * scale, n * scale), Image.NEAREST) if scale != 1 else c
 
 
 # ==========================================================================
-# the handheld home
+# the theme model: every field the renderer reads, with its default
+# ==========================================================================
+BASE = dict(
+    mode="light", danger=None, hi=None, lo=None, edges="flat",
+    fam="inter", sizes={}, w_body=400, w_med=500, w_semi=600, w_bold=700,
+    render=dict(text="aa", shapes="smooth", scale=1),
+    ring_w=2.5, ring_gap=3, ring_alpha=1.0, shadow=None, shadow_back=0.55,
+    win_r=12, card_r=10, key_r=10, win_corners=None, dim_neighbours=0,
+    home_bg=None, backdrop={},
+    win=dict(header="plain", h=44, align="left", ink=None, ink_back=None, tshadow=None,
+             controls="close", grad=None, grad_back=None, fill=None, fill_back=None,
+             frame=None, frame_back=None, body=None, rule=1, icon=True),
+    current="bar", sel=None, sel_ink=None, sel_back=None,
+    bar=dict(edge="top", h=40, style="flat", fill=None, alpha=1.0, line=None, grad=None,
+             sysbtn="tile", sys=None, chips="tab", chip_cur=None, app_title=None,
+             ink=None, dim=None, tray=None, clock="right"),
+    hhbar=dict(style="none", h=28, fill=None, line=None, ink=None, dim=None, sys=None),
+    tabs=dict(style="bar", pill=None, pill_ink=None),
+    launcher="column", dock=dict(fill="#ffffff", alpha=0.32, frost=True, ring=("#ffffff", 0.45), r=20),
+    tiles=None, tile_r=12, tile_fill=None, tile_outline=None, tile_ink=None, tile_grad=True,
+    label=dict(ink=None, shadow=None),
+    on_backdrop=dict(ink=None, dim=None, shadow=None),
+    sidebar=None, places_panel=None, list_bg=None, zebra=None, colhead=None,
+    buttons={}, app_buttons={},
+    lcd=None, lcd_border=None, lcd_bevel=None, lcd_ink=None, lcd_dim=None,
+    keycap=dict(fill=None, alpha=1.0, border=None, grad=None, ink=None, r=4, bevel=False),
+    layout=dict(files=(112, 54, 548, 534), calc=(648, 96, 344, 488)),
+)
+NESTED = ("render", "win", "bar", "hhbar", "tabs", "dock", "label", "on_backdrop", "keycap", "layout")
+
+
+def theme(**kw):
+    T = copy.deepcopy(BASE)
+    for k, v in kw.items():
+        if k in NESTED:
+            T[k].update(v)
+        else:
+            T[k] = v
+    return T
+
+
+# Drawn backdrops. Units: x and widths in thousandths of the surface's width,
+# y, heights and radii in thousandths of its height. A paint is a colour or a
+# list of colours spread top to bottom over the shape's own rows; "mode" is
+# smooth (default), steps:N or dither.
+BD_A = {"desk": [{"k": "circle", "at": [801, 850, 433], "p": "#191c3e"},
+                 {"k": "circle", "at": [889, 733, 433], "p": "#0f1127"}]}
+BD_B = {"desk": [{"k": "circle", "at": [918, 1000, 500], "p": "#e2e5ee"},
+                 {"k": "circle", "at": [88, 983, 350], "p": "#e5e3f1"}]}
+BD_C = {
+    "home": [{"k": "fill", "p": "#ffd23f"},
+             {"k": "circle", "at": [500, 470, 520], "p": "#ffe066"},
+             {"k": "circle", "at": [0, 470, 230], "p": "#7be0b4"},
+             {"k": "circle", "at": [1000, 470, 200], "p": "#ff8a6b"}],
+    "desk": [{"k": "fill", "p": "#fff3dc"},
+             {"k": "rrect", "at": [586, 73, 234, 150, 75], "p": "#ffd23f"},
+             {"k": "pie", "at": [996, 433, 233, 180, 270], "p": "#7cc8ff"},
+             {"k": "circle", "at": [889, 900, 350], "p": "#ff8a6b"},
+             {"k": "circle", "at": [20, 1000, 283], "p": "#7be0b4"}],
+}
+_BLISS = [
+    {"k": "band", "at": [0, 720], "p": ["#1b5ad3", "#3a80e2", "#86b9ef"]},
+    {"k": "ellipse", "at": [270, 170, 120, 48], "p": "#ffffff", "a": 0.85},
+    {"k": "ellipse", "at": [345, 140, 70, 60], "p": "#ffffff", "a": 0.85},
+    {"k": "ellipse", "at": [760, 250, 150, 40], "p": "#ffffff", "a": 0.7},
+    {"k": "ellipse", "at": [820, 225, 60, 45], "p": "#ffffff", "a": 0.7},
+    {"k": "wave", "at": [[0, 600], [260, 560], [560, 610], [820, 540], [1000, 580]],
+     "p": ["#8fd04e", "#5aa12a"]},
+    {"k": "wave", "at": [[0, 800], [220, 690], [480, 650], [740, 720], [1000, 820]],
+     "p": ["#52a52a", "#245f12"]},
+]
+_DUNES = [
+    {"k": "band", "at": [0, 1000], "p": ["#2f3f9e", "#6b62cc", "#d99ac4", "#f4c3a2"]},
+    {"k": "wave", "at": [[0, 560], [300, 470], [650, 560], [1000, 450]], "p": ["#9a8be4", "#6e5fc9"]},
+    {"k": "wave", "at": [[0, 690], [330, 620], [700, 700], [1000, 610]], "p": ["#6252bd", "#43389c"]},
+    {"k": "wave", "at": [[0, 840], [380, 760], [760, 840], [1000, 780]], "p": ["#382e86", "#231c5c"]},
+]
+_PICO = [
+    {"k": "fill", "p": ["#1d2b53", "#1d2b53", "#7e2553"], "mode": "dither"},
+    {"k": "circle", "at": [860, 820, 260], "p": "#7e2553"},
+    {"k": "circle", "at": [860, 820, 200], "p": ["#ff77a8", "#7e2553"], "mode": "dither"},
+]
+_PICO_HOME = [
+    {"k": "fill", "p": ["#1d2b53", "#1d2b53", "#7e2553"], "mode": "dither"},
+]
+_COPPER = [
+    {"k": "fill", "p": ["#001a44", "#0055aa", "#5a4f9e", "#a8432a"], "mode": "steps:16"},
+]
+_ADW = [
+    {"k": "fill", "p": "#1e1b2e"},
+    {"k": "circle", "at": [930, 950, 520], "p": "#1a5fb4"},
+    {"k": "circle", "at": [760, 1080, 380], "p": "#3584e4"},
+    {"k": "circle", "at": [120, 120, 260], "p": "#26213a"},
+    {"k": "circle", "at": [620, 200, 90], "p": "#62a0ea", "a": 0.9},
+]
+_ADW_HOME = [
+    {"k": "fill", "p": "#1e1b2e"},
+    {"k": "circle", "at": [1040, 1060, 330], "p": "#1a5fb4"},
+    {"k": "circle", "at": [930, 1180, 220], "p": "#3584e4"},
+    {"k": "circle", "at": [40, 60, 300], "p": "#26213a"},
+]
+
+P8 = dict(black="#000000", navy="#1d2b53", plum="#7e2553", green="#008751", brown="#ab5236",
+          dgrey="#5f574f", lgrey="#c2c3c7", white="#fff1e8", red="#ff004d", orange="#ffa300",
+          yellow="#ffec27", lime="#00e436", blue="#29adff", lav="#83769c", pink="#ff77a8",
+          peach="#ffccaa")
+
+A = theme(
+    key="moy", name="Moy Night (dark)", mode="dark",
+    bg="#0f1127", surface="#181b38", raised="#23274b", sunk="#0b0d1e", line="#2b2f57",
+    dim="#a1a6cc", text="#eef0fb", accent="#ffc23d", value="#b6a8f7", value_ink="#15123a",
+    shadow=("soft", "#000000", 0.55, 14, 6), dim_neighbours=0.30, fam="inter", backdrop=BD_A,
+    win=dict(header="fill", frame=(1, "#2b2f57"), frame_back=(1, "#2b2f57")),
+    bar=dict(fill="#0b0d1e", alpha=0.85, sys=("#23274b", "#b6a8f7", "#23274b"), chip_cur="#23274b"),
+    tile_fill="#23274b",
+    lcd="#0b0d1e", lcd_ink="#b6a8f7",
+)
+B = theme(
+    key="daylight", name="Daylight (light, the default)",
+    bg="#eceef3", surface="#ffffff", raised="#f4f5f8", sunk="#e3e6ed", line="#e2e5ec",
+    dim="#5f6478", text="#15161d", accent="#d45f00", value="#4c3fd6", value_ink="#ffffff",
+    shadow=("soft", "#1b2040", 0.18, 16, 8), fam="plex", backdrop=BD_B,
+    win=dict(header="bar"),
+    bar=dict(fill="#ffffff", alpha=0.92, line=(1, "#e2e5ec"), sys=("#f4f5f8", "#4c3fd6", "#f4f5f8"),
+             chip_cur="#f4f5f8"),
+    hhbar=dict(sys=("#ffffff", "#4c3fd6", "#ffffff")),
+    tile_fill="#ffffff",
+    buttons={"tonal": {"fill": "#e3e6ed"}},
+    lcd="#f1f2f6", lcd_ink="#4c3fd6",
+)
+C = theme(
+    key="blocks", name="Blocks (light, colour-blocked, for kids and makers)",
+    bg="#fff3dc", surface="#ffffff", raised="#fff8ec", sunk="#f6ead2", line="#eadcc0",
+    dim="#5b5167", text="#1a1530", accent="#1a1530", value="#6a2cff", value_ink="#ffffff",
+    win_r=16, card_r=14, key_r=12, ring_w=3, fam="atkinson", w_semi=700, w_bold=800,
+    home_bg="#ffd23f", backdrop=BD_C,
+    win=dict(header="fill", frame=(2, "#1a1530"), frame_back=(2, "#5b5167"), rule=2),
+    bar=dict(fill="#ffffff", line=(2, "#1a1530"), sys=("#6a2cff", "#ffffff", "#6a2cff"),
+             chip_cur="#f6ead2"),
+    tiles={"play": "#ff6b4a", "projects": "#b79cff", "brush": "#ffd23f", "book": "#7be0b4",
+           "folder": "#7cc8ff", "calc": "#ff9a62", "download": "#9be36b",
+           "cart": "#ff6b4a", "note": "#7be0b4", "trash": "#e8dcc6"},
+    tile_outline=(2, "#1a1530"), tile_ink="#1a1530", tile_grad=False,
+    buttons={"normal": {"fill": "#f4ecdc"}, "tonal": {"fill": "#ffd23f", "ink": "#1a1530"}},
+    lcd="#c9f2dd", lcd_border=(2, "#1a1530"), lcd_ink="#1a1530",
+    keycap=dict(fill="#ffffff", border=(1.25, "#1a1530")),
+)
+_XP_BTN = [(0, "#ffffff"), (0.55, "#f3f2ec"), (1, "#d9d5c7")]
+LUNA = theme(
+    key="luna", name="Luna (in the style of Windows XP)",
+    bg="#3a6ea5", surface="#ece9d8", raised="#ffffff", sunk="#d6d2c2", line="#aca899",
+    dim="#4d4b44", text="#000000", accent="#c86400", value="#2f63d6", value_ink="#ffffff",
+    ring_w=3, ring_gap=0, win_r=8, card_r=4, key_r=3, win_corners=(True, True, False, False),
+    shadow=("soft", "#000000", 0.35, 6, 4), shadow_back=0.6, fam="dejavu", w_med=400, w_semi=700,
+    w_bold=700, backdrop={"home": _BLISS, "desk": _BLISS},
+    sizes={"hh": {"tab": 12, "status": 11, "meta": 11, "hint": 11, "key": 10, "title": 18},
+           "dk": {"row": 14, "meta": 13, "chip": 14, "status": 14, "label": 13, "col": 12,
+                  "wtitle": 16}},
+    win=dict(header="grad", h=40, ink="#ffffff", ink_back="#e1e8fa",
+             tshadow=("#0a1f6d", 0.85, 1, 1), controls="xp",
+             grad=[(0, "#4192fa"), (0.12, "#2a76f0"), (0.35, "#0b5fe3"), (0.85, "#0554d6"),
+                   (1, "#0846bb")],
+             grad_back=[(0, "#b0c6f2"), (0.35, "#8ba8e8"), (1, "#7a96df")],
+             frame=(4, "#0846bb"), frame_back=(4, "#7a96df"), rule=0),
+    current="fill", sel="#316ac5", sel_ink="#ffffff", sel_back="#d6d2c2",
+    bar=dict(edge="bottom", style="grad", sysbtn="start", chips="button",
+             grad=[(0, "#3f8cf3"), (0.1, "#2b70e0"), (0.5, "#245edb"), (0.9, "#1f50c8"),
+                   (1, "#1941a5")],
+             ink="#ffffff", dim="#ffffff", tray=[(0, "#1aa0f0"), (1, "#0e78d6")]),
+    hhbar=dict(style="grad", h=26, ink="#ffffff", dim="#dce8ff"),
+    tabs=dict(style="pill", pill="#1b4ab0", pill_ink="#ffffff"),
+    tiles={"play": "#3ca83a", "projects": "#e9a92b", "brush": "#d9473a", "book": "#3b7bd8",
+           "folder": "#e9b83a", "calc": "#6f84a3", "download": "#2a9fd6",
+           "cart": "#3ca83a", "note": "#d9473a", "trash": "#7b8ba3"},
+    tile_r=8, label=dict(ink="#ffffff", shadow=("#000000", 0.85, 1, 1)),
+    on_backdrop=dict(ink="#ffffff", dim="#eef4ff", shadow=("#00213f", 0.9, 1, 1)),
+    sidebar=[(0, "#7ba2e7"), (1, "#6375d6")],
+    places_panel=dict(fill="#ffffff", head=[(0, "#ffffff"), (1, "#c6d3f7")], head_ink="#215dc6"),
+    list_bg="#ffffff", colhead=dict(fill="#ebeadb", line="#d6d2c2"),
+    buttons={k: {"fill": _XP_BTN, "border": (1, "#003c74")}
+             for k in ("normal", "tonal", "danger", "toggle")},
+    app_buttons={"calc": {"normal": {"ink": "#1a3fcf"}, "tonal": {"ink": "#c4231b"},
+                          "danger": {"ink": "#c4231b"}}},
+    lcd="#ffffff", lcd_border=(1, "#7f9db9"), lcd_ink="#000000",
+    keycap=dict(grad=_XP_BTN, border=(1, "#003c74"), ink="#000000", r=3),
+    layout=dict(files=(112, 14, 548, 534), calc=(648, 50, 344, 488)),
+)
+COAST = theme(
+    key="coast", name="Coast (in the style of macOS)",
+    bg="#d9d4ee", surface="#ffffff", raised="#ffffff", sunk="#e9e9ee", line="#dcdce2",
+    dim="#6e6e76", text="#1d1d1f", accent="#3a86ff", value="#0a6cff", value_ink="#ffffff",
+    ring_w=3.5, ring_gap=0, ring_alpha=0.6, win_r=12, card_r=12, key_r=99,
+    shadow=("soft", "#0b0a2a", 0.38, 22, 14), shadow_back=0.5, fam="inter",
+    backdrop={"home": _DUNES, "desk": _DUNES},
+    sizes={"dk": {"result": 52}}, w_result=300,
+    win=dict(align="center", controls="lights", body="#f6f6f8", icon=False, ink_back="#a1a1a8"),
+    current="fill", sel="#0a6cff", sel_ink="#ffffff", sel_back="#dcdce1",
+    bar=dict(h=30, style="glass", fill="#ffffff", alpha=0.55, sysbtn="glyph", chips="none",
+             app_title="Calc"),
+    hhbar=dict(style="glass", h=22, dim="#2c2c33"),
+    tabs=dict(style="pill", pill="#0a6cff", pill_ink="#ffffff"),
+    launcher="dock",
+    tiles={"play": "#34c759", "projects": "#ff9f0a", "brush": "#ff375f", "book": "#5e5ce6",
+           "folder": "#0a84ff", "calc": "#8e8e93", "download": "#32ade6",
+           "cart": "#34c759", "note": "#ff375f", "trash": "#8e8e93"},
+    on_backdrop=dict(ink="#ffffff", dim="#f1edff", shadow=("#120c3a", 0.55, 0, 1)),
+    sidebar="vibrancy", list_bg="#ffffff", zebra="#f4f4f7",
+    buttons={"normal": {"fill": "#ececf0"}, "tonal": {"fill": "#ececf0"}},
+    app_buttons={"calc": {"normal": {"shape": "circle", "fill": "#e4e4e9"},
+                          "danger": {"shape": "circle", "fill": "#cfcfd6"},
+                          "tonal": {"shape": "circle", "fill": "#ff9f0a", "ink": "#ffffff"},
+                          "primary": {"shape": "circle", "fill": "#ff9f0a"}}},
+    lcd_ink="#1d1d1f",
+    keycap=dict(fill="#ffffff", alpha=0.28, ink="#ffffff", r=5),
+    layout=dict(files=(40, 50, 560, 460), calc=(630, 66, 344, 440)),
+)
+PICO = theme(
+    key="pico", name="Pico (in the style of Picotron)",
+    bg=P8["navy"], surface=P8["white"], raised=P8["lgrey"], sunk=P8["lgrey"], line=P8["black"],
+    dim=P8["dgrey"], text=P8["black"], accent=P8["red"], value=P8["blue"], value_ink=P8["black"],
+    danger=None, render=dict(text="crisp", shapes="stepped", scale=2), fam="galmuri",
+    sizes={"hh": {"tab": 10, "status": 10, "title": 24, "meta": 10, "key": 8, "hint": 10,
+                  "hkey": 12, "hop": 12, "hres": 24, "htape": 10, "htitle": 12},
+           "dk": {r: 8 for r in ("chip", "status", "label", "wtitle", "row", "col", "meta", "tape")}
+           | {"keypad": 12, "op": 12, "result": 24, "wtitle": 10}},
+    ring_w=2, ring_gap=2, win_r=4, card_r=4, key_r=4, shadow=("hard", "#000000", 2, 2),
+    shadow_back=1.0, backdrop={"home": _PICO_HOME, "desk": _PICO},
+    win=dict(header="fill", h=28, fill_back=P8["lgrey"], frame=(2, "#000000"),
+             frame_back=(2, "#000000"), rule=2, ink="#000000", icon=False),
+    bar=dict(h=24, fill="#000000", ink=P8["white"], dim=P8["lgrey"], sysbtn="glyph",
+             chip_cur=P8["dgrey"]),
+    hhbar=dict(style="flat", h=24, fill="#000000", ink=P8["white"], dim=P8["lgrey"]),
+    tiles={"play": P8["lime"], "projects": P8["orange"], "brush": P8["pink"], "book": P8["peach"],
+           "folder": P8["yellow"], "calc": P8["lgrey"], "download": P8["blue"],
+           "cart": P8["lime"], "note": P8["pink"], "trash": P8["lgrey"]},
+    tile_r=4, tile_outline=(2, "#000000"), tile_ink="#000000", tile_grad=False,
+    label=dict(ink=P8["white"], shadow=("#000000", 1.0, 1, 1)),
+    on_backdrop=dict(ink=P8["white"], dim=P8["lgrey"], shadow=("#000000", 1.0, 1, 1)),
+    sidebar=P8["lgrey"], list_bg=P8["white"],
+    buttons={"normal": {"fill": P8["lgrey"]}, "tonal": {"fill": P8["orange"], "ink": "#000000"},
+             "danger": {"fill": P8["pink"], "ink": "#000000"}},
+    lcd="#000000", lcd_ink=P8["lime"], lcd_dim=P8["lgrey"],
+    keycap=dict(fill=P8["lgrey"], ink="#000000", r=2),
+)
+WB = theme(
+    key="bench", name="Bench (in the style of Amiga Workbench 3.x)",
+    bg="#aaaaaa", surface="#aaaaaa", raised="#aaaaaa", sunk="#999999", line="#000000",
+    dim="#333333", text="#000000", accent="#000000", value="#6688bb", value_ink="#000000",
+    hi="#ffffff", lo="#000000", edges="bevel",
+    render=dict(text="crisp", shapes="stepped", scale=2), fam="petme",
+    sizes={"hh": {"tab": 8, "status": 8, "title": 16, "meta": 8, "key": 8, "hint": 8,
+                  "hkey": 8, "hop": 8, "hres": 16, "htape": 8, "htitle": 8},
+           "dk": {r: 8 for r in ("chip", "status", "label", "wtitle", "row", "col", "meta", "tape")}
+           | {"keypad": 16, "op": 16, "result": 24}},
+    ring_w=2, ring_gap=2, win_r=0, card_r=0, key_r=0, shadow=None,
+    backdrop={"home": _COPPER, "desk": _COPPER},
+    win=dict(header="fill", h=30, fill_back="#aaaaaa", ink="#000000", controls="amiga",
+             frame=(6, "#6688bb"), frame_back=(6, "#aaaaaa"), rule=0, icon=False),
+    current="fill", sel="#6688bb", sel_ink="#000000", sel_back="#6688bb",
+    layout=dict(files=(176, 54, 500, 534), calc=(664, 96, 340, 488)),
+    bar=dict(h=24, fill="#ffffff", line=(2, "#000000"), ink="#000000", dim="#333333",
+             sysbtn="glyph", chips="none", app_title="Moybyte Workbench"),
+    hhbar=dict(style="flat", h=24, fill="#ffffff", line=(2, "#000000"), ink="#000000",
+               dim="#333333"),
+    tiles={k: "#aaaaaa" for k in ("play", "projects", "brush", "book", "folder", "calc",
+                                  "download", "cart", "note", "trash")},
+    tile_r=0, tile_ink="#000000", tile_grad=False,
+    label=dict(ink="#ffffff", shadow=("#000000", 1.0, 1, 1)),
+    on_backdrop=dict(ink="#ffffff", dim="#ffffff", shadow=("#000000", 1.0, 1, 1)),
+    list_bg="#aaaaaa",
+    buttons={"tonal": {"fill": "#ffffff", "ink": "#000000"}},
+    lcd="#ffffff", lcd_bevel="in", lcd_ink="#000000", lcd_dim="#333333",
+    keycap=dict(fill="#aaaaaa", ink="#000000", r=0, bevel=True),
+)
+ADW = theme(
+    key="adw", name="Adw (in the style of GNOME's Adwaita)",
+    bg="#1e1b2e", surface="#ffffff", raised="#ffffff", sunk="#ebebed", line="#e0e0e2",
+    dim="#5e5c64", text="#1f1f23", accent="#3584e4", value="#3584e4", value_ink="#ffffff",
+    danger="#c01c28", fam="cantarell", w_med=400, w_semi=700, w_bold=700,
+    sizes={"hh": {"tab": 12}},
+    ring_w=2.5, ring_gap=1, ring_alpha=0.8, win_r=12, card_r=12, key_r=8,
+    shadow=("soft", "#000000", 0.30, 14, 4), shadow_back=0.5, backdrop={"home": _ADW_HOME, "desk": _ADW},
+    win=dict(align="center", controls="adw", body="#fafafb", fill="#ffffff", fill_back="#f6f6f7",
+             icon=False, frame=(1, "#d4d4d8"), frame_back=(1, "#d4d4d8")),
+    current="fill", sel="#d8e5fa", sel_ink="#1f1f23", sel_back="#e3e3e6",
+    bar=dict(h=32, fill="#000000", ink="#ffffff", dim="#c0bfbc", sysbtn="workspaces",
+             chips="none", clock="center"),
+    hhbar=dict(style="flat", h=24, fill="#000000", ink="#ffffff", dim="#bdbdc4"),
+    tabs=dict(style="pill", pill="#3a3a40", pill_ink="#ffffff"),
+    launcher="dock", dock=dict(fill="#2b2b30", alpha=0.94, frost=False, ring=None, r=22),
+    tiles={"play": "#33d17a", "projects": "#f6d32d", "brush": "#e66100", "book": "#9141ac",
+           "folder": "#3584e4", "calc": "#77767b", "download": "#26a269",
+           "cart": "#33d17a", "note": "#e66100", "trash": "#77767b"},
+    tile_r=14,
+    on_backdrop=dict(ink="#ffffff", dim="#deddda", shadow=("#000000", 0.5, 0, 1)),
+    sidebar="#ebebed", list_bg="#ffffff",
+    buttons={"normal": {"fill": "#ececee"}, "tonal": {"fill": "#e1e1e5", "ink": "#1f1f23"}},
+    lcd="#ffffff", lcd_border=(1, "#d4d4d8"), lcd_ink="#1f1f23",
+    keycap=dict(fill="#ffffff", alpha=0.22, ink="#ffffff", r=5),
+    layout=dict(files=(40, 50, 560, 460), calc=(630, 66, 344, 440)),
+)
+CONTRAST = theme(
+    key="contrast", name="Contrast (dark)", mode="dark",
+    bg="#000000", surface="#000000", raised="#000000", sunk="#1a1a1a", line="#ffffff",
+    dim="#e6e6e6", text="#ffffff", accent="#ffe600", value="#ffffff", value_ink="#000000",
+    danger="#ff8f8f", fam="atkinson", w_med=600, w_semi=700, w_bold=800,
+    sizes={"dk": {"keypad": 26, "op": 28, "result": 50, "tape": 17, "wtitle": 17},
+           "hh": {"hkey": 18, "hop": 19, "hres": 30, "htape": 13, "htitle": 15}},
+    ring_w=3, ring_gap=2, win_r=4, card_r=4, key_r=4,
+    win=dict(header="fill", frame=(2, "#ffffff"), frame_back=(2, "#ffffff"), rule=2),
+    bar=dict(fill="#000000", line=(2, "#ffffff"), chip_cur="#1a1a1a"),
+    buttons={"normal": {"border": (2, "#ffffff")}, "tonal": {"border": (2, "#ffffff"), "fill": "#262626",
+                                                              "ink": "#ffffff"},
+             "danger": {"border": (2, "#ffffff")}},
+    lcd="#000000", lcd_border=(2, "#ffffff"), lcd_ink="#ffffff",
+)
+VARIANTS = (A, B, C)
+RICED = (LUNA, COAST)
+STYLES = (PICO, WB, ADW)
+SHEET = (A, B, C, LUNA, COAST, PICO, WB, ADW, CONTRAST)
+
+# role sizes (px), weight step and bpp. A theme's `sizes` overrides the size;
+# a crisp theme draws every face at 1 bpp; a 13 px or smaller face is 2 bpp.
+HH = {"tab": (13, "semi", 2), "status": (12, "med", 2), "title": (19, "bold", 4),
+      "meta": (12, "body", 2), "key": (11, "semi", 2), "hint": (12, "med", 2),
+      "hkey": (16, "med", 4), "hop": (17, "med", 4), "hres": (28, "semi", 4),
+      "htape": (12, "body", 2), "htitle": (14, "semi", 4)}
+DK = {"chip": (15, "med", 4), "status": (15, "med", 4), "label": (13, "med", 4),
+      "wtitle": (15, "semi", 4), "row": (15, "body", 4), "col": (12, "semi", 4),
+      "meta": (14, "body", 4), "tape": (15, "body", 4), "result": (44, "semi", 4),
+      "keypad": (22, "med", 4), "op": (24, "med", 4)}
+
+
+def F(T, role, table, k=1):
+    size, w, bpp = table[role]
+    size = T["sizes"].get("hh" if table is HH else "dk", {}).get(role, size)
+    if T["fam"] == "petme":
+        return Petme(max(1, size // 8), k)
+    if T["render"]["text"] == "crisp":
+        bpp = 1
+    elif size <= 13:
+        bpp = 2
+    weight = T.get("w_" + role, T["w_" + w])
+    return Face(T["fam"], size, weight, bpp, k)
+
+
+def kscale(T, desk):
+    return T["render"]["scale"] if desk else 1
+
+
+def mid_base(face, y, h):
+    """The baseline that centres a face's capitals in a box."""
+    return y + (h + face.cap) // 2
+
+
+def focus_ring(cv, T, x, y, w, h, r):
+    """The focus mark: the engine's, around any part, whatever its kind."""
+    g, t = T["ring_gap"], T["ring_w"]
+    o = g + t
+    ox = int(-(-o // 1))
+    cv.ring(x - ox, y - ox, w + 2 * ox, h + 2 * ox, r + ox if r else 0, t, T["accent"],
+            T["ring_alpha"], inset=ox - o)
+
+
+def soft(cv, T, x, y, w, h, r, k=1.0, corners=None):
+    if T["shadow"]:
+        cv.shadow(x, y, w, h, r, T["shadow"], k if T["shadow"][0] == "soft" else 1.0, corners)
+
+
+def tile_col(T, ic):
+    return (T["tiles"] or {}).get(ic)
+
+
+def paint(p, y0=None, h=None, mode="smooth"):
+    """A theme paint: a colour, or a list of colours or (t, colour) stops."""
+    if isinstance(p, list):
+        stops = p if isinstance(p[0], tuple) else [(i / (len(p) - 1), c) for i, c in enumerate(p)]
+        return grad(stops, y0, h, mode)
+    return p
+
+
+def bevel_of(cv, T, x, y, w, h, inset=False):
+    if T["hi"]:
+        hi, lo = (T["lo"], T["hi"]) if inset else (T["hi"], T["lo"])
+        cv.bevel(x, y, w, h, hi, lo)
+
+
+# ==========================================================================
+# drawn backdrops
+# ==========================================================================
+def _smooth(pts, n=24):
+    out = []
+    P = [pts[0]] + pts + [pts[-1]]
+    for i in range(1, len(P) - 2):
+        p0, p1, p2, p3 = P[i - 1], P[i], P[i + 1], P[i + 2]
+        for k in range(n):
+            t = k / n
+            out.append(tuple(0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t
+                                    + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t * t
+                                    + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t ** 3)
+                             for j in range(2)))
+    out.append(tuple(pts[-1]))
+    return out
+
+
+def backdrop(cv, T, surface):
+    """Rasterise a theme's shape list into the surface: what the device lays
+    into the one wallpaper bake (or redraws clipped to a damaged rect)."""
+    W, H = cv.W, cv.H
+    X = lambda v: v * W / 1000.0
+    Y = lambda v: v * H / 1000.0
+    for sh in T["backdrop"].get(surface, []):
+        k, at, a = sh["k"], sh.get("at"), sh.get("a", 1.0)
+        p = paint(sh["p"], mode=sh.get("mode", "smooth"))
+        if k == "fill":
+            cv.rect(0, 0, W, H, p, a)
+        elif k == "band":
+            y0, y1 = round(Y(at[0])), round(Y(at[1]))
+            cv.rect(0, y0, W, y1 - y0, p, a)
+        elif k in ("circle", "ellipse", "pie"):
+            cx, cy = X(at[0]), Y(at[1])
+            rx = Y(at[2]) if k != "ellipse" else X(at[2])
+            ry = Y(at[2]) if k != "ellipse" else Y(at[3])
+            x0, y0 = int(cx - rx), int(cy - ry)
+            w, h = int(2 * rx) + 2, int(2 * ry) + 2
+            box = lambda s: ((cx - rx - x0) * s, (cy - ry - y0) * s, (cx + rx - x0) * s, (cy + ry - y0) * s)
+            if k == "pie":
+                cv.shape(x0, y0, w, h, lambda d, s: d.pieslice(box(s), at[3], at[4], fill=255), p, a)
+            else:
+                cv.shape(x0, y0, w, h, lambda d, s: d.ellipse(box(s), fill=255), p, a)
+        elif k == "rrect":
+            cv.rrect(round(X(at[0])), round(Y(at[1])), round(X(at[2])), round(Y(at[3])),
+                     Y(at[4]), p, a)
+        elif k == "wave":
+            pts = _smooth([(X(px), Y(py)) for px, py in at])
+            top = int(min(y for _, y in pts))
+            poly = lambda s: [(x * s, (y - top) * s) for x, y in pts] + [(W * s, (H - top) * s),
+                                                                          (0, (H - top) * s)]
+            cv.shape(0, top, W, H - top, lambda d, s: d.polygon(poly(s), fill=255), p, a)
+
+
+def backdrop_bytes(T):
+    """A binary shape record: kind and flags (2 bytes), int16 coordinates,
+    2 bytes per paint colour, 1 byte alpha."""
+    out = {}
+    for surf, shapes in T["backdrop"].items():
+        n = 0
+        for sh in shapes:
+            at = sh.get("at") or []
+            coords = sum(len(c) if isinstance(c, list) else 1 for c in at)
+            cols = len(sh["p"]) if isinstance(sh["p"], list) else 1
+            n += 2 + 2 * coords + 2 * cols + 1
+        out[surf] = (len(shapes), n)
+    return out
+
+
+def backdrop_mean(cv):
+    return cv.img.resize((1, 1), Image.BOX).getpixel((0, 0))
+
+
+# ==========================================================================
+# buttons: an app tags each button with a kind; the theme styles the kind
+# ==========================================================================
+KINDS = ("normal", "primary", "tonal", "danger", "toggle")
+
+
+def bstyle(T, app, kind):
+    """Defaults derive from the base roles; the theme's `buttons` override per
+    kind, then its `app_buttons[app]` per kind. Every other kind derives from
+    the resolved `normal`."""
+    def over(st, k):
+        st.update(T["buttons"].get(k, {}))
+        st.update(T["app_buttons"].get(app, {}).get(k, {}))
+        return st
+    n = over(dict(fill=T["raised"], ink=T["text"], border=None, shape="round", r=T["key_r"],
+                  font="key", bevel=T["edges"] == "bevel"), "normal")
+    derived = {
+        "normal": n,
+        "toggle": dict(n),
+        "tonal": dict(n, ink=T["value"], font="op"),
+        "primary": dict(n, fill=T["value"], ink=T["value_ink"], font="op", border=None),
+        "danger": dict(n, ink=T["danger"] or n["ink"]),
+    }
+    return n if kind == "normal" else over(derived[kind], kind)
+
+
+def button(cv, T, app, kind, x, y, w, h, label, fonts, focus=False):
+    st = bstyle(T, app, kind)
+    bx, by, bw, bh, r = x, y, w, h, min(st["r"], h / 2)
+    if st["shape"] == "circle":
+        d = min(h, w) if w < 1.5 * h else h
+        bh = d
+        bw = d if w < 1.5 * h else w - (h - d)
+        bx, by, r = x + (w - bw) // 2, y + (h - d) // 2, d / 2
+    elif st["shape"] == "square":
+        r = 0
+    cv.rrect(bx, by, bw, bh, r, paint(st["fill"], by, bh))
+    if st["border"]:
+        cv.ring(bx, by, bw, bh, r, st["border"][0], st["border"][1])
+    if st["bevel"]:
+        bevel_of(cv, T, bx, by, bw, bh)
+    f = fonts[st["font"]]
+    if label == "⌫":
+        s = max(12, int(f.cap * 1.6))
+        icon(cv, "backspace", bx + (bw - s) // 2, by + (bh - s) // 2, s, st["ink"])
+    elif label.isalnum() or label == ".":
+        cv.text(bx + bw // 2, mid_base(f, by, bh), label, f, st["ink"], align="center")
+    else:
+        gm, _, gy, _ = f.glyph(label)
+        cv.text(bx + bw // 2, by + (bh - gm.size[1] * cv.k) // 2 - gy * cv.k, label, f, st["ink"],
+                align="center")
+    if focus:
+        focus_ring(cv, T, bx, by, bw, bh, r)
+
+
+# ==========================================================================
+# bars
 # ==========================================================================
 TABS = ("Games", "Mine", "Apps", "Make")
 SHELF = ("pixel_pet", "star_catcher", "sky_run", "hop_quest", "harpoon_pop")
 
 
-def bar_line(cv, T, W):
-    if T["frame"] == "paper":
-        cv.rect(0, 19, W, 1, T["line"])
-    elif T["outline"]:
-        cv.rect(0, 18, W, 2, T["line"])
+def start_button(cv, T, x, y, w, h, label=None, face=None):
+    """A start-style pill: rounded on the right, a green gradient."""
+    g = [(0, "#6fd06a"), (0.45, "#3c9c37"), (1, "#2a7a26")]
+    cv.rrect(x, y, w, h, h / 2, grad(g, y, h), corners=(False, True, True, False))
+    px = h - 8
+    moy(cv, x + 6, y + (h - px) // 2, px, "#ffffff", "#3c9c37")
+    if label:
+        cv.text(x + 8 + px, mid_base(face, y, h), label, face, "#ffffff", shadow=("#1c4a1a", 0.8, 1, 1))
 
 
+def workspaces(cv, x, y, h, ink, dim):
+    cv.rrect(x, y + h // 2 - 4, 26, 8, 4, ink)
+    for i in range(2):
+        cv.rrect(x + 32 + i * 12, y + h // 2 - 4, 8, 8, 4, dim)
 
 
-def meta(cv, x, y, w, T):
-    t = "Platformer  ·  Built in  ·  Played today"
-    cv.ctext(x, y, w, t.upper().replace("·", "/") if T["upper"] else t, T["dim"], T["cap"])
+def keycap(cv, T, x, base, label, face, bg):
+    """A key hint: a small cap, its legend centred."""
+    K = T["keycap"]
+    h = 15
+    y = base - h + 3
+    w = 18 if label == "enter" else max(15, face.width(label) + 8)
+    fill = K["fill"] or mix(bg, T["text"], 0.16 if T["mode"] == "dark" else 0.10)
+    cv.rrect(x, y, w, h, K["r"], paint(K["grad"], y, h) if K["grad"] else fill, K["alpha"])
+    if K["border"]:
+        cv.ring(x, y, w, h, K["r"], K["border"][0], K["border"][1])
+    if K["bevel"]:
+        bevel_of(cv, T, x, y, w, h)
+    ink = K["ink"] or T["text"]
+    if label == "enter":
+        icon(cv, "enter", x + 3, y + 1, 13, ink, stroke=2.2)
+    else:
+        cv.text(x + w // 2, mid_base(face, y, h), label, face, ink, align="center")
+    return w
 
 
-HOME_HINTS = (("⏎", "Play"), ("C", "Change"), ("/", "Search"))
+def hh_bar(cv, T, title=None):
+    """The handheld's top bar: system button, tabs (or ‹ and a title), status."""
+    W = cv.W
+    hb = T["hhbar"]
+    hh = hb["h"]
+    ink, dim = hb["ink"] or T["text"], hb["dim"] or T["dim"]
+    if hb["style"] == "grad":
+        cv.rect(0, 0, W, hh, grad(T["bar"]["grad"], 0, hh))
+    elif hb["style"] == "glass":
+        cv.frost(0, 0, W, hh, 0, 8, T["bar"]["fill"], T["bar"]["alpha"])
+    elif hb["style"] == "flat":
+        cv.rect(0, 0, W, hh, hb["fill"])
+    if hb["line"]:
+        cv.rect(0, hh - hb["line"][0], W, hb["line"][0], hb["line"][1])
+    sb = T["bar"]["sysbtn"]
+    if sb == "start":
+        start_button(cv, T, 0, 2, 32, hh - 4)
+        x = 40
+    elif sb == "glyph":
+        moy(cv, 6, (hh - 16) // 2, 16, ink, hb["fill"] or T["bar"]["fill"] or T["surface"])
+        x = 30
+    elif sb == "workspaces":
+        cv.rrect(8, hh // 2 - 4, 18, 8, 4, ink)
+        x = 36
+    else:
+        sys_fill, body, eye = hb["sys"] or T["bar"]["sys"] or (T["raised"], T["value"], T["raised"])
+        cv.rrect(5, 4, 22, 20, 7, sys_fill)
+        moy(cv, 7, 5, 18, body, eye)
+        x = 38
+    framed = hb["style"] != "none"
+    if title:
+        ft = F(T, "htitle", HH)
+        b = mid_base(ft, 0, hh) if framed else 18
+        icon(cv, "back", x - 6, b - ft.cap // 2 - 8, 16, ink)
+        cv.text(x + 14, b, title, ft, ink)
+    else:
+        ft = F(T, "tab", HH)
+        base = mid_base(ft, 0, hh) if framed else 18
+        for t in TABS:
+            cur = t == "Games"
+            tw = ft.width(t)
+            if cur and T["tabs"]["style"] == "pill":
+                cv.rrect(x - 6, (hh - 18) // 2, tw + 12, 18, 5 if hb["style"] == "glass" else 3,
+                         T["tabs"]["pill"])
+                cv.text(x, base, t, ft, T["tabs"]["pill_ink"])
+            else:
+                cv.text(x, base, t, ft, ink if cur else dim)
+                if cur:
+                    uy = 22 if not framed else hh - 4 - (hb["line"][0] if hb["line"] else 0)
+                    cv.rrect(x, uy, tw, 2 * cv.k if not cv.aa else 3, 1.5, T["value"])
+            x += tw + (13 if T["tabs"]["style"] == "bar" else 14)
+    fs = F(T, "status", HH)
+    if T["bar"]["tray"]:
+        cv.rect(W - 78, 0, 78, hh, grad(T["bar"]["tray"], 0, hh))
+        cv.rect(W - 78, 0, 1, hh, "#0b4fae")
+    w = cv.text(W - 7, mid_base(fs, 0, hh) if framed else 18, "14:32", fs, ink, align="right")
+    iy = (hh - 16) // 2 if framed else 7
+    icon(cv, "battery", W - 7 - w - 22, iy, 16, ink)
+    icon(cv, "wifi", W - 7 - w - 41, iy - 1, 15, ink)
+    return hh if framed else 28
 
 
-def home(cv, T, W, H, wall=False):
-    if T["desk_pattern"] and not wall:
-        desk_bg(cv, T, W, H)
-    if wall:
-        cv.rect(0, 0, W, 20, T["bg"])
-    bar_line(cv, T, W)
-    moy_button(cv, T)
-    tab_row(cv, 34, 4, TABS, "Games", T)
-    status(cv, T, W - 8)
-    n, hero, gap = 64, 128, 12
-    cx = W // 2
-    hy = 34
-    hx = cx - hero // 2
+# ==========================================================================
+# handheld home, 320x240
+# ==========================================================================
+def new_cv(T, desk, bg=None):
+    W, H = (1024, 600) if desk else (320, 240)
+    return Cv(W, H, bg or T["bg"], k=kscale(T, desk), aa=T["render"]["shapes"] == "smooth")
+
+
+def hh_home(T):
+    W = 320
+    bg = T["home_bg"] or T["bg"]
+    cv = new_cv(T, False, bg)
+    backdrop(cv, T, "home")
+    ob = T["on_backdrop"]
+    hh_bar(cv, T)
+    n, hero, gap = 64, 128, 14
+    hx, hy = (W - hero) // 2, 36
     step = n + gap
+    cr = T["card_r"]
     for i, name in enumerate(SHELF):
         d = i - 2
         if d == 0:
             continue
         nx = (hx - gap - n) + (d + 1) * step if d < 0 else hx + hero + gap + (d - 1) * step
-        card(cv, name, nx, hy + n // 2, n, T, dimmed=True, n=n)
-    card(cv, "sky_run", hx, hy, hero, T, focus=True, n=n)
-    ty = hy + hero + 12
-    cv.ctext(0, ty, W, U(T, "Sky Run"), T["text"], T["title"])
-    meta(cv, 0, ty + 16, W, T)
-    hints(cv, 8, H - 14, HOME_HINTS, T, right=(("L", ""), ("R", "Tabs")))
+        ny = hy + (hero - n) // 2
+        soft(cv, T, nx, ny, n, n, cr * 0.7, 0.4)
+        cv.paste(cover(name, n), nx, ny, r=cr * 0.7)
+        if T["dim_neighbours"]:
+            cv._blend(nx, ny, cv.rmask(n, n, cr * 0.7), bg, T["dim_neighbours"])
+    soft(cv, T, hx, hy, hero, hero, cr, 0.8)
+    cv.paste(cover("sky_run", n, 2), hx, hy, r=cr)
+    focus_ring(cv, T, hx, hy, hero, hero, cr)
+    ink, dim, sh = ob["ink"] or T["text"], ob["dim"] or T["dim"], ob["shadow"]
+    T["_under_title"] = cv.img.crop((60, 176, 260, 236)).resize((1, 1), Image.BOX).getpixel((0, 0))
+    cv.text(W // 2, 190, "Sky Run", F(T, "title", HH), ink, align="center", shadow=sh)
+    fmeta = F(T, "meta", HH)
+    meta = "Platformer  ·  Built in  ·  Played today"
+    if fmeta.width(meta) > W - 12:
+        meta = meta.replace("  ·  ", " · ")
+    cv.text(W // 2, 207, meta, fmeta, dim, align="center", shadow=sh)
+    fk, fh = F(T, "key", HH), F(T, "hint", HH)
+    x, base = 8, 233
+    for k, label in (("enter", "Play"), ("C", "Change"), ("/", "Search")):
+        x += keycap(cv, T, x, base, k, fk, bg) + 4
+        x += cv.text(x, base, label, fh, dim, shadow=sh) + 11
+    x = W - 8 - fh.width("Tabs")
+    cv.text(x, base, "Tabs", fh, dim, shadow=sh)
+    x -= 4 + 15
+    keycap(cv, T, x, base, "R", fk, bg)
+    keycap(cv, T, x - 18, base, "L", fk, bg)
+    return cv
 
 
 # ==========================================================================
-# the 1024x600 home: hero, details, the shelf
+# the desk, 1024x600
 # ==========================================================================
-def big_home(cv, T, W, H):
-    if T["desk_pattern"]:
-        desk_bg(cv, T, W, H)
-    bar_line(cv, T, W)
-    moy_button(cv, T)
-    tab_row(cv, 34, 4, TABS, "Games", T)
-    status(cv, T, W - 28)
-    cv.icon("close", W - 18, 4, T["text"])
-    hx, hy = 24, 32
-    card(cv, "sky_run", hx, hy, 128, T, n=64)
-    dx = 172
-    cv.text(dx, hy - 2, U(T, "Sky Run"), T["text"], T["title"], 2)
-    t = "Platformer  ·  Built in  ·  Played today"
-    cv.text(dx, hy + 28, t.upper().replace("·", "/") if T["upper"] else t, T["dim"], T["cap"])
-    desc = ("Run and jump across the hills, grab every coin before the",
-            "clouds roll in, and find the flag at the end of the day.")
-    for i, line in enumerate(desc):
-        cv.text(dx, hy + 44 + i * 13, line, T["text"], T["body"])
-    sy = hy + 78
-    for i, (k, v) in enumerate((("Played", "12 times"), ("Last", "Today"), ("Size", "21 KB"),
-                                ("By", "Moybyte"))):
-        sx = dx + i * 78
-        cv.text(sx, sy, U(T, k), T["dim"], T["cap"])
-        cv.text(sx, sy + 10, v, T["text"], T["body"])
-    by = hy + 108
-    button(cv, dx, by, 76, 22, U(T, "Play"), T, "primary", icon="play")
-    button(cv, dx + 82, by, 76, 22, U(T, "Change"), T)
-    button(cv, dx + 164, by, 64, 22, U(T, "Copy"), T)
-    sy = 196
-    t = "Games  ·  11"
-    cv.text(24, sy - 15, t.upper().replace("·", "/") if T["upper"] else t, T["dim"], T["cap"])
-    names = ("pixel_pet", "star_catcher", "sky_run", "hop_quest", "harpoon_pop",
-             "brick_siege", "bullet_storm", "letter_blitz")
-    x = 24
-    for nm in names:
-        card(cv, nm, x, sy, 64, T, focus=nm == "sky_run", dimmed=nm != "sky_run", n=64)
-        x += 74
-    hints(cv, 12, H - 14, HOME_HINTS, T, right=(("L", ""), ("R", "Tabs")))
-
-
-# ==========================================================================
-# pages
-# ==========================================================================
-def topbar_page(cv, T, W, title, H=240):
-    if T["desk_pattern"]:
-        desk_bg(cv, T, W, H)
-    bar_line(cv, T, W)
-    cv.icon("back", 6, 4, T["dim"])
-    cv.text(20, 4, title.upper() if T["upper"] else title, T["text"], "body")
-    status(cv, T, W - 8)
-
-
-def section(cv, x, y, label, T):
-    cv.text(x + 8, y, label.upper() if T["upper"] else label, T["dim"], T["cap"])
-
-
-def settings(cv, T, W, H):
-    topbar_page(cv, T, W, "Settings", H)
-    x, w = 8, W - 16
-    y = 24
-    section(cv, x, y, "General", T)
-    y += 11
-    group(cv, x, y, w, 60, T)
-    row(cv, x, y, w, "Wi-Fi", T, True, "toggle")
-    row(cv, x, y + 20, w, "Appearance", T, "Moy", "link", focus=True)
-    row(cv, x, y + 40, w, "Text size", T, "Medium", "cycle", last=True)
-    y += 66
-    section(cv, x, y, "About", T)
-    y += 11
-    group(cv, x, y, w, 80, T)
-    for i, (k, v) in enumerate((("Moybyte", "0.9.4"), ("Board", "T-Deck Plus"),
-                                ("Storage", "1.2 MB free"), ("Battery", "82%"))):
-        row(cv, x, y + i * 20, w, k, T, v, "info", last=i == 3)
-    hints(cv, 8, H - 14, (("⏎", "Open"), ("Esc", "Back")), T)
-
-
-def mini_home(cv, x, y, V, line):
-    """A theme's preview: one 64x48 drawing at every size, in the variant the
-    Mode row picks."""
-    w, h = 64, 48
-    cv.rrect(x, y, w, h, V["bg"], 2)
-    if V["desk_pattern"] == "dots":
-        for yy in range(y + 12, y + h - 2, 4):
-            for xx in range(x + 2, x + w - 2, 4):
-                cv.put(xx, yy, mix(V["bg"], V["text"], 0.25))
-    elif V["desk_pattern"] == "stars":
-        for sx, sy in ((6, 14), (55, 12), (12, 40), (52, 38), (30, 44)):
-            cv.put(x + sx, y + sy, V["stars"][1])
-    tab = V["sections"]["Games"] if V["sections"] else (V["value"] if V["frame"] != "contrast"
-                                                         else V["text"])
-    cv.rect(x + 4, y + 4, 10, 2, V["text"])
-    cv.rect(x + 4, y + 7, 10, 1, tab)
-    cv.rect(x + 17, y + 4, 7, 2, V["dim"])
-    cv.rect(x + 27, y + 4, 7, 2, V["dim"])
-    cv.rect(x + w - 9, y + 4, 5, 2, V["dim"])
-    cs = 24
-    cxx = x + (w - cs) // 2
-    side = mix(V["bg"], "#29adff", 0.5) if V["dim_cards"] else "#29adff"
-    cv.rect(x + 4, y + 18, 12, 12, side)
-    cv.rect(x + w - 16, y + 18, 12, 12, side)
-    if V["frame"] == "paper":
-        cv.rect(cxx - 2, y + 11, cs + 4, cs + 4, V["line"])
-        cv.rect(cxx - 1, y + 12, cs + 2, cs + 2, V["raised"])
-    else:
-        cv.rect(cxx - 2, y + 11, cs + 4, cs + 4, V["accent"])
-    cv.rect(cxx, y + 13, cs, cs, "#29adff")
-    cv.rect(cxx, y + 13 + 16, cs, 8, "#008751")
-    cv.rect(cxx + 10, y + 13 + 11, 4, 5, "#ff004d")
-    cv.rect(x + w // 2 - 8, y + h - 7, 16, 2, V["text"])
-    cv.rbox(x, y, w, h, line, 2, 1)
-
-
-def accents(T):
-    if T["mode"] == "light":
-        return ("#d45f00", "#d13f2a", "#c2306f", "#6f4fd8", "#0a72bd", "#0d8160", "#4c8417",
-                T["text"])
-    return ("#ffc53d", "#ff7a59", "#f2719f", "#a98bff", "#5cc4ff", "#55d6a6", "#9fd36a",
-            T["text"])
-
-
-def appearance(cv, T, x, y, w, desk=False):
-    section(cv, x, y, "Theme", T)
-    y += 14
-    n = len(KEPT)
-    tw, th = 64, 48
-    g = min((w - 16 - n * tw) // (n - 1), 24)
-    x0 = x + 8 + (w - 16 - (n * tw + (n - 1) * g)) // 2
-    edge = T["group_edge"] or T["line"]
-    if T["frame"] == "studio" or T["outline"]:
-        edge = T["line"]
-    for i, Tk in enumerate(KEPT):
-        nm = Tk["name"]
-        tx = x0 + i * (tw + g)
-        V = VARIANTS.get((nm, T["mode"])) or VARIANTS[(nm, Tk["modes"][0])]
-        mini_home(cv, tx, y, V, edge)
-        on = nm == T["name"]
-        cv.ctext(tx - 8, y + th + 5, tw + 16, nm, T["text"] if on else T["dim"], T["body"])
-        if on:
-            cur_bar(cv, tx, y + th + 17, tw, T)
-        modes = [m for m in ("dark", "light") if (nm, m) in VARIANTS]
-        cap = "Dark · Light" if len(modes) == 2 else f"{modes[0].title()} only"
-        cv.ctext(tx - 8, y + th + 20, tw + 16, cap, T["dim"], T["cap"])
-    y += th + 33
-    rows = [("Mode", (("Dark", "Light"), T["mode"].title()), "seg"),
-            ("Accent", (accents(T), 0), "swatches"),
-            ("Tint", "Night", "cycle"),
-            ("Wallpaper", "Moy's night", "link")]
-    if desk:
-        rows.append(("Window style", "Soft", "cycle"))
-    rows.append(("Code font", "Galmuri Mono", "cycle"))
-    rh = 20 if not desk else 17
-    group(cv, x + 8, y, w - 16, rh * len(rows), T)
-    for i, (label, value, kind) in enumerate(rows):
-        row(cv, x + 8, y + i * rh, w - 16, label, T, value, kind, focus=label == "Tint",
-            last=i == len(rows) - 1, h=rh)
-    return y + rh * len(rows)
-
-
-def appearance_page(cv, T, W, H):
-    topbar_page(cv, T, W, "Appearance", H)
-    appearance(cv, T, 0, 24, W)
-    hints(cv, 8, H - 14, (("⏎", "Open"), ("Esc", "Back")), T)
-
-
-# ==========================================================================
-# the editors
-# ==========================================================================
-CODE = [
-    ("c", "# Star Catcher: catch the falling stars before they reach the ground"),
-    ("", ""),
-    ("k", "def ", "f", "_spawn", "t", "(s):"),
-    ("t", "    s[", "n", "0", "t", "] = rnd(W - ", "n", "8", "t", ")"),
-    ("t", "    s[", "n", "1", "t", "] = -rnd(H * ", "n", "0.5", "t", ") - ", "n", "8"),
-    ("c", "    # speed ramps with score: harder the better you do"),
-    ("t", "    s[", "n", "2", "t", "] = _base_speed() * (", "n", "0.7", "t", " + rnd(",
-     "n", "0.6", "t", ")) * (", "n", "1.0", "t", " + score * ", "n", "0.02", "t", ")"),
-    ("", ""),
-    ("k", "def ", "f", "_init", "t", "():"),
-    ("t", "    background(col(", "s", "\"black\"", "t", "))  ", "c", "# the night sky"),
-    ("k", "    global ", "t", "score, combo, lives, bx, stars, catcher"),
-    ("t", "    score = ", "n", "0"),
-    ("t", "    combo = ", "n", "0"),
-    ("t", "    lives = LIVES  ", "c", "# l 1 I | ( ) all differ"),
-    ("t", "    bx = W / ", "n", "2", "t", " - BW / ", "n", "2"),
-    ("k", "    for ", "t", "_i ", "k", "in ", "t", "range(int(cfg(", "s", "\"star_count\"",
-     "t", ", ", "n", "5", "t", "))):"),
-    ("t", "        s = [", "n", "0", "t", ", ", "n", "0", "t", ", ", "n", "1", "t", "]"),
-]
-
-
-def editor_bar(cv, T, W, cur):
-    bar_line(cv, T, W)
-    cv.icon("back", 4, 4, T["dim"])
-    cv.text(17, 4, "Star Catcher", T["text"], "body")
-    x = 100
-    for name, ic in (("Code", "code"), ("Sprites", "sprite"), ("Map", "map"), ("Sound", "note")):
-        if name == cur:
-            w = cv.tw(name, "body") + 16
-            cv.icon(ic, x, 4, T["text"])
-            cv.text(x + 14, 4, name, T["text"], "body")
-            cur_bar(cv, x, 17, w - 2, T)
-            x += w + 4
-        else:
-            cv.icon(ic, x, 4, T["dim"])
-            x += 17
-    x += 4
-    cv.icon("undo", x, 4, T["dim"])
-    cv.icon("redo", x + 16, 4, T["line"] if T["mode"] == "dark" else "#b3aec8")
-    button(cv, W - 46, 2, 40, 16, "Run", T, "primary", icon="play")
-
-
-def code_editor(cv, T, W, H):
-    editor_bar(cv, T, W, "Code")
-    syn = T["syn"]
-    cv.rect(0, 20, W, 184, T["surface"])
-    y0, lh, cw = 23, 11, 5
-    cur = 13
-    gut = 20
-    for i, line in enumerate(CODE):
-        y = y0 + i * lh
-        if y + 10 > 203:
-            break
-        bgc = T["sel_rest"] if i == cur else T["surface"]
-        if i == cur:
-            cv.rect(0, y - 1, W, lh, bgc)
-            cv.rect(0, y - 1, 2, lh, T["value"])
-        cv.rtext(gut - 3, y, str(i + 12), T["text"] if i == cur else T["dim"], "code")
-        x = gut + 4
-        for k in range(0, len(line) - 1, 2):
-            for ch in line[k + 1]:
-                if x + cw > W - 4:
-                    break
-                x = cv.text(x, y, ch, syn[line[k] or "t"], "code")
-        if x + cw > W - 4:
-            for j, f in enumerate((0.35, 0.6, 0.85)):
-                cv.shade(W - 4 - (3 - j) * 4, y - 1, 4, lh - 1, f, bgc)
-            cv.rect(W - 4, y - 1, 4, lh - 1, bgc)
-        if i == cur:
-            cv.rect(gut + 4 + cw * 12, y - 1, 2, 10, T["accent"])
-    cv.rect(0, 204, W, 1, T["line"])
-    cv.text(8, 206, "Ln 25, Col 13", T["dim"], "cap")
-    cv.text(78, 206, "178 lines", T["dim"], "cap")
-    cv.rrect(132, 209, 4, 4, "#5cd08a" if T["mode"] == "dark" else "#22985a", 1)
-    cv.text(140, 206, "No issues", T["dim"], "cap")
-    cv.rtext(W - 8, 206, "Python", T["dim"], "cap")
-    keys = "=()[]{}<>:;,.\"_%"
-    kw = (W - 4) // len(keys)
-    for i, ch in enumerate(keys):
-        x = 3 + i * kw
-        raised_box(cv, x, 220, kw - 2, 17, T)
-        cv.ctext(x, 222, kw - 2, ch, T["text"], "title")
-
-
-FROG = ["00bb00bb", "0b7bb7b0", "0bbbbbb0", "bb0bb0bb", "bbbbbbbb", "bbbbbbbb",
-        "0bbbbbb0", "00b00b00"]
-
-
-def checker(cv, x, y, w, h, T, s=4):
-    """Transparent: a mid-grey checker with a hairline diagonal; neither grey
-    is a palette colour, and the pattern is never a solid."""
-    a, b = "#6e6e78", "#9a9aa4"
-    for yy in range(0, h, s):
-        for xx in range(0, w, s):
-            cv.rect(x + xx, y + yy, min(s, w - xx), min(s, h - yy),
-                    a if ((xx // s) + (yy // s)) & 1 else b)
-
-
-def sprite_editor(cv, T, W, H):
-    editor_bar(cv, T, W, "Sprites")
-    tools = ("pencil", "bucket", "line", "rect", "oval", "select")
-    for i, t in enumerate(tools):
-        y = 26 + i * 21
-        if i == 0:
-            cv.rect(4, y + 1, 2, 16, T["value"])
-            cv.icon(t, 9, y + 3, T["text"])
-        else:
-            cv.icon(t, 9, y + 3, T["dim"])
-    cv.rect(8, 26 + 6 * 21 + 1, 12, 1, T["line"])
-    for i, t in enumerate(("flip", "rotate")):
-        cv.icon(t, 9, 26 + 6 * 21 + 6 + i * 21, T["dim"])
-    cx, cy, cs = 30, 24, 22
-    cv.rrect(cx - 1, cy - 1, 8 * cs + 1, 8 * cs + 1, T["line"], 1)
-    for r in range(8):
-        for c in range(8):
-            v = int(FROG[r][c], 16)
-            if v == 0:
-                checker(cv, cx + c * cs, cy + r * cs, cs - 1, cs - 1, T, 7)
-            else:
-                cv.rect(cx + c * cs, cy + r * cs, cs - 1, cs - 1, P(v))
-    fx, fy = cx + 3 * cs, cy + 2 * cs
-    cv.rbox(fx - 1, fy - 1, cs + 1, cs + 1, "#000000", 0, 1)
-    cv.rbox(fx - 3, fy - 3, cs + 5, cs + 5, T["accent"], 0, 2)
-    rx, rw = 214, W - 214 - 6
-    cv.text(rx, 24, "Sprite", T["dim"], "cap")
-    _chev(cv, rx, 39, T["dim"], left=True)
-    cv.text(rx + 8, 36, "12", T["text"], "body")
-    _chev(cv, rx + 22, 39, T["dim"])
-    cv.rtext(rx + rw - 10, 36, "8×8", T["text"], "body")
-    _chev(cv, rx + rw - 4, 39, T["dim"])
-    _chev(cv, rx + rw - 18 - cv.tw("8×8", "body"), 39, T["dim"], left=True)
-    checker(cv, rx, 52, rw, 30, T, 3)
-    for r in range(8):
-        for c in range(8):
-            v = int(FROG[r][c], 16)
-            if v:
-                cv.put(rx + 8 + c, 63 + r, P(v))
-                cv.rect(rx + 26 + c * 3, 55 + r * 3, 3, 3, P(v))
-    cv.rrect(rx + rw - 30, 61, 26, 12, T["surface"], 2)
-    cv.ctext(rx + rw - 30, 62, 26, "1/2", T["text"], "cap")
-    cv.text(rx, 88, "Colour", T["dim"], "cap")
-    sw = 11
-    for i in range(16):
-        px, py = rx + (i % 8) * (sw + 1), 100 + (i // 8) * (sw + 4)
-        if i == 0:
-            checker(cv, px, py, sw, sw, T, 3)
-            for k in range(sw):
-                cv.put(px + sw - 1 - k, py + k, "#ffffff")
-        else:
-            cv.rect(px, py, sw, sw, P(i))
-    sel = 11
-    px, py = rx + (sel % 8) * (sw + 1), 100 + (sel // 8) * (sw + 4)
-    cur_bar(cv, px, py + sw + 1, sw, T)
-    cv.text(rx, 130, "11  Green", T["text"], "cap")
-    cv.rtext(rx + rw, 130, "0 = clear", T["dim"], "cap")
-    button(cv, rx, 144, rw // 2 - 2, 18, "Get", T, icon="get")
-    button(cv, rx + rw // 2 + 2, 144, rw // 2 - 2, 18, "Put", T, icon="put")
-    button(cv, rx, 167, rw, 18, "Whole sheet", T)
-    hints(cv, 8, H - 14, (("Space", "Draw"), ("[ ]", "Colour"), ("Z", "Undo")), T,
-          right=(("Tab", "Tools"),))
-
-
-# ==========================================================================
-# Calc: an object -- a paper tape, a display, a keypad
-# ==========================================================================
-KEYS = (("C", "⌫", "%", "÷"), ("7", "8", "9", "×"), ("4", "5", "6", "−"),
-        ("1", "2", "3", "+"), ("0", None, ".", "="))
-
-
-def calc_key(cv, x, y, w, h, lab, T, font, s, focus=False, big=False):
-    if lab == "=":
-        if T["frame"] not in ("contrast", "studio"):
-            cv.rrect(x, y + 1, w, h, mix(T["value"], "#000000", 0.4), max(0, T["radius"] - 1))
-        cv.rrect(x, y, w, h, T["value"], max(0, T["radius"] - 1))
-        if T["outline"]:
-            cv.rbox(x, y, w, h, T["line"], max(0, T["radius"] - 1), T["outline"])
-        ink = T["value_ink"]
-    else:
-        raised_box(cv, x, y, w, h, T)
-        ink = T["value"] if lab in "÷×−+%" else T["text"]
-        if T["frame"] in ("paper", "contrast"):
-            ink = T["text"]
-    if lab == "⌫":
-        k = 4 if big else 2
-        for yy, rr in enumerate(EXTRA["⌫"][:5]):
-            for xx, b in enumerate(rr):
-                if b == "#":
-                    cv.rect(x + (w - 5 * k) // 2 + xx * k, y + (h - 5 * k) // 2 + yy * k, k, k, ink)
-    elif lab == "." and big:
-        cv.rect(x + w // 2 - 3, y + h // 2 + 3, 6, 6, ink)
-    elif big:
-        big_glyph(cv, x, y, w, h, lab, ink)
-    else:
-        lh = {"body": 9, "title": 11}[font] * s
-        cv.ctext(x, y + (h - lh) // 2 - s, w, lab, ink, font, s)
-    if focus:
-        focus_ring(cv, x, y, w, h, T, max(0, T["radius"] - 1), gap=0, halo=False)
-
-
-def big_glyph(cv, x, y, w, h, lab, ink):
-    """A key legend in Galmuri11 Bold with every stroke doubled in height:
-    the 2x numerals the handheld keypad uses (cap 18 in a 37-pixel key)."""
-    g = GAL["Galmuri11-Bold"]["glyphs"].get(lab)
-    if not g:
-        return
-    adv, x0, y0, rows = g
-    gw = max(len(r) for r in rows) * 2
-    gh = len(rows) * 2
-    ox, oy = x + (w - gw) // 2, y + (h - gh) // 2
-    for yy, r in enumerate(rows):
-        for xx, b in enumerate(r):
-            if b == "#":
-                cv.rect(ox + xx * 2, oy + yy * 2, 2, 2, ink)
-
-
-def keypad(cv, x, y, w, h, T, font, s, g=6, focus="5", big=False):
-    kw = (w - 3 * g) // 4
-    kh = (h - 4 * g) // 5
-    for r, rr in enumerate(KEYS):
-        for c, lab in enumerate(rr):
-            if lab is None:
-                continue
-            ww = kw * 2 + g if lab == "0" else kw
-            calc_key(cv, x + c * (kw + g), y + r * (kh + g), ww, kh, lab, T, font, s,
-                     focus=lab == focus, big=big)
-
-
-def lcd(cv, x, y, w, h, T):
-    cv.rrect(x, y, w, h, T["lcd"], max(0, T["radius"] - 1))
-    if T["mode"] == "dark" and not T["outline"]:
-        cv.rect(x + 2, y, w - 4, 1, mix(T["lcd"], "#000000", 0.6))
-    if T["outline"]:
-        cv.rbox(x, y, w, h, T["line"], max(0, T["radius"] - 1), T["outline"])
-    elif T["frame"] == "studio":
-        cv.rbox(x, y, w, h, T["line"], 0, 1)
-
-
-def calc_page(cv, T, W, H):
-    topbar_page(cv, T, W, "Calc", H)
-    tx, ty, tw, th = 8, 26, 112, 206
-    lcd(cv, tx, ty, tw, th, T)
-    ink = T["lcd_ink"]
-    tape = (("120 − 36", "84"), ("36 + 48", "84"), ("84 ÷ 7", "12"), ("12 × 12", "144"))
-    yy = ty + 8
-    for e, r in tape:
-        cv.rtext(tx + tw - 8, yy, e, mix(ink, T["lcd"], 0.45), T["cap"])
-        cv.rtext(tx + tw - 8, yy + 10, "= " + r, mix(ink, T["lcd"], 0.3), T["body"])
-        yy += 26
-        cv.rect(tx + 8, yy - 5, tw - 16, 1, mix(ink, T["lcd"], 0.8))
-    cv.rtext(tx + tw - 8, ty + th - 52, "12 × 7", mix(ink, T["lcd"], 0.3), T["body"])
-    cv.rtext(tx + tw - 8, ty + th - 40, "84", ink, "title", 3)
-    keypad(cv, 130, ty + 2, W - 130 - 10, th - 4, T, "title", 1, big=True)
-
-
-# ==========================================================================
-# the desk
-# ==========================================================================
-def desk_bg(cv, T, W, H, top=0):
-    cv.rect(0, top, W, H - top, T["desk"])
-    if T["desk_pattern"] == "dots":
-        for yy in range(24, H, 8):
-            for xx in range(4, W, 8):
-                cv.put(xx, yy, mix(T["desk"], "#000000", 0.18))
-    elif T["desk_pattern"] == "stars":
-        dim, bright = T["stars"]
-        seed = [7]
-
-        def rnd(n):
-            seed[0] = (seed[0] * 1103515245 + 12345) & 0x7FFFFFFF
-            return seed[0] % n
-        tile = [(rnd(96), rnd(96), rnd(9)) for _ in range(14)]
-        for oy in range(0, H, 96):
-            for ox in range(0, W, 96):
-                for sx, sy, k in tile:
-                    x, y = ox + sx, oy + sy
-                    if y < max(22, top) or y >= H:
-                        continue
-                    if k == 0:
-                        cv.put(x, y, bright)
-                        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                            cv.put(x + dx, y + dy, dim)
-                    else:
-                        cv.put(x, y, dim if k > 2 else bright)
-
-
-def window(cv, x, y, w, h, title, icon, T, focus=True):
-    """Current window: the strip in the value colour (Studio: white, inverted)
-    and a 3-pixel drop. Behind: the strip sunk to the body, a dim title, the
-    body dimmed, and no drop in the flat or 1-bit themes."""
-    fr, r, th = T["frame"], T["radius"], 20
-    if focus or fr == "soft":
-        drop(cv, x, y, w, h, T, r, 3 if focus else 2)
-    label = U(T, title)
-    if fr == "studio":
-        cv.rect(x, y, w, h, T["surface"])
-        fill, ink = (T["value"], T["value_ink"]) if focus else (T["surface"], T["dim"])
-        cv.rect(x, y, w, th, fill)
-        cv.rbox(x, y, w, h, T["line"] if focus else "#333333", 0, 1)
-        cv.rect(x, y + th - 1, w, 1, T["line"] if focus else "#333333")
-        cv.icon(icon, x + 8, y + 4, ink, fill)
-        cv.text(x + 24, y + 4, label, ink, "body")
-        cv.icon("close", x + w - 17, y + 4, ink)
-        return y + th
-    if fr == "paper":
-        cv.rrect(x, y, w, h, T["surface"], r)
-        if focus:
-            cv.rrect(x, y, w, th, T["text"], r)
-            cv.rect(x, y + th - 3, w, 3, T["text"])
-            ink = T["raised"]
-        else:
-            ink = T["text"]
-        cv.rbox(x, y, w, h, T["line"], r, 1)
-        cv.rect(x, y + th - 1, w, 1, T["line"])
-        cv.icon(icon, x + 7, y + 4, ink, T["text"] if focus else T["surface"])
-        cv.text(x + 23, y + 4, label, ink, "body")
-        cv.icon("close", x + w - 18, y + 4, ink)
-        return y + th
-    cv.rrect(x, y, w, h, T["surface"], r)
-    if focus:
-        fill, ink = T["strip_on"], T["strip_on_ink"]
-    else:
-        fill, ink = T["surface"], T["dim"]
-    cv.rrect(x, y, w, th, fill, r)
-    cv.rect(x, y + th - r, w, r, fill)
-    if fr == "contrast":
-        cv.rbox(x, y, w, h, T["line"] if focus else T["dim"], r, 2)
-        cv.rect(x, y + th - 1, w, 2, T["line"] if focus else T["dim"])
-        cv.icon(icon, x + 7, y + 5, ink, fill)
-        cv.text(x + 23, y + 3, fit(cv, label, w - 50, T["body"]), ink, T["body"])
-        cv.icon("close", x + w - 18, y + 5, ink)
-        return y + th + 1
-    if focus and T["mode"] == "dark":
-        top_edge(cv, x, y, w, mix(fill, "#ffffff", 0.35), r)
-    elif not focus and T["group_edge"] and T["mode"] == "dark":
-        top_edge(cv, x, y, w, T["group_edge"], r)
-    if not focus:
-        cv.rect(x, y + th - 1, w, 1, T["line"])
-    cv.icon(icon, x + 7, y + 4, ink, fill if focus else T["dim"])
-    cv.text(x + 23, y + 4, label, ink, "body")
-    cv.icon("close", x + w - 18, y + 4, ink)
-    return y + th
-
-
+DESK = (("play", "Play"), ("projects", "Projects"), ("brush", "Paint"), ("book", "Storybook"),
+        ("folder", "Files"), ("calc", "Calc"), ("download", "Get carts"))
 FILES = (("brick_siege", "Game", "14 KB"), ("bullet_storm", "Game", "9 KB"),
          ("calc", "App", "6 KB"), ("coin_quest", "Game", "11 KB"),
          ("harpoon_pop", "Game", "12 KB"), ("hop_quest", "Game", "18 KB"),
@@ -1615,404 +1376,519 @@ FILES = (("brick_siege", "Game", "14 KB"), ("bullet_storm", "Game", "9 KB"),
          ("pin_light", "Game", "7 KB"), ("pixel_pet", "Game", "13 KB"),
          ("sky_run", "Game", "21 KB"), ("star_catcher", "Game", "16 KB"),
          ("storybook", "App", "9 KB"), ("tiny_runner", "Game", "8 KB"))
-PLACES = (("Projects", "projects", 16), ("Carts", "play", 11), ("Art", "brush", 4),
-          ("Music", "note", 2), ("Trash", "trash", 0))
+PLACES = (("Projects", "projects"), ("Carts", "cart"), ("Art", "brush"),
+          ("Music", "note"), ("Trash", "trash"))
 
 
-def files_window(cv, x, y, w, h, T, focus=False):
-    by = window(cv, x, y, w, h, "Files", "folder", T, focus)
-    big = T["body"] != "body"
-    rh = 14 if not big else 18
-    sw = 80 if not big else 100
-    section(cv, x, by + 5, "Places", T)
-    for i, (n, ic, cnt) in enumerate(PLACES):
-        yy = by + 18 + i * (rh + 2)
-        on = i == 0
-        if on:
-            cv.rrect(x + 4, yy - 2, sw - 6, rh + 1, T["sel_rest"], 2)
-            cv.rect(x + 4, yy - 2, 2, rh + 1, T["value"])
-        cv.icon(ic, x + 9, yy, T["text"] if on else T["dim"], T["dim"], T["value"])
-        cv.text(x + 24, yy + (0 if not big else 1), fit(cv, U(T, n), sw - 30, T["body"]),
-                T["text"] if on else T["dim"], T["body"])
-    cv.rect(x + sw, by, 1, y + h - by, T["line"] if T["frame"] != "studio" else "#333333")
-    lx, lw = x + sw + 1, w - sw - 1
-    kind_r, size_r = (lx + lw - 40, lx + lw - 8) if not big else (None, lx + lw - 8)
-    cv.text(lx + 8, by + 5, U(T, "Name"), T["dim"], T["cap"])
-    if kind_r:
-        cv.rtext(kind_r, by + 5, U(T, "Kind"), T["dim"], T["cap"])
-    cv.rtext(size_r, by + 5, U(T, "Size"), T["dim"], T["cap"])
-    if kind_r:
-        kind_w = max(cv.tw(U(T, k), T["cap"]) for _, k, _ in FILES)
-        name_w = kind_r - kind_w - 6 - (lx + 24)
+def desk_bar(cv, T):
+    b = T["bar"]
+    W = cv.W
+    h = b["h"]
+    y0 = 0 if b["edge"] == "top" else cv.H - h
+    k = cv.k
+    if b["style"] == "grad":
+        cv.rect(0, y0, W, h, grad(b["grad"], y0, h))
+    elif b["style"] == "glass":
+        cv.frost(0, y0, W, h, 0, 14, b["fill"], b["alpha"])
     else:
-        name_w = size_r - cv.tw("22 KB", T["cap"]) - 6 - (lx + 24)
-    for i, (n, kind, size) in enumerate(FILES):
-        yy = by + 17 + i * rh
-        if yy + rh > y + h - 2:
+        cv.rect(0, y0, W, h, b["fill"] or T["surface"], b["alpha"])
+    if b["line"]:
+        lw, lc = b["line"]
+        cv.rect(0, y0 + h - lw if b["edge"] == "top" else y0, W, lw, lc)
+    ink, dim = b["ink"] or T["text"], b["dim"] or T["dim"]
+    fc = F(T, "chip", DK, k)
+    if b["sysbtn"] == "start":
+        start_button(cv, T, 0, y0, 112, h, "moy", Face("dejavu-oblique", 18, 700, 4))
+        x = 124
+    elif b["sysbtn"] == "glyph":
+        moy(cv, 14, y0 + (h - 18) // 2, 18, ink, b["fill"] or T["surface"])
+        x = 46
+    elif b["sysbtn"] == "workspaces":
+        workspaces(cv, 14, y0, h, ink, dim)
+        x = 80
+    else:
+        sys_fill, body, eye = b["sys"] or (T["raised"], T["value"], T["raised"])
+        cv.rrect(8, y0 + 6, 32, 28, 9, sys_fill)
+        moy(cv, 12, y0 + 8, 24, body, eye)
+        x = 52
+    if b["app_title"]:
+        fb = Face(T["fam"], 14, 700, 4, k) if T["fam"] not in ("petme", "micro5") else fc
+        x += cv.text(x, mid_base(fc, y0, h), b["app_title"], fb, ink) + 22
+    if b["chips"] == "tab":
+        for ic, name, cur in (("calc", "Calc", True), ("folder", "Files", False)):
+            w = 18 + 8 + fc.width(name) + 24
+            ch = min(28, h - 8) if cv.aa else h - 4
+            cy = y0 + (h - ch) // 2
+            if cur:
+                cv.rrect(x, cy, w, ch, 8 if cv.aa else 2 * k, b["chip_cur"])
+                uy = cy + ch - 3 if cv.aa else y0 + h - 2 * k
+                cv.rrect(x + 10, uy, w - 20, 3 if cv.aa else 2 * k, 1.5, T["value"])
+            if cv.k == 1:
+                icon(cv, ic, x + 12, y0 + (h - 18) // 2, 18, ink if cur else dim)
+            cv.text(x + (38 if cv.k == 1 else 14), mid_base(fc, y0, h), name, fc, ink if cur else dim)
+            x += w + 6
+    elif b["chips"] == "button":
+        for ic, name, cur in (("calc", "Calc", True), ("folder", "Files", False)):
+            w = 170
+            fill = [(0, "#1a46a8"), (1, "#2156c4")] if cur else [(0, "#4f9af7"), (0.5, "#3c81f3"), (1, "#3270e0")]
+            cv.rrect(x, y0 + 5, w, h - 9, 4, grad(fill, y0 + 5, h - 9))
+            cv.ring(x, y0 + 5, w, h - 9, 4, 1, "#163f96" if cur else "#2a64cf")
+            icon(cv, ic, x + 10, y0 + 11, 18, "#ffffff")
+            cv.text(x + 36, mid_base(fc, y0 + 3, h - 6), name, fc, "#ffffff",
+                    shadow=("#0a1f6d", 0.6, 1, 1))
+            x += w + 4
+    fs = F(T, "status", DK, k)
+    if b["tray"]:
+        cv.rect(W - 150, y0, 150, h, grad(b["tray"], y0, h))
+        cv.rect(W - 150, y0, 1, h, "#0b4fae")
+        cv.rect(W - 149, y0, 1, h, "#5cb8f7")
+    if b["clock"] == "center":
+        cv.text(W // 2, mid_base(fs, y0, h), "Thu 14:32", fs, ink, align="center")
+        w = -8
+    else:
+        w = cv.text(W - 14, mid_base(fs, y0, h), "14:32", fs, ink, align="right")
+    s = min(22, h - 10)
+    icon(cv, "battery", W - 14 - w - s - 8, y0 + (h - s) // 2, s, ink)
+    icon(cv, "wifi", W - 14 - w - 2 * s - 14, y0 + (h - s) // 2 - 1, s, ink)
+
+
+def tile(cv, T, ic, x, y, s, r):
+    tc = tile_col(T, ic)
+    if not tc:
+        soft(cv, T, x, y, s, s, r, 0.35)
+        cv.rrect(x, y, s, s, r, T["tile_fill"] or T["raised"])
+        return T["text"]
+    if T["shadow"] and not T["tile_outline"]:
+        soft(cv, T, x, y, s, s, r, 0.35)
+    cv.rrect(x, y, s, s, r, grad([(0, mix(tc, "#ffffff", 0.25)), (1, tc)], y, s)
+             if T["tile_grad"] else tc)
+    if T["tile_outline"]:
+        cv.ring(x, y, s, s, r, T["tile_outline"][0], T["tile_outline"][1])
+    if T["edges"] == "bevel":
+        bevel_of(cv, T, x, y, s, s)
+    return T["tile_ink"] or "#ffffff"
+
+
+def desk_icons(cv, T):
+    if T["launcher"] == "dock":
+        return dock(cv, T)
+    fl = F(T, "label", DK, cv.k)
+    lab = T["label"]
+    top = T["bar"]["h"] + 18 if T["bar"]["edge"] == "top" else 18
+    cx = max(54, max(fl.width(lb) for _, lb in DESK) // 2 + 10)
+    for i, (ic, label) in enumerate(DESK):
+        y = top + i * 74
+        ink = tile(cv, T, ic, cx - 22, y, 44, T["tile_r"])
+        icon(cv, ic, cx - 12, y + 10, 24, ink, stroke=2.2)
+        cv.text(cx, y + 62, label, fl, lab["ink"] or T["text"], align="center", shadow=lab["shadow"])
+
+
+def dock(cv, T):
+    D = T["dock"]
+    n, ts, g, pad = len(DESK), 50, 12, 12
+    w = n * ts + (n - 1) * g + 2 * pad
+    h = ts + 2 * pad
+    x, y = (cv.W - w) // 2, cv.H - h - 8
+    soft(cv, T, x, y, w, h, D["r"], 0.5)
+    if D["frost"]:
+        cv.frost(x, y, w, h, D["r"], 16, D["fill"], D["alpha"])
+    else:
+        cv.rrect(x, y, w, h, D["r"], D["fill"], D["alpha"])
+    if D["ring"]:
+        cv.ring(x, y, w, h, D["r"], 1, D["ring"][0], D["ring"][1])
+    for i, (ic, label) in enumerate(DESK):
+        tx = x + pad + i * (ts + g)
+        ink = tile(cv, T, ic, tx, y + pad, ts, T["tile_r"])
+        icon(cv, ic, tx + 11, y + pad + 11, 28, ink, stroke=2.2)
+        if ic in ("calc", "folder"):
+            cv.shape(tx + ts // 2 - 2, y + h - 7, 4, 4,
+                     lambda d, s: d.ellipse((0, 0, 4 * s - 1, 4 * s - 1), fill=255), "#ffffff", 0.9)
+
+
+def window(cv, T, x, y, w, h, title, ic, focus):
+    Wn = T["win"]
+    r = T["win_r"]
+    corners = T["win_corners"]
+    k = cv.k
+    soft(cv, T, x, y, w, h, r, 1.0 if focus else T["shadow_back"], corners)
+    cv.rrect(x, y, w, h, r, Wn["body"] or T["surface"], corners=corners)
+    hh = Wn["h"]
+    ft = F(T, "wtitle", DK, k)
+    frame = Wn["frame"] if focus else Wn["frame_back"]
+    fw = frame[0] if frame else 0
+    inner = fw if fw >= 4 else 0
+    ink = (Wn["ink"] or T["text"]) if focus else (Wn["ink_back"] or T["dim"])
+    style = Wn["header"]
+    hdr = None
+    if style == "fill":
+        hdr = T["value"] if focus else Wn["fill_back"]
+        if focus and not Wn["ink"]:
+            ink = T["value_ink"]
+    elif style == "plain":
+        hdr = Wn["fill"] if focus else (Wn["fill_back"] or Wn["fill"])
+    elif style == "grad":
+        hdr = grad(Wn["grad"] if focus else Wn["grad_back"], y, hh)
+    if hdr:
+        cv.set_clip(x, y, w, hh)
+        cv.rrect(x, y, w, hh + r + 2, r, hdr, corners=corners)
+        cv.clip = None
+    if style == "bar" and focus:
+        cv.set_clip(x, y, w, 4)
+        cv.rrect(x, y, w, 2 * r, r, T["value"])
+        cv.clip = None
+    if Wn["rule"] and style != "grad":
+        rc = frame[1] if frame and Wn["rule"] > 1 else T["line"]
+        cv.rect(x + fw, y + hh - Wn["rule"], w - 2 * fw, Wn["rule"], rc)
+    tsh = Wn["tshadow"] if focus else None
+    c = Wn["controls"]
+    tx = x + 16 if not fw or fw < 4 else x + fw + 10
+    if c == "amiga":
+        gs = hh - inner - 8
+        gx, gy = x + fw + 4, y + inner + 4
+        bevel_of(cv, T, gx, gy, gs, gs)
+        cv.rect(gx + gs // 2 - 2 * k, gy + gs // 2 - 2 * k, 4 * k, 4 * k, "#000000")
+        tx = gx + gs + 12
+    if Wn["align"] == "center":
+        cv.text(x + w // 2, mid_base(ft, y + inner, hh - inner), title, ft, ink, align="center")
+    else:
+        if Wn["icon"]:
+            icon(cv, ic, tx, y + (hh - 20) // 2, 20, ink)
+            tx += 30
+        cv.text(tx, mid_base(ft, y + inner, hh - inner), title, ft, ink, shadow=tsh)
+    if c == "close":
+        s = min(20, hh - 8)
+        icon(cv, "close", x + w - s - 14 - fw, y + (hh - s) // 2, s, ink)
+    elif c == "lights":
+        for i, col in enumerate(("#ff5f57", "#febc2e", "#28c840")):
+            cc = col if focus else "#d4d4d8"
+            cv.shape(x + 16 + i * 20, y + (hh - 12) // 2, 12, 12,
+                     lambda d, s: d.ellipse((0, 0, 12 * s - 1, 12 * s - 1), fill=255), cc)
+    elif c == "xp":
+        bs = hh - 12
+        bx, by = x + w - bs - 8, y + 6
+        g = ([(0, "#f5a385"), (0.45, "#e2582e"), (1, "#c23c16")] if focus
+             else [(0, "#f2c7b8"), (1, "#d8957e")])
+        cv.rrect(bx, by, bs, bs, 4, grad(g, by, bs))
+        cv.ring(bx, by, bs, bs, 4, 1, "#ffffff", 0.9)
+        icon(cv, "close", bx + 4, by + 4, bs - 8, "#ffffff", stroke=3)
+    elif c == "adw":
+        bs = 24
+        bx, by = x + w - bs - 12, y + (hh - bs) // 2
+        cv.shape(bx, by, bs, bs, lambda d, s: d.ellipse((0, 0, bs * s - 1, bs * s - 1), fill=255),
+                 "#e6e6e8" if focus else "#efeff1")
+        icon(cv, "close", bx + 6, by + 6, 12, T["text"] if focus else T["dim"], stroke=2.6)
+    elif c == "amiga":
+        gs = hh - inner - 8
+        gx, gy = x + w - fw - gs - 4, y + inner + 4
+        bevel_of(cv, T, gx, gy, gs, gs)
+        cv.rect(gx + 2 * k, gy + 2 * k, gs // 2 + k, gs // 2 + k, "#000000")
+        cv.rect(gx + gs // 2 - k, gy + gs // 2 - k, gs // 2 - k, gs // 2 - k, "#ffffff")
+        cv.ring(gx + gs // 2 - k, gy + gs // 2 - k, gs // 2 - k, gs // 2 - k, 0, 1, "#000000")
+    if frame:
+        cv.ring(x, y, w, h, r, fw, frame[1], corners=corners)
+    if T["edges"] == "bevel":
+        bevel_of(cv, T, x, y, w, h)
+    return y + hh
+
+
+def file_thumb(cv, T, name, x, y, n=22):
+    if os.path.exists(_src(name)):
+        nl = max(1, n // cv.k)
+        cv.paste(cover(name, 64).resize((nl, nl), Image.BOX).point(LUT565), x, y, n,
+                 r=5 if cv.aa else 0)
+        return
+    letters = {"coin_quest": ("#f2c230", "#3a2a00"), "pin_light": ("#ff3d6e", "#ffffff")}
+    if name in letters:
+        bgc, ink = letters[name]
+        cv.rrect(x, y, n, n, 5, bgc)
+        f = F(T, "row", DK, cv.k) if T["render"]["text"] == "crisp" else Face(T["fam"], 13, T["w_bold"], 4)
+        cv.text(x + n // 2, mid_base(f, y, n), name[0].upper(), f, ink, align="center")
+        return
+    if name == "moy_night":
+        cv.rrect(x, y, n, n, 5, "#1b1d4a")
+        cv.shape(x + 9, y + 4, 9, 9, lambda d, s: d.ellipse((0, 0, 9 * s - 1, 9 * s - 1), fill=255), "#ffd56b")
+        cv.shape(x + 9, y + 4, 9, 9, lambda d, s: d.ellipse((-3 * s, -2 * s, 6 * s, 7 * s), fill=255), "#1b1d4a")
+        cv.rect(x + 1, y + 17, n - 2, 3, "#0b0d24")
+        return
+    ic = {"calc": "calc", "notes": "projects", "my_art": "brush", "storybook": "book"}.get(name, "projects")
+    tc = tile_col(T, ic)
+    if tc and T["tile_grad"]:
+        cv.rrect(x, y, n, n, 5, grad([(0, mix(tc, "#ffffff", 0.25)), (1, tc)], y, n))
+        icon(cv, ic, x + 3, y + 3, n - 6, "#ffffff")
+        return
+    cv.rrect(x, y, n, n, 5, tc or (T["raised"] if T["mode"] == "dark" else T["sunk"]))
+    icon(cv, ic, x + 3, y + 3, n - 6, (T["tile_ink"] or T["text"]) if tc else T["dim"])
+
+
+def current_row(cv, T, x, y, w, h, r, focus):
+    """The current mark on a row: a raised row with the value bar, or a fill."""
+    if T["current"] == "fill":
+        cv.rrect(x, y, w, h, r, T["sel"] if focus else T["sel_back"])
+        return T["sel_ink"] if focus else T["text"]
+    cv.rrect(x, y, w, h, r, T["raised"] if T["mode"] == "dark" else T["sunk"])
+    cv.rrect(x, y + (h - 16) // 2, 3 if cv.aa else 2 * cv.k, 16, 1.5, T["value"])
+    return T["text"]
+
+
+def files_window(cv, T, x, y, w, h, vib=None):
+    k = cv.k
+    top = window(cv, T, x, y, w, h, "Files", "folder", False)
+    fr_ = T["win"]["frame_back"]
+    fw = fr_[0] if fr_ else 0
+    side = 160 if T["current"] == "bar" else 176
+    bottom = y + h - fw
+    corners = (False, False, True, True) if T["win_r"] and not T["win_corners"] else None
+    rr = T["win_r"] if corners else 0
+    if T["list_bg"]:
+        cv.set_clip(x + side, top, w - side - fw, bottom - top)
+        cv.rrect(x + fw, top, w - 2 * fw, bottom - top, rr, T["list_bg"], corners=corners)
+        cv.clip = None
+    if T["sidebar"]:
+        cv.set_clip(x + fw, top, side - fw, bottom - top)
+        sp = vib if T["sidebar"] == "vibrancy" else paint(T["sidebar"], top, bottom - top)
+        cv.rrect(x + fw, top, w - 2 * fw, bottom - top, rr, sp, corners=corners)
+        cv.clip = None
+    cv.rect(x + side, top, 1, bottom - top - T["win_r"] // 2, T["line"])
+    fr, fcol, fm = F(T, "row", DK, k), F(T, "col", DK, k), F(T, "meta", DK, k)
+    ink, dim = T["dim"], mix(T["dim"], T["surface"], 0.15)
+    pp = T["places_panel"]
+    px0, py0 = x + fw + 8, top + 36
+    if pp:
+        px0 = x + fw + 10
+        cv.rrect(px0, top + 12, side - 20 - fw, 36 + 5 * 34 + 8, 4, pp["fill"])
+        cv.rrect(px0, top + 12, side - 20 - fw, 28, 4, grad(pp["head"], top + 12, 28),
+                 corners=(True, True, False, False))
+        cv.text(px0 + 10, top + 31, "Places", Face(T["fam"], 13, 700, 4), pp["head_ink"])
+        py0 = top + 46
+        px0 += 2
+    else:
+        cv.text(x + fw + 16, top + 26, "Places", fcol, dim)
+    for i, (label, ic) in enumerate(PLACES):
+        ry = py0 + i * 34
+        rw = (side - 16 - fw) if not pp else (side - 28 - fw)
+        tink = T["text"]
+        if i == 0:
+            tink = current_row(cv, T, px0, ry, rw, 30, (8 if not pp else 3) if cv.aa else 0, False)
+        icol = pp["head_ink"] if pp else (tink if i == 0 else ink)
+        icon(cv, ic, px0 + 12, ry + 6, 18, icol)
+        cv.text(px0 + 38, mid_base(fr, ry, 30), label, fr, (pp["head_ink"] if pp else ink) if i else tink)
+    lx = x + side + 8
+    sx = x + w - 18 - fw
+    kx = sx - fm.width("22 KB") - 22
+    name_w = kx - fm.width("Wallpaper") - 16 - lx - 36
+    show_kind = name_w >= fr.width("harpoon_pop")
+    if not show_kind:
+        name_w = kx - 16 - lx - 36
+    ch = T["colhead"]
+    if ch:
+        cv.rect(x + side, top, w - side - fw, 30, ch["fill"])
+        cv.rect(x + side, top + 30, w - side - fw, 1, ch["line"])
+        for sx_ in (kx - 70, kx + 8):
+            cv.rect(sx_, top + 5, 1, 20, ch["line"])
+        hb, hc = top + 20, T["text"]
+    else:
+        hb, hc = top + 26, dim
+    cv.text(lx + 36, hb, "Name", fcol, hc)
+    if show_kind:
+        cv.text(kx, hb, "Kind", fcol, hc, align="right")
+    cv.text(sx, hb, "Size", fcol, hc, align="right")
+    for i, (name, kind, size) in enumerate(FILES):
+        ry = top + 36 + i * 28
+        if ry + 28 > bottom - 4:
             break
-        if i == 4:
-            cv.rect(lx + 2, yy, lw - 4, rh, T["sel_rest"])
-            cv.rect(lx + 2, yy, 2, rh, T["value"])
-        file_icon(cv, n, lx + 8, yy + (rh - 12) // 2, T)
-        cv.text(lx + 24, yy + (rh - 11) // 2 + (0 if not big else -1),
-                fit(cv, n, name_w, T["body"]), T["text"], T["body"])
-        if kind_r:
-            cv.rtext(kind_r, yy + (rh - 9) // 2, U(T, kind), T["dim"], T["cap"])
-        cv.rtext(size_r, yy + (rh - 9) // 2, size, T["dim"], T["cap"])
-    if not focus and T["frame"] == "soft":
-        cv.shade(x, by, w, y + h - by, 0.25, T["surface"])
+        if T["zebra"] and i % 2:
+            cv.rect(x + side, ry, w - side - fw, 28, T["zebra"])
+        tink = mix(T["text"], T["surface"], 0.12)
+        if name == "harpoon_pop":
+            tink = current_row(cv, T, lx - 2, ry, x + w - lx - 6 - fw, 28,
+                               (7 if T["key_r"] > 4 else 2) if cv.aa else 0, False)
+        file_thumb(cv, T, name, lx + 6, ry + 3)
+        b = mid_base(fr, ry, 28)
+        cv.text(lx + 36, b, name, fr, tink, maxw=name_w)
+        if show_kind:
+            cv.text(kx, b, kind, fm, ink, align="right")
+        cv.text(sx, b, size, fm, ink, align="right")
 
 
-DESK = (("play", "Play"), ("projects", "Projects"), ("brush", "Paint"), ("book", "Storybook"),
-        ("folder", "Files"), ("calc", "Calc"), ("download", "Get carts"))
+# ==========================================================================
+# Calc: one body, every theme, both sizes
+# ==========================================================================
+KEYS = (("C", "⌫", "%", "÷"), ("7", "8", "9", "×"), ("4", "5", "6", "−"),
+        ("1", "2", "3", "+"), ("0", None, ".", "="))
 
 
-def desktop_bar(cv, T, W, chips):
-    bar_line(cv, T, W)
-    moy_button(cv, T)
-    x = 34
-    for title, ic, on in chips:
-        label = title.upper() if T["upper"] else title
-        w = cv.tw(label, "body") + 22
-        ink = T["text"] if on else T["dim"]
-        if on:
-            if T["frame"] == "paper":
-                cv.rrect(x, 2, w, 16, T["text"], 2)
-                ink = T["raised"]
-            elif T["frame"] == "contrast":
-                cv.rrect(x, 2, w, 16, T["text"], 2)
-                ink = T["bg"]
-            else:
-                raised_box(cv, x, 2, w, 16, T, r=2)
-                cv.rect(x + 4, 16, w - 8, 2, T["value"])
-        cv.icon(ic, x + 4, 4, ink)
-        cv.text(x + 18, 4, label, ink, "body")
-        x += w + 4
-    status(cv, T, W - 8)
+def key_kind(label):
+    """Calc's tagging: the only per-key decision, and it is the app's."""
+    if label == "=":
+        return "primary"
+    if label == "C":
+        return "danger"
+    if label in "÷×−+%":
+        return "tonal"
+    return "normal"
 
 
-def desk_icons(cv, T, wall=False):
-    y = 30
-    for ic, label in DESK:
-        cx = 28
-        raised_box(cv, cx - 13, y, 26, 20, T, r=max(0, T["radius"]))
-        cv.icon(ic, cx - 6, y + 4, T["text"], T["dim"], T["value"]
-                if T["frame"] not in ("paper", "contrast") else T["text"])
-        lab = label.upper() if T["upper"] else label
-        f = T["cap"] if T["cap"] == "cap" else "cap"
-        lw = cv.tw(lab, f)
-        if wall:
-            cv.rrect(cx - lw // 2 - 3, y + 22, lw + 6, 10, T["bg"], 2)
-        cv.text(cx - lw // 2, y + 22, lab, T["text"], f)
-        y += 37
+def calc_body(cv, T, x, y, w, h, desk):
+    k = cv.k
+    tb = DK if desk else HH
+    roles = ("tape", "result", "keypad", "op") if desk else ("htape", "hres", "hkey", "hop")
+    ftape, fres, fkey, fop = (F(T, r, tb, k) for r in roles)
+    pad, g = (16, 10) if desk else (8, 6)
+    lh = 100 if desk else 46
+    lx, lw = x + pad, w - 2 * pad
+    lr = (10 if T["key_r"] > 4 else T["key_r"]) if desk else min(8, T["key_r"])
+    ly = y + (pad if desk else 4)
+    if T["lcd"]:
+        cv.rrect(lx, ly, lw, lh, lr, T["lcd"])
+        if T["lcd_border"]:
+            cv.ring(lx, ly, lw, lh, lr, *T["lcd_border"])
+        if T["lcd_bevel"]:
+            bevel_of(cv, T, lx, ly, lw, lh, inset=True)
+    tape_y, res_y = (30, 84) if desk else (14, 40)
+    if T["fam"] == "petme" or T["render"]["text"] == "crisp":
+        res_y -= 4 if desk else 2
+    cv.text(lx + lw - 14, ly + tape_y, "12 × 7", ftape, T["lcd_dim"] or T["dim"], align="right")
+    cv.text(lx + lw - 12, ly + res_y, "84", fres, T["lcd_ink"] or T["value"], align="right")
+    ky = ly + lh + (pad if desk else 8)
+    kw = (lw - 3 * g) // 4
+    kh = (y + h - pad - ky - 4 * g) // 5 if desk else (y + h - 6 - ky - 4 * g) // 5
+    fonts = {"key": fkey, "op": fop}
+    for r, rowk in enumerate(KEYS):
+        for c, lab in enumerate(rowk):
+            if lab is None:
+                continue
+            ww = kw * 2 + g if lab == "0" else kw
+            button(cv, T, "calc", key_kind(lab), lx + c * (kw + g), ky + r * (kh + g), ww, kh,
+                   lab, fonts, focus=lab == "5")
 
 
-def desktop(cv, T, W, H, wall=False, calc_x=330):
-    if not wall:
-        desk_bg(cv, T, W, H)
-    else:
-        cv.rect(0, 0, W, 20, T["bg"])
-    desktop_bar(cv, T, W, (("Calc", "calc", True), ("Files", "folder", False)))
-    desk_icons(cv, T, wall)
-    files_window(cv, 54, 26, 282, 268, T, focus=False)
-    x, y, w, h = calc_x, 70, 166, 214
-    by = window(cv, x, y, w, h, "Calc", "calc", T, focus=True)
-    lcd(cv, x + 8, by + 8, w - 16, 42, T)
-    ink = T["lcd_ink"]
-    cv.rtext(x + w - 16, by + 12, "12 × 7", mix(ink, T["lcd"], 0.3), T["cap"])
-    cv.rtext(x + w - 16, by + 22, "84", ink, "title", 2)
-    keypad(cv, x + 10, by + 60, w - 20, y + h - by - 70, T, "title", 1, g=6)
+def calc_window(cv, T, x, y, w, h):
+    top = window(cv, T, x, y, w, h, "Calc", "calc", True)
+    fw = (T["win"]["frame"] or (0,))[0]
+    calc_body(cv, T, x + fw, top, w - 2 * fw, y + h - top - fw, True)
 
 
-def appearance_window(cv, T, W, H):
-    desk_bg(cv, T, W, H)
-    desktop_bar(cv, T, W, (("Appearance", "gear", True), ("Files", "folder", False)))
+def hh_calc(T):
+    cv = new_cv(T, False, T["win"]["body"] or T["surface"])
+    if T["hhbar"]["style"] == "none":
+        cv.rect(0, 0, 320, 28, T["bg"] if T["mode"] == "dark" else T["surface"])
+    top = hh_bar(cv, T, title="Calc")
+    calc_body(cv, T, 0, top, 320, 240 - top, False)
+    return cv
+
+
+def desktop(T):
+    cv = new_cv(T, True)
+    backdrop(cv, T, "desk")
+    vib = mix(backdrop_mean(cv), "#ffffff", 0.8) if T["sidebar"] == "vibrancy" else None
     desk_icons(cv, T)
-    x, y, w, h = 76, 26, 340, 262
-    by = window(cv, x, y, w, h, "Appearance", "gear", T, focus=True)
-    end = appearance(cv, T, x, by + 6, w, desk=True)
-    cv.text(x + 16, end + 8, "Moy  ·  built in", T["dim"], T["cap"])
-    hints(cv, x + w - 120, end + 8, (("⏎", "Open"), ("Esc", "Close")), T)
+    files_window(cv, T, *T["layout"]["files"], vib=vib)
+    calc_window(cv, T, *T["layout"]["calc"])
+    desk_bar(cv, T)
+    return cv
+
+
+def calc_sheet():
+    """Calc in every theme: one calc_body, one key_kind, nine themes."""
+    cw, ch, cols = 400, 860, 3
+    rows = -(-len(SHEET) // cols)
+    sheet = Cv(cols * cw + 20, rows * ch + 20, "#d6d6dc")
+    lab = Face("inter", 15, 600, 4)
+    for i, T in enumerate(SHEET):
+        ox, oy = 10 + (i % cols) * cw, 10 + (i // cols) * ch
+        sheet.text(ox + 10, oy + 20, T["name"], lab, "#15161d", maxw=cw - 20)
+        cv = new_cv(T, True)
+        backdrop(cv, T, "desk")
+        x, y, w, h = T["layout"]["calc"]
+        calc_window(cv, T, x, y, w, h)
+        crop = cv.image().crop((max(0, x - 24), max(0, y - 24), min(1024, x + w + 24), min(600, y + h + 30)))
+        sheet.img.paste(crop, (ox + (cw - crop.width) // 2, oy + 34))
+        hh = hh_calc(T).image()
+        sheet.img.paste(hh, (ox + (cw - 320) // 2, oy + 34 + 548))
+    sheet.save("calc_all_themes", "Calc in all nine themes through one body and one kind table: "
+               "the desk window over the theme's backdrop, and the handheld page below it")
+
+
+def specimen():
+    W, H = 860, 336
+    cv = Cv(W, H, "#0f1127")
+    cols = ((1, "1 bpp (hinted)"), (2, "2 bpp"), (4, "4 bpp"), (8, "8 bpp ref"))
+    lab = Face("inter", 11, 600, 4)
+    rows = [("inter", 11), ("inter", 12), ("inter", 13), ("plex", 12), ("atkinson", 12),
+            ("jbmono", 11), ("inter", 15)]
+    sample = "Settings · Wi-Fi 14:32"
+    cw = 186
+    for i, (_, t) in enumerate(cols):
+        cv.text(110 + i * cw, 14, t, lab, "#a1a6cc")
+    y = 22
+    for fam, size in rows:
+        for half_i, (bg, ink) in enumerate((("#0f1127", "#eef0fb"), ("#ffffff", "#15161d"))):
+            yy = y + half_i * (size + 6)
+            cv.rect(0, yy, W, size + 6, bg)
+            if half_i == 0:
+                cv.text(6, yy + size + 1, f"{fam} {size}", lab, "#a1a6cc")
+            for i, (bpp, _) in enumerate(cols):
+                f = Face(fam, size, 400, bpp)
+                cv.clip = (106 + i * cw, yy, 106 + (i + 1) * cw - 4, yy + size + 6)
+                cv.text(110 + i * cw, yy + size + 1, sample, f, ink)
+                cv.clip = None
+        y += 2 * (size + 6) + 6
+    f = Face("jbmono", 11, 400, 2)
+    cv.text(110, y + 14, "jbmono 11 at 2 bpp, the Code tab: if x1 >= l1 then lI = (l1 | 0) end", f, "#eef0fb")
+    cv.save("type_specimen", "Type specimen: handheld sizes, the Code tab's mono and the desk body "
+            "at 1, 2, 4 bpp and an 8-bit reference, on dark and on light", x3=True)
 
 
 # ==========================================================================
-# the default wallpaper: a cart, MOY64 only, laid out per glass
-# ==========================================================================
-MOY_ART = ("................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
-           ".0dddddddd0.....", ".0dddddddd0000..", ".0dd00d00ddddd0.", ".0dddddddddddd0.",
-           ".0dddddddddddd0.", ".0dd0ddd0ddddd0.", ".0ddd000dddddd0.", ".0dddddddddddd0.",
-           ".0dddddddddddd0.", "..022222222220..", "..02220002220...", "...000...000....")
+def contrast_report():
+    for T in VARIANTS + RICED + STYLES:
+        print(T["key"], "backdrop (shapes, bytes):", backdrop_bytes(T))
+        bg = T["home_bg"] or T["bg"]
+        pairs = {
+            "text/surface": (T["text"], T["surface"]), "dim/surface": (T["dim"], T["surface"]),
+            "text/home": (T["text"], bg), "dim/home": (T["dim"], bg),
+            "ring/home": (T["accent"], bg), "ring/raised": (T["accent"], T["raised"]),
+            "ring/surface": (T["accent"], T["surface"]),
+            "value/surface": (T["value"], T["surface"]), "value/home": (T["value"], bg),
+            "value_ink/value": (T["value_ink"], T["value"]),
+        }
+        if T["backdrop"].get("home") and "_under_title" in T:
+            u = T["_under_title"]
+            ob = T["on_backdrop"]
+            pairs = {"title/backdrop": (ob["ink"] or T["text"], u), "meta/backdrop": (ob["dim"] or T["dim"], u),
+                     "text/surface": pairs["text/surface"], "dim/surface": pairs["dim/surface"],
+                     "ring/surface": pairs["ring/surface"], "value/surface": pairs["value/surface"],
+                     "value_ink/value": pairs["value_ink/value"]}
+        print(T["key"], "  ".join(f"{k} {ratio(*v):.1f}" for k, v in pairs.items()))
 
 
-def wallpaper(cv, W, H, moon, moy, ridge, quiet, band=24, zz_above=False):
-    """Moy's night as a cart: black sky with sparse stars, a narrow dithered
-    band down to dark blue at the horizon, a black hill under the hint strip.
-    Stars keep out of the bar and the quiet rectangles; Moy sleeps on the
-    ridge where no card or default window sits."""
-    import math
-    bayer = ((0, 8, 2, 10), (12, 4, 14, 6), (3, 11, 1, 9), (15, 7, 13, 5))
-    for yy in range(H):
-        t = max(0.0, min(1.0, (yy - (ridge - band)) / band))
-        for xx in range(W):
-            cv.px[xx, yy] = P(1) if t * 15 > bayer[yy & 3][xx & 3] else P(0)
-    seed = [20261015]
-
-    def rnd(n):
-        seed[0] = (seed[0] * 1103515245 + 12345) & 0x7FFFFFFF
-        return seed[0] % n
-    for _ in range(W * H // 700):
-        x, y = rnd(W), 24 + rnd(max(1, ridge - 32))
-        if any(qx <= x < qx + qw and qy <= y < qy + qh for qx, qy, qw, qh in quiet):
-            continue
-        k = rnd(14)
-        if k == 0:
-            cv.put(x, y, P(7))
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                cv.put(x + dx, y + dy, P(13))
-        else:
-            cv.put(x, y, P(7) if k < 4 else P(13))
-    mx, my, mr = moon
-    for yy in range(-mr - 3, mr + 4):
-        for xx in range(-mr - 3, mr + 4):
-            d = (xx * xx + yy * yy) ** 0.5
-            bite = ((xx + mr * 0.45) ** 2 + (yy + mr * 0.35) ** 2) ** 0.5
-            if d <= mr and bite > mr * 0.85:
-                cv.put(mx + xx, my + yy, P(10))
-            elif mr < d <= mr + 2 and bite > mr * 0.85 and (xx + yy) & 1:
-                cv.put(mx + xx, my + yy, P(9) if d <= mr + 1 else P(60))
-    ox, oy, s = moy
-    for xx in range(W):
-        bump = int(4 * math.cos((xx - ox - 8 * s) / (W * 0.12)))
-        h1 = ridge - max(0, bump)
-        for yy in range(h1, H):
-            cv.px[xx, yy] = P(0)
-        cv.put(xx, h1, P(60))
-        cv.put(xx, h1 + 1, P(1) if xx & 1 else P(0))
-    oy = ridge - 4 - 16 * s + 2
-    for r, line in enumerate(MOY_ART):
-        for c, ch in enumerate(line):
-            if ch != ".":
-                cv.rect(ox + c * s, oy + r * s, s, s, P(int(ch, 16)))
-    zx, zy = (ox + 9 * s, oy - 12) if zz_above else (ox + 16 * s, oy - 2)
-    cv.text(zx, zy, "z", P(6), "body")
-    cv.text(zx + 6, zy - 8, "z", P(13), "cap")
-
-
-# ==========================================================================
-# compose and save
-# ==========================================================================
-def slug(T):
-    return f"{T['name'].lower()}-{T['mode']}"
-
-
-def shot(fn, T, W, H, name, what, up=1, x3=False):
-    cv = Cv(W, H, T["bg"])
-    fn(cv, T, W, H)
-    cv.save(name, what, f"{T['name']} theme, {T['mode']}", "", x3=x3, up=up)
-
-
-
-def _patch_glyphs():
-    """The Moybyte cut of two Galmuri glyphs (OFL-1.1 allows it): Mono's `l`
-    gains a flag and a tail and `1` a base, so `l 1 I | ( )` never read alike;
-    Bold's minus is the plus's bar, as wide as the plus."""
-    m = GAL["GalmuriMono9"]["glyphs"]
-    m["l"] = [5, 1, 1, ["##.", ".#.", ".#.", ".#.", ".#.", ".#.", ".#.", "..#"]]
-    m["1"] = [5, 1, 1, [".#.", "##.", ".#.", ".#.", ".#.", ".#.", ".#.", "###"]]
-    b = GAL["Galmuri11-Bold"]["glyphs"]
-    adv, x0, y0, rows = b["+"]
-    mid = [i for i, r in enumerate(rows) if r.count("#") == len(r)]
-    b["−"] = [adv, x0, y0 + mid[0], [rows[i] for i in mid]]
-    return True
-
-
-GLYPH_PATCH = _patch_glyphs()
-
-
-def fit(cv, s, maxw, font):
-    """The text, cut with an ellipsis to fit maxw."""
-    if cv.tw(s, font) <= maxw:
-        return s
-    while s and cv.tw(s + "…", font) > maxw:
-        s = s[:-1]
-    return s + "…"
-
-
-def focus_ring(cv, x, y, w, h, T, r=3, gap=1, halo=True):
-    """FOCUS: a 2-pixel accent ring with a 1-pixel gap. Moy adds its dithered
-    moon-glow outside it; Contrast light adds a black keyline."""
-    o = gap + 2
-    if T["frame"] == "contrast" and T["mode"] == "light":
-        cv.rbox(x - o - 1, y - o - 1, w + 2 * o + 2, h + 2 * o + 2, "#000000",
-                r + o + 1 if r else 0, 1)
-    cv.rbox(x - o, y - o, w + 2 * o, h + 2 * o, T["accent"], r + o if r else 0, 2)
-    if T["halo"] and halo:
-        k = o + 1
-        tmp = Cv(w + 2 * k, h + 2 * k, (1, 2, 3))
-        tmp.rbox(0, 0, w + 2 * k, h + 2 * k, (250, 0, 250), r + k if r else 0, 1)
-        for yy in range(h + 2 * k):
-            for xx in range(w + 2 * k):
-                if tmp.px[xx, yy] == q((250, 0, 250)) and (xx + yy) & 1:
-                    cv.put(x - k + xx, y - k + yy, mix(T["accent"], T["bg"], 0.35))
-
-
-
-
-def moy_button(cv, T, x=6):
-    raised_box(cv, x, 2, 20, 16, T, r=2)
-    cv.icon("moy", x + 4, 4, T["text"], T["value"] if T["mode"] == "dark" and T["frame"] == "soft"
-            else T["surface"])
-
-
-
-def U(T, s):
-    return s.upper() if T["upper"] else s
-
-
-def cur_bar(cv, x, y, w, T):
-    """CURRENT / SELECTED: a 2-pixel bar in the value colour (under a tab, a
-    swatch, a theme or a tool; left of a row)."""
-    cv.rect(x, y, w, 2, T["value"])
+def flash_report():
+    print("MFNT v2 bytes for", len(CHARSET), "glyphs")
+    for fam, size, wt in (("inter", 11, 600), ("inter", 12, 400), ("inter", 13, 600),
+                          ("inter", 15, 400), ("inter", 15, 600), ("inter", 22, 500),
+                          ("inter", 44, 600)):
+        row = []
+        for bpp in (1, 2, 4):
+            row.append(f"{bpp}bpp {Face(fam, size, wt, bpp).mfnt_bytes(CHARSET)}")
+        print(f"  {fam} {size}/{wt}: " + ", ".join(row))
+    digits = list("0123456789.,−×÷+%=CE")
+    for size, wt in ((22, 500), (44, 600)):
+        print(f"  inter {size}/{wt}, the {len(digits)} keypad/display glyphs: "
+              + ", ".join(f"{bpp}bpp {Face('inter', size, wt, bpp).mfnt_bytes(digits)}" for bpp in (2, 4)))
 
 
 def main():
-    os.makedirs(OUT, exist_ok=True)
-    for f in os.listdir(OUT):
-        if f.endswith(".png"):
-            os.remove(os.path.join(OUT, f))
-    for T in (MOY_DARK, MOY_LIGHT):
-        s = slug(T)
-        shot(home, T, 320, 240, f"{s}_handheld_home", "Handheld home (console mode), Games "
-             "tab, carousel on Sky Run, 320x240 T-Deck", x3=True)
-        shot(desktop, T, 512, 300, f"{s}_desktop", "Desktop, 1024x600 board at 2x: Calc "
-             "current, Files behind (desk density)", up=2)
-        shot(big_home, T, 512, 300, f"{s}_desktop_home", "Home on the 1024x600 board in "
-             "console mode (2x): hero, details, shelf; the X returns to the desk", up=2)
-        shot(settings, T, 320, 240, f"{s}_handheld_settings", "Settings page, 320x240", x3=True)
-        shot(appearance_page, T, 320, 240, f"{s}_handheld_appearance",
-             "Appearance page, 320x240", x3=True)
-        shot(appearance_window, T, 512, 300, f"{s}_desktop_appearance",
-             "Appearance as a window on the desk, 1024x600 at 2x", up=2)
-        shot(code_editor, T, 320, 240, f"{s}_handheld_code-editor",
-             "Code editor on Star Catcher, 320x240", x3=True)
-        shot(sprite_editor, T, 320, 240, f"{s}_handheld_sprite-editor",
-             "Sprite editor on Star Catcher's frog, 320x240", x3=True)
-        shot(calc_page, T, 320, 240, f"{s}_handheld_calc", "Calc fullscreen, 320x240",
-             x3=True)
-    for T in (PAPER, STUDIO, CONTRAST, CONTRAST_LIGHT):
-        s = slug(T)
-        shot(home, T, 320, 240, f"{s}_handheld_home", "Handheld home, 320x240", x3=True)
-        shot(desktop, T, 512, 300, f"{s}_desktop", "Desktop, Calc current, Files behind, "
-             "1024x600 at 2x", up=2)
-    T = MOY_DARK
-    cv = Cv(320, 240, T["bg"])
-    wallpaper(cv, 320, 240, moon=(296, 44, 8), moy=(10, 0, 2), ridge=216, band=18,
-              quiet=((0, 0, 320, 24), (24, 158, 272, 40)), zz_above=True)
-    home(cv, T, 320, 240, wall=True)
-    cv.save("moy-dark_handheld_home_wallpaper", "Handheld home over the reworked default "
-            "wallpaper (Moy's night), 320x240", "Moy theme, dark", "", x3=True)
-    cv = Cv(512, 300, T["bg"])
-    wallpaper(cv, 512, 300, moon=(486, 44, 12), moy=(472, 0, 2), ridge=284, band=40,
-              quiet=((0, 0, 512, 24), (0, 24, 52, 270)), zz_above=True)
-    desktop(cv, T, 512, 300, wall=True, calc_x=296)
-    cv.save("moy-dark_desktop_wallpaper", "Desktop over the reworked default wallpaper, "
-            "1024x600 at 2x", "Moy theme, dark", "", up=2)
-    sheet()
-    with open(os.path.join(OUT, "index.txt"), "w") as f:
-        f.write("\n".join(INDEX) + "\n")
+    for T in VARIANTS + (CONTRAST,) + RICED + STYLES:
+        hh_home(T).save(f"{T['key']}-{T['mode']}_handheld_home",
+                        f"Handheld home, Games tab, carousel on Sky Run; {T['name']}", x3=True)
+        desktop(T).save(f"{T['key']}-{T['mode']}_desktop",
+                        f"Desk: Calc focused, Files behind, bar; {T['name']}")
+    calc_sheet()
+    specimen()
+    with open(os.path.join(OUT, "index.txt"), "w") as fh:
+        fh.write("\n".join(INDEX) + "\n")
     contrast_report()
-
-
-def sheet():
-    cv = Cv(512, 300, "#22232e")
-    y = 6
-    cv.text(8, y, "bg surface raised edge line dim text | accent: FOCUS ring | value: CURRENT bar, "
-            "PRIMARY fill", "#eceaf8", "cap")
-    y += 13
-    for T in (MOY_DARK, MOY_LIGHT, PAPER, STUDIO, CONTRAST, CONTRAST_LIGHT):
-        cv.text(8, y + 2, f"{T['name']} {T['mode']}", "#eceaf8", "body")
-        x = 100
-        for k in ("bg", "surface", "raised"):
-            cv.rect(x, y, 30, 14, T[k])
-            x += 32
-        cv.rect(x, y, 30, 14, T["group_edge"] or T["edge"] or T["under"])
-        x += 32
-        for k in ("line", "dim", "text"):
-            cv.rect(x, y, 30, 14, T[k])
-            x += 32
-        x += 8
-        cv.rect(x, y, 30, 14, T["accent"])
-        cv.text(x + 6, y + 2, "Aa", T["on_accent"], "body")
-        cv.rect(x + 34, y, 30, 14, T["value"])
-        cv.text(x + 40, y + 2, "Aa", T["value_ink"], "body")
-        if T["sections"]:
-            for i, c in enumerate(T["sections"].values()):
-                cv.rect(x + 70 + i * 9, y, 7, 14, c)
-        y += 16
-    T = MOY_DARK
-    cv.rrect(8, y + 4, 496, 300 - y - 12, T["bg"], 3)
-    desk_bg(cv, T, 504, 292, top=y + 6)
-    yy = y + 10
-    cv.text(16, yy, "Sky Run", T["text"], "title")
-    cv.text(200, yy + 2, "title: Galmuri11 Bold", T["dim"], "cap")
-    yy += 16
-    cv.text(16, yy, "Appearance  Wi-Fi  14:32", T["text"], "body")
-    cv.text(200, yy + 1, "body: Galmuri9", T["dim"], "cap")
-    yy += 14
-    cv.text(16, yy, "Platformer · Built in · Played today", T["dim"], "cap")
-    cv.text(200, yy, "caption: Galmuri7, dim", T["dim"], "cap")
-    yy += 13
-    cv.text(16, yy, "lives = 1 + I | (l)", T["text"], "code")
-    cv.text(200, yy, "code: GalmuriMono9, Moybyte cut of l and 1", T["dim"], "cap")
-    yy += 16
-    x = 16
-    for k in ("⏎", "C", "Space", "↑↓"):
-        x += keycap(cv, x, yy, k, T) + 4
-    toggle(cv, x + 6, yy, True, T)
-    toggle(cv, x + 30, yy, False, T)
-    slider(cv, x + 58, yy + 4, 50, 0.6, T)
-    cv.text(x + 112, yy, "Now", T["text"], "body")
-    cur_bar(cv, x + 112, yy + 13, 20, T)
-    button(cv, x + 136, yy - 3, 50, 16, "Play", T, "primary")
-    button(cv, x + 190, yy - 3, 50, 16, "Copy", T)
-    cv.rrect(x + 254, yy - 3, 50, 16, T["raised"], 2)
-    focus_ring(cv, x + 254, yy - 3, 50, 16, T, 2)
-    cv.ctext(x + 254, yy - 1, 50, "Focus", T["text"], "body")
-    yy += 20
-    x = 16
-    for ic in ("wifi", "batt", "back", "close", "moy", "play", "folder", "projects", "brush",
-               "book", "calc", "download", "code", "sprite", "map", "note", "undo", "redo",
-               "pencil", "bucket", "line", "rect", "oval", "select", "flip", "rotate",
-               "search", "gear", "get", "put", "doc", "trash"):
-        cv.icon(ic, x, yy, T["text"], T["dim"], T["value"])
-        x += 15
-    yy += 22
-    window(cv, 24, yy, 140, 56, "Current", "calc", T, True)
-    window(cv, 184, yy, 140, 56, "Behind", "folder", T, False)
-    group(cv, 344, yy, 150, 40, T)
-    row(cv, 344, yy, 150, "Focused", T, "On", "link", focus=True)
-    row(cv, 344, yy + 20, 150, "Row", T, True, "toggle", last=True)
-    cv.save("system_sheet", "The system on one page: every theme's ramp, focus and value "
-            "colours; type; components; the 12px icons; window states", "all themes", "",
-            up=2)
-
-
-def contrast_report():
-    print("contrast:")
-    for T in (MOY_DARK, MOY_LIGHT, PAPER, STUDIO, CONTRAST, CONTRAST_LIGHT):
-        out = [f"{ink}/{bg} {ratio(T[ink], T[bg]):.1f}" for ink in ("text", "dim")
-               for bg in ("bg", "surface", "raised")]
-        out.append(f"on_accent/accent {ratio(T['on_accent'], T['accent']):.1f}")
-        out.append(f"accent/bg {ratio(T['accent'], T['bg']):.1f}")
-        out.append(f"accent/surface {ratio(T['accent'], T['surface']):.1f}")
-        out.append(f"value_ink/value {ratio(T['value_ink'], T['value']):.1f}")
-        out.append(f"value/surface {ratio(T['value'], T['surface']):.1f}")
-        if T["group_edge"]:
-            out.append(f"group_edge/bg {ratio(T['group_edge'], T['bg']):.1f}")
-        out.append(f"sel_bar(value)/sel {ratio(T['value'], T['sel_rest']):.1f}")
-        if T["syn"]:
-            out.append(f"comment {ratio(T['syn']['c'], T['surface']):.1f}")
-        print(f"  {T['name']} {T['mode']}: " + ", ".join(out))
+    flash_report()
 
 
 if __name__ == "__main__":

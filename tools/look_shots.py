@@ -39,13 +39,17 @@ MOCKUPS = os.path.join(ROOT, "docs", "media", "look_2026-10")
 PLAN = os.path.join(ROOT, "docs", "look_2026-10.md")
 
 # The current theme a target theme the shell does not hold is drawn with.
-FALLBACK = {"moy": "night", "paper": "platinum", "studio": "night"}
+FALLBACK = {"daylight": "platinum", "moy": "night", "blocks": "platinum",
+            "luna": "win95", "coast": "platinum", "pico": "night",
+            "bench": "platinum", "adw": "platinum"}
+DEFAULT = "daylight"
 
-# Steps whose target is every PNG, then every Moy PNG (docs/look_2026-10.md).
-EVERY = ("11", "23")
-EVERY_MOY = ("10",)
-THEME_STEPS = {"paper": ("7", "22a"), "studio": ("7", "22b"),
-               "contrast": ("22c",)}
+# Steps whose target is every PNG, and each theme's own steps
+# (docs/look_2026-10.md).
+EVERY = ("14", "27")
+THEME_STEPS = {"moy": ("26a",), "blocks": ("26b",), "contrast": ("26c",),
+               "luna": ("29",), "coast": ("29",), "pico": ("29",),
+               "bench": ("29",), "adw": ("29",)}
 
 # The surfaces of the shell, as `tests/test_shell_goldens.py` configures them.
 HANDHELD = "tdeck_320x240_fs1_dark"
@@ -63,31 +67,33 @@ def _setup_table():
     """screen -> (config, steps, wallpaper, set up, what the render shows).
     `screen` is a scene's name after its `theme-mode_` prefix."""
     return {
-        "handheld_home": (HANDHELD, ("8", "12"), False, _home,
+        "handheld_home": (HANDHELD, ("7", "11", "15", "17"), False, _home,
                           "home, Games tab, Sky Run current"),
-        "handheld_home_wallpaper": (HANDHELD, ("12", "21"), True, _home,
+        "handheld_home_wallpaper": (HANDHELD, ("17", "28"), True, _home,
                                     "home over the current default wallpaper"),
-        "desktop": (DESK, ("4", "7", "8", "16", "17", "20"), False, _desk,
+        "desktop": (DESK, ("6", "7", "9", "13", "16", "21", "22", "25"),
+                    False, _desk,
                     "desk: Files on Projects behind, Calc current"),
-        "desktop_wallpaper": (DESK, ("20", "21"), True, _desk_wall,
+        "desktop_wallpaper": (DESK, ("25", "28"), True, _desk_wall,
                               "the desk over the current default wallpaper"),
-        "desktop_home": (CONSOLE, ("13",), False, _console_home,
+        "desktop_home": (CONSOLE, ("18",), False, _console_home,
                          "the console-mode home on the 1024x600 board"),
-        "handheld_settings": (HANDHELD, ("5", "14"), False, _settings,
+        "handheld_settings": (HANDHELD, ("11", "12", "19"), False, _settings,
                               "Settings"),
-        "handheld_appearance": (HANDHELD, ("15",), False, _appearance,
+        "handheld_appearance": (HANDHELD, ("20",), False, _appearance,
                                 "Appearance"),
-        "desktop_appearance": (DESK, ("4", "15"), False, _desk_appearance,
+        "desktop_appearance": (DESK, ("9", "20"), False, _desk_appearance,
                                "Appearance as a window on the desk"),
-        "handheld_code-editor": (HANDHELD, ("3", "18"), False, _code,
+        "handheld_code-editor": (HANDHELD, ("3", "4", "23"), False, _code,
                                  "the Code tab on Star Catcher"),
-        "handheld_sprite-editor": (HANDHELD, ("19",), False, _sprites,
+        "handheld_sprite-editor": (HANDHELD, ("24",), False, _sprites,
                                    "the sprite tab on Star Catcher, sprite 0"),
-        "handheld_calc": (HANDHELD, ("5", "17"), False, _calc,
+        "handheld_calc": (HANDHELD, ("10", "11", "22"), False, _calc,
                           "Calc fullscreen after the target's tape"),
-        "system_sheet": (DESK, ("2", "3", "5", "6", "9"), False,
-                         _desk_appearance,
-                         "nearest screen: Appearance on the desk"),
+        "calc_all_themes": (DESK, ("5", "6", "10", "22"), False, _desk,
+                            "nearest screen: Calc on the desk"),
+        "type_specimen": (HANDHELD, ("3", "4"), False, _code,
+                          "nearest screen: the Code tab on Star Catcher"),
     }
 
 
@@ -134,8 +140,6 @@ def scene_steps(scene, theme):
     """The plan steps that target `scene`, in plan order."""
     screen = screen_of(scene)
     steps = set(_setup_table()[screen][1]) | set(EVERY)
-    if theme == "moy":
-        steps |= set(EVERY_MOY)
     steps |= set(THEME_STEPS.get(theme, ()))
     return sorted(steps, key=lambda s: (int(re.match(r"\d+", s).group()), s))
 
@@ -362,7 +366,7 @@ def _run(g, out, filters, step, theme, variant, quiet):
     rows, lines = [], []
     for name, what, want_theme, want_mode, size in scenes:
         config, _steps, wallpaper, setup, shows = table[screen_of(name)]
-        target_theme = theme or want_theme or "moy"
+        target_theme = theme or want_theme or DEFAULT
         mode = variant or want_mode or "dark"
         missing = []
         drawn = target_theme
