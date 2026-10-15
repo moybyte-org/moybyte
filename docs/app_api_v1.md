@@ -162,6 +162,10 @@ widgets (`button`, `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`,
 draw pass registers every key's rect, the pointer resolves against the same
 registry). Layout stays the app's Python.
 
+The public UI API every app draws with in all three runtimes, and that
+this surface and the compiled app's `ui` rows become, is
+`docs/ui_api_2026-10.md` (owner, 2026-10-15; the look plan's step 11a).
+
 ## The bar contract is the HOST's, not yours (2026-08-19)
 
 An app draws **no bar at all**. On the fullscreen tiers the router paints the
