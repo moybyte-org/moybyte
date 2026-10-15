@@ -113,7 +113,7 @@ end
 Focus/navigation state in `moy_ui`, auto-row cursor, slider/toggle/part widgets; move the shell's apps onto it (deleting their own focus code); goldens move; the nine wasm `ui_*` rows are replaced (no users, no compatibility layer).
 
 ## What goes into moy-spec
-`proposals/ui.md`, aimed at **core** (§10: software any host can implement is not an extension): the verb table (`ui.page`, `label`, `button`, `toggle`, `slider`, `list`, `field`, `part`, `focus`, `keys_taken`, `ui.at(x,y,w,h)`), identical in Lua/Python/wasm; the semantics (ids, one focus, navigation by the logical buttons, activation on `a`, `b`/back stays the host's); the kind names. **Not** pixels: each host draws its own look; libmoy ships a reference look in palette indices; conformance tests behaviour, not pixels.
+Nothing (owner, 2026-10-15): the API is Moybyte's vendor extension `moybyte.ui`, and `docs/ui_api_2026-10.md` §9 says what a proposal would carry if another host ever wants it.
 
 ### Sources
 Dear ImGui https://github.com/ocornut/imgui · raygui https://github.com/raysan5/raygui · microui https://github.com/rxi/microui · Nuklear https://github.com/Immediate-Mode-UI/Nuklear · egui https://github.com/emilk/egui · LVGL https://lvgl.io · Picotron manual §10.14 https://www.lexaloffle.com/dl/docs/picotron_manual.html · Inside Playdate https://sdk.play.date/inside-playdate/ · SUIT https://github.com/vrld/suit · Slab https://github.com/flamendless/Slab

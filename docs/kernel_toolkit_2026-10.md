@@ -298,7 +298,8 @@ now. A compiled app uses them in its player window, cart-shaped: a fixed
 canvas, scaled.
 
 The public UI API (`docs/ui_api_2026-10.md`, owner, 2026-10-15) replaces
-these nine rows with its own eleven at the look plan's step 11a.
+these nine rows with its core's ten at the look plan's step 11a; the
+screen steps after it add rows as they add widgets.
 
 **The RUN sink lends the run's canvas as a row.** The target is the run's
 (`moycore_ui_target`, from the module that drives the run: an owed or kept
