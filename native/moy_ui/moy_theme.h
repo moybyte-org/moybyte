@@ -12,7 +12,9 @@
 // line of the surface grammar, compiled here into a record the painter
 // draws), `frame` (the window frame's style, title alignment and button
 // order: moy_ui.h's moy_ui_frame), `fonts` (font role -> a font file of
-// the package, read by the font loader, moy_text.h) and `layout` (its `bars`:
+// the package, read by the font loader, moy_text.h), `sprites` and `icons`
+// (a .moygfx file of the package each: the role sheet the primitives draw
+// sprites from, and the bar's icon sheet) and `layout` (its `bars`:
 // docs/shell_layout_2026-10.md §5, each capped and clamped here and the
 // required widgets checked on the data). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
@@ -105,6 +107,7 @@ typedef struct {
     uint8_t n_surfaces;
     uint8_t frame[MOY_UI_FRAME_FIELDS];     // moy_ui_shape_t's frame, 0 where silent
     char font[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1];  // a file per role, "" where silent
+    char sheet[MOY_THEME_SHEETS][MOY_THEME_NAME_MAX + 1];     // a .moygfx file, "" where silent
     moy_theme_layout_t layout;
     uint8_t notes;
 } moy_theme_pkg_t;
@@ -144,6 +147,37 @@ int moy_theme_shape(const char *name, size_t n, moy_ui_shape_t *out);
 int moy_theme_fonts(const char *name, size_t n,
                     char out[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1]);
 
+// Theme `name`'s sheet files, one per key of moy_theme_sheet_keys
+// (`sprites`, `icons`), each from the nearest package that names one ("" where
+// none does). The return is as resolve's.
+int moy_theme_sheets(const char *name, size_t n,
+                     char out[MOY_THEME_SHEETS][MOY_THEME_NAME_MAX + 1]);
+
+// -- the sprite sheet (docs/theming_2026-09.md §4.6) ------------------------------
+//
+// A sheet is user data in the cart sheet's hex format: a line is a row of up
+// to MOY_THEME_SHEET_W hex digits, one nibble a pixel (a short line's rest is
+// slot 0), blank lines skipped, spaces, tabs and a CR at a line's ends
+// ignored. Anything else is refused: MOY_THEME_SYNTAX for a byte that is not a
+// hex digit or a line over the width, MOY_THEME_BIG for more than `rows_max`
+// rows or more than MOY_THEME_SHEET_BYTES(rows_max) bytes. *rows gets the rows.
+int moy_theme_sheet_check(const uint8_t *src, size_t n, int rows_max, int *rows);
+// Load the theme's ROLE sheet (`sprites`): checked against
+// MOY_THEME_SPRITES_MAX_ROWS, its first MOY_THEME_SPRITE_ROWS rows decoded into
+// a buffer the loader owns, and each cell of moy_theme_cells marked set when a
+// pixel in it is not slot 0. A refusal loads nothing and leaves no sheet.
+int moy_theme_sheet_load(const uint8_t *src, size_t n);
+void moy_theme_sheet_clear(void);
+// Width, sprite rows, icon rows, the rows kept, cells, sheets: the bindings' check.
+extern const int moy_theme_sheet_dims[6];
+// The loaded sheet's slots (MOY_THEME_SHEET_W a row, MOY_THEME_SPRITE_ROWS
+// rows), or NULL when none is loaded.
+const uint8_t *moy_theme_sheet(void);
+// The cell `part` draws in `state` (and title button `sub`, 0 elsewhere): the
+// set cell of that state, else of the state style.json's theme.chain reaches
+// first; -1 where none is set or no sheet is loaded.
+int moy_theme_sheet_cell(int part, int state, int sub);
+
 // Theme `name`'s layout, whole, from the nearest package that sets one.
 // Where that one was refused by the required-set rule, or the chain does not
 // resolve, the default seed's stands in and out->set is
@@ -167,6 +201,7 @@ void moy_theme_probe_end(void);
 // moy_theme_font_roles (its folder provides it): NULL where none.
 const char *moy_theme_probe_name(void);
 const char *moy_theme_probe_font(int role);
+const char *moy_theme_probe_sheet(int key);
 extern const size_t moy_theme_pkg_bytes;
 
 // Accent and tint (docs/theming_2026-09.md §4.10): every colour role of a

@@ -369,6 +369,134 @@ def painter_matches_host(board):
                        strict=True) == moy_ui.theme_shape(name)[2]
 
 
+# -- the sprite lane (docs/theming_2026-09.md §4.6) -------------------------------
+
+SPRITE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "fixtures", "themes", "sprig.moy", "parts.moygfx")
+# (what, args, font scale) into a 48x40 frame over index 9: `paint` a part in
+# a state into a rect, `frame` a window (rect, title_h, active), its title "".
+SPRITE_SCENES = (
+    ("paint", ("button", "rest", (2, 3, 40, 30)), 1),
+    ("paint", ("button", "pressed", (5, 5, 12, 9)), 1),
+    ("paint", ("button", "on", (-6, -4, 30, 20)), 2),
+    ("paint", ("desk.icon", "rest", (4, 2, 36, 36)), 1),
+    ("paint", ("desk.icon", "rest", (1, 1, 46, 38)), 2),
+    ("frame", ((2, 2, 42, 30), 14, True), 1),
+    ("frame", ((0, 1, 44, 34), 12, False), 1),
+)
+_SPRITE_THEME = b'{"format":1,"name":"spr","colors":{"dark":{"accent":12,"title":3}}}'
+
+
+def sprite_host_frames():
+    """The host's index frame of each SPRITE_SCENES scene, drawn from the
+    fixture sheet under a theme that names no font or surface."""
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import ui
+    from runtime.chrome import theme_colors
+    from runtime.host_canvas import indices_of, make_system_canvas
+    with open(SPRITE_FIXTURE, "rb") as f:
+        sheet = f.read()
+    out = []
+    try:
+        assert moy_ui.theme_install(_SPRITE_THEME)[0] == 0
+        ui.use_shape("spr")
+        assert ui.sheet_load(sheet) == 0
+        th = theme_colors("spr")
+        for what, args, fs in SPRITE_SCENES:
+            cv = make_system_canvas(48, 40, font_scale=fs)
+            cv.cls(9)
+            if what == "paint":
+                assert ui.paint(cv, th, args[2], args[0], args[1])
+            else:
+                ui.frame(cv, th, args[0], args[1], "", args[2], True, fs)
+            out.append(bytes(indices_of(cv)))
+    finally:
+        ui.sheet_clear()
+        ui.use_shape(None)
+        moy_ui.theme_uninstall()
+    return out
+
+
+_SPRITE_HELPER = """
+import ui, chrome, moy_ui, device_canvas, binascii
+def _scale(cv, fs):
+    cv.font_scale = fs
+    cv._gate_state[device_canvas._ST_FONT_SCALE] = fs
+def _sprite_scene(src, what, args, fs):
+    sheet = _SPRITE_SHEET
+    cv = (ws.sys_canvas or ws.canvas).new_layer(48, 40)
+    was = getattr(cv, 'font_scale', 1)
+    try:
+        assert moy_ui.theme_install(src)[0] == 0
+        ui.use_shape('spr')
+        assert ui.sheet_load(sheet) == 0
+        _scale(cv, fs)
+        th = chrome.theme_colors('spr')
+        cv.cls(9)
+        if what == 'paint':
+            assert ui.paint(cv, th, args[2], args[0], args[1])
+        else:
+            ui.frame(cv, th, args[0], args[1], '', args[2], True, fs)
+        px = device_canvas.to_indices(cv._buf, cv._wire)
+        return binascii.hexlify(bytes(px)).decode()
+    finally:
+        _scale(cv, was)
+        cv.release()
+        chrome.forget_themes()
+        ws.look._sheet_key = None
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+"""
+
+
+def sprites_match_host(board):
+    """Every sprite scene, drawn by this board's moy_ui from the fixture
+    sheet into a scratch layer and read back as palette indices, is the
+    host's frame byte for byte: the sheet reader, the slot table and the
+    blit are one C body on every tier. The live theme, its shape and its
+    sheet are put back after each scene."""
+    want = sprite_host_frames()
+    with open(SPRITE_FIXTURE, "rb") as f:
+        sheet = f.read()
+    board.pyexec("_SPRITE_SHEET = %r\n" % sheet + _SPRITE_HELPER, strict=True)
+    for (what, args, fs), frame in zip(SPRITE_SCENES, want):
+        got = board.pyval("ws._g['_sprite_scene'](%r, %r, %r, %r)"
+                          % (_SPRITE_THEME, what, args, fs), strict=True)
+        assert bytes.fromhex(got) == frame, (what, args, fs)
+
+
+def sheet_corpus(n, seed=11):
+    """The fixture sheet, its cuts and a mutant per draw: a nibble or a
+    byte flipped anywhere, a line break dropped or doubled, bytes inserted
+    (a space, a CR, a letter past f) or cut; and the caps' edges."""
+    import random
+    with open(SPRITE_FIXTURE, "rb") as f:
+        good = f.read()
+    rng = random.Random(seed)
+    w = 128
+    out = [good, b"", b"\n", good[:w], good[:w + 1], good.upper(), good.replace(b"\n", b"\r\n"),
+           b"0" * w + b"\n", b"0" * (w + 1), b"1\n" * 256, b"1\n" * 257,
+           b" " * (256 * (w + 2)), b" " * (256 * (w + 2) + 1)]
+    alphabet = b"0123456789abcdefABCDEFgz \r\n\t\x00\xff"
+    while len(out) < n:
+        b = bytearray(good)
+        for _m in range(rng.randint(1, 4)):
+            op = rng.randrange(5)
+            i = rng.randrange(len(b))
+            if op == 0:
+                b[i] = rng.choice(alphabet)
+            elif op == 1:
+                b[i] = rng.randrange(256)
+            elif op == 2:
+                del b[i]
+            elif op == 3:
+                b[i:i] = bytes([rng.choice(alphabet)])
+            else:
+                b = b[:i]
+        out.append(bytes(b))
+    return out
+
+
 # -- the font lane (docs/theming_2026-09.md §4.7) ---------------------------------
 
 FONT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),

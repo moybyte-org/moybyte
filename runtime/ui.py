@@ -209,6 +209,35 @@ def theme_fonts(name):
     return _C.theme_fonts(name)
 
 
+def theme_sheets(name):
+    """(sprites, icons): theme `name`'s sheet files (docs/theming_2026-09.md
+    §4.6) along its `inherits`, None where none names one."""
+    return _C.theme_sheets(name)
+
+
+def sheet_check(src, rows):
+    """(rc, rows): sheet bytes `src` read as the loader reads a sheet of at
+    most `rows` rows (the cart sheet's hex format, strictly)."""
+    return _C.sheet_check(src, rows)
+
+
+def sheet_load(src):
+    """rc: load the role sheet the sprite parts draw from (0, or the
+    loader's refusal, which leaves none)."""
+    return _C.sheet_load(src)
+
+
+def sheet_clear():
+    """No role sheet: every part draws its surface."""
+    _C.sheet_clear()
+
+
+def sheet_caps():
+    """(width, sprite rows, icon rows, sprite bytes, icon bytes): a sheet's
+    caps."""
+    return _C.sheet_caps()
+
+
 def theme_layout(name):
     """(refused, bars): theme `name`'s layout along its `inherits`, as the
     loader checked it (docs/shell_layout_2026-10.md §5); refused when the
@@ -240,7 +269,7 @@ def theme_uninstall():
 
 def theme_resolve(src):
     """The loader's answer for theme.json bytes `src`, installing nothing:
-    (rc, notes, name, dark, light, fonts, layout)."""
+    (rc, notes, name, dark, light, fonts, layout, sheets)."""
     return _C.theme_resolve(src)
 
 
@@ -1312,9 +1341,10 @@ def pattern_unreadable(th):
 
 
 def paint(cv, th, rect, part, state=REST):
-    """Paint theme part `part`'s surface in `state` into `rect`, as a
-    primitive paints its frame. False, drawing nothing, when the theme gives
-    the part none there: the caller draws its own."""
+    """Paint theme part `part`'s sprite in `state` into `rect` (the role
+    sheet's, `sheet_load`), else its surface, as a primitive paints its
+    frame. False, drawing nothing, when the theme gives the part neither
+    there: the caller draws its own."""
     p = _PART_ID.get(part)
     if p is None:
         p = _PART_ID[part] = _C.parts().index(part)

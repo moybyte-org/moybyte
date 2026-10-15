@@ -539,6 +539,7 @@ def _corpus(n):
                             "tab": {"on": {"effect": "shadow", "color": "code_text"}}},
                       colors={"dark": {"block_sound": 3, "accent": 9}},
                       fonts={"ui": "ui.fnt", "mono": "mono-8.fnt"},
+                      sprites="parts.moygfx", icons="bar-icons.moygfx",
                       surfaces={"button": {"rest": "bevel2, fill surface, shadow",
                                            "pressed": "sunken, dither shade_lo/7"},
                                 "window.title": {"active": "pinstripe shade_lo/shade_hi"}}))
@@ -583,7 +584,7 @@ def _answer(mod, src):
         return rc, notes, None, None
     n = mod.theme_installed()
     return rc, notes, mod.theme(n, False), \
-        (mod.theme_shape(n), mod.theme_fonts(n), mod.theme_layout(n))
+        (mod.theme_shape(n), mod.theme_fonts(n), mod.theme_layout(n), mod.theme_sheets(n))
 
 
 def test_mutated_themes_never_break_the_reader():
@@ -613,7 +614,7 @@ def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
         assert moy_ui.theme_installed() == "kept"
         parsed = moy_ui.theme_install(src)
         if got[0] != OK:
-            assert got[2:] == (None,) * 5
+            assert got[2:] == (None,) * 6
             assert got[0] == parsed[0] or (parsed[0] == OK and got[0] == CHAIN
                                            and b"inherits" in src)
         else:
@@ -644,7 +645,8 @@ while i < len(data):
     if rc == 0:
         n = moy_ui.theme_installed()
         print(repr((rc, notes, moy_ui.theme(n, False),
-                    (moy_ui.theme_shape(n), moy_ui.theme_fonts(n), moy_ui.theme_layout(n)))))
+                    (moy_ui.theme_shape(n), moy_ui.theme_fonts(n), moy_ui.theme_layout(n),
+                     moy_ui.theme_sheets(n)))))
     else:
         print(repr((rc, notes, None, None)))
     print(repr(got))

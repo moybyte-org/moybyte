@@ -109,14 +109,16 @@ try:
     from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
                               PICTURE_FILE, derived_of, font_files, keys_of,
                               manifest, minified, name_ok, named, overlay,
-                              read_look, wall_keys)
+                              read_look, sheet_files, wall_keys)
     from moy_store_base import cart_path
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
                                       PETME128, PICTURE_FILE, derived_of, font_files,
                                       keys_of, manifest, minified, name_ok,
-                                      named, overlay, read_look, wall_keys)
+                                      named, overlay, read_look, sheet_files,
+                                      wall_keys)
     from runtime.moy_store_base import cart_path
+from binascii import crc32 as _crc32
 try:
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -143,6 +145,9 @@ _FONT_BYTES = 8192      # moy_text.h's MOY_FONT_BYTES: the largest font file
 _THEME_BYTES = 4096     # style.json's theme.bytes: the largest theme.json
 _THEME_MAIN = "theme.json"
 _PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spare
+# A sheet's caps (style.json's theme.sheet_rows): (width, sprite rows, icon
+# rows, sprite bytes, icon bytes).
+_SHEET_CAPS = _uimod.sheet_caps()
 _CHANGES = ("accent", "tint", "wallpaper", "frame", "font")
 # The loader's refusals (moy_theme.h), by rc from 1: each one's string.
 _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
@@ -242,6 +247,13 @@ class Appearance:
         # (from system_icons.moygfx, else the baked default theme); None falls back to
         # the kernel's _glyph.
         self.icon_sheet = None
+        # The theme's sheets (docs/theming_2026-09.md §4.6): what the loaded
+        # role sheet is of, the theme's icon sheet, and the user's own
+        # (system_icons.moygfx), which wins over the theme's.
+        self._sheet_key = None
+        self._theme_icons = None
+        self._user_icons = None
+        self._crcs = {}                 # package_rows's sheet digests, see _sheet_crc
         # The shell layout (docs/shell_layout_2026-10.md §9-§11): the bars as
         # this tier, glass and mode resolved them, what the composer noted,
         # and the loader's answers per package (cleared by a theme switch).
@@ -884,6 +896,7 @@ class Appearance:
         img = wall_keys(theme)[1]
         if img is not None:
             names.append(img)
+        names.extend(sheet_files(theme))
         need = set()
         fetched = {}
         for n in names:
@@ -949,6 +962,7 @@ class Appearance:
         img = wall_keys(src)[1]
         if img is not None:
             files.append(img)
+        files.extend(sheet_files(src))
         c.files = set(files)
         base = None
         if "from" in look:
@@ -1052,6 +1066,7 @@ class Appearance:
                 sheet = IconSheet.from_hex(hexs)
             except Exception:  # noqa: BLE001
                 sheet = None
+        self._user_icons = sheet
         if sheet is None:
             sheet = _default_icon_sheet()
             # Re-seed a STALE (or corrupt) saved theme to the new default so the new
@@ -1064,6 +1079,8 @@ class Appearance:
                         sheet.to_hex(), ws.carts_root, _ICON_VERSION))
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte icons re-seed failed:", _err_text(exc))
+        if self._user_icons is None and self._theme_icons is not None:
+            sheet = self._theme_icons
         self.set_icon_sheet(sheet)
 
     def save_icons(self):
@@ -1083,11 +1100,14 @@ class Appearance:
         sheet = self.icon_sheet
         if not (sheet and ws.carts_root and ws.can_manage):
             return
+        if sheet is self._theme_icons and not sheet.dirty:
+            return                             # the theme's, untouched: not the user's yet
         hexs = sheet.to_hex()
         try:
             ws._with_sd(lambda: ws.carts_store.save_system_icons(
                 hexs, ws.carts_root, _ICON_VERSION))
             sheet.dirty = False
+            self._user_icons = sheet
             ws.save_status = None           # clear stale failure text (see commit_code)
             # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
             # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
@@ -1220,6 +1240,7 @@ class Appearance:
         self.theme_name = name
         _uimod.use_shape(name)
         refont = self._install_fonts(name)
+        self._install_sheets(name)
         ws.theme_colors = theme_colors(name, self.theme_variant)
         self.publish()
         # The launcher grids read the accent for their selection ring/pill.
@@ -1304,9 +1325,10 @@ class Appearance:
 
     def package_rows(self):
         """{name: [rc, rows]} of every store package: the loader's answer
-        and an FNV-1a digest of the dark and light rows it resolves to --
-        the same on every console that holds the same bytes (the dev
-        channel's `state`, a theme carried between consoles)."""
+        and an FNV-1a digest of the dark and light rows it resolves to and
+        the bytes of the sheets it names -- the same on every console that
+        holds the same bytes (the dev channel's `state`, a theme carried
+        between consoles)."""
         out = {}
         for name in self._packages():
             got = package(name)
@@ -1322,8 +1344,27 @@ class Appearance:
                             stack.extend(v)
                         else:
                             h = ((h ^ (int(v) & 0xFF)) * 0x01000193) & 0xFFFFFFFF
+                for i, f in enumerate(got[7]):
+                    for b in self._sheet_crc(name, f, i).to_bytes(4, "little"):
+                        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
             out[name] = [got[0], "%08x" % h]
         return out
+
+    def _sheet_crc(self, name, f, key):
+        """The crc32 of sheet `f` of store package `name` (`key` 0 sprites,
+        1 icons), 0 for none or one that cannot be read: read once per store
+        change and per change to custom."""
+        if f is None:
+            return 0
+        memo = (name, f, self._pkg_gen, self._pic_epoch, self.file_gen)
+        got = self._crcs.get(memo)
+        if got is None:
+            data = self._package_file(name, f, _SHEET_CAPS[3 + key])
+            got = _crc32(data) & 0xFFFFFFFF if data else 0
+            if len(self._crcs) > 16:
+                self._crcs.clear()
+            self._crcs[memo] = got
+        return got
 
     def _package_file(self, name, file, cap):
         """Up to cap + 1 bytes of file `file` of store package `name` (one
@@ -1550,6 +1591,31 @@ class Appearance:
             self.text_floor = floor
             changed = True
         return changed
+
+    def _install_sheets(self, name):
+        """Load theme `name`'s sheets (docs/theming_2026-09.md §4.6): its
+        role sheet (`sprites`) for every sprite part, and its icon sheet
+        (`icons`) for the bar, under the user's own. Read from the package's
+        folder once per theme, file and store change; a sheet that will not
+        load leaves its parts on their surfaces and the bar on the user's or
+        the default icons."""
+        sprites, icons = _uimod.theme_sheets(name)
+        key = (name, sprites, icons, self._pkg_gen, self._pic_epoch)
+        if key == self._sheet_key:
+            return
+        self._sheet_key = key
+        src = self._package_file(name, sprites, _SHEET_CAPS[3]) \
+            if sprites is not None else None
+        if src is None or _uimod.sheet_load(src) != 0:
+            _uimod.sheet_clear()
+        was = self._theme_icons
+        self._theme_icons = None
+        src = self._package_file(name, icons, _SHEET_CAPS[4]) if icons is not None else None
+        if src is not None and _uimod.sheet_check(src, _SHEET_CAPS[2])[0] == 0:
+            self._theme_icons = IconSheet.from_hex(src.decode("ascii"))
+        if self.icon_sheet is not None and self._user_icons is None \
+                and (was is not None or self._theme_icons is not None):
+            self.set_icon_sheet(self._theme_icons or _default_icon_sheet())
 
     def _font_id(self, key):
         """The loaded id of font `key`, (package, file): a store package's

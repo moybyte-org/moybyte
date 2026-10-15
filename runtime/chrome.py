@@ -828,7 +828,7 @@ def adopt_packages(names, read):
 
 def package(name):
     """`moy_ui.theme_resolve`'s answer for store package `name`, read once
-    per store change: (rc, notes, name, dark, light, fonts, layout). None
+    per store change: (rc, notes, name, dark, light, fonts, layout, sheets). None
     when `name` is no store package. A package whose `name` is not its
     folder's is refused (rc 4, the loader's NAME)."""
     if name not in _PACKAGES:
@@ -838,11 +838,11 @@ def package(name):
         read = _PKG_READ[0]
         src = read(name) if read is not None else None
         if src is None:
-            got = (_ui._C.theme_resolve(b"")[0], 0, None, None, None, None, None)
+            got = (_ui._C.theme_resolve(b"")[0], 0, None, None, None, None, None, None)
         else:
             got = _ui._C.theme_resolve(src)
             if got[0] == 0 and got[2] != name:
-                got = (4, got[1], None, None, None, None, None)
+                got = (4, got[1], None, None, None, None, None, None)
         _PACKAGES[name] = got
     return got
 

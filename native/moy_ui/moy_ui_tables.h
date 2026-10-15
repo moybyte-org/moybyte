@@ -186,8 +186,29 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_RULES 69
 #define MOY_THEME_PAIRS 7
 #define MOY_THEME_CONTRAST 30
-#define MOY_THEME_RESERVED 6
+#define MOY_THEME_RESERVED 4
 #define MOY_THEME_FONT_ROLES 3
+// The sheets a package may name (docs/theming_2026-09.md §4.6), the
+// cart sheet's hex format: a line a row of up to MOY_THEME_SHEET_W nibbles,
+// at most each sheet's rows. The role sheet's cells, in pixels, reach
+// MOY_THEME_SPRITE_ROWS rows: what the loader keeps.
+#define MOY_THEME_SHEETS 2
+#define MOY_THEME_SHEET_SPRITES 0
+#define MOY_THEME_SHEET_ICONS 1
+#define MOY_THEME_SHEET_W 128
+#define MOY_THEME_SPRITES_MAX_ROWS 256
+#define MOY_THEME_ICONS_MAX_ROWS 64
+#define MOY_THEME_SHEET_BYTES(rows) ((rows) * (MOY_THEME_SHEET_W + 2))
+#define MOY_THEME_SPRITE_ROWS 80
+#define MOY_THEME_SPRITE_SLOTS 16
+#define MOY_THEME_CELLS 15
+// A cell: its part, state and title button (frame_button_names), its
+// rect in pixels, and whether it is a 9-slice (8-pixel corners).
+typedef struct { uint8_t part, state, sub, x, y, w, h, nine; } moy_theme_cell_t;
+extern const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS];
+// Each slot's colour: INT8_MIN transparent, a palette index, or -1 - a token.
+extern const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS];
+extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_FONT_FILES 2  // the seeds' fonts and their licence texts
 #define MOY_THEME_ROLES 51  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3

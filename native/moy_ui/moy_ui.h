@@ -52,6 +52,10 @@ const int16_t *moy_ui_metrics(int kind, int *n);
 
 // A token of `look`'s row: its palette index, or -1 where the theme is silent.
 int moy_ui_token(int look, int token);
+// The sprite sheet's slots under `look` (style.json's theme.sprite_slots
+// resolved against its row when the row is set): MOY_THEME_SPRITE_SLOTS
+// palette indices, -1 for transparent. NULL for no look.
+const int16_t *moy_ui_sprite_slots(int look);
 
 // -- the theme's shape: surfaces, metrics, text effects ----------------------------
 //
@@ -286,9 +290,9 @@ moy_ui_box_t moy_ui_inset(moy_ui_box_t r, int dx, int dy);
 int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
                  moy_ui_box_t *content);
 int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
-// Paint `part`'s surface in `state` (theme part and state ids) into the box,
-// as a primitive paints its frame. *painted: 0 when the part names none
-// there (nothing drawn).
+// Paint `part`'s sprite in `state` (theme part and state ids) into the box
+// when the role sheet sets its cell, else its surface, as a primitive paints
+// its frame. *painted: 0 when the part has neither there (nothing drawn).
 int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, int *painted);
 // A theme part's id by name, or -1.
 int moy_ui_part(const char *name, size_t n);
@@ -302,7 +306,10 @@ int moy_ui_part(const char *name, size_t n);
 // `title_h` strip under its top edge, and the three-pixel drop shadow right
 // of and below the box. The `window.title` and `window.button` surfaces a
 // theme names are painted in place of the style's own; the title takes
-// `window.title`'s text effect. States are MOY_THEME_S_ACTIVE / _INACTIVE.
+// `window.title`'s text effect. The role sheet's `window` 9-slice replaces
+// the ring's top row and the strip, and a title button's sprite its surface
+// and glyph (docs/theming_2026-09.md §4.6). States are MOY_THEME_S_ACTIVE /
+// _INACTIVE.
 enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2 };
 typedef struct {
     moy_ui_box_t box;

@@ -479,6 +479,36 @@ static int fonts_key(rd_t *r, moy_theme_pkg_t *out) {
     }
 }
 
+// A sheet key's value: a file of the package named `X.moygfx`. Anything
+// else is dropped. 0, or -1: malformed.
+static int sheet_key(rd_t *r, moy_theme_pkg_t *out, int key) {
+    char file[MOY_THEME_NAME_MAX + 1];
+    int over;
+    int32_t iv;
+    int len = peek(r) == '"' ? str(r, file, sizeof(file), &over) : -2;
+    if (len == -1 || (len == -2 && value(r, &iv) < 0)) {
+        return -1;
+    }
+    static const char k_sfx[] = ".moygfx";
+    const int sl = (int)sizeof(k_sfx) - 1;
+    if (len > sl && file_ok(file, len, over) && memcmp(file + len - sl, k_sfx, (size_t)sl) == 0) {
+        memcpy(out->sheet[key], file, (size_t)len);
+        out->sheet[key][len] = 0;
+    } else {
+        out->notes |= MOY_THEME_N_DROPPED;
+    }
+    return 0;
+}
+
+static int sheet_of(const char *key) {
+    for (int i = 0; i < MOY_THEME_SHEETS; i++) {
+        if (strcmp(moy_theme_sheet_keys[i], key) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // One state's effect: {"effect": NAME, "color": ROLE}. 0, or -1: malformed.
 static int effect(rd_t *r, moy_theme_pkg_t *out, int kind, int state) {
     int eff = -1, role = -1, bad = 0;
@@ -1127,6 +1157,8 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
                 kind = fonts_key(&r, out);
             } else if (strcmp(key, "layout") == 0 && eat(&r, '{')) {
                 kind = layout_key(&r, out);
+            } else if (sheet_of(key) >= 0) {
+                kind = sheet_key(&r, out, sheet_of(key));
             } else {
                 if (strcmp(key, "colors") == 0 || strcmp(key, "metrics") == 0
                     || strcmp(key, "text") == 0 || strcmp(key, "surfaces") == 0
@@ -1438,6 +1470,155 @@ int moy_theme_fonts(const char *name, size_t n,
     return rc;
 }
 
+static void apply_sheets(const moy_theme_pkg_t *pkg, void *ctx) {
+    char (*out)[MOY_THEME_NAME_MAX + 1] = ctx;
+    for (int i = 0; i < MOY_THEME_SHEETS; i++) {
+        if (out[i][0] == 0) {
+            memcpy(out[i], pkg->sheet[i], sizeof(pkg->sheet[i]));
+        }
+    }
+}
+
+int moy_theme_sheets(const char *name, size_t n,
+                     char out[MOY_THEME_SHEETS][MOY_THEME_NAME_MAX + 1]) {
+    memset(out, 0, MOY_THEME_SHEETS * (MOY_THEME_NAME_MAX + 1));
+    int rc = chain(name, n, apply_sheets, out);
+    if (rc != MOY_THEME_OK) {
+        memset(out, 0, MOY_THEME_SHEETS * (MOY_THEME_NAME_MAX + 1));
+    }
+    return rc;
+}
+
+// -- the sprite sheet -------------------------------------------------------------
+
+const int moy_theme_sheet_dims[6] = {
+    MOY_THEME_SHEET_W, MOY_THEME_SPRITES_MAX_ROWS, MOY_THEME_ICONS_MAX_ROWS,
+    MOY_THEME_SPRITE_ROWS, MOY_THEME_CELLS, MOY_THEME_SHEETS,
+};
+
+static uint8_t *s_sheet;            // MOY_THEME_SHEET_W x MOY_THEME_SPRITE_ROWS slots
+static int s_sheet_on;
+static uint8_t s_cell_set[MOY_THEME_CELLS];
+
+static int sheet_space(uint8_t c) {
+    return c == ' ' || c == '\t' || c == '\r';
+}
+
+static int nibble(uint8_t c) {
+    return c >= '0' && c <= '9' ? c - '0'
+           : c >= 'a' && c <= 'f' ? c - 'a' + 10
+           : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                  : -1;
+}
+
+// Walk the sheet's rows: each row's digits to `row` (when not NULL, the
+// buffer MOY_THEME_SHEET_W wide, rows past `keep` not written).
+static int sheet_walk(const uint8_t *src, size_t n, int rows_max, int *rows, uint8_t *row,
+                      int keep) {
+    if (n > (size_t)MOY_THEME_SHEET_BYTES(rows_max)) {
+        return MOY_THEME_BIG;
+    }
+    const uint8_t *p = src, *end = src + n;
+    int y = 0;
+    while (p < end) {
+        const uint8_t *e = p;
+        while (e < end && *e != '\n') {
+            e++;
+        }
+        const uint8_t *a = p, *b = e;
+        while (a < b && sheet_space(*a)) {
+            a++;
+        }
+        while (b > a && sheet_space(b[-1])) {
+            b--;
+        }
+        if (b > a) {
+            if (b - a > MOY_THEME_SHEET_W) {
+                return MOY_THEME_SYNTAX;
+            }
+            if (y >= rows_max) {
+                return MOY_THEME_BIG;
+            }
+            uint8_t *out = row != NULL && y < keep ? row + (size_t)y * MOY_THEME_SHEET_W : NULL;
+            for (const uint8_t *q = a; q < b; q++) {
+                int v = nibble(*q);
+                if (v < 0) {
+                    return MOY_THEME_SYNTAX;
+                }
+                if (out != NULL) {
+                    out[q - a] = (uint8_t)v;
+                }
+            }
+            y++;
+        }
+        p = e < end ? e + 1 : e;
+    }
+    if (rows != NULL) {
+        *rows = y;
+    }
+    return MOY_THEME_OK;
+}
+
+int moy_theme_sheet_check(const uint8_t *src, size_t n, int rows_max, int *rows) {
+    return sheet_walk(src, n, rows_max, rows, NULL, 0);
+}
+
+int moy_theme_sheet_load(const uint8_t *src, size_t n) {
+    s_sheet_on = 0;
+    int rc = sheet_walk(src, n, MOY_THEME_SPRITES_MAX_ROWS, NULL, NULL, 0);
+    if (rc != MOY_THEME_OK) {
+        return rc;
+    }
+    const size_t bytes = (size_t)MOY_THEME_SHEET_W * MOY_THEME_SPRITE_ROWS;
+    if (s_sheet == NULL) {
+        s_sheet = THEME_ALLOC(bytes);
+        if (s_sheet == NULL) {
+            return MOY_THEME_NOMEM;
+        }
+    }
+    memset(s_sheet, 0, bytes);
+    sheet_walk(src, n, MOY_THEME_SPRITES_MAX_ROWS, NULL, s_sheet, MOY_THEME_SPRITE_ROWS);
+    for (int i = 0; i < MOY_THEME_CELLS; i++) {
+        const moy_theme_cell_t *c = &moy_theme_cells[i];
+        uint8_t set = 0;
+        for (int y = c->y; y < c->y + c->h && !set; y++) {
+            const uint8_t *row = s_sheet + (size_t)y * MOY_THEME_SHEET_W + c->x;
+            for (int x = 0; x < c->w; x++) {
+                set |= row[x];
+            }
+        }
+        s_cell_set[i] = set != 0;
+    }
+    s_sheet_on = 1;
+    return MOY_THEME_OK;
+}
+
+void moy_theme_sheet_clear(void) {
+    s_sheet_on = 0;
+}
+
+const uint8_t *moy_theme_sheet(void) {
+    return s_sheet_on ? s_sheet : NULL;
+}
+
+int moy_theme_sheet_cell(int part, int state, int sub) {
+    if (!s_sheet_on || state < 0 || state >= MOY_THEME_STATES) {
+        return -1;
+    }
+    for (;;) {
+        for (int i = 0; i < MOY_THEME_CELLS; i++) {
+            const moy_theme_cell_t *c = &moy_theme_cells[i];
+            if (c->part == part && c->state == state && c->sub == sub && s_cell_set[i]) {
+                return i;
+            }
+        }
+        if (moy_theme_state_next[state] == 0xff) {
+            return -1;
+        }
+        state = moy_theme_state_next[state];
+    }
+}
+
 typedef struct {
     moy_theme_layout_t *out;
     int found;
@@ -1538,6 +1719,13 @@ const char *moy_theme_probe_font(int role) {
         return NULL;
     }
     return s_probe->font[role];
+}
+
+const char *moy_theme_probe_sheet(int key) {
+    if (s_probe == NULL || key < 0 || key >= MOY_THEME_SHEETS || !s_probe->sheet[key][0]) {
+        return NULL;
+    }
+    return s_probe->sheet[key];
 }
 
 // -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
@@ -1844,6 +2032,11 @@ static void apply_flat(const moy_theme_pkg_t *pkg, void *ctx) {
             memcpy(f->font[i], pkg->font[i], sizeof(pkg->font[i]));
         }
     }
+    for (int i = 0; i < MOY_THEME_SHEETS; i++) {
+        if (f->sheet[i][0] == 0) {
+            memcpy(f->sheet[i], pkg->sheet[i], sizeof(pkg->sheet[i]));
+        }
+    }
     // A refused layout resolves as the default's, so it flattens to none.
     if (!c->layout_found && pkg->layout.set != MOY_THEME_LAYOUT_SILENT) {
         c->layout_found = 1;
@@ -2115,6 +2308,13 @@ static void put_custom(wr_t *w, const moy_theme_pkg_t *f, const int32_t rows[2][
         put_str(w, f->font[i]);
     }
     put_s(w, any ? "}" : "");
+    for (int i = 0; i < MOY_THEME_SHEETS; i++) {
+        if (f->sheet[i][0]) {
+            put(w, ",", 1);
+            put_key(w, moy_theme_sheet_keys[i]);
+            put_str(w, f->sheet[i]);
+        }
+    }
     put_parts(w, f, 0);
     put_parts(w, f, 1);
     put_layout(w, &f->layout);

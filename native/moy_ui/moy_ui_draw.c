@@ -7,6 +7,7 @@
 
 #include "moy_ui.h"
 #include "moy_canvas.h"
+#include "moy_theme.h"
 
 // -- the font text draws in ---------------------------------------------------------
 //
@@ -168,9 +169,111 @@ static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scal
                                                    d->row->pal[ci & 63], scale);
 }
 
+// -- sprites (docs/theming_2026-09.md §4.6) ---------------------------------------
+//
+// A cell of the theme's role sheet into a box at `scale`, each slot resolved
+// through the look's table (moy_ui_sprite_slots): a glyph cell centred in the
+// box as a glyph is, a 9-slice stretched over it, its 8-pixel corners whole
+// and its edges and centre tiled (a box under two corners wide shows each
+// corner's outer part). Never outside the box; slot 0 leaves the target as
+// it is. A run of one colour across a row of the cell is one fill, a row
+// repeated by the scale or a tiled edge stays one; the call counts one op.
+
+// The cell row or column a 9-slice draws at `at` of a box `size` across,
+// from a cell `src` pixels across.
+static int nine_at(int at, int size, int src, int scale) {
+    int c = 8 * scale;
+    int lo = size < 2 * c ? (size + 1) / 2 : c;
+    int hi = size - lo < c ? size - lo : c;
+    if (at < lo) {
+        return at / scale;
+    }
+    if (at >= size - hi) {
+        return src - 1 - (size - 1 - at) / scale;
+    }
+    return 8 + ((at - lo) / scale) % (src - 16);
+}
+
+static int cell_at(int at, int off, int size, int src, int scale, int nine) {
+    return nine ? nine_at(at, size, src, scale) : (at - off) / scale;
+}
+
+#define SPRITE_CHUNK 256
+
+static int sprite(draw_t *d, moy_ui_box_t b, int cell, int scale) {
+    if (cell < 0 || cell >= MOY_THEME_CELLS) {
+        return 0;
+    }
+    const uint8_t *sheet = moy_theme_sheet();
+    const int16_t *slot = moy_ui_sprite_slots(d->look);
+    if (sheet == NULL || slot == NULL) {
+        return 0;
+    }
+    const moy_theme_cell_t *c = &moy_theme_cells[cell];
+    scale = scale < 1 ? 1 : scale;
+    int ox = 0, oy = 0, x0 = 0, y0 = 0, x1 = b.w, y1 = b.h;
+    if (!c->nine) {
+        ox = moy_ui_fdiv(b.w - c->w * scale, 2);
+        oy = moy_ui_fdiv(b.h - c->h * scale, 2);
+        x0 = ox > 0 ? ox : 0;
+        y0 = oy > 0 ? oy : 0;
+        x1 = ox + c->w * scale < b.w ? ox + c->w * scale : b.w;
+        y1 = oy + c->h * scale < b.h ? oy + c->h * scale : b.h;
+    }
+    // the target's clip, in the box's own coordinates
+    int lx = d->t.cx0 + d->t.cam_x - b.x, rx = d->t.cx1 + d->t.cam_x - b.x;
+    int ty = d->t.cy0 + d->t.cam_y - b.y, by = d->t.cy1 + d->t.cam_y - b.y;
+    x0 = x0 > lx ? x0 : lx;
+    x1 = x1 < rx ? x1 : rx;
+    y0 = y0 > ty ? y0 : ty;
+    y1 = y1 < by ? y1 : by;
+    d->row->st[MOY_ST_N_FILL]++;
+    // The box's columns map to the cell's through a table, a chunk of the
+    // box at a time, and each row of the cell to its colours once.
+    uint8_t xm[SPRITE_CHUNK];
+    int16_t rc[MOY_THEME_SHEET_W];
+    for (int cx = x0; cx < x1; cx += SPRITE_CHUNK) {
+        int cx1 = cx + SPRITE_CHUNK < x1 ? cx + SPRITE_CHUNK : x1;
+        for (int x = cx; x < cx1; x++) {
+            xm[x - cx] = (uint8_t)cell_at(x, ox, b.w, c->w, scale, c->nine);
+        }
+        for (int y = y0; y < y1;) {
+            int sy = cell_at(y, oy, b.h, c->h, scale, c->nine);
+            int y2 = y + 1;
+            while (y2 < y1 && cell_at(y2, oy, b.h, c->h, scale, c->nine) == sy) {
+                y2++;
+            }
+            const uint8_t *row = sheet + (size_t)(c->y + sy) * MOY_THEME_SHEET_W + c->x;
+            for (int k = 0; k < c->w; k++) {
+                rc[k] = slot[row[k] & 15];
+            }
+            int ci = rc[xm[0]];
+            for (int x = cx; x < cx1;) {
+                int x2 = x + 1, next = ci;
+                while (x2 < cx1 && (next = rc[xm[x2 - cx]]) == ci) {
+                    x2++;
+                }
+                if (ci >= 0) {
+                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y, d->row->pal[ci & 63]);
+                }
+                x = x2;
+                ci = next;
+            }
+            y = y2;
+        }
+    }
+    return 1;
+}
+
 // The part's surface in `state`, painted in place of its field and edge when
-// the theme gives it one: 1, or 0 for "draw the field and edge as ever".
+// the theme gives it one: 1, or 0 for "draw the field and edge as ever". A
+// part with a sprite in the sheet draws the sprite instead (the title
+// buttons and the window's 9-slice are the frame's own).
 static int surface(draw_t *d, moy_ui_box_t b, int part, int state, int field, int edge) {
+    if (part != MOY_THEME_P_WINDOW_BUTTON
+        && sprite(d, b, moy_theme_sheet_cell(part, state, 0), d->tfs)) {
+        return 1;
+    }
     const moy_ui_surface_t *sf = moy_ui_shape_surface(d->sh, part, state);
     if (sf == NULL) {
         return 0;
@@ -1154,7 +1257,23 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     moy_ui_box_t strip = {(int16_t)(w.x + 1), (int16_t)(w.y + 1), (int16_t)(w.w - 2), (int16_t)th};
     fill(&d, w.x + 3, w.y + w.h, w.w, 3, dark);
     fill(&d, w.x + w.w, w.y + 3, 3, w.h, dark);
-    if (L.style == MOY_THEME_FRAME_WIN9X) {
+    // The window's 9-slice is the frame above the content: the ring's top
+    // row and the strip, in place of the style's, its slot 0 leaving what is
+    // under the window; the ring's sides and foot and the shadow stay the
+    // style's.
+    int top = moy_theme_sheet_cell(MOY_THEME_P_WINDOW, st, 0);
+    if (top >= 0) {
+        int y0 = w.y + th + 1, sides = w.h - th - 2;
+        int lc = L.style == MOY_THEME_FRAME_WIN9X ? moy_ui_token(look, MOY_UI_T_SHADE_HI) : edge;
+        int rc = L.style == MOY_THEME_FRAME_WIN9X ? dark : edge;
+        if (sides > 0) {
+            fill(&d, w.x, y0, 1, sides, lc);
+            fill(&d, w.x + w.w - 1, y0, 1, sides, rc);
+        }
+        fill(&d, w.x, w.y + w.h - 1, w.w, 1, rc);
+        moy_ui_box_t head = {w.x, w.y, w.w, (int16_t)(th + 1)};
+        sprite(&d, head, top, fs);
+    } else if (L.style == MOY_THEME_FRAME_WIN9X) {
         int hi = moy_ui_token(look, MOY_UI_T_SHADE_HI);
         int panel = moy_ui_token(look, MOY_UI_T_PANEL);
         fill(&d, w.x, w.y, w.w - 1, 1, hi);
@@ -1210,6 +1329,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
         moy_ui_box_t b = L.b[i].box;
         int id = L.b[i].id;
         int ink = fg;
+        if (sprite(&d, b, moy_theme_sheet_cell(MOY_THEME_P_WINDOW_BUTTON, st, id), fs)) {
+            continue;
+        }
         if (L.style == MOY_THEME_FRAME_WIN9X) {
             moy_ui_surface_t own =
                 surf_of(MOY_UI_EDGE_BEVEL2, MOY_UI_FILL_SOLID, MOY_UI_T_PANEL, MOY_UI_T_PANEL, -1);

@@ -43,6 +43,12 @@ _SIGS = (
     ("moy_theme_probe_end", [], None),
     ("moy_theme_probe_name", [], c.c_char_p),
     ("moy_theme_probe_font", [_I], c.c_char_p),
+    ("moy_theme_probe_sheet", [_I], c.c_char_p),
+    ("moy_theme_sheets", [_P, _Z, c.c_void_p], _I),
+    ("moy_theme_sheet_check", [_P, _Z, _I, c.POINTER(_I)], _I),
+    ("moy_theme_sheet_load", [_P, _Z], _I),
+    ("moy_theme_sheet_clear", [], None),
+    ("moy_theme_sheet_cell", [_I, _I, _I], _I),
     ("moy_theme_uninstall", [], None),
     ("moy_theme_custom", [_P, _Z, _I, _I, c.c_void_p, c.c_void_p, _Z, c.POINTER(_Z)], _I),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
@@ -741,6 +747,45 @@ def binding():
         lib.moy_theme_fonts(b, len(b), files)
         return tuple((r, f.value.decode()) for r, f in zip(font_roles, files) if f.value)
 
+    sdims = tuple((c.c_int * 6).in_dll(lib, "moy_theme_sheet_dims"))
+
+    class _CellRec(c.Structure):
+        _fields_ = [(n, c.c_uint8) for n in ("part", "state", "sub", "x", "y", "w", "h",
+                                             "nine")]
+
+    cell_recs = (_CellRec * sdims[4]).in_dll(lib, "moy_theme_cells")
+    cells = tuple((parts[r.part], th_states[r.state], r.sub, r.x, r.y, r.w, r.h, bool(r.nine))
+                  for r in cell_recs)
+
+    def theme_sheets(name):
+        b = _b(name)
+        files = ((c.c_char * 25) * sdims[5])()
+        lib.moy_theme_sheets(b, len(b), files)
+        return tuple(f.value.decode() if f.value else None for f in files)
+
+    def sheet_check(src, rows):
+        b = bytes(src)
+        got = _I()
+        rc = lib.moy_theme_sheet_check(b, len(b), int(rows), c.byref(got))
+        return rc, (got.value if rc == OK else 0)
+
+    def sheet_load(src):
+        b = bytes(src)
+        return lib.moy_theme_sheet_load(b, len(b))
+
+    def sheet_set():
+        return tuple(lib.moy_theme_sheet_cell(parts.index(cl[0]), th_states.index(cl[1]),
+                                              cl[2]) == i for i, cl in enumerate(cells))
+
+    w_, sr, ir = sdims[0], sdims[1], sdims[2]
+    m.theme_sheets = theme_sheets
+    m.sheet_check = sheet_check
+    m.sheet_load = sheet_load
+    m.sheet_clear = lib.moy_theme_sheet_clear
+    m.sheet_cells = lambda: cells
+    m.sheet_set = sheet_set
+    m.sheet_caps = lambda: (w_, sr, ir, sr * (w_ + 2), ir * (w_ + 2))
+
     dims = (c.c_int * 7).in_dll(lib, "moy_theme_layout_dims")
     Layout = _layout_type(*dims[:5])
     assert c.sizeof(Layout) == dims[6]
@@ -777,14 +822,17 @@ def binding():
         notes = c.c_uint8()
         rc = lib.moy_theme_probe(b, len(b), buf, c.byref(notes))
         if rc != OK:
-            return (rc, notes.value, None, None, None, None, None)
+            return (rc, notes.value, None, None, None, None, None, None)
         try:
             name = lib.moy_theme_probe_name().decode()
             fonts = tuple((r, lib.moy_theme_probe_font(i).decode())
                           for i, r in enumerate(font_roles)
                           if lib.moy_theme_probe_font(i))
+            sheets = tuple(None if not lib.moy_theme_probe_sheet(i)
+                           else lib.moy_theme_probe_sheet(i).decode()
+                           for i in range(sdims[5]))
             return (rc, notes.value, name, theme(name, False), theme(name, True),
-                    fonts, theme_layout(name) + (theme_home(name),))
+                    fonts, theme_layout(name) + (theme_home(name),), sheets)
         finally:
             lib.moy_theme_probe_end()
 

@@ -676,13 +676,33 @@ const uint16_t moy_theme_lum[64] = {
 };
 
 const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
-    "sprites",
-    "icons",
     "images",
     "wallpapers",
     "sounds",
     "editor",
 };
+
+const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS] = {
+    {25, 6, 0, 0, 0, 24, 24, 1},  // window active
+    {25, 7, 0, 24, 0, 24, 24, 1},  // window inactive
+    {31, 5, 0, 48, 0, 24, 24, 1},  // desk.icon rest
+    {27, 6, 0, 72, 0, 16, 16, 0},  // window.button active close
+    {27, 6, 1, 88, 0, 16, 16, 0},  // window.button active max
+    {27, 6, 2, 104, 0, 16, 16, 0},  // window.button active min
+    {27, 7, 0, 72, 16, 16, 16, 0},  // window.button inactive close
+    {27, 7, 1, 88, 16, 16, 16, 0},  // window.button inactive max
+    {27, 7, 2, 104, 16, 16, 16, 0},  // window.button inactive min
+    {9, 5, 0, 0, 32, 24, 24, 1},  // button rest
+    {9, 4, 0, 24, 32, 24, 24, 1},  // button hover
+    {9, 2, 0, 48, 32, 24, 24, 1},  // button hot
+    {9, 1, 0, 72, 32, 24, 24, 1},  // button pressed
+    {9, 3, 0, 96, 32, 24, 24, 1},  // button on
+    {9, 0, 0, 0, 56, 24, 24, 1},  // button disabled
+};
+
+const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS] = {INT8_MIN, -12, -10, -29, -30, -31, -2, -5, -17, -3, -4, -1, -7, -6, 0, 7};
+
+const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS] = {"sprites", "icons"};
 
 const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {
     "night",

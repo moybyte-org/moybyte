@@ -340,6 +340,41 @@ def generate_theme(style, t):
             seen.add(cur)
             cur = th["chain"][cur]
         nxt.append(states.index(th["chain"][st]))
+    sheet_keys = list(th["sheets"])
+    for name, src in seeds:
+        if set(sheet_keys) & set(json.loads(src)):
+            raise SystemExit("themes/%s.json: a seed names no sheet (the tables embed none)"
+                             % name)
+    slots = th["sprite_slots"]
+    if len(slots) != 16 or slots[0] is not None:
+        raise SystemExit("theme.sprite_slots: sixteen, the first transparent (null)")
+    slot_terms = ["INT8_MIN"]
+    for v in slots[1:]:
+        if isinstance(v, int) and 0 <= v < 64:
+            slot_terms.append(str(v))
+        elif v in t.tokens:
+            slot_terms.append(str(-1 - t.tokens.index(v)))
+        else:
+            raise SystemExit("theme.sprite_slots: %r is no token and no palette index" % (v,))
+    fb_names = th["frame_button_names"]
+    cells, used = [], set()
+    for part, st, sub, x, y, w, h_ in th["sprite_cells"]:
+        nine = part in th["sprite_nine"]
+        if part not in parts or st not in states:
+            raise SystemExit("theme.sprite_cells: %s %s names no part and state" % (part, st))
+        if (sub is None) != (part != "window.button") or (sub is not None
+                                                          and sub not in fb_names):
+            raise SystemExit("theme.sprite_cells: a title button names its button")
+        if x < 0 or y < 0 or w < 1 or h_ < 1 or x + w > 16 or (nine and (w < 3 or h_ < 3)):
+            raise SystemExit("theme.sprite_cells: %s %s is no cell of the sheet" % (part, st))
+        tiles = {(x + i, y + j) for i in range(w) for j in range(h_)}
+        if tiles & used:
+            raise SystemExit("theme.sprite_cells: %s %s overlaps a cell" % (part, st))
+        used |= tiles
+        cells.append((parts.index(part), states.index(st),
+                      fb_names.index(sub) if sub is not None else 0,
+                      x * 8, y * 8, w * 8, h_ * 8, int(nine), part, st, sub))
+    sheet_rows = max(c[4] + c[6] for c in cells)
     h = ["// Theme packages, format 1 (moy_theme.c): the limits, the derivation",
          "// rules, the readability pairs, MOY64's luminance and the seeds.",
          "#define MOY_THEME_FORMAT %d" % th["format"],
@@ -351,6 +386,27 @@ def generate_theme(style, t):
          "#define MOY_THEME_CONTRAST %d" % th["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
          "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
+         "// The sheets a package may name (docs/theming_2026-09.md \u00a74.6), the",
+         "// cart sheet's hex format: a line a row of up to MOY_THEME_SHEET_W nibbles,",
+         "// at most each sheet's rows. The role sheet's cells, in pixels, reach",
+         "// MOY_THEME_SPRITE_ROWS rows: what the loader keeps.",
+         "#define MOY_THEME_SHEETS %d" % len(sheet_keys),
+         "#define MOY_THEME_SHEET_SPRITES %d" % sheet_keys.index("sprites"),
+         "#define MOY_THEME_SHEET_ICONS %d" % sheet_keys.index("icons"),
+         "#define MOY_THEME_SHEET_W 128",
+         "#define MOY_THEME_SPRITES_MAX_ROWS %d" % th["sheet_rows"]["sprites"],
+         "#define MOY_THEME_ICONS_MAX_ROWS %d" % th["sheet_rows"]["icons"],
+         "#define MOY_THEME_SHEET_BYTES(rows) ((rows) * (MOY_THEME_SHEET_W + 2))",
+         "#define MOY_THEME_SPRITE_ROWS %d" % sheet_rows,
+         "#define MOY_THEME_SPRITE_SLOTS 16",
+         "#define MOY_THEME_CELLS %d" % len(cells),
+         "// A cell: its part, state and title button (frame_button_names), its",
+         "// rect in pixels, and whether it is a 9-slice (8-pixel corners).",
+         "typedef struct { uint8_t part, state, sub, x, y, w, h, nine; } moy_theme_cell_t;",
+         "extern const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS];",
+         "// Each slot's colour: INT8_MIN transparent, a palette index, or -1 - a token.",
+         "extern const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS];",
+         "extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];",
          "#define MOY_THEME_FONT_FILES %d  // the seeds' fonts and their licence texts"
          % len(fonts),
          "#define MOY_THEME_ROLES %d  // the tokens, then the content roles" % len(roles),
@@ -498,6 +554,15 @@ def generate_theme(style, t):
     c.append("const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {")
     c.extend("    %s," % _c_str(k) for k in th["reserved"])
     c.append("};\n")
+    c.append("const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS] = {")
+    for cl in cells:
+        c.append("    {%d, %d, %d, %d, %d, %d, %d, %d},  // %s %s%s"
+                 % (cl[:8] + (cl[8], cl[9], " " + cl[10] if cl[10] else "")))
+    c.append("};\n")
+    c.append("const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS] = {%s};\n"
+             % ", ".join(slot_terms))
+    c.append("const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS] = {%s};\n"
+             % ", ".join(_c_str(k) for k in sheet_keys))
     c.append("const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {")
     c.extend("    %s," % _c_str(n) for n, _s in seeds)
     c.append("};\n")

@@ -264,6 +264,93 @@ static mp_obj_t ui_theme_fonts(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_fonts_obj, ui_theme_fonts);
 
+// A sheet key's file, or None.
+static mp_obj_t sheet_name(const char *f) {
+    return f == NULL || !f[0] ? mp_const_none : mp_obj_new_str(f, strlen(f));
+}
+
+// theme_sheets(name) -> (sprites, icons): theme `name`'s sheet files, each
+// from the nearest package that names one, None where none does.
+static mp_obj_t ui_theme_sheets(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    char files[MOY_THEME_SHEETS][MOY_THEME_NAME_MAX + 1];
+    moy_theme_sheets(s, n, files);
+    mp_obj_t out[MOY_THEME_SHEETS];
+    for (int i = 0; i < MOY_THEME_SHEETS; i++) {
+        out[i] = sheet_name(files[i]);
+    }
+    return mp_obj_new_tuple(MOY_THEME_SHEETS, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_sheets_obj, ui_theme_sheets);
+
+// sheet_check(src, rows) -> (rc, rows): a sheet's bytes read as the loader
+// reads one of at most `rows` rows (moy_theme_sheet_check).
+static mp_obj_t ui_sheet_check(mp_obj_t src, mp_obj_t rows_max) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(src, &b, MP_BUFFER_READ);
+    int rows = 0;
+    int rc = moy_theme_sheet_check(b.buf, b.len, mp_obj_get_int(rows_max), &rows);
+    mp_obj_t out[2] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(rc == 0 ? rows : 0)};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_sheet_check_obj, ui_sheet_check);
+
+// sheet_load(src) -> rc: the role sheet every sprite part draws from
+// (moy_theme_sheet_load); a refusal leaves none. sheet_clear(): none.
+static mp_obj_t ui_sheet_load(mp_obj_t src) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(src, &b, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_theme_sheet_load(b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_sheet_load_obj, ui_sheet_load);
+
+static mp_obj_t ui_sheet_clear(void) {
+    moy_theme_sheet_clear();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_sheet_clear_obj, ui_sheet_clear);
+
+// sheet_cells() -> ((part, state, button, x, y, w, h, nine), ...): the role
+// sheet's cells in pixels (style.json's theme.sprite_cells; button is a
+// title button's index of frame_button_names, else 0), and whether each is
+// set in the loaded sheet: sheet_set() -> (bool, ...).
+static mp_obj_t ui_sheet_cells(void) {
+    mp_obj_t out[MOY_THEME_CELLS];
+    for (int i = 0; i < MOY_THEME_CELLS; i++) {
+        const moy_theme_cell_t *c = &moy_theme_cells[i];
+        mp_obj_t t[8] = {name_obj(moy_theme_part_names[c->part]),
+                         name_obj(moy_theme_state_names[c->state]),
+                         MP_OBJ_NEW_SMALL_INT(c->sub), MP_OBJ_NEW_SMALL_INT(c->x),
+                         MP_OBJ_NEW_SMALL_INT(c->y), MP_OBJ_NEW_SMALL_INT(c->w),
+                         MP_OBJ_NEW_SMALL_INT(c->h), mp_obj_new_bool(c->nine)};
+        out[i] = mp_obj_new_tuple(8, t);
+    }
+    return mp_obj_new_tuple(MOY_THEME_CELLS, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_sheet_cells_obj, ui_sheet_cells);
+
+static mp_obj_t ui_sheet_set(void) {
+    mp_obj_t out[MOY_THEME_CELLS];
+    for (int i = 0; i < MOY_THEME_CELLS; i++) {
+        const moy_theme_cell_t *c = &moy_theme_cells[i];
+        out[i] = mp_obj_new_bool(moy_theme_sheet_cell(c->part, c->state, c->sub) == i);
+    }
+    return mp_obj_new_tuple(MOY_THEME_CELLS, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_sheet_set_obj, ui_sheet_set);
+
+// sheet_caps() -> (width, sprite rows, icon rows, sprite bytes, icon bytes).
+static mp_obj_t ui_sheet_caps(void) {
+    mp_obj_t out[5] = {MP_OBJ_NEW_SMALL_INT(MOY_THEME_SHEET_W),
+                       MP_OBJ_NEW_SMALL_INT(MOY_THEME_SPRITES_MAX_ROWS),
+                       MP_OBJ_NEW_SMALL_INT(MOY_THEME_ICONS_MAX_ROWS),
+                       MP_OBJ_NEW_SMALL_INT(MOY_THEME_SHEET_BYTES(MOY_THEME_SPRITES_MAX_ROWS)),
+                       MP_OBJ_NEW_SMALL_INT(MOY_THEME_SHEET_BYTES(MOY_THEME_ICONS_MAX_ROWS))};
+    return mp_obj_new_tuple(5, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_sheet_caps_obj, ui_sheet_caps);
+
 // theme_layout(name) -> (refused, bars): theme `name`'s layout, whole, from
 // the nearest package that sets one (moy_theme_layout); refused is True when
 // the default's stands in. A bar is (edge, size, left, center, right,
@@ -311,11 +398,12 @@ static mp_obj_t ui_theme_home(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 
-// theme_resolve(src) -> (rc, notes, name, dark, light, fonts, layout): a
+// theme_resolve(src) -> (rc, notes, name, dark, light, fonts, layout, sheets): a
 // stored package resolved from its bytes without installing it
 // (moy_theme_probe). dark and light are theme()'s answers, fonts the
 // package's OWN (role, file) pairs (its folder provides them), layout
-// (refused, bars, home) as theme_layout and theme_home answer. On a refusal
+// (refused, bars, home) as theme_layout and theme_home answer, sheets the
+// package's OWN (sprites, icons) files, None where it names none. On a refusal
 // every field after notes is None.
 static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     mp_buffer_info_t b;
@@ -323,9 +411,9 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     moy_theme_pkg_t *pkg = m_new(moy_theme_pkg_t, 1);
     uint8_t notes = 0;
     int rc = moy_theme_probe(b.buf, b.len, pkg, &notes);
-    mp_obj_t out[7] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
+    mp_obj_t out[8] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
                        mp_const_none, mp_const_none, mp_const_none,
-                       mp_const_none, mp_const_none};
+                       mp_const_none, mp_const_none, mp_const_none};
     if (rc == MOY_THEME_OK) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
@@ -348,6 +436,11 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
             mp_obj_get_array_fixed_n(lay, 2, &l);
             mp_obj_t t[3] = {l[0], l[1], ui_theme_home(name)};
             out[6] = mp_obj_new_tuple(3, t);
+            mp_obj_t sh[MOY_THEME_SHEETS];
+            for (int i = 0; i < MOY_THEME_SHEETS; i++) {
+                sh[i] = sheet_name(moy_theme_probe_sheet(i));
+            }
+            out[7] = mp_obj_new_tuple(MOY_THEME_SHEETS, sh);
             nlr_pop();
         } else {
             moy_theme_probe_end();
@@ -357,7 +450,7 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     }
     moy_theme_probe_end();
     m_del(moy_theme_pkg_t, pkg, 1);
-    return mp_obj_new_tuple(7, out);
+    return mp_obj_new_tuple(8, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
 
@@ -1443,6 +1536,13 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_installed), MP_ROM_PTR(&ui_theme_installed_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_uninstall), MP_ROM_PTR(&ui_theme_uninstall_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_fonts), MP_ROM_PTR(&ui_theme_fonts_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_sheets), MP_ROM_PTR(&ui_theme_sheets_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sheet_check), MP_ROM_PTR(&ui_sheet_check_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sheet_load), MP_ROM_PTR(&ui_sheet_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sheet_clear), MP_ROM_PTR(&ui_sheet_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sheet_cells), MP_ROM_PTR(&ui_sheet_cells_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sheet_set), MP_ROM_PTR(&ui_sheet_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sheet_caps), MP_ROM_PTR(&ui_sheet_caps_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_home), MP_ROM_PTR(&ui_theme_home_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_resolve), MP_ROM_PTR(&ui_theme_resolve_obj) },

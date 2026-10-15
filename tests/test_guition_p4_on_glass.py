@@ -342,6 +342,10 @@ def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 
 
+def test_the_sprites_match_the_host(board):
+    on_glass.sprites_match_host(board)
+
+
 def test_a_fuzzed_font_corpus_loads_as_on_the_host(board):
     on_glass.fonts_match_host(board)
 

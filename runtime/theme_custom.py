@@ -12,7 +12,8 @@ is the theme being edited: the package's inputs and the bytes it answers.
   over     the keys a change set over the source's: `frame`, `fonts`,
            `wallpapers` and `images`, each a value or DROP
   theme    custom's theme.json as derived
-  files    the files beside it the package carries (fonts, licences, picture)
+  files    the files beside it the package carries (fonts, licences, picture,
+           sheets)
   pending  the package's files not yet written, name -> bytes
   stale    the files the package no longer names, removed at the save
   fresh    the folder is replaced at the save (a change started from
@@ -186,4 +187,23 @@ def font_files(fonts):
                 out.append(f)
                 if f.endswith(".fnt"):
                     out.append(f[:-4] + ".txt")
+    return out
+
+
+SHEET_KEYS = ("sprites", "icons")
+
+
+def sheet_files(src):
+    """The sheet files theme.json bytes `src` names (`sprites`, `icons`),
+    each once."""
+    try:
+        d = json.loads(src) if src else None
+    except ValueError:
+        d = None
+    out = []
+    if type(d) is dict:
+        for k in SHEET_KEYS:
+            f = d.get(k)
+            if type(f) is str and f and f not in out:
+                out.append(f)
     return out

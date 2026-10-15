@@ -16,6 +16,7 @@ typedef struct {
     int32_t tok[MOY_UI_TOKENS];
     uint8_t have[MOY_UI_KINDS];
     int16_t flat[MOY_UI_KINDS][MOY_UI_STATES][3];
+    int16_t slot[MOY_THEME_SPRITE_SLOTS];   // a sheet slot's palette index, -1 transparent
 } look_t;
 
 typedef struct {
@@ -99,7 +100,20 @@ int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]) {
     look_t *l = &u->look[look];
     memcpy(l->tok, tokens, sizeof(l->tok));
     memset(l->have, 0, sizeof(l->have));
+    for (int i = 0; i < MOY_THEME_SPRITE_SLOTS; i++) {
+        int8_t t = moy_theme_sprite_slots[i];
+        int32_t v = t == INT8_MIN ? MOY_UI_ABSENT : t >= 0 ? t : l->tok[-1 - t];
+        l->slot[i] = (int16_t)(v == MOY_UI_ABSENT ? -1 : (v & 63));
+    }
     return MOY_UI_OK;
+}
+
+const int16_t *moy_ui_sprite_slots(int look) {
+    ui_t *u = ui();
+    if (u == NULL || look < 0 || look >= MOY_UI_LOOKS) {
+        return NULL;
+    }
+    return u->look[look].slot;
 }
 
 // One term of a chain: a palette index, or a role through the token row

@@ -91,8 +91,8 @@ Each was mocked and judged worse (§11).
   Chrome text at every scale is `mg_text_raw` drawing petme128's row; a cart's
   `print` is libmoy's `moy_print`.
 - **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
-  from `chrome._ICON_ART`, or the user's own edited sheet, `system_icons.moygfx`
-  (Settings → EDIT ICONS).
+  from `chrome._ICON_ART`, or the theme's own (`icons`, §4.6), or the user's
+  own edited sheet, `system_icons.moygfx` (Settings → EDIT ICONS), which wins.
 - **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`, or the
   theme's picture; which one the desk shows is the theme's (D6, §4.9), and
   apps reach the backdrop through `ctx.wallpaper`.
@@ -197,8 +197,10 @@ icon sheets. It never holds a cart or a script.
   it resolves whole from the nearest package that sets it, never merged.
   The caps, the clamps and the required-set rule are
   `docs/shell_layout_2026-10.md` §5 and §9, which owns it.
-- **Reserved:** `sprites`, `icons`,
-  `images`, `wallpapers`, `sounds`, `editor` (style.json's
+- **`sprites`** and **`icons`**: a `.moygfx` file in the package each, a
+  name of the `fonts` grammar ending `.moygfx` (another is dropped): the
+  role sheet the sprite parts draw from and the bar's icon sheet (§4.6).
+- **Reserved:** `images`, `wallpapers`, `sounds`, `editor` (style.json's
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
 - Any other key or role is ignored, a value of the wrong type is dropped and an
@@ -513,24 +515,37 @@ Ruled 2026-10-12, each the pick that builds least:
 
 ### 4.6 Sprites and icons (D3)
 
-- **One sheet per theme at fixed cell sizes:** title buttons per state, checkbox
-  and radio per state, a 9-slice frame per part that wants one, the cursor and a
-  desktop tile. The fixed cells are what made Winamp's classic skins paintable in
-  any paint program (§10). A part with a sprite draws the sprite; a part without
-  one draws its surface — a cell left empty is no sprite.
+- **One sheet per theme at fixed cells** (style.json's `theme.sprite_cells`,
+  in 8-pixel tiles of one 128-wide sheet): the title buttons (close, maximise,
+  minimise) per window state, and 9-slices for `window` per window state,
+  `button` per state and `desk.icon`'s tile. The fixed cells are what made
+  Winamp's classic skins paintable in any paint program (§10). A part with a
+  sprite draws the sprite; a part without one draws its surface — a cell left
+  all slot 0 is no sprite, and a state whose cell is empty takes the one its
+  chain reaches (§4.3). The toolkit draws no checkbox or radio (a toggle is
+  a `button` kind), so the sheet has no cell for either; the cursor is
+  declined (§9 phase 6 step 9).
 - **The sheet is a role sheet in the cart sheet's format** (ruled 2026-10-14,
   phase 6 step 9): `.moygfx`'s nibble names a slot — transparent, a role of
   the row, or black or white — resolved through the variant's table at the
   blit, so one sheet follows light and dark, an accent and a tint. No page
   edits it: the package carries it and `theme.json` names it (EDIT FILE,
   phase 6). A tinted glyph is a sheet in two slots. The slots and the cell map are style.json's.
-- **Drawn in C, in one call each.** A 9-slice is one C call, not nine `spr`
-  wrapper calls, scaled by the chrome scale as a glyph is. Glyph sprites are
-  masks tinted by a role through a C mask-blit, with **no per-tint RGB bake
-  cache**.
-- **Icons:** a theme may ship an icon sheet. **The user's own edited sheet
-  (`system_icons.moygfx`) is an override slot** that wins over the theme's, like
-  the layout override (D5).
+- **Drawn in C, in one call each** (`native/moy_ui/moy_ui_draw.c`'s
+  `sprite`). A 9-slice is one C call, not nine `spr` wrapper calls: its
+  8-pixel corners whole, its edges and centre tiled, scaled by the chrome
+  scale as a glyph is; a title button is its cell centred in the button's
+  box. Neither draws outside its box, slot 0 leaves what is under it, and
+  each slot resolves through the look's slot table, so a tinted glyph is a
+  sheet in two slots and there is **no per-tint RGB bake cache**. The
+  `window` 9-slice is the frame above the content — the ring's top row and
+  the title strip, in place of the style's — under the title and the
+  buttons; the ring's sides and foot and the shadow stay the style's, inside
+  §4.5's footprint.
+- **Icons:** a theme may ship an icon sheet (`icons`, the `IconSheet` shape,
+  colours, not roles). **The user's own edited sheet (`system_icons.moygfx`)
+  is an override slot** that wins over the theme's, like the layout override
+  (D5); the theme's becomes the user's only when EDIT ICONS changes it.
 
 ### 4.7 Fonts
 
@@ -1654,7 +1669,7 @@ port), never here.
      `night` with ACCENT stepped once, NAME… showing and focused) on
      `tdeck_320x240_fs1_dark`, `tdeck_320x240_fs1_light` and
      `p4_1024x600_cs2_fs1_windowed`; every other row identical.
-  9. **Sprites (D3).** `"sprites": "<file>.moygfx"`, the cart sheet's hex
+  9. **Sprites (D3)** (landed 2026-10-15). `"sprites": "<file>.moygfx"`, the cart sheet's hex
      format (`runtime/editors_sheet.py`: one nibble a pixel) read as a **role
      sheet**: a nibble is a slot of style.json's `theme.sprite_slots` — slot 0
      transparent, then roles of the row (`ink`, `surface`, `shade_hi`,
@@ -1664,11 +1679,12 @@ port), never here.
      §4.6's tinted glyph is a sheet in two slots. The sheet is user data:
      its reader joins the loader's validation (`native/moy_ui/moy_theme.c`)
      with a size cap of its own, the fuzz corpus grows sheets, and the
-     decoded sheet lives in a buffer the loader owns. The slot-to-colour
-     table and the empty-cell flags are computed once per `look_gen` at
-     install; the blit resolves a slot in C through that table, never per
-     pixel in Python. The cells are fixed: `theme.sprite_cells` maps each
-     spritable part and state (the title buttons, checkbox and radio, the
+     decoded sheet lives in a buffer the loader owns. The empty-cell flags
+     are computed when the sheet loads and each look's slot-to-colour table
+     when its row is set (`moy_ui_look_set`, once per `look_gen`); the blit
+     resolves a slot in C through that table, never per pixel in Python.
+     The cells are fixed: `theme.sprite_cells` maps each
+     spritable part and state (the title buttons, the
      `window` and `button` 9-slices, `desk.icon`'s tile) to a rect in 8px
      tiles of one 128-wide sheet; a cell that is all slot 0 is no sprite,
      and the part draws its surface (§5). In C
@@ -1698,6 +1714,27 @@ port), never here.
      sheet painted on every console board on the desk reads back equal to
      the host (`painter_matches_host`'s pattern); `gate_counts` budgets
      hold.
+     **As built.** The reader is `moy_theme_sheet_check` and
+     `moy_theme_sheet_load` (`native/moy_ui/moy_theme.h`): a line a row of
+     up to 128 hex digits, blank lines and a line's surrounding spaces and
+     CR ignored, anything else refused (`SYNTAX`), at most
+     `theme.sheet_rows` rows and that many 130-byte lines (`BIG`); the
+     loader keeps the rows the cells reach. The toolkit has no checkbox or
+     radio, so the sheet has no cell for either. The `window` 9-slice is the
+     frame's top (§4.6); its slot 0 shows what is under the window, so the
+     style's ring is not drawn beneath it. `custom`'s flattening carries
+     both keys and `_gather` copies both files, so a sheet travels through
+     `custom`, NAME… and the browser's export and import (the e2e test makes
+     its theme from the `sprig` fixture), and `package_rows`'s digest covers
+     the sheets' bytes. Nets: `tests/test_theme_sprites.py` (the reader,
+     the blit against a Python model of the rule at three scales and under
+     a clip, the frame, the recolour, the look, the sheet corpus on the
+     boards' module) and `on_glass.sprites_match_host` on every console
+     board's suite; the carts repository's `scripts/validate.py` checks a
+     theme's `.moygfx` as the loader reads it. `tools/p4_bench.py --sprites` runs each scenario with
+     `tests/fixtures/themes/sprig.moy`'s sheet and again with the sheet
+     cleared on the same image and theme, and `--painter` is the per-call
+     mode; the numbers are #66's.
 
   10. **The home's readability** (D7, §4.9). **Readability is the band's
      surface, not a flag** (ruled 2026-10-14, §12.1): the home's card band

@@ -9,6 +9,8 @@
 #   idle_edit        --edit: an in-place theme re-install on an idle screen
 #   edit_thrash      --edit: a held key on the Appearance page's ACCENT row
 #   store_switch     --store: a switch to a store theme package, and its boot delta
+#   bench_sprites    --sprites: chrome painted from a theme's role sheet, and without it
+#   bench_painter    --painter: a surface's, a sprite's and a 9-slice's us per call
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -62,6 +64,20 @@ the call (its folder's theme.json and fonts read, the install) and the frames
 it paints -- and back to the seed, beside it. The boot delta is the same call
 cold, as boot makes it (the store's packages unread, the slot empty, the
 package's fonts unloaded), less a seed's cold switch.
+
+`--sprites` benches chrome painted from a theme's role sheet (phase 6 step
+9): tests/fixtures/themes/sprig.moy, whose sheet sets every cell, is pushed
+onto the board's store and picked, and each scenario runs with its sheet and
+again with the sheet cleared (every part on its surface fallback, the same
+image and theme): `sprite chrome drag` (a window dragged over Settings), a
+Settings scroll drag, cursor motion (a hovering pointer moved a step a
+command) and idle, which must paint zero. A fullscreen tier has no window
+and no cursor: its drag is the Settings scroll. The live theme is put back.
+
+`--painter` times one part three ways on the board, into a scratch layer: a
+`button` painted from a surface (`raised, fill surface, border edge`), the
+same part from the sheet's 9-slice, and a window frame with and without the
+sheet's `window` 9-slice and title buttons -- µs per call, N calls each.
 
 `--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
 size and a synthetic focus-band frame into the canvas the home draws into,
@@ -451,6 +467,154 @@ def bench_edit(b, out_path):
         with open(out_path, "w") as f:
             f.write(table + "\n")
     return bench
+
+
+SPRITE_THEME = "sprig"
+SPRITE_FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / \
+    "themes" / (SPRITE_THEME + ".moy")
+
+SPRITE_SETUP = """
+import ui
+def _sheet(on):
+    ws.look._sheet_key = None
+    ws.look.set_theme(%r, persist=False)
+    if not on:
+        ui.sheet_clear()
+        ws.look.publish()
+    ws.mark_dirty()
+def _hover(x, y):
+    pointer.place(x, y)
+    pointer.hovers = True
+    ws.mark_dirty()
+ws._sheet = _sheet
+ws._hover = _hover
+""" % SPRITE_THEME
+
+
+def sprite_scenarios(b, bench, tag):
+    """The sprite scenarios on the board as it is (its sheet on or off),
+    each a row labelled with `tag`."""
+    windowed = b.state().get("desk") is not None and b.state().get("wins") is not None
+    home(b)
+    b.open("settings"); b.drain(2.0)
+    o = win_geom(b, "settings")
+    if o is not None:
+        pyval(b, "ws.open_app(ws._apps_by_id['calc'])"); b.drain(2.0)
+        bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
+        bench.stop("sprite chrome drag %s" % tag)
+        home(b)
+        b.open("settings"); b.drain(2.0)
+        o = win_geom(b, "settings")
+        lay = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_h")
+        sx = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_x")
+        sw = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_w")
+        sy = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_y0")
+        x0, y0 = o[0] + sx + sw // 2, o[1] + sy
+    else:
+        lay = pyval(b, "ws.layout.set_row_h")
+        sx, sw = pyval(b, "ws.layout.set_x"), pyval(b, "ws.layout.set_w")
+        y0 = pyval(b, "ws.layout.set_row_y0")
+        x0 = (sx or 0) + (sw or 0) // 2
+    if lay:
+        y = y0 + 4 * lay
+        bench.start()
+        b.swipe(x0, y, x0, y - 3 * lay, frames=25); b.drain(1.5)
+        bench.stop("settings scroll drag %s" % tag)
+    if windowed and o is not None:
+        bench.start()
+        for k in range(30):
+            pyexec(b, "ws._hover(%d, %d)" % (x0 - 150 + 10 * k, y0 + 2 * k))
+        b.drain(1.0)
+        bench.stop("cursor motion %s" % tag)
+        pyexec(b, "pointer.hovers = False")
+    bench.start(); b.drain(3.0); bench.stop("idle %s" % tag)
+
+
+def bench_sprites(b, out_path):
+    bench = Bench(b)
+    print("\n=== sprites: chrome from a role sheet, and its surface fallback ===")
+    pyexec(b, SPRITE_SETUP)
+    # the `py` scope's pointer, into the namespace the uploads run in
+    b.cmd("py ws._g.__setitem__('pointer', pointer) or 1", wait_for="PY")
+    was = pyval(b, "ws.look.theme_name")
+    if SPRITE_THEME not in (pyval(b, "ws.look.theme_names()") or ()):
+        print("  %s is not on this board's store" % SPRITE_THEME)
+        return bench
+    for on, tag in ((True, "[sheet]"), (False, "[surfaces]")):
+        pyexec(b, "ws._sheet(%r)" % on); b.drain(2.0)
+        print("  cells set: %r" % (pyval(b, "sum(__import__('moy_ui').sheet_set())"),))
+        sprite_scenarios(b, bench, tag)
+    pyexec(b, "ws.look._sheet_key = None\nws.look.set_theme(%r, persist=False)" % was)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+PAINTER_BENCH = """
+import time, ui, moy_ui, chrome
+def _pb(n, sheet):
+    cv = (ws.sys_canvas or ws.canvas).new_layer(240, 120)
+    try:
+        assert moy_ui.theme_install(%r)[0] == 0
+        ui.use_shape('bench-spr')
+        th = chrome.theme_colors('bench-spr')
+        out = {}
+        for label, on in (('surface', False), ('sprite', True)):
+            if on:
+                assert ui.sheet_load(sheet) == 0
+            else:
+                ui.sheet_clear()
+            t = time.ticks_us()
+            for _i in range(n):
+                ui.paint(cv, th, (8, 8, 96, 32), 'button')
+            out['button ' + label] = time.ticks_diff(time.ticks_us(), t) // n
+            t = time.ticks_us()
+            for _i in range(n):
+                ui.frame(cv, th, (2, 2, 230, 110), 14, 'BENCH', True, True, 1)
+            out['frame ' + label] = time.ticks_diff(time.ticks_us(), t) // n
+        return out
+    finally:
+        cv.release()
+        chrome.forget_themes()
+        ws.look._sheet_key = None
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+        ws.mark_dirty()
+""" % (json.dumps({"format": 1, "name": "bench-spr", "surfaces": {
+    "button": {"rest": "raised, fill surface, border edge"}}}).encode(),)
+
+
+def bench_painter(b, out_path, n=50):
+    """µs per call of a part painted from its surface and from the sheet,
+    and of a window frame without and with the sheet's 9-slice."""
+    sheet = (SPRITE_FIXTURE / "parts.moygfx").read_bytes()
+    pyexec(b, "_PB_SHEET = %r\n" % sheet + PAINTER_BENCH)
+    pyexec(b, "ws._pbr = None\nws._pbr = _pb(%d, _PB_SHEET)" % n, timeout=120)
+    r = pyval(b, "ws._pbr", timeout=30)
+    b.drain(1.0)
+    if not r:
+        print("  painter bench: no answer")
+        return None
+    lines = ["| part | surface us/call | sprite us/call |", "|---|---|---|",
+             "| button 96x32 (9-slice) | %d | %d |" % (r["button surface"], r["button sprite"]),
+             "| window frame 230x110 (9-slice + 3 title buttons) | %d | %d |"
+             % (r["frame surface"], r["frame sprite"])]
+    text = "\n".join(lines)
+    print(text)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text + "\n")
+    return r
+
+
+def push_sprite_fixture(args):
+    import subprocess
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
+           str(SPRITE_FIXTURE), "--board", args.board, "--port", args.port]
+    subprocess.run(cmd, check=True)
 
 
 def bench_all(b, out_path):
@@ -1028,16 +1192,24 @@ def main():
     ap.add_argument("--store", action="store_true",
                     help="a switch to a store theme package, and its boot "
                          "delta, alone (pushes tests/fixtures/themes/dusk.moy)")
+    ap.add_argument("--sprites", action="store_true",
+                    help="chrome from a theme's role sheet and without it "
+                         "(pushes tests/fixtures/themes/sprig.moy)")
+    ap.add_argument("--painter", action="store_true",
+                    help="a surface's, a sprite's and a 9-slice's us per call")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     if args.store or not (args.repaint or args.popovers or args.kernel
-                          or args.home or args.edit):
+                          or args.home or args.edit or args.sprites or args.painter):
         push_store_fixture(args)
+    if args.sprites:
+        push_sprite_fixture(args)
     b = board_from_args(args)
     try:
         if (not args.repaint and not args.kernel and not args.home
-                and not args.edit and not args.store and not b.attach_only):
+                and not args.edit and not args.store and not args.sprites
+                and not args.painter and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -1053,6 +1225,10 @@ def main():
             bench_edit(b, args.out)
         elif args.store:
             bench_store(b, args.out)
+        elif args.sprites:
+            bench_sprites(b, args.out)
+        elif args.painter:
+            bench_painter(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:
