@@ -17,7 +17,8 @@ fields. What each pixel costs follows the pipeline in NOTES.md:
   an ordered-dither blend of two colours;
 - every blend lands in RGB565.
 
-Run: .venv/bin/python docs/media/look_2026-10/mockups_modern.py
+This is the renderer and the base scenes; `draw.py` layers the rounds over
+it and draws every picture `index.txt` names. Running this file runs it.
 The fonts download once into ~/.cache/moybyte-look-fonts (see FONT_FILES).
 """
 import copy
@@ -808,7 +809,7 @@ A = theme(
     lcd="#0b0d1e", lcd_ink="#b6a8f7",
 )
 B = theme(
-    key="daylight", name="Daylight (light, the default)",
+    key="moy", name="Moy Day (light, the default)",
     bg="#eceef3", surface="#ffffff", raised="#f4f5f8", sunk="#e3e6ed", line="#e2e5ec",
     dim="#5f6478", text="#15161d", accent="#d45f00", value="#4c3fd6", value_ink="#ffffff",
     shadow=("soft", "#1b2040", 0.18, 16, 8), fam="plex", backdrop=BD_B,
@@ -1408,8 +1409,8 @@ def desk_bar(cv, T):
         x = 80
     else:
         sys_fill, body, eye = b["sys"] or (T["raised"], T["value"], T["raised"])
-        cv.rrect(8, y0 + 6, 32, 28, 9, sys_fill)
-        moy(cv, 12, y0 + 8, 24, body, eye)
+        cv.rrect(6, y0 + 3, 36, 34, 9, sys_fill)
+        moy(cv, 8, y0 + 4, 32, body, eye)
         x = 52
     if b["app_title"]:
         fb = Face(T["fam"], 14, 700, 4, k) if T["fam"] not in ("petme", "micro5") else fc
@@ -1892,4 +1893,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import runpy
+    runpy.run_path(os.path.join(HERE, "draw.py"), run_name="__main__")

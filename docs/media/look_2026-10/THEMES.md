@@ -1,19 +1,20 @@
 # The 2026-10 look: the themes as data
 
 Every theme is a dict of fields over one base in `mockups.py`, and the
-renderer reads only fields. `DESIGN.md` is the system and the shipped
+renderer reads only fields. A theme has one mode or two: Moy's are Day
+(`light`) and Night (`dark`), and a mode may set any field, its family
+included (Day draws Plex, Night Inter). `DESIGN.md` is the system and the shipped
 themes; this file is the theme model and the ricing proofs' fields, the
 input to the theme format. Gap numbers are `GAPS.md`'s.
 
 ## The shipped themes, beyond their colours
 
-- **Daylight:** the desk is two pale discs (`backdrop.desk`), with no
+- **Moy, Day:** the desk is two pale discs (`backdrop.desk`), with no
   gradient. The focused window stays white; its current mark is a 4 px
   `value` bar across its top (`win.header: bar`). `tonal` keys are `sunk`.
-- **Moy Night:** the desk carries a flat crescent one tone above the sky.
+- **Moy, Night:** the desk carries a flat crescent one tone above the sky.
   The focused window's title strip is filled in `value` (`win.header:
-  fill`), windows have a 1 px `line` frame, the bar is 85% `sunk`, and Moy
-  is a flat glyph on the system button.
+  fill`), windows have a 1 px `line` frame, and the bar is 85% `sunk`.
 - **Blocks:** colour lives in blocks, not marks: the home is sunflower
   (`home_bg`), the desk cream with four flat Bauhaus shapes, the home has a
   pale halo behind the hero and mint and coral discs at its edges, each app
@@ -26,21 +27,11 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
 
 ## Ricing proof: Luna and Coast
 
-Two themes in the style of two desktop OSes, drawn on the same two screens
-by the same renderer, glyph pipeline and RGB565 output. Everything is drawn
-with open fonts; there is no Microsoft or Apple artwork, logo or font: the
+Two themes in the style of two desktop OSes, `luna_*` (Windows XP) and
+`coast_*` (macOS Sonoma/Sequoia), drawn on the same two screens by the same
+renderer, glyph pipeline and RGB565 output. Everything is drawn with open
+fonts; there is no Microsoft or Apple artwork, logo or font: the
 start-style button carries Moy and "moy", and the menu bar carries Moy.
-
-Two themes in the style of two desktop OSes, each drawn on the same two
-screens:
-
-- `luna_*` is in the style of Windows XP;
-- `coast_*` is in the style of macOS Sonoma/Sequoia.
-
-They use the same renderer, glyph pipeline and RGB565 output as A, B and C.
-Everything in them is drawn here with open fonts. There is no Microsoft or
-Apple artwork, logo or font: the start-style button carries Moy and "moy",
-and the menu bar carries Moy.
 
 **Luna**
 
@@ -108,7 +99,7 @@ and the menu bar carries Moy.
   - `on_backdrop` white with a soft shadow (12:1);
   - `backdrop`: 4 shapes.
 - **Gaps it uses:** 2, 3, 5 (the circle shape), 6, 7, 9, 12, 13, 15, 16,
-  and the later 26 (frosted glass), 27 (vibrancy) and 28 (the dock).
+  and the later 28 (frosted glass), 29 (vibrancy) and 30 (the dock).
 
 **What the model cannot express, and what the mockups do instead:**
 
@@ -119,17 +110,14 @@ and the menu bar carries Moy.
   bevel`, gap 8). Luna keeps the gradients, which read closer to XP at 1×.
 - **macOS app menus (File, Edit, …):** the shell has no app menus, so the
   bar shows the app's title only.
-- **XP's minimise and maximise buttons:** not drawn. Luna keeps the
-  structure's one ×, and the chip and the title double-tap do the rest.
+- **XP's minimise and maximise buttons:** drawn, blue beside the red close
+  (`win.controls: xp`).
 
 ## Superset proof: Pico, Bench and Adw
 
-Three themes in the style of existing systems, using only open fonts and
-drawing made for them here, prove the pixel look through the same fields.
-
-Three more themes prove it on the same two screens: `pico_*`, `bench_*` and
-`adw_*`. Each is in the style of an existing system and uses only open fonts
-and drawing made for it here.
+Three themes in the style of existing systems, `pico_*`, `bench_*` and
+`adw_*`, using only open fonts and drawing made for them here, prove the
+pixel look through the same fields on the same two screens.
 
 **Pico (in the style of Picotron)**
 
@@ -197,7 +185,9 @@ and drawing made for it here.
   - everything Pico uses, plus `edges`, `hi`, `lo`;
   - `win.controls: amiga`, `bar.app_title`, `lcd_bevel`;
   - `keycap.bevel`, `current: fill`, `layout`;
-  - a `steps` paint.
+  - a `steps` paint;
+  - `icons.swap`, which takes the pixel set's light-blue base to dark blue
+    on the white bar.
 - **Gaps:**
   - the `amiga` controls (15);
   - the column-drop rule (19).
@@ -248,12 +238,14 @@ is absent. This is the input to the format spec. Colours are `#rrggbb`
 | elevation | `shadow` (`soft`, colour, alpha, blur, dy; or `hard`, colour, dx, dy), `shadow_back` | no shadow |
 | backdrop | `backdrop.home`, `backdrop.desk`: lists of shapes (gap 9); `home_bg` | `bg` |
 | home | `dim_neighbours`; `on_backdrop.ink`, `.dim`, `.shadow` | no veil; `text`, `dim` |
-| window | `win.header` (`plain`/`fill`/`bar`/`grad`), `win.h`, `win.align`, `win.ink`, `win.ink_back`, `win.tshadow`, `win.controls` (`close`/`lights`/`xp`/`amiga`/`adw`), `win.grad`, `win.grad_back`, `win.fill`, `win.fill_back`, `win.frame`, `win.frame_back`, `win.body`, `win.rule`, `win.icon` | plain, 44, left, close |
+| window | `win.header` (`plain`/`fill`/`bar`/`grad`), `win.h`, `win.align`, `win.ink`, `win.ink_back`, `win.tshadow`, `win.controls` (`three`/`close`/`lights`/`xp`/`amiga`/`adw`), `win.grad`, `win.grad_back`, `win.fill`, `win.fill_back`, `win.frame`, `win.frame_back`, `win.body`, `win.rule`, `win.icon` | plain, 44, left, three (minimize, maximize, close) |
 | current | `current` (`bar`/`fill`), `sel`, `sel_ink`, `sel_back` | bar |
 | desk bar | `bar.edge`, `bar.h`, `bar.style` (`flat`/`grad`/`glass`), `bar.fill`, `bar.alpha`, `bar.line`, `bar.grad`, `bar.sysbtn` (`tile`/`start`/`glyph`/`workspaces`), `bar.sys`, `bar.chips` (`tab`/`button`/`none`), `bar.chip_cur`, `bar.app_title`, `bar.ink`, `bar.dim`, `bar.tray`, `bar.clock` (`right`/`center`) | top, 40, flat |
 | handheld bar | `hhbar.style` (`none`/`flat`/`grad`/`glass`), `hhbar.h`, `hhbar.fill`, `hhbar.line`, `hhbar.ink`, `hhbar.dim`, `hhbar.sys`; `tabs.style` (`bar`/`pill`), `tabs.pill`, `tabs.pill_ink` | none, bar |
 | launcher | `launcher` (`column`/`dock`); `dock.fill`, `dock.alpha`, `dock.frost`, `dock.ring`, `dock.r`; `tiles` (per app), `tile_r`, `tile_fill`, `tile_outline`, `tile_ink`, `tile_grad`; `label.ink`, `label.shadow` | column, `raised` tiles |
 | lists | `sidebar` (paint or `vibrancy`), `places_panel`, `list_bg`, `zebra`, `colhead` | the window body |
+| icons | `icons.kind` (`pixel`/`smooth`), `icons.set`, `icons.swap` (a pixel set's palette swap, index to index) | smooth, the default set |
+| code | the `code_*` roles of `docs/theming_2026-09.md` §4.1 (the mockups' `syn.*`), each 4.5:1 or better on the code surface | derived per mode |
 | buttons | `buttons[kind]`, `app_buttons[app][kind]`: `fill`, `ink`, `border`, `shape`, `r`, `font`, `bevel` | derived (Button kinds) |
 | display | `lcd`, `lcd_border`, `lcd_bevel`, `lcd_ink`, `lcd_dim` | no box; `value`, `dim` |
 | key hints | `keycap.fill`, `.alpha`, `.border`, `.grad`, `.ink`, `.r`, `.bevel` | a tint of the background |

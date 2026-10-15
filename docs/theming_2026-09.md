@@ -231,8 +231,8 @@ What the reserved keys will hold, as rev 2 sketched them (and the metrics
   then to the default (§4.9).
 - **`sounds`** and **`editor`** have no defined keys yet. `sounds` waits for
   #141; `editor`
-  is where code colour schemes go when they come
-  (`docs/studio_2026-09.md` §12), since syntax colours are content (§4.3).
+  holds no code colours: syntax colours are theme roles, the `code_*` roles
+  of §4.1 (decided 2026-10-15, `docs/look_2026-10.md`).
 
 The sketched key names are illustrative until the phase that reads them
 freezes them; the SHAPE is the decision.

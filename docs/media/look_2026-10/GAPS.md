@@ -71,7 +71,7 @@ carousel frame.
 
 **4. The font set.**
 
-- **Families:** Plex (Daylight), Inter (Moy Night), Atkinson Hyperlegible
+- **Families:** Plex (Moy Day), Inter (Moy Night), Atkinson Hyperlegible
   Next (Blocks, Contrast), JetBrains Mono (the Code tab), each with a
   `THIRD_PARTY.md` notice. A board takes only its size set: about 40 KB per
   family on the handheld boards, 85–100 KB on the desk boards, 5 KB for the
@@ -165,7 +165,9 @@ from `ring_w`, `ring_gap`, `ring_alpha`), `current` (`bar` or `fill`, with
 `sel`, `sel_ink` and a colour in a window behind) and `primary` (gap 13).
 Every part draws its state through them and nothing else; a test in
 `tests/test_ui_style_data.py` holds that `accent` appears only in `focus`.
-**Cost:** 3 days. **Frame:** none.
+A part under 28 px takes the hugging ring (DESIGN, the marks): the focus
+part draws a tinted plate and a thin ring inside the part's own box, before
+the part's glyph. **Cost:** 3.5 days. **Frame:** none.
 
 **13. Button kinds** (DESIGN, "Button kinds"): `play` becomes `primary` and
 `author` `tonal` in `style.json` and the ten callers; `cell` is the `toggle`
@@ -178,12 +180,16 @@ word, an `info` row and a group caption. A setting that is not built has no
 row. **Cost:** 3.5 days. **Frame:** none.
 
 **15. Window parts:** header styles `plain`, `fill`, `bar`, `grad`; control
-sets `close`, `lights`, `xp`, `amiga`, `adw`; frame width; title alignment
-and icon. Minimise moves to the window chip and maximise to a title
-double-tap. **Cost:** 4 days. **Frame:** cached with the window strip.
+sets `three`, `close`, `lights`, `xp`, `amiga`, `adw`; frame width; title alignment
+and icon. Every built-in theme's set is minimize, maximize and close as
+title buttons with hit targets of 28 px or more; a ricing theme's set may
+drop the first two, and the window chip and a title double-tap minimise and
+maximise either way. **Cost:** 5 days. **Frame:** cached with the window
+strip.
 
-**16. Bar parts:** the tile, start-style, glyph and workspaces system
-buttons; `tab`, `button` and no chips; a tray segment; an `app_title`
+**16. Bar parts:** the tile (36×34 on the desk, 22×20 on the handheld,
+the pixel Moy on it, an open plate, no focus stop), start-style, glyph and
+workspaces system buttons; `tab`, `button` and no chips; a tray segment; an `app_title`
 widget; a centred clock slot; the handheld bar styles and pill tabs.
 **Cost:** 3 days. **Frame:** none.
 
@@ -192,10 +198,22 @@ theme with `dim_neighbours` (Moy Night). **Cost:** 1 day. **Frame:** zero
 during motion; 32–75 KB of covers, which the Player's fit check must be
 able to release on the T-Deck.
 
-**18. Icons as alpha masks:** the 24-unit line icons pre-rendered at the
-sizes in use as 4 bpp masks in an MFNT version 2 file (about 20 KB),
-replacing the 16×16 `IconSheet` sprites. A mask is not editable in the
-sprite editor as `IconSheet` is: owner call. **Cost:** 2.5 days.
+**18. Icon sets.** A theme's `icons` is `{kind, set}`; every set fills the
+same 55 slots (`icons/pixel/slots.txt`).
+
+- **Pixel:** a 16×16 `IconSheet` (`icons/pixel/system_icons.moygfx`, drawn
+  by `icons/pixel/pixel_icons.py`), editable in the sprite editor as today.
+  Its palette indices are roles, so a theme recolours it with a swap (Bench
+  takes the blue ramp down a step on its white bar).
+- **Smooth:** 24-unit SVG sources (`icons/smooth/<set>/`, a `.fill` layer
+  where a set has two) rasterised on the host at the sizes in use into 2 bpp
+  (16 px and under) and 4 bpp masks in an MFNT version 2 file (about 20 KB a
+  set), tinted by roles at draw time. A theme package carries its sources,
+  for an on-device SVG icon editor later.
+- **Both:** redo is generated as undo's mirror; Play is a bare glyph in
+  `value`; a slot a set lacks falls back to the default set.
+- **Cost:** 4 days (the field and loader, the host rasteriser in the
+  build, the swap, the mirror). **Frame:** a mask blend per icon, as text.
 
 **19. Adaptive columns:** a list drops its optional column (Kind) when
 names would show fewer than 11 characters, on every theme. **Cost:** 0.5
@@ -224,7 +242,8 @@ cover. **Cost:** 1.5 days.
 | Calc: a tape history (new behaviour), the display inset, the 4×5 keypad in kinds | 2 days |
 | Files: Places (Projects, Carts, Art, Music, Trash), file pictures, ellipsis | 3 days |
 | the sprite editor: the grey checker, the ring cursor, the bar on tool and colour | 1 day |
-| the editors' bar and the code overflow fade | 1 day |
+| the editors in today's layout: the tab row with a bare Play, the playtest window, the code overflow fade | 1.5 days |
+| the `code_*` roles as theme roles: out of the content exemption, held to 4.5:1 on the code surface | 1 day |
 | desk icons as tiles with labels | 0.5 day |
 
 **23. Wallpaper per glass:** a wallpaper cart reads W and H, receives the
@@ -234,30 +253,54 @@ declares a subject rectangle the WM's default placement keeps clear of.
 
 ## Themes
 
-**24. The seed set:** Daylight (default), Moy Night, Blocks, and Contrast
-(dark and light). `night`, `platinum`, `win95`, `machine`, `outline`,
+**24. The seed set:** Moy (Day, the default, and Night), Blocks, and
+Contrast (dark and light). `night`, `platinum`, `win95`, `machine`, `outline`,
 `indigo`, `berry`, `forest` and `slate` are deleted; a stored name of a
 deleted seed falls back to the default, and nothing migrates. Indigo, Berry, Forest and Slate return as accent presets with
 a dark and a light value each. **Cost:** 4 days, plus the goldens.
+
+## The system button and Moy
+
+**25. Moy's outline.** The canonical Moy (`docs/visual_identity_v1.md`
+§6.5) is outlined in index 0, and an `IconSheet` keys index 0 clear, so the
+sheet loses the outline (`moy_mark.png` draws it). The fix is a per-sheet
+clear index in the `.moygfx` header (16 for the system sheet, 0 by default,
+so every existing sheet reads as now). **Cost:** 1 day with the sprite
+editor's swatch. **Frame:** none.
+
+**26. The system menu and the pause menu.**
+
+- **Keys:** Super (the GUI key of a BLE keyboard, the Windows key of a USB
+  one) opens the system menu from every surface; over a fullscreen cart it
+  opens the pause menu instead; Esc closes either and steps back. The
+  T-Deck's own keyboard has no Super key; its chord is an owner call.
+- **The Moy button** leaves the focus order (Super reaches it); tapping it
+  opens the menu, and its open state is the plate of gap 16.
+- **The pause menu** (Resume, Restart, Options, Quit): the Player holds the
+  cart's clock, input and audio while it shows, and Resume gives the cart
+  its next frame as if no time passed. Options holds volume and controls; a
+  cart's own entries need a moy-spec verb (owner call).
+- **Cost:** 4–5 days. **Frame:** the card over a frozen frame, drawn once;
+  the cart's first frame after Resume is measured on tdeck and p4.
 
 ## Later: the ricing themes (moybyte-org/carts)
 
 Luna, Coast, Pico, Bench and Adw ship as installable theme packages, each
 bringing its own font family, so they cost the image nothing. They need, on
-top of gaps 1–24:
+top of gaps 1–26:
 
-**25. Theme packages with fonts** from the store: the package carries its
+**27. Theme packages with fonts** from the store: the package carries its
 MFNT files, the loader validates them as it validates a seed's. **Cost:**
 1.5 days.
 
-**26. Frosted glass over a static backdrop:** the backdrop under a bar's
+**28. Frosted glass over a static backdrop:** the backdrop under a bar's
 rect blurred once at load, in place in the bake, then tinted. No window
 passes under a bar. **Cost:** 1.5 days. **Frame:** none.
 
-**27. Vibrancy as a tint:** a sidebar takes the backdrop's mean colour
+**29. Vibrancy as a tint:** a sidebar takes the backdrop's mean colour
 mixed toward white, computed at load. **Cost:** 0.5 day.
 
-**28. A dock:** a floating, inset, centred, rounded bottom bar with launcher
+**30. A dock:** a floating, inset, centred, rounded bottom bar with launcher
 tiles and a running dot per open app; the inset, centring and radius are
 new layout fields (`docs/shell_layout_2026-10.md`). **Cost:** 2–3 days.
 
@@ -272,5 +315,5 @@ mode (now gap 11, a theme's choice); the 14 and 17 px desk rows; dimming a
 window behind by 25%; the 12×12 two-tone icons; the redrawn default
 wallpaper (the default theme draws a backdrop).
 
-**Total:** about 84–91 developer days for gaps 1–24; gaps 25–28 add about
-6.
+**Total:** about 94–102 developer days for gaps 1–26; gaps 27–30 add
+about 6.

@@ -1,9 +1,9 @@
-moy-dark_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Moy Night (dark); 320x240
+moy-dark_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Moy Night; 320x240
 moy-dark_handheld_home@3x.png — same, enlarged 3x (nearest)
-moy-dark_desktop.png — Desk: Calc focused, Files behind, bar; Moy Night (dark); 1024x600
-daylight-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Daylight (light, the default); 320x240
-daylight-light_handheld_home@3x.png — same, enlarged 3x (nearest)
-daylight-light_desktop.png — Desk: Calc focused, Files behind, bar; Daylight (light, the default); 1024x600
+moy-dark_desktop.png — Desk: Calc focused, Files behind, bar; Moy Night; 1024x600
+moy-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Moy Day; 320x240
+moy-light_handheld_home@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop.png — Desk: Calc focused, Files behind, bar; Moy Day; 1024x600
 blocks-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Blocks (light, colour-blocked, for kids and makers); 320x240
 blocks-light_handheld_home@3x.png — same, enlarged 3x (nearest)
 blocks-light_desktop.png — Desk: Calc focused, Files behind, bar; Blocks (light, colour-blocked, for kids and makers); 1024x600
@@ -28,3 +28,38 @@ adw-light_desktop.png — Desk: Calc focused, Files behind, bar; Adw (in the sty
 calc_all_themes.png — Calc in all nine themes through one body and one kind table: the desk window over the theme's backdrop, and the handheld page below it; 1220x2600
 type_specimen.png — Type specimen: handheld sizes, the Code tab's mono and the desk body at 1, 2, 4 bpp and an 8-bit reference, on dark and on light; 860x336
 type_specimen@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_sysmenu.png — The system menu, open from Super: Moy shows the current plate, no ring; handheld home; Moy Day; 320x240
+moy-light_handheld_sysmenu@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_sysmenu.png — The system menu, open from Super, on the desk; Moy Day; 1024x600
+moy-light_handheld_pause.png — The pause menu over a fullscreen game (Super): resume, restart, options, quit; Moy Day; 320x240
+moy-light_handheld_pause@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_pause.png — The pause menu over a fullscreen game at 2x on the desk; Moy Day; 1024x600
+moy-dark_handheld_sysmenu.png — The system menu, open from Super: Moy shows the current plate, no ring; handheld home; Moy Night; 320x240
+moy-dark_handheld_sysmenu@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_sysmenu.png — The system menu, open from Super, on the desk; Moy Night; 1024x600
+moy-dark_handheld_pause.png — The pause menu over a fullscreen game (Super): resume, restart, options, quit; Moy Night; 320x240
+moy-dark_handheld_pause@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_pause.png — The pause menu over a fullscreen game at 2x on the desk; Moy Night; 1024x600
+moy-light_handheld_code-editor.png — Code tab on Star Catcher in today's layout, restyled: Play bare beside undo and redo; Moy Day; 320x240
+moy-light_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog in today's layout, restyled; Moy Day; 320x240
+moy-light_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_code-editor.png — Code tab on Star Catcher in today's layout, restyled: Play bare beside undo and redo; Moy Night; 320x240
+moy-dark_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog in today's layout, restyled; Moy Night; 320x240
+moy-dark_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
+pico-light_handheld_code-editor.png — Code tab on Star Catcher in today's layout, restyled: Play bare beside undo and redo; Pico (in the style of Picotron); 320x240
+pico-light_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
+pico-light_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog in today's layout, restyled; Pico (in the style of Picotron); 320x240
+pico-light_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_code-editor.png — The Editor window on the desk, Code tab, today's layout; Moy Day; 1024x600
+moy-light_desktop_sprite-editor.png — The Editor window on the desk, Sprites tab, today's layout; Moy Day; 1024x600
+moy-dark_desktop_code-editor.png — The Editor window on the desk, Code tab, today's layout; Moy Night; 1024x600
+moy-dark_desktop_sprite-editor.png — The Editor window on the desk, Sprites tab, today's layout; Moy Night; 1024x600
+moy-light_desktop_playtest.png — The playtest window (2x) over the Editor, on the desk; Moy Day; 1024x600
+editor_bar_all_themes.png — The handheld editor bar in all nine themes at 2x: Play as a bare value-coloured glyph in the undo/redo row; 860x598
+focus_marks.png — Focus on small targets at 3x: the ring against the hugging ring on the handheld bar and a window's title buttons, in Moy Day and Night; and the Moy button at rest and open; 960x786
+moy_mark.png — Moy, the canonical pixel Moy: handheld bar (16 px) and desk button (32 px on 36x34), at rest and open, in Moy Day and Night, at 2x; 884x320
+icons_sheet.png — Icon sets: the default smooth set at 16 and 24 px on light and dark, the pixel set at 1x and 2x, and Luna's and Coast's own sets; 812x2492
+icons_sheet@2x.png — same, enlarged 2x (nearest)
+icons_pixel.png — The pixel icon set: today's art and the refined set for every slot, at 1x and 4x, on Pico's and Bench's bar colours; 610x4146

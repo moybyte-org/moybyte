@@ -38,16 +38,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOCKUPS = os.path.join(ROOT, "docs", "media", "look_2026-10")
 PLAN = os.path.join(ROOT, "docs", "look_2026-10.md")
 
-# The current theme a target theme the shell does not hold is drawn with.
-FALLBACK = {"daylight": "platinum", "moy": "night", "blocks": "platinum",
+# The current theme a target theme the shell does not hold is drawn with,
+# by `theme-mode` first, then by theme.
+FALLBACK = {"moy-light": "platinum", "moy": "night", "blocks": "platinum",
             "luna": "win95", "coast": "platinum", "pico": "night",
             "bench": "platinum", "adw": "platinum"}
-DEFAULT = "daylight"
+DEFAULT = "moy"
 
-# Steps whose target is every PNG, and each theme's own steps
-# (docs/look_2026-10.md).
+# Steps whose target is every PNG, and each theme's own steps, by
+# `theme-mode` first, then by theme (docs/look_2026-10.md).
 EVERY = ("14", "27")
-THEME_STEPS = {"moy": ("26a",), "blocks": ("26b",), "contrast": ("26c",),
+THEME_STEPS = {"moy-dark": ("26a",), "moy": (), "blocks": ("26b",),
+               "contrast": ("26c",),
                "luna": ("29",), "coast": ("29",), "pico": ("29",),
                "bench": ("29",), "adw": ("29",)}
 
@@ -84,10 +86,36 @@ def _setup_table():
                                 "Appearance"),
         "desktop_appearance": (DESK, ("9", "20"), False, _desk_appearance,
                                "Appearance as a window on the desk"),
-        "handheld_code-editor": (HANDHELD, ("3", "4", "23"), False, _code,
-                                 "the Code tab on Star Catcher"),
-        "handheld_sprite-editor": (HANDHELD, ("24",), False, _sprites,
+        "handheld_code-editor": (HANDHELD, ("3", "4", "16", "23"), False,
+                                 _code, "the Code tab on Star Catcher"),
+        "handheld_sprite-editor": (HANDHELD, ("16", "23", "24"), False,
+                                   _sprites,
                                    "the sprite tab on Star Catcher, sprite 0"),
+        "desktop_code-editor": (DESK, ("9", "13", "16", "23"), False, _code,
+                                "the Editor on the desk, Code tab"),
+        "desktop_sprite-editor": (DESK, ("9", "13", "16", "23", "24"), False,
+                                  _sprites,
+                                  "the Editor on the desk, sprite tab"),
+        "desktop_playtest": (DESK, ("9", "13", "23"), False, _code,
+                             "nearest screen: the Editor on the desk"),
+        "handheld_sysmenu": (HANDHELD, ("11", "12", "16", "25a"), False,
+                             _home, "nearest screen: home"),
+        "desktop_sysmenu": (DESK, ("11", "12", "16", "25a"), False, _desk,
+                            "nearest screen: the desk"),
+        "handheld_pause": (HANDHELD, ("11", "16", "25a"), False, _home,
+                           "nearest screen: home"),
+        "desktop_pause": (DESK, ("11", "16", "25a"), False, _desk,
+                          "nearest screen: the desk"),
+        "editor_bar_all_themes": (HANDHELD, ("16", "23"), False, _code,
+                                  "nearest screen: the Code tab's bar"),
+        "focus_marks": (HANDHELD, ("11", "13"), False, _code,
+                        "nearest screen: the Code tab's bar"),
+        "moy_mark": (HANDHELD, ("16", "25a"), False, _home,
+                     "nearest screen: home"),
+        "icons_sheet": (HANDHELD, ("16",), False, _home,
+                        "nearest screen: home"),
+        "icons_pixel": (HANDHELD, ("16",), False, _home,
+                        "nearest screen: home"),
         "handheld_calc": (HANDHELD, ("10", "11", "22"), False, _calc,
                           "Calc fullscreen after the target's tape"),
         "calc_all_themes": (DESK, ("5", "6", "10", "22"), False, _desk,
@@ -140,7 +168,9 @@ def scene_steps(scene, theme):
     """The plan steps that target `scene`, in plan order."""
     screen = screen_of(scene)
     steps = set(_setup_table()[screen][1]) | set(EVERY)
-    steps |= set(THEME_STEPS.get(theme, ()))
+    m = re.match(r"([a-z]+-(?:dark|light))_", scene)
+    own = THEME_STEPS.get(m.group(1)) if m else None
+    steps |= set(own if own is not None else THEME_STEPS.get(theme, ()))
     return sorted(steps, key=lambda s: (int(re.match(r"\d+", s).group()), s))
 
 
@@ -371,8 +401,9 @@ def _run(g, out, filters, step, theme, variant, quiet):
         missing = []
         drawn = target_theme
         if target_theme not in held:
-            drawn = theme if theme in held else FALLBACK.get(target_theme,
-                                                             "night")
+            drawn = theme if theme in held else FALLBACK.get(
+                "%s-%s" % (target_theme, mode),
+                FALLBACK.get(target_theme, "night"))
             missing.append("theme %s is not in the shell (drawn with %s)"
                            % (target_theme, drawn))
         todo = [s for s in scene_steps(name, target_theme)
