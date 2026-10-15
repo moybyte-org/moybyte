@@ -1014,10 +1014,10 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         self.hits.clear()
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
+        bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         ph = self.phase
         if ph == "list":
-            cv.print("PICK A CART", 8 * fs, lay.cy + 8 * fs, th["title_ink"], 1)
+            cv.print("PICK A CART", 8 * fs, lay.cy + 8 * fs, bar_ink, 1)
             self._chip(cv, th, "CHECK", lay.head2, "check")
             self._draw_list(cv, th)
         else:
@@ -1027,7 +1027,7 @@ class GetCartsAppLayer(ListShellApp):
             title = self.cur["cart"]["name"] if self.cur is not None else "GET CARTS"
             x = lay.head[0] + lay.head[2] + 8 * fs
             cv.print(title[:max(1, (lay.cx + lay.cw - x) // (8 * fs) - 1)], x,
-                     lay.cy + 8 * fs, th["title_ink"], 1)
+                     lay.cy + 8 * fs, bar_ink, 1)
             if ph == "cart":
                 self._draw_cart(cv, th)
             elif ph == "licence":

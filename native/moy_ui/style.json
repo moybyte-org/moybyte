@@ -18,16 +18,16 @@
   },
   "kinds": {
     "row": {
-      "rest": [["panel", 60], ["title_ink", 0], ["dim", 1]],
-      "hover": [["panel", 60], ["title_ink", 0], ["hover_cue", "accent", 10]],
+      "rest": [["panel", 60], ["chrome_ink", 7], ["dim", 1]],
+      "hover": [["panel", 60], ["chrome_ink", 7], ["hover_cue", "accent", 10]],
       "on": [["title", 13], ["title_ink", 0], ["accent", 10]],
       "hot": [["danger", 8], 7, ["dim", 1]],
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["accent", 10]],
       "disabled": [["panel", 60], ["disabled_ink", 6], ["disabled_edge", 1]]
     },
     "cell": {
-      "rest": [["panel", 60], ["title_ink", 0], ["dim", 1]],
-      "hover": [["panel", 60], ["title_ink", 0], ["hover_cue", "accent", 10]],
+      "rest": [["panel", 60], ["chrome_ink", 7], ["dim", 1]],
+      "hover": [["panel", 60], ["chrome_ink", 7], ["hover_cue", "accent", 10]],
       "on": [["title", 13], ["title_ink", 0], ["accent", 10]],
       "hot": [["danger", 8], 7, ["dim", 1]],
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["accent", 10]],
@@ -42,16 +42,16 @@
       "disabled": [["title", 13], ["title_ink", 0], null]
     },
     "chip": {
-      "rest": [["panel", 60], ["title_ink", 0], ["dim", 1]],
-      "hover": [["panel", 60], ["title_ink", 0], ["hover_cue", "accent", 10]],
+      "rest": [["panel", 60], ["chrome_ink", 7], ["dim", 1]],
+      "hover": [["panel", 60], ["chrome_ink", 7], ["hover_cue", "accent", 10]],
       "on": [["accent", 10], 0, ["edge", 13]],
       "hot": [["danger", 8], 7, ["dim", 1]],
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["edge", 13]],
       "disabled": [["panel", 60], ["disabled_ink", 6], ["disabled_edge", 1]]
     },
     "toggle": {
-      "rest": [["panel", 60], ["title_ink", 0], ["dim", 1]],
-      "hover": [["panel", 60], ["title_ink", 0], ["hover_cue", "accent", 10]],
+      "rest": [["panel", 60], ["chrome_ink", 7], ["dim", 1]],
+      "hover": [["panel", 60], ["chrome_ink", 7], ["hover_cue", "accent", 10]],
       "on": [["play", 11], 7, ["edge", 13]],
       "hot": [["danger", 8], 7, ["dim", 1]],
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["edge", 13]],
@@ -90,40 +90,40 @@
       "disabled": [["hilite", 13], ["disabled_ink", 6], ["dim", 1]]
     },
     "button": {
-      "rest": [["surface", 7], ["ink", 0], 0],
+      "rest": [["surface", 7], ["ink", 0], ["shade_dark", 0]],
       "hover": [["surface", 7], ["ink", 0], ["hover_cue", "accent", 10]],
-      "on": [["accent", 10], 0, 0],
-      "hot": [["surface", 7], ["ink", 0], 0],
-      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], 0],
-      "disabled": [["surface", 7], ["disabled_ink", 6], 0]
+      "on": [["accent", 10], 0, ["shade_dark", 0]],
+      "hot": [["surface", 7], ["ink", 0], ["shade_dark", 0]],
+      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
+      "disabled": [["surface", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
     "button_play": {
-      "rest": [["play", 7], 7, 0],
+      "rest": [["play", 7], 7, ["shade_dark", 0]],
       "hover": [["play", 7], 7, ["hover_cue", "accent", 10]],
-      "on": [["accent", 10], 0, 0],
-      "hot": [["play", 7], 7, 0],
-      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], 0],
-      "disabled": [["play", 7], ["disabled_ink", 6], 0]
+      "on": [["accent", 10], 0, ["shade_dark", 0]],
+      "hot": [["play", 7], 7, ["shade_dark", 0]],
+      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
+      "disabled": [["play", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
     "button_author": {
-      "rest": [["author", 7], 0, 0],
+      "rest": [["author", 7], 0, ["shade_dark", 0]],
       "hover": [["author", 7], 0, ["hover_cue", "accent", 10]],
-      "on": [["accent", 10], 0, 0],
-      "hot": [["author", 7], 0, 0],
-      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], 0],
-      "disabled": [["author", 7], ["disabled_ink", 6], 0]
+      "on": [["accent", 10], 0, ["shade_dark", 0]],
+      "hot": [["author", 7], 0, ["shade_dark", 0]],
+      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
+      "disabled": [["author", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
     "button_danger": {
-      "rest": [["danger", 7], 7, 0],
+      "rest": [["danger", 7], 7, ["shade_dark", 0]],
       "hover": [["danger", 7], 7, ["hover_cue", "accent", 10]],
-      "on": [["accent", 10], 0, 0],
-      "hot": [["danger", 7], 7, 0],
-      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], 0],
-      "disabled": [["danger", 7], ["disabled_ink", 6], 0]
+      "on": [["accent", 10], 0, ["shade_dark", 0]],
+      "hot": [["danger", 7], 7, ["shade_dark", 0]],
+      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
+      "disabled": [["danger", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
     "tab": {
       "rest": [null, 7, null],
-      "on": [["selection", "hilite", 13], ["title_ink", 0], null]
+      "on": [["selection", "hilite", 13], ["selection_ink", 7], null]
     },
     "status": {
       "rest": [["surface_alt", "panel", 60], ["ink_dim", 6], ["border", 0]]
@@ -135,7 +135,7 @@
       "rest": [["title", 13], ["title_ink", 0], null]
     },
     "toolbar": {
-      "rest": [["title", 13], null, null]
+      "rest": [["title", 13], ["title_ink", 0], null]
     },
     "scrollbar": {
       "rest": [["dim", 1], ["ink_dim", 6], null]
@@ -1100,7 +1100,7 @@
       ],
       "light": [
         ["surface", 7], ["surface_alt", 52], ["ink", 0], ["ink_dim", 53],
-        ["chrome_ink", 0], ["chrome_ink_dim", 53], ["selection_ink", 0],
+        ["chrome_ink", 0], ["chrome_ink_dim", 51], ["selection_ink", 0],
         ["focus", 10], ["play", 11], ["author", 9], ["danger", 8],
         ["surface_light", true], ["bar_light", true], ["band_light", true],
         ["shade_hi", 7], ["ink_accent", "ink"], ["ink_note", 4],
@@ -1127,7 +1127,7 @@
     "pairs": [
       ["title", "title_ink"], ["title_active", "title_ink"], ["surface", "ink"],
       ["surface_alt", "ink"], ["selection", "selection_ink"], ["panel", "chrome_ink"],
-      ["bar", "chrome_ink"]
+      ["bar", "chrome_ink"], ["title_inactive", "chrome_ink_dim"]
     ],
     "contrast": 30,
     "accents": [
@@ -1149,7 +1149,7 @@
       "accent": ["accent", "title", "title_active", "selection"],
       "tied": ["edge", "border", "hilite", "shade_hi", "bar_edge", "desktop_pattern"],
       "accent_ink": ["focus", "ink_accent"],
-      "dim_ink": [["ink_dim", "ink", ["surface"]], ["chrome_ink_dim", "chrome_ink", ["panel", "bar"]]],
+      "dim_ink": [["ink_dim", "ink", ["surface"]], ["chrome_ink_dim", "chrome_ink", ["panel", "bar", "title_inactive"]]],
       "dim_greys": [5, 6, 13, 49, 50, 53],
       "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment",
                   "code_builtin", "ink_note"]

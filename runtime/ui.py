@@ -1411,10 +1411,10 @@ def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
 
 
 def toolbar(cv, th, rect):
-    """The app toolbar band (Storybook): the theme's title surface --
-    chips and status text draw over it in title_ink."""
-    _C.toolbar(cv, _LOOK if th is _TH else _look(th), rect)
-    return rect
+    """The app toolbar band (Files, Storybook, Get Carts): the theme's title
+    surface. Returns the ink its text draws in: title_ink, or the ink of
+    the fill a theme's toolbar surface puts there instead."""
+    return _C.toolbar(cv, _LOOK if th is _TH else _look(th), rect)
 
 
 def dialog(cv, rect, ring=None, fill=None):

@@ -425,7 +425,13 @@ label stay its own), `button` and its kinds, `chip`, `tab`, `toolbar`,
 caller-coloured and game-canvas ones (the quirks above, `dialog`, `focus`,
 `scrollbar`, `status`) do not. A chrome part (`window`, …) is painted through
 the `ui` face, `ui.paint`, which paints nothing and answers False where the
-theme gives the part no surface.
+theme gives the part no surface; its own field and edge, what a surface
+that leaves out its fill or names a bare `border` paints, are the colours
+its caller draws without one: `bar.item` `panel` (`accent` when on) edged
+`chrome_ink` (`dim` when disabled), `desk.icon` `panel` edged `edge`, and
+`desk` `bar` edged `bar_edge`. A `toolbar` surface that fills solid with
+another role than `title` hands the toolbar's text that role's ink of
+`theme.pairs` (`ui.toolbar` answers the ink).
 
 - **The text never reaches a draw.** The loader compiles every surface once
   into a small integer record (a style id, `stid`; not
@@ -807,16 +813,17 @@ Per variant, with B the source's row and R the result, R starting as B:
    B's `title` or B's `accent` — a role the source tied to its identity
    colour — takes A. `focus` and `ink_accent` take the first of A, deep and
    R's `ink` that clears R's `surface`.
-3. **Inks.** Each ink of `theme.pairs` against its backgrounds — `ink`
-   (`surface`, `surface_alt`), `chrome_ink` (`panel`, `bar`), `title_ink`
-   (`title`, `title_active`), `selection_ink` (`selection`) — keeps B's
+3. **Inks.** Each ink of `theme.pairs` but the dim inks (step 4's)
+   against its backgrounds — `ink` (`surface`, `surface_alt`),
+   `chrome_ink` (`panel`, `bar`), `title_ink` (`title`, `title_active`),
+   `selection_ink` (`selection`) — keeps B's
    value if it clears every one, else takes black or white, whichever has
    the larger least ratio (black on a tie). Black or white clears any single MOY64 colour,
    and step 1 keeps the backgrounds a source pairs with one ink on one
    side, so this lands; `tests/test_theme_derive.py` holds it for every
    seed, accent, tint and variant.
 4. **Dim inks.** `ink_dim` (`surface`) and `chrome_ink_dim` (`panel`,
-   `bar`) keep B's value if it clears them, else take the dimmest that does
+   `bar`, `title_inactive`) keep B's value if it clears them, else take the dimmest that does
    (the least ratio, the lower index on a tie) of the ramp and the greys 5,
    6, 13, 49, 50 and 53, else R's `ink` or `chrome_ink`.
 5. **Content.** Each `code_*` role and `ink_note` keeps B's value if it

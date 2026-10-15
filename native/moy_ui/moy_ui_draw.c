@@ -929,13 +929,38 @@ int moy_ui_mini_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label,
 
 // -- frames -----------------------------------------------------------------------------
 
-int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b) {
+// The ink that reads on what a surface of `part` in `state` fills with: the
+// part's own `ink`, unless the surface fills solid with a role other than
+// `field_role`, whose ink is then that role's in theme.pairs.
+static int surface_ink(int look, const moy_ui_shape_t *sh, int part, int state, int field_role,
+                       int ink) {
+    const moy_ui_surface_t *sf = moy_ui_shape_surface(sh, part, state);
+    if (sf == NULL || sf->fill != MOY_UI_FILL_SOLID || sf->a >= 0
+        || sf->a == MOY_UI_TERM_STYLE) {
+        return ink;
+    }
+    int role = -1 - sf->a;
+    if (role == field_role) {
+        return ink;
+    }
+    for (int i = 0; i < MOY_THEME_PAIRS; i++) {
+        if (moy_theme_pairs[i][0] == role) {
+            return moy_ui_token(look, moy_theme_pairs[i][1]);
+        }
+    }
+    return ink;
+}
+
+int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b, int *ink) {
     draw_t d;
     open_draw(s, &d);
     int16_t c[3];
     moy_ui_colors(d.look, MOY_UI_K_TOOLBAR, MOY_UI_REST, c);
+    *ink = c[1];
     if (!surface(&d, b, MOY_UI_K_TOOLBAR, MOY_UI_REST, c[0], c[2])) {
         fill(&d, b.x, b.y, b.w, b.h, c[0]);
+    } else if (moy_theme_sheet_cell(MOY_UI_K_TOOLBAR, MOY_UI_REST, 0) < 0) {
+        *ink = surface_ink(d.look, d.sh, MOY_UI_K_TOOLBAR, MOY_UI_REST, MOY_UI_T_TITLE, c[1]);
     }
     return MOY_UI_OK;
 }
@@ -1049,6 +1074,26 @@ int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
     return MOY_UI_OK;
 }
 
+// A chrome part's own field and edge, what a surface that leaves out its
+// fill or names a bare border paints: the colours its caller draws without
+// a surface (the bar's window chip, the desk's icon tile and label pill).
+// The frame's parts pass their own (moy_ui_frame); here they paint nothing.
+static void part_colors(int look, int part, int state, int16_t c[3]) {
+    int field = -1, edge = -1;
+    if (part == MOY_THEME_P_BAR_ITEM) {
+        field = state == MOY_UI_ON ? MOY_UI_T_ACCENT : MOY_UI_T_PANEL;
+        edge = state == MOY_UI_DISABLED ? MOY_UI_T_DIM : MOY_UI_T_CHROME_INK;
+    } else if (part == MOY_THEME_P_DESK_ICON) {
+        field = MOY_UI_T_PANEL;
+        edge = MOY_UI_T_EDGE;
+    } else if (part == MOY_THEME_P_DESK) {
+        field = MOY_UI_T_BAR;
+        edge = MOY_UI_T_BAR_EDGE;
+    }
+    c[0] = (int16_t)(field < 0 ? -1 : moy_ui_token(look, field));
+    c[2] = (int16_t)(edge < 0 ? -1 : moy_ui_token(look, edge));
+}
+
 int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, int *painted) {
     if (part < 0 || part >= MOY_THEME_PARTS || state < 0 || state >= MOY_THEME_STATES) {
         return MOY_UI_BAD;
@@ -1058,6 +1103,8 @@ int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, in
     int16_t c[3] = {-1, -1, -1};
     if (part < MOY_UI_KINDS) {
         moy_ui_colors(d.look, part, state < MOY_UI_STATES ? state : MOY_UI_REST, c);
+    } else {
+        part_colors(d.look, part, state, c);
     }
     *painted = surface(&d, b, part, state, c[0], c[2]);
     return MOY_UI_OK;

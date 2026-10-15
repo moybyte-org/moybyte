@@ -276,7 +276,7 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
                 assert bytes(cv._buf) == bytes(ref._buf), (name, variant, glyph)
                 seen.append(twin.state_colors(th, "chip", twin.DISABLED if not enabled
                                               else twin.REST)[1])
-            assert seen == [th["title_ink"],
+            assert seen == [th["chrome_ink"],
                             twin.state_token(th, "disabled_ink", 6)], (name, variant)
             assert seen[0] != seen[1], (name, variant)
 

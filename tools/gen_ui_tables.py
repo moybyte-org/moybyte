@@ -642,8 +642,8 @@ def _recolour(th, roles, flags):
     rmax = max(len(r) for _n, r in tints)
     greys = rc["dim_greys"]
     dims = [(role(r), role(f), [role(b) for b in bgs]) for r, f, bgs in rc["dim_ink"]]
-    if any(not 1 <= len(b) <= 2 for _r, _f, b in dims):
-        raise SystemExit("theme.recolour.dim_ink: one or two backgrounds each")
+    if any(not 1 <= len(b) <= 3 for _r, _f, b in dims):
+        raise SystemExit("theme.recolour.dim_ink: one to three backgrounds each")
     h = ["// Accent and tint (docs/theming_2026-09.md §4.10, moy_theme_derive): the",
          "// accents [A, deep], the tints' ramps ([0] the length, then dark to",
          "// light), and the role classes, each 0xff past its end.",
@@ -663,7 +663,7 @@ def _recolour(th, roles, flags):
          "extern const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1];",
          "extern const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX];",
          "// Each dim ink: the role, its fallback, its backgrounds (0xff past the end).",
-         "extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4];",
+         "extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5];",
          "extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];"]
     c = ["const char *const moy_theme_accent_names[MOY_THEME_ACCENTS] = {"]
     c.extend("    %s," % _c_str(n) for n, _a, _d in accents)
@@ -680,8 +680,8 @@ def _recolour(th, roles, flags):
     for k, v in zip(classes, lists):
         c.append("    {%s},  // %s" % (", ".join(map(str, v + [255] * (cmax - len(v)))), k))
     c.append("};\n")
-    c.append("const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4] = {%s};\n"
-             % ", ".join("{%s}" % ", ".join(map(str, [r, f] + b + [255] * (2 - len(b))))
+    c.append("const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5] = {%s};\n"
+             % ", ".join("{%s}" % ", ".join(map(str, [r, f] + b + [255] * (3 - len(b))))
                          for r, f, b in dims))
     c.append("const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS] = {%s};\n"
              % ", ".join(map(str, greys)))

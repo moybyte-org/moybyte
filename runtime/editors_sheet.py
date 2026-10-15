@@ -362,7 +362,8 @@ class SpriteSheet:
     @staticmethod
     def icon_from_rows(art, transparent=-1):
         """The icon `icon_rows` cut out of a sheet -- `(pw, ph, want)`, or
-        None for a sheet with no art -- as a blittable. A catalogue entry
+        None for a sheet with no art -- as a blittable, or None when the tile
+        itself is blank (every pixel 0). A catalogue entry
         carries exactly this for its cart (`moy_carts.entry`), so the shelf
         bakes its icons without the sheet ever being read whole."""
         if art is None:
@@ -381,6 +382,8 @@ class SpriteSheet:
                 pad = pw           # a short blob leaves its missing rows blank
             if pad > 0:
                 pix.extend([0] * pad)
+        if not any(pix):
+            return None            # a blank tile is no art either
         return _SheetSprite(pw, ph, pix, transparent)
 
 

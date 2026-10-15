@@ -158,6 +158,7 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {2, {-7, 1, 0}},
     {2, {-3, 13, 0}},
     {2, {-4, 0, 0}},
+    {2, {-25, 7, 0}},
     {3, {-36, -5, 10}},
     {1, {0, 0, 0}},
     {2, {-2, 13, 0}},
@@ -166,8 +167,8 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {2, {-16, 7, 0}},
     {2, {-26, 6, 0}},
     {2, {-13, 6, 0}},
-    {2, {-25, 7, 0}},
     {2, {-10, 7, 0}},
+    {2, {-31, 0, 0}},
     {2, {-12, 0, 0}},
     {2, {-18, 7, 0}},
     {2, {-19, 7, 0}},
@@ -180,26 +181,26 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
 };
 
 const uint8_t moy_ui_kind_specs[MOY_UI_KINDS][MOY_UI_STATES][3] = {
-    {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 6}, {1, 11, 12}, {1, 11, 9}},  // row
-    {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 6}, {1, 11, 12}, {1, 11, 9}},  // cell
-    {{10, 11, 0}, {10, 11, 0}, {7, 11, 0}, {6, 13, 0}, {10, 11, 0}, {10, 11, 0}},  // cell_band
-    {{1, 2, 3}, {4, 5, 14}, {7, 8, 9}, {6, 13, 14}, {1, 11, 12}, {1, 11, 9}},  // chip
-    {{1, 2, 3}, {4, 5, 14}, {7, 8, 9}, {15, 8, 14}, {1, 11, 12}, {1, 11, 9}},  // toggle
-    {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {16, 17, 0}, {0, 18, 12}, {0, 18, 0}},  // row_menu
-    {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {16, 17, 0}, {0, 19, 12}, {0, 19, 0}},  // row_list
-    {{0, 18, 0}, {4, 5, 0}, {7, 8, 9}, {16, 17, 0}, {0, 20, 12}, {0, 20, 0}},  // row_chrome
-    {{16, 2, 9}, {4, 5, 6}, {7, 8, 9}, {6, 13, 6}, {16, 13, 12}, {16, 13, 9}},  // row_cta
-    {{21, 2, 13}, {4, 5, 13}, {21, 22, 13}, {6, 13, 13}, {21, 22, 12}, {21, 22, 13}},  // button
-    {{23, 2, 13}, {4, 5, 13}, {23, 8, 13}, {6, 13, 13}, {23, 8, 12}, {23, 8, 13}},  // button_play
-    {{24, 2, 13}, {4, 5, 13}, {24, 13, 13}, {6, 13, 13}, {24, 13, 12}, {24, 13, 13}},  // button_author
-    {{25, 2, 13}, {4, 5, 13}, {25, 8, 13}, {6, 13, 13}, {25, 8, 12}, {25, 8, 13}},  // button_danger
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {26, 11, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {27, 19, 28}},  // status
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {29, 0, 28}},  // panel
+    {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 6}, {1, 12, 13}, {1, 12, 9}},  // row
+    {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 6}, {1, 12, 13}, {1, 12, 9}},  // cell
+    {{10, 11, 0}, {10, 11, 0}, {7, 11, 0}, {6, 14, 0}, {10, 11, 0}, {10, 11, 0}},  // cell_band
+    {{1, 2, 3}, {4, 5, 15}, {7, 8, 9}, {6, 14, 15}, {1, 12, 13}, {1, 12, 9}},  // chip
+    {{1, 2, 3}, {4, 5, 15}, {7, 8, 9}, {16, 8, 15}, {1, 12, 13}, {1, 12, 9}},  // toggle
+    {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {17, 18, 0}, {0, 19, 13}, {0, 19, 0}},  // row_menu
+    {{0, 2, 0}, {4, 5, 0}, {7, 8, 9}, {17, 18, 0}, {0, 20, 13}, {0, 20, 0}},  // row_list
+    {{0, 19, 0}, {4, 5, 0}, {7, 8, 9}, {17, 18, 0}, {0, 12, 13}, {0, 12, 0}},  // row_chrome
+    {{17, 2, 9}, {4, 5, 6}, {7, 8, 9}, {6, 14, 6}, {17, 14, 13}, {17, 14, 9}},  // row_cta
+    {{21, 2, 22}, {4, 5, 22}, {21, 23, 22}, {6, 14, 22}, {21, 23, 13}, {21, 23, 22}},  // button
+    {{24, 2, 22}, {4, 5, 22}, {24, 8, 22}, {6, 14, 22}, {24, 8, 13}, {24, 8, 22}},  // button_play
+    {{25, 2, 22}, {4, 5, 22}, {25, 14, 22}, {6, 14, 22}, {25, 14, 13}, {25, 14, 22}},  // button_author
+    {{26, 2, 22}, {4, 5, 22}, {26, 8, 22}, {6, 14, 22}, {26, 8, 13}, {26, 8, 22}},  // button_danger
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {27, 18, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {28, 20, 29}},  // status
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {30, 0, 29}},  // panel
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 11, 0}},  // panel_title
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 0, 0}},  // toolbar
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {9, 19, 0}},  // scrollbar
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 30}},  // focus
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 11, 0}},  // toolbar
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {9, 20, 0}},  // scrollbar
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 31}},  // focus
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // text_field
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_btn
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_icon_btn
@@ -407,7 +408,7 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {11, 0, 0},  // ink
     {12, 0, 53},  // ink_dim
     {24, 0, 0},  // chrome_ink
-    {25, 0, 53},  // chrome_ink_dim
+    {25, 0, 51},  // chrome_ink_dim
     {15, 0, 0},  // selection_ink
     {16, 0, 10},  // focus
     {17, 0, 11},  // play
@@ -663,6 +664,7 @@ const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
     {14, 15},  // selection / selection_ink
     {0, 24},  // panel / chrome_ink
     {21, 24},  // bar / chrome_ink
+    {27, 25},  // title_inactive / chrome_ink_dim
 };
 
 const uint16_t moy_theme_lum[64] = {
@@ -859,7 +861,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"panel\": 48, \"edge\": 51, \"title\": 48, \"title_ink\": 0, \"title_inactive\": 48,\012"
     "      \"accent\": 22, \"hilite\": 22, \"dim\": 49, \"desktop\": 13, \"desktop_pattern\": 23,\012"
     "      \"surface\": 7, \"surface_alt\": 48, \"border\": 51, \"selection\": 22,\012"
-    "      \"chrome_ink_dim\": 50, \"bar\": 7, \"bar_edge\": 0,\012"
+    "      \"bar\": 7, \"bar_edge\": 0,\012"
     "      \"shade_hi\": 7, \"shade_lo\": 49, \"shade_dark\": 50\012"
     "    }\012"
     "  },\012"
@@ -894,7 +896,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"panel\": 6, \"edge\": 50, \"title\": 1, \"title_ink\": 7, \"title_inactive\": 50,\012"
     "      \"accent\": 12, \"hilite\": 1, \"dim\": 50, \"desktop\": 58, \"desktop_pattern\": 3,\012"
     "      \"surface\": 7, \"surface_alt\": 6, \"border\": 50, \"selection\": 1,\012"
-    "      \"selection_ink\": 7, \"chrome_ink_dim\": 50, \"ink_dim\": 50,\012"
+    "      \"selection_ink\": 7, \"chrome_ink_dim\": 54, \"ink_dim\": 50,\012"
     "      \"shade_hi\": 7, \"shade_lo\": 50, \"shade_dark\": 0\012"
     "    }\012"
     "  },\012"
@@ -983,7 +985,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1388, 1296, 860, 1847};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1366, 1296, 860, 1847};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1182,6 +1184,6 @@ const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX] = {
     {34, 35, 36, 37, 38, 39, 32, 255, 255, 255, 255},  // content
 };
 
-const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4] = {{12, 11, 9, 255}, {25, 24, 0, 21}};
+const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5] = {{12, 11, 9, 255, 255}, {25, 24, 0, 21, 27}};
 
 const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS] = {5, 6, 13, 49, 50, 53};

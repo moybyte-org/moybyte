@@ -208,12 +208,15 @@ class WindowChrome:
                 out.append((k, (x, y, side, side), self._win_title(self._wins[k])[:1]))
                 y += side + 2 * fs
             return out
-        widths = []
-        labels = []
-        for k in self._order:
-            label = self._win_title(self._wins[k])[:8]
-            labels.append(label)
-            widths.append(_ui.text_width(label, fs, "ui") + 2 * 4 * fs)
+        titles = [self._win_title(self._wins[k]) for k in self._order]
+        room = cw - 4 * fs - (len(titles) - 1) * 2 * fs
+        cap = max(len(t) for t in titles)
+        while True:
+            labels = [t[:cap] for t in titles]
+            widths = [_ui.text_width(lb, fs, "ui") + 2 * 4 * fs for lb in labels]
+            if sum(widths) <= room or cap <= 4:
+                break
+            cap -= 1                     # shorten the longest titles first
         total = sum(widths) + (len(widths) - 1) * 2 * fs
         if slot == 1:
             x = max(cx, (bw - total) // 2)

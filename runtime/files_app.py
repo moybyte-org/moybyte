@@ -614,7 +614,7 @@ class FilesAppLayer(ListShellApp):
         th = self._theme.colors()
         fs = lay.fs
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
+        bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         crumb = "FILES"
         if self.mode in ("grid", "rename", "game", "used"):
             crumb = "FILES > " + self.grid.kind.upper()
@@ -627,7 +627,7 @@ class FilesAppLayer(ListShellApp):
         self._chip(cv, "<" if self.mode != "kinds" else "FILES", lay.head,
                    self.mode != "kinds")
         cv.print(crumb, lay.head[0] + lay.head[2] + 8 * fs,
-                 lay.cy + 8 * fs, th["title_ink"], 1)
+                 lay.cy + 8 * fs, bar_ink, 1)
         if self.mode == "trash":
             self._chip(cv, "EMPTY", lay.head2, hot=bool(self.trash))
         if self.mode == "rename":

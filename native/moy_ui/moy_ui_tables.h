@@ -11,7 +11,7 @@
 #define MOY_UI_KINDS 25
 #define MOY_UI_COLOR_KINDS 20
 #define MOY_UI_SLOTS 9
-#define MOY_UI_SPECS 31
+#define MOY_UI_SPECS 32
 #define MOY_UI_HITS_CAP 32
 #define MOY_UI_GLYPHS 62
 #define MOY_UI_GLYPH_SIZE 12
@@ -184,7 +184,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_BYTES 4096
 #define MOY_THEME_DEPTH 4
 #define MOY_THEME_RULES 69
-#define MOY_THEME_PAIRS 7
+#define MOY_THEME_PAIRS 8
 #define MOY_THEME_CONTRAST 30
 #define MOY_THEME_RESERVED 4
 #define MOY_THEME_FONT_ROLES 3
@@ -351,7 +351,7 @@ extern const char *const moy_theme_tint_names[MOY_THEME_TINTS];
 extern const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1];
 extern const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX];
 // Each dim ink: the role, its fallback, its backgrounds (0xff past the end).
-extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][4];
+extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5];
 extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 
 #endif // MOY_UI_TABLES_H

@@ -280,7 +280,8 @@ int moy_ui_game_icon_btn(const moy_ui_sink_t *s, moy_ui_box_t b, int g, moy_ui_s
                          int fill_c, int fs, int phase);
 int moy_ui_mini_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
                     int lx, int ly);
-int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b);
+// A toolbar band; `*ink` is the label ink that reads on what it painted.
+int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b, int *ink);
 int moy_ui_dialog(const moy_ui_sink_t *s, moy_ui_box_t b, int ring, int fill_c);
 // `colors` NULL: the style's (field, ring, ink, placeholder ink, caret).
 int moy_ui_text_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t,

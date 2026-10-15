@@ -1200,12 +1200,13 @@ static mp_obj_t ui_mini_btn(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_mini_btn_obj, 5, 5, ui_mini_btn);
 
-// toolbar(cv, look, rect)
+// toolbar(cv, look, rect) -> the label ink
 static mp_obj_t ui_toolbar(mp_obj_t cv, mp_obj_t look, mp_obj_t rect) {
     moy_ui_sink_t s;
     sink_of(&s, cv, look);
-    check(moy_ui_toolbar(&s, box_of(rect)));
-    return mp_const_none;
+    int ink;
+    check(moy_ui_toolbar(&s, box_of(rect), &ink));
+    return mp_obj_new_int(ink);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_toolbar_obj, ui_toolbar);
 

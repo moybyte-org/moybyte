@@ -191,13 +191,17 @@ _PRESS_INK = ('pressed_ink', _WHITE)
 _DIS_INK = ('disabled_ink', 6)
 _DIS_EDGE = ('disabled_edge', 1)
 _HOVER_CUE = ('hover_cue', 'accent', 10)
-_ROW_STATES = {REST: (_PANEL, _TITLE_INK, _DIM), HOVER: (_PANEL, _TITLE_INK, _HOVER_CUE), ON: (_TITLE, _TITLE_INK, _ACCENT), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, _ACCENT), DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE)}
-_CHIP_STATES = {REST: (_PANEL, _TITLE_INK, _DIM), HOVER: (_PANEL, _TITLE_INK, _HOVER_CUE), ON: (_ACCENT, _BLACK, _EDGE), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, _EDGE), DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE)}
+# Edited with the readability pass: a field of panel takes the panel's
+# floor ink (theme.pairs' (panel, chrome_ink)), a selection its
+# selection_ink, and a button's edge the shade_dark role.
+_CHROME_INK = ('chrome_ink', _WHITE)
+_SEL_INK = ('selection_ink', _WHITE)
+_SHADE_DARK = ('shade_dark', _BLACK)
+_ROW_STATES = {REST: (_PANEL, _CHROME_INK, _DIM), HOVER: (_PANEL, _CHROME_INK, _HOVER_CUE), ON: (_TITLE, _TITLE_INK, _ACCENT), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, _ACCENT), DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE)}
+_CHIP_STATES = {REST: (_PANEL, _CHROME_INK, _DIM), HOVER: (_PANEL, _CHROME_INK, _HOVER_CUE), ON: (_ACCENT, _BLACK, _EDGE), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, _EDGE), DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE)}
 _CELL_BAND_STATES = {REST: (_TITLE, _TITLE_INK, None), HOVER: (_TITLE, _TITLE_INK, None), ON: (_ACCENT, _BLACK, None), HOT: (_DANGER, _TITLE_INK, None), PRESSED: (_TITLE, _TITLE_INK, None), DISABLED: (_TITLE, _TITLE_INK, None)}
 _HILITE = ('hilite', 13)
-_CHROME_INK = ('chrome_ink', _WHITE)
 _CHROME_DIM = ('chrome_ink_dim', 6)
-_SEL_INK = ('selection_ink', _WHITE)
 
 def _chrome_row_states(rest_ink):
     return {REST: (None, rest_ink, None), HOVER: (None, rest_ink, _HOVER_CUE), ON: (_HILITE, _SEL_INK, None), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, None), DISABLED: (None, _DIS_INK, None)}
@@ -206,9 +210,9 @@ _ROW_CHROME_STATES[DISABLED] = (None, _CHROME_DIM, None)
 _ROW_CTA_STATES = {REST: (_HILITE, _BLACK, _DIM), HOVER: (_HILITE, _BLACK, _HOVER_CUE), ON: (_ACCENT, _BLACK, _ACCENT), HOT: (_DANGER, _WHITE, _DIM), PRESSED: (_PRESS, _PRESS_INK, _ACCENT), DISABLED: (_HILITE, _DIS_INK, _DIM)}
 
 def _button_states(bg, ink):
-    return {REST: (bg, ink, _BLACK), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, _BLACK), HOT: (bg, ink, _BLACK), PRESSED: (_PRESS, _PRESS_INK, _BLACK), DISABLED: (bg, _DIS_INK, _BLACK)}
+    return {REST: (bg, ink, _SHADE_DARK), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, _SHADE_DARK), HOT: (bg, ink, _SHADE_DARK), PRESSED: (_PRESS, _PRESS_INK, _SHADE_DARK), DISABLED: (bg, _DIS_INK, _SHADE_DARK)}
 _BUTTON_KIND_KEY = {'normal': 'button', 'play': 'button_play', 'author': 'button_author', 'danger': 'button_danger'}
-DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_play': _button_states(('play', _WHITE), _WHITE), 'button_author': _button_states(('author', _WHITE), _BLACK), 'button_danger': _button_states(('danger', _WHITE), _WHITE), 'tab': {ON: (_SELECTION, _TITLE_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, None, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
+DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_play': _button_states(('play', _WHITE), _WHITE), 'button_author': _button_states(('author', _WHITE), _BLACK), 'button_danger': _button_states(('danger', _WHITE), _WHITE), 'tab': {ON: (_SELECTION, _SEL_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, _TITLE_INK, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
 # Edited with theming phase 4 step 2 (docs/theming_2026-09.md §4.3): the
 # mini_btn and chip quirks' rulings, re-ruled; the pixels they describe are
 # the same.
@@ -726,9 +730,9 @@ def mini_btn(cv, rect, label, fill, label_rect=None):
 
 def toolbar(cv, th, rect):
     (x, y, w, h) = rect
-    (field, _ink, _edge) = state_colors(th, 'toolbar', REST)
+    (field, ink, _edge) = state_colors(th, 'toolbar', REST)
     cv.rect(x, y, w, h, field)
-    return rect
+    return ink                         # the label ink (the readability pass)
 
 def dialog(cv, rect, ring=None, fill=None):
     (x, y, w, h) = rect

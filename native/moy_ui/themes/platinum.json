@@ -13,7 +13,7 @@
       "panel": 48, "edge": 51, "title": 48, "title_ink": 0, "title_inactive": 48,
       "accent": 22, "hilite": 22, "dim": 49, "desktop": 13, "desktop_pattern": 23,
       "surface": 7, "surface_alt": 48, "border": 51, "selection": 22,
-      "chrome_ink_dim": 50, "bar": 7, "bar_edge": 0,
+      "bar": 7, "bar_edge": 0,
       "shade_hi": 7, "shade_lo": 49, "shade_dark": 50
     }
   },

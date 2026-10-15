@@ -505,12 +505,13 @@ def test_icon_survives_duplicate(tmp_path):
 
 def test_launcher_draws_the_declared_icon_tiles(tmp_path):
     """A 2x2 icon must resolve to a 16x16 blittable, and an absent one to tile 0
-    -- the host's free choice when the cart declines to name tiles."""
+    -- the host's free choice when the cart declines to name tiles -- which,
+    blank here, is no art: the card draws the type glyph."""
     from runtime import moy_carts, host_app
     root = str(tmp_path / "carts")
     Path(root).mkdir(parents=True)
     # tile 0 blank, tiles 16..17/32..33 (a 2x2 block at tile 16) painted
-    rows = ["0" * 128] * 16 + ["0" * 16 + "8" * 16 + "0" * 96] * 16
+    rows = ["0" * 128] * 8 + ["8" * 16 + "0" * 112] * 16
     for name, icon in (("Big", [16, 2, 2]), ("Plain", None)):
         c = moy_carts.create(name, root, src="def _draw():\n    pass\n",
                              type="game", icon=icon)
@@ -520,13 +521,14 @@ def test_launcher_draws_the_declared_icon_tiles(tmp_path):
     by_title = {c["title"]: c for c in ws.launcher.items if c.get("path")}
     big = ws.covers.icon_sheet_for(by_title["Big"])
     assert big is not None and (big.w, big.h) == (16, 16)
-    plain = ws.covers.icon_sheet_for(by_title["Plain"])
-    assert plain is not None and (plain.w, plain.h) == (8, 8)
+    assert ws.covers.icon_sheet_for(by_title["Plain"]) is None
 
 
 def test_icon_past_the_sheet_falls_back(tmp_path):
     """SPEC.md 3.4: an icon naming tiles this cart doesn't have is IGNORED --
-    the host picks instead. A cosmetic field must never blank the tile."""
+    the host picks instead. A cosmetic field must never blank the tile: the
+    tiles past the blob are blank, and a blank tile is no art, so the card
+    draws the type glyph."""
     from runtime import moy_carts, host_app
     root = str(tmp_path / "carts")
     Path(root).mkdir(parents=True)
@@ -537,7 +539,7 @@ def test_icon_past_the_sheet_falls_back(tmp_path):
     ws.set_home_tab("mine")
     cart = next(x for x in ws.launcher.items if x["title"] == "Missing")
     assert cart["icon"] == (500, 1, 1)          # carried verbatim...
-    assert ws.covers.icon_sheet_for(cart) is not None  # ...but never a blank tile
+    assert ws.covers.icon_sheet_for(cart) is None  # ...but never a blank tile
 
 
 # -- pmem slots are signed 32-bit (SPEC.md 9, matching 4.2) --------------------

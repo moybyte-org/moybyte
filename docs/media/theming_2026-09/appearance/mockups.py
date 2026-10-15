@@ -88,7 +88,7 @@ BACKGROUNDS = ("panel", "surface", "surface_alt", "desktop", "desktop_pattern",
 LINES = ("edge", "border", "bar_edge", "shade_dark")
 INK_PAIRS = (("ink", ("surface", "surface_alt")), ("chrome_ink", ("panel", "bar")),
              ("title_ink", ("title", "title_active")), ("selection_ink", ("selection",)))
-DIM_INKS = (("ink_dim", ("surface",)), ("chrome_ink_dim", ("panel", "bar")))
+DIM_INKS = (("ink_dim", ("surface",)), ("chrome_ink_dim", ("panel", "bar", "title_inactive")))
 ACCENT_INKS = ("focus", "ink_accent")
 SYNTAX = ("code_text", "code_keyword", "code_string", "code_number", "code_comment",
           "code_builtin", "ink_note")
@@ -177,7 +177,7 @@ def derive_variant(base, accent, tint):
 
 PAIRS = (("title", "title_ink"), ("title_active", "title_ink"), ("surface", "ink"),
          ("surface_alt", "ink"), ("selection", "selection_ink"), ("panel", "chrome_ink"),
-         ("bar", "chrome_ink"))
+         ("bar", "chrome_ink"), ("title_inactive", "chrome_ink_dim"))
 
 
 def readable(row):

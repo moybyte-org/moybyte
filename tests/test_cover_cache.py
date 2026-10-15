@@ -584,3 +584,36 @@ def test_a_file_that_does_not_decode_is_no_cover_at_any_size(tmp_path):
         ws.covers.cover_for(live)
     assert live["path"] in ws.covers._none
     assert ws.covers.cover_for(live, cover_cache.HALF) is None
+
+
+def test_a_blank_icon_tile_is_no_art():
+    """Tile 0 is blank by convention, and a cart whose sheet has art but no
+    icon there drew a black square as its card's art (Coin Quest)."""
+    from runtime.editors_sheet import SpriteSheet
+    assert SpriteSheet.icon_from_rows((8, 8, ["0" * 8] * 8)) is None
+    img = SpriteSheet.icon_from_rows((8, 8, ["0" * 8] * 7 + ["0000000a"]))
+    assert img is not None and img.w == 8
+
+
+def test_a_card_without_a_cover_is_the_icon_homes_cell(tmp_path):
+    """A coverless card's art is the cart's icon or type glyph on the
+    theme's `desk.icon` tile, five eighths of the slot: the glyph alone,
+    scaled to the slot, was a card-sized red shape (Pin Light)."""
+    from runtime.host_canvas import indices_of
+    from runtime.host_canvas import make_system_canvas as SystemCanvas
+    from runtime.launcher_layer import _TYPE_COLOR
+    ws = build_ws(tmp_path)
+    lw = ws.launcher
+    th = lw.theme
+    it = {"title": "PIN", "type": "game", "path": None}
+    red = _TYPE_COLOR["game"]
+    w = h = 120
+    cv = SystemCanvas(320, 240)
+    cv.cls(th["desktop"])
+    lw._draw_home_card(cv, it, (20, 20, w, h), False, None)
+    t = w * 5 // 8
+    x0 = y0 = 20 + (w - t) // 2
+    px = indices_of(cv)
+    reds = [(i % 320, i // 320) for i in range(len(px)) if px[i] == red]
+    assert reds and all(x0 <= x < x0 + t and y0 <= y < y0 + t for x, y in reds)
+    assert px[(y0 + 2) * 320 + x0 + 2] == th["panel"]      # the tile's field

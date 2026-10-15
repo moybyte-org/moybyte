@@ -171,7 +171,7 @@ _DRAW_SIGS = (
     ("moy_ui_game_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I], _I),
     ("moy_ui_game_icon_btn", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_mini_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
-    ("moy_ui_toolbar", [c.POINTER(_Sink), _Box], _I),
+    ("moy_ui_toolbar", [c.POINTER(_Sink), _Box, c.POINTER(_I)], _I),
     ("moy_ui_paint", [c.POINTER(_Sink), _Box, _I, _I, c.POINTER(_I)], _I),
     ("moy_ui_frame", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
@@ -477,7 +477,9 @@ def binding():
                                    int(lr[1])))
 
     def toolbar(cv, look, rect):
-        _check(lib.moy_ui_toolbar(c.byref(sink(cv, look)), box_of(rect)))
+        ink = _I()
+        _check(lib.moy_ui_toolbar(c.byref(sink(cv, look)), box_of(rect), c.byref(ink)))
+        return ink.value
 
     def paint(cv, look, rect, part, state):
         painted = _I()

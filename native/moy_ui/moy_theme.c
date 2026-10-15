@@ -1852,10 +1852,14 @@ static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
             }
         }
     }
-    // 3. the inks of theme.pairs: B's where it clears every background it
-    // pairs with, else black or white, the larger least ratio (black on a tie)
+    // 3. the inks of theme.pairs but the dim inks (step 4's): B's where it
+    // clears every background it pairs with, else black or white, the larger
+    // least ratio (black on a tie)
     for (int p = 0; p < MOY_THEME_PAIRS; p++) {
         int ink = moy_theme_pairs[p][1], first = 1;
+        for (int d = 0; d < MOY_THEME_DIM_INKS; d++) {
+            first &= moy_theme_dim_inks[d][0] != ink;
+        }
         uint8_t bgs[MOY_THEME_PAIRS];
         int nb = 0;
         for (int q = 0; q < MOY_THEME_PAIRS; q++) {
@@ -1878,17 +1882,17 @@ static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
     for (int d = 0; d < MOY_THEME_DIM_INKS; d++) {
         const uint8_t *e = moy_theme_dim_inks[d];
         const uint8_t *bgs = &e[2];
-        if (clears_all(b[e[0]], bgs, 2, r)) {
+        if (clears_all(b[e[0]], bgs, 3, r)) {
             continue;
         }
         int32_t best = -1;
         ratio_t bestr = {0, 1};
         for (int k = 0; k < rn + MOY_THEME_DIM_GREYS; k++) {
             int32_t c = k < rn ? ramp[k] : moy_theme_dim_greys[k - rn];
-            if (!clears_all(c, bgs, 2, r)) {
+            if (!clears_all(c, bgs, 3, r)) {
                 continue;
             }
-            ratio_t m = least(c, bgs, 2, r);
+            ratio_t m = least(c, bgs, 3, r);
             int o = best < 0 ? -1 : ratio_cmp(m, bestr);
             if (o < 0 || (o == 0 && c < best)) {
                 best = c;

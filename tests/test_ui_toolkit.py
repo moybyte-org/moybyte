@@ -100,7 +100,7 @@ def test_chip_states_match_the_legacy_button_pixels():
 
 def test_chip_clips_an_overlong_label_inside_its_rect():
     """#174: a label wider than its chip must clip (draw-what-fits), never
-    escape -- the desk pill overflow landed title_ink on the wallpaper
+    escape -- the desk pill overflow landed its ink on the wallpaper
     (invisible black-on-black on Open Machine's field)."""
     cv = _cv()
     cv.rect(0, 0, 320, 120, 7)                     # a field escaped ink shows on
@@ -110,7 +110,7 @@ def test_chip_clips_an_overlong_label_inside_its_rect():
         for y in range(120):
             assert cv.pix(x, y) == 7               # nothing escapes the rect
     # The truncated label still draws inside the chip.
-    assert any(cv.pix(x, y) == TH["title_ink"]
+    assert any(cv.pix(x, y) == TH["chrome_ink"]
                for y in range(r[1], r[1] + r[3])
                for x in range(r[0], r[0] + r[2]))
 
@@ -129,7 +129,7 @@ def test_chip_clip_follows_the_system_font_scale():
                 if r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]:
                     continue
                 assert cv.pix(x, y) == 7, (fs, x, y)
-        assert any(cv.pix(x, y) == TH["title_ink"]
+        assert any(cv.pix(x, y) == TH["chrome_ink"]
                    for y in range(r[1], r[1] + r[3])
                    for x in range(r[0], r[0] + r[2]))
 

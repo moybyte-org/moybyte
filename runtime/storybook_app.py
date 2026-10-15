@@ -585,11 +585,11 @@ class StorybookAppLayer(ListShellApp):
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
+        bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
         fs = lay.fs
         if self.mode == "shelf":
             cv.print(self.status[:max(1, lay.cw // (8 * fs) - 2)],
-                     lay.status_x, lay.cy + 8 * fs, th["title_ink"], 1)
+                     lay.status_x, lay.cy + 8 * fs, bar_ink, 1)
             self._draw_rows(cv, self._stories(), "+ NEW STORY",
                             lambda c: (c.get("title") or "STORY").upper())
         elif self.mode == "pages":
@@ -597,7 +597,7 @@ class StorybookAppLayer(ListShellApp):
             if not self.read_only:
                 self._button(cv, "PLAY", lay.btn2)
             cv.print(self.status[:max(1, (lay.cx + lay.cw - lay.btn3[0]) // (8 * fs))],
-                     lay.btn3[0], lay.cy + 8 * fs, th["title_ink"], 1)
+                     lay.btn3[0], lay.cy + 8 * fs, bar_ink, 1)
             self._draw_rows(cv, self._pages(),
                             None if self.read_only else "+ NEW PAGE",
                             self._page_label)

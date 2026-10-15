@@ -843,6 +843,27 @@ def test_minimize_hides_window_and_chip_restores(tmp_path):
     assert not win.minimized
 
 
+def test_a_chip_names_its_window_whole_while_the_bar_has_room(tmp_path):
+    """A taskbar chip carried its title's first eight letters ("APPEARAN")
+    with the bar half empty. It carries the whole title, and only a bar out
+    of room shortens the longest first, every chip inside the cell."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    for app in ("files", "appearance", "calc"):
+        ws.open_app(ws._apps_by_id[app])
+        drv.frame(1 / 30)
+    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    assert labels["appearance"] == "APPEARANCE" and labels["files"] == "FILES"
+    (_e, (bx, _by, _bw, _bh), _dy, _c), (_n, (cx, _cy, cw, _ch), _t, _s) = \
+        ws.wm._chips_cell()
+    ws.wm._win_title = lambda win: "A VERY LONG WINDOW TITLE INDEED " * 2
+    chips = ws.wm._chip_rects()
+    assert len(chips) == 3
+    assert all(len(lb) < 64 for _k, _r, lb in chips)
+    assert all(bx + cx <= r[0] and r[0] + r[2] <= bx + cx + cw for _k, r, _l in chips)
+
+
 def test_chip_click_is_focus_only_never_a_pop(tmp_path):
     """Taskbar chips: click the focused window's chip to minimize, again to
     restore, and an unfocused window's chip to FOCUS it -- the back-stack never
@@ -1974,7 +1995,7 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "a26bf142418ec89760242eaf46d215f38d219665ae653b42c149b33a88ebadda",
+    "0f0c1cf0a7b4900226e6f62964d3663701c5ff2c66ab74253f64a61d2a2fbf51",
     "e08a1a522adc6234abd2374092c4d96b115d8c4d829cc2cca0031829d89bba41",
 )
 

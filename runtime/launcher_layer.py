@@ -725,8 +725,7 @@ class Launcher:
         # takes, cropped to the slot (`_cover_scale`; a selected card's
         # shorter slot crops, never rescales); under 128 the cart's own icon
         # when it names one, else the cover's half (`_cover_div`). Without a
-        # cover: the cart's own sprite scaled up, else its type glyph in the
-        # type color (both the deterministic pre-cover look).
+        # cover: the icon home's cell, `_art_tile`.
         cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
         art_h = h - band_h
         div = _cover_div(it, w, art_h) if self.cover_for is not None else 0
@@ -734,15 +733,10 @@ class Launcher:
         if cover is not None:
             _draw_cover(cv, cover, x, y, w, cover_h, art_h, self._card_clip)
         else:
-            img = sheet_for(it) if sheet_for is not None else None
-            if img is not None:
-                sc = max(1, min((w - 6 * fs) // 16, (cover_h - 4 * fs) // 16))
-                cv.spr(img, x + (w - 16 * sc) // 2, y + (cover_h - 16 * sc) // 2, sc)
-            else:
-                gs = max(1, min((w - 12 * fs) // 12, (cover_h - 8 * fs) // 12))
-                self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"),
-                                 (x, y, w, cover_h),
-                                 _TYPE_COLOR.get(it["type"], NAMES["indigo"]), gs)
+            t = min(min(w, art_h) * 5 // 8, cover_h - 4 * fs)
+            self._art_tile(cv, th, (x + (w - t) // 2, y + (cover_h - t) // 2, t, t),
+                           sheet_for(it) if sheet_for is not None else None,
+                           it.get("type"))
         # Title band: cream text centered on the strongest ink.
         cv.rect(x, y + cover_h, w, band_h, NAMES["black"])
         name = it["title"]
@@ -829,6 +823,24 @@ class Launcher:
             cv.print(line, x + (w - tw) // 2, ty, NAMES["dark_grey"], 1)
             ty += lay.line_h + 2 * fs
         self._card_frame(cv, rect, selected, ring=th.get("author", NAMES["orange"]))
+
+    def _art_tile(self, cv, th, box, img, kind):
+        """A cart's art where it has no cover: the theme's `desk.icon` tile
+        in the square `box`, the icon `img` centred in it at a whole-number
+        scale, else the cart's type glyph in its type colour -- the icon
+        home's cell, which the shelf's and the carousel's cards draw too."""
+        fs = self.layout.fs
+        x, y, t, _t = box
+        if th:
+            _ui.icon_tile(cv, th, box)
+        if img is not None:
+            iw, ih = img.w, img.h
+            sc = max(1, (t - 8 * fs) // max(iw, ih, 1))
+            cv.spr(img, x + (t - iw * sc) // 2, y + (t - ih * sc) // 2, sc)
+        else:
+            self._blit_glyph(cv, _TYPE_GLYPH.get(kind, "app"), box,
+                             _TYPE_COLOR.get(kind, _TYPE_COLOR["app"]),
+                             max(1, (t - 12 * fs) // 12))
 
     def _card_frame(self, cv, rect, selected, ring=None):
         """The card's thin border, plus the selection focus ring (Section 5.2:
@@ -1286,14 +1298,10 @@ class Carousel(Launcher):
                 cv.blit565_resize(cover.pix, cover.w, cover.h, x, y, w, h)
             else:
                 cv.rect(x, y, w, h, th.get("dim", 0))
-                img = sheet_for(it) if sheet_for is not None else None
-                if img is not None:
-                    sc = max(1, (w * 5 // 8) // 16)
-                    cv.spr(img, x + (w - 16 * sc) // 2, y + (h - 16 * sc) // 2, sc)
-                else:
-                    self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"),
-                                     (x, y, w, h), _TYPE_COLOR.get(it["type"], 0),
-                                     max(1, (w * 5 // 8) // 12))
+                t = min(w, h) * 5 // 8
+                self._art_tile(cv, th, (x + (w - t) // 2, y + (h - t) // 2, t, t),
+                               sheet_for(it) if sheet_for is not None else None,
+                               it.get("type"))
         if centre and self.favorite_for is not None and not self.moving \
                 and it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES:
             _draw_star_badge(cv, NAMES, self._blit_glyph,
@@ -1453,17 +1461,7 @@ class IconHome(Launcher):
         x, y, w, _h = rect
         t = lay.tile
         box = (x, y, t, t)
-        _ui.icon_tile(cv, th, box)
-        img = self._icon_of(it, sheet_for)
-        if img is not None:
-            iw, ih = img.w, img.h
-            sc = max(1, (t - 8 * fs) // max(iw, ih, 1))
-            cv.spr(img, x + (t - iw * sc) // 2, y + (t - ih * sc) // 2, sc)
-        else:
-            gs = max(1, (t - 12 * fs) // 12)
-            kind = it.get("type")
-            self._blit_glyph(cv, _TYPE_GLYPH.get(kind, "app"), box,
-                             _TYPE_COLOR.get(kind, _TYPE_COLOR["app"]), gs)
+        self._art_tile(cv, th, box, self._icon_of(it, sheet_for), it.get("type"))
         if not selected:
             return
         color = th["focus"]
