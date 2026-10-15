@@ -20,11 +20,29 @@ typedef struct {
     int16_t slot[MOY_THEME_SPRITE_SLOTS];   // a sheet slot's palette index, -1 transparent
 } look_t;
 
+// One row of the live theme's button leaves: row 0 its `buttons`, a later
+// row an `app_buttons` app's (docs/look_2026-10.md step 10).
+typedef struct {
+    char app[MOY_THEME_MAPNAME_MAX + 1];
+    int32_t v[MOY_THEME_BTN_KINDS][MOY_THEME_BTN_LEAVES];
+} btn_row_t;
+
 typedef struct {
     look_t look[MOY_UI_LOOKS];
     moy_ui_shape_t shape;
+    btn_row_t btn[1 + MOY_THEME_APPBTN_CAP];
+    uint8_t n_btn;                  // rows in use, row 0 always
     uint32_t calls;                 // primitive entries: one per widget drawn
 } ui_t;
+
+static void btn_row_clear(btn_row_t *r) {
+    r->app[0] = 0;
+    for (int k = 0; k < MOY_THEME_BTN_KINDS; k++) {
+        for (int i = 0; i < MOY_THEME_BTN_LEAVES; i++) {
+            r->v[k][i] = MOY_THEME_NONE;
+        }
+    }
+}
 
 static ui_t *s_ui;
 
@@ -41,6 +59,8 @@ static ui_t *ui(void) {
             }
         }
         moy_ui_shape_clear(&u->shape);
+        btn_row_clear(&u->btn[0]);
+        u->n_btn = 1;
         s_ui = u;
     }
     return s_ui;
@@ -153,6 +173,28 @@ static int16_t resolve(const look_t *l, uint8_t spec) {
     return -1;
 }
 
+// A kind's own states (rest, hover, hot) whose (field, ink) misses the floor
+// take its first floor form that reads, or its last.
+static void floor_kind(look_t *l, int kind) {
+    static const uint8_t own[3] = {MOY_UI_REST, MOY_UI_HOVER, MOY_UI_HOT};
+    int nf = moy_ui_floor_n[kind];
+    for (int i = 0; nf > 0 && i < 3; i++) {
+        int16_t *c = l->flat[kind][own[i]];
+        if (c[0] < 0 || c[1] < 0 || moy_theme_reads(c[0], c[1])) {
+            continue;
+        }
+        for (int a = 0; a < nf; a++) {
+            int16_t f = resolve(l, moy_ui_floor_specs[kind][a][0]);
+            int16_t k = resolve(l, moy_ui_floor_specs[kind][a][1]);
+            if (a == nf - 1 || (f >= 0 && k >= 0 && moy_theme_reads(f, k))) {
+                c[0] = f;
+                c[1] = k;
+                break;
+            }
+        }
+    }
+}
+
 static void flatten(look_t *l, int kind) {
     const uint8_t (*specs)[3] = moy_ui_kind_specs[kind];
     for (int st = 0; st < MOY_UI_STATES; st++) {
@@ -164,6 +206,7 @@ static void flatten(look_t *l, int kind) {
             l->flat[kind][st][c] = resolve(l, tr[c]);
         }
     }
+    floor_kind(l, kind);
     l->have[kind] = 1;
 }
 
@@ -184,6 +227,142 @@ int moy_ui_colors(int look, int kind, int state, int16_t out[3]) {
         flatten(l, kind);
     }
     memcpy(out, l->flat[kind][state], 3 * sizeof(int16_t));
+    return MOY_UI_OK;
+}
+
+// -- button kinds (docs/look_2026-10.md step 10) ------------------------------------
+
+// The `button` fields' leaves, in style.json's theme.look.button order.
+enum { BL_FILL = 0, BL_INK, BL_BORDER_W, BL_BORDER_C, BL_SHAPE, BL_R, BL_FONT, BL_BEVEL };
+
+// The leaves a kind does not take from `normal` (DESIGN.md, "Button kinds"):
+// primary its fill, ink, border and font; tonal its ink and font; danger its
+// ink; toggle none.
+static const uint8_t k_own[MOY_THEME_BTN_KINDS] = {
+    0xff,
+    1 << BL_FILL | 1 << BL_INK | 1 << BL_BORDER_W | 1 << BL_BORDER_C | 1 << BL_FONT,
+    1 << BL_INK | 1 << BL_FONT,
+    1 << BL_INK,
+    0,
+};
+
+void moy_ui_buttons_clear(void) {
+    ui_t *u = ui();
+    if (u != NULL) {
+        btn_row_clear(&u->btn[0]);
+        u->n_btn = 1;
+    }
+}
+
+int moy_ui_buttons_app(const char *name, size_t n) {
+    ui_t *u = ui();
+    if (u == NULL || name == NULL) {
+        return -1;
+    }
+    for (int i = 1; i < u->n_btn; i++) {
+        if (strlen(u->btn[i].app) == n && memcmp(u->btn[i].app, name, n) == 0) {
+            return i - 1;
+        }
+    }
+    return -1;
+}
+
+int moy_ui_buttons_set(const char *app, size_t n, int bkind,
+                       const int32_t leaves[MOY_THEME_BTN_LEAVES]) {
+    ui_t *u = ui();
+    if (u == NULL) {
+        return MOY_UI_NOMEM;
+    }
+    if (bkind < 0 || bkind >= MOY_THEME_BTN_KINDS || (app != NULL && n > MOY_THEME_MAPNAME_MAX)) {
+        return MOY_UI_BAD;
+    }
+    btn_row_t *r = &u->btn[0];
+    if (app != NULL) {
+        int row = moy_ui_buttons_app(app, n);
+        if (row < 0) {
+            if (u->n_btn >= 1 + MOY_THEME_APPBTN_CAP) {
+                return MOY_UI_FULL;
+            }
+            r = &u->btn[u->n_btn++];
+            btn_row_clear(r);
+            memcpy(r->app, app, n);
+            r->app[n] = 0;
+        } else {
+            r = &u->btn[row + 1];
+        }
+    }
+    memcpy(r->v[bkind], leaves, sizeof(r->v[bkind]));
+    return MOY_UI_OK;
+}
+
+int moy_ui_button_of(int kind) {
+    for (int i = 0; i < MOY_UI_BUTTON_KINDS; i++) {
+        const char *k = moy_ui_button_kinds[i][1];
+        if (moy_ui_kind_known(k, strlen(k)) == kind) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Leaf `leaf` of button kind `bk` for app row `app`: the app's, then the
+// theme's, then, for a leaf the kind takes from `normal`, normal's the same way.
+static int32_t btn_leaf(const ui_t *u, int app, int bk, int leaf) {
+    for (int pass = 0; pass < 2; pass++) {
+        int k = pass ? 0 : bk;
+        if (pass && (k_own[bk] >> leaf & 1)) {
+            break;
+        }
+        if (app >= 0 && app + 1 < u->n_btn && u->btn[app + 1].v[k][leaf] != MOY_THEME_NONE) {
+            return u->btn[app + 1].v[k][leaf];
+        }
+        if (u->btn[0].v[k][leaf] != MOY_THEME_NONE) {
+            return u->btn[0].v[k][leaf];
+        }
+    }
+    return MOY_THEME_NONE;
+}
+
+static int16_t btn_colour(int32_t v) {
+    return v == MOY_THEME_OFF ? -1 : (int16_t)(v & 127);
+}
+
+static int8_t btn_small(int32_t v) {
+    return v == MOY_THEME_NONE || v == MOY_THEME_OFF ? -1 : (int8_t)(v > 127 ? 127 : v);
+}
+
+int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style_t *out) {
+    int rc = moy_ui_colors(look, kind, state, out->c);
+    out->edge_w = out->shape = out->r = out->font = out->bevel = -1;
+    ui_t *u = ui();
+    int bk = moy_ui_button_of(kind);
+    if (rc != MOY_UI_OK || u == NULL || bk < 0 || app == MOY_UI_NO_THEME) {
+        return rc;
+    }
+    int own = state == MOY_UI_REST || state == MOY_UI_HOVER || state == MOY_UI_HOT;
+    int32_t v = btn_leaf(u, app, bk, BL_FILL);
+    if (v != MOY_THEME_NONE && (own || state == MOY_UI_DISABLED)) {
+        out->c[0] = btn_colour(v);
+    }
+    v = btn_leaf(u, app, bk, BL_INK);
+    if (v != MOY_THEME_NONE && own) {
+        out->c[1] = btn_colour(v);
+    }
+    int32_t bw = btn_leaf(u, app, bk, BL_BORDER_W), bc = btn_leaf(u, app, bk, BL_BORDER_C);
+    if (state != MOY_UI_HOVER) {
+        if (bc == MOY_THEME_OFF || bw == 0 || bw == MOY_THEME_OFF) {
+            out->c[2] = -1;
+        } else if (bc != MOY_THEME_NONE) {
+            out->c[2] = btn_colour(bc);
+        }
+    }
+    if (bw != MOY_THEME_NONE && bw != MOY_THEME_OFF) {
+        out->edge_w = (int8_t)((bw + 50) / 100);
+    }
+    out->shape = btn_small(btn_leaf(u, app, bk, BL_SHAPE));
+    out->r = btn_small(btn_leaf(u, app, bk, BL_R));
+    out->font = btn_small(btn_leaf(u, app, bk, BL_FONT));
+    out->bevel = btn_small(btn_leaf(u, app, bk, BL_BEVEL));
     return MOY_UI_OK;
 }
 

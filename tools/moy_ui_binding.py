@@ -53,6 +53,11 @@ _SIGS = (
     ("moy_theme_custom", [_P, _Z, _I, _I, c.c_void_p, c.c_void_p, _Z, c.POINTER(_Z)], _I),
     ("moy_ui_look_set", [_I, c.c_void_p], _I),
     ("moy_ui_colors", [_I, _I, _I, c.POINTER(c.c_int16)], _I),
+    ("moy_ui_button_style", [_I, _I, _I, _I, c.c_void_p], _I),
+    ("moy_ui_buttons_set", [_P, _Z, _I, c.c_void_p], _I),
+    ("moy_ui_buttons_clear", [], None),
+    ("moy_ui_buttons_app", [_P, _Z], _I),
+    ("moy_theme_reads", [c.c_int32, c.c_int32], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
     ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
     ("moy_font_load", [_P, _Z, c.POINTER(c.c_uint32)], _I),
@@ -162,7 +167,13 @@ class _Cell(c.Structure):
 
 
 class _Button(c.Structure):
-    _fields_ = [("label", _Span), ("glyph", _I16), ("fs", _I16), ("colors", _I16 * 3)]
+    _fields_ = [("label", _Span), ("glyph", _I16), ("fs", _I16), ("colors", _I16 * 3),
+                ("app", _I16)]
+
+
+class _BtnStyle(c.Structure):
+    _fields_ = [("c", _I16 * 3), ("edge_w", c.c_int8), ("shape", c.c_int8),
+                ("r", c.c_int8), ("font", c.c_int8), ("bevel", c.c_int8)]
 
 
 _R4 = c.c_int32 * 4
@@ -289,6 +300,22 @@ def binding():
         out = _I16x3()
         _check(lib.moy_ui_colors(int(look_), int(kind_), int(state), out))
         return tuple(None if v < 0 else v for v in out)
+
+    def button_style(look_, kind_, state, app):
+        bs = _BtnStyle()
+        _check(lib.moy_ui_button_style(int(look_), int(kind_), int(state), int(app),
+                                       c.byref(bs)))
+        return tuple(None if v < 0 else v for v in bs.c) + (
+            bs.edge_w, bs.shape, bs.r, bs.font, bs.bevel)
+
+    def buttons_set(app, kind_, leaves):
+        b = None if app is None else _b(app)
+        arr = (c.c_int32 * len(leaves))(*[int(v) for v in leaves])
+        _check(lib.moy_ui_buttons_set(b, 0 if b is None else len(b), int(kind_), arr))
+
+    def buttons_app(name):
+        b = _b(name)
+        return lib.moy_ui_buttons_app(b, len(b))
 
     def metrics(name):
         b = _b(name)
@@ -444,16 +471,16 @@ def binding():
         _check(lib.moy_ui_list(c.byref(s), box_of(rect), int(kind), b, len(b), int(count),
                                int(row_h), int(offset), int(sel), s.fs, int(bar_w)))
 
-    def _btn(label, glyph_, fs, colors=None):
+    def _btn(label, glyph_, fs, colors=None, app=-1):
         k = _Button()
         k.label, keep = span(label)
-        k.glyph, k.fs = int(glyph_), int(fs)
+        k.glyph, k.fs, k.app = int(glyph_), int(fs), int(app)
         colors3(colors, k.colors)
         return k, keep
 
-    def button(cv, look, rect, kind, flags, interact, label, glyph_, phase):
+    def button(cv, look, rect, kind, flags, interact, label, glyph_, phase, app):
         s = sink(cv, look)
-        k, keep = _btn(label, glyph_, s.fs)
+        k, keep = _btn(label, glyph_, s.fs, app=app)
         _check(lib.moy_ui_button(c.byref(s), box_of(rect), int(kind), int(flags),
                                  int(interact), c.byref(k), int(phase)))
 
@@ -704,6 +731,11 @@ def binding():
     m.metric_kinds = lambda: tuple(k for k in kinds if metrics(k) is not None)
     m.kind = kind
     m.button_kind = button_kind
+    m.button_style = button_style
+    m.buttons_set = buttons_set
+    m.buttons_clear = lib.moy_ui_buttons_clear
+    m.buttons_app = buttons_app
+    m.theme_reads = lambda a, b: bool(lib.moy_theme_reads(int(a), int(b)))
     seeds = _names(lib, "moy_theme_seed_names", c.c_int.in_dll(lib, "moy_ui_n_themes").value)
     m.themes = lambda: seeds
     n_roles = c.c_int.in_dll(lib, "moy_theme_n_roles").value

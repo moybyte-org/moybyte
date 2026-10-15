@@ -356,7 +356,7 @@ frozen on 2026-10-12 with the first package key that names parts
 (`surfaces`). It is the kinds of `native/moy_ui/style.json`'s `kinds` and
 `metrics`, in the tables' order: `row`, `cell`, `cell_band`, `chip`,
 `toggle`, `row_menu`, `row_list`, `row_chrome`, `row_cta`, `button`,
-`button_play`, `button_author`, `button_danger`, `tab`, `status`, `panel`,
+`button_primary`, `button_tonal`, `button_danger`, `tab`, `status`, `panel`,
 `panel_title`, `toolbar`, `scrollbar`, `focus`, `text_field`, `game_btn`,
 `game_icon_btn`, `mini_btn`, `dialog`; then the chrome the WMs and the bar
 draw, style.json's `theme.parts`: `window`, `window.title`, `window.button`,
@@ -918,8 +918,9 @@ Per variant, with B the source's row and R the result, R starting as B:
    for a surface of that side (the `light` set where black beats white on
    R's `surface`, the `dark` set else) if that clears, else R's `ink`.
    `block_*`, `play`, `author` and `danger` keep B's: they are meanings, not
-   looks, and the kinds paint their labels in literal inks they already
-   clear.
+   looks. A button kind that inks `danger` or `value` on its field holds the
+   pair to the floor itself, through its floor forms (style.json's `floors`,
+   docs/look_2026-10.md step 10).
 
 The flags keep B's. NONE with the source's own accent answers B but for a
 dim ink or a content colour B itself leaves under the floor, which steps 4

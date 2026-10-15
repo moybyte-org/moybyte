@@ -243,6 +243,8 @@ int moy_theme_look_frames(const char *name, size_t n);
 // reads the live block (moy_theme_block_use).
 uint16_t moy_theme_rgb565(int32_t v);
 int32_t moy_theme_lum_of(int32_t v);
+// The loader's predicate: (a, b) reaches the contrast floor (MOY_THEME_CONTRAST).
+int moy_theme_reads(int32_t a, int32_t b);
 int32_t moy_theme_nearest(int32_t v);
 // Place `n` colour values into a block: an index stays, an RGB value takes
 // the slot of its RGB565 word (64 + its place in `block`, a new word the next

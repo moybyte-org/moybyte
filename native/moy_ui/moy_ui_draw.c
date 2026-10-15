@@ -729,24 +729,35 @@ int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs) {
     return b.x + button_off(b, iw, t_w(&f, label.p, (size_t)ln, fs), fs);
 }
 
+// A button's body where the theme gives its part no surface: the field and
+// its rings, square. The kind's shape, radius and bevel (bs) are resolved
+// and not drawn here. *on gets the field under the text, *ring the rings.
+static void button_body(draw_t *d, moy_ui_box_t b, const moy_ui_btn_style_t *bs, int *on,
+                        int *ring) {
+    int bg = bs->c[0], edge = bs->c[2];
+    if (bg >= 0) {
+        fill(d, b.x, b.y, b.w, b.h, bg);
+        *on = bg;
+    }
+    int n = bs->edge_w >= 0 ? bs->edge_w : metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
+    if (n > 0 && edge >= 0) {
+        rings(d, b.x, b.y, b.w, b.h, edge, n);
+        *ring = n;
+    }
+}
+
 int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
                   const moy_ui_button_t *k, int phase) {
     draw_t d;
     open_draw(s, &d);
     int fs = k->fs, x = b.x, y = b.y, w = b.w, h = b.h;
-    int16_t c[3];
     int state = moy_ui_state_of(flags & ~MOY_UI_F_HOT, interact);
-    colours(&d, kind, state, NULL, c);
-    int bg = c[0], ink = c[1], edge = c[2];
+    moy_ui_btn_style_t bs;
+    moy_ui_button_style(d.look, kind, state, d.run ? MOY_UI_NO_THEME : k->app, &bs);
+    int bg = bs.c[0], ink = bs.c[1], edge = bs.c[2];
     int on = -1, ring = 0;      // the field this call filled under the text, its rings
     if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, bg, edge)) {
-        fill(&d, x, y, w, h, bg);
-        on = bg;
-        int n = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
-        if (n > 0) {
-            rings(&d, x, y, w, h, edge, n);
-            ring = n;
-        }
+        button_body(&d, b, &bs, &on, &ring);
     }
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;

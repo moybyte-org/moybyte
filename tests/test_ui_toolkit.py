@@ -72,13 +72,15 @@ def _cv(w=320, h=120, fs=1):
 
 def test_button_kinds_paint_their_tokens():
     cv = _cv()
-    ui.button(cv, TH, (10, 10, 80, 20), "PLAY", kind="play")
-    assert cv.pix(12, 12) == TH["play"]
-    assert cv.pix(10, 10) == 0                         # dark edge
+    ui.button(cv, TH, (10, 10, 80, 20), "PLAY", kind="primary")
+    assert cv.pix(12, 12) == TH["value"]
+    assert cv.pix(10, 10) == TH["value"]               # no border
     ui.button(cv, TH, (10, 50, 80, 20), "CHANGE", kind="normal")
     assert cv.pix(12, 52) == TH["surface"]
+    assert cv.pix(10, 50) == 0                         # dark edge
     ui.button(cv, TH, (10, 80, 80, 20), "DEL", kind="danger")
-    assert cv.pix(12, 82) == TH["danger"]
+    assert cv.pix(12, 82) == TH["surface"]
+    assert TH["danger"] in [cv.pix(x, y) for x in range(10, 90) for y in range(80, 100)]
     ui.button(cv, TH, (110, 10, 80, 20), "ON", on=True)
     assert cv.pix(112, 12) == TH["accent"]
 

@@ -813,14 +813,14 @@ class SettingsLayer:
             prefix = "ONLINE " if connected else ("SAVED " if preferred else "")
             tail = "  %d" % int(rssi) if int(rssi) > -127 else ""
             _ui.button(cv, th, rect, prefix + str(dev_name) + tail,
-                       kind="play" if connected else "normal", on=preferred)
+                       kind="tonal" if connected else "normal", on=preferred)
             self._bt_hits.add(rect, "device", address)
             if i == self.bt_sel:
                 _ui.focus_ring(cv, th, rect, fs)
 
         action_defs = (("toggle", "OFF" if enabled else "ON", "normal"),
-                       ("connect", "USE", "play"),
-                       ("scan", "SCAN", "author"),
+                       ("connect", "USE", "primary"),
+                       ("scan", "SCAN", "tonal"),
                        ("forget", "FORGET", "danger"),
                        ("back", "BACK", "normal"))
         rects = _ui.hsplit(_ui.inset(actions_r, 3 * fs), len(action_defs), 3 * fs)

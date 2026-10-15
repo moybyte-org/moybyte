@@ -211,8 +211,16 @@ _ROW_CTA_STATES = {REST: (_HILITE, _BLACK, _DIM), HOVER: (_HILITE, _BLACK, _HOVE
 
 def _button_states(bg, ink):
     return {REST: (bg, ink, _SHADE_DARK), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, _SHADE_DARK), HOT: (bg, ink, _SHADE_DARK), PRESSED: (_PRESS, _PRESS_INK, _SHADE_DARK), DISABLED: (bg, _DIS_INK, _SHADE_DARK)}
-_BUTTON_KIND_KEY = {'normal': 'button', 'play': 'button_play', 'author': 'button_author', 'danger': 'button_danger'}
-DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_play': _button_states(('play', _WHITE), _WHITE), 'button_author': _button_states(('author', _WHITE), _BLACK), 'button_danger': _button_states(('danger', _WHITE), _WHITE), 'tab': {ON: (_SELECTION, _SEL_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, _TITLE_INK, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
+_BUTTON_KIND_KEY = {'normal': 'button', 'primary': 'button_primary', 'tonal': 'button_tonal', 'danger': 'button_danger', 'toggle': 'cell'}
+_VALUE = ('value', 13)
+
+def _primary_states():
+    bg, ink = _VALUE, ('value_ink', _WHITE)
+    return {REST: (bg, ink, None), HOVER: (bg, ink, _HOVER_CUE), ON: (_ACCENT, _BLACK, None), HOT: (bg, ink, None), PRESSED: (_PRESS, _PRESS_INK, None), DISABLED: (bg, _DIS_INK, None)}
+# Edited with the 2026-10 look's step 10 (button kinds): the kinds' own
+# states whose (field, ink) misses the contrast floor take these forms.
+FLOORS = {'button_tonal': ((('surface', _WHITE), ('ink', _BLACK)),), 'button_danger': ((('danger', 8), _WHITE), (('danger', 8), _BLACK))}
+DEFAULT_SPECS = {'row': _ROW_STATES, 'cell': _ROW_STATES, 'cell_band': _CELL_BAND_STATES, 'chip': _CHIP_STATES, 'row_menu': _chrome_row_states(_CHROME_DIM), 'row_list': _chrome_row_states(_INK_DIM), 'row_chrome': _ROW_CHROME_STATES, 'row_cta': _ROW_CTA_STATES, 'button': _button_states(('surface', _WHITE), ('ink', _BLACK)), 'button_primary': _primary_states(), 'button_tonal': _button_states(('surface', _WHITE), _VALUE), 'button_danger': _button_states(('surface', _WHITE), ('danger', 8)), 'tab': {ON: (_SELECTION, _SEL_INK, None), REST: (None, _WHITE, None)}, 'status': {REST: (('surface_alt', 'panel', 60), _INK_DIM, _BORDER)}, 'panel': {REST: (_SURFACE, None, _BORDER)}, 'panel_title': {REST: (_TITLE, _TITLE_INK, None)}, 'toolbar': {REST: (_TITLE, _TITLE_INK, None)}, 'scrollbar': {REST: (_DIM, _INK_DIM, None)}, 'focus': {REST: (None, None, ('focus', 10))}}
 # Edited with theming phase 4 step 2 (docs/theming_2026-09.md §4.3): the
 # mini_btn and chip quirks' rulings, re-ruled; the pixels they describe are
 # the same.
@@ -269,8 +277,26 @@ def _flatten_kind(th, kind):
     for state in src:
         spec = src[state]
         out[state] = (_token(th, spec[0]), _token(th, spec[1]), _token(th, spec[2]))
+    forms = FLOORS.get(kind, ())
+    for state in (REST, HOVER, HOT):
+        got = out.get(state)
+        if not forms or got is None or got[0] is None or got[1] is None or _reads(got[0], got[1]):
+            continue
+        for i, (f, k) in enumerate(forms):
+            f, k = _token(th, f), _token(th, k)
+            if i == len(forms) - 1 or (f is not None and k is not None and _reads(f, k)):
+                out[state] = (f, k, got[2])
+                break
     _FLAT[kind] = out
     return out
+
+def _reads(a, b):
+    import moy_ui
+    return moy_ui.theme_reads(_colour(a), _colour(b))
+
+def _colour(v):
+    import moy_ui
+    return v if v < 128 else moy_ui.theme_rgb(v)[2]
 
 def _state_colors_slow(th, kind, state):
     ent = _FLAT.get(kind)
@@ -399,7 +425,7 @@ def button(cv, th, rect, label, kind='normal', on=False, icon_img=None, glyph=No
     m = _METRICS['button']
     cv.rect(x, y, w, h, bg)
     n = m[BTN_EDGE]
-    if n > 0:
+    if n > 0 and edge is not None:
         cv.rectb(x, y, w, h, edge)
         i = 1
         while i < n:

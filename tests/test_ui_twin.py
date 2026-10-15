@@ -92,7 +92,7 @@ def _case(r):
         "state": r.choice(STATE_ARGS), "kind": r.choice(
             ("row", "row_menu", "row_list", "row_chrome", "row_cta", "cell",
              "chip", "nosuchkind")),
-        "bkind": r.choice(("normal", "play", "author", "danger", "nosuch")),
+        "bkind": r.choice(("normal", "primary", "tonal", "danger", "toggle")),
         "icon": r.random() < 0.25, "glyph": r.random() < 0.25,
         "n": r.randint(0, 4), "int": r.randint(-3, 9), "flag": r.random() < 0.5,
         "pad": r.choice((None, 0, 4, 6)), "dy": r.choice((None, 0, 5)),
@@ -284,7 +284,7 @@ def test_the_toolkit_draws_what_the_twin_drew(widget):
 # --- the op budgets -----------------------------------------------------------
 
 def _b_button(m, cv, th):
-    m.button(cv, th, (8, 14, 90, 22), "PLAY", kind="play")
+    m.button(cv, th, (8, 14, 90, 22), "PLAY", kind="normal")
 
 
 def _b_button_icon(m, cv, th):

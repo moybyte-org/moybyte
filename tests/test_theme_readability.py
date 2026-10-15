@@ -105,6 +105,32 @@ def test_every_seed_reads_every_kind(seed, variant):
     assert not bad
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed", TH["seeds"])
+def test_every_seed_reads_every_button_kind(seed, variant):
+    """Each button kind's ink on its field, in every state but disabled,
+    through the live placement and the seed's own button leaves
+    (docs/look_2026-10.md step 10): a derived ink that misses the floor took
+    its kind's floor form, and no seed's `buttons` reads under it."""
+    live = live_colors(seed, variant)
+    ui._C.theme_block(live.block, live.used)
+    ui.use_buttons(live)
+    th = live.tokens
+    look = ui._look(th)
+    bad = []
+    try:
+        for kind in ui.BUTTON_KINDS:
+            kid = ui._kind_id(ui._button_kind(kind))
+            for st in STATES.values():
+                field, ink = ui._C.button_style(look, kid, ui._STATE_ID[st], -1)[:2]
+                if field is not None and ink is not None and not _clears(field, ink):
+                    bad.append((kind, st, field, ink))
+        assert ui.button_unreadable(th) == []
+    finally:
+        ui.use_buttons(None)
+    assert not bad
+
+
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
     real frame: a titled frame against the same frame untitled."""

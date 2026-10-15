@@ -47,6 +47,36 @@ int moy_ui_state(const char *name, size_t n);
 int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]);
 // (field, ink, edge) of `kind` in `state` under `look`, -1 for nothing.
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
+// A kind's own states (rest, hover, hot) whose (field, ink) misses the
+// contrast floor take its floor forms (style.json's "floors"), in order.
+
+// -- button kinds (docs/look_2026-10.md step 10) -------------------------------------
+//
+// `button(kind=...)`'s names are style.json's button_kinds, each drawn as a
+// style kind. The live theme's `buttons[kind]` and `app_buttons[app][kind]`
+// (MOY_THEME_BTN_LEAVES each, a colour placed in the live block, MOY_THEME_NONE
+// where silent) restyle them: an app's leaf, then the theme's, then, for a
+// leaf the kind takes from `normal` (DESIGN.md), normal's the same way, then
+// the style's. `app` NULL sets the theme's row.
+void moy_ui_buttons_clear(void);
+int moy_ui_buttons_set(const char *app, size_t n, int bkind,
+                       const int32_t leaves[MOY_THEME_BTN_LEAVES]);
+// The row of app `name`'s overrides, or -1 where the theme has none for it.
+int moy_ui_buttons_app(const char *name, size_t n);
+// The button kind (an index of moy_ui_button_kinds) style kind `kind` is, or -1.
+int moy_ui_button_of(int kind);
+// A button's resolved style in `state` for app row `app` (-1 none,
+// MOY_UI_NO_THEME the style alone: a compiled run, whose colours are MOY64): its
+// (field, ink, edge), -1 for nothing; the ring width in pixels, the shape (an
+// index of the field's enum), the radius, the font (key, op) and the bevel,
+// -1 where silent (the style's).
+#define MOY_UI_NO_THEME (-2)
+typedef struct {
+    int16_t c[3];
+    int8_t edge_w, shape, r, font, bevel;
+} moy_ui_btn_style_t;
+int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style_t *out);
+
 // The metric slots of `kind` (its count in *n, 0: none).
 const int16_t *moy_ui_metrics(int kind, int *n);
 
@@ -308,6 +338,7 @@ typedef struct {
     int16_t glyph;                  // its id, or -1 (with F_GLYPH: a slot the caller fills)
     int16_t fs;
     int16_t colors[3];              // chip's override; button reads its kind's
+    int16_t app;                    // button: its app's row of overrides, or -1
 } moy_ui_button_t;
 // A button: the field, its rings, the icon or glyph, the label (centred by
 // the style). button_x: where its icon or glyph lands, for a caller's own.

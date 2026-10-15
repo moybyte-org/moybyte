@@ -889,6 +889,59 @@ static mp_obj_t ui_colors(mp_obj_t look, mp_obj_t kind, mp_obj_t state) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_colors_obj, ui_colors);
 
+// button_style(look, kind, state, app) -> (field, ink, edge, edge_w, shape, r,
+// font, bevel): moy_ui_button_style, a colour None for nothing, a number -1
+// where silent.
+static mp_obj_t ui_button_style(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_btn_style_t bs;
+    check(moy_ui_button_style(mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                              mp_obj_get_int(a[3]), &bs));
+    mp_obj_t t[8] = {colour(bs.c[0]), colour(bs.c[1]), colour(bs.c[2]),
+                     MP_OBJ_NEW_SMALL_INT(bs.edge_w), MP_OBJ_NEW_SMALL_INT(bs.shape),
+                     MP_OBJ_NEW_SMALL_INT(bs.r), MP_OBJ_NEW_SMALL_INT(bs.font),
+                     MP_OBJ_NEW_SMALL_INT(bs.bevel)};
+    return mp_obj_new_tuple(8, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_button_style_obj, 4, 4, ui_button_style);
+
+// buttons_set(app or None, kind index, leaves): one row of the live theme's
+// button leaves (moy_ui_buttons_set); buttons_clear() drops them all;
+// buttons_app(name) -> the app's row, or -1.
+static mp_obj_t ui_buttons_set(mp_obj_t app, mp_obj_t kind, mp_obj_t leaves) {
+    int32_t v[MOY_THEME_BTN_LEAVES];
+    size_t n = 0;
+    mp_obj_t *items;
+    mp_obj_get_array_fixed_n(leaves, MOY_THEME_BTN_LEAVES, &items);
+    for (int i = 0; i < MOY_THEME_BTN_LEAVES; i++) {
+        v[i] = (int32_t)mp_obj_get_int_truncated(items[i]);
+    }
+    const char *s = app == mp_const_none ? NULL : mp_obj_str_get_data(app, &n);
+    check(moy_ui_buttons_set(s, n, mp_obj_get_int(kind), v));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_buttons_set_obj, ui_buttons_set);
+
+static mp_obj_t ui_buttons_clear(void) {
+    moy_ui_buttons_clear();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_buttons_clear_obj, ui_buttons_clear);
+
+static mp_obj_t ui_buttons_app(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_buttons_app(s, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_buttons_app_obj, ui_buttons_app);
+
+// theme_reads(a, b): the two colours reach the contrast floor.
+static mp_obj_t ui_theme_reads(mp_obj_t a, mp_obj_t b) {
+    return mp_obj_new_bool(moy_theme_reads((int32_t)mp_obj_get_int_truncated(a),
+                                           (int32_t)mp_obj_get_int_truncated(b)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_reads_obj, ui_theme_reads);
+
 // metrics(kind) -> the tuple for a kind's name, or None.
 static mp_obj_t ui_metrics(mp_obj_t name) {
     size_t n;
@@ -1306,7 +1359,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_list_obj, 10, 10, ui_list);
 
 // -- buttons and frames --------------------------------------------------------------------
 
-// button(cv, look, rect, kind, flags, interact, label, glyph, phase)
+// button(cv, look, rect, kind, flags, interact, label, glyph, phase, app)
 static mp_obj_t ui_button(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
@@ -1316,11 +1369,12 @@ static mp_obj_t ui_button(size_t n_args, const mp_obj_t *a) {
     k.glyph = i16(a[7]);
     k.fs = s.fs;
     k.colors[0] = k.colors[1] = k.colors[2] = MOY_UI_FROM_STYLE;
+    k.app = i16(a[9]);
     check(moy_ui_button(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
                         mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[8])));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_button_obj, 9, 9, ui_button);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_button_obj, 10, 10, ui_button);
 
 // button_x(rect, flags, label, fs): where its icon or glyph lands
 static mp_obj_t ui_button_x(size_t n_args, const mp_obj_t *a) {
@@ -1340,6 +1394,7 @@ static mp_obj_t ui_chip(size_t n_args, const mp_obj_t *a) {
     k.glyph = i16(a[7]);
     k.fs = (int16_t)fs_or(a[8], &s);
     colors3(a[9], k.colors);
+    k.app = -1;
     check(moy_ui_chip(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
                       mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[10])));
     return mp_const_none;
@@ -1863,6 +1918,11 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_font), MP_ROM_PTR(&ui_font_obj) },
     { MP_ROM_QSTR(MP_QSTR_look), MP_ROM_PTR(&ui_look_obj) },
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&ui_colors_obj) },
+    { MP_ROM_QSTR(MP_QSTR_button_style), MP_ROM_PTR(&ui_button_style_obj) },
+    { MP_ROM_QSTR(MP_QSTR_buttons_set), MP_ROM_PTR(&ui_buttons_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_buttons_clear), MP_ROM_PTR(&ui_buttons_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_buttons_app), MP_ROM_PTR(&ui_buttons_app_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_reads), MP_ROM_PTR(&ui_theme_reads_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_width), MP_ROM_PTR(&ui_text_width_obj) },
     { MP_ROM_QSTR(MP_QSTR_wrap), MP_ROM_PTR(&ui_wrap_obj) },

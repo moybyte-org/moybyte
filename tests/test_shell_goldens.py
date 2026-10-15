@@ -898,7 +898,13 @@ def _hits_peak(monkeypatch):
 def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
                                      monkeypatch):
     peak = _hits_peak(monkeypatch)
+    from runtime import ui
+    del ui.primary_warnings[:]
+    ui._PRIMARY_WARNED.clear()
     got = capture(config_name, tmp_path / "carts")
+    assert ui.primary_warnings == [], (
+        "a surface draws more than one primary button in a frame (DESIGN.md, "
+        "'Button kinds'): %r" % ui.primary_warnings)
     cap = json.loads((ROOT / "native" / "moy_ui" / "style.json").read_text())[
         "hits_capacity"]
     # (a `plan` config's few surfaces need not register any)

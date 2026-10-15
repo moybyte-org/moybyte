@@ -150,12 +150,12 @@ class CalcAppLayer:
                 rect = lay.keys[r][c]
                 kind = "normal"
                 if label == "=":
-                    kind = "play"
+                    kind = "primary"
                 elif label == "C":
                     kind = "danger"
                 elif label in "+-*/":
-                    kind = "author"
-                _ui.button(cv, th, rect, label, kind=kind)
+                    kind = "tonal"
+                _ui.button(cv, th, rect, label, kind=kind, app=self.id)
                 self.hits.add(rect, "key", label)
 
     # -- input -----------------------------------------------------------------

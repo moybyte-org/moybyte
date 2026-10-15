@@ -1,5 +1,5 @@
 {
-  "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the quirks that stay code, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
+  "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the button kinds (button(kind=...)'s names, the theme model's, each the kind it draws as), each kind's floor forms ((field, ink) specs its rest, hover and hot take, in order, where their own pair misses the contrast floor; the last when none reads), the quirks that stay code, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
   "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note", "band_light", "value", "value_ink", "sunk", "lcd", "lcd_ink"],
   "states": ["disabled", "pressed", "hot", "on", "hover", "rest"],
   "aliases": {
@@ -12,9 +12,14 @@
   },
   "button_kinds": {
     "normal": "button",
-    "play": "button_play",
-    "author": "button_author",
-    "danger": "button_danger"
+    "primary": "button_primary",
+    "tonal": "button_tonal",
+    "danger": "button_danger",
+    "toggle": "cell"
+  },
+  "floors": {
+    "button_tonal": [[["surface", 7], ["ink", 0]]],
+    "button_danger": [[["danger", 8], 7], [["danger", 8], 0]]
   },
   "kinds": {
     "row": {
@@ -97,29 +102,29 @@
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
       "disabled": [["surface", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
-    "button_play": {
-      "rest": [["play", 7], 7, ["shade_dark", 0]],
-      "hover": [["play", 7], 7, ["hover_cue", "accent", 10]],
-      "on": [["accent", 10], 0, ["shade_dark", 0]],
-      "hot": [["play", 7], 7, ["shade_dark", 0]],
-      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
-      "disabled": [["play", 7], ["disabled_ink", 6], ["shade_dark", 0]]
+    "button_primary": {
+      "rest": [["value", 13], ["value_ink", 7], null],
+      "hover": [["value", 13], ["value_ink", 7], ["hover_cue", "accent", 10]],
+      "on": [["accent", 10], 0, null],
+      "hot": [["value", 13], ["value_ink", 7], null],
+      "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], null],
+      "disabled": [["value", 13], ["disabled_ink", 6], null]
     },
-    "button_author": {
-      "rest": [["author", 7], 0, ["shade_dark", 0]],
-      "hover": [["author", 7], 0, ["hover_cue", "accent", 10]],
+    "button_tonal": {
+      "rest": [["surface", 7], ["value", 13], ["shade_dark", 0]],
+      "hover": [["surface", 7], ["value", 13], ["hover_cue", "accent", 10]],
       "on": [["accent", 10], 0, ["shade_dark", 0]],
-      "hot": [["author", 7], 0, ["shade_dark", 0]],
+      "hot": [["surface", 7], ["value", 13], ["shade_dark", 0]],
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
-      "disabled": [["author", 7], ["disabled_ink", 6], ["shade_dark", 0]]
+      "disabled": [["surface", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
     "button_danger": {
-      "rest": [["danger", 7], 7, ["shade_dark", 0]],
-      "hover": [["danger", 7], 7, ["hover_cue", "accent", 10]],
+      "rest": [["surface", 7], ["danger", 8], ["shade_dark", 0]],
+      "hover": [["surface", 7], ["danger", 8], ["hover_cue", "accent", 10]],
       "on": [["accent", 10], 0, ["shade_dark", 0]],
-      "hot": [["danger", 7], 7, ["shade_dark", 0]],
+      "hot": [["surface", 7], ["danger", 8], ["shade_dark", 0]],
       "pressed": [["pressed", "hilite", 13], ["pressed_ink", 7], ["shade_dark", 0]],
-      "disabled": [["danger", 7], ["disabled_ink", 6], ["shade_dark", 0]]
+      "disabled": [["surface", 7], ["disabled_ink", 6], ["shade_dark", 0]]
     },
     "tab": {
       "rest": [null, 7, null],

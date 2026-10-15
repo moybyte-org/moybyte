@@ -45,8 +45,8 @@ STYLE = json.loads(ROOT.joinpath("native", "moy_ui", "style.json").read_text())
 def test_the_default_tables_cover_every_kind_the_toolkit_asks_for():
     """A kind a widget looks up but the style does not name would silently
     style as a row. Enumerated from the draw functions themselves."""
-    asked = ("row", "cell", "cell_band", "chip", "button", "button_play",
-             "button_author", "button_danger", "tab", "status", "panel",
+    asked = ("row", "cell", "cell_band", "chip", "button", "button_primary",
+             "button_tonal", "button_danger", "tab", "status", "panel",
              "panel_title", "toolbar", "scrollbar", "focus",
              # the shell's own row kinds, asked for through `row(kind=...)`
              "row_menu", "row_list", "row_chrome", "row_cta")
@@ -149,7 +149,7 @@ def _draw_many(cv, th, n=100):
         ui.row(cv, th, (0, 0, 200, 16), "Row", state=state, value="v")
         ui.cell(cv, th, (0, 20, 60, 60), "C", state=state)
         ui.chip(cv, th, (0, 90, 60, 18), "Chip", on=(i % 2 == 0))
-        ui.button(cv, th, (0, 110, 90, 20), "Go", kind="play")
+        ui.button(cv, th, (0, 110, 90, 20), "Go", kind="primary")
         ui.panel(cv, th, (0, 140, 80, 60), title="T")
         ui.status_row(cv, th, (0, 210, 200, 14), ("a", "b"))
 

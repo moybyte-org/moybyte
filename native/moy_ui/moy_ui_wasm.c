@@ -127,6 +127,7 @@ int32_t moy_ui_wasm_button(void *e, int32_t x, int32_t y, int32_t w, int32_t h, 
     k.glyph = (int16_t)glyph;
     k.fs = r.s.fs;
     k.colors[0] = k.colors[1] = k.colors[2] = MOY_UI_FROM_STYLE;
+    k.app = -1;
     // The app's flags are the state's (ON, HOT, DISABLED); a glyph is its id.
     flags &= MOY_UI_F_ON | MOY_UI_F_HOT | MOY_UI_F_DISABLED;
     if (glyph >= 0) {

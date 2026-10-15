@@ -957,10 +957,44 @@ class Live:
     step 5): `tokens` and `content` with each RGB role placed in the block
     (`block`, `used` of its 64 RGB565 words, indices 64..), `near` each
     token's nearest MOY64 index (what theme(), a compiled app and a cart
-    canvas are given), and `look` the look's leaves with its colours placed
-    in the same block."""
+    canvas are given), `look` the look's leaves with its colours placed in
+    the same block, and `buttons` its button leaves as `ui.use_buttons`
+    installs them: (app or None, kind, leaves), a paint fill its first stop's
+    colour, every colour placed."""
 
-    __slots__ = ("tokens", "content", "near", "block", "used", "look")
+    __slots__ = ("tokens", "content", "near", "block", "used", "look", "buttons")
+
+
+_PAINT, _VIBRANCY = 0x2000000, 0x3000000
+_NONE = -2147483648
+
+
+def _button_rows(look, names, kinds, btn):
+    """The look's button leaves, (app or None, kind, [leaves]), and the
+    (row, leaf) of each colour among them: the theme's kinds, then its
+    app_buttons."""
+    leaves, paints = look[0], look[1]
+    at = {n: i for i, n in enumerate(names)}
+    order = []
+    for n in names:
+        if n.startswith("buttons.") and n.split(".")[1] not in order:
+            order.append(n.split(".")[1])
+    rows = [(None, k, [leaves[at["buttons.%s.%s" % (k, f)]] for f in btn]) for k in order]
+    rows += [(app, k, list(vals)) for app, k, vals in look[3]]
+    colourish = [j for j, f in enumerate(btn)
+                 if kinds[at["buttons.normal." + f]] in ("colour", "paint")]
+    spots = []
+    for r, (_app, _k, vals) in enumerate(rows):
+        for j in colourish:
+            v = vals[j]
+            if _PAINT <= v < _VIBRANCY:
+                p = paints[v - _PAINT] if v - _PAINT < len(paints) else None
+                v = vals[j] = p[2][0][1] if p and p[2] else _NONE
+            elif v >= _VIBRANCY:
+                v = vals[j] = _NONE
+            if v >= 0:
+                spots.append((r, j))
+    return rows, spots
 
 
 def live_colors(name, variant=DEFAULT_VARIANT):
@@ -977,11 +1011,12 @@ def live_colors(name, variant=DEFAULT_VARIANT):
     light = variant == "light"
     row = _row(name, light)
     look = _look_raw(name, light)
-    names, kinds, _btn = look_fields()
+    names, kinds, btn = look_fields()
     leaves = look[0]
     at = [i for i in range(len(leaves)) if kinds[i] == "colour"]
+    rows, spots = _button_rows(look, names, kinds, btn)
     placed, near, block, used = _ui._C.theme_place(
-        list(row) + [leaves[i] for i in at])
+        list(row) + [leaves[i] for i in at] + [rows[r][2][j] for r, j in spots])
     toks = _ui._C.tokens()
     roles = _ui._C.theme_roles()
     rec = Live()
@@ -999,6 +1034,10 @@ def live_colors(name, variant=DEFAULT_VARIANT):
     for k, i in enumerate(at):
         lv[i] = placed[len(row) + k]
     rec.look = (dict(zip(names, lv)),) + tuple(look[1:5])
+    base = len(row) + len(at)
+    for k, (r, j) in enumerate(spots):
+        rows[r][2][j] = placed[base + k]
+    rec.buttons = rows
     rec.block, rec.used = block, used
     _LIVE_CACHE[key] = rec
     return rec

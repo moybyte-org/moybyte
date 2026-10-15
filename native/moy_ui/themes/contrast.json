@@ -26,8 +26,8 @@
   },
   "surfaces": {
     "button": { "rest": "border", "pressed": "border" },
-    "button_play": { "rest": "border", "pressed": "border" },
-    "button_author": { "rest": "border", "pressed": "border" },
+    "button_primary": { "rest": "border", "pressed": "border" },
+    "button_tonal": { "rest": "border", "pressed": "border" },
     "button_danger": { "rest": "border", "pressed": "border" },
     "chip": { "rest": "border" },
     "tab": { "rest": "border" },

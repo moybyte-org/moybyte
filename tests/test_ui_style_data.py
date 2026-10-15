@@ -176,3 +176,238 @@ def test_each_entry_keeps_its_conversions_in_order():
     for sid, text in _strings().items():
         convs = CONVERSION.findall(text)
         assert all(c in ("%s", "%u", "%d", "%08x") for c in convs), (sid, convs)
+
+
+# -- button kinds (docs/look_2026-10.md step 10) -----------------------------------
+
+KINDS = ("normal", "primary", "tonal", "danger", "toggle")
+
+
+def test_the_button_kinds_are_the_theme_models_in_its_order():
+    """`button(kind=...)`'s names are the theme model's `buttons` keys, in the
+    order the C's derivation table (moy_ui.c's k_own) and the loader share,
+    and the button fields' leaves are in the order moy_ui.c names them."""
+    from runtime import chrome, ui
+    d = _style()
+    assert tuple(d["button_kinds"]) == tuple(d["theme"]["look"]["button_kinds"]) == KINDS
+    assert ui.BUTTON_KINDS == KINDS
+    assert chrome.look_fields()[2] == (
+        "fill", "ink", "border.w", "border.c", "shape", "r", "font", "bevel")
+    assert {k: tuple(tuple(_spec(x) for x in form) for form in forms)
+            for k, forms in d["floors"].items()} == twin.FLOORS
+
+
+def _install(src):
+    import moy_ui
+    from runtime import chrome
+    rc, _notes = moy_ui.theme_install(json.dumps(src).encode())
+    assert rc == 0
+    chrome.forget_themes()
+
+
+def _uninstall():
+    from runtime import chrome, ui
+    ui.theme_uninstall()
+    ui.use_shape(None)
+    chrome.forget_themes()
+
+
+_BLOCK = [None]
+
+
+def _live(name, variant="dark"):
+    from runtime import chrome, ui
+    live = chrome.live_colors(name, variant)
+    ui._C.theme_block(live.block, live.used)
+    ui.use_buttons(live)
+    _BLOCK[0] = live.block
+    return live
+
+
+def _field(th, kind, app=None, state=None):
+    """The field and ink a button of `kind` draws at rest, read off its pixels:
+    the corner inside the edge, and the most common other colour."""
+    from runtime import ui
+    from runtime.host_canvas import make_system_canvas
+    cv = make_system_canvas(80, 24)
+    if _BLOCK[0] is not None:
+        cv.theme_block(_BLOCK[0])
+    cv.cls(1)
+    ui.button(cv, th, (0, 0, 80, 24), "MMMM", kind=kind, app=app, state=state)
+    i = (3 * cv.w + 3) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]          # the wire order
+
+
+def _word(v):
+    """A colour's RGB565 word as the canvas holds it (a slot's from the live
+    block)."""
+    from runtime import ui
+    return ui._C.theme_rgb(v)[0]
+
+
+def test_each_kind_resolves_from_the_base_roles():
+    """With no `buttons` in the theme each kind is DESIGN.md's derivation:
+    primary the value fill and value_ink with no border, tonal the normal
+    field with the value ink, danger with the danger ink, toggle a cell --
+    where a derived ink misses the floor, the kind's floor form."""
+    from runtime import ui
+    for name in ("machine", "night", "moy"):
+        for variant in THEME_VARIANTS:
+            th = _live(name, variant).tokens
+            look = ui._look(th)
+
+            def style(kind, state=ui.REST):
+                kid = ui._kind_id(ui._button_kind(kind))
+                return ui._C.button_style(look, kid, ui._STATE_ID[state], -1)[:3]
+
+            assert style("primary") == (th["value"], th["value_ink"], None)
+            assert style("normal") == (th["surface"], th["ink"], th["shade_dark"])
+            tonal, danger = style("tonal"), style("danger")
+            assert tonal[2] == danger[2] == th["shade_dark"]
+            if (name, variant) == ("moy", "light"):    # its buttons.tonal.fill
+                assert tonal[:2] == ([v for a, k, v in _live(name, variant).buttons
+                                      if (a, k) == (None, "tonal")][0][0], th["value"])
+            elif ui._C.theme_reads(th["surface"], th["value"]):
+                assert tonal[:2] == (th["surface"], th["value"])
+            else:
+                assert tonal[:2] == (th["surface"], th["ink"])
+            if ui._C.theme_reads(th["surface"], th["danger"]):
+                assert danger[:2] == (th["surface"], th["danger"])
+            else:
+                assert danger[0] == th["danger"]
+            assert style("toggle") == ui.state_colors(th, "cell", ui.REST)
+            for kind in KINDS:          # the shared marks stay the style's
+                assert style(kind, ui.PRESSED)[:2] == ui.state_colors(
+                    th, ui._button_kind(kind), ui.PRESSED)[:2]
+            assert _field(th, "primary") == _word(th["value"])
+    _uninstall()
+
+
+def test_a_theme_styles_each_kind_and_an_app_its_own():
+    """`buttons[kind]` restyles a kind everywhere; every kind but primary
+    takes normal's fill; `app_buttons[app][kind]` restyles it for that app
+    only (THEMES.md, "buttons")."""
+    from runtime import ui
+    _install({"format": 2, "name": "kt", "inherits": "machine", "look": {
+        "buttons": {"normal": {"fill": "#ececf0", "ink": "#1d1d1f"},
+                    "tonal": {"ink": "#c4231b"}},
+        "app_buttons": {"calc": {"primary": {"fill": "#ff9f0a", "ink": "#000000"},
+                                 "normal": {"fill": "#e4e4e9", "border": None}}}}})
+    try:
+        live = _live("kt")
+        th = live.tokens
+        rows = {(a, k): v for a, k, v in live.buttons}
+        normal_fill = rows[(None, "normal")][0]
+        calc_fill = rows[("calc", "primary")][0]
+        calc_normal = rows[("calc", "normal")][0]
+        assert normal_fill >= 64 and calc_fill >= 64 and calc_normal >= 64
+        assert _field(th, "normal") == _word(normal_fill)
+        assert _field(th, "tonal") == _word(normal_fill)            # from normal
+        assert _field(th, "danger") == _word(normal_fill)
+        assert _field(th, "primary") == _word(th["value"])          # its own
+        assert _field(th, "primary", app="calc") == _word(calc_fill)
+        assert _field(th, "primary", app="files") == _word(th["value"])
+        assert _field(th, "tonal", app="calc") == _word(calc_normal)   # calc's normal
+        assert _field(th, "normal", app="files") == _word(normal_fill)
+        look = ui._look(th)
+        kid = ui._kind_id(ui._button_kind("normal"))
+        row = ui._app_row("calc")
+        assert ui._C.button_style(look, kid, ui._STATE_ID[ui.REST], row)[2] is None
+        assert ui._C.button_style(look, kid, ui._STATE_ID[ui.REST], -1)[2] == th["shade_dark"]
+        assert ui.button_unreadable(th, ("calc",)) == []
+    finally:
+        _uninstall()
+
+
+def test_an_unreadable_kind_is_reported_and_never_refused():
+    from runtime import ui
+    _install({"format": 2, "name": "ku", "inherits": "machine", "look": {
+        "buttons": {"danger": {"fill": "#ffffff", "ink": "#fefefe"}},
+        "app_buttons": {"calc": {"tonal": {"ink": "#ffffff", "fill": "#f0f0f0"}}}}})
+    try:
+        th = _live("ku").tokens
+        assert ui.button_unreadable(th, ("calc", "files")) == [
+            (None, "danger"), ("calc", "tonal"), ("calc", "danger"),
+            ("files", "danger")]
+        assert _field(th, "danger") == _word(_live("ku").buttons[3][2][0])
+    finally:
+        _uninstall()
+
+
+def test_one_primary_per_surface_is_warned_of(capsys):
+    """A second primary on one canvas in one frame is said once; the same
+    button drawn twice, another canvas, or the next frame is not."""
+    from runtime import ui
+    from runtime.host_canvas import make_system_canvas
+    th = theme_colors("machine")
+    a, b = make_system_canvas(80, 60), make_system_canvas(80, 60)
+    del ui.primary_warnings[:]
+    ui._PRIMARY_WARNED.clear()
+    ui.begin_frame()
+    ui.button(a, th, (0, 0, 40, 20), "GO", kind="primary")
+    ui.button(a, th, (0, 0, 40, 20), "GO", kind="primary")
+    ui.button(b, th, (0, 0, 40, 20), "OK", kind="primary")
+    ui.button(a, th, (0, 30, 40, 20), "NO", kind="tonal")
+    assert ui.primary_warnings == []
+    ui.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
+    ui.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
+    assert ui.primary_warnings == [("GO", "YES")]
+    ui.begin_frame()
+    ui.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
+    assert ui.primary_warnings == [("GO", "YES")]
+    assert capsys.readouterr().out.count("second primary") == 1
+    del ui.primary_warnings[:]
+    ui._PRIMARY_WARNED.clear()
+    ui.begin_frame()
+
+
+def test_an_unknown_kind_draws_as_normal():
+    th = theme_colors("machine")
+    _BLOCK[0] = None
+    assert _field(th, "nosuch") == _field(th, "normal") == _word(th["surface"])
+
+
+_KIND_DRIVER = r'''
+import moy_ui
+from array import array
+NONE = -2147483648
+OFF = NONE + 1
+toks = moy_ui.tokens()
+kinds = ("normal", "primary", "tonal", "danger", "toggle")
+moy_ui.buttons_clear()
+moy_ui.buttons_set(None, 0, [12, 1, 200, 8, NONE, NONE, NONE, NONE])
+moy_ui.buttons_set(None, 2, [NONE, 9, NONE, NONE, 1, 40, 1, 1])
+moy_ui.buttons_set("calc", 1, [10, 0, OFF, OFF, 1, NONE, NONE, NONE])
+moy_ui.buttons_set("calc", 0, [NONE, NONE, 0, NONE, NONE, NONE, NONE, NONE])
+for name in moy_ui.themes():
+    for light in (False, True):
+        row = moy_ui.theme(name, light)[0]
+        r = array("i", [NONE] * len(toks))
+        for i in range(len(toks)):
+            r[i] = row[i] if row[i] < 64 else moy_ui.theme_rgb(row[i])[2]
+        moy_ui.look(0, r)
+        for k in kinds:
+            kid = moy_ui.kind(moy_ui.kinds()[moy_ui.button_kind(k)])
+            for st in range(len(moy_ui.states())):
+                for app in (-1, moy_ui.buttons_app("calc"), -2):
+                    print(repr(moy_ui.button_style(0, kid, st, app)))
+print(repr([moy_ui.theme_reads(a, b) for a in (0, 7, 8, 13) for b in (0, 7, 11)]))
+'''
+
+
+def test_the_boards_module_resolves_the_kinds_as_the_host_does(tmp_path):
+    """The button kinds' resolution, the theme's leaves and an app's over
+    them, and the floor forms, through the module every board imports."""
+    import subprocess
+    import moy_ui
+    from unix_mp import require_unix_mp
+    exe = require_unix_mp("moy_ui", why="Without it the button kinds' MicroPython "
+                          "face, the one every board imports, is never run on the host.")
+    script = tmp_path / "kinds.py"
+    script.write_text(_KIND_DRIVER)
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=120)
+    host = {}
+    exec(compile(_KIND_DRIVER.replace("print(repr(", "_out.append(repr("), "k", "exec"),
+         {"_out": host.setdefault("out", []), "__name__": "k"})
+    moy_ui.buttons_clear()
+    assert out.stdout.splitlines() == host["out"], out.stderr[-400:]

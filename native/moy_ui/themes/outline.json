@@ -10,8 +10,8 @@
               "on": "border accent" },
     "button": { "rest": "fill panel, border dim", "hover": "fill panel, border focus",
                 "on": "border accent", "pressed": "border accent" },
-    "button_play": { "rest": "border dim", "pressed": "border accent" },
-    "button_author": { "rest": "border dim", "pressed": "border accent" },
+    "button_primary": { "rest": "border dim", "pressed": "border accent" },
+    "button_tonal": { "rest": "border dim", "pressed": "border accent" },
     "button_danger": { "rest": "border dim", "pressed": "border accent" },
     "panel": { "rest": "border accent" }
   }

@@ -3903,6 +3903,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the deferred drain at the tail. Bound once, here, so both cost a call
         # and no second lookup (#209 landing C -- nothing else in the loop
         # reaches into covers, and neither goes through a forward).
+        _uimod.begin_frame()          # the one-primary check's frame
         covers = self.covers
         covers.begin_frame()          # the per-frame cover-build budget, which is
                                       # a TIME slice, not a count

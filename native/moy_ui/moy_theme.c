@@ -3006,11 +3006,14 @@ int moy_theme_look_frames(const char *name, size_t n) {
 
 // -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
 
-// The loader's predicate: (a, b) reaches MOY_THEME_CONTRAST.
-static int clears(int32_t a, int32_t b) {
+int moy_theme_reads(int32_t a, int32_t b) {
     int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);
     int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
     return (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
+}
+
+static int clears(int32_t a, int32_t b) {
+    return moy_theme_reads(a, b);
 }
 
 // A contrast ratio as a fraction, compared exactly.

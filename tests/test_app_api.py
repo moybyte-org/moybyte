@@ -141,6 +141,31 @@ def test_calc_math_via_hits(tmp_path):
     assert calc.entry == "OOPS"
 
 
+def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
+    """Calc's one per-key decision (DESIGN.md, "Button kinds"): = the one
+    primary, C danger, the operators tonal, the rest normal, each drawn as
+    Calc's so a theme's app_buttons.calc reaches them."""
+    from runtime import ui
+    ws = _ws(tmp_path)
+    _select(ws, "Calc")
+    ws.launch_selected()
+    drawn = {}
+    real = ui.button
+
+    def button(cv, th, rect, label, kind="normal", **kw):
+        drawn[label] = (kind, kw.get("app"))
+        return real(cv, th, rect, label, kind=kind, **kw)
+
+    monkeypatch.setattr(ui, "button", button)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert drawn["="] == ("primary", "calc")
+    assert drawn["C"] == ("danger", "calc")
+    assert {drawn[k] for k in "+-*/"} == {("tonal", "calc")}
+    assert {drawn[k] for k in "0123456789"} == {("normal", "calc")}
+    assert [k for k, v in drawn.items() if v[0] == "primary"] == ["="]
+
+
 def test_calc_layout_reflows_and_declares_minimum(tmp_path):
     from runtime.calc_app import CalcLayout
     assert CalcLayout.MIN_W > 0 and CalcLayout.MIN_H > 0

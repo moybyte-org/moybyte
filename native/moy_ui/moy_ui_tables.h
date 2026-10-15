@@ -11,7 +11,7 @@
 #define MOY_UI_KINDS 25
 #define MOY_UI_COLOR_KINDS 20
 #define MOY_UI_SLOTS 9
-#define MOY_UI_SPECS 32
+#define MOY_UI_SPECS 31
 #define MOY_UI_HITS_CAP 32
 #define MOY_UI_GLYPHS 62
 #define MOY_UI_GLYPH_SIZE 12
@@ -81,8 +81,8 @@ enum {
     MOY_UI_K_ROW_CHROME = 7,
     MOY_UI_K_ROW_CTA = 8,
     MOY_UI_K_BUTTON = 9,
-    MOY_UI_K_BUTTON_PLAY = 10,
-    MOY_UI_K_BUTTON_AUTHOR = 11,
+    MOY_UI_K_BUTTON_PRIMARY = 10,
+    MOY_UI_K_BUTTON_TONAL = 11,
     MOY_UI_K_BUTTON_DANGER = 12,
     MOY_UI_K_TAB = 13,
     MOY_UI_K_STATUS = 14,
@@ -170,11 +170,16 @@ extern const char *const moy_ui_role_names[MOY_UI_ROLES];
 extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];
 extern const char *const moy_ui_state_names[MOY_UI_STATES];
 extern const char *const moy_ui_kind_names[MOY_UI_KINDS];
-extern const char *const moy_ui_button_kinds[4][2];
-#define MOY_UI_BUTTON_KINDS 4
+extern const char *const moy_ui_button_kinds[5][2];
+#define MOY_UI_BUTTON_KINDS 5
 extern const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS];
 // [kind][state][field, ink, edge]: a spec index, or 0xff where the kind names no such state.
 extern const uint8_t moy_ui_kind_specs[MOY_UI_KINDS][MOY_UI_STATES][3];
+// [kind]: the (field, ink) specs its own states (rest, hover, hot) take,
+// in order, where their pair misses the contrast floor; the count first.
+#define MOY_UI_FLOORS 2
+extern const uint8_t moy_ui_floor_n[MOY_UI_KINDS];
+extern const uint8_t moy_ui_floor_specs[MOY_UI_KINDS][MOY_UI_FLOORS][2];
 // [kind]: the slot count (0: no metrics), then the values.
 extern const uint8_t moy_ui_metric_n[MOY_UI_KINDS];
 extern const int16_t moy_ui_metric_vals[MOY_UI_KINDS][MOY_UI_SLOTS];

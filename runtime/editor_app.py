@@ -476,7 +476,7 @@ class EditorApp:
             _ui.tab_row(cv, th, tabs_area, self._chips(), self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
                         ink=band_ink)
-            _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run",
+            _ui.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
                        glyph_draw=ws._glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open

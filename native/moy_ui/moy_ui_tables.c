@@ -131,8 +131,8 @@ const char *const moy_ui_kind_names[MOY_UI_KINDS] = {
     "row_chrome",
     "row_cta",
     "button",
-    "button_play",
-    "button_author",
+    "button_primary",
+    "button_tonal",
     "button_danger",
     "tab",
     "status",
@@ -148,11 +148,12 @@ const char *const moy_ui_kind_names[MOY_UI_KINDS] = {
     "dialog",
 };
 
-const char *const moy_ui_button_kinds[4][2] = {
+const char *const moy_ui_button_kinds[5][2] = {
     {"normal", "button"},
-    {"play", "button_play"},
-    {"author", "button_author"},
+    {"primary", "button_primary"},
+    {"tonal", "button_tonal"},
     {"danger", "button_danger"},
+    {"toggle", "cell"},
 };
 
 const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
@@ -180,9 +181,8 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {2, {-10, 7, 0}},
     {2, {-31, 0, 0}},
     {2, {-12, 0, 0}},
-    {2, {-18, 7, 0}},
-    {2, {-19, 7, 0}},
-    {2, {-20, 7, 0}},
+    {2, {-35, 13, 0}},
+    {2, {-36, 7, 0}},
     {3, {-15, -6, 13}},
     {3, {-11, -1, 60}},
     {2, {-14, 0, 0}},
@@ -201,21 +201,51 @@ const uint8_t moy_ui_kind_specs[MOY_UI_KINDS][MOY_UI_STATES][3] = {
     {{0, 19, 0}, {4, 5, 0}, {7, 8, 9}, {17, 18, 0}, {0, 12, 13}, {0, 12, 0}},  // row_chrome
     {{17, 2, 9}, {4, 5, 6}, {7, 8, 9}, {6, 14, 6}, {17, 14, 13}, {17, 14, 9}},  // row_cta
     {{21, 2, 22}, {4, 5, 22}, {21, 23, 22}, {6, 14, 22}, {21, 23, 13}, {21, 23, 22}},  // button
-    {{24, 2, 22}, {4, 5, 22}, {24, 8, 22}, {6, 14, 22}, {24, 8, 13}, {24, 8, 22}},  // button_play
-    {{25, 2, 22}, {4, 5, 22}, {25, 14, 22}, {6, 14, 22}, {25, 14, 13}, {25, 14, 22}},  // button_author
-    {{26, 2, 22}, {4, 5, 22}, {26, 8, 22}, {6, 14, 22}, {26, 8, 13}, {26, 8, 22}},  // button_danger
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {27, 18, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {28, 20, 29}},  // status
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {30, 0, 29}},  // panel
+    {{24, 2, 0}, {4, 5, 0}, {24, 25, 0}, {6, 14, 0}, {24, 25, 13}, {24, 25, 0}},  // button_primary
+    {{21, 2, 22}, {4, 5, 22}, {21, 24, 22}, {6, 14, 22}, {21, 24, 13}, {21, 24, 22}},  // button_tonal
+    {{21, 2, 22}, {4, 5, 22}, {21, 7, 22}, {6, 14, 22}, {21, 7, 13}, {21, 7, 22}},  // button_danger
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {26, 18, 0}, {0xff, 0xff, 0xff}, {0, 8, 0}},  // tab
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {27, 20, 28}},  // status
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {29, 0, 28}},  // panel
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 11, 0}},  // panel_title
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {10, 11, 0}},  // toolbar
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {9, 20, 0}},  // scrollbar
-    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 31}},  // focus
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0, 0, 30}},  // focus
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // text_field
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_btn
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_icon_btn
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // mini_btn
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // dialog
+};
+
+const uint8_t moy_ui_floor_n[MOY_UI_KINDS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+const uint8_t moy_ui_floor_specs[MOY_UI_KINDS][MOY_UI_FLOORS][2] = {
+    {{0, 0}, {0, 0}},  // row
+    {{0, 0}, {0, 0}},  // cell
+    {{0, 0}, {0, 0}},  // cell_band
+    {{0, 0}, {0, 0}},  // chip
+    {{0, 0}, {0, 0}},  // toggle
+    {{0, 0}, {0, 0}},  // row_menu
+    {{0, 0}, {0, 0}},  // row_list
+    {{0, 0}, {0, 0}},  // row_chrome
+    {{0, 0}, {0, 0}},  // row_cta
+    {{0, 0}, {0, 0}},  // button
+    {{0, 0}, {0, 0}},  // button_primary
+    {{21, 23}, {0, 0}},  // button_tonal
+    {{7, 8}, {7, 14}},  // button_danger
+    {{0, 0}, {0, 0}},  // tab
+    {{0, 0}, {0, 0}},  // status
+    {{0, 0}, {0, 0}},  // panel
+    {{0, 0}, {0, 0}},  // panel_title
+    {{0, 0}, {0, 0}},  // toolbar
+    {{0, 0}, {0, 0}},  // scrollbar
+    {{0, 0}, {0, 0}},  // focus
+    {{0, 0}, {0, 0}},  // text_field
+    {{0, 0}, {0, 0}},  // game_btn
+    {{0, 0}, {0, 0}},  // game_icon_btn
+    {{0, 0}, {0, 0}},  // mini_btn
+    {{0, 0}, {0, 0}},  // dialog
 };
 
 const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {5, 6, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3};
@@ -231,8 +261,8 @@ const int16_t moy_ui_metric_vals[MOY_UI_KINDS][MOY_UI_SLOTS] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_chrome
     {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_cta
     {2, 16, 12, 1, 1, 0, 0, 0, 0},  // button
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_play
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_author
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_primary
+    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_tonal
     {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_danger
     {2, 3, 16, 0, 0, 0, 0, 0, 0},  // tab
     {1, 3, 2, 1, 0, 0, 0, 0, 0},  // status
@@ -571,8 +601,8 @@ const char *const moy_theme_part_names[MOY_THEME_PARTS] = {
     "row_chrome",
     "row_cta",
     "button",
-    "button_play",
-    "button_author",
+    "button_primary",
+    "button_tonal",
     "button_danger",
     "tab",
     "status",
@@ -774,8 +804,8 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "                \"hover\": \"fill surface_alt, border focus, shadow\",\012"
     "                \"on\": \"border shade_dark, shadow\",\012"
     "                \"pressed\": \"border shade_dark\" },\012"
-    "    \"button_play\": { \"rest\": \"border shade_dark, shadow\", \"pressed\": \"border shade_dark\" },\012"
-    "    \"button_author\": { \"rest\": \"border shade_dark, shadow\", \"pressed\": \"border shade_dark\" },\012"
+    "    \"button_primary\": { \"rest\": \"border shade_dark, shadow\", \"pressed\": \"border shade_dark\" },\012"
+    "    \"button_tonal\": { \"rest\": \"border shade_dark, shadow\", \"pressed\": \"border shade_dark\" },\012"
     "    \"button_danger\": { \"rest\": \"border shade_dark, shadow\", \"pressed\": \"border shade_dark\" },\012"
     "    \"chip\": { \"rest\": \"border shade_dark\" },\012"
     "    \"panel\": { \"rest\": \"border shade_dark\" },\012"
@@ -951,8 +981,8 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "              \"on\": \"border accent\" },\012"
     "    \"button\": { \"rest\": \"fill panel, border dim\", \"hover\": \"fill panel, border focus\",\012"
     "                \"on\": \"border accent\", \"pressed\": \"border accent\" },\012"
-    "    \"button_play\": { \"rest\": \"border dim\", \"pressed\": \"border accent\" },\012"
-    "    \"button_author\": { \"rest\": \"border dim\", \"pressed\": \"border accent\" },\012"
+    "    \"button_primary\": { \"rest\": \"border dim\", \"pressed\": \"border accent\" },\012"
+    "    \"button_tonal\": { \"rest\": \"border dim\", \"pressed\": \"border accent\" },\012"
     "    \"button_danger\": { \"rest\": \"border dim\", \"pressed\": \"border accent\" },\012"
     "    \"panel\": { \"rest\": \"border accent\" }\012"
     "  }\012"
@@ -986,8 +1016,8 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  },\012"
     "  \"surfaces\": {\012"
     "    \"button\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
-    "    \"button_play\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
-    "    \"button_author\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
+    "    \"button_primary\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
+    "    \"button_tonal\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
     "    \"button_danger\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
     "    \"chip\": { \"rest\": \"border\" },\012"
     "    \"tab\": { \"rest\": \"border\" },\012"
@@ -1063,7 +1093,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1366, 1296, 860, 1847, 2932};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 1849, 2932};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

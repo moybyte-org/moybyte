@@ -261,9 +261,9 @@ class _Split:
         self._c.row(*a[:-1], ui._FRAME)
         self._c.row(*a[:-1], ui._CONTENT)
 
-    def button(self, *a):
-        self._c.button(*a[:-1], ui._FRAME)
-        self._c.button(*a[:-1], ui._CONTENT)
+    def button(self, *a):                  # (..., phase, app)
+        self._c.button(*a[:-2], ui._FRAME, a[-1])
+        self._c.button(*a[:-2], ui._CONTENT, a[-1])
 
 
 def _words(cv):

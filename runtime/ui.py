@@ -12,6 +12,7 @@
 #   Hits                              per-draw hit registry
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
 #   -- widgets                        button, chip
+#   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
 #   -- scrolling                      row_drag, ScrollRegion, DragTap
@@ -35,8 +36,10 @@ the redesign thread):
   * Widgets take RECTS; the per-surface Layout classes keep owning reflow.
     The combinators here are helpers FOR those classes, not a layout engine.
   * Colors come from the semantic theme tokens (chrome.theme_colors -- surface/ink/
-    focus/play/author/danger/...), so restyling an app means routing it
-    through this module, not hunting literals.
+    focus/value/danger/...), so restyling an app means routing it
+    through this module, not hunting literals. A button names its KIND
+    (normal, primary, tonal, danger, toggle) and the theme styles the kind
+    (`use_buttons`).
   * STYLE IS DATA, not code. Every per-state colour and every number a draw
     used to hardcode -- pads, edge weights, strip heights, icon boxes, label
     alignment -- is native/moy_ui/style.json, resolved by native/moy_ui's C
@@ -864,12 +867,19 @@ def list(cv, th, rect, items, region, row_h, sel=-1, kind="row_list"):
 
 
 def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
-           glyph=None, glyph_draw=None, disabled=False, state=None):
-    """One themed chip button: filled field, thin dark edge, centered label
+           glyph=None, glyph_draw=None, disabled=False, state=None, app=None):
+    """One themed button: filled field, thin edge, centered label
     (truncated to fit), optional 16x16 icon image or 12x12 glyph at the left.
     A glyph is drawn by `glyph` unless the caller passes its own
     `glyph_draw(kind, rect, color, cv)`;
     `on` swaps to the accent (the pressed/active look).
+
+    `kind` is what the button MEANS (docs/media/look_2026-10/DESIGN.md,
+    "Button kinds"): "normal", "primary" (the one primary action on a
+    surface), "tonal" (a secondary emphasis), "danger" (clears or destroys)
+    or "toggle" (a two-state part, drawn as a cell); an unknown one is
+    normal. `app` is the drawing app's id, which picks the theme's
+    `app_buttons[app]` overrides.
 
     `disabled` + `state` are the six-state model (see `widget_state`): they
     default to the untouched REST/`on` rendering the goldens pin, and only a
@@ -877,8 +887,8 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     for this button's id.
 
     The field/ink/edge come from the style under the key `kind` maps to
-    (style.json's "button_kinds"), the pads/boxes/alignment from
-    `_METRICS["button"]`."""
+    (style.json's "button_kinds") and the live theme's button leaves
+    (`use_buttons`), the pads/boxes/alignment from `_METRICS["button"]`."""
     flags = (_F_ON if on else 0) | (_F_DISABLED if disabled else 0)
     gid = -1
     if icon_img is not None:
@@ -891,11 +901,14 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     kid = _BUTTON_KID.get(kind)
     if kid is None:
         kid = _BUTTON_KID[kind] = _kind_id(_button_kind(kind))
+    if kid == _PRIMARY_KID:
+        _primary_seen(cv, rect, label)
+    row = -1 if app is None else _app_row(app)
     act = -1 if state is None else _STATE_ID.get(state, -1)
     if icon_img is None and (glyph is None or glyph_draw is None):
-        _C.button(cv, look, rect, kid, flags, act, label, gid, _ALL)
+        _C.button(cv, look, rect, kid, flags, act, label, gid, _ALL, row)
         return
-    _C.button(cv, look, rect, kid, flags, act, label, gid, _FRAME)
+    _C.button(cv, look, rect, kid, flags, act, label, gid, _FRAME, row)
     fs = _fs(cv)
     tx = _C.button_x(rect, flags, label, fs)
     y, h = int(rect[1]), int(rect[3])
@@ -904,10 +917,80 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
         box = m[BTN_ICON] * fs
         cv.spr(icon_img, tx, y + (h - box) // 2, fs)
     else:
-        ink = state_colors(th, _button_kind(kind),
-                           widget_state(on, False, disabled, state))[1]
+        st = widget_state(on, False, disabled, state)
+        ink = _C.button_style(look, kid, _STATE_ID.get(st, _REST_ID), row)[1]
         glyph_draw(glyph, (tx, y, m[BTN_GLYPH] * fs, h), ink, cv)
-    _C.button(cv, look, rect, kid, flags, act, label, gid, _CONTENT)
+    _C.button(cv, look, rect, kid, flags, act, label, gid, _CONTENT, row)
+
+
+# -- button kinds (docs/look_2026-10.md step 10) ----------------------------------
+
+BUTTON_KINDS = []                     # the theme model's kind names, in its order
+for _n in _C.theme_look_fields()[0]:
+    if _n.startswith("buttons.") and _n.split(".")[1] not in BUTTON_KINDS:
+        BUTTON_KINDS.append(_n.split(".")[1])
+BUTTON_KINDS = tuple(BUTTON_KINDS)
+_PRIMARY_KID = _C.kind(_C.kinds()[_C.button_kind("primary")])
+_APP_ROW = {}                         # app id -> its row of the live theme's overrides
+_PRIMARY = {}                         # id(canvas) -> (rect, label) of this frame's primary
+_PRIMARY_WARNED = set()
+primary_warnings = []                 # (first label, second label), once each
+
+
+def _app_row(app):
+    r = _APP_ROW.get(app)
+    if r is None:
+        r = _APP_ROW[app] = _C.buttons_app(app)
+    return r
+
+
+def use_buttons(live):
+    """Install the live theme's `buttons[kind]` and `app_buttons[app][kind]`
+    (`chrome.live_colors`' `look`, every colour placed in its block) for every
+    button that draws; None drops them. A gradient fill draws its first stop."""
+    _C.buttons_clear()
+    _APP_ROW.clear()
+    if live is None:
+        return
+    for app, kind, vals in live.buttons:
+        _C.buttons_set(app, BUTTON_KINDS.index(kind), vals)
+
+
+def button_unreadable(th, apps=()):
+    """The button kinds whose ink misses the contrast floor on their field at
+    rest under theme `th` and the installed button leaves, as (app, kind)
+    pairs (app None: the theme's own). A miss never refuses a theme."""
+    look = _LOOK if th is _TH else _look(th)
+    out = []
+    for app in (None,) + tuple(apps):
+        row = -1 if app is None else _app_row(app)
+        for kind in BUTTON_KINDS:
+            kid = _kind_id(_button_kind(kind))
+            f, i = _C.button_style(look, kid, _REST_ID, row)[:2]
+            if f is not None and i is not None and not _C.theme_reads(f, i):
+                out.append((app, kind))
+    return out
+
+
+def begin_frame():
+    """A new frame: the one-primary check starts over."""
+    if _PRIMARY:
+        _PRIMARY.clear()
+
+
+def _primary_seen(cv, rect, label):
+    """One `primary` per surface (DESIGN.md, "Button kinds"): a second one on
+    the same canvas in one frame is warned of, once per pair of labels."""
+    k = id(cv)
+    got = _PRIMARY.get(k)
+    if got is None:
+        _PRIMARY[k] = (tuple(rect), label)
+    elif got[0] != tuple(rect):
+        pair = (got[1], label)
+        if pair not in _PRIMARY_WARNED:
+            _PRIMARY_WARNED.add(pair)
+            primary_warnings.append(pair)
+            print("ui: a second primary button on one surface: %r and %r" % pair)
 
 
 def chip(cv, th, rect, label, on=False, hot=False, fs=None,
@@ -1331,8 +1414,10 @@ for _i, _s in enumerate(_C.theme_states()):
 
 def use_shape(name):
     """Install theme `name`'s shape for every primitive (None: the empty one,
-    which draws as no theme had one)."""
+    which draws as no theme had one, with no button leaves)."""
     _C.use_shape(name)
+    if name is None:
+        use_buttons(None)
 
 
 def pattern_unreadable(th):

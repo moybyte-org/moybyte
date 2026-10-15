@@ -1268,11 +1268,13 @@ class GetCartsAppLayer(ListShellApp):
             return
         fs = self.layout.fs
         rects = self.layout.buttons(len(verbs))
+        primary = False                # one primary a surface: the first go verb
         for k, verb in enumerate(verbs):
             enabled = self.phase != "cart" or self._enabled(verb)
             kind = "normal"
             if verb in ("GET", "UPDATE", "PLAY", "USE", "I AGREE", "TRY AGAIN"):
-                kind = "play"
+                kind = "tonal" if primary else "primary"
+                primary = True
             elif verb in ("REMOVE", "CANCEL"):
                 kind = "danger"
             _ui.button(cv, th, rects[k], verb, kind=kind, on=k == self.focus,
