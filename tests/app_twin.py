@@ -52,7 +52,7 @@ _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "author", "danger", "surface_light", "bar", "bar_edge", "bar_light",
            "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive",
            "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note",
-           "band_light")
+           "band_light", "value", "value_ink", "sunk", "lcd", "lcd_ink")
 _FLAGS = ("surface_light", "bar_light", "band_light")
 NAME_MAX = 31
 DOC_MAX = 255
@@ -108,10 +108,10 @@ class App:
         self._servers = {}
         self._served = {}
         self._tokens = {}
+        self._near = {}             # what a RUN grant is answered
         self._names = ["", ""]      # theme, variant
         self._tgen = 0
-        self._colors = None
-        self._colors_gen = 0
+        self._colors = {}           # run -> (the colour dict, its generation)
         self._store = (None, False, False, None)    # root, readable, writable, no_store
         self._sessions = 0
         self._copy_gen = 0
@@ -184,15 +184,20 @@ class App:
         self._ptr = p
         return p is not None
 
-    def theme_write(self, name, variant, colors):
-        tok = {}
-        for k, v in colors.items():
-            if k not in _TOKENS:
-                raise ValueError("a token outside the vocabulary")
-            tok[k] = int(v)
+    def theme_write(self, name, variant, colors, near=None):
+        def table(d):
+            tok = {}
+            for k, v in d.items():
+                if k not in _TOKENS:
+                    raise ValueError("a token outside the vocabulary")
+                tok[k] = int(v)
+            return tok
+        tok = table(colors)
+        near_tok = tok if near is None else table(near)
         if len(name.encode()) > NAME_MAX or len(variant.encode()) > NAME_MAX:
             raise ValueError("an argument the role refuses")
         self._tokens = tok
+        self._near = near_tok
         self._names[0], self._names[1] = name, variant
         self._tgen += 1
         return self._tgen
@@ -290,21 +295,26 @@ class Theme(_Role):
     def colors(self):
         app = self._app
         app._hold(self._g, "theme", "theme.colors")
-        if app._colors is None or app._colors_gen != app._tgen:
-            d = {}
-            for k in _TOKENS:
-                if k in app._tokens:
-                    v = app._tokens[k]
-                    d[k] = bool(v) if k in _FLAGS else v
-            app._colors, app._colors_gen = d, app._tgen
-        return app._colors
+        run = app._grants[self._g][1]
+        have = app._colors.get(run) if app._colors else None
+        if have is not None and have[1] == app._tgen:
+            return have[0]
+        src = app._near if run else app._tokens
+        d = {}
+        for k in _TOKENS:
+            if k in src:
+                v = src[k]
+                d[k] = bool(v) if k in _FLAGS else v
+        app._colors[run] = (d, app._tgen)
+        return d
 
     def token(self, role):
         self._app._hold(self._g, "theme", "theme.token")
         role = int(role)
         if not 0 <= role < len(_TOKENS):
             raise ValueError("an argument the role refuses")
-        return self._app._tokens.get(_TOKENS[role])
+        app = self._app
+        return (app._near if app._grants[self._g][1] else app._tokens).get(_TOKENS[role])
 
     def gen(self):
         self._app._hold(self._g, "theme", "theme.gen")

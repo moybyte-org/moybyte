@@ -27,6 +27,7 @@ from pathlib import Path
 
 from runtime import ui
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
+from theme_live import live_tokens  # noqa: E402
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
 
@@ -65,18 +66,19 @@ def test_the_default_tables_cover_every_kind_the_toolkit_asks_for():
 
 def test_every_state_of_every_kind_resolves_on_every_theme_set():
     """The restyle promise, over the whole table rather than row/cell alone: a
-    theme that names NO state token still resolves to a real palette index (or
-    to None, which means 'paint nothing here'), on every family x variant."""
+    theme that names NO state token still resolves to a real palette index, the
+    block's 64.. included (or to None, which means 'paint nothing here'), on
+    every family x variant."""
     for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
-            th = theme_colors(name, variant)
+            th = live_tokens(name, variant)
             for kind in ui.kinds():
                 for state in ui.STATES:
                     trio = ui.state_colors(th, kind, state)
                     assert len(trio) == 3, (kind, state)
                     for c in trio:
                         assert c is None or (isinstance(c, int)
-                                             and 0 <= c < 64), (kind, state, trio)
+                                             and 0 <= c < 128), (kind, state, trio)
 
 
 def test_the_scrollbar_width_metric_and_the_class_attribute_agree():
@@ -471,7 +473,7 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
     checked = 0
     for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
-            th = theme_colors(name, variant)
+            th = live_tokens(name, variant)
             for (kind, state), before in _PRE_207_TRIPLES.items():
                 assert tuple(ui.state_colors(th, kind, state)) == \
                     tuple(before(th)), (name, variant, kind, state)

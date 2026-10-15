@@ -17,6 +17,7 @@ struct moy_app {
     const moy_input_ptr_t *ptr; // the pointer the surface rows read, or NULL
     uint32_t theme_gen;         // bumped by every write of the look
     int32_t tokens[MOY_APP_TOKENS];
+    int32_t near[MOY_APP_TOKENS];   // each role's nearest MOY64 index: a RUN grant's
     uint8_t name_len, variant_len;
     char name[MOY_APP_NAME_MAX + 1];
     char variant[MOY_APP_NAME_MAX + 1];
@@ -84,7 +85,8 @@ static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
     "border", "selection", "selection_ink", "focus", "play", "author", "danger",
     "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink",
     "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo",
-    "shade_dark", "ink_accent", "ink_note", "band_light",
+    "shade_dark", "ink_accent", "ink_note", "band_light", "value", "value_ink",
+    "sunk", "lcd", "lcd_ink",
 };
 #define TOKEN_SURFACE_LIGHT 20
 #define TOKEN_BAR_LIGHT 23
@@ -116,7 +118,7 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     a->prefs = prefs;
     a->gated = -1;
     for (uint32_t i = 0; i < MOY_APP_TOKENS; i++) {
-        a->tokens[i] = MOY_TOKEN_ABSENT;
+        a->tokens[i] = a->near[i] = MOY_TOKEN_ABSENT;
     }
     a->grants = moy_htab_new(mem, MOY_KIND_GRANT, MOY_GRANT_SLOTS, sizeof(moy_grant_t));
     a->clip = mem->alloc(MOY_APP_CLIP_MAX);
@@ -559,7 +561,8 @@ static void put_name(char *dst, uint8_t *len, const char *src, size_t n) {
 
 int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
                         const char *variant, size_t vn,
-                        const int32_t tokens[MOY_APP_TOKENS]) {
+                        const int32_t tokens[MOY_APP_TOKENS],
+                        const int32_t near[MOY_APP_TOKENS]) {
     if (n > MOY_APP_NAME_MAX || vn > MOY_APP_NAME_MAX) {
         return MOY_APP_BAD;
     }
@@ -567,6 +570,7 @@ int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
     put_name(a->name, &a->name_len, name, n);
     put_name(a->variant, &a->variant_len, variant, vn);
     memcpy(a->tokens, tokens, sizeof(a->tokens));
+    memcpy(a->near, near != NULL ? near : tokens, sizeof(a->near));
     a->theme_gen++;
     seq_close(a);
     return MOY_APP_OK;
@@ -581,6 +585,16 @@ size_t moy_app_name_read(const moy_appabi_t *a, char *out, size_t cap) {
 uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]) {
     memcpy(tokens, a->tokens, sizeof(a->tokens));
     return a->theme_gen;
+}
+
+uint32_t moy_app_theme_read_near(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]) {
+    memcpy(tokens, a->near, sizeof(a->near));
+    return a->theme_gen;
+}
+
+int moy_app_theme_near(const moy_appabi_t *a, uint32_t g) {
+    const moy_grant_t *r = grant_row(a, g);
+    return r != NULL && r->cls == MOY_GRANT_RUN;
 }
 
 int moy_app_theme_colors(moy_appabi_t *a, uint32_t g, uint32_t *gen) {
@@ -601,10 +615,11 @@ int moy_app_theme_token(moy_appabi_t *a, uint32_t g, int role, int32_t *v) {
     if (role < 0 || role >= (int)MOY_APP_TOKENS) {
         return MOY_APP_BAD;
     }
-    if (a->tokens[role] == MOY_TOKEN_ABSENT) {
+    const int32_t *row = moy_app_theme_near(a, g) ? a->near : a->tokens;
+    if (row[role] == MOY_TOKEN_ABSENT) {
         return MOY_APP_ABSENT;
     }
-    *v = a->tokens[role];
+    *v = row[role];
     return MOY_APP_OK;
 }
 

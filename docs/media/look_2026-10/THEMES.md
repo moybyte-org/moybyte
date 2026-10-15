@@ -228,6 +228,15 @@ is absent. This is the input to the format spec. Colours are `#rrggbb`
 (gap 1). A paint is a colour, a list of colours, or a list of
 `(t, colour)` stops, with `mode` set to `smooth`, `steps:N` or `dither`.
 
+In the package format (`docs/theming_2026-09.md` §3, style.json's
+`theme.look`) a theme carries both modes: its `colors.dark` and
+`colors.light` and its `look`'s shared, `dark` and `light` objects, so
+`mode` names one of a theme's two. The ramp's names map onto the roles:
+`bg` is `desktop` and `panel`, `raised` is `surface_alt`, `line` is `edge`,
+`border` and `bar_edge`, `text` is `ink` and `chrome_ink`, `dim` is
+`ink_dim` and `chrome_ink_dim`, and `sel` is `selection`; `value`,
+`value_ink`, `sunk`, `lcd` and `lcd_ink` are roles of their own.
+
 | group | fields | absent means |
 |---|---|---|
 | identity | `key`, `name`, `mode` (`dark`/`light`) | — |

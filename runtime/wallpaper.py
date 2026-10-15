@@ -352,11 +352,9 @@ class Wallpaper:
 
     def draw(self, dt):
         b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
-        was = _cart_text(True)          # a wallpaper is a cart: petme128 (§4.7)
         try:
             self._paint(dt)
         finally:
-            _cart_text(was)
             self._stock_unbracket(b)
 
     def _paint(self, dt):
@@ -385,6 +383,10 @@ class Wallpaper:
             except Exception as exc:  # noqa: BLE001 -- fall back to the fill
                 print("Moybyte picture error:", _err_text(exc))
         if self._wp_draw is not None:
+            # A wallpaper is a cart: petme128 and its colours modulo 64 while its
+            # code runs (the app-cart boundary, docs/theming_2026-09.md §4.7); the
+            # fill below is the shell's.
+            was = _cart_text(True)
             try:
                 rb = getattr(self, "_wp_restore_bg", None)
                 if rb is not None:
@@ -446,6 +448,8 @@ class Wallpaper:
                 guard = getattr(ws, "wallpaper_guard", None)
                 if guard is not None:
                     guard.release()     # its strike stands
+            finally:
+                _cart_text(was)
         # A struck-out wallpaper says so once, as a notice: the machine turned
         # it off, so the machine says it (console_notices.notice).
         if self._refused is not None:

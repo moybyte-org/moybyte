@@ -29,6 +29,7 @@ typedef struct {
 } glass_t;
 
 static glass_t G;
+static uint16_t s_block[MOY_CANVAS_BLOCK];   // the theme's block, wire order
 
 int moy_glass_ready(void) {
     return G.bufs != NULL;
@@ -417,7 +418,35 @@ int moy_canvas_new(uint32_t *h, uint16_t w, uint16_t h_px, uint32_t caps,
     c->st[MOY_ST_CX1] = w;
     c->st[MOY_ST_CY1] = h_px;
     c->st[MOY_ST_FONT_SCALE] = 1;
+    memcpy(&c->pal[MOY_CANVAS_PAL - MOY_CANVAS_BLOCK], s_block, sizeof(s_block));
     return MOY_GLASS_OK;
+}
+
+uint8_t moy_canvas_cmask = MOY_CANVAS_PAL - 1;
+
+void moy_canvas_cart(int on) {
+    moy_canvas_cmask = on ? MOY_CANVAS_BLOCK - 1 : MOY_CANVAS_PAL - 1;
+}
+
+uint16_t *moy_canvas_block_words(void) {
+    return s_block;
+}
+
+void moy_canvas_block(const uint16_t block[MOY_CANVAS_BLOCK]) {
+    if (block == NULL) {
+        memset(s_block, 0, sizeof(s_block));
+    } else {
+        memcpy(s_block, block, sizeof(s_block));
+    }
+    if (G.canvases == NULL) {
+        return;
+    }
+    for (uint32_t i = 0; i < G.canvases->used; i++) {
+        if (moy_htab_live(G.canvases, i)) {
+            moy_canvas_row_t *c = moy_htab_row(G.canvases, i);
+            memcpy(&c->pal[MOY_CANVAS_PAL - MOY_CANVAS_BLOCK], s_block, sizeof(s_block));
+        }
+    }
 }
 
 int moy_canvas_get(uint32_t h, moy_canvas_row_t **row) {

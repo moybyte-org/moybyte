@@ -95,16 +95,16 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                         DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
-                        theme_colors, theme_content, theme_known, THEME_NAMES,
+                        theme_known, THEME_NAMES,
                         THEME_VARIANTS, text_scale_floor, adopt_packages,
-                        package, theme_names, forget_package)
+                        package, theme_names, forget_package, live_colors)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
                                 DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
-                                theme_colors, theme_content, theme_known,
+                                theme_known,
                                 THEME_NAMES, THEME_VARIANTS, text_scale_floor,
                                 adopt_packages, package, theme_names,
-                                forget_package)
+                                forget_package, live_colors)
 try:
     from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
                               PICTURE_FILE, derived_of, font_files, keys_of,
@@ -236,7 +236,8 @@ class Appearance:
         self.theme_variant = DEFAULT_VARIANT
         # The live token dict lives on the KERNEL, not here -- see the module
         # docstring. `set_theme` is its only author; this is the first write.
-        ws.theme_colors = theme_colors(DEFAULT_THEME)
+        self.live = None
+        self._go_live(DEFAULT_THEME)
         # The wallpaper in force: a wallpaper cart's id, PICTURE, or None for
         # the theme's `desktop` fill -- the theme's (`_apply_wallpaper`),
         # shown by `_show_wallpaper`. A picture is named (theme, epoch), the
@@ -1028,7 +1029,7 @@ class Appearance:
             return
         ws = self.ws
         _uimod.use_shape(CUSTOM)
-        ws.theme_colors = theme_colors(CUSTOM, self.theme_variant)
+        self._go_live(CUSTOM)
         self.publish()
         ws.launcher.theme = ws.theme_colors
         if getattr(ws, "projects_grid", None) is not None:
@@ -1253,7 +1254,7 @@ class Appearance:
         _uimod.use_shape(name)
         refont = self._install_fonts(name)
         self._install_sheets(name)
-        ws.theme_colors = theme_colors(name, self.theme_variant)
+        self._go_live(name)
         self.publish()
         # The launcher grids read the accent for their selection ring/pill.
         ws.launcher.theme = ws.theme_colors
@@ -1681,15 +1682,28 @@ class Appearance:
         gen = 0
         if abi is not None:
             gen = abi.theme_write(self.theme_name, self.theme_variant,
-                                  self.ws.theme_colors)
+                                  self.ws.theme_colors, self.live.near)
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
         _uimod.look_moved()
 
+    def _go_live(self, name):
+        """Make theme `name` (in the live variant) the colours the shell
+        draws: its block onto every canvas's indices 64.. and the readability
+        check's, its placed tokens `ws.theme_colors`."""
+        live = live_colors(name, self.theme_variant)
+        put = getattr(getattr(self.ws, "canvas", None), "theme_block", None)
+        if put is not None:
+            put(live.block)
+        _uimod._C.theme_block(live.block, live.used)
+        self.live = live
+        self.ws.theme_colors = live.tokens
+
     def content_colors(self):
         """The live theme's CONTENT roles (code syntax, block colours):
-        `chrome.theme_content` for the current theme and variant."""
-        return theme_content(self.theme_name, self.theme_variant)
+        `chrome.theme_content` for the current theme and variant, each RGB
+        one placed in the live block (`chrome.live_colors`)."""
+        return self.live.content
 
     def light_chrome(self):
         """True when the live theme's tool surface is LIGHT (visual identity v1

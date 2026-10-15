@@ -41,7 +41,7 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 63, 4, 34
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 63, 4, 39
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
@@ -117,7 +117,10 @@ _SIGS = (
     ("moy_app_token_name", [c.c_int], _PCHAR),
     ("moy_app_token_flag", [c.c_int], c.c_int),
     ("moy_app_token_of", [_PCHAR, _SIZE], c.c_int),
-    ("moy_app_theme_write", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE, c.POINTER(c.c_int32)],
+    ("moy_app_theme_read_near", [_P, c.POINTER(c.c_int32)], _U32),
+    ("moy_app_theme_near", [_P, _U32], c.c_int),
+    ("moy_app_theme_write", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE, c.POINTER(c.c_int32),
+                             c.POINTER(c.c_int32)],
      c.c_int),
     ("moy_app_theme_read", [_P, c.POINTER(c.c_int32)], _U32),
     ("moy_app_theme_colors", [_P, _U32, _PU32], c.c_int),
@@ -281,8 +284,8 @@ def binding(sanitize=False):
             self._pointer = None
             self._servers = {}
             self._served = {}
-            self._colors = None
-            self._colors_gen = 0
+            self._colors = None        # (the colour dict, its generation)
+            self._near = None          # ...the nearest-index one a RUN grant reads
 
         def __del__(self):
             if getattr(self, "_own", False) and self._p:
@@ -364,14 +367,18 @@ def binding(sanitize=False):
             lib.moy_app_pointer_bind(self._p, c.addressof(p) if ok else None)
             return ok
 
-        def theme_write(self, name, variant, colors):
-            tok = (c.c_int32 * TOKENS_N)(*([TOKEN_ABSENT] * TOKENS_N))
-            for k, v in colors.items():
-                if k not in token_names:
-                    raise ValueError("a token outside the vocabulary")
-                tok[token_names.index(k)] = int(v)
+        def theme_write(self, name, variant, colors, near=None):
+            def table(d):
+                tok = (c.c_int32 * TOKENS_N)(*([TOKEN_ABSENT] * TOKENS_N))
+                for k, v in d.items():
+                    if k not in token_names:
+                        raise ValueError("a token outside the vocabulary")
+                    tok[token_names.index(k)] = int(v)
+                return tok
+            tok = table(colors)
             nb, vb = _str(name), _str(variant)
-            _check(lib.moy_app_theme_write(self._p, nb, len(nb), vb, len(vb), tok))
+            _check(lib.moy_app_theme_write(self._p, nb, len(nb), vb, len(vb), tok,
+                                           None if near is None else table(near)))
             return lib.moy_app_theme_read(self._p, tok) & 0x3fffffff
 
         def serve(self, role, server):
@@ -431,16 +438,20 @@ def binding(sanitize=False):
             self._served[key] = self._served.get(key, 0) + 1
             return getattr(server, verb)
 
-        def _colors_at(self, gen):
-            if self._colors is not None and self._colors_gen == gen:
-                return self._colors
+        def _colors_at(self, gen, near=False):
+            have = self._near if near else self._colors
+            if have is not None and have[1] == gen:
+                return have[0]
             tok = (c.c_int32 * TOKENS_N)()
-            gen = lib.moy_app_theme_read(self._p, tok)
+            gen = (lib.moy_app_theme_read_near if near else lib.moy_app_theme_read)(self._p, tok)
             d = {}
             for i, v in enumerate(tok):
                 if v != TOKEN_ABSENT:
                     d[token_names[i]] = bool(v) if token_flags[i] else v
-            self._colors, self._colors_gen = d, gen
+            if near:
+                self._near = (d, gen)
+            else:
+                self._colors = (d, gen)
             return d
 
     def kernel(fresh):
@@ -509,7 +520,8 @@ def binding(sanitize=False):
         def colors(self):
             gen = c.c_uint32()
             _check(lib.moy_app_theme_colors(self._app._p, self._g, c.byref(gen)))
-            return self._app._colors_at(gen.value)
+            return self._app._colors_at(gen.value,
+                                        bool(lib.moy_app_theme_near(self._app._p, self._g)))
 
         def token(self, role):
             v = c.c_int32()

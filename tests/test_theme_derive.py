@@ -70,8 +70,13 @@ def _reference(name, variant, accent, tint):
     return row
 
 
+def _val(x):
+    """A theme.json colour: an index, or "#rrggbb" as RGB | 0xrrggbb."""
+    return 0x1000000 | int(x[1:], 16) if isinstance(x, str) else int(x)
+
+
 def _row(d):
-    return tuple(int(d[r]) for r in ROLES)
+    return tuple(_val(d[r]) for r in ROLES)
 
 
 def _custom(source, accent=None, tint=None):
@@ -82,7 +87,7 @@ def _custom(source, accent=None, tint=None):
 
 
 def _src(name, **kw):
-    d = {"format": 1, "name": name}
+    d = {"format": 2, "name": name}
     d.update(kw)
     return json.dumps(d).encode()
 
@@ -117,7 +122,7 @@ def test_every_combination_is_the_reference_and_reads(name):
             b = _custom(name, accent, tint)
             pkg = json.loads(b)
             assert pkg["name"] == "custom" and "inherits" not in pkg
-            rc, notes, got_name, dark, light, _fonts, _lay, _sh = moy_ui.theme_resolve(b)
+            rc, notes, got_name, dark, light, _fonts, _lay, _sh, _look = moy_ui.theme_resolve(b)
             assert (rc, notes, got_name) == (OK, 0, "custom"), (name, accent, tint)
             for v, resolved in (("dark", dark), ("light", light)):
                 want = _reference(name, v, accent, tint)
@@ -246,7 +251,7 @@ def _maximal(name="maximal", colors=True):
               text=text, layout={"bars": bars})
     if colors:
         kw["colors"] = rows
-    return json.dumps(dict({"format": 1, "name": name}, **kw), separators=(",", ":")).encode()
+    return json.dumps(dict({"format": 2, "name": name}, **kw), separators=(",", ":")).encode()
 
 
 def test_a_maximal_source_stays_under_the_cap():
@@ -293,7 +298,7 @@ def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
                 assert rc == OK and len(b) <= TH["bytes"]
                 cols = json.loads(b).get("colors", {})
                 assert all(len(c) < len(ROLES) for c in cols.values())
-                _rc, notes, _name, dark, light, _f, _l, _s = moy_ui.theme_resolve(b)
+                _rc, notes, _name, dark, light, _f, _l, _s, _lk = moy_ui.theme_resolve(b)
                 assert notes == 0
                 for v, resolved in (("dark", dark), ("light", light)):
                     want = _reference("night", v, accent, tint)

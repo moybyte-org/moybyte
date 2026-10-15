@@ -49,7 +49,7 @@ def _put(ws, src=None, name=NAME):
 
 
 def _src(**kw):
-    pkg = {"format": 1, "name": NAME, "colors": {"dark": {"panel": 2}}}
+    pkg = {"format": 2, "name": NAME, "colors": {"dark": {"panel": 2}}}
     pkg.update(kw)
     return json.dumps(pkg).encode()
 
@@ -109,10 +109,10 @@ def test_the_cards_resolve_a_package_without_installing_it(tmp_path):
 
 
 @pytest.mark.parametrize("src,why", [
-    (b'{"format": 1, "name": "other"}', "name"),
+    (b'{"format": 2, "name": "other"}', "name"),
     (_src(inherits="berry"), "chain"),
     (_src(format=9), "newer"),
-    (b'{"format": 1, "name": "dusk", ', "syntax"),
+    (b'{"format": 2, "name": "dusk", ', "syntax"),
     (_src(colors={"dark": {"panel": 2}}, pad="x" * 5000), "big"),
 ])
 def test_a_package_that_will_not_load_boots_the_default_with_one_note(

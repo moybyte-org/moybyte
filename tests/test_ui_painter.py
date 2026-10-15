@@ -37,7 +37,7 @@ def theme():
     """Install a package and make its shape the toolkit's; the empty shape
     again afterwards, so no other test draws with it."""
     def use(**kw):
-        d = {"format": 1, "name": "painted"}
+        d = {"format": 2, "name": "painted"}
         d.update(kw)
         rc, _notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == 0

@@ -8,6 +8,7 @@
 #   -- the unified top bar's icon theme  the bar's icon sheet
 #   -- Panel THEMES                   THEME_NAMES, the seed packages' names
 #   theme_colors                      the full token dict for a theme and variant
+#   Live                              the live theme's colours, RGB placed in the block (live_colors)
 """The console's stateless base layer -- the chrome + geometry the shared Moybyte
 console draws with, extracted from console.py so the Workstation kernel is alone in
 that file.
@@ -794,7 +795,10 @@ _ICON_VERSION = 5
 # (native/moy_ui/moy_theme.c), which validates them, walks `inherits` and
 # fills every role a package leaves unset from style.json's derivation rules.
 # The roles are style.json's `tokens`; their jobs are
-# docs/visual_identity_v1.md Section 4.3's. Colour roles are MOY64 indices;
+# docs/visual_identity_v1.md Section 4.3's. A colour role is a MOY64 index or
+# RGB (`RGB | 0xrrggbb`, docs/look_2026-10.md step 5): `theme_colors` answers
+# the theme's own values, and `live_colors` the live theme's as the shell
+# draws them, each RGB role placed in the block at indices 64..127;
 # `surface_light`, `bar_light` and `band_light` are presentation flags
 # (booleans here).
 # The default is the first seed ("night", the moybyte site palette). The
@@ -810,6 +814,8 @@ DEFAULT_VARIANT = "dark"
 _THEME_FLAGS = ("surface_light", "bar_light", "band_light")
 _THEME_CACHE = {}
 _CONTENT_CACHE = {}
+_LIVE_CACHE = {}
+RGB = 0x1000000             # a colour value at or above: RGB | 0xrrggbb
 # The store's packages: name -> theme_resolve's answer, None until first read.
 _PACKAGES = {}
 _PKG_READ = [None]          # name -> its theme.json's bytes, or None
@@ -838,11 +844,11 @@ def package(name):
         read = _PKG_READ[0]
         src = read(name) if read is not None else None
         if src is None:
-            got = (_ui._C.theme_resolve(b"")[0], 0, None, None, None, None, None, None)
+            got = (_ui._C.theme_resolve(b"")[0], 0, None, None, None, None, None, None, None)
         else:
             got = _ui._C.theme_resolve(src)
             if got[0] == 0 and got[2] != name:
-                got = (4, got[1], None, None, None, None, None, None)
+                got = (4, got[1], None, None, None, None, None, None, None)
         _PACKAGES[name] = got
     return got
 
@@ -909,6 +915,88 @@ def forget_themes():
     moved what the names resolve to."""
     _THEME_CACHE.clear()
     _CONTENT_CACHE.clear()
+    _LIVE_CACHE.clear()
+
+
+def _look_raw(name, light):
+    if name not in THEME_NAMES and name != _ui._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            return got[8][1 if light else 0]
+    return _ui._C.theme_look(name, light)
+
+
+_LOOK_FIELDS = []
+
+
+def look_fields():
+    """The look's leaves (`moy_ui.theme_look_fields`): (names, kinds, a
+    button's leaf names)."""
+    if not _LOOK_FIELDS:
+        _LOOK_FIELDS.append(_ui._C.theme_look_fields())
+    return _LOOK_FIELDS[0]
+
+
+class Live:
+    """The live theme's colours as the shell draws them (docs/look_2026-10.md
+    step 5): `tokens` and `content` with each RGB role placed in the block
+    (`block`, `used` of its 64 RGB565 words, indices 64..), `near` each
+    token's nearest MOY64 index (what theme(), a compiled app and a cart
+    canvas are given), and `look` the look's leaves with its colours placed
+    in the same block."""
+
+    __slots__ = ("tokens", "content", "near", "block", "used", "look")
+
+
+def live_colors(name, variant=DEFAULT_VARIANT):
+    """The `Live` record of theme `name` in `variant`, cached as
+    `theme_colors` is."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    if variant not in THEME_VARIANTS:
+        variant = DEFAULT_VARIANT
+    key = (name, variant)
+    got = _LIVE_CACHE.get(key)
+    if got is not None:
+        return got
+    light = variant == "light"
+    row = _row(name, light)
+    look = _look_raw(name, light)
+    names, kinds, _btn = look_fields()
+    leaves = look[0]
+    at = [i for i in range(len(leaves)) if kinds[i] == "colour"]
+    placed, near, block, used = _ui._C.theme_place(
+        list(row) + [leaves[i] for i in at])
+    toks = _ui._C.tokens()
+    roles = _ui._C.theme_roles()
+    rec = Live()
+    rec.tokens, rec.content, near_tok = {}, {}, {}
+    for i in range(len(roles)):
+        v = placed[i]
+        if i < len(toks):
+            flag = roles[i] in _THEME_FLAGS
+            rec.tokens[roles[i]] = bool(v) if flag else v
+            near_tok[roles[i]] = bool(v) if flag else near[i]
+        else:
+            rec.content[roles[i]] = v
+    rec.near = near_tok
+    lv = list(leaves)
+    for k, i in enumerate(at):
+        lv[i] = placed[len(row) + k]
+    rec.look = (dict(zip(names, lv)),) + tuple(look[1:5])
+    rec.block, rec.used = block, used
+    _LIVE_CACHE[key] = rec
+    return rec
+
+
+def rgb565_of(v):
+    """A colour value's RGB565 word: an index's, a block slot's or RGB's."""
+    return _ui._C.theme_rgb(v)[0]
+
+
+def nearest_of(v):
+    """A colour value's nearest MOY64 index."""
+    return _ui._C.theme_rgb(v)[2]
 
 
 def theme_content(name, variant=DEFAULT_VARIANT):

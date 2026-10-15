@@ -4,9 +4,11 @@
 // can, and flattens a theme into the live token row the toolkit's looks
 // resolve against (moy_ui_look_set) and native/moy_app publishes.
 //
-// Format 1 defines `format`, `name`, `inherits`, `colors.dark` /
-// `colors.light` (role -> MOY64 index, or a flag role -> true/false; a role
-// is a token of the live row or a content role), `metrics` (theme-wide
+// Format 2 defines `format`, `name`, `inherits`, `colors.dark` /
+// `colors.light` (role -> a MOY64 index or "#rrggbb", or a flag role ->
+// true/false; a role is a token of the live row or a content role), `look`
+// (the theme model's fields, docs/media/look_2026-10/THEMES.md: shared, then
+// a `dark` and a `light` object of their own), `metrics` (theme-wide
 // numbers, each clamped to its range), `text` (part -> state -> a text
 // effect and the role it paints with) and `surfaces` (part -> state -> one
 // line of the surface grammar, compiled here into a record the painter
@@ -18,8 +20,9 @@
 // docs/shell_layout_2026-10.md §5, each capped and clamped here and the
 // required widgets checked on the data). The keys style.json's theme section
 // lists as reserved are accepted and not yet read; any other key is ignored
-// and noted. A reader refuses a newer `format`; a key a later phase defines
-// is additive and needs no bump.
+// and noted. A reader refuses any `format` but its own (a format-1 package
+// reads as absent: no migration); a key a later phase defines is additive and
+// needs no bump.
 //
 // Resolution walks `inherits` from the theme to the default seed (a theme
 // that names no parent inherits the default), each role taken from the
@@ -59,13 +62,28 @@ enum {
 
 // What a parse noted and got past (a bit set each).
 enum {
-    MOY_THEME_N_CLAMPED = 1,  // an index outside 0..63, clamped
+    MOY_THEME_N_CLAMPED = 1,  // an index outside 0..63 or a number out of range, clamped
     MOY_THEME_N_UNKNOWN = 2,  // a key or role this format does not define, ignored
     MOY_THEME_N_DROPPED = 4,  // a value of the wrong type, dropped
 };
 
 #define MOY_THEME_NAME_MAX 24
 #define MOY_THEME_UNSET (-1)
+
+// A colour value (a role's, a look leaf's): a MOY64 index 0..63, a block slot
+// 64..127 (moy_theme_place's answer only), or RGB: MOY_THEME_RGB | 0xrrggbb.
+// A paint leaf may also be MOY_THEME_PAINT | k (paint k of its look) or
+// MOY_THEME_VIBRANCY. Any leaf may be MOY_THEME_NONE (silent: the renderer
+// derives it) or MOY_THEME_OFF (`null`: explicitly none).
+#define MOY_THEME_RGB 0x1000000
+#define MOY_THEME_PAINT 0x2000000
+#define MOY_THEME_VIBRANCY 0x3000000
+#define MOY_THEME_NONE INT32_MIN
+#define MOY_THEME_OFF (INT32_MIN + 1)
+#define MOY_THEME_IS_RGB(v) ((v) >= MOY_THEME_RGB && (v) < MOY_THEME_PAINT)
+#define MOY_THEME_SLOT0 64      // the shell's block: slots 64..127
+#define MOY_THEME_BLOCK 64
+#define MOY_THEME_LOOK_TEXTS 4  // the text leaves' strings a look holds
 #define MOY_THEME_NO_METRIC INT8_MIN
 #define MOY_THEME_NO_ROLE 0xff
 
@@ -95,10 +113,49 @@ typedef struct {
     uint8_t home;                                    // index of moy_theme_home_names
 } moy_theme_layout_t;
 
+// A paint (THEMES.md): stops (t in thousandths, a colour) and a mode of
+// moy_theme_paint_modes, `steps` its band count.
+typedef struct {
+    uint8_t n, mode, steps, pad;
+    int16_t t[MOY_THEME_PAINT_STOPS];
+    int32_t c[MOY_THEME_PAINT_STOPS];
+} moy_theme_paint_t;
+
+// A package's look: what it sets, leaf by leaf, in a section (0 shared,
+// 1 `dark`, 2 `light`); its tiles (app -> colour) and app_buttons (app and
+// kind -> a button's leaves, MOY_THEME_NONE where silent).
+typedef struct {
+    uint16_t leaf;
+    uint8_t section, pad;
+    int32_t v;
+} moy_theme_entry_t;
+
+typedef struct {
+    char name[MOY_THEME_MAPNAME_MAX + 1];
+    uint8_t section, kind;
+    int32_t v[MOY_THEME_BTN_LEAVES];        // a tile: v[0] its colour
+} moy_theme_mapent_t;
+
+typedef struct {
+    int32_t v[MOY_THEME_LEAVES];
+    uint8_t n_paints, n_tiles, n_appbtn, n_text;
+    moy_theme_paint_t paint[MOY_THEME_PAINTS_CAP];
+    moy_theme_mapent_t tile[MOY_THEME_TILES_CAP];
+    moy_theme_mapent_t appbtn[MOY_THEME_APPBTN_CAP];
+    char text[MOY_THEME_LOOK_TEXTS][MOY_THEME_LOOK_TEXT_MAX + 1];  // a text leaf: index + 1
+} moy_theme_look_t;
+
 typedef struct {
     char name[MOY_THEME_NAME_MAX + 1];
     char inherits[MOY_THEME_NAME_MAX + 1];  // "" : the default
-    int8_t role[2][MOY_THEME_ROLES];        // [variant][role], MOY_THEME_UNSET where silent
+    int32_t role[2][MOY_THEME_ROLES];       // [variant][role], MOY_THEME_UNSET where silent
+    moy_theme_entry_t entry[MOY_THEME_ENTRIES_CAP];
+    uint16_t n_entries;
+    uint8_t n_paints, n_tiles, n_appbtn, n_text;
+    moy_theme_paint_t paint[MOY_THEME_PAINTS_CAP];
+    moy_theme_mapent_t tile[MOY_THEME_TILES_CAP];
+    moy_theme_mapent_t appbtn[MOY_THEME_APPBTN_CAP];
+    char text[MOY_THEME_LOOK_TEXTS][MOY_THEME_LOOK_TEXT_MAX + 1];
     int8_t metric[MOY_THEME_METRICS];       // MOY_THEME_NO_METRIC where silent
     uint8_t effect[MOY_THEME_EFFECTS_CAP][4];   // part, state, effect, role
     uint8_t n_effects;
@@ -135,6 +192,35 @@ void moy_theme_uninstall(void);
 // MOY_THEME_CHAIN / MOY_THEME_NOMEM with the default's row written instead.
 int moy_theme_resolve(const char *name, size_t n, int variant,
                       int32_t row[MOY_THEME_ROLES], uint32_t *unreadable);
+
+// Theme `name`'s look in `variant`: each leaf from the nearest package that
+// sets it, its variant's object before its shared one; with `defaults`, a
+// leaf still silent takes the model's default. The return is as resolve's.
+int moy_theme_look(const char *name, size_t n, int variant, int defaults,
+                   moy_theme_look_t *out);
+extern const size_t moy_theme_look_bytes;
+// Leaves, paint stops, paints, tiles, app_buttons, a button's leaves, a map
+// name's and a text's longest, texts, the first button leaf: the bindings' check.
+extern const int moy_theme_look_dims[10];
+
+// -- RGB (docs/look_2026-10.md step 5) ------------------------------------------
+//
+// A colour value's RGB565 word (canonical order), its WCAG luminance (x10000,
+// moy_theme_lum's scale, on the RGB565 it shows as) and its nearest MOY64
+// index (what theme(), a compiled app and a cart canvas are given). A slot
+// reads the live block (moy_theme_block_use).
+uint16_t moy_theme_rgb565(int32_t v);
+int32_t moy_theme_lum_of(int32_t v);
+int32_t moy_theme_nearest(int32_t v);
+// Place `n` colour values into a block: an index stays, an RGB value takes
+// the slot of its RGB565 word (64 + its place in `block`, a new word the next
+// free one; past MOY_THEME_BLOCK, its nearest index). out[i] is the placed
+// value, near[i] the nearest index of each; anything else is copied. The
+// words used.
+int moy_theme_place(const int32_t *in, int n, int32_t *out, int32_t *near,
+                    uint16_t block[MOY_THEME_BLOCK]);
+// The live theme's block, which moy_theme_lum_of reads a slot through.
+void moy_theme_block_use(const uint16_t block[MOY_THEME_BLOCK], int used);
 
 // Theme `name`'s shape: its metrics (every one set), its text effects and its
 // surfaces, each from the nearest package that sets it (moy_ui.h's

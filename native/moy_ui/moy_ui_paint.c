@@ -46,7 +46,7 @@ static void solid(paint_t *p, int x, int y, int w, int h, int ci) {
     if (ci < 0 || w <= 0 || h <= 0) {
         return;
     }
-    moy_target_fill(p->t, x, y, w, h, p->pal[ci & 63]);
+    moy_target_fill(p->t, x, y, w, h, p->pal[ci & moy_ui_cmask()]);
     p->fills++;
 }
 
@@ -72,7 +72,7 @@ static void pattern(paint_t *p, int x, int y, int w, int h, unsigned pat, int a,
     if (x1 <= x0) {
         return;
     }
-    uint16_t on = p->pal[a & 63], off = p->pal[b & 63];
+    uint16_t on = p->pal[a & moy_ui_cmask()], off = p->pal[b & moy_ui_cmask()];
     for (int row = y0; row < y1; row++) {
         unsigned bits = (pat >> (12 - ((row & 3) << 2))) & 15u;
         moy_pat_span(t->px + (size_t)row * (size_t)stride + (size_t)x0, x0, bits, on, off,
@@ -169,7 +169,7 @@ static int term(int look, int t, int dflt) {
     return t >= 0 ? t : moy_ui_token(look, -1 - t);
 }
 
-int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[64], int look,
+int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[128], int look,
                          moy_ui_box_t b, const moy_ui_surface_t *sf, int field, int edge,
                          int radius) {
     paint_t p = {t, pal, 0};

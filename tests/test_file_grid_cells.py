@@ -24,6 +24,10 @@ from pathlib import Path
 from runtime import ui
 import ui_twin as twin
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
+
+# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s
+# RGB roles are tests/test_theme_rgb.py's and its goldens'.
+THEME_NAMES = tuple(n for n in THEME_NAMES if n != "moy")
 from runtime.file_widgets import FileGridView
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 

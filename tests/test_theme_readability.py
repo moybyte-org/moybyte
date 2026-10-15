@@ -21,7 +21,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 from runtime import ui
-from runtime.chrome import theme_colors
+from runtime.chrome import live_colors, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from tools.gen_ui_tables import _luminance
@@ -39,8 +39,13 @@ STATES = {"rest": ui.REST, "hover": ui.HOVER, "on": ui.ON, "hot": ui.HOT,
 VARIANTS = ("dark", "light")
 
 
+def _lum(v):
+    """An index's luminance, or a block slot's or an RGB value's (the C's)."""
+    return LUM[v] if v < 64 else ui._C.theme_rgb(v)[1]
+
+
 def _clears(a, b):
-    la, lb = LUM[a], LUM[b]
+    la, lb = _lum(a), _lum(b)
     hi, lo = max(la, lb), min(la, lb)
     return (hi + 500) * 10 >= TH["contrast"] * (lo + 500)
 
@@ -88,7 +93,10 @@ def test_every_kind_inks_its_field_with_a_floor_pair():
 @pytest.mark.parametrize("variant", VARIANTS)
 @pytest.mark.parametrize("seed", TH["seeds"])
 def test_every_seed_reads_every_kind(seed, variant):
-    th = theme_colors(seed, variant)
+    """Through the live placement: an RGB role reads in its block slot."""
+    live = live_colors(seed, variant)
+    ui._C.theme_block(live.block, live.used)
+    th = live.tokens
     bad = []
     for kind, st, _f, _i in _floor_states():
         field, ink, _edge = ui.state_colors(th, kind, STATES[st])
@@ -142,7 +150,7 @@ def test_the_inactive_title_is_a_floor_pair():
 
 def _install(name, surfaces, colors=None):
     import moy_ui
-    pkg = {"format": 1, "name": name, "surfaces": surfaces}
+    pkg = {"format": 2, "name": name, "surfaces": surfaces}
     if colors:
         pkg["colors"] = colors
     rc, _notes = moy_ui.theme_install(json.dumps(pkg).encode())

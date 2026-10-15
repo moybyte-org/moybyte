@@ -80,7 +80,7 @@ def _cell(part, state, sub=0):
 
 
 def _install(name="spr", **kw):
-    pkg = {"format": 1, "name": name}
+    pkg = {"format": 2, "name": name}
     pkg.update(kw)
     assert moy_ui.theme_install(json.dumps(pkg).encode())[0] == OK
     chrome.forget_themes()
@@ -155,7 +155,7 @@ def test_a_cell_all_slot_0_is_no_sprite_and_a_state_follows_the_chain():
 
 
 def test_a_package_names_its_sheets_and_custom_carries_them():
-    src = json.dumps({"format": 1, "name": "spr", "sprites": "parts.moygfx",
+    src = json.dumps({"format": 2, "name": "spr", "sprites": "parts.moygfx",
                       "icons": "icons.moygfx"}).encode()
     got = moy_ui.theme_resolve(src)
     assert got[0] == OK and got[1] == 0 and got[7] == ("parts.moygfx", "icons.moygfx")
@@ -169,7 +169,7 @@ def test_a_package_names_its_sheets_and_custom_carries_them():
     # a name that is no .moygfx of the folder is dropped and noted
     for bad in ("parts.png", ".moygfx", "../x.moygfx", "A.moygfx", 3, {"a": 1},
                 "x" * 30 + ".moygfx"):
-        got = moy_ui.theme_resolve(json.dumps({"format": 1, "name": "spr",
+        got = moy_ui.theme_resolve(json.dumps({"format": 2, "name": "spr",
                                                "sprites": bad}).encode())
         assert got[0] == OK and got[1] & 4 and got[7] == (None, None), bad
     assert "sprites" not in TH["reserved"] and "icons" not in TH["reserved"]

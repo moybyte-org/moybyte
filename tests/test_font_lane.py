@@ -306,7 +306,7 @@ def test_the_boards_module_answers_as_the_host_does(tmp_path):
 # --- the theme's `fonts` key ---------------------------------------------------------
 
 def _theme(name, **keys):
-    return json.dumps(dict({"format": 1, "name": name}, **keys)).encode()
+    return json.dumps(dict({"format": 2, "name": name}, **keys)).encode()
 
 
 NIGHT_FONTS = (("ui", "tiny5.fnt"), ("title", "tiny5.fnt"))

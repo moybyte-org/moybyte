@@ -309,7 +309,7 @@ PAINTER_SCENES = (
 
 def _painter_src(text, metrics):
     import json
-    return json.dumps({"format": 1, "name": "painted", "metrics": metrics,
+    return json.dumps({"format": 2, "name": "painted", "metrics": metrics,
                        "surfaces": {"desk": {"rest": text}}}).encode()
 
 
@@ -384,7 +384,7 @@ SPRITE_SCENES = (
     ("frame", ((2, 2, 42, 30), 14, True), 1),
     ("frame", ((0, 1, 44, 34), 12, False), 1),
 )
-_SPRITE_THEME = b'{"format":1,"name":"spr","colors":{"dark":{"accent":12,"title":3}}}'
+_SPRITE_THEME = b'{"format":2,"name":"spr","colors":{"dark":{"accent":12,"title":3}}}'
 
 
 def sprite_host_frames():
@@ -616,7 +616,7 @@ def layout_corpus(n, seed=5):
               {"edge": "bottom", "size": 22,
                "left": ["menu", "separator", "chips", "zone", "spacer", "text"],
                "right": ["close", "wifi", "battery", "clock"], "text": ["a!"]}]]
-    good = [json.dumps({"format": 1, "name": "fz", "inherits": "berry",
+    good = [json.dumps({"format": 2, "name": "fz", "inherits": "berry",
                         "layout": {"bars": c}}).encode() for c in cases]
     rng = random.Random(seed)
     out = list(good)

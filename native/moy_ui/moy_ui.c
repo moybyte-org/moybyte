@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "moy_ui.h"
+#include "moy_theme.h"
 
 #if __has_include("esp_heap_caps.h")
 #include "esp_heap_caps.h"
@@ -99,11 +100,17 @@ int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]) {
     }
     look_t *l = &u->look[look];
     memcpy(l->tok, tokens, sizeof(l->tok));
+    for (int i = 0; i < MOY_UI_TOKENS; i++) {
+        // an RGB value no block holds: its nearest MOY64 index
+        if (l->tok[i] != MOY_UI_ABSENT && l->tok[i] >= MOY_THEME_SLOT0 + MOY_THEME_BLOCK) {
+            l->tok[i] = moy_theme_nearest(l->tok[i]);
+        }
+    }
     memset(l->have, 0, sizeof(l->have));
     for (int i = 0; i < MOY_THEME_SPRITE_SLOTS; i++) {
         int8_t t = moy_theme_sprite_slots[i];
         int32_t v = t == INT8_MIN ? MOY_UI_ABSENT : t >= 0 ? t : l->tok[-1 - t];
-        l->slot[i] = (int16_t)(v == MOY_UI_ABSENT ? -1 : (v & 63));
+        l->slot[i] = (int16_t)(v == MOY_UI_ABSENT ? -1 : (v & 127));
     }
     return MOY_UI_OK;
 }
@@ -195,7 +202,7 @@ int moy_ui_token(int look, int token) {
         return -1;
     }
     int32_t v = u->look[look].tok[token];
-    return v == MOY_UI_ABSENT ? -1 : (int)(v & 63);
+    return v == MOY_UI_ABSENT ? -1 : (int)(v & 127);
 }
 
 int moy_ui_part(const char *name, size_t n) {
@@ -283,6 +290,10 @@ int moy_ui_cart_text(int on) {
     return was;
 }
 
+int moy_ui_cmask(void) {
+    return s_cart ? 63 : 127;
+}
+
 int64_t moy_ui_print_font(uint32_t font) {
     if (!s_cart) {
         return moy_text_print_font_use(font);
@@ -361,10 +372,10 @@ static int part_ink(int look, int part, int state, int *field) {
 }
 
 static int readable(int a, int b) {
-    if (a < 0 || a > 63 || b < 0 || b > 63) {
+    if (a < 0 || a > 127 || b < 0 || b > 127) {
         return 1;
     }
-    int32_t la = moy_theme_lum[a], lb = moy_theme_lum[b];
+    int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);
     int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
     return (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
 }

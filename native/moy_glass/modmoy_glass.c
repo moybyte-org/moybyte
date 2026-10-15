@@ -661,6 +661,44 @@ static mp_obj_t glass_kernel_bump(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(glass_kernel_bump_obj, glass_kernel_bump);
 
+// -- the theme's block and the cart boundary (moy_canvas.h) --------------------
+
+// block(words): the live theme's 64 RGB565 words, in this build's wire order,
+// into every canvas row's entries 64..127; None clears it.
+static mp_obj_t glass_block(mp_obj_t words) {
+    if (words == mp_const_none) {
+        moy_canvas_block(NULL);
+        return mp_const_none;
+    }
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(words, &bi, MP_BUFFER_READ);
+    if (bi.len != MOY_CANVAS_BLOCK * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("block"));
+    }
+    moy_canvas_block((const uint16_t *)bi.buf);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(glass_block_obj, glass_block);
+
+// cart(on): the cart boundary's colour mask, 63 while a cart's code runs.
+static mp_obj_t glass_cart(mp_obj_t on) {
+    moy_canvas_cart(mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(glass_cart_obj, glass_cart);
+
+// cmask(): a one-byte view of the mask, which the canvas class's Python verbs read.
+static mp_obj_t glass_cmask(void) {
+    return mp_obj_new_bytearray_by_ref(1, &moy_canvas_cmask);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(glass_cmask_obj, glass_cmask);
+
+// block_view(): the block's 64 words as a view.
+static mp_obj_t glass_block_view(void) {
+    return row_view('H', MOY_CANVAS_BLOCK, moy_canvas_block_words());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(glass_block_view_obj, glass_block_view);
+
 // -- the panel's backlight -------------------------------------------------------
 //
 // backlight(on): the panel entry sprint 2 gave the recovery floor
@@ -2272,6 +2310,10 @@ static const mp_rom_map_elem_t glass_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&glass_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_kernel_epoch), MP_ROM_PTR(&glass_kernel_epoch_obj) },
     { MP_ROM_QSTR(MP_QSTR_kernel_bump), MP_ROM_PTR(&glass_kernel_bump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_block), MP_ROM_PTR(&glass_block_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cart), MP_ROM_PTR(&glass_cart_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cmask), MP_ROM_PTR(&glass_cmask_obj) },
+    { MP_ROM_QSTR(MP_QSTR_block_view), MP_ROM_PTR(&glass_block_view_obj) },
     #ifdef MOY_KERNEL_PANEL
     { MP_ROM_QSTR(MP_QSTR_backlight), MP_ROM_PTR(&glass_backlight_obj) },
     #endif

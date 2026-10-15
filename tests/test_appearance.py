@@ -422,7 +422,7 @@ def _store_package(ws, name, keys):
     (d / "manifest.json").write_text(json.dumps(
         {"format": "moy-1", "title": name.title(), "runtime": "theme",
          "main": "theme.json", "moybyte": {"type": "theme"}}))
-    pkg = {"format": 1, "name": name, "colors": {"dark": {"panel": 2}}}
+    pkg = {"format": 2, "name": name, "colors": {"dark": {"panel": 2}}}
     pkg.update(keys)
     (d / "theme.json").write_text(json.dumps(pkg))
     ws.carts.rescan()

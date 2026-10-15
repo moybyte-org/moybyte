@@ -9,6 +9,7 @@
 #include "py/objstr.h"
 
 #include "moy_ui.h"
+#include "moy_canvas.h"
 #include "moy_theme.h"
 #include "moy_str.h"
 #include "moy_ui_wasm.h"
@@ -91,7 +92,7 @@ static mp_obj_t ui_theme(mp_obj_t name, mp_obj_t light) {
                                : MOY_THEME_DARK, row, &bad);
     mp_obj_t items[MOY_THEME_ROLES];
     for (int i = 0; i < MOY_THEME_ROLES; i++) {
-        items[i] = MP_OBJ_NEW_SMALL_INT(row[i]);
+        items[i] = mp_obj_new_int(row[i]);
     }
     mp_obj_t out[3] = {mp_obj_new_tuple(MOY_THEME_ROLES, items),
                        mp_obj_new_int_from_uint(bad), MP_OBJ_NEW_SMALL_INT(rc)};
@@ -405,15 +406,160 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 // (refused, bars, home) as theme_layout and theme_home answer, sheets the
 // package's OWN (sprites, icons) files, None where it names none. On a refusal
 // every field after notes is None.
+// -- the look and RGB (docs/look_2026-10.md step 5) ---------------------------
+
+static mp_obj_t ints(const int32_t *v, int n) {
+    mp_obj_t t = mp_obj_new_tuple(n, NULL);
+    mp_obj_tuple_t *tt = MP_OBJ_TO_PTR(t);
+    for (int i = 0; i < n; i++) {
+        tt->items[i] = mp_obj_new_int(v[i]);
+    }
+    return t;
+}
+
+// theme_look(name, light) -> (leaves, paints, tiles, app_buttons, texts, rc):
+// the look resolved with the model's defaults (moy_theme_look); a paint is
+// (mode, steps, ((t, colour), ...)) with t in thousandths, a tile (app,
+// colour), an app_buttons entry (app, kind, leaves).
+static mp_obj_t ui_theme_look(mp_obj_t name, mp_obj_t light) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    moy_theme_look_t *lk = m_new(moy_theme_look_t, 1);
+    int rc = moy_theme_look(s, n, mp_obj_is_true(light) ? MOY_THEME_LIGHT : MOY_THEME_DARK,
+                            1, lk);
+    mp_obj_t out[6];
+    out[0] = ints(lk->v, MOY_THEME_LEAVES);
+    mp_obj_t paints = mp_obj_new_tuple(lk->n_paints, NULL);
+    for (int i = 0; i < lk->n_paints; i++) {
+        const moy_theme_paint_t *p = &lk->paint[i];
+        mp_obj_t stops = mp_obj_new_tuple(p->n, NULL);
+        for (int k = 0; k < p->n; k++) {
+            mp_obj_t st[2] = {MP_OBJ_NEW_SMALL_INT(p->t[k]), mp_obj_new_int(p->c[k])};
+            ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(stops))->items[k] = mp_obj_new_tuple(2, st);
+        }
+        mp_obj_t pt[3] = {name_obj(moy_theme_paint_modes[p->mode]),
+                          MP_OBJ_NEW_SMALL_INT(p->steps), stops};
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(paints))->items[i] = mp_obj_new_tuple(3, pt);
+    }
+    out[1] = paints;
+    mp_obj_t tiles = mp_obj_new_tuple(lk->n_tiles, NULL);
+    for (int i = 0; i < lk->n_tiles; i++) {
+        mp_obj_t t[2] = {mp_obj_new_str(lk->tile[i].name, strlen(lk->tile[i].name)),
+                         mp_obj_new_int(lk->tile[i].v[0])};
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(tiles))->items[i] = mp_obj_new_tuple(2, t);
+    }
+    out[2] = tiles;
+    mp_obj_t ab = mp_obj_new_tuple(lk->n_appbtn, NULL);
+    for (int i = 0; i < lk->n_appbtn; i++) {
+        const moy_theme_mapent_t *e = &lk->appbtn[i];
+        mp_obj_t t[3] = {mp_obj_new_str(e->name, strlen(e->name)),
+                         name_obj(moy_theme_btn_kinds[e->kind]),
+                         ints(e->v, MOY_THEME_BTN_LEAVES)};
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(ab))->items[i] = mp_obj_new_tuple(3, t);
+    }
+    out[3] = ab;
+    mp_obj_t texts = mp_obj_new_tuple(lk->n_text, NULL);
+    for (int i = 0; i < lk->n_text; i++) {
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(texts))->items[i] =
+            mp_obj_new_str(lk->text[i], strlen(lk->text[i]));
+    }
+    out[4] = texts;
+    out[5] = MP_OBJ_NEW_SMALL_INT(rc);
+    m_del(moy_theme_look_t, lk, 1);
+    return mp_obj_new_tuple(6, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_look_obj, ui_theme_look);
+
+// theme_look_fields() -> (leaf names, leaf kinds, app_buttons leaf names):
+// the look's vocabulary, what theme_look's tuples are in the order of.
+static mp_obj_t ui_theme_look_fields(void) {
+    static const char *const kinds[] = {"colour", "paint", "enum", "int", "num", "bool",
+                                        "text", "corners"};
+    mp_obj_t names = mp_obj_new_tuple(MOY_THEME_LEAVES, NULL);
+    mp_obj_t ks = mp_obj_new_tuple(MOY_THEME_LEAVES, NULL);
+    for (int i = 0; i < MOY_THEME_LEAVES; i++) {
+        const moy_theme_leaf_t *l = &moy_theme_leaves[i];
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(names))->items[i] = name_obj(moy_theme_leaf_names[i]);
+        mp_obj_t k = name_obj(kinds[l->kind]);
+        if (l->kind == MOY_THEME_LK_ENUM) {
+            mp_obj_t en = mp_obj_new_tuple(l->hi, NULL);
+            for (int j = 0; j < l->hi; j++) {
+                ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(en))->items[j] =
+                    name_obj(moy_theme_enum_names[l->lo + j]);
+            }
+            mp_obj_t pair[2] = {k, en};
+            k = mp_obj_new_tuple(2, pair);
+        }
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(ks))->items[i] = k;
+    }
+    mp_obj_t b = mp_obj_new_tuple(MOY_THEME_BTN_LEAVES, NULL);
+    for (int i = 0; i < MOY_THEME_BTN_LEAVES; i++) {
+        const char *full = moy_theme_leaf_names[MOY_THEME_BTN_LEAF0 + i];
+        const char *rest = strchr(strchr(full, '.') + 1, '.') + 1;   // buttons.<kind>.
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(b))->items[i] = name_obj(rest);
+    }
+    mp_obj_t out[3] = {names, ks, b};
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_look_fields_obj, ui_theme_look_fields);
+
+// theme_place(values) -> (placed, near, block, used): moy_theme_place over
+// a sequence of colour values.
+static mp_obj_t ui_theme_place(mp_obj_t values) {
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(values, &n, &items);
+    int32_t *in = m_new(int32_t, 3 * n + 1);
+    for (size_t i = 0; i < n; i++) {
+        in[i] = (int32_t)mp_obj_get_int_truncated(items[i]);
+    }
+    uint16_t block[MOY_THEME_BLOCK];
+    int used = moy_theme_place(in, (int)n, in + n, in + 2 * n, block);
+    mp_obj_t bl = mp_obj_new_tuple(MOY_THEME_BLOCK, NULL);
+    for (int i = 0; i < MOY_THEME_BLOCK; i++) {
+        ((mp_obj_tuple_t *)MP_OBJ_TO_PTR(bl))->items[i] = MP_OBJ_NEW_SMALL_INT(block[i]);
+    }
+    mp_obj_t out[4] = {ints(in + n, (int)n), ints(in + 2 * n, (int)n), bl,
+                       MP_OBJ_NEW_SMALL_INT(used)};
+    m_del(int32_t, in, 3 * n + 1);
+    return mp_obj_new_tuple(4, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_place_obj, ui_theme_place);
+
+// theme_block(block, used): the live theme's block (canonical RGB565 words),
+// which the readability check reads a slot 64.. through.
+static mp_obj_t ui_theme_block(mp_obj_t block, mp_obj_t used) {
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(block, &n, &items);
+    uint16_t b[MOY_THEME_BLOCK] = {0};
+    for (size_t i = 0; i < n && i < MOY_THEME_BLOCK; i++) {
+        b[i] = (uint16_t)mp_obj_get_int(items[i]);
+    }
+    moy_theme_block_use(b, (int)mp_obj_get_int(used));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_block_obj, ui_theme_block);
+
+// theme_rgb(v) -> (rgb565, luminance x10000, nearest MOY64 index).
+static mp_obj_t ui_theme_rgb(mp_obj_t v) {
+    int32_t x = (int32_t)mp_obj_get_int_truncated(v);
+    mp_obj_t out[3] = {MP_OBJ_NEW_SMALL_INT(moy_theme_rgb565(x)),
+                       MP_OBJ_NEW_SMALL_INT(moy_theme_lum_of(x)),
+                       MP_OBJ_NEW_SMALL_INT(moy_theme_nearest(x))};
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_rgb_obj, ui_theme_rgb);
+
 static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(src, &b, MP_BUFFER_READ);
     moy_theme_pkg_t *pkg = m_new(moy_theme_pkg_t, 1);
     uint8_t notes = 0;
     int rc = moy_theme_probe(b.buf, b.len, pkg, &notes);
-    mp_obj_t out[8] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
+    mp_obj_t out[9] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
                        mp_const_none, mp_const_none, mp_const_none,
-                       mp_const_none, mp_const_none, mp_const_none};
+                       mp_const_none, mp_const_none, mp_const_none, mp_const_none};
     if (rc == MOY_THEME_OK) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
@@ -441,6 +587,9 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
                 sh[i] = sheet_name(moy_theme_probe_sheet(i));
             }
             out[7] = mp_obj_new_tuple(MOY_THEME_SHEETS, sh);
+            mp_obj_t lk[2] = {ui_theme_look(name, mp_const_false),
+                              ui_theme_look(name, mp_const_true)};
+            out[8] = mp_obj_new_tuple(2, lk);
             nlr_pop();
         } else {
             moy_theme_probe_end();
@@ -450,7 +599,7 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     }
     moy_theme_probe_end();
     m_del(moy_theme_pkg_t, pkg, 1);
-    return mp_obj_new_tuple(8, out);
+    return mp_obj_new_tuple(9, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
 
@@ -640,6 +789,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_print_font_obj, 0, 1, ui_print_fon
 
 // cart_text(on) -> bool: the app-cart boundary (moy_ui.h); whether it was on.
 static mp_obj_t ui_cart_text(mp_obj_t on) {
+    moy_canvas_cart(mp_obj_is_true(on));    // the canvases' colour mask with it
     return mp_obj_new_bool(moy_ui_cart_text(mp_obj_is_true(on)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_cart_text_obj, ui_cart_text);
@@ -881,7 +1031,7 @@ static int16_t opt(mp_obj_t o, int16_t none) {
 
 // A colour: the style's (None), else the index the canvas would mask it to.
 static int16_t col(mp_obj_t o, int16_t none) {
-    return o == mp_const_none ? none : (int16_t)(mp_obj_get_int(o) & 63);
+    return o == mp_const_none ? none : (int16_t)(mp_obj_get_int(o) & moy_ui_cmask());
 }
 
 static void colors3(mp_obj_t o, int16_t out[3]) {
@@ -1547,6 +1697,11 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_layout), MP_ROM_PTR(&ui_theme_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_home), MP_ROM_PTR(&ui_theme_home_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_resolve), MP_ROM_PTR(&ui_theme_resolve_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_look), MP_ROM_PTR(&ui_theme_look_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_look_fields), MP_ROM_PTR(&ui_theme_look_fields_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_place), MP_ROM_PTR(&ui_theme_place_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_block), MP_ROM_PTR(&ui_theme_block_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_rgb), MP_ROM_PTR(&ui_theme_rgb_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_custom), MP_ROM_PTR(&ui_theme_custom_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_accents), MP_ROM_PTR(&ui_theme_accents_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_tints), MP_ROM_PTR(&ui_theme_tints_obj) },

@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "name": "contrast",
   "frame": { "style": "classic" },
   "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },

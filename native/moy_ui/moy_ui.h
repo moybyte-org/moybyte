@@ -125,8 +125,12 @@ int moy_ui_font_use(int role, uint32_t font);
 uint32_t moy_ui_font(int role, moy_font_info_t *out);
 // The app-cart boundary (§4.7): while a cart's code runs, every role draws in
 // petme128 and so does the print font (moy_text.h), which comes back when the
-// cart's code returns. Answers whether it was on.
+// cart's code returns, and a colour index is masked to 0..63 (a cart's
+// colour is its index modulo 64) where the shell's reaches the theme's block
+// at 64..127 (moy_canvas.h). Answers whether it was on.
 int moy_ui_cart_text(int on);
+// What a colour index is masked with now: 127, or 63 inside the boundary.
+int moy_ui_cmask(void);
 // The shell's print font (moy_text_print_font_use), the one put aside while a
 // cart's code runs: the font it replaced, or -1 for one not loaded.
 int64_t moy_ui_print_font(uint32_t font);
@@ -144,7 +148,7 @@ int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)
 // terms resolved through `look` (`field` and `edge` stand for
 // MOY_UI_TERM_STYLE; -1 paints nothing), its outline cut by the corner mask
 // of `radius` (0-3). Never draws outside the box. Answers the fills it made.
-int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[64], int look,
+int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[128], int look,
                          moy_ui_box_t b, const moy_ui_surface_t *sf, int field, int edge,
                          int radius);
 

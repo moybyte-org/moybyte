@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "name": "win95",
   "frame": { "style": "win9x" },
   "metrics": { "radius": 0, "press_dx": 1, "press_dy": 1 },

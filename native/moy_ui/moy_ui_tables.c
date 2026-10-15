@@ -47,6 +47,11 @@ const char *const moy_ui_token_names[MOY_UI_TOKENS] = {
     "ink_accent",
     "ink_note",
     "band_light",
+    "value",
+    "value_ink",
+    "sunk",
+    "lcd",
+    "lcd_ink",
 };
 
 const char *const moy_ui_role_names[MOY_UI_ROLES] = {
@@ -84,6 +89,11 @@ const char *const moy_ui_role_names[MOY_UI_ROLES] = {
     "ink_accent",
     "ink_note",
     "band_light",
+    "value",
+    "value_ink",
+    "sunk",
+    "lcd",
+    "lcd_ink",
     "hover",
     "hover_cue",
     "pressed",
@@ -148,10 +158,10 @@ const char *const moy_ui_button_kinds[4][2] = {
 const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {0, {0, 0, 0}},
     {2, {-1, 60, 0}},
-    {2, {-39, 6, 0}},
-    {2, {-40, 1, 0}},
-    {3, {-37, -6, 13}},
-    {2, {-38, 7, 0}},
+    {2, {-44, 6, 0}},
+    {2, {-45, 1, 0}},
+    {3, {-42, -6, 13}},
+    {2, {-43, 7, 0}},
     {2, {-5, 10, 0}},
     {2, {-20, 8, 0}},
     {1, {7, 0, 0}},
@@ -159,7 +169,7 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {2, {-3, 13, 0}},
     {2, {-4, 0, 0}},
     {2, {-25, 7, 0}},
-    {3, {-36, -5, 10}},
+    {3, {-41, -5, 10}},
     {1, {0, 0, 0}},
     {2, {-2, 13, 0}},
     {2, {-18, 11, 0}},
@@ -397,12 +407,12 @@ const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE] = {
 };
 
 const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
-    {34, 0, 6},  // code_text
-    {35, 0, 12},  // code_keyword
-    {36, 0, 11},  // code_string
-    {37, 0, 9},  // code_number
-    {38, 0, 22},  // code_comment
-    {39, 0, 14},  // code_builtin
+    {39, 0, 6},  // code_text
+    {40, 0, 12},  // code_keyword
+    {41, 0, 11},  // code_string
+    {42, 0, 9},  // code_number
+    {43, 0, 22},  // code_comment
+    {44, 0, 14},  // code_builtin
     {9, 0, 7},  // surface
     {10, 0, 52},  // surface_alt
     {11, 0, 0},  // ink
@@ -422,12 +432,12 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {32, 0, 4},  // ink_note
     {21, 1, 0},  // bar
     {22, 1, 6},  // bar_edge
-    {34, 0, 0},  // code_text
-    {35, 0, 59},  // code_keyword
-    {36, 0, 3},  // code_string
-    {37, 0, 4},  // code_number
-    {38, 0, 53},  // code_comment
-    {39, 0, 2},  // code_builtin
+    {39, 0, 0},  // code_text
+    {40, 0, 59},  // code_keyword
+    {41, 0, 3},  // code_string
+    {42, 0, 4},  // code_number
+    {43, 0, 53},  // code_comment
+    {44, 0, 2},  // code_builtin
     {7, 1, 0},  // desktop
     {8, 1, 6},  // desktop_pattern
     {9, 1, 0},  // surface
@@ -455,22 +465,27 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {30, 0, 0},  // shade_dark
     {31, 1, 4},  // ink_accent
     {32, 0, 15},  // ink_note
-    {40, 0, 10},  // block_events
-    {41, 0, 9},  // block_control
-    {42, 0, 12},  // block_actors
-    {43, 0, 2},  // block_looks
-    {44, 0, 3},  // block_draw
-    {45, 0, 13},  // block_input
-    {46, 0, 8},  // block_variables
-    {47, 0, 15},  // block_lists
-    {48, 0, 11},  // block_operators
-    {49, 0, 14},  // block_sound
-    {50, 0, 4},  // block_myblocks
+    {45, 0, 10},  // block_events
+    {46, 0, 9},  // block_control
+    {47, 0, 12},  // block_actors
+    {48, 0, 2},  // block_looks
+    {49, 0, 3},  // block_draw
+    {50, 0, 13},  // block_input
+    {51, 0, 8},  // block_variables
+    {52, 0, 15},  // block_lists
+    {53, 0, 11},  // block_operators
+    {54, 0, 14},  // block_sound
+    {55, 0, 4},  // block_myblocks
+    {34, 1, 14},  // value
+    {35, 1, 15},  // value_ink
+    {36, 1, 10},  // sunk
+    {37, 1, 36},  // lcd
+    {38, 1, 11},  // lcd_ink
 };
 
-const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 25}, {31, 38}};
+const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 25}, {31, 43}};
 
-const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
     "panel",
@@ -507,6 +522,11 @@ const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
     "ink_accent",
     "ink_note",
     "band_light",
+    "value",
+    "value_ink",
+    "sunk",
+    "lcd",
+    "lcd_ink",
     "code_text",
     "code_keyword",
     "code_string",
@@ -666,6 +686,8 @@ const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
     {0, 24},  // panel / chrome_ink
     {21, 24},  // bar / chrome_ink
     {27, 25},  // title_inactive / chrome_ink_dim
+    {34, 35},  // value / value_ink
+    {37, 38},  // lcd / lcd_ink
 };
 
 const uint16_t moy_theme_lum[64] = {
@@ -719,12 +741,13 @@ const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {
     "win95",
     "outline",
     "contrast",
+    "moy",
 };
 
 const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     // themes/night.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"night\",\012"
     "  \"frame\": { \"style\": \"classic\" },\012"
     "  \"fonts\": { \"ui\": \"tiny5.fnt\", \"title\": \"tiny5.fnt\" },\012"
@@ -762,7 +785,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/indigo.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"indigo\",\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
@@ -778,7 +801,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/berry.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"berry\",\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
@@ -794,7 +817,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/forest.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"forest\",\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
@@ -810,7 +833,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/slate.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"slate\",\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
@@ -826,7 +849,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/machine.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"machine\",\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
@@ -848,7 +871,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/platinum.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"platinum\",\012"
     "  \"frame\": { \"style\": \"platinum\" },\012"
     "  \"metrics\": { \"radius\": 2, \"press_dx\": 0, \"press_dy\": 0 },\012"
@@ -883,7 +906,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/win95.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"win95\",\012"
     "  \"frame\": { \"style\": \"win9x\" },\012"
     "  \"metrics\": { \"radius\": 0, \"press_dx\": 1, \"press_dy\": 1 },\012"
@@ -917,7 +940,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/outline.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"outline\",\012"
     "  \"surfaces\": {\012"
     "    \"row\": { \"rest\": \"fill panel, border dim\", \"hover\": \"fill panel, border focus\",\012"
@@ -936,7 +959,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "}\012",
     // themes/contrast.json
     "{\012"
-    "  \"format\": 1,\012"
+    "  \"format\": 2,\012"
     "  \"name\": \"contrast\",\012"
     "  \"frame\": { \"style\": \"classic\" },\012"
     "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
@@ -976,6 +999,57 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"desk\": { \"rest\": \"fill bar\" }\012"
     "  }\012"
     "}\012",
+    // themes/moy.json
+    "{\012"
+    "  \"format\": 2,\012"
+    "  \"name\": \"moy\",\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": \"#0f1127\", \"edge\": \"#2b2f57\", \"title\": \"#b6a8f7\", \"title_ink\": \"#15123a\",\012"
+    "      \"accent\": \"#ffc23d\", \"hilite\": \"#b6a8f7\", \"dim\": \"#23274b\", \"desktop\": \"#0f1127\",\012"
+    "      \"desktop_pattern\": \"#23274b\", \"surface\": \"#181b38\", \"surface_alt\": \"#23274b\",\012"
+    "      \"ink\": \"#eef0fb\", \"ink_dim\": \"#a1a6cc\", \"border\": \"#2b2f57\", \"selection\": \"#b6a8f7\",\012"
+    "      \"selection_ink\": \"#15123a\", \"focus\": \"#ffc23d\", \"bar\": \"#0b0d1e\", \"bar_edge\": \"#2b2f57\",\012"
+    "      \"chrome_ink\": \"#eef0fb\", \"chrome_ink_dim\": \"#a1a6cc\", \"title_active\": \"#b6a8f7\",\012"
+    "      \"title_inactive\": \"#23274b\", \"shade_hi\": \"#23274b\", \"shade_lo\": \"#0b0d1e\",\012"
+    "      \"shade_dark\": \"#2b2f57\", \"ink_accent\": \"#ffc23d\", \"value\": \"#b6a8f7\",\012"
+    "      \"value_ink\": \"#15123a\", \"sunk\": \"#0b0d1e\", \"lcd\": \"#0b0d1e\", \"lcd_ink\": \"#b6a8f7\"\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": \"#eceef3\", \"edge\": \"#e2e5ec\", \"title\": \"#ffffff\", \"title_ink\": \"#15161d\",\012"
+    "      \"accent\": \"#d45f00\", \"hilite\": \"#4c3fd6\", \"dim\": \"#e3e6ed\", \"desktop\": \"#eceef3\",\012"
+    "      \"desktop_pattern\": \"#e2e5ec\", \"surface\": \"#ffffff\", \"surface_alt\": \"#f4f5f8\",\012"
+    "      \"ink\": \"#15161d\", \"ink_dim\": \"#5f6478\", \"border\": \"#e2e5ec\", \"selection\": \"#4c3fd6\",\012"
+    "      \"selection_ink\": \"#ffffff\", \"focus\": \"#d45f00\", \"bar\": \"#ffffff\", \"bar_edge\": \"#e2e5ec\",\012"
+    "      \"chrome_ink\": \"#15161d\", \"chrome_ink_dim\": \"#5f6478\", \"title_active\": \"#ffffff\",\012"
+    "      \"title_inactive\": \"#f4f5f8\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#e3e6ed\",\012"
+    "      \"shade_dark\": \"#e2e5ec\", \"ink_accent\": \"#d45f00\", \"value\": \"#4c3fd6\",\012"
+    "      \"value_ink\": \"#ffffff\", \"sunk\": \"#e3e6ed\", \"lcd\": \"#f1f2f6\", \"lcd_ink\": \"#4c3fd6\"\012"
+    "    }\012"
+    "  },\012"
+    "  \"look\": {\012"
+    "    \"dark\": {\012"
+    "      \"shadow\": [\"soft\", \"#000000\", 0.55, 14, 6], \"dim_neighbours\": 0.3,\012"
+    "      \"win\": { \"header\": \"fill\", \"frame\": [1, \"#2b2f57\"], \"frame_back\": [1, \"#2b2f57\"] },\012"
+    "      \"bar\": { \"fill\": \"#0b0d1e\", \"alpha\": 0.85, \"sys\": [\"#23274b\", \"#b6a8f7\", \"#23274b\"],\012"
+    "               \"chip_cur\": \"#23274b\" },\012"
+    "      \"tile_fill\": \"#23274b\",\012"
+    "      \"backdrop\": { \"desk\": [{ \"k\": \"circle\", \"at\": [801, 850, 433], \"p\": \"#191c3e\" },\012"
+    "                             { \"k\": \"circle\", \"at\": [889, 733, 433], \"p\": \"#0f1127\" }] }\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"shadow\": [\"soft\", \"#1b2040\", 0.18, 16, 8],\012"
+    "      \"win\": { \"header\": \"bar\" },\012"
+    "      \"bar\": { \"fill\": \"#ffffff\", \"alpha\": 0.92, \"line\": [1, \"#e2e5ec\"],\012"
+    "               \"sys\": [\"#f4f5f8\", \"#4c3fd6\", \"#f4f5f8\"], \"chip_cur\": \"#f4f5f8\" },\012"
+    "      \"hhbar\": { \"sys\": [\"#ffffff\", \"#4c3fd6\", \"#ffffff\"] },\012"
+    "      \"tile_fill\": \"#ffffff\",\012"
+    "      \"buttons\": { \"tonal\": { \"fill\": \"#e3e6ed\" } },\012"
+    "      \"backdrop\": { \"desk\": [{ \"k\": \"circle\", \"at\": [918, 1000, 500], \"p\": \"#e2e5ee\" },\012"
+    "                             { \"k\": \"circle\", \"at\": [88, 983, 350], \"p\": \"#e5e3f1\" }] }\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
 };
 
 const int moy_ui_n_themes = MOY_THEME_SEEDS;
@@ -986,7 +1060,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1366, 1296, 860, 1847};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1505, 364, 360, 397, 390, 779, 1366, 1296, 860, 1847, 2772};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1177,14 +1251,607 @@ const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1] = {
 };
 
 const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX] = {
-    {0, 9, 10, 7, 8, 27, 21, 6, 5, 28, 29},  // background
-    {1, 13, 22, 30, 255, 255, 255, 255, 255, 255, 255},  // line
-    {4, 2, 26, 14, 255, 255, 255, 255, 255, 255, 255},  // accent
-    {1, 13, 5, 28, 22, 8, 255, 255, 255, 255, 255},  // tied
-    {16, 31, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // accent_ink
-    {34, 35, 36, 37, 38, 39, 32, 255, 255, 255, 255},  // content
+    {0, 9, 10, 7, 8, 27, 21, 6, 5, 28, 29, 36, 37},  // background
+    {1, 13, 22, 30, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // line
+    {4, 2, 26, 14, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // accent
+    {1, 13, 5, 28, 22, 8, 255, 255, 255, 255, 255, 255, 255},  // tied
+    {16, 31, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // accent_ink
+    {39, 40, 41, 42, 43, 44, 32, 255, 255, 255, 255, 255, 255},  // content
 };
 
 const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5] = {{12, 11, 9, 255, 255}, {25, 24, 0, 21, 27}};
 
 const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS] = {5, 6, 13, 49, 50, 53};
+
+const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
+    {MOY_THEME_LK_ENUM, 0, 2, 0},  // render.text
+    {MOY_THEME_LK_ENUM, 2, 2, 0},  // render.shapes
+    {MOY_THEME_LK_INT, 1, 2, 1},  // render.scale
+    {MOY_THEME_LK_NUM, 0, 800, 250},  // ring_w
+    {MOY_THEME_LK_NUM, 0, 800, 300},  // ring_gap
+    {MOY_THEME_LK_NUM, 0, 100, 100},  // ring_alpha
+    {MOY_THEME_LK_INT, 0, 99, 12},  // win_r
+    {MOY_THEME_LK_INT, 0, 99, 10},  // card_r
+    {MOY_THEME_LK_INT, 0, 99, 10},  // key_r
+    {MOY_THEME_LK_CORNERS, 0, 15, 15},  // win_corners
+    {MOY_THEME_LK_ENUM, 4, 3, 0},  // shadow.kind
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // shadow.c
+    {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // shadow.alpha
+    {MOY_THEME_LK_NUM, 0, 6400, INT32_MIN},  // shadow.blur
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // shadow.dx
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // shadow.dy
+    {MOY_THEME_LK_NUM, 0, 100, 55},  // shadow_back
+    {MOY_THEME_LK_ENUM, 7, 2, 0},  // edges
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // home_bg
+    {MOY_THEME_LK_NUM, 0, 100, 0},  // dim_neighbours
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // on_backdrop.ink
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // on_backdrop.dim
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // on_backdrop.shadow.c
+    {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // on_backdrop.shadow.alpha
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // on_backdrop.shadow.dx
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // on_backdrop.shadow.dy
+    {MOY_THEME_LK_ENUM, 9, 4, 0},  // win.header
+    {MOY_THEME_LK_INT, 16, 64, 44},  // win.h
+    {MOY_THEME_LK_ENUM, 13, 2, 0},  // win.align
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.ink
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.ink_back
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.tshadow.c
+    {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // win.tshadow.alpha
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // win.tshadow.dx
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // win.tshadow.dy
+    {MOY_THEME_LK_ENUM, 15, 5, 0},  // win.controls
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.grad
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.grad_back
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.fill
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.fill_back
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // win.frame.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.frame.c
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // win.frame_back.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.frame_back.c
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.body
+    {MOY_THEME_LK_INT, 0, 8, 1},  // win.rule
+    {MOY_THEME_LK_BOOL, 0, 1, 1},  // win.icon
+    {MOY_THEME_LK_ENUM, 20, 2, 0},  // current
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // sel_back
+    {MOY_THEME_LK_ENUM, 22, 2, 0},  // bar.edge
+    {MOY_THEME_LK_INT, 16, 64, 40},  // bar.h
+    {MOY_THEME_LK_ENUM, 24, 3, 0},  // bar.style
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // bar.fill
+    {MOY_THEME_LK_NUM, 0, 100, 100},  // bar.alpha
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // bar.line.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.line.c
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // bar.grad
+    {MOY_THEME_LK_ENUM, 27, 4, 0},  // bar.sysbtn
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys.body
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys.eye
+    {MOY_THEME_LK_ENUM, 31, 3, 0},  // bar.chips
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.chip_cur
+    {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // bar.app_title
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.ink
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.dim
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // bar.tray
+    {MOY_THEME_LK_ENUM, 34, 2, 0},  // bar.clock
+    {MOY_THEME_LK_ENUM, 36, 4, 0},  // hhbar.style
+    {MOY_THEME_LK_INT, 16, 48, 28},  // hhbar.h
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // hhbar.fill
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // hhbar.line.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.line.c
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.ink
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.dim
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.sys.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.sys.body
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.sys.eye
+    {MOY_THEME_LK_ENUM, 40, 2, 0},  // tabs.style
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // tabs.pill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // tabs.pill_ink
+    {MOY_THEME_LK_ENUM, 42, 2, 0},  // launcher
+    {MOY_THEME_LK_COLOUR, 0, 0, 33554431},  // dock.fill
+    {MOY_THEME_LK_NUM, 0, 100, 32},  // dock.alpha
+    {MOY_THEME_LK_BOOL, 0, 1, 1},  // dock.frost
+    {MOY_THEME_LK_COLOUR, 0, 0, 33554431},  // dock.ring.c
+    {MOY_THEME_LK_NUM, 0, 100, 45},  // dock.ring.alpha
+    {MOY_THEME_LK_INT, 0, 99, 20},  // dock.r
+    {MOY_THEME_LK_INT, 0, 99, 12},  // tile_r
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // tile_fill
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // tile_outline.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // tile_outline.c
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // tile_ink
+    {MOY_THEME_LK_BOOL, 0, 1, 1},  // tile_grad
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // label.ink
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // label.shadow.c
+    {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // label.shadow.alpha
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // label.shadow.dx
+    {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // label.shadow.dy
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // sidebar
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // places_panel.fill
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // places_panel.head
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // places_panel.head_ink
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // list_bg
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // zebra
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // colhead.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // colhead.line
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.normal.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.normal.ink
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.normal.border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.normal.border.c
+    {MOY_THEME_LK_ENUM, 44, 3, INT32_MIN},  // buttons.normal.shape
+    {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.normal.r
+    {MOY_THEME_LK_ENUM, 47, 2, INT32_MIN},  // buttons.normal.font
+    {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.normal.bevel
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.primary.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.primary.ink
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.primary.border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.primary.border.c
+    {MOY_THEME_LK_ENUM, 49, 3, INT32_MIN},  // buttons.primary.shape
+    {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.primary.r
+    {MOY_THEME_LK_ENUM, 52, 2, INT32_MIN},  // buttons.primary.font
+    {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.primary.bevel
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.tonal.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.tonal.ink
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.tonal.border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.tonal.border.c
+    {MOY_THEME_LK_ENUM, 54, 3, INT32_MIN},  // buttons.tonal.shape
+    {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.tonal.r
+    {MOY_THEME_LK_ENUM, 57, 2, INT32_MIN},  // buttons.tonal.font
+    {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.tonal.bevel
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.danger.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.danger.ink
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.danger.border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.danger.border.c
+    {MOY_THEME_LK_ENUM, 59, 3, INT32_MIN},  // buttons.danger.shape
+    {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.danger.r
+    {MOY_THEME_LK_ENUM, 62, 2, INT32_MIN},  // buttons.danger.font
+    {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.danger.bevel
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.toggle.fill
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.toggle.ink
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.toggle.border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.toggle.border.c
+    {MOY_THEME_LK_ENUM, 64, 3, INT32_MIN},  // buttons.toggle.shape
+    {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.toggle.r
+    {MOY_THEME_LK_ENUM, 67, 2, INT32_MIN},  // buttons.toggle.font
+    {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.toggle.bevel
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // lcd_border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // lcd_border.c
+    {MOY_THEME_LK_ENUM, 69, 3, 0},  // lcd_bevel
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // lcd_dim
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // keycap.fill
+    {MOY_THEME_LK_NUM, 0, 100, 100},  // keycap.alpha
+    {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // keycap.border.w
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // keycap.border.c
+    {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // keycap.grad
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // keycap.ink
+    {MOY_THEME_LK_INT, 0, 99, 4},  // keycap.r
+    {MOY_THEME_LK_BOOL, 0, 1, 0},  // keycap.bevel
+};
+
+const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
+    "render.text",
+    "render.shapes",
+    "render.scale",
+    "ring_w",
+    "ring_gap",
+    "ring_alpha",
+    "win_r",
+    "card_r",
+    "key_r",
+    "win_corners",
+    "shadow.kind",
+    "shadow.c",
+    "shadow.alpha",
+    "shadow.blur",
+    "shadow.dx",
+    "shadow.dy",
+    "shadow_back",
+    "edges",
+    "home_bg",
+    "dim_neighbours",
+    "on_backdrop.ink",
+    "on_backdrop.dim",
+    "on_backdrop.shadow.c",
+    "on_backdrop.shadow.alpha",
+    "on_backdrop.shadow.dx",
+    "on_backdrop.shadow.dy",
+    "win.header",
+    "win.h",
+    "win.align",
+    "win.ink",
+    "win.ink_back",
+    "win.tshadow.c",
+    "win.tshadow.alpha",
+    "win.tshadow.dx",
+    "win.tshadow.dy",
+    "win.controls",
+    "win.grad",
+    "win.grad_back",
+    "win.fill",
+    "win.fill_back",
+    "win.frame.w",
+    "win.frame.c",
+    "win.frame_back.w",
+    "win.frame_back.c",
+    "win.body",
+    "win.rule",
+    "win.icon",
+    "current",
+    "sel_back",
+    "bar.edge",
+    "bar.h",
+    "bar.style",
+    "bar.fill",
+    "bar.alpha",
+    "bar.line.w",
+    "bar.line.c",
+    "bar.grad",
+    "bar.sysbtn",
+    "bar.sys.fill",
+    "bar.sys.body",
+    "bar.sys.eye",
+    "bar.chips",
+    "bar.chip_cur",
+    "bar.app_title",
+    "bar.ink",
+    "bar.dim",
+    "bar.tray",
+    "bar.clock",
+    "hhbar.style",
+    "hhbar.h",
+    "hhbar.fill",
+    "hhbar.line.w",
+    "hhbar.line.c",
+    "hhbar.ink",
+    "hhbar.dim",
+    "hhbar.sys.fill",
+    "hhbar.sys.body",
+    "hhbar.sys.eye",
+    "tabs.style",
+    "tabs.pill",
+    "tabs.pill_ink",
+    "launcher",
+    "dock.fill",
+    "dock.alpha",
+    "dock.frost",
+    "dock.ring.c",
+    "dock.ring.alpha",
+    "dock.r",
+    "tile_r",
+    "tile_fill",
+    "tile_outline.w",
+    "tile_outline.c",
+    "tile_ink",
+    "tile_grad",
+    "label.ink",
+    "label.shadow.c",
+    "label.shadow.alpha",
+    "label.shadow.dx",
+    "label.shadow.dy",
+    "sidebar",
+    "places_panel.fill",
+    "places_panel.head",
+    "places_panel.head_ink",
+    "list_bg",
+    "zebra",
+    "colhead.fill",
+    "colhead.line",
+    "buttons.normal.fill",
+    "buttons.normal.ink",
+    "buttons.normal.border.w",
+    "buttons.normal.border.c",
+    "buttons.normal.shape",
+    "buttons.normal.r",
+    "buttons.normal.font",
+    "buttons.normal.bevel",
+    "buttons.primary.fill",
+    "buttons.primary.ink",
+    "buttons.primary.border.w",
+    "buttons.primary.border.c",
+    "buttons.primary.shape",
+    "buttons.primary.r",
+    "buttons.primary.font",
+    "buttons.primary.bevel",
+    "buttons.tonal.fill",
+    "buttons.tonal.ink",
+    "buttons.tonal.border.w",
+    "buttons.tonal.border.c",
+    "buttons.tonal.shape",
+    "buttons.tonal.r",
+    "buttons.tonal.font",
+    "buttons.tonal.bevel",
+    "buttons.danger.fill",
+    "buttons.danger.ink",
+    "buttons.danger.border.w",
+    "buttons.danger.border.c",
+    "buttons.danger.shape",
+    "buttons.danger.r",
+    "buttons.danger.font",
+    "buttons.danger.bevel",
+    "buttons.toggle.fill",
+    "buttons.toggle.ink",
+    "buttons.toggle.border.w",
+    "buttons.toggle.border.c",
+    "buttons.toggle.shape",
+    "buttons.toggle.r",
+    "buttons.toggle.font",
+    "buttons.toggle.bevel",
+    "lcd_border.w",
+    "lcd_border.c",
+    "lcd_bevel",
+    "lcd_dim",
+    "keycap.fill",
+    "keycap.alpha",
+    "keycap.border.w",
+    "keycap.border.c",
+    "keycap.grad",
+    "keycap.ink",
+    "keycap.r",
+    "keycap.bevel",
+};
+
+const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
+    {"render.text", MOY_THEME_FT_ENUM, 1, 0},
+    {"render.shapes", MOY_THEME_FT_ENUM, 1, 1},
+    {"render.scale", MOY_THEME_FT_INT, 1, 2},
+    {"ring_w", MOY_THEME_FT_NUM, 1, 3},
+    {"ring_gap", MOY_THEME_FT_NUM, 1, 4},
+    {"ring_alpha", MOY_THEME_FT_NUM, 1, 5},
+    {"win_r", MOY_THEME_FT_INT, 1, 6},
+    {"card_r", MOY_THEME_FT_INT, 1, 7},
+    {"key_r", MOY_THEME_FT_INT, 1, 8},
+    {"win_corners", MOY_THEME_FT_CORNERS, 1, 9},
+    {"shadow", MOY_THEME_FT_SHADOW, 6, 10},
+    {"shadow_back", MOY_THEME_FT_NUM, 1, 16},
+    {"edges", MOY_THEME_FT_ENUM, 1, 17},
+    {"home_bg", MOY_THEME_FT_COLOUR, 1, 18},
+    {"dim_neighbours", MOY_THEME_FT_NUM, 1, 19},
+    {"on_backdrop.ink", MOY_THEME_FT_COLOUR, 1, 20},
+    {"on_backdrop.dim", MOY_THEME_FT_COLOUR, 1, 21},
+    {"on_backdrop.shadow", MOY_THEME_FT_TSHADOW, 4, 22},
+    {"win.header", MOY_THEME_FT_ENUM, 1, 26},
+    {"win.h", MOY_THEME_FT_INT, 1, 27},
+    {"win.align", MOY_THEME_FT_ENUM, 1, 28},
+    {"win.ink", MOY_THEME_FT_COLOUR, 1, 29},
+    {"win.ink_back", MOY_THEME_FT_COLOUR, 1, 30},
+    {"win.tshadow", MOY_THEME_FT_TSHADOW, 4, 31},
+    {"win.controls", MOY_THEME_FT_ENUM, 1, 35},
+    {"win.grad", MOY_THEME_FT_PAINT, 1, 36},
+    {"win.grad_back", MOY_THEME_FT_PAINT, 1, 37},
+    {"win.fill", MOY_THEME_FT_PAINT, 1, 38},
+    {"win.fill_back", MOY_THEME_FT_PAINT, 1, 39},
+    {"win.frame", MOY_THEME_FT_LINE, 2, 40},
+    {"win.frame_back", MOY_THEME_FT_LINE, 2, 42},
+    {"win.body", MOY_THEME_FT_COLOUR, 1, 44},
+    {"win.rule", MOY_THEME_FT_INT, 1, 45},
+    {"win.icon", MOY_THEME_FT_BOOL, 1, 46},
+    {"current", MOY_THEME_FT_ENUM, 1, 47},
+    {"sel_back", MOY_THEME_FT_COLOUR, 1, 48},
+    {"bar.edge", MOY_THEME_FT_ENUM, 1, 49},
+    {"bar.h", MOY_THEME_FT_INT, 1, 50},
+    {"bar.style", MOY_THEME_FT_ENUM, 1, 51},
+    {"bar.fill", MOY_THEME_FT_PAINT, 1, 52},
+    {"bar.alpha", MOY_THEME_FT_NUM, 1, 53},
+    {"bar.line", MOY_THEME_FT_LINE, 2, 54},
+    {"bar.grad", MOY_THEME_FT_PAINT, 1, 56},
+    {"bar.sysbtn", MOY_THEME_FT_ENUM, 1, 57},
+    {"bar.sys", MOY_THEME_FT_TRIO, 3, 58},
+    {"bar.chips", MOY_THEME_FT_ENUM, 1, 61},
+    {"bar.chip_cur", MOY_THEME_FT_COLOUR, 1, 62},
+    {"bar.app_title", MOY_THEME_FT_TEXT, 1, 63},
+    {"bar.ink", MOY_THEME_FT_COLOUR, 1, 64},
+    {"bar.dim", MOY_THEME_FT_COLOUR, 1, 65},
+    {"bar.tray", MOY_THEME_FT_PAINT, 1, 66},
+    {"bar.clock", MOY_THEME_FT_ENUM, 1, 67},
+    {"hhbar.style", MOY_THEME_FT_ENUM, 1, 68},
+    {"hhbar.h", MOY_THEME_FT_INT, 1, 69},
+    {"hhbar.fill", MOY_THEME_FT_PAINT, 1, 70},
+    {"hhbar.line", MOY_THEME_FT_LINE, 2, 71},
+    {"hhbar.ink", MOY_THEME_FT_COLOUR, 1, 73},
+    {"hhbar.dim", MOY_THEME_FT_COLOUR, 1, 74},
+    {"hhbar.sys", MOY_THEME_FT_TRIO, 3, 75},
+    {"tabs.style", MOY_THEME_FT_ENUM, 1, 78},
+    {"tabs.pill", MOY_THEME_FT_COLOUR, 1, 79},
+    {"tabs.pill_ink", MOY_THEME_FT_COLOUR, 1, 80},
+    {"launcher", MOY_THEME_FT_ENUM, 1, 81},
+    {"dock.fill", MOY_THEME_FT_COLOUR, 1, 82},
+    {"dock.alpha", MOY_THEME_FT_NUM, 1, 83},
+    {"dock.frost", MOY_THEME_FT_BOOL, 1, 84},
+    {"dock.ring", MOY_THEME_FT_RING, 2, 85},
+    {"dock.r", MOY_THEME_FT_INT, 1, 87},
+    {"tile_r", MOY_THEME_FT_INT, 1, 88},
+    {"tile_fill", MOY_THEME_FT_PAINT, 1, 89},
+    {"tile_outline", MOY_THEME_FT_LINE, 2, 90},
+    {"tile_ink", MOY_THEME_FT_COLOUR, 1, 92},
+    {"tile_grad", MOY_THEME_FT_BOOL, 1, 93},
+    {"label.ink", MOY_THEME_FT_COLOUR, 1, 94},
+    {"label.shadow", MOY_THEME_FT_TSHADOW, 4, 95},
+    {"sidebar", MOY_THEME_FT_PAINT, 1, 99},
+    {"places_panel.fill", MOY_THEME_FT_PAINT, 1, 100},
+    {"places_panel.head", MOY_THEME_FT_PAINT, 1, 101},
+    {"places_panel.head_ink", MOY_THEME_FT_COLOUR, 1, 102},
+    {"list_bg", MOY_THEME_FT_COLOUR, 1, 103},
+    {"zebra", MOY_THEME_FT_COLOUR, 1, 104},
+    {"colhead.fill", MOY_THEME_FT_COLOUR, 1, 105},
+    {"colhead.line", MOY_THEME_FT_COLOUR, 1, 106},
+    {"buttons.normal.fill", MOY_THEME_FT_PAINT, 1, 107},
+    {"buttons.normal.ink", MOY_THEME_FT_COLOUR, 1, 108},
+    {"buttons.normal.border", MOY_THEME_FT_LINE, 2, 109},
+    {"buttons.normal.shape", MOY_THEME_FT_ENUM, 1, 111},
+    {"buttons.normal.r", MOY_THEME_FT_INT, 1, 112},
+    {"buttons.normal.font", MOY_THEME_FT_ENUM, 1, 113},
+    {"buttons.normal.bevel", MOY_THEME_FT_BOOL, 1, 114},
+    {"buttons.primary.fill", MOY_THEME_FT_PAINT, 1, 115},
+    {"buttons.primary.ink", MOY_THEME_FT_COLOUR, 1, 116},
+    {"buttons.primary.border", MOY_THEME_FT_LINE, 2, 117},
+    {"buttons.primary.shape", MOY_THEME_FT_ENUM, 1, 119},
+    {"buttons.primary.r", MOY_THEME_FT_INT, 1, 120},
+    {"buttons.primary.font", MOY_THEME_FT_ENUM, 1, 121},
+    {"buttons.primary.bevel", MOY_THEME_FT_BOOL, 1, 122},
+    {"buttons.tonal.fill", MOY_THEME_FT_PAINT, 1, 123},
+    {"buttons.tonal.ink", MOY_THEME_FT_COLOUR, 1, 124},
+    {"buttons.tonal.border", MOY_THEME_FT_LINE, 2, 125},
+    {"buttons.tonal.shape", MOY_THEME_FT_ENUM, 1, 127},
+    {"buttons.tonal.r", MOY_THEME_FT_INT, 1, 128},
+    {"buttons.tonal.font", MOY_THEME_FT_ENUM, 1, 129},
+    {"buttons.tonal.bevel", MOY_THEME_FT_BOOL, 1, 130},
+    {"buttons.danger.fill", MOY_THEME_FT_PAINT, 1, 131},
+    {"buttons.danger.ink", MOY_THEME_FT_COLOUR, 1, 132},
+    {"buttons.danger.border", MOY_THEME_FT_LINE, 2, 133},
+    {"buttons.danger.shape", MOY_THEME_FT_ENUM, 1, 135},
+    {"buttons.danger.r", MOY_THEME_FT_INT, 1, 136},
+    {"buttons.danger.font", MOY_THEME_FT_ENUM, 1, 137},
+    {"buttons.danger.bevel", MOY_THEME_FT_BOOL, 1, 138},
+    {"buttons.toggle.fill", MOY_THEME_FT_PAINT, 1, 139},
+    {"buttons.toggle.ink", MOY_THEME_FT_COLOUR, 1, 140},
+    {"buttons.toggle.border", MOY_THEME_FT_LINE, 2, 141},
+    {"buttons.toggle.shape", MOY_THEME_FT_ENUM, 1, 143},
+    {"buttons.toggle.r", MOY_THEME_FT_INT, 1, 144},
+    {"buttons.toggle.font", MOY_THEME_FT_ENUM, 1, 145},
+    {"buttons.toggle.bevel", MOY_THEME_FT_BOOL, 1, 146},
+    {"lcd_border", MOY_THEME_FT_LINE, 2, 147},
+    {"lcd_bevel", MOY_THEME_FT_ENUM, 1, 149},
+    {"lcd_dim", MOY_THEME_FT_COLOUR, 1, 150},
+    {"keycap.fill", MOY_THEME_FT_PAINT, 1, 151},
+    {"keycap.alpha", MOY_THEME_FT_NUM, 1, 152},
+    {"keycap.border", MOY_THEME_FT_LINE, 2, 153},
+    {"keycap.grad", MOY_THEME_FT_PAINT, 1, 155},
+    {"keycap.ink", MOY_THEME_FT_COLOUR, 1, 156},
+    {"keycap.r", MOY_THEME_FT_INT, 1, 157},
+    {"keycap.bevel", MOY_THEME_FT_BOOL, 1, 158},
+};
+
+const moy_theme_field_t moy_theme_btn_fields[7] = {
+    {"fill", MOY_THEME_FT_PAINT, 1, 0},
+    {"ink", MOY_THEME_FT_COLOUR, 1, 1},
+    {"border", MOY_THEME_FT_LINE, 2, 2},
+    {"shape", MOY_THEME_FT_ENUM, 1, 4},
+    {"r", MOY_THEME_FT_INT, 1, 5},
+    {"font", MOY_THEME_FT_ENUM, 1, 6},
+    {"bevel", MOY_THEME_FT_BOOL, 1, 7},
+};
+
+const char *const moy_theme_look_groups[MOY_THEME_LOOK_GROUPS] = {
+    "render",
+    "on_backdrop",
+    "win",
+    "bar",
+    "hhbar",
+    "tabs",
+    "dock",
+    "label",
+    "places_panel",
+    "colhead",
+    "buttons",
+    "buttons.normal",
+    "buttons.primary",
+    "buttons.tonal",
+    "buttons.danger",
+    "buttons.toggle",
+    "keycap",
+};
+
+const char *const moy_theme_enum_names[MOY_THEME_ENUM_NAMES] = {
+    "aa",
+    "crisp",
+    "smooth",
+    "stepped",
+    "none",
+    "soft",
+    "hard",
+    "flat",
+    "bevel",
+    "plain",
+    "fill",
+    "bar",
+    "grad",
+    "left",
+    "center",
+    "close",
+    "lights",
+    "xp",
+    "amiga",
+    "adw",
+    "bar",
+    "fill",
+    "top",
+    "bottom",
+    "flat",
+    "grad",
+    "glass",
+    "tile",
+    "start",
+    "glyph",
+    "workspaces",
+    "tab",
+    "button",
+    "none",
+    "right",
+    "center",
+    "none",
+    "flat",
+    "grad",
+    "glass",
+    "bar",
+    "pill",
+    "column",
+    "dock",
+    "round",
+    "circle",
+    "square",
+    "key",
+    "op",
+    "round",
+    "circle",
+    "square",
+    "key",
+    "op",
+    "round",
+    "circle",
+    "square",
+    "key",
+    "op",
+    "round",
+    "circle",
+    "square",
+    "key",
+    "op",
+    "round",
+    "circle",
+    "square",
+    "key",
+    "op",
+    "none",
+    "in",
+    "out",
+};
+
+const char *const moy_theme_btn_kinds[MOY_THEME_BTN_KINDS] = {
+    "normal",
+    "primary",
+    "tonal",
+    "danger",
+    "toggle",
+};
+
+const char *const moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED] = {
+    "backdrop",
+};
+
+const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES] = {
+    "smooth",
+    "steps",
+    "dither",
+};
+
+const uint32_t moy_theme_moy64[64] = {
+    0x000000, 0x1d2b53, 0x7e2553, 0x008751, 0xab5236, 0x5f574f, 0xc2c3c7, 0xfff1e8,
+    0xff004d, 0xffa300, 0xffec27, 0x00e436, 0x29adff, 0x83769c, 0xff77a8, 0xffccaa,
+    0xe6a1a1, 0xe6b9a1, 0xe6d2a1, 0xaee6a1, 0xa1e6d1, 0xa1d1e6, 0xa1b4e6, 0xb7a1e6,
+    0xd8a1e6, 0xe6a1ca, 0xe6a1b1, 0xa1e6e6, 0x8c6b4d, 0xa88d79, 0x66502e, 0xccbf9f,
+    0x507347, 0x57382b, 0x857a6d, 0x9e936a, 0xe0582d, 0xe0992d, 0xd2e02d, 0x30e02d,
+    0x2de08a, 0x2de0e0, 0x2d8ae0, 0x512de0, 0xa72de0, 0xe02dc4, 0xe02d78, 0x71e02d,
+    0xdae1f2, 0xafb6c7, 0x828899, 0x585d6b, 0xe6dcd3, 0x8c857e, 0x393d47, 0x292929,
+    0x662e2e, 0x66492e, 0x2e6655, 0x2e5566, 0x2e3e66, 0x402e66, 0x662e60, 0x662e45,
+};
+
+const uint16_t moy_theme_lin5[32] = {0, 24, 52, 91, 152, 222, 307, 409, 545, 685, 844, 1022, 1248, 1470, 1714, 1981, 2307, 2623, 2961, 3325, 3763, 4179, 4621, 5089, 5647, 6172, 6724, 7305, 7991, 8632, 9301, 10000};
+
+const uint16_t moy_theme_lin6[64] = {0, 12, 24, 37, 52, 70, 91, 116, 144, 176, 212, 252, 296, 343, 395, 452, 529, 595, 666, 742, 823, 908, 999, 1095, 1195, 1301, 1413, 1529, 1651, 1779, 1912, 2051, 2232, 2384, 2542, 2705, 2874, 3050, 3231, 3419, 3613, 3813, 4020, 4233, 4452, 4678, 4910, 5149, 5457, 5711, 5972, 6240, 6514, 6795, 7084, 7379, 7682, 7991, 8308, 8632, 8963, 9301, 9647, 10000};

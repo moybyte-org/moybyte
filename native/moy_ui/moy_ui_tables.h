@@ -5,8 +5,8 @@
 
 #include <stdint.h>
 
-#define MOY_UI_TOKENS 34
-#define MOY_UI_ROLES 40
+#define MOY_UI_TOKENS 39
+#define MOY_UI_ROLES 45
 #define MOY_UI_STATES 6
 #define MOY_UI_KINDS 25
 #define MOY_UI_COLOR_KINDS 20
@@ -52,6 +52,11 @@ enum {
     MOY_UI_T_INK_ACCENT = 31,
     MOY_UI_T_INK_NOTE = 32,
     MOY_UI_T_BAND_LIGHT = 33,
+    MOY_UI_T_VALUE = 34,
+    MOY_UI_T_VALUE_INK = 35,
+    MOY_UI_T_SUNK = 36,
+    MOY_UI_T_LCD = 37,
+    MOY_UI_T_LCD_INK = 38,
 };
 
 // The states, strongest first (widget_state's precedence).
@@ -179,12 +184,12 @@ extern const char *const moy_ui_glyph_names[MOY_UI_GLYPHS];
 extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 // Theme packages, format 1 (moy_theme.c): the limits, the derivation
 // rules, the readability pairs, MOY64's luminance and the seeds.
-#define MOY_THEME_FORMAT 1
-#define MOY_THEME_SEEDS 10
+#define MOY_THEME_FORMAT 2
+#define MOY_THEME_SEEDS 11
 #define MOY_THEME_BYTES 4096
 #define MOY_THEME_DEPTH 4
-#define MOY_THEME_RULES 69
-#define MOY_THEME_PAIRS 8
+#define MOY_THEME_RULES 74
+#define MOY_THEME_PAIRS 10
 #define MOY_THEME_CONTRAST 30
 #define MOY_THEME_RESERVED 4
 #define MOY_THEME_FONT_ROLES 4
@@ -210,7 +215,7 @@ extern const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS];
 extern const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS];
 extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_FONT_FILES 2  // the seeds' fonts and their licence texts
-#define MOY_THEME_ROLES 51  // the tokens, then the content roles
+#define MOY_THEME_ROLES 56  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3
 #define MOY_THEME_EFFECTS_CAP 32
@@ -333,7 +338,7 @@ extern const int moy_ui_n_themes, moy_theme_n_roles, moy_theme_n_metrics,
 #define MOY_THEME_ACCENTS 16
 #define MOY_THEME_TINTS 8
 #define MOY_THEME_RAMP_MAX 7
-#define MOY_THEME_CLASS_MAX 11
+#define MOY_THEME_CLASS_MAX 13
 #define MOY_THEME_DIM_INKS 2
 #define MOY_THEME_DIM_GREYS 6
 enum {
@@ -353,5 +358,66 @@ extern const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX];
 // Each dim ink: the role, its fallback, its backgrounds (0xff past the end).
 extern const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5];
 extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
+// The look (docs/look_2026-10.md step 5): the theme model's fields, each
+// one or more leaves; a leaf's kind, its range (an enum's first name and
+// count), its default (MOY_THEME_NONE: silent, the renderer derives it).
+#define MOY_THEME_LEAVES 159
+#define MOY_THEME_LOOK_FIELDS 128
+#define MOY_THEME_LOOK_GROUPS 17
+#define MOY_THEME_ENUM_NAMES 72
+#define MOY_THEME_BTN_KINDS 5
+#define MOY_THEME_BTN_LEAVES 8
+#define MOY_THEME_BTN_LEAF0 107  // buttons.normal's first leaf
+#define MOY_THEME_PAINT_STOPS 6
+#define MOY_THEME_PAINTS_CAP 12
+#define MOY_THEME_ENTRIES_CAP 160
+#define MOY_THEME_TILES_CAP 12
+#define MOY_THEME_APPBTN_CAP 8
+#define MOY_THEME_MAPNAME_MAX 12
+#define MOY_THEME_LOOK_TEXT_MAX 24
+#define MOY_THEME_LOOK_ACCEPTED 1
+#define MOY_THEME_PAINT_MODES 3
+enum {
+    MOY_THEME_LK_COLOUR = 0,
+    MOY_THEME_LK_PAINT = 1,
+    MOY_THEME_LK_ENUM = 2,
+    MOY_THEME_LK_INT = 3,
+    MOY_THEME_LK_NUM = 4,
+    MOY_THEME_LK_BOOL = 5,
+    MOY_THEME_LK_TEXT = 6,
+    MOY_THEME_LK_CORNERS = 7,
+};
+enum {
+    MOY_THEME_FT_COLOUR = 0,
+    MOY_THEME_FT_PAINT = 1,
+    MOY_THEME_FT_ENUM = 2,
+    MOY_THEME_FT_INT = 3,
+    MOY_THEME_FT_NUM = 4,
+    MOY_THEME_FT_BOOL = 5,
+    MOY_THEME_FT_TEXT = 6,
+    MOY_THEME_FT_CORNERS = 7,
+    MOY_THEME_FT_LINE = 8,
+    MOY_THEME_FT_SHADOW = 9,
+    MOY_THEME_FT_TSHADOW = 10,
+    MOY_THEME_FT_RING = 11,
+    MOY_THEME_FT_TRIO = 12,
+};
+typedef struct { uint8_t kind; int32_t lo, hi, def; } moy_theme_leaf_t;
+typedef struct { const char *path; uint8_t type, n; uint16_t leaf; } moy_theme_field_t;
+extern const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES];
+extern const char *const moy_theme_leaf_names[MOY_THEME_LEAVES];
+extern const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS];
+extern const char *const moy_theme_look_groups[MOY_THEME_LOOK_GROUPS];
+extern const char *const moy_theme_enum_names[MOY_THEME_ENUM_NAMES];
+extern const char *const moy_theme_btn_kinds[MOY_THEME_BTN_KINDS];
+// An app_buttons entry's leaves: a kind's button leaves, in order.
+extern const moy_theme_field_t moy_theme_btn_fields[7];
+#define MOY_THEME_BTN_FIELDS 7
+extern const char *const moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED];
+extern const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES];
+// RGB colours (docs/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the
+// WCAG luminance (x10000, as moy_theme_lum) of an RGB565 channel.
+extern const uint32_t moy_theme_moy64[64];
+extern const uint16_t moy_theme_lin5[32], moy_theme_lin6[64];
 
 #endif // MOY_UI_TABLES_H

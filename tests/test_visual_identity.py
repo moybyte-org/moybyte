@@ -29,14 +29,14 @@ def _home_layer(ws):
 # -- Section 4.3: semantic theme roles ---------------------------------------
 
 def test_every_theme_resolves_every_semantic_role():
-    from runtime.chrome import THEME_NAMES, theme_colors
+    from runtime.chrome import THEME_NAMES, theme_colors, RGB
     roles = ("desktop", "desktop_pattern", "surface", "surface_alt", "border",
              "ink", "ink_dim", "selection", "focus", "play", "author", "danger")
     for name in THEME_NAMES:
         th = theme_colors(name)
         for role in roles:
             assert role in th, (name, role)
-            assert 0 <= th[role] <= 63
+            assert 0 <= th[role] <= 63 or th[role] >= RGB
         assert isinstance(th["surface_light"], bool)
 
 
@@ -92,8 +92,9 @@ def test_every_theme_has_a_light_variant_resolving_every_role():
              "focus", "play", "author", "danger",
              "title_active", "title_inactive")
     for name in THEME_NAMES:
-        if name == "contrast":
-            continue        # black panels and white ink in both variants, by design
+        if name in ("contrast", "moy"):
+            continue        # black panels and white ink in both variants, by design;
+            # moy's roles are RGB (tests/test_theme_rgb.py)
         th = theme_colors(name, "light")
         for role in roles:
             assert role in th, (name, role)
@@ -112,6 +113,8 @@ def test_dark_variant_is_the_legacy_token_set():
     for name in THEME_NAMES:
         th = theme_colors(name)
         assert th is theme_colors(name, "dark")
+        if name == "moy":
+            continue        # RGB roles (tests/test_theme_rgb.py)
         if name != "machine":
             assert th["ink"] == 7 and th["ink_dim"] == 6
         assert th["chrome_ink"] == 7 and th["chrome_ink_dim"] == 6

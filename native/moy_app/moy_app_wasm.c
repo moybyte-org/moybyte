@@ -84,7 +84,7 @@ uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *na
     for (unsigned spins = 0;; spins++) {
         uint32_t q = moy_app_seq_begin(a);
         if (!(q & 1u)) {
-            uint32_t gen = moy_app_theme_read(a, out) + 1u;
+            uint32_t gen = moy_app_theme_read_near(a, out) + 1u;
             gen = gen != 0u ? gen : 1u;
             if (gen != have && cap > 0u) {
                 name[moy_app_name_read(a, name, cap - 1u)] = 0;

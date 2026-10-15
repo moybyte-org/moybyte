@@ -51,7 +51,7 @@ N_CLAMPED, N_UNKNOWN, N_DROPPED = 1, 2, 4
 
 
 def _src(name="t", **kw):
-    d = {"format": 1, "name": name}
+    d = {"format": 2, "name": name}
     d.update(kw)
     return json.dumps(d).encode()
 
@@ -61,12 +61,20 @@ def _row(name, light=False):
     return list(row), bad, rc
 
 
+RGB = 0x1000000
+
+
 def _check_row(row):
     for role, v in zip(ROLES, row):
         if role in FLAGS:
             assert v in (0, 1), (role, v)
         else:
-            assert 0 <= v <= 63, (role, v)
+            assert 0 <= v <= 63 or RGB <= v <= RGB | 0xFFFFFF, (role, v)
+
+
+def _json_colour(v):
+    """A row's colour as a theme.json takes it."""
+    return "#%06x" % (v & 0xFFFFFF) if v >= RGB else v
 
 
 def test_the_seeds_are_style_jsons_and_the_default_comes_first():
@@ -84,7 +92,7 @@ def test_a_flattened_seed_round_trips_as_a_package(seed, light):
     assert rc == OK and bad == 0
     _check_row(row)
     variant = "light" if light else "dark"
-    roles = {r: (bool(v) if r in FLAGS else v) for r, v in zip(ROLES, row)}
+    roles = {r: (bool(v) if r in FLAGS else _json_colour(v)) for r, v in zip(ROLES, row)}
     rc, notes = moy_ui.theme_install(_src("dump", colors={variant: roles}))
     assert (rc, notes) == (OK, 0)
     assert _row("dump", light)[0] == row
@@ -115,24 +123,25 @@ def test_a_recolour_inherits_the_rest():
 @pytest.mark.parametrize("src,rc", [
     (b"", SYNTAX),
     (b"[]", SYNTAX),
-    (b'{"format": 1, "name": "t"', SYNTAX),
-    (b'{"format": 1, "name": "t"} x', SYNTAX),
-    (b'{"format": 1, "name": "t", "x": [[[[[[[[[[1]]]]]]]]]]}', SYNTAX),
-    (b'{"format": 1, "name": "t\\q"}', SYNTAX),
+    (b'{"format": 2, "name": "t"', SYNTAX),
+    (b'{"format": 2, "name": "t"} x', SYNTAX),
+    (b'{"format": 2, "name": "t", "x": [[[[[[[[[[1]]]]]]]]]]}', SYNTAX),
+    (b'{"format": 2, "name": "t\\q"}', SYNTAX),
     (b'{"name": "t"}', NEWER),
-    (b'{"format": 2, "name": "t"}', NEWER),
+    (b'{"format": 3, "name": "t"}', NEWER),
+    (b'{"format": 1, "name": "t"}', NEWER),     # a format-1 package reads as absent
     (b'{"format": "1", "name": "t"}', NEWER),
-    (b'{"format": 1.0, "name": "t"}', NEWER),
-    (b'{"format": 1}', NAME),
-    (b'{"format": 1, "name": "Has Caps"}', NAME),
-    (b'{"format": 1, "name": "' + b"x" * 25 + b'"}', NAME),
-    (b'{"format": 1, "name": 7}', NAME),
-    (b'{"format": 1, "name": "_t"}', NAME),
-    (b'{"format": 1, "name": "-t"}', NAME),
-    (b'{"format": 1, "name": "night"}', TAKEN),
-    (b'{"format": 1, "name": "t", "inherits": "nowhere"}', CHAIN),
-    (b'{"format": 1, "name": "t", "inherits": "t"}', CHAIN),
-    (b'{"format": 1, "name": "t", "inherits": 3}', CHAIN),
+    (b'{"format": 2.0, "name": "t"}', NEWER),
+    (b'{"format": 2}', NAME),
+    (b'{"format": 2, "name": "Has Caps"}', NAME),
+    (b'{"format": 2, "name": "' + b"x" * 25 + b'"}', NAME),
+    (b'{"format": 2, "name": 7}', NAME),
+    (b'{"format": 2, "name": "_t"}', NAME),
+    (b'{"format": 2, "name": "-t"}', NAME),
+    (b'{"format": 2, "name": "night"}', TAKEN),
+    (b'{"format": 2, "name": "t", "inherits": "nowhere"}', CHAIN),
+    (b'{"format": 2, "name": "t", "inherits": "t"}', CHAIN),
+    (b'{"format": 2, "name": "t", "inherits": 3}', CHAIN),
 ])
 def test_what_the_reader_refuses(src, rc):
     assert moy_ui.theme_install(_src("kept"))[0] == OK
@@ -295,7 +304,7 @@ def test_a_packages_surfaces_are_keyed_capped_inherited_and_noted():
     assert len(_own("s4")) == TH["surfaces_cap"]
     # a later key for the same part and state replaces the earlier
     rc, notes = moy_ui.theme_install(
-        b'{"format": 1, "name": "s5", "surfaces": {"chip": {"rest": "raised"},'
+        b'{"format": 2, "name": "s5", "surfaces": {"chip": {"rest": "raised"},'
         b' "chip": {"rest": "sunken"}}}')
     assert (rc, notes) == (OK, 0)
     assert _own("s5") == (
@@ -331,7 +340,7 @@ def _chained_lib(tmp_path):
                 "c2": {"button": {"rest": "etched"}}}
     for name, parent in links.items():
         (d / "themes" / (name + ".json")).write_text(json.dumps(
-            {"format": 1, "name": name, "inherits": parent,
+            {"format": 2, "name": name, "inherits": parent,
              "colors": {"dark": {"dim": int(name[-1]) if name[-1].isdigit() else 0}},
              "surfaces": surfaces.get(name, {})}))
     style["theme"]["seeds"] += list(links)
@@ -527,6 +536,36 @@ def test_a_refused_layout_in_the_chain_stands_in_with_the_default():
     assert rc == OK and moy_ui.theme_layout("t") == (True, (TODAY,))
 
 
+LOOK_SAMPLE = {
+    "render": {"text": "crisp", "shapes": "stepped", "scale": 2},
+    "ring_w": 3.5, "ring_gap": 0, "ring_alpha": 0.6, "win_r": 8, "key_r": 99,
+    "win_corners": [True, True, False, False], "shadow": ["hard", "#000000", 2, 2],
+    "edges": "bevel", "home_bg": "#ffd23f", "dim_neighbours": 0.3,
+    "on_backdrop": {"ink": "#ffffff", "shadow": ["#00213f", 0.9, 1, 1]},
+    "win": {"header": "grad", "h": 40, "align": "center", "controls": "xp",
+            "grad": [[0, "#4192fa"], [0.35, "#0b5fe3"], [1, "#0846bb"]],
+            "grad_back": {"stops": ["#b0c6f2", "#7a96df"], "mode": "steps:4"},
+            "frame": [4, "#0846bb"], "icon": False, "tshadow": ["#0a1f6d", 0.85, 1, 1]},
+    "current": "fill", "sel_back": "#d6d2c2",
+    "bar": {"edge": "bottom", "style": "grad", "sysbtn": "start", "chips": "button",
+            "app_title": "Calc", "sys": ["#23274b", "#b6a8f7", "#23274b"],
+            "tray": ["#1aa0f0", "#0e78d6"], "clock": "center", "alpha": 0.85},
+    "hhbar": {"style": "glass", "h": 22, "line": [1, "#e2e5ec"]},
+    "tabs": {"style": "pill", "pill": "#1b4ab0"},
+    "launcher": "dock", "dock": {"frost": False, "ring": None, "r": 22},
+    "tiles": {"play": "#3ca83a", "calc": 13, "bad name": "#000000"},
+    "sidebar": "vibrancy", "zebra": "#f4f4f7", "colhead": {"fill": "#ebeadb"},
+    "buttons": {"normal": {"fill": {"stops": [[0, "#ffffff"], [1, "#d9d5c7"]], "mode": "dither"},
+                           "border": [1, "#003c74"], "shape": "circle"},
+                "tonal": {"ink": "#c4231b", "font": "op", "bevel": True}},
+    "app_buttons": {"calc": {"normal": {"ink": "#1a3fcf"}, "primary": {"shape": "circle"}}},
+    "lcd_bevel": "in", "keycap": {"alpha": 0.28, "r": 5},
+    "backdrop": {"desk": [{"k": "circle", "at": [1, 2, 3], "p": "#191c3e"}]},
+    "dark": {"shadow": ["soft", "#000000", 0.55, 14, 6], "win": {"header": "fill"}},
+    "light": {"bar": {"fill": "#ffffff"}, "teapot": 1},
+}
+
+
 def _corpus(n):
     rng = random.Random(224)
     seeds = []
@@ -544,6 +583,11 @@ def _corpus(n):
                       surfaces={"button": {"rest": "bevel2, fill surface, shadow",
                                            "pressed": "sunken, dither shade_lo/7"},
                                 "window.title": {"active": "pinstripe shade_lo/shade_hi"}}))
+    # The look (docs/look_2026-10.md step 5): every field type, paints, maps,
+    # both variants' objects.
+    seeds.append(_src("fz", colors={"dark": {"panel": "#102030", "accent": "#ffc23d"},
+                                    "light": {"surface": "#FFFFFF", "ink": 0}},
+                      look=LOOK_SAMPLE))
     # The layout cases (docs/shell_layout_2026-10.md §5): a string for bars,
     # five bars, two on one edge, a size of 0 and of 10000, an unknown
     # widget, a 200-character text, no menu, `zone` in a vertical bar only.
@@ -615,7 +659,7 @@ def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
         assert moy_ui.theme_installed() == "kept"
         parsed = moy_ui.theme_install(src)
         if got[0] != OK:
-            assert got[2:] == (None,) * 6
+            assert got[2:] == (None,) * 7
             assert got[0] == parsed[0] or (parsed[0] == OK and got[0] == CHAIN
                                            and b"inherits" in src)
         else:

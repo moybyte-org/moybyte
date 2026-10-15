@@ -1247,13 +1247,13 @@ static mp_obj_t moy_gfx_draw_ctx_fill_rects(size_t n_args, const mp_obj_t *a) {
     uint16_t col = 0;
     bool have_col = false;
     if (cov >= 0) {
-        col = c->pal[(size_t)(cov & 63) % c->npal];
+        col = c->pal[(size_t)(cov & moy_canvas_cmask)];
         have_col = true;
     }
     for (mp_int_t i = 0; i < n; i++) {
         const int16_t *p = q + i * 5;
         uint16_t cc = have_col
-            ? col : c->pal[(size_t)(p[4] & 63) % c->npal];
+            ? col : c->pal[(size_t)(p[4] & moy_canvas_cmask)];
         gate_fill(c, (mp_int_t)p[0] + ox, (mp_int_t)p[1] + oy,
                   (mp_int_t)p[2], (mp_int_t)p[3], cc);
     }
@@ -1459,7 +1459,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         const char *s = mp_obj_str_get_data(args[0], &slen);
         moy_text_target_t tt = ctx_text_target(c);
         moy_text(&tt, moy_text_print_font(), MOY_TEXT_PY, (const uint8_t *)s, slen, x, y,
-                 c->pal[(size_t)(ci & 63) % c->npal], st[ST_FONT_SCALE],
+                 c->pal[(size_t)(ci & moy_canvas_cmask)], st[ST_FONT_SCALE],
                  MOY_TEXT_LEFT, -1);
         st[ST_N_TEXT]++;
         if (st[ST_PROF]) st[ST_T_TEXT] += (int32_t)(mp_hal_ticks_us() - t0);
@@ -1473,7 +1473,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
             || !gate_num(args[2], &ci)) {
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
-        gate_fill(c, x, y, 1, 1, c->pal[(size_t)(ci & 63) % c->npal]);
+        gate_fill(c, x, y, 1, 1, c->pal[(size_t)(ci & moy_canvas_cmask)]);
         st[ST_N_FILL]++;
         if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
         return mp_const_none;
@@ -1489,7 +1489,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
     }
-    uint16_t col = c->pal[(size_t)(v[4] & 63) % c->npal];
+    uint16_t col = c->pal[(size_t)(v[4] & moy_canvas_cmask)];
     if (kind == GATE_RECT) {
         gate_fill(c, v[0], v[1], v[2], v[3], col);
     } else {
@@ -1538,7 +1538,7 @@ static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
     c->cap = r->cap;
     c->st = r->st;
     c->pal = r->pal;
-    c->npal = 64u;
+    c->npal = MOY_CANVAS_PAL;
     c->batch = NULL;
     c->batch_len = 0;
     if (a[2] != mp_const_none) {
@@ -1618,7 +1618,7 @@ bool moy_gfx_capi_prof(const moy_gfx_draw_ctx_t *c) {
 }
 
 static inline uint16_t capi_col(const moy_gfx_draw_ctx_t *c, int ci) {
-    return c->pal[(size_t)(ci & 63) % c->npal];
+    return c->pal[(size_t)(ci & 63)];   // the C API draws carts' colours
 }
 
 void moy_gfx_capi_fill(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci) {

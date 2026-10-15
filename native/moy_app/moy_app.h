@@ -97,7 +97,7 @@ enum {
 #define MOY_APP_CLIP_MAX 4096u  // the clipboard's text, in bytes (configuration)
 #define MOY_APP_KINDS 4u        // the files kinds a permission may name
 #define MOY_APP_NAME_MAX 31u    // a theme's and a variant's name bytes
-#define MOY_APP_TOKENS 34u      // the token vocabulary's roles
+#define MOY_APP_TOKENS 39u      // the token vocabulary's roles
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
 #define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
 #define MOY_APP_ARTWORK_NS "paint"  // the namespace Paint's open picture is kept in
@@ -241,14 +241,21 @@ int moy_app_token_flag(int role);
 int moy_app_token_of(const char *name, size_t n);
 
 // The look's writes: the live theme (its name, its variant and every token,
-// MOY_TOKEN_ABSENT for a role it does not set). It bumps the generation. OK,
-// or BAD for a name over MOY_APP_NAME_MAX bytes.
+// MOY_TOKEN_ABSENT for a role it does not set), as the shell draws it (a
+// colour of the theme's block at 64..127, docs/look_2026-10.md step 5) and,
+// in `near` (NULL: the same), each role's nearest MOY64 index, which a RUN
+// grant and a compiled app are answered: a cart's colours are MOY64. It
+// bumps the generation. OK, or BAD for a name over MOY_APP_NAME_MAX bytes.
 int moy_app_theme_write(moy_appabi_t *a, const char *name, size_t n,
                         const char *variant, size_t vn,
-                        const int32_t tokens[MOY_APP_TOKENS]);
-// The table whole and its generation, uncounted: what a binding builds its
-// colours from.
+                        const int32_t tokens[MOY_APP_TOKENS],
+                        const int32_t near[MOY_APP_TOKENS]);
+// The table whole (`near`: the nearest-index one) and its generation,
+// uncounted: what a binding builds its colours from.
 uint32_t moy_app_theme_read(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]);
+uint32_t moy_app_theme_read_near(const moy_appabi_t *a, int32_t tokens[MOY_APP_TOKENS]);
+// Whether grant `g` is answered the nearest-index table (a RUN grant).
+int moy_app_theme_near(const moy_appabi_t *a, uint32_t g);
 // The theme's name (up to cap bytes, unterminated), uncounted; its length.
 size_t moy_app_name_read(const moy_appabi_t *a, char *out, size_t cap);
 

@@ -71,7 +71,10 @@ static int open_run(run_t *r) {
     r->row.st[MOY_ST_CX1] = r->row.st[MOY_ST_W] = c->w;
     r->row.st[MOY_ST_CY1] = r->row.st[MOY_ST_H] = c->h;
     r->row.st[MOY_ST_FONT_SCALE] = 1;
-    memcpy(r->row.pal, c->store, sizeof(r->row.pal));
+    // A compiled app is a cart: its colours are MOY64 (its theme imports
+    // answer each role's nearest index), so both halves are the canvas's.
+    memcpy(r->row.pal, c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
+    memcpy(&r->row.pal[MOY_CANVAS_BLOCK], c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
     r->s.kind = MOY_UI_SINK_RUN;
     r->s.fs = 1;
     r->s.look = MOY_UI_LOOK_RUN;

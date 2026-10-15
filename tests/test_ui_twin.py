@@ -23,6 +23,7 @@ import pytest
 import ui_twin as twin
 from runtime import ui
 from runtime.chrome import THEME_VARIANTS, THEME_NAMES, theme_colors
+from theme_live import live_tokens  # noqa: E402
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 
@@ -244,7 +245,7 @@ def _truncated(c):
 
 
 def _draw(m, widget, c):
-    th = theme_colors(*c["th"])
+    th = live_tokens(*c["th"])
     cv = SystemCanvas(128, 72, font_scale=c["fs"])
     cv.gate_counts_reset()
     ret = WIDGETS[widget](m, cv, th, c)

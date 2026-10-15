@@ -106,6 +106,9 @@ _SIGS = (
     ("moy_surface_sync", [ctypes.POINTER(ctypes.c_char_p), _Z, ctypes.c_char_p], None),
     ("moy_surface_kernel_epoch", [], _U32),
     ("moy_surface_kernel_bump", [], None),
+    ("moy_canvas_block", [_P], None),
+    ("moy_canvas_cart", [_I], None),
+    ("moy_canvas_block_words", [], _P),
 )
 
 _LIB = [None]
@@ -437,6 +440,31 @@ def kernel_epoch():
 
 def kernel_bump():
     _lib().moy_surface_kernel_bump()
+
+
+def block(words):
+    """The live theme's 64 RGB565 words (wire order) into every canvas row's
+    entries 64..127 (native/moy_glass/moy_canvas.h); None clears it."""
+    if words is None:
+        _lib().moy_canvas_block(None)
+        return
+    arr = (ctypes.c_uint16 * 64)(*[int(w) & 0xFFFF for w in words])
+    _lib().moy_canvas_block(ctypes.cast(arr, ctypes.c_void_p))
+
+
+def cart(on):
+    """The cart boundary's colour mask: 63 while a cart's code runs."""
+    _lib().moy_canvas_cart(1 if on else 0)
+
+
+def block_view():
+    """The block's 64 words (wire order) as a view."""
+    return _view(_lib().moy_canvas_block_words(), 128).cast("H")
+
+
+def cmask():
+    """A one-byte view of the colour mask the canvas class's verbs read."""
+    return _view(ctypes.addressof(ctypes.c_uint8.in_dll(_lib(), "moy_canvas_cmask")), 1)
 
 
 # -- present: the DSI compositor (native/moy_glass/moy_present.h) ----------------

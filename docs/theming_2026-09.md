@@ -27,7 +27,8 @@ that settles it).
 OS** — colours, sizes, how surfaces are drawn, window decorations, fonts, icons,
 images and, later, sounds. It installs, shares and remixes like a cart. Drawing
 code never names a colour or a shape: it asks for a **role** or a **part in a
-state**, and the active theme answers with MOY64 indices, sizes and a compiled
+state**, and the active theme answers with colours (MOY64 indices, or RGB
+placed in the shell's block of indices 64–127), sizes and a compiled
 surface record. **Nothing in a theme can run**: a theme holds data and images,
 and it may *name* installed carts (wallpapers) but never contain one.
 
@@ -47,7 +48,7 @@ for them from format 1.
 
 | # | decision |
 |---|---|
-| D1 | The default look is **"Open Machine, refined"**: the Workbench structure (1px black outlines, 2px hard shadows, calm light/dark chrome over the PICO-8 base colours), the **Tiny5** UI font, desk icons as tiles with the **label in a pill under the tile**, window title strips **left-aligned with the app's identity stripe and a square close on the right**, and **Moy's night** (stars, a low hill, a moon, Moy on the hill) as the default wallpaper. Light and dark are ONE drawing routine and two token tables. The 2026-10 look replaces D1 as the default: anti-aliased type, smooth shapes and soft shadows, with Daylight the default theme (owner, 2026-10-15; `docs/look_2026-10.md`). |
+| D1 | The default look is **"Open Machine, refined"**: the Workbench structure (1px black outlines, 2px hard shadows, calm light/dark chrome over the PICO-8 base colours), the **Tiny5** UI font, desk icons as tiles with the **label in a pill under the tile**, window title strips **left-aligned with the app's identity stripe and a square close on the right**, and **Moy's night** (stars, a low hill, a moon, Moy on the hill) as the default wallpaper. Light and dark are ONE drawing routine and two token tables. The 2026-10 look replaces D1 as the default: anti-aliased type, smooth shapes and soft shadows, with `moy` in its Day mode the default theme (owner, 2026-10-15; `docs/look_2026-10.md`). |
 | D2 | Themes change the OS **extensively** (§0's range), not only colours. |
 | D3 | A theme can carry **paintable sprites** (9-slice frames, glyphs, a desktop tile), in the first or second version; the format reserves them from format 1. |
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
@@ -137,13 +138,15 @@ field is `type` in the manifest's `moybyte` object, as for wallpapers and apps;
 It holds a `theme.json` and optional **data** assets: images, fonts, sprite and
 icon sheets. It never holds a cart or a script.
 
-**Format 1, as the loader reads it** (`native/moy_ui/moy_theme.h`; frozen
-2026-10-11 by phase 1, `surfaces` and `frame` defined 2026-10-12 by phase 3,
-`fonts` 2026-10-13 by phase 4, `layout` 2026-10-13 by phase 5's step 4):
+**Format 2, as the loader reads it** (`native/moy_ui/moy_theme.h`; format 1
+frozen 2026-10-11 by phase 1, `surfaces` and `frame` defined 2026-10-12 by
+phase 3, `fonts` 2026-10-13 by phase 4, `layout` 2026-10-13 by phase 5's
+step 4; format 2, RGB colours and `look`, 2026-10-15 by
+`docs/look_2026-10.md` step 5):
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "name": "dusk",
   "colors": {
     "dark":  { "panel": 1, "title": 13, "title_ink": 7, "code_keyword": 12 },
@@ -172,9 +175,23 @@ icon sheets. It never holds a cart or a script.
 - **`inherits`**: one parent, by name (§5). A theme that names none inherits
   the default. A seed's key: a user package is a standalone copy and carries
   none (owner, 2026-10-14).
-- **`colors.dark`, `colors.light`**: role → MOY64 index, or a flag role →
-  `true`/`false` (§4.1). A role is a token of the live row or a content role.
-  Every role is optional.
+- **`colors.dark`, `colors.light`**: role → a MOY64 index or `"#rrggbb"`,
+  or a flag role → `true`/`false` (§4.1). A role is a token of the live row
+  or a content role. Every role is optional. The two tables are the theme's
+  two modes (`moy`'s Night and Day).
+- **`look`**: the theme model's fields
+  (`docs/media/look_2026-10/THEMES.md`, style.json's `theme.look`): shared
+  ones, then a `dark` and a `light` object of the mode's own, which come
+  first. A field is a colour, a paint (a colour, `"vibrancy"`, a list of
+  colours or `[t, colour]` stops, or `{"stops", "mode"}` with `smooth`,
+  `dither` or `steps:N`), a name of its list, an integer or a number (in
+  hundredths, each clamped to its range), a bool, a short text, or an array
+  of those (`[width, colour]` for a line, `["soft", colour, alpha, blur,
+  dy]` or `["hard", colour, dx, dy]` for a shadow); `null` is explicitly
+  none. `tiles` maps an app to a colour and `app_buttons` an app and a
+  button kind to a button's fields, each capped; `backdrop` is accepted and
+  read by step 7. A field nothing sets takes the model's default, which for
+  most colours is silent: the renderer derives it.
 - **`metrics`**: `radius` (0-3), `press_dx` and `press_dy` (-3 to 3), each
   clamped to its range (§4.2); the default seed sets every one to 0.
 - **`text`**: part → state → `{"effect": "none" | "shadow" | "emboss",
@@ -204,7 +221,9 @@ icon sheets. It never holds a cart or a script.
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
 - Any other key or role is ignored, a value of the wrong type is dropped and an
-  index outside 0-63 is clamped, and each is noted (§7).
+  index outside 0-63 is clamped, and each is noted (§7). A package of another
+  `format` is refused: under the store rule a format-1 package reads as
+  absent.
 
 What the reserved keys will hold, as rev 2 sketched them (and the metrics
 §4.2 lists beyond format 1's three, added to `metrics` additively):
@@ -251,9 +270,16 @@ semantic roles of `docs/visual_identity_v1.md`, then the roles phase 3 added
 below, three of them the flags `surface_light`, `bar_light` and
 `band_light`). They are the names `theme()`, `ctx.theme.colors()` and a
 compiled app's `theme` imports answer; a role a phase adds is appended to the
-row, so a compiled app's role ids do not move. Every value is a **MOY64
-index**; per-theme RGB values were ruled in on 2026-10-15 (§11), and
-`docs/look_2026-10.md` step 5 builds them.
+row, so a compiled app's role ids do not move. A value is a **MOY64 index**
+or **RGB** (ruled in 2026-10-15, §11). The live theme's RGB values are
+quantised to RGB565 and placed in the shell's block, indices 64–127, which
+every canvas's colour table carries above MOY64 and no `pal()` remaps
+(`chrome.live_colors`, `moy_theme_place`); the shell draws with those. Each
+role also has its nearest MOY64 index, which `theme()`, a compiled app's
+`theme` imports and a cart's canvas are given, and while a cart's code runs
+a colour index is masked to 0–63 (`moy_ui.cart_text`), so a cart's colour
+stays its index modulo 64. Another theme's preview draws its RGB as RGB565
+and takes no slot.
 
 A role a package leaves unset is **derived by a rule** (style.json's
 `theme.derive`, §5): `surface` from `panel`, `focus` from `accent`, the inks
@@ -821,8 +847,9 @@ default; a SAFE start runs no cart.
 **The rule** (owner, 2026-10-14: every colour role, the code and block
 colours with them, follows from a source theme, MODE, one ACCENT and one
 TINT, readable by construction). It runs in C (`moy_theme_derive`, phase 6
-step 4), integer only, on the loader's luminance table (`moy_theme_lum`)
-and the loader's own predicate: `clears(a, b)` is
+step 4), integer only, on the loader's luminance (`moy_theme_lum_of`: an
+index's from `moy_theme_lum`, an RGB colour's from its RGB565) and the
+loader's own predicate: `clears(a, b)` is
 `(hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500)` over the two
 luminances, the pair check §7 already makes. Its inputs are the source's
 two resolved rows (the token row and the content set, both variants), an
@@ -885,8 +912,9 @@ carry one; their pairs of `theme.pairs` all clear). A source a hand edit
 made unreadable in `theme.pairs` stays reported as any hand edit is (§7).
 
 **Where the result lives: plain roles in `custom`'s `theme.json`.** Both
-variants, every role, written by `ui.theme_custom` (phase 6 step 4), so the
-loader stays format 1 and unchanged, EDIT FILE shows the colours the
+variants, every role, written by `ui.theme_custom` (phase 6 step 4) with the
+source's `look` flattened beside them, so the loader reads it as any
+package, EDIT FILE shows the colours the
 console draws, and a console without the step, the web console and the
 carts repository read the same row. The inputs ride in the package's
 manifest, `"moybyte": {"type": "theme", "look": {"from": "night", "accent":
@@ -990,9 +1018,10 @@ Kids will trade themes, so a theme is untrusted input:
 - **Data only.** Parse, validate and clamp (`native/moy_ui/moy_theme.c`, a
   strict JSON reader of its own, built on every tier): a theme.json over
   `theme.bytes` (4096) is refused, as is malformed JSON, nesting past eight
-  levels, a missing, non-integer or newer `format`, a missing or ill-formed
+  levels, a missing, non-integer or other `format`, a missing or ill-formed
   `name`, a seed's name, or an `inherits` that names no package, cycles or
-  runs past the cap. An index is clamped to 0-63, a value of the wrong type is
+  runs past the cap. An index is clamped to 0-63, a number of `look` to its
+  range, a value of the wrong type (a colour that is not `#rrggbb`) is
   dropped and an unknown key or role is ignored, each noted to the caller.
   A metric is clamped to its range, a text effect with an unknown part,
   state or effect name, or without its role, is ignored or dropped and noted,
@@ -1003,7 +1032,8 @@ Kids will trade themes, so a theme is untrusted input:
   fuzzes the reader and holds the boards' module to the host's answers.
 - **Readability check** at load and in the editor. Every pair of `theme.pairs`
   must clear `theme.contrast` (a WCAG ratio of 3.0, the floor for large text
-  and UI parts) on the MOY64 table; a failing pair sets its bit in the report
+  and UI parts) on each colour's luminance (an RGB colour's as its RGB565
+  shows it); a failing pair sets its bit in the report
   and never refuses the theme. For a dither or pinstripe fill the ink is
   checked against **both** colours, in the look, since the check needs each
   part's ink, which the style resolves there (ruled 2026-10-12):

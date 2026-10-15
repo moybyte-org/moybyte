@@ -507,6 +507,9 @@ def generate_theme(style, t):
          "\n    moy_theme_n_homes;"]
     rh, rc = _recolour(th, roles, flags)
     h.extend(rh)
+    lh, lc = _look(th)
+    h.extend(lh)
+    rc = rc + lc
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
     for r, k, v in rules:
         c.append("    {%d, %d, %d},  // %s" % (r, k, v, roles[r]))
@@ -602,6 +605,225 @@ def generate_theme(style, t):
     c.append("const uint16_t moy_theme_font_len[MOY_THEME_FONT_FILES + 1] = {%s0};\n"
              % "".join("%d, " % len(d) for _n, d in fonts))
     c.extend(rc)
+    return h, c
+
+
+def _moy64():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_moy64", os.path.join(ROOT, "runtime", "palette.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return list(mod.MOY64)
+
+
+# A look leaf's kind, and a look field's type (moy_theme.h).
+_LEAF_KINDS = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners")
+_FIELD_TYPES = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners",
+                "line", "shadow", "tshadow", "ring", "trio")
+
+
+def _look_fields(lk):
+    """theme.look's fields with `buttons` expanded per kind: [(path, type,
+    [(leaf name, kind, lo, hi, default), ...])]. A default None is NONE
+    (silent: the renderer derives it); enum lo/hi are names, numbers are in
+    hundredths."""
+    out = []
+
+    def colour(v):
+        if v is None:
+            return None
+        if not re.match(r"^#[0-9a-f]{6}$", v):
+            raise SystemExit("theme.look: %r is no #rrggbb" % (v,))
+        return 0x1000000 | int(v[1:], 16)
+
+    def hund(v):
+        return None if v is None else int(round(v * 100))
+
+    def one(path, spec):
+        t = spec[0]
+        a = spec[1:]
+        if t not in _FIELD_TYPES:
+            raise SystemExit("theme.look: %s has no type %r" % (path, t))
+        if t == "colour":
+            return [(path, "colour", 0, 0, colour(a[0] if a else None))]
+        if t == "paint":
+            return [(path, "paint", 0, 0, None)]
+        if t == "enum":
+            d = 0 if len(a) < 2 else a[1]
+            return [(path, "enum", a[0], None, d)]
+        if t == "int":
+            return [(path, "int", a[0], a[1], a[2] if len(a) > 2 else None)]
+        if t == "num":
+            return [(path, "num", hund(a[0]), hund(a[1]), hund(a[2]) if len(a) > 2 else None)]
+        if t == "bool":
+            d = a[0] if a else None
+            return [(path, "bool", 0, 1, None if d is None else int(d))]
+        if t == "text":
+            return [(path, "text", 0, 0, None)]
+        if t == "corners":
+            return [(path, "corners", 0, 15, 15)]
+        w0, w1 = lk["line_w"]
+        o0, o1 = lk["offset"]
+        b0, b1 = lk["shadow_blur"]
+        if t == "line":
+            return [(path + ".w", "num", w0 * 100, w1 * 100, None),
+                    (path + ".c", "colour", 0, 0, None)]
+        if t == "shadow":
+            return [(path + ".kind", "enum", lk["shadow_kinds"], None, 0),
+                    (path + ".c", "colour", 0, 0, None),
+                    (path + ".alpha", "num", 0, 100, None),
+                    (path + ".blur", "num", b0 * 100, b1 * 100, None),
+                    (path + ".dx", "int", o0, o1, None),
+                    (path + ".dy", "int", o0, o1, None)]
+        if t == "tshadow":
+            return [(path + ".c", "colour", 0, 0, None),
+                    (path + ".alpha", "num", 0, 100, None),
+                    (path + ".dx", "int", o0, o1, None),
+                    (path + ".dy", "int", o0, o1, None)]
+        if t == "ring":
+            return [(path + ".c", "colour", 0, 0, colour(a[0] if a else None)),
+                    (path + ".alpha", "num", 0, 100, hund(a[1]) if len(a) > 1 else None)]
+        return [(path + "." + k, "colour", 0, 0, None) for k in ("fill", "body", "eye")]
+
+    for spec in lk["fields"]:
+        path, t = spec[0], spec[1]
+        if t == "button":
+            for kind in lk["button_kinds"]:
+                for b in lk["button"]:
+                    p = "%s.%s.%s" % (path, kind, b[0])
+                    out.append((p, b[1], one(p, b[1:])))
+            continue
+        out.append((path, t, one(path, spec[1:])))
+    return out
+
+
+def _look(th):
+    """The look model's tables (docs/look_2026-10.md step 5, THEMES.md's
+    theme model): every field, its leaves, their kinds, ranges and
+    defaults, the enum names and the object groups."""
+    lk = th["look"]
+    fields = _look_fields(lk)
+    paths = [f[0] for f in fields]
+    if len(set(paths)) != len(paths):
+        raise SystemExit("theme.look: a field twice")
+    groups = []
+    for p in paths:
+        parts = p.split(".")
+        for i in range(1, len(parts)):
+            g = ".".join(parts[:i])
+            if g in paths:
+                raise SystemExit("theme.look: %s is a field and a group" % g)
+            if g not in groups:
+                groups.append(g)
+    # each group's fields are contiguous, so the writer opens each once
+    for g in groups:
+        idx = [i for i, p in enumerate(paths) if p.startswith(g + ".")]
+        if idx != list(range(idx[0], idx[-1] + 1)):
+            raise SystemExit("theme.look: group %s is not contiguous" % g)
+    enums, leaves = [], []
+    for path, t, lv in fields:
+        for name, kind, lo, hi, d in lv:
+            if kind == "enum":
+                names = lo
+                if d is not None and not isinstance(d, int):
+                    d = names.index(d)
+                lo, hi = len(enums), len(names)
+                enums.extend(names)
+            leaves.append((name, kind, lo, hi, d))
+    btn = _look_fields({**lk, "fields": [["b", "button"]], "button_kinds": ["k"]})
+    btn_leaves = [l for _p, _t, lv in btn for l in lv]
+
+    def term(v):
+        return "INT32_MIN" if v is None else "%d" % v
+
+    h = ["// The look (docs/look_2026-10.md step 5): the theme model's fields, each",
+         "// one or more leaves; a leaf's kind, its range (an enum's first name and",
+         "// count), its default (MOY_THEME_NONE: silent, the renderer derives it).",
+         "#define MOY_THEME_LEAVES %d" % len(leaves),
+         "#define MOY_THEME_LOOK_FIELDS %d" % len(fields),
+         "#define MOY_THEME_LOOK_GROUPS %d" % len(groups),
+         "#define MOY_THEME_ENUM_NAMES %d" % len(enums),
+         "#define MOY_THEME_BTN_KINDS %d" % len(lk["button_kinds"]),
+         "#define MOY_THEME_BTN_LEAVES %d" % len(btn_leaves),
+         "#define MOY_THEME_BTN_LEAF0 %d  // buttons.%s's first leaf" % (
+             [l[0] for l in leaves].index("buttons.%s.%s" % (lk["button_kinds"][0],
+                                                             lk["button"][0][0])),
+             lk["button_kinds"][0]),
+         "#define MOY_THEME_PAINT_STOPS %d" % lk["paint_stops"],
+         "#define MOY_THEME_PAINTS_CAP %d" % lk["paints_cap"],
+         "#define MOY_THEME_ENTRIES_CAP %d" % lk["entries_cap"],
+         "#define MOY_THEME_TILES_CAP %d" % lk["tiles_cap"],
+         "#define MOY_THEME_APPBTN_CAP %d" % lk["app_buttons_cap"],
+         "#define MOY_THEME_MAPNAME_MAX %d" % lk["name_max"],
+         "#define MOY_THEME_LOOK_TEXT_MAX %d" % lk["text_max"],
+         "#define MOY_THEME_LOOK_ACCEPTED %d" % len(lk["accepted"]),
+         "#define MOY_THEME_PAINT_MODES %d" % len(lk["paint_modes"]),
+         "enum {",
+         *["    MOY_THEME_LK_%s = %d," % (_ident(k), i) for i, k in enumerate(_LEAF_KINDS)],
+         "};",
+         "enum {",
+         *["    MOY_THEME_FT_%s = %d," % (_ident(k), i) for i, k in enumerate(_FIELD_TYPES)],
+         "};",
+         "typedef struct { uint8_t kind; int32_t lo, hi, def; } moy_theme_leaf_t;",
+         "typedef struct { const char *path; uint8_t type, n; uint16_t leaf; } moy_theme_field_t;",
+         "extern const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES];",
+         "extern const char *const moy_theme_leaf_names[MOY_THEME_LEAVES];",
+         "extern const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS];",
+         "extern const char *const moy_theme_look_groups[MOY_THEME_LOOK_GROUPS];",
+         "extern const char *const moy_theme_enum_names[MOY_THEME_ENUM_NAMES];",
+         "extern const char *const moy_theme_btn_kinds[MOY_THEME_BTN_KINDS];",
+         "// An app_buttons entry's leaves: a kind's button leaves, in order.",
+         "extern const moy_theme_field_t moy_theme_btn_fields[%d];" % len(btn),
+         "#define MOY_THEME_BTN_FIELDS %d" % len(btn),
+         "extern const char *const moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED];",
+         "extern const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES];",
+         "// RGB colours (docs/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the",
+         "// WCAG luminance (x10000, as moy_theme_lum) of an RGB565 channel.",
+         "extern const uint32_t moy_theme_moy64[64];",
+         "extern const uint16_t moy_theme_lin5[32], moy_theme_lin6[64];"]
+    c = ["const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {"]
+    for name, kind, lo, hi, d in leaves:
+        c.append("    {MOY_THEME_LK_%s, %s, %s, %s},  // %s" % (
+            _ident(kind), term(lo), term(hi), term(d), name))
+    c.append("};\n")
+    c.append("const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {")
+    c.extend("    %s," % _c_str(l[0]) for l in leaves)
+    c.append("};\n")
+
+    def field_rows(fs):
+        rows, at = [], 0
+        for path, t, lv in fs:
+            rows.append("    {%s, MOY_THEME_FT_%s, %d, %d}," % (_c_str(path), _ident(t), len(lv), at))
+            at += len(lv)
+        return rows
+    c.append("const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {")
+    c.extend(field_rows(fields))
+    c.append("};\n")
+    c.append("const moy_theme_field_t moy_theme_btn_fields[%d] = {" % len(btn))
+    c.extend(field_rows([(p.split(".", 2)[2], t, lv) for p, t, lv in btn]))
+    c.append("};\n")
+    for decl, seq in (("moy_theme_look_groups[MOY_THEME_LOOK_GROUPS]", groups),
+                      ("moy_theme_enum_names[MOY_THEME_ENUM_NAMES]", enums),
+                      ("moy_theme_btn_kinds[MOY_THEME_BTN_KINDS]", lk["button_kinds"]),
+                      ("moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED]", lk["accepted"]),
+                      ("moy_theme_paint_modes[MOY_THEME_PAINT_MODES]", lk["paint_modes"])):
+        c.append("const char *const %s = {" % decl)
+        c.extend("    %s," % _c_str(n) for n in seq)
+        c.append("};\n")
+    m = _moy64()
+    c.append("const uint32_t moy_theme_moy64[64] = {")
+    for i in range(0, 64, 8):
+        c.append("    %s," % ", ".join("0x%06x" % ((r << 16) | (g << 8) | b) for r, g, b in m[i:i + 8]))
+    c.append("};\n")
+
+    def lin(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    l5 = [round(10000 * lin((i << 3) | (i >> 2))) for i in range(32)]
+    l6 = [round(10000 * lin((i << 2) | (i >> 4))) for i in range(64)]
+    c.append("const uint16_t moy_theme_lin5[32] = {%s};\n" % ", ".join(map(str, l5)))
+    c.append("const uint16_t moy_theme_lin6[64] = {%s};\n" % ", ".join(map(str, l6)))
     return h, c
 
 

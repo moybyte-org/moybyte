@@ -1,6 +1,8 @@
 """The incremental gate-pal table stays equal to the full rebuild -- always.
 
-pal()/reset_state() maintain the draw gates' 64-entry RGB565 palette table
+pal()/reset_state() maintain the draw gates' 64-entry MOY64 half of the
+128-entry RGB565 palette table (the upper half, the theme's block, is the
+glass's and the walk checks the gates draw it untouched)
 incrementally (one poke per remap, one slice-copy per reset) instead of
 re-deriving all 64 entries per call -- that rebuild was ~80% of a pal() body,
 and the celeste shim calls pal() every frame (attribution:
@@ -73,6 +75,12 @@ def rnd(n):
     return state % n
 
 
+# The theme's block, colour indices 64..127: written into every row by the
+# glass, never remapped by pal(), drawn by the native gates as by _col.
+device_canvas.set_block([(0x1234 + 977 * i) & 0xFFFF for i in range(64)])
+BLOCK = device_canvas._BLOCK
+
+
 def check(step, op):
     pm = canvas._pal_map
     gp = canvas._gate_pal
@@ -82,6 +90,13 @@ def check(step, op):
             print("DIVERGED step=%d op=%s idx=%d gate=%d want=%d"
                   % (step, op, i, gp[i], want))
             raise SystemExit(1)
+    k = rnd(64)
+    canvas.rect(0, 0, 1, 1, 64 + k)
+    o = 2 * (canvas._oy * canvas._stride + canvas._ox)
+    got = canvas._buf[o] | canvas._buf[o + 1] << 8
+    if got != BLOCK[k] or canvas._col(64 + k) != BLOCK[k]:
+        print("BLOCK step=%d op=%s slot=%d drew=%d want=%d" % (step, op, k, got, BLOCK[k]))
+        raise SystemExit(1)
 
 
 canvas.reset_state()

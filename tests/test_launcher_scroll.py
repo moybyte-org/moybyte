@@ -395,7 +395,7 @@ def test_a_layouts_home_picks_the_arrangement(tmp_path):
     from runtime.launcher_layer import Carousel, Launcher
 
     ws = _ws_with_carts(tmp_path, 4)
-    rc, _n = moy_ui.theme_install(json.dumps({"format": 1, "name": "hg", "layout": {
+    rc, _n = moy_ui.theme_install(json.dumps({"format": 2, "name": "hg", "layout": {
         "home": "grid", "bars": [{"edge": "top", "left": ["zone"],
                                   "right": ["clock", "close", "menu"]}]}}).encode())
     assert rc == 0

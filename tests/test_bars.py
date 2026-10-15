@@ -35,7 +35,7 @@ def _bar(edge, size=18, left=(), center=(), right=(), text=()):
 
 def _pick(ws, bars):
     """Install `bars` as a package's layout and pick it, as Settings does."""
-    pkg = {"format": 1, "name": "bars", "layout": {"bars": [
+    pkg = {"format": 2, "name": "bars", "layout": {"bars": [
         {"edge": b[0], "size": b[1], "left": list(b[2]), "center": list(b[3]),
          "right": list(b[4]), "text": list(b[5])} for b in bars]}}
     rc, _notes = moy_ui.theme_install(json.dumps(pkg).encode())

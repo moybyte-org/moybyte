@@ -53,17 +53,35 @@ def _lin(v):
 LUM = [round(10000 * (0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)))
        for r, g, b in MOY64]
 FLOOR = 30          # theme.contrast x 10
+RGB = 0x1000000     # a colour value at or above: RGB | 0xrrggbb (docs/look_2026-10.md step 5)
+
+
+def _lin_c(v):
+    v /= 255.0
+    return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+
+# an RGB value's luminance is its RGB565's, per channel (moy_theme_lin5/6)
+_L5 = [round(10000 * _lin_c((i << 3) | (i >> 2))) for i in range(32)]
+_L6 = [round(10000 * _lin_c((i << 2) | (i >> 4))) for i in range(64)]
+
+
+def lum(v):
+    if v < 64:
+        return LUM[v]
+    r, g, b = (v >> 16) & 255, (v >> 8) & 255, v & 255
+    return (2126 * _L5[r >> 3] + 7152 * _L6[g >> 2] + 722 * _L5[b >> 3] + 5000) // 10000
 
 
 def clears(a, b):
     """The loader's predicate: the pair (a, b) reaches theme.contrast."""
-    la, lb = LUM[a], LUM[b]
+    la, lb = lum(a), lum(b)
     hi, lo = max(la, lb), min(la, lb)
     return (hi + 500) * 10 >= FLOOR * (lo + 500)
 
 
 def ratio(a, b):
-    la, lb = LUM[a], LUM[b]
+    la, lb = lum(a), lum(b)
     return (max(la, lb) + 500) / (min(la, lb) + 500)
 
 
@@ -84,10 +102,12 @@ TINT = dict(TINTS)
 ACCENT_FILLS = ("accent", "title", "title_active", "selection")
 TIED = ("edge", "border", "hilite", "shade_hi", "bar_edge", "desktop_pattern")
 BACKGROUNDS = ("panel", "surface", "surface_alt", "desktop", "desktop_pattern",
-               "title_inactive", "bar", "dim", "hilite", "shade_hi", "shade_lo")
+               "title_inactive", "bar", "dim", "hilite", "shade_hi", "shade_lo",
+               "sunk", "lcd")
 LINES = ("edge", "border", "bar_edge", "shade_dark")
 INK_PAIRS = (("ink", ("surface", "surface_alt")), ("chrome_ink", ("panel", "bar")),
-             ("title_ink", ("title", "title_active")), ("selection_ink", ("selection",)))
+             ("title_ink", ("title", "title_active")), ("selection_ink", ("selection",)),
+             ("value_ink", ("value",)), ("lcd_ink", ("lcd",)))
 DIM_INKS = (("ink_dim", ("surface",)), ("chrome_ink_dim", ("panel", "bar", "title_inactive")))
 ACCENT_INKS = ("focus", "ink_accent")
 SYNTAX = ("code_text", "code_keyword", "code_string", "code_number", "code_comment",
@@ -120,7 +140,7 @@ def tint_map(v, ramp):
     ok = [c for c in ramp if all(clears(c, x) for x in need)]
     if not ok:
         return v
-    return min(ok, key=lambda c: (abs(LUM[c] - LUM[v]), c))
+    return min(ok, key=lambda c: (abs(lum(c) - lum(v)), c))
 
 
 def pick_ink(base, bgs):
@@ -177,7 +197,8 @@ def derive_variant(base, accent, tint):
 
 PAIRS = (("title", "title_ink"), ("title_active", "title_ink"), ("surface", "ink"),
          ("surface_alt", "ink"), ("selection", "selection_ink"), ("panel", "chrome_ink"),
-         ("bar", "chrome_ink"), ("title_inactive", "chrome_ink_dim"))
+         ("bar", "chrome_ink"), ("title_inactive", "chrome_ink_dim"), ("value", "value_ink"),
+         ("lcd", "lcd_ink"))
 
 
 def readable(row):

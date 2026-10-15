@@ -119,6 +119,8 @@ typedef struct {
     mp_obj_t no_store;      // the `err` a storage row answers with no store
     mp_obj_t colors;        // the colour dict of generation colors_gen, or NULL
     uint32_t colors_gen;
+    mp_obj_t near;          // ...and the nearest-index one a RUN grant reads
+    uint32_t near_gen;
     bool own;               // false: a view of the kernel's
     mp_obj_t canvases[MOY_GRANT_SLOTS];     // per grant slot: the canvas object
 } app_obj_t;
@@ -140,6 +142,8 @@ static void app_init(app_obj_t *o) {
     o->no_store = mp_const_none;
     o->colors = MP_OBJ_NULL;
     o->colors_gen = 0u;
+    o->near = MP_OBJ_NULL;
+    o->near_gen = 0u;
     for (size_t i = 0; i < MOY_GRANT_SLOTS; i++) {
         o->canvases[i] = mp_const_none;
     }
@@ -347,20 +351,13 @@ static mp_obj_t app_bind_pointer(mp_obj_t self_in, mp_obj_t p) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(app_bind_pointer_obj, app_bind_pointer);
 
-// theme_write(name, variant, colors): the live token table from the look's
-// dict, and the table's new generation; a key outside the vocabulary is
-// refused (ValueError).
-static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
-    moy_appabi_t *a = app_of(args[0]);
-    size_t n, vn;
-    const char *name = str_of(args[1], &n);
-    const char *variant = str_of(args[2], &vn);
-    int32_t tokens[MOY_APP_TOKENS];
+// A colour dict into a token table; a key outside the vocabulary is refused
+// (ValueError).
+static void tokens_of(mp_obj_t dict, int32_t tokens[MOY_APP_TOKENS]) {
     for (size_t i = 0; i < MOY_APP_TOKENS; i++) {
         tokens[i] = MOY_TOKEN_ABSENT;
     }
-    mp_map_t *map = mp_obj_dict_get_map(args[3]);
+    mp_map_t *map = mp_obj_dict_get_map(dict);
     for (size_t i = 0; i < map->alloc; i++) {
         if (!mp_map_slot_is_filled(map, i)) {
             continue;
@@ -373,10 +370,26 @@ static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
         }
         tokens[role] = (int32_t)mp_obj_get_int(map->table[i].value);
     }
-    check(moy_app_theme_write(a, name, n, variant, vn, tokens));
+}
+
+// theme_write(name, variant, colors, near=None): the live token table from
+// the look's dict (and the nearest-index one a RUN grant reads, else the
+// same), and the table's new generation.
+static mp_obj_t app_theme_write(size_t n_args, const mp_obj_t *args) {
+    moy_appabi_t *a = app_of(args[0]);
+    size_t n, vn;
+    const char *name = str_of(args[1], &n);
+    const char *variant = str_of(args[2], &vn);
+    int32_t tokens[MOY_APP_TOKENS], near[MOY_APP_TOKENS];
+    tokens_of(args[3], tokens);
+    int has_near = n_args > 4 && args[4] != mp_const_none;
+    if (has_near) {
+        tokens_of(args[4], near);
+    }
+    check(moy_app_theme_write(a, name, n, variant, vn, tokens, has_near ? near : NULL));
     return MP_OBJ_NEW_SMALL_INT(moy_app_theme_read(a, tokens) & 0x3fffffffu);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_theme_write_obj, 4, 4, app_theme_write);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_theme_write_obj, 4, 5, app_theme_write);
 
 static mp_obj_t app_serve(mp_obj_t self_in, mp_obj_t role, mp_obj_t server) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -748,12 +761,14 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // The colour dict of the token table's generation `gen`, rebuilt only when it
 // moves: what the look's dict holds, flags as bools.
-static mp_obj_t colors_at(app_obj_t *app, uint32_t gen) {
-    if (app->colors != MP_OBJ_NULL && app->colors_gen == gen) {
-        return app->colors;
+static mp_obj_t colors_at(app_obj_t *app, uint32_t gen, int near) {
+    mp_obj_t *have = near ? &app->near : &app->colors;
+    uint32_t *have_gen = near ? &app->near_gen : &app->colors_gen;
+    if (*have != MP_OBJ_NULL && *have_gen == gen) {
+        return *have;
     }
     int32_t tok[MOY_APP_TOKENS];
-    gen = moy_app_theme_read(app->a, tok);
+    gen = near ? moy_app_theme_read_near(app->a, tok) : moy_app_theme_read(app->a, tok);
     mp_obj_t d = mp_obj_new_dict(MOY_APP_TOKENS);
     for (int i = 0; i < (int)MOY_APP_TOKENS; i++) {
         if (tok[i] == MOY_TOKEN_ABSENT) {
@@ -765,8 +780,8 @@ static mp_obj_t colors_at(app_obj_t *app, uint32_t gen) {
                                            : MP_OBJ_NEW_SMALL_INT(tok[i]);
         mp_obj_dict_store(d, key, v);
     }
-    app->colors = d;
-    app->colors_gen = gen;
+    *have = d;
+    *have_gen = gen;
     return d;
 }
 
@@ -774,7 +789,8 @@ static mp_obj_t theme_colors(mp_obj_t self) {
     uint32_t g, gen;
     moy_appabi_t *a = role_app(self, &g);
     check(moy_app_theme_colors(a, g, &gen));
-    return colors_at(MP_OBJ_TO_PTR(((role_obj_t *)MP_OBJ_TO_PTR(self))->app), gen);
+    return colors_at(MP_OBJ_TO_PTR(((role_obj_t *)MP_OBJ_TO_PTR(self))->app), gen,
+                     moy_app_theme_near(a, g));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_colors_obj, theme_colors);
 

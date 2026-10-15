@@ -67,6 +67,14 @@ _SIGS = (
     ("moy_font_reset", [], None),
     ("moy_text_print_font_use", [c.c_uint32], c.c_int64),
     ("moy_ui_cart_text", [_I], _I),
+    ("moy_ui_cmask", [], _I),
+    ("moy_canvas_cart", [_I], None),
+    ("moy_theme_look", [_P, _Z, _I, _I, c.c_void_p], _I),
+    ("moy_theme_place", [c.c_void_p, _I, c.c_void_p, c.c_void_p, c.c_void_p], _I),
+    ("moy_theme_block_use", [c.c_void_p, _I], None),
+    ("moy_theme_rgb565", [c.c_int32], c.c_uint16),
+    ("moy_theme_lum_of", [c.c_int32], c.c_int32),
+    ("moy_theme_nearest", [c.c_int32], c.c_int32),
     ("moy_ui_print_font", [c.c_uint32], c.c_int64),
     ("moy_ui_glyph_id", [_P, _Z], _I),
     ("moy_text_wrap", [c.c_uint32, _P, _Z, _I, _I, c.c_void_p, _I], _I),
@@ -332,7 +340,7 @@ def binding():
         return none if v is None else int(v)
 
     def col(v, none):
-        return none if v is None else int(v) & 63
+        return none if v is None else int(v) & lib.moy_ui_cmask()
 
     def colors3(cols, out):
         for i in range(3):
@@ -818,13 +826,79 @@ def binding():
 
     pkg_bytes = c.c_size_t.in_dll(lib, "moy_theme_pkg_bytes").value
 
+    ld = tuple((c.c_int * 10).in_dll(lib, "moy_theme_look_dims"))
+    n_leaves, stops, paints_cap, tiles_cap, ab_cap, btn_n, map_max, text_max, n_texts, btn0 = ld
+
+    class _Paint(c.Structure):
+        _fields_ = [("n", c.c_uint8), ("mode", c.c_uint8), ("steps", c.c_uint8),
+                    ("pad", c.c_uint8), ("t", c.c_int16 * stops), ("c", c.c_int32 * stops)]
+
+    class _Map(c.Structure):
+        _fields_ = [("name", c.c_char * (map_max + 1)), ("section", c.c_uint8),
+                    ("kind", c.c_uint8), ("v", c.c_int32 * btn_n)]
+
+    class _Look(c.Structure):
+        _fields_ = [("v", c.c_int32 * n_leaves), ("n_paints", c.c_uint8),
+                    ("n_tiles", c.c_uint8), ("n_appbtn", c.c_uint8), ("n_text", c.c_uint8),
+                    ("paint", _Paint * paints_cap), ("tile", _Map * tiles_cap),
+                    ("appbtn", _Map * ab_cap), ("text", (c.c_char * (text_max + 1)) * n_texts)]
+
+    if c.sizeof(_Look) != c.c_size_t.in_dll(lib, "moy_theme_look_bytes").value:
+        raise RuntimeError("moy_ui_binding: moy_theme_look_t does not match")
+
+    class _Leaf(c.Structure):
+        _fields_ = [("kind", c.c_uint8), ("lo", c.c_int32), ("hi", c.c_int32),
+                    ("def_", c.c_int32)]
+
+    leaf_rows = (_Leaf * n_leaves).in_dll(lib, "moy_theme_leaves")
+    leaf_names = _names(lib, "moy_theme_leaf_names", n_leaves)
+    enum_arr = (c.c_char_p * max(r.lo + r.hi for r in leaf_rows if r.kind == 2)).in_dll(
+        lib, "moy_theme_enum_names")
+    _KINDS = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners")
+    pmodes = ("smooth", "steps", "dither")
+    btn_kinds = _names(lib, "moy_theme_btn_kinds", 5)
+
+    def theme_look_fields():
+        kinds = tuple((_KINDS[r.kind], tuple(enum_arr[r.lo + j].decode() for j in range(r.hi)))
+                      if r.kind == 2 else _KINDS[r.kind] for r in leaf_rows)
+        btn = tuple(n.split(".", 2)[2] for n in leaf_names[btn0:btn0 + btn_n])
+        return leaf_names, kinds, btn
+
+    def theme_look(name, light):
+        b = _b(name)
+        lk = _Look()
+        rc = lib.moy_theme_look(b, len(b), 1 if light else 0, 1, c.byref(lk))
+        paints = tuple((pmodes[p.mode], p.steps, tuple((p.t[k], p.c[k]) for k in range(p.n)))
+                       for p in lk.paint[:lk.n_paints])
+        tiles = tuple((t.name.decode(), t.v[0]) for t in lk.tile[:lk.n_tiles])
+        ab = tuple((e.name.decode(), btn_kinds[e.kind], tuple(e.v)) for e in lk.appbtn[:lk.n_appbtn])
+        texts = tuple(t.value.decode() for t in lk.text[:lk.n_text])
+        return tuple(lk.v), paints, tiles, ab, texts, rc
+
+    def theme_place(values):
+        n = len(values)
+        arr = (c.c_int32 * max(1, n))(*[int(v) for v in values])
+        out = (c.c_int32 * max(1, n))()
+        near = (c.c_int32 * max(1, n))()
+        block = (c.c_uint16 * 64)()
+        used = lib.moy_theme_place(arr, n, out, near, block)
+        return tuple(out[:n]), tuple(near[:n]), tuple(block), used
+
+    def theme_block(block, used):
+        arr = (c.c_uint16 * 64)(*[int(w) & 0xFFFF for w in list(block)[:64]])
+        lib.moy_theme_block_use(arr, int(used))
+
+    def theme_rgb(v):
+        v = int(v)
+        return lib.moy_theme_rgb565(v), lib.moy_theme_lum_of(v), lib.moy_theme_nearest(v)
+
     def theme_resolve(src):
         b = bytes(src)
         buf = c.create_string_buffer(pkg_bytes)
         notes = c.c_uint8()
         rc = lib.moy_theme_probe(b, len(b), buf, c.byref(notes))
         if rc != OK:
-            return (rc, notes.value, None, None, None, None, None, None)
+            return (rc, notes.value, None, None, None, None, None, None, None)
         try:
             name = lib.moy_theme_probe_name().decode()
             fonts = tuple((r, lib.moy_theme_probe_font(i).decode())
@@ -834,7 +908,8 @@ def binding():
                            else lib.moy_theme_probe_sheet(i).decode()
                            for i in range(sdims[5]))
             return (rc, notes.value, name, theme(name, False), theme(name, True),
-                    fonts, theme_layout(name) + (theme_home(name),), sheets)
+                    fonts, theme_layout(name) + (theme_home(name),), sheets,
+                    (theme_look(name, False), theme_look(name, True)))
         finally:
             lib.moy_theme_probe_end()
 
@@ -880,6 +955,7 @@ def binding():
         return None if was < 0 else was
 
     def cart_text(on):
+        lib.moy_canvas_cart(1 if on else 0)     # the canvases' colour mask with it
         return bool(lib.moy_ui_cart_text(1 if on else 0))
 
     def font_load(src):
@@ -914,6 +990,11 @@ def binding():
     m.theme_install = theme_install
     m.theme_installed = theme_installed
     m.theme_resolve = theme_resolve
+    m.theme_look = theme_look
+    m.theme_look_fields = theme_look_fields
+    m.theme_place = theme_place
+    m.theme_block = theme_block
+    m.theme_rgb = theme_rgb
     m.theme_custom = theme_custom
     m.theme_accents = lambda: accents
     m.theme_tints = lambda: tints

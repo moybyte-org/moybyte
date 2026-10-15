@@ -29,7 +29,7 @@ BG = 9
 def frame():
     """Install a package naming `frame` and make its shape the toolkit's."""
     def use(**fr):
-        d = {"format": 1, "name": "framed", "frame": fr}
+        d = {"format": 2, "name": "framed", "frame": fr}
         rc, notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == OK
         ui.use_shape("framed")
@@ -49,7 +49,7 @@ def test_the_frame_key_reads_and_notes(frame):
     for bad in ("CTMZZ", "CTM", "CTMX", "", 5):
         assert frame(buttons=bad) == N_DROPPED, bad
     assert frame(glow=1) == N_UNKNOWN
-    rc, notes = moy_ui.theme_install(b'{"format": 1, "name": "f2", "frame": 3}')
+    rc, notes = moy_ui.theme_install(b'{"format": 2, "name": "f2", "frame": 3}')
     assert (rc, notes) == (OK, N_DROPPED)
     assert "frame" not in TH["reserved"]
 

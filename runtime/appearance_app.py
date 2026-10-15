@@ -50,9 +50,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import BUILTIN_NS, builtin_name
 
 try:
-    from chrome import THEME_NAMES, theme_colors, theme_names
+    from chrome import THEME_NAMES, theme_colors, theme_names, RGB, rgb565_of, nearest_of
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import THEME_NAMES, theme_colors, theme_names
+    from runtime.chrome import (THEME_NAMES, theme_colors, theme_names, RGB, rgb565_of,
+                                nearest_of)
 
 try:
     from editors_base import TE_CANCEL, TE_COMMIT, TE_EDIT, TextEntry
@@ -99,6 +100,30 @@ NAME_WHY = {"grammar": "a-z 0-9 _ -, A LETTER OR DIGIT FIRST",
             "none": "ONLY CUSTOM IS NAMED"}
 NAME_HINT = "a-z 0-9 _ -, UP TO 24"
 
+
+
+def _fill(cv, x, y, w, h, v):
+    """A rect in colour value `v`: a palette index (the live theme's block
+    included) through the canvas, an RGB value as its RGB565 word, which
+    takes no slot: how a card shows another theme's colours."""
+    if v < RGB:
+        cv.rect(x, y, w, h, v)
+        return
+    fill = getattr(cv, "fill565", None)
+    if fill is None:                    # a canvas that takes indices only
+        cv.rect(x, y, w, h, nearest_of(v))
+        return
+    fill(x, y, w, h, rgb565_of(v))
+
+
+def _frame(cv, x, y, w, h, v):
+    if v < RGB:
+        cv.rectb(x, y, w, h, v)
+        return
+    _fill(cv, x, y, w, 1, v)
+    _fill(cv, x, y + h - 1, w, 1, v)
+    _fill(cv, x, y, 1, h, v)
+    _fill(cv, x + w - 1, y, 1, h, v)
 
 class AppearanceLayout:
     """The page's geometry for one content size. `wide` puts THEME's grid
@@ -1069,25 +1094,25 @@ class AppearanceAppLayer:
         fs = self.layout.fs
         x, y, w, h = r
         band = 9 * fs if label else 0
-        cv.rect(x, y, w, h, tok["desktop"])
+        _fill(cv, x, y, w, h, tok["desktop"])
         iw, ih = w - 2 * fs, h - 2 * fs - band
-        cv.rect(x + fs, y + fs, iw, 3 * fs, tok["bar"])
+        _fill(cv, x + fs, y + fs, iw, 3 * fs, tok["bar"])
         wx, wy, ww, wh = x + 4 * fs, y + 7 * fs, iw * 5 // 9, ih - 11 * fs
         if wh > 4 * fs:
-            cv.rect(wx, wy, ww, wh, tok["panel"])
-            cv.rectb(wx, wy, ww, wh, tok["shade_dark"])
-            cv.rect(wx + fs, wy + fs, ww - 2 * fs, 3 * fs, tok["title_inactive"])
+            _fill(cv, wx, wy, ww, wh, tok["panel"])
+            _frame(cv, wx, wy, ww, wh, tok["shade_dark"])
+            _fill(cv, wx + fs, wy + fs, ww - 2 * fs, 3 * fs, tok["title_inactive"])
             ax, ay = x + iw * 3 // 8, y + 10 * fs
-            cv.rect(ax + fs, ay + fs, ww, wh, 0)
-            cv.rect(ax, ay, ww, wh, tok["surface"])
-            cv.rectb(ax, ay, ww, wh, tok["shade_dark"])
-            cv.rect(ax + fs, ay + fs, ww - 2 * fs, 3 * fs, tok["title"])
-            cv.rect(ax + 3 * fs, ay + 6 * fs, ww // 3, 3 * fs, tok["accent"])
+            _fill(cv, ax + fs, ay + fs, ww, wh, 0)
+            _fill(cv, ax, ay, ww, wh, tok["surface"])
+            _frame(cv, ax, ay, ww, wh, tok["shade_dark"])
+            _fill(cv, ax + fs, ay + fs, ww - 2 * fs, 3 * fs, tok["title"])
+            _fill(cv, ax + 3 * fs, ay + 6 * fs, ww // 3, 3 * fs, tok["accent"])
             if wh > 14 * fs:
-                cv.rect(ax + 3 * fs, ay + 11 * fs, ww - 6 * fs, fs, tok["ink_dim"])
+                _fill(cv, ax + 3 * fs, ay + 11 * fs, ww - 6 * fs, fs, tok["ink_dim"])
         if label:
             ly = y + h - band - fs
-            cv.rect(x + fs, ly, w - 2 * fs, band, th["accent"] if selected else th["bar"])
+            _fill(cv, x + fs, ly, w - 2 * fs, band, th["accent"] if selected else th["bar"])
             ink = 0 if selected else th["chrome_ink"]
             cv.print(_ui.print_fit(title or name, (w - 8 * fs) // fs), x + 4 * fs,
                      ly + (band - _ui.font("ui")[3] * fs) // 2, ink, 1)
@@ -1095,13 +1120,13 @@ class AppearanceAppLayer:
                 "STORE" if name in self._stores() else None)
             if tag and w >= 80 * fs:
                 tw = (_ui.print_width(tag) + 4) * fs
-                cv.rect(x + w - fs - tw, ly, tw, band,
+                _fill(cv, x + w - fs - tw, ly, tw, band,
                         th["play"] if tag == "CUSTOM" else th["dim"])
                 cv.print(tag, x + w - fs - tw + 2 * fs,
                          ly + (band - _ui.font("ui")[3] * fs) // 2,
                          0 if tag == "CUSTOM" else th["chrome_ink"], 1)
         edge = th["accent"] if selected else th["shade_dark"]
-        cv.rectb(x, y, w, h, edge)
+        _frame(cv, x, y, w, h, edge)
         if focused:
             _ui.focus_ring(cv, th, r, fs)
 

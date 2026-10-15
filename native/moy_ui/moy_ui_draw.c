@@ -121,13 +121,13 @@ static void use_part(draw_t *d, int kind, int state, int fs) {
 }
 
 static void fill(draw_t *d, int x, int y, int w, int h, int ci) {
-    moy_target_fill(&d->t, x, y, w, h, d->row->pal[ci & 63]);
+    moy_target_fill(&d->t, x, y, w, h, d->row->pal[ci & moy_ui_cmask()]);
     d->row->st[MOY_ST_N_FILL]++;
 }
 
 // The canvas's rectb: four clipped fills, one op.
 static void rectb(draw_t *d, int x, int y, int w, int h, int ci) {
-    uint16_t c = d->row->pal[ci & 63];
+    uint16_t c = d->row->pal[ci & moy_ui_cmask()];
     moy_target_fill(&d->t, x, y, w, 1, c);
     moy_target_fill(&d->t, x, y + h - 1, w, 1, c);
     moy_target_fill(&d->t, x, y, 1, h, c);
@@ -143,7 +143,7 @@ static void rings(draw_t *d, int x, int y, int w, int h, int ci, int n) {
 }
 
 static void text_at(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
-    moy_text(&d->t, d->f.id, MOY_TEXT_PY, s, n, x, y, d->row->pal[ci & 63],
+    moy_text(&d->t, d->f.id, MOY_TEXT_PY, s, n, x, y, d->row->pal[ci & moy_ui_cmask()],
              d->tfs, MOY_TEXT_LEFT, -1);
     d->row->st[MOY_ST_N_TEXT]++;
 }
@@ -166,7 +166,7 @@ static void text(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {
 
 static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scale) {
     d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, g, x + d->pdx, y + d->pdy, w, h,
-                                                   d->row->pal[ci & 63], scale);
+                                                   d->row->pal[ci & moy_ui_cmask()], scale);
 }
 
 // -- sprites (docs/theming_2026-09.md §4.6) ---------------------------------------
@@ -254,7 +254,7 @@ static int sprite(draw_t *d, moy_ui_box_t b, int cell, int scale) {
                     x2++;
                 }
                 if (ci >= 0) {
-                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y, d->row->pal[ci & 63]);
+                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y, d->row->pal[ci & moy_ui_cmask()]);
                 }
                 x = x2;
                 ci = next;

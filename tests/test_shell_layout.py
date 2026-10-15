@@ -162,7 +162,7 @@ def test_the_composer_never_raises():
 
 # -- the workstation: the pick, the reader, the row, the mode ----------------------
 
-DOCK = {"format": 1, "name": "dock", "inherits": "berry",
+DOCK = {"format": 2, "name": "dock", "inherits": "berry",
         "layout": {"bars": [{"edge": "bottom", "size": 22,
                              "left": ["menu", "separator", "chips", "zone"],
                              "right": ["close", "wifi", "battery", "clock"]}]}}
@@ -227,7 +227,7 @@ def test_an_uninstalled_pick_reads_as_absent_at_boot(tmp_path):
     ws.system.set("layout_theme", "dock")
     ws.look.apply_layout()
     assert layout_base.bar_edge() == "bottom"
-    _install({"format": 1, "name": "other"})      # the one slot now holds another
+    _install({"format": 2, "name": "other"})      # the one slot now holds another
     ws.load_system()
     assert ws.look.layout_theme() is None
     assert ws.system.get("layout_theme") == "dock"  # the row stays; it reads absent
@@ -266,11 +266,11 @@ def test_a_mode_switch_resolves_the_catalogue_again(tmp_path):
 # One fixture layout that triggers each drop of §10 at once: a widget outside
 # the console catalogue (`chips`), one with no cell on a side bar (`title`)
 # and one that does not fit its bar (a `text` wider than the 16-row side bar).
-FIXTURE = {"format": 1, "name": "drops", "layout": {"bars": [
+FIXTURE = {"format": 2, "name": "drops", "layout": {"bars": [
     {"edge": "top", "left": ["zone", "chips"],
      "right": ["clock", "close", "menu", "wifi", "battery"]},
     {"edge": "left", "size": 16, "left": ["title", "text"], "text": ["abcdefgh"]}]}}
-VERTICAL_ZONE = {"format": 1, "name": "vzone", "layout": {"bars": [
+VERTICAL_ZONE = {"format": 2, "name": "vzone", "layout": {"bars": [
     {"edge": "top", "right": ["clock", "close", "menu"]},
     {"edge": "left", "size": 24, "left": ["zone"]}]}}
 

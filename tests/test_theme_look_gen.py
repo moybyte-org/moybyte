@@ -34,7 +34,7 @@ def _seeds_only():
 def _pkg(**change):
     """A package over BERRY with `change` as its dark roles: what the theme
     editor's save installs."""
-    return json.dumps({"format": 1, "name": THEME, "inherits": BASE,
+    return json.dumps({"format": 2, "name": THEME, "inherits": BASE,
                        "colors": {"dark": change}}).encode()
 
 

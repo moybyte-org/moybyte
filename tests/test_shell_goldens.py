@@ -84,6 +84,13 @@ keeps the matrix a clean product instead of a pile of special cases.
                            ink in both variants, a yellow accent, a border on
                            every part. One axis (theme) from the as-shipped
                            row in the light variant.
+  tdeck_320x240_fs1_moy_day, tdeck_320x240_fs1_moy_night,
+  p4_1024x600_cs2_fs1_moy_day, p4_1024x600_cs2_fs1_moy_night
+                           the `moy` seed (docs/look_2026-10.md step 5) in
+                           its Day (light) and Night (dark) modes, the
+                           T-Deck row and the P4 as shipped: RGB roles in the
+                           block at indices 64..127 on every surface. One axis
+                           (theme) from each row in its variant.
   p4_1024x600_cs2_fs1_console  the P4 as shipped in CONSOLE mode
                            (docs/shell_layout_2026-10.md §3): the desk's PLAY,
                            then the T-Deck row's surfaces, every one
@@ -387,6 +394,18 @@ CONFIGS = {
     "tdeck_320x240_fs1_widget_pages": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
         diagonal_in=None, plan="widget_pages"),
+    "tdeck_320x240_fs1_moy_day": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="light",
+        diagonal_in=None, theme="moy"),
+    "tdeck_320x240_fs1_moy_night": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, theme="moy"),
+    "p4_1024x600_cs2_fs1_moy_day": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="moy"),
+    "p4_1024x600_cs2_fs1_moy_night": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, theme="moy"),
 }
 
 # The bar widgets that open a component (docs/shell_layout_2026-10.md §8), in
@@ -517,7 +536,7 @@ def pick_layout(ws, cfg):
         return
     import moy_ui                      # registered by the runtime package
     rc, _notes = moy_ui.theme_install(json.dumps(
-        {"format": 1, "name": name, "layout": dict(
+        {"format": 2, "name": name, "layout": dict(
             {"bars": cfg["layout"]}, **({"home": cfg["home"]} if "home" in cfg else {}))}
          ).encode())
     assert rc == 0, name

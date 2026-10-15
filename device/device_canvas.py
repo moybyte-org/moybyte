@@ -326,6 +326,9 @@ def to_indices(buf, wire=None, strict=True):
     at the boundary leaves all of them untouched; converting THEM to 565 would
     change a persisted format.
 
+    A word of the shell's block that MOY64 does not hold reads as its slot,
+    64..127 (`set_block`).
+
     `wire` defaults to the stock table. Pass a canvas's own `_wire` to read a
     frame drawn under a cart palette -- with a private table the words are
     different and the stock reverse map would not know them.
@@ -342,6 +345,17 @@ def to_indices(buf, wire=None, strict=True):
         rev = {}
         for _i in range(len(wire) - 1, -1, -1):
             rev[wire[_i]] = _i
+    # The shell's block (indices 64..127): a word MOY64 does not hold reads
+    # as its slot, so a frame of the shell's is index-native too.
+    blk = None
+    for _i in range(63, -1, -1):
+        w = _BLOCK[_i]
+        if w not in rev:
+            if blk is None:
+                blk = dict(rev)
+            blk[w] = 64 + _i
+    if blk is not None:
+        rev = blk
     # Byte pairs, NOT memoryview.cast("H"): MicroPython's memoryview has no
     # `cast`, and this function is meant to be callable on a board. Caught on P4
     # glass 2026-08-15 -- it worked in every host test and raised AttributeError
@@ -431,6 +445,31 @@ def _room(obj):
 
 
 _PAL_IDENTITY = bytes(range(64))
+
+# THE SHELL'S BLOCK (docs/look_2026-10.md step 5): the live theme's RGB
+# colours, colour indices 64..127, in this build's wire order. A canvas row's
+# table is 128 entries: 0..63 are MOY64 through the canvas's palette and pal()
+# (this class writes them), 64..127 this block (native/moy_glass writes it into
+# every row; pal() never remaps it). `_CMASK[0]` is what a colour index is
+# masked with: 127, or 63 while a cart's code runs (`set_cart`), so a cart's
+# colour stays its index modulo 64.
+_BLOCK = _glass_mod.block_view()
+_CMASK = _glass_mod.cmask()
+
+
+def set_block(words):
+    """Make `words` (up to 64 canonical RGB565 words, the live theme's
+    block: `moy_ui.theme_place`) colour indices 64.. on every canvas."""
+    wire = array("H", bytes(128))
+    for i in range(min(64, len(words))):
+        w = int(words[i]) & 0xFFFF
+        wire[i] = w if PAL565_WIRE is PAL565 else (((w & 0xFF) << 8) | (w >> 8))
+    _glass_mod.block(wire)
+
+
+def set_cart(on):
+    """The cart boundary: while on, a colour index is masked to 0..63."""
+    _glass_mod.cart(on)
 _PALT_OPAQUE = bytes(64)
 
 
@@ -1126,10 +1165,24 @@ class DeviceCanvas:
         if getattr(self, "_gate_pal", None) is not None:
             self._sync_gate_pal()              # the C gate's table mirrors it
 
+    def theme_block(self, words):
+        """The live theme's block (`set_block`) onto every canvas."""
+        set_block(words)
+
+    def fill565(self, x, y, w, h, word):
+        """A rect in one canonical RGB565 word, through no palette: a colour
+        that holds no index (another theme's RGB, on its preview)."""
+        if WIRE_SWAPPED:
+            word = ((word & 0xFF) << 8) | (word >> 8)
+        self.blit565_resize(bytes((word & 0xFF, (word >> 8) & 0xFF)), 1, 1, x, y, w, h)
+
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
-        # circ/circb/rectb all honour pal() for free.
-        return self._wire[self._pal_map[c & 63]]
+        # circ/circb/rectb all honour pal() for free; 64.. is the shell's block.
+        c &= _CMASK[0]
+        if c < 64:
+            return self._wire[self._pal_map[c]]
+        return _BLOCK[c - 64]
 
     def _fill(self, x, y, w, h, col):
         # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
@@ -1244,8 +1297,7 @@ class DeviceCanvas:
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
         self._gate_state[_ST_N_FILL] += 1   # the gate's count, on every tier
-        self._fill(int(x), int(y), int(w), int(h),
-                   self._wire[self._pal_map[c & 63]])
+        self._fill(int(x), int(y), int(w), int(h), self._col(c))
 
     def rectb(self, x, y, w, h, c):
         if self._fillp:
@@ -1255,7 +1307,7 @@ class DeviceCanvas:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
         self._gate_state[_ST_N_FILL] += 1   # one op, as the gate counts it
         x = int(x); y = int(y); w = int(w); h = int(h)
-        col = self._wire[self._pal_map[c & 63]]
+        col = self._col(c)
         self._fill(x, y, w, 1, col)
         self._fill(x, y + h - 1, w, 1, col)
         self._fill(x, y, 1, h, col)
@@ -1463,7 +1515,7 @@ class DeviceCanvas:
         # An ungated canvas (the host's kernel has no gates): fill_spans takes
         # buffer/camera/clip as plain args like circ/line.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
-        col = -1 if c < 0 else self._wire[self._pal_map[c & 63]]
+        col = -1 if c < 0 else self._col(c)
         self._gfx.fill_spans(self._buf, self._stride, self._bh, arr,
                              -1 if n is None else n, ox, oy, col,
                              None if col >= 0 else self._wire_pal(),
@@ -2005,7 +2057,7 @@ class DeviceCanvas:
         _prof = self._prof
         _t0 = _ticks_us() if _prof else 0
         self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
-                       self._wire[self._pal_map[c & 63]],
+                       self._col(c),
                        _FONT8, _FONT8_FIRST, 1,
                        self._cam_x, self._cam_y,
                        self._clip_x0, self._clip_y0,
