@@ -26,7 +26,10 @@
     }
   },
   "look": {
+    "focus": { "style": "edge", "card": "lift", "small": "underline" },
+    "current": { "style": "plate" },
     "dark": {
+      "focus": { "lift": { "shadow": "accent" } },
       "shadow": ["soft", "#000000", 0.55, 14, 6], "dim_neighbours": 0.3,
       "win": { "header": "fill", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"] },
       "bar": { "fill": "#0b0d1e", "alpha": 0.85, "sys": ["#23274b", "#b6a8f7", "#23274b"],

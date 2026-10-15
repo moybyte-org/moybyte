@@ -507,7 +507,7 @@ def generate_theme(style, t):
          "\n    moy_theme_n_homes;"]
     rh, rc = _recolour(th, roles, flags)
     h.extend(rh)
-    lh, lc = _look(th)
+    lh, lc = _look(th, roles)
     h.extend(lh)
     rc = rc + lc
     c = ["const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {"]
@@ -623,11 +623,13 @@ _FIELD_TYPES = ("colour", "paint", "enum", "int", "num", "bool", "text", "corner
                 "line", "shadow", "tshadow", "ring", "trio")
 
 
-def _look_fields(lk):
+def _look_fields(lk, roles=()):
     """theme.look's fields with `buttons` expanded per kind: [(path, type,
     [(leaf name, kind, lo, hi, default), ...])]. A default None is NONE
     (silent: the renderer derives it); enum lo/hi are names, numbers are in
-    hundredths."""
+    hundredths; a `role` field is an enum of the theme's roles. A num's
+    default may be a pair (light, dark): the leaf's default is the light
+    one, and the dark one is a (leaf name, value) in the out list `dark`."""
     out = []
 
     def colour(v):
@@ -640,10 +642,12 @@ def _look_fields(lk):
     def hund(v):
         return None if v is None else int(round(v * 100))
 
+    dark = []
+
     def one(path, spec):
         t = spec[0]
         a = spec[1:]
-        if t not in _FIELD_TYPES:
+        if t not in _FIELD_TYPES + ("role",):
             raise SystemExit("theme.look: %s has no type %r" % (path, t))
         if t == "colour":
             return [(path, "colour", 0, 0, colour(a[0] if a else None))]
@@ -652,10 +656,18 @@ def _look_fields(lk):
         if t == "enum":
             d = 0 if len(a) < 2 else a[1]
             return [(path, "enum", a[0], None, d)]
+        if t == "role":
+            if a[0] not in roles:
+                raise SystemExit("theme.look: %s's default %r is no role" % (path, a[0]))
+            return [(path, "enum", list(roles), None, a[0])]
         if t == "int":
             return [(path, "int", a[0], a[1], a[2] if len(a) > 2 else None)]
         if t == "num":
-            return [(path, "num", hund(a[0]), hund(a[1]), hund(a[2]) if len(a) > 2 else None)]
+            d = a[2] if len(a) > 2 else None
+            if isinstance(d, list):
+                dark.append((path, hund(d[1])))
+                d = d[0]
+            return [(path, "num", hund(a[0]), hund(a[1]), hund(d))]
         if t == "bool":
             d = a[0] if a else None
             return [(path, "bool", 0, 1, None if d is None else int(d))]
@@ -694,16 +706,24 @@ def _look_fields(lk):
                     p = "%s.%s.%s" % (path, kind, b[0])
                     out.append((p, b[1], one(p, b[1:])))
             continue
-        out.append((path, t, one(path, spec[1:])))
-    return out
+        out.append((path, "enum" if t == "role" else t, one(path, spec[1:])))
+    return out, dark
 
 
-def _look(th):
+def _sublist(seq, part):
+    """Where `part` sits in `seq` as a run, or -1."""
+    for i in range(len(seq) - len(part) + 1):
+        if seq[i:i + len(part)] == part:
+            return i
+    return -1
+
+
+def _look(th, roles):
     """The look model's tables (docs/look_2026-10.md step 5, THEMES.md's
     theme model): every field, its leaves, their kinds, ranges and
     defaults, the enum names and the object groups."""
     lk = th["look"]
-    fields = _look_fields(lk)
+    fields, dark = _look_fields(lk, roles)
     paths = [f[0] for f in fields]
     if len(set(paths)) != len(paths):
         raise SystemExit("theme.look: a field twice")
@@ -728,10 +748,13 @@ def _look(th):
                 names = lo
                 if d is not None and not isinstance(d, int):
                     d = names.index(d)
-                lo, hi = len(enums), len(names)
-                enums.extend(names)
+                lo, hi = _sublist(enums, names), len(names)
+                if lo < 0:
+                    lo = len(enums)
+                    enums.extend(names)
             leaves.append((name, kind, lo, hi, d))
-    btn = _look_fields({**lk, "fields": [["b", "button"]], "button_kinds": ["k"]})
+    btn, _ = _look_fields({**lk, "fields": [["b", "button"]], "button_kinds": ["k"]})
+    leaf_at = [l[0] for _p, _t, lv in fields for l in lv]
     btn_leaves = [l for _p, _t, lv in btn for l in lv]
 
     def term(v):
@@ -759,6 +782,9 @@ def _look(th):
          "#define MOY_THEME_LOOK_TEXT_MAX %d" % lk["text_max"],
          "#define MOY_THEME_LOOK_ACCEPTED %d" % len(lk["accepted"]),
          "#define MOY_THEME_PAINT_MODES %d" % len(lk["paint_modes"]),
+         "// The leaves whose default differs in a dark variant: (leaf, value).",
+         "#define MOY_THEME_DARK_DEFS %d" % len(dark),
+         "extern const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2];",
          "enum {",
          *["    MOY_THEME_LK_%s = %d," % (_ident(k), i) for i, k in enumerate(_LEAF_KINDS)],
          "};",
@@ -797,6 +823,9 @@ def _look(th):
             rows.append("    {%s, MOY_THEME_FT_%s, %d, %d}," % (_c_str(path), _ident(t), len(lv), at))
             at += len(lv)
         return rows
+    c.append("const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2] = {")
+    c.extend("    {%d, %d},  // %s" % (leaf_at.index(n), v, n) for n, v in dark)
+    c.append("};\n")
     c.append("const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {")
     c.extend(field_rows(fields))
     c.append("};\n")

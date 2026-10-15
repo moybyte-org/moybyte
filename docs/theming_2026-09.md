@@ -184,13 +184,15 @@ step 4; format 2, RGB colours and `look`, 2026-10-15 by
   ones, then a `dark` and a `light` object of the mode's own, which come
   first. A field is a colour, a paint (a colour, `"vibrancy"`, a list of
   colours or `[t, colour]` stops, or `{"stops", "mode"}` with `smooth`,
-  `dither` or `steps:N`), a name of its list, an integer or a number (in
-  hundredths, each clamped to its range), a bool, a short text, or an array
+  `dither` or `steps:N`), a name of its list (`focus.color` and
+  `current.color` name a role), an integer or a number (in hundredths, each
+  clamped to its range; `focus.plate.alpha` and `current.alpha` default
+  differently per mode), a bool, a short text, or an array
   of those (`[width, colour]` for a line, `["soft", colour, alpha, blur,
   dy]` or `["hard", colour, dx, dy]` for a shadow); `null` is explicitly
   none. `tiles` maps an app to a colour and `app_buttons` an app and a
-  button kind to a button's fields, each capped; `backdrop` is accepted and
-  read by step 7. A field nothing sets takes the model's default, which for
+  button kind to a button's fields, each capped; `backdrop` and
+  `icons.swap` are accepted and read by steps 7 and 16. A field nothing sets takes the model's default, which for
   most colours is silent: the renderer derives it.
 - **`metrics`**: `radius` (0-3), `press_dx` and `press_dy` (-3 to 3), each
   clamped to its range (§4.2); the default seed sets every one to 0.

@@ -1098,7 +1098,15 @@
         ["render.text", "enum", ["aa", "crisp"]],
         ["render.shapes", "enum", ["smooth", "stepped"]],
         ["render.scale", "int", 1, 2, 1],
-        ["ring_w", "num", 0, 8, 2.5], ["ring_gap", "num", 0, 8, 3], ["ring_alpha", "num", 0, 1, 1],
+        ["focus.style", "enum", ["ring", "plate", "lift", "edge", "underline", "invert"]],
+        ["focus.card", "enum", ["ring", "plate", "lift", "edge", "underline", "invert"], null], ["focus.small", "enum", ["ring", "plate", "lift", "edge", "underline", "invert"], null],
+        ["focus.color", "role", "accent"], ["focus.ink", "enum", ["keep", "accent"]],
+        ["focus.ring.w", "num", 0, 8, 2.5], ["focus.ring.gap", "num", 0, 8, 3],
+        ["focus.ring.alpha", "num", 0, 1, 1], ["focus.ring.keyline", "colour"],
+        ["focus.plate.alpha", "num", 0, 1, [0.14, 0.22]],
+        ["focus.lift.grow", "int", 0, 16, 5], ["focus.lift.rise", "int", 0, 16, 3],
+        ["focus.lift.shadow", "enum", ["ink", "accent"]],
+        ["focus.edge.w", "int", 0, 8, 4], ["focus.underline.w", "int", 0, 8, 3],
         ["win_r", "int", 0, 99, 12], ["card_r", "int", 0, 99, 10], ["key_r", "int", 0, 99, 10],
         ["win_corners", "corners"],
         ["shadow", "shadow"], ["shadow_back", "num", 0, 1, 0.55],
@@ -1109,12 +1117,13 @@
         ["win.header", "enum", ["plain", "fill", "bar", "grad"]],
         ["win.h", "int", 16, 64, 44], ["win.align", "enum", ["left", "center"]],
         ["win.ink", "colour"], ["win.ink_back", "colour"], ["win.tshadow", "tshadow"],
-        ["win.controls", "enum", ["close", "lights", "xp", "amiga", "adw"]],
+        ["win.controls", "enum", ["three", "close", "lights", "xp", "amiga", "adw"]],
         ["win.grad", "paint"], ["win.grad_back", "paint"],
         ["win.fill", "paint"], ["win.fill_back", "paint"],
         ["win.frame", "line"], ["win.frame_back", "line"], ["win.body", "colour"],
         ["win.rule", "int", 0, 8, 1], ["win.icon", "bool", true],
-        ["current", "enum", ["bar", "fill"]], ["sel_back", "colour"],
+        ["current.style", "enum", ["bar", "plate", "fill"]], ["current.color", "role", "value"],
+        ["current.alpha", "num", 0, 1, [0.14, 0.24]], ["sel_back", "colour"],
         ["bar.edge", "enum", ["top", "bottom"]], ["bar.h", "int", 16, 64, 40],
         ["bar.style", "enum", ["flat", "grad", "glass"]], ["bar.fill", "paint"],
         ["bar.alpha", "num", 0, 1, 1], ["bar.line", "line"], ["bar.grad", "paint"],
@@ -1140,7 +1149,8 @@
         ["lcd_border", "line"], ["lcd_bevel", "enum", ["none", "in", "out"]], ["lcd_dim", "colour"],
         ["keycap.fill", "paint"], ["keycap.alpha", "num", 0, 1, 1], ["keycap.border", "line"],
         ["keycap.grad", "paint"], ["keycap.ink", "colour"], ["keycap.r", "int", 0, 99, 4],
-        ["keycap.bevel", "bool", false]
+        ["keycap.bevel", "bool", false],
+        ["icons.kind", "enum", ["smooth", "pixel"]], ["icons.set", "text"]
       ],
       "button": [
         ["fill", "paint"], ["ink", "colour"], ["border", "line"],
@@ -1160,7 +1170,7 @@
       "app_buttons_cap": 8,
       "name_max": 12,
       "text_max": 24,
-      "accepted": ["backdrop"]
+      "accepted": ["backdrop", "icons.swap"]
     },
     "derive": {
       "dark": [

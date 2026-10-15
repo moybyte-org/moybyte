@@ -538,7 +538,11 @@ def test_a_refused_layout_in_the_chain_stands_in_with_the_default():
 
 LOOK_SAMPLE = {
     "render": {"text": "crisp", "shapes": "stepped", "scale": 2},
-    "ring_w": 3.5, "ring_gap": 0, "ring_alpha": 0.6, "win_r": 8, "key_r": 99,
+    "focus": {"style": "invert", "card": "ring", "small": "plate", "color": "value",
+              "ink": "accent", "ring": {"w": 3.5, "gap": 0, "alpha": 0.6, "keyline": "#ffffff"},
+              "plate": {"alpha": 0.3}, "lift": {"grow": 99, "shadow": "accent"},
+              "edge": {"w": 2}, "underline": {"w": 1}},
+    "win_r": 8, "key_r": 99,
     "win_corners": [True, True, False, False], "shadow": ["hard", "#000000", 2, 2],
     "edges": "bevel", "home_bg": "#ffd23f", "dim_neighbours": 0.3,
     "on_backdrop": {"ink": "#ffffff", "shadow": ["#00213f", 0.9, 1, 1]},
@@ -546,7 +550,8 @@ LOOK_SAMPLE = {
             "grad": [[0, "#4192fa"], [0.35, "#0b5fe3"], [1, "#0846bb"]],
             "grad_back": {"stops": ["#b0c6f2", "#7a96df"], "mode": "steps:4"},
             "frame": [4, "#0846bb"], "icon": False, "tshadow": ["#0a1f6d", 0.85, 1, 1]},
-    "current": "fill", "sel_back": "#d6d2c2",
+    "current": {"style": "fill", "color": "teapot", "alpha": 0.2}, "sel_back": "#d6d2c2",
+    "icons": {"kind": "pixel", "set": "system_icons", "swap": {"3": 7}},
     "bar": {"edge": "bottom", "style": "grad", "sysbtn": "start", "chips": "button",
             "app_title": "Calc", "sys": ["#23274b", "#b6a8f7", "#23274b"],
             "tray": ["#1aa0f0", "#0e78d6"], "clock": "center", "alpha": 0.85},

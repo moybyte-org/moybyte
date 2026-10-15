@@ -2641,6 +2641,12 @@ static int resolve_look(const char *name, size_t n, int variant, int defaults,
     }
     look_ctx_t c = {out, variant == MOY_THEME_LIGHT ? 2 : 1};
     int rc = chain(name, n, apply_look, &c);
+    for (int i = 0; defaults && variant == MOY_THEME_DARK && i < MOY_THEME_DARK_DEFS; i++) {
+        int32_t *v = &out->v[moy_theme_dark_defs[i][0]];
+        if (*v == MOY_THEME_NONE) {
+            *v = moy_theme_dark_defs[i][1];
+        }
+    }
     for (int i = 0; defaults && i < MOY_THEME_LEAVES; i++) {
         if (out->v[i] == MOY_THEME_NONE) {
             out->v[i] = moy_theme_leaves[i].def;
