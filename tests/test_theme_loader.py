@@ -412,7 +412,8 @@ def test_the_home_rides_the_layout_carousel_by_default():
         assert moy_ui.theme_home(name) == "carousel", name
     req = ["menu", "zone", "close"]
     for home, want, note in (("grid", "grid", 0), ("carousel", "carousel", 0),
-                             ("icons", "carousel", N_UNKNOWN),
+                             ("icons", "icons", 0),
+                             ("tiles", "carousel", N_UNKNOWN),
                              (7, "carousel", N_DROPPED)):
         rc, notes = moy_ui.theme_install(_src("hm", layout={"bars": [{"edge": "top", "left": req}],
                                                             "home": home}))

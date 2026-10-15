@@ -247,7 +247,7 @@ def theme_layout(name):
 
 def theme_home(name):
     """The home's arrangement in theme `name`'s layout (docs/shell_layout_2026-10.md
-    §12): "carousel" (the default) or "grid"."""
+    §12): "carousel" (the default), "grid" or "icons"."""
     return _C.theme_home(name)
 
 
@@ -1350,6 +1350,33 @@ def paint(cv, th, rect, part, state=REST):
         p = _PART_ID[part] = _C.parts().index(part)
     return _C.paint(cv, _LOOK if th is _TH else _look(th), rect, p,
                     _THEME_STATE_ID[state])
+
+
+def icon_tile(cv, th, box):
+    """An icon's tile -- the desk's and the icon home's: the theme's
+    `desk.icon` part (a role-sheet cell or its surface), else a panel box on
+    the edge ink. The icon draws inside it."""
+    if not paint(cv, th, box, "desk.icon"):
+        cv.rect(box[0], box[1], box[2], box[3], th["panel"])
+        cv.rectb(box[0], box[1], box[2], box[3], th["edge"])
+
+
+def icon_label_rect(band, text, fs):
+    """The pill an icon's label is drawn in (D1: the label in a pill under
+    the tile): the label's width, centred in the label band `band`."""
+    w = min(band[2], text_width(text, fs, "ui") + 6 * fs)
+    return (band[0] + (band[2] - w) // 2, band[1], w, band[3])
+
+
+def icon_label(cv, th, band, text, on, fs):
+    """An icon's label under its tile -- the desk's and the icon home's: the
+    theme's `desk` surface as a pill the label's width, or, with none, a
+    chip the band's width."""
+    r = icon_label_rect(band, text, fs)
+    if paint(cv, th, r, "desk"):
+        label(cv, r, text, th["chrome_ink"], ALIGN_CENTER)
+    else:
+        chip(cv, th, band, text, on=on, fs=fs)
 
 
 # --- window frames ---------------------------------------------------------------

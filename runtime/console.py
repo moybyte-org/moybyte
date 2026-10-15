@@ -365,14 +365,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # and their input), and HomeWindowLayer, the same home in a desk window. The
 # card models take NAMES + ui.glyph injected for their card art; ws.open() stays.
 try:
-    from launcher_layer import (Launcher, Carousel, LauncherHomeLayer,
+    from launcher_layer import (Launcher, Carousel, IconHome, LauncherHomeLayer,
                                 HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                 PSEUDO_TILE_TYPES, HOME_TABS, tab_count_title)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.launcher_layer import (Launcher, Carousel, LauncherHomeLayer,
+    from runtime.launcher_layer import (Launcher, Carousel, IconHome,
+                                        LauncherHomeLayer,
                                         HomeWindowLayer, new_tile, NEW_TILE_TYPE,
                                         PSEUDO_TILE_TYPES, HOME_TABS,
                                         tab_count_title)
+# The home's arrangements by the layout's `home` value
+# (docs/shell_layout_2026-10.md §12); an unknown one is the carousel.
+_HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 
 try:
     import ui as _uimod
@@ -3000,8 +3004,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _home_grid(self, arrangement, items):
         """The home's card model for `arrangement` (docs/shell_layout_2026-10.md
-        §12): the Carousel, or the shelf grid (the home window's, always)."""
-        cls = Launcher if arrangement == "grid" else Carousel
+        §12): the Carousel, the shelf grid (the home window's, always) or
+        the icon grid."""
+        cls = _HOME_CLASSES.get(arrangement, Carousel)
         g = cls(items, self.layout, NAMES, _uimod.glyph)
         # The "+ New" card draws the real themeable IconSheet plus sprite big --
         # keyed so the sheet's 0-filled backdrop doesn't plate the card.
@@ -3013,10 +3018,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return g
 
     def set_home_arrangement(self, arrangement):
-        """Show the home as `arrangement` -- "carousel" or "grid", the layout's
-        `home` key (look.apply_layout) -- on the same tab and card."""
+        """Show the home as `arrangement` -- "carousel", "grid" or "icons",
+        the layout's `home` key (look.apply_layout) -- on the same tab and
+        card."""
         old = self.launcher
-        if (arrangement == "grid") == (type(old) is Launcher):
+        if type(old) is _HOME_CLASSES.get(arrangement, Carousel):
             return
         g = self._home_grid(arrangement, old.items)
         g.tab = old.tab

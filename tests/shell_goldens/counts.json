@@ -137,6 +137,12 @@
     "launcher_make": [0, 0],
     "launcher_mine": [0, 0]
   },
+  "p4_1024x600_cs2_fs1_homeicons": {
+    "launcher": [0, 0],
+    "launcher_apps": [0, 0],
+    "launcher_make": [0, 0],
+    "launcher_mine": [0, 0]
+  },
   "p4_1024x600_cs2_fs1_platinum_light": {
     "app_appearance": [141, 7],
     "app_artwork": [101, 5],
@@ -359,6 +365,12 @@
     "web_console_address": [192, 6]
   },
   "tdeck_320x240_fs1_homegrid": {
+    "launcher": [0, 0],
+    "launcher_apps": [0, 0],
+    "launcher_make": [0, 0],
+    "launcher_mine": [0, 0]
+  },
+  "tdeck_320x240_fs1_homeicons": {
     "launcher": [0, 0],
     "launcher_apps": [0, 0],
     "launcher_make": [0, 0],

@@ -12,6 +12,7 @@
 #   bench_sprites    --sprites: chrome painted from a theme's role sheet, and without it
 #   bench_painter    --painter: a surface's, a sprite's and a 9-slice's us per call
 #   bench_band       --band: the home under a theme's band scrim, and without it
+#   bench_icons      --icons: the icon home beside the grid it is drawn from
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -87,6 +88,14 @@ picked, and `home idle` and the slow drag run over its picture, over the
 default wallpaper cart and over the first live one, each with the scrim and
 again with the package re-installed without it (the same image, theme and
 wallpaper). Idle paints zero; a live wallpaper's idle is its own frames.
+
+`--icons` benches the icon home (phase 6 step 11) beside the grid
+arrangement it is drawn from, on the same image and store: each set on the
+console (`ws.set_home_arrangement`, no package), then `home idle`, the slow
+drag and a fling with its frames until idle on the Make tab (the longest
+list on every board), and `tab` (the four tabs, then back). The scenario
+names carry the arrangement (`icon home drag`, `grid home drag`...). The
+layout's own arrangement is put back.
 
 `--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
 size and a synthetic focus-band frame into the canvas the home draws into,
@@ -1244,6 +1253,43 @@ def bench_home(b, out_path):
     return bench
 
 
+def bench_icons(b, out_path):
+    """The icon home and the grid, the same scenarios each (the docstring's
+    `--icons`)."""
+    bench = Bench(b)
+    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    for arr, name in (("grid", "grid home"), ("icons", "icon home")):
+        pyexec(b, "ws.set_home_arrangement(%r)\nws.set_home_tab('make')\n"
+                  "ws.launcher.sel = 0\nws.launcher.scroll = 0\n"
+                  "ws.mark_dirty()" % arr)
+        b.drain(4.0)
+        bench.start(); b.drain(3.0); bench.stop("%s idle" % name)
+        bx, by, bw, bh = pyval(b, "ws.launcher.band_rect()")
+        cy = by + bh // 2
+        bench.start()
+        b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(3.0)
+        bench.stop("%s drag" % name)
+        pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+        b.drain(1.5)
+        b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+        bench.start(); b.drain(4.0)
+        bench.stop("%s fling: frames until idle" % name)
+        bench.start(); b.drain(2.0); bench.stop("%s idle after the fling" % name)
+        bench.start()
+        for t in ("games", "mine", "apps", "make"):
+            pyexec(b, "ws.set_home_tab(%r)" % t); b.drain(1.2)
+        bench.stop("%s tab (x4)" % name)
+    pyexec(b, "ws.set_home_arrangement(ws.look.home)\nws.mark_dirty()")
+    b.drain(1.0)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
 def main():
     ap = argparse.ArgumentParser()
     add_board_args(ap)
@@ -1275,12 +1321,14 @@ def main():
     ap.add_argument("--band", action="store_true",
                     help="the home under a theme's band scrim and without it "
                          "(pushes tests/fixtures/themes/band.moy)")
+    ap.add_argument("--icons", action="store_true",
+                    help="the icon home beside the grid: idle, drag, fling, tab")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     if args.store or not (args.repaint or args.popovers or args.kernel
                           or args.home or args.edit or args.sprites or args.painter
-                          or args.band):
+                          or args.band or args.icons):
         push_store_fixture(args)
     if args.sprites:
         push_sprite_fixture(args)
@@ -1290,7 +1338,8 @@ def main():
     try:
         if (not args.repaint and not args.kernel and not args.home
                 and not args.edit and not args.store and not args.sprites
-                and not args.painter and not args.band and not b.attach_only):
+                and not args.painter and not args.band and not args.icons
+                and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -1312,6 +1361,8 @@ def main():
             bench_painter(b, args.out)
         elif args.band:
             bench_band(b, args.out)
+        elif args.icons:
+            bench_icons(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

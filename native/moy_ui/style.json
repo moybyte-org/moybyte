@@ -1072,7 +1072,7 @@
       "size": [16, 32],
       "size_default": 18,
       "text_max": 24,
-      "homes": ["carousel", "grid"]
+      "homes": ["carousel", "grid", "icons"]
     },
     "sheets": ["sprites", "icons"],
     "sprite_slots": [null, "ink", "surface", "shade_hi", "shade_lo", "shade_dark", "edge",

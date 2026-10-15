@@ -651,6 +651,7 @@ const char *const moy_theme_widget_names[MOY_THEME_WIDGETS] = {
 const char *const moy_theme_home_names[MOY_THEME_HOMES] = {
     "carousel",
     "grid",
+    "icons",
 };
 
 const uint8_t moy_theme_state_next[MOY_THEME_STATES] = {5, 2, 5, 5, 5, 255, 5, 6};

@@ -7,6 +7,7 @@
 #   Carousel                    the home's row: the centre card scaled by its distance
 #   Carousel.anim_frame         the fling, the glide to the centre, the settle
 #   Carousel.draw_shift         the moving frame: the wallpaper restored around the cards
+#   IconHome                    the icon arrangement: the grid over one-tile cells
 #   LauncherHomeLayer           the home: wallpaper, tab row, carousel, zone
 #   LauncherHomeLayer.draw      the home frame
 #   LauncherHomeLayer.zone_tap  the active tab's verb chips
@@ -23,6 +24,9 @@
                       the centre card larger by a function of its distance
                       from the centre. Its instance is ws.launcher in the
                       `carousel` arrangement, the default (the layout's `home`).
+  * `IconHome`     -- the `icons` arrangement: the grid's model over one-tile
+                      cells (`_IconCells`), the focused cell's name in the
+                      desk's label pill.
   * `LauncherHomeLayer` -- the "launcher" content Layer: the home, console mode's
                       root on every board (wallpaper -> tab row -> carousel ->
                       bar), its four tabs (Games / Mine / Apps / Make, the lists
@@ -60,9 +64,10 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 # mockup): block-scaled petme128 headings that render identically on every canvas.
 # The tick helpers feed the perf_capture-gated home-frame split (see draw below).
 try:
-    from chrome import _print_scaled, _text_w, _ticks_ms, _ticks_diff
+    from chrome import Layout as _Layout, _print_scaled, _text_w, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _print_scaled, _text_w, _ticks_ms, _ticks_diff
+    from runtime.chrome import (Layout as _Layout, _print_scaled, _text_w,
+                                _ticks_ms, _ticks_diff)
 
 try:
     from widgets import ConfirmTap
@@ -79,11 +84,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 NEW_TILE_TYPE = "new"
 PSEUDO_TILE_TYPES = (NEW_TILE_TYPE,)
 
-# A cover's side (SPEC.md 3.6) and the two decodes of it a card draws:
-# CoverCache's BASE and HALF (cover_cache.py names them).
+# A cover's side (SPEC.md 3.6) and the decodes of it a card draws:
+# CoverCache's BASE and HALF, and the icon home's ICON (cover_cache.py names
+# them).
 _COVER_SIDE = 128
 _COVER_BASE = 1
 _COVER_HALF = 2
+_COVER_ICON = 8
 
 
 def _cover_scale(side, w, h):
@@ -199,6 +206,8 @@ class Launcher:
 
     `names` (the palette) + `blit_glyph` (the shared glyph blitter) are injected so the
     tile draw stays free of a console back-import."""
+
+    arrangement = "grid"          # the layout's `home` value this class draws
 
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
         self.items = items
@@ -454,6 +463,7 @@ class Launcher:
         if clip is not None:
             self._card_clip = (bx, by, bw, bh)
             clip(bx, by, bw, bh)
+        sel = self.sel
         for i, rect in self._visible():
             # Inflate by the focus-ring margin so a card whose ring sliver was
             # damaged redraws whole (a full card redraw over shifted pixels is
@@ -462,6 +472,9 @@ class Launcher:
             ry0 = rect[1] - d
             rx1 = rect[0] + rect[2] + d
             ry1 = rect[1] + rect[3] + d
+            if i == sel:
+                # The selected card's reach past its cell (`_sel_reach`).
+                rx0, ry0, rx1, ry1 = self._sel_reach(rect, rx0, ry0, rx1, ry1)
             for r in rects:
                 if rx0 < r[0] + r[2] and r[0] < rx1 \
                         and ry0 < r[1] + r[3] and r[1] < ry1:
@@ -478,6 +491,11 @@ class Launcher:
             clip()
         self._draw_scroll_ui(cv)   # arrows redraw (dim state); draw_bar refills
                                    # its whole track, healing the shifted thumb
+
+    def _sel_reach(self, rect, x0, y0, x1, y1):
+        """The (x0, y0, x1, y1) the selected card at `rect` paints, given its
+        ring's: the shelf's card paints no further."""
+        return x0, y0, x1, y1
 
     def pointer_frame(self, px, py, click, down, dt_ms=None):
         """One pointer sample over the grid, fed through the shared ui.DragTap
@@ -900,6 +918,8 @@ class Carousel(Launcher):
     pitch leaves room for the centre card at full scale beside a neighbour
     at 1.0, so no two cards overlap."""
 
+    arrangement = "carousel"
+
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
         self.motion = "full"
         self.scale = HOME_SCALE_MAX
@@ -1300,6 +1320,168 @@ class Carousel(Launcher):
                  y + (h - lay.line_h) // 2, th.get("chrome_ink", 7), 1)
 
 
+class _IconCells:
+    """The icon home's cells in the grid's viewport (`Layout.lib_grid`): a
+    square tile with its label band under it, `rows` cells a column, the
+    columns spread to fill the viewport's width. It stands in as the
+    `IconHome`'s layout -- the shelf's cell names (`lib_card_w`, `lib_step`,
+    `tile_rect`...) answer the cells, every other name the layout it was
+    built from -- so the shelf's selection, scroll and drag bodies run on it
+    unchanged. One per Layout (`IconHome.set_layout` keeps it on the layout),
+    so a layout swap never rebuilds one."""
+
+    tile_cell = _Layout.tile_cell
+    tile_index = _Layout.tile_index
+
+    def __init__(self, lay):
+        self._lay = lay
+        fs = lay.fs
+        gx, gy, gw, gh = lay.lib_grid
+        gap = lay.lib_gap
+        ring = 2 * fs + 2
+        self.label_dy = ring + fs          # the label band's top under the tile
+        self.label_h = 13 * fs             # the desk's label band
+        under = self.label_dy + self.label_h
+        target = max(40 * fs, lay.cw // 10)
+        rows = max(1, (gh + gap) // (target + under + gap))
+        tile = max(16, (gh - (rows - 1) * gap) // rows - under)
+        cols = max(1, (gw + gap) // (tile + gap))
+        cgap = (gw - cols * tile) // (cols - 1) if cols > 1 else gap
+        # The names the shelf's bodies read, answered here directly (a miss
+        # goes through __getattr__ to the layout).
+        self.fs = fs
+        self.cs = lay.cs
+        self.cw = lay.cw
+        self.font_w = lay.font_w
+        self.line_h = lay.line_h
+        self.lib_panel = lay.lib_panel
+        self.lib_header_h = lay.lib_header_h
+        self.scroll_lt = lay.scroll_lt
+        self.scroll_rt = lay.scroll_rt
+        self.lib_grid = lay.lib_grid
+        self.lib_gap = gap                 # between rows
+        self.rows = rows
+        self.cols = cols
+        self.tile = tile
+        self.lib_card_w = tile
+        self.lib_card_h = tile + under
+        self.lib_step = tile + cgap        # one column
+        self.lib_card_actions = False      # the verbs ride the bar's zone
+
+    def __getattr__(self, name):
+        return getattr(self._lay, name)
+
+    def tile_rect(self, i, scroll=0, featured=False):
+        """Cell `i`'s rect (tile and label band) at `scroll`, or None when
+        it and the selected label's reach lie wholly outside the viewport."""
+        gx, gy, gw, _gh = self.lib_grid
+        rows = self.rows
+        x = gx + (i // rows) * self.lib_step - scroll
+        w = self.lib_card_w
+        half = self.lib_step // 2          # the selected cell's label reach
+        if x + w + half <= gx or x - half >= gx + gw:
+            return None
+        h = self.lib_card_h
+        return (x, gy + (i % rows) * (h + self.lib_gap), w, h)
+
+    def grid_content_w(self, n, featured=False):
+        if n <= 0:
+            return 0
+        return (n - 1) // self.rows * self.lib_step + self.lib_card_w
+
+
+class IconHome(Launcher):
+    """The home's icon arrangement (docs/shell_layout_2026-10.md §12, the
+    layout's `home: icons`): the grid arrangement with one-tile cards -- its
+    panel, its tab row, its selection, scroll, drag and verbs -- where each
+    cell is the cart's icon (the cover's reduction, else its sheet's tile,
+    `CoverCache.icon_sheet_for`'s order) in the theme's `desk.icon` tile, no
+    title under it, and the focused cell's name in the desk's label pill
+    (`ui.icon_label`). "+ New" is a cell like any other: no tall card."""
+
+    arrangement = "icons"
+
+    def set_layout(self, layout):
+        cells = getattr(layout, "_icon_cells", None)
+        if cells is None:
+            cells = _IconCells(layout)
+            layout._icon_cells = cells
+        Launcher.set_layout(self, cells)
+
+    def _featured(self):
+        return False
+
+    def _label_band(self, rect):
+        """The selected cell's label band: under its tile, half a column
+        wider on each side, so a name longer than the tile still reads."""
+        lay = self.layout
+        x, y, w, _h = rect
+        half = lay.lib_step // 2
+        return (x - half, y + lay.tile + lay.label_dy, w + 2 * half, lay.label_h)
+
+    def _sel_reach(self, rect, x0, y0, x1, y1):
+        b = self._label_band(rect)
+        return (min(x0, b[0]), y0, max(x1, b[0] + b[2]), max(y1, b[1] + b[3]))
+
+    def cover_specs(self):
+        """The (cart, div) covers the next full draw requests: each cart's
+        ICON reduction, where the cart names no icon of its own."""
+        out = []
+        for it in self.items:
+            if (it.get("path") and not it.get("icon")
+                    and it.get("type") not in PSEUDO_TILE_TYPES):
+                out.append((it, _COVER_ICON))
+        return out
+
+    def _icon_of(self, it, sheet_for):
+        if it.get("type") in PSEUDO_TILE_TYPES:
+            return self.icon_for("new") if self.icon_for is not None else None
+        img = None
+        if self.cover_for is not None and not it.get("icon"):
+            img = self.cover_for(it, _COVER_ICON)
+        if img is None and sheet_for is not None:
+            img = sheet_for(it)
+        return img
+
+    def _draw_cart_card(self, cv, it, rect, selected, sheet_for):
+        """One cell: the tile, the icon centred in it at a whole-number scale
+        (or the type glyph), and on the selected one its focus ring, the
+        favourite star and the name's pill."""
+        th = self.theme
+        lay = self.layout
+        fs = lay.fs
+        x, y, w, _h = rect
+        t = lay.tile
+        box = (x, y, t, t)
+        _ui.icon_tile(cv, th, box)
+        img = self._icon_of(it, sheet_for)
+        if img is not None:
+            iw, ih = img.w, img.h
+            sc = max(1, (t - 8 * fs) // max(iw, ih, 1))
+            cv.spr(img, x + (t - iw * sc) // 2, y + (t - ih * sc) // 2, sc)
+        else:
+            gs = max(1, (t - 12 * fs) // 12)
+            kind = it.get("type")
+            self._blit_glyph(cv, _TYPE_GLYPH.get(kind, "app"), box,
+                             _TYPE_COLOR.get(kind, _TYPE_COLOR["app"]), gs)
+        if not selected:
+            return
+        color = th["focus"]
+        for i in range(max(2, fs)):
+            d = fs + 1 + i
+            cv.rectb(x - d, y - d, t + 2 * d, t + 2 * d, color)
+        if self.favorite_for is not None and it.get("path") \
+                and it.get("type") not in PSEUDO_TILE_TYPES:
+            _draw_star_badge(cv, self._NAMES, self._blit_glyph,
+                             self._favorite_badge_geom(rect),
+                             bool(self.favorite_for(it)))
+        name = "NEW" if it.get("type") in PSEUDO_TILE_TYPES else it.get("title", "")
+        _ui.icon_label(cv, th, self._label_band(rect), name, True, fs)
+
+    def _draw_pseudo_card(self, cv, it, rect, selected):
+        self._draw_cart_card(cv, it, rect, selected, None)
+
+
 def _retained_n(cv):
     """The canvas's physical-buffer rotation -- the staleness horizon the
     drag-partial streaks must respect (a back buffer on an N-buffer root is N
@@ -1507,7 +1689,7 @@ class LauncherHomeLayer:
         return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id,
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
-            self.grid.tab, self._tab_focus)
+            self.grid.tab, self._tab_focus, self.grid.arrangement)
 
     def _retained_key(self, cv):
         """Everything the WHOLE home frame's pixels are a pure function of: the

@@ -242,9 +242,7 @@ class _BackdropLayer(Layer):
         th = ws.theme_colors
         fs = ws.look.effective_font_scale()
         for key, box, pill, label, cart in self._icon_rects():
-            if not _ui.paint(cv, th, box, "desk.icon"):
-                cv.rect(box[0], box[1], box[2], box[3], th["panel"])
-                cv.rectb(box[0], box[1], box[2], box[3], th["edge"])
+            _ui.icon_tile(cv, th, box)
             img = ws.covers.icon_sheet_for(cart) if cart is not None else None
             if img is not None:
                 sc = max(1, (box[2] - 8 * fs) // 16)
@@ -255,24 +253,13 @@ class _BackdropLayer(Layer):
                 ink = th.get("accent", 10) if key == "play" else th.get("title_ink", 0)
                 ws._glyph(glyph, (box[0] + 6 * fs, box[1] + 6 * fs,
                                   box[2] - 12 * fs, box[3] - 12 * fs), ink, cv)
-            self._draw_label(cv, th, pill, label, key == "play", fs)
+            _ui.icon_label(cv, th, pill, label, key == "play", fs)
 
     @staticmethod
     def label_rect(pill, label, fs):
-        """The pill a label is drawn in: the label's width, centred in the
-        cell's label band `pill` (the hit-test keeps the whole band)."""
-        w = min(pill[2], _ui.text_width(label, fs, "ui") + 6 * fs)
-        return (pill[0] + (pill[2] - w) // 2, pill[1], w, pill[3])
-
-    @classmethod
-    def _draw_label(cls, cv, th, pill, label, on, fs):
-        """The icon's label under its tile: the theme's `desk` surface as a pill
-        the label's width, or, with none, a chip the cell's width."""
-        r = cls.label_rect(pill, label, fs)
-        if _ui.paint(cv, th, r, "desk"):
-            _ui.label(cv, r, label, th["chrome_ink"], _ui.ALIGN_CENTER)
-        else:
-            _ui.chip(cv, th, pill, label, on=on, fs=fs)
+        """The pill a label is drawn in (`ui.icon_label_rect`; the hit-test
+        keeps the whole band)."""
+        return _ui.icon_label_rect(pill, label, fs)
 
     def _open_icon(self, key):
         ws = self.ws

@@ -113,6 +113,10 @@ keeps the matrix a clean product instead of a pile of special cases.
                            surface a tab -- Games, Mine, Apps, Make -- on the
                            T-Deck and on the as-shipped P4 in console mode.
                            One axis (the arrangement) from those rows.
+  tdeck_320x240_fs1_homeicons, p4_1024x600_cs2_fs1_homeicons
+                           the home in its ICONS arrangement, the same four
+                           surfaces on the same two configs: one axis (the
+                           arrangement) from the grid's rows.
 
 The last two were added before theming's first phase
 (`docs/theming_2026-09.md` §9), so the phases that hold the goldens hold
@@ -371,6 +375,12 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_homegrid": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, layout=_DEFAULT_BARS, home="grid", plan="home"),
+    "tdeck_320x240_fs1_homeicons": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, layout=_DEFAULT_BARS, home="icons", plan="home"),
+    "p4_1024x600_cs2_fs1_homeicons": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, layout=_DEFAULT_BARS, home="icons", plan="home"),
     "p4_1024x600_cs2_fs1_popovers": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="popovers"),

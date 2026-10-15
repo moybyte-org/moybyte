@@ -38,7 +38,7 @@ memory and compositors); this doc cites, it does not copy.
 | L11 | **The HOME key backs out one level, everywhere** (owner, 2026-10-13). In desktop mode it shows the desktop, `show_desk()`: every window minimised to its chip and kept, HOME again restores them, and it never closes a window (Win+D's shape). In console mode it goes home, and from the home on a P4 to the desktop | §3 |
 | L12 | **The input model assumes a keyboard on every board** (owner, 2026-10-13): the T-Deck's own, a BLE keyboard on the Guition S3 and both P4s. Touch is supplementary -- a fullscreen game on a P4 is left by the keyboard alone -- and there is no on-screen home button: it would spend bar space on what the HOME key does | §4, §15 |
 | L13 | **Every bar widget is compact** (owner, 2026-10-14: "I only want the calendar to pop out"; "that should be the default for every widget, why would we want giant bars?"): an icon or a short value. Anything bigger opens as its component -- the popover in desktop mode, the fullscreen page in console mode -- and no widget is ever docked large in a bar, so a bar's `size` is a slim range, 16..32. Side bars stay, as thin bars | §4, §5, §8 |
-| L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default) or `grid`, `icons` planned | §5, §12 |
+| L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default), `grid` or `icons` | §5, §12 |
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
 | L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, always the `grid` arrangement whatever the fullscreen home's, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window | §3, §12 |
@@ -271,8 +271,8 @@ whole through `inherits` from the nearest package that sets it (§5 there);
 the default seed sets today's bar (example 1; owner, 2026-10-13: one bar is
 the default look), the taskbar's chips floating over its middle in desktop
 mode as they always have. A bar list is never merged by position. `home`
-names the home's arrangement (§12, L14): `carousel`, the default, or `grid`;
-`icons` is planned, not built, and reads as unknown. There is no `windows`
+names the home's arrangement (§12, L14): `carousel`, the default, `grid` or
+`icons`. There is no `windows`
 key (§15) and no `mode` key (§3: PLAY is the switch).
 
 ```json
@@ -291,7 +291,7 @@ key (§15) and no `mode` key (§3: PLAY is the switch).
 | `bars[].size` | an integer, logical pixels | clamped to 16..32 (L13: the compact widgets' 16-pixel cells, an icon's margins, a taskbar of chips at 22 or so; the tap floor is the chrome scale's, #203, not the size's); absent is 18 |
 | `bars[].left`, `center`, `right` | lists of catalogue names | at most 6 per slot, 12 per layout; an unknown name is dropped and noted; a widget placed twice keeps its first placement, except `text`, `spacer`, `separator` |
 | `bars[].text` | a string per `text` widget, by position | 1 to 24 characters of printable ASCII; longer is cut, empty is dropped |
-| `home` | `carousel` or `grid` | absent or unknown is `carousel` (unknown noted); it rides the layout, which a package sets whole with its bars |
+| `home` | `carousel`, `grid` or `icons` | absent or unknown is `carousel` (unknown noted); it rides the layout, which a package sets whole with its bars |
 
 The flattened package carries it in a few dozen bytes, well inside
 `theme.bytes` (4096). `style.json`'s `theme.layout` holds the edges, the
@@ -610,11 +610,14 @@ active one (a switch would rewrite its `inherits`).
 has no home of its own — its root is the desk, and PLAY enters console mode
 (§3). So there is one home component on every board, drawn by one layer, in
 an **arrangement** the layout's `home` key picks (L14, owner 2026-10-14): the
-`carousel` (the default, below) or the `grid` -- the shelf, its two-row card
+`carousel` (the default, below), the `grid` -- the shelf, its two-row card
 grid on a panel, with the same tab row (in the panel's header), the same
 sources, taps and bar-zone verbs, and no Make tile (a tall "+ New" heads the
-Make tab). A small icon-only grid
-(`icons`, Nintendo-style) is planned, not built. The carousel:
+Make tab) -- or `icons`, the small icon-only grid (Nintendo-style;
+`docs/theming_2026-09.md` §9 phase 6 step 11): the grid's panel, tab row,
+keys, taps and verbs over one-tile cards, each the cart's icon in the
+theme's `desk.icon` tile, the focused card's name in the desk's label pill
+under it and no other card's, "+ New" a card like the rest. The carousel:
 `LauncherHomeLayer` becomes it, the `Launcher` shelf engine under a **tab
 row** (`ui.tab_row`, a toolkit kind, drawn through C) with four sources. One
 class, four lists; the pinned Make tile goes, its job is the Make tab. The
@@ -903,7 +906,7 @@ The step named in the last column corrects the claim where it stands:
 | a running windowed playtest when PLAY is pressed | ended; the simplest to build | §3 |
 | wifi: one implementation | the Settings WIFI panel stays and `moybyte.wifi.moy` is deleted (step 6). The cart was one of the first "the OS is carts" carts; where the line between system carts and built-in apps sits is not settled and can move later — today one implementation wins | §8, §13 step 6, §16 |
 | the docked calendar (2026-10-14) | "I don't want bars, I only want the calendar to pop out": `calendar` leaves the catalogue; the calendar is the clock's popover and page only | L13, §4, §8, §15 |
-| the home's arrangements (2026-10-14) | carousel (default), the old big grid, later a small icon-only grid; "we don't have to do it now": `home: carousel | grid` built, `icons` planned | L14, §5, §12 |
+| the home's arrangements (2026-10-14) | carousel (default), the old big grid, later a small icon-only grid; "we don't have to do it now": `home: carousel | grid`, then `icons` (theming phase 6 step 11) | L14, §5, §12 |
 | giant bars (2026-10-14) | "that should be the default for every widget": every widget is compact, anything bigger opens; `size` capped at 32 | L13, §5, §15 |
 | how far the bars reach | global: every surface, the running tool/app included, lays out off `content_rect()`, migrated in step 3b; it saves the most space | §7, §13 step 3b, §15 |
 | the project picker (2026-10-14) | deleted on every tier; the Make tab is the one projects list | L15, §12, §13 step 7c |

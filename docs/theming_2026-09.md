@@ -53,7 +53,7 @@ for them from format 1.
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§6). |
 | D5 | **Layout: both.** A theme sets the default bar layout (its `layout`'s bars, §3); the user can override it in Settings, and the override survives a theme switch. A window's mode is its own button, not a theme's (`docs/shell_layout_2026-10.md` §15, owner 2026-10-13). Designed in the shell-layout doc (§4.8). |
 | D6 | **Themes bring wallpapers**: one wallpaper for the desk and the home (owner, 2026-10-14, replacing the per-slot wallpapers of 2026-09-27: a screen-sized bake per slot is memory a board does not have, and the home already shows the desk's wallpaper behind its cards). **The wallpaper is the theme's** (owner, 2026-10-14, the modern-Windows rule, replacing 2026-09-27's separate user override): picking a theme brings its wallpaper, and the user's pick is a change to the theme like any other, landing in `custom` and travelling with it; there is no persisted `wallpaper` setting (phase 6 step 5). A theme ships a static image and may name an installed wallpaper cart (§4.9). |
-| D7 | **The home is one component on every board**: tabs (Games / Mine / Apps / Make) over the carts, themeable, over the one wallpaper (D6), in an arrangement a theme or the user picks (the layout's `home`: the cover carousel by default, or the grid; owner, 2026-10-14, `docs/shell_layout_2026-10.md` §12). **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
+| D7 | **The home is one component on every board**: tabs (Games / Mine / Apps / Make) over the carts, themeable, over the one wallpaper (D6), in an arrangement a theme or the user picks (the layout's `home`: the cover carousel by default, the grid, or the icon grid; owner, 2026-10-14, `docs/shell_layout_2026-10.md` §12). **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 | D8 | **Format 1 carries four more keys** (owner, 2026-10-11, before phase 1 froze it): **content colour roles** for code syntax and the block editor's block colours (§4.1); a **corner radius of 0 to 3** (§4.2); a **pressed-label offset** (§4.2); and a **text effect** per part and state, `none`, `shadow` or `emboss` with the role it paints in (§4.3). Their defaults reproduce today's pixels. The Paint, sprite, map and scene canvases stay exempt. |
 
 The pictures for D1 and D7, with the shell as it rendered before, are in
@@ -1768,7 +1768,7 @@ port), never here.
      numbers are #66's. Net: `tests/test_home_band.py`.
 
   11. **The icon home** (`home: icons`; the shell-layout doc §12, the owner's
-     "we don't have to do it now", 2026-10-14). The `grid` arrangement with
+     "we don't have to do it now", 2026-10-14; landed 2026-10-15). The `grid` arrangement with
      one-tile cards: each cart's icon (the cover's reduction,
      `SpriteSheet.icon_from_hex`) in the theme's `desk.icon` tile and
      sprite, no title under it, the name in the pill for the focused card
@@ -1779,6 +1779,25 @@ port), never here.
      configs; `home idle` zero; the moving scenarios within §9's thresholds
      on every console board on the desk; the carousel's and the grid's
      goldens hold.
+     **As built.** `IconHome` (`runtime/launcher_layer.py`) is the grid's
+     `Launcher` over its own cells (`_IconCells`), which stand in as its
+     layout: square tiles with a label band under each, two or three rows
+     sized from the content width, the columns spread across the grid's
+     viewport -- so the grid's selection, keys, taps, scroll, fling and
+     drag partial run unchanged, on its panel and band (no `home.band`
+     under it, as the grid). A cell's icon is the cover's ICON reduction
+     where the cart names no icon, else its sheet's tile, else its type
+     glyph, at a whole-number scale; the focused cell wears the ring, the
+     favourite star and the label pill, which reaches half a column past
+     its tile each side (the drag partial redraws the selected card over
+     that reach). The tile and the pill are the desk's own bodies,
+     `ui.icon_tile` and `ui.icon_label`, which the desk now draws through.
+     The theme loader reads `icons` (style.json's `layout.homes`); a
+     theme's layout reaches it, or EDIT FILE on one. Goldens:
+     `tdeck_320x240_fs1_homeicons` and `p4_1024x600_cs2_fs1_homeicons`,
+     the home's four tabs each; `tools/p4_bench.py --icons` runs the
+     scenarios beside the grid's; the numbers are #66's. Net:
+     `tests/test_icon_home.py`.
 
   12. **EDIT TASKBAR** (owner, 2026-10-14; deferrable: nothing before it
      depends on it, and until it lands the page has no taskbar row and a
