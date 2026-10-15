@@ -54,7 +54,7 @@ form is 3.6x smaller (201,716 B against 731,592 B, measured on the 35-cart
 roster) and it is what let the Zero carry a roster at all. BOTH FORMS WERE
 BUILT rather than inferred from the source, and the interesting answer is that
 the plain one fits: 2,830,672 B of that board's 2,883,584 B OTA slot, 51 KB
-left -- under the #168 warning floor, one cart from a build failure, in a slot
+left -- under the board's headroom floor, a failed build, in a slot
 paid for twice. The packed image is 2,399,232 B and leaves 473 KB.
 
 Why a Python bytes literal and not a second `.incbin` beside the web bundle's:

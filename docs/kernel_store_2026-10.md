@@ -362,7 +362,7 @@ from `StoreWatcher`'s sweep of that tree and do not change. The worker is one
 thread and its VM never stops.
 
 **The Zero.** It takes the usermod, so every slice is a Zero link gate against
-its 256 KiB floor. Its volume is its internal littlefs, borrowed from `VfsLfs2`
+its headroom floor (`[image]` in its `board.toml`). Its volume is its internal littlefs, borrowed from `VfsLfs2`
 until the kernel is its entry (sprint 3). `apply_ops(journal=True)` journals
 through the C journal, and a cart-delete from the wire goes through
 `delete(h)`, so the index stays true.

@@ -5,6 +5,7 @@
 #   impls               the native twins a board's decision takes
 #   stage_native        stage the native modules and write their cmake list
 #   sdkconfig_required  the stale-sdkconfig guard's list
+#   headroom_floor      the OTA-slot headroom the build's size guard demands
 #   stage               stage the Python modules
 #   Setting             one sdkconfig.board assignment and its prose
 #   TomlError           a board.toml the parser refuses
@@ -270,6 +271,21 @@ def load(board_dir):
     """The parsed `board.toml` of `board_dir`."""
     path = Path(board_dir) / "board.toml"
     return loads(path.read_text(encoding="utf-8"))
+
+
+def headroom_floor(board_dir):
+    """`(ota id, floor in bytes)`: the OTA-slot headroom the board's app image
+    must keep, `[image] headroom_floor_kib`. The build's size guard fails
+    under it; a board with an OTA id and no floor is an error, not a pass."""
+    cfg = load(board_dir)
+    ota = cfg.get("board", {}).get("ota")
+    kib = cfg.get("image", {}).get("headroom_floor_kib")
+    if not ota:
+        raise ValueError("%s/board.toml: [board] has no ota id" % board_dir)
+    if not isinstance(kib, int) or isinstance(kib, bool) or kib <= 0:
+        raise ValueError("%s/board.toml: [image] headroom_floor_kib must be a "
+                         "positive integer, got %r" % (board_dir, kib))
+    return ota, kib * 1024
 
 
 def _shared(cfg):
@@ -760,6 +776,10 @@ def main(argv):
         for s in sdkconfig_required(argv[2]):
             print(s.assignment)
         return 0
+    if len(argv) >= 3 and argv[1] == "headroom-floor":
+        ota, floor = headroom_floor(argv[2])
+        print("%d %s" % (floor, ota))
+        return 0
     if len(argv) >= 4 and argv[1] == "sdkconfig-get":
         print(sdkconfig_get(argv[2], argv[3]))
         return 0
@@ -774,7 +794,8 @@ def main(argv):
     print(__doc__.strip().splitlines()[0], file=sys.stderr)
     print("usage: board_config.py stage|stage-native|list|list-native "
           "<board_dir>", file=sys.stderr)
-    print("       board_config.py native-dest|impls <board_dir>", file=sys.stderr)
+    print("       board_config.py native-dest|impls|headroom-floor <board_dir>",
+          file=sys.stderr)
     print("       board_config.py sdkconfig-required|sdkconfig-get|"
           "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)
     return 2

@@ -889,7 +889,7 @@ board; the Guition S3's card is on SPI3 but its slot numbers invert against
 host numbers; a card that will not mount leaves its bus up. The Zero has no
 dev channel and a Ctrl-C takes its webhost offline until a Ctrl-D, its USB
 port re-enumerates under a new name, and it holds every module twice across
-8 MB of flash, so each C module here is weighed against its 256 KiB floor —
+8 MB of flash, so each C module here is weighed against its headroom floor —
 which it approaches already, the web bundle being most of what it carries
 (#224). The browser's half is a derived artifact: the kernel's modules enter
 the web build through the pinned emscripten container, and `tools/preflight.sh`
@@ -1158,8 +1158,8 @@ reviews asked for, each a number that moves when the bug is present:
   sprint 0's baseline and within the share (§8); `KERNEL_SRAM` updated;
 - **PSRAM**: the share by owner class, free and largest, fresh and after the
   census's session, both S3s;
-- **flash**: every image above its floor (1 MiB on the P4s, 512 KiB on the
-  S3s, 256 KiB on the Zero), the Zero BUILT at every pass with a per-pass byte
+- **flash**: every image above its floor (`[image] headroom_floor_kib` in its
+  `board.toml`; the build fails under it), the Zero BUILT at every pass with a per-pass byte
   budget set from its remaining headroom, and a module the Zero cannot afford
   denied there with its reason in board.toml and the Python it replaces kept
   on that one board;

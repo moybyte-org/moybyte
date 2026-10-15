@@ -25,8 +25,8 @@
 #   The image this table was cut for is ~2.67 MB, and most of it is the browser
 #   console every board bakes (native/moy_web, ~808 KB gzipped, 91% of it
 #   micropython.wasm.gz), which grows with the console rather than with this
-#   board. On 2.75 MiB slots that left ~217 KB, under the 256 KiB floor section
-#   6.1 sets for this image. The kernel adds to it next: moy_kernel and moy_net
+#   board. On 2.75 MiB slots that left ~217 KB, under the 256 KiB floor this
+#   image then had (section 6.1; [image] in board.toml holds the current one). The kernel adds to it next: moy_kernel and moy_net
 #   cross onto this board natively (docs/kernel_survival_2026-10.md 6.5). 3 MiB
 #   leaves about the floor again on top of the floor, which is that pass's room;
 #   the build prints the current figure on every run.
@@ -38,9 +38,9 @@
 #   under twice the roster.
 #
 # WHAT WOULD FALSIFY IT: the app image crossing ~2.9 MB. The build says so on
-# every run (the #168 guard reads THIS FILE's ota_0 size and prints the
-# headroom, and fails the build on an overflow), so the tell arrives before the
-# image does. Changing these offsets costs every deployed board a full-erase
+# every run (the #168 guard reads THIS FILE's ota_0 size, prints the headroom
+# beside board.toml's floor, and fails the build under the floor), so the tell
+# arrives before the image does. Changing these offsets costs every deployed board a full-erase
 # cable flash and its store (tools/board_flash.py erases the moved store's
 # first blocks), so the time to argue with the numbers is before the next one.
 #

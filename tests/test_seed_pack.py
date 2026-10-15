@@ -13,7 +13,7 @@ MEASURED, on the two things a change like this can get wrong:
     the packed one -- about the blob's own 201,716 B, so the bytes land in ROM
     and cost their size and an index. The plain form was BUILT TOO, and the
     interesting answer is that it fits: 2,830,672 B of the 2,883,584 B slot,
-    51 KB left, under the #168 warning floor and one cart from a build failure
+    51 KB left, under the board's headroom floor and so a failed build
     -- in a slot the board pays for twice. So this is not "it would not fit"
     but "it fit with 1.8% to spare", which is not a margin.
   * RAM. `test_the_inflate_runs_on_micropython` seeds the whole roster under a

@@ -355,6 +355,50 @@ def test_every_native_take_names_a_module_and_says_why(board):
 CONSOLE_BOARDS = ("tdeck", "p4", "guition-s3", "guition-p4")
 
 
+def test_every_board_with_an_ota_slot_carries_its_headroom_floor():
+    """Globbed, not BOARDS: a board added without a floor would otherwise
+    build with no floor at all. The size guard is handed the value through
+    `board_config.py headroom-floor`, which refuses a missing one."""
+    found = {}
+    for toml in sorted((ROOT / "firmware").glob("*/board.toml")):
+        if not board_config.load(toml.parent).get("board", {}).get("ota"):
+            continue
+        ota, floor = board_config.headroom_floor(toml.parent)
+        assert floor >= 64 * 1024, "%s: a floor of %d bytes guards nothing" % (
+            ota, floor)
+        found[ota] = floor
+    assert set(found) >= {"tdeck", "p4", "guition_s3", "guition_p4",
+                          "xiao_zero"}, sorted(found)
+
+
+def test_a_board_without_a_floor_is_refused(tmp_path):
+    (tmp_path / "board.toml").write_text(
+        '[board]\nname = "x"\nota = "x"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="headroom_floor_kib"):
+        board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = "512"\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError, match="positive integer"):
+        board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = 512\n',
+        encoding="utf-8")
+    assert board_config.headroom_floor(tmp_path) == ("x", 512 * 1024)
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "board_config.py"),
+                        "headroom-floor", str(tmp_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.split() == ["524288", "x"]
+
+
+def test_the_build_hands_the_size_guard_the_boards_floor():
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text(encoding="utf-8")
+    collect = lib.partition("moybyte_build_and_collect() {")[2].partition("\n}")[0]
+    assert "headroom-floor" in collect
+    call = collect.partition("moybyte_app_size_guard")[2]
+    assert '"${floor}" "${board_id}"' in call.split("echo", 1)[0]
+
+
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_board_decides_the_wasm_engine(board):
     takes = board_config.native_takes(BOARDS[board])

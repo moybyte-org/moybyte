@@ -223,8 +223,8 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
 # strings live in ROM and cost no heap. That representation is free on a board
 # with the flash for it, and the Zero is the board without. Both forms were
 # BUILT: the plain roster makes a 2,830,672 B image of a 2,883,584 B OTA slot,
-# 51 KB left -- it fits, by less than 2%, under the #168 warning floor and one
-# cart from a build failure, in a slot the board pays for TWICE.
+# 51 KB left -- it fits, by less than 2%, under the board's headroom floor and
+# so a failed build, in a slot the board pays for TWICE.
 #
 # So the Zero froze `carts_data.CARTS_Z` instead: the SAME carts, one raw
 # deflate stream each (tools/gen_device_carts.py --packed), which builds to

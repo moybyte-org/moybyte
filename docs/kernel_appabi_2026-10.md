@@ -494,7 +494,7 @@ against that bug before it goes green.
 | the C spine everywhere | the host's ctypes spine and the browser's linked one pass the spine's suite and the differential fuzz against the twin under `tests/` | a host that still runs the twin; a twin that drifts unseen |
 | grants do not leak | `kstop N stop` reads the grant count flat | a grant re-made at every start |
 | user apps unchanged | `tests/test_user_apps.py`: one cart opened twice, a permission apart; Notes on every console | a grant widened or narrowed by the move to C |
-| the standing meters | all five boards passing; the roster uncapped on each S3; Bench, µs per op; `KERNEL_SRAM` with the launcher up, beside internal SRAM free and its low-water (radios on), inside the plan's §6.1 share; each image's headroom over its floor (the Zero: 256 KiB); time from reboot to first light and to `state`; the return start's parts | what every sprint's gate guards against |
+| the standing meters | all five boards passing; the roster uncapped on each S3; Bench, µs per op; `KERNEL_SRAM` with the launcher up, beside internal SRAM free and its low-water (radios on), inside the plan's §6.1 share; each image's headroom over its floor (the build fails under it); time from reboot to first light and to `state`; the return start's parts | what every sprint's gate guards against |
 
 ## 10. Risks
 

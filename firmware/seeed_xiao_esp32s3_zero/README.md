@@ -98,17 +98,18 @@ them back on the next visit — but anything that existed *only* here is.
   canvas, and only one shared native module. Measured on the first build,
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
   the Guition's 3,668,096 B the day before. The baked browser console grew
-  the image past its 256 KiB headroom floor (`docs/native_kernel_2026-09.md`
+  the image past its first headroom floor, 256 KiB (`docs/native_kernel_2026-09.md`
   §6.1), so since 2026-10-07 the slots are **3 MiB** (`0x300000`, at `0x20000`
   and `0x320000`) and the store is the **1.875 MiB** `vfs` at `0x620000`, sized
   for the kernel's native modules to cross onto this board. The CSV carries the
   full arithmetic and what would falsify it; the build prints the headroom on
-  every run and fails on an overflow (#168).
+  every run beside the board's floor (`[image] headroom_floor_kib` in
+  `board.toml`) and fails under it or on an overflow (#168).
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
-  **2,830,672 B of the 2,883,584 B slot — 51 KB left**: it fits, under the #168
-  warning floor, one cart from a build failure, in a slot paid for twice. With
+  **2,830,672 B of the 2,883,584 B slot — 51 KB left**: it fits, under the
+  board's headroom floor and so a failed build, in a slot paid for twice. With
   the same 35 carts as one raw-deflate stream each it is **2,399,232 B — 473 KB
   left**, against **2,194,112 B / 673 KB** for the image that carried no roster
   at all. `tools/gen_device_carts.py --packed` emits it (201,716 B of blobs

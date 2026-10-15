@@ -846,13 +846,17 @@ board stands against each value, are #224's.
   stack is alive (docs/kernel_cartpath_2026-10.md §4). Kernel data is PSRAM by rule, and the T-Deck's DMA-capable
   low-water with both radios up is the tightest figure on either board.
 - **Image headroom floors**, the OTA-slot headroom `build.sh` prints with the
-  browser console baked in, at every sprint's gate:
+  browser console baked in. Each board's floor is `[image] headroom_floor_kib`
+  in its `board.toml`, and the build enforces it: `moybyte_app_size_guard`
+  (`tools/esp32_build_lib.sh`) prints the headroom beside the floor and fails a
+  build under it, naming the board (`MOYBYTE_ALLOW_UNDER_FLOOR=1` builds one
+  anyway, for an experiment). Why each is what it is:
 
-  | image | floor | why |
-  |---|---|---|
-  | Waveshare P4, Guition P4 | 1 MiB | the 6 MiB slots (owner, 2026-10-05; `f738797`) were cut for the kernel; the floor leaves it about half of their headroom, so the store never pays for a second table change |
-  | T-Deck, Guition S3 | 512 KiB | no table change is planned; the floor leaves the kernel about two-thirds of their headroom and keeps the build's own warning (`MOYBYTE_APP_HEADROOM_WARN_BYTES`, 200 KB, #168) over twice |
-  | Zero | 256 KiB | the baked web bundle took it under the floor, and the 3 MiB slots (owner, 2026-10-07) re-tabled it rather than take the bundle off its image; they leave the kernel's native modules (`docs/kernel_survival_2026-10.md` §6.5) about the floor again, out of an 8 MB flash whose store pays for every slot byte twice |
+  | image | why |
+  |---|---|
+  | Waveshare P4, Guition P4 | the 6 MiB slots (owner, 2026-10-05; `f738797`) were cut for the kernel; the floor leaves it about half of their headroom, so the store never pays for a second table change |
+  | T-Deck, Guition S3 | no table change is planned; the floor leaves the kernel about two-thirds of their headroom |
+  | Zero | the baked web bundle took it under its first floor (256 KiB), and the 3 MiB slots (owner, 2026-10-07) re-tabled it rather than take the bundle off its image. The floor is **200 KB since 2026-10-15** (owner): the baked browser console's phase-6 growth left 236 KB (`bc073f04`), and the kernel's networking already crossed onto the Zero on 2026-10-08, so the floor guards general growth out of an 8 MB flash whose store pays for every slot byte twice |
 
 - **The heap after boot** (sprint 1b's gate): the GC heap the boot leaves at the
   launcher holds at most the five areas the catalogue's boot leaves (dev

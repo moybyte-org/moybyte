@@ -521,33 +521,49 @@ moybyte_sdkconfig_report_inert() {
 
 # The #168 size guard: the app image ($2) must fit the ota_0 slot read from
 # the board's OWN partition table ($1) -- read, not restated, so the check
-# cannot drift from the layout it is checking. An overflow FAILS: an image
-# that does not fit cannot be cable-flashed and cannot be installed over OTA,
-# so the alternatives to stopping here are esptool refusing it later or a
-# published payload no board can take. MOYBYTE_APP_SLOT_BYTES overrides for a
-# what-if; MOYBYTE_APP_HEADROOM_WARN_BYTES tunes the warning (default 200KB).
+# cannot drift from the layout it is checking -- and leave the board ($4) at
+# least its headroom floor ($3 bytes, `[image] headroom_floor_kib` in its
+# board.toml). Both FAIL the build. An image that does not fit cannot be
+# cable-flashed and cannot be installed over OTA, so the alternatives to
+# stopping here are esptool refusing it later or a published payload no board
+# can take; an image under its floor is the growth the floor exists to stop
+# before the next partition-table change. MOYBYTE_APP_SLOT_BYTES overrides the
+# slot for a what-if; MOYBYTE_ALLOW_UNDER_FLOOR=1 builds an under-floor image
+# anyway (an experiment, never a release).
 moybyte_app_size_guard() {
-  local csv="$1" app_bin="$2"
-  local slot_hex slot_bytes warn_bytes size_bytes headroom
+  local csv="$1" app_bin="$2" floor_bytes="$3" board="$4"
+  local slot_hex slot_bytes size_bytes headroom
   slot_hex="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $5); print $5; exit }' "${csv}")"
   slot_bytes="${MOYBYTE_APP_SLOT_BYTES:-$(( ${slot_hex:-0x400000} ))}"
-  warn_bytes="${MOYBYTE_APP_HEADROOM_WARN_BYTES:-204800}"
   size_bytes="$(wc -c < "${app_bin}" | tr -d '[:space:]')"
   headroom=$(( slot_bytes - size_bytes ))
-  printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB)\n' \
-    "${size_bytes}" "${slot_bytes}" "${headroom}" "$(( headroom / 1024 ))"
+  printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB), floor %s KB (%s)\n' \
+    "${size_bytes}" "${slot_bytes}" "${headroom}" "$(( headroom / 1024 ))" \
+    "$(( floor_bytes / 1024 ))" "${board}"
   if [ "${headroom}" -lt 0 ]; then
     echo "" >&2
     echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its OTA slot" >&2
+    echo "!!   board:    ${board}" >&2
     echo "!!   slot:     ${slot_bytes} bytes (ota_0/ota_1, $(basename "${csv}"))" >&2
     echo "!!   image:    ${size_bytes} bytes" >&2
     echo "!!   OVERFLOW: $(( -headroom )) bytes ($(( (-headroom) / 1024 )) KB)" >&2
-    echo "!! Trim it (the baked web console is ~573KB -- see tools/gen_web_blob.py)" >&2
+    echo "!! Trim it (the baked web console -- see tools/gen_web_blob.py)" >&2
     echo "!! or change the partition table, which costs every deployed device a" >&2
     echo "!! full-erase USB flash." >&2
     exit 1
-  elif [ "${headroom}" -lt "${warn_bytes}" ]; then
-    echo "Moybyte WARNING (#168): under $(( warn_bytes / 1024 ))KB of OTA-slot headroom left -- trim the image or plan the next table change" >&2
+  elif [ "${headroom}" -lt "${floor_bytes}" ]; then
+    echo "" >&2
+    echo "!! Moybyte BUILD FAILED: ${board}'s image is under its headroom floor" >&2
+    echo "!!   headroom: ${headroom} bytes ($(( headroom / 1024 )) KB)" >&2
+    echo "!!   floor:    ${floor_bytes} bytes ($(( floor_bytes / 1024 )) KB, [image] headroom_floor_kib in its board.toml)" >&2
+    echo "!!   short by: $(( floor_bytes - headroom )) bytes" >&2
+    echo "!! Trim the image, or change the floor with its reason" >&2
+    echo "!! (docs/native_kernel_2026-09.md section 6.1). MOYBYTE_ALLOW_UNDER_FLOOR=1" >&2
+    echo "!! builds it anyway, for an experiment." >&2
+    if [ "${MOYBYTE_ALLOW_UNDER_FLOOR:-0}" != "1" ]; then
+      exit 1
+    fi
+    echo "!! MOYBYTE_ALLOW_UNDER_FLOOR=1: continuing" >&2
   fi
 }
 
@@ -560,7 +576,8 @@ moybyte_app_size_guard() {
 #                               into the inactive slot. Handing the merged
 #                               image to esp32.Partition would write a
 #                               bootloader into an app slot.
-# Reads: MPY_DIR BOARD BOARD_DIR SCRIPT_DIR MANIFEST DIST_DIR BUILD_JOBS.
+# Reads: MPY_DIR BOARD BOARD_DIR SCRIPT_DIR MANIFEST DIST_DIR BUILD_JOBS
+# BUILD_PYTHON REPO_ROOT.
 # Leaves the cwd in ports/esp32 (both scripts end here).
 # The kernel's entry (native/moy_kernel), on a board that takes it: its VM
 # service is mp_task copied, so the pinned tag's mp_task must be the one the
@@ -631,7 +648,13 @@ moybyte_build_and_collect() {
     FROZEN_MANIFEST="${MANIFEST}"
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
-  moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"
+  local floor board_id
+  floor="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" \
+           headroom-floor "${SCRIPT_DIR}")"
+  board_id="${floor#* }"
+  floor="${floor%% *}"
+  moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin" \
+    "${floor}" "${board_id}"
   echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }

@@ -228,7 +228,7 @@ GENERATED = {
     # (`CARTS_Z`, 202 KB of raw-deflate blobs) that `zero_host.seed_carts`
     # inflates into an empty store on first boot. It did not carry one at all
     # until that day -- the plain roster left 51 KB of a 2.8 MB slot, under the
-    # #168 warning floor -- so a flashed Zero came up an empty console and its
+    # board's headroom floor -- so a flashed Zero came up an empty console and its
     # carts arrived over a USB cable, or never.
     "zero": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which

@@ -260,6 +260,12 @@ baud           = 921600
 otadata_offset = "0xd000"
 otadata_size   = "0x2000"
 
+[image]
+# The OTA-slot headroom this board's app image keeps, browser console baked in.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
+# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+headroom_floor_kib = 1024
+
 [serial]
 # Read by tools/push_cart.py. THE LINE STATE AT OPEN IS BOARD-SPECIFIC AND
 # LOAD-BEARING -- the same facts tests/test_p4_on_glass.py and

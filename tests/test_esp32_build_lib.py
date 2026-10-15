@@ -1204,12 +1204,13 @@ def test_the_value_is_matched_literally_not_as_a_pattern(board):
 # -- the #168 size guard --------------------------------------------------------
 
 
-def _size_guard(tmp_path, nbytes, **env):
+def _size_guard(tmp_path, nbytes, floor=512 * 1024, **env):
     csv = tmp_path / "partitions.csv"
     csv.write_text(CSV, encoding="utf-8")
     app = tmp_path / "app.bin"
     app.write_bytes(b"\0" * nbytes)
-    return sh("moybyte_app_size_guard '%s' '%s'" % (csv, app), **env)
+    return sh("moybyte_app_size_guard '%s' '%s' %d testboard"
+              % (csv, app, floor), **env)
 
 
 def test_the_slot_size_is_read_out_of_the_boards_own_table(tmp_path):
@@ -1229,26 +1230,46 @@ def test_an_image_that_does_not_fit_FAILS_the_build(tmp_path):
     assert "BUILD FAILED" in r.stderr
 
 
-def test_a_tight_fit_warns_without_failing(tmp_path):
-    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 1024)
+def test_an_image_under_its_floor_FAILS_naming_board_headroom_and_floor(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 511 * 1024)
+    assert r.returncode != 0
+    assert "BUILD FAILED: testboard's image is under its headroom floor" in r.stderr
+    assert "headroom: 523264 bytes (511 KB)" in r.stderr
+    assert "floor:    524288 bytes (512 KB" in r.stderr
+    assert "short by: 1024 bytes" in r.stderr
+    assert "MOYBYTE_ALLOW_UNDER_FLOOR=1" in r.stderr
+
+
+def test_the_floor_itself_passes(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 512 * 1024)
+    assert r.returncode == 0 and r.stderr.strip() == ""
+
+
+def test_an_experiment_can_build_under_its_floor(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 1024,
+                    MOYBYTE_ALLOW_UNDER_FLOOR="1")
     assert r.returncode == 0
-    assert "under 200KB of OTA-slot headroom" in r.stderr
+    assert "under its headroom floor" in r.stderr and "continuing" in r.stderr
 
 
-def test_a_comfortable_image_says_nothing_alarming(tmp_path):
+def test_the_override_does_not_reach_an_overflow(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 + 1,
+                    MOYBYTE_ALLOW_UNDER_FLOOR="1")
+    assert r.returncode != 0 and "OVERFLOW" in r.stderr
+
+
+def test_a_comfortable_image_prints_its_headroom_and_floor(tmp_path):
     r = _size_guard(tmp_path, 3 * 1024 * 1024)
     assert r.returncode == 0 and r.stderr.strip() == ""
-    assert "1048576 bytes headroom (1024 KB)" in r.stdout
+    assert ("1048576 bytes headroom (1024 KB), floor 512 KB (testboard)"
+            in r.stdout)
 
 
-def test_the_slot_and_the_warning_threshold_are_both_overridable(tmp_path):
+def test_the_slot_is_overridable_for_a_what_if(tmp_path):
     """A what-if against a table change, without editing the table."""
     r = _size_guard(tmp_path, 3 * 1024 * 1024,
                     MOYBYTE_APP_SLOT_BYTES=str(2 * 1024 * 1024))
     assert r.returncode != 0
-    r = _size_guard(tmp_path, 3 * 1024 * 1024,
-                    MOYBYTE_APP_HEADROOM_WARN_BYTES=str(4 * 1024 * 1024))
-    assert r.returncode == 0 and "headroom left" in r.stderr
 
 
 # -- the greps and the executable lane must point at the same file --------------

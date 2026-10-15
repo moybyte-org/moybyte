@@ -243,6 +243,12 @@ baud           = 460800
 otadata_offset = "0x1d000"
 otadata_size   = "0x2000"
 
+[image]
+# The OTA-slot headroom this board's app image keeps, browser console baked in.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
+# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+headroom_floor_kib = 200
+
 [serial]
 # USB-Serial/JTAG since 2026-08-30, like the console S3 boards -- so this board
 # shows 303a:1001 and NOT the TinyUSB CDC 303a:4001 it used to. mpconfigboard.h

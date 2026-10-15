@@ -109,8 +109,8 @@ def identity():
 # header called it "what an image cannot carry: a kid's carts". The plain roster
 # the console boards freeze very nearly could not be carried here, and both
 # forms were BUILT to find out: with it this image is 2,830,672 B of a
-# 2,883,584 B OTA slot and leaves 51 KB -- under the #168 warning floor, one
-# cart from a build failure, in a slot paid for twice. Compressed the image is
+# 2,883,584 B OTA slot and leaves 51 KB -- under the board's headroom floor, a
+# failed build, in a slot paid for twice. Compressed the image is
 # 2,399,232 B and leaves 473 KB. `carts_data.CARTS_Z` is the same 35 carts as
 # one raw-deflate stream each, and this function inflates them.
 #

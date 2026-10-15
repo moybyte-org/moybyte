@@ -149,7 +149,7 @@ moybyte_patch_native_code_free
 #    roster arrived over a USB cable, or never -- and the arithmetic is why.
 #    BOTH FORMS WERE BUILT: with the plain `CARTS = [...]` the console boards
 #    freeze, this image is 2,830,672 B of the 2,883,584 B slot and leaves
-#    51 KB -- under the #168 warning floor, one cart from a build failure, in a
+#    51 KB -- under the board's headroom floor, a failed build, in a
 #    slot this board pays for twice. With the same 35 carts as one raw deflate
 #    stream each it is 2,399,232 B and leaves 473 KB, and
 #    `zero_host.seed_carts()` inflates them into an EMPTY store on first boot.

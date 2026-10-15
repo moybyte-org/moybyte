@@ -25,7 +25,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
-  oversized image is a build FAILURE on every board.
+  oversized image, or one under its board's headroom floor (`[image]
+  headroom_floor_kib` in board.toml), is a build FAILURE on every board.
 - **What crosses into an image is board.toml DATA** (#161), staged by
   `tools/board_config.py`: a denylist over `runtime/*.py` (each `[[deny]]` names
   a kind and a `why`), an allowlist over `device/*.py`, and a
