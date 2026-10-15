@@ -11,6 +11,7 @@
 #   store_switch     --store: a switch to a store theme package, and its boot delta
 #   bench_sprites    --sprites: chrome painted from a theme's role sheet, and without it
 #   bench_painter    --painter: a surface's, a sprite's and a 9-slice's us per call
+#   bench_band       --band: the home under a theme's band scrim, and without it
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -78,6 +79,14 @@ and no cursor: its drag is the Settings scroll. The live theme is put back.
 `button` painted from a surface (`raised, fill surface, border edge`), the
 same part from the sheet's 9-slice, and a window frame with and without the
 sheet's `window` 9-slice and title buttons -- µs per call, N calls each.
+
+`--band` benches the home's band surface (phase 6 step 10):
+tests/fixtures/themes/band.moy, whose `home.band` is a dither scrim and
+whose wallpaper is a busy picture, is pushed onto the board's store and
+picked, and `home idle` and the slow drag run over its picture, over the
+default wallpaper cart and over the first live one, each with the scrim and
+again with the package re-installed without it (the same image, theme and
+wallpaper). Idle paints zero; a live wallpaper's idle is its own frames.
 
 `--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
 size and a synthetic focus-band frame into the canvas the home draws into,
@@ -614,6 +623,72 @@ def push_sprite_fixture(args):
     import subprocess
     cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
            str(SPRITE_FIXTURE), "--board", args.board, "--port", args.port]
+    subprocess.run(cmd, check=True)
+
+
+BAND_THEME = "band"
+BAND_FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / \
+    "themes" / (BAND_THEME + ".moy")
+
+BAND_SETUP = """
+import json
+def _band(on, wp):
+    ws.look.set_theme(%r, persist=False)
+    t = json.loads(ws.look._theme_src(%r))
+    if not on:
+        t["surfaces"].pop("home.band")
+    ws.look.install_theme(json.dumps(t).encode())
+    if wp is not None:
+        ws.look.select_wallpaper(wp, persist=False)
+    ws.go_home()
+    ws.mark_dirty()
+ws._band = _band
+""" % (BAND_THEME, BAND_THEME)
+
+
+def bench_band(b, out_path):
+    """`home idle` and the slow drag under the band fixture, its scrim on
+    and off, over its picture, the default wallpaper cart and a live one."""
+    bench = Bench(b)
+    print("\n=== the home's band: a scrim, and none ===")
+    pyexec(b, BAND_SETUP)
+    was = pyval(b, "ws.look.theme_name")
+    if BAND_THEME not in (pyval(b, "ws.look.theme_names()") or ()):
+        print("  %s is not on this board's store" % BAND_THEME)
+        return bench
+    walls = [("picture", None),
+             ("default cart", pyval(b, "ws.look._default_wallpaper()"))]
+    for wp in pyval(b, "[ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]") or []:
+        pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % wp)
+        if pyval(b, "ws.wallpaper.is_animating(0.03)"):
+            walls.append(("live " + wp, wp))
+            break
+    pyexec(b, "ws.open_library()"); b.drain(4.0)
+    for name, wp in walls:
+        for on, tag in ((True, "[scrim]"), (False, "[none]")):
+            pyexec(b, "ws._band(%r, %r)" % (on, wp))
+            pyexec(b, "ws.open_library()"); b.drain(3.0)
+            bench.start(); b.drain(3.0)
+            bench.stop("home idle, %s %s" % (name, tag))
+            bx, by, bw, bh = pyval(b, "ws.launcher.band_rect()")
+            cy = by + bh // 2
+            bench.start()
+            b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(2.0)
+            bench.stop("home drag, %s %s" % (name, tag))
+    pyexec(b, "ws.look.set_theme(%r, persist=False)" % was)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+def push_band_fixture(args):
+    import subprocess
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
+           str(BAND_FIXTURE), "--board", args.board, "--port", args.port]
     subprocess.run(cmd, check=True)
 
 
@@ -1197,19 +1272,25 @@ def main():
                          "(pushes tests/fixtures/themes/sprig.moy)")
     ap.add_argument("--painter", action="store_true",
                     help="a surface's, a sprite's and a 9-slice's us per call")
+    ap.add_argument("--band", action="store_true",
+                    help="the home under a theme's band scrim and without it "
+                         "(pushes tests/fixtures/themes/band.moy)")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     if args.store or not (args.repaint or args.popovers or args.kernel
-                          or args.home or args.edit or args.sprites or args.painter):
+                          or args.home or args.edit or args.sprites or args.painter
+                          or args.band):
         push_store_fixture(args)
     if args.sprites:
         push_sprite_fixture(args)
+    if args.band:
+        push_band_fixture(args)
     b = board_from_args(args)
     try:
         if (not args.repaint and not args.kernel and not args.home
                 and not args.edit and not args.store and not args.sprites
-                and not args.painter and not b.attach_only):
+                and not args.painter and not args.band and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
             pick_layout(b, args.layout)
@@ -1229,6 +1310,8 @@ def main():
             bench_sprites(b, args.out)
         elif args.painter:
             bench_painter(b, args.out)
+        elif args.band:
+            bench_band(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

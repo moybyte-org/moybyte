@@ -685,9 +685,10 @@ scroll's own condition (#113). The frame in motion:
   and the zone update once, on settle;
 - the cards lie on the home's **wallpaper**: the band has no backdrop of its
   own (owner, 2026-10-14: "why is the background white? instead of showing
-  the wallpaper"), so its pixels cannot shift as #113's scroll-as-blit does
-  — the wallpaper would slide with the cards. Every full paint copies the
-  wallpaper under the band (`LauncherHomeLayer._band_bg`, an owned layer the
+  the wallpaper") beyond the theme's `home.band` surface, which paints with
+  the wallpaper (theming doc §4.9), so its pixels cannot shift as #113's
+  scroll-as-blit does — the wallpaper would slide with the cards. Every full
+  paint copies the wallpaper under the band (`LauncherHomeLayer._band_bg`, an owned layer the
   fit check releases with the retained frame), and a moving frame restores
   it only around the cards, every card painting its whole square opaque:
   each card one scaled blit of its RGB565 cover bake at its scale, the

@@ -572,6 +572,7 @@ const char *const moy_theme_part_names[MOY_THEME_PARTS] = {
     "bar.item",
     "desk",
     "desk.icon",
+    "home.band",
 };
 
 const char *const moy_theme_state_names[MOY_THEME_STATES] = {

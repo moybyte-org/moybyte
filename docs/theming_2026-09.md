@@ -328,10 +328,11 @@ frozen on 2026-10-12 with the first package key that names parts
 `panel_title`, `toolbar`, `scrollbar`, `focus`, `text_field`, `game_btn`,
 `game_icon_btn`, `mini_btn`, `dialog`; then the chrome the WMs and the bar
 draw, style.json's `theme.parts`: `window`, `window.title`, `window.button`,
-`bar`, `bar.item`, `desk`, `desk.icon`. A window's buttons are one part
+`bar`, `bar.item`, `desk`, `desk.icon`, `home.band` (the home carousel's
+card band, §4.9; added 2026-10-15 by phase 6 step 10). A window's buttons are one part
 (ruled 2026-10-12, the pick that builds least: the frame style tells them
 apart, §4.5). `tests/test_theme_loader.py` holds this paragraph to the
-tables. A part added later is additive (§3): the home's parts once the
+tables. A part added later is additive (§3): the home's other parts once the
 shell-layout doc names them, and the Studio's pane parts (a pane tab with a
 close, the panel list, a splitter, a drop zone, the completion popup:
 `docs/studio_2026-09.md` §8), which join the style file as kinds.
@@ -755,11 +756,15 @@ default; a SAFE start runs no cart.
   mid-screen fights the carousel (mocked 2026-09-27 with Space Desktop). The
   home's card band is a part, `home.band`, whose surface the theme sets like
   any part's: `none` where the wallpaper is readable by construction (the
-  default), or a dither scrim (ruled 2026-10-14, §12.1; phase 6 step 10). A
-  scrim is baked into the wallpaper's bake, keyed on `look_gen` and the
-  band's rect, before `_band_bg`'s capture, so no home frame paints it; a
-  live wallpaper's bake is at its source resolution, a picture's (My Art) is
-  1:1.
+  default), or a dither scrim (ruled 2026-10-14, §12.1; phase 6 step 10). The
+  surface paints with the wallpaper, on the canvas the wallpaper drew on
+  (`Wallpaper.draw`'s `band`): a wallpaper cart's on the game canvas before
+  the cover composite, so at its source resolution, a picture's (My Art) and
+  the fill's 1:1 on the system canvas. It lands before `_band_bg`'s capture,
+  keyed on `look_gen` and the band's rect, so a moving frame restores it and
+  a settled frame stamps it: only a full paint, the wallpaper's own, paints
+  it (a live wallpaper's every frame, at its source resolution). A pattern
+  is opaque (§4.4), so a scrim covers the wallpaper under the band.
 - **Prefer wallpapers that need no VM.** A live Python wallpaper keeps the
   Python VM up, against the kernel doc's memory goal (§4.4 there). Images and
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
@@ -1736,7 +1741,7 @@ port), never here.
      cleared on the same image and theme, and `--painter` is the per-call
      mode; the numbers are #66's.
 
-  10. **The home's readability** (D7, §4.9). **Readability is the band's
+  10. **The home's readability** (D7, §4.9; landed 2026-10-15). **Readability is the band's
      surface, not a flag** (ruled 2026-10-14, §12.1): the home's card band
      is a part, `home.band`, whose surface a theme sets as any part's —
      `none` in `night`, whose wallpaper is readable by construction, a
@@ -1749,6 +1754,18 @@ port), never here.
      byte-identical (`night` sets `none`); `home idle` zero on every console
      board on the desk; the bake's memory is the one wallpaper's, as before
      this step (the off-heap census, #66).
+     **As built.** `home.band` is a chrome part after `desk.icon`
+     (style.json's `theme.parts`), painted through `ui.paint`, so a sprite
+     cell for it draws as any part's. The home's full paint hands
+     `Wallpaper.draw` the carousel's band rect, and the wallpaper paints the
+     surface where §4.9 says; the grid arrangement's band lies on its panel
+     and takes none. No seed names the part, so every golden holds; nothing
+     new is allocated (the capture is the band backdrop's own layer). The
+     fixture is `tests/fixtures/themes/band.moy` (an opaque dither of
+     `panel` over a busy picture); `tools/p4_bench.py --band` runs `home
+     idle` and the slow drag over its picture, the default wallpaper cart
+     and a live one, with the scrim and without it on the same image; the
+     numbers are #66's. Net: `tests/test_home_band.py`.
 
   11. **The icon home** (`home: icons`; the shell-layout doc §12, the owner's
      "we don't have to do it now", 2026-10-14). The `grid` arrangement with
