@@ -569,6 +569,19 @@ ok("a zip named for a cart's id keeps it",
     const back = JSON.parse(new TextDecoder().decode(
         store.renamedTheme(enc({ format: 1, name: "sunset", colors: {} }), "sunset_2")));
     ok("theme.json's name is rewritten to the folder's", back.name === "sunset_2" && back.format === 1);
+    const pretty = new TextEncoder().encode(
+        JSON.stringify({ format: 1, name: "dusk", colors: {} }, null, 2) + "\n");
+    const dusk = store.themeOf([pkg("dusk.moy", "dusk")[0],
+        { name: "dusk.moy/theme.json", data: pretty }], "dusk.moy");
+    ok("a theme landing under its own name keeps theme.json byte for byte",
+       store.landedTheme(pretty, dusk, "dusk") === pretty && !dusk.renamed, JSON.stringify(dusk));
+    ok("a theme landing under a _2 stem has theme.json rewritten",
+       JSON.parse(new TextDecoder().decode(store.landedTheme(pretty, dusk, "dusk_2"))).name
+           === "dusk_2");
+    const owl = store.themeOf(pkg("night_owl.moy", "Bad Name"), "night_owl.moy");
+    ok("a theme named for its folder has theme.json rewritten, even unmoved",
+       owl.renamed && JSON.parse(new TextDecoder().decode(
+           store.landedTheme(pkg("x", "Bad Name")[1].data, owl, "night_owl"))).name === "night_owl");
 }
 
 console.log("\n" + (fail ? fail + " FAILED" : "all store checks passed"));

@@ -862,12 +862,13 @@ export function themeOf(entries, top) {
     const file = typeof man.main === "string" && man.main ? man.main : "theme.json";
     const theme = text(file);
     let name = theme && typeof theme.name === "string" ? theme.name : "";
-    if (!themeName(name)) {
+    const renamed = !themeName(name);
+    if (renamed) {
         name = String(top || "").replace(/\.moy$/i, "").toLowerCase()
             .replace(/[^a-z0-9_-]+/g, "_").replace(/^[_-]+/, "").slice(0, THEME_NAME_MAX);
         if (!themeName(name)) name = "theme";
     }
-    return { name, file };
+    return { name, file, renamed };
 }
 
 // A theme's name by the loader's grammar: 1 to 24 of a-z, 0-9, `_` and `-`,
@@ -887,6 +888,13 @@ export function uniqueThemeDir(exists, name) {
         const n = name.slice(0, THEME_NAME_MAX - tail.length) + tail;
         if (!exists(n + ".moy")) return { dir: n + ".moy", name: n };
     }
+}
+
+// The theme.json bytes a theme `themeOf` read lands with under `name`: as
+// they came when theme.json already says `name` (moy_carts.import_archive's
+// rule), else `renamedTheme`'s.
+export function landedTheme(bytes, theme, name) {
+    return name === theme.name && !theme.renamed ? bytes : renamedTheme(bytes, name);
 }
 
 // theme.json bytes with `name` set to `name`; the bytes as they were when

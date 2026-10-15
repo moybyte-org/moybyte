@@ -4,5 +4,9 @@
   {"js": "WORKER.postMessage({t:'import',name:window.__themeName,buf:window.__theme.slice(0)}),'sent'"},
   {"wait": 3000},
   {"js": "'IMPORTED ' + (window.__moyImported || 'nothing')"},
-  {"js": "window.__moyState().then(s => 'STATE ' + JSON.stringify(s.theme || s.theme_err))"}
+  {"js": "window.__moyState().then(s => 'STATE ' + JSON.stringify(s.theme || s.theme_err))"},
+  {"note": "the folder it landed in, exported again: its bytes as they are in the store"},
+  {"js": "window.__zip=null,pzDownload=function(n,b){window.__zip={n:n,b:b};},WORKER.postMessage({t:'export',cart:(window.__moyImported||'').split(' ')[1]}),'asked'"},
+  {"wait": 1500},
+  {"js": "window.__zip ? 'ZIP ' + window.__zip.n + ' ' + btoa(String.fromCharCode.apply(null, new Uint8Array(window.__zip.b))) : 'ZIP none'"}
 ]}

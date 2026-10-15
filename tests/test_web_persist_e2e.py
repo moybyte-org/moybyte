@@ -201,6 +201,38 @@ def test_a_theme_exports_and_imports_as_a_zip(tmp_path, monkeypatch):
         server.wait(timeout=10)
 
 
+def test_a_theme_imports_under_its_own_name_byte_for_byte(tmp_path, monkeypatch):
+    """A theme that lands under the name its theme.json already says keeps
+    that file as it came (moy_carts.import_archive's rule): the `dusk`
+    fixture's theme.json, trailing newline and all, exported back out of
+    the store identical."""
+    import base64
+    import io
+    import zipfile
+    web_e2e.require("store")
+    sys.path.insert(0, str(ROOT))
+    from runtime import moy_carts
+    src = ROOT / "tests" / "fixtures" / "themes" / "dusk.moy"
+    arc = str(tmp_path / "dusk.moy.zip")
+    moy_carts.pack(str(src), arc)
+    port = web_e2e.free_port()
+    server, base = _serve(port)
+    try:
+        monkeypatch.setenv("MOY_THEME_ZIP", arc)
+        out, js = _run("persist_theme_fresh", base, tmp_path / "chrome", tmp_path / "s1")
+        assert "imported dusk.moy" in _tagged(js, "IMPORTED"), out[-3000:]
+        name, b64 = _tagged(js, "ZIP").split(" ", 1)
+        assert name == "dusk.moy.zip", name
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(b64))) as z:
+            got = z.read("dusk.moy/theme.json")
+        assert got == (src / "theme.json").read_bytes(), \
+            "theme.json was rewritten on the way in (%d bytes, was %d)" % (
+                len(got), (src / "theme.json").stat().st_size)
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
 def test_name_on_the_desk_survives_a_phone_keyboards_enter(tmp_path):
     """Appearance → NAME… on the desk, the name typed and ENTERed the way a
     phone's on-screen keyboard delivers them (#kbin's input event, then its
