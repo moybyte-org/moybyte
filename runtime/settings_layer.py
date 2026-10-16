@@ -739,7 +739,7 @@ class SettingsLayer:
                 # fill + the name, the signal bars / lock / SAVED markers are
                 # this list's own per-row content at their fixed columns.
                 _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16],
-                        kind="row_list", on=sel,
+                        kind="row_list", focus=sel,
                         edge=False, pad=4, text_dy=5 + dy, fs=fs)
                 _bx, band_y, _bw, band_h = lay.row_band((x, y, w, h))
                 bars = max(0, min(4, int(sig) // 25 + 1))
@@ -816,7 +816,7 @@ class SettingsLayer:
                        kind="tonal" if connected else "normal", on=preferred)
             self._bt_hits.add(rect, "device", address)
             if i == self.bt_sel:
-                _ui.focus_ring(cv, th, rect, fs)
+                _ui.focus(cv, th, rect, fs=fs)
 
         action_defs = (("toggle", "OFF" if enabled else "ON", "normal"),
                        ("connect", "USE", "primary"),
@@ -938,7 +938,7 @@ class SettingsLayer:
         self._confirm_hits.add(rects[0], "keep")
         _ui.button(cv, th, rects[1], yes, kind="danger")
         self._confirm_hits.add(rects[1], "accept")
-        _ui.focus_ring(cv, th, rects[self.confirm_sel], fs)
+        _ui.focus(cv, th, rects[self.confirm_sel], fs=fs)
 
     # -- LAST CRASH panel (the kernel's record, read-only) --------------------
 
@@ -990,7 +990,7 @@ class SettingsLayer:
         rect = _ui.inset(actions_r, 3 * fs)
         _ui.button(cv, th, rect, "BACK")
         self._crash_hits.add(rect, "back")
-        _ui.focus_ring(cv, th, rect, fs)
+        _ui.focus(cv, th, rect, fs=fs)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
@@ -1663,7 +1663,7 @@ class SettingsLayer:
         # The palette is the style's "row_menu" kind (#207): a Settings row is
         # panel-CHROME coloured, which the row kind cannot express, so it is its
         # own catalog entry rather than a hand-built triple no theme could reach.
-        _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", on=sel,
+        _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", focus=sel,
                 edge=False, pad=4, text_dy=5 + lay.row_text_dy, fs=lay.fs)
         # Below here the rect is the row's own CONTENT band -- the fs-tall strip
         # the chrome scale re-centred inside the tap target (#203). The identity

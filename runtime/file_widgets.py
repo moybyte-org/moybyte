@@ -214,6 +214,7 @@ class FileGridView:
             name = self.names[i]
             ax, ay, _aw, _ah = _ui.cell(
                 cv, th, self._cell_rect(i - start), name, on=(i == self.sel),
+                focus=(i == self.sel),
                 state=_ui.cell_state(i, hover, pressed), fs=fs)
             bmp = self._thumb(name, art_w, art_h) if self.kind == "drawings" else None
             if bmp is not None:

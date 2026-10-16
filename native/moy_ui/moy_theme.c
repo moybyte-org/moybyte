@@ -1,5 +1,6 @@
 // moy_theme: the theme loader (moy_theme.h).
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "moy_theme.h"
@@ -2276,6 +2277,8 @@ static int resolve_row(const char *name, size_t n, int variant, int32_t row[MOY_
     return rc;
 }
 
+static int plate_reads(const char *name, size_t n, int variant, const int32_t *row);
+
 int moy_theme_resolve(const char *name, size_t n, int variant,
                       int32_t row[MOY_THEME_ROLES], uint32_t *unreadable) {
     variant = variant == MOY_THEME_LIGHT ? MOY_THEME_LIGHT : MOY_THEME_DARK;
@@ -2295,6 +2298,9 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
         if ((hi + 500) * 10 < MOY_THEME_CONTRAST * (lo + 500)) {
             bad |= 1u << i;
         }
+    }
+    if (rc == MOY_THEME_OK && !plate_reads(name, n, variant, row)) {
+        bad |= 1u << MOY_THEME_PAIRS;
     }
     if (unreadable != NULL) {
         *unreadable = bad;
@@ -2705,6 +2711,53 @@ int32_t moy_theme_lum_of(int32_t v) {
         return moy_theme_lum[v];
     }
     return lum565(moy_theme_rgb565(v));
+}
+
+static int look_leaf(const char *name) {
+    for (int i = 0; i < MOY_THEME_LEAVES; i++) {
+        if (strcmp(moy_theme_leaf_names[i], name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// The current plate's pair (docs/media/look_2026-10/DESIGN.md, Colour): where
+// a theme's current mark is a plate, its focus colour clears
+// MOY_THEME_CONTRAST on the plate (current.color at current.alpha over
+// `surface`). 1 where it does or the current is no plate.
+static int plate_reads(const char *name, size_t n, int variant, const int32_t *row) {
+    int ls = look_leaf("current.style"), lc = look_leaf("current.color");
+    int la = look_leaf("current.alpha"), lf = look_leaf("focus.color");
+    moy_theme_look_t *lk = THEME_ALLOC(sizeof(moy_theme_look_t));
+    if (lk == NULL || ls < 0 || lc < 0 || la < 0 || lf < 0) {
+        free(lk);
+        return 1;
+    }
+    moy_theme_look(name, n, variant, 0, lk);
+    int any = 0;
+    for (int i = 0; i < MOY_THEME_LEAVES && !any; i++) {
+        any = lk->v[i] != MOY_THEME_NONE;
+    }
+    int ok = 1;
+    if (any) {
+        moy_theme_look(name, n, variant, 1, lk);
+        int32_t st = lk->v[ls], cr = lk->v[lc], al = lk->v[la], fr = lk->v[lf];
+        if (st == 1 && cr >= 0 && cr < MOY_THEME_ROLES && fr >= 0 && fr < MOY_THEME_ROLES
+            && al >= 0 && row[MOY_UI_T_SURFACE] >= 0 && row[cr] >= 0 && row[fr] >= 0) {
+            uint16_t g = moy_theme_rgb565(row[MOY_UI_T_SURFACE]), c = moy_theme_rgb565(row[cr]);
+            int k = al > 100 ? 100 : al;
+            int gr = g >> 11, gg = (g >> 5) & 63, gb = g & 31;
+            int cr5 = c >> 11, cg = (c >> 5) & 63, cb = c & 31;
+            uint16_t p = (uint16_t)(((gr + (cr5 - gr) * k / 100) << 11)
+                                    | ((gg + (cg - gg) * k / 100) << 5) | (gb + (cb - gb) * k / 100));
+            int32_t lp = lum565(p), la2 = moy_theme_lum_of(row[fr]);
+            int32_t hi = lp > la2 ? lp : la2, lo = lp > la2 ? la2 : lp;
+            ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
+        }
+    }
+    free(lk);
+    return ok;
 }
 
 int32_t moy_theme_nearest(int32_t v) {

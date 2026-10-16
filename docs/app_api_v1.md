@@ -155,8 +155,9 @@ The ui toolkit (`runtime/ui.py`, the face of `native/moy_ui`'s C: each
 widget is one call, with its style data in `native/moy_ui/style.json`) is the
 intended surface: theme tokens (`ctx.theme.colors()`, `ctx.theme.light()`),
 widgets (`button`, `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`,
-`status_row`, `panel`, `toolbar`, `dialog`, `text_field`, `focus_ring`,
-`scroll_cues`), `ScrollRegion`, the rect algebra (`cut_*`/`inset`/`hsplit`/
+`status_row`, `panel`, `toolbar`, `dialog`, `text_field`, `scroll_cues`),
+the marks (`focus` and `current`, the theme's own, and a part's `focus=`
+and `on=`), `ScrollRegion`, the rect algebra (`cut_*`/`inset`/`hsplit`/
 `vsplit` — the recommended layout style for NEW apps; see `CalcLayout`), and
 `Hits` for draw==tap dispatch (see `CalcAppLayer.draw`/`handle_pointer` — the
 draw pass registers every key's rect, the pointer resolves against the same

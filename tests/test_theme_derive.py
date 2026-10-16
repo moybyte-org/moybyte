@@ -42,6 +42,7 @@ with open(os.path.join(UI, "style.json")) as _f:
     STYLE = json.load(_f)
 TH = STYLE["theme"]
 ROLES = STYLE["tokens"] + TH["content"]
+PAIRS = len(TH["pairs"])          # the current plate's bit is the one past the pairs
 OK, BIG, SYNTAX, NEWER, NAME, TAKEN, CHAIN = range(7)
 SEEDS = list(moy_ui.themes())
 ACCENTS = [None] + [a for _n, a, _d in TH["accents"]]
@@ -129,7 +130,9 @@ def test_every_combination_is_the_reference_and_reads(name):
                 assert _row(pkg["colors"][v]) == _row(want), (name, v, accent, tint)
                 row, unreadable, rc = resolved
                 assert rc == OK and tuple(row) == _row(want), (name, v, accent, tint)
-                assert unreadable == 0, (name, v, accent, tint)
+                # the pairs; the current plate's bit (past them) is a report
+                # the derivation does not answer: a picked accent on its plate
+                assert unreadable & ~(1 << PAIRS) == 0, (name, v, accent, tint)
 
 
 REPAIRED = {r: bgs for r, _f, bgs in TH["recolour"]["dim_ink"]}

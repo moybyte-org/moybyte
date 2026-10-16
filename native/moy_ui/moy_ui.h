@@ -262,13 +262,66 @@ int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int activ
 // alone. Answers whether the theme casts one.
 int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);
 
+// -- the marks (moy_ui_depth.c; docs/media/look_2026-10/DESIGN.md, the marks) ----
+//
+// Focus and current are theme properties the engine draws: `focus` by the
+// part's size class (a CARD 48 px and up, a SMALL part under 28 px both ways,
+// any other a PART), `current` as a plate, a fill or a bar. They resolve with
+// the depth (moy_ui_depth_use) from the look's focus.*, current.* and
+// sel_back, which a theme may set without a depth. A theme with no marks
+// draws its focus as its ring (moy_ui_focus_ring) and no current mark.
+// Focus is drawn only while the marks are ACTIVE: the shell clears that while
+// a window behind draws, so a screen shows one focus mark, in the focused
+// window. `drawn` counts the focus marks drawn, for the nets.
+enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI_MARK_AUTO = 3 };
+// A mark's flags: AFTER the part's content (a lifted card's rim), BACK in a
+// window behind, a current bar at the SIDE of a row rather than under it.
+// INK draws nothing and answers only the ink (a part's CONTENT phase).
+enum { MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8 };
+// focus.style's and current.style's values, in style.json's order
+enum {
+    MOY_UI_FOCUS_RING = 0, MOY_UI_FOCUS_PLATE = 1, MOY_UI_FOCUS_LIFT = 2, MOY_UI_FOCUS_EDGE = 3,
+    MOY_UI_FOCUS_UNDERLINE = 4, MOY_UI_FOCUS_INVERT = 5,
+};
+enum { MOY_UI_CUR_BAR = 0, MOY_UI_CUR_PLATE = 1, MOY_UI_CUR_FILL = 2 };
+typedef struct {
+    uint8_t on, active, dark, ink_accent;
+    uint8_t style[3];               // per class: PART, CARD, SMALL
+    uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w;
+    int16_t color, cur_color;       // tokens
+    int16_t ring_w, ring_gap, grow, rise, edge_w, underline_w;
+    int32_t outline_c, rim_c, sel_back;     // look colours
+    uint32_t drawn;
+} moy_ui_marks_t;
+const moy_ui_marks_t *moy_ui_marks(void);
+void moy_ui_marks_active(int active);
+// The focus marks drawn since the last reset.
+uint32_t moy_ui_marks_drawn(int reset);
+// How far class `cls`'s focus mark reaches past its box's top edge (0: inside it).
+int moy_ui_mark_reach(int cls);
+// The size class of box `b` at scale fs, or `cls` where it names one.
+int moy_ui_mark_class(moy_ui_box_t b, int cls, int fs);
+// The focus mark on box `b` (corner radius r), drawn after the part's fill
+// and before its content; a lifted card's rim is a second call, AFTER its
+// content. *content gets the box the content draws in (a lifted card's,
+// grown and raised), *ink the colour index the content takes (-1: its own).
+int moy_ui_focus(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
+                 moy_ui_box_t *content, int *ink);
+// The current mark under box `b`'s content; *ink as moy_ui_focus's.
+int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink);
+// The two as a primitive draws them, inside its own crossing.
+int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
+                    moy_ui_box_t *content, int *ink, int crossing);
+int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink,
+                      int crossing);
+
 #define MOY_UI_DEFAULT INT16_MIN
 #define MOY_UI_FROM_STYLE (-2)
 
 enum {
     MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
     MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
-    MOY_UI_F_GLYPH = 256,
+    MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512,
 };
 // A widget whose caller draws an icon image (or its own glyph) between the
 // frame and the content draws in two calls, FRAME then CONTENT; every other

@@ -209,6 +209,8 @@ class Launcher:
 
     arrangement = "grid"          # the layout's `home` value this class draws
 
+    tab_focus = False             # the tab row holds the focus, not a card
+
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
         self.items = items
         # Visual identity v1 (docs/visual_identity_v1.md Section 1.2): the HOME grid
@@ -854,7 +856,10 @@ class Launcher:
         for i in range(fs):
             cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i,
                      th.get("border", NAMES["black"]))
-        if selected:
+        if selected and _ui.marks_on():
+            _ui.focus(cv, self.theme, rect, size="card")
+            _ui.focus(cv, self.theme, rect, size="card", after=True)
+        elif selected:
             color = ring if ring is not None else th.get("focus", NAMES["yellow"])
             for i in range(max(2, fs)):
                 d = fs + 1 + i
@@ -938,6 +943,7 @@ class Carousel(Launcher):
         self._glide = None            # the offset a glide is carrying the row to
         self._was_drag = False
         self._g_lay = None            # the layout _g was computed for
+        self._g_reach = 0
         self._g = None
         self.layout = None
         Launcher.__init__(self, items, layout, names, blit_glyph)
@@ -952,7 +958,8 @@ class Carousel(Launcher):
         in 128s -- so a resting card shows its cover at a whole-number
         ratio."""
         lay = self.layout
-        if self._g_lay is lay:
+        reach = _ui.mark_reach()          # the centre card's focus mark
+        if self._g_lay is lay and self._g_reach == reach:
             return self._g
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
@@ -960,7 +967,7 @@ class Carousel(Launcher):
         tab_h = _TAB_H * lay.cs
         tabs = (cx + pad, cy + pad, cw - 2 * pad, tab_h)
         plate_h = lay.line_h + 6 * fs
-        ring = 2 * fs + 2
+        ring = max(2 * fs + 2, reach)
         gap = max(6 * fs, cw // 64)
         top = cy + 2 * pad + tab_h
         avail = cy + ch - pad - top
@@ -978,6 +985,7 @@ class Carousel(Launcher):
         self._g = (tabs, (cx, by, cw, bh), card, pitch, ring, gap, plate_h,
                    by + ring + big // 2)
         self._g_lay = lay
+        self._g_reach = reach
         return self._g
 
     def tabs_rect(self):
@@ -1284,6 +1292,13 @@ class Carousel(Launcher):
     def _draw_home_card(self, cv, it, rect, centre, sheet_for):
         NAMES = self._NAMES
         th = self.theme or {}
+        # The centre card at rest takes the theme's focus mark (ui.focus; a
+        # lifted card draws grown and raised); a theme without marks rings it.
+        marks = _ui.marks_on()
+        mark = centre and not self.moving and marks and not self.tab_focus
+        at = rect
+        if mark:
+            _ink, rect = _ui.focus(cv, self.theme, at, size="card")
         x, y, w, h = rect
         if it.get("type") in PSEUDO_TILE_TYPES:
             cv.rect(x, y, w, h, th.get("focus", 0))
@@ -1315,7 +1330,9 @@ class Carousel(Launcher):
                              bool(self.favorite_for(it)))
         ring = th.get("author", 0) if it.get("type") in PSEUDO_TILE_TYPES \
             else None
-        self._card_frame(cv, rect, centre, ring=ring)
+        self._card_frame(cv, rect, centre and not marks, ring=ring)
+        if mark:
+            _ui.focus(cv, self.theme, at, size="card", after=True)
 
     def _draw_plate(self, cv, it, p):
         """The centre card's name on a plate, in the bar's colours."""
@@ -1470,10 +1487,13 @@ class IconHome(Launcher):
         self._art_tile(cv, th, box, self._icon_of(it, sheet_for), it.get("type"))
         if not selected:
             return
-        color = th["focus"]
-        for i in range(max(2, fs)):
-            d = fs + 1 + i
-            cv.rectb(x - d, y - d, t + 2 * d, t + 2 * d, color)
+        if _ui.marks_on():
+            _ui.focus(cv, th, box, size="card")
+            _ui.focus(cv, th, box, size="card", after=True)
+        else:
+            for i in range(max(2, fs)):
+                d = fs + 1 + i
+                cv.rectb(x - d, y - d, t + 2 * d, t + 2 * d, th["focus"])
         if self.favorite_for is not None and it.get("path") \
                 and it.get("type") not in PSEUDO_TILE_TYPES:
             _draw_star_badge(cv, self._NAMES, self._blit_glyph,
@@ -1682,6 +1702,18 @@ class LauncherHomeLayer:
         """The card model this home draws: ws.launcher, whose class is the
         layout's arrangement."""
         return self.ws.launcher
+
+    @property
+    def _tab_focus(self):
+        return self._tab_keys
+
+    @_tab_focus.setter
+    def _tab_focus(self, on):
+        # one focus mark a screen: the tab row's takes it from the cards
+        self._tab_keys = on
+        g = getattr(self.ws, "launcher", None)
+        if g is not None:
+            g.tab_focus = on
 
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
@@ -2015,7 +2047,9 @@ class LauncherHomeLayer:
                     icon_for=getattr(ws, "_icon_image_keyed", None), ink=th["ink"])
         if self._tab_focus:
             for tid, r, _on in rects:
-                if tid == grid.tab:
+                if tid == grid.tab and _ui.marks_on():
+                    _ui.focus(cv, th, r, fs=fs)
+                elif tid == grid.tab:
                     for k in range(max(2, fs)):
                         d = fs + k
                         cv.rectb(r[0] - d, r[1] - d, r[2] + 2 * d, r[3] + 2 * d,

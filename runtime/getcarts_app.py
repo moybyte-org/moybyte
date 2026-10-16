@@ -1274,6 +1274,10 @@ class GetCartsAppLayer(ListShellApp):
         fs = self.layout.fs
         rects = self.layout.buttons(len(verbs))
         primary = False                # one primary a surface: the first go verb
+        # an armed REMOVE takes the focus mark; a theme without marks rings it
+        armed = self.phase == "cart" and self.arm_remove
+        marks = _ui.marks_on()
+        fk = len(verbs) - 1 if armed and marks else self.focus
         for k, verb in enumerate(verbs):
             enabled = self.phase != "cart" or self._enabled(verb)
             kind = "normal"
@@ -1282,10 +1286,10 @@ class GetCartsAppLayer(ListShellApp):
                 primary = True
             elif verb in ("REMOVE", "CANCEL"):
                 kind = "danger"
-            _ui.button(cv, th, rects[k], verb, kind=kind, on=k == self.focus,
+            _ui.button(cv, th, rects[k], verb, kind=kind, focus=k == fk,
                        disabled=not enabled,
                        state=self.hits.state_of("btn", verb))
             if enabled:
                 self.hits.add(rects[k], "btn", verb)
-        if self.phase == "cart" and self.arm_remove:
-            _ui.focus_ring(cv, th, rects[len(verbs) - 1], fs)
+        if armed and not marks:
+            _ui.focus(cv, th, rects[len(verbs) - 1], fs=fs)

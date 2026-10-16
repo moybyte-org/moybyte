@@ -843,6 +843,7 @@ glyph_draw = _glyph_draw
 
 _F_ON, _F_HOT, _F_DISABLED, _F_EDGE = 1, 2, 4, 8
 _F_BAND, _F_EDGE_LAST, _F_LABEL, _F_ICON, _F_GLYPH = 16, 32, 64, 128, 256
+_F_FOCUS = 512
 _FRAME, _CONTENT, _ALL = 1, 2, 3
 
 
@@ -884,7 +885,8 @@ def list(cv, th, rect, items, region, row_h, sel=-1, kind="row_list"):
 
 
 def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
-           glyph=None, glyph_draw=None, disabled=False, state=None, app=None):
+           glyph=None, glyph_draw=None, disabled=False, state=None, app=None,
+           focus=False):
     """One themed button: filled field, thin edge, centered label
     (truncated to fit), optional 16x16 icon image or 12x12 glyph at the left.
     A glyph is drawn by `glyph` unless the caller passes its own
@@ -906,7 +908,8 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     The field/ink/edge come from the style under the key `kind` maps to
     (style.json's "button_kinds") and the live theme's button leaves
     (`use_buttons`), the pads/boxes/alignment from `_METRICS["button"]`."""
-    flags = (_F_ON if on else 0) | (_F_DISABLED if disabled else 0)
+    flags = (_F_ON if on else 0) | (_F_DISABLED if disabled else 0) | (
+        _F_FOCUS if focus else 0)
     gid = -1
     if icon_img is not None:
         flags |= _F_ICON
@@ -1012,7 +1015,7 @@ def _primary_seen(cv, rect, label):
 
 def chip(cv, th, rect, label, on=False, hot=False, fs=None,
          glyph=None, glyph_draw=None, disabled=False, state=None,
-         colors=None, kind="chip"):
+         colors=None, kind="chip", focus=False):
     """The app-toolbar CHIP -- the one implementation of the `_button` the
     Appearance/Storybook/Artwork apps each used to carry a local copy
     of (pixel-identical to those). A quiet field on the panel color with the
@@ -1038,7 +1041,7 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     `colors` is the same escape hatch `row` and `cell` carry: an explicit
     (field, ink, edge) triple bypassing the style, for a site whose pixels are
     frozen off-token. `field` None paints no field, `edge` None no border."""
-    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
+    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (_F_FOCUS if focus else 0) | (
         _F_DISABLED if disabled else 0)
     gid = -1
     if glyph is not None:
@@ -1081,7 +1084,7 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
         state=None, colors=None, icon_img=None, glyph=None, glyph_draw=None,
         value=None, value_ink=None, edge=True, pad=None, text_dy=None,
         hits=None, verb=None, arg=None, fs=None, pad_right=None, scale=1,
-        glyph_ink=None, glyph_size=None):
+        glyph_ink=None, glyph_size=None, focus=False):
     """One list row: [field] [edge] [icon|glyph] [label] ... [value].
 
     Semantics are the caller's: `on` is the selection, `hot` the armed
@@ -1134,7 +1137,7 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
     """
     if state is None and hits is not None and verb is not None:
         state = hits.state_of(verb, arg)
-    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
+    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (_F_FOCUS if focus else 0) | (
         _F_DISABLED if disabled else 0) | (_F_EDGE if edge else 0)
     gid = -1
     if icon_img is not None:
@@ -1203,7 +1206,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
          disabled=False, state=None, colors=None, band=False, band_fill=None,
          band_ink=None, pad=None, caption_h=None, icon_img=None, glyph=None,
          glyph_draw=None, fs=None, text_dx=None, text_dy=None,
-         edge_last=False):
+         edge_last=False, focus=False):
     """One grid cell: [field] [caption] [edge] + a centred icon/glyph, and
     RETURNS the art rect for the caller's own picture.
 
@@ -1246,7 +1249,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     `appearance_app._draw_wall_card` and `cards_layer._draw_bg_thumbs` both
     already do by hand.
     """
-    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (
+    flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (_F_FOCUS if focus else 0) | (
         _F_DISABLED if disabled else 0) | (_F_BAND if band else 0) | (
         _F_EDGE_LAST if edge_last else 0) | (_F_LABEL if label is not None else 0)
     gid = -1
@@ -1517,11 +1520,25 @@ def frame_buttons(rect, title_h, title, has_min, fs):
 UNDER_FULL, UNDER_SMALL, UNDER_NONE = 0, 1, 2
 CAST_WINDOW, CAST_CARD, CAST_KEY = 0, 1, 2
 _DEPTH = [(0,) * 14]
+_MARKS = [False, 0]                 # the installed theme's: marks on, a card's reach
 
 
 def use_depth(name, light):
-    """Install theme `name`'s depth in a mode (None: off)."""
+    """Install theme `name`'s depth in a mode (None: off), and its marks."""
     _DEPTH[0] = tuple(_C.use_depth(name, light))
+    m = _C.marks(None, False)
+    _MARKS[0], _MARKS[1] = m[0], m[3]
+
+
+def marks_on():
+    """Whether the installed theme draws the marks (`focus`, `current`)."""
+    return _MARKS[0]
+
+
+def mark_reach():
+    """How far the installed theme's focus mark on a card reaches past the
+    card's top edge, in pixels."""
+    return _MARKS[1]
 
 
 def depth():
@@ -1601,9 +1618,45 @@ def panel(cv, th, rect, title=None, fs=None):
 
 
 def focus_ring(cv, th, rect, fs=None):
-    """The Section 5.2 focus treatment: signal-yellow ring with a 1-step gap --
-    one implementation so keyboard/pointer focus looks the same everywhere."""
+    """The ring a theme without marks draws as its focus (`focus` draws it
+    for such a theme; an app calls `focus`)."""
     _C.focus_ring(cv, _LOOK if th is _TH else _look(th), rect, fs)
+
+
+# The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
+_MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
+_MARK_AFTER, _MARK_BACK, _MARK_SIDE = 1, 2, 4
+
+
+def focus(cv, th, rect, size=None, r=0, after=False, fs=None):
+    """The focus mark on `rect`, the theme's by its size class
+    (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
+    "part", or None to class it by its size. Drawn after the part's own fill
+    and before its content; a lifted card's rim is a second call with
+    `after`, once its content is drawn. Returns (ink, box): the colour the
+    content takes (None: its own) and the box it draws in (a lifted card's,
+    grown and raised). A part drawn by `row`, `cell`, `chip` or `button`
+    takes `focus=True` instead. In a window behind it draws nothing."""
+    return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
+                    _MARK_AFTER if after else 0, fs)
+
+
+def current(cv, th, rect, r=0, back=False, side=False, fs=None):
+    """The current mark under `rect`'s content: the theme's plate, fill or
+    bar (`side`: a bar beside a row, not under it; `back`: in a window
+    behind). Returns the ink the content takes, or None for its own. A part
+    drawn by `row`, `cell`, `chip` or `tab` marks its `on` itself."""
+    return _C.current(cv, _LOOK if th is _TH else _look(th), rect, r,
+                      (_MARK_BACK if back else 0) | (_MARK_SIDE if side else 0), fs)
+
+
+def marks(active=None, reset=False):
+    """(marks on, active, focus marks drawn, reach): whether the theme draws
+    the marks, whether focus draws (`active` sets it: the shell clears it
+    while a window behind draws), the count of focus marks drawn (`reset`
+    zeroes it after reading), and how far a card's focus mark reaches past
+    the card's top edge."""
+    return _C.marks(active, reset)
 
 
 def fill_uncovered(cv, inner, outer, col):

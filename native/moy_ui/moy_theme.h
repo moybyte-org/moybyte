@@ -32,7 +32,8 @@
 // default seed setting every metric. A layout resolves whole, from the
 // nearest package that sets one; a bar list is never merged. The chain is capped at
 // MOY_THEME_DEPTH and a cycle is refused. Readability is a report, never a
-// refusal: each (background, ink) pair under MOY_THEME_CONTRAST sets its bit.
+// refusal: each (background, ink) pair under MOY_THEME_CONTRAST sets its bit,
+// and bit MOY_THEME_PAIRS is the current plate's (the focus colour on it).
 //
 // The seeds are style.json's, embedded in moy_ui_tables.c. One more package
 // can be installed beside them (the one loaded theme of the memory rule); it

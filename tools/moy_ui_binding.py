@@ -214,6 +214,13 @@ _DRAW_SIGS = (
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
     ("moy_ui_frame_under", [c.POINTER(_Sink), _Box, _I, _I, _I], _I),
     ("moy_ui_cast", [c.POINTER(_Sink), _Box, _I, _I], _I),
+    ("moy_ui_focus", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, c.POINTER(_Box),
+                      c.POINTER(_I)], _I),
+    ("moy_ui_current", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_I)], _I),
+    ("moy_ui_marks_active", [_I], None),
+    ("moy_ui_marks_drawn", [_I], c.c_uint32),
+    ("moy_ui_marks", [], c.c_void_p),
+    ("moy_ui_mark_reach", [_I], _I),
     ("moy_ui_dialog", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_text_field", [c.POINTER(_Sink), _Box, _Span, _Span, c.c_void_p, _I], _I),
     ("moy_ui_panel", [c.POINTER(_Sink), _Box, _Span, _I, c.POINTER(_Box)], _I),
@@ -600,6 +607,27 @@ def binding():
         s = sink(cv, look)
         _check(lib.moy_ui_focus_ring(c.byref(s), box_of(rect), fs_or(fs, s)))
 
+    def focus(cv, look, rect, cls, r, flags, fs):
+        s = sink(cv, look)
+        out, ink = _Box(), _I()
+        _check(lib.moy_ui_focus(c.byref(s), box_of(rect), int(cls), int(r), int(flags),
+                                fs_or(fs, s), c.byref(out), c.byref(ink)))
+        return (None if ink.value < 0 else ink.value, (out.x, out.y, out.w, out.h))
+
+    def current(cv, look, rect, r, flags, fs):
+        s = sink(cv, look)
+        ink = _I()
+        _check(lib.moy_ui_current(c.byref(s), box_of(rect), int(r), int(flags),
+                                  fs_or(fs, s), c.byref(ink)))
+        return None if ink.value < 0 else ink.value
+
+    def marks(active, reset):
+        if active is not None:
+            lib.moy_ui_marks_active(1 if active else 0)
+        on, act = c.cast(lib.moy_ui_marks(), c.POINTER(c.c_uint8 * 2)).contents
+        return (bool(on), bool(act), lib.moy_ui_marks_drawn(1 if reset else 0),
+                lib.moy_ui_mark_reach(1))
+
     def inset(rect, dx, dy):
         out = _R4()
         lib.moy_ui_inset32(r4(rect), int(dx), int(dy), out)
@@ -631,7 +659,8 @@ def binding():
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom,
-              frame_under, cast, dialog, text_field, panel, focus_ring, inset, cut,
+              frame_under, cast, dialog, text_field, panel, focus_ring, focus, current,
+              marks, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
     m.list = list_

@@ -464,3 +464,157 @@ def test_a_kind_draws_its_shape():
     finally:
         ui.use_depth(None, False)
         _uninstall()
+
+
+# -- the marks (docs/media/look_2026-10/DESIGN.md, the marks; look step 11) ----
+
+_ACCENTS = {"accent", "focus", "ink_accent", "hover_cue"}
+
+
+def _names(spec):
+    if isinstance(spec, list):
+        return {x for x in spec if isinstance(x, str)}
+    return {spec} if isinstance(spec, str) else set()
+
+
+def test_accent_reaches_a_part_only_through_the_marks():
+    """`accent` is the focus colour (and `value`'s default): a kind's style
+    names it only in the `focus` kind, in `on` (which a theme with marks
+    draws as its current mark, never as the ON look) and in the pointer's
+    states, hover and pressed."""
+    stray = sorted((kind, state)
+                   for kind, states in _style()["kinds"].items()
+                   for state, trip in states.items()
+                   if kind != "focus" and state not in ("on", "hover", "pressed")
+                   and any(_ACCENTS & _names(s) for s in trip))
+    assert stray == []
+
+
+def _marked(name, light, draw, size=(120, 40)):
+    from runtime import ui
+    from runtime.host_canvas import make_system_canvas
+    ui.use_depth(name, light)
+    live = _live(name, "light" if light else "dark")
+    th = live.tokens
+    cv = make_system_canvas(*size)
+    cv.theme_block(live.block)
+    cv.cls(th["surface"])
+    draw(ui, cv, th)
+    return cv, th
+
+
+def test_on_is_the_current_mark_and_focus_the_focus_mark():
+    """Under Moy Day a row's `on` is the current plate (value at 0.14 over the
+    surface), not the ON field, and its `focus` the 4 px edge bar on its
+    leading edge; a theme without marks draws `focus` as it drew `on`."""
+    from runtime import ui
+    try:
+        cv, th = _marked("moy", True, lambda ui, cv, th: ui.row(
+            cv, th, (10, 10, 100, 20), "", kind="row_list", on=True, focus=True))
+        plate = _px(cv, 60, 15)
+        assert plate not in (_word(th["surface"]), _word(th["value"]),
+                             _word(ui.state_colors(th, "row_list", "on")[0]))
+        assert _px(cv, 11, 15) == _word(th["accent"])          # the edge bar
+        assert _px(cv, 15, 15) == plate
+        ui.marks(None, True)
+        cv, th = _marked("moy", True, lambda ui, cv, th: ui.row(
+            cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True))
+        assert _px(cv, 60, 15) == _word(th["surface"]) and ui.marks()[2] == 1
+    finally:
+        ui.use_depth(None, False)
+    for name in ("night", "win95"):
+        a = _marked(name, False, lambda ui, cv, th: ui.row(
+            cv, th, (10, 10, 100, 20), "x", kind="row_list", focus=True))[0]
+        b = _marked(name, False, lambda ui, cv, th: ui.row(
+            cv, th, (10, 10, 100, 20), "x", kind="row_list", on=True))[0]
+        assert bytes(a._buf) == bytes(b._buf), name
+
+
+def test_the_focus_style_follows_the_size_class():
+    """Moy lifts a card (grown and raised, its rim white in Day), edge-bars a
+    part and underlines a small part; Contrast rings a card and inverts a
+    part, its ink flipped to black on yellow."""
+    from runtime import ui
+    try:
+        def card(ui, cv, th):
+            ink, box = ui.focus(cv, th, (40, 30, 60, 60), size="card")
+            assert ink is None and box == (35, 22, 70, 70)
+            cv.rect(*box, 0)
+            ui.focus(cv, th, (40, 30, 60, 60), size="card", after=True)
+        cv, th = _marked("moy", True, card, (140, 120))
+        assert _px(cv, 34, 50) == 0xffff                      # the white rim
+        cv, th = _marked("moy", True, lambda ui, cv, th: ui.focus(
+            cv, th, (20, 20, 20, 20), size="small"))
+        assert _px(cv, 30, 37) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 37)
+        cv, th = _marked("contrast", False, lambda ui, cv, th: ui.focus(
+            cv, th, (20, 10, 60, 60), size="card"), (100, 80))
+        assert _px(cv, 15, 40) == _word(th["accent"])         # ring 3 wide, 2 out
+        assert _px(cv, 18, 40) == _word(th["surface"])
+        got = []
+        cv, th = _marked("contrast", False, lambda ui, cv, th: got.append(ui.focus(
+            cv, th, (10, 10, 100, 20))))
+        assert _px(cv, 60, 15) == _word(th["accent"]) and got[0][0] == 0
+    finally:
+        ui.use_depth(None, False)
+
+
+def test_a_window_behind_draws_no_focus_mark():
+    from runtime import ui
+    try:
+        ui.marks(False, True)
+        cv, th = _marked("moy", True, lambda ui, cv, th: ui.row(
+            cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True, on=True))
+        assert _px(cv, 11, 15) == _px(cv, 60, 15) != _word(th["accent"])
+        assert ui.marks()[2] == 0
+    finally:
+        ui.marks(True)
+        ui.use_depth(None, False)
+
+
+def _contrast(a, b):
+    from runtime import ui
+
+    def lum(v):
+        w = ui._C.theme_rgb(v)[0]
+        out = []
+        for c in ((w >> 11) * 255 // 31, (w >> 5 & 63) * 255 // 63, (w & 31) * 255 // 31):
+            c /= 255
+            out.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        return 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_the_readability_check_holds_accent_on_the_current_plate():
+    """Where a theme's current mark is a plate, its focus colour clears 3:1 on
+    the plate: Moy's (Day 5.9, Night 5.2 in DESIGN.md) and Contrast's read,
+    and a theme whose accent sinks into its plate is reported (the bit past
+    the pairs)."""
+    import moy_ui
+    from runtime import ui
+    pairs = len(_style()["theme"]["pairs"])
+    for seed in ("moy", "contrast"):
+        for light in (False, True):
+            row, bad, rc = moy_ui.theme(seed, light)
+            assert rc == 0 and not bad >> pairs & 1, (seed, light)
+    roles = dict(zip(moy_ui.theme_roles(), moy_ui.theme("moy", True)[0]))
+    assert _contrast(roles["accent"], roles["surface"]) > 5
+    _install({"format": 2, "name": "pl", "inherits": "moy",
+              "colors": {"light": {"accent": "#e3e6ed", "focus": "#e3e6ed"}},
+              "look": {"focus": {"color": "accent"},
+                       "current": {"style": "plate", "color": "ink", "alpha": 0.1}}})
+    try:
+        assert moy_ui.theme("pl", True)[1] >> pairs & 1
+    finally:
+        _uninstall()
+        ui.look_moved()
+
+
+def test_apps_draw_focus_through_the_marks():
+    """No app draws its own focus ring: the toolkit draws the theme's mark
+    (`ui.focus`, or a part's `focus=`), and `focus_ring` is the ring a theme
+    without marks falls back to inside it."""
+    import glob
+    hits = [os.path.basename(p) for p in glob.glob(os.path.join(ROOT, "runtime", "*.py"))
+            if not p.endswith(os.sep + "ui.py") and "focus_ring(" in open(p).read()]
+    assert hits == []

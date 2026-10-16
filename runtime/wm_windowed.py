@@ -85,6 +85,7 @@ try:
     from moy_spine import EDITOR
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
     import layout_base as _layout_base
+    import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
@@ -95,6 +96,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_spine import EDITOR
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
     from runtime import layout_base as _layout_base
+    from runtime import ui as _ui
 
 import time as _time                  # the bar clock's minute (localtime)
 
@@ -188,6 +190,7 @@ class _Win:
                                       # render live before the content freeze
                                       # (_content_static) may reuse it
         self._look_gen = -1           # the look buf's content was drawn under
+        self._marked = False          # buf was drawn focused: it holds a focus mark
 
     def content_rect(self):
         """The inner rect the content occupies (below the WM title strip)."""
@@ -516,11 +519,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._root_ctx.app_layouts[app.id] = layout
 
     def _install(self, ctx, win=None):
+        # The focus mark draws only in the focused window (ui.marks).
         if win is None:
             ctx.install(self.ws)
+            _ui.marks(True)
         else:
             cx, cy, _cw, _ch = win.content_rect()
             ctx.install(self.ws, (cx, cy))
+            win._marked = self._wins.get(self._focus) is win
+            _ui.marks(win._marked)
 
     def _make_ctx(self, buf):
         """Build the layout set for a window buffer: run the console's own
@@ -2019,8 +2026,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                       and self._wins.get(self._resize[0]) is win))
         if moving:
             self._win_touched = True
-        elif not focused and win._look_gen != self.ws.look.look_gen:
-            # A background window's retained buffer under an older look.
+        elif not focused and (win._look_gen != self.ws.look.look_gen
+                              or (win._marked and _ui.marks_on())):
+            # A background window's retained buffer under an older look, or
+            # drawn while it had the focus mark.
             win._look_gen = self.ws.look.look_gen
             self._win_touched = True
             self._prewarm(win)

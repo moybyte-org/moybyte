@@ -693,5 +693,6 @@ class FilesAppLayer(ListShellApp):
             if i >= len(self._rows):
                 break
             _ui.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
+                    focus=(i == self.sel),
                     pad=4 * fs, text_dy=lay.dy(6), fs=fs)
         self._rows_bar(cv, th, len(self._rows))

@@ -1659,6 +1659,46 @@ static mp_obj_t ui_focus_ring(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_focus_ring_obj, 4, 4, ui_focus_ring);
 
+// focus(cv, look, rect, cls, r, flags, fs) -> (ink or None, content rect)
+static mp_obj_t ui_focus(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_box_t ct;
+    int ink;
+    check(moy_ui_focus(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                       mp_obj_get_int(a[5]), fs_or(a[6], &s), &ct, &ink));
+    mp_obj_t out[2] = {ink < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(ink), box_tuple(ct)};
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_focus_obj, 7, 7, ui_focus);
+
+// current(cv, look, rect, r, flags, fs) -> ink or None
+static mp_obj_t ui_current(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    int ink;
+    check(moy_ui_current(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                         fs_or(a[5], &s), &ink));
+    return ink < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(ink);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_current_obj, 6, 6, ui_current);
+
+// marks(active=None, reset=False) -> (marks on, active, focus marks drawn,
+// a card's focus reach)
+static mp_obj_t ui_marks(mp_obj_t active, mp_obj_t reset) {
+    if (active != mp_const_none) {
+        moy_ui_marks_active(mp_obj_is_true(active));
+    }
+    const moy_ui_marks_t *m = moy_ui_marks();
+    mp_obj_t out[4] = {mp_obj_new_bool(m->on), mp_obj_new_bool(m->active),
+                       mp_obj_new_int_from_uint(moy_ui_marks_drawn(mp_obj_is_true(reset))),
+                       MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_MARK_CARD))};
+    return mp_obj_new_tuple(4, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_marks_obj, ui_marks);
+
 // -- rect algebra ---------------------------------------------------------------------------
 
 // inset(rect, dx, dy)
@@ -1971,6 +2011,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_panel), MP_ROM_PTR(&ui_panel_obj) },
     { MP_ROM_QSTR(MP_QSTR_focus_ring), MP_ROM_PTR(&ui_focus_ring_obj) },
+    { MP_ROM_QSTR(MP_QSTR_focus), MP_ROM_PTR(&ui_focus_obj) },
+    { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&ui_current_obj) },
+    { MP_ROM_QSTR(MP_QSTR_marks), MP_ROM_PTR(&ui_marks_obj) },
     { MP_ROM_QSTR(MP_QSTR_inset), MP_ROM_PTR(&ui_inset_obj) },
     { MP_ROM_QSTR(MP_QSTR_cut), MP_ROM_PTR(&ui_cut_obj) },
     { MP_ROM_QSTR(MP_QSTR_split), MP_ROM_PTR(&ui_split_obj) },

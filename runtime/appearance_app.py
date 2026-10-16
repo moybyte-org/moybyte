@@ -1094,6 +1094,8 @@ class AppearanceAppLayer:
         fs = self.layout.fs
         x, y, w, h = r
         band = 9 * fs if label else 0
+        if focused:
+            _ui.focus(cv, th, r, size="card", fs=fs)
         _fill(cv, x, y, w, h, tok["desktop"])
         iw, ih = w - 2 * fs, h - 2 * fs - band
         _fill(cv, x + fs, y + fs, iw, 3 * fs, tok["bar"])
@@ -1128,7 +1130,7 @@ class AppearanceAppLayer:
         edge = th["accent"] if selected else th["shade_dark"]
         _frame(cv, x, y, w, h, edge)
         if focused:
-            _ui.focus_ring(cv, th, r, fs)
+            _ui.focus(cv, th, r, size="card", after=True, fs=fs)
 
     def _stores(self):
         """The THEME grid's installed packages: every name that is no seed
@@ -1165,13 +1167,15 @@ class AppearanceAppLayer:
                 continue
             x, y, w, h = r
             on = i == self.cur
+            if on and self.pick != "theme":
+                _ui.focus(cv, th, r, size="card", fs=fs)
             if self.pick == "accent":
                 cv.rect(x, y, w, h, self._accents[i][1])
                 cv.rectb(x, y, w, h, th["shade_dark"])
                 if self._accents[i][1] == th["accent"]:
                     cv.rect(x + w // 2 - fs, y + h // 2 - fs, 2 * fs, 2 * fs, 0)
                 if on:
-                    _ui.focus_ring(cv, th, r, fs)
+                    _ui.focus(cv, th, r, size="card", after=True, fs=fs)
                     name = self._accents[i][0].upper()
                     nw = _ui.print_width(name) * fs
                     cv.print(name, x + (w - nw) // 2, y + h + 4 * fs, th["ink"], 1)
@@ -1196,7 +1200,7 @@ class AppearanceAppLayer:
             if kept:
                 self._right(cv, "*", x + w, y + h + 2 * fs, 10 * fs, th["ink"])
             if on:
-                _ui.focus_ring(cv, th, r, fs)
+                _ui.focus(cv, th, r, size="card", after=True, fs=fs)
 
     def _cart_scene(self, cv, x, y, w, h, title):
         # Distinct miniature visual identities of the wallpaper carts.

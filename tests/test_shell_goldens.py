@@ -168,6 +168,11 @@ grows; a budget that moves fails by name, and is re-pinned by the same
 command as the hashes. Only the system canvas counts: a window's own canvas on
 the desk is not in the number.
 
+No frame of a surface's render draws more than one focus mark (the
+engine's count, `ui.marks`): a screen shows one, and a window behind draws none
+(docs/media/look_2026-10/DESIGN.md, the marks). The window manager clears
+the marks while a window behind draws, so a second mark is an app's.
+
 What moves these goldens (so a red one is diagnosable)
 -----------------------------------------------------
 Three things, in descending order of likelihood: a shell DRAW change; a
@@ -476,6 +481,7 @@ def _quiesce(ws):
 
 
 _DRAWN = {}             # (config, surface) -> (fills, texts) of the settled frame
+_MARKED = {}            # (config, surface) -> the most focus marks one frame drew
 
 
 def _render(ws, surface, config_name):
@@ -483,15 +489,19 @@ def _render(ws, surface, config_name):
     The settled frame's fills and texts go to `_DRAWN`."""
     prev = None
     cv = ws.sys_canvas
+    marked = 0
     for _ in range(_MAX_FRAMES):
         _quiesce(ws)
         ws._dirty = True                 # defeat the #44 redraw gate
         cv.gate_counts_reset()
+        _ui().marks(None, True)
         ws.frame(_DT)
+        marked = max(marked, _ui().marks()[2])
         cur = bytes(ws.glass_canvas._buf)
         if cur == prev:
             fills, texts = cv.gate_counts()[:2]
             _DRAWN[(config_name, surface)] = (fills, texts)
+            _MARKED[(config_name, surface)] = marked
             return hashlib.sha256(cur).hexdigest()
         prev = cur
     raise AssertionError(
@@ -920,6 +930,10 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
     assert ui.primary_warnings == [], (
         "a surface draws more than one primary button in a frame (DESIGN.md, "
         "'Button kinds'): %r" % ui.primary_warnings)
+    many = {s: n for (c, s), n in _MARKED.items() if c == config_name and n > 1}
+    assert not many, (
+        "a frame draws more than one focus mark (DESIGN.md, the marks: "
+        "exactly one a screen, never in a window behind): %r" % many)
     cap = json.loads((ROOT / "native" / "moy_ui" / "style.json").read_text())[
         "hits_capacity"]
     # (a `plan` config's few surfaces need not register any)

@@ -111,17 +111,23 @@ def test_every_seed_reads_every_button_kind(seed, variant):
     """Each button kind's ink on its field, in every state but disabled,
     through the live placement and the seed's own button leaves
     (docs/look_2026-10.md step 10): a derived ink that misses the floor took
-    its kind's floor form, and no seed's `buttons` reads under it."""
+    its kind's floor form, and no seed's `buttons` reads under it. A seed
+    with marks draws `on` as its current mark, never the ON look (step 11)."""
     live = live_colors(seed, variant)
     ui._C.theme_block(live.block, live.used)
     ui.use_buttons(live)
     th = live.tokens
     look = ui._look(th)
     bad = []
+    ui.use_depth(seed, variant == "light")
+    marks = ui.marks()[0]
+    ui.use_depth(None, False)
     try:
         for kind in ui.BUTTON_KINDS:
             kid = ui._kind_id(ui._button_kind(kind))
             for st in STATES.values():
+                if marks and st == "on":
+                    continue
                 field, ink = ui._C.button_style(look, kid, ui._STATE_ID[st], -1)[:2]
                 if field is not None and ink is not None and not _clears(field, ink):
                     bad.append((kind, st, field, ink))

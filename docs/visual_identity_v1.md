@@ -26,7 +26,7 @@ disambiguated on release via the shared `ui.DragTap`, so a scroll never
 launches a cart), the footer's left/right column-nudge arrows, the slim
 scrollbar along the grid's bottom edge, and keyboard nav (the view follows
 the selection). The selected card
-carries the focus ring and — where the card is tall enough — its in-card
+carries the theme's focus mark and — where the card is tall enough — its in-card
 PLAY/CHANGE row; small-card tiers (320×240) keep the verbs as bar-zone chips
 and the home bar's lent zone shows the selected cart's name (wide-card tiers
 show the moybyte wordmark). Phase 3's shared `ui` toolkit, warm-light Studio
