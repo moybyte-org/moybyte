@@ -8,6 +8,7 @@
 #include "moy_ui.h"
 #include "moy_canvas.h"
 #include "moy_theme.h"
+#include "moy_shape.h"
 
 // -- the font text draws in ---------------------------------------------------------
 //
@@ -729,21 +730,67 @@ int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs) {
     return b.x + button_off(b, iw, t_w(&f, label.p, (size_t)ln, fs), fs);
 }
 
-// A button's body where the theme gives its part no surface: the field and
-// its rings, square. The kind's shape, radius and bevel (bs) are resolved
-// and not drawn here. *on gets the field under the text, *ring the rings.
+// A button's body: the field and its rings in the kind's shape (moy_ui_button_style): square with no radius
+// and no bevel as fills, else a rounded rect (native/moy_gfx/moy_shape.h),
+// a circle the shorter side across, a bevel the shade_hi/shade_lo ring. The
+// font leaf resolves and does not draw: no type role is a key's or an
+// operator's yet. *on gets the field under the text, *ring the rings.
+enum { BTN_ROUND = 0, BTN_CIRCLE = 1, BTN_SQUARE = 2 };
+
 static void button_body(draw_t *d, moy_ui_box_t b, const moy_ui_btn_style_t *bs, int *on,
                         int *ring) {
     int bg = bs->c[0], edge = bs->c[2];
+    int n = bs->edge_w >= 0 ? bs->edge_w : metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
+    int r = bs->shape == BTN_SQUARE || bs->r < 0 ? 0 : bs->r;
+    int bevel = bs->bevel > 0;
+    if (r == 0 && !bevel && bs->shape != BTN_CIRCLE) {
+        if (bg >= 0) {
+            fill(d, b.x, b.y, b.w, b.h, bg);
+            *on = bg;
+        }
+        if (n > 0 && edge >= 0) {
+            rings(d, b.x, b.y, b.w, b.h, edge, n);
+            *ring = n;
+        }
+        return;
+    }
+    int x = b.x, y = b.y, w = b.w, h = b.h;
+    if (bs->shape == BTN_CIRCLE) {
+        int dm = w < h ? w : h;
+        int wide = 2 * w >= 3 * h;          // a wide key is a pill
+        int bw = wide ? w - (h - dm) : dm;
+        x += (w - bw) / 2;
+        y += (h - dm) / 2;
+        w = bw;
+        h = dm;
+        r = dm / 2;
+    }
+    moy_shape_paint_t fillp;
+    memset(&fillp, 0, sizeof(fillp));
+    moy_shape_rrect_t sr;
+    memset(&sr, 0, sizeof(sr));
+    for (int i = 0; i < 4; i++) {
+        sr.r[i] = (uint8_t)(r > 255 ? 255 : r);
+    }
+    sr.stepped = (uint8_t)moy_ui_depth()->stepped;
     if (bg >= 0) {
-        fill(d, b.x, b.y, b.w, b.h, bg);
+        fillp.n = 1;
+        fillp.c[0] = d->row->pal[bg & moy_ui_cmask()];
+        sr.fill = &fillp;
         *on = bg;
     }
-    int n = bs->edge_w >= 0 ? bs->edge_w : metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_EDGE);
-    if (n > 0 && edge >= 0) {
-        rings(d, b.x, b.y, b.w, b.h, edge, n);
-        *ring = n;
+    if (bevel) {
+        sr.line = (uint8_t)(n > 0 ? n : 1);
+        sr.line_hi = d->row->pal[moy_ui_token(d->look, MOY_UI_T_SHADE_HI) & moy_ui_cmask()];
+        sr.line_lo = d->row->pal[moy_ui_token(d->look, MOY_UI_T_SHADE_LO) & moy_ui_cmask()];
+    } else if (n > 0 && edge >= 0) {
+        sr.line = (uint8_t)n;
+        sr.line_hi = d->row->pal[edge & moy_ui_cmask()];
+        sr.line_lo = -1;
     }
+    *ring = sr.line;
+    moy_shape_rrect(&d->t, x, y, w, h, &sr);
+    d->row->st[MOY_ST_N_FILL]++;
 }
 
 int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
@@ -756,7 +803,10 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     moy_ui_button_style(d.look, kind, state, d.run ? MOY_UI_NO_THEME : k->app, &bs);
     int bg = bs.c[0], ink = bs.c[1], edge = bs.c[2];
     int on = -1, ring = 0;      // the field this call filled under the text, its rings
-    if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, b, kind, state, bg, edge)) {
+    // A shaped kind (a radius, a circle, a bevel: a theme with a look) is its
+    // shape; a square one is the part's sprite or surface where the theme has one.
+    int shaped = (bs.shape != BTN_SQUARE && bs.r > 0) || bs.shape == BTN_CIRCLE || bs.bevel > 0;
+    if ((phase & MOY_UI_PHASE_FRAME) && (shaped || !surface(&d, b, kind, state, bg, edge))) {
         button_body(&d, b, &bs, &on, &ring);
     }
     if (!(phase & MOY_UI_PHASE_CONTENT)) {

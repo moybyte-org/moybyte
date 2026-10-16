@@ -410,4 +410,57 @@ def test_the_boards_module_resolves_the_kinds_as_the_host_does(tmp_path):
     exec(compile(_KIND_DRIVER.replace("print(repr(", "_out.append(repr("), "k", "exec"),
          {"_out": host.setdefault("out", []), "__name__": "k"})
     moy_ui.buttons_clear()
+    from runtime import ui
+    ui.look_moved()                    # the driver wrote look slot 0
     assert out.stdout.splitlines() == host["out"], out.stderr[-400:]
+
+
+def _px(cv, x, y):
+    i = (y * cv.w + x) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]
+
+
+def _drawn(th, kind, app=None, rect=(0, 0, 80, 24)):
+    from runtime import ui
+    from runtime.host_canvas import make_system_canvas
+    cv = make_system_canvas(90, 30)
+    if _BLOCK[0] is not None:
+        cv.theme_block(_BLOCK[0])
+    cv.cls(1)
+    ui.button(cv, th, rect, "MM", kind=kind, app=app)
+    return cv
+
+
+def test_a_kind_draws_its_shape():
+    """A theme with a look rounds its keys at key_r (a circle, a square or a
+    radius where it says so; a bevel under `edges: bevel`); a theme with no
+    look keeps them square."""
+    from runtime import ui
+    bg = _word(1)
+    th = theme_colors("machine")
+    _BLOCK[0] = None
+    sq = _drawn(th, "primary")
+    assert _px(sq, 0, 0) == _px(sq, 40, 0) == _word(th["value"])
+    _install({"format": 2, "name": "ks", "inherits": "machine", "look": {
+        "key_r": 8, "edges": "bevel",
+        "app_buttons": {"calc": {"primary": {"shape": "circle"},
+                                 "normal": {"shape": "square", "bevel": False},
+                                 "danger": {"shape": "round", "r": 6}}}}})
+    try:
+        ui.use_depth("ks", False)
+        th = _live("ks").tokens
+        cv = _drawn(th, "primary")
+        assert _px(cv, 0, 0) == bg                         # a rounded corner
+        assert _px(cv, 40, 12) == _word(th["value"])
+        assert _px(cv, 40, 0) == _word(th["shade_hi"])     # the bevel's top
+        assert _px(cv, 40, 23) == _word(th["shade_lo"])    # ...and its foot
+        sq = _drawn(th, "normal", app="calc")
+        assert _px(sq, 0, 0) == _word(th["shade_dark"])    # square, its edge
+        circle = _drawn(th, "primary", app="calc", rect=(0, 0, 30, 24))
+        assert _px(circle, 1, 12) == bg                    # 24 across, centred
+        assert _px(circle, 15, 12) == _word(th["value"])
+        small = _drawn(th, "danger", app="calc")
+        assert _px(small, 0, 0) == bg and _px(small, 6, 0) != bg
+    finally:
+        ui.use_depth(None, False)
+        _uninstall()
