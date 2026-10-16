@@ -39,7 +39,9 @@
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
-//   {t:"error", s}       fatal: the page shows it and stops
+//   {t:"error", s, msg}  fatal: the page shows it and stops. msg is the
+//                        thrown value's String() (an abort's reason, a
+//                        traceback), s that plus the stack's frames
 //   {t:"persist", mode, s}   where carts are being kept, in the page's words
 //   {t:"keep"}           site mode: ask the browser to make this origin
 //                        durable. Sent to the PAGE because storage.persist()
@@ -839,6 +841,17 @@ let pin = null;
 const withPin = (url) => (pin ? url + (url.indexOf("?") >= 0 ? "&" : "?")
                               + "pin=" + encodeURIComponent(pin) : url);
 
+// A fatal error as {t:"error"}. V8's e.stack leads with String(e), JSC's
+// (Safari's) and SpiderMonkey's hold the frames alone -- so on an iPhone the
+// stack without the message is an abort with no reason. The message goes first
+// by hand when the stack does not already carry it.
+function crashMessage(e) {
+    const msg = String(e);
+    const stack = (e && typeof e.stack === "string") ? e.stack : "";
+    return { t: "error", msg,
+             s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
+}
+
 async function init(search) {
     const qs = new URLSearchParams(search || "");
     // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
@@ -1550,7 +1563,7 @@ function loop() {
         updatePump();
         cartsPump();
     } catch (e) {
-        self.postMessage({ t: "error", s: String((e && e.message) || e) });
+        self.postMessage(crashMessage(e));
         running = false;
         return;
     }
@@ -1675,6 +1688,6 @@ self.onmessage = async (ev) => {
             }
         }
     } catch (e) {
-        self.postMessage({ t: "error", s: String((e && e.stack) || e) });
+        self.postMessage(crashMessage(e));
     }
 };

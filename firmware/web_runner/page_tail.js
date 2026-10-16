@@ -77,9 +77,13 @@ else if(m.t==="lost"){linkLost(m.kind||"lost",m.head||"the console is not answer
 m.body||"",m.risk!==false);}
 else if(m.t==="error"){console.error("[moy]",m.s);
 sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";
-// The traceback's tail (the raising line and the exception) under the title.
-var ce=document.getElementById("crash");window.__moyCrash=String(m.s);
-ce.textContent=window.__moyCrash.split("\n").slice(-12).join("\n");ce.style.display="block";}}
+// Under the title: the message's tail (an abort's reason; a traceback's
+// raising line and exception), then the first frames that threw it.
+var ce=document.getElementById("crash");var cs=String(m.s);window.__moyCrash=cs;
+var cm=m.msg==null?"":String(m.msg);var cl=(cm||cs).split("\n").slice(-12);
+if(cm&&cs.indexOf(cm)===0)cl=cl.concat(cs.slice(cm.length).split("\n")
+.filter(function(x){return x.trim();}).slice(0,4));
+ce.textContent=cl.join("\n");ce.style.display="block";}}
 // ---- the pin prompt (2026-08-25) --------------------------------------------
 // A board serves its console to anyone and its CARTS to nobody without the
 // pairing pin, so a page opened by hand -- typing the address instead of
@@ -401,6 +405,13 @@ try {
   const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
   w.postMessage({ t: "init", search: location.search });
+  // Leaving the page ends the VM with it. A page the back-forward cache keeps
+  // keeps its worker too -- and on iOS that worker's wasm memory, so the next
+  // console in the same tab (the desk's "small screen?" link) instantiates
+  // beside it and can be refused memory. A page brought back from that cache
+  // has no VM any more, so it boots again.
+  addEventListener("pagehide", function () { if (WORKER) WORKER.terminate(); });
+  addEventListener("pageshow", function (e) { if (e.persisted) location.reload(); });
   // ---- play-button splash ----------------------------------------------------
   // The p8-web-player pattern: the game starts on a CLICK, which is also the user
   // gesture that unlocks WebAudio, so sound works from frame one.

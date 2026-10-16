@@ -292,7 +292,11 @@ def test_a_crash_is_readable_on_a_phone(tmp_path):
     report nobody can act on (the owner's iPhone, 2026-10-16). The worker's
     error -- a Python traceback -- is printed on the page itself, under the
     title, in a phone-shaped handheld page where a person can read and copy
-    it. The error is posted the way worker.js posts it ({t:"error", s})."""
+    it. The error is posted the way worker.js posts it ({t:"error", s, msg}).
+
+    The second post is the iPhone's own report: an abort while instantiating
+    the wasm, whose JSC stack is the frames alone. Its message -- the abort's
+    reason -- is the line that has to be on the screen, above the frames."""
     import json
     web_e2e.require("store")
     port = web_e2e.free_port()
@@ -300,23 +304,36 @@ def test_a_crash_is_readable_on_a_phone(tmp_path):
     tb = ("Traceback (most recent call last):\n"
           '  File "launcher_layer.py", line 1, in draw\n'
           "IndexError: list index out of range")
+    abort = ("RuntimeError: Aborted(RangeError: Out of memory). "
+             "Build with -sASSERTIONS for more info.")
+    frames = ("abort@http://192.168.1.208:8321/micropython.mjs:1:3440\n"
+              "instantiateArrayBuffer@http://192.168.1.208:8321/"
+              "micropython.mjs:1:4172")
+    read = {"js": "(function(){var c=document.getElementById('crash');"
+                  "var r=c.getBoundingClientRect();return JSON.stringify("
+                  "{shown:getComputedStyle(c).display,text:c.textContent,"
+                  "top:r.top,h:r.height,vh:innerHeight,crash:window.__moyCrash,"
+                  "status:document.getElementById('s').textContent});})()"}
     try:
         out, js = web_e2e.run(
             tmp_path, "crash_readable", "?handheld=1",
-            [{"js": "(onWorker({t:'error',s:%s}),1)" % json.dumps(tb)},
-             {"js": "(function(){var c=document.getElementById('crash');"
-                    "var r=c.getBoundingClientRect();return JSON.stringify("
-                    "{shown:getComputedStyle(c).display,text:c.textContent,"
-                    "top:r.top,h:r.height,vh:innerHeight,"
-                    "status:document.getElementById('s').textContent});})()"}],
+            [{"js": "(onWorker({t:'error',s:%s,msg:%s}),1)"
+                    % (json.dumps(tb), json.dumps(tb))}, read,
+             {"js": "(onWorker({t:'error',s:%s,msg:%s}),1)"
+                    % (json.dumps(abort + "\n" + frames), json.dumps(abort))},
+             read],
             base, tmp_path / "chrome", boot_ms=30000,
             device={"width": 390, "height": 844, "dpr": 3, "mobile": True})
-        got = json.loads(js[-1])
+        got = json.loads(js[-3])
         assert got["status"] == "console crash (see devtools)", got
         assert got["shown"] == "block", got
         assert got["text"].endswith("IndexError: list index out of range"), got
         assert got["h"] > 0 and 0 <= got["top"] < got["vh"], \
             "the crash text is off the phone's first screen: %r" % got
+        got = json.loads(js[-1])
+        assert got["text"].split("\n") == [abort] + frames.split("\n"), got
+        assert got["crash"] == abort + "\n" + frames, got
+        assert got["h"] > 0 and 0 <= got["top"] < got["vh"], got
     finally:
         server.terminate()
         server.wait(timeout=10)
