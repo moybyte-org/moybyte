@@ -299,10 +299,15 @@ class OtaUpdater(SlotHealth):
             import json
             import os
 
-            try:
-                os.mkdir(self.update_dir)
-            except OSError:
-                pass
+            # Every level: on a board whose store is the card, the internal
+            # volume a cable flash formatted has no /moy yet.
+            path = ""
+            for part in self.update_dir.strip("/").split("/"):
+                path += "/" + part
+                try:
+                    os.mkdir(path)
+                except OSError:
+                    pass
             f = open(self._pending_path(), "w")
             try:
                 f.write(json.dumps(rec))

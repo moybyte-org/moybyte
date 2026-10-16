@@ -182,6 +182,21 @@ def test_finish_records_the_slot_it_pointed_the_bootloader_at(tmp_path):
     assert rec["channel"] == mod.FIRMWARE_CHANNEL
 
 
+def test_the_marker_lands_on_a_freshly_formatted_volume(tmp_path):
+    """The P4s keep the store on the card, so the internal volume a cable flash
+    formats has no /moy: the marker makes every level of update_dir."""
+    from runtime import net_binding as nb
+
+    mod = _load_moy_ota()
+    d = tmp_path / "moy" / "update"
+    u = mod.OtaUpdater(lambda fn: fn(), update_dir=str(d))
+    u._running_label = lambda: "ota_0"
+    _stage()
+    assert u.finish() is True
+    assert nb._slot()[1] == "ota_1"
+    assert json.loads(Path(u._pending_path()).read_text(encoding="utf-8"))["slot"] == "ota_1"
+
+
 def test_finish_never_deletes_an_image_the_owner_supplied(tmp_path):
     """The copied-image path installs whatever .bin is in the update directory.
     That file is the owner's -- possibly the only copy, possibly meant for the

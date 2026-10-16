@@ -667,17 +667,17 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     """The marker round trip against the real filesystem, without a 3MB install.
 
     What is device-specific here is exactly what a host test cannot reach: this
-    board has no SD, so `with_sd` is a plain call-through and the marker lands on
-    the internal VFS -- the same path that has to hold a rollback's evidence
-    across a reboot.
+    board's card has a bus of its own, so `with_sd` is a plain call-through, and
+    the marker lands on the internal VFS whatever the store is -- the same path
+    that has to hold a rollback's evidence across a reboot.
 
-    The mkdir is not scaffolding, it is the firmware's own step: `update_dir`
-    does NOT exist on a board whose VFS has never taken an OTA, and `finish()`
-    and the download opener each create it before their first write. This test
-    writes the marker directly, so it has to do the same -- without it the test
-    passes only on a board that happens to have downloaded an update earlier,
-    and fails on any freshly-flashed one (a full cable flash wipes the VFS).
-    That is exactly how it failed on 2026-08-15 after the canvas-flip reflash.
+    The mkdirs are not scaffolding, they are the firmware's own step:
+    `update_dir` does NOT exist on a board whose VFS has never taken an OTA, nor
+    does its parent `/moy` when the store is the card, and `finish()` creates
+    every level before its first write. This test writes the marker directly,
+    so it has to do the same -- without it the test passes only on a board that
+    happens to have the directories already, and fails on any freshly-flashed
+    one (a cable flash that moves the store formats the VFS).
 
     AND IT HAS TO BE ITS OWN SHORT COMMAND, not a line of the snippet below.
     `pyexec` uploads a multi-line snippet in chunks; `cmd` sends one line. A
@@ -690,8 +690,9 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     present mkdir raises EEXIST immediately, never stalls, and the upload is
     clean. Any device call that blocks on flash belongs outside a chunked
     upload for the same reason."""
-    board.cmd("py (lambda: (__import__('os').mkdir(ws.updater.update_dir), 1)[1])()",
-              wait_for="PY", timeout=20)     # EEXIST if it is already there
+    for d in ("/moy", "/moy/update"):     # the path test_the_ota_updater_is_live_on_this_board pins
+        board.cmd("py (lambda: (__import__('os').mkdir(%r), 1)[1])()" % d,
+                  wait_for="PY", timeout=20)     # EEXIST if it is already there
     assert board.pyexec(
         "import json\n"
         "f = open(ws.updater._pending_path(), 'w')\n"
