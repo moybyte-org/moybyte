@@ -787,3 +787,85 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
 int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink) {
     return moy_ui_current_in(s, b, r, flags, fs, ink, 1);
 }
+
+// -- the bars' parts (docs/look_2026-10.md step 14) --------------------------------
+
+// A band's fill and its line on the edge facing the content (`side`, a
+// MOY_UI_BAND_*), solid over whatever backdrop or wallpaper is under it.
+static void band(dd_t *d, moy_ui_box_t b, const moy_shape_paint_t *p, int lw, int32_t lc,
+                 int side) {
+    rrect(d, b.x, b.y, b.w, b.h, 0, 0, 0, MOY_SHAPE_ALL, p, 0, 0, -1, NULL);
+    if (lw <= 0 || !is_set(lc)) {
+        return;
+    }
+    lw = lw < b.h ? lw : b.h;
+    uint16_t c = val(d, lc);
+    switch (side) {
+        case MOY_UI_BAND_TOP:
+            moy_target_fill(&d->t, b.x, b.y, b.w, lw, c);
+            break;
+        case MOY_UI_BAND_LEFT:
+            moy_target_fill(&d->t, b.x, b.y, lw, b.h, c);
+            break;
+        case MOY_UI_BAND_RIGHT:
+            moy_target_fill(&d->t, b.x + b.w - lw, b.y, lw, b.h, c);
+            break;
+        default:
+            moy_target_fill(&d->t, b.x, b.y + b.h - lw, b.w, lw, c);
+            break;
+    }
+}
+
+int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
+    dd_t d;
+    open_dd(s, &d, 1);
+    const moy_ui_depth_t *dp = &s_depth;
+    if (!dp->on) {
+        return 0;
+    }
+    moy_shape_paint_t p;
+    int ink;
+    switch (part) {
+        case MOY_UI_BARP_BAND:
+            if (!paint_of(&d, dp->bar_fill, &p)) {
+                p = solid(tok(&d, MOY_UI_T_BAR));
+            }
+            band(&d, b, &p, dp->bar_line_w, dp->bar_line_c, on);
+            return 1;
+        case MOY_UI_BARP_HH_BAND:
+            if (dp->hh_style == MOY_UI_HH_NONE
+                || (!paint_of(&d, dp->hh_fill, &p) && !paint_of(&d, dp->bar_fill, &p))) {
+                p = solid(tok(&d, dp->hh_style == MOY_UI_HH_NONE ? MOY_UI_T_DESKTOP
+                                                                  : MOY_UI_T_BAR));
+            }
+            band(&d, b, &p, dp->hh_line_w, dp->hh_line_c, on);
+            return 1;
+        case MOY_UI_BARP_SYS:
+        case MOY_UI_BARP_HH_SYS: {
+            // the tile: 36x34 at r 9 on the desk, 22x20 at r 7 on the handheld
+            int32_t f = part == MOY_UI_BARP_HH_SYS && is_set(dp->hh_sys_fill) ? dp->hh_sys_fill
+                                                                               : dp->sys_fill;
+            int r = moy_ui_fdiv(b.h * (part == MOY_UI_BARP_SYS ? 9 : 7) + b.h / 2,
+                                part == MOY_UI_BARP_SYS ? 34 : 20);
+            p = solid(is_set(f) ? val(&d, f) : tok(&d, MOY_UI_T_SURFACE_ALT));
+            rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+            if (on) {
+                moy_ui_current_in(s, b, r, 0, 1, &ink, 0);
+            }
+            return 1;
+        }
+        case MOY_UI_BARP_CHIP: {
+            if (!on) {
+                return 1;
+            }
+            int r = moy_ui_fdiv(b.h * 8 + 14, 28);
+            p = solid(is_set(dp->chip_cur) ? val(&d, dp->chip_cur)
+                                           : tok(&d, MOY_UI_T_SURFACE_ALT));
+            rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+            moy_ui_current_in(s, b, r, 0, 1, &ink, 0);
+            return 1;
+        }
+        default:
+            return 0;
+    }
+}

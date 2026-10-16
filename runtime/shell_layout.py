@@ -140,12 +140,14 @@ def resolve(bars, default, w, h, cs, catalogue, edges, text_w=None, notes=None):
 
 # -- packing: the cells of a surface's bars ------------------------------------
 
-def _along(name, horiz, cs, fs, clock_w, text):
+def _along(name, horiz, cs, fs, clock_w, text, sys_len=0):
     """A widget's minimum length along its bar, in pixels."""
     if name == "text":
         return text if horiz else _TEXT_H * fs
     if name == "clock" and horiz:
         return clock_w
+    if name == "menu" and sys_len:
+        return sys_len
     cell = CELLS[name][0 if horiz else 1]
     if cell is None:
         return 0
@@ -177,7 +179,7 @@ def _grow(items, slack):
     flex[-1][1] += slack - each * len(flex)
 
 
-def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None):
+def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
     """The bars of `of` (default: the bars in force) on a `w` x `h` surface
     whose BAR_ROWS-row bar is `rows` tall, at chrome scale `cs` and font
     scale `fs`: ((edge, rect, dy, cells), ...), the rect on the surface,
@@ -194,7 +196,9 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None):
     bounds nothing: its cell runs from the bar's first quarter to the right
     slot, and what it holds centres on the bar (today's taskbar chips).
     Across, a 16-pixel icon sits 1 pixel in on an 18-row bar and keeps that
-    inset centred on a thicker one; a side bar centres it."""
+    inset centred on a thicker one; a side bar centres it. `sys_len`, where
+    set, is the `menu` cell's length along its bar: a theme's system button
+    larger than an icon (the 2026-10 look's tile)."""
     if of is None:
         of = _bars()
     rects = bar_rects_of(w, h, rows, of)
@@ -217,7 +221,7 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None):
                     text = texts.pop(0) if texts else ""
                     tw = (text_w(text) if text_w is not None else 8 * len(text)) * fs
                 # [name, length, flex, position, text, slot]
-                items.append([name, _along(name, horiz, cs, fs, clock_w, tw),
+                items.append([name, _along(name, horiz, cs, fs, clock_w, tw, sys_len),
                               name in FLEX, 0, text, len(slots)])
             slots.append(items)
         left, center, right = slots
@@ -250,13 +254,17 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None):
         for it in left + center + right:
             name, n, _flex, at, text, slot = it
             if horiz:
-                if name in ("menu", "close", "wifi", "battery"):
+                if name == "menu":
+                    r = (at, iy, n, ic)
+                elif name in ("close", "wifi", "battery"):
                     r = (at, iy, ic, ic)
                 elif name in ("zone", "title", "separator"):
                     r = (at, iy, n, ic)
                 else:
                     r = (at, 0, n, thick)
-            elif name in ("menu", "close", "wifi", "battery"):
+            elif name == "menu":
+                r = (iy, at, ic, n)
+            elif name in ("close", "wifi", "battery"):
                 r = (iy, at, ic, ic)
             else:
                 r = (0, at, thick, n)

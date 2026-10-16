@@ -83,10 +83,12 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     assert r == 12 and foot == 11 == win.foot
     assert win.content_rect()[3] == win.h - 2 - win.title_h - foot
     assert win.buf.h == win.content_rect()[3]
-    # a theme without depth gives the rows back
+    # a theme without depth gives the rows back (its bars re-pack: the window
+    # is laid out again)
     ws.look.set_theme("indigo", persist=False)
     ws._dirty = True
     drv.frame(0.0)
+    win = ws.wm._wins["settings"]
     assert win.foot == 0 and win.buf.h == win.h - 2 - win.title_h
 
 

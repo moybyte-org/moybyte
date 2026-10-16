@@ -239,6 +239,8 @@ class Appearance:
         # The live token dict lives on the KERNEL, not here -- see the module
         # docstring. `set_theme` is its only author; this is the first write.
         self.live = None
+        self._bars_moved = False
+        self._looked = False
         self._go_live(DEFAULT_THEME)
         # The wallpaper in force: a wallpaper cart's id, PICTURE, or None for
         # the theme's `desktop` fill -- the theme's (`_apply_wallpaper`),
@@ -1294,7 +1296,10 @@ class Appearance:
         self._layouts = {}
         self._choices = None
         ws.set_render_scale(self.live.look[0].get("render.scale", 1))
-        self.apply_layout()
+        if not self.apply_layout() and self._bars_moved \
+                and getattr(ws, "layout", None) is not None:
+            ws._relayout()
+        self._bars_moved = False
         self._apply_wallpaper()
 
     def install_theme(self, src):
@@ -1561,15 +1566,17 @@ class Appearance:
 
     def layout_choices(self):
         """The packages whose layout differs from the active theme's: the
-        values the Settings LAYOUT row steps through after THEME. Cached until
-        the next theme switch."""
+        values the Settings LAYOUT row steps through after THEME. A seed's
+        layout is its look's (Moy's bar) and is no choice. Cached until the
+        next theme switch."""
         if self._choices is None:
             names = self.theme_names()
             extra = _ui_draw.theme_installed()
             if extra is not None and extra not in names:
                 names = names + (extra,)
             mine = self._theme_layout(self.theme_name)[1:]
-            self._choices = tuple(n for n in names if self._theme_layout(n)[1:] != mine)
+            self._choices = tuple(n for n in names if n not in THEME_NAMES
+                                  and self._theme_layout(n)[1:] != mine)
         return self._choices
 
     def cycle_layout_theme(self, d):
@@ -1715,6 +1722,14 @@ class Appearance:
         `ws.theme_colors`; and its depth (`ui.use_depth`)."""
         live = live_colors(name, self.theme_variant)
         _ui_draw.use_depth(name, self.theme_variant == "light")
+        # The look's bars: their heights, and a system button that takes a
+        # tile's cell (layout_base.sys_tile), re-pack the bars.
+        d = _ui_draw.depth()
+        moved = _layout_base.place_bar_h(d[15], d[14]) or bool(d[0]) != self._looked
+        self._looked = bool(d[0])
+        if moved and getattr(self.ws, "bar_layer", None) is not None:
+            self.ws.bar_layer.invalidate()
+            self._bars_moved = True
         put = getattr(getattr(self.ws, "canvas", None), "theme_block", None)
         if put is not None:
             put(live.block)

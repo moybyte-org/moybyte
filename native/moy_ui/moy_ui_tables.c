@@ -1063,6 +1063,10 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"value_ink\": \"#ffffff\", \"sunk\": \"#e3e6ed\", \"lcd\": \"#f1f2f6\", \"lcd_ink\": \"#4c3fd6\"\012"
     "    }\012"
     "  },\012"
+    "  \"layout\": {\012"
+    "    \"bars\": [{ \"edge\": \"top\", \"size\": 18, \"left\": [\"menu\", \"chips\", \"zone\"],\012"
+    "               \"right\": [\"close\", \"wifi\", \"battery\", \"clock\"] }]\012"
+    "  },\012"
     "  \"look\": {\012"
     "    \"focus\": { \"style\": \"edge\", \"card\": \"lift\", \"small\": \"underline\" },\012"
     "    \"current\": { \"style\": \"plate\" },\012"
@@ -1100,7 +1104,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 2950};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3111};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

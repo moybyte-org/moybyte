@@ -258,6 +258,16 @@ enum {
 enum { MOY_UI_HH_NONE = 0, MOY_UI_HH_FLAT = 1, MOY_UI_HH_GRAD = 2, MOY_UI_HH_GLASS = 3 };
 // The value bar across a focused window's top under `win.header: bar`, in pixels.
 #define MOY_UI_HEAD_BAR_H 4
+// The bars' parts under the depth (step 14): a desk bar's band and a
+// handheld bar's (`on` the band's edge-line side, a MOY_UI_BAND_*), the
+// system button's tile on each (`on`: its menu is open, the current mark
+// over the tile), and a desk chip's field (`on`: the focused window's, the
+// raised chip under the current mark; else nothing). Answers 0, drawing
+// nothing, where the theme has no depth.
+enum {
+    MOY_UI_BARP_BAND = 0, MOY_UI_BARP_HH_BAND = 1, MOY_UI_BARP_SYS = 2, MOY_UI_BARP_HH_SYS = 3,
+    MOY_UI_BARP_CHIP = 4,
+};
 // Install theme `name`'s depth in a mode (light 1: its `light` look). Answers on.
 int moy_ui_depth_use(const char *name, size_t n, int light);
 const moy_ui_depth_t *moy_ui_depth(void);
@@ -492,6 +502,8 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_s
 // right column); a Win9x frame shades both long sides instead.
 enum { MOY_UI_BAND_BOTTOM = 0, MOY_UI_BAND_TOP = 1, MOY_UI_BAND_RIGHT = 2, MOY_UI_BAND_LEFT = 3 };
 int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light, int side);
+// A bar part under the depth (MOY_UI_BARP_*); 0 where the theme has none.
+int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 

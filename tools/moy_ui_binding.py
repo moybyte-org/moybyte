@@ -138,7 +138,10 @@ class _Depth(c.Structure):
                 + [("shadow_565", c.c_uint16)]
                 + [(n, c.c_int16) for n in ("alpha", "blur", "dx", "dy", "back", "line",
                                             "line_back")]
-                + [(n, c.c_int32) for n in ("line_c", "line_back_c", "body")])
+                + [(n, c.c_int32) for n in ("line_c", "line_back_c", "body")]
+                + [(n, c.c_uint8) for n in ("header", "align", "controls", "icon", "rule")]
+                + [(n, c.c_int32) for n in ("fill", "fill_back", "grad", "grad_back")]
+                + [(n, c.c_uint8) for n in ("bar_style", "hh_style", "bar_h", "hh_h")])
 
 
 class _FrameButton(c.Structure):
@@ -210,6 +213,7 @@ _DRAW_SIGS = (
     ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
     ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
     ("moy_ui_frame_icon", [_Box, _I, c.POINTER(_Box)], _I),
+    ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
@@ -597,6 +601,10 @@ def binding():
             return None
         return (out.x, out.y, out.w, out.h)
 
+    def bar_part(cv, look, part, rect, on):
+        return bool(lib.moy_ui_bar_part(c.byref(sink(cv, look)), int(part), box_of(rect),
+                                        int(on)))
+
     def frame_geom(w, h, title_h, active, mode):
         out = (_I * 6)()
         lib.moy_ui_frame_geom(int(w), int(h), int(title_h), 1 if active else 0, int(mode), out)
@@ -692,7 +700,7 @@ def binding():
 
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
-              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon,
+              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               frame_under, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, inset, cut,
               split, row_content, cell_art):
@@ -979,7 +987,8 @@ def binding():
             lib.moy_ui_depth_use(b, len(b), 1 if light else 0)
         d = _Depth.from_address(lib.moy_ui_depth())
         return (d.on, d.win_r, d.card_r, d.key_r, d.corners, d.stepped, d.shadow, d.edges,
-                d.alpha, d.blur, d.dx, d.dy, d.back, d.frames)
+                d.alpha, d.blur, d.dx, d.dy, d.back, d.frames,
+                d.bar_h if d.on else 0, d.hh_h if d.on else 0)
 
     m.use_depth = use_depth
 

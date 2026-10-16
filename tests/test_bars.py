@@ -255,3 +255,95 @@ def test_a_window_keeps_its_band_on_top_under_a_bottom_bar(tmp_path):
     lay = win.ctx.layout
     assert lay.cy == lay.status_h and lay.bars[0][0] == "top"
     assert lay.bars[0][1] == (0, 0, lay.w, lay.status_h)
+
+
+# -- the 2026-10 look's bar (docs/look_2026-10.md step 14) --------------------
+
+def _looked_ws(tmp_path, variant="light", desk=False):
+    if desk:
+        ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    else:
+        ws = build_ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant=variant)
+    return ws
+
+
+def _names_of(packed):
+    return [[c[0] for c in b[3]] for b in packed]
+
+
+@pytest.mark.parametrize("desk", [False, True])
+def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
+    """Moy's layout: the Moy button first, its tile's cell, then the chips
+    (desk) and the zone; the X, Wi-Fi, battery and the clock at the right;
+    the handheld bar 28 rows (`hhbar.h`), the desk's 40, and back to 18 on a
+    theme with no look."""
+    ws = _looked_ws(tmp_path, desk=desk)
+    L = ws.layout
+    assert L.status_h == (40 if desk else 28)
+    names = _names_of(L.bars)[0]
+    assert names[0] == "menu" and names[-4:] == ["close", "wifi", "battery", "clock"]
+    assert ("chips" in names) == desk
+    menu = L.bars[0][3][0][1]
+    assert menu[0] == 2 * L.cs and menu[2] == layout_base.sys_tile(L.status_h)[2]
+    tile = ws.bar_layer.sys_tile(menu, L.bars[0][1], False)
+    assert tile[2:] == ((36, 34) if desk else (22, 20))
+    ws.look.set_theme("night", persist=False)
+    assert ws.layout.status_h == (40 if desk else 18)
+    assert ws.layout.bars[0][3][0][0] == "zone"
+
+
+def _px(cv, x, y):
+    i = (y * cv.w + x) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]
+
+
+def _word(v):
+    from runtime import ui_draw
+    return ui_draw._C.theme_rgb(v)[0]
+
+
+@pytest.mark.parametrize("variant,fill", [("light", 0xffff), ("dark", None)])
+def test_the_desk_bar_is_solid_over_the_backdrop(tmp_path, variant, fill):
+    """The band is `bar.fill` at full strength wherever it lies, its line
+    under it: the backdrop's discs never show through it."""
+    ws = _looked_ws(tmp_path, variant, desk=True)
+    _settle(ws)
+    cv = ws.wm._root_canvas
+    row = [_px(cv, x, 20) for x in range(400, 900, 7)]
+    want = fill if fill is not None else _px(cv, 400, 20)
+    assert set(row) == {want}
+    if variant == "light":
+        assert _px(cv, 600, 39) != want                  # bar.line, one row
+        assert _px(cv, 600, 38) == want
+
+
+def test_the_moy_button_takes_the_current_plate_while_its_menu_shows(tmp_path):
+    """The Moy button is the pixel Moy on its tile; while the system menu
+    it opens shows, the tile takes the current plate."""
+    ws = _looked_ws(tmp_path)
+    _settle(ws)
+    cv = ws.sys_canvas
+    L = ws.layout
+    tx, ty, tw, tht = ws.bar_layer.sys_tile(L.bars[0][3][0][1], L.bars[0][1], False)
+    at = (tx + 1, ty + tht // 2)                          # the tile's edge, past Moy
+    rest = _px(cv, *at)
+    ws.toggle_sysmenu()
+    _settle(ws)
+    assert ws.sysmenu.open and _px(cv, *at) != rest
+    ws.toggle_sysmenu()
+    _settle(ws)
+    assert _px(cv, *at) == rest
+
+
+def test_the_focused_windows_chip_is_raised_under_the_current_mark(tmp_path):
+    ws = _looked_ws(tmp_path, desk=True)
+    ws.open_settings()
+    _settle(ws)
+    cv = ws.wm._root_canvas
+    chips = ws.wm._chip_rects()
+    assert chips and all(r[3] == 28 for _k, r, _l in chips)
+    bar = _px(cv, 600, 20)
+    for key, (x, y, w, h), _label in chips:
+        inside = _px(cv, x + w - 4, y + h // 2)
+        assert (inside != bar) == (key == ws.wm._focus)

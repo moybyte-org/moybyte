@@ -222,7 +222,9 @@ reason, and its PSRAM outside the Python heap is the cart-runtime reserve
 
 **A bar** has an `edge`, a `size` (in the handheld's rows: a bar `size` rows
 thick is `size / 18` of its metric class's bar, `layout_base.bar_rows`, so 18
-is 18 × the chrome scale on a handheld and 40 on a desk) and three slots.
+is 18 × the chrome scale on a handheld and 40 on a desk, or the class's
+bar a theme's look sets, `hhbar.h` and `bar.h`: `docs/look_2026-10.md`
+step 14) and three slots.
 The 2026-10 look designs the P4 desk at chrome size 1 with per-class metrics
 and a 40-pixel bar, a theme's `render.scale: 2` drawing it on a half-size
 surface the glass doubles (owner, 2026-10-15; `docs/look_2026-10.md` step 9,
@@ -245,7 +247,7 @@ thing in both modes; what differs is only the container a component opens in
 
 | widget | draws | value | tap | min cell, horizontal / vertical |
 |---|---|---|---|---|
-| `menu` | the ≡ glyph | — | the system menu (the popup it is today, in both modes) | 16×16 / 16×16 |
+| `menu` | the ≡ glyph; under a theme's look the pixel Moy on its tile (`docs/look_2026-10.md` step 14), its cell the tile's | — | the system menu (the popup it is today, in both modes) | 16×16 / 16×16 |
 | `close` | the context-X | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status) | the surface's zone generation | the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
@@ -580,7 +582,9 @@ with one fixture layout that triggers each drop.
 **One row.** `layout_theme` in `ws.system` holds the name of the package —
 a seed, or an installed theme once phase 6 brings installs — whose resolved
 `layout` is used in place of the active theme's. Absent means "the active
-theme's". The reader is strict: a name that is not installed reads as absent
+theme's". Settings' row steps through the installed packages' layouts, not
+the seeds': a seed's layout is its look's (Moy's bar, `docs/look_2026-10.md`
+step 14). The reader is strict: a name that is not installed reads as absent
 (`None`); there is no legacy shape, so the store rule costs nothing
 (CLAUDE.md, 2026-09-07). `set_theme` writes `theme` and `theme_variant` and
 nothing else, which is why the pick survives a switch: it is stored beside

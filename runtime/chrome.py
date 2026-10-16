@@ -78,11 +78,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
     from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
+    from layout_base import sys_tile as _sys_tile
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
     from runtime.layout_base import (CLASSES as _LB_CLASSES, class_of as _lb_class_of,
-                                     bar_rows as _bar_rows)
+                                     bar_rows as _bar_rows, sys_tile as _sys_tile)
 
 
 try:                                    # device: ticks is frozen flat
@@ -389,8 +390,9 @@ class Layout(LayoutBase):
         # the context X and the clock in today's bar; its lent left zone runs
         # from the left edge to just before the clock.
         self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
+        sys_len = _sys_tile(self.status_h)[2] if _ui_draw.depth()[0] else 0
         self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
-                                       self.clock_w, _bar_text_w)
+                                       self.clock_w, _bar_text_w, sys_len=sys_len)
         self.batt_btn = self._cell("battery")
         self.wifi_btn = self._cell("wifi")
         self.sysmenu_btn = self._cell("menu")

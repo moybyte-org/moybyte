@@ -1476,7 +1476,7 @@ def frame_icon(rect, title_h):
 
 UNDER_FULL, UNDER_SMALL, UNDER_NONE = 0, 1, 2
 CAST_WINDOW, CAST_CARD, CAST_KEY = 0, 1, 2
-_DEPTH = [(0,) * 14]
+_DEPTH = [(0,) * 16]
 _MARKS = [False, 0]                 # the installed theme's: marks on, a card's reach
 
 
@@ -1500,8 +1500,9 @@ def mark_reach():
 
 def depth():
     """The installed depth: (on, win_r, card_r, key_r, corners, stepped,
-    shadow, edges, alpha, blur, dx, dy, back, frames); shadow 0 none, 1 soft,
-    2 hard; `frames` when the window frame is the depth's."""
+    shadow, edges, alpha, blur, dx, dy, back, frames, bar_h, hhbar_h);
+    shadow 0 none, 1 soft, 2 hard; `frames` when the window frame is the
+    depth's; the desk bar's and the handheld bar's heights (0 with depth off)."""
     return _DEPTH[0]
 
 
@@ -1532,6 +1533,18 @@ def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
     """The bar's band in the frame's style; `light`: a window's light toolbar;
     `side` the edge line's (a top bar's is its bottom row)."""
     _C.frame_band(cv, _LOOK if th is _TH else _look(th), rect, light, side)
+
+
+# bar_part's parts (moy_ui.h's MOY_UI_BARP_*): the 2026-10 look's bar.
+BAR_BAND, BAR_HH_BAND, BAR_SYS, BAR_HH_SYS, BAR_CHIP = 0, 1, 2, 3, 4
+
+
+def bar_part(cv, th, part, rect, on=0):
+    """A bar part of the live theme's look (docs/look_2026-10.md step 14):
+    a desk or handheld bar's band (`on` the band's BAND_* side), the system
+    button's tile (`on`: its menu is open) or a desk chip's field (`on`: the
+    focused window's). False, drawing nothing, under a theme with no depth."""
+    return _C.bar_part(cv, _LOOK if th is _TH else _look(th), part, rect, int(on))
 
 
 def toolbar(cv, th, rect):

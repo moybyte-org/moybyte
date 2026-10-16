@@ -25,6 +25,10 @@
       "value_ink": "#ffffff", "sunk": "#e3e6ed", "lcd": "#f1f2f6", "lcd_ink": "#4c3fd6"
     }
   },
+  "layout": {
+    "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
+               "right": ["close", "wifi", "battery", "clock"] }]
+  },
   "look": {
     "focus": { "style": "edge", "card": "lift", "small": "underline" },
     "current": { "style": "plate" },

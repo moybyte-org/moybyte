@@ -65,6 +65,9 @@ CLASSES = {
            "tile": 44, "tile_cell": 74, "tile_top": 18},
 }
 DESK_MIN_IN = 5.0
+# The bar heights a theme's look sets per class (`hhbar.h`, `bar.h`; the
+# 2026-10 look's THEMES.md), in place of the class's `bar` (`place_bar_h`).
+_bar_h = {}
 # The render scales a desk theme may ask for (`render.scale`): 2 lays the
 # desk out at its glass metrics on a half-size system surface the glass
 # doubles (the 2026-10 look's GAPS 11).
@@ -88,6 +91,35 @@ def place_class(name, render=1):
         raise ValueError("metric class: " + str(name))
     _class = name
     _render = render if name == DESK and render in RENDER_SCALES else 1
+
+
+def place_bar_h(handheld=0, desk=0):
+    """Lay the bars out `handheld` and `desk` rows thick on those classes (0:
+    the class's own `bar`). True when that moved a height."""
+    want = {}
+    if handheld:
+        want[HANDHELD] = int(handheld)
+    if desk:
+        want[DESK] = int(desk)
+    if want == _bar_h:
+        return False
+    _bar_h.clear()
+    _bar_h.update(want)
+    return True
+
+
+def sys_tile(thick):
+    """The system button's tile (w, h) on a bar `thick` rows across, and the
+    length its cell takes along the bar: the 2026-10 look's 36x34 on the
+    desk's 40-row bar and 22x20 on the handheld's 28 (DESIGN.md, the sizes),
+    in proportion on another."""
+    if _class == DESK:
+        h = thick * 34 // 40
+        w = h * 36 // 34
+        return w, h, w + 4
+    h = thick * 20 // 28
+    w = h * 22 // 20
+    return w, h, w + 6
 
 
 def metric_class():
@@ -122,6 +154,8 @@ def metric(name, s=1):
     grows with `s` over the unit (`chrome_size`), on the surface's own
     pixels."""
     m = CLASSES[_class][name]
+    if name == "bar":
+        m = _bar_h.get(_class, m)
     if _class == HANDHELD:
         return m * int(s)
     return m * chrome_size(s) // _render

@@ -1186,3 +1186,29 @@ def test_bar_strip_rebuild_budget(tmp_path):
     # One per distinct destination is right; one per SWITCH is the bug (would be 12).
     assert allocs <= 2, "strip layer reallocated %d times in 24 frames" % allocs
     assert renders <= 2, "strip re-rendered %d times in 24 frames" % renders
+
+
+# -- the 2026-10 look's bar (docs/look_2026-10.md step 14) --------------------
+
+def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
+    """Under Moy's look the clock's own repaint (`redraw_clock`) lays the
+    solid band and the chrome-ink clock exactly where a whole strip would."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    cv = ws.sys_canvas
+    bh = ws.layout.status_h
+    assert bh == 28
+
+    def frame(text):
+        ws.bar_layer._clock_text = lambda: text
+        ws.bar_layer.invalidate()
+        ws._dirty = True
+        ws.frame(1 / 30)
+        return bytes(cv._buf[:cv.w * bh * 2])
+
+    frame("12:34")
+    whole = frame("12:35")
+    frame("12:34")
+    ws.bar_layer._clock_text = lambda: "12:35"
+    ws.bar_layer.redraw_clock("home")
+    assert bytes(cv._buf[:cv.w * bh * 2]) == whole

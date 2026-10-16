@@ -28,6 +28,9 @@ _TITLES = {"menu": "EDITOR", "projects": "PROJECTS",
 # The title icon of a window no app cart draws (`_win_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
                 "update": "get", "desktop": "run"}
+# A look chip's room beside its label: the 12-pixel margin, the 18-pixel icon
+# and 8 to the label, 24 after it (the 2026-10 look's desk bar).
+_CHIP_PAD = 18 + 8 + 24
 
 
 class WindowChrome:
@@ -315,15 +318,18 @@ class WindowChrome:
                 y += side + 2 * fs
             return out
         titles = [self._win_title(self._wins[k]) for k in self._order]
-        room = cw - 4 * fs - (len(titles) - 1) * 2 * fs
+        looked = bool(_ui_draw.depth()[0])
+        pad = _CHIP_PAD if looked else 2 * 4 * fs   # the look's: icon slot and margins
+        gap = 6 if looked else 2 * fs
+        room = cw - 4 * fs - (len(titles) - 1) * gap
         cap = max(len(t) for t in titles)
         while True:
             labels = [t[:cap] for t in titles]
-            widths = [_ui_draw.text_width(lb, fs, "ui") + 2 * 4 * fs for lb in labels]
+            widths = [_ui_draw.text_width(lb, fs, "ui") + pad for lb in labels]
             if sum(widths) <= room or cap <= 4:
                 break
             cap -= 1                     # shorten the longest titles first
-        total = sum(widths) + (len(widths) - 1) * 2 * fs
+        total = sum(widths) + (len(widths) - 1) * gap
         if slot == 1:
             x = max(cx, (bw - total) // 2)
         elif slot == 2:
@@ -333,12 +339,15 @@ class WindowChrome:
         x += bx
         y = by + 1 * fs
         h = bh - 2 * fs
+        if looked:
+            h = min(bh * 28 // 40, bh - 8)
+            y = by + (bh - h) // 2
         end = bx + cx + cw - 4 * fs
         for i, k in enumerate(self._order):
             if x + widths[i] > end:
                 break                                  # out of bar space -- stop
             out.append((k, (x, y, widths[i], h), labels[i]))
-            x += widths[i] + 2 * fs
+            x += widths[i] + gap
         return out
 
     def _draw_taskbar_chips(self, quiet=False):
@@ -365,6 +374,9 @@ class WindowChrome:
             return
         self._chip_streak += 1
         line_h = self._root_ctx.layout.line_h
+        if _ui_draw.depth()[0]:
+            self._draw_look_chips(sc, th, fs, line_h)
+            return
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
             focused = (key == self._focus and not win.minimized)
@@ -379,6 +391,25 @@ class WindowChrome:
                 sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
             tx = x + (w - _ui_draw.text_width(label, fs, "ui")) // 2
             sc.print(label, tx, y + (h - line_h) // 2, fg, 1)
+
+    def _draw_look_chips(self, sc, th, fs, line_h):
+        """The taskbar chips as the look's tabs (docs/look_2026-10.md step 14):
+        the window's icon then its title, the focused window's chip raised
+        under the current mark, a minimized one's in the dim ink."""
+        for key, (x, y, w, h), label in self._chip_rects():
+            win = self._wins[key]
+            focused = key == self._focus and not win.minimized
+            _ui_draw.bar_part(sc, th, _ui_draw.BAR_CHIP, (x, y, w, h), focused)
+            ink = th["chrome_ink" if focused else "chrome_ink_dim"]
+            slot = (x + 12, y + (h - 18) // 2, 18, 18)
+            img = self._win_icon_img(win)
+            if img is not None:
+                iw = getattr(img, "w", 16) or 16
+                s = max(1, 18 // iw)
+                sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
+            else:
+                self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+            sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a

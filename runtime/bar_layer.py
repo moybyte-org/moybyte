@@ -119,8 +119,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
     import ui_draw as _ui_draw
+    import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
+    from runtime import layout_base as _layout_base
 
 
 def _bar_text_w(s):
@@ -143,10 +145,31 @@ _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
 # _cart_bar_key's fields every bar folds, and the ones a widget adds. Field 2
 # (the EDIT|CODE slot) is drawn by the crash chrome alone, which folds all.
 _KEY_ALWAYS = (0, 3, 4, 10)
-_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,)}
-_KEY_N = 11
+_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
+           "menu": (11,)}
+_KEY_N = 12
 _KEY_ALL = (1 << _KEY_N) - 1
 _KEY_UNDO = 1 << 9          # drawn only by the Editor's zone ("menu")
+
+
+def _battery(cv, x, y, side, u, ink):
+    """The look's battery in a `side`-square cell at unit `u`: an outlined
+    body with its cap, filled to the level (full: the host reads no level)."""
+    bw, bh = 11 * u, 7 * u
+    bx = x + (side - bw - u) // 2
+    by = y + (side - bh) // 2
+    for k in range(u):
+        cv.rectb(bx + k, by + k, bw - 2 * k, bh - 2 * k, ink)
+    cv.rect(bx + bw, by + 2 * u, u, bh - 4 * u, ink)
+    cv.rect(bx + 2 * u, by + 2 * u, bw - 4 * u, bh - 4 * u, ink)
+
+
+def _band_part():
+    """The look's band for the metric class in force: the desk bar's or the
+    handheld bar's (ui.bar_part)."""
+    if _layout_base.metric_class() == _layout_base.DESK:
+        return _ui_draw.BAR_BAND
+    return _ui_draw.BAR_HH_BAND
 
 
 def _edit_kind(cart):
@@ -519,7 +542,7 @@ class BarLayer:
                         if k not in f:
                             f.append(k)
                 if not b[3]:                # the crash chrome: everything
-                    f = list(range(11))
+                    f = list(range(_KEY_N))
                 out.append(tuple(f))
                 for k in f:
                     need |= 1 << k
@@ -665,6 +688,10 @@ class BarLayer:
             # invalidate explicitly)
             key[9] = ws.history.bar_undo_bits()
         key[10] = self._bar_cache_gen
+        if need & 2048:
+            m = getattr(ws, "sysmenu", None)       # the system button's open plate
+            key[11] = bool(_ui_draw.depth()[0]) and m is not None and m.open \
+                and m.widget == "menu"
 
     def _render_cart_bar(self, cv, key, i=0):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
@@ -697,10 +724,15 @@ class BarLayer:
         # min/max/close -- then the active app's LENT zone.
         tool = where in ("tool", "app")
         light = False if tool else self.zone_band_light(where)
-        _ui_draw.frame_band(cv, ws.theme_colors, (0, 0, rect[2], rect[3]), light,
-                       _BAND_SIDE[edge])
+        inside = self._in_window(where)
+        looked = not game and not inside and _ui_draw.depth()[0]
+        bar = (0, 0, rect[2], rect[3])
+        if not (looked and _ui_draw.bar_part(cv, ws.theme_colors, _band_part(), bar,
+                                             _BAND_SIDE[edge])):
+            looked = False
+            _ui_draw.frame_band(cv, ws.theme_colors, bar, light, _BAND_SIDE[edge])
         zone = None
-        if not self._in_window(where):
+        if not inside:
             cs = 0 if game else ws.layout.cs
             across = edge in ("left", "right")
             show_x = self._show_x(where)
@@ -708,7 +740,10 @@ class BarLayer:
                 if name == "zone":
                     zone = r
                 elif name in _PAINTED and (show_x or name != "close"):
-                    self._paint_cell(cv, mp, where, name, r, text, cs, dy, across, game)
+                    if looked:
+                        self._paint_look_cell(cv, where, name, r, text, bar, across)
+                    else:
+                        self._paint_cell(cv, mp, where, name, r, text, cs, dy, across, game)
         else:
             for c in cells:
                 if c[0] == "zone":
@@ -716,6 +751,9 @@ class BarLayer:
         if zone is None:
             return
         if tool:
+            if looked:
+                self._paint_look_cell(cv, where, "title", zone, None, bar, False)
+                return
             _ch.replay(mp.chrome_strip_cell("title", zone, 0, dy, self._title(where), False),
                        cv, ws)
             return
@@ -745,6 +783,67 @@ class BarLayer:
                 tw = _bar_text_w(s) * (1 if game else ws.layout.fs)
                 r = (r[0] + (r[2] - tw) // 2, r[1], tw, r[3])
         _ch.replay(mp.chrome_strip_cell(name, r, cs, dy, s, across), cv, ws)
+
+    def _paint_look_cell(self, cv, where, name, r, text, bar, across):
+        """One OS widget's cell under the theme's look (docs/look_2026-10.md
+        step 14): the system button is the pixel Moy on its tile, open while
+        the system menu shows; the status glyphs, the clock and the strings
+        draw in the bar's ink, centred across the bar."""
+        ws = self.ws
+        th = ws.theme_colors
+        ink = th["chrome_ink"]
+        x, y, w, h = r
+        thick = bar[2] if across else bar[3]
+        u = _layout_base.unit()
+        if name == "menu":
+            tx, ty, tw, tht = self.sys_tile(r, bar, across)
+            m = ws.sysmenu
+            part = _ui_draw.BAR_HH_SYS if _band_part() == _ui_draw.BAR_HH_BAND \
+                else _ui_draw.BAR_SYS
+            _ui_draw.bar_part(cv, th, part, (tx, ty, tw, tht), m.open and m.widget == "menu")
+            sc = max(1, tht // 16)
+            img = ws._icon_image_keyed("moy")          # its plate keyed on the tile
+            if img is not None:
+                cv.spr(img, tx + (tw - 16 * sc) // 2, ty + (tht - 16 * sc) // 2, sc)
+            return
+        if name in ("wifi", "battery", "close"):
+            if name == "wifi" and ws._wifi_icon_kind() != "wifi":
+                ink = th["chrome_ink_dim"]
+            side = 12 * u
+            gx = x + (w - side) // 2 if not across else (thick - side) // 2
+            gy = (thick - side) // 2 if not across else y + (h - side) // 2
+            if name == "battery":
+                _battery(cv, gx, gy, side, u, ink)
+            else:
+                ws._glyph(name, (gx, gy, side, side), ink, cv, u)
+            return
+        if name == "separator":
+            if across:
+                cv.rect(x + 2 * u, y + h // 2, w - 4 * u, 1, th["chrome_ink_dim"])
+            else:
+                cv.rect(x + w // 2, (thick - 16 * u) // 2, 1, 16 * u, th["chrome_ink_dim"])
+            return
+        s = self._clock_text() if name == "clock" else \
+            self._title(where) if name == "title" else (text or "")
+        L = ws.layout
+        if name == "clock" and across:
+            for i, part in enumerate((s[:2], s[3:5])):
+                cv.print(part, (thick - 2 * L.font_w) // 2, y + i * (h // 2), ink, 1)
+            return
+        if name == "title":
+            s = s[:max(0, w // max(1, L.font_w))]
+        cv.print(s, x, (thick - L.line_h) // 2, ink, 1)
+
+    def sys_tile(self, r, bar, across):
+        """The system button's tile in its cell `r` of bar rect `bar`: 36x34 on
+        the desk's 40-row bar, 22x20 on the handheld's 28, in proportion on
+        another (`layout_base.sys_tile`), centred in its cell and across the
+        bar."""
+        thick = bar[2] if across else bar[3]
+        tw, th, _len = _layout_base.sys_tile(thick)
+        if across:
+            return ((thick - tw) // 2, r[1] + (r[3] - th) // 2, tw, th)
+        return (r[0] + (r[2] - tw) // 2, (thick - th) // 2, tw, th)
 
     def _title(self, where):
         """The `title` widget's string: the running cart's or the open
@@ -804,12 +903,20 @@ class BarLayer:
         elif cx == bx:
             cx, cw = bx + 1, w - 1
         cv.clip(cx, cy, cw, ch)
-        _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
-                       _BAND_SIDE[edge])
+        looked = not self._zone_is_game(where) and not self._in_window(where) \
+            and _ui_draw.bar_part(cv, th, _band_part(), (bx, by, bw, bh), _BAND_SIDE[edge])
+        if not looked:
+            _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
+                                _BAND_SIDE[edge])
         cv.clip()
         text = self._clock_text()
         across = edge in ("left", "right")
-        if across:
+        if looked:
+            cv.camera(-bx, -by)
+            self._paint_look_cell(cv, where, "clock", (x - bx, y - by, w, h), None,
+                                  (0, 0, bw, bh), across)
+            cv.camera(0, 0)
+        elif across:
             cv.camera(-bx, -by)
             mp = _ch.chrome_inks(th, self._NAMES)
             self._paint_cell(cv, mp, where, "clock", (x - bx, y - by, w, h), None,

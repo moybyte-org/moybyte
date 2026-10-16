@@ -430,8 +430,13 @@ def test_the_home_rides_the_layout_carousel_by_default():
 
 
 def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
+    """...but Moy, whose look carries its own bar (docs/look_2026-10.md
+    step 14): the Moy button first, the status at the right."""
     for name in TH["seeds"]:
-        assert moy_ui.theme_layout(name) == (False, (TODAY,)), name
+        if name != "moy":
+            assert moy_ui.theme_layout(name) == (False, (TODAY,)), name
+    assert moy_ui.theme_layout("moy") == (False, (
+        ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"), ()),))
     assert "layout" not in TH["reserved"]
     assert set(LAY["required"]) <= set(LAY["widgets"])
     from runtime import shell_layout
