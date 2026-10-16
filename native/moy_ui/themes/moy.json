@@ -4,24 +4,24 @@
   "colors": {
     "dark": {
       "panel": "#0f1127", "edge": "#2b2f57", "title": "#b6a8f7", "title_ink": "#15123a",
-      "accent": "#ffc23d", "hilite": "#b6a8f7", "dim": "#23274b", "desktop": "#0f1127",
+      "accent": "#b6a8f7", "hilite": "#b6a8f7", "dim": "#23274b", "desktop": "#0f1127",
       "desktop_pattern": "#23274b", "surface": "#181b38", "surface_alt": "#23274b",
       "ink": "#eef0fb", "ink_dim": "#a1a6cc", "border": "#2b2f57", "selection": "#b6a8f7",
-      "selection_ink": "#15123a", "focus": "#ffc23d", "bar": "#0b0d1e", "bar_edge": "#2b2f57",
+      "selection_ink": "#15123a", "focus": "#b6a8f7", "bar": "#0b0d1e", "bar_edge": "#2b2f57",
       "chrome_ink": "#eef0fb", "chrome_ink_dim": "#a1a6cc", "title_active": "#b6a8f7",
       "title_inactive": "#23274b", "shade_hi": "#23274b", "shade_lo": "#0b0d1e",
-      "shade_dark": "#2b2f57", "ink_accent": "#ffc23d", "value": "#b6a8f7",
+      "shade_dark": "#2b2f57", "ink_accent": "#b6a8f7",
       "value_ink": "#15123a", "sunk": "#0b0d1e", "lcd": "#0b0d1e", "lcd_ink": "#b6a8f7"
     },
     "light": {
       "panel": "#eceef3", "edge": "#e2e5ec", "title": "#ffffff", "title_ink": "#15161d",
-      "accent": "#d45f00", "hilite": "#4c3fd6", "dim": "#e3e6ed", "desktop": "#eceef3",
+      "accent": "#4c3fd6", "hilite": "#4c3fd6", "dim": "#e3e6ed", "desktop": "#eceef3",
       "desktop_pattern": "#e2e5ec", "surface": "#ffffff", "surface_alt": "#f4f5f8",
       "ink": "#15161d", "ink_dim": "#5f6478", "border": "#e2e5ec", "selection": "#4c3fd6",
-      "selection_ink": "#ffffff", "focus": "#d45f00", "bar": "#ffffff", "bar_edge": "#e2e5ec",
+      "selection_ink": "#ffffff", "focus": "#4c3fd6", "bar": "#ffffff", "bar_edge": "#e2e5ec",
       "chrome_ink": "#15161d", "chrome_ink_dim": "#5f6478", "title_active": "#ffffff",
       "title_inactive": "#f4f5f8", "shade_hi": "#ffffff", "shade_lo": "#e3e6ed",
-      "shade_dark": "#e2e5ec", "ink_accent": "#d45f00", "value": "#4c3fd6",
+      "shade_dark": "#e2e5ec", "ink_accent": "#4c3fd6",
       "value_ink": "#ffffff", "sunk": "#e3e6ed", "lcd": "#f1f2f6", "lcd_ink": "#4c3fd6"
     }
   },
@@ -29,9 +29,9 @@
     "focus": { "style": "edge", "card": "lift", "small": "underline" },
     "current": { "style": "plate" },
     "dark": {
-      "focus": { "lift": { "shadow": "accent" } },
+      "focus": { "lift": { "rim": ["#b6a8f7", 0.6] } },
       "shadow": ["soft", "#000000", 0.55, 14, 6], "dim_neighbours": 0.3,
-      "win": { "header": "fill", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"] },
+      "win": { "header": "bar", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"] },
       "bar": { "fill": "#0b0d1e", "alpha": 0.85, "sys": ["#23274b", "#b6a8f7", "#23274b"],
                "chip_cur": "#23274b" },
       "tile_fill": "#23274b",
@@ -39,6 +39,7 @@
                              { "k": "circle", "at": [889, 733, 433], "p": "#0f1127" }] }
     },
     "light": {
+      "focus": { "lift": { "rim": ["#ffffff", 1] } },
       "shadow": ["soft", "#1b2040", 0.18, 16, 8],
       "win": { "header": "bar" },
       "bar": { "fill": "#ffffff", "alpha": 0.92, "line": [1, "#e2e5ec"],

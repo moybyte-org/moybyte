@@ -92,7 +92,8 @@ class _CountingHits(ui.Hits):
 # theme/variant WxH@font_scale sha256[:16] of the index readout. Taken on the
 # pre-Phase-3a tree (a raw RGB565 A/B of the two module objects in one process
 # agreed on all 48, 0 differing bytes); re-pinned by the 2026-10 look's step 10,
-# which moved the primary, tonal and danger buttons to their kinds' colours.
+# which moved the primary, tonal and danger buttons to their kinds' colours,
+# and step 11, which gave Contrast a `value` of its own (white).
 SHIPPED_WIDGET_HASHES = (
     "night/dark 320x240@1 2851ff3c973b8530",
     "night/dark 480x320@1 98643cb337ad1c57",
@@ -166,14 +167,14 @@ SHIPPED_WIDGET_HASHES = (
     "outline/light 480x320@1 2cf2c3b4e981f9e4",
     "outline/light 1024x600@2 45ddee661dd9f978",
     "outline/light 320x240@3 a8ea861852569676",
-    "contrast/dark 320x240@1 98dad17bbfddec4d",
-    "contrast/dark 480x320@1 c17a1140d2f9b4fe",
-    "contrast/dark 1024x600@2 a4f72335ece9ac34",
-    "contrast/dark 320x240@3 b4994f9d6fff7c3a",
-    "contrast/light 320x240@1 98dad17bbfddec4d",
-    "contrast/light 480x320@1 c17a1140d2f9b4fe",
-    "contrast/light 1024x600@2 a4f72335ece9ac34",
-    "contrast/light 320x240@3 b4994f9d6fff7c3a",
+    "contrast/dark 320x240@1 84124fc412e47af3",
+    "contrast/dark 480x320@1 911aa409329decf5",
+    "contrast/dark 1024x600@2 36978144566e9002",
+    "contrast/dark 320x240@3 1d4727d6f947e754",
+    "contrast/light 320x240@1 84124fc412e47af3",
+    "contrast/light 480x320@1 911aa409329decf5",
+    "contrast/light 1024x600@2 36978144566e9002",
+    "contrast/light 320x240@3 1d4727d6f947e754",
 )
 
 _SIZES = ((320, 240, 1), (480, 320, 1), (1024, 600, 2), (320, 240, 3))
@@ -884,7 +885,7 @@ def _matrix_bar(cv, th, y):
 
 
 # theme/variant sha256[:16] of the index readout at 320x320@1, the theme's
-# shape installed.
+# shape installed (Contrast's re-pinned by the look's step 11: its `value`).
 WIDGET_MATRIX_HASHES = (
     "night/dark 8eed92b1d0c0f895",
     "night/light ff04f3edb8d6f1f9",
@@ -904,8 +905,8 @@ WIDGET_MATRIX_HASHES = (
     "win95/light 489a464d634664b9",
     "outline/dark 959c775cbbaf86da",
     "outline/light 0221118a3188188a",
-    "contrast/dark 4bd55de149504c28",
-    "contrast/light 4bd55de149504c28",
+    "contrast/dark 142ae2069d655301",
+    "contrast/light 142ae2069d655301",
 )
 
 

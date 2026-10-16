@@ -539,8 +539,8 @@ def test_a_refused_layout_in_the_chain_stands_in_with_the_default():
 LOOK_SAMPLE = {
     "render": {"text": "crisp", "shapes": "stepped", "scale": 2},
     "focus": {"style": "invert", "card": "ring", "small": "plate", "color": "value",
-              "ink": "accent", "ring": {"w": 3.5, "gap": 0, "alpha": 0.6, "keyline": "#ffffff"},
-              "plate": {"alpha": 0.3}, "lift": {"grow": 99, "shadow": "accent"},
+              "ink": "accent", "ring": {"w": 3.5, "gap": 0, "alpha": 0.6}, "outline": [2, "#000000"],
+              "plate": {"alpha": 0.3}, "lift": {"grow": 99, "rim": ["#ffffff", 0.6]},
               "edge": {"w": 2}, "underline": {"w": 1}},
     "win_r": 8, "key_r": 99,
     "win_corners": [True, True, False, False], "shadow": ["hard", "#000000", 2, 2],

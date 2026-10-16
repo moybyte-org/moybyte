@@ -10,7 +10,7 @@
       "surface": 0, "surface_alt": 0, "ink": 7, "ink_dim": 6, "border": 7,
       "selection": 10, "selection_ink": 0, "focus": 10, "bar": 0, "bar_edge": 7,
       "chrome_ink": 7, "chrome_ink_dim": 6, "shade_hi": 7, "shade_lo": 0,
-      "shade_dark": 7, "ink_accent": 10, "ink_note": 10
+      "shade_dark": 7, "ink_accent": 10, "ink_note": 10, "value": 7
     },
     "light": {
       "panel": 0, "edge": 7, "title": 0, "title_ink": 7, "title_inactive": 0,
@@ -18,11 +18,17 @@
       "surface": 0, "surface_alt": 0, "ink": 7, "ink_dim": 6, "border": 7,
       "selection": 10, "selection_ink": 0, "focus": 10, "bar": 0, "bar_edge": 7,
       "chrome_ink": 7, "chrome_ink_dim": 6, "shade_hi": 7, "shade_lo": 0,
-      "shade_dark": 7, "ink_accent": 10, "ink_note": 10,
+      "shade_dark": 7, "ink_accent": 10, "ink_note": 10, "value": 7,
       "surface_light": false, "bar_light": false, "band_light": false,
       "code_text": 7, "code_keyword": 12, "code_string": 11, "code_number": 9,
       "code_comment": 22, "code_builtin": 14
     }
+  },
+  "look": {
+    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3, "gap": 2 } },
+    "current": { "style": "plate" },
+    "dark": { "current": { "alpha": 0.40 } },
+    "light": { "current": { "alpha": 0.42 }, "focus": { "outline": [2, 0] } }
   },
   "surfaces": {
     "button": { "rest": "border", "pressed": "border" },

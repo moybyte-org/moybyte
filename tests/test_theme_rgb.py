@@ -134,8 +134,10 @@ def test_moy_is_one_theme_with_day_and_night():
     assert day["surface_light"] == 1 and night["surface_light"] == 0
     assert day["desktop"] == RGB | 0xeceef3 and night["desktop"] == RGB | 0x0f1127
     assert day["value"] == RGB | 0x4c3fd6 and night["value"] == RGB | 0xb6a8f7
-    assert _leaf("moy", "win.header", True) == 2         # bar
-    assert _leaf("moy", "win.header", False) == 1        # fill
+    # one accent: focus, current and primary are one colour, the header a bar
+    assert day["accent"] == day["focus"] == day["value"]
+    assert night["accent"] == night["focus"] == night["value"]
+    assert _leaf("moy", "win.header", True) == _leaf("moy", "win.header", False) == 2
 
 
 # -- the cart boundary -----------------------------------------------------------
@@ -208,8 +210,9 @@ def test_the_moy_seed_sets_its_marks():
         assert [styles[lk[LEAF["focus." + k]]] for k in ("style", "card", "small")] == [
             "edge", "lift", "underline"]
         assert KINDS[LEAF["current.style"]][1][lk[LEAF["current.style"]]] == "plate"
-        shadow = KINDS[LEAF["focus.lift.shadow"]][1][lk[LEAF["focus.lift.shadow"]]]
-        assert shadow == ("ink" if light else "accent")
+        rim = (lk[LEAF["focus.lift.rim.c"]], lk[LEAF["focus.lift.rim.alpha"]])
+        assert rim == ((RGB | 0xffffff, 100) if light else (RGB | 0xb6a8f7, 60))
+        assert KINDS[LEAF["win.header"]][1][lk[LEAF["win.header"]]] == "bar"
 
 
 def test_a_set_plate_alpha_holds_in_both_modes():
