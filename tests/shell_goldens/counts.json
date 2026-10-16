@@ -16,7 +16,7 @@
     "editor_scene": [117, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [44, 11],
+    "settings": [26, 14],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -37,7 +37,7 @@
     "editor_scene": [117, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [44, 26],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -61,7 +61,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [62, 44],
+    "settings": [33, 28],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -82,7 +82,7 @@
     "editor_scene": [116, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [49, 15],
+    "settings": [43, 24],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -103,7 +103,7 @@
     "editor_scene": [117, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [33, 28],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -127,7 +127,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [63, 33],
+    "settings": [32, 28],
     "web_console": [184, 4],
     "web_console_address": [184, 6]
   },
@@ -151,7 +151,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 34],
+    "settings": [36, 30],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -187,7 +187,7 @@
     "editor_scene": [3, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [63, 34],
+    "settings": [26, 27],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -211,7 +211,7 @@
     "editor_scene": [3, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [63, 34],
+    "settings": [26, 27],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -235,16 +235,16 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [45, 28],
     "web_console": [212, 4],
     "web_console_address": [216, 6]
   },
   "p4_1024x600_cs2_fs1_popovers": {
     "desk_window_calc": [48, 3],
-    "popover_battery": [17, 10],
+    "popover_battery": [17, 8],
     "popover_clock": [112, 42],
     "popover_menu": [8, 8],
-    "popover_wifi": [65, 11]
+    "popover_wifi": [82, 13]
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "app_appearance": [130, 4],
@@ -266,7 +266,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 30],
+    "settings": [37, 30],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -290,7 +290,7 @@
     "editor_scene": [5, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [37, 28],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -314,7 +314,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 34],
+    "settings": [36, 30],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -340,7 +340,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [33, 28],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -364,7 +364,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 29],
+    "settings": [23, 17],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -388,7 +388,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 29],
+    "settings": [23, 17],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -412,7 +412,7 @@
     "editor_scene": [3, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [63, 30],
+    "settings": [18, 18],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -433,7 +433,7 @@
     "editor_scene": [114, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [449, 28],
+    "settings": [35, 19],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -456,7 +456,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [449, 28],
+    "settings": [34, 19],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -491,7 +491,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [449, 28],
+    "settings": [34, 19],
     "web_console": [192, 4],
     "web_console_address": [192, 6]
   },
@@ -512,7 +512,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [53, 25],
+    "settings": [36, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -533,7 +533,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [53, 25],
+    "settings": [38, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -549,9 +549,9 @@
     "ui_page": [25, 11]
   },
   "tdeck_320x240_fs1_widget_pages": {
-    "page_battery": [449, 28],
+    "page_battery": [34, 19],
     "page_clock": [63, 39],
     "page_menu": [3, 5],
-    "page_wifi": [473, 16]
+    "page_wifi": [77, 12]
   }
 }
