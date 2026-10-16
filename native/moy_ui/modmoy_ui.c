@@ -1530,6 +1530,18 @@ static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_buttons_obj, 5, 5, ui_frame_buttons);
 
+// frame_icon(rect, title_h) -> the line icon's slot (x, y, w, h), or None
+static mp_obj_t ui_frame_icon(mp_obj_t rect, mp_obj_t th) {
+    moy_ui_box_t b;
+    if (!moy_ui_frame_icon(box_of(rect), mp_obj_get_int(th), &b)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
+                     MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_frame_icon_obj, ui_frame_icon);
+
 // frame_band(cv, look, rect, light, side): the bar's band
 static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2201,6 +2213,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_paint), MP_ROM_PTR(&ui_paint_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&ui_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_buttons), MP_ROM_PTR(&ui_frame_buttons_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_icon), MP_ROM_PTR(&ui_frame_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_band), MP_ROM_PTR(&ui_frame_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },

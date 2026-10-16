@@ -209,6 +209,7 @@ _DRAW_SIGS = (
     ("moy_ui_frame", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
     ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
+    ("moy_ui_frame_icon", [_Box, _I, c.POINTER(_Box)], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
@@ -590,6 +591,12 @@ def binding():
                                      int(fs), out)
         return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
 
+    def frame_icon(rect, title_h):
+        out = _Box()
+        if not lib.moy_ui_frame_icon(box_of(rect), int(title_h), c.byref(out)):
+            return None
+        return (out.x, out.y, out.w, out.h)
+
     def frame_geom(w, h, title_h, active, mode):
         out = (_I * 6)()
         lib.moy_ui_frame_geom(int(w), int(h), int(title_h), 1 if active else 0, int(mode), out)
@@ -685,7 +692,7 @@ def binding():
 
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
-              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom,
+              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon,
               frame_under, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, inset, cut,
               split, row_content, cell_art):

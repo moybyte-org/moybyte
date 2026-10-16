@@ -237,7 +237,27 @@ typedef struct {
     int16_t alpha, blur, dx, dy, back;  // alpha 0..255; back: a back window's share, %
     int16_t line, line_back;        // win.frame's and win.frame_back's widths
     int32_t line_c, line_back_c, body;
+    // The window's parts (step 13): win.header, .align, .controls, .icon,
+    // .rule, and its paints (a colour, or MOY_THEME_PAINT | a slot of the depth's
+    // own copy of the look's paints, moy_ui_depth.c).
+    uint8_t header, align, controls, icon, rule;
+    int32_t fill, fill_back, grad, grad_back;
+    // The bars' parts (step 14): the desk bar's and the handheld bar's style,
+    // height, paint, line and ink, the system button's tile, the current chip.
+    uint8_t bar_style, hh_style, bar_h, hh_h;
+    int16_t bar_line_w, hh_line_w;
+    int32_t bar_fill, bar_line_c, hh_fill, hh_line_c, bar_ink, bar_dim, hh_ink, hh_dim;
+    int32_t sys_fill, hh_sys_fill, chip_cur;
 } moy_ui_depth_t;
+// win.header's, win.controls' and the bars' styles, in style.json's order
+enum { MOY_UI_HEAD_PLAIN = 0, MOY_UI_HEAD_FILL = 1, MOY_UI_HEAD_BAR = 2, MOY_UI_HEAD_GRAD = 3 };
+enum {
+    MOY_UI_CTL_THREE = 0, MOY_UI_CTL_CLOSE = 1, MOY_UI_CTL_LIGHTS = 2, MOY_UI_CTL_XP = 3,
+    MOY_UI_CTL_AMIGA = 4, MOY_UI_CTL_ADW = 5,
+};
+enum { MOY_UI_HH_NONE = 0, MOY_UI_HH_FLAT = 1, MOY_UI_HH_GRAD = 2, MOY_UI_HH_GLASS = 3 };
+// The value bar across a focused window's top under `win.header: bar`, in pixels.
+#define MOY_UI_HEAD_BAR_H 4
 // Install theme `name`'s depth in a mode (light 1: its `light` look). Answers on.
 int moy_ui_depth_use(const char *name, size_t n, int light);
 const moy_ui_depth_t *moy_ui_depth(void);
@@ -254,6 +274,12 @@ void moy_ui_frame_geom(int w, int h, int th, int active, int mode, int out[MOY_U
 // The frame's own pixels under the depth (moy_ui_frame draws it): the strip,
 // the sides and the foot inside the rounded outline, the ring, the rule.
 void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active);
+// The token a title draws in under the depth's header: the value ink on a
+// focused `fill` header, the chrome ink, the dim chrome ink behind.
+int moy_ui_depth_title_ink(int active);
+// The slot the window's line icon takes left of its title (win.icon), a
+// square `th` * 20 / 44 on a side; 0 where the frame draws no icon.
+int moy_ui_frame_icon(moy_ui_box_t w, int th, moy_ui_box_t *slot);
 // What a window leaves to the layer under it: its shadow at `mode`'s size and
 // its outline's partly covered pixels, blended over what that layer just
 // painted (runtime/wm_desk.py draws it, clipped to what it repainted).

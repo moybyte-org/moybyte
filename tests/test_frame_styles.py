@@ -158,3 +158,101 @@ def test_the_band(frame, style):
     px = indices_of(cv)
     assert px[5 * 40 + 5] == th["surface"] and px[11 * 40 + 5] == BG
     assert cv.gate_counts()[0] == (2 if style == "win9x" else 1)
+
+
+# -- the depth's window parts (docs/look_2026-10.md step 13) ------------------
+
+@pytest.fixture
+def looked():
+    """Install theme `name`'s depth in a mode and its live colours; answers
+    (tokens, a canvas over its block)."""
+    from test_ui_style_data import _live
+    def use(name, light, size=(420, 200)):
+        ui_draw.use_depth(name, light)
+        live = _live(name, "light" if light else "dark")
+        cv = SystemCanvas(*size)
+        cv.theme_block(live.block)
+        cv.cls(live.tokens["desktop"])
+        return live.tokens, cv
+    yield use
+    ui_draw.use_depth(None, False)
+
+
+def _word(v):
+    return ui_draw._C.theme_rgb(v)[0]
+
+
+def _px(cv, x, y):
+    i = (y * cv.w + x) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]
+
+
+@pytest.mark.parametrize("light", [True, False])
+def test_the_title_buttons_are_minimize_maximize_close(looked, light):
+    """Every built-in theme's controls are minimize, maximize and close as
+    title buttons, each a 28-pixel target inside the 44-row header, and a
+    running game's window has no minimize."""
+    looked("moy", light)
+    rect = (100, 50, 400, 300)
+    btns = ui_draw.frame_buttons(rect, 44, "CALC", True, 1)
+    assert _names(btns) == [("min", True), ("max", True), ("close", True)]
+    for _n, (x, y, w, h), _right in btns:
+        assert w >= 28 and h >= 28
+        assert 100 < x and x + w < 500 and 50 < y and y + h <= 50 + 45
+    pitch = [b[1][0] for b in btns]
+    assert pitch[1] - pitch[0] == pitch[2] - pitch[1] == 34
+    game = ui_draw.frame_buttons(rect, 44, "GAME", False, 1)
+    assert _names(game) == [("max", True), ("close", True)]
+    assert ui_draw.frame_icon(rect, 44) == (116, 62, 20, 20)
+
+
+@pytest.mark.parametrize("light", [True, False])
+def test_moys_header_is_the_windows_colour_under_a_value_bar(looked, light):
+    """`win.header: bar`: the focused window's header is the window's colour
+    under a 4-pixel value bar across its top; a window behind has no bar."""
+    th, cv = looked("moy", light)
+    x, y, w, h = 20, 20, 300, 160
+    for active in (True, False):
+        cv.cls(th["desktop"])
+        ui_draw.frame(cv, th, (x, y, w, h), 44, "CALC", active, True, 1)
+        mid = x + w // 2
+        top = _word(th["value"]) if active else _word(th["surface"])
+        # Night rings its windows in `line`, over the bar's first row
+        first = 0 if light else 1
+        assert [_px(cv, mid, y + j) for j in range(first, 4)] == [top] * (4 - first)
+        assert _px(cv, mid, y + 4) == _px(cv, mid, y + 30) == _word(th["surface"])
+        assert _px(cv, mid, y + 44) == _word(th["edge"])            # the rule
+    assert ui_draw.frame_geom(w, h, 44)[0] > 0                      # rounded
+
+
+def test_a_header_fill_and_close_alone(looked):
+    """A look's `win.header: fill` fills a focused header with `value` (a
+    window behind takes `win.fill_back`, else its colour), `win.controls:
+    close` leaves close alone, and `win.icon: false` leaves no icon slot."""
+    from test_ui_style_data import _install, _uninstall
+    _install({"format": 2, "name": "wp", "inherits": "moy", "look": {
+        "win": {"header": "fill", "controls": "close", "icon": False, "rule": 0}}})
+    try:
+        th, cv = looked("wp", True)
+        rect = (20, 20, 300, 160)
+        assert _names(ui_draw.frame_buttons(rect, 44, "T", True, 1)) == [("close", True)]
+        assert ui_draw.frame_icon(rect, 44) is None
+        ui_draw.frame(cv, th, rect, 44, "T", True, True, 1)
+        assert _px(cv, 170, 40) == _px(cv, 170, 64) == _word(th["value"])
+        cv.cls(th["desktop"])
+        ui_draw.frame(cv, th, rect, 44, "T", False, True, 1)
+        assert _px(cv, 170, 40) == _px(cv, 170, 64) == _word(th["surface"])
+    finally:
+        _uninstall()
+
+
+def test_a_theme_without_a_look_keeps_its_frame():
+    """Legacy seeds draw their frame style: no icon slot, their own boxes."""
+    ui_draw.use_depth("night", False)
+    try:
+        assert ui_draw.frame_icon((0, 0, 300, 200), 18) is None
+        assert _names(ui_draw.frame_buttons((0, 0, 300, 200), 18, "T", True, 1)) == [
+            ("min", True), ("max", True), ("close", True)]
+        assert ui_draw.frame_buttons((0, 0, 300, 200), 18, "T", True, 1)[0][1][2] == 16
+    finally:
+        ui_draw.use_depth(None, False)

@@ -48,6 +48,27 @@ static int16_t whole(const moy_theme_look_t *lk, const char *name, int dflt) {
 static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, size_t n,
                     int light);
 
+// The look's paints the parts name, copied out of the look at install: a
+// paint leaf reads as MOY_THEME_PAINT | its slot here.
+#define DEPTH_PAINTS 6
+static moy_theme_paint_t s_paint[DEPTH_PAINTS];
+static int s_paints;
+
+static int set(int32_t v);
+
+static int32_t paint_leaf(const moy_theme_look_t *lk, const char *name) {
+    int32_t v = leaf(lk, name);
+    if (v >= MOY_THEME_PAINT && v < MOY_THEME_VIBRANCY) {
+        int k = (int)(v - MOY_THEME_PAINT);
+        if (k < 0 || k >= lk->n_paints || s_paints >= DEPTH_PAINTS) {
+            return MOY_THEME_NONE;
+        }
+        s_paint[s_paints] = lk->paint[k];
+        return MOY_THEME_PAINT | s_paints++;
+    }
+    return v == MOY_THEME_VIBRANCY ? MOY_THEME_NONE : v;
+}
+
 static moy_ui_marks_t s_marks = {.active = 1};
 
 const moy_ui_marks_t *moy_ui_marks(void) {
@@ -182,6 +203,33 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
     if (d->line_back_c == MOY_THEME_NONE || d->line_back_c == MOY_THEME_OFF) {
         d->line_back_c = d->line_c;
     }
+    s_paints = 0;
+    d->header = (uint8_t)num(leaf(lk, "win.header"), MOY_UI_HEAD_PLAIN);
+    d->align = (uint8_t)num(leaf(lk, "win.align"), 0);
+    d->controls = (uint8_t)num(leaf(lk, "win.controls"), MOY_UI_CTL_THREE);
+    d->icon = (uint8_t)num(leaf(lk, "win.icon"), 1);
+    d->rule = (uint8_t)num(leaf(lk, "win.rule"), 1);
+    d->fill = paint_leaf(lk, "win.fill");
+    d->fill_back = paint_leaf(lk, "win.fill_back");
+    d->grad = paint_leaf(lk, "win.grad");
+    d->grad_back = paint_leaf(lk, "win.grad_back");
+    d->bar_style = (uint8_t)num(leaf(lk, "bar.style"), 0);
+    d->bar_h = (uint8_t)num(leaf(lk, "bar.h"), 40);
+    d->bar_fill = paint_leaf(lk, "bar.fill");
+    d->bar_line_w = whole(lk, "bar.line.w", 0);
+    d->bar_line_c = leaf(lk, "bar.line.c");
+    d->bar_ink = leaf(lk, "bar.ink");
+    d->bar_dim = leaf(lk, "bar.dim");
+    d->sys_fill = leaf(lk, "bar.sys.fill");
+    d->chip_cur = leaf(lk, "bar.chip_cur");
+    d->hh_style = (uint8_t)num(leaf(lk, "hhbar.style"), MOY_UI_HH_NONE);
+    d->hh_h = (uint8_t)num(leaf(lk, "hhbar.h"), 28);
+    d->hh_fill = paint_leaf(lk, "hhbar.fill");
+    d->hh_line_w = whole(lk, "hhbar.line.w", 0);
+    d->hh_line_c = leaf(lk, "hhbar.line.c");
+    d->hh_ink = leaf(lk, "hhbar.ink");
+    d->hh_dim = leaf(lk, "hhbar.dim");
+    d->hh_sys_fill = leaf(lk, "hhbar.sys.fill");
     return 1;
 }
 
@@ -298,8 +346,72 @@ static moy_shape_paint_t solid(uint16_t c) {
     return p;
 }
 
-// The frame's body in `mask`: the strip with the top corners, the sides and
-// foot with the bottom ones (the content's rect left alone), and the ring.
+static int is_set(int32_t v) {
+    return v != MOY_THEME_NONE && v != MOY_THEME_OFF;
+}
+
+// Look value `v` as a fill: a colour, or a paint the install copied.
+static int paint_of(const dd_t *d, int32_t v, moy_shape_paint_t *p) {
+    if (!is_set(v)) {
+        return 0;
+    }
+    if (v >= MOY_THEME_PAINT && v < MOY_THEME_VIBRANCY) {
+        const moy_theme_paint_t *tp = &s_paint[(v - MOY_THEME_PAINT) % DEPTH_PAINTS];
+        memset(p, 0, sizeof(*p));
+        p->n = (uint8_t)(tp->n > MOY_SHAPE_STOPS ? MOY_SHAPE_STOPS : tp->n);
+        p->mode = tp->mode;
+        p->steps = tp->steps;
+        for (int k = 0; k < p->n; k++) {
+            p->t[k] = tp->t[k];
+            p->c[k] = val(d, tp->c[k]);
+        }
+        return p->n > 0;
+    }
+    *p = solid(val(d, v));
+    return 1;
+}
+
+// `d` with its clip narrowed to rows [y0, y1) of the canvas.
+static dd_t rows_of(const dd_t *d, int y0, int y1) {
+    dd_t c = *d;
+    int a = y0 - d->t.cam_y, b = y1 - d->t.cam_y;
+    c.t.cy0 = a > c.t.cy0 ? a : c.t.cy0;
+    c.t.cy1 = b < c.t.cy1 ? b : c.t.cy1;
+    return c;
+}
+
+// The header's fill by win.header (THEMES.md, the theme model): plain takes
+// win.fill (a window behind win.fill_back, else win.fill), fill the value
+// colour (behind: win.fill_back), grad win.grad and win.grad_back, and bar
+// none: the header is the window's colour, a value bar across a focused one.
+static int header_paint(const dd_t *d, int active, moy_shape_paint_t *p) {
+    const moy_ui_depth_t *dp = &s_depth;
+    switch (dp->header) {
+        case MOY_UI_HEAD_FILL:
+            if (active) {
+                *p = solid(tok(d, MOY_UI_T_VALUE));
+                return 1;
+            }
+            return paint_of(d, dp->fill_back, p);
+        case MOY_UI_HEAD_GRAD:
+            return paint_of(d, active ? dp->grad : dp->grad_back, p);
+        case MOY_UI_HEAD_PLAIN:
+            return paint_of(d, active || !is_set(dp->fill_back) ? dp->fill : dp->fill_back, p);
+        default:
+            return 0;
+    }
+}
+
+int moy_ui_depth_title_ink(int active) {
+    if (!active) {
+        return MOY_UI_T_CHROME_INK_DIM;
+    }
+    return s_depth.header == MOY_UI_HEAD_FILL ? MOY_UI_T_VALUE_INK : MOY_UI_T_CHROME_INK;
+}
+
+// The frame's body in `mask`: the header with the top corners (a focused
+// `bar` header's value bar across its top rows), the sides and foot with the
+// bottom ones (the content's rect left alone), the ring and the rule.
 static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int mask) {
     const moy_ui_depth_t *dp = &s_depth;
     int g[MOY_UI_GEOM];
@@ -318,13 +430,22 @@ static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int ma
         line = 0;
     }
     if (line == 0 || mask != MOY_SHAPE_FRINGE) {
-        moy_shape_paint_t strip = solid(tok(d, active ? MOY_UI_T_TITLE_ACTIVE
-                                                      : MOY_UI_T_TITLE_INACTIVE));
-        rrect(d, w.x, w.y, w.w, th + 1, r, cn & (MOY_SHAPE_TL | MOY_SHAPE_TR), st, mask, &strip, 0,
-              0, -1, NULL);
-        moy_shape_paint_t body = solid(dp->body != MOY_THEME_NONE && dp->body != MOY_THEME_OFF
-                                           ? val(d, dp->body)
-                                           : tok(d, MOY_UI_T_SURFACE));
+        moy_shape_paint_t body = solid(is_set(dp->body) ? val(d, dp->body)
+                                                        : tok(d, MOY_UI_T_SURFACE));
+        moy_shape_paint_t head;
+        if (!header_paint(d, active, &head)) {
+            head = body;
+        }
+        int top = cn & (MOY_SHAPE_TL | MOY_SHAPE_TR);
+        int band = dp->header == MOY_UI_HEAD_BAR && active ? MOY_UI_HEAD_BAR_H : 0;
+        band = band < th ? band : 0;
+        if (band) {
+            moy_shape_paint_t value = solid(tok(d, MOY_UI_T_VALUE));
+            dd_t bar = rows_of(d, w.y, w.y + band);
+            rrect(&bar, w.x, w.y, w.w, th + 1, r, top, st, mask, &value, 0, 0, -1, NULL);
+        }
+        dd_t rest = rows_of(d, w.y + band, w.y + th + 1);
+        rrect(&rest, w.x, w.y, w.w, th + 1, r, top, st, mask, &head, 0, 0, -1, NULL);
         moy_shape_hole_t content = {w.x + 1, w.y + 1 + th, w.w - 2, w.h - 2 - th - foot, 0};
         rrect(d, w.x, w.y + th + 1, w.w, w.h - th - 1, r, cn & (MOY_SHAPE_BL | MOY_SHAPE_BR), st,
               mask, &body, 0, 0, -1, &content);
@@ -333,8 +454,11 @@ static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int ma
         rrect(d, w.x, w.y, w.w, w.h, r, cn, st, mask, NULL, line, hi, dp->edges == 1 ? lo : -1,
               NULL);
     }
-    if (mask != MOY_SHAPE_FRINGE) {
-        moy_target_fill(&d->t, w.x + line, w.y + th, w.w - 2 * line, 1, tok(d, MOY_UI_T_EDGE));
+    int rule = dp->header == MOY_UI_HEAD_GRAD ? 0 : dp->rule;
+    rule = rule < th ? rule : th;
+    if (mask != MOY_SHAPE_FRINGE && rule > 0) {
+        uint16_t rc = rule > 1 && line > 0 && hi >= 0 ? (uint16_t)hi : tok(d, MOY_UI_T_EDGE);
+        moy_target_fill(&d->t, w.x + line, w.y + th + 1 - rule, w.w - 2 * line, rule, rc);
     }
 }
 

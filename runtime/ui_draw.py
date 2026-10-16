@@ -1459,6 +1459,12 @@ def frame_buttons(rect, title_h, title, has_min, fs):
             for b in _C.frame_buttons(rect, title_h, title, has_min, fs)]
 
 
+def frame_icon(rect, title_h):
+    """The slot (x, y, w, h) the frame leaves for the window's line icon left
+    of its title, or None where it draws none (no depth, `win.icon` off)."""
+    return _C.frame_icon(rect, title_h)
+
+
 # --- depth: the theme's radii, shadow and edges (docs/look_2026-10.md step 6) ---
 #
 # Installed with the theme and its mode (`use_depth`); off for a theme with no

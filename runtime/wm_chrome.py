@@ -25,6 +25,10 @@ _SHADOW = NAMES["black"]
 _TITLES = {"menu": "EDITOR", "projects": "PROJECTS",
            "settings": "SETTINGS", "update": "UPDATE"}
 
+# The title icon of a window no app cart draws (`_win_icon`).
+_ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
+                "update": "get", "desktop": "run"}
+
 
 class WindowChrome:
     """The window chrome + taskbar chips of `WindowedWM` (its first base)."""
@@ -68,7 +72,43 @@ class WindowChrome:
         _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
                   win.title_h, self._win_title(win), focused, win.kind != "desktop",
                   self._fs())
+        slot = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h)
+        if slot is not None:
+            self._win_icon(win, slot, focused)
         self._win_grip(win, focused)
+
+    def _win_icon(self, win, slot, focused):
+        """The window's icon in the slot its frame leaves left of the title:
+        its app cart's icon at the largest whole scale that fits, else the kind's glyph in the title's ink."""
+        ws = self.ws
+        sc = self._root_canvas
+        x, y, w, h = slot
+        img = self._win_icon_img(win)
+        if img is not None:
+            iw = getattr(img, "w", 16) or 16
+            s = max(1, w // iw)
+            sc.spr(img, x + (w - iw * s) // 2, y + (h - iw * s) // 2, s)
+            return
+        ink = ws.theme_colors["chrome_ink" if focused else "chrome_ink_dim"]
+        ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+
+    def _win_icon_img(self, win):
+        """The icon sheet of the app cart `win` runs, found once per window."""
+        got = getattr(win, "_icon_img", False)
+        if got is not False:
+            return got
+        ws = self.ws
+        img = None
+        for app, _text in getattr(ws, "_apps", ()):
+            if app.id != win.kind:
+                continue
+            for c in ws.carts.all:
+                if app.is_app(c):
+                    img = ws.covers.icon_sheet_for(c)
+                    break
+            break
+        win._icon_img = img
+        return img
 
     # -- depth: rounded frames and shadows (ui.use_depth) ---------------------
 

@@ -1345,8 +1345,83 @@ static void frame_box(int style, int fs, int th, int *bw, int *bh, int *gap) {
     (void)th;
 }
 
+// The depth's window parts (docs/look_2026-10.md step 13), in proportion to
+// the 44-row header the look is drawn at: the title 16 in, after the line
+// icon's 20-pixel slot and a 10-pixel gap where win.icon is on; minimize,
+// maximize and close as 28-pixel title buttons on a 34-pixel pitch, close's
+// centre 24 in from the frame's inner edge (win.controls `close`: close
+// alone; the ricing sets lay out as `three`).
+static int depth_px(int th, int v) {
+    int p = moy_ui_fdiv(v * th + 22, 44);
+    return p > 1 ? p : 1;
+}
+
+static int depth_title_x(moy_ui_box_t w, int th) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    int x = w.x + (dp->line >= 4 ? dp->line + depth_px(th, 10) : depth_px(th, 16));
+    return dp->icon ? x + depth_px(th, 20) + depth_px(th, 10) : x;
+}
+
+int moy_ui_frame_icon(moy_ui_box_t w, int th, moy_ui_box_t *slot) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    if (!dp->frames || !dp->icon) {
+        return 0;
+    }
+    int n = depth_px(th, 20);
+    int x = w.x + (dp->line >= 4 ? dp->line + depth_px(th, 10) : depth_px(th, 16));
+    *slot = (moy_ui_box_t){(int16_t)x, (int16_t)(w.y + moy_ui_fdiv(th + 1 - n, 2)), (int16_t)n,
+                           (int16_t)n};
+    return 1;
+}
+
+static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int has_min, int fs,
+                               frame_lay_t *L) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    L->style = MOY_THEME_FRAME_FLAT;
+    L->align = dp->align == 1 ? MOY_THEME_ALIGN_CENTER : MOY_THEME_ALIGN_LEFT;
+    L->fs = fs;
+    L->th = th;
+    L->tab_w = 0;
+    int b = depth_px(th, 28), pitch = depth_px(th, 34);
+    int cx = w.x + w.w - dp->line - depth_px(th, 24);
+    int by = w.y + moy_ui_fdiv(th + 1 - b, 2);
+    uint8_t ids[3];
+    int n = 0;
+    if (dp->controls != MOY_UI_CTL_CLOSE) {
+        if (has_min) {
+            ids[n++] = MOY_UI_FB_MIN;
+        }
+        ids[n++] = MOY_UI_FB_MAX;
+    }
+    ids[n++] = MOY_UI_FB_CLOSE;
+    L->n = n;
+    for (int i = 0; i < n; i++) {
+        int c = cx - (n - 1 - i) * pitch;
+        L->b[i] = (moy_ui_frame_button_t){
+            {(int16_t)(c - b / 2), (int16_t)by, (int16_t)b, (int16_t)b}, ids[i], 1};
+    }
+    tfont_t f = role_font(MOY_UI_FONT_TITLE);
+    int x0 = depth_title_x(w, th);
+    int limit = L->b[0].box.x - depth_px(th, 8);
+    L->maxc = limit - x0 > 0 ? moy_ui_fdiv(limit - x0, f.w * fs) : 0;
+    L->tn = t_fit(&f, title, limit - x0, fs);
+    L->tw = t_w(&f, title.p, (size_t)L->tn, fs);
+    int tx = x0;
+    if (L->align == MOY_THEME_ALIGN_CENTER) {
+        tx = w.x + moy_ui_fdiv(w.w - L->tw, 2);
+        tx = tx > limit - L->tw ? limit - L->tw : tx;
+        tx = tx < x0 ? x0 : tx;
+    }
+    L->tx = tx;
+    L->ty = w.y + 1 + moy_ui_fdiv(th - f.line * fs, 2);
+}
+
 static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_ui_span_t title,
                          int has_min, int fs, frame_lay_t *L) {
+    if (moy_ui_depth()->frames) {
+        frame_layout_depth(w, th, title, has_min, fs, L);
+        return;
+    }
     int style = sh != NULL && sh->frame[0] ? sh->frame[0] - 1 : MOY_THEME_FRAME_CLASSIC;
     L->style = style;
     L->align = sh != NULL && sh->frame[1] ? sh->frame[1] - 1 : k_frame_align[style];
@@ -1467,7 +1542,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
                    : moy_ui_token(look, active ? MOY_UI_T_CHROME_INK : MOY_UI_T_DIM);
     int t_bg = active ? MOY_UI_T_TITLE_ACTIVE : MOY_UI_T_TITLE_INACTIVE;
     int bg = moy_ui_token(look, t_bg);
-    int fg = moy_ui_token(look, active ? MOY_UI_T_TITLE_INK : MOY_UI_T_CHROME_INK_DIM);
+    int fg = moy_ui_token(look, moy_ui_depth()->frames
+                                    ? moy_ui_depth_title_ink(active)
+                                    : active ? MOY_UI_T_TITLE_INK : MOY_UI_T_CHROME_INK_DIM);
     int dark = L.style == MOY_THEME_FRAME_CLASSIC ? FRAME_BLACK
                                                   : moy_ui_token(look, MOY_UI_T_SHADE_DARK);
     moy_ui_box_t strip = {(int16_t)(w.x + 1), (int16_t)(w.y + 1), (int16_t)(w.w - 2), (int16_t)th};
