@@ -112,58 +112,139 @@ def test_calc_opens_from_its_identity_cart(tmp_path):
     assert ws.screen == "launcher"
 
 
-def test_calc_math_via_hits(tmp_path):
-    """Drive 7 x 8 = 56 entirely through pointer taps resolved by ui_draw.Hits --
-    the draw pass builds the hit map, exactly the toolkit contract."""
+class _Key:
+    """One frame's input as an app's handler reads it: button `name`
+    pressed, `typed` the key typed."""
+
+    def __init__(self, name=None, typed=0):
+        self.name = name
+        self.last_key = typed
+
+    def pressed(self, n):
+        return n == self.name
+
+
+def _calc(tmp_path):
     ws = _ws(tmp_path)
     _select(ws, "Calc")
     ws.launch_selected()
     calc = ws._content_layers["calc"]
-    ws.frame(1 / 30)                                      # populate hits
+    ws.frame(1 / 30)
+    return ws, calc
 
-    def tap(label):
-        for rect, verb, arg in calc.hits._items:
-            if arg == label:
-                calc.handle_pointer(rect[0] + 2, rect[1] + 2, True)
-                return
-        raise AssertionError("no key " + label)
 
-    for k in ("7", "*", "8", "="):
+def _settle_calc(ws, calc, n=3):
+    for _ in range(n):
+        calc.handle_input(_Key())
         ws.frame(1 / 30)
-        tap(k)
+
+
+def _tap(ws, calc, key):
+    """A tap on `key`: the press frame, then the release that activates it."""
+    lay = calc.layout
+    x, y, w, h = lay.keys[lay.labels.index(key)]
+    calc.handle_pointer(x + w // 2, y + h // 2, True)
+    ws.frame(1 / 30)
+    _settle_calc(ws, calc)
+
+
+def test_calc_math_via_taps(tmp_path):
+    """7 x 8 = 56 through taps on the keys the verbs drew: the engine
+    resolves the tap to the stop it went down on."""
+    ws, calc = _calc(tmp_path)
+    for k in ("7", "*", "8", "="):
+        _tap(ws, calc, k)
     assert calc.entry == "56"
-    tap("C")
+    _tap(ws, calc, "C")
     assert calc.entry == "0" and calc.op is None
     # Division by zero stays kid-friendly.
     for k in ("9", "/", "0", "="):
-        ws.frame(1 / 30)
-        tap(k)
+        _tap(ws, calc, k)
     assert calc.entry == "OOPS"
+    # % is the remainder, the backspace key drops the last digit.
+    for k in ("C", "1", "7", "%", "5", "="):
+        _tap(ws, calc, k)
+    assert calc.entry == "2"
+    for k in ("1", "2", "3", "<"):
+        _tap(ws, calc, k)
+    assert calc.entry == "12"                  # a digit after a sum starts afresh
+    # Calc counts in whole numbers: the point key never activates.
+    _tap(ws, calc, ".")
+    assert calc.entry == "12"
+
+
+def test_calc_arrows_move_focus_and_enter_presses(tmp_path):
+    """Focus opens on 5; the arrows move it key to key and `a` presses the
+    focused key; the keyboard types digits and operators."""
+    ws, calc = _calc(tmp_path)
+    for name in ("a", "right", "a", "down", "a"):
+        calc.handle_input(_Key(name))
+        ws.frame(1 / 30)
+        _settle_calc(ws, calc, 1)
+    assert calc.entry == "563"
+    for ch in "*2=":
+        calc.handle_input(_Key(typed=ord(ch)))
+        ws.frame(1 / 30)
+    assert calc.entry == "1126"
+    # A tap owes its release and rest frames, and then Calc paints nothing.
+    _quiesce_frame(ws)
+    _tap(ws, calc, "4")
+    before = ws._frames_drawn
+    _settle_calc(ws, calc, 8)
+    assert ws._frames_drawn == before
+
+
+def test_calc_keeps_a_tape(tmp_path):
+    """Each sum lands on the tape (operands, operator, result), the newest
+    shown over the result, the rest drawn above it on the display."""
+    ws, calc = _calc(tmp_path)
+    blank = None
+    for expr in ("48+72=", "120-36=", "84/7=", "12*7="):
+        for ch in expr:
+            calc.handle_input(_Key(typed=ord(ch)))
+        if blank is None:
+            ws.frame(1 / 30)
+            blank = _region(ws, calc)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert calc.tape == [(48, "+", 72, "120"), (120, "-", 36, "84"),
+                         (84, "/", 7, "12"), (12, "*", 7, "84")]
+    assert calc.entry == "84" and calc._expr(None) == "12 * 7 ="
+    assert _region(ws, calc) != blank, "the sums above the result are drawn"
+    calc.handle_input(_Key(typed=ord("5")))
+    assert calc._expr(None) == "" and len(calc.tape) == 4
+    calc.open()
+    assert calc.tape == [] and calc.entry == "0"
+
+
+def _region(ws, calc):
+    """The rows of the display's top half, where the tape's earlier sums draw."""
+    x, y, w, h = calc.layout.display
+    cv = ws.sys_canvas
+    row = cv.w * 2
+    return bytes(cv._buf)[y * row:(y + h // 2) * row]
 
 
 def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
     """Calc's one per-key decision (DESIGN.md, "Button kinds"): = the one
-    primary, C danger, the operators tonal, the rest normal, each drawn as
-    Calc's so a theme's app_buttons.calc reaches them."""
-    from runtime import ui_draw
-    ws = _ws(tmp_path)
-    _select(ws, "Calc")
-    ws.launch_selected()
+    primary, C danger, the operators tonal, the rest normal."""
+    from runtime import calc_app
+    ws, calc = _calc(tmp_path)
     drawn = {}
-    real = ui_draw.button
+    real = calc_app.ui.button
 
-    def button(cv, th, rect, label, kind="normal", **kw):
-        drawn[label] = (kind, kw.get("app"))
-        return real(cv, th, rect, label, kind=kind, **kw)
+    def button(label, kind="normal", o=None):
+        drawn[label] = kind
+        return real(label, kind, o)
 
-    monkeypatch.setattr(ui_draw, "button", button)
+    monkeypatch.setattr(calc_app.ui, "button", button)
     ws._dirty = True
     ws.frame(1 / 30)
-    assert drawn["="] == ("primary", "calc")
-    assert drawn["C"] == ("danger", "calc")
-    assert {drawn[k] for k in "+-*/"} == {("tonal", "calc")}
-    assert {drawn[k] for k in "0123456789"} == {("normal", "calc")}
-    assert [k for k, v in drawn.items() if v[0] == "primary"] == ["="]
+    assert drawn["="] == "primary"
+    assert drawn["C"] == "danger"
+    assert {drawn[k] for k in "+-*/%"} == {"tonal"}
+    assert {drawn[k] for k in "0123456789.<"} == {"normal"}
+    assert [k for k, v in drawn.items() if v == "primary"] == ["="]
 
 
 def test_calc_layout_reflows_and_declares_minimum(tmp_path):
@@ -171,11 +252,15 @@ def test_calc_layout_reflows_and_declares_minimum(tmp_path):
     assert CalcLayout.MIN_W > 0 and CalcLayout.MIN_H > 0
     small = CalcLayout(320, 240, 1)
     big = CalcLayout(1024, 600, 1)
-    assert big.keys[3][3][2] > small.keys[3][3][2]        # keys grow with the window
-    # Every key stays inside the canvas.
-    for row in big.keys:
-        for x, y, w, h in row:
-            assert x >= 0 and y >= 0 and x + w <= 1024 and y + h <= 600
+    assert small.side and big.side                         # the tape beside the keys
+    assert not CalcLayout(344, 444, 1, windowed=True).side  # a window stacks them
+    assert big.keys[-1][2] > small.keys[-1][2]             # keys grow with the window
+    assert len(big.keys) == 19 and big.labels[-3] == "0"
+    # Every key stays inside the canvas, and the 0 is two keys wide.
+    for x, y, w, h in big.keys:
+        assert x >= 0 and y >= 0 and x + w <= 1024 and y + h <= 600
+    zero, dot = big.keys[big.labels.index("0")], big.keys[big.labels.index(".")]
+    assert zero[2] > dot[2] * 2
 
 
 def test_calc_is_app_rejects_lookalikes(tmp_path):

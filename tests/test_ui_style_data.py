@@ -266,22 +266,25 @@ def test_each_kind_resolves_from_the_base_roles():
                 kid = ui_draw._kind_id(ui_draw._button_kind(kind))
                 return ui_draw._C.button_style(look, kid, ui_draw._STATE_ID[state], -1)[:3]
 
+            own = {k: v[0] for a, k, v in _live(name, variant).buttons
+                   if a is None and v[0] != -2 ** 31}
+            field = own.get("normal", th["surface"])    # moy's buttons.normal.fill
             assert style("primary") == (th["value"], th["value_ink"], None)
-            assert style("normal") == (th["surface"], th["ink"], th["shade_dark"])
+            assert style("normal") == (field, th["ink"], th["shade_dark"])
             tonal, danger = style("tonal"), style("danger")
             assert tonal[2] == danger[2] == th["shade_dark"]
-            if (name, variant) == ("moy", "light"):    # its buttons.tonal.fill
-                assert tonal[:2] == ([v for a, k, v in _live(name, variant).buttons
-                                      if (a, k) == (None, "tonal")][0][0], th["value"])
-            elif ui_draw._C.theme_reads(th["surface"], th["value"]):
-                assert tonal[:2] == (th["surface"], th["value"])
+            if "tonal" in own:                          # moy's buttons.tonal.fill
+                assert tonal[:2] == (own["tonal"], th["value"])
+            elif ui_draw._C.theme_reads(field, th["value"]):
+                assert tonal[:2] == (field, th["value"])
             else:
-                assert tonal[:2] == (th["surface"], th["ink"])
-            if ui_draw._C.theme_reads(th["surface"], th["danger"]):
-                assert danger[:2] == (th["surface"], th["danger"])
+                assert tonal[:2] == (field, th["ink"])
+            if ui_draw._C.theme_reads(field, th["danger"]):
+                assert danger[:2] == (field, th["danger"])
             else:
                 assert danger[0] == th["danger"]
-            assert style("toggle") == ui_draw.state_colors(th, "cell", ui_draw.REST)
+            cell = tuple(ui_draw.state_colors(th, "cell", ui_draw.REST))
+            assert tuple(style("toggle")) == ((field,) + cell[1:] if "normal" in own else cell)
             for kind in KINDS:          # the shared marks stay the style's
                 assert style(kind, ui_draw.PRESSED)[:2] == ui_draw.state_colors(
                     th, ui_draw._button_kind(kind), ui_draw.PRESSED)[:2]

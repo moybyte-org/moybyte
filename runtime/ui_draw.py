@@ -18,6 +18,7 @@
 #   ScrollRegion                      the one scroll model
 #   DragTap                           press/drag/release over a ScrollRegion
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
+#   AppHost                           a shipped app's host side of the verbs (ctx.ui)
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
 `runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
@@ -1675,6 +1676,67 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False):
     if rect is None:
         rect = (0, 0, cv.w, cv.h)
     return _C.api_begin(ctx, inp, rect, 1 if desk else 0, _fs(cv))
+
+
+_HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+
+
+class AppHost:
+    """The host side of one shipped app's verbs (`ctx.ui`, for an app class
+    with `UI = True`): its context, and the frame's input gathered from the
+    app protocol's handlers in the run snapshot's shape. `keys` and `point`
+    answer whether the app owes a frame (its `damage.all()` is the caller's);
+    `begin` begins the frame. A tap is a press frame then a release frame
+    where it went down, and a frame that was not settled owes one more, so
+    the rest state a press or a move leaves is painted, then nothing."""
+
+    def __init__(self):
+        self.ctx = ui_context()
+        self.inp = array("i", [0] * 6)
+        self.tap = 0                    # 1 a press to begin, 2 its release
+        self.owed = False
+
+    def reset(self):
+        """A fresh context: focus, kept state and input forgotten."""
+        self.ctx = ui_context()
+        a = self.inp
+        a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = 0
+        self.tap = 0
+        self.owed = False
+
+    def keys(self, i):
+        """Take this frame's buttons and typed key from input state `i`."""
+        a = self.inp
+        b = 0
+        for n in range(len(_HOST_BUTTONS)):
+            if i.pressed(_HOST_BUTTONS[n]):
+                b |= 1 << n
+        k = getattr(i, "last_key", 0) or 0
+        if not isinstance(k, int):
+            k = ord(k[0]) if k else 0
+        a[0] = a[1] = b
+        a[5] = k
+        return bool(b) or k == 9 or self.owed or self.tap != 0
+
+    def point(self, x, y, click):
+        """A pointer sample in the app's coordinates; a click starts a tap."""
+        if not click:
+            return False
+        self.inp[2] = int(x)
+        self.inp[3] = int(y)
+        self.tap = 1
+        return True
+
+    def begin(self, cv, th, rect, desk=False):
+        """Begin the frame on `cv` under theme `th`, its page `rect`: whether
+        it is settled."""
+        a = self.inp
+        a[4] = 7 if self.tap == 1 else 1 if self.tap == 2 else 0
+        settled = ui_frame(self.ctx, cv, th, rect, a, desk)
+        self.tap = 2 if self.tap == 1 else 0
+        a[0] = a[1] = a[5] = 0
+        self.owed = not settled
+        return settled
 
 
 def fill_uncovered(cv, inner, outer, col):

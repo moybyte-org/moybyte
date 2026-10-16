@@ -27,7 +27,6 @@ PINNED = {
     "achievements_ui.py": (11, 0),
     "appearance.py": (0, 1),
     "block_editor_ui.py": (53, 0),
-    "calc_app.py": (2, 0),
     "cards_layer.py": (26, 0),
     "code_layer.py": (17, 0),
     "console.py": (9, 0),

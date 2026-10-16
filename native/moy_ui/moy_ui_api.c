@@ -1150,15 +1150,10 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     clip_t k;
     if (clip_row(&k, s, b, stacked, c->page)) {
         band(c, s, b, stacked, mark_flags(st, o));
-        moy_ui_cell_t cell;
-        memset(&cell, 0, sizeof(cell));
-        cell.glyph = -1;
-        cell.pad = cell.caption_h = cell.text_dx = cell.text_dy = MOY_UI_DEFAULT;
-        cell.band_fill = cell.band_ink = MOY_UI_FROM_STYLE;
-        cell.fs = c->fs;
-        colours(s, o, cell.colors);
-        moy_ui_cell(s, b, MOY_UI_K_CELL, mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0),
-                    interact(st), &cell, MOY_UI_PHASE_ALL, NULL);
+        int16_t oc[3];
+        colours(s, o, oc);
+        moy_ui_well(s, b, mark_flags(st, o), oc[0] == MOY_UI_FROM_STYLE ? -1 : oc[0], c->fs,
+                    c->cls);
         clip_out(&k);
     }
     out[0] = b.x;

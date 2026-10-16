@@ -15,12 +15,14 @@ try:
     from chrome import NAMES
     from settings_layer import SETTINGS_TOGGLES
     from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
+    from ui_draw import AppHost
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
     from runtime.chrome import NAMES
     from runtime.settings_layer import SETTINGS_TOGGLES
     from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
                                    ROUTE_WINDOW)
+    from runtime.ui_draw import AppHost
 import moy_app as _moy_app
 
 
@@ -312,9 +314,11 @@ class SpineVerbs:
         """
         for d in APPS:
             cls = _resolve_app_entry(d["entry"])
-            app = cls(self.app_context(d["id"], getattr(cls, "NEEDS", ()),
-                                       prefs_ns=getattr(cls, "PREFS_NS", None)),
-                      NAMES)
+            ctx = self.app_context(d["id"], getattr(cls, "NEEDS", ()),
+                                   prefs_ns=getattr(cls, "PREFS_NS", None))
+            if getattr(cls, "UI", False):
+                ctx.ui = AppHost()          # an app on the public UI API's verbs
+            app = cls(ctx, NAMES)
             setattr(self, str(d["id"]) + "_app", app)
             # Paint's document model is the console's reach into Paint (the
             # backdrop's My Art, the image door, the Paint cart's identity).

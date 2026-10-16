@@ -411,7 +411,6 @@ NOT_MOVED = frozenset((
     "runtime/appearance_app.py",
     "runtime/artwork.py",
     "runtime/block_editor_ui.py",
-    "runtime/calc_app.py",
     "runtime/code_layer.py",
     "runtime/editor_app.py",
     "runtime/file_widgets.py",

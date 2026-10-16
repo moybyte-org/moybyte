@@ -19,7 +19,8 @@ each id's state from frame to frame. `o`, the override table, is a dict of
 (native/moy_ui/moy_ui_wasm.h); all three draw the same pixels.
 
 The verbs draw into the frame the host began (`ui_draw.ui_frame`). The rect
-algebra is pure tuple math, every rect `(x, y, w, h)`. What lies under the
+algebra is pure tuple math, every rect `(x, y, w, h)`; `text_size` and
+`has_symbols` measure what an app prints into a part. What lies under the
 verbs -- the rect-taking widgets, the marks, `Hits`, `ScrollRegion` -- is
 `runtime/ui_draw.py`, the chrome's.
 """
@@ -79,6 +80,22 @@ def vsplit(rect, n, gap=0):
     if n <= 1:
         return [rect]
     return _C.split(rect, n, gap, False)
+
+
+def text_size(text, scale=1):
+    """`(w, h)`: the pixels `text` covers through a canvas's `print` now, its
+    font the theme's, at the whole-number `scale` -- `h` is the line."""
+    f = _C.print_font()
+    info = _C.font_info(f)
+    return _C.text_width(str(text), scale, f), (info[2] if info else 8) * scale
+
+
+def has_symbols():
+    """Whether that font draws Latin-1 and the symbols `− × ÷ … ← → ↑ ↓ •`
+    (a version 2 font, native/moy_gfx/moy_text.h); petme128 and a version 1
+    font draw ASCII alone."""
+    info = _C.font_info(_C.print_font())
+    return info is not None and info[4] == 0
 
 
 # --- the verbs ----------------------------------------------------------------

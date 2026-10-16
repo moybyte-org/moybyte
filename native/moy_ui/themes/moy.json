@@ -40,6 +40,7 @@
       "bar": { "fill": "#0b0d1e", "alpha": 0.85, "sys": ["#23274b", "#b6a8f7", "#23274b"],
                "chip_cur": "#23274b" },
       "tile_fill": "#23274b",
+      "buttons": { "normal": { "fill": "#23274b" }, "tonal": { "fill": "#2e3360" } },
       "backdrop": { "desk": [{ "k": "circle", "at": [801, 850, 433], "p": "#191c3e" },
                              { "k": "circle", "at": [889, 733, 433], "p": "#0f1127" }] }
     },
@@ -51,7 +52,7 @@
                "sys": ["#f4f5f8", "#4c3fd6", "#f4f5f8"], "chip_cur": "#f4f5f8" },
       "hhbar": { "sys": ["#ffffff", "#4c3fd6", "#ffffff"] },
       "tile_fill": "#ffffff",
-      "buttons": { "tonal": { "fill": "#e3e6ed" } },
+      "buttons": { "normal": { "fill": "#f4f5f8" }, "tonal": { "fill": "#e3e6ed" } },
       "backdrop": { "desk": [{ "k": "circle", "at": [918, 1000, 500], "p": "#e2e5ee" },
                              { "k": "circle", "at": [88, 983, 350], "p": "#e5e3f1" }] }
     }

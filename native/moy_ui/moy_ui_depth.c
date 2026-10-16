@@ -157,10 +157,26 @@ static void keycap_of(const moy_theme_look_t *lk) {
     s_keycap.r = num(leaf(lk, "keycap.r"), 4);
 }
 
+// The look's display fields (moy_ui.h, the parts), silent until a look sets them.
+static moy_ui_display_t s_display = {MOY_THEME_NONE, 0, MOY_UI_BEVEL_NONE};
+
+const moy_ui_display_t *moy_ui_display(void) {
+    return &s_display;
+}
+
+static void display_of(const moy_theme_look_t *lk) {
+    s_display.border_w = whole(lk, "lcd_border.w", 0);
+    s_display.border_c = leaf(lk, "lcd_border.c");
+    s_display.bevel = num(leaf(lk, "lcd_bevel"), MOY_UI_BEVEL_NONE);
+}
+
 int moy_ui_depth_use(const char *name, size_t n, int light) {
     moy_ui_depth_t *d = &s_depth;
     memset(d, 0, sizeof(*d));
     keycap_none();
+    s_display.border_c = MOY_THEME_NONE;
+    s_display.border_w = 0;
+    s_display.bevel = MOY_UI_BEVEL_NONE;
     uint8_t active = s_marks.active;
     uint32_t drawn = s_marks.drawn;
     memset(&s_marks, 0, sizeof(s_marks));
@@ -195,6 +211,7 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
     }
     moy_theme_look(name, n, variant, 1, lk);
     keycap_of(lk);
+    display_of(lk);
     if (marks || any) {
         marks_of(&s_marks, lk, light);
     }

@@ -671,5 +671,22 @@ typedef struct {
     int16_t alpha, border_w, r;
 } moy_ui_keycap_t;
 const moy_ui_keycap_t *moy_ui_keycap(void);
+// The look's display fields (moy_ui_depth_use reads them): `lcd_border`'s
+// width and look colour (MOY_THEME_NONE where silent) and `lcd_bevel`
+// (MOY_UI_BEVEL_*).
+enum { MOY_UI_BEVEL_NONE = 0, MOY_UI_BEVEL_IN = 1, MOY_UI_BEVEL_OUT = 2 };
+typedef struct {
+    int32_t border_c;
+    int16_t border_w, bevel;
+} moy_ui_display_t;
+const moy_ui_display_t *moy_ui_display(void);
+// A part's ground (ui.part): the display inset, the `lcd` role's fill
+// (`fill` in its place unless MOY_UI_FROM_STYLE), ringed by `lcd_border` or
+// bevelled by `lcd_bevel`, its corners the depth's key radius up to 8
+// pixels on the handheld and 10 on the desk (square without a depth), then
+// the marks `flags` holds: the current mark (MOY_UI_F_ON) and the focus mark
+// (MOY_UI_F_FOCUS), the theme's by size class, or its ring without marks.
+int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int fs,
+                int desk);
 
 #endif // MOY_UI_H

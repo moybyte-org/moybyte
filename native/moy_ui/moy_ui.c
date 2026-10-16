@@ -340,6 +340,11 @@ int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style
         return rc;
     }
     int own = state == MOY_UI_REST || state == MOY_UI_HOVER || state == MOY_UI_HOT;
+    if (state == MOY_UI_HOT) {
+        // A kind whose hot field is a cue of its own (a cell's danger) keeps it.
+        int16_t rest[3];
+        own = moy_ui_colors(look, kind, MOY_UI_REST, rest) == MOY_UI_OK && rest[0] == out->c[0];
+    }
     int32_t v = btn_leaf(u, app, bk, BL_FILL);
     if (v != MOY_THEME_NONE && (own || state == MOY_UI_DISABLED)) {
         out->c[0] = btn_colour(v);

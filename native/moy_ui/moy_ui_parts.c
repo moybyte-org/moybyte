@@ -566,6 +566,62 @@ int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t tit
     return MOY_UI_OK;
 }
 
+// -- a part's ground --------------------------------------------------------------------
+
+int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int fs,
+                 int desk) {
+    if (b.w <= 0 || b.h <= 0) {
+        return MOY_UI_OK;
+    }
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    const moy_ui_display_t *ds = moy_ui_display();
+    int r = 0;
+    if (dp->on) {
+        int cap = desk ? 10 : 8;
+        r = (dp->key_r < cap ? dp->key_r : cap) * d.fs;
+    }
+    moy_shape_paint_t p;
+    memset(&p, 0, sizeof(p));
+    p.n = 1;
+    p.c[0] = pal(&d, fill >= 0 ? fill : tok(&d, MOY_UI_T_LCD, MOY_UI_T_SUNK));
+    moy_shape_rrect_t sp;
+    memset(&sp, 0, sizeof(sp));
+    for (int k = 0; k < 4; k++) {
+        sp.r[k] = (uint8_t)(r > 255 ? 255 : r);
+    }
+    sp.stepped = dp->stepped;
+    sp.fill = &p;
+    sp.line_lo = -1;
+    if (ds->bevel != MOY_UI_BEVEL_NONE) {
+        uint16_t hi = pal(&d, tok(&d, MOY_UI_T_SHADE_HI, MOY_UI_T_SURFACE));
+        uint16_t lo = pal(&d, tok(&d, MOY_UI_T_SHADE_LO, MOY_UI_T_EDGE));
+        int in = ds->bevel == MOY_UI_BEVEL_IN;
+        sp.line = (uint8_t)d.fs;
+        sp.line_hi = in ? lo : hi;          // the top and left edges
+        sp.line_lo = in ? hi : lo;
+    } else if (ds->border_w > 0 && set(ds->border_c)) {
+        sp.line = (uint8_t)(ds->border_w * d.fs);
+        sp.line_hi = val(&d, ds->border_c);
+    }
+    moy_shape_rrect(&d.t, b.x, b.y, b.w, b.h, &sp);
+    d.row->st[MOY_ST_N_FILL]++;
+    const moy_ui_marks_t *m = moy_ui_marks();
+    int mi = -1;
+    if ((flags & MOY_UI_F_ON) && m->on) {
+        moy_ui_current_in(s, b, r, m->active ? 0 : MOY_UI_MARK_BACK, d.fs, &mi, 0);
+    }
+    if ((flags & MOY_UI_F_FOCUS) && m->active) {
+        if (m->on) {
+            moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, 0, d.fs, NULL, &mi, 0);
+        } else {
+            moy_ui_focus_ring(s, b, d.fs);
+        }
+    }
+    return MOY_UI_OK;
+}
+
 // -- groups ---------------------------------------------------------------------------
 
 int moy_ui_group_r(int fs) {

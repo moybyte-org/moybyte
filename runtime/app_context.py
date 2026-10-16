@@ -31,6 +31,10 @@ on a cart's manifest permissions rather than on a class constant.
     ctx.clipboard   the system cut/copy/paste buffer (#132)
     ctx.install     carts from outside: the network, its lease, the store (#124)
 
+An app class that sets `UI = True` draws with the public UI API's verbs and
+is handed their host side as `ctx.ui` (`ui_draw.AppHost`, not a role: no row
+serves it).
+
 No role hands out the console itself: an app reaches the shell only through
 the roles above (`tests/test_app_context.py` holds it).
 
