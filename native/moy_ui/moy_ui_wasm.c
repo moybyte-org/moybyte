@@ -243,6 +243,19 @@ int moy_ui_run_hints(void *target, const uint8_t *items, size_t n, const moy_ui_
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_icon(void *target, moy_ui_span_t name, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_icon(c, name);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_progress(void *target, moy_ui_span_t label, int32_t v, int32_t hi,
+                        const moy_ui_over_t *o) {
+    OPEN(target);
+    moy_ui_api_progress(c, &r.s, label, v, hi, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
 // -- the rows ----------------------------------------------------------------------
 
 static int over_of(moy_ui_over_t *o, const uint8_t *p, uint32_t n) {
@@ -406,6 +419,23 @@ int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8
     return moy_ui_run_hints(wasm_target(), items, n, &o);
 }
 
+int32_t moy_ui_wasm_icon(void *e, const uint8_t *name, uint32_t n, const uint8_t *ob,
+                         uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    (void)o;
+    int32_t v = 0;
+    int rc = moy_ui_run_icon(wasm_target(), span(name, n), &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_progress(void *e, const uint8_t *label, uint32_t n, int32_t v, int32_t hi,
+                             const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    return moy_ui_run_progress(wasm_target(), span(label, n), v, hi, &o);
+}
+
 #define FN(f) ((void *)(f))
 
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
@@ -428,6 +458,8 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_seg", FN(moy_ui_wasm_seg) },
     { "ui_swatches", FN(moy_ui_wasm_swatches) },
     { "ui_hints", FN(moy_ui_wasm_hints) },
+    { "ui_icon", FN(moy_ui_wasm_icon) },
+    { "ui_progress", FN(moy_ui_wasm_progress) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

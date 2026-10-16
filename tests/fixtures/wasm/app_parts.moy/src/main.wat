@@ -24,6 +24,9 @@
   (import "moybyte.app" "ui_swatches" (func $ui_swatches
     (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_hints" (func $ui_hints (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_icon" (func $ui_icon (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_progress" (func $ui_progress
+    (param i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
@@ -41,6 +44,8 @@
   (data (i32.const 1152) "Day\00Night")
   (data (i32.const 1168) "Accent")
   (data (i32.const 1176) "\00\00\ff\00\00\c0\00\00\ff\00\00\00")
+  (data (i32.const 1192) "wifi")
+  (data (i32.const 1200) "Update")
 
   ;; 2048: the page's rect (16 bytes); 2096: the focused id (32).
   (global $opens (mut i32) (i32.const 0))
@@ -65,6 +70,7 @@
                              (i32.const 2048) (i32.const 16)))
     (call $ok (call $ui_hints (i32.const 1040) (i32.const 28) (i32.const 0) (i32.const 0)))
     (call $ok (call $ui_group (i32.const 1072) (i32.const 7) (i32.const 0) (i32.const 0)))
+    (call $ok (call $ui_icon (i32.const 1192) (i32.const 4) (i32.const 0) (i32.const 0)))
     (if (call $ui_link (i32.const 1088) (i32.const 5) (i32.const 1096) (i32.const 4)
                        (i32.const 0) (i32.const 0))
       (then (global.set $opens (i32.add (global.get $opens) (i32.const 1)))))
@@ -73,6 +79,8 @@
                                       (i32.const 0)))
     (call $ok (call $ui_info (i32.const 1120) (i32.const 5) (i32.const 1128) (i32.const 6)
                              (i32.const 0) (i32.const 0)))
+    (call $ok (call $ui_progress (i32.const 1200) (i32.const 6) (i32.const 3) (i32.const 4)
+                                 (i32.const 0) (i32.const 0)))
     (call $ok (call $ui_group (i32.const 1136) (i32.const 4) (i32.const 0) (i32.const 0)))
     (global.set $mode (call $ui_seg (i32.const 1144) (i32.const 4) (i32.const 1152)
                                     (i32.const 9) (global.get $mode) (i32.const 0)

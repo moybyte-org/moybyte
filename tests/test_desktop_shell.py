@@ -7,7 +7,7 @@ ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==devic
 behavior, not a host-only path."""
 
 from pathlib import Path
-from ws_helpers import shelf, select_on_home  # noqa: E402
+from ws_helpers import shelf, select_on_home, settings_back  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -185,7 +185,8 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
     assert "wallpaper" not in rows and "theme" not in rows   # the old steppers are gone
     ws.settings_layer.set_msel = rows.index("appearance")
-    drv.press("right")                                    # any step activates an action row
+    drv.frame(1 / 30)
+    drv.press("a")                                        # A opens the link
     drv.frame(1 / 30)
     assert ws.wm.top_kind() == "appearance"
     before = ws.look.wallpaper_id
@@ -204,7 +205,8 @@ def test_settings_back_returns_home(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(ws.layout.set_back[0] + 2, ws.layout.set_back[1] + 2)
+    drv.frame(1 / 30)
+    settings_back(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -229,7 +231,7 @@ def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
         drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
     drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)     # activate SETTINGS
     assert ws.screen == "settings"
-    drv.click(ws.layout.set_back[0] + 2, ws.layout.set_back[1] + 2)  # Back resumes the cart...
+    settings_back(ws, drv)                                    # Back resumes the cart...
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                             # ...not the launcher
 

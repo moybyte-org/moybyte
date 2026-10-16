@@ -338,18 +338,19 @@ def test_open_settings_window(board):
 
 def test_settings_rows_scroll_on_swipe(board):
     st = board.state()
+    y0 = board.settings_scrolled(st)
     board.swipe_settings(st)
     st = board.state()
-    assert (st["settings"]["set_top"] or 0) > 0, st["settings"]
+    assert y0 is not None and board.settings_scrolled(st) < y0, st["settings"]
 
 
 def test_scroll_survives_release(board):
     """Letting go must NOT snap the rows back to the top (the on-glass
     'thrown at the start' report)."""
-    top = board.state()["settings"]["set_top"]
+    y = board.settings_scrolled(board.state())
     board.drain(1.0)
     st = board.state()
-    assert st["settings"]["set_top"] == top, st["settings"]
+    assert board.settings_scrolled(st) == y, st["settings"]
 
 
 def test_appearance_opens(board):

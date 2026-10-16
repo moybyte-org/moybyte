@@ -256,6 +256,36 @@ static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int r
     return tok(d, MOY_UI_T_SELECTION_INK, MOY_UI_T_INK);
 }
 
+// -- icons -------------------------------------------------------------------------------
+
+static int icon_d(pd_t *d, int slot, int glyph, moy_ui_box_t b, int ci) {
+    int box = b.w < b.h ? b.w : b.h;
+    uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
+    uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
+    if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {   // a cart's: the glyph
+        int size = font == f24 ? 24 : 16;
+        uint8_t code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
+        int w = moy_text(&d->t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
+                         b.y + moy_ui_fdiv(b.h - size, 2), pal(d, ci), 1, MOY_TEXT_LEFT, -1);
+        d->row->st[MOY_ST_N_TEXT]++;
+        if (w > 0) {
+            return 1;
+        }
+    }
+    if (glyph >= 0) {
+        d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, glyph, b.x, b.y, b.w, b.h,
+                                                       pal(d, ci), d->fs);
+        return 1;
+    }
+    return 0;
+}
+
+int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs) {
+    pd_t d;
+    open_pd(s, &d, fs, 0);
+    return icon_d(&d, slot, glyph, b, ci);
+}
+
 // -- value rows -------------------------------------------------------------------------
 
 static int pad_of(const pd_t *d, const moy_ui_vrow_t *r) {
@@ -488,6 +518,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             text_t(&d, &fv, 1, word, wn, right, b.y, b.h, cdim, sc);
             break;
         }
+        case MOY_UI_V_PROGRESS:
         case MOY_UI_V_SLIDER: {
             moy_ui_box_t t = g.track;
             int dk = dark(&d);
@@ -501,12 +532,17 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             rrect(&d, t.x, t.y, fw, t.h, d.fs, 1, (flags & MOY_UI_F_DISABLED) ? cdim : val_c, 0,
                   0);
             int kw = 7 * d.fs, kh = 9 * d.fs;
-            rrect(&d, t.x + fw - kw / 2, t.y + t.h / 2 - kh / 2, kw, kh, 2 * d.fs, 1,
-                  dk ? cink : val_c, 0, 0);
+            if (kind == MOY_UI_V_SLIDER) {
+                rrect(&d, t.x + fw - kw / 2, t.y + t.h / 2 - kh / 2, kw, kh, 2 * d.fs, 1,
+                      dk ? cink : val_c, 0, 0);
+            } else {
+                kw = 0;
+            }
             char num[12];
             int n = 0;
             {
-                int32_t v = r->v;
+                int32_t v = kind == MOY_UI_V_SLIDER ? r->v
+                            : (int32_t)((int64_t)100 * (r->v - r->lo) / span);
                 char tmp[12];
                 int k = 0, neg = v < 0;
                 uint32_t u = neg ? (uint32_t)(-(int64_t)v) : (uint32_t)v;
@@ -521,6 +557,9 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                     num[n++] = tmp[--k];
                 }
             }
+            if (kind == MOY_UI_V_PROGRESS) {
+                num[n++] = '%';
+            }
             int vw = tw(&fv, (const uint8_t *)num, (size_t)n, sc);
             right = t.x - gap - kw / 2 - vw;
             text(&d, &fv, (const uint8_t *)num, (size_t)n, right, b.y, b.h, cdim, sc);
@@ -529,7 +568,16 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
         default:
             break;
     }
-    int tx = b.x + pad, room = right - gap - tx;
+    int tx = b.x + pad;
+    if (r->icon_slot >= 0 || r->icon_glyph >= 0) {
+        int side = 16 * d.fs;
+        moy_ui_box_t ib = {(int16_t)tx, (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)),
+                           (int16_t)side, (int16_t)side};
+        if (icon_d(&d, r->icon_slot, r->icon_glyph, ib, lab)) {
+            tx += side + pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
+        }
+    }
+    int room = right - gap - tx;
     if (r->label.n && room > 0) {
         size_t ln = moy_text_fit_px(fl.id, r->label.p, r->label.n, room, sc);
         text(&d, &fl, r->label.p, ln, tx, b.y, b.h, pal(&d, lab), sc);

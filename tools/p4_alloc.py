@@ -401,11 +401,10 @@ ws._g['_wrap_phases'] = _wrap_phases
 # hypothesis about where the bytes are; the tool exists to rank them.
 DRILL_SETTINGS = [
     "ws.wm._content_for('settings')::_settings_rows::set.rows",
-    "ws.wm._content_for('settings')::_draw_settings_row::set.row_draw",
-    "ws.wm._content_for('settings')::_settings_row_rect::set.row_rect",
-    "ws.wm._content_for('settings')::_settings_row_visible::set.row_vis",
-    "ws.wm._content_for('settings')::_settings_visible::set.visible",
-    "ws.wm._content_for('settings')::_scroll_region::set.scroll",
+    "ws.wm._content_for('settings')::_draw_page::set.page",
+    "ws.wm._content_for('settings')::_rows_page::set.rows_page",
+    "ws.wm._content_for('settings')::_row::set.row",
+    "ws.wm._content_for('settings')::_grouped::set.groups",
     "ws.bar_layer::_draw_status_strip::bar.status",
     "ws.sys_canvas::print::cv.print",
     "ws.sys_canvas::rect::cv.rect",

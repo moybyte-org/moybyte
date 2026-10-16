@@ -163,8 +163,14 @@ def test_achievements_view_hides_secrets(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    # Open the achievements view via its trophy button, then render it.
-    _tap(drv, ws.layout.set_ach)
+    # Open the achievements view from About's Achievements row, then render it.
+    sl = ws.settings_layer
+    sl._want = "Achievements"
+    ws.mark_dirty()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    _tap(drv, sl._host.box("Achievements"))
+    drv.frame(1 / 30)
     assert ws.show_achievements
     drv.frame(1 / 30)
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
@@ -220,8 +226,13 @@ def test_secret_door_egg_in_settings(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
+    drv.frame(1 / 30)
+    bar = ws.bar_layer
+    bx, by = bar.cell("settings", "zone")[0][1][:2]
+    x, y, w, h = bar._zone_rect("settings")
+    title = (bx + x + h + 4, by + y, w - h - 4, h)     # the zone past the chevron
     for _ in range(ws.ach_ui._SECRET_TAP_GOAL):
-        _tap(drv, ws.layout.set_title_hit)
+        _tap(drv, title)
     assert ws.ach.has("secret_door")         # hidden "Secret Finder"
     assert ws.ach_ui.egg_msg is not None
 

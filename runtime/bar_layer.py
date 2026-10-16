@@ -759,7 +759,39 @@ class BarLayer:
             return
         owner = self._zone_owner(where)
         if owner is not None:
+            title = getattr(owner, "back_title", None) if looked else None
+            if title:
+                self._paint_back_title(cv, zone, title, bar)
+                return
             owner.draw_zone(cv, zone)
+
+    def draws_back(self, where):
+        """Whether `where`'s bar draws its owner's back chevron and title
+        (`back_title`): under a theme's depth, outside a window."""
+        return bool(_ui_draw.depth()[0]) and not self._in_window(where)
+
+    def _paint_back_title(self, cv, r, title, bar):
+        """A page's place in the bar under the theme's look (DESIGN.md, Bar):
+        the back chevron in the zone's first square, its tap the owner's,
+        then the page's title in the `title` face, in the chrome ink."""
+        ws = self.ws
+        ink = ws.theme_colors["chrome_ink"]
+        x, _y, w, _h = r
+        thick = bar[3]
+        u = _layout_base.unit()
+        side = 16 * u
+        gy = (thick - side) // 2
+        if not ws.draw_icon("back", (x, gy, side, side), ink, cv):
+            ws._glyph("arr_l", (x, gy, side, side), ink, cv, u)
+        tf = _ui_draw.font("title")
+        fs = ws.layout.fs
+        sc = max(fs, (16 * fs) // max(1, tf[2]))     # a heading, 16 rows at the scale
+        was = _ui_draw.print_font(tf[0])
+        tx = x + side + 6 * u
+        cv.print_scaled(_ui_draw.print_cut(title, max(0, x + w - tx), sc), tx,
+                        (thick - tf[2] * sc) // 2, ink, sc)
+        if was is not None:
+            _ui_draw.print_font(was)
 
     def _paint_cell(self, cv, mp, where, name, r, text, cs, dy, across, game):
         """One OS widget's cell, through the kernel's painter."""
@@ -871,6 +903,8 @@ class BarLayer:
         whose desk waits beneath it -- and none where it is the floor."""
         if where == "desk":
             return False
+        if where == "settings" and self.draws_back(where):
+            return False              # its back chevron leads out instead
         if where == "home":
             wm = self.ws.wm
             return wm.stack.depth() > wm.floor()

@@ -246,10 +246,6 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring
 _SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
 
 _FROZEN_HATCH = {
-    "settings_layer.py": (3,
-        "the CONNECTED line's `play` and the password prompt's `ink` are status "
-        "and body roles the theme owns, not widget states; the 'soon' second "
-        "line's grey is a literal that matches no token on any theme"),
     "cards_layer.py": (3,
         "the bad-card warning frame, and the two choice-cell palettes: a chosen "
         "swatch is literal black + literal yellow (which is NOT `accent` on "
@@ -263,9 +259,6 @@ _FROZEN_HATCH = {
     "achievements_ui.py": (1,
         "the Easter-egg banner: literal white on a literal black dialog, a "
         "surprise no theme colours"),
-    "update_ui.py": (1,
-        "one line per update PHASE, inked by what is happening (downloading / "
-        "done / failed) -- a status colour, not a state of the widget"),
     "storybook_app.py": (1,
         "a deck row is cream paper with black ink -- frozen off-token, the "
         "case the hatch is documented for"),
@@ -393,10 +386,10 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
     assert named == {
         "achievements_ui.py": 1,        # the achievements list
         "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
-        "settings_layer.py": 7,         # the rows, the wifi list, the notes, the power line
+        "popover.py": 2,                # the power popover's level line and its rows
         "storybook_app.py": 1,          # the + NEW row
     }, named
-    assert sum(named.values()) == 12
+    assert sum(named.values()) == 7
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():
@@ -451,7 +444,7 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
 # row is never rendered at rest. Every other state below IS netted by a golden
 # (verified by mutation: `row_menu` REST turns all ten golden rows red).
 _PRE_207_TRIPLES = {
-    ("row_menu", ui_draw.REST):  # settings_layer._draw_settings_row, the system menu (moy_chrome)
+    ("row_menu", ui_draw.REST):  # the power popover's rows (popover.PowerRows), the system menu (moy_chrome)
         lambda th: (None, th["chrome_ink_dim"], None),
     ("row_menu", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),

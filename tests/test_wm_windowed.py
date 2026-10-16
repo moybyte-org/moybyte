@@ -2423,6 +2423,12 @@ class _Key:
     def pressed(self, n):
         return n == self.name
 
+    def held(self, n):
+        return n == self.name
+
+    def any_pressed(self):
+        return True
+
 
 class _Ring:
     """N physical buffers behind the root canvas: each drawn frame lands in the
@@ -2572,16 +2578,6 @@ def test_the_wifi_popover_releases_the_radio_on_every_close(tmp_path):
         drv.frame(1 / 30)
         assert not ws.sysmenu.open
         assert ws.leases.holders() == [] and ws.wifi.radio is False
-    # the panel's own BACK button closes the popover the same way
-    _tap_widget(ws, drv, "wifi")
-    drv.frame(1 / 30)
-    sl = ws.settings_layer
-    rect = ws.sysmenu.panel_rect()
-    ws.sysmenu.comp._run(rect, lambda: None)
-    back = [r for n, r in ws.sysmenu.comp._run(rect, sl._wifi_btns) if n == "back"][0]
-    drv.click(back[0] + 2, back[1] + 2)
-    drv.frame(1 / 30)
-    assert not ws.sysmenu.open and ws.leases.holders() == []
 
 
 def test_the_wifi_popover_runs_the_password_step_in_place(tmp_path):
@@ -2589,8 +2585,10 @@ def test_the_wifi_popover_runs_the_password_step_in_place(tmp_path):
     ws.widget_tap("wifi")
     drv.frame(1 / 30)
     sl = ws.settings_layer
-    sl.wifi_sel = next(i for i, n in enumerate(sl.wifi_nets) if n[2])   # locked
-    ws._sysmenu_layer.handle_input(_Key("a"))
+    k = next(i for i, n in enumerate(sl.wifi_nets) if n[2])            # locked
+    ws.sysmenu.comp.host.focus("net%d" % k)
+    drv.press("a")
+    drv.frame(1 / 30)
     assert sl.wifi_pick is not None and ws.sysmenu.comp.typing()
     for ch in "hunter2":
         drv.type_char(ord(ch))

@@ -36,7 +36,6 @@ PINNED = {
     "paint_layer.py": (24, 0),
     "perf_hud.py": (4, 0),
     "scene_editor_ui.py": (36, 0),
-    "settings_layer.py": (30, 0),
     "text_console.py": (6, 0),
     "update_ui.py": (2, 0),
     "wallpaper.py": (2, 0),

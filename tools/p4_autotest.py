@@ -783,29 +783,34 @@ class P4Board:
     # -- geometry helpers -------------------------------------------------
 
     def settings_geometry(self, st=None):
-        """Screen-space geometry of the Settings rows from a state snapshot:
-        (center_x, row_y(i) fn, row_h). Needs the settings window open."""
+        """Screen-space geometry of the Settings page from a state snapshot:
+        (center_x, y_at(f) -- the screen y a fraction f down the content --,
+        the content's height). Needs the settings window open."""
         st = st or self.state()
         win = st["wins"]["settings"]
-        lay = st["settings"]["lay"]          # window-local [x, y0, w, row_h]
+        c = st["settings"]["content"]        # window-local [x, y, w, h]
         ox, oy = win[0] + 1, win[1] + 1 + win[4]   # content origin on screen
-        cx = ox + lay[0] + lay[2] // 2
+        cx = ox + c[0] + c[2] // 2
 
-        def row_y(i):
-            return oy + lay[1] + i * lay[3] + lay[3] // 2
+        def y_at(f):
+            return oy + c[1] + int(f * c[3])
 
-        return cx, row_y, lay[3]
+        return cx, y_at, c[3]
 
-    def swipe_settings(self, st=None, rows=2.5, frames=25):
-        """Drag the Settings list up by `rows` rows, starting from the last
-        row INSIDE the view. The row height follows the chrome scale (52px on
-        a board that declares its glass, 26 without), so a fixed start row can
-        sit below the view and move nothing."""
+    @staticmethod
+    def settings_scrolled(st):
+        """How far the Settings page has scrolled since it opened: how far
+        its focused row (Wi-Fi, which a drag leaves focused) moved up."""
+        s = st.get("settings") or {}
+        box = s.get("focus_box")
+        return None if box is None else box[1]
+
+    def swipe_settings(self, st=None, frames=25):
+        """Drag the Settings page up by half its content's height, from two
+        thirds of the way down it."""
         st = st or self.state()
-        cx, row_y, row_h = self.settings_geometry(st)
-        start = max(1, st["settings"]["view"][3] // row_h - 1)
-        y0 = row_y(start)
-        self.swipe(cx, y0, cx, y0 - int(rows * row_h), frames=frames)
+        cx, y_at, _h = self.settings_geometry(st)
+        self.swipe(cx, y_at(2 / 3), cx, y_at(1 / 6), frames=frames)
 
 
 # ---------------------------------------------------------------------------
@@ -836,20 +841,18 @@ def _tour(board):
     check("open settings -> window", "settings" in st.get("order", ()),
           str(st.get("order")))
 
-    # Scroll the rows: swipe up by ~2.5 rows, expect set_top to advance and
-    # SURVIVE the release (the on-glass "thrown back to the start" bug).
-    cx, row_y, row_h = board.settings_geometry(st)
-    board.swipe(cx, row_y(4), cx, row_y(4) - int(2.5 * row_h), frames=25)
+    # Scroll the page: swipe it up, expect its rows to move up and STAY
+    # there after the release (the on-glass "thrown back to the start" bug).
+    y0 = board.settings_scrolled(st)
+    board.swipe_settings(st)
     st = board.state()
-    top_after = (st.get("settings") or {}).get("set_top")
-    check("settings rows scroll on swipe", (top_after or 0) > 0,
-          "set_top=%s" % top_after)
+    y1 = board.settings_scrolled(st)
+    check("settings rows scroll on swipe", y0 is not None and y1 is not None and y1 < y0,
+          "focus y %s -> %s" % (y0, y1))
     board.drain(1.0)
     st2 = board.state()
-    check("scroll position survives release",
-          (st2.get("settings") or {}).get("set_top") == top_after,
-          "set_top=%s (was %s)" % (
-              (st2.get("settings") or {}).get("set_top"), top_after))
+    check("scroll position survives release", board.settings_scrolled(st2) == y1,
+          "focus y=%s (was %s)" % (board.settings_scrolled(st2), y1))
 
     line = board.open("appearance")
     board.drain(0.5)

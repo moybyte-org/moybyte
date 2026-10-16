@@ -16,10 +16,12 @@ def _draw():
     x, y, w, h = ui.page("Parts")
     ui.hints(["enter", "Open", "left right", "Change"])
     ui.group("General")
+    ui.icon("wifi")
     if ui.link("Wi-Fi", "Home"):
         opens += 1
     size = ui.cycle("Size", ["S", "M", "L"], size)
     ui.info("Board", "T-Deck")
+    ui.progress("Update", 3, 4)
     ui.group("Look")
     mode = ui.seg("Mode", ["Day", "Night"], mode)
     accent = ui.swatches("Accent", [0xff0000, 0x00c000, 0x0000ff], accent)

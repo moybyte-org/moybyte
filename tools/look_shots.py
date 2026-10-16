@@ -284,8 +284,25 @@ def _desk_wall(g, ws):
     _desk(g, ws, calc_x=592)
 
 
+class _HomeWifi:
+    """The targets' Wi-Fi: on the network called Home."""
+
+    def status(self):
+        return (True, "Home", "192.168.1.20")
+
+    def scan(self):
+        return [("Home", 80, True)]
+
+    def known(self):
+        return ["Home"]
+
+
 def _settings(g, ws):
+    # The target's facts: Wi-Fi on Home, the battery at 82%, Appearance focused.
+    ws.wifi = _HomeWifi()
+    ws.battery_level = lambda: 82
     ws.open_settings()
+    ws.settings_layer.show_row("appearance")
 
 
 def _appearance(g, ws):

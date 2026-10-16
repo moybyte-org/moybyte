@@ -18,6 +18,8 @@
  *   ui.seg(label, items, cur, o)   -> the new cur
  *   ui.swatches(label, colours, cur, o) -> the new cur (colours 0xRRGGBB)
  *   ui.hints(items, o)             (keys, then what they do, alternating)
+ *   ui.icon(name, o)               -> whether `name` names an icon (the next row's)
+ *   ui.progress(label, v, hi, o)   (v of hi done)
  *   ui.part(id, w, h, o)           -> x, y, w, h, state
  *   ui.focus(id), ui.focus()       -> the focused id, or nil
  *   ui.keys_taken()                -> whether the ui used this frame's keys
@@ -302,6 +304,22 @@ static int moycore_ui_hints(lua_State *L)
     return 0;
 }
 
+static int moycore_ui_icon(lua_State *L)
+{
+    int32_t v = 0;
+    moy_ui_run_icon(moycore_ui_canvas(), moycore_ui_span(L, 1), &v);
+    lua_pushboolean(L, v != 0);
+    return 1;
+}
+
+static int moycore_ui_progress(lua_State *L)
+{
+    moy_ui_over_t o;
+    moy_ui_run_progress(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_int(L, 2),
+                        moycore_ui_int(L, 3), moycore_ui_over(L, 4, &o));
+    return 0;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -346,7 +364,8 @@ static void moycore_ui_open(lua_State *L)
         {"group", moycore_ui_group}, {"info", moycore_ui_info}, {"link", moycore_ui_link},
         {"cycle", moycore_ui_cycle}, {"seg", moycore_ui_seg}, {"swatches", moycore_ui_swatches},
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
-        {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {NULL, NULL},
+        {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
+        {"progress", moycore_ui_progress}, {NULL, NULL},
     };
     luaL_newlib(L, verbs);
     lua_setglobal(L, "ui");

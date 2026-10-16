@@ -9,7 +9,8 @@ draws its interface with, and the rect algebra they lay out with.
         save()
 
 `group`, `info`, `link`, `cycle`, `seg`, `swatches` and `hints` are the
-Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components).
+Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components); `icon`
+puts an icon on the next row and `progress` shows how far a task is.
 
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
@@ -233,6 +234,21 @@ def hints(items, o=None):
     `left`, `right`, `up` and `down` draw as signs -- and what they do."""
     t = _T
     _C.api_hints(t[0], t[1], t[2], _opts(items), _over(o))
+
+
+def icon(name, o=None):
+    """The next row (a label, info, link, cycle, seg, swatches, toggle,
+    slider or progress) draws icon `name` before its label: the theme's
+    icon set's (`wifi`, `battery`, `settings`, `folder`...), else the glyph
+    table's (`lock`, `key`...). True where either names it."""
+    return _C.api_icon(_T[0], name)
+
+
+def progress(label, v, hi, o=None):
+    """A row showing `v` of `hi` done: a bar and its percent at the right;
+    no stop."""
+    t = _T
+    _C.api_progress(t[0], t[1], t[2], label, v, hi, _over(o))
 
 
 def part(id, w=0, h=0, o=None):

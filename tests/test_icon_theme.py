@@ -26,14 +26,11 @@ def _icons_row_index(ws):
 
 
 def _click_icons_row(ws, drv):
-    """Scroll the EDIT ICONS row into view (the WIFI row pushed it below the
-    320x240 fold, #38) then click it -- the same scroll a kid's d-pad does."""
-    sl = ws.settings_layer
-    idx = _icons_row_index(ws)
-    sl.set_msel = idx
-    sl._settings_scroll()
+    """Focus the EDIT ICONS row (the page scrolls it into view, as a kid's
+    d-pad does) and activate it."""
+    ws.settings_layer.set_msel = _icons_row_index(ws)
     drv.frame(1 / 30)
-    drv.click(*_center(sl._settings_row_rect(idx)))
+    drv.press("a")
 
 
 # -- the Settings entry point opens the PAINT editor on the icon sheet -------
@@ -70,6 +67,7 @@ def test_edit_icons_reachable_by_keyboard_a(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     ws.settings_layer.set_msel = _icons_row_index(ws)
+    drv.frame(1 / 30)                 # the page draws, the row focused
     drv.press("a")
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"

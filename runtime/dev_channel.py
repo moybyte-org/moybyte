@@ -786,13 +786,12 @@ def _remote_state(ws):
         st["theme_err"] = str(exc)
     try:
         sl = ws.settings_layer
-        sr = sl.scroll
+        f = sl._focused
+        box = sl._host.box(f) if f else None
         st["settings"] = {
-            "set_top": sl.set_top, "sel": sl.set_msel,
-            "rows": len(sl._settings_rows()),
-            "offset": None if sr is None else sr.offset,
-            "view": None if sr is None else list(sr.view),
-            "content": None if sr is None else sr.content,
+            "sel": sl.set_msel, "rows": len(sl._settings_rows()),
+            # the focused row and where it drew (the page's scroll moves it)
+            "focus": f, "focus_box": None if box is None else list(box),
             "wifi_view": bool(sl.wifi_view),
             "bt_view": bool(getattr(sl, "bt_view", False)),
             # the toggle whose warning is up before it turns ON, or None
@@ -803,8 +802,7 @@ def _remote_state(ws):
         win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
         if win is not None and win.ctx is not None:
             lay = win.ctx.layout
-            st["settings"]["lay"] = [lay.set_x, lay.set_row_y0,
-                                     lay.set_w, lay.set_row_h]
+            st["settings"]["content"] = [lay.cx, lay.cy, lay.cw, lay.ch]
     except Exception as exc:  # noqa: BLE001
         st["settings_err"] = str(exc)
     try:

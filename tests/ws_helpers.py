@@ -194,3 +194,16 @@ def wallpaper_on_store(carts, wp_id):
     settings["theme"] = "custom"
     moy_carts.save_system(settings, carts)
     return d
+
+
+def settings_back(ws, drv):
+    """Tap Settings' way out on the bar: the back chevron where the theme's
+    look draws it, else the bar's context X."""
+    bl = ws.bar_layer
+    if bl.draws_back("settings"):
+        x, y, w, h = bl._zone_rect("settings")
+        bx, by = bl.cell("settings", "zone")[0][1][:2]
+        drv.click(bx + x + h // 2, by + y + h // 2)
+        return
+    bar, (x, y, w, h) = bl.cell("settings", "close")
+    drv.click(bar[1][0] + x + w // 2, bar[1][1] + y + h // 2)

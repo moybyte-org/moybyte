@@ -2065,6 +2065,36 @@ static mp_obj_t ui_api_slider(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_slider_obj, 8, 8, ui_api_slider);
 
+// api_icon(ctx, name) -> whether `name` names an icon: the next row's
+static mp_obj_t ui_api_icon(mp_obj_t ctx, mp_obj_t name) {
+    return mp_obj_new_bool(moy_ui_api_icon(ctx_of(ctx), span_of(name)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_icon_obj, ui_api_icon);
+
+// api_box(ctx, id) -> (x, y, w, h) where stop `id` drew last frame, or None
+static mp_obj_t ui_api_box(mp_obj_t ctx, mp_obj_t id) {
+    int32_t v[4];
+    if (!moy_ui_api_box(ctx_of(ctx), span_of(id), v)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[4] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1]), mp_obj_new_int(v[2]),
+                     mp_obj_new_int(v[3])};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_box_obj, ui_api_box);
+
+// api_progress(ctx, cv, look, label, v, hi, o)
+static mp_obj_t ui_api_progress(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    moy_ui_api_progress(c, &s, span_of(a[3]), num(a[4]), num(a[5]), over_of(a[6], &o));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_progress_obj, 7, 7, ui_api_progress);
+
 // api_list(ctx, cv, look, label, items, cur, o) -> the new cur; `items` the
 // rows NUL-separated (bytes)
 static mp_obj_t ui_api_list(size_t n_args, const mp_obj_t *a) {
@@ -2289,6 +2319,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_choice), MP_ROM_PTR(&ui_api_choice_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_hints), MP_ROM_PTR(&ui_api_hints_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slider), MP_ROM_PTR(&ui_api_slider_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_icon), MP_ROM_PTR(&ui_api_icon_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_box), MP_ROM_PTR(&ui_api_box_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_progress), MP_ROM_PTR(&ui_api_progress_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },

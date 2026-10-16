@@ -1,7 +1,7 @@
 // The public UI API's engine (docs/ui_api_2026-10.md): the verbs every app
 // and cart draws its interface with -- page, label, button, toggle, slider,
-// list, group, info, link, cycle, seg, swatches, hints, part, focus,
-// keys_taken, at -- and the focus and navigation they share.
+// list, group, info, link, cycle, seg, swatches, hints, icon, progress, part,
+// focus, keys_taken, at -- and the focus and navigation they share.
 //
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
 // the Python face's bytearray per app, the run's one static): the focused id,
@@ -117,6 +117,9 @@ typedef struct {
     uint16_t grp_flags;
     uint8_t grp_open, grp_n, grp_any, grp_first;
     moy_ui_box_t grp_last;
+    // ui.icon's: the next row's icon, then the row's being drawn (an icon
+    // set's slot and the glyph table's glyph, -1 none).
+    int16_t icon_slot, icon_glyph, row_slot, row_glyph;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -168,6 +171,14 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
 // page's foot, which its rows then stack above; ui.at places them instead.
 void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
                       const moy_ui_over_t *o);
+// The next row (a label, info, link, cycle, seg, swatch picker, toggle,
+// slider or progress) draws icon `name` before its label: the live icon
+// set's slot of that name (moy_ui_icon_slot), else the glyph table's.
+// Answers whether either names it.
+int moy_ui_api_icon(moy_ui_ctx_t *c, moy_ui_span_t name);
+// A row showing `v` of `hi` done as a bar and its percent at the right; no stop.
+void moy_ui_api_progress(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int32_t v,
+                         int32_t hi, const moy_ui_over_t *o);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);
@@ -176,6 +187,9 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h);
+// Where stop `id` drew in the frame drawn last (the host's: a popover beside
+// a row, a test's tap): its box into out, 1; 0 where it drew no such stop.
+int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]);
 // A duplicate id drawn this frame, its text, once per id (NULL none).
 const char *moy_ui_api_dup(moy_ui_ctx_t *c);
 

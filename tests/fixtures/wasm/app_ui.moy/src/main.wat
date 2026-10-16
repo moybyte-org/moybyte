@@ -42,6 +42,9 @@
   (import "moybyte.app" "ui_swatches" (func $ui_swatches
     (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_hints" (func $ui_hints (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_icon" (func $ui_icon (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_progress" (func $ui_progress
+    (param i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 

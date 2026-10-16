@@ -272,6 +272,10 @@ _DRAW_SIGS = (
     ("moy_ui_api_choice", [c.c_void_p, c.POINTER(_Sink), _I, _Span, c.c_char_p, _Z, c.c_int32,
                            c.c_void_p], c.c_int32),
     ("moy_ui_api_hints", [c.c_void_p, c.POINTER(_Sink), c.c_char_p, _Z, c.c_void_p], None),
+    ("moy_ui_api_icon", [c.c_void_p, _Span], _I),
+    ("moy_ui_api_box", [c.c_void_p, _Span, c.POINTER(c.c_int32)], _I),
+    ("moy_ui_api_progress", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int32, c.c_int32,
+                             c.c_void_p], None),
     ("moy_ui_api_part", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p,
                          c.c_void_p], None),
     ("moy_ui_api_focus", [c.c_void_p, _Span, c.c_char_p, c.c_size_t], _I),
@@ -857,6 +861,26 @@ def binding():
         ov, ok = _over(o)
         return int(lib.moy_ui_api_slider(p, c.byref(s), t, int(v), int(lo), int(hi), ov))
 
+    def api_icon(ctx, name):
+        p, _k = _ctx(ctx)
+        t, keep = span(name)
+        return bool(lib.moy_ui_api_icon(p, t))
+
+    def api_box(ctx, id_):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        v = (c.c_int32 * 4)()
+        if not lib.moy_ui_api_box(p, t, v):
+            return None
+        return tuple(v)
+
+    def api_progress(ctx, cv, look, label, v, hi, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        ov, ok = _over(o)
+        lib.moy_ui_api_progress(p, c.byref(s), t, int(v), int(hi), ov)
+
     def api_list(ctx, cv, look, label, items, cur, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -931,8 +955,8 @@ def binding():
         return None if d is None else d.decode("utf-8", "replace")
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
-              api_list, api_group, api_value, api_choice, api_hints, api_part, api_focus,
-              api_keys_taken, api_at, api_dup):
+              api_list, api_group, api_value, api_choice, api_hints, api_icon, api_progress,
+              api_box, api_part, api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value
     m.calls = lambda: lib.moy_ui_calls()

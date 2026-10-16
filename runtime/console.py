@@ -1083,8 +1083,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # reuses the cart PAINT renderer/input over ws.look.icon_sheet (PaintEditor is
         # tile-size-agnostic, so the 16x16 IconSheet edits natively).
         self._editing_icons = False
-        # (The Settings selection/scroll window -- set_msel/set_top -- lives on
-        # self.settings_layer now, built in _build_layers with the rest of the stack.)
+        # (Settings' focus and page scroll live in self.settings_layer's UI
+        # context, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         # (cart_error + crash_line live on self.player now -- Stage 2; forwarding
         # properties below, so ws.cart_error / ws.crash_line are unchanged.)
@@ -1199,10 +1199,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
         self._paint_layer = None      # built at its first use, as theme_layer
         self._theme_layer = None
-        # The Settings app (#28/#39/#53): the aggregator screen. Owns the row list +
-        # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
-        # dispatches every mutation to ws setters (it owns NO config).
-        self.settings_layer = SettingsLayer(self, NAMES, _clamp_scroll)
+        # The Settings app (#28/#39/#53): the aggregator screen. Owns its page of
+        # rows and panels; reads ws config/system state + dispatches every
+        # mutation to ws setters (it owns NO config).
+        self.settings_layer = SettingsLayer(self, _ui_draw.AppHost)
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
         # chrome, Storybook's compiling decks, Files' user-files gallery and

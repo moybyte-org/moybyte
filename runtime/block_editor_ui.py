@@ -372,9 +372,8 @@ class BlockEditorUI:
         # Injected instead of imported back from console.py (see module docstring):
         # console.py builds this instance, so `import console` here would be a real
         # circular import at BlockEditorUI's own module-load time. `clamp_scroll` is
-        # the tiny shared scrolloff helper (#dedup, stage 1) also used by
-        # Workstation._settings_scroll -- injecting it here (instead of duplicating
-        # it) keeps that dedup meaningful.
+        # the tiny shared scrolloff helper (#dedup, stage 1) chrome holds --
+        # injected here instead of duplicated.
         self._NAMES = names
         self._err_text = err_text
         self._clamp_scroll = clamp_scroll

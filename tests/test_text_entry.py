@@ -251,21 +251,21 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     ws.input.last_key = 0x0D                      # the Enter that picked the row
     sl._wifi_activate()
     assert sl.wifi_pick == "Locked" and ws.input.text_mode
-    sl._wifi_input(ws.input)                      # the byte is still held
+    sl.wifi_input(ws.input, sl._sub)                      # the byte is still held
     assert sl.wifi_pick == "Locked", "a latched Enter must not connect with ''"
     ws.input.last_key = 0
-    sl._wifi_input(ws.input)
+    sl.wifi_input(ws.input, sl._sub)
     for ch in "pw":
         ws.input.last_key = ord(ch)
-        sl._wifi_input(ws.input)
+        sl.wifi_input(ws.input, sl._sub)
         ws.input.last_key = 0
-        sl._wifi_input(ws.input)
+        sl.wifi_input(ws.input, sl._sub)
     assert sl.wifi_pw.text == "pw"
     ws.input.last_key = 127                       # Delete trims like Backspace now
-    sl._wifi_input(ws.input)
+    sl.wifi_input(ws.input, sl._sub)
     assert sl.wifi_pw.text == "p"
     ws.input.last_key = 27
-    sl._wifi_input(ws.input)
+    sl.wifi_input(ws.input, sl._sub)
     assert sl.wifi_pick is None and not ws.input.text_mode
 
 

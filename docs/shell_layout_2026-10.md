@@ -495,8 +495,9 @@ in desktop mode; (b) fullscreen in console mode, pushed on the back-stack as
 a kind so back pops it: the calendar as its own kind, the wifi and power rows
 as the Settings page scrolled to them. (a) versus (b) is the mode's, not the
 board's. No component is docked in a bar (L13). No component is a registered app or a desk icon.
-The components are `runtime/popover.py`'s; the wifi panel and the rows draw
-through Settings' own painters over the popover's rect (`PanelGeom`), the
+The components are `runtime/popover.py`'s; the wifi panel is Settings' Wi-Fi
+page (`SettingsLayer.wifi_page`) drawn in the popover's rect over the
+component's own UI context, the power rows are `PowerRows`' own, the
 calendar's one painter is `draw_month`, and the battery's level reads None on
 every board today (no board measures one), drawn as `--`.
 

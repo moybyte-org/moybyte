@@ -1018,8 +1018,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # --- list rows and grid cells: the two shapes the tree hand-rolls ~29 times ----
 #
 # Designed from the real call sites, not from first principles. `row` answers
-# `settings_layer._draw_settings_row` (no field when unselected, a fixed label
-# pad, a right-hand value + a trailing icon), `files_app._draw_rows` (panel/
+# `popover.PowerRows` (no field when unselected, a fixed label pad, a
+# right-hand value + a trailing icon), `files_app._draw_rows` (panel/
 # title field, dim/accent edge, a truncated name), `storybook_app._draw_rows`
 # (an off-token field, a vertically centred label), the system menu's rows
 # (hilite on the selected row only, drawn by `moy_chrome`'s C) and
@@ -1683,25 +1683,35 @@ _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
 class AppHost:
     """The host side of one shipped app's verbs (`ctx.ui`, for an app class
-    with `UI = True`): its context, and the frame's input gathered from the
-    app protocol's handlers in the run snapshot's shape. `keys` and `point`
+    with `UI = True`; Settings, the update screen and the wifi popover hold
+    their own): its context, and the frame's input gathered from the app
+    protocol's handlers in the run snapshot's shape. `keys` and `point`
     answer whether the app owes a frame (its `damage.all()` is the caller's);
     `begin` begins the frame. A tap is a press frame then a release frame
-    where it went down, and a frame that was not settled owes one more, so
-    the rest state a press or a move leaves is painted, then nothing."""
+    where it went down; a host that passes `point` the pointer's `down` on
+    every sample also drags (the press held while it moves, released where
+    it comes up), which a page scrolls by. A frame that was not settled
+    owes one more, so the rest state a press or a move leaves is painted,
+    then nothing."""
 
     def __init__(self):
         self.ctx = ui_context()
         self.inp = array("i", [0] * 6)
-        self.tap = 0                    # 1 a press to begin, 2 its release
+        self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
+        self.hold = False               # the pointer is down since the press
         self.owed = False
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
         self.ctx = ui_context()
+        self.clear()
+
+    def clear(self):
+        """Forget the input gathered for the next frame."""
         a = self.inp
         a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = 0
         self.tap = 0
+        self.hold = False
         self.owed = False
 
     def keys(self, i):
@@ -1718,22 +1728,42 @@ class AppHost:
         a[5] = k
         return bool(b) or k == 9 or self.owed or self.tap != 0
 
-    def point(self, x, y, click):
-        """A pointer sample in the app's coordinates; a click starts a tap."""
-        if not click:
+    def point(self, x, y, click, down=None):
+        """A pointer sample in the app's coordinates; a click starts a tap.
+        With `down` (the pointer held), the press stays held while it moves
+        and is released where it comes up."""
+        if click:
+            self.inp[2] = int(x)
+            self.inp[3] = int(y)
+            self.tap = 1
+            self.hold = bool(down)
+            return True
+        if down is None or not self.hold:
             return False
         self.inp[2] = int(x)
         self.inp[3] = int(y)
-        self.tap = 1
+        if not down:
+            self.hold = False
+            self.tap = 2
         return True
+
+    def focus(self, id):
+        """Move focus to `id` ahead of the next frame, so that frame's keys
+        act on it (`ui.focus` inside a frame moves it after them)."""
+        _C.api_focus(self.ctx, id)
+
+    def box(self, id):
+        """(x, y, w, h) where stop `id` drew in the last frame, or None."""
+        return _C.api_box(self.ctx, id)
 
     def begin(self, cv, th, rect, desk=False):
         """Begin the frame on `cv` under theme `th`, its page `rect`: whether
         it is settled."""
         a = self.inp
-        a[4] = 7 if self.tap == 1 else 1 if self.tap == 2 else 0
+        t = self.tap
+        a[4] = 7 if t == 1 else 3 if t == 3 else 1 if t == 2 else 0
         settled = ui_frame(self.ctx, cv, th, rect, a, desk)
-        self.tap = 2 if self.tap == 1 else 0
+        self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         a[0] = a[1] = a[5] = 0
         self.owed = not settled
         return settled

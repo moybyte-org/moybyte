@@ -133,6 +133,7 @@ void moy_ui_api_reset(moy_ui_ctx_t *c) {
     c->fs = 1;
     c->page_keep = -1;
     c->page_stop = NO_PAGE;
+    c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
 }
 
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n) {
@@ -319,6 +320,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->step_x = c->step_y = 0;
     c->dup = 0;
     c->grp_open = c->grp_n = c->grp_any = 0;
+    c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
     int settled = 1;
     uint32_t focus0 = c->focus;
     const moy_ui_stop_t *v = c->prev;
@@ -468,7 +470,17 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         int i = find(v, n, c->focus);
         if (i >= 0 && v[i].page != NO_PAGE && v[i].page < n) {
             moy_ui_box_t b = c->reveal_box.w ? c->reveal_box : v[i].b;
-            if (reveal(c, &v[v[i].page], b)) {
+            int first = !c->reveal_box.w;
+            for (int j = 0; first && j < n; j++) {
+                first = j == i || v[j].page != v[i].page || (v[j].flags & STOP_PAGE)
+                        || v[j].b.y >= b.y;
+            }
+            moy_ui_keep_t *pk = first ? keep_of(c, v[v[i].page].id) : NULL;
+            if (pk != NULL && pk->a > 0
+                && b.y + b.h + pk->a <= v[v[i].page].b.y + v[v[i].page].b.h) {
+                pk->a = 0;              // the page's first stop shows the page's top
+                settled = 0;
+            } else if (reveal(c, &v[v[i].page], b)) {
                 settled = 0;
             }
         }
@@ -490,6 +502,9 @@ static moy_ui_keep_t *page_keep(moy_ui_ctx_t *c) {
 // The next call's box: ui.at's, or the next row of the page. *stacked says
 // which (a row clips to the page).
 static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
+    c->row_slot = c->icon_slot;
+    c->row_glyph = c->icon_glyph;
+    c->icon_slot = c->icon_glyph = -1;
     if (c->has_at) {
         c->has_at = 0;
         *stacked = 0;
@@ -692,6 +707,8 @@ static void vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t lab
     r->fs = c->fs;
     r->desk = c->cls;
     r->card = c->grp_open;
+    r->icon_slot = c->row_slot;
+    r->icon_glyph = c->row_glyph;
 }
 
 static void vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
@@ -783,7 +800,17 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     int16_t ink = colour(s->look, o->ink);
     int pad = kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
     moy_ui_box_t t = {(int16_t)(b.x + pad), b.y, (int16_t)(b.w - 2 * pad), b.h};
-    moy_ui_label(s, t, text, ink == MOY_UI_FROM_STYLE ? pc[1] : ink, MOY_TEXT_LEFT);
+    int li = ink == MOY_UI_FROM_STYLE ? pc[1] : ink;
+    if (c->row_slot >= 0 || c->row_glyph >= 0) {
+        int side = 16 * c->fs;
+        moy_ui_box_t ib = {t.x, (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,
+                           (int16_t)side};
+        if (moy_ui_icon_in(s, c->row_slot, c->row_glyph, ib, li, c->fs)) {
+            t.x = (int16_t)(t.x + side + 4 * c->fs);
+            t.w = (int16_t)(t.w - side - 4 * c->fs);
+        }
+    }
+    moy_ui_label(s, t, text, li, MOY_TEXT_LEFT);
     clip_out(&k);
 }
 
@@ -1131,6 +1158,25 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
     return cur < count ? cur : count - 1;
 }
 
+int moy_ui_api_icon(moy_ui_ctx_t *c, moy_ui_span_t name) {
+    c->icon_slot = (int16_t)moy_ui_icon_slot(name.p, name.n);
+    c->icon_glyph = (int16_t)moy_ui_icon_glyph(name.p, name.n);
+    return c->icon_slot >= 0 || c->icon_glyph >= 0;
+}
+
+void moy_ui_api_progress(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int32_t v,
+                         int32_t hi, const moy_ui_over_t *o) {
+    o = over(o);
+    int stacked;
+    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    moy_ui_vrow_t r;
+    vrow_init(c, &r, label);
+    r.lo = 0;
+    r.hi = hi > 0 ? hi : 1;
+    r.v = v < 0 ? 0 : v > r.hi ? r.hi : v;
+    vrow_draw(c, s, b, stacked, MOY_UI_V_PROGRESS, 0, o, &r);
+}
+
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]) {
     o = over(o);
@@ -1206,6 +1252,18 @@ void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h) {
     c->at.w = (int16_t)(w > 0 ? w : 0);
     c->at.h = (int16_t)(h > 0 ? h : 0);
     c->has_at = 1;
+}
+
+int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]) {
+    int i = find(c->cur, c->n_cur, hash(id.p, id.n, 0));
+    if (i < 0) {
+        return 0;
+    }
+    out[0] = c->cur[i].b.x;
+    out[1] = c->cur[i].b.y;
+    out[2] = c->cur[i].b.w;
+    out[3] = c->cur[i].b.h;
+    return 1;
 }
 
 const char *moy_ui_api_dup(moy_ui_ctx_t *c) {

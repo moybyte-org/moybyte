@@ -611,6 +611,58 @@ void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
     memcpy(s_icon_code, codes, sizeof(s_icon_code));
 }
 
+// The slots, tools/make_icons.py's order (runtime/iconsets.py SLOTS;
+// tests/test_ui_icon_progress.py holds the two equal).
+static const char *const s_icon_slots[] = {
+    "moy", "home", "wifi", "wifi_off", "battery", "search", "play", "projects",
+    "paint", "storybook", "files", "calc", "getcarts", "settings", "music", "notes",
+    "code", "sprite", "map", "blocks", "scene", "undo", "redo", "run",
+    "save", "pencil", "bucket", "line", "rect", "oval", "select", "flip",
+    "rotate", "game", "app", "art", "wallpaper", "doc", "folder", "trash",
+    "close", "minimize", "maximize", "back", "forward", "down", "new", "dup",
+    "del", "enter", "backspace", "cart_py", "cart_lua", "cart_wasm", "cart_p8",
+};
+#define ICON_SLOTS ((int)(sizeof(s_icon_slots) / sizeof(s_icon_slots[0])))
+// An alias and the slot it names, which is also the glyph table's name.
+static const char *const s_icon_alias[][2] = {
+    {"gear", "settings"}, {"batt", "battery"}, {"edit", "pencil"},
+};
+#define ICON_ALIASES ((int)(sizeof(s_icon_alias) / sizeof(s_icon_alias[0])))
+
+static int named(const char *a, const uint8_t *name, size_t n) {
+    return strlen(a) == n && memcmp(a, name, n) == 0;
+}
+
+int moy_ui_icon_slot(const uint8_t *name, size_t n) {
+    for (int k = 0; k < ICON_ALIASES; k++) {
+        if (named(s_icon_alias[k][0], name, n)) {
+            name = (const uint8_t *)s_icon_alias[k][1];
+            n = strlen(s_icon_alias[k][1]);
+            break;
+        }
+    }
+    for (int i = 0; i < ICON_SLOTS; i++) {
+        if (named(s_icon_slots[i], name, n)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int moy_ui_icon_glyph(const uint8_t *name, size_t n) {
+    int g = moy_ui_glyph_id((const char *)name, n);
+    for (int k = 0; g < 0 && k < ICON_ALIASES; k++) {
+        if (named(s_icon_alias[k][1], name, n)) {
+            g = moy_ui_glyph_id(s_icon_alias[k][0], strlen(s_icon_alias[k][0]));
+        }
+    }
+    return g;
+}
+
+uint32_t moy_ui_icon_font(int size24) {
+    return s_icon_font[size24 ? 1 : 0];
+}
+
 int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col) {
     if (id < 0 || id > 2 || s_icon_code[id] == 0) {
         return 0;

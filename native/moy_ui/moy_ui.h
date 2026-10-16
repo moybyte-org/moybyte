@@ -227,6 +227,18 @@ void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
 // centred, in RGB565 `col`: 1 when drawn, 0 where no set is installed or
 // its font is gone (the caller draws its glyph).
 int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col);
+#define MOY_UI_ICON_FIRST 0x21          // slot 0's byte in a mask file
+// The icon set's slot named `name` (tools/make_icons.py's order; `gear`,
+// `batt` and `edit` are aliases of settings, battery and pencil), -1 none.
+int moy_ui_icon_slot(const uint8_t *name, size_t n);
+// The glyph table's glyph named `name` or by an icon slot's alias, -1 none.
+int moy_ui_icon_glyph(const uint8_t *name, size_t n);
+// The live set's mask file at 24 px (`size24`) or 16 px, 0 where it has none.
+uint32_t moy_ui_icon_font(int size24);
+// An icon in square box `b` in colour index `ci`: the live set's mask of
+// `slot`, the largest that `b` holds, centred, else glyph `glyph` at the
+// font scale `fs`. 1 when drawn.
+int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs);
 // An icon mask through a sink (docs/look_2026-10.md step 16): glyph `code` of
 // font `font` (an icon set's file, tools/make_icons.py) at (x, y), the top
 // left of its square, blended in colour index `ci` at scale 1. MOY_UI_BAD
@@ -614,14 +626,16 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 enum {
     MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
     MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,
+    MOY_UI_V_PROGRESS = 8,
 };
 typedef struct {
     moy_ui_span_t label, value;     // seg: value holds the options, NUL-separated
     const uint8_t *colours;         // swatch: `n` colours, 0xRRGGBB as little-endian words
     int16_t n, cur;                 // seg, swatch: the count and the current (-1 none);
                                     // toggle: cur is on
-    int32_t v, lo, hi;              // slider
+    int32_t v, lo, hi;              // slider; progress: v of hi done (lo 0)
     int16_t fs, desk, card;         // card: on a group's card
+    int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
 } moy_ui_vrow_t;
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r);

@@ -142,58 +142,16 @@ class MonthView:
         self.off = 0
 
 
-class PanelGeom:
-    """The Settings panel's row geometry over another rect: what the WIFI
-    panel and the Settings rows read (`settings_panel`, `settings_row_rect`,
-    `row_band`...) when a popover holds them, so Settings draws them -- one
-    implementation, the popover a container for it."""
-
-    def __init__(self, lay, rect):
-        fs = lay.fs
-        self.fs = fs
-        self.cs = lay.cs
-        self.font_w = lay.font_w
-        self.set_row_h = lay.set_row_h
-        self.row_text_dy = lay.row_text_dy
-        self.settings_panel = rect
-        self.set_x = rect[0] + 10 * fs
-        self.set_w = rect[2] - 20 * fs
-        self.set_row_y0 = rect[1] + 6 * lay.cs
-
-    def settings_row_rect(self, i):
-        return (self.set_x, self.set_row_y0 + i * self.set_row_h,
-                self.set_w, self.set_row_h - 2)
-
-    def row_band(self, rect):
-        d = self.row_text_dy
-        return (rect[0], rect[1] + d, rect[2], rect[3] - 2 * d)
-
-
-class _SettingsComponent:
-    """A component Settings draws: its calls run with the panel geometry
-    over the popover's rect (`SettingsLayer.in_panel`)."""
+class WifiPanel:
+    """The `wifi` widget's component: the Settings WIFI panel's page (scan,
+    pick, the password step, connect) drawn in the popover's rect over its
+    own UI context (`ui_draw.AppHost`), holding the radio lease Settings'
+    panel holds, released on every close. One implementation: `SettingsLayer.wifi_page`."""
 
     def __init__(self, ws):
         self.ws = ws
-
-    def _run(self, rect, fn, *args):
-        sl = self.ws.settings_layer
-        was = sl._geom
-        sl._geom = PanelGeom(self.ws.layout, rect)
-        try:
-            return fn(*args)
-        finally:
-            sl._geom = was
-
-
-class WifiPanel(_SettingsComponent):
-    """The `wifi` widget's component: the Settings WIFI panel's rows (scan,
-    pick, the password step in the same container, connect), holding the
-    radio lease Settings' panel holds, released on every close."""
-
-    def __init__(self, ws):
-        _SettingsComponent.__init__(self, ws)
         self.rect = None
+        self.host = _ui_draw.AppHost()
 
     def size(self):
         lay = self.ws.layout
@@ -201,33 +159,41 @@ class WifiPanel(_SettingsComponent):
         return (304 * fs, 6 * lay.cs + 5 * lay.set_row_h + 44 * fs)
 
     def opened(self):
+        self.host.reset()
         self.ws.settings_layer.wifi_enter()
 
     def draw(self, cv, rect):
+        ws = self.ws
         self.rect = rect
-        self._run(rect, self.ws.settings_layer._draw_wifi)
+        before = self._radio()
+        self.host.begin(cv, ws.theme_colors, rect)
+        ws.settings_layer.wifi_page(popover=True)
+        if self._radio() != before:
+            ws._dirty = True          # the radio's state shows outside the panel
+        elif self.host.owed or self.host.tap == 2:
+            ws.popover_touch()        # a tap's release, next frame
 
-    def _changed(self, before):
-        now = self._state()
-        if now[0] != before[0]:
-            return "global"           # the radio's state shows outside the panel
-        return "local" if now[1] != before[1] else None
+    def _radio(self):
+        sl = self.ws.settings_layer
+        return (tuple(sl.wifi_known), self.ws._wifi_icon_kind())
 
     def _state(self):
         sl = self.ws.settings_layer
-        return ((tuple(sl.wifi_known), self.ws._wifi_icon_kind()),
-                (len(sl.wifi_nets), sl.wifi_msg, sl.wifi_sel, sl.wifi_pick,
-                 sl.wifi_pw.text))
+        return (len(sl.wifi_nets), sl.wifi_msg, sl.wifi_sel, sl.wifi_pick, sl.wifi_pw.text)
 
     def handle_input(self, i):
         before = self._state()
-        self._run(self.rect or (0, 0, 0, 0), self.ws.settings_layer._wifi_input, i)
-        return self._changed(before)
+        radio = self._radio()
+        self.ws.settings_layer.wifi_input(i, self.host, popover=True)
+        if self._radio() != radio:
+            return "global"
+        if self._state() != before or i.any_pressed() or i.last_key:
+            return "local"            # the page resolves the keys as it draws
+        return None
 
     def click(self, px, py, rect):
-        before = self._state()
-        self._run(rect, self.ws.settings_layer._wifi_pointer, px, py, True)
-        return self._changed(before)
+        self.host.point(px, py, True)
+        return "local"
 
     def typing(self):
         return self.ws.settings_layer.wifi_pick is not None
@@ -236,15 +202,15 @@ class WifiPanel(_SettingsComponent):
         self.ws.settings_layer.wifi_leave()
 
 
-class PowerRows(_SettingsComponent):
-    """The `battery` widget's component: the level line and Settings' VOLUME
-    and BRIGHTNESS rows, drawn by Settings' own row painter. Up/down pick a
-    row, left/right (or a tap on a row's ends) step it."""
+class PowerRows:
+    """The `battery` widget's component: the level line and the VOLUME and
+    BRIGHTNESS rows. Up/down pick a row, left/right (or a tap on a row's
+    ends) step it through Settings (`step_row`)."""
 
     KEYS = ("volume", "brightness")
 
     def __init__(self, ws):
-        _SettingsComponent.__init__(self, ws)
+        self.ws = ws
         self.sel = 0
         self.rect = None
 
@@ -252,9 +218,41 @@ class PowerRows(_SettingsComponent):
         lay = self.ws.layout
         return (208 * lay.fs, 12 * lay.cs + 3 * lay.set_row_h)
 
+    def _row_rect(self, rect, i):
+        lay = self.ws.layout
+        fs = lay.fs
+        return (rect[0] + 10 * fs, rect[1] + 6 * lay.cs + i * lay.set_row_h,
+                rect[2] - 20 * fs, lay.set_row_h - 2)
+
     def draw(self, cv, rect):
+        """The level line, then the two rows: the label, a five-step gauge
+        between chevrons, the cursor's row filled."""
+        ws = self.ws
         self.rect = rect
-        self._run(rect, self.ws.settings_layer.draw_power, self.sel)
+        lay = ws.layout
+        fs = lay.fs
+        th = ws.theme_colors
+        dy = lay.row_text_dy
+        x, y, w, h = self._row_rect(rect, 0)
+        lvl = ws.battery_level()
+        ws._icon("batt", x, y + dy, cv)
+        _ui_draw.row(cv, th, (x, y, w, h),
+                     "BATTERY  " + ("--" if lvl is None else "%d%%" % lvl),
+                     kind="row_list", edge=False, pad=20 * fs, text_dy=5 + dy, fs=fs)
+        grey = th["ink_dim"]
+        for k in range(len(self.KEYS)):
+            key = self.KEYS[k]
+            x, y, w, h = self._row_rect(rect, k + 1)
+            _ui_draw.row(cv, th, (x, y, w, h), key.upper(), kind="row_menu",
+                         focus=k == self.sel, edge=False, pad=4, text_dy=5 + dy, fs=fs)
+            by = y + dy
+            cv.print("<", x + w - 88 * fs - 2, by + 5, th["author"], 2)
+            cv.print(">", x + w - 16 * fs + 2, by + 5, th["author"], 2)
+            vx = x + w - 78 * fs
+            lv = int(ws.system.get(key, 3))
+            for s in range(5):
+                cv.rect(vx + s * 8 * fs, by + 6, 6 * fs, 8 * fs,
+                        th["play"] if s < lv else grey)
 
     def handle_input(self, i):
         if i.pressed("up") and self.sel > 0:
@@ -271,10 +269,9 @@ class PowerRows(_SettingsComponent):
 
     def click(self, px, py, rect):
         sl = self.ws.settings_layer
-        g = PanelGeom(self.ws.layout, rect)
-        edge = 5 * g.font_w
+        edge = 5 * self.ws.layout.font_w
         for k in range(len(self.KEYS)):
-            x, y, w, h = g.settings_row_rect(k + 1)
+            x, y, w, h = self._row_rect(rect, k + 1)
             if _in(px, py, (x, y, w, h)):
                 self.sel = k
                 if px >= x + w - edge:

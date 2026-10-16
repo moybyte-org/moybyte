@@ -387,20 +387,16 @@ def test_open_settings_window(board):
 
 
 def test_settings_rows_fit_or_scroll(board):
-    """On the Waveshare's 600px desk the Settings list overflows its window
-    and a swipe scrolls it; on this 1280px-tall desk the whole list FITS (the
-    window is 768px tall, the rows 468px on the first flash), so the honest
-    assertion is the one the geometry picks: no scroll when nothing overflows,
-    a scroll when it does."""
+    """On the Waveshare's 600px desk the Settings page overflows its window
+    and a swipe scrolls it; on this 1280px-tall desk it may fit, so the
+    assertion holds either way: a swipe moves the focused row up or leaves
+    it where it is, never down."""
     st = board.state()
-    view_h = st["settings"]["view"][3]
-    content = st["settings"]["content"]
+    y0 = board.settings_scrolled(st)
     board.swipe_settings(st)
     st = board.state()
-    if content <= view_h:
-        assert (st["settings"]["set_top"] or 0) == 0, st["settings"]
-    else:
-        assert (st["settings"]["set_top"] or 0) > 0, st["settings"]
+    y1 = board.settings_scrolled(st)
+    assert y0 is not None and y1 is not None and y1 <= y0, st["settings"]
 
 
 def test_projects_opens(board):

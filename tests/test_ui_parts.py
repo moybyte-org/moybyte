@@ -331,7 +331,7 @@ def _script(ws):
         _frame(drv)
         shots.append((_pixels(ws), _pmem(ws)))
     top = shots[-1][1][P_TOP]
-    yy = top + CAPTION + 3 * ROW + GAP + CAPTION + ROW + 10
+    yy = top + CAPTION + 4 * ROW + GAP + CAPTION + ROW + 10
     drv.touch(320 - INSET - PAD - 6, yy)
     _frame(drv)
     drv.touch_up()
@@ -386,3 +386,135 @@ def test_the_parts_page_answers_its_script(parts_runs):
     assert s[7][P_FOCUS] == len("Accent")
     assert s[8][P_ACCENT] == 0, "left at the first dot stays"
     assert s[9][P_ACCENT] == 2, "the tap picked the last dot"
+
+
+# -- an icon on a row, and a progress bar (docs/look_2026-10.md step 19) --------------
+
+def _row_page(before):
+    """One group of one link, `before()` called just ahead of it."""
+    st = {}
+
+    def draw():
+        st["rect"] = ui.page("")
+        ui.group("General")
+        st["named"] = before()
+        st["opened"] = ui.link("Row", "v")
+        ui.link("Next", "w")
+        ui.group()
+        return st
+    return _Run(draw)
+
+
+def _ink_cols(r, y0, y1, x0, x1):
+    """The columns from x0 to x1 that hold a pixel other than the card's."""
+    card = r.px(x1 + 1, y0)
+    return [x for x in range(x0, x1) if any(r.px(x, y) != card for y in range(y0, y1))]
+
+
+def test_an_icon_draws_before_the_label_and_moves_it_right():
+    plain = _row_page(lambda: False)
+    plain.frame()
+    plain.frame()
+    iconed = _row_page(lambda: ui.icon("wifi"))
+    iconed.frame()
+    iconed.frame()
+    assert iconed.out["named"] is True
+    top = iconed.out["rect"][1] + CAPTION            # the first row, the icon's
+    x0 = INSET + PAD
+    a = _ink_cols(plain, top + 2, top + ROW - 2, x0, 160)
+    b = _ink_cols(iconed, top + 2, top + ROW - 2, x0, 160)
+    assert a and b and b[0] < a[0] + 8, "the icon starts where the label did"
+    assert b[-1] > a[-1] + 12, "the label moved right past the icon"
+
+
+def test_an_icon_applies_to_the_next_row_only():
+    st = {}
+
+    def draw():
+        st["rect"] = ui.page("")
+        ui.group("General")
+        ui.icon("lock")
+        ui.link("Row", "v")
+        ui.link("Next", "w")
+        ui.group()
+        return st
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    plain = _row_page(lambda: False)
+    plain.frame()
+    plain.frame()
+    top = r.out["rect"][1] + CAPTION + ROW          # the second row, "Next"
+    y0, y1 = top + 2, top + ROW - 2
+    assert _ink_cols(r, y0, y1, INSET + PAD, 160) == _ink_cols(plain, y0, y1, INSET + PAD, 160)
+
+
+def test_an_icon_no_set_or_glyph_names_draws_nothing():
+    plain = _row_page(lambda: False)
+    plain.frame()
+    plain.frame()
+    none = _row_page(lambda: ui.icon("no such icon"))
+    none.frame()
+    none.frame()
+    assert none.out["named"] is False
+    assert bytes(none.cv._buf) == bytes(plain.cv._buf)
+
+
+def test_the_icon_slots_are_the_sets():
+    """The C names the icon set's slots in tools/make_icons.py's order: the
+    table in native/moy_ui/moy_ui.c is runtime/iconsets.py's SLOTS."""
+    from runtime import iconsets
+    src = open(os.path.join(ROOT, "native", "moy_ui", "moy_ui.c")).read()
+    body = src[src.index("s_icon_slots[] = {"):]
+    body = body[:body.index("};")]
+    import re
+    assert tuple(re.findall(r'"([a-z0-9_]+)"', body)) == iconsets.SLOTS
+
+
+def _progress_page(v, hi):
+    st = {}
+
+    def draw():
+        st["rect"] = ui.page("")
+        ui.group("Update")
+        ui.progress("Done", v, hi)
+        st["after"] = ui.link("After", "")
+        ui.group()
+        return st
+    return _Run(draw)
+
+
+def test_progress_is_no_stop_and_fills_its_bar_with_the_value():
+    half = _progress_page(5, 10)
+    half.frame()
+    half.frame()
+    assert ui.focus() == "After", "the progress row is no stop"
+    full = _progress_page(10, 10)
+    full.frame()
+    full.frame()
+    none = _progress_page(0, 10)
+    none.frame()
+    none.frame()
+    y = half.out["rect"][1] + CAPTION + ROW // 2
+    right = 320 - INSET - PAD
+    a = _ink_cols(none, y - 1, y + 2, 200, right)
+    b = _ink_cols(half, y - 1, y + 2, 200, right)
+    assert bytes(half.cv._buf) != bytes(none.cv._buf) != bytes(full.cv._buf)
+    assert a == b or len(b) >= len(a), "the track is drawn either way"
+
+
+def test_progress_clamps_its_value():
+    over = _progress_page(15, 10)
+    over.frame()
+    over.frame()
+    full = _progress_page(10, 10)
+    full.frame()
+    full.frame()
+    assert bytes(over.cv._buf) == bytes(full.cv._buf)
+    under = _progress_page(-3, 10)
+    under.frame()
+    under.frame()
+    zero = _progress_page(0, 10)
+    zero.frame()
+    zero.frame()
+    assert bytes(under.cv._buf) == bytes(zero.cv._buf)

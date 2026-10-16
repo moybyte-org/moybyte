@@ -82,6 +82,10 @@ class IdleLadder:
     def label(self, key):
         return label(self.value(key))
 
+    def steps(self):
+        """The values a rung takes, in seconds (0 is OFF)."""
+        return STEPS
+
     def step(self, key, d):
         """The next value up (d > 0) or down, persisted and live."""
         cur = self.value(key)
@@ -89,7 +93,10 @@ class IdleLadder:
         while i < len(STEPS) and STEPS[i] < cur:
             i += 1
         i = max(0, min(len(STEPS) - 1, i + (1 if d > 0 else -1)))
-        secs = STEPS[i]
+        return self.set(key, STEPS[i])
+
+    def set(self, key, secs):
+        """Rung `key` at `secs`, persisted and live."""
         for k, rung, _t, _d in ROWS:
             if k == key:
                 self.loop.idle(rung, secs)

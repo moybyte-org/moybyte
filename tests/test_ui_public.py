@@ -420,7 +420,6 @@ NOT_MOVED = frozenset((
     "runtime/music_editor_ui.py",
     "runtime/paint_layer.py",
     "runtime/scene_editor_ui.py",
-    "runtime/settings_layer.py",
     "runtime/storybook_app.py",
     "system_carts/moybyte.notes.moy/main.py",
 ))
