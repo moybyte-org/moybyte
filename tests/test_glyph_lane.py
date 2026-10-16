@@ -26,7 +26,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from runtime import glass_binding, ui
+from runtime import glass_binding, ui_draw
 from runtime.host_canvas import make_system_canvas
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -241,9 +241,9 @@ def ui_font():
     rc, fid = moy_ui.font_load(data)
     assert rc == 0
     was = moy_ui.font("ui")[0]
-    assert ui.use_font("ui", fid)
+    assert ui_draw.use_font("ui", fid)
     yield fid, _Ref(data)
-    ui.use_font("ui", was)
+    ui_draw.use_font("ui", was)
     moy_ui.font_free(fid)
 
 
@@ -258,12 +258,12 @@ class _Split:
         return getattr(self._c, name)
 
     def row(self, *a):
-        self._c.row(*a[:-1], ui._FRAME)
-        self._c.row(*a[:-1], ui._CONTENT)
+        self._c.row(*a[:-1], ui_draw._FRAME)
+        self._c.row(*a[:-1], ui_draw._CONTENT)
 
     def button(self, *a):                  # (..., phase, app)
-        self._c.button(*a[:-2], ui._FRAME, a[-1])
-        self._c.button(*a[:-2], ui._CONTENT, a[-1])
+        self._c.button(*a[:-2], ui_draw._FRAME, a[-1])
+        self._c.button(*a[:-2], ui_draw._CONTENT, a[-1])
 
 
 def _words(cv):
@@ -275,14 +275,14 @@ def test_a_row_and_a_button_ramp_over_their_field(ui_font, fs, monkeypatch):
     def frame():
         cv = make_system_canvas(240, 60 * fs, font_scale=fs)
         cv.cls(1)
-        ui.row(cv, ui._TH, (2, 2, 200, 18 * fs), "Wi-Fi network", value="Moy AV")
-        ui.button(cv, ui._TH, (2, 24 * fs, 120, 18 * fs), "Tray")
+        ui_draw.row(cv, ui_draw._TH, (2, 2, 200, 18 * fs), "Wi-Fi network", value="Moy AV")
+        ui_draw.button(cv, ui_draw._TH, (2, 24 * fs, 120, 18 * fs), "Tray")
         return _words(cv)
 
     n0 = moy_ui.text_lanes()
     whole = frame()
     n1 = moy_ui.text_lanes()
-    monkeypatch.setattr(ui, "_C", _Split(ui._C))
+    monkeypatch.setattr(ui_draw, "_C", _Split(ui_draw._C))
     apart = frame()
     n2 = moy_ui.text_lanes()
     assert whole == apart
@@ -299,7 +299,7 @@ def test_a_labels_bg_and_shadow(ui_font):
         cv = make_system_canvas(W, H)
         cv.cls(9)
         n0 = moy_ui.text_lanes()
-        drawn = ui.label(cv, rect, text, 7, bg=bg, shadow=shadow)
+        drawn = ui_draw.label(cv, rect, text, 7, bg=bg, shadow=shadow)
         n1 = moy_ui.text_lanes()
         got = [sw(v) for v in memoryview(cv._buf).cast("H")]
         want = [PAL565[9]] * (W * H)

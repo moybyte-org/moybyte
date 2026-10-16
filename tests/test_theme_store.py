@@ -180,19 +180,19 @@ def test_the_desk_draws_a_package(tmp_path):
 
 
 def test_contrast_is_a_seed_that_reads_in_both_variants():
-    from runtime import ui
+    from runtime import ui_draw
     assert "contrast" in chrome.THEME_NAMES
     for light in (False, True):
         row, bad, rc = moy_ui.theme("contrast", light)
         assert rc == 0 and bad == 0
     try:
-        ui.use_shape("contrast")
+        ui_draw.use_shape("contrast")
         for variant in chrome.THEME_VARIANTS:
             th = chrome.theme_colors("contrast", variant)
-            assert ui.pattern_unreadable(th) == []
+            assert ui_draw.pattern_unreadable(th) == []
             assert (th["panel"], th["ink"], th["accent"]) == (0, 7, 10)
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
 
 
 def test_files_lists_a_package_as_a_theme_whose_door_is_appearance(tmp_path):

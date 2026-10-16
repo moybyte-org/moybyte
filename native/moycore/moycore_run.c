@@ -36,8 +36,20 @@ uint32_t moycore_run_now_ms(void) {
 #endif
 }
 
+// The ticks begun and the runs opened: what the public UI API's RUN face
+// begins a frame and resets its context on (native/moy_ui/moy_ui_wasm.h).
+static uint32_t g_ticks, g_serial;
+
 void moycore_run_tick_begin(void) {
     g_tick_ms = moycore_run_now_ms();
+    g_ticks++;
+}
+
+const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial);
+const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial) {
+    *tick = g_ticks;
+    *serial = g_serial;
+    return moycore_run_cur != NULL ? moycore_run_cur->snap : NULL;
 }
 
 uint32_t moycore_run_now_us(void) {
@@ -214,6 +226,7 @@ static const char *h_cfg(void *u, const char *k) {
 
 void moycore_run_open(moycore_run_t *c, int32_t *snap, int32_t *aq, int aq_cap) {
     moy_host *hs = &c->con.host;
+    g_serial++;
     c->snap = snap;
     c->aq = aq;
     c->aq_cap = aq_cap;

@@ -5,7 +5,7 @@ never a tap). All physics dt is INJECTED (the loop's tick) -- no clock is
 ever read, so every trajectory here is exactly reproducible (the wall-clock
 flake rule for this box).
 
-Region-level tests drive ui.ScrollRegion/DragTap directly; console-level
+Region-level tests drive ui_draw.ScrollRegion/DragTap directly; console-level
 tests drive the real shared console through ConsoleDriver and prove the
 fling frames keep riding the #113 blit path with the redraw gate open."""
 
@@ -18,9 +18,9 @@ DT = 16.0        # injected ms per synthetic pointer frame
 
 
 def _region(extent=100, content=800):
-    from runtime import ui
+    from runtime import ui_draw
 
-    r = ui.ScrollRegion()
+    r = ui_draw.ScrollRegion()
     r.set((0, 0, 50, extent), content)
     return r
 
@@ -97,10 +97,10 @@ def test_new_touch_catches_a_fling():
 
 
 def test_catch_tap_is_swallowed_but_a_plain_tap_still_fires():
-    from runtime import ui
+    from runtime import ui_draw
 
     r = _region()                  # vertical region: the drag axis is y
-    t = ui.DragTap(r)
+    t = ui_draw.DragTap(r)
     # A real fling via the tap machine.
     t.frame(30, 90, True, True, dt_ms=DT)
     y = 90

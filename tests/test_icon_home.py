@@ -147,24 +147,24 @@ def test_keys_and_taps_are_the_grids(tmp_path):
 
 
 def test_only_the_focused_cell_carries_its_name(tmp_path):
-    from runtime import ui
+    from runtime import ui_draw
 
     ws, drv = _icons(tmp_path, 10)
     g = ws.launcher
     ws.set_home_tab("games")
     labels = []
-    real = ui.icon_label
+    real = ui_draw.icon_label
 
     def spy(cv, th, band, text, on, fs):
         labels.append((text, band))
         return real(cv, th, band, text, on, fs)
 
-    ui.icon_label = spy
+    ui_draw.icon_label = spy
     try:
         ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
-        ui.icon_label = real
+        ui_draw.icon_label = real
     sel = g.selected()
     assert [t for t, _b in labels] == [sel["title"]]
     band = labels[0][1]

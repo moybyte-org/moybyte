@@ -37,9 +37,9 @@ appears on the glass is unchanged (host == device).
 
 
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
@@ -120,7 +120,7 @@ class AchievementsUI:
         x = (cv.w - w) // 2
         y = 150
         h = 30
-        _ui.dialog(cv, (x, y, w, h), ring=NAMES["pink"], fill=NAMES["black"])
+        _ui_draw.dialog(cv, (x, y, w, h), ring=NAMES["pink"], fill=NAMES["black"])
         self.ws._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
         # The banner's own 16x16 character glyph is wider than ui.row's 14px
         # leading slot, so the caller draws it and hands `row` the rect that is
@@ -129,7 +129,7 @@ class AchievementsUI:
         # so its clip budget is the frozen one, not the canvas font scale. The
         # ink is a literal white on a literal black dialog -- an off-token
         # surprise banner that no theme colours.
-        _ui.row(cv, self.ws.theme_colors, (x + 24, y, w - 24, h), line,
+        _ui_draw.row(cv, self.ws.theme_colors, (x + 24, y, w - 24, h), line,
                 colors=(None, NAMES["white"], None), edge=False, pad=0,
                 text_dy=11, fs=1)
 
@@ -160,7 +160,7 @@ class AchievementsUI:
         light = th.get("bar_light", False)
         ink = th["ink"] if light else th["chrome_ink"]
         dim = th["chrome_ink_dim"]
-        _ui.dialog(cv, (6, 14, 308, 212), ring=th["accent"], fill=th["panel"])
+        _ui_draw.dialog(cv, (6, 14, 308, 212), ring=th["accent"], fill=th["panel"])
         self.ws._glyph("trophy", (12, 16, 14, 14), th["accent"], cv)
         cv.print("ACHIEVEMENTS", 30, 18, ink, 2)
         cv.print("%d / %d" % (self.ws.ach.count(), len(ACHIEVEMENTS)), 240, 20,
@@ -193,7 +193,7 @@ class AchievementsUI:
             # reads bright at rest and dims when unusable, which is exactly this
             # list. fs=1: this view's geometry is fixed.
             self.ws._glyph(glyph, (x, y, 14, 14), g_col, cv)
-            _ui.row(cv, th, (x + 16, y, col_w - 16, 14), label,
+            _ui_draw.row(cv, th, (x + 16, y, col_w - 16, 14), label,
                     kind="row_chrome", disabled=not got,
                     edge=False, pad=0, text_dy=3, fs=1)
         cv.print("TAP TO CLOSE", 110, 210, dim, 1)

@@ -10,12 +10,12 @@ live, blit the cache, or skip the restore outright.
 try:
     from layers import Layer
     from widgets import _in, _ticks_ms
-    import ui as _ui                  # desk icon label pills (ui.chip)
+    import ui_draw as _ui_draw        # desk icon label pills (ui_draw.chip)
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.widgets import _in, _ticks_ms
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
 
 
@@ -94,7 +94,7 @@ class _BackdropLayer(Layer):
         s = wm._shape_sig()
         # order + geometry; focus too under the depth, whose shadows and
         # outline fringes (drawn here, _draw_unders) follow it
-        wsig = (s[0], s[2], s[1]) if _ui.depth()[13] else (s[0], s[2])
+        wsig = (s[0], s[2], s[1]) if _ui_draw.depth()[13] else (s[0], s[2])
         if wsig != wm._desk_win_sig:
             wm._desk_win_sig = wsig
             if wm._drag is None and wm._resize is None:
@@ -224,7 +224,7 @@ class _BackdropLayer(Layer):
         # as the columns it takes still fit the canvas, or a long app title
         # marches the last column off the right edge and out of reach. The last
         # column draws no gutter, so its width is not charged against the fit.
-        maxw = max((_ui.text_width(label, fs, "ui") for _k, label, _c in catalog),
+        maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
                    default=0)
         rows = max(1, (bottom - y0) // cell_h)
         cols = max(1, (len(catalog) + rows - 1) // rows)
@@ -252,7 +252,7 @@ class _BackdropLayer(Layer):
         th = ws.theme_colors
         fs = ws.look.effective_font_scale()
         for key, box, pill, label, cart in self._icon_rects():
-            _ui.icon_tile(cv, th, box)
+            _ui_draw.icon_tile(cv, th, box)
             img = ws.covers.icon_sheet_for(cart) if cart is not None else None
             if img is not None:
                 sc = max(1, (box[2] - 8 * fs) // 16)
@@ -263,13 +263,13 @@ class _BackdropLayer(Layer):
                 ink = th.get("accent", 10) if key == "play" else th.get("title_ink", 0)
                 ws._glyph(glyph, (box[0] + 6 * fs, box[1] + 6 * fs,
                                   box[2] - 12 * fs, box[3] - 12 * fs), ink, cv)
-            _ui.icon_label(cv, th, pill, label, key == "play", fs)
+            _ui_draw.icon_label(cv, th, pill, label, key == "play", fs)
 
     @staticmethod
     def label_rect(pill, label, fs):
         """The pill a label is drawn in (`ui.icon_label_rect`; the hit-test
         keeps the whole band)."""
-        return _ui.icon_label_rect(pill, label, fs)
+        return _ui_draw.icon_label_rect(pill, label, fs)
 
     def _open_icon(self, key):
         ws = self.ws

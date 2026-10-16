@@ -60,9 +60,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moy_catalogue
     from runtime.moy_carts import PAYLOADS
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host package lane
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _SLIM_DROPS = PAYLOADS + ("icon_rows",)
 
 
@@ -320,7 +320,7 @@ class CartManager:
         that is left to do is tell the kid why nothing appeared."""
         full = getattr(self.ws.carts_store, "store_full", None)
         if full is not None and full(exc):
-            self.ws.notice(refusal, _ui.s("notice.store_full"), "warn")
+            self.ws.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
 
     def delete(self, cart=None):
         """Delete `cart` (the Make tab's DEL, armed and confirmed), else the OPEN

@@ -12,9 +12,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
 
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
@@ -65,7 +65,7 @@ class WindowChrome:
             self._win_grip(win, focused)
             return
         win._chrome_streak += 1
-        _ui.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
+        _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
                   win.title_h, self._win_title(win), focused, win.kind != "desktop",
                   self._fs())
         self._win_grip(win, focused)
@@ -74,21 +74,21 @@ class WindowChrome:
 
     def _win_radius(self, win):
         """The depth's corner radius for `win` (0 with depth off)."""
-        if not _ui.depth()[13]:
+        if not _ui_draw.depth()[13]:
             return 0
-        return _ui.frame_geom(win.w, win.h, win.title_h)[0]
+        return _ui_draw.frame_geom(win.w, win.h, win.title_h)[0]
 
     def _win_foot(self, win):
         """The rows under `win`'s content its rounded bottom corners take."""
-        if not _ui.depth()[13]:
+        if not _ui_draw.depth()[13]:
             return 0
-        return _ui.frame_geom(win.w, win.h, win.title_h)[1]
+        return _ui_draw.frame_geom(win.w, win.h, win.title_h)[1]
 
     def _pad_extent(self, win, x, y, w, h):
         """(x, y, w, h) grown by what its draw touches beyond it: the border,
         the classic 3px shadow, or the depth's shadow at its full size."""
-        if _ui.depth()[13]:
-            g = _ui.frame_geom(w, h, win.title_h)
+        if _ui_draw.depth()[13]:
+            g = _ui_draw.frame_geom(w, h, win.title_h)
             return (x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4, h + g[3] + g[5] + 4)
         return (x - 2, y - 2, w + 7, h + 7)
 
@@ -99,7 +99,7 @@ class WindowChrome:
         which the windows stay off too. Nothing else draws them, so each lands
         once on freshly painted pixels. A window being dragged or resized casts
         `drag_shadow`'s size."""
-        if not _ui.depth()[13]:
+        if not _ui_draw.depth()[13]:
             return
         rc = self._root_canvas
         g = self._drag if self._drag is not None else self._resize
@@ -118,8 +118,8 @@ class WindowChrome:
                 win = self._wins.get(key)
                 if win is None or win.minimized:
                     continue
-                mode = self.drag_shadow if win is moving else _ui.UNDER_FULL
-                _ui.frame_under(rc, th, (win.x, win.y, win.w, win.h), win.title_h,
+                mode = self.drag_shadow if win is moving else _ui_draw.UNDER_FULL
+                _ui_draw.frame_under(rc, th, (win.x, win.y, win.w, win.h), win.title_h,
                                 key == self._focus, mode)
         finally:
             rc.clip()
@@ -152,7 +152,7 @@ class WindowChrome:
         [(name, rect, right)]. Close, maximize, and -- app windows only --
         minimize (a running game can't minimize: hiding it would mean silently
         pausing it)."""
-        return _ui.frame_buttons((win.x, win.y, win.w, win.h), win.title_h,
+        return _ui_draw.frame_buttons((win.x, win.y, win.w, win.h), win.title_h,
                                  self._win_title(win), win.kind != "desktop", self._fs())
 
     def _strip_buttons(self, win):
@@ -279,7 +279,7 @@ class WindowChrome:
         cap = max(len(t) for t in titles)
         while True:
             labels = [t[:cap] for t in titles]
-            widths = [_ui.text_width(lb, fs, "ui") + 2 * 4 * fs for lb in labels]
+            widths = [_ui_draw.text_width(lb, fs, "ui") + 2 * 4 * fs for lb in labels]
             if sum(widths) <= room or cap <= 4:
                 break
             cap -= 1                     # shorten the longest titles first
@@ -330,14 +330,14 @@ class WindowChrome:
             focused = (key == self._focus and not win.minimized)
             bg = th["accent"] if focused else th["panel"]
             if focused:
-                fg = _ui.state_colors(th, "chip", _ui.ON)[1]
+                fg = _ui_draw.state_colors(th, "chip", _ui_draw.ON)[1]
             else:
                 fg = th["edge"] if win.minimized else th["chrome_ink"]
-            state = _ui.ON if focused else (_ui.DISABLED if win.minimized else _ui.REST)
-            if not _ui.paint(sc, th, (x, y, w, h), "bar.item", state):
+            state = _ui_draw.ON if focused else (_ui_draw.DISABLED if win.minimized else _ui_draw.REST)
+            if not _ui_draw.paint(sc, th, (x, y, w, h), "bar.item", state):
                 sc.rect(x, y, w, h, bg)
                 sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
-            tx = x + (w - _ui.text_width(label, fs, "ui")) // 2
+            tx = x + (w - _ui_draw.text_width(label, fs, "ui")) // 2
             sc.print(label, tx, y + (h - line_h) // 2, fg, 1)
 
     def _chip_tap(self, key):

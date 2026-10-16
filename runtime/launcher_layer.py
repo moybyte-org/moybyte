@@ -55,8 +55,10 @@ on the selected card.
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -236,8 +238,8 @@ class Launcher:
         # Settings-rows pattern (settings_layer._scroll_region); `_taps` is the
         # shared tap-vs-drag machine over it.
         self._scroll = 0
-        self._region = _ui.ScrollRegion(horizontal=True)
-        self._taps = _ui.DragTap(self._region)
+        self._region = _ui_draw.ScrollRegion(horizontal=True)
+        self._taps = _ui_draw.DragTap(self._region)
         self._NAMES = names
         self._blit_glyph = blit_glyph
         self.theme = None             # chrome THEME tokens (look.set_theme pushes them);
@@ -743,15 +745,15 @@ class Launcher:
         cv.rect(x, y + cover_h, w, band_h, NAMES["black"])
         name = it["title"]
         fw = lay.font_w
-        name = _ui.print_fit(name, max(3 * fw, w - 4 * fs), fs)
-        cv.print(name, x + (w - _ui.print_width(name, fs)) // 2,
+        name = _ui_draw.print_fit(name, max(3 * fw, w - 4 * fs), fs)
+        cv.print(name, x + (w - _ui_draw.print_width(name, fs)) // 2,
                  y + cover_h + (band_h - lay.line_h) // 2, NAMES["white"], 1)
         # PLAY / CHANGE (mockup: green PLAY, warm-light CHANGE, both dark-edged).
         if ar is not None:
             bx, by, bw, bh = ar["play"]
             cv.rect(bx, by, bw, bh, th.get("play", NAMES["green"]))
             cv.rectb(bx, by, bw, bh, NAMES["black"])
-            pw = _ui.print_width("PLAY", fs)
+            pw = _ui_draw.print_width("PLAY", fs)
             tw = pw + 14 * fs                        # run glyph + "PLAY"
             if tw > bw - 2 * fs:                     # narrow card -> text only
                 cv.print("PLAY", bx + max(fs, (bw - pw) // 2),
@@ -766,8 +768,8 @@ class Launcher:
             cv.rect(bx, by, bw, bh, NAMES["white"])
             cv.rectb(bx, by, bw, bh, NAMES["black"])
             label = "CHANGE"
-            label = _ui.print_fit(label, max(2 * fw, bw - 2 * fs), fs)
-            cv.print(label, bx + max(fs, (bw - _ui.print_width(label, fs)) // 2),
+            label = _ui_draw.print_fit(label, max(2 * fw, bw - 2 * fs), fs)
+            cv.print(label, bx + max(fs, (bw - _ui_draw.print_width(label, fs)) // 2),
                      by + (bh - lay.line_h) // 2, NAMES["black"], 1)
         # Favorite star (#105): a corner badge on the SELECTED card only, mirroring
         # the pseudo card's corner-pushpin idiom rather than inventing new chrome
@@ -820,7 +822,7 @@ class Launcher:
                 _print_scaled(cv, line, x + (w - tw) // 2, ty, NAMES["black"], mult)
                 ty += lay.line_h * mult + 2 * fs
         ty += 2 * fs
-        for line in _ui.wrap_px(caption, max(6 * lay.font_w, w - 4 * fs), fs):
+        for line in _ui_draw.wrap_px(caption, max(6 * lay.font_w, w - 4 * fs), fs):
             tw = _text_w(cv, line, 1)
             cv.print(line, x + (w - tw) // 2, ty, NAMES["dark_grey"], 1)
             ty += lay.line_h + 2 * fs
@@ -834,7 +836,7 @@ class Launcher:
         fs = self.layout.fs
         x, y, t, _t = box
         if th:
-            _ui.icon_tile(cv, th, box)
+            _ui_draw.icon_tile(cv, th, box)
         if img is not None:
             iw, ih = img.w, img.h
             sc = max(1, (t - 8 * fs) // max(iw, ih, 1))
@@ -856,9 +858,9 @@ class Launcher:
         for i in range(fs):
             cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i,
                      th.get("border", NAMES["black"]))
-        if selected and _ui.marks_on():
-            _ui.focus(cv, self.theme, rect, size="card")
-            _ui.focus(cv, self.theme, rect, size="card", after=True)
+        if selected and _ui_draw.marks_on():
+            _ui_draw.focus(cv, self.theme, rect, size="card")
+            _ui_draw.focus(cv, self.theme, rect, size="card", after=True)
         elif selected:
             color = ring if ring is not None else th.get("focus", NAMES["yellow"])
             for i in range(max(2, fs)):
@@ -958,7 +960,7 @@ class Carousel(Launcher):
         in 128s -- so a resting card shows its cover at a whole-number
         ratio."""
         lay = self.layout
-        reach = _ui.mark_reach()          # the centre card's focus mark
+        reach = _ui_draw.mark_reach()          # the centre card's focus mark
         if self._g_lay is lay and self._g_reach == reach:
             return self._g
         fs = lay.fs
@@ -1276,7 +1278,7 @@ class Carousel(Launcher):
             # whole and draws none, so a glide never pays it.
             hero = self.tile_rect(c)
             if hero is not None:
-                _ui.cast(cv, self.theme, hero, _ui.CAST_CARD)
+                _ui_draw.cast(cv, self.theme, hero, _ui_draw.CAST_CARD)
         for i, t in self._visible():
             if (t[0] - d < x1 and x0 < t[0] + t[2] + d
                     and t[1] - d < y1 and y0 < t[1] + t[3] + d):
@@ -1294,11 +1296,11 @@ class Carousel(Launcher):
         th = self.theme or {}
         # The centre card at rest takes the theme's focus mark (ui.focus; a
         # lifted card draws grown and raised); a theme without marks rings it.
-        marks = _ui.marks_on()
+        marks = _ui_draw.marks_on()
         mark = centre and not self.moving and marks and not self.tab_focus
         at = rect
         if mark:
-            _ink, rect = _ui.focus(cv, self.theme, at, size="card")
+            _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card")
         x, y, w, h = rect
         if it.get("type") in PSEUDO_TILE_TYPES:
             cv.rect(x, y, w, h, th.get("focus", 0))
@@ -1332,7 +1334,7 @@ class Carousel(Launcher):
             else None
         self._card_frame(cv, rect, centre and not marks, ring=ring)
         if mark:
-            _ui.focus(cv, self.theme, at, size="card", after=True)
+            _ui_draw.focus(cv, self.theme, at, size="card", after=True)
 
     def _draw_plate(self, cv, it, p):
         """The centre card's name on a plate, in the bar's colours."""
@@ -1346,8 +1348,8 @@ class Carousel(Launcher):
         name = it.get("title") or ""
         if it.get("type") == NEW_TILE_TYPE:
             name = "NEW"
-        name = _ui.print_fit(name, max(3 * lay.font_w, w - 4 * fs), fs)
-        cv.print(name, x + (w - _ui.print_width(name, fs)) // 2,
+        name = _ui_draw.print_fit(name, max(3 * lay.font_w, w - 4 * fs), fs)
+        cv.print(name, x + (w - _ui_draw.print_width(name, fs)) // 2,
                  y + (h - lay.line_h) // 2, th.get("chrome_ink", 7), 1)
 
 
@@ -1487,9 +1489,9 @@ class IconHome(Launcher):
         self._art_tile(cv, th, box, self._icon_of(it, sheet_for), it.get("type"))
         if not selected:
             return
-        if _ui.marks_on():
-            _ui.focus(cv, th, box, size="card")
-            _ui.focus(cv, th, box, size="card", after=True)
+        if _ui_draw.marks_on():
+            _ui_draw.focus(cv, th, box, size="card")
+            _ui_draw.focus(cv, th, box, size="card", after=True)
         else:
             for i in range(max(2, fs)):
                 d = fs + 1 + i
@@ -1500,7 +1502,7 @@ class IconHome(Launcher):
                              self._favorite_badge_geom(rect),
                              bool(self.favorite_for(it)))
         name = "NEW" if it.get("type") in PSEUDO_TILE_TYPES else it.get("title", "")
-        _ui.icon_label(cv, th, self._label_band(rect), name, True, fs)
+        _ui_draw.icon_label(cv, th, self._label_band(rect), name, True, fs)
 
     def _draw_pseudo_card(self, cv, it, rect, selected):
         self._draw_cart_card(cv, it, rect, selected, None)
@@ -1999,7 +2001,7 @@ class LauncherHomeLayer:
     def tab_rects(self):
         """[(tab id, rect, labels_on)] of the home's tab row."""
         fs = self.ws.layout.fs
-        return _ui.tab_row_rects(self.grid.tabs_rect(), HOME_TABS, fs)
+        return _ui_draw.tab_row_rects(self.grid.tabs_rect(), HOME_TABS, fs)
 
     def _draw_grid_panel(self, cv):
         """The grid arrangement's framed panel: the surface the shelf's cards
@@ -2014,7 +2016,7 @@ class LauncherHomeLayer:
         for i in range(fs):
             cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th["border"])
         label = ws.home_title(self.grid)
-        tw = _ui.print_width(label, fs)
+        tw = _ui_draw.print_width(label, fs)
         ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - lay.line_h) // 2
         tx = x + (w - tw) // 2
         cv.print(label, tx, ty, th["ink_dim"], 1)
@@ -2043,12 +2045,12 @@ class LauncherHomeLayer:
             cv.rectb(tx - p - k, ty - p - k, x1 - tx + 2 * (p + k),
                      tht + 2 * (p + k), th["border"])
         tabs = [(tid, label, _TAB_ICON[tid]) for tid, label in HOME_TABS]
-        _ui.tab_row(cv, th, grid.tabs_rect(), tabs, grid.tab,
+        _ui_draw.tab_row(cv, th, grid.tabs_rect(), tabs, grid.tab,
                     icon_for=getattr(ws, "_icon_image_keyed", None), ink=th["ink"])
         if self._tab_focus:
             for tid, r, _on in rects:
-                if tid == grid.tab and _ui.marks_on():
-                    _ui.focus(cv, th, r, fs=fs)
+                if tid == grid.tab and _ui_draw.marks_on():
+                    _ui_draw.focus(cv, th, r, fs=fs)
                 elif tid == grid.tab:
                     for k in range(max(2, fs)):
                         d = fs + k
@@ -2059,8 +2061,8 @@ class LauncherHomeLayer:
         if self.searchable and (query or typing):
             label = "SEARCH: " + query + ("_" if typing else "")
             sx = x1 + 4 * p
-            label = _ui.print_fit(label, max(6 * lay.font_w, tx + tw - sx - p), fs)
-            w = _ui.print_width(label, fs) + 2 * p
+            label = _ui_draw.print_fit(label, max(6 * lay.font_w, tx + tw - sx - p), fs)
+            w = _ui_draw.print_width(label, fs) + 2 * p
             cv.rect(sx - p, ty - p, w + p, tht + 2 * p, th["surface"])
             cv.print(label, sx, ty + (tht - lay.line_h) // 2, th["ink"], 1)
 
@@ -2301,7 +2303,7 @@ class LauncherHomeLayer:
         h = max(lay.line_h + 4 * fs, rect[3] - 3 * cs)
         out = {}
         for verb in self.zone_verbs():
-            w = _ui.print_width(_VERB_LABEL[verb], fs) + 6 * fs
+            w = _ui_draw.print_width(_VERB_LABEL[verb], fs) + 6 * fs
             if x + w > rect[0] + rect[2]:
                 break
             out[verb] = (x, y, w, h)

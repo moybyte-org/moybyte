@@ -244,7 +244,34 @@ _DRAW_SIGS = (
     ("moy_ui_dragtap_frame", [c.c_void_p, c.c_void_p, _R4, _I, c.c_int32, c.c_int32, _I, _I,
                               c.c_int32, c.c_float, c.c_void_p, c.c_int32, c.c_void_p,
                               c.c_void_p], _I),
+    # the public UI API (native/moy_ui/moy_ui_api.h)
+    ("moy_ui_api_size", [], c.c_size_t),
+    ("moy_ui_api_ctx", [c.c_void_p, c.c_size_t], c.c_void_p),
+    ("moy_ui_over_block", [c.c_void_p, c.c_char_p, c.c_size_t], _I),
+    ("moy_ui_api_begin", [c.c_void_p, c.c_void_p, _Box, _I, _I], _I),
+    ("moy_ui_api_page", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.POINTER(_Box)],
+     None),
+    ("moy_ui_api_label", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], None),
+    ("moy_ui_api_button", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
+    ("moy_ui_api_toggle", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
+    ("moy_ui_api_slider", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int32, c.c_int32,
+                           c.c_int32, c.c_void_p], c.c_int32),
+    ("moy_ui_api_list", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_int32,
+                         c.c_void_p], c.c_int32),
+    ("moy_ui_api_part", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p,
+                         c.c_void_p], None),
+    ("moy_ui_api_focus", [c.c_void_p, _Span, c.c_char_p, c.c_size_t], _I),
+    ("moy_ui_api_keys_taken", [c.c_void_p], _I),
+    ("moy_ui_api_at", [c.c_void_p, _I, _I, _I, _I], None),
+    ("moy_ui_api_dup", [c.c_void_p], c.c_char_p),
 )
+
+
+class _Over(c.Structure):
+    """moy_ui_over_t (native/moy_ui/moy_ui_api.h)."""
+    _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
+                ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
+                ("nav", c.c_int8), ("mark", c.c_int8)]
 
 
 class _Line(c.Structure):
@@ -724,6 +751,116 @@ def binding():
 
     for f in (hits_clear, hits_add, hits_at, hits_pump, scroll_stop, scroll_drag_start,
               scroll_drag_move, scroll_drag_end, scroll_tick, dragtap):
+        setattr(m, f.__name__, f)
+
+    # -- the public UI API -----------------------------------------------------
+
+    def _ctx(ctx):
+        b = _buf(ctx)
+        p = lib.moy_ui_api_ctx(b, len(b))
+        if not p:
+            raise ValueError("moy_ui: not a ui context")
+        return p, b
+
+    def _over(o):
+        """The override block (bytes) as the C's struct, and what keeps it."""
+        if o is None:
+            return None, None
+        raw = c.create_string_buffer(bytes(o), len(o))
+        ov = _Over()
+        _check(lib.moy_ui_over_block(c.byref(ov), raw, len(o)))
+        return c.byref(ov), (ov, raw)
+
+    def api_size():
+        return int(lib.moy_ui_api_size())
+
+    def api_begin(ctx, inp, rect, cls, fs):
+        p, _k = _ctx(ctx)
+        ib = None if inp is None else _buf(inp)
+        return bool(lib.moy_ui_api_begin(p, ib, box_of(rect), int(cls), int(fs)))
+
+    def api_page(ctx, cv, look, title, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(title)
+        ov, ok = _over(o)
+        out = _Box()
+        lib.moy_ui_api_page(p, c.byref(s), t, ov, c.byref(out))
+        return (out.x, out.y, out.w, out.h)
+
+    def api_label(ctx, cv, look, text, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(text)
+        ov, ok = _over(o)
+        lib.moy_ui_api_label(p, c.byref(s), t, ov)
+
+    def api_button(ctx, cv, look, label, kind_, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        ov, ok = _over(o)
+        return bool(lib.moy_ui_api_button(p, c.byref(s), t, int(kind_), ov))
+
+    def api_toggle(ctx, cv, look, label, on, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        ov, ok = _over(o)
+        return bool(lib.moy_ui_api_toggle(p, c.byref(s), t, 1 if on else 0, ov))
+
+    def api_slider(ctx, cv, look, label, v, lo, hi, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        ov, ok = _over(o)
+        return int(lib.moy_ui_api_slider(p, c.byref(s), t, int(v), int(lo), int(hi), ov))
+
+    def api_list(ctx, cv, look, label, items, cur, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        ov, ok = _over(o)
+        b = bytes(items)
+        return int(lib.moy_ui_api_list(p, c.byref(s), t, b, len(b), int(cur), ov))
+
+    def api_part(ctx, cv, look, id_, w, h, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(id_)
+        ov, ok = _over(o)
+        out = (c.c_int32 * 5)()
+        lib.moy_ui_api_part(p, c.byref(s), t, int(w), int(h), ov, out)
+        return tuple(out)
+
+    def api_focus(ctx, id_=None):
+        p, _k = _ctx(ctx)
+        if id_ is None:
+            t, keep = _Span(None, 0), None
+        else:
+            t, keep = span(id_)
+            if not t.n:
+                keep = c.create_string_buffer(b"", 1)
+                t = _Span(c.addressof(keep), 0)
+        buf = c.create_string_buffer(64)
+        n = lib.moy_ui_api_focus(p, t, buf, 64)
+        return None if n < 0 else buf.value.decode("utf-8", "replace")
+
+    def api_keys_taken(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_keys_taken(p))
+
+    def api_at(ctx, x, y, w, h):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_at(p, int(x), int(y), int(w), int(h))
+
+    def api_dup(ctx):
+        p, _k = _ctx(ctx)
+        d = lib.moy_ui_api_dup(p)
+        return None if d is None else d.decode("utf-8", "replace")
+
+    for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
+              api_list, api_part, api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value
     m.calls = lambda: lib.moy_ui_calls()

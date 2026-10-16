@@ -41,8 +41,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
@@ -530,7 +532,7 @@ class PaintAppLayer:
         # One shared implementation now (ui.chip) -- pixel-identical delegate.
         # `glyph` draws a glyph instead of the text (`ui.glyph`); unknown kinds
         # draw nothing, so callers only pass kinds this build ships.
-        _ui.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs,
+        _ui_draw.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs,
                  glyph=glyph)
 
     def _display_spec(self):

@@ -41,7 +41,7 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 63, 4, 39
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 64, 4, 39
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
@@ -323,7 +323,7 @@ def binding(sanitize=False):
         def wasm_bind(self, g, roles=()):
             """The run a compiled app's imports serve (moy_app_wasm_bind)."""
             g = int(g) & 0xFFFFFFFF
-            lib.moy_app_wasm_bind(self._p if g else None, g, mask_of(roles) if g else 0)
+            lib.moy_app_wasm_bind(self._p, g, mask_of(roles) if g else 0)
 
         def wasm_end(self):
             lib.moy_app_wasm_end()

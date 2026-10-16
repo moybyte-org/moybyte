@@ -35,14 +35,18 @@ SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy/moy_wasm.c
 # moy_canvas, so it must be identical for every translation unit that sees
 # moy.h -- moy_gfx sets the same define, and CFLAGS_USERMOD is global to the
 # build, so the two agree by construction. MOY_WITH_LUA is what compiles
-# libmoy's binding at all (moy.h guards it).
+# libmoy's binding at all (moy.h guards it). MOYCORE_UI opens the public UI
+# API's Lua face (moycore_ui.h) over native/moy_ui, which every build that
+# takes moycore takes.
 CFLAGS_USERMOD += -I$(MOYCORE_MOD_DIR) \
 	-I$(MOYCORE_MOD_DIR)/../moy_gfx/libmoy \
 	-I$(MOYCORE_MOD_DIR)/../moy_lua/lua \
 	-I$(MOYCORE_MOD_DIR)/../moy_spine \
 	-I$(MOYCORE_MOD_DIR)/../moy_store \
 	-I$(MOYCORE_MOD_DIR)/../moy_glass \
-	-DMOY_PIXEL_RGB565=1 -DMOY_WITH_LUA=1
+	-I$(MOYCORE_MOD_DIR)/../moy_gfx \
+	-I$(MOYCORE_MOD_DIR)/../moy_ui \
+	-DMOY_PIXEL_RGB565=1 -DMOY_WITH_LUA=1 -DMOYCORE_UI=1
 
 # NB: libmoy/moy_lua.c is NOT listed above -- libmoy_binding.c includes it, so
 # the two diagnostics a 32-bit Lua necessarily trips can be silenced by pragma

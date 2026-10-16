@@ -877,7 +877,7 @@ def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
     ns = _api.make_system_api(ws.app_context,
                               {"title": "Skinner", "permissions": ["appearance"]})
     assert sorted(ns) == ["bar_h", "content_rect", "screen", "set_theme", "theme",
-                          "themes", "ui"]
+                          "themes", "ui", "ui_draw"]
     # NAMES, one per installed theme -- the round trip the docstring promises,
     # since `set_theme` takes a name and falls back to DEFAULT_THEME silently on
     # anything else. Feeding the picker's own output back is the case that used

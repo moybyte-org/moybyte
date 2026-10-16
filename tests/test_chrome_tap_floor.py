@@ -283,7 +283,7 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
     number now, and all seven tabs stay reachable on the bar the tap floor
     shortened."""
     from runtime import editor_app as _ea
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
     for diag, cs in ((None, 1), (3.5, 2)):
         ws = host_app.build_workstation(
             str(tmp_path / ("z%s" % diag)), sys_size=(480, 320), font_scale=1,
@@ -295,7 +295,7 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
         assert ed._zone_scale() == ws.sys_canvas.font_scale
         tabs_area, _play = ed._zone_parts(ws.layout.zone_left)
         slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
-        rects = _ui.tab_row_rects(tabs_area, slim, ed._zone_scale())
+        rects = _ui_draw.tab_row_rects(tabs_area, slim, ed._zone_scale())
         assert [t for t, _r, _l in rects] == [t for t, _l, _i in _ea._TAB_CHIPS]
         assert rects[0][1][3] == ws.layout.bar_icon      # ...as tall as the band
 

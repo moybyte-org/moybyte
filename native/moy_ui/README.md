@@ -1,9 +1,11 @@
 # moy_ui — the widget toolkit in C
 
 The toolkit's bodies in C, with style and strings as data
-(`docs/kernel_toolkit_2026-10.md`, #224). `runtime/ui.py` is its face: every
-shipped app and every app cart still imports `ui`, and the face hands its
-calls here.
+(`docs/kernel_toolkit_2026-10.md`, #224), and the engine of the public UI
+API (`docs/ui_api_2026-10.md`). `runtime/ui.py` (the verbs) and
+`runtime/ui_draw.py` (the rect-taking widgets the chrome keeps) are its
+Python faces, `native/moycore/moycore_ui.h` its Lua face and
+`moy_ui_wasm.c` its rows for a compiled app.
 
 | file | holds |
 |---|---|
@@ -18,8 +20,9 @@ calls here.
 | `moy_ui_paint.c` | the surface painter: a compiled surface into a box, under the corner mask of the theme's radius |
 | `moy_ui_depth.c` | the theme's depth (`docs/look_2026-10.md` step 6): its look's radii, shadow and edges installed per theme and mode, the window frame it draws, what a window leaves to the desk under it (its shadow and its outline's fringe) and a card's shadow, through `native/moy_gfx/moy_shape.h` |
 | `moy_ui_sink.c` | the ROW sink: a glass canvas row by its CANVAS handle |
-| `moy_ui_wasm.h`, `moy_ui_wasm.c` | the RUN sink and the `ui` rows a compiled app imports (roles.json's `ui` role) |
-| `modmoy_ui.c` | the module `moy_ui` the boards and the browser import (its `themes`, `theme_roles`, `theme`, `theme_look`, `theme_look_fields`, `theme_place`, `theme_block`, `theme_rgb`, `theme_shape`, `surface`, `parts`, `theme_states`, `theme_install`, `theme_installed`, `theme_fonts`, `theme_sheets` and `theme_layout` face the loader, `sheet_check`, `sheet_load`, `sheet_clear`, `sheet_cells`, `sheet_set` and `sheet_caps` the role sheet, `font_load`, `font_free`, `font_reset`, `font_info` and `font_file` the font rows behind `moy_text` (`native/moy_gfx/moy_text.h`), `use_font` and `font` the font each role's text draws in, `print_font` the one a canvas's print draws in and `cart_text` the app-cart boundary (`docs/theming_2026-09.md` §4.7), `use_shape` installs a theme's shape, `buttons_set`, `buttons_clear` and `buttons_app` the live theme's button leaves and `button_style` resolves a button kind against them, `theme_reads` is the contrast floor, `paint` is the painter's sink op and `frame`, `frame_buttons` and `frame_band` draw and lay out a window frame; `use_depth`, `frame_geom`, `frame_under` and `cast` are the depth's); its `s`, `str_set` and `str_reset` read and write the spine's string table |
+| `moy_ui_api.h`, `moy_ui_api.c` | the public UI API's engine: a context per running app (focus, the last frame's stops, each id's kept state, the layout cursor), the frame's input resolved once into focus moves, activation, the pointer's press and drag and the page's scroll, and the verbs, each drawing through the primitives with the theme's marks |
+| `moy_ui_wasm.h`, `moy_ui_wasm.c` | the RUN sink and the RUN face: the run's one context over its snapshot, the verbs a Lua cart's `ui` calls and the `ui` rows a compiled app imports (roles.json's `ui` role) |
+| `modmoy_ui.c` | the module `moy_ui` the boards and the browser import (its `themes`, `theme_roles`, `theme`, `theme_look`, `theme_look_fields`, `theme_place`, `theme_block`, `theme_rgb`, `theme_shape`, `surface`, `parts`, `theme_states`, `theme_install`, `theme_installed`, `theme_fonts`, `theme_sheets` and `theme_layout` face the loader, `sheet_check`, `sheet_load`, `sheet_clear`, `sheet_cells`, `sheet_set` and `sheet_caps` the role sheet, `font_load`, `font_free`, `font_reset`, `font_info` and `font_file` the font rows behind `moy_text` (`native/moy_gfx/moy_text.h`), `use_font` and `font` the font each role's text draws in, `print_font` the one a canvas's print draws in and `cart_text` the app-cart boundary (`docs/theming_2026-09.md` §4.7), `use_shape` installs a theme's shape, `buttons_set`, `buttons_clear` and `buttons_app` the live theme's button leaves and `button_style` resolves a button kind against them, `theme_reads` is the contrast floor, `paint` is the painter's sink op and `frame`, `frame_buttons` and `frame_band` draw and lay out a window frame; `use_depth`, `frame_geom`, `frame_under` and `cast` are the depth's; `api_size`, `api_begin` and the `api_` verbs are the public UI API's engine); its `s`, `str_set` and `str_reset` read and write the spine's string table |
 
 The strings C draws are the spine's (`native/moy_spine/moy_str.h`), not this
 module's: the kernel's floor draws them on an image with no toolkit.

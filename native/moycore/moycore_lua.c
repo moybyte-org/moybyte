@@ -14,6 +14,9 @@
 #include "moycore_lua.h"
 #include "moycore_run.h"
 #include "moycore_superset.h"
+#if MOYCORE_UI
+#include "moycore_ui.h"
+#endif
 #include "moycore_scene.h"
 #include "moy_img.h"
 #include "moy_buf.h"
@@ -1140,6 +1143,9 @@ int moycore_lua_open(char *err, size_t n)
     // The layer glue's two natives, captured and cleared by the prelude.
     moycore_layers_open(RUN.L, &RUN.layers, &RUN.c.con);
     moycore_superset_open(RUN.L);
+#if MOYCORE_UI
+    moycore_ui_open(RUN.L);
+#endif
     media_open(RUN.L);
     // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
     // walk read the same 512 bytes, seeded from the cart's file. The shim's

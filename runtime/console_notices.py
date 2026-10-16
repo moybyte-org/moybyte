@@ -18,9 +18,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 
 class Notices:
@@ -104,9 +104,9 @@ class Notices:
         if not verdict:
             return False
         if verdict[0] == "ok":
-            self.notice(_ui.s("notice.updated"), _ui.s("notice.now") % u.version_label(), "ok")
+            self.notice(_ui_draw.s("notice.updated"), _ui_draw.s("notice.now") % u.version_label(), "ok")
         else:
-            self.notice(_ui.s("notice.undone"), _ui.s("notice.still_on") % u.version_label(), "warn")
+            self.notice(_ui_draw.s("notice.undone"), _ui_draw.s("notice.still_on") % u.version_label(), "warn")
         return True
 
     def _draw_notice(self):
@@ -150,22 +150,22 @@ class SystemMenuUI:
         The cart group is OMITTED entirely (not greyed) when no cart is open."""
         rows = []
         if self.ws.cart is not None:
-            rows.append(("header", _ui.s("menu.cart")))
-            rows.append(("item", _ui.s("menu.restart_cart"), self._menu_restart_cart))
-            rows.append(("item", _ui.s("menu.delete_cart"), self._menu_delete_cart))
+            rows.append(("header", _ui_draw.s("menu.cart")))
+            rows.append(("item", _ui_draw.s("menu.restart_cart"), self._menu_restart_cart))
+            rows.append(("item", _ui_draw.s("menu.delete_cart"), self._menu_delete_cart))
             rows.append(("sep",))
-        rows.append(("header", _ui.s("menu.system")))
+        rows.append(("header", _ui_draw.s("menu.system")))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
         # from the launcher home -- the label flips to CLEAR SEARCH once a query
         # is active/typing, so the same row both opens and dismisses it.
         if self.ws.screen == "launcher":
-            label = _ui.s("menu.clear_search"
+            label = _ui_draw.s("menu.clear_search"
                           if (self.ws.search_typing or self.ws.search_query)
                           else "menu.search")
             rows.append(("item", label, self.ws.toggle_search))
-        rows.append(("item", _ui.s("menu.settings"), self.ws.open_settings))
-        rows.append(("item", _ui.s("menu.about"), self._menu_about))
-        rows.append(("item", _ui.s("menu.reboot"), self._menu_reboot))
+        rows.append(("item", _ui_draw.s("menu.settings"), self.ws.open_settings))
+        rows.append(("item", _ui_draw.s("menu.about"), self._menu_about))
+        rows.append(("item", _ui_draw.s("menu.reboot"), self._menu_reboot))
         return rows
 
     def _menu_restart_cart(self):
@@ -214,7 +214,7 @@ class SystemMenuUI:
             # A component's panel: the menu's dialog shell, its painter inside.
             cv = ws.sys_canvas
             th = ws.theme_colors
-            _ui.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
+            _ui_draw.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
             m.comp.draw(cv, (x, y, w, h))
             return
         rows = []

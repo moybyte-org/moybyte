@@ -47,10 +47,15 @@ int moy_wasm_on_vm(void (*fn)(void *arg), void *arg) __attribute__((weak));
 enum { HOP = 0, SEQ = 1 };
 
 static moy_appabi_t *volatile s_a;
+static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads with no run
 static volatile uint32_t s_g, s_roles;
 static uint32_t s_hops, s_hop_us, s_hop_work_us;
 
 void moy_app_wasm_bind(moy_appabi_t *a, uint32_t g, uint32_t roles) {
+    if (a != NULL) {
+        s_live = a;
+    }
+    a = g != 0u ? a : NULL;
     s_a = a;
     s_g = a != NULL ? g : 0u;
     s_roles = a != NULL ? roles : 0u;
@@ -69,6 +74,9 @@ void moy_app_wasm_forget(const moy_appabi_t *a) {
     if (a != NULL && s_a == a) {
         moy_app_wasm_bind(NULL, 0u, 0u);
     }
+    if (a != NULL && s_live == a) {
+        s_live = NULL;
+    }
 }
 
 uint32_t moy_app_wasm_grant(void) {
@@ -77,7 +85,7 @@ uint32_t moy_app_wasm_grant(void) {
 
 uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
                             uint32_t cap) {
-    moy_appabi_t *a = s_a;
+    moy_appabi_t *a = s_a != NULL ? s_a : s_live;
     if (a == NULL) {
         return 0u;
     }
@@ -215,8 +223,8 @@ enum {
     N_NAV_OPEN_APP,
     N_PREFS_GET, N_PREFS_SET, N_PREFS_CLEAR,
     N_CLIPBOARD_PUT_TEXT, N_CLIPBOARD_TEXT, N_CLIPBOARD_KIND, N_CLIPBOARD_SEQ,
-    N_UI_KIND, N_UI_GLYPH_ID, N_UI_BUTTON, N_UI_LABEL, N_UI_LIST, N_UI_HITS_CLEAR,
-    N_UI_HITS_ADD, N_UI_HITS_PUMP, N_UI_DRAGTAP,
+    N_UI_PAGE, N_UI_LABEL, N_UI_BUTTON, N_UI_TOGGLE, N_UI_SLIDER, N_UI_LIST, N_UI_PART,
+    N_UI_FOCUS, N_UI_KEYS_TAKEN, N_UI_AT,
     N_COUNT
 };
 
@@ -229,8 +237,8 @@ static const char *const ROW_OF[N_COUNT] = {
     "nav.open_app",
     "prefs.get", "prefs.set", "prefs.clear",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
-    "ui.kind", "ui.glyph_id", "ui.button", "ui.label", "ui.list", "ui.hits_clear",
-    "ui.hits_add", "ui.hits_pump", "ui.dragtap",
+    "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
+    "ui.focus", "ui.keys_taken", "ui.at",
 };
 
 static int8_t s_rows[N_COUNT];      // MOY_APP_TABLE_N < 128
@@ -381,22 +389,22 @@ static int32_t w_clipboard_seq(void *e) {
 // spine library, which runtime/moyhost_wasm.c fills from its own) answers
 // NULL for them.
 #define UI_WEAK __attribute__((weak))
-int32_t moy_ui_wasm_kind(void *, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_glyph_id(void *, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_button(void *, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
-                           int32_t, const uint8_t *, uint32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_label(void *, int32_t, int32_t, int32_t, int32_t, const uint8_t *,
-                          uint32_t, int32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_list(void *, int32_t, int32_t, int32_t, int32_t, int32_t, const uint8_t *,
-                         uint32_t, int32_t, int32_t, int32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_hits_clear(void *, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_hits_add(void *, uint8_t *, uint32_t, int32_t, int32_t, int32_t, int32_t,
-                             int32_t) UI_WEAK;
-int32_t moy_ui_wasm_hits_pump(void *, uint8_t *, uint32_t, int32_t, int32_t, int32_t, int32_t,
-                              uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_dragtap(void *, uint8_t *, uint32_t, int32_t, int32_t, int32_t, int32_t,
-                            int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
-                            float) UI_WEAK;
+int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                         uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_label(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_button(void *, const uint8_t *, uint32_t, int32_t, const uint8_t *,
+                           uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_toggle(void *, const uint8_t *, uint32_t, int32_t, const uint8_t *,
+                           uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_slider(void *, const uint8_t *, uint32_t, int32_t, int32_t, int32_t,
+                           const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_list(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
+                         const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_part(void *, const uint8_t *, uint32_t, int32_t, int32_t, const uint8_t *,
+                         uint32_t, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_focus(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_keys_taken(void *) UI_WEAK;
+int32_t moy_ui_wasm_at(void *, int32_t, int32_t, int32_t, int32_t) UI_WEAK;
 
 // The rows, roles.json's wasm types: what tests/test_roles.py holds equal.
 static const moy_app_native_t NATIVES[N_COUNT] = {
@@ -423,15 +431,16 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "clipboard_text", FN(w_clipboard_text), "(*~)i", NULL },
     { "clipboard_kind", FN(w_clipboard_kind), "()i", NULL },
     { "clipboard_seq", FN(w_clipboard_seq), "()i", NULL },
-    { "ui_kind", FN(moy_ui_wasm_kind), "(*~)i", NULL },
-    { "ui_glyph_id", FN(moy_ui_wasm_glyph_id), "(*~)i", NULL },
-    { "ui_button", FN(moy_ui_wasm_button), "(iiiiiii*~i)i", NULL },
-    { "ui_label", FN(moy_ui_wasm_label), "(iiii*~ii)i", NULL },
-    { "ui_list", FN(moy_ui_wasm_list), "(iiiii*~iiii)i", NULL },
-    { "ui_hits_clear", FN(moy_ui_wasm_hits_clear), "(*~)i", NULL },
-    { "ui_hits_add", FN(moy_ui_wasm_hits_add), "(*~iiiii)i", NULL },
-    { "ui_hits_pump", FN(moy_ui_wasm_hits_pump), "(*~iiii*~)i", NULL },
-    { "ui_dragtap", FN(moy_ui_wasm_dragtap), "(*~iiiiiiiiiiif)i", NULL },
+    { "ui_page", FN(moy_ui_wasm_page), "(*~*~*~)i", NULL },
+    { "ui_label", FN(moy_ui_wasm_label), "(*~*~)i", NULL },
+    { "ui_button", FN(moy_ui_wasm_button), "(*~i*~)i", NULL },
+    { "ui_toggle", FN(moy_ui_wasm_toggle), "(*~i*~)i", NULL },
+    { "ui_slider", FN(moy_ui_wasm_slider), "(*~iii*~)i", NULL },
+    { "ui_list", FN(moy_ui_wasm_list), "(*~*~i*~)i", NULL },
+    { "ui_part", FN(moy_ui_wasm_part), "(*~ii*~*~)i", NULL },
+    { "ui_focus", FN(moy_ui_wasm_focus), "(*~*~)i", NULL },
+    { "ui_keys_taken", FN(moy_ui_wasm_keys_taken), "()i", NULL },
+    { "ui_at", FN(moy_ui_wasm_at), "(iiii)i", NULL },
 };
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {

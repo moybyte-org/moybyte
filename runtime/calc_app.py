@@ -36,8 +36,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 _in = _ui.rect_in
 
@@ -90,7 +92,7 @@ class CalcAppLayer:
         self._theme = ctx.theme
         self._damage = ctx.damage
         self._NAMES = names
-        self.hits = _ui.Hits()
+        self.hits = _ui_draw.Hits()
         self.entry = "0"              # the number being typed
         self.acc = None               # banked left operand
         self.op = None                # pending operator
@@ -140,7 +142,7 @@ class CalcAppLayer:
         if self.op is not None:
             cv.print(self.op, x + 3 * fs, y + (h - 8 * fs) // 2, th["author"], 1)
         text = self.entry[-14:]
-        cv.print(text, x + w - 3 * fs - _ui.print_width(text, fs),
+        cv.print(text, x + w - 3 * fs - _ui_draw.print_width(text, fs),
                  y + (h - 8 * fs) // 2, NAMES["green"], 1)
         # The key grid through the toolkit's button vocabulary; every key rect
         # registers in the SAME pass the pixels land (draw == tap).
@@ -155,7 +157,7 @@ class CalcAppLayer:
                     kind = "danger"
                 elif label in "+-*/":
                     kind = "tonal"
-                _ui.button(cv, th, rect, label, kind=kind, app=self.id)
+                _ui_draw.button(cv, th, rect, label, kind=kind, app=self.id)
                 self.hits.add(rect, "key", label)
 
     # -- input -----------------------------------------------------------------

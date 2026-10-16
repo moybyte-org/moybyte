@@ -19,9 +19,9 @@ console can do:
 """
 
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # host: the runtime package
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 try:
     from chrome import _ticks_ms, _ticks_diff
 except ImportError:  # host: the runtime package
@@ -141,5 +141,5 @@ class Saver:
         if img is not None:
             _draw_cover(cv, img, 0, 0, w, h - band, h - band)
         name = cart.get("title") or "?"
-        x = max(0, (w - _ui.print_width(name)) // 2)
+        x = max(0, (w - _ui_draw.print_width(name)) // 2)
         cv.print(name, x, h - band + 8, 7, 1)

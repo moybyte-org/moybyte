@@ -18,8 +18,10 @@ state lives ON the grid (`grid.sel_name()`), never mirrored here.
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
@@ -610,7 +612,7 @@ class FilesAppLayer(ListShellApp):
         return out
 
     def _chip(self, cv, label, r, on=False, hot=False):
-        _ui.chip(cv, self._theme.colors(), r, label, on=on, hot=hot,
+        _ui_draw.chip(cv, self._theme.colors(), r, label, on=on, hot=hot,
                  fs=self.layout.fs)
 
     def draw(self, dt):
@@ -619,7 +621,7 @@ class FilesAppLayer(ListShellApp):
         th = self._theme.colors()
         fs = lay.fs
         cv.cls(th["panel"])
-        bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
+        bar_ink = _ui_draw.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         crumb = "FILES"
         if self.mode in ("grid", "rename", "game", "used"):
             crumb = "FILES > " + self.grid.kind.upper()
@@ -692,7 +694,7 @@ class FilesAppLayer(ListShellApp):
             i = self.top + row
             if i >= len(self._rows):
                 break
-            _ui.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
+            _ui_draw.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
                     focus=(i == self.sel),
                     pad=4 * fs, text_dy=lay.dy(6), fs=fs)
         self._rows_bar(cv, th, len(self._rows))

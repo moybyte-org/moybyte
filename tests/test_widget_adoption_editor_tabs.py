@@ -36,13 +36,13 @@ class _Counter:
     KINDS = ("row", "cell", "chip", "button", "status_row", "dialog")
 
     def __init__(self, monkeypatch):
-        from runtime import ui
+        from runtime import ui_draw
         self.n = {}
         for kind in self.KINDS:
-            self._wrap(monkeypatch, ui, kind)
+            self._wrap(monkeypatch, ui_draw, kind)
 
-    def _wrap(self, monkeypatch, ui, kind):
-        real = getattr(ui, kind)
+    def _wrap(self, monkeypatch, ui_draw, kind):
+        real = getattr(ui_draw, kind)
         counts = self.n
         counts[kind] = 0
 
@@ -50,7 +50,7 @@ class _Counter:
             counts[kind] += 1
             return real(*a, **kw)
 
-        monkeypatch.setattr(ui, kind, counted)
+        monkeypatch.setattr(ui_draw, kind, counted)
 
     def reset(self):
         for k in self.n:
@@ -91,8 +91,8 @@ def test_the_private_panel_button_copy_is_gone(tmp_path):
 
 
 def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
-    """Every chrome button on the code tab is a `ui.chip`, and every symbol-
-    palette key is a `ui.cell`. Counted with the tool palette AND the find bar
+    """Every chrome button on the code tab is a `ui_draw.chip`, and every symbol-
+    palette key is a `ui_draw.cell`. Counted with the tool palette AND the find bar
     open -- the states no golden enters."""
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     cl = ws.code_layer
@@ -165,8 +165,8 @@ def _cards_ws(tmp_path, **kw):
 
 
 def test_config_cards_are_toolkit_rows_and_cells(tmp_path, monkeypatch):
-    """One `ui.row` per visible card (the selection field + its label line) and
-    one `ui.cell` per choice cell -- the stepper glyphs, the gauge/count meters
+    """One `ui_draw.row` per visible card (the selection field + its label line) and
+    one `ui_draw.cell` per choice cell -- the stepper glyphs, the gauge/count meters
     and the background previews stay the card's own CONTENT."""
     ws = _cards_ws(tmp_path, sys_size=(480, 320))
     cl = ws.cards_layer
@@ -182,13 +182,14 @@ def test_config_grids_register_no_per_cell_hit_rects(tmp_path, monkeypatch):
     """MEASURED constraint (runtime/ui.py's module docstring): a grid must not
     put one hit rect per cell into `Hits` -- on the P4 that is ~9.3ms, 13% of the
     map tab's frame. The Config tab's choice/thumbnail grids hit-test
-    arithmetically (`_choice_cells`), and `ui.cell` takes no `hits` argument at
+    arithmetically (`_choice_cells`), and `ui_draw.cell` takes no `hits` argument at
     all, so this asserts the whole cards draw adds ZERO."""
     from runtime import ui
+    from runtime import ui_draw
     ws = _cards_ws(tmp_path, sys_size=(480, 320))
     counter = _Counter(monkeypatch)
     added = []
-    monkeypatch.setattr(ui.Hits, "add",
+    monkeypatch.setattr(ui_draw.Hits, "add",
                         lambda self, *a, **kw: added.append(a))
     ws.cards_layer._t = ws.cards_layer._tones()
     ws.cards_layer._draw_cards()

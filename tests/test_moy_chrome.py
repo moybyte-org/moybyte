@@ -9,7 +9,7 @@ import ctypes
 import pytest
 
 from runtime import chrome_ops as ui, moy_play
-from runtime import ui as toolkit
+from runtime import ui_draw as toolkit
 from runtime.chrome import NAMES
 from ws_helpers import build_ws
 

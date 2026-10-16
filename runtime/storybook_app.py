@@ -26,8 +26,10 @@ Same app pattern as Paint/Appearance: a `.moy` cartridge identity
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -154,7 +156,7 @@ class StorybookLayout(ListShellLayout):
         # live-ish preview strip.
         # The page's words are a typed grid, so they lay out in the `mono`
         # font's cells (as the code editor's do) and draw in it.
-        _mf, mw, mline, _ma = _ui.font("mono")
+        _mf, mw, mline, _ma = _ui_draw.font("mono")
         self.cell = mw * fs
         self.mono_line = mline * fs
         self.lh = self.mono_line + 2 * fs
@@ -596,7 +598,7 @@ class StorybookAppLayer(ListShellApp):
         lay = self.layout
         th = self._theme.colors()
         cv.cls(th["panel"])
-        bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
+        bar_ink = _ui_draw.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
         if self.mode == "shelf":
             cv.print(lay.cut(self.status, lay.cw, 2),
                      lay.status_x, lay.cy + lay.dy(8), bar_ink, 1)
@@ -645,7 +647,7 @@ class StorybookAppLayer(ListShellApp):
                 # pad-derived one at some widths.
                 label = lay.cut(label_fn(rows[i]), r[2], 2)
                 kind, colors = "row", (7, 0, edge)
-            _ui.row(cv, th, r, label, kind=kind, on=selected, colors=colors,
+            _ui_draw.row(cv, th, r, label, kind=kind, on=selected, colors=colors,
                     pad=6 * fs, fs=fs)
 
     def _draw_page(self, cv):
@@ -658,13 +660,13 @@ class StorybookAppLayer(ListShellApp):
         cv.rectb(ax, ay, aw, ah, th["dim"])
         ed = self.editor
         if ed is not None:
-            was = _ui.print_font(_ui.font("mono")[0])
+            was = _ui_draw.print_font(_ui_draw.font("mono")[0])
             try:
                 for r, line in enumerate(ed.visible_lines()):
                     cv.print(line[ed.left:ed.left + lay.cols], lay.tx,
                              lay.ty + r * lay.lh, 0, 1)
             finally:
-                _ui.print_font(was)
+                _ui_draw.print_font(was)
             crow = ed.row - ed.top
             ccol = ed.col - ed.left
             if not self.read_only and 0 <= crow < lay.rows and 0 <= ccol <= lay.cols:

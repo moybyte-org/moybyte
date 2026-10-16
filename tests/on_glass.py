@@ -317,7 +317,7 @@ def painter_host_frames():
     """The host's index frame of each PAINTER_SCENES scene."""
     import runtime  # noqa: F401  (registers the host's moy_ui)
     import moy_ui
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.chrome import theme_colors
     from runtime.host_canvas import indices_of, make_system_canvas
     th = theme_colors("night")
@@ -325,30 +325,30 @@ def painter_host_frames():
     try:
         for text, metrics, rect in PAINTER_SCENES:
             assert moy_ui.theme_install(_painter_src(text, metrics))[0] == 0
-            ui.use_shape("painted")
+            ui_draw.use_shape("painted")
             cv = make_system_canvas(16, 12)
             cv.cls(9)
-            assert ui.paint(cv, th, rect, "desk")
+            assert ui_draw.paint(cv, th, rect, "desk")
             out.append(bytes(indices_of(cv)))
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
     return out
 
 
 _PAINTER_HELPER = """
-import ui, chrome, moy_ui, device_canvas, binascii
+import ui_draw, chrome, moy_ui, device_canvas, binascii
 def _paint_scene(src, rect):
     cv = (ws.sys_canvas or ws.canvas).new_layer(16, 12)
     try:
         assert moy_ui.theme_install(src)[0] == 0
-        ui.use_shape('painted')
+        ui_draw.use_shape('painted')
         cv.cls(9)
-        assert ui.paint(cv, chrome.theme_colors('night'), rect, 'desk')
+        assert ui_draw.paint(cv, chrome.theme_colors('night'), rect, 'desk')
         px = device_canvas.to_indices(cv._buf, cv._wire)
         return binascii.hexlify(bytes(px)).decode()
     finally:
         cv.release()
-        ui.use_shape(ws.look.theme_name)
+        ui_draw.use_shape(ws.look.theme_name)
 """
 
 
@@ -393,6 +393,7 @@ def sprite_host_frames():
     import runtime  # noqa: F401  (registers the host's moy_ui)
     import moy_ui
     from runtime import ui
+    from runtime import ui_draw
     from runtime.chrome import theme_colors
     from runtime.host_canvas import indices_of, make_system_canvas
     with open(SPRITE_FIXTURE, "rb") as f:
@@ -400,26 +401,26 @@ def sprite_host_frames():
     out = []
     try:
         assert moy_ui.theme_install(_SPRITE_THEME)[0] == 0
-        ui.use_shape("spr")
-        assert ui.sheet_load(sheet) == 0
+        ui_draw.use_shape("spr")
+        assert ui_draw.sheet_load(sheet) == 0
         th = theme_colors("spr")
         for what, args, fs in SPRITE_SCENES:
             cv = make_system_canvas(48, 40, font_scale=fs)
             cv.cls(9)
             if what == "paint":
-                assert ui.paint(cv, th, args[2], args[0], args[1])
+                assert ui_draw.paint(cv, th, args[2], args[0], args[1])
             else:
-                ui.frame(cv, th, args[0], args[1], "", args[2], True, fs)
+                ui_draw.frame(cv, th, args[0], args[1], "", args[2], True, fs)
             out.append(bytes(indices_of(cv)))
     finally:
-        ui.sheet_clear()
-        ui.use_shape(None)
+        ui_draw.sheet_clear()
+        ui_draw.use_shape(None)
         moy_ui.theme_uninstall()
     return out
 
 
 _SPRITE_HELPER = """
-import ui, chrome, moy_ui, device_canvas, binascii
+import ui_draw, chrome, moy_ui, device_canvas, binascii
 def _scale(cv, fs):
     cv.font_scale = fs
     cv._gate_state[device_canvas._ST_FONT_SCALE] = fs
@@ -429,15 +430,15 @@ def _sprite_scene(src, what, args, fs):
     was = getattr(cv, 'font_scale', 1)
     try:
         assert moy_ui.theme_install(src)[0] == 0
-        ui.use_shape('spr')
-        assert ui.sheet_load(sheet) == 0
+        ui_draw.use_shape('spr')
+        assert ui_draw.sheet_load(sheet) == 0
         _scale(cv, fs)
         th = chrome.theme_colors('spr')
         cv.cls(9)
         if what == 'paint':
-            assert ui.paint(cv, th, args[2], args[0], args[1])
+            assert ui_draw.paint(cv, th, args[2], args[0], args[1])
         else:
-            ui.frame(cv, th, args[0], args[1], '', args[2], True, fs)
+            ui_draw.frame(cv, th, args[0], args[1], '', args[2], True, fs)
         px = device_canvas.to_indices(cv._buf, cv._wire)
         return binascii.hexlify(bytes(px)).decode()
     finally:
@@ -2444,22 +2445,20 @@ def wasm_app_reaches_its_roles(board, root):
     return (us - work) / n
 
 
-# App UI Wasm's pmem slots (tests/fixtures/wasm/app_ui.moy/src/main.wat) and
-# where its list is on its canvas.
-_UI_FRAMES, _UI_OFFSET, _UI_KEPT, _UI_BTN, _UI_LIST, _UI_FAIL = 0, 1, 4, 5, 6, 8
-_UI_LIST_XY = (200, 150)
+# App UI Wasm's pmem slots (tests/fixtures/wasm/app_ui.moy/src/main.wat).
+_UI_FRAMES, _UI_FAIL, _UI_HASH = 0, 8, 9
 
 
 def _app_ui_host_pmem(look):
     """The fixture's pmem after its first frames on the host's WAMR in the
-    board's look (theme, variant): the widgets' pixel hashes the
-    board's must equal."""
+    board's look (theme, variant): the page's pixel hash the board's must
+    equal."""
     import tempfile
     from runtime import host_app, wasm_host
     from tools import wasm_cart
-    from ws_helpers import open_cart
+    from ws_helpers import make_drv, open_cart, quiesce
     if not wasm_host.available():
-        pytest.skip("no host wasm binding to hold the board's widgets to")
+        pytest.skip("no host wasm binding to hold the board's page to")
     root = os.path.join(tempfile.mkdtemp(prefix="moy_app_ui_"), "carts")
     host_app.moy_carts.ensure_dirs(root)
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"),
@@ -2468,23 +2467,22 @@ def _app_ui_host_pmem(look):
     ws.pointer.visible = False
     ws.look.set_theme(look[0], persist=False, variant=look[1])
     open_cart(ws, APP_UI[1])
+    drv = make_drv(ws)              # each frame's input edges begin and end, as on a board
+    ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
     for _ in range(9):
+        quiesce(ws)
         ws._dirty = True
-        ws.frame(1.0 / 30.0)
+        drv.frame(1.0 / 30.0)
     pm = list(ws.player._lua._run.pmem()[1])
     ws.exit()
     return pm
 
 
 def wasm_app_draws_the_toolkit(board, root):
-    """App UI Wasm draws a button, a scrolling list and a label through the
-    `ui` rows (docs/kernel_toolkit_2026-10.md §3.5) with a palette remap, a
-    camera and a fill pattern of its own set: no row fails, the widgets'
-    pixel hashes are the host's run's, the cart's draw state survives the
-    rows, the run crosses into Python for nothing but the console's frame,
-    the census keeps it VM-free, and a swipe through the real pointer feed
-    scrolls the list through the run's snapshot. Leaves the desk as it found
-    it."""
+    """App UI Wasm draws the public UI API's fixture page through the `ui`
+    rows (docs/ui_api_2026-10.md): no row fails, the page's pixel hash is the
+    host's run's, the run crosses into Python for nothing but the console's
+    frame and the census keeps it VM-free. Leaves the desk as it found it."""
     host = _app_ui_host_pmem(board.pyval(
         "(ws.look.theme_name, ws.look.theme_variant)", strict=True))
     pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
@@ -2500,22 +2498,9 @@ def wasm_app_draws_the_toolkit(board, root):
         assert play is not None and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
         pm = board.pyval(pm_expr, timeout=30, strict=True)
         assert pm[_UI_FAIL] == 0, "a ui row answered -%d" % pm[_UI_FAIL]
-        assert pm[_UI_KEPT] == 8, "the cart's draw state was lost: %r" % pm[_UI_KEPT]
-        assert (pm[_UI_BTN], pm[_UI_LIST]) == (host[_UI_BTN], host[_UI_LIST]), (
-            "the widgets' hashes %r, the host's %r" % (pm[_UI_BTN:_UI_LIST + 1],
-                                                       host[_UI_BTN:_UI_LIST + 1]))
-        assert pm[_UI_OFFSET] == 0, pm
-        # Where the list's middle is on the glass: the console's own game
-        # mapping, searched along each axis.
-        sx, sy = board.pyval(
-            "(lambda f, g: (next(x for x in range(2048) if f(x, 0)[0] >= g[0]), "
-            "next(y for y in range(2048) if f(0, y)[1] >= g[1])))(ws._game_xy, %r)"
-            % (_UI_LIST_XY,), strict=True)
-        board.swipe(sx, sy, sx, sy - 120, frames=12)
-        board.drain(1.5)
-        pm = board.pyval(pm_expr, timeout=30, strict=True)
-        assert pm[_UI_OFFSET] > 0, "the swipe did not scroll the list: %r" % pm
-        assert pm[_UI_FAIL] == 0, pm
+        assert pm[_UI_FRAMES] > 0, pm
+        assert pm[_UI_HASH] == host[_UI_HASH], (
+            "the page's hash %r, the host's %r" % (pm[_UI_HASH], host[_UI_HASH]))
         assert not board.state().get("cart_error")
     finally:
         board.leave_cart()

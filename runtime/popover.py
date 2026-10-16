@@ -23,9 +23,11 @@ outside included.
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
     from layers import Layer
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
     from runtime.layers import Layer
 
 _in = _ui.rect_in
@@ -81,7 +83,7 @@ def draw_month(cv, th, rect, y, m, today, fs, ink, dim):
     for d in range(1, n + 1):
         i = first + d - 1
         r = (gx + (i % 7) * cw, gy + (i // 7) * ch, cw, ch)
-        _ui.cell(cv, th, r, label=str(d), on=(d == today), pad=0, fs=fs,
+        _ui_draw.cell(cv, th, r, label=str(d), on=(d == today), pad=0, fs=fs,
                  text_dy=(ch - 8 * fs) // 2)
 
 

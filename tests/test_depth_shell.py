@@ -8,7 +8,7 @@ rest. Counts are of the toolkit calls that draw them.
 
 import json
 
-from runtime import ui
+from runtime import ui_draw
 from ws_helpers import build_desktop_ws, build_ws_with_shelf
 
 from runtime import host_app, wm_chrome, launcher_layer
@@ -34,13 +34,13 @@ def _below_bar(ws):
 
 def _spy(monkeypatch, mod, name):
     calls = []
-    real = getattr(mod._ui, name)
+    real = getattr(mod._ui_draw, name)
 
     def spy(*a, **k):
         calls.append(a)
         return real(*a, **k)
 
-    monkeypatch.setattr(mod._ui, name, spy)
+    monkeypatch.setattr(mod._ui_draw, name, spy)
     return calls
 
 
@@ -48,28 +48,28 @@ def _spy(monkeypatch, mod, name):
 
 def test_the_depth_is_the_live_themes_in_its_mode(tmp_path):
     ws, _ = _desk(tmp_path)
-    d = ui.depth()
+    d = ui_draw.depth()
     assert d[0] and d[13]                          # on, and the frame is its
     assert (d[1], d[2], d[3]) == (12, 10, 10)      # the model's radii
     assert d[6] == 1 and (d[9], d[10], d[11]) == (16, 0, 8)
     assert d[8] == (18 * 255 + 50) // 100           # Day: 18%
     ws.look.set_theme("moy", persist=False, variant="dark")
-    d = ui.depth()
+    d = ui_draw.depth()
     assert (d[9], d[11], d[8]) == (14, 6, (55 * 255 + 50) // 100)
     ws.look.set_theme("indigo", persist=False)
-    assert ui.depth()[0] == 0                      # no look: the style's frame
+    assert ui_draw.depth()[0] == 0                      # no look: the style's frame
 
 
 def test_a_theme_naming_a_frame_style_keeps_it(tmp_path):
     ws, _ = _desk(tmp_path)
     pkg = {"format": 2, "name": "boxed", "inherits": "moy",
            "frame": {"style": "win9x"}}
-    rc, _notes = ui._C.theme_install(json.dumps(pkg).encode())
+    rc, _notes = ui_draw._C.theme_install(json.dumps(pkg).encode())
     assert rc == 0
     ws.look.set_theme("boxed", persist=False, variant="light")
-    d = ui.depth()
+    d = ui_draw.depth()
     assert d[0] and not d[13]
-    assert ui.frame_geom(400, 300, 36) == (0,) * 6
+    assert ui_draw.frame_geom(400, 300, 36) == (0,) * 6
 
 
 # -- the windows ----------------------------------------------------------------------
@@ -79,7 +79,7 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     ws.open_settings()
     drv.frame(0.0)
     win = ws.wm._wins["settings"]
-    r, foot = ui.frame_geom(win.w, win.h, win.title_h)[:2]
+    r, foot = ui_draw.frame_geom(win.w, win.h, win.title_h)[:2]
     assert r == 12 and foot == 11 == win.foot
     assert win.content_rect()[3] == win.h - 2 - win.title_h - foot
     assert win.buf.h == win.content_rect()[3]
@@ -152,7 +152,7 @@ def test_a_dragged_window_casts_the_drag_shadow_and_a_still_desk_none(
     ws, drv = _desk(tmp_path)
     calls = _spy(monkeypatch, wm_chrome, "frame_under")
     win, (hx, hy) = _drag(ws, drv)
-    for knob in (ui.UNDER_SMALL, ui.UNDER_NONE):
+    for knob in (ui_draw.UNDER_SMALL, ui_draw.UNDER_NONE):
         ws.wm.drag_shadow = knob
         del calls[:]
         drv.touch_drag(hx + knob, hy)

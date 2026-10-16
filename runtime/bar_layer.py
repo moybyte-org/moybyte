@@ -118,19 +118,19 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 
 def _bar_text_w(s):
     """A bar `text` widget's width at scale 1, in the print font it draws in."""
-    return _ui.print_width(s, 1)
+    return _ui_draw.print_width(s, 1)
 
 
 # The band's edge line faces the content (ui.frame_band's `side`).
-_BAND_SIDE = {"top": _ui.BAND_BOTTOM, "bottom": _ui.BAND_TOP,
-              "left": _ui.BAND_RIGHT, "right": _ui.BAND_LEFT}
+_BAND_SIDE = {"top": _ui_draw.BAND_BOTTOM, "bottom": _ui_draw.BAND_TOP,
+              "left": _ui_draw.BAND_RIGHT, "right": _ui_draw.BAND_LEFT}
 # The OS widgets a bar paints itself (the zone is its owner's, the chips the
 # WM's, a spacer nothing).
 _PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separator")
@@ -697,7 +697,7 @@ class BarLayer:
         # min/max/close -- then the active app's LENT zone.
         tool = where in ("tool", "app")
         light = False if tool else self.zone_band_light(where)
-        _ui.frame_band(cv, ws.theme_colors, (0, 0, rect[2], rect[3]), light,
+        _ui_draw.frame_band(cv, ws.theme_colors, (0, 0, rect[2], rect[3]), light,
                        _BAND_SIDE[edge])
         zone = None
         if not self._in_window(where):
@@ -804,7 +804,7 @@ class BarLayer:
         elif cx == bx:
             cx, cw = bx + 1, w - 1
         cv.clip(cx, cy, cw, ch)
-        _ui.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
+        _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
                        _BAND_SIDE[edge])
         cv.clip()
         text = self._clock_text()

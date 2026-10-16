@@ -1,0 +1,11 @@
+{
+  "format": "moy-1",
+  "title": "UI Page Py",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "permissions": []
+  }
+}

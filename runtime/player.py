@@ -151,6 +151,7 @@ SUPPORTED_EXTENSIONS = (
     "moybyte.net",        # #65: net.send / on_net (also permission-gated)
     "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
     "moybyte.app",        # #224: a compiled app's role imports (native/moy_app/moy_app_wasm.h)
+    "moybyte.ui",         # the public UI API, a Lua cart's `ui` (native/moycore/moycore_ui.h)
 )
 APP_EXT = "moybyte.app"
 
@@ -166,11 +167,18 @@ except ImportError:                     # host: the runtime package
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 try:
-    from ui import cart_text as _cart_text      # the app-cart boundary (§4.7)
-    from ui import print_font as _print_font
+    from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
+    from ui_draw import print_font as _print_font
+    from ui_draw import ui_context as _ui_context, ui_frame as _ui_frame
+    from moy_input import pointer_state as _pointer_state
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui import cart_text as _cart_text
-    from runtime.ui import print_font as _print_font
+    from runtime.ui_draw import cart_text as _cart_text
+    from runtime.ui_draw import print_font as _print_font
+    from runtime.ui_draw import ui_context as _ui_context, ui_frame as _ui_frame
+    from runtime.moy_input import pointer_state as _pointer_state
+from array import array as _array
+_UI_MASKS = [0, 0]                      # reused: the frame's button masks
+_UI_POINTER = [0, 0, 0, 0]              # reused: moy_input.pointer_state's answer
 try:
     from system_api import make_system_api, wants_layout
 except ImportError:                     # host: the runtime package
@@ -588,6 +596,7 @@ class Player:
                                       # window resize / font-scale change re-runs it and a
                                       # steady frame costs one tuple compare
         self._app_id = None           # the crash guard's key for this run (#160), or None
+        self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
         self._app_ctx = None          # a user app's or script's context: its run grant
         self._embed_ctx = None        # the shell's drawings grant, for a note's embeds
@@ -890,6 +899,7 @@ class Player:
         # stands -- an exit before the heal is precisely the evidence kept.
         self._app_layout = None
         self._app_wh = None
+        self._ui = None
         self._end_grant()
         if self._app_id is not None:
             self._app_id = None
@@ -1354,6 +1364,7 @@ class Player:
         self._app_layout = None
         self._app_wh = None
         self._app_id = None
+        self._ui = None
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
@@ -1538,6 +1549,28 @@ class Player:
         self._net = net
         return wifi, net, gpio, console
 
+    def _ui_begin(self, ws):
+        """Begin a Python app's frame of `ui` verbs (runtime/ui.py) over the
+        input its btn() and touch() read, in the run snapshot's shape, before
+        its update, so `ui.keys_taken()` answers there."""
+        ctx, a, cv = self._ui
+        inp = ws.input
+        if getattr(inp, "button_masks", None) is not None:
+            m = inp.button_masks(_NET_BUTTONS, None, _UI_MASKS)
+        else:
+            m = _UI_MASKS
+            m[0] = m[1] = 0
+            for i in range(len(_NET_BUTTONS)):
+                if inp.held(_NET_BUTTONS[i]):
+                    m[0] |= 1 << i
+                if inp.pressed(_NET_BUTTONS[i]):
+                    m[1] |= 1 << i
+        st = _pointer_state(inp, _UI_POINTER)
+        a[0], a[1] = m[0], m[1]
+        a[2], a[3], a[4] = st[0], st[1], st[2]
+        a[5] = int(getattr(inp, "last_key", 0) or 0)
+        _ui_frame(ctx, cv, ws.theme_colors, None, a)
+
     def _build_namespace(self, ws, project, cart, wifi, net, gpio, console):
         """The cart's namespace: make_api over the project, the artwork and
         system-api capabilities a shipped app / user app / script is granted,
@@ -1572,6 +1605,8 @@ class Player:
                                       editor=self._open_cart_editor,
                                       request=ws.take_text_request(),
                                       keep=self._keep_grant))
+            if "ui" in ns:
+                self._ui = [_ui_context(), _array("i", [0] * 6), ws.canvas]
         if console is not None:
             ns.update(console.api())
         # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
@@ -1992,8 +2027,9 @@ class Player:
                 if fit is not None and not _fits(fit):
                     raise _Refused(fit_notice(cart.get("title"), fit[0], fit[1]),
                                    _ch.say_title(_ch.SAY_FIT))
-            if runtime == "wasm":
-                self._wasm_bind(ws.cart)
+            # A Lua run binds none, which leaves the console's state the
+            # one its `ui` reads the theme from (moy_app_wasm.h).
+            self._wasm_bind(ws.cart)
             lua = make(ns, src)
             if runtime == "wasm" and getattr(lua, "interp", False):
                 # Not an error and not a panel: the cart plays, on the
@@ -2111,6 +2147,8 @@ class Player:
                 # for its first cls()), and letting it fall out of the bracket
                 # once put ~4.7ms of Brick Siege's frame under CHROME and sent
                 # #172 hunting the shell for a regression that was never there.
+                if self._ui is not None and getattr(self, "_lua", None) is None:
+                    self._ui_begin(ws)
                 _tb = _ticks_us() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:

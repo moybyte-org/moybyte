@@ -1884,7 +1884,189 @@ static mp_obj_t ui_dragtap(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_dragtap_obj, 13, 13, ui_dragtap);
 
-// wasm_rows() -> the toolkit's rows a compiled app imports ("ui_button", ...),
+// -- the public UI API (moy_ui_api.h; runtime/ui.py is its Python face) ---------------
+//
+// Each verb takes the app's context (a bytearray of api_size() bytes), the
+// canvas and look it draws in, its arguments, and `o`: the override block
+// (moy_ui_api.h's words and id) as bytes, or None.
+
+static moy_ui_ctx_t *ctx_of(mp_obj_t o) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_WRITE);
+    moy_ui_ctx_t *c = moy_ui_api_ctx(b.buf, b.len);
+    if (c == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: not a ui context"));
+    }
+    return c;
+}
+
+static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
+    if (o == mp_const_none) {
+        return NULL;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    check(moy_ui_over_block(out, (const uint8_t *)b.buf, b.len));
+    return out;
+}
+
+// api_size() -> the bytes a context takes
+static mp_obj_t ui_api_size(void) {
+    return MP_OBJ_NEW_SMALL_INT((mp_int_t)moy_ui_api_size());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_size_obj, ui_api_size);
+
+// api_begin(ctx, inp, rect, cls, fs) -> settled. `inp` an array('i') of
+// MOY_UI_IN_LEN words, or None.
+static mp_obj_t ui_api_begin(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    const int32_t *in = NULL;
+    mp_buffer_info_t b;
+    if (a[1] != mp_const_none) {
+        mp_get_buffer_raise(a[1], &b, MP_BUFFER_READ);
+        if (b.len < MOY_UI_IN_LEN * sizeof(int32_t)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: short input"));
+        }
+        in = (const int32_t *)b.buf;
+    }
+    return mp_obj_new_bool(moy_ui_api_begin(c, in, box_of(a[2]), mp_obj_get_int(a[3]),
+                                            mp_obj_get_int(a[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_begin_obj, 5, 5, ui_api_begin);
+
+// api_page(ctx, cv, look, title, o) -> the content rect
+static mp_obj_t ui_api_page(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    moy_ui_box_t b;
+    moy_ui_api_page(c, &s, span_of(a[3]), over_of(a[4], &o), &b);
+    return box_tuple(b);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_page_obj, 5, 5, ui_api_page);
+
+// api_label(ctx, cv, look, text, o)
+static mp_obj_t ui_api_label(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    moy_ui_api_label(c, &s, span_of(a[3]), over_of(a[4], &o));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_label_obj, 5, 5, ui_api_label);
+
+// api_button(ctx, cv, look, label, kind, o) -> activated; `kind` a button
+// kind's index
+static mp_obj_t ui_api_button(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    return mp_obj_new_bool(moy_ui_api_button(c, &s, span_of(a[3]), mp_obj_get_int(a[4]),
+                                             over_of(a[5], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_button_obj, 6, 6, ui_api_button);
+
+// api_toggle(ctx, cv, look, label, on, o) -> the new on
+static mp_obj_t ui_api_toggle(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    return mp_obj_new_bool(moy_ui_api_toggle(c, &s, span_of(a[3]), mp_obj_is_true(a[4]),
+                                             over_of(a[5], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_toggle_obj, 6, 6, ui_api_toggle);
+
+// api_slider(ctx, cv, look, label, v, lo, hi, o) -> the new v
+static mp_obj_t ui_api_slider(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    return mp_obj_new_int(moy_ui_api_slider(c, &s, span_of(a[3]), num(a[4]), num(a[5]),
+                                            num(a[6]), over_of(a[7], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_slider_obj, 8, 8, ui_api_slider);
+
+// api_list(ctx, cv, look, label, items, cur, o) -> the new cur; `items` the
+// rows NUL-separated (bytes)
+static mp_obj_t ui_api_list(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    return mp_obj_new_int(moy_ui_api_list(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
+                                          num(a[5]), over_of(a[6], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_list_obj, 7, 7, ui_api_list);
+
+// api_part(ctx, cv, look, id, w, h, o) -> (x, y, w, h, state)
+static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    int32_t v[5];
+    moy_ui_api_part(c, &s, span_of(a[3]), num(a[4]), num(a[5]), over_of(a[6], &o), v);
+    mp_obj_t t[5];
+    for (int i = 0; i < 5; i++) {
+        t[i] = mp_obj_new_int(v[i]);
+    }
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
+
+// api_focus(ctx, id=None) -> the focused id, or None
+static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
+    moy_ui_ctx_t *c = ctx_of(ctx);
+    moy_ui_span_t sp = {NULL, 0};
+    if (id != mp_const_none) {
+        sp = span_of(id);
+        if (sp.p == NULL) {
+            sp.p = (const uint8_t *)"";
+        }
+    }
+    char buf[MOY_UI_API_NAME];
+    int n = moy_ui_api_focus(c, sp, buf, sizeof(buf));
+    return n < 0 ? mp_const_none : mp_obj_new_str(buf, strlen(buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_obj, ui_api_focus);
+
+// api_keys_taken(ctx) -> whether the ui used this frame's keys
+static mp_obj_t ui_api_keys_taken(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_keys_taken(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_keys_taken_obj, ui_api_keys_taken);
+
+// api_at(ctx, x, y, w, h)
+static mp_obj_t ui_api_at(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_api_at(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_at_obj, 5, 5, ui_api_at);
+
+// api_dup(ctx) -> a duplicate id drawn this frame, once per id, or None
+static mp_obj_t ui_api_dup(mp_obj_t ctx) {
+    const char *d = moy_ui_api_dup(ctx_of(ctx));
+    return d == NULL ? mp_const_none : mp_obj_new_str(d, strlen(d));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_dup_obj, ui_api_dup);
+
+// wasm_rows() -> the public UI API's rows a compiled app imports ("ui_page", ...),
 // in roles.json's order: what this image serves (moy_ui_wasm.h).
 static mp_obj_t ui_wasm_rows(void) {
     mp_obj_t items[MOY_UI_WASM_ROWS];
@@ -1970,6 +2152,19 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_rows), MP_ROM_PTR(&ui_wasm_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_size), MP_ROM_PTR(&ui_api_size_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_begin), MP_ROM_PTR(&ui_api_begin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_page), MP_ROM_PTR(&ui_api_page_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_label), MP_ROM_PTR(&ui_api_label_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_button), MP_ROM_PTR(&ui_api_button_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_toggle), MP_ROM_PTR(&ui_api_toggle_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_slider), MP_ROM_PTR(&ui_api_slider_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_dup), MP_ROM_PTR(&ui_api_dup_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_set), MP_ROM_PTR(&ui_str_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_reset), MP_ROM_PTR(&ui_str_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&ui_glyph_obj) },

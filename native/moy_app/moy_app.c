@@ -73,8 +73,8 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "wallpaper.load_copy", "wallpaper.save_copy",
     "artwork.current", "artwork.follow",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
-    "ui.kind", "ui.glyph_id", "ui.button", "ui.label", "ui.list", "ui.hits_clear",
-    "ui.hits_add", "ui.hits_pump", "ui.dragtap",
+    "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
+    "ui.focus", "ui.keys_taken", "ui.at",
 };
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
@@ -1546,15 +1546,16 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"install.find", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"install.net", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"install.keep", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"ui.kind", MOY_ROLE_UI, MOY_ROW_UI_KIND},
-    {"ui.glyph_id", MOY_ROLE_UI, MOY_ROW_UI_GLYPH_ID},
-    {"ui.button", MOY_ROLE_UI, MOY_ROW_UI_BUTTON},
+    {"ui.page", MOY_ROLE_UI, MOY_ROW_UI_PAGE},
     {"ui.label", MOY_ROLE_UI, MOY_ROW_UI_LABEL},
+    {"ui.button", MOY_ROLE_UI, MOY_ROW_UI_BUTTON},
+    {"ui.toggle", MOY_ROLE_UI, MOY_ROW_UI_TOGGLE},
+    {"ui.slider", MOY_ROLE_UI, MOY_ROW_UI_SLIDER},
     {"ui.list", MOY_ROLE_UI, MOY_ROW_UI_LIST},
-    {"ui.hits_clear", MOY_ROLE_UI, MOY_ROW_UI_HITS_CLEAR},
-    {"ui.hits_add", MOY_ROLE_UI, MOY_ROW_UI_HITS_ADD},
-    {"ui.hits_pump", MOY_ROLE_UI, MOY_ROW_UI_HITS_PUMP},
-    {"ui.dragtap", MOY_ROLE_UI, MOY_ROW_UI_DRAGTAP},
+    {"ui.part", MOY_ROLE_UI, MOY_ROW_UI_PART},
+    {"ui.focus", MOY_ROLE_UI, MOY_ROW_UI_FOCUS},
+    {"ui.keys_taken", MOY_ROLE_UI, MOY_ROW_UI_KEYS_TAKEN},
+    {"ui.at", MOY_ROLE_UI, MOY_ROW_UI_AT},
 };
 
 int moy_app_table_role(uint32_t row) {

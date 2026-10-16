@@ -85,9 +85,9 @@ enum {
     MOY_ROW_ARTWORK_CURRENT, MOY_ROW_ARTWORK_FOLLOW,
     MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
     MOY_ROW_CLIPBOARD_SEQ,
-    MOY_ROW_UI_KIND, MOY_ROW_UI_GLYPH_ID, MOY_ROW_UI_BUTTON, MOY_ROW_UI_LABEL,
-    MOY_ROW_UI_LIST, MOY_ROW_UI_HITS_CLEAR, MOY_ROW_UI_HITS_ADD, MOY_ROW_UI_HITS_PUMP,
-    MOY_ROW_UI_DRAGTAP,
+    MOY_ROW_UI_PAGE, MOY_ROW_UI_LABEL, MOY_ROW_UI_BUTTON, MOY_ROW_UI_TOGGLE,
+    MOY_ROW_UI_SLIDER, MOY_ROW_UI_LIST, MOY_ROW_UI_PART, MOY_ROW_UI_FOCUS,
+    MOY_ROW_UI_KEYS_TAKEN, MOY_ROW_UI_AT,
     MOY_ROW_N
 };
 
@@ -426,7 +426,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 // -- the ROLE door -----------------------------------------------------------------
 
 // The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 123u
+#define MOY_APP_TABLE_N 124u
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.

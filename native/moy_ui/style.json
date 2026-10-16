@@ -152,7 +152,7 @@
   "metrics": {
     "button": {"pad": 2, "icon": 16, "glyph": 12, "edge": 1, "align": 1},
     "chip": {"clip": 4, "min_x": 2, "min_y": 1, "edge": 1, "align": 1},
-    "row": {"pad": 4, "icon": 16, "glyph": 14, "gap": 1, "edge": 1},
+    "row": {"pad": 4, "icon": 16, "glyph": 14, "gap": 1, "edge": 1, "stack": 20, "stack_desk": 28, "stack_gap": 2},
     "cell": {"pad": 2, "caption": 14, "indent": 2, "icon": 16, "glyph": 14, "edge": 1},
     "tab": {"gap": 2, "pad": 3, "icon": 16},
     "status": {"rule": 1, "pad": 3, "gap": 2, "dy": 1},

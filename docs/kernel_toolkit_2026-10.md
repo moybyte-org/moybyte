@@ -236,8 +236,9 @@ primitive → `moy_text` → `snprintf` runs on mp_task's stack, whose margin
 | the game-canvas family | `moy_ui_game_btn` and its two siblings | unchanged | none: cart verbs draw a cart's buttons |
 | rect algebra | `moy_ui_inset` and its siblings | `ui.inset` and its siblings, unchanged | `ui_inset(...)` and siblings |
 
-**How Python drives one.** `runtime/ui.py` stays the module every shipped app
-and every app cart imports (`docs/app_api_v1.md`'s `ui`). Each function becomes
+**How Python drives one.** `runtime/ui_draw.py` is the module the chrome and
+the shipped apps not yet on the public UI API import (`runtime/ui.py` is that
+API's verbs, over the same C). Each function is
 a thin face: it converts keywords to the C entry's positional ints, maps the
 kind name to its id (interned at first use) and makes one call with the
 canvas's CANVAS handle. What stays Python because it is a Python seam: a
@@ -283,23 +284,20 @@ nothing to end at a VM stop: the plan's §4.3 rule holds with no handle.
 
 The `ui` rows join `native/moy_app/roles.json` as a role of their own: server
 `c`, grant `never`, wasm-typed, and taking no grant: the load's check admits
-them for every compiled app that declares the extension. As built (step 9):
-nine rows (`ui_kind`, `ui_glyph_id`, `ui_button`, `ui_label`, `ui_list`, and
-the pump's `ui_hits_clear`, `ui_hits_add`, `ui_hits_pump`, `ui_dragtap` over
-buffers in the app's memory), served by `native/moy_ui/moy_ui_wasm.c` and
-named in `native/moy_app/moy_app_wasm.c`'s table, so every engine's adapter
-registers them with the rest. No AppContext object is built for the role
+them for every compiled app that declares the extension. The rows are the
+public UI API's (`docs/ui_api_2026-10.md`, owner, 2026-10-15): its verbs,
+ten since the look plan's step 11a, served by `native/moy_ui/moy_ui_wasm.c`
+over the engine (`native/moy_ui/moy_ui_api.h`) and named in
+`native/moy_app/moy_app_wasm.c`'s table, so every engine's adapter
+registers them with the rest; the screen steps after it add rows as they
+add widgets. No AppContext object is built for the role
 (`app_context.TOOLKIT`): a Python app draws the same C through `import ui`.
-The rows' contract and buffer layouts are `docs/app_api_v1.md`'s compiled-app
-section; `tests/test_roles.py` holds the table, the adapter and the doc
-together, and the fixture `tests/fixtures/wasm/app_ui.moy` imports every row.
+The rows' contract is `docs/app_api_v1.md`'s compiled-app section;
+`tests/test_roles.py` holds the table, the adapter and the doc together,
+and the fixture `tests/fixtures/wasm/app_ui.moy` imports every row.
 A cart that declares no `moybyte.app` extension imports only from `"moy"`, as
 now. A compiled app uses them in its player window, cart-shaped: a fixed
 canvas, scaled.
-
-The public UI API (`docs/ui_api_2026-10.md`, owner, 2026-10-15) replaces
-these nine rows with its core's ten at the look plan's step 11a; the
-screen steps after it add rows as they add widgets.
 
 **The RUN sink lends the run's canvas as a row.** The target is the run's
 (`moycore_ui_target`, from the module that drives the run: an owed or kept

@@ -272,8 +272,8 @@ def _lib():
 def _app_ext(d):
     """Hand the host's WAMR the app ABI's import adapter (native/moy_app/
     moy_app_wasm.h), from the spine library that carries it: its rows for
-    module "moybyte.app", the run's grant and the load's grant check, and
-    the live theme's reader the toolkit's rows need."""
+    module "moybyte.app", the run's grant and the load's grant check (the
+    live theme's reader the ui rows need is lua_binding's, `_ui_theme`)."""
     try:
         import moy_app
     except ImportError:
@@ -291,11 +291,6 @@ def _app_ext(d):
     d.hw_app_ext(rows, n.value,
                  ctypes.cast(lib.moy_app_wasm_grant, _P),
                  ctypes.cast(lib.moy_app_wasm_admit, _P))
-    # The toolkit's rows (native/moy_ui/moy_ui_wasm.h) live in this library
-    # and the live theme in the spine's: hand them the spine's reader.
-    d.moy_ui_wasm_theme_from.argtypes = [_P]
-    d.moy_ui_wasm_theme_from.restype = None
-    d.moy_ui_wasm_theme_from(ctypes.cast(lib.moy_app_wasm_theme, _P))
 
 
 def footprint(memory, module_len):

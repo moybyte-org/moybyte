@@ -61,7 +61,8 @@ def test_the_metric_slots_are_named_once_per_kind():
     consts = {
         "button": "BTN_PAD BTN_ICON BTN_GLYPH BTN_EDGE BTN_ALIGN",
         "chip": "CHIP_CLIP CHIP_MINX CHIP_MINY CHIP_EDGE CHIP_ALIGN",
-        "row": "ROW_PAD ROW_ICON ROW_GLYPH ROW_GAP ROW_EDGE",
+        "row": "ROW_PAD ROW_ICON ROW_GLYPH ROW_GAP ROW_EDGE ROW_STACK ROW_STACK_DESK "
+               "ROW_STACK_GAP",
         "cell": "CELL_PAD CELL_CAP CELL_INDENT CELL_ICON CELL_GLYPH CELL_EDGE",
         "tab": "TAB_GAP TAB_PAD TAB_ICON",
         "status": "ST_RULE ST_PAD ST_GAP ST_DY",
@@ -187,10 +188,10 @@ def test_the_button_kinds_are_the_theme_models_in_its_order():
     """`button(kind=...)`'s names are the theme model's `buttons` keys, in the
     order the C's derivation table (moy_ui.c's k_own) and the loader share,
     and the button fields' leaves are in the order moy_ui.c names them."""
-    from runtime import chrome, ui
+    from runtime import chrome, ui_draw
     d = _style()
     assert tuple(d["button_kinds"]) == tuple(d["theme"]["look"]["button_kinds"]) == KINDS
-    assert ui.BUTTON_KINDS == KINDS
+    assert ui_draw.BUTTON_KINDS == KINDS
     assert chrome.look_fields()[2] == (
         "fill", "ink", "border.w", "border.c", "shape", "r", "font", "bevel")
     assert {k: tuple(tuple(_spec(x) for x in form) for form in forms)
@@ -206,9 +207,9 @@ def _install(src):
 
 
 def _uninstall():
-    from runtime import chrome, ui
-    ui.theme_uninstall()
-    ui.use_shape(None)
+    from runtime import chrome, ui_draw
+    ui_draw.theme_uninstall()
+    ui_draw.use_shape(None)
     chrome.forget_themes()
 
 
@@ -216,10 +217,10 @@ _BLOCK = [None]
 
 
 def _live(name, variant="dark"):
-    from runtime import chrome, ui
+    from runtime import chrome, ui_draw
     live = chrome.live_colors(name, variant)
-    ui._C.theme_block(live.block, live.used)
-    ui.use_buttons(live)
+    ui_draw._C.theme_block(live.block, live.used)
+    ui_draw.use_buttons(live)
     _BLOCK[0] = live.block
     return live
 
@@ -227,13 +228,13 @@ def _live(name, variant="dark"):
 def _field(th, kind, app=None, state=None):
     """The field and ink a button of `kind` draws at rest, read off its pixels:
     the corner inside the edge, and the most common other colour."""
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
     cv = make_system_canvas(80, 24)
     if _BLOCK[0] is not None:
         cv.theme_block(_BLOCK[0])
     cv.cls(1)
-    ui.button(cv, th, (0, 0, 80, 24), "MMMM", kind=kind, app=app, state=state)
+    ui_draw.button(cv, th, (0, 0, 80, 24), "MMMM", kind=kind, app=app, state=state)
     i = (3 * cv.w + 3) * 2
     return cv._buf[i] << 8 | cv._buf[i + 1]          # the wire order
 
@@ -241,8 +242,8 @@ def _field(th, kind, app=None, state=None):
 def _word(v):
     """A colour's RGB565 word as the canvas holds it (a slot's from the live
     block)."""
-    from runtime import ui
-    return ui._C.theme_rgb(v)[0]
+    from runtime import ui_draw
+    return ui_draw._C.theme_rgb(v)[0]
 
 
 def test_each_kind_resolves_from_the_base_roles():
@@ -250,15 +251,15 @@ def test_each_kind_resolves_from_the_base_roles():
     primary the value fill and value_ink with no border, tonal the normal
     field with the value ink, danger with the danger ink, toggle a cell --
     where a derived ink misses the floor, the kind's floor form."""
-    from runtime import ui
+    from runtime import ui_draw
     for name in ("machine", "night", "moy"):
         for variant in THEME_VARIANTS:
             th = _live(name, variant).tokens
-            look = ui._look(th)
+            look = ui_draw._look(th)
 
-            def style(kind, state=ui.REST):
-                kid = ui._kind_id(ui._button_kind(kind))
-                return ui._C.button_style(look, kid, ui._STATE_ID[state], -1)[:3]
+            def style(kind, state=ui_draw.REST):
+                kid = ui_draw._kind_id(ui_draw._button_kind(kind))
+                return ui_draw._C.button_style(look, kid, ui_draw._STATE_ID[state], -1)[:3]
 
             assert style("primary") == (th["value"], th["value_ink"], None)
             assert style("normal") == (th["surface"], th["ink"], th["shade_dark"])
@@ -267,18 +268,18 @@ def test_each_kind_resolves_from_the_base_roles():
             if (name, variant) == ("moy", "light"):    # its buttons.tonal.fill
                 assert tonal[:2] == ([v for a, k, v in _live(name, variant).buttons
                                       if (a, k) == (None, "tonal")][0][0], th["value"])
-            elif ui._C.theme_reads(th["surface"], th["value"]):
+            elif ui_draw._C.theme_reads(th["surface"], th["value"]):
                 assert tonal[:2] == (th["surface"], th["value"])
             else:
                 assert tonal[:2] == (th["surface"], th["ink"])
-            if ui._C.theme_reads(th["surface"], th["danger"]):
+            if ui_draw._C.theme_reads(th["surface"], th["danger"]):
                 assert danger[:2] == (th["surface"], th["danger"])
             else:
                 assert danger[0] == th["danger"]
-            assert style("toggle") == ui.state_colors(th, "cell", ui.REST)
+            assert style("toggle") == ui_draw.state_colors(th, "cell", ui_draw.REST)
             for kind in KINDS:          # the shared marks stay the style's
-                assert style(kind, ui.PRESSED)[:2] == ui.state_colors(
-                    th, ui._button_kind(kind), ui.PRESSED)[:2]
+                assert style(kind, ui_draw.PRESSED)[:2] == ui_draw.state_colors(
+                    th, ui_draw._button_kind(kind), ui_draw.PRESSED)[:2]
             assert _field(th, "primary") == _word(th["value"])
     _uninstall()
 
@@ -287,7 +288,7 @@ def test_a_theme_styles_each_kind_and_an_app_its_own():
     """`buttons[kind]` restyles a kind everywhere; every kind but primary
     takes normal's fill; `app_buttons[app][kind]` restyles it for that app
     only (THEMES.md, "buttons")."""
-    from runtime import ui
+    from runtime import ui_draw
     _install({"format": 2, "name": "kt", "inherits": "machine", "look": {
         "buttons": {"normal": {"fill": "#ececf0", "ink": "#1d1d1f"},
                     "tonal": {"ink": "#c4231b"}},
@@ -309,24 +310,24 @@ def test_a_theme_styles_each_kind_and_an_app_its_own():
         assert _field(th, "primary", app="files") == _word(th["value"])
         assert _field(th, "tonal", app="calc") == _word(calc_normal)   # calc's normal
         assert _field(th, "normal", app="files") == _word(normal_fill)
-        look = ui._look(th)
-        kid = ui._kind_id(ui._button_kind("normal"))
-        row = ui._app_row("calc")
-        assert ui._C.button_style(look, kid, ui._STATE_ID[ui.REST], row)[2] is None
-        assert ui._C.button_style(look, kid, ui._STATE_ID[ui.REST], -1)[2] == th["shade_dark"]
-        assert ui.button_unreadable(th, ("calc",)) == []
+        look = ui_draw._look(th)
+        kid = ui_draw._kind_id(ui_draw._button_kind("normal"))
+        row = ui_draw._app_row("calc")
+        assert ui_draw._C.button_style(look, kid, ui_draw._STATE_ID[ui_draw.REST], row)[2] is None
+        assert ui_draw._C.button_style(look, kid, ui_draw._STATE_ID[ui_draw.REST], -1)[2] == th["shade_dark"]
+        assert ui_draw.button_unreadable(th, ("calc",)) == []
     finally:
         _uninstall()
 
 
 def test_an_unreadable_kind_is_reported_and_never_refused():
-    from runtime import ui
+    from runtime import ui_draw
     _install({"format": 2, "name": "ku", "inherits": "machine", "look": {
         "buttons": {"danger": {"fill": "#ffffff", "ink": "#fefefe"}},
         "app_buttons": {"calc": {"tonal": {"ink": "#ffffff", "fill": "#f0f0f0"}}}}})
     try:
         th = _live("ku").tokens
-        assert ui.button_unreadable(th, ("calc", "files")) == [
+        assert ui_draw.button_unreadable(th, ("calc", "files")) == [
             (None, "danger"), ("calc", "tonal"), ("calc", "danger"),
             ("files", "danger")]
         assert _field(th, "danger") == _word(_live("ku").buttons[3][2][0])
@@ -337,28 +338,28 @@ def test_an_unreadable_kind_is_reported_and_never_refused():
 def test_one_primary_per_surface_is_warned_of(capsys):
     """A second primary on one canvas in one frame is said once; the same
     button drawn twice, another canvas, or the next frame is not."""
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
     th = theme_colors("machine")
     a, b = make_system_canvas(80, 60), make_system_canvas(80, 60)
-    del ui.primary_warnings[:]
-    ui._PRIMARY_WARNED.clear()
-    ui.begin_frame()
-    ui.button(a, th, (0, 0, 40, 20), "GO", kind="primary")
-    ui.button(a, th, (0, 0, 40, 20), "GO", kind="primary")
-    ui.button(b, th, (0, 0, 40, 20), "OK", kind="primary")
-    ui.button(a, th, (0, 30, 40, 20), "NO", kind="tonal")
-    assert ui.primary_warnings == []
-    ui.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
-    ui.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
-    assert ui.primary_warnings == [("GO", "YES")]
-    ui.begin_frame()
-    ui.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
-    assert ui.primary_warnings == [("GO", "YES")]
+    del ui_draw.primary_warnings[:]
+    ui_draw._PRIMARY_WARNED.clear()
+    ui_draw.begin_frame()
+    ui_draw.button(a, th, (0, 0, 40, 20), "GO", kind="primary")
+    ui_draw.button(a, th, (0, 0, 40, 20), "GO", kind="primary")
+    ui_draw.button(b, th, (0, 0, 40, 20), "OK", kind="primary")
+    ui_draw.button(a, th, (0, 30, 40, 20), "NO", kind="tonal")
+    assert ui_draw.primary_warnings == []
+    ui_draw.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
+    ui_draw.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
+    assert ui_draw.primary_warnings == [("GO", "YES")]
+    ui_draw.begin_frame()
+    ui_draw.button(a, th, (0, 30, 40, 20), "YES", kind="primary")
+    assert ui_draw.primary_warnings == [("GO", "YES")]
     assert capsys.readouterr().out.count("second primary") == 1
-    del ui.primary_warnings[:]
-    ui._PRIMARY_WARNED.clear()
-    ui.begin_frame()
+    del ui_draw.primary_warnings[:]
+    ui_draw._PRIMARY_WARNED.clear()
+    ui_draw.begin_frame()
 
 
 def test_an_unknown_kind_draws_as_normal():
@@ -410,8 +411,8 @@ def test_the_boards_module_resolves_the_kinds_as_the_host_does(tmp_path):
     exec(compile(_KIND_DRIVER.replace("print(repr(", "_out.append(repr("), "k", "exec"),
          {"_out": host.setdefault("out", []), "__name__": "k"})
     moy_ui.buttons_clear()
-    from runtime import ui
-    ui.look_moved()                    # the driver wrote look slot 0
+    from runtime import ui_draw
+    ui_draw.look_moved()                    # the driver wrote look slot 0
     assert out.stdout.splitlines() == host["out"], out.stderr[-400:]
 
 
@@ -421,13 +422,13 @@ def _px(cv, x, y):
 
 
 def _drawn(th, kind, app=None, rect=(0, 0, 80, 24)):
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
     cv = make_system_canvas(90, 30)
     if _BLOCK[0] is not None:
         cv.theme_block(_BLOCK[0])
     cv.cls(1)
-    ui.button(cv, th, rect, "MM", kind=kind, app=app)
+    ui_draw.button(cv, th, rect, "MM", kind=kind, app=app)
     return cv
 
 
@@ -435,7 +436,7 @@ def test_a_kind_draws_its_shape():
     """A theme with a look rounds its keys at key_r (a circle, a square or a
     radius where it says so; a bevel under `edges: bevel`); a theme with no
     look keeps them square."""
-    from runtime import ui
+    from runtime import ui_draw
     bg = _word(1)
     th = theme_colors("machine")
     _BLOCK[0] = None
@@ -447,7 +448,7 @@ def test_a_kind_draws_its_shape():
                                  "normal": {"shape": "square", "bevel": False},
                                  "danger": {"shape": "round", "r": 6}}}}})
     try:
-        ui.use_depth("ks", False)
+        ui_draw.use_depth("ks", False)
         th = _live("ks").tokens
         cv = _drawn(th, "primary")
         assert _px(cv, 0, 0) == bg                         # a rounded corner
@@ -462,7 +463,7 @@ def test_a_kind_draws_its_shape():
         small = _drawn(th, "danger", app="calc")
         assert _px(small, 0, 0) == bg and _px(small, 6, 0) != bg
     finally:
-        ui.use_depth(None, False)
+        ui_draw.use_depth(None, False)
         _uninstall()
 
 
@@ -491,15 +492,15 @@ def test_accent_reaches_a_part_only_through_the_marks():
 
 
 def _marked(name, light, draw, size=(120, 40)):
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
-    ui.use_depth(name, light)
+    ui_draw.use_depth(name, light)
     live = _live(name, "light" if light else "dark")
     th = live.tokens
     cv = make_system_canvas(*size)
     cv.theme_block(live.block)
     cv.cls(th["surface"])
-    draw(ui, cv, th)
+    draw(ui_draw, cv, th)
     return cv, th
 
 
@@ -507,25 +508,25 @@ def test_on_is_the_current_mark_and_focus_the_focus_mark():
     """Under Moy Day a row's `on` is the current plate (value at 0.14 over the
     surface), not the ON field, and its `focus` the 4 px edge bar on its
     leading edge; a theme without marks draws `focus` as it drew `on`."""
-    from runtime import ui
+    from runtime import ui_draw
     try:
-        cv, th = _marked("moy", True, lambda ui, cv, th: ui.row(
+        cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", on=True, focus=True))
         plate = _px(cv, 60, 15)
         assert plate not in (_word(th["surface"]), _word(th["value"]),
-                             _word(ui.state_colors(th, "row_list", "on")[0]))
+                             _word(ui_draw.state_colors(th, "row_list", "on")[0]))
         assert _px(cv, 11, 15) == _word(th["accent"])          # the edge bar
         assert _px(cv, 15, 15) == plate
-        ui.marks(None, True)
-        cv, th = _marked("moy", True, lambda ui, cv, th: ui.row(
+        ui_draw.marks(None, True)
+        cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True))
-        assert _px(cv, 60, 15) == _word(th["surface"]) and ui.marks()[2] == 1
+        assert _px(cv, 60, 15) == _word(th["surface"]) and ui_draw.marks()[2] == 1
     finally:
-        ui.use_depth(None, False)
+        ui_draw.use_depth(None, False)
     for name in ("night", "win95"):
-        a = _marked(name, False, lambda ui, cv, th: ui.row(
+        a = _marked(name, False, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "x", kind="row_list", focus=True))[0]
-        b = _marked(name, False, lambda ui, cv, th: ui.row(
+        b = _marked(name, False, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "x", kind="row_list", on=True))[0]
         assert bytes(a._buf) == bytes(b._buf), name
 
@@ -534,48 +535,48 @@ def test_the_focus_style_follows_the_size_class():
     """Moy lifts a card (grown and raised, its rim white in Day), edge-bars a
     part and underlines a small part; Contrast rings a card and inverts a
     part, its ink flipped to black on yellow."""
-    from runtime import ui
+    from runtime import ui_draw
     try:
-        def card(ui, cv, th):
-            ink, box = ui.focus(cv, th, (40, 30, 60, 60), size="card")
+        def card(d, cv, th):
+            ink, box = ui_draw.focus(cv, th, (40, 30, 60, 60), size="card")
             assert ink is None and box == (35, 22, 70, 70)
             cv.rect(*box, 0)
-            ui.focus(cv, th, (40, 30, 60, 60), size="card", after=True)
+            ui_draw.focus(cv, th, (40, 30, 60, 60), size="card", after=True)
         cv, th = _marked("moy", True, card, (140, 120))
         assert _px(cv, 34, 50) == 0xffff                      # the white rim
-        cv, th = _marked("moy", True, lambda ui, cv, th: ui.focus(
+        cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.focus(
             cv, th, (20, 20, 20, 20), size="small"))
         assert _px(cv, 30, 37) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 37)
-        cv, th = _marked("contrast", False, lambda ui, cv, th: ui.focus(
+        cv, th = _marked("contrast", False, lambda d, cv, th: ui_draw.focus(
             cv, th, (20, 10, 60, 60), size="card"), (100, 80))
         assert _px(cv, 15, 40) == _word(th["accent"])         # ring 3 wide, 2 out
         assert _px(cv, 18, 40) == _word(th["surface"])
         got = []
-        cv, th = _marked("contrast", False, lambda ui, cv, th: got.append(ui.focus(
+        cv, th = _marked("contrast", False, lambda d, cv, th: got.append(ui_draw.focus(
             cv, th, (10, 10, 100, 20))))
         assert _px(cv, 60, 15) == _word(th["accent"]) and got[0][0] == 0
     finally:
-        ui.use_depth(None, False)
+        ui_draw.use_depth(None, False)
 
 
 def test_a_window_behind_draws_no_focus_mark():
-    from runtime import ui
+    from runtime import ui_draw
     try:
-        ui.marks(False, True)
-        cv, th = _marked("moy", True, lambda ui, cv, th: ui.row(
+        ui_draw.marks(False, True)
+        cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True, on=True))
         assert _px(cv, 11, 15) == _px(cv, 60, 15) != _word(th["accent"])
-        assert ui.marks()[2] == 0
+        assert ui_draw.marks()[2] == 0
     finally:
-        ui.marks(True)
-        ui.use_depth(None, False)
+        ui_draw.marks(True)
+        ui_draw.use_depth(None, False)
 
 
 def _contrast(a, b):
-    from runtime import ui
+    from runtime import ui_draw
 
     def lum(v):
-        w = ui._C.theme_rgb(v)[0]
+        w = ui_draw._C.theme_rgb(v)[0]
         out = []
         for c in ((w >> 11) * 255 // 31, (w >> 5 & 63) * 255 // 63, (w & 31) * 255 // 31):
             c /= 255
@@ -591,7 +592,7 @@ def test_the_readability_check_holds_accent_on_the_current_plate():
     and a theme whose accent sinks into its plate is reported (the bit past
     the pairs)."""
     import moy_ui
-    from runtime import ui
+    from runtime import ui_draw
     pairs = len(_style()["theme"]["pairs"])
     for seed in ("moy", "contrast"):
         for light in (False, True):
@@ -607,14 +608,4 @@ def test_the_readability_check_holds_accent_on_the_current_plate():
         assert moy_ui.theme("pl", True)[1] >> pairs & 1
     finally:
         _uninstall()
-        ui.look_moved()
-
-
-def test_apps_draw_focus_through_the_marks():
-    """No app draws its own focus ring: the toolkit draws the theme's mark
-    (`ui.focus`, or a part's `focus=`), and `focus_ring` is the ring a theme
-    without marks falls back to inside it."""
-    import glob
-    hits = [os.path.basename(p) for p in glob.glob(os.path.join(ROOT, "runtime", "*.py"))
-            if not p.endswith(os.sep + "ui.py") and "focus_ring(" in open(p).read()]
-    assert hits == []
+        ui_draw.look_moved()

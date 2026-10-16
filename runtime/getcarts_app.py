@@ -63,8 +63,10 @@ import json
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 try:
     from app_shell import ListShellLayout, ListShellApp
@@ -195,7 +197,7 @@ class GetCartsAppLayer(ListShellApp):
         self.layout = GetCartsLayout(cv.w, cv.h, self._surf.font_scale(),
                                      self._surf.windowed(),
                                      self._surf.chrome_scale())
-        self.hits = _ui.Hits()
+        self.hits = _ui_draw.Hits()
         self.phase = "list"
         self.carts = []               # every index's carts, this session
         self.rows = []                # [{"cart", "plan", "state", "runs"}]
@@ -765,7 +767,7 @@ class GetCartsAppLayer(ListShellApp):
         out = []
         for para in text.split("\n"):
             para = para.strip()
-            out.extend(_ui.wrap_px(para, cols, self.layout.fs) if para else [""])
+            out.extend(_ui_draw.wrap_px(para, cols, self.layout.fs) if para else [""])
         return out
 
     def _pump_connect(self):
@@ -938,8 +940,8 @@ class GetCartsAppLayer(ListShellApp):
         """The licence text's ScrollRegion + drag/fling machine, built lazily
         and re-synced to the live layout each sample."""
         if self._lic_scroll is None:
-            self._lic_scroll = _ui.ScrollRegion()
-            self._lic_taps = _ui.DragTap(self._lic_scroll)
+            self._lic_scroll = _ui_draw.ScrollRegion()
+            self._lic_taps = _ui_draw.DragTap(self._lic_scroll)
         sr = self._lic_scroll
         lay = self.layout
         sr.set(lay.lic_area(), len(self.lic[1]) * lay.line_h)
@@ -1018,7 +1020,7 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         self.hits.clear()
         cv.cls(th["panel"])
-        bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
+        bar_ink = _ui_draw.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         ph = self.phase
         if ph == "list":
             cv.print("PICK A CART", 8 * fs, lay.cy + lay.dy(8), bar_ink, 1)
@@ -1045,7 +1047,7 @@ class GetCartsAppLayer(ListShellApp):
                  sy + lay.dy(3), self.names["yellow"], 1)
 
     def _chip(self, cv, th, label, rect, verb):
-        _ui.chip(cv, th, rect, label, fs=self.layout.fs,
+        _ui_draw.chip(cv, th, rect, label, fs=self.layout.fs,
                  state=self.hits.state_of(verb))
         self.hits.add(rect, verb)
 
@@ -1098,10 +1100,10 @@ class GetCartsAppLayer(ListShellApp):
                 shift = side + 4 * fs
                 rect = (rect[0] + shift, rect[1], rect[2] - shift, rect[3])
             on = i == self.sel
-            _ui.row(cv, th, rect, row["cart"]["name"], on=on,
+            _ui_draw.row(cv, th, rect, row["cart"]["name"], on=on,
                     value=STATE_LABEL[st], value_ink=self._state_ink(th, st),
                     pad=6 * fs, text_dy=lay.name_dy, fs=fs)
-            ink = _ui.state_colors(th, "row", _ui.ON if on else _ui.REST)[1]
+            ink = _ui_draw.state_colors(th, "row", _ui_draw.ON if on else _ui_draw.REST)[1]
             info = "%s  %s" % (row["cart"]["licence"].get("spdx") or "",
                                _mb(row["plan"]["store_bytes"]))
             cv.print(lay.cut(info, rect[2] - 12 * fs),
@@ -1141,15 +1143,15 @@ class GetCartsAppLayer(ListShellApp):
         elif st == "update":
             y = self._line(cv, "An update is ready.", y, self.names["orange"])
         elif st == "taken":
-            for ln in _ui.wrap_px("Another cart here is already called %s."
+            for ln in _ui_draw.wrap_px("Another cart here is already called %s."
                                      % c["folder"], lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
         why = self.blocker(row) if st in ("get", "update") else None
         if why:
-            for ln in _ui.wrap_px(why, lay.text_px, fs):
+            for ln in _ui_draw.wrap_px(why, lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
         if self.arm_remove:
-            for ln in _ui.wrap_px("Tap REMOVE again. Its saves and the files it "
+            for ln in _ui_draw.wrap_px("Tap REMOVE again. Its saves and the files it "
                                      "wrote go too.", lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
 
@@ -1239,15 +1241,15 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         title, lines = self._message()
         x, y = lay.body[0] + 4 * fs, lay.text_y + 4 * fs
-        scale = 2 if _ui.print_width(title, 2) * fs <= lay.body[2] - 8 * fs else 1
+        scale = 2 if _ui_draw.print_width(title, 2) * fs <= lay.body[2] - 8 * fs else 1
         ink = th["danger"] if self.phase in ("failed", "nowifi", "unreached",
                                              "nomemory", "nonet") else th["play"]
         if self.phase == "pick" and self.pick_why is not None:
             ink = th["danger"]
         cv.print(title, x, y, ink, scale)
-        y += _ui.font("ui")[2] * fs * scale + 8 * fs
+        y += _ui_draw.font("ui")[2] * fs * scale + 8 * fs
         for text in lines:
-            for ln in _ui.wrap_px(text, lay.text_px, fs):
+            for ln in _ui_draw.wrap_px(text, lay.text_px, fs):
                 y = self._line(cv, ln, y, th["ink"])
         if self.phase == "getting" and self.job is not None:
             self._draw_progress(cv, th, y + 4 * fs)
@@ -1276,7 +1278,7 @@ class GetCartsAppLayer(ListShellApp):
         primary = False                # one primary a surface: the first go verb
         # an armed REMOVE takes the focus mark; a theme without marks rings it
         armed = self.phase == "cart" and self.arm_remove
-        marks = _ui.marks_on()
+        marks = _ui_draw.marks_on()
         fk = len(verbs) - 1 if armed and marks else self.focus
         for k, verb in enumerate(verbs):
             enabled = self.phase != "cart" or self._enabled(verb)
@@ -1286,10 +1288,10 @@ class GetCartsAppLayer(ListShellApp):
                 primary = True
             elif verb in ("REMOVE", "CANCEL"):
                 kind = "danger"
-            _ui.button(cv, th, rects[k], verb, kind=kind, focus=k == fk,
+            _ui_draw.button(cv, th, rects[k], verb, kind=kind, focus=k == fk,
                        disabled=not enabled,
                        state=self.hits.state_of("btn", verb))
             if enabled:
                 self.hits.add(rects[k], "btn", verb)
         if armed and not marks:
-            _ui.focus(cv, th, rects[len(verbs) - 1], fs=fs)
+            _ui_draw.focus(cv, th, rects[len(verbs) - 1], fs=fs)

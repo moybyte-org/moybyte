@@ -6,11 +6,11 @@ absorbed (the notebook app's history pair) is the
 duplication the refactor exists to end. What is pinned here is what the shell
 goldens cannot see:
 
-  * the grid's cells ARE `ui.cell` (pixel-compared against the toolkit itself,
+  * the grid's cells ARE `ui_draw.cell` (pixel-compared against the toolkit itself,
     not against a transcription of it),
   * it registers NOTHING per cell -- the measured P4 constraint (~395 rects,
-    ~9.3ms on the map tab) that `ui.cell_state` exists to keep,
-  * its hover/pressed pump obeys `ui.Hits`'s four rules in index form, and
+    ~9.3ms on the map tab) that `ui_draw.cell_state` exists to keep,
+  * its hover/pressed pump obeys `ui_draw.Hits`'s four rules in index form, and
   * the private buttons are gone, with `disabled` now token-derived.
 
 The rest -- "no pixel moved" -- is `tests/test_shell_goldens.py`'s job, and the
@@ -21,7 +21,7 @@ code across 6 themes x 2 variants x 5 geometries before landing.
 import inspect
 from pathlib import Path
 
-from runtime import ui
+from runtime import ui_draw
 import ui_twin as twin
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 
@@ -73,10 +73,10 @@ def _shot(w, h, fs, draw):
     return bytes(cv._buf)
 
 
-# --- the cells ARE ui.cell -------------------------------------------------------
+# --- the cells ARE ui_draw.cell -------------------------------------------------------
 
 def test_every_tile_is_the_toolkit_cell_not_a_copy_of_it():
-    """Pixel equality against `ui.cell` ITSELF (plus the caller's own art), for
+    """Pixel equality against `ui_draw.cell` ITSELF (plus the caller's own art), for
     every theme family x variant and every selection state. A transcription
     would pass a shape test and fail this one."""
     for name in THEME_NAMES:
@@ -89,9 +89,9 @@ def test_every_tile_is_the_toolkit_cell_not_a_copy_of_it():
                 def by_hand(cv, th=th, g=g, sel=sel):
                     for i in range(len(g.names)):
                         r = g._cell_rect(i)
-                        ax, ay, _aw, _ah = ui.cell(
+                        ax, ay, _aw, _ah = ui_draw.cell(
                             cv, th, r, g.names[i], on=(i == sel), fs=g.fs)
-                        ui_art = ui.cell_art_rect(r, g.fs, 2 * g.fs, 14 * g.fs)
+                        ui_art = ui_draw.cell_art_rect(r, g.fs, 2 * g.fs, 14 * g.fs)
                         cv.rect(ax, ay, ui_art[2], ui_art[3],
                                 th.get("edge", 13))
 
@@ -101,11 +101,11 @@ def test_every_tile_is_the_toolkit_cell_not_a_copy_of_it():
 
 def test_the_grid_registers_nothing_per_cell():
     """The module docstring's measured rule: a grid hit-tests ARITHMETICALLY and
-    feeds `ui.cell_state` two indices. One `Hits` rect per cell would be ~395
+    feeds `ui_draw.cell_state` two indices. One `Hits` rect per cell would be ~395
     rects / ~9.3ms on the P4's worst tab, so the widget must not even be able
     to grow one by accident."""
     src = (ROOT / "runtime" / "file_widgets.py").read_text(encoding="utf-8")
-    assert "_ui.Hits" not in src and "hits=" not in src and ".add(" not in src
+    assert "_ui_draw.Hits" not in src and "hits=" not in src and ".add(" not in src
     assert "cell_state" in src
     assert "_index_at" in inspect.getsource(FileGridView.tap), (
         "tap() and the cue pump must share ONE arithmetic hit-test")
@@ -186,7 +186,7 @@ def test_a_relist_drops_stale_cue_indices():
 
 
 def test_the_cue_paints_only_the_edge_at_rest_geometry():
-    """ADDITIVE by construction (ui.state_colors): a hovered tile changes paint,
+    """ADDITIVE by construction (ui_draw.state_colors): a hovered tile changes paint,
     never geometry -- so the label and the art land on the same pixels."""
     th = theme_colors("night")
     g = _grid()
@@ -228,7 +228,7 @@ def test_every_grid_embedder_pumps_on_non_click_samples():
 # --- the private button copies ---------------------------------------------------
 
 def test_the_private_button_copies_are_gone():
-    """The notebook app's `_hist_btn` was a hand-rolled copy of `ui.chip` that
+    """The notebook app's `_hist_btn` was a hand-rolled copy of `ui_draw.chip` that
     disagreed with its siblings about what an enabled icon button looks
     like. It is absorbed; `disabled` is the toolkit's.
 
@@ -275,7 +275,7 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
                 # state table resolves through the theme's `ink_dim` role.
                 ref = SystemCanvas(40, 30, 1)
                 twin.chip(ref, th, (4, 4, 18, 18), glyph, fs=1, glyph=glyph,
-                          glyph_draw=lambda k, r, c, v: ui.glyph(v, k, r, c),
+                          glyph_draw=lambda k, r, c, v: ui_draw.glyph(v, k, r, c),
                           disabled=not enabled)
                 assert bytes(cv._buf) == bytes(ref._buf), (name, variant, glyph)
                 seen.append(twin.state_colors(th, "chip", twin.DISABLED if not enabled
@@ -288,14 +288,14 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
 # --- the row conversions ---------------------------------------------------------
 
 def test_the_converted_row_draws_go_through_the_toolkit():
-    """The two list surfaces in this file group draw rows with `ui.row`; the
+    """The two list surfaces in this file group draw rows with `ui_draw.row`; the
     one whose pixels are frozen OFF-token passes `colors=`, which is what that
     escape hatch is for."""
     from runtime import files_app, storybook_app
 
-    assert "_ui.row(" in inspect.getsource(files_app.FilesAppLayer._draw_rows)
+    assert "_ui_draw.row(" in inspect.getsource(files_app.FilesAppLayer._draw_rows)
     deck = inspect.getsource(storybook_app.StorybookAppLayer._draw_rows)
-    assert "_ui.row(" in deck and "colors=" in deck
+    assert "_ui_draw.row(" in deck and "colors=" in deck
     for src in (inspect.getsource(files_app.FilesAppLayer._draw_rows),
                 deck):
         assert "cv.rectb(" not in src and "cv.rect(" not in src

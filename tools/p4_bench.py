@@ -514,11 +514,12 @@ SPRITE_FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" /
 
 SPRITE_SETUP = """
 import ui
+import ui_draw
 def _sheet(on):
     ws.look._sheet_key = None
     ws.look.set_theme(%r, persist=False)
     if not on:
-        ui.sheet_clear()
+        ui_draw.sheet_clear()
         ws.look.publish()
     ws.mark_dirty()
 def _hover(x, y):
@@ -599,21 +600,21 @@ def _pb(n, sheet):
     cv = (ws.sys_canvas or ws.canvas).new_layer(240, 120)
     try:
         assert moy_ui.theme_install(%r)[0] == 0
-        ui.use_shape('bench-spr')
+        ui_draw.use_shape('bench-spr')
         th = chrome.theme_colors('bench-spr')
         out = {}
         for label, on in (('surface', False), ('sprite', True)):
             if on:
-                assert ui.sheet_load(sheet) == 0
+                assert ui_draw.sheet_load(sheet) == 0
             else:
-                ui.sheet_clear()
+                ui_draw.sheet_clear()
             t = time.ticks_us()
             for _i in range(n):
-                ui.paint(cv, th, (8, 8, 96, 32), 'button')
+                ui_draw.paint(cv, th, (8, 8, 96, 32), 'button')
             out['button ' + label] = time.ticks_diff(time.ticks_us(), t) // n
             t = time.ticks_us()
             for _i in range(n):
-                ui.frame(cv, th, (2, 2, 230, 110), 14, 'BENCH', True, True, 1)
+                ui_draw.frame(cv, th, (2, 2, 230, 110), 14, 'BENCH', True, True, 1)
             out['frame ' + label] = time.ticks_diff(time.ticks_us(), t) // n
         return out
     finally:
@@ -635,8 +636,8 @@ def _ps(n):
     cv = (ws.sys_canvas or ws.canvas).new_layer(320, 200)
     th = ws.theme_colors
     try:
-        ui.use_shape('moy')
-        ui.use_depth('moy', True)
+        ui_draw.use_shape('moy')
+        ui_draw.use_depth('moy', True)
         out = {}
         def t(label, fn):
             fn()
@@ -645,10 +646,10 @@ def _ps(n):
                 fn()
             out[label] = time.ticks_diff(time.ticks_us(), t0) // n
         r = (40, 30, 230, 140)
-        t('frame (depth)', lambda: ui.frame(cv, th, r, 18, 'BENCH', True, True, 1))
+        t('frame (depth)', lambda: ui_draw.frame(cv, th, r, 18, 'BENCH', True, True, 1))
         for name, mode in (('full', 0), ('small', 1), ('none', 2)):
-            t('frame_under ' + name, lambda: ui.frame_under(cv, th, r, 18, True, mode))
-        t('cast card 96x96', lambda: ui.cast(cv, th, (60, 40, 96, 96), 1))
+            t('frame_under ' + name, lambda: ui_draw.frame_under(cv, th, r, 18, True, mode))
+        t('cast card 96x96', lambda: ui_draw.cast(cv, th, (60, 40, 96, 96), 1))
         t('rrect 230x140 r12', lambda: cv.rrect(40, 30, 230, 140, 12, 7))
         t('rrect ring 230x140 r12', lambda: cv.rrect(40, 30, 230, 140, 12, None, ring=0))
         t('rrect smooth paint 230x140', lambda: cv.rrect(40, 30, 230, 140, 12,

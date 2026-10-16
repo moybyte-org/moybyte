@@ -281,17 +281,16 @@ def test_a_compiled_app_reaches_its_roles_with_no_upcall(tmp_path):
 
 
 APP_UI = ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"
-# What App UI Wasm's widgets cover (its src/main.wat): the button, the list and
-# the label.
-_APP_UI_RECTS = ((20, 80, 80, 20), (120, 80, 160, 96), (20, 110, 80, 10))
+# What App UI Wasm's page covers below the host's strip (its src/main.wat).
+_APP_UI_RECTS = ((0, 40, 320, 120),)
 
 
 def _app_ui_host_words(tmp_path):
-    """The fixture's frame on the host's WAMR (tests/test_ui_wasm.py's run),
-    as canonical RGB565 words."""
+    """The fixture's frame on the host's WAMR (tests/test_ui_public.py's
+    run), as canonical RGB565 words."""
     from runtime import host_app, wasm_host
     from tools import wasm_cart
-    from ws_helpers import open_cart
+    from ws_helpers import make_drv, open_cart, quiesce
     if not wasm_host.available():
         pytest.skip("no host wasm binding to hold the page to")
     root = str(tmp_path / "host_carts")
@@ -300,9 +299,12 @@ def _app_ui_host_words(tmp_path):
     ws = host_app.build_workstation(root)
     ws.pointer.visible = False
     open_cart(ws, "App UI Wasm")
+    drv = make_drv(ws)              # each frame's input edges begin and end, as on a board
+    ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
     for _ in range(9):
+        quiesce(ws)
         ws._dirty = True
-        ws.frame(1.0 / 30.0)
+        drv.frame(1.0 / 30.0)
     words = tier_frame.from_canvas(ws.sys_canvas._buf, True)     # the host keeps panel order
     ws.exit()
     return words
@@ -315,12 +317,12 @@ def _rects(words):
     return out
 
 
-def test_a_compiled_app_draws_the_toolkits_widgets_in_the_browser(tmp_path):
-    """App UI Wasm (its src/main.wat says what it does) draws a button, a
-    scrolling list and a label through the `ui` rows: in the browser they are
-    the page's adapters over the same C (native/moy_ui/moy_ui_wasm.c), so the
-    run makes no crossing but the page's frame, and the widgets' pixels are
-    the host's run's, rect for rect."""
+def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path):
+    """App UI Wasm (its src/main.wat says what it does) draws the public UI
+    API's fixture page through the `ui` rows: in the browser they are the
+    page's adapters over the same C (native/moy_ui/moy_ui_wasm.c), so the run
+    makes no crossing but the page's frame, and the page's pixels are the
+    host's run's."""
     web_e2e.require("store")
     sys.path.insert(0, str(ROOT))
     app = _built(APP_UI, tmp_path / "carts" / "app_ui.moy")

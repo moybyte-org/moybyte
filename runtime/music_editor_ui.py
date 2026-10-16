@@ -62,8 +62,10 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
@@ -171,7 +173,7 @@ class MusicLayout(LayoutBase):
         top = self.cy
         x0 = self.cx
         ctl_y = top + 1 * fs
-        self.title_y = top + _ui.line_dy(3 * fs, fs)
+        self.title_y = top + _ui_draw.line_dy(3 * fs, fs)
         self.view_btn = (x0 + 2 * fs, ctl_y, 46 * fs, 14 * fs)
         self.obj_prev = (x0 + 52 * fs, ctl_y, 16 * fs, 14 * fs)
         self.obj_next = (x0 + 134 * fs, ctl_y, 16 * fs, 14 * fs)
@@ -185,10 +187,10 @@ class MusicLayout(LayoutBase):
         self.list_y0 = top + 16 * fs
         # The step and slot lists are a tracker: columns of cells as wide as
         # the print font's glyph box, never under 8 rows.
-        _f, fw, line, _a = _ui.font("ui")
+        _f, fw, line, _a = _ui_draw.font("ui")
         self.cell = max(8, fw) * fs
         self.row_h = max(_MU_ROW_H * fs, (line + 8) * fs)
-        self.row_dy = _ui.line_dy(4 * fs, fs)
+        self.row_dy = _ui_draw.line_dy(4 * fs, fs)
         self.rows = max(4, (bot_y - 4 * fs - self.list_y0) // self.row_h)
         self.list_w = max(_MU_LIST_W * fs, 12 * self.cell + 54 * fs)
         self.list_area = (self.list_x, self.list_y0, self.list_w,
@@ -517,7 +519,7 @@ class MusicEditorUI:
         x, y, w, h = rect
         NAMES = self._NAMES
         fs = self.layout.fs
-        _ui.row(self.ws.sys_canvas, self.ws.theme_colors, rect, label,
+        _ui_draw.row(self.ws.sys_canvas, self.ws.theme_colors, rect, label,
                 colors=(NAMES["blue"], NAMES["black"], NAMES["white"]),
                 pad=(w - 8 * fs) // 2, text_dy=(h - 8 * fs) // 2, fs=fs)
 
@@ -646,7 +648,7 @@ class MusicEditorUI:
                 # (the pads are wide enough); the rest stay plain labels. A missing
                 # glyph kind falls back to the plain labeled button.
                 kind = _MU_PAD_GLYPH.get(lbl)
-                if _ui.glyph_id(kind) >= 0:
+                if _ui_draw.glyph_id(kind) >= 0:
                     self.ws._icon_btn(kind, lbl, rect, fill, cv)
                 else:
                     self.ws._btn(lbl, rect, fill, cv)

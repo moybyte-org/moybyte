@@ -108,6 +108,23 @@ def test_the_import_adapter_is_the_tables_wasm_column():
     assert list(moy_app.wasm_rows()) == want
 
 
+def test_the_ui_fixture_imports_every_ui_row():
+    """tests/fixtures/wasm/app_ui.moy imports every `ui` row, at the table's
+    type: a step that adds a widget adds its row, and the fixture imports it
+    (docs/ui_api_2026-10.md §8)."""
+    src = (ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy" / "src" / "main.wat").read_text()
+    want = {"ui_" + r["verb"]: r["wasm"] for r in _rows() if r["role"] == _ac.TOOLKIT}
+    got = dict(re.findall(r'\(import "moybyte\.app" "(ui_\w+)" \(func \$\w+\s*'
+                          r'((?:\(param[^)]*\)\s*)?(?:\(result[^)]*\))?)', src))
+    assert set(got) == set(want)
+    for name, sig in want.items():
+        params = sig[1:sig.index(")")].replace("*~", "ii")
+        decl = got[name]
+        m = re.search(r"\(param ([^)]*)\)", decl)
+        assert len(m.group(1).split()) if m else 0 == len(params), name
+        assert ("(result i32)" in decl) == sig.endswith("i"), name
+
+
 def test_the_role_doors_table_is_the_tables_rows():
     """The ROLE door names a row by its index here (moy_app_role), so the C's
     table is roles.json row for row."""

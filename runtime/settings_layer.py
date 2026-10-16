@@ -35,9 +35,11 @@ the bar (ws.bar_layer) stay put.
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
     from crash_guard import crash_available, crash_lines, last_crash
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
     from runtime.crash_guard import crash_available, crash_lines, last_crash
 
 try:
@@ -251,7 +253,7 @@ class SettingsLayer:
         self.bt_sel = 0
         self.bt_msg = ""
         self._bt_state = None
-        self._bt_hits = _ui.Hits()    # visual-identity v1: draw pass == tap map
+        self._bt_hits = _ui_draw.Hits()    # visual-identity v1: draw pass == tap map
         # Memo for _settings_rows (see there): the built tuple plus the four
         # capability flags it was built from, held as separate attributes so the
         # comparison allocates NOTHING (a signature tuple would itself cost ~40B
@@ -277,11 +279,11 @@ class SettingsLayer:
         # keyboard -- 0, KEEP OFF, whenever it opens.
         self.confirm_key = None
         self.confirm_sel = 0
-        self._confirm_hits = _ui.Hits()
+        self._confirm_hits = _ui_draw.Hits()
         # The kernel's last crash record (Settings -> LAST CRASH): a read-only
         # panel that replaces the rows, on a board whose kernel keeps one.
         self.crash_view = False
-        self._crash_hits = _ui.Hits()
+        self._crash_hits = _ui_draw.Hits()
         # The panel geometry a popover lends while it holds the WIFI panel or
         # the power rows (popover.PanelGeom); None is this layout's own.
         self._geom = None
@@ -699,21 +701,21 @@ class SettingsLayer:
         if connected:
             # The ONE ink here that is not a widget state: `play` says CONNECTED,
             # which is a status the theme owns and no style should overrule.
-            _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
+            _ui_draw.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
                     colors=(None, th["play"], None), edge=False,
                     pad=20 * fs, text_dy=5 + dy, fs=fs)
             if ip:
                 cv.print(str(ip)[:15], x + w - 15 * fw, y + 5 + dy,
                          NAMES["blue"], 1)
         else:
-            _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED", kind="row_list",
+            _ui_draw.row(cv, th, (x, y, w, h), "NOT CONNECTED", kind="row_list",
                     edge=False, pad=20 * fs, text_dy=5 + dy, fs=fs)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
             # `ink`, not the chrome family: this is the panel's own body text,
             # and the two families are different indices on machine/dark.
-            _ui.row(cv, th, (x, y, w, h),
+            _ui_draw.row(cv, th, (x, y, w, h),
                     ("PASSWORD FOR " + str(self.wifi_pick))[:30],
                     colors=(None, th["ink"], None), edge=False, pad=4,
                     text_dy=5 + dy, fs=fs)
@@ -722,10 +724,10 @@ class SettingsLayer:
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
             shown = self.wifi_pw.text[-max(4, bw2 // fw - 3):]
             cv.print(shown, bx + 4, by + 5 + dy, NAMES["yellow"], 1)
-            cv.rect(bx + 4 + _ui.print_width(shown, fs), by + 3 + dy, fs,
+            cv.rect(bx + 4 + _ui_draw.print_width(shown, fs), by + 3 + dy, fs,
                     bh2 - 8 - 2 * dy, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
-            _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
+            _ui_draw.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
                     kind="row_list", edge=False, pad=4, text_dy=5 + dy, fs=fs)
         else:
             # The network list.
@@ -738,7 +740,7 @@ class SettingsLayer:
                 # Same split as the Settings rows: ui.row draws the selection
                 # fill + the name, the signal bars / lock / SAVED markers are
                 # this list's own per-row content at their fixed columns.
-                _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16],
+                _ui_draw.row(cv, th, (x, y, w, h), str(ssid_k)[:16],
                         kind="row_list", focus=sel,
                         edge=False, pad=4, text_dy=5 + dy, fs=fs)
                 _bx, band_y, _bw, band_h = lay.row_band((x, y, w, h))
@@ -781,16 +783,16 @@ class SettingsLayer:
         # the exact content rect; every remaining band is cut responsively.
         body = (lay.set_x, lay.set_row_y0, lay.set_w,
                 max(1, py + ph - lay.set_row_y0 - 4 * fs))
-        content = _ui.panel(cv, th, body, title="BLUETOOTH KEYBOARD", fs=fs)
+        content = _ui_draw.panel(cv, th, body, title="BLUETOOTH KEYBOARD", fs=fs)
         status_r, content = _ui.cut_top(content, 18 * fs)
         msg_r, content = _ui.cut_top(content, 14 * fs)
         actions_r, list_r = _ui.cut_bottom(content, 24 * fs)
         list_r = _ui.inset(list_r, 4 * fs, 3 * fs)
 
         enabled, state, name, _preferred, _error = status
-        _ui.status_row(cv, th, status_r,
+        _ui_draw.status_row(cv, th, status_r,
                        (("ON" if enabled else "OFF"), state.upper(), name or "NO DEVICE"))
-        _ui.row(cv, th, msg_r, self.bt_msg[:max(1, msg_r[2] // fw - 1)],
+        _ui_draw.row(cv, th, msg_r, self.bt_msg[:max(1, msg_r[2] // fw - 1)],
                 kind="row_list", edge=False,
                 pad=3 * fs, text_dy=(msg_r[3] - lay.line_h) // 2, fs=fs)
 
@@ -803,7 +805,7 @@ class SettingsLayer:
         end = min(len(self.bt_devices), top + visible)
         if not self.bt_devices:
             label = "SCANNING..." if state == "scanning" else "NO KEYBOARDS FOUND"
-            _ui.row(cv, th, (list_r[0], list_r[1], list_r[2], row_h), label,
+            _ui_draw.row(cv, th, (list_r[0], list_r[1], list_r[2], row_h), label,
                     kind="row_list", edge=False,
                     pad=3 * fs, text_dy=6 * fs, fs=fs)
         for i in range(top, end):
@@ -812,11 +814,11 @@ class SettingsLayer:
                     list_r[2], row_h - 3 * fs)
             prefix = "ONLINE " if connected else ("SAVED " if preferred else "")
             tail = "  %d" % int(rssi) if int(rssi) > -127 else ""
-            _ui.button(cv, th, rect, prefix + str(dev_name) + tail,
+            _ui_draw.button(cv, th, rect, prefix + str(dev_name) + tail,
                        kind="tonal" if connected else "normal", on=preferred)
             self._bt_hits.add(rect, "device", address)
             if i == self.bt_sel:
-                _ui.focus(cv, th, rect, fs=fs)
+                _ui_draw.focus(cv, th, rect, fs=fs)
 
         action_defs = (("toggle", "OFF" if enabled else "ON", "normal"),
                        ("connect", "USE", "primary"),
@@ -826,7 +828,7 @@ class SettingsLayer:
         rects = _ui.hsplit(_ui.inset(actions_r, 3 * fs), len(action_defs), 3 * fs)
         for j in range(len(action_defs)):
             action, label, kind = action_defs[j]
-            _ui.button(cv, th, rects[j], label, kind=kind,
+            _ui_draw.button(cv, th, rects[j], label, kind=kind,
                        on=(action == "toggle" and enabled))
             self._bt_hits.add(rects[j], action)
 
@@ -922,11 +924,11 @@ class SettingsLayer:
         title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
         body = (lay.set_x, lay.set_row_y0, lay.set_w,
                 max(1, py + ph - lay.set_row_y0 - 4 * fs))
-        content = _ui.panel(cv, th, body, title=title, fs=fs)
+        content = _ui_draw.panel(cv, th, body, title=title, fs=fs)
         actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
         tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
         lh = lay.line_h + 4 * fs
-        lines = _ui.wrap_px(text, tw, fs)
+        lines = _ui_draw.wrap_px(text, tw, fs)
         for n in range(len(lines)):
             y = ty + n * lh
             if y + lay.line_h > ty + th_h:
@@ -934,11 +936,11 @@ class SettingsLayer:
             cv.print(lines[n], tx, y, th["ink"], 1)
         self._confirm_hits.clear()
         rects = _ui.hsplit(_ui.inset(actions_r, 3 * fs), 2, 3 * fs)
-        _ui.button(cv, th, rects[0], KEEP_OFF)
+        _ui_draw.button(cv, th, rects[0], KEEP_OFF)
         self._confirm_hits.add(rects[0], "keep")
-        _ui.button(cv, th, rects[1], yes, kind="danger")
+        _ui_draw.button(cv, th, rects[1], yes, kind="danger")
         self._confirm_hits.add(rects[1], "accept")
-        _ui.focus(cv, th, rects[self.confirm_sel], fs=fs)
+        _ui_draw.focus(cv, th, rects[self.confirm_sel], fs=fs)
 
     # -- LAST CRASH panel (the kernel's record, read-only) --------------------
 
@@ -975,22 +977,22 @@ class SettingsLayer:
         _px, py, _pw, ph = lay.settings_panel
         body = (lay.set_x, lay.set_row_y0, lay.set_w,
                 max(1, py + ph - lay.set_row_y0 - 4 * fs))
-        content = _ui.panel(cv, th, body, title="LAST CRASH", fs=fs)
+        content = _ui_draw.panel(cv, th, body, title="LAST CRASH", fs=fs)
         actions_r, text_r = _ui.cut_bottom(content, 24 * fs)
         tx, ty, tw, th_h = _ui.inset(text_r, 4 * fs, 6 * fs)
         lh = lay.line_h + 4 * fs
         y = ty
         for line in crash_lines(last_crash()):
-            for part in _ui.wrap_px(line, tw, fs):
+            for part in _ui_draw.wrap_px(line, tw, fs):
                 if y + lay.line_h > ty + th_h:
                     break
                 cv.print(part, tx, y, th["ink"], 1)
                 y += lh
         self._crash_hits.clear()
         rect = _ui.inset(actions_r, 3 * fs)
-        _ui.button(cv, th, rect, "BACK")
+        _ui_draw.button(cv, th, rect, "BACK")
         self._crash_hits.add(rect, "back")
-        _ui.focus(cv, th, rect, fs=fs)
+        _ui_draw.focus(cv, th, rect, fs=fs)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
@@ -1187,7 +1189,7 @@ class SettingsLayer:
         x, y, w, h = lay.settings_row_rect(0)
         lvl = ws.battery_level()
         ws._icon("batt", x, y + lay.row_text_dy, cv)
-        _ui.row(cv, th, (x, y, w, h),
+        _ui_draw.row(cv, th, (x, y, w, h),
                 "BATTERY  " + ("--" if lvl is None else "%d%%" % lvl),
                 kind="row_list", edge=False, pad=20 * fs,
                 text_dy=5 + lay.row_text_dy, fs=fs)
@@ -1248,8 +1250,8 @@ class SettingsLayer:
         the region is the touch INTERACTION model (drag) + the shelf-tier
         scrollbar, synced from set_top when a drag is not active."""
         if self.scroll is None:
-            self.scroll = _ui.ScrollRegion()
-            self._taps = _ui.DragTap(self.scroll)
+            self.scroll = _ui_draw.ScrollRegion()
+            self._taps = _ui_draw.DragTap(self.scroll)
         ws = self.ws
         lay = ws.layout
         rows = self._settings_rows()
@@ -1570,7 +1572,7 @@ class SettingsLayer:
             cv.rectb(px, py, pw, ph, th["edge"])
         else:
             ws.wallpaper.draw(dt, home=True)
-            _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["panel"])
+            _ui_draw.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["panel"])
         # Inside a WM window (#73) the title strip already says SETTINGS and carries
         # the closing X, so the panel's own header + X are suppressed (no doubled
         # chrome); the trophy (the achievements door, #21) stays either way.
@@ -1635,7 +1637,7 @@ class SettingsLayer:
         xr = px + pw - 9 * lay.fs
         vis = self._settings_visible()
         th_ = ws.theme_colors
-        _ui.scroll_cues(
+        _ui_draw.scroll_cues(
             cv, (xr, lay.set_row_y0), (xr, py + ph - 9 * lay.fs),
             self.set_top > 0, self.set_top + vis < len(rows),
             th_["ink"] if th_.get("bar_light", False) else th_["chrome_ink"])
@@ -1663,7 +1665,7 @@ class SettingsLayer:
         # The palette is the style's "row_menu" kind (#207): a Settings row is
         # panel-CHROME coloured, which the row kind cannot express, so it is its
         # own catalog entry rather than a hand-built triple no theme could reach.
-        _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", focus=sel,
+        _ui_draw.row(cv, th, (x, y, w, h), label, kind="row_menu", focus=sel,
                 edge=False, pad=4, text_dy=5 + lay.row_text_dy, fs=lay.fs)
         # Below here the rect is the row's own CONTENT band -- the fs-tall strip
         # the chrome scale re-centred inside the tap target (#203). The identity
@@ -1772,7 +1774,7 @@ class SettingsLayer:
             lbl = ws.webhost_label()
             col = (NAMES["orange"] if ws.webhost_serving()
                    else NAMES["dark_grey"])
-            tx = x + w - _ui.print_width(lbl, lay.fs) - 2
+            tx = x + w - _ui_draw.print_width(lbl, lay.fs) - 2
             if tx < x + 84 * lay.fs:       # still too long: keep the tail, which
                 tx = x + 84 * lay.fs       # is the part that varies (the host)
             cv.print(lbl, tx, y + 5, col, 1)
@@ -1784,6 +1786,6 @@ class SettingsLayer:
             # the title), so it is the row kind again with its own text_dy. Its
             # grey is a frozen literal, not `ink_dim` -- off-token on every
             # theme, which is what the `colors` hatch is for.
-            _ui.row(cv, th, (x, y, w, h), "soon",
+            _ui_draw.row(cv, th, (x, y, w, h), "soon",
                     colors=(None, NAMES["dark_grey"], None), edge=False,
                     pad=4, text_dy=6 + fw, fs=lay.fs)

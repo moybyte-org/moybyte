@@ -151,21 +151,19 @@ now.
 
 ## What an app draws with
 
-The ui toolkit (`runtime/ui.py`, the face of `native/moy_ui`'s C: each
-widget is one call, with its style data in `native/moy_ui/style.json`) is the
-intended surface: theme tokens (`ctx.theme.colors()`, `ctx.theme.light()`),
-widgets (`button`, `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`,
-`status_row`, `panel`, `toolbar`, `dialog`, `text_field`, `scroll_cues`),
-the marks (`focus` and `current`, the theme's own, and a part's `focus=`
-and `on=`), `ScrollRegion`, the rect algebra (`cut_*`/`inset`/`hsplit`/
-`vsplit` — the recommended layout style for NEW apps; see `CalcLayout`), and
-`Hits` for draw==tap dispatch (see `CalcAppLayer.draw`/`handle_pointer` — the
-draw pass registers every key's rect, the pointer resolves against the same
-registry). Layout stays the app's Python.
-
-The public UI API every app draws with in all three runtimes, and that
-this surface and the compiled app's `ui` rows become, is
-`docs/ui_api_2026-10.md` (owner, 2026-10-15; the look plan's step 11a).
+An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
+2026-10-15): `runtime/ui.py`'s verbs (`page`, `label`, `button`, `toggle`,
+`slider`, `list`, `part`, `focus`, `keys_taken`, `at`) and its rect algebra
+(`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
+app make. The engine under them -- the rect-taking widgets (`button`,
+`chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
+`panel`, `toolbar`, `dialog`, `text_field`, `scroll_cues`), the marks
+(`focus` and `current`, and a part's `focus=` and `on=`), `ScrollRegion` and
+`Hits` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
+moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`
+(see `CalcAppLayer.draw`/`handle_pointer` for draw==tap through `Hits`).
+Theme tokens are `ctx.theme.colors()` and `ctx.theme.light()`; layout stays
+the app's Python.
 
 ## The bar contract is the HOST's, not yours (2026-08-19)
 
@@ -272,9 +270,10 @@ its run's and ends with it; its crash-guard strikes are keyed by the same id.
 
 Five globals every `type: "app"` cart gets with no permission, because they are
 how an app draws rather than what it may reach: **`ui`** (`runtime/ui.py`, the
-face of the toolkit's C in `native/moy_ui`, the same widgets a compiled app
-draws), **`screen()`** (the canvas -- `ui`'s `cv`), **`theme()`** (the
-live tokens -- its `th`), **`content_rect()`** (`(x, y, w, h)`, the part of
+public UI API's verbs, the calls a Lua cart and a compiled app make;
+`ui_draw`, the engine layer under them, rides beside it while a system cart
+still draws with it), **`screen()`** (the canvas -- `ui_draw`'s `cv`),
+**`theme()`** (the live tokens -- its `th`), **`content_rect()`** (`(x, y, w, h)`, the part of
 the surface the host's exitable strip leaves you; lay out inside it, never
 hardcode 18) with **`bar_h()`**, its `y` -- what an app that knows only a top
 strip draws below. Under a strip at the bottom `bar_h()` is 0 and the strip
@@ -298,25 +297,16 @@ every row it imports is served in C it runs as a VM-free cart does; one that
 imports a row the Python console serves (`theme_set*`, `theme_edit_file`, `nav_open_app`) keeps
 the VM.
 
-**The toolkit's rows** (the table's `ui` role) are every compiled app's, with
-no permission: the same C a Python app's `ui` draws (`native/moy_ui`), drawn
-into the app's canvas with no hop and no upcall (`native/moy_ui/moy_ui_wasm.h`
-is their contract). `ui_kind(name)` and `ui_glyph_id(name)` answer the ids
-the drawing rows take (an unknown kind draws as a row, an unknown glyph as
-none); `ui_button(x, y, w, h, kind, flags, interact, label, glyph)` takes
-flags ON 1, HOT 2, DISABLED 4 and `interact` PRESSED 1, HOVER 4 or -1;
-`ui_label(x, y, w, h, text, ink, align)` answers the drawn width;
-`ui_list(x, y, w, h, kind, items, count, row_h, offset, sel)` takes its items
-NUL-separated. A widget looks the same whatever palette, camera, clip or fill
-pattern the app left set, and the app finds them as it left them. The pump
-keeps its state in the app's memory, each buffer 4-byte aligned:
-`ui_hits_clear(buf)`, `ui_hits_add(buf, x, y, w, h, id)` and
-`ui_hits_pump(buf, px, py, down, pointing, pump)` over a hit buffer (two
-header words, then five per rect) and a 16-byte pump (hover id, pressed id,
-armed id, down); `ui_dragtap(drag, x, y, w, h, horizontal, px, py, click,
-down, slop, content, dt_ms)` over a 40-byte drag (the tap's 12 bytes, the
-scroll's 16, then the offset and the last tap's x and y), answering 1 on a
-clean tap. `tests/fixtures/wasm/app_ui.moy` uses every row.
+**The public UI API's rows** (the table's `ui` role) are every compiled
+app's, with no permission: `docs/ui_api_2026-10.md` §1's ten verbs, the
+same C a Python app's `ui` and a Lua cart's draw (`native/moy_ui/moy_ui_api.h`),
+drawn into the app's canvas with no hop and no upcall
+(`native/moy_ui/moy_ui_wasm.h` is their contract). The engine keeps focus,
+the last frame's stops and each id's state for the run, so the app's memory
+holds no ui buffers, and it reads the frame's keys and pointer from the
+run's snapshot. A widget looks the same whatever palette, camera, clip or
+fill pattern the app left set, and the app finds them as it left them.
+`tests/fixtures/wasm/app_ui.moy` imports every row.
 
 ### The canvas: FIXED by default, responsive by opt-in
 

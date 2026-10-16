@@ -31,8 +31,10 @@ from array import array
 
 try:
     import ui as _ui              # frozen on device
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
@@ -230,7 +232,7 @@ class MapLayout(LayoutBase):
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + _ui.line_dy(2 * fs, fs))
+        self.title_xy = (px + 6 * fs, py + _ui_draw.line_dy(2 * fs, fs))
         row_y = p_bottom - 22 * fs                # bottom button row (base 198)
         rc_x = p_right - 106 * fs                 # right column origin (base 206)
         self.mv_x0 = px + 6 * fs
@@ -910,7 +912,7 @@ class MapEditorUI:
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
-        _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
+        _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
                            th["surface"])
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
@@ -1094,7 +1096,7 @@ class MapEditorUI:
         cv.rect(sx, sy, sw, sh, NAMES["dark_blue"])
         cv.rect(sx, sy, cb, cb, NAMES["light_grey"])
         cv.rect(sx + cb, sy + cb, cb, cb, NAMES["light_grey"])
-        cv.print("SKY", sx + sw - 26 * fs, sy + (sh - _ui.font("ui")[2] * fs) // 2,
+        cv.print("SKY", sx + sw - 26 * fs, sy + (sh - _ui_draw.font("ui")[2] * fs) // 2,
                  NAMES["white"], 1)
         cv.rectb(sx, sy, sw, sh,
                  NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
@@ -1225,7 +1227,7 @@ class MapEditorUI:
         px, py, pw, ph = r["panel"]
         cv.rect(px, py, pw, ph, NAMES["dark_blue"])
         cv.rectb(px, py, pw, ph, NAMES["white"])
-        cv.print("MAP SIZE", px + 8 * fs, py + _ui.line_dy(6 * fs, fs), NAMES["white"], 1)
+        cv.print("MAP SIZE", px + 8 * fs, py + _ui_draw.line_dy(6 * fs, fs), NAMES["white"], 1)
         wy, hy = r["rows"]
         w = tm.w if tm is not None else 0
         h = tm.h if tm is not None else 0
@@ -1233,7 +1235,7 @@ class MapEditorUI:
         self._gbtn("plus", "+", r["w_up"], NAMES["green"], cv)
         self._gbtn("minus", "-", r["h_dn"], NAMES["red"], cv)
         self._gbtn("plus", "+", r["h_up"], NAMES["green"], cv)
-        yoff = (22 * fs - _ui.font("ui")[2] * fs) // 2
+        yoff = (22 * fs - _ui_draw.font("ui")[2] * fs) // 2
         cv.print("W " + str(w), px + pw // 2 - 14 * fs, wy + yoff, NAMES["white"], 1)
         cv.print("H " + str(h), px + pw // 2 - 14 * fs, hy + yoff, NAMES["white"], 1)
         ws._btn("DONE", r["done"], NAMES["green"], cv)

@@ -60,7 +60,7 @@ hits = None
 
 def _init():
     global hits
-    hits = ui.Hits()
+    hits = ui_draw.Hits()
     _refresh()
     # A note the console was already asked to open -- Files routed a `.md`, a
     # `.json` or a `.txt` here. `open_editor()` with no name is that request,
@@ -233,12 +233,12 @@ def _draw_shelf(cv, th, rect):
     # one control, reachable by a finger and by the same A/ENTER that opens a
     # cart on the launcher shelf.
     new_btn, title = ui.cut_left(head, 84)
-    ui.button(cv, th, new_btn, "+ NEW", on=(sel == 0),
+    ui_draw.button(cv, th, new_btn, "+ NEW", on=(sel == 0),
               state=hits.state_of("new"))
     hits.add(new_btn, "new")
     cv.print(("MY NOTES  " + str(len(names)))[:26], title[0] + 6,
              title[1] + 5, th["ink_dim"], 1)
-    inner = ui.panel(cv, th, list_rect)
+    inner = ui_draw.panel(cv, th, list_rect)
     rows = ui.vsplit(inner, ROWS, 2)
     for i in range(ROWS):
         n = top + i
@@ -248,23 +248,23 @@ def _draw_shelf(cv, th, rect):
         # The whole name, and the mode's badge beside it: the vault holds
         # notes, plain text, data and scripts side by side now, and a row that
         # did not say which is which would open a surprise.
-        ui.row(cv, th, rows[i], name, on=(sel == n + 1), value=files.badge(name),
+        ui_draw.row(cv, th, rows[i], name, on=(sel == n + 1), value=files.badge(name),
                hits=hits, verb="open", arg=n)
     cv.print(status[:38], line[0], line[1] + 1, th["ink_dim"], 1)
 
 
 def _draw_naming(cv, th, rect):
     box = (rect[0] + 10, rect[1] + 44, rect[2] - 20, 78)
-    inner = ui.inset(ui.panel(cv, th, box, "NAME IT"), 4)
+    inner = ui.inset(ui_draw.panel(cv, th, box, "NAME IT"), 4)
     field, below = ui.cut_top(inner, 16)
-    ui.text_field(cv, field, typed, "my note")
+    ui_draw.text_field(cv, field, typed, "my note")
     hint, btns = ui.cut_top(below, 10)
     cv.print(".txt .json .py -- or just a name", hint[0], hint[1] + 1,
              th["ink_dim"], 1)
     a, b = ui.hsplit(btns, 2, 4)
-    ui.button(cv, th, a, "MAKE", state=hits.state_of("make"))
+    ui_draw.button(cv, th, a, "MAKE", state=hits.state_of("make"))
     hits.add(a, "make")
-    ui.button(cv, th, b, "CANCEL", state=hits.state_of("cancel"))
+    ui_draw.button(cv, th, b, "CANCEL", state=hits.state_of("cancel"))
     hits.add(b, "cancel")
 
 
@@ -274,7 +274,7 @@ def _draw_note(cv, th, rect):
     for i in range(len(TOOLS)):
         verb = TOOLS[i]
         off = _tool_off(verb)
-        ui.button(cv, th, rects[i], TOOL_LABEL[verb], disabled=off,
+        ui_draw.button(cv, th, rects[i], TOOL_LABEL[verb], disabled=off,
                   on=(verb == "sel" and ed.selecting()),
                   state=hits.state_of(verb))
         if not off:
@@ -303,7 +303,7 @@ def _note_status():
     return ed.name() + "  " + ed.mode().upper()
 
 
-# -- taps: the draw pass IS the hit map (ui.Hits) -----------------------------
+# -- taps: the draw pass IS the hit map (ui_draw.Hits) -----------------------------
 
 
 def _tapping():

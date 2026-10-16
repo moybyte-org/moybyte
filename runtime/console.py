@@ -379,9 +379,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 
 try:
-    import ui as _uimod
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _uimod
+    from runtime import ui_draw as _ui_draw
 
 
 # Project (project.py): the open cart's DATA + commit_* verbs; its six data
@@ -3085,7 +3085,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         §12): the Carousel, the shelf grid (the home window's, always) or
         the icon grid."""
         cls = _HOME_CLASSES.get(arrangement, Carousel)
-        g = cls(items, self.layout, NAMES, _uimod.glyph)
+        g = cls(items, self.layout, NAMES, _ui_draw.glyph)
         # The "+ New" card draws the real themeable IconSheet plus sprite big --
         # keyed so the sheet's 0-filled backdrop doesn't plate the card.
         g.icon_for = self._icon_image_keyed
@@ -3595,7 +3595,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         cv = self.sys_canvas
         fs = self.look.effective_font_scale()
         label = "LOADING..."
-        w = _uimod.print_width(label, fs) + 16 * fs
+        w = _ui_draw.print_width(label, fs) + 16 * fs
         h = 16 * fs
         x = (cv.w - w) // 2
         y = 24 * fs                    # clear of the 18px-per-fs top bar
@@ -3981,7 +3981,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the deferred drain at the tail. Bound once, here, so both cost a call
         # and no second lookup (#209 landing C -- nothing else in the loop
         # reaches into covers, and neither goes through a forward).
-        _uimod.begin_frame()          # the one-primary check's frame
+        _ui_draw.begin_frame()          # the one-primary check's frame
         covers = self.covers
         covers.begin_frame()          # the per-frame cover-build budget, which is
                                       # a TIME slice, not a count
@@ -4315,7 +4315,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _mini_btn(self, label, rect, fill, cv=None, label_rect=None):
         # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
         # 2026-07 kernel-shrink direction); this stays the tested ws entry point.
-        _uimod.mini_btn(cv if cv is not None else self.canvas, rect, label, fill,
+        _ui_draw.mini_btn(cv if cv is not None else self.canvas, rect, label, fill,
                         label_rect)
 
     def _btn(self, label, rect, fill, cv=None):
@@ -4323,15 +4323,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas. The
         # implementation (incl. the frozen scale-2 baseline quirk) moved to
         # ui.game_btn; this stays the tested ws entry point.
-        _uimod.game_btn(cv if cv is not None else self.canvas, rect, label, fill)
+        _ui_draw.game_btn(cv if cv is not None else self.canvas, rect, label, fill)
 
     def _icon_btn(self, kind, label, rect, fill, cv=None):
         """A button that leads with an icon glyph (pre-literate) and keeps the
         word as a small secondary cue beside it -- so a reader still gets the
         label and a kid who can't read still gets the picture. Implementation:
         ui.game_icon_btn."""
-        _uimod.game_icon_btn(cv if cv is not None else self.canvas, rect,
-                             kind, label, fill, _uimod.glyph_draw)
+        _ui_draw.game_icon_btn(cv if cv is not None else self.canvas, rect,
+                             kind, label, fill, _ui_draw.glyph_draw)
 
     # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
     # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees
@@ -4355,7 +4355,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
         # slot (#203). The raster is native/moy_ui's, through `ui.glyph`, which
         # Launcher (canvas-only) is handed too.
-        _uimod.glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
+        _ui_draw.glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi

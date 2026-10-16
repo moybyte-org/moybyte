@@ -111,14 +111,16 @@ lost feature rather than a granted capability.)
 These five are published to every `type: "app"` cart with no permission,
 because they are not capabilities -- they are how an app draws.
 
-  * `ui` is `runtime/ui.py`, the same leaf the shipped apps use: the face of
-    the toolkit's C (`native/moy_ui`) -- the rect algebra, the six-state
-    widgets (`button`/`chip`/`row`/`cell`/`label`/`list`/`tab_row`/
-    `status_row`/`panel`/`dialog`/`text_field`), the glyphs, `ScrollRegion`
-    and `Hits`. It takes `(cv, th, rect)` and imports nothing from the shell,
-    so it needed no port to cross this boundary.
-  * `screen()` returns the canvas the cart is drawing on -- what `ui`'s `cv`
-    argument wants. It is the SAME surface the kid API's `rect`/`print` already
+  * `ui` is `runtime/ui.py`, the public UI API (docs/ui_api_2026-10.md): its
+    verbs and rect algebra, the calls a Lua cart and a compiled app make. The
+    Player begins each frame of them (`Player._ui_begin`). Beside it rides
+    `ui_draw`, the engine layer under the verbs -- the six-state widgets
+    (`button`/`chip`/`row`/`cell`/`label`/`list`/`tab_row`/`status_row`/
+    `panel`/`dialog`/`text_field`), the glyphs, `ScrollRegion` and `Hits`,
+    taking `(cv, th, rect)` -- while a system cart still draws with it
+    (tests/test_ui_public.py pins which). Neither imports from the shell.
+  * `screen()` returns the canvas the cart is drawing on -- what `ui_draw`'s
+    `cv` argument wants. It is the SAME surface the kid API's `rect`/`print` already
     write to, so it grants no new reach; it just names the object.
   * `theme()` returns the live panel-theme token dict, so an app looks like the
     rest of the console and follows a theme change without knowing one
@@ -145,9 +147,10 @@ save is not a thing to teach.
 
 try:
     import ui
+    import ui_draw
     from app_context import NO_STORE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+    from runtime import ui, ui_draw
     from runtime.app_context import NO_STORE
 
 
@@ -302,20 +305,20 @@ def make_system_api(ctx_factory, cart, canvas=None,
     if keep is not None:
         keep(ctx)
 
-    ns = {"ui": ui}
+    ns = {"ui": ui, "ui_draw": ui_draw}
 
     # -- UNGATED: how an app draws -------------------------------------------
     theme = ctx.theme
 
     def _theme():
-        """The live panel-theme tokens (`ui`'s `th` argument). HOIST IT once per
+        """The live panel-theme tokens (`ui_draw`'s `th` argument). HOIST IT once per
         frame like every shipped app does, never per widget."""
         return theme.colors()
 
     ns["theme"] = _theme
 
     def _screen():
-        """The canvas this app draws on (`ui`'s `cv` argument)."""
+        """The canvas this app draws on (`ui_draw`'s `cv` argument)."""
         return canvas
 
     ns["screen"] = _screen

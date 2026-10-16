@@ -14,7 +14,7 @@ import json
 import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
-from runtime import ui
+from runtime import ui_draw
 from runtime.chrome import CodeLayout, Layout, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -33,14 +33,14 @@ LONG = "A LABEL FAR TOO LONG FOR ITS BOX, Wiq"
 @pytest.fixture
 def sample():
     """The fixture font installed for every role; petme128 back after."""
-    rc, fid = ui._C.font_load(open(SAMPLE, "rb").read())
+    rc, fid = ui_draw._C.font_load(open(SAMPLE, "rb").read())
     assert rc == 0
     for role in ROLES:
-        assert ui.use_font(role, fid)
+        assert ui_draw.use_font(role, fid)
     yield fid
     for role in ROLES:
-        ui.use_font(role, 0)
-    ui._C.font_free(fid)
+        ui_draw.use_font(role, 0)
+    ui_draw._C.font_free(fid)
 
 
 def _ink(draw, w=200, h=80, fs=1):
@@ -70,19 +70,19 @@ def _inside(box, rect):
 def test_the_roles_are_style_jsons_and_read_petme128_until_installed():
     assert STYLE["theme"]["font_roles"] == list(ROLES)   # moy_ui.h's MOY_UI_FONT_*
     for role in ROLES:
-        assert ui.font(role) == PETME
+        assert ui_draw.font(role) == PETME
     for fs in (1, 2, 3):
         lay = Layout(320, 240, fs)
         assert (lay.font_w, lay.line_h) == (8 * fs, 8 * fs)
         code = CodeLayout(320, 240, fs)
         assert (code.cell, code.lh) == (8 * fs, 10 * fs)
     with pytest.raises(ValueError):
-        ui.font("body")
+        ui_draw.font("body")
 
 
 def test_an_installed_font_is_what_the_layouts_read(sample):
     for role in ROLES:
-        assert ui.font(role) == (sample, 6, 11, 8)
+        assert ui_draw.font(role) == (sample, 6, 11, 8)
     for fs in (1, 2):
         lay = Layout(320, 240, fs)
         assert (lay.font_w, lay.line_h) == (6 * fs, 11 * fs)
@@ -94,18 +94,18 @@ def test_an_installed_font_is_what_the_layouts_read(sample):
 
 
 def test_a_freed_font_reads_as_petme128_again():
-    rc, fid = ui._C.font_load(open(SAMPLE, "rb").read())
-    assert ui.use_font("ui", fid) and ui.font("ui")[0] == fid
-    ui._C.font_free(fid)
-    assert ui.font("ui") == PETME
-    assert not ui.use_font("ui", fid)              # a stale id installs nothing
-    assert not ui.use_font("ui", 12345)
+    rc, fid = ui_draw._C.font_load(open(SAMPLE, "rb").read())
+    assert ui_draw.use_font("ui", fid) and ui_draw.font("ui")[0] == fid
+    ui_draw._C.font_free(fid)
+    assert ui_draw.font("ui") == PETME
+    assert not ui_draw.use_font("ui", fid)              # a stale id installs nothing
+    assert not ui_draw.use_font("ui", 12345)
 
 
 def test_text_width_measures_in_the_roles_font(sample):
-    assert ui.text_width("Wiq", 1) == 24            # no role: petme128's cell
-    w = ui.text_width("Wiq", 1, "ui")
-    assert 0 < w < 24 and ui.text_width("Wiq", 3, "ui") == 3 * w
+    assert ui_draw.text_width("Wiq", 1) == 24            # no role: petme128's cell
+    w = ui_draw.text_width("Wiq", 1, "ui")
+    assert 0 < w < 24 and ui_draw.text_width("Wiq", 3, "ui") == 3 * w
 
 
 # -- each primitive's label lands inside its box, as wide as it was measured ----
@@ -114,25 +114,25 @@ RECT = (12, 6, 120, 24)
 
 
 def _button(cv, text):
-    ui.button(cv, TH, RECT, LONG if text else "")
+    ui_draw.button(cv, TH, RECT, LONG if text else "")
 
 
 def _chip(cv, text):
-    ui.chip(cv, TH, RECT, LONG if text else "", fs=cv.font_scale)
+    ui_draw.chip(cv, TH, RECT, LONG if text else "", fs=cv.font_scale)
 
 
 def _row(cv, text):
-    ui.row(cv, TH, RECT, LONG if text else "", fs=cv.font_scale)
+    ui_draw.row(cv, TH, RECT, LONG if text else "", fs=cv.font_scale)
 
 
 def _cell(cv, text):
-    ui.cell(cv, TH, (12, 6, 120, 60), LONG if text else None, fs=cv.font_scale)
+    ui_draw.cell(cv, TH, (12, 6, 120, 60), LONG if text else None, fs=cv.font_scale)
 
 
 def _panel(cv, text):
     # A panel's title is not fitted, so it is one that fits; the strip is
     # drawn either way, so only the title's own ink differs.
-    ui.panel(cv, TH, (12, 6, 150, 60), title="SETTINGS" if text else " ", fs=cv.font_scale)
+    ui_draw.panel(cv, TH, (12, 6, 150, 60), title="SETTINGS" if text else " ", fs=cv.font_scale)
 
 
 @pytest.mark.parametrize("fs", [1, 2])
@@ -152,16 +152,16 @@ def test_label_draws_as_wide_as_it_measured(sample, fs, text):
     got = []
 
     def draw(cv, on):
-        got.append(ui.label(cv, rect, text if on else "", 7))
+        got.append(ui_draw.label(cv, rect, text if on else "", 7))
 
     box = _ink(draw, fs=fs)
     assert _inside(box, rect)
     width = got[0]
     assert width <= rect[2] and box[2] - box[0] <= width
     if text == "Wiq":
-        assert width == ui.text_width(text, fs, "ui")
+        assert width == ui_draw.text_width(text, fs, "ui")
     # vertically, the line box is centred: the ink starts at its top
-    line = ui.font("ui")[2] * fs
+    line = ui_draw.font("ui")[2] * fs
     assert box[1] >= rect[1] + (rect[3] - line) // 2
 
 
@@ -169,10 +169,10 @@ def test_a_rows_label_stops_short_of_its_value(sample):
     rect = (4, 4, 150, 20)
 
     def both(cv, on):
-        ui.row(cv, TH, rect, LONG if on else "", value="99:99", fs=1)
+        ui_draw.row(cv, TH, rect, LONG if on else "", value="99:99", fs=1)
 
     def value(cv, on):
-        ui.row(cv, TH, rect, "", value="99:99" if on else None, fs=1)
+        ui_draw.row(cv, TH, rect, "", value="99:99" if on else None, fs=1)
 
     label_box, value_box = _ink(both), _ink(value)
     assert _inside(label_box, rect) and _inside(value_box, rect)
@@ -182,12 +182,12 @@ def test_a_rows_label_stops_short_of_its_value(sample):
 @pytest.mark.parametrize("fs", [1, 2])
 def test_tabs_are_as_wide_as_their_labels_and_never_overlap(sample, fs):
     labels = ["CODE", "SPRITES", "MAP"]
-    on, rects = ui._C.tab_rects((0, 0, 400, 20), "\0".join(labels).encode(), 3, fs, 2 * fs)
+    on, rects = ui_draw._C.tab_rects((0, 0, 400, 20), "\0".join(labels).encode(), 3, fs, 2 * fs)
     assert on and len(rects) == 3
     for a, b in zip(rects, rects[1:]):
         assert a[0] + a[2] <= b[0]
     # each grows with its label's width in the role's font, never the 8px cell
-    pad = [r[2] - ui.text_width(t, fs, "ui") for r, t in zip(rects, labels)]
+    pad = [r[2] - ui_draw.text_width(t, fs, "ui") for r, t in zip(rects, labels)]
     assert pad[0] == pad[1] == pad[2]
 
 
@@ -196,11 +196,11 @@ def test_a_frames_title_stays_clear_of_its_buttons(sample, fs):
     win, th_ = (10, 10, 180, 100), 18 * fs
 
     def draw(cv, on):
-        ui.frame(cv, TH, win, th_, LONG if on else "", True, True, fs)
+        ui_draw.frame(cv, TH, win, th_, LONG if on else "", True, True, fs)
 
     box = _ink(draw, w=220, h=140, fs=fs)
     assert _inside(box, (win[0], win[1], win[2], th_ + 1))
-    for _id, (x, y, w, h), _right in ui.frame_buttons(win, th_, LONG, True, fs):
+    for _id, (x, y, w, h), _right in ui_draw.frame_buttons(win, th_, LONG, True, fs):
         assert box[2] <= x or x + w <= box[0]
 
 
@@ -210,21 +210,21 @@ def test_the_game_canvas_stays_on_petme128():
     def frame():
         cv = SystemCanvas(160, 80)
         cv.cls(BG)
-        ui.game_btn(cv, (4, 4, 120, 20), "PLAY", 1)
-        ui.game_icon_btn(cv, (4, 28, 120, 20), "play", "GO", 1)
-        ui.text_field(cv, (4, 52, 120, 20), "name", "")
+        ui_draw.game_btn(cv, (4, 4, 120, 20), "PLAY", 1)
+        ui_draw.game_icon_btn(cv, (4, 28, 120, 20), "play", "GO", 1)
+        ui_draw.text_field(cv, (4, 52, 120, 20), "name", "")
         return indices_of(cv)
 
     before = frame()
-    rc, fid = ui._C.font_load(open(SAMPLE, "rb").read())
+    rc, fid = ui_draw._C.font_load(open(SAMPLE, "rb").read())
     try:
         for role in ROLES:
-            ui.use_font(role, fid)
+            ui_draw.use_font(role, fid)
         assert frame() == before
     finally:
         for role in ROLES:
-            ui.use_font(role, 0)
-        ui._C.font_free(fid)
+            ui_draw.use_font(role, 0)
+        ui_draw._C.font_free(fid)
 
 
 @pytest.mark.parametrize("fs", [1, 2])
@@ -232,7 +232,7 @@ def test_a_desk_label_pill_is_its_labels_width(sample, fs):
     pill = (0, 0, 120, 13 * fs)
     for label in ("FILES", "STORYBOOK"):
         r = Desk.label_rect(pill, label, fs)
-        assert r[2] == min(pill[2], ui.text_width(label, fs, "ui") + 6 * fs)
+        assert r[2] == min(pill[2], ui_draw.text_width(label, fs, "ui") + 6 * fs)
         assert pill[0] <= r[0] and r[0] + r[2] <= pill[0] + pill[2]
 
 
@@ -246,13 +246,13 @@ def test_a_short_label_sits_where_its_metrics_centre_it(sample, kind, fs):
 
     def draw(cv, on):
         if kind == "button":
-            ui.button(cv, TH, rect, text if on else "")
+            ui_draw.button(cv, TH, rect, text if on else "")
         else:
-            ui.chip(cv, TH, rect, text if on else "", fs=fs)
+            ui_draw.chip(cv, TH, rect, text if on else "", fs=fs)
 
     box = _ink(draw, w=140, h=60, fs=fs)
-    _fid, _w, line, _asc = ui.font("ui")
-    tw = ui.text_width(text, fs, "ui")
+    _fid, _w, line, _asc = ui_draw.font("ui")
+    tw = ui_draw.text_width(text, fs, "ui")
     tx = rect[0] + (rect[2] - tw) // 2
     ty = rect[1] + (rect[3] - line * fs) // 2
     assert tx <= box[0] and box[2] <= tx + tw

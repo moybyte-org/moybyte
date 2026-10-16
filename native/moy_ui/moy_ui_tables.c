@@ -248,10 +248,10 @@ const uint8_t moy_ui_floor_specs[MOY_UI_KINDS][MOY_UI_FLOORS][2] = {
     {{0, 0}, {0, 0}},  // dialog
 };
 
-const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {5, 6, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3};
+const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {8, 6, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3};
 
 const int16_t moy_ui_metric_vals[MOY_UI_KINDS][MOY_UI_SLOTS] = {
-    {4, 16, 14, 1, 1, 0, 0, 0, 0},  // row
+    {4, 16, 14, 1, 1, 20, 28, 2, 0},  // row
     {2, 14, 2, 16, 14, 1, 0, 0, 0},  // cell
     {0, 0, 0, 0, 0, 0, 0, 0, 0},  // cell_band
     {4, 2, 1, 1, 1, 0, 0, 0, 0},  // chip
@@ -279,7 +279,7 @@ const int16_t moy_ui_metric_vals[MOY_UI_KINDS][MOY_UI_SLOTS] = {
 };
 
 const char *const moy_ui_metric_slots[MOY_UI_KINDS] = {
-    "pad icon glyph gap edge",
+    "pad icon glyph gap edge stack stack_desk stack_gap",
     "pad caption indent icon glyph edge",
     "",
     "clip min_x min_y edge align",

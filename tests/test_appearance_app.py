@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from runtime import host_app, ui
+from runtime import host_app, ui_draw
 from ws_helpers import select_on_home  # noqa: E402
 
 
@@ -111,13 +111,13 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
     _press(ws, app, "right")
     assert look.theme_name == "custom"
     a = look.custom_look()["accent"]
-    assert a == ui.theme_accents()[1][1]      # night's own is yellow, the first
+    assert a == ui_draw.theme_accents()[1][1]      # night's own is yellow, the first
     _press(ws, app, "left")
-    assert look.custom_look()["accent"] == ui.theme_accents()[0][1]
+    assert look.custom_look()["accent"] == ui_draw.theme_accents()[0][1]
     # TINT, WALLPAPER, WINDOW STYLE, FONT.
     _focus(app, "tint")
     _press(ws, app, "right")
-    assert look.custom_look()["tint"] == ui.theme_tints()[0][0]
+    assert look.custom_look()["tint"] == ui_draw.theme_tints()[0][0]
     _focus(app, "wallpaper")
     was = look.wallpaper_id
     _press(ws, app, "right")
@@ -127,7 +127,7 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
     assert app.choices()["frame"] == "tab"
     _focus(app, "font")
     _press(ws, app, "right")
-    assert app.choices()["font"] == "petme128" and ui.font("ui")[0] == 0
+    assert app.choices()["font"] == "petme128" and ui_draw.font("ui")[0] == 0
     look.commit()
     pkg = _custom(tmp_path)
     assert pkg["frame"] == {"style": "tab"}
@@ -135,7 +135,7 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
     folder = tmp_path / "carts" / "custom.moy"
     assert not (folder / "petme128").exists()   # a reserved name, no file
     _press(ws, app, "left")
-    assert app.choices()["font"] == "tiny5" and ui.font("ui")[0] != 0
+    assert app.choices()["font"] == "tiny5" and ui_draw.font("ui")[0] != 0
     # THEME: ←→ steps the theme in place (a row on the small page, the grid
     # on the wide one).
     if not app.layout.wide:
@@ -155,12 +155,12 @@ def test_every_picker_opens_tries_and_keeps_by_keys(tmp_path):
     _press(ws, app, "a")
     assert app.pick == "accent" and app.cur == 0
     _press(ws, app, "right", "down")            # tried live
-    assert ws.look.custom_look()["accent"] == ui.theme_accents()[9][1]
+    assert ws.look.custom_look()["accent"] == ui_draw.theme_accents()[9][1]
     _press(ws, app, "a")                        # kept
     assert app.pick is None and ws.look.theme_name == "custom"
     _focus(app, "tint")
     _press(ws, app, "a", "right", "right", "a")
-    assert ws.look.custom_look()["tint"] == ui.theme_tints()[1][0]
+    assert ws.look.custom_look()["tint"] == ui_draw.theme_tints()[1][0]
     _focus(app, "wallpaper")
     _press(ws, app, "a")
     walls = app._walls()
@@ -261,8 +261,8 @@ def test_every_row_answers_a_tap(tmp_path, kw):
         app.handle_pointer(r[0] + 2, r[1] + 2, True)   # ENTER on the swatch
         _frame(ws)
         assert app.pick is None
-    assert ws.look.custom_look()["accent"] == ui.theme_accents()[2][1]
-    assert ws.look.custom_look()["tint"] == ui.theme_tints()[1][0]
+    assert ws.look.custom_look()["accent"] == ui_draw.theme_accents()[2][1]
+    assert ws.look.custom_look()["tint"] == ui_draw.theme_tints()[1][0]
     tap("frame")
     assert app.choices()["frame"] == "tab"
     r = dict(app._row_rects())["frame"]

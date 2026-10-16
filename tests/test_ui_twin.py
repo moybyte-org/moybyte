@@ -17,15 +17,24 @@ nets hold the shipped toolkit (`runtime/ui.py` and what it calls) to it:
 
 import hashlib
 import random
+import types
 
 import pytest
 
 import ui_twin as twin
+
 from runtime import ui
+from runtime import ui_draw
 from runtime.chrome import THEME_VARIANTS, THEME_NAMES, theme_colors
 from theme_live import live_tokens  # noqa: E402
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
+
+# The toolkit the twin was: the engine layer, with the rect algebra that is
+# runtime/ui.py's beside it.
+TOOLKIT = types.SimpleNamespace(**dict(vars(ui_draw), **{
+    n: getattr(ui, n) for n in ("inset", "cut_top", "cut_bottom", "cut_left", "cut_right",
+                                "hsplit", "vsplit", "rect_in")}))
 
 
 class _Img:
@@ -51,7 +60,7 @@ def _glyph_draw(kind, rect, color, cv):
 def _raster(kind, rect, color, cv):
     """The real C glyph raster: the twin draws its glyphs through it, as the
     toolkit does (§7)."""
-    ui.glyph(cv, kind, rect, color)
+    ui_draw.glyph(cv, kind, rect, color)
 
 
 def _gd(m, c):
@@ -59,7 +68,7 @@ def _gd(m, c):
     raster; the toolkit half the time passes none and draws its own."""
     if not c["glyph"]:
         return None
-    if m is ui and c["flag"]:
+    if m is TOOLKIT and c["flag"]:
         return None
     return _raster
 
@@ -267,7 +276,7 @@ def test_the_toolkit_draws_what_the_twin_drew(widget):
     for i in range(CASES):
         c = _case(r)
         want, want_ops, want_ret = _draw(twin, widget, _truncated(c))
-        got, got_ops, got_ret = _draw(ui, widget,
+        got, got_ops, got_ret = _draw(TOOLKIT, widget,
                                       c if widget in FACE_TRUNCATES else _truncated(c))
         if got != want:
             raise AssertionError("%s case %d %r: pixels differ in %r (hash %s, "
@@ -437,9 +446,9 @@ def _ops(m, fn):
 def test_each_widget_issues_its_budgeted_ops(name):
     fn, budget = OP_BUDGETS[name]
     assert _ops(twin, fn) == budget, "the twin's count is the budget"
-    assert _ops(ui, fn) == budget, (
+    assert _ops(TOOLKIT, fn) == budget, (
         "%s issues %r ops, budgeted %r: a body drawing more or fewer ops "
-        "than the one it replaced" % (name, _ops(ui, fn), budget))
+        "than the one it replaced" % (name, _ops(TOOLKIT, fn), budget))
 
 
 def test_a_widget_is_one_crossing():
@@ -448,16 +457,16 @@ def test_a_widget_is_one_crossing():
     Python left behind. A caller's own picture splits one into two."""
     th = theme_colors("machine")
     cv = SystemCanvas(200, 120, font_scale=2)
-    before = ui._C.calls()
+    before = ui_draw._C.calls()
     for i in range(10):
-        ui.row(cv, th, (0, i * 10, 200, 10), "R%d" % i, value="v", on=i == 3)
+        ui_draw.row(cv, th, (0, i * 10, 200, 10), "R%d" % i, value="v", on=i == 3)
     for i in range(5):
-        ui.cell(cv, th, (i * 30, 0, 28, 40), "C")
-    ui.label(cv, (0, 0, 100, 20), "hi", 7)
-    sr = ui.ScrollRegion()
+        ui_draw.cell(cv, th, (i * 30, 0, 28, 40), "C")
+    ui_draw.label(cv, (0, 0, 100, 20), "hi", 7)
+    sr = ui_draw.ScrollRegion()
     sr.set((0, 0, 60, 100), 400)
     sr.draw_bar(cv, th)
-    assert ui._C.calls() - before == 17
-    before = ui._C.calls()
-    ui.row(cv, th, (0, 0, 200, 16), "ICON", icon_img=IMG)
-    assert ui._C.calls() - before == 2
+    assert ui_draw._C.calls() - before == 17
+    before = ui_draw._C.calls()
+    ui_draw.row(cv, th, (0, 0, 200, 16), "ICON", icon_img=IMG)
+    assert ui_draw._C.calls() - before == 2

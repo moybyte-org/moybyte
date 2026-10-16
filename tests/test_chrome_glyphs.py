@@ -8,14 +8,14 @@ walk drew (`tests/ui_twin.py`'s `blit_glyph`, the old `_blit_glyph`): every
 glyph, every scale, rects smaller than the glyph, a camera and a clip -- the
 baselines are byte-identical contracts (#39). moy_chrome's GLYPH op draws
 through the same raster; tests/test_moy_chrome.py holds its raster to the
-canvas replay, which draws with `ui.glyph`.
+canvas replay, which draws with `ui_draw.glyph`.
 """
 
 import json
 import os
 
 import ui_twin as twin
-from runtime import ui
+from runtime import ui_draw
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 
@@ -36,7 +36,7 @@ def test_the_style_file_holds_the_vocabulary():
 def _both(kind, rect, fs, scale=None, camera=(0, 0), clip=None):
     out = []
     for draw in (lambda cv: twin.blit_glyph(cv, kind, rect, 9, scale),
-                 lambda cv: ui.glyph(cv, kind, rect, 9, scale)):
+                 lambda cv: ui_draw.glyph(cv, kind, rect, 9, scale)):
         cv = SystemCanvas(96, 72, font_scale=fs)
         cv.camera(*camera)
         if clip:
@@ -73,9 +73,9 @@ def test_unknown_kind_draws_nothing():
     for kind in ("no-such-glyph", None, ""):
         cv = SystemCanvas(32, 32)
         before = indices_of(cv)
-        ui.glyph(cv, kind, (0, 0, 32, 32), 9)
+        ui_draw.glyph(cv, kind, (0, 0, 32, 32), 9)
         assert indices_of(cv) == before
-        assert ui.glyph_id(kind) == -1
+        assert ui_draw.glyph_id(kind) == -1
 
 
 def test_a_glyph_is_one_fill_per_span():
@@ -83,7 +83,7 @@ def test_a_glyph_is_one_fill_per_span():
     for kind in ("run", "map", "blocks"):
         cv = SystemCanvas(64, 64, font_scale=2)
         cv.gate_counts_reset()
-        ui.glyph(cv, kind, (0, 0, 40, 40), 7)
+        ui_draw.glyph(cv, kind, (0, 0, 40, 40), 7)
         assert cv.gate_counts()[:2] == (len(twin.glyph_runs(kind, 2)), 0), kind
 
 

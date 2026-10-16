@@ -21,7 +21,7 @@ import re
 import pytest
 
 import ui_twin as twin
-from runtime import chrome, glass_binding, moy_play, ui
+from runtime import chrome, glass_binding, moy_play, ui_draw
 from runtime.chrome import theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -105,7 +105,7 @@ def test_the_toolkit_wrap_is_the_twins_and_cuts_no_codepoint():
     for _ in range(600):
         t = _text(r, r.randint(0, 20))
         cols = r.randint(1, 14)
-        got = ui.wrap_words(t, cols)
+        got = ui_draw.wrap_words(t, cols)
         assert got == twin.wrap_words(t, cols), (t, cols)
         for line in got:
             assert len(line.encode()) <= cols, (t, cols, line)
@@ -175,7 +175,7 @@ def _non_ascii_frame():
     cv.cls(th["panel"])
     chrome._print_scaled(cv, "Café 日本", 4, 4, th["accent"], 2)
     y = 40
-    for line in ui.wrap_words("Ünïcödé läbëls "
+    for line in ui_draw.wrap_words("Ünïcödé läbëls "
                               "wräp by býtes \U0001f600 ok", 9):
         cv.print(line, 4, y, th["ink"])
         y += 18
@@ -222,7 +222,7 @@ def test_one_rasterizer_entry_and_no_second_wrap():
     body = chrome_c[chrome_c.index("static void panel_lines("):]
     body = body[:body.index("\n}\n")]
     assert "moy_text_wrap" in body and "memcpy" not in body
-    ui_src = open(os.path.join(ROOT, "runtime/ui.py")).read()
+    ui_src = open(os.path.join(ROOT, "runtime/ui_draw.py")).read()
     body = ui_src[ui_src.index("def wrap_words("):]
     body = body[:body.index("\ndef ")]
     assert "_C.wrap(" in body and "split(" not in body

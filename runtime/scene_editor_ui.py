@@ -38,8 +38,10 @@ from array import array
 
 try:
     import ui as _ui              # frozen on device
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
@@ -139,7 +141,7 @@ class SceneLayout(LayoutBase):
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + _ui.line_dy(2 * fs, fs))
+        self.title_xy = (px + 6 * fs, py + _ui_draw.line_dy(2 * fs, fs))
         row_y = p_bottom - 22 * fs
         rc_x = p_right - 106 * fs
         self.sv_x0 = px + 6 * fs
@@ -591,7 +593,7 @@ class SceneEditorUI:
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
-        _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
+        _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
                            th["surface"])
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         x0, y0, scale, vw, vh = self._sv_metrics()
@@ -718,8 +720,8 @@ class SceneEditorUI:
             tag_text = "TAG " + (sel.get("tag") or "-")
         else:
             tag_text = "TAG -"
-        cv.print(_ui.print_cut(tag_text, tw2 - 8 * fs, fs), tx + 4 * fs,
-                 ty + (th2 - _ui.font("ui")[2] * fs) // 2,
+        cv.print(_ui_draw.print_cut(tag_text, tw2 - 8 * fs, fs), tx + 4 * fs,
+                 ty + (th2 - _ui_draw.font("ui")[2] * fs) // 2,
                  NAMES["white"], 1)
         cv.rectb(tx, ty, tw2, th2,
                  NAMES["white"] if self.tag_edit else

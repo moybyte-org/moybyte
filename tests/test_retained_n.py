@@ -68,7 +68,7 @@ def test_scroll_ring_keeps_the_largest_n(tmp_path):
     """note_painted has no canvas to read N from, so the ring keeps
     _MAX_RETAINED entries -- trimming to 2 would leave len < k forever on an
     N=3 root and silently disable scroll-as-blit there."""
-    from runtime.ui import ScrollRegion, _MAX_RETAINED
+    from runtime.ui_draw import ScrollRegion, _MAX_RETAINED
     assert _MAX_RETAINED >= 3
     r = ScrollRegion()
     r.set((0, 0, 100, 100), 1000)

@@ -390,7 +390,7 @@ typedef struct {
     moy_ui_span_t label;
     int16_t glyph;                  // its id, or -1 (with F_GLYPH: a slot the caller fills)
     int16_t fs;
-    int16_t colors[3];              // chip's override; button reads its kind's
+    int16_t colors[3];              // an override of the kind's, MOY_UI_FROM_STYLE each where none
     int16_t app;                    // button: its app's row of overrides, or -1
 } moy_ui_button_t;
 // A button: the field, its rings, the icon or glyph, the label (centred by

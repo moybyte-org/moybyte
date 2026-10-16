@@ -27,7 +27,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from runtime import chrome, ui
+from runtime import chrome, ui_draw
 from runtime.chrome import theme_colors
 from runtime.host_canvas import indices_of, make_system_canvas
 
@@ -49,8 +49,8 @@ BG = 9
 @pytest.fixture(autouse=True)
 def _clean():
     yield
-    ui.sheet_clear()
-    ui.use_shape(None)
+    ui_draw.sheet_clear()
+    ui_draw.use_shape(None)
     moy_ui.theme_uninstall()
     chrome.adopt_packages((), None)
 
@@ -84,7 +84,7 @@ def _install(name="spr", **kw):
     pkg.update(kw)
     assert moy_ui.theme_install(json.dumps(pkg).encode())[0] == OK
     chrome.forget_themes()
-    ui.use_shape(name)
+    ui_draw.use_shape(name)
     return theme_colors(name)
 
 
@@ -102,51 +102,51 @@ def test_the_cells_fit_one_128_wide_sheet_and_never_overlap():
         px = {(x + i, y + j) for i in range(w) for j in range(h)}
         assert not px & taken
         taken |= px
-    assert ui.FRAME_BUTTONS == tuple(TH["frame_button_names"])
+    assert ui_draw.FRAME_BUTTONS == tuple(TH["frame_button_names"])
     assert len(TH["sprite_slots"]) == 16 and TH["sprite_slots"][0] is None
 
 
 def test_the_sheet_is_the_cart_sheets_hex_read_strictly():
-    caps = ui.sheet_caps()
+    caps = ui_draw.sheet_caps()
     assert caps == (W, TH["sheet_rows"]["sprites"], TH["sheet_rows"]["icons"],
                     TH["sheet_rows"]["sprites"] * (W + 2), TH["sheet_rows"]["icons"] * (W + 2))
     # what a cart's sprites.moygfx may hold: short rows, blank lines, CRLF,
     # either case, a trailing newline, nothing at all
-    assert ui.sheet_check(b"0123\n\nABCdef\r\n  7  \n", 64) == (OK, 3)
-    assert ui.sheet_check(b"", 64) == (OK, 0)
-    assert ui.sheet_check(SHEET, caps[1]) == (OK, TH_ROWS)
-    assert ui.sheet_check(b"0" * W, 1) == (OK, 1)
+    assert ui_draw.sheet_check(b"0123\n\nABCdef\r\n  7  \n", 64) == (OK, 3)
+    assert ui_draw.sheet_check(b"", 64) == (OK, 0)
+    assert ui_draw.sheet_check(SHEET, caps[1]) == (OK, TH_ROWS)
+    assert ui_draw.sheet_check(b"0" * W, 1) == (OK, 1)
     for bad in (b"012g", b"0 1", b"0" * (W + 1), b"\x00", b"0,1", "é".encode()):
-        assert ui.sheet_check(bad, 64)[0] == SYNTAX, bad
-    assert ui.sheet_check(b"0\n" * 65, 64)[0] == BIG
-    assert ui.sheet_check(b" " * (64 * (W + 2) + 1), 64)[0] == BIG
+        assert ui_draw.sheet_check(bad, 64)[0] == SYNTAX, bad
+    assert ui_draw.sheet_check(b"0\n" * 65, 64)[0] == BIG
+    assert ui_draw.sheet_check(b" " * (64 * (W + 2) + 1), 64)[0] == BIG
     # a refusal loads nothing and leaves no sheet
-    assert ui.sheet_load(SHEET) == OK and any(moy_ui.sheet_set())
-    assert ui.sheet_load(b"zz") == SYNTAX and not any(moy_ui.sheet_set())
+    assert ui_draw.sheet_load(SHEET) == OK and any(moy_ui.sheet_set())
+    assert ui_draw.sheet_load(b"zz") == SYNTAX and not any(moy_ui.sheet_set())
 
 
 def test_a_cell_all_slot_0_is_no_sprite_and_a_state_follows_the_chain():
     rest = _cell("button", "rest")
-    assert ui.sheet_load(_sheet([rest], 2)) == OK
+    assert ui_draw.sheet_load(_sheet([rest], 2)) == OK
     got = dict(zip(range(len(moy_ui.sheet_cells())), moy_ui.sheet_set()))
     assert got[rest] and sum(got.values()) == 1
     th = _install()
     for state in ("rest", "hot", "pressed", "disabled", "on", "hover"):
         cv = make_system_canvas(30, 30)
         cv.cls(BG)
-        assert ui.paint(cv, th, (2, 2, 26, 26), "button", state), state
+        assert ui_draw.paint(cv, th, (2, 2, 26, 26), "button", state), state
         assert indices_of(cv)[10 * 30 + 10] == th["surface"]
     # desk.icon's cell is empty: it draws its surface, as with no sheet
     th = _install(surfaces={"desk.icon": {"rest": "fill 8"}})
     frames = []
     for sheet in (_sheet([rest], 2), None):
         if sheet is None:
-            ui.sheet_clear()
+            ui_draw.sheet_clear()
         else:
-            ui.sheet_load(sheet)
+            ui_draw.sheet_load(sheet)
         cv = make_system_canvas(30, 30)
         cv.cls(BG)
-        assert ui.paint(cv, th, (2, 2, 26, 26), "desk.icon")
+        assert ui_draw.paint(cv, th, (2, 2, 26, 26), "desk.icon")
         frames.append(indices_of(cv))
     assert frames[0] == frames[1] and frames[0][10 * 30 + 10] == 8
 
@@ -230,7 +230,7 @@ BOXES = ((2, 3, 40, 30), (0, 0, 64, 48), (5, 5, 12, 9), (1, 1, 17, 40), (-6, -4,
 @pytest.mark.parametrize("scale", (1, 2, 3))
 def test_a_9_slice_and_a_glyph_cell_draw_as_the_model_does(scale):
     th = _install(colors={"dark": {"accent": 12}})
-    assert ui.sheet_load(SHEET) == OK
+    assert ui_draw.sheet_load(SHEET) == OK
     slots = _slots(th)
     for part, state, sub in (("button", "rest", 0), ("desk.icon", "rest", 0),
                              ("button", "on", 0)):
@@ -239,7 +239,7 @@ def test_a_9_slice_and_a_glyph_cell_draw_as_the_model_does(scale):
             cv = make_system_canvas(64, 48, font_scale=scale)
             cv.cls(BG)
             cv.gate_counts_reset()
-            assert ui.paint(cv, th, box, part, state)
+            assert ui_draw.paint(cv, th, box, part, state)
             assert cv.gate_counts()[0] == 1, (part, box)
             assert list(indices_of(cv)) == _model(cell, box, scale, slots), (part, box, scale)
     # under a clip, the clipped part of the same frame
@@ -247,20 +247,20 @@ def test_a_9_slice_and_a_glyph_cell_draw_as_the_model_does(scale):
     cv = make_system_canvas(64, 48, font_scale=scale)
     cv.cls(BG)
     cv.clip(10, 8, 20, 9)
-    ui.paint(cv, th, (2, 3, 40, 30), "button")
+    ui_draw.paint(cv, th, (2, 3, 40, 30), "button")
     cv.clip()
     assert list(indices_of(cv)) == _model(cell, (2, 3, 40, 30), scale, slots,
                                           clip=(10, 8, 20, 9))
 
 
 def test_a_sprite_recolours_with_the_theme_with_no_new_file():
-    assert ui.sheet_load(SHEET) == OK
+    assert ui_draw.sheet_load(SHEET) == OK
     frames = []
     for accent in (12, 8):
         th = _install(colors={"dark": {"accent": accent, "title": 3}})
         cv = make_system_canvas(64, 48)
         cv.cls(BG)
-        ui.paint(cv, th, (0, 0, 64, 48), "button", "on")      # filled with `accent`
+        ui_draw.paint(cv, th, (0, 0, 64, 48), "button", "on")      # filled with `accent`
         frames.append(list(indices_of(cv)))
         assert frames[-1][24 * 64 + 32] == accent
     assert [a == b or {a, b} == {12, 8} for a, b in zip(*frames)] == [True] * (64 * 48)
@@ -274,12 +274,12 @@ def test_the_frame_takes_the_windows_9_slice_and_the_title_buttons():
     def frame(active):
         cv = make_system_canvas(200, 100)
         cv.cls(BG)
-        ui.frame(cv, th, win, th_h, "SPRIG", active, True, fs)
+        ui_draw.frame(cv, th, win, th_h, "SPRIG", active, True, fs)
         return indices_of(cv)
 
-    ui.sheet_clear()
+    ui_draw.sheet_clear()
     plain = frame(True)
-    assert ui.sheet_load(SHEET) == OK
+    assert ui_draw.sheet_load(SHEET) == OK
     slots = _slots(th)
     for active in (True, False):
         px = frame(active)
@@ -296,8 +296,8 @@ def test_the_frame_takes_the_windows_9_slice_and_the_title_buttons():
             assert px[y * 200 + 20] == plain[y * 200 + 20]
             assert px[y * 200 + 181] == plain[y * 200 + 181]
         assert px[91 * 200 + 100] == plain[91 * 200 + 100]
-        for name, (bx, by, bw, bh), _right in ui.frame_buttons(win, th_h, "SPRIG", True, fs):
-            sub = ui.FRAME_BUTTONS.index(name)
+        for name, (bx, by, bw, bh), _right in ui_draw.frame_buttons(win, th_h, "SPRIG", True, fs):
+            sub = ui_draw.FRAME_BUTTONS.index(name)
             want = _model(_cell("window.button", "active" if active else "inactive", sub),
                           (bx, by, bw, bh), fs, slots, size=(200, 100))
             want_head = head
@@ -310,11 +310,11 @@ def test_the_frame_takes_the_windows_9_slice_and_the_title_buttons():
 
 def test_one_op_a_sprite_and_never_outside_its_box():
     th = _install()
-    assert ui.sheet_load(SHEET) == OK
+    assert ui_draw.sheet_load(SHEET) == OK
     cv = make_system_canvas(64, 48, font_scale=2)
     for box in BOXES:
         cv.cls(BG)
-        ui.paint(cv, th, box, "desk.icon")
+        ui_draw.paint(cv, th, box, "desk.icon")
         px = indices_of(cv)
         for y in range(48):
             for x in range(64):
@@ -353,13 +353,13 @@ def test_the_boards_module_reads_the_sheet_corpus_as_the_host_does(tmp_path):
     lines = out.stdout.splitlines()
     assert len(lines) == len(corpus), out.stdout[-500:] + out.stderr
     for src, line in zip(corpus, lines):
-        want = (ui.sheet_check(src, 64), ui.sheet_load(src), moy_ui.sheet_set())
+        want = (ui_draw.sheet_check(src, 64), ui_draw.sheet_load(src), moy_ui.sheet_set())
         assert repr(want) == line, src[:80]
 
 
 def test_a_mutated_sheet_never_breaks_the_reader():
     for src in on_glass.sheet_corpus(600):
-        rc = ui.sheet_load(src)
+        rc = ui_draw.sheet_load(src)
         assert rc in (OK, BIG, SYNTAX)
         assert any(moy_ui.sheet_set()) <= (rc == OK)
 
@@ -450,7 +450,7 @@ def test_a_console_tier_draws_the_themes_buttons(tmp_path):
     th = ws.theme_colors
     cv = make_system_canvas(48, 32)
     cv.cls(BG)
-    ui.button(cv, th, (4, 4, 40, 24), "OK")
+    ui_draw.button(cv, th, (4, 4, 40, 24), "OK")
     px = indices_of(cv)
     assert px[4 * 48 + 4] == BG                      # the fixture's rounded corner
     assert px[4 * 48 + 20] == th["edge"]             # its border

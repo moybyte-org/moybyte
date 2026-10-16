@@ -62,8 +62,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The theme's picture's wallpaper id (`Appearance.PICTURE`), and the change
@@ -224,8 +226,8 @@ class AppearanceAppLayer:
         self._gen = None
         self._stale = 0
         self._dt = 0
-        self._accents = tuple(_ui.theme_accents())
-        self._tints = tuple(_ui.theme_tints())
+        self._accents = tuple(_ui_draw.theme_accents())
+        self._tints = tuple(_ui_draw.theme_tints())
 
     @staticmethod
     def is_app(cart):
@@ -850,16 +852,16 @@ class AppearanceAppLayer:
     # -- drawing ---------------------------------------------------------------
 
     def _button(self, cv, label, r, on=False):
-        _ui.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs)
+        _ui_draw.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs)
 
     def _text(self, cv, s, x, y, h, c):
         """`s` at x, centred in a band of height `h` from y."""
         fs = self.layout.fs
-        cv.print(s, x, y + (h - _ui.font("ui")[3] * fs) // 2, c, 1)
+        cv.print(s, x, y + (h - _ui_draw.font("ui")[3] * fs) // 2, c, 1)
 
     def _right(self, cv, s, rx, y, h, c):
         """`s` ending at rx; answers its left edge."""
-        x = rx - _ui.print_width(s) * self.layout.fs
+        x = rx - _ui_draw.print_width(s) * self.layout.fs
         self._text(cv, s, x, y, h, c)
         return x
 
@@ -919,9 +921,9 @@ class AppearanceAppLayer:
             keys = NAME_KEYS
         elif self.pick is not None:
             keys = PICK_KEYS
-        kx = lay.cx + lay.cw - 5 * fs - _ui.print_width(keys) * fs
+        kx = lay.cx + lay.cw - 5 * fs - _ui_draw.print_width(keys) * fs
         lx = lay.cx + 5 * fs
-        if lx + _ui.print_width(left) * fs > kx - 8 * fs:
+        if lx + _ui_draw.print_width(left) * fs > kx - 8 * fs:
             keys = ""
         self._text(cv, left, lx, y + fs, h - fs, th["chrome_ink"])
         if keys:
@@ -953,11 +955,11 @@ class AppearanceAppLayer:
                 val = FONT_NAMES.get(ch["font"], "THEME'S OWN")
             else:
                 val = "%dx" % ch["chrome"]
-            vw = _ui.print_width(val) * fs
+            vw = _ui_draw.print_width(val) * fs
             self._text(cv, val, cx + (cw - vw) // 2, y, h, th["ink"])
             if key == "frame":
                 sw, sh = 38 * fs, h - 6 * fs
-                _ui.frame(cv, th, (cx - sw - 8 * fs, y + 3 * fs, sw, sh - 2 * fs),
+                _ui_draw.frame(cv, th, (cx - sw - 8 * fs, y + 3 * fs, sw, sh - 2 * fs),
                           5 * fs, "", True, False, 1)
             elif key == "font":
                 self._right(cv, "Aa", cx - 8 * fs, y, h, th["ink_dim"])
@@ -1046,18 +1048,18 @@ class AppearanceAppLayer:
         fs = self.layout.fs
         bx, by, bw, bh = self._pick_body()
         ink, dim = th["ink"], th["ink_dim"]
-        lh = _ui.font("ui")[3] * fs + 3 * fs
+        lh = _ui_draw.font("ui")[3] * fs + 3 * fs
         y = by
         if not self._console():
             cv.print("NAME YOUR THEME", bx, y, ink, 1)
             y += lh + 2 * fs
         for line in ("IT JOINS THE THEME GRID AS ITS OWN.",
                      "CUSTOM IS FREE FOR THE NEXT CHANGE."):
-            cv.print(_ui.print_fit(line, bw // fs), bx, y, dim, 1)
+            cv.print(_ui_draw.print_fit(line, bw // fs), bx, y, dim, 1)
             y += lh
         y += 3 * fs
         fh = 16 * fs
-        _ui.text_field(cv, (bx, y, bw, fh), self.entry.text, "",
+        _ui_draw.text_field(cv, (bx, y, bw, fh), self.entry.text, "",
                        (th["surface"], th["accent"], ink, dim, th["focus"]), fs)
         y += fh + 4 * fs
         name = self.entry.text
@@ -1067,7 +1069,7 @@ class AppearanceAppLayer:
             msg, c = NAME_WHY.get(self.why, str(self.why).upper()), th["accent"]
         else:
             msg, c = NAME_HINT, dim
-        cv.print(_ui.print_fit(msg, bw // fs), bx, y, c, 1)
+        cv.print(_ui_draw.print_fit(msg, bw // fs), bx, y, c, 1)
         y += lh + 4 * fs
         cw, chh = 86 * fs, 54 * fs
         if y + chh > by + bh:
@@ -1081,7 +1083,7 @@ class AppearanceAppLayer:
                         ((name or "...") + ".moy", ink),
                         ("TRAVELS LIKE A CART:", dim),
                         ("FILES, EXPORT, THE STORE.", dim)):
-            cv.print(_ui.print_fit(line, tw), tx, ty, c, 1)
+            cv.print(_ui_draw.print_fit(line, tw), tx, ty, c, 1)
             ty += lh
 
     def _draw_card(self, cv, th, r, name, selected, focused, label=True,
@@ -1095,7 +1097,7 @@ class AppearanceAppLayer:
         x, y, w, h = r
         band = 9 * fs if label else 0
         if focused:
-            _ui.focus(cv, th, r, size="card", fs=fs)
+            _ui_draw.focus(cv, th, r, size="card", fs=fs)
         _fill(cv, x, y, w, h, tok["desktop"])
         iw, ih = w - 2 * fs, h - 2 * fs - band
         _fill(cv, x + fs, y + fs, iw, 3 * fs, tok["bar"])
@@ -1116,21 +1118,21 @@ class AppearanceAppLayer:
             ly = y + h - band - fs
             _fill(cv, x + fs, ly, w - 2 * fs, band, th["accent"] if selected else th["bar"])
             ink = 0 if selected else th["chrome_ink"]
-            cv.print(_ui.print_fit(title or name, (w - 8 * fs) // fs), x + 4 * fs,
-                     ly + (band - _ui.font("ui")[3] * fs) // 2, ink, 1)
+            cv.print(_ui_draw.print_fit(title or name, (w - 8 * fs) // fs), x + 4 * fs,
+                     ly + (band - _ui_draw.font("ui")[3] * fs) // 2, ink, 1)
             tag = None if title else "CUSTOM" if name == "custom" else (
                 "STORE" if name in self._stores() else None)
             if tag and w >= 80 * fs:
-                tw = (_ui.print_width(tag) + 4) * fs
+                tw = (_ui_draw.print_width(tag) + 4) * fs
                 _fill(cv, x + w - fs - tw, ly, tw, band,
                         th["play"] if tag == "CUSTOM" else th["dim"])
                 cv.print(tag, x + w - fs - tw + 2 * fs,
-                         ly + (band - _ui.font("ui")[3] * fs) // 2,
+                         ly + (band - _ui_draw.font("ui")[3] * fs) // 2,
                          0 if tag == "CUSTOM" else th["chrome_ink"], 1)
         edge = th["accent"] if selected else th["shade_dark"]
         _frame(cv, x, y, w, h, edge)
         if focused:
-            _ui.focus(cv, th, r, size="card", after=True, fs=fs)
+            _ui_draw.focus(cv, th, r, size="card", after=True, fs=fs)
 
     def _stores(self):
         """The THEME grid's installed packages: every name that is no seed
@@ -1143,7 +1145,7 @@ class AppearanceAppLayer:
         fs = self.layout.fs
         x, y, w, h = self._pick_frame()
         cv.rect(x + 2 * fs, y + 2 * fs, w, h, 0)
-        _ui.panel(cv, th, (x, y, w, h), LABELS[self.pick], fs)
+        _ui_draw.panel(cv, th, (x, y, w, h), LABELS[self.pick], fs)
         self._draw_items(cv, th, ch)
 
     def _draw_page(self, cv, th, ch):
@@ -1168,16 +1170,16 @@ class AppearanceAppLayer:
             x, y, w, h = r
             on = i == self.cur
             if on and self.pick != "theme":
-                _ui.focus(cv, th, r, size="card", fs=fs)
+                _ui_draw.focus(cv, th, r, size="card", fs=fs)
             if self.pick == "accent":
                 cv.rect(x, y, w, h, self._accents[i][1])
                 cv.rectb(x, y, w, h, th["shade_dark"])
                 if self._accents[i][1] == th["accent"]:
                     cv.rect(x + w // 2 - fs, y + h // 2 - fs, 2 * fs, 2 * fs, 0)
                 if on:
-                    _ui.focus(cv, th, r, size="card", after=True, fs=fs)
+                    _ui_draw.focus(cv, th, r, size="card", after=True, fs=fs)
                     name = self._accents[i][0].upper()
-                    nw = _ui.print_width(name) * fs
+                    nw = _ui_draw.print_width(name) * fs
                     cv.print(name, x + (w - nw) // 2, y + h + 4 * fs, th["ink"], 1)
                 continue
             if self.pick == "theme":
@@ -1195,12 +1197,12 @@ class AppearanceAppLayer:
                 self._draw_wall(cv, th, r, item)
                 name = item[1]
                 kept = i == self._wall_at(ch)
-            cv.print(_ui.print_fit(name, w // fs - 10), x, y + h + 4 * fs,
+            cv.print(_ui_draw.print_fit(name, w // fs - 10), x, y + h + 4 * fs,
                      th["ink"] if on else th["ink_dim"], 1)
             if kept:
                 self._right(cv, "*", x + w, y + h + 2 * fs, 10 * fs, th["ink"])
             if on:
-                _ui.focus(cv, th, r, size="card", after=True, fs=fs)
+                _ui_draw.focus(cv, th, r, size="card", after=True, fs=fs)
 
     def _cart_scene(self, cv, x, y, w, h, title):
         # Distinct miniature visual identities of the wallpaper carts.

@@ -38,8 +38,10 @@ directly, and tools/make_site_gifs.py's demo-recording script.
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -279,8 +281,8 @@ class BlockLayout(LayoutBase):
                             chrome_scale=chrome_scale)
         fs = self.fs
         # A block's label cells: the print font's glyph box, never under 8.
-        self.cell = max(_FONT_W, _ui.font("ui")[1]) * fs
-        self.text_dy = _ui.line_dy(4 * fs, fs)
+        self.cell = max(_FONT_W, _ui_draw.font("ui")[1]) * fs
+        self.text_dy = _ui_draw.line_dy(4 * fs, fs)
         # The hint + SAVE-status strip, then the outline. The _BLK_* rows count
         # from the canvas top past a top bar's 18 rows at the FONT scale, so
         # under a top bar drawn at a larger chrome scale the strip starts inside
@@ -288,7 +290,7 @@ class BlockLayout(LayoutBase):
         top = max(self.cy - _BAR_ROWS * self.cs, -_BAR_ROWS * fs)
         self.hint_y = top + _BLK_HINT_Y * fs
         self.status_x = self.cx + 198 * fs        # the SAVE-status text x (right side)
-        self.row_h = max(_BLK_ROW_H, _ui.font("ui")[2] + 8) * fs
+        self.row_h = max(_BLK_ROW_H, _ui_draw.font("ui")[2] + 8) * fs
         self.indent = _BLK_INDENT * fs
         self.x0 = self.cx + _BLK_X0 * fs
         self.y0 = top + _BLK_Y0 * fs
@@ -1502,7 +1504,7 @@ class BlockEditorUI:
             self._dragv = py
             return
         was = self.blk_top
-        self._dragv, self.blk_top = _ui.row_drag(
+        self._dragv, self.blk_top = _ui_draw.row_drag(
             self._dragv, py, max(1, lay.row_h), self.blk_top,
             max(0, len(be.rows) - lay.rows))
         if self.blk_top != was:
@@ -1717,7 +1719,7 @@ class BlockEditorUI:
             self._draw_grad_banner()
         else:
             if self.blk_status:
-                cv.print(_ui.print_cut(self.blk_status, 14 * lay.cell, lay.fs),
+                cv.print(_ui_draw.print_cut(self.blk_status, 14 * lay.cell, lay.fs),
                          lay.status_x, lay.hint_y,
                          th["author"], 1)
             elif be is not None and be.dirty:
@@ -1738,7 +1740,7 @@ class BlockEditorUI:
             if hint:
                 # truncate to leave the right end for the status slot
                 hw = max(8 * lay.cell, lay.status_x - lay.x0 - lay.cell)
-                cv.print(_ui.print_cut(hint, hw, lay.fs), lay.x0, lay.hint_y,
+                cv.print(_ui_draw.print_cut(hint, hw, lay.fs), lay.x0, lay.hint_y,
                          th["ink_dim"], 1)
         rows = be.rows
         for vi in range(lay.rows):
@@ -1747,7 +1749,7 @@ class BlockEditorUI:
                 break
             self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
         # scroll cue
-        _ui.scroll_cues(
+        _ui_draw.scroll_cues(
             cv, (lay.x0 + lay.outline_w - 8 * fs, lay.y0),
             (lay.x0 + lay.outline_w - 8 * fs, lay.y0 + (lay.rows - 1) * lay.row_h),
             self.blk_top > 0, self.blk_top + lay.rows < len(rows),
@@ -1797,10 +1799,10 @@ class BlockEditorUI:
         y = lay.hint_y - 2 * fs
         w = lay.outline_w
         h = 11 * fs
-        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
+        _ui_draw.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
         msg = "YOU LEVELED UP TO CODE!"
         mw = max(8 * lay.cell, w - lay.cell)
-        cv.print(_ui.print_cut(msg, mw, fs), x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
+        cv.print(_ui_draw.print_cut(msg, mw, fs), x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
 
     def _draw_blk_kbd(self):
         """Render whichever entry prompt is up: the number pad (kind == 'num') or the
@@ -1816,7 +1818,7 @@ class BlockEditorUI:
         # drawing here left the modal INVISIBLE -- the editor looked frozen (#85/#93).
         cv = self.ws.sys_canvas
         x, y, w, h = _BLK_KBD
-        _ui.dialog(cv, (x, y, w, h))
+        _ui_draw.dialog(cv, (x, y, w, h))
         kind = self.blk_kbd.get("kind")
         is_text = kind == "text"
         title = {"text": "TYPE SOME TEXT", "proc": "NAME YOUR BLOCK",
@@ -1828,7 +1830,7 @@ class BlockEditorUI:
         txt = self.blk_kbd["entry"].text[:24]
         # empty buffer: the default name shows as a dim placeholder (OK keeps it)
         ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
-        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph)
+        _ui_draw.text_field(cv, (fx, fy, fw, 14), txt, ph)
         self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"], cv)
         self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"], cv)
         self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"], cv)
@@ -1841,14 +1843,14 @@ class BlockEditorUI:
                                    # (see _draw_blk_kbd -- same invisible-modal bug, #85/#93)
         k = self.blk_kbd
         x, y, w, h = _BLK_NUM
-        _ui.dialog(cv, (x, y, w, h))
+        _ui_draw.dialog(cv, (x, y, w, h))
         cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
         # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
         fx, fy, fw = x + 10, y + 18, w - 20
         txt = k["entry"].text[:30]
         cur = k.get("cur")
         ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
-        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
+        _ui_draw.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
         # the digit grid (0-9 . -)
         for idx in range(len(_BLK_NUM_KEYS)):
             r = idx // _BLK_NUM_BPR
@@ -1914,10 +1916,10 @@ class BlockEditorUI:
             c = NAMES["yellow"] if is_cursor else NAMES["dark_grey"]
             cv.rect(x + 2 * fs, y + rh // 2 - fs, 12 * fs, 2 * fs, c)
             if is_cursor:
-                cv.print("+ add a block", x + 16 * fs, y + _ui.line_dy(3 * fs, fs),
+                cv.print("+ add a block", x + 16 * fs, y + _ui_draw.line_dy(3 * fs, fs),
                          NAMES["light_grey"], 1)
             else:
-                cv.print("+", x + 4 * fs, y + _ui.line_dy(3 * fs, fs), c, 1)
+                cv.print("+", x + 4 * fs, y + _ui_draw.line_dy(3 * fs, fs), c, 1)
             return
         b = row.block
         cat = self._blk_block_cat(b)
@@ -1941,7 +1943,7 @@ class BlockEditorUI:
         cv.rect(x, ty, tw, tht, fill)
         cv.rect(x, ty, tw, fs, NAMES["white"] if not is_cursor else NAMES["yellow"])
         cv.rect(x, ty + tht - fs, tw, fs, NAMES["black"])
-        cv.print(_ui.print_cut(label, tw - 4 * fs, fs), x + 3 * fs, y + lay.text_dy,
+        cv.print(_ui_draw.print_cut(label, tw - 4 * fs, fs), x + 3 * fs, y + lay.text_dy,
                  self._blk_ink(fill), 1)
         # rounded corners: knock the 4 corner pixels back to the background.
         for cx, cy in ((x, ty), (x + tw - fs, ty),
@@ -2117,7 +2119,7 @@ class BlockEditorUI:
         mrh = lay.menu_row_h
         m = self.blk_menu
         mx, my, mw, mh = lay.menu
-        _ui.dialog(cv, (mx, my, mw, mh), ring=NAMES["yellow"], fill=NAMES["black"])
+        _ui_draw.dialog(cv, (mx, my, mw, mh), ring=NAMES["yellow"], fill=NAMES["black"])
         titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
                   "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
                   "expr": "PICK A VALUE", "actions": "BLOCK ACTIONS",
@@ -2137,7 +2139,7 @@ class BlockEditorUI:
             # A row over the black dialog: the selection fill, the label ink
             # and the chip gutter are the frozen indigo/white/grey trio, so
             # the row takes them as `colors=` (test_skin pins the site).
-            _ui.row(cv, None, (mx + 3 * fs, y, mw - 6 * fs, mrh - fs),
+            _ui_draw.row(cv, None, (mx + 3 * fs, y, mw - 6 * fs, mrh - fs),
                     self._blk_menu_label(ridx),
                     colors=(NAMES["indigo"] if sel else None,
                             NAMES["white"] if sel else NAMES["light_grey"], None),

@@ -112,19 +112,19 @@ def test_a_pack_with_other_conversions_reads_english(chrome):
 
 
 def test_the_face_reads_the_table_and_refuses_a_broken_entry():
-    from runtime import ui
+    from runtime import ui_draw
     en = _en()
-    assert ui.s("recovery.title") == en["recovery.title"]
+    assert ui_draw.s("recovery.title") == en["recovery.title"]
     try:
-        assert ui._C.str_set("web.pin", "PIN") is False
-        assert ui.s("web.pin") == en["web.pin"]
-        assert ui._C.str_set("web.pin", "CODE %s") is True
-        assert ui.s("web.pin") == "CODE %s"
+        assert ui_draw._C.str_set("web.pin", "PIN") is False
+        assert ui_draw.s("web.pin") == en["web.pin"]
+        assert ui_draw._C.str_set("web.pin", "CODE %s") is True
+        assert ui_draw.s("web.pin") == "CODE %s"
         with pytest.raises(KeyError):
-            ui.s("no.such_id")
+            ui_draw.s("no.such_id")
     finally:
-        ui._C.str_reset()
-    assert ui.s("web.pin") == en["web.pin"]
+        ui_draw._C.str_reset()
+    assert ui_draw.s("web.pin") == en["web.pin"]
 
 
 # --- the pseudo-locale ------------------------------------------------------------
@@ -313,4 +313,4 @@ def test_the_python_fed_words_read_the_table():
             src = f.read()
         for w in words:
             q = w if w.startswith('"') else '"%s' % w
-            assert q not in src, "%s holds the literal %s: use ui.s(id)" % (rel, w)
+            assert q not in src, "%s holds the literal %s: use ui_draw.s(id)" % (rel, w)

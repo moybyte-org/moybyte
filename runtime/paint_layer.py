@@ -52,8 +52,10 @@ the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 
 try:
     import ui as _ui              # frozen on device
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from editors import PaintEditor, KeyEdge, _pe_line
 
@@ -157,7 +159,7 @@ class PaintLayout(LayoutBase):
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + _ui.line_dy(2 * fs, fs))
+        self.title_xy = (px + 6 * fs, py + _ui_draw.line_dy(2 * fs, fs))
         rc_x = p_right - 142 * fs                 # right column origin (base 170)
         row_y = p_bottom - 30 * fs                # CLOSE row (base 190; SAVE lived here too)
         toolh = 12 * fs                           # #90 tool row height (per row)
@@ -579,7 +581,7 @@ class PaintLayer:
             cv.rect(x, y, w, h, fill)
             cv.rectb(x, y, w, h, NAMES["light_grey"])
             kind = _TOOL_GLYPH.get(tid)
-            if _ui.glyph_id(kind) >= 0:
+            if _ui_draw.glyph_id(kind) >= 0:
                 ws._glyph(kind, (x, y, w, h), ink, cv)
             else:                            # missing glyph -> the letter is the fallback
                 cv.print(_TOOL_LABEL[tid],
@@ -640,7 +642,7 @@ class PaintLayer:
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
-        _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
+        _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
                            th["surface"])
         cv.rectb(*(lay.panel + (th["author"],)))
         # No dirty star: SAVE (the button and the concept) is gone (#111) -- autosave
@@ -719,7 +721,7 @@ class PaintLayer:
             if fbtn is not None:             # export the sheet to files/sprites/ (#108)
                 ws._btn("FILE", fbtn, NAMES["dark_blue"], cv)
         if ws.paint_status:
-            cv.print(_ui.print_cut(ws.paint_status, lay.status_w, lay.fs),
+            cv.print(_ui_draw.print_cut(ws.paint_status, lay.status_w, lay.fs),
                      lay.status_xy[0], lay.status_xy[1],
                      th["author"], 1)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)

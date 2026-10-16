@@ -42,8 +42,10 @@ method bodies stay byte-for-byte identical to the pre-extraction versions.
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:                                    # device: ticks is frozen flat
@@ -480,7 +482,7 @@ class UpdateUI:
         lay = ws.layout
         fs = lay.fs
         px, _py, pw, _ph = lay.settings_panel
-        _ui.row(ws.sys_canvas, ws.theme_colors,
+        _ui_draw.row(ws.sys_canvas, ws.theme_colors,
                 (x, y, px + pw - 12 * fs - x, 8 * fs), text,
                 colors=(None, col, None), edge=False, pad=0, text_dy=0, fs=fs)
 
@@ -494,7 +496,7 @@ class UpdateUI:
         fs = lay.fs
         cv.rect(0, 0, lay.w, lay.h, th["bar"])
         px, py, pw, ph = lay.settings_panel
-        _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
+        _ui_draw.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
         # The same title band Settings draws, so it takes the same #203 re-centring:
         # the gear + word ride set_head_dy, the X's letter the middle of its chip.
         hd = lay.set_head_dy

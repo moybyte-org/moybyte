@@ -113,7 +113,7 @@ def test_calc_opens_from_its_identity_cart(tmp_path):
 
 
 def test_calc_math_via_hits(tmp_path):
-    """Drive 7 x 8 = 56 entirely through pointer taps resolved by ui.Hits --
+    """Drive 7 x 8 = 56 entirely through pointer taps resolved by ui_draw.Hits --
     the draw pass builds the hit map, exactly the toolkit contract."""
     ws = _ws(tmp_path)
     _select(ws, "Calc")
@@ -145,18 +145,18 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
     """Calc's one per-key decision (DESIGN.md, "Button kinds"): = the one
     primary, C danger, the operators tonal, the rest normal, each drawn as
     Calc's so a theme's app_buttons.calc reaches them."""
-    from runtime import ui
+    from runtime import ui_draw
     ws = _ws(tmp_path)
     _select(ws, "Calc")
     ws.launch_selected()
     drawn = {}
-    real = ui.button
+    real = ui_draw.button
 
     def button(cv, th, rect, label, kind="normal", **kw):
         drawn[label] = (kind, kw.get("app"))
         return real(cv, th, rect, label, kind=kind, **kw)
 
-    monkeypatch.setattr(ui, "button", button)
+    monkeypatch.setattr(ui_draw, "button", button)
     ws._dirty = True
     ws.frame(1 / 30)
     assert drawn["="] == ("primary", "calc")

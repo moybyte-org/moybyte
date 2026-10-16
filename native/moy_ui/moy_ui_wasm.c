@@ -1,4 +1,4 @@
-// The toolkit's rows for a compiled app (moy_ui_wasm.h).
+// The RUN face of the public UI API and its wasm rows (moy_ui_wasm.h).
 
 #include <string.h>
 
@@ -22,6 +22,14 @@ void moy_ui_wasm_theme_from(moy_ui_theme_fn fn) {
     s_gen = 0;
 }
 
+// A compiled run's draw target: the module that drives a compiled run's (a
+// library with no compiled run answers none).
+void *moycore_ui_target(void) __attribute__((weak));
+
+static void *wasm_target(void) {
+    return moycore_ui_target != NULL ? moycore_ui_target() : NULL;
+}
+
 uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
                             uint32_t cap) __attribute__((weak));
 
@@ -39,9 +47,8 @@ typedef struct {
     moy_canvas saved;
 } run_t;
 
-static int open_run(run_t *r) {
+static int open_run(run_t *r, moy_canvas *c) {
     moy_ui_theme_fn theme = s_theme != NULL ? s_theme : moy_app_wasm_theme;
-    moy_canvas *c = moycore_ui_target();
     if (c == NULL || theme == NULL) {
         return -MOY_UI_STALE;
     }
@@ -87,130 +94,230 @@ static int close_run(run_t *r, int rc) {
     return rc == MOY_UI_OK ? 0 : -rc;
 }
 
-static moy_ui_box_t box(int32_t x, int32_t y, int32_t w, int32_t h) {
-    moy_ui_box_t b = { (int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h };
-    return b;
+// -- the run's context ------------------------------------------------------------
+//
+// One run at a time, so one context: begun lazily by the first verb of each
+// tick, over the run's snapshot, and reset when a new run opens.
+
+static moy_ui_ctx_t s_ctx;
+static uint32_t s_tick, s_serial;
+static int s_live;
+
+static moy_ui_ctx_t *run_ctx(const void *target) {
+    const moy_canvas *c = (const moy_canvas *)target;
+    uint32_t tick = 0, serial = 0;
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    if (!s_live || serial != s_serial) {
+        moy_ui_api_reset(&s_ctx);
+        s_serial = serial;
+        s_tick = tick - 1u;
+        s_live = 1;
+    }
+    if (tick != s_tick) {
+        int32_t in[MOY_UI_IN_LEN] = {0};
+        if (snap != NULL) {
+            in[MOY_UI_IN_BTN] = snap[MOYCORE_UI_SNAP_BTN];
+            in[MOY_UI_IN_BTNP] = snap[MOYCORE_UI_SNAP_BTNP];
+            in[MOY_UI_IN_X] = snap[MOYCORE_UI_SNAP_X];
+            in[MOY_UI_IN_Y] = snap[MOYCORE_UI_SNAP_Y];
+            in[MOY_UI_IN_PTR] = snap[MOYCORE_UI_SNAP_PTR];
+            in[MOY_UI_IN_KEY] = snap[MOYCORE_UI_SNAP_KEY];
+        }
+        moy_ui_box_t surf = s_ctx.surface;
+        if (c != NULL) {
+            surf.x = surf.y = 0;
+            surf.w = (int16_t)c->w;
+            surf.h = (int16_t)c->h;
+        }
+        moy_ui_api_begin(&s_ctx, in, surf, 0, 1);
+        s_tick = tick;
+    }
+    return &s_ctx;
 }
 
-static moy_ui_span_t span(const uint8_t *p, uint32_t n) {
+static moy_ui_span_t span(const uint8_t *p, size_t n) {
     moy_ui_span_t s = { p, (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n) };
     return s;
 }
 
-// A buffer the app keeps its state in: in its memory, 4-byte aligned (a
-// board's core faults on an unaligned word) and at least `need` bytes.
-static void *state(uint8_t *p, uint32_t n, uint32_t need) {
-    return p != NULL && ((uintptr_t)p & 3u) == 0u && n >= need ? p : NULL;
+// A row's drawing opens the sink over `target` and the run's context.
+#define OPEN(target)                                    \
+    run_t r;                                            \
+    moy_canvas *t_ = (moy_canvas *)(target);            \
+    if (t_ == NULL) {                                   \
+        return -MOY_UI_STALE;                           \
+    }                                                   \
+    int rc_ = open_run(&r, t_);                         \
+    if (rc_ != 0) {                                     \
+        return rc_;                                     \
+    }                                                   \
+    moy_ui_ctx_t *c = run_ctx(t_)
+
+int moy_ui_run_page(void *target, moy_ui_span_t title, const moy_ui_over_t *o, int32_t out[4]) {
+    OPEN(target);
+    moy_ui_box_t b;
+    moy_ui_api_page(c, &r.s, title, o, &b);
+    out[0] = b.x;
+    out[1] = b.y;
+    out[2] = b.w;
+    out[3] = b.h;
+    return close_run(&r, MOY_UI_OK);
 }
 
-int32_t moy_ui_wasm_kind(void *e, const uint8_t *name, uint32_t n) {
-    (void)e;
-    return moy_ui_kind((const char *)name, n);
+int moy_ui_run_label(void *target, moy_ui_span_t text, const moy_ui_over_t *o) {
+    OPEN(target);
+    moy_ui_api_label(c, &r.s, text, o);
+    return close_run(&r, MOY_UI_OK);
 }
 
-int32_t moy_ui_wasm_glyph_id(void *e, const uint8_t *name, uint32_t n) {
-    (void)e;
-    return moy_ui_glyph_id((const char *)name, n);
+int moy_ui_run_button(void *target, moy_ui_span_t label, int kind, const moy_ui_over_t *o,
+                      int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_button(c, &r.s, label, kind, o);
+    return close_run(&r, MOY_UI_OK);
 }
 
-int32_t moy_ui_wasm_button(void *e, int32_t x, int32_t y, int32_t w, int32_t h, int32_t kind,
-                           int32_t flags, int32_t interact, const uint8_t *label, uint32_t ln,
-                           int32_t glyph) {
-    (void)e;
-    run_t r;
-    int rc = open_run(&r);
-    if (rc != 0) {
-        return rc;
+int moy_ui_run_toggle(void *target, moy_ui_span_t label, int on, const moy_ui_over_t *o,
+                      int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_toggle(c, &r.s, label, on, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_slider(void *target, moy_ui_span_t label, int32_t v, int32_t lo, int32_t hi,
+                      const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_slider(c, &r.s, label, v, lo, hi, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_list(void *target, moy_ui_span_t label, const uint8_t *items, size_t n,
+                    int32_t cur, const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_list(c, &r.s, label, items, n, cur, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_part(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o,
+                    int32_t out[5]) {
+    OPEN(target);
+    moy_ui_api_part(c, &r.s, id, w, h, o, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_focus(void *target, moy_ui_span_t id, char *buf, size_t cap) {
+    return moy_ui_api_focus(run_ctx(target), id, buf, cap);
+}
+
+int moy_ui_run_keys_taken(void *target) {
+    return moy_ui_api_keys_taken(run_ctx(target));
+}
+
+void moy_ui_run_at(void *target, int x, int y, int w, int h) {
+    moy_ui_api_at(run_ctx(target), x, y, w, h);
+}
+
+// -- the rows ----------------------------------------------------------------------
+
+static int over_of(moy_ui_over_t *o, const uint8_t *p, uint32_t n) {
+    return moy_ui_over_block(o, p, n) == MOY_UI_OK ? 0 : -MOY_UI_BAD;
+}
+
+static void put_words(uint8_t *out, uint32_t cap, const int32_t *v, uint32_t n) {
+    if (out != NULL && cap >= 4u * n) {
+        memcpy(out, v, 4u * n);     // the app's buffer need not be aligned
     }
-    moy_ui_button_t k;
-    k.label = span(label, ln);
-    k.glyph = (int16_t)glyph;
-    k.fs = r.s.fs;
-    k.colors[0] = k.colors[1] = k.colors[2] = MOY_UI_FROM_STYLE;
-    k.app = -1;
-    // The app's flags are the state's (ON, HOT, DISABLED); a glyph is its id.
-    flags &= MOY_UI_F_ON | MOY_UI_F_HOT | MOY_UI_F_DISABLED;
-    if (glyph >= 0) {
-        flags |= MOY_UI_F_GLYPH;
-    }
-    return close_run(&r, moy_ui_button(&r.s, box(x, y, w, h), kind, flags, interact, &k,
-                                       MOY_UI_PHASE_ALL));
 }
 
-int32_t moy_ui_wasm_label(void *e, int32_t x, int32_t y, int32_t w, int32_t h,
-                          const uint8_t *text, uint32_t n, int32_t ink, int32_t align) {
-    (void)e;
-    run_t r;
-    int rc = open_run(&r);
-    if (rc != 0) {
-        return rc;
+#define OVER(p, n)                                      \
+    moy_ui_over_t o;                                    \
+    if (over_of(&o, (p), (n)) != 0) {                   \
+        return -MOY_UI_BAD;                             \
     }
-    int got = moy_ui_label(&r.s, box(x, y, w, h), span(text, n), ink, align);
-    close_run(&r, MOY_UI_OK);
-    return got;
+
+int32_t moy_ui_wasm_page(void *e, const uint8_t *title, uint32_t tn, const uint8_t *ob,
+                         uint32_t on, uint8_t *out, uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t b[4];
+    int rc = moy_ui_run_page(wasm_target(), span(title, tn), &o, b);
+    if (rc == 0) {
+        put_words(out, cap, b, 4);
+    }
+    return rc;
 }
 
-int32_t moy_ui_wasm_list(void *e, int32_t x, int32_t y, int32_t w, int32_t h, int32_t kind,
-                         const uint8_t *items, uint32_t n, int32_t count, int32_t row_h,
-                         int32_t offset, int32_t sel) {
+int32_t moy_ui_wasm_label(void *e, const uint8_t *text, uint32_t n, const uint8_t *ob,
+                          uint32_t on) {
     (void)e;
-    run_t r;
-    int rc = open_run(&r);
-    if (rc != 0) {
-        return rc;
-    }
-    int nm = 0;
-    const int16_t *m = moy_ui_metrics(MOY_UI_K_SCROLLBAR, &nm);
-    int bar_w = m != NULL && nm > MOY_UI_M_SCROLLBAR_W ? m[MOY_UI_M_SCROLLBAR_W] : 0;
-    return close_run(&r, moy_ui_list(&r.s, box(x, y, w, h), kind, items, n, count, row_h,
-                                     offset, sel, r.s.fs, bar_w));
+    OVER(ob, on);
+    return moy_ui_run_label(wasm_target(), span(text, n), &o);
 }
 
-int32_t moy_ui_wasm_hits_clear(void *e, uint8_t *buf, uint32_t n) {
+int32_t moy_ui_wasm_button(void *e, const uint8_t *label, uint32_t n, int32_t kind,
+                           const uint8_t *ob, uint32_t on) {
     (void)e;
-    int32_t *b = state(buf, n, MOY_UI_HITS_HDR * 4u);
-    if (b == NULL) {
-        return -MOY_UI_BAD;
+    OVER(ob, on);
+    int32_t v = 0;
+    int rc = moy_ui_run_button(wasm_target(), span(label, n), kind, &o, &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_toggle(void *e, const uint8_t *label, uint32_t n, int32_t on_,
+                           const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v = 0;
+    int rc = moy_ui_run_toggle(wasm_target(), span(label, n), on_, &o, &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_slider(void *e, const uint8_t *label, uint32_t n, int32_t v, int32_t lo,
+                           int32_t hi, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t got = v;
+    int rc = moy_ui_run_slider(wasm_target(), span(label, n), v, lo, hi, &o, &got);
+    return rc != 0 ? v : got;
+}
+
+int32_t moy_ui_wasm_list(void *e, const uint8_t *label, uint32_t n, const uint8_t *items,
+                         uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t got = cur;
+    int rc = moy_ui_run_list(wasm_target(), span(label, n), items, len, cur, &o, &got);
+    return rc != 0 ? cur : got;
+}
+
+int32_t moy_ui_wasm_part(void *e, const uint8_t *id, uint32_t n, int32_t w, int32_t h,
+                         const uint8_t *ob, uint32_t on, uint8_t *out, uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v[5];
+    int rc = moy_ui_run_part(wasm_target(), span(id, n), w, h, &o, v);
+    if (rc == 0) {
+        put_words(out, cap, v, 5);
     }
-    moy_ui_hits_clear(b);
+    return rc;
+}
+
+int32_t moy_ui_wasm_focus(void *e, const uint8_t *id, uint32_t n, uint8_t *buf, uint32_t cap) {
+    (void)e;
+    moy_ui_span_t s = span(n ? id : NULL, n);
+    int len = moy_ui_run_focus(wasm_target(), s, (char *)buf, cap);
+    return len < 0 ? 0 : len;
+}
+
+int32_t moy_ui_wasm_keys_taken(void *e) {
+    (void)e;
+    return moy_ui_run_keys_taken(wasm_target());
+}
+
+int32_t moy_ui_wasm_at(void *e, int32_t x, int32_t y, int32_t w, int32_t h) {
+    (void)e;
+    moy_ui_run_at(wasm_target(), x, y, w, h);
     return 0;
-}
-
-int32_t moy_ui_wasm_hits_add(void *e, uint8_t *buf, uint32_t n, int32_t x, int32_t y,
-                             int32_t w, int32_t h, int32_t id) {
-    (void)e;
-    int32_t *b = state(buf, n, MOY_UI_HITS_HDR * 4u);
-    if (b == NULL) {
-        return -MOY_UI_BAD;
-    }
-    return moy_ui_hits_add(b, n / 4u, x, y, w, h, id) == MOY_UI_OK ? 0 : -MOY_UI_FULL;
-}
-
-int32_t moy_ui_wasm_hits_pump(void *e, uint8_t *buf, uint32_t n, int32_t px, int32_t py,
-                              int32_t down, int32_t pointing, uint8_t *pump, uint32_t pn) {
-    (void)e;
-    int32_t *b = state(buf, n, MOY_UI_HITS_HDR * 4u);
-    moy_ui_pump_t *p = state(pump, pn, sizeof(moy_ui_pump_t));
-    if (b == NULL || p == NULL) {
-        return -MOY_UI_BAD;
-    }
-    moy_ui_hits_pump(b, px, py, down != 0, pointing != 0, p);
-    return 0;
-}
-
-int32_t moy_ui_wasm_dragtap(void *e, uint8_t *st, uint32_t n, int32_t x, int32_t y, int32_t w,
-                            int32_t h, int32_t horizontal, int32_t px, int32_t py,
-                            int32_t click, int32_t down, int32_t slop, int32_t content,
-                            float dt_ms) {
-    (void)e;
-    moy_ui_wasm_drag_t *d = state(st, n, sizeof(moy_ui_wasm_drag_t));
-    if (d == NULL) {
-        return -MOY_UI_BAD;
-    }
-    int32_t view[4] = { x, y, w, h };
-    return moy_ui_dragtap_frame(&d->tap, &d->scroll, view, horizontal != 0, px, py,
-                                click != 0, down != 0, slop, dt_ms, &d->offset, content,
-                                &d->tx, &d->ty);
 }
 
 #define FN(f) ((void *)(f))
@@ -218,15 +325,16 @@ int32_t moy_ui_wasm_dragtap(void *e, uint8_t *st, uint32_t n, int32_t x, int32_t
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
 // row's import type (tests/test_roles.py holds the two to roles.json).
 static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = {
-    { "ui_kind", FN(moy_ui_wasm_kind) },
-    { "ui_glyph_id", FN(moy_ui_wasm_glyph_id) },
-    { "ui_button", FN(moy_ui_wasm_button) },
+    { "ui_page", FN(moy_ui_wasm_page) },
     { "ui_label", FN(moy_ui_wasm_label) },
+    { "ui_button", FN(moy_ui_wasm_button) },
+    { "ui_toggle", FN(moy_ui_wasm_toggle) },
+    { "ui_slider", FN(moy_ui_wasm_slider) },
     { "ui_list", FN(moy_ui_wasm_list) },
-    { "ui_hits_clear", FN(moy_ui_wasm_hits_clear) },
-    { "ui_hits_add", FN(moy_ui_wasm_hits_add) },
-    { "ui_hits_pump", FN(moy_ui_wasm_hits_pump) },
-    { "ui_dragtap", FN(moy_ui_wasm_dragtap) },
+    { "ui_part", FN(moy_ui_wasm_part) },
+    { "ui_focus", FN(moy_ui_wasm_focus) },
+    { "ui_keys_taken", FN(moy_ui_wasm_keys_taken) },
+    { "ui_at", FN(moy_ui_wasm_at) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

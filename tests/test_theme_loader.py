@@ -592,7 +592,7 @@ def _corpus(n):
                                        "pressed": {"effect": "shadow", "color": "dim"}},
                             "tab": {"on": {"effect": "shadow", "color": "code_text"}}},
                       colors={"dark": {"block_sound": 3, "accent": 9}},
-                      fonts={"ui": "ui.fnt", "mono": "mono-8.fnt"},
+                      fonts={"ui": "ui_draw.fnt", "mono": "mono-8.fnt"},
                       sprites="parts.moygfx", icons="bar-icons.moygfx",
                       surfaces={"button": {"rest": "bevel2, fill surface, shadow",
                                            "pressed": "sunken, dither shade_lo/7"},
@@ -740,23 +740,23 @@ def test_the_boards_module_answers_as_the_host_does(tmp_path):
 # -- the readability check of a pattern fill (§7) ---------------------------------
 
 def test_every_seeds_pattern_fills_read_in_both_variants():
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.chrome import THEME_VARIANTS, theme_colors
     try:
         for name in moy_ui.themes():
-            ui.use_shape(name)
+            ui_draw.use_shape(name)
             for variant in THEME_VARIANTS:
-                assert ui.pattern_unreadable(theme_colors(name, variant)) == [], (
+                assert ui_draw.pattern_unreadable(theme_colors(name, variant)) == [], (
                     name, variant)
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
 
 
 def test_a_pattern_fill_is_checked_against_both_colours():
     """A dither of black and white under a black label misses on the black
     half, and so does its pinstripe; a solid fill is the pairs' business; a
     part that paints no label is not checked."""
-    from runtime import ui
+    from runtime import ui_draw
     from runtime.chrome import theme_colors
     rc, _n = moy_ui.theme_install(_src("dz", surfaces={
         "button": {"rest": "dither 0/7", "pressed": "pinstripe 7/0",
@@ -767,10 +767,10 @@ def test_a_pattern_fill_is_checked_against_both_colours():
     th = dict(theme_colors("night", "light"))
     th["ink"] = 0                      # the button's label ink at rest
     try:
-        ui.use_shape("dz")
-        bad = ui.pattern_unreadable(th)
+        ui_draw.use_shape("dz")
+        bad = ui_draw.pattern_unreadable(th)
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
     assert ("button", "rest") in bad and ("button", "pressed") in bad
     assert ("button", "hover") not in bad
     assert not [b for b in bad if b[0] in ("chip", "desk.icon")]

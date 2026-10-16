@@ -43,7 +43,7 @@ from runtime import host_app            # noqa: E402
 from runtime import host_canvas         # noqa: E402  (the 565 -> index readout)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
 from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
-from runtime import ui as UI            # noqa: E402  (labeled tab-row geometry)
+from runtime import ui_draw as UI       # noqa: E402  (labeled tab-row geometry)
 from runtime import widgets as WID      # noqa: E402  (the achievement catalog)
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")

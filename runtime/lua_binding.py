@@ -51,7 +51,7 @@ _CACHE = os.path.join(_ROOT, ".build", "host_lua")
 # is the point of using them rather than a system Lua: the host then wraps its
 # integers where the boards wrap theirs.
 _CFLAGS = native_build.BASE_CFLAGS + [
-    "-DMOY_WITH_LUA=1", "-DMOY_PIXEL_RGB565=1", "-DMOY_PLAY_HOST=1",
+    "-DMOY_WITH_LUA=1", "-DMOY_PIXEL_RGB565=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1",
     "-Wno-double-promotion", "-Wno-float-conversion",
 ]
 
@@ -101,6 +101,11 @@ def build(verbose=False, wasm=None):
         "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
         "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
         "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
+        # the public UI API's Lua face (native/moycore/moycore_ui.h) and the
+        # RUN face it shares with a compiled app (native/moy_ui/moy_ui_wasm.h)
+        "moycore_ui.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+        "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api.c", "moy_ui_wasm.h", "moy_ui_wasm.c",
+        "moy_theme.h", "moy_theme.c",
         "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
         "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
         "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
@@ -118,10 +123,6 @@ def build(verbose=False, wasm=None):
     name = "moyhost_lua"
     if got is not None:
         inc, lib = got
-        # ...and the toolkit's rows a compiled app imports, over the RUN sink
-        # (native/moy_ui/moy_ui_wasm.h)
-        names += ["moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
-                  "moy_ui_interact.c", "moy_ui_wasm.h", "moy_ui_wasm.c", "moy_theme.h", "moy_theme.c"]
         names += ["moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c",
                   "moy_audio.h", "moy_files.h", "moy_files.c", "moyhost_wasm.c"]
         cflags += ["-DMOY_WASM=1", "-isystem", inc,
@@ -244,6 +245,24 @@ def kernel(d):
         pass
 
 
+def _ui_theme(d):
+    """The public UI API's RUN face (native/moy_ui/moy_ui_wasm.h) lives in this
+    library and the live theme in the spine's: hand it the spine's reader."""
+    try:
+        import moy_app
+    except ImportError:
+        try:
+            from runtime import moy_app
+        except ImportError:
+            return
+    lib = getattr(moy_app, "_lib", None)
+    if lib is None:
+        return
+    d.moy_ui_wasm_theme_from.argtypes = [_P]
+    d.moy_ui_wasm_theme_from.restype = None
+    d.moy_ui_wasm_theme_from(ctypes.cast(lib.moy_app_wasm_theme, _P))
+
+
 def _lib():
     if _LIB[0] is None:
         try:
@@ -266,6 +285,7 @@ def _lib():
             d.hl_img_decoder(ctypes.cast(_IMG_CB, _P))
             d.hl_play_rows(1 if hasattr(d, "hw_runtime") else 0)
             kernel(d)
+            _ui_theme(d)
             _LIB[0] = d
     return _LIB[0] or None
 

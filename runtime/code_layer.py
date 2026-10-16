@@ -41,8 +41,10 @@ from editors_base import KeyEdge
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
@@ -67,7 +69,7 @@ except ImportError:  # pragma: no cover - host fallback
 def _glyph_known(kind):
     """True if `kind` is a known glyph (so a button draws the icon; else the
     text label is the fallback)."""
-    return _ui.glyph_id(kind) >= 0
+    return _ui_draw.glyph_id(kind) >= 0
 
 
 # The code editor draws its chrome in its OWN palette (`_tones`), not in the
@@ -131,7 +133,7 @@ def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None):
     #203). Appends each key's rect to `rects` when a list is given."""
     for i in range(len(syms)):
         r = (x0 + i * cell, y, cell - 1, h - 1)
-        art = _ui.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
+        art = _ui_draw.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
         cv.print(syms[i], art[0] + 6 * fs + dx, art[1] + 6 * fs + dy,
                  t["sym_ink"], 1)
         if rects is not None:
@@ -346,11 +348,11 @@ class CodeLayer:
     def draw(self, dt):
         # The code and its popup are laid out in the `mono` font's cells, so
         # they print in it (docs/theming_2026-09.md §4.7).
-        was = _ui.print_font(_ui.font("mono")[0])
+        was = _ui_draw.print_font(_ui_draw.font("mono")[0])
         try:
             self._draw_code()
         finally:
-            _ui.print_font(was)
+            _ui_draw.print_font(was)
         # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + X (no SAVE,
         # #111), drawn LAST (chrome over the full-screen text) so the code editor shows
         # the SAME bar every other tab does. System canvas + responsive layout, like the
@@ -358,11 +360,11 @@ class CodeLayer:
         # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
         self.ws.bar_layer._draw_status_strip("menu")
         if self.ws.crash_popup:
-            was = _ui.print_font(_ui.font("mono")[0])
+            was = _ui_draw.print_font(_ui_draw.font("mono")[0])
             try:
                 self._draw_crash_popup()   # crash-to-code (owner 2026-07-23): the
             finally:                       # dismissible error popup over the marked line
-                _ui.print_font(was)
+                _ui_draw.print_font(was)
 
     def _draw_crash_popup(self):
         """The crash-to-code popup: the full error text in a danger-framed panel
@@ -396,7 +398,7 @@ class CodeLayer:
         h = strip + (len(lines) + 1) * 10 * fs + 14 * fs
         x = (cv.w - w) // 2
         y = max(20 * fs, (cv.h - h) // 3)
-        _ui.dialog(cv, (x, y, w, h), ring=th["danger"], fill=th["surface"])
+        _ui_draw.dialog(cv, (x, y, w, h), ring=th["danger"], fill=th["surface"])
         cv.rect(x + 1, y + 1, w - 2, strip, th["danger"])
         cv.print(title, x + 4 * fs, y + 2 * fs, 7, 1)
         ty = y + strip + 4 * fs
@@ -1107,7 +1109,7 @@ class CodeLayer:
         # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
         if lay.status_band is not None and ed is not None:
             issues = "1 ISSUE" if ws.code_err else "NO ISSUES"
-            _ui.status_row(cv, ws.theme_colors, lay.status_band,
+            _ui_draw.status_row(cv, ws.theme_colors, lay.status_band,
                            ("LN " + str(ed.row + 1) + ", COL " + str(ed.col + 1),
                             str(len(ed.lines)) + " LINES", issues))
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
@@ -1250,12 +1252,12 @@ class CodeLayer:
         fs = lay.fs
         # `glyph` carries the FACE spec (a glyph kind or the label text) and
         # `_btn_face` draws it -- ui.py stays blind to the chrome vocabulary.
-        _ui.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
+        _ui_draw.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
                  on=self._tools_open, glyph=self._btn_spec("TLS", "tools"),
                  glyph_draw=self._btn_face, fs=fs)
         fb = self._file_btn(lay)
         if fb is not None:
-            _ui.chip(cv, t, _chip_rect(fb), self._file_label(),
+            _ui_draw.chip(cv, t, _chip_rect(fb), self._file_label(),
                      on=self._files_open, fs=fs)
         if self._tools_open:
             r = self._toolbar_rect(lay)
@@ -1267,7 +1269,7 @@ class CodeLayer:
                          (name == "find" and self._find_open) or \
                          (name == "gutter" and self._gutter)
                 label = self._TOOL_LABEL[name]
-                _ui.chip(cv, t, _chip_rect((r[0] + i * bw, r[1], bw, r[3])),
+                _ui_draw.chip(cv, t, _chip_rect((r[0] + i * bw, r[1], bw, r[3])),
                          label, on=active,
                          glyph=self._btn_spec(label, self._TOOL_GLYPH.get(name)),
                          glyph_draw=self._btn_face, fs=fs)
@@ -1290,13 +1292,13 @@ class CodeLayer:
         # ENTRIES must paint no field when unselected: their rects tile the
         # panel edge to edge, so a rest field (every kind has one) would erase
         # the shell's own border a row at a time. Frozen by geometry, not taste.
-        _ui.row(cv, t, _chip_rect(panel), title,
+        _ui_draw.row(cv, t, _chip_rect(panel), title,
                 colors=(t["sym_bg"], t["find"], t["sym_edge"]),
                 pad=fs, text_dy=fs, fs=fs)
         maxch = max(1, (panel[2] - 2 * fs) // lay.cell)
         for i in range(len(rects)):
             r = rects[i]
-            _ui.row(cv, t, _chip_rect(r), labels[i][:maxch],
+            _ui_draw.row(cv, t, _chip_rect(r), labels[i][:maxch],
                     colors=(t["sel"] if i == sel else None, t["sym_ink"], None),
                     edge=False, pad=fs, text_dy=fs, fs=fs)
 
@@ -1330,20 +1332,20 @@ class CodeLayer:
         # The FIELD is a row; the query text + caret stay the caller's, because
         # they are the field's live CONTENT (a tail slice plus a caret block) and
         # `row` would re-clip the already-fitted string by its own symmetric pad.
-        _ui.row(cv, t, (r[0], r[1], qright - r[0] - 1, r[3] - 1), None, fs=fs)
+        _ui_draw.row(cv, t, (r[0], r[1], qright - r[0] - 1, r[3] - 1), None, fs=fs)
         # As much of the tail of the query as fits, then a caret block.
         avail = max(1, (qright - r[0]) // lay.cell - 2)
         shown = self._find_q[-avail:] if len(self._find_q) > avail else self._find_q
         cv.print(("F:" + shown)[-avail - 2:], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
         cx = r[0] + fs + (len(shown) + 2) * lay.cell
         cv.rect(cx, r[1] + fs, fs, 8 * fs, t["caret"])
-        _ui.chip(cv, t, _chip_rect(btns["prev"]), "<", glyph="<",
+        _ui_draw.chip(cv, t, _chip_rect(btns["prev"]), "<", glyph="<",
                  glyph_draw=self._btn_face, fs=fs)
-        _ui.chip(cv, t, _chip_rect(btns["next"]), ">", glyph=">",
+        _ui_draw.chip(cv, t, _chip_rect(btns["next"]), ">", glyph=">",
                  glyph_draw=self._btn_face, fs=fs)
-        _ui.chip(cv, t, _chip_rect(btns["case"]), "Aa", on=not self._find_ci,
+        _ui_draw.chip(cv, t, _chip_rect(btns["case"]), "Aa", on=not self._find_ci,
                  glyph="Aa", glyph_draw=self._btn_face, fs=fs)
-        _ui.chip(cv, t, _chip_rect(btns["close"]), "X", glyph="X",
+        _ui_draw.chip(cv, t, _chip_rect(btns["close"]), "X", glyph="X",
                  glyph_draw=self._btn_face, fs=fs)
 
     def _draw_symbols(self):

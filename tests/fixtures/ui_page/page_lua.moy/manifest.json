@@ -1,0 +1,14 @@
+{
+  "format": "moy-1",
+  "title": "UI Page Lua",
+  "runtime": "lua",
+  "main": "main.lua",
+  "canvas": "320x240",
+  "extensions": [
+    "moybyte.ui"
+  ],
+  "moybyte": {
+    "type": "app",
+    "permissions": []
+  }
+}

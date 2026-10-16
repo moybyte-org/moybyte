@@ -20,7 +20,7 @@ import os
 import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
-from runtime import ui
+from runtime import ui_draw
 from runtime.chrome import live_colors, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -34,14 +34,14 @@ TOKENS = set(STYLE["tokens"])
 PAIRS = {tuple(p) for p in TH["pairs"]}
 FLOOR_INKS = {ink for _bg, ink in PAIRS}
 LUM = _luminance()
-STATES = {"rest": ui.REST, "hover": ui.HOVER, "on": ui.ON, "hot": ui.HOT,
-          "pressed": ui.PRESSED}
+STATES = {"rest": ui_draw.REST, "hover": ui_draw.HOVER, "on": ui_draw.ON, "hot": ui_draw.HOT,
+          "pressed": ui_draw.PRESSED}
 VARIANTS = ("dark", "light")
 
 
 def _lum(v):
     """An index's luminance, or a block slot's or an RGB value's (the C's)."""
-    return LUM[v] if v < 64 else ui._C.theme_rgb(v)[1]
+    return LUM[v] if v < 64 else ui_draw._C.theme_rgb(v)[1]
 
 
 def _clears(a, b):
@@ -95,11 +95,11 @@ def test_every_kind_inks_its_field_with_a_floor_pair():
 def test_every_seed_reads_every_kind(seed, variant):
     """Through the live placement: an RGB role reads in its block slot."""
     live = live_colors(seed, variant)
-    ui._C.theme_block(live.block, live.used)
+    ui_draw._C.theme_block(live.block, live.used)
     th = live.tokens
     bad = []
     for kind, st, _f, _i in _floor_states():
-        field, ink, _edge = ui.state_colors(th, kind, STATES[st])
+        field, ink, _edge = ui_draw.state_colors(th, kind, STATES[st])
         if field is not None and ink is not None and not _clears(field, ink):
             bad.append((kind, st, field, ink))
     assert not bad
@@ -114,39 +114,39 @@ def test_every_seed_reads_every_button_kind(seed, variant):
     its kind's floor form, and no seed's `buttons` reads under it. A seed
     with marks draws `on` as its current mark, never the ON look (step 11)."""
     live = live_colors(seed, variant)
-    ui._C.theme_block(live.block, live.used)
-    ui.use_buttons(live)
+    ui_draw._C.theme_block(live.block, live.used)
+    ui_draw.use_buttons(live)
     th = live.tokens
-    look = ui._look(th)
+    look = ui_draw._look(th)
     bad = []
-    ui.use_depth(seed, variant == "light")
-    marks = ui.marks()[0]
-    ui.use_depth(None, False)
+    ui_draw.use_depth(seed, variant == "light")
+    marks = ui_draw.marks()[0]
+    ui_draw.use_depth(None, False)
     try:
-        for kind in ui.BUTTON_KINDS:
-            kid = ui._kind_id(ui._button_kind(kind))
+        for kind in ui_draw.BUTTON_KINDS:
+            kid = ui_draw._kind_id(ui_draw._button_kind(kind))
             for st in STATES.values():
                 if marks and st == "on":
                     continue
-                field, ink = ui._C.button_style(look, kid, ui._STATE_ID[st], -1)[:2]
+                field, ink = ui_draw._C.button_style(look, kid, ui_draw._STATE_ID[st], -1)[:2]
                 if field is not None and ink is not None and not _clears(field, ink):
                     bad.append((kind, st, field, ink))
-        assert ui.button_unreadable(th) == []
+        assert ui_draw.button_unreadable(th) == []
     finally:
-        ui.use_buttons(None)
+        ui_draw.use_buttons(None)
     assert not bad
 
 
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
     real frame: a titled frame against the same frame untitled."""
-    ui.use_shape(seed)
+    ui_draw.use_shape(seed)
     th = theme_colors(seed, variant)
     out = []
     for title in ("FILES", ""):
         cv = SystemCanvas(240, 100)
         cv.cls(9)
-        ui.frame(cv, th, (10, 10, 200, 70), 18 * fs, title, active, True, fs)
+        ui_draw.frame(cv, th, (10, 10, 200, 70), 18 * fs, title, active, True, fs)
         out.append(indices_of(cv))
     titled, bare = out
     left = 10 + 1 + 3 * fs                   # past classic's identity stripe
@@ -164,7 +164,7 @@ def test_every_seed_reads_its_window_titles(seed, variant, active):
     try:
         px, diff = _title_pixels(seed, variant, active, 1)
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
     assert diff, "the title draws nothing"
     xs = [i % 240 for i in diff]
     ys = [i // 240 for i in diff]
@@ -187,7 +187,7 @@ def _install(name, surfaces, colors=None):
         pkg["colors"] = colors
     rc, _notes = moy_ui.theme_install(json.dumps(pkg).encode())
     assert rc == 0
-    ui.use_shape(name)
+    ui_draw.use_shape(name)
 
 
 def test_a_chrome_part_without_a_fill_paints_its_own_colours():
@@ -198,31 +198,31 @@ def test_a_chrome_part_without_a_fill_paints_its_own_colours():
     try:
         _install("parts", {"bar.item": {"rest": "border"},
                            "desk.icon": {"rest": "fill panel, border"}})
-        for state, field, edge in ((ui.REST, th["panel"], th["chrome_ink"]),
-                                   (ui.ON, th["accent"], th["chrome_ink"])):
+        for state, field, edge in ((ui_draw.REST, th["panel"], th["chrome_ink"]),
+                                   (ui_draw.ON, th["accent"], th["chrome_ink"])):
             cv = SystemCanvas(40, 20)
             cv.cls(9)
-            assert ui.paint(cv, th, (4, 4, 30, 12), "bar.item", state)
+            assert ui_draw.paint(cv, th, (4, 4, 30, 12), "bar.item", state)
             px = indices_of(cv)
             assert px[4 * 40 + 10] == edge and px[10 * 40 + 10] == field
         cv = SystemCanvas(40, 40)
         cv.cls(9)
-        assert ui.paint(cv, th, (4, 4, 30, 30), "desk.icon")
+        assert ui_draw.paint(cv, th, (4, 4, 30, 30), "desk.icon")
         px = indices_of(cv)
         assert px[4 * 40 + 10] == th["edge"] and px[15 * 40 + 15] == th["panel"]
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
 
 
 def test_a_bare_button_border_is_the_shade_dark_role():
     """Contrast's `button: border` drew a black edge on its black keys."""
     th = theme_colors("contrast")
     try:
-        ui.use_shape("contrast")
+        ui_draw.use_shape("contrast")
         cv = SystemCanvas(60, 40)
         cv.cls(th["panel"])
-        ui.button(cv, th, (5, 5, 40, 24), "7")
+        ui_draw.button(cv, th, (5, 5, 40, 24), "7")
         px = indices_of(cv)
         assert px[5 * 60 + 20] == th["shade_dark"] != th["panel"]
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)

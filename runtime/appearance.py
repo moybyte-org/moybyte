@@ -126,9 +126,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_sheet import IconSheet
 try:
-    import ui as _uimod
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _uimod
+    from runtime import ui_draw as _ui_draw
 try:
     import fontset as _fontset
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -139,10 +139,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import shell_layout as _shell_layout
     from runtime import layout_base as _layout_base
-_ui_is_light = _uimod.is_light
+_ui_is_light = _ui_draw.is_light
 
 def _ui_text_w(t):
-    return _uimod.text_width(t, 1, "ui")
+    return _ui_draw.text_width(t, 1, "ui")
 
 
 _FONT_ROLES = ("ui", "title", "mono", "caption")
@@ -154,14 +154,14 @@ def font_file(name):
     """A font file the image carries, by name, as bytes, or None: a seed
     package's (ui.font_file), else a face of the font set (runtime/fontset.py);
     X.txt beside a font X.fnt is its licence."""
-    data = _uimod.font_file(name)
+    data = _ui_draw.font_file(name)
     return data if data is not None else _fontset.file(name)
 _THEME_BYTES = 4096     # style.json's theme.bytes: the largest theme.json
 _THEME_MAIN = "theme.json"
 _PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spare
 # A sheet's caps (style.json's theme.sheet_rows): (width, sprite rows, icon
 # rows, sprite bytes, icon bytes).
-_SHEET_CAPS = _uimod.sheet_caps()
+_SHEET_CAPS = _ui_draw.sheet_caps()
 _CHANGES = ("accent", "tint", "wallpaper", "frame", "font")
 # The loader's refusals (moy_theme.h), by rc from 1: each one's string.
 _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
@@ -635,7 +635,7 @@ class Appearance:
         if got is None:
             b = self._source(src)
             if b is not None and src in THEME_NAMES:
-                b = _uimod.theme_custom(b, None, None)[1]
+                b = _ui_draw.theme_custom(b, None, None)[1]
             f = keys_of(b)["frame"] if b is not None else DROP
             got = f.get("style", "classic") if type(f) is dict else "classic"
             self._styles = {key: got}
@@ -644,7 +644,7 @@ class Appearance:
     def _font_preset(self):
         """The FONTS preset the live `ui` font is, None for a font of the
         theme's own."""
-        fid = _uimod.font("ui")[0]
+        fid = _ui_draw.font("ui")[0]
         if not fid:
             return PETME128
         for key in _FONTS:
@@ -782,12 +782,12 @@ class Appearance:
             body = minified(text) or text
         rc = 1
         if len(body.encode()) <= _THEME_BYTES:
-            got = _uimod.theme_resolve(body.encode())
+            got = _ui_draw.theme_resolve(body.encode())
             rc = got[0]
             if rc == 0 and got[2] != CUSTOM:
                 rc = 4                         # NAME: not its folder's
         if rc != 0:
-            return (False, _uimod.s("theme.why_"
+            return (False, _ui_draw.s("theme.why_"
                                     + _THEME_WHY[min(max(rc, 1), 7) - 1]), None)
         # A pair of theme.pairs under the floor never refuses (§7): it is
         # the note a save that passed shows.
@@ -859,7 +859,7 @@ class Appearance:
         if c is None or c.theme is None:
             return "store"
         theme = named(c.theme, name)
-        if _uimod.theme_resolve(theme)[0] != 0:
+        if _ui_draw.theme_resolve(theme)[0] != 0:
             return "grammar"
         files = {_THEME_MAIN: theme, MANIFEST: manifest(c.look, name)}
         src = self._custom_path()
@@ -902,13 +902,13 @@ class Appearance:
         src = self._source(look["from"]) if "from" in look else c.src
         if src is None:
             return 6, None                     # the loader's CHAIN: no source
-        rc, b = _uimod.theme_custom(src, look.get("accent"), look.get("tint"))
+        rc, b = _ui_draw.theme_custom(src, look.get("accent"), look.get("tint"))
         if rc != 0:
             return rc, None
         b = overlay(b, over)
         if len(b) > _THEME_BYTES:
             return 1, None                     # BIG
-        rc = _uimod.theme_resolve(b)[0]
+        rc = _ui_draw.theme_resolve(b)[0]
         return rc, (b if rc == 0 else None)
 
     def _gather(self, c, look, theme, pic):
@@ -994,7 +994,7 @@ class Appearance:
         if "from" in look:
             frm = self._source(look["from"])
             if frm is not None:
-                rc, base = _uimod.theme_custom(frm, None, None)
+                rc, base = _ui_draw.theme_custom(frm, None, None)
                 if rc != 0:
                     base = None
         if base is None:
@@ -1017,7 +1017,7 @@ class Appearance:
             self._pic_epoch += 1               # a new custom, maybe a new picture
             for key in list(_FONTS):
                 if key[0] == CUSTOM:
-                    _uimod.font_free(_FONTS.pop(key))
+                    _ui_draw.font_free(_FONTS.pop(key))
         self._cust = c
         self._pkg_gen = None
         self._packages()
@@ -1027,7 +1027,7 @@ class Appearance:
         the first time and on a FONT change (fonts, relayout, the layout),
         else the shape and the tokens alone."""
         c.dirty = False
-        if _uimod.theme_install(c.theme)[0] != 0:
+        if _ui_draw.theme_install(c.theme)[0] != 0:
             return
         self._slot_src = c.theme
         self._slot_gen = self._pkg_gen
@@ -1041,7 +1041,7 @@ class Appearance:
             self.set_theme(CUSTOM, persist=False)
             return
         ws = self.ws
-        _uimod.use_shape(CUSTOM)
+        _ui_draw.use_shape(CUSTOM)
         self._go_live(CUSTOM)
         self.publish()
         ws.launcher.theme = ws.theme_colors
@@ -1270,7 +1270,7 @@ class Appearance:
             self.theme_variant = variant if variant in THEME_VARIANTS \
                 else DEFAULT_VARIANT
         self.theme_name = name
-        _uimod.use_shape(name)
+        _ui_draw.use_shape(name)
         refont = self._install_fonts(name)
         self._install_sheets(name)
         self._go_live(name)
@@ -1302,7 +1302,7 @@ class Appearance:
         beside the seeds (`moy_ui.theme_install`) and re-apply the live
         theme over it: an in-place edit is a re-install under its own name.
         (rc, notes), the loader's; a refusal leaves everything as it was."""
-        rc, notes = _uimod.theme_install(src)
+        rc, notes = _ui_draw.theme_install(src)
         if rc == 0:
             self._slot_src = None
             self._packages_moved()
@@ -1310,7 +1310,7 @@ class Appearance:
 
     def uninstall_theme(self):
         """Drop the installed theme package: only the seeds remain."""
-        _uimod.theme_uninstall()
+        _ui_draw.theme_uninstall()
         self._slot_src = None
         self._packages_moved()
 
@@ -1348,10 +1348,10 @@ class Appearance:
             paths[CUSTOM] = self._custom_path()   # changed, not yet written
         self._pkg_paths = paths
         adopt_packages(tuple(paths), self._theme_src)
-        used = [_uimod.font(role)[0] for role in _FONT_ROLES]
+        used = [_ui_draw.font(role)[0] for role in _FONT_ROLES]
         for key in list(_FONTS):
             if key[0] is not None and _FONTS[key] not in used:
-                _uimod.font_free(_FONTS.pop(key))
+                _ui_draw.font_free(_FONTS.pop(key))
         self._layouts = {}
         self._choices = None
         return paths
@@ -1450,7 +1450,7 @@ class Appearance:
         if type(name) is not str:
             return DEFAULT_THEME
         self._packages()
-        if name == _uimod.theme_installed() and (
+        if name == _ui_draw.theme_installed() and (
                 self._slot_src is None or self._slot_gen == self._pkg_gen):
             return name
         got = package(name)
@@ -1459,11 +1459,11 @@ class Appearance:
         rc = got[0]
         src = self._theme_src(name) if rc == 0 else None
         if src is not None and src == self._slot_src \
-                and _uimod.theme_installed() == name:
+                and _ui_draw.theme_installed() == name:
             self._slot_gen = self._pkg_gen
             return name
         if src is not None:
-            rc = _uimod.theme_install(src)[0]
+            rc = _ui_draw.theme_install(src)[0]
         if rc != 0 or src is None:
             self._refuse(name, rc or 2)
             return DEFAULT_THEME
@@ -1482,8 +1482,8 @@ class Appearance:
         self._refused.add(name)
         notice = getattr(self.ws, "notice", None)
         if notice is not None:
-            notice(_uimod.s("notice.theme_refused") % name.upper(),
-                   _uimod.s("theme.why_" + _THEME_WHY[min(max(rc, 1), 7) - 1]), "warn")
+            notice(_ui_draw.s("notice.theme_refused") % name.upper(),
+                   _ui_draw.s("theme.why_" + _THEME_WHY[min(max(rc, 1), 7) - 1]), "warn")
 
     def _packages_moved(self):
         # Every theme resolves along `inherits` to the default, so an install
@@ -1512,12 +1512,12 @@ class Appearance:
         got = self._layouts.get(name)
         if got is None:
             pkg = None
-            if name not in THEME_NAMES and name != _uimod.theme_installed():
+            if name not in THEME_NAMES and name != _ui_draw.theme_installed():
                 pkg = package(name)
             if pkg is not None and pkg[0] == 0:
                 got = pkg[6]
             else:
-                got = _uimod.theme_layout(name) + (_uimod.theme_home(name),)
+                got = _ui_draw.theme_layout(name) + (_ui_draw.theme_home(name),)
             self._layouts[name] = got
         return got
 
@@ -1565,7 +1565,7 @@ class Appearance:
         the next theme switch."""
         if self._choices is None:
             names = self.theme_names()
-            extra = _uimod.theme_installed()
+            extra = _ui_draw.theme_installed()
             if extra is not None and extra not in names:
                 names = names + (extra,)
             mine = self._theme_layout(self.theme_name)[1:]
@@ -1594,9 +1594,9 @@ class Appearance:
         that will not load leaves its role on petme128. True when a role's
         font or the floor changed."""
         files = {}
-        for role, f in _uimod.theme_fonts(name):
+        for role, f in _ui_draw.theme_fonts(name):
             files[role] = (None, f)
-        if self._slot_src is not None and name == _uimod.theme_installed():
+        if self._slot_src is not None and name == _ui_draw.theme_installed():
             got = package(name)
             for role, f in (got[5] if got is not None and got[0] == 0 else ()):
                 files[role] = (name, f)
@@ -1606,21 +1606,21 @@ class Appearance:
             ids[role] = self._font_id(f) if f else 0
         changed = False
         for role in _FONT_ROLES:
-            if _uimod.font(role)[0] != ids[role]:
+            if _ui_draw.font(role)[0] != ids[role]:
                 changed = True
-            _uimod.use_font(role, ids[role])
-        _uimod.print_font(ids["ui"])
+            _ui_draw.use_font(role, ids[role])
+        _ui_draw.print_font(ids["ui"])
         keep = set(ids.values())
         for key in list(_FONTS):
             if _FONTS[key] not in keep:
-                _uimod.font_free(_FONTS.pop(key))
+                _ui_draw.font_free(_FONTS.pop(key))
         ws = self.ws
         floor = 1
         if ids["ui"]:
             # Measured on the glass: a surface pixel is `render_scale` of its.
             panel = ws.glass_canvas
             floor = text_scale_floor(panel.w, panel.h, ws.panel_diagonal_in,
-                                     _uimod.font("ui")[3] * ws.render_scale)
+                                     _ui_draw.font("ui")[3] * ws.render_scale)
         if floor != self.text_floor:
             self.text_floor = floor
             changed = True
@@ -1633,19 +1633,19 @@ class Appearance:
         folder once per theme, file and store change; a sheet that will not
         load leaves its parts on their surfaces and the bar on the user's or
         the default icons."""
-        sprites, icons = _uimod.theme_sheets(name)
+        sprites, icons = _ui_draw.theme_sheets(name)
         key = (name, sprites, icons, self._pkg_gen, self._pic_epoch)
         if key == self._sheet_key:
             return
         self._sheet_key = key
         src = self._package_file(name, sprites, _SHEET_CAPS[3]) \
             if sprites is not None else None
-        if src is None or _uimod.sheet_load(src) != 0:
-            _uimod.sheet_clear()
+        if src is None or _ui_draw.sheet_load(src) != 0:
+            _ui_draw.sheet_clear()
         was = self._theme_icons
         self._theme_icons = None
         src = self._package_file(name, icons, _SHEET_CAPS[4]) if icons is not None else None
-        if src is not None and _uimod.sheet_check(src, _SHEET_CAPS[2])[0] == 0:
+        if src is not None and _ui_draw.sheet_check(src, _SHEET_CAPS[2])[0] == 0:
             self._theme_icons = IconSheet.from_hex(src.decode("ascii"))
         if self.icon_sheet is not None and self._user_icons is None \
                 and (was is not None or self._theme_icons is not None):
@@ -1656,7 +1656,7 @@ class Appearance:
         file from its folder, a seed's (package None) from the image; loaded
         once, 0 when it cannot be."""
         fid = _FONTS.get(key)
-        if fid is not None and _uimod.font_info(fid) is not None:
+        if fid is not None and _ui_draw.font_info(fid) is not None:
             return fid
         pkg, f = key
         if f == PETME128:
@@ -1667,13 +1667,13 @@ class Appearance:
             src = self._package_file(pkg, f, _FONT_BYTES)
         if src is None:
             return 0
-        rc, fid = _uimod.font_load(src)
+        rc, fid = _ui_draw.font_load(src)
         if rc == _FONT_FULL:
             # The slots are the process's: where no kernel frees them with
             # the VM (a host, a test), the theme's are all they keep.
-            _uimod.font_reset()
+            _ui_draw.font_reset()
             _FONTS.clear()
-            rc, fid = _uimod.font_load(src)
+            rc, fid = _ui_draw.font_load(src)
         if fid is None:
             return 0
         _FONTS[key] = fid
@@ -1706,7 +1706,7 @@ class Appearance:
                                   self.ws.theme_colors, self.live.near)
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
-        _uimod.look_moved()
+        _ui_draw.look_moved()
 
     def _go_live(self, name):
         """Make theme `name` (in the live variant) the colours the shell
@@ -1714,12 +1714,12 @@ class Appearance:
         check's, its button leaves every button's, its placed tokens
         `ws.theme_colors`; and its depth (`ui.use_depth`)."""
         live = live_colors(name, self.theme_variant)
-        _uimod.use_depth(name, self.theme_variant == "light")
+        _ui_draw.use_depth(name, self.theme_variant == "light")
         put = getattr(getattr(self.ws, "canvas", None), "theme_block", None)
         if put is not None:
             put(live.block)
-        _uimod._C.theme_block(live.block, live.used)
-        _uimod.use_buttons(live)
+        _ui_draw._C.theme_block(live.block, live.used)
+        _ui_draw.use_buttons(live)
         self.live = live
         self.ws.theme_colors = live.tokens
 

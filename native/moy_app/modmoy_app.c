@@ -478,7 +478,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_role_obj, 5, 5, app_role);
 static mp_obj_t app_wasm_bind(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t h = (uint32_t)mp_obj_get_int_truncated(g);
-    moy_app_wasm_bind(h ? self->a : NULL, h, h ? roles_mask(roles) : 0u);
+    moy_app_wasm_bind(self->a, h, h ? roles_mask(roles) : 0u);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(app_wasm_bind_obj, app_wasm_bind);

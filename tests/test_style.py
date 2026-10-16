@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 
 
-from runtime import ui
+from runtime import ui_draw
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 from theme_live import live_tokens  # noqa: E402
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -51,17 +51,17 @@ def test_the_default_tables_cover_every_kind_the_toolkit_asks_for():
              # the shell's own row kinds, asked for through `row(kind=...)`
              "row_menu", "row_list", "row_chrome", "row_cta")
     for kind in asked:
-        assert kind in ui.kinds(), kind
-        assert ui.REST in STYLE["kinds"][kind], kind
-    for kind in ui.kinds():
-        assert ui.REST in STYLE["kinds"][kind], (
+        assert kind in ui_draw.kinds(), kind
+        assert ui_draw.REST in STYLE["kinds"][kind], kind
+    for kind in ui_draw.kinds():
+        assert ui_draw.REST in STYLE["kinds"][kind], (
             "%r names no REST entry, so a state it does not name resolves "
             "through the row fallback instead of its own look" % kind)
     metric_kinds = ("button", "chip", "row", "cell", "tab", "status", "panel",
                     "focus", "scrollbar", "text_field", "game_btn",
                     "game_icon_btn", "mini_btn", "dialog")
     for kind in metric_kinds:
-        assert isinstance(ui.metrics(kind), tuple), kind
+        assert isinstance(ui_draw.metrics(kind), tuple), kind
 
 
 def test_every_state_of_every_kind_resolves_on_every_theme_set():
@@ -72,9 +72,9 @@ def test_every_state_of_every_kind_resolves_on_every_theme_set():
     for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             th = live_tokens(name, variant)
-            for kind in ui.kinds():
-                for state in ui.STATES:
-                    trio = ui.state_colors(th, kind, state)
+            for kind in ui_draw.kinds():
+                for state in ui_draw.STATES:
+                    trio = ui_draw.state_colors(th, kind, state)
                     assert len(trio) == 3, (kind, state)
                     for c in trio:
                         assert c is None or (isinstance(c, int)
@@ -84,9 +84,9 @@ def test_every_state_of_every_kind_resolves_on_every_theme_set():
 def test_the_scrollbar_width_metric_and_the_class_attribute_agree():
     """`ScrollRegion.BAR_W` is public (a caller hit-tests the bar with it) AND
     a style metric. They must never disagree."""
-    bw = ui.metrics("scrollbar")[ui.SB_W]
-    assert ui.ScrollRegion.BAR_W == bw
-    r = ui.ScrollRegion()
+    bw = ui_draw.metrics("scrollbar")[ui_draw.SB_W]
+    assert ui_draw.ScrollRegion.BAR_W == bw
+    r = ui_draw.ScrollRegion()
     r.set((0, 0, 40, 100), 400)
     assert r.bar_rect(1)[2] == bw
 
@@ -145,13 +145,13 @@ class _CountingCanvas:
 def _draw_many(cv, th, n=100):
     """A widget storm across every kind that resolves through the style."""
     for i in range(n):
-        state = ui.STATES[i % len(ui.STATES)]
-        ui.row(cv, th, (0, 0, 200, 16), "Row", state=state, value="v")
-        ui.cell(cv, th, (0, 20, 60, 60), "C", state=state)
-        ui.chip(cv, th, (0, 90, 60, 18), "Chip", on=(i % 2 == 0))
-        ui.button(cv, th, (0, 110, 90, 20), "Go", kind="primary")
-        ui.panel(cv, th, (0, 140, 80, 60), title="T")
-        ui.status_row(cv, th, (0, 210, 200, 14), ("a", "b"))
+        state = ui_draw.STATES[i % len(ui_draw.STATES)]
+        ui_draw.row(cv, th, (0, 0, 200, 16), "Row", state=state, value="v")
+        ui_draw.cell(cv, th, (0, 20, 60, 60), "C", state=state)
+        ui_draw.chip(cv, th, (0, 90, 60, 18), "Chip", on=(i % 2 == 0))
+        ui_draw.button(cv, th, (0, 110, 90, 20), "Go", kind="primary")
+        ui_draw.panel(cv, th, (0, 140, 80, 60), title="T")
+        ui_draw.status_row(cv, th, (0, 210, 200, 14), ("a", "b"))
 
 
 def test_the_style_path_resolves_in_c_once_per_theme(monkeypatch):
@@ -164,49 +164,49 @@ def test_the_style_path_resolves_in_c_once_per_theme(monkeypatch):
     is gone, which is how a regression net quietly stops being one."""
     th = theme_colors("night")
     packs = []
-    real_look = ui._C.look
-    monkeypatch.setattr(ui._C, "look",
+    real_look = ui_draw._C.look
+    monkeypatch.setattr(ui_draw._C, "look",
                         lambda slot, row: (packs.append(slot), real_look(slot, row))[1])
     asked = []
-    real_colors = ui.state_colors
-    monkeypatch.setattr(ui, "state_colors",
+    real_colors = ui_draw.state_colors
+    monkeypatch.setattr(ui_draw, "state_colors",
                         lambda t, k, st: (asked.append(k), real_colors(t, k, st))[1])
     cv = _CountingCanvas()
-    calls = ui._C.calls()
+    calls = ui_draw._C.calls()
     _draw_many(cv, th, 100)
-    assert ui._C.calls() - calls >= 600, "the widgets stopped calling the C"
+    assert ui_draw._C.calls() - calls >= 600, "the widgets stopped calling the C"
     assert len(packs) == 1, packs
     assert asked == [], "a widget resolved its colours in Python: %r" % asked[:5]
     # The metrics tuples are shared: `metrics()` is a dict get.
-    assert ui.metrics("row") is ui.metrics("row")
-    a = ui.state_colors(th, "chip", ui.ON)
-    assert ui.state_colors(th, "chip", ui.ON) is a
+    assert ui_draw.metrics("row") is ui_draw.metrics("row")
+    a = ui_draw.state_colors(th, "chip", ui_draw.ON)
+    assert ui_draw.state_colors(th, "chip", ui_draw.ON) is a
 
 
 def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch):
     """The fast path is an identity compare, so alternating themes must not
     thrash: each theme is packed into a C look once, while the ring holds it."""
     packs = []
-    real_look = ui._C.look
-    monkeypatch.setattr(ui._C, "look",
+    real_look = ui_draw._C.look
+    monkeypatch.setattr(ui_draw._C, "look",
                         lambda slot, row: (packs.append(slot), real_look(slot, row))[1])
     # An empty ring, as at boot: a theme an earlier draw packed is held.
-    monkeypatch.setattr(ui, "_RING", [])
-    monkeypatch.setattr(ui, "_TH", None)
+    monkeypatch.setattr(ui_draw, "_RING", [])
+    monkeypatch.setattr(ui_draw, "_TH", None)
     a, b = theme_colors("night"), theme_colors("berry")
     cv = _CountingCanvas()
     for _ in range(20):
-        ui.row(cv, a, (0, 0, 100, 16), "x")
+        ui_draw.row(cv, a, (0, 0, 100, 16), "x")
     assert len(packs) == 1, "no pack counted -- is the probe wired?"
     for _ in range(20):
-        ui.row(cv, b, (0, 0, 100, 16), "x")
+        ui_draw.row(cv, b, (0, 0, 100, 16), "x")
     assert len(packs) == 2, packs
     # And back: a theme the ring still holds costs NO pack. This is what keeps
     # the `self.theme or {}` sites (an empty dict is a fresh object every
     # call) from evicting the live theme once per frame.
     for _ in range(20):
-        ui.row(cv, a, (0, 0, 100, 16), "x")
-        ui.row(cv, {}, (0, 0, 100, 16), "x")       # a throwaway theme
+        ui_draw.row(cv, a, (0, 0, 100, 16), "x")
+        ui_draw.row(cv, {}, (0, 0, 100, 16), "x")       # a throwaway theme
     assert len(packs) == 2 + 20, packs
 
 
@@ -214,13 +214,13 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch):
 # 3. the `colors=` escape hatch, and the kinds a surface asks for (#207)
 # =============================================================================
 #
-# `ui.row` / `ui.cell` / `ui.chip` / `ui.text_field` all take an explicit
+# `ui_draw.row` / `ui_draw.cell` / `ui_draw.chip` / `ui_draw.text_field` all take an explicit
 # (field, ink, edge) triple that bypasses this catalog entirely. It exists for a
-# real case -- `ui.row`'s own docstring: "a site whose pixels are frozen
+# real case -- `ui_draw.row`'s own docstring: "a site whose pixels are frozen
 # off-token" -- and #207 is the triage that separated those from the sites that
 # were merely hand-resolving a role the catalog could own. Phase 4 shipped with
 # 27 uses of it and no way to tell the two apart; the ones that were a widget
-# STATE PALETTE now resolve through `ui.state_colors` against a kind, and what
+# STATE PALETTE now resolve through `ui_draw.state_colors` against a kind, and what
 # is left is pinned below.
 #
 # The classifier reads what reaches the `colors=` argument of a call. A
@@ -329,7 +329,7 @@ def _hatch_sites(path):
 
 
 def _named_kinds(path):
-    """The SHELL kinds this module asks a widget for by name. `ui.button`'s own
+    """The SHELL kinds this module asks a widget for by name. `ui_draw.button`'s own
     `kind=` vocabulary ("play", "normal", ...) is not in the set, so it does not
     count here."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -422,11 +422,11 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
         # other kind a surface names must be in the table itself.
         if kind in STYLE["button_kinds"]:
             continue
-        assert kind in ui.kinds(), (kind, asked[kind])
+        assert kind in ui_draw.kinds(), (kind, asked[kind])
     # And every shell kind has a consumer: a table entry nothing asks for is a
     # decision pretending to be one.
     for kind in _SHELL_KINDS:
-        assert kind in ui.kinds(), kind
+        assert kind in ui_draw.kinds(), kind
         assert kind in asked, "%r is in the table but nothing asks for it" % kind
 
 
@@ -441,24 +441,24 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
 # row is never rendered at rest. Every other state below IS netted by a golden
 # (verified by mutation: `row_menu` REST turns all ten golden rows red).
 _PRE_207_TRIPLES = {
-    ("row_menu", ui.REST):  # settings_layer._draw_settings_row, the system menu (moy_chrome)
+    ("row_menu", ui_draw.REST):  # settings_layer._draw_settings_row, the system menu (moy_chrome)
         lambda th: (None, th["chrome_ink_dim"], None),
-    ("row_menu", ui.ON):
+    ("row_menu", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),
-    ("row_list", ui.REST):  # the wifi list + the wifi/bluetooth note lines
+    ("row_list", ui_draw.REST):  # the wifi list + the wifi/bluetooth note lines
         lambda th: (None, th["ink_dim"], None),
-    ("row_list", ui.ON):
+    ("row_list", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),
-    ("row_chrome", ui.REST):  # achievements_ui (earned), cards_layer (a card)
+    ("row_chrome", ui_draw.REST):  # achievements_ui (earned), cards_layer (a card)
         lambda th: (None, th["ink"] if th.get("bar_light", False)
                     else th["chrome_ink"], None),
-    ("row_chrome", ui.ON):
+    ("row_chrome", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),
-    ("row_chrome", ui.DISABLED):  # achievements_ui (locked)
+    ("row_chrome", ui_draw.DISABLED):  # achievements_ui (locked)
         lambda th: (None, th["chrome_ink_dim"], None),
-    ("row_cta", ui.REST):   # storybook_app._draw_rows, the "+ NEW" row
+    ("row_cta", ui_draw.REST):   # storybook_app._draw_rows, the "+ NEW" row
         lambda th: (th["hilite"], 0, th["dim"]),
-    ("row_cta", ui.ON):
+    ("row_cta", ui_draw.ON):
         lambda th: (th["accent"], 0, th["accent"]),
 }
 
@@ -475,7 +475,7 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
         for variant in THEME_VARIANTS:
             th = live_tokens(name, variant)
             for (kind, state), before in _PRE_207_TRIPLES.items():
-                assert tuple(ui.state_colors(th, kind, state)) == \
+                assert tuple(ui_draw.state_colors(th, kind, state)) == \
                     tuple(before(th)), (name, variant, kind, state)
                 checked += 1
     assert checked == 2 * len(THEME_NAMES) * len(_PRE_207_TRIPLES)
@@ -496,13 +496,13 @@ def test_the_outline_seed_restyles_the_shipped_widgets_on_every_variant():
     for variant in THEME_VARIANTS:
         th = theme_colors("outline", variant)
         try:
-            ui.use_shape("night")
+            ui_draw.use_shape("night")
             a = SystemCanvas(320, 240, font_scale=1)
             _paint_shipped(a, th)
-            ui.use_shape("outline")
+            ui_draw.use_shape("outline")
             b = SystemCanvas(320, 240, font_scale=1)
             _paint_shipped(b, th)
         finally:
-            ui.use_shape(None)
+            ui_draw.use_shape(None)
         assert bytes(a._buf) != bytes(b._buf), variant
         assert len(set(indices_of(b))) > 3, variant

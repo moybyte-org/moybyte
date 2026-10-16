@@ -38,8 +38,10 @@ NAMES is injected at construction rather than imported back from console.py --
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
@@ -157,7 +159,7 @@ class WebConsoleUI:
         NAMES = self._NAMES
         cv.rect(0, 0, lay.w, lay.h, th["bar"])
         px, py, pw, ph = lay.settings_panel
-        _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
+        _ui_draw.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
         ws._glyph("wifi", (px + 6 * fs, py + 2 * fs, 16 * fs, 16 * fs),
                   th["accent"], cv)
         _print_scaled(cv, "WEB CONSOLE", px + 26 * fs, py + 4 * fs, th["ink"], 2)
@@ -168,10 +170,10 @@ class WebConsoleUI:
         self._draw_qr(cv, qr_rect, url, NAMES)
         if self.show_address:
             self._draw_address(cv, th, addr, url, fs)
-        _ui.button(cv, th, show,
+        _ui_draw.button(cv, th, show,
                    "HIDE ADDRESS" if self.show_address else "SHOW ADDRESS",
                    on=self.show_address)
-        _ui.button(cv, th, off, "TURN OFF", kind="danger")
+        _ui_draw.button(cv, th, off, "TURN OFF", kind="danger")
 
     def _draw_qr(self, cv, rect, url, NAMES):
         """The code, centered in `rect` at the largest whole-pixel module size

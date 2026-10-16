@@ -198,12 +198,12 @@ def _theme_shape_back():
     every font role and the print font go back to petme128."""
     yield
     try:
-        from runtime import ui
+        from runtime import ui_draw
     except ImportError:
         return
-    ui.use_shape(None)
-    ui.theme_uninstall()
-    ui.cart_text(False)
+    ui_draw.use_shape(None)
+    ui_draw.theme_uninstall()
+    ui_draw.cart_text(False)
     for role in ("ui", "title", "mono"):
-        ui.use_font(role, 0)
-    ui.print_font(0)
+        ui_draw.use_font(role, 0)
+    ui_draw.print_font(0)

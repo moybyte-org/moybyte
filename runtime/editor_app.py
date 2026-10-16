@@ -133,8 +133,10 @@ _TAB_LAYOUT_UI = {
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -473,10 +475,10 @@ class EditorApp:
             # dropped, #111).
             tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-            _ui.tab_row(cv, th, tabs_area, self._chips(), self.tab,
+            _ui_draw.tab_row(cv, th, tabs_area, self._chips(), self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
                         ink=band_ink)
-            _ui.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
+            _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
                        glyph_draw=ws._glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
@@ -488,10 +490,10 @@ class EditorApp:
             if tab is not None and tab == self.tab:
                 if label:
                     band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-                    _ui.tab(cv, th, r, True, label, True, band_ink,
+                    _ui_draw.tab(cv, th, r, True, label, True, band_ink,
                             ws._icon_image_keyed(glyph))
                     continue
-                _ui.tab(cv, th, r, True)
+                _ui_draw.tab(cv, th, r, True)
                 x += (w - ic) // 2
             if tab == _ZONE_UNDO:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
@@ -504,7 +506,7 @@ class EditorApp:
         """Whether the zone takes the narrow bar: the labeled row drops a tab."""
         tabs_area, _play = self._zone_parts(rect)
         slim = [(tid, label) for tid, label, _ic in self._chips()]
-        return len(_ui.tab_row_rects(tabs_area, slim, self._zone_scale())) < len(slim)
+        return len(_ui_draw.tab_row_rects(tabs_area, slim, self._zone_scale())) < len(slim)
 
     def _open_label(self, rect):
         """The open tab's name for the narrow bar, or "" when the whole ladder
@@ -517,7 +519,7 @@ class EditorApp:
             return ""
         x, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON
-        chip = _ui.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
+        chip = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
                                  self._zone_scale())
         if not chip or not chip[0][2]:
             return ""
@@ -532,10 +534,10 @@ class EditorApp:
         labeled chip with the tab's name (`_open_label`)."""
         x, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON
-        pad = _ui.metrics("tab")[_ui.TAB_PAD] * self._zone_scale()
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * self._zone_scale()
         label = self._open_label(rect)
         if label:
-            wide = _ui.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
+            wide = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
                                      self._zone_scale())[0][1][2]
         else:
             wide = ic + 2 * pad
@@ -616,7 +618,7 @@ class EditorApp:
             if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
             slim = [(tid, label) for tid, label, _ic in self._chips()]
-            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
+            for tid, r, _labels_on in _ui_draw.tab_row_rects(tabs_area, slim,
                                                         self._zone_scale()):
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)

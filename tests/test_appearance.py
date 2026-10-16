@@ -49,7 +49,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import appearance, moy_carts, ui  # noqa: E402
+from runtime import appearance, moy_carts, ui_draw  # noqa: E402
 from runtime.chrome import THEME_NAMES, theme_colors  # noqa: E402
 from runtime.theme_custom import CUSTOM  # noqa: E402
 from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
@@ -180,7 +180,7 @@ def test_persist_false_writes_nothing(tmp_path):
         ws.look.select_wallpaper(None, persist=False)
         assert _stored(ws) == {}
     finally:
-        ui.use_shape(None)          # process-wide state: never leak it
+        ui_draw.use_shape(None)          # process-wide state: never leak it
 
 
 # -- font scale ---------------------------------------------------------------
@@ -435,7 +435,7 @@ def _blob(w, h):
 
 
 def _accent(i):
-    return ui.theme_accents()[i][1]
+    return ui_draw.theme_accents()[i][1]
 
 
 def _writes(ws, monkeypatch):
@@ -461,7 +461,7 @@ def test_the_first_change_on_a_seed_makes_custom_and_switches_to_it(tmp_path):
     assert ws.look.change("accent", _accent(3)) == 0
     assert ws.look.theme_name == "night"          # shown at the next frame
     ws.look.tick(0.0)
-    assert ws.look.theme_name == CUSTOM == ui.theme_installed()
+    assert ws.look.theme_name == CUSTOM == ui_draw.theme_installed()
     assert ws.theme_colors["accent"] == _accent(3)
     assert theme_colors("night") == night, "the seed moved"
     assert not (Path(ws.carts_root) / "custom.moy").exists(), "written per change"
@@ -500,7 +500,7 @@ def test_a_change_on_custom_edits_it_in_place_from_its_source(tmp_path):
     _settle(ws)
     assert _package(ws) == once
     assert _look(ws) == {"from": "night", "tint": "plum"}
-    rc, want = ui.theme_custom("night", None, "plum")
+    rc, want = ui_draw.theme_custom("night", None, "plum")
     assert rc == 0 and _package(ws) == __import__("json").loads(want)
 
 
@@ -518,7 +518,7 @@ def test_a_change_from_another_theme_replaces_custom(tmp_path):
     # forest takes its fonts through the default seed, as custom does now:
     # nothing of the custom before it is left in the folder.
     assert "fonts" not in _package(ws) and not (pkg / "tiny5.fnt").exists()
-    assert ui.theme_fonts(CUSTOM) == ui.theme_fonts("forest")
+    assert ui_draw.theme_fonts(CUSTOM) == ui_draw.theme_fonts("forest")
 
 
 def test_custom_carries_the_font_files_its_fonts_name(tmp_path):
@@ -529,14 +529,14 @@ def test_custom_carries_the_font_files_its_fonts_name(tmp_path):
     ws.look.change("accent", _accent(2))
     _settle(ws)
     pkg = Path(ws.carts_root) / "custom.moy"
-    names = {f for _r, f in ui.theme_fonts("night")}
+    names = {f for _r, f in ui_draw.theme_fonts("night")}
     assert names and _package(ws)["fonts"]
     for f in names:
-        assert (pkg / f).read_bytes() == ui.font_file(f)
+        assert (pkg / f).read_bytes() == ui_draw.font_file(f)
         lic = f[:-4] + ".txt"
-        assert (pkg / lic).read_bytes() == ui.font_file(lic)
+        assert (pkg / lic).read_bytes() == ui_draw.font_file(lic)
     d = _store_package(ws, "pixel", {"fonts": {"ui": "pixel.fnt"}})
-    (d / "pixel.fnt").write_bytes(ui.font_file("tiny5.fnt"))
+    (d / "pixel.fnt").write_bytes(ui_draw.font_file("tiny5.fnt"))
     ws.look.set_theme("pixel")
     ws.look.change("tint", "sand")
     _settle(ws)
@@ -555,7 +555,7 @@ def test_a_change_from_a_store_package_copies_its_files(tmp_path):
     d = _store_package(ws, "sunset", {"fonts": {"ui": "tiny5.fnt"},
                                       "images": {"desk": PICTURE_FILE}})
     blob = _blob(4, 4)
-    (d / "tiny5.fnt").write_bytes(ui.font_file("tiny5.fnt"))
+    (d / "tiny5.fnt").write_bytes(ui_draw.font_file("tiny5.fnt"))
     (d / PICTURE_FILE).write_bytes(blob)
     ws.look.set_theme("sunset")
     assert ws.look.wallpaper_id == ws.look.PICTURE
@@ -574,8 +574,8 @@ def test_ten_changes_land_where_one_would(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     n = _writes(ws, monkeypatch)
     installs = []
-    real = ui.theme_install
-    monkeypatch.setattr(ui, "theme_install", lambda b: installs.append(1) or real(b))
+    real = ui_draw.theme_install
+    monkeypatch.setattr(ui_draw, "theme_install", lambda b: installs.append(1) or real(b))
     for i in range(10):
         ws.look.change("accent", _accent(i))
         ws.look.change("accent", _accent(i + 1))
@@ -653,7 +653,7 @@ def test_edit_file_on_a_seed_makes_custom_and_opens_its_file(tmp_path):
     ws.look.set_theme("forest")
     forest = theme_colors("forest")
     ed = _edit(ws)
-    assert ws.look.theme_name == CUSTOM == ui.theme_installed()
+    assert ws.look.theme_name == CUSTOM == ui_draw.theme_installed()
     assert theme_colors("forest") == forest, "the seed moved"
     assert _look(ws) == {"from": "forest"}
     assert _stored(ws)["theme"] == CUSTOM
@@ -698,7 +698,7 @@ def test_a_saved_role_moves_the_look_and_drops_from(tmp_path):
     ws._exit_to_caller()
     assert ws.look.change("tint", "plum") == 0
     _settle(ws)
-    rc, want = ui.theme_custom(saved, None, "plum")
+    rc, want = ui_draw.theme_custom(saved, None, "plum")
     assert rc == 0 and _package(ws) == __import__("json").loads(want)
     assert _look(ws) == {"tint": "plum"}
 
@@ -788,7 +788,7 @@ def test_a_refused_save_shows_the_note_and_changes_nothing(tmp_path, edit, note)
     ok, badge = ed.save(soft=True)
     assert not ok and badge.startswith("INVALID ")
     if note is not None:
-        assert badge == "INVALID " + ui.s(note)
+        assert badge == "INVALID " + ui_draw.s(note)
     assert ed.badge() == badge
     ws.frame(1 / 30)
     assert _custom_files(ws) == before
@@ -798,7 +798,7 @@ def test_a_refused_save_shows_the_note_and_changes_nothing(tmp_path, edit, note)
     assert after["theme.json"] == text.encode()
     assert after["manifest.json"] == before["manifest.json"]
     assert ws.theme_colors == colors and ws.look.look_gen == gen
-    assert ws.look._cust.theme == held and ui.theme_installed() == CUSTOM
+    assert ws.look._cust.theme == held and ui_draw.theme_installed() == CUSTOM
 
 
 def test_an_unreadable_pair_is_saved_and_noted(tmp_path):
@@ -851,7 +851,7 @@ def test_name_renames_custom_into_a_theme_of_its_own(tmp_path):
     assert man["moybyte"] == {"type": "theme",
                               "look": {"from": "night", "accent": _accent(6)}}
     assert man["title"] == "bubblegum"
-    assert ws.look.theme_name == "bubblegum" == ui.theme_installed()
+    assert ws.look.theme_name == "bubblegum" == ui_draw.theme_installed()
     assert ws.theme_colors == colors, "naming moved the look"
     assert _stored(ws)["theme"] == "bubblegum"
     names = ws.look.theme_names()
@@ -1037,7 +1037,7 @@ def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):
         assert ws2.look.wallpaper_id == ws2.look.wallpaper_options()[0]
         assert ws2.theme_colors == theme_colors("forest", "light")
     finally:
-        ui.use_shape(None)
+        ui_draw.use_shape(None)
 
 
 def test_the_look_is_built_before_anything_reads_it(tmp_path):
@@ -1070,4 +1070,4 @@ def test_an_archived_theme_imports_under_its_own_name(tmp_path):
     again = moy_carts.import_archive(arc, str(other / "carts"))
     assert again.endswith("/bubblegum_2.moy")
     assert json.loads(Path(again, "theme.json").read_bytes())["name"] == "bubblegum_2"
-    assert ui.theme_resolve(Path(again, "theme.json").read_bytes())[0] == 0
+    assert ui_draw.theme_resolve(Path(again, "theme.json").read_bytes())[0] == 0

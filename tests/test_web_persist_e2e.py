@@ -146,13 +146,13 @@ def _host_theme(tmp_path):
     `Appearance.package_rows` digests them)."""
     sys.path.insert(0, str(ROOT / "tests"))
     from ws_helpers import build_ws
-    from runtime import moy_carts, ui
+    from runtime import moy_carts, ui_draw
     ws = build_ws(tmp_path / "host")
     shutil.copytree(ROOT / "tests" / "fixtures" / "themes" / "sprig.moy",
                     os.path.join(ws.carts_root, "sprig.moy"))
     ws.carts.rescan()
     ws.look.set_theme("sprig")
-    assert ws.look.change("accent", ui.theme_accents()[4][1]) == 0
+    assert ws.look.change("accent", ui_draw.theme_accents()[4][1]) == 0
     ws.look.tick(0.0)
     assert ws.look.name_custom("sunset") is None
     folder = os.path.join(ws.carts_root, "sunset.moy")

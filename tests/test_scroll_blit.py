@@ -8,7 +8,7 @@ proxy is DISPATCH COUNT, which models the device verdict and cannot flake):
 
   * Canvas.scroll_rect -- the in-place shift primitive vs a naive reference,
     every direction, overlap-safe, clamped.
-  * ui.ScrollRegion's paint ring -- blit_shift only fires when the target
+  * ui_draw.ScrollRegion's paint ring -- blit_shift only fires when the target
     framebuffer provably holds this view's pixels (consecutive paints, same
     key, canvas capability).
   * The home's carousel + shelf pilots -- a blitted drag frame is
@@ -115,9 +115,9 @@ class _Cv:
 
 
 def _region(extent=100, content=400):
-    from runtime import ui
+    from runtime import ui_draw
 
-    r = ui.ScrollRegion()
+    r = ui_draw.ScrollRegion()
     r.set((0, 0, 50, extent), content)
     return r
 

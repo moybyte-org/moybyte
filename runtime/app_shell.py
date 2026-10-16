@@ -43,8 +43,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 try:
     from editors_base import TE_COMMIT, TE_CANCEL
@@ -70,22 +72,22 @@ class ListShellLayout:
 
     def print_line(self):
         """The print font's line at the font scale: what a row of text needs."""
-        return _ui.font("ui")[2] * self.fs
+        return _ui_draw.font("ui")[2] * self.fs
 
     def char_w(self):
         """A character cell at the font scale: the print font's glyph box,
         never under petme128's 8 rows. A margin counted in characters is
         this many pixels each."""
-        return max(8, _ui.font("ui")[1]) * self.fs
+        return max(8, _ui_draw.font("ui")[1]) * self.fs
 
     def dy(self, k):
         """A text line's top offset, `k` rows of petme128 at the font scale,
         centred for the print font (`ui.line_dy`)."""
-        return _ui.line_dy(k * self.fs, self.fs)
+        return _ui_draw.line_dy(k * self.fs, self.fs)
 
     def cut(self, s, w, chars=0):
         """`s` cut to draw in `w` pixels less `chars` characters' margin."""
-        return _ui.print_cut(s, w - chars * self.char_w(), self.fs)
+        return _ui_draw.print_cut(s, w - chars * self.char_w(), self.fs)
 
     def band(self, k, pad):
         """A band `k` rows tall at the font scale, or the print font's line
@@ -95,7 +97,7 @@ class ListShellLayout:
     def label_w(self, label, pad):
         """A chip's width for `label`: its printed width plus `pad` rows of
         petme128 at the font scale."""
-        return (_ui.print_width(label) + pad) * self.fs
+        return (_ui_draw.print_width(label) + pad) * self.fs
 
     def _init_list(self, top):
         """The notebook-list rows below `top` (the title/toolbar band's bottom)."""
@@ -185,7 +187,7 @@ class ListShellApp:
         in `dim`), which left three byte-identical two-line DELEGATES -- and
         Storybook's, which was the same call with the two arguments it never
         passes left off. They are this one method now."""
-        _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
+        _ui_draw.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
                  glyph=glyph, disabled=not enabled)
 
     # -- typed keys ------------------------------------------------------------
@@ -257,8 +259,8 @@ class ListShellApp:
         while a drag is live: re-snapping from `top` every sample would discard
         normal 3-5px finger travel, so a gradual drag could never cross a row."""
         if self._rows_scroll is None:
-            self._rows_scroll = _ui.ScrollRegion()
-            self._rows_taps = _ui.DragTap(self._rows_scroll)
+            self._rows_scroll = _ui_draw.ScrollRegion()
+            self._rows_taps = _ui_draw.DragTap(self._rows_scroll)
         lay = self.layout
         self._rows_scroll.set(lay.rows_view(), count * lay.row_h)
         if not self._rows_scroll.drag_active:

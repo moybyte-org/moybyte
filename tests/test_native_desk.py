@@ -16,7 +16,7 @@ import os
 
 import pytest
 
-from runtime import host_app, layout_base, ui
+from runtime import host_app, layout_base, ui_draw
 from runtime.app_shell import ListShellLayout
 from runtime.chrome import text_scale_floor
 from runtime.files_app import FilesLayout
@@ -138,13 +138,13 @@ def test_the_text_floor_answers_1_on_the_desks_for_the_font_set(name, size, diag
     faces = sorted(f for f in os.listdir(FONTS) if f.endswith(".fnt"))
     assert faces
     for face in faces:
-        rc, fid = ui._C.font_load(open(os.path.join(FONTS, face), "rb").read())
+        rc, fid = ui_draw._C.font_load(open(os.path.join(FONTS, face), "rb").read())
         assert rc == 0, face
         try:
-            asc = ui.font_info(fid)[3]
+            asc = ui_draw.font_info(fid)[3]
             assert text_scale_floor(size[0], size[1], diag, asc) == 1, (name, face)
         finally:
-            ui._C.font_free(fid)
+            ui_draw._C.font_free(fid)
 
 
 # -- line metrics ------------------------------------------------------------------
@@ -156,26 +156,26 @@ def test_the_list_apps_read_the_print_fonts_line(tmp_path):
     lay = FilesLayout(320, 240, 1)
     assert (lay.top_h, lay.action_h, lay.status_h, lay.row_h) == (24, 20, 14, 20)
     sample = os.path.join(ROOT, "tests", "fixtures", "fonts", "sample6x9.fnt")
-    rc, fid = ui._C.font_load(open(sample, "rb").read())
+    rc, fid = ui_draw._C.font_load(open(sample, "rb").read())
     assert rc == 0
     try:
-        ui.use_font("ui", fid)
-        line = ui.font("ui")[2]
+        ui_draw.use_font("ui", fid)
+        line = ui_draw.font("ui")[2]
         big = FilesLayout(320, 240, 2)
         assert big.row_h >= line * 2 + 4 * 2
         assert big.top_h >= line * 2 + 8 * 2
         assert isinstance(big, ListShellLayout)
         assert big.cut("A LABEL FAR TOO LONG FOR ITS BOX", 60) \
-            == ui.print_cut("A LABEL FAR TOO LONG FOR ITS BOX", 60, 2)
+            == ui_draw.print_cut("A LABEL FAR TOO LONG FOR ITS BOX", 60, 2)
     finally:
-        ui.use_font("ui", 0)
-        ui._C.font_free(fid)
+        ui_draw.use_font("ui", 0)
+        ui_draw._C.font_free(fid)
 
 
 # -- the 2x option -----------------------------------------------------------------
 
 def _double(name="double", base="moy"):
-    rc, _notes = ui._C.theme_install(json.dumps(
+    rc, _notes = ui_draw._C.theme_install(json.dumps(
         {"format": 2, "name": name, "inherits": base,
          "look": {"render": {"scale": 2}}}).encode())
     assert rc == 0
@@ -207,7 +207,7 @@ def test_a_render_scale_2_theme_draws_the_desk_at_half_and_doubles_it(tmp_path):
         assert (ws.pointer.x, ws.pointer.y) == (200, 149)
     finally:
         ws.look.set_theme("moy", persist=False, variant="light")
-        ui._C.theme_uninstall()
+        ui_draw._C.theme_uninstall()
     assert ws.render_scale == 1 and ws.sys_canvas is ws.glass_canvas
     assert (ws.sys_canvas.w, ws.layout.status_h) == (1024, 40)
     assert ws.pointer.div == 1
@@ -220,4 +220,4 @@ def test_render_scale_2_is_a_desks_alone(tmp_path):
         hh.look.set_theme("double", persist=False)
         assert hh.render_scale == 1 and hh.sys_canvas.w == 480
     finally:
-        ui._C.theme_uninstall()
+        ui_draw._C.theme_uninstall()

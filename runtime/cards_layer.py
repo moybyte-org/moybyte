@@ -38,8 +38,10 @@ ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 try:
     import text_modes as _modes
@@ -332,7 +334,7 @@ class CardsLayer:
             self._dragv = py
             return
         was = self.mtop
-        self._dragv, self.mtop = _ui.row_drag(self._dragv, py,
+        self._dragv, self.mtop = _ui_draw.row_drag(self._dragv, py,
                                               max(1, lay.card_h + lay.gap),
                                               self.mtop, self._max_mtop())
         if self.mtop != was:
@@ -681,15 +683,15 @@ class CardsLayer:
             # Say why, and leave the ADVANCED row below as the way to the file.
             cv.print("MANIFEST BROKEN", lay.head_xy[0], lay.head_xy[1],
                      self._NAMES["red"], 2)
-            cv.print(_ui.print_cut(broken, lay.card_w, lay.fs),
+            cv.print(_ui_draw.print_cut(broken, lay.card_w, lay.fs),
                      lay.card_x, lay.card_y0, t["text"], 1)
         else:
             cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
-        _ui.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
+        _ui_draw.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
-            _ui.scroll_cues(
+            _ui_draw.scroll_cues(
                 cv, (lay.scroll_up[0], lay.scroll_up[1]),
                 (lay.scroll_dn[0], lay.scroll_dn[1]),
                 self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)
@@ -714,7 +716,7 @@ class CardsLayer:
         # a stepper card (clear of the -/+ glyphs) and 2px in on a visual one.
         # The stepper glyphs and the picture displays below are this card's own
         # CONTENT -- `row` draws the row, not the card.
-        _ui.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
+        _ui_draw.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
                 kind="row_chrome", on=sel, edge=False,
                 pad=(18 if disp is None else 2) * fs, text_dy=1 * fs, fs=fs)
         if disp is None:                                # today's plain text card
@@ -737,7 +739,7 @@ class CardsLayer:
         fs = self.layout.fs
         t = self._t
         x, y, w, h = row["x"], row["y"], row["w"], row["h"]
-        _ui.row(cv, t, (x, y - 1 * fs, w, h), _ADVANCED_ROW,
+        _ui_draw.row(cv, t, (x, y - 1 * fs, w, h), _ADVANCED_ROW,
                 kind="row_chrome", on=(row["i"] == self.msel), edge=False,
                 pad=6 * fs, text_dy=1 * fs, fs=fs)
         cv.print(">", x + w - 10 * fs, y + 1 * fs, t["accent"], fs)
@@ -760,12 +762,12 @@ class CardsLayer:
         # The row FRAME only: the "!" and the reason are content with their own
         # budget (the message is already clipped to 32 chars, which `row`'s
         # symmetric pad would re-clip to 30).
-        _ui.row(cv, self._t, (x, y, w, h), None,
+        _ui_draw.row(cv, self._t, (x, y, w, h), None,
                 colors=(NAMES["dark_grey"], NAMES["light_grey"], NAMES["red"]),
                 fs=fs)
         cv.print("!", x + 4 * fs, y + max(0, (h - 8 * fs) // 2), NAMES["red"], 2)
-        msg = _ui.print_cut("%s: %s" % (label, row["error"]), w - 24 * fs, fs)
-        cv.print(msg, x + 20 * fs, y + max(0, (h - _ui.font("ui")[2]) // 2),
+        msg = _ui_draw.print_cut("%s: %s" % (label, row["error"]), w - 24 * fs, fs)
+        cv.print(msg, x + 20 * fs, y + max(0, (h - _ui_draw.font("ui")[2]) // 2),
                  NAMES["light_grey"], 1)
 
     def _draw_gauge(self, row):
@@ -852,7 +854,7 @@ class CardsLayer:
                 img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
             else:
                 glyph = icons[k] if k < len(icons) else "dot"
-            art = _ui.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
+            art = _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
                            colors=(NAMES["black"] if chosen else t["cell"],
                                    NAMES["white"],
                                    NAMES["yellow"] if chosen else t["cell_edge"]),
@@ -903,7 +905,7 @@ class CardsLayer:
             # inset rect and the cell puts the selection border around it.
             self._draw_bg_thumb(f["choices"][k],
                                 (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
-            _ui.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
+            _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
                      colors=(None, t["cell_edge"],
                              NAMES["yellow"] if k == sel_k else t["cell_edge"]))
 
@@ -1069,18 +1071,18 @@ class CardsLayer:
         cv.rectb(*(lay.body + (t["edge"],)))
         ws._glyph("code", lay.head_glyph, t["accent"], cv)
         cv.print("PROJECT FILES", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
-        _ui.mini_btn(cv, lay.info_btn, "BACK", t["accent"])
+        _ui_draw.mini_btn(cv, lay.info_btn, "BACK", t["accent"])
         rows = self._files_rects()
         if not rows:
             cv.print(f["msg"] or "NO FILES", lay.card_x, lay.card_y0,
                      t["text"], lay.fs)
             return
         for rect, name, k in rows:
-            _ui.row(cv, t, rect, name, kind="row_chrome", on=(k == f["sel"]),
+            _ui_draw.row(cv, t, rect, name, kind="row_chrome", on=(k == f["sel"]),
                     edge=False, pad=6 * lay.fs, text_dy=1 * lay.fs, fs=lay.fs)
         if f["msg"]:
-            cv.print(_ui.print_cut(f["msg"], lay.card_w, lay.fs), lay.card_x,
-                     lay.view_bottom - _ui.font("ui")[2] * lay.fs,
+            cv.print(_ui_draw.print_cut(f["msg"], lay.card_w, lay.fs), lay.card_x,
+                     lay.view_bottom - _ui_draw.font("ui")[2] * lay.fs,
                      self._NAMES["red"], lay.fs)
 
     # -- the two dialogs: CART INFO (#94) and NEW SCRIPT (#89) ---------------
@@ -1246,15 +1248,15 @@ class CardsLayer:
         fs = self.layout.fs
         p = self.prompt
         (x, y, w, h), fields, ok_r, cancel_r = self._prompt_rects()
-        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print(p.title, x + 10 * fs, y + _ui.line_dy(8 * fs, fs), NAMES["white"], 1)
+        _ui_draw.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
+        cv.print(p.title, x + 10 * fs, y + _ui_draw.line_dy(8 * fs, fs), NAMES["white"], 1)
         for i, r in enumerate(fields):
             cv.print(p.labels[i], x + 12 * fs, r[1] - 9 * fs, NAMES["light_grey"], 1)
-            _ui.text_field(cv, r, p.fields[i].text, p.hints[i])
+            _ui_draw.text_field(cv, r, p.fields[i].text, p.hints[i])
             if i == p.field:
                 cv.rectb(r[0], r[1], r[2], r[3], NAMES["yellow"])
         if p.msg:
-            cv.print(_ui.print_cut(p.msg, w - 24 * fs, fs), x + 12 * fs, y + h - 38 * fs,
+            cv.print(_ui_draw.print_cut(p.msg, w - 24 * fs, fs), x + 12 * fs, y + h - 38 * fs,
                      NAMES["red"], 1)
-        _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
-        _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])
+        _ui_draw.game_btn(cv, ok_r, "OK", NAMES["green"])
+        _ui_draw.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])

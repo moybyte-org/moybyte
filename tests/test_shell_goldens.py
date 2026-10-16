@@ -169,7 +169,7 @@ command as the hashes. Only the system canvas counts: a window's own canvas on
 the desk is not in the number.
 
 No frame of a surface's render draws more than one focus mark (the
-engine's count, `ui.marks`): a screen shows one, and a window behind draws none
+engine's count, `ui_draw.marks`): a screen shows one, and a window behind draws none
 (docs/media/look_2026-10/DESIGN.md, the marks). The window manager clears
 the marks while a window behind draws, so a second mark is an app's.
 
@@ -198,6 +198,7 @@ one sentence which pixel moved and why, the change is a revert, not an update
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -267,6 +268,12 @@ APPS = ("artwork", "appearance", "storybook", "files", "calc", "getcarts")
 # game is the spec's domain and free to use rnd(). An app cart draws a settled
 # surface out of stored content, which is what every other row here does.
 APP_CARTS = (("notes", "Notes"),)
+
+# The public UI API's fixture page (docs/ui_api_2026-10.md), the Python app's
+# (tests/test_ui_public.py holds the Lua and compiled ones to its pixels): its
+# config's one surface.
+UI_PAGE = (str(Path(__file__).resolve().parent / "fixtures" / "ui_page" / "page_py.moy"),
+           "UI Page Py")
 
 # The WEB CONSOLE connection screen (#197) is rendered LAST, and with a fake
 # service, for two reasons that are both about not moving the other 87 hashes:
@@ -414,6 +421,9 @@ CONFIGS = {
     "guition_p4_1280x800_windowed": dict(
         sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
         diagonal_in=10.1),
+    "tdeck_320x240_fs1_ui_page": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="ui_page"),
     "p4_1024x600_render2_moy_day": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
         diagonal_in=7.0, theme="moy", render=2),
@@ -528,6 +538,9 @@ def _cart_by_title(ws, title):
 
 def _build(cfg, carts_dir):
     from runtime import host_app
+    if cfg.get("plan") == "ui_page":
+        host_app.moy_carts.ensure_dirs(str(carts_dir))
+        shutil.copytree(UI_PAGE[0], os.path.join(str(carts_dir), os.path.basename(UI_PAGE[0])))
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"],
         font_scale=cfg["font_scale"], windowed=cfg["windowed"],
@@ -581,6 +594,8 @@ def _surface_plan(ws, cfg):
         return _widget_page_plan(ws)
     if cfg.get("plan") == "home":
         return _home_plan(ws, cfg)
+    if cfg.get("plan") == "ui_page":
+        return [("ui_page", lambda: open_cart(ws, UI_PAGE[1]))]
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -794,6 +809,8 @@ def surface_names(config_name):
         return ["page_" + w for w in WIDGETS]
     if cfg.get("plan") == "home":
         return ["launcher" if t == "games" else "launcher_" + t for t in HOME_TAB_IDS]
+    if cfg.get("plan") == "ui_page":
+        return ["ui_page"]
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
@@ -810,8 +827,8 @@ def surface_names(config_name):
 
 
 def _ui():
-    from runtime import ui
-    return ui
+    from runtime import ui_draw
+    return ui_draw
 
 
 def capture(config_name, carts_dir):
@@ -905,17 +922,17 @@ def _pin_cover_budget(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _hits_peak(monkeypatch):
-    """The most rects one `ui.Hits` holds at once while the goldens render."""
-    from runtime import ui
+    """The most rects one `ui_draw.Hits` holds at once while the goldens render."""
+    from runtime import ui_draw
     peak = [0]
-    add = ui.Hits.add
+    add = ui_draw.Hits.add
 
     def counting(self, rect, verb, arg=None):
         add(self, rect, verb, arg)
         if len(self._items) > peak[0]:
             peak[0] = len(self._items)
 
-    monkeypatch.setattr(ui.Hits, "add", counting)
+    monkeypatch.setattr(ui_draw.Hits, "add", counting)
     return peak
 
 
@@ -924,12 +941,13 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
                                      monkeypatch):
     peak = _hits_peak(monkeypatch)
     from runtime import ui
-    del ui.primary_warnings[:]
-    ui._PRIMARY_WARNED.clear()
+    from runtime import ui_draw
+    del ui_draw.primary_warnings[:]
+    ui_draw._PRIMARY_WARNED.clear()
     got = capture(config_name, tmp_path / "carts")
-    assert ui.primary_warnings == [], (
+    assert ui_draw.primary_warnings == [], (
         "a surface draws more than one primary button in a frame (DESIGN.md, "
-        "'Button kinds'): %r" % ui.primary_warnings)
+        "'Button kinds'): %r" % ui_draw.primary_warnings)
     many = {s: n for (c, s), n in _MARKED.items() if c == config_name and n > 1}
     assert not many, (
         "a frame draws more than one focus mark (DESIGN.md, the marks: "

@@ -38,9 +38,9 @@ try:
 except ImportError:  # pragma: no cover - no proof: every compile arms
     crc32 = None
 try:
-    from ui import cart_text as _cart_text
+    from ui_draw import cart_text as _cart_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui import cart_text as _cart_text
+    from runtime.ui_draw import cart_text as _cart_text
 try:
     from widgets import Pmem, _Blit, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased

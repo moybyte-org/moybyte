@@ -9,9 +9,11 @@
 try:
     from moyimg import decode_moyimg
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moyimg import decode_moyimg
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 _in = _ui.rect_in
 
@@ -200,22 +202,22 @@ class FileGridView:
         x, y, w, h = self._rect
         if not self.names:
             msg = "NOTHING HERE YET"
-            cv.print(msg, x + (w - _ui.print_width(msg, fs)) // 2,
+            cv.print(msg, x + (w - _ui_draw.print_width(msg, fs)) // 2,
                      y + (h - 8 * fs) // 2, th.get("dim", 1), 1)
             return
         start = self.page * self._per_page()
         # The thumbnail cache is sized ONCE, outside the loop, off the same pure
         # geometry every cell will hand back (ui.cell_art_rect is separate from
         # ui.cell for exactly this).
-        _ax, _ay, art_w, art_h = _ui.cell_art_rect(
+        _ax, _ay, art_w, art_h = _ui_draw.cell_art_rect(
             (0, 0, self.cell_w, self.cell_h), fs, 2 * fs, _CAPTION_H * fs)
         hover, pressed = self.hover, self.pressed
         for i in range(start, min(start + self._per_page(), len(self.names))):
             name = self.names[i]
-            ax, ay, _aw, _ah = _ui.cell(
+            ax, ay, _aw, _ah = _ui_draw.cell(
                 cv, th, self._cell_rect(i - start), name, on=(i == self.sel),
                 focus=(i == self.sel),
-                state=_ui.cell_state(i, hover, pressed), fs=fs)
+                state=_ui_draw.cell_state(i, hover, pressed), fs=fs)
             bmp = self._thumb(name, art_w, art_h) if self.kind == "drawings" else None
             if bmp is not None:
                 cv.spr(bmp, ax, ay)
@@ -227,7 +229,7 @@ class FileGridView:
             cv.print("<", prev_r[0] + 8 * fs, prev_r[1] + 3 * fs, ink, 1)
             cv.print(">", next_r[0] + 8 * fs, next_r[1] + 3 * fs, ink, 1)
             label = str(self.page + 1) + "/" + str(self._pages())
-            cv.print(label, x + (w - _ui.print_width(label, fs)) // 2,
+            cv.print(label, x + (w - _ui_draw.print_width(label, fs)) // 2,
                      prev_r[1] + 3 * fs, th.get("dim", 1), 1)
 
     def _index_at(self, px, py):

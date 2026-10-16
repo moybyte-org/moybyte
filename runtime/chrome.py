@@ -46,9 +46,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The toolkit's face: the display type's widths go through its text path.
 try:
-    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 
 # Surface geometry constants the Layout classes derive their responsive rects from.
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
@@ -293,7 +293,7 @@ class Layout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        _fid, fw, line, _asc = _ui.font("ui")
+        _fid, fw, line, _asc = _ui_draw.font("ui")
         self.font_w = fw * fs
         self.line_h = line * fs
 
@@ -536,7 +536,7 @@ class CodeLayout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        _fid, fw, line, _asc = _ui.font("mono")
+        _fid, fw, line, _asc = _ui_draw.font("mono")
         self.cell = fw * fs
         self.lh = (line + _CODE_LEAD) * fs
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
@@ -585,7 +585,7 @@ def _gbtn(ws, names, kind, label, rect, fill, cv):
     button's label ink) over it. Falls back to the word `label` when the glyph
     kind is missing (or None), so the row is never blank. The ONE body behind
     the map/music/block editor surfaces' `_gbtn` delegates."""
-    if _ui.glyph_id(kind) >= 0:
+    if _ui_draw.glyph_id(kind) >= 0:
         ws._btn("", rect, fill, cv)
         ws._glyph(kind, rect, names["black"], cv)
     else:
@@ -615,7 +615,7 @@ def _text_w(cv, s, mult=1):
     fs = getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
-    return _ui.print_width(s, fs * max(1, int(mult)))
+    return _ui_draw.print_width(s, fs * max(1, int(mult)))
 
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------
@@ -815,7 +815,7 @@ _ICON_VERSION = 5
 # installing it (`moy_ui.theme_resolve`), as is the one installed package
 # beside the seeds (`theme_known`); a name no package provides resolves as the
 # default.
-THEME_NAMES = _ui._C.themes()
+THEME_NAMES = _ui_draw._C.themes()
 DEFAULT_THEME = THEME_NAMES[0]
 THEME_VARIANTS = ("dark", "light")
 DEFAULT_VARIANT = "dark"
@@ -853,9 +853,9 @@ def package(name):
         read = _PKG_READ[0]
         src = read(name) if read is not None else None
         if src is None:
-            got = (_ui._C.theme_resolve(b"")[0], 0) + (None,) * 8
+            got = (_ui_draw._C.theme_resolve(b"")[0], 0) + (None,) * 8
         else:
-            got = _ui._C.theme_resolve(src)
+            got = _ui_draw._C.theme_resolve(src)
             if got[0] == 0 and got[2] != name:
                 got = (4, got[1]) + (None,) * 8
         _PACKAGES[name] = got
@@ -877,18 +877,18 @@ def theme_names():
 def theme_known(name):
     """True for a seed's name, a store package that resolves, or the
     installed package's."""
-    return (name in THEME_NAMES or name == _ui._C.theme_installed()
+    return (name in THEME_NAMES or name == _ui_draw._C.theme_installed()
             or package_ok(name))
 
 
 def _row(name, light):
     """`name`'s role row: the installed slot's or a seed's from the loader,
     a store package's from its resolved bytes."""
-    if name not in THEME_NAMES and name != _ui._C.theme_installed():
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
         got = package(name)
         if got is not None and got[0] == 0:
             return got[4 if light else 3][0]
-    return _ui._C.theme(name, light)[0]
+    return _ui_draw._C.theme(name, light)[0]
 
 
 def theme_colors(name, variant=DEFAULT_VARIANT):
@@ -905,7 +905,7 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
     if cached is None:
         row = _row(name, variant == "light")
         cached = {}
-        for role, v in zip(_ui._C.tokens(), row):
+        for role, v in zip(_ui_draw._C.tokens(), row):
             cached[role] = bool(v) if role in _THEME_FLAGS else v
         _THEME_CACHE[key] = cached
     return cached
@@ -928,11 +928,11 @@ def forget_themes():
 
 
 def _look_raw(name, light):
-    if name not in THEME_NAMES and name != _ui._C.theme_installed():
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
         got = package(name)
         if got is not None and got[0] == 0:
             return got[8][1 if light else 0]
-    return _ui._C.theme_look(name, light)
+    return _ui_draw._C.theme_look(name, light)
 
 
 def backdrop(name, variant, surface):
@@ -942,11 +942,11 @@ def backdrop(name, variant, surface):
     if not theme_known(name):
         name = DEFAULT_THEME
     light = variant == "light"
-    if name not in THEME_NAMES and name != _ui._C.theme_installed():
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
         got = package(name)
         if got is not None and got[0] == 0:
             return got[9][1 if light else 0][0 if surface == "home" else 1]
-    return _ui._C.theme_backdrop(name, light, surface)
+    return _ui_draw._C.theme_backdrop(name, light, surface)
 
 
 _LOOK_FIELDS = []
@@ -956,7 +956,7 @@ def look_fields():
     """The look's leaves (`moy_ui.theme_look_fields`): (names, kinds, a
     button's leaf names)."""
     if not _LOOK_FIELDS:
-        _LOOK_FIELDS.append(_ui._C.theme_look_fields())
+        _LOOK_FIELDS.append(_ui_draw._C.theme_look_fields())
     return _LOOK_FIELDS[0]
 
 
@@ -1023,10 +1023,10 @@ def live_colors(name, variant=DEFAULT_VARIANT):
     leaves = look[0]
     at = [i for i in range(len(leaves)) if kinds[i] == "colour"]
     rows, spots = _button_rows(look, names, kinds, btn)
-    placed, near, block, used = _ui._C.theme_place(
+    placed, near, block, used = _ui_draw._C.theme_place(
         list(row) + [leaves[i] for i in at] + [rows[r][2][j] for r, j in spots])
-    toks = _ui._C.tokens()
-    roles = _ui._C.theme_roles()
+    toks = _ui_draw._C.tokens()
+    roles = _ui_draw._C.theme_roles()
     rec = Live()
     rec.tokens, rec.content, near_tok = {}, {}, {}
     for i in range(len(roles)):
@@ -1053,12 +1053,12 @@ def live_colors(name, variant=DEFAULT_VARIANT):
 
 def rgb565_of(v):
     """A colour value's RGB565 word: an index's, a block slot's or RGB's."""
-    return _ui._C.theme_rgb(v)[0]
+    return _ui_draw._C.theme_rgb(v)[0]
 
 
 def nearest_of(v):
     """A colour value's nearest MOY64 index."""
-    return _ui._C.theme_rgb(v)[2]
+    return _ui_draw._C.theme_rgb(v)[2]
 
 
 def theme_content(name, variant=DEFAULT_VARIANT):
@@ -1073,8 +1073,8 @@ def theme_content(name, variant=DEFAULT_VARIANT):
     cached = _CONTENT_CACHE.get(key)
     if cached is None:
         row = _row(name, variant == "light")
-        roles = _ui._C.theme_roles()
-        n = len(_ui._C.tokens())
+        roles = _ui_draw._C.theme_roles()
+        n = len(_ui_draw._C.tokens())
         cached = {}
         for i in range(n, len(roles)):
             cached[roles[i]] = row[i]

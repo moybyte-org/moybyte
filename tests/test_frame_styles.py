@@ -13,7 +13,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from runtime import ui
+from runtime import ui_draw
 from runtime.chrome import theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
@@ -32,10 +32,10 @@ def frame():
         d = {"format": 2, "name": "framed", "frame": fr}
         rc, notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == OK
-        ui.use_shape("framed")
+        ui_draw.use_shape("framed")
         return notes
     yield use
-    ui.use_shape(None)
+    ui_draw.use_shape(None)
 
 
 def _names(btns):
@@ -68,23 +68,23 @@ def test_the_styles_and_orders_are_style_jsons():
 ])
 def test_each_styles_own_button_order(frame, style, want):
     frame(style=style)
-    btns = ui.frame_buttons((10, 10, 300, 200), 18, "HELLO", True, 1)
+    btns = ui_draw.frame_buttons((10, 10, 300, 200), 18, "HELLO", True, 1)
     assert _names(btns) == want
-    no_min = ui.frame_buttons((10, 10, 300, 200), 18, "HELLO", False, 1)
+    no_min = ui_draw.frame_buttons((10, 10, 300, 200), 18, "HELLO", False, 1)
     assert _names(no_min) == [b for b in want if b[0] != "min"]
 
 
 def test_a_theme_orders_the_buttons(frame):
     frame(style="classic", buttons="ZT|CM")
-    btns = ui.frame_buttons((0, 0, 200, 100), 18, "T", True, 1)
+    btns = ui_draw.frame_buttons((0, 0, 200, 100), 18, "T", True, 1)
     assert _names(btns) == [("max", False), ("close", True), ("min", True)]
     left = btns[0][1]
     assert left[0] == 2 and btns[-1][1][0] + btns[-1][1][2] == 200 - 2
 
 
 def test_classic_is_the_frame_without_a_theme():
-    ui.use_shape(None)
-    btns = ui.frame_buttons((10, 10, 300, 200), 36, "HELLO", True, 2)
+    ui_draw.use_shape(None)
+    btns = ui_draw.frame_buttons((10, 10, 300, 200), 36, "HELLO", True, 2)
     ic = 32
     assert [r for _n, r, _s in btns] == [
         (10 + 300 - 2 - ic - 2 * (ic + 4), 13, ic, ic),
@@ -103,7 +103,7 @@ def test_every_style_stays_in_the_footprint(frame, style, active, fs):
     cv = SystemCanvas(200, 120)
     cv.cls(BG)
     x, y, w, h, t = 20, 10, 140, 90, 18 * fs
-    ui.frame(cv, th, (x, y, w, h), t, "A LONG WINDOW TITLE", active, True, fs)
+    ui_draw.frame(cv, th, (x, y, w, h), t, "A LONG WINDOW TITLE", active, True, fs)
     px = indices_of(cv)
     for j in range(cv.h):
         for i in range(cv.w):
@@ -114,7 +114,7 @@ def test_every_style_stays_in_the_footprint(frame, style, active, fs):
             if content or not (inside or shadow):
                 assert px[j * cv.w + i] == BG, (style, i, j)
     # the buttons are inside the strip
-    for _n, (bx, by, bw, bh), _s in ui.frame_buttons((x, y, w, h), t, "A LONG WINDOW TITLE",
+    for _n, (bx, by, bw, bh), _s in ui_draw.frame_buttons((x, y, w, h), t, "A LONG WINDOW TITLE",
                                                       True, fs):
         assert x < bx and bx + bw < x + w and y < by and by + bh <= y + 1 + t
 
@@ -143,7 +143,7 @@ def test_the_band(frame, style):
     th = theme_colors("night")
     cv = SystemCanvas(40, 20)
     cv.cls(BG)
-    ui.frame_band(cv, th, (0, 0, 40, 12))
+    ui_draw.frame_band(cv, th, (0, 0, 40, 12))
     px = indices_of(cv)
     assert px[5 * 40 + 5] == th["bar"]
     want = th["shade_dark"] if style == "win9x" else th["bar_edge"]
@@ -153,7 +153,7 @@ def test_the_band(frame, style):
     cv.cls(BG)
     cv.clip(0, 0, 40, 11)
     cv.gate_counts_reset()
-    ui.frame_band(cv, th, (0, 0, 40, 12), True)
+    ui_draw.frame_band(cv, th, (0, 0, 40, 12), True)
     cv.clip()
     px = indices_of(cv)
     assert px[5 * 40 + 5] == th["surface"] and px[11 * 40 + 5] == BG

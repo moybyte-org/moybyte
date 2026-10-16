@@ -16,7 +16,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from runtime import chrome, ui
+from runtime import chrome, ui_draw
 from ws_helpers import build_desktop_ws, build_ws
 
 THEME = "mine"
@@ -140,13 +140,13 @@ def test_the_toolkit_ring_re_resolves_a_dict_it_holds(tmp_path):
     in its own slot after a publish, never a second entry."""
     ws = build_ws(tmp_path)
     th = ws.theme_colors
-    ui.state_colors(th, "button", ui.REST)
-    ring = [e for e in ui._RING if e[0] is th]
+    ui_draw.state_colors(th, "button", ui_draw.REST)
+    ring = [e for e in ui_draw._RING if e[0] is th]
     assert len(ring) == 1
     slot, gen = ring[0][1], ring[0][3]
     ws.look.publish()
-    ui.state_colors(th, "button", ui.REST)
-    ring = [e for e in ui._RING if e[0] is th]
+    ui_draw.state_colors(th, "button", ui_draw.REST)
+    ring = [e for e in ui_draw._RING if e[0] is th]
     assert len(ring) == 1 and ring[0][1] == slot and ring[0][3] != gen
 
 
@@ -248,7 +248,7 @@ def test_re_installing_replaces_every_cache_entry(tmp_path, desk):
 
     def sizes():
         strips = ws.bar_layer._bar_strips
-        return (len(ui._RING), len(chrome._THEME_CACHE), len(chrome._CONTENT_CACHE),
+        return (len(ui_draw._RING), len(chrome._THEME_CACHE), len(chrome._CONTENT_CACHE),
                 len(ws.look._layouts), len(strips),
                 max((len(v) for v in strips.values()), default=0),
                 ws.wm._backdrop is not None if desk else None)
@@ -262,7 +262,7 @@ def test_re_installing_replaces_every_cache_entry(tmp_path, desk):
         assert ws.look.install_theme(_pkg(accent=3 + i, panel=i))[0] == 0
         _settle(ws, force=False)
         assert sizes() == want, i
-    assert len(ui._RING) <= ui._RING_MAX
+    assert len(ui_draw._RING) <= ui_draw._RING_MAX
 
 
 def test_a_refused_install_moves_nothing(tmp_path):

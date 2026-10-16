@@ -49,8 +49,9 @@ int moy_app_wasm_row(uint32_t i);
 int moy_app_wasm_row_named(const char *name, size_t n);
 
 // The run the natives serve: `a`, grant `g` and the role mask (1 << MOY_ROLE_*)
-// its permissions name (NULL, 0, 0: none). While none is bound every native
-// answers -MOY_APP_STALE. end: the bound run is over, its grant ended and
+// its permissions name (g 0: none). While none is bound every native
+// answers -MOY_APP_STALE. `a` stays the state the theme is read from with no
+// run bound, as a Lua cart's `ui` reads it. end: the bound run is over, its grant ended and
 // unbound (the Player's, at a run's end and at the start after a stopped one).
 void moy_app_wasm_bind(moy_appabi_t *a, uint32_t g, uint32_t roles);
 void moy_app_wasm_end(void);
@@ -71,10 +72,10 @@ typedef int (*moy_app_import_fn)(void *ctx, const uint8_t *mod, size_t mn,
 int moy_app_wasm_imports(const uint8_t *head, size_t n, moy_app_import_fn fn, void *ctx);
 
 // The live theme's token row and its name (NUL-terminated in `cap` bytes),
-// read under the state's seqlock for the toolkit's rows
+// read under the state's seqlock for the public UI API's RUN face
 // (native/moy_ui/moy_ui_wasm.h): copied only when the generation differs
-// from `have`. Answers a generation that is never 0, or 0 while no run is
-// bound.
+// from `have`. Answers a generation that is never 0, or 0 while no state
+// was ever bound.
 uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
                             uint32_t cap);
 
