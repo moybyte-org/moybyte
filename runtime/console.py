@@ -182,9 +182,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # and the #105 favorites/recents. What a shelf CARD looks like (the pseudo
 # tiles, the search filter, the app-claim hiding) stays kernel, below.
 try:
-    from cart_manager import CartManager
+    from cart_manager import CartManager, today_ymd as _today_ymd
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_manager import CartManager
+    from runtime.cart_manager import CartManager, today_ymd as _today_ymd
 
 # system.json's owner (#209 landing B, system_store.py): the settings rows
 # `ws.system` aliases (written through one persisting setter), and the
@@ -3086,6 +3086,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 if it.get("type") in PSEUDO_TILE_TYPES
                 or q in it.get("title", "").lower()]
 
+    def _today_ymd(self):
+        return _today_ymd(self)
+
     def _home_grid(self, arrangement, items):
         """The home's card model for `arrangement` (docs/shell_layout_2026-10.md
         §12): the Carousel, the shelf grid (the home window's, always) or
@@ -3100,6 +3103,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
         g.own_for = self.carts.is_own
+        g.plays_for = self.carts.plays
+        g.today_for = self._today_ymd
         g.theme = getattr(self, "theme_colors", None)
         return g
 

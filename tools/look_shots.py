@@ -250,6 +250,11 @@ def _console_home(g, ws):
     ws.go_home()
     ws.open_library()
     _pick_home(g, ws)
+    # the target's records: played twelve times, the last on the pinned day
+    y, m, d = g._DATE
+    sel = ws.launcher.selected()
+    if sel is not None and sel.get("path"):
+        ws.system.set("plays", {sel["path"]: [12, y * 10000 + m * 100 + d]})
 
 
 def _key_calc(g, ws):

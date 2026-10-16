@@ -82,8 +82,12 @@ class CartManager:
     # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
     # capped most-recently-run path list, newest first. Cart identity is the
     # store PATH (stable across a rename/rescan, unlike an in-memory dict).
+    # `plays` (docs/look_2026-10.md step 18) maps a path to [count, day]: how
+    # many times it was run and the day of the last run as YYYYMMDD, 0 where
+    # the board had no wall clock. A value of any other shape reads as absent.
 
     _MRU_CAP = 8          # how many recents system.json remembers
+    _PLAYS_CAP = 64       # how many carts' play records it keeps
 
     def __init__(self, ws, handle, carts=None):
         self.ws = ws
@@ -101,6 +105,9 @@ class CartManager:
         # it decoded them from: a card asks per paint, a decode is per change.
         self._fav_text = None
         self._fav_paths = ()
+        # The play records as `plays` last decoded them, the same way.
+        self._plays_text = None
+        self._plays = {}
 
     # -- the roster ----------------------------------------------------------
 
@@ -389,6 +396,48 @@ class CartManager:
         mru = [p for p in ws.system.get("desk_mru", []) if p != path]
         mru.insert(0, path)
         ws.system.set("desk_mru", mru[:self._MRU_CAP])
+        self._note_play(path)
+
+    def _plays_rows(self):
+        """{path: (count, day)} of the well-formed play records."""
+        rows = self.ws.system
+        text = rows.text("plays")
+        if text != self._plays_text:
+            self._plays_text = text
+            got = rows.get("plays", None)
+            out = {}
+            if isinstance(got, dict):
+                for path, rec in got.items():
+                    rec = _play_rec(rec)
+                    if rec is not None:
+                        out[path] = rec
+            self._plays = out
+        return self._plays
+
+    def plays(self, cart):
+        """(times run, day of the last run as YYYYMMDD or 0) for `cart`, or
+        None where it has no record (never run, or a record that does not
+        read)."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return None
+        return self._plays_rows().get(path)
+
+    def _note_play(self, path):
+        """Count a run of `path` and stamp today on it (the bar's wall clock;
+        a board without one keeps the day it had). Past _PLAYS_CAP records
+        the one run longest ago goes."""
+        recs = self._plays_rows()
+        old = recs.get(path)
+        day = today_ymd(self.ws)
+        if not day and old is not None:
+            day = old[1]
+        out = {p: [r[0], r[1]] for p, r in recs.items() if p != path}
+        while len(out) >= self._PLAYS_CAP:
+            drop = min(out, key=lambda p: out[p][1])
+            del out[drop]
+        out[path] = [(old[0] if old is not None else 0) + 1, day]
+        self.ws.system.set("plays", out)
 
     def recent(self):
         """The desk_mru path list resolved back to live cart dicts (newest first),
@@ -402,3 +451,19 @@ class CartManager:
             if c is not None:
                 out.append(c)
         return out
+
+
+def _play_rec(rec):
+    """A `plays` value as (count, day), or None for any other shape."""
+    if (isinstance(rec, list) and len(rec) == 2
+            and type(rec[0]) is int and type(rec[1]) is int
+            and rec[0] > 0 and 0 <= rec[1] <= 99991231):
+        return (rec[0], rec[1])
+    return None
+
+
+def today_ymd(ws):
+    """Today as YYYYMMDD from the bar's wall clock, 0 without one (a board
+    that never set its clock reads a year before 2020)."""
+    y, m, d = ws.bar_layer._today()
+    return y * 10000 + m * 100 + d if y >= 2020 else 0

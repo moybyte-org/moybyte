@@ -526,3 +526,101 @@ def test_a_handheld_card_draws_its_covers_crop(tmp_path):
     assert lz._crop_of({"id": "moybyte.sky_run"}) == (8, 44, 64, 64)
     assert lz._crop_of({"id": "someone.game"}) == (32, 32, 64, 64)
     assert all(x + w <= 128 and y + h <= 128 for x, y, w, h in ll._CROPS.values())
+
+
+# -- the desk home (docs/look_2026-10.md step 18) ---------------------------------
+
+def _desk_home(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    font_scale=1, windowed=True, panel_diagonal_in=7.0)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    ws.open_library()
+    ws.set_home_tab("games")
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def test_the_desk_home_lays_out_the_hero_its_details_and_the_shelf(tmp_path):
+    """The hero at a whole multiple of the 64-pixel crop with the details
+    pane beside it, the shelf under them at half its scale with the
+    selected card two in, bleeding off the right edge, the hint strip
+    along the foot."""
+    from runtime import launcher_layer as ll
+
+    ws, drv = _desk_home(tmp_path)
+    lz = ws.launcher
+    assert lz.desk() and not lz.handheld()
+    hx, hy, hs, _ = lz.hero_rect()
+    card = lz.card_side()
+    assert hs % ll._CROP == 0 and card == hs // 2
+    px, py, pw, ph = lz.plate_rect()
+    assert px > hx + hs and py == hy
+    assert len(lz.items) > 7
+    lz.sel = 5
+    drv.frame(1 / 30)
+    first = lz.tile_rect(3)
+    assert first[0] == lz.band_rect()[0] + 48 * ws.layout.fs
+    assert first[1] > hy + hs
+    assert lz.tile_rect(5)[0] == first[0] + 2 * lz.pitch()
+    last_seen = max(i for i, _r in lz._visible())
+    assert lz.tile_rect(last_seen)[0] + card > lz.band_rect()[2]
+    hints = lz.foot()[5]
+    assert lz.band_rect()[1] + lz.band_rect()[3] <= hints[1]
+
+
+def test_a_key_selects_at_once_and_the_shelf_glides(tmp_path):
+    ws, drv = _desk_home(tmp_path)
+    lz = ws.launcher
+    lz.sel = 4
+    drv.frame(1 / 30)
+    at = lz.scroll
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert lz.sel == 5 and lz.moving
+    for _ in range(30):
+        drv.frame(1 / 30)
+        if not lz.moving:
+            break
+    assert lz.sel == 5 and lz.scroll == at + lz.pitch()
+
+
+def test_the_details_buttons_are_the_tabs_verbs_and_the_hero_plays(tmp_path):
+    ws, drv = _desk_home(tmp_path)
+    home = ws.launcher_layer
+    assert [v for v, _r, _k in home._desk_buttons()] == ["play", "change", "copy"]
+    assert home._desk_buttons()[0][2] == "primary"
+    n = len(ws.carts.all)
+    _v, (x, y, w, h), _k = home._desk_buttons()[2]
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    assert len(ws.carts.all) == n + 1                 # COPY made the kid's own
+    hx, hy, hs, _ = ws.launcher.hero_rect()
+    drv.click(hx + hs // 2, hy + hs // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"                     # the hero's tap ran it
+
+
+def test_the_details_read_the_play_records(tmp_path):
+    ws, drv = _desk_home(tmp_path)
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    home = ws.launcher_layer
+    it = ws.launcher.selected()
+    assert home._facts(it) == [("Played", "Not yet"), ("By", "Moybyte")]
+    ws.system.set("plays", {it["path"]: [12, 20261013]})
+    assert home._facts(it) == [("Played", "12 times"), ("Last", "Yesterday"),
+                               ("By", "Moybyte")]
+    assert ws.launcher._meta(it)[-1] == "Played yesterday"
+
+
+def test_the_bars_x_leaves_the_desk_home_for_the_desk(tmp_path):
+    ws, drv = _desk_home(tmp_path)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+    bar, (x, y, w, h) = ws.bar_layer.cell("home", "close")
+    bx, by = bar[1][:2]
+    drv.click(bx + x + w // 2, by + y + h // 2)
+    drv.frame(1 / 30)
+    assert ws.screen == "desk"

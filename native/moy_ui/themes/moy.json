@@ -41,6 +41,7 @@
                "chip_cur": "#23274b" },
       "tile_fill": "#23274b",
       "buttons": { "normal": { "fill": "#23274b" }, "tonal": { "fill": "#2e3360" } },
+      "app_buttons": { "home": { "normal": { "border": [1, "#848aad"] } } },
       "backdrop": { "desk": [{ "k": "circle", "at": [801, 850, 433], "p": "#191c3e" },
                              { "k": "circle", "at": [889, 733, 433], "p": "#0f1127" }] }
     },
@@ -53,6 +54,7 @@
       "hhbar": { "sys": ["#ffffff", "#4c3fd6", "#ffffff"] },
       "tile_fill": "#ffffff",
       "buttons": { "normal": { "fill": "#f4f5f8" }, "tonal": { "fill": "#e3e6ed" } },
+      "app_buttons": { "home": { "normal": { "border": [1, "#7b8294"] } } },
       "backdrop": { "desk": [{ "k": "circle", "at": [918, 1000, 500], "p": "#e2e5ee" },
                              { "k": "circle", "at": [88, 983, 350], "p": "#e5e3f1" }] }
     }

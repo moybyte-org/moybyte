@@ -577,3 +577,71 @@ def test_rescan_loads_no_cart_whole_and_the_open_path_rehydrates_it(tmp_path):
     assert cart.get("lazy") is True and "src" not in cart
     ws.carts.rehydrate(cart)
     assert cart["src"].startswith("def _draw") and cart["lazy"] is False
+
+
+# -- the play records (docs/look_2026-10.md step 18) ---------------------------
+
+def _real(ws, n=1):
+    return [c for c in ws.carts.all if c.get("path")][:n]
+
+
+def test_a_run_counts_a_play_and_stamps_the_day(tmp_path):
+    ws = build_ws(tmp_path)
+    a, b = _real(ws, 2)
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    assert ws.carts.plays(a) is None
+    ws.carts.note_recent(a)
+    ws.bar_layer._today = lambda: (2026, 10, 15)
+    ws.carts.note_recent(a)
+    assert ws.carts.plays(a) == (2, 20261015)
+    assert ws.carts.plays(b) is None
+    assert ws.system.get("plays") == {a["path"]: [2, 20261015]}
+
+
+def test_a_launcher_run_writes_the_play_record(tmp_path):
+    ws = build_ws(tmp_path)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    cart = ws.launcher.selected()
+    ws.launch_selected()
+    assert ws.carts.plays(cart)[0] == 1
+
+
+def test_a_board_without_a_wall_clock_keeps_the_day_it_had(tmp_path):
+    ws = build_ws(tmp_path)
+    a, = _real(ws)
+    ws.bar_layer._today = lambda: (2000, 1, 1)     # an unset RTC
+    ws.carts.note_recent(a)
+    assert ws.carts.plays(a) == (1, 0)
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.carts.note_recent(a)
+    ws.bar_layer._today = lambda: (0, 0, 0)
+    ws.carts.note_recent(a)
+    assert ws.carts.plays(a) == (3, 20261014)
+
+
+def test_a_play_record_of_another_shape_reads_as_absent(tmp_path):
+    """Strict readers, no migration: a value the store did not write reads
+    as None, its neighbours as written, and the next run starts it over."""
+    ws = build_ws(tmp_path)
+    a, b, c, d = _real(ws, 4)
+    ws.system.set("plays", {a["path"]: [3, 20261001], b["path"]: "12",
+                            c["path"]: [0, 20261001], d["path"]: [2, 20261001, 1]})
+    assert ws.carts.plays(a) == (3, 20261001)
+    assert [ws.carts.plays(x) for x in (b, c, d)] == [None, None, None]
+    ws.carts.note_recent(b)
+    assert ws.carts.plays(b)[0] == 1
+    assert ws.carts.plays(a) == (3, 20261001)
+    ws.system.set("plays", ["not", "a", "map"])
+    assert ws.carts.plays(a) is None
+
+
+def test_the_play_records_drop_the_one_played_longest_ago_past_the_cap(tmp_path):
+    ws = build_ws(tmp_path)
+    cap = ws.carts._PLAYS_CAP
+    ws.system.set("plays", {"p/%d" % i: [1, 20260101 + i] for i in range(cap)})
+    a, = _real(ws)
+    ws.carts.note_recent(a)
+    got = ws.system.get("plays")
+    assert len(got) == cap and a["path"] in got and "p/0" not in got
+    assert "p/1" in got

@@ -636,10 +636,13 @@ layouts; L0: not set in stone) are at
 2026-10 look restyles this component (`docs/look_2026-10.md` steps 17 and 18):
 on the handheld's metrics a 2× hero between 1× neighbours, its title and
 metadata under it, the tabs in the bar's `zone` and the verbs a keycap hint
-strip along the foot (step 17); on wide glass the hero, a details pane and a
-shelf, still the `carousel` arrangement.
+strip along the foot (step 17); on the desk's metrics the selected card as
+the hero beside a details pane (its metadata, its play record, its
+buttons) over a shelf that bleeds off the right edge, the tabs in the bar
+and the hint strip along the foot as on the handheld, still the `carousel`
+arrangement (step 18).
 
-| tab | source | tap (console mode, every board) | verbs in `zone` (the handheld's hint strip) |
+| tab | source | tap (console mode, every board) | verbs (the hint strip; the desk's buttons add COPY beside CHANGE) |
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
@@ -676,13 +679,15 @@ the Editor, a Games cart the player, an Apps entry its app; the Editor's
 window X closes back to it. SEARCH is the fullscreen home's verb alone.
 
 **Navigation.** Touch: tap a tab, drag or fling the carousel, tap the centre
-card or a verb (a `zone` chip, the handheld's hint). T-Deck: left/right move
-the carousel by a card with the drag's glide (the handheld's 6-frame slide),
-run through the same `flinging` path as a touch fling (`_drag_partial`), so
-a held key is one continuous motion; up moves focus to the tab row (the
-handheld's in the bar), where left/right switch tabs and down or enter
-returns; the trackball is the same four directions. The handheld's hint
-strip names its keys: C, /, N, Y and X its verbs, Q and E the tabs.
+card (the desk's hero) or a verb (a hint, a desk button). T-Deck: left/right
+move the carousel by a card with the drag's glide (the handheld's 6-frame
+slide), run through the same `flinging` path as a touch fling
+(`_drag_partial`), so a held key is one continuous motion; up moves focus to
+the tabs in the bar, where left/right switch tabs and down or enter
+returns; the trackball is the same four directions. On the desk a key or a
+tap on a shelf card selects it at once and the shelf glides to show it two
+cards in; a drag scrolls the shelf and selects nothing. The hint strip names
+its keys: C, /, N, Y and X its verbs, Q and E the tabs.
 
 **Damage first.** The fullscreen home's drag partial hands its band rect to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
@@ -693,7 +698,8 @@ floor: the carousel's band hands the same way.
 
 **The carousel, animated** (owner, 2026-10-13: the centre card is larger and
 grows and shrinks as cards pass through the centre, in motion as well as at
-rest). The rule that keeps it inside the cost model: **a card's scale is a
+rest), on the handheld; the desk's shelf cards keep one size, and its hero
+and details lie outside the band, repainted when the selection moves. The rule that keeps it inside the cost model: **a card's scale is a
 function of its distance from the centre and of nothing else** — `1.0` at one
 card pitch or more, rising to the centre scale at distance 0 — so there is no
 animation clock, a settled row is a still row, and "settled" is the kinetic
@@ -712,9 +718,9 @@ scroll's own condition (#113). The frame in motion:
   it only around the cards, every card painting its whole square opaque
   but the rows its rounded corners span, which are restored too: each
   card one scaled blit of its RGB565 cover bake at its scale (on the
-  handheld its 64-pixel crop, `DeviceCanvas.cover`), the outline frame
-  and the name plate on the centre one (on the handheld the title and the
-  metadata across the band). Covers are RGB565
+  its 64-pixel crop, `DeviceCanvas.cover`), the focus mark on the
+  selected one (on the handheld its title and metadata across the band, on
+  the desk the shelf's caption). Covers are RGB565
   bakes and `sspr` scales index sheets, so this is **a nearest-neighbour
   RGB565 scaled-blit kernel** in `moy_gfx`, benched on all four boards
   before the home committed (§13 step 7a). The band's rect is the frame's
