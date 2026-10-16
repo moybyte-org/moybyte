@@ -14,7 +14,18 @@ import pytest
 
 from ws_helpers import select_on_home
 
+from runtime import layout_base
 from runtime.app_shell import ListShellApp, ListShellLayout
+
+
+@pytest.fixture(autouse=True)
+def _handheld_metrics():
+    """The 320x240 geometry is the handheld class's; a desk workstation an
+    earlier test in this worker built leaves its class in force."""
+    was = layout_base.metric_class(), layout_base.render_scale()
+    layout_base.place_class(layout_base.HANDHELD)
+    yield
+    layout_base.place_class(*was)
 
 
 class _Layout(ListShellLayout):
