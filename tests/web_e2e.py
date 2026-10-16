@@ -205,11 +205,16 @@ def serve(site, port):
     pytest.fail("serve.py never answered")
 
 
-def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000):
+def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
+        device=None):
     """One browsershot scenario against `base` in the Chrome profile
-    `profile`: (its stdout, every `js` step's value in order)."""
+    `profile`: (its stdout, every `js` step's value in order). `device` is
+    browsershot's phone/tablet shape ({"width", "height", "dpr", "mobile"})."""
     path = tmp_path / ("%s.json" % name)
-    path.write_text(json.dumps({"query": query, "boot_ms": boot_ms, "steps": steps}))
+    scenario = {"query": query, "boot_ms": boot_ms, "steps": steps}
+    if device:
+        scenario["device"] = device
+    path.write_text(json.dumps(scenario))
     r = subprocess.run(
         ["node", "browsershot.mjs", str(path), str(tmp_path / ("shots_" + name))],
         cwd=RUNNER, env=dict(os.environ, MOY_BASE=base, MOY_PROFILE=str(profile),

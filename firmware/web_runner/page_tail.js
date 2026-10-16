@@ -76,7 +76,10 @@ else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 else if(m.t==="lost"){linkLost(m.kind||"lost",m.head||"the console is not answering",
 m.body||"",m.risk!==false);}
 else if(m.t==="error"){console.error("[moy]",m.s);
-sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";}}
+sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";
+// The traceback's tail (the raising line and the exception) under the title.
+var ce=document.getElementById("crash");window.__moyCrash=String(m.s);
+ce.textContent=window.__moyCrash.split("\n").slice(-12).join("\n");ce.style.display="block";}}
 // ---- the pin prompt (2026-08-25) --------------------------------------------
 // A board serves its console to anyone and its CARTS to nobody without the
 // pairing pin, so a page opened by hand -- typing the address instead of

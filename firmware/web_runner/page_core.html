@@ -33,7 +33,7 @@ overflow:hidden;text-overflow:ellipsis}#s{color:#ffec27}
    and must not inherit the guard. */
 @media (pointer:coarse){body{-webkit-user-select:none;user-select:none;
 -webkit-touch-callout:none}
-#kbin{-webkit-user-select:text;user-select:text}}
+#kbin,#crash{-webkit-user-select:text;user-select:text}}
 /* Presentation scale: the OS renders at its DESIGN resolution (320x240 /
    1024x600); fit() uses the whole available viewport while the browser keeps
    nearest-neighbour sampling. Desktop users have real keyboard/pointer input,
@@ -87,6 +87,12 @@ color:#c2c3c7;background:#1d2b53;border:1px solid #29366f;border-radius:4px;padd
 #pz button,#pz .fb{cursor:pointer}
 #pz .fb:hover,#pz button:hover{border-color:#5f6f9f}
 #pzs.warn{color:#ffa300}
+/* The crash itself, ON the page: a phone has no devtools to "see". Above the
+   play splash (z-index 20), which a console that crashed while booting has
+   left standing. */
+#crash{display:none;position:relative;z-index:21;max-width:96vw;margin:0 auto 6px;
+white-space:pre-wrap;word-break:break-word;text-align:left;font-size:11px;
+color:#ff004d;background:#0b0f1a}
 /* THE LINK SURFACE, and there is exactly one of it. A board stops answering
    for two very different reasons -- an update or a wasm-mode hand-back (which
    the person just asked for, and which comes back) versus vanishing (which in
@@ -160,6 +166,7 @@ background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px u
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
 <h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small> <a id=tier href="?handheld=1" style="color:#5f6f9f;font-size:11px;text-decoration:none;border-bottom:1px dotted #5f6f9f">small screen?</a> <a id=pod href="#" style="display:none;color:#00e436;font-size:11px;text-decoration:none;border-bottom:1px dotted #00e436">play on device</a></h1>
+<pre id=crash></pre>
 <div id=pz><span id=pzs></span>
 <select id=pzc title="cart to export"></select>
 <button id=pze>export .moy</button>
