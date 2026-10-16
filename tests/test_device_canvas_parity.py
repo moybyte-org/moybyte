@@ -121,6 +121,8 @@ class _FakeGfx:
     shape = staticmethod(gfx_binding.shape)
     rrect = staticmethod(gfx_binding.rrect)
     shadow = staticmethod(gfx_binding.shadow)
+    cover = staticmethod(gfx_binding.cover)
+    tint = staticmethod(gfx_binding.tint)
     shape_order = staticmethod(gfx_binding.shape_order)
     shape_stats = staticmethod(gfx_binding.shape_stats)
     shape_reset = staticmethod(gfx_binding.shape_reset)
@@ -1075,6 +1077,115 @@ def test_a_layer_smaller_than_the_screen_lands_unsheared_at_the_origin():
 # --------------------------------------------------------------------------- #
 # blit_indices (#63 Fold 3): bake a palette-index bitmap into the framebuffer. #
 # --------------------------------------------------------------------------- #
+def _mix15(a, wa, b, wb):
+    """moy_shape's mix: two canonical RGB565 words at weights out of 15."""
+    out = 0
+    for sh, m in ((11, 31), (5, 63), (0, 31)):
+        out |= ((((a >> sh) & m) * wa + ((b >> sh) & m) * wb + 7) // 15) << sh
+    return out
+
+
+def _over256(f, b, wt):
+    out = 0
+    for sh, m in ((11, 31), (5, 63), (0, 31)):
+        out |= ((((f >> sh) & m) * wt + ((b >> sh) & m) * (256 - wt) + 128) >> 8) << sh
+    return out
+
+
+def _words_in(c, words):
+    out = bytearray()
+    for w_ in words:
+        out += (bytes((w_ >> 8, w_ & 255)) if c.swapped565 else bytes((w_ & 255, w_ >> 8)))
+    return out
+
+
+def test_cover_draws_a_rounded_scaled_sub_rect_on_every_lane():
+    """`DeviceCanvas.cover` -- a home card (docs/look_2026-10.md step 17): a
+    sub-rect of a picture scaled to the card as `blit565_resize` samples it,
+    the corners anti-aliased over what is under them (moy_shape's coverage,
+    the picture at `co` fifteenths) or stepped, camera and clip honoured. The
+    picture is computed from that rule and both canvases must draw it."""
+    sw, sh = 12, 10
+    words = [((i * 2654435761) >> 9) & 0xFFFF for i in range(sw * sh)]
+    cases = (
+        # (sub-rect, x, y, w, h, r, stepped, clip, camera)
+        ((2, 1, 8, 8), 4, 3, 16, 16, 5, False, None, (0, 0)),
+        ((0, 0, 12, 10), 10, 6, 12, 10, 0, False, None, (0, 0)),
+        ((3, 2, 6, 6), -3, -2, 21, 21, 7, False, None, (0, 0)),
+        ((1, 1, 8, 8), 20, 9, 13, 11, 4, True, None, (0, 0)),
+        ((4, 0, 8, 10), 14, 8, 20, 20, 6, False, (16, 10, 12, 30), (3, -1)),
+        ((0, 2, 10, 8), 30, 20, 9, 7, 3, False, (0, 0, W, 24), (0, 0)),
+    )
+    under = palette.MOY64[3]
+    for (sx, sy, cw, ch), x, y, w, h, r, st, clip, cam in cases:
+        bx, by = x - cam[0], y - cam[1]
+        cx0, cy0, cx1, cy1 = 0, 0, W, H
+        if clip is not None:
+            cx0, cy0 = max(0, clip[0]), max(0, clip[1])
+            cx1, cy1 = min(W, clip[0] + clip[2]), min(H, clip[1] + clip[3])
+        bg = rgb565(under)
+        rr = max(0, min(r, 48, min(w, h) // 2))
+        fx, fy = (cw << 16) // w, (ch << 16) // h
+        expect = []
+        for py in range(H):
+            for px in range(W):
+                i, j = py - by, px - bx
+                if not (cx0 <= px < cx1 and cy0 <= py < cy1 and 0 <= i < h and 0 <= j < w):
+                    expect.append(bg)
+                    continue
+                p = words[(sy + ((i * fy + (fy >> 1)) >> 16)) * sw
+                          + sx + ((j * fx + (fx >> 1)) >> 16)]
+                ci = i if i < rr else h - 1 - i if i >= h - rr else -1
+                cj = j if j < rr else w - 1 - j if j >= w - rr else -1
+                co = 15
+                if ci >= 0 and cj >= 0:
+                    co = gfx_binding.shape_coverage(rr, ci, cj)
+                    if st:
+                        co = 15 if co >= 8 else 0
+                expect.append(p if co == 15 else bg if co == 0
+                              else _mix15(bg, 15 - co, p, co))
+        for name, make in (("kernel", lambda: Canvas(W, H)),
+                           ("transcription", lambda: _both()[2])):
+            c = make()
+            c.cls(3)
+            src = _words_in(c, words)
+            if clip is not None:
+                c.clip(*clip)
+            c.camera(*cam)
+            c.cover(src, sw, sx, sy, cw, ch, x, y, w, h, r, st)
+            c.camera()
+            c.clip()
+            got = (_host_rgb565(c) if name == "kernel" else _dev_rgb565(c))
+            assert got == expect, (name, (sx, sy, cw, ch), x, y, w, h, r, st, clip, cam)
+
+
+def test_tint565_dims_a_sub_rect_into_its_own_buffer():
+    """`DeviceCanvas.tint565` -- the dimmed neighbour's cover (step 15): the
+    sub-rect copied out with the colour over it at alpha, every word in the
+    canvas's byte order, the canvas itself untouched; a short buffer on
+    either side writes nothing."""
+    sw, sh = 9, 7
+    words = [((i * 2246822519) >> 11) & 0xFFFF for i in range(sw * sh)]
+    for name, make in (("kernel", lambda: Canvas(W, H)),
+                       ("transcription", lambda: _both()[2])):
+        c = make()
+        c.cls(5)
+        before = bytes(c._buf)
+        src = _words_in(c, words)
+        col = rgb565(palette.MOY64[12])
+        for alpha in (0, 77, 255):
+            dst = bytearray(2 * 5 * 4)
+            assert c.tint565(dst, src, sw, 3, 2, 5, 4, 12, alpha) == 20, name
+            wt = (alpha * 256 + 127) // 255
+            want = _words_in(c, [_over256(col, words[(2 + i) * sw + 3 + j], wt)
+                                 for i in range(4) for j in range(5)])
+            assert dst == want, (name, alpha)
+        assert c.tint565(bytearray(2 * 19), src, sw, 3, 2, 5, 4, 12, 77) == 0
+        assert c.tint565(bytearray(40), src, sw, 3, 4, 5, 4, 12, 77) == 0
+        assert c.tint565(bytearray(40), src, sw, 6, 2, 5, 4, 12, 77) == 0
+        assert bytes(c._buf) == before, name
+
+
 def test_blit_indices_matches_host():
     # Place an index bitmap (a paint-app image) at a range of offsets -- including
     # negative and past the right/bottom edge (clamped), plus an index past the palette

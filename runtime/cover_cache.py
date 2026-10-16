@@ -3,6 +3,7 @@
 #   _CoverJob                  a resumable decode of one cover
 #   CoverCache                 the cover and icon caches, budgets and warmers
 #   CoverCache.cover_for       a cart's cover at a reduction
+#   CoverCache.tinted          a cover's dimmed sub-rect, made from its BASE
 #   CoverCache.sheet_icon      the icon out of a cart's sprite sheet
 #   CoverCache.invalidate_all  drop everything a store rescan could change
 #   CoverCache.diet_release    drop the cover pipeline before a cart runs
@@ -23,6 +24,10 @@ consumer:
     under 128 and whose cart names no icon (the T-Deck's home cards);
   * ICON, 16 x 16, a reduction in palette indices: the desktop icon of a cart
     that names no SPEC.md 3.4 icon (`icon_sheet_for`).
+
+One product is made from the BASE rather than decoded: a sub-rect of it
+dimmed toward a colour (`tinted`), the home's neighbour card under a theme
+that dims them, kept in the same LRU so it leaves with the decodes.
 
 This is the FRAME-HOT collaborator: the grids call `cover_for` once per card
 per painted shelf frame through an injected bound method, and `frame()` touches
@@ -316,6 +321,36 @@ class CoverCache:
             self._spend(t0)
             self._jobs.pop(key, None)
             return self._finish(key, None)
+
+    def tinted(self, cart, sub, c, alpha):
+        """The cart's BASE cover's sub-rect `sub` (x, y, w, h) with colour
+        `c` over it at `alpha` (0..255, `DeviceCanvas.tint565`): a dimmed
+        neighbour's card (docs/look_2026-10.md step 15), made once from the
+        BASE and kept in the same LRU as the decodes, so every drop path
+        (the diet, a re-scan, eviction) frees it. None until the BASE has
+        landed, or where the cart has no cover."""
+        path = cart.get("path")
+        if path is None:
+            return None
+        key = (path, sub, c, alpha)
+        cache = self._cache
+        if key in cache:
+            order = self._order
+            try:
+                order.remove(key)
+            except ValueError:
+                pass
+            order.append(key)
+            return cache[key]
+        base = self.cover_for(cart, BASE)
+        cv = getattr(self.ws, "sys_canvas", None)
+        if base is None or cv is None:
+            return None
+        x, y, w, h = sub
+        out = bytearray(2 * w * h)
+        if not cv.tint565(out, base.pix, base.w, x, y, w, h, c, alpha):
+            return self._finish(key, None)
+        return self._finish(key, _CoverImage(w, h, _moybuf.take(out)))
 
     def _build(self, path, key, div, t0):
         """One step of a cover build, from `cover_for`'s budget gate. Split out

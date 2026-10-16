@@ -106,6 +106,9 @@ _SIGS = (
                   _P, _I, _I, _I, _I, _I, _I], _I),
     ("mg_shadow", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, _I, _I,
                    _P, _I, _I, _I, _I, _I, _I], _I),
+    ("mg_cover", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I,
+                  _I, _I, _I, _I, _I, _I], _I),
+    ("mg_tint", [_P, _Z, _P, _Z, _I, _I, _I, _I, _I, ctypes.c_uint16, _I], _I),
     ("moy_shape_stats", [_P], None),
     ("moy_shape_reset", [_I], None),
     ("moy_shape_wire_swapped", [_I], None),
@@ -294,6 +297,23 @@ def shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
                             int(alpha), int(bool(stepped)),
                             None if hp is None else ctypes.cast(ctypes.pointer(hp), _P),
                             int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped,
+          cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    return _lib().mg_cover(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
+                           int(h), ctypes.cast(sarr, _P), scap, int(sw), int(sx), int(sy),
+                           int(cw), int(ch), int(r), int(bool(stepped)), int(cam_x),
+                           int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def tint(dst, src, sw, sx, sy, w, h, col, alpha):
+    arr, cap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    return _lib().mg_tint(ctypes.cast(arr, _P), cap, ctypes.cast(sarr, _P), scap, int(sw),
+                          int(sx), int(sy), int(w), int(h), int(col) & 0xFFFF, int(alpha))
 
 
 def shape_stats():

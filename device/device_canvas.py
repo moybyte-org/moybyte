@@ -2269,6 +2269,29 @@ class DeviceCanvas:
             o = 2 * (ty * stride + x0)
             d[o:o + len(row)] = row
 
+    def cover(self, buf, sw, sx, sy, cw, ch, x, y, w, h, r=0, stepped=False):
+        """A home card's cover: the (sx, sy, cw, ch) sub-rect of a picture of
+        RGB565 words `sw` a row (this canvas's byte order, as `blit565`),
+        scaled to w x h at (x, y) as `blit565_resize` samples, inside corners
+        of radius `r`, anti-aliased or `stepped`: a corner pixel the shape
+        covers in part is the picture over what is there, one it misses is
+        left. Camera and clip honoured; one kernel call (moy_shape.h). The
+        pixels written."""
+        self.flush_batch()
+        return self._gfx.cover(self._buf, self._stride, int(x), int(y), int(w), int(h),
+                               buf, int(sw), int(sx), int(sy), int(cw), int(ch), int(r),
+                               stepped, self._cam_x, self._cam_y, self._clip_x0,
+                               self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def tint565(self, dst, buf, sw, sx, sy, w, h, c, alpha):
+        """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`
+        a row into `dst` (w words a row), colour `c` over every pixel at
+        `alpha` (0..255), in this canvas's byte order: a dimmed cover, made
+        once and kept by its owner (runtime/cover_cache.py). Draws nothing.
+        The pixels written, 0 where either buffer is short."""
+        return self._gfx.tint(dst, buf, int(sw), int(sx), int(sy), int(w), int(h),
+                              self._col(c), int(alpha))
+
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index
         # to RGB565 via the panel-wire-order PAL565_WIRE table. The "images are data, not draw calls"

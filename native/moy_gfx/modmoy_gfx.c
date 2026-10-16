@@ -997,6 +997,38 @@ static mp_obj_t moy_gfx_shadow(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shadow_obj, 20, 20, moy_gfx_shadow);
 
+// cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped, cam_x, cam_y,
+// cx0, cy0, cx1, cy1): a picture's sub-rect scaled into a rect with rounded
+// corners (moy_shape.h). Answers the pixels written.
+static mp_obj_t moy_gfx_cover(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *src = moy_gfx_buf_r(a[6], &scap);
+    int v[20];
+    for (int i = 1; i < 20; i++) {
+        v[i] = i == 6 ? 0 : (i == 13 ? mp_obj_is_true(a[i]) : mp_obj_get_int(a[i]));
+    }
+    int n = mg_cover(dst, cap, v[1], v[2], v[3], v[4], v[5], src, scap, v[7], v[8], v[9],
+                     v[10], v[11], v[12], v[13], v[14], v[15], v[16], v[17], v[18], v[19]);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_cover_obj, 20, 20, moy_gfx_cover);
+
+// tint(dst, src, sw, sx, sy, w, h, col, alpha): a picture's sub-rect copied
+// into dst with `col` over it at `alpha` (moy_shape.h). Answers the pixels.
+static mp_obj_t moy_gfx_tint(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *src = moy_gfx_buf_r(a[1], &scap);
+    int n = mg_tint(dst, cap, src, scap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                    mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                    (uint16_t)mp_obj_get_int(a[7]), mp_obj_get_int(a[8]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tint_obj, 9, 9, moy_gfx_tint);
+
 // shape_stats() -> moy_shape.h's counters; shape_reset(caches); shape_order(swapped).
 static mp_obj_t moy_gfx_shape_stats(void) {
     uint32_t st[MOY_SHAPE_STATS];
@@ -2155,6 +2187,8 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_shape),      MP_ROM_PTR(&moy_gfx_shape_obj) },
     { MP_ROM_QSTR(MP_QSTR_rrect),      MP_ROM_PTR(&moy_gfx_rrect_obj) },
     { MP_ROM_QSTR(MP_QSTR_shadow),     MP_ROM_PTR(&moy_gfx_shadow_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cover),      MP_ROM_PTR(&moy_gfx_cover_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tint),       MP_ROM_PTR(&moy_gfx_tint_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_order), MP_ROM_PTR(&moy_gfx_shape_order_obj) },

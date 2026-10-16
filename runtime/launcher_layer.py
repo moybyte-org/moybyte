@@ -93,6 +93,7 @@ _COVER_SIDE = 128
 _COVER_BASE = 1
 _COVER_HALF = 2
 _COVER_ICON = 8
+_UNSET = -2147483648      # a look leaf the theme leaves silent
 
 
 def _cover_scale(side, w, h):
@@ -249,6 +250,10 @@ class Launcher:
                                       # draw the real themeable pencil/plus icon big
         self.cover_for = None         # optional (cart, div) -> the cart's decoded
                                       # cover (CoverCache.cover_for, SPEC.md 3.6)
+        self.tinted_for = None        # optional (cart, sub, colour, alpha) -> the
+                                      # cover's dimmed sub-rect (CoverCache.tinted)
+        self.dim = None               # (colour, alpha 0..255): the theme dims the
+                                      # carousel's neighbours (`dim_neighbours`)
         self._card_clip = None        # the clip cards draw in while a draw runs
         self.favorite_for = None     # optional cart -> bool (console wires
                                       # ws.carts.is_favorite as a bound method,
@@ -1315,7 +1320,15 @@ class Carousel(Launcher):
         else:
             card = self.card_side()
             div = _cover_div(it, card, card) if self.cover_for is not None else 0
-            cover = self.cover_for(it, div) if div else None
+            cover = None
+            dim = self.dim
+            if dim is not None and not centre and self.tinted_for is not None:
+                # a neighbour under a theme that dims them: the cover dimmed
+                # once and kept (CoverCache.tinted), the same blit as the rest
+                cover = self.tinted_for(it, (0, 0, _COVER_SIDE, _COVER_SIDE),
+                                        dim[0], dim[1])
+            if cover is None and div:
+                cover = self.cover_for(it, div)
             if cover is not None:
                 # opaque over the whole card: no backdrop under it
                 cv.blit565_resize(cover.pix, cover.w, cover.h, x, y, w, h)
@@ -1506,6 +1519,23 @@ class IconHome(Launcher):
 
     def _draw_pseudo_card(self, cv, it, rect, selected):
         self._draw_cart_card(cv, it, rect, selected, None)
+
+
+def _dim_of(ws):
+    """The theme's neighbour dimming (`dim_neighbours`, Moy Night's): the
+    colour the carousel's neighbours are dimmed toward -- the home's ground,
+    `home_bg` or the `desktop` fill -- and its alpha (0..255), or None."""
+    look = getattr(getattr(ws, "look", None), "live", None)
+    if look is None:
+        return None
+    lk = look.look[0]
+    pct = lk.get("dim_neighbours", 0)
+    if not pct or pct < 0:
+        return None
+    c = lk.get("home_bg", _UNSET)
+    if c == _UNSET:
+        c = ws.theme_colors["desktop"]
+    return (c, (pct * 255 + 50) // 100)
 
 
 def _retained_n(cv):
@@ -1937,6 +1967,7 @@ class LauncherHomeLayer:
         if carousel:
             self.grid.motion = getattr(wm, "HOME_MOTION", "full")
             self.grid.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_MAX)
+            self.grid.dim = _dim_of(ws)
         # Kinetic fling (#113) and the glide to the centre card: advance the
         # row BEFORE painting, and keep the redraw gate open until it rests.
         # Both ride the partial path (its gate includes flinging).

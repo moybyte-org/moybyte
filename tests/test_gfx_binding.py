@@ -375,6 +375,14 @@ shadow(buf, 16, 3, 2, 8, 4, 2, 3, 1, 1, 0x0000, 128, 0, None, 0, 0, 0, 0, 16, 8)
 shadow(buf, 16, 3, 2, 8, 4, 2, 3, 1, 1, 0x0000, 200, 0, (3, 2, 8, 4, 2), 0, 0, 0, 0, 16, 8)
 shadow(buf, 16, 2, 1, 10, 5, 3, 0, 2, 1, 0xf800, 255, 1, None, 1, 0, 1, 1, 15, 7)
 shadow(buf, 16, 0, 0, 16, 8, 0, 64, 0, 0, 0x001f, 255, 0, None, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, 1, 1, 12, 6, src, 4, 0, 0, 4, 4, 3, 0, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, -2, -1, 9, 9, src, 4, 1, 1, 3, 3, 4, 0, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, 6, 2, 8, 5, src, 4, 1, 0, 2, 4, 2, 1, 1, 1, 2, 1, 15, 7)
+cover(buf, 16, 0, 0, 16, 8, src, 4, 2, 2, 3, 3, 0, 0, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, 0, 0, 8, 8, src, 4, 2, 0, 4, 4, 3, 0, 0, 0, 0, 0, 16, 8)
+tint(buf, src, 4, 0, 0, 4, 4, 0x1234, 77)
+tint(buf, src, 4, 1, 1, 3, 2, 0xffff, 255)
+tint(buf, src, 4, 2, 2, 3, 3, 0x0000, 128)
 """
 
 OPS = OPS + CLAMP_OPS + SHAPE_OPS
@@ -826,6 +834,8 @@ def tline(*a): moy_gfx.tline(*a); _shot()
 def shape(*a): moy_gfx.shape(*a); _shot()
 def rrect(*a): moy_gfx.rrect(*a); _shot()
 def shadow(*a): moy_gfx.shadow(*a); _shot()
+def cover(*a): moy_gfx.cover(*a); _shot()
+def tint(*a): moy_gfx.tint(*a); _shot()
 
 @OPS@
 '''

@@ -3096,6 +3096,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # keyed so the sheet's 0-filled backdrop doesn't plate the card.
         g.icon_for = self._icon_image_keyed
         g.cover_for = self.covers.cover_for
+        g.tinted_for = self.covers.tinted
         # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
         g.theme = getattr(self, "theme_colors", None)

@@ -522,6 +522,43 @@ def test_one_base_per_cover_and_two_reductions_beside_it(tmp_path):
     assert set(bytes(icon.pix)) == {9}            # a palette cover maps exactly
 
 
+def test_a_tinted_cover_is_made_from_the_base_and_leaves_with_it(tmp_path, monkeypatch):
+    """`tinted` (docs/look_2026-10.md step 15): a sub-rect of the BASE with a
+    colour over it, made by the canvas's tint and kept in the decodes' LRU --
+    asked twice it is the same picture, and the diet that drops the decodes
+    frees it too. Before the BASE lands there is none."""
+    cart = _mk_cart(tmp_path, value=9)
+    ws, tr = _tracked_ws(tmp_path, monkeypatch)
+    sub, c, alpha = (8, 4, 64, 64), 1, 77
+    base = _land(ws, cart)
+    got = ws.covers.tinted(cart, sub, c, alpha)
+    assert (got.w, got.h) == (64, 64)
+    want = bytearray(2 * 64 * 64)
+    ws.sys_canvas.tint565(want, base.pix, base.w, 8, 4, 64, 64, c, alpha)
+    assert bytes(got.pix) == bytes(want)
+    assert ws.covers.tinted(cart, sub, c, alpha) is got
+    assert (cart["path"], sub, c, alpha) in ws.covers._cache
+    for _ in range(cover_cache._COVER_DIET_KEEP + 2):
+        other = _mk_cart(tmp_path, name="Other%d" % _, value=3)
+        _land(ws, other)
+    ws.covers.diet_release()
+    assert (cart["path"], sub, c, alpha) not in ws.covers._cache
+    assert got.pix is None                         # freed, not merely dropped
+
+
+def test_no_tinted_cover_before_its_base_lands(tmp_path):
+    cart = _mk_cart(tmp_path, value=9)
+    ws = build_ws(tmp_path)
+    assert ws.covers.tinted({"path": None}, (0, 0, 8, 8), 1, 77) is None
+    got = None
+    for _ in range(300):
+        ws.covers.begin_frame()
+        got = ws.covers.tinted(cart, (0, 0, 8, 8), 1, 77)
+        if got is not None:
+            break
+    assert got is not None and (got.w, got.h) == (8, 8)
+
+
 def test_a_cart_naming_no_icon_draws_its_cover_as_its_desk_icon(tmp_path):
     """SPEC.md 3.4 says a host may draw the cover where a cart names no icon,
     so the desk does: the ICON reduction, once it lands -- the sheet's own

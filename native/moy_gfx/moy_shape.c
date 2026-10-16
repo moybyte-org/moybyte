@@ -706,3 +706,88 @@ int mg_shadow(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int
     moy_shape_shadow_t s = {r, blur, dx, dy, col, alpha, (uint8_t)(stepped != 0)};
     return moy_shape_shadow(&t, x, y, w, h, &s, hole);
 }
+
+int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
+             const uint16_t *src, size_t scap, int sw, int sx, int sy, int cw, int ch,
+             int r, int stepped, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1) {
+    moy_text_target_t t;
+    tgt_t g;
+    flat_target(&t, dst, cap, dw, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    if (w <= 0 || h <= 0 || src == NULL || sw <= 0 || cw <= 0 || ch <= 0 || sx < 0 || sy < 0
+        || sx + cw > sw || cw > 32767 || ch > 32767 || !tgt_open(&t, NULL, &g)) {
+        return 0;
+    }
+    if ((size_t)(sy + ch) * (size_t)sw > scap) {
+        return 0;
+    }
+    int rr = clamp_r(r, w, h);
+    int rad[4] = {rr, rr, rr, rr};
+    corners_t c;
+    corners_set(&c, w, h, rad, stepped);
+    int bx = x - g.cam_x, by = y - g.cam_y;
+    int X0 = imax(bx, g.x0), X1 = imin(bx + w, g.x1);
+    int Y0 = imax(by, g.y0), Y1 = imin(by + h, g.y1);
+    if (X1 <= X0 || Y1 <= Y0) {
+        return 0;
+    }
+    uint32_t fx = ((uint32_t)cw << 16) / (uint32_t)w;
+    uint32_t fy = ((uint32_t)ch << 16) / (uint32_t)h;
+    uint32_t u0 = (uint32_t)(X0 - bx) * fx + (fx >> 1);
+    int n = 0;
+    for (int Y = Y0; Y < Y1; Y++) {
+        int i = Y - by;
+        const uint16_t *srow = src + (size_t)(sy + (int)(((uint32_t)i * fy + (fy >> 1)) >> 16))
+                                         * (size_t)sw + sx;
+        uint16_t *row = g.px + (size_t)Y * (size_t)g.stride;
+        int L = 0, R = 0;
+        if (i < rr || i >= h - rr) {
+            L = R = rr;
+        }
+        int a = imax(X0, bx + L), b = imin(X1, bx + w - R);
+        uint32_t u = u0;
+        for (int X = X0; X < X1; X++, u += fx) {
+            if (X >= a && X < b) {
+                // the run between the corners: a straight sample
+                uint32_t v = u;
+                for (int Z = X; Z < b; Z++, v += fx) {
+                    row[Z] = srow[v >> 16];
+                }
+                n += b - X;
+                u += fx * (uint32_t)(b - X - 1);
+                X = b - 1;
+                continue;
+            }
+            int co = corners_cov(&c, i, X - bx);
+            if (co == 0) {
+                continue;
+            }
+            uint16_t p = srow[u >> 16];
+            if (co < 15) {
+                p = wire(mix3(can(row[X]), 15 - co, can(p), co, 0, 0));
+                s_st[MOY_SHAPE_ST_BLENDS]++;
+            }
+            row[X] = p;
+            n++;
+        }
+    }
+    return n;
+}
+
+int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw, int sx,
+            int sy, int w, int h, uint16_t col, int alpha) {
+    if (dst == NULL || src == NULL || w <= 0 || h <= 0 || sw <= 0 || sx < 0 || sy < 0
+        || sx + w > sw || (size_t)w * (size_t)h > dcap
+        || (size_t)(sy + h) * (size_t)sw > scap) {
+        return 0;
+    }
+    int wt = (imax(0, imin(alpha, 255)) * 256 + 127) / 255;
+    uint16_t c = can(col);
+    for (int i = 0; i < h; i++) {
+        const uint16_t *s = src + (size_t)(sy + i) * (size_t)sw + sx;
+        uint16_t *d = dst + (size_t)i * (size_t)w;
+        for (int j = 0; j < w; j++) {
+            d[j] = wire(over(c, can(s[j]), wt));
+        }
+    }
+    return w * h;
+}

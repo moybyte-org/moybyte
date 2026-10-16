@@ -48,6 +48,12 @@
  * shape filled at `alpha`. A HOLE (a rect and its radius) is left untouched:
  * the caster's own body, which covers it.
  *
+ * COVERS (steps 15 and 17). A cover is a picture's sub-rect scaled into a
+ * rounded rect: its interior a straight nearest-neighbour sample, its
+ * corners' partly covered pixels the picture over the target at their
+ * coverage. A TINT copies a sub-rect out with a colour over it, the dimmed
+ * neighbour a cache keeps rather than a blend every frame.
+ *
  * COLOURS are RGB565 in the buffer's wire order; moy_shape_wire_swapped says
  * which order that is (the S3 boards, the host and the browser hold it high
  * byte first, the P4's DPI does not: device/device_canvas.py's WIRE_SWAPPED).
@@ -139,5 +145,23 @@ int mg_rrect(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int 
 int mg_shadow(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int r, int blur,
               int dx, int dy, int32_t col, int alpha, int stepped, const moy_shape_hole_t *hole,
               int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
+// A home card's cover (docs/look_2026-10.md steps 15 and 17): the sub-rect
+// (sx, sy, cw, ch) of an RGB565 picture `sw` words a row, in the wire order,
+// scaled nearest-neighbour to w x h at (x, y) -- target column i samples
+// sx + ((i * fx + fx / 2) >> 16) with fx = (cw << 16) / w, rows alike, as
+// mg_blit565_resize does -- inside corners of radius r, anti-aliased or
+// `stepped`: a corner pixel the shape covers in part is the picture over what
+// is there. A sub-rect past the picture's rows draws nothing. Answers the
+// pixels written.
+int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
+             const uint16_t *src, size_t scap, int sw, int sx, int sy, int cw, int ch,
+             int r, int stepped, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+// The tint (step 15): the sub-rect (sx, sy, w, h) of a picture `sw` words a
+// row copied into `dst`, w words a row, `col` over each pixel at `alpha`
+// (0..255), all in the wire order: a dimmed neighbour's cover, made once and
+// kept. Answers the pixels written: 0 where either buffer is short.
+int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw, int sx,
+            int sy, int w, int h, uint16_t col, int alpha);
 
 #endif
