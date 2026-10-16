@@ -1469,6 +1469,29 @@ static mp_obj_t ui_status(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_status_obj, 5, 5, ui_status);
 
+// hints(cv, look, rect, items, desk, draw) -> ((x0, x1), ...): keycap hints in
+// band `rect` (moy_ui_hints_at), each pair's span across it; drawn when `draw`.
+static mp_obj_t ui_hints(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+    int16_t spans[32];
+    int n = moy_ui_hints_at(&s, box_of(a[2]), (const uint8_t *)b.buf, b.len, s.fs,
+                            mp_obj_is_true(a[4]), mp_obj_is_true(a[5]), spans, 16);
+    if (n > 16) {
+        n = 16;
+    }
+    mp_obj_t t[16];
+    for (int k = 0; k < n; k++) {
+        mp_obj_t p[2] = {MP_OBJ_NEW_SMALL_INT(spans[2 * k]), MP_OBJ_NEW_SMALL_INT(spans[2 * k + 1])};
+        t[k] = mp_obj_new_tuple(2, p);
+    }
+    return mp_obj_new_tuple((size_t)n, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_hints_obj, 6, 6, ui_hints);
+
 // game_btn(cv, rect, label, fill)
 static mp_obj_t ui_game_btn(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2300,6 +2323,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_chip), MP_ROM_PTR(&ui_chip_obj) },
     { MP_ROM_QSTR(MP_QSTR_tab_rects), MP_ROM_PTR(&ui_tab_rects_obj) },
     { MP_ROM_QSTR(MP_QSTR_tab), MP_ROM_PTR(&ui_tab_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hints), MP_ROM_PTR(&ui_hints_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&ui_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_game_btn), MP_ROM_PTR(&ui_game_btn_obj) },
     { MP_ROM_QSTR(MP_QSTR_game_icon_btn), MP_ROM_PTR(&ui_game_icon_btn_obj) },

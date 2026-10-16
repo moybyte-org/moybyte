@@ -693,36 +693,6 @@ def test_player_keeps_ticking_while_editor_is_focused(tmp_path):
     assert ticks[0] >= 3, "the playtest froze when it lost focus"
 
 
-def test_desktop_click_launches_a_cart_with_a_window_open(tmp_path):
-    """The desktop stays interactive beneath windows: tapping a cart tile on the
-    home grid (outside every window) runs it."""
-    ws = _ws(tmp_path)
-    drv = _drv(ws)
-    ws.open_settings()
-    drv.frame(1 / 30)
-    win = ws.wm._wins["settings"]
-    # Find a cart tile whose rect is fully outside the settings window.
-    tile = None
-    for i, it in enumerate(ws.launcher.items):
-        if not it.get("path"):
-            continue
-        r = ws.launcher.tile_rect(i)
-        if r is None:
-            continue
-        tx, ty = r[0] + r[2] // 2, r[1] + r[3] // 2
-        if not (win.x <= tx < win.x + win.w and win.y <= ty < win.y + win.h):
-            tile = (i, tx, ty)
-            break
-    if tile is None:
-        return                             # window covers the whole grid -- skip
-    i, tx, ty = tile
-    drv.click(tx, ty)                      # select (focus hops to the desktop)
-    drv.frame(1 / 30)
-    drv.click(tx, ty)                      # confirm-tap runs it (launcher rule)
-    drv.frame(1 / 30)
-    assert ws.wm._order[-1] == "desktop"   # a playtest window opened
-
-
 # ---------------------------------------------------------------------------
 # Keyboard focus
 # ---------------------------------------------------------------------------

@@ -89,9 +89,11 @@ static int tgt_open(const moy_text_target_t *t, const moy_shape_hole_t *hole, tg
     return g->x1 > g->x0 && g->y1 > g->y0;
 }
 
-// The hole's span on buffer row Y: its full width, or less its radius on
-// either side within its radius of its top and bottom (what its corners
-// leave uncovered is drawn).
+static int hole_inset(int r, int i);
+
+// The hole's span on buffer row Y: its full width, or within its radius of
+// its top and bottom less the pixels its corners do not cover whole (what
+// its corners leave uncovered is drawn).
 static void tgt_row(tgt_t *g, int Y) {
     g->hx0 = g->hx1 = 0;
     const moy_shape_hole_t *h = g->hole;
@@ -102,8 +104,8 @@ static void tgt_row(tgt_t *g, int Y) {
     if (i < 0 || i >= h->h) {
         return;
     }
-    int r = imax(0, imin(h->r, imin(h->w, h->h) / 2));
-    int in = (i < r || i >= h->h - r) ? r : 0;
+    int r = imax(0, imin(imin(h->r, MOY_SHAPE_RMAX), imin(h->w, h->h) / 2));
+    int in = i < r ? hole_inset(r, i) : i >= h->h - r ? hole_inset(r, h->h - 1 - i) : 0;
     g->hx0 = h->x - g->cam_x + in;
     g->hx1 = h->x - g->cam_x + h->w - in;
 }
@@ -210,6 +212,18 @@ int moy_shape_coverage(int r, int i, int j) {
         return 15;
     }
     return cov_read(cov_table(r), r, i, j);
+}
+
+// The columns of row i of a corner box of radius r the arc does not cover
+// whole: where a hole's span on that row starts.
+static int hole_inset(int r, int i) {
+    const uint8_t *t = cov_table(r);
+    for (int j = 0; j < r; j++) {
+        if (cov_read(t, r, i, j) == 15) {
+            return j;
+        }
+    }
+    return r;
 }
 
 // A rounded rect's corners, its tables looked up once.

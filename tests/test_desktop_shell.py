@@ -111,8 +111,10 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     assert ws.look.wallpaper_carts() == []                     # none installed
     assert ws.look.wallpaper_id is None                        # the theme's fill
     ws.frame(1 / 30)                                       # renders without error
-    assert host_canvas.indices_of(ws.sys_canvas)[200 * 320 + 160] == \
-        ws.theme_colors["desktop"]
+    cv = ws.sys_canvas                    # the keycaps blend: read the word
+    o = 2 * (175 * cv._stride + 4)
+    word = cv._buf[o] | (cv._buf[o + 1] << 8)
+    assert word == cv._wire[ws.theme_colors["desktop"]]
 
 
 # -- wallpaper switching is functional + persists --------------------------

@@ -1,10 +1,10 @@
 {"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
   {"note": "launcher up; tap the Make tab", "wait": 1500},
-  {"click": [152, 30]},
+  {"click": [117, 9]},
   {"wait": 1500},
   {"shot": "make_tab"},
   {"note": "tap the +New card at the centre -- a real store mutation through the real UI"},
-  {"click": [160, 129]},
+  {"click": [160, 100]},
   {"wait": 2000},
   {"shot": "after_new"},
   {"note": "let the commit sweep + POST /sync land (1s pump cadence)"},

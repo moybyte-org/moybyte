@@ -654,6 +654,11 @@ int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int 
 // look styles the caps (moy_ui_keycap).
 int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                  int fs, int desk);
+// The same hints, drawn when `draw`, with each pair's span across the band
+// (its first cap's left, its action's right) in `spans`, two a pair, up to
+// `cap` pairs: what a caller hit-tests and lays out by. Answers the pairs.
+int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                    int fs, int desk, int draw, int16_t *spans, int cap);
 // Text in font `font` (a run's: petme128) at (x, y), its line's top, in
 // colour `col` (the buffer's word), inside a part's crossing: `table` text
 // is the string table's (moy_str.h), else a caller's. Answers its width.

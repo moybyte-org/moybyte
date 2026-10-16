@@ -16,9 +16,9 @@
   {"shot": "shelf"},
 
   {"note": "and the home is REAL: Make -> +New, which must reach the store"},
-  {"click": [152, 30]},
+  {"click": [117, 9]},
   {"wait": 1500},
-  {"click": [160, 129]},
+  {"click": [160, 100]},
   {"wait": 8000},
   {"shot": "after_new"}
 ]}

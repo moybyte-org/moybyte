@@ -72,6 +72,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 _ticks_ms, _ticks_diff)
 
 try:
+    import layout_base as _lb
+    import shell_layout as _shell_layout
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import layout_base as _lb
+    from runtime import shell_layout as _shell_layout
+
+try:
     from widgets import ConfirmTap
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
@@ -907,11 +914,38 @@ HOME_TABS = (("games", "Games"), ("mine", "Mine"), ("apps", "Apps"),
 _TAB_ICON = {"games": "run", "mine": "moy", "apps": "gear", "make": "edit"}
 _TAB_NOUN = {"games": ("GAME", "GAMES"), "mine": ("CART", "CARTS"),
              "apps": ("APP", "APPS"), "make": ("PROJECT", "PROJECTS")}
-# The centre card's scale the home is laid out for: a board's verdict
-# (FullscreenStackWM.HOME_SCALE) draws it at most this large.
+# The centre card's scale the home is laid out for, on the desk and on the
+# handheld: a board's verdict (FullscreenStackWM.HOME_SCALE) draws it at most
+# this large.
 HOME_SCALE_MAX = 1.5
+HOME_SCALE_HH = 2.0
+# The handheld home (docs/look_2026-10.md step 17): each cover is a 64-pixel
+# crop of its 128 (GAPS 21), a neighbour at 1x and the hero at 2x, a gap
+# between cards, the corners of a neighbour 7/10 of the hero's.
+_CROP = 64
+_HH_GAP = 14
+# The seed carts' crops (the 2026-10 look's art direction, mockups.py's
+# CROPS), by cart id: the top left of the crop in the cover. Any other cart's
+# is the centre.
+_CROPS = {"moybyte.sky_run": (8, 44), "moybyte.star_catcher": (43, 52),
+          "moybyte.hop_quest": (52, 36), "moybyte.pixel_pet": (24, 50),
+          "moybyte.harpoon_pop": (18, 64), "moybyte.brick_siege": (2, 20),
+          "moybyte.bullet_storm": (32, 8), "moybyte.letter_blitz": (2, 18),
+          "moybyte.tiny_runner": (0, 60)}
+_CROPS = {k: (x, y, _CROP, _CROP) for k, (x, y) in _CROPS.items()}
+_CENTRE_CROP = ((_COVER_SIDE - _CROP) // 2, (_COVER_SIDE - _CROP) // 2, _CROP, _CROP)
+_KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpaper"}
+# The handheld home's hint strip (step 17): each verb's key and words. The
+# keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k).
+_VERB_HINT = {"play": ("enter", "Play"), "open": ("enter", "Open"),
+              "change": ("C", "Change"), "search": ("/", "Search"),
+              "new": ("N", "New"), "copy": ("Y", "Copy"),
+              "delete": ("X", "Delete"), "sure": ("X", "Sure?")}
+_VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
+_TAB_KEYS = ("Q E", "Tabs")
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
+_SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps
 _VERB_LABEL = {"play": "PLAY", "open": "OPEN", "change": "CHANGE",
                "new": "NEW", "search": "SEARCH", "copy": "COPY",
                "delete": "DEL", "sure": "SURE?"}
@@ -946,13 +980,16 @@ class Carousel(Launcher):
 
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
         self.motion = "full"
-        self.scale = HOME_SCALE_MAX
+        self.scale = HOME_SCALE_HH
         self._glide = None            # the offset a glide is carrying the row to
+        self._slide = None            # the handheld's slide: [from, ms so far]
         self._was_drag = False
         self._g_lay = None            # the layout _g was computed for
         self._g_reach = 0
         self._g = None
         self.layout = None
+        self.own_for = None           # optional cart -> bool (ws.carts.is_own)
+        self._cap = None              # the caption laid out: (card, layout, parts)
         Launcher.__init__(self, items, layout, names, blit_glyph)
 
     # -- geometry ------------------------------------------------------------
@@ -967,6 +1004,11 @@ class Carousel(Launcher):
         lay = self.layout
         reach = _ui_draw.mark_reach()          # the centre card's focus mark
         if self._g_lay is lay and self._g_reach == reach:
+            return self._g
+        if _lb.metric_class() == _lb.HANDHELD:
+            self._g = self._geom_hh(lay, reach)
+            self._g_lay = lay
+            self._g_reach = reach
             return self._g
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
@@ -990,11 +1032,48 @@ class Carousel(Launcher):
         bh = 2 * ring + big + gap + plate_h
         by = top + max(0, (avail - bh) // 2)
         self._g = (tabs, (cx, by, cw, bh), card, pitch, ring, gap, plate_h,
-                   by + ring + big // 2)
+                   by + ring + big // 2, None)
         self._g_lay = lay
         self._g_reach = reach
         return self._g
 
+    def _geom_hh(self, lay, reach):
+        """The handheld home's geometry (docs/look_2026-10.md step 17), the
+        same tuple with its foot: no tab row (the tabs are the bar's), the
+        hero twice a neighbour's side, its title and its metadata under it
+        and the hint strip along the content's foot. A neighbour is 64 at
+        the font scale where that fits, less in eighths where it does not."""
+        fs = lay.fs
+        cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
+        hint_h = 20 * fs
+        hints = (cx, cy + ch - hint_h, cw, hint_h)
+        tf = _ui_draw.font("title")
+        tsc = max(fs, (16 * fs) // max(1, tf[2]))
+        title_h = tf[2] * tsc
+        meta_h = lay.line_h
+        foot = 12 * fs + title_h + 3 * fs + meta_h + 4 * fs
+        ring = max(2 * fs + 2, reach)
+        space = hints[1] - cy
+        card = _CROP * fs
+        while card > 16 and ring + 2 * card + foot > space:
+            card -= 8
+        gap = _HH_GAP * fs
+        top = cy + max(ring, (space - 2 * card - foot) // 2)
+        title_y = top + 2 * card + 12 * fs
+        meta_y = title_y + title_h + 3 * fs
+        band = (cx, cy, cw, hints[1] - cy)
+        return (None, band, card, card + gap, ring, gap, 0, top + card,
+                (title_y, title_h, tsc, meta_y, meta_h, hints))
+
+    def handheld(self):
+        """Whether the home is the handheld's (step 17): its tabs in the bar,
+        its foot under the band."""
+        return self._geom()[8] is not None
+
+    def foot(self):
+        """(title y, title h, title scale, meta y, meta h, the hint strip's
+        rect) on the handheld, else None."""
+        return self._geom()[8]
     def tabs_rect(self):
         return self._geom()[0]
 
@@ -1073,6 +1152,7 @@ class Carousel(Launcher):
         self._region.stop()
         t = max(0, min(n - 1, i)) * self.pitch()
         self._glide = t if t != self._scroll else None
+        self._slide = [self._scroll, 0] if self._glide is not None else None
 
     def nav2d(self, dx, dy):
         """Left/right move the row by a card with the glide; a key held is one
@@ -1094,6 +1174,21 @@ class Carousel(Launcher):
             moved = Launcher.anim_frame(self, dt)
             if not self._region.animating:
                 self._snap()
+        elif self._glide is not None and self._slide is not None and self.handheld():
+            # The handheld's slide (the 2026-10 look's motion): from where
+            # the row was to the card in _SLIDE_MS, eased out, in TIME so a
+            # slow board shows it in fewer frames; a key held retargets it
+            # from where it is.
+            sl = self._slide
+            sl[1] += max(1.0, min(200.0, dt * 1000.0))
+            u = min(1.0, sl[1] / _SLIDE_MS + 1e-6)
+            e = 1.0 - (1.0 - u) ** 3
+            to = self._glide if u >= 1.0 else sl[0] + int((self._glide - sl[0]) * e)
+            moved = to != self._scroll
+            self._scroll = to
+            if to == self._glide:
+                self._glide = None
+                self._slide = None
         elif self._glide is not None:
             # An ease-out in TIME (half the distance left every
             # _GLIDE_HALF_MS), so a slow board shows the same motion in
@@ -1136,15 +1231,31 @@ class Carousel(Launcher):
         if (d >= pitch or self.motion == "one"
                 or (moving and self.motion == "rest")):
             return card
-        big = int(card * min(self.scale, HOME_SCALE_MAX) + 0.5)
+        big = self._big()
         return card + (big - card) * (pitch - d) // pitch
+
+    def _big(self):
+        """The centre card's side at rest: the board's scale, at most the
+        arrangement's (the handheld's 2x hero, the desk's 1.5)."""
+        g = self._geom()
+        top = HOME_SCALE_HH if g[8] is not None else HOME_SCALE_MAX
+        return int(g[2] * min(self.scale, top) + 0.5)
 
     def _rect_at(self, i, moving):
         g = self._geom()
         bx, _by, bw, _bh = g[1]
         mid = bx + bw // 2
-        xc = mid + i * g[3] - self.scroll
-        t = self._side(abs(xc - mid), moving)
+        d = i * g[3] - self.scroll
+        t = self._side(abs(d), moving)
+        if g[8] is not None:
+            # The handheld's cards keep their gap beside the hero: each is
+            # pushed out by half what the centre card grew, in proportion
+            # to its distance up to one pitch.
+            grow = self._side(0, moving) - g[2]
+            ad = min(abs(d), g[3])
+            push = grow * ad // (2 * g[3])
+            d += push if d > 0 else -push
+        xc = mid + d
         return (xc - t // 2, g[7] - t // 2, t, t)
 
     def _visible(self):
@@ -1157,7 +1268,7 @@ class Carousel(Launcher):
         bx, _by, bw, _bh = g[1]
         pitch = g[3]
         s = self.scroll
-        reach = bw // 2 + g[2]
+        reach = bw // 2 + 2 * g[2]
         i0 = max(0, (s - reach) // pitch)
         i1 = min(n - 1, (s + reach) // pitch + 1)
         moving = self.moving
@@ -1191,9 +1302,13 @@ class Carousel(Launcher):
     def plate_rect(self):
         """The title plate under the centre card: as wide as the centre card
         at full scale, at the foot of the band, under the card nearest the
-        centre."""
+        centre. On the handheld, the title's and the metadata's lines across
+        the band."""
         g = self._geom()
         bx, by, bw, bh = g[1]
+        if g[8] is not None:
+            f = g[8]
+            return (bx, f[0], bw, f[3] + f[4] - f[0])
         big = g[2] * 3 // 2
         xc = bx + bw // 2 + self.nearest() * g[3] - self.scroll
         return (xc - big // 2, by + bh - g[6], big, g[6])
@@ -1221,11 +1336,12 @@ class Carousel(Launcher):
 
     def cover_specs(self):
         card = self.card_side()
+        hh = self.handheld()
         out = []
         for it in self.items:
             if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
                 continue
-            div = _cover_div(it, card, card)
+            div = _COVER_BASE if hh else _cover_div(it, card, card)
             if div:
                 out.append((it, div))
         return out
@@ -1260,6 +1376,12 @@ class Carousel(Launcher):
                 fill(cv, (x, y0, cx0 - x, y1 - y0))
             ct = max(c[1], y0)
             cb = min(c[1] + c[3], y1)
+            k = min(self._corner_r(c[2]), (cb - ct) // 2)
+            if k > 0:
+                # rounded cards leave their corners' pixels to the backdrop:
+                # the rows the corners span are restored too
+                ct += k
+                cb -= k
             if ct > y0:
                 fill(cv, (cx0, y0, cx1 - cx0, ct - y0))
             if cb < y1:
@@ -1268,9 +1390,21 @@ class Carousel(Launcher):
         if x < x1:
             fill(cv, (x, y0, x1 - x, y1 - y0))
 
+    def _corner_r(self, side):
+        """The corner radius of a card `side` across under the theme's depth
+        (its `card_r` on the hero, 7/10 of it on a neighbour, as the desk
+        draws square cards), 0 without one or off the handheld."""
+        d = _ui_draw.depth()
+        if not d[0] or not self.handheld():
+            return 0
+        r = d[2]
+        return r if side > self._geom()[2] else r * 7 // 10
+
     def _paint(self, cv, sheet_for, r):
         """Every card meeting rect `r`, clipped to it, the centre card's ring
         and plate, and at rest its shadow (the theme's depth, `ui.cast`)."""
+        if self.handheld():
+            return self._paint_hh(cv, sheet_for, r)
         clip = getattr(cv, "clip", None)
         if clip is not None:
             self._card_clip = r
@@ -1296,6 +1430,155 @@ class Carousel(Launcher):
             self._card_clip = None
             clip()
 
+    def _paint_hh(self, cv, sheet_for, r):
+        """The handheld home's band (docs/look_2026-10.md step 17): the cards,
+        smallest first, the hero last and at rest lifted by the theme's focus
+        mark, every card's shadow at rest, then the title and the metadata
+        of the card nearest the centre."""
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            self._card_clip = r
+            clip(*r)
+        c = self.nearest()
+        moving = self.moving
+        th = self.theme
+        if self.items and not moving:
+            for i, t in self._visible():
+                if i == c:
+                    _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD)
+                else:
+                    _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
+        for i, t in self._visible():
+            self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
+        if self.items:
+            self._draw_caption(cv, self.items[c])
+        if clip is not None:
+            self._card_clip = None
+            clip()
+
+    def _meta(self, it):
+        """The metadata under the hero, its items: the cart's kind and where
+        it came from (built in, the kid's own, installed)."""
+        if it.get("type") in PSEUDO_TILE_TYPES:
+            return ("A new game",)
+        kind = _KIND_NAME.get(it.get("type"), "App")
+        cid = it.get("id") or ""
+        if self.own_for is not None and self.own_for(it):
+            src = "Yours"
+        elif cid.startswith("moybyte."):
+            src = "Built in"
+        else:
+            src = "Installed"
+        return (kind, src)
+
+    def _draw_caption(self, cv, it):
+        """The title of the card nearest the centre in the `title` face,
+        centred, and its metadata in the `ui` face under it, the items
+        apart by a dot: on the home's ground in its ink under a theme's
+        depth, on a plate in the bar's colours without one (a legacy
+        ground is any colour)."""
+        th = self.theme or {}
+        lay = self.layout
+        fs = lay.fs
+        ty, tht, tsc, my, mh, _hints = self._geom()[8]
+        bx, _by, bw, _bh = self.band_rect()
+        sep = 12 * fs
+        fid = _ui_draw.font("title")[0]
+        cap = self._cap
+        if cap is None or cap[0] is not it or cap[1] is not self._g:
+            # laid out once a card: a moving frame draws it again as it is
+            name = it.get("title") or ""
+            if it.get("type") == NEW_TILE_TYPE:
+                name = "New"
+            was = _ui_draw.print_font(fid)
+            name = _ui_draw.print_fit(name, bw - 16 * fs, tsc)
+            tw = _ui_draw.print_width(name, tsc)
+            if was is not None:
+                _ui_draw.print_font(was)
+            parts = self._meta(it)
+            ws_ = [_ui_draw.print_width(t, fs) for t in parts]
+            cap = self._cap = (it, self._g, name, tw, parts, ws_,
+                               sum(ws_) + sep * (len(parts) - 1))
+        name, tw, parts, ws_, mw = cap[2], cap[3], cap[4], cap[5], cap[6]
+        was = _ui_draw.print_font()
+        ink, dim = th.get("ink", 7), th.get("ink_dim", 6)
+        if not _ui_draw.depth()[0]:
+            pw = min(bw, max(tw, mw) + 16 * fs)
+            px, py = bx + (bw - pw) // 2, ty - 3 * fs
+            ph = my + mh + 3 * fs - py
+            cv.rect(px, py, pw, ph, th.get("bar", 0))
+            for k in range(fs):
+                cv.rectb(px - k, py - k, pw + 2 * k, ph + 2 * k, th.get("border", 0))
+            ink, dim = th.get("chrome_ink", 7), th.get("chrome_ink_dim", 6)
+        if _ui_draw.print_font(fid) is not None:
+            cv.print_scaled(name, bx + (bw - tw) // 2, ty, ink, tsc)
+            _ui_draw.print_font(was)
+        else:
+            cv.print_scaled(name, bx + (bw - tw) // 2, ty, ink, tsc)
+        x = bx + (bw - mw) // 2
+        for k, t in enumerate(parts):
+            if k:
+                cv.rect(x - sep // 2 - fs // 2, my + (mh - fs) // 2, fs, fs, dim)
+            cv.print(t, x, my, dim, 1)
+            x += ws_[k] + sep
+
+    def _crop_of(self, it):
+        return _CROPS.get(it.get("id"), _CENTRE_CROP)
+
+    def _draw_title_tile(self, cv, it, rect, r):
+        """A card for a cart with no cover (GAPS 21): the theme's tile field,
+        its corners the card's, the cart's title wrapped across it."""
+        th = self.theme or {}
+        fs = self.layout.fs
+        x, y, w, h = rect
+        cv.rrect(x, y, w, h, r, th.get("surface_alt", 1),
+                 stepped=bool(_ui_draw.depth()[5]))
+        sc = 2 * fs if w >= 2 * _CROP * fs else fs
+        words = (it.get("title") or "").split()
+        lines = []
+        cur = ""
+        room = w - 8 * fs
+        for wd in words:
+            nxt = (cur + " " + wd) if cur else wd
+            if cur and _ui_draw.print_width(nxt, sc) > room:
+                lines.append(cur)
+                cur = wd
+            else:
+                cur = nxt
+        if cur:
+            lines.append(cur)
+        lh = self.layout.line_h * sc // fs
+        lines = lines[:max(1, (h - 8 * fs) // max(1, lh))]
+        yy = y + (h - lh * len(lines)) // 2
+        for ln in lines:
+            ln = _ui_draw.print_fit(ln, room, sc)
+            cv.print_scaled(ln, x + (w - _ui_draw.print_width(ln, sc)) // 2, yy,
+                            th.get("ink", 7), sc)
+            yy += lh
+
+    def _draw_hh_cover(self, cv, it, rect, centre):
+        """A handheld card's picture: the cover's 64-pixel crop scaled to the
+        card (the neighbour's dimmed once and kept where the theme dims
+        them, step 15), else the title tile."""
+        r = self._corner_r(rect[2])
+        stepped = bool(_ui_draw.depth()[5])
+        sub = self._crop_of(it)
+        cover = None
+        if self.cover_for is not None:
+            dim = self.dim
+            if dim is not None and not centre and self.tinted_for is not None:
+                cover = self.tinted_for(it, sub, dim[0], dim[1])
+                if cover is not None:
+                    cv.cover(cover.pix, cover.w, 0, 0, cover.w, cover.h, rect[0],
+                             rect[1], rect[2], rect[3], r, stepped)
+                    return
+            cover = self.cover_for(it, _COVER_BASE)
+        if cover is not None:
+            cv.cover(cover.pix, cover.w, sub[0], sub[1], sub[2], sub[3], rect[0], rect[1],
+                     rect[2], rect[3], r, stepped)
+        else:
+            self._draw_title_tile(cv, it, rect, r)
+
     def _draw_home_card(self, cv, it, rect, centre, sheet_for):
         NAMES = self._NAMES
         th = self.theme or {}
@@ -1305,7 +1588,8 @@ class Carousel(Launcher):
         mark = centre and not self.moving and marks and not self.tab_focus
         at = rect
         if mark:
-            _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card")
+            _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card",
+                                        r=self._corner_r(at[2]))
         x, y, w, h = rect
         if it.get("type") in PSEUDO_TILE_TYPES:
             cv.rect(x, y, w, h, th.get("focus", 0))
@@ -1317,6 +1601,8 @@ class Carousel(Launcher):
             else:
                 self._blit_glyph(cv, _TYPE_GLYPH[NEW_TILE_TYPE], (x, y, w, h),
                                  th.get("ink", 0), max(1, (w * 5 // 8) // 12))
+        elif self.handheld():
+            self._draw_hh_cover(cv, it, rect, centre)
         else:
             card = self.card_side()
             div = _cover_div(it, card, card) if self.cover_for is not None else 0
@@ -1345,9 +1631,11 @@ class Carousel(Launcher):
                              bool(self.favorite_for(it)))
         ring = th.get("author", 0) if it.get("type") in PSEUDO_TILE_TYPES \
             else None
-        self._card_frame(cv, rect, centre and not marks, ring=ring)
+        if not self._corner_r(rect[2]):
+            self._card_frame(cv, rect, centre and not marks, ring=ring)
         if mark:
-            _ui_draw.focus(cv, self.theme, at, size="card", after=True)
+            _ui_draw.focus(cv, self.theme, at, size="card", r=self._corner_r(at[2]),
+                           after=True)
 
     def _draw_plate(self, cv, it, p):
         """The centre card's name on a plate, in the bar's colours."""
@@ -1700,6 +1988,8 @@ class LauncherHomeLayer:
         self._full_streak = 0
         self._statics = None
         self._search_kprev = 0        # keyboard edge detect while typing a search query
+        self._kprev = 0               # ...and for the handheld home's hint keys
+        self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
         # Retained WHOLE-frame cache (2026-07-27, the damage-model doctrine at
         # shelf granularity): the last full home frame, captured at the END of
         # a live paint (right after our own last pixel -- overlays/cursor draw
@@ -1742,6 +2032,8 @@ class LauncherHomeLayer:
     @_tab_focus.setter
     def _tab_focus(self, on):
         # one focus mark a screen: the tab row's takes it from the cards
+        if on != getattr(self, "_tab_keys", None):
+            self._zone_bump = getattr(self, "_zone_bump", 0) + 1
         self._tab_keys = on
         g = getattr(self.ws, "launcher", None)
         if g is not None:
@@ -2029,8 +2321,24 @@ class LauncherHomeLayer:
         _advance_streak(self, cv)
         self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
 
+    def _hh(self):
+        """The handheld home (docs/look_2026-10.md step 17): the carousel on
+        the handheld's metrics, its tabs in the bar's zone and its verbs a
+        hint strip along its foot."""
+        return self._carousel() and self.grid.handheld()
+
     def tab_rects(self):
-        """[(tab id, rect, labels_on)] of the home's tab row."""
+        """[(tab id, rect, labels_on)] of the home's tab row; on the
+        handheld, of its tabs in the bar's zone (`zone_tabs`), on the
+        glass."""
+        if self._hh():
+            got = _shell_layout.cell_of(self.ws.layout.bars, "zone")
+            if got is None:
+                return []
+            rx, ry = self.ws.layout.bars[got[0]][1][:2]
+            zx, zy, zw, zh = got[1]
+            return [(tid, (rx + r[0], ry + r[1], r[2], r[3]), True)
+                    for tid, _l, r in self.zone_tabs((zx, zy, zw, zh))]
         fs = self.ws.layout.fs
         return _ui_draw.tab_row_rects(self.grid.tabs_rect(), HOME_TABS, fs)
 
@@ -2061,7 +2369,9 @@ class LauncherHomeLayer:
     def _draw_home_chrome(self, cv):
         """The tab row on its plate (with the search query beside it while one
         is held). The carousel's band has no backdrop of its own: the cards
-        lie on the wallpaper."""
+        lie on the wallpaper. On the handheld, the hint strip instead."""
+        if self._hh():
+            return self._draw_hints(cv)
         ws = self.ws
         th = ws.theme_colors
         lay = ws.layout
@@ -2096,6 +2406,105 @@ class LauncherHomeLayer:
             w = _ui_draw.print_width(label, fs) + 2 * p
             cv.rect(sx - p, ty - p, w + p, tht + 2 * p, th["surface"])
             cv.print(label, sx, ty + (tht - lay.line_h) // 2, th["ink"], 1)
+
+    def _hint_groups(self):
+        """The hint strip's two groups: the active tab's verbs on the
+        selected card, then the tab keys; and the verb of each pair."""
+        items = []
+        verbs = []
+        for v in self.zone_verbs():
+            k, words = _VERB_HINT[v]
+            items.append(k)
+            items.append(words)
+            verbs.append(v)
+        return items, verbs
+
+    def _hint_spans(self, cv):
+        """[(verb or "tabs", x0, x1)] across the hint strip, and the strip's
+        rect: what `_draw_hints` draws and a tap hits."""
+        th = self.ws.theme_colors
+        rect = self.grid.foot()[5]
+        items, verbs = self._hint_groups()
+        out = []
+        if self.searchable and (getattr(self.ws, "search_query", "")
+                                or getattr(self.ws, "search_typing", False)):
+            items = ()
+        if items:
+            for v, (x0, x1) in zip(verbs, _ui_draw.hints(cv, th, rect, items, draw=False)):
+                out.append((v, x0, x1))
+        sp = _ui_draw.hints(cv, th, rect, _TAB_KEYS, draw=False)
+        if sp:
+            dx = rect[0] + rect[2] - 8 * self.ws.layout.fs - sp[0][1]
+            if not out or sp[0][0] + dx > out[-1][2]:
+                out.append(("tabs", sp[0][0] + dx, sp[0][1] + dx))
+        return out, rect
+
+    def _draw_hints(self, cv):
+        """The handheld home's hint strip (step 17): keycaps naming the
+        active tab's verbs on the selected card, from the left, and the tab
+        keys at the right (the theme's `keycap`, `ui.hints`'s part). While
+        a search query is held it shows in the verbs' place."""
+        th = self.ws.theme_colors
+        spans, rect = self._hint_spans(cv)
+        items, verbs = self._hint_groups()
+        n = sum(1 for v, _a, _b in spans if v != "tabs")
+        query = getattr(self.ws, "search_query", "")
+        typing = getattr(self.ws, "search_typing", False)
+        if self.searchable and (query or typing):
+            n = 0
+        if not _ui_draw.depth()[0]:
+            # a legacy ground is any colour: the strip on the bar's band
+            x, y, w, h = rect
+            cv.rect(x, y, w, h, th["bar"])
+            cv.rect(x, y, w, self.ws.layout.fs, th["border"])
+        if n:
+            _ui_draw.hints(cv, th, rect, items[:2 * n])
+        elif self.searchable and (query or typing):
+            fs = self.ws.layout.fs
+            label = "SEARCH: " + query + ("_" if typing else "")
+            label = _ui_draw.print_fit(label, rect[2] // 2, fs)
+            ink = th["ink"] if _ui_draw.depth()[0] else th["chrome_ink"]
+            cv.print(label, rect[0] + 8 * fs,
+                     rect[1] + (rect[3] - self.ws.layout.line_h) // 2, ink, 1)
+        for v, x0, _x1 in spans:
+            if v == "tabs":
+                left = x0 - (rect[0] + 8 * self.ws.layout.fs)
+                _ui_draw.hints(cv, th, (rect[0] + left, rect[1], rect[2] - left, rect[3]),
+                               _TAB_KEYS)
+
+    def _hint_tap(self, px, py):
+        """A tap on the hint strip: its verb, as the bar's chip was."""
+        spans, rect = self._hint_spans(self.ws.sys_canvas)
+        if not _in(px, py, rect):
+            return False
+        for v, x0, x1 in spans:
+            if x0 <= px < x1:
+                if v == "tabs":
+                    self.ws.step_home_tab(1, self.grid)
+                else:
+                    self._do_verb(v)
+                return True
+        return True
+
+    def _hint_keys(self, i):
+        """The hint strip's keys, typed (an edge: a held key acts once):
+        C, /, N, Y and X the verbs it names, Q and E the tabs."""
+        k = self.ws.input.last_key
+        prev = self._kprev
+        self._kprev = k
+        if not k or k == prev or not (32 < k < 127):
+            return False
+        ch = chr(k).lower()
+        if ch in ("q", "e"):
+            self.ws.step_home_tab(-1 if ch == "q" else 1, self.grid)
+            return True
+        v = _VERB_KEY.get(ch)
+        if v == "delete" and self._armed():
+            v = "sure"
+        if v is None or v not in self.zone_verbs():
+            return False
+        self._do_verb(v)
+        return True
 
     def _handle_search_typing(self, i):
         """Keyboard while a search query is being TYPED (ws.search_typing, entered
@@ -2146,6 +2555,8 @@ class LauncherHomeLayer:
                 ws.mark_dirty()
             elif i.pressed("home"):
                 ws.home_key()
+            return True
+        if self._hh() and self._hint_keys(i):
             return True
         # The carousel (§12): left/right glide by a card, a held key one
         # motion; up takes the keys to the tab row. The grid: the arrows
@@ -2252,6 +2663,8 @@ class LauncherHomeLayer:
         if click:
             if ws.bar_layer.handle_bar_tap(self.strip, px, py):
                 return True
+            if self._hh() and self._hint_tap(px, py):
+                return True
             for tid, r, _on in self.tab_rects():
                 if _in(px, py, r):
                     self._tab_focus = False
@@ -2286,7 +2699,7 @@ class LauncherHomeLayer:
         """Proxy onto the grid's zone_gen -- the GRID owns sel/items (the state
         that actually varies the zone's pixels) -- plus the DEL guard's
         generation, so BarLayer's strip cache repaints the armed prompt."""
-        return self.grid.zone_gen + self._delete.gen
+        return self.grid.zone_gen + self._delete.gen + self._zone_bump
 
     def _armed(self):
         """Whether DEL is armed on the selected card."""
@@ -2323,10 +2736,59 @@ class LauncherHomeLayer:
             out = out + ("search",)
         return out
 
+    def zone_tabs(self, rect):
+        """[(tab id, label, rect)] of the handheld home's tabs in the bar's
+        zone `rect` (step 17), flush left, as many as fit."""
+        lay = self.ws.layout
+        fs, cs = lay.fs, lay.cs
+        h = min(rect[3] - 2 * cs, lay.line_h + 8 * fs)
+        y = rect[1] + (rect[3] - h) // 2
+        x = rect[0] + 2 * cs
+        out = []
+        for tid, label in HOME_TABS:
+            w = _ui_draw.print_width(label, fs) + 12 * fs
+            if x + w > rect[0] + rect[2]:
+                break
+            out.append((tid, label, (x, y, w, h)))
+            x += w + 2 * fs
+        return out
+
+    def _draw_zone_tabs(self, cv, rect):
+        """The tabs in the bar (step 17): the active one under the current
+        mark (a theme without marks: its selection), the rest in the dim
+        chrome ink, the focus mark on the active one while the keys are the
+        tab row's."""
+        ws = self.ws
+        th = ws.theme_colors
+        fs = ws.layout.fs
+        marks = _ui_draw.marks_on()
+        for tid, label, r in self.zone_tabs(rect):
+            on = tid == self.grid.tab
+            ink = th["chrome_ink_dim"]
+            if on and marks:
+                got = _ui_draw.current(cv, th, r, r=5 * fs, fs=fs)
+                ink = th["chrome_ink"] if got is None else got
+            elif on:
+                cv.rect(r[0], r[1], r[2], r[3], th["selection"])
+                ink = th["selection_ink"]
+            if on and self._tab_focus:
+                if marks:
+                    _ui_draw.focus(cv, th, r, fs=fs)
+                else:
+                    for k in range(max(2, fs)):
+                        cv.rectb(r[0] - k, r[1] - k, r[2] + 2 * k, r[3] + 2 * k,
+                                 th["focus"])
+            cv.print(label, r[0] + 6 * fs, r[1] + (r[3] - ws.layout.line_h) // 2 + fs,
+                     ink, 1)
+
     def _zone_action_rects(self, rect):
         """{verb: rect} of the verb chips in the lent bar zone, flush left in
-        it, as many as fit."""
+        it, as many as fit; on the handheld home, of the hint strip's pairs
+        (`rect` unread), where its verbs are."""
         ws = self.ws
+        if self._hh():
+            spans, hr = self._hint_spans(ws.sys_canvas)
+            return {v: (x0, hr[1], x1 - x0, hr[3]) for v, x0, x1 in spans if v != "tabs"}
         lay = ws.layout
         fs, cs = lay.fs, lay.cs
         x = rect[0] + 2 * cs
@@ -2343,7 +2805,10 @@ class LauncherHomeLayer:
 
     def draw_zone(self, cv, rect):
         """The home's lent left zone: the active tab's verb chips on the
-        selected card -- the selected card's name is on its plate."""
+        selected card -- the selected card's name is on its plate. On the
+        handheld home, the tabs."""
+        if self._hh():
+            return self._draw_zone_tabs(cv, rect)
         ws = self.ws
         NAMES = self._NAMES
         th = ws.theme_colors
@@ -2359,32 +2824,47 @@ class LauncherHomeLayer:
                      NAMES["black"], 1)
 
     def zone_tap(self, px, py, rect=None):
-        """The zone's verb chips; anything else falls through."""
+        """The zone's verb chips (the handheld home's tabs); anything else
+        falls through."""
         ws = self.ws
+        if self._hh():
+            for tid, _label, r in self.zone_tabs(
+                    rect if rect is not None else ws.layout.zone_left):
+                if _in(px, py, r):
+                    self._tab_focus = False
+                    ws.set_home_tab(tid, self.grid)
+                    return True
         chips = self._zone_action_rects(
             rect if rect is not None else ws.layout.zone_left)
         for verb, r in chips.items():
             if _in(px, py, r):
-                if verb != "sure":
-                    self._delete.disarm()
-                if verb in ("play", "open"):
-                    ws.defer(self._launch)   # #184: start behind the paint
-                elif verb == "change":
-                    ws.defer(self._change)
-                elif verb == "new":
-                    ws.defer(self._new)
-                elif verb == "copy":
-                    ws.carts.dup(self.grid.selected())
-                elif verb == "delete":
-                    self._delete_path = self.grid.selected().get("path")
-                    self._delete.arm()
-                elif verb == "sure":
-                    self._delete.disarm()
-                    ws.carts.delete(self.grid.selected())
-                else:
-                    ws.toggle_search()
+                self._do_verb(verb)
                 return True
         return False
+
+    def _do_verb(self, verb):
+        """One of the active tab's verbs on the selected card (§12's table),
+        from a zone chip, a hint or its key."""
+        ws = self.ws
+        if verb != "sure":
+            self._delete.disarm()
+        if verb in ("play", "open"):
+            ws.defer(self._launch)   # #184: start behind the paint
+        elif verb == "change":
+            ws.defer(self._change)
+        elif verb == "new":
+            ws.defer(self._new)
+        elif verb == "copy":
+            ws.carts.dup(self.grid.selected())
+        elif verb == "delete":
+            self._delete_path = self.grid.selected().get("path")
+            self._delete.arm()
+        elif verb == "sure":
+            self._delete.disarm()
+            ws.carts.delete(self.grid.selected())
+        else:
+            ws.toggle_search()
+        ws.mark_dirty()
 
 
 class HomeWindowLayer(LauncherHomeLayer):

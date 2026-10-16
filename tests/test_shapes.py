@@ -177,8 +177,11 @@ def ref_shadow(px, x, y, w, h, r, b, dx, dy, col, alpha, stepped=False, hole=Non
         if hole is not None:
             hi_ = Yv - hole[1]
             if 0 <= hi_ < hole[3]:
-                hr = max(0, min(hole[4], min(hole[2], hole[3]) // 2))
-                inset = hr if (hi_ < hr or hi_ >= hole[3] - hr) else 0
+                hr = max(0, min(hole[4], 48, min(hole[2], hole[3]) // 2))
+                ci = hi_ if hi_ < hr else hole[3] - 1 - hi_ if hi_ >= hole[3] - hr else -1
+                # a corner row's span starts at the first pixel the arc covers whole
+                inset = 0 if ci < 0 else next(
+                    (j for j in range(hr) if g.shape_coverage(hr, ci, j) == 15), hr)
                 hx0, hx1 = hole[0] + inset - cam[0], hole[0] + hole[2] - inset - cam[0]
         for Xv in range(sx - b, sx + w + b):
             X = Xv - cam[0]

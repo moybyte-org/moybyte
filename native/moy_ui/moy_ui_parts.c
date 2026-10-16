@@ -698,6 +698,12 @@ static int key_sign(moy_ui_span_t k) {
 
 int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                  int fs, int desk) {
+    moy_ui_hints_at(s, b, items, len, fs, desk, 1, NULL, 0);
+    return MOY_UI_OK;
+}
+
+int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                    int fs, int desk, int draw, int16_t *spans, int cap) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_keycap_t *kc = moy_ui_keycap();
@@ -714,7 +720,7 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
     int r = kc->r * d.fs;
     int x = b.x + 8 * d.fs, y = b.y + (b.h - kh) / 2;
     size_t i = 0;
-    int field = 0;
+    int field = 0, pairs = 0;
     while (i < len) {
         size_t j = i;
         while (j < len && items[j] != 0) {
@@ -722,6 +728,9 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
         }
         moy_ui_span_t t = {items + i, (uint16_t)(j - i)};
         if ((field & 1) == 0) {
+            if (spans != NULL && pairs < cap) {
+                spans[2 * pairs] = (int16_t)x;
+            }
             size_t a = 0;
             while (a < t.n) {
                 size_t e = a;
@@ -735,15 +744,19 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
                             : sign >= 0 ? kh
                                         : tw(&fk, k.p, k.n, sc) + (desk ? 10 : 8) * d.fs;
                     w = w < kh ? kh : w;
-                    if (kc->alpha >= 255) {
+                    if (!draw) {
+                        // measured only
+                    } else if (kc->alpha >= 255) {
                         rrect(&d, x, y, w, kh, r, 1, capc, 0, 0);
                     } else {
                         rrect(&d, x, y, w, kh, r, 1, mix(bg, capc, kc->alpha), 0, 0);
                     }
-                    if (kc->border_w > 0 && set(kc->border_c)) {
+                    if (draw && kc->border_w > 0 && set(kc->border_c)) {
                         rrect(&d, x, y, w, kh, r, 0, 0, kc->border_w * d.fs, val(&d, kc->border_c));
                     }
-                    if (sign == 4) {
+                    if (!draw) {
+                        // measured only
+                    } else if (sign == 4) {
                         enter_sign(&d, x, y, w, kh, capi);
                     } else if (sign >= 0) {
                         arrow_sign(&d, x, y, w, kh, sign, capi);
@@ -757,10 +770,15 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
             }
             x += d.fs;
         } else {
-            x += text(&d, &fh, t.p, t.n, x, b.y, b.h, dim, sc) + hgap;
+            x += draw ? text(&d, &fh, t.p, t.n, x, b.y, b.h, dim, sc) : tw(&fh, t.p, t.n, sc);
+            if (spans != NULL && pairs < cap) {
+                spans[2 * pairs + 1] = (int16_t)x;
+            }
+            pairs++;
+            x += hgap;
         }
         field++;
         i = j + 1;
     }
-    return MOY_UI_OK;
+    return pairs;
 }

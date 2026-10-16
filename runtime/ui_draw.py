@@ -1313,6 +1313,16 @@ def _tab_label(tabs, tid):
     return ""
 
 
+def hints(cv, th, rect, items, desk=False, draw=True):
+    """Keycap hints in band `rect`, from its left (the public `ui.hints`'s
+    part, for chrome that lays itself out): `items` alternate the keys --
+    space-separated; `enter`, `left`, `right`, `up` and `down` draw as signs
+    -- and what they do. Answers each pair's (x0, x1) across the band, what
+    a tap hit-tests; `draw` False only measures."""
+    b = b"\0".join([str(t).encode("utf-8") for t in items])
+    return _C.hints(cv, _LOOK if th is _TH else _look(th), rect, b, desk, draw)
+
+
 def status_row(cv, th, rect, items):
     """The window status band ("Ln 13, Col 1" / "No issues"): a quiet strip on
     the alt surface with dim ink, items spaced left-to-right."""

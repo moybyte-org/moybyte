@@ -634,10 +634,12 @@ mockups (`docs/media/theming_2026-09/README.md`: the look, not finished
 layouts; L0: not set in stone) are at
 `docs/media/theming_2026-09/home_dark_480x320.png` and the 320×240 pair. The
 2026-10 look restyles this component (`docs/look_2026-10.md` steps 17 and 18):
-a 2× hero between 1× neighbours on the handheld, and on wide glass the hero,
-a details pane and a shelf, still the `carousel` arrangement.
+on the handheld's metrics a 2× hero between 1× neighbours, its title and
+metadata under it, the tabs in the bar's `zone` and the verbs a keycap hint
+strip along the foot (step 17); on wide glass the hero, a details pane and a
+shelf, still the `carousel` arrangement.
 
-| tab | source | tap (console mode, every board) | verbs in `zone` |
+| tab | source | tap (console mode, every board) | verbs in `zone` (the handheld's hint strip) |
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
@@ -674,11 +676,13 @@ the Editor, a Games cart the player, an Apps entry its app; the Editor's
 window X closes back to it. SEARCH is the fullscreen home's verb alone.
 
 **Navigation.** Touch: tap a tab, drag or fling the carousel, tap the centre
-card or a `zone` chip. T-Deck: left/right move the carousel by a card with
-the drag's glide, run through the same `flinging` path as a touch fling
-(`_drag_partial`), so a held key is one continuous motion; up moves focus to
-the tab row, where left/right switch tabs and down or enter returns; the
-trackball is the same four directions.
+card or a verb (a `zone` chip, the handheld's hint). T-Deck: left/right move
+the carousel by a card with the drag's glide (the handheld's 6-frame slide),
+run through the same `flinging` path as a touch fling (`_drag_partial`), so
+a held key is one continuous motion; up moves focus to the tab row (the
+handheld's in the bar), where left/right switch tabs and down or enter
+returns; the trackball is the same four directions. The handheld's hint
+strip names its keys: C, /, N, Y and X its verbs, Q and E the tabs.
 
 **Damage first.** The fullscreen home's drag partial hands its band rect to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
@@ -705,9 +709,12 @@ scroll's own condition (#113). The frame in motion:
   cards. Every full paint copies the wallpaper under the band
   (`LauncherHomeLayer._band_bg`, an owned layer the
   fit check releases with the retained frame), and a moving frame restores
-  it only around the cards, every card painting its whole square opaque:
-  each card one scaled blit of its RGB565 cover bake at its scale, the
-  outline frame and the name plate on the centre one. Covers are RGB565
+  it only around the cards, every card painting its whole square opaque
+  but the rows its rounded corners span, which are restored too: each
+  card one scaled blit of its RGB565 cover bake at its scale (on the
+  handheld its 64-pixel crop, `DeviceCanvas.cover`), the outline frame
+  and the name plate on the centre one (on the handheld the title and the
+  metadata across the band). Covers are RGB565
   bakes and `sspr` scales index sheets, so this is **a nearest-neighbour
   RGB565 scaled-blit kernel** in `moy_gfx`, benched on all four boards
   before the home committed (§13 step 7a). The band's rect is the frame's

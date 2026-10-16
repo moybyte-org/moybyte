@@ -3099,6 +3099,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g.tinted_for = self.covers.tinted
         # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
+        g.own_for = self.carts.is_own
         g.theme = getattr(self, "theme_colors", None)
         return g
 

@@ -44,7 +44,7 @@ def test_cards_lay_out_in_one_row_the_centre_card_largest(tmp_path):
     assert r0[0] + r0[2] // 2 == bx + bw // 2
     assert r0[2] == r0[3] and r1[2] == r1[3]   # square cards
     assert r1[2] == lz.card_side()             # one pitch away: scale 1.0
-    assert r0[2] == lz.card_side() * 3 // 2    # the centre at the board's 1.5
+    assert r0[2] == lz.card_side() * 2        # the handheld's 2x hero
     assert r0[1] + r0[3] // 2 == r1[1] + r1[3] // 2   # one centre line
     assert r1[0] >= r0[0] + r0[2]              # neighbours never overlap it
     for r in (r0, r1):
@@ -60,7 +60,7 @@ def test_a_cards_size_is_a_function_of_its_distance_alone(tmp_path):
         lz._scroll = 2 * p + off
         sizes.append(lz.tile_rect(2)[2])
     assert sizes == sorted(sizes, reverse=True)
-    assert sizes[0] == lz.card_side() * 3 // 2 and sizes[-1] == lz.card_side()
+    assert sizes[0] == lz.card_side() * 2 and sizes[-1] == lz.card_side()
     lz._scroll = 2 * p - p // 4                # the same distance the other side
     assert lz.tile_rect(2)[2] == sizes[1]
 
@@ -76,19 +76,19 @@ def test_the_degradation_order_is_the_wms_constant(tmp_path):
     lz = ws.launcher
     card = lz.card_side()
     drv.frame(1 / 30)
-    assert (lz.motion, lz.scale) == ("full", 1.5)        # every board's verdict
+    assert (lz.motion, lz.scale) == ("full", 2.0)        # every board's verdict
     ws.wm.HOME_SCALE = 1.25
     ws.mark_dirty()
     drv.frame(1 / 30)
     assert lz.tile_rect(0)[2] == int(card * 1.25 + 0.5)
-    ws.wm.HOME_SCALE = 1.5
+    ws.wm.HOME_SCALE = 2.0
     ws.wm.HOME_MOTION = "rest"
     drv.press("right")
     drv.frame(1 / 30)
     assert lz.moving
     assert all(r[2] == card for _i, r in lz._visible())
     _settle(drv)
-    assert lz.tile_rect(1)[2] == card * 3 // 2
+    assert lz.tile_rect(1)[2] == card * 2
     ws.wm.HOME_MOTION = "one"
     ws.mark_dirty()
     drv.frame(1 / 30)
@@ -423,3 +423,106 @@ def test_cursor_delta_is_faster_and_accelerates():
     assert C._cursor_delta(6) > 6 * C._cursor_delta(1)
     # A brisk flick crosses a large fraction of the 320px screen in a few rolls.
     assert C._cursor_delta(8) >= 320 // 3
+
+
+# -- the handheld home (docs/look_2026-10.md step 17) ---------------------------
+
+def test_the_handheld_hero_keeps_its_gap_to_the_neighbours(tmp_path):
+    """A 2x hero between 1x neighbours, every gap the same, the card the
+    64-pixel crop's side; the title and the hint strip under the band."""
+    from runtime import launcher_layer as ll
+
+    ws = _ws_with_carts(tmp_path, 10)
+    lz = ws.launcher
+    assert lz.handheld()
+    lz.sel = 3
+    card = lz.card_side()
+    assert card == ll._CROP * ws.layout.fs
+    left, hero, right, far = (lz.tile_rect(i) for i in (2, 3, 4, 5))
+    gap = ll._HH_GAP * ws.layout.fs
+    assert hero[2] == 2 * card and left[2] == right[2] == card
+    assert hero[0] - (left[0] + left[2]) == gap
+    assert right[0] - (hero[0] + hero[2]) == gap
+    assert far[0] - (right[0] + right[2]) == gap
+    ty, _h, _sc, my, mh, hints = lz.foot()
+    bx, by, bw, bh = lz.band_rect()
+    assert hero[1] + hero[3] < ty < my and my + mh <= by + bh <= hints[1]
+
+
+def test_a_handheld_slide_takes_six_frames(tmp_path):
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    drv.press("right")
+    n = 0
+    while True:
+        drv.frame(1 / 30)
+        n += 1
+        if not ws.launcher.moving or n > 30:
+            break
+    assert n == 6 and ws.launcher.sel == 1
+
+
+def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
+    """The tabs draw in the bar's zone and a tap there switches; the
+    active tab's verbs are the hint strip's pairs, and a tap on one is its
+    verb (step 17)."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    home = ws.launcher_layer
+    bar_h = ws.layout.cy
+    rects = {tid: r for tid, r, _on in home.tab_rects()}
+    assert set(rects) == {"games", "mine", "apps", "make"}
+    assert all(r[1] + r[3] <= bar_h for r in rects.values())
+    r = rects["apps"]
+    drv.click(r[0] + r[2] // 2, r[1] + r[3] // 2)
+    drv.frame(1 / 30)
+    assert ws.launcher.tab == "apps"
+    ws.set_home_tab("games")
+    drv.frame(1 / 30)
+    hints = home._zone_action_rects(None)
+    assert tuple(hints) == home.zone_verbs() == ("play", "change", "search")
+    strip = ws.launcher.foot()[5]
+    for x, y, w, h in hints.values():
+        assert strip[1] <= y and y + h <= strip[1] + strip[3]
+    x, y, w, h = hints["search"]
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    assert ws.search_typing
+
+
+def test_the_hint_keys_switch_tabs_and_change(tmp_path):
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    drv.type_char(ord("e"))
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.launcher.tab == "mine"
+    drv.type_char(ord("q"))
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.launcher.tab == "games"
+    drv.type_char(ord("c"))
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.screen == "menu"                       # CHANGE: the Editor
+
+
+def test_a_handheld_card_draws_its_covers_crop(tmp_path):
+    """A cover's 64-pixel crop is what a handheld card shows: a seed's from
+    the look's art direction, any other cart's from the centre."""
+    from runtime import launcher_layer as ll
+
+    ws = _ws_with_carts(tmp_path, 10)
+    lz = ws.launcher
+    assert lz._crop_of({"id": "moybyte.sky_run"}) == (8, 44, 64, 64)
+    assert lz._crop_of({"id": "someone.game"}) == (32, 32, 64, 64)
+    assert all(x + w <= 128 and y + h <= 128 for x, y, w, h in ll._CROPS.values())

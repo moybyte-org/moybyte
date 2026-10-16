@@ -632,25 +632,22 @@ def test_a_blank_icon_tile_is_no_art():
     assert img is not None and img.w == 8
 
 
-def test_a_card_without_a_cover_is_the_icon_homes_cell(tmp_path):
-    """A coverless card's art is the cart's icon or type glyph on the
-    theme's `desk.icon` tile, five eighths of the slot: the glyph alone,
-    scaled to the slot, was a card-sized red shape (Pin Light)."""
+def test_a_card_without_a_cover_is_its_title_tile(tmp_path):
+    """A coverless card on the handheld home is its title tile (the 2026-10
+    look's GAPS 21): the theme's tile field across the card, the cart's
+    title on it in the ink, inside the card."""
     from runtime.host_canvas import indices_of
     from runtime.host_canvas import make_system_canvas as SystemCanvas
-    from runtime.launcher_layer import _TYPE_COLOR
     ws = build_ws(tmp_path)
     lw = ws.launcher
+    assert lw.handheld()
     th = lw.theme
     it = {"title": "PIN", "type": "game", "path": None}
-    red = _TYPE_COLOR["game"]
     w = h = 120
     cv = SystemCanvas(320, 240)
     cv.cls(th["desktop"])
     lw._draw_home_card(cv, it, (20, 20, w, h), False, None)
-    t = w * 5 // 8
-    x0 = y0 = 20 + (w - t) // 2
     px = indices_of(cv)
-    reds = [(i % 320, i // 320) for i in range(len(px)) if px[i] == red]
-    assert reds and all(x0 <= x < x0 + t and y0 <= y < y0 + t for x, y in reds)
-    assert px[(y0 + 2) * 320 + x0 + 2] == th["panel"]      # the tile's field
+    assert px[(20 + 2) * 320 + 20 + 2] == th["surface_alt"]       # the tile's field
+    ink = [(i % 320, i // 320) for i in range(len(px)) if px[i] == th["ink"]]
+    assert ink and all(20 < x < 20 + w and 20 < y < 20 + h for x, y in ink)

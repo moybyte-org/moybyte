@@ -206,6 +206,8 @@ _DRAW_SIGS = (
                           c.POINTER(_I)], _I),
     ("moy_ui_tab", [c.POINTER(_Sink), _Box, _I, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_status", [c.POINTER(_Sink), _Box, c.c_char_p, _Z, _I, _I], _I),
+    ("moy_ui_hints_at", [c.POINTER(_Sink), _Box, c.c_char_p, _Z, _I, _I, _I, c.c_void_p, _I],
+     _I),
     ("moy_ui_game_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I], _I),
     ("moy_ui_game_icon_btn", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_mini_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
@@ -569,6 +571,14 @@ def binding():
         b = bytes(items)
         _check(lib.moy_ui_status(c.byref(s), box_of(rect), b, len(b), int(count), s.fs))
 
+    def hints(cv, look, rect, items, desk, draw):
+        s = sink(cv, look)
+        b = bytes(items)
+        spans = (c.c_int16 * 32)()
+        n = lib.moy_ui_hints_at(c.byref(s), box_of(rect), b, len(b), s.fs, int(desk),
+                                int(bool(draw)), spans, 16)
+        return tuple((spans[2 * k], spans[2 * k + 1]) for k in range(min(n, 16)))
+
     def game_btn(cv, rect, label, fill):
         s = sink(cv, None)
         sp, keep = span(label)
@@ -715,7 +725,7 @@ def binding():
         return tuple(out)
 
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
-              button, button_x, chip, tab_rects, tab, status, game_btn, game_icon_btn,
+              button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               frame_under, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, inset, cut,
