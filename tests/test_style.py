@@ -24,6 +24,7 @@ import ast
 import json
 from pathlib import Path
 
+import pytest
 
 from runtime import ui_draw
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
@@ -154,7 +155,19 @@ def _draw_many(cv, th, n=100):
         ui_draw.status_row(cv, th, (0, 210, 200, 14), ("a", "b"))
 
 
-def test_the_style_path_resolves_in_c_once_per_theme(monkeypatch):
+@pytest.fixture
+def empty_ring(monkeypatch):
+    """A theme ring empty as at boot: a theme an earlier test drew is otherwise
+    already held and packs nothing. The C look slots the test overwrites are
+    re-resolved at the next bind afterwards (`look_moved`)."""
+    monkeypatch.setattr(ui_draw, "_RING", [])
+    ui_draw.look_moved()
+    yield
+    monkeypatch.undo()
+    ui_draw.look_moved()
+
+
+def test_the_style_path_resolves_in_c_once_per_theme(monkeypatch, empty_ring):
     """Every widget's colours resolve inside native/moy_ui against the look
     its theme was packed into: 600 widget draws on one theme pack it ONCE and
     never ask the face's cache (`state_colors`, which stays for the callers
@@ -183,16 +196,13 @@ def test_the_style_path_resolves_in_c_once_per_theme(monkeypatch):
     assert ui_draw.state_colors(th, "chip", ui_draw.ON) is a
 
 
-def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch):
+def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring):
     """The fast path is an identity compare, so alternating themes must not
     thrash: each theme is packed into a C look once, while the ring holds it."""
     packs = []
     real_look = ui_draw._C.look
     monkeypatch.setattr(ui_draw._C, "look",
                         lambda slot, row: (packs.append(slot), real_look(slot, row))[1])
-    # An empty ring, as at boot: a theme an earlier draw packed is held.
-    monkeypatch.setattr(ui_draw, "_RING", [])
-    monkeypatch.setattr(ui_draw, "_TH", None)
     a, b = theme_colors("night"), theme_colors("berry")
     cv = _CountingCanvas()
     for _ in range(20):

@@ -2187,7 +2187,10 @@ def roles_trace(ws):
     say("load", _n(blob), err, _n(f.decode_text(blob)))
     say("duplicate", _n(f.duplicate("docs", name)))
     say("rename", _n(f.rename("docs", name, "renamed")))
-    say("list", _n(f.list("docs")[0]))
+    # The store lists newest first by whole seconds of mtime, so two documents
+    # written either side of a second boundary swap places; the trace pins the
+    # set, not the clock.
+    say("list", _n(sorted(f.list("docs")[0])))
     say("delete", _n(f.delete("docs", "renamed")))
     say("trash", _n(f.trash_list()))
     say("restore", _n(f.restore("docs", "renamed")))

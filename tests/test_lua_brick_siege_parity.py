@@ -65,4 +65,9 @@ def test_brick_siege_lua_runs_under_the_real_player(tmp_path):
     for _ in range(240):                               # 8s: spawns, shots, booms
         ws.frame(1 / 30)
     assert ws.player.cart_error is None
-    assert float(run.get_global("t")) > 0.0            # the cart kept ticking
+    # The cart kept ticking. A game over restarts the field and zeroes `t` on
+    # the frame it does so (the AI-less tanks die at a random moment), so read
+    # the clock after one more frame: a restart is 1.6s away from the next.
+    ws.frame(1 / 30)
+    assert ws.player.cart_error is None
+    assert float(run.get_global("t")) > 0.0
