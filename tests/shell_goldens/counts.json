@@ -537,8 +537,16 @@
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
+  "tdeck_320x240_fs1_parts_day": {
+    "parts_appearance": [44, 19],
+    "parts_settings": [28, 19]
+  },
+  "tdeck_320x240_fs1_parts_night": {
+    "parts_appearance": [46, 19],
+    "parts_settings": [30, 19]
+  },
   "tdeck_320x240_fs1_ui_page": {
-    "ui_page": [22, 10]
+    "ui_page": [26, 11]
   },
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": [449, 28],

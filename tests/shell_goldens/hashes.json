@@ -537,8 +537,16 @@
     "web_console": "8ab8bbc90909e45890e4c1c959c911a66e3088d7c403526d2967f5c32ce17516",
     "web_console_address": "ecc047f5307cb581e6bc46f0773c9f38092fc1814f6fddbac611d5e1f860878a"
   },
+  "tdeck_320x240_fs1_parts_day": {
+    "parts_appearance": "6c59876bdf92420ed70efeb01b2f814d1e0df4758e6c65a572a923294d71677b",
+    "parts_settings": "a58705d0c2c61333a43e1c10c30ed9ba2470194043d67fae5eb5a0bf01c73321"
+  },
+  "tdeck_320x240_fs1_parts_night": {
+    "parts_appearance": "923692d59ef8e6b0b826b1b17493d655c181964742ec0c3d2bdff8daec6f9ab0",
+    "parts_settings": "ca8d539b756ba44f5f329e6615f7916ae4a6bd21ebc1284bc87be3b88293703e"
+  },
   "tdeck_320x240_fs1_ui_page": {
-    "ui_page": "d44b6208a5070ef6ec49f4f04a2f8025989eded8383e938aefa3bd00789bcabd"
+    "ui_page": "c535034838edda19c9ab729479b2aae960cf1fb87545aabbd699cfe619778b8a"
   },
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": "2e0185f8d8733010740a6dd51221bd86692b6e27b349f773b43db7a6ee36cf74",
