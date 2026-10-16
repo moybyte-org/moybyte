@@ -83,6 +83,13 @@ keeps the matrix a clean product instead of a pile of special cases.
                            T-Deck row and the P4 as shipped: RGB roles in the
                            block at indices 64..127 on every surface. One axis
                            (theme) from each row in its variant.
+  tdeck_320x240_fs1_parts_day, tdeck_320x240_fs1_parts_night
+                           the public UI API's parts sheet
+                           (docs/look_2026-10.md step 12): a system app
+                           (tests/fixtures/ui_parts/parts_app.py) drawing the
+                           Settings and Appearance targets' rows with the
+                           verbs, in the `moy` seed's Day and Night, and only
+                           those surfaces (a config's `plan`).
   guition_p4_1280x800_windowed  the Guition P4's desk as shipped: the second
                            desk glass, on the same desk metrics as the P4.
                            One axis (the glass) from the as-shipped P4 row.
@@ -275,6 +282,11 @@ APP_CARTS = (("notes", "Notes"),)
 UI_PAGE = (str(Path(__file__).resolve().parent / "fixtures" / "ui_page" / "page_py.moy"),
            "UI Page Py")
 
+# The public UI API's parts sheet (docs/look_2026-10.md step 12): a system
+# app registered for the `parts` configs, its pages their surfaces.
+PARTS_APP = Path(__file__).resolve().parent / "fixtures" / "ui_parts" / "parts_app.py"
+PARTS_PAGES = ("settings", "appearance")
+
 # The WEB CONSOLE connection screen (#197) is rendered LAST, and with a fake
 # service, for two reasons that are both about not moving the other 87 hashes:
 # injecting `ws.webhost` makes the Settings row appear, and parking the glass
@@ -421,6 +433,12 @@ CONFIGS = {
     "guition_p4_1280x800_windowed": dict(
         sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
         diagonal_in=10.1),
+    "tdeck_320x240_fs1_parts_day": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="light",
+        diagonal_in=None, theme="moy", plan="parts"),
+    "tdeck_320x240_fs1_parts_night": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, theme="moy", plan="parts"),
     "tdeck_320x240_fs1_ui_page": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
         diagonal_in=None, plan="ui_page"),
@@ -596,6 +614,8 @@ def _surface_plan(ws, cfg):
         return _home_plan(ws, cfg)
     if cfg.get("plan") == "ui_page":
         return [("ui_page", lambda: open_cart(ws, UI_PAGE[1]))]
+    if cfg.get("plan") == "parts":
+        return _parts_plan(ws)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -772,6 +792,30 @@ def _home_plan(ws, cfg):
             for t in HOME_TAB_IDS]
 
 
+def parts_app(ws, page):
+    """The parts sheet's app on `ws`, registered, drawing `page`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("parts_app", str(PARTS_APP))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    app = mod.PartsApp(ws, page)
+    ws.register_app(app)
+    return app
+
+
+def _parts_plan(ws):
+    """Each page of the parts sheet, its app opened fresh (its focus set)."""
+    app = parts_app(ws, PARTS_PAGES[0])
+
+    def enter(page):
+        def go():
+            app.page = page
+            app.open()
+            ws.wm.goto(app.id)
+        return go
+    return [("parts_" + p, enter(p)) for p in PARTS_PAGES]
+
+
 def _widget_page_plan(ws):
     """Console mode's container for each widget, entered from the home: the
     calendar's own page, Settings at the WIFI panel, Settings at VOLUME, and
@@ -811,6 +855,8 @@ def surface_names(config_name):
         return ["launcher" if t == "games" else "launcher_" + t for t in HOME_TAB_IDS]
     if cfg.get("plan") == "ui_page":
         return ["ui_page"]
+    if cfg.get("plan") == "parts":
+        return ["parts_" + p for p in PARTS_PAGES]
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]

@@ -11,6 +11,13 @@
  *   ui.toggle(label, on, o)        -> the new on
  *   ui.slider(label, v, lo, hi, o) -> the new v
  *   ui.list(label, items, cur, o)  -> the new cur (from 1; 0 is none)
+ *   ui.group(caption, o)           (ui.group() ends the group)
+ *   ui.info(label, value, o)
+ *   ui.link(label, value, o)       -> true the frame it is activated
+ *   ui.cycle(label, items, cur, o) -> the new cur (from 1; 0 is none)
+ *   ui.seg(label, items, cur, o)   -> the new cur
+ *   ui.swatches(label, colours, cur, o) -> the new cur (colours 0xRRGGBB)
+ *   ui.hints(items, o)             (keys, then what they do, alternating)
  *   ui.part(id, w, h, o)           -> x, y, w, h, state
  *   ui.focus(id), ui.focus()       -> the focused id, or nil
  *   ui.keys_taken()                -> whether the ui used this frame's keys
@@ -189,6 +196,112 @@ static int moycore_ui_list(lua_State *L)
     return 1;
 }
 
+/* The strings of the table at stack index `i`, NUL-separated, pushed as one
+ * string: its bytes. */
+static const char *moycore_ui_items(lua_State *L, int i, size_t *len)
+{
+    luaL_checktype(L, i, LUA_TTABLE);
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    lua_Integer n = luaL_len(L, i);
+    for (lua_Integer k = 1; k <= n; k++) {
+        lua_geti(L, i, k);
+        luaL_tolstring(L, -1, NULL);
+        lua_remove(L, -2);
+        luaL_addvalue(&b);
+        if (k < n) luaL_addchar(&b, '\0');
+    }
+    luaL_pushresult(&b);
+    return lua_tolstring(L, -1, len);
+}
+
+static int moycore_ui_group(lua_State *L)
+{
+    moy_ui_over_t o;
+    moy_ui_run_group(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_over(L, 2, &o));
+    return 0;
+}
+
+static int moycore_ui_value(lua_State *L, int kind)
+{
+    moy_ui_over_t o;
+    moycore_ui_over(L, 3, &o);
+    size_t n = 0;
+    const char *v = lua_isnoneornil(L, 2) ? "" : luaL_tolstring(L, 2, &n);
+    moy_ui_span_t vs = { (const uint8_t *)v, (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n) };
+    int32_t got = 0;
+    moy_ui_run_value(moycore_ui_canvas(), kind, moycore_ui_span(L, 1), vs, &o, &got);
+    lua_pushboolean(L, got != 0);
+    return 1;
+}
+
+static int moycore_ui_info(lua_State *L)
+{
+    moycore_ui_value(L, MOY_UI_V_INFO);
+    return 0;
+}
+
+static int moycore_ui_link(lua_State *L)
+{
+    return moycore_ui_value(L, MOY_UI_V_LINK);
+}
+
+static int moycore_ui_choice(lua_State *L, int kind)
+{
+    int32_t cur = lua_isnoneornil(L, 3) ? -1 : moycore_ui_int(L, 3) - 1;
+    moy_ui_over_t o;
+    moycore_ui_over(L, 4, &o);
+    size_t len = 0;
+    const char *opts;
+    if (kind == MOY_UI_V_SWATCH) {
+        luaL_checktype(L, 2, LUA_TTABLE);
+        luaL_Buffer b;
+        luaL_buffinit(L, &b);
+        lua_Integer n = luaL_len(L, 2);
+        for (lua_Integer k = 1; k <= n; k++) {
+            lua_geti(L, 2, k);
+            uint32_t c = (uint32_t)(lua_tointeger(L, -1) & 0xffffff);
+            lua_pop(L, 1);
+            char w[4] = { (char)(c & 0xff), (char)((c >> 8) & 0xff), (char)((c >> 16) & 0xff), 0 };
+            luaL_addlstring(&b, w, 4);
+        }
+        luaL_pushresult(&b);
+        opts = lua_tolstring(L, -1, &len);
+    } else {
+        opts = moycore_ui_items(L, 2, &len);
+    }
+    int32_t got = cur;
+    moy_ui_run_choice(moycore_ui_canvas(), kind, moycore_ui_span(L, 1), (const uint8_t *)opts,
+                      len, cur, &o, &got);
+    lua_pushinteger(L, (lua_Integer)got + 1);
+    return 1;
+}
+
+static int moycore_ui_cycle(lua_State *L)
+{
+    return moycore_ui_choice(L, MOY_UI_V_CYCLE);
+}
+
+static int moycore_ui_seg(lua_State *L)
+{
+    return moycore_ui_choice(L, MOY_UI_V_SEG);
+}
+
+static int moycore_ui_swatches(lua_State *L)
+{
+    return moycore_ui_choice(L, MOY_UI_V_SWATCH);
+}
+
+static int moycore_ui_hints(lua_State *L)
+{
+    moy_ui_over_t o;
+    moycore_ui_over(L, 2, &o);
+    size_t len = 0;
+    const char *items = moycore_ui_items(L, 1, &len);
+    moy_ui_run_hints(moycore_ui_canvas(), (const uint8_t *)items, len, &o);
+    return 0;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -230,7 +343,9 @@ static void moycore_ui_open(lua_State *L)
     static const luaL_Reg verbs[] = {
         {"page", moycore_ui_page}, {"label", moycore_ui_label}, {"button", moycore_ui_button},
         {"toggle", moycore_ui_toggle}, {"slider", moycore_ui_slider}, {"list", moycore_ui_list},
-        {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
+        {"group", moycore_ui_group}, {"info", moycore_ui_info}, {"link", moycore_ui_link},
+        {"cycle", moycore_ui_cycle}, {"seg", moycore_ui_seg}, {"swatches", moycore_ui_swatches},
+        {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
         {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {NULL, NULL},
     };
     luaL_newlib(L, verbs);

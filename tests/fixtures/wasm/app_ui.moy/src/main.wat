@@ -31,6 +31,17 @@
   (import "moybyte.app" "ui_focus" (func $ui_focus (param i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_keys_taken" (func $ui_keys_taken (result i32)))
   (import "moybyte.app" "ui_at" (func $ui_at (param i32 i32 i32 i32) (result i32)))
+  ;; the parts' rows, which tests/fixtures/wasm/app_parts.moy draws
+  (import "moybyte.app" "ui_group" (func $ui_group (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_info" (func $ui_info (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_link" (func $ui_link (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_cycle" (func $ui_cycle
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_seg" (func $ui_seg
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_swatches" (func $ui_swatches
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_hints" (func $ui_hints (param i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 

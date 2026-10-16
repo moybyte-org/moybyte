@@ -217,6 +217,32 @@ void moy_ui_run_at(void *target, int x, int y, int w, int h) {
     moy_ui_api_at(run_ctx(target), x, y, w, h);
 }
 
+int moy_ui_run_group(void *target, moy_ui_span_t caption, const moy_ui_over_t *o) {
+    OPEN(target);
+    moy_ui_api_group(c, &r.s, caption, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_value(void *target, int kind, moy_ui_span_t label, moy_ui_span_t value,
+                     const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_value(c, &r.s, kind, label, value, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_choice(void *target, int kind, moy_ui_span_t label, const uint8_t *opts, size_t n,
+                      int32_t cur, const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_choice(c, &r.s, kind, label, opts, n, cur, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_hints(void *target, const uint8_t *items, size_t n, const moy_ui_over_t *o) {
+    OPEN(target);
+    moy_ui_api_hints(c, &r.s, items, n, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
 // -- the rows ----------------------------------------------------------------------
 
 static int over_of(moy_ui_over_t *o, const uint8_t *p, uint32_t n) {
@@ -320,6 +346,66 @@ int32_t moy_ui_wasm_at(void *e, int32_t x, int32_t y, int32_t w, int32_t h) {
     return 0;
 }
 
+int32_t moy_ui_wasm_group(void *e, const uint8_t *caption, uint32_t n, const uint8_t *ob,
+                          uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    return moy_ui_run_group(wasm_target(), span(caption, n), &o);
+}
+
+static int32_t value_row(int kind, const uint8_t *label, uint32_t n, const uint8_t *value,
+                         uint32_t vn, const uint8_t *ob, uint32_t on) {
+    OVER(ob, on);
+    int32_t v = 0;
+    int rc = moy_ui_run_value(wasm_target(), kind, span(label, n), span(value, vn), &o, &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_info(void *e, const uint8_t *label, uint32_t n, const uint8_t *value,
+                         uint32_t vn, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    return value_row(MOY_UI_V_INFO, label, n, value, vn, ob, on);
+}
+
+int32_t moy_ui_wasm_link(void *e, const uint8_t *label, uint32_t n, const uint8_t *value,
+                         uint32_t vn, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    return value_row(MOY_UI_V_LINK, label, n, value, vn, ob, on);
+}
+
+static int32_t choice_row(int kind, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                          uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
+    OVER(ob, on);
+    int32_t got = cur;
+    int rc = moy_ui_run_choice(wasm_target(), kind, span(label, n), opts, len, cur, &o, &got);
+    return rc != 0 ? cur : got;
+}
+
+int32_t moy_ui_wasm_cycle(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                          uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    return choice_row(MOY_UI_V_CYCLE, label, n, opts, len, cur, ob, on);
+}
+
+int32_t moy_ui_wasm_seg(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                        uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    return choice_row(MOY_UI_V_SEG, label, n, opts, len, cur, ob, on);
+}
+
+int32_t moy_ui_wasm_swatches(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                             uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    return choice_row(MOY_UI_V_SWATCH, label, n, opts, len, cur, ob, on);
+}
+
+int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8_t *ob,
+                          uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    return moy_ui_run_hints(wasm_target(), items, n, &o);
+}
+
 #define FN(f) ((void *)(f))
 
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
@@ -335,6 +421,13 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_focus", FN(moy_ui_wasm_focus) },
     { "ui_keys_taken", FN(moy_ui_wasm_keys_taken) },
     { "ui_at", FN(moy_ui_wasm_at) },
+    { "ui_group", FN(moy_ui_wasm_group) },
+    { "ui_info", FN(moy_ui_wasm_info) },
+    { "ui_link", FN(moy_ui_wasm_link) },
+    { "ui_cycle", FN(moy_ui_wasm_cycle) },
+    { "ui_seg", FN(moy_ui_wasm_seg) },
+    { "ui_swatches", FN(moy_ui_wasm_swatches) },
+    { "ui_hints", FN(moy_ui_wasm_hints) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

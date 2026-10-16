@@ -1,6 +1,7 @@
 // The public UI API's engine (docs/ui_api_2026-10.md): the verbs every app
 // and cart draws its interface with -- page, label, button, toggle, slider,
-// list, part, focus, keys_taken, at -- and the focus and navigation they share.
+// list, group, info, link, cycle, seg, swatches, hints, part, focus,
+// keys_taken, at -- and the focus and navigation they share.
 //
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
 // the Python face's bytearray per app, the run's one static): the focused id,
@@ -110,6 +111,12 @@ typedef struct {
     moy_ui_box_t reveal_box;        // a list row to keep in view next frame
     uint32_t dup, dup_told;         // a duplicate id this frame (its hash), the last told
     char dup_name[MOY_UI_API_NAME];
+    // The open group (ui.group): its card's top in content coordinates, the
+    // rows stacked on it, its last row's box and that row's marks.
+    int16_t grp_top;
+    uint16_t grp_flags;
+    uint8_t grp_open, grp_n, grp_any, grp_first;
+    moy_ui_box_t grp_last;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -142,6 +149,25 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 // `items` NUL-separated in `len` bytes; `cur` from 0, -1 none. Answers the new cur.
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                         const uint8_t *items, size_t len, int32_t cur, const moy_ui_over_t *o);
+// A group (§1): `caption` heads a card the rows stacked after it sit on,
+// until the next group or a caption of length 0, which ends it.
+void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t caption,
+                      const moy_ui_over_t *o);
+// A row with a value at its right: `kind` MOY_UI_V_INFO (no stop) or
+// MOY_UI_V_LINK, which answers true the frame it is activated.
+int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
+                     moy_ui_span_t value, const moy_ui_over_t *o);
+// A choice of `n` options with `cur` (from 0, -1 none) current: `kind`
+// MOY_UI_V_CYCLE and MOY_UI_V_SEG take `opts` NUL-separated, MOY_UI_V_SWATCH
+// `n` colours (0xRRGGBB, little-endian words). Left and right are its own
+// while focused (a cycle wraps); activation takes the next option, a tap the
+// one tapped. Answers the new cur.
+int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
+                          const uint8_t *opts, size_t len, int32_t cur, const moy_ui_over_t *o);
+// Keycap hints (`items` NUL-separated key and action pairs) in a band at the
+// page's foot, which its rows then stack above; ui.at places them instead.
+void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
+                      const moy_ui_over_t *o);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);

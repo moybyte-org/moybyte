@@ -67,8 +67,7 @@ typedef struct {
     int fx, fx_c, pdx, pdy;
 } draw_t;
 
-static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
-    moy_ui_count_call();
+static void open_quiet(const moy_ui_sink_t *s, draw_t *d) {
     moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
     const int32_t *st = row->st;
     d->row = row;
@@ -87,6 +86,11 @@ static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
     d->look = s->look;
     d->sh = moy_ui_shape();
     d->fx = d->fx_c = d->pdx = d->pdy = 0;
+}
+
+static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
+    moy_ui_count_call();
+    open_quiet(s, d);
 }
 
 // Text that follows draws in `role`'s font.
@@ -143,11 +147,32 @@ static void rings(draw_t *d, int x, int y, int w, int h, int ci, int n) {
     }
 }
 
+// Text's source (moy_text.h): the string table's, or what a runtime passed in.
+static uint8_t source_of(int table) {
+    return table ? MOY_TEXT_TABLE : MOY_TEXT_PY;
+}
+
+static void text_col(draw_t *d, int table, const uint8_t *s, size_t n, int x, int y,
+                     uint16_t col, const moy_text_paint_t *p) {
+    moy_text_paint(&d->t, d->f.id, source_of(table), s, n, x, y, col, d->tfs, MOY_TEXT_LEFT, -1,
+                   p);
+    d->row->st[MOY_ST_N_TEXT]++;
+}
+
 static void text_paint(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci,
                        const moy_text_paint_t *p) {
-    moy_text_paint(&d->t, d->f.id, MOY_TEXT_PY, s, n, x, y, d->row->pal[ci & moy_ui_cmask()],
-                   d->tfs, MOY_TEXT_LEFT, -1, p);
-    d->row->st[MOY_ST_N_TEXT]++;
+    text_col(d, 0, s, n, x, y, d->row->pal[ci & moy_ui_cmask()], p);
+}
+
+int moy_ui_text_in(const moy_ui_sink_t *s, uint32_t font, int table, moy_ui_span_t t, int x,
+                   int y, uint16_t col) {
+    draw_t d;
+    open_quiet(s, &d);
+    if (!d.run) {
+        d.f.id = font;
+    }
+    text_col(&d, table, t.p, t.n, x, y, col, NULL);
+    return t_w(&d.f, t.p, t.n, d.tfs);
 }
 
 static void text_at(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci) {

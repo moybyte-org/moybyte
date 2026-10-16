@@ -74,7 +74,8 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "artwork.current", "artwork.follow",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
     "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
-    "ui.focus", "ui.keys_taken", "ui.at",
+    "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
+    "ui.seg", "ui.swatches", "ui.hints",
 };
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
@@ -1556,6 +1557,13 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"ui.focus", MOY_ROLE_UI, MOY_ROW_UI_FOCUS},
     {"ui.keys_taken", MOY_ROLE_UI, MOY_ROW_UI_KEYS_TAKEN},
     {"ui.at", MOY_ROLE_UI, MOY_ROW_UI_AT},
+    {"ui.group", MOY_ROLE_UI, MOY_ROW_UI_GROUP},
+    {"ui.info", MOY_ROLE_UI, MOY_ROW_UI_INFO},
+    {"ui.link", MOY_ROLE_UI, MOY_ROW_UI_LINK},
+    {"ui.cycle", MOY_ROLE_UI, MOY_ROW_UI_CYCLE},
+    {"ui.seg", MOY_ROLE_UI, MOY_ROW_UI_SEG},
+    {"ui.swatches", MOY_ROLE_UI, MOY_ROW_UI_SWATCHES},
+    {"ui.hints", MOY_ROLE_UI, MOY_ROW_UI_HINTS},
 };
 
 int moy_app_table_role(uint32_t row) {

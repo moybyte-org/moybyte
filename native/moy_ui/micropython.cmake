@@ -10,6 +10,7 @@ target_sources(usermod_moy_ui INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_draw.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_paint.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_depth.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_ui_parts.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_interact.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_sink.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_api.c

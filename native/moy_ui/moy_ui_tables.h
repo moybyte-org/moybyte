@@ -8,9 +8,9 @@
 #define MOY_UI_TOKENS 39
 #define MOY_UI_ROLES 45
 #define MOY_UI_STATES 6
-#define MOY_UI_KINDS 25
+#define MOY_UI_KINDS 27
 #define MOY_UI_COLOR_KINDS 20
-#define MOY_UI_SLOTS 9
+#define MOY_UI_SLOTS 20
 #define MOY_UI_SPECS 31
 #define MOY_UI_HITS_CAP 32
 #define MOY_UI_GLYPHS 62
@@ -96,6 +96,8 @@ enum {
     MOY_UI_K_GAME_ICON_BTN = 22,
     MOY_UI_K_MINI_BTN = 23,
     MOY_UI_K_DIALOG = 24,
+    MOY_UI_K_GROUP = 25,
+    MOY_UI_K_VALUE_ROW = 26,
 };
 
 // Each kind's metric slots.
@@ -162,6 +164,32 @@ enum {
     MOY_UI_M_DIALOG_EDGE = 0,
     MOY_UI_M_DIALOG_FILL = 1,
     MOY_UI_M_DIALOG_RING = 2,
+    MOY_UI_M_GROUP_INSET = 0,
+    MOY_UI_M_GROUP_PAD = 1,
+    MOY_UI_M_GROUP_R = 2,
+    MOY_UI_M_GROUP_CAPTION = 3,
+    MOY_UI_M_GROUP_CAPTION_DESK = 4,
+    MOY_UI_M_GROUP_GAP = 5,
+    MOY_UI_M_VALUE_ROW_GAP = 0,
+    MOY_UI_M_VALUE_ROW_GAP_DESK = 1,
+    MOY_UI_M_VALUE_ROW_CHEV = 2,
+    MOY_UI_M_VALUE_ROW_CHEV_DESK = 3,
+    MOY_UI_M_VALUE_ROW_SWITCH_W = 4,
+    MOY_UI_M_VALUE_ROW_SWITCH_H = 5,
+    MOY_UI_M_VALUE_ROW_TRACK = 6,
+    MOY_UI_M_VALUE_ROW_TRACK_DESK = 7,
+    MOY_UI_M_VALUE_ROW_DOT = 8,
+    MOY_UI_M_VALUE_ROW_DOT_DESK = 9,
+    MOY_UI_M_VALUE_ROW_DOT_STEP = 10,
+    MOY_UI_M_VALUE_ROW_DOT_STEP_DESK = 11,
+    MOY_UI_M_VALUE_ROW_SEG = 12,
+    MOY_UI_M_VALUE_ROW_SEG_DESK = 13,
+    MOY_UI_M_VALUE_ROW_KEY = 14,
+    MOY_UI_M_VALUE_ROW_KEY_DESK = 15,
+    MOY_UI_M_VALUE_ROW_HINTS = 16,
+    MOY_UI_M_VALUE_ROW_HINTS_DESK = 17,
+    MOY_UI_M_VALUE_ROW_HINT_GAP = 18,
+    MOY_UI_M_VALUE_ROW_HINT_GAP_DESK = 19,
 };
 
 typedef struct { int8_t n; int8_t t[3]; } moy_ui_spec_t;
@@ -229,7 +257,7 @@ extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_EFFECTS_CAP 32
 // What `text` and `surfaces` are keyed by: the kinds, then the chrome's
 // parts; the style's states, then a window's.
-#define MOY_THEME_PARTS 32
+#define MOY_THEME_PARTS 34
 #define MOY_THEME_STATES 8
 #define MOY_THEME_EDGES 5
 #define MOY_THEME_FILLS 4
@@ -290,13 +318,13 @@ enum {
 };
 // The chrome's parts, after the kinds.
 enum {
-    MOY_THEME_P_WINDOW = 25,
-    MOY_THEME_P_WINDOW_TITLE = 26,
-    MOY_THEME_P_WINDOW_BUTTON = 27,
-    MOY_THEME_P_BAR = 28,
-    MOY_THEME_P_BAR_ITEM = 29,
-    MOY_THEME_P_DESK = 30,
-    MOY_THEME_P_DESK_ICON = 31,
+    MOY_THEME_P_WINDOW = 27,
+    MOY_THEME_P_WINDOW_TITLE = 28,
+    MOY_THEME_P_WINDOW_BUTTON = 29,
+    MOY_THEME_P_BAR = 30,
+    MOY_THEME_P_BAR_ITEM = 31,
+    MOY_THEME_P_DESK = 32,
+    MOY_THEME_P_DESK_ICON = 33,
 };
 // The states past the style's.
 enum {

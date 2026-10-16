@@ -77,6 +77,8 @@ const char *const moy_str_ids[MOY_STRINGS] = {
     "web.waiting",
     "web.pin",
     "web.restarting",
+    "ui.on",
+    "ui.off",
 };
 
 const char *const moy_str_en[MOY_STRINGS] = {
@@ -153,4 +155,6 @@ const char *const moy_str_en[MOY_STRINGS] = {
     "(waiting for an address)",
     "PIN %s",
     "THE CONSOLE IS RESTARTING",
+    "On",
+    "Off",
 };

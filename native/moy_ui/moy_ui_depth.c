@@ -133,9 +133,34 @@ static void marks_of(moy_ui_marks_t *m, const moy_theme_look_t *lk, int light) {
     }
 }
 
+// The look's keycap fields (moy_ui.h, the parts), silent until a look sets them.
+static moy_ui_keycap_t s_keycap = {MOY_THEME_NONE, MOY_THEME_NONE, MOY_THEME_NONE, 255, 0, 4};
+
+const moy_ui_keycap_t *moy_ui_keycap(void) {
+    return &s_keycap;
+}
+
+static void keycap_none(void) {
+    s_keycap.fill = s_keycap.border_c = s_keycap.ink = MOY_THEME_NONE;
+    s_keycap.alpha = 255;
+    s_keycap.border_w = 0;
+    s_keycap.r = 4;
+}
+
+static void keycap_of(const moy_theme_look_t *lk) {
+    int32_t f = leaf(lk, "keycap.fill");
+    s_keycap.fill = f >= MOY_THEME_PAINT ? MOY_THEME_NONE : f;
+    s_keycap.alpha = alpha_of(lk, "keycap.alpha", 100);
+    s_keycap.border_w = whole(lk, "keycap.border.w", 0);
+    s_keycap.border_c = leaf(lk, "keycap.border.c");
+    s_keycap.ink = leaf(lk, "keycap.ink");
+    s_keycap.r = num(leaf(lk, "keycap.r"), 4);
+}
+
 int moy_ui_depth_use(const char *name, size_t n, int light) {
     moy_ui_depth_t *d = &s_depth;
     memset(d, 0, sizeof(*d));
+    keycap_none();
     uint8_t active = s_marks.active;
     uint32_t drawn = s_marks.drawn;
     memset(&s_marks, 0, sizeof(s_marks));
@@ -169,6 +194,7 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
         return 0;
     }
     moy_theme_look(name, n, variant, 1, lk);
+    keycap_of(lk);
     if (marks || any) {
         marks_of(&s_marks, lk, light);
     }
@@ -637,7 +663,9 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
     int ci = moy_ui_token(d.look, m->color);
     uint16_t c = d.row->pal[ci & moy_ui_cmask()];
     if (!after) {
-        s_marks.drawn++;
+        if (!(flags & MOY_UI_MARK_AGAIN)) {
+            s_marks.drawn++;
+        }
         if (m->ink_accent) {
             *ink = ci;
         }

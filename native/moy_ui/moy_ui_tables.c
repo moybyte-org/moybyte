@@ -146,6 +146,8 @@ const char *const moy_ui_kind_names[MOY_UI_KINDS] = {
     "game_icon_btn",
     "mini_btn",
     "dialog",
+    "group",
+    "value_row",
 };
 
 const char *const moy_ui_button_kinds[5][2] = {
@@ -216,9 +218,11 @@ const uint8_t moy_ui_kind_specs[MOY_UI_KINDS][MOY_UI_STATES][3] = {
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // game_icon_btn
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // mini_btn
     {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // dialog
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // group
+    {{0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}, {0xff, 0xff, 0xff}},  // value_row
 };
 
-const uint8_t moy_ui_floor_n[MOY_UI_KINDS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const uint8_t moy_ui_floor_n[MOY_UI_KINDS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 const uint8_t moy_ui_floor_specs[MOY_UI_KINDS][MOY_UI_FLOORS][2] = {
     {{0, 0}, {0, 0}},  // row
@@ -246,36 +250,40 @@ const uint8_t moy_ui_floor_specs[MOY_UI_KINDS][MOY_UI_FLOORS][2] = {
     {{0, 0}, {0, 0}},  // game_icon_btn
     {{0, 0}, {0, 0}},  // mini_btn
     {{0, 0}, {0, 0}},  // dialog
+    {{0, 0}, {0, 0}},  // group
+    {{0, 0}, {0, 0}},  // value_row
 };
 
-const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {8, 6, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3};
+const uint8_t moy_ui_metric_n[MOY_UI_KINDS] = {8, 6, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 3, 4, 4, 0, 0, 2, 2, 9, 3, 5, 3, 3, 6, 20};
 
 const int16_t moy_ui_metric_vals[MOY_UI_KINDS][MOY_UI_SLOTS] = {
-    {4, 16, 14, 1, 1, 20, 28, 2, 0},  // row
-    {2, 14, 2, 16, 14, 1, 0, 0, 0},  // cell
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // cell_band
-    {4, 2, 1, 1, 1, 0, 0, 0, 0},  // chip
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // toggle
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_menu
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_list
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_chrome
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_cta
-    {2, 16, 12, 1, 1, 0, 0, 0, 0},  // button
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_primary
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_tonal
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_danger
-    {2, 3, 16, 0, 0, 0, 0, 0, 0},  // tab
-    {1, 3, 2, 1, 0, 0, 0, 0, 0},  // status
-    {1, 1, 12, 3, 0, 0, 0, 0, 0},  // panel
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // panel_title
-    {0, 0, 0, 0, 0, 0, 0, 0, 0},  // toolbar
-    {4, 8, 0, 0, 0, 0, 0, 0, 0},  // scrollbar
-    {2, 1, 0, 0, 0, 0, 0, 0, 0},  // focus
-    {4, 3, 6, 8, 0, 6, 7, 5, 10},  // text_field
-    {6, 7, 0, 0, 0, 0, 0, 0, 0},  // game_btn
-    {2, 16, 19, 7, 0, 0, 0, 0, 0},  // game_icon_btn
-    {2, 2, 0, 0, 0, 0, 0, 0, 0},  // mini_btn
-    {1, 2, 7, 0, 0, 0, 0, 0, 0},  // dialog
+    {4, 16, 14, 1, 1, 20, 28, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // row
+    {2, 14, 2, 16, 14, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // cell
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // cell_band
+    {4, 2, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // chip
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // toggle
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_menu
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_list
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_chrome
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // row_cta
+    {2, 16, 12, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // button
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_primary
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_tonal
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // button_danger
+    {2, 3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // tab
+    {1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // status
+    {1, 1, 12, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // panel
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // panel_title
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // toolbar
+    {4, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // scrollbar
+    {2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // focus
+    {4, 3, 6, 8, 0, 6, 7, 5, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // text_field
+    {6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // game_btn
+    {2, 16, 19, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // game_icon_btn
+    {2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // mini_btn
+    {1, 2, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // dialog
+    {6, 10, 8, 19, 26, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},  // group
+    {5, 8, 3, 4, 20, 10, 84, 120, 11, 16, 15, 24, 12, 18, 15, 20, 20, 28, 11, 14},  // value_row
 };
 
 const char *const moy_ui_metric_slots[MOY_UI_KINDS] = {
@@ -304,6 +312,8 @@ const char *const moy_ui_metric_slots[MOY_UI_KINDS] = {
     "pad glyph label ring ink",
     "pad_x pad_y ink",
     "edge fill ring",
+    "inset pad r caption caption_desk gap",
+    "gap gap_desk chev chev_desk switch_w switch_h track track_desk dot dot_desk dot_step dot_step_desk seg seg_desk key key_desk hints hints_desk hint_gap hint_gap_desk",
 };
 
 const char *const moy_ui_glyph_names[MOY_UI_GLYPHS] = {
@@ -616,6 +626,8 @@ const char *const moy_theme_part_names[MOY_THEME_PARTS] = {
     "game_icon_btn",
     "mini_btn",
     "dialog",
+    "group",
+    "value_row",
     "window",
     "window.title",
     "window.button",
@@ -739,15 +751,15 @@ const char *const moy_theme_reserved[MOY_THEME_RESERVED] = {
 };
 
 const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS] = {
-    {25, 6, 0, 0, 0, 24, 24, 1},  // window active
-    {25, 7, 0, 24, 0, 24, 24, 1},  // window inactive
-    {31, 5, 0, 48, 0, 24, 24, 1},  // desk.icon rest
-    {27, 6, 0, 72, 0, 16, 16, 0},  // window.button active close
-    {27, 6, 1, 88, 0, 16, 16, 0},  // window.button active max
-    {27, 6, 2, 104, 0, 16, 16, 0},  // window.button active min
-    {27, 7, 0, 72, 16, 16, 16, 0},  // window.button inactive close
-    {27, 7, 1, 88, 16, 16, 16, 0},  // window.button inactive max
-    {27, 7, 2, 104, 16, 16, 16, 0},  // window.button inactive min
+    {27, 6, 0, 0, 0, 24, 24, 1},  // window active
+    {27, 7, 0, 24, 0, 24, 24, 1},  // window inactive
+    {33, 5, 0, 48, 0, 24, 24, 1},  // desk.icon rest
+    {29, 6, 0, 72, 0, 16, 16, 0},  // window.button active close
+    {29, 6, 1, 88, 0, 16, 16, 0},  // window.button active max
+    {29, 6, 2, 104, 0, 16, 16, 0},  // window.button active min
+    {29, 7, 0, 72, 16, 16, 16, 0},  // window.button inactive close
+    {29, 7, 1, 88, 16, 16, 16, 0},  // window.button inactive max
+    {29, 7, 2, 104, 16, 16, 16, 0},  // window.button inactive min
     {9, 5, 0, 0, 32, 24, 24, 1},  // button rest
     {9, 4, 0, 24, 32, 24, 24, 1},  // button hover
     {9, 2, 0, 48, 32, 24, 24, 1},  // button hot

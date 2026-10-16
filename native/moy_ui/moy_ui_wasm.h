@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 10
+#define MOY_UI_WASM_ROWS 17
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -74,6 +74,14 @@ int moy_ui_run_part(void *target, moy_ui_span_t id, int w, int h, const moy_ui_o
 int moy_ui_run_focus(void *target, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_run_keys_taken(void *target);
 void moy_ui_run_at(void *target, int x, int y, int w, int h);
+int moy_ui_run_group(void *target, moy_ui_span_t caption, const moy_ui_over_t *o);
+// `kind` MOY_UI_V_INFO or MOY_UI_V_LINK (moy_ui.h); *out: activated.
+int moy_ui_run_value(void *target, int kind, moy_ui_span_t label, moy_ui_span_t value,
+                     const moy_ui_over_t *o, int32_t *out);
+// `kind` MOY_UI_V_CYCLE, MOY_UI_V_SEG or MOY_UI_V_SWATCH; *out: the new cur.
+int moy_ui_run_choice(void *target, int kind, moy_ui_span_t label, const uint8_t *opts, size_t n,
+                      int32_t cur, const moy_ui_over_t *o, int32_t *out);
+int moy_ui_run_hints(void *target, const uint8_t *items, size_t n, const moy_ui_over_t *o);
 
 // The rows, in roles.json's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an
@@ -97,6 +105,21 @@ int32_t moy_ui_wasm_part(void *e, const uint8_t *id, uint32_t n, int32_t w, int3
 int32_t moy_ui_wasm_focus(void *e, const uint8_t *id, uint32_t n, uint8_t *buf, uint32_t cap);
 int32_t moy_ui_wasm_keys_taken(void *e);
 int32_t moy_ui_wasm_at(void *e, int32_t x, int32_t y, int32_t w, int32_t h);
+int32_t moy_ui_wasm_group(void *e, const uint8_t *caption, uint32_t n, const uint8_t *o,
+                          uint32_t on);
+int32_t moy_ui_wasm_info(void *e, const uint8_t *label, uint32_t n, const uint8_t *value,
+                         uint32_t vn, const uint8_t *o, uint32_t on);
+int32_t moy_ui_wasm_link(void *e, const uint8_t *label, uint32_t n, const uint8_t *value,
+                         uint32_t vn, const uint8_t *o, uint32_t on);
+// The options NUL-separated (ui_swatches: 0xRRGGBB words), `cur` from 0.
+int32_t moy_ui_wasm_cycle(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                          uint32_t len, int32_t cur, const uint8_t *o, uint32_t on);
+int32_t moy_ui_wasm_seg(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                        uint32_t len, int32_t cur, const uint8_t *o, uint32_t on);
+int32_t moy_ui_wasm_swatches(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                             uint32_t len, int32_t cur, const uint8_t *o, uint32_t on);
+int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8_t *o,
+                          uint32_t on);
 
 // The native serving `name` ("ui_button"), or NULL; and the rows' names.
 void *moy_ui_wasm_native(const char *name);

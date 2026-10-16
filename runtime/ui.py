@@ -8,6 +8,9 @@ draws its interface with, and the rect algebra they lay out with.
     if ui.button("Save", "primary"):
         save()
 
+`group`, `info`, `link`, `cycle`, `seg`, `swatches` and `hints` are the
+Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components).
+
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
 each id's state from frame to frame. `o`, the override table, is a dict of
@@ -156,6 +159,63 @@ def list(label, items, cur, o=None):
     t = _T
     b = "\0".join([str(i) for i in items]).encode("utf-8")
     return _C.api_list(t[0], t[1], t[2], label, b, -1 if cur is None else cur, _over(o))
+
+
+def group(caption="", o=None):
+    """A group headed by `caption`: the rows stacked after it sit on its
+    card until the next group, or `group()`, which ends it."""
+    t = _T
+    _C.api_group(t[0], t[1], t[2], caption, _over(o))
+
+
+def info(label, value, o=None):
+    """A row that shows `value`; no stop."""
+    t = _T
+    _C.api_value(t[0], t[1], t[2], 1, label, str(value), _over(o))
+
+
+def link(label, value="", o=None):
+    """A row that leads somewhere, `value` where it is now: True the frame it
+    is activated."""
+    t = _T
+    return _C.api_value(t[0], t[1], t[2], 2, label, str(value), _over(o))
+
+
+def _opts(items):
+    return "\0".join([str(i) for i in items]).encode("utf-8")
+
+
+def cycle(label, items, cur, o=None):
+    """`items[cur]` between chevrons; left and right step it (wrapping) while
+    focused, activation takes the next: the new `cur`."""
+    t = _T
+    return _C.api_choice(t[0], t[1], t[2], 3, label, _opts(items), -1 if cur is None else cur,
+                         _over(o))
+
+
+def seg(label, items, cur, o=None):
+    """A segmented control, `items[cur]` wearing the current mark; left and
+    right move it while focused, a tap picks: the new `cur`."""
+    t = _T
+    return _C.api_choice(t[0], t[1], t[2], 4, label, _opts(items), -1 if cur is None else cur,
+                         _over(o))
+
+
+def swatches(label, colours, cur, o=None):
+    """A row of colour dots (each 0xRRGGBB), `colours[cur]` wearing the
+    current mark; left and right move it while focused, a tap picks: the new
+    `cur`."""
+    t = _T
+    b = b"".join([_pack("<i", int(c) & 0xffffff) for c in colours])
+    return _C.api_choice(t[0], t[1], t[2], 5, label, b, -1 if cur is None else cur, _over(o))
+
+
+def hints(items, o=None):
+    """Keycap hints at the page's foot, its rows stacking above them (call it
+    before them): `items` alternate the keys -- space-separated; `enter`,
+    `left`, `right`, `up` and `down` draw as signs -- and what they do."""
+    t = _T
+    _C.api_hints(t[0], t[1], t[2], _opts(items), _over(o))
 
 
 def part(id, w=0, h=0, o=None):

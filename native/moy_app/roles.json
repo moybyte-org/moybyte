@@ -124,6 +124,13 @@
     {"role": "ui", "verb": "part", "server": "c", "grant": "never", "wasm": "(*~ii*~*~)i"},
     {"role": "ui", "verb": "focus", "server": "c", "grant": "never", "wasm": "(*~*~)i"},
     {"role": "ui", "verb": "keys_taken", "server": "c", "grant": "never", "wasm": "()i"},
-    {"role": "ui", "verb": "at", "server": "c", "grant": "never", "wasm": "(iiii)i"}
+    {"role": "ui", "verb": "at", "server": "c", "grant": "never", "wasm": "(iiii)i"},
+    {"role": "ui", "verb": "group", "server": "c", "grant": "never", "wasm": "(*~*~)i"},
+    {"role": "ui", "verb": "info", "server": "c", "grant": "never", "wasm": "(*~*~*~)i"},
+    {"role": "ui", "verb": "link", "server": "c", "grant": "never", "wasm": "(*~*~*~)i"},
+    {"role": "ui", "verb": "cycle", "server": "c", "grant": "never", "wasm": "(*~*~i*~)i"},
+    {"role": "ui", "verb": "seg", "server": "c", "grant": "never", "wasm": "(*~*~i*~)i"},
+    {"role": "ui", "verb": "swatches", "server": "c", "grant": "never", "wasm": "(*~*~i*~)i"},
+    {"role": "ui", "verb": "hints", "server": "c", "grant": "never", "wasm": "(*~*~)i"}
   ]
 }

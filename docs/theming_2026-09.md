@@ -359,7 +359,9 @@ frozen on 2026-10-12 with the first package key that names parts
 `toggle`, `row_menu`, `row_list`, `row_chrome`, `row_cta`, `button`,
 `button_primary`, `button_tonal`, `button_danger`, `tab`, `status`, `panel`,
 `panel_title`, `toolbar`, `scrollbar`, `focus`, `text_field`, `game_btn`,
-`game_icon_btn`, `mini_btn`, `dialog`; then the chrome the WMs and the bar
+`game_icon_btn`, `mini_btn`, `dialog`, `group`, `value_row` (the public UI
+API's group card and value rows, `docs/look_2026-10.md` step 12, whose
+primitives paint no surface); then the chrome the WMs and the bar
 draw, style.json's `theme.parts`: `window`, `window.title`, `window.button`,
 `bar`, `bar.item`, `desk`, `desk.icon`. A window's buttons are one part
 (ruled 2026-10-12, the pick that builds least: the frame style tells them

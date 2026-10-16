@@ -263,6 +263,11 @@ _DRAW_SIGS = (
                            c.c_int32, c.c_void_p], c.c_int32),
     ("moy_ui_api_list", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_int32,
                          c.c_void_p], c.c_int32),
+    ("moy_ui_api_group", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], None),
+    ("moy_ui_api_value", [c.c_void_p, c.POINTER(_Sink), _I, _Span, _Span, c.c_void_p], _I),
+    ("moy_ui_api_choice", [c.c_void_p, c.POINTER(_Sink), _I, _Span, c.c_char_p, _Z, c.c_int32,
+                           c.c_void_p], c.c_int32),
+    ("moy_ui_api_hints", [c.c_void_p, c.POINTER(_Sink), c.c_char_p, _Z, c.c_void_p], None),
     ("moy_ui_api_part", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p,
                          c.c_void_p], None),
     ("moy_ui_api_focus", [c.c_void_p, _Span, c.c_char_p, c.c_size_t], _I),
@@ -839,6 +844,36 @@ def binding():
         b = bytes(items)
         return int(lib.moy_ui_api_list(p, c.byref(s), t, b, len(b), int(cur), ov))
 
+    def api_group(ctx, cv, look, caption, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(caption)
+        ov, ok = _over(o)
+        lib.moy_ui_api_group(p, c.byref(s), t, ov)
+
+    def api_value(ctx, cv, look, kind_, label, value, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        v, keep2 = span(value)
+        ov, ok = _over(o)
+        return bool(lib.moy_ui_api_value(p, c.byref(s), int(kind_), t, v, ov))
+
+    def api_choice(ctx, cv, look, kind_, label, opts, cur, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        ov, ok = _over(o)
+        b = bytes(opts)
+        return int(lib.moy_ui_api_choice(p, c.byref(s), int(kind_), t, b, len(b), int(cur), ov))
+
+    def api_hints(ctx, cv, look, items, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        ov, ok = _over(o)
+        b = bytes(items)
+        lib.moy_ui_api_hints(p, c.byref(s), b, len(b), ov)
+
     def api_part(ctx, cv, look, id_, w, h, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -875,7 +910,8 @@ def binding():
         return None if d is None else d.decode("utf-8", "replace")
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
-              api_list, api_part, api_focus, api_keys_taken, api_at, api_dup):
+              api_list, api_group, api_value, api_choice, api_hints, api_part, api_focus,
+              api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value
     m.calls = lambda: lib.moy_ui_calls()

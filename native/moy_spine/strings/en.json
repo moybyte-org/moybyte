@@ -73,6 +73,8 @@
     "web.open": "OPEN THIS IN A BROWSER:",
     "web.waiting": "(waiting for an address)",
     "web.pin": "PIN %s",
-    "web.restarting": "THE CONSOLE IS RESTARTING"
+    "web.restarting": "THE CONSOLE IS RESTARTING",
+    "ui.on": "On",
+    "ui.off": "Off"
   }
 }

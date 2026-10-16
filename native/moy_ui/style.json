@@ -163,7 +163,12 @@
     "game_btn": {"pad": 6, "ring": 7, "ink": 0},
     "game_icon_btn": {"pad": 2, "glyph": 16, "label": 19, "ring": 7, "ink": 0},
     "mini_btn": {"pad_x": 2, "pad_y": 2, "ink": 0},
-    "dialog": {"edge": 1, "fill": 2, "ring": 7}
+    "dialog": {"edge": 1, "fill": 2, "ring": 7},
+    "group": {"inset": 6, "pad": 10, "r": 8, "caption": 19, "caption_desk": 26, "gap": 3},
+    "value_row": {"gap": 5, "gap_desk": 8, "chev": 3, "chev_desk": 4, "switch_w": 20, "switch_h": 10,
+                  "track": 84, "track_desk": 120, "dot": 11, "dot_desk": 16, "dot_step": 15,
+                  "dot_step_desk": 24, "seg": 12, "seg_desk": 18, "key": 15, "key_desk": 20,
+                  "hints": 20, "hints_desk": 28, "hint_gap": 11, "hint_gap_desk": 14}
   },
   "quirks": {
     "game_btn": "at font scale 1 the label prints with the legacy scale-2 argument but centres with height 8 -- an off-by-one-scale mismatch the shipped pixels bake in. It is a BRANCH on fs, not a number.",

@@ -2035,6 +2035,62 @@ static mp_obj_t ui_api_list(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_list_obj, 7, 7, ui_api_list);
 
+// api_group(ctx, cv, look, caption, o): a caption of length 0 ends the group
+static mp_obj_t ui_api_group(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    moy_ui_api_group(c, &s, span_of(a[3]), over_of(a[4], &o));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_group_obj, 5, 5, ui_api_group);
+
+// api_value(ctx, cv, look, kind, label, value, o) -> activated; `kind` an
+// info's or a link's (moy_ui.h's MOY_UI_V_*)
+static mp_obj_t ui_api_value(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    return mp_obj_new_bool(moy_ui_api_value(c, &s, num(a[3]), span_of(a[4]), span_of(a[5]),
+                                            over_of(a[6], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_value_obj, 7, 7, ui_api_value);
+
+// api_choice(ctx, cv, look, kind, label, opts, cur, o) -> the new cur; `opts`
+// the options NUL-separated, or a swatch picker's colours as words (bytes)
+static mp_obj_t ui_api_choice(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[5], &b, MP_BUFFER_READ);
+    return mp_obj_new_int(moy_ui_api_choice(c, &s, num(a[3]), span_of(a[4]),
+                                            (const uint8_t *)b.buf, b.len, num(a[6]),
+                                            over_of(a[7], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_choice_obj, 8, 8, ui_api_choice);
+
+// api_hints(ctx, cv, look, items, o): `items` the key and action pairs
+// NUL-separated (bytes)
+static mp_obj_t ui_api_hints(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+    moy_ui_api_hints(c, &s, (const uint8_t *)b.buf, b.len, over_of(a[4], &o));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_obj, 5, 5, ui_api_hints);
+
 // api_part(ctx, cv, look, id, w, h, o) -> (x, y, w, h, state)
 static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2181,6 +2237,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_label), MP_ROM_PTR(&ui_api_label_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_button), MP_ROM_PTR(&ui_api_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_toggle), MP_ROM_PTR(&ui_api_toggle_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_group), MP_ROM_PTR(&ui_api_group_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_value), MP_ROM_PTR(&ui_api_value_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_choice), MP_ROM_PTR(&ui_api_choice_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_hints), MP_ROM_PTR(&ui_api_hints_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slider), MP_ROM_PTR(&ui_api_slider_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },

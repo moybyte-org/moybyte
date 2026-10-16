@@ -3,6 +3,7 @@
 
 usage: .venv/bin/python tools/look_shots.py OUT [FILTER ...] [--step N]
                                             [--theme NAME] [--variant MODE]
+                                            [--parts]
 
 Each scene `docs/media/look_2026-10/index.txt` names is set up on the host
 from the REAL shell (the workstation `tests/test_shell_goldens.py` builds, with
@@ -24,7 +25,10 @@ becomes FALLBACK's) and marked "not built yet" with what is missing.
 FILTER keeps the scene it names, else the scenes whose name contains it
 (shell globs work too);
 `--step N` keeps the scenes step N targets. `--theme`/`--variant` render
-every kept scene in that theme instead of its own.
+every kept scene in that theme instead of its own. `--parts` draws the
+handheld Settings and Appearance scenes with the public UI API's parts sheet
+(tests/fixtures/ui_parts/parts_app.py, docs/look_2026-10.md step 12) in
+place of the shell's screens, which have not moved onto the verbs yet.
 """
 
 import argparse
@@ -317,6 +321,18 @@ def _image(ws):
     return Image.frombytes("RGB", (cv.w, cv.h), bytes(sw), "raw", "BGR;16")
 
 
+# The scenes the parts sheet stands in for (--parts): screen -> its page.
+PARTS = {"handheld_settings": "settings", "handheld_appearance": "appearance"}
+
+
+def _parts(page):
+    def setup(g, ws):
+        app = g.parts_app(ws, page)
+        app.open()
+        ws.wm.goto(app.id)
+    return setup
+
+
 def render(g, config, theme, mode, setup, wallpaper):
     """(image, settled) for one scene on a fresh workstation."""
     import moy_ui
@@ -374,7 +390,7 @@ def pair(mockup, shot, built, scale=1):
     return out
 
 
-def run(out, filters=(), step=None, theme=None, variant=None, quiet=False):
+def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts=False):
     """Render, pair and index the kept scenes into `out`. Returns the rows
     written: [(scene, built, missing)]. The cover slice and the bar's clock
     are pinned for the run and put back after it."""
@@ -384,12 +400,12 @@ def run(out, filters=(), step=None, theme=None, variant=None, quiet=False):
     cover_cache._COVER_SLICE_MS = g._COVER_SLICE_UNBOUNDED
     g._CLOCK = CLOCK
     try:
-        return _run(g, out, filters, step, theme, variant, quiet)
+        return _run(g, out, filters, step, theme, variant, quiet, parts)
     finally:
         cover_cache._COVER_SLICE_MS, g._CLOCK = saved
 
 
-def _run(g, out, filters, step, theme, variant, quiet):
+def _run(g, out, filters, step, theme, variant, quiet, parts=False):
     from PIL import Image
     table = _setup_table()
     scenes = select(read_index(), filters, step)
@@ -402,6 +418,9 @@ def _run(g, out, filters, step, theme, variant, quiet):
     rows, lines = [], []
     for name, what, want_theme, want_mode, size in scenes:
         config, _steps, wallpaper, setup, shows = table[screen_of(name)]
+        if parts and screen_of(name) in PARTS:
+            setup = _parts(PARTS[screen_of(name)])
+            shows = "the parts sheet's %s page" % PARTS[screen_of(name)]
         target_theme = theme or want_theme or DEFAULT
         mode = variant or want_mode or "dark"
         missing = []
@@ -478,8 +497,12 @@ def main(argv=None):
     ap.add_argument("--theme", help="render every scene in this theme")
     ap.add_argument("--variant", choices=("dark", "light"),
                     help="render every scene in this mode")
+    ap.add_argument("--parts", action="store_true",
+                    help="draw the handheld Settings and Appearance scenes "
+                    "with the parts sheet")
     args = ap.parse_args(argv)
-    rows = run(args.out, args.filters, args.step, args.theme, args.variant)
+    rows = run(args.out, args.filters, args.step, args.theme, args.variant,
+               parts=args.parts)
     print("%d scenes, %d built -> %s" % (
         len(rows), sum(1 for r in rows if r[1]),
         os.path.join(args.out, "index.txt")))

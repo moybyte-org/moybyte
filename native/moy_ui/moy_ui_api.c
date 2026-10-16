@@ -318,6 +318,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->keys = 0;
     c->step_x = c->step_y = 0;
     c->dup = 0;
+    c->grp_open = c->grp_n = c->grp_any = 0;
     int settled = 1;
     uint32_t focus0 = c->focus;
     const moy_ui_stop_t *v = c->prev;
@@ -496,7 +497,23 @@ static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
     }
     *stacked = 1;
     moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->y - c->scroll), c->page.w, (int16_t)h};
-    c->y = (int16_t)(c->y + h + metric(MOY_UI_M_ROW_STACK_GAP) * c->fs);
+    int gap = metric(MOY_UI_M_ROW_STACK_GAP) * c->fs;
+    if (c->grp_open) {
+        // a group's rows sit on its card, one under the next
+        if (!c->cls) {
+            int in = kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
+            b.x = (int16_t)(b.x + in);
+            b.w = (int16_t)(b.w - 2 * in);
+        }
+        gap = 0;
+        c->grp_first = c->grp_n == 0;
+        if (c->grp_n < 255) {
+            c->grp_n++;
+        }
+        c->grp_last = b;
+        c->grp_flags = 0;
+    }
+    c->y = (int16_t)(c->y + h + gap);
     moy_ui_keep_t *k = page_keep(c);
     if (k != NULL) {
         k->b = c->y;
@@ -544,6 +561,45 @@ static int clip_row(clip_t *k, const moy_ui_sink_t *s, moy_ui_box_t b, int stack
         return 0;
     }
     return clip_in(k, s, in);
+}
+
+// -- groups (ui.group) ---------------------------------------------------------------
+
+// The open group's card: its x and width, its top on screen.
+static moy_ui_box_t card_of(const moy_ui_ctx_t *c) {
+    int in = c->cls ? 0 : kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
+    return (moy_ui_box_t){(int16_t)(c->page.x + in),
+                          (int16_t)(c->page.y + c->grp_top - c->scroll),
+                          (int16_t)(c->page.w - 2 * in), 0};
+}
+
+// The card behind stacked row b, drawn under the row's clip; the row's marks
+// (MOY_UI_F_FOCUS, MOY_UI_F_ON) are kept for the card's foot.
+static void band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
+                 int marks) {
+    if (!stacked || !c->grp_open) {
+        return;
+    }
+    c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON));
+    moy_ui_group_band(s, card_of(c), b, c->grp_first, c->fs, c->cls);
+}
+
+// The open group ends: its card's foot under its last row, and the gap the
+// next group's caption keeps.
+static void group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    if (!c->grp_open) {
+        return;
+    }
+    c->grp_open = 0;
+    c->grp_any = 1;
+    if (c->grp_n) {
+        clip_t k;
+        if (clip_row(&k, s, c->grp_last, 1, c->page)) {
+            moy_ui_group_end(s, card_of(c), c->grp_last, c->grp_flags, c->fs, c->cls);
+            clip_out(&k);
+        }
+    }
+    c->y = (int16_t)(c->y + kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_GAP) * c->fs);
 }
 
 // A stop recorded for the next frame's navigation: its state bits, or -1
@@ -628,18 +684,51 @@ static void row_init(moy_ui_row_t *r, moy_ui_span_t label, int fs, const int16_t
     memcpy(r->colors, colors, sizeof(r->colors));
 }
 
+// A value row (moy_ui.h, the parts) in box b, its marks from the stop's state.
+static void vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t label) {
+    memset(r, 0, sizeof(*r));
+    r->label = label;
+    r->cur = -1;
+    r->fs = c->fs;
+    r->desk = c->cls;
+    r->card = c->grp_open;
+}
+
+static void vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
+                      int kind, int st, const moy_ui_over_t *o, const moy_ui_vrow_t *r) {
+    clip_t k;
+    if (clip_row(&k, s, b, stacked, c->page)) {
+        int f = mark_flags(st, o) & ~MOY_UI_F_ON;
+        band(c, s, b, stacked, f);
+        moy_ui_vrow(s, b, kind, f | (o->disabled == 1 ? MOY_UI_F_DISABLED : 0), r);
+        clip_out(&k);
+    }
+}
+
+// The stop a value row is, with its state bits (0: none, or a disabled row).
+static int vrow_stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags,
+                     const moy_ui_over_t *o, moy_ui_span_t label) {
+    if (o->disabled == 1) {
+        return 0;
+    }
+    int st = stop(c, id, b, flags, name_of(o, label));
+    return st < 0 ? 0 : st;
+}
+
 // -- the verbs -----------------------------------------------------------------------
 
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      const moy_ui_over_t *o, moy_ui_box_t *content) {
     o = over(o);
+    group_close(c, s);
+    c->grp_any = 0;
     moy_ui_box_t b = c->surface;
     if (c->has_at) {
         b = c->at;
         c->has_at = 0;
     }
     moy_ui_box_t ct;
-    moy_ui_panel(s, b, title, c->fs, &ct);
+    moy_ui_page_ground(s, b, title, c->fs, &ct);
     uint32_t id = hash(title.p, title.n, PAGE_SALT);
     moy_ui_keep_t *k = keep(c, id, 1);
     c->page = ct;
@@ -681,6 +770,14 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     if (!clip_row(&k, s, b, stacked, c->page)) {
         return;
     }
+    if (stacked && c->grp_open) {
+        band(c, s, b, stacked, 0);
+        moy_ui_vrow_t r;
+        vrow_init(c, &r, text);
+        moy_ui_vrow(s, b, MOY_UI_V_LABEL, 0, &r);
+        clip_out(&k);
+        return;
+    }
     int16_t pc[3];
     moy_ui_colors(s->look, MOY_UI_K_PANEL, MOY_UI_REST, pc);
     int16_t ink = colour(s->look, o->ink);
@@ -707,6 +804,7 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     clip_t k;
     if (clip_row(&k, s, b, stacked, c->page)) {
+        band(c, s, b, stacked, mark_flags(st, o));
         moy_ui_button_t bt;
         bt.label = label;
         bt.glyph = -1;
@@ -725,44 +823,16 @@ int moy_ui_api_toggle(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     o = over(o);
     int stacked;
     moy_ui_box_t b = place(c, row_h(c), &stacked);
-    int disabled = o->disabled == 1;
-    int st = disabled ? 0 : stop(c, id_of(o, label), b, 0, name_of(o, label));
-    if (st < 0) {
-        st = 0;
-    }
+    int st = vrow_stop(c, id_of(o, label), b, 0, o, label);
     on = on ? 1 : 0;
     if (st & MOY_UI_ST_ACTIVATED) {
         on = !on;
     }
-    clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
-        int16_t col[3];
-        colours(s, o, col);
-        moy_ui_row_t r;
-        row_init(&r, label, c->fs, col);
-        int f = mark_flags(st, o) | (on ? MOY_UI_F_ON : 0) | (disabled ? MOY_UI_F_DISABLED : 0);
-        moy_ui_row(s, b, MOY_UI_K_ROW, f, interact(st), &r, MOY_UI_PHASE_ALL);
-        clip_out(&k);
-    }
+    moy_ui_vrow_t r;
+    vrow_init(c, &r, label);
+    r.cur = (int16_t)on;
+    vrow_draw(c, s, b, stacked, MOY_UI_V_TOGGLE, st, o, &r);
     return on;
-}
-
-static int put_int(char *buf, int32_t v) {
-    char t[12];
-    int n = 0, neg = v < 0;
-    uint32_t u = neg ? (uint32_t)(-(int64_t)v) : (uint32_t)v;
-    do {
-        t[n++] = (char)('0' + u % 10u);
-        u /= 10u;
-    } while (u);
-    int m = 0;
-    if (neg) {
-        buf[m++] = '-';
-    }
-    while (n) {
-        buf[m++] = t[--n];
-    }
-    return m;
 }
 
 int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
@@ -775,26 +845,19 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     int stacked;
     moy_ui_box_t b = place(c, row_h(c), &stacked);
-    int disabled = o->disabled == 1;
     uint32_t id = id_of(o, label);
-    int st = disabled ? 0 : stop(c, id, b, STOP_KEEP_LR, name_of(o, label));
-    if (st < 0) {
-        st = 0;
-    }
+    int st = vrow_stop(c, id, b, STOP_KEEP_LR, o, label);
     if ((st & MOY_UI_ST_FOCUS) && c->step_x) {
         v += c->step_x;
     }
+    moy_ui_vrow_t r;
+    vrow_init(c, &r, label);
+    r.lo = lo;
+    r.hi = hi;
     int p = c->in[MOY_UI_IN_PTR];
-    if (!disabled && c->press == id && c->gesture == 1 && (p & MOY_UI_P_LIVE)
+    if (o->disabled != 1 && c->press == id && c->gesture == 1 && (p & MOY_UI_P_LIVE)
         && (p & MOY_UI_P_HELD) && b.w > 0) {
-        int32_t dx = c->in[MOY_UI_IN_X] - b.x;
-        if (dx < 0) {
-            dx = 0;
-        }
-        if (dx > b.w) {
-            dx = b.w;
-        }
-        v = lo + (int32_t)(((int64_t)dx * (hi - lo) + b.w / 2) / b.w);
+        v = moy_ui_vrow_at(s, b, MOY_UI_V_SLIDER, &r, c->in[MOY_UI_IN_X]);
     }
     if (v < lo) {
         v = lo;
@@ -802,20 +865,159 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     if (v > hi) {
         v = hi;
     }
-    clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
-        int16_t col[3];
-        colours(s, o, col);
-        moy_ui_row_t r;
-        row_init(&r, label, c->fs, col);
-        char num[12];
-        r.value.p = (const uint8_t *)num;
-        r.value.n = (uint16_t)put_int(num, v);
-        moy_ui_row(s, b, MOY_UI_K_ROW, mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0),
-                   interact(st), &r, MOY_UI_PHASE_ALL);
-        clip_out(&k);
-    }
+    r.v = v;
+    vrow_draw(c, s, b, stacked, MOY_UI_V_SLIDER, st, o, &r);
     return v;
+}
+
+void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t caption,
+                      const moy_ui_over_t *o) {
+    (void)o;
+    group_close(c, s);
+    c->has_at = 0;
+    if (caption.n == 0) {
+        return;
+    }
+    int h = kmetric(MOY_UI_K_GROUP, c->cls ? MOY_UI_M_GROUP_CAPTION_DESK : MOY_UI_M_GROUP_CAPTION)
+            * c->fs;
+    moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->y - c->scroll), c->page.w, (int16_t)h};
+    c->y = (int16_t)(c->y + h);
+    moy_ui_keep_t *k = page_keep(c);
+    if (k != NULL) {
+        k->b = c->y;
+    }
+    clip_t cl;
+    if (clip_row(&cl, s, b, 1, c->page)) {
+        if (!c->cls) {
+            int in = kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
+            b.x = (int16_t)(b.x + in);
+            b.w = (int16_t)(b.w - 2 * in);
+        }
+        moy_ui_caption(s, b, caption, c->fs, c->cls);
+        clip_out(&cl);
+    }
+    c->grp_open = 1;
+    c->grp_n = 0;
+    c->grp_top = c->y;
+}
+
+int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
+                     moy_ui_span_t value, const moy_ui_over_t *o) {
+    o = over(o);
+    if (kind != MOY_UI_V_LINK) {
+        kind = MOY_UI_V_INFO;
+    }
+    int stacked;
+    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    int st = kind == MOY_UI_V_LINK ? vrow_stop(c, id_of(o, label), b, 0, o, label) : 0;
+    moy_ui_vrow_t r;
+    vrow_init(c, &r, label);
+    r.value = value;
+    vrow_draw(c, s, b, stacked, kind, st, o, &r);
+    return (st & MOY_UI_ST_ACTIVATED) != 0;
+}
+
+int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
+                          const uint8_t *opts, size_t len, int32_t cur, const moy_ui_over_t *o) {
+    o = over(o);
+    if (kind != MOY_UI_V_SEG && kind != MOY_UI_V_SWATCH) {
+        kind = MOY_UI_V_CYCLE;
+    }
+    int n = 0;
+    if (kind == MOY_UI_V_SWATCH) {
+        n = (int)(len / 4);
+    } else {
+        for (size_t i = 0; i < len; i++) {
+            n += opts[i] == 0;
+        }
+        if (len && opts[len - 1] != 0) {
+            n++;
+        }
+    }
+    if (n > 255) {
+        n = 255;
+    }
+    int stacked;
+    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    int st = vrow_stop(c, id_of(o, label), b, STOP_KEEP_LR, o, label);
+    moy_ui_vrow_t r;
+    vrow_init(c, &r, label);
+    r.n = (int16_t)n;
+    if (kind == MOY_UI_V_SWATCH) {
+        r.colours = opts;
+    } else {
+        r.value.p = opts;
+        r.value.n = (uint16_t)(len > 0xffff ? 0xffff : len);
+    }
+    if (n > 0) {
+        int step = (st & MOY_UI_ST_FOCUS) ? c->step_x : 0;
+        if (st & MOY_UI_ST_ACTIVATED) {
+            int at = c->tap_x != INT16_MIN ? moy_ui_vrow_at(s, b, kind, &r, c->tap_x) : -1;
+            if (at >= 0) {
+                cur = at;
+                step = 0;
+            } else if (c->tap_x == INT16_MIN) {
+                step = 1;
+            }
+        }
+        if (step) {
+            cur = cur < 0 ? (step > 0 ? 0 : n - 1) : cur + step;
+            if (kind == MOY_UI_V_CYCLE || (st & MOY_UI_ST_ACTIVATED)) {
+                cur = (cur % n + n) % n;
+            } else {
+                cur = cur < 0 ? 0 : cur >= n ? n - 1 : cur;
+            }
+        }
+        if (cur >= n) {
+            cur = n - 1;
+        }
+    } else {
+        cur = -1;
+    }
+    r.cur = (int16_t)cur;
+    if (kind == MOY_UI_V_CYCLE) {
+        size_t at = 0;
+        int i = 0;
+        r.value.n = 0;
+        while (at <= len && n > 0 && cur >= 0) {
+            size_t e = at;
+            while (e < len && opts[e] != 0) {
+                e++;
+            }
+            if (i == cur) {
+                r.value.p = opts + at;
+                r.value.n = (uint16_t)(e - at);
+                break;
+            }
+            i++;
+            at = e + 1;
+        }
+    }
+    vrow_draw(c, s, b, stacked, kind, st, o, &r);
+    return cur;
+}
+
+void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
+                      const moy_ui_over_t *o) {
+    (void)o;
+    moy_ui_box_t b;
+    if (c->has_at) {
+        b = c->at;
+        c->has_at = 0;
+    } else {
+        int h = kmetric(MOY_UI_K_VALUE_ROW, c->cls ? MOY_UI_M_VALUE_ROW_HINTS_DESK : MOY_UI_M_VALUE_ROW_HINTS)
+                * c->fs;
+        if (h > c->page.h) {
+            h = c->page.h;
+        }
+        b = (moy_ui_box_t){c->page.x, (int16_t)(c->page.y + c->page.h - h), c->page.w,
+                           (int16_t)h};
+        c->page.h = (int16_t)(c->page.h - h);
+        if (c->page_stop != NO_PAGE) {
+            c->cur[c->page_stop].b.h = c->page.h;
+        }
+    }
+    moy_ui_hints(s, b, items, len, c->fs, c->cls);
 }
 
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
@@ -891,6 +1093,7 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
     }
     clip_t k;
     if (clip_row(&k, s, b, stacked, c->page)) {
+        band(c, s, b, stacked, 0);
         clip_t kb;
         int any = clip_in(&kb, s, b);
         int16_t col[3];
@@ -946,6 +1149,7 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     }
     clip_t k;
     if (clip_row(&k, s, b, stacked, c->page)) {
+        band(c, s, b, stacked, mark_flags(st, o));
         moy_ui_cell_t cell;
         memset(&cell, 0, sizeof(cell));
         cell.glyph = -1;

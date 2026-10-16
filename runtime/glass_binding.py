@@ -36,7 +36,7 @@ _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
-            "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+            "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
             "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api.c",
             "moy_ui_sink.c", "moy_theme.h", "moy_theme.c",
             "moy_ui_tables.h",

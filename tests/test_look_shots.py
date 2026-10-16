@@ -58,3 +58,13 @@ def test_a_run_puts_the_pins_back(tmp_path):
     before = cover_cache._COVER_SLICE_MS, g._CLOCK
     L.run(str(tmp_path), ["moy-light_handheld_home"], quiet=True)
     assert (cover_cache._COVER_SLICE_MS, g._CLOCK) == before
+
+
+def test_parts_draws_the_settings_scenes_with_the_parts_sheet(tmp_path):
+    L.run(str(tmp_path / "shell"), ["moy-light_handheld_settings"], quiet=True)
+    L.run(str(tmp_path / "parts"), ["moy-light_handheld_settings"], quiet=True, parts=True)
+    index = (tmp_path / "parts" / "index.txt").read_text()
+    assert "the parts sheet's settings page" in index
+    a = Image.open(tmp_path / "shell" / "moy-light_handheld_settings.render.png")
+    b = Image.open(tmp_path / "parts" / "moy-light_handheld_settings.render.png")
+    assert a.tobytes() != b.tobytes(), "--parts draws the sheet, not the shell's screen"

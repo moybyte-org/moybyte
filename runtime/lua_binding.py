@@ -103,7 +103,7 @@ def build(verbose=False, wasm=None):
         "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
         # the public UI API's Lua face (native/moycore/moycore_ui.h) and the
         # RUN face it shares with a compiled app (native/moy_ui/moy_ui_wasm.h)
-        "moycore_ui.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+        "moycore_ui.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
         "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api.c", "moy_ui_wasm.h", "moy_ui_wasm.c",
         "moy_theme.h", "moy_theme.c",
         "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",

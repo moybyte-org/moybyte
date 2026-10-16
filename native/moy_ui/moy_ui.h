@@ -312,8 +312,12 @@ int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);
 enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI_MARK_AUTO = 3 };
 // A mark's flags: AFTER the part's content (a lifted card's rim), BACK in a
 // window behind, a current bar at the SIDE of a row rather than under it.
-// INK draws nothing and answers only the ink (a part's CONTENT phase).
-enum { MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8 };
+// INK draws nothing and answers only the ink (a part's CONTENT phase); AGAIN
+// draws a focus mark once more under a clip and counts no mark.
+enum {
+    MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
+    MOY_UI_MARK_AGAIN = 16,
+};
 // focus.style's and current.style's values, in style.json's order
 enum {
     MOY_UI_FOCUS_RING = 0, MOY_UI_FOCUS_PLATE = 1, MOY_UI_FOCUS_LIFT = 2, MOY_UI_FOCUS_EDGE = 3,
@@ -578,5 +582,75 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
                          int horizontal, int32_t px, int32_t py, int click, int down,
                          int32_t slop, float dt_ms, int32_t *offset, int32_t content,
                          int32_t *tx, int32_t *ty);
+
+// -- the parts (moy_ui_parts.c; docs/look_2026-10.md step 12) --------------------------
+//
+// The rows the public UI API's verbs draw (docs/ui_api_2026-10.md): a label
+// and, at the right, a value of one KIND -- an info's text, a link's text and
+// chevron, a cycle's text between chevrons, a segmented control's options, a
+// swatch picker's dots, a toggle's On/Off word and switch, a slider's number
+// and track -- on the page's ground or on a group's card; the group's caption
+// and card; and a strip of keycap hints. A row's FOCUS is the theme's focus
+// mark (a theme without marks fills it with the row's `on` field); a seg's
+// and a swatch picker's current option wear the current mark (a theme
+// without: the selection colour). Geometry is style.json's `group` and
+// `value_row` metrics at font scale `fs`, a `_desk` slot where `desk` is set;
+// colours are tokens of the sink's look; text is the `ui` role's (the label)
+// and the `caption` role's (values, captions, legends), petme128 on a run.
+enum {
+    MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
+    MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,
+};
+typedef struct {
+    moy_ui_span_t label, value;     // seg: value holds the options, NUL-separated
+    const uint8_t *colours;         // swatch: `n` colours, 0xRRGGBB as little-endian words
+    int16_t n, cur;                 // seg, swatch: the count and the current (-1 none);
+                                    // toggle: cur is on
+    int32_t v, lo, hi;              // slider
+    int16_t fs, desk, card;         // card: on a group's card
+} moy_ui_vrow_t;
+int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
+                const moy_ui_vrow_t *r);
+// What x on row box b picks: a seg's or a swatch picker's option (-1 none),
+// a slider's value (lo..hi), -1 for another kind.
+int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const moy_ui_vrow_t *r,
+                       int x);
+// A group's card (handheld) behind row box `row`: `card` is its x, width and
+// top; `first` rounds the card's top corners, else a rule heads the row. On
+// the desk (`desk`) the card is plain rules between rows.
+int moy_ui_group_band(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t row, int first,
+                      int fs, int desk);
+// The card's foot: its bottom corners rounded under the last row (`last`),
+// whose marks (`flags`' F_FOCUS and F_ON) draw again in them.
+int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t last, int flags,
+                     int fs, int desk);
+// The card's corner radius: the group metric, under the depth's card radius;
+// 0 for a theme without a depth.
+int moy_ui_group_r(int fs);
+// A page's ground in box b: under a theme with a depth the `panel` colour,
+// its title (if any) a heading in the title role over a panel strip's
+// height; under one without, moy_ui_panel. *content: where its rows go.
+int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
+                       moy_ui_box_t *content);
+// A group's caption in band `b`.
+int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
+// Keycap hints in band `b`, from its left: `items` NUL-separated pairs of the
+// keys (space-separated; `enter`, `left`, `right`, `up` and `down` draw as
+// signs, any other as its legend) and what they do. The theme's `keycap`
+// look styles the caps (moy_ui_keycap).
+int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                 int fs, int desk);
+// Text in font `font` (a run's: petme128) at (x, y), its line's top, in
+// colour `col` (the buffer's word), inside a part's crossing: `table` text
+// is the string table's (moy_str.h), else a caller's. Answers its width.
+int moy_ui_text_in(const moy_ui_sink_t *s, uint32_t font, int table, moy_ui_span_t t, int x,
+                   int y, uint16_t col);
+// The look's `keycap` fields (moy_ui_depth_use reads them): look colours,
+// MOY_THEME_NONE where silent; alpha 0..255.
+typedef struct {
+    int32_t fill, border_c, ink;
+    int16_t alpha, border_w, r;
+} moy_ui_keycap_t;
+const moy_ui_keycap_t *moy_ui_keycap(void);
 
 #endif // MOY_UI_H

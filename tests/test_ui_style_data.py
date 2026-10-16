@@ -41,12 +41,17 @@ def _metrics(j):
 # Kinds the style gained after the crossing: data with no Python body behind
 # them, so the twin has no table for them.
 ADDED_KINDS = ("toggle",)
+# Metrics likewise: the parts' (docs/look_2026-10.md step 12), whose slots are
+# moy_ui_tables.h's MOY_UI_M_GROUP_* and MOY_UI_M_VALUE_ROW_*.
+ADDED_METRICS = ("group", "value_row")
 
 
 def test_the_style_file_is_the_twins_tables():
     d = _style()
     for k in ADDED_KINDS:
         del d["kinds"][k]
+    for k in ADDED_METRICS:
+        del d["metrics"][k]
     assert tuple(d["states"]) == twin.STATES
     assert {k: tuple(v) for k, v in d["aliases"].items()} == twin._STATE_ALIAS
     assert d["button_kinds"] == twin._BUTTON_KIND_KEY
@@ -76,7 +81,7 @@ def test_the_metric_slots_are_named_once_per_kind():
         "mini_btn": "MB_PADX MB_PADY MB_INK",
         "dialog": "DLG_EDGE DLG_FILL DLG_RING",
     }
-    assert set(consts) == set(d["metrics"])
+    assert set(consts) == set(d["metrics"]) - set(ADDED_METRICS)
     for kind, names in consts.items():
         names = names.split()
         assert len(names) == len(d["metrics"][kind]), kind

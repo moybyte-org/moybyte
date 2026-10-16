@@ -224,7 +224,8 @@ enum {
     N_PREFS_GET, N_PREFS_SET, N_PREFS_CLEAR,
     N_CLIPBOARD_PUT_TEXT, N_CLIPBOARD_TEXT, N_CLIPBOARD_KIND, N_CLIPBOARD_SEQ,
     N_UI_PAGE, N_UI_LABEL, N_UI_BUTTON, N_UI_TOGGLE, N_UI_SLIDER, N_UI_LIST, N_UI_PART,
-    N_UI_FOCUS, N_UI_KEYS_TAKEN, N_UI_AT,
+    N_UI_FOCUS, N_UI_KEYS_TAKEN, N_UI_AT, N_UI_GROUP, N_UI_INFO, N_UI_LINK, N_UI_CYCLE,
+    N_UI_SEG, N_UI_SWATCHES, N_UI_HINTS,
     N_COUNT
 };
 
@@ -238,10 +239,11 @@ static const char *const ROW_OF[N_COUNT] = {
     "prefs.get", "prefs.set", "prefs.clear",
     "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
     "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
-    "ui.focus", "ui.keys_taken", "ui.at",
+    "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
+    "ui.seg", "ui.swatches", "ui.hints",
 };
 
-static int8_t s_rows[N_COUNT];      // MOY_APP_TABLE_N < 128
+static int16_t s_rows[N_COUNT];
 static int s_rows_made;
 
 int moy_app_wasm_row(uint32_t i) {
@@ -253,7 +255,7 @@ int moy_app_wasm_row(uint32_t i) {
             s_rows[k] = -1;
             for (uint32_t r = 0; r < MOY_APP_TABLE_N; r++) {
                 if (strcmp(moy_app_table_name(r), ROW_OF[k]) == 0) {
-                    s_rows[k] = (int8_t)r;
+                    s_rows[k] = (int16_t)r;
                     break;
                 }
             }
@@ -405,6 +407,18 @@ int32_t moy_ui_wasm_part(void *, const uint8_t *, uint32_t, int32_t, int32_t, co
 int32_t moy_ui_wasm_focus(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
 int32_t moy_ui_wasm_keys_taken(void *) UI_WEAK;
 int32_t moy_ui_wasm_at(void *, int32_t, int32_t, int32_t, int32_t) UI_WEAK;
+int32_t moy_ui_wasm_group(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_info(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                         const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_link(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                         const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_cycle(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
+                          const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_seg(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
+                        const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_swatches(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                             int32_t, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_hints(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
 
 // The rows, roles.json's wasm types: what tests/test_roles.py holds equal.
 static const moy_app_native_t NATIVES[N_COUNT] = {
@@ -441,6 +455,13 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "ui_focus", FN(moy_ui_wasm_focus), "(*~*~)i", NULL },
     { "ui_keys_taken", FN(moy_ui_wasm_keys_taken), "()i", NULL },
     { "ui_at", FN(moy_ui_wasm_at), "(iiii)i", NULL },
+    { "ui_group", FN(moy_ui_wasm_group), "(*~*~)i", NULL },
+    { "ui_info", FN(moy_ui_wasm_info), "(*~*~*~)i", NULL },
+    { "ui_link", FN(moy_ui_wasm_link), "(*~*~*~)i", NULL },
+    { "ui_cycle", FN(moy_ui_wasm_cycle), "(*~*~i*~)i", NULL },
+    { "ui_seg", FN(moy_ui_wasm_seg), "(*~*~i*~)i", NULL },
+    { "ui_swatches", FN(moy_ui_wasm_swatches), "(*~*~i*~)i", NULL },
+    { "ui_hints", FN(moy_ui_wasm_hints), "(*~*~)i", NULL },
 };
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {
