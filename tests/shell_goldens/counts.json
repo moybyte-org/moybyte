@@ -127,9 +127,9 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [63, 33],
     "web_console": [184, 4],
-    "web_console_address": [188, 6]
+    "web_console_address": [184, 6]
   },
   "p4_1024x600_cs2_fs1_gnomebar": {
     "app_appearance": [130, 4],
@@ -187,7 +187,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [63, 33],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -211,7 +211,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 33],
+    "settings": [63, 33],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -412,7 +412,7 @@
     "editor_scene": [4, 1],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [64, 29],
+    "settings": [63, 29],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -504,7 +504,7 @@
     "app_notes": [6, 3],
     "app_storybook": [3, 2],
     "editor_blocks": [91, 15],
-    "editor_cards": [135, 8],
+    "editor_cards": [134, 8],
     "editor_code": [48, 53],
     "editor_map": [84, 14],
     "editor_music": [161, 32],
@@ -512,7 +512,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [54, 24],
+    "settings": [53, 24],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -525,7 +525,7 @@
     "app_notes": [6, 3],
     "app_storybook": [3, 2],
     "editor_blocks": [91, 15],
-    "editor_cards": [135, 8],
+    "editor_cards": [134, 8],
     "editor_code": [48, 53],
     "editor_map": [84, 14],
     "editor_music": [161, 32],
@@ -533,7 +533,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [34, 19],
-    "settings": [54, 24],
+    "settings": [53, 24],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
