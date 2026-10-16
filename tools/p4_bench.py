@@ -272,7 +272,7 @@ def pick_layout(b, bars):
     its own short `cmd`, never inside a `pyexec` upload. What the console
     resolved goes to stdout."""
     if bars is not None:
-        pkg = json.dumps({"format": 1, "name": "bench",
+        pkg = json.dumps({"format": 2, "name": "bench",
                           "layout": {"bars": json.loads(bars)}})
         pyexec(b, "import moy_ui\nws._bench_rc = moy_ui.theme_install(%r)"
                % pkg.encode())
@@ -613,7 +613,7 @@ def _pb(n, sheet):
         ws.look._sheet_key = None
         ws.look.set_theme(ws.look.theme_name, persist=False)
         ws.mark_dirty()
-""" % (json.dumps({"format": 1, "name": "bench-spr", "surfaces": {
+""" % (json.dumps({"format": 2, "name": "bench-spr", "surfaces": {
     "button": {"rest": "raised, fill surface, border edge"}}}).encode(),)
 
 
@@ -795,6 +795,8 @@ def _bd_switch(name=None, variant=None):
         ws.look.set_theme_variant(variant, persist=False)
     ws._bd_call = time.ticks_diff(time.ticks_us(), t) // 1000
     ws._bd_r0 = r0
+ws._bd_raster = _bd_raster
+ws._bd_switch = _bd_switch
 """ % (BACKDROP_PKG,)
 
 
@@ -816,14 +818,14 @@ def bench_backdrop(b, out_path):
         bench.stop(label, "call %sms, rasters %s" % (pyval(b, "ws._bd_call"), made))
 
     home(b)
-    switch("backdrop theme load", "_bd_switch('bench-bd', 'light')")
+    switch("backdrop theme load", "ws._bd_switch('bench-bd', 'light')")
     for variant in ("dark", "light"):
-        switch("backdrop mode switch (%s)" % variant, "_bd_switch(None, %r)" % variant)
+        switch("backdrop mode switch (%s)" % variant, "ws._bd_switch(None, %r)" % variant)
     if desk:
         bench.start(); b.drain(3.0); bench.stop("desk idle over the backdrop")
-        rows.append(("desk", pyval(b, "_bd_raster('desk')", timeout=60)))
+        rows.append(("desk", pyval(b, "ws._bd_raster('desk')", timeout=60)))
     pyexec(b, "ws.open_library()"); b.drain(4.0)
-    rows.append(("home", pyval(b, "_bd_raster('home')", timeout=60)))
+    rows.append(("home", pyval(b, "ws._bd_raster('home')", timeout=60)))
     b.drain(2.0)
     bench.start(); b.drain(3.0); bench.stop("home idle over the backdrop")
     r0 = pyval(b, "ws.wallpaper.rasters")

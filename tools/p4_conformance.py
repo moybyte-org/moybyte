@@ -501,7 +501,10 @@ def run_shapes(board, log=print):
     """Each case on the board beside the host; the number that differ."""
     if not board.pyexec(SHAPE_RUN):
         raise RuntimeError("could not install the shape cases")
-    got = board.pyval("_shapes(__import__('device_canvas').WIRE_SWAPPED)", timeout=60.0)
+    # a one-line `py` runs in a fresh namespace; the upload's is ws._g
+    board.pyexec("ws._shr = None\nws._shr = _shapes(__import__('device_canvas').WIRE_SWAPPED)",
+                 timeout=60.0)
+    got = board.pyval("ws._shr", timeout=30.0)
     want = shapes_host()
     if not isinstance(got, list) or len(got) != len(want):
         raise RuntimeError("the board answered %r" % (got,))
