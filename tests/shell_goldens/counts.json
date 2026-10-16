@@ -537,6 +537,9 @@
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
+  "tdeck_320x240_fs1_ui_page": {
+    "ui_page": [22, 10]
+  },
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": [449, 28],
     "page_clock": [63, 39],

@@ -537,6 +537,9 @@
     "web_console": "3315495783495f9433cf37195cd8ae7a98e190caf48314f1bfcbf7dca602cff0",
     "web_console_address": "4486d90324e25a889c3db5e38da08e7e48bbbc6e4fceeb47a14f116e2eab1966"
   },
+  "tdeck_320x240_fs1_ui_page": {
+    "ui_page": "d44b6208a5070ef6ec49f4f04a2f8025989eded8383e938aefa3bd00789bcabd"
+  },
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": "2e0185f8d8733010740a6dd51221bd86692b6e27b349f773b43db7a6ee36cf74",
     "page_clock": "06d696ad780643dcbe5ef34b5904c8471b8a99bff51bf0dd2cf85a8e610a060c",
