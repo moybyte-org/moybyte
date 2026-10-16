@@ -854,7 +854,7 @@ board stands against each value, are #224's.
 
   | image | why |
   |---|---|
-  | Waveshare P4, Guition P4 | the 6 MiB slots (owner, 2026-10-05; `f738797`) were cut for the kernel; the floor leaves it about half of their headroom, so the store never pays for a second table change |
+  | Waveshare P4, Guition P4 | the 6 MiB slots (owner, 2026-10-05; `f738797`) were cut for the kernel; when the 2026-10 look's font set took both images near the floor, the slots grew again (owner, 2026-10-15) to 8 MiB on the Waveshare's 32 MB and 7.5 MiB on the Guition's 16 MB: the theme fonts stay in the image, and the store (on the card; the internal vfs is its fallback) gives the room |
   | T-Deck, Guition S3 | the 6 MiB slots (owner, 2026-10-15) were cut when the 2026-10 look's font set took these images near the floor: the theme fonts stay in the image, so the slots grow and the vfs (the store's fallback without a card) gives the room |
   | Zero | the baked web bundle took it under its first floor (256 KiB), and the 3 MiB slots (owner, 2026-10-07) re-tabled it rather than take the bundle off its image. The floor is **200 KB since 2026-10-15** (owner): the baked browser console's phase-6 growth left 236 KB (`bc073f04`), and the kernel's networking already crossed onto the Zero on 2026-10-08, so the floor guards general growth out of an 8 MB flash whose store pays for every slot byte twice |
 
@@ -899,7 +899,9 @@ Trackers (#66, #95, #97–#99, #105) and issues about apps alone are not listed.
   bytecode deleted, net +0.15–0.5 MB for the `runtime/` share alone — and the
   kernel's wasm build rides every image again inside the web bundle. The P4
   boards were repartitioned to 6 MiB app slots for it (owner, 2026-10-05;
-  `f738797`, `f596ed5`), paid from the store. A partition change is a cable
+  `f738797`, `f596ed5`), paid from the store, and again (8 MiB on the
+  Waveshare, 7.5 MiB on the Guition; owner, 2026-10-15) when the 2026-10
+  look's fonts took them near the floor. A partition change is a cable
   flash — OTA writes only the next app slot — and `tools/board_flash.py`
   formats a store the new table moved, so the store's contents go
   (`firmware/seeed_xiao_esp32s3_zero/README.md`): cheap while the field is the

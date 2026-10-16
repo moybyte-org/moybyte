@@ -240,7 +240,7 @@ rasterizes from the same bytes the host draws from."""
 [flash]
 # Read by tools/board_flash.py (#202 Phase A). The merged image flashes at
 # 0x2000 (the P4's bootloader offset); otadata is at 0xd000 on this table
-# (the Waveshare's layout, on 16MB instead of 32MB) and is erased first so a
+# (the Waveshare's table head, on 16MB instead of 32MB) and is erased first so a
 # board that has taken an OTA boots the slot the cable flash just wrote.
 # No `before`: this board flashes over the P4's OWN USB-Serial/JTAG (no
 # external UART bridge), which esptool's default reset drives cleanly --

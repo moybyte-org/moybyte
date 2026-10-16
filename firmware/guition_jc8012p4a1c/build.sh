@@ -124,7 +124,7 @@ moybyte_stage_native
 moybyte_ota_identity guition_p4 "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
-# 4) Frozen manifest + partition table (OTA-shaped 2x6MB app slots + auto-vfs
+# 4) Frozen manifest + partition table (OTA-shaped 2x7.5 MiB app slots + auto-vfs
 #    tail on 16MB) + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"
