@@ -133,22 +133,33 @@ class StorybookLayout(ListShellLayout):
     def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
-        self.band_h = 24 * fs
+        self.band_h = self.band(24, 8)
         x = self.cx + 6 * fs
         y = self.cy + 3 * fs
         bh = self.band_h - 6 * fs
-        # Band buttons (which show depends on the view).
-        self.btn1 = (x, y, 58 * fs, bh)                      # SHELF / PAGES
-        self.btn2 = (x + 62 * fs, y, 52 * fs, bh)            # PLAY / BG
-        self.btn3 = (x + 118 * fs, y, 72 * fs, bh)           # MY ART
-        self.btn4 = (x + 194 * fs, y, 66 * fs, bh)           # NO ART / TEAR OUT
+        # Band buttons (which show depends on the view), each never narrower
+        # than its widest label.
+        btns = []
+        for k, label in ((58, "SHELF"), (52, "PLAY"), (72, "MY ART"),
+                         (66, "TEAR OUT")):
+            bw = max(k * fs, self.label_w(label, 2))
+            btns.append((x, y, bw, bh))
+            x += bw + 4 * fs
+        self.btn1, self.btn2, self.btn3, self.btn4 = btns
+        x = self.btn1[0]
         self.status_x = x
         # Row lists (shelf + pages); geometry: ListShellLayout.
         self._init_list(self.cy + self.band_h)
         # Page view: the text box (the kid types the page's words here) above a
         # live-ish preview strip.
-        self.cell = 8 * fs
-        self.lh = 10 * fs
+        # The page's words are a typed grid, so they lay out in the `mono`
+        # font's cells (as the code editor's do) and draw in it.
+        _mf, mw, mline, _ma = _ui.font("mono")
+        self.cell = mw * fs
+        self.mono_line = mline * fs
+        self.lh = self.mono_line + 2 * fs
+        # The preview's story lines: the print font's line, a strip behind each.
+        self.pv_lh = self.print_line() + 4 * fs
         self.tx = self.cx + 8 * fs
         self.ty = self.cy + self.band_h * 2 + 3 * fs
         self.cols = min(MAX_LINE, max(1, (self.cw - 16 * fs) // self.cell))
@@ -586,18 +597,17 @@ class StorybookAppLayer(ListShellApp):
         th = self._theme.colors()
         cv.cls(th["panel"])
         bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
-        fs = lay.fs
         if self.mode == "shelf":
-            cv.print(self.status[:max(1, lay.cw // (8 * fs) - 2)],
-                     lay.status_x, lay.cy + 8 * fs, bar_ink, 1)
+            cv.print(lay.cut(self.status, lay.cw, 2),
+                     lay.status_x, lay.cy + lay.dy(8), bar_ink, 1)
             self._draw_rows(cv, self._stories(), "+ NEW STORY",
                             lambda c: (c.get("title") or "STORY").upper())
         elif self.mode == "pages":
             self._button(cv, "SHELF", lay.btn1)
             if not self.read_only:
                 self._button(cv, "PLAY", lay.btn2)
-            cv.print(self.status[:max(1, (lay.cx + lay.cw - lay.btn3[0]) // (8 * fs))],
-                     lay.btn3[0], lay.cy + 8 * fs, bar_ink, 1)
+            cv.print(lay.cut(self.status, lay.cx + lay.cw - lay.btn3[0]),
+                     lay.btn3[0], lay.cy + lay.dy(8), bar_ink, 1)
             self._draw_rows(cv, self._pages(),
                             None if self.read_only else "+ NEW PAGE",
                             self._page_label)
@@ -633,7 +643,7 @@ class StorybookAppLayer(ListShellApp):
                 # is for. The label is truncated HERE because this site's frozen
                 # cap (`w // 8fs - 2`) is one column tighter than the toolkit's
                 # pad-derived one at some widths.
-                label = label_fn(rows[i])[:max(1, r[2] // (8 * fs) - 2)]
+                label = lay.cut(label_fn(rows[i]), r[2], 2)
                 kind, colors = "row", (7, 0, edge)
             _ui.row(cv, th, r, label, kind=kind, on=selected, colors=colors,
                     pad=6 * fs, fs=fs)
@@ -648,14 +658,18 @@ class StorybookAppLayer(ListShellApp):
         cv.rectb(ax, ay, aw, ah, th["dim"])
         ed = self.editor
         if ed is not None:
-            for r, line in enumerate(ed.visible_lines()):
-                cv.print(line[ed.left:ed.left + lay.cols], lay.tx,
-                         lay.ty + r * lay.lh, 0, 1)
+            was = _ui.print_font(_ui.font("mono")[0])
+            try:
+                for r, line in enumerate(ed.visible_lines()):
+                    cv.print(line[ed.left:ed.left + lay.cols], lay.tx,
+                             lay.ty + r * lay.lh, 0, 1)
+            finally:
+                _ui.print_font(was)
             crow = ed.row - ed.top
             ccol = ed.col - ed.left
             if not self.read_only and 0 <= crow < lay.rows and 0 <= ccol <= lay.cols:
                 cv.rect(lay.tx + ccol * lay.cell,
-                        lay.ty + crow * lay.lh + 8 * fs,
+                        lay.ty + crow * lay.lh + lay.mono_line,
                         lay.cell, max(1, 2 * fs), self.names["blue"])
         # Preview: the page's bg color + art tag + its words, story-style.
         px_, py_, pw, ph = lay.preview
@@ -667,14 +681,14 @@ class StorybookAppLayer(ListShellApp):
         if p is None:
             return
         if p.get("art"):
-            cv.print("ART: " + p["art"], px_ + 4 * fs, py_ + 3 * fs,
+            cv.print("ART: " + p["art"], px_ + 4 * fs, py_ + lay.dy(3),
                      self.names["light_grey"], 1)
         if ed is not None:
-            y = py_ + ph - 12 * fs * max(1, len(ed.lines))
+            y = py_ + ph - lay.pv_lh * max(1, len(ed.lines))
             for ln in ed.lines[:MAX_TEXT_LINES]:
                 if ln.strip():
-                    cv.rect(px_ + 2 * fs, y - 2 * fs, pw - 4 * fs, 11 * fs,
+                    cv.rect(px_ + 2 * fs, y - 2 * fs, pw - 4 * fs, lay.pv_lh - fs,
                             self.names["black"])
-                    cv.print(ln[:max(1, pw // (8 * fs) - 2)], px_ + 6 * fs, y,
+                    cv.print(lay.cut(ln, pw, 2), px_ + 6 * fs, y,
                              self.names["white"], 1)
-                y += 12 * fs
+                y += lay.pv_lh

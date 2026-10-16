@@ -130,23 +130,27 @@ class GetCartsLayout(ListShellLayout):
     def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
-        self.top_h = 24 * fs
+        self.top_h = self.band(24, 8)
         hy, hh = self.cy + 2 * fs, self.top_h - 4 * fs
         self.head = (self.cx + 4 * fs, hy, 50 * fs, hh)
         self.head2 = (self.cx + self.cw - 70 * fs, hy, 66 * fs, hh)
-        self.status_h = 14 * fs
+        self.status_h = self.band(14, 4)
         body_y = self.cy + self.top_h + 2 * fs
         self.body = (self.cx + 4 * fs, body_y, self.cw - 8 * fs,
                      max(60 * fs, self.cy + self.ch - self.status_h - body_y
                          - 4 * fs))
         bx, by, bw, bh = self.body
-        self.btn_h = 26 * fs
+        self.btn_h = self.band(26, 12)
         self.btns = (bx, by + bh - self.btn_h, bw, self.btn_h)
-        self.cols = max(10, (bw - 8 * fs) // (8 * fs))
+        # The body's text: wrapped and cut to its pixels, a line apart.
+        self.text_px = max(10 * self.char_w(), bw - 8 * fs)
         self.text_y = by + 4 * fs
-        self.line_h = 12 * fs
+        self.line_h = self.print_line() + 4 * fs
         self.text_rows = max(1, (self.btns[1] - self.text_y - 4 * fs) // self.line_h)
-        self.row_h = 30 * fs
+        # A cart row: its name, then its licence and size a line below.
+        self.row_h = max(30 * fs, 2 * self.print_line() + 14 * fs)
+        self.name_dy = self.dy(5)
+        self.info_dy = self.name_dy + self.print_line() + 4 * fs
         rh = self.row_h - 2 * fs
         side = 16
         while side < 128 and abs(2 * side - rh) < abs(side - rh):
@@ -757,11 +761,11 @@ class GetCartsAppLayer(ListShellApp):
             chk.close()
 
     def _wrap(self, text):
-        cols = self.layout.cols
+        cols = self.layout.text_px
         out = []
         for para in text.split("\n"):
             para = para.strip()
-            out.extend(_ui.wrap_words(para, cols) if para else [""])
+            out.extend(_ui.wrap_px(para, cols, self.layout.fs) if para else [""])
         return out
 
     def _pump_connect(self):
@@ -1017,7 +1021,7 @@ class GetCartsAppLayer(ListShellApp):
         bar_ink = _ui.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.top_h))
         ph = self.phase
         if ph == "list":
-            cv.print("PICK A CART", 8 * fs, lay.cy + 8 * fs, bar_ink, 1)
+            cv.print("PICK A CART", 8 * fs, lay.cy + lay.dy(8), bar_ink, 1)
             self._chip(cv, th, "CHECK", lay.head2, "check")
             self._draw_list(cv, th)
         else:
@@ -1026,8 +1030,8 @@ class GetCartsAppLayer(ListShellApp):
                 self._chip(cv, th, "<", lay.head, "back")
             title = self.cur["cart"]["name"] if self.cur is not None else "GET CARTS"
             x = lay.head[0] + lay.head[2] + 8 * fs
-            cv.print(title[:max(1, (lay.cx + lay.cw - x) // (8 * fs) - 1)], x,
-                     lay.cy + 8 * fs, bar_ink, 1)
+            cv.print(lay.cut(title, lay.cx + lay.cw - x, 1), x,
+                     lay.cy + lay.dy(8), bar_ink, 1)
             if ph == "cart":
                 self._draw_cart(cv, th)
             elif ph == "licence":
@@ -1037,8 +1041,8 @@ class GetCartsAppLayer(ListShellApp):
             self._draw_buttons(cv, th)
         sy = lay.cy + lay.ch - lay.status_h
         cv.rect(lay.cx, sy, lay.cw, lay.status_h, self.names["black"])
-        cv.print(self._status_text()[:max(1, lay.cw // (8 * fs) - 1)], lay.cx + 4 * fs,
-                 sy + 3 * fs, self.names["yellow"], 1)
+        cv.print(lay.cut(self._status_text(), lay.cw, 1), lay.cx + 4 * fs,
+                 sy + lay.dy(3), self.names["yellow"], 1)
 
     def _chip(self, cv, th, label, rect, verb):
         _ui.chip(cv, th, rect, label, fs=self.layout.fs,
@@ -1062,14 +1066,14 @@ class GetCartsAppLayer(ListShellApp):
 
     def _line(self, cv, text, y, ink):
         lay = self.layout
-        cv.print(text[:lay.cols], lay.body[0] + 4 * lay.fs, y, ink, 1)
+        cv.print(lay.cut(text, lay.text_px), lay.body[0] + 4 * lay.fs, y, ink, 1)
         return y + lay.line_h
 
     def _draw_list(self, cv, th):
         lay = self.layout
         fs = lay.fs
         if not self.rows:
-            self._line(cv, "NO CARTS ON THE SHELF YET", lay.text_y + 8 * fs,
+            self._line(cv, "NO CARTS ON THE SHELF YET", lay.text_y + lay.dy(8),
                        th["ink_dim"])
             return
         for r in range(lay.list_rows):
@@ -1096,12 +1100,12 @@ class GetCartsAppLayer(ListShellApp):
             on = i == self.sel
             _ui.row(cv, th, rect, row["cart"]["name"], on=on,
                     value=STATE_LABEL[st], value_ink=self._state_ink(th, st),
-                    pad=6 * fs, text_dy=5 * fs, fs=fs)
+                    pad=6 * fs, text_dy=lay.name_dy, fs=fs)
             ink = _ui.state_colors(th, "row", _ui.ON if on else _ui.REST)[1]
             info = "%s  %s" % (row["cart"]["licence"].get("spdx") or "",
                                _mb(row["plan"]["store_bytes"]))
-            cv.print(info[:max(1, (rect[2] - 12 * fs) // (8 * fs))],
-                     rect[0] + 6 * fs, rect[1] + 17 * fs, ink, 1)
+            cv.print(lay.cut(info, rect[2] - 12 * fs),
+                     rect[0] + 6 * fs, rect[1] + lay.info_dy, ink, 1)
         self._rows_bar(cv, th, len(self.rows))
 
     def _state_ink(self, th, st):
@@ -1115,6 +1119,7 @@ class GetCartsAppLayer(ListShellApp):
 
     def _draw_cart(self, cv, th):
         lay = self.layout
+        fs = lay.fs
         row = self.cur
         c = row["cart"]
         p = row["plan"]
@@ -1136,16 +1141,16 @@ class GetCartsAppLayer(ListShellApp):
         elif st == "update":
             y = self._line(cv, "An update is ready.", y, self.names["orange"])
         elif st == "taken":
-            for ln in _ui.wrap_words("Another cart here is already called %s."
-                                     % c["folder"], lay.cols):
+            for ln in _ui.wrap_px("Another cart here is already called %s."
+                                     % c["folder"], lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
         why = self.blocker(row) if st in ("get", "update") else None
         if why:
-            for ln in _ui.wrap_words(why, lay.cols):
+            for ln in _ui.wrap_px(why, lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
         if self.arm_remove:
-            for ln in _ui.wrap_words("Tap REMOVE again. Its saves and the files it "
-                                     "wrote go too.", lay.cols):
+            for ln in _ui.wrap_px("Tap REMOVE again. Its saves and the files it "
+                                     "wrote go too.", lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
 
     def _draw_licence(self, cv, th):
@@ -1153,7 +1158,7 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         ext, lines, _off = self.lic
         self._line(cv, "Before getting %s:" % ext["path"], lay.text_y, th["ink"])
-        self._line(cv, (ext["licence"].get("name") or "its licence")[:lay.cols],
+        self._line(cv, ext["licence"].get("name") or "its licence",
                    lay.text_y + lay.line_h, th["accent"])
         area = lay.lic_area()
         cv.rect(area[0], area[1], area[2], area[3], th["surface"])
@@ -1165,7 +1170,7 @@ class GetCartsAppLayer(ListShellApp):
         if clip is not None:
             clip(*area)
         while yy < area[1] + area[3] and i < len(lines):
-            cv.print(lines[i][:lay.cols], area[0] + 4 * fs, yy, th["ink"], 1)
+            cv.print(lay.cut(lines[i], lay.text_px), area[0] + 4 * fs, yy, th["ink"], 1)
             yy += lay.line_h
             i += 1
         if clip is not None:
@@ -1234,15 +1239,15 @@ class GetCartsAppLayer(ListShellApp):
         fs = lay.fs
         title, lines = self._message()
         x, y = lay.body[0] + 4 * fs, lay.text_y + 4 * fs
-        scale = 2 if len(title) * 16 * fs <= lay.body[2] - 8 * fs else 1
+        scale = 2 if _ui.print_width(title, 2) * fs <= lay.body[2] - 8 * fs else 1
         ink = th["danger"] if self.phase in ("failed", "nowifi", "unreached",
                                              "nomemory", "nonet") else th["play"]
         if self.phase == "pick" and self.pick_why is not None:
             ink = th["danger"]
         cv.print(title, x, y, ink, scale)
-        y += 8 * fs * scale + 8 * fs
+        y += _ui.font("ui")[2] * fs * scale + 8 * fs
         for text in lines:
-            for ln in _ui.wrap_words(text, lay.cols):
+            for ln in _ui.wrap_px(text, lay.text_px, fs):
                 y = self._line(cv, ln, y, th["ink"])
         if self.phase == "getting" and self.job is not None:
             self._draw_progress(cv, th, y + 4 * fs)
@@ -1251,7 +1256,7 @@ class GetCartsAppLayer(ListShellApp):
         lay = self.layout
         fs = lay.fs
         job = self.job
-        x, w, h = lay.body[0] + 4 * fs, lay.body[2] - 8 * fs, 10 * fs
+        x, w, h = lay.body[0] + 4 * fs, lay.body[2] - 8 * fs, lay.print_line() + 2 * fs
         cv.rectb(x, y, w, h, th["ink_dim"])
         fill = (w - 2) * job.done // job.total if job.total else 0
         if fill > 0:

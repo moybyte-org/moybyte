@@ -659,11 +659,22 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # `chrome_floor` being a constructor-time field buys on the windowed tier.
         self.panel_diagonal_in = panel_diagonal_in
         _panel = sys_canvas if sys_canvas is not None else canvas
+        # The metric class the glass lays out on (layout_base.class_of): a
+        # declared glass of a desk's size is a desk, every other a handheld.
+        # One per process, as the bars are.
+        self.metric_class = _layout_base.class_of(panel_diagonal_in)
+        _layout_base.place_class(self.metric_class)
+        # The glass's own canvas, and the half-size surface a `render.scale: 2`
+        # desk theme draws on instead (`set_render_scale`); None at 1.
+        self.glass = sys_canvas
+        self.render_scale = 1
+        self._half = None
         self.chrome_floor = chrome_scale_floor(_panel.w, _panel.h,
                                                panel_diagonal_in)
         # What Settings' CHROME SIZE may pick on this panel, resolved with the
         # floor and for the same reason: from the panel, never a window.
-        self.chrome_scales = chrome_scale_choices(_panel.w, self.chrome_floor)
+        self.chrome_scales = chrome_scale_choices(
+            _panel.w // _layout_base.CLASSES[self.metric_class]["unit"], self.chrome_floor)
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
         # canvas is the panel/window surface the desktop/launcher/settings + status
@@ -1308,6 +1319,70 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         correct even if a backend swaps the game canvas (e.g. the web CommandCanvas)."""
         return self._sys_canvas if self._sys_canvas is not None else self.canvas
 
+    @property
+    def glass_canvas(self):
+        """What the glass shows: the panel's canvas, which a `render.scale: 2`
+        frame is doubled onto; the system canvas where the shell draws on the
+        glass itself."""
+        return self.glass if self.glass is not None else self.sys_canvas
+
+    def set_render_scale(self, n):
+        """Draw the shell on a surface 1/`n` of the glass, doubled onto it at
+        the end of every drawn frame (`render.scale`, the 2026-10 look's
+        GAPS 11). Only a desk with a system canvas of its own takes 2; every
+        other glass draws at 1. The layouts keep the desk's glass metrics on
+        the smaller surface (`layout_base.place_class`), the pointer lands in
+        its pixels (`Pointer.div`), and the windows rebuild at its size."""
+        glass = self.glass
+        if (n not in _layout_base.RENDER_SCALES or glass is None
+                or self.metric_class != _layout_base.DESK):
+            n = 1
+        if n == self.render_scale:
+            return
+        half = self._half
+        wm = getattr(self, "wm", None)
+        if n == 1:
+            root = glass
+            glass.set_font_scale(half.font_scale)
+        else:
+            root = glass.new_layer(glass.w // n, glass.h // n)
+            root.set_font_scale(glass.font_scale)
+        self._half = None if n == 1 else root
+        self.render_scale = n
+        if wm is not None and getattr(wm, "_root_canvas", None) is not None:
+            wm._root_canvas = root
+        self._sys_canvas = root
+        if half is not None:
+            rel = getattr(half, "release", None)
+            if rel is not None:
+                rel()
+        p = self.pointer
+        if p is not None:
+            was = p.div if p.div > 0 else 1
+            p.w, p.h, p.div = root.w, root.h, n
+            p.x = min(p.x * was // n, root.w - 1)
+            p.y = min(p.y * was // n, root.h - 1)
+        _layout_base.place_class(self.metric_class, n)
+        bl = getattr(self, "bar_layer", None)
+        if bl is not None:
+            bl.invalidate()
+            bl.publish_strips()
+        if getattr(self, "layout", None) is not None:
+            self._relayout()
+        drop = getattr(wm, "_drop_backdrop", None)
+        if drop is not None:
+            drop()
+        if n == 1:
+            glass.cls(0)
+        self._dirty = True
+
+    def _present_half(self):
+        """The half-size surface, doubled onto the glass: the frame's one
+        present at `render.scale: 2`."""
+        half = self._half
+        half.flush_batch()
+        self.glass.blit565(half._buf, half.w, half.h, 0, 0, self.render_scale)
+
     def _cart_has_perm(self, name):
         """True iff the open cart's manifest permissions include `name` (#38).
         moy_carts.load() carries the manifest "permissions" list onto the cart;
@@ -1430,6 +1505,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         `ws.pointer` names and the app ABI's surface rows read, live. Every
         assignment comes through here, so `ctx.surface.pointer()` never reads a
         cursor the console dropped."""
+        if pointer is not None and self._half is not None:
+            pointer.w, pointer.h = self._half.w, self._half.h
+            pointer.div = self.render_scale
         self.pointer = pointer
         self.app_abi.bind_pointer(pointer)
 
@@ -3945,6 +4023,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if saver is not None:
             if saver.frame(dt):
                 self._flush_batches()
+                if self._half is not None:
+                    self._present_half()
                 self.comp.flush()
                 self._frames_drawn += 1
             return
@@ -4175,6 +4255,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Images immediately (never queued). This final flush is the last-line guard so
         # a queued run can never survive to the next frame's cls().
         self._flush_batches()
+        if self._half is not None:
+            self._present_half()
         # Perf HUD (#43/#44): time the panel DMA flush in isolation, then back out
         # the draw span (everything before it this frame). On the host _NullComp the
         # flush is a near-zero no-op (no real panel), so flush reads ~0 and draw ~=

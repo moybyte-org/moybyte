@@ -54,21 +54,13 @@ keeps the matrix a clean product instead of a pile of special cases.
                            the smallest canvas that gives fs=3 room.
   p4_1024x600_fs2_windowed the desktop tier: WindowedWM, font_scale 2 (so the
                            fs=2 rung is pinned here rather than in a config of
-                           its own), plus the desk and a desk-with-one-window.
-                           It declares the P4's 7.0" glass (2026-09-06), whose
-                           floor is 2 -- the scale this row already ran -- so
-                           its hashes did not move by a byte when the diagonal
-                           landed. That is the PIXEL statement of "declaring
-                           the scale you already run changes nothing", the
-                           arithmetic half of which is
-                           tests/test_chrome_tap_floor.py. (The board ships
-                           FONT_SCALE 1, so what it actually draws is cs 2 over
-                           fs 1; no config models that tier, which was already
-                           true before the diagonal was declared.)
+                           its own), plus the desk and a desk-with-one-window,
+                           on the P4's declared 7.0" glass: a desk, laid out
+                           on the desk's metric class (layout_base.CLASSES).
   p4_1024x600_cs2_fs1_windowed  the P4 AS SHIPPED: the same desk at font
-                           scale 1, so its 7.0" floor makes chrome scale 2
-                           over text scale 1 -- the tier the row above does
-                           not model. One axis from it (font scale).
+                           scale 1 and chrome size 1, whose layouts run at the
+                           desk's unit of 2 (the `cs2` of every P4 row's
+                           name). One axis from the row above (font scale).
   p4_1024x600_fs2_windowed_light  the windowed row in the light variant: the
                            one place light chrome meets the WM's decorations.
                            One axis from the windowed row (variant).
@@ -91,6 +83,14 @@ keeps the matrix a clean product instead of a pile of special cases.
                            T-Deck row and the P4 as shipped: RGB roles in the
                            block at indices 64..127 on every surface. One axis
                            (theme) from each row in its variant.
+  guition_p4_1280x800_windowed  the Guition P4's desk as shipped: the second
+                           desk glass, on the same desk metrics as the P4.
+                           One axis (the glass) from the as-shipped P4 row.
+  p4_1024x600_render2_moy_day  the Moy Day row with `render.scale: 2`
+                           (docs/look_2026-10.md step 9): the desk drawn on a
+                           512x300 surface at the desk's metrics halved and
+                           doubled onto the glass, which is what is hashed.
+                           One axis (the render scale) from the Moy Day row.
   p4_1024x600_cs2_fs1_console  the P4 as shipped in CONSOLE mode
                            (docs/shell_layout_2026-10.md §3): the desk's PLAY,
                            then the T-Deck row's surfaces, every one
@@ -406,6 +406,12 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_moy_night": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, theme="moy"),
+    "guition_p4_1280x800_windowed": dict(
+        sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=10.1),
+    "p4_1024x600_render2_moy_day": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="moy", render=2),
 }
 
 # The bar widgets that open a component (docs/shell_layout_2026-10.md §8), in
@@ -482,7 +488,7 @@ def _render(ws, surface, config_name):
         ws._dirty = True                 # defeat the #44 redraw gate
         cv.gate_counts_reset()
         ws.frame(_DT)
-        cur = bytes(cv._buf)
+        cur = bytes(ws.glass_canvas._buf)
         if cur == prev:
             fills, texts = cv.gate_counts()[:2]
             _DRAWN[(config_name, surface)] = (fills, texts)
@@ -517,10 +523,19 @@ def _build(cfg, carts_dir):
         font_scale=cfg["font_scale"], windowed=cfg["windowed"],
         panel_diagonal_in=cfg["diagonal_in"])
     pick_layout(ws, cfg)
+    theme = cfg.get("theme", ws.look.theme_name)
+    if cfg.get("render", 1) != 1:
+        # A package of the config's theme asking for its render scale.
+        import moy_ui                  # registered by the runtime package
+        name = theme + "-x%d" % cfg["render"]
+        rc, _notes = moy_ui.theme_install(json.dumps(
+            {"format": 2, "name": name, "inherits": theme,
+             "look": {"render": {"scale": cfg["render"]}}}).encode())
+        assert rc == 0, name
+        theme = name
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
-    ws.look.set_theme(cfg.get("theme", ws.look.theme_name), persist=False,
-                      variant=cfg["variant"])
+    ws.look.set_theme(theme, persist=False, variant=cfg["variant"])
     keep = [c for c in ws.carts.all if c.get("title") not in GOLDEN_EXCLUDE]
     if len(keep) != len(ws.carts.all):
         ws.carts.apply(keep)            # pin the roster -- see GOLDEN_EXCLUDE
@@ -793,14 +808,14 @@ def capture(config_name, carts_dir):
     """{surface: sha256} for one configuration."""
     cfg = CONFIGS[config_name]
     ws = _build(cfg, carts_dir)
-    expect_bytes = ws.sys_canvas.w * ws.sys_canvas.h * 2      # RGB565
+    expect_bytes = ws.glass_canvas.w * ws.glass_canvas.h * 2  # RGB565
     out = {}
     try:
         for name, enter in _surface_plan(ws, cfg):
             enter()
-            assert len(bytes(ws.sys_canvas._buf)) == expect_bytes, (
-                "%s/%s: system canvas is %d bytes, expected %d (w*h*2)"
-                % (config_name, name, len(bytes(ws.sys_canvas._buf)), expect_bytes))
+            assert len(bytes(ws.glass_canvas._buf)) == expect_bytes, (
+                "%s/%s: the glass is %d bytes, expected %d (w*h*2)"
+                % (config_name, name, len(bytes(ws.glass_canvas._buf)), expect_bytes))
             out[name] = _render(ws, name, config_name)
     finally:
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
@@ -997,6 +1012,10 @@ def test_every_axis_is_actually_exercised():
     assert {c["variant"] for c in CONFIGS.values()} == {"dark", "light"}
     assert {c["windowed"] for c in CONFIGS.values()} == {True, False}
     assert {bool(c["diagonal_in"]) for c in CONFIGS.values()} == {True, False}
+    from runtime.layout_base import class_of
+    assert {class_of(c["diagonal_in"]) for c in CONFIGS.values()} == {
+        "handheld", "desk"}
+    assert {c.get("render", 1) for c in CONFIGS.values()} == {1, 2}
 
 
 # A running APP CART is drawn on the fixed 320x240 GAME raster, and so is the

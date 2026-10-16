@@ -665,6 +665,7 @@ static int32_t *pointer_int(moy_input_ptr_t *p, qstr attr) {
         case MP_QSTR_x: return &p->x;
         case MP_QSTR_y: return &p->y;
         case MP_QSTR_idle_ms: return &p->idle_ms;
+        case MP_QSTR_div: return &p->div;
         case MP_QSTR__sampled: return (int32_t *)&p->sampled;
         case MP_QSTR__last_move: return (int32_t *)&p->last_move;
         default: return NULL;

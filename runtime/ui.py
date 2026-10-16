@@ -185,6 +185,23 @@ def print_font(fid=None):
     return _C.print_font(fid)
 
 
+def line_dy(dy, fs=1, role="ui"):
+    """A text line's top offset `dy` at font scale `fs`, written for
+    petme128's 7-row ascent, kept where it centres the line for `role`'s
+    font: moved up by half the ascent that font adds. A shorter ascent keeps
+    the offset as written, so it is the identity under petme128 and Tiny5."""
+    return dy - max(0, (_C.font(role)[3] - 7) * fs) // 2
+
+
+def print_cut(s, maxw, scale=1):
+    """`print_fit`, never empty for a non-empty `s`: a box too narrow for one
+    character still shows the first."""
+    if type(s) is not str:
+        s = str(s)
+    got = print_fit(s, maxw, scale)
+    return got if got or not s else s[:1]
+
+
 def print_width(s, scale=1):
     """The pixels `s` draws at `scale` through a canvas's `print` now: in the
     print font (`print_font`)."""

@@ -212,7 +212,7 @@ def _settle(g, ws, frames=8):
         g._quiesce(ws)
         ws._dirty = True
         ws.frame(g._DT)
-        cur = bytes(ws.sys_canvas._buf)
+        cur = bytes(ws.glass_canvas._buf)
         if cur == prev:
             return True
         prev = cur
@@ -256,23 +256,23 @@ def _key_calc(g, ws):
             calc._key(k)
 
 
-def _desk(g, ws, calc_x=330):
-    # The target's windows, in its 512x300 logical space at the board's 2x.
+def _desk(g, ws, calc_x=648):
+    # The target's windows where it puts them, in glass pixels.
     ws.open_desk()
     ws.open_app(ws._apps_by_id["files"])
     _settle(g, ws, 2)
-    _place(ws, "files", 2 * 54, 2 * 26, 2 * 282, 2 * 268)
+    _place(ws, "files", 112, 54, 548, 534)
     files = _app(ws, "files")
     files._enter_rows("projects")
     _settle(g, ws, 2)
     ws.open_app(ws._apps_by_id["calc"])
     _settle(g, ws, 2)
-    _place(ws, "calc", 2 * calc_x, 2 * 70, 2 * 166, 2 * 214)
+    _place(ws, "calc", calc_x, 96, 344, 488)
     _key_calc(g, ws)
 
 
 def _desk_wall(g, ws):
-    _desk(g, ws, calc_x=296)
+    _desk(g, ws, calc_x=592)
 
 
 def _settings(g, ws):
@@ -308,9 +308,9 @@ def _calc(g, ws):
 
 
 def _image(ws):
-    """The system canvas as an RGB image (its RGB565 is big-endian)."""
+    """The glass as an RGB image (its RGB565 is big-endian)."""
     from PIL import Image
-    cv = ws.sys_canvas
+    cv = ws.glass_canvas
     buf = bytes(cv._buf)
     sw = bytearray(len(buf))
     sw[0::2], sw[1::2] = buf[1::2], buf[0::2]

@@ -265,7 +265,7 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
     ws.open_app(ws._apps_by_id["calc"])
     drv.frame(1 / 30)
     win = ws.wm._wins["calc"]
-    win.x, win.y = 60, 200
+    win.x, win.y = 60, 560 - win.h
     ws.wm.dirty = True
     for _ in range(3):
         ws._dirty = True

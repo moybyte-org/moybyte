@@ -334,7 +334,8 @@ axis is gone: its rows, its verbs in the app ABI and its persisted setting.
 ### 4.2 Metrics
 
 Logical pixels, multiplied by the chrome scale each tier already computes (the
-#203 floor): `border`, `title_h`, `button`, `pad`, `gap`, `shadow`, `radius`
+#203 floor; on a desk its unit of 2 at chrome size 1, docs/look_2026-10.md
+step 9): `border`, `title_h`, `button`, `pad`, `gap`, `shadow`, `radius`
 (0 to 3, D8: a corner cut from a precomputed mask in C, one per radius, so a
 rounded box costs four masked corner spans and no per-pixel test), and the
 pressed-label offset `press_dx`, `press_dy` (D8: the label of a part in its
@@ -781,7 +782,9 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     runs font scale 1 by the owner's call of 2026-07-12), under the 3.5"
     Guition S3's 0.92mm (#203: its 1x text "reads fine"). It lifts nothing
     in the lineup and guards denser glass, as the tap floor does; petme128
-    clears it on every panel.
+    clears it on every panel. It is measured on the GLASS (a `render.scale:
+    2` surface pixel is two of its), and every face of the font set answers
+    1 on both P4 desks (`tests/test_native_desk.py`).
   - **The fonts go with the VM.** The kernel's stop frees every font row
     (`moy_text_vm_stop`), so a restarted VM loads its theme's into empty
     slots; where nothing frees them (a host process), a load that finds

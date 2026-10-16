@@ -243,17 +243,19 @@ def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
         "%s. Read chrome_scale_floor's docstring before updating this."
         % sorted(b for b, v in declared.items() if v))
 
-    # ...and each number does the job it was declared for: the landscape glass
-    # the board composites onto floors the chrome a scale above its font.
-    for name, board_dir, glass in (("guition-s3", GUITION, (480, 320)),
-                                   ("guition-p4", GUITION_P4, (1280, 800)),
-                                   ("p4", P4, (1024, 600))):
+    # ...and each number does the job it was declared for: the handheld's
+    # glass floors its chrome a size above its font; the desks' glass makes
+    # them desks, whose 32px icons need no floor (layout_base.class_of).
+    for name, board_dir, glass, floor in (
+            ("guition-s3", GUITION, (480, 320), 2),
+            ("guition-p4", GUITION_P4, (1280, 800), 1),
+            ("p4", P4, (1024, 600), 1)):
         diag = declared[name]
         runtime_py = (board_dir / "modules" / "moy_runtime.py").read_text(
             encoding="utf-8")
         assert "PANEL_DIAGONAL_IN = %s" % diag in runtime_py, name
         assert "panel_diagonal_in=PANEL_DIAGONAL_IN" in runtime_py, name
-        assert chrome_scale_floor(glass[0], glass[1], diag) == 2, name
+        assert chrome_scale_floor(glass[0], glass[1], diag) == floor, name
 
     # The T-Deck's silence is the one that was ARGUED (2026-09-06): the owner
     # asked for the floor there, it was built and rendered, and it was declined

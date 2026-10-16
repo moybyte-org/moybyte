@@ -45,6 +45,11 @@ cross-import web. It's cohesive with the launcher-home rendering, so it's left p
 import json
 
 
+try:
+    from layout_base import bar_rows as _bar_rows
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import bar_rows as _bar_rows
+
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:                     # host: the runtime package
@@ -624,7 +629,7 @@ class Popup:
         self.anchor_x = _POPUP_X
         # The edge the panel hangs from: the bar's content-side edge, set by
         # toggle_sysmenu from the bar's rect. `up` grows it upward (a bar at the
-        # bottom). None is `_POPUP_Y * cs`, a top bar's.
+        # bottom). None is a top bar's bottom (`layout_base.bar_rows`).
         self.anchor_y = None
         self.up = False
         # Geometry scale (#39/#58): the popup's rows hold fs-scaled petme128 text,
@@ -741,7 +746,7 @@ class Popup:
             h = 0
             for it in self.items:
                 h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
-        y = _POPUP_Y * cs if self.anchor_y is None else self.anchor_y
+        y = _bar_rows(cs) if self.anchor_y is None else self.anchor_y
         if self.up:
             y -= h
         return (self.anchor_x, y, w, h)

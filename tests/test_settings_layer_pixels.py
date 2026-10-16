@@ -48,8 +48,9 @@ import pytest
 from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
 
 # The sub-surfaces are rendered on every config that renders the whole
-# surface list; a `plan` config holds a few named surfaces alone.
-CONFIGS = {k: v for k, v in _ALL.items() if "plan" not in v}
+# surface list; a `plan` config holds a few named surfaces alone, and a
+# `render` config is its row's Settings doubled.
+CONFIGS = {k: v for k, v in _ALL.items() if "plan" not in v and "render" not in v}
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_FILE = Path(__file__).resolve().parent / "shell_goldens" / "subsurfaces.json"

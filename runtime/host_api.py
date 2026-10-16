@@ -387,7 +387,7 @@ class ConsoleDriver:
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +
         # responsive desktop chrome). When it's the same object as the game canvas
         # (320x240 degradation) this is exactly today's output (#39).
-        return self.ws.sys_canvas.to_rgb888()
+        return self.ws.glass_canvas.to_rgb888()
 
     def current_canvas(self):
         return self.ws.sys_canvas

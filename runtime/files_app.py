@@ -23,6 +23,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
+    from layout_base import metric
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import metric
+
+try:
     from editors_base import TextEntry
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import TextEntry
@@ -93,13 +98,13 @@ class FilesLayout(ListShellLayout):
     def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
-        self.top_h = 24 * fs
+        self.top_h = self.band(24, 8)
         self.head = (self.cx + 4 * fs, self.cy + 2 * fs, 58 * fs, self.top_h - 4 * fs)
         self.head2 = (self.head[0] + self.head[2] + 4 * fs, self.head[1],
                       58 * fs, self.head[3])
         body_y = self.cy + self.top_h + 2 * fs
-        self.action_h = 20 * fs
-        self.status_h = 14 * fs
+        self.action_h = self.band(20, 8)
+        self.status_h = self.band(14, 4)
         self.action_y = (self.cy + self.ch - self.status_h - self.action_h
                          - 2 * fs)
         self.body = (self.cx + 4 * fs, body_y, self.cw - 8 * fs,
@@ -107,7 +112,7 @@ class FilesLayout(ListShellLayout):
         # Kind tiles: two columns of big buttons in the body.
         cols = 2
         tw = (self.body[2] - 6 * fs) // cols
-        th = 34 * fs
+        th = metric("place", fs)
         self.tiles = []
         for i in range(len(KIND_LABELS) + 1):          # +1 = the TRASH tile
             c, r = i % cols, i // cols
@@ -120,7 +125,7 @@ class FilesLayout(ListShellLayout):
         out = []
         x = self.cx + 4 * fs
         for label in labels:
-            w = (len(label) * 8 + 12) * fs
+            w = self.label_w(label, 12)
             out.append((x, self.action_y, w, self.action_h))
             x += w + 3 * fs
         return out
@@ -627,7 +632,7 @@ class FilesAppLayer(ListShellApp):
         self._chip(cv, "<" if self.mode != "kinds" else "FILES", lay.head,
                    self.mode != "kinds")
         cv.print(crumb, lay.head[0] + lay.head[2] + 8 * fs,
-                 lay.cy + 8 * fs, bar_ink, 1)
+                 lay.cy + lay.dy(8), bar_ink, 1)
         if self.mode == "trash":
             self._chip(cv, "EMPTY", lay.head2, hot=bool(self.trash))
         if self.mode == "rename":
@@ -647,8 +652,8 @@ class FilesAppLayer(ListShellApp):
 
         sy = lay.cy + lay.ch - lay.status_h
         cv.rect(lay.cx, sy, lay.cw, lay.status_h, self.names["black"])
-        cv.print(self.status[:max(1, lay.cw // (8 * fs) - 1)], lay.cx + 4 * fs,
-                 sy + 3 * fs, self.names["yellow"], 1)
+        cv.print(lay.cut(self.status, lay.cw, 1), lay.cx + 4 * fs,
+                 sy + lay.dy(3), self.names["yellow"], 1)
 
     def _draw_kinds(self, cv):
         shown = self._shown_kinds()
@@ -672,7 +677,7 @@ class FilesAppLayer(ListShellApp):
         r = (lay.body[0], lay.action_y, lay.body[2], lay.action_h)
         cv.rect(r[0], r[1], r[2], r[3], self.names["white"])
         cv.rectb(r[0], r[1], r[2], r[3], th.get("accent", 10))
-        cv.print(self.rename.text + "_", r[0] + 4 * fs, r[1] + 6 * fs,
+        cv.print(self.rename.text + "_", r[0] + 4 * fs, r[1] + lay.dy(6),
                  self.names["black"], 1)
 
     def _draw_rows(self, cv):
@@ -681,12 +686,12 @@ class FilesAppLayer(ListShellApp):
         fs = lay.fs
         if not self._rows:
             cv.print(self._rows_empty, lay.body[0] + 8 * fs,
-                     lay.body[1] + 12 * fs, th.get("dim", 1), 1)
+                     lay.body[1] + lay.dy(12), th.get("dim", 1), 1)
             return
         for row in range(lay.list_rows):
             i = self.top + row
             if i >= len(self._rows):
                 break
             _ui.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
-                    pad=4 * fs, text_dy=6 * fs, fs=fs)
+                    pad=4 * fs, text_dy=lay.dy(6), fs=fs)
         self._rows_bar(cv, th, len(self._rows))

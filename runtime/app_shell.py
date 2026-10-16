@@ -27,9 +27,9 @@
 import json
 
 try:
-    from layout_base import BAR_ROWS, content_of
+    from layout_base import bar_rows, content_of, metric
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import BAR_ROWS, content_of
+    from runtime.layout_base import bar_rows, content_of, metric
 
 try:
     from moy_store_base import builtin_name
@@ -66,12 +66,41 @@ class ListShellLayout:
         # over its content (the WM's title strip is outside it).
         self.cs = max(self.fs, int(cs)) if cs else self.fs
         self.cx, self.cy, self.cw, self.ch = content_of(
-            self.w, self.h, 0 if windowed else BAR_ROWS * self.cs)
+            self.w, self.h, 0 if windowed else bar_rows(self.cs))
+
+    def print_line(self):
+        """The print font's line at the font scale: what a row of text needs."""
+        return _ui.font("ui")[2] * self.fs
+
+    def char_w(self):
+        """A character cell at the font scale: the print font's glyph box,
+        never under petme128's 8 rows. A margin counted in characters is
+        this many pixels each."""
+        return max(8, _ui.font("ui")[1]) * self.fs
+
+    def dy(self, k):
+        """A text line's top offset, `k` rows of petme128 at the font scale,
+        centred for the print font (`ui.line_dy`)."""
+        return _ui.line_dy(k * self.fs, self.fs)
+
+    def cut(self, s, w, chars=0):
+        """`s` cut to draw in `w` pixels less `chars` characters' margin."""
+        return _ui.print_cut(s, w - chars * self.char_w(), self.fs)
+
+    def band(self, k, pad):
+        """A band `k` rows tall at the font scale, or the print font's line
+        plus `pad` rows when that is taller."""
+        return max(k * self.fs, self.print_line() + pad * self.fs)
+
+    def label_w(self, label, pad):
+        """A chip's width for `label`: its printed width plus `pad` rows of
+        petme128 at the font scale."""
+        return (_ui.print_width(label) + pad) * self.fs
 
     def _init_list(self, top):
         """The notebook-list rows below `top` (the title/toolbar band's bottom)."""
         fs = self.fs
-        self.row_h = 20 * fs
+        self.row_h = max(metric("row", fs), self.print_line() + 4 * fs)
         self.list_y = top
         self.list_rows = max(1, (self.cy + self.ch - self.list_y - 2 * fs)
                              // self.row_h)

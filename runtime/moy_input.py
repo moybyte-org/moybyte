@@ -94,7 +94,7 @@ class Pointer(ctypes.Structure):
     _fields_ = [("w", _I32), ("h", _I32), ("x", _I32), ("y", _I32),
                 ("idle_ms", _I32), ("_sampled", _U32), ("_last_move", _U32),
                 ("click", _B), ("down", _B), ("hovers", _B), ("fresh", _B),
-                ("visible", _B)]
+                ("visible", _B), ("div", _I32)]
 
     def __init__(self, w, h, idle_ms=CURSOR_IDLE_MS):
         super().__init__()

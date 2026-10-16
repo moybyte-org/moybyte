@@ -617,7 +617,7 @@ class Appearance:
                 "from": lk.get("from"), "accent": lk.get("accent"),
                 "tint": lk.get("tint"), "frame": self._frame_style(c, lk),
                 "font": self._font_preset(), "wallpaper": self.wallpaper_id,
-                "picture": pic, "chrome": self.effective_chrome_scale(),
+                "picture": pic, "chrome": self.chrome_size(),
                 "chromes": tuple(self.ws.chrome_scales)}
 
     def _frame_style(self, c, lk):
@@ -1171,8 +1171,14 @@ class Appearance:
         `ws.chrome_floor`, resolved once from the board's declared glass, so the
         whole point of #203 -- a size a kid's finger can rely on -- is not one a
         stored choice can lose."""
-        return max(self.effective_font_scale(), self.ws.chrome_floor,
-                   self.chrome_scale)
+        return max(self.effective_font_scale(), self.chrome_size() * _layout_base.unit())
+
+    def chrome_size(self):
+        """The chrome SIZE in force, as CHROME SIZE shows it: the requested
+        one, never under the board's tap floor. `effective_chrome_scale` is
+        this times the metric class's unit (`layout_base.unit`): the desk's
+        size 1 lays its handheld-sized parts out at 2."""
+        return max(self.ws.chrome_floor, self.chrome_scale)
 
     def valid_chrome_scale(self, scale):
         """`scale` if it is an int this panel can take (`ws.chrome_scales`),
@@ -1287,6 +1293,7 @@ class Appearance:
             ws.system.set("theme_variant", self.theme_variant)
         self._layouts = {}
         self._choices = None
+        ws.set_render_scale(self.live.look[0].get("render.scale", 1))
         self.apply_layout()
         self._apply_wallpaper()
 
@@ -1610,9 +1617,10 @@ class Appearance:
         ws = self.ws
         floor = 1
         if ids["ui"]:
-            panel = ws._sys_canvas if ws._sys_canvas is not None else ws.canvas
+            # Measured on the glass: a surface pixel is `render_scale` of its.
+            panel = ws.glass_canvas
             floor = text_scale_floor(panel.w, panel.h, ws.panel_diagonal_in,
-                                     _uimod.font("ui")[3])
+                                     _uimod.font("ui")[3] * ws.render_scale)
         if floor != self.text_floor:
             self.text_floor = floor
             changed = True

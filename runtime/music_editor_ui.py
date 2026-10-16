@@ -171,7 +171,7 @@ class MusicLayout(LayoutBase):
         top = self.cy
         x0 = self.cx
         ctl_y = top + 1 * fs
-        self.title_y = top + 3 * fs
+        self.title_y = top + _ui.line_dy(3 * fs, fs)
         self.view_btn = (x0 + 2 * fs, ctl_y, 46 * fs, 14 * fs)
         self.obj_prev = (x0 + 52 * fs, ctl_y, 16 * fs, 14 * fs)
         self.obj_next = (x0 + 134 * fs, ctl_y, 16 * fs, 14 * fs)
@@ -183,9 +183,14 @@ class MusicLayout(LayoutBase):
         bot_y = self.cy + self.ch - 42 * fs       # PLAY/LOOP row (base 198)
         self.list_x = x0 + _MU_LIST_X * fs
         self.list_y0 = top + 16 * fs
-        self.row_h = _MU_ROW_H * fs
+        # The step and slot lists are a tracker: columns of cells as wide as
+        # the print font's glyph box, never under 8 rows.
+        _f, fw, line, _a = _ui.font("ui")
+        self.cell = max(8, fw) * fs
+        self.row_h = max(_MU_ROW_H * fs, (line + 8) * fs)
+        self.row_dy = _ui.line_dy(4 * fs, fs)
         self.rows = max(4, (bot_y - 4 * fs - self.list_y0) // self.row_h)
-        self.list_w = _MU_LIST_W * fs
+        self.list_w = max(_MU_LIST_W * fs, 12 * self.cell + 54 * fs)
         self.list_area = (self.list_x, self.list_y0, self.list_w,
                           self.rows * self.row_h)
         self.pad_x = self.list_x + self.list_w + 10 * fs
@@ -555,15 +560,16 @@ class MusicEditorUI:
             base_dim = self.ws.theme_colors["ink_dim"]
             sel_ink = self.ws.theme_colors["selection_ink"]
             tc = sel_ink if cur else base_ink
-            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, base_dim
+            ty = y + lay.row_dy
+            cv.print("%02d" % idx, x + 2 * fs, ty, base_dim
                      if not cur else sel_ink, 1)
             note = _mu_note_name(pitch)
             note_c = sel_ink if cur else self.ws.theme_colors["ink_note"]
-            cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
+            cv.print(note, x + 3 * lay.cell, ty, note_c if pitch >= 0 else
                      base_dim, 1)
-            cv.print(_MU_WAVE_LABELS[wave & 7], x + 64 * fs, y + 4 * fs, tc, 1)
+            cv.print(_MU_WAVE_LABELS[wave & 7], x + 8 * lay.cell, ty, tc, 1)
             # a little volume bar (0..7) -> up to 7 ticks
-            bx = x + 96 * fs
+            bx = x + 12 * lay.cell
             for v in range(7):
                 off = base_dim
                 col = NAMES["green"] if v < vol else off
@@ -599,10 +605,10 @@ class MusicEditorUI:
             else:
                 label = "SFX " + str(row)
             sel_ink = th["selection_ink"]
-            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs,
+            cv.print("%02d" % idx, x + 2 * fs, y + lay.row_dy,
                      th["ink_dim"]
                      if not cur else sel_ink, 1)
-            cv.print(label, x + 30 * fs, y + 4 * fs,
+            cv.print(label, x + 30 * lay.cell // 8, y + lay.row_dy,
                      sel_ink if cur else
                      th["ink"], 1)
 

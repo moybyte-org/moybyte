@@ -89,7 +89,7 @@ def test_the_rows_are_the_rulings_on_a_small_and_a_wide_page(tmp_path):
     wide = _open_appearance(_ws(tmp_path / "w", **DESK))
     assert wide.layout.wide                  # THEME is the grid above the rows
     assert wide._rows()[0] == "mode" and "theme" not in wide._rows()
-    assert "chrome" not in wide._rows()       # the P4's glass takes one scale
+    assert "chrome" in wide._rows()           # the P4's desk takes two sizes
     sim = _open_appearance(_ws(tmp_path / "b", sys_size=(1024, 600),
                                windowed=True))
     assert "chrome" in sim._rows()            # the simulator's desk takes two

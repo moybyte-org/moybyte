@@ -28,18 +28,16 @@ module lists differ by exactly those files, and by nothing else."""
 # ---------------------------------------------------------------------------
 
 [panel]
-# The GLASS, in inches -- the opt-in to the chrome tap-target floor (#203).
-# 1024x600 on 7.0" is ~170 PPI, so a 16px bar icon is 2.4mm and the floor
-# (`chrome.MIN_TAP_MM`, 4.5) answers chrome scale 2.
-#
-# The #203 note said declaring here was "only free while that board runs at
-# font scale 2", and this board runs at 1 (`FONT_SCALE`, owner call 2026-07-12:
-# the 7" panel fits CONTENT, not magnification) -- so it is NOT free, and the
-# owner made the call on 2026-09-06 anyway. It costs nothing but pixels here:
-# 1024px of width absorbs a 36px bar without dropping a single tab chip or a
-# Settings row, and the code editor's symbol keys -- this board's on-screen
-# keyboard until a BLE one is paired -- double. The T-Deck was declined on the
-# same day for the opposite arithmetic; its board.toml records why.
+# The GLASS, in inches -- the opt-in to the chrome tap-target floor (#203),
+# declared 2026-09-06, and what makes this board a DESK
+# (`layout_base.class_of`, docs/look_2026-10.md step 9): its chrome lays out
+# on the desk's metrics -- a 40px bar, 28px list rows, 44px title strips, the
+# handheld's 16px icons at 32 -- at chrome size 1 and font scale 1
+# (`FONT_SCALE`, owner call 2026-07-12: the 7" panel fits CONTENT, not
+# magnification). At ~170 PPI a 32px bar icon is 4.8mm, over the floor
+# (`chrome.MIN_TAP_MM`, 4.5), so CHROME SIZE offers 1 and 2. The T-Deck was
+# declined on 2026-09-06 for the opposite arithmetic; its board.toml records
+# why.
 diagonal_in = 7.0
 
 # ---------------------------------------------------------------------------

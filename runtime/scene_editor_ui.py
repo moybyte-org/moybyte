@@ -139,7 +139,7 @@ class SceneLayout(LayoutBase):
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + 2 * fs)
+        self.title_xy = (px + 6 * fs, py + _ui.line_dy(2 * fs, fs))
         row_y = p_bottom - 22 * fs
         rc_x = p_right - 106 * fs
         self.sv_x0 = px + 6 * fs
@@ -718,7 +718,8 @@ class SceneEditorUI:
             tag_text = "TAG " + (sel.get("tag") or "-")
         else:
             tag_text = "TAG -"
-        cv.print(tag_text[:14], tx + 4 * fs, ty + (th2 - 8 * fs) // 2,
+        cv.print(_ui.print_cut(tag_text, tw2 - 8 * fs, fs), tx + 4 * fs,
+                 ty + (th2 - _ui.font("ui")[2] * fs) // 2,
                  NAMES["white"], 1)
         cv.rectb(tx, ty, tw2, th2,
                  NAMES["white"] if self.tag_edit else

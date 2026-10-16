@@ -25,9 +25,9 @@ packs.
 """
 
 try:
-    from layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars as _bars
+    from layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bar_rows, bars as _bars
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars as _bars
+    from runtime.layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bar_rows, bars as _bars
 
 EDGES = ("top", "bottom", "left", "right")
 REQUIRED = ("menu", "zone", "close")
@@ -67,10 +67,11 @@ def _place(bars, w, h, cs, catalogue, edges, text_w, notes):
             kept.append(bar)
         else:
             notes.append("%s bar: not on this tier" % bar[0])
+    rows = bar_rows(cs)
     across_h = 0
     for bar in kept:
         if bar[0] in ("top", "bottom"):
-            across_h += bar[1] * cs
+            across_h += bar[1] * rows // BAR_ROWS
     across_w = 0
     placed = set()
     out = []
@@ -78,7 +79,7 @@ def _place(bars, w, h, cs, catalogue, edges, text_w, notes):
         edge, size = bar[0], bar[1]
         horiz = edge in ("top", "bottom")
         length = w if horiz else h - across_h
-        thick = size * cs
+        thick = size * rows // BAR_ROWS
         if not horiz:
             across_w += thick
         texts = list(bar[5])

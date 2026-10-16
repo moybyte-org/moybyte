@@ -583,6 +583,7 @@ void moy_input_ptr_init(moy_input_ptr_t *p, int32_t w, int32_t h, int32_t idle_m
     p->last_move = now;
     p->fresh = true;
     p->visible = true;
+    p->div = 1;
 }
 
 void moy_input_ptr_move(moy_input_ptr_t *p, int32_t dx, int32_t dy, uint32_t now) {
@@ -594,6 +595,10 @@ void moy_input_ptr_move(moy_input_ptr_t *p, int32_t dx, int32_t dy, uint32_t now
 }
 
 void moy_input_ptr_place(moy_input_ptr_t *p, int32_t x, int32_t y, uint32_t now) {
+    if (p->div > 1) {
+        x /= p->div;
+        y /= p->div;
+    }
     p->x = clamp(x, p->w - 1);
     p->y = clamp(y, p->h - 1);
     p->visible = false;

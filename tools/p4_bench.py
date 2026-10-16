@@ -13,6 +13,7 @@
 #   bench_painter    --painter: a surface's, a sprite's and a 9-slice's us per call
 #   bench_icons      --icons: the icon home beside the grid it is drawn from
 #   bench_backdrop   --backdrop: a theme's backdrop raster, and the home and desk over it
+#   bench_desk_scale  --desk-scale: the desk at render scale 1 and 2 (step 9)
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
@@ -114,6 +115,14 @@ rasters the switch made; then `home idle` and, on a desk, `desk idle` (both
 paint zero), and the home's drag, fling and held-key glide over the backdrop,
 which raster nothing. The live theme is put back and the package dropped.
 
+`--desk-scale` benches a desk at each render scale (docs/look_2026-10.md
+step 9, run at the phase gate on p4 and guition_p4): at the live theme
+(`render.scale` 1, the desk's native metrics) and under the package
+`bench-x2` (the live theme with `render.scale: 2`, the desk drawn at half
+size and doubled onto the glass), with Settings, Calc and Files open: `desk
+idle, three windows` (paints zero), `window drag (settings)`, and `files
+scroll` (Files on its projects rows, a drag up its list), each named with its
+scale. The live theme is put back and the package dropped.
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
 """
@@ -858,6 +867,62 @@ def bench_backdrop(b, out_path):
     return bench
 
 
+DESK_X2 = """
+import json
+ws._dx_was = (ws.look.theme_name, ws.look.theme_variant)
+ws._dx_rc = ws.look.install_theme(json.dumps({"format": 2, "name": "bench-x2",
+    "inherits": ws._dx_was[0], "look": {"render": {"scale": 2}}}).encode())
+"""
+
+
+def bench_desk_scale(b, out_path):
+    """The desk at render scale 1 and 2 (step 9): three windows idle, a
+    window drag and a Files scroll at each."""
+    bench = Bench(b)
+    print("\n=== the desk at render scale 1 and 2 ===")
+    pyexec(b, DESK_X2)
+    print("  install: %r" % (pyval(b, "ws._dx_rc"),))
+    for scale in (1, 2):
+        if scale == 2:
+            pyexec(b, "ws.look.set_theme('bench-x2', persist=False, "
+                      "variant=ws._dx_was[1])")
+        r = pyval(b, "ws.render_scale") or 1
+        tag = "%dx" % r
+        home(b)
+        pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
+                  "ws.open_app(ws._apps_by_id['calc'])\n"
+                  "ws.open_settings()")
+        b.drain(4.0)
+        bench.start(); b.drain(3.0); bench.stop("desk idle, three windows, " + tag)
+        bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
+        bench.stop("window drag (settings), " + tag)
+        pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
+                  "ws._apps_by_id['files']._enter_rows('projects')")
+        b.drain(2.0)
+        o = win_geom(b, "files")
+        rows = pyval(b, "ws.wm._wins['files'].ctx.app_layouts['files'].rows_view()"
+                        " if 'files' in ws.wm._wins and ws.wm._wins['files'].ctx "
+                        "else None")
+        if o and rows:
+            cx = (o[0] + rows[0] + rows[2] // 2) * r
+            y0 = (o[1] + rows[1] + rows[3] * 3 // 4) * r
+            y1 = (o[1] + rows[1] + rows[3] // 4) * r
+            bench.start()
+            b.swipe(cx, y0, cx, y1, frames=25); b.drain(1.5)
+            bench.stop("files scroll, " + tag)
+        else:
+            print("  %-34s (no Files rows on this image)" % ("files scroll, " + tag))
+    pyexec(b, "ws.look.set_theme(ws._dx_was[0], persist=False, variant=ws._dx_was[1])\n"
+              "ws.look.uninstall_theme()")
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
 def bench_all(b, out_path):
     bench = Bench(b)
     print("\n=== P4 panel benchmark (end-to-end frame ms) ===")
@@ -1484,13 +1549,16 @@ def main():
     ap.add_argument("--shadows", action="store_true",
                     help="a window drag under Moy's soft shadows at each drag "
                          "size, and the carousel's hero at rest and moving")
+    ap.add_argument("--desk-scale", action="store_true",
+                    help="the desk at render scale 1 and 2: three windows idle, "
+                         "a window drag, a Files scroll")
     ap.add_argument("--layout", default=None, metavar="BARS",
                     help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
     if args.store or not (args.repaint or args.popovers or args.kernel
                           or args.home or args.edit or args.sprites or args.painter
                           or args.icons or args.backdrop
-                          or args.shadows):
+                          or args.shadows or args.desk_scale):
         push_store_fixture(args)
     if args.sprites:
         push_sprite_fixture(args)
@@ -1499,7 +1567,7 @@ def main():
         if (not args.repaint and not args.kernel and not args.home
                 and not args.edit and not args.store and not args.sprites
                 and not args.painter and not args.icons and not args.backdrop
-                and not args.shadows
+                and not args.shadows and not args.desk_scale
                 and not b.attach_only):
             b.reset()               # an attach-only board is benched as found
         if args.layout:
@@ -1526,6 +1594,8 @@ def main():
             bench_backdrop(b, args.out)
         elif args.shadows:
             bench_shadows(b, args.out)
+        elif args.desk_scale:
+            bench_desk_scale(b, args.out)
         else:
             bench_all(b, args.out)
         if args.layout:

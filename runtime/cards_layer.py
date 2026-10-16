@@ -681,7 +681,7 @@ class CardsLayer:
             # Say why, and leave the ADVANCED row below as the way to the file.
             cv.print("MANIFEST BROKEN", lay.head_xy[0], lay.head_xy[1],
                      self._NAMES["red"], 2)
-            cv.print(broken[:(lay.card_w // (8 * lay.fs))],
+            cv.print(_ui.print_cut(broken, lay.card_w, lay.fs),
                      lay.card_x, lay.card_y0, t["text"], 1)
         else:
             cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
@@ -764,8 +764,9 @@ class CardsLayer:
                 colors=(NAMES["dark_grey"], NAMES["light_grey"], NAMES["red"]),
                 fs=fs)
         cv.print("!", x + 4 * fs, y + max(0, (h - 8 * fs) // 2), NAMES["red"], 2)
-        msg = ("%s: %s" % (label, row["error"]))[:32]
-        cv.print(msg, x + 20 * fs, y + max(0, (h - 8) // 2), NAMES["light_grey"], 1)
+        msg = _ui.print_cut("%s: %s" % (label, row["error"]), w - 24 * fs, fs)
+        cv.print(msg, x + 20 * fs, y + max(0, (h - _ui.font("ui")[2]) // 2),
+                 NAMES["light_grey"], 1)
 
     def _draw_gauge(self, row):
         # A slow->fast slider: a turtle at the low end, a rabbit at the high end,
@@ -1078,7 +1079,8 @@ class CardsLayer:
             _ui.row(cv, t, rect, name, kind="row_chrome", on=(k == f["sel"]),
                     edge=False, pad=6 * lay.fs, text_dy=1 * lay.fs, fs=lay.fs)
         if f["msg"]:
-            cv.print(f["msg"][:34], lay.card_x, lay.view_bottom - 8 * lay.fs,
+            cv.print(_ui.print_cut(f["msg"], lay.card_w, lay.fs), lay.card_x,
+                     lay.view_bottom - _ui.font("ui")[2] * lay.fs,
                      self._NAMES["red"], lay.fs)
 
     # -- the two dialogs: CART INFO (#94) and NEW SCRIPT (#89) ---------------
@@ -1245,13 +1247,14 @@ class CardsLayer:
         p = self.prompt
         (x, y, w, h), fields, ok_r, cancel_r = self._prompt_rects()
         _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print(p.title, x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
+        cv.print(p.title, x + 10 * fs, y + _ui.line_dy(8 * fs, fs), NAMES["white"], 1)
         for i, r in enumerate(fields):
             cv.print(p.labels[i], x + 12 * fs, r[1] - 9 * fs, NAMES["light_grey"], 1)
             _ui.text_field(cv, r, p.fields[i].text, p.hints[i])
             if i == p.field:
                 cv.rectb(r[0], r[1], r[2], r[3], NAMES["yellow"])
         if p.msg:
-            cv.print(p.msg[:34], x + 12 * fs, y + h - 38 * fs, NAMES["red"], 1)
+            cv.print(_ui.print_cut(p.msg, w - 24 * fs, fs), x + 12 * fs, y + h - 38 * fs,
+                     NAMES["red"], 1)
         _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
         _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])

@@ -220,11 +220,13 @@ reason, and its PSRAM outside the Python heap is the cart-runtime reserve
 
 ## 4. The model
 
-**A bar** has an `edge`, a `size` (logical pixels, multiplied by the chrome
-scale as every metric is, `docs/theming_2026-09.md` §4.2) and three slots.
-The 2026-10 look designs the P4 desk at a chrome scale of 1 with per-class
-metrics and a 40-pixel bar, 2 being a theme's choice (owner, 2026-10-15;
-`docs/look_2026-10.md` step 9 builds it).
+**A bar** has an `edge`, a `size` (in the handheld's rows: a bar `size` rows
+thick is `size / 18` of its metric class's bar, `layout_base.bar_rows`, so 18
+is 18 × the chrome scale on a handheld and 40 on a desk) and three slots.
+The 2026-10 look designs the P4 desk at chrome size 1 with per-class metrics
+and a 40-pixel bar, a theme's `render.scale: 2` drawing it on a half-size
+surface the glass doubles (owner, 2026-10-15; `docs/look_2026-10.md` step 9,
+landed 2026-10-16).
 Widgets in `left` pack from the bar's start, `right` from its end, `center`
 around its middle (polybar's `modules-left/center/right`, waybar's the same
 names; both open 2026-10-13). On a `left` or `right` bar the slots run top to
@@ -291,7 +293,7 @@ key (§15) and no `mode` key (§3: PLAY is the switch).
 |---|---|---|
 | `bars` | a list of bar objects | at most 4, at most one per edge; a second on the same edge is dropped and noted |
 | `bars[].edge` | `top`, `bottom`, `left`, `right` | required; an unknown edge drops the bar |
-| `bars[].size` | an integer, logical pixels | clamped to 16..32 (L13: the compact widgets' 16-pixel cells, an icon's margins, a taskbar of chips at 22 or so; the tap floor is the chrome scale's, #203, not the size's); absent is 18 |
+| `bars[].size` | an integer, the handheld's rows (§4) | clamped to 16..32 (L13: the compact widgets' 16-pixel cells, an icon's margins, a taskbar of chips at 22 or so; the tap floor is the chrome scale's, #203, not the size's); absent is 18 |
 | `bars[].left`, `center`, `right` | lists of catalogue names | at most 6 per slot, 12 per layout; an unknown name is dropped and noted; a widget placed twice keeps its first placement, except `text`, `spacer`, `separator` |
 | `bars[].text` | a string per `text` widget, by position | 1 to 24 characters of printable ASCII; longer is cut, empty is dropped |
 | `home` | `carousel`, `grid` or `icons` | absent or unknown is `carousel` (unknown noted); it rides the layout, which a package sets whole with its bars |

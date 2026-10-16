@@ -45,8 +45,11 @@ PANELS = (
      "wide that leaves the bar's lent zone too narrow for the tab ladder"),
     ("guition-s3", 480, 320, 3.5, 2, True,
      "touch-only 3.5in glass -- the board the floor exists for"),
-    ("p4", 1024, 600, 7.0, 2, True,
-     "declared 2026-09-06 over a shipped FONT_SCALE of 1: 1024px absorbs it"),
+    ("p4", 1024, 600, 7.0, 1, True,
+     "declared 2026-09-06; a desk since the 2026-10 look's step 9, whose "
+     "32px bar icons clear the floor at size 1"),
+    ("guition-p4", 1280, 800, 10.1, 1, True,
+     "declared 2026-09-06; a desk, as the P4"),
 )
 
 
@@ -54,15 +57,17 @@ PANELS = (
 def test_the_floor_is_the_millimetres_it_claims(name, w, h, diag, floor,
                                                 _declares, _why):
     """The derivation, checked against the physics rather than against itself:
-    a 16px icon at the answered scale clears MIN_TAP_MM, and one scale lower
-    does not (so the answer is the SMALLEST one that works, not merely one that
-    does)."""
+    the class's bar icon (16px times its unit) at the answered size clears
+    MIN_TAP_MM, and one size lower does not (so the answer is the SMALLEST one
+    that works, not merely one that does)."""
+    from runtime import layout_base
     got = chrome_scale_floor(w, h, diag)
     assert got == floor, name
+    icon = 16 * layout_base.CLASSES[layout_base.class_of(diag)]["unit"]
     mm_per_px = 25.4 * diag / ((w * w + h * h) ** 0.5)
-    assert 16 * got * mm_per_px >= chrome.MIN_TAP_MM
+    assert icon * got * mm_per_px >= chrome.MIN_TAP_MM
     if got > 1:
-        assert 16 * (got - 1) * mm_per_px < chrome.MIN_TAP_MM
+        assert icon * (got - 1) * mm_per_px < chrome.MIN_TAP_MM
 
 
 def test_a_board_that_declares_nothing_keeps_chrome_on_the_font_scale():
@@ -300,8 +305,8 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
 @pytest.mark.parametrize("w, floor, choices", [
     (320, 1, (1,)),          # T-Deck / handheld web tier: 2x would leave 160px
     (480, 2, (2,)),          # Guition S3: the floor already is the top
-    (1024, 2, (2,)),         # P4, declared 7"
-    (1280, 2, (2,)),         # Guition P4
+    (512, 1, (1, 2)),        # P4, declared 7": a desk, 1024px over its unit
+    (640, 1, (1, 2)),        # Guition P4, the same
     (1024, 1, (1, 2)),       # the browser's desk and the simulator: no glass
 ])
 def test_the_choices_are_what_the_panel_can_take(w, floor, choices):
@@ -329,8 +334,9 @@ def test_appearance_offers_chrome_size_only_where_there_is_a_choice(tmp_path):
     keys = _row_keys(desk)
     assert keys[keys.index("font") + 1] == "chrome"
     assert "chrome_scale" not in [r[0] for r in desk.settings_layer._settings_rows()]
+    p4 = _row_keys(_desk(tmp_path / "p4", panel_diagonal_in=7.0))
+    assert p4[p4.index("font") + 1] == "chrome"
     for name, kw in (("handheld", {"sys_size": None, "windowed": False}),
-                     ("p4", {"panel_diagonal_in": 7.0}),
                      ("guition_s3", {"sys_size": (480, 320), "windowed": False,
                                      "panel_diagonal_in": 3.5})):
         assert "chrome" not in _row_keys(_desk(tmp_path / name, **kw)), name
@@ -356,17 +362,31 @@ def test_a_stored_chrome_scale_it_did_not_write_reads_as_absent(tmp_path, stored
 
 
 def test_no_stored_choice_takes_chrome_under_the_floor_or_past_the_panel(tmp_path):
-    p4 = _desk(tmp_path / "p4", panel_diagonal_in=7.0)
-    p4.system.set("chrome_scale", 1)
-    p4 = _desk(tmp_path / "p4", panel_diagonal_in=7.0)
-    assert p4.layout.cs == 2
-    p4.look.set_chrome_scale(1, persist=False)
-    assert p4.layout.cs == 2
+    kw = {"sys_size": (480, 320), "windowed": False, "panel_diagonal_in": 3.5}
+    gs = _desk(tmp_path / "gs", **kw)
+    gs.system.set("chrome_scale", 1)
+    gs = _desk(tmp_path / "gs", **kw)
+    assert gs.layout.cs == 2
+    gs.look.set_chrome_scale(1, persist=False)
+    assert gs.layout.cs == 2
 
     hh = _desk(tmp_path / "hh", sys_size=None, windowed=False)
     hh.system.set("chrome_scale", 2)
     hh = _desk(tmp_path / "hh", sys_size=None, windowed=False)
     assert hh.look.chrome_scale == 0 and hh.layout.cs == 1
+
+
+def test_a_desk_lays_out_at_its_unit_and_steps_its_size(tmp_path):
+    """The P4's glass is a desk: size 1 by default, its handheld-sized parts
+    at the desk's unit of 2, its bar the desk's 40 rows; CHROME SIZE 2 doubles
+    the desk's metrics."""
+    p4 = _desk(tmp_path, panel_diagonal_in=7.0)
+    assert p4.metric_class == "desk" and p4.chrome_floor == 1
+    assert p4.look.chrome_size() == 1 and p4.layout.cs == 2
+    assert p4.layout.status_h == 40 and p4.layout.bar_icon == 32
+    _appearance(p4)._step("chrome", 1)
+    assert p4.look.chrome_size() == 2 and p4.layout.cs == 4
+    assert p4.layout.status_h == 80
 
 
 def test_switching_chrome_size_matches_booting_at_it(tmp_path):

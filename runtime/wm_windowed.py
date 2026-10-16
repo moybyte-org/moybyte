@@ -101,6 +101,12 @@ import time as _time                  # the bar clock's minute (localtime)
 _DRAG_MIN = 4                         # px of travel before a press becomes a drag
 
 
+# The desk's default OUTER sizes of the apps the 2026-10 look sizes to their
+# content (DESIGN.md "The sizes"; the `*desktop*` targets), in glass pixels
+# at chrome size 1. Every other window takes `_win_size`'s formulas.
+DESK_SIZES = {"files": (548, 534), "calc": (344, 488)}
+
+
 class _LayoutCtx:
     """A snapshot of every layout object the responsive surfaces read, plus the
     system canvas they draw on -- captured once per window (or for the root) and
@@ -752,8 +758,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._play_intent = intent if intent == "dev" else "play"
 
     def _win_size(self, key, full, fs):
-        """Default window OUTER size per window slot."""
-        th = 18 * fs
+        """Default window OUTER size per window slot: on a desk, the apps the
+        2026-10 look sizes to their content take that size (`DESK_SIZES`)."""
+        th = _layout_base.metric("title", fs)
+        if _layout_base.metric_class() == _layout_base.DESK and key in DESK_SIZES:
+            n = _layout_base.chrome_size(fs)
+            r = _layout_base.render_scale()
+            return (DESK_SIZES[key][0] * n // r, DESK_SIZES[key][1] * n // r)
         if key == "desktop":
             # A dev playtest (#178) is ONE size on every desktop: native cart
             # pixels. Deliberately not derived from the screen -- "PLAY from the
@@ -778,7 +789,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         full = self._root_canvas
         fs = self._fs()
         w, h = self._win_size(key, full, fs)
-        title_h = 18 * fs
+        title_h = _layout_base.metric("title", fs)
         dx, dy, dw, dh = self._desk_rect()
         # A default can exceed a small desktop (e.g. the fs-scaled Settings minimum
         # at font 2x on 600px) -- clamp so the whole window, grip included, fits

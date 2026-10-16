@@ -278,7 +278,9 @@ class BlockLayout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale,
                             chrome_scale=chrome_scale)
         fs = self.fs
-        self.cell = _FONT_W * fs
+        # A block's label cells: the print font's glyph box, never under 8.
+        self.cell = max(_FONT_W, _ui.font("ui")[1]) * fs
+        self.text_dy = _ui.line_dy(4 * fs, fs)
         # The hint + SAVE-status strip, then the outline. The _BLK_* rows count
         # from the canvas top past a top bar's 18 rows at the FONT scale, so
         # under a top bar drawn at a larger chrome scale the strip starts inside
@@ -286,7 +288,7 @@ class BlockLayout(LayoutBase):
         top = max(self.cy - _BAR_ROWS * self.cs, -_BAR_ROWS * fs)
         self.hint_y = top + _BLK_HINT_Y * fs
         self.status_x = self.cx + 198 * fs        # the SAVE-status text x (right side)
-        self.row_h = _BLK_ROW_H * fs
+        self.row_h = max(_BLK_ROW_H, _ui.font("ui")[2] + 8) * fs
         self.indent = _BLK_INDENT * fs
         self.x0 = self.cx + _BLK_X0 * fs
         self.y0 = top + _BLK_Y0 * fs
@@ -1715,7 +1717,8 @@ class BlockEditorUI:
             self._draw_grad_banner()
         else:
             if self.blk_status:
-                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y,
+                cv.print(_ui.print_cut(self.blk_status, 14 * lay.cell, lay.fs),
+                         lay.status_x, lay.hint_y,
                          th["author"], 1)
             elif be is not None and be.dirty:
                 cv.print("*", lay.status_x, lay.hint_y,
@@ -1734,8 +1737,8 @@ class BlockEditorUI:
             hint = None if self.blk_graduated else self._blk_hint()
             if hint:
                 # truncate to leave the right end for the status slot
-                hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
-                cv.print(hint[:hmax], lay.x0, lay.hint_y,
+                hw = max(8 * lay.cell, lay.status_x - lay.x0 - lay.cell)
+                cv.print(_ui.print_cut(hint, hw, lay.fs), lay.x0, lay.hint_y,
                          th["ink_dim"], 1)
         rows = be.rows
         for vi in range(lay.rows):
@@ -1796,8 +1799,8 @@ class BlockEditorUI:
         h = 11 * fs
         _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
         msg = "YOU LEVELED UP TO CODE!"
-        mmax = max(8, w // lay.cell - 1)
-        cv.print(msg[:mmax], x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
+        mw = max(8 * lay.cell, w - lay.cell)
+        cv.print(_ui.print_cut(msg, mw, fs), x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
 
     def _draw_blk_kbd(self):
         """Render whichever entry prompt is up: the number pad (kind == 'num') or the
@@ -1911,9 +1914,10 @@ class BlockEditorUI:
             c = NAMES["yellow"] if is_cursor else NAMES["dark_grey"]
             cv.rect(x + 2 * fs, y + rh // 2 - fs, 12 * fs, 2 * fs, c)
             if is_cursor:
-                cv.print("+ add a block", x + 16 * fs, y + 3 * fs, NAMES["light_grey"], 1)
+                cv.print("+ add a block", x + 16 * fs, y + _ui.line_dy(3 * fs, fs),
+                         NAMES["light_grey"], 1)
             else:
-                cv.print("+", x + 4 * fs, y + 3 * fs, c, 1)
+                cv.print("+", x + 4 * fs, y + _ui.line_dy(3 * fs, fs), c, 1)
             return
         b = row.block
         cat = self._blk_block_cat(b)
@@ -1937,7 +1941,7 @@ class BlockEditorUI:
         cv.rect(x, ty, tw, tht, fill)
         cv.rect(x, ty, tw, fs, NAMES["white"] if not is_cursor else NAMES["yellow"])
         cv.rect(x, ty + tht - fs, tw, fs, NAMES["black"])
-        cv.print(label[:(tw - 4 * fs) // cell], x + 3 * fs, y + 4 * fs,
+        cv.print(_ui.print_cut(label, tw - 4 * fs, fs), x + 3 * fs, y + lay.text_dy,
                  self._blk_ink(fill), 1)
         # rounded corners: knock the 4 corner pixels back to the background.
         for cx, cy in ((x, ty), (x + tw - fs, ty),

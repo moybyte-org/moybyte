@@ -11,10 +11,12 @@ try:
     from layers import Layer
     from widgets import _in, _ticks_ms
     import ui as _ui                  # desk icon label pills (ui.chip)
+    import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.widgets import _in, _ticks_ms
     from runtime import ui as _ui
+    from runtime import layout_base as _layout_base
 
 
 class _BackdropLayer(Layer):
@@ -210,12 +212,12 @@ class _BackdropLayer(Layer):
         ws = self.ws
         fs = ws.look.effective_font_scale()
         dx, dy, dw, dh = self.wm._desk_rect()
-        box = 40 * fs
+        box = _layout_base.metric("tile", fs)
         gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
         catalog = self._icon_catalog()
-        cell_h = 62 * fs
+        cell_h = _layout_base.metric("tile_cell", fs)
         x0 = dx + 14 * fs
-        y0 = dy + 12 * fs
+        y0 = dy + _layout_base.metric("tile_top", fs)
         bottom = dy + dh - 6 * fs
         # The pill must hold the longest catalog label or the chip clips it
         # (#174: a fixed 66*fs cell cut PROJECTS/STORYBOOK) -- but only as wide

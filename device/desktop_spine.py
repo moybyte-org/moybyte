@@ -171,7 +171,8 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
             g = vp() if vp is not None else None
             if g is None:
                 return False
-            ox, oy, scale = g
+            r = getattr(ws, "render_scale", 1)
+            ox, oy, scale = g[0] * r, g[1] * r, g[2] * r
             smooth = bool(getattr(type(sys_canvas), "_smooth", True))
             took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
         if took:

@@ -284,7 +284,9 @@ class BarLayer:
         ss = getattr(cv, "set_strips", None)
         if ss is None:
             return
-        ss(list(bar_rects_of(cv.w, cv.h, self.ws.layout.status_h, bars_in_force())))
+        r = getattr(self.ws, "render_scale", 1)
+        ss([(x * r, y * r, w * r, h * r) for x, y, w, h in
+            bar_rects_of(cv.w // r, cv.h // r, self.ws.layout.status_h, bars_in_force())])
 
     def _strip_moved(self, cv, x, y, w, h):
         """New pixels landed in (x, y, w, h) of the bar on `cv`: when that is

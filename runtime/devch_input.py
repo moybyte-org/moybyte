@@ -30,7 +30,8 @@ def tap(chan, ws, parts, line):
     elif len(parts) == 2:
         rect = getattr(ws.layout, parts[1] + "_btn", None)
         if rect:
-            r = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
+            k = getattr(ws, "render_scale", 1)  # the loop feeds glass pixels
+            r = ((rect[0] + rect[2] // 2) * k, (rect[1] + rect[3] // 2) * k)
     if r is None:
         print("REMOTE ? %s" % line)
         return
@@ -82,8 +83,9 @@ def drag(chan, ws, parts, line):
             step = max(1, int(parts[2]))  # px/frame amplitude scale
         except ValueError:
             pass
-    cx = win.x + 30
-    cy = win.y + max(6, win.title_h // 2)
+    r = getattr(ws, "render_scale", 1)          # the loop feeds glass pixels
+    cx = (win.x + 30) * r
+    cy = (win.y + max(6, win.title_h // 2)) * r
     if _loop is None:
         print("REMOTE drag: no kernel loop on this tier")
         return

@@ -72,11 +72,13 @@ to whoever called it.
   `BarLayer.handle_bar_tap` translates a tap into. Bars are global
   (docs/shell_layout_2026-10.md §7): `tests/test_content_rect.py` moves the bar
   to the bottom and fails a surface that stayed behind.
-- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, 18px ×
-  the CHROME scale — `chrome.Layout`'s `cs` (#203), which equals the font scale
-  unless a board declared a panel diagonal small enough that a 16px icon falls
-  under `chrome.MIN_TAP_MM` (which boards do is pinned in
-  `tests/test_board_toml.py`). RIGHT
+- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, its
+  metric class's bar (`layout_base.bar_rows`): 18px × the CHROME scale on a
+  handheld — `chrome.Layout`'s `cs` (#203), which equals the font scale unless
+  a board declared a panel diagonal small enough that a 16px icon falls under
+  `chrome.MIN_TAP_MM` (which boards do is pinned in `tests/test_board_toml.py`)
+  — and 40px on a desk (a declared glass of 5" or more, the P4s), whose `cs` is
+  its unit of 2 at chrome size 1 (docs/look_2026-10.md step 9). RIGHT
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
   the launcher root draws one only above its mode's floor -- console mode over a
   P4's parked desk). LEFT zone = LENT to the active app (`draw_zone`):

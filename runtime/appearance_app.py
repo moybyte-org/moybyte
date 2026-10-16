@@ -40,9 +40,9 @@ out.
 """
 
 try:
-    from layout_base import BAR_ROWS, content_of
+    from layout_base import bar_rows, content_of
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import BAR_ROWS, content_of
+    from runtime.layout_base import bar_rows, content_of
 
 try:
     from moy_store_base import BUILTIN_NS, builtin_name
@@ -146,7 +146,7 @@ class AppearanceLayout:
         cs = self.cs
         self.windowed = bool(windowed)
         self.cx, self.cy, self.cw, self.ch = content_of(
-            self.w, self.h, 0 if windowed else BAR_ROWS * cs)
+            self.w, self.h, 0 if windowed else bar_rows(cs))
         self.row_h = max(20 * fs, 13 * cs)
         self.strip_h = 12 * fs if self.cw < 480 * fs else 16 * fs
         self.pad = 4 * fs

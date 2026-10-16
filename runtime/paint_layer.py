@@ -157,7 +157,7 @@ class PaintLayout(LayoutBase):
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + 2 * fs)
+        self.title_xy = (px + 6 * fs, py + _ui.line_dy(2 * fs, fs))
         rc_x = p_right - 142 * fs                 # right column origin (base 170)
         row_y = p_bottom - 30 * fs                # CLOSE row (base 190; SAVE lived here too)
         toolh = 12 * fs                           # #90 tool row height (per row)
@@ -210,7 +210,7 @@ class PaintLayout(LayoutBase):
             row1_y = row2_y - toolh - 1 * fs
             tool_span = (p_right - 6 * fs) - self.pg_x0
             self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
-        self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
+        self.status_w = max(4 * 8 * fs, self.close_btn[0] - self.status_xy[0])
         cw1 = max(10 * fs, tool_span // len(_TOOL_ROW1))
         cw2 = max(10 * fs, tool_span // len(_TOOL_ROW2))
         self.tool_btns = (
@@ -719,7 +719,7 @@ class PaintLayer:
             if fbtn is not None:             # export the sheet to files/sprites/ (#108)
                 ws._btn("FILE", fbtn, NAMES["dark_blue"], cv)
         if ws.paint_status:
-            cv.print(ws.paint_status[:lay.status_maxc],
+            cv.print(_ui.print_cut(ws.paint_status, lay.status_w, lay.fs),
                      lay.status_xy[0], lay.status_xy[1],
                      th["author"], 1)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)

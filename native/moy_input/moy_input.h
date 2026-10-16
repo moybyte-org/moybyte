@@ -118,6 +118,7 @@ typedef struct {
     bool hovers;            // the source reports a position with nothing held
     bool fresh;             // this frame's sample came from the hardware
     bool visible;
+    int32_t div;            // glass pixels per surface pixel: a placed position is divided by it
 } moy_input_ptr_t;
 
 moy_input_t *moy_input_new(uint8_t nbuttons);

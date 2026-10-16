@@ -77,9 +77,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
+    from runtime.layout_base import (CLASSES as _LB_CLASSES, class_of as _lb_class_of,
+                                     bar_rows as _bar_rows)
 
 
 try:                                    # device: ticks is frozen flat
@@ -178,8 +181,10 @@ MIN_TAP_MM = 4.5
 
 
 def chrome_scale_floor(w, h, diagonal_in=None):
-    """The smallest chrome scale that keeps a `_BAR_ICON`-px icon at least
-    MIN_TAP_MM wide on a `diagonal_in`-inch panel of `w` x `h` pixels.
+    """The smallest chrome SIZE that keeps a bar icon at least MIN_TAP_MM wide
+    on a `diagonal_in`-inch panel of `w` x `h` pixels: a `_BAR_ICON`-px icon
+    times the unit of the panel's metric class (`layout_base.class_of`), so
+    the desk's 32-pixel icons are what is measured there.
 
     1 when no diagonal is declared, which is the OPT-IN: a panel's physical size
     is a board fact that nothing else in the tree knows, so a board that does not
@@ -188,12 +193,14 @@ def chrome_scale_floor(w, h, diagonal_in=None):
 
       Guition S3   3.5" 480x320, DECLARED -- the board the floor exists for.
                    FONT_SCALE 2 was built, shipped and reverted first (#202).
+                   A handheld: its floor is 2.
       Guition P4  10.1" 1280x800, DECLARED 2026-09-06 from the desk: 2.7mm icons
-                   on touch-only glass, "too tiny", never "hard to read".
-      P4           7.0" 1024x600, DECLARED 2026-09-06. This one is NOT free --
-                   its FONT_SCALE ships at 1, so the floor really doubles its
-                   chrome -- but 1024px of width absorbs a 36px bar without
-                   dropping a control, and its symbol keys are its keyboard.
+                   on touch-only glass, "too tiny", never "hard to read". A
+                   desk: its 32-pixel icons clear the floor at 1.
+      P4           7.0" 1024x600, DECLARED 2026-09-06. A desk, floor 1, as the
+                   Guition P4: the desk metrics are what lifted it from the
+                   2 it answered on the handheld's 16-pixel icons (the 2026-10
+                   look, step 9).
       T-Deck       2.8" 320x240, DECLINED 2026-09-06 -- built, rendered, declined
                    on the pictures. Its floor is 2 as well, and at 320px wide
                    that leaves the bar's lent zone too narrow for the Editor's
@@ -207,7 +214,8 @@ def chrome_scale_floor(w, h, diagonal_in=None):
     diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5
     if diag_px <= 0:
         return 1
-    icon_mm = _BAR_ICON * 25.4 * float(diagonal_in) / diag_px
+    icon = _BAR_ICON * _LB_CLASSES[_lb_class_of(diagonal_in)]["unit"]
+    icon_mm = icon * 25.4 * float(diagonal_in) / diag_px
     if icon_mm <= 0:
         return 1
     need = MIN_TAP_MM / icon_mm
@@ -292,7 +300,7 @@ class Layout(LayoutBase):
         # -- status strip (its rows scale with the CHROME scale; where it sits
         # is the content rect's business: everything below lays out in
         # cx/cy/cw/ch, never under the bar) ------------------------------------
-        self.status_h = _STATUS_H * cs
+        self.status_h = _bar_rows(cs)
         bottom = self.cy + self.ch
         # The bar's clock/title print at a hand-tuned y=3 inside an fs-tall bar;
         # this re-centers that band when the bar is taller than the font asked for.
