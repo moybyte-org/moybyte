@@ -144,6 +144,10 @@ def _first_use(attr, build):
 # (perf_sample/perf_breakdown/...) is the Workstation's, in console_perf.py (the
 # device diag's measurement contract). Same bare-or-package fallback as above.
 try:
+    import iconsets as _iconsets
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import iconsets as _iconsets
+try:
     from perf_hud import PerfHud
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.perf_hud import PerfHud
@@ -1065,6 +1069,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # shared draw toolkit) and stays here; the SHEET itself is the look's
         # (`ws.look.icon_sheet`), and `look.set_icon_sheet` clears this.
         self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
+        self._icon_spec = None        # the live theme's icon set (icon_spec)
+        self._icon_spec_gen = -1
         # The unified top bar (#46) is its own surface now (BarLayer, Phase 2
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
@@ -4428,6 +4434,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         sheet's untouched pixels are 0: invisible on the black bar, a black plate
         anywhere else. tile_image memoises per (slot, transparent), so this shares
         the sheet's own cache."""
+        sp = self.icon_spec()
+        if sp is not None and sp[0] == "pixel":
+            img = _iconsets.pixel_image(kind, sp[2])
+            if img is not None:
+                return img
         sheet = self.look.icon_sheet
         if sheet is None:
             return None
@@ -4436,9 +4447,33 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return None
         return sheet.tile_image(slot, transparent=0)
 
-    def _icon(self, kind, x, y, cv=None, scale=None):
-        """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
-        themeable replacement for _glyph on the bar; falls back to _glyph (the 12x12
+    def icon_spec(self):
+        """The live theme's icon set, (kind, set, swap), or None where it
+        names none (runtime/iconsets.py); read once per look change."""
+        look = self.look
+        gen = look.look_gen
+        if self._icon_spec_gen != gen:
+            live = look.live
+            self._icon_spec = _iconsets.spec(live.look) if live is not None else None
+            self._icon_spec_gen = gen
+            _iconsets.use_parts(self._icon_spec)
+        return self._icon_spec
+
+    def draw_icon(self, kind, rect, ink, cv=None):
+        """Draw icon `kind` of the live theme's icon set centred in `rect` in
+        colour index `ink` (a glyph_draw for ui.button and ui.tab). False,
+        drawing nothing, where the theme names no set or its set has no such
+        icon on this image."""
+        sp = self.icon_spec()
+        if sp is None:
+            return False
+        return _iconsets.draw(cv if cv is not None else self.sys_canvas, kind, rect, ink, sp)
+
+    def _icon(self, kind, x, y, cv=None, scale=None, ink=None):
+        """Draw the top-bar icon `kind` at (x, y), in a 16px box at the scale:
+        from the live theme's icon set in `ink` (default `chrome_ink`) where it
+        names one (draw_icon), else a 16x16 sprite of the bar's IconSheet. The
+        sheet's is the themeable replacement for _glyph on the bar; falls back to _glyph (the 12x12
         bitmap, centered) when the icon sheet/slot is missing, so the bar never crashes
         on a half-wired theme. cv defaults to the system canvas (the bar lives there);
         the running-cart bar passes the game canvas explicitly. The icon scales with
@@ -4450,6 +4485,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         fs = int(scale) if scale else getattr(cv, "font_scale", 1)
         if fs < 1:
             fs = 1
+        box = _BAR_ICON * fs
+        if self.icon_spec() is not None and _iconsets.draw(
+                cv, kind, (x, y, box, box),
+                self.theme_colors.get("chrome_ink", 7) if ink is None else ink,
+                self._icon_spec):
+            return
         img = self._bar_image(kind)
         if img is not None:
             cv.spr(img, x, y, fs)                        # 16px art upscaled by that scale

@@ -7,10 +7,15 @@ base, light) of the 16-colour base palette. The rules:
   light tone, its bottom and right edge pixels its shade, the rest its base
   (a part marked flat, too thin to shade, keeps its base);
 - one outline: palette 1 (dark blue) on every pixel 4-adjacent to the
-  silhouette, never black, because index 0 is transparent in an IconSheet;
+  silhouette;
 - details (a door, a page's lines, a slash) are drawn after shading, inside
   the silhouette, and get no outline;
 - content sits in rows and columns 1-14, so the outline fits in 16.
+
+Moy is hand-drawn: the canonical Moy (docs/visual_identity_v1.md §6.5),
+outlined in index 0. The sheet's clear pixel is CLEAR (16, a `.` in the
+file under its `clear 16` header), so index 0 draws black. Redo is undo's
+mirror.
 
 Palette slots are roles, so a theme recolours an icon with a palette swap:
 1 outline, 5/6/7 the grey ramp, 12/13 the blue ramp, 11/3 green, 10/9 yellow,
@@ -19,6 +24,7 @@ Palette slots are roles, so a theme recolours an icon with a palette swap:
 from PIL import Image, ImageDraw
 
 OUTLINE = 1
+CLEAR = 16
 RAMPS = {
     "grey": (5, 6, 7), "paper": (6, 7, 7), "blue": (13, 12, 6), "green": (3, 11, 10),
     "yellow": (9, 10, 7), "red": (2, 8, 14), "orange": (4, 9, 10), "lav": (2, 13, 6),
@@ -54,7 +60,7 @@ def _mask(op):
 
 def build(parts):
     """parts: [(op, ramp | palette index, flags)], flags: 'flat', 'cut', 'detail'."""
-    pix = [[0] * 16 for _ in range(16)]
+    pix = [[CLEAR] * 16 for _ in range(16)]
     solid = [[False] * 16 for _ in range(16)]
     for op, colour, *fl in parts:
         flags = fl[0] if fl else ""
@@ -64,7 +70,7 @@ def build(parts):
             for y in range(16):
                 for x in range(16):
                     if own[y][x]:
-                        pix[y][x], solid[y][x] = 0, False
+                        pix[y][x], solid[y][x] = CLEAR, False
             continue
         if "detail" in flags:
             for y in range(16):
@@ -102,28 +108,17 @@ def build(parts):
     return out
 
 
-def hand(rows, key):
-    return [[key.get(ch, 0) for ch in r.ljust(16, ".")[:16]] for r in rows]
+def hand(rows):
+    """Rows of 16 hex digits, `.` the clear pixel."""
+    return [[CLEAR if ch == "." else int(ch, 16) for ch in r.ljust(16, ".")[:16]] for r in rows]
 
 
 MOY = hand([
-    ".OOOOOOOO.......",
-    "OLLLBBBBBO......",
-    "OLBBBBBBBO......",
-    "OBBBBBBBBBOOOOO.",
-    "OBBBBBBBBBBBBBBO",
-    "OBBWWBWWBBBBBBSO",
-    "OBBWPBWPBBBBBBSO",
-    "OBBBBBBBBBBBBBSO",
-    "OBBPBBBPBBBBBBSO",
-    "OBBBPPPBBBBBBBSO",
-    "OBBBBBBBBBBBBBSO",
-    "OFFFFFFFFFFFFFFO",
-    ".OFFFFFFFFFFFFO.",
-    ".OFFFO....OFFFO.",
-    "..OOO......OOO..",
-    "................",
-], {"O": 1, "L": 6, "B": 13, "S": 2, "W": 7, "P": 1, "F": 2})
+    "................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
+    ".0dddddddd0.....", ".0dddddddd0000..", ".0dd77d77ddddd0.", ".0dd70d70ddddd0.",
+    ".0dddddddddddd0.", ".0dd0ddd0ddddd0.", ".0ddd000dddddd0.", ".0dddddddddddd0.",
+    ".0dddddddddddd0.", "..022222222220..", "..02220002220...", "...000...000....",
+])
 
 
 def chev(pts):
@@ -205,8 +200,6 @@ ICONS = {
               (("ell", (10, 3, 13, 6)), 10, "detail"), (("rect", (4, 9, 2, 3)), 8, "detail")],
     "undo": [(("line", ([(5, 6), (10, 6), (13, 9), (10, 12), (7, 12)], 2)), "blue", "flat"),
              (("poly", [(1, 6), (5, 2), (5, 10)]), "blue", "flat")],
-    "redo": [(("line", ([(10, 6), (5, 6), (2, 9), (5, 12), (8, 12)], 2)), "blue", "flat"),
-             (("poly", [(14, 6), (10, 2), (10, 10)]), "blue", "flat")],
     "run": PLAY,
     "save": [(("poly", [(1, 1), (12, 1), (14, 3), (14, 14), (1, 14)]), "blue"),
              (("rect", (4, 1, 7, 5)), "grey"), (("rect", (8, 2, 2, 3)), 5, "detail"),
@@ -261,6 +254,8 @@ ICONS = {
 
 
 def icon(slot):
+    if slot == "redo":
+        return [row[::-1] for row in icon("undo")]
     spec = ICONS[slot]
     return spec if isinstance(spec[0], list) else build(spec)
 
@@ -269,19 +264,21 @@ def image(pix, pal, scale=1):
     im = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
     for y, row in enumerate(pix):
         for x, c in enumerate(row):
-            if c:
+            if c != CLEAR:
                 im.putpixel((x, y), pal[c] + (255,))
     return im.resize((16 * scale, 16 * scale), Image.NEAREST) if scale != 1 else im
 
 
 def moygfx(slots, cols=8):
-    """The IconSheet's .moygfx: h lines of w hex nibbles, 16x16 tiles, row-major."""
+    """The IconSheet's .moygfx: a `clear 16` header, then h lines of w hex
+    nibbles, `.` the clear pixel, 16x16 tiles, row-major."""
     rows = -(-len(slots) // cols)
     w, h = cols * 16, rows * 16
-    grid = [[0] * w for _ in range(h)]
+    grid = [[CLEAR] * w for _ in range(h)]
     for n, slot in enumerate(slots):
         tx, ty = (n % cols) * 16, (n // cols) * 16
         for y, row in enumerate(icon(slot)):
             for x, c in enumerate(row):
-                grid[ty + y][tx + x] = c & 15
-    return "\n".join("".join("%x" % c for c in row) for row in grid) + "\n", cols, rows
+                grid[ty + y][tx + x] = c
+    body = "\n".join("".join("." if c == CLEAR else "%x" % c for c in row) for row in grid)
+    return "clear %d\n" % CLEAR + body + "\n", cols, rows

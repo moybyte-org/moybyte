@@ -1082,6 +1082,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  \"look\": {\012"
     "    \"focus\": { \"style\": \"edge\", \"card\": \"lift\", \"small\": \"underline\" },\012"
     "    \"current\": { \"style\": \"plate\" },\012"
+    "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
     "    \"dark\": {\012"
     "      \"focus\": { \"lift\": { \"rim\": [\"#b6a8f7\", 0.6] } },\012"
     "      \"shadow\": [\"soft\", \"#000000\", 0.55, 14, 6], \"dim_neighbours\": 0.3,\012"
@@ -1116,7 +1117,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3111};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3164};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1495,8 +1496,9 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // keycap.ink
     {MOY_THEME_LK_INT, 0, 99, 4},  // keycap.r
     {MOY_THEME_LK_BOOL, 0, 1, 0},  // keycap.bevel
-    {MOY_THEME_LK_ENUM, 118, 2, 0},  // icons.kind
+    {MOY_THEME_LK_ENUM, 118, 2, INT32_MIN},  // icons.kind
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.set
+    {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.swap
 };
 
 const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
@@ -1677,6 +1679,7 @@ const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
     "keycap.bevel",
     "icons.kind",
     "icons.set",
+    "icons.swap",
 };
 
 const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2] = {
@@ -1829,6 +1832,7 @@ const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
     {"keycap.bevel", MOY_THEME_FT_BOOL, 1, 174},
     {"icons.kind", MOY_THEME_FT_ENUM, 1, 175},
     {"icons.set", MOY_THEME_FT_TEXT, 1, 176},
+    {"icons.swap", MOY_THEME_FT_TEXT, 1, 177},
 };
 
 const moy_theme_field_t moy_theme_btn_fields[7] = {
@@ -1998,10 +2002,6 @@ const char *const moy_theme_btn_kinds[MOY_THEME_BTN_KINDS] = {
     "tonal",
     "danger",
     "toggle",
-};
-
-const char *const moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED] = {
-    "icons.swap",
 };
 
 const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES] = {

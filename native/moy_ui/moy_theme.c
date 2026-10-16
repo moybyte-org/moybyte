@@ -1137,9 +1137,6 @@ static int look_key(rd_t *r, const char *key, int over, void *ctx) {
         }
         return keys(r, c, bd_key);
     }
-    if (find_name(moy_theme_look_accepted, MOY_THEME_LOOK_ACCEPTED, path) >= 0) {
-        return skip_note(r, pkg, 0);
-    }
     if (is_group(path)) {
         if (!eat(r, '{')) {
             return skip_note(r, pkg, MOY_THEME_N_DROPPED);
@@ -2468,6 +2465,23 @@ static int sheet_walk(const uint8_t *src, size_t n, int rows_max, int *rows, uin
         return MOY_THEME_BIG;
     }
     const uint8_t *p = src, *end = src + n;
+    // An icon sheet may open with `clear N`, its clear pixel (0..16), which
+    // its rows write as `.`; a row's `.` reads as slot 0 here.
+    if (n >= 6 && memcmp(src, "clear ", 6) == 0) {
+        const uint8_t *q = src + 6;
+        int v = 0, digits = 0;
+        while (q < end && *q >= '0' && *q <= '9' && digits < 3) {
+            v = v * 10 + (*q++ - '0');
+            digits++;
+        }
+        while (q < end && sheet_space(*q)) {
+            q++;
+        }
+        if (digits == 0 || v > 16 || (q < end && *q != '\n')) {
+            return MOY_THEME_SYNTAX;
+        }
+        p = q < end ? q + 1 : q;
+    }
     int y = 0;
     while (p < end) {
         const uint8_t *e = p;
@@ -2490,7 +2504,7 @@ static int sheet_walk(const uint8_t *src, size_t n, int rows_max, int *rows, uin
             }
             uint8_t *out = row != NULL && y < keep ? row + (size_t)y * MOY_THEME_SHEET_W : NULL;
             for (const uint8_t *q = a; q < b; q++) {
-                int v = nibble(*q);
+                int v = *q == '.' ? 0 : nibble(*q);
                 if (v < 0) {
                     return MOY_THEME_SYNTAX;
                 }

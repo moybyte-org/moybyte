@@ -28,6 +28,9 @@ _TITLES = {"menu": "EDITOR", "projects": "PROJECTS",
 # The title icon of a window no app cart draws (`_win_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
                 "update": "get", "desktop": "run"}
+# ...and the slot of an icon set (runtime/iconsets.py) each draws.
+_ICON_SLOTS = {"menu": "code", "projects": "projects", "settings": "settings",
+               "update": "getcarts", "desktop": "run"}
 # A look chip's room beside its label: the 12-pixel margin, the 18-pixel icon
 # and 8 to the label, 24 after it (the 2026-10 look's desk bar).
 _CHIP_PAD = 18 + 8 + 24
@@ -72,6 +75,7 @@ class WindowChrome:
             self._win_grip(win, focused)
             return
         win._chrome_streak += 1
+        self.ws.icon_spec()               # the look's icon set, for the title buttons
         _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
                   win.title_h, self._win_title(win), focused, win.kind != "desktop",
                   self._fs())
@@ -82,7 +86,8 @@ class WindowChrome:
 
     def _win_icon(self, win, slot, focused):
         """The window's icon in the slot its frame leaves left of the title:
-        its app cart's icon at the largest whole scale that fits, else the kind's glyph in the title's ink."""
+        its app cart's icon at the largest whole scale that fits, else the kind's
+        icon of the theme's icon set, else its glyph, in the title's ink."""
         ws = self.ws
         sc = self._root_canvas
         x, y, w, h = slot
@@ -93,7 +98,8 @@ class WindowChrome:
             sc.spr(img, x + (w - iw * s) // 2, y + (h - iw * s) // 2, s)
             return
         ink = ws.theme_colors["chrome_ink" if focused else "chrome_ink_dim"]
-        ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+        if not ws.draw_icon(_ICON_SLOTS.get(win.kind, "app"), slot, ink, sc):
+            ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
 
     def _win_icon_img(self, win):
         """The icon sheet of the app cart `win` runs, found once per window."""

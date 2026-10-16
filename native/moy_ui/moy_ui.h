@@ -218,6 +218,20 @@ int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look);
 // A glyph through a sink (moy_ui_glyph_draw's raster, a fill per span).
 int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h, int ci,
                       int scale);
+// The live theme's icon set for the parts the C draws (docs/look_2026-10.md
+// step 16): its mask files at 16 and 24 px (0 where it has none, the whole
+// set off when both are) and the glyph codes of close, maximize and
+// minimize, by MOY_UI_FB_*. runtime/iconsets.py installs it at a look change.
+void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
+// Title button `id`'s icon, the set's largest mask that box `b` holds,
+// centred, in RGB565 `col`: 1 when drawn, 0 where no set is installed or
+// its font is gone (the caller draws its glyph).
+int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col);
+// An icon mask through a sink (docs/look_2026-10.md step 16): glyph `code` of
+// font `font` (an icon set's file, tools/make_icons.py) at (x, y), the top
+// left of its square, blended in colour index `ci` at scale 1. MOY_UI_BAD
+// for a font that is not loaded.
+int moy_ui_sink_mask(const moy_ui_sink_t *s, uint32_t font, int code, int x, int y, int ci);
 // Every primitive counts its entry: the gate's "one crossing per widget".
 void moy_ui_count_call(void);
 uint32_t moy_ui_calls(void);

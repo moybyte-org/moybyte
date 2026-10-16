@@ -209,13 +209,13 @@ during motion; 32–75 KB of covers, which the Player's fit check must be
 able to release on the T-Deck.
 
 **18. Icon sets.** A theme's `icons` is `{kind, set}`; every set fills the
-same 55 slots (`icons/pixel/slots.txt`).
+same 55 slots (`native/moy_ui/icons/pixel/slots.txt`).
 
-- **Pixel:** a 16×16 `IconSheet` (`icons/pixel/system_icons.moygfx`, drawn
-  by `icons/pixel/pixel_icons.py`), editable in the sprite editor as today.
+- **Pixel:** a 16×16 `IconSheet` (`native/moy_ui/icons/pixel/system_icons.moygfx`, drawn
+  by `native/moy_ui/icons/pixel/pixel_icons.py`), editable in the sprite editor as today.
   Its palette indices are roles, so a theme recolours it with a swap (Bench
   takes the blue ramp down a step on its white bar).
-- **Smooth:** 24-unit SVG sources (`icons/smooth/<set>/`, a `.fill` layer
+- **Smooth:** 24-unit SVG sources (`native/moy_ui/icons/smooth/<set>/`, a `.fill` layer
   where a set has two) rasterised on the host at the sizes in use into 2 bpp
   (16 px and under) and 4 bpp masks in an MFNT version 2 file (about 20 KB a
   set), tinted by roles at draw time. A theme package carries its sources,

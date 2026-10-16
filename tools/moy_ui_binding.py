@@ -185,6 +185,8 @@ DEFAULT, FROM_STYLE = -32768, -2
 _DRAW_SIGS = (
     ("moy_ui_sink_row", [c.POINTER(_Sink), c.c_uint32, _I], _I),
     ("moy_ui_sink_glyph", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
+    ("moy_ui_sink_mask", [c.POINTER(_Sink), c.c_uint32, _I, _I, _I, _I], _I),
+    ("moy_ui_icons_use", [c.c_uint32, c.c_uint32, c.POINTER(c.c_uint8 * 3)], None),
     ("moy_ui_calls", [], c.c_uint32),
     ("moy_ui_row", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Row), _I], _I),
     ("moy_ui_cell", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Cell), _I,
@@ -444,6 +446,15 @@ def binding():
         b = box_of(rect)
         _check(lib.moy_ui_sink_glyph(c.byref(s), int(g), b.x, b.y, b.w, b.h, int(ci),
                                      fs_or(scale, s)))
+
+    def icons_use(f16, f24, close, maximize, minimize):
+        codes = (c.c_uint8 * 3)(int(close), int(maximize), int(minimize))
+        lib.moy_ui_icons_use(int(f16), int(f24), c.byref(codes))
+
+    def icon_mask(cv, font, code, x, y, ci):
+        s = sink(cv, None)
+        _check(lib.moy_ui_sink_mask(c.byref(s), int(font), int(code), int(x), int(y),
+                                    int(ci)))
 
     def row(cv, look, rect, kind, flags, interact, label, value, glyph_, glyph_size,
             glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs, colors, phase):
@@ -917,6 +928,8 @@ def binding():
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
+    m.icon_mask = icon_mask
+    m.icons_use = icons_use
     m.glyph = glyph
 
     def s(name):

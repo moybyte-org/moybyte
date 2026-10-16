@@ -9,6 +9,9 @@ with neither (the browser) carries none.
 
   names() -> (name, ...)   the faces this image carries
   file(name) -> bytes | None   NAME.fnt, or NAME.txt its family's licence
+  icon_file(name) -> bytes | None   an icon set's file (tools/make_icons.py):
+                           SET[.fill]-SIZE.fnt, system_icons.moygfx, and on
+                           the host set.json; the image's are its tier's
 """
 
 try:
@@ -17,6 +20,7 @@ except ImportError:
     _data = None
 
 _DIR = None
+_ICON_DIR = None
 
 
 def _host_dir():
@@ -58,3 +62,28 @@ def file(name):
         return _data.FACES[stem]
     with open(_host_dir() + "/" + stem + ext, "rb") as f:
         return f.read()
+
+
+def _icon_dir():
+    global _ICON_DIR
+    if _ICON_DIR is None:
+        d = _host_dir()
+        _ICON_DIR = d[:-len("fonts")] + "icons" if d else ""
+    return _ICON_DIR
+
+
+def icon_file(name):
+    if type(name) is not str or "/" in name:
+        return None
+    if _data is not None:
+        return getattr(_data, "ICONS", {}).get(name)
+    d = _icon_dir()
+    if not d:
+        return None
+    if name == "system_icons.moygfx":
+        name = "pixel/" + name
+    try:
+        with open(d + "/" + name, "rb") as f:
+            return f.read()
+    except OSError:
+        return None

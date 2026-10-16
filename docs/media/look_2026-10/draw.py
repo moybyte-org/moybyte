@@ -6,8 +6,8 @@ desk, the Calc sheet, the type specimen); `rounds/round7.py` to
 `rounds/round11.py` are layered over it in order, each patching the one
 before, and draw the icon sets, the editors, the system and pause menus,
 Settings, Appearance, the handheld Calc, the console home, the wallpaper
-scenes and the sheets. The SVG sources go to `icons/smooth/`, the pixel set's
-IconSheet to `icons/pixel/`.
+scenes and the sheets. The icon sets' sources live in native/moy_ui/icons/
+(tools/make_icons.py builds the shipped masks from them).
 
   pip install resvg-py==0.5.0   # the SVG rasteriser, into any path
   .venv/bin/python docs/media/look_2026-10/draw.py

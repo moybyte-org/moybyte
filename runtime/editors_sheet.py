@@ -50,10 +50,11 @@ _NIBBLES = [bytes((_b >> 4, _b & 15)) for _b in range(256)]
 # nibbles per byte are exactly what hex text is, on both sides.
 
 
-def _fill_hex_grid(pix, w, h, text):
+def _fill_hex_grid(pix, w, h, text, clear=0):
     """Decode a flat .moygfx hex grid into `pix` (a w*h bytearray of palette
     indices), for both from_hex classmethods -- a module-level function, not a
-    shared classmethod, because MicroPython has no __func__ rebinding.
+    shared classmethod, because MicroPython has no __func__ rebinding. A `.`
+    is the sheet's clear pixel, `clear`.
 
     A short blob lands in the TOP rows with tile ids unchanged and the rest
     stays blank, which is what every pre-512 cart and every PICO-8 import
@@ -65,6 +66,18 @@ def _fill_hex_grid(pix, w, h, text):
             continue
         if y >= h:
             break
+        if "." in line and len(line.split()) == 1:
+            n = min(w, len(line))
+            base = y * w
+            row = bytearray(n)
+            _fill_hex_grid(row, n, 1, line[:n].replace(".", "0"))
+            pix[base:base + n] = row
+            i = line.find(".")
+            while 0 <= i < n:
+                pix[base + i] = clear
+                i = line.find(".", i + 1)
+            y += 1
+            continue
         n = min(w, len(line))
         # Fast path: a whole line in one C call, declining anything the
         # per-pixel path below would read differently -- a line wider than the
@@ -403,19 +416,51 @@ class IconSheet(SpriteSheet):
 
     TILE = 16
 
-    def __init__(self, cols=8, rows=4, pix=None, spec=False):
+    def __init__(self, cols=8, rows=4, pix=None, spec=False, clear=0):
         # `spec` defaults FALSE here and is still forwarded: an icon sheet is never
         # a cart sheet, but a caller who insists on spec=True should hear the same
         # ValueError everyone else does rather than have it quietly swallowed.
         SpriteSheet.__init__(self, cols, rows, pix, spec)
+        # The clear pixel: 0 (every sheet without a header), or 16, past the
+        # palette, for a sheet whose art draws index 0 (the pixel set's Moy is
+        # outlined in it). Its file says so in a `clear 16` first line and
+        # writes the clear pixel as `.`.
+        self.clear = clear
+        if clear and pix is None:
+            self.pix = bytearray(bytes((clear,)) * (self.w * self.h))
+
+    def pset(self, x, y, c):
+        if c == self.clear and 0 <= x < self.w and 0 <= y < self.h:
+            self.pix[y * self.w + x] = c
+            self.dirty = True
+            self.gen += 1
+            return
+        SpriteSheet.pset(self, x, y, c)
+
+    def to_hex(self):
+        if not self.clear:
+            return SpriteSheet.to_hex(self)
+        w, clear = self.w, self.clear
+        rows = ["clear %d" % clear]
+        for y in range(self.h):
+            row = self.pix[y * w:y * w + w]
+            rows.append("".join("." if v == clear else "0123456789abcdef"[v & 15]
+                                for v in row))
+        return "\n".join(rows)
 
     @classmethod
     def from_hex(cls, text, cols=8, rows=4):
         # Same flat-grid parse as SpriteSheet -- _fill_hex_grid is dimensioned off
         # the sheet's own w/h, so 16px tiles need nothing of their own; only the
-        # default geometry differs.
-        sheet = cls(cols, rows)
-        _fill_hex_grid(sheet.pix, sheet.w, sheet.h, text)
+        # default geometry and the optional `clear N` header differ.
+        clear = 0
+        if text.startswith("clear "):
+            end = text.find("\n")
+            head = text[6:end if end >= 0 else len(text)].strip()
+            text = text[end + 1:] if end >= 0 else ""
+            clear = int(head) if head.isdigit() and int(head) <= 16 else 0
+        sheet = cls(cols, rows, clear=clear)
+        _fill_hex_grid(sheet.pix, sheet.w, sheet.h, text, clear)
         sheet.dirty = False
         return sheet
 

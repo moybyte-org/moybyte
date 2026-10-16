@@ -594,3 +594,31 @@ int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)
     }
     return bad;
 }
+
+// -- the icon set (moy_ui.h) ---------------------------------------------------------
+
+static uint32_t s_icon_font[2];         // the 16 and 24 px masks
+static uint8_t s_icon_code[3];
+
+void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
+    s_icon_font[0] = f16;
+    s_icon_font[1] = f24;
+    memcpy(s_icon_code, codes, sizeof(s_icon_code));
+}
+
+int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col) {
+    if (id < 0 || id > 2 || s_icon_code[id] == 0) {
+        return 0;
+    }
+    int box = b.w < b.h ? b.w : b.h;
+    int k = box >= 24 && s_icon_font[1] != 0 ? 1 : 0;
+    uint32_t font = s_icon_font[k] != 0 ? s_icon_font[k] : s_icon_font[1 - k];
+    int size = font == s_icon_font[1] ? 24 : 16;
+    if (font == 0) {
+        return 0;
+    }
+    uint8_t code = s_icon_code[id];
+    return moy_text(t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
+                    b.y + moy_ui_fdiv(b.h - size, 2), col, 1, MOY_TEXT_LEFT, -1) >= 0;
+}
+

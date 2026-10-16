@@ -1657,7 +1657,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             continue;
         }
         if (depth) {
-            glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
+            if (!moy_ui_icon_button(&d.t, id, b, d.row->pal[ink & moy_ui_cmask()])) {
+                glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
+            }
             continue;
         }
         if (L.style == MOY_THEME_FRAME_WIN9X) {

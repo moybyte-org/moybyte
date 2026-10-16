@@ -570,14 +570,14 @@ class EditorApp:
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
         """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
-        walk. `enabled` reads the themeable 16x16 IconSheet sprite like any other bar
-        icon; disabled falls back to the plain _glyph bitmap tinted dim -- there's no
-        separate 'dimmed' sprite variant, so the fallback vocabulary carries the
-        color instead."""
+        walk. `enabled` draws it like any other bar icon; disabled draws the
+        theme's icon set's in `chrome_ink_dim`, or, where the theme names no set,
+        the plain _glyph bitmap tinted dim -- an IconSheet has no 'dimmed' sprite
+        variant, so the fallback vocabulary carries the color instead."""
         ws = self.ws
         if enabled:
             ws._icon(glyph, x, y, cv)
-        else:
+        elif not ws.draw_icon(glyph, (x, y, ic, ic), ws.theme_colors["chrome_ink_dim"], cv):
             ws._glyph(glyph, (x, y, ic, ic), ws.theme_colors["dim"], cv)
 
     def _zone_scale(self):

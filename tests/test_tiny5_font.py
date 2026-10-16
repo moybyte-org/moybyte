@@ -29,6 +29,7 @@ sys.path.insert(0, ROOT)
 from tools import make_tiny5_font as tool          # noqa: E402
 from runtime import ui_draw                        # noqa: E402
 from runtime import appearance                     # noqa: E402
+from runtime import iconsets                       # noqa: E402
 from runtime.chrome import text_scale_floor        # noqa: E402
 
 SLOTS = 10      # moy_text.h's MOY_FONT_SLOTS
@@ -139,6 +140,7 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
         for name in appearance.THEME_NAMES:
             ws.look.set_theme(name, persist=False)
             assert len(appearance._FONTS) == 1
+    iconsets.reset()            # an icon set's masks hold font rows of their own
     assert _free_slots() == SLOTS - 1
     # A theme that names no font: every role and the print font on petme128,
     # nothing left loaded, the layout rebuilt on petme128's cell.

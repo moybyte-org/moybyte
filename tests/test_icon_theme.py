@@ -371,3 +371,208 @@ def test_reset_on_an_already_default_slot_is_a_noop(tmp_path):
     ws.paint.n = n
     ws.paint.reset_tile(n, chrome.default_icon_pixels(n))  # already default
     assert ws.paint.can_undo() is False
+
+
+# --- the icon sets (docs/look_2026-10.md step 16) ---------------------------------
+
+import importlib  # noqa: E402
+import json  # noqa: E402
+import struct  # noqa: E402
+
+import pytest  # noqa: E402
+
+from runtime import chrome, iconsets  # noqa: E402
+from runtime import ui_draw as _ui  # noqa: E402
+
+ICONS = ROOT / "native" / "moy_ui" / "icons"
+
+
+def _installed(look, name="iconpkg"):
+    rc, _notes = _ui._C.theme_install(json.dumps(
+        {"format": 2, "name": name, "inherits": "moy", "look": look}).encode())
+    assert rc == 0
+    return chrome.live_colors(name, "light")
+
+
+def _glyph(src, byte):
+    """(w, h, x, y, levels) of a mask file's glyph at `byte`, or None."""
+    rec = src[16 + byte]
+    if rec == 0:
+        return None
+    at = 16 + 256 + rec * 8
+    off = src[at] | src[at + 1] << 8 | src[at + 2] << 16
+    w, h, x, y = struct.unpack("<BBbb", src[at + 3:at + 7])
+    bpp = src[5]
+    base = 16 + 256 + src[9] * 8
+    lv = []
+    for i in range(w * h):
+        bit = i * bpp
+        b = src[base + off + (bit >> 3)]
+        lv.append((b >> (8 - bpp - (bit & 7))) & ((1 << bpp) - 1))
+    return w, h, x, y, [lv[r * w:(r + 1) * w] for r in range(h)]
+
+
+def test_every_set_fills_the_slots_of_the_sources():
+    names = [ln.split()[1] for ln in (ICONS / "pixel" / "slots.txt").read_text().splitlines()
+             if ln.strip()]
+    assert list(iconsets.SLOTS) == names
+    meta = json.loads((ICONS / "set.json").read_text())
+    assert meta["slots"] == names and meta["first"] == iconsets.FIRST
+    assert not set(iconsets.ALIASES) & set(names), "an alias may not hide a slot"
+
+
+def test_masks_build_from_their_sources():
+    """The committed masks and pixel set are what tools/make_icons.py builds from
+    the SVG sources and pixel_icons.py: a derived artifact, compared byte for byte
+    under the rasteriser that made them."""
+    pytest.importorskip("resvg_py")
+    pytest.importorskip("PIL")
+    make_icons = importlib.import_module("tools.make_icons")
+    meta = json.loads((ICONS / "set.json").read_text())
+    if meta["built_with"] != make_icons.versions():
+        pytest.skip("resvg %s, not the set's %s" % (make_icons.versions(), meta["built_with"]))
+    files = make_icons.build_all()
+    for name, data in files.items():
+        assert (ICONS / name).read_bytes() == data, name + " differs from its sources"
+    assert {p.name for p in ICONS.glob("*.fnt")} == {n for n in files if n.endswith(".fnt")}
+
+
+def test_a_tier_freezes_the_seed_sets_at_its_sizes():
+    make_icons = importlib.import_module("tools.make_icons")
+    meta = json.loads((ICONS / "set.json").read_text())
+    assert meta["tiers"]["handheld"] == ["default-16"]
+    assert meta["tiers"]["desktop"] == ["default-16", "default-24"]
+    lines = "\n".join(make_icons.module_lines("handheld"))
+    assert "'default-16.fnt'" in lines and "'system_icons.moygfx'" in lines
+    assert "default-24" not in lines
+
+
+def test_redo_is_undos_mirror_in_both_kinds():
+    sheet = iconsets.pixel_sheet()
+    u, r = iconsets.SLOT["undo"], iconsets.SLOT["redo"]
+    for y in range(16):
+        assert [sheet.tget(r, x, y) for x in range(16)] == \
+            [sheet.tget(u, 15 - x, y) for x in range(16)]
+    for f in ICONS.glob("*.fnt"):
+        src = f.read_bytes()
+        size = src[6]
+        a = _glyph(src, iconsets.FIRST + u)
+        b = _glyph(src, iconsets.FIRST + r)
+        if a is None:                       # a layer with no undo art (Luna's fill)
+            assert b is None, f.name
+            continue
+        assert (b[0], b[1], b[3]) == (a[0], a[1], a[3]) and b[2] == size - a[2] - a[0], f.name
+        assert b[4] == [row[::-1] for row in a[4]], f.name
+
+
+def test_moy_draws_its_outline():
+    """The canonical Moy is outlined in index 0; the pixel set's clear pixel is 16,
+    so the outline is drawn, and the sheet's file round-trips its header."""
+    src = (ICONS / "pixel" / "system_icons.moygfx").read_text()
+    assert src.startswith("clear 16\n")
+    sheet = iconsets.pixel_sheet()
+    assert sheet.clear == 16
+    img = iconsets.pixel_image("moy")
+    assert img.transparent == 16
+    assert img.pix.count(0) > 30                       # the outline and the face
+    assert img.pix[0] == 16 and img.pix[3 + 16] == 0   # clear corner, outlined top
+    assert type(sheet).from_hex(src, 8, 7).to_hex() == src.rstrip("\n")
+
+
+def test_the_sheet_loader_takes_the_clear_header():
+    rows = "clear 16\n" + "\n".join(["." * 16 + "0123456789abcdef"] * 16)
+    rc, n = _ui.sheet_check(rows.encode(), 64)
+    assert (rc, n) == (0, 16)
+    assert _ui.sheet_check(b"clear 17\n00\n", 64)[0] != 0
+    assert _ui.sheet_check(b"clear x\n00\n", 64)[0] != 0
+
+
+def test_the_pixel_set_takes_the_themes_swap():
+    live = _installed({"icons": {"kind": "pixel", "swap": "0123456789abd1ef"}})
+    try:
+        sp = iconsets.spec(live.look)
+        assert sp[0] == "pixel" and sp[2] == bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+                                                    13, 1, 14, 15])
+        plain = iconsets.pixel_image("wifi")
+        swapped = iconsets.pixel_image("wifi", sp[2])
+        assert 12 in plain.pix and 12 not in swapped.pix
+        assert [sp[2][p] if p != 16 else 16 for p in plain.pix] == list(swapped.pix)
+    finally:
+        _ui._C.theme_uninstall()
+
+
+def test_a_bad_swap_is_no_swap():
+    live = _installed({"icons": {"kind": "pixel", "swap": "123"}}, "iconbad")
+    try:
+        sp = iconsets.spec(live.look)
+        assert sp[0] == "pixel" and sp[2] is None
+    finally:
+        _ui._C.theme_uninstall()
+
+
+def test_icons_names_a_set_and_a_theme_without_it_keeps_its_sheet():
+    assert iconsets.spec(chrome.live_colors("moy", "light").look) == ("smooth", "default", None)
+    for name in ("night", "platinum", "win95", "contrast"):
+        assert iconsets.spec(chrome.live_colors(name, "dark").look) is None, name
+
+
+def _pixels(cv, rect):
+    """The RGB565 words of `rect` on canvas `cv`, row by row."""
+    x, y, w, h = rect
+    buf, stride = bytes(cv._buf), cv._stride
+    return [buf[2 * ((y + j) * stride + x):2 * ((y + j) * stride + x + w)] for j in range(h)]
+
+
+@pytest.mark.parametrize("box", [16, 32])
+def test_a_smooth_set_draws_every_slot_and_falls_back_to_the_default(tmp_path, box):
+    ws = _ws(tmp_path)
+    cv = ws.sys_canvas
+    for set_name in ("default", "luna", "coast", "no_such_set"):
+        for kind in iconsets.SLOTS:
+            cv.rect(0, 0, 40, 40, 0)
+            assert iconsets.draw(cv, kind, (0, 0, box, box), 7, ("smooth", set_name, None)), \
+                (set_name, kind)
+            assert len(set(b"".join(_pixels(cv, (0, 0, box, box))))) > 1, (set_name, kind)
+    assert not iconsets.draw(cv, "teapot", (0, 0, 16, 16), 7, ("smooth", "default", None))
+    iconsets.reset()                # the sets' masks back out of the font rows
+
+
+def test_the_bar_draws_the_themes_set(tmp_path):
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    assert ws.icon_spec() == ("smooth", "default", None)
+    cv = ws.sys_canvas
+    cv.rect(0, 0, 40, 20, 0)
+    ws._icon("wifi", 0, 0, cv, 1, ink=7)
+    smooth = _pixels(cv, (0, 0, 16, 16))
+    cv.rect(0, 0, 40, 20, 0)
+    iconsets.draw(cv, "wifi", (0, 0, 16, 16), 7, ("smooth", "default", None))
+    assert smooth == _pixels(cv, (0, 0, 16, 16))
+    ws.look.set_theme("night", persist=False, variant="dark")
+    assert ws.icon_spec() is None
+    assert not ws.draw_icon("wifi", (0, 0, 16, 16), 7, cv)
+
+
+def test_a_depth_frames_title_buttons_take_the_set(tmp_path):
+    """moy_ui.icons_use hands the C its set: the title buttons of a depth frame
+    draw the set's close/maximize/minimize masks, and its glyphs without one."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    cv = ws.sys_canvas
+    rect, th = (0, 0, 300, 120), 44
+
+    def frame():
+        cv.rect(0, 0, 300, 120, 7)
+        _ui.frame(cv, ws.theme_colors, rect, th, "T", True, True, 1)
+        return _pixels(cv, (150, 0, 150, th))
+
+    iconsets.use_parts(None)
+    glyphs = frame()
+    iconsets.use_parts(("smooth", "default", None))
+    masks = frame()
+    assert masks != glyphs
+    assert ws.icon_spec() == ("smooth", "default", None)
+    iconsets.use_parts(("pixel", None, None))
+    assert frame() == glyphs
+    iconsets.reset()
+    ws.look.set_theme("night", persist=False, variant="dark")     # the depth is global

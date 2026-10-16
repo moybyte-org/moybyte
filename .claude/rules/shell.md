@@ -83,8 +83,10 @@ to whoever called it.
   the launcher root draws one only above its mode's floor -- console mode over a
   P4's parked desk). LEFT zone = LENT to the active app (`draw_zone`):
   the home shows the active tab's verbs on the selected card, the Editor its PROJECTS/tab-ladder/
-  UNDO/REDO/PLAY icons. Icons stay 16×16 sprites from the editable `IconSheet`
-  (Settings → EDIT ICONS). **The bar hides entirely while a GAME plays** (the cart
+  UNDO/REDO/PLAY icons. Icons are the theme's icon set where its look names
+  one (`runtime/iconsets.py`: a smooth set's masks or the 55-slot pixel
+  set), else 16×16 sprites from the editable `IconSheet` (Settings → EDIT
+  ICONS). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
   they're always exitable.
 - **Exit model (#71's pause machinery is retired):** a fullscreen GAME exits on a

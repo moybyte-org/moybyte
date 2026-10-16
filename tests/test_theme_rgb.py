@@ -200,7 +200,9 @@ def test_focus_and_current_are_the_models_properties():
     assert (light[LEAF["current.alpha"]], dark[LEAF["current.alpha"]]) == (14, 24)
     assert light[LEAF["focus.lift.grow"]] == 5 and light[LEAF["focus.edge.w"]] == 4
     assert KINDS[LEAF["win.controls"]][1][light[LEAF["win.controls"]]] == "three"
-    assert KINDS[LEAF["icons.kind"]][1][light[LEAF["icons.kind"]]] == "smooth"
+    assert light[LEAF["icons.kind"]] == NONE      # no set: the bar's IconSheet
+    moy = moy_ui.theme_look("moy", True)[0]
+    assert KINDS[LEAF["icons.kind"]][1][moy[LEAF["icons.kind"]]] == "smooth"
 
 
 def test_the_moy_seed_sets_its_marks():

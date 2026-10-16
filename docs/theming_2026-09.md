@@ -91,9 +91,12 @@ Each was mocked and judged worse (§11).
   file another, §4.7), `align` and `maxw`, and it returns the drawn width.
   Chrome text at every scale is `mg_text_raw` drawing petme128's row; a cart's
   `print` is libmoy's `moy_print`.
-- **Icons:** a themeable 16×16 `IconSheet` (`runtime/editors_sheet.py`), baked
-  from `chrome._ICON_ART`, or the theme's own (`icons`, §4.6), or the user's
-  own edited sheet, `system_icons.moygfx` (Settings → EDIT ICONS), which wins.
+- **Icons:** the icon set a theme's look names (`icons.kind`, `icons.set`,
+  `icons.swap`: `runtime/iconsets.py`, `docs/look_2026-10.md` step 16); a
+  theme that names none draws a themeable 16×16 `IconSheet`
+  (`runtime/editors_sheet.py`), baked from `chrome._ICON_ART`, or the theme's
+  own (`icons`, §4.6), or the user's own edited sheet, `system_icons.moygfx`
+  (Settings → EDIT ICONS), which wins.
 - **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`, or the
   theme's picture; which one the desk shows is the theme's (D6, §4.9), and
   apps reach the backdrop through `ctx.wallpaper`.

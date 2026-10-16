@@ -18,6 +18,8 @@ dev = [
   "pytest",
   "pytest-xdist", # `make test` runs the ~2000 host tests across cores (3m25s -> ~40s)
   "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
+  "resvg-py==0.5.0", # the icon sets' rasteriser (tools/make_icons.py): the
+                     # masks are compared byte for byte under this version
   "pyflakes",     # the undefined-name gate (tests/test_undefined_names.py):
                   # a moved body naming a symbol its new namespace never
                   # imported NameErrors only when the line runs, on glass

@@ -216,9 +216,9 @@ tile, 32 px on the desk's 36×34 button (`moy_mark.png`). Its outline is
 index 0, which needs GAPS 25.
 
 **Pixel sets** are 16×16 `IconSheet`s of 55 slots
-(`icons/pixel/system_icons.moygfx`), lit from the top left, outlined in
+(`native/moy_ui/icons/pixel/system_icons.moygfx`), lit from the top left, outlined in
 dark blue; a theme may swap their palette indices.
-**Smooth sets** are 24-unit SVGs with a 2-unit stroke (`icons/smooth/`),
+**Smooth sets** are 24-unit SVGs with a 2-unit stroke (`native/moy_ui/icons/smooth/`),
 rasterised on the host to 2 or 4 bpp masks and tinted by roles; a package
 keeps its sources for a later on-device SVG editor. Redo is undo's mirror
 in both (`icons_sheet.png`, `icons_pixel.png`).

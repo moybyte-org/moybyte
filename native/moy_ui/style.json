@@ -1160,7 +1160,8 @@
         ["keycap.fill", "paint"], ["keycap.alpha", "num", 0, 1, 1], ["keycap.border", "line"],
         ["keycap.grad", "paint"], ["keycap.ink", "colour"], ["keycap.r", "int", 0, 99, 4],
         ["keycap.bevel", "bool", false],
-        ["icons.kind", "enum", ["smooth", "pixel"]], ["icons.set", "text"]
+        ["icons.kind", "enum", ["smooth", "pixel"], null], ["icons.set", "text"],
+        ["icons.swap", "text"]
       ],
       "button": [
         ["fill", "paint"], ["ink", "colour"], ["border", "line"],
@@ -1180,7 +1181,6 @@
       "app_buttons_cap": 8,
       "name_max": 12,
       "text_max": 24,
-      "accepted": ["icons.swap"],
       "backdrop": {
         "surfaces": ["home", "desk"],
         "kinds": ["fill", "band", "circle", "ellipse", "rrect", "pie", "wave"],

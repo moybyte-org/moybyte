@@ -801,7 +801,6 @@ def _look(th, roles):
          "#define MOY_THEME_APPBTN_CAP %d" % lk["app_buttons_cap"],
          "#define MOY_THEME_MAPNAME_MAX %d" % lk["name_max"],
          "#define MOY_THEME_LOOK_TEXT_MAX %d" % lk["text_max"],
-         "#define MOY_THEME_LOOK_ACCEPTED %d" % len(lk["accepted"]),
          "#define MOY_THEME_PAINT_MODES %d" % len(lk["paint_modes"]),
          "// A backdrop (docs/media/look_2026-10/GAPS.md gap 9): per surface a list",
          "// of shapes, each kind's coordinate count (-1: [x, y] points).",
@@ -838,7 +837,6 @@ def _look(th, roles):
          "// An app_buttons entry's leaves: a kind's button leaves, in order.",
          "extern const moy_theme_field_t moy_theme_btn_fields[%d];" % len(btn),
          "#define MOY_THEME_BTN_FIELDS %d" % len(btn),
-         "extern const char *const moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED];",
          "extern const char *const moy_theme_paint_modes[MOY_THEME_PAINT_MODES];",
          "// RGB colours (docs/look_2026-10.md step 5): MOY64 as 0xrrggbb, and the",
          "// WCAG luminance (x10000, as moy_theme_lum) of an RGB565 channel.",
@@ -871,7 +869,6 @@ def _look(th, roles):
     for decl, seq in (("moy_theme_look_groups[MOY_THEME_LOOK_GROUPS]", groups),
                       ("moy_theme_enum_names[MOY_THEME_ENUM_NAMES]", enums),
                       ("moy_theme_btn_kinds[MOY_THEME_BTN_KINDS]", lk["button_kinds"]),
-                      ("moy_theme_look_accepted[MOY_THEME_LOOK_ACCEPTED]", lk["accepted"]),
                       ("moy_theme_paint_modes[MOY_THEME_PAINT_MODES]", lk["paint_modes"]),
                       ("moy_theme_bd_surfaces[MOY_THEME_BD_SURFACES]", bd["surfaces"]),
                       ("moy_theme_bd_kinds[MOY_THEME_BD_KINDS]", bd["kinds"])):

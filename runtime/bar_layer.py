@@ -802,13 +802,22 @@ class BarLayer:
                 else _ui_draw.BAR_SYS
             _ui_draw.bar_part(cv, th, part, (tx, ty, tw, tht), m.open and m.widget == "menu")
             sc = max(1, tht // 16)
+            if ws.draw_icon("moy", (tx, ty, tw, tht), ink, cv):   # outlined, its set's
+                return
             img = ws._icon_image_keyed("moy")          # its plate keyed on the tile
             if img is not None:
                 cv.spr(img, tx + (tw - 16 * sc) // 2, ty + (tht - 16 * sc) // 2, sc)
             return
         if name in ("wifi", "battery", "close"):
+            kind = name
             if name == "wifi" and ws._wifi_icon_kind() != "wifi":
                 ink = th["chrome_ink_dim"]
+                kind = "wifi_off"
+            side = 16 * u                              # the theme's icon set, centred
+            gx = x + (w - side) // 2 if not across else (thick - side) // 2
+            gy = (thick - side) // 2 if not across else y + (h - side) // 2
+            if ws.draw_icon(kind, (gx, gy, side, side), ink, cv):
+                return
             side = 12 * u
             gx = x + (w - side) // 2 if not across else (thick - side) // 2
             gy = (thick - side) // 2 if not across else y + (h - side) // 2

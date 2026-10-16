@@ -1211,6 +1211,28 @@ static mp_obj_t ui_glyph(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_glyph_obj, 5, 5, ui_glyph);
 
+// icon_mask(cv, font, code, x, y, ci): glyph `code` of icon set file `font`
+static mp_obj_t ui_icon_mask(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], mp_const_none);
+    check(moy_ui_sink_mask(&s, (uint32_t)mp_obj_get_int_truncated(a[1]), mp_obj_get_int(a[2]),
+                           mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_icon_mask_obj, 6, 6, ui_icon_mask);
+
+// icons_use(f16, f24, close, maximize, minimize): the icon set the C parts draw
+static mp_obj_t ui_icons_use(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    uint8_t codes[3] = {(uint8_t)mp_obj_get_int(a[2]), (uint8_t)mp_obj_get_int(a[3]),
+                        (uint8_t)mp_obj_get_int(a[4])};
+    moy_ui_icons_use((uint32_t)mp_obj_get_int_truncated(a[0]),
+                     (uint32_t)mp_obj_get_int_truncated(a[1]), codes);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_icons_use_obj, 5, 5, ui_icons_use);
+
 // -- rows, cells and lists ---------------------------------------------------------------
 
 // row(cv, look, rect, kind, flags, interact, label, value, glyph, glyph_size,
@@ -2229,6 +2251,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_wrap), MP_ROM_PTR(&ui_wrap_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_names), MP_ROM_PTR(&ui_glyph_names_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_icon_mask), MP_ROM_PTR(&ui_icon_mask_obj) },
+    { MP_ROM_QSTR(MP_QSTR_icons_use), MP_ROM_PTR(&ui_icons_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_rows), MP_ROM_PTR(&ui_wasm_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_size), MP_ROM_PTR(&ui_api_size_obj) },
