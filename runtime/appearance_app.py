@@ -164,7 +164,7 @@ class AppearanceAppLayer:
 
     id = "appearance"
     domain = "system"
-    TITLE = "APPEARANCE"
+    TITLE = "Appearance"
     # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
     # CAPABILITY, not a core role: this app and the two that copy a drawing
     # into it (Paint, Files) are its only consumers. A pick is a change to

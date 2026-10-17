@@ -160,7 +160,7 @@ class FilesLayout:
 class FilesAppLayer(ListShellApp):
     id = "files"
     domain = "system"
-    TITLE = "FILES"
+    TITLE = "Files"
     APP_TITLE = "Files"
     APP_PERM = "files"
     APP_FOLDER = "moybyte.files.moy"

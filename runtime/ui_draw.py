@@ -1555,14 +1555,15 @@ def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
 
 
 # bar_part's parts (moy_ui.h's MOY_UI_BARP_*): the 2026-10 look's bar.
-BAR_BAND, BAR_HH_BAND, BAR_SYS, BAR_HH_SYS, BAR_CHIP = 0, 1, 2, 3, 4
+BAR_BAND, BAR_HH_BAND, BAR_SYS, BAR_HH_SYS, BAR_CHIP, BAR_TILE = 0, 1, 2, 3, 4, 5
 
 
 def bar_part(cv, th, part, rect, on=0):
     """A bar part of the live theme's look (docs/look_2026-10.md step 14):
     a desk or handheld bar's band (`on` the band's BAND_* side), the system
-    button's tile (`on`: its menu is open) or a desk chip's field (`on`: the
-    focused window's). False, drawing nothing, under a theme with no depth."""
+    button's tile (`on`: its menu is open), a desk chip's field (`on`: the
+    focused window's) or a desk icon's tile (step 25, BAR_TILE). False,
+    drawing nothing, under a theme with no depth."""
     return _C.bar_part(cv, _LOOK if th is _TH else _look(th), part, rect, int(on))
 
 

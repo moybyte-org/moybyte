@@ -44,7 +44,7 @@ ICONS = os.path.join(ROOT, "native", "moy_ui", "icons")
 THEMES = os.path.join(ROOT, "native", "moy_ui", "themes")
 PIXEL = os.path.join(ICONS, "pixel", "system_icons.moygfx")
 
-SIZES = {"handheld": (16,), "desktop": (16, 24)}
+SIZES = {"handheld": (16,), "desktop": (16, 20, 24)}
 FIRST = 0x21                # slot 0's byte; a version 2 font draws ASCII bytes as given
 MIRRORED = {"redo": "undo"}
 PIXEL_ONLY = ("moy",)

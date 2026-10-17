@@ -2713,3 +2713,130 @@ def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
     drv.frame(1 / 30)
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
     assert (labels["menu"], labels["desktop"]) == ("Editor", "Play")
+
+
+# -- the desk and windows (docs/look_2026-10.md step 25) ----------------------
+
+def _moy_desk(tmp_path, variant="light"):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    ws.look.set_theme("moy", persist=False, variant=variant)
+    ws.open_desk()
+    _quiesce(ws)
+    ws.frame(1 / 30)
+    return ws
+
+
+def _px(cv, x, y):
+    i = (y * cv.w + x) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]
+
+
+def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
+    """Under the look the column is 44-pixel tiles on the 74-row pitch, the
+    first 18 under the bar, centred 54 in from the desk's edge; each label is
+    the title its app names, under its tile, on the backdrop with no plate."""
+    ws = _moy_desk(tmp_path)
+    rects = ws.wm._backdrop_layer._icon_rects()
+    labels = [r[3] for r in rects]
+    assert labels[:2] == ["Play", "Projects"]
+    assert {"Paint", "Storybook", "Files", "Calc", "Get carts"} <= set(labels)
+    dx, dy, _dw, _dh = ws.wm._desk_rect()
+    cv = ws.sys_canvas
+    for i, (_key, box, band, _label, _cart) in enumerate(rects):
+        assert box == (dx + 32, dy + 18 + 74 * i, 44, 44)
+        assert band[1] == box[1] + 52 and band[0] + band[2] // 2 == box[0] + 22
+        # no plate: the band's edge is the backdrop either side of it
+        assert _px(cv, band[0] + 1, band[1] + 1) == _px(cv, band[0] - 1, band[1] + 1)
+        assert _px(cv, box[0] + 2, box[1] + 22) == 0xFFFF       # the tile's fill
+
+
+def test_a_desk_tile_draws_its_apps_icon_from_the_set(tmp_path):
+    """Every tile's icon is its app's slot of the theme's set (Paint's by
+    its alias), at the 20-pixel size in the ink."""
+    ws = _moy_desk(tmp_path)
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, cv=None: (
+        drawn.append((kind, rect[2], real(kind, rect, ink, cv))), drawn[-1][2])[1]
+    ws.wm._backdrop_layer._draw_desk_icons()
+    keys = [r[0] for r in ws.wm._backdrop_layer._icon_rects()]
+    assert [d[0] for d in drawn] == keys
+    assert all(size == 20 and ok for _k, size, ok in drawn)
+    from runtime import iconsets
+    assert iconsets._pick("default", 20)[1] == 20
+
+
+def test_a_desk_label_over_a_wallpaper_is_white_over_a_shadow(tmp_path, monkeypatch):
+    """Over the theme's backdrop a label takes the ink; over a wallpaper,
+    whose pixels the theme does not know, white over a black shadow."""
+    from runtime import ui_draw
+    ws = _moy_desk(tmp_path)
+    got = []
+    real = ui_draw.label
+    monkeypatch.setattr(ui_draw, "label", lambda cv, r, t, ink, align=0, bg=None,
+                        shadow=None: (got.append((t, ink, shadow)),
+                                      real(cv, r, t, ink, align, bg, shadow))[1])
+    ws.wm._backdrop_layer._draw_desk_icons()
+    assert got and all(ink == ws.theme_colors["ink"] and sh is None for _t, ink, sh in got)
+    got.clear()
+    monkeypatch.setattr(ws.look, "wallpaper_id", ws.look.PICTURE)
+    ws.wm._backdrop_layer._draw_desk_icons()
+    black, white = ws.look.live.fixed[2:]
+    assert got and all(ink == white and sh[0] == black for _t, ink, sh in got)
+
+
+def test_a_theme_without_a_look_keeps_its_capitals_and_pills(tmp_path):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    ws.open_desk()
+    ws.frame(1 / 30)
+    labels = [r[3] for r in ws.wm._backdrop_layer._icon_rects()]
+    assert labels[:2] == ["PLAY", "PROJECTS"] and "CALC" in labels
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    assert ws.wm._win_title(ws.wm._wins["calc"]) == "CALC"
+
+
+def test_a_window_under_the_look_is_titled_and_drawn_whole(tmp_path):
+    """The title is the app's as it names it, the line icon and the chip's
+    are the set's slot for the app, and the rounded frame draws no grip
+    (its corner still resizes)."""
+    ws = _moy_desk(tmp_path)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["calc"]
+    assert wm._win_title(win) == "Calc"
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, cv=None: (
+        drawn.append(kind), real(kind, rect, ink, cv))[1]
+    grips = []
+    real_fill = wm._root_canvas.rect
+    wm._win_chrome(win, True)
+    wm._draw_look_chips(wm._root_canvas, ws.theme_colors, 1, wm._root_ctx.layout.line_h)
+    assert drawn == ["calc", "calc"]
+    gx, gy, gw, gh = wm._grip_rect(win)
+    wm._root_canvas.rect = lambda *a: (grips.append(a), real_fill(*a))[1]
+    try:
+        wm._win_grip(win, True)
+    finally:
+        wm._root_canvas.rect = real_fill
+    assert grips == []
+    hx, hy, _hw, _hh = wm._grip_hit_rect(win)
+    assert hx <= gx and hy <= gy
+
+
+def test_a_chip_that_minimizes_its_window_takes_the_focus_with_it(tmp_path):
+    """The chip's minimize leaves no window focused, as the title strip's
+    does, so no window behind draws as the focused one and no key reaches a
+    hidden window; the chip again restores and focuses it."""
+    ws = _moy_desk(tmp_path)
+    for app in ("files", "calc"):
+        ws.open_app(ws._apps_by_id[app])
+        ws.frame(1 / 30)
+    wm = ws.wm
+    assert wm._focus == "calc"
+    wm._chip_tap("calc")
+    assert wm._wins["calc"].minimized and wm._focus is None
+    wm._chip_tap("calc")
+    assert not wm._wins["calc"].minimized and wm._focus == "calc"

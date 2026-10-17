@@ -10,13 +10,24 @@ live, blit the cache, or skip the restore outright.
 try:
     from layers import Layer
     from widgets import _in, _ticks_ms
-    import ui_draw as _ui_draw        # desk icon label pills (ui_draw.chip)
+    import ui_draw as _ui_draw        # the desk's tiles and labels
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.widgets import _in, _ticks_ms
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
+
+# A desk label over a wallpaper (a picture or a cart, pixels the theme does
+# not know): white over a black shadow (chrome.FIXED's), 80% and one pixel
+# down and right.
+_WALL_SHADOW_A = 204
+
+
+def _icon_box(box):
+    """The square a desk tile's icon is drawn in: 20 of the tile's 44, centred."""
+    s = box[2] * 20 // 44
+    return (box[0] + (box[2] - s) // 2, box[1] + (box[3] - s) // 2, s, s)
 
 
 class _BackdropLayer(Layer):
@@ -182,7 +193,10 @@ class _BackdropLayer(Layer):
     # home in a window, on Make), then every desktop-only system app. Geometry is deterministic
     # (the _chip_rects pattern -- computed per call, no stored state), so draw
     # and hit-test can never disagree, and the icons render before the drag
-    # backdrop capture, so the drag cache carries them for free.
+    # backdrop capture, so the drag cache carries them for free. Under a
+    # theme's look the column is the look's (docs/look_2026-10.md step 25:
+    # `_look_rects`, `_draw_look_icons`); without one, tiles and label pills
+    # in the theme's shape.
 
     ICON_GLYPHS = {"play": "run", "projects": "edit"}
 
@@ -192,8 +206,12 @@ class _BackdropLayer(Layer):
         return self.wm.HIDDEN_APPS
 
     def _icon_catalog(self):
+        """[(key, label, cart)]: under a look the labels are the titles as
+        their apps name them, else in capitals."""
         ws = self.ws
-        out = [("play", "PLAY", None), ("projects", "PROJECTS", None)]
+        looked = bool(_ui_draw.depth()[0])
+        out = [("play", "Play" if looked else "PLAY", None),
+               ("projects", "Projects" if looked else "PROJECTS", None)]
         for app, _text in getattr(ws, "_apps", ()):
             if app.id in self.HIDDEN_APPS:
                 continue
@@ -202,8 +220,8 @@ class _BackdropLayer(Layer):
                 if app.is_app(c):
                     cart = c
                     break
-            title = ws.app_title(app.id) or app.id.upper()
-            out.append((app.id, str(title).upper(), cart))
+            title = str(ws.app_title(app.id) or app.id.upper())
+            out.append((app.id, title if looked else title.upper(), cart))
         return out
 
     def _icon_rects(self):
@@ -213,8 +231,10 @@ class _BackdropLayer(Layer):
         fs = ws.look.effective_font_scale()
         dx, dy, dw, dh = self.wm._desk_rect()
         box = _layout_base.metric("tile", fs)
-        gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
         catalog = self._icon_catalog()
+        if _ui_draw.depth()[0]:
+            return self._look_rects(catalog, box, fs, dx, dy, dw, dh)
+        gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
         cell_h = _layout_base.metric("tile_cell", fs)
         x0 = dx + 14 * fs
         y0 = dy + _layout_base.metric("tile_top", fs)
@@ -246,11 +266,66 @@ class _BackdropLayer(Layer):
             y += cell_h
         return out
 
+    def _look_rects(self, catalog, box, fs, dx, dy, dw, dh):
+        """The column under a look (docs/look_2026-10.md step 25): `box`
+        tiles on the class's pitch, their centres 54 of the tile's 44 in from
+        the desk's edge or further where a label needs it, each label under
+        its tile, 8 of the 44 below it, as wide as the column."""
+        k = box / 44
+        cell_h = _layout_base.metric("tile_cell", fs)
+        y0 = dy + _layout_base.metric("tile_top", fs)
+        bottom = dy + dh - int(6 * k)
+        line = _ui_draw.font("ui")[2] * fs
+        maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
+                   default=0)
+        pitch = max(box + int(20 * k), maxw + int(20 * k))
+        cx = dx + max(int(54 * k), (maxw + 1) // 2 + int(10 * k))
+        gap = int(8 * k)
+        y = y0
+        out = []
+        for key, label, cart in catalog:
+            if y + box + gap + line > bottom and y > y0:
+                y = y0
+                cx += pitch
+            out.append((key,
+                        (cx - box // 2, y, box, box),
+                        (cx - pitch // 2, y + box + gap, pitch, line),
+                        label, cart))
+            y += cell_h
+        return out
+
+    def _draw_look_icons(self, ws, cv, th):
+        """Each tile as the look's part (`ui.bar_part`'s BAR_TILE), its app's
+        icon from the theme's set at the 20-pixel size in the ink (the app's
+        own art where the set has none), its label in the ink over the
+        theme's backdrop, with no plate; over a wallpaper, white over a
+        shadow."""
+        ink = th.get("ink", 0)
+        if ws.look.wallpaper_id is not None:
+            black, white = ws.look.live.fixed[2:]
+            lab, shadow = white, (black, _WALL_SHADOW_A, 1, 1)
+        else:
+            lab, shadow = ink, None
+        for key, box, band, label, cart in self._icon_rects():
+            _ui_draw.bar_part(cv, th, _ui_draw.BAR_TILE, box)
+            if not ws.draw_icon(key, _icon_box(box), ink, cv):
+                img = ws.covers.icon_sheet_for(cart) if cart is not None else None
+                if img is not None:
+                    sc = max(1, (box[2] * 20 // 44) // 16)
+                    cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
+                           box[1] + (box[3] - 16 * sc) // 2, sc)
+                else:
+                    ws._glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), ink, cv)
+            _ui_draw.label(cv, band, label, lab, _ui_draw.ALIGN_CENTER, shadow=shadow)
+
     def _draw_desk_icons(self):
         ws = self.ws
         cv = ws.sys_canvas
         th = ws.theme_colors
         fs = ws.look.effective_font_scale()
+        if _ui_draw.depth()[0]:
+            self._draw_look_icons(ws, cv, th)
+            return
         for key, box, pill, label, cart in self._icon_rects():
             _ui_draw.icon_tile(cv, th, box)
             img = ws.covers.icon_sheet_for(cart) if cart is not None else None

@@ -177,7 +177,7 @@ class GetCartsLayout(ListShellLayout):
 class GetCartsAppLayer(ListShellApp):
     id = "getcarts"
     domain = "system"
-    TITLE = "GET CARTS"
+    TITLE = "Get carts"
     APP_TITLE = "Get Carts"
     APP_PERM = "getcarts"
     APP_FOLDER = "moybyte.get_carts.moy"

@@ -41,6 +41,13 @@
    "set": "coast",
    "size": 16
   },
+  "coast-20": {
+   "bpp": 4,
+   "bytes": 6278,
+   "layer": "ink",
+   "set": "coast",
+   "size": 20
+  },
   "coast-24": {
    "bpp": 4,
    "bytes": 8848,
@@ -54,6 +61,13 @@
    "layer": "ink",
    "set": "default",
    "size": 16
+  },
+  "default-20": {
+   "bpp": 4,
+   "bytes": 6457,
+   "layer": "ink",
+   "set": "default",
+   "size": 20
   },
   "default-24": {
    "bpp": 4,
@@ -69,6 +83,13 @@
    "set": "luna",
    "size": 16
   },
+  "luna-20": {
+   "bpp": 4,
+   "bytes": 6361,
+   "layer": "ink",
+   "set": "luna",
+   "size": 20
+  },
   "luna-24": {
    "bpp": 4,
    "bytes": 8848,
@@ -82,6 +103,13 @@
    "layer": "fill",
    "set": "luna",
    "size": 16
+  },
+  "luna.fill-20": {
+   "bpp": 4,
+   "bytes": 3636,
+   "layer": "fill",
+   "set": "luna",
+   "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
@@ -169,6 +197,7 @@
  "tiers": {
   "desktop": [
    "default-16",
+   "default-20",
    "default-24"
   ],
   "handheld": [

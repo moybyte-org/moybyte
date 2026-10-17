@@ -179,7 +179,7 @@ class StorybookAppLayer(ListShellApp):
 
     id = "storybook"
     domain = "system"
-    TITLE = "STORYBOOK"
+    TITLE = "Storybook"
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Storybook"
     APP_PERM = "storybook"

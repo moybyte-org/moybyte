@@ -13,17 +13,24 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import ui_draw as _ui_draw
+    from app_decls import APPS as _APP_DECLS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
+    from runtime.app_decls import APPS as _APP_DECLS
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
 _SHADOW = NAMES["black"]
 
 # Shell-process title strips (registered apps contribute TITLE through the app
-# registry instead; the player shows the live cart title).
-_TITLES = {"menu": "Editor", "projects": "PROJECTS",
-           "settings": "SETTINGS", "update": "UPDATE"}
+# registry instead; the player shows the live cart title). A theme without a
+# depth (the older seeds) draws an app's and these in capitals, the Editor's
+# as written.
+_TITLES = {"menu": "Editor", "projects": "Projects",
+           "settings": "Settings", "update": "Update"}
+# The shell's own apps (runtime/app_decls.py), whose titles those seeds
+# capitalise; an installed app's title is drawn as its app names it.
+_SHELL_APPS = tuple(d["id"] for d in _APP_DECLS)
 # The title of an Editor or a playtest, "Editor · Star Catcher": the app, the
 # separator and the cart; the separator is a hyphen in a face without the dot
 # (petme128). A chip under the 2026-10 look shows the app alone.
@@ -55,8 +62,10 @@ class WindowChrome:
         """The resize grip: three diagonal steps in the bottom-right corner.
         Drawn SEPARATELY from the rest of the chrome because it sits INSIDE the
         content rect -- the window's content stamp overwrites it every frame, so
-        it is the one piece the chrome freeze can never skip."""
-        if not focused:
+        it is the one piece the chrome freeze can never skip. A depth's
+        rounded frame draws none (its corner still resizes,
+        `_grip_hit_rect`)."""
+        if not focused or _ui_draw.depth()[13]:
             return
         sc = self._root_canvas
         ink = self.ws.theme_colors["chrome_ink"]
@@ -98,19 +107,22 @@ class WindowChrome:
 
     def _win_icon(self, win, slot, focused):
         """The window's icon in the slot its frame leaves left of the title:
-        its app cart's icon at the largest whole scale that fits, else the kind's
-        icon of the theme's icon set, else its glyph, in the title's ink."""
+        its kind's icon of the theme's icon set where the set draws one (a
+        shell app's by its id), else its app cart's icon at the largest whole
+        scale that fits, else its glyph, in the title's ink."""
         ws = self.ws
         sc = self._root_canvas
         x, y, w, h = slot
+        ink = ws.theme_colors["chrome_ink" if focused else "chrome_ink_dim"]
+        if ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
+            return
         img = self._win_icon_img(win)
         if img is not None:
             iw = getattr(img, "w", 16) or 16
             s = max(1, w // iw)
             sc.spr(img, x + (w - iw * s) // 2, y + (h - iw * s) // 2, s)
             return
-        ink = ws.theme_colors["chrome_ink" if focused else "chrome_ink_dim"]
-        if not ws.draw_icon(_ICON_SLOTS.get(win.kind, "app"), slot, ink, sc):
+        if not ws.draw_icon("app", slot, ink, sc):
             ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
 
     def _win_icon_img(self, win):
@@ -204,7 +216,10 @@ class WindowChrome:
             if getattr(self, "_play_intent", None) == "dev":
                 return _PLAY + _title_sep() + t       # a playtest from the Editor
             return t
+        shell = win.kind in _TITLES or win.kind in _SHELL_APPS
         base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
+        if shell and win.kind != "menu" and not _ui_draw.depth()[0]:
+            base = base.upper()
         if win.kind == "menu" and ws.cart:
             t = ws.cart.get("title")
             if t:
@@ -426,27 +441,30 @@ class WindowChrome:
 
     def _draw_look_chips(self, sc, th, fs, line_h):
         """The taskbar chips as the look's tabs (docs/look_2026-10.md step 14):
-        the window's icon then its title, the focused window's chip raised
-        under the current mark, a minimized one's in the dim ink."""
+        the window's icon (in `_win_icon`'s order) then its title, the
+        focused window's chip raised under the current mark, a minimized
+        one's in the dim ink."""
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
             focused = key == self._focus and not win.minimized
             _ui_draw.bar_part(sc, th, _ui_draw.BAR_CHIP, (x, y, w, h), focused)
             ink = th["chrome_ink" if focused else "chrome_ink_dim"]
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
-            img = self._win_icon_img(win)
-            if img is not None:
-                iw = getattr(img, "w", 16) or 16
-                s = max(1, 18 // iw)
-                sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
-            else:
-                self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+            if not self.ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
+                img = self._win_icon_img(win)
+                if img is not None:
+                    iw = getattr(img, "w", 16) or 16
+                    s = max(1, 18 // iw)
+                    sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
+                else:
+                    self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a
-        minimized window (and focus it), minimize the focused one (apps only),
-        or just move focus to it. Nothing closes from the taskbar."""
+        minimized window (and focus it), minimize the focused one (apps only;
+        the focus leaves it, as the title strip's minimize leaves it), or just
+        move focus to it. Nothing closes from the taskbar."""
         ws = self.ws
         win = self._wins.get(key)
         if win is None:
@@ -458,5 +476,6 @@ class WindowChrome:
         elif key == self._focus:
             if win.kind != "desktop":              # a running game never minimizes
                 win.minimized = True
+                self._focus = None
         else:
             self._focus = key

@@ -991,6 +991,8 @@ class Live:
 # Editors): transparency's grey checker, dark then light, under the sprite
 # editor's clear pixels and its colour 0; the black keyline its cursor's ring
 # goes round; the white that strokes colour 0 and rings the colour in use.
+# The black and the white are also a desk label's over a wallpaper, its
+# shadow and its ink (docs/look_2026-10.md step 25).
 FIXED = (RGB | 0x6e6e78, RGB | 0x9a9aa4, RGB | 0x000000, RGB | 0xffffff)
 
 

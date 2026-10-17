@@ -256,3 +256,53 @@ def test_a_theme_without_a_look_keeps_its_frame():
         assert ui_draw.frame_buttons((0, 0, 300, 200), 18, "T", True, 1)[0][1][2] == 16
     finally:
         ui_draw.use_depth(None, False)
+
+
+# -- the desk's tiles (docs/look_2026-10.md step 25) --------------------------
+
+def _rgb(hexs):
+    return ui_draw._C.theme_rgb(0x1000000 | int(hexs, 16))[0]
+
+
+@pytest.mark.parametrize("light", [True, False])
+def test_a_desk_tile_is_the_looks_fill_over_a_soft_shadow(looked, light):
+    """`tile_fill` at `tile_r` (12, the default: Moy sets none) over the
+    theme's soft shadow at MOY_UI_TILE_SHADOW percent: the tile's pixels are
+    its fill, its corner is rounded, the pixels under it darken."""
+    th, cv = looked("moy", light)
+    ground = _px(cv, 5, 5)
+    assert ui_draw.bar_part(cv, th, ui_draw.BAR_TILE, (40, 40, 44, 44))
+    fill = _rgb("ffffff" if light else "23274b")
+    assert _px(cv, 62, 62) == _px(cv, 41, 62) == _px(cv, 62, 41) == fill
+    assert _px(cv, 40, 40) != fill                                 # rounded
+    assert _px(cv, 62, 84 + 3) != ground                           # the shadow
+    assert _px(cv, 300, 150) == ground
+
+
+def test_an_outlined_tile_casts_no_shadow(looked):
+    """`tile_outline` rings the tile in its colour, and an outlined tile
+    casts no shadow (THEMES.md: the tiles Blocks and Pico outline)."""
+    from test_ui_style_data import _install, _uninstall
+    _install({"format": 2, "name": "tl", "inherits": "moy", "look": {
+        "tile_r": 6, "tile_fill": "#ff0000", "tile_outline": [2, "#00ff00"]}})
+    try:
+        th, cv = looked("tl", True)
+        ground = _px(cv, 5, 5)
+        assert ui_draw.bar_part(cv, th, ui_draw.BAR_TILE, (40, 40, 44, 44))
+        assert _px(cv, 62, 40) == _px(cv, 62, 41) == _rgb("00ff00")
+        assert _px(cv, 62, 62) == _rgb("ff0000")
+        assert _px(cv, 62, 84 + 3) == ground                       # no shadow
+    finally:
+        _uninstall()
+
+
+def test_a_theme_without_a_look_draws_no_tile():
+    ui_draw.use_depth("night", False)
+    try:
+        cv = SystemCanvas(80, 80)
+        cv.cls(BG)
+        assert not ui_draw.bar_part(cv, theme_colors("night"), ui_draw.BAR_TILE,
+                                    (8, 8, 44, 44))
+        assert set(indices_of(cv)) == {BG}
+    finally:
+        ui_draw.use_depth(None, False)

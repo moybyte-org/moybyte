@@ -274,6 +274,11 @@ typedef struct {
     int16_t bar_line_w, hh_line_w;
     int32_t bar_fill, bar_line_c, hh_fill, hh_line_c, bar_ink, bar_dim, hh_ink, hh_dim;
     int32_t sys_fill, hh_sys_fill, chip_cur;
+    // The desk's icon tiles (step 25): `tile_r`, `tile_fill` (a paint),
+    // `tile_outline`.
+    uint8_t tile_r;
+    int16_t tile_line_w;
+    int32_t tile_fill, tile_line_c;
 } moy_ui_depth_t;
 // win.header's, win.controls' and the bars' styles, in style.json's order
 enum { MOY_UI_HEAD_PLAIN = 0, MOY_UI_HEAD_FILL = 1, MOY_UI_HEAD_BAR = 2, MOY_UI_HEAD_GRAD = 3 };
@@ -284,15 +289,20 @@ enum {
 enum { MOY_UI_HH_NONE = 0, MOY_UI_HH_FLAT = 1, MOY_UI_HH_GRAD = 2, MOY_UI_HH_GLASS = 3 };
 // The value bar across a focused window's top under `win.header: bar`, in pixels.
 #define MOY_UI_HEAD_BAR_H 4
+// A desk tile's soft shadow, in percent of the theme's strength.
+#define MOY_UI_TILE_SHADOW 35
 // The bars' parts under the depth (step 14): a desk bar's band and a
 // handheld bar's (`on` the band's edge-line side, a MOY_UI_BAND_*), the
 // system button's tile on each (`on`: its menu is open, the current mark
-// over the tile), and a desk chip's field (`on`: the focused window's, the
-// raised chip under the current mark; else nothing). Answers 0, drawing
-// nothing, where the theme has no depth.
+// over the tile), a desk chip's field (`on`: the focused window's, the
+// raised chip under the current mark; else nothing), and a desk icon's tile
+// (step 25: `tile_fill`, else the raised surface, at `tile_r` on a 44-pixel
+// tile and in proportion on another, ringed by `tile_outline`, and without
+// one over the theme's soft shadow at MOY_UI_TILE_SHADOW percent). Answers
+// 0, drawing nothing, where the theme has no depth.
 enum {
     MOY_UI_BARP_BAND = 0, MOY_UI_BARP_HH_BAND = 1, MOY_UI_BARP_SYS = 2, MOY_UI_BARP_HH_SYS = 3,
-    MOY_UI_BARP_CHIP = 4,
+    MOY_UI_BARP_CHIP = 4, MOY_UI_BARP_TILE = 5,
 };
 // Install theme `name`'s depth in a mode (light 1: its `light` look). Answers on.
 int moy_ui_depth_use(const char *name, size_t n, int light);

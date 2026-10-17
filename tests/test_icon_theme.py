@@ -439,10 +439,11 @@ def test_a_tier_freezes_the_seed_sets_at_its_sizes():
     make_icons = importlib.import_module("tools.make_icons")
     meta = json.loads((ICONS / "set.json").read_text())
     assert meta["tiers"]["handheld"] == ["default-16"]
-    assert meta["tiers"]["desktop"] == ["default-16", "default-24"]
+    # the desk's tiles draw the 20-pixel size (docs/look_2026-10.md step 25)
+    assert meta["tiers"]["desktop"] == ["default-16", "default-20", "default-24"]
     lines = "\n".join(make_icons.module_lines("handheld"))
     assert "'default-16.fnt'" in lines and "'system_icons.moygfx'" in lines
-    assert "default-24" not in lines
+    assert "default-20" not in lines and "default-24" not in lines
 
 
 def test_redo_is_undos_mirror_in_both_kinds():

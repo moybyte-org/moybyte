@@ -117,7 +117,7 @@ class CalcAppLayer:
 
     id = "calc"
     domain = "system"
-    TITLE = "CALC"
+    TITLE = "Calc"
     # The shell roles this app uses (runtime/app_context.py). The context
     # carries these and nothing else, so an undeclared reach-in is an
     # AttributeError here rather than a coupling nobody sees.

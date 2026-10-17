@@ -422,7 +422,7 @@ class PaintAppLayer:
 
     id = "artwork"
     domain = "system"
-    TITLE = "PAINT"
+    TITLE = "Paint"
     TOOLS = ("PENCIL", "BRUSH", "ERASER", "FILL", "PICK",
              "LINE", "BOX", "CIRCLE", "SPRAY", "PAN")
     GLYPHS = ("P", "B", "E", "F", "I", "/", "#", "O", "*", "+")

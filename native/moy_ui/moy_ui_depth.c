@@ -50,7 +50,7 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
 
 // The look's paints the parts name, copied out of the look at install: a
 // paint leaf reads as MOY_THEME_PAINT | its slot here.
-#define DEPTH_PAINTS 6
+#define DEPTH_PAINTS 8
 static moy_theme_paint_t s_paint[DEPTH_PAINTS];
 static int s_paints;
 
@@ -273,6 +273,10 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
     d->hh_ink = leaf(lk, "hhbar.ink");
     d->hh_dim = leaf(lk, "hhbar.dim");
     d->hh_sys_fill = leaf(lk, "hhbar.sys.fill");
+    d->tile_r = (uint8_t)num(leaf(lk, "tile_r"), 12);
+    d->tile_fill = paint_leaf(lk, "tile_fill");
+    d->tile_line_w = whole(lk, "tile_outline.w", 0);
+    d->tile_line_c = leaf(lk, "tile_outline.c");
     return 1;
 }
 
@@ -914,6 +918,29 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
                                            : tok(&d, MOY_UI_T_SURFACE_ALT));
             rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
             moy_ui_current_in(s, b, r, 0, 1, &ink, 0);
+            return 1;
+        }
+        case MOY_UI_BARP_TILE: {
+            // tile_r on the desk's 44-pixel tile, in proportion on another
+            int r = moy_ui_fdiv(dp->tile_r * b.h + 22, 44);
+            r = r < b.h / 2 ? r : b.h / 2;
+            int ring = dp->tile_line_w > 0 && is_set(dp->tile_line_c);
+            moy_shape_shadow_t sh;
+            if (!ring && shadow_of(dp, r, 1, MOY_UI_UNDER_FULL, &sh)) {
+                if (dp->shadow == 1) {
+                    sh.alpha = sh.alpha * MOY_UI_TILE_SHADOW / 100;
+                }
+                moy_shape_hole_t body = {b.x, b.y, b.w, b.h, r};
+                moy_shape_shadow(&d.t, b.x, b.y, b.w, b.h, &sh, &body);
+            }
+            if (!paint_of(&d, dp->tile_fill, &p)) {
+                p = solid(tok(&d, MOY_UI_T_SURFACE_ALT));
+            }
+            rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+            if (ring) {
+                rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, NULL,
+                      dp->tile_line_w, val(&d, dp->tile_line_c), -1, NULL);
+            }
             return 1;
         }
         default:
