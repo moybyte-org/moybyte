@@ -25,6 +25,8 @@
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
  *   ui.dialog(title, buttons, kind, o) -> the button activated (from 1; 0 none);
  *                                    ui.dialog() ends its body
+ *   ui.popover(id, w, o)           -> true, false the frame it is dismissed;
+ *                                    ui.popover() ends its body
  *   ui.tabs(label, items, cur, o)  -> the new cur (from 1)
  *   ui.grid(id, w, h, o), ui.grid() (a grid of cards w x h; ui.grid() ends it)
  *   ui.card(title, sub, o)         -> x, y, w, h, state (the picture's rect)
@@ -463,6 +465,24 @@ static int moycore_ui_dialog(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_popover(lua_State *L)
+{
+    moy_ui_over_t o;
+    int32_t v = 0;
+    if (lua_isnoneornil(L, 1)) {
+        static const uint8_t none[1] = {0};
+        moy_ui_span_t end = {none, 0};
+        moy_ui_over_none(&o);
+        moy_ui_run_popover(moycore_ui_canvas(), end, 0, &o, &v);
+        return 0;
+    }
+    int w = lua_isnoneornil(L, 2) ? 0 : moycore_ui_int(L, 2);
+    moy_ui_run_popover(moycore_ui_canvas(), moycore_ui_span(L, 1), w, moycore_ui_over(L, 3, &o),
+                       &v);
+    lua_pushboolean(L, v != 0);
+    return 1;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -511,6 +531,7 @@ static void moycore_ui_open(lua_State *L)
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
         {"scroll", moycore_ui_scroll}, {"field", moycore_ui_field}, {"dialog", moycore_ui_dialog},
         {"tabs", moycore_ui_tabs}, {"grid", moycore_ui_grid}, {"card", moycore_ui_card},
+        {"popover", moycore_ui_popover},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);

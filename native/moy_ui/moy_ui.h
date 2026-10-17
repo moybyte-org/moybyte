@@ -339,10 +339,12 @@ enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI
 // A mark's flags: AFTER the part's content (a lifted card's rim), BACK in a
 // window behind, a current bar at the SIDE of a row rather than under it.
 // INK draws nothing and answers only the ink (a part's CONTENT phase); AGAIN
-// draws a focus mark once more under a clip and counts no mark.
+// draws a focus mark once more under a clip and counts no mark; RING draws
+// the theme's `focus.ring` whatever its focus style, and counts no mark (a
+// cursor: the sprite editor's).
 enum {
     MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
-    MOY_UI_MARK_AGAIN = 16,
+    MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32,
 };
 // focus.style's and current.style's values, in style.json's order
 enum {

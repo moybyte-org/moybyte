@@ -347,8 +347,16 @@ def _playtest(g, ws):
     ws._leave_menu()
 
 
+# The Sprites tab's state in the targets: the cursor on column 3, row 2, and
+# colour 11 in use.
+SPRITE_CUR, SPRITE_COLOUR = (3, 2), 11
+
+
 def _sprites(g, ws):
     _editor(g, ws, "paint")
+    ws.paint_layer._cur[:] = SPRITE_CUR
+    if ws.paint is not None:
+        ws.paint.color = SPRITE_COLOUR
 
 
 def _calc(g, ws):

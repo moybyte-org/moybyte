@@ -57,6 +57,7 @@
   (import "moybyte.app" "ui_grid" (func $ui_grid (param i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_card" (func $ui_card
     (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_popover" (func $ui_popover (param i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 

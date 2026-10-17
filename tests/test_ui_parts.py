@@ -23,6 +23,10 @@ and so do Appearance's (step 20): a tab row moves by left and right and takes
 a tap, and a grid of cards lays them in centred columns, moves between them,
 activates one and cuts and rings each picture the app draws
 (`tests/fixtures/ui_parts/look_*.moy`, `tests/fixtures/wasm/app_look.moy`).
+The sprite editor's popover (step 24) opens focus in it under its opener or
+`at`'s rect, holds the input, and goes on a press outside or Esc; its page is
+drawn the same three ways too (`tests/fixtures/ui_parts/pop_*.moy`,
+`tests/fixtures/wasm/app_pop.moy`).
 """
 
 import os
@@ -1176,3 +1180,168 @@ def test_the_look_page_answers_its_script(look_runs):
     assert s[4][L_ACTS] == 1 and s[4][L_PICKED] == s[4][L_PICKED]
     assert s[6][L_FOCUS] == len("After")
     assert s[0][L_LEFT] > 0
+
+
+# -- a popover (docs/look_2026-10.md step 24) ------------------------------------------
+
+
+def _popover_page(shown, at=None, w=160):
+    st = {"size": 0, "under": 0, "open": None, "done": 0, "end": None}
+
+    def draw():
+        ui.page("")
+        if ui.button("Pick"):
+            shown[0] = True
+        if ui.link("Under", ""):
+            st["under"] += 1
+        if shown[0]:
+            if at is not None:
+                ui.at(*at)
+            shown[0] = st["open"] = ui.popover("pick", w)
+            st["size"] = ui.seg("Size", ("1", "2", "3"), st["size"])
+            if ui.button("Done"):
+                shown[0] = False
+                st["done"] += 1
+            st["end"] = ui.popover()
+        return st
+    return _Run(draw)
+
+
+def _open_popover(at=None):
+    shown = [False]
+    r = _popover_page(shown, at)
+    r.frame()
+    r.frame()
+    r.frame(("a",))
+    for _ in range(3):
+        r.frame()
+    return r, shown
+
+
+def test_a_popover_opens_focus_on_its_first_stop_and_hangs_under_its_opener():
+    r, shown = _open_popover()
+    assert shown[0] and r.out["open"] is True and r.out["end"] is False
+    assert ui.focus() == "Size"
+    pick, size = _box(r, "Pick"), _box(r, "Size")
+    assert size[1] > pick[1] + pick[3], "the card hangs under the button that opened it"
+    r.frame(("right",))
+    assert r.out["size"] == 1
+    r.frame(("down",))
+    assert ui.focus() == "Done"
+    r.frame(("a",))
+    assert r.out["done"] == 1 and not shown[0]
+    r.frame()
+    r.frame()
+    assert ui.focus() == "Pick", "focus went back to the opener"
+
+
+def test_nothing_outside_a_popover_takes_input():
+    r, shown = _open_popover()
+    r.frame(("up",))
+    r.frame(("a",))
+    assert r.out["under"] == 0 and shown[0]
+
+
+def test_a_press_outside_a_popover_dismisses_it():
+    r, shown = _open_popover()
+    r.frame(ptr=(2, 236, 1 | 2 | 4))
+    assert r.out["open"] is False and not shown[0]
+    r.frame(ptr=(2, 236, 1))
+    r.frame()
+    assert r.out["under"] == 0, "the press that dismissed it reached nothing"
+
+
+def test_a_press_inside_a_popover_keeps_it():
+    r, shown = _open_popover()
+    b = _box(r, "Done")
+    r.frame(ptr=(b[0] + 2, b[1] + 2, 1 | 2 | 4))
+    assert r.out["open"] is True
+    r.frame(ptr=(b[0] + 2, b[1] + 2, 1))
+    assert r.out["done"] == 1
+
+
+def test_esc_dismisses_a_popover():
+    r, shown = _open_popover()
+    r.frame(typed=27)
+    assert r.out["open"] is False and not shown[0]
+
+
+def test_a_popover_hangs_from_ats_rect_and_goes_above_it_without_room_below():
+    r, _shown = _open_popover(at=(40, 200, 80, 20))
+    size = _box(r, "Size")
+    assert size[1] + size[3] <= 200, "no room under the rect: the card goes above it"
+
+
+def test_a_popover_draws_a_card_and_leaves_the_rest():
+    plain = _popover_page([False])
+    for _ in range(3):
+        plain.frame()
+    r, _shown = _open_popover()
+    size = _box(r, "Size")
+    assert r.px(300, 236) == plain.px(300, 236), "only the card is drawn over the page"
+    assert any(r.px(x, size[1] - 2) != plain.px(x, size[1] - 2)
+               for x in range(size[0], size[0] + size[2]))
+
+
+# -- the popover's page in every runtime ---------------------------------------------------
+
+WASM_POP = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_pop.moy")
+Q_FRAMES, Q_OPEN, Q_SIZE, Q_CLOSES, _Q4, Q_FOCUS, Q_FAIL, Q_UNDER = range(8)
+POP_SCRIPT = ("a", "right", "down", "a", "down", "a")
+
+
+@pytest.fixture(scope="module")
+def pop_runs(tmp_path_factory):
+    root = str(tmp_path_factory.mktemp("ui_pop") / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("pop_py.moy", "pop_lua.moy"):
+        shutil.copytree(os.path.join(PARTS, d), os.path.join(root, d))
+    titles = {"python": "UI Pop Py", "lua": "UI Pop Lua"}
+    if _wasm_or_skip():
+        from tools import wasm_cart
+        wasm_cart.build(WASM_POP, os.path.join(root, "app_pop.moy"))
+        titles["wasm"] = "App Pop Wasm"
+    out = {}
+    for name, title in titles.items():
+        ws = host_app.build_workstation(root)
+        ws.pointer.visible = False
+        open_cart(ws, title)
+        make_drv(ws).frame(_DT)
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        drv = make_drv(ws)
+        shots = []
+        for _ in range(3):
+            _frame(drv)
+        shots.append((_pixels(ws), _pmem(ws)))
+        for step in POP_SCRIPT:
+            drv.press(step)
+            for _ in range(3):
+                _frame(drv)
+            shots.append((_pixels(ws), _pmem(ws)))
+        out[name] = shots
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        ws.exit()
+    return out
+
+
+def test_the_popover_page_is_one_page_in_every_runtime(pop_runs):
+    ref = pop_runs["python"]
+    for name, got in pop_runs.items():
+        assert len(got) == len(ref)
+        for i, ((px, pm), (rpx, rpm)) in enumerate(zip(got, ref)):
+            assert pm[Q_FAIL] == 0, "%s: a row failed (%d)" % (name, pm[Q_FAIL])
+            assert pm[:Q_FAIL] == rpm[:Q_FAIL], "%s step %d answered %r, python %r" % (
+                name, i, pm, rpm)
+            assert pm[Q_UNDER] == rpm[Q_UNDER], (name, i)
+            assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
+
+
+def test_the_popover_page_answers_its_script(pop_runs):
+    s = [p for _px, p in pop_runs["python"]]
+    assert s[0][Q_FOCUS] == len("Pick") and s[0][Q_OPEN] == 0
+    assert s[1][Q_OPEN] == 1 and s[1][Q_FOCUS] == len("Size"), "a opens it, focus in it"
+    assert s[2][Q_SIZE] == 1, "right on the seg"
+    assert s[3][Q_FOCUS] == len("Done")
+    assert s[4][Q_CLOSES] == 1 and s[4][Q_OPEN] == 0
+    assert s[4][Q_FOCUS] == len("Pick"), "focus back on the opener"
+    assert s[6][Q_UNDER] == 1, "the link under it takes input again"

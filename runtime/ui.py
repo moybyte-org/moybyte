@@ -13,6 +13,7 @@ Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components); `icon`
 puts an icon on the next row or button and `progress` shows how far a task
 is. `table` is a list in columns, `scroll` a region whose rows scroll in it,
 `field` a line of typed text and `dialog` a modal card (Files' verbs);
+`popover` a card hung from a part, holding a picker (the sprite editor's);
 `tabs` is a row of tabs and `grid` and `card` a grid of cards whose pictures
 the app draws (Appearance's).
 
@@ -310,6 +311,20 @@ def dialog(title=None, buttons=(), kind="primary", o=None):
         return _C.api_dialog(t[0], t[1], t[2], "", b"", 0, None)
     k = _KINDS.index(kind) if kind in _KINDS else 1
     return _C.api_dialog(t[0], t[1], t[2], title, _opts(buttons), k, _over(o))
+
+
+def popover(id=None, w=0, o=None):
+    """`popover(id, w)` begins a card hung under `at`'s rect (else under the
+    stop that holds focus as it opens), above it where there is no room
+    below, `w` wide (0: the rect's width), its body the rows stacked until
+    `popover()` ends it; while it is drawn nothing outside it takes input.
+    True, or False the frame a press outside the card or Esc dismissed it
+    (the app then stops drawing it)."""
+    t = _T
+    if id is None:
+        _C.api_popover(t[0], t[1], t[2], "", 0, None)
+        return False
+    return bool(_C.api_popover(t[0], t[1], t[2], id, w, _over(o)))
 
 
 def tabs(label, items, cur, o=None):

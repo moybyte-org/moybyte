@@ -67,10 +67,12 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
     from runtime.chrome import default_icon_pixels
 
 try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
+                             metric_class as _metric_class, DESK as _DESK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
+                                     BASE_H as _BASE_H,
+                                     metric_class as _metric_class, DESK as _DESK)
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
@@ -121,6 +123,16 @@ _TOOL_GLYPH = {
     "sleft": "arr_l", "sright": "arr_r", "sup": "arr_u", "sdown": "arr_d",
     "clear": "clear",
 }
+# The 2026-10 look's icon for each tool: the icon set's slot where the sets
+# have one, else the glyph table's (`ui.icon`'s order).
+_TOOL_ICON = {
+    "pen": "pencil", "fill": "bucket", "rect": "rect", "line": "line",
+    "oval": "oval", "select": "select", "copy": "dup", "fliph": "flip",
+    "rot": "rotate", "sleft": "back", "sright": "forward", "sdown": "down",
+    "clear": "del",
+}
+# The pickers' sizes, PaintEditor.SIZES's order.
+_SIZE_NAMES = ("1x1", "2x2", "3x3")
 # The drawing-mode tools (highlighted when active); the rest are one-shot actions.
 _TOOL_MODE = {
     "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "rect": PaintEditor.RECT,
@@ -146,8 +158,13 @@ class PaintLayout(LayoutBase):
     a hugely bigger drawing surface, not just scaled chrome."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
-                 chrome_scale=None):
+                 chrome_scale=None, look=False):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
+        self.look = bool(look)
+        self.desk = _metric_class() == _DESK
+        if self.look:
+            self._look_geometry()
+            return
         fs = self.fs
         # -- responsive: anchor the panel to the canvas, the swatch/button column to
         # the panel's right edge, and grow the grid to fill what's left ------------
@@ -220,6 +237,73 @@ class PaintLayout(LayoutBase):
             + _tool_row(self.pg_x0, row2_y, cw2, toolh, len(_TOOL_ROW2)))
 
 
+    def _look_geometry(self):
+        """The 2026-10 look's arrangement (a theme with a depth; the
+        `sprite-editor` targets): "Sprite N" over the grid, the palette's two
+        columns beside it, then a column of ‹ ›, the Size line, the preview
+        and Get / Put / File; the tools under the grid and the actions under
+        them, Close in the column. The grid is the largest multiple of 48
+        that leaves room for both tool rows and the column. Close sits beside
+        the tools when the column ends above them, and the actions then take
+        the whole width; else Close sits beside the actions, which span the
+        grid and the palette."""
+        fs, desk = self.fs, self.desk
+        pad, gap = (16, 20) if desk else (6 * fs, 6 * fs)
+        trow = 40 if desk else 22 * fs
+        bh = 40 if desk else 18 * fs
+        line = 8 * fs                             # a line of the pixel face
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = self.panel = (cx, cy, cw, ch)
+        self.title_xy = (cx + pad, cy + pad)
+        self.trow = trow
+        self.icon = 24 if desk else 16 * fs
+        gx = cx + pad
+        gy = cy + pad + line + (10 if desk else 3 * fs)
+        tgap = 14 if desk else 3 * fs
+        bottom = cy + ch - (pad // 2 if desk else 2 * fs)
+        col = 300 if desk else 120 * fs           # the column's least width
+        hroom = bottom - gy - tgap - 2 * trow
+        wroom = (cw - 2 * pad - 2 * gap - col) * 144 // 166
+        span = max(48, 48 * (min(hroom, wroom) // 48))
+        self.pg_x0, self.pg_y0, self.pg_span = gx, gy, span
+        self.pg_area = (gx, gy, span, span)
+        self.caption = (gx, cy + pad - 2 * fs, span, line + 4 * fs)
+        sw = max(6 * fs, span * 11 // 144)
+        self.sw, self.sw_cols = sw, _SW_COLS
+        self.sw_x0, self.sw_y0 = gx + span + gap, gy
+        self.sw_area = (self.sw_x0, gy, 2 * sw, 8 * sw)
+        rx = self.sw_x0 + 2 * sw + gap
+        rw = cx + cw - pad - rx
+        half = (rw - (8 if desk else 4 * fs)) // 2
+        self.spr_prev = (rx, gy, half, bh)
+        self.spr_next = (rx + rw - half, gy, half, bh)
+        y = gy + bh + (12 if desk else 5 * fs)
+        self.size_btn = (rx, y - 3 * fs, rw, line + 6 * fs)
+        self.size_xy = (rx + rw // 2, y)
+        y += line + (14 if desk else 6 * fs)
+        ph = 96 if desk else 34 * fs
+        self.prev_rect = (rx, y, rw, ph)
+        self.prev_xy, self.prev_box = (rx, y), ph
+        y += ph + (14 if desk else 6 * fs)
+        step = bh + (8 if desk else 3 * fs)
+        self.get_btn = (rx, y, rw, bh)
+        self.put_btn = (rx, y + step, rw, bh)
+        self.files_btn = (rx, y + 2 * step, rw, bh)
+        col_end = y + 2 * step + bh
+        row1_y = gy + span + tgap
+        row2_y = row1_y + trow
+        beside = col_end + line + 2 * fs <= row1_y
+        self.close_btn = (rx, row1_y if beside else row2_y, rw, bh)
+        self.status_xy = (rx, col_end + 2 * fs)
+        self.status_w = rw
+        span2 = (cx + cw - pad - gx) if beside else (self.sw_x0 + 2 * sw - gx)
+        cw1 = span // len(_TOOL_ROW1)
+        cw2 = span2 // len(_TOOL_ROW2)
+        self.tool_btns = (
+            _tool_row(gx, row1_y, cw1, trow, len(_TOOL_ROW1))
+            + _tool_row(gx, row2_y, cw2, trow, len(_TOOL_ROW2)))
+
+
 class PaintLayer:
     """The paint editor content Layer (SYSTEM domain, responsive #39 step 3): a
     full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
@@ -240,13 +324,38 @@ class PaintLayer:
         self._shape_start = None      # RECT/LINE/OVAL/SELECT drag origin cell (#90)
         self._shape_end = None        # ...and its current (clamped) end cell, for preview
         self._ekey = KeyEdge()        # Ctrl+Z/Y edge tracker (undo-shortcut, #90)
+        # The grid's cursor (lx, ly): the cell the pointer last pressed or
+        # dragged over, moved by the arrows; `a` acts there as a tap would.
+        # Under a theme with a depth it always shows, else once a key moved it.
+        self._cur = [0, 0]
+        self._keyed = False
+        # The pickers (the sprite and its size): a popover of the public UI
+        # API's, its host side made at the first open; the release that
+        # tapped inside it last.
+        self._pop = False
+        self._host = None
+        self._pop_tap = None
         sc = ws.sys_canvas
-        self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+        self._lay_args = (sc.w, sc.h, getattr(sc, "font_scale", 1), None)
+        self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1),
+                                  look=self._looked())
+
+    @staticmethod
+    def _looked():
+        return bool(_ui_draw.depth()[0])
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- called by ws._relayout on a
         font-scale change (and, later, a window resize)."""
-        self.layout = PaintLayout(w, h, fs, chrome_scale=cs)
+        self._lay_args = (w, h, fs, cs)
+        self.layout = PaintLayout(w, h, fs, chrome_scale=cs, look=self._looked())
+
+    def _sync_layout(self):
+        """A look change between a theme with a depth and one without lays
+        the tab out again."""
+        if self.layout.look != self._looked():
+            w, h, fs, cs = self._lay_args
+            self.layout = PaintLayout(w, h, fs, chrome_scale=cs, look=self._looked())
 
     def reset_drag(self):
         """Clear the drag-stroke origin (called by ws lifecycle: open_theme /
@@ -255,6 +364,8 @@ class PaintLayer:
         self._fill_fired = False
         self._shape_start = None
         self._shape_end = None
+        self._pop = False
+        self._pop_tap = None
 
     # -- Layer facets --------------------------------------------------------
 
@@ -274,8 +385,45 @@ class PaintLayer:
         self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
+        if self._pop:                  # the pickers take the keys while open
+            if self._host.keys(i):
+                self.ws.mark_dirty()
+            return True
         self.handle_key(i)             # host Ctrl+Z / Ctrl+Y undo shortcut (#90)
-        return True                    # otherwise paint is pointer/touch-driven
+        self._cursor_keys(i)
+        return True
+
+    def _cursor_keys(self, i):
+        """The arrows move the grid's cursor; `a` acts at it as a tap there
+        does (a pen dot, a fill, a one-cell shape or selection)."""
+        ws = self.ws
+        pe = ws.paint
+        if pe is None:
+            return
+        dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
+        dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        c = self._cur
+        if dx or dy:
+            d = pe.dim - 1
+            c[0] = max(0, min(d, c[0] + dx))
+            c[1] = max(0, min(d, c[1] + dy))
+            self._keyed = True
+            ws.mark_dirty()
+        if i.pressed("a"):
+            self._keyed = True
+            lay = self.layout
+            cell = max(1, lay.pg_span // pe.dim)
+            px = lay.pg_x0 + min(c[0], pe.dim - 1) * cell + cell // 2
+            py = lay.pg_y0 + min(c[1], pe.dim - 1) * cell + cell // 2
+            if self._grid_press(px, py):
+                self._paint_release()
+            ws.mark_dirty()
+
+    def _follow(self, px, py):
+        """The cursor follows the pointer over the grid."""
+        cell = self._paint_grid_cell(px, py)
+        if cell is not None:
+            self._cur[0], self._cur[1] = cell
 
     def handle_key(self, i):
         """Host-convenience undo/redo shortcut: Ctrl+Z (0x1A) / Ctrl+Y (0x19). These
@@ -300,6 +448,17 @@ class PaintLayer:
         # unconditionally claiming the tap (a stray theme-editor tap must reach the
         # paint grid, not the Editor's tab ladder).
         if click and ws.menu_view == "paint" and ws.bar_layer.handle_bar_tap("menu", px, py):
+            self._pop = False
+            return True
+        if self._pop:
+            # The pickers hold the pointer while open: a press outside them
+            # closes them (ui.popover answers it), and a release is the tap
+            # their sheet reads its tile from.
+            down = bool(ws.pointer.down)
+            if self._host.point(px, py, click, down):
+                if not click and not down:
+                    self._pop_tap = (px, py)
+                ws.mark_dirty()
             return True
         # A tap (click) routes through _paint_click (grid OR buttons). A held drag with
         # no fresh click keeps drawing on the grid so press-and-move draws a continuous
@@ -408,8 +567,10 @@ class PaintLayer:
             cell = self._grid_cell_clamped(px, py)
             if cell is not None:
                 self._shape_end = cell
+                self._cur[0], self._cur[1] = cell
             return
-        self._paint_stroke(px, py)
+        if self._paint_stroke(px, py):
+            self._follow(px, py)
 
     def _paint_release(self):
         """Pointer released (anywhere): commit the pending shape/selection, or close a
@@ -452,6 +613,7 @@ class PaintLayer:
         if pe is None:
             return
         if self._grid_press(px, py):           # draw/shape/select in the zoomed grid
+            self._follow(px, py)
             return
         tid = self._tool_at(px, py)            # a #90 tool button (mode/undo/transform)?
         if tid is not None:
@@ -465,6 +627,9 @@ class PaintLayer:
             pe.select(-1)
         elif _in(px, py, lay.spr_next):
             pe.select(1)
+        elif lay.look and (_in(px, py, lay.size_btn) or _in(px, py, lay.prev_rect)
+                           or _in(px, py, lay.caption)):
+            self._open_pickers()               # the sprite and its size, a popover
         elif _in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
         elif _in(px, py, lay.get_btn) and ws._editing_icons:
@@ -624,11 +789,17 @@ class PaintLayer:
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
+        self._sync_layout()
         lay = self.layout
         pe = ws.paint
         # Edit the editor's OWN sheet -- the cart sprites for PAINT, the system icon
         # sheet for the theme editor (EDIT ICONS) -- so one renderer serves both.
         sheet = pe.sheet if pe is not None else ws.project.sheet
+        if lay.look:
+            self._draw_look(sheet)
+            if self._pop and pe is not None:
+                self._draw_pickers()
+            return
         # Cover the FULL content area below the bar first (Fix 3): the panel below
         # doesn't span edge to edge, so without this fill stale pixels would bleed
         # through the side/bottom strips. Match the cards tab (which fills the whole
@@ -686,6 +857,9 @@ class PaintLayer:
         # The selection marquee + the live shape/select drag preview (#90). Draws
         # nothing in the default (no-selection, no-drag) state.
         self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
+        if self._keyed:                  # the cursor, once a key has moved it
+            x, y = self._cursor_xy(pe, gx0, gy0, cell)
+            cv.rectb(x, y, cell, cell, th["accent"])
         # 16-color palette (2x8), the selected swatch outlined white.
         for idx in range(16):
             x = lay.sw_x0 + (idx % lay.sw_cols) * lay.sw
@@ -728,6 +902,225 @@ class PaintLayer:
         self._draw_tools()               # #90: undo/redo/fill/transform row
 
 
+    # -- the 2026-10 look (a theme with a depth) ----------------------------------
+
+    def _cursor_xy(self, pe, gx0, gy0, cell):
+        c = self._cur
+        d = pe.dim - 1
+        c[0] = min(c[0], d)
+        c[1] = min(c[1], d)
+        return gx0 + c[0] * cell, gy0 + c[1] * cell
+
+    def _icon_draw(self, kind, rect, ink, cv):
+        """A glyph_draw for the look's buttons and tools: `kind` (an icon set
+        slot, a glyph) from the theme's icon set where it has the slot, else
+        the glyph table's -- `ui.icon`'s order."""
+        slot, glyph = kind if isinstance(kind, tuple) else (kind, kind)
+        if slot is not None and self.ws.draw_icon(slot, rect, ink, cv):
+            return
+        _ui_draw.glyph(cv, glyph, rect, ink, 2 if self.layout.desk else None)
+
+    def _checker(self, cv, x, y, w, h, s, greys):
+        """Transparency's grey checker over (x, y, w, h) in squares of s."""
+        dark, light = greys
+        cv.rect(x, y, w, h, light)
+        for yy in range(0, h, s):
+            for xx in range(s if (yy // s) & 1 == 0 else 0, w, 2 * s):
+                cv.rect(x + xx, y + yy, min(s, w - xx), min(s, h - yy), dark)
+
+    def _draw_look(self, sheet):
+        """The sprite tab in the theme's roles (docs/look_2026-10.md step 24):
+        the grid on the grey checker where a pixel is clear, the ring cursor,
+        the current mark on the tool and the colour, and the column's parts as
+        the theme's buttons with its icons."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        lay = self.layout
+        pe = ws.paint
+        th = ws.theme_colors
+        fs = lay.fs
+        greys = ws.look.live.fixed[:2]
+        keyline, white = ws.look.live.fixed[2:]
+        cv.rect(*(lay.body_fill + (th["surface"],)))
+        n = pe.n if pe is not None else 0
+        cv.print(("Icon " if ws._editing_icons else "Sprite ") + str(n),
+                 lay.title_xy[0], lay.title_xy[1], th["ink_dim"], 1)
+        if pe is None or sheet is None:
+            return
+        # The grid: each pixel a cell, a clear one the checker, the cells
+        # parted by the theme's border where they are big enough to part.
+        dim, span = pe.dim, lay.pg_span
+        gx0, gy0 = lay.pg_x0, lay.pg_y0
+        cell = span // dim
+        if cell < 1:
+            cell = 1
+        ox, oy = sheet.tile_origin(pe.n)
+        lines = cell >= 6
+        inner = cell - 1 if lines else cell
+        cs = max(3 * fs, cell // 3)
+        if lines:
+            cv.rect(gx0 - 1, gy0 - 1, span + 1, span + 1, th["border"])
+        for ly in range(dim):
+            y = gy0 + ly * cell
+            for lx in range(dim):
+                x = gx0 + lx * cell
+                v = sheet.pget(ox + lx, oy + ly)
+                if v:
+                    cv.rect(x, y, inner, inner, v)
+                else:
+                    self._checker(cv, x, y, inner, inner, cs, greys)
+        if pe.size > 1:
+            tpx = span // pe.size
+            for t in range(1, pe.size):
+                cv.rect(gx0 + t * tpx - 1, gy0, 1, span, th["ink_dim"])
+                cv.rect(gx0, gy0 + t * tpx - 1, span, 1, th["ink_dim"])
+        self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
+        # The cursor: the theme's ring around a black keyline.
+        x, y = self._cursor_xy(pe, gx0, gy0, cell)
+        box = (x - 1, y - 1, cell + 1, cell + 1)
+        cv.rectb(box[0], box[1], box[2], box[3], keyline)
+        _ui_draw.focus(cv, th, box, "part", ring=True)
+        # The palette: colour 0 the checker under a white stroke, the
+        # colour in use ringed white over a `value` bar.
+        sw = lay.sw
+        for idx in range(16):
+            x = lay.sw_x0 + (idx % lay.sw_cols) * sw
+            y = lay.sw_y0 + (idx // lay.sw_cols) * sw
+            if idx:
+                cv.rect(x, y, sw, sw, idx)
+            else:
+                self._checker(cv, x, y, sw, sw, max(3 * fs, sw // 4), greys)
+                cv.line(x + sw - 1, y, x, y + sw - 1, white)
+        x = lay.sw_x0 + (pe.color % lay.sw_cols) * sw
+        y = lay.sw_y0 + (pe.color // lay.sw_cols) * sw
+        for r in range(2 if lay.desk else fs):
+            cv.rectb(x + r, y + r, sw - 2 * r, sw - 2 * r, white)
+        cv.rect(x, y + sw - 3 * fs, sw, 3 * fs, th["value"])
+        # The column: the sprite before and after, its size (a tap opens the
+        # pickers, as on the preview and the caption), the preview on the
+        # checker, then Get, Put and File.
+        _ui_draw.button(cv, th, lay.spr_prev, "<", "normal")
+        _ui_draw.button(cv, th, lay.spr_next, ">", "normal")
+        text = "Size %dx%d" % (pe.size, pe.size)
+        cv.print(text, lay.size_xy[0] - len(text) * 4 * fs, lay.size_xy[1], th["ink"], 1)
+        px, py, pw, ph = lay.prev_rect
+        self._checker(cv, px, py, pw, ph, 6 if lay.desk else 3 * fs, greys)
+        ps = max(1, (ph * 3 // 4) // dim)
+        bx = px + (pw - dim * ps) // 2
+        by = py + (ph - dim * ps) // 2
+        for ly in range(dim):
+            for lx in range(dim):
+                v = sheet.pget(ox + lx, oy + ly)
+                if v:
+                    cv.rect(bx + lx * ps, by + ly * ps, ps, ps, v)
+        draw = self._icon_draw
+        if ws._editing_icons:
+            _ui_draw.button(cv, th, lay.get_btn, "Reset", "normal",
+                            glyph=("rotate", "rotate"), glyph_draw=draw)
+        else:
+            _ui_draw.button(cv, th, lay.get_btn, "Get", "normal",
+                            glyph=("getcarts", "get"), glyph_draw=draw)
+            _ui_draw.button(cv, th, lay.put_btn, "Put", "normal",
+                            glyph=("save", "put"), glyph_draw=draw)
+            _ui_draw.button(cv, th, lay.files_btn, "File", "normal",
+                            glyph=("files", "folder"), glyph_draw=draw)
+        if ws.paint_status:
+            cv.print(_ui_draw.print_cut(ws.paint_status, lay.status_w, fs),
+                     lay.status_xy[0], lay.status_xy[1], th["ink_dim"], 1)
+        _ui_draw.button(cv, th, lay.close_btn, "Close", "normal")
+        self._draw_tools_look()
+
+    def _draw_tools_look(self):
+        """The tools and the actions as icons in the dim ink: the tool in use
+        and an armed toggle (erase, mirror) on the current mark, copy and
+        paste fainter while there is nothing to copy or paste, clear in the
+        danger colour."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        pe = ws.paint
+        lay = self.layout
+        th = ws.theme_colors
+        fs = lay.fs
+        btns = lay.tool_btns
+        r = 8 if lay.desk else 6 * fs
+        for i in range(len(btns)):
+            tid = _TOOLS[i]
+            x, y, w, h = btns[i]
+            plate = (x + fs, y, w - 2 * fs, h - 4 * fs)
+            active = (tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]) or (
+                tid == "erase" and pe.erase) or (tid == "mirror" and pe.mirror)
+            ink = th["ink_dim"]
+            if active:
+                got = _ui_draw.current(cv, th, plate, r)
+                ink = th["ink"] if got is None else got
+            elif tid in ("copy", "paste") and not (
+                    (pe.sel is not None) if tid == "copy" else pe.has_clip):
+                ink = th["border"]
+            elif tid == "clear":
+                ink = th["danger"]
+            box = min(lay.icon, w, plate[3])
+            rect = (x + (w - box) // 2, y + (plate[3] - box) // 2, box, box)
+            self._icon_draw((_TOOL_ICON.get(tid), _TOOL_GLYPH[tid]), rect, ink, cv)
+
+    def _open_pickers(self):
+        if self._host is None:
+            self._host = _ui_draw.AppHost()
+        else:
+            self._host.reset()
+        self._pop = True
+        self._pop_tap = None
+        self.ws.mark_dirty()
+
+    def _draw_pickers(self):
+        """The pickers, a popover of the public UI API's hung from the
+        preview: the size as a seg, and the sheet in a part, whose tapped
+        tile becomes the sprite. A press outside, or Esc, closes it."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        pe = ws.paint
+        lay = self.layout
+        th = ws.theme_colors
+        fs = lay.fs
+        sheet = pe.sheet
+        settled = self._host.begin(cv, th, lay.body_fill, lay.desk)
+        k = 2 if lay.desk else fs
+        m = 2 * fs
+        tile = sheet.TILE * k
+        pw = sheet.cols * tile + 2 * m
+        ph = sheet.rows * tile + 2 * m
+        _ui.at(*lay.prev_rect)
+        shown = _ui.popover("Sprites", max(pw + (48 if lay.desk else 24 * fs),
+                                           300 if lay.desk else 200 * fs))
+        i = _ui.seg("Size", _SIZE_NAMES, pe.size - 1)
+        if 0 <= i < len(pe.SIZES) and pe.SIZES[i] != pe.size:
+            pe.size = pe.SIZES[i]
+            pe._clamp_size()
+        x, y, w, h, st = _ui.part("Sheet", pw, ph)
+        if w > 0 and h > 0:
+            x0, y0 = x + m, y + m
+            for t in range(sheet.count):
+                tx, ty = sheet.tile_origin(t)
+                cv.spr(sheet.tile_image(t, 0), x0 + tx * k, y0 + ty * k, k)
+            tx, ty = sheet.tile_origin(pe.n)
+            span = pe.size * tile
+            cv.rectb(x0 + tx * k - 1, y0 + ty * k - 1, span + 2, span + 2, th["value"])
+            tap = self._pop_tap
+            if st & _ui.ACTIVATED and tap is not None:
+                col = (tap[0] - x0) // tile
+                row = (tap[1] - y0) // tile
+                if 0 <= col < sheet.cols and 0 <= row < sheet.rows:
+                    pe.n = row * sheet.cols + col
+                    pe._clamp_size()
+                    shown = False
+        _ui.popover()
+        self._pop_tap = None
+        if not shown:
+            self._pop = False
+            ws.request_frame()
+        elif not settled:
+            ws.request_frame()
+
+
 class ThemeLayer:
     """The icon-theme editor (EDIT ICONS, Settings -> #52): the SAME paint flow as the
     cart sprite editor, pointed at the SYSTEM icon sheet. It owns the theme LIFECYCLE
@@ -760,8 +1153,9 @@ class ThemeLayer:
 
     def handle_input(self, i):
         # EDIT ICONS is pointer/touch-driven like PAINT; B closes back to Settings.
-        # Share the paint editor's host Ctrl+Z/Y undo shortcut here too (#90).
-        self._paint.handle_key(i)
+        # Share the paint editor's host Ctrl+Z/Y undo shortcut and its cursor
+        # keys here too (#90).
+        self._paint.handle_input(i)
         self.ws._leave_or_home(self.leave)
         return True
 

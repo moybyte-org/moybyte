@@ -1,7 +1,7 @@
 // The public UI API's engine (docs/ui_api_2026-10.md): the verbs every app
 // and cart draws its interface with -- page, label, button, toggle, slider,
 // list, group, info, link, cycle, seg, swatches, hints, icon, progress, table,
-// scroll, field, dialog, tabs, grid, card, part, focus, keys_taken, at -- and
+// scroll, field, dialog, popover, tabs, grid, card, part, focus, keys_taken, at -- and
 // the focus and navigation they share.
 //
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
@@ -78,13 +78,14 @@ typedef struct {
     uint8_t page;                   // the index of its page's stop, or 0xff
 } moy_ui_stop_t;
 
-// The page a scroll region or a dialog's body stands in, kept while it is open.
+// The page a scroll region, a dialog's body or a popover's stands in, kept
+// while it is open.
 typedef struct {
     moy_ui_box_t page;
     int16_t y, scroll;
     int8_t keep;
-    uint8_t stop, kind;             // kind: 1 a scroll region, 2 a dialog
-    int16_t used;                   // a dialog: the body height it was laid out for
+    uint8_t stop, kind;             // kind: 1 a scroll region, 2 a dialog, 3 a popover
+    int16_t used;                   // a dialog or popover: the body height it was laid out for
 } moy_ui_nest_t;
 #define MOY_UI_API_NEST 2
 
@@ -141,6 +142,11 @@ typedef struct {
     int8_t dlg_pick;                // the dialog button activated this frame, -1 none
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
+    // ui.popover's: the card drawn this frame and last (w 0: none), the
+    // rect it hangs from, and whether this frame's input dismissed it (a
+    // press outside the card drawn last, or Esc).
+    moy_ui_box_t pop_card, pop_prev, pop_at;
+    uint8_t pop_gone;
     // ui.grid's: open (2: placed by ui.at), its columns, the card next, the
     // first column's left edge and the columns' pitch, the pictures' size,
     // the top of the card row being laid out (content coordinates; a placed
@@ -240,6 +246,15 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
 // the button activated this frame (from 0), -1 none; the end answers -1.
 int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                           const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o);
+// A popover (§1): `id` begins a card hung under ui.at's rect (else under the
+// stop that holds focus as it opens), above it where the surface has no room
+// below, `w` wide (0: the rect's width), its body the rows stacked until an
+// id of length 0 ends it. While it is drawn nothing outside it takes input,
+// as under a dialog. Answers 1, or 0 the frame a press outside the card or
+// Esc dismissed it; the end answers 0.
+#define MOY_UI_KEY_ESC 27
+int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
+                       const moy_ui_over_t *o);
 // A card grid (§1): `id` begins one whose cards' pictures are w x h, as
 // many columns as the row holds, the grid's rows stacking on the page (or
 // from ui.at's rect's top left, across its width); an id of length 0 ends it.
@@ -250,7 +265,7 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // draws into it before its next ui call -- and the state bits (§5).
 void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      moy_ui_span_t sub, const moy_ui_over_t *o, int32_t out[5]);
-// Whether the frame drawn last laid a dialog out from a stale measure, so
+// Whether the frame drawn last laid a dialog or a popover out from a stale measure, so
 // the next frame is owed though no input came.
 int moy_ui_api_owes(const moy_ui_ctx_t *c);
 // out: x, y, w, h, state.

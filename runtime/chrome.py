@@ -981,9 +981,17 @@ class Live:
     canvas are given), `look` the look's leaves with its colours placed in
     the same block, and `buttons` its button leaves as `ui.use_buttons`
     installs them: (app or None, kind, leaves), a paint fill its first stop's
-    colour, every colour placed."""
+    colour, every colour placed; `fixed` the colours no theme changes
+    (FIXED), placed in the block too."""
 
-    __slots__ = ("tokens", "content", "near", "block", "used", "look", "buttons")
+    __slots__ = ("tokens", "content", "near", "block", "used", "look", "buttons", "fixed")
+
+
+# The colours no theme changes (docs/media/look_2026-10/DESIGN.md, Components:
+# Editors): transparency's grey checker, dark then light, under the sprite
+# editor's clear pixels and its colour 0; the black keyline its cursor's ring
+# goes round; the white that strokes colour 0 and rings the colour in use.
+FIXED = (RGB | 0x6e6e78, RGB | 0x9a9aa4, RGB | 0x000000, RGB | 0xffffff)
 
 
 _PAINT, _VIBRANCY = 0x2000000, 0x3000000
@@ -1037,7 +1045,8 @@ def live_colors(name, variant=DEFAULT_VARIANT):
     at = [i for i in range(len(leaves)) if kinds[i] == "colour"]
     rows, spots = _button_rows(look, names, kinds, btn)
     placed, near, block, used = _ui_draw._C.theme_place(
-        list(row) + [leaves[i] for i in at] + [rows[r][2][j] for r, j in spots])
+        list(row) + [leaves[i] for i in at] + [rows[r][2][j] for r, j in spots]
+        + list(FIXED))
     toks = _ui_draw._C.tokens()
     roles = _ui_draw._C.theme_roles()
     rec = Live()
@@ -1059,6 +1068,8 @@ def live_colors(name, variant=DEFAULT_VARIANT):
     for k, (r, j) in enumerate(spots):
         rows[r][2][j] = placed[base + k]
     rec.buttons = rows
+    at = base + len(spots)
+    rec.fixed = tuple(placed[at:at + len(FIXED)])
     rec.block, rec.used = block, used
     _LIVE_CACHE[key] = rec
     return rec

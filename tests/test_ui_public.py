@@ -406,7 +406,7 @@ def test_a_settled_page_draws_the_same_pixels():
 
 # The shell's app modules and system carts not yet moved onto the verbs: each
 # screen step that restyles an app takes it off (docs/look_2026-10.md 19-24;
-# step 23 restyled the editors in place, docs/ui_api_2026-10.md §1a),
+# steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a),
 # and step 27 holds the list empty.
 NOT_MOVED = frozenset((
     "runtime/artwork.py",

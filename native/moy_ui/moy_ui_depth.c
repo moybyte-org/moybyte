@@ -665,7 +665,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
         }
         return MOY_UI_OK;
     }
-    if (!m->on && m->active && !after) {
+    if (!m->on && m->active && !after && !(flags & MOY_UI_MARK_RING)) {
         s_marks.drawn++;
         return moy_ui_focus_ring(s, b, fs);     // a theme with no marks: its ring
     }
@@ -679,6 +679,12 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
     int st = m->style[cls];
     int ci = moy_ui_token(d.look, m->color);
     uint16_t c = d.row->pal[ci & moy_ui_cmask()];
+    if (flags & MOY_UI_MARK_RING) {
+        if (!after) {
+            focus_ring_of(&d, m, x, y, w, h, r, c);
+        }
+        return MOY_UI_OK;
+    }
     if (!after) {
         if (!(flags & MOY_UI_MARK_AGAIN)) {
             s_marks.drawn++;

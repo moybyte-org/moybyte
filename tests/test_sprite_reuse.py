@@ -1,6 +1,12 @@
 """Cross-cart sprite reuse (#18): the SpriteSheet.copy_tile import primitive and
 the shared sprite sheet stored alongside the carts dir. These exercise the same
-shared `runtime/editors.py` + `runtime/moy_carts.py` the device freezes."""
+shared `runtime/editors.py` + `runtime/moy_carts.py` the device freezes.
+
+The sprite tab in the 2026-10 look (docs/look_2026-10.md step 24) is held at
+the foot: a clear pixel on the grey checker, the ring cursor the arrows move
+and `a` paints at, the current mark on the tool, and the pickers -- the
+sprite and its size in a `ui.popover` -- which a tile picks from and a press
+outside or Esc closes; a theme without a depth keeps today's layout."""
 
 from pathlib import Path
 
@@ -209,3 +215,152 @@ def test_get_reports_when_shared_sheet_is_empty(tmp_path):
     assert ws.paint_status in ("NO SHARED", "SHARED EMPTY")
     # The current tile was left untouched (no spurious write).
     assert ws.sheet is not None
+
+
+# -- the sprite tab in the 2026-10 look (docs/look_2026-10.md step 24) ------------------
+
+
+def _look_tab(tmp_path, theme="moy", variant="light"):
+    from runtime import chrome
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.look.set_theme(theme, persist=False, variant=variant)
+    _open_cart(ws, "Star Catcher")
+    ws._open_paint()
+    drv = host_app.ConsoleDriver(ws)
+    ws.pointer.visible = False
+    _frames(drv, 2)
+    return ws, drv, chrome
+
+
+def _frames(drv, n=1):
+    for _ in range(n):
+        drv.ws._dirty = True
+        drv.frame(1 / 30)
+
+
+def _px(ws, x, y):
+    cv = ws.sys_canvas
+    o = 2 * (y * cv.w + x)
+    return cv._buf[o] << 8 | cv._buf[o + 1]
+
+
+def _tap_at(drv, x, y):
+    drv.touch(x, y)
+    _frames(drv)
+    drv.touch_up()
+    _frames(drv, 2)
+
+
+def _cell(lay, pe, lx, ly):
+    cell = lay.pg_span // pe.dim
+    return lay.pg_x0 + lx * cell, lay.pg_y0 + ly * cell, cell
+
+
+def test_a_theme_with_a_depth_takes_the_looks_layout_and_one_without_keeps_todays(tmp_path):
+    ws, drv, _c = _look_tab(tmp_path)
+    lay = ws.paint_layer.layout
+    assert lay.look and lay.pg_span == 144, "the grid is the largest 48 that fits"
+    assert lay.sw_x0 > lay.pg_x0 + lay.pg_span, "the palette lies beside the grid"
+    for r in list(lay.tool_btns) + [lay.close_btn, lay.files_btn]:
+        assert r[1] + r[3] <= ws.sys_canvas.h, r
+    ws.look.set_theme("night", persist=False, variant="dark")
+    _frames(drv)
+    assert not ws.paint_layer.layout.look
+
+
+def test_a_clear_pixel_lies_on_the_grey_checker_and_a_colour_fills_its_cell(tmp_path):
+    ws, drv, chrome = _look_tab(tmp_path)
+    pe = ws.paint
+    ox, oy = pe.sheet.tile_origin(pe.n)
+    pe.sheet.pset(ox, oy, 0)
+    pe.sheet.pset(ox + 1, oy, 9)
+    _frames(drv)
+    lay = ws.paint_layer.layout
+    x, y, cell = _cell(lay, pe, 0, 0)
+    greys = {chrome.rgb565_of(v) for v in ws.look.live.fixed[:2]}
+    assert {_px(ws, x + 1, y + 1), _px(ws, x + cell // 2 + 1, y + 1)} == greys
+    x, y, cell = _cell(lay, pe, 1, 0)
+    assert _px(ws, x + cell // 2, y + cell // 2) == chrome.rgb565_of(9)
+
+
+def test_the_arrows_move_the_ring_cursor_and_a_paints_at_it(tmp_path):
+    ws, drv, chrome = _look_tab(tmp_path)
+    pe = ws.paint
+    pe.color = 12
+    ws.paint_layer._cur[:] = [0, 0]
+    before = bytes(ws.sys_canvas._buf)
+    for k in ("right", "right", "down"):
+        drv.press(k)
+        _frames(drv, 2)
+    assert ws.paint_layer._cur == [2, 1]
+    assert bytes(ws.sys_canvas._buf) != before, "the cursor moved on the glass"
+    drv.press("a")
+    _frames(drv)
+    ox, oy = pe.sheet.tile_origin(pe.n)
+    assert pe.sheet.pget(ox + 2, oy + 1) == 12
+    x, y, cell = _cell(ws.paint_layer.layout, pe, 4, 4)
+    _tap_at(drv, x + cell // 2, y + cell // 2)
+    assert ws.paint_layer._cur == [4, 4], "the cursor follows the pointer"
+
+
+def test_the_tool_in_use_wears_the_current_mark(tmp_path):
+    from runtime import paint_layer as P
+    ws, drv, _c = _look_tab(tmp_path)
+    lay = ws.paint_layer.layout
+    x, y, w, h = lay.tool_btns[P._TOOLS.index("pen")]
+    ws.paint.tool = ws.paint.PEN
+    _frames(drv)
+    on = _px(ws, x + 3, y + 3)
+    ws.paint.tool = ws.paint.FILL
+    _frames(drv)
+    assert _px(ws, x + 3, y + 3) != on
+
+
+def test_the_size_opens_the_pickers_and_a_tile_of_the_sheet_becomes_the_sprite(tmp_path):
+    ws, drv, _c = _look_tab(tmp_path)
+    pl = ws.paint_layer
+    lay = pl.layout
+    pe = ws.paint
+    x, y, w, h = lay.size_btn
+    _tap_at(drv, x + w // 2, y + h // 2)
+    assert pl._pop, "a tap on the size opens the pickers"
+    _frames(drv, 2)
+    box = pl._host.box("Sheet")
+    assert box is not None
+    t = pe.sheet.TILE * lay.fs
+    m = 2 * lay.fs
+    _tap_at(drv, box[0] + m + 3 * t + 2, box[1] + m + 1 * t + 2)
+    assert pe.n == 1 * pe.sheet.cols + 3
+    assert not pl._pop, "a pick closes them"
+
+
+def test_the_pickers_size_seg_sets_the_sprites_size(tmp_path):
+    ws, drv, _c = _look_tab(tmp_path)
+    pl = ws.paint_layer
+    x, y, w, h = pl.layout.prev_rect
+    _tap_at(drv, x + w // 2, y + h // 2)
+    _frames(drv, 2)
+    drv.press("right")
+    _frames(drv, 2)
+    assert ws.paint.size == 2 and pl._pop
+
+
+def test_a_press_outside_the_pickers_or_esc_closes_them(tmp_path):
+    ws, drv, _c = _look_tab(tmp_path)
+    pl = ws.paint_layer
+    pe = ws.paint
+    n = pe.n
+    x, y, w, h = pl.layout.size_btn
+    _tap_at(drv, x + w // 2, y + h // 2)
+    _frames(drv, 2)
+    gx, gy = pl.layout.pg_x0 + 2, pl.layout.pg_y0 + 2
+    ox, oy = pe.sheet.tile_origin(pe.n)
+    pixel = pe.sheet.pget(ox, oy)
+    _tap_at(drv, gx, gy)
+    assert not pl._pop and pe.n == n
+    assert pe.sheet.pget(ox, oy) == pixel, "the press that closed them drew nothing"
+    _tap_at(drv, x + w // 2, y + h // 2)
+    _frames(drv, 2)
+    drv.type_char(27)
+    _frames(drv, 2)
+    assert not pl._pop

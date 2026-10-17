@@ -10,6 +10,7 @@
 #define PAGE_SALT 0x9e3779b9u
 #define SCROLL_SALT 0x85ebca6bu
 #define DIALOG_SALT 0xc2b2ae35u
+#define POPOVER_SALT 0x27d4eb2fu
 #define NO_PAGE 0xffu
 
 // A stop's flags.
@@ -21,7 +22,7 @@ enum {
     STOP_AT_END = 16,       // ...and down at its last
     STOP_HOLD = 32,         // nav = false on a part: focus stays, the keys are the cart's
     STOP_NAV_OFF = 64,      // nav = false on a page: the engine moves no focus in it
-    STOP_MODAL = 128,       // a dialog's: while one is drawn, the others take no input
+    STOP_MODAL = 128,       // a dialog's or a popover's: while one is drawn, the others take no input
     STOP_DLG_BTN = 256,     // a dialog's button (focus opens on its body first)
     STOP_FIELD = 512,       // a text field: it takes the typed keys, and `a` is a letter
 };
@@ -334,6 +335,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->fin_on = 0;
     c->dlg_pick = -1;
     c->typed = 0;
+    c->pop_prev = c->pop_card;
+    c->pop_card.w = 0;
+    c->pop_gone = 0;
     int settled = !c->owe;
     c->owe = 0;
     uint32_t focus0 = c->focus;
@@ -428,6 +432,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int pressed = in[MOY_UI_IN_BTNP];
     int key = in[MOY_UI_IN_KEY];
     int tab = key == MOY_UI_KEY_TAB && c->last_key != MOY_UI_KEY_TAB;
+    if (c->modal && c->pop_prev.w > 0 && key == MOY_UI_KEY_ESC && c->last_key != key) {
+        c->pop_gone = 1;            // Esc dismisses a popover
+        settled = 0;
+    }
     c->last_key = key;
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;
     int off = f == NULL || (f->flags & STOP_HOLD)
@@ -483,6 +491,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int x = in[MOY_UI_IN_X], y = in[MOY_UI_IN_Y];
     int slop = 4 * c->fs;
     if (live && (p & MOY_UI_P_EDGE)) {
+        if (c->modal && c->pop_prev.w > 0 && !inside(c->pop_prev, x, y)) {
+            c->pop_gone = 1;        // a press outside a popover dismisses it
+        }
         int h = stop_at(v, n, x, y);
         c->press = h >= 0 ? v[h].id : 0;
         c->press_x = (int16_t)x;
@@ -700,10 +711,11 @@ static void group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     c->y = (int16_t)(c->y + kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_GAP) * c->fs);
 }
 
-// Whether a dialog's body or buttons are being laid out.
+// Whether a dialog's or a popover's body (or a dialog's buttons) is being
+// laid out: its stops are modal.
 static int in_dialog(const moy_ui_ctx_t *c) {
     for (int i = 0; i < c->n_nest; i++) {
-        if (c->nest[i].kind == 2) {
+        if (c->nest[i].kind >= 2) {
             return 1;
         }
     }
@@ -1393,7 +1405,8 @@ static int pmetric(const moy_ui_ctx_t *c, int slot) {
     return kmetric(MOY_UI_K_VALUE_ROW, slot + (c->cls ? 1 : 0)) * c->fs;
 }
 
-// Open a nested page (a scroll region, kind 1; a dialog's body, kind 2) in
+// Open a nested page (a scroll region, kind 1; a dialog's body, kind 2; a
+// popover's, kind 3) in
 // box b, the outer one kept until it closes.
 static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int used,
                       int flags) {
@@ -1405,7 +1418,7 @@ static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, in
     n->stop = c->page_stop;
     n->kind = (uint8_t)kind;
     n->used = (int16_t)used;
-    open_page(c, id, b, flags | (kind == 2 || in_dialog(c) ? STOP_MODAL : 0));
+    open_page(c, id, b, flags | (kind >= 2 || in_dialog(c) ? STOP_MODAL : 0));
 }
 
 // Close the innermost nested page where it is of `kind`: answers the height
@@ -1765,6 +1778,89 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     c->page_stop = body_stop;
     c->dlg_pick = (int8_t)pick;
     return pick;
+}
+
+// -- popovers -------------------------------------------------------------------------
+
+int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
+                       const moy_ui_over_t *o) {
+    (void)over(o);
+    if (id.n == 0) {
+        if (c->n_nest && c->nest[c->n_nest - 1].kind == 3) {
+            int used = c->nest[c->n_nest - 1].used;
+            int took = nest_close(c, s, 3);
+            if (took != used) {
+                c->owe = 1;             // laid out for another body: the next frame redraws
+            }
+        }
+        return 0;
+    }
+    if (c->n_nest >= MOY_UI_API_NEST) {
+        return 0;
+    }
+    group_close(c, s);
+    // the rect it hangs from: ui.at's, else the one it opened under
+    if (c->has_at) {
+        c->pop_at = c->at;
+        c->has_at = 0;
+    } else if (c->pop_prev.w == 0) {
+        c->pop_at = c->focus_box;
+    }
+    moy_ui_box_t a = c->pop_at;
+    int fs = c->fs, rh = row_h(c);
+    uint32_t pid = hash(id.p, id.n, POPOVER_SALT);
+    moy_ui_keep_t *kb = keep_of(c, pid);
+    int body = kb != NULL && kb->b > 0 ? kb->b : rh;
+    if (!c->modal) {
+        c->owe = 1;                     // its first frame: focus opens in it on the next
+    }
+    int pad = moy_ui_modal_band(fs, c->cls);
+    moy_ui_box_t sf = c->surface;
+    if (w <= 0) {
+        w = a.w;
+    }
+    if (w > sf.w - 2 * pad) {
+        w = sf.w - 2 * pad;
+    }
+    if (w < 2 * pad + rh) {
+        w = 2 * pad + rh;
+    }
+    int bh = body;
+    if (2 * pad + bh > sf.h - 2 * pad) {
+        bh = sf.h - 4 * pad;
+        if (bh < rh) {
+            bh = rh;
+        }
+    }
+    int h = 2 * pad + bh;
+    int gap = 4 * fs;
+    int x = a.x;
+    if (x + w > sf.x + sf.w) {
+        x = sf.x + sf.w - w;
+    }
+    if (x < sf.x) {
+        x = sf.x;
+    }
+    int y = a.y + a.h + gap;
+    if (y + h > sf.y + sf.h) {
+        y = a.y - gap - h;          // no room below: above it
+        if (y < sf.y) {
+            y = sf.y + sf.h - h;    // nor above: as low as it fits
+            if (y < sf.y) {
+                y = sf.y;
+            }
+        }
+    }
+    moy_ui_box_t card = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
+    static const uint8_t none[1] = {0};
+    moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
+    int lp = c->cls ? kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * fs
+                    : kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs;
+    moy_ui_box_t inner = {(int16_t)(card.x + pad - lp), (int16_t)(card.y + pad),
+                          (int16_t)(w - 2 * (pad - lp)), (int16_t)bh};
+    nest_open(c, 3, pid, inner, body, 0);
+    c->pop_card = card;
+    return !c->pop_gone;
 }
 
 // -- card grids ----------------------------------------------------------------------

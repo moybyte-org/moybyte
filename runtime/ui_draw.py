@@ -1614,10 +1614,10 @@ def focus_ring(cv, th, rect, fs=None):
 
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
-_MARK_AFTER, _MARK_BACK, _MARK_SIDE = 1, 2, 4
+_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_RING = 1, 2, 4, 32
 
 
-def focus(cv, th, rect, size=None, r=0, after=False, fs=None):
+def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
     """The focus mark on `rect`, the theme's by its size class
     (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
     "part", or None to class it by its size. Drawn after the part's own fill
@@ -1625,9 +1625,11 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None):
     `after`, once its content is drawn. Returns (ink, box): the colour the
     content takes (None: its own) and the box it draws in (a lifted card's,
     grown and raised). A part drawn by `row`, `cell`, `chip` or `button`
-    takes `focus=True` instead. In a window behind it draws nothing."""
+    takes `focus=True` instead. In a window behind it draws nothing. `ring`
+    draws the theme's ring whatever its focus style, and is no focus mark (a
+    cursor's: the sprite editor's)."""
     return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
-                    _MARK_AFTER if after else 0, fs)
+                    (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0), fs)
 
 
 def current(cv, th, rect, r=0, back=False, side=False, fs=None):

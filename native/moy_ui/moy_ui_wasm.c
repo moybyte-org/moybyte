@@ -286,6 +286,13 @@ int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons,
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_popover(void *target, moy_ui_span_t id, int w, const moy_ui_over_t *o,
+                       int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_popover(c, &r.s, id, w, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_grid(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o) {
     OPEN(target);
     moy_ui_api_grid(c, &r.s, id, w, h, o);
@@ -541,6 +548,15 @@ int32_t moy_ui_wasm_dialog(void *e, const uint8_t *title, uint32_t n, const uint
     return rc != 0 ? rc : v;
 }
 
+int32_t moy_ui_wasm_popover(void *e, const uint8_t *id, uint32_t n, int32_t w, const uint8_t *ob,
+                            uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v = 0;
+    int rc = moy_ui_run_popover(wasm_target(), span(id, n), w, &o, &v);
+    return rc != 0 ? rc : v;
+}
+
 #define FN(f) ((void *)(f))
 
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
@@ -572,6 +588,7 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_tabs", FN(moy_ui_wasm_tabs) },
     { "ui_grid", FN(moy_ui_wasm_grid) },
     { "ui_card", FN(moy_ui_wasm_card) },
+    { "ui_popover", FN(moy_ui_wasm_popover) },
 };
 
 void *moy_ui_wasm_native(const char *name) {
