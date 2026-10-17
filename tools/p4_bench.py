@@ -314,10 +314,11 @@ import time, moy_ui
 class _TK:
     last_key = 0
     def pressed(self, n):
-        return n == 'right'
+        # the swatches stop at their ends: seven steps right, seven back
+        return n == ('right' if (ws._th_i // 7) % 2 == 0 else 'left')
 ws._th_key = _TK()
 ws._th_app = getattr(ws, 'appearance_app', None)
-if ws._th_app is not None and not hasattr(ws._th_app, '_rows'):
+if ws._th_app is not None and not hasattr(ws._th_app, 'show_row'):
     ws._th_app = None
 ws._th_acc = [a for _n, a, _d in moy_ui.theme_accents()]
 ws._th_i = 0
@@ -353,7 +354,7 @@ if not hasattr(ws, '_th_frame'):
 
 
 def edit_thrash(b, bench):
-    """`edit thrash`: a held key on the Appearance page's ACCENT row (the
+    """`edit thrash`: a held key on the Appearance page's Accent swatches (the
     verb on an image without the page), from the live theme (so the first change makes `custom`), the painted frames per
     change and after release; zero store writes while held, one package
     write once it settles. Puts the live theme back."""
@@ -364,10 +365,9 @@ def edit_thrash(b, bench):
     keys = bool(pyval(b, "ws._th_app is not None"))
     if keys:
         pyexec(b, "ws.open_app(ws._th_app)\n"
-                  "ws._th_app.zone = 'rows'\n"
-                  "ws._th_app.row = ws._th_app._rows().index('accent')")
+                  "ws._th_app.show_row('Accent')")
         b.drain(2.0)
-    print("  edit thrash: %s" % ("the ACCENT row by keys" if keys
+    print("  edit thrash: %s" % ("the Accent swatches by keys" if keys
                                  else "the verb (no Appearance page)"))
     b.drain(1.0)
     pyexec(b, "ws._th_writes[0] = ws._th_writes[1] = 0")

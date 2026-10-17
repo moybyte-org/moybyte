@@ -1339,9 +1339,11 @@ instead:
   sixteen), TINT (one background tint), WALLPAPER (the wallpaper picker, out
   of the old tabs), WINDOW STYLE (the frame presets), FONT (the font
   presets, Tiny5 and petme128 only, owner 2026-10-14), CHROME SIZE (out of Settings, where the board has more than one
-  scale), EDIT FILE… and, on `custom` only, NAME…. A picker opens as a
-  popover in desktop mode and as a page in console mode
-  (`docs/shell_layout_2026-10.md` L5); ←→ on a row steps it in place.
+  scale), EDIT FILE… and, on `custom` only, NAME…; ←→ on a row steps it in
+  place. The 2026-10 look's step 20 (2026-10-17) drew the page with the
+  public UI API: THEME is a grid of cards above the rows, ACCENT eight
+  swatches in its row, WALLPAPER a page of cards under tabs, NAME… a
+  dialog, and no picker opens over the page.
 - **The first change on a seed or an installed theme copies it to one theme
   named `custom` and switches to it**; a change on `custom` edits it. It
   saves as it goes: no SAVE and no name page. A change started from another

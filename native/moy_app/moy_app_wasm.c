@@ -226,7 +226,7 @@ enum {
     N_UI_PAGE, N_UI_LABEL, N_UI_BUTTON, N_UI_TOGGLE, N_UI_SLIDER, N_UI_LIST, N_UI_PART,
     N_UI_FOCUS, N_UI_KEYS_TAKEN, N_UI_AT, N_UI_GROUP, N_UI_INFO, N_UI_LINK, N_UI_CYCLE,
     N_UI_SEG, N_UI_SWATCHES, N_UI_HINTS, N_UI_ICON, N_UI_PROGRESS, N_UI_TABLE, N_UI_SCROLL,
-    N_UI_FIELD, N_UI_DIALOG,
+    N_UI_FIELD, N_UI_DIALOG, N_UI_TABS, N_UI_GRID, N_UI_CARD,
     N_COUNT
 };
 
@@ -242,7 +242,7 @@ static const char *const ROW_OF[N_COUNT] = {
     "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
     "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
     "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress", "ui.table", "ui.scroll",
-    "ui.field", "ui.dialog",
+    "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card",
 };
 
 static int16_t s_rows[N_COUNT];
@@ -432,6 +432,12 @@ int32_t moy_ui_wasm_field(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t
                           const uint8_t *, uint32_t) UI_WEAK;
 int32_t moy_ui_wasm_dialog(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
                            const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_tabs(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
+                         const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_grid(void *, const uint8_t *, uint32_t, int32_t, int32_t, const uint8_t *,
+                         uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_card(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                         const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
 
 // The rows, roles.json's wasm types: what tests/test_roles.py holds equal.
 static const moy_app_native_t NATIVES[N_COUNT] = {
@@ -481,6 +487,9 @@ static const moy_app_native_t NATIVES[N_COUNT] = {
     { "ui_scroll", FN(moy_ui_wasm_scroll), "(*~*~)i", NULL },
     { "ui_field", FN(moy_ui_wasm_field), "(*~*~i*~)i", NULL },
     { "ui_dialog", FN(moy_ui_wasm_dialog), "(*~*~i*~)i", NULL },
+    { "ui_tabs", FN(moy_ui_wasm_tabs), "(*~*~i*~)i", NULL },
+    { "ui_grid", FN(moy_ui_wasm_grid), "(*~ii*~)i", NULL },
+    { "ui_card", FN(moy_ui_wasm_card), "(*~*~*~*~)i", NULL },
 };
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {

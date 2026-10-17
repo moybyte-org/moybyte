@@ -408,7 +408,6 @@ def test_a_settled_page_draws_the_same_pixels():
 # screen step that restyles an app takes it off (docs/look_2026-10.md 19-24),
 # and step 27 holds the list empty.
 NOT_MOVED = frozenset((
-    "runtime/appearance_app.py",
     "runtime/artwork.py",
     "runtime/block_editor_ui.py",
     "runtime/code_layer.py",

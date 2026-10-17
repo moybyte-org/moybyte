@@ -617,11 +617,12 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // and, at the right, a value of one KIND -- an info's text, a link's text and
 // chevron, a cycle's text between chevrons, a segmented control's options, a
 // swatch picker's dots, a toggle's On/Off word and switch, a slider's number
-// and track -- on the page's ground or on a group's card; the group's caption
+// and track -- or a tab row's tabs from the left, on the page's ground or on
+// a group's card; the group's caption
 // and card; and a strip of keycap hints. A row's FOCUS is the theme's focus
-// mark (a theme without marks fills it with the row's `on` field); a seg's
-// and a swatch picker's current option wear the current mark (a theme
-// without: the selection colour). Geometry is style.json's `group` and
+// mark (a theme without marks fills it with the row's `on` field); a seg's,
+// a swatch picker's and a tab row's current option wear the current mark (a
+// theme without: the selection colour); a tab row's are in the label's face. Geometry is style.json's `group` and
 // `value_row` metrics at font scale `fs`, a `_desk` slot where `desk` is set;
 // colours are tokens of the sink's look; text is the `ui` role's (the label)
 // and the `caption` role's (values, captions, legends), petme128 on a run.
@@ -631,7 +632,7 @@ enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
 enum {
     MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
     MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,
-    MOY_UI_V_PROGRESS = 8,
+    MOY_UI_V_PROGRESS = 8, MOY_UI_V_TABS = 9,
 };
 typedef struct {
     moy_ui_span_t label, value;     // seg: value holds the options, NUL-separated
@@ -644,7 +645,7 @@ typedef struct {
 } moy_ui_vrow_t;
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r);
-// What x on row box b picks: a seg's or a swatch picker's option (-1 none),
+// What x on row box b picks: a seg's, a swatch picker's or a tab row's option (-1 none),
 // a slider's value (lo..hi), -1 for another kind.
 int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const moy_ui_vrow_t *r,
                        int x);
@@ -673,6 +674,19 @@ int moy_ui_table_head(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_
                       const uint8_t *cols, size_t cols_n, int fs, int desk);
 int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
                      const uint8_t *cells, size_t cells_n, int flags, int fs, int desk);
+// A card of a card grid (ui.card): `b` the card, `pic` its picture's box.
+// Its current mark (F_ON) over the card, its focus mark (F_FOCUS) on the
+// picture -- a lifted card's grown and raised, *content where the app draws
+// it -- and its title and `sub` centred under the picture. *gnd is the
+// colour around the picture, which moy_ui_card_end cuts its corners to;
+// `desk` takes MOY_UI_WINDOW as the page's ground does.
+int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
+                moy_ui_span_t sub, int flags, int fs, int desk, moy_ui_box_t *content,
+                uint16_t *gnd);
+// After the app drew into `content`: its corners cut to the card radius over
+// `gnd` and its ring, then a lifted picture's rim (F_FOCUS) round `pic`.
+int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t content, int flags,
+                    uint16_t gnd, int fs, int desk);
 // A text field row (ui.field): its label, then the field to the row's right
 // showing the text's tail and, focused (F_FOCUS), the caret.
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,

@@ -229,7 +229,19 @@ class _WindowStackLayer(Layer):
     def draw(self, dt):
         _perf = getattr(self.ws, "perf_capture", False)
         _t0 = _ticks_ms() if _perf else 0
-        self.wm._draw_windows(dt)
+        wm = self.wm
+        wm._in_draw = True
+        try:
+            wm._draw_windows(dt)
+        finally:
+            wm._in_draw = False
+        if wm._relayout_owed:
+            # An app on the verbs answers in its draw: a relayout it caused
+            # (a theme, a chrome size) runs here, after the windows' draw,
+            # never under it.
+            wm._relayout_owed = False
+            self.ws._relayout()
+            self.ws._dirty = True
         if _perf:
             self.ws._pf_wm_windows = _ticks_ms() - _t0
 
@@ -381,6 +393,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
         self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
+        self._in_draw = False         # the windows draw: a relayout waits for its end
+        self._relayout_owed = False
         # Quiet-frame fast path (#58): the stand-in stacks + the ping-pong
         # full-paint debt. After ANY full repaint the NEXT drawn frame must also be
         # full -- a double-buffered panel alternates physical buffers, so one full
@@ -486,6 +500,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         which re-render at it on the way back to the desk."""
         if self._ctx_switching:
             return                    # an internal (window-building) relayout
+        if self._in_draw:
+            self._relayout_owed = True    # after the windows' draw (the layer's)
+            return
         ws = self.ws
         if ws._sys_canvas is not self._root_canvas:
             self._ctx_switching = True

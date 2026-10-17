@@ -330,6 +330,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->grp_open = c->grp_n = c->grp_any = 0;
     c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
     c->n_nest = 0;
+    c->grid_open = 0;
+    c->fin_on = 0;
     c->dlg_pick = -1;
     c->typed = 0;
     int settled = !c->owe;
@@ -827,6 +829,8 @@ static int vrow_stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags,
     return st < 0 ? 0 : st;
 }
 
+static void grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+
 // -- the verbs -----------------------------------------------------------------------
 
 // Make `ct` the page the rows stack in: its scroll kept by `id` (clamped by
@@ -863,6 +867,7 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) 
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      const moy_ui_over_t *o, moy_ui_box_t *content) {
     o = over(o);
+    grid_end(c, s);
     group_close(c, s);
     c->grp_any = 0;
     moy_ui_box_t b = c->surface;
@@ -887,7 +892,8 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     if (!clip_row(&k, s, b, stacked, c->page)) {
         return;
     }
-    if (stacked && c->grp_open) {
+    // a group's row, or a label on a depth's ground: the parts' ink
+    if ((stacked && c->grp_open) || (o->ink == MOY_UI_O_NONE && moy_ui_depth()->on)) {
         band(c, s, b, stacked, 0);
         moy_ui_vrow_t r;
         vrow_init(c, &r, text);
@@ -1006,6 +1012,7 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t caption,
                       const moy_ui_over_t *o) {
     (void)o;
+    grid_end(c, s);
     group_close(c, s);
     c->has_at = 0;
     if (caption.n == 0) {
@@ -1053,7 +1060,7 @@ int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_s
 int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
                           const uint8_t *opts, size_t len, int32_t cur, const moy_ui_over_t *o) {
     o = over(o);
-    if (kind != MOY_UI_V_SEG && kind != MOY_UI_V_SWATCH) {
+    if (kind != MOY_UI_V_SEG && kind != MOY_UI_V_SWATCH && kind != MOY_UI_V_TABS) {
         kind = MOY_UI_V_CYCLE;
     }
     int n = 0;
@@ -1089,8 +1096,8 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
             if (at >= 0) {
                 cur = at;
                 step = 0;
-            } else if (c->tap_x == INT16_MIN) {
-                step = 1;
+            } else if (c->tap_x == INT16_MIN || kind == MOY_UI_V_CYCLE) {
+                step = 1;               // a key, or a tap on a cycle: the next
             }
         }
         if (step) {
@@ -1758,6 +1765,146 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     c->page_stop = body_stop;
     c->dlg_pick = (int8_t)pick;
     return pick;
+}
+
+// -- card grids ----------------------------------------------------------------------
+
+// The card drawn last: its picture finished over what the app drew in it.
+static void card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    if (!c->fin_on) {
+        return;
+    }
+    c->fin_on = 0;
+    clip_t k;
+    if (clip_row(&k, s, c->fin_content, c->grid_open == 1, c->page)) {
+        moy_ui_card_end(s, c->fin_pic, c->fin_content, c->fin_flags ? MOY_UI_F_FOCUS : 0,
+                        c->fin_ground, c->fs, ground_of(c));
+        clip_out(&k);
+    }
+}
+
+// The open grid ends: its last card finished, the page's cursor under its
+// last row, and a group it opened in holding its rows' card from there.
+static void grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    if (!c->grid_open) {
+        return;
+    }
+    card_finish(c, s);
+    if (c->grid_open == 1) {
+        if (c->grid_i > 0) {
+            c->y = (int16_t)(c->grid_y + c->grid_row);
+        }
+        moy_ui_keep_t *k = page_keep(c);
+        if (k != NULL) {
+            k->b = c->y;
+        }
+        if (c->grp_open && c->grp_n == 0) {
+            c->grp_top = c->y;
+        }
+    }
+    c->grid_open = 0;
+}
+
+void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
+                     const moy_ui_over_t *o) {
+    (void)over(o);
+    grid_end(c, s);
+    if (id.n == 0) {
+        return;
+    }
+    int fs = c->fs;
+    if (w <= 0) {
+        w = 48 * fs;
+    }
+    if (h <= 0) {
+        h = w * 3 / 4;
+    }
+    if (c->grp_open && c->grp_n > 0) {
+        group_close(c, s);          // a grid lies on the page's ground
+    }
+    int pad = pmetric(c, MOY_UI_M_VALUE_ROW_CARD_PAD);
+    int gap = pmetric(c, MOY_UI_M_VALUE_ROW_CARD_GAP);
+    moy_ui_box_t area;
+    if (c->has_at) {
+        area = c->at;
+        c->has_at = 0;
+        c->grid_open = 2;
+        c->grid_y = area.y;
+    } else {
+        area = c->page;
+        c->grid_open = 1;
+        c->y = (int16_t)(c->y + pmetric(c, MOY_UI_M_VALUE_ROW_GRID_TOP));
+        c->grid_y = c->y;
+    }
+    int cols = (area.w - 2 * pad + gap) / (w + gap);
+    cols = cols < 1 ? 1 : cols > 255 ? 255 : cols;
+    int span = cols * w + (cols - 1) * gap;
+    c->grid_cols = (uint8_t)cols;
+    c->grid_i = 0;
+    c->grid_x = (int16_t)(area.x + (area.w - span) / 2);
+    c->grid_pitch = (int16_t)(w + gap);
+    c->grid_w = (int16_t)w;
+    c->grid_h = (int16_t)h;
+    c->grid_row = (int16_t)(pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP) + h
+                            + pmetric(c, MOY_UI_M_VALUE_ROW_CARD_FOOT)
+                            + pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP));
+}
+
+void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                     moy_ui_span_t sub, const moy_ui_over_t *o, int32_t out[5]) {
+    o = over(o);
+    card_finish(c, s);
+    memset(out, 0, 5 * sizeof(int32_t));
+    if (!c->grid_open) {
+        return;
+    }
+    int col = c->grid_i % c->grid_cols;
+    if (col == 0 && c->grid_i > 0) {
+        c->grid_y = (int16_t)(c->grid_y + c->grid_row);
+    }
+    if (col == 0 && c->grid_open == 1) {
+        c->y = (int16_t)(c->grid_y + c->grid_row);
+        moy_ui_keep_t *k = page_keep(c);
+        if (k != NULL) {
+            k->b = c->y;
+        }
+    }
+    if (c->grid_i < 0xffff) {
+        c->grid_i++;
+    }
+    c->icon_slot = c->icon_glyph = -1;
+    int pad = pmetric(c, MOY_UI_M_VALUE_ROW_CARD_PAD), top = pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP);
+    int stacked = c->grid_open == 1;
+    int y = stacked ? c->page.y + c->grid_y - c->scroll : c->grid_y;
+    moy_ui_box_t pic = {(int16_t)(c->grid_x + col * c->grid_pitch), (int16_t)(y + top), c->grid_w,
+                        c->grid_h};
+    moy_ui_box_t b = {(int16_t)(pic.x - pad), (int16_t)y, (int16_t)(pic.w + 2 * pad),
+                      (int16_t)(c->grid_row - pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP))};
+    int st = 0;
+    if (o->disabled != 1) {
+        st = stop(c, id_of(o, title), b, 0, name_of(o, title));
+        st = st < 0 ? 0 : st;
+    }
+    int f = mark_flags(st, o);
+    clip_t k;
+    moy_ui_box_t content = pic;
+    uint16_t g = 0;
+    if (!clip_row(&k, s, b, stacked, c->page)) {
+        out[4] = st;
+        return;                     // scrolled out of view: nothing to draw into
+    }
+    moy_ui_card(s, b, pic, title, sub, f, c->fs, ground_of(c), &content, &g);
+    clip_out(&k);
+    c->fin_on = 1;
+    c->fin_flags = (uint8_t)(f & MOY_UI_F_FOCUS ? 1 : 0);
+    c->fin_ground = g;
+    c->fin_pic = pic;
+    c->fin_content = content;
+    out[0] = content.x;
+    out[1] = content.y;
+    out[2] = content.w;
+    out[3] = content.h;
+    out[4] = st;
 }
 
 int moy_ui_api_owes(const moy_ui_ctx_t *c) {

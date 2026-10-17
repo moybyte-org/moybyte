@@ -25,6 +25,9 @@
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
  *   ui.dialog(title, buttons, kind, o) -> the button activated (from 1; 0 none);
  *                                    ui.dialog() ends its body
+ *   ui.tabs(label, items, cur, o)  -> the new cur (from 1)
+ *   ui.grid(id, w, h, o), ui.grid() (a grid of cards w x h; ui.grid() ends it)
+ *   ui.card(title, sub, o)         -> x, y, w, h, state (the picture's rect)
  *   ui.part(id, w, h, o)           -> x, y, w, h, state
  *   ui.focus(id), ui.focus()       -> the focused id, or nil
  *   ui.keys_taken()                -> whether the ui used this frame's keys
@@ -299,6 +302,30 @@ static int moycore_ui_swatches(lua_State *L)
     return moycore_ui_choice(L, MOY_UI_V_SWATCH);
 }
 
+static int moycore_ui_tabs(lua_State *L)
+{
+    return moycore_ui_choice(L, MOY_UI_V_TABS);
+}
+
+static int moycore_ui_grid(lua_State *L)
+{
+    moy_ui_over_t o;
+    int w = lua_isnoneornil(L, 2) ? 0 : moycore_ui_int(L, 2);
+    int h = lua_isnoneornil(L, 3) ? 0 : moycore_ui_int(L, 3);
+    moy_ui_run_grid(moycore_ui_canvas(), moycore_ui_span(L, 1), w, h, moycore_ui_over(L, 4, &o));
+    return 0;
+}
+
+static int moycore_ui_card(lua_State *L)
+{
+    moy_ui_over_t o;
+    int32_t v[5] = {0, 0, 0, 0, 0};
+    moy_ui_run_card(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_span(L, 2),
+                    moycore_ui_over(L, 3, &o), v);
+    for (int i = 0; i < 5; i++) lua_pushinteger(L, v[i]);
+    return 5;
+}
+
 static int moycore_ui_hints(lua_State *L)
 {
     moy_ui_over_t o;
@@ -483,6 +510,7 @@ static void moycore_ui_open(lua_State *L)
         {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
         {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
         {"scroll", moycore_ui_scroll}, {"field", moycore_ui_field}, {"dialog", moycore_ui_dialog},
+        {"tabs", moycore_ui_tabs}, {"grid", moycore_ui_grid}, {"card", moycore_ui_card},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);

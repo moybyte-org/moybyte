@@ -137,18 +137,17 @@ def test_chip_clip_follows_the_system_font_scale():
                    for x in range(r[0], r[0] + r[2]))
 
 
-def test_apps_button_delegates_to_chip(tmp_path):
-    """The Appearance app's toolbar button (one of the four migrated copies)
-    paints through the chip, in the default theme's chip surface: the chip's
-    field, ringed in shade_dark."""
+def test_a_chip_paints_the_themes_chip_surface(tmp_path):
+    """A chip paints in the default theme's chip surface: the chip's field,
+    ringed in shade_dark."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     cv = ws.sys_canvas
-    ws.appearance_app._button(cv, "CARTS", (10, 100, 60, 16), on=True)
     th = ws.theme_colors
+    ui_draw.chip(cv, th, (10, 100, 60, 16), "CARTS", on=True, fs=1)
     assert cv.pix(12, 102) == th["accent"]
     assert cv.pix(10, 100) == th["shade_dark"]
-    ws.appearance_app._button(cv, "CARTS", (10, 120, 60, 16), on=False)
+    ui_draw.chip(cv, th, (10, 120, 60, 16), "CARTS", on=False, fs=1)
     assert cv.pix(12, 122) == th["panel"]
     assert cv.pix(10, 120) == th["shade_dark"]
 
@@ -391,9 +390,9 @@ def test_every_new_parameter_defaults_to_the_frozen_rendering():
 
 
 def test_cell_text_offsets_place_a_frozen_caption_baseline():
-    """`appearance_app._draw_wall_card`'s blocker: its caption baseline is the
-    frozen literal `y + h - 13*fs`, and the band centre agrees with it only at
-    font scale 1 (fs=2: 8 vs 9). `text_dy` is what lets a site say so."""
+    """A caption whose baseline is the frozen literal `y + h - 13*fs`: the band
+    centre agrees with it only at font scale 1 (fs=2: 8 vs 9). `text_dy` is
+    what lets a site say so."""
     for fs in (1, 2, 3):
         h = 40 * fs
         want_dy = h - 13 * fs
@@ -412,9 +411,8 @@ def test_cell_text_offsets_place_a_frozen_caption_baseline():
 
 
 def test_cell_edge_last_paints_the_frame_over_the_content():
-    """`appearance_app._draw_theme_card`'s blocker in miniature: a glyph that
-    reaches the cell's border must be clipped by it, which needs the border
-    painted after the picture rather than before."""
+    """A glyph that reaches the cell's border must be clipped by it, which
+    needs the border painted after the picture rather than before."""
     edge = ui_draw.state_colors(TH, "cell", ui_draw.REST)[2]
     ink = ui_draw.state_colors(TH, "cell", ui_draw.REST)[1]
     # A cell exactly as big as the skin's 14px glyph box, pad 0: the glyph

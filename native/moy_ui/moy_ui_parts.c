@@ -378,6 +378,23 @@ static moy_ui_box_t seg_box(const pd_t *d, const pf_t *f, moy_ui_box_t b, const 
     return (moy_ui_box_t){0, 0, 0, 0};
 }
 
+// Option i's box of a tab row: x from the left, `ph` tall.
+static moy_ui_box_t tab_box(const pd_t *d, const pf_t *f, moy_ui_box_t b, const moy_ui_vrow_t *r,
+                            const vgeo_t *g, int i, int scale) {
+    int x = b.x + pad_of(d, r);
+    int ph = b.h - pm(d, MOY_UI_M_VALUE_ROW_TAB, 1);
+    for (int j = 0; j < r->n; j++) {
+        moy_ui_span_t o = option(r->value, j);
+        int ow = tw(f, o.p, o.n, scale) + g->gap;
+        if (j == i) {
+            return (moy_ui_box_t){(int16_t)x, (int16_t)(b.y + (b.h - ph) / 2), (int16_t)ow,
+                                  (int16_t)ph};
+        }
+        x += ow + (d->desk ? 4 : 2) * d->fs;
+    }
+    return (moy_ui_box_t){0, 0, 0, 0};
+}
+
 static moy_ui_box_t dot_box(moy_ui_box_t b, const moy_ui_vrow_t *r, const vgeo_t *g, int i) {
     int x = g->right - g->dot - (r->n - 1 - i) * g->step;
     return (moy_ui_box_t){(int16_t)x, (int16_t)(b.y + (b.h - g->dot) / 2), (int16_t)g->dot,
@@ -403,6 +420,9 @@ int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const m
         if (kind == MOY_UI_V_SEG) {
             pf_t f = font_of(&d, MOY_UI_FONT_CAPTION);
             o = seg_box(&d, &f, b, r, &g, i, tscale(s));
+        } else if (kind == MOY_UI_V_TABS) {
+            pf_t f = font_of(&d, MOY_UI_FONT_UI);
+            o = tab_box(&d, &f, b, r, &g, i, tscale(s));
         } else if (kind == MOY_UI_V_SWATCH) {
             o = dot_box(b, r, &g, i);
             int h = (g.step - g.dot) / 2;
@@ -493,6 +513,18 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 right = o.x;
             }
             break;
+        case MOY_UI_V_TABS:
+            // from the left, in the label's face; the label is the row's id
+            for (int i = 0; i < r->n; i++) {
+                moy_ui_box_t o = tab_box(&d, &fl, b, r, &g, i, sc);
+                moy_ui_span_t t = option(r->value, i);
+                int c = dim;
+                if (i == r->cur) {
+                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, lab);
+                }
+                text(&d, &fl, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
+            }
+            return MOY_UI_OK;
         case MOY_UI_V_SWATCH:
             for (int i = r->n - 1; i >= 0; i--) {
                 moy_ui_box_t o = dot_box(b, r, &g, i);
@@ -595,6 +627,140 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     if (r->label.n && room > 0) {
         size_t ln = moy_text_fit_px(fl.id, r->label.p, r->label.n, room, sc);
         text(&d, &fl, r->label.p, ln, tx, b.y, b.h, pal(&d, lab), sc);
+    }
+    return MOY_UI_OK;
+}
+
+// -- cards (ui.card) -------------------------------------------------------------------
+
+// The card's picture radius at the scale, under the depth's card radius; 0
+// without a depth.
+static int card_r(const pd_t *d) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    if (!dp->on) {
+        return 0;
+    }
+    int r = pm(d, MOY_UI_M_VALUE_ROW_CARD_R, 1), cr = dp->card_r * d->fs;
+    return cr < r ? cr : r;
+}
+
+int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
+                moy_ui_span_t sub, int flags, int fs, int desk, moy_ui_box_t *content,
+                uint16_t *gnd) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    const moy_ui_marks_t *m = moy_ui_marks();
+    int r = card_r(&d);
+    uint16_t gc;
+    if (!ground(&d, &gc)) {
+        gc = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
+    }
+    if (flags & MOY_UI_F_ON) {
+        int pr = moy_ui_depth()->on ? pm(&d, MOY_UI_M_VALUE_ROW_PLATE_R, 1) : 0;
+        current(s, &d, b, pr, 0, 0);
+        if (m->on) {
+            int alpha = m->active ? m->cur_alpha : m->cur_alpha * 6 / 10;
+            if (m->cur_style == MOY_UI_CUR_PLATE) {
+                gc = mix(gc, pal(&d, moy_ui_token(d.look, m->cur_color)), alpha);
+            } else if (m->cur_style == MOY_UI_CUR_FILL && m->active) {
+                gc = pal(&d, tok(&d, MOY_UI_T_SELECTION, MOY_UI_T_ACCENT));
+            }
+        } else {
+            gc = pal(&d, tok(&d, MOY_UI_T_SELECTION, MOY_UI_T_ACCENT));
+        }
+    }
+    *content = pic;
+    if ((flags & MOY_UI_F_FOCUS) && m->active) {
+        int mi = -1;
+        moy_ui_focus_in(s, pic, MOY_UI_MARK_CARD, r, 0, d.fs, content, &mi, 0);
+    }
+    *gnd = gc;
+    // the title and the sub line, centred in the band under the picture
+    int sc = tscale(s);
+    int th = pm(&d, MOY_UI_M_VALUE_ROW_CARD_TITLE, 1);
+    int y = pic.y + pic.h + pm(&d, MOY_UI_M_VALUE_ROW_CARD_TOP, 1) / 2;
+    int room = b.w - 2 * d.fs;
+    int ink = tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
+    int dim = tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
+    if ((flags & MOY_UI_F_ON) && !m->on) {
+        ink = dim = tok(&d, MOY_UI_T_SELECTION_INK, MOY_UI_T_INK);
+    }
+    pf_t ft = font_of(&d, MOY_UI_FONT_UI), fsub = font_of(&d, MOY_UI_FONT_CAPTION);
+    if (title.n && room > 0) {
+        size_t n = moy_text_fit_px(ft.id, title.p, title.n, room, sc);
+        int w = tw(&ft, title.p, n, sc);
+        text(&d, &ft, title.p, n, b.x + (b.w - w) / 2, y, th, pal(&d, ink), sc);
+    }
+    int sh = fsub.line * sc + 4 * d.fs;
+    if (sub.n && room > 0 && y + th - d.fs + sh <= b.y + b.h) {     // where the foot holds it
+        size_t n = moy_text_fit_px(fsub.id, sub.p, sub.n, room, sc);
+        int w = tw(&fsub, sub.p, n, sc);
+        text(&d, &fsub, sub.p, n, b.x + (b.w - w) / 2, y + th - d.fs, sh, pal(&d, dim), sc);
+    }
+    return MOY_UI_OK;
+}
+
+// The integer square root of v.
+static int isqrt(int32_t v) {
+    int32_t x = 0, bit = 1 << 30;
+    while (bit > v) {
+        bit >>= 2;
+    }
+    while (bit) {
+        if (v >= x + bit) {
+            v -= x + bit;
+            x = (x >> 1) + bit;
+        } else {
+            x >>= 1;
+        }
+        bit >>= 2;
+    }
+    return (int)x;
+}
+
+// The pixels of box c's corners outside radius r, blended toward `g` by how
+// much of each lies outside the arc.
+static void corners(pd_t *d, moy_ui_box_t c, int r, uint16_t g) {
+    if (r <= 0) {
+        return;
+    }
+    moy_text_target_t *t = &d->t;
+    for (int k = 0; k < 4; k++) {
+        int right = k == 1 || k == 2, bottom = k >= 2;
+        for (int j = 0; j < r; j++) {
+            for (int i = 0; i < r; i++) {
+                // the pixel's centre from the arc's centre, in sixteenths
+                int dx = (r - i) * 16 - 8, dy = (r - j) * 16 - 8;
+                int dist = isqrt(dx * dx + dy * dy);
+                int out = dist - (r * 16 - 8);  // past the arc, in sixteenths
+                if (out <= 0) {
+                    continue;
+                }
+                int k255 = out >= 16 ? 255 : out * 255 / 16;
+                int x = (right ? c.x + c.w - 1 - i : c.x + i) - t->cam_x;
+                int y = (bottom ? c.y + c.h - 1 - j : c.y + j) - t->cam_y;
+                if (x < t->cx0 || x >= t->cx1 || y < t->cy0 || y >= t->cy1) {
+                    continue;
+                }
+                uint16_t *p = &t->px[(size_t)y * (size_t)t->dw + (size_t)x];
+                *p = mix(*p, g, k255);
+            }
+        }
+    }
+    d->row->st[MOY_ST_N_FILL]++;
+}
+
+int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t content, int flags,
+                    uint16_t gnd, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int r = card_r(&d);
+    corners(&d, content, r, gnd);
+    rrect(&d, content.x, content.y, content.w, content.h, r, 0, 0, d.fs,
+          pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
+    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active && moy_ui_marks()->on) {
+        int mi = -1;
+        moy_ui_focus_in(s, pic, MOY_UI_MARK_CARD, r, MOY_UI_MARK_AFTER, d.fs, NULL, &mi, 0);
     }
     return MOY_UI_OK;
 }

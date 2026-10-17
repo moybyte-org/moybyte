@@ -1,8 +1,8 @@
 // The public UI API's engine (docs/ui_api_2026-10.md): the verbs every app
 // and cart draws its interface with -- page, label, button, toggle, slider,
 // list, group, info, link, cycle, seg, swatches, hints, icon, progress, table,
-// scroll, field, dialog, part, focus, keys_taken, at -- and the focus and
-// navigation they share.
+// scroll, field, dialog, tabs, grid, card, part, focus, keys_taken, at -- and
+// the focus and navigation they share.
 //
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
 // the Python face's bytearray per app, the run's one static): the focused id,
@@ -141,6 +141,19 @@ typedef struct {
     int8_t dlg_pick;                // the dialog button activated this frame, -1 none
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
+    // ui.grid's: open (2: placed by ui.at), its columns, the card next, the
+    // first column's left edge and the columns' pitch, the pictures' size,
+    // the top of the card row being laid out (content coordinates; a placed
+    // grid's on screen) and a card row's height.
+    uint8_t grid_open, grid_cols;
+    uint16_t grid_i;
+    int16_t grid_x, grid_pitch, grid_w, grid_h, grid_y, grid_row;
+    moy_ui_box_t grid_at;
+    // The card drawn last, its picture finished (corners, ring, a lifted
+    // rim) by the next card or the grid's end, once the app drew into it.
+    uint8_t fin_on, fin_flags;
+    uint16_t fin_ground;
+    moy_ui_box_t fin_pic, fin_content;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -184,10 +197,11 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
 int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
                      moy_ui_span_t value, const moy_ui_over_t *o);
 // A choice of `n` options with `cur` (from 0, -1 none) current: `kind`
-// MOY_UI_V_CYCLE and MOY_UI_V_SEG take `opts` NUL-separated, MOY_UI_V_SWATCH
-// `n` colours (0xRRGGBB, little-endian words). Left and right are its own
-// while focused (a cycle wraps); activation takes the next option, a tap the
-// one tapped. Answers the new cur.
+// MOY_UI_V_CYCLE, MOY_UI_V_SEG and MOY_UI_V_TABS (a tab row: its options
+// from the left, its label only its id) take `opts` NUL-separated,
+// MOY_UI_V_SWATCH `n` colours (0xRRGGBB, little-endian words). Left and right
+// are its own while focused (a cycle wraps); activation takes the next
+// option, a tap the one tapped. Answers the new cur.
 int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
                           const uint8_t *opts, size_t len, int32_t cur, const moy_ui_over_t *o);
 // Keycap hints (`items` NUL-separated key and action pairs) in a band at the
@@ -226,6 +240,16 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
 // the button activated this frame (from 0), -1 none; the end answers -1.
 int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                           const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o);
+// A card grid (§1): `id` begins one whose cards' pictures are w x h, as
+// many columns as the row holds, the grid's rows stacking on the page (or
+// from ui.at's rect's top left, across its width); an id of length 0 ends it.
+void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
+                     const moy_ui_over_t *o);
+// A card in the open grid: `title` (its id) and `sub` under its picture, the
+// current mark where o->current. out: the picture's x, y, w, h -- the app
+// draws into it before its next ui call -- and the state bits (§5).
+void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                     moy_ui_span_t sub, const moy_ui_over_t *o, int32_t out[5]);
 // Whether the frame drawn last laid a dialog out from a stale measure, so
 // the next frame is owed though no input came.
 int moy_ui_api_owes(const moy_ui_ctx_t *c);

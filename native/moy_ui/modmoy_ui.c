@@ -2186,6 +2186,35 @@ static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
 
+// api_grid(ctx, cv, look, id, w, h, o): an id of length 0 ends the grid
+static mp_obj_t ui_api_grid(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    moy_ui_api_grid(c, &s, span_of(a[3]), num(a[4]), num(a[5]), over_of(a[6], &o));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_grid_obj, 7, 7, ui_api_grid);
+
+// api_card(ctx, cv, look, title, sub, o) -> (x, y, w, h, state): the picture's rect
+static mp_obj_t ui_api_card(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    int32_t v[5];
+    moy_ui_api_card(c, &s, span_of(a[3]), span_of(a[4]), over_of(a[5], &o), v);
+    mp_obj_t t[5];
+    for (int i = 0; i < 5; i++) {
+        t[i] = mp_obj_new_int(v[i]);
+    }
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_card_obj, 6, 6, ui_api_card);
+
 // api_table(ctx, cv, look, label, cols, cells, cur, o) -> (cur, opened); `cols`
 // and `cells` NUL-separated (bytes), the cells row by row
 static mp_obj_t ui_api_table(size_t n_args, const mp_obj_t *a) {
@@ -2394,6 +2423,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_progress), MP_ROM_PTR(&ui_api_progress_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_grid), MP_ROM_PTR(&ui_api_grid_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_card), MP_ROM_PTR(&ui_api_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table), MP_ROM_PTR(&ui_api_table_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_scroll), MP_ROM_PTR(&ui_api_scroll_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },

@@ -12,7 +12,9 @@ draws its interface with, and the rect algebra they lay out with.
 Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components); `icon`
 puts an icon on the next row or button and `progress` shows how far a task
 is. `table` is a list in columns, `scroll` a region whose rows scroll in it,
-`field` a line of typed text and `dialog` a modal card (Files' verbs).
+`field` a line of typed text and `dialog` a modal card (Files' verbs);
+`tabs` is a row of tabs and `grid` and `card` a grid of cards whose pictures
+the app draws (Appearance's).
 
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
@@ -308,6 +310,34 @@ def dialog(title=None, buttons=(), kind="primary", o=None):
         return _C.api_dialog(t[0], t[1], t[2], "", b"", 0, None)
     k = _KINDS.index(kind) if kind in _KINDS else 1
     return _C.api_dialog(t[0], t[1], t[2], title, _opts(buttons), k, _over(o))
+
+
+def tabs(label, items, cur, o=None):
+    """A row of tabs from the left, `items[cur]` wearing the current mark,
+    `label` its id (it draws none); left and right move it while focused, a
+    tap picks: the new `cur`."""
+    t = _T
+    return _C.api_choice(t[0], t[1], t[2], 9, label, _opts(items), -1 if cur is None else cur,
+                         _over(o))
+
+
+def grid(id=None, w=0, h=0, o=None):
+    """`grid(id, w, h)` begins a grid of cards whose pictures are `w` x `h`,
+    as many columns as the row holds, centred, its rows stacking on the page
+    (or from `at`'s rect's top left); `grid()` ends it. In a group it lies
+    on the page's ground between the caption and the group's rows."""
+    t = _T
+    _C.api_grid(t[0], t[1], t[2], "" if id is None else id, w, h, _over(o))
+
+
+def card(title, sub="", o=None):
+    """A card in the open grid, `title` (its id) and `sub` under its
+    picture, the current mark where `o` says `current`: `(x, y, w, h,
+    state)`, the picture's rect -- the app draws its picture there before
+    its next ui call, which cuts its corners and rings it -- and the state
+    bits `part`'s are. `w` and `h` are 0 for a card scrolled out of view."""
+    t = _T
+    return _C.api_card(t[0], t[1], t[2], title, sub, _over(o))
 
 
 def part(id, w=0, h=0, o=None):

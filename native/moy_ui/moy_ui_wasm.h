@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 23
+#define MOY_UI_WASM_ROWS 26
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -79,7 +79,7 @@ int moy_ui_run_group(void *target, moy_ui_span_t caption, const moy_ui_over_t *o
 // `kind` MOY_UI_V_INFO or MOY_UI_V_LINK (moy_ui.h); *out: activated.
 int moy_ui_run_value(void *target, int kind, moy_ui_span_t label, moy_ui_span_t value,
                      const moy_ui_over_t *o, int32_t *out);
-// `kind` MOY_UI_V_CYCLE, MOY_UI_V_SEG or MOY_UI_V_SWATCH; *out: the new cur.
+// `kind` MOY_UI_V_CYCLE, MOY_UI_V_SEG, MOY_UI_V_SWATCH or MOY_UI_V_TABS; *out: the new cur.
 int moy_ui_run_choice(void *target, int kind, moy_ui_span_t label, const uint8_t *opts, size_t n,
                       int32_t cur, const moy_ui_over_t *o, int32_t *out);
 int moy_ui_run_hints(void *target, const uint8_t *items, size_t n, const moy_ui_over_t *o);
@@ -94,6 +94,9 @@ int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap
                      const moy_ui_over_t *o, int32_t *out);
 int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons, size_t n,
                       int kind, const moy_ui_over_t *o, int32_t *out);
+int moy_ui_run_grid(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o);
+int moy_ui_run_card(void *target, moy_ui_span_t title, moy_ui_span_t sub, const moy_ui_over_t *o,
+                    int32_t out[5]);
 
 // The rows, in roles.json's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an
@@ -150,6 +153,15 @@ int32_t moy_ui_wasm_field(void *e, const uint8_t *label, uint32_t n, uint8_t *bu
 // ui_dialog: the button activated (from 0), -1 none; a title of length 0 ends it.
 int32_t moy_ui_wasm_dialog(void *e, const uint8_t *title, uint32_t n, const uint8_t *buttons,
                            uint32_t bn, int32_t kind, const uint8_t *o, uint32_t on);
+// ui_tabs: the new cur, as ui_seg's.
+int32_t moy_ui_wasm_tabs(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                         uint32_t len, int32_t cur, const uint8_t *o, uint32_t on);
+// ui_grid with an id of length 0 ends the grid.
+int32_t moy_ui_wasm_grid(void *e, const uint8_t *id, uint32_t n, int32_t w, int32_t h,
+                         const uint8_t *o, uint32_t on);
+// ui_card writes the picture's x, y, w, h and the state bits at `out`.
+int32_t moy_ui_wasm_card(void *e, const uint8_t *title, uint32_t n, const uint8_t *sub,
+                         uint32_t sn, const uint8_t *o, uint32_t on, uint8_t *out, uint32_t cap);
 
 // The native serving `name` ("ui_button"), or NULL; and the rows' names.
 void *moy_ui_wasm_native(const char *name);

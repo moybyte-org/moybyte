@@ -286,6 +286,19 @@ int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons,
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_grid(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o) {
+    OPEN(target);
+    moy_ui_api_grid(c, &r.s, id, w, h, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_card(void *target, moy_ui_span_t title, moy_ui_span_t sub, const moy_ui_over_t *o,
+                    int32_t out[5]) {
+    OPEN(target);
+    moy_ui_api_card(c, &r.s, title, sub, o, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
 // -- the rows ----------------------------------------------------------------------
 
 static int over_of(moy_ui_over_t *o, const uint8_t *p, uint32_t n) {
@@ -442,6 +455,31 @@ int32_t moy_ui_wasm_swatches(void *e, const uint8_t *label, uint32_t n, const ui
     return choice_row(MOY_UI_V_SWATCH, label, n, opts, len, cur, ob, on);
 }
 
+int32_t moy_ui_wasm_tabs(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
+                         uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    return choice_row(MOY_UI_V_TABS, label, n, opts, len, cur, ob, on);
+}
+
+int32_t moy_ui_wasm_grid(void *e, const uint8_t *id, uint32_t n, int32_t w, int32_t h,
+                         const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    return moy_ui_run_grid(wasm_target(), span(id, n), w, h, &o);
+}
+
+int32_t moy_ui_wasm_card(void *e, const uint8_t *title, uint32_t n, const uint8_t *sub,
+                         uint32_t sn, const uint8_t *ob, uint32_t on, uint8_t *out, uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v[5] = {0, 0, 0, 0, 0};
+    int rc = moy_ui_run_card(wasm_target(), span(title, n), span(sub, sn), &o, v);
+    if (rc == 0) {
+        put_words(out, cap, v, 5);
+    }
+    return rc;
+}
+
 int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8_t *ob,
                           uint32_t on) {
     (void)e;
@@ -531,6 +569,9 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_scroll", FN(moy_ui_wasm_scroll) },
     { "ui_field", FN(moy_ui_wasm_field) },
     { "ui_dialog", FN(moy_ui_wasm_dialog) },
+    { "ui_tabs", FN(moy_ui_wasm_tabs) },
+    { "ui_grid", FN(moy_ui_wasm_grid) },
+    { "ui_card", FN(moy_ui_wasm_card) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

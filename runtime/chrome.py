@@ -1063,6 +1063,18 @@ def nearest_of(v):
     return _ui_draw._C.theme_rgb(v)[2]
 
 
+def theme_accents():
+    """((name, A, deep), ...): the sixteen accents a theme change takes
+    (style.json's), for a picker."""
+    return _ui_draw.theme_accents()
+
+
+def theme_tints():
+    """((name, ramp), ...): the eight tints a theme change takes
+    (style.json's), for a picker."""
+    return _ui_draw.theme_tints()
+
+
 def theme_content(name, variant=DEFAULT_VARIANT):
     """The CONTENT roles of theme `name` in `variant` -- code syntax and block
     colours (style.json's `theme.content`), which are not in the live token

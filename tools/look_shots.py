@@ -306,12 +306,17 @@ def _settings(g, ws):
 
 
 def _appearance(g, ws):
+    # The target's focus: Tint.
     ws.open_app(ws._apps_by_id["appearance"])
+    _app(ws, "appearance").show_row("Tint")
 
 
 def _desk_appearance(g, ws):
     ws.open_desk()
     ws.open_app(ws._apps_by_id["appearance"])
+    _settle(g, ws, 2)
+    _place(ws, "appearance", 226, 65, 680, 510)    # the target's window
+    _app(ws, "appearance").show_row("Tint")
 
 
 def _editor(g, ws, tab):

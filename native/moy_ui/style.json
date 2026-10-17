@@ -171,7 +171,12 @@
                   "hints": 20, "hints_desk": 28, "hint_gap": 11, "hint_gap_desk": 14,
                   "pic": 16, "pic_desk": 16, "col": 10, "col_desk": 16, "head": 18,
                   "head_desk": 34, "modal": 280, "modal_desk": 360, "inset": 10,
-                  "inset_desk": 18, "field": 3, "field_desk": 4}
+                  "inset_desk": 18, "field": 3, "field_desk": 4,
+                  "card_pad": 5, "card_pad_desk": 7, "card_top": 4, "card_top_desk": 6,
+                  "card_foot": 18, "card_foot_desk": 52, "card_gap": 31, "card_gap_desk": 24,
+                  "card_r": 6, "card_r_desk": 8, "plate_r": 8, "plate_r_desk": 12,
+                  "card_title": 16, "card_title_desk": 24, "grid_gap": 4, "grid_gap_desk": 10,
+                  "grid_top": 0, "grid_top_desk": 8, "tab": 4, "tab_desk": 8}
   },
   "quirks": {
     "game_btn": "at font scale 1 the label prints with the legacy scale-2 argument but centres with height 8 -- an off-by-one-scale mismatch the shipped pixels bake in. It is a BRANCH on fs, not a number.",

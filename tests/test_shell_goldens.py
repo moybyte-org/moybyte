@@ -344,10 +344,10 @@ _DEFAULT_BARS = [{"edge": "top", "size": 18, "left": ["zone"], "center": ["chips
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
-        diagonal_in=None, accent=True),
+        diagonal_in=None, appearance=True),
     "tdeck_320x240_fs1_light": dict(
         sys_size=None, font_scale=1, windowed=False, variant="light",
-        diagonal_in=None, accent=True),
+        diagonal_in=None, appearance=True),
     "guition_480x320_fs1_dark": dict(
         sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
         diagonal_in=None),
@@ -362,7 +362,7 @@ CONFIGS = {
         diagonal_in=7.0),
     "p4_1024x600_cs2_fs1_windowed": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
-        diagonal_in=7.0, accent=True),
+        diagonal_in=7.0, appearance=True),
     "p4_1024x600_fs2_windowed_light": dict(
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="light",
         diagonal_in=7.0),
@@ -650,20 +650,20 @@ def _surface_plan(ws, cfg):
             ws.open_in_editor(cart)
             ws.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
-    picker = False
+    pages = False
     for app in APPS:
         enter = (lambda app=app: ws.open_app(ws._apps_by_id[app]))
         if app == "getcarts":
             enter = _open_get_carts(ws)
-        if picker:
-            enter = _after_picker(ws, enter)
-            picker = False
+        if pages:
+            enter = _after_appearance(ws, enter)
+            pages = False
         plan.append(("app_" + app, enter))
-        if app == "appearance" and cfg.get("accent"):
-            plan.append(("app_appearance_accent", _accent_picker(ws)))
-            plan.append(("app_appearance_custom",
-                         _after_picker(ws, _custom_page(ws))))
-            picker = True
+        if app == "appearance" and cfg.get("appearance"):
+            plan.append(("app_appearance_walls", _walls_page(ws)))
+            plan.append(("app_appearance_name",
+                         _after_appearance(ws, _name_page(ws))))
+            pages = True
     for surface, title in APP_CARTS:
         plan.append(("app_" + surface,
                      lambda title=title: open_cart(ws, title)))
@@ -698,60 +698,46 @@ def _surface_plan(ws, cfg):
     return plan
 
 
-class _Key:
-    last_key = 0
-
-    def __init__(self, n):
-        self.n = n
-
-    def pressed(self, n):
-        return n == self.n
-
-
-def _accent_picker(ws):
-    """The Appearance page with its ACCENT picker open on the theme's own
-    accent (docs/theming_2026-09.md §9 phase 6 step 7): a popover on the
-    desk, a page in console mode. Nothing is tried until the cursor moves."""
+def _walls_page(ws):
+    """The Appearance page's wallpapers (docs/look_2026-10.md step 20): the
+    tabs over the cards, on the tab of the wallpaper in use."""
     def enter():
         app = ws.appearance_app
-        app.zone = "rows"
-        app.row = app._rows().index("accent")
-        app.handle_input(_Key("a"))
-        assert app.pick == "accent"
+        app.view = "walls"
+        app.tab, title = app._wall_kind(app.choices())
+        app._focus = "Wallpaper " + title
     return enter
 
 
-def _custom_page(ws):
-    """The Appearance page on a `custom` made from night with one accent
-    (ACCENT stepped once), NAME… showing and focused (§9 phase 6 step 8)."""
+def _name_page(ws):
+    """The Appearance page on a `custom` made from night with one accent, its
+    NAME dialog open with a name typed (§9 phase 6 step 8)."""
     def enter():
         app = ws.appearance_app
-        app.zone = "rows"
-        app.row = app._rows().index("accent")
-        app.handle_input(_Key("right"))
+        ws.look.change("accent", _ui().theme_accents()[9][1])
         ws.look.tick(0.0)
         assert ws.look.theme_name == "custom"
         app._refresh()
-        app.row = app._rows().index("name")
+        app._open_name()
+        app.name_text = "bubble"
     return enter
 
 
-def _after_picker(ws, enter):
-    """`enter`, after the surface before it is put back: a picker closed (B,
-    which restores nothing: nothing was tried), and a `custom` the page made
-    gone, the page on night with ACCENT focused, as the picker left it."""
+def _after_appearance(ws, enter):
+    """`enter`, after the surface before it is put back: the page on its rows,
+    no dialog, and a `custom` the page made gone, the page on night with the
+    theme in use focused, as it opens."""
     def go():
         app = ws.appearance_app
-        if app.pick is not None:
-            app.handle_input(_Key("b"))
-            assert app.pick is None
+        app.view = "rows"
+        app._close_name(acted=False)
         if ws.look.theme_name == "custom":
             ws.look.set_theme("night")
             ws.carts_store.delete({"path": os.path.join(ws.carts_root,
                                                         "custom.moy")})
             ws.carts.rescan()
             app._refresh()
-            app.row = app._rows().index("accent")
+        app.open()
         enter()
     return go
 
@@ -864,8 +850,8 @@ def surface_names(config_name):
     names += ["editor_" + t for t in TABS]
     for a in APPS:
         names.append("app_" + a)
-        if a == "appearance" and cfg.get("accent"):
-            names += ["app_appearance_accent", "app_appearance_custom"]
+        if a == "appearance" and cfg.get("appearance"):
+            names += ["app_appearance_walls", "app_appearance_name"]
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
     names += ["web_console", "web_console_address"]

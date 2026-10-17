@@ -1025,8 +1025,7 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # (hilite on the selected row only, drawn by `moy_chrome`'s C) and
 # `achievements_ui._draw_achievements` (a leading glyph, a locked/dim look
 # that IS `disabled`). `cell` answers
-# `file_widgets.FileGridView.draw` (thumbnail + centred caption),
-# `appearance_app._draw_wall_card` (art + a filled caption BAND) and
+# `file_widgets.FileGridView.draw` (thumbnail + centred caption) and
 # `cards_layer._draw_choice_icons` / `_draw_bg_thumbs` (frame-only cells whose
 # picture is bespoke) -- which is why `cell` RETURNS the art rect instead of
 # trying to own every picture.
@@ -1184,8 +1183,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
                    the band/centred choice -- `row`'s knobs, same meaning and
                    same default-None semantics. A caption whose frozen baseline
                    is `y + h - 13*fs` agrees with the band centre only at font
-                   scale 1, which is what kept `appearance_app._draw_wall_card`
-                   hand-rolled.
+                   scale 1.
       `edge_last`  paint the border AFTER the icon/glyph rather than before,
                    so content that escapes the cell is clipped by its own
                    frame. (It cannot come after the CALLER's art -- that is
@@ -1198,8 +1196,7 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     Default draw order is field -> caption -> edge -> icon/glyph, so the
     caller's art (drawn after, into the returned rect) never sits under the
     border and the border never sits under the art -- which is what
-    `appearance_app._draw_wall_card` and `cards_layer._draw_bg_thumbs` both
-    already do by hand.
+    `cards_layer._draw_bg_thumbs` already does by hand.
     """
     flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (_F_FOCUS if focus else 0) | (
         _F_DISABLED if disabled else 0) | (_F_BAND if band else 0) | (

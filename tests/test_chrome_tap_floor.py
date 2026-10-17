@@ -320,37 +320,63 @@ def _desk(path, **kw):
     return host_app.build_workstation(str(path / "carts"), **kw)
 
 
+def _frames(ws, n=3):
+    for _ in range(n):
+        ws.input.begin_frame()
+        ws._dirty = True
+        ws.frame(1 / 30)
+
+
 def _appearance(ws):
     assert ws.open_app(ws.appearance_app)
+    _frames(ws)
     return ws.appearance_app
 
 
+class _Right:
+    last_key = 0
+
+    def pressed(self, n):
+        return n == "right"
+
+
+def _step_chrome(ws):
+    """CHROME SIZE stepped once, as a person does: focused, then right."""
+    app = ws.appearance_app
+    app._ui.focus("Chrome size")
+    _frames(ws, 1)
+    app.handle_input(_Right())
+    _frames(ws)
+
+
 def _row_keys(ws):
-    return _appearance(ws)._rows()
+    return [k for k in _appearance(ws)._kinds if not k.startswith("theme ")]
 
 
 def test_appearance_offers_chrome_size_only_where_there_is_a_choice(tmp_path):
     desk = _desk(tmp_path / "desk")
     keys = _row_keys(desk)
-    assert keys[keys.index("font") + 1] == "chrome"
+    assert keys[keys.index("Font") + 1] == "Chrome size"
     assert "chrome_scale" not in [r[0] for r in desk.settings_layer._settings_rows()]
     p4 = _row_keys(_desk(tmp_path / "p4", panel_diagonal_in=7.0))
-    assert p4[p4.index("font") + 1] == "chrome"
+    assert p4[p4.index("Font") + 1] == "Chrome size"
     for name, kw in (("handheld", {"sys_size": None, "windowed": False}),
                      ("guition_s3", {"sys_size": (480, 320), "windowed": False,
                                      "panel_diagonal_in": 3.5})):
-        assert "chrome" not in _row_keys(_desk(tmp_path / name, **kw)), name
+        assert "Chrome size" not in _row_keys(_desk(tmp_path / name, **kw)), name
 
 
 def test_chrome_size_steps_live_and_persists(tmp_path):
     ws = _desk(tmp_path)
     assert ws.look.chrome_scale == 0 and ws.layout.cs == 1     # the board's default
-    _appearance(ws)._step("chrome", 1)
+    _appearance(ws)
+    _step_chrome(ws)
     assert ws.layout.cs == 2 and ws.layout.fs == 1             # text stays 1x
     assert ws.system.get("chrome_scale") == 2
     again = _desk(tmp_path)                                    # the same store, rebooted
     assert again.look.chrome_scale == 2 and again.layout.cs == 2
-    _appearance(again)._step("chrome", 1)
+    _appearance(again)
+    _step_chrome(again)
     assert again.layout.cs == 1 and again.system.get("chrome_scale") == 1
 
 
@@ -384,7 +410,8 @@ def test_a_desk_lays_out_at_its_unit_and_steps_its_size(tmp_path):
     assert p4.metric_class == "desk" and p4.chrome_floor == 1
     assert p4.look.chrome_size() == 1 and p4.layout.cs == 2
     assert p4.layout.status_h == 40 and p4.layout.bar_icon == 32
-    _appearance(p4)._step("chrome", 1)
+    _appearance(p4)
+    _step_chrome(p4)
     assert p4.look.chrome_size() == 2 and p4.layout.cs == 4
     assert p4.layout.status_h == 80
 
@@ -405,19 +432,16 @@ def test_switching_chrome_size_matches_booting_at_it(tmp_path):
     ref.bar_layer._clock_text = lambda: "10:30"
     drv = ConsoleDriver(ref)
     _appearance(ref)
+    ref.appearance_app._ui.focus("Chrome size")    # where the live desk's focus is
     settle(ref, drv)
     reference = bytes(ref.sys_canvas._buf)
 
     ws = _desk(tmp_path / "live")
     ws.bar_layer._clock_text = lambda: "10:30"
     drv = ConsoleDriver(ws)
-    app = _appearance(ws)
+    _appearance(ws)
     settle(ws, drv)
-    ws.wm._install(ws.wm._wins["appearance"].ctx)   # what input dispatch does
-    try:
-        app._step("chrome", 1)
-    finally:
-        ws.wm._install(ws.wm._root_ctx)
+    _step_chrome(ws)
     settle(ws, drv)
     assert ws.layout.cs == 2
     assert bytes(ws.sys_canvas._buf) == reference

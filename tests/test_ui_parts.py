@@ -18,7 +18,11 @@ page drawn by a Python, a Lua and a compiled app to the same pixels.
     its own ground, and every runtime's host says which.
 
 The Files verbs (step 21) have a page of their own drawn the same three
-ways (`tests/fixtures/ui_parts/files_*.moy`, `tests/fixtures/wasm/app_files.moy`).
+ways (`tests/fixtures/ui_parts/files_*.moy`, `tests/fixtures/wasm/app_files.moy`),
+and so do Appearance's (step 20): a tab row moves by left and right and takes
+a tap, and a grid of cards lays them in centred columns, moves between them,
+activates one and cuts and rings each picture the app draws
+(`tests/fixtures/ui_parts/look_*.moy`, `tests/fixtures/wasm/app_look.moy`).
 """
 
 import os
@@ -966,3 +970,209 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
                 snap = run._run.snap
             assert snap[wasm_binding.SNAP_WINDOW] == (1 if desk else 0), name
         ws.exit()
+
+
+# -- the Appearance verbs (step 20): tabs, a grid of cards --------------------------------
+
+def _tabs_page(label="Kind"):
+    st = {"cur": 0}
+
+    def draw():
+        ui.page("")
+        st["cur"] = ui.tabs(label, ("Pictures", "Carts", "Art"), st["cur"])
+        ui.link("After", "")
+        return st
+    return _Run(draw)
+
+
+def test_tabs_move_by_left_and_right_stop_at_their_ends_and_take_a_tap():
+    r = _tabs_page()
+    r.frame()
+    r.frame()
+    assert ui.focus() == "Kind"
+    assert r.frame(("right",))["cur"] == 1
+    r.frame(("right",))
+    assert r.frame(("right",))["cur"] == 2, "the last tab stays"
+    x, y, w, h = _box(r, "Kind")
+    assert r.tap(x + 12, y + h // 2)["cur"] == 0, "a tap picks the tab under it"
+    r.frame(("down",))
+    assert ui.focus() == "After"
+
+
+def test_a_tab_rows_label_is_its_id_and_draws_nothing():
+    a, b = _tabs_page("Kind"), _tabs_page("Other")
+    for r in (a, b):
+        r.frame()
+        r.frame()
+    assert bytes(a.cv._buf) == bytes(b.cv._buf)
+
+
+def _grid_page(n=4, w=66, h=50, group=False, at=None, colour=8):
+    st = {"act": None, "cur": 0, "boxes": []}
+
+    def draw():
+        st["rect"] = ui.page("")
+        if at is not None:
+            ui.at(*at)
+            ui.scroll("region")
+        if group:
+            ui.group("Theme")
+        ui.grid("cards", w, h)
+        st["boxes"] = []
+        for i in range(n):
+            got = ui.card("Card %d" % i, "sub", {"current": i == st["cur"]})
+            st["boxes"].append(got)
+            if got[2]:
+                r.cv.rect(got[0], got[1], got[2], got[3], colour)
+            if got[4] & ui.ACTIVATED:
+                st["act"] = i
+        ui.grid()
+        ui.link("After", "")
+        if group:
+            ui.group()
+        if at is not None:
+            ui.scroll()
+        return st
+    r = _Run(draw)
+    return r
+
+
+def test_a_grid_lays_its_cards_in_centred_columns_and_rows():
+    r = _grid_page()
+    r.frame()
+    st = r.frame()
+    b = st["boxes"]
+    assert [c[2:4] for c in b[1:]] == [(66, 50)] * 3
+    assert b[0][2] > 66, "the focused card is lifted: grown, its picture with it"
+    assert b[1][1] == b[2][1] and b[3][1] > b[2][1], "three columns, then a row"
+    assert b[3][0] == b[1][0] - (b[2][0] - b[1][0]), "the second row starts under the first"
+    left, right = b[3][0], 320 - (b[2][0] + b[2][2])
+    assert abs(left - right) <= 1, "the columns are centred"
+    after = _box(r, "After")
+    assert after[1] > b[3][1] + 50, "the rows stack under the grid"
+
+
+def test_the_arrows_move_between_cards_and_enter_activates_one():
+    r = _grid_page()
+    r.frame()
+    r.frame()
+    assert ui.focus() == "Card 0"
+    r.frame(("right",))
+    assert ui.focus() == "Card 1"
+    r.frame(("left",))
+    r.frame(("down",))
+    assert ui.focus() == "Card 3"
+    st = r.frame(("a",))
+    assert st["act"] == 3
+    assert r.frame()["act"] == 3 and r.out["boxes"][3][4] & ui.ACTIVATED == 0
+
+
+def test_a_tap_activates_the_card_under_it():
+    r = _grid_page()
+    r.frame()
+    r.frame()
+    x, y, w, h, _st = r.out["boxes"][2]
+    r.out["act"] = None
+    assert r.tap(x + w // 2, y + h // 2)["act"] == 2
+
+
+def test_a_cards_picture_is_cut_to_the_radius_and_ringed_after_the_app_draws():
+    r = _grid_page(colour=8)
+    r.frame()
+    r.frame()
+    x, y, w, h, _st = r.out["boxes"][1]
+    inside = r.px(x + w // 2, y + h // 2)
+    assert r.px(x, y) != inside, "the corner is cut over the ground"
+    assert r.px(x + w // 2, y) != inside, "the ring is drawn over the picture's edge"
+    assert r.px(x + w // 2, y + 3) == inside
+
+
+def test_the_current_card_wears_the_current_mark():
+    r = _grid_page()
+    r.frame()
+    r.frame()
+    a, b = r.out["boxes"][0], r.out["boxes"][1]
+    pad = 5                                     # style.json's card_pad
+    assert r.px(a[0] - pad + 2, a[1] + 20) != r.px(b[0] - pad + 2, b[1] + 20)
+
+
+def test_a_grid_in_a_group_lies_on_the_ground_between_its_caption_and_rows():
+    r = _grid_page(group=True)
+    r.frame()
+    r.frame()
+    b = r.out["boxes"]
+    ground = r.px(2, b[0][1] + 10)
+    assert r.px(INSET + 1, b[0][1] + 10) == ground, "no card under the grid"
+    after = _box(r, "After")
+    assert r.px(INSET + 2, after[1] + after[3] // 2) != ground, "the rows sit on a card"
+
+
+def test_a_card_scrolled_out_of_view_answers_no_picture():
+    r = _grid_page(n=6, at=(0, 40, 320, 60))
+    r.frame()
+    st = r.frame()
+    assert st["boxes"][1][2] == 66
+    assert st["boxes"][3][2] == 0 and st["boxes"][3][3] == 0, "the second row is out of view"
+
+
+# -- the Appearance verbs' page in every runtime -------------------------------------------
+
+WASM_LOOK = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_look.moy")
+L_FRAMES, L_TAB, L_PICKED, L_ACTS, _L4, L_FOCUS, L_FAIL, L_LEFT = range(8)
+LOOK_SCRIPT = ("right", "down", "right", "a", "down", "down", "up", "left")
+
+
+@pytest.fixture(scope="module")
+def look_runs(tmp_path_factory):
+    root = str(tmp_path_factory.mktemp("ui_look") / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("look_py.moy", "look_lua.moy"):
+        shutil.copytree(os.path.join(PARTS, d), os.path.join(root, d))
+    titles = {"python": "UI Look Py", "lua": "UI Look Lua"}
+    if _wasm_or_skip():
+        from tools import wasm_cart
+        wasm_cart.build(WASM_LOOK, os.path.join(root, "app_look.moy"))
+        titles["wasm"] = "App Look Wasm"
+    out = {}
+    for name, title in titles.items():
+        ws = host_app.build_workstation(root)
+        ws.pointer.visible = False
+        open_cart(ws, title)
+        make_drv(ws).frame(_DT)
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        drv = make_drv(ws)
+        shots = []
+        for _ in range(3):
+            _frame(drv)
+        shots.append((_pixels(ws), _pmem(ws)))
+        for step in LOOK_SCRIPT:
+            drv.press(step)
+            for _ in range(3):
+                _frame(drv)
+            shots.append((_pixels(ws), _pmem(ws)))
+        out[name] = shots
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        ws.exit()
+    return out
+
+
+def test_the_look_page_is_one_page_in_every_runtime(look_runs):
+    ref = look_runs["python"]
+    for name, got in look_runs.items():
+        assert len(got) == len(ref)
+        for i, ((px, pm), (rpx, rpm)) in enumerate(zip(got, ref)):
+            assert pm[L_FAIL] == 0, "%s: a row failed (%d)" % (name, pm[L_FAIL])
+            assert pm[:L_FAIL] == rpm[:L_FAIL], "%s step %d answered %r, python %r" % (
+                name, i, pm, rpm)
+            assert pm[L_LEFT] == rpm[L_LEFT], (name, i)
+            assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
+
+
+def test_the_look_page_answers_its_script(look_runs):
+    s = [p for _px, p in look_runs["python"]]
+    assert s[0][L_FOCUS] == len("Kind") and s[0][L_TAB] == 0
+    assert s[1][L_TAB] == 1, "right on the tabs"
+    assert s[2][L_FOCUS] in (len("Red"), len("Green"), len("Blue"))
+    assert s[4][L_ACTS] == 1 and s[4][L_PICKED] == s[4][L_PICKED]
+    assert s[6][L_FOCUS] == len("After")
+    assert s[0][L_LEFT] > 0

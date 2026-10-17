@@ -190,7 +190,10 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.top_kind() == "appearance"
     before = ws.look.wallpaper_id
-    for key in ("down", "down", "right"):   # ACCENT -> TINT -> WALLPAPER, step it
+    drv.frame(1 / 30)          # its first frame: focus opens on the theme in use
+    ws.appearance_app._ui.focus("Wallpaper")
+    drv.frame(1 / 30)
+    for key in ("a", "right", "a"):   # WALLPAPER's page, the next card, use it
         drv.press(key)
         drv.frame(1 / 30)
         drv.frame(1 / 30)      # released: the next press is an edge of its own

@@ -154,8 +154,8 @@ now.
 An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
 2026-10-15): `runtime/ui.py`'s verbs (`page`, `label`, `button`, `toggle`,
 `slider`, `list`, `group`, `info`, `link`, `cycle`, `seg`, `swatches`,
-`hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `part`,
-`focus`, `keys_taken`, `at`) and its rect algebra
+`hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `tabs`,
+`grid`, `card`, `part`, `focus`, `keys_taken`, `at`) and its rect algebra
 (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
 app make. The engine under them -- the rect-taking widgets (`button`,
 `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
@@ -303,7 +303,7 @@ imports a row the Python console serves (`theme_set*`, `theme_edit_file`, `nav_o
 the VM.
 
 **The public UI API's rows** (the table's `ui` role) are every compiled
-app's, with no permission: `docs/ui_api_2026-10.md` §1's ten verbs, the
+app's, with no permission: `docs/ui_api_2026-10.md` §1's verbs, the
 same C a Python app's `ui` and a Lua cart's draw (`native/moy_ui/moy_ui_api.h`),
 drawn into the app's canvas with no hop and no upcall
 (`native/moy_ui/moy_ui_wasm.h` is their contract). The engine keeps focus,
