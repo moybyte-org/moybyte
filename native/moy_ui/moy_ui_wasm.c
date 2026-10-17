@@ -115,7 +115,9 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
     }
     if (tick != s_tick) {
         int32_t in[MOY_UI_IN_LEN] = {0};
+        int flags = 0;
         if (snap != NULL) {
+            flags = snap[MOYCORE_UI_SNAP_WINDOW] ? MOY_UI_WINDOW : 0;
             in[MOY_UI_IN_BTN] = snap[MOYCORE_UI_SNAP_BTN];
             in[MOY_UI_IN_BTNP] = snap[MOYCORE_UI_SNAP_BTNP];
             in[MOY_UI_IN_X] = snap[MOYCORE_UI_SNAP_X];
@@ -129,7 +131,7 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             surf.w = (int16_t)c->w;
             surf.h = (int16_t)c->h;
         }
-        moy_ui_api_begin(&s_ctx, in, surf, 0, 1);
+        moy_ui_api_begin(&s_ctx, in, surf, flags, 1);
         s_tick = tick;
     }
     return &s_ctx;

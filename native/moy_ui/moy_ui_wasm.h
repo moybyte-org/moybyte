@@ -54,7 +54,8 @@ const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial);
 // The snapshot's slots the engine reads (moycore_run.h's SNAP_*).
 enum {
     MOYCORE_UI_SNAP_BTN = 0, MOYCORE_UI_SNAP_BTNP = 1, MOYCORE_UI_SNAP_X = 6,
-    MOYCORE_UI_SNAP_Y = 7, MOYCORE_UI_SNAP_PTR = 8, MOYCORE_UI_SNAP_KEY = 10
+    MOYCORE_UI_SNAP_Y = 7, MOYCORE_UI_SNAP_PTR = 8, MOYCORE_UI_SNAP_KEY = 10,
+    MOYCORE_UI_SNAP_WINDOW = 14
 };
 
 // The verbs over `target`, a libmoy moy_canvas (NULL: -MOY_UI_STALE). 0 or a

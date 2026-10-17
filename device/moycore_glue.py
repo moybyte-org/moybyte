@@ -365,7 +365,8 @@ class MoycoreRun:
             held, pressed = inp.button_masks(MOY_BUTTONS, None, self._masks)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms,
+                    getattr(self.ws, "windowed_chrome", False))
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
@@ -502,7 +503,8 @@ class MoycoreRun:
             x, y, st = int(out[0]), int(out[1]), int(out[2])
         except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
             x = y = st = 0
-        bits = _moy_play.frame(self._run, n, dt, draw, x, y, st)
+        bits = _moy_play.frame(self._run, n, dt, draw, x, y, st,
+                               getattr(ws, "windowed_chrome", False))
         if bits:
             if bits & _moy_play.QUIT:
                 inp.cart_quit = True

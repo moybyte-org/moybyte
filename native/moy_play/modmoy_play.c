@@ -330,8 +330,9 @@ static mp_obj_t mod_open(mp_obj_t run_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_open_obj, mod_open);
 
-// frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW bits. The
-// pointer is the console's, in the cart's coordinates. A cart that raised
+// frame(run, ticks, dt, render, x, y, touch[, window]) -> QUIT | VIEW bits.
+// The pointer is the console's, in the cart's coordinates; `window`, whether
+// the run's surface is a window's body. A cart that raised
 // raises RuntimeError with its own text, which is how the Player has always
 // captured a Lua cart's crash.
 static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
@@ -339,7 +340,7 @@ static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
     uint32_t run = run_arg(a[0]);
     moy_play_in_t in = {
         (int32_t)mp_obj_get_int(a[4]), (int32_t)mp_obj_get_int(a[5]),
-        (int32_t)mp_obj_get_int(a[6]),
+        (int32_t)mp_obj_get_int(a[6]), n_args > 7 && mp_obj_is_true(a[7]) ? 1 : 0,
     };
     moy_play_input(run, &in);
     uint32_t out = 0;
@@ -356,7 +357,7 @@ static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
     }
     return MP_OBJ_NEW_SMALL_INT(out);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 7, 7, mod_frame);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 7, 8, mod_frame);
 
 // end(run[, why]) -- the run's books closed; a stale handle is a no-op.
 static mp_obj_t mod_end(size_t n_args, const mp_obj_t *a) {

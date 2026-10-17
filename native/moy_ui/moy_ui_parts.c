@@ -14,7 +14,7 @@ typedef struct {
     const moy_ui_sink_t *s;
     moy_canvas_row_t *row;
     moy_text_target_t t;
-    int look, run, fs, desk;
+    int look, run, fs, desk, win;
 } pd_t;
 
 static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
@@ -35,7 +35,8 @@ static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
     d->look = s->look;
     d->run = s->kind == MOY_UI_SINK_RUN;
     d->fs = fs < 1 ? 1 : fs;
-    d->desk = desk != 0;
+    d->desk = (desk & MOY_UI_DESK) != 0;
+    d->win = (desk & MOY_UI_WINDOW) != 0;
 }
 
 static int metric(int kind, int slot) {
@@ -98,14 +99,27 @@ static int dark(const pd_t *d) {
     return 2126 * r + 7152 * g + 722 * b < 1280000;
 }
 
-// The colour index a page's ground is (moy_ui_page_ground), -1 for none.
-static int ground(const pd_t *d) {
-    if (moy_ui_depth()->on) {
-        return tok(d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE);
+// The colour a page's ground is (moy_ui_page_ground) in the buffer's order,
+// in *c; 0 for none. Under a depth, in a window: the window's body as
+// moy_ui_depth_frame paints it.
+static int ground(const pd_t *d, uint16_t *c) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    if (dp->on) {
+        if (d->win) {
+            *c = set(dp->body) ? val(d, dp->body)
+                               : pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_SURFACE));
+        } else {
+            *c = pal(d, tok(d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
+        }
+        return 1;
     }
     int16_t pc[3];
     moy_ui_colors(d->look, MOY_UI_K_PANEL, MOY_UI_REST, pc);
-    return pc[0];
+    if (pc[0] < 0) {
+        return 0;
+    }
+    *c = pal(d, pc[0]);
+    return 1;
 }
 
 static void fill(pd_t *d, int x, int y, int w, int h, uint16_t c) {
@@ -588,13 +602,15 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
 // -- the page ---------------------------------------------------------------------------
 
 int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
-                       moy_ui_box_t *content) {
+                       int desk, moy_ui_box_t *content) {
     if (!moy_ui_depth()->on) {
         return moy_ui_panel(s, b, title, fs, content);
     }
     pd_t d;
-    open_pd(s, &d, fs, 0);
-    fill(&d, b.x, b.y, b.w, b.h, pal(&d, ground(&d)));
+    open_pd(s, &d, fs, desk);
+    uint16_t gc;
+    ground(&d, &gc);
+    fill(&d, b.x, b.y, b.w, b.h, gc);
     moy_ui_box_t ct = b;
     if (title.n) {
         int sh = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_STRIP) * d.fs;
@@ -741,7 +757,8 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
     if (r <= 0) {
         return MOY_UI_OK;
     }
-    int gc = ground(&d);
+    uint16_t gc;
+    int has_gc = ground(&d, &gc);
     moy_canvas_row_t *row = d.row;
     int32_t saved[4];
     memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
@@ -752,8 +769,8 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
         if (k.t.cx0 >= k.t.cx1 || k.t.cy0 >= k.t.cy1) {
             continue;
         }
-        if (gc >= 0) {
-            fill(&k, x, bottom - r, r, r, pal(&k, gc));
+        if (has_gc) {
+            fill(&k, x, bottom - r, r, r, gc);
         }
         card(&k, c, bottom);
         if (flags & (MOY_UI_F_FOCUS | MOY_UI_F_ON)) {
@@ -815,8 +832,10 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     int sc = tscale(s);
     int kh = pm(&d, MOY_UI_M_VALUE_ROW_KEY, 1), hgap = pm(&d, MOY_UI_M_VALUE_ROW_HINT_GAP, 1);
     int dk = dark(&d);
-    int gc = ground(&d);
-    uint16_t bg = pal(&d, gc >= 0 ? gc : 0);
+    uint16_t bg;
+    if (!ground(&d, &bg)) {
+        bg = pal(&d, 0);
+    }
     uint16_t ink = pal(&d, tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
     uint16_t dim = pal(&d, tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM));
     uint16_t capc = set(kc->fill) ? val(&d, kc->fill) : mix(bg, ink, dk ? 41 : 26);
@@ -846,7 +865,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                     int sign = key_sign(k);
                     int w = sign == 4 ? kh + 3 * d.fs
                             : sign >= 0 ? kh
-                                        : tw(&fk, k.p, k.n, sc) + (desk ? 10 : 8) * d.fs;
+                                        : tw(&fk, k.p, k.n, sc) + (d.desk ? 10 : 8) * d.fs;
                     w = w < kh ? kh : w;
                     if (!draw) {
                         // measured only

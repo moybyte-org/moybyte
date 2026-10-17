@@ -1986,8 +1986,9 @@ static mp_obj_t ui_api_size(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_size_obj, ui_api_size);
 
-// api_begin(ctx, inp, rect, cls, fs) -> settled. `inp` an array('i') of
-// MOY_UI_IN_LEN words, or None.
+// api_begin(ctx, inp, rect, flags, fs) -> settled. `flags` moy_ui.h's
+// MOY_UI_DESK and MOY_UI_WINDOW; `inp` an array('i') of MOY_UI_IN_LEN words,
+// or None.
 static mp_obj_t ui_api_begin(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_ctx_t *c = ctx_of(a[0]);

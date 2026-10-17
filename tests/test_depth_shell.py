@@ -2,11 +2,14 @@
 with the theme and its mode, the WM's rounded windows with their foot, the
 shadows and outline fringes the desk draws under the windows over pixels it
 has just painted (so a drag, a release and a re-render agree to the byte), a
-dragged window's smaller shadow, and the carousel's hero shadow, cast only at
-rest. Counts are of the toolkit calls that draw them.
+dragged window's smaller shadow, the carousel's hero shadow, cast only at
+rest, and an app's page lying on its window's body. Counts are of the
+toolkit calls that draw them.
 """
 
 import json
+
+import pytest
 
 from runtime import ui_draw
 from ws_helpers import build_desktop_ws, build_ws_with_shelf
@@ -278,3 +281,35 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
     assert all(s <= b for s, b in zip(at(now, x, y), at(bare, x, y)))
     assert at(now, x, y) != at(bare, x, y)
     assert ws.wallpaper.rasters == 1
+
+
+@pytest.mark.parametrize("variant", ["light", "dark"])
+def test_an_apps_page_in_a_window_lies_on_the_windows_body(tmp_path, variant):
+    """Settings, Files and Calc begin their page in the window they run in,
+    so the page's ground is the colour the frame paints the window's body."""
+    from runtime.host_canvas import make_system_canvas
+    ws, drv = _desk(tmp_path, variant)
+    _quiet(ws)
+    scratch = make_system_canvas(320, 240)
+    ui_draw.frame(scratch, ws.theme_colors, (10, 10, 300, 200), 20, "Window", True, False, 1)
+    o = 2 * (208 * scratch.w + 160)
+    body = scratch._buf[o] << 8 | scratch._buf[o + 1]
+    cv = ws.sys_canvas
+
+    def px(x, y):
+        o = 2 * (y * cv.w + x)
+        return cv._buf[o] << 8 | cv._buf[o + 1]
+    for app in ("settings", "files", "calc"):
+        if app == "settings":
+            ws.open_settings()
+        else:
+            ws.open_app(ws._apps_by_id[app])
+        for _ in range(3):
+            ws._dirty = True
+            drv.frame(1 / 30)
+        cx, cy, cw, ch = ws.wm._wins[app].content_rect()
+        # the page's ground: under its last row (Calc's keys reach its foot,
+        # so right of its tape)
+        x, y = ((cx + cw - 2, cy + 1) if app == "calc"
+                else (cx + cw // 2, min(cy + ch, cv.h) - 2))
+        assert px(x, y) == body, (app, x, y, hex(px(x, y)), hex(body))

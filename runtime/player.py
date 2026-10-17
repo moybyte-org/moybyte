@@ -1569,7 +1569,7 @@ class Player:
         a[0], a[1] = m[0], m[1]
         a[2], a[3], a[4] = st[0], st[1], st[2]
         a[5] = int(getattr(inp, "last_key", 0) or 0)
-        _ui_frame(ctx, cv, ws.theme_colors, None, a)
+        _ui_frame(ctx, cv, ws.theme_colors, None, a, False, ws.windowed_chrome)
 
     def _build_namespace(self, ws, project, cart, wifi, net, gpio, console):
         """The cart's namespace: make_api over the project, the artwork and

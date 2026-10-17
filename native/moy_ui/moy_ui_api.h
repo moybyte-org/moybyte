@@ -109,6 +109,7 @@ typedef struct {
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // a key the focused stop keeps: -1 or 1
     uint8_t keys, reveal, cls, fs;
+    uint8_t win;                    // the page lies in a window's body
     uint8_t n_prev, n_cur, has_at, gesture;    // gesture: 0 none, 1 down, 2 a drag
     moy_ui_stop_t prev[MOY_UI_API_STOPS], cur[MOY_UI_API_STOPS];
     moy_ui_keep_t keep[MOY_UI_API_KEEP];
@@ -150,11 +151,13 @@ void moy_ui_api_reset(moy_ui_ctx_t *c);
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n);
 
 // A frame begins: `in` (MOY_UI_IN_LEN words, NULL none), the surface a page
-// fills, the size class (0 the handheld's rows, 1 the desk's) and the font
-// scale. Answers 1 when the frame is SETTLED: its input moved no focus,
+// fills, its flags (moy_ui.h's MOY_UI_DESK: the desk's rows, else the
+// handheld's; MOY_UI_WINDOW: the page lies in a window's body, so its ground
+// is the window's) and the font scale. Answers 1 when the frame is SETTLED: its input moved no focus,
 // activated nothing, pressed nothing and scrolled nothing, so a page drawn
 // again draws the same pixels.
-int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int cls, int fs);
+int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
+                     int fs);
 
 // The verbs (§1). `o` may be NULL. Text is a span.
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,

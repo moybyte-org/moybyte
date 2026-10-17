@@ -2879,6 +2879,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_SNAP_KEY_DOWN), MP_ROM_INT(SNAP_KEY_DOWN) },
     { MP_ROM_QSTR(MP_QSTR_SNAP_TEXTMODE), MP_ROM_INT(SNAP_TEXTMODE) },
     { MP_ROM_QSTR(MP_QSTR_SNAP_QUIT),   MP_ROM_INT(SNAP_QUIT) },
+    { MP_ROM_QSTR(MP_QSTR_SNAP_WINDOW), MP_ROM_INT(SNAP_WINDOW) },
     // ...and the audio queue's.
     { MP_ROM_QSTR(MP_QSTR_AQ_SLOTS),    MP_ROM_INT(AQ_SLOTS) },
     { MP_ROM_QSTR(MP_QSTR_AQ_MAX),      MP_ROM_INT(AQ_MAX) },

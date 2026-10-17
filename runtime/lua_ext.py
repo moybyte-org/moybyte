@@ -98,7 +98,7 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
 SNAP_SLOTS = ("SNAP_BTN_P1", "SNAP_BTNP_P1", "SNAP_PLAYERS",
               "SNAP_TOUCH_X", "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN",
-              "SNAP_TOUCH_MS", "SNAP_TIME_MS")
+              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_WINDOW")
 
 AQ_OPS = ("AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP",
           "AQ_VOLUME")
@@ -114,9 +114,9 @@ def audio_ops(mod):
     return tuple(getattr(mod, name) for name in AQ_OPS)
 
 
-def snap_shared(s, inp, idx, pointer_state, out, since_ms):
-    """PLAYER TWO, THE POINTER and THE CLOCK, into the snapshot the tick will
-    read.
+def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
+    """PLAYER TWO, THE POINTER, THE CLOCK and THE WINDOW, into the snapshot the
+    tick will read.
 
     PLAYER TWO (#65). These slots exist in the C ABI and nothing filled them, so
     libmoy's `players()` answered 1 forever and a Lua cart could not have a
@@ -138,6 +138,10 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms):
     (`ticks._since_ms`), the base libmoy's time() adds the milliseconds inside
     the tick to -- the same clock a Python cart's time() reads. An input with
     no stamp leaves the slot as it was.
+
+    THE WINDOW: whether the run's surface is a window's body (the desk's
+    `windowed_chrome`), which the public UI API's page lies on: its ground is
+    then the window's (native/moy_ui/moy_ui_wasm.c), as a Python app's is.
     """
     n = 1
     pr = getattr(inp, "players", None)
@@ -159,6 +163,7 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms):
     start = getattr(inp, "cart_start_ms", None)
     if start is not None:
         s[idx[7]] = since_ms(start)
+    s[idx[8]] = 1 if window else 0
 
 
 def cfg_blob(cfg):

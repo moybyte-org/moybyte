@@ -13,7 +13,9 @@ page drawn by a Python, a Lua and a compiled app to the same pixels.
   * an icon goes on the next row or button; progress is no stop;
   * a table's current row follows focus and opens by Enter or a second tap,
     a scroll region keeps the focused row in its rect, a field types each
-    key once, and a dialog holds the input with focus on its first stop.
+    key once, and a dialog holds the input with focus on its first stop;
+  * a page begun in a window lies on the window's body, a fullscreen one on
+    its own ground, and every runtime's host says which.
 
 The Files verbs (step 21) have a page of their own drawn the same three
 ways (`tests/fixtures/ui_parts/files_*.moy`, `tests/fixtures/wasm/app_files.moy`).
@@ -874,3 +876,93 @@ def test_the_files_page_answers_its_script(files_runs):
     assert s[14][F_FOCUS] == len("Cancel"), "the dialog took focus to its first button"
     assert s[15][F_FOCUS] == len("Delete")
     assert s[16][F_PICKS] == 2, "the dialog answered its second button"
+
+
+# -- a page in a window's body ---------------------------------------------------------
+#
+# A page whose host begins it in a window (`ui_frame(window=True)`; a run's
+# snapshot slot SNAP_WINDOW, which the kernel's Player writes from the console)
+# lies on the window's body as the frame paints it; a fullscreen page keeps
+# its own ground.
+
+def _ground(theme, window):
+    """The ground pixel of an empty page begun in a window or not."""
+    r = _Run(lambda: ui.page(""), theme)
+    ui_draw.ui_frame(r.ctx, r.cv, r.th, None, None, False, window)
+    ui.page("")
+    return r.px(300, 200)
+
+
+def _window_body(theme):
+    """The colour a window's frame paints its body, at its foot."""
+    th = _theme(*theme)
+    cv = make_system_canvas(320, 240)
+    ui_draw.frame(cv, th, (10, 10, 300, 200), 20, "Window", True, False, 1)
+    b = cv._buf
+    o = 2 * (208 * cv.w + 160)
+    return b[o] << 8 | b[o + 1]
+
+
+@pytest.mark.parametrize("variant", ["light", "dark"])
+def test_a_page_in_a_window_lies_on_the_windows_body(variant):
+    theme = ("moy", variant)
+    body = _window_body(theme)
+    assert _ground(theme, True) == body
+    full = _ground(theme, False)
+    assert full != body, "a fullscreen page keeps the panel's ground"
+    cv = make_system_canvas(8, 8)
+    cv.rect(0, 0, 8, 8, _theme(*theme)["panel"])
+    assert full == cv._buf[0] << 8 | cv._buf[1], "the fullscreen ground is the panel"
+
+
+def test_a_theme_without_a_depth_keeps_its_page_in_a_window():
+    theme = ("night", "dark")
+    assert _ground(theme, True) == _ground(theme, False)
+
+
+@pytest.fixture(scope="module")
+def parts_root(tmp_path_factory):
+    root = str(tmp_path_factory.mktemp("ui_window") / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("parts_py.moy", "parts_lua.moy"):
+        shutil.copytree(os.path.join(PARTS, d), os.path.join(root, d))
+    titles = {"python": "UI Parts Py", "lua": "UI Parts Lua"}
+    if _wasm_or_skip():
+        from tools import wasm_cart
+        wasm_cart.build(WASM, os.path.join(root, "app_parts.moy"))
+        titles["wasm"] = "App Parts Wasm"
+    return root, titles
+
+
+@pytest.mark.parametrize("desk", [False, True])
+def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monkeypatch,
+                                                                  desk):
+    """A Python app's frame begins with the window flag; a Lua and a compiled
+    app's snapshot carries it to the RUN face's begin (moy_ui_wasm.c)."""
+    from runtime import player, wasm_binding
+    seen = []
+    real = player._ui_frame
+
+    def spy(*a):
+        seen.append(a[6])
+        return real(*a)
+    monkeypatch.setattr(player, "_ui_frame", spy)
+    root, titles = parts_root
+    kw = dict(sys_size=(1024, 600), font_scale=2, windowed=True) if desk else {}
+    for name, title in titles.items():
+        ws = host_app.build_workstation(root, **kw)
+        ws.pointer.visible = False
+        open_cart(ws, title)
+        for _ in range(2):
+            make_drv(ws).frame(_DT)
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.windowed_chrome is desk
+        if name == "python":
+            assert seen and set(seen) == {desk}, seen
+        else:
+            run = ws.player._lua
+            snap = getattr(run, "snap", None)
+            if snap is None:
+                snap = run._run.snap
+            assert snap[wasm_binding.SNAP_WINDOW] == (1 if desk else 0), name
+        ws.exit()

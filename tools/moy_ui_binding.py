@@ -827,10 +827,10 @@ def binding():
     def api_size():
         return int(lib.moy_ui_api_size())
 
-    def api_begin(ctx, inp, rect, cls, fs):
+    def api_begin(ctx, inp, rect, flags, fs):
         p, _k = _ctx(ctx)
         ib = None if inp is None else _buf(inp)
-        return bool(lib.moy_ui_api_begin(p, ib, box_of(rect), int(cls), int(fs)))
+        return bool(lib.moy_ui_api_begin(p, ib, box_of(rect), int(flags), int(fs)))
 
     def api_page(ctx, cv, look, title, o):
         p, _k = _ctx(ctx)

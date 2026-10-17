@@ -296,7 +296,8 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, moy_ui_box_t b) {
 
 // -- a frame -------------------------------------------------------------------------
 
-int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int cls, int fs) {
+int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
+                     int fs) {
     static const int32_t none[MOY_UI_IN_LEN] = {0};
     if (in == NULL) {
         in = none;
@@ -314,7 +315,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->n_cur = 0;
     c->surface = surface;
     c->page = surface;
-    c->cls = (uint8_t)(cls ? 1 : 0);
+    c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
+    c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : 0);
     c->fs = (uint8_t)(fs > 0 ? fs : 1);
     c->y = 0;
     c->scroll = 0;
@@ -567,6 +569,12 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 }
 
 // -- layout --------------------------------------------------------------------------
+
+// The parts' `desk` for what lies on the page's ground: the size class and
+// whether the page is a window's body.
+static int ground_of(const moy_ui_ctx_t *c) {
+    return (c->cls ? MOY_UI_DESK : 0) | (c->win ? MOY_UI_WINDOW : 0);
+}
 
 static moy_ui_keep_t *page_keep(moy_ui_ctx_t *c) {
     return c->page_keep >= 0 ? &c->keep[c->page_keep] : NULL;
@@ -863,7 +871,7 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         c->has_at = 0;
     }
     moy_ui_box_t ct;
-    moy_ui_page_ground(s, b, title, c->fs, &ct);
+    moy_ui_page_ground(s, b, title, c->fs, ground_of(c), &ct);
     open_page(c, hash(title.p, title.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0);
     if (content != NULL) {
         *content = ct;
@@ -1142,7 +1150,7 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
             c->cur[c->page_stop].b.h = c->page.h;
         }
     }
-    moy_ui_hints(s, b, items, len, c->fs, c->cls);
+    moy_ui_hints(s, b, items, len, c->fs, ground_of(c));
 }
 
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,

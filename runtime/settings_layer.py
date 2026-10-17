@@ -1353,7 +1353,7 @@ class SettingsLayer:
             host.focus(want)          # before the frame: its keys act on it
             self._want = None
         host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch),
-                   _lb.metric_class() == _lb.DESK)
+                   _lb.metric_class() == _lb.DESK, ws.windowed_chrome)
         was = ws._dirty
         ws._dirty = False             # what the rows' answers change marks it again
         if view is None:

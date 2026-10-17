@@ -207,7 +207,8 @@ class WasmHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms,
+                    getattr(self._ws, "windowed_chrome", False))
         err = self._run.tick(dt, self.draw_next)
         # quit() sets SNAP_QUIT; the Player honours cart_quit after the tick.
         if s[SNAP_QUIT]:
@@ -259,7 +260,8 @@ class WasmHostRun:
             x, y, st = int(out[0]), int(out[1]), int(out[2])
         except Exception:  # noqa: BLE001 -- no pointer this frame
             x = y = st = 0
-        bits = moy_play.frame(self._prun, n, dt, draw, x, y, st)
+        bits = moy_play.frame(self._prun, n, dt, draw, x, y, st,
+                              getattr(ws, "windowed_chrome", False))
         if bits:
             if bits & moy_play.QUIT:
                 inp.cart_quit = True

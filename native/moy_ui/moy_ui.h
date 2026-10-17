@@ -625,6 +625,9 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // `value_row` metrics at font scale `fs`, a `_desk` slot where `desk` is set;
 // colours are tokens of the sink's look; text is the `ui` role's (the label)
 // and the `caption` role's (values, captions, legends), petme128 on a run.
+// The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
+// size class (MOY_UI_DESK): the page lies in a window's body.
+enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
 enum {
     MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
     MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,
@@ -694,10 +697,12 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t las
 // 0 for a theme without a depth.
 int moy_ui_group_r(int fs);
 // A page's ground in box b: under a theme with a depth the `panel` colour,
-// its title (if any) a heading in the title role over a panel strip's
-// height; under one without, moy_ui_panel. *content: where its rows go.
+// or in a window (`desk`'s MOY_UI_WINDOW) the window's body as the frame
+// paints it (the look's `win.body`, else `surface`), its title (if any) a
+// heading in the title role over a panel strip's height; under one without,
+// moy_ui_panel. *content: where its rows go.
 int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
-                       moy_ui_box_t *content);
+                       int desk, moy_ui_box_t *content);
 // A group's caption in band `b`.
 int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
 // Keycap hints in band `b`, from its left: `items` NUL-separated pairs of the

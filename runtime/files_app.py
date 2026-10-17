@@ -138,6 +138,7 @@ class FilesLayout:
         self.fs = fs = max(1, int(fs))
         self.cs = max(fs, int(cs)) if cs else fs
         self.desk = metric_class() == DESK
+        self.windowed = bool(windowed)     # its page lies in a window's body
         self.cx, self.cy, self.cw, self.ch = content_of(
             self.w, self.h, 0 if windowed else bar_rows(self.cs))
         # style.json's `row` stack: the engine's row height in this size class
@@ -620,7 +621,7 @@ class FilesAppLayer(ListShellApp):
         cv = self._surf.canvas()
         lay = self.layout
         th = self._theme.colors()
-        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk)
+        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
         ui.page("")                   # the ground under the bar's band too
         was = (self.place, self.level, self.dialog, self.cur, len(self.rows))
         if self._focus is not None:

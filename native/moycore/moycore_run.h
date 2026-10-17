@@ -36,6 +36,7 @@ enum {
     SNAP_KEY_DOWN,       // the code currently held, or 0
     SNAP_TEXTMODE,       // written BY the cart (textmode)
     SNAP_QUIT,           // written BY the cart (quit)
+    SNAP_WINDOW,         // 1: the run's surface is a window's body (the desk)
     SNAP_LEN,
 };
 

@@ -144,6 +144,7 @@ enum {                                          // why a run ended
 typedef struct {
     int32_t x, y;               // the pointer in the cart's own coordinates
     int32_t touch;              // touch()'s flags: 1 live, 2 held, 4 the press edge
+    int32_t window;             // 1: the run's surface is a window's body (the desk)
 } moy_play_in_t;
 
 typedef struct {
