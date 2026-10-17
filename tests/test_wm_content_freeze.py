@@ -111,7 +111,12 @@ def test_pointer_down_and_release_edge_rerender(tmp_path):
     assert calls[0] > down_calls
     _quiesce(ws)
     ws._dirty = True
-    drv.frame(0.0)                         # settle whatever the tap changed
+    drv.frame(0.0)                         # settle whatever the tap changed:
+    for _ in range(8):                     # a tapped stop's page may owe frames
+        if not ws.settings_layer._host.owed:
+            break
+        drv.frame(0.0)
+    assert not ws.settings_layer._host.owed
     after_settle = calls[0]
     drv.pan(1, 0)
     drv.frame(0.0)                         # position-only: freeze resumes

@@ -225,8 +225,9 @@ class PowerRows:
                 rect[2] - 20 * fs, lay.set_row_h - 2)
 
     def draw(self, cv, rect):
-        """The level line, then the two rows: the label, a five-step gauge
-        between chevrons, the cursor's row filled."""
+        """The level line, then the two rows: the label, a gauge of the
+        row's steps (`SettingsLayer.level`) between chevrons, the cursor's
+        row filled."""
         ws = self.ws
         self.rect = rect
         lay = ws.layout
@@ -249,8 +250,8 @@ class PowerRows:
             cv.print("<", x + w - 88 * fs - 2, by + 5, th["author"], 2)
             cv.print(">", x + w - 16 * fs + 2, by + 5, th["author"], 2)
             vx = x + w - 78 * fs
-            lv = int(ws.system.get(key, 3))
-            for s in range(5):
+            lv, _lo, hi = ws.settings_layer.level(key)
+            for s in range(hi):
                 cv.rect(vx + s * 8 * fs, by + 6, 6 * fs, 8 * fs,
                         th["play"] if s < lv else grey)
 

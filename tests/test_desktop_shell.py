@@ -239,19 +239,86 @@ def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
     assert ws.screen == "desktop"                             # ...not the launcher
 
 
-def test_settings_mock_rows_do_not_touch_carts(tmp_path):
-    """The mocked rows (volume/brightness/name) step cosmetic values in the system
-    dict but are clearly not wired to a backend yet. (The old "theme" mock-choice is
-    now the functional EDIT ICONS action -- see test_icon_theme.)"""
+def _settings_page(tmp_path):
+    from runtime import host_app
     ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
-    ws.settings_layer.set_msel = rows.index("volume")
-    ws.settings_layer.settings_adjust(1)
-    assert 0 <= ws.system.get("volume") <= 5
-    ws.settings_layer.set_msel = rows.index("name")
-    ws.settings_layer.settings_adjust(1)
-    assert ws.system.get("name") in ws.settings_layer._MOCK_NAMES
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def _focus_row(ws, drv, key):
+    sl = ws.settings_layer
+    sl.set_msel = sl.row_index(key)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
+def test_settings_shows_volume_brightness_and_name(tmp_path):
+    """Volume and Brightness are sliders and Name a text field, in General
+    after Text size (owner call 2026-10-17: the rows stay on the page)."""
+    ws, drv = _settings_page(tmp_path)
+    sl = ws.settings_layer
+    general = dict(sl._grouped())["General"]
+    keys = [r[0] for r in general]
+    assert keys.index("font_scale") < keys.index("volume") < keys.index("brightness") \
+        < keys.index("name")
+    assert sl._kinds["Volume"] == sl._kinds["Brightness"] == "slider"
+    assert sl._kinds["Name"] == "field"
+
+
+def test_the_volume_row_sets_the_console_level(tmp_path):
+    """Volume is the console's level: a step on its slider stores it in
+    system.json and reaches the audio kernel's level, the one every session
+    mixes at (`audio_session.console_volume`)."""
+    from runtime import audio_session
+    if audio_session.native() is None:
+        import pytest
+        pytest.skip("no native audio module on this host")
+    was = audio_session.console_volume()
+    try:
+        ws, drv = _settings_page(tmp_path)
+        _focus_row(ws, drv, "volume")
+        assert ws.settings_layer._focused == "Volume"
+        start = ws.settings_layer.level("volume")[0]
+        drv.press("left")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        assert ws.system.get("volume") == start - 1
+        assert audio_session.console_volume() == start - 1
+        ws.settings_layer.step_row("volume", -99)      # held in its range
+        assert ws.system.get("volume") == 0 == audio_session.console_volume()
+        ws.settings_layer.step_row("volume", 99)
+        assert ws.system.get("volume") == 7 == audio_session.console_volume()
+    finally:
+        audio_session.console_volume(was)
+
+
+def test_brightness_and_name_are_stored(tmp_path):
+    """Brightness and Name apply nothing yet, but what they are set to is in
+    system.json: a fresh session reads it back. Name is typed (the keyboard
+    in text mode while it holds focus), Brightness stepped in 0..5."""
+    from runtime import host_app
+    ws, drv = _settings_page(tmp_path)
+    sl = ws.settings_layer
+    sl.step_row("brightness", 1)
+    assert ws.system.get("brightness") == 4
+    sl.step_row("brightness", 9)
+    assert ws.system.get("brightness") == 5
+    _focus_row(ws, drv, "name")
+    assert sl._focused == "Name" and ws.input.text_mode
+    for ch in "Kit":
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+    assert ws.system.get("name") == "Kit"
+    _focus_row(ws, drv, "volume")
+    assert not ws.input.text_mode
+    again = host_app.build_workstation(str(tmp_path / "carts"))
+    assert again.system.get("brightness") == 5
+    assert again.system.get("name") == "Kit"
 
 
 # -- the pre-2026-07 bottom dock is gone -----------------------------------

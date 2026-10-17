@@ -12,11 +12,12 @@ engine owns focus, navigation, activation and the page's scroll; this layer
 owns what each row shows and does.
 
 The groups: General (Wi-Fi, the Bluetooth keyboard where a board has one,
-Appearance, Text size, Layout, and Edit icons where the theme draws the
-IconSheet), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
+Appearance, Text size, Layout, Volume, Brightness, Name, and Edit icons
+where the theme draws the IconSheet), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
 rows), Power (the idle ladder's rungs), Updates (the web console, the OTA
 channel and the update flows) and About (firmware, board, storage, battery
-and the achievements). Only rows that work show. The Wi-Fi panel, the Bluetooth picker, a toggle's warning and the last
+and the achievements). Brightness and Name store a value nothing applies
+yet. The Wi-Fi panel, the Bluetooth picker, a toggle's warning and the last
 crash record are pages of their own in place of the rows; the Wi-Fi panel is
 also what the bar's wifi popover holds (`wifi_page`, runtime/popover.py).
 
@@ -48,8 +49,10 @@ except ImportError:  # pragma: no cover - host fallback
 
 try:
     from editors_base import TextEntry, TE_COMMIT, TE_CANCEL
+    from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import TextEntry, TE_COMMIT, TE_CANCEL
+    from runtime.audio_session import console_volume
 
 # -- settings-screen geometry: the row height console's Layout scales ---------
 _SET_ROW_H = 26
@@ -217,10 +220,10 @@ _BOARDS = {"tdeck": "T-Deck Plus", "p4": "ESP32-P4 7B", "guition_s3": "JC3248W53
            "guition_p4": "JC8012P4A1C", "xiao_zero": "XIAO ESP32-S3"}
 
 # The groups, in page order: (caption, row keys). A row of kind `idle` is
-# Power's; the mock rows (VOLUME, BRIGHTNESS, NAME) are no group's: they do
-# nothing yet, so the page leaves them out.
+# Power's.
 _GROUPS = (
-    ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme", "icons")),
+    ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme",
+                 "volume", "brightness", "name", "icons")),
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
     ("Updates", ("webhost", "ota_channel", "update_online", "update", "update_c6")),
@@ -231,7 +234,16 @@ _GROUPS = (
 _HINT_OPEN = ("enter", "Open", "Esc", "Back")
 _HINT_CHANGE = ("left right", "Change", "Esc", "Back")
 _HINT_SWITCH = ("enter", "Switch", "Esc", "Back")
-_HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH}
+_HINT_TYPE = ("enter", "Done", "Esc", "Back")
+_HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
+          "slider": _HINT_CHANGE, "field": _HINT_TYPE}
+
+# The level rows, by system.json key: (lowest, highest, the value with none
+# stored). Volume is the console's level (`audio_session.console_volume`,
+# the one the boot applies and the dev channel's `vol` sets); Brightness is
+# stored and applied by nothing yet.
+LEVELS = {"volume": (0, 7, 7), "brightness": (0, 5, 3)}
+NAME_MAX = 16                 # the Name row's bytes
 
 _NETS = 24                    # the networks the Wi-Fi page lists
 
@@ -286,9 +298,11 @@ class SettingsLayer:
         # ONE appearance surface); this row deep-links to it.
         ("appearance", "APPEARANCE", "action"),
         ("font_scale", "FONT SIZE", "font"),
-        ("volume", "VOLUME", "mock-gauge"),
-        ("brightness", "BRIGHTNESS", "mock-gauge"),
-        ("name", "NAME", "mock-name"),
+        # VOLUME applies the console's level; BRIGHTNESS and NAME are
+        # stored in system.json and applied by nothing yet.
+        ("volume", "VOLUME", "level"),
+        ("brightness", "BRIGHTNESS", "level"),
+        ("name", "NAME", "name"),
         # EDIT ICONS (Stage 2): opens the PAINT editor on the system icon
         # sheet so a kid can repaint the top-bar chrome.
         ("icons", "EDIT ICONS", "action"),
@@ -296,7 +310,6 @@ class SettingsLayer:
         # SETTINGS_TOGGLES above and spliced in by _toggle_rows below, in
         # registry order, directly after this row.
     )
-    _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
     def __init__(self, ws, host):
         self.ws = ws
@@ -350,6 +363,7 @@ class SettingsLayer:
         # The kernel's last crash record (Settings -> LAST CRASH): a read-only
         # page in place of the rows, on a board whose kernel keeps one.
         self.crash_view = False
+        self._typing = False          # the Name field holds focus: text mode
 
     def reset(self):
         """A fresh visit (ws.open_settings): focus on the first row, the page
@@ -365,6 +379,7 @@ class SettingsLayer:
             self.close_bluetooth()
         self.confirm_key = None
         self.crash_view = False
+        self._typing = False
         self._about = self._read_about()
 
     # -- the cursor, as a row index ---------------------------------------------
@@ -1026,9 +1041,9 @@ class SettingsLayer:
             self.set_msel = i
     def settings_adjust(self, d, i=None):
         """Step the selected Settings row (or row `i`) by d. Font applies +
-        persists; the mock rows just move a cosmetic value held in ws.system
-        (not acted on); an "action" row (APPEARANCE / EDIT ICONS) fires its
-        action regardless of direction."""
+        persists; a level row (VOLUME, BRIGHTNESS) moves within its range
+        (`set_level`); an "action" row (APPEARANCE / EDIT ICONS) fires its
+        action regardless of direction; NAME is typed, not stepped."""
         ws = self.ws
         key, _label, kind = self._settings_rows()[self.set_msel if i is None else i]
         if kind == "wifi-net":                  # WIFI: any step/tap opens the panel (#38)
@@ -1061,13 +1076,27 @@ class SettingsLayer:
         if kind == "layout":                    # LAYOUT: THEME / a package's bars
             ws.look.cycle_layout_theme(d)
             return
-        if key == "name":
-            cur = ws.system.get("name", self._MOCK_NAMES[0])
-            i = self._MOCK_NAMES.index(cur) if cur in self._MOCK_NAMES else 0
-            ws.system.set("name", self._MOCK_NAMES[(i + d) % len(self._MOCK_NAMES)])
-        else:  # mock-gauge (volume / brightness): a 0..5 placeholder
-            v = int(ws.system.get(key, 3)) + d
-            ws.system.set(key, max(0, min(5, v)))
+        if kind == "level":                     # VOLUME / BRIGHTNESS
+            self.set_level(key, self.level(key)[0] + d)
+
+    def level(self, key):
+        """A level row's (value, lowest, highest): the stored value, else the
+        row's default, held in its range."""
+        lo, hi, dflt = LEVELS[key]
+        try:
+            v = int(self.ws.system.get(key, dflt))
+        except (TypeError, ValueError):
+            v = dflt
+        return max(lo, min(hi, v)), lo, hi
+
+    def set_level(self, key, v):
+        """Store a level row's value, held in its range; VOLUME also sets the
+        console's level, which every audio session mixes at."""
+        lo, hi, _dflt = LEVELS[key]
+        v = max(lo, min(hi, int(v)))
+        self.ws.system.set(key, v)
+        if key == "volume":
+            console_volume(v)
 
     def rows_flinging(self):
         """False: the page scrolls by the engine's drag, which has no coast."""
@@ -1236,6 +1265,18 @@ class SettingsLayer:
             got = _ui.seg(s, _STABLE_BETA, cur)
             if got != cur:
                 ws._cycle_channel(got - cur)
+        elif kind == "level":
+            self._kinds[s] = "slider"
+            cur, lo, hi = self.level(key)
+            got = _ui.slider(s, cur, lo, hi)
+            if got != cur:
+                self.set_level(key, got)
+        elif kind == "name":
+            self._kinds[s] = "field"
+            cur = str(ws.system.get(key, "") or "")
+            got, _done = _ui.field(s, cur, NAME_MAX)
+            if got != cur:
+                ws.system.set(key, got)
 
     def _rows_page(self):
         _ui.page("")
@@ -1362,6 +1403,10 @@ class SettingsLayer:
                 ws.request_frame()    # ... and the next scrolls to it
             self._rows_page()
             self._focused = _ui.focus()
+            typing = self._kinds.get(self._focused) == "field"
+            if typing != self._typing:
+                self._typing = typing     # typed letters are the field's,
+                ws._set_text_mode(typing)  # never a button's alias
         else:
             if view == "wifi":
                 self.wifi_page()
