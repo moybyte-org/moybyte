@@ -356,10 +356,10 @@ def _row_keys(ws):
 def test_appearance_offers_chrome_size_only_where_there_is_a_choice(tmp_path):
     desk = _desk(tmp_path / "desk")
     keys = _row_keys(desk)
-    assert keys[keys.index("Font") + 1] == "Chrome size"
+    assert keys[keys.index("Code font") + 1] == "Chrome size"
     assert "chrome_scale" not in [r[0] for r in desk.settings_layer._settings_rows()]
     p4 = _row_keys(_desk(tmp_path / "p4", panel_diagonal_in=7.0))
-    assert p4[p4.index("Font") + 1] == "Chrome size"
+    assert p4[p4.index("Code font") + 1] == "Chrome size"
     for name, kw in (("handheld", {"sys_size": None, "windowed": False}),
                      ("guition_s3", {"sys_size": (480, 320), "windowed": False,
                                      "panel_diagonal_in": 3.5})):

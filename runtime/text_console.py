@@ -437,7 +437,7 @@ class TextConsole:
         rects = []
         draw_symbol_keys(cv, self.ws.code_layer._tones(), syms, 0, y, cell, h,
                          fs, (cell - 1 - 8 * fs) // 2 - 8 * fs,
-                         (h - 1 - 8 * fs) // 2 - 8 * fs, rects)
+                         (h - 1 - 8 * fs) // 2 - 8 * fs, rects, th=self.ws.theme_colors)
         self._sym_rects = tuple(rects)
 
     def _tones(self, th):

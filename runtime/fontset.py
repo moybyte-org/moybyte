@@ -9,6 +9,7 @@ with neither (the browser) carries none.
 
   names() -> (name, ...)   the faces this image carries
   file(name) -> bytes | None   NAME.fnt, or NAME.txt its family's licence
+  face(name) -> bool       `name` is shaped as a face's NAME.fnt, carried or not
   icon_file(name) -> bytes | None   an icon set's file (tools/make_icons.py):
                            SET[.fill]-SIZE.fnt, system_icons.moygfx, and on
                            the host set.json; the image's are its tier's
@@ -62,6 +63,20 @@ def file(name):
         return _data.FACES[stem]
     with open(_host_dir() + "/" + stem + ext, "rb") as f:
         return f.read()
+
+
+def face(name):
+    """Whether `name` is shaped as a face's file, FAMILY-SIZE-WEIGHT-BPP.fnt,
+    whether or not this image carries it (the browser carries none)."""
+    if type(name) is not str or not name.endswith(".fnt"):
+        return False
+    parts = name[:-4].split("-")
+    if len(parts) != 4 or not parts[0].isalpha():
+        return False
+    for p in parts[1:]:
+        if not p.isdigit():
+            return False
+    return True
 
 
 def _icon_dir():

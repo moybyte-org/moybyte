@@ -116,6 +116,10 @@ _SYM_Y = 220
 _SYM_H = 20
 _SYM_CELL = 20
 _SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
+# The 2026-10 look's overflow fade: a line longer than the view fades out over
+# its last _FADE pixels (at the font scale), in bands of `bg` at these alphas.
+_FADE = 12
+_FADE_ALPHA = (89, 153, 217)
 
 
 def symbols_for(lang):
@@ -124,20 +128,27 @@ def symbols_for(lang):
     return _LUA_SYMBOLS if lang == "lua" else _CODE_SYMBOLS
 
 
-def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None):
+def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None,
+                     th=None):
     """The symbol palette renderer, ONE body for the Code tab and the script
     console: each key is a grid CELL whose picture is the symbol itself, laid
     out `cell` apart from `x0`. `cell` draws the frame and hands back where
     the picture goes; the symbol sits at the frozen +6px inside it, nudged by
     `dx`/`dy` (the Code tab re-centres it in a key the chrome scale grew,
-    #203). Appends each key's rect to `rects` when a list is given."""
+    #203). Under the 2026-10 look (`t["look"]`) each key is a normal button
+    of theme `th` inside its rect instead. Appends each key's rect to `rects`
+    when a list is given."""
     for i in range(len(syms)):
         r = (x0 + i * cell, y, cell - 1, h - 1)
+        if rects is not None:
+            rects.append(r)
+        if t.get("look") and th is not None:
+            _ui_draw.button(cv, th, (r[0] + fs, r[1] + fs, r[2] - fs, r[3] - fs),
+                            syms[i], kind="normal", app="code")
+            continue
         art = _ui_draw.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
         cv.print(syms[i], art[0] + 6 * fs + dx, art[1] + 6 * fs + dy,
                  t["sym_ink"], 1)
-        if rects is not None:
-            rects.append(r)
 
 
 # --- code-editor syntax highlighting (#24) ---------------------------------
@@ -376,7 +387,8 @@ class CodeLayer:
         cv = ws.sys_canvas
         th = ws.theme_colors
         fs = getattr(cv, "font_scale", 1)
-        fw = 8 * fs
+        fw = ws.code_layout.cell                # it prints in the mono face
+        lh = max(10 * fs, ws.code_layout.lh)
         maxc = max(12, min(34, (cv.w - 32 * fs) // fw - 2))
         text = str(ws.crash_popup)
         lines = []
@@ -395,7 +407,7 @@ class CodeLayer:
             + 8 * fs
         w = min(w, cv.w - 8 * fs)
         strip = 12 * fs
-        h = strip + (len(lines) + 1) * 10 * fs + 14 * fs
+        h = strip + (len(lines) + 1) * lh + 14 * fs
         x = (cv.w - w) // 2
         y = max(20 * fs, (cv.h - h) // 3)
         _ui_draw.dialog(cv, (x, y, w, h), ring=th["danger"], fill=th["surface"])
@@ -404,7 +416,7 @@ class CodeLayer:
         ty = y + strip + 4 * fs
         for l in lines:
             cv.print(l, x + 4 * fs, ty, th["ink"], 1)
-            ty += 10 * fs
+            ty += lh
         cv.print(foot, x + 4 * fs, y + h - 11 * fs, th["ink_dim"], 1)
 
     def handle_input(self, i):
@@ -1034,22 +1046,35 @@ class CodeLayer:
         find-match outline and the dim gutter number ink."""
         NAMES = self._NAMES
         th = self.ws.theme_colors
+        if _ui_draw.depth()[0]:
+            # The 2026-10 look: the code surface and its chrome in the
+            # theme's roles, the caret and a find match in its accent.
+            return _as_theme({"bg": th["surface"], "caret": th["accent"],
+                              "sym_bg": th["surface_alt"], "sym_edge": th["border"],
+                              "sym_ink": th["ink"], "hl": self._hl_map(),
+                              "sel": th["hilite"], "find": th["accent"],
+                              "gutter": th["ink_dim"], "gutter_cur": th["ink"],
+                              "look": True})
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
-            return _as_theme({"bg": th.get("surface", NAMES["black"]),
-                              "caret": th.get("accent", NAMES["yellow"]),
-                              "sym_bg": NAMES["dark_grey"],
-                              "sym_edge": th.get("hilite", NAMES["indigo"]),
-                              "sym_ink": NAMES["white"], "hl": self._hl_map(),
-                              "sel": th.get("hilite", NAMES["indigo"]),
-                              "find": NAMES["orange"],
-                              "gutter": NAMES["dark_grey"]})
-        return _as_theme({"bg": th["surface"], "caret": th["ink"],
-                          "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
-                          "sym_edge": th["border"], "sym_ink": th["ink"],
-                          "hl": self._hl_map(),
-                          "sel": th.get("hilite", NAMES["indigo"]),
-                          "find": NAMES["orange"],
-                          "gutter": th.get("border", NAMES["dark_grey"])})
+            t = _as_theme({"bg": th.get("surface", NAMES["black"]),
+                           "caret": th.get("accent", NAMES["yellow"]),
+                           "sym_bg": NAMES["dark_grey"],
+                           "sym_edge": th.get("hilite", NAMES["indigo"]),
+                           "sym_ink": NAMES["white"], "hl": self._hl_map(),
+                           "sel": th.get("hilite", NAMES["indigo"]),
+                           "find": NAMES["orange"],
+                           "gutter": NAMES["dark_grey"]})
+        else:
+            t = _as_theme({"bg": th["surface"], "caret": th["ink"],
+                           "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
+                           "sym_edge": th["border"], "sym_ink": th["ink"],
+                           "hl": self._hl_map(),
+                           "sel": th.get("hilite", NAMES["indigo"]),
+                           "find": NAMES["orange"],
+                           "gutter": th.get("border", NAMES["dark_grey"])})
+        t["gutter_cur"] = t["gutter"]
+        t["look"] = False
+        return t
 
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
@@ -1061,10 +1086,12 @@ class CodeLayer:
         cv = ws.sys_canvas
         lay = ws.code_layout
         fs = lay.fs
-        cell = lay.cell                          # on-screen char-cell width (8*fs)
+        cell = lay.cell                          # on-screen char-cell width
         lh = lay.lh
+        th = lay.text_h                          # the glyph box: caret, selection
         ed = ws.editor
         t = self._t = self._tones()
+        look = t["look"]
         cv.cls(t["bg"])                         # full-screen editor
         # The old title + RUN/SAVE/CLOSE top band is gone (Stage 4 rollout): the unified
         # bar (drawn after this in draw()) owns the top 18px -- PLAY runs (and persists,
@@ -1079,21 +1106,30 @@ class CodeLayer:
             cols = ed.COLS
             vis = ed.visible_lines()
             errrow = ws.code_err_row
+            # The 2026-10 look (a theme with a depth): the current line on the
+            # theme's current mark with a `value` bar at its left, and a line
+            # longer than the view fading out over FADE pixels at its right.
+            fx = tx0 + cols * cell - _FADE * fs if look else None
             for idx in range(len(vis)):
                 y = lay.y0 + idx * lh
                 absrow = ed.top + idx
                 full = vis[idx]
                 on_err = errrow is not None and absrow == errrow
+                cur = look and absrow == ed.row
+                fade = look and len(full) - ed.left > cols
+                if cur:
+                    self._current_line(cv, lay, y, lay.cx, (fx if fade else lay.cx + lay.cw))
                 if gc:                           # #89: line-number gutter (crash mark integrated)
                     num = str(absrow + 1)
                     cv.print(num[-gc:], lay.x0, y,
-                             NAMES["red"] if on_err else t["gutter"], 1)
+                             NAMES["red"] if on_err else
+                             (t["gutter_cur"] if cur else t["gutter"]), 1)
                 elif on_err:                     # no gutter: the original far-left crash tick
-                    cv.rect(0, y, 3 * fs, 8 * fs, NAMES["red"])
+                    cv.rect(0, y, 3 * fs, th, NAMES["red"])
                 if on_err:                       # inline error underline (#24)
-                    cv.rect(tx0, y + 8 * fs, cols * cell, fs, NAMES["red"])
-                self._draw_selection(ed, absrow, y, tx0, cell, cols, fs, t["sel"])
-                self._draw_find_matches(ed, full, y, tx0, cell, cols, fs, t["find"])
+                    cv.rect(tx0, y + th, cols * cell, fs, NAMES["red"])
+                self._draw_selection(ed, absrow, y, tx0, cell, cols, th, t["sel"])
+                self._draw_find_matches(ed, full, y, tx0, cell, cols, th, t["find"])
                 seg = full[ed.left:ed.left + cols]
                 segcols = self._hl(full)[ed.left:ed.left + cols]
                 self._draw_code_runs(seg, segcols, y, tx0)
@@ -1102,18 +1138,43 @@ class CodeLayer:
                     if mcol < cols - 2:
                         cv.print(ws.code_err[:cols - mcol],
                                  tx0 + mcol * cell, y, NAMES["red"], 1)
+                if fade:
+                    self._fade(cv, fx, y, lh, t["bg"], fs)
+                    if cur:
+                        self._current_line(cv, lay, y, fx, lay.cx + lay.cw)
                 if absrow == ed.row:            # caret on the cursor's line
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= cols:
-                        cv.rect(tx0 + vcol * cell, y, fs, 8 * fs, t["caret"])
+                        if look:
+                            cv.rect(tx0 + vcol * cell - fs, y + fs, 2 * fs, th - 2 * fs,
+                                    t["caret"])
+                        else:
+                            cv.rect(tx0 + vcol * cell, y, fs, th, t["caret"])
         # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
         if lay.status_band is not None and ed is not None:
-            issues = "1 ISSUE" if ws.code_err else "NO ISSUES"
+            issues = "1 issue" if ws.code_err else "No issues"
             _ui_draw.status_row(cv, ws.theme_colors, lay.status_band,
-                           ("LN " + str(ed.row + 1) + ", COL " + str(ed.col + 1),
-                            str(len(ed.lines)) + " LINES", issues))
+                           ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
+                            str(len(ed.lines)) + " lines", issues))
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
+
+    def _current_line(self, cv, lay, y, x0, x1):
+        """The current line's mark from x0 to x1: the theme's current mark,
+        and the `value` bar where the band starts at the area's left."""
+        if x1 <= x0:
+            return
+        th = self.ws.theme_colors
+        _ui_draw.current(cv, th, (x0, y, x1 - x0, lay.lh))
+        if x0 == lay.cx:
+            cv.rect(x0, y, 2 * lay.fs, lay.lh, th["value"])
+
+    def _fade(self, cv, x, y, h, bg, fs):
+        """A line longer than the view fades into `bg` over the FADE pixels
+        from x: three steps, each a band of `bg` at a rising alpha."""
+        step = _FADE * fs // len(_FADE_ALPHA)
+        for i in range(len(_FADE_ALPHA)):
+            cv.shadow(x + i * step, y, step, h, 0, bg, _FADE_ALPHA[i], 0)
 
     def _hl(self, line):
         """Memoized per-line syntax highlight (#24). Lines recur every frame, so
@@ -1167,7 +1228,7 @@ class CodeLayer:
             return None
         return vs, ve
 
-    def _draw_selection(self, ed, absrow, y, tx0, cell, cols, fs, color):
+    def _draw_selection(self, ed, absrow, y, tx0, cell, cols, h, color):
         """Highlight the selected columns on one visible row (#89): a filled tint
         behind the text (the runs redraw on top). Multi-row selections fill full
         lines between the endpoints."""
@@ -1184,9 +1245,9 @@ class CodeLayer:
             return
         vs, ve = span
         cv = self.ws.sys_canvas
-        cv.rect(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, 8 * fs, color)
+        cv.rect(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, h, color)
 
-    def _draw_find_matches(self, ed, line, y, tx0, cell, cols, fs, color):
+    def _draw_find_matches(self, ed, line, y, tx0, cell, cols, h, color):
         """Outline every occurrence of the find query on one visible row (#89): the
         incremental "all matches" highlight the find bar drives."""
         q = self._find_q
@@ -1204,7 +1265,7 @@ class CodeLayer:
             span = self._visible_span(ed, i, i + L, cols)
             if span is not None:
                 vs, ve = span
-                cv.rectb(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, 8 * fs, color)
+                cv.rectb(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, h, color)
             start = i + (L if L > 0 else 1)
 
     # The tool/find buttons ARE `ui.chip`s (Phase 3d): the private `_panel_btn`
@@ -1238,11 +1299,12 @@ class CodeLayer:
             return
         if not spec:
             return
-        fs = self.ws.code_layout.fs
-        gx = rect[0] + (rect[2] + 1 - len(spec) * 8 * fs) // 2
+        lay = self.ws.code_layout
+        fs = lay.fs
+        gx = rect[0] + (rect[2] + 1 - len(spec) * lay.cell) // 2
         if gx < rect[0] + fs:
             gx = rect[0] + fs
-        cv.print(spec, gx, rect[1] + (rect[3] + 1 - 8 * fs) // 2, ink, 1)
+        cv.print(spec, gx, rect[1] + (rect[3] + 1 - lay.text_h) // 2, ink, 1)
 
     def _draw_tools(self, lay, ed, t):
         """The #89 chrome: the always-visible TLS toggle, the tool palette row (when
@@ -1338,7 +1400,7 @@ class CodeLayer:
         shown = self._find_q[-avail:] if len(self._find_q) > avail else self._find_q
         cv.print(("F:" + shown)[-avail - 2:], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
         cx = r[0] + fs + (len(shown) + 2) * lay.cell
-        cv.rect(cx, r[1] + fs, fs, 8 * fs, t["caret"])
+        cv.rect(cx, r[1] + fs, fs, lay.text_h, t["caret"])
         _ui_draw.chip(cv, t, _chip_rect(btns["prev"]), "<", glyph="<",
                  glyph_draw=self._btn_face, fs=fs)
         _ui_draw.chip(cv, t, _chip_rect(btns["next"]), ">", glyph=">",
@@ -1359,4 +1421,4 @@ class CodeLayer:
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
         draw_symbol_keys(cv, t, self._symbols(), lay.sym_area[0], sy, sc, sh,
-                         fs, lay.sym_text_dx, lay.sym_text_dy)
+                         fs, lay.sym_text_dx, lay.sym_text_dy, th=self.ws.theme_colors)

@@ -110,13 +110,13 @@ def test_appearance_cart_is_versioned_system_app():
 
 def test_the_cards_then_the_rows_on_the_handheld_and_the_desk(tmp_path):
     small = _open(_ws(tmp_path / "s"))
-    rows = ["Mode", "Accent", "Tint", "Wallpaper", "Font", "Theme file"]
+    rows = ["Mode", "Accent", "Tint", "Wallpaper", "Font", "Code font", "Theme file"]
     assert [k for k in small._kinds if not k.startswith("theme ")] == rows
     cards = [k[len("theme "):] for k in small._kinds if k.startswith("theme ")]
     assert cards == small._themes() and cards[-1] == "moy"
     wide = _open(_ws(tmp_path / "w", **DESK))
     assert [k for k in wide._kinds if not k.startswith("theme ")] == [
-        "Mode", "Accent", "Tint", "Wallpaper", "Window style", "Font", "Chrome size",
+        "Mode", "Accent", "Tint", "Wallpaper", "Window style", "Font", "Code font", "Chrome size",
         "Theme file"]
     sim = _open(_ws(tmp_path / "b", sys_size=(1024, 600), windowed=True))
     assert "Chrome size" in sim._kinds          # the simulator's desk takes two
@@ -172,6 +172,52 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
     _focus(ws, app, "theme " + names[1])
     _press(ws, app, "right", "a")
     assert look.theme_name == names[2]
+
+
+def test_code_font_sets_the_code_tabs_face_and_font_keeps_it(tmp_path):
+    """CODE FONT (docs/look_2026-10.md step 23): the `mono` role's preset,
+    JetBrains Mono where the image carries the font set; FONT changes the
+    `ui` and `title` faces and keeps it."""
+    ws = _ws(tmp_path)
+    app = _open(ws)
+    look = ws.look
+    assert app.choices()["code_fonts"] == ("petme128", "jbmono")
+    assert app.choices()["code_font"] == "petme128"           # night's: petme128
+    _focus(ws, app, "Code font")
+    _press(ws, app, "right")
+    assert app.choices()["code_font"] == "jbmono"
+    assert ui_draw.font_info(ui_draw.font("mono")[0])[0] == 7  # the 7 px cell
+    _focus(ws, app, "Font")
+    _press(ws, app, "right")
+    assert app.choices()["font"] == "petme128" and app.choices()["code_font"] == "jbmono"
+    look.commit()
+    pkg = _custom(tmp_path)
+    assert pkg["fonts"] == {"ui": "petme128", "title": "petme128",
+                            "mono": "jbmono-11-400-2.fnt"}
+    assert (tmp_path / "carts" / "custom.moy" / "jbmono-11-400-2.fnt").exists()
+    _focus(ws, app, "Code font")
+    _press(ws, app, "left")
+    assert app.choices()["code_font"] == "petme128" and ui_draw.font("mono")[0] == 0
+
+
+def test_code_font_shows_only_where_the_image_draws_a_choice(tmp_path, monkeypatch):
+    """The browser carries no font set: PetMe128 is its one code font, and
+    the row is not shown."""
+    ws = _ws(tmp_path)
+    monkeypatch.setattr(ws.look, "code_fonts", lambda: ("petme128",))
+    app = _open(ws)
+    _frame(ws)
+    assert app.choices()["code_fonts"] == ("petme128",)
+    assert "Code font" not in app._kinds and "Font" in app._kinds
+
+
+def test_the_moy_seed_names_jetbrains_mono_for_the_code_tab(tmp_path):
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False)
+    _frame(ws)
+    assert dict(ui_draw.theme_fonts("moy"))["mono"] == "jbmono-11-400-2.fnt"
+    assert ws.look.choices()["code_font"] == "jbmono"
+    assert ui_draw.font_info(ui_draw.font("mono")[0])[:2] == (7, 14)
 
 
 def test_the_wallpapers_page_is_tabs_over_cards_and_b_comes_back(tmp_path):

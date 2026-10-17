@@ -196,7 +196,8 @@ def _theme_shape_back():
     draws, so the empty shape goes back after each, the depth a workstation's
     `_go_live` installed (the shape does not carry it) is switched off, the
     installed theme package is dropped (a later test's Settings would list
-    its layout), and every font role and the print font go back to petme128."""
+    its layout), every font role and the print font go back to petme128, and
+    the bars go back to the default's."""
     yield
     try:
         from runtime import ui_draw
@@ -209,3 +210,8 @@ def _theme_shape_back():
     for role in ("ui", "title", "mono"):
         ui_draw.use_font(role, 0)
     ui_draw.print_font(0)
+    # ...and the bars a look placed (its layout, its bar heights) are the
+    # default's again, as the depth is off
+    from runtime import layout_base
+    layout_base.place_bar_h()
+    layout_base.place_bars(layout_base.DEFAULT_BARS)

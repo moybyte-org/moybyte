@@ -89,6 +89,8 @@ def test_every_seed_font_ships_its_licence_in_the_image():
     for name in seeds:
         with open(os.path.join(THEMES, name)) as f:
             fonts |= set(json.load(f).get("fonts", {}).values())
+    # a face of the font set is the image's (runtime/fontset.py), not the tables'
+    fonts = {f for f in fonts if os.path.isfile(os.path.join(THEMES, f))}
     assert fonts
     for fnt in fonts:
         with open(os.path.join(THEMES, fnt[:-len(".fnt")] + ".txt"), "rb") as f:
@@ -139,7 +141,10 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
     for _ in range(3):
         for name in appearance.THEME_NAMES:
             ws.look.set_theme(name, persist=False)
-            assert len(appearance._FONTS) == 1
+            # moy's Code tab adds JetBrains Mono (docs/look_2026-10.md step 23)
+            assert len(appearance._FONTS) == (2 if name == "moy" else 1)
+    ws.look.set_theme("night", persist=False)
+    assert len(appearance._FONTS) == 1
     iconsets.reset()            # an icon set's masks hold font rows of their own
     assert _free_slots() == SLOTS - 1
     # A theme that names no font: every role and the print font on petme128,

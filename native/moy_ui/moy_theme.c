@@ -2276,6 +2276,26 @@ static int resolve_row(const char *name, size_t n, int variant, int32_t row[MOY_
 
 static int plate_reads(const char *name, size_t n, int variant, const int32_t *row);
 
+// A code role on the code surface, at the code floor (style.json's
+// theme.code): a set colour of either that reaches MOY_THEME_CODE_CONTRAST.
+static int code_reads(int32_t a, int32_t b) {
+    if (a < 0 || b < 0 || a >= MOY_THEME_PAINT || b >= MOY_THEME_PAINT) {
+        return 1;
+    }
+    int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);
+    int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
+    return (hi + 500) * 10 >= MOY_THEME_CODE_CONTRAST * (lo + 500);
+}
+
+static int is_code(int role) {
+    for (int i = 0; i < MOY_THEME_CODE; i++) {
+        if (moy_theme_code[i] == role) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int moy_theme_resolve(const char *name, size_t n, int variant,
                       int32_t row[MOY_THEME_ROLES], uint32_t *unreadable) {
     variant = variant == MOY_THEME_LIGHT ? MOY_THEME_LIGHT : MOY_THEME_DARK;
@@ -2298,6 +2318,11 @@ int moy_theme_resolve(const char *name, size_t n, int variant,
     }
     if (rc == MOY_THEME_OK && !plate_reads(name, n, variant, row)) {
         bad |= 1u << MOY_THEME_PAIRS;
+    }
+    for (int i = 0; i < MOY_THEME_CODE; i++) {
+        if (!code_reads(row[moy_theme_code[i]], row[MOY_THEME_CODE_BG])) {
+            bad |= 1u << (MOY_THEME_PAIRS + 1 + i);
+        }
     }
     if (unreadable != NULL) {
         *unreadable = bad;
@@ -3247,15 +3272,33 @@ static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
         }
         r[e[0]] = best >= 0 ? best : r[e[1]];
     }
-    // 5. content: B's where it clears R's surface, else the derive set's for
-    // the surface's side where that clears, else R's ink
+    // 5. content but the code roles: B's where it clears R's surface, else
+    // the derive set's for the surface's side where that clears, else R's ink
     int32_t s = r[MOY_UI_T_SURFACE];
     int side = ratio_cmp(ratio(s, 0), ratio(s, 7)) >= 0;
     EACH(MOY_THEME_CL_CONTENT, i) {
         int role = CLASS(MOY_THEME_CL_CONTENT, i);
+        if (is_code(role)) {
+            continue;
+        }
         if (!clears(r[role], s)) {
             int32_t alt = set_value(role, side);
             r[role] = alt >= 0 && clears(alt, s) ? alt : r[MOY_UI_T_INK];
+        }
+    }
+    // 6. the code roles: B's where it reaches the code floor on the code
+    // surface, else the derive set's for the surface's side where that
+    // does, else black or RGB white, the larger ratio (one of the two always
+    // reaches 4.58:1; MOY64's white, at 9000, does not)
+    const int32_t white = MOY_THEME_RGB | 0xffffff;
+    int32_t cs = r[MOY_THEME_CODE_BG];
+    int cside = ratio_cmp(ratio(cs, 0), ratio(cs, 7)) >= 0;
+    int32_t bw = ratio_cmp(ratio(cs, 0), ratio(cs, white)) >= 0 ? 0 : white;
+    for (int i = 0; i < MOY_THEME_CODE; i++) {
+        int role = moy_theme_code[i];
+        if (!code_reads(r[role], cs)) {
+            int32_t alt = set_value(role, cside);
+            r[role] = alt >= 0 && code_reads(alt, cs) ? alt : bw;
         }
     }
 }

@@ -33,7 +33,9 @@
 // nearest package that sets one; a bar list is never merged. The chain is capped at
 // MOY_THEME_DEPTH and a cycle is refused. Readability is a report, never a
 // refusal: each (background, ink) pair under MOY_THEME_CONTRAST sets its bit,
-// and bit MOY_THEME_PAIRS is the current plate's (the focus colour on it).
+// bit MOY_THEME_PAIRS is the current plate's (the focus colour on it), and
+// bit MOY_THEME_PAIRS + 1 + i is code role i's under MOY_THEME_CODE_CONTRAST
+// on the code surface (style.json's theme.code).
 //
 // The seeds are style.json's, embedded in moy_ui_tables.c. One more package
 // can be installed beside them (the one loaded theme of the memory rule); it
@@ -206,7 +208,8 @@ void moy_theme_uninstall(void);
 // The role row of theme `name` in `variant` (the MOY_UI_TOKENS tokens, then
 // the content roles): every role set (a flag 0 or 1).
 // An unknown name resolves as the default. *unreadable gets one bit per pair
-// of style.json's theme.pairs that misses the contrast floor. MOY_THEME_OK, or
+// of style.json's theme.pairs that misses the contrast floor, then the
+// plate's and the code roles' (above). MOY_THEME_OK, or
 // MOY_THEME_CHAIN / MOY_THEME_NOMEM with the default's row written instead.
 int moy_theme_resolve(const char *name, size_t n, int variant,
                       int32_t row[MOY_THEME_ROLES], uint32_t *unreadable);
@@ -330,7 +333,8 @@ extern const size_t moy_theme_pkg_bytes;
 // [MOY_THEME_LIGHT]) derived from an accent, an index of moy_theme_accents or
 // -1 for the source's own, and a tint, an index of moy_theme_tints or -1 for
 // none, readable by construction: no pair of theme.pairs under the floor
-// where the source's own pairs clear. Integer only, on moy_theme_lum and the
+// where the source's own pairs clear, and no code role under the code floor.
+// Integer only, on moy_theme_lum and the
 // loader's predicate. Tint and accent -1 answer the source's rows where they
 // are readable.
 void moy_theme_derive(const int32_t src[2][MOY_THEME_ROLES], int accent, int tint,

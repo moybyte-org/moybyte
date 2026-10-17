@@ -108,14 +108,19 @@ COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
 # tabs as LABELED chips (icon + name) via ui.tab_row, PLAY a labeled button on the
 # right (SAVE dropped, #111). The 320x240 baseline keeps the icon ladder above.
 _TAB_CHIPS = (
-    ("cards", "CONFIG", "edit"),
-    ("blocks", "BLOCKS", "blocks"),
-    ("code", "CODE", "code"),
-    ("paint", "SPRITES", "paint"),
-    ("map", "MAP", "map"),
-    ("scene", "SCENE", "scene"),
-    ("music", "MUSIC", "music"),
+    ("cards", "Config", "edit"),
+    ("blocks", "Blocks", "blocks"),
+    ("code", "Code", "code"),
+    ("paint", "Sprites", "paint"),
+    ("map", "Map", "map"),
+    ("scene", "Scene", "scene"),
+    ("music", "Music", "music"),
 )
+
+# The slot of a theme's icon set (runtime/iconsets.py) a ladder icon draws
+# where it differs from the IconSheet's kind: the 2026-10 look's gear for
+# Config and face for Sprites (docs/media/look_2026-10/editor_bar_all_themes.png).
+_SET_KIND = {"edit": "settings", "paint": "sprite", "run": "play"}
 
 # The `ws` attribute holding each tab's layout owner -- the object whose
 # `relayout(w, h, fs, cs)` rebuilds that tab's geometry from the live canvas
@@ -469,29 +474,36 @@ class EditorApp:
         that only runs HERE, inside a cache-miss re-render (never per-frame)."""
         ws = self.ws
         th = ws.theme_colors
+        sets = ws.icon_spec() is not None
         if not self._compact(rect):
             # SHELF density (visual identity v1 Phase 3): labeled tabs + a labeled
             # PLAY button -- the Studio mockup's tab row, on the zoned bar (SAVE
-            # dropped, #111).
+            # dropped, #111). Under a theme's icon set the tabs take its icons
+            # and Play is its bare glyph and label in `value`.
             tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             _ui_draw.tab_row(cv, th, tabs_area, self._chips(), self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
-                        ink=band_ink)
-            _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
-                       glyph_draw=ws._glyph)
+                        ink=band_ink, icon_draw=self._set_icon(cv) if sets else None)
+            if sets:
+                self._bare_play(cv, play_r)
+            else:
+                _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
+                           glyph_draw=ws._glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
         # one in the tab's ON field with its name where the bar has the room,
         # then UNDO, REDO and PLAY.
         label = self._open_label(rect)
+        sets = ws.icon_spec() is not None
         for tab, glyph, r in self._ladder_rects(rect):
             x, y0, w, ic = r
             if tab is not None and tab == self.tab:
                 if label:
                     band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
                     _ui_draw.tab(cv, th, r, True, label, True, band_ink,
-                            ws._icon_image_keyed(glyph))
+                            ws._icon_image_keyed(glyph),
+                            icon_draw=self._set_icon(cv) if sets else None, kind=glyph)
                     continue
                 _ui_draw.tab(cv, th, r, True)
                 x += (w - ic) // 2
@@ -499,8 +511,35 @@ class EditorApp:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
             elif tab == _ZONE_REDO:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
+            elif tab is None and sets:
+                # Play: the set's bare glyph in `value` (DESIGN.md, Play)
+                ws.draw_icon("play", (x, y0, ic, ic), th["value"], cv)
             else:
-                ws._icon(glyph, x, y0, cv)
+                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y0, cv)
+
+    def _set_icon(self, cv):
+        """A tab's icon_draw: the theme's icon set's slot for a ladder kind,
+        in the chrome ink."""
+        ws = self.ws
+        ink = ws.theme_colors["chrome_ink"]
+
+        def draw(kind, r):
+            return ws.draw_icon(_SET_KIND.get(kind, kind), r, ink, cv)
+        return draw
+
+    def _bare_play(self, cv, r):
+        """The shelf's Play under a theme's icon set: the set's glyph and the
+        word, in `value`, on the band with no plate, centred in `r`."""
+        ws = self.ws
+        ink = ws.theme_colors["value"]
+        fs = self._zone_scale()
+        box = _BAR_ICON * fs
+        gap = 4 * fs
+        tw = _ui_draw.print_width("Play", fs)
+        x = r[0] + (r[2] - box - gap - tw) // 2
+        ws.draw_icon("play", (x, r[1] + (r[3] - box) // 2, box, box), ink, cv)
+        line = _ui_draw.font("ui")[2] * fs
+        cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
 
     def _compact(self, rect):
         """Whether the zone takes the narrow bar: the labeled row drops a tab."""

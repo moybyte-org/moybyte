@@ -145,7 +145,7 @@ def test_the_open_tab_is_named_on_the_narrow_bar(tmp_path):
     ws.launch_selected()
     ea = ws.editor_app
     rect = ws.layout.zone_left
-    for tab, name in (("cards", "CONFIG"), ("paint", "SPRITES"), ("code", "CODE")):
+    for tab, name in (("cards", "Config"), ("paint", "Sprites"), ("code", "Code")):
         ws.set_menu_view(tab)
         assert ea._open_label(rect) == name
         rects = ea._ladder_rects(rect)

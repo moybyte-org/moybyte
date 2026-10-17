@@ -530,7 +530,8 @@ class CodeLayout(LayoutBase):
     The T-Deck's 320x240 is laid out by the same formulas as every canvas: the text grid, the status band and the symbol palette.
 
     `cell` is the `mono` font's glyph-box width at fs; `lh` its line advance and
-    `_CODE_LEAD` rows (10 at fs 1 with petme128). `cols` /
+    `_CODE_LEAD` rows (10 at fs 1 with petme128), or a version 2 face's glyph
+    box (14 with JetBrains Mono 11). `cols` /
     `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
     the right span."""
 
@@ -538,9 +539,19 @@ class CodeLayout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        _fid, fw, line, _asc = _ui_draw.font("mono")
+        fid, fw, line, _asc = _ui_draw.font("mono")
         self.cell = fw * fs
-        self.lh = (line + _CODE_LEAD) * fs
+        # A row: petme128's 8-pixel line and the code lead; a version 2
+        # face's glyph box, which holds its ascenders and descenders (14 for
+        # the Code tab's JetBrains Mono 11). `text_h` is the box the caret
+        # and a selection span.
+        info = _ui_draw.font_info(fid) if fid else None
+        if info is not None and info[4] == 0:
+            self.text_h = info[1] * fs
+            self.lh = self.text_h
+        else:
+            self.text_h = 8 * fs
+            self.lh = (line + _CODE_LEAD) * fs
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
         # A key is TAPPED (on a board with no keyboard this strip IS the keyboard),
         # so it takes the chrome scale and the symbol re-centers inside it. WIDTH is

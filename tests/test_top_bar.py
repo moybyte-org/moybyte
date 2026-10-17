@@ -1212,3 +1212,32 @@ def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
     ws.bar_layer._clock_text = lambda: "12:35"
     ws.bar_layer.redraw_clock("home")
     assert bytes(cv._buf[:cv.w * bh * 2]) == whole
+
+
+def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch):
+    """docs/look_2026-10.md step 23: under a theme's icon set the ladder
+    draws the set's gear for Config and face for Sprites, the open tab its
+    name in sentence case, and Play bare in `value`."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    import sys
+    sets = sys.modules.get("iconsets") or sys.modules["runtime.iconsets"]
+    drew = []
+    real = sets.draw
+
+    def spy(cv, kind, rect, ink, spec):
+        drew.append((kind, ink))
+        return real(cv, kind, rect, ink, spec)
+    monkeypatch.setattr(sets, "draw", spy)
+    ws.bar_layer.invalidate()
+    drv.frame(1 / 30)
+    kinds = [k for k, _i in drew]
+    assert "settings" in kinds and "sprite" in kinds and "code" in kinds
+    assert "edit" not in kinds and "paint" not in kinds
+    assert ("play", ws.theme_colors["value"]) in drew
+    assert ws.editor_app._open_label(ws.layout.zone_left) == "Code"

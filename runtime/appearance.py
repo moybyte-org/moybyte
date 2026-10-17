@@ -162,7 +162,7 @@ _PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spar
 # A sheet's caps (style.json's theme.sheet_rows): (width, sprite rows, icon
 # rows, sprite bytes, icon bytes).
 _SHEET_CAPS = _ui_draw.sheet_caps()
-_CHANGES = ("accent", "tint", "wallpaper", "frame", "font")
+_CHANGES = ("accent", "tint", "wallpaper", "frame", "font", "code_font")
 # The loader's refusals (moy_theme.h), by rc from 1: each one's string.
 _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
 # The note of a saved theme.json one of whose pairs misses the contrast floor.
@@ -473,7 +473,10 @@ class Appearance:
                        (the source's own)
           "frame"      a `frame` value, None the source's
           "font"       a `fonts` value (role -> file), None the source's;
-                       the files it names are copied in
+                       the files it names are copied in, the code
+                       font kept
+          "code_font"  the `mono` role's file (the Code tab's face),
+                       None the source's
 
         On a seed or an installed package the first change makes `custom`
         from it (any `custom` before replaced) and switches to it; on
@@ -497,12 +500,29 @@ class Appearance:
                 look.pop(kind, None)
             else:
                 look[kind] = value
-        elif kind == "frame" or kind == "font":
-            key = "frame" if kind == "frame" else "fonts"
+        elif kind == "frame":
             if value is None:
-                over.pop(key, None)
+                over.pop("frame", None)
             else:
-                over[key] = value
+                over["frame"] = value
+        elif kind == "font" or kind == "code_font":
+            now = self._fonts_now(c, over)
+            if kind == "font" and value is None:
+                over.pop("fonts", None)
+            elif kind == "font":
+                value = dict(value)
+                if "mono" in now:
+                    value["mono"] = now["mono"]
+                over["fonts"] = value
+            else:
+                if value is None:
+                    value = dict(_ui_draw.theme_fonts(c.look.get("from") or
+                                                      self.theme_name)).get("mono")
+                if value is None:
+                    now.pop("mono", None)
+                else:
+                    now["mono"] = value
+                over["fonts"] = now
         elif value == self.THEIRS:
             over.pop("wallpapers", None)
             over.pop("images", None)
@@ -539,7 +559,7 @@ class Appearance:
         if rc != 0:
             return rc
         files = None
-        if kind in ("wallpaper", "font") or c.theme is None:
+        if kind in ("wallpaper", "font", "code_font") or c.theme is None:
             files = self._gather(c, look, theme, pic)
             if files is None:
                 return self.NO_FILE
@@ -556,7 +576,7 @@ class Appearance:
             c.files = need
         c.dirty = True
         self.file_gen += 1
-        c.font_moved = c.font_moved or kind == "font"
+        c.font_moved = c.font_moved or kind in ("font", "code_font")
         c.wall_moved = c.wall_moved or kind == "wallpaper"
         self._unsaved = True
         self._idle = 0.0
@@ -582,6 +602,25 @@ class Appearance:
     FONTS = ("tiny5", PETME128)
     _FONT_VALUES = {"tiny5": {"ui": "tiny5.fnt", "title": "tiny5.fnt"},
                     PETME128: {"ui": PETME128, "title": PETME128}}
+    # The CODE FONT row's presets: the `mono` role's file. JetBrains Mono is
+    # the font set's (docs/look_2026-10.md step 3), on the images that carry it.
+    CODE_FONTS = (PETME128, "jbmono")
+    _CODE_FONT_VALUES = {PETME128: PETME128, "jbmono": "jbmono-11-400-2.fnt"}
+
+    def _fonts_now(self, c, over):
+        """custom's `fonts` as it stands: its own where a change set them,
+        else its source's, role -> file."""
+        f = over.get("fonts", DROP)
+        if f is DROP and c.theme is not None:
+            f = keys_of(c.theme)["fonts"]
+        if f is DROP:
+            return dict(_ui_draw.theme_fonts(c.look.get("from") or self.theme_name))
+        return dict(f) if type(f) is dict else {}
+
+    def code_fonts(self):
+        """The CODE FONT presets this image can draw."""
+        return tuple(k for k in self.CODE_FONTS
+                     if k == PETME128 or font_file(self._CODE_FONT_VALUES[k]) is not None)
 
     def preset(self, kind, name):
         """change()'s value for preset `name` of the WINDOW STYLE (`frame`)
@@ -594,6 +633,8 @@ class Appearance:
             return {"style": name}
         if kind == "font":
             return dict(self._FONT_VALUES[name])
+        if kind == "code_font":
+            return self._CODE_FONT_VALUES[name]
         return name
 
     def choices(self):
@@ -603,7 +644,8 @@ class Appearance:
         is the source); `accent` an accent's A and `tint` a tint's name,
         each None for the theme's own; `frame`, the style its windows draw;
         `font`, the FONTS preset its `ui` font is, None for a font of its
-        own; `wallpaper`, the wallpaper shown; `picture`, for the theme's
+        own; `code_font`, the CODE_FONTS preset its `mono` font is, the same
+        way, and `code_fonts`, the presets this image draws; `wallpaper`, the wallpaper shown; `picture`, for the theme's
         picture, "mine" (Paint's, copied by a pick) or "theme" (the
         package's own); `chrome`, the chrome scale, and `chromes`, the
         panel's choices. The page reads it when `look_gen` moves."""
@@ -618,7 +660,8 @@ class Appearance:
                 "store": name not in THEME_NAMES and name != CUSTOM,
                 "from": lk.get("from"), "accent": lk.get("accent"),
                 "tint": lk.get("tint"), "frame": self._frame_style(c, lk),
-                "font": self._font_preset(), "wallpaper": self.wallpaper_id,
+                "font": self._font_preset(), "code_font": self._code_font_preset(),
+                "code_fonts": self.code_fonts(), "wallpaper": self.wallpaper_id,
                 "picture": pic, "chrome": self.chrome_size(),
                 "chromes": tuple(self.ws.chrome_scales)}
 
@@ -652,6 +695,19 @@ class Appearance:
         for key in _FONTS:
             if _FONTS[key] == fid:
                 return "tiny5" if key[1] == "tiny5.fnt" else None
+        return None
+
+    def _code_font_preset(self):
+        """The CODE FONT preset the live `mono` font is, None for a font of
+        the theme's own."""
+        fid = _ui_draw.font("mono")[0]
+        if not fid:
+            return PETME128
+        for key in _FONTS:
+            if _FONTS[key] == fid:
+                for name in self.CODE_FONTS:
+                    if self._CODE_FONT_VALUES[name] == key[1]:
+                        return name
         return None
 
     def tick(self, dt):
@@ -937,8 +993,11 @@ class Appearance:
                 continue
             data = self._fetch(look, n)
             if data is None:
-                if n.endswith(".txt"):
-                    continue                   # a font with no licence beside it
+                if n.endswith(".txt") or _fontset.face(n):
+                    # a font with no licence beside it; a face of the font
+                    # set where this image carries none (the browser): its
+                    # role draws petme128 here, the face wherever it loads
+                    continue
                 return None
             fetched[n] = data
             need.add(n)
@@ -1672,6 +1731,8 @@ class Appearance:
             src = font_file(f)
         else:
             src = self._package_file(pkg, f, _FONT_BYTES)
+            if src is None and _fontset.face(f):
+                src = font_file(f)         # a face custom was made without
         if src is None:
             return 0
         rc, fid = _ui_draw.font_load(src)

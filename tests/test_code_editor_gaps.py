@@ -734,3 +734,68 @@ def test_the_swallowed_key_still_types_when_it_is_pressed_again(tmp_path):
     src.last_key = 0
     _dframe(ws)
     assert ws.editor.text() == "mz" + before
+
+
+# ---------------------------------------------------------------------------
+# The 2026-10 look (docs/look_2026-10.md step 23): the current line and the fade
+# ---------------------------------------------------------------------------
+
+def _w(cv, x, y):
+    """The RGB565 word at (x, y): a theme's colours are block slots that
+    `pix` does not read back."""
+    i = (y * cv._stride + x) * 2
+    return cv._buf[i] | (cv._buf[i + 1] << 8)
+
+
+def _look_ws(tmp_path, theme, variant="light"):
+    ws = _ws(tmp_path)
+    ws.look.set_theme(theme, persist=False, variant=variant)
+    drv = _enter_code(ws)
+    lay = ws.code_layout
+    ed = ws.editor
+    ed.set_text("\n".join(["x = 1", "y" * (ed.COLS + 9), "z" * ed.COLS, "w = 2"]))
+    ed.row, ed.col, ed.top, ed.left = 0, 2, 0, 0
+    drv.frame(DT)
+    return ws, drv, lay, ed
+
+
+def test_the_current_line_wears_the_current_mark_and_the_value_bar(tmp_path):
+    ws, drv, lay, ed = _look_ws(tmp_path, "moy")
+    cv, th = ws.sys_canvas, ws.theme_colors
+    value, surface = cv._col(th["value"]), cv._col(th["surface"])
+    mid = lay.y0 + lay.lh // 2
+    assert _w(cv, lay.cx, mid) == value and _w(cv, lay.cx + lay.fs, mid) == value
+    far = lay.x0 + 10 * lay.cell                 # past the short line's text
+    assert _w(cv, far, mid) not in (value, surface), "the current plate"
+    assert _w(cv, far, mid + 3 * lay.lh) == surface, "another line is bare"
+    assert _w(cv, lay.cx, mid + 3 * lay.lh) == surface
+    ed.row = 3
+    drv.frame(DT)
+    assert _w(cv, lay.cx, mid) == surface and _w(cv, lay.cx, mid + 3 * lay.lh) == value
+
+
+def test_a_theme_without_a_depth_keeps_its_code_tab(tmp_path):
+    ws, _drv, lay, _ed = _look_ws(tmp_path, "night", "dark")
+    cv = ws.sys_canvas
+    mid = lay.y0 + lay.lh // 2
+    bg = cv._col(ws.code_layer._t["bg"])
+    assert _w(cv, lay.cx, mid) == _w(cv, lay.x0 + 10 * lay.cell, mid) == bg
+
+
+def _band(cv, x0, x1, y, h):
+    return [_w(cv, x, yy) for yy in range(y, y + h) for x in range(x0, x1)]
+
+
+def test_a_line_longer_than_the_view_fades_over_its_last_12_pixels(tmp_path):
+    from runtime.code_layer import _FADE
+    ws, _drv, lay, ed = _look_ws(tmp_path, "moy")
+    cv = ws.sys_canvas
+    x1 = lay.x0 + ed.COLS * lay.cell
+    x0 = x1 - _FADE * lay.fs
+    long_y, fits_y = lay.y0 + lay.lh, lay.y0 + 2 * lay.lh
+    # the same glyphs ("y" and "z" differ, so compare each line with its own
+    # left: the fitting line's band holds its ink, the long line's has none)
+    ink = cv._col(ws.look.content_colors()["code_text"])
+    assert ink in _band(cv, x0, x1, fits_y, lay.lh)
+    assert ink in _band(cv, lay.x0, lay.x0 + _FADE, long_y, lay.lh)
+    assert ink not in _band(cv, x0 + _FADE * lay.fs // 3, x1, long_y, lay.lh)

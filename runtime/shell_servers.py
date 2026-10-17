@@ -76,9 +76,9 @@ class ThemeServer:
     def change(self, g, kind, value=None):
         """A change to the theme (`Appearance.change`), landing in `custom`:
         `accent` an accent's A, `tint` a tint's name, `wallpaper` an id,
-        `frame` a WINDOW STYLE preset and `font` a FONT preset by name
-        (`Appearance.FRAMES`, `FONTS`); None the source's own. 0, else the
-        refusal."""
+        `frame` a WINDOW STYLE preset, `font` a FONT preset and `code_font`
+        a CODE FONT preset by name (`Appearance.FRAMES`, `FONTS`,
+        `CODE_FONTS`); None the source's own. 0, else the refusal."""
         look = self.__ws.look
         return look.change(kind, look.preset(kind, value))
 

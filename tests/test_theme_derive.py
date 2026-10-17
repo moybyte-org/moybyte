@@ -6,8 +6,9 @@ in C (`moy_theme_derive`, native/moy_ui/moy_theme.c) and written as
   draw (owner, 2026-10-14: the set as drawn), every accent one black clears,
   and the C's luminance table is the mockups'.
 * Every seed x accent (and the source's own) x tint (and none) x variant: the
-  C answers the mockups' `derive()` role for role, no pair of theme.pairs
-  is under theme.contrast, and the bytes parse with no note and resolve to
+  C answers the mockups' `derive()` role for role (its code roles held to
+  theme.code's floor), no pair of theme.pairs is under theme.contrast and no
+  code role under theme.code's, and the bytes parse with no note and resolve to
   the rows the derivation answered; no tint with the source's own accent
   answers the source's rows but for the dim inks and content colours the
   source itself leaves under the floor.
@@ -64,10 +65,31 @@ def _mockups():
 MK = _mockups()
 
 
+WHITE = 0x1ffffff                 # RGB white: MOY64's (9000) misses 4.5:1 on a mid grey
+
+
+def _code_reads(a, b):
+    """A code role on the code surface at theme.code's floor."""
+    la, lb = MK.lum(a), MK.lum(b)
+    return (max(la, lb) + 500) * 10 >= TH["code"]["contrast"] * (min(la, lb) + 500)
+
+
 def _reference(name, variant, accent, tint):
+    """The mockups' derivation, its code roles then held to theme.code's
+    floor (docs/look_2026-10.md step 23): the source's where it reaches it,
+    else the derive set's for the code surface's side, else black or RGB
+    white, the larger ratio."""
     entry = None if accent is None else next(a for a in MK.ACCENTS if a[0] == accent)
-    row, _why = MK.derive_variant(MK.base_row(name, variant), entry,
-                                  "NONE" if tint is None else tint.upper())
+    base = MK.base_row(name, variant)
+    row, _why = MK.derive_variant(base, entry, "NONE" if tint is None else tint.upper())
+    s = row[TH["code"]["bg"]]
+    light = MK.light_bg(s)
+    for r in TH["code"]["roles"]:
+        row[r] = base[r]
+        if not _code_reads(row[r], s):
+            alt = (MK.SYNTAX_LIGHT if light else MK.SYNTAX_DARK).get(r)
+            row[r] = alt if alt is not None and _code_reads(alt, s) else \
+                (0 if MK.ratio(s, 0) >= MK.ratio(s, WHITE) else WHITE)
     return row
 
 
@@ -137,6 +159,7 @@ def test_every_combination_is_the_reference_and_reads(name):
 
 REPAIRED = {r: bgs for r, _f, bgs in TH["recolour"]["dim_ink"]}
 REPAIRED.update((r, ["surface"]) for r in TH["recolour"]["content"])
+CODE = set(TH["code"]["roles"])
 
 
 @pytest.mark.parametrize("name", SEEDS)
@@ -150,7 +173,10 @@ def test_no_tint_and_the_own_accent_answer_the_source(name):
         for r in ROLES:
             if got[r] != row[r]:
                 assert r in REPAIRED, (name, v, r)
-                assert not all(MK.clears(row[r], row[b]) for b in REPAIRED[r]), (name, v, r)
+                if r in CODE:
+                    assert not _code_reads(row[r], row[TH["code"]["bg"]]), (name, v, r)
+                else:
+                    assert not all(MK.clears(row[r], row[b]) for b in REPAIRED[r]), (name, v, r)
 
 
 # -- the flattening ------------------------------------------------------------
@@ -290,7 +316,10 @@ def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
     half = _half_effects(full)
     for src in (full, half):
         assert len(src) <= TH["bytes"] < len(src) + len(_custom("night"))
-    assert "colors" not in json.loads(_custom(full))
+    # what the resolution gives back is left out: night's own rows, but for
+    # the code roles its syntax colours leave under theme.code's floor
+    cols = json.loads(_custom(half))["colors"]
+    assert cols and set(cols["dark"]) | set(cols["light"]) <= set(TH["code"]["roles"])
     fits = 0
     for src in (full, half):
         for accent in ACCENTS:

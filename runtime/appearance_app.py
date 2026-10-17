@@ -13,9 +13,9 @@ The themes are a grid of cards (`ui.grid`, `ui.card`), each picture the
 theme's own ground, bar, surface and accent, the theme in use wearing the
 current mark; under them the rows: MODE (a seg), ACCENT (swatches: the
 theme's own and seven of the sixteen), TINT, WALLPAPER (a link to the
-wallpapers' page), WINDOW STYLE (where windows are), FONT, CHROME SIZE
-(where the panel takes more than one), the theme's file, and NAME on
-`custom`. The engine owns focus, the arrows, Enter and taps.
+wallpapers' page), WINDOW STYLE (where windows are), FONT, CODE FONT
+(where the image draws more than one), CHROME SIZE (where the panel takes
+more than one), the theme's file, and NAME on `custom`. The engine owns focus, the arrows, Enter and taps.
 
 WALLPAPER opens a page of the wallpapers as cards under two tabs
 (`ui.tabs`): Pictures (the theme's backdrop, its picture, Paint's) and
@@ -66,6 +66,8 @@ FRAMES = ("classic", "tab", "platinum", "win9x", "flat")
 FONTS = ("tiny5", "petme128")
 FRAME_NAMES = ("Classic", "Tabs", "Platinum", "Win9x", "Flat")
 FONT_NAMES = ("Tiny5", "PetMe128")
+# The CODE FONT presets (`Appearance.CODE_FONTS`) by name.
+CODE_FONT_NAMES = {"petme128": "PetMe128", "jbmono": "JetBrains Mono"}
 OWN = "Theme's"
 # ACCENT's swatches after the theme's own: seven of the sixteen accents
 # (style.json's), by name.
@@ -545,6 +547,19 @@ class AppearanceAppLayer:
         got = ui.cycle("Font", words, cur)
         if got != cur and got >= off:
             self._change("font", FONTS[got - off])
+        # CODE FONT: the Code tab's face, where the image draws more than one
+        codes = ch["code_fonts"]
+        if len(codes) > 1:
+            code = ch["code_font"]
+            names = [CODE_FONT_NAMES[k] for k in codes]
+            if code in codes:
+                words, cur, off = names, codes.index(code), 0
+            else:
+                words, cur, off = [OWN] + names, 0, 1
+            kinds["Code font"] = "step"
+            got = ui.cycle("Code font", words, cur)
+            if got != cur and got >= off:
+                self._change("code_font", codes[got - off])
         # CHROME SIZE: where the panel takes more than one
         chromes = ch["chromes"]
         if len(chromes) > 1:

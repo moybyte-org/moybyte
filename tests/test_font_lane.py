@@ -314,9 +314,13 @@ NIGHT_FONTS = (("ui", "tiny5.fnt"), ("title", "tiny5.fnt"))
 
 def test_every_seed_draws_in_tiny5():
     """`night` names Tiny5 for `ui` and `title`, and every other seed
-    inherits it; `mono` stays petme128 (phase 4 step 3)."""
+    inherits it; `mono` stays petme128 (phase 4 step 3) but in `moy`, whose
+    Code tab is JetBrains Mono (docs/look_2026-10.md step 23), a face of the
+    font set and not embedded in the tables."""
     for name in moy_ui.themes():
-        assert moy_ui.theme_fonts(name) == NIGHT_FONTS, name
+        want = NIGHT_FONTS + ((("mono", "jbmono-11-400-2.fnt"),) if name == "moy" else ())
+        assert moy_ui.theme_fonts(name) == want, name
+    assert moy_ui.font_file("jbmono-11-400-2.fnt") is None
 
 
 def test_the_fonts_key_names_a_file_per_role():
@@ -652,8 +656,8 @@ def test_the_code_tab_hit_tests_at_the_mono_faces_7px_cell(tmp_path):
         ws.set_menu_view("code")
         drv = host_app.ConsoleDriver(ws)
         lay, ed, cl = ws.code_layout, ws.editor, ws.code_layer
-        from runtime.chrome import _CODE_LEAD
-        assert lay.cell == 7 and lay.lh == moy_ui.font_info(fid)[2] + _CODE_LEAD
+        # a row is the face's glyph box, 14 (petme128's is its line and the lead)
+        assert lay.cell == 7 and lay.lh == lay.text_h == moy_ui.font_info(fid)[1] == 14
         assert lay.cols == (lay.w - lay.x0) // 7
         ed.set_text("\n".join("%02d " % i + "abcdefghij" * 4 for i in range(12)))
         drv.frame(1 / 30)

@@ -48,6 +48,14 @@ FLAGS = {r for v in ("dark", "light", "both") for r, x in TH["derive"][v]
          if isinstance(x, bool)}
 OK, BIG, SYNTAX, NEWER, NAME, TAKEN, CHAIN = range(7)
 N_CLAMPED, N_UNKNOWN, N_DROPPED = 1, 2, 4
+# The readability report: a bit per pair, the current plate's past them, then
+# one per code role (theme.code, docs/look_2026-10.md step 23).
+PAIRS = len(TH["pairs"])
+CODE_BITS = ((1 << len(TH["code"]["roles"])) - 1) << (PAIRS + 1)
+# The seeds that hold the code roles to theme.code's floor: the 2026-10
+# look's. The older seeds keep their syntax colours, and their pixels, until
+# step 27 retires them; the check reports theirs.
+CODE_READ = ("moy", "contrast")
 
 
 def _src(name="t", **kw):
@@ -89,7 +97,7 @@ def test_the_seeds_are_style_jsons_and_the_default_comes_first():
 @pytest.mark.parametrize("seed", TH["seeds"])
 def test_a_flattened_seed_round_trips_as_a_package(seed, light):
     row, bad, rc = _row(seed, light)
-    assert rc == OK and bad == 0
+    assert rc == OK and bad & ~CODE_BITS == 0
     _check_row(row)
     variant = "light" if light else "dark"
     roles = {r: (bool(v) if r in FLAGS else _json_colour(v)) for r, v in zip(ROLES, row)}
@@ -188,8 +196,26 @@ def test_readability_reports_and_never_refuses():
     _row_, bad, rc = _row("t")
     pairs = [tuple(p) for p in TH["pairs"]]
     assert rc == OK
-    assert bad == (1 << pairs.index(("title", "title_ink"))
-                   | 1 << pairs.index(("title_active", "title_ink")))
+    assert bad & ~CODE_BITS == (1 << pairs.index(("title", "title_ink"))
+                                | 1 << pairs.index(("title_active", "title_ink")))
+    # a code role under theme.code's floor is reported too, its own bit
+    code = TH["code"]["roles"]
+    rc, _n = moy_ui.theme_install(_src("t", inherits="moy", colors={"light": {
+        "code_comment": "#c0c0c0"}}))
+    assert rc == OK
+    assert _row("t", True)[1] == 1 << (PAIRS + 1 + code.index("code_comment"))
+    assert _row("t", False)[1] == 0
+
+
+@pytest.mark.parametrize("light", [False, True])
+@pytest.mark.parametrize("seed", CODE_READ)
+def test_the_looks_seeds_hold_the_code_roles_to_their_floor(seed, light):
+    """Code syntax colours are theme roles, each 4.5:1 or better on the code
+    surface (docs/look_2026-10.md, the decisions)."""
+    assert TH["code"]["contrast"] == 45 and TH["code"]["bg"] == "surface"
+    assert set(TH["code"]["roles"]) <= set(TH["content"])
+    _row_, bad, rc = _row(seed, light)
+    assert rc == OK and bad & CODE_BITS == 0
 
 
 def test_every_block_category_and_syntax_class_has_a_role():

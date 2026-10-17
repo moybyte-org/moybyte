@@ -1267,12 +1267,15 @@ def tab_row_rects(rect, tabs, fs, gap=None):
     return out
 
 
-def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
+def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None,
+            icon_draw=None):
     """The labeled tab ladder (mockup: Config | Blocks | Code | ...). `tabs` is
     a sequence of (id, label, icon_kind); the ACTIVE tab wears the selection
     color (grape in the shipped themes) with its title ink, inactive tabs stay
-    quiet on the field. Registers ("tab", id) hits; returns the geometry list
-    so a cached-strip caller can hit-test without redrawing."""
+    quiet on the field. `icon_draw(kind, rect)` draws a tab's icon where it
+    can (a theme's icon set), else `icon_for(kind)`'s 16x16 image. Registers
+    ("tab", id) hits; returns the geometry list so a cached-strip caller can
+    hit-test without redrawing."""
     fs = _fs(cv)
     icons = {}
     slim = []
@@ -1281,26 +1284,34 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
         icons[tid] = icon_kind
     rects = tab_row_rects(rect, slim, fs)
     for tid, r, labels_on in rects:
-        img = icon_for(icons[tid]) if icon_for is not None else None
-        tab(cv, th, r, tid == active, str(_tab_label(tabs, tid)), labels_on, ink, img)
+        kind = icons[tid]
+        img = icon_for(kind) if icon_for is not None else None
+        tab(cv, th, r, tid == active, str(_tab_label(tabs, tid)), labels_on, ink, img,
+            icon_draw=icon_draw, kind=kind)
         if hits is not None:
             hits.add(r, "tab", tid)
     return rects
 
 
-def tab(cv, th, r, active, label="", labels_on=False, ink=None, img=None):
+def tab(cv, th, r, active, label="", labels_on=False, ink=None, img=None,
+        icon_draw=None, kind=None):
     """One tab chip of `tab_row` in rect `r`: its field (the ON look when
-    `active`), the 16x16 `img` in its icon slot, `label` when `labels_on`."""
+    `active`), its icon in the icon slot -- `icon_draw(kind, rect)` where it
+    draws one (a theme's icon set), else the 16x16 `img` -- and `label` when
+    `labels_on`."""
     look = _LOOK if th is _TH else _look(th)
-    if img is None:
+    if img is None and icon_draw is None:
         _C.tab(cv, look, r, active, labels_on, label, ink, _ALL)
         return
     fs = _fs(cv)
     x, y, w, h = r
     box = _METRICS["tab"][TAB_ICON] * fs
     _C.tab(cv, look, r, active, labels_on, label, ink, _FRAME)
-    cv.spr(img, x + (_METRICS["tab"][TAB_PAD] * fs if labels_on else (w - box) // 2),
-           y + (h - box) // 2, fs)
+    ix = x + (_METRICS["tab"][TAB_PAD] * fs if labels_on else (w - box) // 2)
+    iy = y + (h - box) // 2
+    if icon_draw is None or not icon_draw(kind, (ix, iy, box, box)):
+        if img is not None:
+            cv.spr(img, ix, iy, fs)
     _C.tab(cv, look, r, active, labels_on, label, ink, _CONTENT)
 
 

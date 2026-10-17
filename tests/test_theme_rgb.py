@@ -122,9 +122,19 @@ def test_the_live_row_content_look_and_swatches_fit_the_block(seed, variant):
 
 
 def test_every_seed_reads_in_both_modes():
+    """Every pair; and the code roles (the bits past the plate's) in the
+    2026-10 look's seeds, the older ones' syntax colours reported until
+    step 27 retires them (docs/look_2026-10.md step 23)."""
+    import os
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "native", "moy_ui", "style.json")) as f:
+        pairs = json.load(f)["theme"]["pairs"]
+    past = (1 << (len(pairs) + 1)) - 1
     for seed in moy_ui.themes():
         for light in (False, True):
             _row, bad, rc = moy_ui.theme(seed, light)
+            if seed not in ("moy", "contrast"):
+                bad &= past
             assert (rc, bad) == (OK, 0), (seed, light)
 
 

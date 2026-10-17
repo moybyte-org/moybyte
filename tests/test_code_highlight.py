@@ -230,3 +230,21 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
     assert lua_cols[line.index("--")] == _HL_COMMENT
     assert lua_cols[line.index("#")] != _HL_COMMENT
     ws.frame(1 / 30)                       # the palette draw must not raise
+
+
+def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
+    """Code syntax colours are theme roles (docs/look_2026-10.md, the
+    decisions): Moy's Day draws the targets' set, each placed in the live
+    block the canvas draws through."""
+    from runtime import chrome
+    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
+    ws.look.set_theme("moy", persist=False, variant="light")
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    want = {_HL_TEXT: 0x15161d, _HL_KEYWORD: 0x6a35c4, _HL_STRING: 0x1f7a3a,
+            _HL_NUMBER: 0xa8510a, _HL_COMMENT: 0x5f6478, _HL_BUILTIN: 0x1662a8}
+    hl = ws.code_layer._hl_map()
+    for cls, rgb in want.items():
+        r, g, b = rgb >> 16, (rgb >> 8) & 255, rgb & 255
+        assert chrome.rgb565_of(hl[cls]) == ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), cls
+    ws.frame(1 / 30)

@@ -732,6 +732,15 @@ const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
     {37, 38},  // lcd / lcd_ink
 };
 
+const uint8_t moy_theme_code[MOY_THEME_CODE] = {
+    39,  // code_text
+    40,  // code_keyword
+    41,  // code_string
+    42,  // code_number
+    43,  // code_comment
+    44,  // code_builtin
+};
+
 const uint16_t moy_theme_lum[64] = {
         0,   261,   638,  1792,  1496,   981,  5462,  9000,
      2180,  4745,  8140,  5575,  3758,  2018,  3728,  6735,
@@ -1051,6 +1060,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "{\012"
     "  \"format\": 2,\012"
     "  \"name\": \"moy\",\012"
+    "  \"fonts\": { \"mono\": \"jbmono-11-400-2.fnt\" },\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
     "      \"panel\": \"#0f1127\", \"edge\": \"#2b2f57\", \"title\": \"#b6a8f7\", \"title_ink\": \"#15123a\",\012"
@@ -1061,7 +1071,9 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"chrome_ink\": \"#eef0fb\", \"chrome_ink_dim\": \"#a1a6cc\", \"title_active\": \"#b6a8f7\",\012"
     "      \"title_inactive\": \"#23274b\", \"shade_hi\": \"#23274b\", \"shade_lo\": \"#0b0d1e\",\012"
     "      \"shade_dark\": \"#2b2f57\", \"ink_accent\": \"#b6a8f7\",\012"
-    "      \"value_ink\": \"#15123a\", \"sunk\": \"#0b0d1e\", \"lcd\": \"#0b0d1e\", \"lcd_ink\": \"#b6a8f7\"\012"
+    "      \"value_ink\": \"#15123a\", \"sunk\": \"#0b0d1e\", \"lcd\": \"#0b0d1e\", \"lcd_ink\": \"#b6a8f7\",\012"
+    "      \"code_text\": \"#eef0fb\", \"code_keyword\": \"#c9a2ff\", \"code_string\": \"#9be3a5\",\012"
+    "      \"code_number\": \"#ffb070\", \"code_comment\": \"#9aa0cc\", \"code_builtin\": \"#7fd0ff\"\012"
     "    },\012"
     "    \"light\": {\012"
     "      \"panel\": \"#eceef3\", \"edge\": \"#e2e5ec\", \"title\": \"#ffffff\", \"title_ink\": \"#15161d\",\012"
@@ -1072,7 +1084,9 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"chrome_ink\": \"#15161d\", \"chrome_ink_dim\": \"#5f6478\", \"title_active\": \"#ffffff\",\012"
     "      \"title_inactive\": \"#f4f5f8\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#e3e6ed\",\012"
     "      \"shade_dark\": \"#e2e5ec\", \"ink_accent\": \"#4c3fd6\",\012"
-    "      \"value_ink\": \"#ffffff\", \"sunk\": \"#e3e6ed\", \"lcd\": \"#f1f2f6\", \"lcd_ink\": \"#4c3fd6\"\012"
+    "      \"value_ink\": \"#ffffff\", \"sunk\": \"#e3e6ed\", \"lcd\": \"#f1f2f6\", \"lcd_ink\": \"#4c3fd6\",\012"
+    "      \"code_text\": \"#15161d\", \"code_keyword\": \"#6a35c4\", \"code_string\": \"#1f7a3a\",\012"
+    "      \"code_number\": \"#a8510a\", \"code_comment\": \"#5f6478\", \"code_builtin\": \"#1662a8\"\012"
     "    }\012"
     "  },\012"
     "  \"layout\": {\012"
@@ -1120,7 +1134,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3437};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3821};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

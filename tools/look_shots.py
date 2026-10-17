@@ -101,8 +101,8 @@ def _setup_table():
         "desktop_sprite-editor": (DESK, ("9", "13", "16", "23", "24"), False,
                                   _sprites,
                                   "the Editor on the desk, sprite tab"),
-        "desktop_playtest": (DESK, ("9", "13", "23"), False, _code,
-                             "nearest screen: the Editor on the desk"),
+        "desktop_playtest": (DESK, ("9", "13", "23"), False, _playtest,
+                             "the playtest window over the Editor"),
         "handheld_sysmenu": (HANDHELD, ("11", "12", "16", "25a"), False,
                              _home, "nearest screen: home"),
         "desktop_sysmenu": (DESK, ("11", "12", "16", "25a"), False, _desk,
@@ -324,8 +324,27 @@ def _editor(g, ws, tab):
     ws.set_menu_view(tab)
 
 
+# The Code tab's state in the targets: the caret on line 42, column 13, with
+# line 34 the first shown.
+CODE_TOP, CODE_ROW, CODE_COL = 33, 41, 12
+
+
 def _code(g, ws):
+    desk = getattr(ws.wm, "mode", None) == "desktop"
+    if desk:
+        ws.open_desk()
     _editor(g, ws, "code")
+    if desk:
+        _settle(g, ws, 2)
+        _place(ws, "menu", 112, 54, 900, 534)       # the target's window
+    ed = ws.editor
+    ed.row, ed.col, ed.top = CODE_ROW, CODE_COL, CODE_TOP
+
+
+def _playtest(g, ws):
+    _code(g, ws)
+    _settle(g, ws, 2)
+    ws._leave_menu()
 
 
 def _sprites(g, ws):

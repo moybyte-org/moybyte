@@ -2691,3 +2691,25 @@ def test_the_fit_check_releases_a_closed_popovers_snapshots(tmp_path):
         pass
     assert all(s[0] is None for s in wm._pop_slots)
     assert snap._comp._buf is None
+
+
+def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
+    """docs/look_2026-10.md step 23: "Editor \u00b7 Star Catcher" over "Play \u00b7
+    Star Catcher" (a hyphen where the title face has no dot), and under the
+    look's depth a chip names the app alone."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    cart = ws.cart.get("title")
+    wins = ws.wm._wins
+    assert ws.wm._win_title(wins["menu"]) == "Editor - " + cart
+    assert ws.wm._win_title(wins["desktop"]) == "Play - " + cart
+    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    assert labels["menu"].startswith("Editor - ")
+    ws.look.set_theme("moy", persist=False)
+    drv.frame(1 / 30)
+    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    assert (labels["menu"], labels["desktop"]) == ("Editor", "Play")

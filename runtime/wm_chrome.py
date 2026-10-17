@@ -22,8 +22,13 @@ _SHADOW = NAMES["black"]
 
 # Shell-process title strips (registered apps contribute TITLE through the app
 # registry instead; the player shows the live cart title).
-_TITLES = {"menu": "EDITOR", "projects": "PROJECTS",
+_TITLES = {"menu": "Editor", "projects": "PROJECTS",
            "settings": "SETTINGS", "update": "UPDATE"}
+# The title of an Editor or a playtest, "Editor · Star Catcher": the app, the
+# separator and the cart; the separator is a hyphen in a face without the dot
+# (petme128). A chip under the 2026-10 look shows the app alone.
+_SEP_DOT, _SEP_ASCII = " \u00b7 ", " - "
+_PLAY = "Play"
 
 # The title icon of a window no app cart draws (`_win_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
@@ -34,6 +39,13 @@ _ICON_SLOTS = {"menu": "code", "projects": "projects", "settings": "settings",
 # A look chip's room beside its label: the 12-pixel margin, the 18-pixel icon
 # and 8 to the label, 24 after it (the 2026-10 look's desk bar).
 _CHIP_PAD = 18 + 8 + 24
+
+
+def _title_sep():
+    """The title separator the `title` face draws: the middle dot, else a
+    hyphen (petme128 draws ASCII alone)."""
+    info = _ui_draw.font_info(_ui_draw.font("title")[0]) if _ui_draw.font("title")[0] else None
+    return _SEP_DOT if info is not None and info[4] == 0 else _SEP_ASCII
 
 
 class WindowChrome:
@@ -188,13 +200,27 @@ class WindowChrome:
     def _win_title(self, win):
         ws = self.ws
         if win.kind == "desktop":
-            return str((ws.cart.get("title") if ws.cart else "") or "GAME")
+            t = str((ws.cart.get("title") if ws.cart else "") or "GAME")
+            if getattr(self, "_play_intent", None) == "dev":
+                return _PLAY + _title_sep() + t       # a playtest from the Editor
+            return t
         base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
         if win.kind == "menu" and ws.cart:
             t = ws.cart.get("title")
             if t:
-                return base + " - " + str(t)
+                return base + _title_sep() + str(t)
         return base
+
+    def _chip_title(self, win, looked):
+        """A window's chip label: its title, or under the 2026-10 look the app
+        alone where the title names the app and a cart ("Editor")."""
+        t = self._win_title(win)
+        if looked:
+            for sep in (_SEP_DOT, _SEP_ASCII):
+                at = t.find(sep)
+                if at > 0 and win.kind in ("menu", "desktop"):
+                    return t[:at]
+        return t
 
     def _frame_buttons(self, win):
         """The title-strip buttons as the frame style lays them, left to right:
@@ -323,8 +349,8 @@ class WindowChrome:
                 out.append((k, (x, y, side, side), self._win_title(self._wins[k])[:1]))
                 y += side + 2 * fs
             return out
-        titles = [self._win_title(self._wins[k]) for k in self._order]
         looked = bool(_ui_draw.depth()[0])
+        titles = [self._chip_title(self._wins[k], looked) for k in self._order]
         pad = _CHIP_PAD if looked else 2 * 4 * fs   # the look's: icon slot and margins
         gap = 6 if looked else 2 * fs
         room = cw - 4 * fs - (len(titles) - 1) * gap

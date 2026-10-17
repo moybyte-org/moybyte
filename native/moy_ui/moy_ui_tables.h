@@ -259,6 +259,11 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_RULES 74
 #define MOY_THEME_PAIRS 10
 #define MOY_THEME_CONTRAST 30
+// The code roles, each held to its own floor on the code surface; bit
+// MOY_THEME_PAIRS + 1 + i of the readability report is role i's.
+#define MOY_THEME_CODE 6
+#define MOY_THEME_CODE_BG 9
+#define MOY_THEME_CODE_CONTRAST 45
 #define MOY_THEME_RESERVED 4
 #define MOY_THEME_FONT_ROLES 4
 // The sheets a package may name (docs/theming_2026-09.md §4.6), the
@@ -384,6 +389,7 @@ extern const char *const moy_theme_fill_names[MOY_THEME_FILLS];
 extern const char *const moy_theme_frame_names[MOY_THEME_FRAMES];
 extern const char *const moy_theme_align_names[MOY_THEME_ALIGNS];
 extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];
+extern const uint8_t moy_theme_code[MOY_THEME_CODE];
 extern const uint16_t moy_theme_lum[64];
 extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];
 extern const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES];

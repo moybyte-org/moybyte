@@ -307,9 +307,13 @@ def generate_theme(style, t):
         seeds.append((name, src))
     # The seed packages' files: every font a seed's `fonts` names and, as
     # in a published package, its licence's full text X.txt beside X.fnt,
-    # from themes/, in name order.
+    # from themes/, in name order. A face of the font set (fonts/, which
+    # each board image carries per tier: runtime/fontset.py) is not
+    # embedded a second time.
+    font_set = os.path.join(t.dir, "fonts")
     font_files = sorted({f for _n, src in seeds
-                         for f in json.loads(src).get("fonts", {}).values()})
+                         for f in json.loads(src).get("fonts", {}).values()
+                         if not os.path.isfile(os.path.join(font_set, f))})
     fonts = []
     for name in sorted(font_files + [f[:-len(".fnt")] + ".txt" for f in font_files]):
         path = os.path.join(t.dir, "themes", name)
@@ -404,6 +408,11 @@ def generate_theme(style, t):
          "#define MOY_THEME_RULES %d" % len(rules),
          "#define MOY_THEME_PAIRS %d" % len(th["pairs"]),
          "#define MOY_THEME_CONTRAST %d" % th["contrast"],
+         "// The code roles, each held to its own floor on the code surface; bit",
+         "// MOY_THEME_PAIRS + 1 + i of the readability report is role i's.",
+         "#define MOY_THEME_CODE %d" % len(th["code"]["roles"]),
+         "#define MOY_THEME_CODE_BG %d" % roles.index(th["code"]["bg"]),
+         "#define MOY_THEME_CODE_CONTRAST %d" % th["code"]["contrast"],
          "#define MOY_THEME_RESERVED %d" % len(th["reserved"]),
          "#define MOY_THEME_FONT_ROLES %d" % len(th["font_roles"]),
          "// The sheets a package may name (docs/theming_2026-09.md \u00a74.6), the",
@@ -509,6 +518,7 @@ def generate_theme(style, t):
          "extern const char *const moy_theme_frame_names[MOY_THEME_FRAMES];",
          "extern const char *const moy_theme_align_names[MOY_THEME_ALIGNS];",
          "extern const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2];",
+         "extern const uint8_t moy_theme_code[MOY_THEME_CODE];",
          "extern const uint16_t moy_theme_lum[64];",
          "extern const char *const moy_theme_reserved[MOY_THEME_RESERVED];",
          "extern const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES];",
@@ -568,6 +578,10 @@ def generate_theme(style, t):
     c.append("const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {")
     for a, b in th["pairs"]:
         c.append("    {%d, %d},  // %s / %s" % (roles.index(a), roles.index(b), a, b))
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_code[MOY_THEME_CODE] = {")
+    for r in th["code"]["roles"]:
+        c.append("    %d,  // %s" % (roles.index(r), r))
     c.append("};\n")
     lum = _luminance()
     c.append("const uint16_t moy_theme_lum[64] = {")

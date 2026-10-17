@@ -305,7 +305,11 @@ classes, and `block_<category>` for each block category (`block_events`,
 `block_myblocks`). Their derivation gives today's colours: the syntax set per
 variant (the dark classes' own colours, and the light set the Code tab drew on
 a light surface), and the Scratch category colours in both. A seed whose dark
-table has a light surface (`machine`) sets the light syntax set itself.
+table has a light surface (`machine`) sets the light syntax set itself. The six
+`code_*` roles are theme roles held to a floor of their own, 4.5:1 on the
+code surface (`surface`; style.json's `theme.code`, §7); Moy sets its own
+(`docs/look_2026-10.md` step 23), and the older seeds keep theirs, under the
+floor where they are, until step 27 retires them.
 `runtime/code_layer.py` and `runtime/block_editor_ui.py` read them through
 the look (`runtime/appearance.py`'s `content_colors`).
 
@@ -395,9 +399,9 @@ table (§5).
 
 **What "chrome" means** (for the ratchet in phase 2a): the pixels the shell, the WMs
 and the toolkit draw around content. Content is exempt: the Paint and sprite
-canvases, the map and scene views, code syntax colours and the block editor's
-block colours, which format 1 themes through the content roles (§4.1, D8).
-The Paint and sprite canvases and the map and scene views stay exempt.
+canvases, the map and scene views and the block editor's block colours,
+which format 1 themes through the content roles (§4.1, D8). Code syntax
+colours are content roles held to the code floor (§7).
 
 **Text effects** (D8). A part in a state may name a text effect: `none`,
 `shadow` (the label drawn once more, offset one pixel down and right, in the
@@ -767,7 +771,10 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     (#135's work); a byte the font does not cover draws glyph 0, the space,
     as petme128's row does.
   - **`night` names Tiny5 for `ui` and `title`**, as D1's pictures draw it,
-    and every seed inherits it; `mono` stays petme128.
+    and every seed inherits it; `mono` stays petme128 but in `moy`,
+    which names the font set's JetBrains Mono for the Code tab
+    (`docs/look_2026-10.md` step 23). A face of the font set
+    (`runtime/fontset.py`) is the image's, not embedded in the tables.
   - **The print font.** A canvas's `print` draws in one process-wide font
     (`moy_text_print_font`; `ui.print_font`), the `ui` role's, through the
     print gate and the `text` op; `ui.print_width`, `ui.print_fit` and
@@ -921,10 +928,13 @@ Per variant, with B the source's row and R the result, R starting as B:
    `bar`, `title_inactive`) keep B's value if it clears them, else take the dimmest that does
    (the least ratio, the lower index on a tie) of the ramp and the greys 5,
    6, 13, 49, 50 and 53, else R's `ink` or `chrome_ink`.
-5. **Content.** Each `code_*` role and `ink_note` keeps B's value if it
-   clears R's `surface`, else takes its value in style.json's derive set
-   for a surface of that side (the `light` set where black beats white on
-   R's `surface`, the `dark` set else) if that clears, else R's `ink`.
+5. **Content.** `ink_note` keeps B's value if it clears R's `surface`,
+   else takes its value in style.json's derive set for a surface of that
+   side (the `light` set where black beats white on R's `surface`, the
+   `dark` set else) if that clears, else R's `ink`. Each `code_*` role does
+   the same at the code floor (`theme.code`, 4.5:1), and its last resort is
+   black or RGB white, the larger ratio: one of the two always reaches it,
+   where MOY64's white does not on a mid grey.
    `block_*`, `play`, `author` and `danger` keep B's: they are meanings, not
    looks. A button kind that inks `danger` or `value` on its field holds the
    pair to the floor itself, through its floor forms (style.json's `floors`,
@@ -1059,7 +1069,10 @@ Kids will trade themes, so a theme is untrusted input:
   must clear `theme.contrast` (a WCAG ratio of 3.0, the floor for large text
   and UI parts) on each colour's luminance (an RGB colour's as its RGB565
   shows it); a failing pair sets its bit in the report
-  and never refuses the theme. For a dither or pinstripe fill the ink is
+  and never refuses the theme. The current plate's bit follows the pairs,
+  and then one bit per code role: each of `theme.code`'s roles must reach
+  its own floor, 4.5:1, on the code surface (`docs/look_2026-10.md`
+  step 23). For a dither or pinstripe fill the ink is
   checked against **both** colours, in the look, since the check needs each
   part's ink, which the style resolves there (ruled 2026-10-12):
   `moy_ui_pattern_unreadable` (`ui.pattern_unreadable`) answers the installed
@@ -1069,7 +1082,9 @@ Kids will trade themes, so a theme is untrusted input:
   The derivation (§4.10) never writes a pair under the floor; a hand edit
   through EDIT FILE can, and its reader is the editor's badge at the save
   (phase 6 step 6). Every seed passes both checks in both variants
-  (`tests/test_theme_loader.py`).
+  (`tests/test_theme_loader.py`); the code floor holds `moy` and
+  `contrast`, and reports the older seeds' syntax colours until step 27
+  retires them.
 - **The loader is the safety** (owner, 2026-10-14). A theme cannot run code,
   so the validation above, the readability report, the layout's required set
   (`docs/shell_layout_2026-10.md` §9) and the fuzz gates on the host and on
