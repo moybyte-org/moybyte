@@ -334,7 +334,7 @@ console needs while no Python app runs is OS.
 | `runtime/editors_paint_map.py` | app | — | the paint and map editor cores |
 | `runtime/editors_scene.py` | app | — | the scene placement core |
 | `runtime/editors_sheet.py` | app | — | the sprite, tile and map models; `IconSheet` is also the bar's icon data, which the bar reads in 7 |
-| `runtime/file_widgets.py` | app | — | the thumbnail-grid picker Files and Paint share |
+| `runtime/file_widgets.py` | app | — | the thumbnail-grid picker Paint's OPEN mode embeds |
 | `runtime/files_app.py` | app | — | Files |
 | `runtime/font.py` | host-only | — | the host's petme128 glyph table, standing in for the `framebuf` font a board has; the native canvas carries its font from sprint 3, and the one UI text path is `native/moy_gfx/moy_text.h` (sprint 6's step 3) |
 | `runtime/getcarts_app.py` | app | — | Get Carts, a registered system app |

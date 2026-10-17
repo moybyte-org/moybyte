@@ -886,3 +886,316 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     }
     return pairs;
 }
+
+// -- tables ----------------------------------------------------------------------------
+
+// The span of field i of `p` (NUL-separated in n bytes), empty past its end.
+static moy_ui_span_t field_at(const uint8_t *p, size_t n, int i) {
+    moy_ui_span_t s = {p, 0};
+    moy_ui_span_t all = {p, (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n)};
+    if (p == NULL || i < 0) {
+        return s;
+    }
+    return option(all, i);
+}
+
+// The fields of `p` (NUL-separated in n bytes, a trailing NUL ending the last).
+int moy_ui_fields(const uint8_t *p, size_t n) {
+    int k = 0;
+    for (size_t i = 0; i < n; i++) {
+        k += p[i] == 0;
+    }
+    return n && p[n - 1] != 0 ? k + 1 : k;
+}
+
+int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols, size_t cols_n,
+                     const uint8_t *cells, size_t cells_n, int fs, int desk, moy_ui_tgeo_t *g) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    memset(g, 0, sizeof(*g));
+    int n = moy_ui_fields(cols, cols_n);
+    if (n > MOY_UI_TABLE_COLS) {
+        n = MOY_UI_TABLE_COLS;
+    }
+    g->n = (int16_t)n;
+    if (n == 0) {
+        return MOY_UI_OK;
+    }
+    int sc = tscale(s);
+    pf_t fl = font_of(&d, MOY_UI_FONT_UI), fv = font_of(&d, MOY_UI_FONT_CAPTION);
+    moy_ui_span_t c0 = field_at(cols, cols_n, 0);
+    g->pic = c0.n == 0 && n > 1;
+    int first = g->pic ? 1 : 0;
+    for (int j = first + 1; j < n; j++) {
+        moy_ui_span_t h = field_at(cols, cols_n, j);
+        if (h.n) {
+            g->head = 1;
+        }
+        int w = tw(&fv, h.p, h.n, sc);
+        g->w[j] = (int16_t)w;
+    }
+    if (field_at(cols, cols_n, first).n) {
+        g->head = 1;
+    }
+    // the widest cell of each column after the first text column
+    int cells_total = moy_ui_fields(cells, cells_n);
+    size_t at = 0;
+    for (int i = 0; i < cells_total && at <= cells_n; i++) {
+        size_t e = at;
+        while (e < cells_n && cells[e] != 0) {
+            e++;
+        }
+        int j = i % n;
+        if (j > first) {
+            int w = tw(&fv, cells + at, e - at, sc);
+            if (w > g->w[j]) {
+                g->w[j] = (int16_t)w;
+            }
+        }
+        at = e + 1;
+    }
+    int pad = pm(&d, MOY_UI_M_VALUE_ROW_INSET, 1);
+    int gap = pm(&d, MOY_UI_M_VALUE_ROW_COL, 1);
+    int pic = g->pic ? pm(&d, MOY_UI_M_VALUE_ROW_PIC, 1) + pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1) + 2 * d.fs
+                     : 0;
+    // The first text column shows at least eleven characters: the columns
+    // between it and the last drop, the nearest the last first, then the last.
+    uint8_t n_ch = 'n';
+    int need = 11 * tw(&fl, &n_ch, 1, sc);
+    int dropped = 0;
+    for (;;) {
+        int used = 2 * pad + pic;
+        for (int j = first + 1; j < n; j++) {
+            if (g->w[j] > 0) {
+                used += g->w[j] + gap;
+            }
+        }
+        int room = b.w - used;
+        int victim = -1;
+        if (room < need) {
+            for (int j = n - 2; j > first && victim < 0; j--) {
+                if (g->w[j] > 0) {
+                    victim = j;
+                }
+            }
+            if (victim < 0 && n - 1 > first && g->w[n - 1] > 0) {
+                victim = n - 1;
+            }
+        }
+        if (victim < 0) {
+            g->x[first] = (int16_t)(b.x + pad + pic);
+            g->w[first] = (int16_t)(room > 0 ? room : 0);
+            break;
+        }
+        g->w[victim] = 0;
+        dropped++;
+    }
+    int x = b.x + b.w - pad;
+    for (int j = n - 1; j > first; j--) {
+        if (g->w[j] > 0) {
+            x -= g->w[j];
+            g->x[j] = (int16_t)x;
+            x -= gap;
+        }
+    }
+    if (g->pic) {
+        g->x[0] = (int16_t)(b.x + pad);
+        g->w[0] = (int16_t)pm(&d, MOY_UI_M_VALUE_ROW_PIC, 1);
+    }
+    return dropped;
+}
+
+// Text cut to `room` with an ellipsis where the font has one.
+static void text_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int y, int h, int room,
+                     uint16_t c, int sc) {
+    if (room <= 0 || t.n == 0) {
+        return;
+    }
+    int ell = 0;
+    size_t k = moy_text_cut_px(f->id, t.p, t.n, room, sc, &ell);
+    int w = text(d, f, t.p, k, x, y, h, c, sc);
+    if (ell) {
+        static const uint8_t dots[] = {0xE2, 0x80, 0xA6};
+        text(d, f, dots, sizeof(dots), x + w, y, h, c, sc);
+    }
+}
+
+int moy_ui_table_head(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
+                      const uint8_t *cols, size_t cols_n, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    pf_t fv = font_of(&d, MOY_UI_FONT_CAPTION);
+    int sc = tscale(s);
+    uint16_t dim = pal(&d, tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM));
+    int first = g->pic ? 1 : 0;
+    for (int j = first; j < g->n; j++) {
+        if (g->w[j] <= 0) {
+            continue;
+        }
+        moy_ui_span_t h = field_at(cols, cols_n, j);
+        int x = g->x[j];
+        if (j > first) {
+            x += g->w[j] - tw(&fv, h.p, h.n, sc);
+        }
+        text_cut(&d, &fv, h, x, b.y, b.h, g->w[j], dim, sc);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
+                     const uint8_t *cells, size_t cells_n, int flags, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    const moy_ui_marks_t *m = moy_ui_marks();
+    int sc = tscale(s);
+    int ink = tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
+    int dim = tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
+    int lab = ink, meta = dim;
+    int r = moy_ui_depth()->on ? (desk ? 7 : 4) * d.fs : 0;
+    if (flags & MOY_UI_F_DISABLED) {
+        lab = dim;
+    } else {
+        if (flags & MOY_UI_F_ON) {
+            int c = current(s, &d, b, r, 0, ink);
+            if (c != ink) {
+                lab = meta = c;
+            }
+        }
+        if (flags & MOY_UI_F_FOCUS) {
+            if (m->on) {
+                int mi = -1;
+                moy_ui_focus_in(s, b, MOY_UI_MARK_PART, r, 0, d.fs, NULL, &mi, 0);
+                if (mi >= 0) {
+                    lab = mi;
+                    if (m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
+                        meta = mi;
+                    }
+                }
+            } else if (m->active) {
+                int16_t c[3];
+                moy_ui_colors(d.look, MOY_UI_K_ROW, MOY_UI_ON, c);
+                if (c[0] >= 0) {
+                    fill(&d, b.x, b.y, b.w, b.h, pal(&d, c[0]));
+                }
+                if (c[1] >= 0) {
+                    lab = meta = c[1];
+                }
+            }
+        }
+    }
+    pf_t fl = font_of(&d, MOY_UI_FONT_UI), fv = font_of(&d, MOY_UI_FONT_CAPTION);
+    int first = g->pic ? 1 : 0;
+    if (g->pic) {
+        moy_ui_span_t name = field_at(cells, cells_n, 0);
+        int side = g->w[0];
+        moy_ui_box_t ib = {g->x[0], (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,
+                           (int16_t)side};
+        int slot = moy_ui_icon_slot(name.p, name.n), glyph = moy_ui_icon_glyph(name.p, name.n);
+        icon_d(&d, slot, glyph, ib, lab != ink ? lab : dim);
+    }
+    for (int j = first; j < g->n; j++) {
+        if (g->w[j] <= 0) {
+            continue;
+        }
+        moy_ui_span_t t = field_at(cells, cells_n, j);
+        if (j == first) {
+            text_cut(&d, &fl, t, g->x[j], b.y, b.h, g->w[j], pal(&d, lab), sc);
+        } else {
+            int w = tw(&fv, t.p, t.n, sc);
+            text_cut(&d, &fv, t, g->x[j] + g->w[j] - w, b.y, b.h, g->w[j], pal(&d, meta), sc);
+        }
+    }
+    return MOY_UI_OK;
+}
+
+// -- a text field ------------------------------------------------------------------------
+
+int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text_,
+                 int flags, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    const moy_ui_marks_t *m = moy_ui_marks();
+    int sc = tscale(s);
+    int pad = (desk ? gm(MOY_UI_M_GROUP_PAD, fs) : metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * d.fs);
+    int gap = pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
+    int inset = pm(&d, MOY_UI_M_VALUE_ROW_FIELD, 1);
+    pf_t fl = font_of(&d, MOY_UI_FONT_UI);
+    uint16_t ink = pal(&d, tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
+    int x = b.x + pad;
+    if (label.n) {
+        x += text(&d, &fl, label.p, label.n, x, b.y, b.h, ink, sc) + gap;
+    }
+    moy_ui_box_t f = {(int16_t)x, (int16_t)(b.y + inset), (int16_t)(b.x + b.w - pad - x),
+                      (int16_t)(b.h - 2 * inset)};
+    if (f.w <= 0 || f.h <= 0) {
+        return MOY_UI_OK;
+    }
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    int r = dp->on ? (dp->key_r < (desk ? 8 : 6) ? dp->key_r : (desk ? 8 : 6)) * d.fs : 0;
+    int focused = (flags & MOY_UI_F_FOCUS) != 0;
+    uint16_t ring = pal(&d, focused ? tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)
+                                    : tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+    rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
+          d.fs, ring);
+    if (focused && m->on) {
+        int mi = -1;
+        moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &mi, 0);
+    } else if (focused && m->active) {
+        moy_ui_focus_ring(s, f, d.fs);
+    }
+    int tx = f.x + gap, room = f.w - 2 * gap - (focused ? 2 * d.fs : 0);
+    uint16_t tink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
+    // the text's tail shows where it is wider than the field
+    size_t from = 0;
+    while (from < text_.n && tw(&fl, text_.p + from, text_.n - from, sc) > room) {
+        from++;
+        while (from < text_.n && (text_.p[from] & 0xC0) == 0x80) {
+            from++;
+        }
+    }
+    int w = text(&d, &fl, text_.p + from, text_.n - from, tx, f.y, f.h, tink, sc);
+    if (focused) {
+        int ch = fl.line * sc;
+        fill(&d, tx + w + d.fs, f.y + moy_ui_fdiv(f.h - ch, 2), d.fs, ch,
+             pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)));
+    }
+    return MOY_UI_OK;
+}
+
+// -- a modal card --------------------------------------------------------------------------
+
+int moy_ui_modal_band(int fs, int desk) {
+    int n = 0;
+    const int16_t *m = moy_ui_metrics(MOY_UI_K_VALUE_ROW, &n);
+    int slot = MOY_UI_M_VALUE_ROW_INSET + (desk ? 1 : 0);
+    return (m != NULL && slot < n ? m[slot] : 0) * (fs < 1 ? 1 : fs);
+}
+
+int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,
+                 int title_h) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    int r = dp->on ? (dp->card_r < (desk ? 12 : 8) ? dp->card_r : (desk ? 12 : 8)) * d.fs : 0;
+    if (dp->on) {
+        moy_ui_cast(s, b, MOY_UI_CAST_CARD, MOY_UI_UNDER_FULL);
+    }
+    rrect(&d, b.x, b.y, b.w, b.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
+          d.fs, pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
+    if (title.n) {
+        int pad = moy_ui_modal_band(fs, desk);
+        pf_t f = font_of(&d, MOY_UI_FONT_TITLE);
+        int sc = tscale(s);
+        moy_ui_span_t t = title;
+        text_cut(&d, &f, t, b.x + pad, b.y + pad, title_h, b.w - 2 * pad,
+                 pal(&d, tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK)), sc);
+    }
+    return MOY_UI_OK;
+}
+
+int moy_ui_role_w(const moy_ui_sink_t *s, int role, moy_ui_span_t t) {
+    pd_t d;
+    open_pd(s, &d, s->fs, 0);
+    pf_t f = font_of(&d, role);
+    return tw(&f, t.p, t.n, tscale(s));
+}

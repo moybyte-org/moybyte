@@ -272,7 +272,7 @@ def _desk(g, ws, calc_x=648):
     _settle(g, ws, 2)
     _place(ws, "files", 112, 54, 548, 534)
     files = _app(ws, "files")
-    files._enter_rows("projects")
+    files.open_place("projects", keep="harpoon_pop")
     _settle(g, ws, 2)
     ws.open_app(ws._apps_by_id["calc"])
     _settle(g, ws, 2)

@@ -20,6 +20,7 @@ from runtime import host_app, layout_base, ui_draw
 from runtime.app_shell import ListShellLayout
 from runtime.chrome import text_scale_floor
 from runtime.files_app import FilesLayout
+from runtime.storybook_app import StorybookLayout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONTS = os.path.join(ROOT, "native", "moy_ui", "fonts")
@@ -113,10 +114,10 @@ def test_the_desk_lists_take_its_rows_and_places(tmp_path):
     layout_base.place_class(layout_base.DESK)
     lay = FilesLayout(548, 490, 1, True, 2)
     assert lay.row_h == 28
-    assert lay.tiles[0][3] == 34
+    assert lay.two and lay.side[2] == FilesLayout.SIDE      # the places beside
     layout_base.place_class(layout_base.HANDHELD)
     lay = FilesLayout(320, 240, 1, False, 1)
-    assert lay.row_h == 20 and lay.tiles[0][3] == 34
+    assert lay.row_h == 20 and not lay.two
 
 
 def test_the_desk_icon_column_is_the_targets(tmp_path):
@@ -153,17 +154,17 @@ def test_the_list_apps_read_the_print_fonts_line(tmp_path):
     """A taller print font grows the rows and bands that hold its text; under
     petme128 they are the 8px cell's numbers."""
     layout_base.place_class(layout_base.HANDHELD)
-    lay = FilesLayout(320, 240, 1)
-    assert (lay.top_h, lay.action_h, lay.status_h, lay.row_h) == (24, 20, 14, 20)
+    lay = StorybookLayout(320, 240, 1)
+    assert (lay.band_h, lay.row_h) == (24, 20)
     sample = os.path.join(ROOT, "tests", "fixtures", "fonts", "sample6x9.fnt")
     rc, fid = ui_draw._C.font_load(open(sample, "rb").read())
     assert rc == 0
     try:
         ui_draw.use_font("ui", fid)
         line = ui_draw.font("ui")[2]
-        big = FilesLayout(320, 240, 2)
+        big = StorybookLayout(320, 240, 2)
         assert big.row_h >= line * 2 + 4 * 2
-        assert big.top_h >= line * 2 + 8 * 2
+        assert big.band_h >= line * 2 + 8 * 2
         assert isinstance(big, ListShellLayout)
         assert big.cut("A LABEL FAR TOO LONG FOR ITS BOX", 60) \
             == ui_draw.print_cut("A LABEL FAR TOO LONG FOR ITS BOX", 60, 2)

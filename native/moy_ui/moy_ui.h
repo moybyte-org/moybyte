@@ -458,6 +458,8 @@ typedef struct {
     int16_t fs;
     int16_t colors[3];              // an override of the kind's, MOY_UI_FROM_STYLE each where none
     int16_t app;                    // button: its app's row of overrides, or -1
+    int16_t icon;                   // button, with F_ICON: an icon set's slot it draws (its
+                                    // glyph where the set has none), or -1: the caller's
 } moy_ui_button_t;
 // A button: the field, its rings, the icon or glyph, the label (centred by
 // the style). button_x: where its icon or glyph lands, for a caller's own.
@@ -643,6 +645,42 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
 // a slider's value (lo..hi), -1 for another kind.
 int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const moy_ui_vrow_t *r,
                        int x);
+// A table (ui.table): its columns' x and width over box b, the picture
+// column first where its header is empty, a column the first text column's
+// room drops 0 wide; `head` 1 where any header is named.
+#define MOY_UI_TABLE_COLS 8
+typedef struct {
+    int16_t n, pic, head;
+    int16_t x[MOY_UI_TABLE_COLS], w[MOY_UI_TABLE_COLS];
+} moy_ui_tgeo_t;
+// The NUL-separated fields of `p` in n bytes (a trailing NUL ends the last).
+int moy_ui_fields(const uint8_t *p, size_t n);
+// The geometry of a table of columns `cols` over every row's `cells` (both
+// NUL-separated, the cells row by row): the columns after the first text
+// column take their widest cell, right-aligned; it takes the rest, and where
+// that shows fewer than eleven characters the columns between it and the
+// last drop, the nearest the last first, then the last. Answers the dropped.
+int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols, size_t cols_n,
+                     const uint8_t *cells, size_t cells_n, int fs, int desk, moy_ui_tgeo_t *g);
+// The header row in box b, and one row of `cells` (that row's alone): its
+// marks by flags' F_ON (current), F_FOCUS and F_DISABLED, the picture column's
+// icon by name (moy_ui_icon_slot, else the glyph table's), the first text
+// column cut with an ellipsis where the font has one.
+int moy_ui_table_head(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
+                      const uint8_t *cols, size_t cols_n, int fs, int desk);
+int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
+                     const uint8_t *cells, size_t cells_n, int flags, int fs, int desk);
+// A text field row (ui.field): its label, then the field to the row's right
+// showing the text's tail and, focused (F_FOCUS), the caret.
+int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
+                 int flags, int fs, int desk);
+// A modal card (ui.dialog) in box b: its shadow under a depth, the card and
+// its title in the `title_h` rows under the card's padding; the padding.
+int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,
+                 int title_h);
+int moy_ui_modal_band(int fs, int desk);
+// The width of text `t` in type role `role`'s font on the sink.
+int moy_ui_role_w(const moy_ui_sink_t *s, int role, moy_ui_span_t t);
 // A group's card (handheld) behind row box `row`: `card` is its x, width and
 // top; `first` rounds the card's top corners, else a rule heads the row. On
 // the desk (`desk`) the card is plain rules between rows.

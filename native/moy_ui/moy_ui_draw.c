@@ -892,6 +892,13 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
         glyph(&d, k->glyph, tx, y, metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs, h, ink,
               d.tfs);
     }
+    if ((flags & MOY_UI_F_ICON) && (k->icon >= 0 || k->glyph >= 0)) {
+        int side = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON) * fs;
+        int ix = ln ? tx : x + moy_ui_fdiv(w - side, 2);
+        moy_ui_box_t ib = {(int16_t)ix, (int16_t)(y + moy_ui_fdiv(h - side, 2)), (int16_t)side,
+                           (int16_t)side};
+        moy_ui_icon_in(s, k->icon, k->glyph, ib, ink, fs);
+    }
     if (ln) {
         int lw = t_w(&d.f, k->label.p, (size_t)ln, fs);
         text_over(&d, k->label.p, (size_t)ln, tx + iw, y + moy_ui_fdiv(h - d.f.line * fs, 2), ink,

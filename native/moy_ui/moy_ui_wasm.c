@@ -256,6 +256,34 @@ int moy_ui_run_progress(void *target, moy_ui_span_t label, int32_t v, int32_t hi
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_table(void *target, moy_ui_span_t label, const uint8_t *cols, size_t cols_n,
+                     const uint8_t *cells, size_t cells_n, int32_t cur, const moy_ui_over_t *o,
+                     int32_t out[2]) {
+    OPEN(target);
+    moy_ui_api_table(c, &r.s, label, cols, cols_n, cells, cells_n, cur, o, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o) {
+    OPEN(target);
+    moy_ui_api_scroll(c, &r.s, id, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap, size_t len,
+                     const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_field(c, &r.s, label, buf, cap, len, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons, size_t n,
+                      int kind, const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_dialog(c, &r.s, title, buttons, n, kind, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
 // -- the rows ----------------------------------------------------------------------
 
 static int over_of(moy_ui_over_t *o, const uint8_t *p, uint32_t n) {
@@ -436,6 +464,43 @@ int32_t moy_ui_wasm_progress(void *e, const uint8_t *label, uint32_t n, int32_t 
     return moy_ui_run_progress(wasm_target(), span(label, n), v, hi, &o);
 }
 
+int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8_t *cols,
+                          uint32_t cn, const uint8_t *cells, uint32_t en, int32_t cur,
+                          const uint8_t *ob, uint32_t on, uint8_t *out, uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v[2] = {cur, 0};
+    int rc = moy_ui_run_table(wasm_target(), span(label, n), cols, cn, cells, en, cur, &o, v);
+    put_words(out, cap, v, 2);
+    return rc;
+}
+
+int32_t moy_ui_wasm_scroll(void *e, const uint8_t *id, uint32_t n, const uint8_t *ob,
+                           uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    return moy_ui_run_scroll(wasm_target(), span(id, n), &o);
+}
+
+int32_t moy_ui_wasm_field(void *e, const uint8_t *label, uint32_t n, uint8_t *buf, uint32_t cap,
+                          int32_t len, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v = len;
+    int rc = moy_ui_run_field(wasm_target(), span(label, n), buf, cap,
+                              len < 0 ? 0u : (size_t)len, &o, &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_dialog(void *e, const uint8_t *title, uint32_t n, const uint8_t *buttons,
+                           uint32_t bn, int32_t kind, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v = -1;
+    int rc = moy_ui_run_dialog(wasm_target(), span(title, n), buttons, bn, kind, &o, &v);
+    return rc != 0 ? rc : v;
+}
+
 #define FN(f) ((void *)(f))
 
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
@@ -460,6 +525,10 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_hints", FN(moy_ui_wasm_hints) },
     { "ui_icon", FN(moy_ui_wasm_icon) },
     { "ui_progress", FN(moy_ui_wasm_progress) },
+    { "ui_table", FN(moy_ui_wasm_table) },
+    { "ui_scroll", FN(moy_ui_wasm_scroll) },
+    { "ui_field", FN(moy_ui_wasm_field) },
+    { "ui_dialog", FN(moy_ui_wasm_dialog) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

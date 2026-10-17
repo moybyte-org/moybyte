@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 19
+#define MOY_UI_WASM_ROWS 23
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -85,6 +85,14 @@ int moy_ui_run_hints(void *target, const uint8_t *items, size_t n, const moy_ui_
 int moy_ui_run_icon(void *target, moy_ui_span_t name, int32_t *out);
 int moy_ui_run_progress(void *target, moy_ui_span_t label, int32_t v, int32_t hi,
                         const moy_ui_over_t *o);
+int moy_ui_run_table(void *target, moy_ui_span_t label, const uint8_t *cols, size_t cols_n,
+                     const uint8_t *cells, size_t cells_n, int32_t cur, const moy_ui_over_t *o,
+                     int32_t out[2]);
+int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o);
+int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap, size_t len,
+                     const moy_ui_over_t *o, int32_t *out);
+int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons, size_t n,
+                      int kind, const moy_ui_over_t *o, int32_t *out);
 
 // The rows, in roles.json's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an
@@ -127,6 +135,20 @@ int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8
 int32_t moy_ui_wasm_icon(void *e, const uint8_t *name, uint32_t n, const uint8_t *o, uint32_t on);
 int32_t moy_ui_wasm_progress(void *e, const uint8_t *label, uint32_t n, int32_t v, int32_t hi,
                              const uint8_t *o, uint32_t on);
+// ui_table writes the new cur and whether the current row was opened at
+// `out`; its headers and cells each end in a NUL, the cells row by row.
+int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8_t *cols,
+                          uint32_t cn, const uint8_t *cells, uint32_t en, int32_t cur,
+                          const uint8_t *o, uint32_t on, uint8_t *out, uint32_t cap);
+// ui_scroll with an id of length 0 ends the region.
+int32_t moy_ui_wasm_scroll(void *e, const uint8_t *id, uint32_t n, const uint8_t *o, uint32_t on);
+// ui_field edits the `len` bytes at buf (its room `cap`): the new length,
+// plus 0x10000 the frame Enter is pressed in it.
+int32_t moy_ui_wasm_field(void *e, const uint8_t *label, uint32_t n, uint8_t *buf, uint32_t cap,
+                          int32_t len, const uint8_t *o, uint32_t on);
+// ui_dialog: the button activated (from 0), -1 none; a title of length 0 ends it.
+int32_t moy_ui_wasm_dialog(void *e, const uint8_t *title, uint32_t n, const uint8_t *buttons,
+                           uint32_t bn, int32_t kind, const uint8_t *o, uint32_t on);
 
 // The native serving `name` ("ui_button"), or NULL; and the rows' names.
 void *moy_ui_wasm_native(const char *name);

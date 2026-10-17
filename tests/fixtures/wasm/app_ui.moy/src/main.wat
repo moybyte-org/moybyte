@@ -45,6 +45,13 @@
   (import "moybyte.app" "ui_icon" (func $ui_icon (param i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_progress" (func $ui_progress
     (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_table" (func $ui_table
+    (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_scroll" (func $ui_scroll (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_field" (func $ui_field
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_dialog" (func $ui_dialog
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 

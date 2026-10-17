@@ -263,10 +263,9 @@ def test_files_offers_RUN_on_a_script_and_not_on_a_note(tmp_path):
     _seed(ws, "hi.py", "print('hi')\n")
     _seed(ws, "shopping", "milk\n")
     app = _files_app(ws)
-    app._enter_kind("docs")
-    app.grid.select("hi.py")
+    app.open_place("docs", keep="hi.py")
     assert app._action_labels()[0] == "RUN"
-    app.grid.select("shopping")
+    app.select("shopping")
     assert "RUN" not in app._action_labels()
 
 
@@ -274,8 +273,7 @@ def test_the_files_RUN_action_starts_the_script(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('from files')\n")
     app = _files_app(ws)
-    app._enter_kind("docs")
-    app.grid.select("hi.py")
+    app.open_place("docs")
     app._act("RUN", "hi.py")
     _frame(ws)
     assert ws.wm.top_is_player()
@@ -289,7 +287,7 @@ def test_the_router_sends_a_script_to_the_text_page_not_the_editor(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('hi')\n")
     app = _files_app(ws)
-    app._enter_kind("docs")
+    app.open_place("docs")
     assert app.door("hi.py", "docs") == (text_modes.CODE, "hi.py")
     assert app.route("hi.py", kind="docs") == text_modes.CODE
     # OPEN edits the script: the Player is running Notes' editor skin over it

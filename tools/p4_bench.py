@@ -898,12 +898,12 @@ def bench_desk_scale(b, out_path):
         bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
         bench.stop("window drag (settings), " + tag)
         pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
-                  "ws._apps_by_id['files']._enter_rows('projects')")
+                  "ws._apps_by_id['files'].open_place('projects')")
         b.drain(2.0)
         o = win_geom(b, "files")
-        rows = pyval(b, "ws.wm._wins['files'].ctx.app_layouts['files'].rows_view()"
-                        " if 'files' in ws.wm._wins and ws.wm._wins['files'].ctx "
-                        "else None")
+        # the projects' table: its rows scroll under a drag in the list rect
+        rows = pyval(b, "ws._apps_by_id['files'].layout.list"
+                        " if 'files' in ws.wm._wins else None")
         if o and rows:
             cx = (o[0] + rows[0] + rows[2] // 2) * r
             y0 = (o[1] + rows[1] + rows[3] * 3 // 4) * r

@@ -8,6 +8,8 @@
 
 #define MAGIC 0x6d756931u           // "mui1"
 #define PAGE_SALT 0x9e3779b9u
+#define SCROLL_SALT 0x85ebca6bu
+#define DIALOG_SALT 0xc2b2ae35u
 #define NO_PAGE 0xffu
 
 // A stop's flags.
@@ -19,6 +21,9 @@ enum {
     STOP_AT_END = 16,       // ...and down at its last
     STOP_HOLD = 32,         // nav = false on a part: focus stays, the keys are the cart's
     STOP_NAV_OFF = 64,      // nav = false on a page: the engine moves no focus in it
+    STOP_MODAL = 128,       // a dialog's: while one is drawn, the others take no input
+    STOP_DLG_BTN = 256,     // a dialog's button (focus opens on its body first)
+    STOP_FIELD = 512,       // a text field: it takes the typed keys, and `a` is a letter
 };
 
 static uint32_t hash(const uint8_t *p, size_t n, uint32_t salt) {
@@ -134,6 +139,7 @@ void moy_ui_api_reset(moy_ui_ctx_t *c) {
     c->page_keep = -1;
     c->page_stop = NO_PAGE;
     c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
+    c->dlg_pick = -1;
 }
 
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n) {
@@ -321,10 +327,67 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->dup = 0;
     c->grp_open = c->grp_n = c->grp_any = 0;
     c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
-    int settled = 1;
+    c->n_nest = 0;
+    c->dlg_pick = -1;
+    c->typed = 0;
+    int settled = !c->owe;
+    c->owe = 0;
     uint32_t focus0 = c->focus;
-    const moy_ui_stop_t *v = c->prev;
+    moy_ui_stop_t *v = c->prev;
     int n = c->n_prev;
+
+    // A dialog drawn last frame takes the input: only its stops are kept.
+    c->modal = 0;
+    for (int i = 0; i < n && !c->modal; i++) {
+        c->modal = (v[i].flags & STOP_MODAL) != 0;
+    }
+    if (c->modal) {
+        uint8_t to[MOY_UI_API_STOPS];
+        int k = 0;
+        for (int i = 0; i < n; i++) {
+            to[i] = NO_PAGE;
+            if (v[i].flags & STOP_MODAL) {
+                to[i] = (uint8_t)k;
+                v[k] = v[i];
+                v[k].page = v[k].page < n ? to[v[k].page] : NO_PAGE;
+                k++;
+            }
+        }
+        n = c->n_prev = (uint8_t)k;
+        if (c->focus == 0 || find(v, n, c->focus) < 0) {
+            if (c->focus && !c->modal_from) {
+                c->modal_from = c->focus;
+            }
+            int first = -1;
+            for (int i = 0; i < n && first < 0; i++) {
+                if (!(v[i].flags & (STOP_PAGE | STOP_DLG_BTN))) {
+                    first = i;
+                }
+            }
+            for (int i = 0; i < n && first < 0; i++) {
+                if (!(v[i].flags & STOP_PAGE)) {
+                    first = i;
+                }
+            }
+            if (first >= 0) {
+                c->focus = v[first].id;
+                c->focus_box = v[first].b;
+                c->focus_name[0] = 0;
+                settled = 0;
+            }
+        }
+    } else if (c->modal_from) {
+        if (c->focus == 0 || find(v, n, c->focus) < 0) {
+            int i = find(v, n, c->modal_from);
+            if (i >= 0) {
+                c->focus = v[i].id;
+                c->focus_box = v[i].b;
+                c->focus_name[0] = 0;
+                settled = 0;
+            }
+        }
+        c->modal_from = 0;
+    }
 
     // Focus on an id no longer drawn passes to the nearest stop.
     int fi = c->focus ? find(v, n, c->focus) : -1;
@@ -365,9 +428,19 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;
     int off = f == NULL || (f->flags & STOP_HOLD)
               || (f->page != NO_PAGE && f->page < n && (v[f->page].flags & STOP_NAV_OFF));
+    int field = f != NULL && (f->flags & STOP_FIELD);
+    if (field && key != c->last_typed && key != 0 && key != MOY_UI_KEY_TAB) {
+        c->typed = key;             // a typed key, once per press
+        c->keys = 1;
+        settled = 0;
+    }
+    c->last_typed = key;
     if (!off) {
         int dir = pressed & (MOY_UI_B_LEFT | MOY_UI_B_RIGHT | MOY_UI_B_UP | MOY_UI_B_DOWN);
-        int go = pressed & (MOY_UI_B_A | MOY_UI_B_RUN);
+        int go = pressed & (field ? MOY_UI_B_RUN : (MOY_UI_B_A | MOY_UI_B_RUN));
+        if (field && (c->typed == 13 || c->typed == 10)) {
+            go = MOY_UI_B_RUN;
+        }
         if (dir || go || tab) {
             c->keys = 1;
         }
@@ -617,6 +690,16 @@ static void group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     c->y = (int16_t)(c->y + kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_GAP) * c->fs);
 }
 
+// Whether a dialog's body or buttons are being laid out.
+static int in_dialog(const moy_ui_ctx_t *c) {
+    for (int i = 0; i < c->n_nest; i++) {
+        if (c->nest[i].kind == 2) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // A stop recorded for the next frame's navigation: its state bits, or -1
 // where it is no stop (a duplicate id, or a full frame).
 static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_span_t name) {
@@ -632,11 +715,15 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     if (c->n_cur >= MOY_UI_API_STOPS) {
         return -1;
     }
+    int dlg = in_dialog(c);
     moy_ui_stop_t *s = &c->cur[c->n_cur++];
     s->id = id;
     s->b = b;
-    s->flags = (uint8_t)flags;
+    s->flags = (uint16_t)(flags | (dlg ? STOP_MODAL : 0));
     s->page = c->page_stop;
+    if (c->modal && !dlg) {
+        return 0;                   // under a dialog: drawn, and no input reaches it
+    }
     if (c->focus == 0) {
         c->focus = id;
         c->focus_name[0] = 0;
@@ -734,19 +821,9 @@ static int vrow_stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags,
 
 // -- the verbs -----------------------------------------------------------------------
 
-void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
-                     const moy_ui_over_t *o, moy_ui_box_t *content) {
-    o = over(o);
-    group_close(c, s);
-    c->grp_any = 0;
-    moy_ui_box_t b = c->surface;
-    if (c->has_at) {
-        b = c->at;
-        c->has_at = 0;
-    }
-    moy_ui_box_t ct;
-    moy_ui_page_ground(s, b, title, c->fs, &ct);
-    uint32_t id = hash(title.p, title.n, PAGE_SALT);
+// Make `ct` the page the rows stack in: its scroll kept by `id` (clamped by
+// the rows it held last frame) and its stop, which a drag scrolls.
+static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) {
     moy_ui_keep_t *k = keep(c, id, 1);
     c->page = ct;
     c->y = 0;
@@ -769,10 +846,25 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         moy_ui_stop_t *p = &c->cur[c->n_cur];
         p->id = id;
         p->b = ct;
-        p->flags = (uint8_t)(STOP_PAGE | (o->nav == 0 ? STOP_NAV_OFF : 0));
+        p->flags = (uint16_t)(STOP_PAGE | flags);
         p->page = NO_PAGE;
         c->page_stop = c->n_cur++;
     }
+}
+
+void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                     const moy_ui_over_t *o, moy_ui_box_t *content) {
+    o = over(o);
+    group_close(c, s);
+    c->grp_any = 0;
+    moy_ui_box_t b = c->surface;
+    if (c->has_at) {
+        b = c->at;
+        c->has_at = 0;
+    }
+    moy_ui_box_t ct;
+    moy_ui_page_ground(s, b, title, c->fs, &ct);
+    open_page(c, hash(title.p, title.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0);
     if (content != NULL) {
         *content = ct;
     }
@@ -838,8 +930,14 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         bt.fs = c->fs;
         colours(s, o, bt.colors);
         bt.app = -1;
-        moy_ui_button(s, b, kid, mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0),
-                      interact(st), &bt, MOY_UI_PHASE_ALL);
+        bt.icon = -1;
+        int fl = mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0);
+        if (c->row_slot >= 0 || c->row_glyph >= 0) {
+            fl |= MOY_UI_F_ICON;
+            bt.icon = c->row_slot;
+            bt.glyph = c->row_glyph;
+        }
+        moy_ui_button(s, b, kid, fl, interact(st), &bt, MOY_UI_PHASE_ALL);
         clip_out(&k);
     }
     return (st & MOY_UI_ST_ACTIVATED) != 0;
@@ -1272,4 +1370,388 @@ const char *moy_ui_api_dup(moy_ui_ctx_t *c) {
     }
     c->dup_told = c->dup;
     return c->dup_name;
+}
+
+// -- tables, scroll regions, fields, dialogs ------------------------------------------
+
+static int pmetric(const moy_ui_ctx_t *c, int slot) {
+    return kmetric(MOY_UI_K_VALUE_ROW, slot + (c->cls ? 1 : 0)) * c->fs;
+}
+
+// Open a nested page (a scroll region, kind 1; a dialog's body, kind 2) in
+// box b, the outer one kept until it closes.
+static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int used,
+                      int flags) {
+    moy_ui_nest_t *n = &c->nest[c->n_nest++];
+    n->page = c->page;
+    n->y = c->y;
+    n->scroll = c->scroll;
+    n->keep = c->page_keep;
+    n->stop = c->page_stop;
+    n->kind = (uint8_t)kind;
+    n->used = (int16_t)used;
+    open_page(c, id, b, flags | (kind == 2 || in_dialog(c) ? STOP_MODAL : 0));
+}
+
+// Close the innermost nested page where it is of `kind`: answers the height
+// its rows took.
+static int nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
+    if (c->n_nest == 0 || c->nest[c->n_nest - 1].kind != kind) {
+        return -1;
+    }
+    group_close(c, s);
+    int took = c->y;
+    moy_ui_nest_t *n = &c->nest[--c->n_nest];
+    c->page = n->page;
+    c->y = (int16_t)(n->y + (kind == 1 ? n->used : 0));
+    c->scroll = n->scroll;
+    c->page_keep = n->keep;
+    c->page_stop = n->stop;
+    return took;
+}
+
+void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                       const moy_ui_over_t *o) {
+    o = over(o);
+    if (id.n == 0) {
+        nest_close(c, s, 1);
+        return;
+    }
+    if (c->n_nest >= MOY_UI_API_NEST) {
+        return;
+    }
+    group_close(c, s);
+    moy_ui_box_t b;
+    int used = 0;
+    if (c->has_at) {
+        b = c->at;
+        c->has_at = 0;
+    } else {
+        int top = c->page.y + c->y - c->scroll;
+        int bottom = c->page.y + c->page.h;
+        b = (moy_ui_box_t){c->page.x, (int16_t)top, c->page.w,
+                           (int16_t)(bottom > top ? bottom - top : 0)};
+        used = b.h;
+    }
+    nest_open(c, 1, hash(id.p, id.n, SCROLL_SALT), b, used, o->nav == 0 ? STOP_NAV_OFF : 0);
+}
+
+void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
+                      const uint8_t *cols, size_t cols_n, const uint8_t *cells, size_t cells_n,
+                      int32_t cur, const moy_ui_over_t *o, int32_t out[2]) {
+    o = over(o);
+    int nc = moy_ui_fields(cols, cols_n);
+    if (nc < 1) {
+        nc = 1;
+    }
+    int count = moy_ui_fields(cells, cells_n) / nc;
+    int rh = row_h(c);
+    int cap_h = label.n ? kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_CAPTION + (c->cls ? 1 : 0)) * c->fs
+                        : 0;
+    int named = 0;
+    for (size_t i = 0; i < cols_n && !named; i++) {
+        named = cols[i] != 0;
+    }
+    int head_h = named ? pmetric(c, MOY_UI_M_VALUE_ROW_HEAD) : 0;
+    int placed = c->has_at;
+    int stacked;
+    moy_ui_box_t b = place(c, cap_h + head_h + (count ? count : 1) * rh, &stacked);
+    moy_ui_box_t view = {b.x, (int16_t)(b.y + cap_h + head_h), b.w,
+                         (int16_t)(b.h - cap_h - head_h > 0 ? b.h - cap_h - head_h : 0)};
+    uint32_t id = id_of(o, label);
+    int disabled = o->disabled == 1;
+    moy_ui_keep_t *kp = disabled || !placed ? NULL : keep(c, id, 1);
+    if (cur >= count) {
+        cur = count - 1;
+    }
+    int focused = !disabled && c->focus == id && count > 0;
+    int row = cur;
+    if (focused) {
+        row = cur < 0 ? 0 : cur + c->step_y;
+    }
+    if (row >= count) {
+        row = count - 1;
+    }
+    if (row < 0 && cur >= 0) {
+        row = 0;
+    }
+    if (placed && kp != NULL && c->n_cur < MOY_UI_API_STOPS) {
+        // the rows' view: what a drag over them scrolls, by the table's kept offset
+        moy_ui_stop_t *p = &c->cur[c->n_cur++];
+        p->id = id;
+        p->b = view;
+        p->flags = (uint16_t)(STOP_PAGE | (in_dialog(c) ? STOP_MODAL : 0));
+        p->page = NO_PAGE;
+    }
+    int flags = STOP_KEEP_UD | (row <= 0 ? STOP_AT_TOP : 0) | (row >= count - 1 ? STOP_AT_END : 0);
+    int st = disabled ? 0 : stop(c, id, b, flags, name_of(o, label));
+    if (st < 0) {
+        st = 0;
+    }
+    int offset = kp != NULL ? kp->a : 0;
+    int opened = 0;
+    if ((st & MOY_UI_ST_ACTIVATED) && count) {
+        if (c->tap_y != INT16_MIN) {
+            int r = moy_ui_fdiv(c->tap_y - view.y + offset, rh > 0 ? rh : 1);
+            if (c->tap_y >= view.y && r >= 0 && r < count) {
+                opened = r == cur;
+                row = r;
+            }
+        } else {
+            opened = row >= 0;
+        }
+    }
+    if (focused || (st & MOY_UI_ST_ACTIVATED)) {
+        cur = row;
+    }
+    if (kp != NULL) {
+        if (focused && (c->step_y || (st & MOY_UI_ST_ACTIVATED)) && cur >= 0) {
+            if (cur * rh < offset) {
+                offset = cur * rh;
+            } else if ((cur + 1) * rh > offset + view.h) {
+                offset = (cur + 1) * rh - view.h;
+            }
+        }
+        int most = count * rh - view.h;
+        if (offset > most) {
+            offset = most;
+        }
+        if (offset < 0) {
+            offset = 0;
+        }
+        kp->a = offset;
+    }
+    if (!placed && focused && c->step_y && cur >= 0) {
+        c->reveal = 1;
+        c->reveal_box = (moy_ui_box_t){b.x, (int16_t)(view.y + cur * rh), b.w, (int16_t)rh};
+    }
+    clip_t k;
+    if (clip_row(&k, s, b, stacked, c->page)) {
+        band(c, s, b, stacked, 0);
+        if (cap_h) {
+            moy_ui_caption(s, (moy_ui_box_t){b.x, b.y, b.w, (int16_t)cap_h}, label, c->fs, c->cls);
+        }
+        moy_ui_tgeo_t g;
+        moy_ui_table_geo(s, b, cols, cols_n, cells, cells_n, c->fs, c->cls, &g);
+        if (head_h) {
+            moy_ui_table_head(s, (moy_ui_box_t){b.x, (int16_t)(b.y + cap_h), b.w, (int16_t)head_h},
+                              &g, cols, cols_n, c->fs, c->cls);
+        }
+        clip_t kv;
+        int any = clip_in(&kv, s, view);
+        size_t at = 0;
+        for (int i = 0; any && i < count && at <= cells_n; i++) {
+            size_t e = at;
+            for (int j = 0; j < nc; j++) {
+                while (e < cells_n && cells[e] != 0) {
+                    e++;
+                }
+                if (j < nc - 1) {
+                    e++;
+                }
+            }
+            int ry = view.y + i * rh - offset;
+            if (ry + rh > view.y && ry < view.y + view.h) {
+                int f = (i == cur ? MOY_UI_F_ON : 0) | (disabled ? MOY_UI_F_DISABLED : 0);
+                if ((st & MOY_UI_ST_FOCUS) && o->mark != 0 && i == cur) {
+                    f |= MOY_UI_F_FOCUS;
+                }
+                size_t end = e < cells_n ? e : cells_n;
+                moy_ui_table_row(s, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh}, &g,
+                                 cells + at, end - at, f, c->fs, c->cls);
+            }
+            at = e + 1;
+        }
+        clip_out(&kv);
+        clip_out(&k);
+    }
+    out[0] = cur;
+    out[1] = opened;
+}
+
+int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
+                         uint8_t *buf, size_t cap, size_t len, const moy_ui_over_t *o) {
+    o = over(o);
+    if (len > cap) {
+        len = cap;
+    }
+    int stacked;
+    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    int disabled = o->disabled == 1;
+    int st = disabled ? 0 : stop(c, id_of(o, label), b, STOP_FIELD, name_of(o, label));
+    if (st < 0) {
+        st = 0;
+    }
+    int done = 0;
+    if ((st & MOY_UI_ST_FOCUS) && c->typed) {
+        int k = c->typed;
+        c->typed = 0;
+        if (k == 8 || k == 127) {
+            while (len > 0) {
+                len--;
+                if ((buf[len] & 0xC0) != 0x80) {
+                    break;
+                }
+            }
+        } else if (k >= 32 && k < 127 && len < cap) {
+            buf[len++] = (uint8_t)k;
+        }
+    }
+    if ((st & MOY_UI_ST_ACTIVATED) && c->tap_y == INT16_MIN) {
+        done = 1;
+    }
+    clip_t k;
+    if (clip_row(&k, s, b, stacked, c->page)) {
+        int f = mark_flags(st, o) & ~MOY_UI_F_ON;
+        band(c, s, b, stacked, f);
+        moy_ui_span_t t = {buf, (uint16_t)len};
+        moy_ui_field(s, b, label, t, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs, c->cls);
+        clip_out(&k);
+    }
+    return (int32_t)len | (done ? MOY_UI_FIELD_DONE : 0);
+}
+
+int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                          const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o) {
+    o = over(o);
+    if (title.n == 0) {
+        if (c->n_nest && c->nest[c->n_nest - 1].kind == 2) {
+            int used = c->nest[c->n_nest - 1].used;
+            int took = nest_close(c, s, 2);
+            if (took != used) {
+                c->owe = 1;             // laid out for another body: the next frame redraws
+            }
+        }
+        return -1;
+    }
+    if (c->n_nest >= MOY_UI_API_NEST) {
+        return -1;
+    }
+    group_close(c, s);
+    c->has_at = 0;
+    if (kind < 0 || kind >= 5) {
+        kind = 1;
+    }
+    int fs = c->fs, rh = row_h(c);
+    uint32_t id = hash(title.p, title.n, DIALOG_SALT);
+    moy_ui_keep_t *kb = keep_of(c, id);
+    int body = kb != NULL && kb->b > 0 ? kb->b : rh;
+    if (!c->modal) {
+        c->owe = 1;                     // its first frame: focus opens in it on the next
+    }
+    int pad = moy_ui_modal_band(fs, c->cls);
+    int foot = rh + 2 * pad;
+    int top = pad + rh + pad / 2;
+    moy_ui_box_t sf = c->surface;
+    int w = pmetric(c, MOY_UI_M_VALUE_ROW_MODAL);
+    if (w > sf.w - 2 * pad) {
+        w = sf.w - 2 * pad;
+    }
+    int bh = body;
+    if (top + bh + foot > sf.h - 2 * pad) {
+        bh = sf.h - 2 * pad - top - foot;
+        if (bh < rh) {
+            bh = rh;
+        }
+    }
+    int h = top + bh + foot;
+    moy_ui_box_t card = {(int16_t)(sf.x + moy_ui_fdiv(sf.w - w, 2)),
+                         (int16_t)(sf.y + moy_ui_fdiv(sf.h - h, 2)), (int16_t)w, (int16_t)h};
+    if (card.y < sf.y) {
+        card.y = sf.y;
+    }
+    moy_ui_modal(s, card, title, fs, c->cls, rh);
+    // the buttons at its foot, right-aligned, recorded left to right
+    int nb = moy_ui_fields(buttons, len);
+    int gap = 8 * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
+    int bw[8];
+    int total = 0;
+    if (nb > 8) {
+        nb = 8;
+    }
+    for (int i = 0; i < nb; i++) {
+        size_t at = 0;
+        int k = 0;
+        moy_ui_span_t t = {buttons, 0};
+        for (size_t j = 0; j <= len; j++) {
+            if (j == len || buttons[j] == 0) {
+                if (k == i) {
+                    t.p = buttons + at;
+                    t.n = (uint16_t)(j - at);
+                    break;
+                }
+                at = j + 1;
+                k++;
+            }
+        }
+        int tw = moy_ui_role_w(s, MOY_UI_FONT_UI, t) + 2 * bpad;
+        bw[i] = tw > minw ? tw : minw;
+        total += bw[i] + (i ? gap : 0);
+    }
+    if (total > w - 2 * pad && nb > 0) {
+        int each = (w - 2 * pad - (nb - 1) * gap) / nb;
+        for (int i = 0; i < nb; i++) {
+            bw[i] = each;
+        }
+        total = nb * each + (nb - 1) * gap;
+    }
+    // the body's page first, so its stops and the buttons' are the dialog's
+    moy_ui_box_t inner = {0, 0, 0, 0};
+    int lp = c->cls ? kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * fs
+                    : kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs;
+    inner.x = (int16_t)(card.x + pad - lp);
+    inner.w = (int16_t)(w - 2 * (pad - lp));
+    inner.y = (int16_t)(card.y + top);
+    inner.h = (int16_t)bh;
+    nest_open(c, 2, id, inner, body, 0);
+    int pick = -1;
+    moy_ui_over_t none;
+    moy_ui_over_none(&none);
+    uint8_t body_stop = c->page_stop;
+    c->page_stop = NO_PAGE;             // a button is no row of the body's
+    int x = card.x + w - pad - total;
+    int by = card.y + h - pad - rh;
+    for (int i = 0; i < nb; i++) {
+        size_t at = 0;
+        int k = 0;
+        moy_ui_span_t t = {buttons, 0};
+        for (size_t j = 0; j <= len; j++) {
+            if (j == len || buttons[j] == 0) {
+                if (k == i) {
+                    t.p = buttons + at;
+                    t.n = (uint16_t)(j - at);
+                    break;
+                }
+                at = j + 1;
+                k++;
+            }
+        }
+        moy_ui_box_t bb = {(int16_t)x, (int16_t)by, (int16_t)bw[i], (int16_t)rh};
+        int st = stop(c, hash(t.p, t.n, id), bb, STOP_DLG_BTN, t);
+        if (st < 0) {
+            st = 0;
+        }
+        if (st & MOY_UI_ST_ACTIVATED) {
+            pick = i;
+        }
+        int bk = i == nb - 1 ? kind : 0;
+        const char *kn = moy_ui_button_kinds[bk][0];
+        moy_ui_button_t bt;
+        bt.label = t;
+        bt.glyph = -1;
+        bt.fs = fs;
+        bt.colors[0] = bt.colors[1] = bt.colors[2] = MOY_UI_FROM_STYLE;
+        bt.app = -1;
+        bt.icon = -1;
+        moy_ui_button(s, bb, moy_ui_button_kind(kn, strlen(kn)), mark_flags(st, &none),
+                      interact(st), &bt, MOY_UI_PHASE_ALL);
+        x += bw[i] + gap;
+    }
+    c->page_stop = body_stop;
+    c->dlg_pick = (int8_t)pick;
+    return pick;
+}
+
+int moy_ui_api_owes(const moy_ui_ctx_t *c) {
+    return c->owe;
 }

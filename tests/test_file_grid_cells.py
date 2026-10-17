@@ -1,7 +1,7 @@
 """Phase 3c: the shared thumbnail grid and the app toolbars speak `runtime/ui.py`.
 
-`file_widgets.FileGridView` is the widget Files and Paint's OPEN mode both
-embed, so converting it pays twice; the private button copy this phase
+`file_widgets.FileGridView` is the widget Paint's OPEN mode embeds; the
+private button copy this phase
 absorbed (the notebook app's history pair) is the
 duplication the refactor exists to end. What is pinned here is what the shell
 goldens cannot see:
@@ -205,26 +205,6 @@ def test_the_cue_paints_only_the_edge_at_rest_geometry():
             px, py)
 
 
-# --- the embedders pump it -------------------------------------------------------
-
-def _pointer_head(mod, verb="handle_pointer"):
-    """The source of `verb` up to its first `if not click` early return."""
-    src = (ROOT / "runtime" / (mod + ".py")).read_text(encoding="utf-8")
-    return src.split("def " + verb + "(", 1)[1].split("if not click", 1)[0]
-
-
-def test_every_grid_embedder_pumps_on_non_click_samples():
-    """A press cue that only appeared on the CLICK frame would never be seen:
-    the pump has to run before each app's `if not click: return`.
-
-    The shared `ListShellApp._list_pointer` went with the notebook app that
-    was its second caller, so Files owns this head again. The ratchet FOLLOWS
-    the head rather than pinning a copy in place: what must stay true is that
-    the pump precedes the early return, wherever it lives."""
-    head = _pointer_head("files_app")
-    assert "grid.pointer_frame(" in head
-
-
 # --- the private button copies ---------------------------------------------------
 
 def test_the_private_button_copies_are_gone():
@@ -288,14 +268,11 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
 # --- the row conversions ---------------------------------------------------------
 
 def test_the_converted_row_draws_go_through_the_toolkit():
-    """The two list surfaces in this file group draw rows with `ui_draw.row`; the
-    one whose pixels are frozen OFF-token passes `colors=`, which is what that
-    escape hatch is for."""
-    from runtime import files_app, storybook_app
+    """The Storybook's list draws its rows with `ui_draw.row`, and its pixels are
+    frozen OFF-token, so it passes `colors=`, which is what that escape hatch
+    is for."""
+    from runtime import storybook_app
 
-    assert "_ui_draw.row(" in inspect.getsource(files_app.FilesAppLayer._draw_rows)
     deck = inspect.getsource(storybook_app.StorybookAppLayer._draw_rows)
     assert "_ui_draw.row(" in deck and "colors=" in deck
-    for src in (inspect.getsource(files_app.FilesAppLayer._draw_rows),
-                deck):
-        assert "cv.rectb(" not in src and "cv.rect(" not in src
+    assert "cv.rectb(" not in deck and "cv.rect(" not in deck

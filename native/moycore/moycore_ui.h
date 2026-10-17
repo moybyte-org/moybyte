@@ -20,6 +20,11 @@
  *   ui.hints(items, o)             (keys, then what they do, alternating)
  *   ui.icon(name, o)               -> whether `name` names an icon (the next row's)
  *   ui.progress(label, v, hi, o)   (v of hi done)
+ *   ui.table(label, columns, rows, cur, o) -> the new cur (from 1; 0 is none), opened
+ *   ui.scroll(id, o), ui.scroll()  (a scroll region; ui.scroll() ends it)
+ *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
+ *   ui.dialog(title, buttons, kind, o) -> the button activated (from 1; 0 none);
+ *                                    ui.dialog() ends its body
  *   ui.part(id, w, h, o)           -> x, y, w, h, state
  *   ui.focus(id), ui.focus()       -> the focused id, or nil
  *   ui.keys_taken()                -> whether the ui used this frame's keys
@@ -320,6 +325,117 @@ static int moycore_ui_progress(lua_State *L)
     return 0;
 }
 
+/* The strings of the table at stack index `i`, each ending in a NUL, appended to b. */
+static void moycore_ui_cells(lua_State *L, int i, luaL_Buffer *b, lua_Integer n)
+{
+    for (lua_Integer k = 1; k <= n; k++) {
+        lua_geti(L, i, k);
+        if (!lua_isnil(L, -1)) {
+            luaL_tolstring(L, -1, NULL);
+            lua_remove(L, -2);
+            luaL_addvalue(b);
+        } else {
+            lua_pop(L, 1);
+        }
+        luaL_addchar(b, '\0');
+    }
+}
+
+static int moycore_ui_table(lua_State *L)
+{
+    luaL_checktype(L, 2, LUA_TTABLE);
+    luaL_checktype(L, 3, LUA_TTABLE);
+    int32_t cur = lua_isnoneornil(L, 4) ? -1 : moycore_ui_int(L, 4) - 1;
+    moy_ui_over_t o;
+    moycore_ui_over(L, 5, &o);
+    lua_Integer nc = luaL_len(L, 2);
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    moycore_ui_cells(L, 2, &b, nc);
+    luaL_pushresult(&b);
+    lua_Integer nr = luaL_len(L, 3);
+    if (nr > 4096) nr = 4096;
+    luaL_checkstack(L, (int)nr + 4, "ui.table");
+    for (lua_Integer r = 1; r <= nr; r++) {
+        lua_geti(L, 3, r);
+        int row = lua_gettop(L);
+        luaL_buffinit(L, &b);       /* its slot above the row: the cells go on top */
+        if (lua_type(L, row) == LUA_TTABLE) {
+            moycore_ui_cells(L, row, &b, nc);
+        } else {
+            for (lua_Integer k = 0; k < nc; k++) luaL_addchar(&b, '\0');
+        }
+        luaL_pushresult(&b);
+        lua_remove(L, row);
+    }
+    lua_concat(L, (int)nr);
+    size_t cn = 0, en = 0;
+    const char *cols = lua_tolstring(L, -2, &cn);
+    const char *cells = lua_tolstring(L, -1, &en);
+    int32_t v[2] = {cur, 0};
+    moy_ui_run_table(moycore_ui_canvas(), moycore_ui_span(L, 1), (const uint8_t *)cols, cn,
+                     (const uint8_t *)cells, en, cur, &o, v);
+    lua_pushinteger(L, (lua_Integer)v[0] + 1);
+    lua_pushboolean(L, v[1] != 0);
+    return 2;
+}
+
+static int moycore_ui_scroll(lua_State *L)
+{
+    moy_ui_over_t o;
+    moy_ui_run_scroll(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_over(L, 2, &o));
+    return 0;
+}
+
+static int moycore_ui_field(lua_State *L)
+{
+    size_t n = 0;
+    const char *text = lua_isnoneornil(L, 2) ? "" : luaL_checklstring(L, 2, &n);
+    int32_t cap = lua_isnoneornil(L, 3) ? 32 : moycore_ui_int(L, 3);
+    if (cap < 1) cap = 1;
+    if (cap > 255) cap = 255;
+    uint8_t buf[255];
+    size_t len = n < (size_t)cap ? n : (size_t)cap;
+    memcpy(buf, text, len);
+    moy_ui_over_t o;
+    int32_t v = (int32_t)len;
+    moy_ui_run_field(moycore_ui_canvas(), moycore_ui_span(L, 1), buf, (size_t)cap, len,
+                     moycore_ui_over(L, 4, &o), &v);
+    lua_pushlstring(L, (const char *)buf, (size_t)(v & 0xffff));
+    lua_pushboolean(L, (v & MOY_UI_FIELD_DONE) != 0);
+    return 2;
+}
+
+static int moycore_ui_dialog(lua_State *L)
+{
+    moy_ui_over_t o;
+    int32_t v = -1;
+    if (lua_isnoneornil(L, 1)) {
+        static const uint8_t none[1] = {0};
+        moy_ui_span_t end = {none, 0};
+        moy_ui_over_none(&o);
+        moy_ui_run_dialog(moycore_ui_canvas(), end, none, 0, 0, &o, &v);
+        return 0;
+    }
+    int kind = 1;
+    if (lua_type(L, 3) == LUA_TSTRING) {
+        const char *k = lua_tostring(L, 3);
+        for (int i = 0; i < 5; i++) {
+            if (strcmp(k, moy_ui_button_kinds[i][0]) == 0) {
+                kind = i;
+                break;
+            }
+        }
+    }
+    moycore_ui_over(L, 4, &o);
+    size_t len = 0;
+    const char *items = lua_isnoneornil(L, 2) ? "" : moycore_ui_items(L, 2, &len);
+    moy_ui_run_dialog(moycore_ui_canvas(), moycore_ui_span(L, 1), (const uint8_t *)items, len,
+                      kind, &o, &v);
+    lua_pushinteger(L, (lua_Integer)v + 1);
+    return 1;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -365,7 +481,9 @@ static void moycore_ui_open(lua_State *L)
         {"cycle", moycore_ui_cycle}, {"seg", moycore_ui_seg}, {"swatches", moycore_ui_swatches},
         {"hints", moycore_ui_hints}, {"part", moycore_ui_part}, {"focus", moycore_ui_focus},
         {"keys_taken", moycore_ui_keys_taken}, {"at", moycore_ui_at}, {"icon", moycore_ui_icon},
-        {"progress", moycore_ui_progress}, {NULL, NULL},
+        {"progress", moycore_ui_progress}, {"table", moycore_ui_table},
+        {"scroll", moycore_ui_scroll}, {"field", moycore_ui_field}, {"dialog", moycore_ui_dialog},
+        {NULL, NULL},
     };
     luaL_newlib(L, verbs);
     lua_setglobal(L, "ui");

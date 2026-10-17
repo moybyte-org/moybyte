@@ -1,7 +1,8 @@
 // The public UI API's engine (docs/ui_api_2026-10.md): the verbs every app
 // and cart draws its interface with -- page, label, button, toggle, slider,
-// list, group, info, link, cycle, seg, swatches, hints, icon, progress, part,
-// focus, keys_taken, at -- and the focus and navigation they share.
+// list, group, info, link, cycle, seg, swatches, hints, icon, progress, table,
+// scroll, field, dialog, part, focus, keys_taken, at -- and the focus and
+// navigation they share.
 //
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
 // the Python face's bytearray per app, the run's one static): the focused id,
@@ -73,9 +74,19 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n);
 typedef struct {
     uint32_t id;
     moy_ui_box_t b;                 // on screen, as drawn
-    uint8_t flags;                  // STOP_* (moy_ui_api.c)
+    uint16_t flags;                 // STOP_* (moy_ui_api.c)
     uint8_t page;                   // the index of its page's stop, or 0xff
 } moy_ui_stop_t;
+
+// The page a scroll region or a dialog's body stands in, kept while it is open.
+typedef struct {
+    moy_ui_box_t page;
+    int16_t y, scroll;
+    int8_t keep;
+    uint8_t stop, kind;             // kind: 1 a scroll region, 2 a dialog
+    int16_t used;                   // a dialog: the body height it was laid out for
+} moy_ui_nest_t;
+#define MOY_UI_API_NEST 2
 
 typedef struct {
     uint32_t id;
@@ -86,7 +97,7 @@ typedef struct {
 typedef struct {
     uint32_t magic;
     int32_t in[MOY_UI_IN_LEN];
-    int32_t last_key, last_ptr;
+    int32_t last_key, last_ptr, last_typed;
     uint32_t focus;                 // the focused id, 0 none
     moy_ui_box_t focus_box;         // where it last drew
     char focus_name[MOY_UI_API_NAME];
@@ -120,6 +131,15 @@ typedef struct {
     // ui.icon's: the next row's icon, then the row's being drawn (an icon
     // set's slot and the glyph table's glyph, -1 none).
     int16_t icon_slot, icon_glyph, row_slot, row_glyph;
+    // ui.scroll's and ui.dialog's open pages, innermost last.
+    moy_ui_nest_t nest[MOY_UI_API_NEST];
+    uint8_t n_nest;
+    // The frame begun over a dialog's stops (MODAL: the others take no input);
+    // a layout from a stale measure owes the next frame (OWE).
+    uint8_t modal, owe;
+    int8_t dlg_pick;                // the dialog button activated this frame, -1 none
+    uint32_t modal_from;            // the focus a dialog took
+    int32_t typed;                  // the key a focused field takes this frame, 0 none
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -179,6 +199,33 @@ int moy_ui_api_icon(moy_ui_ctx_t *c, moy_ui_span_t name);
 // A row showing `v` of `hi` done as a bar and its percent at the right; no stop.
 void moy_ui_api_progress(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int32_t v,
                          int32_t hi, const moy_ui_over_t *o);
+// A table (§1): `cols` its headers and `cells` its rows' cells row by row
+// (both NUL-separated), `cur` the current row (from 0, -1 none), which
+// follows its focus. out[0] the new cur, out[1] 1 the frame a current row is
+// opened (Enter on it, or a tap on the row already current).
+void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
+                      const uint8_t *cols, size_t cols_n, const uint8_t *cells, size_t cells_n,
+                      int32_t cur, const moy_ui_over_t *o, int32_t out[2]);
+// A scroll region (§1): `id` begins one in ui.at's rect (else the page's
+// room below its rows), whose stacked rows scroll in it; an id of length 0
+// ends it.
+void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                       const moy_ui_over_t *o);
+// A text field (§1) editing the `len` bytes at `buf` (`cap` its room) while
+// focused: answers the new length, plus MOY_UI_FIELD_DONE the frame Enter
+// is pressed in it.
+#define MOY_UI_FIELD_DONE 0x10000
+int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
+                         uint8_t *buf, size_t cap, size_t len, const moy_ui_over_t *o);
+// A dialog (§1): `title` begins a modal card centred on the surface, its
+// `buttons` (NUL-separated, the last of `kind`, the others normal) at its
+// foot, its body the rows stacked until a title of length 0 ends it. Answers
+// the button activated this frame (from 0), -1 none; the end answers -1.
+int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                          const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o);
+// Whether the frame drawn last laid a dialog out from a stale measure, so
+// the next frame is owed though no input came.
+int moy_ui_api_owes(const moy_ui_ctx_t *c);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);

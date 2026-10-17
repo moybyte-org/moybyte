@@ -200,15 +200,16 @@ def test_files_lists_a_package_as_a_theme_whose_door_is_appearance(tmp_path):
     files = ws._apps_by_id["files"]
     assert ws.open_app(files)
     files.open()
-    assert "themes" not in [k for k, _l in files._shown_kinds()]
+    assert "themes" not in [p[0] for p in files.shown_places()]
     _put(ws)
     files.open()
-    assert ("themes", "THEMES") in files._shown_kinds()
-    files._enter_rows("themes")
-    assert files._rows == ("dusk.moy",)
+    assert ("themes", "Themes") in [p[:2] for p in files.shown_places()]
+    files.open_place("themes")
+    assert files.names_shown() == ["dusk"]
+    assert files.rows[0][4] == "dusk.moy"
     assert files.door("dusk.moy", "themes") == ("appearance", "dusk.moy")
-    files._enter_rows("projects")
-    assert "dusk.moy" not in files._rows
+    files.open_place("projects")
+    assert "dusk" not in files.names_shown()
     assert files.route("dusk.moy", "themes") == "appearance"
 
 
@@ -234,8 +235,8 @@ def test_an_installed_package_as_the_carts_repository_ships_it(tmp_path):
     files = ws._apps_by_id["files"]
     assert ws.open_app(files)
     files.open()
-    files._enter_rows("themes")
-    assert files._rows == ("dusk.moy",)
+    files.open_place("themes")
+    assert files.names_shown() == ["dusk"]
     from runtime import moy_seed
     before = {p.name: p.read_bytes() for p in dst.iterdir()}
     moy_seed.sweep_store(ws.carts_root)

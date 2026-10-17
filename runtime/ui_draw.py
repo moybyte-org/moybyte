@@ -1700,6 +1700,7 @@ class AppHost:
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
         self.hold = False               # the pointer is down since the press
         self.owed = False
+        self.key = 0                    # the key typed last frame (a press is its change)
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -1713,6 +1714,7 @@ class AppHost:
         self.tap = 0
         self.hold = False
         self.owed = False
+        self.key = 0
 
     def keys(self, i):
         """Take this frame's buttons and typed key from input state `i`."""
@@ -1725,8 +1727,11 @@ class AppHost:
         if not isinstance(k, int):
             k = ord(k[0]) if k else 0
         a[0] = a[1] = b
-        a[5] = k
-        return bool(b) or k == 9 or self.owed or self.tap != 0
+        typed = k != 0 and k != self.key
+        self.key = k
+        a[5] = k if typed else 0        # the engine sees each press once
+        return (bool(b) or typed or self.owed or self.tap != 0
+                or _C.api_owes(self.ctx))
 
     def point(self, x, y, click, down=None):
         """A pointer sample in the app's coordinates; a click starts a tap.

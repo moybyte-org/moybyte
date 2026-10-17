@@ -10,7 +10,9 @@ draws its interface with, and the rect algebra they lay out with.
 
 `group`, `info`, `link`, `cycle`, `seg`, `swatches` and `hints` are the
 Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components); `icon`
-puts an icon on the next row and `progress` shows how far a task is.
+puts an icon on the next row or button and `progress` shows how far a task
+is. `table` is a list in columns, `scroll` a region whose rows scroll in it,
+`field` a line of typed text and `dialog` a modal card (Files' verbs).
 
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
@@ -249,6 +251,63 @@ def progress(label, v, hi, o=None):
     no stop."""
     t = _T
     _C.api_progress(t[0], t[1], t[2], label, v, hi, _over(o))
+
+
+def _cells(items):
+    """Text fields, each ending in a NUL (an empty last one included)."""
+    return "".join([str(i) + "\0" for i in items]).encode("utf-8")
+
+
+def table(label, columns, rows, cur, o=None):
+    """A list in columns: `label` its caption (none where empty), `columns`
+    the headers -- an empty first one makes column 0 the picture column,
+    its cells icon names -- and `rows` each a sequence of cells. The current
+    row `cur` (from 0, -1 none) follows the focus; the columns between the
+    first text column and the last, then the last, drop where it would show
+    fewer than eleven characters. `(cur, opened)`, `opened` True the frame
+    the current row is opened (Enter on it, or a tap on it again)."""
+    t = _T
+    n = len(columns)
+    cells = []
+    for r in rows:
+        r = [str(c) for c in r][:n]
+        cells.extend(r)
+        cells.extend([""] * (n - len(r)))
+    return _C.api_table(t[0], t[1], t[2], label, _cells(columns), _cells(cells),
+                        -1 if cur is None else cur, _over(o))
+
+
+def scroll(id=None, o=None):
+    """`scroll(id)` begins a scroll region in `at`'s rect (else the page's
+    room below its rows): the rows stacked after it scroll in it, by the keys
+    that move focus and by a drag, until `scroll()` ends it."""
+    t = _T
+    _C.api_scroll(t[0], t[1], t[2], "" if id is None else id, _over(o))
+
+
+def field(label, text, max=32, o=None):
+    """A line of text the keyboard types into while it is focused, at most
+    `max` bytes: `(text, done)`, `done` True the frame Enter is pressed in
+    it."""
+    t = _T
+    raw = str(text).encode("utf-8")[:max]
+    b = bytearray(max)
+    b[:len(raw)] = raw
+    r = _C.api_field(t[0], t[1], t[2], label, b, len(raw), _over(o))
+    return str(bytes(b[:r & 0xffff]), "utf-8"), bool(r & 0x10000)
+
+
+def dialog(title=None, buttons=(), kind="primary", o=None):
+    """`dialog(title, buttons)` begins a modal card centred on the surface,
+    its `buttons` at its foot (the last of `kind`, the others normal) and its
+    body the rows stacked until `dialog()` ends it; while it is drawn nothing
+    under it takes input, and focus opens on its body's first stop, else its
+    first button. The button activated this frame (from 0), -1 none."""
+    t = _T
+    if title is None:
+        return _C.api_dialog(t[0], t[1], t[2], "", b"", 0, None)
+    k = _KINDS.index(kind) if kind in _KINDS else 1
+    return _C.api_dialog(t[0], t[1], t[2], title, _opts(buttons), k, _over(o))
 
 
 def part(id, w=0, h=0, o=None):

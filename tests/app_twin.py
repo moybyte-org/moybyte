@@ -46,7 +46,8 @@ _ROWS = ("damage.all", "damage.again",
          # counted by nothing here
          "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list",
          "ui.part", "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link",
-         "ui.cycle", "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress")
+         "ui.cycle", "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress",
+         "ui.table", "ui.scroll", "ui.field", "ui.dialog")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",

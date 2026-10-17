@@ -1392,6 +1392,7 @@ static mp_obj_t ui_button(size_t n_args, const mp_obj_t *a) {
     k.fs = s.fs;
     k.colors[0] = k.colors[1] = k.colors[2] = MOY_UI_FROM_STYLE;
     k.app = i16(a[9]);
+    k.icon = -1;
     check(moy_ui_button(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
                         mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[8])));
     return mp_const_none;
@@ -1417,6 +1418,7 @@ static mp_obj_t ui_chip(size_t n_args, const mp_obj_t *a) {
     k.fs = (int16_t)fs_or(a[8], &s);
     colors3(a[9], k.colors);
     k.app = -1;
+    k.icon = -1;
     check(moy_ui_chip(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
                       mp_obj_get_int(a[5]), &k, mp_obj_get_int(a[10])));
     return mp_const_none;
@@ -2183,6 +2185,73 @@ static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
 
+// api_table(ctx, cv, look, label, cols, cells, cur, o) -> (cur, opened); `cols`
+// and `cells` NUL-separated (bytes), the cells row by row
+static mp_obj_t ui_api_table(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t cb, eb;
+    mp_get_buffer_raise(a[4], &cb, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[5], &eb, MP_BUFFER_READ);
+    int32_t v[2];
+    moy_ui_api_table(c, &s, span_of(a[3]), (const uint8_t *)cb.buf, cb.len,
+                     (const uint8_t *)eb.buf, eb.len, num(a[6]), over_of(a[7], &o), v);
+    mp_obj_t t[2] = {mp_obj_new_int(v[0]), mp_obj_new_bool(v[1])};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_table_obj, 8, 8, ui_api_table);
+
+// api_scroll(ctx, cv, look, id, o): an id of length 0 ends the region
+static mp_obj_t ui_api_scroll(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    moy_ui_api_scroll(c, &s, span_of(a[3]), over_of(a[4], &o));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_scroll_obj, 5, 5, ui_api_scroll);
+
+// api_field(ctx, cv, look, label, buf, n, o) -> the new length, plus 0x10000
+// the frame Enter is pressed in it; `buf` a bytearray, its room the field's
+static mp_obj_t ui_api_field(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[4], &b, MP_BUFFER_RW);
+    return mp_obj_new_int(moy_ui_api_field(c, &s, span_of(a[3]), (uint8_t *)b.buf, b.len,
+                                           (size_t)num(a[5]), over_of(a[6], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_field_obj, 7, 7, ui_api_field);
+
+// api_dialog(ctx, cv, look, title, buttons, kind, o) -> the button activated
+// (from 0), -1 none; a title of length 0 ends the dialog
+static mp_obj_t ui_api_dialog(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    return mp_obj_new_int(moy_ui_api_dialog(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
+                                            num(a[5]), over_of(a[6], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_dialog_obj, 7, 7, ui_api_dialog);
+
+// api_owes(ctx) -> whether the frame drawn last owes the next
+static mp_obj_t ui_api_owes(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_owes(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_owes_obj, ui_api_owes);
+
 // api_focus(ctx, id=None) -> the focused id, or None
 static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
     moy_ui_ctx_t *c = ctx_of(ctx);
@@ -2324,6 +2393,11 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_progress), MP_ROM_PTR(&ui_api_progress_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table), MP_ROM_PTR(&ui_api_table_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_scroll), MP_ROM_PTR(&ui_api_scroll_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },

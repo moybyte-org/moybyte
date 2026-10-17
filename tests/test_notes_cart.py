@@ -218,7 +218,7 @@ def test_files_opens_a_note_in_notes_and_x_returns_to_files(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "letter", "dear you", ws.carts_root)
     app = _open_files(ws)
-    app._enter_kind("docs")
+    app.open_place("docs")
     app._act("OPEN", "letter")
     _frames(ws)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
@@ -232,7 +232,7 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_shelf(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "letter", "dear you", ws.carts_root)
     app = _open_files(ws)
-    app._enter_kind("docs")
+    app.open_place("docs")
     app._act("OPEN", "letter")
     _frames(ws)
     assert ws._text_request is None
