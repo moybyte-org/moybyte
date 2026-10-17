@@ -1,6 +1,6 @@
 {
   "big_800x480_fs3_dark": {
-    "app_appearance": [82, 22],
+    "app_appearance": [28, 12],
     "app_artwork": [357, 12],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -21,7 +21,7 @@
     "web_console_address": [192, 6]
   },
   "guition_480x320_fs1_dark": {
-    "app_appearance": [85, 33],
+    "app_appearance": [65, 30],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -66,7 +66,7 @@
     "web_console_address": [192, 6]
   },
   "guition_tapfloor_dark": {
-    "app_appearance": [84, 29],
+    "app_appearance": [54, 29],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -87,7 +87,7 @@
     "web_console_address": [192, 6]
   },
   "p4_1024x600_cs2_fs1_console": {
-    "app_appearance": [85, 33],
+    "app_appearance": [53, 38],
     "app_artwork": [357, 12],
     "app_calc": [177, 20],
     "app_files": [85, 46],
@@ -320,8 +320,8 @@
   },
   "p4_1024x600_cs2_fs1_windowed": {
     "app_appearance": [136, 7],
-    "app_appearance_accent": [52, 5],
-    "app_appearance_custom": [136, 7],
+    "app_appearance_name": [136, 7],
+    "app_appearance_walls": [4, 1],
     "app_artwork": [92, 5],
     "app_calc": [268, 13],
     "app_files": [224, 11],
@@ -417,7 +417,7 @@
     "web_console_address": [176, 6]
   },
   "tdeck_320x240_fs1_bottombar": {
-    "app_appearance": [84, 29],
+    "app_appearance": [47, 22],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -438,9 +438,9 @@
     "web_console_address": [192, 6]
   },
   "tdeck_320x240_fs1_dark": {
-    "app_appearance": [84, 29],
-    "app_appearance_accent": [38, 4],
-    "app_appearance_custom": [85, 33],
+    "app_appearance": [47, 22],
+    "app_appearance_name": [68, 28],
+    "app_appearance_walls": [82, 10],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -473,9 +473,9 @@
     "launcher_mine": [0, 0]
   },
   "tdeck_320x240_fs1_light": {
-    "app_appearance": [84, 29],
-    "app_appearance_accent": [38, 4],
-    "app_appearance_custom": [85, 33],
+    "app_appearance": [47, 22],
+    "app_appearance_name": [68, 28],
+    "app_appearance_walls": [82, 10],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -496,7 +496,7 @@
     "web_console_address": [192, 6]
   },
   "tdeck_320x240_fs1_moy_day": {
-    "app_appearance": [34, 30],
+    "app_appearance": [41, 19],
     "app_artwork": [314, 13],
     "app_calc": [24, 23],
     "app_files": [3, 16],
@@ -517,7 +517,7 @@
     "web_console_address": [176, 6]
   },
   "tdeck_320x240_fs1_moy_night": {
-    "app_appearance": [34, 30],
+    "app_appearance": [41, 19],
     "app_artwork": [314, 13],
     "app_calc": [24, 23],
     "app_files": [3, 16],
