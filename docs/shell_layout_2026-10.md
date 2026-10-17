@@ -718,8 +718,8 @@ scroll's own condition (#113). The frame in motion:
   fit check releases with the retained frame), and a moving frame restores
   it only around the cards, every card painting its whole square opaque
   but the rows its rounded corners span, which are restored too: each
-  card one scaled blit of its RGB565 cover bake at its scale (on the
-  its 64-pixel crop, `DeviceCanvas.cover`), the focus mark on the
+  card one scaled blit of its whole RGB565 cover bake at its scale
+  (`DeviceCanvas.cover`), the focus mark on the
   selected one (on the handheld its title and metadata across the band, on
   the desk the shelf's caption). Covers are RGB565
   bakes and `sspr` scales index sheets, so this is **a nearest-neighbour

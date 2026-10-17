@@ -257,8 +257,8 @@ class Launcher:
                                       # draw the real themeable pencil/plus icon big
         self.cover_for = None         # optional (cart, div) -> the cart's decoded
                                       # cover (CoverCache.cover_for, SPEC.md 3.6)
-        self.tinted_for = None        # optional (cart, sub, colour, alpha) -> the
-                                      # cover's dimmed sub-rect (CoverCache.tinted)
+        self.tinted_for = None        # optional (cart, colour, alpha) -> the
+                                      # cover dimmed (CoverCache.tinted)
         self.dim = None               # (colour, alpha 0..255): the theme dims the
                                       # carousel's neighbours (`dim_neighbours`)
         self._card_clip = None        # the clip cards draw in while a draw runs
@@ -924,21 +924,26 @@ _TAB_NOUN = {"games": ("GAME", "GAMES"), "mine": ("CART", "CARTS"),
 # The handheld hero's scale the home is laid out for: a board's verdict
 # (FullscreenStackWM.HOME_SCALE) draws it at most this large.
 HOME_SCALE_HH = 2.0
-# The handheld home (docs/look_2026-10.md step 17): each cover is a 64-pixel
-# crop of its 128 (GAPS 21), a neighbour at 1x and the hero at 2x, a gap
-# between cards, the corners of a neighbour 7/10 of the hero's.
-_CROP = 64
+# The handheld home (docs/look_2026-10.md step 17): each card shows its
+# whole cover at a clean scale (`_clean_side`), a neighbour at half the
+# cover's side and the hero at twice that, a gap between cards, the corners
+# of a neighbour 7/10 of the hero's.
+_HH_CARD = _COVER_SIDE // 2
 _HH_GAP = 14
-# The seed carts' crops (the 2026-10 look's art direction, mockups.py's
-# CROPS), by cart id: the top left of the crop in the cover. Any other cart's
-# is the centre.
-_CROPS = {"moybyte.sky_run": (8, 44), "moybyte.star_catcher": (43, 52),
-          "moybyte.hop_quest": (52, 36), "moybyte.pixel_pet": (24, 50),
-          "moybyte.harpoon_pop": (18, 64), "moybyte.brick_siege": (2, 20),
-          "moybyte.bullet_storm": (32, 8), "moybyte.letter_blitz": (2, 18),
-          "moybyte.tiny_runner": (0, 60)}
-_CROPS = {k: (x, y, _CROP, _CROP) for k, (x, y) in _CROPS.items()}
-_CENTRE_CROP = ((_COVER_SIDE - _CROP) // 2, (_COVER_SIDE - _CROP) // 2, _CROP, _CROP)
+
+
+def _clean_side(limit):
+    """The largest card side at most `limit` that shows a whole cover at a
+    clean scale (owner call 2026-10-17): a whole multiple of the cover's
+    side, else its half, quarter or eighth -- never a ratio like 1.5x."""
+    if limit >= _COVER_SIDE:
+        return limit // _COVER_SIDE * _COVER_SIDE
+    side = _COVER_SIDE // 2
+    while side > _COVER_SIDE // 8 and side > limit:
+        side //= 2
+    return side
+
+
 _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpaper"}
 # The home's hint strip (steps 17 and 18): each verb's key and words. The
 # keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k).
@@ -1054,7 +1059,7 @@ class Carousel(Launcher):
         """(tabs, band, card, pitch, ring, gap, plate_h, centre_y, foot,
         desk): the handheld's (`_geom_hh`) or the desk's (`_geom_desk`) on
         the class in force. A card is square (a cover is, SPEC.md 3.6) and
-        shows a crop of its cover at a whole-number scale."""
+        shows its whole cover at a clean scale (`_clean_side`)."""
         lay = self.layout
         reach = _ui_draw.mark_reach()          # the centre card's focus mark
         if self._g_lay is lay and self._g_reach == reach:
@@ -1069,8 +1074,9 @@ class Carousel(Launcher):
         """The handheld home's geometry (docs/look_2026-10.md step 17), the
         same tuple with its foot: no tab row (the tabs are the bar's), the
         hero twice a neighbour's side, its title and its metadata under it
-        and the hint strip along the content's foot. A neighbour is 64 at
-        the font scale where that fits, less in eighths where it does not."""
+        and the hint strip along the content's foot. A neighbour is half the
+        cover's side at the font scale where that fits, and the next clean
+        side down (`_clean_side`) where it does not."""
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         hint_h = 20 * fs
@@ -1082,9 +1088,9 @@ class Carousel(Launcher):
         foot = 12 * fs + title_h + 3 * fs + meta_h + 4 * fs
         ring = max(2 * fs + 2, reach)
         space = hints[1] - cy
-        card = _CROP * fs
-        while card > 16 and ring + 2 * card + foot > space:
-            card -= 8
+        card = _clean_side(_HH_CARD * fs)
+        while card > _COVER_SIDE // 8 and ring + 2 * card + foot > space:
+            card = _clean_side(card - 1)
         gap = _HH_GAP * fs
         top = cy + max(ring, (space - 2 * card - foot) // 2)
         title_y = top + 2 * card + 12 * fs
@@ -1100,8 +1106,9 @@ class Carousel(Launcher):
         bleeding off the right edge, its caption over it. The desk lays out
         in glass pixels (the target's 1x), its type at whole scales of the
         face no smaller than the font scale. The hero is the largest whole
-        multiple of the crop a quarter of the width holds with the shelf
-        under it, a shelf card the largest at most half the hero; the pane
+        multiple of the cover's side a quarter of the width holds with the
+        shelf under it, else half the cover's side, and a shelf card is half
+        the hero, so every card shows its whole cover at a clean scale; the pane
         is as tall as the hero, or as its type needs where that is more;
         what height is left goes half above the shelf's caption and half
         under the shelf. The tuple's band is the shelf's: its caption, its
@@ -1120,12 +1127,12 @@ class Carousel(Launcher):
         need = tl * ts + lh * (ms + ks + vs) + bh + 60 // u
         cap_h = lh * ms + 8 // u
         room = hints[1] - cy - top - cap_h - 72 // u
-        hero = max(1, cw // 4 // _CROP) * _CROP
-        while True:
-            shelf = max(1, hero // 2 // _CROP) * _CROP
-            if hero <= _CROP or max(hero, need) + shelf <= room:
-                break
-            hero -= _CROP
+        hero = cw // 4 // _COVER_SIDE * _COVER_SIDE
+        while hero > _COVER_SIDE and max(hero, need) + hero // 2 > room:
+            hero -= _COVER_SIDE
+        if hero < _COVER_SIDE or max(hero, need) + hero // 2 > room:
+            hero = _COVER_SIDE // 2
+        shelf = hero // 2
         block = max(hero, need)
         spare = max(0, hints[1] - cy - top - block - cap_h - shelf)
         hx, hy = cx + pad, cy + top
@@ -1710,9 +1717,6 @@ class Carousel(Launcher):
             cv.print(t, x, my, dim, 1)
             x += ws_[k] + sep
 
-    def _crop_of(self, it):
-        return _CROPS.get(it.get("id"), _CENTRE_CROP)
-
     def _draw_title_tile(self, cv, it, rect, r):
         """A card for a cart with no cover (GAPS 21): the theme's tile field,
         its corners the card's, the cart's title wrapped across it."""
@@ -1721,7 +1725,7 @@ class Carousel(Launcher):
         x, y, w, h = rect
         cv.rrect(x, y, w, h, r, th.get("surface_alt", 1),
                  stepped=bool(_ui_draw.depth()[5]))
-        sc = 2 * fs if w >= 2 * _CROP * fs else fs
+        sc = 2 * fs if w >= _COVER_SIDE * fs else fs
         words = (it.get("title") or "").split()
         lines = []
         cur = ""
@@ -1745,31 +1749,30 @@ class Carousel(Launcher):
             yy += lh
 
     def _draw_hh_cover(self, cv, it, rect, centre):
-        """A handheld card's picture: the cover's 64-pixel crop scaled to the
-        card (the neighbour's dimmed once and kept where the theme dims
-        them, step 15), else the title tile."""
+        """A card's picture: the whole cover scaled to the card (the
+        neighbour's dimmed once and kept where the theme dims them, step 15),
+        else the title tile."""
         r = self._corner_r(rect[2])
         stepped = bool(_ui_draw.depth()[5])
-        sub = self._crop_of(it)
         cover = None
         if self.cover_for is not None:
             dim = self.dim if self.handheld() else None
             if dim is not None and not centre and self.tinted_for is not None:
-                cover = self.tinted_for(it, sub, dim[0], dim[1])
+                cover = self.tinted_for(it, dim[0], dim[1])
                 if cover is not None:
                     cv.cover(cover.pix, cover.w, 0, 0, cover.w, cover.h, rect[0],
                              rect[1], rect[2], rect[3], r, stepped)
                     return
             cover = self.cover_for(it, _COVER_BASE)
         if cover is not None:
-            cv.cover(cover.pix, cover.w, sub[0], sub[1], sub[2], sub[3], rect[0], rect[1],
+            cv.cover(cover.pix, cover.w, 0, 0, cover.w, cover.h, rect[0], rect[1],
                      rect[2], rect[3], r, stepped)
         else:
             self._draw_title_tile(cv, it, rect, r)
 
     def _draw_picture(self, cv, it, rect, centre, sheet_for=None):
         """A card's picture over its whole rect: the "+ New" card's icon on
-        the focus colour, else its cover's crop (`_draw_hh_cover`)."""
+        the focus colour, else its cover (`_draw_hh_cover`)."""
         th = self.theme or {}
         NAMES = self._NAMES
         x, y, w, h = rect

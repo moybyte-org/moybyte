@@ -3,7 +3,7 @@
 #   _CoverJob                  a resumable decode of one cover
 #   CoverCache                 the cover and icon caches, budgets and warmers
 #   CoverCache.cover_for       a cart's cover at a reduction
-#   CoverCache.tinted          a cover's dimmed sub-rect, made from its BASE
+#   CoverCache.tinted          a cover dimmed, made from its BASE
 #   CoverCache.sheet_icon      the icon out of a cart's sprite sheet
 #   CoverCache.invalidate_all  drop everything a store rescan could change
 #   CoverCache.diet_release    drop the cover pipeline before a cart runs
@@ -25,7 +25,7 @@ consumer:
   * ICON, 16 x 16, a reduction in palette indices: the desktop icon of a cart
     that names no SPEC.md 3.4 icon (`icon_sheet_for`).
 
-One product is made from the BASE rather than decoded: a sub-rect of it
+One product is made from the BASE rather than decoded: the whole of it
 dimmed toward a colour (`tinted`), the home's neighbour card under a theme
 that dims them, kept in the same LRU so it leaves with the decodes.
 
@@ -322,17 +322,17 @@ class CoverCache:
             self._jobs.pop(key, None)
             return self._finish(key, None)
 
-    def tinted(self, cart, sub, c, alpha):
-        """The cart's BASE cover's sub-rect `sub` (x, y, w, h) with colour
-        `c` over it at `alpha` (0..255, `DeviceCanvas.tint565`): a dimmed
-        neighbour's card (docs/look_2026-10.md step 15), made once from the
-        BASE and kept in the same LRU as the decodes, so every drop path
-        (the diet, a re-scan, eviction) frees it. None until the BASE has
-        landed, or where the cart has no cover."""
+    def tinted(self, cart, c, alpha):
+        """The cart's BASE cover with colour `c` over it at `alpha` (0..255,
+        `DeviceCanvas.tint565`): a dimmed neighbour's card
+        (docs/look_2026-10.md step 15), made once from the BASE and kept in
+        the same LRU as the decodes, so every drop path (the diet, a re-scan,
+        eviction) frees it. None until the BASE has landed, or where the cart
+        has no cover."""
         path = cart.get("path")
         if path is None:
             return None
-        key = (path, sub, c, alpha)
+        key = (path, c, alpha)
         cache = self._cache
         if key in cache:
             order = self._order
@@ -346,9 +346,9 @@ class CoverCache:
         cv = getattr(self.ws, "sys_canvas", None)
         if base is None or cv is None:
             return None
-        x, y, w, h = sub
+        w, h = base.w, base.h
         out = bytearray(2 * w * h)
-        if not cv.tint565(out, base.pix, base.w, x, y, w, h, c, alpha):
+        if not cv.tint565(out, base.pix, w, 0, 0, w, h, c, alpha):
             return self._finish(key, None)
         return self._finish(key, _CoverImage(w, h, _moybuf.take(out)))
 

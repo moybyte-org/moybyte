@@ -239,9 +239,10 @@ Play, Change, Copy) over a shelf that bleeds off the right edge, the bar's
 records (0.5 day). A manifest description and genre, and a best score, are
 moy-spec's: owner call.
 
-**21. Covers:** a 64 px crop per cover for the hero, a 48 px shelf crop
-(`CROPS`), anti-aliased clipped corners, a title tile for a cart without a
-cover. **Cost:** 1.5 days.
+**21. Covers:** the whole cover on every card at a clean scale (owner call
+2026-10-17, after a side-by-side render; the mockups' per-cover crops,
+`CROPS`, are declined), anti-aliased clipped corners, a title tile for a
+cart without a cover. **Cost:** 1.5 days.
 
 **22. App relayouts:**
 

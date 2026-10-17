@@ -523,40 +523,40 @@ def test_one_base_per_cover_and_two_reductions_beside_it(tmp_path):
 
 
 def test_a_tinted_cover_is_made_from_the_base_and_leaves_with_it(tmp_path, monkeypatch):
-    """`tinted` (docs/look_2026-10.md step 15): a sub-rect of the BASE with a
-    colour over it, made by the canvas's tint and kept in the decodes' LRU --
-    asked twice it is the same picture, and the diet that drops the decodes
-    frees it too. Before the BASE lands there is none."""
+    """`tinted` (docs/look_2026-10.md step 15): the whole BASE with a colour
+    over it, made by the canvas's tint and kept in the decodes' LRU -- asked
+    twice it is the same picture, and the diet that drops the decodes frees
+    it too. Before the BASE lands there is none."""
     cart = _mk_cart(tmp_path, value=9)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    sub, c, alpha = (8, 4, 64, 64), 1, 77
+    c, alpha = 1, 77
     base = _land(ws, cart)
-    got = ws.covers.tinted(cart, sub, c, alpha)
-    assert (got.w, got.h) == (64, 64)
-    want = bytearray(2 * 64 * 64)
-    ws.sys_canvas.tint565(want, base.pix, base.w, 8, 4, 64, 64, c, alpha)
+    got = ws.covers.tinted(cart, c, alpha)
+    assert (got.w, got.h) == (128, 128)
+    want = bytearray(2 * 128 * 128)
+    ws.sys_canvas.tint565(want, base.pix, base.w, 0, 0, 128, 128, c, alpha)
     assert bytes(got.pix) == bytes(want)
-    assert ws.covers.tinted(cart, sub, c, alpha) is got
-    assert (cart["path"], sub, c, alpha) in ws.covers._cache
+    assert ws.covers.tinted(cart, c, alpha) is got
+    assert (cart["path"], c, alpha) in ws.covers._cache
     for _ in range(cover_cache._COVER_DIET_KEEP + 2):
         other = _mk_cart(tmp_path, name="Other%d" % _, value=3)
         _land(ws, other)
     ws.covers.diet_release()
-    assert (cart["path"], sub, c, alpha) not in ws.covers._cache
+    assert (cart["path"], c, alpha) not in ws.covers._cache
     assert got.pix is None                         # freed, not merely dropped
 
 
 def test_no_tinted_cover_before_its_base_lands(tmp_path):
     cart = _mk_cart(tmp_path, value=9)
     ws = build_ws(tmp_path)
-    assert ws.covers.tinted({"path": None}, (0, 0, 8, 8), 1, 77) is None
+    assert ws.covers.tinted({"path": None}, 1, 77) is None
     got = None
     for _ in range(300):
         ws.covers.begin_frame()
-        got = ws.covers.tinted(cart, (0, 0, 8, 8), 1, 77)
+        got = ws.covers.tinted(cart, 1, 77)
         if got is not None:
             break
-    assert got is not None and (got.w, got.h) == (8, 8)
+    assert got is not None and (got.w, got.h) == (128, 128)
 
 
 def test_a_cart_naming_no_icon_draws_its_cover_as_its_desk_icon(tmp_path):

@@ -428,8 +428,8 @@ def test_cursor_delta_is_faster_and_accelerates():
 # -- the handheld home (docs/look_2026-10.md step 17) ---------------------------
 
 def test_the_handheld_hero_keeps_its_gap_to_the_neighbours(tmp_path):
-    """A 2x hero between 1x neighbours, every gap the same, the card the
-    64-pixel crop's side; the title and the hint strip under the band."""
+    """A hero twice its neighbours, every gap the same, the card half the
+    cover's side; the title and the hint strip under the band."""
     from runtime import launcher_layer as ll
 
     ws = _ws_with_carts(tmp_path, 10)
@@ -437,7 +437,7 @@ def test_the_handheld_hero_keeps_its_gap_to_the_neighbours(tmp_path):
     assert lz.handheld()
     lz.sel = 3
     card = lz.card_side()
-    assert card == ll._CROP * ws.layout.fs
+    assert card == ll._HH_CARD * ws.layout.fs
     left, hero, right, far = (lz.tile_rect(i) for i in (2, 3, 4, 5))
     gap = ll._HH_GAP * ws.layout.fs
     assert hero[2] == 2 * card and left[2] == right[2] == card
@@ -516,16 +516,35 @@ def test_the_hint_keys_switch_tabs_and_change(tmp_path):
     assert ws.screen == "menu"                       # CHANGE: the Editor
 
 
-def test_a_handheld_card_draws_its_covers_crop(tmp_path):
-    """A cover's 64-pixel crop is what a handheld card shows: a seed's from
-    the look's art direction, any other cart's from the centre."""
+def test_a_card_shows_its_whole_cover_at_a_clean_scale(tmp_path, monkeypatch):
+    """Every home card draws the WHOLE 128x128 cover (owner call 2026-10-17),
+    and a card side is only ever a whole multiple of the cover's or its half,
+    quarter or eighth -- never a ratio like 1.5x."""
     from runtime import launcher_layer as ll
 
+    assert [ll._clean_side(n) for n in (400, 320, 256, 200, 128, 112, 64, 50, 20)] \
+        == [384, 256, 256, 128, 128, 64, 64, 32, 16]
     ws = _ws_with_carts(tmp_path, 10)
     lz = ws.launcher
-    assert lz._crop_of({"id": "moybyte.sky_run"}) == (8, 44, 64, 64)
-    assert lz._crop_of({"id": "someone.game"}) == (32, 32, 64, 64)
-    assert all(x + w <= 128 and y + h <= 128 for x, y, w, h in ll._CROPS.values())
+    drawn = []
+    real = ws.sys_canvas.cover
+
+    def spy(buf, sw, sx, sy, cw, ch, x, y, w, h, r=0, stepped=False):
+        drawn.append((sx, sy, cw, ch, w, h))
+        return real(buf, sw, sx, sy, cw, ch, x, y, w, h, r, stepped)
+
+    monkeypatch.setattr(ws.sys_canvas, "cover", spy)
+
+    class _Cover:
+        w = h = 128
+        pix = bytearray(2 * 128 * 128)
+
+    lz.cover_for = lambda it, div: _Cover
+    lz.sel = 3
+    for i, centre in ((3, True), (4, False)):
+        lz._draw_hh_cover(ws.sys_canvas, lz.items[i], lz.tile_rect(i), centre)
+    assert [d[:4] for d in drawn] == [(0, 0, 128, 128)] * 2
+    assert [d[4] for d in drawn] == [128, 64]
 
 
 # -- the desk home (docs/look_2026-10.md step 18) ---------------------------------
@@ -544,7 +563,7 @@ def _desk_home(tmp_path):
 
 
 def test_the_desk_home_lays_out_the_hero_its_details_and_the_shelf(tmp_path):
-    """The hero at a whole multiple of the 64-pixel crop with the details
+    """The hero at a whole multiple of the cover's side with the details
     pane beside it, the shelf under them at half its scale with the
     selected card two in, bleeding off the right edge, the hint strip
     along the foot."""
@@ -555,7 +574,7 @@ def test_the_desk_home_lays_out_the_hero_its_details_and_the_shelf(tmp_path):
     assert lz.desk() and not lz.handheld()
     hx, hy, hs, _ = lz.hero_rect()
     card = lz.card_side()
-    assert hs % ll._CROP == 0 and card == hs // 2
+    assert hs % ll._COVER_SIDE == 0 and card == hs // 2
     px, py, pw, ph = lz.plate_rect()
     assert px > hx + hs and py == hy
     assert len(lz.items) > 7
