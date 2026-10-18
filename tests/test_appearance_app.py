@@ -146,9 +146,9 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
     _focus(ws, app, "Accent")
     _press(ws, app, "right")
     assert look.theme_name == "custom"
-    assert look.custom_look()["accent"] == _accent(page.PRESETS[0])
+    assert look.custom_look()["accent"] == _accent(page.OFFERED[0])
     _press(ws, app, "right")
-    assert look.custom_look()["accent"] == _accent(page.PRESETS[1])
+    assert look.custom_look()["accent"] == _accent(page.OFFERED[1])
     _press(ws, app, "left", "left")
     assert look.custom_look().get("accent") is None        # the source's own
     # TINT, WINDOW STYLE, FONT.
@@ -348,7 +348,7 @@ def test_every_row_answers_a_tap(tmp_path, kw):
     _tap(ws, app, "Mode", dx=app._ui.box("Mode")[2] - 60)   # the Light option
     assert look.theme_variant == "light"
     _tap(ws, app, "Accent", dx=app._ui.box("Accent")[2] - 12)  # the last dot
-    assert look.custom_look()["accent"] == _accent(page.ACCENTS[-1])
+    assert look.custom_look()["accent"] == _accent(page.OFFERED[-1])
     _tap(ws, app, "Tint")
     assert look.custom_look()["tint"] == ui_draw.theme_tints()[0][0]
     _tap(ws, app, "Font")
@@ -511,7 +511,29 @@ def test_the_pages_copies_of_the_looks_names_agree():
     assert page.PICTURE == Appearance.PICTURE and page.THEIRS == Appearance.THEIRS
     assert len(page.FRAME_NAMES) == len(page.FRAMES)
     assert len(page.FONT_NAMES) == len(page.FONTS)
-    assert set(page.ACCENTS) <= {a[0] for a in ui_draw.theme_accents()}
+    names = [a[0] for a in ui_draw.theme_accents() + ui_draw.theme_presets()]
+    assert set(page.OFFERED) <= set(names) and len(set(page.OFFERED)) == 7
+
+
+def test_the_accent_row_is_eight_distinct_swatches(tmp_path):
+    """The theme's own and seven (owner, 2026-10-18), none the twin of
+    another in either mode: no two swatches within 48 in RGB (the closest
+    pair, Night's own lavender and slate's grey, is about 53 apart; the
+    `indigo` preset dropped was 26 from Day's own)."""
+    for variant in ("light", "dark"):
+        (tmp_path / variant).mkdir()
+        ws = _ws(tmp_path / variant)
+        ws.look.set_theme("moy", persist=False, variant=variant)
+        app = _open(ws)
+        side = 3 if variant == "light" else 2
+        own = page._rgb(app._own_accent(app.choices()))
+        cols = [own] + [page._rgb(a[side]) for a in app._accents]
+        assert len(cols) == 8
+        rgb = [((c >> 16) & 255, (c >> 8) & 255, c & 255) for c in cols]
+        for i in range(8):
+            for j in range(i):
+                d = sum((p - q) ** 2 for p, q in zip(rgb[i], rgb[j])) ** 0.5
+                assert d > 48, (variant, i, j, cols[i], cols[j])
 
 
 def test_a_settled_page_shows_the_wallpaper_picture_of_a_store_theme(tmp_path):

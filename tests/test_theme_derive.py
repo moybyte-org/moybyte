@@ -167,25 +167,20 @@ def test_every_combination_is_the_reference_and_reads(name):
                 assert unreadable & ~(1 << PAIRS) == 0, (name, v, accent, tint)
 
 
-# Appearance's accents on Moy (its own, the four presets and seven of the
-# sixteen) whose focus
+# Appearance's accents on Moy (its own and the seven it offers) whose focus
 # colour, the `accent` role, misses 3:1 on Moy's current plate in that mode
-# (Day light, Night dark) -- the readability report's plate bit, measured
-# 2026-10-18. Each is the owner's call; none is changed here. A fix takes
-# its entry off; a new failure is a regression.
-PLATE_UNDER = {("orange", "Day"), ("pink", "Day"), ("blue", "Day"), ("mint", "Day"),
-               ("green", "Day"), ("violet", "Night")}
+# (Day light, Night dark) -- the readability report's plate bit. The owner's
+# call (2026-10-18) is that all eight read in both, so none does.
+PLATE_UNDER = set()
 
 
 def test_moys_appearance_accents_read_in_day_and_night():
     """Every accent Appearance offers on Moy, in Day and Night: every pair
     of theme.pairs reaches theme.contrast, and the focus colour on the
     current plate does, but for the pinned PLATE_UNDER."""
-    from runtime.appearance_app import ACCENTS, PRESETS
-    OFFERED = PRESETS + ACCENTS
+    from runtime.appearance_app import OFFERED
     by_name = {n: a for n, a, _d in TH["accents"] + TH["presets"]}
-    assert len(OFFERED) + 1 == 12, \
-        "Appearance's swatches are the theme's own, the four presets and seven"
+    assert len(OFFERED) + 1 == 8, "Appearance's swatches are the theme's own and seven"
     under = set()
     for name in (None,) + tuple(OFFERED):
         b = _custom("moy", None if name is None else by_name[name])

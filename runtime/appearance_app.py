@@ -11,8 +11,8 @@ UI API's verbs (docs/ui_api_2026-10.md) and nothing under them.
 
 The themes are a grid of cards (`ui.grid`, `ui.card`), each picture the
 theme's own ground, bar, surface and accent, the theme in use wearing the
-current mark; under them the rows: MODE (a seg), ACCENT (swatches: the
-theme's own and seven of the sixteen), TINT, WALLPAPER (a link to the
+current mark; under them the rows: MODE (a seg), ACCENT (eight swatches:
+the theme's own and `OFFERED`), TINT, WALLPAPER (a link to the
 wallpapers' page), WINDOW STYLE (where windows are), FONT, CODE FONT
 (where the image draws more than one), CHROME SIZE (where the panel takes
 more than one), the theme's file, and NAME on `custom`. The engine owns focus, the arrows, Enter and taps.
@@ -69,11 +69,12 @@ FONT_NAMES = ("Tiny5", "PetMe128")
 # The CODE FONT presets (`Appearance.CODE_FONTS`) by name.
 CODE_FONT_NAMES = {"petme128": "PetMe128", "jbmono": "JetBrains Mono"}
 OWN = "Theme's"
-# ACCENT's swatches after the theme's own: the four presets, each in the
-# mode's value (style.json's `presets`, the seeds docs/look_2026-10.md step
-# 27 turned into accents), then seven of the sixteen accents, by name.
-PRESETS = ("indigo", "berry", "forest", "slate")
-ACCENTS = ("orange", "red", "pink", "blue", "mint", "green", "violet")
+# ACCENT's seven swatches after the theme's own, by name, in hue order: a
+# preset (style.json's `presets`, an accent in each mode's value) or one of
+# the sixteen accents. Each reads in Moy's Day and Night, its focus colour on
+# the current plate included (tests/test_theme_derive.py); `indigo`, the
+# twin of Moy's own, and the rest stay in the data, not offered.
+OFFERED = ("coral", "red", "berry", "magenta", "azure", "forest", "slate")
 # The wallpapers' page's tabs.
 TABS = ("Pictures", "Carts")
 # NAME's refusals (`ctx.theme.name_check`), in words.
@@ -202,11 +203,12 @@ class AppearanceAppLayer:
         self._gen = None
         self._stale = 0
         self._dt = 0
-        # (name, the change's value, its swatch in dark, in light)
-        self._accents = tuple((p[0], p[1], p[1], p[2]) for n in PRESETS
-                              for p in theme_presets() if p[0] == n) \
-            + tuple((a[0], a[1], a[1], a[1]) for n in ACCENTS
-                    for a in theme_accents() if a[0] == n)
+        # (name, the change's value, its swatch in dark, in light): a
+        # preset is picked by its dark value and shows each mode's.
+        by = dict((p[0], (p[0], p[1], p[1], p[2])) for p in theme_presets())
+        for a in theme_accents():
+            by.setdefault(a[0], (a[0], a[1], a[1], a[1]))
+        self._accents = tuple(by[n] for n in OFFERED)
         self._tints = tuple(theme_tints())
 
     @staticmethod
@@ -514,8 +516,7 @@ class AppearanceAppLayer:
         if got != cur:
             self._theme.set_variant("light" if got == 0 else "dark")
             self._acted()
-        # ACCENT: the theme's own, the presets in this mode, then seven of
-        # the sixteen
+        # ACCENT: the theme's own, then the offered seven in this mode
         own = th["accent"] if ch["accent"] is None else None
         colours = [_rgb(own if own is not None else self._own_accent(ch))]
         side = 3 if ch["variant"] == "light" else 2
