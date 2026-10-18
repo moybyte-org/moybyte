@@ -213,7 +213,8 @@ def test_manifest_valid(tmp_path):
     assert man["format"] == "moy-1"
     assert man["main"] == "main.lua"
     assert man["fps"] == 30                      # PICO-8's own rate
-    assert man["ported_from"] == "pico-8"
+    assert man["tags"] == ["pico8"]               # SPEC.md 3.7: the record of a conversion
+    assert "ported_from" not in man
     # A p8 cart is 128x128 (SPEC.md 1/3.1 carries that size to inherit the
     # PICO-8 back catalogue at native res), NOT the 320x240 default -- and the
     # size has to be in moy_carts.CANVAS_SIZES or Player.start refuses the cart.

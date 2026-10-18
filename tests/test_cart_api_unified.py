@@ -152,7 +152,7 @@ def test_a_cart_may_be_several_scripts_and_each_one_is_its_own_chunk(tmp_path):
     (cart / "manifest.json").write_text(json.dumps(
         {"format": "moy-1", "title": "Port", "main": "main.lua",
          "sources": ["p8.lua", "main.lua", "perf.lua"],
-         "runtime": "lua", "ported_from": "pico-8"}), encoding="utf-8")
+         "runtime": "lua", "tags": ["pico8"]}), encoding="utf-8")
     (cart / "main.lua").write_text("function _update() end\n", encoding="utf-8")
     (cart / "p8.lua").write_text("-- the generated half\n", encoding="utf-8")
     (cart / "perf.lua").write_text("-- the wrapper\n", encoding="utf-8")
