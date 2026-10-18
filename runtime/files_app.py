@@ -130,6 +130,13 @@ def shown_name(folder):
     return name[dot + 1:] if dot >= 0 else name
 
 
+# The engine's table head and group caption heights (style.json's
+# `value_row` `head` and `group` `caption`, handheld then desk; held to it
+# by tests/test_files_app.py), which sit over a table's rows.
+HEAD = (18, 34)
+CAPTION = (19, 26)
+
+
 class FilesLayout:
     """Files' rects over the content rect: on the desk the places beside the
     list, else one of them at a time; the verbs' band under the list."""
@@ -159,6 +166,16 @@ class FilesLayout:
         pad = 8 if self.desk else 4 * fs
         self.foot, self.list = ui.cut_bottom(self.pane, self.row_h + 2 * pad)
         self.pad = pad
+        # On the desk the list holds whole rows: under its caption (a single
+        # pane names the place) and its columns' head, the rows' view is a
+        # multiple of the row, and what is left over lies between it and the
+        # verbs, so no row is cut by the strip's edge at any window size or
+        # in any theme. The handheld keeps every pixel for rows, its last
+        # one cut as a phone's list shows there is more.
+        top = HEAD[self.desk] * fs + (0 if self.two else CAPTION[self.desk] * fs)
+        x, y, w, h = self.list
+        if self.desk and h > top + self.row_h:
+            self.list = (x, y, w, h - (h - top) % self.row_h)
         # the handheld's places page: the places over the keycap hints
         self.hints, self.places = ui.cut_bottom(content, 20 * fs)
 

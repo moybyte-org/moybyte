@@ -507,3 +507,25 @@ def test_the_desk_shows_the_places_beside_the_files(tmp_path):
     _press(drv, "down", "down")
     assert app.place == files_app.ART and app.names_shown() == ["dragon"]
     assert app._focused == "Places", "a place opens beside the list, focus stays"
+
+
+def test_the_desks_list_holds_whole_rows_above_the_verbs(tmp_path):
+    """A table's rows view is a whole number of rows at every size, so the
+    strip's edge never cuts one (the desk's Contrast window cut a row through
+    its x-height); the heights it reckons with are the engine's."""
+    import json
+    style = json.loads((Path(__file__).resolve().parent.parent / "native" / "moy_ui"
+                        / "style.json").read_text())["metrics"]
+    vr, grp, row = style["value_row"], style["group"], style["row"]
+    assert files_app.HEAD == (vr["head"], vr["head_desk"])
+    assert files_app.CAPTION == (grp["caption"], grp["caption_desk"])
+    ws = host_app.build_workstation(str(Path(tmp_path) / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    assert ws is not None
+    for w in (360, 520):
+        for h in range(300, 600, 7):
+            lay = files_app.FilesLayout(w, h, 1, windowed=True)
+            assert lay.desk
+            top = files_app.HEAD[1] + (0 if lay.two else files_app.CAPTION[1])
+            assert (lay.list[3] - top) % lay.row_h == 0, (w, h)
+            assert lay.row_h == row["stack_desk"]
