@@ -471,12 +471,15 @@ fi
 # no Content-Encoding, and a browser handed gzip bytes without that header sees
 # garbage -- so raw has to stay the default and .gz has to be opt-in by a server
 # that knows to advertise it.
-# -n omits the mtime, so an unchanged asset produces a byte-identical .gz and
-# the push tool's per-file compare stays meaningful.
+# tools/zopfli_gz.py compresses with zopfli: standard gzip, a few percent
+# smaller than `gzip -9` (every byte is image headroom), no mtime or name in the
+# header, so an unchanged asset produces a byte-identical .gz and the push tool's
+# per-file compare stays meaningful. It fails when the `zopfli` package is
+# missing (pyproject.toml's dev extra), and does NOT fall back to gzip.
+GZ_FILES=()
 for f in index.html worker.js moy_store.mjs micropython.mjs micropython.wasm; do
-  if [ -f "${DIST_DIR}/${f}" ]; then
-    gzip -9 -n -c "${DIST_DIR}/${f}" > "${DIST_DIR}/${f}.gz"
-  fi
+  if [ -f "${DIST_DIR}/${f}" ]; then GZ_FILES+=("${DIST_DIR}/${f}"); fi
 done
+"${PY}" "${REPO_ROOT}/tools/zopfli_gz.py" "${GZ_FILES[@]}"
 echo "== dist/ ready:"
 ls -la "${DIST_DIR}"

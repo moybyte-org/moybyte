@@ -31,6 +31,7 @@ on:
       - "runtime/**"
       - "system_carts/**"
       - "firmware/web_runner/**"
+      - "tools/zopfli_gz.py"
       - "tools/fetch_ci_firmware.py"
       - "README.md"
       - ".github/workflows/pages.yml"
@@ -83,6 +84,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # build.sh compresses the console's assets with zopfli (tools/zopfli_gz.py,
+      # pinned in pyproject.toml's dev extra); it fails when the package is absent.
+      - name: Install zopfli
+        run: python3 -m pip install --quiet 'zopfli==0.4.3'
 
       # emsdk + the micropython clone, keyed on the build script that pins them.
       # ~1.8 GB, comfortably inside the 10 GB repo cache (unlike the board

@@ -20,6 +20,8 @@ dev = [
   "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
   "resvg-py==0.5.0", # the icon sets' rasteriser (tools/make_icons.py): the
                      # masks are compared byte for byte under this version
+  "zopfli==0.4.3", # the web console's baked .gz (tools/zopfli_gz.py, run by
+                   # firmware/web_runner/build.sh): standard gzip, smaller than gzip -9
   "pyflakes",     # the undefined-name gate (tests/test_undefined_names.py):
                   # a moved body naming a symbol its new namespace never
                   # imported NameErrors only when the line runs, on glass

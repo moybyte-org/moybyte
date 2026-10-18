@@ -69,6 +69,7 @@ on:
       - "native/**"                 # the C the browser build compiles, its engine included
       - "ports/jet/**"              # the Jet carts the wasm suite builds
       - "tools/jet_cart.py"
+      - "tools/zopfli_gz.py"
       - "tools/wasm_cart.py"
       - "tools/p8_import.py"        # the vendored converter the wasm freezes
       - "tools/p8_lua_port.py"      # ...the vendored PORTER, frozen beside it
@@ -89,6 +90,7 @@ on:
       - "native/**"
       - "ports/jet/**"
       - "tools/jet_cart.py"
+      - "tools/zopfli_gz.py"
       - "tools/wasm_cart.py"
       - "tools/p8_import.py"
       - "tools/p8_lua_port.py"
