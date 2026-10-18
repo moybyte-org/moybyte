@@ -495,7 +495,8 @@ _ST_FONT_SCALE = 8
 _ST_PROF = 9
 _ST_N_FILL, _ST_N_TEXT = 10, 11
 _ST_T_FILL, _ST_T_TEXT = 12, 13
-_ST_LEN = 14
+_ST_FILLP = 14
+_ST_LEN = 15
 _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
 
 # Image comes from moy_image now -- ONE definition, shared with the host canvas
@@ -704,6 +705,7 @@ class DeviceCanvas:
         # by nothing else -- see fillp().
         self._fillp = 0
         self._fillp_col = -1
+        st[_ST_FILLP] = 0
         # SPEC.md 6 / 12.1's SCREEN palette: a second remap COMPOSED after the
         # draw palette into _wire, so every draw site resolves through it for
         # nothing. None while identity, which is every frame of most carts.
@@ -818,6 +820,8 @@ class DeviceCanvas:
                 gp[:] = self._wire  # C memcpy, not the 64-iteration rebuild
         self._fillp = 0                   # SPEC.md 6: a frame starts solid
         self._fillp_col = -1
+        if self._gate_state is not None:
+            self._gate_state[_ST_FILLP] = 0
         self._sync_gate_state()
 
     def camera(self, x=0, y=0):
@@ -1673,9 +1677,15 @@ class DeviceCanvas:
         if p is None:
             self._fillp = 0
             self._fillp_col = -1
+            if self._gate_state is not None:
+                self._gate_state[_ST_FILLP] = 0
             return
         self._fillp = int(p) & 0xFFFF
         self._fillp_col = -1 if c is None or int(c) < 0 else int(c) & 63
+        # The native rect/rectb gates fill solid, so they read this flag and
+        # hand a patterned draw to the verbs above.
+        if self._gate_state is not None:
+            self._gate_state[_ST_FILLP] = 1 if self._fillp else 0
 
     def _shape(self, kind, a0, a1, a2, a3, a4, a5, c):
         # The nine shape verbs' patterned lane, plus oval/ovalb always: ONE

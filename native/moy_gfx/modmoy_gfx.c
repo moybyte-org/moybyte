@@ -1304,6 +1304,7 @@ enum {
     ST_PROF,                 // 1 = accumulate the DRAW2 timers below
     ST_N_FILL, ST_N_TEXT,    // call counts (always) -- proof the gate is live
     ST_T_FILL, ST_T_TEXT,    // microseconds (only while ST_PROF)
+    ST_FILLP,                // 1 while a fill pattern is set (rect/rectb decline)
     ST_LEN
 };
 
@@ -1585,6 +1586,12 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
     }
     if (n_kw != 0) {
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    // A fill pattern (SPEC.md 6) is the shape verbs' two-colour lane, which
+    // the solid fills below do not draw: rect and rectb go to the canvas's
+    // own verbs while one is set. print and pix are not shape verbs.
+    if (c->st[ST_FILLP] && (g->kind == GATE_RECT || g->kind == GATE_RECTB)) {
         return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
     }
     // A pending sprite run must land before any other primitive (#63 order).

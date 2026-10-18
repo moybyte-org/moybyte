@@ -66,3 +66,20 @@ def test_gate_counts_are_real_on_the_host():
         assert cv.gate_counts()[:2] == (3, 1)
         st, _pal = _row(cv)
         assert (st[dc._ST_N_FILL], st[dc._ST_N_TEXT]) == (3, 1)
+
+
+def test_the_row_carries_the_fill_pattern_flag():
+    """The native rect/rectb gates fill solid, so they decline while the row's
+    ST_FILLP is set: it follows fillp(), the frame's reset_state and fillp(0)."""
+    cv = make_system_canvas(64, 64)
+    assert _row(cv)[0][dc._ST_FILLP] == 0
+    cv.fillp(0x5A5A)
+    assert _row(cv)[0][dc._ST_FILLP] == 1
+    cv.fillp()
+    assert _row(cv)[0][dc._ST_FILLP] == 0
+    cv.fillp(0xA5A5, 3)
+    assert _row(cv)[0][dc._ST_FILLP] == 1
+    cv.reset_state()
+    assert _row(cv)[0][dc._ST_FILLP] == 0
+    cv.fillp(0)                          # an all-solid pattern is solid
+    assert _row(cv)[0][dc._ST_FILLP] == 0

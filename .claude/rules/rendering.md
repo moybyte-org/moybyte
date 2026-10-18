@@ -19,6 +19,8 @@ paths:
 
 The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on every board and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it. The SYSTEM-surface contract (#39: font_scale text, font-scale layers, `blit_cover`) is one body too since 2026-08-18 — `device_canvas.SystemCanvas`, which the host/web/P4 classes subclass for only their per-tier pieces; two of the three hand-copies it replaced had silently drifted (the P4's print stride, its lost cart-palette layer rider).
 
+**The native rect/rectb gates fill SOLID.** Every canvas with a native `moy_gfx` (the boards, the wasm head) swaps them in over the Python verbs, and the host's ctypes kernel has none, so a host test cannot see a draw state the gates do not know. The fill pattern is one: the row's `ST_FILLP` flag (the draw-state array's last entry, `device_canvas._ST_FILLP`, in step with `moy_canvas.h` and `modmoy_gfx.c`) makes the gates decline while one is set, and `tests/test_web_fillp.py` draws a patterned rect and rectb in the wasm VM. State a gate reads is a new `ST_*` entry, never a Python-only attribute.
+
 
 ### Graphics is conformance-checked, and the indexed canvas was MEASURED AND DECLINED
 
