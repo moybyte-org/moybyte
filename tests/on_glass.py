@@ -2465,7 +2465,8 @@ _UI_FRAMES, _UI_FAIL, _UI_HASH = 0, 8, 9
 
 def _app_ui_host_pmem(look):
     """The fixture's pmem after its first frames on the host's WAMR in the
-    board's look (theme, variant): the page's pixel hash the board's must
+    board's look (theme, variant) and its input in use (moy_ui.input(): the
+    hints draw that input's keys): the page's pixel hash the board's must
     equal."""
     import tempfile
     from runtime import host_app, wasm_host
@@ -2480,6 +2481,8 @@ def _app_ui_host_pmem(look):
     ws = host_app.build_workstation(root)
     ws.pointer.visible = False
     ws.look.set_theme(look[0], persist=False, variant=look[1])
+    from runtime import ui_draw
+    ws.use_inputs((("local", ui_draw.INPUTS[look[2]]),))
     open_cart(ws, APP_UI[1])
     drv = make_drv(ws)              # each frame's input edges begin and end, as on a board
     ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
@@ -2489,6 +2492,7 @@ def _app_ui_host_pmem(look):
         drv.frame(1.0 / 30.0)
     pm = list(ws.player._lua._run.pmem()[1])
     ws.exit()
+    ui_draw.input_kind("keys")      # the host's own again
     return pm
 
 
@@ -2498,7 +2502,8 @@ def wasm_app_draws_the_toolkit(board, root):
     host's run's, the run crosses into Python for nothing but the console's
     frame and the census keeps it VM-free. Leaves the desk as it found it."""
     host = _app_ui_host_pmem(board.pyval(
-        "(ws.look.theme_name, ws.look.theme_variant)", strict=True))
+        "(ws.look.theme_name, ws.look.theme_variant, __import__('moy_ui').input())",
+        strict=True))
     pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
                "(__import__('array').array('i', bytearray(1024)))")
     line = board.cmd("run %s" % APP_UI[1].lower(), wait_for="REMOTE run")
