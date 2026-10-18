@@ -501,6 +501,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # per frame. Same trust as the backdrop restore places in its union.
         self._damage_rects = None
         self._win_touched = False
+        self._chrome_drew = False     # this window's chrome painted (_cast_onto)
 
     # -- layout-context plumbing ----------------------------------------------
 
@@ -2057,6 +2058,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 _surf(sid, "system")
             win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
             self._win_touched = False
+            self._chrome_drew = False
             if win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
                 # input focus AND of what sits above it on the back-stack -- a
@@ -2069,6 +2071,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._draw_player_window(win, True, focused, dt)
             else:
                 self._draw_app_window(win, focused, dt)
+            self._cast_onto(i)
             if self._win_touched:
                 touched.append(self._win_extent(win))
         # The chips live on the OS bar, whose strip the compositor carries

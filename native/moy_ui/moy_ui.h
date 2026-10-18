@@ -338,6 +338,12 @@ int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot);
 // its outline's partly covered pixels, blended over what that layer just
 // painted (runtime/wm_desk.py draws it, clipped to what it repainted).
 int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode);
+// The same, onto the pixels window `o` (title strip `oth`, focused `oactive`)
+// paints opaque -- its frame and content, never its outline's fringe or the
+// corners its arcs leave -- within the clip: what a window above casts over a
+// window under it that has just repainted.
+int moy_ui_frame_under_onto(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active,
+                            int mode, moy_ui_box_t o, int oth, int oactive);
 // The shadow box `b` casts as a part (MOY_UI_CAST_*), its own pixels left
 // alone. Answers whether the theme casts one.
 int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);

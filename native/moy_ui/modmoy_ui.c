@@ -1695,6 +1695,18 @@ static mp_obj_t ui_frame_under(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_under_obj, 6, 6, ui_frame_under);
 
+// frame_under_onto(cv, look, rect, title_h, active, mode, onto, onto_title_h, onto_active)
+static mp_obj_t ui_frame_under_onto(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_frame_under_onto(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_is_true(a[4]),
+                                  mp_obj_get_int(a[5]), box_of(a[6]), mp_obj_get_int(a[7]),
+                                  mp_obj_is_true(a[8])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_under_onto_obj, 9, 9, ui_frame_under_onto);
+
 // cast(cv, look, rect, part, mode) -> whether the theme casts a shadow
 static mp_obj_t ui_cast(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2412,6 +2424,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_use_depth), MP_ROM_PTR(&ui_use_depth_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_geom), MP_ROM_PTR(&ui_frame_geom_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_under), MP_ROM_PTR(&ui_frame_under_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_under_onto), MP_ROM_PTR(&ui_frame_under_onto_obj) },
     { MP_ROM_QSTR(MP_QSTR_cast), MP_ROM_PTR(&ui_cast_obj) },
     { MP_ROM_QSTR(MP_QSTR_pattern_unreadable), MP_ROM_PTR(&ui_pattern_unreadable_obj) },
     { MP_ROM_QSTR(MP_QSTR_parts), MP_ROM_PTR(&ui_parts_obj) },

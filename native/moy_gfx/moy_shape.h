@@ -25,8 +25,9 @@
  * colour), MOY_SHAPE_FRINGE only the rest it covers in part, which blend over
  * what is under them. The two together are the whole shape. A window's frame is the
  * inner, drawn over pixels it paints itself, so it repeats to the same
- * pixels; its fringe belongs to whatever repaints the pixels under it
- * (runtime/wm_desk.py), so a fringe never blends twice.
+ * pixels; its fringe belongs to whatever repaints the pixels under it (the
+ * desk, runtime/wm_desk.py, or a window behind, runtime/wm_chrome.py), so a
+ * fringe never blends twice.
  *
  * PAINTS (GAPS 7). A fill is a paint: up to MOY_SHAPE_STOPS stops (t in
  * thousandths down the paint's rows, a colour), in mode SMOOTH (one colour a
@@ -115,6 +116,13 @@ int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
 // The shadow box (x, y, w, h) casts. Answers the pixels written.
 int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
                      const moy_shape_shadow_t *s, const moy_shape_hole_t *hole);
+
+// The columns [*x0, *x1) of row i of a w x h rect with corners `r` (clamped as
+// moy_shape_rrect clamps them), `stepped`, ringed `line` wide, that its
+// MOY_SHAPE_INNER draws paint opaque: what a shape drawn over it after it
+// may cover without blending twice (x0 == x1: none).
+void moy_shape_inner_row(int w, int h, const int r[4], int stepped, int line, int i, int *x0,
+                         int *x1);
 
 // How far a shadow reaches past its caster on each side: left, top, right,
 // bottom (what a caller's damage rect grows by).

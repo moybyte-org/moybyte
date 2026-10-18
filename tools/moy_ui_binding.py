@@ -225,6 +225,7 @@ _DRAW_SIGS = (
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
     ("moy_ui_frame_under", [c.POINTER(_Sink), _Box, _I, _I, _I], _I),
+    ("moy_ui_frame_under_onto", [c.POINTER(_Sink), _Box, _I, _I, _I, _Box, _I, _I], _I),
     ("moy_ui_cast", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_focus", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, c.POINTER(_Box),
                       c.POINTER(_I)], _I),
@@ -666,6 +667,11 @@ def binding():
         _check(lib.moy_ui_frame_under(c.byref(sink(cv, look)), box_of(rect), int(title_h),
                                       1 if active else 0, int(mode)))
 
+    def frame_under_onto(cv, look, rect, title_h, active, mode, onto, onto_th, onto_active):
+        _check(lib.moy_ui_frame_under_onto(c.byref(sink(cv, look)), box_of(rect), int(title_h),
+                                           1 if active else 0, int(mode), box_of(onto),
+                                           int(onto_th), 1 if onto_active else 0))
+
     def cast(cv, look, rect, part, mode):
         return bool(lib.moy_ui_cast(c.byref(sink(cv, look)), box_of(rect), int(part),
                                     int(mode)))
@@ -753,7 +759,7 @@ def binding():
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              frame_under, cast, dialog, text_field, panel, focus_ring, focus, current,
+              frame_under, frame_under_onto, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)

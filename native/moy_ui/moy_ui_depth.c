@@ -515,20 +515,91 @@ void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int acti
     frame_body(&d, w, th, active, MOY_SHAPE_INNER);
 }
 
+static void under(const dd_t *d, moy_ui_box_t w, int th, int active, int mode) {
+    int g[MOY_UI_GEOM];
+    moy_ui_frame_geom(w.w, w.h, th, active, mode, g);
+    moy_shape_shadow_t sh;
+    if (shadow_of(&s_depth, g[0], active, mode, &sh)) {
+        moy_shape_hole_t body = {w.x, w.y, w.w, w.h, g[0]};
+        moy_shape_shadow(&d->t, w.x, w.y, w.w, w.h, &sh, &body);
+    }
+    frame_body(d, w, th, active, MOY_SHAPE_FRINGE);
+}
+
 int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode) {
     dd_t d;
     open_dd(s, &d, 1);
     if (!s_depth.frames) {
         return MOY_UI_OK;
     }
-    int g[MOY_UI_GEOM];
-    moy_ui_frame_geom(w.w, w.h, th, active, mode, g);
-    moy_shape_shadow_t sh;
-    if (shadow_of(&s_depth, g[0], active, mode, &sh)) {
-        moy_shape_hole_t body = {w.x, w.y, w.w, w.h, g[0]};
-        moy_shape_shadow(&d.t, w.x, w.y, w.w, w.h, &sh, &body);
+    under(&d, w, th, active, mode);
+    return MOY_UI_OK;
+}
+
+// The ring frame_body draws round a window: its width (0: none).
+static int ring_of(int active) {
+    const moy_ui_depth_t *dp = &s_depth;
+    int line = active ? dp->line : dp->line_back;
+    int32_t lc = active ? dp->line_c : dp->line_back_c;
+    if (dp->edges == 1) {
+        return line > 0 ? line : 1;
     }
-    frame_body(&d, w, th, active, MOY_SHAPE_FRINGE);
+    return line > 0 && is_set(lc) ? line : 0;
+}
+
+int moy_ui_frame_under_onto(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active,
+                            int mode, moy_ui_box_t o, int oth, int oactive) {
+    dd_t d;
+    open_dd(s, &d, 1);
+    const moy_ui_depth_t *dp = &s_depth;
+    if (!dp->frames || o.w <= 0 || o.h <= 0) {
+        return MOY_UI_OK;
+    }
+    int g[MOY_UI_GEOM];
+    moy_ui_frame_geom(o.w, o.h, oth, oactive, MOY_UI_UNDER_FULL, g);
+    int r[4];
+    for (int k = 0; k < 4; k++) {
+        r[k] = (dp->corners >> k) & 1 ? g[0] : 0;
+    }
+    int line = ring_of(oactive);
+    // the clip narrowed to what the caster's shadow and fringe reach
+    int p[MOY_UI_GEOM];
+    moy_ui_frame_geom(w.w, w.h, th, active, mode, p);
+    int ex = w.x - p[2] - d.t.cam_x, ey = w.y - p[3] - d.t.cam_y;
+    int ex1 = ex + w.w + p[2] + p[4], ey1 = ey + w.h + p[3] + p[5];
+    d.t.cx0 = d.t.cx0 > ex ? d.t.cx0 : ex;
+    d.t.cy0 = d.t.cy0 > ey ? d.t.cy0 : ey;
+    d.t.cx1 = d.t.cx1 < ex1 ? d.t.cx1 : ex1;
+    d.t.cy1 = d.t.cy1 < ey1 ? d.t.cy1 : ey1;
+    if (d.t.cx1 <= d.t.cx0 || d.t.cy1 <= d.t.cy0) {
+        return MOY_UI_OK;
+    }
+    const moy_text_target_t t0 = d.t;
+    int bx = o.x - t0.cam_x, by = o.y - t0.cam_y;
+    // only the rows of `o` inside the clip; rows sharing a span draw as one band
+    int i = t0.cy0 - by > 0 ? t0.cy0 - by : 0;
+    int end = t0.cy1 - by < o.h ? t0.cy1 - by : o.h;
+    while (i < end) {
+        int a0, a1;
+        moy_shape_inner_row(o.w, o.h, r, dp->stepped, line, i, &a0, &a1);
+        int j = i + 1;
+        while (j < end) {
+            int b0, b1;
+            moy_shape_inner_row(o.w, o.h, r, dp->stepped, line, j, &b0, &b1);
+            if (b0 != a0 || b1 != a1) {
+                break;
+            }
+            j++;
+        }
+        d.t.cx0 = bx + a0 > t0.cx0 ? bx + a0 : t0.cx0;
+        d.t.cx1 = bx + a1 < t0.cx1 ? bx + a1 : t0.cx1;
+        d.t.cy0 = by + i;
+        d.t.cy1 = by + j;
+        if (d.t.cx1 > d.t.cx0) {
+            under(&d, w, th, active, mode);
+        }
+        i = j;
+    }
     return MOY_UI_OK;
 }
 

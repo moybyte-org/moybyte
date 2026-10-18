@@ -422,6 +422,53 @@ static int clamp_r(int r, int w, int h) {
     return imax(0, imin(imin(r, MOY_SHAPE_RMAX), imin(w, h) / 2));
 }
 
+// Whether rr_px's MOY_SHAPE_INNER writes shape pixel (i, j) opaque, for a
+// fill and a ring together: covered whole, or half or more of it the ring's.
+static int inner_px(const corners_t *out, const corners_t *in, int has_in, int line, int i,
+                    int j) {
+    int co = corners_cov(out, i, j);
+    if (co == 15) {
+        return 1;
+    }
+    if (line <= 0 || co == 0) {
+        return 0;
+    }
+    int ci = has_in ? corners_cov(in, i - line, j - line) : 0;
+    return co - ci >= 8;
+}
+
+void moy_shape_inner_row(int w, int h, const int r[4], int stepped, int line, int i, int *x0,
+                         int *x1) {
+    *x0 = *x1 = 0;
+    if (w <= 0 || h <= 0 || i < 0 || i >= h) {
+        return;
+    }
+    int rr[4], ri[4];
+    for (int k = 0; k < 4; k++) {
+        rr[k] = clamp_r(r[k], w, h);
+    }
+    corners_t out, in;
+    corners_set(&out, w, h, rr, stepped);
+    line = imax(0, imin(line, imin(w, h) / 2));
+    int iw = w - 2 * line, ih = h - 2 * line;
+    int has_in = line > 0 && iw > 0 && ih > 0;
+    if (has_in) {
+        for (int k = 0; k < 4; k++) {
+            ri[k] = clamp_r(rr[k] - line, iw, ih);
+        }
+        corners_set(&in, iw, ih, ri, stepped);
+    }
+    int a = 0, b = w - 1;
+    while (a < w && !inner_px(&out, &in, has_in, line, i, a)) {
+        a++;
+    }
+    while (b >= a && !inner_px(&out, &in, has_in, line, i, b)) {
+        b--;
+    }
+    *x0 = a;
+    *x1 = b + 1 > a ? b + 1 : a;
+}
+
 int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
                     const moy_shape_rrect_t *sh) {
     tgt_t g;

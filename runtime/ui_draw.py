@@ -6,7 +6,7 @@
 #   -- the style                      metrics, state_colors (C)
 #   -- the theme's shape              use_shape, paint (C)
 #   -- window frames                  frame, frame_buttons, frame_band (C)
-#   -- depth                          use_depth, depth, frame_geom, frame_under, cast (C)
+#   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_onto, cast (C)
 #   -- draw == tap                    Hits
 #   Hits                              per-draw hit registry
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
@@ -1523,9 +1523,11 @@ def frame_icon(rect, title_h, btns=0):
 # Installed with the theme and its mode (`use_depth`); off for a theme with no
 # `look`, and a theme whose chain names a frame style nearer than its look
 # keeps that frame (moy_theme_look_frames). A window's shadow and its
-# rounded outline's fringe are drawn by the layer under the windows
-# (`frame_under`, runtime/wm_desk.py), clipped to what that layer repainted,
-# so a blend never lands twice on the same pixel.
+# rounded outline's fringe blend over whatever lies under it: the desk layer
+# casts them over what it repainted (`frame_under`, runtime/wm_desk.py), and
+# a window that repaints takes the casts of the windows above it over what
+# it painted (`frame_under_onto`, runtime/wm_windowed.py), so a blend never
+# lands twice on the same pixel.
 
 UNDER_FULL, UNDER_SMALL, UNDER_NONE = 0, 1, 2
 CAST_WINDOW, CAST_CARD, CAST_KEY = 0, 1, 2
@@ -1570,6 +1572,14 @@ def frame_under(cv, th, rect, title_h, active, mode=UNDER_FULL):
     """What window `rect` leaves to the pixels under it: its shadow at `mode`'s
     size and its outline's partly covered pixels, blended over them."""
     _C.frame_under(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode)
+
+
+def frame_under_onto(cv, th, rect, title_h, active, onto, onto_th, onto_active,
+                     mode=UNDER_FULL):
+    """`frame_under` of window `rect`, onto only the pixels window `onto`
+    (title strip `onto_th`, focused `onto_active`) paints opaque."""
+    _C.frame_under_onto(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode,
+                        onto, onto_th, onto_active)
 
 
 def cast(cv, th, rect, part=CAST_CARD, mode=UNDER_FULL):

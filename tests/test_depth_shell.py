@@ -295,6 +295,136 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
     assert ws.wallpaper.rasters == rasters
 
 
+# -- a window over a window ------------------------------------------------------------
+
+def _overlapping(tmp_path, variant):
+    """Files, then Calc above it over its right half."""
+    ws, drv = _desk(tmp_path, variant)
+    ws.open_desk()
+    drv.frame(0.0)
+    ws.open_app(ws._apps_by_id["files"])
+    drv.frame(0.0)
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(0.0)
+    files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
+    ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
+    _quiet(ws)
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(0.0)
+    return ws, drv, files, calc
+
+
+@pytest.mark.parametrize("variant", ["light", "dark"])
+def test_a_window_casts_its_shadow_on_the_window_under_it(tmp_path, variant):
+    """The shadow of the window in front falls on the window behind as it
+    falls on the desk (the targets' Calc over Files), not only on the desk."""
+    ws, drv, files, calc = _overlapping(tmp_path, variant)
+    w = ws.sys_canvas.w
+    x, y = calc.x - 3, calc.y + calc.h // 2              # Files' body, left of Calc
+    assert ws.wm._win_at(x, y) == "files"
+
+    def at():
+        buf = drv.rgb888()
+        return tuple(buf[3 * (y * w + x):3 * (y * w + x) + 3])
+
+    shaded = at()
+    ws.wm._move_window(calc, calc.x, files.y + files.h + 40)   # off Files
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(0.0)
+    bare = at()
+    assert shaded != bare
+    assert all(s <= b for s, b in zip(shaded, bare))
+
+
+@pytest.mark.parametrize("variant", ["light", "dark"])
+@pytest.mark.parametrize("active", [True, False])
+def test_a_cast_onto_a_window_lands_where_its_frame_paints_whole(tmp_path, variant,
+                                                                 active):
+    """`frame_under_onto` is `frame_under` on the pixels the window under it
+    paints opaque (its frame's and its content's) and nothing anywhere else:
+    its corners' outer pixels and its outline's fringe keep what is under
+    them, which took the cast when that was painted."""
+    ws, _ = _desk(tmp_path, variant)
+    cv, th = ws.sys_canvas, ws.theme_colors
+    under, over = (120, 100, 300, 200), (300, 150, 300, 200)
+
+    x, y, w, h = under
+    foot = ui_draw.frame_geom(w, h, 36)[1]
+
+    def frame_on(bg, cast=None):
+        cv.cls(bg)
+        ui_draw.frame(cv, th, under, 36, "Under", active, 0, 1)
+        cv.rect(x + 1, y + 37, w - 2, h - 38 - foot, 7)     # its content's stamp
+        if cast == "onto":
+            ui_draw.frame_under_onto(cv, th, over, 36, True, under, 36, active)
+        elif cast == "all":
+            ui_draw.frame_under(cv, th, over, 36, True)
+        return bytes(cv._buf)
+
+    a, b = frame_on(1), frame_on(12)
+    whole = [a[i:i + 2] == b[i:i + 2] for i in range(0, len(a), 2)]
+    onto, cast = frame_on(1, "onto"), frame_on(1, "all")
+    n = 0
+    for k, w in enumerate(whole):
+        i = 2 * k
+        if w:
+            assert onto[i:i + 2] == cast[i:i + 2], (k % cv.w, k // cv.w)
+            n += onto[i:i + 2] != a[i:i + 2]
+        else:
+            assert onto[i:i + 2] == a[i:i + 2], (k % cv.w, k // cv.w)
+    assert n > 0                                       # it cast
+
+
+def _frames(ws, ring, drv, n, pointer=False):
+    """`n` drawn frames (the console stays dirty), then the still ones."""
+    for _ in range(n):
+        ws.pointer.visible = pointer
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv, 6)
+
+
+@pytest.mark.parametrize("variant", ["light", "dark"])
+def test_casts_over_a_window_are_a_full_repaints_on_every_buffer(tmp_path, variant):
+    """On three retained buffers (the Waveshare P4's), a drag that ends with
+    Files' corner under Calc's shadow, the frames after it -- a still cursor
+    among them, which repaints the windows' frames over a desk it does not
+    restore -- and a raise leave every buffer byte for byte a full repaint:
+    a cast onto a window lands once, and never on the corners its arcs
+    leave to what is under it."""
+    from test_wm_windowed import _Ring
+    ws, drv, files, calc = _overlapping(tmp_path, variant)
+    ws.wm._move_window(files, files.x - 200, files.y)   # room right of it
+    ring = _Ring(ws, 3)
+    _frames(ws, ring, drv, 3)
+    end = (files.x + files.w + 2, files.y + 4)        # beside Files' top right corner
+    gx, gy = calc.x + calc.w // 2, calc.y + 4
+    dx, dy = end[0] - calc.x, end[1] - calc.y
+    drv.touch(gx, gy)
+    ring.frame(drv)
+    for k in range(1, 8):
+        drv.touch_drag(gx + dx * k // 7, gy + dy * k // 7)
+        ring.frame(drv)
+    drv.touch_up()
+    assert (calc.x, calc.y) == end
+    _frames(ws, ring, drv, 6)
+    drv.hover(100, ws.sys_canvas.h - 8)
+    _frames(ws, ring, drv, 6, pointer=True)
+    assert list(ring.bufs) == ring.full(drv)
+    _quiet(ws)
+    x, y = next((x, y) for y in range(files.y + 2, files.y + files.h, 6)
+                for x in range(files.x + 2, files.x + files.w, 6)
+                if ws.wm._win_at(x, y) == "files")
+    drv.touch(x, y)                                      # Files to the front
+    ring.frame(drv)
+    drv.touch_up()
+    _frames(ws, ring, drv, 6)
+    assert ws.wm._order[-1] == "files"
+    assert list(ring.bufs) == ring.full(drv)
+
+
 @pytest.mark.parametrize("variant", ["light", "dark"])
 def test_an_apps_page_in_a_window_lies_on_the_windows_body(tmp_path, variant):
     """Settings, Files and Calc begin their page in the window they run in,

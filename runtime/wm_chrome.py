@@ -100,6 +100,7 @@ class WindowChrome:
             self._win_grip(win, focused)
             return
         win._chrome_streak += 1
+        self._chrome_drew = True
         self.ws.icon_spec()               # the look's icon set, for the title buttons
         _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
                   win.title_h, self._win_title(win), focused, btns, self._fs())
@@ -176,9 +177,10 @@ class WindowChrome:
         """Every visible window's shadow and outline fringe, bottom to top,
         over the desk the backdrop layer just painted: the whole desk, or only
         `clip`, the rect a cache restore covered -- and never over the bar,
-        which the windows stay off too. Nothing else draws them, so each lands
-        once on freshly painted pixels. A window being dragged or resized casts
-        the same shadow as a still one: a moving thing keeps its shadow."""
+        which the windows stay off too. Over a window, the casts of the windows
+        above it are its own repaint's (`_cast_onto`), so each lands once on
+        freshly painted pixels. A window being dragged or resized casts the
+        same shadow as a still one: a moving thing keeps its shadow."""
         if not _ui_draw.depth()[13]:
             return
         rc = self._root_canvas
@@ -200,6 +202,56 @@ class WindowChrome:
                                 key == self._focus)
         finally:
             rc.clip()
+
+    def _cast_onto(self, i):
+        """The windows above z-slot `i` cast their shadows and outline
+        fringes over what window `i` has just painted -- its whole frame when
+        its chrome drew this frame, else its content rect -- bottom to top.
+        Window `i` painted those pixels afresh, so each blend lands once; what
+        it left alone keeps the casts it took when it was painted."""
+        order = self._order
+        n = len(order)
+        if i >= n - 1 or not _ui_draw.depth()[13]:
+            return
+        key = order[i]
+        win = self._wins[key]
+        chrome = self._chrome_drew
+        if chrome:
+            rx, ry, rw, rh = win.x, win.y, win.w, win.h
+        else:
+            rx, ry, rw, rh = win.content_rect()
+        dx, dy, dw, dh = self._desk_rect()
+        x0, y0 = max(dx, rx), max(dy, ry)
+        x1, y1 = min(dx + dw, rx + rw), min(dy + dh, ry + rh)
+        if x1 <= x0 or y1 <= y0:
+            return
+        rc = self._root_canvas
+        th = self.ws.theme_colors
+        focus = self._focus
+        onto = (win.x, win.y, win.w, win.h)
+        clipped = False
+        try:
+            for j in range(i + 1, n):
+                k = order[j]
+                up = self._wins.get(k)
+                if up is None or up.minimized:
+                    continue
+                ex = self._pad_extent(up, up.x, up.y, up.w, up.h)
+                if (ex[0] >= x1 or ex[1] >= y1 or ex[0] + ex[2] <= x0
+                        or ex[1] + ex[3] <= y0):
+                    continue
+                if not clipped:
+                    rc.clip(x0, y0, x1 - x0, y1 - y0)
+                    clipped = True
+                rect = (up.x, up.y, up.w, up.h)
+                if chrome:
+                    _ui_draw.frame_under_onto(rc, th, rect, up.title_h, k == focus,
+                                              onto, win.title_h, key == focus)
+                else:
+                    _ui_draw.frame_under(rc, th, rect, up.title_h, k == focus)
+        finally:
+            if clipped:
+                rc.clip()
 
     def _resize_feet(self):
         """A look that moves the depth re-sizes every window's foot (its
