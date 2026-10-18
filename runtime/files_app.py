@@ -109,6 +109,12 @@ VERB = {
 }
 
 
+def _cap(word):
+    """`word` with its first letter in capitals: MicroPython's str has no
+    `capitalize`."""
+    return word[:1].upper() + word[1:]
+
+
 def _folder_of(cart):
     """A cart's `.moy` FOLDER name. The folder and not the title: the title
     is what a kid renamed the game to, the folder is the thing on the card."""
@@ -264,14 +270,14 @@ class FilesAppLayer(ListShellApp):
         if key == PROJECTS:
             for cart in self._nav.projects():
                 label, icon = CART_KIND.get(cart.get("type") or "game",
-                                            ((cart.get("type") or "cart").capitalize(), "game"))
+                                            (_cap(cart.get("type") or "cart"), "game"))
                 out.append((shown_name(_folder_of(cart)), PROJECTS, label, icon, cart))
         elif key == THEMES:
             for folder in self._themes():
                 out.append((shown_name(folder), THEMES, "Theme", "wallpaper", folder))
         elif key == TRASH:
             for kind, name in self.trash:
-                label, icon = KIND_OF.get(kind, (kind.capitalize(), "doc"))
+                label, icon = KIND_OF.get(kind, (_cap(kind), "doc"))
                 out.append((name, kind, label, icon, None))
         else:
             for k, _label, _icon, kinds in PLACES:
@@ -282,7 +288,7 @@ class FilesAppLayer(ListShellApp):
                     if err is not None:
                         continue
                     for name in names or ():
-                        label, icon = KIND_OF.get(kind, (kind.capitalize(), "doc"))
+                        label, icon = KIND_OF.get(kind, (_cap(kind), "doc"))
                         if kind == "docs" and _modes.is_script(name):
                             label = "Script"
                             icon = "cart_lua" if name.endswith(".lua") else "cart_py"
