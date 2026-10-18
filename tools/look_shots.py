@@ -316,7 +316,7 @@ def _desk_wall(g, ws):
 
 
 class _HomeWifi:
-    """The targets' Wi-Fi: on the network called Home."""
+    """The targets' Wi-Fi, in every scene: on the network called Home."""
 
     def status(self):
         return (True, "Home", "192.168.1.20")
@@ -329,9 +329,7 @@ class _HomeWifi:
 
 
 def _settings(g, ws):
-    # The target's facts: Wi-Fi on Home, the battery at 82%, Appearance focused.
-    ws.wifi = _HomeWifi()
-    ws.battery_level = lambda: 82
+    # The target's focus: Appearance.
     ws.open_settings()
     ws.settings_layer.show_row("appearance")
 
@@ -432,6 +430,9 @@ def render(g, config, theme, mode, setup, wallpaper):
         # night on a seeded store), the rest the theme's backdrop.
         ws.look.select_wallpaper(ws.look._default_wallpaper() if wallpaper
                                  else None, persist=False)
+        # Every target's status: Wi-Fi on Home, the battery at 82%.
+        ws.wifi = _HomeWifi()
+        ws.battery_level = lambda: 82
         setup(g, ws)
         settled = _settle(g, ws)
         return _image(ws), settled
