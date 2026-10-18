@@ -2722,6 +2722,12 @@ const char *moy_theme_probe_sheet(int key) {
 
 static uint16_t s_live[MOY_THEME_BLOCK];    // the live theme's block, canonical RGB565
 static int s_live_n;
+// Each live slot's nearest MOY64 index as moy_theme_place took it from the
+// colour's own 8 bits (-1: none, the slot's RGB565 answers), and the last
+// place's words and answers it comes from.
+static int8_t s_live_near[MOY_THEME_BLOCK];
+static uint16_t s_placed[MOY_THEME_BLOCK];
+static int8_t s_placed_near[MOY_THEME_BLOCK];
 
 static uint16_t rgb_565(uint32_t rgb) {
     return (uint16_t)(((rgb >> 8) & 0xf800u) | ((rgb >> 5) & 0x07e0u) | ((rgb >> 3) & 0x1fu));
@@ -2816,6 +2822,9 @@ int32_t moy_theme_nearest(int32_t v) {
         return 0;
     }
     uint32_t rgb;
+    if (!MOY_THEME_IS_RGB(v) && s_live_near[v - MOY_THEME_SLOT0] >= 0) {
+        return s_live_near[v - MOY_THEME_SLOT0];
+    }
     if (MOY_THEME_IS_RGB(v)) {
         rgb = (uint32_t)v & 0xffffffu;
     } else {
@@ -2855,6 +2864,8 @@ int moy_theme_place(const int32_t *in, int n, int32_t *out, int32_t *near,
         }
         near[i] = moy_theme_nearest(v);
         if (k == used && used < MOY_THEME_BLOCK) {
+            s_placed[used] = w;
+            s_placed_near[used] = (int8_t)near[i];
             block[used++] = w;
         }
         out[i] = k < used ? MOY_THEME_SLOT0 + k : near[i];
@@ -2868,6 +2879,9 @@ int moy_theme_place(const int32_t *in, int n, int32_t *out, int32_t *near,
 void moy_theme_block_use(const uint16_t block[MOY_THEME_BLOCK], int used) {
     memcpy(s_live, block, sizeof(s_live));
     s_live_n = used;
+    for (int k = 0; k < MOY_THEME_BLOCK; k++) {
+        s_live_near[k] = k < used && s_placed[k] == block[k] ? s_placed_near[k] : -1;
+    }
 }
 
 // The look: each package's entries into out, nearest first, a package's

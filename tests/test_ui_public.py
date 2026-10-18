@@ -526,7 +526,9 @@ def test_a_python_pages_ground_is_a_colour_the_cart_canvas_has(tmp_path):
         words = [px[i:i + 2] for i in range(0, len(px), 2)]
         return max(set(words), key=words.count)
 
-    py = ground(_first_page(root, "UI Page Py", "moy", "light"))
-    lua = ground(_first_page(root, "UI Page Lua", "moy", "light"))
-    assert py != b"\x00\x00", "the page's ground is black"
-    assert py == lua
+    for variant in ("light", "dark"):
+        py = ground(_first_page(root, "UI Page Py", "moy", variant))
+        lua = ground(_first_page(root, "UI Page Lua", "moy", variant))
+        assert py == lua, variant
+        if variant == "light":
+            assert py != b"\x00\x00", "the page's ground is black"
