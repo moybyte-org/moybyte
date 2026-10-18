@@ -261,6 +261,9 @@ def build_carts(system_carts_dir):
             cart["fps"] = fps if fps == "free" else int(fps)   # the loop, SPEC 5)
         if man.get("icon"):                # launcher icon tiles (SPEC.md 3.4)
             cart["icon"] = man["icon"]
+        for _k in ("description", "genre", "tags"):    # SPEC.md 3.7 list fields
+            if man.get(_k):
+                cart[_k] = man[_k]
         sheet = os.path.join(base, "sprites.moygfx")
         if os.path.exists(sheet):
             cart["sprites"] = _read(sheet)

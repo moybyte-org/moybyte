@@ -157,6 +157,9 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
             manifest["canvas"] = _canvas_str(cart["canvas"])
         if cart.get("input") is not None:               # #42 Thread 3 input-kind hint
             manifest["input"] = list(cart["input"])
+        for k in ("description", "genre", "tags"):    # SPEC.md 3.7 list fields
+            if cart.get(k):
+                manifest[k] = cart[k]
         if cart.get("permissions") is not None:
             ven["permissions"] = cart["permissions"]
         scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)

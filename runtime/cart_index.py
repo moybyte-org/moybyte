@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   InstallError                a failure: the kid's text and serial's detail
 #   -- references               is_url, resolve, plain_name, mirror_ok
-#   -- the index                check_cart, cover_ref, parse_index, load_indexes
+#   -- the index                check_cart, cover_ref, parse_index (_read_listing), load_indexes
 #   -- what this console takes  plan, need_bytes
 #   -- the record               load_record, save_record, record_entry
 #   -- fetching                 Fetch, Reach, FileCheck, index_fetch, cover_fetch
@@ -138,6 +138,7 @@ try:
     from moy_fs import _exists, _mkdir
     import moy_carts as _store
     import cart_files as _cart_files
+    import cart_listing as _cl
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
@@ -145,6 +146,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_fs import _exists, _mkdir
     from runtime import moy_carts as _store
     from runtime import cart_files as _cart_files
+    from runtime import cart_listing as _cl
 
 
 INDEX_VERSION = 1
@@ -387,6 +389,19 @@ def cover_ref(c):
     return None
 
 
+def _read_listing(c):
+    """The description, genre and tags of an entry (SPEC.md 3.7) as a host
+    reads them, in place: each stays when it reads and is dropped when it does
+    not, so the three keys are either what the row shows or absent."""
+    for key, val in (("description", _cl.description(c.get("description"))),
+                     ("genre", _cl.genre(c.get("genre"))),
+                     ("tags", _cl.tags(c.get("tags")))):
+        if val:
+            c[key] = val
+        elif key in c:
+            del c[key]
+
+
 def parse_index(data, url):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
@@ -407,6 +422,7 @@ def parse_index(data, url):
                                            else c, why))
             continue
         c = dict(c)
+        _read_listing(c)
         if "cover" in c and cover_ref(c) is None:
             _log("%s: %r's cover left out" % (url, c["id"]))
             del c["cover"]

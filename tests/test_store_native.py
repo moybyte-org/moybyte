@@ -139,8 +139,12 @@ def test_the_native_shelf_is_the_twins_over_every_cart(tmp_path):
 _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "input", "canvas", "assets", "id",
-         "config", "sources")
+         "config", "sources", "description", "genre", "tags")
 _VENDOR = ("type", "graduated", "edit", "permissions", "assets", "config")
+
+
+_LISTING = json.load(open(os.path.join(ROOT, "tests", "listing_vectors",
+                                       "listing.json"), encoding="utf-8"))["cases"]
 
 
 def _value(rng, depth=0):
@@ -193,6 +197,8 @@ def _manifest(rng):
         if key == "icon" and rng.random() < 0.5:
             man[key] = rng.choice([[rng.randrange(-2, 520), rng.randrange(0, 6),
                                     rng.randrange(0, 6)], rng.randrange(600)])
+        if key in ("description", "genre", "tags") and rng.random() < 0.7:
+            man.update(rng.choice(_LISTING)["manifest"])      # SPEC.md 3.7's cases
         if key == "id" and rng.random() < 0.6:
             man[key] = rng.choice(["kenny.star", "local.a_1", "moybyte.x", "Kenny.star",
                                    "a.b.c", ".x", "x.", "kenny", "k\u00e9.x", ""])
@@ -289,6 +295,33 @@ def test_the_native_shelf_is_the_twins_over_generated_folders(tmp_path, seed):
     for a, b in zip(vm, cp):
         assert a == b
     assert len(vm) == len(cp)
+
+
+@pytest.mark.parametrize("ascii_only", [True, False])
+def test_the_native_shelf_reads_the_listing_vectors_as_the_twin_does(tmp_path, ascii_only):
+    """SPEC.md 3.7's description, genre and tags: the C reads each of
+    moy-spec's cases to the answer the twin gives, which test_cart_listing.py
+    holds to the spec's."""
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    for i, case in enumerate(_LISTING):
+        d = os.path.join(root, "c%02d.moy" % i)
+        os.makedirs(d)
+        man = {"format": "moy-1", "title": "T%d" % i, "main": "main.lua"}
+        man.update(case["manifest"])
+        with open(os.path.join(d, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(man, f, ensure_ascii=ascii_only)
+        with open(os.path.join(d, "main.lua"), "w") as f:
+            f.write("function _draw() cls(0) end\n")
+    ops = [["cat", root]]
+    for n in sorted(os.listdir(root)):
+        ops += [["entry", os.path.join(root, n)], ["load", os.path.join(root, n)]]
+    vm, cp = _both(ops, tmp_path)
+    assert int(cp[0].split()[1]) == len(_LISTING)
+    for a, b in zip(vm, cp):
+        assert a == b
+    assert len(vm) == len(cp)
+    assert any("s67,97,116,99,104," in ln for ln in vm)    # "Catch the stars." is in it
 
 
 # -- moy_json against CPython's json ----------------------------------------------------

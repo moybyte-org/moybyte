@@ -283,6 +283,91 @@ static char *str_of(arena_t *a, moy_cat_json_t f, size_t *n) {
     return d;
 }
 
+// SPEC.md 3.7's genres, closed: runtime/cart_listing.py's GENRES.
+static const char *const genres[] = {
+    "action", "adventure", "arcade", "music", "platformer", "puzzle",
+    "racing", "rpg", "shooter", "sports", "strategy", "toy",
+};
+
+// cart_listing.description: the text, its first MOY_CAT_DESC_MAX bytes ending
+// on a character boundary, control characters spaces, the ends trimmed of
+// spaces; none for a value that is not a string or holds only spaces.
+static void norm_desc(arena_t *a, moy_cat_json_t f, moy_cat_entry_t *e) {
+    size_t n = 0;
+    char *d = str_of(a, f, &n);
+    if (d == NULL) {
+        return;
+    }
+    if (n > MOY_CAT_DESC_MAX) {
+        n = MOY_CAT_DESC_MAX;
+        while (n > 0 && ((uint8_t)d[n] & 0xC0u) == 0x80u) {
+            n--;
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        if ((uint8_t)d[i] < 32u || d[i] == 127) {
+            d[i] = ' ';
+        }
+    }
+    size_t lo = 0;
+    while (lo < n && d[lo] == ' ') {
+        lo++;
+    }
+    while (n > lo && d[n - 1u] == ' ') {
+        n--;
+    }
+    if (n > lo) {
+        e->desc = d + lo;
+        e->desc_n = n - lo;
+    }
+}
+
+// cart_listing.genre: the name in `genres` the value is exactly, else none.
+static void norm_genre(moy_cat_json_t f, moy_cat_entry_t *e) {
+    for (size_t i = 0; i < sizeof genres / sizeof genres[0]; i++) {
+        if (is_str(f, genres[i])) {
+            e->genre = genres[i];
+            return;
+        }
+    }
+}
+
+// cart_listing.tags: of the first MOY_CAT_TAGS_MAX entries, the ones that are
+// 1-16 of a-z, 0-9 and '-', each once, in order.
+static void norm_tags(moy_cat_json_t f, moy_cat_entry_t *e) {
+    if (f.v == NULL || *f.v != '[') {
+        return;
+    }
+    moy_json_iter_t it;
+    const char *x, *xe;
+    size_t seen = 0;
+    moy_json_iter(&it, f.v, f.e);
+    while (seen < MOY_CAT_TAGS_MAX && moy_json_next(&it, NULL, NULL, &x, &xe)) {
+        seen++;
+        if (*x != '"') {
+            continue;
+        }
+        size_t k = moy_json_strlen(x, xe);
+        if (k < 1u || k > MOY_CAT_TAG_MAX) {
+            continue;
+        }
+        char t[MOY_CAT_TAG_MAX + 1];
+        size_t n = moy_json_str(x, xe, t);
+        t[n] = 0;
+        int ok = n >= 1u && n <= MOY_CAT_TAG_MAX;
+        for (size_t i = 0; ok && i < n; i++) {
+            ok = (t[i] >= 'a' && t[i] <= 'z') || (t[i] >= '0' && t[i] <= '9')
+                 || t[i] == '-';
+        }
+        for (size_t i = 0; ok && i < e->tags_n; i++) {
+            ok = strcmp(e->tags[i], t) != 0;
+        }
+        if (ok) {
+            memcpy(e->tags[e->tags_n++], t, n + 1u);
+        }
+    }
+}
+
 // _normalize_icon: (tile, w, h), or 0.
 static int norm_icon(moy_cat_json_t f, int64_t out[3]) {
     if (f.v == NULL) {
@@ -858,6 +943,9 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
         }
     }
     norm_canvas(e, field(man, mend, "canvas"));
+    norm_desc(&r->a, field(man, mend, "description"), e);
+    norm_genre(field(man, mend, "genre"), e);
+    norm_tags(field(man, mend, "tags"), e);
 
     moy_cat_json_t id = field(man, mend, "id");
     size_t idn = 0;

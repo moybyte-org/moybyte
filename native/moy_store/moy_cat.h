@@ -58,6 +58,10 @@ enum {
 
 // One cart's entry. Every pointer is good until the function it was handed to
 // returns.
+#define MOY_CAT_TAGS_MAX 8      // SPEC.md 3.7: the entries of `tags` a host reads
+#define MOY_CAT_TAG_MAX 16      // ... and the characters in one
+#define MOY_CAT_DESC_MAX 240    // ... and the bytes of a `description`
+
 typedef struct {
     const char *folder;         // its name in the root, NUL-terminated
     size_t folder_n;
@@ -83,6 +87,14 @@ typedef struct {
     int canvas;                 // 0 None, 1 (w, h) in the set, 2 the raw value
     uint16_t canvas_w, canvas_h;
     moy_cat_json_t canvas_raw;
+    // SPEC.md 3.7, each read as a host reads it (runtime/cart_listing.py) and
+    // absent when it degrades: the description's text (NULL for none), the
+    // genre (a MOY_CAT_GENRES name, NULL for none) and the tags that are tags.
+    const char *desc;
+    size_t desc_n;
+    const char *genre;
+    size_t tags_n;
+    char tags[MOY_CAT_TAGS_MAX][MOY_CAT_TAG_MAX + 1];
     uint32_t has;               // MOY_CAT_HAS_* from the listing
     uint32_t cover_size;
     size_t scenes_n;            // scene_names, in order

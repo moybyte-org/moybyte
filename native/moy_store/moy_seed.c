@@ -517,6 +517,16 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
         sb_str(b, ", \"input\": ");
         sb_canon(b, f.v, f.e);
     }
+    static const char *const listing[] = { "description", "genre", "tags" };
+    for (size_t i = 0; i < 3u; i++) {                  // SPEC.md 3.7 list fields
+        f = get(c, ce, listing[i]);
+        if (truthy(f)) {
+            sb_str(b, ", \"");
+            sb_str(b, listing[i]);
+            sb_str(b, "\": ");
+            sb_canon(b, f.v, f.e);
+        }
+    }
     sb_str(b, ", \"moybyte\": {\"type\": ");
     f = get(c, ce, "type");
     sb_canon(b, f.v, f.e);

@@ -204,6 +204,11 @@ def flags_to_hex(flags):
 # every `store.X` lookup reaches them. Same bare-or-package fallback as every
 # shared module.
 try:
+    import cart_listing as _cart_listing
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import cart_listing as _cart_listing
+
+try:
     from moy_store_base import THUMBS_DIR
     from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
@@ -854,6 +859,12 @@ def _load(path, whole, folder=None):
             # the 320x240 default, or the raw out-of-set value Player.start
             # refuses by name -- see _normalize_canvas above.
             "canvas": _normalize_canvas(man.get("canvas")),
+            # What a list says about the cart (SPEC.md 3.7), each read as
+            # every host reads it: None / None / [] when the manifest has none
+            # or has one that does not read. Cosmetic, never a reason to refuse.
+            "description": _cart_listing.description(man.get("description")),
+            "genre": _cart_listing.genre(man.get("genre")),
+            "tags": _cart_listing.tags(man.get("tags")),
         }
         if broken:
             # Set ONLY on a cart whose manifest would not parse, so every reader
@@ -1790,7 +1801,7 @@ def _unique_dir(root, base, ns=USER_NS):
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
            author=None, palette=None, extensions=None, format=None, fps=None,
-           icon=None, canvas=None, ns=USER_NS):
+           icon=None, canvas=None, listing=None, ns=USER_NS):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
@@ -1799,17 +1810,19 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     is optional -- omitted entirely when blank, so a fresh/duplicated cart's
     manifest stays as clean as before this field existed. `format`/`fps` are
     duplicate()'s passthrough (SPEC.md 3.1): copying a spec cart must yield
-    another "moy-1" cart at its declared tick, not a restamped moybyte one."""
+    another "moy-1" cart at its declared tick, not a restamped moybyte one.
+    `listing` is a cart dict whose description/genre/tags (SPEC.md 3.7) the
+    manifest keeps, the PICO-8 tag included."""
     d = _unique_dir(root, slug(title), ns)
     _mkdir(d)
     return _whole_or_none(d, lambda: _create_in(
         d, title, src, cfg, edit, type, runtime, main, scenes, scene_order,
-        author, palette, extensions, format, fps, icon, canvas))
+        author, palette, extensions, format, fps, icon, canvas, listing))
 
 
 def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
                scene_order, author, palette, extensions, format, fps, icon,
-               canvas):
+               canvas, listing):
     name = d.replace("\\", "/").rsplit("/", 1)[-1]
     manifest = {
         "format": format or CART_FORMAT, "title": title,
@@ -1829,6 +1842,10 @@ def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
         manifest["icon"] = list(icon)
     if canvas is not None:            # cart canvas (SPEC.md 1/3.1) survives a copy
         manifest["canvas"] = _canvas_str(canvas)
+    if listing:                       # description/genre/tags (SPEC.md 3.7) survive a copy
+        for k in ("description", "genre", "tags"):
+            if listing.get(k):
+                manifest[k] = listing[k]
     if scenes:                        # scene assets (#85): register + write (see above)
         ven["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
     manifest[VENDOR_KEY] = ven
@@ -1916,6 +1933,7 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
                  fps=cart.get("fps"),                        # stays moy-1 at its tick
                  icon=cart.get("icon"),                      # spec 3.4 launcher art
                  canvas=cart.get("canvas"),                  # spec 1/3.1 cart canvas
+                 listing=cart,                               # spec 3.7 description/genre/tags
                  ns=ns)
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
