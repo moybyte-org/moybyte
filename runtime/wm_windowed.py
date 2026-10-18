@@ -546,14 +546,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._root_ctx.app_layouts[app.id] = layout
 
     def _install(self, ctx, win=None):
-        # The focus mark draws only in the focused window (ui.marks).
+        # The focus mark draws only in the focused window (ui.marks), and in
+        # none while a popover above the windows holds the keys: one a screen.
         if win is None:
             ctx.install(self.ws)
             _ui_draw.marks(True)
         else:
             cx, cy, _cw, _ch = win.content_rect()
             ctx.install(self.ws, (cx, cy))
-            win._marked = self._wins.get(self._focus) is win
+            win._marked = (self._wins.get(self._focus) is win
+                           and not self.popover_takes_keys())
             _ui_draw.marks(win._marked)
 
     def _make_ctx(self, buf):
