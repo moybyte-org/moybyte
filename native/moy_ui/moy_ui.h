@@ -654,6 +654,7 @@ typedef struct {
     int32_t v, lo, hi;              // slider; progress: v of hi done (lo 0)
     int16_t fs, desk, card;         // card: on a group's card
     int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
+    int16_t steps;                  // slider: a segment per step, no number
 } moy_ui_vrow_t;
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r);

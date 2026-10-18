@@ -135,10 +135,10 @@ def _over(o):
         return None
     oid = o.get("id")
     idb = b"" if oid is None else str(oid).encode("utf-8")
-    return _pack("<8i", _colour(o.get("fill")), _colour(o.get("ink")),
+    return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
-                 _flag(o, "mark")) + idb
+                 _flag(o, "mark"), _flag(o, "steps")) + idb
 
 
 def page(title, o=None):
@@ -170,7 +170,7 @@ def toggle(label, on, o=None):
 
 def slider(label, v, lo, hi, o=None):
     """A value from `lo` to `hi`, left and right its own while focused: the
-    new `v`."""
+    new `v`. `o.steps` draws a segment per step and no number."""
     t = _T
     return _C.api_slider(t[0], t[1], t[2], label, v, lo, hi, _over(o))
 

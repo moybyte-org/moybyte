@@ -42,10 +42,10 @@
   ;; every other key absent (-1).
   (data (i32.const 1152)
     "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
-    "\01\00\00\00\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff")
-  (data (i32.const 1184)
+    "\01\00\00\00\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff")
+  (data (i32.const 1192)
     "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
-    "\00\00\00\00\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff")
+    "\00\00\00\00\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff")
   ;; 2048: the page's rect (16 bytes); 2064: a card's answers (20); 2096:
   ;; the focused id (32).
 
@@ -66,10 +66,10 @@
   (func $card (param $i i32) (param $np i32) (param $nl i32) (param $sp i32)
               (param $sl i32) (param $c i32)
     (local $blk i32) (local $x i32) (local $y i32)
-    (local.set $blk (select (i32.const 1152) (i32.const 1184)
+    (local.set $blk (select (i32.const 1152) (i32.const 1192)
                             (i32.eq (local.get $i) (global.get $picked))))
     (call $ok (call $ui_card (local.get $np) (local.get $nl) (local.get $sp) (local.get $sl)
-                             (local.get $blk) (i32.const 32) (i32.const 2064) (i32.const 20)))
+                             (local.get $blk) (i32.const 36) (i32.const 2064) (i32.const 20)))
     (local.set $x (i32.load (i32.const 2064)))
     (local.set $y (i32.load (i32.const 2068)))
     (if (i32.eqz (local.get $i))

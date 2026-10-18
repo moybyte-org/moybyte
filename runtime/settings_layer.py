@@ -243,6 +243,7 @@ _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
 # the one the boot applies and the dev channel's `vol` sets); Brightness is
 # stored and applied by nothing yet.
 LEVELS = {"volume": (0, 7, 7), "brightness": (0, 5, 3)}
+_STEPPED = {"steps": True}    # Volume's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
 
 _NETS = 24                    # the networks the Wi-Fi page lists
@@ -1294,7 +1295,12 @@ class SettingsLayer:
         elif kind == "level":
             self._kinds[s] = "slider"
             cur, lo, hi = self.level(key)
-            got = _ui.slider(s, cur, lo, hi)
+            if key == "volume":           # the power popover's gauge, muted at 0
+                if cur == lo:
+                    _ui.icon("mute")
+                got = _ui.slider(s, cur, lo, hi, _STEPPED)
+            else:
+                got = _ui.slider(s, cur, lo, hi)
             if got != cur:
                 self.set_level(key, got)
         elif kind == "name":

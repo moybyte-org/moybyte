@@ -8,7 +8,8 @@
 ;; tools/wasm_cart.py and never committed. Into pmem: 0 frames, 1 the link's
 ;; activations, 2 the size (from 0), 3 the mode, 4 the accent, 5 the focused
 ;; id's length, 6 the last row answer that failed, negated (0: none), 7 the
-;; content's top, 8 the name's length, 9 the times Enter was pressed in it.
+;; content's top, 8 the name's length, 9 the times Enter was pressed in it,
+;; 10 the level.
 (module
   (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_page" (func $ui_page
@@ -28,6 +29,8 @@
   (import "moybyte.app" "ui_progress" (func $ui_progress
     (param i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_field" (func $ui_field
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_slider" (func $ui_slider
     (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
@@ -49,6 +52,12 @@
   (data (i32.const 1192) "wifi")
   (data (i32.const 1200) "Update")
   (data (i32.const 1208) "Name")
+  (data (i32.const 1216) "Level")
+  ;; The level's override block (docs/ui_api_2026-10.md §3): `steps` 1, every
+  ;; other key absent (-1).
+  (data (i32.const 1224)
+    "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff"
+    "\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\ff\01\00\00\00")
   (data (i32.const 2144) "pic")
 
   ;; 2048: the page's rect (16 bytes); 2096: the focused id (32); 2144: the
@@ -59,6 +68,7 @@
   (global $accent (mut i32) (i32.const 0))
   (global $len (mut i32) (i32.const 3))
   (global $dones (mut i32) (i32.const 0))
+  (global $level (mut i32) (i32.const 3))
   (global $frames (mut i32) (i32.const 0))
 
   ;; A row's answer: below 0 is a failure, kept in pmem 6.
@@ -102,6 +112,10 @@
     (global.set $len (i32.and (local.get $r) (i32.const 0xffff)))
     (if (i32.and (local.get $r) (i32.const 0x10000))
       (then (global.set $dones (i32.add (global.get $dones) (i32.const 1)))))
+    (global.set $level (call $ui_slider (i32.const 1216) (i32.const 5) (global.get $level)
+                                        (i32.const 0) (i32.const 7) (i32.const 1224)
+                                        (i32.const 36)))
+    (call $ok (global.get $level))
     (call $ok (call $ui_group (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)))
     (local.set $f (call $ui_focus (i32.const 0) (i32.const 0) (i32.const 2096) (i32.const 32)))
     (global.set $frames (i32.add (global.get $frames) (i32.const 1)))
@@ -113,4 +127,5 @@
     (drop (call $pmem (i32.const 5) (local.get $f) (i32.const 1)))
     (drop (call $pmem (i32.const 7) (i32.load (i32.const 2052)) (i32.const 1)))
     (drop (call $pmem (i32.const 8) (global.get $len) (i32.const 1)))
-    (drop (call $pmem (i32.const 9) (global.get $dones) (i32.const 1)))))
+    (drop (call $pmem (i32.const 9) (global.get $dones) (i32.const 1)))
+    (drop (call $pmem (i32.const 10) (global.get $level) (i32.const 1)))))

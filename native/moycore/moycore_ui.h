@@ -104,6 +104,7 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->disabled = moycore_ui_flag(L, i, "disabled");
     o->nav = moycore_ui_flag(L, i, "nav");
     o->mark = moycore_ui_flag(L, i, "mark");
+    o->steps = moycore_ui_flag(L, i, "steps");
     lua_getfield(L, i, "id");
     if (lua_type(L, -1) == LUA_TSTRING) {
         size_t n = 0;

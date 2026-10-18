@@ -10,7 +10,7 @@ the engine's focus and navigation, and the shell-strict ratchet.
     kept by id and dropped with it, `nav` and `mark` off, a settled frame;
   * the shell is strict (§7): the shell's app modules and the system carts
     reach the engine layer (`runtime/ui_draw.py`) only where pinned below,
-    and pass no override key but `id`, `current` and `disabled`.
+    and pass no override key but `id`, `current`, `disabled` and `steps`.
 """
 
 import os

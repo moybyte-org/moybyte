@@ -50,11 +50,11 @@ enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_
 // The override block (§3) as words, in its order: fill, ink, border (a role
 // as MOY_UI_O_ROLE + its index in the token row, moy_ui_token_names; an RGB
 // colour 0xRRGGBB; -1 absent), the id's length in bytes (its text follows
-// the eight words; -1 absent), current, disabled, nav, mark (0 or 1; -1
-// absent). A wasm app hands it over as a pointer and its length.
+// the nine words; -1 absent), current, disabled, nav, mark, steps (0 or 1;
+// -1 absent). A wasm app hands it over as a pointer and its length.
 enum {
     MOY_UI_O_FILL = 0, MOY_UI_O_INK, MOY_UI_O_BORDER, MOY_UI_O_ID, MOY_UI_O_CURRENT,
-    MOY_UI_O_DISABLED, MOY_UI_O_NAV, MOY_UI_O_MARK, MOY_UI_O_WORDS
+    MOY_UI_O_DISABLED, MOY_UI_O_NAV, MOY_UI_O_MARK, MOY_UI_O_STEPS, MOY_UI_O_WORDS
 };
 #define MOY_UI_O_ROLE 0x1000000
 #define MOY_UI_O_NONE (-1)
@@ -63,6 +63,7 @@ typedef struct {
     int32_t fill, ink, border;      // MOY_UI_O_NONE, RGB, or MOY_UI_O_ROLE + a token
     moy_ui_span_t id;               // p NULL: the label's
     int8_t current, disabled, nav, mark;    // -1 absent
+    int8_t steps;                   // a slider: a segment per step, no number
 } moy_ui_over_t;
 
 // Every key absent.

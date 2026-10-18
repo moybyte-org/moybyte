@@ -19,6 +19,7 @@
    "map": "#9fd0ff",
    "moy": "#c9b8ff",
    "music": "#46b843",
+   "mute": "#c9d3e6",
    "notes": "#ffffff",
    "paint": "#e2582e",
    "play": "#46b843",
@@ -36,84 +37,84 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 2506,
+   "bytes": 2549,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 6278,
+   "bytes": 6398,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 8848,
+   "bytes": 9016,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 2624,
+   "bytes": 2667,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 6457,
+   "bytes": 6584,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 8858,
+   "bytes": 9026,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 2595,
+   "bytes": 2638,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 6361,
+   "bytes": 6488,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 8848,
+   "bytes": 9016,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1592,
+   "bytes": 1615,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 3636,
+   "bytes": 3686,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 4935,
+   "bytes": 5006,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -192,7 +193,8 @@
   "cart_py",
   "cart_lua",
   "cart_wasm",
-  "cart_p8"
+  "cart_p8",
+  "mute"
  ],
  "tiers": {
   "desktop": [

@@ -301,7 +301,7 @@ class _Over(c.Structure):
     """moy_ui_over_t (native/moy_ui/moy_ui_api.h)."""
     _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
                 ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
-                ("nav", c.c_int8), ("mark", c.c_int8)]
+                ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8)]
 
 
 class _Line(c.Structure):

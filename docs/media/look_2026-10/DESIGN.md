@@ -215,7 +215,7 @@ as pixel art in every theme at whole scales: 16 px on the handheld's 22×20
 tile, 32 px on the desk's 36×34 button (`moy_mark.png`). Its outline is
 index 0, which needs GAPS 25.
 
-**Pixel sets** are 16×16 `IconSheet`s of 55 slots
+**Pixel sets** are 16×16 `IconSheet`s of 56 slots
 (`native/moy_ui/icons/pixel/system_icons.moygfx`), lit from the top left, outlined in
 dark blue; a theme may swap their palette indices.
 **Smooth sets** are 24-unit SVGs with a 2-unit stroke (`native/moy_ui/icons/smooth/`),

@@ -2,7 +2,7 @@
 """The console's icon sets (docs/look_2026-10.md step 16): the pixel set and
 the smooth sets' masks, built from their sources in native/moy_ui/icons/.
 
-Every set fills the 55 slots of `pixel/slots.txt`.
+Every set fills the 56 slots of `pixel/slots.txt`.
 
 * The PIXEL set is `pixel/system_icons.moygfx`, a 16x16 IconSheet of 8x7
   tiles that `pixel/pixel_icons.py` draws. Its first line is `clear 16`: its
@@ -60,7 +60,7 @@ FILLS = {
              "moy": "#c9b8ff", "home": "#f2a65a", "projects": "#f5c542",
              "paint": "#e2582e", "storybook": "#e2582e", "music": "#46b843",
              "battery": "#46b843", "calc": "#c9d3e6", "getcarts": "#46b843",
-             "save": "#7da7ea", "sprite": "#9be36b", "map": "#9fd0ff"},
+             "save": "#7da7ea", "sprite": "#9be36b", "map": "#9fd0ff", "mute": "#c9d3e6"},
 }
 
 

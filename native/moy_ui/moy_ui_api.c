@@ -65,7 +65,7 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->fill = o->ink = o->border = MOY_UI_O_NONE;
     o->id.p = NULL;
     o->id.n = 0;
-    o->current = o->disabled = o->nav = o->mark = -1;
+    o->current = o->disabled = o->nav = o->mark = o->steps = -1;
 }
 
 static int32_t word(const uint8_t *w, int i) {
@@ -101,12 +101,13 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
     o->disabled = flag(word(w, MOY_UI_O_DISABLED));
     o->nav = flag(word(w, MOY_UI_O_NAV));
     o->mark = flag(word(w, MOY_UI_O_MARK));
+    o->steps = flag(word(w, MOY_UI_O_STEPS));
     return MOY_UI_OK;
 }
 
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
-                                       -1, -1, -1, -1};
+                                       -1, -1, -1, -1, -1};
     return o != NULL ? o : &none;
 }
 
@@ -1005,6 +1006,7 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     vrow_init(c, &r, label);
     r.lo = lo;
     r.hi = hi;
+    r.steps = o->steps == 1;
     int p = c->in[MOY_UI_IN_PTR];
     if (o->disabled != 1 && c->press == id && c->gesture == 1 && (p & MOY_UI_P_LIVE)
         && (p & MOY_UI_P_HELD) && b.w > 0) {

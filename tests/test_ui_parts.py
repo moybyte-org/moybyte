@@ -7,8 +7,8 @@ page drawn by a Python, a Lua and a compiled app to the same pixels.
     last row's focus mark and draws no second one;
   * info is no stop; link answers its activation by key and by tap;
   * cycle wraps, seg clamps, swatches pick by tap and draw their colours;
-  * toggle draws its On/Off word and flips; slider maps the pointer over its
-    track and steps by arrow;
+  * toggle draws its On/Off word and flips; slider (a segment a step, with
+    `steps`) maps the pointer over its track and steps by arrow;
   * hints take the page's foot, which its rows then stop above;
   * an icon goes on the next row or button; progress is no stop;
   * a table's current row follows focus and opens by Enter or a second tap,
@@ -45,8 +45,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARTS = os.path.join(ROOT, "tests", "fixtures", "ui_parts")
 WASM = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_parts.moy")
 _DT = 1.0 / 30.0
-P_FRAMES, P_OPENS, P_SIZE, P_MODE, P_ACCENT, P_FOCUS, P_FAIL, P_TOP, P_NAME, P_DONES = range(10)
-N_PMEM = 10
+(P_FRAMES, P_OPENS, P_SIZE, P_MODE, P_ACCENT, P_FOCUS, P_FAIL, P_TOP, P_NAME, P_DONES,
+ P_LEVEL) = range(11)
+N_PMEM = 11
 BITS = {"left": 1, "right": 2, "up": 4, "down": 8, "a": 16, "b": 32, "run": 64}
 
 _THEMES = {}
@@ -275,6 +276,57 @@ def test_slider_maps_the_pointer_over_its_track_and_steps_by_arrow():
     r.frame(ptr=(right, 10, 1))
 
 
+def _level_page(v, o):
+    """A group of a link, a 0..7 slider under override `o` and a link."""
+    st = {"v": v}
+
+    def draw():
+        st["rect"] = ui.page("")
+        ui.group("Sound")
+        ui.link("Top", "")
+        st["v"] = ui.slider("Volume", st["v"], 0, 7, o)
+        ui.link("Foot", "")
+        ui.group()
+        return st
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    return r, st
+
+
+def test_a_stepped_slider_draws_a_segment_a_step_and_no_number():
+    """`steps`: seven segments for 0..7, the power popover's gauge (6 wide on
+    an 8 pitch) right-aligned in the track, the first `v` in the value
+    colour; no number and no knob, where a plain slider has both."""
+    r, _st = _level_page(3, {"steps": True})
+    plain, _pst = _level_page(3, None)
+    mid = r.out["rect"][1] + CAPTION + ROW + ROW // 2
+    right = 320 - INSET - PAD
+    x0 = right - (7 * 8 - 2)
+    card = r.px(x0 + 6, mid)
+    assert card == r.px(120, mid), "the gap between segments is the card"
+    on, off = r.px(x0 + 2, mid), r.px(x0 + 3 * 8 + 2, mid)
+    assert on != card and off != card and on != off
+    assert [r.px(x0 + i * 8 + 2, mid) for i in range(7)] == [on] * 3 + [off] * 4
+    assert r.px(x0 + 6 * 8 + 5, mid) == off and r.px(x0 + 6 * 8 + 6, mid) == card, \
+        "the last segment ends at the row's pad"
+    assert all(r.px(x, mid) == card for x in range(100, x0)), "no number, no knob"
+    assert any(plain.px(x, mid) != card for x in range(100, x0)), \
+        "a plain slider draws its number and track there"
+
+
+def test_a_stepped_slider_takes_a_tap_on_a_segment_and_the_arrows():
+    r, st = _level_page(3, {"steps": True})
+    mid = r.out["rect"][1] + CAPTION + ROW + ROW // 2
+    x0 = 320 - INSET - PAD - (7 * 8 - 2)
+    r.tap(x0 + 4 * 8 + 2, mid)
+    assert st["v"] == 5, "a tap on segment 4 fills it and those before it"
+    r.tap(x0 - 10, mid)
+    assert st["v"] == 0, "left of the segments is lo: muted"
+    r.frame(("right",))
+    assert st["v"] == 1
+
+
 def test_hints_take_the_pages_foot_and_rows_stop_above_them():
     def draw():
         ui.page("")
@@ -338,7 +390,7 @@ def _frame(drv):
 def _script(ws):
     """Settle; open the link; step the cycle; move to the seg and step it;
     then tap the swatch picker's last dot; move down to the field, type in
-    it and press Enter."""
+    it and press Enter; move down to the stepped slider and step it."""
     drv = make_drv(ws)
     shots = []
     for _ in range(3):
@@ -357,7 +409,7 @@ def _script(ws):
     _frame(drv)
     _frame(drv)
     shots.append((_pixels(ws), _pmem(ws)))
-    for step in ("down", ord("x"), 13):
+    for step in ("down", ord("x"), 13, "down", "left"):
         if isinstance(step, int):
             drv.type_char(step)
         else:
@@ -417,6 +469,7 @@ def test_the_parts_page_answers_its_script(parts_runs):
     assert s[10][P_FOCUS] == len("Name"), "down from the swatches is the field"
     assert s[11][P_NAME] == len("picx"), "the field took the typed key"
     assert s[12][P_DONES] == 1, "Enter in the field"
+    assert s[13][P_FOCUS] == len("Level") and s[14][P_LEVEL] == 2, "left steps the level"
 
 
 # -- an icon on a row, and a progress bar (docs/look_2026-10.md step 19) --------------

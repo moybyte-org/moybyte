@@ -53,3 +53,4 @@
 52 cart_lua
 53 cart_wasm
 54 cart_p8
+55 mute

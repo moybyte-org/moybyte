@@ -395,6 +395,16 @@ static moy_ui_box_t tab_box(const pd_t *d, const pf_t *f, moy_ui_box_t b, const 
     return (moy_ui_box_t){0, 0, 0, 0};
 }
 
+// A stepped slider's segments (o.steps): one per step from lo to hi, the
+// power popover's gauge (6 wide on an 8 pitch, 8 tall, at the scale) where
+// they fit the track, narrower where they do not, right-aligned in it.
+static int step_geo(const pd_t *d, const vgeo_t *g, const moy_ui_vrow_t *r, int *pitch) {
+    int n = r->hi > r->lo ? r->hi - r->lo : 1;
+    int p = 8 * d->fs, room = (g->track.w + 2 * d->fs) / n;
+    *pitch = p < room ? p : room < 2 ? 2 : room;
+    return g->track.x + g->track.w - (n * *pitch - 2 * d->fs);
+}
+
 static moy_ui_box_t dot_box(moy_ui_box_t b, const moy_ui_vrow_t *r, const vgeo_t *g, int i) {
     int x = g->right - g->dot - (r->n - 1 - i) * g->step;
     return (moy_ui_box_t){(int16_t)x, (int16_t)(b.y + (b.h - g->dot) / 2), (int16_t)g->dot,
@@ -407,6 +417,11 @@ int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const m
     open_pd(s, &d, r->fs, r->desk);
     vgeo_t g;
     geo(&d, b, r, &g);
+    if (kind == MOY_UI_V_SLIDER && r->steps) {
+        int pitch, x0 = step_geo(&d, &g, r, &pitch);
+        int32_t v = x < x0 ? r->lo : r->lo + 1 + (x - x0) / pitch;
+        return v > r->hi ? r->hi : v;
+    }
     if (kind == MOY_UI_V_SLIDER) {
         int dx = x - g.track.x;
         dx = dx < 0 ? 0 : dx > g.track.w ? g.track.w : dx;
@@ -573,6 +588,17 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                                             90);
             uint16_t val_c = rowfill >= 0 ? cink : pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT));
             int span = r->hi > r->lo ? r->hi - r->lo : 1;
+            if (kind == MOY_UI_V_SLIDER && r->steps) {
+                int pitch, x0 = step_geo(&d, &g, r, &pitch);
+                int sw = pitch - 2 * d.fs, sh = 8 * d.fs, sy = b.y + (b.h - sh) / 2;
+                uint16_t on = (flags & MOY_UI_F_DISABLED) ? cdim : val_c;
+                for (int i = 0; i < span; i++) {
+                    fill(&d, x0 + i * pitch, sy, sw > 1 ? sw : 1, sh,
+                         i < r->v - r->lo ? on : base);
+                }
+                right = x0;
+                break;
+            }
             int fw = (int)((int64_t)t.w * (r->v - r->lo) / span);
             rrect(&d, t.x, t.y, t.w, t.h, d.fs, 1, base, 0, 0);
             rrect(&d, t.x, t.y, fw, t.h, d.fs, 1, (flags & MOY_UI_F_DISABLED) ? cdim : val_c, 0,

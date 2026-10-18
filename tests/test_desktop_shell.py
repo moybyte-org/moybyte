@@ -296,6 +296,37 @@ def test_the_volume_row_sets_the_console_level(tmp_path):
         audio_session.console_volume(was)
 
 
+def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypatch):
+    """Volume draws as the power popover's seven-step gauge (a `steps`
+    slider: no number), the theme's muted-speaker icon before it at 0;
+    Brightness keeps the plain slider."""
+    from runtime import settings_layer as S
+    ws, drv = _settings_page(tmp_path)
+    icons, sliders = [], {}
+    real_icon, real_slider = S._ui.icon, S._ui.slider
+
+    def icon(name, o=None):
+        icons.append((name, real_icon(name, o)))
+        return icons[-1][1]
+
+    def slider(label, v, lo, hi, o=None):
+        sliders[label] = (lo, hi, o)
+        return real_slider(label, v, lo, hi, o)
+    monkeypatch.setattr(S._ui, "icon", icon)
+    monkeypatch.setattr(S._ui, "slider", slider)
+    ws.settings_layer.set_level("volume", 0)
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert ("mute", True) in icons, "the theme's set draws the muted speaker"
+    assert sliders["Volume"] == (0, 7, {"steps": True})
+    assert sliders["Brightness"][2] is None
+    ws.settings_layer.set_level("volume", 4)
+    icons.clear()
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert not any(n == "mute" for n, _ok in icons)
+
+
 def test_brightness_and_name_are_stored(tmp_path):
     """Brightness and Name apply nothing yet, but what they are set to is in
     system.json: a fresh session reads it back. Name is typed (the keyboard

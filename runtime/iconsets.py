@@ -5,7 +5,7 @@ A theme's look sets `icons.kind` (`pixel` or `smooth`), `icons.set` and, for
 a pixel set, `icons.swap`. A theme that sets no kind draws the bar's own
 IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has.
 
-* PIXEL: the 55-slot IconSheet tools/make_icons.py builds
+* PIXEL: the 56-slot IconSheet tools/make_icons.py builds
   (`system_icons.moygfx`, its clear pixel 16, so Moy's index-0 outline
   draws), at whole scales. `icons.swap` is 16 hex digits, digit i the index
   that index i draws as (Bench takes the blue ramp down a step).
@@ -39,7 +39,7 @@ SLOTS = (
     "save", "pencil", "bucket", "line", "rect", "oval", "select", "flip",
     "rotate", "game", "app", "art", "wallpaper", "doc", "folder", "trash",
     "close", "minimize", "maximize", "back", "forward", "down", "new", "dup",
-    "del", "enter", "backspace", "cart_py", "cart_lua", "cart_wasm", "cart_p8",
+    "del", "enter", "backspace", "cart_py", "cart_lua", "cart_wasm", "cart_p8", "mute",
 )
 SLOT = {n: i for i, n in enumerate(SLOTS)}
 # The shell's own icon kinds (chrome._ICON's) by the slot they draw.
