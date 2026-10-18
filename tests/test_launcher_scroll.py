@@ -12,6 +12,14 @@ tests/test_v04_userland.py."""
 
 from pathlib import Path
 from ws_helpers import build_ws_with_shelf as _ws_with_carts
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 ROOT = Path(__file__).resolve().parent.parent
 

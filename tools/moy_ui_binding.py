@@ -1377,11 +1377,14 @@ def binding():
         finally:
             lib.moy_theme_probe_end()
 
-    rdims = (c.c_int * 4).in_dll(lib, "moy_theme_custom_dims")
+    rdims = (c.c_int * 5).in_dll(lib, "moy_theme_custom_dims")
     theme_bytes = rdims[3]
     acc = ((c.c_uint8 * 2) * rdims[0]).in_dll(lib, "moy_theme_accents")
     accents = tuple((n, acc[i][0], acc[i][1]) for i, n in
                     enumerate(_names(lib, "moy_theme_accent_names", rdims[0])))
+    pre = ((c.c_uint8 * 2) * rdims[4]).in_dll(lib, "moy_theme_presets")
+    presets = tuple((n, pre[i][0], pre[i][1]) for i, n in
+                    enumerate(_names(lib, "moy_theme_preset_names", rdims[4])))
     ramps = ((c.c_uint8 * (rdims[2] + 1)) * rdims[1]).in_dll(lib, "moy_theme_tints")
     tints = tuple((n, tuple(ramps[i][1:1 + ramps[i][0]])) for i, n in
                   enumerate(_names(lib, "moy_theme_tint_names", rdims[1])))
@@ -1395,7 +1398,7 @@ def binding():
         else:
             b = bytes(source)
         ai = -1 if accent is None else next(
-            (i for i, a in enumerate(accents) if a[1] == accent), None)
+            (i for i, a in enumerate(accents + presets) if a[1] == accent), None)
         ti = -1 if tint is None else next(
             (i for i, t in enumerate(tints) if t[0] == tint), None)
         if ai is None or ti is None:
@@ -1462,6 +1465,7 @@ def binding():
     m.theme_rgb = theme_rgb
     m.theme_custom = theme_custom
     m.theme_accents = lambda: accents
+    m.theme_presets = lambda: presets
     m.theme_tints = lambda: tints
     m.theme_uninstall = lib.moy_theme_uninstall
     m.theme_fonts = theme_fonts

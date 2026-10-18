@@ -10,7 +10,16 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws, select_on_home
+from ws_helpers import build_ws as _build_ws, select_on_home, use_theme
+
+
+def _ws(tmp_path, **kw):
+    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
+    in its dark mode, whose tool apps exit by the bar's context X; a test of
+    a look sets its theme."""
+    ws = _build_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
+    return ws
 
 
 def _select(ws, title):
@@ -253,8 +262,8 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
 def test_calc_draws_in_the_faces_its_theme_names(tmp_path, monkeypatch, variant):
     """Calc's keys take its theme's `app_buttons.calc` (its host passes its
     id), and its result is the theme's `result` face where one is installed
-    (Moy's Night: Inter), else the ui face at the largest whole scale that
-    fits (Day's pixel face)."""
+    (Moy's Night: Inter, its Day: Day Sans), else the ui face at the
+    largest whole scale that fits."""
     from runtime import calc_app, ui_draw
     ws, calc = _calc(tmp_path)
     ws.look.set_theme("moy", persist=False, variant=variant)
@@ -273,7 +282,7 @@ def test_calc_draws_in_the_faces_its_theme_names(tmp_path, monkeypatch, variant)
         calc.handle_input(_Key(typed=ord(ch)))
     ws._dirty = True
     ws.frame(1 / 30)
-    assert faces[-1] == ("result", "84", variant == "dark")
+    assert faces[-1] == ("result", "84", True)
     assert ui_draw.print_font() == ui_draw.font("ui")[0], "the ui face is put back"
     calc.entry = "OOPS"
     ws._dirty = True

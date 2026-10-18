@@ -11,7 +11,7 @@ import pytest
 from runtime import chrome_ops as ui, moy_play
 from runtime import ui_draw as toolkit
 from runtime.chrome import NAMES
-from ws_helpers import build_ws
+from ws_helpers import build_ws, use_theme
 
 
 @pytest.fixture(scope="module")
@@ -20,7 +20,10 @@ def ws(tmp_path_factory):
         moy_play._clib()
     except RuntimeError:
         pytest.skip("no host Player (a C compiler builds it)")
-    return build_ws(tmp_path_factory.mktemp("chrome"))
+    # a palette theme (the `night` fixture): the raster's palette here is MOY64's
+    ws = build_ws(tmp_path_factory.mktemp("chrome"))
+    use_theme(ws, "night", "dark")
+    return ws
 
 
 def _both(ws, piece, *args):

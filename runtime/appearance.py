@@ -242,8 +242,9 @@ class Appearance:
         # above the tap floor; it can never take it below.
         self.chrome_scale = 0
         # Panel THEME (Appearance -> THEMES): the chrome token set the panels/window
-        # chrome/selection accents read each draw. Default = the moybyte "night"
-        # colorway (today's exact colors); load_system applies the persisted pick.
+        # chrome/selection accents read each draw. Default = Moy in its Day
+        # mode (`DEFAULT_THEME`, `DEFAULT_VARIANT`); load_system applies the
+        # persisted pick.
         self.theme_name = DEFAULT_THEME
         self.theme_variant = DEFAULT_VARIANT
         # The live token dict lives on the KERNEL, not here -- see the module
@@ -476,7 +477,8 @@ class Appearance:
         """Change the theme, the one write path of every Appearance row but
         THEME, MODE and CHROME SIZE. `kind` and `value`:
 
-          "accent"     an accent's A (`ui.theme_accents`), None the source's own
+          "accent"     an accent's A (`ui.theme_accents`) or a preset's dark
+                       value (`ui.theme_presets`), None the source's own
           "tint"       a tint's name (`ui.theme_tints`), None for none
           "wallpaper"  a wallpaper cart's id, PICTURE (Paint's picture,
                        copied into the package), None (NONE) or THEIRS

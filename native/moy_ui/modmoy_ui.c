@@ -641,8 +641,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
 
 // theme_custom(source, accent, tint) -> (rc, bytes or None): the bytes of
 // `custom`'s theme.json (moy_theme_custom) derived from `source`, a seed's
-// name or a stored package's bytes; accent the A of a theme_accents() entry
-// or None for the source's own, tint a theme_tints() name or None. A name
+// name or a stored package's bytes; accent the A of a theme_accents() entry,
+// the dark value of a theme_presets() entry, or None for the source's own, tint a theme_tints() name or None. A name
 // that is no seed answers MOY_THEME_CHAIN.
 static mp_obj_t ui_theme_custom(mp_obj_t source, mp_obj_t accent, mp_obj_t tint) {
     const uint8_t *src;
@@ -673,6 +673,9 @@ static mp_obj_t ui_theme_custom(mp_obj_t source, mp_obj_t accent, mp_obj_t tint)
         mp_int_t a = mp_obj_get_int(accent);
         for (int i = 0; i < MOY_THEME_ACCENTS && ai < 0; i++) {
             ai = moy_theme_accents[i][0] == a ? i : -1;
+        }
+        for (int i = 0; i < MOY_THEME_PRESETS && ai < 0; i++) {
+            ai = moy_theme_presets[i][0] == a ? MOY_THEME_ACCENTS + i : -1;
         }
         if (ai < 0) {
             mp_raise_ValueError(MP_ERROR_TEXT("no such accent"));
@@ -715,6 +718,19 @@ static mp_obj_t ui_theme_accents(void) {
     return mp_obj_new_tuple(MOY_THEME_ACCENTS, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_accents_obj, ui_theme_accents);
+
+// theme_presets() -> ((name, dark, light), ...): style.json's theme.presets.
+static mp_obj_t ui_theme_presets(void) {
+    mp_obj_t items[MOY_THEME_PRESETS];
+    for (int i = 0; i < MOY_THEME_PRESETS; i++) {
+        mp_obj_t t[3] = {name_obj(moy_theme_preset_names[i]),
+                         MP_OBJ_NEW_SMALL_INT(moy_theme_presets[i][0]),
+                         MP_OBJ_NEW_SMALL_INT(moy_theme_presets[i][1])};
+        items[i] = mp_obj_new_tuple(3, t);
+    }
+    return mp_obj_new_tuple(MOY_THEME_PRESETS, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_theme_presets_obj, ui_theme_presets);
 
 // theme_tints() -> ((name, (ramp...)), ...): style.json's theme.tints.
 static mp_obj_t ui_theme_tints(void) {
@@ -2421,6 +2437,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_rgb), MP_ROM_PTR(&ui_theme_rgb_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_custom), MP_ROM_PTR(&ui_theme_custom_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_accents), MP_ROM_PTR(&ui_theme_accents_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_presets), MP_ROM_PTR(&ui_theme_presets_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_tints), MP_ROM_PTR(&ui_theme_tints_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },

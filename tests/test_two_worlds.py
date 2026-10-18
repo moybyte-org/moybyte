@@ -10,6 +10,13 @@ from runtime.host_canvas import make_system_canvas
 
 
 from ws_helpers import build_desktop_ws as _ws, select_on_home
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 
 def _drv(ws):

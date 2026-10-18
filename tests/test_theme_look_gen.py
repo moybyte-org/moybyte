@@ -17,7 +17,7 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import chrome, ui_draw
-from ws_helpers import build_desktop_ws, build_ws
+from ws_helpers import build_desktop_ws, build_ws, fixture_theme, install_theme, use_theme
 
 THEME = "mine"
 BASE = "berry"
@@ -31,11 +31,18 @@ def _seeds_only():
     chrome.forget_themes()
 
 
+def _base():
+    """BASE, the fixture package (a palette theme, standalone)."""
+    return json.loads(fixture_theme(BASE))
+
+
 def _pkg(**change):
-    """A package over BERRY with `change` as its dark roles: what the theme
+    """BASE renamed, with `change` over its dark roles: what the theme
     editor's save installs."""
-    return json.dumps({"format": 2, "name": THEME, "inherits": BASE,
-                       "colors": {"dark": change}}).encode()
+    pkg = _base()
+    pkg["name"] = THEME
+    pkg["colors"]["dark"].update(change)
+    return json.dumps(pkg).encode()
 
 
 def _quiet(ws):
@@ -49,8 +56,11 @@ def _world(tmp_path, desk):
         ws = build_desktop_ws(tmp_path)
     else:
         ws = build_ws(tmp_path)
-    ws.look.set_theme(THEME if moy_ui.theme_installed() == THEME else BASE,
-                      persist=False)
+    if moy_ui.theme_installed() == THEME:
+        ws.look.set_theme(THEME, persist=False, variant="dark")
+    else:
+        install_theme(BASE)
+        ws.look.set_theme(BASE, persist=False, variant="dark")
     _quiet(ws)
     if desk:
         ws.open_desk()
@@ -91,7 +101,7 @@ def _keys(ws, desk):
 # A role each cache's pixels show: the bar strips, the home's statics and
 # its retained frame, the window chrome (focused and behind), the windows'
 # content, the desk.
-_CASES = [(False, "bar"), (False, "panel"), (False, "accent"), (False, "surface"),
+_CASES = [(False, "bar"), (False, "panel"), (False, "focus"), (False, "surface"),
           (True, "bar"), (True, "title_active"), (True, "title_inactive"),
           (True, "panel"), (True, "accent"), (True, "title_ink")]
 
@@ -99,7 +109,7 @@ _CASES = [(False, "bar"), (False, "panel"), (False, "accent"), (False, "surface"
 @pytest.mark.parametrize("desk,role", _CASES,
                          ids=["%s-%s" % ("desk" if d else "console", r) for d, r in _CASES])
 def test_an_in_place_edit_draws_what_a_cold_boot_under_it_draws(tmp_path, desk, role):
-    first = chrome.theme_colors(BASE)[role]
+    first = _base()["colors"]["dark"][role]
     ws = _world(tmp_path / "live", desk)
     assert ws.look.install_theme(_pkg())[0] == 0
     ws.look.set_theme(THEME, persist=False)
@@ -159,6 +169,8 @@ def test_a_change_through_the_verb_draws_what_a_boot_of_custom_draws(tmp_path, d
     change wrote, which is the store's news, not the look's."""
     def boot():
         ws = (build_desktop_ws if desk else build_ws)(tmp_path)
+        if ws.look.theme_name != "custom":
+            use_theme(ws, BASE, "dark", store=True)
         _quiet(ws)
         if desk:
             ws.open_desk()
@@ -202,6 +214,8 @@ def test_a_save_through_edit_file_draws_what_a_boot_of_it_draws(tmp_path, desk):
     picture."""
     def boot():
         ws = (build_desktop_ws if desk else build_ws)(tmp_path)
+        if ws.look.theme_name != "custom":
+            use_theme(ws, BASE, "dark", store=True)
         _quiet(ws)
         if desk:
             ws.open_desk()

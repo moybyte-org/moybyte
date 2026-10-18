@@ -20,6 +20,7 @@
 """
 
 import ctypes
+import glob
 import json
 import os
 import random
@@ -87,7 +88,7 @@ def _json_colour(v):
 
 def test_the_seeds_are_style_jsons_and_the_default_comes_first():
     assert list(moy_ui.themes()) == TH["seeds"]
-    assert moy_ui.themes()[0] == "night"
+    assert moy_ui.themes()[0] == "moy"
     for name in TH["seeds"]:
         with open(os.path.join(UI, "themes", name + ".json"), "rb") as f:
             assert len(f.read()) <= TH["bytes"]
@@ -107,25 +108,24 @@ def test_a_flattened_seed_round_trips_as_a_package(seed, light):
 
 
 def test_an_unknown_name_resolves_as_the_default():
-    assert _row("no-such-theme") == _row("night")
+    assert _row("no-such-theme") == _row("moy")
 
 
 def test_a_recolour_inherits_the_rest():
-    rc, _n = moy_ui.theme_install(_src("mine", inherits="berry",
+    rc, _n = moy_ui.theme_install(_src("mine", inherits="blocks",
                                        colors={"dark": {"accent": 12}}))
     assert rc == OK and moy_ui.theme_installed() == "mine"
-    mine, berry = _row("mine")[0], _row("berry")[0]
+    mine, blocks = _row("mine")[0], _row("blocks")[0]
     i = ROLES.index("accent")
     assert mine[i] == 12
-    # focus and ink_accent derive from accent, so they follow the recolour
-    follow = ("accent", "focus", "ink_accent")
-    assert mine[ROLES.index("focus")] == mine[ROLES.index("ink_accent")] == 12
-    assert [v for k, v in enumerate(mine) if ROLES[k] not in follow] \
-        == [v for k, v in enumerate(berry) if ROLES[k] not in follow]
+    # Blocks sets focus and ink_accent itself, so only accent moves (a role
+    # derived from accent follows it only where the chain leaves it unset)
+    assert [v for k, v in enumerate(mine) if k != i] \
+        == [v for k, v in enumerate(blocks) if k != i]
     # no `inherits`: the default is the parent
     moy_ui.theme_install(_src("mine2", colors={"dark": {"accent": 12}}))
-    night = _row("night")[0]
-    assert _row("mine2")[0][ROLES.index("panel")] == night[ROLES.index("panel")]
+    moy = _row("moy")[0]
+    assert _row("mine2")[0][ROLES.index("panel")] == moy[ROLES.index("panel")]
 
 
 @pytest.mark.parametrize("src,rc", [
@@ -146,7 +146,7 @@ def test_a_recolour_inherits_the_rest():
     (b'{"format": 2, "name": 7}', NAME),
     (b'{"format": 2, "name": "_t"}', NAME),
     (b'{"format": 2, "name": "-t"}', NAME),
-    (b'{"format": 2, "name": "night"}', TAKEN),
+    (b'{"format": 2, "name": "moy"}', TAKEN),
     (b'{"format": 2, "name": "t", "inherits": "nowhere"}', CHAIN),
     (b'{"format": 2, "name": "t", "inherits": "t"}', CHAIN),
     (b'{"format": 2, "name": "t", "inherits": 3}', CHAIN),
@@ -229,8 +229,8 @@ def test_every_block_category_and_syntax_class_has_a_role():
 
 def test_metrics_and_text_effects():
     names = list(TH["metrics"])
-    assert moy_ui.theme_shape("night")[:2] == ((0,) * len(names), ())
-    rc, notes = moy_ui.theme_install(_src("w", inherits="berry",
+    assert moy_ui.theme_shape("moy")[:2] == ((0,) * len(names), ())
+    rc, notes = moy_ui.theme_install(_src("w", inherits="blocks",
         metrics={"radius": 9, "press_dx": 1, "glow": 2},
         text={"button": {"disabled": {"effect": "emboss", "color": "ink"},
                          "rest": {"effect": "shadow"}},
@@ -259,7 +259,7 @@ def _tok(name):
 def _own(name):
     """Theme `name`'s surfaces less those it inherits unchanged from the
     default seed, whose surfaces every chain ends at."""
-    base = set(moy_ui.theme_shape("night")[2])
+    base = set(moy_ui.theme_shape("moy")[2])
     return tuple(r for r in moy_ui.theme_shape(name)[2] if r not in base)
 
 
@@ -356,10 +356,10 @@ def _chained_lib(tmp_path):
     shutil.copytree(UI, d)
     style = json.loads((d / "style.json").read_text())
     # The chain's own surfaces only: a default seed with none of its own.
-    night = json.loads((d / "themes" / "night.json").read_text())
+    night = json.loads((d / "themes" / "moy.json").read_text())
     night.pop("surfaces", None)
-    (d / "themes" / "night.json").write_text(json.dumps(night))
-    links = {"c1": "night", "c2": "c1", "c3": "c2", "c4": "c3", "c5": "c4",
+    (d / "themes" / "moy.json").write_text(json.dumps(night))
+    links = {"c1": "moy", "c2": "c1", "c3": "c2", "c4": "c3", "c5": "c4",
              "loop_a": "loop_b", "loop_b": "loop_a"}
     surfaces = {"c1": {"button": {"rest": "raised", "pressed": "sunken"},
                        "chip": {"rest": "raised"}},
@@ -412,7 +412,7 @@ def test_surfaces_inherit_nearest_first(tmp_path):
 def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
     resolve = _chained_lib(tmp_path)
     dim = ROLES.index("dim")
-    night = resolve("night")[1]
+    night = resolve("moy")[1]
     rc, row = resolve("c4")            # c4 -> c3 -> c2 -> c1 -> night: depth 4
     assert rc == OK and row[dim] == 4
     for name in ("c5", "loop_a"):      # one too deep; a cycle
@@ -423,7 +423,8 @@ def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
 # -- the layout (docs/shell_layout_2026-10.md §5, §9) -----------------------------
 
 LAY = TH["layout"]
-TODAY = ("top", 18, ("zone",), ("chips",), ("clock", "close", "menu", "wifi", "battery"), ())
+# The default seed's (Moy's) bar.
+TODAY = ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"), ())
 
 
 def _bar(edge="top", **kw):
@@ -482,7 +483,7 @@ def test_a_layout_is_read_whole_and_inherited_whole():
                             ("close", "wifi", "battery", "clock"), ()),))
     # A child that sets no layout takes its parent's, and one that sets bars
     # replaces the list whole: a bar list is never merged by position.
-    assert moy_ui.theme_install(_src("dock2", inherits="slate"))[0] == OK
+    assert moy_ui.theme_install(_src("dock2", inherits="contrast"))[0] == OK
     assert moy_ui.theme_layout("dock2") == (False, (TODAY,))
     notes, got = _lay("two", [_bar("top", left=["title"], right=["clock", "close", "menu"]),
                               _bar("bottom", left=["zone"])])
@@ -565,7 +566,7 @@ def test_the_required_set_rule_runs_on_the_data():
 
 
 def test_a_refused_layout_in_the_chain_stands_in_with_the_default():
-    rc, _n = moy_ui.theme_install(_src("t", inherits="berry",
+    rc, _n = moy_ui.theme_install(_src("t", inherits="blocks",
                                        layout={"bars": [_bar(left=["clock"])]}))
     assert rc == OK and moy_ui.theme_layout("t") == (True, (TODAY,))
 
@@ -621,7 +622,13 @@ def _corpus(n):
         with open(os.path.join(UI, "themes", name + ".json"), "rb") as f:
             src = f.read()
         seeds.append(src.replace(b'"name": "%s"' % name.encode(), b'"name": "fz"'))
-    seeds.append(_src("fz", inherits="slate", metrics={"radius": 2, "press_dy": 1},
+    # ...and the deleted seeds' fixture packages (tests/fixtures/themes/)
+    for d in sorted(glob.glob(os.path.join(os.path.dirname(__file__), "fixtures", "themes",
+                                           "*.moy"))):
+        pkg = json.loads(open(os.path.join(d, "theme.json"), "rb").read())
+        pkg["name"] = "fz"
+        seeds.append(json.dumps(pkg, indent=1).encode())
+    seeds.append(_src("fz", inherits="contrast", metrics={"radius": 2, "press_dy": 1},
                       text={"button": {"disabled": {"effect": "emboss", "color": "ink"},
                                        "pressed": {"effect": "shadow", "color": "dim"}},
                             "tab": {"on": {"effect": "shadow", "color": "code_text"}}},
@@ -651,7 +658,7 @@ def _corpus(n):
                  [{"edge": "bottom", "size": 22,
                    "left": ["menu", "separator", "chips", "zone", "text", "spacer"],
                    "right": ["close", "wifi", "battery", "clock"], "text": ["moy", "!"]}]):
-        seeds.append(_src("fz", inherits="berry", layout={"bars": bars}))
+        seeds.append(_src("fz", inherits="blocks", layout={"bars": bars}))
     alphabet = b'{}[]":,0123456789-.eE truefalsnl\\/ '
     out = list(seeds)
     while len(out) < n:
@@ -721,8 +728,8 @@ def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
                                          for s in ("home", "desk")) for lt in (False, True))
         moy_ui.theme_install(_src("kept"))
     assert seen > 40
-    assert moy_ui.theme_resolve(_src("t", inherits="berry"))[0] == CHAIN
-    assert moy_ui.theme_resolve(_src("night"))[0] == TAKEN
+    assert moy_ui.theme_resolve(_src("t", inherits="blocks"))[0] == CHAIN
+    assert moy_ui.theme_resolve(_src("moy"))[0] == TAKEN
     assert moy_ui.theme_installed() == "kept"
 
 
@@ -798,7 +805,7 @@ def test_a_pattern_fill_is_checked_against_both_colours():
         "chip": {"rest": "fill 0"},
         "desk.icon": {"rest": "dither 0/7"}}))
     assert rc == OK
-    th = dict(theme_colors("night", "light"))
+    th = dict(theme_colors("moy", "light"))
     th["ink"] = 0                      # the button's label ink at rest
     try:
         ui_draw.use_shape("dz")

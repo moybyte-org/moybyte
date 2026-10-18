@@ -2161,11 +2161,11 @@ def roles_trace(ws):
     say("theme", t.name(), t.variant(), t.light(), th == ws.theme_colors,
         len(th) > 10, t.token(0) == th["panel"], t.colors() is th)
     gen = t.gen()
-    t.set("forest")
+    t.set("contrast")
     t.set_variant("light")
     say("theme set", t.name(), t.variant(), t.light(), t.colors() == ws.theme_colors,
         t.gen() > gen)
-    t.set("night", variant="dark")
+    t.set("moy", variant="dark")
     say("theme back", t.name(), t.variant(), t.light())
 
     # -- prefs
@@ -2334,7 +2334,7 @@ def roles_trace(ws):
     t.set_chrome_scale(ch["chrome"])
     say("chrome", t.choices()["chrome"] == ch["chrome"])
     say("edit file", t.edit_file())
-    say("name", t.name_check("night"), t.name_custom("traced"), t.name(),
+    say("name", t.name_check("moy"), t.name_custom("traced"), t.name(),
         t.choices()["store"])
 
     _c_called(ws.app_abi, c_before)
@@ -2454,9 +2454,9 @@ roles artwork carts clipboard damage files install nav notify prefs surface them
 damage 1 2 0
 surface True True 1 1 False True True
 pointer True True
-theme night dark False True True True True
-theme set forest light True True True
-theme back night dark False
+theme moy light True True True True True
+theme set contrast light True True True
+theme back moy dark False
 prefs absent None 5
 prefs set [1,'two'] [1,'two']
 prefs cleared gone
@@ -2497,7 +2497,7 @@ run_script [False,"CAN'T READ IT"]
 text_mode True False
 play desktop
 notify
-wallpaper moybyte.moy_night 'moybyte.wall_z'
+wallpaper None 'moybyte.wall_z'
 wallpaper carts True None True
 selected None custom
 copy [None,None] [None,None] [2,2,b4]

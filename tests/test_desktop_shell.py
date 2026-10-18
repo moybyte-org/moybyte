@@ -15,6 +15,14 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 
 
 from ws_helpers import build_ws as _ws
+import pytest
+from ws_helpers import boot_on_fixture, use_theme
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch, store=True)
 
 
 def _open_game(ws):
@@ -108,6 +116,7 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     ws.carts_root = carts_dir
     ws.set_pointer(console.Pointer(320, 240))
     ws.load_system()
+    use_theme(ws, "night", "dark")
     assert ws.look.wallpaper_carts() == []                     # none installed
     assert ws.look.wallpaper_id is None                        # the theme's fill
     ws.frame(1 / 30)                                       # renders without error

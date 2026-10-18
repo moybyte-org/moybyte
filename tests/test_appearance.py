@@ -50,9 +50,9 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import appearance, moy_carts, ui_draw  # noqa: E402
-from runtime.chrome import THEME_NAMES, theme_colors  # noqa: E402
+from runtime.chrome import THEME_NAMES, live_colors, theme_colors  # noqa: E402
 from runtime.theme_custom import CUSTOM  # noqa: E402
-from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
+from ws_helpers import build_desktop_ws, build_ws, use_theme  # noqa: E402
 
 _THEME_BYTES = appearance._THEME_BYTES
 
@@ -84,7 +84,7 @@ def test_the_kernel_keeps_no_look_state(tmp_path):
     for name in ("theme_name", "theme_variant", "font_scale",
                  "wallpaper_id", "icon_sheet"):
         assert not hasattr(ws, name), name
-        assert getattr(ws.look, name) is not None or name in ("icon_sheet",)
+        assert hasattr(ws.look, name), name
     src = ROOT.joinpath("runtime/console.py").read_text(encoding="utf-8")
     for gone in ("self.theme_name", "self.theme_variant",
                  "self.wallpaper_id", "self.icon_sheet"):
@@ -113,14 +113,14 @@ def test_set_theme_swaps_the_tokens_pushes_the_grids_and_persists(tmp_path):
     ws = build_ws(tmp_path)
     gen = ws.look.look_gen
     key = ws.bar_layer._cart_bar_key("home")
-    ws.look.set_theme("berry")
-    assert ws.look.theme_name == "berry"
-    assert ws.theme_colors == theme_colors("berry", "dark")
+    ws.look.set_theme("blocks")
+    assert ws.look.theme_name == "blocks"
+    assert ws.theme_colors == live_colors("blocks", "light").tokens
     assert ws.launcher.theme is ws.theme_colors          # the selection accent
     assert ws.look.look_gen > gen                        # the look moved
     assert ws.bar_layer._cart_bar_key("home") != key     # the cached strip repaints
     assert ws._dirty
-    assert _stored(ws)["theme"] == "berry"
+    assert _stored(ws)["theme"] == "blocks"
 
 
 def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
@@ -135,7 +135,7 @@ def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
     cv = ws.sys_canvas
     ws.projects_grid = ws._home_grid("grid", [])
     before = (ws.launcher_layer._statics_key(cv), ws.projects_layer._statics_key(cv))
-    ws.look.set_theme("forest", persist=False)
+    ws.look.set_theme("contrast", persist=False)
     assert ws.launcher_layer._statics_key(cv) != before[0]
     assert ws.projects_layer._statics_key(cv) != before[1]
 
@@ -145,24 +145,24 @@ def test_an_unknown_theme_falls_back_and_an_unknown_variant_too(tmp_path):
     ws.look.set_theme("no-such-theme", persist=False)
     assert ws.look.theme_name == THEME_NAMES[0]
     ws.look.set_theme_variant("chartreuse", persist=False)
-    assert ws.look.theme_variant == "dark"
+    assert ws.look.theme_variant == "light"
 
 
 def test_set_theme_variant_keeps_the_family_and_persists(tmp_path):
     ws = build_ws(tmp_path)
-    ws.look.set_theme("berry", persist=False)
+    ws.look.set_theme("blocks", persist=False)
     ws.look.set_theme_variant("light")
-    assert (ws.look.theme_name, ws.look.theme_variant) == ("berry", "light")
-    assert ws.theme_colors == theme_colors("berry", "light")
-    assert _stored(ws)["theme"] == "berry"
+    assert (ws.look.theme_name, ws.look.theme_variant) == ("blocks", "light")
+    assert ws.theme_colors == live_colors("blocks", "light").tokens
+    assert _stored(ws)["theme"] == "blocks"
     assert _stored(ws)["theme_variant"] == "light"
 
 
 def test_set_theme_with_no_variant_keeps_the_current_one(tmp_path):
     """The `variant=None` contract every name-only caller relies on."""
     ws = build_ws(tmp_path)
-    ws.look.set_theme("berry", persist=False, variant="light")
-    ws.look.set_theme("forest", persist=False)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    ws.look.set_theme("contrast", persist=False)
     assert ws.look.theme_variant == "light"
 
 
@@ -182,7 +182,7 @@ def test_persist_false_writes_nothing(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_system({}, ws.carts_root)
     try:
-        ws.look.set_theme("berry", persist=False)
+        ws.look.set_theme("blocks", persist=False)
         ws.look.set_theme_variant("light", persist=False)
         ws.look.set_font_scale(2, persist=False)
         ws.look.select_wallpaper(None, persist=False)
@@ -262,10 +262,13 @@ def test_wallpaper_options_are_the_wallpaper_carts(tmp_path):
 
 
 def test_a_seed_brings_the_default_wallpaper(tmp_path):
-    """No seed names a wallpaper, so the desk shows the first wallpaper cart,
-    as an absent setting did -- which is why no golden moves."""
+    """No seed names a wallpaper: the default, Moy, has a backdrop, so the
+    desk shows it (no wallpaper cart), and a theme with neither shows the
+    first wallpaper cart, as an absent setting did."""
     ws = build_ws(tmp_path)
     assert ws.look.theme_name in THEME_NAMES
+    assert ws.look.wallpaper_id is None and ws.look.backdrop("desk")
+    use_theme(ws, "night", store=True)
     assert ws.look.wallpaper_id == ws.look.wallpaper_options()[0]
     assert ws.look.wallpaper_id != ws.look.PICTURE
 
@@ -351,7 +354,7 @@ def test_a_stored_wallpaper_row_reads_as_nothing(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_system({"wallpaper": "moybyte.sakura"}, ws.carts_root)
     ws2 = build_ws(tmp_path)
-    assert ws2.look.wallpaper_id == ws2.look.wallpaper_options()[0]
+    assert ws2.look.wallpaper_id == ws2.look.theme_wallpaper()
     assert ws2.look.wallpaper_id != "moybyte.sakura"
     src = inspect.getsource(appearance) + inspect.getsource(
         type(ws2).load_system)
@@ -370,8 +373,8 @@ def test_picking_a_theme_brings_its_wallpaper(tmp_path):
     assert ws.look.wallpaper_id == opts[-1]
     ws.look.set_theme("gone")
     assert ws.look.wallpaper_id == opts[0]
-    ws.look.set_theme("night")
-    assert ws.look.wallpaper_id == opts[0]
+    ws.look.set_theme("moy")
+    assert ws.look.wallpaper_id is None          # Moy's backdrop
 
 
 def test_a_picture_is_copied_into_the_package_and_drawn(tmp_path):
@@ -400,7 +403,7 @@ def test_a_picture_is_copied_into_the_package_and_drawn(tmp_path):
 def test_no_picture_yet_refuses_the_pick(tmp_path):
     ws = build_ws(tmp_path)
     assert ws.look.select_wallpaper(ws.look.PICTURE) == ws.look.NO_FILE
-    assert ws.look.theme_name == "night"
+    assert ws.look.theme_name == "moy"
 
 
 # -- custom: a change to the theme (phase 6 step 5) -----------------------------
@@ -465,16 +468,16 @@ def _writes(ws, monkeypatch):
 
 def test_the_first_change_on_a_seed_makes_custom_and_switches_to_it(tmp_path):
     ws = build_ws(tmp_path)
-    night = theme_colors("night")
+    moy = theme_colors("moy")
     assert ws.look.change("accent", _accent(3)) == 0
-    assert ws.look.theme_name == "night"          # shown at the next frame
+    assert ws.look.theme_name == "moy"          # shown at the next frame
     ws.look.tick(0.0)
     assert ws.look.theme_name == CUSTOM == ui_draw.theme_installed()
     assert ws.theme_colors["accent"] == _accent(3)
-    assert theme_colors("night") == night, "the seed moved"
+    assert theme_colors("moy") == moy, "the seed moved"
     assert not (Path(ws.carts_root) / "custom.moy").exists(), "written per change"
     ws.look.tick(ws.look.AUTOSAVE_S)
-    assert _look(ws) == {"from": "night", "accent": _accent(3)}
+    assert _look(ws) == {"from": "moy", "accent": _accent(3)}
     assert _package(ws)["name"] == CUSTOM and "inherits" not in _package(ws)
     assert CUSTOM in ws.look.theme_names()
     assert _stored(ws)["theme"] == CUSTOM
@@ -485,13 +488,13 @@ def test_the_first_change_on_a_seed_makes_custom_and_switches_to_it(tmp_path):
 
 def test_theme_mode_and_chrome_size_are_no_change(tmp_path):
     ws = build_desktop_ws(tmp_path)
-    ws.look.set_theme("forest")
+    ws.look.set_theme("contrast")
     ws.look.set_theme_variant("light")
     scales = ws.chrome_scales
     if len(scales) > 1:
         ws.look.set_chrome_scale(scales[-1])
     _settle(ws)
-    assert ws.look.theme_name == "forest"
+    assert ws.look.theme_name == "contrast"
     assert not (Path(ws.carts_root) / "custom.moy").exists()
     assert ws.look._cust is None
 
@@ -507,26 +510,27 @@ def test_a_change_on_custom_edits_it_in_place_from_its_source(tmp_path):
     ws.look.change("tint", "plum")
     _settle(ws)
     assert _package(ws) == once
-    assert _look(ws) == {"from": "night", "tint": "plum"}
-    rc, want = ui_draw.theme_custom("night", None, "plum")
+    assert _look(ws) == {"from": "moy", "tint": "plum"}
+    rc, want = ui_draw.theme_custom("moy", None, "plum")
     assert rc == 0 and _package(ws) == __import__("json").loads(want)
 
 
 def test_a_change_from_another_theme_replaces_custom(tmp_path):
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", store=True)
     ws.look.change("accent", _accent(1))
     _settle(ws)
     pkg = Path(ws.carts_root) / "custom.moy"
     assert (pkg / "tiny5.fnt").exists()            # night names its fonts
-    ws.look.set_theme("forest")
+    ws.look.set_theme("contrast")
     ws.look.change("tint", "grey")
     _settle(ws)
-    assert _look(ws) == {"from": "forest", "tint": "grey"}
-    assert ws.theme_colors["accent"] == theme_colors("forest")["accent"]
-    # forest takes its fonts through the default seed, as custom does now:
+    assert _look(ws) == {"from": "contrast", "tint": "grey"}
+    assert ws.theme_colors["accent"] == live_colors("contrast", "light").tokens["accent"]
+    # contrast takes its fonts through the default seed, as custom does now:
     # nothing of the custom before it is left in the folder.
-    assert "fonts" not in _package(ws) and not (pkg / "tiny5.fnt").exists()
-    assert ui_draw.theme_fonts(CUSTOM) == ui_draw.theme_fonts("forest")
+    assert "ui" not in _package(ws).get("fonts", {}) and not (pkg / "tiny5.fnt").exists()
+    assert ui_draw.theme_fonts(CUSTOM) == ui_draw.theme_fonts("contrast")
 
 
 def test_custom_carries_the_font_files_its_fonts_name(tmp_path):
@@ -534,11 +538,13 @@ def test_custom_carries_the_font_files_its_fonts_name(tmp_path):
     custom's `fonts` names is copied in with its licence -- a seed's from the
     image, a package's from its folder -- and a file it stops naming goes."""
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", store=True)
+    names = {f for _r, f in ui_draw.theme_fonts("night")}
     ws.look.change("accent", _accent(2))
     _settle(ws)
     pkg = Path(ws.carts_root) / "custom.moy"
-    names = {f for _r, f in ui_draw.theme_fonts("night")}
-    assert names and _package(ws)["fonts"]
+    assert names == {"tiny5.fnt", "petme128"} and _package(ws)["fonts"]
+    names.discard("petme128")                    # the built-in, no file
     for f in names:
         assert (pkg / f).read_bytes() == ui_draw.font_file(f)
         lic = f[:-4] + ".txt"
@@ -621,11 +627,11 @@ def test_a_theme_switch_writes_custom_before_it_leaves(tmp_path):
     ws = build_ws(tmp_path)
     ws.look.change("accent", _accent(7))
     ws.look.tick(0.0)
-    ws.look.set_theme("berry")
+    ws.look.set_theme("blocks")
     assert _look(ws)["accent"] == _accent(7)
     ws.look.set_theme(CUSTOM)
     assert ws.theme_colors["accent"] == _accent(7)
-    assert ws.look.custom_look() == {"from": "night", "accent": _accent(7)}
+    assert ws.look.custom_look() == {"from": "moy", "accent": _accent(7)}
 
 
 # -- EDIT FILE (phase 6 step 6) -----------------------------------------------
@@ -658,12 +664,12 @@ def test_edit_file_on_a_seed_makes_custom_and_opens_its_file(tmp_path):
     and opens custom's theme.json -- in the text app, not as a project."""
     import json
     ws = build_ws(tmp_path)
-    ws.look.set_theme("forest")
-    forest = theme_colors("forest")
+    ws.look.set_theme("contrast")
+    contrast = theme_colors("contrast")
     ed = _edit(ws)
     assert ws.look.theme_name == CUSTOM == ui_draw.theme_installed()
-    assert theme_colors("forest") == forest, "the seed moved"
-    assert _look(ws) == {"from": "forest"}
+    assert theme_colors("contrast") == contrast, "the seed moved"
+    assert _look(ws) == {"from": "contrast"}
     assert _stored(ws)["theme"] == CUSTOM
     assert (ed.name(), ed.mode()) == ("theme.json", "json")
     assert ed.kind == moy_carts.project_kind(str(Path(ws.carts_root) / "custom.moy"))
@@ -679,7 +685,7 @@ def test_edit_file_on_custom_writes_its_change_first(tmp_path):
     ws.look.change("accent", _accent(5))
     ws.look.tick(0.0)
     ed = _edit(ws)
-    assert _look(ws) == {"from": "night", "accent": _accent(5)}
+    assert _look(ws) == {"from": "moy", "accent": _accent(5)}
     assert json.loads(ed.text())["colors"]["dark"]["accent"] == _accent(5)
 
 
@@ -688,6 +694,7 @@ def test_a_saved_role_moves_the_look_and_drops_from(tmp_path):
     frame, `from` (and the accent and tint with it) dropped, and a later
     TINT derived from the file as saved, not from the old source."""
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", "dark", store=True)
     ws.look.change("accent", _accent(2))
     ws.look.tick(0.0)
     ed = _edit(ws)
@@ -724,12 +731,12 @@ def test_a_save_of_a_key_over_the_source_keeps_it(tmp_path):
     ed.set_text(json.dumps(d, indent=2))
     assert ed.save(soft=True)[0]
     ws.frame(1 / 30)
-    assert _look(ws) == {"from": "night", "accent": _accent(9)}
+    assert _look(ws) == {"from": "moy", "accent": _accent(9)}
     ws._exit_to_caller()
     assert ws.look.change("accent", _accent(1)) == 0
     _settle(ws)
     assert _package(ws)["frame"] == {"style": "platinum"}
-    assert _look(ws) == {"from": "night", "accent": _accent(1)}
+    assert _look(ws) == {"from": "moy", "accent": _accent(1)}
 
 
 def test_a_save_of_a_metric_drops_the_source(tmp_path):
@@ -749,6 +756,7 @@ def test_a_save_of_a_metric_drops_the_source(tmp_path):
 def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
     import json
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", store=True)
     ed = _edit(ws)
     d = json.loads(ed.text())
     ed.set_text(json.dumps(d, indent=32))
@@ -764,7 +772,7 @@ def _big(d):
 
 
 def _inherits(d):
-    d["inherits"] = "night"
+    d["inherits"] = "moy"
     return d
 
 
@@ -813,6 +821,7 @@ def test_an_unreadable_pair_is_saved_and_noted(tmp_path):
     """A pair under the contrast floor never refuses (§7): the save lands
     and the badge says so."""
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", "dark", store=True)
     ed = _edit(ws)
     ink = ws.theme_colors["panel"]
     _hand_edit(ed, ink=ink)
@@ -857,7 +866,7 @@ def test_name_renames_custom_into_a_theme_of_its_own(tmp_path):
     assert _package(ws, "bubblegum")["name"] == "bubblegum"
     man = json.loads((d / "manifest.json").read_bytes())
     assert man["moybyte"] == {"type": "theme",
-                              "look": {"from": "night", "accent": _accent(6)}}
+                              "look": {"from": "moy", "accent": _accent(6)}}
     assert man["title"] == "bubblegum"
     assert ws.look.theme_name == "bubblegum" == ui_draw.theme_installed()
     assert ws.theme_colors == colors, "naming moved the look"
@@ -893,7 +902,7 @@ def test_a_named_theme_survives_a_reboot(tmp_path):
 
 @pytest.mark.parametrize("name,why", [
     ("", "grammar"), ("Bubble", "grammar"), ("_x", "grammar"),
-    ("a" * 25, "grammar"), ("a b", "grammar"), ("night", "seed"),
+    ("a" * 25, "grammar"), ("a b", "grammar"), ("moy", "seed"),
     ("custom", "custom"), ("moybyte.calc", "grammar")])
 def test_a_name_the_grammar_or_a_seed_refuses(tmp_path, name, why):
     ws = build_ws(tmp_path)
@@ -996,7 +1005,7 @@ def test_load_icon_sheet_bakes_the_default_when_the_store_has_none(tmp_path):
 
 def test_light_chrome_tracks_the_live_variant(tmp_path):
     ws = build_ws(tmp_path)
-    ws.look.set_theme("night", persist=False, variant="dark")
+    ws.look.set_theme("moy", persist=False, variant="dark")
     assert ws.look.light_chrome() is False
     ws.look.set_theme_variant("light", persist=False)
     assert ws.look.light_chrome() is True
@@ -1036,14 +1045,14 @@ def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):
     for -- and the only test here that would catch the cascade calling a verb
     that no longer exists."""
     ws = build_ws(tmp_path)
-    ws.look.set_theme("forest", variant="light")
+    ws.look.set_theme("contrast", variant="light")
     ws.look.set_font_scale(2)
     try:
         ws2 = build_ws(tmp_path)
-        assert (ws2.look.theme_name, ws2.look.theme_variant) == ("forest", "light")
+        assert (ws2.look.theme_name, ws2.look.theme_variant) == ("contrast", "light")
         assert ws2.look.font_scale == 2
         assert ws2.look.wallpaper_id == ws2.look.wallpaper_options()[0]
-        assert ws2.theme_colors == theme_colors("forest", "light")
+        assert ws2.theme_colors == live_colors("contrast", "light").tokens
     finally:
         ui_draw.use_shape(None)
 

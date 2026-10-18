@@ -20,7 +20,7 @@ description, what the render stands in with, and the plan steps still to land.
 A scene is BUILT when the shell holds its theme and every step of
 `docs/look_2026-10.md` that targets it carries a "Landed YYYY-MM-DD" mark.
 Until then it is rendered as the nearest current screen (a missing theme
-becomes FALLBACK's) and marked "not built yet" with what is missing.
+becomes the default, `DEFAULT`) and marked "not built yet" with what is missing.
 
 FILTER keeps the scene it names, else the scenes whose name contains it
 (shell globs work too);
@@ -43,11 +43,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOCKUPS = os.path.join(ROOT, "docs", "media", "look_2026-10")
 PLAN = os.path.join(ROOT, "docs", "look_2026-10.md")
 
-# The current theme a target theme the shell does not hold is drawn with,
-# by `theme-mode` first, then by theme.
-FALLBACK = {"moy-light": "platinum", "moy": "night",
-            "luna": "win95", "coast": "platinum", "pico": "night",
-            "bench": "platinum", "adw": "platinum"}
+# The theme a scene names none of is drawn with, and a target theme the
+# shell does not hold (the ricing themes, step 29) is drawn with, in the
+# scene's mode.
 DEFAULT = "moy"
 
 # Steps whose target is every PNG, and each theme's own steps, by
@@ -515,9 +513,7 @@ def _run(g, out, filters, step, theme, variant, quiet, parts=False):
         missing = []
         drawn = target_theme
         if target_theme not in held:
-            drawn = theme if theme in held else FALLBACK.get(
-                "%s-%s" % (target_theme, mode),
-                FALLBACK.get(target_theme, "night"))
+            drawn = theme if theme in held else DEFAULT
             missing.append("theme %s is not in the shell (drawn with %s)"
                            % (target_theme, drawn))
         todo = [s for s in scene_steps(name, target_theme)

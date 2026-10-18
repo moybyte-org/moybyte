@@ -22,6 +22,14 @@ from ws_helpers import build_ws as _ws
 
 
 from ws_helpers import make_drv as _drv
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 
 def _center(rect):

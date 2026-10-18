@@ -155,7 +155,7 @@ def test_the_fuzz_corpus_never_reaches_the_slot(tmp_path):
 def test_a_changed_package_is_re_taken_and_a_removed_one_falls_back(tmp_path):
     ws = build_ws(tmp_path)
     dst = _put(ws)
-    ws.look.set_theme(NAME)
+    ws.look.set_theme(NAME, variant="dark")
     gen = ws.look.look_gen
     (dst / "theme.json").write_bytes(_src(colors={"dark": {"panel": 3}}))
     ws.carts.rescan()

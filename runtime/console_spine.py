@@ -12,13 +12,13 @@ surfaces a route lands on, and the radio service the lease powers.
 
 try:
     from app_decls import APPS
-    from chrome import NAMES
+    from chrome import DEFAULT_VARIANT, NAMES
     from settings_layer import SETTINGS_TOGGLES
     from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
     from ui_draw import AppHost
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
-    from runtime.chrome import NAMES
+    from runtime.chrome import DEFAULT_VARIANT, NAMES
     from runtime.settings_layer import SETTINGS_TOGGLES
     from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
                                    ROUTE_WINDOW)
@@ -135,10 +135,15 @@ class SpineVerbs:
             self.artwork.sync_wallpaper()
         # The theme brings the wallpaper (`Appearance.theme_wallpaper`); a SAFE
         # start (the kernel's recovery screen) runs no wallpaper cart.
-        self.look.set_theme(self.system.get("theme", self.look.theme_name),
-                            persist=False,
+        # A stored name no theme has (a seed step 27 of docs/look_2026-10.md
+        # deleted, a package since removed) reads as absent: the default, in
+        # its own mode, with nothing rewritten.
+        name = self.system.get("theme", self.look.theme_name)
+        self.look.set_theme(name, persist=False,
                             variant=self.system.get("theme_variant",
                                                     self.look.theme_variant))
+        if self.look.theme_name != name:
+            self.look.set_theme_variant(DEFAULT_VARIANT, persist=False)
         # Every persisted ON/OFF setting, through the verb its registry entry
         # names (#209 section 7): the key is the system.json key, the default is
         # declared beside it, and a board that cannot serve one gets the honest

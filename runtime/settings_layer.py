@@ -58,7 +58,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _SET_ROW_H = 26
 
 # (The panel colors are the selectable THEME tokens -- chrome.theme_colors,
-# picked in the Appearance app; the "night" default is the moybyte site colorway.)
+# picked in the Appearance app; the default is Moy's Day.)
 
 
 # -- the settings-toggle registry (#209, console_architecture_2026-08.md 7) ---

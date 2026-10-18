@@ -2,9 +2,10 @@
 docs/theming_2026-09.md §4.5): the `frame` key, each style inside the WM's
 footprint, the button layout the hit-test reads, and the bar's band.
 
-Classic is the frame the WM drew in Python; the goldens hold it byte for
-byte on every config the default theme renders, and the Platinum and Win95
-seeds pin the other styles on every golden surface.
+Classic is the frame the WM drew in Python. The lookless palette theme
+these draw under is the `night` fixture package (tests/fixtures/themes/,
+the seed docs/look_2026-10.md step 27 deleted) with the frame each test
+names.
 """
 
 import json
@@ -17,6 +18,7 @@ from runtime import ui_draw
 from runtime.chrome import theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
+from ws_helpers import fixture_theme, install_theme
 
 OK = 0
 N_UNKNOWN, N_DROPPED = 2, 4
@@ -29,7 +31,8 @@ BG = 9
 def frame():
     """Install a package naming `frame` and make its shape the toolkit's."""
     def use(**fr):
-        d = {"format": 2, "name": "framed", "frame": fr}
+        d = json.loads(fixture_theme("night"))
+        d["name"], d["frame"] = "framed", fr
         rc, notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == OK
         ui_draw.use_shape("framed")
@@ -99,7 +102,7 @@ def test_every_style_stays_in_the_footprint(frame, style, active, fs):
     """The ring, the strip and the 3px shadow right and below: nothing else,
     which is what the WM's damage and its frozen chrome are built on."""
     frame(style=style)
-    th = theme_colors("night")
+    th = theme_colors("framed", "dark")
     cv = SystemCanvas(200, 120)
     cv.cls(BG)
     x, y, w, h, t = 20, 10, 140, 90, 18 * fs
@@ -125,6 +128,7 @@ def test_a_left_group_does_not_swallow_the_title(tmp_path, frame):
     from test_wm_windowed import _drv, _ws
     ws = _ws(tmp_path)
     frame(style="platinum")
+    ws.look.set_theme("framed", persist=False)
     ws.open_settings()
     _drv(ws).frame(1 / 30)
     win = ws.wm._wins["settings"]
@@ -140,7 +144,7 @@ def test_a_left_group_does_not_swallow_the_title(tmp_path, frame):
 @pytest.mark.parametrize("style", TH["frames"])
 def test_the_band(frame, style):
     frame(style=style)
-    th = theme_colors("night")
+    th = theme_colors("framed", "dark")
     cv = SystemCanvas(40, 20)
     cv.cls(BG)
     ui_draw.frame_band(cv, th, (0, 0, 40, 12))
@@ -248,6 +252,7 @@ def test_a_header_fill_and_close_alone(looked):
 
 def test_a_theme_without_a_look_keeps_its_frame():
     """Legacy seeds draw their frame style: no icon slot, their own boxes."""
+    install_theme("night")
     ui_draw.use_depth("night", False)
     try:
         assert ui_draw.frame_icon((0, 0, 300, 200), 18) is None
@@ -309,6 +314,7 @@ def test_a_tile_takes_its_apps_colour(looked):
 
 
 def test_a_theme_without_a_look_draws_no_tile():
+    install_theme("night")
     ui_draw.use_depth("night", False)
     try:
         cv = SystemCanvas(80, 80)

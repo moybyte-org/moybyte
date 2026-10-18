@@ -22,7 +22,9 @@ which is exactly the risk of transcribing hand-rolled widgets onto a toolkit.
 The matrix, and why it is this one
 ----------------------------------
 Eleven configurations, each ONE axis away from the T-Deck row or from
-the windowed row, so a red golden names the axis by itself. Every configuration renders the SAME surface
+the windowed row, so a red golden names the axis by itself. A row that names
+no theme draws the default seed, Moy (docs/look_2026-10.md step 27), in its
+variant: Night where it is dark, Day where it is light. Every configuration renders the SAME surface
 list (plus the two desk surfaces that only exist on the windowed tier), which
 keeps the matrix a clean product instead of a pile of special cases.
 
@@ -64,13 +66,6 @@ keeps the matrix a clean product instead of a pile of special cases.
   p4_1024x600_fs2_windowed_light  the windowed row in the light variant: the
                            one place light chrome meets the WM's decorations.
                            One axis from the windowed row (variant).
-  p4_1024x600_cs2_fs1_platinum_light, p4_1024x600_cs2_fs1_win95_light
-                           the P4 as shipped, light, under the Platinum and the
-                           Win95 seed packages: a theme's frame style, surfaces,
-                           text effects and metrics on every surface, with no
-                           code of their own (docs/theming_2026-09.md §9, phase
-                           3 step 3). One axis (theme) from the as-shipped row
-                           in the light variant.
   p4_1024x600_cs2_fs1_contrast_light  the same, under the high-contrast seed
                            `contrast` (docs/look_2026-10.md step 26c): black
                            on white in the light variant, 2 px outlines, a
@@ -354,8 +349,8 @@ class _GoldenWebHost:
 # every tier that does not declare one, i.e. chrome on the font scale.
 # The default seed's bar, for a config that changes only the home's
 # arrangement (a layout is set whole, its bars with it).
-_DEFAULT_BARS = [{"edge": "top", "size": 18, "left": ["zone"], "center": ["chips"],
-                  "right": ["clock", "close", "menu", "wifi", "battery"]}]
+_DEFAULT_BARS = [{"edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
+                  "right": ["close", "wifi", "battery", "clock"]}]
 
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
@@ -382,12 +377,6 @@ CONFIGS = {
     "p4_1024x600_fs2_windowed_light": dict(
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="light",
         diagonal_in=7.0),
-    "p4_1024x600_cs2_fs1_platinum_light": dict(
-        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
-        diagonal_in=7.0, theme="platinum"),
-    "p4_1024x600_cs2_fs1_win95_light": dict(
-        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
-        diagonal_in=7.0, theme="win95"),
     "p4_1024x600_cs2_fs1_contrast_light": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
         diagonal_in=7.0, theme="contrast"),
@@ -495,7 +484,7 @@ def _axes(cfg):
         w, h, cfg["font_scale"], cfg["variant"],
         ("console" if cfg.get("console") else "windowed") if cfg["windowed"]
         else "fullscreen",
-        cfg["diagonal_in"] or "-", cfg.get("theme", "night"),
+        cfg["diagonal_in"] or "-", cfg.get("theme", "moy"),
         _layout_name(cfg) or "the theme's")
 
 
@@ -740,7 +729,7 @@ def _walls_page(ws):
 
 
 def _name_page(ws):
-    """The Appearance page on a `custom` made from night with one accent, its
+    """The Appearance page on a `custom` made from Moy with one accent, its
     NAME dialog open with a name typed (§9 phase 6 step 8)."""
     def enter():
         app = ws.appearance_app
@@ -755,14 +744,14 @@ def _name_page(ws):
 
 def _after_appearance(ws, enter):
     """`enter`, after the surface before it is put back: the page on its rows,
-    no dialog, and a `custom` the page made gone, the page on night with the
+    no dialog, and a `custom` the page made gone, the page on Moy with the
     theme in use focused, as it opens."""
     def go():
         app = ws.appearance_app
         app.view = "rows"
         app._close_name(acted=False)
         if ws.look.theme_name == "custom":
-            ws.look.set_theme("night")
+            ws.look.set_theme("moy")
             ws.carts_store.delete({"path": os.path.join(ws.carts_root,
                                                         "custom.moy")})
             ws.carts.rescan()

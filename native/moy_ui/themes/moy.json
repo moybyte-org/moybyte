@@ -2,6 +2,7 @@
   "format": 2,
   "name": "moy",
   "fonts": { "mono": "jbmono-11-400-2.fnt" },
+  "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },
   "colors": {
     "dark": {
       "panel": "#0f1127", "edge": "#2b2f57", "title": "#b6a8f7", "title_ink": "#15123a",
@@ -54,6 +55,7 @@
                              { "k": "circle", "at": [889, 733, 433], "p": "#0f1127" }] }
     },
     "light": {
+      "fam": "daysans",
       "focus": { "lift": { "rim": ["#ffffff", 1] } },
       "shadow": ["soft", "#1b2040", 0.18, 16, 8],
       "win": { "header": "bar" },
@@ -66,5 +68,17 @@
       "backdrop": { "desk": [{ "k": "circle", "at": [918, 1000, 500], "p": "#e2e5ee" },
                              { "k": "circle", "at": [88, 983, 350], "p": "#e5e3f1" }] }
     }
+  },
+  "surfaces": {
+    "button": { "rest": "fill surface_alt, border shade_dark, shadow",
+                "hover": "fill surface_alt, border focus, shadow",
+                "on": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "button_primary": { "rest": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "button_tonal": { "rest": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "button_danger": { "rest": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "chip": { "rest": "border shade_dark" },
+    "panel": { "rest": "border shade_dark" },
+    "desk.icon": { "rest": "fill panel, border shade_dark, shadow" },
+    "desk": { "rest": "fill bar" }
   }
 }

@@ -804,18 +804,18 @@ def _custom_digest(src, accents, tints):
 
 
 def theme_custom_matches_host(board):
-    """Every seed x accent x tint (docs/theming_2026-09.md §4.10): this
+    """Every seed x accent (presets too) x tint (docs/theming_2026-09.md §4.10): this
     board's moy_ui writes `custom`'s theme.json byte for byte as the host's
     does, each seed's answers digested on the board."""
     import binascii
     import hashlib
     import runtime  # noqa: F401  (registers the host's moy_ui)
     import moy_ui
-    for verb in ("theme_accents", "theme_tints"):
+    for verb in ("theme_accents", "theme_presets", "theme_tints"):
         assert board.pyval("__import__('moy_ui').%s()" % verb, strict=True) == \
             getattr(moy_ui, verb)(), verb
     board.pyexec(_CUSTOM_HELPER, strict=True)
-    accents = [None] + [a for _n, a, _d in moy_ui.theme_accents()]
+    accents = [None] + [a for _n, a, _d in moy_ui.theme_accents() + moy_ui.theme_presets()]
     tints = [None] + [n for n, _r in moy_ui.theme_tints()]
     for name in moy_ui.themes():
         kind, n, got = board.pyval("ws._g['_custom_digest'](%r, %r, %r)" % (name, accents, tints),

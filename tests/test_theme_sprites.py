@@ -34,7 +34,7 @@ from runtime.host_canvas import indices_of, make_system_canvas
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import on_glass  # noqa: E402
 from unix_mp import require_unix_mp  # noqa: E402
-from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
+from ws_helpers import build_desktop_ws, build_ws, fixture_theme  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 with open(ROOT / "native" / "moy_ui" / "style.json") as _f:
@@ -80,12 +80,19 @@ def _cell(part, state, sub=0):
 
 
 def _install(name="spr", **kw):
-    pkg = {"format": 2, "name": name}
+    """Install `name`: the `night` fixture's colours (a palette theme,
+    tests/fixtures/themes/) under `kw`; its dark colours."""
+    pkg = json.loads(fixture_theme("night"))
+    for k in ("surfaces", "text", "metrics", "frame"):
+        pkg.pop(k, None)
+    pkg["name"] = name
+    for v, roles in kw.pop("colors", {}).items():
+        pkg["colors"][v].update(roles)
     pkg.update(kw)
     assert moy_ui.theme_install(json.dumps(pkg).encode())[0] == OK
     chrome.forget_themes()
     ui_draw.use_shape(name)
-    return theme_colors(name)
+    return theme_colors(name, "dark")
 
 
 # -- the sheet ------------------------------------------------------------------------
@@ -161,7 +168,7 @@ def test_a_package_names_its_sheets_and_custom_carries_them():
     assert got[0] == OK and got[1] == 0 and got[7] == ("parts.moygfx", "icons.moygfx")
     assert moy_ui.theme_install(src)[0] == OK
     assert moy_ui.theme_sheets("spr") == ("parts.moygfx", "icons.moygfx")
-    assert moy_ui.theme_sheets("night") == (None, None)
+    assert moy_ui.theme_sheets("moy") == (None, None)
     rc, b = moy_ui.theme_custom(src, 12, None)
     assert rc == OK
     d = json.loads(b)
@@ -388,7 +395,7 @@ def test_the_theme_brings_its_sheets_and_takes_them_away(tmp_path):
     assert ws.look.theme_name == "sprig" and all(moy_ui.sheet_set())
     icons = (FIXTURE / "icons.moygfx").read_text().strip()
     assert ws.look.icon_sheet.to_hex() == icons
-    ws.look.set_theme("night")
+    ws.look.set_theme("moy")
     assert not any(moy_ui.sheet_set())
     assert ws.look.icon_sheet.to_hex() == default
     # a sheet that will not load leaves the parts on their surfaces
@@ -410,7 +417,7 @@ def test_the_users_icons_win_and_the_themes_are_never_saved_as_theirs(tmp_path):
     ws.look.save_icons()
     mine = sheet.to_hex()
     assert ws.carts_store.load_system_icons(ws.carts_root) == mine != icons
-    ws.look.set_theme("night")
+    ws.look.set_theme("moy")
     ws.look.set_theme("sprig")
     assert ws.look.icon_sheet.to_hex() == mine
 

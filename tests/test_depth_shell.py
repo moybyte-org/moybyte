@@ -12,7 +12,7 @@ import json
 import pytest
 
 from runtime import ui_draw
-from ws_helpers import build_desktop_ws, build_ws_with_shelf
+from ws_helpers import build_desktop_ws, build_ws_with_shelf, use_theme
 
 from runtime import host_app, wm_chrome, launcher_layer
 
@@ -59,7 +59,7 @@ def test_the_depth_is_the_live_themes_in_its_mode(tmp_path):
     ws.look.set_theme("moy", persist=False, variant="dark")
     d = ui_draw.depth()
     assert (d[9], d[11], d[8]) == (14, 6, (55 * 255 + 50) // 100)
-    ws.look.set_theme("indigo", persist=False)
+    use_theme(ws, "indigo")                     # a fixture with no look
     assert ui_draw.depth()[0] == 0                      # no look: the style's frame
 
 
@@ -88,7 +88,7 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     assert win.buf.h == win.content_rect()[3]
     # a theme without depth gives the rows back (its bars re-pack: the window
     # is laid out again)
-    ws.look.set_theme("indigo", persist=False)
+    use_theme(ws, "indigo")                     # a fixture with no look
     ws._dirty = True
     drv.frame(0.0)
     win = ws.wm._wins["settings"]
@@ -267,6 +267,7 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
         return tuple(buf[3 * (y * w + x):3 * (y * w + x) + 3])
 
     bare = bytes(drv.rgb888())
+    rasters = ws.wallpaper.rasters
     ws.open_app(ws._apps_by_id["calc"])
     drv.frame(1 / 30)
     win = ws.wm._wins["calc"]
@@ -280,7 +281,7 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
     assert at(bare, x, y) != at(bare, 900, y)        # the disc, not the desk
     assert all(s <= b for s, b in zip(at(now, x, y), at(bare, x, y)))
     assert at(now, x, y) != at(bare, x, y)
-    assert ws.wallpaper.rasters == 1
+    assert ws.wallpaper.rasters == rasters
 
 
 @pytest.mark.parametrize("variant", ["light", "dark"])

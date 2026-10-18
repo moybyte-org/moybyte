@@ -21,17 +21,20 @@ import hashlib
 
 from runtime import ui
 from runtime import ui_draw
-from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
+from runtime.chrome import THEME_VARIANTS
+from ws_helpers import fixture_colors, install_theme
 
-# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s,
-# `blocks`' and `contrast`'s RGB roles are tests/test_theme_rgb.py's and its
-# goldens'.
-THEME_NAMES = tuple(n for n in THEME_NAMES if n not in ("moy", "blocks", "contrast"))
+# The palette themes whose widgets these pin byte for byte: the seeds of
+# MOY64 colours docs/look_2026-10.md step 27 deleted, as fixture packages
+# (tests/fixtures/themes/), in their old seed order; `moy`'s, `blocks`' and
+# `contrast`'s RGB roles are tests/test_theme_rgb.py's and its goldens'.
+THEME_NAMES = ("night", "indigo", "berry", "forest", "slate", "machine",
+               "platinum", "win95", "outline")
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
 
 
-TH = theme_colors("machine")
+TH = fixture_colors("machine")
 
 
 # --- test doubles --------------------------------------------------------------
@@ -234,7 +237,7 @@ def test_shipped_widgets_are_byte_identical():
     for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
             for (w, h, fs) in _SIZES:
-                th = theme_colors(name, variant)
+                th = fixture_colors(name, variant)
                 cv = SystemCanvas(w, h, font_scale=fs)
                 _paint_shipped(cv, th)
                 seen.append("%s/%s %dx%d@%d %s" % (
@@ -250,7 +253,7 @@ def test_the_new_arguments_default_to_the_frozen_rendering():
     """`disabled`/`state` were added to chip and button. Passing them at their
     defaults, or not at all, must be the same call -- checked per branch rather
     than only through the aggregate hash above."""
-    for th in (theme_colors("night"), theme_colors("machine", "light")):
+    for th in (fixture_colors("night"), fixture_colors("machine", "light")):
         for kwargs in ({}, {"on": True}, {"hot": True}):
             a = SystemCanvas(80, 30)
             b = SystemCanvas(80, 30)
@@ -313,7 +316,7 @@ def test_every_state_resolves_on_all_twelve_theme_sets():
     a correct cue, so all 12 family x variant sets keep working unmodified."""
     for name in THEME_NAMES:
         for variant in THEME_VARIANTS:
-            th = theme_colors(name, variant)
+            th = fixture_colors(name, variant)
             palette = set(th.values())
             for state in ui_draw.STATES:
                 for kind in ("row", "cell"):
@@ -352,7 +355,7 @@ def test_state_tokens_walk_the_alias_chain_in_c():
 def test_hover_is_additive_and_disabled_only_dims():
     """SS7's principles as assertions: hover changes the EDGE only (field and
     ink stay at rest), and disabled keeps the field but dims the ink."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     rest = ui_draw.state_colors(th, "row", ui_draw.REST)
     hover = ui_draw.state_colors(th, "row", ui_draw.HOVER)
     assert hover[0] == rest[0] and hover[1] == rest[1]
@@ -580,7 +583,7 @@ def test_hits_add_budget_per_full_draw():
     first, so deleting the registrations (or the counter) fails rather than
     sails through, then a cap."""
     cv = SystemCanvas(320, 240)
-    th = theme_colors("night")
+    th = fixture_colors("night")
     hits = _CountingHits()
     for _frame in range(3):                            # three full draws
         hits.clear()
@@ -600,7 +603,7 @@ def test_a_grid_registers_nothing():
     """The constraint stated directly: 24 cells, 0 rects. `cell` has no `hits`
     parameter, so this cannot regress by someone 'unifying' a call site."""
     cv = SystemCanvas(320, 240)
-    th = theme_colors("night")
+    th = fixture_colors("night")
     hits = _CountingHits()
     for i in range(24):
         ui_draw.cell(cv, th, ((i % 6) * 20, (i // 6) * 20, 18, 18), "N",
@@ -626,7 +629,7 @@ def test_a_row_reads_its_own_state_from_the_registry():
     """The ergonomic half of the boundedness rule: a bounded surface wires the
     pump once and every row registers AND reads itself."""
     cv = SystemCanvas(200, 60)
-    th = theme_colors("night")
+    th = fixture_colors("night")
     hits = ui_draw.Hits()
     for i in range(3):
         ui_draw.row(cv, th, (0, i * 20, 200, 18), "R%d" % i,
@@ -648,7 +651,7 @@ def test_a_row_reads_its_own_state_from_the_registry():
 # =============================================================================
 
 def test_row_rest_and_selected_paint_the_row_tokens():
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 60)
     ui_draw.row(cv, th, (0, 0, 200, 20), "REST")
     assert cv.pix(2, 2) == th["panel"]
@@ -663,7 +666,7 @@ def test_row_rest_and_selected_paint_the_row_tokens():
 def test_row_field_none_paints_nothing_and_edge_is_optional():
     """Settings and the system menu paint no field on an unselected row and no
     border at all; a `row` that could not express that would not fit them."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(100, 20)
     cv.cls(31)
     ui_draw.row(cv, th, (0, 0, 100, 20), "", colors=(None, 7, 3), edge=False)
@@ -675,7 +678,7 @@ def test_row_field_none_paints_nothing_and_edge_is_optional():
 def test_row_disabled_dims_and_does_not_register():
     """"dim ink, NON-registering": an unusable row must not be tappable, which
     is exactly what the four hand-rolled disabled sites get wrong today."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 20)
     hits = ui_draw.Hits()
     ui_draw.row(cv, th, (0, 0, 200, 20), "LOCKED", disabled=True,
@@ -689,7 +692,7 @@ def test_row_disabled_dims_and_does_not_register():
 def test_row_truncates_the_label_and_the_value_inside_the_rect():
     """#174's lesson generalized: overflow must CLIP, never escape the rect and
     land ink on whatever is beside it."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 40)
     cv.cls(31)
     ui_draw.row(cv, th, (20, 10, 60, 20), "A VERY LONG ROW LABEL",
@@ -701,7 +704,7 @@ def test_row_truncates_the_label_and_the_value_inside_the_rect():
 
 
 def test_row_value_is_right_aligned_and_label_keeps_the_rest():
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 20)
     cv.cls(31)
     ui_draw.row(cv, th, (0, 0, 200, 20), "WIFI", value="OFF",
@@ -713,7 +716,7 @@ def test_row_value_is_right_aligned_and_label_keeps_the_rest():
 
 def test_row_icon_and_glyph_shift_the_label(monkeypatch):
     """Achievements' leading glyph, Settings' trailing status icon."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     plain = SystemCanvas(200, 20)
     ui_draw.row(plain, th, (0, 0, 200, 20), "NAME", colors=(None, 7, 3), edge=False)
     withg = SystemCanvas(200, 20)
@@ -729,7 +732,7 @@ def test_row_icon_and_glyph_shift_the_label(monkeypatch):
 def test_row_pad_and_text_dy_reproduce_the_frozen_geometries():
     """Settings' literal (4, 5), Files' (4*fs, 6*fs), Storybook's centred
     label -- the three the converting phases must be able to hit exactly."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     a = SystemCanvas(200, 26)
     ui_draw.row(a, th, (0, 0, 200, 26), "X", colors=(None, 7, 3), edge=False,
            pad=4, text_dy=5)
@@ -748,7 +751,7 @@ def test_row_pad_and_text_dy_reproduce_the_frozen_geometries():
 # =============================================================================
 
 def test_cell_returns_the_art_rect_and_matches_the_pure_geometry():
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 120)
     art = ui_draw.cell(cv, th, (0, 0, 76, 66), "name")
     assert art == ui_draw.cell_art_rect((0, 0, 76, 66), 1, 2, 14)
@@ -759,7 +762,7 @@ def test_cell_returns_the_art_rect_and_matches_the_pure_geometry():
 
 
 def test_cell_selected_lifts_the_field_and_the_edge():
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 120)
     ui_draw.cell(cv, th, (0, 0, 76, 66), "a")
     assert cv.pix(1, 1) == th["panel"] and cv.pix(0, 0) == th["dim"]
@@ -770,7 +773,7 @@ def test_cell_selected_lifts_the_field_and_the_edge():
 def test_cell_band_fills_the_caption_zone():
     """The wallpaper cards' look: a filled strip with a left-aligned title,
     accented when selected. Without a band the label prints on the field."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(200, 120)
     # y = 78 is inside the 17px caption zone (63..79) but below the label row
     # (67..74), so it reads the ZONE, not the glyphs.
@@ -787,7 +790,7 @@ def test_cell_band_fills_the_caption_zone():
 def test_cell_art_never_covers_the_border_or_the_caption():
     """Draw order is field -> caption -> edge, and the art rect excludes both,
     so a caller's picture cannot land on the frame."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     cv = SystemCanvas(120, 90)
     ax, ay, aw, ah = ui_draw.cell(cv, th, (0, 0, 100, 80), "T", band=True, pad=3,
                              caption_h=17)
@@ -797,7 +800,7 @@ def test_cell_art_never_covers_the_border_or_the_caption():
 
 
 def test_cell_states_route_through_the_same_model_as_row():
-    th = theme_colors("night")
+    th = fixture_colors("night")
     for state in (ui_draw.HOVER, ui_draw.PRESSED):
         cv = SystemCanvas(60, 60)
         ui_draw.cell(cv, th, (0, 0, 40, 40), None, state=state)
@@ -807,7 +810,7 @@ def test_cell_states_route_through_the_same_model_as_row():
 
 
 def test_cell_draws_a_centred_glyph_or_icon_in_the_art_rect():
-    th = theme_colors("night")
+    th = fixture_colors("night")
     a = SystemCanvas(60, 60)
     art = ui_draw.cell(a, th, (0, 0, 40, 40), None, glyph="dot",
                   glyph_draw=_glyph_draw, pad=0)
@@ -906,10 +909,12 @@ def _matrix_hashes():
     out = []
     try:
         for name in THEME_NAMES:
+            th = {v: fixture_colors(name, v) for v in THEME_VARIANTS}
+            install_theme(name)                # its shape: the slot's
             ui_draw.use_shape(name)
             for variant in THEME_VARIANTS:
                 cv = SystemCanvas(320, 320)
-                _paint_matrix(cv, theme_colors(name, variant))
+                _paint_matrix(cv, th[variant])
                 out.append("%s/%s %s" % (
                     name, variant, hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
     finally:
@@ -931,7 +936,7 @@ def test_the_toggle_is_a_chip_that_reads_switched_on():
     """A kind added as data (sprint 6, docs/kernel_toolkit_2026-10.md §2.2):
     chip's shape and chip's look, except ON, which paints the theme's play
     green with light ink."""
-    th = theme_colors("machine")
+    th = fixture_colors("machine")
     for st in ui_draw.STATES:
         t, c = ui_draw.state_colors(th, "toggle", st), ui_draw.state_colors(th, "chip", st)
         if st == ui_draw.ON:

@@ -14,6 +14,72 @@ from pathlib import Path
 from runtime import host_app
 
 
+# The fixture theme packages (tests/fixtures/themes/<name>.moy): the seeds
+# the 2026-10 look deleted (docs/look_2026-10.md step 27), each standalone,
+# for the tests that draw a lookless pixel theme, a frame style or a palette.
+FIXTURE_THEMES = Path(__file__).resolve().parent / "fixtures" / "themes"
+
+
+def fixture_theme(name):
+    """Fixture package `name`'s theme.json bytes."""
+    return (FIXTURE_THEMES / (name + ".moy") / "theme.json").read_bytes()
+
+
+def install_theme(name):
+    """Put fixture package `name` in the loader's install slot (conftest
+    drops it after the test), so `theme_colors(name)` and `set_theme(name)`
+    reach it."""
+    import moy_ui
+    from runtime import chrome
+    rc = moy_ui.theme_install(fixture_theme(name))[0]
+    assert rc == 0, (name, rc)
+    chrome.forget_themes()
+
+
+def fixture_colors(name, variant="dark"):
+    """Fixture package `name`'s `theme_colors` in `variant`, the slot left
+    empty after."""
+    import moy_ui
+    from runtime import chrome
+    install_theme(name)
+    try:
+        return dict(chrome.theme_colors(name, variant))
+    finally:
+        moy_ui.theme_uninstall()
+        chrome.forget_themes()
+
+
+def use_theme(ws, name, variant=None, store=False):
+    """`ws` on fixture package `name`, in `variant` (None keeps the current
+    one): in the install slot, or with `store` copied into its store as a
+    theme a kid installed (its fonts from its own folder), which a change
+    in Appearance makes `custom` from."""
+    if store:
+        import shutil
+        dst = Path(ws.carts_root) / (name + ".moy")
+        if not dst.exists():
+            shutil.copytree(FIXTURE_THEMES / (name + ".moy"), dst)
+            ws.carts.rescan()
+    else:
+        install_theme(name)
+    ws.look.set_theme(name, persist=False, variant=variant)
+
+
+def boot_on_fixture(monkeypatch, name="night", variant="dark", store=False):
+    """Every workstation the test builds boots on fixture package `name` in
+    `variant` (`use_theme`'s `store`): for the suites that pin the lookless
+    pixel bar, its context X and the 320x240 coordinates (the default is
+    Moy, whose look moves them). A store that names a theme boots it."""
+    real = host_app.build_workstation
+
+    def build(*a, **kw):
+        ws = real(*a, **kw)
+        if ws.system.get("theme") is None:
+            use_theme(ws, name, variant, store)
+        return ws
+    monkeypatch.setattr(host_app, "build_workstation", build)
+
+
 def build_ws(tmp_path, **kw):
     """A workstation over a fresh seeded store under tmp_path/carts."""
     return host_app.build_workstation(str(tmp_path / "carts"), **kw)
@@ -178,14 +244,14 @@ def wallpaper_on_store(carts, wp_id):
     import moy_ui
     from runtime import moy_carts
     from runtime.theme_custom import font_files, manifest
-    rc, src = moy_ui.theme_custom("night", None, None)
+    rc, src = moy_ui.theme_custom("moy", None, None)
     assert rc == 0
     pkg = json.loads(src)
     pkg["wallpapers"] = {"desk": wp_id} if wp_id is not None else {}
     d = Path(carts) / "custom.moy"
     d.mkdir(parents=True, exist_ok=True)
     (d / "theme.json").write_text(json.dumps(pkg))
-    (d / "manifest.json").write_bytes(manifest({"from": "night"}))
+    (d / "manifest.json").write_bytes(manifest({"from": "moy"}))
     for f in font_files(pkg.get("fonts")):
         data = moy_ui.font_file(f)
         if data is not None:

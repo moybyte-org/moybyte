@@ -12,7 +12,16 @@ from ws_helpers import shelf  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
-from ws_helpers import build_ws as _ws  # noqa: E402
+from ws_helpers import build_ws as _build_ws, use_theme  # noqa: E402
+
+
+def _ws(tmp_path, **kw):
+    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
+    in its dark mode: the bar's mechanics are pinned on the pixel IconSheet
+    and the pixel bar; a test of a look sets its theme."""
+    ws = _build_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
+    return ws
 
 
 def _pin_clock(ws, drv):

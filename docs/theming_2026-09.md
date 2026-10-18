@@ -69,9 +69,9 @@ Each was mocked and judged worse (§11).
 
 **SOURCE.** Theming is data in three layers; what it lacks is reach.
 
-- **Theme packages:** the six families (`night`, `indigo`, `berry`, `forest`,
-  `slate`, `machine`) are seed packages in format 1 (§3),
-  `native/moy_ui/themes/*.json`, each with a dark and a light table, embedded
+- **Theme packages:** the three themes (`moy`, the default, `blocks` and
+  `contrast`; `docs/look_2026-10.md` step 27) are seed packages in format 2
+  (§3), `native/moy_ui/themes/*.json`, each with a dark and a light table, embedded
   in every image by `tools/gen_ui_tables.py`. `native/moy_ui/moy_theme.c` is
   the loader: it reads a theme.json with a strict reader of its own, walks
   `inherits` and fills every role a package leaves unset from the derivation
@@ -84,8 +84,7 @@ Each was mocked and judged worse (§11).
   with the state ladder `disabled > pressed > hot > on > hover > rest` and the
   quirks it lists, resolved in C by `native/moy_ui` against the live token row
   (sprint 6). What a theme changes beyond colours is its shape (§4.2-§4.5),
-  installed with the theme; the skin axis folded into it (phase 3 step 4), and
-  `outline`, once the second skin, is a seed package.
+  installed with the theme; the skin axis folded into it (phase 3 step 4).
 - **Text:** one text call, `moy_text` (`native/moy_gfx/moy_text.h`), for every
   UI string: UTF-8, a font argument (a row: petme128 is id 0, a loaded font
   file another, §4.7), `align` and `maxw`, and it returns the drawn width.
@@ -304,12 +303,10 @@ classes, and `block_<category>` for each block category (`block_events`,
 `block_variables`, `block_lists`, `block_operators`, `block_sound`,
 `block_myblocks`). Their derivation gives today's colours: the syntax set per
 variant (the dark classes' own colours, and the light set the Code tab drew on
-a light surface), and the Scratch category colours in both. A seed whose dark
-table has a light surface (`machine`) sets the light syntax set itself. The six
+a light surface), and the Scratch category colours in both. The six
 `code_*` roles are theme roles held to a floor of their own, 4.5:1 on the
-code surface (`surface`; style.json's `theme.code`, §7); Moy sets its own
-(`docs/look_2026-10.md` step 23), and the older seeds keep theirs, under the
-floor where they are, until step 27 retires them.
+code surface (`surface`; style.json's `theme.code`, §7); every seed sets its
+own (`docs/look_2026-10.md` steps 23 and 26).
 `runtime/code_layer.py` and `runtime/block_editor_ui.py` read them through
 the look (`runtime/appearance.py`'s `content_colors`).
 
@@ -327,16 +324,17 @@ existing theme keeps its pixels. Phase 3's painter added six (2026-10-12):
 
 They are the three `light_chrome()` branches outside a `_base` branch turned
 into tokens (`runtime/web_console_ui.py`, `runtime/music_editor_ui.py`,
-`runtime/bar_layer.py`). `machine`, the seed whose dark table has a light
-surface, sets the three itself, as it sets its syntax colours. An `_ink` for a
-fill role that lacks one comes when a surface first paints text on it.
+`runtime/bar_layer.py`). A seed sets them itself where its look needs them.
+An `_ink` for a fill role that lacks one comes when a surface first paints
+text on it.
 
-The six shipped families are seed packages in format 1 (§2). There is no
-reader for the old settings beyond that: under the no-migrations rule a stored
-name that no package provides reads as absent and resolves to the default, and
-a stored `skin` is not read at all. `outline`, once the second skin, is a seed
-package of surfaces over the default's colours (phase 3 step 4), and the skin
-axis is gone: its rows, its verbs in the app ABI and its persisted setting.
+The shipped themes are seed packages (§2). There is no reader for the old
+settings beyond that: under the no-migrations rule a stored name that no
+package provides (a seed `docs/look_2026-10.md` step 27 deleted: `night`,
+`indigo`, `berry`, `forest`, `slate`, `machine`, `platinum`, `win95`,
+`outline`) reads as absent and resolves to the default in its default mode,
+and a stored `skin` is not read at all. The skin axis is gone: its rows, its
+verbs in the app ABI and its persisted setting.
 
 ### 4.2 Metrics
 
@@ -606,7 +604,10 @@ shadow's reach).
 Seven roles: `ui`, `title`, `mono`, `caption`, and the display's `key`,
 `op` and `result` (a button kind's `font` leaf names `key` or `op`;
 docs/look_2026-10.md step 22). A theme font is a bitmap font file.
-The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
+Every seed's look names a family of the font set (`fam`, below); Moy's Day
+draws Day Sans (IBM Plex Sans, renamed), its Night Inter. Tiny5 (D1) is a
+Font preset of Appearance (style.json's `preset_fonts`) and the face of a
+package that names it. Petme128 stays the carts' font, and the cart
 `print` path is byte-identical, including the Lua C API that shares
 `mg_text_raw`. The one text path for every app runtime is sprint 6's
 `moy_text` (`docs/kernel_toolkit_2026-10.md` §4).
@@ -772,10 +773,9 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     which Tiny5 draws, cannot be addressed until a codepoint map does it
     (#135's work); a byte the font does not cover draws glyph 0, the space,
     as petme128's row does.
-  - **`night` names Tiny5 for `ui` and `title`**, as D1's pictures draw it,
-    and every seed inherits it but where a look sets a family; `mono` stays
-    petme128 but in `moy`, which names the font set's JetBrains Mono for the
-    Code tab (`docs/look_2026-10.md` step 23). A face of the font set
+  - **Every seed names the font set's JetBrains Mono for `mono`** (the
+    Code tab, `docs/look_2026-10.md` step 23), and its look's family for
+    the rest; a role neither covers draws petme128. A face of the font set
     (`runtime/fontset.py`) is the image's, not embedded in the tables.
   - **A look's `fam` names the type**: a family of the font set whose
     faces, sized per metric class (`fontset.ROLES`) at the weights its
@@ -907,7 +907,11 @@ loader's own predicate: `clears(a, b)` is
 luminances, the pair check §7 already makes. Its inputs are the source's
 two resolved rows (the token row and the content set, both variants), an
 **accent** — one of sixteen pairs (A, deep) in style.json's
-`theme.accents`, or the source's own — and a **tint** — NONE or one of
+`theme.accents`, one of the four presets in `theme.presets` (Indigo, Berry,
+Forest and Slate, the seeds `docs/look_2026-10.md` step 27 deleted, each an
+A per variant that is its own deep: the dark one black clears, the light
+one white clears; picked by its dark value), or the source's own — and a
+**tint** — NONE or one of
 eight ramps of MOY64 indices in `theme.tints`, dark to light, never black
 (0) or white (7). The role classes each step names below are
 `theme.recolour`. The lists are data, as `font_roles` is, and the sixteen
@@ -916,7 +920,8 @@ the mockups' `derive()` (`docs/media/theming_2026-09/appearance/mockups.py`)
 carries them. **Every accent is one black clears** (`clears(A, 0)`), because
 style.json's kinds paint a literal black label on an accent fill (`chip`,
 `button` and `row_cta` in `on`); that is what lets the accent fill every
-accent role with no new ink role.
+accent role with no new ink role. A preset's light value clears white
+instead, as Moy Day's own accent does.
 
 Per variant, with B the source's row and R the result, R starting as B:
 
@@ -975,7 +980,7 @@ source's `look` flattened beside them, so the loader reads it as any
 package, EDIT FILE shows the colours the
 console draws, and a console without the step, the web console and the
 carts repository read the same row. The inputs ride in the package's
-manifest, `"moybyte": {"type": "theme", "look": {"from": "night", "accent":
+manifest, `"moybyte": {"type": "theme", "look": {"from": "moy", "accent":
 14, "tint": "plum"}}`, read by Appearance alone: ACCENT and TINT show them,
 and each change re-derives from `from`'s resolved rows, never from the last
 result, since a ramp quantises and quantising a quantised row drifts. A
@@ -994,11 +999,14 @@ would need a precedence over the rule.
 
 Every key but `format` and `name` is optional. A theme resolves through
 `inherits` (one parent; a theme that names none inherits the default) and ends
-at the default seed, `night`, which sets every role nothing derives.
-**Inheritance is the seeds'** (`platinum` and `win95` on `night`); a user
+at the default seed, `moy`, which sets every role. The default lends a
+package that names no `inherits` its roles, metrics, surfaces, fonts and
+layout, but not its look (its fields and backdrops), which a chain takes only
+by name (`docs/look_2026-10.md` step 27): a package of its own draws
+lookless, as `blocks` and `contrast` draw their own looks alone. A user
 theme is a standalone copy, flattened when `custom` is made, with no `inherits` (owner,
 2026-10-14; phase 6 steps 2 and 5), and a role a copy lacks — one a later
-format added — derives as any unset role does. The chain
+format added — takes the default's, as any unset role does. The chain
 is **capped at four links and a cycle is refused**, at install and at resolve
 (style.json's `theme.depth`). Each role comes from the nearest package that
 sets it; what is still unset is filled by `theme.derive`, the variant's own
@@ -1105,9 +1113,7 @@ Kids will trade themes, so a theme is untrusted input:
   The derivation (§4.10) never writes a pair under the floor; a hand edit
   through EDIT FILE can, and its reader is the editor's badge at the save
   (phase 6 step 6). Every seed passes both checks in both variants
-  (`tests/test_theme_loader.py`); the code floor holds `moy` and
-  `contrast`, and reports the older seeds' syntax colours until step 27
-  retires them.
+  (`tests/test_theme_loader.py`), the code floor among them.
 - **The loader is the safety** (owner, 2026-10-14). A theme cannot run code,
   so the validation above, the readability report, the layout's required set
   (`docs/shell_layout_2026-10.md` §9) and the fuzz gates on the host and on

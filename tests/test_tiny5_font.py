@@ -72,12 +72,14 @@ def test_the_font_covers_ascii_on_one_byte_columns():
         ui_draw.font_free(fid)
 
 
-def test_the_tables_embed_the_file_and_night_names_it():
+def test_the_tables_embed_the_file_as_a_font_preset():
+    """No seed names Tiny5 since docs/look_2026-10.md step 27 (every seed
+    draws its look's family); the tables carry it for Appearance's Font
+    preset (style.json's `preset_fonts`) and a package that names it."""
     assert ui_draw.font_file("tiny5.fnt") == _fnt()
     assert ui_draw.font_file("nothing.fnt") is None
-    assert dict(ui_draw.theme_fonts("night")) == {"ui": "tiny5.fnt", "title": "tiny5.fnt"}
-    with open(os.path.join(THEMES, "night.json")) as f:
-        assert "mono" not in json.load(f)["fonts"]
+    with open(os.path.join(THEMES, "..", "style.json")) as f:
+        assert "tiny5.fnt" in json.load(f)["theme"]["preset_fonts"]
 
 
 def test_every_seed_font_ships_its_licence_in_the_image():
@@ -85,7 +87,8 @@ def test_every_seed_font_ships_its_licence_in_the_image():
     its licence's full text; the tables embed it with the font, so every
     image that carries the font carries its licence."""
     seeds = [f for f in os.listdir(THEMES) if f.endswith(".json")]
-    fonts = set()
+    with open(os.path.join(THEMES, "..", "style.json")) as f:
+        fonts = set(json.load(f)["theme"]["preset_fonts"])
     for name in seeds:
         with open(os.path.join(THEMES, name)) as f:
             fonts |= set(json.load(f).get("fonts", {}).values())
@@ -132,8 +135,11 @@ def _free_slots():
 
 
 def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
-    from ws_helpers import build_ws
+    """On the `night` fixture (tests/fixtures/themes/, Tiny5 for `ui` and
+    `title`), against every seed and a theme that names no font."""
+    from ws_helpers import build_ws, use_theme
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", "dark")
     fid = ui_draw.font("ui")[0]
     assert fid != 0 and ui_draw.font("title")[0] == fid and ui_draw.font("mono")[0] == 0
     assert ui_draw.print_font() == fid
@@ -145,9 +151,8 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
             # and its Night, this workstation's mode, Inter's four faces and
             # Calc's three in place of Tiny5 (steps 26a and 22); blocks and
             # contrast the same with Atkinson's (26b, 26c)
-            assert len(appearance._FONTS) == (
-                8 if name in ("moy", "blocks", "contrast") else 1)
-    ws.look.set_theme("night", persist=False)
+            assert len(appearance._FONTS) == 8
+        ws.look.set_theme("night", persist=False)
     assert len(appearance._FONTS) == 1
     iconsets.reset()            # an icon set's masks hold font rows of their own
     assert _free_slots() == SLOTS - 1
@@ -155,11 +160,12 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
     # nothing left loaded, the layout rebuilt on petme128's cell.
     real = ui_draw.theme_fonts
     monkeypatch.setattr(appearance._ui_draw, "theme_fonts",
-                        lambda n: () if n == "slate" else real(n))
-    ws.look.set_theme("slate", persist=False)
+                        lambda n: () if n == "night" else real(n))
+    ws.look.set_theme("night", persist=False)
     assert [ui_draw.font(r)[0] for r in ("ui", "title", "mono", "caption")] == [0, 0, 0, 0]
     assert ui_draw.print_font() == 0 and appearance._FONTS == {}
     assert ws.layout.font_w == 8 and _free_slots() == SLOTS
+    monkeypatch.undo()
     ws.look.set_theme("night", persist=False)
     assert ui_draw.font("ui")[0] != 0 and ws.layout.font_w == 6
 
@@ -168,17 +174,18 @@ def test_the_floor_lifts_the_effective_font_scale(tmp_path):
     """On a 3.0" 480x320, denser than any panel in the lineup, the `ui`
     font's ascent needs scale 2: the shell lays out and draws at 2 while the
     setting stays 1; a theme on petme128 drops it back."""
-    from ws_helpers import build_ws
+    from ws_helpers import build_ws, use_theme
     ws = build_ws(tmp_path, sys_size=(480, 320), panel_diagonal_in=3.0)
+    use_theme(ws, "night", "dark")                 # Tiny5's (tests/fixtures/themes/)
     assert ui_draw.font("ui")[1:] == (6, 8, 6)
     assert ws.look.font_scale == 1 and ws.look.effective_font_scale() == 2
     assert ws.sys_canvas.font_scale == 2
     assert ws.layout.font_w == 12 and ws.layout.line_h == 16
     import runtime.appearance as A
     real = ui_draw.theme_fonts
-    A._ui_draw.theme_fonts = lambda n: () if n == "slate" else real(n)
+    A._ui_draw.theme_fonts = lambda n: () if n == "night" else real(n)
     try:
-        ws.look.set_theme("slate", persist=False)
+        ws.look.set_theme("night", persist=False)
         assert ws.look.effective_font_scale() == 1 and ws.layout.font_w == 8
         assert ws.sys_canvas.font_scale == 1
     finally:
@@ -321,5 +328,6 @@ def test_a_full_set_of_slots_is_taken_back(tmp_path):
     assert _free_slots() == 0
     appearance._FONTS.clear()                  # a console that knows none of them
     build_ws(tmp_path)
-    assert ui_draw.font("ui")[0] not in (0, None) and len(appearance._FONTS) == 1
-    assert _free_slots() == SLOTS - 1
+    # Moy's Day: its seven faces and JetBrains Mono
+    assert ui_draw.font("ui")[0] not in (0, None) and len(appearance._FONTS) == 8
+    assert _free_slots() == SLOTS - 8

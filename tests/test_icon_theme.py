@@ -13,7 +13,16 @@ ROOT = Path(__file__).resolve().parent.parent
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _build_ws, install_theme, use_theme
+
+
+def _ws(tmp_path, **kw):
+    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
+    in its dark mode: the bar's mechanics are pinned on the pixel IconSheet
+    and the pixel bar; a test of a look sets its theme."""
+    ws = _build_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
+    return ws
 
 
 def _center(rect):
@@ -513,6 +522,7 @@ def test_icons_names_a_set_and_a_theme_without_it_keeps_its_sheet():
     for name in ("moy", "contrast"):
         assert iconsets.spec(chrome.live_colors(name, "light").look) == ("smooth", "default", None)
     for name in ("night", "platinum", "win95"):
+        install_theme(name)
         assert iconsets.spec(chrome.live_colors(name, "dark").look) is None, name
 
 
@@ -548,7 +558,7 @@ def test_the_bar_draws_the_themes_set(tmp_path):
     cv.rect(0, 0, 40, 20, 0)
     iconsets.draw(cv, "wifi", (0, 0, 16, 16), 7, ("smooth", "default", None))
     assert smooth == _pixels(cv, (0, 0, 16, 16))
-    ws.look.set_theme("night", persist=False, variant="dark")
+    use_theme(ws, "night", "dark")
     assert ws.icon_spec() is None
     assert not ws.draw_icon("wifi", (0, 0, 16, 16), 7, cv)
 
@@ -575,4 +585,4 @@ def test_a_depth_frames_title_buttons_take_the_set(tmp_path):
     iconsets.use_parts(("pixel", None, None))
     assert frame() == glyphs
     iconsets.reset()
-    ws.look.set_theme("night", persist=False, variant="dark")     # the depth is global
+    use_theme(ws, "night", "dark")     # the depth is global

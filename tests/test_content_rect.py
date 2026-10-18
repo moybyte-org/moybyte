@@ -19,6 +19,13 @@ import pytest
 from runtime import layout_base
 from runtime.layout_base import LayoutBase
 from ws_helpers import build_ws, build_desktop_ws, select_on_home
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 DT = 1.0 / 30.0
 

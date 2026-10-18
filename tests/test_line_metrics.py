@@ -19,6 +19,13 @@ from runtime.chrome import CodeLayout, Layout, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.wm_desk import _BackdropLayer as Desk
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 ROOT = runtime.__path__[0] + "/.."
 STYLE = json.loads(open(ROOT + "/native/moy_ui/style.json").read())

@@ -10,6 +10,7 @@ import re
 
 import ui_twin as twin
 from runtime.chrome import THEME_VARIANTS, THEME_NAMES, theme_colors
+from ws_helpers import fixture_colors, fixture_theme, install_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STYLE = os.path.join(ROOT, "native", "moy_ui", "style.json")
@@ -204,8 +205,17 @@ def test_the_button_kinds_are_the_theme_models_in_its_order():
 
 
 def _install(src):
+    """Install package `src`; one that `inherits` a fixture package
+    (tests/fixtures/themes/, the one install slot holds one) is that
+    package's under its own keys, colours merged per variant."""
     import moy_ui
     from runtime import chrome
+    if src.get("inherits") not in THEME_NAMES + (None,):
+        pkg = json.loads(fixture_theme(src["inherits"]))
+        for v, roles in src.get("colors", {}).items():
+            pkg["colors"].setdefault(v, {}).update(roles)
+        pkg.update((k, x) for k, x in src.items() if k not in ("inherits", "colors"))
+        src = pkg
     rc, _notes = moy_ui.theme_install(json.dumps(src).encode())
     assert rc == 0
     chrome.forget_themes()
@@ -223,6 +233,9 @@ _BLOCK = [None]
 
 def _live(name, variant="dark"):
     from runtime import chrome, ui_draw
+    import moy_ui
+    if name not in THEME_NAMES and moy_ui.theme_installed() != name:
+        install_theme(name)               # a fixture package
     live = chrome.live_colors(name, variant)
     ui_draw._C.theme_block(live.block, live.used)
     ui_draw.use_buttons(live)
@@ -348,7 +361,7 @@ def test_one_primary_per_surface_is_warned_of(capsys):
     button drawn twice, another canvas, or the next frame is not."""
     from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
-    th = theme_colors("machine")
+    th = fixture_colors("machine")
     a, b = make_system_canvas(80, 60), make_system_canvas(80, 60)
     del ui_draw.primary_warnings[:]
     ui_draw._PRIMARY_WARNED.clear()
@@ -371,7 +384,7 @@ def test_one_primary_per_surface_is_warned_of(capsys):
 
 
 def test_an_unknown_kind_draws_as_normal():
-    th = theme_colors("machine")
+    th = fixture_colors("machine")
     _BLOCK[0] = None
     assert _field(th, "nosuch") == _field(th, "normal") == _word(th["surface"])
 
@@ -446,7 +459,7 @@ def test_a_kind_draws_its_shape():
     look keeps them square."""
     from runtime import ui_draw
     bg = _word(1)
-    th = theme_colors("machine")
+    th = fixture_colors("machine")
     _BLOCK[0] = None
     sq = _drawn(th, "primary")
     assert _px(sq, 0, 0) == _px(sq, 40, 0) == _word(th["value"])
@@ -502,8 +515,8 @@ def test_accent_reaches_a_part_only_through_the_marks():
 def _marked(name, light, draw, size=(120, 40)):
     from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
-    ui_draw.use_depth(name, light)
     live = _live(name, "light" if light else "dark")
+    ui_draw.use_depth(name, light)
     th = live.tokens
     cv = make_system_canvas(*size)
     cv.theme_block(live.block)

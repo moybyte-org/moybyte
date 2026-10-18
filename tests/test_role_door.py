@@ -205,10 +205,11 @@ def _field(b):
 
 
 def test_the_shell_rows_reach_the_consoles_servers(tmp_path):
-    from ws_helpers import build_ws
+    from ws_helpers import build_ws, use_theme
     from runtime import moy_loop
     import moy_app
     ws = build_ws(tmp_path)
+    use_theme(ws, "night", "dark")      # a wallpaper cart: Moy's is its backdrop
     app = ws.app_abi
     table = moy_app.table()
     row = {n: i for i, n in enumerate(table)}

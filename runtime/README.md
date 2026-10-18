@@ -137,7 +137,7 @@ The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`
 older `.moyproj` SDK was removed in 2026-07 (git history has it).
 
 Content + tooling:
-- `system_carts/` — `moybyte.moy_night.moy` (the default: a STATIC night scene drawn
+- `system_carts/` — `moybyte.moy_night.moy` (the first wallpaper, which a theme with no backdrop shows: a STATIC night scene drawn
   per glass, Moy asleep clear of the shell's quiet rectangles — free under the redraw
   gate, incl. the web view),
   `moybyte.open_machine.moy` (the STATIC MOY64 construction-grid backdrop from the visual

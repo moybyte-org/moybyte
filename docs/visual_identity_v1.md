@@ -2,7 +2,9 @@
 
 **Status:** DRAFT / CHOSEN DESIGN DIRECTION — this document turns the July 2026
 concept exploration into a product and implementation contract. It is not yet the
-shipped shell reference. Where it changes behavior described by
+shipped shell reference. Its colours are not the default look: that is the 2026-10
+look's Moy in its Day mode (`docs/look_2026-10.md`, step 27 of which deleted the
+`machine` seed this document's Open Machine colourway shipped as, with `night`). Where it changes behavior described by
 `docs/shell_ux_v1.md`, the change must land in code and tests before that reference is
 updated.
 
@@ -320,9 +322,9 @@ danger
 The exact storage shape is an implementation decision. The behavioral rule is not:
 system surfaces consume semantic roles rather than scattering literal indices.
 
-The default theme, `night`, carries the look `docs/theming_2026-09.md` §1 chose
-(D1, landed 2026-10-12 by its phase 3 step 4); a change to it is a named
-re-baseline of the goldens.
+The default theme is `moy` in its Day mode, the 2026-10 look
+(`docs/look_2026-10.md` step 27); a change to it is a named re-baseline of the
+goldens.
 
 *Status (2026-07-23): SHIPPED, extended.* Every theme family now carries a **dark
 and a light variant** (`chrome.THEME_VARIANTS`, picked in Appearance → THEMES →

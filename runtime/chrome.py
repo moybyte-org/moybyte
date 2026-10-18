@@ -824,7 +824,7 @@ _ICON_VERSION = 5
 # draws them, each RGB role placed in the block at indices 64..127;
 # `surface_light`, `bar_light` and `band_light` are presentation flags
 # (booleans here).
-# The default is the first seed ("night", the moybyte site palette). The
+# The default is the first seed, Moy, in its light mode (Day). The
 # store's theme packages are themes too (`adopt_packages`, which the look
 # calls at every store change), each resolved from its bytes without
 # installing it (`moy_ui.theme_resolve`), as is the one installed package
@@ -833,7 +833,7 @@ _ICON_VERSION = 5
 THEME_NAMES = _ui_draw._C.themes()
 DEFAULT_THEME = THEME_NAMES[0]
 THEME_VARIANTS = ("dark", "light")
-DEFAULT_VARIANT = "dark"
+DEFAULT_VARIANT = "light"
 _THEME_FLAGS = ("surface_light", "bar_light", "band_light")
 _THEME_CACHE = {}
 _CONTENT_CACHE = {}
@@ -1093,6 +1093,12 @@ def theme_accents():
     """((name, A, deep), ...): the sixteen accents a theme change takes
     (style.json's), for a picker."""
     return _ui_draw.theme_accents()
+
+
+def theme_presets():
+    """((name, dark, light), ...): the accent presets a theme change takes,
+    an accent in each mode's value (style.json's), for a picker."""
+    return _ui_draw.theme_presets()
 
 
 def theme_tints():

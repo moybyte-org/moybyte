@@ -25,6 +25,13 @@ from runtime import chrome, glass_binding, moy_play, ui_draw
 from runtime.chrome import theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
+from ws_helpers import boot_on_fixture, fixture_colors
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PIECES = ("a", "B", "z", "0", " ", " ", "  ", "\t", "\n", "-", "é", "ü",
@@ -171,7 +178,7 @@ NON_ASCII_GOLDEN = "bfc397099784c84b"
 
 def _non_ascii_frame():
     cv = SystemCanvas(320, 240, font_scale=2)
-    th = theme_colors("machine")
+    th = fixture_colors("machine")
     cv.cls(th["panel"])
     chrome._print_scaled(cv, "Café 日本", 4, 4, th["accent"], 2)
     y = 40

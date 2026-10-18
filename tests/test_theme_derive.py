@@ -46,7 +46,10 @@ ROLES = STYLE["tokens"] + TH["content"]
 PAIRS = len(TH["pairs"])          # the current plate's bit is the one past the pairs
 OK, BIG, SYNTAX, NEWER, NAME, TAKEN, CHAIN = range(7)
 SEEDS = list(moy_ui.themes())
-ACCENTS = [None] + [a for _n, a, _d in TH["accents"]]
+ACCENTS = [None] + [a for _n, a, _d in TH["accents"]] + [d for _n, d, _l in TH["presets"]]
+# A preset (docs/look_2026-10.md step 27) is picked by its dark value and is
+# its mode's value, its own deep.
+PRESETS = {d: (d, li) for _n, d, li in TH["presets"]}
 TINTS = [None] + [n for n, _r in TH["tints"]]
 
 
@@ -79,7 +82,11 @@ def _reference(name, variant, accent, tint):
     floor (docs/look_2026-10.md step 23): the source's where it reaches it,
     else the derive set's for the code surface's side, else black or RGB
     white, the larger ratio."""
-    entry = None if accent is None else next(a for a in MK.ACCENTS if a[0] == accent)
+    if accent in PRESETS:
+        v = PRESETS[accent][variant == "light"]
+        entry = (v, v, "PRESET")
+    else:
+        entry = None if accent is None else next(a for a in MK.ACCENTS if a[0] == accent)
     base = MK.base_row(name, variant)
     row, _why = MK.derive_variant(base, entry, "NONE" if tint is None else tint.upper())
     s = row[TH["code"]["bg"]]
@@ -160,7 +167,8 @@ def test_every_combination_is_the_reference_and_reads(name):
                 assert unreadable & ~(1 << PAIRS) == 0, (name, v, accent, tint)
 
 
-# Appearance's accents on Moy (its own and seven of the sixteen) whose focus
+# Appearance's accents on Moy (its own, the four presets and seven of the
+# sixteen) whose focus
 # colour, the `accent` role, misses 3:1 on Moy's current plate in that mode
 # (Day light, Night dark) -- the readability report's plate bit, measured
 # 2026-10-18. Each is the owner's call; none is changed here. A fix takes
@@ -173,9 +181,11 @@ def test_moys_appearance_accents_read_in_day_and_night():
     """Every accent Appearance offers on Moy, in Day and Night: every pair
     of theme.pairs reaches theme.contrast, and the focus colour on the
     current plate does, but for the pinned PLATE_UNDER."""
-    from runtime.appearance_app import ACCENTS as OFFERED
-    by_name = {n: a for n, a, _d in TH["accents"]}
-    assert len(OFFERED) + 1 == 8, "Appearance's swatches are the theme's own and seven"
+    from runtime.appearance_app import ACCENTS, PRESETS
+    OFFERED = PRESETS + ACCENTS
+    by_name = {n: a for n, a, _d in TH["accents"] + TH["presets"]}
+    assert len(OFFERED) + 1 == 12, \
+        "Appearance's swatches are the theme's own, the four presets and seven"
     under = set()
     for name in (None,) + tuple(OFFERED):
         b = _custom("moy", None if name is None else by_name[name])
@@ -380,11 +390,10 @@ def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
     full = _padded(_maximal("no-colors", colors=False))
     half = _padded(_half_effects(_maximal("no-colors", colors=False)))
     for src in (full, half):
-        assert len(src) <= TH["bytes"] < len(src) + len(_custom("night"))
-    # what the resolution gives back is left out: night's own rows, but for
-    # the code roles its syntax colours leave under theme.code's floor
-    cols = json.loads(_custom(half))["colors"]
-    assert cols and set(cols["dark"]) | set(cols["light"]) <= set(TH["code"]["roles"])
+        assert len(src) <= TH["bytes"] < len(src) + len(_custom("moy"))
+    # what the resolution gives back is left out: Moy's own rows, whose
+    # syntax colours reach theme.code's floor, so none is written
+    assert "colors" not in json.loads(_custom(half))
     fits = 0
     for src in (full, half):
         for accent in ACCENTS:
@@ -398,7 +407,7 @@ def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
                 _rc, notes, _name, dark, light, _f, _l, _s, _lk, _bd = moy_ui.theme_resolve(b)
                 assert notes == 0
                 for v, resolved in (("dark", dark), ("light", light)):
-                    want = _reference("night", v, accent, tint)
+                    want = _reference("moy", v, accent, tint)
                     assert tuple(resolved[0]) == _row(want), (accent, tint, v)
                 fits += bool(cols)
     assert fits > 0
@@ -407,17 +416,17 @@ def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
 # -- refusals ----------------------------------------------------------------------
 
 def test_what_theme_custom_refuses():
-    with open(os.path.join(UI, "themes", "forest.json"), "rb") as f:
-        forest = f.read()
-    assert moy_ui.theme_custom(forest, None, None)[0] == OK
-    assert moy_ui.theme_custom(forest.replace(b"\n", b"\n "), None, None) == (TAKEN, None)
-    assert moy_ui.theme_custom(_src("kid", inherits="forest"), None, None) == (CHAIN, None)
+    with open(os.path.join(UI, "themes", "contrast.json"), "rb") as f:
+        contrast = f.read()
+    assert moy_ui.theme_custom(contrast, None, None)[0] == OK
+    assert moy_ui.theme_custom(contrast.replace(b"\n", b"\n "), None, None) == (TAKEN, None)
+    assert moy_ui.theme_custom(_src("kid", inherits="contrast"), None, None) == (CHAIN, None)
     assert moy_ui.theme_custom("sunset", None, None) == (CHAIN, None)
     assert moy_ui.theme_custom(b"{", None, None) == (SYNTAX, None)
     with pytest.raises(ValueError):
-        moy_ui.theme_custom("night", 7, None)
+        moy_ui.theme_custom("moy", 7, None)
     with pytest.raises(ValueError):
-        moy_ui.theme_custom("night", None, "plaid")
+        moy_ui.theme_custom("moy", None, "plaid")
 
 
 # -- the boards' module ----------------------------------------------------------

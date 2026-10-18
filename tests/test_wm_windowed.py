@@ -25,11 +25,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_desktop_ws, select_on_home
+from ws_helpers import build_desktop_ws, select_on_home, use_theme
 
 
 def _ws(tmp_path, **kw):
+    """The desk on the lookless `night` fixture (tests/fixtures/themes/), in
+    its dark mode: the WM's mechanics are pinned on a pixel theme; a test of
+    a look sets its theme."""
     ws = build_desktop_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     return ws
@@ -1132,15 +1136,15 @@ def test_settings_keyboard_close_is_surgical_too(tmp_path):
 def test_theme_setting_cycles_and_persists(tmp_path):
     """Settings -> THEME cycles chrome.THEME_NAMES, retints the panel chrome
     everywhere (settings panel, window strips, chips, selection accents), and
-    persists to system.json; the default "night" keeps today's exact colors."""
-    ws = _ws(tmp_path)                             # aliases the bare-name modules
-    from runtime.chrome import THEME_NAMES, theme_colors
+    persists to system.json; the default is Moy in its Day mode."""
+    ws = build_desktop_ws(tmp_path)               # aliases the bare-name modules
+    from runtime.chrome import THEME_NAMES, live_colors
     drv = _drv(ws)
-    assert ws.look.theme_name == "night"
-    assert ws.theme_colors == theme_colors("night")
+    assert (ws.look.theme_name, ws.look.theme_variant) == ("moy", "light")
+    assert ws.theme_colors == live_colors("moy", "light").tokens
     ws.look.cycle_theme(1)
-    assert ws.look.theme_name == THEME_NAMES[1]           # "indigo"
-    assert ws.theme_colors is not theme_colors("night")
+    assert ws.look.theme_name == THEME_NAMES[1]           # "blocks"
+    assert ws.theme_colors != live_colors("moy", "light").tokens
     assert ws.launcher.theme is ws.theme_colors    # accents follow
     assert ws.system.get("theme") == ws.look.theme_name  # persisted
     # A themed frame renders (window strip uses the new title token).
@@ -1148,7 +1152,7 @@ def test_theme_setting_cycles_and_persists(tmp_path):
     drv.frame(1 / 30)
     # And an unknown persisted name falls back to the default.
     ws.look.set_theme("nonsense", persist=False)
-    assert ws.look.theme_name == "night"
+    assert ws.look.theme_name == "moy"
 
 
 def _engage_resize(ws, drv, dx=60, dy=-40):
@@ -2589,6 +2593,7 @@ class _Ring:
 
 def _popover_desk(tmp_path, game=False):
     ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    use_theme(ws, "night", "dark")
     drv = _drv(ws)
     ws.bar_layer._clock_text = lambda: "00:00"
     ws.bar_layer._today = lambda: (2026, 10, 14)
@@ -2815,12 +2820,12 @@ def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
     assert ws.wm._win_title(wins["desktop"]) == "Play - " + cart
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
     assert labels["menu"].startswith("Editor - ")
-    # Day: on this undeclared glass (the handheld class at font scale 2) three
-    # chips of Night's Inter cut their names; the chip's label is what is pinned
+    # Day: on this undeclared glass (the handheld class at font scale 2) the
+    # chips' Day Sans cuts a name to what fits; the chip's label is pinned
     ws.look.set_theme("moy", persist=False, variant="light")
     drv.frame(1 / 30)
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
-    assert (labels["menu"], labels["desktop"]) == ("Editor", "Play")
+    assert "Editor".startswith(labels["menu"]) and labels["desktop"] == "Play"
 
 
 # -- the desk and windows (docs/look_2026-10.md step 25) ----------------------
@@ -2954,6 +2959,7 @@ def test_a_looks_label_ink_and_shadow_draw_the_desk_labels(tmp_path, monkeypatch
 
 def test_a_theme_without_a_look_keeps_its_capitals_and_pills(tmp_path):
     ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    use_theme(ws, "night", "dark")
     ws.open_desk()
     ws.frame(1 / 30)
     labels = [r[3] for r in ws.wm._backdrop_layer._icon_rects()]

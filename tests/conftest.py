@@ -207,8 +207,9 @@ def _theme_shape_back():
     ui_draw.use_depth(None, False)
     ui_draw.theme_uninstall()
     ui_draw.cart_text(False)
-    for role in ("ui", "title", "mono"):
+    for role in ("ui", "title", "mono", "caption", "key", "op", "result"):
         ui_draw.use_font(role, 0)
+    ui_draw.use_hero(0)
     ui_draw.print_font(0)
     # ...and the bars a look placed (its layout, its bar heights) are the
     # default's again, as the depth is off

@@ -22,6 +22,7 @@ from runtime import ui_draw
 from runtime.chrome import theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
+from ws_helpers import fixture_theme
 
 BG = 9
 W, H = 16, 12
@@ -37,12 +38,15 @@ def theme():
     """Install a package and make its shape the toolkit's; the empty shape
     again afterwards, so no other test draws with it."""
     def use(**kw):
-        d = {"format": 2, "name": "painted"}
+        d = json.loads(fixture_theme("night"))
+        d["name"] = "painted"
+        for k in ("surfaces", "text", "metrics", "frame"):
+            d.pop(k, None)
         d.update(kw)
         rc, _notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == 0
         ui_draw.use_shape("painted")
-        return theme_colors("night")
+        return theme_colors("painted", "dark")
     yield use
     ui_draw.use_shape(None)
 

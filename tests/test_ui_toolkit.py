@@ -6,7 +6,9 @@ path is the one every tier shares.
 The 2026-08 UI refactor's Phase 3a additions -- the six-state interaction
 model, the `Hits` pointer pump, and the `row`/`cell` kinds -- are in
 `tests/test_ui_states.py`, which also pins every SHIPPED widget's pixels across
-all 12 theme sets so a later phase cannot re-baseline them by accident.
+the theme sets so a later phase cannot re-baseline them by accident. The
+palette themes these draw with are the fixture packages
+(tests/fixtures/themes/, `ws_helpers.fixture_colors`).
 """
 
 from pathlib import Path
@@ -16,10 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import ui
 from runtime import ui_draw
 from runtime.host_canvas import make_system_canvas as SystemCanvas
-from runtime.chrome import theme_colors
+from ws_helpers import fixture_colors, use_theme
 
 
-TH = theme_colors("machine")
+TH = fixture_colors("machine")
 
 
 # -- rect algebra -------------------------------------------------------------
@@ -138,10 +140,11 @@ def test_chip_clip_follows_the_system_font_scale():
 
 
 def test_a_chip_paints_the_themes_chip_surface(tmp_path):
-    """A chip paints in the default theme's chip surface: the chip's field,
-    ringed in shade_dark."""
+    """A chip paints in its theme's chip surface (the night fixture's): the
+    chip's field, ringed in shade_dark."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    use_theme(ws, "night", "dark")
     cv = ws.sys_canvas
     th = ws.theme_colors
     ui_draw.chip(cv, th, (10, 100, 60, 16), "CARTS", on=True, fs=1)
@@ -197,8 +200,8 @@ def test_focus_ring_paints_focus_token():
 
 def test_is_light_gate():
     """The presentation class is explicit, independent of palette choices."""
-    assert ui_draw.is_light(theme_colors("machine"))
-    assert not ui_draw.is_light(theme_colors("night"))
+    assert ui_draw.is_light(fixture_colors("machine"))
+    assert not ui_draw.is_light(fixture_colors("night"))
     assert ui_draw.is_light({"surface_light": True, "ink": 1})
     assert not ui_draw.is_light({"surface_light": False, "ink": 0})
 
@@ -364,7 +367,7 @@ def _glyphd(kind, rect, color, cv):
 
 
 def test_every_new_parameter_defaults_to_the_frozen_rendering():
-    for th in (theme_colors("night"), theme_colors("machine", "light")):
+    for th in (fixture_colors("night"), fixture_colors("machine", "light")):
         for fs in (1, 2, 3):
             pairs = (
                 (ui_draw.chip, (), {"label": "HI"}, {"colors": None}),

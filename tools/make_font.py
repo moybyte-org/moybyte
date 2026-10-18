@@ -89,8 +89,8 @@ STEPS = {"body": 400, "med": 500, "semi": 600, "bold": 700}
 # The built-in themes' families, weight steps and size overrides
 # (docs/media/look_2026-10/THEMES.md, mockups.py's theme table).
 THEMES = {
-    "daylight": ("daysans", {}, {}),
-    "moy": ("inter", {}, {}),
+    "moy-day": ("daysans", {}, {}),
+    "moy-night": ("inter", {}, {}),
     "blocks": ("atkinson", {"semi": 700, "bold": 800}, {}),
     "contrast": ("atkinson", {"med": 600, "semi": 700, "bold": 800},
                  {"handheld": {"hkey": 18, "hop": 19, "hres": 30, "htape": 13, "htitle": 15},

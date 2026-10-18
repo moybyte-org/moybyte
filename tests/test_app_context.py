@@ -36,7 +36,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 RUNTIME = ROOT / "runtime"
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, use_theme
 
 from runtime import app_context as _ac
 from runtime import chrome as _chrome
@@ -733,15 +733,15 @@ def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     at the next boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
-    assert theme.variant() == "dark" and theme.light() is False
+    assert theme.variant() == "light" and theme.light() is True    # Moy's Day
     before = theme.colors()
     family = theme.name()
-    theme.set_variant("light")
-    assert theme.variant() == "light" and theme.light() is True
+    theme.set_variant("dark")
+    assert theme.variant() == "dark" and theme.light() is False
     assert theme.name() == family                    # the FAMILY does not move
     assert theme.colors() is not before
-    assert ws.system.get("theme_variant") == "light"
-    assert _system_json(ws)["theme_variant"] == "light"
+    assert ws.system.get("theme_variant") == "dark"
+    assert _system_json(ws)["theme_variant"] == "dark"
 
 
 def test_the_shells_unpersisted_variant_leaves_the_stored_choice_alone(tmp_path):
@@ -861,9 +861,13 @@ def test_the_ungated_verbs_answer_for_every_app_cart(tmp_path):
     assert ns["bar_h"]() == ws.app_bar_h() > 0
     assert ns["content_rect"]() == ws.app_content_rect()
     assert ns["content_rect"]()[1] == ns["bar_h"]()
-    assert ns["theme"]() == ws.theme_colors
-    ws.look.set_theme("berry")
-    assert ns["theme"]() == ws.theme_colors      # live tokens, never a snapshot
+    # On a palette theme the app's tokens are the shell's; an RGB theme's
+    # are their nearest MOY64 inside the cart boundary
+    use_theme(ws, "night", "dark")
+    first = ns["theme"]()
+    assert first == ws.theme_colors
+    ws.look.set_theme("blocks")
+    assert ns["theme"]() != first                # live tokens, never a snapshot
     assert ns["theme"]() is ns["theme"]()        # one dict per generation
     bare = _api.make_system_api(ws.app_context, {"title": "Plain"})
     assert bare["screen"]() is None and bare["bar_h"]() == ws.app_bar_h()
@@ -886,10 +890,10 @@ def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
     for name in ns["themes"]():
         ns["set_theme"](name)
         assert ws.look.theme_name == name
-    ns["set_theme"]("berry")
-    assert ws.look.theme_name == "berry"
-    assert ns["theme"]() == ws.theme_colors
-    assert _system_json(ws)["theme"] == "berry"
+    ns["set_theme"]("blocks")
+    assert ws.look.theme_name == "blocks"
+    assert ns["theme"]() is ns["theme"]()
+    assert _system_json(ws)["theme"] == "blocks"
 
 
 def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):

@@ -27,6 +27,9 @@ from ws_helpers import build_desktop_ws, build_ws
 TODAY = FALLBACK[0]
 # Today's bar in console mode: the taskbar's chips have no value there.
 TODAY_C = TODAY[:3] + ((),) + TODAY[4:]
+# The default seed's (Moy's) bar, and in console mode.
+MOY = ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"), ())
+MOY_C = ("top", 18, ("menu", "zone"), (), ("close", "wifi", "battery", "clock"), ())
 ALL = shell_layout.WIDGETS
 DESKTOP = WindowedWM.LAYOUT_CATALOGUE["desktop"]
 CONSOLE = FullscreenStackWM.LAYOUT_CATALOGUE["console"]
@@ -162,7 +165,7 @@ def test_the_composer_never_raises():
 
 # -- the workstation: the pick, the reader, the row, the mode ----------------------
 
-DOCK = {"format": 2, "name": "dock", "inherits": "berry",
+DOCK = {"format": 2, "name": "dock", "inherits": "blocks",
         "layout": {"bars": [{"edge": "bottom", "size": 22,
                              "left": ["menu", "separator", "chips", "zone"],
                              "right": ["close", "wifi", "battery", "clock"]}]}}
@@ -179,10 +182,10 @@ def _rows(ws):
 
 def test_the_default_layout_is_todays_bar_on_every_tier(tmp_path):
     ws = build_ws(tmp_path / "a")
-    assert ws.look.bars == (TODAY_C,)
+    assert ws.look.bars == (MOY_C,)
     assert ws.look.layout_notes == ("chips: not in this mode",)
     ws2 = build_desktop_ws(tmp_path / "b")
-    assert ws2.look.bars == (TODAY,) and ws2.look.layout_notes == ()
+    assert ws2.look.bars == (MOY,) and ws2.look.layout_notes == ()
     for ws in (ws, ws2):
         assert layout_base.bar_edge() == "top"
         assert ws.look.layout_theme() is None
@@ -192,7 +195,7 @@ def test_the_default_layout_is_todays_bar_on_every_tier(tmp_path):
 def test_a_picked_layout_survives_two_theme_switches(tmp_path):
     _install(DOCK)
     ws = build_ws(tmp_path)
-    ws.look.set_theme("night", persist=False)    # the cache folds the install
+    ws.look.set_theme("moy", persist=False)    # the cache folds the install
     assert ws.look.layout_choices() == ("dock",)
     rows = _rows(ws)
     assert rows[rows.index("font_scale") + 1] == "layout_theme"
@@ -202,14 +205,14 @@ def test_a_picked_layout_survives_two_theme_switches(tmp_path):
     assert ws.look.bars == (_bar("bottom", 22, ["menu", "separator", "zone"], [],
                                  ["close", "wifi", "battery", "clock"]),)
     assert ws.look.layout_notes == ("chips: not in this mode",)
-    for name in ("forest", "platinum"):
+    for name in ("blocks", "contrast"):
         ws.look.set_theme(name)
         assert ws.look.layout_theme() == "dock" and layout_base.bar_edge() == "bottom"
-    assert ws.system.get("theme") == "platinum"
+    assert ws.system.get("theme") == "contrast"
     # THEME deletes the row and the active theme's bars come back
     ws.look.cycle_layout_theme(-1)
     assert ws.system.get("layout_theme") is None
-    assert layout_base.bar_edge() == "top" and ws.look.bars == (TODAY_C,)
+    assert layout_base.bar_edge() == "top" and ws.look.bars == (MOY_C,)
 
 
 @pytest.mark.parametrize("value", ["nowhere", 7, "", None, ["dock"], "NIGHT"])
@@ -218,7 +221,7 @@ def test_the_reader_is_strict(tmp_path, value):
     ws.system.set("layout_theme", value)
     assert ws.look.layout_theme() is None
     ws.look.apply_layout()
-    assert ws.look.bars == (TODAY_C,) and layout_base.bar_edge() == "top"
+    assert ws.look.bars == (MOY_C,) and layout_base.bar_edge() == "top"
 
 
 def test_an_uninstalled_pick_reads_as_absent_at_boot(tmp_path):
@@ -237,7 +240,7 @@ def test_an_uninstalled_pick_reads_as_absent_at_boot(tmp_path):
 def test_the_settings_row_steps_through_the_choices(tmp_path):
     _install(DOCK)
     ws = build_ws(tmp_path)
-    ws.look.set_theme("night", persist=False)
+    ws.look.set_theme("moy", persist=False)
     sl = ws.settings_layer
     sl.set_msel = _rows(ws).index("layout_theme")
     sl.settings_adjust(1)
@@ -252,7 +255,7 @@ def test_the_settings_row_steps_through_the_choices(tmp_path):
 def test_a_mode_switch_resolves_the_catalogue_again(tmp_path):
     _install(DOCK)
     ws = build_desktop_ws(tmp_path)
-    ws.look.set_theme("night", persist=False)
+    ws.look.set_theme("moy", persist=False)
     ws.system.set("layout_theme", "dock")
     ws.look.apply_layout()
     assert ws.wm.mode == "desktop" and "chips" in ws.look.bars[0][2]
@@ -308,7 +311,7 @@ def test_the_fixture_layouts_drop_as_specified_on_every_config(tmp_path, config_
     ws.look.set_theme(ws.look.theme_name, persist=False)
     ws.system.set("layout_theme", "vzone")
     ws.look.apply_layout()
-    assert ws.look.bars == ((TODAY if desktop else TODAY_C),)
+    assert ws.look.bars == ((MOY if desktop else MOY_C),)
     want = ("zone: not on a left bar", "no zone after the drops", "replaced by the default")
     assert ws.look.layout_notes == want + (() if desktop else ("chips: not in this mode",))
     assert layout_base.bar_edge() == "top"

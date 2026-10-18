@@ -20,6 +20,14 @@ from runtime import scene_editor_ui as SU        # noqa: E402
 from runtime import blocks as _blocks            # noqa: E402
 
 import canvas_probe as probe                     # noqa: E402  (pixel-width-agnostic probes)
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 
 MAIN_SCENE = json.dumps([

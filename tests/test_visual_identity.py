@@ -2,7 +2,8 @@
 vertical slice:
 
   * semantic theme roles (Section 4.3): theme_colors() resolves every role for
-    every theme, the "machine" theme is opt-in, and "night" stays byte-identical;
+    every theme, and the default is Moy in its Day mode (docs/look_2026-10.md
+    step 27, which deleted `night` and the opt-in `machine`);
   * the Library verbs (Sections 1.2-1.3): the selected card exposes PLAY and
     CHANGE, primary activation still always plays, CHANGE opens the SAME project
     in the Editor landing on Config;
@@ -19,7 +20,15 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _build_ws, use_theme
+
+
+def _ws(tmp_path, **kw):
+    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
+    in its dark mode, the palette theme these surfaces were pinned on."""
+    ws = _build_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
+    return ws
 
 
 def _home_layer(ws):
@@ -40,83 +49,30 @@ def test_every_theme_resolves_every_semantic_role():
         assert isinstance(th["surface_light"], bool)
 
 
-def test_night_base_tokens_are_byte_identical():
-    """The shipped default keeps today's exact values (Section 4.3: Open Machine
-    is an additional theme, never an in-place mutation of "night")."""
-    from runtime.chrome import theme_colors
-    th = theme_colors("night")
-    assert {k: th[k] for k in ("panel", "edge", "title", "title_ink",
-                               "accent", "hilite", "dim")} == {
-        "panel": 60, "edge": 13, "title": 13, "title_ink": 0,
-        "accent": 10, "hilite": 13, "dim": 1}
-    # The semantic fallbacks ARE today's hardcoded literals.
-    assert th["ink"] == 7 and th["ink_dim"] == 6
-    assert th["focus"] == th["accent"] == 10
-    assert th["play"] == 11 and th["danger"] == 8
-    assert th["author"] == 10          # the frozen Make-tile yellow
-
-
-def test_machine_theme_is_optional_and_selectable(tmp_path):
-    """Open Machine ships as an opt-in Settings theme with the Section 4.2 jobs:
-    dark-blue field, signal verbs (play green / author orange / focus yellow)."""
-    from runtime.chrome import THEME_NAMES, DEFAULT_THEME, theme_colors
-    assert DEFAULT_THEME == "night"
-    assert any(n == "machine" for n in THEME_NAMES)
-    th = theme_colors("machine")
-    assert th["panel"] == th["desktop"] == 1     # dark blue construction field
-    assert th["play"] == 11 and th["author"] == 9 and th["focus"] == 10
-    assert th["danger"] == 8
-    ws = _ws(tmp_path)
-    ws.look.set_theme("machine")
-    assert ws.look.theme_name == "machine"
-    assert ws.launcher.theme is ws.theme_colors
-    # Persisted like any theme choice.
-    assert ws.system.get("theme") == "machine"
+def test_the_default_is_moy_in_its_day_mode(tmp_path):
+    """The seed set is Moy, Blocks and Contrast, Moy's Day the default
+    (docs/look_2026-10.md step 27); a deleted seed's name is no theme."""
+    from runtime.chrome import THEME_NAMES, DEFAULT_THEME, DEFAULT_VARIANT
+    assert (DEFAULT_THEME, DEFAULT_VARIANT) == ("moy", "light")
+    assert THEME_NAMES == ("moy", "blocks", "contrast")
+    ws = _build_ws(tmp_path)
+    assert (ws.look.theme_name, ws.look.theme_variant) == ("moy", "light")
 
 
 def test_unknown_theme_falls_back_to_default():
     from runtime.chrome import theme_colors
-    assert theme_colors("no-such-theme") == theme_colors("night")
+    assert theme_colors("no-such-theme") == theme_colors("moy")
+    assert theme_colors("night") == theme_colors("moy")
 
 
 # -- Light/dark variants (owner ask 2026-07-23) -------------------------------
 
-def test_every_theme_has_a_light_variant_resolving_every_role():
-    """Each theme family ships DARK + LIGHT presentations of the same identity:
-    the light set resolves every semantic role, is marked surface_light, and
-    flips the chrome ink dark (light fields need dark text)."""
-    from runtime.chrome import THEME_NAMES, theme_colors
-    roles = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
-             "desktop", "desktop_pattern", "surface", "surface_alt", "border",
-             "ink", "ink_dim", "chrome_ink", "chrome_ink_dim", "selection",
-             "focus", "play", "author", "danger",
-             "title_active", "title_inactive")
+def test_the_one_arg_call_is_the_default_variant():
+    """theme_colors(name) is theme_colors(name, DEFAULT_VARIANT): the one-arg
+    call answers the mode the console boots in."""
+    from runtime.chrome import THEME_NAMES, DEFAULT_VARIANT, theme_colors
     for name in THEME_NAMES:
-        if name in ("contrast", "moy", "blocks"):
-            continue        # RGB roles (tests/test_theme_rgb.py)
-        th = theme_colors(name, "light")
-        for role in roles:
-            assert role in th, (name, role)
-            assert 0 <= th[role] <= 63
-        assert th["surface_light"] is True
-        assert th["ink"] == 0 and th["chrome_ink"] == 0
-        # The signal verbs keep their Section 4.2 jobs in both variants.
-        assert th["play"] == 11 and th["danger"] == 8 and th["focus"] == 10
-
-
-def test_dark_variant_is_the_legacy_token_set():
-    """theme_colors(name) == theme_colors(name, "dark") -- the one-arg call
-    (every existing caller) keeps its exact pre-variant pixels, including the
-    chrome ink statics (white / light-grey)."""
-    from runtime.chrome import THEME_NAMES, theme_colors
-    for name in THEME_NAMES:
-        th = theme_colors(name)
-        assert th is theme_colors(name, "dark")
-        if name in ("moy", "blocks", "contrast"):
-            continue        # RGB roles (tests/test_theme_rgb.py)
-        if name != "machine":
-            assert th["ink"] == 7 and th["ink_dim"] == 6
-        assert th["chrome_ink"] == 7 and th["chrome_ink_dim"] == 6
+        assert theme_colors(name) is theme_colors(name, DEFAULT_VARIANT)
 
 
 def test_theme_variant_applies_and_persists(tmp_path):
@@ -130,20 +86,22 @@ def test_theme_variant_applies_and_persists(tmp_path):
     assert ws.system.get("theme_variant") == "light"
     carts = ws.carts_root
     assert moy_carts.load_system(carts).get("theme_variant") == "light"
-    # A theme pick keeps the variant; an unknown variant falls back to dark.
-    ws.look.set_theme("berry")
-    assert ws.look.theme_variant == "light" and ws.theme_colors["panel"] == 7
+    # A theme pick keeps the variant; an unknown variant falls back to the
+    # default's.
+    ws.look.set_theme("blocks")
+    assert ws.look.theme_variant == "light"
+    ws.look.set_theme_variant("dark")
     ws.look.set_theme_variant("nonsense")
-    assert ws.look.theme_variant == "dark"
+    assert ws.look.theme_variant == "light"
 
 
 def test_variant_survives_reboot(tmp_path):
-    ws = _ws(tmp_path)
-    ws.look.set_theme("forest")
-    ws.look.set_theme_variant("light")
-    ws2 = _ws(tmp_path)
-    assert ws2.look.theme_name == "forest" and ws2.look.theme_variant == "light"
-    assert ws2.theme_colors["surface_light"] is True
+    ws = _build_ws(tmp_path)
+    ws.look.set_theme("contrast")
+    ws.look.set_theme_variant("dark")
+    ws2 = _build_ws(tmp_path)
+    assert ws2.look.theme_name == "contrast" and ws2.look.theme_variant == "dark"
+    assert ws2.theme_colors["surface_light"] is False
 
 
 def test_base_tier_editors_follow_the_theme(tmp_path):
@@ -331,7 +289,7 @@ def test_the_home_shows_its_wallpaper_behind_the_cards(tmp_path):
     own wallpaper slot): beside the cards the wallpaper shows, never the
     theme's surface."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    ws.look.set_theme("machine")
+    use_theme(ws, "machine", "dark")
     ws.frame(1 / 30)
     bx, by, bw, bh = ws.launcher.band_rect()
     th = ws.theme_colors

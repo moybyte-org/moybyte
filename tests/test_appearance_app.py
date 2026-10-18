@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from runtime import appearance_app as page, host_app, ui_draw
-from ws_helpers import select_on_home  # noqa: E402
+from ws_helpers import select_on_home, use_theme  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -95,7 +95,9 @@ def _custom(tmp_path):
 
 
 def _accent(name):
-    return [a for a in ui_draw.theme_accents() if a[0] == name][0][1]
+    """The change's value of accent or preset `name`."""
+    return [a for a in ui_draw.theme_accents() + ui_draw.theme_presets()
+            if a[0] == name][0][1]
 
 
 def test_appearance_cart_is_versioned_system_app():
@@ -113,7 +115,7 @@ def test_the_cards_then_the_rows_on_the_handheld_and_the_desk(tmp_path):
     rows = ["Mode", "Accent", "Tint", "Wallpaper", "Font", "Code font", "Theme file"]
     assert [k for k in small._kinds if not k.startswith("theme ")] == rows
     cards = [k[len("theme "):] for k in small._kinds if k.startswith("theme ")]
-    assert cards == small._themes() and cards[-2:] == ["moy", "blocks"]
+    assert cards == small._themes() == ["moy", "blocks", "contrast"]
     wide = _open(_ws(tmp_path / "w", **DESK))
     assert [k for k in wide._kinds if not k.startswith("theme ")] == [
         "Mode", "Accent", "Tint", "Wallpaper", "Window style", "Font", "Code font", "Chrome size",
@@ -131,6 +133,7 @@ def test_focus_opens_on_the_theme_in_use(tmp_path):
 @pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
 def test_every_row_changes_by_keys_alone(tmp_path, kw):
     ws = _ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark", store=True)
     app = _open(ws)
     look = ws.look
     # MODE: not a change to the theme.
@@ -143,9 +146,9 @@ def test_every_row_changes_by_keys_alone(tmp_path, kw):
     _focus(ws, app, "Accent")
     _press(ws, app, "right")
     assert look.theme_name == "custom"
-    assert look.custom_look()["accent"] == _accent(page.ACCENTS[0])
+    assert look.custom_look()["accent"] == _accent(page.PRESETS[0])
     _press(ws, app, "right")
-    assert look.custom_look()["accent"] == _accent(page.ACCENTS[1])
+    assert look.custom_look()["accent"] == _accent(page.PRESETS[1])
     _press(ws, app, "left", "left")
     assert look.custom_look().get("accent") is None        # the source's own
     # TINT, WINDOW STYLE, FONT.
@@ -179,6 +182,7 @@ def test_code_font_sets_the_code_tabs_face_and_font_keeps_it(tmp_path):
     JetBrains Mono where the image carries the font set; FONT changes the
     `ui` and `title` faces and keeps it."""
     ws = _ws(tmp_path)
+    use_theme(ws, "night", "dark", store=True)
     app = _open(ws)
     look = ws.look
     assert app.choices()["code_fonts"] == ("petme128", "jbmono")
@@ -233,11 +237,11 @@ def _faces():
           "caption": "inter-11-600-2.fnt", "hero": "inter-19-700-4.fnt"}),
     (DESK, {"ui": "inter-15-500-4.fnt", "title": "inter-15-600-4.fnt",
             "caption": "inter-12-600-4.fnt", "hero": "inter-15-600-4.fnt"})])
-def test_moy_night_draws_inter_and_day_keeps_its_faces(tmp_path, kw, faces):
-    """Moy Night's look sets `fam` (docs/look_2026-10.md step 26a): its type
-    roles take Inter at the metric class's sizes (fontset.ROLES; the desk
-    home's title is the `title` face), mono stays JetBrains Mono, and Day,
-    which sets no family, keeps the faces its chain names."""
+def test_moy_draws_inter_by_night_and_day_sans_by_day(tmp_path, kw, faces):
+    """Moy's look sets `fam` per mode (docs/look_2026-10.md steps 26a and
+    27): Night's type roles take Inter and Day's Day Sans (IBM Plex Sans,
+    renamed), each at the metric class's sizes (fontset.ROLES; the desk
+    home's title is the `title` face), and mono stays JetBrains Mono."""
     ws = _ws(tmp_path, **kw)
     ws.look.set_theme("moy", persist=False, variant="dark")
     _frame(ws)
@@ -245,9 +249,9 @@ def test_moy_night_draws_inter_and_day_keeps_its_faces(tmp_path, kw, faces):
     assert ws.layout.line_h == ui_draw.font()[2] > 8
     ws.look.set_theme_variant("light", persist=False)
     _frame(ws)
-    got = _faces()
-    assert got["ui"] == got["title"] == got["hero"] == "tiny5.fnt"
-    assert got["caption"] is None and got["mono"] == "jbmono-11-400-2.fnt"
+    day = {r: f.replace("inter-", "daysans-") for r, f in faces.items()}
+    assert _faces() == dict(day, mono="jbmono-11-400-2.fnt")
+    assert ws.layout.line_h == ui_draw.font()[2] > 8
 
 
 @pytest.mark.parametrize("kw, faces, calc", [
@@ -314,6 +318,7 @@ def test_a_font_preset_on_moy_night_overrides_its_family(tmp_path):
 
 def test_the_wallpapers_page_is_tabs_over_cards_and_b_comes_back(tmp_path):
     ws = _ws(tmp_path)
+    use_theme(ws, "night", "dark", store=True)
     app = _open(ws)
     look = ws.look
     _focus(ws, app, "Wallpaper")
@@ -337,6 +342,7 @@ def test_the_wallpapers_page_is_tabs_over_cards_and_b_comes_back(tmp_path):
 @pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
 def test_every_row_answers_a_tap(tmp_path, kw):
     ws = _ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark", store=True)
     app = _open(ws)
     look = ws.look
     _tap(ws, app, "Mode", dx=app._ui.box("Mode")[2] - 60)   # the Light option
@@ -353,10 +359,10 @@ def test_every_row_answers_a_tap(tmp_path, kw):
     assert app.tab == 0
     _tap(ws, app, "Wallpaper Backdrop")
     assert app.view == "rows" and look.wallpaper_id is None
-    app._ui.focus("theme berry")                            # scrolled into view
+    app._ui.focus("theme blocks")                           # scrolled into view
     _frame(ws)
-    _tap(ws, app, "theme berry")
-    assert look.theme_name == "berry"
+    _tap(ws, app, "theme blocks")
+    assert look.theme_name == "blocks"
     app._ui.focus("Theme file")
     _frame(ws)
     _tap(ws, app, "Theme file")
@@ -392,7 +398,7 @@ def test_chrome_size_steps_live_and_persists(tmp_path):
     _focus(ws, app, "Chrome size")
     _press(ws, app, "right")
     assert ws.layout.cs == 2 and ws.system.get("chrome_scale") == 2
-    assert ws.look.theme_name == "night"        # not a change to the theme
+    assert ws.look.theme_name == "moy"          # not a change to the theme
     again = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
     assert again.look.chrome_scale == 2 and again.layout.cs == 2
 
@@ -466,7 +472,8 @@ def test_an_editor_save_writes_no_journal_into_the_package(tmp_path):
     names = sorted(p.name for p in folder.iterdir())
     assert "journal" not in names and "journal.jsonl" not in names, names
     assert set(names) <= {"manifest.json", "theme.json", "desk.moyimg",
-                          "tiny5.fnt", "tiny5.txt"}, names
+                          "tiny5.fnt", "tiny5.txt",
+                          "jbmono-11-400-2.fnt", "jbmono-11-400-2.txt"}, names
 
 
 def test_a_clean_buffer_follows_a_change_and_an_edited_one_keeps_its_text(tmp_path):
@@ -581,7 +588,7 @@ def test_a_theme_set_elsewhere_closes_name(tmp_path):
     app = _open(ws)
     _to_custom(ws, app)
     _name(ws, app)
-    ws.look.set_theme("night")
+    ws.look.set_theme("moy")
     _frame(ws)
     assert not app.naming and not ws.input.text_mode
     assert "Name" not in app._kinds
@@ -592,7 +599,7 @@ def test_name_refuses_with_the_reason_and_arms_replace(tmp_path):
     app = _open(ws)
     _to_custom(ws, app)
     _name(ws, app)
-    _type(ws, app, "night\r")
+    _type(ws, app, "moy\r")
     assert app.naming and app.why == "seed"
     _type(ws, app, [8] * 5 + list("mine\r"))
     assert ws.look.theme_name == "mine"

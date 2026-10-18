@@ -22,7 +22,8 @@ import pytest
 
 from runtime import host_app, ui, ui_draw
 from runtime.host_canvas import make_system_canvas
-from ws_helpers import build_ws, make_drv, open_cart, quiesce
+from runtime.chrome import THEME_NAMES
+from ws_helpers import build_ws, make_drv, open_cart, quiesce, use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = os.path.join(ROOT, "tests", "fixtures", "ui_page")
@@ -58,6 +59,7 @@ def page_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
+        use_theme(ws, "night", "dark")            # the lookless fixture
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -486,7 +488,10 @@ def _first_page(root, title, theme, variant=None):
     """The page's first settled frame in a fresh workstation under `theme`."""
     ws = host_app.build_workstation(root)
     ws.pointer.visible = False
-    ws.look.set_theme(theme, persist=False, variant=variant)
+    if theme in THEME_NAMES:
+        ws.look.set_theme(theme, persist=False, variant=variant)
+    else:
+        use_theme(ws, theme, variant)             # a fixture package
     open_cart(ws, title)
     drv = make_drv(ws)
     drv.frame(_DT)
@@ -507,7 +512,7 @@ def test_a_later_workstation_never_draws_the_look_of_an_earlier_one(tmp_path):
     host_app.moy_carts.ensure_dirs(root)
     for d in ("page_py.moy", "page_lua.moy"):
         shutil.copytree(os.path.join(PAGES, d), os.path.join(root, d))
-    for theme in ("platinum", "slate", "night"):
+    for theme in ("indigo", "slate", "night"):
         py = _first_page(root, "UI Page Py", theme)
         lua = _first_page(root, "UI Page Lua", theme)
         assert lua == py, "the Lua page under %s drew other pixels than python" % theme

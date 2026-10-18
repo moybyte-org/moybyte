@@ -2206,10 +2206,14 @@ static void derive(int32_t row[MOY_THEME_ROLES], int at) {
     }
 }
 
-// Walk `name`'s chain, nearest package first, handing each to `apply`.
+// Walk `name`'s chain, nearest package first, handing each to `apply`. A
+// chain ends at the default seed; with `implicit` 0 it ends before it unless
+// the default is the theme itself or a package names it in `inherits`: the
+// look (its fields and backdrops) is lent only by name, so a package with
+// none of its own draws lookless, whatever the default's is.
 typedef void (*apply_fn)(const moy_theme_pkg_t *pkg, void *ctx);
 
-static int chain(const char *name, size_t n, apply_fn apply, void *ctx) {
+static int chain_walk(const char *name, size_t n, apply_fn apply, void *ctx, int implicit) {
     char seen[MOY_THEME_DEPTH + 1][MOY_THEME_NAME_MAX + 1];
     moy_theme_pkg_t *walk = scratch(0);
     if (walk == NULL) {
@@ -2239,12 +2243,16 @@ static int chain(const char *name, size_t n, apply_fn apply, void *ctx) {
         apply(walk, ctx);
         if (walk->inherits[0]) {
             strcpy(cur, walk->inherits);
-        } else if (strcmp(cur, def) != 0) {
+        } else if (strcmp(cur, def) != 0 && implicit) {
             strcpy(cur, def);
         } else {
             return MOY_THEME_OK;
         }
     }
+}
+
+static int chain(const char *name, size_t n, apply_fn apply, void *ctx) {
+    return chain_walk(name, n, apply, ctx, 1);
 }
 
 typedef struct {
@@ -2974,7 +2982,7 @@ static int resolve_look(const char *name, size_t n, int variant, int defaults,
         out->v[i] = MOY_THEME_NONE;
     }
     look_ctx_t c = {out, variant == MOY_THEME_LIGHT ? 2 : 1};
-    int rc = chain(name, n, apply_look, &c);
+    int rc = chain_walk(name, n, apply_look, &c, 0);
     for (int i = 0; defaults && variant == MOY_THEME_DARK && i < MOY_THEME_DARK_DEFS; i++) {
         int32_t *v = &out->v[moy_theme_dark_defs[i][0]];
         if (*v == MOY_THEME_NONE) {
@@ -3030,10 +3038,10 @@ static void apply_bd(const moy_theme_pkg_t *pkg, void *ctx) {
 static int bd_resolve(const char *name, size_t n, int variant, int surface,
                       moy_theme_shape_t out[MOY_THEME_BD_SHAPES]) {
     bd_ctx_t c = {variant == MOY_THEME_LIGHT ? 2 : 1, surface, -1, out};
-    if (chain(name, n, apply_bd, &c) != MOY_THEME_OK) {
+    if (chain_walk(name, n, apply_bd, &c, 0) != MOY_THEME_OK) {
         const char *def = moy_theme_seed_names[0];
         c.n = -1;
-        chain(def, strlen(def), apply_bd, &c);
+        chain_walk(def, strlen(def), apply_bd, &c, 0);
     }
     return c.n;
 }
@@ -3208,7 +3216,7 @@ static int32_t set_value(int role, int side) {
 #define CLASS(k, i) moy_theme_classes[k][i]
 #define EACH(k, i) for (int i = 0; i < MOY_THEME_CLASS_MAX && CLASS(k, i) != 0xff; i++)
 
-static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
+static void derive_variant(const int32_t *b, int accent, int tint, int light, int32_t *r) {
     memcpy(r, b, MOY_THEME_ROLES * sizeof(int32_t));
     const uint8_t *ramp = tint >= 0 ? &moy_theme_tints[tint][1] : NULL;
     int rn = tint >= 0 ? moy_theme_tints[tint][0] : 0;
@@ -3227,7 +3235,14 @@ static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
     }
     // 2. the accent
     if (accent >= 0) {
-        int32_t a = moy_theme_accents[accent][0], deep = moy_theme_accents[accent][1];
+        // a preset is its mode's value, its own deep
+        int32_t a, deep;
+        if (accent < MOY_THEME_ACCENTS) {
+            a = moy_theme_accents[accent][0];
+            deep = moy_theme_accents[accent][1];
+        } else {
+            a = deep = moy_theme_presets[accent - MOY_THEME_ACCENTS][light];
+        }
         EACH(MOY_THEME_CL_TIED, i) {
             int role = CLASS(MOY_THEME_CL_TIED, i);
             if (b[role] == b[MOY_UI_T_TITLE] || b[role] == b[MOY_UI_T_ACCENT]) {
@@ -3332,10 +3347,10 @@ static void derive_variant(const int32_t *b, int accent, int tint, int32_t *r) {
 
 void moy_theme_derive(const int32_t src[2][MOY_THEME_ROLES], int accent, int tint,
                       int32_t out[2][MOY_THEME_ROLES]) {
-    accent = accent >= 0 && accent < MOY_THEME_ACCENTS ? accent : -1;
+    accent = accent >= 0 && accent < MOY_THEME_ACCENTS + MOY_THEME_PRESETS ? accent : -1;
     tint = tint >= 0 && tint < MOY_THEME_TINTS ? tint : -1;
     for (int v = 0; v < 2; v++) {
-        derive_variant(src[v], accent, tint, out[v]);
+        derive_variant(src[v], accent, tint, v == MOY_THEME_LIGHT, out[v]);
     }
 }
 
@@ -4248,6 +4263,6 @@ int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
     return w.n > MOY_THEME_BYTES || w.n > cap ? MOY_THEME_BIG : MOY_THEME_OK;
 }
 
-const int moy_theme_custom_dims[4] = {
-    MOY_THEME_ACCENTS, MOY_THEME_TINTS, MOY_THEME_RAMP_MAX, MOY_THEME_BYTES,
+const int moy_theme_custom_dims[5] = {
+    MOY_THEME_ACCENTS, MOY_THEME_TINTS, MOY_THEME_RAMP_MAX, MOY_THEME_BYTES, MOY_THEME_PRESETS,
 };

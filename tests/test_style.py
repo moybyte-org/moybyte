@@ -27,7 +27,8 @@ from pathlib import Path
 import pytest
 
 from runtime import ui_draw
-from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
+from runtime.chrome import THEME_NAMES, THEME_VARIANTS
+from ws_helpers import fixture_colors, install_theme
 from theme_live import live_tokens  # noqa: E402
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
@@ -175,7 +176,7 @@ def test_the_style_path_resolves_in_c_once_per_theme(monkeypatch, empty_ring):
 
     Floor first: without the pack assertion this test passes when the probe
     is gone, which is how a regression net quietly stops being one."""
-    th = theme_colors("night")
+    th = fixture_colors("night")
     packs = []
     real_look = ui_draw._C.look
     monkeypatch.setattr(ui_draw._C, "look",
@@ -203,7 +204,7 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring
     real_look = ui_draw._C.look
     monkeypatch.setattr(ui_draw._C, "look",
                         lambda slot, row: (packs.append(slot), real_look(slot, row))[1])
-    a, b = theme_colors("night"), theme_colors("berry")
+    a, b = fixture_colors("night"), fixture_colors("berry")
     cv = _CountingCanvas()
     for _ in range(20):
         ui_draw.row(cv, a, (0, 0, 100, 16), "x")
@@ -491,15 +492,16 @@ def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
 # 4. the outline seed: a restyle in the theme's shape
 # =============================================================================
 
-def test_the_outline_seed_restyles_the_shipped_widgets_on_every_variant():
+def test_the_outline_package_restyles_the_shipped_widgets_on_every_variant():
     """The skin axis folded into the theme (docs/theming_2026-09.md §9, phase 3
-    step 4): `outline` is a seed package whose surfaces repaint the shipped
-    widgets, never to nothing, and the shape it installs is its own."""
-    assert "outline" in THEME_NAMES
+    step 4): `outline`, once a seed and now a fixture package
+    (tests/fixtures/themes/), has surfaces that repaint the shipped widgets,
+    never to nothing, and the shape it installs is its own."""
     for variant in THEME_VARIANTS:
-        th = theme_colors("outline", variant)
+        th = fixture_colors("outline", variant)
+        install_theme("outline")
         try:
-            ui_draw.use_shape("night")
+            ui_draw.use_shape("moy")
             a = SystemCanvas(320, 240, font_scale=1)
             _paint_shipped(a, th)
             ui_draw.use_shape("outline")

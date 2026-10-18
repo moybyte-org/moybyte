@@ -45,10 +45,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_names,
-                        theme_tints, RGB, rgb565_of, nearest_of)
+                        theme_presets, theme_tints, RGB, rgb565_of, nearest_of)
 except ImportError:  # pragma: no cover - direct host import
     from runtime.chrome import (THEME_NAMES, theme_accents, theme_colors, theme_names,
-                                theme_tints, RGB, rgb565_of, nearest_of)
+                                theme_presets, theme_tints, RGB, rgb565_of, nearest_of)
 
 try:
     import ui
@@ -69,8 +69,10 @@ FONT_NAMES = ("Tiny5", "PetMe128")
 # The CODE FONT presets (`Appearance.CODE_FONTS`) by name.
 CODE_FONT_NAMES = {"petme128": "PetMe128", "jbmono": "JetBrains Mono"}
 OWN = "Theme's"
-# ACCENT's swatches after the theme's own: seven of the sixteen accents
-# (style.json's), by name.
+# ACCENT's swatches after the theme's own: the four presets, each in the
+# mode's value (style.json's `presets`, the seeds docs/look_2026-10.md step
+# 27 turned into accents), then seven of the sixteen accents, by name.
+PRESETS = ("indigo", "berry", "forest", "slate")
 ACCENTS = ("orange", "red", "pink", "blue", "mint", "green", "violet")
 # The wallpapers' page's tabs.
 TABS = ("Pictures", "Carts")
@@ -200,7 +202,11 @@ class AppearanceAppLayer:
         self._gen = None
         self._stale = 0
         self._dt = 0
-        self._accents = tuple(a for n in ACCENTS for a in theme_accents() if a[0] == n)
+        # (name, the change's value, its swatch in dark, in light)
+        self._accents = tuple((p[0], p[1], p[1], p[2]) for n in PRESETS
+                              for p in theme_presets() if p[0] == n) \
+            + tuple((a[0], a[1], a[1], a[1]) for n in ACCENTS
+                    for a in theme_accents() if a[0] == n)
         self._tints = tuple(theme_tints())
 
     @staticmethod
@@ -497,10 +503,12 @@ class AppearanceAppLayer:
         if got != cur:
             self._theme.set_variant("light" if got == 0 else "dark")
             self._acted()
-        # ACCENT: the theme's own, then seven of the sixteen
+        # ACCENT: the theme's own, the presets in this mode, then seven of
+        # the sixteen
         own = th["accent"] if ch["accent"] is None else None
         colours = [_rgb(own if own is not None else self._own_accent(ch))]
-        colours += [_rgb(a[1]) for a in self._accents]
+        side = 3 if ch["variant"] == "light" else 2
+        colours += [_rgb(a[side]) for a in self._accents]
         cur = 0
         if ch["accent"] is not None:
             cur = -1

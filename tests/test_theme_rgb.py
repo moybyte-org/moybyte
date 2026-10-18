@@ -187,8 +187,15 @@ def test_a_cart_colour_is_its_index_modulo_64():
 
 # -- the look -----------------------------------------------------------------------
 
+def _bare():
+    """A package of no look (it names no `inherits`, and the default lends
+    its look only by name): the model's defaults."""
+    assert moy_ui.theme_install(b'{"format": 2, "name": "bare"}')[0] == 0
+    return "bare"
+
+
 def test_the_look_defaults_are_the_model():
-    lk = moy_ui.theme_look("night", False)[0]
+    lk = moy_ui.theme_look(_bare(), False)[0]
     assert lk[LEAF["focus.ring.w"]] == 250 and lk[LEAF["win_r"]] == 12
     assert lk[LEAF["win.h"]] == 44 and lk[LEAF["win_corners"]] == 15
     assert lk[LEAF["dock.fill"]] == RGB | 0xffffff and lk[LEAF["dock.alpha"]] == 32
@@ -197,8 +204,8 @@ def test_the_look_defaults_are_the_model():
 
 
 def test_focus_and_current_are_the_models_properties():
-    light = moy_ui.theme_look("night", True)[0]
-    dark = moy_ui.theme_look("night", False)[0]
+    light = moy_ui.theme_look(_bare(), True)[0]
+    dark = moy_ui.theme_look(_bare(), False)[0]
     styles = KINDS[LEAF["focus.style"]][1]
     assert styles == ("ring", "plate", "lift", "edge", "underline", "invert")
     assert KINDS[LEAF["focus.card"]][1] == styles == KINDS[LEAF["focus.small"]][1]

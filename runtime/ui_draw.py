@@ -317,8 +317,8 @@ def theme_resolve(src):
 
 def theme_custom(source, accent, tint):
     """(rc, bytes): `custom`'s theme.json derived from `source` (a seed's
-    name or a stored package's bytes), `accent` (an accent's A, None for
-    the source's own) and `tint` (a tint's name, None for none);
+    name or a stored package's bytes), `accent` (an accent's A or a
+    preset's dark value, None for the source's own) and `tint` (a tint's name, None for none);
     docs/theming_2026-09.md §4.10."""
     return _C.theme_custom(source, accent, tint)
 
@@ -326,6 +326,12 @@ def theme_custom(source, accent, tint):
 def theme_accents():
     """((name, A, deep), ...): the sixteen accents, style.json's."""
     return _C.theme_accents()
+
+
+def theme_presets():
+    """((name, dark, light), ...): the accent presets, style.json's, each
+    picked by its dark value (docs/look_2026-10.md step 27)."""
+    return _C.theme_presets()
 
 
 def theme_tints():

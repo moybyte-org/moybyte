@@ -309,19 +309,18 @@ def _theme(name, **keys):
     return json.dumps(dict({"format": 2, "name": name}, **keys)).encode()
 
 
-NIGHT_FONTS = (("ui", "tiny5.fnt"), ("title", "tiny5.fnt"))
+# The default's fonts (Moy's): its Code tab's JetBrains Mono alone, the
+# rest its look's family (docs/look_2026-10.md step 27).
+DEFAULT_FONTS = (("mono", "jbmono-11-400-2.fnt"),)
 
 
-def test_every_seed_draws_in_tiny5():
-    """`night` names Tiny5 for `ui` and `title`, and every other seed
-    inherits it; `mono` stays petme128 (phase 4 step 3) but in `moy`,
-    `blocks` and `contrast`, whose Code tab is JetBrains Mono
-    (docs/look_2026-10.md steps 23, 26b and 26c), a face of the font set and
-    not embedded in the tables."""
+def test_every_seed_names_jetbrains_mono_alone():
+    """Every seed names the font set's JetBrains Mono for `mono` (the Code
+    tab, docs/look_2026-10.md steps 23, 26b and 26c), a face of the font set
+    and not embedded in the tables, and no other file: its look's family
+    gives the other roles their faces."""
     for name in moy_ui.themes():
-        want = NIGHT_FONTS + ((("mono", "jbmono-11-400-2.fnt"),)
-                              if name in ("moy", "blocks", "contrast") else ())
-        assert moy_ui.theme_fonts(name) == want, name
+        assert moy_ui.theme_fonts(name) == DEFAULT_FONTS, name
     assert moy_ui.font_file("jbmono-11-400-2.fnt") is None
 
 
@@ -334,17 +333,18 @@ def test_the_fonts_key_names_a_file_per_role():
     rc, notes = moy_ui.theme_install(_theme("typed2", fonts={
         "ui": ".hidden", "title": "../up.fnt", "mono": 3, "bold": "b.fnt"}))
     assert rc == OK and notes == 2 | 4          # an unknown role; dropped names
-    assert moy_ui.theme_fonts("typed2") == NIGHT_FONTS     # the default's, inherited
+    assert moy_ui.theme_fonts("typed2") == DEFAULT_FONTS   # the default's, inherited
     rc, notes = moy_ui.theme_install(_theme("typed3", fonts={"ui": "x" * 25}))
-    assert rc == OK and notes == 4 and moy_ui.theme_fonts("typed3") == NIGHT_FONTS
+    assert rc == OK and notes == 4 and moy_ui.theme_fonts("typed3") == DEFAULT_FONTS
     assert moy_ui.theme_install(_theme("typed4", fonts=["ui.fnt"]))[1] == 4
 
 
 def test_a_package_over_a_seed_keeps_its_own_roles():
-    rc, _n = moy_ui.theme_install(_theme("kid", inherits="berry",
+    rc, _n = moy_ui.theme_install(_theme("kid", inherits="blocks",
                                          fonts={"title": "t.fnt"}))
-    assert rc == OK and moy_ui.theme_fonts("kid") == (("ui", "tiny5.fnt"), ("title", "t.fnt"))
-    assert moy_ui.theme_fonts("no-such-theme") == moy_ui.theme_fonts("night") == NIGHT_FONTS
+    assert rc == OK and moy_ui.theme_fonts("kid") == (("title", "t.fnt"),
+                                                      ("mono", "jbmono-11-400-2.fnt"))
+    assert moy_ui.theme_fonts("no-such-theme") == moy_ui.theme_fonts("moy") == DEFAULT_FONTS
 
 
 # --- version 2: per-glyph boxes, 1/2/4 bpp, kerning, the byte map -------------------

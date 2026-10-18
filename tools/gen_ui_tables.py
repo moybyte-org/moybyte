@@ -305,15 +305,16 @@ def generate_theme(style, t):
             raise SystemExit("themes/%s.json: named %s, within %d bytes"
                              % (name, name, th["bytes"]))
         seeds.append((name, src))
-    # The seed packages' files: every font a seed's `fonts` names and, as
-    # in a published package, its licence's full text X.txt beside X.fnt,
-    # from themes/, in name order. A face of the font set (fonts/, which
-    # each board image carries per tier: runtime/fontset.py) is not
-    # embedded a second time.
+    # The seed packages' files: every font a seed's `fonts` names and each
+    # of `preset_fonts` (Appearance's Font presets) and, as in a published
+    # package, its licence's full text X.txt beside X.fnt, from themes/, in
+    # name order. A face of the font set (fonts/, which each board image
+    # carries per tier: runtime/fontset.py) is not embedded a second time.
     font_set = os.path.join(t.dir, "fonts")
     font_files = sorted({f for _n, src in seeds
-                         for f in json.loads(src).get("fonts", {}).values()
-                         if not os.path.isfile(os.path.join(font_set, f))})
+                         for f in json.loads(src).get("fonts", {}).values()}
+                        .union(th["preset_fonts"])
+                        - {f for f in os.listdir(font_set)})
     fonts = []
     for name in sorted(font_files + [f[:-len(".fnt")] + ".txt" for f in font_files]):
         path = os.path.join(t.dir, "themes", name)
@@ -909,8 +910,9 @@ def _look(th, roles):
 
 def _recolour(th, roles, flags):
     """The accent-and-tint derivation's tables (docs/theming_2026-09.md
-    §4.10, moy_theme_derive): the accents, the tints' ramps and the role
-    classes its steps rewrite."""
+    §4.10, moy_theme_derive): the accents, the presets (an accent in a dark
+    and a light value, docs/look_2026-10.md step 27), the tints' ramps and
+    the role classes its steps rewrite."""
     lum = _luminance()
     rc = th["recolour"]
 
@@ -923,19 +925,24 @@ def _recolour(th, roles, flags):
             raise SystemExit("theme.recolour: %r is no colour role" % name)
         return roles.index(name)
 
-    accents, tints = th["accents"], th["tints"]
+    accents, tints, presets = th["accents"], th["tints"], th["presets"]
     for name, a, deep in accents:
         if not (0 <= a < 64 and 0 <= deep < 64 and clears(a, 0)):
             raise SystemExit("theme.accents: %s is two palette indices, A one black clears"
                              % name)
+    for name, dark, light in presets:
+        if not (0 <= dark < 64 and 0 <= light < 64 and clears(dark, 0) and clears(light, 7)):
+            raise SystemExit("theme.presets: %s is two palette indices, dark one black "
+                             "clears, light one white clears" % name)
     for name, ramp in tints:
         if not ramp or any(not 0 < v < 64 or v == 7 for v in ramp):
             raise SystemExit("theme.tints: %s's ramp is palette indices, never 0 or 7" % name)
-    names = [n for n, *_ in accents] + [n for n, _r in tints]
-    if len(set(n for n, *_ in accents)) != len(accents) or \
+    names = [n for n, *_ in accents + presets] + [n for n, _r in tints]
+    if len(set(n for n, *_ in accents + presets)) != len(accents) + len(presets) or \
             len(set(n for n, _r in tints)) != len(tints) or \
-            len(set(a for _n, a, _d in accents)) != len(accents):
-        raise SystemExit("theme.accents / theme.tints: a name or an accent twice")
+            len(set(a for _n, a, _d in accents + presets)) != len(accents) + len(presets):
+        raise SystemExit("theme.accents / theme.presets / theme.tints: a name or an accent "
+                         "(a preset's dark value) twice")
     if any(len(n) > 15 for n in names):
         raise SystemExit("theme.accents / theme.tints: a name of at most 15 characters")
     classes = ("background", "line", "accent", "tied", "accent_ink", "content")
@@ -947,9 +954,11 @@ def _recolour(th, roles, flags):
     if any(not 1 <= len(b) <= 3 for _r, _f, b in dims):
         raise SystemExit("theme.recolour.dim_ink: one to three backgrounds each")
     h = ["// Accent and tint (docs/theming_2026-09.md §4.10, moy_theme_derive): the",
-         "// accents [A, deep], the tints' ramps ([0] the length, then dark to",
-         "// light), and the role classes, each 0xff past its end.",
+         "// accents [A, deep], the presets [dark, light] (an accent index past",
+         "// MOY_THEME_ACCENTS names one), the tints' ramps ([0] the length, then",
+         "// dark to light), and the role classes, each 0xff past its end.",
          "#define MOY_THEME_ACCENTS %d" % len(accents),
+         "#define MOY_THEME_PRESETS %d" % len(presets),
          "#define MOY_THEME_TINTS %d" % len(tints),
          "#define MOY_THEME_RAMP_MAX %d" % rmax,
          "#define MOY_THEME_CLASS_MAX %d" % cmax,
@@ -961,6 +970,8 @@ def _recolour(th, roles, flags):
          "};",
          "extern const char *const moy_theme_accent_names[MOY_THEME_ACCENTS];",
          "extern const uint8_t moy_theme_accents[MOY_THEME_ACCENTS][2];",
+         "extern const char *const moy_theme_preset_names[MOY_THEME_PRESETS];",
+         "extern const uint8_t moy_theme_presets[MOY_THEME_PRESETS][2];",
          "extern const char *const moy_theme_tint_names[MOY_THEME_TINTS];",
          "extern const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1];",
          "extern const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX];",
@@ -972,6 +983,11 @@ def _recolour(th, roles, flags):
     c.append("};\n")
     c.append("const uint8_t moy_theme_accents[MOY_THEME_ACCENTS][2] = {%s};\n"
              % ", ".join("{%d, %d}" % (a, d) for _n, a, d in accents))
+    c.append("const char *const moy_theme_preset_names[MOY_THEME_PRESETS] = {")
+    c.extend("    %s," % _c_str(n) for n, _d, _l in presets)
+    c.append("};\n")
+    c.append("const uint8_t moy_theme_presets[MOY_THEME_PRESETS][2] = {%s};\n"
+             % ", ".join("{%d, %d}" % (d, li) for _n, d, li in presets))
     c.append("const char *const moy_theme_tint_names[MOY_THEME_TINTS] = {")
     c.extend("    %s," % _c_str(n) for n, _r in tints)
     c.append("};\n")

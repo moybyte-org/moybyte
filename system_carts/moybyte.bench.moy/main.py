@@ -261,7 +261,7 @@ def _role_row():
     g = app.grant("moybyte.bench", ("clipboard", "theme"))
     clip = m.Clipboard(app, g)
     theme = m.Theme(app, g)
-    app.theme_write("night", "dark", {"panel": 60, "surface_light": False})
+    app.theme_write("moy", "dark", {"panel": 60, "surface_light": False})
 
     class _Hop:
         pass

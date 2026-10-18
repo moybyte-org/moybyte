@@ -39,7 +39,8 @@ import pytest
 
 from runtime import host_app, ui, ui_draw
 from runtime.host_canvas import make_system_canvas
-from ws_helpers import build_ws, make_drv, open_cart, quiesce
+from runtime.chrome import THEME_NAMES
+from ws_helpers import build_ws, make_drv, open_cart, quiesce, use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARTS = os.path.join(ROOT, "tests", "fixtures", "ui_parts")
@@ -54,12 +55,16 @@ _THEMES = {}
 
 
 def _theme(name, variant):
-    """The theme colours of a workstation in `name`, its look installed."""
+    """The theme colours of a workstation in `name` (a seed, else a fixture
+    package, tests/fixtures/themes/), its look installed."""
     ws = _THEMES.get((name, variant))
     if ws is None:
         ws = build_ws(Path(tempfile.mkdtemp()))
         _THEMES[(name, variant)] = ws
-    ws.look.set_theme(name, persist=False, variant=variant)
+    if name in THEME_NAMES:
+        ws.look.set_theme(name, persist=False, variant=variant)
+    else:
+        use_theme(ws, name, variant)
     return ws.theme_colors
 
 
@@ -435,6 +440,7 @@ def parts_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
+        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -740,8 +746,8 @@ def test_a_buttons_font_leaf_draws_its_label_in_the_key_face():
             ("op", "7", "tonal", "calc", ("moy", "dark")),
             ("arrow", "\u2190", "normal", "calc", ("moy", "dark")),
             ("arrow_ui", "\u2190", "normal", None, ("moy", "dark")),
-            ("day", "7", "normal", "calc", ("moy", "light")),
-            ("day_ui", "7", "normal", None, ("moy", "light"))):
+            ("pixel", "7", "normal", "calc", ("night", "dark")),
+            ("pixel_ui", "7", "normal", None, ("night", "dark"))):
         r = pages[name] = _key_page(label, kind, app, theme)
         r.frame()
         r.frame()
@@ -749,7 +755,7 @@ def test_a_buttons_font_leaf_draws_its_label_in_the_key_face():
     assert tall["ui"] < tall["key"] <= tall["op"], tall
     assert bytes(pages["key"].cv._buf) != bytes(pages["op"].cv._buf)
     assert bytes(pages["arrow"].cv._buf) == bytes(pages["arrow_ui"].cv._buf)
-    assert bytes(pages["day"].cv._buf) == bytes(pages["day_ui"].cv._buf)
+    assert bytes(pages["pixel"].cv._buf) == bytes(pages["pixel_ui"].cv._buf)
 
 
 def _field_page(text, mx=8):
@@ -1013,6 +1019,7 @@ def files_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
+        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -1306,6 +1313,7 @@ def look_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
+        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -1470,6 +1478,7 @@ def pop_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
+        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -1637,6 +1646,7 @@ def menu_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
+        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)

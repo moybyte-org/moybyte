@@ -24,6 +24,7 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import gfx_binding as gfx
+from ws_helpers import use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(ROOT, "native", "moy_ui", "style.json")) as _f:
@@ -174,7 +175,9 @@ def test_the_moy_seed_carries_its_desks():
                 for s in look[mode]["backdrop"]["desk"]]
         assert _decode(moy_ui.theme_backdrop("moy", light, "desk")) == want
         assert moy_ui.theme_backdrop("moy", light, "home") == b""
-        assert moy_ui.theme_backdrop("night", light, "desk") == b""
+        # a package of no look of its own takes none from the default
+        assert moy_ui.theme_install(b'{"format": 2, "name": "bare"}')[0] == 0
+        assert moy_ui.theme_backdrop("bare", light, "desk") == b""
 
 
 def _at(drv, x, y):
@@ -202,6 +205,7 @@ def test_the_backdrop_rasters_once_per_theme_load_on_the_desk(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True, panel_diagonal_in=7.0)
+    use_theme(ws, "night", "dark")                 # a wallpaper cart, no backdrop
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     ws.look.set_theme("moy", variant="light")

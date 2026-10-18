@@ -330,8 +330,9 @@ extern const size_t moy_theme_pkg_bytes;
 
 // Accent and tint (docs/theming_2026-09.md §4.10): every colour role of a
 // source's two resolved rows (moy_theme_resolve's, [MOY_THEME_DARK] and
-// [MOY_THEME_LIGHT]) derived from an accent, an index of moy_theme_accents or
-// -1 for the source's own, and a tint, an index of moy_theme_tints or -1 for
+// [MOY_THEME_LIGHT]) derived from an accent, an index of moy_theme_accents,
+// MOY_THEME_ACCENTS plus one of moy_theme_presets (each row its value in
+// that row's mode), or -1 for the source's own, and a tint, an index of moy_theme_tints or -1 for
 // none, readable by construction: no pair of theme.pairs under the floor
 // where the source's own pairs clear, and no code role under the code floor.
 // Integer only, on moy_theme_lum and the
@@ -360,8 +361,8 @@ void moy_theme_derive(const int32_t src[2][MOY_THEME_ROLES], int accent, int tin
 int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
                      moy_theme_pkg_t scratch[2], uint8_t *out, size_t cap, size_t *len);
 
-// Accents, tints, the longest ramp, MOY_THEME_BYTES: the bindings' table check.
-extern const int moy_theme_custom_dims[4];
+// Accents, tints, the longest ramp, MOY_THEME_BYTES, presets: the bindings' table check.
+extern const int moy_theme_custom_dims[5];
 
 // A seed package's file by name (the tables embed every font a seed's `fonts`
 // names, and each font X.fnt's licence text X.txt): its bytes and *len, or NULL.

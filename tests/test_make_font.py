@@ -107,7 +107,7 @@ def test_every_family_a_seed_names_carries_its_type_roles():
                     sizes = tuple((cls, tuple(sorted(v.items())))
                                   for cls, v in sorted(part.get("sizes", {}).items()))
                     named.add((part["fam"], tuple(sorted(steps.items())), sizes))
-    assert {fam for fam, _s, _z in named} >= {"inter", "atkinson"}
+    assert {fam for fam, _s, _z in named} >= {"daysans", "inter", "atkinson"}
     assert any(z for _f, _s, z in named), "a seed sizes a role (Contrast's titles)"
     for fam, steps, sizes in named:
         sizes = {cls: dict(v) for cls, v in sizes}

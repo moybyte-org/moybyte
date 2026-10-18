@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "Berry",
+  "runtime": "theme",
+  "main": "theme.json",
+  "moybyte": {
+    "type": "theme"
+  }
+}

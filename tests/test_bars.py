@@ -19,6 +19,13 @@ from runtime import layout_base, shell_layout
 from runtime.layout_base import DEFAULT_BARS, LayoutBase
 from test_content_rect import _inside, _layouts, _open_every_surface, _rect_map, _settle, _tap
 from ws_helpers import build_desktop_ws, build_ws
+from ws_helpers import boot_on_fixture, fixture_theme
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """These pin the lookless pixel bar and its coordinates: every
+    workstation here boots on the `night` fixture (ws_helpers)."""
+    boot_on_fixture(monkeypatch)
 
 DT = 1.0 / 30.0
 
@@ -34,13 +41,17 @@ def _bar(edge, size=18, left=(), center=(), right=(), text=()):
 
 
 def _pick(ws, bars):
-    """Install `bars` as a package's layout and pick it, as Settings does."""
-    pkg = {"format": 2, "name": "bars", "layout": {"bars": [
+    """Install `bars` as a package's layout and pick it, as Settings does:
+    the package is the `night` fixture's (the one install slot holds it)
+    with that layout."""
+    pkg = json.loads(fixture_theme("night"))
+    pkg["name"] = "bars"
+    pkg["layout"] = {"bars": [
         {"edge": b[0], "size": b[1], "left": list(b[2]), "center": list(b[3]),
-         "right": list(b[4]), "text": list(b[5])} for b in bars]}}
+         "right": list(b[4]), "text": list(b[5])} for b in bars]}
     rc, _notes = moy_ui.theme_install(json.dumps(pkg).encode())
     assert rc == 0
-    ws.look.set_theme(ws.look.theme_name, persist=False)
+    ws.look.set_theme("bars", persist=False)
     ws.system.set("layout_theme", "bars")
     ws.look.apply_layout()
 
