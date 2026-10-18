@@ -657,7 +657,9 @@ cart's own §3.4 icon when it names one, else the cover's 64x64 half; carts with
 cover keep the sprite/glyph fallback deterministically. `tools/gen_covers.py`
 captures a gameplay frame for each seed game and squares it to 128x128 in the
 console palette (committed artifacts, hand-replaceable in Paint; manifest versions
-bumped for the #47 re-seed). It replaced `images/cover.moyimg` (2026-07-12), which
+bumped for the #47 re-seed). *Decided 2026-10-17 (owner):* a cover is the scene
+without the game's HUD -- the capture silences the cart's `print` verb, and the
+tool's docstring says how a HUD drawn with more than text is left out. It replaced `images/cover.moyimg` (2026-07-12), which
 is no longer read.
 
 ### 11.5 A second system UI font?
