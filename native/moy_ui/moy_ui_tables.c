@@ -842,7 +842,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"win\": { \"header\": \"bar\", \"frame\": [1, \"#2b2f57\"], \"frame_back\": [1, \"#2b2f57\"] },\012"
     "      \"bar\": { \"fill\": \"#0b0d1e\", \"alpha\": 0.85, \"sys\": [\"#23274b\", \"#b6a8f7\", \"#23274b\"],\012"
     "               \"chip_cur\": \"#23274b\" },\012"
-    "      \"tile_fill\": \"#23274b\",\012"
+    "      \"tile_fill\": \"#23274b\", \"disabled\": \"#686c92\",\012"
     "      \"buttons\": { \"normal\": { \"fill\": \"#23274b\" }, \"tonal\": { \"fill\": \"#2e3360\" },\012"
     "                   \"danger\": { \"ink\": \"#eef0fb\" } },\012"
     "      \"app_buttons\": { \"home\": { \"normal\": { \"border\": [1, \"#848aad\"] } } },\012"
@@ -857,7 +857,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"bar\": { \"fill\": \"#ffffff\", \"alpha\": 0.92, \"line\": [1, \"#e2e5ec\"],\012"
     "               \"sys\": [\"#f4f5f8\", \"#4c3fd6\", \"#f4f5f8\"], \"chip_cur\": \"#f4f5f8\" },\012"
     "      \"hhbar\": { \"sys\": [\"#ffffff\", \"#4c3fd6\", \"#ffffff\"] },\012"
-    "      \"tile_fill\": \"#ffffff\",\012"
+    "      \"tile_fill\": \"#ffffff\", \"disabled\": \"#9a9eb0\",\012"
     "      \"buttons\": { \"normal\": { \"fill\": \"#f4f5f8\" }, \"tonal\": { \"fill\": \"#e3e6ed\" },\012"
     "                   \"danger\": { \"ink\": \"#15161d\" } },\012"
     "      \"app_buttons\": { \"home\": { \"normal\": { \"border\": [1, \"#7b8294\"] } } },\012"
@@ -933,6 +933,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "               \"getcarts\": \"#9be36b\", \"game\": \"#ff6b4a\", \"notes\": \"#7be0b4\",\012"
     "               \"trash\": \"#e8dcc6\" },\012"
     "    \"tile_outline\": [2, \"#1a1530\"], \"tile_ink\": \"#1a1530\", \"tile_grad\": false,\012"
+    "    \"disabled\": \"#9c95a4\",\012"
     "    \"buttons\": { \"normal\": { \"fill\": \"#f4ecdc\", \"border\": [0, \"#1a1530\"] },\012"
     "                 \"tonal\": { \"fill\": \"#ffd23f\", \"ink\": \"#1a1530\", \"border\": [0, \"#1a1530\"] },\012"
     "                 \"danger\": { \"ink\": \"#1a1530\" } },\012"
@@ -1000,7 +1001,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"win_r\": 4, \"card_r\": 4, \"key_r\": 4,\012"
     "    \"win\": { \"header\": \"fill\", \"rule\": 2 },\012"
     "    \"dark\": {\012"
-    "      \"current\": { \"alpha\": 0.40 },\012"
+    "      \"current\": { \"alpha\": 0.40 }, \"disabled\": \"#5c5c5c\",\012"
     "      \"win\": { \"frame\": [2, \"#ffffff\"], \"frame_back\": [2, \"#ffffff\"] },\012"
     "      \"bar\": { \"fill\": \"#000000\", \"line\": [2, \"#ffffff\"], \"chip_cur\": \"#1a1a1a\" },\012"
     "      \"buttons\": {\012"
@@ -1011,7 +1012,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"keycap\": { \"border\": [1.25, \"#ffffff\"] }\012"
     "    },\012"
     "    \"light\": {\012"
-    "      \"current\": { \"alpha\": 0.42 },\012"
+    "      \"current\": { \"alpha\": 0.42 }, \"disabled\": \"#949494\",\012"
     "      \"focus\": { \"outline\": [2, \"#000000\"] },\012"
     "      \"win\": { \"frame\": [2, \"#000000\"], \"frame_back\": [2, \"#000000\"] },\012"
     "      \"bar\": { \"fill\": \"#ffffff\", \"line\": [2, \"#000000\"], \"chip_cur\": \"#e6e6e6\" },\012"
@@ -1034,7 +1035,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4893, 4246, 4029};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4939, 4273, 4075};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1312,6 +1313,7 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_ENUM, 10, 56, 34},  // current.color
     {MOY_THEME_LK_NUM, 0, 100, 14},  // current.alpha
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // sel_back
+    {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // disabled
     {MOY_THEME_LK_ENUM, 88, 2, 0},  // bar.edge
     {MOY_THEME_LK_INT, 16, 64, 40},  // bar.h
     {MOY_THEME_LK_ENUM, 90, 3, 0},  // bar.style
@@ -1505,6 +1507,7 @@ const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
     "current.color",
     "current.alpha",
     "sel_back",
+    "disabled",
     "bar.edge",
     "bar.h",
     "bar.style",
@@ -1688,113 +1691,114 @@ const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
     {"current.color", MOY_THEME_FT_ENUM, 1, 62},
     {"current.alpha", MOY_THEME_FT_NUM, 1, 63},
     {"sel_back", MOY_THEME_FT_COLOUR, 1, 64},
-    {"bar.edge", MOY_THEME_FT_ENUM, 1, 65},
-    {"bar.h", MOY_THEME_FT_INT, 1, 66},
-    {"bar.style", MOY_THEME_FT_ENUM, 1, 67},
-    {"bar.fill", MOY_THEME_FT_PAINT, 1, 68},
-    {"bar.alpha", MOY_THEME_FT_NUM, 1, 69},
-    {"bar.line", MOY_THEME_FT_LINE, 2, 70},
-    {"bar.grad", MOY_THEME_FT_PAINT, 1, 72},
-    {"bar.sysbtn", MOY_THEME_FT_ENUM, 1, 73},
-    {"bar.sys", MOY_THEME_FT_TRIO, 3, 74},
-    {"bar.chips", MOY_THEME_FT_ENUM, 1, 77},
-    {"bar.chip_cur", MOY_THEME_FT_COLOUR, 1, 78},
-    {"bar.app_title", MOY_THEME_FT_TEXT, 1, 79},
-    {"bar.ink", MOY_THEME_FT_COLOUR, 1, 80},
-    {"bar.dim", MOY_THEME_FT_COLOUR, 1, 81},
-    {"bar.tray", MOY_THEME_FT_PAINT, 1, 82},
-    {"bar.clock", MOY_THEME_FT_ENUM, 1, 83},
-    {"hhbar.style", MOY_THEME_FT_ENUM, 1, 84},
-    {"hhbar.h", MOY_THEME_FT_INT, 1, 85},
-    {"hhbar.fill", MOY_THEME_FT_PAINT, 1, 86},
-    {"hhbar.line", MOY_THEME_FT_LINE, 2, 87},
-    {"hhbar.ink", MOY_THEME_FT_COLOUR, 1, 89},
-    {"hhbar.dim", MOY_THEME_FT_COLOUR, 1, 90},
-    {"hhbar.sys", MOY_THEME_FT_TRIO, 3, 91},
-    {"tabs.style", MOY_THEME_FT_ENUM, 1, 94},
-    {"tabs.pill", MOY_THEME_FT_COLOUR, 1, 95},
-    {"tabs.pill_ink", MOY_THEME_FT_COLOUR, 1, 96},
-    {"launcher", MOY_THEME_FT_ENUM, 1, 97},
-    {"dock.fill", MOY_THEME_FT_COLOUR, 1, 98},
-    {"dock.alpha", MOY_THEME_FT_NUM, 1, 99},
-    {"dock.frost", MOY_THEME_FT_BOOL, 1, 100},
-    {"dock.ring", MOY_THEME_FT_RING, 2, 101},
-    {"dock.r", MOY_THEME_FT_INT, 1, 103},
-    {"tile_r", MOY_THEME_FT_INT, 1, 104},
-    {"tile_fill", MOY_THEME_FT_PAINT, 1, 105},
-    {"tile_outline", MOY_THEME_FT_LINE, 2, 106},
-    {"tile_ink", MOY_THEME_FT_COLOUR, 1, 108},
-    {"tile_grad", MOY_THEME_FT_BOOL, 1, 109},
-    {"label.ink", MOY_THEME_FT_COLOUR, 1, 110},
-    {"label.shadow", MOY_THEME_FT_TSHADOW, 4, 111},
-    {"sidebar", MOY_THEME_FT_PAINT, 1, 115},
-    {"places_panel.fill", MOY_THEME_FT_PAINT, 1, 116},
-    {"places_panel.head", MOY_THEME_FT_PAINT, 1, 117},
-    {"places_panel.head_ink", MOY_THEME_FT_COLOUR, 1, 118},
-    {"list_bg", MOY_THEME_FT_COLOUR, 1, 119},
-    {"zebra", MOY_THEME_FT_COLOUR, 1, 120},
-    {"colhead.fill", MOY_THEME_FT_COLOUR, 1, 121},
-    {"colhead.line", MOY_THEME_FT_COLOUR, 1, 122},
-    {"buttons.normal.fill", MOY_THEME_FT_PAINT, 1, 123},
-    {"buttons.normal.ink", MOY_THEME_FT_COLOUR, 1, 124},
-    {"buttons.normal.border", MOY_THEME_FT_LINE, 2, 125},
-    {"buttons.normal.shape", MOY_THEME_FT_ENUM, 1, 127},
-    {"buttons.normal.r", MOY_THEME_FT_INT, 1, 128},
-    {"buttons.normal.font", MOY_THEME_FT_ENUM, 1, 129},
-    {"buttons.normal.bevel", MOY_THEME_FT_BOOL, 1, 130},
-    {"buttons.primary.fill", MOY_THEME_FT_PAINT, 1, 131},
-    {"buttons.primary.ink", MOY_THEME_FT_COLOUR, 1, 132},
-    {"buttons.primary.border", MOY_THEME_FT_LINE, 2, 133},
-    {"buttons.primary.shape", MOY_THEME_FT_ENUM, 1, 135},
-    {"buttons.primary.r", MOY_THEME_FT_INT, 1, 136},
-    {"buttons.primary.font", MOY_THEME_FT_ENUM, 1, 137},
-    {"buttons.primary.bevel", MOY_THEME_FT_BOOL, 1, 138},
-    {"buttons.tonal.fill", MOY_THEME_FT_PAINT, 1, 139},
-    {"buttons.tonal.ink", MOY_THEME_FT_COLOUR, 1, 140},
-    {"buttons.tonal.border", MOY_THEME_FT_LINE, 2, 141},
-    {"buttons.tonal.shape", MOY_THEME_FT_ENUM, 1, 143},
-    {"buttons.tonal.r", MOY_THEME_FT_INT, 1, 144},
-    {"buttons.tonal.font", MOY_THEME_FT_ENUM, 1, 145},
-    {"buttons.tonal.bevel", MOY_THEME_FT_BOOL, 1, 146},
-    {"buttons.danger.fill", MOY_THEME_FT_PAINT, 1, 147},
-    {"buttons.danger.ink", MOY_THEME_FT_COLOUR, 1, 148},
-    {"buttons.danger.border", MOY_THEME_FT_LINE, 2, 149},
-    {"buttons.danger.shape", MOY_THEME_FT_ENUM, 1, 151},
-    {"buttons.danger.r", MOY_THEME_FT_INT, 1, 152},
-    {"buttons.danger.font", MOY_THEME_FT_ENUM, 1, 153},
-    {"buttons.danger.bevel", MOY_THEME_FT_BOOL, 1, 154},
-    {"buttons.toggle.fill", MOY_THEME_FT_PAINT, 1, 155},
-    {"buttons.toggle.ink", MOY_THEME_FT_COLOUR, 1, 156},
-    {"buttons.toggle.border", MOY_THEME_FT_LINE, 2, 157},
-    {"buttons.toggle.shape", MOY_THEME_FT_ENUM, 1, 159},
-    {"buttons.toggle.r", MOY_THEME_FT_INT, 1, 160},
-    {"buttons.toggle.font", MOY_THEME_FT_ENUM, 1, 161},
-    {"buttons.toggle.bevel", MOY_THEME_FT_BOOL, 1, 162},
-    {"lcd_border", MOY_THEME_FT_LINE, 2, 163},
-    {"lcd_bevel", MOY_THEME_FT_ENUM, 1, 165},
-    {"lcd_dim", MOY_THEME_FT_COLOUR, 1, 166},
-    {"keycap.fill", MOY_THEME_FT_PAINT, 1, 167},
-    {"keycap.alpha", MOY_THEME_FT_NUM, 1, 168},
-    {"keycap.border", MOY_THEME_FT_LINE, 2, 169},
-    {"keycap.grad", MOY_THEME_FT_PAINT, 1, 171},
-    {"keycap.ink", MOY_THEME_FT_COLOUR, 1, 172},
-    {"keycap.r", MOY_THEME_FT_INT, 1, 173},
-    {"keycap.bevel", MOY_THEME_FT_BOOL, 1, 174},
-    {"icons.kind", MOY_THEME_FT_ENUM, 1, 175},
-    {"icons.set", MOY_THEME_FT_TEXT, 1, 176},
-    {"icons.swap", MOY_THEME_FT_TEXT, 1, 177},
-    {"fam", MOY_THEME_FT_TEXT, 1, 178},
-    {"w_med", MOY_THEME_FT_INT, 1, 179},
-    {"w_semi", MOY_THEME_FT_INT, 1, 180},
-    {"w_bold", MOY_THEME_FT_INT, 1, 181},
-    {"sizes.hh.title", MOY_THEME_FT_INT, 1, 182},
-    {"sizes.hh.key", MOY_THEME_FT_INT, 1, 183},
-    {"sizes.hh.op", MOY_THEME_FT_INT, 1, 184},
-    {"sizes.hh.result", MOY_THEME_FT_INT, 1, 185},
-    {"sizes.dk.title", MOY_THEME_FT_INT, 1, 186},
-    {"sizes.dk.key", MOY_THEME_FT_INT, 1, 187},
-    {"sizes.dk.op", MOY_THEME_FT_INT, 1, 188},
-    {"sizes.dk.result", MOY_THEME_FT_INT, 1, 189},
+    {"disabled", MOY_THEME_FT_COLOUR, 1, 65},
+    {"bar.edge", MOY_THEME_FT_ENUM, 1, 66},
+    {"bar.h", MOY_THEME_FT_INT, 1, 67},
+    {"bar.style", MOY_THEME_FT_ENUM, 1, 68},
+    {"bar.fill", MOY_THEME_FT_PAINT, 1, 69},
+    {"bar.alpha", MOY_THEME_FT_NUM, 1, 70},
+    {"bar.line", MOY_THEME_FT_LINE, 2, 71},
+    {"bar.grad", MOY_THEME_FT_PAINT, 1, 73},
+    {"bar.sysbtn", MOY_THEME_FT_ENUM, 1, 74},
+    {"bar.sys", MOY_THEME_FT_TRIO, 3, 75},
+    {"bar.chips", MOY_THEME_FT_ENUM, 1, 78},
+    {"bar.chip_cur", MOY_THEME_FT_COLOUR, 1, 79},
+    {"bar.app_title", MOY_THEME_FT_TEXT, 1, 80},
+    {"bar.ink", MOY_THEME_FT_COLOUR, 1, 81},
+    {"bar.dim", MOY_THEME_FT_COLOUR, 1, 82},
+    {"bar.tray", MOY_THEME_FT_PAINT, 1, 83},
+    {"bar.clock", MOY_THEME_FT_ENUM, 1, 84},
+    {"hhbar.style", MOY_THEME_FT_ENUM, 1, 85},
+    {"hhbar.h", MOY_THEME_FT_INT, 1, 86},
+    {"hhbar.fill", MOY_THEME_FT_PAINT, 1, 87},
+    {"hhbar.line", MOY_THEME_FT_LINE, 2, 88},
+    {"hhbar.ink", MOY_THEME_FT_COLOUR, 1, 90},
+    {"hhbar.dim", MOY_THEME_FT_COLOUR, 1, 91},
+    {"hhbar.sys", MOY_THEME_FT_TRIO, 3, 92},
+    {"tabs.style", MOY_THEME_FT_ENUM, 1, 95},
+    {"tabs.pill", MOY_THEME_FT_COLOUR, 1, 96},
+    {"tabs.pill_ink", MOY_THEME_FT_COLOUR, 1, 97},
+    {"launcher", MOY_THEME_FT_ENUM, 1, 98},
+    {"dock.fill", MOY_THEME_FT_COLOUR, 1, 99},
+    {"dock.alpha", MOY_THEME_FT_NUM, 1, 100},
+    {"dock.frost", MOY_THEME_FT_BOOL, 1, 101},
+    {"dock.ring", MOY_THEME_FT_RING, 2, 102},
+    {"dock.r", MOY_THEME_FT_INT, 1, 104},
+    {"tile_r", MOY_THEME_FT_INT, 1, 105},
+    {"tile_fill", MOY_THEME_FT_PAINT, 1, 106},
+    {"tile_outline", MOY_THEME_FT_LINE, 2, 107},
+    {"tile_ink", MOY_THEME_FT_COLOUR, 1, 109},
+    {"tile_grad", MOY_THEME_FT_BOOL, 1, 110},
+    {"label.ink", MOY_THEME_FT_COLOUR, 1, 111},
+    {"label.shadow", MOY_THEME_FT_TSHADOW, 4, 112},
+    {"sidebar", MOY_THEME_FT_PAINT, 1, 116},
+    {"places_panel.fill", MOY_THEME_FT_PAINT, 1, 117},
+    {"places_panel.head", MOY_THEME_FT_PAINT, 1, 118},
+    {"places_panel.head_ink", MOY_THEME_FT_COLOUR, 1, 119},
+    {"list_bg", MOY_THEME_FT_COLOUR, 1, 120},
+    {"zebra", MOY_THEME_FT_COLOUR, 1, 121},
+    {"colhead.fill", MOY_THEME_FT_COLOUR, 1, 122},
+    {"colhead.line", MOY_THEME_FT_COLOUR, 1, 123},
+    {"buttons.normal.fill", MOY_THEME_FT_PAINT, 1, 124},
+    {"buttons.normal.ink", MOY_THEME_FT_COLOUR, 1, 125},
+    {"buttons.normal.border", MOY_THEME_FT_LINE, 2, 126},
+    {"buttons.normal.shape", MOY_THEME_FT_ENUM, 1, 128},
+    {"buttons.normal.r", MOY_THEME_FT_INT, 1, 129},
+    {"buttons.normal.font", MOY_THEME_FT_ENUM, 1, 130},
+    {"buttons.normal.bevel", MOY_THEME_FT_BOOL, 1, 131},
+    {"buttons.primary.fill", MOY_THEME_FT_PAINT, 1, 132},
+    {"buttons.primary.ink", MOY_THEME_FT_COLOUR, 1, 133},
+    {"buttons.primary.border", MOY_THEME_FT_LINE, 2, 134},
+    {"buttons.primary.shape", MOY_THEME_FT_ENUM, 1, 136},
+    {"buttons.primary.r", MOY_THEME_FT_INT, 1, 137},
+    {"buttons.primary.font", MOY_THEME_FT_ENUM, 1, 138},
+    {"buttons.primary.bevel", MOY_THEME_FT_BOOL, 1, 139},
+    {"buttons.tonal.fill", MOY_THEME_FT_PAINT, 1, 140},
+    {"buttons.tonal.ink", MOY_THEME_FT_COLOUR, 1, 141},
+    {"buttons.tonal.border", MOY_THEME_FT_LINE, 2, 142},
+    {"buttons.tonal.shape", MOY_THEME_FT_ENUM, 1, 144},
+    {"buttons.tonal.r", MOY_THEME_FT_INT, 1, 145},
+    {"buttons.tonal.font", MOY_THEME_FT_ENUM, 1, 146},
+    {"buttons.tonal.bevel", MOY_THEME_FT_BOOL, 1, 147},
+    {"buttons.danger.fill", MOY_THEME_FT_PAINT, 1, 148},
+    {"buttons.danger.ink", MOY_THEME_FT_COLOUR, 1, 149},
+    {"buttons.danger.border", MOY_THEME_FT_LINE, 2, 150},
+    {"buttons.danger.shape", MOY_THEME_FT_ENUM, 1, 152},
+    {"buttons.danger.r", MOY_THEME_FT_INT, 1, 153},
+    {"buttons.danger.font", MOY_THEME_FT_ENUM, 1, 154},
+    {"buttons.danger.bevel", MOY_THEME_FT_BOOL, 1, 155},
+    {"buttons.toggle.fill", MOY_THEME_FT_PAINT, 1, 156},
+    {"buttons.toggle.ink", MOY_THEME_FT_COLOUR, 1, 157},
+    {"buttons.toggle.border", MOY_THEME_FT_LINE, 2, 158},
+    {"buttons.toggle.shape", MOY_THEME_FT_ENUM, 1, 160},
+    {"buttons.toggle.r", MOY_THEME_FT_INT, 1, 161},
+    {"buttons.toggle.font", MOY_THEME_FT_ENUM, 1, 162},
+    {"buttons.toggle.bevel", MOY_THEME_FT_BOOL, 1, 163},
+    {"lcd_border", MOY_THEME_FT_LINE, 2, 164},
+    {"lcd_bevel", MOY_THEME_FT_ENUM, 1, 166},
+    {"lcd_dim", MOY_THEME_FT_COLOUR, 1, 167},
+    {"keycap.fill", MOY_THEME_FT_PAINT, 1, 168},
+    {"keycap.alpha", MOY_THEME_FT_NUM, 1, 169},
+    {"keycap.border", MOY_THEME_FT_LINE, 2, 170},
+    {"keycap.grad", MOY_THEME_FT_PAINT, 1, 172},
+    {"keycap.ink", MOY_THEME_FT_COLOUR, 1, 173},
+    {"keycap.r", MOY_THEME_FT_INT, 1, 174},
+    {"keycap.bevel", MOY_THEME_FT_BOOL, 1, 175},
+    {"icons.kind", MOY_THEME_FT_ENUM, 1, 176},
+    {"icons.set", MOY_THEME_FT_TEXT, 1, 177},
+    {"icons.swap", MOY_THEME_FT_TEXT, 1, 178},
+    {"fam", MOY_THEME_FT_TEXT, 1, 179},
+    {"w_med", MOY_THEME_FT_INT, 1, 180},
+    {"w_semi", MOY_THEME_FT_INT, 1, 181},
+    {"w_bold", MOY_THEME_FT_INT, 1, 182},
+    {"sizes.hh.title", MOY_THEME_FT_INT, 1, 183},
+    {"sizes.hh.key", MOY_THEME_FT_INT, 1, 184},
+    {"sizes.hh.op", MOY_THEME_FT_INT, 1, 185},
+    {"sizes.hh.result", MOY_THEME_FT_INT, 1, 186},
+    {"sizes.dk.title", MOY_THEME_FT_INT, 1, 187},
+    {"sizes.dk.key", MOY_THEME_FT_INT, 1, 188},
+    {"sizes.dk.op", MOY_THEME_FT_INT, 1, 189},
+    {"sizes.dk.result", MOY_THEME_FT_INT, 1, 190},
 };
 
 const moy_theme_field_t moy_theme_btn_fields[7] = {

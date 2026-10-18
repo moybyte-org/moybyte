@@ -210,6 +210,17 @@ static void flatten(look_t *l, int kind) {
     l->have[kind] = 1;
 }
 
+// The live theme's disabled ink (its look's `disabled`, placed), or -1.
+static int16_t s_disabled = -1;
+
+void moy_ui_set_disabled(int32_t v) {
+    s_disabled = v < 0 || v == MOY_THEME_OFF ? -1 : (int16_t)(v & 127);
+}
+
+int moy_ui_disabled(void) {
+    return s_disabled;
+}
+
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]) {
     ui_t *u = ui();
     if (u == NULL) {
@@ -227,6 +238,9 @@ int moy_ui_colors(int look, int kind, int state, int16_t out[3]) {
         flatten(l, kind);
     }
     memcpy(out, l->flat[kind][state], 3 * sizeof(int16_t));
+    if (state == MOY_UI_DISABLED && s_disabled >= 0 && out[1] >= 0) {
+        out[1] = s_disabled;
+    }
     return MOY_UI_OK;
 }
 

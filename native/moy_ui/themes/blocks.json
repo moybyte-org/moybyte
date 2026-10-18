@@ -52,6 +52,7 @@
                "getcarts": "#9be36b", "game": "#ff6b4a", "notes": "#7be0b4",
                "trash": "#e8dcc6" },
     "tile_outline": [2, "#1a1530"], "tile_ink": "#1a1530", "tile_grad": false,
+    "disabled": "#9c95a4",
     "buttons": { "normal": { "fill": "#f4ecdc", "border": [0, "#1a1530"] },
                  "tonal": { "fill": "#ffd23f", "ink": "#1a1530", "border": [0, "#1a1530"] },
                  "danger": { "ink": "#1a1530" } },

@@ -45,8 +45,14 @@ int moy_ui_state(const char *name, size_t n);
 // Point `look` at a token row (MOY_UI_TOKENS values, MOY_UI_ABSENT where the
 // theme is silent): its flatten starts over.
 int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]);
-// (field, ink, edge) of `kind` in `state` under `look`, -1 for nothing.
+// (field, ink, edge) of `kind` in `state` under `look`, -1 for nothing. A
+// disabled state inks in the live theme's disabled ink where it names one.
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
+// The live theme's disabled ink: its look's `disabled` leaf as placed (a
+// colour index; none, absent or off: -1), which every disabled part's ink is
+// -- below the ink and its dim, about 3:1 on the surface. Set with the theme.
+void moy_ui_set_disabled(int32_t v);
+int moy_ui_disabled(void);
 // A kind's own states (rest, hover, hot) whose (field, ink) misses the
 // contrast floor take its floor forms (style.json's "floors"), in order.
 

@@ -489,7 +489,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                       : tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
     int lab = ink, rowfill = -1;
     if (flags & MOY_UI_F_DISABLED) {
-        lab = ink = dim;
+        lab = ink = dim = moy_ui_disabled() >= 0 ? moy_ui_disabled() : dim;
     } else if (flags & MOY_UI_F_FOCUS) {
         if (m->on) {
             int mi = -1;

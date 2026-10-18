@@ -159,6 +159,36 @@ def test_a_seeds_danger_button_reads_as_text(seed, variant):
     assert (hi + 500) * 10 >= 45 * (lo + 500), (field, ink)
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed", TH["seeds"])
+def test_a_seeds_disabled_ink_is_quiet_and_seen(seed, variant):
+    """Every seed names its `disabled` ink, and it is seen (2.5:1 or more on
+    the surface) and quieter than the ink and its dim, so a disabled control
+    is neither invisible (Moy, Blocks) nor brighter than an enabled one
+    (Contrast, where ink_dim is the ink). It is what every disabled part
+    inks in (`ui_draw.use_buttons`)."""
+    live = live_colors(seed, variant)
+    ui_draw._C.theme_block(live.block, live.used)
+    th = live.tokens
+    dis = live.look[0].get("disabled")
+    assert dis is not None and dis >= 0
+
+    def ratio(a, b):
+        la, lb = _lum(a), _lum(b)
+        return (max(la, lb) + 500) / (min(la, lb) + 500)
+    assert ratio(dis, th["surface"]) >= 2.5
+    assert ratio(dis, th["surface"]) < ratio(th["ink_dim"], th["surface"])
+    ui_draw.use_buttons(live)
+    try:
+        assert ui_draw.disabled_ink(th) == dis
+        look = ui_draw._look(th)
+        assert ui_draw._C.colors(look, ui_draw._kind_id("button"),
+                                 ui_draw._STATE_ID["disabled"])[1] == dis
+    finally:
+        ui_draw.use_buttons(None)
+    assert ui_draw.disabled_ink(th) == th["ink_dim"]
+
+
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
     real frame: a titled frame against the same frame untitled."""

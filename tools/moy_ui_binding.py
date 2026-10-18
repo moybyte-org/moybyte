@@ -57,6 +57,7 @@ _SIGS = (
     ("moy_ui_button_style", [_I, _I, _I, _I, c.c_void_p], _I),
     ("moy_ui_buttons_set", [_P, _Z, _I, c.c_void_p], _I),
     ("moy_ui_buttons_clear", [], None),
+    ("moy_ui_set_disabled", [c.c_int32], None),
     ("moy_ui_buttons_app", [_P, _Z], _I),
     ("moy_theme_reads", [c.c_int32, c.c_int32], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
@@ -1115,6 +1116,7 @@ def binding():
     m.button_style = button_style
     m.buttons_set = buttons_set
     m.buttons_clear = lib.moy_ui_buttons_clear
+    m.disabled = lambda v: lib.moy_ui_set_disabled(-1 if v is None else int(v))
     m.buttons_app = buttons_app
     m.theme_reads = lambda a, b: bool(lib.moy_theme_reads(int(a), int(b)))
     seeds = _names(lib, "moy_theme_seed_names", c.c_int.in_dll(lib, "moy_ui_n_themes").value)

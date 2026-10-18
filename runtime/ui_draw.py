@@ -949,13 +949,30 @@ def _app_row(app):
 def use_buttons(live):
     """Install the live theme's `buttons[kind]` and `app_buttons[app][kind]`
     (`chrome.live_colors`' `look`, every colour placed in its block) for every
-    button that draws; None drops them. A gradient fill draws its first stop."""
+    button that draws, and its look's `disabled` as every disabled part's
+    ink; None drops them. A gradient fill draws its first stop."""
     _C.buttons_clear()
     _APP_ROW.clear()
+    _DISABLED[0] = None
     if live is None:
+        _C.disabled(None)
         return
     for app, kind, vals in live.buttons:
         _C.buttons_set(app, BUTTON_KINDS.index(kind), vals)
+    v = live.look[0].get("disabled")
+    _DISABLED[0] = v if v is not None and v >= 0 else None
+    _C.disabled(_DISABLED[0])
+
+
+_DISABLED = [None]        # the live theme's disabled ink, a colour index, or None
+
+
+def disabled_ink(th):
+    """The colour index a disabled icon or label draws in under theme `th`:
+    the live theme's `disabled` (about 3:1 on the surface, under the ink and
+    its dim), else `th`'s ink_dim."""
+    v = _DISABLED[0]
+    return v if v is not None else th["ink_dim"]
 
 
 def button_unreadable(th, apps=()):

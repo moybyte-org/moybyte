@@ -944,6 +944,14 @@ static mp_obj_t ui_buttons_clear(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_buttons_clear_obj, ui_buttons_clear);
 
+// disabled(v): the live theme's disabled ink (moy_ui_set_disabled), its
+// look's placed `disabled` leaf; None or a negative value for none.
+static mp_obj_t ui_disabled(mp_obj_t v) {
+    moy_ui_set_disabled(v == mp_const_none ? -1 : (int32_t)mp_obj_get_int(v));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_disabled_obj, ui_disabled);
+
 static mp_obj_t ui_buttons_app(mp_obj_t name) {
     size_t n;
     const char *s = mp_obj_str_get_data(name, &n);
@@ -2479,6 +2487,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_button_style), MP_ROM_PTR(&ui_button_style_obj) },
     { MP_ROM_QSTR(MP_QSTR_buttons_set), MP_ROM_PTR(&ui_buttons_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_buttons_clear), MP_ROM_PTR(&ui_buttons_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_disabled), MP_ROM_PTR(&ui_disabled_obj) },
     { MP_ROM_QSTR(MP_QSTR_buttons_app), MP_ROM_PTR(&ui_buttons_app_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_reads), MP_ROM_PTR(&ui_theme_reads_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },
