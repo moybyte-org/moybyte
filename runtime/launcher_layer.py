@@ -193,6 +193,18 @@ def _draw_new_icon(cv, names, img, x, y, sc):
     cv.pal()
 
 
+def _dot_top(y, s, d):
+    """The top of a `d`-pixel dot between words of the `ui` face drawn at
+    row `y` and scale `s`: on the middle of a version 2 face's lowercase
+    (its x-height taken as half its ascent), on the line's middle in a
+    pixel face."""
+    f = _ui_draw.font()
+    if not _ui_draw.font_v2(f[0]):
+        return y + (f[2] * s - d) // 2
+    asc = f[3] * s
+    return y + asc - (asc // 2 + d) // 2
+
+
 _STAR = {}           # chip side -> (edge runs, inside runs) of its star
 
 
@@ -1713,7 +1725,7 @@ class Carousel(Launcher):
             dim = th.get("chrome_ink_dim", 6)
         cv.print_scaled(name, x, y, dim, sc)
         x += nw + sep
-        cv.rect(x, y + (lh - sc) // 2, sc, sc, dim)
+        cv.rect(x, _dot_top(y, sc, sc), sc, sc, dim)
         cv.print_scaled(count, x + sc + sep, y, dim, sc)
 
     def _paint_details(self, cv):
@@ -1846,12 +1858,14 @@ class Carousel(Launcher):
         if swap is not None:
             _ui_draw.print_font(was)
         x0 = x = bx + (bw - mw) // 2
+        d = 2 * fs if _ui_draw.font_v2(_ui_draw.font()[0]) else fs
+        dy = _dot_top(my, mh // max(1, _ui_draw.font()[2]), d)
         for pas in ((1, wall[1]), (0, dim)) if wall is not None else ((0, dim),):
             o, c = pas
             x = x0
             for k, t in enumerate(parts):
                 if k:
-                    cv.rect(x - sep // 2 - fs // 2 + o, my + (mh - fs) // 2 + o, fs, fs, c)
+                    cv.rect(x - (sep + d) // 2 + o, dy + o, d, d, c)
                 cv.print(t, x + o, my + o, c, 1)
                 x += ws_[k] + sep
 
@@ -2832,7 +2846,7 @@ class LauncherHomeLayer:
         x = dx
         for k, t in enumerate(g._meta(it)):
             if k:
-                cv.rect(x, my + (lh * ms - ms) // 2, ms, ms, dim)
+                cv.rect(x, _dot_top(my, ms, ms), ms, ms, dim)
                 x += ms + sep
             cv.print_scaled(t, x, my, dim, ms)
             x += _ui_draw.print_width(t, ms) + sep
@@ -3309,8 +3323,9 @@ class LauncherHomeLayer:
                         cv.rectb(r[0] - k, r[1] - k, r[2] + 2 * k, r[3] + 2 * k,
                                  th["focus"])
             if sc == fs:
-                cv.print(label, r[0] + pad, r[1] + (r[3] - ws.layout.line_h) // 2 + fs,
-                         ink, 1)
+                # the line centred on the plate, as the bar's clock is on the bar,
+                # so the two share a baseline
+                cv.print(label, r[0] + pad, r[1] + (r[3] - ws.layout.line_h) // 2, ink, 1)
             else:
                 lh = _ui_draw.font()[2] * sc
                 cv.print_scaled(label, r[0] + pad, r[1] + (r[3] - lh) // 2, ink, sc)
