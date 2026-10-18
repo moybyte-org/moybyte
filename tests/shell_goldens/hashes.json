@@ -21,7 +21,7 @@
     "web_console_address": "3bc5469bc7f11069ccbe2b08846b4ffe2354765831497a09821d5bf951905b0d"
   },
   "guition_480x320_fs1_dark": {
-    "app_appearance": "ee5fe72c1f6bd68f7a73e8db4a61febfdb35417da0475e5175575381be8433b2",
+    "app_appearance": "5325a4ca2c525ae79d73d4acac760d76b164378c8be2f92c4f668bca197a2c70",
     "app_artwork": "2cb059c5963fc3399c005fc372d90686f0416c3e326eaaa98381a5522c19a64e",
     "app_calc": "c615aed3e45b56f19c8cc826bf0abc35a908830ba0de9b5b9bcb610d1d78dbaa",
     "app_files": "2a820483c31ffdd9429254f237ee41bc6b909f3c2b84de5470ccb0b418ed83e6",
@@ -42,7 +42,7 @@
     "web_console_address": "7c7d264e00d50f8dc3fd05174727b66fa08922fb7379e01a5d4aece0e08fa25e"
   },
   "guition_p4_1280x800_windowed": {
-    "app_appearance": "5527ebe6b91fcf232a9b1b1bc323efef0314e33d2a33631ee268906287c962c4",
+    "app_appearance": "5b5388f6ff8dea0da4ffac0e2aff510bf743031d6205dd7f8d520322e6580695",
     "app_artwork": "b652532ae361570fca4a070be03e46f79cb0053a98b41a2756650ae74901ee60",
     "app_calc": "52233e9e7606ea56793e89eab568a3a799df25376e10a95d8d9a1fe9632c6d45",
     "app_files": "a94739272aa00bf921919a690d223850b2cdd176121606685aadbb70424a5ee0",
@@ -66,7 +66,7 @@
     "web_console_address": "c160562ca09d0b135932504ae032468a90b604d4a60846296827038651e39e9f"
   },
   "guition_tapfloor_dark": {
-    "app_appearance": "19578cff22d91e2932805bc2db2ba8d2229119ec1ea6e66e10dadfbff7ebee7b",
+    "app_appearance": "e50649293892e9b4e8d25fe9ddb27558c2ecdffa26ae0b6a2d169227f08baea2",
     "app_artwork": "65b91992c5444714355e19880f1332320c912c44d16f8ffc04ce91075ac157d1",
     "app_calc": "eae22144cc62538144f1fbc070fb394711c1ead24d49d8c9522697e2184eb70b",
     "app_files": "ce7824278ea2affc7a5fed7cbf17ec3b7e50b235969fb64e77e9ab8964aa5559",
@@ -86,8 +86,32 @@
     "web_console": "72d29b8cc5f94485575ff5a8927777190a3dabc31e46de8ec12fa0816edc32c9",
     "web_console_address": "1d30fe07b8c674436ed59900eec2f9fbeefe852a86f429950a539119b60668e1"
   },
+  "p4_1024x600_cs2_fs1_blocks": {
+    "app_appearance": "00639a0aca62f70e38b1cf6501363243b7f98ba27cf08f70ec0db2764f0cc8b9",
+    "app_artwork": "2e3e56fcfa4bab268044ae549b58bac13071aecccb95a1a2f538d63f34dd21e0",
+    "app_calc": "b4ba079e1ac826e3fe9a7b81cb570c1777d1680acd8f0c3b63f8091bf7f858a4",
+    "app_files": "47655583f4c261bcc982f13cd924dc9bfb8edafe65505e8ae2011b3a643d630e",
+    "app_getcarts": "97bd72096faee379a9672d29d1c1501d5e6acc7db8465c0392a822e96b4b8fe5",
+    "app_notes": "6fa3a6803f73eaa42fa86ee7b89521c423be288543911fce950681152bafb329",
+    "app_storybook": "87f0223f8da3fbd3393abd97e5f294c821ee99ab1b9d9cb3d0590828f3ed6c48",
+    "desk": "376c83dcc72f8c343d657d6e9d4b7b0b079c51ca23363743aae6c7c57665a3da",
+    "desk_window_calc": "185bbe925fa52ad39ccfab31720ba6f009ca0f7a04eab40ca76208711f8171b3",
+    "desk_window_projects": "170b2ad187b09a1cf5486f358fd59b4586be1426743d7b876404290f4f85ad38",
+    "editor_blocks": "4180e31c64869a70bd6a0fcecabe5fe298643059c4d2e13df2c344c721d1b152",
+    "editor_cards": "1bf9ad0cfc9ac2493de2ab2ff009b5ad32be88b480d777d4010a02c31dcab1fb",
+    "editor_code": "3146baf54fed122228dba1ff4f15695dc7973e3df1c26bf20c00e285d9d9c689",
+    "editor_map": "f5bdc09fac7af8f5d7e8b6e5189f7e393c6a909ac299d783aa92d0886e07b37c",
+    "editor_music": "0d0d6c9083adaf09e59d0a6ed376f22a7b5b074626b6625dc17cda4cfba0832c",
+    "editor_paint": "404146d9c78ac5eae22a010fac641aabb4c9c64c185d7499538802ca9e59d378",
+    "editor_scene": "6f44c7461c72c5966ee2dec434c5bac52f2ab47b86290610bd6b5a895879dcd9",
+    "launcher": "a08247ef9acf6ed84c469f1c0774f47f52b50af3c1f58a116de6a39fe7ca437c",
+    "script_console": "86235e26648713c54ef6026dc0436e9c2c08fe3e88ef638774cb7dcd9e95674e",
+    "settings": "f0f7381e92196a7f2143251cf32568bb529b4481d4e257708dc4019cdc66e453",
+    "web_console": "e549180020fd9a27c2c97f636969909344d9d5d0a4c4ffff72c6518f08c8b335",
+    "web_console_address": "da910a692fd0ec3e70394c8c966d431db7d79e2faf65ecf1d979da97e0a72517"
+  },
   "p4_1024x600_cs2_fs1_console": {
-    "app_appearance": "7c9e66c933f06744d464c1164cf1e779a26095d120a5c5bdd5727b4bc8dd62ec",
+    "app_appearance": "f2da094087c7b8d94188d7f97d3358f0d5a07a3d62de4bfd373dd2bfbd83d144",
     "app_artwork": "6e5557a9cbcff2055888b83496a7f03301574ceb5d5f11a5272f432566cff6fc",
     "app_calc": "546e4449cbe888a441db9eb54bed1ebe215af371f2de4f08fcb2ee8ed14a51b0",
     "app_files": "3117d339a5657a3087fd1434579c3ff34e6f26eec994781f392934c5bb6ff907",
@@ -108,7 +132,7 @@
     "web_console_address": "d3b5fb8647d5f41b90ab69e12661b881908887bc5f5b0c13f58d1fb4c9f0be61"
   },
   "p4_1024x600_cs2_fs1_contrast_light": {
-    "app_appearance": "237e1415d9ffedf8b4d032fe75448892467a7754f7da740442b90e4e6c697249",
+    "app_appearance": "69b9cf2db012e1b05f0a11175388452f197714685000cabcdf3124acc27ef7bd",
     "app_artwork": "75731e012f5b2bde29d3885a7e356441d84d04c37c23a392312d8b1b92464403",
     "app_calc": "57eb08df764d8793a4ee6034f01d0d996ab656e95711783e1144b0044fae132d",
     "app_files": "2f1b93550c70ce3c0a4058d9754c57fe88d7d20550c4a32fdcda4daa9c9f9adc",
@@ -132,7 +156,7 @@
     "web_console_address": "a90ac4ccfd97abd6e9b904c6eaea5f1cbe61d522ae6d83d76ef2c243cd14e6a6"
   },
   "p4_1024x600_cs2_fs1_gnomebar": {
-    "app_appearance": "d8d0cef4bcda1e468c343b7d6b542c24e409952191769895d75903e114a475d6",
+    "app_appearance": "a16dc1d2c3c7506141546376539c84a39e5e1ddf22eaf3c8cc3af71df56436c7",
     "app_artwork": "ed4aa089b19807350d55a972035bf1e9dda1f9e7da5ebe4744357450fb7bf7c4",
     "app_calc": "5a0b9411fca7fe02a03bd0ba23c0f7f1310d1818f5aed6f478fa905e28ccd71c",
     "app_files": "4f99c6914f028fe238214fa5e70322825165da9a0717cdec4aeb5eed9695cbc6",
@@ -168,15 +192,15 @@
     "launcher_mine": "fc1d8aadc733bb5880fb748adeccdb4c4ad53b4392c9b2a8575f6b9f27810c6f"
   },
   "p4_1024x600_cs2_fs1_moy_day": {
-    "app_appearance": "2bae77e96d90fcf4e89264d2d7d547484c54b26450c9293870cc696b72ccdde5",
+    "app_appearance": "787765add448aeab31ade2c9f40ffa95f4709e483750dfeed462ea6cb404860a",
     "app_artwork": "bb4cd601c5de5438bc07281a8edc7bea176a68979a764d74e3936e08bb2b40a2",
-    "app_calc": "8b3077da863c59079b4d8e651698e6663f7db917e9dd45171131d5b766793ada",
+    "app_calc": "e7354cfe49a588f662fe0e32fd0f2fb05ca246c067fc9c4a30a74d7bb7f1fb40",
     "app_files": "1cf942e4a7f834315f50f4425a8d9cf509bcffd0d45f5c177ebcd85244677c08",
     "app_getcarts": "c1ea96c610741bb1aa9260f13de36e780e02d041c179e64f78344b7c9c8366d1",
     "app_notes": "cc4f7781268edf4f7d3c2c3a98d93aa5e7dbd37525c984a50439630cd8f2e329",
     "app_storybook": "cadd9f94cf5f1c94d2cb8a0b2547400042833c648e34b346e3fe7bcf58af9cab",
     "desk": "d748c92ac2bb0a2d6d18515eb66348e36322749ae7f31106ac28797a94ad0fa0",
-    "desk_window_calc": "0f924fb6aa22fd27fd38fb98fdeb58406dfca129a68c2e59edfb5b05b7252b2b",
+    "desk_window_calc": "8d52c15bffcf5f42c61cf99fae450dbc3a379a07c259908927334b6c6b1e7dd1",
     "desk_window_projects": "b5c36aa6f9c4c316f7fb22240d33b574c9bd9d7d9520d2f07a4b27d7b9710017",
     "editor_blocks": "2af490c4c4b1e0ed782130e737c37325bb119aa794f6d633ccdd80870a8416ad",
     "editor_cards": "009bd8503c7ae35d83b1dad0880c2c9b98ebb0725fa806085cd89a00bf5bebb8",
@@ -197,15 +221,15 @@
     "sysmenu": "fee59a7172a0652666eee1f55c7848cbc461027eb4e1b46dc627ad9d4db29016"
   },
   "p4_1024x600_cs2_fs1_moy_night": {
-    "app_appearance": "bd04f6e0d28031ed26747dc1835c6c497a9bbf2b5cdb2a87a3a5475d0927aea9",
+    "app_appearance": "21cb57d6bef9d279c45d79401227041019d31ca0a5b60be5c6c9af8355ec38c2",
     "app_artwork": "d8029df6f3c3b740f3c186ce88d2c1ee2a0b9b495fdbdf743a54203a00e9f925",
-    "app_calc": "55745bdabe8c633f22cf8b8e6f6df4b1137935a65fbaa8d29edd0a54a5b0af64",
+    "app_calc": "bc8bbc6fbd682541b77a859aeb41f0b3e57b11f1a7f0d9814064e4a737817b7b",
     "app_files": "b09a64c68042cc42cbcf8112b6e5aca45983012f7c74d9ef15c7dc2e08b9f4e7",
     "app_getcarts": "1a72e1c91e4783f62ac467214bccf77d492e67f0a6fb60fca762e17c88c8e42b",
     "app_notes": "4a6ff8d49208510dfc1f64abf5f6d3d5052de2bff16789e90b1213b9b80dca49",
     "app_storybook": "50d013c876e48f971c09b0ce88e57a5365c9adf59fc29585f17644c79c1e31a5",
     "desk": "df851acb5879eba95f22166525d91f6f34466fd7d5d75e837f4356c1d523215b",
-    "desk_window_calc": "bfefaa0df245a726f13634173fe83f2930d998177b560ea5f4b6ac3173a728bb",
+    "desk_window_calc": "2872c834a7ed9a3a1f671e89114ef409ea9cafd4913134e8d228d06728fd57fa",
     "desk_window_projects": "def979c57b086859ce24127663e6517cba5d85d7e40cca46819929c54e7105b6",
     "editor_blocks": "749f2731f39f70cdca9d5106b0fe93d42d8057f5416913c4f80840face150746",
     "editor_cards": "c743e2eb00583a4fe3fe9a285ccf02d8f134451ca8257de61ad3395a760d3b7c",
@@ -221,7 +245,7 @@
     "web_console_address": "e7c09532d757418617fb26e885d1c19c90305ac9a5f46047019e6f47c6b4b626"
   },
   "p4_1024x600_cs2_fs1_platinum_light": {
-    "app_appearance": "1b715a1600467d59dee9a8a92b210bfa317892952ec93c588bc00653dd353793",
+    "app_appearance": "4fc8b931d793deb2e310d81cc8c7e15fa9ed5837655875f3be782cc506903e53",
     "app_artwork": "707c01dd6abdc6b5155a61b40566a8c8311eba31196a290c96e00d0704d01767",
     "app_calc": "a4b89e4536cf2c164b23f6707c58a09e989c0086cf7c98d1cdb3bdc3cb53f31c",
     "app_files": "710f2cb3a22aaf22de6ed48c59c8731a88bcd28868921148c3140ef903ae8ee1",
@@ -252,7 +276,7 @@
     "popover_wifi": "f561ebb33d33e248e1fd3ddcf6f7c8f2c904031fd0788bb3e3e8b6bfc6b39783"
   },
   "p4_1024x600_cs2_fs1_twobars": {
-    "app_appearance": "873ec94bcc56e52f03c7e0f72c9ad9ef48600f38c29c040c79e64de2d5bd3b0d",
+    "app_appearance": "04982481689e294e4145feb48a03716918e653fa65aa2391e7a582ceea17928e",
     "app_artwork": "76f407612e87df0a5287859ead016def21ded37793e265d7b716589047768a6f",
     "app_calc": "9a90348ee635ab9d52986cf2b80171e9159cfb4e0b796dc43c18a75a98540446",
     "app_files": "918361f12789db9893c762f56d00e3deb377b1ea6f20b06d20290966edfac805",
@@ -276,7 +300,7 @@
     "web_console_address": "2e802eaa7c566cc20149b973099fe42148e1f3c4fc5157982425a50fe70cc9cb"
   },
   "p4_1024x600_cs2_fs1_win95_light": {
-    "app_appearance": "7a530eb60d0f9e5d4edfe45f3c9c10fe09953e24c0cb04fa86769f0a1737987e",
+    "app_appearance": "414b135a046bdc70abeb62ec95c0c90ff85e2f12e99a46d4de4b946ade330410",
     "app_artwork": "509ae8bce2819bb1cefe5de401eaf7479dffed07f4737e319e65c52958950279",
     "app_calc": "5e82a18aaa612e6ed8d03ba2f76aee9ddd648ae856cd1de59d38ae25753ba07b",
     "app_files": "9e6f130febb0753b8ea36c98b5382e73bb9a3fc75b2bf93741cee61aa0b123f5",
@@ -300,7 +324,7 @@
     "web_console_address": "71c2a673f1c64bf7f95e51f410c54449ac6e62038b8fe1ca3305ef9ac5f7b987"
   },
   "p4_1024x600_cs2_fs1_win95bar": {
-    "app_appearance": "e388c60939ac97cf9111fb018179e4950b970c21fc519c3e0a6887e5fbd311ba",
+    "app_appearance": "9d7a1dbe13e0dcc61eb7b3c8ade81608ceecc8d52d7b62bfb7a00db1bebe62af",
     "app_artwork": "0abe70e9291ae9d9ad9e8a140e9bf43f3c8671b51947d800c316f5703083c9cb",
     "app_calc": "56fc5feb09d8575ba7738e2893c6732a7fec552e738c12b581a23e9d1b8e4653",
     "app_files": "59f50d4cd3b68c1e9c3de3cbd2364a43210d185365670c86f5276c1fb2e824bc",
@@ -324,7 +348,7 @@
     "web_console_address": "35c9173af05dfbe6989970d437dd671907c98a5528f922f5dc34328410849427"
   },
   "p4_1024x600_cs2_fs1_windowed": {
-    "app_appearance": "2f6fcc283361cbb7b7963fe6f2b8347ce3904f193d5c8f34e716ee082817d7d9",
+    "app_appearance": "dc33d5259a84ca281f62883d1c6f96a01c07d1036d49a52b5e1b83d688786f15",
     "app_appearance_name": "95ae21a1b9edd713a96d648bb43b47969396aeb1ad1df7ce26292235f127a71f",
     "app_appearance_walls": "f63b8f7af976380e307ff6c33eadc6a329aa426067197447ad529b618d6d7f73",
     "app_artwork": "84c8e1f3b61060e05e2a57064c09912dde580a04315b2c149cdd12fe793867d5",
@@ -421,6 +445,27 @@
     "web_console": "23809f1d291c373eb7b75810f51ae769b0074f76198e1d39484cad2d2d7812fa",
     "web_console_address": "8b704bbbd7ab3cb6a3265a0e8bf37e6dedadd50eaecd3e1d91d04bfadb5e1b2a"
   },
+  "tdeck_320x240_fs1_blocks": {
+    "app_appearance": "fdfc13a1d0223db7b3db2108d0ad98bba0677bf7205df11e05332f4d21b87f04",
+    "app_artwork": "183788fbddc8d3b0105cfea68c57b8bb01a943501210b66652064719adc9072e",
+    "app_calc": "3e75a9b1ec17700eeec43a86ba33e96bda3301dda798175b1386f55059b8f40c",
+    "app_files": "3496f990fd2325314a414b34ed5d827a35f4b4016be6daf709d135e455af3ba8",
+    "app_getcarts": "54cfbc6c6a35426adda8a0182074a834cee3fb14c91d9a36d53e748397bc6da7",
+    "app_notes": "a446788a8f5e7c04294d53a22829d43f8f2ddfcde123ecd640267736583f0866",
+    "app_storybook": "550e1c112657f90eb7a38f7e1a838ec15c5ace0858e3cc0d897becc223aa881a",
+    "editor_blocks": "94793cf16b13d4b6c27306be776b35af66835609ed490f6ebf61e532fbf99ac8",
+    "editor_cards": "4cbd6b7cbb192d9fb6a2ca3ce99e873ecd24b6405ad64da382d8c6d409752919",
+    "editor_code": "62d71f78bd7ce25d099d9c56bf11cabe375bdff9edd21c56e32c24131f484a0a",
+    "editor_map": "f857762f999f920ee42682979ac1cea573cc7dceaec01e627893a91dcf3eee53",
+    "editor_music": "6f8a2aa362fd8e26b9d1216239d08214a0e3a81432eb272a1edcfeb364436d9e",
+    "editor_paint": "edfa1b9f1faf3252fb3f63bfae6d0291d0b3e003fc1402523f4b6e4ca6fc287d",
+    "editor_scene": "a01b47f3289eba7ce8aac7d4890637f935e3f6956f67b1e4a8bc64e83eb415d4",
+    "launcher": "bec8c833dfa8fd08d7721a864517141115a323bc87f839ff08656803a2e4e0a3",
+    "script_console": "70be883cd37b4a0afa1e9a485d8d77bf850235c14203c8dbee2b4c33c8c658b0",
+    "settings": "5dbe76f572c506a9154515cdf2222fd21586dc38a559c1cfeaae054166ba1ea5",
+    "web_console": "989f5b8f4ffa6418c0cd19180d6bdf698b7ff0831d74eaf293c8b55f98b4a117",
+    "web_console_address": "198674526db0592beb4d75332ae91999a4a186573fbb16cc0ce8e189b981b6db"
+  },
   "tdeck_320x240_fs1_bottombar": {
     "app_appearance": "b9885694b5c15f902f3a479083ca2de5dd32771bba7b88abc0617ca9267350ed",
     "app_artwork": "a220743edb0ff2c74bb716f10fe4bdeb6d0ca87a0177a82a2a72b6ea8c355dc8",
@@ -501,7 +546,7 @@
     "web_console_address": "aaae37764bb963552015408d96a5b11b08e13f82ac25bf9885020bfba9171958"
   },
   "tdeck_320x240_fs1_moy_day": {
-    "app_appearance": "16019dbf50ef5bbc0326477ef605b37b1a405e5084cf09f655a6b9e71b5a5443",
+    "app_appearance": "37e2b7923ac7b0622d372db146700781b3da3731abce80a6697cb74b7676c519",
     "app_artwork": "d68eefcd294ae02e0dcc9d62e25869930fd4fffdf0374460b1867eca3635151f",
     "app_calc": "36499f3e7b577be92ca8a2ff02faa5480d2af4ffbf9572a5f729723b5a8f1acd",
     "app_files": "5e0113ca50dac14838d0865e712a60090082cabedefd5b6584899156b2ecc6c0",
@@ -527,7 +572,7 @@
     "sysmenu": "124f3abbd71c424c46d92131a4b5b4272e5c716d6013320e0665b1db59f049ee"
   },
   "tdeck_320x240_fs1_moy_night": {
-    "app_appearance": "6fd3a9359896945cb0ede33ae6cefc0841af0381e96e54baba65e548e3c49da1",
+    "app_appearance": "dfeafa3f86fd909b1c3b8881d3dd37222291543fc8120efc60136df2b31a7e89",
     "app_artwork": "12a4513b60074b3f8e11b90419c6df244259bbeaa2f848dbe7b3a9413980dc80",
     "app_calc": "9de9b6f66b0b92c01507ce8b0db9937bd6ba3d97bf35a4aa2317eb680ce0586a",
     "app_files": "db90dba128f87667b33fcee87f42e2ac575fdfa5f60ad2a01041d17c1ed161af",
