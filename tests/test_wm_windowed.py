@@ -3026,7 +3026,8 @@ def _px(cv, x, y):
 def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
     """Under the look the column is 44-pixel tiles on the 74-row pitch, the
     first 18 under the bar, centred 54 in from the desk's edge; each label is
-    the title its app names, under its tile, on the backdrop with no plate."""
+    the title its app names, 2 under its tile (nearer it than the next tile),
+    on the backdrop with no plate."""
     ws = _moy_desk(tmp_path)
     rects = ws.wm._backdrop_layer._icon_rects()
     labels = [r[3] for r in rects]
@@ -3036,7 +3037,7 @@ def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
     cv = ws.sys_canvas
     for i, (_key, box, band, _label, _cart) in enumerate(rects):
         assert box == (dx + 32, dy + 18 + 74 * i, 44, 44)
-        assert band[1] == box[1] + 52 and band[0] + band[2] // 2 == box[0] + 22
+        assert band[1] == box[1] + 46 and band[0] + band[2] // 2 == box[0] + 22
         # no plate: the band's edge is the backdrop either side of it
         assert _px(cv, band[0] + 1, band[1] + 1) == _px(cv, band[0] - 1, band[1] + 1)
         assert _px(cv, box[0] + 2, box[1] + 22) == 0xFFFF       # the tile's fill

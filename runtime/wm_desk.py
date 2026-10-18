@@ -306,7 +306,8 @@ class _BackdropLayer(Layer):
         """The column under a look (docs/look_2026-10.md step 25): `box`
         tiles on the class's pitch, their centres 54 of the tile's 44 in from
         the desk's edge or further where a label needs it, each label under
-        its tile, 8 of the 44 below it, as wide as the column."""
+        its tile, 2 of the 44 below it, as wide as the column: nearer its own
+        tile than the next one down."""
         k = box / 44
         cell_h = _layout_base.metric("tile_cell", fs)
         y0 = dy + _layout_base.metric("tile_top", fs)
@@ -316,7 +317,7 @@ class _BackdropLayer(Layer):
                    default=0)
         pitch = max(box + int(20 * k), maxw + int(20 * k))
         cx = dx + max(int(54 * k), (maxw + 1) // 2 + int(10 * k))
-        gap = int(8 * k)
+        gap = int(2 * k)
         y = y0
         out = []
         for key, label, cart in catalog:
