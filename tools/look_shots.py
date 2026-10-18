@@ -311,7 +311,10 @@ def _pause(g, ws):
 
 
 def _desk_wall(g, ws):
-    _desk(g, ws, calc_x=592)
+    # The target's Calc starts at 592, over Files' Kind column (its text ends
+    # at x 640 here: no Size column); 644 is the nearest place that leaves
+    # the column whole, 4 px left of the plain desk scene's 648.
+    _desk(g, ws, calc_x=644)
 
 
 class _HomeWifi:
