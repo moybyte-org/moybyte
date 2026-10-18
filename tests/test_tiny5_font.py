@@ -143,8 +143,8 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
             ws.look.set_theme(name, persist=False)
             # moy's Code tab adds JetBrains Mono (docs/look_2026-10.md step 23)
             # and its Night, this workstation's mode, Inter's four faces in
-            # place of Tiny5 (step 26a)
-            assert len(appearance._FONTS) == (5 if name == "moy" else 1)
+            # place of Tiny5 (step 26a); blocks the same with Atkinson's (26b)
+            assert len(appearance._FONTS) == (5 if name in ("moy", "blocks") else 1)
     ws.look.set_theme("night", persist=False)
     assert len(appearance._FONTS) == 1
     iconsets.reset()            # an icon set's masks hold font rows of their own

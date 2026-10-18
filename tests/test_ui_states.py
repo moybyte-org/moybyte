@@ -23,9 +23,9 @@ from runtime import ui
 from runtime import ui_draw
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 
-# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s
-# RGB roles are tests/test_theme_rgb.py's and its goldens'.
-THEME_NAMES = tuple(n for n in THEME_NAMES if n != "moy")
+# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s and
+# `blocks`' RGB roles are tests/test_theme_rgb.py's and its goldens'.
+THEME_NAMES = tuple(n for n in THEME_NAMES if n not in ("moy", "blocks"))
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
 

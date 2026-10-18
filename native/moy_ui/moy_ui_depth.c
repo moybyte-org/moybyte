@@ -920,30 +920,42 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
             moy_ui_current_in(s, b, r, 0, 1, &ink, 0);
             return 1;
         }
-        case MOY_UI_BARP_TILE: {
-            // tile_r on the desk's 44-pixel tile, in proportion on another
-            int r = moy_ui_fdiv(dp->tile_r * b.h + 22, 44);
-            r = r < b.h / 2 ? r : b.h / 2;
-            int ring = dp->tile_line_w > 0 && is_set(dp->tile_line_c);
-            moy_shape_shadow_t sh;
-            if (!ring && shadow_of(dp, r, 1, MOY_UI_UNDER_FULL, &sh)) {
-                if (dp->shadow == 1) {
-                    sh.alpha = sh.alpha * MOY_UI_TILE_SHADOW / 100;
-                }
-                moy_shape_hole_t body = {b.x, b.y, b.w, b.h, r};
-                moy_shape_shadow(&d.t, b.x, b.y, b.w, b.h, &sh, &body);
-            }
-            if (!paint_of(&d, dp->tile_fill, &p)) {
-                p = solid(tok(&d, MOY_UI_T_SURFACE_ALT));
-            }
-            rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
-            if (ring) {
-                rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, NULL,
-                      dp->tile_line_w, val(&d, dp->tile_line_c), -1, NULL);
-            }
-            return 1;
-        }
+        case MOY_UI_BARP_TILE:
+            return moy_ui_bar_tile(s, b, MOY_THEME_NONE);
         default:
             return 0;
     }
+}
+
+int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill) {
+    dd_t d;
+    open_dd(s, &d, 1);
+    const moy_ui_depth_t *dp = &s_depth;
+    if (!dp->on) {
+        return 0;
+    }
+    // tile_r on the desk's 44-pixel tile, in proportion on another
+    int r = moy_ui_fdiv(dp->tile_r * b.h + 22, 44);
+    r = r < b.h / 2 ? r : b.h / 2;
+    int ring = dp->tile_line_w > 0 && is_set(dp->tile_line_c);
+    moy_shape_shadow_t sh;
+    if (!ring && shadow_of(dp, r, 1, MOY_UI_UNDER_FULL, &sh)) {
+        if (dp->shadow == 1) {
+            sh.alpha = sh.alpha * MOY_UI_TILE_SHADOW / 100;
+        }
+        moy_shape_hole_t body = {b.x, b.y, b.w, b.h, r};
+        moy_shape_shadow(&d.t, b.x, b.y, b.w, b.h, &sh, &body);
+    }
+    moy_shape_paint_t p;
+    if (is_set(fill)) {
+        p = solid(val(&d, fill));
+    } else if (!paint_of(&d, dp->tile_fill, &p)) {
+        p = solid(tok(&d, MOY_UI_T_SURFACE_ALT));
+    }
+    rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+    if (ring) {
+        rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, NULL,
+              dp->tile_line_w, val(&d, dp->tile_line_c), -1, NULL);
+    }
+    return 1;
 }

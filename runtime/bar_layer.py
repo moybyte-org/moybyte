@@ -164,6 +164,10 @@ def _battery(cv, x, y, side, u, ink):
     cv.rect(bx + 2 * u, by + 2 * u, bw - 4 * u, bh - 4 * u, ink)
 
 
+# A look leaf no theme sets (moy_theme.h's MOY_THEME_NONE).
+_NONE = -2147483648
+
+
 def _band_part():
     """The look's band for the metric class in force: the desk bar's or the
     handheld bar's (ui.bar_part)."""
@@ -727,8 +731,10 @@ class BarLayer:
         inside = self._in_window(where)
         looked = not game and not inside and _ui_draw.depth()[0]
         bar = (0, 0, rect[2], rect[3])
-        if not (looked and _ui_draw.bar_part(cv, ws.theme_colors, _band_part(), bar,
-                                             _BAND_SIDE[edge])):
+        if looked and self._home_ground(cv, where, -rect[0], -rect[1]):
+            pass
+        elif not (looked and _ui_draw.bar_part(cv, ws.theme_colors, _band_part(), bar,
+                                               _BAND_SIDE[edge])):
             looked = False
             _ui_draw.frame_band(cv, ws.theme_colors, bar, light, _BAND_SIDE[edge])
         zone = None
@@ -910,6 +916,27 @@ class BarLayer:
             return wm.stack.depth() > wm.floor()
         return True
 
+    def _home_ground(self, cv, where, x, y):
+        """Paint the handheld home's backdrop under its bar where the look
+        draws the bar with no band (`hhbar.style` none) and the home's
+        ground is a backdrop of its own, not the `desktop` colour a band
+        would fill (Blocks' sunflower; docs/look_2026-10.md step 26b): the
+        screen's surface at (x, y) of `cv`, inside its clip. True when
+        painted; no wallpaper is under a bar here."""
+        ws = self.ws
+        if where != "home" or _layout_base.metric_class() == _layout_base.DESK \
+                or ws.look.wallpaper_id is not None:
+            return False
+        style = ws.look.live.look[0].get("hhbar.style")
+        if style not in (None, 0, _NONE):
+            return False
+        rec = ws.look.backdrop("home")
+        if not rec:
+            return False
+        sc = ws.sys_canvas
+        cv.backdrop(rec, ws.theme_colors["desktop"], surface=(x, y, sc.w, sc.h))
+        return True
+
     def redraw_clock(self, where):
         """Repaint JUST the clock cell of an already-drawn bar (#155).
 
@@ -947,7 +974,8 @@ class BarLayer:
             cx, cw = bx + 1, w - 1
         cv.clip(cx, cy, cw, ch)
         looked = not self._zone_is_game(where) and not self._in_window(where) \
-            and _ui_draw.bar_part(cv, th, _band_part(), (bx, by, bw, bh), _BAND_SIDE[edge])
+            and (self._home_ground(cv, where, 0, 0)
+                 or _ui_draw.bar_part(cv, th, _band_part(), (bx, by, bw, bh), _BAND_SIDE[edge]))
         if not looked:
             _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
                                 _BAND_SIDE[edge])

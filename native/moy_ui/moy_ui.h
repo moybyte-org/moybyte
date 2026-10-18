@@ -548,6 +548,10 @@ enum { MOY_UI_BAND_BOTTOM = 0, MOY_UI_BAND_TOP = 1, MOY_UI_BAND_RIGHT = 2, MOY_U
 int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light, int side);
 // A bar part under the depth (MOY_UI_BARP_*); 0 where the theme has none.
 int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
+// A desk icon's tile (MOY_UI_BARP_TILE) filled with look colour `fill`, an
+// app's colour of the look's `tiles` (step 26b), or with MOY_THEME_NONE the
+// tile's own fill. Answers 0, drawing nothing, where the theme has no depth.
+int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 

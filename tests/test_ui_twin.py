@@ -241,7 +241,9 @@ CASES = 48
 # The faces convert coordinates toward zero before the C call, as the print
 # gate's gate_num does (§7); the twin's bodies slice with them, so the oracle
 # draws the truncated case. The widgets whose bodies are C take raw floats.
-FACE_TRUNCATES = set(("row", "cell", "scroll", "button", "chip", "tab_row",
+# A ScrollRegion is Python on both sides and keeps its view as given (its
+# offset clamps to a float extent), so the scroll case is truncated for both.
+FACE_TRUNCATES = set(("row", "cell", "button", "chip", "tab_row",
                       "status_row", "game_family", "frames", "text_field",
                       "algebra", "label", "list"))
 

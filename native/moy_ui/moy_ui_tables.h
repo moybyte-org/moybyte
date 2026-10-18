@@ -253,7 +253,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 // Theme packages, format 1 (moy_theme.c): the limits, the derivation
 // rules, the readability pairs, MOY64's luminance and the seeds.
 #define MOY_THEME_FORMAT 2
-#define MOY_THEME_SEEDS 11
+#define MOY_THEME_SEEDS 12
 #define MOY_THEME_BYTES 4096
 #define MOY_THEME_DEPTH 4
 #define MOY_THEME_RULES 74
@@ -435,8 +435,8 @@ extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 // The look (docs/look_2026-10.md step 5): the theme model's fields, each
 // one or more leaves; a leaf's kind, its range (an enum's first name and
 // count), its default (MOY_THEME_NONE: silent, the renderer derives it).
-#define MOY_THEME_LEAVES 179
-#define MOY_THEME_LOOK_FIELDS 146
+#define MOY_THEME_LEAVES 182
+#define MOY_THEME_LOOK_FIELDS 149
 #define MOY_THEME_LOOK_GROUPS 25
 #define MOY_THEME_ENUM_NAMES 120
 #define MOY_THEME_BTN_KINDS 5

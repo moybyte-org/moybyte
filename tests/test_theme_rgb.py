@@ -133,7 +133,7 @@ def test_every_seed_reads_in_both_modes():
     for seed in moy_ui.themes():
         for light in (False, True):
             _row, bad, rc = moy_ui.theme(seed, light)
-            if seed not in ("moy", "contrast"):
+            if seed not in ("moy", "blocks", "contrast"):
                 bad &= past
             assert (rc, bad) == (OK, 0), (seed, light)
 

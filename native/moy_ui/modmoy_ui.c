@@ -1589,15 +1589,18 @@ static mp_obj_t ui_frame_icon(mp_obj_t rect, mp_obj_t th) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_frame_icon_obj, ui_frame_icon);
 
-// bar_part(cv, look, part, rect, on) -> whether the depth drew the bar part
+// bar_part(cv, look, part, rect, on[, fill]) -> whether the depth drew the
+// bar part; `fill`, a look colour, fills a desk icon's tile (BARP_TILE)
 static mp_obj_t ui_bar_part(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
-    return mp_obj_new_bool(moy_ui_bar_part(&s, mp_obj_get_int(a[2]), box_of(a[3]),
-                                           mp_obj_get_int(a[4])));
+    int part = mp_obj_get_int(a[2]);
+    if (part == MOY_UI_BARP_TILE && n_args > 5 && a[5] != mp_const_none) {
+        return mp_obj_new_bool(moy_ui_bar_tile(&s, box_of(a[3]), mp_obj_get_int(a[5])));
+    }
+    return mp_obj_new_bool(moy_ui_bar_part(&s, part, box_of(a[3]), mp_obj_get_int(a[4])));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_part_obj, 5, 5, ui_bar_part);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_part_obj, 5, 6, ui_bar_part);
 
 // frame_band(cv, look, rect, light, side): the bar's band
 static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {

@@ -12,16 +12,33 @@ try:
     from widgets import _in, _ticks_ms
     import ui_draw as _ui_draw        # the desk's tiles and labels
     import layout_base as _layout_base
+    import iconsets as _iconsets
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.widgets import _in, _ticks_ms
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
+    from runtime import iconsets as _iconsets
 
 # A desk label over a wallpaper (a picture or a cart, pixels the theme does
 # not know): white over a black shadow (chrome.FIXED's), 80% and one pixel
 # down and right.
 _WALL_SHADOW_A = 204
+_NONE = -2147483648
+
+
+def _set(v):
+    """A look leaf that is set: a value, not silent (None) or MOY_THEME_NONE."""
+    return type(v) is int and v != _NONE
+
+
+def _tile_fill(tiles, key):
+    """Desk key `key`'s colour of a look's `tiles` (docs/look_2026-10.md
+    step 26b), which names an app by its icon slot (Paint's `artwork` is the
+    `paint` tile), or None."""
+    slot = _iconsets.slot_of(key)
+    v = tiles.get(_iconsets.SLOTS[slot] if slot is not None else key)
+    return v if _set(v) else None
 
 
 def _icon_box(box):
@@ -314,27 +331,41 @@ class _BackdropLayer(Layer):
         return out
 
     def _draw_look_icons(self, ws, cv, th):
-        """Each tile as the look's part (`ui.bar_part`'s BAR_TILE), its app's
-        icon from the theme's set at the 20-pixel size in the ink (the app's
-        own art where the set has none), its label in the ink over the
-        theme's backdrop, with no plate; over a wallpaper, white over a
-        shadow."""
+        """Each tile as the look's part (`ui.bar_part`'s BAR_TILE) in its
+        app's colour of the look's `tiles` where it names one, its app's
+        icon from the theme's set at the 20-pixel size in `tile_ink` (else
+        the ink; the app's own art where the set has none), its label in
+        `label.ink` (else the ink) over the theme's backdrop with no plate
+        and `label.shadow` under it where the look sets one; over a
+        wallpaper, white over a shadow."""
+        look = ws.look.live.look
+        leaves = look[0]
         ink = th.get("ink", 0)
+        tiles = dict(look[2]) if len(look) > 2 else {}
+        tink = leaves.get("tile_ink")
+        tink = tink if _set(tink) else ink
         if ws.look.wallpaper_id is not None:
             black, white = ws.look.live.fixed[2:]
             lab, shadow = white, (black, _WALL_SHADOW_A, 1, 1)
         else:
-            lab, shadow = ink, None
+            lab = leaves.get("label.ink")
+            lab = lab if _set(lab) else ink
+            shadow = None
+            sc = leaves.get("label.shadow.c")
+            if _set(sc):
+                a, dx, dy = (leaves.get("label.shadow." + f) for f in ("alpha", "dx", "dy"))
+                shadow = (sc, (a * 255 + 50) // 100 if _set(a) else 255,
+                          dx if _set(dx) else 1, dy if _set(dy) else 1)
         for key, box, band, label, cart in self._icon_rects():
-            _ui_draw.bar_part(cv, th, _ui_draw.BAR_TILE, box)
-            if not ws.draw_icon(key, _icon_box(box), ink, cv):
+            _ui_draw.bar_part(cv, th, _ui_draw.BAR_TILE, box, 0, _tile_fill(tiles, key))
+            if not ws.draw_icon(key, _icon_box(box), tink, cv):
                 img = ws.covers.icon_sheet_for(cart) if cart is not None else None
                 if img is not None:
                     sc = max(1, (box[2] * 20 // 44) // 16)
                     cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
                            box[1] + (box[3] - 16 * sc) // 2, sc)
                 else:
-                    ws._glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), ink, cv)
+                    ws._glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), tink, cv)
             _ui_draw.label(cv, band, label, lab, _ui_draw.ALIGN_CENTER, shadow=shadow)
 
     def _draw_desk_icons(self):

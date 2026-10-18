@@ -218,6 +218,7 @@ _DRAW_SIGS = (
     ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
     ("moy_ui_frame_icon", [_Box, _I, c.POINTER(_Box)], _I),
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
+    ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
@@ -645,7 +646,9 @@ def binding():
             return None
         return (out.x, out.y, out.w, out.h)
 
-    def bar_part(cv, look, part, rect, on):
+    def bar_part(cv, look, part, rect, on, fill=None):
+        if part == 5 and fill is not None:          # MOY_UI_BARP_TILE
+            return bool(lib.moy_ui_bar_tile(c.byref(sink(cv, look)), box_of(rect), int(fill)))
         return bool(lib.moy_ui_bar_part(c.byref(sink(cv, look)), int(part), box_of(rect),
                                         int(on)))
 

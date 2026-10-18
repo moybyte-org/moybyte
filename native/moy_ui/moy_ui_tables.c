@@ -793,6 +793,7 @@ const char *const moy_theme_seed_names[MOY_THEME_SEEDS] = {
     "outline",
     "contrast",
     "moy",
+    "blocks",
 };
 
 const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
@@ -1125,6 +1126,76 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    }\012"
     "  }\012"
     "}\012",
+    // themes/blocks.json
+    "{\012"
+    "  \"format\": 2,\012"
+    "  \"name\": \"blocks\",\012"
+    "  \"fonts\": { \"mono\": \"jbmono-11-400-2.fnt\" },\012"
+    "  \"colors\": {\012"
+    "    \"dark\": {\012"
+    "      \"panel\": \"#fff3dc\", \"edge\": \"#eadcc0\", \"title\": \"#ffffff\", \"title_ink\": \"#1a1530\",\012"
+    "      \"accent\": \"#1a1530\", \"hilite\": \"#6a2cff\", \"dim\": \"#f6ead2\", \"desktop\": \"#fff3dc\",\012"
+    "      \"desktop_pattern\": \"#eadcc0\", \"surface\": \"#ffffff\", \"surface_alt\": \"#fff8ec\",\012"
+    "      \"ink\": \"#1a1530\", \"ink_dim\": \"#5b5167\", \"border\": \"#eadcc0\", \"selection\": \"#6a2cff\",\012"
+    "      \"selection_ink\": \"#ffffff\", \"focus\": \"#1a1530\", \"bar\": \"#ffffff\", \"bar_edge\": \"#1a1530\",\012"
+    "      \"chrome_ink\": \"#1a1530\", \"chrome_ink_dim\": \"#5b5167\", \"title_active\": \"#ffffff\",\012"
+    "      \"title_inactive\": \"#fff8ec\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#f6ead2\",\012"
+    "      \"shade_dark\": \"#eadcc0\", \"ink_accent\": \"#6a2cff\", \"value_ink\": \"#ffffff\",\012"
+    "      \"sunk\": \"#f6ead2\", \"lcd\": \"#c9f2dd\", \"lcd_ink\": \"#1a1530\",\012"
+    "      \"surface_light\": true, \"bar_light\": true, \"band_light\": true,\012"
+    "      \"code_text\": \"#1a1530\", \"code_keyword\": \"#6a2cff\", \"code_string\": \"#1f7a3a\",\012"
+    "      \"code_number\": \"#a8510a\", \"code_comment\": \"#5b5167\", \"code_builtin\": \"#1662a8\"\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"panel\": \"#fff3dc\", \"edge\": \"#eadcc0\", \"title\": \"#ffffff\", \"title_ink\": \"#1a1530\",\012"
+    "      \"accent\": \"#1a1530\", \"hilite\": \"#6a2cff\", \"dim\": \"#f6ead2\", \"desktop\": \"#fff3dc\",\012"
+    "      \"desktop_pattern\": \"#eadcc0\", \"surface\": \"#ffffff\", \"surface_alt\": \"#fff8ec\",\012"
+    "      \"ink\": \"#1a1530\", \"ink_dim\": \"#5b5167\", \"border\": \"#eadcc0\", \"selection\": \"#6a2cff\",\012"
+    "      \"selection_ink\": \"#ffffff\", \"focus\": \"#1a1530\", \"bar\": \"#ffffff\", \"bar_edge\": \"#1a1530\",\012"
+    "      \"chrome_ink\": \"#1a1530\", \"chrome_ink_dim\": \"#5b5167\", \"title_active\": \"#ffffff\",\012"
+    "      \"title_inactive\": \"#fff8ec\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#f6ead2\",\012"
+    "      \"shade_dark\": \"#eadcc0\", \"ink_accent\": \"#6a2cff\", \"value_ink\": \"#ffffff\",\012"
+    "      \"sunk\": \"#f6ead2\", \"lcd\": \"#c9f2dd\", \"lcd_ink\": \"#1a1530\",\012"
+    "      \"code_text\": \"#1a1530\", \"code_keyword\": \"#6a2cff\", \"code_string\": \"#1f7a3a\",\012"
+    "      \"code_number\": \"#a8510a\", \"code_comment\": \"#5b5167\", \"code_builtin\": \"#1662a8\"\012"
+    "    }\012"
+    "  },\012"
+    "  \"layout\": {\012"
+    "    \"bars\": [{ \"edge\": \"top\", \"size\": 18, \"left\": [\"menu\", \"chips\", \"zone\"],\012"
+    "               \"right\": [\"close\", \"wifi\", \"battery\", \"clock\"] }]\012"
+    "  },\012"
+    "  \"look\": {\012"
+    "    \"fam\": \"atkinson\", \"w_semi\": 700, \"w_bold\": 800,\012"
+    "    \"focus\": { \"style\": \"invert\", \"card\": \"ring\", \"small\": \"invert\", \"ring\": { \"w\": 3 } },\012"
+    "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
+    "    \"win_r\": 16, \"card_r\": 14, \"key_r\": 12,\012"
+    "    \"home_bg\": \"#ffd23f\",\012"
+    "    \"win\": { \"header\": \"fill\", \"frame\": [2, \"#1a1530\"], \"frame_back\": [2, \"#5b5167\"], \"rule\": 2 },\012"
+    "    \"bar\": { \"fill\": \"#ffffff\", \"line\": [2, \"#1a1530\"], \"sys\": [\"#6a2cff\", \"#ffffff\", \"#6a2cff\"],\012"
+    "             \"chip_cur\": \"#f6ead2\" },\012"
+    "    \"tiles\": { \"play\": \"#ff6b4a\", \"projects\": \"#b79cff\", \"paint\": \"#ffd23f\",\012"
+    "               \"storybook\": \"#7be0b4\", \"files\": \"#7cc8ff\", \"calc\": \"#ff9a62\",\012"
+    "               \"getcarts\": \"#9be36b\", \"game\": \"#ff6b4a\", \"notes\": \"#7be0b4\",\012"
+    "               \"trash\": \"#e8dcc6\" },\012"
+    "    \"tile_outline\": [2, \"#1a1530\"], \"tile_ink\": \"#1a1530\", \"tile_grad\": false,\012"
+    "    \"buttons\": { \"normal\": { \"fill\": \"#f4ecdc\", \"border\": [0, \"#1a1530\"] },\012"
+    "                 \"tonal\": { \"fill\": \"#ffd23f\", \"ink\": \"#1a1530\", \"border\": [0, \"#1a1530\"] },\012"
+    "                 \"danger\": { \"ink\": \"#1a1530\" } },\012"
+    "    \"lcd_border\": [2, \"#1a1530\"],\012"
+    "    \"keycap\": { \"fill\": \"#ffffff\", \"border\": [1.25, \"#1a1530\"] },\012"
+    "    \"backdrop\": {\012"
+    "      \"home\": [{ \"k\": \"fill\", \"p\": \"#ffd23f\" },\012"
+    "               { \"k\": \"circle\", \"at\": [500, 470, 520], \"p\": \"#ffe066\" },\012"
+    "               { \"k\": \"circle\", \"at\": [0, 470, 230], \"p\": \"#7be0b4\" },\012"
+    "               { \"k\": \"circle\", \"at\": [1000, 470, 200], \"p\": \"#ff8a6b\" }],\012"
+    "      \"desk\": [{ \"k\": \"fill\", \"p\": \"#fff3dc\" },\012"
+    "               { \"k\": \"rrect\", \"at\": [586, 73, 234, 150, 75], \"p\": \"#ffd23f\" },\012"
+    "               { \"k\": \"pie\", \"at\": [996, 433, 233, 180, 270], \"p\": \"#7cc8ff\" },\012"
+    "               { \"k\": \"circle\", \"at\": [889, 900, 350], \"p\": \"#ff8a6b\" },\012"
+    "               { \"k\": \"circle\", \"at\": [20, 1000, 283], \"p\": \"#7be0b4\" }]\012"
+    "    }\012"
+    "  }\012"
+    "}\012",
 };
 
 const int moy_ui_n_themes = MOY_THEME_SEEDS;
@@ -1135,7 +1206,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3843};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3843, 4062};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1518,6 +1589,9 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.set
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.swap
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // fam
+    {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_med
+    {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_semi
+    {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_bold
 };
 
 const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
@@ -1700,6 +1774,9 @@ const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
     "icons.set",
     "icons.swap",
     "fam",
+    "w_med",
+    "w_semi",
+    "w_bold",
 };
 
 const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2] = {
@@ -1854,6 +1931,9 @@ const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
     {"icons.set", MOY_THEME_FT_TEXT, 1, 176},
     {"icons.swap", MOY_THEME_FT_TEXT, 1, 177},
     {"fam", MOY_THEME_FT_TEXT, 1, 178},
+    {"w_med", MOY_THEME_FT_INT, 1, 179},
+    {"w_semi", MOY_THEME_FT_INT, 1, 180},
+    {"w_bold", MOY_THEME_FT_INT, 1, 181},
 };
 
 const moy_theme_field_t moy_theme_btn_fields[7] = {

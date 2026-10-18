@@ -13,9 +13,10 @@ with neither (the browser) carries none.
   icon_file(name) -> bytes | None   an icon set's file (tools/make_icons.py):
                            SET[.fill]-SIZE.fnt, system_icons.moygfx, and on
                            the host set.json; the image's are its tier's
-  role_face(fam, role, desk) -> str | None   the face NAME.fnt a type role
-                           draws in under a theme's `fam` (ROLES), None for
-                           a role ROLES does not size on that class
+  role_face(fam, role, desk, steps=None) -> str | None   the face NAME.fnt
+                           a type role draws in under a theme's `fam`
+                           (ROLES) and its weight steps, None for a role
+                           ROLES does not size on that class
 """
 
 # The face each type role takes under a theme's look `fam` (a family of the
@@ -24,8 +25,10 @@ with neither (the browser) carries none.
 # hint and row face, `title` a bar's page title on the handheld and a
 # window's on the desk, `caption` the keycap legend and the column head, and
 # `hero` the handheld home's title (`ui_draw.font("hero")`; None on the desk,
-# whose home draws its title in `title`). tests/test_make_font.py holds each
-# to its tier's set.
+# whose home draws its title in `title`). A weight is a step of the type
+# scale, 500 medium, 600 semibold and 700 bold, which a look moves to its
+# family's own (`w_med`, `w_semi`, `w_bold`; Blocks' semibold is 700).
+# tests/test_make_font.py holds each seed's to its tier's set.
 ROLES = {"ui": ((12, 500, 2), (15, 500, 4)),
          "title": ((14, 600, 4), (15, 600, 4)),
          "caption": ((11, 600, 2), (12, 600, 4)),
@@ -120,9 +123,12 @@ def icon_file(name):
         return None
 
 
-def role_face(fam, role, desk):
+def role_face(fam, role, desk, steps=None):
     sized = ROLES.get(role)
     sized = sized[1 if desk else 0] if sized is not None else None
     if sized is None or type(fam) is not str or not fam.isalpha():
         return None
-    return "%s-%d-%d-%d.fnt" % ((fam,) + sized)
+    size, weight, bpp = sized
+    if steps:
+        weight = steps.get(weight, weight)
+    return "%s-%d-%d-%d.fnt" % (fam, size, weight, bpp)

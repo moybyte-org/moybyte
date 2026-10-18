@@ -149,7 +149,10 @@ def test_every_combination_is_the_reference_and_reads(name):
             assert (rc, notes, got_name) == (OK, 0, "custom"), (name, accent, tint)
             for v, resolved in (("dark", dark), ("light", light)):
                 want = _reference(name, v, accent, tint)
-                assert _row(pkg["colors"][v]) == _row(want), (name, v, accent, tint)
+                # a custom over the size cap leaves out the roles the
+                # resolution gives back (Blocks' look is large)
+                for r, x in pkg["colors"][v].items():
+                    assert _val(x) == _val(want[r]), (name, v, r, accent, tint)
                 row, unreadable, rc = resolved
                 assert rc == OK and tuple(row) == _row(want), (name, v, accent, tint)
                 # the pairs; the current plate's bit (past them) is a report
@@ -196,10 +199,10 @@ CODE = set(TH["code"]["roles"])
 def test_no_tint_and_the_own_accent_answer_the_source(name):
     """Every role but a dim ink or a content colour the source itself leaves
     under the floor against its own backgrounds, which steps 4 and 5 repair."""
-    pkg = json.loads(_custom(name))
+    resolved = moy_ui.theme_resolve(_custom(name))
     for v, light in (("dark", False), ("light", True)):
         row = dict(zip(ROLES, moy_ui.theme(name, light)[0]))
-        got = dict(zip(ROLES, _row(pkg["colors"][v])))
+        got = dict(zip(ROLES, resolved[3 + light][0]))
         for r in ROLES:
             if got[r] != row[r]:
                 assert r in REPAIRED, (name, v, r)

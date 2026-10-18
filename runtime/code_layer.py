@@ -1160,12 +1160,13 @@ class CodeLayer:
         self._draw_symbols()
 
     def _current_line(self, cv, lay, y, x0, x1):
-        """The current line's mark from x0 to x1: the theme's current mark,
-        and the `value` bar where the band starts at the area's left."""
+        """The current line's mark from x0 to x1: the theme's current mark (a
+        `bar` beside the line, as beside a row), and the `value` bar where the
+        band starts at the area's left."""
         if x1 <= x0:
             return
         th = self.ws.theme_colors
-        _ui_draw.current(cv, th, (x0, y, x1 - x0, lay.lh))
+        _ui_draw.current(cv, th, (x0, y, x1 - x0, lay.lh), side=True)
         if x0 == lay.cx:
             cv.rect(x0, y, 2 * lay.fs, lay.lh, th["value"])
 

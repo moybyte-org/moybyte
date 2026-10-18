@@ -252,13 +252,15 @@ static void arrow_sign(pd_t *d, int x, int y, int w, int h, int dir, uint16_t c)
 
 // -- the current mark on an option -------------------------------------------------------
 
-// The current mark on box b (radius r): the theme's, or under a theme without
-// marks the selection colour (`ring` a ring instead). The ink the option takes.
-static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int ring, int ink) {
+// The current mark on box b (radius r): the theme's (`side` MOY_UI_MARK_SIDE on
+// a row, whose current `bar` is beside it), or under a theme without marks the
+// selection colour (`ring` a ring instead). The ink the option takes.
+static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int ring, int ink,
+                   int side) {
     const moy_ui_marks_t *m = moy_ui_marks();
     if (m->on) {
         int mi = -1;
-        moy_ui_current_in(s, b, r, m->active ? 0 : MOY_UI_MARK_BACK, d->fs, &mi, 0);
+        moy_ui_current_in(s, b, r, (m->active ? 0 : MOY_UI_MARK_BACK) | side, d->fs, &mi, 0);
         return mi >= 0 ? mi : ink;
     }
     int sel = tok(d, MOY_UI_T_SELECTION, MOY_UI_T_ACCENT);
@@ -522,7 +524,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 moy_ui_span_t t = option(r->value, i);
                 int c = dim;
                 if (i == r->cur) {
-                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, ink);
+                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, ink, 0);
                 }
                 text(&d, &fv, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
                 right = o.x;
@@ -535,7 +537,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 moy_ui_span_t t = option(r->value, i);
                 int c = dim;
                 if (i == r->cur) {
-                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, lab);
+                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, lab, 0);
                 }
                 text(&d, &fl, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
             }
@@ -547,7 +549,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                     int h = 3 * d.fs;
                     moy_ui_box_t c = {(int16_t)(o.x - h), (int16_t)(o.y - h),
                                       (int16_t)(o.w + 2 * h), (int16_t)(o.h + 2 * h)};
-                    current(s, &d, c, c.w / 2, 1, ink);
+                    current(s, &d, c, c.w / 2, 1, ink, 0);
                 }
                 rrect(&d, o.x, o.y, o.w, o.h, o.w / 2, 1, swatch(&d, colour_at(r->colours, i)), 0,
                       0);
@@ -683,7 +685,7 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     }
     if (flags & MOY_UI_F_ON) {
         int pr = moy_ui_depth()->on ? pm(&d, MOY_UI_M_VALUE_ROW_PLATE_R, 1) : 0;
-        current(s, &d, b, pr, 0, 0);
+        current(s, &d, b, pr, 0, 0, 0);
         if (m->on) {
             int alpha = m->active ? m->cur_alpha : m->cur_alpha * 6 / 10;
             if (m->cur_style == MOY_UI_CUR_PLATE) {
@@ -1276,7 +1278,7 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
         lab = dim;
     } else {
         if (flags & MOY_UI_F_ON) {
-            int c = current(s, &d, b, r, 0, ink);
+            int c = current(s, &d, b, r, 0, ink, MOY_UI_MARK_SIDE);
             if (c != ink) {
                 lab = meta = c;
             }

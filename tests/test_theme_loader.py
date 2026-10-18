@@ -55,7 +55,7 @@ CODE_BITS = ((1 << len(TH["code"]["roles"])) - 1) << (PAIRS + 1)
 # The seeds that hold the code roles to theme.code's floor: the 2026-10
 # look's. The older seeds keep their syntax colours, and their pixels, until
 # step 27 retires them; the check reports theirs.
-CODE_READ = ("moy", "contrast")
+CODE_READ = ("moy", "blocks", "contrast")
 
 
 def _src(name="t", **kw):
@@ -456,13 +456,16 @@ def test_the_home_rides_the_layout_carousel_by_default():
 
 
 def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
-    """...but Moy, whose look carries its own bar (docs/look_2026-10.md
-    step 14): the Moy button first, the status at the right."""
+    """...but Moy and Blocks, whose looks carry the 2026-10 bar
+    (docs/look_2026-10.md steps 14 and 26b): the Moy button first, the
+    status at the right."""
     for name in TH["seeds"]:
-        if name != "moy":
+        if name not in ("moy", "blocks"):
             assert moy_ui.theme_layout(name) == (False, (TODAY,)), name
-    assert moy_ui.theme_layout("moy") == (False, (
-        ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"), ()),))
+    for name in ("moy", "blocks"):
+        assert moy_ui.theme_layout(name) == (False, (
+            ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"),
+             ()),)), name
     assert "layout" not in TH["reserved"]
     assert set(LAY["required"]) <= set(LAY["widgets"])
     from runtime import shell_layout

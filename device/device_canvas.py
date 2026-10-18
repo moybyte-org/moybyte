@@ -2205,12 +2205,14 @@ class DeviceCanvas:
                 o = 2 * (ty * stride + x0)
                 d[o:o + 2 * (x1 - x0)] = row[2 * (x0 - x):2 * (x1 - x)]
 
-    def backdrop(self, rec, c, img=None):
+    def backdrop(self, rec, c, img=None, surface=None):
         """A theme's backdrop (`moy_gfx.backdrop`, native/moy_gfx/moy_backdrop.h):
         the records `rec` over colour `c`, across the whole surface. Into
         `img`'s one RGB565 bake (`_rgb_i`, img.w x img.h, lent to img's owner
         as a picture's bake is: _paint_bake_buf), or, with no img, onto this
-        canvas inside its clip. The shapes drawn, or -1 where `rec` is
+        canvas inside its clip; `surface` (x, y, w, h) places the surface the
+        shapes are laid out on, in this canvas's pixels (a bar's strip takes
+        its rows of the screen's). The shapes drawn, or -1 where `rec` is
         malformed and the fill alone is drawn."""
         self.flush_batch()
         col = self._col(c)
@@ -2222,7 +2224,8 @@ class DeviceCanvas:
             n = g.backdrop(buf, w, 0, 0, w, h, rec, col, WIRE_SWAPPED, 0, 0, w, h)
             img._rgb_i = buf
             return n
-        return g.backdrop(self._buf, self._stride, self._ox, self._oy, self.w, self.h,
+        sx, sy, sw, sh = surface if surface is not None else (0, 0, self.w, self.h)
+        return g.backdrop(self._buf, self._stride, self._ox + sx, self._oy + sy, sw, sh,
                           rec, col, WIRE_SWAPPED, self._clip_x0, self._clip_y0,
                           self._clip_x1, self._clip_y1)
 

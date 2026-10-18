@@ -776,9 +776,11 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     Code tab (`docs/look_2026-10.md` step 23). A face of the font set
     (`runtime/fontset.py`) is the image's, not embedded in the tables.
   - **A look's `fam` names the type**: a family of the font set whose
-    faces, sized per metric class (`fontset.ROLES`), win over the faces
-    the chain's `fonts` give; `docs/look_2026-10.md` step 26a has the
-    roles, the sizes and the custom's FONT row.
+    faces, sized per metric class (`fontset.ROLES`) at the weights its
+    `w_med`, `w_semi` and `w_bold` move the type scale's steps to, win over
+    the faces the chain's `fonts` give; `docs/look_2026-10.md` steps 26a
+    and 26b have the roles, the sizes, the weights and the custom's FONT
+    row.
   - **The print font.** A canvas's `print` draws in one process-wide font
     (`moy_text_print_font`; `ui.print_font`), the `ui` role's, through the
     print gate and the `text` op; `ui.print_width`, `ui.print_fit` and

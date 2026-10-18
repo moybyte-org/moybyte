@@ -2893,6 +2893,65 @@ def test_a_desk_label_over_a_wallpaper_is_white_over_a_shadow(tmp_path, monkeypa
     assert got and all(ink == white and sh[0] == black for _t, ink, sh in got)
 
 
+def test_blocks_tiles_are_each_apps_colour_and_their_icons_the_tile_ink(tmp_path):
+    """Blocks' `tiles` (docs/look_2026-10.md step 26b) name an app by its
+    icon slot, Paint's `artwork` by `paint`; each tile is that colour inside
+    the ink outline, its icon in `tile_ink`, and an app the map leaves out
+    keeps the raised fill."""
+    from runtime import ui_draw
+    from runtime.wm_desk import _tile_fill
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    ws.open_desk()
+    _quiesce(ws)
+    ws.frame(1 / 30)
+    tiles = dict(ws.look.live.look[2])
+    assert _tile_fill(tiles, "artwork") == tiles["paint"]
+    assert _tile_fill(tiles, "appearance") is None
+    word = {k: ui_draw._C.theme_rgb(0x1000000 | int(v, 16))[0] for k, v in (
+        ("play", "ff6b4a"), ("artwork", "ffd23f"), ("files", "7cc8ff"), ("calc", "ff9a62"),
+        ("getcarts", "9be36b"), ("ink", "1a1530"))}
+    cv = ws.sys_canvas
+    seen = set()
+    for key, box, _band, _label, _cart in ws.wm._backdrop_layer._icon_rects():
+        if key in word:
+            assert _px(cv, box[0] + 4, box[1] + 22) == word[key], key
+            assert _px(cv, box[0], box[1] + 22) == word["ink"], key
+            seen.add(key)
+    assert seen == {"play", "artwork", "files", "calc", "getcarts"}
+    inks = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, c=None: (inks.append(ink), real(kind, rect, ink, c))[1]
+    ws.wm._backdrop_layer._draw_desk_icons()
+    assert inks and set(inks) == {ws.look.live.look[0]["tile_ink"]}
+
+
+def test_a_looks_label_ink_and_shadow_draw_the_desk_labels(tmp_path, monkeypatch):
+    """`label.ink` and `label.shadow` (THEMES.md's launcher group) are the
+    labels' over the theme's backdrop; a look that sets neither keeps the
+    ink and no shadow."""
+    from test_ui_style_data import _install, _uninstall
+    from runtime import ui_draw
+    _install({"format": 2, "name": "lb", "inherits": "moy", "look": {
+        "label": {"ink": "#ff0000", "shadow": ["#000000", 0.5, 2, 1]}}})
+    try:
+        ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+        ws.look.set_theme("lb", persist=False, variant="light")
+        ws.open_desk()
+        _quiesce(ws)
+        got = []
+        real = ui_draw.label
+        monkeypatch.setattr(ui_draw, "label", lambda cv, r, t, ink, align=0, bg=None,
+                            shadow=None: (got.append((ink, shadow)),
+                                          real(cv, r, t, ink, align, bg, shadow))[1])
+        ws.wm._backdrop_layer._draw_desk_icons()
+        leaves = ws.look.live.look[0]
+        assert got and set(got) == {(leaves["label.ink"],
+                                     (leaves["label.shadow.c"], 128, 2, 1))}
+    finally:
+        _uninstall()
+
+
 def test_a_theme_without_a_look_keeps_its_capitals_and_pills(tmp_path):
     ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
     ws.open_desk()

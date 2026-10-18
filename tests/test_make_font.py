@@ -85,7 +85,8 @@ def test_the_set_is_every_themes_roles_and_the_mono():
 
 def test_every_family_a_seed_names_carries_its_type_roles():
     """A seed's look `fam` (docs/look_2026-10.md step 26a) draws each role of
-    `fontset.ROLES` in a face its class's tier carries, with the full
+    `fontset.ROLES`, at the weight steps the look moves (`w_med`, `w_semi`,
+    `w_bold`; step 26b), in a face its class's tier carries, with the full
     character set (a Calc subset would draw a name's letters as spaces)."""
     from runtime import fontset
     faces, tiers = make_font.faces()
@@ -95,17 +96,21 @@ def test_every_family_a_seed_names_carries_its_type_roles():
         if f.endswith(".json"):
             with open(os.path.join(themes, f)) as fh:
                 look = json.load(fh).get("look", {})
-            for part in (look, look.get("dark", {}), look.get("light", {})):
+            for mode in ("dark", "light"):
+                part = dict(look)
+                part.update(look.get(mode, {}))
                 if "fam" in part:
-                    named.add(part["fam"])
-    assert "inter" in named
-    for fam in named:
+                    steps = {w: part[k] for w, k in
+                             ((500, "w_med"), (600, "w_semi"), (700, "w_bold")) if k in part}
+                    named.add((part["fam"], tuple(sorted(steps.items()))))
+    assert {fam for fam, _s in named} >= {"inter", "atkinson"}
+    for fam, steps in named:
         for desk, tier in ((False, "handheld"), (True, "desktop")):
             for role in fontset.ROLES:
-                face = fontset.role_face(fam, role, desk)
+                face = fontset.role_face(fam, role, desk, dict(steps))
                 if face is None:
                     continue
-                assert face[:-4] in tiers[tier], (fam, role, tier)
+                assert face[:-4] in tiers[tier], (fam, steps, role, tier)
                 assert not faces[face[:-4]][4], (face, "a Calc subset")
 
 

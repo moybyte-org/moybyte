@@ -296,6 +296,18 @@ def test_an_outlined_tile_casts_no_shadow(looked):
         _uninstall()
 
 
+def test_a_tile_takes_its_apps_colour(looked):
+    """A tile's `fill` (an app's colour of the look's `tiles`, step 26b)
+    fills it in place of `tile_fill`, inside the same outline."""
+    th, cv = looked("blocks", True)
+    assert ui_draw.bar_part(cv, th, ui_draw.BAR_TILE, (40, 40, 44, 44), 0,
+                            0x1000000 | 0xff6b4a)
+    assert _px(cv, 62, 62) == _rgb("ff6b4a")
+    assert _px(cv, 62, 40) == _px(cv, 62, 41) == _rgb("1a1530")     # the ink outline
+    assert ui_draw.bar_part(cv, th, ui_draw.BAR_TILE, (140, 40, 44, 44))
+    assert _px(cv, 162, 62) == _rgb("fff8ec")                      # no tile_fill: raised
+
+
 def test_a_theme_without_a_look_draws_no_tile():
     ui_draw.use_depth("night", False)
     try:

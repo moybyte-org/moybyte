@@ -146,6 +146,9 @@ def _ui_text_w(t):
 
 
 _FONT_ROLES = ("ui", "title", "mono", "caption")
+# The type scale's weight steps a look moves to its family's own
+# (THEMES.md's type group; fontset.ROLES names the steps).
+_WEIGHT_STEPS = ((500, "w_med"), (600, "w_semi"), (700, "w_bold"))
 _FONT_FULL = 6          # moy_font_load's MOY_FONT_FULL: every slot holds a font
 _FONT_BYTES = 65536     # moy_text.h's MOY_FONT_BYTES: the largest font file
 
@@ -1672,11 +1675,11 @@ class Appearance:
             own = got[5] if got is not None and got[0] == 0 else ()
             for role, f in own:
                 files[role] = (name, f)
-        fam = self._fam(name)
+        fam, steps = self._fam(name)
         if fam is not None and "ui" not in dict(own):
             desk = getattr(self.ws, "metric_class", None) == _layout_base.DESK
             for role in _fontset.ROLES:
-                face = _fontset.role_face(fam, role, desk)
+                face = _fontset.role_face(fam, role, desk, steps)
                 if face is not None:
                     files[role] = (None, face)
         ids = {}
@@ -1734,12 +1737,19 @@ class Appearance:
             self.set_icon_sheet(self._theme_icons or _default_icon_sheet())
 
     def _fam(self, name):
-        """The family theme `name`'s look sets in the live variant (`fam`),
-        or None."""
+        """(family, weight steps) theme `name`'s look sets in the live
+        variant: `fam`, or None, and {500: w_med, 600: w_semi, 700: w_bold}
+        for the steps it moves."""
         look = live_colors(name, self.theme_variant).look
         texts = look[4] if len(look) > 4 else ()
         i = look[0].get("fam", 0)
-        return texts[i - 1] if type(i) is int and 0 < i <= len(texts) else None
+        fam = texts[i - 1] if type(i) is int and 0 < i <= len(texts) else None
+        steps = {}
+        for w, leaf in _WEIGHT_STEPS:
+            v = look[0].get(leaf)
+            if type(v) is int and 100 <= v <= 900:
+                steps[w] = v
+        return fam, steps
 
     def _font_id(self, key):
         """The loaded id of font `key`, (package, file): a store package's

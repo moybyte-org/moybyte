@@ -318,6 +318,25 @@ def test_the_desk_bar_is_solid_over_the_backdrop(tmp_path, variant, fill):
         assert _px(cv, 600, 38) == want
 
 
+def test_a_handheld_bar_with_no_band_shows_the_homes_own_ground(tmp_path):
+    """Blocks draws its handheld bar with no band (`hhbar.style` none) over a
+    home whose ground is a backdrop of its own, not `desktop` (step 26b): the
+    bar's rows are the backdrop's, after a clock tick too."""
+    ws = build_ws(tmp_path)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    _settle(ws)
+    cv = ws.sys_canvas
+    sunflower = _word(0x1000000 | 0xffd23f)
+    assert ws.screen == "launcher"
+    assert _px(cv, 0, 1) == _px(cv, 0, ws.layout.status_h + 2) == sunflower
+    got = ws.bar_layer.cell("home", "clock")
+    assert got is not None
+    _bar, (x, y, w, h) = got
+    ws.bar_layer.redraw_clock("home")
+    assert _px(cv, x + w - 1, y + 1) != _word(0x1000000 | 0xfff3dc)      # not the band
+    assert _px(cv, 0, 1) == sunflower
+
+
 def test_the_moy_button_takes_the_current_plate_while_its_menu_shows(tmp_path):
     """The Moy button is the pixel Moy on its tile; while the system menu
     it opens shows, the tile takes the current plate."""

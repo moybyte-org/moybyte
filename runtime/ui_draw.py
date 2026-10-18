@@ -1582,13 +1582,17 @@ def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
 BAR_BAND, BAR_HH_BAND, BAR_SYS, BAR_HH_SYS, BAR_CHIP, BAR_TILE = 0, 1, 2, 3, 4, 5
 
 
-def bar_part(cv, th, part, rect, on=0):
+def bar_part(cv, th, part, rect, on=0, fill=None):
     """A bar part of the live theme's look (docs/look_2026-10.md step 14):
     a desk or handheld bar's band (`on` the band's BAND_* side), the system
     button's tile (`on`: its menu is open), a desk chip's field (`on`: the
-    focused window's) or a desk icon's tile (step 25, BAR_TILE). False,
+    focused window's) or a desk icon's tile (step 25, BAR_TILE; `fill`, a
+    look colour, is its app's of the look's `tiles`, step 26b). False,
     drawing nothing, under a theme with no depth."""
-    return _C.bar_part(cv, _LOOK if th is _TH else _look(th), part, rect, int(on))
+    look = _LOOK if th is _TH else _look(th)
+    if fill is not None:
+        return _C.bar_part(cv, look, part, rect, int(on), fill)
+    return _C.bar_part(cv, look, part, rect, int(on))
 
 
 def toolbar(cv, th, rect):

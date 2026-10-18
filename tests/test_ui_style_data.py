@@ -539,6 +539,23 @@ def test_on_is_the_current_mark_and_focus_the_focus_mark():
         assert bytes(a._buf) == bytes(b._buf), name
 
 
+def test_a_current_bar_is_beside_a_row_and_under_a_chip():
+    """Blocks' current mark is the `bar` (DESIGN.md, the marks): 3 px of
+    `value` beside a row, at its leading edge, and under a chip."""
+    from runtime import ui_draw
+    try:
+        cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.row(
+            cv, th, (10, 10, 100, 24), "", kind="row_list", on=True))
+        value = _word(th["value"])
+        assert _px(cv, 10, 22) == _px(cv, 12, 22) == value
+        assert _px(cv, 60, 31) != value and _px(cv, 13, 22) != value
+        cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.chip(
+            cv, th, (10, 10, 100, 24), "", on=True))
+        assert _px(cv, 60, 31) == value and _px(cv, 10, 22) != value
+    finally:
+        ui_draw.use_depth(None, False)
+
+
 def test_the_focus_style_follows_the_size_class():
     """Moy lifts a card (grown and raised, its rim white in Day), edge-bars a
     part and underlines a small part; Contrast rings a card and inverts a

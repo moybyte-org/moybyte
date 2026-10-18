@@ -113,7 +113,7 @@ def test_the_cards_then_the_rows_on_the_handheld_and_the_desk(tmp_path):
     rows = ["Mode", "Accent", "Tint", "Wallpaper", "Font", "Code font", "Theme file"]
     assert [k for k in small._kinds if not k.startswith("theme ")] == rows
     cards = [k[len("theme "):] for k in small._kinds if k.startswith("theme ")]
-    assert cards == small._themes() and cards[-1] == "moy"
+    assert cards == small._themes() and cards[-2:] == ["moy", "blocks"]
     wide = _open(_ws(tmp_path / "w", **DESK))
     assert [k for k in wide._kinds if not k.startswith("theme ")] == [
         "Mode", "Accent", "Tint", "Wallpaper", "Window style", "Font", "Code font", "Chrome size",
@@ -248,6 +248,23 @@ def test_moy_night_draws_inter_and_day_keeps_its_faces(tmp_path, kw, faces):
     got = _faces()
     assert got["ui"] == got["title"] == got["hero"] == "tiny5.fnt"
     assert got["caption"] is None and got["mono"] == "jbmono-11-400-2.fnt"
+
+
+@pytest.mark.parametrize("kw, faces", [
+    ({}, {"ui": "atkinson-12-500-2.fnt", "title": "atkinson-14-700-4.fnt",
+          "caption": "atkinson-11-700-2.fnt", "hero": "atkinson-19-800-4.fnt"}),
+    (DESK, {"ui": "atkinson-15-500-4.fnt", "title": "atkinson-15-700-4.fnt",
+            "caption": "atkinson-12-700-4.fnt", "hero": "atkinson-15-700-4.fnt"})])
+@pytest.mark.parametrize("variant", ["light", "dark"])
+def test_blocks_draws_atkinson_at_its_own_weights(tmp_path, kw, faces, variant):
+    """Blocks' look sets `fam` and moves the weight steps (docs/look_2026-10.md
+    step 26b: `w_semi` 700, `w_bold` 800), so its semibold roles take
+    Atkinson Bold and the hero ExtraBold, in its one mode whichever the
+    Mode row holds."""
+    ws = _ws(tmp_path, **kw)
+    ws.look.set_theme("blocks", persist=False, variant=variant)
+    _frame(ws)
+    assert _faces() == dict(faces, mono="jbmono-11-400-2.fnt")
 
 
 def test_a_font_preset_on_moy_night_overrides_its_family(tmp_path):

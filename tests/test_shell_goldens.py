@@ -83,6 +83,12 @@ keeps the matrix a clean product instead of a pile of special cases.
                            T-Deck row and the P4 as shipped: RGB roles in the
                            block at indices 64..127 on every surface. One axis
                            (theme) from each row in its variant.
+  tdeck_320x240_fs1_blocks, p4_1024x600_cs2_fs1_blocks
+                           the `blocks` seed (docs/look_2026-10.md step 26b),
+                           one mode (light), the T-Deck row and the P4 as
+                           shipped: Atkinson, the sunflower home, the Bauhaus
+                           desk and its per-app tiles. One axis (theme) from
+                           each row in the light variant.
   tdeck_320x240_fs1_parts_day, tdeck_320x240_fs1_parts_night
                            the public UI API's parts sheet
                            (docs/look_2026-10.md step 12): a system app
@@ -445,6 +451,12 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_moy_menus": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
         diagonal_in=7.0, theme="moy", plan="menus"),
+    "tdeck_320x240_fs1_blocks": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="light",
+        diagonal_in=None, theme="blocks"),
+    "p4_1024x600_cs2_fs1_blocks": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="blocks"),
     "guition_p4_1280x800_windowed": dict(
         sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
         diagonal_in=10.1),

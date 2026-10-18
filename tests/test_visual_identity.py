@@ -92,9 +92,9 @@ def test_every_theme_has_a_light_variant_resolving_every_role():
              "focus", "play", "author", "danger",
              "title_active", "title_inactive")
     for name in THEME_NAMES:
-        if name in ("contrast", "moy"):
+        if name in ("contrast", "moy", "blocks"):
             continue        # black panels and white ink in both variants, by design;
-            # moy's roles are RGB (tests/test_theme_rgb.py)
+            # moy's and blocks' roles are RGB (tests/test_theme_rgb.py)
         th = theme_colors(name, "light")
         for role in roles:
             assert role in th, (name, role)
@@ -113,7 +113,7 @@ def test_dark_variant_is_the_legacy_token_set():
     for name in THEME_NAMES:
         th = theme_colors(name)
         assert th is theme_colors(name, "dark")
-        if name == "moy":
+        if name in ("moy", "blocks"):
             continue        # RGB roles (tests/test_theme_rgb.py)
         if name != "machine":
             assert th["ink"] == 7 and th["ink_dim"] == 6

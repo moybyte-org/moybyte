@@ -45,7 +45,7 @@ PLAN = os.path.join(ROOT, "docs", "look_2026-10.md")
 
 # The current theme a target theme the shell does not hold is drawn with,
 # by `theme-mode` first, then by theme.
-FALLBACK = {"moy-light": "platinum", "moy": "night", "blocks": "platinum",
+FALLBACK = {"moy-light": "platinum", "moy": "night",
             "luna": "win95", "coast": "platinum", "pico": "night",
             "bench": "platinum", "adw": "platinum"}
 DEFAULT = "moy"
