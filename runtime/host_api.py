@@ -230,10 +230,12 @@ class ConsoleDriver:
 
     def touch(self, x, y):
         # Mouse = the touchscreen: place the pointer absolutely (cursor hidden, like
-        # a finger) and register a tap.
+        # a finger) and register a tap. It is the input "touch" where the console
+        # declares one (Workstation.use_inputs); the sim's declares none.
         self.pointer.place(int(x), int(y))
         self._click = True
         self._down = True
+        self.ws.input_used("touch")
 
     def touch_drag(self, x, y):
         self.pointer.place(int(x), int(y))   # drag with the button down (no tap)

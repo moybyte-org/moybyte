@@ -1171,6 +1171,11 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
                       const moy_ui_over_t *o) {
     (void)o;
     moy_ui_box_t b;
+    if (moy_ui_input() == MOY_UI_INPUT_TOUCH) {
+        // touch alone shows no keys: no band, and the rows take its height
+        c->has_at = 0;
+        return;
+    }
     if (c->has_at) {
         b = c->at;
         c->has_at = 0;

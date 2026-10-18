@@ -105,6 +105,7 @@ from .input import InputState  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 WIDTH, HEIGHT = 320, 240        # the fixed GAME canvas (the console spec)
+HOST_INPUTS = (("local", "keys"),)   # the inputs it declares (Workstation.use_inputs)
 
 
 class SdlPump(PcmPump):
@@ -333,6 +334,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale,
                              panel_diagonal_in=panel_diagonal_in)
+    # The host's inputs: its keyboard, on the table's own source. Its mouse is
+    # a mouse, not a finger, so a click leaves the keys showing.
+    ws.use_inputs(HOST_INPUTS)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
     ws.make_game_canvas = host_canvas.make_canvas

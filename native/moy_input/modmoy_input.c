@@ -369,6 +369,19 @@ static mp_obj_t table_multi(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(table_multi_obj, table_multi);
 
+// news() -> the name of the source that brought news since the last ask
+// (moy_input_news), or None.
+static mp_obj_t table_news(mp_obj_t self_in) {
+    input_table_obj_t *s = table_of(self_in);
+    uint32_t h;
+    char name[MOY_INPUT_NAME + 1];
+    if (!moy_input_news(s->t, &h) || moy_input_source_name(s->t, h, name, sizeof(name))) {
+        return mp_const_none;
+    }
+    return mp_obj_new_str(name, strlen(name));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(table_news_obj, table_news);
+
 static void set_held(input_table_obj_t *s, uint32_t h, mp_obj_t name, mp_obj_t held) {
     int b = name_bit(name);
     if (b < 0 || b >= moy_input_nbuttons(s->t)) {
@@ -411,6 +424,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
     { MP_ROM_QSTR(MP_QSTR_source_players), MP_ROM_PTR(&table_source_players_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_player_count), MP_ROM_PTR(&table_player_count_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_multi), MP_ROM_PTR(&table_multi_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_news), MP_ROM_PTR(&table_news_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_apply_pointer), MP_ROM_PTR(&table_apply_pointer_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_set_button), MP_ROM_PTR(&table_set_button_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&table_set_button_obj) }

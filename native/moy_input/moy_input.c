@@ -64,6 +64,9 @@ struct moy_input {
     uint32_t p_last[MOY_INPUT_PLAYERS];
     uint32_t p_pressed[MOY_INPUT_PLAYERS];
     uint32_t p_kept[MOY_INPUT_PLAYERS];
+    uint32_t was[MOY_INPUT_SOURCES];        // each source's held set at the last merge
+    int32_t was_key[MOY_INPUT_SOURCES];     // and its key
+    uint8_t news;                           // the source that brought news last, slot + 1
     moy_input_sample_t smp;
 };
 
@@ -427,6 +430,13 @@ void moy_input_begin_frame(moy_input_t *t) {
         if ((l->pflags & P_SET) && better(l, best)) {
             best = l;
         }
+        // news: a button going down, a new key, or a press of its pointer
+        if ((l->held & ~t->was[i]) || (l->key != 0 && l->key != t->was_key[i])
+            || (l->pflags & (P_DOWN | P_EDGE)) == (P_DOWN | P_EDGE)) {
+            t->news = (uint8_t)(i + 1);
+        }
+        t->was[i] = l->held;
+        t->was_key[i] = l->key;
     }
     if (best != NULL) {
         smp.any = true;
@@ -451,6 +461,15 @@ void moy_input_begin_frame(moy_input_t *t) {
         t->p_pressed[p] = ph[p] & ~t->p_last[p];
         t->p_last[p] = ph[p];
     }
+}
+
+int moy_input_news(moy_input_t *t, uint32_t *h) {
+    if (t->news == 0) {
+        return 0;
+    }
+    *h = HANDLE(t->news - 1u);
+    t->news = 0;
+    return 1;
 }
 
 void moy_input_release_all(moy_input_t *t) {

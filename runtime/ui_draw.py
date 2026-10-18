@@ -1352,12 +1352,30 @@ def _tab_label(tabs, tid):
     return ""
 
 
+# The inputs the hints draw the keys of (moy_ui.h, MOY_UI_INPUT_*): a desk
+# keyboard, the T-Deck's keyboard, a gamepad, and touch alone, which shows no
+# keycaps.
+INPUTS = ("keys", "tdeck", "pad", "touch")
+
+
+def input_kind(name=None):
+    """The input in use, one of INPUTS, which every hint strip draws the keys
+    of; `name` sets it first. The console sets it from the last input used."""
+    if name is not None:
+        _C.input(INPUTS.index(name))
+    return INPUTS[_C.input()]
+
+
 def hints(cv, th, rect, items, desk=False, draw=True):
     """Keycap hints in band `rect`, from its left (the public `ui.hints`'s
-    part, for chrome that lays itself out): `items` alternate the keys --
-    space-separated; `enter`, `left`, `right`, `up` and `down` draw as signs
-    -- and what they do. Answers each pair's (x0, x1) across the band, what
-    a tap hit-tests; `draw` False only measures."""
+    part, for chrome that lays itself out): `items` alternate an action --
+    `confirm`, `back`, `change`, `tabs` or `menu`, drawn as the keys of the
+    input in use (`input_kind`) -- or keys spelled out -- space-separated;
+    `enter`, `left`, `right`, `up` and `down` draw as signs -- and what they
+    do. `enter`, `Esc`, `left right` and `Q E` name their actions. Answers
+    each pair's (x0, x1) across the band, what a tap hit-tests (x0 == x1 for
+    a pair the input has no key for; none under touch); `draw` False only
+    measures."""
     b = b"\0".join([str(t).encode("utf-8") for t in items])
     return _C.hints(cv, _LOOK if th is _TH else _look(th), rect, b, desk, draw)
 

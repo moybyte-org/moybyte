@@ -22,6 +22,7 @@ when not. Everything else -- the boot order, the service set, the frame loop
 from mem_census import mark as _census
 from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
+from wire_input import TOUCH_BLE_INPUTS
 # The seed roster, generated from system_carts/ at build time and PACKED
 # (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
 # `moy_carts.seed_any`, which reads the roster's form rather than being told.
@@ -119,6 +120,7 @@ def run_desktop(fps_cap=60):
                       inputs=lambda: make_touch(sys_canvas.w, sys_canvas.h),
                       keyboard=keyboard, seed_carts=CARTS,
                       power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H),
+                      input_kinds=TOUCH_BLE_INPUTS,
                       font_scale=FONT_SCALE,
                       panel_diagonal_in=PANEL_DIAGONAL_IN,
                       load_carts=carts_loader(tf_card, CARTS, SD_CARTS_ROOT,

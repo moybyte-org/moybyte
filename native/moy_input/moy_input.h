@@ -164,6 +164,11 @@ void moy_input_masks(const moy_input_t *t, uint8_t player, uint32_t *held, uint3
 uint32_t moy_input_released(const moy_input_t *t);
 void moy_input_sample(const moy_input_t *t, moy_input_sample_t *out);
 uint32_t moy_input_kept(const moy_input_t *t);   // the press edges a paced cart's next tick takes
+// The source that brought news -- a button going down, a new key, a press of
+// its pointer -- at the latest merge that had any, once: 1 and its handle at
+// the first ask after it, 0 until a merge brings more. The console reads the
+// input in use from it (the hints draw that input's keys).
+int moy_input_news(moy_input_t *t, uint32_t *h);
 int32_t moy_input_last_key(const moy_input_t *t);
 void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write; the next source write heals it
 // The distinct player slots the sources sit on, in the order a source first

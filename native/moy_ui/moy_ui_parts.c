@@ -1010,14 +1010,74 @@ int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
 
 // -- keycap hints -----------------------------------------------------------------------
 
+static int s_input = MOY_UI_INPUT_KEYS;
+
+void moy_ui_set_input(int input) {
+    s_input = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
+}
+
+int moy_ui_input(void) {
+    return s_input;
+}
+
+// Each action's name, then the key spellings the hints took before actions.
+static const char *const ACT_NAMES[MOY_UI_ACTS][3] = {
+    {"confirm", "enter", NULL}, {"back", "Esc", "esc"}, {"change", "left right", NULL},
+    {"tabs", "Q E", NULL},      {"menu", NULL, NULL},
+};
+
+// The keys each input does each action with. The T-Deck's are its keyboard's
+// (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
+// chevron is), the trackball and A/D steer, Q and E are the home's tab keys
+// and Mic is `start`. A gamepad's are its face buttons, its d-pad, its
+// shoulders and Start. Touch has none.
+static const char *const ACT_KEYS[MOY_UI_INPUTS][MOY_UI_ACTS] = {
+    {"enter", "Esc", "left right", "Q E", "Super"},
+    {"enter", "K", "left right", "Q E", "Mic"},
+    {"A", "B", "left right", "L R", "Start"},
+    {"", "", "", "", ""},
+};
+
+static int span_is(moy_ui_span_t k, const char *s) {
+    return s != NULL && strlen(s) == k.n && memcmp(s, k.p, k.n) == 0;
+}
+
+int moy_ui_hint_action(moy_ui_span_t k) {
+    for (int a = 0; a < MOY_UI_ACTS; a++) {
+        for (int i = 0; i < 3; i++) {
+            if (span_is(k, ACT_NAMES[a][i])) {
+                return a;
+            }
+        }
+    }
+    return -1;
+}
+
+const char *moy_ui_hint_keys(int input, int act) {
+    if (input < 0 || input >= MOY_UI_INPUTS || act < 0 || act >= MOY_UI_ACTS) {
+        return "";
+    }
+    return ACT_KEYS[input][act];
+}
+
 static int key_sign(moy_ui_span_t k) {
     static const char *const names[] = {"left", "right", "up", "down", "enter"};
     for (int i = 0; i < 5; i++) {
-        if (strlen(names[i]) == k.n && memcmp(names[i], k.p, k.n) == 0) {
+        if (span_is(k, names[i])) {
             return i;
         }
     }
     return -1;
+}
+
+// Whether `k` is one codepoint of UTF-8.
+static int one_glyph(moy_ui_span_t k) {
+    if (k.n == 0) {
+        return 0;
+    }
+    uint8_t c = k.p[0];
+    size_t n = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+    return n == k.n;
 }
 
 int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
@@ -1028,6 +1088,9 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
 
 int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                     int fs, int desk, int draw, int16_t *spans, int cap) {
+    if (s_input == MOY_UI_INPUT_TOUCH) {
+        return 0;
+    }
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_keycap_t *kc = moy_ui_keycap();
@@ -1046,7 +1109,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     int r = kc->r * d.fs;
     int x = b.x + 8 * d.fs, y = b.y + (b.h - kh) / 2;
     size_t i = 0;
-    int field = 0, pairs = 0;
+    int field = 0, pairs = 0, shown = 1;
     while (i < len) {
         size_t j = i;
         while (j < len && items[j] != 0) {
@@ -1057,6 +1120,13 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
             if (spans != NULL && pairs < cap) {
                 spans[2 * pairs] = (int16_t)x;
             }
+            int act = moy_ui_hint_action(t);
+            if (act >= 0) {
+                const char *keys = moy_ui_hint_keys(s_input, act);
+                t.p = (const uint8_t *)keys;
+                t.n = (uint16_t)strlen(keys);
+            }
+            shown = t.n > 0;
             size_t a = 0;
             while (a < t.n) {
                 size_t e = a;
@@ -1066,9 +1136,13 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                 moy_ui_span_t k = {t.p + a, (uint16_t)(e - a)};
                 if (k.n) {
                     int sign = key_sign(k);
+                    int lw = sign >= 0 ? 0 : tw(&fk, k.p, k.n, sc);
+                    // a sign's cap and a one-glyph legend's are square, a
+                    // word's grows with it; the enter sign's is a little wider
                     int w = sign == 4 ? kh + 3 * d.fs
-                            : sign >= 0 ? kh
-                                        : tw(&fk, k.p, k.n, sc) + (d.desk ? 10 : 8) * d.fs;
+                            : sign >= 0 || (one_glyph(k) && lw + 4 * d.fs <= kh)
+                                ? kh
+                                : lw + (d.desk ? 10 : 8) * d.fs;
                     w = w < kh ? kh : w;
                     if (!draw) {
                         // measured only
@@ -1078,7 +1152,8 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                         rrect(&d, x, y, w, kh, r, 1, mix(bg, capc, kc->alpha), 0, 0);
                     }
                     if (draw && kc->border_w > 0 && set(kc->border_c)) {
-                        rrect(&d, x, y, w, kh, r, 0, 0, kc->border_w * d.fs, val(&d, kc->border_c));
+                        rrect(&d, x, y, w, kh, r, 0, 0, kc->border_w * d.fs,
+                              val(&d, kc->border_c));
                     }
                     if (!draw) {
                         // measured only
@@ -1087,21 +1162,27 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                     } else if (sign >= 0) {
                         arrow_sign(&d, x, y, w, kh, sign, capi);
                     } else {
-                        int lw = tw(&fk, k.p, k.n, sc);
                         text(&d, &fk, k.p, k.n, x + (w - lw) / 2, y, kh, capi, sc);
                     }
                     x += w + 3 * d.fs;
                 }
                 a = e + 1;
             }
-            x += d.fs;
+            if (shown) {
+                x += d.fs;
+            }
         } else {
-            x += draw ? text(&d, &fh, t.p, t.n, x, b.y, b.h, dim, sc) : tw(&fh, t.p, t.n, sc);
+            if (shown) {
+                x += draw ? text(&d, &fh, t.p, t.n, x, b.y, b.h, dim, sc)
+                          : tw(&fh, t.p, t.n, sc);
+            }
             if (spans != NULL && pairs < cap) {
-                spans[2 * pairs + 1] = (int16_t)x;
+                spans[2 * pairs + 1] = shown ? (int16_t)x : spans[2 * pairs];
             }
             pairs++;
-            x += hgap;
+            if (shown) {
+                x += hgap;
+            }
         }
         field++;
         i = j + 1;

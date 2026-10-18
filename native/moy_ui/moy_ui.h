@@ -764,15 +764,37 @@ int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int 
 // A rule across band `b` (inside the group pad), one unit thick, centred in
 // its height: what parts a menu from the rows above it in a card.
 int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
+// The input in use, which the hints draw the keys of (docs/ui_api_2026-10.md,
+// "Hints"): a desk keyboard, the T-Deck's keyboard, a gamepad, or touch alone,
+// which shows no keycaps. The console sets it from the last input used, among
+// the inputs its board declares; it starts at the desk keyboard.
+enum { MOY_UI_INPUT_KEYS = 0, MOY_UI_INPUT_TDECK, MOY_UI_INPUT_PAD, MOY_UI_INPUT_TOUCH,
+       MOY_UI_INPUTS };
+void moy_ui_set_input(int input);
+int moy_ui_input(void);
+// The hints' actions, which a pair names in place of its keys: confirm, back,
+// change (left and right), tabs (the previous and the next) and menu (the
+// console's key). Answers the action `k` names, a key spelling the hints took
+// before actions (`enter`, `Esc`, `left right`, `Q E`) included, else -1.
+enum { MOY_UI_ACT_CONFIRM = 0, MOY_UI_ACT_BACK, MOY_UI_ACT_CHANGE, MOY_UI_ACT_TABS,
+       MOY_UI_ACT_MENU, MOY_UI_ACTS };
+int moy_ui_hint_action(moy_ui_span_t k);
+// The keys input `input` does action `act` with (the hints' key spelling), or
+// "" where it has none.
+const char *moy_ui_hint_keys(int input, int act);
 // Keycap hints in band `b`, from its left: `items` NUL-separated pairs of the
-// keys (space-separated; `enter`, `left`, `right`, `up` and `down` draw as
-// signs, any other as its legend) and what they do. The theme's `keycap`
-// look styles the caps (moy_ui_keycap).
+// keys and what they do. A pair's keys are an action (moy_ui_hint_action),
+// drawn as the keys of the input in use, or keys spelled out (space-separated;
+// `enter`, `left`, `right`, `up` and `down` draw as signs, any other as its
+// legend). An action the input has no key for draws nothing, and the input
+// touch draws no hints at all. The theme's `keycap` look styles the caps
+// (moy_ui_keycap); a one-glyph legend's cap is square.
 int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                  int fs, int desk);
 // The same hints, drawn when `draw`, with each pair's span across the band
 // (its first cap's left, its action's right) in `spans`, two a pair, up to
-// `cap` pairs: what a caller hit-tests and lays out by. Answers the pairs.
+// `cap` pairs: what a caller hit-tests and lays out by. A pair that draws
+// nothing spans nothing (x0 == x1). Answers the pairs: 0 under touch.
 int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                     int fs, int desk, int draw, int16_t *spans, int cap);
 // Text in font `font` (a run's: petme128) at (x, y), its line's top, in

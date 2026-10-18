@@ -263,8 +263,11 @@ def swatches(label, colours, cur, o=None):
 
 def hints(items, o=None):
     """Keycap hints at the page's foot, its rows stacking above them (call it
-    before them): `items` alternate the keys -- space-separated; `enter`,
-    `left`, `right`, `up` and `down` draw as signs -- and what they do."""
+    before them): `items` alternate an action -- `confirm`, `back`,
+    `change`, `tabs` or `menu`, which draws as the keys of the input in use
+    -- or keys spelled out -- space-separated; `enter`, `left`, `right`,
+    `up` and `down` draw as signs -- and what it does. Under touch alone
+    there are no hints and the rows take the band."""
     t = _T
     _C.api_hints(t[0], t[1], t[2], _opts(items), _over(o))
 

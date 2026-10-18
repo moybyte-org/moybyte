@@ -136,6 +136,8 @@ _SIGS = (
     ("moy_input_masks", [_P, _U8, _PU32, _PU32], None),
     ("moy_input_released", [_P], _U32),
     ("moy_input_kept", [_P], _U32),
+    ("moy_input_news", [_P, _PU32], _I),
+    ("moy_input_source_name", [_P, _U32, ctypes.c_char_p, ctypes.c_size_t], _I),
     ("moy_input_last_key", [_P], _I32),
     ("moy_input_set_last_key", [_P, _I32], None),
     ("moy_input_players", [_P, ctypes.POINTER(_U8)], _U8),
@@ -405,6 +407,17 @@ class InputTable:
         """The press edges kept for a paced cart's next tick."""
         k = _lib().moy_input_kept(self._t)
         return {n for i, n in enumerate(NAMES) if k & (1 << i)}
+
+    def news(self):
+        """The name of the source that brought news -- a button going down, a
+        new key, a press of its pointer -- since the last ask, or None."""
+        h = _U32()
+        if not _lib().moy_input_news(self._t, ctypes.byref(h)):
+            return None
+        buf = ctypes.create_string_buffer(32)
+        if _lib().moy_input_source_name(self._t, h.value, buf, 32) != OK:
+            return None
+        return buf.value.decode()
 
     def source_players(self):
         """The distinct player slots the sources sit on (at least one)."""

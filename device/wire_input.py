@@ -14,6 +14,11 @@ keyboard, trackball and GT911 -- is its board module's
 from console import Pointer
 
 
+# The inputs of a touch board with a BLE HID keyboard, as the hints know them
+# (Workstation.use_inputs): touch, in use from boot, and the keyboard's keys.
+TOUCH_BLE_INPUTS = (("touch", "touch"), ("ble", "keys"))
+
+
 def ble_keyboard_input():
     """(inp, keyboard): the kernel's input table and its BLE HID keyboard
     (native/moy_input's central, its bonds in NVS), or None where the board

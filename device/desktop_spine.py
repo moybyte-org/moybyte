@@ -23,6 +23,9 @@ arguments and hooks:
                        the touch-only boards, the C3 matrix on the T-Deck. It
                        is started after the WM if it can be
   ble_keyboard         an OPTIONAL SECOND keyboard beside a physical one
+  input_kinds          the board's inputs as the hints know them: pairs of an
+                       input source's name and its kind, the first in use at
+                       boot (Workstation.use_inputs); None declares none
   seed_carts           the packed seed roster
   game_wh              the GAME canvas size, or None when the system canvas
                        IS the game canvas (the 320x240 tier)
@@ -277,7 +280,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   store_root=None, ota_dir=None, load_carts=None, with_sd=None,
                   before_slim=None, after_services=None,
                   ble_keyboard=None, wm=None, c6_updater=None, extras=None,
-                  serial=True, log=None, fps_cap=60):
+                  serial=True, log=None, fps_cap=60, input_kinds=None):
     """Boot the shared console on a board (the module docstring is the
     contract). Returns the Desktop; the caller's `run()` is the loop."""
     board_log = log
@@ -330,6 +333,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=font_scale,
                      panel_diagonal_in=panel_diagonal_in)
+    ws.use_inputs(input_kinds)
     _census("workstation")
     _stamp(kernel, 3)               # MOY_STAMP_WS
     # The bar strips a rotated compositor presents as rects of their own,

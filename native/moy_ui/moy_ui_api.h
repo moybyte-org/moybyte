@@ -217,8 +217,10 @@ int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_s
 // option, a tap the one tapped. Answers the new cur.
 int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
                           const uint8_t *opts, size_t len, int32_t cur, const moy_ui_over_t *o);
-// Keycap hints (`items` NUL-separated key and action pairs) in a band at the
-// page's foot, which its rows then stack above; ui.at places them instead.
+// Keycap hints (`items` NUL-separated pairs of an action or keys and what it
+// does, moy_ui_hints) in a band at the page's foot, which its rows then stack
+// above; ui.at places them instead. Under the input touch there is no band
+// and a ui.at before it is spent.
 void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
                       const moy_ui_over_t *o);
 // The next row (a label, info, link, cycle, seg, swatch picker, toggle,

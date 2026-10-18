@@ -636,6 +636,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     music_ui = _first_use("music_ui", _build_music_ui)
     paint_layer = _first_use("paint_layer", _build_paint_layer)
     theme_layer = _first_use("theme_layer", _build_theme_layer)
+    # The board's inputs as the hints know them (`use_inputs`): None until a
+    # board declares them, and then the source names' kinds.
+    input_kinds = None
+    _news = None
 
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1, panel_diagonal_in=None):
@@ -670,6 +674,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # One per process, as the bars are.
         self.metric_class = _layout_base.class_of(panel_diagonal_in)
         _layout_base.place_class(self.metric_class)
+        # The hints draw the desk keyboard's keys until the board declares its
+        # inputs (`use_inputs`). One per process, as the metric class is.
+        _ui_draw.input_kind("keys")
         # The glass's own canvas, and the half-size surface a `render.scale: 2`
         # desk theme draws on instead (`set_render_scale`); None at 1.
         self.glass = sys_canvas
@@ -1742,6 +1749,30 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True
         else:
             self.go_home()
+
+    # -- the input in use (the hints' keys) ---------------------------------
+
+    def use_inputs(self, kinds):
+        """The board's inputs: `kinds` pairs an input source's name (the
+        input table's -- a board's "kbd", "touch" and "ble", the host's
+        "local") with the input it is to the hints (`ui_draw.INPUTS`), and the
+        first pair's is the input in use until another one is used. Every
+        hint strip draws the keys of the input in use, and touch hides them.
+        A board that declares none (None) leaves them on the desk keyboard's."""
+        self.input_kinds = None if kinds is None else dict(kinds)
+        self._news = None if kinds is None else getattr(self.input, "news", None)
+        if kinds:
+            self.input_used(kinds[0][0])
+
+    def input_used(self, source):
+        """Input source `source` was used: the input in use becomes its kind
+        (a source the board did not declare changes nothing), and a change
+        repaints, as its keys show in every hint strip."""
+        kinds = self.input_kinds
+        kind = kinds.get(source) if kinds is not None else None
+        if kind is not None and kind != _ui_draw.input_kind():
+            _ui_draw.input_kind(kind)
+            self._dirty = True
 
     # -- top-bar system menu (#52) -------------------------------------------
     #
@@ -3402,6 +3433,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         _pr = getattr(i, "players", None)
         if _pr is not None:
             _pr.begin_frame()
+        # The input in use follows the last one used (the hints' keys).
+        if self._news is not None:
+            src = self._news()
+            if src is not None:
+                self.input_used(src)
         # Super (the `start` button) is the console's from every surface, before
         # any layer: the system menu, or the pause menu over a fullscreen game.
         if i.pressed("start"):

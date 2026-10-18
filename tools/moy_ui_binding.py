@@ -210,6 +210,8 @@ _DRAW_SIGS = (
     ("moy_ui_status", [c.POINTER(_Sink), _Box, c.c_char_p, _Z, _I, _I], _I),
     ("moy_ui_hints_at", [c.POINTER(_Sink), _Box, c.c_char_p, _Z, _I, _I, _I, c.c_void_p, _I],
      _I),
+    ("moy_ui_set_input", [_I], None),
+    ("moy_ui_input", [], _I),
     ("moy_ui_game_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I], _I),
     ("moy_ui_game_icon_btn", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_mini_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
@@ -1495,6 +1497,13 @@ def binding():
         return (n[0], n[1])
 
     m.text_lanes = text_lanes
+
+    def input_(*kind):
+        if kind:
+            lib.moy_ui_set_input(int(kind[0]))
+        return lib.moy_ui_input()
+
+    m.input = input_
     m.print_font = print_font
     m.cart_text = cart_text
     m.font_free = font_free

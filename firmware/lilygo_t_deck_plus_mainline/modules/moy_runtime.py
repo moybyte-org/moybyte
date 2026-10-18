@@ -81,6 +81,10 @@ SERIAL_CMDS = True
 # ...`) and at runtime over the dev channel (`power <secs>`, `power off`). The
 # same 5 minutes every console ships unless a board has a reason not to.
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
+# The inputs as the hints know them (Workstation.use_inputs): the C3 keyboard
+# and the trackball write "kbd", in use from boot; a paired BLE keyboard is a
+# desk keyboard; the GT911 is touch, which hides the keycaps until a key.
+INPUT_KINDS = (("kbd", "tdeck"), ("ble", "keys"), ("touch", "touch"))
 
 # #183: print a phase bracket around every SD session. This board has no REPL to
 # interrogate once the desktop owns the loop, so the trace IS the diagnostic.
@@ -264,6 +268,7 @@ def run_desktop(fps_cap=60):
                       load_carts=store.load, with_sd=store.session,
                       before_slim=_before_slim, after_services=_after_services,
                       ble_keyboard=tdin.ble_keyboard,
+                      input_kinds=INPUT_KINDS,
                       serial=SERIAL_CMDS,
                       log=lambda tag, msg: _diag_log(tag, msg, diag),
                       fps_cap=fps_cap)

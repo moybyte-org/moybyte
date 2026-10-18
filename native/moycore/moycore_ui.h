@@ -17,7 +17,7 @@
  *   ui.cycle(label, items, cur, o) -> the new cur (from 1; 0 is none)
  *   ui.seg(label, items, cur, o)   -> the new cur
  *   ui.swatches(label, colours, cur, o) -> the new cur (colours 0xRRGGBB)
- *   ui.hints(items, o)             (keys, then what they do, alternating)
+ *   ui.hints(items, o)             (an action or keys, then what it does, alternating)
  *   ui.icon(name, o)               -> whether `name` names an icon (the next row's)
  *   ui.progress(label, v, hi, o)   (v of hi done)
  *   ui.table(label, columns, rows, cur, o) -> the new cur (from 1; 0 is none), opened
