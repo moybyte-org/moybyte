@@ -690,6 +690,27 @@ def test_a_tables_picture_column_draws_the_named_icon():
     assert pic and _ink_cols(b, y0 + 2, y0 + ROW - 2, INSET, 40) != pic
 
 
+def test_a_table_in_a_narrow_rect_keeps_its_last_column_inside():
+    """The columns after the first text column keep their widest cell's
+    width, right-aligned to the rect's inset; the first takes what is left
+    and cuts a long name, so no cell draws past the rect."""
+    long = [("paint", "a name far longer than the room it has", "Wallpaper")] * 3
+    x0, w = 40, 200
+    r = _table_page(long, at=(x0, 40, w, CAPTION + HEAD + 3 * ROW))
+    r.frame()
+    r.frame()
+    y0 = 40 + CAPTION + HEAD + ROW             # a row that is not the current one
+    ink = _ink_cols(r, y0 + 2, y0 + ROW - 2, x0, x0 + w)
+    assert ink and ink[-1] < x0 + w - INSET, "the Kind cell ends inside the rect"
+    assert _ink_cols(r, y0 + 2, y0 + ROW - 2, x0 + w, 318) == [], "nothing past it"
+    # the caption face, else the ui role's (the engine's font_of)
+    face = ui_draw.font("caption")[0] or ui_draw.font("ui")[0]
+    kind = ui_draw._C.text_width("Wallpaper", 1, face)
+    gaps = [(b - a, b) for a, b in zip(ink, ink[1:])]
+    widest, kind_x = max(gaps)
+    assert widest > 4 and ink[-1] - kind_x < kind, "the name is cut short of the Kind"
+
+
 def _field_page(text, mx=8):
     st = {"text": text, "done": False}
 
