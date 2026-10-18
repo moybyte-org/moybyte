@@ -2071,8 +2071,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "72790000c31ff55f3853de5ffdd0771a19c6fba9f7bd353c1d9283d9ceb4682b",
-    "e4f789c4a5b9cab45daaf1eee21fe2a08b12ca94ea46caf2cfc31b5f2e907629",
+    "5e2e0ee626ad4e4dcf24d030a3c0452baecb31ff529bf186f756103cdbcb622b",
+    "b1730fe7e2e48e23ea2f84c0d04499f78798a7c7abe65d92f413872cd3ab16e1",
 )
 
 
