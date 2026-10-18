@@ -190,6 +190,9 @@ class EditorHandle:
         # a write that passed it -- custom's theme.json under EDIT FILE
         # (`appearance.Appearance.file_watch`).
         self._watch = watch
+        # The document's size cap: MAX_CHARS, or the watch's `max_chars` --
+        # a theme.json is indented on opening, past its minified cap.
+        self._max = getattr(watch, "max_chars", MAX_CHARS)
         self._images = images or files   # the role a note's embedded drawings load through
         self._canvas = canvas
         self._theme = theme          # () -> the live token dict
@@ -254,7 +257,7 @@ class EditorHandle:
         return self.ed.text()
 
     def set_text(self, body):
-        self.ed.set_text(str(body)[:MAX_CHARS])
+        self.ed.set_text(str(body)[:self._max])
         self._caret_at = None
         self._mark()
 
@@ -322,7 +325,7 @@ class EditorHandle:
         if code in (0x18, 0x16):             # Ctrl+X / Ctrl+V
             changed = self.cut() if code == 0x18 else self.paste()
             return changed
-        if len(ed.text()) >= MAX_CHARS and code not in (0x08, 0x7F):
+        if len(ed.text()) >= self._max and code not in (0x08, 0x7F):
             return False
         if self._burst is None:
             self._burst = ed.text()
@@ -422,7 +425,7 @@ class EditorHandle:
         return True
 
     def paste(self):
-        if len(self.ed.text()) + len(self.ed.paste_text()) > MAX_CHARS:
+        if len(self.ed.text()) + len(self.ed.paste_text()) > self._max:
             return False
         if self._burst is None:
             self._burst = self.ed.text()
@@ -445,7 +448,7 @@ class EditorHandle:
         the badge, because a kid's text is theirs and a broken document is
         caught the next time something loads it."""
         self._close_burst()
-        body = self.ed.text()[:MAX_CHARS]
+        body = self.ed.text()[:self._max]
         good, why = _modes.check(self._mode, body)
         out = body
         if good and self._watch is not None:
@@ -641,7 +644,7 @@ class EditorHandle:
         body = w.file_text()
         if body is None:
             return
-        self.ed.set_text(_modes.pretty(self._mode, body)[:MAX_CHARS])
+        self.ed.set_text(_modes.pretty(self._mode, body)[:self._max])
         self.history = History(self.ed, TextEditCodec())
         self._memo = {}
         self._memo_old = {}

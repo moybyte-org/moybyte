@@ -54,6 +54,14 @@ from runtime.chrome import THEME_NAMES, theme_colors  # noqa: E402
 from runtime.theme_custom import CUSTOM  # noqa: E402
 from ws_helpers import build_desktop_ws, build_ws  # noqa: E402
 
+_THEME_BYTES = appearance._THEME_BYTES
+
+
+def test_the_size_cap_is_style_jsons():
+    import json
+    with open(Path(__file__).resolve().parent.parent / "native" / "moy_ui" / "style.json") as f:
+        assert json.load(f)["theme"]["bytes"] == _THEME_BYTES
+
 
 def _notes(ws):
     """Record every achievement the shell notes, without the store."""
@@ -743,15 +751,15 @@ def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
     ws = build_ws(tmp_path)
     ed = _edit(ws)
     d = json.loads(ed.text())
-    ed.set_text(json.dumps(d, indent=6))
-    assert 4096 < len(ed.text()) < 8000         # the handle's MAX_CHARS
+    ed.set_text(json.dumps(d, indent=32))
+    assert _THEME_BYTES < len(ed.text()) <= ws.look.max_chars   # the watch's cap
     assert ed.save(soft=True) == (True, "")
     saved = (Path(ws.carts_root) / "custom.moy" / "theme.json").read_bytes()
-    assert len(saved) <= 4096 and json.loads(saved) == d
+    assert len(saved) <= _THEME_BYTES and json.loads(saved) == d
 
 
 def _big(d):
-    d["notes"] = "x" * 4200
+    d["notes"] = "x" * (_THEME_BYTES + 200)
     return d
 
 
@@ -770,7 +778,7 @@ def _renamed(d):
     (_big, "theme.why_big"),
     (_inherits, "theme.why_chain"),
     (_renamed, "theme.why_name"),
-], ids=["bad-json", "over-4096", "inherits", "bad-name"])
+], ids=["bad-json", "over-the-cap", "inherits", "bad-name"])
 def test_a_refused_save_shows_the_note_and_changes_nothing(tmp_path, edit, note):
     """The soft save refuses and badges; the hard exit writes the text as
     typed (#154) and still leaves the running look, its `custom` and the

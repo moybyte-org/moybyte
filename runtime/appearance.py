@@ -161,7 +161,7 @@ def font_file(name):
     X.txt beside a font X.fnt is its licence."""
     data = _ui_draw.font_file(name)
     return data if data is not None else _fontset.file(name)
-_THEME_BYTES = 4096     # style.json's theme.bytes: the largest theme.json
+_THEME_BYTES = 16384    # style.json's theme.bytes: the largest theme.json
 _THEME_MAIN = "theme.json"
 _PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spare
 # A sheet's caps (style.json's theme.sheet_rows): (width, sprite rows, icon
@@ -185,6 +185,10 @@ class Appearance:
     plain hop's +0.5us on this codebase). Nothing here runs per frame -- the
     per-draw surface is `light_chrome()` and the `ws.theme_colors` dict it
     reads, both of which stay one cheap call and one flat attribute."""
+
+    # The text app's cap on custom's theme.json as typed (the editor handle
+    # reads it): the file opens indented, half again its minified size.
+    max_chars = 2 * _THEME_BYTES
 
     # -- the wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) --------
     #

@@ -302,7 +302,7 @@ key (§15) and no `mode` key (§3: PLAY is the switch).
 | `home` | `carousel`, `grid` or `icons` | absent or unknown is `carousel` (unknown noted); it rides the layout, which a package sets whole with its bars |
 
 The flattened package carries it in a few dozen bytes, well inside
-`theme.bytes` (4096). `style.json`'s `theme.layout` holds the edges, the
+`theme.bytes` (16384). `style.json`'s `theme.layout` holds the edges, the
 slots, the widget names, the required and repeatable sets and the caps (data,
 as `font_roles` is); `tests/test_theme_loader.py`'s fuzz corpus carries the
 cases (a string for `bars`, five bars, two on one edge, a size of 0 and of

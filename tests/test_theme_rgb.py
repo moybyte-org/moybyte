@@ -20,7 +20,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from runtime import chrome
+from runtime import appearance, chrome
 
 RGB = 0x1000000
 NONE = -(1 << 31)
@@ -279,7 +279,7 @@ def test_paints_maps_and_texts():
 
 def test_custom_carries_the_look_and_rgb():
     rc, b = moy_ui.theme_custom("moy", None, None)
-    assert rc == OK and len(b) <= 4096
+    assert rc == OK and len(b) <= appearance._THEME_BYTES
     got = moy_ui.theme_resolve(b)
     assert got[0] == OK and got[1] == 0
     for light in (False, True):

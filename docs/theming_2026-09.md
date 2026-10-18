@@ -981,7 +981,7 @@ and each change re-derives from `from`'s resolved rows, never from the last
 result, since a ramp quantises and quantising a quantised row drifts. A
 colour (or any key the derivation writes) saved through EDIT FILE drops
 `from`, and the file as saved is the source from then on. A package whose whole rows would pass `theme.bytes` (a
-source with many surfaces) is written without the roles whose value §5's
+source carrying a large `images` value, say: every seed's fits whole) is written without the roles whose value §5's
 rule gives back, which resolves to the same row, and one that does not fit
 even so is refused (`MOY_THEME_BIG`). Declined: `accent` and
 `tint` keys the loader derives from, smaller on the card, because the
@@ -1075,7 +1075,7 @@ Kids will trade themes, so a theme is untrusted input:
 
 - **Data only.** Parse, validate and clamp (`native/moy_ui/moy_theme.c`, a
   strict JSON reader of its own, built on every tier): a theme.json over
-  `theme.bytes` (4096) is refused, as is malformed JSON, nesting past eight
+  `theme.bytes` (16384) is refused, as is malformed JSON, nesting past eight
   levels, a missing, non-integer or other `format`, a missing or ill-formed
   `name`, a seed's name, or an `inherits` that names no package, cycles or
   runs past the cap. An index is clamped to 0-63, a number of `look` to its
@@ -1142,7 +1142,7 @@ built first** (owner, 2026-10-11). The pieces:
 cart-runtime reserve, and the biggest carts need most of it
 (`.claude/rules/boards.md`). So: **one loaded theme at a time** (the loader
 holds the seeds as flash constants and one installed package beside them),
-a hard byte cap (a theme.json is capped at 4096 bytes; the cap on a package's
+a hard byte cap (a theme.json is capped at 16384 bytes (owner, 2026-10-18: a theme may be big, the cap only has to exist); the cap on a package's
 assets is set by the phase that first loads one), no per-tint bakes (§4.6),
 and every phase takes the kernel doc's internal-SRAM gate (its §4.6). Phase 1
 allocates nothing at boot: the installed slot is allocated on the first
@@ -1589,7 +1589,8 @@ port), never here.
      answers the source's rows but for the dim inks and content colours
      the source leaves under the floor (steps 4 and 5 repair them); the
      seeds' derived rows equal the mockups' `derive()` role for role; a maximal fixture (every role,
-     32 surfaces, 32 effects, a layout) stays under `theme.bytes`; and the
+     32 surfaces, 32 effects, a layout) stays under `theme.bytes`, and a source padded to near the cap
+     (an `images` value) leaves out the roles its resolution gives back; and the
      boards' module answers the host's bytes (the desktop MicroPython's
      `moy_ui` there, and `theme_custom_matches_host` in
      `tests/on_glass.py` on every console board). No golden moves (nothing draws it yet).
@@ -1685,7 +1686,7 @@ port), never here.
      opens its file in the text app, not as a project; on `custom` writes
      the change first; a saved role moves the look and `look_gen` and drops
      `from`, and so does a metric; a `frame` alone keeps it; a file over the cap as
-     typed is written minified; a refused save (bad JSON, over 4096 bytes,
+     typed (the text app's cap on it is twice `theme.bytes`: the file opens indented) is written minified; a refused save (bad JSON, over 16384 bytes,
      `inherits`, a name not `custom`'s) badges the note and moves nothing,
      its hard exit too; an unreadable pair saves and badges; idle frames
      write nothing. `tests/test_theme_look_gen.py` — a save draws, byte for

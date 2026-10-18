@@ -115,7 +115,7 @@ def test_the_cards_resolve_a_package_without_installing_it(tmp_path):
     (_src(inherits="berry"), "chain"),
     (_src(format=9), "newer"),
     (b'{"format": 2, "name": "dusk", ', "syntax"),
-    (_src(colors={"dark": {"panel": 2}}, pad="x" * 5000), "big"),
+    (_src(colors={"dark": {"panel": 2}}, pad="x" * (appearance._THEME_BYTES + 1000)), "big"),
 ])
 def test_a_package_that_will_not_load_boots_the_default_with_one_note(
         tmp_path, src, why):

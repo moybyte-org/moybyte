@@ -149,8 +149,8 @@ def test_every_combination_is_the_reference_and_reads(name):
             assert (rc, notes, got_name) == (OK, 0, "custom"), (name, accent, tint)
             for v, resolved in (("dark", dark), ("light", light)):
                 want = _reference(name, v, accent, tint)
-                # a custom over the size cap leaves out the roles the
-                # resolution gives back (Blocks' look is large)
+                # every seed's custom fits the cap whole: it writes each role
+                assert set(pkg["colors"][v]) == set(ROLES), (name, v, accent, tint)
                 for r, x in pkg["colors"][v].items():
                     assert _val(x) == _val(want[r]), (name, v, r, accent, tint)
                 row, unreadable, rc = resolved
@@ -359,13 +359,26 @@ def _half_effects(src):
     return json.dumps(pkg, separators=(",", ":")).encode()
 
 
+def _padded(src):
+    """`src` with an `images` value (custom carries it whole) grown to 1000
+    bytes under the cap: a source the cap lets in whose custom, with its
+    rows, does not fit."""
+    pkg = json.loads(src)
+    pkg["images"] = {"pad": ""}
+    room = TH["bytes"] - 1000 - len(json.dumps(pkg, separators=(",", ":")))
+    pkg["images"]["pad"] = "x" * room
+    out = json.dumps(pkg, separators=(",", ":")).encode()
+    assert len(out) == TH["bytes"] - 1000
+    return out
+
+
 def test_over_the_cap_the_roles_resolution_gives_back_are_left_out():
     """Sources with no colours and long surfaces and effects, whose whole rows
     would not fit: custom carries only the roles that differ from what its
     resolution gives back, and still resolves to the derived rows; where even
     that does not fit, the answer is MOY_THEME_BIG."""
-    full = _maximal("no-colors", colors=False)
-    half = _half_effects(full)
+    full = _padded(_maximal("no-colors", colors=False))
+    half = _padded(_half_effects(_maximal("no-colors", colors=False)))
     for src in (full, half):
         assert len(src) <= TH["bytes"] < len(src) + len(_custom("night"))
     # what the resolution gives back is left out: night's own rows, but for
@@ -427,7 +440,7 @@ def test_the_boards_module_answers_as_the_host_does(tmp_path):
         why="Without it the derivation's MicroPython face, the one every board "
             "imports, never meets the host's answers.")
     full = _maximal("no-colors", colors=False)
-    srcs = SEEDS + [STORED, _maximal(), full, _half_effects(full)]
+    srcs = SEEDS + [STORED, _maximal(), full, _half_effects(full), _padded(full)]
     script = tmp_path / "driver.py"
     script.write_text(_MP_DRIVER.replace("@SRCS@", repr(srcs))
                       .replace("@ACCENTS@", repr(ACCENTS)).replace("@TINTS@", repr(TINTS)))
