@@ -4,7 +4,6 @@
 // its canvas (runtime/ui.py's replay).
 //
 //   chrome_inks(inks, bar_light, rings)
-//   chrome_pill(cw, ch, held_ms, hold_ms)
 //   chrome_panel(cw, ch, notice, title, text, compiled)
 //   chrome_say_title(say, line), chrome_crash_title(text, line|None),
 //   chrome_fit_text(title, total, block, free, largest),
@@ -72,15 +71,6 @@ static mp_obj_t ch_inks(mp_obj_t inks, mp_obj_t light, mp_obj_t rings) {
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_3(moy_chrome_inks_obj, ch_inks);
-
-static mp_obj_t ch_pill(size_t n, const mp_obj_t *a) {
-    (void)n;
-    moy_chrome_list_t *l = list();
-    moy_chrome_pill(l, mp_obj_get_int(a[0]), mp_obj_get_int(a[1]),
-                    (uint32_t)mp_obj_get_int(a[2]), (uint32_t)mp_obj_get_int(a[3]));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_pill_obj, 4, 4, ch_pill);
 
 static mp_obj_t ch_panel(size_t n, const mp_obj_t *a) {
     (void)n;

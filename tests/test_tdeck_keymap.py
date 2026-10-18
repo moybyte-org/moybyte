@@ -80,7 +80,7 @@ EXPECTED = {
 }
 # ...plus the non-letters, which are not in EXPECTED because the uppercase test
 # below folds case and they have none.
-EXPECTED_CODES = {0x0D: "run", 0x08: "home", 0x20: "a"}
+EXPECTED_CODES = {0x0D: "run", 0x20: "a"}
 # SPACE is the one deliberate alias: `a` is reachable as L *and* as space,
 # because a kid arrives already knowing space = jump.
 ALIASES = {0x20: "a"}
@@ -188,10 +188,9 @@ def test_two_keys_at_once_come_back_as_two_buttons():
 
 
 def test_backspace_wins_the_key_slot_over_a_held_letter():
-    """Only one `key` fits in the report, and BACKSPACE is THE console key in
-    every input mode -- so a hold-to-exit must not be swallowed by a direction
-    the kid is still leaning on. That is what RAW_KEYS' order buys, and order
-    is invisible unless something asserts it."""
+    """Only one `key` fits in the report. BACKSPACE is a plain key, and it is
+    the last match in RAW_KEYS, so it beats a letter held with it -- a game
+    that reads key() sees the delete, and `up` is still held."""
     mod = _input_module()
     data = bytearray(5)
     for idx, bit, code in mod.RAW_KEYS:
@@ -199,7 +198,62 @@ def test_backspace_wins_the_key_slot_over_a_held_letter():
             data[idx] |= bit
     buttons, key = mod.decode_raw(data)
     assert key == 0x08
-    assert set(buttons) == {"up", "home"}
+    assert set(buttons) == {"up"}
+
+
+def test_backspace_is_a_plain_key_on_every_path():
+    """BACKSPACE stopped being `home` (owner call, 2026-10-18): no button on the
+    ASCII path, the matrix or a BLE keyboard, and no hold gesture anywhere reads
+    it. A cart reads it with key() as 0x08."""
+    mod = _input_module()
+    kbd = mod.TDeckKeyboard.__new__(mod.TDeckKeyboard)
+    assert kbd._buttons_for_key(0x08) == ()
+    assert 0x08 not in mod.KEY_BUTTON
+    data = bytearray(5)
+    for idx, bit, code in mod.RAW_KEYS:
+        if code == 0x08:
+            data[idx] |= bit
+    assert mod.decode_raw(data) == ((), 0x08)
+    from runtime import moy_input as mi
+    assert mi.hid_buttons_for_key(0x08) == ()
+
+
+def test_mic_is_the_console_key_in_both_decoders():
+    """Mic -> `start`, the console's key, and nothing else (owner call,
+    2026-10-18): the raw matrix's d0 bit 6, and the ASCII mode's one spelling
+    of it, Shift+Mic = 0xE0 (the C3's NULL entry minus 32). It takes no key
+    slot, so a held letter keeps it."""
+    mod = _input_module()
+    kbd = mod.TDeckKeyboard.__new__(mod.TDeckKeyboard)
+    assert mod.decode_raw(bytes([0x40, 0, 0, 0, 0])) == (("start",), 0)
+    buttons, key = mod.decode_raw(bytes([0x40 | 0x02, 0, 0, 0, 0]))
+    assert set(buttons) == {"up", "start"} and key == ord("w")
+    assert kbd._buttons_for_key(0xE0) == ("start",)
+    # no other byte the C3 can send is the console's key
+    for code in range(256):
+        if code != 0xE0:
+            assert "start" not in kbd._buttons_for_key(code), hex(code)
+    # and no matrix bit but Mic's
+    for idx in range(5):
+        for bit in range(7):
+            data = bytearray(5)
+            data[idx] = 1 << bit
+            assert ("start" in mod.decode_raw(data)[0]) == (idx == 0 and bit == 6)
+
+
+@pytest.mark.skipif(not VENDOR_KBD.exists(),
+                    reason="vendor keyboard reference not checked out")
+def test_the_mic_position_and_its_ascii_byte_are_the_vendor_firmwares():
+    """The facts the Mic decode rests on, read from the vendor firmware: d0
+    bit 6 is `keyboard[0][6]`, whose plain entry is NULL (so a bare Mic sends
+    the idle byte 0x00 and cannot be seen in ASCII mode), and a Shift is
+    `toPrint - 32`, which is 0xE0 for it."""
+    src = VENDOR_KBD.read_text(encoding="utf-8", errors="replace")
+    assert re.search(r"keyboard\[0\]\[6\]\s*=\s*NULL;\s*//\s*Mic", src)
+    assert "toPrint - 32" in src
+    assert (0 - 32) & 0xFF == 0xE0
+    mod = _input_module()
+    assert mod.decode_raw(bytes([1 << 6, 0, 0, 0, 0]))[0] == ("start",)
 
 
 def test_uppercase_types_the_same_button_as_lowercase():
@@ -243,8 +297,9 @@ def test_the_p4_ble_keyboard_is_an_arrow_host_too():
     d-pad and R as `run` after the others had moved on."""
     from runtime import moy_input as mi
     for key, button in ((ord("z"), "a"), (ord("x"), "b"), (ord(" "), "a"),
-                        (0x0D, "run"), (0x08, "home")):
+                        (0x0D, "run")):
         assert mi.hid_buttons_for_key(key) == (button,), hex(key)
+    assert mi.hid_buttons_for_key(0x08) == (), "Backspace is a plain key on the P4 too"
     for gone in "lkhjr":
         assert mi.hid_buttons_for_key(ord(gone)) == (), "%s fires a button on the P4" % gone
     # the HID arrow usages are what make it an arrow host in the first place

@@ -601,7 +601,7 @@ This is the acceptance journey. It must work before broader surface restyling.
 
 1. Reflow Library to 320x240 without removing actions.
 2. Route CHANGE to fullscreen Config.
-3. Verify PLAY/exit/return and hold-to-exit behavior.
+3. Verify PLAY/exit/return and the pause menu's Quit.
 4. Keep Player performance unchanged: no shell compositing during fullscreen play.
 
 ### Phase 5 — system apps and website

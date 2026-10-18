@@ -123,16 +123,13 @@ def test_game_cart_gets_buttons_and_no_stray_text(tmp_path):
 
 
 def test_backspace_is_a_plain_key_zero_special_casing(tmp_path):
-    # Stage 5 exit model (spec Section 9): the #71 pause frame is GONE, and with it the
-    # text-mode carve-out + the _bks_prev edge-detect. BACKSPACE is a PLAIN key
-    # everywhere, with ZERO special-casing:
+    # BACKSPACE is a PLAIN key everywhere, with ZERO special-casing (the #71 pause
+    # frame is gone, and so is the hold gesture that followed it):
     #   * a running text-mode TOOL (a password field) receives BACKSPACE as
-    #     a typed 0x08 -> DELETE, and it NEVER exits (the input backend routes 0x08 as a
-    #     typed key, not the "home" button, in text mode -- so the exit gesture, which
-    #     watches "home", simply never fires here);
+    #     a typed 0x08 -> DELETE, and it NEVER exits;
     #   * a typing game keeps all 26 letters (q types, never a shortcut).
-    # Exit is the deliberate hold-"home" gesture for games (tested in
-    # test_desktop_shell.py) / the bar X for tools, not a single BACKSPACE anywhere.
+    # Exit is the pause menu's Quit for games (tested in test_desktop_shell.py) / the
+    # bar X for tools, not BACKSPACE anywhere.
     import os
     from runtime import host_app
     from runtime import moy_carts

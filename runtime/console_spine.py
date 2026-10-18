@@ -190,8 +190,8 @@ class SpineVerbs:
 
     def _exit_to_caller(self):
         """Pop the running cart back to whoever launched it (run()'s recorded caller,
-        spec Section 2's launch-and-return). The Player's Stage-5 exit gestures
-        (hold-BACKSPACE) calls this. The Editor is the second caller
+        spec Section 2's launch-and-return). The pause menu's Quit, quit()
+        and a tool's bar X call this. The Editor is the second caller
         (Stage 3b): a cart run from PLAY returns to the Editor on the tab it left
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
         Player has zero knowledge of who launched it. A registered APP is the

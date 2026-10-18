@@ -93,22 +93,22 @@ def test_a_pack_with_other_conversions_reads_english(chrome):
         "recovery.pc": "PC %08x",                            # one conversion short
         "fit.needs": "%s %s %s %s %u",                       # one too many
         "say.stuck_line": "Stuck at %d.",                    # the same: taken
-        "chrome.hold_to_exit": "HALTEN",                     # none either side
+        "chrome.hint_home": "HALTEN",                        # none either side
         "stuck.text": "100%% stuck after %u s",              # a literal % is no conversion
     })
     assert rcs == {"say.crash_line": 1, "recovery.pc": 1, "fit.needs": 1,
-                   "say.stuck_line": 0, "chrome.hold_to_exit": 0, "stuck.text": 0}
+                   "say.stuck_line": 0, "chrome.hint_home": 0, "stuck.text": 0}
     for sid in ("say.crash_line", "recovery.pc", "fit.needs"):
         assert _str(chrome, sid) == en[sid]
     assert moy_play.chrome_say_title(0, 12) == en["say.crash_line"] % 12
     assert moy_play.chrome_say_title(1, 12) == "Stuck at 12."
-    pill = moy_play.chrome_pill(320, 240, 0, 0)
-    assert [o[7] for o in pill if o[0] == moy_play.CH_TEXT] == ["HALTEN"]
+    hint = moy_play.chrome_panel(320, 240, False, "", "", True)
+    assert "HALTEN" in [o[7] for o in hint if o[0] == moy_play.CH_TEXT]
     # a refused entry replaces nothing a pack had taken before it
     assert _set_pack(chrome, {"say.stuck_line": "Stuck %s"}) == {"say.stuck_line": 1}
     assert _str(chrome, "say.stuck_line") == en["say.stuck_line"]
     chrome.moy_str_reset()
-    assert _str(chrome, "chrome.hold_to_exit") == en["chrome.hold_to_exit"]
+    assert _str(chrome, "chrome.hint_home") == en["chrome.hint_home"]
 
 
 def test_the_face_reads_the_table_and_refuses_a_broken_entry():
@@ -136,7 +136,6 @@ def _chrome_screens():
         for compiled in (False, True):
             out.append(("panel", moy_play.chrome_panel(320, 240, notice, "", "", compiled)))
     out.append(("panel_py", moy_play.chrome_panel(320, 240, False, "zz", "qq", False)))
-    out.append(("pill", moy_play.chrome_pill(320, 240, 10, 100)))
     out.append(("toast", moy_play.chrome_toast("qq", "gear")))
     out.append(("banner", moy_play._chrome("moy_chrome_banner", 320, 1, 18, b"qq", b"zz", True)))
     out.append(("about", moy_play._chrome("moy_chrome_about", 320, 240, 1, None)))
@@ -181,14 +180,14 @@ def test_under_a_pseudo_locale_the_chrome_draws_no_english(chrome):
 def test_no_chrome_op_is_a_literal_and_the_sources_are_the_callers(chrome):
     srcs = (_srcs("moy_chrome_panel", 320, 240, False, b"", b"", False)
             + _srcs("moy_chrome_panel", 320, 240, False, b"zz", b"qq", True)
-            + _srcs("moy_chrome_pill", 320, 240, 0, 0)
+            + _srcs("moy_chrome_panel", 320, 240, False, b"", b"", True)
             + _srcs("moy_chrome_toast", b"qq", b"gear")
             + _srcs("moy_chrome_about", 320, 240, 1, b"9.9"))
     assert all(s != LIT for s, _ in srcs)
     by = {t: s for s, t in srcs}
     en = _en()
     assert by[en["say.crash"]] == TABLE and by[en["chrome.no_text"]] == TABLE
-    assert by[en["chrome.hold_to_exit"]] == TABLE and by[en["about.close"]] == TABLE
+    assert by[en["chrome.hint_home"]] == TABLE and by[en["about.close"]] == TABLE
     assert by["zz"] == PY and by["qq"] == PY and by["9.9"] == PY
 
 
@@ -196,7 +195,7 @@ def test_a_literal_op_is_never_rastered(chrome):
     """moy_chrome's raster draws through moy_text, which refuses a LIT op."""
     lst = moy_play._ChList()
     p = ctypes.cast(ctypes.byref(lst), ctypes.c_void_p)
-    chrome.moy_chrome_pill(p, 320, 240, 0, 0)
+    chrome.moy_chrome_about(p, 320, 240, 1, b"9.9")
     pal = (ctypes.c_uint16 * 64)(*range(1, 65))
     for src, drawn in ((TABLE, True), (LIT, False)):
         for i in range(lst.n):

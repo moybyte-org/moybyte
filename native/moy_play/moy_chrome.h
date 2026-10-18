@@ -1,6 +1,6 @@
 // moy_chrome: the chrome drawn over a cart and the shell's bar, one body each
 // (docs/kernel_cartpath_2026-10.md §3.5): the strip (the crash and tool bars,
-// the band and right zone every bar shares), the hold-to-exit pill, the error
+// the band and right zone every bar shares), the error
 // and notice panel, the system menu and its ABOUT box, the notice banner and
 // the achievement toast.
 //
@@ -25,8 +25,8 @@
 // draws, so the kernel's own frames use the theme the shell last drew with.
 //
 // THE KERNEL'S STATE: the notice banner and the toast with their deadlines
-// (one each; a second replaces the first), and the hold-to-exit pill's
-// progress, which the kernel's run reads to draw over its frame.
+// (one each; a second replaces the first), which the kernel's run reads to
+// draw over its frame.
 
 #ifndef MOY_CHROME_H
 #define MOY_CHROME_H
@@ -78,8 +78,6 @@ void moy_chrome_clear(moy_chrome_list_t *l);
 
 // -- the pieces -----------------------------------------------------------------
 
-// The hold-to-exit pill over a `cw` x `ch` canvas, `held_ms` into a `hold_ms` hold.
-void moy_chrome_pill(moy_chrome_list_t *l, int cw, int ch, uint32_t held_ms, uint32_t hold_ms);
 // The panel a crashed or refused run leaves: `notice` is the calmer one (a
 // cart this console cannot hold), titled `title` ("" or NULL: the table's
 // default for its kind); `text` word-wrapped; the hint names the way out (a
@@ -166,9 +164,7 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
 
 void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t until_ms);
 void moy_chrome_toast_arm(const char *title, const char *glyph, uint32_t until_ms);
-// What is up at `now` over a cw x ch canvas (the pill at `held_ms`, 0: none),
-// into `l`: the pill, then the banner, then the toast. False: nothing.
-bool moy_chrome_overlay(moy_chrome_list_t *l, uint32_t now, int cw, int ch, int lw, int fs,
-                        int status_h, uint32_t held_ms, uint32_t hold_ms);
+// What is up at `now`, into `l`: the banner, then the toast. False: nothing.
+bool moy_chrome_overlay(moy_chrome_list_t *l, uint32_t now, int lw, int fs, int status_h);
 
 #endif // MOY_CHROME_H

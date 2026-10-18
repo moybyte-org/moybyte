@@ -16,9 +16,9 @@ what this file drives through the real frame walk on the host:
     first, so the ordinary composite reads the pixels the blit would have
     written;
   * a frame the cart did not replace is shown again from the kept copy;
-  * anything that draws on the game canvas over the frame -- the
-    hold-to-exit toast, a crash panel -- settles it before it draws, so
-    correctness never depends on the fast path;
+  * anything that draws on the game canvas over the frame -- a crash panel,
+    a tool's bar -- settles it before it draws, so correctness never depends
+    on the fast path;
   * the FPS chip and the perf HUD line, opaque rects, are declared instead
     (`patch_cart_frame`): the frame still goes to the glass from the cart's
     memory and the flush takes those rects from the game canvas; a frame
@@ -191,27 +191,22 @@ def test_a_frame_settled_after_the_chip_keeps_it(tmp_path):
     assert ("settle", True) in cf.log     # the canvas is handed over to keep
 
 
-def test_the_hold_to_exit_toast_settles_the_frame_first(tmp_path):
+def test_the_crash_panel_settles_the_frame_first(tmp_path):
     ws, drv = _playing(tmp_path)
     cf = ws.cart_frame = FakeCartFrame()
     _spy(ws)
     drawn = []
-    real = ws.player._draw_hold_progress
+    real = ws.player._draw_error_panel
 
-    def hold():
+    def panel(*a, **k):
         drawn.append(list(cf.log))
-        return real()
+        return real(*a, **k)
 
-    ws.player._draw_hold_progress = hold
-    real_input = ws.player.handle_input
-
-    def holding(i):
-        out = real_input(i)
-        ws.player._home_holding = True      # BACKSPACE held down
-        return out
-
-    ws.player.handle_input = holding
-    _frame(ws, drv, cf)
+    ws.player._draw_error_panel = panel
+    ws.player.cart_error = "boom"           # the run crashed
+    cf.owed = True
+    cf.log.clear()
+    ws.player.tick(DT)                      # the crash frame, drawn over the cart's
     assert drawn and drawn[0][-1] == "settle"
 
 

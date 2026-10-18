@@ -185,8 +185,7 @@ def test_a_lua_cart_can_end_itself():
 
     libmoy's quit() is a host callback that sets SNAP_QUIT, and NOTHING read it
     on either tier -- so a Lua cart calling quit() ran on forever, including a
-    textmode(True) cart, which the cart API says must provide its own exit
-    because hold-BACKSPACE cannot reach one. Found on glass: a probe cart
+    textmode(True) cart, whose own exit it is. Found on glass: a probe cart
     called quit() 3,940 times and kept running.
     """
     buf = bytearray(32 * 32 * 2)

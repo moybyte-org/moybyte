@@ -386,7 +386,7 @@ A Ctrl-C (0x03) ends the run (why SERIAL) and starts the VM, so
 
 ### 5.4 Exit, the VM starting, the shell rebuilt
 
-1. The run ends: hold-to-exit, `quit()`, a menu row, a crash, a lost match, a
+1. The run ends: `quit()`, a menu row (the pause menu's Quit), a crash, a lost match, a
    Ctrl-C. The kernel persists pmem (the store's crash-safe write), closes the
    runtime, ends the audio session, releases the run's rows and the arena,
    disarms the crash record on a clean end, and records the route with any

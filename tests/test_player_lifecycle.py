@@ -36,7 +36,7 @@ def test_release_world_on_exit_drops_the_cart_world(tmp_path):
     assert ws.player.ns is None
     assert len(ns) == 0
     gc.collect()
-    # And the hold-to-exit path funnels through the same release.
+    # And the pause menu's Quit path funnels through the same release.
     _open_game(ws)
     for _ in range(5):
         ws.frame(1 / 60)
@@ -88,7 +88,7 @@ def test_text_mode_restored_on_play_exit_to_code_tab(tmp_path):
     assert ws.input.text_mode is True          # code tab = typing mode
     ws._leave_menu()                            # PLAY: cart wants game keys
     assert ws.input.text_mode is False
-    ws._exit_to_caller()                        # hold-exit back to the code tab
+    ws._exit_to_caller()                        # Quit back to the code tab
     assert ws.wm.top_is("menu")
     assert ws.input.text_mode is True          # the #80 fix: mode restored
     # And returning to a NON-text tab stays in game-key mode.

@@ -399,8 +399,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # Player (player.py): the run-loop black box; its cart-run fields
 # (cart_error/crash_line/ns/...) are forwarding properties here for the same
-# reason. Exit is hold-BACKSPACE (games) / the bar X (tools) -- the #71 pause
-# machinery is retired, do not reintroduce it.
+# reason. A game is left through the pause menu (the console's key, `start`),
+# a tool through the bar X; the #71 BACKSPACE pause is retired, do not
+# reintroduce it.
 try:
     from player import (Player, BAR_TYPES, SCRIPT_TYPE)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -2198,18 +2199,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
         WITH a minimal bar (back + title + status) so it's EXITABLE (Part 4), unlike a
-        GAME which owns the full 320x240 with NO chrome and exits via hold-BACKSPACE. This
-        is the bar-visibility-by-type rule: game -> hide the bar; tool/app -> show it. The
-        Player reads it to decide whether to draw/route the tool bar and to suppress its
-        own hold-to-exit gesture (a tool's BACKSPACE stays a free text key). False for
+        GAME which owns the full 320x240 with NO chrome and is left through the pause menu.
+        This is the bar-visibility-by-type rule: game -> hide the bar; tool/app -> show it.
+        The Player reads it to decide whether to draw/route the tool bar. False for
         games, the crash frame (the crash bar handles that), and every non-play screen.
 
         A GAME that reads text (textmode(True), e.g. the typing game Letter Blitz) does NOT
         get this bar -- forcing it over a game was rejected as a hack (it overlays the game's
-        own top strip). Such a cart MUST provide its OWN exit instead: it calls quit()
-        (make_api) from a key/affordance it draws. hold-BACKSPACE can't reach a text-mode
-        cart (BACKSPACE is a typed 0x08 there, no keyboard autorepeat), so the exit is the
-        cart's job -- see docs/moy_cart_api.md "A text-mode cart must provide its own exit"."""
+        own top strip). The console's key (`start`) reaches it all the same and opens the
+        pause menu, whose Quit leaves; a cart may also call quit() (make_api) from a
+        key/affordance it draws."""
         return (self.wm.top_is_player() and self.cart_error is None  # Stage 6d
                 and self.cart is not None
                 and self.cart.get("type") in BAR_TYPES)
@@ -3057,7 +3056,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.ach_ui._clock_taps = 0
         # #197: while WASM MODE is on, HOME is the connection screen. Here and
         # not at each exit site, because "return to the launcher" has many doors
-        # -- the bar's context X, hold-BACKSPACE out of a game, an app's own
+        # -- the bar's context X, the pause menu's Quit, an app's own
         # close, a crash -- and every one of them funnels through this method. A
         # per-door re-park is the bug class that left the T-Deck without a web
         # console at all; this is the last line of the one door they share.
@@ -3434,9 +3433,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             if layer.handle_input(i):
                 return
 
-    # (The desktop/running-cart keyboard handler -- the #71 BACKSPACE-toggles-pause
-    # logic -- moved to Player.handle_input (Stage 2, player.py); the "desktop"
-    # content layer routes to it via _PlayerLayer.)
+    # (The "desktop" content layer routes the running cart's frame to
+    # Player.handle_input (player.py) via _PlayerLayer.)
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
@@ -3676,7 +3674,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _draw_loading_toast(self):
         """#184: the deferred-transition acknowledgment -- a small top-center
-        pill (the hold-to-exit toast's idiom) painted on the frame between a
+        pill painted on the frame between a
         tap and its heavy transition. The panel retains this frame for the
         whole load stall, so the kid sees LOADING instead of a frozen shelf.
         Drawn on the system canvas above the whole stack; indexed API only
@@ -4404,10 +4402,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         draw_splash(self.sys_canvas)
 
     # -- desktop shell drawing (#28) -----------------------------------------
-
-    # (The #71 pause chrome -- _draw_pause_dim / _draw_pause_buttons -- was retired in
-    # Stage 5; the Player now exits on hold-BACKSPACE, with a transient
-    # hold-progress toast in its place. See player.py.)
 
     def _mini_btn(self, label, rect, fill, cv=None, label_rect=None):
         # Shared draw toolkit -- the implementation moved to ui.mini_btn (the

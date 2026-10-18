@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 14,
+  "version": 15,
   "title": "Bench Lua",
   "id": "moybyte.bench_lua",
   "fps": "free",

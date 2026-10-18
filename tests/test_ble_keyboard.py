@@ -130,7 +130,7 @@ def test_the_arrow_host_scheme():
     assert mi.hid_buttons_for_key(ord("x")) == ("b",)
     assert mi.hid_buttons_for_key(ord("W")) == ("up",)
     assert mi.hid_buttons_for_key(0x0D) == ("run",)
-    assert mi.hid_buttons_for_key(0x08) == ("home",)
+    assert mi.hid_buttons_for_key(0x08) == ()        # Backspace is a plain key
     assert mi.hid_buttons_for_key(ord("l")) == ()
 
 

@@ -130,13 +130,12 @@ uint32_t moy_play_flags(void);
 void moy_play_set_down(uint32_t run);
 enum { MOY_PLAY_QUIT = 1u, MOY_PLAY_VIEW = 2u };    // what a frame reports
 enum {                                          // why a run ended
-    MOY_PLAY_END_HOLD = 0, MOY_PLAY_END_QUIT = 1, MOY_PLAY_END_MENU = 2,
+    MOY_PLAY_END_QUIT = 1, MOY_PLAY_END_MENU = 2,
     MOY_PLAY_END_CRASH = 3, MOY_PLAY_END_LINK = 4, MOY_PLAY_END_SERIAL = 5,
 };
 
 // libmoy's seven buttons are the input table's first seven bits.
 #define MOY_PLAY_BUTTON_MASK 0x7Fu
-#define MOY_PLAY_HOME_BIT 7             // moy_input's `home`, after the seven
 #define MOY_PLAY_START_BIT 14           // moy_input's `start`: Super, the pause menu
 // A run handle's low byte: generation << 8 | this.
 #define MOY_PLAY_TAG 0x5Au
@@ -241,8 +240,8 @@ bool moy_play_lock_seed(uint32_t *seed);
 // THE KERNEL RUN AS THE LOOP'S FOREGROUND (docs/kernel_cartpath_2026-10.md
 // §4). While a run is in front the loop's frame stage calls
 // moy_play_front_frame and makes no console upcall: the run's input (the
-// hold-to-exit gesture, the pointer), its ticks (the tick model's plan, or
-// the match's lockstep), the chrome over it (the pill, the banner, the toast:
+// pointer), its ticks (the tick model's plan, or
+// the match's lockstep), the chrome over it (the banner, the toast:
 // moy_chrome's raster) and the board's present are all C. A board's
 // compositor gives the front its two ends (moy_front_ops_t); an image whose
 // board gives none keeps the console's foreground, which drives the same
@@ -252,7 +251,7 @@ bool moy_play_lock_seed(uint32_t *seed);
 // when the run needs it: the cart declared a view the board's present does
 // not compose, it raised (the console's next frame reports it), or the link
 // asked for a cart. It ENDS the run, freezing its books, when the run is
-// over: the hold (END_HOLD), quit() (END_QUIT), a Ctrl-C (END_SERIAL), the
+// over: quit() (END_QUIT), a Ctrl-C (END_SERIAL), the
 // dev channel's `end` (END_MENU). The console's next frame takes the route.
 typedef struct {
     // The run's canvas this frame: its pixels and size (a banded board's
@@ -263,7 +262,6 @@ typedef struct {
     bool (*map)(void *ctx, int32_t *x, int32_t *y);
     void *ctx;
 } moy_front_ops_t;
-#define MOY_PLAY_HOLD_MS 700u           // the hold-to-exit gesture
 #define MOY_PLAY_FREE_DT 0.1f           // a free-running cart's dt clamp
 void moy_play_front_ops(const moy_front_ops_t *ops);
 // Take the loop's foreground for the live run: OK, NORT where the board has

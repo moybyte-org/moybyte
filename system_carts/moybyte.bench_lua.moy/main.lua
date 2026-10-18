@@ -658,7 +658,7 @@ local function report()
       y = y + 10
     end
   end
-  print("HOLD BACK TO EXIT", 8, y, 6)
+  print("MENU KEY TO LEAVE", 8, y, 6)
 end
 
 function _draw()

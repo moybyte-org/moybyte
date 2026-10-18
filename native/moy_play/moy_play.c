@@ -762,8 +762,6 @@ static struct {
     const moy_front_ops_t *ops;
     uint32_t run;
     bool live;
-    bool holding;
-    uint32_t since;
     moy_chrome_list_t *overlay;
 } F;
 
@@ -814,7 +812,6 @@ int moy_play_front(uint32_t run) {
     }
     F.run = run;
     F.live = true;
-    F.holding = false;
     return MOY_PLAY_OK;
 }
 
@@ -852,26 +849,8 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     if (m != NULL && m->act != MOY_MATCH_ACT_NONE) {
         return front_back();
     }
-    // The hold-to-exit gesture: home held MOY_PLAY_HOLD_MS. A text-mode cart
-    // never sees home asserted (BACKSPACE is a typed byte there).
     uint32_t held = 0, pressed = 0;
     moy_input_masks(r->in, MOY_INPUT_UNION, &held, &pressed);
-    uint32_t held_ms = 0;
-    if (held & (1u << MOY_PLAY_HOME_BIT)) {
-        if (!F.holding) {
-            F.holding = true;
-            F.since = now;
-        }
-        held_ms = now - F.since;
-        if (held_ms >= MOY_PLAY_HOLD_MS) {
-            return front_ended(MOY_PLAY_END_HOLD);
-        }
-        if (held_ms == 0) {
-            held_ms = 1;                // the pill shows from the first held frame
-        }
-    } else {
-        F.holding = false;
-    }
     // Super (`start`): the console's pause menu holds the run, and the
     // console's frame -- this same loop frame -- takes the press.
     if (pressed & (1u << MOY_PLAY_START_BIT)) {
@@ -931,7 +910,7 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     }
     if (render) {
         moy_chrome_list_t *l = F.overlay;
-        if (moy_chrome_overlay(l, now, w, h, w, 1, 18, held_ms, MOY_PLAY_HOLD_MS)) {
+        if (moy_chrome_overlay(l, now, w, 1, 18)) {
             moy_chrome_raster(l, px, w, h, moycore_RUN.c.canvas.wire, 1);
         }
     }

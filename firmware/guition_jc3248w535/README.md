@@ -181,8 +181,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   2026-10-05), on-glass suite 10/10 running carts from the card, no card = the
   internal store this board shipped with.
   Also decided: **no touch-only game-exit gesture -- DECLINED** (owner: "we
-  don't support that"; a paired BLE keyboard's hold-BACKSPACE is the exit
-  path on this board), and **audio stays untracked** (the board HAS an audio
+  don't support that"; a paired BLE keyboard's GUI key, the pause menu's Quit, is the
+  exit path on this board), and **audio stays untracked** (the board HAS an audio
   out -- a 2-pin JST1.25 speaker connector, I2S per the field guides -- amp
   pins unverified; revisit if a speaker ever gets plugged in).
 * 2026-08-19 (evening) -- **the owner calls the board PORTED.** Also the
@@ -253,8 +253,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     480x320. The lever is the launcher first-paint diet, not the driver.
   * lived pain: entering a game with no way out (the touch-only exit
     gesture, already on #202) -- the owner had to power cycle to leave a
-    cart. Rising priority (a paired BLE keyboard's hold-BACKSPACE now
-    also serves).
+    cart. Rising priority (a paired BLE keyboard's GUI key and the pause
+    menu's Quit now also serve).
   * **the scroll feel, closed the same evening** (owner verdict: "perfect,
     looks better than tdeck"): the drag-hang-then-phantom-fling was the
     driver waiting the GT911's 400ms no-news bound to believe a lift on a
@@ -295,6 +295,7 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   * open stages/decisions: SD (stage 4 -- pins unverified), audio (stage 5 --
     amp/pins unverified), backlight PWM dimming (owner call), and a
     **touch-only exit gesture for fullscreen games** -- this board has no
-    BACKSPACE to hold, so a running game currently has no on-glass exit path
-    (tools/apps keep the bar's back; games hide the bar). #202 carries
+    console key of its own, so a running game with no keyboard paired has no
+    on-glass exit path (tools/apps keep the bar's back; games hide the bar).
+    #202 carries
     it.

@@ -46,12 +46,6 @@ def _both(ws, piece, *args):
     return ops, got, bytes(raw)
 
 
-@pytest.mark.parametrize("held", [0, 1, 350, 700, 2000])
-def test_the_pill_rasters_as_the_canvas_draws_it(ws, held):
-    ops, canvas, raster = _both(ws, "chrome_pill", 320, 240, held, 700)
-    assert ops and canvas == raster
-
-
 @pytest.mark.parametrize("notice,text", [
     (False, "cart:12: attempt to index a nil value (global 'player')"),
     (True, "This cart needs 5.2 MB and this console has 3.1 MB free."),

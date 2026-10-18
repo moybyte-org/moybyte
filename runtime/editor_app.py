@@ -396,7 +396,7 @@ class EditorApp:
         """PLAY (spec Section 6): leave the current tab by RUNNING the cart. Commits/
         applies the tab's freshest edit, (re)starts the cart, and hands it to the
         Player -- recording SELF (the Editor) as the run caller (Stage 3b), so the
-        cart's exit (pause QUIT here, hold-BACKSPACE from Stage 5) returns to the
+        cart's exit (the pause menu's Quit, quit()) returns to the
         Editor on THIS tab (spec Section 2's launch-and-return), not to the home root.
         This is the deliberate navigation-semantics change: today's implicit run-on-
         close returned to the launcher; PLAY returns to the Editor."""

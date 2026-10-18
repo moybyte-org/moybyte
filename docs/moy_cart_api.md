@@ -193,23 +193,20 @@ an imported PICO-8 cart always carries its own 30 or 60.
   (it reappears only on the crash panel). There is no reserved letter: **every key
   belongs to your cart** but Super, the console's system key, which opens its pause
   menu and holds your cart there (no tick, `time()` and the music stopped) until
-  the player resumes it. To exit, the player **holds BACKSPACE
-  (~700ms)** — a quick tap reaches your cart as a plain key; a sustained hold shows a
-  small progress toast and returns to whoever launched the cart (the launcher, or
-  the editor's PLAY). A `"tool"`/`"app"` cart runs WITH a minimal console bar
-  (the back chevron, its title and the status) instead, and exits via that back.
+  the player resumes it. A cart can never read the device's console key (a keyboard's
+  Super, a gamepad's Start, the Moy button, the T-Deck's Mic), in any input mode;
+  tapping it opens the pause menu, whose **Quit** hands control back to whoever
+  launched the cart (the launcher, or the editor's PLAY). BACKSPACE is an ordinary
+  key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
+  title and the status) instead, and exits via that back.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
   `q e`); text mode delivers EVERY letter to `key()`/`keyp()`.
-- **A `textmode(True)` game MUST provide its own exit** — the console can't reach it.
-  In text mode BACKSPACE is a plain typed key your cart reads (a delete), so the
-  console's standard BACKSPACE exit never reaches the cart, and the T-Deck keyboard
-  has no autorepeat so a *held* BACKSPACE doesn't register either. So bind **`quit()`**
-  (see [State & utility](#state--utility)) to a spare key or a small on-screen
-  affordance you draw. Letter Blitz models this with a tap-anytime ✕ in the top-right
-  corner (above its HUD, clear of the play area) — a touch exit never depends on the
-  keyboard. (A `"tool"`/`"app"` cart already runs with the console's own bar and its
-  back, so it's exitable without this; but `quit()` works for any cart.)
+- **A `textmode(True)` game needs no exit of its own**: the console's key opens the
+  pause menu in text mode too, and BACKSPACE is a typed delete your cart reads. A
+  cart may still bind **`quit()`** (see [State & utility](#state--utility)) to a key
+  or an on-screen affordance it draws; Letter Blitz keeps a tap-anytime ✕ in the
+  top-right corner.
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.
@@ -511,7 +508,7 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
 
 ## Input
 
-Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`.
+Buttons are named. The canonical set a cart reads is `left, right, up, down, a, b, run`.
 
 **Which key is which.** The buttons are the same everywhere; the *keys* differ, because
 a thumb keyboard and a desktop keyboard are not the same instrument:
@@ -522,7 +519,6 @@ a thumb keyboard and a desktop keyboard are not the same instrument:
 | `a` | **L** or **SPACE** | **Z** or **SPACE** |
 | `b` | **K** | **X** |
 | `run` | **ENTER** | **ENTER** |
-| `home` | **BACKSPACE** | **BACKSPACE** |
 | `stop` | — | **ESC** |
 
 On the T-Deck the left thumb steers and the right thumb fires, both on the home row.
@@ -532,7 +528,7 @@ and comfortable `Z`/`X`, which is PICO-8's layout and every emulator's, so it ge
 those. `SPACE` is jump and `ENTER` is `run` on both.
 
 `run` is also the launcher's **open this cart**, so Enter confirms in menus.
-`home` is the **exit**: hold it ~700ms while a game is running.
+The console's key is no button a cart can read (see [The canvas](#the-canvas)).
 
 **Every other key is a plain character** a cart reads with `key()` / `keyp()`, firing
 no button — including `R`, `H`, `J`, `Q`, `E` and (on the T-Deck) `Z`/`X`, all of which
@@ -541,6 +537,7 @@ moving the player; a stolen letter is a bug you only find by playing.
 
 In **text mode** (`textmode(True)`, the code editor, a wifi password) no key fires a
 button at all — even Backspace, Enter and space arrive as plain characters to type.
+The console's key still works there.
 
 | call | returns |
 |---|---|
@@ -569,8 +566,8 @@ also the single biggest speed lever a port has.
 (`btn`/`btnp`), `"touch"` (`touch()`), `"keyboard"` (`key`/`keyp`/`textmode`), e.g.
 `"input": ["touch"]` for a touch-only game. It's purely a hint for surfaces that draw
 optional controls (today: the web view's virtual gamepad + soft-keyboard summon —
-`"buttons"` shows the d-pad + A/B, `"keyboard"` shows the ⌨ toggle; the HOME/exit
-button always shows, so even a `["touch"]` cart stays exitable); it changes nothing about
+`"buttons"` shows the d-pad + A/B, `"keyboard"` shows the ⌨ toggle; the ☰ console-key
+button always shows, so even a `["touch"]` cart can reach the pause menu); it changes nothing about
 which calls actually work. **Omit it and every control shows** (today's behavior,
 zero regression) — only declare it once a cart's input is settled.
 
@@ -996,7 +993,7 @@ same here as on any other console that implements the spec.
 | call | does |
 |---|---|
 | `time()` | milliseconds since the cart started |
-| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
+| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. Optional: the console's key opens a pause menu with Quit in every mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |

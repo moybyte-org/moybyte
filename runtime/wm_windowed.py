@@ -43,7 +43,7 @@ Picotron-style (owner direction, 2026-07-08):
     -- a playtest keeps ticking (it stays the stack top, the running process)
     while the editor beside it is being typed in, and its pointer feed is
     click-stripped so the background cart never eats the editor's taps. Only an
-    explicit exit ends a run: the strip X, hold-BACKSPACE while focused, or an
+    explicit exit ends a run: the strip X, the pause menu's Quit while focused, or an
     app verb. Chips: click to focus, click the focused chip to minimize, click
     a minimized chip to restore. The keyboard's TEXT MODE follows focus: a
     window keeps the mode it had when focus left it and gets it back when
@@ -375,8 +375,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # OPEN and who TICKS (the Player ticks while it's the stack top), but the
         # keyboard and window highlight follow _focus, which moves on click without
         # popping anything. A running game now keeps running while the editor
-        # beside it is being typed in; only its X / hold-BACKSPACE (when focused)
-        # / an exit verb ends it. None = the desktop root has focus.
+        # beside it is being typed in; only its X / the pause menu's Quit (when
+        # focused) / an exit verb ends it. None = the desktop root has focus.
         self._focus = None
         # TEXT MODE follows _focus: the keyboard is in text mode only while
         # the focused window wants it. `_text_wish` keeps, per window key (None
@@ -2474,8 +2474,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._wins[key]
         # A click FOCUSES the window it lands in -- and never pops anything (the
         # owner call: looking at the editor must not end the playtest beside it).
-        # Closing is explicit: the strip X, hold-BACKSPACE in a focused game, or
-        # an app's own exit verb.
+        # Closing is explicit: the strip X, the pause menu's Quit in a focused game,
+        # or an app's own exit verb.
         if click and key != self._focus:
             self._move_focus(key)
             ws._dirty = True
@@ -2532,7 +2532,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._on_nav()
 
     def close_player(self):
-        """Close the playtest window (its X, or hold-BACKSPACE routed through
+        """Close the playtest window (its X, or the pause menu's Quit routed through
         ws._exit_to_caller): remove ONLY the player from the stack, then hand
         focus back to the run CALLER's window when it's open (the Editor for a
         PLAY run) -- the launch-and-return contract, without collateral pops."""

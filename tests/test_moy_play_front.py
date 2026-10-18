@@ -12,9 +12,9 @@ watches for:
   * every front frame ticks the cart, draws into the board's canvas and
     presents it, with no upcall of any class in the run's books;
   * `state` while the run is in front is the kernel's answer, not the console's;
-  * the hold-to-exit gesture is the kernel's: home held short of the hold
-    keeps the run, held through it ends the run with why HOLD, and the
-    console's next frame takes the route back to the launcher;
+  * there is no hold gesture: a held button the console once read as an exit
+    (`home`) ends nothing, and a front run is left through its pause menu or
+    quit();
   * the dev channel's `end` ends the run the same way, with why MENU.
 """
 
@@ -85,7 +85,9 @@ def test_the_player_hands_a_vm_free_game_to_the_front(front):
     assert st["link"] is None
 
 
-def test_a_front_ends_on_the_hold_and_the_console_takes_the_route(front):
+def test_no_held_button_ends_a_front_run(front):
+    """The hold-to-exit gesture is gone: `home` held far past the old 700 ms
+    (and Backspace, which no longer maps to it) leaves the run playing."""
     ws, buf, presents = front
     open_cart(ws, "Bullet Storm")
     assert ws.player._front is True
@@ -94,24 +96,15 @@ def test_a_front_ends_on_the_hold_and_the_console_takes_the_route(front):
     assert mp.front_frame(now, 33333) == 1
     inp.set_button("home", True)
     inp.begin_frame()
-    # Short of the hold: the run plays on, the pill over it.
-    for _ in range(10):
+    for _ in range(60):
         now += 33
         assert mp.front_frame(now, 33333) == 1
+    now += 2000
+    assert mp.front_frame(now, 33333) == 1
     assert mp.front_live()
-    # Through the hold: the run ends where it stands.
-    now += 700
-    assert mp.front_frame(now, 33333) == -1
-    assert not mp.front_live()
-    info = mp.info()
-    assert info[6] is True and info[10] == mp.END_HOLD, info
-    assert list(info[5]) == [0, 0, 0, 0, 0, 0], info
-    assert mp.state_json() == "null", "no run in front: the console answers `state`"
+    assert mp.info()[6] is False, "the run did not end"
     inp.set_button("home", False)
     inp.begin_frame()
-    ws.frame(1 / 30)
-    assert ws.player._front is False
-    assert ws.screen == "launcher", ws.screen
 
 
 def test_super_gives_the_console_the_frame_and_the_pause_holds_the_run(front):

@@ -18,7 +18,8 @@
 //
 // THE KEYMAP is the arrow-key hosts' (owner call, 2026-08-14): arrows are the
 // d-pad, W A S D too, Z and SPACE are A, X is B, ENTER is `run`, ESC `stop`,
-// BACKSPACE `home`. A text surface gets the key and no alias but the arrows.
+// BACKSPACE a plain key; the GUI key is `start`, the console's. A text
+// surface gets the key and no alias but the arrows (and `start`).
 //
 // RECONNECT. Once a keyboard is picked only that address is reconnected; with
 // none picked, the first HOGP keyboard seen is. Background scans are passive

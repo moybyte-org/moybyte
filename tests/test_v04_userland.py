@@ -729,7 +729,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     drv.press("b")                                      # B belongs to the GAME while it
     drv.frame(1 / 30)                                   # plays -- no chrome, stays playing
     assert ws.screen == "desktop"
-    # Stage 5 exit model: a running game exits via hold-BACKSPACE (covered in
+    # Stage 5 exit model: a running game exits via the pause menu (covered in
     # test_desktop_shell); here we just leave to the launcher via go_home() (the ≡ HOME
     # action) -- robust regardless of the seed cart's type -- then open it in the Editor.
     ws.go_home()

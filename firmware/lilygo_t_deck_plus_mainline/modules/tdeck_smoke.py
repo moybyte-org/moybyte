@@ -225,8 +225,8 @@ def touch(secs=60):
 
 # Buttons drawn as a held/not-held row: the ones the T-Deck matrix can
 # produce (native/moy_input/moy_kbd.c's scheme): the WASD d-pad, L/space = A,
-# K = B, ENTER = run, BACKSPACE = home.
-_KBD_BUTTONS = ("up", "down", "left", "right", "a", "b", "run", "home")
+# K = B, ENTER = run, Mic = start (the console's key).
+_KBD_BUTTONS = ("up", "down", "left", "right", "a", "b", "run", "start")
 
 # Seconds per phase. Two phases, so the whole smoke is ~2x this plus the
 # wrap-up -- long enough to hold a key down and see it repeat, short enough

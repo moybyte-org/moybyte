@@ -137,7 +137,7 @@ beneath it). The **PLAY icon** enters console mode: the desk's windows wait
 parked, off the back-stack, and the fullscreen **home** shows — the same
 home every board has (`docs/shell_layout_2026-10.md` §12: its Games / Mine /
 Apps / Make tabs, the Games tab holding no app): a tap runs a game
-FULLSCREEN exactly like the small tiers (hold-BACKSPACE exits back to the
+FULLSCREEN exactly like the small tiers (the pause menu's Quit exits back to the
 home), and a tap on the Make tab and a card's CHANGE open the Editor
 fullscreen, as there. The home's X — B from a keyboard — is the way back to
 the desk, its windows where they were. The Player tier only ever gets the
@@ -372,7 +372,7 @@ either restricts the code editor or corrupts kid code — both worse.
 
 The rule in one line: **back goes one level, a window's X closes it
 (owner, 2026-10-18); taskbar shown → the back on its bar exits (a tap);
-fullscreen game → the pause menu's Quit, or hold-BACKSPACE.** On a console
+fullscreen game → the console's key opens the pause menu, whose Quit exits.** On a console
 bar (one screen stack, no windows) the way back is the **back chevron** at
 the head of the bar's zone, after the Moy button: the bar draws it wherever
 there is somewhere to go back to and its layout places no `close` widget
@@ -388,7 +388,7 @@ lives only in a window's title strip and closes the window.
 | Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **none** — the PLAY icon enters console mode; a window's X closes it | a plain key |
 | Editor | taskbar | back → pop back, to where it was opened from | a plain key |
 | Settings (incl. wifi setup) | taskbar | back, Esc or B → a page of it, else out of it | a plain key — **delete in the password field just works** |
-| Running game | fullscreen | Super → the pause menu's Quit; **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |
+| Running game | fullscreen | the console's key (§9a) → the pause menu's Quit → return to caller (§2) | a plain key the game reads |
 | Registered app (Calc, Files, …) | the bar: Moy, back, title, status | back, Esc or B → a page of it, else return to caller | a plain key — delete in text fields |
 | Running tool/app cart | minimal bar (back + title + status) | back → return to caller | a plain key — delete in text fields |
 
@@ -400,12 +400,22 @@ and the whole BACKSPACE pause-screen / double-tap-to-exit lineage that #71 itera
 the interlock that made BACKSPACE precious was the bar being one global mode-machine;
 zone the bar (§5) and the preciousness dissolves.
 
-For a fullscreen game, a quick BACKSPACE tap still reaches the game (carts may use it
-as a key); only a sustained HOLD (~700ms, with a transient on-screen progress toast)
-exits, returning control to whoever called `run` — launcher or Editor. One niche edge,
-on the record: a game that wants *autorepeat* backspace-delete (hold to erase)
-collides with hold-to-exit. Accepted; it is rarer and cheaper than every alternative
-tried (see #71's history of what "clever" cost).
+For a fullscreen game BACKSPACE reaches the game like any other key, in every input
+mode (a text game's delete included, autorepeat or none). The way out is the
+console's key (§9a): its pause menu's Quit returns control to whoever called `run` —
+launcher or Editor.
+
+### 9a. The console key (owner call, 2026-10-18)
+
+Every device has a single key the console keeps for itself, whatever the input mode,
+and no cart reads it: the GUI key of a BLE or USB keyboard (the simulator's Super, Cmd
+or Meta), Start on a gamepad, the Moy button on touch, and the **Mic key** on the
+T-Deck. They are all the `start` button (`Workstation.system_key`,
+`docs/look_2026-10.md` step 25a), so a tap pauses a fullscreen game and opens the
+system menu from every other surface. The T-Deck's Mic is d0 bit 6 of the raw matrix,
+and `start` in game mode and at a text surface alike; the C3 sends no byte for a bare
+Mic in its ASCII mode, where the key is Shift+Mic
+(`firmware/lilygo_t_deck_plus_mainline/README.md`).
 
 The second edge is resolved by an additive cart verb: a **`textmode(True)` game**
 receives BACKSPACE as a typed delete (and the T-Deck keyboard has no autorepeat), so

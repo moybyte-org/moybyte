@@ -438,9 +438,7 @@ class MoycoreRun:
         # A LUA cart ends itself the same way a Python one does. libmoy's quit()
         # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
         # the flag was written on every tier and translated on none, so `quit()`
-        # was a no-op for every Lua cart -- including the textmode(True) carts
-        # the cart API says MUST provide their own exit, because hold-BACKSPACE
-        # cannot reach one. Route it into the flag the Player already honours
+        # was a no-op for every Lua cart. Route it into the flag the Player already honours
         # after _update (player.tick), and clear the slot so one quit is one
         # exit.
         if self.snap[self._I_QUIT]:

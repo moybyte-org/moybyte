@@ -122,11 +122,9 @@ HUD_H = 28
 GRID_Y0 = 48
 
 # This is a TYPING game -- it calls textmode(True) so every letter reaches keyp()
-# cleanly. But that means the console's usual game exit (hold BACKSPACE) can't
-# reach it: in text mode BACKSPACE is a plain typed key (delete), and the T-Deck
-# keyboard has no autorepeat, so a held BACKSPACE never accumulates the hold. A
-# textmode(True) cart MUST provide its OWN exit (see docs/moy_cart_api.md). Ours
-# is a tap-anytime X button in the top-right corner -- above the HUD (row < 20),
+# cleanly. BACKSPACE is a plain typed key (delete) here, and the console's own
+# key (the pause menu, whose Quit leaves) works in every mode and never reaches
+# the cart. Ours is also a tap-anytime X button in the top-right corner -- above the HUD (row < 20),
 # clear of the maze (which starts at GRID_Y0), and touch-only so it never depends
 # on the keyboard. Tapping it calls quit() to return to the launcher.
 EXIT_W = 16
@@ -438,9 +436,9 @@ def _init():
     # TYPING GAME: ask the console for the text keyboard. Without this the
     # device keyboard stays in raw game mode, where only the 9 d-pad-mapped
     # keys produce letters at all -- and q/e got eaten as pause/stop. In text
-    # mode EVERY letter reaches keyp() cleanly. That also means the console's
-    # hold-BACKSPACE game exit can't reach us, so we provide our OWN exit: the
-    # top-right X button (tap it -> quit()), drawn + handled below.
+    # mode EVERY letter reaches keyp() cleanly. The console's own key still
+    # opens the pause menu; our own exit is the top-right X button (tap it ->
+    # quit()), drawn + handled below.
     textmode(True)
     _bg_dirty = True          # open on the arena as drawn in the Map editor
     n = int(cfg("tank_count", 4))

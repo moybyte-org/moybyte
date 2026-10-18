@@ -1101,7 +1101,7 @@ def test_closing_make_never_takes_settings_with_it(tmp_path):
 
 
 def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
-    """Closing the playtest (X / hold-BACKSPACE -> _exit_to_caller) removes ONLY
+    """Closing the playtest (X / the pause menu's Quit -> _exit_to_caller) removes ONLY
     the player: Settings floating above stays open, and focus returns to the run
     caller's window (the Editor)."""
     ws = _ws(tmp_path)
@@ -1112,7 +1112,7 @@ def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
     ws.open_settings()                          # Settings over the running game
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "desktop", "settings"]
-    ws._exit_to_caller()                        # the hold-BACKSPACE exit path
+    ws._exit_to_caller()                        # the pause menu's Quit path
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "settings"]
     assert "settings" in ws.wm._order           # Settings SURVIVED

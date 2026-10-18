@@ -95,19 +95,11 @@ to whoever called it.
   ICONS). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
-- **Exit model (#71's BACKSPACE pause machinery is retired):** a fullscreen GAME exits on a
-  sustained **hold-BACKSPACE (~700ms)** — raw-matrix mode streams the held key, a
-  transient progress toast fills, the pop returns to the caller; a quick tap is a
-  plain cart key. Taskbar tools/apps exit via the bar's back, so BACKSPACE stays an
-  ordinary key there (the wifi password field's delete works with zero
-  special-casing). A `textmode(True)` game provides its OWN exit via the additive
-  cart verb **`quit()`** (in text mode BACKSPACE arrives as a typed delete and the
-  keyboard has no autorepeat, so the console's gesture can't reach it) — Letter
-  Blitz models it with a tap-✕. (The plan's triple-tap alias was dropped after
-  on-device testing.) **Super** (the `start` button; `Workstation.system_key`)
-  is the console's from every surface: the pause menu over a fullscreen game
-  (the Player holds the run, its clock and its music: `Player.pause`), the
-  system menu anywhere else (`docs/shell_ux_v1.md` §9).
+- **Exit model (#71's BACKSPACE pause machinery is retired).** A game is left
+  through the pause menu, which the console's one key opens (`start`:
+  `Workstation.system_key`; the T-Deck's is Mic); BACKSPACE is a plain key with
+  no hold gesture, so a `textmode(True)` game needs no exit of its own. Tools
+  and apps leave by the bar's back. `docs/shell_ux_v1.md` §9 and §9a.
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
 - **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo

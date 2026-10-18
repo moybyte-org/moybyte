@@ -184,9 +184,7 @@ class ConsoleDriver:
         self.pointer = ws.pointer
         self._pending = []      # one-frame button presses
         self._held_ext = set()  # buttons held via hold() -- press cleanup must not
-                                # release them (a browser Backspace key-repeat maps to
-                                # HOME presses that used to clobber bshold's sustained
-                                # hold, resetting the hold-to-exit toast every repeat)
+                                # release them
         self._typed = []        # queued typed chars; frame() feeds ONE per frame
         self._key_held = 0      # physically held printable key (khold latch): in
                                 # game mode it streams as last_key every frame,

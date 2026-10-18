@@ -141,7 +141,7 @@ ALL-CAPS, **three words or fewer**, no terminal punctuation. This is text stampe
 on the machine: verbs, labels, settings rows, tab names, status pills.
 
 ```text
-PLAY   CHANGE   MAKE   SAVED   HOLD TO EXIT   TAP AGAIN TO DELETE   WIFI
+PLAY   CHANGE   MAKE   SAVED   TAP AGAIN TO DELETE   WIFI
 ```
 
 ENGRAVED text never forms a sentence. The moment a string needs a verb *and* an

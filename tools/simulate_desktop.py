@@ -12,8 +12,9 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   #            click/drag taps and drags. Nothing steers a cursor with the keys.
   #   ARROWS = the d-pad (WASD also works). Z = A, X = B, SPACE = A too.
   #            Enter = run, which is also "open this cart" in the launcher.
-  #            BACKSPACE = home, the EXIT key: HOLD ~700ms to leave a running
-  #            cart (a plain key while playing otherwise). Esc quits the sim.
+  #            BACKSPACE is a plain key. SUPER (Cmd, the Windows key) is the
+  #            console's key: the system menu, or the pause menu over a game
+  #            (Quit leaves it). Esc closes a menu, or quits the sim.
   #   The T-Deck's own keys differ ON PURPOSE (it has no arrows, and its Z/X sit
   #   under the WASD thumb): there it is WASD + L/K. Same buttons, two keyboards.
   #   The code editor is FULL-SCREEN: letters type, the bottom symbol palette
@@ -25,7 +26,7 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   python tools/simulate_desktop.py --demo --gif demo.gif
 
   # headless custom script
-  python tools/simulate_desktop.py --gif out.gif --script "wait:20 right run wait:40 home"
+  python tools/simulate_desktop.py --gif out.gif --script "wait:20 right run wait:40 super"
 
   # launch a single cartridge directly (skip the launcher)
   python tools/simulate_desktop.py --cart system_carts/moybyte.star_catcher.moy
@@ -53,11 +54,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
 # Tour (shared-console buttons): open a cart, play it, EXIT, move, open another, play,
-# exit. Stage 5 retired pause -- a running cart is exited by the fw-independent triple-
-# tap "home" (three consecutive home tokens = three BACKSPACE edges within the window).
+# exit. The `super` token is the console's key; over a game it opens the pause
+# menu, whose rows are Resume, Restart, Options, Quit (a press needs a gap
+# frame to be a second edge).
+_EXIT = "super wait:4 down:2 down:2 down:2 run wait:8"
 DEMO_SCRIPT = (
-    "wait:18 run wait:40 home home home wait:8 down run wait:50 home home home wait:8 "
-    "down down run wait:40 home home home wait:20"
+    "wait:18 run wait:40 " + _EXIT + " down run wait:50 " + _EXIT +
+    " down down run wait:40 " + _EXIT + " wait:20"
 )
 
 
@@ -123,7 +126,9 @@ def run_script(driver, actions, dt):
     seen = set()
     ws = getattr(driver, "ws", None)
     for press in actions:
-        if press:
+        if press == "super":
+            driver.system_key()
+        elif press:
             driver.press(press)
         driver.frame(dt)
         err = getattr(ws, "cart_error", None) if ws is not None else None
@@ -199,12 +204,6 @@ def run_live(driver, dt, scale):
     nav_keys = dict(arrow_keys)
     nav_keys.update({pygame.K_a: "left", pygame.K_d: "right",
                      pygame.K_w: "up", pygame.K_s: "down"})
-    # BACKSPACE = the device's one console key, now the Stage-5 EXIT key. It is mapped
-    # as a HELD "home" button (below, like the WASD nav keys) -- NOT a one-shot press --
-    # so a sustained hold reaches the Player's hold-to-exit (~700ms) for a game and a quick
-    # tap is a single edge the cart reads. In text mode the branch above routes it as typed
-    # 0x08 instead (DELETE for a tool). K_h is a host-only convenience alias for held "home".
-    exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
     shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a",
                  pygame.K_SPACE: "a", pygame.K_x: "b"}
     # Super (the GUI key; Cmd on a Mac) is the console's system key from every
@@ -276,16 +275,14 @@ def run_live(driver, dt, scale):
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     running = False       # with no menu open, Esc quits the simulator
-                elif ev.key in exit_keys:
-                    driver.hold("home", True)        # held so a sustained hold = the exit gesture
+                elif ev.key == pygame.K_BACKSPACE:
+                    driver.type_char(0x08)           # a plain key: the cart's key() reads it
                 elif ev.key in shortcuts:
                     driver.press(shortcuts[ev.key])
                 elif ev.key in nav_keys:
                     driver.hold(nav_keys[ev.key], True)
             elif ev.type == pygame.KEYUP and ev.key in nav_keys:
                 driver.hold(nav_keys[ev.key], False)
-            elif ev.type == pygame.KEYUP and ev.key in exit_keys:
-                driver.hold("home", False)
         # (No trackball nudge: this tier's cursor IS the mouse. ConsoleDriver.pan
         # stays for backends that really have a trackball -- the T-Deck's own.)
         driver.frame(dt)

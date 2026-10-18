@@ -160,7 +160,7 @@ int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps) {
 
 enum {
     B_LEFT = 1u << 0, B_RIGHT = 1u << 1, B_UP = 1u << 2, B_DOWN = 1u << 3,
-    B_A = 1u << 4, B_B = 1u << 5, B_RUN = 1u << 6, B_HOME = 1u << 7, B_STOP = 1u << 10,
+    B_A = 1u << 4, B_B = 1u << 5, B_RUN = 1u << 6, B_STOP = 1u << 10,
     B_START = 1u << 14,
 };
 
@@ -181,7 +181,6 @@ uint32_t moy_hid_buttons_for_key(int32_t key) {
         case 'x': return B_B;
         case 0x0D: return B_RUN;
         case 0x1B: return B_STOP;
-        case 0x08: return B_HOME;
         default: return 0;
     }
 }

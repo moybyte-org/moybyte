@@ -1,7 +1,8 @@
 """Super, Esc, the system menu and the pause menu (docs/look_2026-10.md step
 25a; docs/shell_ux_v1.md, the system key).
 
-  * Super (the `start` button on a board, the host's system_key) opens the
+  * Super (the `start` button on a board -- a keyboard's GUI key, a T-Deck's
+    Mic -- or the host's system_key) opens the
     system menu from every surface and, over a fullscreen game, the pause
     menu; pressed again it closes the one it opened, and Esc closes either;
   * the pause holds the cart: no tick, its time() and its music held, and
@@ -116,6 +117,64 @@ def test_a_boards_start_button_is_super_and_its_stop_is_esc(tmp_path):
     assert ws.pause.open and not ws.sysmenu.open
     _press(ws, "stop")
     assert not ws.pause.open
+
+
+def _tdeck_frame(ws, frame, raw=True, text=False):
+    """One frame of the T-Deck's keyboard through the kernel's driver (the C3's
+    bytes -> moy_kbd.c -> a board's table), then the console's router over that
+    table: what the Mic key does from the glass."""
+    from test_tdeck_input import _frame, _keyboard
+    table, drv, _fake = _keyboard(frame, raw=raw)
+    table.text_mode = text
+    _frame(drv, table)
+    was = ws.input
+    ws.input = table
+    try:
+        ws.handle_input()
+    finally:
+        ws.input = was
+    return table
+
+
+MIC = bytes([0x40, 0, 0, 0, 0])             # the matrix with only Mic down
+
+
+def test_the_tdeck_mic_key_pauses_a_game_and_opens_the_system_menu_elsewhere(tmp_path):
+    ws = build_ws(tmp_path)
+    _frames(make_drv(ws))
+    table = _tdeck_frame(ws, MIC)
+    assert table.held("start") and ws.sysmenu.open and not ws.pause.open
+    _tdeck_frame(ws, MIC)
+    assert not ws.sysmenu.open, "Mic again closes it"
+    ws, _drv = _game(tmp_path / "g")
+    _tdeck_frame(ws, MIC)
+    assert ws.pause.open and ws.player.paused and not ws.sysmenu.open
+    _tdeck_frame(ws, MIC)
+    assert not ws.pause.open and not ws.player.paused
+
+
+def test_the_tdeck_mic_key_works_in_text_mode_and_on_the_ascii_path(tmp_path):
+    ws = build_ws(tmp_path)
+    _frames(make_drv(ws))
+    _tdeck_frame(ws, MIC, text=True)                  # a text surface, matrix still streaming
+    assert ws.sysmenu.open
+    _tdeck_frame(ws, MIC, text=True)
+    assert not ws.sysmenu.open
+    _tdeck_frame(ws, [b"\xe0"], raw=False, text=True)   # ASCII mode: Shift+Mic
+    assert ws.sysmenu.open
+    ws.sysmenu.close()
+    ws, _drv = _game(tmp_path / "g")
+    _tdeck_frame(ws, [b"\xe0"], raw=False)
+    assert ws.pause.open
+
+
+def test_the_tdeck_mic_key_never_reaches_the_cart(tmp_path):
+    from runtime.cart_api import CART_BUTTONS
+    assert "start" not in CART_BUTTONS
+    ws, _drv = _game(tmp_path)
+    table = _tdeck_frame(ws, bytes([0x40 | 0x02, 0, 0, 0, 0x08]))   # Mic + W + Backspace
+    assert table.held("start") and table.held("up")
+    assert table.last_key == 0x08, "Backspace is the cart's key; Mic is nobody's"
 
 
 def test_super_over_a_fullscreen_game_pauses_and_again_resumes(tmp_path):

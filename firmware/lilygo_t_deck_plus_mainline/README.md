@@ -193,7 +193,7 @@ and everything typed so far.
 | phase | what it proves |
 |---|---|
 | 1 ascii | the C3 answers at 0x55 and returns clean 1-byte ASCII — the mode the code editor runs in. **A held key does not repeat**; that is correct, not a fault |
-| 2 raw | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists |
+| 2 raw | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists. **Hold Mic and the `start` chip lights**; in phase 1 only Shift+Mic does (below) |
 
 ```
 Moybyte kbd: available=1 raw_allowed=True task_stack_free=NNNN
@@ -324,8 +324,8 @@ code. What you should see:
 3. `Moybyte loaded N carts from SD`, then `lua runtime ON (moycore)`;
 4. the **launcher**, and `Moybyte first frame in NNNms`.
 
-Then it is the console: tap a cart to play it, hold BACKSPACE ~700ms to leave a
-game, the ≡ menu and Settings work, the Editor's seven tabs work.
+Then it is the console: tap a cart to play it, tap the Mic key for the pause menu
+and its Quit to leave a game, the ≡ menu and Settings work, the Editor's seven tabs work.
 
 | what you see | what it means |
 |---|---|
@@ -783,6 +783,21 @@ Every one of these was learned by hanging or bricking a board.
   on-screen symbol palette; `0x01 <duty>` sets its backlight. `MODE =
   "keyboard"` is the on-glass check (it dumps keys over serial), and the last
   thing it does is send the `0x04` revert.
+- **The Mic key is the console's key (owner call, 2026-10-18).** It is the
+  `start` button — the pause menu over a fullscreen game, the system menu
+  anywhere else (`docs/shell_ux_v1.md` §9a) — and never reaches a cart.
+  BACKSPACE is a plain key (a typed 0x08 in text mode, `key()` 0x08 in a game),
+  with no hold gesture. What the C3 says for Mic, from the vendor firmware
+  (`keyboard[0][6] = NULL`, `keyboard_symbol[0][6] = '0'`):
+  - **raw matrix (games):** d0 bit 6, level state: `start` while held, every
+    mode, a text surface's included (`moy_kbd_decode_raw`).
+  - **ASCII (text surfaces):** a bare Mic press sets the byte 0x00, the very
+    byte an idle read returns, so the driver CANNOT see it. Shift+Mic is the
+    byte 0xE0 (NULL − 32) and is `start` (it is never a typed key); Sym+Mic is
+    '0'. Seeing a bare Mic there needs one of: a C3 firmware that gives the
+    key a byte, or a raw-matrix read between ASCII reads, which this driver
+    does not do (every mode flip costs two C3 console prints inside the I2C
+    callback and a typed byte can land in the window).
 - **Serial works both ways during play** — "The serial dev channel" above has
   the three changes RX needed.
 

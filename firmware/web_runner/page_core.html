@@ -24,7 +24,7 @@ overflow:hidden;text-overflow:ellipsis}#s{color:#ffec27}
    steal canvas height -- drop the "device" suffix + the backtick hint (meaningless
    without a physical keyboard) on coarse pointers; nowrap+ellipsis backstops the rest. */
 @media (pointer:coarse){h1 .dv,h1 small{display:none}}
-/* Long-press guard: HOLDING a control (the hold-to-exit burger, a d-pad direction, A/B)
+/* Long-press guard: HOLDING a control (a d-pad direction, A/B)
    used to start the OS text-selection -- iOS magnifier/blue highlight, Android context
    menu -- because plain user-select isn't enough there: iOS wants the -webkit- prefix +
    -webkit-touch-callout, and the page text (title/status) had no guard at all for a hold
@@ -372,7 +372,10 @@ function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",nam
 function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
-wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME (Stage 5 EXIT key): a HELD wb button streams "home" down, so holding it ~700ms is the hold-to-exit gesture (server-side synthesized hold)
+wb("ba","a");wb("bb","b");
+// &#9776; is the console's key on a touch page: a tap is the Super tap (the system
+// menu, or the pause menu over a game), the same event a Meta tap sends.
+document.getElementById("bh").addEventListener("pointerdown",function(e){send({type:"super"});e.preventDefault();});
 // Android long-press fires contextmenu even with pointerdown preventDefault'd -- swallow it
 // on the play surfaces (canvas + control bar) only, so desktop right-click elsewhere is normal.
 document.addEventListener("contextmenu",function(e){var t=e.target;
@@ -384,12 +387,9 @@ NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"," ":"a"},pH
 // one alias in the whole map; the boards carry it too (native/moy_input/moy_kbd.c).
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
 // suppression, so h-as-HOME stole the letter h from typing carts (Letter
-// Blitz). EXIT from the page (Stage 5) = HOLD the burger button ~700ms for a
-// game (it streams a held "home" -> the hold-to-exit gesture), or tap the tool
-// bar's X for a tool. A single Backspace outside text mode is sent as typed cd=8
-// and the SERVER also maps it to a HOME press (a plain key edge the cart reads,
-// mirroring the physical key). In text mode Backspace stays a typed 0x08 (DELETE
-// for a tool -- never an exit).
+// Blitz). The console's key from the page is a tap on the burger button, Esc
+// during play, or a Meta tap (all the `super` event); a tool also has the bar's
+// X. Backspace is a plain typed 0x08 everywhere.
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 var AN={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};
 cv.addEventListener("keydown",function(e){if(e.key in PAN){
@@ -421,10 +421,7 @@ if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.length==1){
 var cc={a:1,c:3,e:5,f:6,g:7,v:22,x:24,y:25,z:26}[e.key.toLowerCase()];
 if(cc){send({type:"key",code:cc});e.preventDefault();}return;}var cd=null;
 if(e.key=="Enter")cd=13;
-// A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
-// press/release edges) -- the desktop-keyboard twin of the burger button's hold, so
-// hold-Backspace-to-exit works from a desktop browser. Text-mode gating is server-side.
-else if(e.key=="Backspace"){cd=8;if(!e.repeat)send({type:"bshold",down:true});}
+else if(e.key=="Backspace")cd=8;
 else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.key.charCodeAt(0);
 if(cd!==null)send({type:"key",code:cd});
 // A held printable key must STREAM in game mode (the device's raw matrix
@@ -442,7 +439,6 @@ cv.addEventListener("keyup",function(e){if(e.key=="Meta"){if(metaTap)send({type:
 if(e.key in PAN){delete pH[e.key];
 var an=AN[e.key];if(nH[an]){delete nH[an];send({type:"hold",name:an,down:false});}
 e.preventDefault();return;}
-if(e.key=="Backspace")send({type:"bshold",down:false});
 if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)
 send({type:"khold",code:e.key.charCodeAt(0),down:false});
 var s=SC[e.key.length==1?e.key.toLowerCase():e.key];

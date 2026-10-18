@@ -22,15 +22,14 @@ What the Player owns (moved verbatim from Workstation):
     manifest permission, call the injected `make_api`, exec the source, capture
     `_update`/`_draw`, turn any exception into `cart_error`/`crash_line`.
   * `tick(dt)` -- the per-frame game loop: key-edge derivation (cart_key/cart_keyp),
-    `_update(dt)`/`_draw()`/`audio.tick`, the crash capture, then the crash chrome +
-    the TRANSIENT hold-to-exit toast. It fills the DRAWBRK perf split
+    `_update(dt)`/`_draw()`/`audio.tick`, the crash capture, then the crash chrome.
+    It fills the DRAWBRK perf split
     (ws._pf_upd/_pf_cart/_pf_audio/_pf_bg) -- that contract stays on `ws`.
-  * `handle_input`/`handle_pointer` -- input + the Stage-5 EXIT model: for a GAME a
-    sustained hold-BACKSPACE (~700ms) pops to the run caller (`ws._exit_to_caller`);
-    the #71 pause machinery it replaced is gone. (Tool/app carts run WITH a minimal
-    bar and exit via its context-X instead -- see Workstation; their hold gesture is
-    suppressed so BACKSPACE stays a free text key.)
-  * the crash `_draw_error_panel` + the transient `_draw_hold_progress` toast.
+  * `handle_input`/`handle_pointer` -- a running cart owns every key and tap. The
+    console's key (`start`, Super) is read by the router before this layer and
+    opens the pause menu (`pause`/`resume` below); a cart ends itself with `quit()`,
+    and a tool/app exits through its bar's context-X.
+  * the crash `_draw_error_panel`.
 
 The BUNDLE the Player reaches (spec Section 2): the open `Project` (its live data),
 plus the RAW canvas / input / audio / `make_api` / wifi through its `ws` back-ref --
@@ -512,23 +511,6 @@ def _lua_cart_where(text, cart):
     return where
 
 
-# The Player's EXIT gesture (Stage 5 of docs/history/shell_ux_technical_plan_v1.md, spec
-# Section 9): the #71 pause machinery is GONE. A running GAME owns the full 320x240
-# with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a single
-# deliberate gesture that pops to the run caller:
-#   * hold BACKSPACE ~700ms -- raw-matrix mode (keyboard fw >= 2025-06-12) streams the
-#     held "home" key each frame; a small TRANSIENT progress toast fills as you hold,
-#     and the pop fires at the threshold.
-# A single quick BACKSPACE tap is NOT the gesture -- it just reaches the cart as a
-# key/button. In TEXT mode "home" is never asserted (BACKSPACE arrives as a typed 0x08
-# the cart's key() reads -- e.g. a password field's DELETE), so the gesture
-# never fires there: exactly the "backspace = delete, zero special-casing" the spec
-# wants. (The old triple-tap fw-independent alias was DROPPED after on-device testing --
-# tools/apps now run WITH a minimal bar whose context-X exits them, so a cart is never
-# strandable-but-for-reboot without needing a keyboard fallback.)
-_HOLD_EXIT_MS = 700         # sustained BACKSPACE hold to exit
-
-
 # Compiled-code cache (#66 exec-arena fix, see Player.start): one entry per
 # cart, keyed by the source's (len, hash) -- so the native emitter runs once
 # per source VERSION, not once per PLAY. Module-level: survives Player runs,
@@ -580,11 +562,6 @@ class Player:
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
                                       # manifest palette (spec 2.2) is applied
-        # Stage 5 exit-gesture state (spec Section 9). Reset per run in start() so a
-        # fresh cart never inherits a stale half-gesture.
-        self._home_held_since = 0     # _ticks_ms when "home" (BACKSPACE) began being held
-        self._home_holding = False    # True while "home" is held -> draw the TRANSIENT
-                                      # hold-progress toast (ONLY while holding, Section 12)
         # #75: the tool/app-vs-game decision is a per-run CONSTANT (the manifest type
         # can't change mid-run), cached at start() so the per-frame tick/input paths
         # don't re-derive it through ws._running_cart_shows_bar (a property-forward
@@ -796,12 +773,6 @@ class Player:
                 break
         return line - n
 
-    def _reset_exit_state(self):
-        """Clear the hold timer (a fresh run, or the moment the exit gesture completes
-        -- so re-entering a cart starts from a clean slate)."""
-        self._home_held_since = 0
-        self._home_holding = False
-
     def _restore_palette(self):
         """Put back the default palette table a cart-supplied one (spec 2.2)
         displaced. Idempotent; called from every exit path AND at start (so a
@@ -899,8 +870,8 @@ class Player:
         # RESPONSIVE app-cart bind, #181: same field, same release.)
         self.ws.release_run_canvas()
         # A dirty EDITOR HANDLE is written HERE and nowhere else (#154): this
-        # is the one place every exit path passes -- the tap on X, the hold
-        # gesture, quit(), a workspace swap, a crash -- so a kid's note is
+        # is the one place every exit path passes -- the tap on X,
+        # quit(), a workspace swap, a crash -- so a kid's note is
         # saved by leaving, exactly as a code tab's half-typed Python is.
         self._release_editors()
         # A USER APP's crash-guard arming dies with its run. Any STRIKE it took
@@ -1363,7 +1334,6 @@ class Player:
         """Reset the previous run's world and stamp this run's per-run flags.
         Returns the cart."""
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
-        self._reset_exit_state()       # a fresh run drops any half-done exit gesture
         self._reset_stage_meters()     # #210: this run's misses are its own
         self._disarm_pacing()          # re-armed below, once the cart is running
         # USER APP per-run state (#181): cleared here rather than at the bind
@@ -1861,7 +1831,7 @@ class Player:
 
     def _resume_from_front(self, ws):
         """The console's first frame after the kernel's front gave it back:
-        True when the run ENDED there (the hold, quit(), `end`, a Ctrl-C),
+        True when the run ENDED there (quit(), `end`, a Ctrl-C),
         whose route this takes; False when it is live and needs the console
         (a view it composes, an error it reports, a cart the link asked for).
         While the kernel still has the front -- a console frame in the same
@@ -1870,8 +1840,6 @@ class Player:
         if _moy_play.front_live():
             return True
         self._front = False
-        self._home_holding = False
-        self._home_held_since = 0
         info = _moy_play.info()
         if info is None or not info[6]:
             return False
@@ -2172,7 +2140,7 @@ class Player:
     def tick(self, dt, render=True):
         """The running-cart content (game domain): the logic ticks frame_plan
         scheduled for this loop frame, the cart's _draw when `render`, the mixer
-        feed, then the crash chrome + the transient hold-to-exit toast. Fills the
+        feed, then the crash chrome. Fills the
         per-frame perf split (ws._pf_*) the router's DRAWBRK accounting
         reads. Drawn on the fixed 320x240 GAME canvas, composited by the router.
 
@@ -2332,7 +2300,7 @@ class Player:
             # ticks (moy_play_lockstep).
             run = _moy_play.current()
             if not run:
-                # The run ended in the kernel's front (the hold, `end`):
+                # The run ended in the kernel's front (`end`):
                 # nothing simulates, and this frame's Player takes the route.
                 return np.dt, True, np
             n = _moy_play.lockstep(run)
@@ -2441,9 +2409,8 @@ class Player:
         # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.
         # Honor it now that this frame's _update has run: pop to the run caller and stop
         # (screen leaves "desktop", so this cart won't tick again -- skip the text-mode
-        # sync + chrome below). This is the exit a TEXT-mode cart MUST provide -- once it
-        # calls textmode(True), hold-BACKSPACE can't reach it (BACKSPACE is a typed delete
-        # there, no keyboard autorepeat) -- but ANY cart may call quit(). Reset the
+        # sync + chrome below). Any cart may call quit(); the console's own key (`start`)
+        # opens the pause menu whatever the cart does. Reset the
         # cart-set camera/clip/pal first so whatever paints underneath is clean.
         if self.cart_error is None and getattr(ws.input, "cart_quit", False):
             ws.input.cart_quit = False
@@ -2460,11 +2427,11 @@ class Player:
         # its own UI overlays, so they're never offset/clipped/recoloured.
         ws._reset_canvas_state()
         # A logic-only frame (#217): nothing below draws pixels this frame --
-        # the crash panel/tool bar/hold toast all repaint on the next drawn frame
+        # the crash panel/tool bar all repaint on the next drawn frame
         # (a crash disarms the pacing itself, so the panel is never starved).
         if not render:
             return
-        if self.cart_error is not None or self._is_tool or self._home_holding:
+        if self.cart_error is not None or self._is_tool:
             ws.settle_cart_frame()          # the chrome below draws over the frame
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
@@ -2479,54 +2446,17 @@ class Player:
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
             # type rule keys on the running cart's manifest type (ws._running_cart_shows_bar).
             ws._draw_tool_bar()
-        elif self._home_holding:
-            # The TRANSIENT hold-to-exit affordance (spec Section 12): drawn ONLY while
-            # BACKSPACE is being held, never on a plain play frame -- so a frame with no
-            # hold in flight draws exactly the cart's pixels and nothing else (no chrome
-            # re-added to the sacred 50fps path).
-            self._draw_hold_progress()
         # (The FPS chip + perf HUD is the game-domain _PerfLayer, drawn right after
         # this content -- still on the GAME canvas, before the composite.)
 
     def handle_input(self, i):
-        # Stage 5 EXIT model (spec Section 9): the #71 pause machinery is GONE. A running
-        # GAME owns the full 320x240 and every button/key -- BACKSPACE ("home") is a plain
-        # key the cart reads via its OWN btn()/key() calls in tick() (a parallel read; the
-        # Player never steals it from the cart). The Player only WATCHES "home" for the
-        # deliberate exit gesture: hold ~700ms -> pop to the run caller (ws._exit_to_caller).
-        # Raw-matrix mode streams the held key, so a sustained hold is a rising elapsed-
-        # since-first-held; a transient progress toast fills as you hold. A single quick tap
-        # is NOT the gesture -> it just reaches the cart. In TEXT mode "home" is never
-        # asserted (BACKSPACE arrives as a typed 0x08 the cart's key() reads -- the wifi
-        # password field's DELETE), so the gesture never fires there: the "backspace =
-        # delete, zero special-casing" the spec wants.
-        #
-        # The hold gesture is for GAMES only. A tool/app runs WITH a minimal bar and exits
-        # via its context-X (ws._running_cart_shows_bar()), so its hold is suppressed --
-        # BACKSPACE stays a free text key (the wifi password field's DELETE).
-        ws = self.ws
-        if self._is_tool and self.cart_error is None:   # #75: cached type + live error
-            if self._home_holding:              # drop any in-flight hold (no toast on a tool)
-                self._home_holding = False
-                self._home_held_since = 0
-                ws._dirty = True
-            return True
-        now = _ticks_ms()
-        if i.held("home"):
-            if not self._home_holding:
-                self._home_holding = True
-                self._home_held_since = now
-                ws._dirty = True               # the toast just appeared -> repaint
-            elif _ticks_diff(now, self._home_held_since) >= _HOLD_EXIT_MS:
-                self._reset_exit_state()
-                ws._exit_to_caller()           # hold complete: pop to the caller
-                return True
-            else:
-                ws._dirty = True               # the toast fills each held frame
-        elif self._home_holding:
-            self._home_holding = False         # released before the threshold -> toast gone
-            self._home_held_since = 0
-            ws._dirty = True
+        # A running cart owns the full 320x240 and every button and key,
+        # BACKSPACE included: its own btn()/key() calls in tick() read them in
+        # parallel, and the Player takes none. The console's one key is `start`
+        # (Super, a T-Deck's Mic), which the router reads before any layer and
+        # which opens the pause menu over a game (`Workstation.system_key`). A
+        # cart ends itself with quit(); a tool/app runs WITH a minimal bar and
+        # exits through its context-X.
         return True
 
     def handle_pointer(self, px, py, click):
@@ -2560,7 +2490,7 @@ class Player:
                 ws.perf_hud = not ws.perf_hud
         return True
 
-    # -- crash chrome + the transient exit toast (the Player's own UX) --------
+    # -- crash chrome (the Player's own UX) -----------------------------------
 
     @property
     def notice(self):
@@ -2590,30 +2520,3 @@ class Player:
                                    self.cart_error or "",
                                    _compiled(self.ws.cart)), cv, self.ws)
         _print_font(was)
-
-    def _draw_hold_progress(self):
-        """The TRANSIENT hold-to-exit pill (spec Section 12), filling as
-        BACKSPACE is held toward _HOLD_EXIT_MS: drawn only while the hold is in
-        flight. The kernel's one body (moy_chrome_pill), which a run the kernel
-        drives draws over its own frames."""
-        cv = self.ws.canvas
-        held = 0
-        if self._home_holding:
-            held = _ticks_diff(_ticks_ms(), self._home_held_since)
-            if held < 0:
-                held = 0
-        mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
-        was = _print_font(0)
-        _ch.replay(mp.chrome_pill(cv.w, cv.h, held, _HOLD_EXIT_MS), cv, self.ws)
-        _print_font(was)
-
-    def _hold_frac(self):
-        """0..1 progress of the current BACKSPACE hold toward _HOLD_EXIT_MS (0 when no
-        hold is in flight, capped at 1 so the fill never overruns the pill)."""
-        if not self._home_holding:
-            return 0.0
-        el = _ticks_diff(_ticks_ms(), self._home_held_since)
-        if el <= 0:
-            return 0.0
-        f = el / _HOLD_EXIT_MS
-        return 1.0 if f > 1.0 else f

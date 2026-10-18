@@ -5,7 +5,7 @@
 #   launch            the Player: launch, bind, open, frame, end, info, lockstep
 #   front_ops         the run in the kernel loop's front, on the host
 #   Match             the radio link and its lockstep session
-#   chrome_pill       the chrome's pieces: pill, panel, toast, banner, strip, menu
+#   chrome_panel      the chrome's pieces: panel, toast, banner, strip, menu
 """The kernel's Player (native/moy_play) on CPython, by ctypes: the module
 `moy_play` as the boards and the desktop MicroPython import it, name for name
 (native/moy_play/modmoy_play.c has the list). A VM's `import moy_play` is the
@@ -367,7 +367,7 @@ def files_live():
 # is RuntimeError("moy_play: ..."), as the module raises.
 
 QUIT, VIEW = 1, 2
-END_HOLD, END_QUIT, END_MENU, END_CRASH, END_LINK, END_SERIAL = range(6)
+END_QUIT, END_MENU, END_CRASH, END_LINK, END_SERIAL = range(1, 6)
 _WHAT = ("ok", "stale run", "full", "no memory", "no such cart",
          "runtime not in this image", "newer", "does not fit", "raised", "ended",
          "needs the VM")
@@ -972,7 +972,6 @@ _CP, _CI, _CS = ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p
 _CSIGS = (
     ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B, _CI], None),
     ("moy_chrome_clear", [_CP], None),
-    ("moy_chrome_pill", [_CP, _CI, _CI, _U32, _U32], None),
     ("moy_chrome_panel", [_CP, _CI, _CI, _B, _CS, _CS, _B], None),
     ("moy_chrome_toast", [_CP, _CS, _CS], None),
     ("moy_chrome_banner", [_CP, _CI, _CI, _CI, _CS, _CS, _B], None),
@@ -984,7 +983,7 @@ _CSIGS = (
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
     ("moy_chrome_toast_arm", [_CS, _CS, _U32], None),
-    ("moy_chrome_overlay", [_CP, _U32, _CI, _CI, _CI, _CI, _CI, _U32, _U32], _B),
+    ("moy_chrome_overlay", [_CP, _U32, _CI, _CI, _CI], _B),
     ("moy_chrome_title", [_CS, ctypes.c_size_t, _CI, _CI], _CI),
     ("moy_chrome_crash_title", [_CS, ctypes.c_size_t, _CS, _CI], _CI),
     ("moy_chrome_fit_text", [_CS, ctypes.c_size_t, _CS, _U32, _U32, _U32, _U32], _CI),
@@ -1034,11 +1033,6 @@ def _chrome(name, *args, raster=None):
 def chrome_inks(inks, bar_light, rings):
     arr = (ctypes.c_int16 * INKS)(*[(-1 if v is None else int(v)) for v in inks])
     _clib().moy_chrome_set_inks(arr, bool(bar_light), int(rings))
-
-
-def chrome_pill(cw, ch, held_ms, hold_ms, raster=None):
-    return _chrome("moy_chrome_pill", int(cw), int(ch), int(held_ms), int(hold_ms),
-                   raster=raster)
 
 
 def chrome_panel(cw, ch, notice, title, text, compiled, raster=None):

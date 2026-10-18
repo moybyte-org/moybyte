@@ -5,10 +5,9 @@ Transport-shaped, not raster-shaped: both the wasm head and the plan's 3.4
 sync/controller RPC speak this same `{"events":[...]}` format, so the decode
 is its own module with no draw path beside it.
 
-The edge cases it carries: the hover-without-button rule, the
-Backspace-is-also-HOME mapping and its text-mode exemption, the held-key latch
-that stops browser autorepeat flapping key() at 60fps, and the desktop
-hold-Backspace-to-exit gesture.
+The edge cases it carries: the hover-without-button rule and the held-key
+latch that stops browser autorepeat flapping key() at 60fps. Backspace is a
+plain typed 0x08; the console's key is the `super` event.
 """
 
 import json
@@ -102,16 +101,6 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 code = ev.get("code")
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:
                     on_key(code)
-                    # ONE console key on the web too: outside text mode a browser
-                    # Backspace also fires the HOME button (Stage 5: HOME is the EXIT
-                    # key -- a single edge the running cart reads; the ☰ button, wired
-                    # as a HELD "home" below, is the hold-to-exit gesture for games),
-                    # mirroring the physical key -- the raw-matrix path likewise
-                    # reports last_key=0x08 AND the home button. In text mode it stays
-                    # a typed 0x08 only (DELETE for a tool -- zero special-casing).
-                    if (code == 0x08 and on_press is not None
-                            and not getattr(input, "text_mode", False)):
-                        on_press("home")
             elif t == "khold":
                 # A physically HELD printable key (browser keydown/keyup edges):
                 # outside text mode the driver latches it so key() streams every
@@ -124,22 +113,6 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                     pass
                 elif on_key_hold is not None:
                     on_key_hold(ev.get("code"), down)
-            elif t == "bshold":
-                # Desktop-keyboard hold-to-exit: a physically HELD Backspace
-                # streams the same sustained "home" the touch burger button
-                # provides, so the console's ~700ms hold-to-exit gesture works
-                # from a desktop browser (it previously had NO game-exit path
-                # -- the burger row is media-query hidden there). Gated on
-                # text_mode SERVER-side: a text cart's delete autorepeat must
-                # never arm the exit; the release always passes so leaving
-                # text mode can't strand a held home.
-                down = bool(ev.get("down"))
-                if down and getattr(input, "text_mode", False):
-                    pass
-                elif on_hold is not None:
-                    on_hold("home", down)
-                else:
-                    input.set_button("home", down)
             elif t == "esc":
                 if on_esc is not None:
                     on_esc()

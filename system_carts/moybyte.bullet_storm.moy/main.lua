@@ -318,6 +318,6 @@ function _draw()
     print("SCORE " .. sc, 104, 112, col("white"))
     print("BEST  " .. best, 104, 122, col("yellow"))
     print("TAP TO FLY AGAIN", 96, 138, col("green"))
-    print("HOLD BACKSPACE TO LEAVE", 68, 148, col("dark_grey"))
+    print("MENU KEY TO LEAVE", 92, 148, col("dark_grey"))
   end
 end

@@ -802,7 +802,7 @@ def _report():
         print(label + " n=" + str(sc["n"]) + " fps=" + _f1(sc["fps"])
               + " p50=" + _f1(sc["p50"]) + " w=" + _f1(sc["worst"]), 8, y, 11)
         y += 10
-    print("HOLD BACK TO EXIT", 8, y, 6)
+    print("MENU KEY TO LEAVE", 8, y, 6)
     if not state["reported"]:
         state["reported"] = True
         _serial_report()

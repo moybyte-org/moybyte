@@ -1439,7 +1439,7 @@ def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
 def test_go_home_re_parks_exactly_while_the_flag_is_set(tmp_path):
     """The other half: every door back to the launcher funnels through go_home,
     so the flag is the only thing that has to be right for a browser-launched
-    cart, the bar's X, a crash and hold-BACKSPACE to all land back here."""
+    cart, the bar's X, a crash and the pause menu's Quit to all land back here."""
     ws = _mode_ws(tmp_path)
     ws.web.parked = True
     ws.go_home()

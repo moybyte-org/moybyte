@@ -93,9 +93,9 @@ simulator draws, plays audio and runs Lua through the same C library as the
 boards. Debian/Ubuntu `sudo apt install build-essential`, Fedora
 `sudo dnf install gcc`, macOS `xcode-select --install`.
 
-Arrows or WASD move, Z or Space is A, X is B, Enter runs, hold H or Backspace to
-go home, Esc quits. The mouse is the touchscreen. Pick **Make** on the launcher
-to open the editor on any cart.
+Arrows or WASD move, Z or Space is A, X is B, Enter runs, Super (Cmd, the
+Windows key) opens the menu, Esc quits the simulator. The mouse is the
+touchscreen. Pick **Make** on the launcher to open the editor on any cart.
 
 ```bash
 # the 1024x600 desktop

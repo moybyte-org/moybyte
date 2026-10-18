@@ -28,8 +28,8 @@ def _on_the_night_fixture(monkeypatch):
 def _open_game(ws):
     """Select a seeded GAME cart and run it.
 
-    A game is fullscreen and exits on hold-BACKSPACE; an app runs WITH the bar and
-    exits via its X. So a test about the game exit contract has to say "a game" --
+    A game is fullscreen and is left through the pause menu's Quit; an app runs WITH
+    the bar and exits via its X. So a test about the game exit contract has to say "a game" --
     `sel = 0` resolves to whichever cart sorts FIRST, which is alphabetical and
     changes whenever a cart is added or renamed."""
     for i, it in enumerate(ws.launcher.items):
@@ -688,8 +688,8 @@ def test_launcher_draws_the_strip_and_no_in_cart_bar(tmp_path):
 def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     """Stage 5 retired the #71 pause frame: while a cart PLAYS the game owns the full
     canvas with NO chrome at all -- the in-cart tool bar (EDIT/PAINT/MAP/HOME) appears
-    ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing a game is the
-    hold-BACKSPACE gesture, not a bar tap.)"""
+    ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing a game is
+    the pause menu's Quit, not a bar tap.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -705,64 +705,62 @@ def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     assert seen["incart"] >= 1        # crashed: the in-cart tool buttons ARE drawn
 
 
-def test_single_backspace_tap_reaches_the_cart_never_exits(tmp_path):
-    """Stage 5 exit model (spec Section 9): the #71 pause frame is GONE -- a running cart
-    owns the full 320x240 and BACKSPACE ("home") is a plain key/button the cart reads. A
-    single quick tap keeps playing (it is not the hold-to-exit gesture); the cart keeps
-    ticking (no freeze), proving there is no pause state left."""
+def test_backspace_reaches_the_cart_as_a_plain_key_and_never_exits(tmp_path):
+    """BACKSPACE is no console key (owner call 2026-10-18): a running game owns it as a
+    typed 0x08 its key() reads, a tap or a long run of them keeps it playing, and no
+    button (`home` included, held for seconds) ends the run -- there is no hold gesture
+    and no pause state."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
+    _open_game(ws)
     assert ws.screen == "desktop"
     calls = [0]
+    keys = []
     orig_upd = ws._update
 
     def counting(dt):
         calls[0] += 1
+        keys.append(ws.input.last_key)
         if orig_upd:
             orig_upd(dt)
     ws._update = counting
 
     drv.frame(1 / 30)
     assert calls[0] == 1               # playing: the cart ticks
-    drv.press("home")                  # ONE quick BACKSPACE tap...
+    drv.type_char(0x08)                # a BACKSPACE...
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"      # ...does NOT exit (no pause, no quit)
-    drv.frame(1 / 30)
-    assert calls[0] > 1                # ...and the cart keeps ticking (never froze)
+    assert 0x08 in keys                # ...reaches the cart as a key
+    assert ws.screen == "desktop"
+    drv.hold("home", True)             # even a button held far past the old 700 ms
+    for _ in range(90):
+        drv.frame(1 / 30)
+    drv.hold("home", False)
+    assert ws.screen == "desktop" and calls[0] > 60   # ...ends nothing; the cart never froze
 
 
-def test_hold_backspace_exits_to_caller(tmp_path, monkeypatch):
-    """Stage 5: a sustained BACKSPACE hold (~700ms) pops the running cart back to its
-    caller -- the launcher root here. Wired to input.held("home") + a threshold on the
-    raw-matrix held-key stream; the host maps a held BACKSPACE to a held "home". Drive
-    the module clock (monkeypatch auto-restores) so the 700ms elapses deterministically."""
+def test_the_pause_menus_quit_exits_a_game_to_the_caller(tmp_path):
+    """The way out of a fullscreen game is the console's key: it opens the pause menu
+    (`Workstation.system_key`, tests/test_system_key.py) and Quit pops to the caller --
+    the launcher root here."""
     from runtime import host_app
-    from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    _open_game(ws)                     # the exit gesture under test is the GAME one
+    _open_game(ws)
     assert ws.screen == "desktop"
-    clock = [10_000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])   # deterministic hold timer
-    drv.hold("home", True)             # begin holding BACKSPACE ...
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"      # ... not yet (no time elapsed)
-    clock[0] += P._HOLD_EXIT_MS - 1
+    drv.system_key()
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"      # ... still short of the threshold
-    clock[0] += 2                      # now past _HOLD_EXIT_MS since the first held frame
+    assert ws.pause.open and ws.screen == "desktop"
+    ws.pause.choose(3)                 # Quit
     drv.frame(1 / 30)
-    assert ws.screen == "launcher"     # hold complete -> popped to the caller
-    drv.hold("home", False)
+    assert ws.screen == "launcher"
 
 
 def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
     """The triple-tap BACKSPACE exit alias was DROPPED (owner tested on device): quick
     BACKSPACE taps are plain 'home' key edges the running GAME reads -- even three of them
-    in a row do NOT exit. Hold-BACKSPACE (test above) is the only game exit now; tools/apps
+    in a row do NOT exit. The pause menu's Quit (test above) is the game exit; tools/apps
     exit via their bar X (Part 4). Each drv.press is a one-frame 'home' edge the cart sees;
     the cart keeps ticking and stays on the desktop."""
     from runtime import host_app
@@ -785,41 +783,6 @@ def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
     assert calls[0] > 0                # ...and the cart kept ticking (never froze/popped)
 
 
-def test_hold_progress_toast_is_transient(tmp_path, monkeypatch):
-    """The hold-to-exit affordance is TRANSIENT (spec Section 12): _draw_hold_progress
-    fires ONLY on frames where BACKSPACE is being held, NEVER on a plain play frame --
-    so no chrome is re-added to the sacred play path. Spy the toast draw across a
-    playing frame, held frames, and the released frame."""
-    from runtime import host_app
-    from runtime import player as P
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    _open_game(ws)                     # the hold toast is the GAME exit affordance
-    assert ws.screen == "desktop"
-    calls = [0]
-    orig = ws.player._draw_hold_progress
-
-    def counting():
-        calls[0] += 1
-        return orig()
-    ws.player._draw_hold_progress = counting
-    clock = [1000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])
-    drv.frame(1 / 30)                      # playing, no hold
-    assert calls[0] == 0                   # NO toast on a plain play frame
-    drv.hold("home", True)
-    drv.frame(1 / 30)                      # holding -> toast drawn
-    clock[0] += 100                        # still short of _HOLD_EXIT_MS
-    drv.frame(1 / 30)                      # still holding -> toast again
-    assert calls[0] >= 2
-    held_calls = calls[0]
-    assert ws.screen == "desktop"          # short hold: has NOT exited yet
-    drv.hold("home", False)
-    drv.frame(1 / 30)                      # released -> toast gone
-    drv.frame(1 / 30)
-    assert calls[0] == held_calls          # no more toast draws once the hold ends
-
-
 # -- Part 4: a TOOL/APP runs WITH a minimal bar so it's EXITABLE ------------
 
 def _make_tool_ws(tmp_path):
@@ -836,13 +799,12 @@ def _make_tool_ws(tmp_path):
     return ws, drv
 
 
-def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path, monkeypatch):
+def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path):
     """Part 4 (the one architectural call to confirm on device): a launched TOOL/APP runs
     WITH a minimal bar so it is EXITABLE -- the right-zone context-X exits it, while
-    BACKSPACE stays a FREE key (never a hold-to-exit) so a text tool's password field keeps
-    its DELETE. (A GAME by contrast stays fullscreen-bar-hidden and exits via
-    hold-BACKSPACE -- the bar-visibility-by-type rule keys on the cart's manifest type.)"""
-    from runtime import player as P
+    BACKSPACE stays a FREE key so a text tool's password field keeps its DELETE. (A GAME
+    by contrast stays fullscreen-bar-hidden and is left through the pause menu -- the
+    bar-visibility-by-type rule keys on the cart's manifest type.)"""
     from runtime import bar_layer as BL
     ws, drv = _make_tool_ws(tmp_path)
 
@@ -859,13 +821,10 @@ def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path,
     assert "tool" in where_seen                       # the tool bar shows during play
 
     # 2) BACKSPACE is NOT stolen as an exit: a sustained hold-"home" does NOT pop the tool
-    #    (for a game this would exit; a tool keeps BACKSPACE free for its text fields).
-    clock = [10_000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])
+    #    (a tool keeps BACKSPACE free for its text fields).
     drv.hold("home", True)
-    drv.frame(1 / 30)
-    clock[0] += P._HOLD_EXIT_MS + 100                  # well past a game's hold threshold
-    drv.frame(1 / 30)
+    for _ in range(60):
+        drv.frame(1 / 30)
     drv.hold("home", False)
     assert ws.screen == "desktop"                      # the tool did NOT exit on BACKSPACE
 
@@ -898,12 +857,11 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
     assert calls == [], "the tool bar must not lend an editor zone during play: %r" % calls
 
 
-# -- a cart can end ITSELF via the quit() verb (the exit a text-mode cart must provide) --
+# -- a cart can end ITSELF via the quit() verb --
 
 def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
     """A cart calls quit() (make_api) to END itself and return to the launcher -- the
-    self-exit a text-mode cart MUST provide (once it textmode(True)s, hold-BACKSPACE can't
-    reach it: BACKSPACE is a typed delete, no keyboard autorepeat). The verb is ADDITIVE to
+    self-exit a cart may offer (the console's own is the pause menu). The verb is ADDITIVE to
     the frozen kid API and works for ANY cart type; the Player honors the flag AFTER the
     cart's _update runs (player.tick) and pops to the run caller (ws._exit_to_caller)."""
     from runtime import host_app, moy_carts
@@ -963,15 +921,14 @@ def test_tap_mode_is_retired_from_settings(tmp_path):
     assert not hasattr(ws, "cycle_tap_mode")
 
 
-def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatch):
+def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
     """Stage 3b + Stage 5: PLAY runs the cart recording the EDITOR as the run caller, so
-    the cart's EXIT gesture (hold-BACKSPACE here) returns to the Editor on the tab it left
+    the cart's exit (the pause menu's Quit here) returns to the Editor on the tab it left
     (spec Section 2/Section 6's launch-and-return) -- NOT the launcher home. The launcher
     stays the caller only when IT launched the cart (test above), while the Editor's PLAY
     makes the Editor the second caller, proving the Player is caller-agnostic and the exit
     gesture pops to whoever launched it."""
     from runtime import host_app
-    from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     _open_game(ws)                     # launcher launch: caller = the home root
@@ -981,13 +938,11 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatc
     tab = ws.menu_view
     ws._leave_menu()                   # PLAY: run the cart, caller = the Editor now
     assert ws.screen == "desktop"      # ...still runs fullscreen (transition preserved)
-    clock = [10_000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])   # deterministic hold timer
-    drv.hold("home", True)             # hold-BACKSPACE = the game exit gesture
-    drv.frame(1 / 30)                  # first held frame (timer starts)
-    clock[0] += P._HOLD_EXIT_MS + 1    # elapse past the hold threshold
     drv.frame(1 / 30)
-    drv.hold("home", False)
+    drv.system_key()                   # the console's key: the pause menu
+    drv.frame(1 / 30)
+    ws.pause.choose(3)                 # Quit
+    drv.frame(1 / 30)
     assert ws.screen == "menu"         # exit returned to the EDITOR...
     assert ws.menu_view == tab         # ...on the very tab it left (not the launcher)
 
@@ -1385,7 +1340,7 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
         _open_game(ws)
         for _ in range(3):
             drv.frame(1 / 30)
-        ws._exit_to_caller()                      # the hold-BACKSPACE exit
+        ws._exit_to_caller()                      # the pause menu's Quit
         for _ in range(8):
             drv.frame(1 / 30)                     # ...and the repaint burst
     finally:

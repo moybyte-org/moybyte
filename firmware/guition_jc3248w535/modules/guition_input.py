@@ -11,8 +11,8 @@ import wire_input
 def make_input():
     """(inp, keyboard): the merged InputState and the BLE HID keyboard. The
     spine starts the keyboard's radio after the Workstation's boot
-    allocations. A paired keyboard's hold-BACKSPACE is also this board's
-    game-exit path, through the shared console unmodified."""
+    allocations. A paired keyboard's GUI key is `start`, the console's key,
+    through the shared console unmodified."""
     return wire_input.ble_keyboard_input()
 
 

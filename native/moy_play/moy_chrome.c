@@ -112,25 +112,6 @@ static void icon(moy_chrome_list_t *l, const char *kind, int x, int y, int scale
 
 // -- the pieces ------------------------------------------------------------------
 
-void moy_chrome_pill(moy_chrome_list_t *l, int cw, int ch, uint32_t held_ms, uint32_t hold_ms) {
-    (void)ch;
-    int w = cw - 8 < 128 ? cw - 8 : 128, h = 16;   // fits a cart-declared small canvas
-    int x = (cw - w) / 2, y = 6;
-    rect(l, x, y, w, h, ink(MOY_INK_BLACK));
-    rectb(l, x, y, w, h, ink(MOY_INK_LIGHT_GREY));
-    const char *label = moy_str(MOY_S_CHROME_HOLD_TO_EXIT);
-    int ln = (int)strlen(label);
-    print(l, MOY_TEXT_TABLE, label, -1, x + (w - ln * 8) / 2, y + 2, ink(MOY_INK_WHITE), 1);
-    if (hold_ms == 0u) {
-        return;
-    }
-    uint32_t el = held_ms > hold_ms ? hold_ms : held_ms;
-    int fill = (int)((uint64_t)(uint32_t)(w - 4) * el / hold_ms);
-    if (fill > 0) {
-        rect(l, x + 2, y + h - 4, fill, 2, ink(MOY_INK_YELLOW));
-    }
-}
-
 #define CODE_LH 10
 
 // The panel's text, word-wrapped into `cols`-byte lines by the one wrap
@@ -555,12 +536,8 @@ void moy_chrome_toast_arm(const char *title, const char *g, uint32_t until_ms) {
     K.toast_up = true;
 }
 
-bool moy_chrome_overlay(moy_chrome_list_t *l, uint32_t now, int cw, int ch, int lw, int fs,
-                        int status_h, uint32_t held_ms, uint32_t hold_ms) {
+bool moy_chrome_overlay(moy_chrome_list_t *l, uint32_t now, int lw, int fs, int status_h) {
     moy_chrome_clear(l);
-    if (held_ms) {
-        moy_chrome_pill(l, cw, ch, held_ms, hold_ms);
-    }
     if (K.up && (int32_t)(K.until - now) <= 0) {
         K.up = false;
     }

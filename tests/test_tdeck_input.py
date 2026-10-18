@@ -122,18 +122,18 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
     assert not table.held("right") and table.last_key == 0
 
 
-def test_tdeck_raw_backspace_is_the_one_console_key():
-    # BACKSPACE (matrix [4][3] -> d4 bit 3) is the `home` button on the raw path
-    # and reports last_key 0x08: a held home is what the Player's hold-BACKSPACE
-    # exit watches. q, e and x are plain letters; K is B and L is A
-    # (tests/test_tdeck_keymap.py pins the scheme).
+def test_tdeck_raw_backspace_is_a_plain_key():
+    # BACKSPACE (matrix [4][3] -> d4 bit 3) is no button: it reports last_key
+    # 0x08 and nothing is held, so a game reads it with key() like any letter
+    # and there is no hold gesture to watch. q, e and x are plain letters too;
+    # K is B and L is A (tests/test_tdeck_keymap.py pins the scheme).
     def poll_frame(frame):
         table, drv, _fake = _keyboard(frame, raw=True)
         _frame(drv, table)
         return table
 
     st = poll_frame(bytes([0, 0, 0, 0, 0x08]))
-    assert st.held("home") and st.last_key == 0x08
+    assert not st.any_held() and st.last_key == 0x08
     st = poll_frame(bytes([0x01, 0, 0, 0, 0]))       # q: a letter, not a button
     assert not st.any_held() and st.last_key == ord("q")
     st = poll_frame(bytes([0, 0x01, 0, 0, 0]))       # e: a letter, not a button
@@ -143,6 +143,73 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
     st = poll_frame(bytes([0, 0x10, 0, 0, 0]))       # x is a plain letter now
     assert not st.any_held() and st.last_key == ord("x")
     assert not poll_frame(bytes([0, 0, 0, 0, 0x08])).held("b")
+
+
+def test_the_mic_key_is_start_in_the_raw_matrix_and_no_typed_key():
+    # Mic is d0 bit 6. It is the console's key: `start` while held, and it
+    # never takes the key slot, so a cart sees neither a button nor a key.
+    def poll_frame(frame, text=False):
+        table, drv, _fake = _keyboard(frame, raw=True)
+        table.text_mode = text
+        _frame(drv, table)
+        return table
+
+    st = poll_frame(bytes([0x40, 0, 0, 0, 0]))
+    assert st.held_names() == {"start"} and st.last_key == 0
+    # held with a direction: both, and the letter keeps the key slot
+    st = poll_frame(bytes([0x40 | 0x02, 0, 0, 0, 0]))      # Mic + W
+    assert st.held("start") and st.held("up") and st.last_key == ord("w")
+    # held with backspace: backspace is still the key
+    st = poll_frame(bytes([0x40, 0, 0, 0, 0x08]))
+    assert st.held("start") and st.last_key == 0x08
+    # a text surface drops every alias but the console's key
+    st = poll_frame(bytes([0x40 | 0x02, 0, 0, 0, 0]), text=True)
+    assert st.held("start") and not st.held("up")
+    # released: gone
+    assert not poll_frame(bytes(5)).held("start")
+
+
+def test_mic_with_a_letter_is_not_mistaken_for_an_ascii_stray():
+    # A stray ASCII byte in a raw read means the firmware ignored 0x03, and
+    # the session then stays on ASCII for good. Mic + Q reads 0x41, 'A', which
+    # the old test took for a stray capital -- one Mic tap over a held Q would
+    # have demoted the keyboard. Only a byte no chord makes counts.
+    for d0 in (0x41, 0x44, 0x53, 0x57):
+        table, drv, _fake = _keyboard(bytes([d0, 0, 0, 0, 0]), raw=True)
+        _frame(drv, table)
+        assert drv.raw_mode and not drv.raw_unsupported, hex(d0)
+        assert table.held("start"), hex(d0)
+
+
+def test_shift_mic_is_start_on_the_ascii_path_and_a_bare_mic_is_unseen():
+    # The C3 resolves Shift+Mic to 0xE0 (its NULL entry minus 32). That is the
+    # one ASCII spelling of the console's key; it is never a typed key, in
+    # game mode or at a text surface. A bare Mic is the idle byte 0x00.
+    table, drv, _fake = _keyboard([b"\xe0", b"\x00"])
+    _frame(drv, table)
+    assert table.held_names() == {"start"} and table.last_key == 0
+    table, drv, _fake = _keyboard([b"\xe0"])
+    table.text_mode = True
+    _frame(drv, table)
+    assert table.held("start") and table.last_key == 0
+    table, drv, _fake = _keyboard([b"\x00"])
+    _frame(drv, table)
+    assert not table.any_held() and table.last_key == 0
+    # the latch releases like any ASCII button
+    table, drv, fake = _keyboard([b"\xe0", b"\x00"])
+    _frame(drv, table)
+    fake.t += mi.KBD_HOLD_MS
+    _frame(drv, table)
+    assert not table.held("start")
+
+
+def test_a_stray_shift_mic_byte_in_a_raw_read_is_start_too():
+    # An old keyboard that ignores 0x03 answers a raw read with its ASCII byte:
+    # the same table decodes it.
+    table, drv, _fake = _keyboard(bytes([0xE0, 0, 0, 0, 0]), raw=True)
+    _frame(drv, table)
+    assert table.held("start") and table.last_key == 0
+    assert not drv.raw_mode and drv.raw_unsupported
 
 
 def test_ascii_bytes_deliver_one_frame_each():
