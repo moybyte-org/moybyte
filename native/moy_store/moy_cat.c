@@ -913,6 +913,8 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     }
     moy_cat_json_t g = vfield(man, mend, "graduated");
     e->graduated = g.v != NULL && moy_json_truthy(g.v, g.e);
+    moy_cat_json_t gl = vfield(man, mend, "glass");
+    e->glass = gl.v != NULL && gl.e - gl.v == 4 && memcmp(gl.v, "true", 4) == 0;
     e->icon_ok = norm_icon(field(man, mend, "icon"), e->icon);
     moy_cat_json_t in = field(man, mend, "input");
     if (in.v != NULL && *in.v == '[') {

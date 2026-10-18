@@ -862,6 +862,20 @@ desk draws `backdrop.desk`, the home and the handheld's every screen
   while `ws._animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
   Moy's night, the default, is a still image, or animates only small dirty
   rects.
+- **A wallpaper per glass** (docs/look_2026-10.md step 28, GAPS 23). A
+  wallpaper cart whose manifest says `"moybyte": {"glass": true}` draws on
+  the system canvas itself, so `W` and `H` are the glass's, and lays out
+  around `QUIET`, the shell's quiet rectangles for the surface it draws
+  behind: the bars on every surface, the home's title, metadata and hint
+  strip (the desk home's hero, details and shelf), and the desk's icon
+  column. The `SUBJECT` it sets, an (x, y, w, h) on the glass, is the
+  rectangle a new window's default place keeps clear of
+  (`WindowedWM._clear_of_subject`). Its preview renders at the glass's size
+  around the quiet rectangles it last drew with. Any other wallpaper draws
+  its 320×240 frame on the game canvas, cover-cropped onto a bigger glass.
+  Moy's night draws per glass; over any wallpaper the home's title,
+  metadata and hint labels are white, the title and metadata over a black
+  shadow, as the desk's labels are.
 - **Readability at home.** A wallpaper with its own text or characters
   mid-screen fights the carousel (mocked 2026-09-27 with Space Desktop). The
   home's card band has no surface of its own: the cards lie on the

@@ -183,9 +183,28 @@ class _BackdropLayer(Layer):
                 len(getattr(ws, "_apps", ())), len(ws.carts.all))
 
     def _draw_desktop(self, dt):
-        self.ws.wallpaper.draw(dt)
+        self.ws.wallpaper.draw(dt, quiet=self.quiet())
         self._draw_desk_icons()
         self.ws.bar_layer._draw_status_strip("desk")
+
+    def quiet(self):
+        """The desk's quiet rectangles (docs/theming_2026-09.md §4.9): the
+        bars and the icon column, its tiles and labels as one rectangle per
+        column. Built when the desk cache is lost, never per frame."""
+        cols = {}
+        for _key, box, band, _label, _cart in self._icon_rects():
+            x0 = min(box[0], band[0])
+            y0 = min(box[1], band[1])
+            x1 = max(box[0] + box[2], band[0] + band[2])
+            y1 = max(box[1] + box[3], band[1] + band[3])
+            c = cols.get(box[0])
+            if c is not None:
+                x0, y0 = min(x0, c[0]), min(y0, c[1])
+                x1, y1 = max(x1, c[2]), max(y1, c[3])
+            cols[box[0]] = (x0, y0, x1, y1)
+        return self.ws.wallpaper.bars() + tuple(
+            (x0, y0, x1 - x0, y1 - y0) for x0, y0, x1, y1 in
+            (cols[k] for k in sorted(cols)))
 
     # -- desk icons (#105: desktop mode's launch surface) ---------------------
     #

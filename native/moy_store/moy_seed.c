@@ -542,6 +542,10 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
         sb_str(b, ", \"permissions\": ");
         sb_canon(b, f.v, f.e);
     }
+    f = get(c, ce, "glass");                // a per-glass wallpaper
+    if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
+        sb_str(b, ", \"glass\": true");
+    }
     span_t scenes = get(c, ce, "scenes");
     if (truthy(scenes) && *scenes.v == '{') {
         sb_str(b, ", \"assets\": {\"scenes\": ");

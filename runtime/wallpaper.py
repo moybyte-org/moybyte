@@ -3,6 +3,8 @@
 #   Wallpaper.draw_picture    the theme's picture, one screen-sized bitmap
 #   Wallpaper._draw_backdrop  the theme's backdrop, rastered once into the bake
 #   Wallpaper.is_animating    a live wallpaper is running
+#   Wallpaper.bars            the bars' quiet rectangles, for a per-glass wallpaper
+#   Wallpaper._glass_paint    a per-glass wallpaper's frame: QUIET in, SUBJECT out
 #   Wallpaper.draw_preview    the Appearance monitor's screen
 """The desktop wallpaper backdrop (#28), extracted from Workstation
 (runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
@@ -25,6 +27,13 @@ compile(cart); draw() reads ws.look.wallpaper_id for the picture and the fill. I
 its self.ws back-ref; the pmem building block for the wallpaper's own namespace
 is imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
+
+A wallpaper cart PER GLASS (`"moybyte": {"glass": true}`, docs/theming_2026-09.md
+§4.9) draws on the system canvas itself: W and H are the glass's, `QUIET` holds
+the shell's quiet rectangles for the surface it draws behind, and the
+`SUBJECT` it declares is `self.subject`, which the windowed WM's default
+placement keeps clear of. Any other wallpaper draws its 320x240 frame on the
+game canvas and is cover-cropped onto a bigger glass.
 
 The compile is crash-guarded (#160): `ws.wallpaper_guard` arms before the cart's
 code runs and heals once the backdrop has painted, so a wallpaper that hangs or
@@ -70,6 +79,16 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                    save_wallpaper_preview)
 
 
+def _rect(v):
+    """`v` as an (x, y, w, h) of ints with some area, else None: what a
+    wallpaper cart declares as its SUBJECT is arbitrary cart data."""
+    try:
+        x, y, w, h = (int(n) for n in v)
+    except (TypeError, ValueError):
+        return None
+    return (x, y, w, h) if w > 0 and h > 0 else None
+
+
 def _cover(sw, sh, gw, gh):
     """(scale, ox, oy): a gw x gh frame placed cover-style on a sw x sh
     canvas -- the smallest integer upscale that covers it, centred, so the
@@ -106,6 +125,15 @@ class Wallpaper:
         self._wp_draw = None
         self._wp_cart = None
         self._wp_live = True
+        # A per-glass cart: it draws on the system canvas, reads QUIET and
+        # declares SUBJECT (see the module docstring).
+        self._wp_glass = False
+        # The quiet rectangles each surface last drew with ({home: rects}),
+        # and the desk's subject as the cart last declared it, or None.
+        self._quiet = {}
+        self.subject = None
+        self._bars_key = None         # what `bars` last computed from
+        self._bars = ()
         # The title of a wallpaper the crash guard refused at this compile; the
         # first fill paint turns it into a notice.
         self._refused = None
@@ -146,6 +174,8 @@ class Wallpaper:
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
         self._wp_restore_bg = None
+        self._wp_glass = False
+        self.subject = None
         self._refused = None
         self._pv_ns = self._pv_update = self._pv_draw = None
         self._pv_restore = None
@@ -300,9 +330,11 @@ class Wallpaper:
             self._refused = cart.get("title") or "Wallpaper"
             return
         try:
+            glass = bool(cart.get("glass"))
             sheet = ws._build_sheet(cart)
             tilemap = ws._build_tilemap(cart)
-            ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
+            ns = ws.make_api(ws.sys_canvas if glass else ws.canvas, ws.input,
+                             dict(cart.get("cfg", {})),
                              # A wallpaper is silent: it holds no audio session.
                              sheet, None,
                              tilemap, Pmem(), None, cart.get("images") or {},
@@ -312,8 +344,13 @@ class Wallpaper:
                              flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
+            if glass:               # after the module's own default, before _init
+                ns["QUIET"] = self._quiet.get(False) or self.bars()
             if ns.get("_init"):
                 ns["_init"]()
+            self._wp_glass = glass
+            if glass:
+                self.subject = _rect(ns.get("SUBJECT"))
             self._wp_ns = ns
             self._wp_cart = cart
             self._wp_update = ns.get("_update")
@@ -356,14 +393,71 @@ class Wallpaper:
         return (self._wp_live and self._wp_update is not None
                 and self._wp_draw is not None and dt > 0)
 
-    def draw(self, dt, home=False):
+    def draw(self, dt, home=False, quiet=None):
         """Paint the backdrop of the desk, or with `home` of the home (the
-        handheld's every screen): the surface a theme's backdrop names."""
+        handheld's every screen): the surface a theme's backdrop names.
+        `quiet` is that surface's quiet rectangles (its bars, the home's text,
+        the desk's icon column), which a per-glass wallpaper reads as QUIET;
+        None keeps the ones that surface last gave."""
+        if quiet is not None:
+            self._quiet[home] = quiet
         b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
         try:
             self._paint(dt, home)
         finally:
             self._stock_unbracket(b)
+
+    def bars(self):
+        """The bars' quiet rectangles on the system canvas: every band of the
+        glass outside the layout's content rect (docs/shell_layout_2026-10.md
+        §7: a bar may sit on any edge)."""
+        ws = self.ws
+        sc = ws.sys_canvas
+        lay = getattr(ws, "layout", None)
+        if lay is None:
+            return ()
+        w, h = sc.w, sc.h
+        x0, y0 = lay.cx, lay.cy
+        x1, y1 = x0 + lay.cw, y0 + lay.ch
+        k = self._bars_key
+        if k is not None and k[0] is lay and k[1] == w and k[2] == h \
+                and k[3] == x0 and k[4] == y0 and k[5] == x1 and k[6] == y1:
+            return self._bars
+        self._bars_key = (lay, w, h, x0, y0, x1, y1)
+        out = []
+        if y0 > 0:
+            out.append((0, 0, w, y0))
+        if y1 < h:
+            out.append((0, y1, w, h - y1))
+        if x0 > 0:
+            out.append((0, y0, x0, y1 - y0))
+        if x1 < w:
+            out.append((x1, y0, w - x1, y1 - y0))
+        self._bars = tuple(out)
+        return self._bars
+
+    def _glass_paint(self, dt, home):
+        """A per-glass wallpaper's frame: its draw on the system canvas at the
+        glass's size, QUIET the surface's quiet rectangles, and the desk's
+        SUBJECT read back after it."""
+        ws = self.ws
+        ns = self._wp_ns
+        sc = ws.sys_canvas
+        ns["W"], ns["H"] = sc.w, sc.h
+        ns["QUIET"] = self._quiet.get(home) or self.bars()
+        gp = self._enter_pointer(ws, True, glass=True)
+        try:
+            if self._wp_live and self._wp_update is not None and dt > 0:
+                self._wp_update(dt)
+            self._wp_draw()
+        finally:
+            if gp is not False:
+                ws.input.game_pointer = gp
+            rs = getattr(sc, "reset_state", None)   # the cart's camera/clip/pal/fillp
+            if rs is not None:
+                rs()
+        if not home:
+            self.subject = _rect(ns.get("SUBJECT"))
 
     # -- the theme's backdrop (docs/media/look_2026-10/GAPS.md gap 9) ----------
 
@@ -409,7 +503,9 @@ class Wallpaper:
     def _paint(self, dt, home=False):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
-        backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
+        backdrop. Guarded so a misbehaving wallpaper degrades to a fill. A
+        per-glass cart draws the whole glass itself (`_glass_paint`); what
+        follows is the 320x240 cart frame's path.
 
         Status-strip safe area (#46): on the launcher/settings the strip sits along the
         top, so a wallpaper that draws art/text near y=0 (the shipped ones print their
@@ -440,6 +536,10 @@ class Wallpaper:
                 rb = getattr(self, "_wp_restore_bg", None)
                 if rb is not None:
                     rb()            # #63: restore the wallpaper's declared backdrop
+                if self._wp_glass:
+                    self._glass_paint(dt, home)
+                    self._painted(self._wp_live and self._wp_update is not None)
+                    return
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
                 # The safe area is the layout's content rect: the wallpaper
@@ -513,7 +613,7 @@ class Wallpaper:
         # same object as the game canvas on the 320x240 tiers).
         self._fill(home)
 
-    def _enter_pointer(self, ws, bracketed):
+    def _enter_pointer(self, ws, bracketed, glass=False):
         """Re-map the pointer into the WALLPAPER's own space for the duration of
         its draw, returning the value to restore (or False when untouched).
 
@@ -531,10 +631,13 @@ class Wallpaper:
         if p is None:
             return False
         sc, gc = ws.sys_canvas, ws.canvas
-        gw, gh = gc.w, gc.h
-        scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
-        ox = (sc.w - gw * scale) // 2
-        oy = (sc.h - gh * scale) // 2
+        if glass:                   # a per-glass wallpaper: the glass's own pixels
+            gw, gh, scale, ox, oy = sc.w, sc.h, 1, 0, 0
+        else:
+            gw, gh = gc.w, gc.h
+            scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
+            ox = (sc.w - gw * scale) // 2
+            oy = (sc.h - gh * scale) // 2
         gx = (int(getattr(p, "x", 0)) - ox) // scale
         gy = (int(getattr(p, "y", 0)) - oy) // scale
         # Out-of-frame reads as "no pointer" rather than a clamped edge value,
@@ -579,7 +682,8 @@ class Wallpaper:
         an offscreen canvas at all.
 
         What a board pays, once per cart and preview size: a 320x240 RGB565
-        scratch surface, the wallpaper's own _init/_update/_draw in interpreted
+        scratch surface (the glass's size for a per-glass wallpaper, given
+        back after the render), the wallpaper's own _init/_update/_draw in interpreted
         Python, and the reduction in _preview_indices. The .mct sidecar is what
         holds it to once -- every later open reads the file and never builds a
         runner at all."""
@@ -670,9 +774,11 @@ class Wallpaper:
         if make_canvas is None:
             return False            # a backend with no offscreen canvas factory
         try:
+            pw, ph = self._frame_size(cart)
             pv = self._pv_canvas
-            if pv is None:
-                pv = make_canvas(ws.canvas.w, ws.canvas.h)
+            if pv is None or (pv.w, pv.h) != (pw, ph):
+                self._pv_canvas = None
+                pv = make_canvas(pw, ph)
                 if pv is None:      # a build with no native kernel to draw with
                     return False
                 self._pv_canvas = pv
@@ -694,6 +800,8 @@ class Wallpaper:
                                  flags=ws._build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
+                if cart.get("glass"):
+                    ns["QUIET"] = self._preview_quiet()
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
                     ws.carts.reslim(cart)
@@ -711,9 +819,24 @@ class Wallpaper:
             self._pv_for = None
             return False
 
+    def _frame_size(self, cart):
+        """(w, h) of the frame `cart` draws: the glass's for a per-glass
+        wallpaper, else the game canvas's."""
+        ws = self.ws
+        cv = ws.sys_canvas if cart.get("glass") else ws.canvas
+        return cv.w, cv.h
+
+    def _preview_quiet(self):
+        """The quiet rectangles a per-glass wallpaper's preview lays out
+        around: the desk's where it has drawn, else the home's, else the
+        bars."""
+        return self._quiet.get(False) or self._quiet.get(True) or self.bars()
+
     def _src_sig(self, cart):
         """text_sig of the cart's SOURCE -- the staleness stamp for computed
-        previews. Rehydrates a slimmed cart (#66) just long enough to read it."""
+        previews -- and, for a per-glass wallpaper, of the quiet rectangles
+        its preview lays out around. Rehydrates a slimmed cart (#66) just
+        long enough to read it."""
         src = cart.get("src")
         if src is None:
             ws = self.ws
@@ -723,6 +846,8 @@ class Wallpaper:
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
                     ws.carts.reslim(cart)
+        if src and cart.get("glass"):
+            src = src + repr(self._preview_quiet())
         return text_sig(src) if src else None
 
     def _static_preview(self, w, h):
@@ -735,7 +860,7 @@ class Wallpaper:
         cart = self._wp_cart
         if cart is None:
             return None
-        gw, gh = self.ws.canvas.w, self.ws.canvas.h
+        gw, gh = self._frame_size(cart)
         if gw * h >= gh * w:                    # aspect-fit target, capped at
             vw, vh = w, max(1, gh * w // gw)    # native (draw upscales cleanly)
         else:
@@ -779,7 +904,9 @@ class Wallpaper:
         """Render ONE representative frame of the current wallpaper cart on
         the offscreen runner canvas (live scenes warmed a few seconds so the
         still looks alive) and resample it to (vw, vh). The one-time cost the
-        sidecar amortizes away; None when the runner is unavailable."""
+        sidecar amortizes away; None when the runner is unavailable. A
+        per-glass wallpaper's runner is a glass-sized canvas, given back once
+        its frame is read (`_drop_glass_runner`)."""
         if not self._ensure_preview():
             return None
         try:
@@ -802,6 +929,27 @@ class Wallpaper:
             self._pv_ns = self._pv_update = self._pv_draw = None
             self._pv_for = None
             return None
+        finally:
+            self._drop_glass_runner()
+
+    def _drop_glass_runner(self):
+        """Give back a per-glass preview runner: its canvas is the glass's
+        size (1.2 MB on a 1024x600 desk), and the preview is a still the
+        memo and the sidecar keep, so nothing draws on it again."""
+        cart = self._pv_for
+        pv = self._pv_canvas
+        if cart is None or pv is None or not cart.get("glass"):
+            return
+        rl = getattr(pv, "reclaim_layers", None)
+        if rl is not None:
+            rl("wallpaper_pv")
+        rel = getattr(pv, "release", None)
+        if rel is not None:
+            rel()
+        self._pv_canvas = None
+        self._pv_ns = self._pv_update = self._pv_draw = None
+        self._pv_restore = None
+        self._pv_for = None
 
     @classmethod
     def _preview_indices(cls, pv, vw, vh):

@@ -427,8 +427,10 @@ def render(g, config, theme, mode, setup, wallpaper):
         if "layout" not in cfg:
             cfg["theme"] = theme
         ws = g._build(cfg, os.path.join(tmp, "carts"))
-        if not wallpaper:
-            ws.look.select_wallpaper(None, persist=False)
+        # A wallpaper scene shows the console's default wallpaper cart (Moy's
+        # night on a seeded store), the rest the theme's backdrop.
+        ws.look.select_wallpaper(ws.look._default_wallpaper() if wallpaper
+                                 else None, persist=False)
         setup(g, ws)
         settled = _settle(g, ws)
         return _image(ws), settled

@@ -80,6 +80,8 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     _quiesce(ws)
     ws.open_desk()
     drv.frame(1 / 30)
+    sc = ws.sys_canvas
+    desk = bytes(sc._buf)
     ws.open()                                    # a cart, in a player WINDOW
     for _ in range(3):
         drv.frame(1 / 30)
@@ -87,15 +89,22 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     win = ws.wm._wins["desktop"]
     assert win is not None and win.w < ws.sys_canvas.w
 
-    sc = ws.sys_canvas
-    # Sample the desk WELL clear of the window: bands span the full width and
-    # the full height, so any of these catches them.
-    outside = [(2, sc.h - 3), (sc.w - 3, sc.h - 3), (2, win.y + win.h // 2),
-               (sc.w - 3, win.y + win.h // 2)]
-    for x, y in outside:
-        assert ws.wm._win_at(x, y) is None, (x, y)   # really outside every window
-    assert any(sc.pix(x, y) != 0 for x, y in outside), \
-        "the game composite letterboxed the whole desktop black"
+    # Sample the desk WELL clear of the window, along a row and a column the
+    # bands would cross whole: the wallpaper and the icon column there are as
+    # the desk drew them before the game opened (Moy's night is a black sky,
+    # so a lone pixel's colour would not tell a band from the night).
+    outside = [(x, win.y + win.h // 2) for x in range(0, sc.w, 3)] + \
+              [(x, sc.h - 3) for x in range(0, sc.w, 3)]
+    outside = [p for p in outside if ws.wm._win_at(*p) is None]
+    assert len(outside) > sc.w // 3
+
+    def px(buf, x, y):
+        i = (y * sc.w + x) * 2
+        return buf[i] << 8 | buf[i + 1]
+
+    assert any(px(desk, x, y) != px(desk, 0, sc.h - 3) for x, y in outside)
+    assert all(px(sc._buf, x, y) == px(desk, x, y) for x, y in outside), \
+        "the game composite letterboxed the desktop"
 
 
 def test_the_fullscreen_tier_still_gets_its_letterbox(tmp_path):
@@ -2939,3 +2948,73 @@ def test_a_chip_that_minimizes_its_window_takes_the_focus_with_it(tmp_path):
     assert wm._wins["calc"].minimized and wm._focus is None
     wm._chip_tap("calc")
     assert not wm._wins["calc"].minimized and wm._focus == "calc"
+
+
+# -- the wallpaper's subject (docs/look_2026-10.md step 28) -------------------
+
+def _overlaps(a, b):
+    return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
+            and a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def test_moys_night_sleeps_clear_of_the_icon_column(tmp_path):
+    """The desk hands its wallpaper the bars and the icon column as quiet
+    rectangles; Moy's night, drawing per glass, puts Moy where neither is,
+    and its subject is where Moy sleeps."""
+    ws = _moy_desk(tmp_path)
+    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+    ws.wm._backdrop_layer._draw_desktop(1 / 30)
+    quiet = ws.wm._backdrop_layer.quiet()
+    assert quiet[:len(ws.wallpaper.bars())] == ws.wallpaper.bars()
+    col = quiet[len(ws.wallpaper.bars()):]
+    assert col and col[0][0] < 100                      # the column, at the left
+    s = ws.wallpaper.subject
+    assert s is not None and not any(_overlaps(s, q) for q in quiet)
+    assert s[0] > ws.sys_canvas.w // 2                  # so Moy sleeps bottom right
+
+
+def test_a_new_window_keeps_clear_of_the_wallpapers_subject(tmp_path):
+    """The WM's default placement moves a window that would cover the
+    subject to the nearest place beside it that holds the whole window, and
+    leaves one that does not cover it, or that nothing holds, where the
+    cascade put it."""
+    ws = _moy_desk(tmp_path)
+    wm = ws.wm
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    plain = (win.x, win.y, win.w, win.h)
+    ws.exit()
+    ws.frame(1 / 30)
+    assert "calc" not in wm._wins
+
+    # a subject square in the middle of where Calc opens
+    sub = (plain[0] + plain[2] // 2 - 20, plain[1] + plain[3] // 2 - 20, 40, 40)
+    ws.wallpaper.subject = sub
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    got = (win.x, win.y, win.w, win.h)
+    dx, dy, dw, dh = wm._desk_rect()
+    assert got[2:] == plain[2:]
+    assert not _overlaps(got, sub)
+    assert dx <= got[0] and got[0] + got[2] <= dx + dw
+    assert dy <= got[1] and got[1] + got[3] <= dy + dh
+    ws.exit()
+    ws.frame(1 / 30)
+
+    # a subject Calc does not cover moves nothing
+    ws.wallpaper.subject = (dx + dw - 30, dy + dh - 30, 20, 20)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    assert (win.x, win.y) == plain[:2]
+    ws.exit()
+    ws.frame(1 / 30)
+
+    # a subject no place on the desk avoids leaves the cascade's place
+    ws.wallpaper.subject = (dx, dy, dw, dh)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    assert (win.x, win.y) == plain[:2]

@@ -80,6 +80,7 @@ typedef struct {
     int writable_ok;            // a compiled cart's "writable" is a list of strings
     moy_cat_int_t version, memory;
     int graduated;
+    int glass;                  // a per-glass wallpaper: moybyte.glass is JSON true
     int icon_ok;                // the normalised icon: tile, w, h
     int64_t icon[3];
     size_t input_n;             // -1 cast: None; else the kinds, in order

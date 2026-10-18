@@ -1054,6 +1054,9 @@ class Carousel(Launcher):
         self.plays_for = None         # optional cart -> its play record (ws.carts.plays)
         self.today_for = None         # optional () -> today as YYYYMMDD, 0 unknown
         self._cap = None              # the caption laid out: (card, layout, parts)
+        self.wall_ink = None          # (white, black) over a wallpaper (_wall_ink)
+        self._quiet_for = None        # the geometry `quiet` was computed for
+        self._quiet_q = ()
         Launcher.__init__(self, items, layout, names, blit_glyph)
 
     # -- geometry ------------------------------------------------------------
@@ -1178,6 +1181,32 @@ class Carousel(Launcher):
         """The desk home's hero, or None."""
         dk = self._geom()[9]
         return None if dk is None else dk[0]
+
+    def quiet(self):
+        """The home's quiet rectangles (docs/theming_2026-09.md §4.9), which
+        a per-glass wallpaper keeps its subject out of: on the handheld the
+        title and the metadata, a column as wide as the hero and half a
+        neighbour each side, and the hint strip; on the desk the hero and
+        its details, the shelf's band and the hint strip. Computed once per
+        geometry."""
+        g = self._geom()
+        if self._quiet_for is g:
+            return self._quiet_q
+        foot, dk = g[8], g[9]
+        if foot is None:
+            q = ()
+        elif dk is None:
+            title_y, _th, _ts, meta_y, meta_h, hints = foot
+            lay = self.layout
+            tw = min(lay.cw, 3 * g[2])
+            q = ((lay.cx + (lay.cw - tw) // 2, title_y, tw,
+                  meta_y + meta_h - title_y), hints)
+        else:
+            (hx, hy, hero, _h), dx, dw = dk[0], dk[1], dk[2]
+            q = ((hx, hy, dx + dw - hx, max(hero, dk[5][5])), g[1], foot[5])
+        self._quiet_for = g
+        self._quiet_q = q
+        return q
     def tabs_rect(self):
         return self._geom()[0]
 
@@ -1714,17 +1743,25 @@ class Carousel(Launcher):
             for k in range(fs):
                 cv.rectb(px - k, py - k, pw + 2 * k, ph + 2 * k, th.get("border", 0))
             ink, dim = th.get("chrome_ink", 7), th.get("chrome_ink_dim", 6)
-        if _ui_draw.print_font(fid) is not None:
-            cv.print_scaled(name, bx + (bw - tw) // 2, ty, ink, tsc)
+        wall = self.wall_ink
+        if wall is not None and _ui_draw.depth()[0]:
+            ink = dim = wall[0]
+        tx = bx + (bw - tw) // 2
+        swap = _ui_draw.print_font(fid)
+        if wall is not None:
+            cv.print_scaled(name, tx + 1, ty + 1, wall[1], tsc)
+        cv.print_scaled(name, tx, ty, ink, tsc)
+        if swap is not None:
             _ui_draw.print_font(was)
-        else:
-            cv.print_scaled(name, bx + (bw - tw) // 2, ty, ink, tsc)
-        x = bx + (bw - mw) // 2
-        for k, t in enumerate(parts):
-            if k:
-                cv.rect(x - sep // 2 - fs // 2, my + (mh - fs) // 2, fs, fs, dim)
-            cv.print(t, x, my, dim, 1)
-            x += ws_[k] + sep
+        x0 = x = bx + (bw - mw) // 2
+        for pas in ((1, wall[1]), (0, dim)) if wall is not None else ((0, dim),):
+            o, c = pas
+            x = x0
+            for k, t in enumerate(parts):
+                if k:
+                    cv.rect(x - sep // 2 - fs // 2 + o, my + (mh - fs) // 2 + o, fs, fs, c)
+                cv.print(t, x + o, my + o, c, 1)
+                x += ws_[k] + sep
 
     def _draw_title_tile(self, cv, it, rect, r):
         """A card for a cart with no cover (GAPS 21): the theme's tile field,
@@ -1978,6 +2015,17 @@ class IconHome(Launcher):
 
     def _draw_pseudo_card(self, cv, it, rect, selected):
         self._draw_cart_card(cv, it, rect, selected, None)
+
+
+def _wall_ink(ws):
+    """(white, black) where the home lies on a wallpaper -- a cart or a
+    picture, pixels the theme does not know -- under a theme with a depth,
+    else None: its text is then white over a black shadow, as the desk's
+    labels are (docs/look_2026-10.md steps 25 and 28)."""
+    if ws.look.wallpaper_id is None or not _ui_draw.depth()[0]:
+        return None
+    black, white = ws.look.live.fixed[2:]
+    return white, black
 
 
 def _dim_of(ws):
@@ -2432,6 +2480,7 @@ class LauncherHomeLayer:
             self.grid.motion = getattr(wm, "HOME_MOTION", "full")
             self.grid.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_HH)
             self.grid.dim = _dim_of(ws)
+            self.grid.wall_ink = _wall_ink(ws)
         # Kinetic fling (#113) and the glide to the centre card: advance the
         # row BEFORE painting, and keep the redraw gate open until it rests.
         # Both ride the partial path (its gate includes flinging).
@@ -2462,7 +2511,7 @@ class LauncherHomeLayer:
         # three sections so a slow launcher frame names its eater (PERF's
         # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
-        ws.wallpaper.draw(dt, home=True)
+        ws.wallpaper.draw(dt, home=True, quiet=self._quiet(ws, carousel))
         if carousel:
             self._capture_band_backdrop(cv, dt)
         else:
@@ -2637,6 +2686,19 @@ class LauncherHomeLayer:
                 return True
         return False
 
+    def _quiet(self, ws, carousel):
+        """The home's quiet rectangles for its wallpaper: the bars and, on a
+        carousel, its own (`Carousel.quiet`); kept while both are the same
+        objects, so a live wallpaper's frame builds nothing."""
+        bars = ws.wallpaper.bars()
+        own = self.grid.quiet() if carousel else ()
+        hit = getattr(self, "_quiet_key", None)
+        if hit is not None and hit[0] is bars and hit[1] is own:
+            return hit[2]
+        q = bars + own
+        self._quiet_key = (bars, own, q)
+        return q
+
     def _draw_details(self, cv):
         """The desk home's details pane beside the hero (step 18): the
         selected card's title in the `title` face, its metadata, its facts
@@ -2770,6 +2832,9 @@ class LauncherHomeLayer:
         keys at the right (the theme's `keycap`, `ui.hints`'s part). While
         a search query is held it shows in the verbs' place."""
         th = self.ws.theme_colors
+        wall = _wall_ink(self.ws)
+        if wall is not None:
+            th = self._wall_theme(th, wall[0])
         if self.ws.menu_ui.looked():
             # the system menu's card is open over the home: its keys
             rect = self.grid.foot()[5]
@@ -2803,6 +2868,18 @@ class LauncherHomeLayer:
                 left = x0 - (rect[0] + _HINT_LEAD * self.ws.layout.fs)
                 _ui_draw.hints(cv, th, (rect[0] + left, rect[1], rect[2] - left, rect[3]),
                                _TAB_KEYS, desk)
+
+    def _wall_theme(self, th, white):
+        """`th` with its hint labels' roles white, for the strip over a
+        wallpaper: one dict per theme load, so the toolkit's look ring keeps
+        its slot."""
+        k = getattr(self, "_wall_th", None)
+        if k is not None and k[0] is th and k[1] == white:
+            return k[2]
+        wt = dict(th)
+        wt["chrome_ink_dim"] = wt["ink_dim"] = white
+        self._wall_th = (th, white, wt)
+        return wt
 
     def _hint_pad(self):
         """The hint strip's margin at either end: the handheld's is the one

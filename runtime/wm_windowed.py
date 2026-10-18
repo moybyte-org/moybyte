@@ -856,6 +856,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             y = dy + (dh - h) * 2 // 5 + depth * 10 * fs
             x = max(dx, min(x, dx + dw - w // 2))
             y = max(dy, min(y, dy + dh - 24 * fs))
+        x, y = self._clear_of_subject(x, y, w, h, fs)
         win = _Win(kind, x, y, w, h, title_h)
         self._build_content(win)
         # Prewarm: render the content ONCE into the fresh buffer, so a window
@@ -864,6 +865,31 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # buffer.
         self._prewarm(win)
         return win
+
+    def _clear_of_subject(self, x, y, w, h, fs):
+        """A new window's place kept clear of the wallpaper's subject
+        (`Wallpaper.subject`, docs/theming_2026-09.md §4.9): where the
+        window at (x, y) would cover it, the nearest place beside, above or
+        under it, 8 pixels clear at the font scale, that holds the whole
+        window on the desk; where none does, (x, y) as it was."""
+        s = getattr(getattr(self.ws, "wallpaper", None), "subject", None)
+        if s is None:
+            return x, y
+        sx, sy, sw, sh = s
+        m = 8 * fs
+        if x + w <= sx - m or x >= sx + sw + m or y + h <= sy - m \
+                or y >= sy + sh + m:
+            return x, y
+        dx, dy, dw, dh = self._desk_rect()
+        best = None
+        for cx, cy in ((sx - m - w, y), (sx + sw + m, y),
+                       (x, sy - m - h), (x, sy + sh + m)):
+            if cx < dx or cy < dy or cx + w > dx + dw or cy + h > dy + dh:
+                continue
+            d = abs(cx - x) + abs(cy - y)
+            if best is None or d < best[0]:
+                best = (d, cx, cy)
+        return (x, y) if best is None else (best[1], best[2])
 
     def _prewarm(self, win):
         """One-shot render of an app window's content into its buffer (defensive:

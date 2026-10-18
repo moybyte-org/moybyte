@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Moy Night",
   "id": "moybyte.moy_night",
   "runtime": "python",
@@ -8,6 +8,7 @@
   "canvas": "320x240",
   "moybyte": {
     "type": "wallpaper",
+    "glass": true,
     "system": true,
     "order": 10,
     "permissions": [
