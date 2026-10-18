@@ -115,11 +115,36 @@ _LUA_SYMBOLS = "=~()[]{}<>:,.\"_%"
 _SYM_Y = 220
 _SYM_H = 20
 _SYM_CELL = 20
+# The responsive strip (CodeLayout): its keys share out the content width
+# less _SYM_MARGIN each side, never narrower than _SYM_MIN, and it sits
+# _SYM_MARGIN less a key's 1px inset above the content's bottom edge.
+_SYM_MIN = 18
+_SYM_MARGIN = 3
 _SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
 # The 2026-10 look's overflow fade: a line longer than the view fades out over
 # its last _FADE pixels (at the font scale), in bands of `bg` at these alphas.
 _FADE = 12
 _FADE_ALPHA = (89, 153, 217)
+
+
+def _status_line(fields, room, fs):
+    """The status band's one line: `fields` joined by the home's separator,
+    the middle dot (a hyphen in a `ui` face without it), as many as fit
+    `room` less the band's pads at the `ui` face."""
+    fid = _ui_draw.font("ui")[0]
+    info = _ui_draw.font_info(fid) if fid else None
+    sep = "  \u00b7  " if info is not None and info[4] == 0 else " - "
+    was = _ui_draw.print_font(fid)
+    try:
+        room -= 2 * _ui_draw.metrics("status")[_ui_draw.ST_PAD] * fs
+        line = fields[0]
+        for f in fields[1:]:
+            if _ui_draw.print_width(line + sep + f, fs) > room:
+                break
+            line += sep + f
+    finally:
+        _ui_draw.print_font(was)
+    return line
 
 
 def symbols_for(lang):
@@ -143,7 +168,9 @@ def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None,
         if rects is not None:
             rects.append(r)
         if t.get("look") and th is not None:
-            _ui_draw.button(cv, th, (r[0] + fs, r[1] + fs, r[2] - fs, r[3] - fs),
+            # Each key inset by fs inside its cell: 2*fs apart, fs off the
+            # strip's edges.
+            _ui_draw.button(cv, th, (r[0] + fs, r[1] + fs, cell - 2 * fs, h - 2 * fs),
                             syms[i], kind="normal", app="code")
             continue
         art = _ui_draw.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
@@ -1153,9 +1180,9 @@ class CodeLayer:
         # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
         if lay.status_band is not None and ed is not None:
             issues = "1 issue" if ws.code_err else "No issues"
-            _ui_draw.status_row(cv, ws.theme_colors, lay.status_band,
-                           ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
-                            str(len(ed.lines)) + " lines", issues))
+            _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, (_status_line(
+                ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
+                 str(len(ed.lines)) + " lines", issues), lay.status_band[2], fs),))
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
 

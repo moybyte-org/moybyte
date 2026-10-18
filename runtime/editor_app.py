@@ -693,9 +693,13 @@ class EditorApp:
                     return self._activate_zone_tab(tid)
             return False
         rects, gap = self._ladder_layout(rect)
-        for tab, _glyph, r in rects:
-            # A tap in a gap belongs to the icon either side of it.
-            if _in(px, py, (r[0] - gap // 2, r[1], r[2] + gap, r[3])):
+        last = len(rects) - 1
+        for i, (tab, _glyph, r) in enumerate(rects):
+            # A tap in a gap between two icons belongs to the nearer one;
+            # the ladder's two ends stay where they are drawn.
+            lo = r[0] - (gap // 2 if i else 0)
+            hi = r[0] + r[2] + (gap - gap // 2 if i < last else 0)
+            if _in(px, py, (lo, r[1], hi - lo, r[3])):
                 return self._activate_zone_tab(tab)
         return False
 

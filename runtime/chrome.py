@@ -64,11 +64,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import _SET_ROW_H
 
 try:
-    from code_layer import (_CODE_LEAD, _CODE_X0,
-                            _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
+    from code_layer import (_CODE_LEAD, _CODE_X0, _SYM_CELL, _SYM_H,
+                            _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LEAD, _CODE_X0,
-                                    _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
+    from runtime.code_layer import (_CODE_LEAD, _CODE_X0, _SYM_CELL, _SYM_H,
+                                    _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS)
 
 try:
     import shell_layout as _shell_layout
@@ -556,17 +556,21 @@ class CodeLayout(LayoutBase):
             self.lh = (line + _CODE_LEAD) * fs
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
         # A key is TAPPED (on a board with no keyboard this strip IS the keyboard),
-        # so it takes the chrome scale and the symbol re-centers inside it. WIDTH is
-        # capped at what the canvas can hold, because a key that grew off the right
-        # edge is a key that cannot be pressed at all -- never below the fs width,
-        # which is what keeps the existing tiers (fs 3 already overflows) unmoved.
-        self.sym_cell = max(_SYM_CELL * fs,
-                            min(_SYM_CELL * cs, self.cw // len(_CODE_SYMBOLS)))
+        # so it is as tall as the chrome scale makes a tap target, and the keys
+        # share out the content width less a margin each side -- the row is
+        # centred, and a key is never narrower than _SYM_MIN at the font scale
+        # (font scale 3 overflows 800px either way). Each key draws 1px inside
+        # its cell (`draw_symbol_keys`), so keys stand 2px apart and the strip
+        # sits a margin above the content's bottom edge.
+        n = len(_CODE_SYMBOLS)
+        m = _SYM_MARGIN * fs
+        self.sym_cell = max(_SYM_MIN * fs, (self.cw - 2 * m) // n)
         self.sym_h = _SYM_H * cs
-        self.sym_text_dx = (self.sym_cell - _SYM_CELL * fs) // 2
+        self.sym_text_dx = max(0, (self.sym_cell - _SYM_CELL * fs) // 2)
         self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
-        self.sym_y = self.cy + self.ch - self.sym_h
-        self.sym_area = (self.cx, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
+        self.sym_y = self.cy + self.ch - self.sym_h - (m - fs)
+        self.sym_area = (self.cx + max(0, (self.cw - self.sym_cell * n) // 2), self.sym_y,
+                         self.sym_cell * n, self.sym_h)
         # -- code area origin (the content rect's top) --------------------------
         # The zoned bar carries the editor's controls, so CodeLayout has no
         # chrome of its own: the body is text + the symbol palette, filling the
@@ -578,7 +582,10 @@ class CodeLayout(LayoutBase):
         self.cols = max(8, avail_w // self.cell)
         # Status band (visual identity v1 Phase 3, the Studio mockup's
         # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
-        self.status_band = (self.cx, self.sym_y - 12 * fs, self.cw, 12 * fs)
+        # Its height is the `ui` face's line and 2px above and below, never
+        # under 12px at the font scale.
+        band = max(12, _ui_draw.font("ui")[2] + 4) * fs
+        self.status_band = (self.cx, self.sym_y - band, self.cw, band)
         avail_h = self.status_band[1] - self.y0
         self.rows = max(4, avail_h // self.lh)
 

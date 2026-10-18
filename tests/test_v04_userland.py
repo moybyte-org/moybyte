@@ -815,7 +815,8 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     drv.frame(1 / 30)
     for sym in "=[]":                       # ... + palette symbols the keyboard lacks
         i = C._CODE_SYMBOLS.index(sym)
-        drv.click(C._SYM_AREA[0] + i * C._SYM_CELL + 4, C._SYM_Y + 6)
+        lay = ws.code_layout
+        drv.click(lay.sym_area[0] + i * lay.sym_cell + 4, lay.sym_y + 6)
         drv.frame(1 / 30)
     assert ed.text() == "x=[]"
     # RUN dissolved into the unified bar (Stage-4 rollout): the code tab shows the SAME

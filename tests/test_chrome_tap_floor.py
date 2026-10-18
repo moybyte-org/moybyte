@@ -159,14 +159,17 @@ def test_the_tap_targets_grow_and_the_text_does_not():
 
 def test_the_symbol_keys_never_grow_off_the_panel():
     """On a board with no keyboard that strip IS the keyboard, so a key that
-    grew past the right edge is a key that cannot be pressed. It is capped at
-    what the canvas holds -- and never below the font-scale width, which is
+    grew past the right edge is a key that cannot be pressed. The keys share
+    out the width less a margin each side, centred, whatever the chrome
+    scale -- and never below their least width at the font scale, which is
     what keeps font scale 3 (already wider than 800px) where it is."""
-    from runtime.code_layer import _CODE_SYMBOLS
+    from runtime.code_layer import _CODE_SYMBOLS, _SYM_MARGIN
     n = len(_CODE_SYMBOLS)
     floored = CodeLayout(480, 320, 1, chrome_scale=2)
-    assert floored.sym_cell * n <= 480
-    assert floored.sym_cell > CodeLayout(480, 320, 1).sym_cell
+    x, _y, w, _h = floored.sym_area
+    assert x >= _SYM_MARGIN and x + w <= 480 - _SYM_MARGIN
+    assert 480 - w - 2 * _SYM_MARGIN < n                  # the width is shared out
+    assert abs(x - (480 - x - w)) <= 1                    # centred
     for w, h, fs in TIERS:
         assert (CodeLayout(w, h, fs).sym_cell
                 == CodeLayout(w, h, fs, chrome_scale=fs).sym_cell)
@@ -176,13 +179,17 @@ def test_the_text_offsets_re_centre_only_when_the_box_grew():
     """The hand-tuned offsets (the bar's y=3, a Settings row's y=5) are frozen
     pixels. The `*_dy` fields shift the fs-tall band into the middle of a
     cs-tall box, so they must be exactly 0 wherever the box did not grow."""
+    from runtime.code_layer import _SYM_CELL
     for w, h, fs in TIERS:
         lay = Layout(w, h, fs, chrome_scale=fs)
         assert lay.bar_text_dy == 0
         assert lay.row_text_dy == 0
         assert lay.set_head_dy == 0
         code = CodeLayout(w, h, fs, chrome_scale=fs)
-        assert code.sym_text_dx == 0 and code.sym_text_dy == 0
+        # A symbol key's width is the strip's share, so its x offset centres
+        # the symbol in what the key grew by; its height is the tap target's.
+        assert code.sym_text_dx == max(0, (code.sym_cell - _SYM_CELL * fs) // 2)
+        assert code.sym_text_dy == 0
     w, h, fs, cs = GUITION
     lay = Layout(w, h, fs, chrome_scale=cs)
     assert lay.bar_text_dy > 0 and lay.row_text_dy > 0 and lay.set_head_dy > 0
