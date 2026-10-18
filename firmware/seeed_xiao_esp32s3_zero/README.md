@@ -78,10 +78,12 @@ write finishes, and holding BOOT while plugging in is the escape hatch on the
 card.
 
 **A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
-`0x620000` (since 2026-10-07); a board flashed under an older table, or the
-stock MicroPython one, has its filesystem elsewhere, so the new image comes up
-on a freshly formatted store (`tools/board_flash.py` erases the moved store's
-first blocks and says so). Run
+`0x6A0000` (since 2026-10-18; `0x620000` from 2026-10-07); a board flashed under
+an older table, or the stock MicroPython one, has its filesystem elsewhere, so
+the new image comes up on a freshly formatted store (`tools/board_flash.py`
+erases the moved store's first blocks and says so). A table change needs a USB
+flash, and an OTA'd Zero keeps the table it was last cabled with: OTA writes
+the app slot, never the table. Run
 `./provision.sh` afterwards to put the credentials and the pin back; the seed
 roster the image carries seeds itself on the next boot. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
@@ -99,12 +101,17 @@ them back on the next visit — but anything that existed *only* here is.
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
   the Guition's 3,668,096 B the day before. The baked browser console grew
   the image past its first headroom floor, 256 KiB (`docs/native_kernel_2026-09.md`
-  §6.1), so since 2026-10-07 the slots are **3 MiB** (`0x300000`, at `0x20000`
-  and `0x320000`) and the store is the **1.875 MiB** `vfs` at `0x620000`, sized
-  for the kernel's native modules to cross onto this board. The CSV carries the
-  full arithmetic and what would falsify it; the build prints the headroom on
-  every run beside the board's floor (`[image] headroom_floor_kib` in
-  `board.toml`) and fails under it or on an overflow (#168).
+  §6.1), so on 2026-10-07 the slots became **3 MiB** (`0x300000`) and the store
+  the 1.875 MiB `vfs` at `0x620000`, sized for the kernel's native modules to
+  cross onto this board. The console kept growing: at 2,913,328 B the image
+  had ~226 KB of headroom against the 200 KB floor, so on 2026-10-18 (owner)
+  the slots became **3.25 MiB** (`0x340000`, at `0x20000` and `0x360000`) and
+  the store the **1.375 MiB** `vfs` at `0x6A0000`: 494,544 B (483 KB) of
+  headroom. The seed carts are ~820 KB, so the room for a kid's own carts goes
+  from ~1.1 MB to ~600 KB. The CSV carries the full arithmetic and what would
+  falsify it; the build prints the headroom on every run beside the board's
+  floor (`[image] headroom_floor_kib` in `board.toml`) and fails under it or on
+  an overflow (#168).
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is

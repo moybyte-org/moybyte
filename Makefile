@@ -603,7 +603,7 @@ firmware-monitor-guition-p4:
 # how you read the boot line, the paired url and every `ZERO ota:` transition.
 #
 # A TABLE-CHANGING FLASH IS A STORE WIPE. This board's table puts vfs at
-# 0x620000 (since 2026-10-07); a board flashed under an older table has its
+# 0x6A0000 (since 2026-10-18); a board flashed under an older table has its
 # filesystem elsewhere, so the new image comes up on a freshly formatted store.
 # Re-run provision.sh afterwards -- see the board README.
 

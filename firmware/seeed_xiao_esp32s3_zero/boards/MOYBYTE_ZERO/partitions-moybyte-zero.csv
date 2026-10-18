@@ -18,36 +18,43 @@
 # where a transposed digit between two S3 boards is a real hazard (the T-Deck's
 # 0x1D000 vs the P4's 0xD000 has already been typed wrong once, by hand).
 #
-# THE SLOT SIZE, and what it is sized against: 3 MiB (0x300000) per slot since
-# 2026-10-07 (owner; option (b) of docs/native_kernel_2026-09.md section 6.1's
-# Zero row), re-tabled from the first table's 2.75 MiB slots and 2.375 MiB vfs.
+# THE SLOT SIZE, and what it is sized against: 3.25 MiB (0x340000) per slot
+# since 2026-10-18 (owner), re-tabled from 3 MiB slots (2026-10-07; option (b)
+# of docs/native_kernel_2026-09.md section 6.1's Zero row) and before that from
+# the first table's 2.75 MiB slots and 2.375 MiB vfs.
 #
-#   The image this table was cut for is ~2.67 MB, and most of it is the browser
-#   console every board bakes (native/moy_web, ~808 KB gzipped, 91% of it
-#   micropython.wasm.gz), which grows with the console rather than with this
-#   board. On 2.75 MiB slots that left ~217 KB, under the 256 KiB floor this
-#   image then had (section 6.1; [image] in board.toml holds the current one). The kernel adds to it next: moy_kernel and moy_net
-#   cross onto this board natively (docs/kernel_survival_2026-10.md 6.5). 3 MiB
-#   leaves about the floor again on top of the floor, which is that pass's room;
-#   the build prints the current figure on every run.
+#   The image is ~2.91 MB (2,913,328 B at the last measurement), and most of it
+#   is the browser console every board bakes (native/moy_web, ~808 KB gzipped,
+#   91% of it micropython.wasm.gz), which grows with the console rather than
+#   with this board. On 3 MiB slots that left ~226 KB, against the 200 KB floor
+#   ([image] in board.toml holds the current one); the next console pass would
+#   have failed the build. 3.25 MiB slots leave 494,544 B (483 KB), about
+#   2.4 times the floor.
+#
+#   Arithmetic, on 8 MiB (0x800000) of flash:
+#     ota_0  0x020000 + 0x340000 = 0x360000   (3,407,872 B, 64 KB aligned)
+#     ota_1  0x360000 + 0x340000 = 0x6A0000   (64 KB aligned)
+#     vfs    0x6A0000 + 0x160000 = 0x800000   (1.375 MiB, ends on the last byte)
 #
 #   The price is the store, and it is the store that sets the ceiling: this
-#   board is a CART STORE, and the seed roster alone is 763KB / 36 folders /
-#   132 files (measured on glass 2026-08-25) before a kid has made anything.
-#   3 MiB slots keep 1.875 MiB of vfs; 3.25 MiB slots would keep 1.375 MiB,
-#   under twice the roster.
+#   board is a CART STORE, and the seed roster alone is ~820 KB of carts, so a
+#   kid's room for their own goes from ~1.1 MB to ~600 KB. Every slot byte is
+#   paid for twice and comes off the store.
 #
-# WHAT WOULD FALSIFY IT: the app image crossing ~2.9 MB. The build says so on
-# every run (the #168 guard reads THIS FILE's ota_0 size, prints the headroom
-# beside board.toml's floor, and fails the build under the floor), so the tell
-# arrives before the image does. Changing these offsets costs every deployed board a full-erase
-# cable flash and its store (tools/board_flash.py erases the moved store's
-# first blocks), so the time to argue with the numbers is before the next one.
+# WHAT WOULD FALSIFY IT: the app image crossing ~3.2 MB, or the store filling
+# with the roster plus a kid's carts. The build says so on every run (the #168
+# guard reads THIS FILE's ota_0 size, prints the headroom beside board.toml's
+# floor, and fails the build under the floor), so the tell arrives before the
+# image does. Changing these offsets costs every deployed board a USB flash and
+# its store (tools/board_flash.py erases the moved store's first blocks; the
+# browser re-syncs its carts), and an OTA'd board keeps the table it was
+# flashed with: OTA writes the app slot, never the table. The time to argue
+# with the numbers is before the next one.
 #
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
 phy_init, data, phy,     0x1F000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x300000,
-ota_1,    app,  ota_1,   0x320000, 0x300000,
-vfs,      data, fat,     0x620000, 0x1E0000,
+ota_0,    app,  ota_0,   0x20000,  0x340000,
+ota_1,    app,  ota_1,   0x360000, 0x340000,
+vfs,      data, fat,     0x6A0000, 0x160000,

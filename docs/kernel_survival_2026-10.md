@@ -1243,8 +1243,9 @@ their group's sprint. The recommendations, each one sentence of mechanism:
   the S3's coexistence is measured, not assumed, with
   `wasm_low_water_with_radios_up`'s shape of test run under the kernel's
   central.
-- **The Zero's headroom.** Its 3 MiB slots (2026-10-07) leave it about its
-  floor again above the floor, which is this pass's `moy_kernel` and `moy_net`
+- **The Zero's headroom.** Its 3 MiB slots (2026-10-07) left it about its
+  floor again above the floor; they became 3.25 MiB on 2026-10-18 (about
+  480 KB of headroom). That room is for this pass's `moy_kernel` and `moy_net`
   plus every pass that touches the web build and grows the bundle it carries;
   the per-pass budget and the deny path are what keep a pass from discovering
   this at its end.

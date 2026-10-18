@@ -514,9 +514,9 @@ class ZeroUpdate:
             return
         try:
             # STRAIGHT INTO THE SLOT on this board, and it is not a preference.
-            # The whole filesystem here is smaller than the image (1.875MB
-            # against ~2.7MB): a staged copy cannot fit on an EMPTY volume, and
-            # the symptom is OSError 28 (ENOSPC). The inactive slot is 3MB and
+            # The whole filesystem here is smaller than the image (1.375MB
+            # against ~2.9MB): a staged copy cannot fit on an EMPTY volume, and
+            # the symptom is OSError 28 (ENOSPC). The inactive slot is 3.25MB and
             # empty, which is what it is for.
             self.ota.begin_download(self.manifest, to_slot=True)
         except Exception as exc:         # noqa: BLE001 -- bad url / non-200
