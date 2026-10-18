@@ -628,6 +628,15 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
     return MOY_PLAY_OK;
 }
 
+int moy_play_hold(uint32_t run, uint32_t ms) {
+    run_t *r = live(run);
+    if (r == NULL) {
+        return MOY_PLAY_STALE;
+    }
+    r->start_ms += ms;
+    return MOY_PLAY_OK;
+}
+
 int moy_play_end(uint32_t run, int why) {
     run_t *r = live(run);
     if (r == NULL) {
@@ -862,6 +871,11 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         }
     } else {
         F.holding = false;
+    }
+    // Super (`start`): the console's pause menu holds the run, and the
+    // console's frame -- this same loop frame -- takes the press.
+    if (pressed & (1u << MOY_PLAY_START_BIT)) {
+        return front_back();
     }
     // The pointer, in the run's canvas.
     moy_input_sample_t smp;

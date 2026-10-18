@@ -154,7 +154,7 @@ now.
 An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
 2026-10-15): `runtime/ui.py`'s verbs (`page`, `label`, `button`, `toggle`,
 `slider`, `list`, `group`, `info`, `link`, `cycle`, `seg`, `swatches`,
-`hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `popover`, `tabs`,
+`hints`, `icon`, `progress`, `table`, `scroll`, `field`, `dialog`, `popover`, `menu`, `tabs`,
 `grid`, `card`, `part`, `focus`, `keys_taken`, `at`) and its rect algebra
 (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
 app make. The engine under them -- the rect-taking widgets (`button`,

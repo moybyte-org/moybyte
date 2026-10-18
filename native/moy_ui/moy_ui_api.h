@@ -1,7 +1,7 @@
 // The public UI API's engine (docs/ui_api_2026-10.md): the verbs every app
 // and cart draws its interface with -- page, label, button, toggle, slider,
 // list, group, info, link, cycle, seg, swatches, hints, icon, progress, table,
-// scroll, field, dialog, popover, tabs, grid, card, part, focus, keys_taken, at -- and
+// scroll, field, dialog, popover, menu, tabs, grid, card, part, focus, keys_taken, at -- and
 // the focus and navigation they share.
 //
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
@@ -148,6 +148,8 @@ typedef struct {
     // press outside the card drawn last, or Esc).
     moy_ui_box_t pop_card, pop_prev, pop_at;
     uint8_t pop_gone;
+    uint8_t pop_mid;                // it opened with nothing to hang from: centred
+    uint32_t pop_id;                // the popover drawn this frame (0: none)
     // ui.grid's: open (2: placed by ui.at), its columns, the card next, the
     // first column's left edge and the columns' pitch, the pictures' size,
     // the top of the card row being laid out (content coordinates; a placed
@@ -256,6 +258,16 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 #define MOY_UI_KEY_ESC 27
 int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
                        const moy_ui_over_t *o);
+// A menu (§1): its caption (`label`; of length 0 none, and then a rule when
+// rows sit above it in its page), then a row a stop per item of `items`
+// (NUL-separated, `len` bytes), the icon named at the same place in `icons`
+// (NUL-separated, `ilen` bytes; an empty name, or none, no icon) before its
+// label. An item's id is its text. Stacked on the page, or from ui.at's
+// rect's top left across its width. Answers the item activated this frame
+// (from 0), -1 none.
+int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
+                        const uint8_t *items, size_t len, const uint8_t *icons, size_t ilen,
+                        const moy_ui_over_t *o);
 // A card grid (§1): `id` begins one whose cards' pictures are w x h, as
 // many columns as the row holds, the grid's rows stacking on the page (or
 // from ui.at's rect's top left, across its width); an id of length 0 ends it.
@@ -278,7 +290,8 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h);
 // Where stop `id` drew in the frame drawn last (the host's: a popover beside
-// a row, a test's tap): its box into out, 1; 0 where it drew no such stop.
+// a row, a test's tap), or the card of the popover `id` drawn then: its box
+// into out, 1; 0 where it drew no such stop or popover.
 int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]);
 // A duplicate id drawn this frame, its text, once per id (NULL none).
 const char *moy_ui_api_dup(moy_ui_ctx_t *c);

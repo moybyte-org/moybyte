@@ -207,12 +207,22 @@ def run_live(driver, dt, scale):
     exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
     shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a",
                  pygame.K_SPACE: "a", pygame.K_x: "b"}
+    # Super (the GUI key; Cmd on a Mac) is the console's system key from every
+    # surface: the system menu, or the pause menu over a fullscreen game.
+    super_keys = tuple(getattr(pygame, n) for n in ("K_LSUPER", "K_RSUPER", "K_LGUI",
+                                                     "K_RGUI", "K_LMETA", "K_RMETA")
+                       if hasattr(pygame, n))
     mouse_down = False
     running = True
     while running:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
+            elif ev.type == pygame.KEYDOWN and ev.key in super_keys:
+                driver.system_key()
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE \
+                    and driver.menu_open():
+                driver.escape()           # a menu's Esc closes it and steps back
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mouse_down = True
                 driver.touch(ev.pos[0] // scale, ev.pos[1] // scale)   # tap
@@ -265,7 +275,7 @@ def run_live(driver, dt, scale):
                     driver.type_char(ord(ev.unicode))
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
-                    running = False
+                    running = False       # with no menu open, Esc quits the simulator
                 elif ev.key in exit_keys:
                     driver.hold("home", True)        # held so a sustained hold = the exit gesture
                 elif ev.key in shortcuts:

@@ -292,10 +292,28 @@ class ConsoleDriver:
         return (self.ws.screen == "desktop"
                 and bool(getattr(self.ws.input, "text_mode", False)))
 
+    def system_key(self):
+        """Super: the system menu, or the pause menu over a fullscreen game
+        (`Workstation.system_key`). The host's keyboard reaches it here, as a
+        board's reaches it through its `start` button."""
+        self.ws.system_key()
+
+    def menu_open(self):
+        """The pause menu or the system menu shows: Esc is theirs."""
+        return self.ws.pause.open or self.ws.sysmenu.open
+
     def escape(self):
-        """Leave an open menu/editor panel back to the desktop."""
-        if self.ws.screen == "menu":
-            self.ws._leave_menu()
+        """Esc: the pause menu steps back (Options to its menu, the menu to
+        the game), the system menu closes; else an open Editor panel goes
+        back to the desktop."""
+        ws = self.ws
+        if ws.pause.open:
+            ws.pause.back()
+        elif ws.sysmenu.open:
+            ws.sysmenu.close()
+            ws.popover_touch()
+        elif ws.screen == "menu":
+            ws._leave_menu()
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):

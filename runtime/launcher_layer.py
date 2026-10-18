@@ -956,6 +956,7 @@ _VERB_HINT = {"play": ("enter", "Play"), "open": ("enter", "Open"),
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
 _TAB_KEYS = ("Q E", "Tabs")
 _HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
+_MENU_KEYS = ("enter", "Choose", "Esc", "Close")   # the strip under the system menu
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
 _SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps
@@ -2769,6 +2770,11 @@ class LauncherHomeLayer:
         keys at the right (the theme's `keycap`, `ui.hints`'s part). While
         a search query is held it shows in the verbs' place."""
         th = self.ws.theme_colors
+        if self.ws.menu_ui.looked():
+            # the system menu's card is open over the home: its keys
+            rect = self.grid.foot()[5]
+            _ui_draw.hints(cv, th, self._hint_inner(rect), _MENU_KEYS, self.grid.desk())
+            return
         spans, rect = self._hint_spans(cv)
         items, verbs = self._hint_groups()
         n = sum(1 for v, _a, _b in spans if v != "tabs")

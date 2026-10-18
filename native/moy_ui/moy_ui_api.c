@@ -339,6 +339,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pop_prev = c->pop_card;
     c->pop_card.w = 0;
     c->pop_gone = 0;
+    c->pop_id = 0;
     int settled = !c->owe;
     c->owe = 0;
     uint32_t focus0 = c->focus;
@@ -1151,6 +1152,12 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
     return cur;
 }
 
+// The band a rule takes between a card's rows: the row stack's gap and a
+// unit, twice over.
+static int rule_h(const moy_ui_ctx_t *c) {
+    return (2 * metric(MOY_UI_M_ROW_STACK_GAP) + (c->cls ? 9 : 5)) * c->fs;
+}
+
 void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
                       const moy_ui_over_t *o) {
     (void)o;
@@ -1158,6 +1165,16 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
     if (c->has_at) {
         b = c->at;
         c->has_at = 0;
+    } else if (c->n_nest && c->nest[c->n_nest - 1].kind >= 2) {
+        // in a dialog's or a popover's body: a band at the row cursor, under a
+        // rule that parts it from the rows above
+        group_close(c, s);
+        int h = kmetric(MOY_UI_K_VALUE_ROW, c->cls ? MOY_UI_M_VALUE_ROW_HINTS_DESK : MOY_UI_M_VALUE_ROW_HINTS)
+                * c->fs;
+        int stacked;
+        moy_ui_box_t r = place(c, rule_h(c), &stacked);
+        moy_ui_rule(s, r, c->fs, c->cls);
+        b = place(c, h, &stacked);
     } else {
         int h = kmetric(MOY_UI_K_VALUE_ROW, c->cls ? MOY_UI_M_VALUE_ROW_HINTS_DESK : MOY_UI_M_VALUE_ROW_HINTS)
                 * c->fs;
@@ -1382,6 +1399,13 @@ void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h) {
 }
 
 int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]) {
+    if (c->pop_id != 0 && c->pop_card.w > 0 && hash(id.p, id.n, POPOVER_SALT) == c->pop_id) {
+        out[0] = c->pop_card.x;
+        out[1] = c->pop_card.y;
+        out[2] = c->pop_card.w;
+        out[3] = c->pop_card.h;
+        return 1;
+    }
     int i = find(c->cur, c->n_cur, hash(id.p, id.n, 0));
     if (i < 0) {
         return 0;
@@ -1806,8 +1830,10 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     if (c->has_at) {
         c->pop_at = c->at;
         c->has_at = 0;
+        c->pop_mid = 0;
     } else if (c->pop_prev.w == 0) {
         c->pop_at = c->focus_box;
+        c->pop_mid = c->focus_box.w == 0;   // nothing to hang from: centred
     }
     moy_ui_box_t a = c->pop_at;
     int fs = c->fs, rh = row_h(c);
@@ -1845,7 +1871,10 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         x = sf.x;
     }
     int y = a.y + a.h + gap;
-    if (y + h > sf.y + sf.h) {
+    if (c->pop_mid) {
+        x = sf.x + moy_ui_fdiv(sf.w - w, 2);
+        y = sf.y + moy_ui_fdiv(sf.h - h, 2);
+    } else if (y + h > sf.y + sf.h) {
         y = a.y - gap - h;          // no room below: above it
         if (y < sf.y) {
             y = sf.y + sf.h - h;    // nor above: as low as it fits
@@ -1863,7 +1892,92 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
                           (int16_t)(w - 2 * (pad - lp)), (int16_t)bh};
     nest_open(c, 3, pid, inner, body, 0);
     c->pop_card = card;
+    c->pop_id = pid;
     return !c->pop_gone;
+}
+
+// -- menus ---------------------------------------------------------------------------
+
+// Field i of a NUL-separated list (empty past its end).
+static moy_ui_span_t field_at(const uint8_t *p, size_t len, int i) {
+    static const uint8_t none[1] = {0};
+    size_t at = 0;
+    int k = 0;
+    for (size_t j = 0; p != NULL && j <= len; j++) {
+        if (j == len || p[j] == 0) {
+            if (k == i) {
+                return (moy_ui_span_t){p + at, (uint16_t)(j - at)};
+            }
+            at = j + 1;
+            k++;
+        }
+    }
+    return (moy_ui_span_t){none, 0};
+}
+
+int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
+                        const uint8_t *items, size_t len, const uint8_t *icons, size_t ilen,
+                        const moy_ui_over_t *o) {
+    o = over(o);
+    group_close(c, s);
+    int fs = c->fs, rh = row_h(c);
+    // placed: the rows from ui.at's rect's top left, across its width
+    int placed = c->has_at;
+    moy_ui_box_t at = c->at;
+    c->has_at = 0;
+    int ay = at.y;
+    if (label.n) {
+        int h = kmetric(MOY_UI_K_GROUP, c->cls ? MOY_UI_M_GROUP_CAPTION_DESK
+                                               : MOY_UI_M_GROUP_CAPTION) * fs;
+        int stacked = 0;
+        moy_ui_box_t b = {at.x, (int16_t)ay, at.w, (int16_t)h};
+        if (placed) {
+            ay += h;
+        } else {
+            b = place(c, h, &stacked);
+        }
+        clip_t k;
+        if (clip_row(&k, s, b, stacked, c->page)) {
+            moy_ui_caption(s, b, label, fs, c->cls);
+            clip_out(&k);
+        }
+    } else if (!placed && c->y > 0) {
+        int stacked;
+        moy_ui_box_t b = place(c, rule_h(c), &stacked);
+        clip_t k;
+        if (clip_row(&k, s, b, stacked, c->page)) {
+            moy_ui_rule(s, b, fs, c->cls);
+            clip_out(&k);
+        }
+    }
+    int n = moy_ui_fields(items, len);
+    int32_t pick = -1;
+    for (int i = 0; i < n; i++) {
+        moy_ui_span_t t = field_at(items, len, i);
+        moy_ui_span_t ic = field_at(icons, ilen, i);
+        if (ic.n) {
+            moy_ui_api_icon(c, ic);
+        }
+        int stacked = 0;
+        moy_ui_box_t b;
+        if (placed) {
+            c->row_slot = c->icon_slot;
+            c->row_glyph = c->icon_glyph;
+            c->icon_slot = c->icon_glyph = -1;
+            b = (moy_ui_box_t){at.x, (int16_t)ay, at.w, (int16_t)rh};
+            ay += rh;
+        } else {
+            b = place(c, rh, &stacked);
+        }
+        int st = vrow_stop(c, hash(t.p, t.n, 0), b, 0, o, t);
+        if (st & MOY_UI_ST_ACTIVATED) {
+            pick = i;
+        }
+        moy_ui_vrow_t r;
+        vrow_init(c, &r, t);
+        vrow_draw(c, s, b, stacked, MOY_UI_V_INFO, st, o, &r);
+    }
+    return pick;
 }
 
 // -- card grids ----------------------------------------------------------------------

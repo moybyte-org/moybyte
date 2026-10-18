@@ -735,6 +735,9 @@ int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t tit
                        int desk, moy_ui_box_t *content);
 // A group's caption in band `b`.
 int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
+// A rule across band `b` (inside the group pad), one unit thick, centred in
+// its height: what parts a menu from the rows above it in a card.
+int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
 // Keycap hints in band `b`, from its left: `items` NUL-separated pairs of the
 // keys (space-separated; `enter`, `left`, `right`, `up` and `down` draw as
 // signs, any other as its legend) and what they do. The theme's `keycap`

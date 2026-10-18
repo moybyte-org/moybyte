@@ -11,9 +11,10 @@ module holds the shell-side building blocks that are NOT the router itself:
                     cursor), which have no state worth a class of their own.
   * The Phase-1 adapters -- `_BlocksLayer` / `_UpdateLayer` / `_MapLayer` /
                     `_MusicLayer` / `_PerfLayer` / `_AchOverlayLayer` / `_SysMenuLayer`
-                    / `_AboutLayer` -- real Layer types for the surfaces that were
-                    already their own objects (block_ui / update_ui / map_ui /
-                    music_ui / perf_ui / ach_ui / menu_ui).
+                    / `_PauseLayer` / `_AboutLayer` -- real Layer types for the
+                    surfaces that were already their own objects (block_ui /
+                    update_ui / map_ui / music_ui / perf_ui / ach_ui / menu_ui /
+                    pause).
 
 Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer` /
 `_AchOverlayLayer`, injected callables) -- no console module-level constants or
@@ -333,6 +334,30 @@ class _AchOverlayLayer(Layer):
         self._fn()
 
 
+class _PauseLayer(Layer):
+    """The pause menu's layer (docs/look_2026-10.md step 25a): its card over
+    the frozen game, drawn on the system canvas; it takes every key and tap
+    while it shows, and clears the game pointer's tap so the held cart never
+    sees one."""
+
+    id = "pause"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.pause.draw()
+
+    def handle_input(self, i):
+        self.ws.pause.handle_input(i)
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        ws.pause.handle_pointer(px, py, click)
+        gp = ws.input.game_pointer
+        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        return True
+
+
 class _SysMenuLayer(Layer):
     """The popover layer (#52, docs/shell_layout_2026-10.md §8): the ONE modal
     panel a bar widget opens -- the system menu's rows, or a component. Rows:
@@ -406,6 +431,15 @@ class _SysMenuLayer(Layer):
                 else:
                     m.close()             # outside dismisses
                     ws.popover_touch()
+            elif ws.menu_ui.looked():
+                hit = ws.menu_ui.look_hit(px, py)
+                if hit is None:
+                    m.close()             # outside dismisses
+                elif hit >= 0:
+                    m.sel = hit           # a row: move+select
+                    m.activate()
+                    ws._dirty = True
+                ws.popover_touch()
             elif m.row_at(px, py) is None:
                 m.close()                 # outside dismisses
                 ws.popover_touch()

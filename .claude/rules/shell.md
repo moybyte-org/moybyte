@@ -92,7 +92,7 @@ to whoever called it.
   ICONS). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
   they're always exitable.
-- **Exit model (#71's pause machinery is retired):** a fullscreen GAME exits on a
+- **Exit model (#71's BACKSPACE pause machinery is retired):** a fullscreen GAME exits on a
   sustained **hold-BACKSPACE (~700ms)** — raw-matrix mode streams the held key, a
   transient progress toast fills, the pop returns to the caller; a quick tap is a
   plain cart key. Taskbar tools/apps exit via the context-X, so BACKSPACE stays an
@@ -101,7 +101,10 @@ to whoever called it.
   cart verb **`quit()`** (in text mode BACKSPACE arrives as a typed delete and the
   keyboard has no autorepeat, so the console's gesture can't reach it) — Letter
   Blitz models it with a tap-✕. (The plan's triple-tap alias was dropped after
-  on-device testing.)
+  on-device testing.) **Super** (the `start` button; `Workstation.system_key`)
+  is the console's from every surface: the pause menu over a fullscreen game
+  (the Player holds the run, its clock and its music: `Player.pause`), the
+  system menu anywhere else (`docs/shell_ux_v1.md` §9).
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
 - **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo

@@ -195,7 +195,7 @@ var W=320,H=240,ready=false,assCart=undefined,img=null,rgba=null;
 // #42 Thread 3: the open cart's manifest input hint (null/"buttons"/"touch"/"keyboard" list;
 // null = undeclared -> show every control, today's behaviour). applyInputHint() gates the
 // virtual gamepad (#ctl) on "buttons" and the soft-keyboard summon (#kb) on "keyboard".
-var INPUT=null,padWanted=true,kbWanted=true;
+var INPUT=null,padWanted=true,kbWanted=true,metaTap=false;
 var HUD={on:false,fps:0,kb:0,el:document.getElementById("hud"),last:0};
 // Periodic perf LOG: one console.log line every PERF_MS. recv = frames the page
 // actually presented, render = the smoothed rAF rate, then the two halves of the
@@ -405,9 +405,14 @@ var an=AN[e.key];
 if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}
 e.preventDefault();return;}
 if(e.key=="Escape"){
-// In play (INPUT set), Esc is RESET -- the p8-web-player expectation (their pause
-// menu's reset). Transports without a reset handler ignore the event safely.
-send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}
+// In play (INPUT set), Esc is the system key -- the pause menu, the
+// p8-web-player expectation -- since a page rarely sees the Super key; on a
+// system surface it closes and steps back.
+send(INPUT?{type:"super"}:{type:"esc"});e.preventDefault();return;}
+// Super alone (the Meta key pressed and released with no other key, so a
+// Cmd chord never opens it) is the system key from every surface.
+if(e.key=="Meta"){metaTap=true;return;}
+metaTap=false;
 // Ctrl/Cmd chords (#132): the console's control-byte shortcuts -- select-all/
 // copy/cut/paste (a/c/x/v), undo/redo (z/y), find/autocomplete/jump (f/e/g).
 // Mapped EXPLICITLY, never every letter (Ctrl+R/T/W stay the browser's), and
@@ -433,7 +438,8 @@ var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
 if(s&&!nH[s]){nH[s]=true;send({type:"hold",name:s,down:true});}
 var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
 if(s||n||cd!==null)e.preventDefault();});
-cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];
+cv.addEventListener("keyup",function(e){if(e.key=="Meta"){if(metaTap)send({type:"super"});metaTap=false;return;}
+if(e.key in PAN){delete pH[e.key];
 var an=AN[e.key];if(nH[an]){delete nH[an];send({type:"hold",name:an,down:false});}
 e.preventDefault();return;}
 if(e.key=="Backspace")send({type:"bshold",down:false});

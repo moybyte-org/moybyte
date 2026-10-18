@@ -42,6 +42,14 @@ def _ticks_diff(a, b):
         return a - b
 
 
+def _ticks_add(t, d):
+    """Tick `t` moved by `d` milliseconds, in the ticks' own domain."""
+    try:
+        return time.ticks_add(t, d)
+    except AttributeError:
+        return t + d
+
+
 def _since_ms(start):
     """Milliseconds from tick `start` to now. A cart's clock is this from the
     Player's `cart_start_ms` stamp, on every tier and every runtime."""

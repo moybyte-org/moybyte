@@ -76,7 +76,7 @@ static const char *const ROW_NAMES[MOY_ROW_N] = {
     "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
     "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
     "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress", "ui.table", "ui.scroll",
-    "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover",
+    "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover", "ui.menu",
 };
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
@@ -1575,6 +1575,7 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"ui.grid", MOY_ROLE_UI, MOY_ROW_UI_GRID},
     {"ui.card", MOY_ROLE_UI, MOY_ROW_UI_CARD},
     {"ui.popover", MOY_ROLE_UI, MOY_ROW_UI_POPOVER},
+    {"ui.menu", MOY_ROLE_UI, MOY_ROW_UI_MENU},
 };
 
 int moy_app_table_role(uint32_t row) {

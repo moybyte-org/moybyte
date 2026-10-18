@@ -304,6 +304,8 @@ class FullscreenStackWM:
             sig |= 32
         if ws.sysmenu.open:
             sig |= 64
+        if ws.pause.open:
+            sig |= 512
         if ws._about:
             sig |= 128
         if ws.notice_active():
@@ -350,6 +352,8 @@ class FullscreenStackWM:
             overlays.append(ws._toast_layer)
         if sig & 64:
             overlays.append(ws._sysmenu_layer)
+        if sig & 512:
+            overlays.append(ws._pause_layer)
         if sig & 128:
             overlays.append(ws._about_layer)
         if sig & 256:

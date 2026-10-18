@@ -368,6 +368,13 @@ static mp_obj_t mod_end(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_end_obj, 1, 2, mod_end);
 
+// hold(run, ms) -- a pause of `ms` the run's clock skips; a stale handle is a no-op.
+static mp_obj_t mod_hold(mp_obj_t run, mp_obj_t ms) {
+    moy_play_hold(run_arg(run), (uint32_t)mp_obj_get_int(ms));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_hold_obj, mod_hold);
+
 static mp_obj_t stack_obj(uint32_t v) {
     return v == MOY_PLAY_NO_STACK ? mp_const_none : mp_obj_new_int_from_uint(v);
 }
@@ -483,6 +490,7 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&mod_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&mod_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&mod_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hold), MP_ROM_PTR(&mod_hold_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&mod_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_lockstep), MP_ROM_PTR(&mod_lockstep_obj) },

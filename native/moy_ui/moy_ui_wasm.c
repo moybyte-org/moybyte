@@ -293,6 +293,13 @@ int moy_ui_run_popover(void *target, moy_ui_span_t id, int w, const moy_ui_over_
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_menu(void *target, moy_ui_span_t label, const uint8_t *items, size_t n,
+                    const uint8_t *icons, size_t in, const moy_ui_over_t *o, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_menu(c, &r.s, label, items, n, icons, in, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_grid(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o) {
     OPEN(target);
     moy_ui_api_grid(c, &r.s, id, w, h, o);
@@ -557,6 +564,16 @@ int32_t moy_ui_wasm_popover(void *e, const uint8_t *id, uint32_t n, int32_t w, c
     return rc != 0 ? rc : v;
 }
 
+int32_t moy_ui_wasm_menu(void *e, const uint8_t *label, uint32_t n, const uint8_t *items,
+                         uint32_t len, const uint8_t *icons, uint32_t ilen, const uint8_t *ob,
+                         uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v = -1;
+    int rc = moy_ui_run_menu(wasm_target(), span(label, n), items, len, icons, ilen, &o, &v);
+    return rc != 0 ? rc : v;
+}
+
 #define FN(f) ((void *)(f))
 
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
@@ -589,6 +606,7 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_grid", FN(moy_ui_wasm_grid) },
     { "ui_card", FN(moy_ui_wasm_card) },
     { "ui_popover", FN(moy_ui_wasm_popover) },
+    { "ui_menu", FN(moy_ui_wasm_menu) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

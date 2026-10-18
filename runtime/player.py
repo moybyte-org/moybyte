@@ -157,10 +157,10 @@ APP_EXT = "moybyte.app"
 
 
 try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from ticks import _ticks_ms, _ticks_us, _ticks_diff, _ticks_add
     from widgets import _err_text, _in
 except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff, _ticks_add
     from runtime.widgets import _err_text, _in
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
@@ -184,6 +184,10 @@ try:
 except ImportError:                     # host: the runtime package
     from runtime.system_api import make_system_api, wants_layout
 import moy_app as _moy_app              # the grant policy (native/moy_app)
+try:
+    from audio_session import native as _audio_native
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.audio_session import native as _audio_native
 
 # The cart-facing text editor (docs/text_editing_2026-09.md step 3). Imported
 # here rather than reached through the shell for the same reason as the module
@@ -570,6 +574,8 @@ class Player:
         self.verdict = None           # the run's (runtime, vm_free, why): _verdict
         self._front = False           # the run is the kernel loop's foreground
         self._stopping = False        # the kernel stops the VM for the run
+        self._paused_at = 0           # _ticks_ms the pause menu held the run at (0: not held)
+        self._audio_held = 0          # the session the pause took the mix from
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
@@ -874,6 +880,8 @@ class Player:
         reclaim + collect leave a compact heap for the next build. Idempotent;
         safe on the crash path (the error panel reads cart_error, never ns)."""
         self._front = False
+        self._paused_at = 0
+        self._audio_held = 0
         # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
         # (ws.project still points at this run's Project here -- both exit call
         # sites run release_world ahead of replacing/slimming it).
@@ -1871,6 +1879,53 @@ class Player:
         ws._exit_to_caller()
         return True
 
+    # -- the pause menu's hold (docs/look_2026-10.md step 25a) -----------------
+
+    @property
+    def paused(self):
+        return self._paused_at != 0
+
+    def pause(self):
+        """Hold the run for the pause menu: no tick, no draw, its time() and
+        its music stopped where they are (the mix loses its session, which
+        keeps its state unheard), and the keys it kept dropped."""
+        if self._paused_at:
+            return
+        self._paused_at = _ticks_ms() or 1
+        na = _audio_native()
+        if na is not None:
+            try:
+                self._audio_held = na.focused()
+                na.focus(0)
+            except Exception:  # noqa: BLE001 -- a pause never fails on sound
+                self._audio_held = 0
+        self.park()
+
+    def resume(self):
+        """Give the run back as if no time passed: its clock moves by the
+        pause, the mix takes its session again, its next tick sees fresh
+        edges and the kernel takes the frame again where it had it."""
+        if not self._paused_at:
+            return
+        span = _ticks_diff(_ticks_ms(), self._paused_at)
+        self._paused_at = 0
+        if span > 0:
+            self._cart_start_ms = _ticks_add(self._cart_start_ms, span)
+            inp = self.ws.input
+            inp.cart_start_ms = _ticks_add(getattr(inp, "cart_start_ms", 0), span)
+            run = _moy_play.current() if self._play is not None else 0
+            if run:
+                _moy_play.hold(run, span)
+        held, self._audio_held = self._audio_held, 0
+        na = _audio_native()
+        if na is not None and held:
+            try:
+                na.focus(held)
+            except Exception:  # noqa: BLE001 -- the session may have closed
+                pass
+        self.park()
+        self._front = self._take_front()
+
     def _loop_dt(self, dt):
         """The dt an UNPACED tick gets: the loop's own for a tool/app, and for
         a `"fps": "free"` game the same CLAMPED at FREE_DT_MAX -- a stall (a
@@ -2120,6 +2175,8 @@ class Player:
             return                     # the VM stops at this frame's end
         if self._front and self._resume_from_front(ws):
             return
+        if self._paused_at:
+            return                     # the pause menu holds it: the frame stays
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
             self._tick_keys(ws)
@@ -2468,9 +2525,10 @@ class Player:
         ws = self.ws
         gx, gy = ws._game_xy(px, py)
         px, py = gx, gy
-        # While a GAME plays the bar is hidden (Stage 5 retired the pause screen), so the
-        # game owns the full 320x240 and every tap belongs to the cart (published as the
-        # game pointer by the router before this runs). Two chrome cases DO hit-test a tap:
+        # While a GAME plays the bar is hidden, so the game owns the full 320x240 and
+        # every tap belongs to the cart (published as the game pointer by the router before
+        # this runs; the pause menu, a layer above, takes them while it shows). Two chrome
+        # cases DO hit-test a tap:
         # the CRASH panel's top bar (HOME / EDIT|CODE / PAINT / MAP / BLOCKS / MUSIC -- the
         # fix-it tool switcher) and -- Part 4 -- a running TOOL/APP's minimal bar (its
         # context-X / wifi / ≡). Both route through thin ws helpers so this file never

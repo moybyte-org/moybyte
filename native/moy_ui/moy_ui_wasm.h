@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 27
+#define MOY_UI_WASM_ROWS 28
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -96,6 +96,8 @@ int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons,
                       int kind, const moy_ui_over_t *o, int32_t *out);
 int moy_ui_run_popover(void *target, moy_ui_span_t id, int w, const moy_ui_over_t *o,
                        int32_t *out);
+int moy_ui_run_menu(void *target, moy_ui_span_t label, const uint8_t *items, size_t n,
+                    const uint8_t *icons, size_t in, const moy_ui_over_t *o, int32_t *out);
 int moy_ui_run_grid(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o);
 int moy_ui_run_card(void *target, moy_ui_span_t title, moy_ui_span_t sub, const moy_ui_over_t *o,
                     int32_t out[5]);
@@ -158,6 +160,10 @@ int32_t moy_ui_wasm_dialog(void *e, const uint8_t *title, uint32_t n, const uint
 // ui_popover: 1, 0 the frame it is dismissed; an id of length 0 ends it.
 int32_t moy_ui_wasm_popover(void *e, const uint8_t *id, uint32_t n, int32_t w, const uint8_t *o,
                             uint32_t on);
+// ui_menu: the item activated (from 0), -1 none.
+int32_t moy_ui_wasm_menu(void *e, const uint8_t *label, uint32_t n, const uint8_t *items,
+                         uint32_t len, const uint8_t *icons, uint32_t ilen, const uint8_t *o,
+                         uint32_t on);
 // ui_tabs: the new cur, as ui_seg's.
 int32_t moy_ui_wasm_tabs(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
                          uint32_t len, int32_t cur, const uint8_t *o, uint32_t on);

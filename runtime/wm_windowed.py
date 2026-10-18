@@ -1126,7 +1126,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._pop_face_ok = False
         slots = self._pop_slots
         cur = self._pop_cur
-        rect = m.panel_rect() if m.open else None
+        rect = self.ws.menu_ui.panel_rect() if m.open else None
         if cur is not None and slots[cur][1] != rect:
             slots[cur][2] = n             # closing (or moved): restore owed
             cur = self._pop_cur = None
@@ -1232,7 +1232,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self.ws.menu_ui._draw_sysmenu()
             return
         s = self._pop_slots[cur]
-        if not ride or not s[3]:
+        fresh = not ride or not s[3]
+        if fresh:
             self._pop_capture(s)
         r = s[1]
         if ride and s[2] <= 0:
@@ -1248,6 +1249,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 root.blit_strip_rect(self._pop_face, r[0], r[1], r[0], r[1], r[2], r[3])
                 self._pop_note(r)
                 return
+        if not fresh and self.ws.menu_ui.looked():
+            # the look's card casts a shadow: paint it over what it covers,
+            # never over its own last paint
+            self._root_canvas.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
         self.ws.menu_ui._draw_sysmenu()
         if self._pop_over_game and not self._pop_face_ok:
             face = self._pop_face

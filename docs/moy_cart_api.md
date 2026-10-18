@@ -190,8 +190,10 @@ an imported PICO-8 cart always carries its own 30 or 60.
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).
 - **A running GAME owns the FULL canvas** — the console's top bar hides during play
-  (it reappears only on the crash panel). There is no pause screen and no reserved
-  letter: **every key belongs to your cart**. To exit, the player **holds BACKSPACE
+  (it reappears only on the crash panel). There is no reserved letter: **every key
+  belongs to your cart** but Super, the console's system key, which opens its pause
+  menu and holds your cart there (no tick, `time()` and the music stopped) until
+  the player resumes it. To exit, the player **holds BACKSPACE
   (~700ms)** — a quick tap reaches your cart as a plain key; a sustained hold shows a
   small progress toast and returns to whoever launched the cart (the launcher, or
   the editor's PLAY). A `"tool"`/`"app"` cart runs WITH a minimal console bar

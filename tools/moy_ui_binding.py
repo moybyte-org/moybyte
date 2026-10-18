@@ -287,6 +287,8 @@ _DRAW_SIGS = (
      c.c_int32),
     ("moy_ui_api_owes", [c.c_void_p], _I),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
+    ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
+                         c.c_void_p], c.c_int32),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),
     ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
      None),
@@ -980,6 +982,17 @@ def binding():
         ov, ok = _over(o)
         return int(lib.moy_ui_api_popover(p, c.byref(s), t, int(w), ov))
 
+    def api_menu(ctx, cv, look, label, items, icons, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(label)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        ov, ok = _over(o)
+        b, ib = bytes(items), bytes(icons)
+        return int(lib.moy_ui_api_menu(p, c.byref(s), t, b, len(b), ib, len(ib), ov))
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -1042,7 +1055,7 @@ def binding():
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_icon, api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_grid,
-              api_card, api_part, api_popover,
+              api_card, api_part, api_popover, api_menu,
               api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value

@@ -1449,3 +1449,168 @@ def test_the_popover_page_answers_its_script(pop_runs):
     assert s[4][Q_CLOSES] == 1 and s[4][Q_OPEN] == 0
     assert s[4][Q_FOCUS] == len("Pick"), "focus back on the opener"
     assert s[6][Q_UNDER] == 1, "the link under it takes input again"
+
+
+# -- a menu (docs/look_2026-10.md step 25a) ---------------------------------------------
+
+_PAUSE_ITEMS = ("Resume", "Restart", "Options", "Quit")
+_PAUSE_ICONS = ("play", "rotate", "settings", "close")
+
+
+def _menu_page(shown, icons=_PAUSE_ICONS):
+    """A centred card (a popover with nothing to hang from) holding a header
+    row, a menu of four and its hints, then a captioned menu on the page."""
+    st = {"pick": -1, "open": None, "sys": -1}
+
+    def draw():
+        ui.page("")
+        if shown[0]:
+            shown[0] = st["open"] = ui.popover("pause", 200)
+            ui.icon("moy")
+            ui.info("Star", "Paused")
+            st["pick"] = ui.menu("", _PAUSE_ITEMS, icons)
+            ui.hints(("enter", "Choose", "Esc", "Resume"))
+            ui.popover()
+            if st["pick"] == 3:
+                shown[0] = False
+        st["sys"] = ui.menu("System", ("Search", "Settings"), ("search", "settings"))
+        return st
+    return _Run(draw)
+
+
+def _open_menu(icons=_PAUSE_ICONS):
+    shown = [True]
+    r = _menu_page(shown, icons)
+    for _ in range(3):
+        r.frame()
+    return r, shown
+
+
+def _card(r):
+    got = ui_draw._C.api_box(r.ctx, "pause")
+    assert got is not None, "the popover's card answers by its id"
+    return got
+
+
+def test_a_menu_is_a_stop_per_item_and_answers_the_one_activated():
+    r, shown = _open_menu()
+    assert ui.focus() == "Resume", "focus opens on the card's first item"
+    boxes = [_box(r, t) for t in _PAUSE_ITEMS]
+    assert all(b is not None for b in boxes)
+    pitch = boxes[1][1] - boxes[0][1]
+    for a, b in zip(boxes, boxes[1:]):
+        assert b[1] - a[1] == pitch and a[3] == ROW, "the items stack as rows"
+    r.frame(("down",))
+    r.frame(("down",))
+    assert ui.focus() == "Options"
+    r.frame(("a",))
+    assert r.out["pick"] == 2
+    r.frame()
+    assert r.out["pick"] == -1, "an item answers the frame it is activated"
+    b = _box(r, "Restart")
+    r.tap(b[0] + b[2] // 2, b[1] + b[3] // 2)
+    assert r.out["pick"] == 1
+
+
+def test_a_menu_draws_each_items_icon_before_its_label():
+    r, _shown = _open_menu()
+    bare, _ = _open_menu(icons=())
+    b = _box(r, "Quit")
+    assert b == _box(bare, "Quit"), "an icon moves no row"
+    y = b[1] + b[3] // 2
+    assert any(r.px(x, y) != bare.px(x, y) for x in range(b[0], b[0] + 2 * b[3]))
+
+
+def test_a_popover_with_nothing_to_hang_from_is_centred():
+    r, _shown = _open_menu()
+    card = _card(r)
+    assert abs(card[0] + card[2] // 2 - 160) <= 1
+    assert abs(card[1] + card[3] // 2 - 120) <= 1
+
+
+def test_a_menu_in_a_card_is_ruled_from_the_rows_above_and_its_hints_below():
+    r, _shown = _open_menu()
+    card = _card(r)
+    ground = r.px(card[0] + card[2] // 2, card[1] + 3)
+
+    def rules(y0, y1):
+        xs = range(card[0] + 24, card[0] + card[2] - 24)
+        return [y for y in range(y0, y1)
+                if r.px(xs[0], y) != ground and all(r.px(x, y) == r.px(xs[0], y) for x in xs)]
+    resume, quit_ = _box(r, "Resume"), _box(r, "Quit")
+    assert rules(resume[1] - 12, resume[1]), "a rule over the menu"
+    assert rules(quit_[1] + quit_[3], quit_[1] + quit_[3] + 12), "a rule over the hints"
+
+
+def test_esc_closes_the_card_and_a_captioned_menu_stacks_on_the_page():
+    r, shown = _open_menu()
+    r.frame(typed=27)
+    assert r.out["open"] is False and not shown[0]
+    r.frame()
+    r.frame()
+    assert _box(r, "Search") is not None and _box(r, "Resume") is None
+    r.frame(("down",))
+    r.frame(("a",))
+    assert r.out["sys"] == 1
+
+
+# -- the menu's page in every runtime ------------------------------------------------------
+
+WASM_MENU = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_menu.moy")
+M_FRAMES, M_OPEN, M_LAST, M_PICKS, _M4, M_FOCUS, M_FAIL, M_SYS = range(8)
+MENU_SCRIPT = ("down", "down", "a", "down", "a", "down", "a")
+
+
+@pytest.fixture(scope="module")
+def menu_runs(tmp_path_factory):
+    root = str(tmp_path_factory.mktemp("ui_menu") / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("menu_py.moy", "menu_lua.moy"):
+        shutil.copytree(os.path.join(PARTS, d), os.path.join(root, d))
+    titles = {"python": "UI Menu Py", "lua": "UI Menu Lua"}
+    if _wasm_or_skip():
+        from tools import wasm_cart
+        wasm_cart.build(WASM_MENU, os.path.join(root, "app_menu.moy"))
+        titles["wasm"] = "App Menu Wasm"
+    out = {}
+    for name, title in titles.items():
+        ws = host_app.build_workstation(root)
+        ws.pointer.visible = False
+        open_cart(ws, title)
+        make_drv(ws).frame(_DT)
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        drv = make_drv(ws)
+        shots = []
+        for _ in range(3):
+            _frame(drv)
+        shots.append((_pixels(ws), _pmem(ws)))
+        for step in MENU_SCRIPT:
+            drv.press(step)
+            for _ in range(3):
+                _frame(drv)
+            shots.append((_pixels(ws), _pmem(ws)))
+        out[name] = shots
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        ws.exit()
+    return out
+
+
+def test_the_menu_page_is_one_page_in_every_runtime(menu_runs):
+    ref = menu_runs["python"]
+    for name, got in menu_runs.items():
+        assert len(got) == len(ref)
+        for i, ((px, pm), (rpx, rpm)) in enumerate(zip(got, ref)):
+            assert pm[M_FAIL] == 0, "%s: a row failed (%d)" % (name, pm[M_FAIL])
+            assert pm[:M_FAIL] == rpm[:M_FAIL], "%s step %d answered %r, python %r" % (
+                name, i, pm, rpm)
+            assert pm[M_SYS] == rpm[M_SYS], (name, i)
+            assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
+
+
+def test_the_menu_page_answers_its_script(menu_runs):
+    s = [p for _px, p in menu_runs["python"]]
+    assert s[0][M_OPEN] == 1 and s[0][M_FOCUS] == len("Resume"), "focus opens in the card"
+    assert s[2][M_FOCUS] == len("Options")
+    assert s[3][M_LAST] == 3 and s[3][M_PICKS] == 1, "a activates Options"
+    assert s[5][M_LAST] == 4 and s[5][M_OPEN] == 0, "Quit closes the card"
+    assert s[7][M_SYS] == 2, "the page's menu takes input again"

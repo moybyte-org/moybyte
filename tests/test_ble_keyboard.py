@@ -158,6 +158,22 @@ def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
     assert table.last_key == 0 and table.held("left")
 
 
+def test_super_is_the_start_button_in_every_mode():
+    """Either GUI key (Super, the Windows key) is `start`, the console's
+    system key (docs/look_2026-10.md step 25a), and types nothing."""
+    table, _stack, m = _machine()
+    _ready(m)
+    for text in (False, True):
+        table.text_mode = text
+        for gui in (0x08, 0x80):
+            m.notify(3, 3, bytes((gui, 0, 0, 0, 0, 0, 0, 0)))
+            _frame(m, table)
+            assert table.pressed("start") and table.last_key == 0
+            m.notify(3, 3, bytes(8))
+            _frame(m, table)
+            assert not table.held("start")
+
+
 def test_make_and_break_between_frames_preserves_one_press_then_release():
     table, _stack, m = _machine()
     _ready(m)

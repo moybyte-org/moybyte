@@ -161,7 +161,11 @@ int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps) {
 enum {
     B_LEFT = 1u << 0, B_RIGHT = 1u << 1, B_UP = 1u << 2, B_DOWN = 1u << 3,
     B_A = 1u << 4, B_B = 1u << 5, B_RUN = 1u << 6, B_HOME = 1u << 7, B_STOP = 1u << 10,
+    B_START = 1u << 14,
 };
+
+// The GUI keys (left 0x08, right 0x80): Super, the console's system key.
+#define MOD_GUI 0x88u
 
 uint32_t moy_hid_buttons_for_key(int32_t key) {
     if (key >= 'A' && key <= 'Z') {
@@ -961,6 +965,9 @@ void moy_hid_frame(moy_hid_t *h) {
         if (key == 0) {
             key = k;
         }
+    }
+    if (mods & MOD_GUI) {
+        buttons |= B_START;             // Super: the system menu, or the pause menu
     }
     moy_input_set_mask(h->table, h->src, buttons & ((1u << moy_input_nbuttons(h->table)) - 1u));
     moy_input_set_key(h->table, h->src, key);

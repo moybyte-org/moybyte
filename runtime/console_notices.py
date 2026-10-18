@@ -19,8 +19,39 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import chrome_ops as _ch
 try:
     import ui_draw as _ui_draw
+    import ui as _ui
+    import layout_base as _lb
+    import shell_layout as _shell_layout
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
+    from runtime import ui as _ui
+    from runtime import layout_base as _lb
+    from runtime import shell_layout as _shell_layout
+
+
+# The 2026-10 look's words and icons for the system menu's rows, by string id
+# (docs/look_2026-10.md step 25a); a theme without a depth draws the kernel's
+# chrome menu in the string table's capitals.
+_LOOK_TEXT = {"menu.cart": "Cart", "menu.restart_cart": "Restart cart",
+              "menu.delete_cart": "Delete cart", "menu.system": "System",
+              "menu.clear_search": "Clear search", "menu.search": "Search",
+              "menu.settings": "Settings", "menu.about": "About", "menu.reboot": "Restart"}
+_LOOK_ICON = {"menu.restart_cart": "rotate", "menu.delete_cart": "trash",
+              "menu.clear_search": "search", "menu.search": "search",
+              "menu.settings": "settings", "menu.about": "doc", "menu.reboot": "rotate"}
+
+
+def _row(kind, sid, action=None):
+    """A Popup row: (kind, the chrome's label, action, icon, the look's text)."""
+    return (kind, _ui_draw.s(sid), action, _LOOK_ICON.get(sid, ""), _LOOK_TEXT[sid])
+
+
+def _in_box(px, py, b):
+    return b is not None and b[0] <= px < b[0] + b[2] and b[1] <= py < b[1] + b[3]
+
+
+def _desk_class():
+    return _lb.metric_class() == _lb.DESK
 
 
 class Notices:
@@ -134,6 +165,206 @@ class Notices:
     # (achievements_ui.py, AchievementsUI). frame() calls self.ach_ui._draw_*.
 
 
+class PauseMenu:
+    """The pause menu (docs/look_2026-10.md step 25a): over a fullscreen game
+    Super holds the run (`Player.pause`: no tick, no draw, its clock and its
+    music held) and a card centred on the glass names the game and offers
+    Resume, Restart, Options and Quit; Esc, B or Super again resumes, and
+    the cart's next frame comes as if no time passed. Options is the card's
+    second page, the console's Volume (Esc goes back). The card is a
+    popover of the public UI API's with nothing to hang from, holding a
+    `ui.menu`, drawn on the system canvas over the frozen frame; the menu's
+    keys and taps are this object's, so an action runs in the input phase,
+    and Options' slider takes the engine's."""
+
+    ITEMS = ("Resume", "Restart", "Options", "Quit")
+    ICONS = ("play", "rotate", "settings", "close")
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.open = False
+        self.sel = 0
+        self.page = 0               # 0 the menu, 1 Options
+        self._host = None
+        self._key = 0               # the key typed last frame (a press is its change)
+        self._under = None          # what the card's band covered: (layer, x)
+        self._capture = False       # take that band before the card first draws
+
+    def _width(self, desk):
+        return 300 if desk else 188 * self.ws.layout.fs
+
+    def _band(self, cv, desk):
+        """The band the card and its shadow can cover: the card's columns
+        and a shadow's reach either side, the canvas's whole height."""
+        m = 48 if desk else 24 * self.ws.layout.fs
+        w = min(cv.w, self._width(desk) + 2 * m)
+        return (cv.w - w) // 2, w
+
+    def _keep_under(self, cv, desk):
+        """Where the game's frame IS the system canvas (the handheld), the
+        card draws over the frozen frame itself: keep the band it can cover,
+        so a smaller card (Options) and the resumed game find it whole.
+        Where the game is composited, its frame repaints under the card."""
+        self._capture = False
+        ws = self.ws
+        new = getattr(cv, "new_layer", None)
+        if ws.canvas is not cv or new is None:
+            return
+        x, w = self._band(cv, desk)
+        try:
+            lay = new(w, cv.h)
+        except Exception:  # noqa: BLE001 -- no room: the card draws without it
+            return
+        lay.blit_strip(cv, -x, 0)
+        self._under = (lay, x)
+
+    def _put_under(self, cv):
+        u = self._under
+        if u is not None:
+            lay, x = u
+            cv.blit_strip_rect(lay, x, 0, x, 0, lay.w, lay.h)
+
+    def _drop_under(self):
+        u, self._under = self._under, None
+        if u is not None:
+            rel = getattr(u[0], "release", None)
+            if rel is not None:
+                rel()
+
+    def show(self):
+        ws = self.ws
+        ws.player.pause()
+        self.open = True
+        self.sel = 0
+        self.page = 0
+        self._key = getattr(ws.input, "last_key", 0)
+        self._drop_under()
+        self._capture = True
+        if self._host is None:
+            self._host = _ui_draw.AppHost()
+        else:
+            self._host.reset()
+        ws._dirty = True
+
+    def close(self):
+        """Resume: the run is given back."""
+        if not self.open:
+            return
+        self.open = False
+        self._put_under(self.ws.sys_canvas)   # the frame as the game left it
+        self._drop_under()
+        self.ws.player.resume()
+        self.ws._dirty = True
+
+    def back(self):
+        """Esc and B: Options back to the menu, the menu back to the game."""
+        if self.page:
+            self.page = 0
+            self._host.reset()
+            self.ws._dirty = True
+        else:
+            self.close()
+
+    def choose(self, i):
+        ws = self.ws
+        if i == 0:
+            self.close()
+        elif i == 1:
+            self.close()
+            ws._reset_canvas_state()
+            ws._start()                   # the same cart from the top, same caller
+        elif i == 2:
+            self.page = 1
+            self._host.reset()
+        elif i == 3:
+            self.close()
+            ws._reset_canvas_state()
+            ws._exit_to_caller()
+        ws._dirty = True
+
+    def handle_input(self, i):
+        k = getattr(i, "last_key", 0) or 0
+        esc = k == 27 and self._key != 27
+        self._key = k
+        if i.pressed("b") or i.pressed("stop") or esc:
+            self.back()
+            return
+        if self.page:
+            if self._host.keys(i):
+                self.ws._dirty = True
+            return
+        n = len(self.ITEMS)
+        if i.pressed("up") and self.sel > 0:
+            self.sel -= 1
+            self.ws._dirty = True
+        elif i.pressed("down") and self.sel < n - 1:
+            self.sel += 1
+            self.ws._dirty = True
+        elif i.pressed("a") or i.pressed("run"):
+            self.choose(self.sel)
+
+    def handle_pointer(self, px, py, click):
+        host = self._host
+        ws = self.ws
+        if self.page:
+            if click and not _in_box(px, py, host.box("Pause")):
+                self.back()
+            elif host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
+                ws._dirty = True
+            return
+        if not click:
+            return
+        for j, t in enumerate(self.ITEMS):
+            if _in_box(px, py, host.box(t)):
+                self.sel = j
+                self.choose(j)
+                return
+        if not _in_box(px, py, host.box("Pause")):
+            self.close()                  # a press outside the card resumes
+
+    def draw(self):
+        # The card is the shell's, not the held cart's: the shell's fonts and
+        # icons, whatever the run left the app-cart boundary at.
+        was = _ui_draw.cart_text(False)
+        try:
+            self._draw()
+        finally:
+            _ui_draw.cart_text(was)
+
+    def _draw(self):
+        ws = self.ws
+        cv = ws.sys_canvas
+        host = self._host
+        desk = _desk_class()
+        if self._capture:
+            self._keep_under(cv, desk)
+        else:
+            self._put_under(cv)
+        ws.icon_spec()                    # the theme's set in the engine, as the bar has it
+        if not self.page:
+            host.focus(self.ITEMS[self.sel])
+        settled = host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
+        _ui.popover("Pause", self._width(desk))
+        cart = ws.cart
+        _ui.icon("moy")
+        _ui.info(str((cart.get("title") if cart else "") or "Game"), "Paused")
+        if self.page:
+            sl = ws.settings_layer
+            cur, lo, hi = sl.level("volume")
+            if cur == lo:
+                _ui.icon("mute")
+            got = _ui.slider("Volume", cur, lo, hi, {"steps": True})
+            if got != cur:
+                sl.set_level("volume", got)
+            _ui.hints(("left right", "Change", "Esc", "Back"))
+        else:
+            _ui.menu("", self.ITEMS, self.ICONS)
+            _ui.hints(("enter", "Choose", "Esc", "Resume"))
+        _ui.popover()
+        if not settled:
+            ws.request_frame()
+
+
 class SystemMenuUI:
     """The ≡ system menu's rows and their actions (#52). Its drawing, and the
     ABOUT box's, is the kernel's one body (moy_chrome_menu, moy_chrome_about),
@@ -144,28 +375,28 @@ class SystemMenuUI:
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
+        self._host = None           # the look's card: its verbs' context
 
     def _sysmenu_items(self):
         """The rows for this open of the ≡ menu (see class note for the tuple form).
         The cart group is OMITTED entirely (not greyed) when no cart is open."""
         rows = []
         if self.ws.cart is not None:
-            rows.append(("header", _ui_draw.s("menu.cart")))
-            rows.append(("item", _ui_draw.s("menu.restart_cart"), self._menu_restart_cart))
-            rows.append(("item", _ui_draw.s("menu.delete_cart"), self._menu_delete_cart))
+            rows.append(_row("header", "menu.cart"))
+            rows.append(_row("item", "menu.restart_cart", self._menu_restart_cart))
+            rows.append(_row("item", "menu.delete_cart", self._menu_delete_cart))
             rows.append(("sep",))
-        rows.append(("header", _ui_draw.s("menu.system")))
+        rows.append(_row("header", "menu.system"))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
         # from the launcher home -- the label flips to CLEAR SEARCH once a query
         # is active/typing, so the same row both opens and dismisses it.
         if self.ws.screen == "launcher":
-            label = _ui_draw.s("menu.clear_search"
-                          if (self.ws.search_typing or self.ws.search_query)
-                          else "menu.search")
-            rows.append(("item", label, self.ws.toggle_search))
-        rows.append(("item", _ui_draw.s("menu.settings"), self.ws.open_settings))
-        rows.append(("item", _ui_draw.s("menu.about"), self._menu_about))
-        rows.append(("item", _ui_draw.s("menu.reboot"), self._menu_reboot))
+            sid = ("menu.clear_search" if (self.ws.search_typing or self.ws.search_query)
+                   else "menu.search")
+            rows.append(_row("item", sid, self.ws.toggle_search))
+        rows.append(_row("item", "menu.settings", self.ws.open_settings))
+        rows.append(_row("item", "menu.about", self._menu_about))
+        rows.append(_row("item", "menu.reboot", self._menu_reboot))
         return rows
 
     def _menu_restart_cart(self):
@@ -210,6 +441,9 @@ class SystemMenuUI:
         `cs` (#203) the rows -- or a component in the same dialog shell."""
         ws = self.ws
         m = ws.sysmenu
+        if self.looked():
+            self._draw_look()
+            return
         x, y, w, h = m.panel_rect()
         if m.comp is not None:
             # A component's panel: the menu's dialog shell, its painter inside.
@@ -227,6 +461,129 @@ class SystemMenuUI:
                 rows.append((1 if kind == "header" else 0, it[1]))
         mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
         _ch.replay(mp.chrome_menu(rows, m.sel, x, y, w, h, m.fs, m.cs), ws.sys_canvas, ws)
+
+    # -- the 2026-10 look's card (docs/look_2026-10.md step 25a) ----------------
+
+    def looked(self):
+        """The menu's rows show as the look's card: a theme with a depth."""
+        m = self.ws.sysmenu
+        return m.open and m.comp is None and bool(_ui_draw.depth()[0])
+
+    def _look_w(self, desk):
+        return 220 if desk else 150 * self.ws.layout.fs
+
+    def look_card(self):
+        """The look's card, (x, y, w, h), as the engine lays it out (a
+        popover hung under the system button, `_draw_look`'s rows), known
+        before it draws: what the windowed desk snapshots and paints alone.
+        tests/test_system_menu.py holds it to the card the engine draws."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        desk = _desk_class()
+        fs = getattr(cv, "font_scale", 1) or 1
+        d = 1 if desk else 0
+        row = _ui_draw.metrics("row")
+        grp = _ui_draw.metrics("group")
+        vr = _ui_draw.metrics("value_row")
+        rh, gap = row[5 + d] * fs, row[7] * fs
+        cap = grp[3 + d] * fs
+        pad = vr[28 + d] * fs
+        rule = (2 * row[7] + (9 if desk else 5)) * fs
+        body, n, first = 0, 0, True
+        for it in ws.sysmenu.items:
+            if it[0] == "header":
+                if n:
+                    body += n * (rh + gap)
+                    n = 0
+                body += cap + gap
+                first = False
+            elif it[0] == "item":
+                if first and body:
+                    body += rule + gap
+                first = False
+                n += 1
+        body += n * (rh + gap)
+        w = min(self._look_w(desk), cv.w - 2 * pad)
+        bh = min(body, cv.h - 4 * pad) if 2 * pad + body > cv.h - 2 * pad else body
+        h = 2 * pad + bh
+        ax, ay, aw, ah = self._menu_cell()
+        x = max(0, min(ax, cv.w - w))
+        y = ay + ah + 4 * fs
+        if y + h > cv.h:
+            y = ay - 4 * fs - h
+            if y < 0:
+                y = max(0, cv.h - h)
+        return (x, y, w, h)
+
+    def panel_rect(self):
+        """The rect the open popover paints: the Popup's, or the look's card
+        with its shadow's reach."""
+        m = self.ws.sysmenu
+        if not self.looked():
+            return m.panel_rect()
+        x, y, w, h = self.look_card()
+        dp = _ui_draw.depth()
+        fs = self.ws.layout.fs
+        r = (dp[9] + abs(dp[10]) + abs(dp[11]) + 2) * fs
+        cv = self.ws.sys_canvas
+        x0, y0 = max(0, x - r), max(0, y - r)
+        x1, y1 = min(cv.w, x + w + r), min(cv.h, y + h + r)
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    def _menu_cell(self):
+        """The system button's cell on the system canvas, the card's anchor."""
+        ws = self.ws
+        bars = ws.layout.bars
+        got = _shell_layout.cell_of(bars, "menu")
+        if got is None:
+            return (0, 0, 0, 0)
+        i, (bx, by, bw, bh) = got
+        rx, ry = bars[i][1][0], bars[i][1][1]
+        return (rx + bx, ry + by, bw, bh)
+
+    def _draw_look(self):
+        """The rows as a popover of the public UI API's hung under the system
+        button: a captioned `ui.menu` a group, each row its icon, the
+        Popup's row the focused one (its keys stay the Popup's, so an action
+        runs in the input phase)."""
+        ws = self.ws
+        m = ws.sysmenu
+        cv = ws.sys_canvas
+        host = self._host
+        if host is None:
+            host = self._host = _ui_draw.AppHost()
+        if 0 <= m.sel < len(m.items) and m.items[m.sel][0] == "item":
+            host.focus(m.items[m.sel][4])
+        desk = _desk_class()
+        settled = host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
+        _ui.at(*self._menu_cell())
+        _ui.popover("System", self._look_w(desk))
+        cap, texts, icons = "", [], []
+        for it in m.items:
+            if it[0] == "header":
+                if texts:
+                    _ui.menu(cap, texts, icons)
+                cap, texts, icons = it[4], [], []
+            elif it[0] == "item":
+                texts.append(it[4])
+                icons.append(it[3])
+        if texts:
+            _ui.menu(cap, texts, icons)
+        _ui.popover()
+        if not settled:
+            ws.request_frame()
+
+    def look_hit(self, px, py):
+        """The Popup row index a tap at (px, py) lands on in the look's card,
+        -1 inside the card on no row, None outside it."""
+        host = self._host
+        if host is None:
+            return None
+        m = self.ws.sysmenu
+        for i, it in enumerate(m.items):
+            if it[0] == "item" and _in_box(px, py, host.box(it[4])):
+                return i
+        return -1 if _in_box(px, py, host.box("System")) else None
 
     def _draw_about(self):
         """ABOUT: the console's name and firmware version, centred; any tap,

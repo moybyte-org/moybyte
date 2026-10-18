@@ -44,7 +44,8 @@ def apply_ws_text(payload, apply):
 
 
 def apply_events(events, input, pointer, on_press=None, on_pan=None,
-                 on_key=None, on_esc=None, on_hold=None, on_key_hold=None):
+                 on_key=None, on_esc=None, on_hold=None, on_key_hold=None,
+                 on_super=None):
     """Inject a batch of browser events into an InputState + Pointer. Each event is fully
     guarded (a malformed one is skipped, never raised) so a buggy client can't crash the loop.
 
@@ -56,6 +57,8 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
       {"type":"hold","name":..,"down":bool} -> held button (on_hold, else input.set_button)
       {"type":"key","code":<ascii>}  -> typed key (on_key)
       {"type":"esc"}                 -> close panel (on_esc)
+      {"type":"super"}               -> the system key (on_super): the system
+                                        menu, or the pause menu in play
     """
     for ev in events:
         try:
@@ -140,6 +143,9 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
             elif t == "esc":
                 if on_esc is not None:
                     on_esc()
+            elif t == "super":
+                if on_super is not None:
+                    on_super()
         except Exception:  # noqa: BLE001 -- one bad event must not drop the batch
             pass
 

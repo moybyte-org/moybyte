@@ -238,7 +238,7 @@ buttons and became an OS shell with an app-populated region.
   current app (§9). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
-  320×240 and every input. The bar is authoring/system chrome; play is sacred.
+  320×240 and every input but Super, which pauses it (§9). The bar is authoring/system chrome; play is sacred.
   (A running *tool/app* cart is the exception: it keeps a minimal bar — title +
   status + the context X — so it is always exitable by tap, §9.)
 
@@ -380,14 +380,14 @@ theme's layout, which every layout places (`docs/shell_layout_2026-10.md` §9).
 | Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **no X** — the PLAY icon enters console mode | a plain key |
 | Editor | taskbar | X → pop back, to where it was opened from | a plain key |
 | Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
-| Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |
+| Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2); Super → the pause menu's Quit | a game key on a quick tap |
 | Running tool/app cart | minimal bar (title + status + X) | X → return to caller | a plain key — delete in text fields |
 
 Why this kills the keyboard special cases: because taskbar apps exit via a **tap**,
 BACKSPACE is never reserved in them — it stays an ordinary key everywhere a taskbar
 exists. The wifi password field gets BACKSPACE=delete **for free**, with zero
 special-casing. This retires the #71 "text-mode TOOL keeps backspace as delete" hack,
-and the whole pause-screen / double-tap-to-exit lineage that #71 iterated through —
+and the whole BACKSPACE pause-screen / double-tap-to-exit lineage that #71 iterated through —
 the interlock that made BACKSPACE precious was the bar being one global mode-machine;
 zone the bar (§5) and the preciousness dissolves.
 
@@ -406,6 +406,20 @@ bound to a spare key or an on-screen affordance; Letter Blitz models it with a
 tap-anytime ✕. (The plan's firmware-independent triple-tap alias was dropped after
 on-device testing — tools/apps keep their bar X, so no cart is ever
 strandable-but-for-reboot.)
+
+**The system key (Super)** is the console's from every surface, whatever holds
+the keys (`Workstation.system_key`, docs/look_2026-10.md step 25a): over a
+fullscreen game it opens the **pause menu**, anywhere else the **system menu**
+(the Moy button's, which takes no focus); pressed again it closes the one it
+opened, and **Esc** closes either and steps back (Options to the pause menu,
+the pause menu to the game). Super is a keyboard's GUI key (the `start` button
+on a board, from a BLE or USB keyboard), the host's Super, and the browser's
+Meta tap; in the browser Esc during play is Super too, since a page rarely
+sees that key. The T-Deck's own keyboard has none, and its chord is an owner
+call. The pause menu holds the run — no tick, no draw, its `time()` and its
+music stopped where they are — and offers Resume, Restart (the same cart from
+the top, the same caller), Options (the console's Volume) and Quit (return to
+caller); Resume gives the cart its next frame as if no time passed.
 
 ---
 

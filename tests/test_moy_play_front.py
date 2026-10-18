@@ -114,6 +114,32 @@ def test_a_front_ends_on_the_hold_and_the_console_takes_the_route(front):
     assert ws.screen == "launcher", ws.screen
 
 
+def test_super_gives_the_console_the_frame_and_the_pause_holds_the_run(front):
+    """Super (`start`, a board keyboard's GUI key) hands the frame back with
+    the run live; the console's frame in the same loop frame takes the press
+    and pauses it, and Resume gives the kernel the front again."""
+    from runtime.moy_input import InputTable
+    ws, buf, presents = front
+    ws.input = InputTable()           # a board's table: it carries `start`
+    open_cart(ws, "Bullet Storm")
+    assert ws.player._front is True
+    inp = mp._BOUND[0]
+    assert mp.front_frame(7000, 33333) == 1
+    src = inp.source("kbd")
+    src.set_button("start", True)
+    inp.begin_frame()
+    assert mp.front_frame(7033, 33333) == -1, "the press gives the frame back"
+    assert not mp.front_live() and mp.current(), "the run is live"
+    assert mp.info()[6] is False
+    ws.handle_input()
+    assert ws.pause.open and ws.player.paused
+    src.set_button("start", False)
+    inp.begin_frame()
+    ws.frame(1 / 30)
+    ws.pause.close()
+    assert ws.player._front is True and mp.front_live(), "Resume gives the front back"
+
+
 def test_the_dev_channels_end_closes_a_run_in_front(front):
     ws, buf, presents = front
     open_cart(ws, "Bullet Storm")

@@ -431,6 +431,16 @@ def end(run, why=END_QUIT):
     del _BOUND[:]
 
 
+def hold(run, ms):
+    """A pause of `ms` the run's clock skips (the pause menu); a stale handle
+    is a no-op."""
+    d, _ = _play()
+    f = d.moy_play_hold
+    f.argtypes = [_U32, _U32]
+    f.restype = ctypes.c_int
+    f(int(run), int(ms) & 0xFFFFFFFF)
+
+
 def lockstep(run):
     """1 the frame simulates, 0 it stalls or waits, None: no match. The host
     has no kernel link, so a host run is always solo."""

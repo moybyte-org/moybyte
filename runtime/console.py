@@ -209,9 +209,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 try:
-    from console_notices import SystemMenuUI
+    from console_notices import SystemMenuUI, PauseMenu
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.console_notices import SystemMenuUI
+    from runtime.console_notices import SystemMenuUI, PauseMenu
 
 # The Easter-egg subsystem + achievement/egg drawing (#21): the 3 hidden eggs +
 # their state + _draw_egg/_draw_confetti/_draw_achievements. The achievement
@@ -231,12 +231,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
                         _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
-                        _AchOverlayLayer, _SysMenuLayer, _AboutLayer, _WebConsoleLayer)
+                        _AchOverlayLayer, _SysMenuLayer, _AboutLayer, _WebConsoleLayer,
+                        _PauseLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
                                 _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
                                 _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
-                                _WebConsoleLayer)
+                                _WebConsoleLayer, _PauseLayer)
 
 # The unified top bar surface (#46 -- see bar_layer.py). bar_layer.py is the
 # SINGLE SOURCE of the bar geometry constants (_STATUS_H / the tool-switcher
@@ -1157,6 +1158,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # toggle_sysmenu() + the sysmenu Popup + _about flag stay here (tested ws.
         # surface); the menu just delegates item-building/drawing to this.
         self.menu_ui = SystemMenuUI(self, NAMES)
+        # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
+        # Super holds the run and shows it; Esc or Super again gives it back.
+        self.pause = PauseMenu(self)
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
@@ -1267,6 +1271,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
         self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
         self._sysmenu_layer = _SysMenuLayer(self)
+        self._pause_layer = _PauseLayer(self)
         self._about_layer = _AboutLayer(self)
         self._cursor_layer = L("cursor", "system", draw=lambda dt: self._draw_cursor())
 
@@ -1742,6 +1747,29 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # -- only when a cart is open -- a CART group PREPENDED (Restart / Delete). The
     # actions wire to the existing console flows (open_settings, apply = re-run, the SD
     # delete path). Selecting any row closes the menu (Popup.activate closes first).
+
+    def system_key(self):
+        """Super -- the `start` button (a keyboard's GUI key), the host's
+        Super, the browser's Meta tap -- from every surface: over a fullscreen
+        game it opens the pause menu, anywhere else the system menu; pressed
+        again it closes the one it opened (Esc closes either and steps back)."""
+        p = self.pause
+        m = self.sysmenu
+        if p.open:
+            p.close()
+        elif m.open and m.widget == "menu":
+            m.close()
+            self.popover_touch()
+        elif self.plays_fullscreen():
+            p.show()
+        else:
+            self.toggle_sysmenu()
+        self._dirty = True
+
+    def plays_fullscreen(self):
+        """A game runs fullscreen, live: what Super pauses."""
+        return (self.wm.top_is_player() and self.cart_error is None
+                and not self.player._is_tool and not self.wm.desk_open())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
@@ -3338,6 +3366,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         _pr = getattr(i, "players", None)
         if _pr is not None:
             _pr.begin_frame()
+        # Super (the `start` button) is the console's from every surface, before
+        # any layer: the system menu, or the pause menu over a fullscreen game.
+        if i.pressed("start"):
+            self.system_key()
+            return
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
         # repaint. Only the press edge (not release, not a steady hold) is marked: every
@@ -3869,10 +3902,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Stage 6d: the animation gates ask the WM stack top (the source of truth), not
         # the `screen` projection string -- same answers, hoisted once per call.
         kind = self.wm.top_kind()
-        # A running cart on the desktop draws every frame (unless it crashed, when the
-        # error panel is static). Stage 5 retired the pause frame, so there is no
-        # paused-but-idle state to exclude here anymore.
-        if kind == "desktop" and self.cart_error is None and (
+        # A running cart on the desktop draws every frame, unless it crashed (the
+        # error panel is static) or the pause menu holds it (its card is drawn on
+        # a change, over the frozen frame).
+        if kind == "desktop" and self.cart_error is None and not self.pause.open and (
                 self.player._update is not None or self.player._draw is not None):
             return True             # (the Player's own fields: ws._update/_draw
                                     # are property forwards to exactly these)
@@ -4048,7 +4081,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # lockstep match (#65) owns its clock in there: the world moves only on
         # the shared tick, so a frame that tick is not due for holds the last
         # agreed frame instead of repainting it.
-        if self.wm.top_is_player() and self.cart_error is None:
+        if self.wm.top_is_player() and self.cart_error is None and not self.pause.open:
             if not self.player.frame_plan(dt):
                 self.player.tick(dt, render=False)
                 return

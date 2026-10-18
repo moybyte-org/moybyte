@@ -13,7 +13,9 @@ Settings-style rows (docs/media/look_2026-10/DESIGN.md, Components); `icon`
 puts an icon on the next row or button and `progress` shows how far a task
 is. `table` is a list in columns, `scroll` a region whose rows scroll in it,
 `field` a line of typed text and `dialog` a modal card (Files' verbs);
-`popover` a card hung from a part, holding a picker (the sprite editor's);
+`popover` a card hung from a part, holding a picker (the sprite editor's),
+or centred where nothing holds focus, and `menu` its rows of verbs (the
+system menu, the pause menu);
 `tabs` is a row of tabs and `grid` and `card` a grid of cards whose pictures
 the app draws (Appearance's).
 
@@ -325,6 +327,16 @@ def popover(id=None, w=0, o=None):
         _C.api_popover(t[0], t[1], t[2], "", 0, None)
         return False
     return bool(_C.api_popover(t[0], t[1], t[2], id, w, _over(o)))
+
+
+def menu(label, items, icons=(), o=None):
+    """A menu: its caption `label` ("" none, and then a rule where rows sit
+    above it), then a row per item, each a stop with the icon named at its
+    place in `icons` ("" none) before it. Stacked on the page (in a popover,
+    its card), or from `at`'s rect's top left. The item activated this frame
+    (from 0), -1 none; an item's id is its text."""
+    t = _T
+    return _C.api_menu(t[0], t[1], t[2], label, _opts(items), _opts(icons), _over(o))
 
 
 def tabs(label, items, cur, o=None):

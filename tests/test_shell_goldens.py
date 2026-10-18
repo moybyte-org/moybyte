@@ -90,6 +90,15 @@ keeps the matrix a clean product instead of a pile of special cases.
                            Settings and Appearance targets' rows with the
                            verbs, in the `moy` seed's Day and Night, and only
                            those surfaces (a config's `plan`).
+  tdeck_320x240_fs1_moy_menus, p4_1024x600_cs2_fs1_moy_menus
+                           the system menu and the pause menu
+                           (docs/look_2026-10.md step 25a) in the `moy` seed's
+                           Day, and only those surfaces (a config's `plan`):
+                           the system menu over the home (the T-Deck) or the
+                           desk (the P4), and the pause menu and its Options
+                           page over Star Catcher, held after a fixed run of
+                           frames from a seeded `rnd` (the P4's in console
+                           mode, where a game plays fullscreen).
   guition_p4_1280x800_windowed  the Guition P4's desk as shipped: the second
                            desk glass, on the same desk metrics as the P4.
                            One axis (the glass) from the as-shipped P4 row.
@@ -430,6 +439,12 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_moy_night": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, theme="moy"),
+    "tdeck_320x240_fs1_moy_menus": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="light",
+        diagonal_in=None, theme="moy", plan="menus"),
+    "p4_1024x600_cs2_fs1_moy_menus": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="light",
+        diagonal_in=7.0, theme="moy", plan="menus"),
     "guition_p4_1280x800_windowed": dict(
         sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
         diagonal_in=10.1),
@@ -616,6 +631,8 @@ def _surface_plan(ws, cfg):
         return [("ui_page", lambda: open_cart(ws, UI_PAGE[1]))]
     if cfg.get("plan") == "parts":
         return _parts_plan(ws)
+    if cfg.get("plan") == "menus":
+        return _menus_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -742,6 +759,48 @@ def _after_appearance(ws, enter):
     return go
 
 
+# The game the pause menu holds, and the frames it plays first.
+_PAUSE_CART, _PAUSE_FRAMES = "Star Catcher", 30
+MENU_SURFACES = ("sysmenu", "pause", "pause_options")
+
+
+def _menus_plan(ws, cfg):
+    """The system menu over the home (or the desk), then the pause menu and
+    its Options page over a game held after a fixed run: the seed's `rnd`
+    is seeded, the frames' dt injected, so the held frame is the same."""
+    import random
+
+    def sysmenu():
+        ws.go_home()
+        if cfg["windowed"]:
+            ws.open_desk()
+        ws._golden_popover = True
+        ws.system_key()
+        assert ws.sysmenu.open and ws.menu_ui.looked()
+
+    def pause(options):
+        def enter():
+            ws._golden_popover = False
+            ws.sysmenu.close()
+            ws.pause.close()
+            ws.go_home()
+            if cfg["windowed"]:
+                ws.open_library()
+            random.seed(25)
+            ws._open_workspace(_cart_by_title(ws, _PAUSE_CART))
+            ws.run(ws.project, ws.launcher_layer)
+            for _ in range(_PAUSE_FRAMES):
+                _quiesce(ws)
+                ws.frame(_DT)
+            ws.system_key()
+            assert ws.pause.open
+            if options:
+                ws.pause.choose(2)
+        return enter
+
+    return [("sysmenu", sysmenu), ("pause", pause(False)), ("pause_options", pause(True))]
+
+
 def _popover_plan(ws):
     """The desk with a Calc window, then each widget's popover over it. The
     popover stays open through the render (`_golden_popover`)."""
@@ -843,6 +902,8 @@ def surface_names(config_name):
         return ["ui_page"]
     if cfg.get("plan") == "parts":
         return ["parts_" + p for p in PARTS_PAGES]
+    if cfg.get("plan") == "menus":
+        return list(MENU_SURFACES)
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]

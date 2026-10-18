@@ -137,6 +137,7 @@ enum {                                          // why a run ended
 // libmoy's seven buttons are the input table's first seven bits.
 #define MOY_PLAY_BUTTON_MASK 0x7Fu
 #define MOY_PLAY_HOME_BIT 7             // moy_input's `home`, after the seven
+#define MOY_PLAY_START_BIT 14           // moy_input's `start`: Super, the pause menu
 // A run handle's low byte: generation << 8 | this.
 #define MOY_PLAY_TAG 0x5Au
 #define MOY_PLAY_UPC 6          // MOY_UPC_CLASSES, the loop's crossing classes
@@ -188,6 +189,9 @@ int  moy_play_input(uint32_t run, const moy_play_in_t *in);
 // NEEDS_VM or STALE.
 int  moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t *out);
 int  moy_play_end(uint32_t run, int why);
+// A pause of `ms` the run did not live through (the pause menu): its time()
+// resumes where it stopped. STALE with no such run.
+int  moy_play_hold(uint32_t run, uint32_t ms);
 // The live run's info, or the last one's once it ended.
 int  moy_play_info(uint32_t run, moy_play_info_t *out);
 uint32_t moy_play_current(void);       // the live run, or 0

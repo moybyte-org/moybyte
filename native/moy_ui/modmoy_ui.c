@@ -2289,6 +2289,22 @@ static mp_obj_t ui_api_popover(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_popover_obj, 6, 6, ui_api_popover);
 
+// api_menu(ctx, cv, look, label, items, icons, o) -> the item activated (from
+// 0), -1 none
+static mp_obj_t ui_api_menu(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    mp_buffer_info_t b, ib;
+    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[5], &ib, MP_BUFFER_READ);
+    return mp_obj_new_int(moy_ui_api_menu(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
+                                          (const uint8_t *)ib.buf, ib.len, over_of(a[6], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_menu_obj, 7, 7, ui_api_menu);
+
 // api_owes(ctx) -> whether the frame drawn last owes the next
 static mp_obj_t ui_api_owes(mp_obj_t ctx) {
     return mp_obj_new_bool(moy_ui_api_owes(ctx_of(ctx)));
@@ -2444,6 +2460,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },

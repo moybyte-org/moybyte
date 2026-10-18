@@ -997,6 +997,15 @@ int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int 
     return MOY_UI_OK;
 }
 
+int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int in = gm(MOY_UI_M_GROUP_PAD, fs);
+    fill(&d, b.x + in, b.y + (b.h - d.fs) / 2, b.w - 2 * in, d.fs,
+         pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
+    return MOY_UI_OK;
+}
+
 // -- keycap hints -----------------------------------------------------------------------
 
 static int key_sign(moy_ui_span_t k) {

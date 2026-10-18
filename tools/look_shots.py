@@ -104,13 +104,13 @@ def _setup_table():
         "desktop_playtest": (DESK, ("9", "13", "23"), False, _playtest,
                              "the playtest window over the Editor"),
         "handheld_sysmenu": (HANDHELD, ("11", "12", "16", "25a"), False,
-                             _home, "nearest screen: home"),
-        "desktop_sysmenu": (DESK, ("11", "12", "16", "25a"), False, _desk,
-                            "nearest screen: the desk"),
-        "handheld_pause": (HANDHELD, ("11", "16", "25a"), False, _home,
-                           "nearest screen: home"),
-        "desktop_pause": (DESK, ("11", "16", "25a"), False, _desk,
-                          "nearest screen: the desk"),
+                             _sysmenu_home, "the system menu over the home"),
+        "desktop_sysmenu": (DESK, ("11", "12", "16", "25a"), False,
+                            _sysmenu_desk, "the system menu over the desk"),
+        "handheld_pause": (HANDHELD, ("11", "16", "25a"), False, _pause,
+                           "the pause menu over Star Catcher"),
+        "desktop_pause": (CONSOLE, ("11", "16", "25a"), False, _pause,
+                          "the pause menu over Star Catcher, console mode"),
         "editor_bar_all_themes": (HANDHELD, ("16", "23"), False, _code,
                                   "nearest screen: the Code tab's bar"),
         "focus_marks": (HANDHELD, ("11", "13"), False, _code,
@@ -278,6 +278,36 @@ def _desk(g, ws, calc_x=648):
     _settle(g, ws, 2)
     _place(ws, "calc", calc_x, 96, 344, 488)
     _key_calc(g, ws)
+
+
+def _sysmenu_home(g, ws):
+    _home(g, ws)
+    _settle(g, ws, 2)
+    ws._golden_popover = True             # the frames' quiesce keeps it open
+    ws.system_key()
+
+
+def _sysmenu_desk(g, ws):
+    _desk(g, ws)
+    _settle(g, ws, 2)
+    ws._golden_popover = True
+    ws.system_key()
+
+
+# Frames Star Catcher plays before the pause, so its stars and HUD show.
+PAUSE_FRAMES = 45
+
+
+def _pause(g, ws):
+    ws.go_home()
+    if getattr(ws.wm, "mode", None) is not None:
+        ws.open_library()                 # the windowed tier plays in console mode
+    ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
+    ws.run(ws.project, ws.launcher_layer)
+    for _ in range(PAUSE_FRAMES):
+        g._quiesce(ws)
+        ws.frame(g._DT)
+    ws.system_key()
 
 
 def _desk_wall(g, ws):
