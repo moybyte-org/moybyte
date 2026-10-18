@@ -21,7 +21,7 @@
     "web_console_address": [192, 6]
   },
   "guition_480x320_fs1_dark": {
-    "app_appearance": [66, 32],
+    "app_appearance": [63, 32],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -66,7 +66,7 @@
     "web_console_address": [192, 6]
   },
   "guition_tapfloor_dark": {
-    "app_appearance": [55, 31],
+    "app_appearance": [52, 31],
     "app_artwork": [314, 13],
     "app_calc": [180, 23],
     "app_files": [50, 11],
@@ -111,7 +111,7 @@
     "web_console_address": [176, 6]
   },
   "p4_1024x600_cs2_fs1_console": {
-    "app_appearance": [54, 41],
+    "app_appearance": [51, 41],
     "app_artwork": [357, 12],
     "app_calc": [177, 20],
     "app_files": [85, 46],
@@ -132,28 +132,28 @@
     "web_console_address": [192, 6]
   },
   "p4_1024x600_cs2_fs1_contrast_light": {
-    "app_appearance": [145, 7],
-    "app_artwork": [98, 5],
-    "app_calc": [286, 13],
-    "app_files": [239, 11],
-    "app_getcarts": [333, 15],
-    "app_notes": [905, 23],
-    "app_storybook": [192, 9],
-    "desk": [1, 1],
-    "desk_window_calc": [51, 3],
-    "desk_window_projects": [51, 3],
-    "editor_blocks": [51, 3],
-    "editor_cards": [51, 3],
-    "editor_code": [4, 1],
-    "editor_map": [4, 1],
-    "editor_music": [4, 1],
-    "editor_paint": [4, 1],
-    "editor_scene": [4, 1],
+    "app_appearance": [0, 11],
+    "app_artwork": [0, 9],
+    "app_calc": [0, 19],
+    "app_files": [0, 17],
+    "app_getcarts": [0, 21],
+    "app_notes": [465, 36],
+    "app_storybook": [0, 15],
+    "desk": [0, 1],
+    "desk_window_calc": [0, 5],
+    "desk_window_projects": [0, 5],
+    "editor_blocks": [0, 1],
+    "editor_cards": [0, 5],
+    "editor_code": [0, 1],
+    "editor_map": [0, 1],
+    "editor_music": [0, 1],
+    "editor_paint": [0, 1],
+    "editor_scene": [0, 1],
     "launcher": [0, 0],
-    "script_console": [34, 19],
-    "settings": [46, 32],
-    "web_console": [184, 4],
-    "web_console_address": [184, 6]
+    "script_console": [18, 19],
+    "settings": [42, 31],
+    "web_console": [176, 4],
+    "web_console_address": [176, 6]
   },
   "p4_1024x600_cs2_fs1_gnomebar": {
     "app_appearance": [130, 4],
@@ -446,7 +446,7 @@
     "web_console_address": [176, 6]
   },
   "tdeck_320x240_fs1_blocks": {
-    "app_appearance": [45, 21],
+    "app_appearance": [42, 21],
     "app_artwork": [314, 13],
     "app_calc": [26, 23],
     "app_files": [4, 16],
@@ -546,7 +546,7 @@
     "web_console_address": [192, 6]
   },
   "tdeck_320x240_fs1_moy_day": {
-    "app_appearance": [43, 21],
+    "app_appearance": [40, 21],
     "app_artwork": [314, 13],
     "app_calc": [24, 23],
     "app_files": [3, 16],
@@ -572,7 +572,7 @@
     "sysmenu": [1, 9]
   },
   "tdeck_320x240_fs1_moy_night": {
-    "app_appearance": [43, 21],
+    "app_appearance": [40, 21],
     "app_artwork": [314, 13],
     "app_calc": [24, 23],
     "app_files": [3, 16],
