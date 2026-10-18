@@ -150,7 +150,7 @@
     }
   },
   "metrics": {
-    "button": {"pad": 2, "icon": 16, "glyph": 12, "edge": 1, "align": 1},
+    "button": {"pad": 2, "icon": 16, "glyph": 12, "edge": 1, "align": 1, "icon_gap": 6},
     "chip": {"clip": 4, "min_x": 2, "min_y": 1, "edge": 1, "align": 1},
     "row": {"pad": 4, "icon": 16, "glyph": 14, "gap": 1, "edge": 1, "stack": 20, "stack_desk": 28, "stack_gap": 2},
     "cell": {"pad": 2, "caption": 14, "indent": 2, "icon": 16, "glyph": 14, "edge": 1},

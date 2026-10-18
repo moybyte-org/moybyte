@@ -65,7 +65,7 @@ def test_the_metric_slots_are_named_once_per_kind():
     d = _style()
     # the slot constants the toolkit exports are the slots' positions
     consts = {
-        "button": "BTN_PAD BTN_ICON BTN_GLYPH BTN_EDGE BTN_ALIGN",
+        "button": "BTN_PAD BTN_ICON BTN_GLYPH BTN_EDGE BTN_ALIGN BTN_ICON_GAP",
         "chip": "CHIP_CLIP CHIP_MINX CHIP_MINY CHIP_EDGE CHIP_ALIGN",
         "row": "ROW_PAD ROW_ICON ROW_GLYPH ROW_GAP ROW_EDGE ROW_STACK ROW_STACK_DESK "
                "ROW_STACK_GAP",

@@ -159,7 +159,7 @@ def state_token(th, role, fallback=None):
 ALIGN_LEFT = 0
 ALIGN_CENTER = 1
 ALIGN_RIGHT = 2
-(BTN_PAD, BTN_ICON, BTN_GLYPH, BTN_EDGE, BTN_ALIGN) = (0, 1, 2, 3, 4)
+(BTN_PAD, BTN_ICON, BTN_GLYPH, BTN_EDGE, BTN_ALIGN, BTN_ICON_GAP) = (0, 1, 2, 3, 4, 5)
 (CHIP_CLIP, CHIP_MINX, CHIP_MINY, CHIP_EDGE, CHIP_ALIGN) = (0, 1, 2, 3, 4)
 (ROW_PAD, ROW_ICON, ROW_GLYPH, ROW_GAP, ROW_EDGE, ROW_STACK, ROW_STACK_DESK,
  ROW_STACK_GAP) = (0, 1, 2, 3, 4, 5, 6, 7)
@@ -175,7 +175,7 @@ ALIGN_RIGHT = 2
 (GI_PAD, GI_GLYPH, GI_LABEL, GI_RING, GI_INK) = (0, 1, 2, 3, 4)
 (MB_PADX, MB_PADY, MB_INK) = (0, 1, 2)
 (DLG_EDGE, DLG_FILL, DLG_RING) = (0, 1, 2)
-DEFAULT_METRICS = {'button': (2, 16, 12, 1, ALIGN_CENTER), 'chip': (4, 2, 1, 1, ALIGN_CENTER), 'row': (4, 16, 14, 1, 1, 20, 28, 2), 'cell': (2, 14, 2, 16, 14, 1), 'tab': (2, 3, 16), 'status': (1, 3, 2, 1), 'panel': (1, 1, 12, 3), 'focus': (2, 1), 'scrollbar': (4, 8), 'text_field': (4, 3, 6, 8, _BLACK, 6, _WHITE, 5, 10), 'game_btn': (6, _WHITE, _BLACK), 'game_icon_btn': (2, 16, 19, _WHITE, _BLACK), 'mini_btn': (2, 2, _BLACK), 'dialog': (1, 2, _WHITE)}
+DEFAULT_METRICS = {'button': (2, 16, 12, 1, ALIGN_CENTER, 6), 'chip': (4, 2, 1, 1, ALIGN_CENTER), 'row': (4, 16, 14, 1, 1, 20, 28, 2), 'cell': (2, 14, 2, 16, 14, 1), 'tab': (2, 3, 16), 'status': (1, 3, 2, 1), 'panel': (1, 1, 12, 3), 'focus': (2, 1), 'scrollbar': (4, 8), 'text_field': (4, 3, 6, 8, _BLACK, 6, _WHITE, 5, 10), 'game_btn': (6, _WHITE, _BLACK), 'game_icon_btn': (2, 16, 19, _WHITE, _BLACK), 'mini_btn': (2, 2, _BLACK), 'dialog': (1, 2, _WHITE)}
 _PANEL = ('panel', 60)
 _TITLE = ('title', 13)
 _TITLE_INK = ('title_ink', _BLACK)
@@ -438,7 +438,8 @@ def button(cv, th, rect, label, kind='normal', on=False, icon_img=None, glyph=No
     iw = 0
     has_glyph = glyph is not None and glyph_draw is not None
     if icon_img is not None or has_glyph:
-        iw = (icon_box if icon_img is not None else m[BTN_GLYPH] * fs) + pad
+        # the icon's gap is its own metric (icon_gap, 2026-10-18), not the pad
+        iw = (icon_box if icon_img is not None else m[BTN_GLYPH] * fs) + m[BTN_ICON_GAP] * fs
     label = str(label)
     maxc = max(0, (w - 2 * pad - iw) // fw)
     label = fit_bytes(label.encode('utf-8'), maxc).decode('utf-8')  # bytes (step 6)

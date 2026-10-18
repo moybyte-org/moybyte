@@ -427,7 +427,7 @@ ALIGN_RIGHT = 2
 # One tuple per kind (`metrics(kind)`); the constants are its indices, and
 # style.json names the slots in this order. Numbers are in UNSCALED units and
 # the `* fs` stays in the draw, except where style.json's quirks say not.
-BTN_PAD, BTN_ICON, BTN_GLYPH, BTN_EDGE, BTN_ALIGN = 0, 1, 2, 3, 4
+BTN_PAD, BTN_ICON, BTN_GLYPH, BTN_EDGE, BTN_ALIGN, BTN_ICON_GAP = 0, 1, 2, 3, 4, 5
 CHIP_CLIP, CHIP_MINX, CHIP_MINY, CHIP_EDGE, CHIP_ALIGN = 0, 1, 2, 3, 4
 ROW_PAD, ROW_ICON, ROW_GLYPH, ROW_GAP, ROW_EDGE = 0, 1, 2, 3, 4
 CELL_PAD, CELL_CAP, CELL_INDENT, CELL_ICON, CELL_GLYPH, CELL_EDGE = (

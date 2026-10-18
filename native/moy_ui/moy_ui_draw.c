@@ -782,13 +782,15 @@ static int button_off(moy_ui_box_t b, int iw, int lw, int fs) {
     return off < pad ? pad : off;
 }
 
+// The width an icon or a glyph takes before the label: the icon and the one
+// gap every button keeps between its icon and its word.
 static int button_iw(int flags, int fs) {
-    int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
+    int gap = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON_GAP) * fs;
     if (flags & MOY_UI_F_ICON) {
-        return metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON) * fs + pad;
+        return metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON) * fs + gap;
     }
     if (flags & MOY_UI_F_GLYPH) {
-        return metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs + pad;
+        return metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_GLYPH) * fs + gap;
     }
     return 0;
 }
