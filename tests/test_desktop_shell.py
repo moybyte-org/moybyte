@@ -226,7 +226,7 @@ def test_settings_back_returns_home(tmp_path):
 def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
     """Settings must be reachable from inside a running cart via the in-cart bar's ≡
     system menu (#52), and Back must RESUME the cart, not strand you at the launcher
-    (#46). The in-cart menu prepends a CART group, so SETTINGS is two rows down."""
+    (#46). The in-cart menu prepends the cart's group, so SETTINGS is rows down."""
     from runtime import console as C
     from runtime import host_app
     ws = _ws(tmp_path)
@@ -239,7 +239,9 @@ def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
     drv.click(C._SYSMENU_BTN[0] + 2, C._SYSMENU_BTN[1] + 2)   # ≡ on the in-cart bar
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    for _ in range(2):                                       # RESTART -> DELETE -> SETTINGS
+    for _ in range(4):                           # down the cart's group to SETTINGS
+        if ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS":
+            break
         drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
     drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)     # activate SETTINGS
     assert ws.screen == "settings"
