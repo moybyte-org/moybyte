@@ -411,9 +411,11 @@ static int mark_flags(int flags) {
 // The marks of a part with `flags` on box b: drawn where `draw`, and *ink
 // and *on (the field under the text, none over a mark) follow them. A row
 // takes a current `bar` beside it (`side`, MOY_UI_MARK_SIDE), a part under it;
-// `r` is the part's corner radius, which a focus ring follows.
+// `r` is the part's corner radius, which a focus ring follows. The focus mark
+// is classed by the box's size, but a button or a chip (`card` 0) is a part
+// however big: a desk's keypad key wears the part's mark, never a card's.
 static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs, int draw,
-                       int side, int r, int *ink, int *on) {
+                       int side, int r, int card, int *ink, int *on) {
     const moy_ui_marks_t *m = moy_ui_marks();
     if (!m->on) {
         return;
@@ -425,7 +427,9 @@ static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs
         *on = -1;
     }
     if ((flags & MOY_UI_F_FOCUS) && m->active) {
-        moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, how, fs, NULL, &mi, 0);
+        int cls = moy_ui_mark_class(b, MOY_UI_MARK_AUTO, fs);
+        cls = cls == MOY_UI_MARK_CARD && !card ? MOY_UI_MARK_PART : cls;
+        moy_ui_focus_in(s, b, cls, r, how, fs, NULL, &mi, 0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;
     }
@@ -454,7 +458,7 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
             ring = n;
         }
     }
-    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, MOY_UI_MARK_SIDE, 0, &ink, &on);
+    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, MOY_UI_MARK_SIDE, 0, 1, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
@@ -506,7 +510,7 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
     colours(&d, kind, state, k->colors, c);
     int field = c[0], ink = c[1], edge = c[2];
     int on = -1;
-    part_marks(s, b, flags, fs, 0, 0, 0, &ink, &on);
+    part_marks(s, b, flags, fs, 0, 0, 0, 1, &ink, &on);
     (void)on;
     int pad = dflt(k->pad, metric(MOY_UI_K_CELL, MOY_UI_M_CELL_PAD) * fs);
     int has_label = (flags & MOY_UI_F_LABEL) != 0;
@@ -519,7 +523,7 @@ int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
         } else if (field >= 0) {
             fill(&d, x, y, w, h, field);
         }
-        part_marks(s, b, flags, fs, 1, 0, 0, &ink, &on);
+        part_marks(s, b, flags, fs, 1, 0, 0, 1, &ink, &on);
         use_part(&d, kind, state, fs);
         if (has_label && cap > 0) {
             int cap_y = y + h - cap;
@@ -898,7 +902,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     if ((phase & MOY_UI_PHASE_FRAME) && (shaped || !surface(&d, b, kind, state, bg, edge))) {
         button_body(&d, b, &bs, &on, &ring);
     }
-    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, shaped ? bs.r : 0, &ink, &on);
+    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, shaped ? bs.r : 0, 0, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
@@ -945,7 +949,7 @@ int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
             rings(&d, x, y, w, h, edge, n);
         }
     }
-    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, 0, &ink, &on);
+    part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, 0, 0, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
         return MOY_UI_OK;
     }
@@ -1044,7 +1048,7 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
     }
     if (marked) {
         int on = -1;
-        part_marks(s, r, MOY_UI_F_ON, fs, phase & MOY_UI_PHASE_FRAME, 0, 0, &ink_i, &on);
+        part_marks(s, r, MOY_UI_F_ON, fs, phase & MOY_UI_PHASE_FRAME, 0, 0, 1, &ink_i, &on);
     }
     if ((phase & MOY_UI_PHASE_CONTENT) && labels_on) {
         use_part(&d, MOY_UI_K_TAB, state, fs);
