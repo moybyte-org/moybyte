@@ -45,11 +45,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import BUILTIN_NS, builtin_name
 
 try:
-    from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_names,
-                        theme_presets, theme_tints, RGB, rgb565_of, nearest_of)
+    from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look,
+                        theme_names, theme_presets, theme_tints, RGB, PAINT, LOOK_NONE,
+                        rgb565_of, nearest_of)
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import (THEME_NAMES, theme_accents, theme_colors, theme_names,
-                                theme_presets, theme_tints, RGB, rgb565_of, nearest_of)
+    from runtime.chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look,
+                                theme_names, theme_presets, theme_tints, RGB, PAINT,
+                                LOOK_NONE, rgb565_of, nearest_of)
 
 try:
     import ui
@@ -87,6 +89,8 @@ NAME_WHY = {"grammar": "a-z 0-9 _ - only, a letter or digit first",
             "none": "Only custom is named"}
 NAME_HINT = "a-z 0-9 _ -, up to 24"
 NAME_MAX = 24
+# The type roles a card's "Aa" tries, largest first (`_aa`).
+_AA_FACES = ("result", "key", "title")
 # The roles a theme's second mode changes (`_single_mode`).
 _MODE_ROLES = ("desktop", "surface", "panel", "ink", "bar", "accent")
 # The hints by the focused stop's kind.
@@ -120,6 +124,36 @@ def _fill(cv, x, y, w, h, v):
         cv.rect(x, y, w, h, nearest_of(v))
         return
     fill(x, y, w, h, rgb565_of(v))
+
+
+def _shape(cv, x, y, w, h, r, v):
+    """A rect with anti-aliased corners of radius `r` (a circle at w // 2)
+    in colour value `v`: an index through the canvas's `rrect`, an RGB value
+    exactly, as a one-word picture `cover` scales into the shape."""
+    if w <= 0 or h <= 0:
+        return
+    if v < RGB:
+        cv.rrect(x, y, w, h, r, v)
+        return
+    if getattr(cv, "cover", None) is None:      # a canvas that takes indices only
+        cv.rrect(x, y, w, h, r, nearest_of(v))
+        return
+    word = rgb565_of(v)
+    if getattr(cv, "swapped565", False):
+        word = ((word & 0xFF) << 8) | (word >> 8)
+    cv.cover(bytes((word & 0xFF, word >> 8)), 1, 0, 0, 1, 1, x, y, w, h, r)
+
+
+def _look_colour(lk, leaf, default):
+    """Look leaf `leaf`'s colour, else `default` (unset, or a paint)."""
+    v = lk.get(leaf, LOOK_NONE)
+    return default if v == LOOK_NONE or v < 0 or v >= PAINT else v
+
+
+def _look_px(lk, leaf, k):
+    """Look width `leaf` (hundredths) in pixels at scale `k`, 0 unset."""
+    v = lk.get(leaf, LOOK_NONE)
+    return 0 if v == LOOK_NONE or v <= 0 else max(1, (v * k + 50) // 100)
 
 
 def _index(v):
@@ -494,8 +528,14 @@ class AppearanceAppLayer:
         bx, _by, bw, _bh = lay.body
         cv.rect(bx, y, bw, 1, th["border"])
         hw = self._hints_w(items)
-        ui.at(bx, y + 1, max(0, bw - hw), h - 1)
-        ui.label(self._status(ch))
+        # The status: the body face in the dim ink, quieter than the rows.
+        ui.face("ui")
+        text = self._status(ch)
+        room = max(0, bw - hw - 8)
+        while len(text) > 1 and ui.text_size(text)[0] > room:
+            text = text[:-1]
+        cv.print(text, bx + 8, y + 1 + (h - 1 - ui.text_size(text)[1]) // 2, th["ink_dim"])
+        ui.face()
         ui.at(bx + bw - hw, y + 1, hw, h - 1)
         ui.hints(items)
 
@@ -641,39 +681,61 @@ class AppearanceAppLayer:
         ui.grid()
 
     def _preview(self, cv, r, name, variant):
-        """Theme `name`'s card picture: its ground and bar, a surface panel
-        with "Aa" in its ink, its accent (and its value, where that is
-        another colour)."""
+        """Theme `name`'s card picture, as its home shows it: its ground (the
+        look's home ground, else `desktop`), its bar with the bar's line, a
+        panel in its window frame (else a `border` hairline) at its card
+        radius holding "Aa" in the live theme's title face and its ink, and
+        its accent (and its value, where that is another colour) as dots."""
         tok = theme_colors(name, variant)
+        lk = theme_look(name, variant)
         x, y, w, h = r
-        desk = self.layout.desk
-        fs = self.layout.fs
-        k = 1 if desk else fs
-        cv.clip(*self.layout.body)
-        _fill(cv, x, y, w, h, tok["desktop"])
+        lay = self.layout
+        desk = lay.desk
+        k = 1 if desk else lay.fs
+        cv.clip(*lay.body)
+        _fill(cv, x, y, w, h, _look_colour(lk, "home_bg", tok["desktop"]))
         bh = (14 if desk else 8) * k
-        _fill(cv, x, y, w, bh, tok["bar"])
+        _fill(cv, x, y, w, bh, _look_colour(lk, "bar.fill", tok["bar"]))
+        lw = _look_px(lk, "bar.line.w", k)
+        if lw:
+            _fill(cv, x, y + bh - lw, w, lw, _look_colour(lk, "bar.line.c", tok["border"]))
         m = (14 if desk else 6) * k
         py = y + bh + (10 if desk else 5) * k
         pw, ph = w - 2 * m, h - (py - y) - (10 if desk else 5) * k
-        _fill(cv, x + m, py, pw, ph, tok["surface"])
-        big = 2 if desk else 1
-        tw, lh = ui.text_size("Aa", big)
-        cv.print_scaled("Aa", x + m + m, py + (ph - lh) // 2, _index(tok["ink"]), big) \
-            if big > 1 else cv.print("Aa", x + m + m, py + (ph - lh) // 2, _index(tok["ink"]))
+        fw = _look_px(lk, "win.frame.w", k) or k
+        rad = lk.get("card_r", 0)
+        rad = min(max(0, rad) * k // 2, ph // 3) if rad != LOOK_NONE else 2 * k
+        _shape(cv, x + m, py, pw, ph, rad, _look_colour(lk, "win.frame.c", tok["border"]))
+        _shape(cv, x + m + fw, py + fw, pw - 2 * fw, ph - 2 * fw, max(0, rad - fw),
+               tok["surface"])
+        self._aa(cv, x + 2 * m, py, ph, _index(tok["ink"]))
         d = (16 if desk else 8) * k
         xr = x + m + pw - m - d
         acc, val = tok["accent"], tok["value"]
         if val != acc:
-            self._dot(cv, xr, py + ph // 2 - d - k, d, acc)
-            self._dot(cv, xr, py + ph // 2 + k, d, val)
+            _shape(cv, xr, py + ph // 2 - d - k, d, d, d // 2, acc)
+            _shape(cv, xr, py + ph // 2 + k, d, d, d // 2, val)
         else:
-            self._dot(cv, xr, py + (ph - d) // 2, d, acc)
+            _shape(cv, xr, py + (ph - d) // 2, d, d, d // 2, acc)
         cv.clip()
 
     @staticmethod
-    def _dot(cv, x, y, d, v):
-        cv.circ(x + d // 2, y + d // 2, d // 2, _index(v))
+    def _aa(cv, x, y, h, c):
+        """"Aa" centred down a panel of height `h` at `x`: the live theme's
+        largest face whose line is at most half the panel, at its own size
+        (its anti-aliasing unscaled), else the print font at the whole scale
+        that fits."""
+        for role in _AA_FACES:
+            if ui.face(role, "Aa"):
+                lh = ui.text_size("Aa")[1]
+                if 2 * lh <= h:
+                    cv.print("Aa", x, y + (h - lh) // 2, c)
+                    ui.face()
+                    return
+                ui.face()
+        big = max(1, h // (2 * ui.text_size("Aa")[1]))
+        lh = ui.text_size("Aa", big)[1]
+        cv.print_scaled("Aa", x, y + (h - lh) // 2, c, big)
 
     # -- the wallpapers --------------------------------------------------------
 

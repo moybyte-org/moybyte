@@ -846,6 +846,8 @@ _THEME_CACHE = {}
 _CONTENT_CACHE = {}
 _LIVE_CACHE = {}
 RGB = 0x1000000             # a colour value at or above: RGB | 0xrrggbb
+PAINT = 0x2000000           # a look colour at or above is a paint, no colour
+LOOK_NONE = -2147483648     # a look leaf the theme leaves unset
 # The store's packages: name -> theme_resolve's answer, None until first read.
 _PACKAGES = {}
 _PKG_READ = [None]          # name -> its theme.json's bytes, or None
@@ -957,6 +959,16 @@ def _look_raw(name, light):
     return _ui_draw._C.theme_look(name, light)
 
 
+def theme_look(name, variant=DEFAULT_VARIANT):
+    """Theme `name`'s look leaves in `variant` as {leaf name: value}, a
+    colour a palette index or RGB | 0xrrggbb, a width or alpha in
+    hundredths, an unset leaf `LOOK_NONE`: what a picture of another theme
+    (Appearance's cards) reads its ground, bar and frame from."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    return dict(zip(look_fields()[0], _look_raw(name, variant == "light")[0]))
+
+
 def backdrop(name, variant, surface):
     """Theme `name`'s backdrop for `surface` ("home" or "desk") in `variant`:
     the records `moy_gfx.backdrop` draws (`moy_ui.theme_backdrop`), b"" where
@@ -1005,8 +1017,8 @@ class Live:
 FIXED = (RGB | 0x6e6e78, RGB | 0x9a9aa4, RGB | 0x000000, RGB | 0xffffff)
 
 
-_PAINT, _VIBRANCY = 0x2000000, 0x3000000
-_NONE = -2147483648
+_PAINT, _VIBRANCY = PAINT, 0x3000000
+_NONE = LOOK_NONE
 
 
 def _button_rows(look, names, kinds, btn):
