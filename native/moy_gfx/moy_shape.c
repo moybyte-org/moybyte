@@ -13,6 +13,17 @@
 
 #include "moy_gfx_kernels.h"
 
+// The corner and shadow caches are PSRAM where the board has it. Each is under
+// the boards' SPIRAM_MALLOC_ALWAYSINTERNAL, so a plain malloc would put it in
+// internal SRAM, and the desk draws corners and shadows from its first frame:
+// the idle desk would hold them there for good.
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define SHAPE_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+#else
+#define SHAPE_ALLOC(n) malloc(n)
+#endif
+
 static int s_swapped = 1;
 static uint32_t s_st[MOY_SHAPE_STATS];
 
@@ -142,9 +153,8 @@ static int run(const tgt_t *g, int Y, int X0, int X1, uint16_t w) {
 
 #define COV_SLOTS 4
 #define COV_BYTES ((MOY_SHAPE_RMAX * MOY_SHAPE_RMAX + 1) / 2)
-// The slots are one allocation, made at the first corner (PSRAM where the
-// board's allocator puts it); without it a corner's coverage is computed as
-// it draws -- the same values.
+// The slots are one allocation, made at the first corner (SHAPE_ALLOC);
+// without it a corner's coverage is computed as it draws -- the same values.
 static uint8_t *s_cov;
 static uint8_t s_cov_r[COV_SLOTS];
 static uint32_t s_cov_use[COV_SLOTS], s_tick;
@@ -168,7 +178,7 @@ static const uint8_t *cov_table(int r) {
         return NULL;
     }
     if (s_cov == NULL) {
-        s_cov = (uint8_t *)malloc((size_t)COV_SLOTS * COV_BYTES);
+        s_cov = (uint8_t *)SHAPE_ALLOC((size_t)COV_SLOTS * COV_BYTES);
         if (s_cov == NULL) {
             return NULL;
         }
@@ -575,7 +585,7 @@ static const mask_t *mask_get(int r, int b, int stepped, mask_t *spare) {
     if (C > 0) {
         free(m->T);
         m->T = NULL;
-        T = (uint8_t *)malloc((size_t)(C * C + 1) / 2);
+        T = (uint8_t *)SHAPE_ALLOC((size_t)(C * C + 1) / 2);
     }
     if (T == NULL) {
         m = spare;

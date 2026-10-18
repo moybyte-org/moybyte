@@ -1,6 +1,14 @@
 // The RUN face of the public UI API and its wasm rows (moy_ui_wasm.h).
 
+#include <stdlib.h>
 #include <string.h>
+
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define CTX_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+#else
+#define CTX_ALLOC(n) malloc(n)
+#endif
 
 #include "moy.h"
 #include "moy_canvas.h"
@@ -100,18 +108,24 @@ static int close_run(run_t *r, int rc) {
 // -- the run's context ------------------------------------------------------------
 //
 // One run at a time, so one context: begun lazily by the first verb of each
-// tick, over the run's snapshot, and reset when a new run opens.
+// tick, over the run's snapshot, and reset when a new run opens. The first
+// verb any run calls allocates it (CTX_ALLOC: PSRAM where the board has it)
+// and it is kept: a static would hold its size in internal SRAM from boot on
+// a console that never runs a cart on the API. NULL: none could be had.
 
-static moy_ui_ctx_t s_ctx;
+static moy_ui_ctx_t *s_ctx;
 static uint32_t s_tick, s_serial;
 static int s_live;
 
 static moy_ui_ctx_t *run_ctx(const void *target) {
     const moy_canvas *c = (const moy_canvas *)target;
     uint32_t tick = 0, serial = 0;
+    if (s_ctx == NULL && (s_ctx = CTX_ALLOC(sizeof(*s_ctx))) == NULL) {
+        return NULL;
+    }
     const int32_t *snap = moycore_ui_snap(&tick, &serial);
     if (!s_live || serial != s_serial) {
-        moy_ui_api_reset(&s_ctx);
+        moy_ui_api_reset(s_ctx);
         s_serial = serial;
         s_tick = tick - 1u;
         s_live = 1;
@@ -128,16 +142,16 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             in[MOY_UI_IN_PTR] = snap[MOYCORE_UI_SNAP_PTR];
             in[MOY_UI_IN_KEY] = snap[MOYCORE_UI_SNAP_KEY];
         }
-        moy_ui_box_t surf = s_ctx.surface;
+        moy_ui_box_t surf = s_ctx->surface;
         if (c != NULL) {
             surf.x = surf.y = 0;
             surf.w = (int16_t)c->w;
             surf.h = (int16_t)c->h;
         }
-        moy_ui_api_begin(&s_ctx, in, surf, flags, 1);
+        moy_ui_api_begin(s_ctx, in, surf, flags, 1);
         s_tick = tick;
     }
-    return &s_ctx;
+    return s_ctx;
 }
 
 static moy_ui_span_t span(const uint8_t *p, size_t n) {
@@ -156,7 +170,11 @@ static moy_ui_span_t span(const uint8_t *p, size_t n) {
     if (rc_ != 0) {                                     \
         return rc_;                                     \
     }                                                   \
-    moy_ui_ctx_t *c = run_ctx(t_)
+    moy_ui_ctx_t *c = run_ctx(t_);                      \
+    if (c == NULL) {                                    \
+        return close_run(&r, MOY_UI_NOMEM);             \
+    }                                                   \
+    (void)0
 
 int moy_ui_run_page(void *target, moy_ui_span_t title, const moy_ui_over_t *o, int32_t out[4]) {
     OPEN(target);
@@ -211,15 +229,26 @@ int moy_ui_run_part(void *target, moy_ui_span_t id, int w, int h, const moy_ui_o
 }
 
 int moy_ui_run_focus(void *target, moy_ui_span_t id, char *buf, size_t cap) {
-    return moy_ui_api_focus(run_ctx(target), id, buf, cap);
+    moy_ui_ctx_t *c = run_ctx(target);
+    if (c == NULL) {
+        if (cap) {
+            buf[0] = 0;
+        }
+        return -1;
+    }
+    return moy_ui_api_focus(c, id, buf, cap);
 }
 
 int moy_ui_run_keys_taken(void *target) {
-    return moy_ui_api_keys_taken(run_ctx(target));
+    moy_ui_ctx_t *c = run_ctx(target);
+    return c != NULL ? moy_ui_api_keys_taken(c) : 0;
 }
 
 void moy_ui_run_at(void *target, int x, int y, int w, int h) {
-    moy_ui_api_at(run_ctx(target), x, y, w, h);
+    moy_ui_ctx_t *c = run_ctx(target);
+    if (c != NULL) {
+        moy_ui_api_at(c, x, y, w, h);
+    }
 }
 
 int moy_ui_run_group(void *target, moy_ui_span_t caption, const moy_ui_over_t *o) {
