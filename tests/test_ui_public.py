@@ -214,12 +214,15 @@ _TH = []
 
 
 def _theme():
+    """The lookless `night` fixture's colours, installed afresh for each page:
+    the installed look is process-wide, as on a board, and these pages' stops
+    sit where night lays them out."""
     if not _TH:
         import tempfile
         from pathlib import Path
-        ws = build_ws(Path(tempfile.mkdtemp()))
-        _TH.append(ws.theme_colors)
-    return _TH[0]
+        _TH.append(build_ws(Path(tempfile.mkdtemp())))
+    use_theme(_TH[0], "night", "dark")
+    return _TH[0].theme_colors
 
 
 def _page():
@@ -512,7 +515,7 @@ def test_a_later_workstation_never_draws_the_look_of_an_earlier_one(tmp_path):
     host_app.moy_carts.ensure_dirs(root)
     for d in ("page_py.moy", "page_lua.moy"):
         shutil.copytree(os.path.join(PAGES, d), os.path.join(root, d))
-    for theme in ("indigo", "slate", "night"):
+    for theme in ("platinum", "slate", "night"):
         py = _first_page(root, "UI Page Py", theme)
         lua = _first_page(root, "UI Page Lua", theme)
         assert lua == py, "the Lua page under %s drew other pixels than python" % theme

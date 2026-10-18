@@ -321,11 +321,6 @@ def _rects(words):
     return out
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "the default is Moy, a look (docs/look_2026-10.md step 27): the page draws "
-    "the compiled app's rows under it (an edge-bar focus, a plate for the "
-    "current row), and the host's WAMR run draws them lookless, a row higher, "
-    "measured 2026-10-18; the host reference needs the look to hold the page to"))
 def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path, monkeypatch):
     """App UI Wasm (its src/main.wat says what it does) draws the public UI
     API's fixture page through the `ui` rows: in the browser they are the

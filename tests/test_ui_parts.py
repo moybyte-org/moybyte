@@ -440,7 +440,6 @@ def parts_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
-        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -1313,7 +1312,6 @@ def look_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
-        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -1646,7 +1644,6 @@ def menu_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
-        use_theme(ws, "night", "dark")
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
