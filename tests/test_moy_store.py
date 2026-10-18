@@ -71,7 +71,14 @@ class _Buf(ctypes.Structure):
 
 def _lib():
     san = os.environ.get("MOY_FS_SANITIZE") == "1"
-    path = spike.host_library("c", sanitize=san, comp=spike.FS)
+    if san:
+        path = spike.host_library("c", sanitize=True, comp=spike.FS)
+    else:
+        # The store's part alone, a library of this suite's own: its leak and
+        # roots checks clear process-wide state the host's one library shares
+        # with every other store user.
+        from runtime import native_build
+        path = native_build.build_parts("moy_fs_c", [spike.part(spike.FS)], spike.FS.cache)
     if path is None:
         _no_toolchain("no C compiler")
     lib = ctypes.CDLL(path)
