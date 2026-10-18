@@ -1574,25 +1574,26 @@ static mp_obj_t ui_paint(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_paint_obj, 5, 5, ui_paint);
 
-// frame(cv, look, rect, title_h, title, active, has_min, fs): a window's frame
+// frame(cv, look, rect, title_h, title, active, btns, fs): a window's frame,
+// `btns` its MOY_UI_FRAME_* buttons (True: a minimise)
 static mp_obj_t ui_frame(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     check(moy_ui_frame(&s, box_of(a[2]), mp_obj_get_int(a[3]), span_of(a[4]),
-                       mp_obj_is_true(a[5]), mp_obj_is_true(a[6]), mp_obj_get_int(a[7])));
+                       mp_obj_is_true(a[5]), mp_obj_get_int(a[6]), mp_obj_get_int(a[7])));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_obj, 8, 8, ui_frame);
 
-// frame_buttons(rect, title_h, title, has_min, fs) -> ((id, x, y, w, h, right), ...)
+// frame_buttons(rect, title_h, title, btns, fs) -> ((id, x, y, w, h, right), ...)
 // left to right
 static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
-    moy_ui_frame_button_t b[3];
+    moy_ui_frame_button_t b[MOY_UI_FRAME_BUTTONS];
     int n = moy_ui_frame_buttons(box_of(a[0]), mp_obj_get_int(a[1]), span_of(a[2]),
-                                 mp_obj_is_true(a[3]), mp_obj_get_int(a[4]), b);
-    mp_obj_t out[3];
+                                 mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), b);
+    mp_obj_t out[MOY_UI_FRAME_BUTTONS];
     for (int i = 0; i < n; i++) {
         mp_obj_t t[6] = {MP_OBJ_NEW_SMALL_INT(b[i].id), MP_OBJ_NEW_SMALL_INT(b[i].box.x),
                          MP_OBJ_NEW_SMALL_INT(b[i].box.y), MP_OBJ_NEW_SMALL_INT(b[i].box.w),
@@ -1603,17 +1604,17 @@ static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_buttons_obj, 5, 5, ui_frame_buttons);
 
-// frame_icon(rect, title_h) -> the line icon's slot (x, y, w, h), or None
-static mp_obj_t ui_frame_icon(mp_obj_t rect, mp_obj_t th) {
+// frame_icon(rect, title_h, btns) -> the line icon's slot (x, y, w, h), or None
+static mp_obj_t ui_frame_icon(mp_obj_t rect, mp_obj_t th, mp_obj_t btns) {
     moy_ui_box_t b;
-    if (!moy_ui_frame_icon(box_of(rect), mp_obj_get_int(th), &b)) {
+    if (!moy_ui_frame_icon(box_of(rect), mp_obj_get_int(th), mp_obj_get_int(btns), &b)) {
         return mp_const_none;
     }
     mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
                      MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
     return mp_obj_new_tuple(4, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_frame_icon_obj, ui_frame_icon);
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_frame_icon_obj, ui_frame_icon);
 
 // bar_part(cv, look, part, rect, on[, fill]) -> whether the depth drew the
 // bar part; `fill`, a look colour, fills a desk icon's tile (BARP_TILE)

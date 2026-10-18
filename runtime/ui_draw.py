@@ -1492,26 +1492,30 @@ def icon_label(cv, th, band, text, on, fs):
 # chooses (docs/theming_2026-09.md §4.5): the styles are C, a theme only picks
 # one, its title alignment and its button order.
 
-FRAME_BUTTONS = ("close", "max", "min")
+FRAME_BUTTONS = ("close", "max", "min", "back")     # MOY_UI_FB_*
+FRAME_MIN, FRAME_BACK = 1, 2                           # MOY_UI_FRAME_*
 
 
-def frame(cv, th, rect, title_h, title, active, has_min, fs):
+def frame(cv, th, rect, title_h, title, active, btns, fs):
     """Window `rect`'s frame: its ring, its `title_h` strip with `title` and
-    the strip's buttons, its drop shadow. `has_min`: a minimise button."""
-    _C.frame(cv, _LOOK if th is _TH else _look(th), rect, title_h, title, active, has_min, fs)
+    the strip's buttons, its drop shadow. `btns`: FRAME_MIN for a minimise
+    button, FRAME_BACK for the back chevron at the head of the strip (True:
+    a minimise)."""
+    _C.frame(cv, _LOOK if th is _TH else _look(th), rect, title_h, title, active, int(btns), fs)
 
 
-def frame_buttons(rect, title_h, title, has_min, fs):
+def frame_buttons(rect, title_h, title, btns, fs):
     """The strip's buttons as `frame` draws them, left to right:
     [(name, rect, right)], `right` True for the group right of the title."""
     return [(FRAME_BUTTONS[b[0]], (b[1], b[2], b[3], b[4]), b[5] == 1)
-            for b in _C.frame_buttons(rect, title_h, title, has_min, fs)]
+            for b in _C.frame_buttons(rect, title_h, title, int(btns), fs)]
 
 
-def frame_icon(rect, title_h):
+def frame_icon(rect, title_h, btns=0):
     """The slot (x, y, w, h) the frame leaves for the window's line icon left
-    of its title, or None where it draws none (no depth, `win.icon` off)."""
-    return _C.frame_icon(rect, title_h)
+    of its title, past a back chevron `btns` asks for, or None where it draws
+    none (no depth, `win.icon` off)."""
+    return _C.frame_icon(rect, title_h, int(btns))
 
 
 # --- depth: the theme's radii, shadow and edges (docs/look_2026-10.md step 6) ---

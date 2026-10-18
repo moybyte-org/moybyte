@@ -301,17 +301,20 @@ class ConsoleDriver:
         return self.ws.pause.open or self.ws.sysmenu.open
 
     def takes_escape(self):
-        """Esc is the console's: a menu shows, or Settings or a registered
-        app is the fullscreen surface (its Esc is the bar's back)."""
+        """Esc is the console's: a menu shows, Settings or a registered app is
+        the fullscreen surface (its Esc is the bar's back), or the focused
+        desk window shows its back chevron."""
         ws = self.ws
         return (self.menu_open() or ws.screen == "settings"
-                or (not ws.windowed_chrome and ws.screen in ws._apps_by_id))
+                or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
+                or (ws.windowed_chrome and ws.wm.focus_has_back()))
 
     def escape(self):
         """Esc: the pause menu steps back (Options to its menu, the menu to
         the game), the system menu closes; Settings and a registered app go
-        back one level, as the bar's chevron and B do; else an open Editor
-        panel goes back to the desktop."""
+        back one level, as the bar's chevron and B do, and so does a desk
+        window's app with a page open (its title strip's chevron); else an
+        open Editor panel goes back to the desktop."""
         ws = self.ws
         if ws.pause.open:
             ws.pause.back()
@@ -322,6 +325,8 @@ class ConsoleDriver:
             ws.settings_layer.back()
         elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
             ws.app_back()
+        elif ws.windowed_chrome and ws.wm.focus_back():
+            pass
         elif ws.screen == "menu":
             ws._leave_menu()
 

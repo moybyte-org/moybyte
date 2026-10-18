@@ -88,8 +88,9 @@ class WindowChrome:
         disturbance -- desk repaint, drag, cursor, animation, a changed title or
         theme -- restarts it and all buffers are refreshed before skipping
         resumes."""
+        btns = self._win_btns(win)
         sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
-               self._win_title(win), self.ws.look.look_gen, self._fs())
+               self._win_title(win), btns, self.ws.look.look_gen, self._fs())
         if sig != getattr(win, "_chrome_sig", None):
             self._win_touched = True      # the chrome's pixels differ from last frame's
         if not quiet or sig != getattr(win, "_chrome_sig", None):
@@ -101,9 +102,8 @@ class WindowChrome:
         win._chrome_streak += 1
         self.ws.icon_spec()               # the look's icon set, for the title buttons
         _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
-                  win.title_h, self._win_title(win), focused, win.kind != "desktop",
-                  self._fs())
-        slot = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h)
+                  win.title_h, self._win_title(win), focused, btns, self._fs())
+        slot = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h, btns)
         if slot is not None:
             self._win_icon(win, slot, focused)
         self._win_grip(win, focused)
@@ -244,13 +244,53 @@ class WindowChrome:
                     return t[:at]
         return t
 
+    def _win_btns(self, win):
+        """The frame's optional strip buttons for `win` (ui_draw.FRAME_*):
+        minimize for an app window (a running game can't minimize: hiding it
+        would mean silently pausing it), and the back chevron while its app
+        has a page of it open (docs/look_2026-10.md step 27a), which the
+        chrome's freeze signature carries."""
+        if win.kind == "desktop":
+            return 0
+        if self.ws.app_has_page(win.kind):
+            return _ui_draw.FRAME_MIN | _ui_draw.FRAME_BACK
+        return _ui_draw.FRAME_MIN
+
     def _frame_buttons(self, win):
         """The title-strip buttons as the frame style lays them, left to right:
-        [(name, rect, right)]. Close, maximize, and -- app windows only --
-        minimize (a running game can't minimize: hiding it would mean silently
-        pausing it)."""
+        [(name, rect, right)]. Close, maximize, and `_win_btns`' minimize and
+        back."""
         return _ui_draw.frame_buttons((win.x, win.y, win.w, win.h), win.title_h,
-                                 self._win_title(win), win.kind != "desktop", self._fs())
+                                      self._win_title(win), self._win_btns(win), self._fs())
+
+    def _win_back(self, win):
+        """The window's back -- its chevron, and Esc and B while it holds the
+        focus: its app steps out of the page it has open, under the window's
+        layout context. False where the app has none open (no chevron shows;
+        the keys stay the app's own)."""
+        if not self.ws.app_has_page(win.kind):
+            return False
+        app = self.ws._apps_by_id.get(win.kind)
+        if win.ctx is not None:
+            self._install(win.ctx, win)
+        try:
+            self.ws.app_back(app)
+        finally:
+            if win.ctx is not None:
+                self._install(self._root_ctx)
+        self.ws._dirty = True
+        return True
+
+    def focus_has_back(self):
+        """Whether the focused window shows the back chevron: what Esc does
+        on the host's desk (host_api.ConsoleDriver.escape)."""
+        win = self._focus_win()
+        return win is not None and not win.minimized and self.ws.app_has_page(win.kind)
+
+    def focus_back(self):
+        """The focused window's back (`_win_back`); False where it shows none."""
+        win = self._focus_win()
+        return win is not None and not win.minimized and self._win_back(win)
 
     def _strip_buttons(self, win):
         """The title-strip buttons as (name, rect), RIGHT to LEFT."""

@@ -602,17 +602,22 @@ class FilesAppLayer(ListShellApp):
             self._damage.all()
         return True
 
+    def has_page(self):
+        """Whether a page of the app is open, which `back` steps out of: a
+        dialog, or a folder's list where one column shows it alone."""
+        return self.dialog is not None or (not self.layout.two and self.level == "files")
+
     def back(self):
         """Back one level (B, Esc, the bar's chevron): a dialog closes, a
         one-column list goes back to the places. False on the places: the
         host leaves the app."""
+        if not self.has_page():
+            return False
         if self.dialog is not None:
             self._close_dialog()
-        elif not self.layout.two and self.level == "files":
+        else:
             self.level = "places"
             self._focus = "Places"
-        else:
-            return False
         self._damage.all()
         return True
 

@@ -686,11 +686,16 @@ class PaintAppLayer:
         self.display = None
         self._damage.all()
 
+    def has_page(self):
+        """Whether a mode over the canvas is open, which `back` steps out
+        of."""
+        return self.mode != "paint"
+
     def back(self):
         """Back one level (B, Esc, the bar's chevron): a mode over the
         canvas goes back to painting. False while painting: the host leaves
         the app."""
-        if self.mode == "paint":
+        if not self.has_page():
             return False
         self.mode = "paint"
         self._damage.all()

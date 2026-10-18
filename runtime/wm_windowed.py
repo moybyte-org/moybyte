@@ -2332,7 +2332,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         playtest keeps running beside it. No focused window (the desktop root) ->
         return False and the launcher layer takes the keys. The HOME key is the
         desk's, whatever holds focus but a game (`ws.home_key`: show the
-        desktop, or bring the windows back)."""
+        desktop, or bring the windows back). B and Esc are the window's back
+        chevron while it shows one (`_win_back`)."""
         if not self._order:
             return False
         win = self._focus_win()
@@ -2344,6 +2345,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         content = self._content_for(win.kind)
         if content is None:
             return False
+        if (i.pressed("b") or i.pressed("stop")) and self._win_back(win):
+            return True               # the window's back chevron (`_win_back`)
         if win.ctx is not None:
             self._install(win.ctx, win)
             try:
@@ -2486,6 +2489,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 ws._dirty = True
                 if name == "close":
                     self._close_window(win.kind)
+                elif name == "back":
+                    self._win_back(win)
                 elif name == "max":
                     self._toggle_max(win)
                 elif name == "min" and win.kind != "desktop":

@@ -2382,6 +2382,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             commit()
         return bool(self.bar_layer.handle_bar_tap("app", px, py))
 
+    def app_has_page(self, kind):
+        """Whether registered app `kind` has a page of it open (its
+        `has_page`), which its back steps out of: a desk window shows the
+        back chevron in its title strip then. False for any other kind."""
+        app = self._apps_by_id.get(kind)
+        has = getattr(app, "has_page", None) if app is not None else None
+        return bool(has is not None and has())
+
     def app_back(self, app=None):
         """Back one level on registered `app` (None: the one on top) -- the
         bar's chevron, Esc and B (docs/look_2026-10.md step 27a): the app's

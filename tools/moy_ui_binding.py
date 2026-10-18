@@ -218,7 +218,7 @@ _DRAW_SIGS = (
     ("moy_ui_frame", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
     ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
-    ("moy_ui_frame_icon", [_Box, _I, c.POINTER(_Box)], _I),
+    ("moy_ui_frame_icon", [_Box, _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
@@ -633,22 +633,21 @@ def binding():
                                 c.byref(painted)))
         return bool(painted.value)
 
-    def frame(cv, look, rect, title_h, title, active, has_min, fs):
+    def frame(cv, look, rect, title_h, title, active, btns, fs):
         s = sink(cv, look)
         sp, keep = span_if(title)
         _check(lib.moy_ui_frame(c.byref(s), box_of(rect), int(title_h), sp,
-                                1 if active else 0, 1 if has_min else 0, int(fs)))
+                                1 if active else 0, int(btns), int(fs)))
 
-    def frame_buttons(rect, title_h, title, has_min, fs):
+    def frame_buttons(rect, title_h, title, btns, fs):
         sp, keep = span_if(title)
-        out = (_FrameButton * 3)()
-        n = lib.moy_ui_frame_buttons(box_of(rect), int(title_h), sp, 1 if has_min else 0,
-                                     int(fs), out)
+        out = (_FrameButton * 4)()                  # MOY_UI_FRAME_BUTTONS
+        n = lib.moy_ui_frame_buttons(box_of(rect), int(title_h), sp, int(btns), int(fs), out)
         return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
 
-    def frame_icon(rect, title_h):
+    def frame_icon(rect, title_h, btns):
         out = _Box()
-        if not lib.moy_ui_frame_icon(box_of(rect), int(title_h), c.byref(out)):
+        if not lib.moy_ui_frame_icon(box_of(rect), int(title_h), int(btns), c.byref(out)):
             return None
         return (out.x, out.y, out.w, out.h)
 

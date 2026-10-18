@@ -500,6 +500,11 @@ class StorybookAppLayer(ListShellApp):
 
     # -- input -------------------------------------------------------------------------
 
+    def has_page(self):
+        """Whether a page of the app is open, which `back` steps out of: a
+        story's pages or one of them."""
+        return self.mode in ("page", "pages")
+
     def back(self):
         """Back one level (B, Esc, the bar's chevron): a page back to its
         story's pages, the pages back to the shelf. False on the shelf: the

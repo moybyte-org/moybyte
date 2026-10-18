@@ -407,17 +407,22 @@ class AppearanceAppLayer:
             self._damage.all()
         return True
 
+    def has_page(self):
+        """Whether a page of the app is open, which `back` steps out of:
+        the name field or the wallpapers."""
+        return bool(self.naming) or self.view == "walls"
+
     def back(self):
         """Back one level (B, Esc, the bar's chevron): the name field
         closes, the wallpapers go back to the rows. False on the rows: the
         host leaves the app."""
+        if not self.has_page():
+            return False
         if self.naming:
             self._close_name()
-        elif self.view == "walls":
+        else:
             self.view = "rows"
             self._focus = "Wallpaper"
-        else:
-            return False
         self._damage.all()
         return True
 

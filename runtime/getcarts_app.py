@@ -107,6 +107,8 @@ ARCHIVE_RAM_SHARE = 4
 
 # The phases whose work runs a slice per frame from draw().
 BUSY = ("checking", "licence_fetch", "probing", "picked", "connecting", "getting")
+# The phases past the list that are pages of their own (`has_page`).
+_PAGES = ("licence", "pick", "cart", "done", "failed")
 
 
 def _mb(n):
@@ -868,20 +870,26 @@ class GetCartsAppLayer(ListShellApp):
         self.status = ("REMOVED " + row["cart"]["name"]).upper()
         self._go("list")
 
+    def has_page(self):
+        """Whether a page of the app is open, which `back` steps out of: a
+        licence, a fetch or a pick, a cart's page."""
+        ph = self.phase
+        return ph in _PAGES or ph in BUSY
+
     def back(self):
         """Back one level (B, Esc, the bar's chevron, the page's own back):
         a licence declined, a fetch or a pick cancelled, a cart's page back
         to the list. False on the list: the host leaves the app."""
+        if not self.has_page():
+            return False
         ph = self.phase
         if ph == "licence":
             self._press("NO")
         elif ph in BUSY or ph == "pick":
             self._cancel()
-        elif ph in ("cart", "done", "failed"):
+        else:
             self.status = ""
             self._go("list")
-        else:
-            return False
         return True
 
     # -- input -----------------------------------------------------------------

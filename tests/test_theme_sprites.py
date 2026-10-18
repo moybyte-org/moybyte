@@ -109,7 +109,8 @@ def test_the_cells_fit_one_128_wide_sheet_and_never_overlap():
         px = {(x + i, y + j) for i in range(w) for j in range(h)}
         assert not px & taken
         taken |= px
-    assert ui_draw.FRAME_BUTTONS == tuple(TH["frame_button_names"])
+    # the sheet's title-button cells; the back chevron has none (a glyph or the icon set's)
+    assert ui_draw.FRAME_BUTTONS == tuple(TH["frame_button_names"]) + ("back",)
     assert len(TH["sprite_slots"]) == 16 and TH["sprite_slots"][0] is None
 
 

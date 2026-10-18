@@ -675,8 +675,18 @@ uint32_t moy_ui_icon_font(int size24) {
 }
 
 int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col) {
-    if (id < 0 || id > 2 || s_icon_code[id] == 0) {
+    uint8_t code;
+    if (id == MOY_UI_FB_BACK) {
+        // the set's `back`, beside the three it was installed with
+        int slot = s_icon_code[0] != 0 ? moy_ui_icon_slot((const uint8_t *)"back", 4) : -1;
+        if (slot < 0) {
+            return 0;
+        }
+        code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
+    } else if (id < 0 || id > 2 || s_icon_code[id] == 0) {
         return 0;
+    } else {
+        code = s_icon_code[id];
     }
     int box = b.w < b.h ? b.w : b.h;
     int k = box >= 24 && s_icon_font[1] != 0 ? 1 : 0;
@@ -685,7 +695,6 @@ int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint1
     if (font == 0) {
         return 0;
     }
-    uint8_t code = s_icon_code[id];
     return moy_text(t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
                     b.y + moy_ui_fdiv(b.h - size, 2), col, 1, MOY_TEXT_LEFT, -1) >= 0;
 }

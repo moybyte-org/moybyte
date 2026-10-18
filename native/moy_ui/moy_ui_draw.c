@@ -1370,7 +1370,7 @@ static const char *const k_frame_order[MOY_THEME_FRAMES] = {"TMZC", "CTMZ", "CTZ
 typedef struct {
     int style, align, fs, th;
     int n;
-    moy_ui_frame_button_t b[3];
+    moy_ui_frame_button_t b[MOY_UI_FRAME_BUTTONS];
     int maxc;                       // the title's room, in cells of its font
     int tn, tw;                     // the title's bytes drawn, and their width
     int tx, ty;
@@ -1378,7 +1378,10 @@ typedef struct {
 } frame_lay_t;
 
 static int fb_id(uint8_t letter) {
-    return letter == 'C' ? MOY_UI_FB_CLOSE : letter == 'Z' ? MOY_UI_FB_MAX : MOY_UI_FB_MIN;
+    return letter == 'C'   ? MOY_UI_FB_CLOSE
+           : letter == 'Z' ? MOY_UI_FB_MAX
+           : letter == 'B' ? MOY_UI_FB_BACK
+                           : MOY_UI_FB_MIN;
 }
 
 // A button box's size and the gap between two, per style.
@@ -1402,31 +1405,42 @@ static void frame_box(int style, int fs, int th, int *bw, int *bh, int *gap) {
 // icon's 20-pixel slot and a 10-pixel gap where win.icon is on; minimize,
 // maximize and close as 28-pixel title buttons on a 34-pixel pitch, close's
 // centre 24 in from the frame's inner edge (win.controls `close`: close
-// alone; the ricing sets lay out as `three`).
+// alone; the ricing sets lay out as `three`). The back chevron is a title
+// button at the head, centred where the icon would be, and the icon and the
+// title move a pitch right past it.
 static int depth_px(int th, int v) {
     int p = moy_ui_fdiv(v * th + 22, 44);
     return p > 1 ? p : 1;
 }
 
-static int depth_title_x(moy_ui_box_t w, int th) {
+// Where the head of the strip starts: the icon's left edge with no back.
+static int depth_head_x(moy_ui_box_t w, int th) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    int x = w.x + (dp->line >= 4 ? dp->line + depth_px(th, 10) : depth_px(th, 16));
-    return dp->icon ? x + depth_px(th, 20) + depth_px(th, 10) : x;
+    return w.x + (dp->line >= 4 ? dp->line + depth_px(th, 10) : depth_px(th, 16));
 }
 
-int moy_ui_frame_icon(moy_ui_box_t w, int th, moy_ui_box_t *slot) {
+static int depth_lead_x(moy_ui_box_t w, int th, int btns) {
+    return depth_head_x(w, th) + (btns & MOY_UI_FRAME_BACK ? depth_px(th, 34) : 0);
+}
+
+static int depth_title_x(moy_ui_box_t w, int th, int btns) {
+    int x = depth_lead_x(w, th, btns);
+    return moy_ui_depth()->icon ? x + depth_px(th, 20) + depth_px(th, 10) : x;
+}
+
+int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot) {
     const moy_ui_depth_t *dp = moy_ui_depth();
     if (!dp->frames || !dp->icon) {
         return 0;
     }
     int n = depth_px(th, 20);
-    int x = w.x + (dp->line >= 4 ? dp->line + depth_px(th, 10) : depth_px(th, 16));
+    int x = depth_lead_x(w, th, btns);
     *slot = (moy_ui_box_t){(int16_t)x, (int16_t)(w.y + moy_ui_fdiv(th + 1 - n, 2)), (int16_t)n,
                            (int16_t)n};
     return 1;
 }
 
-static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int has_min, int fs,
+static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int btns, int fs,
                                frame_lay_t *L) {
     const moy_ui_depth_t *dp = moy_ui_depth();
     L->style = MOY_THEME_FRAME_FLAT;
@@ -1440,21 +1454,27 @@ static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int 
     uint8_t ids[3];
     int n = 0;
     if (dp->controls != MOY_UI_CTL_CLOSE) {
-        if (has_min) {
+        if (btns & MOY_UI_FRAME_MIN) {
             ids[n++] = MOY_UI_FB_MIN;
         }
         ids[n++] = MOY_UI_FB_MAX;
     }
     ids[n++] = MOY_UI_FB_CLOSE;
-    L->n = n;
+    int lead = 0;
+    if (btns & MOY_UI_FRAME_BACK) {
+        int c = depth_head_x(w, th) + depth_px(th, 10);
+        L->b[lead++] = (moy_ui_frame_button_t){
+            {(int16_t)(c - b / 2), (int16_t)by, (int16_t)b, (int16_t)b}, MOY_UI_FB_BACK, 0};
+    }
+    L->n = lead + n;
     for (int i = 0; i < n; i++) {
         int c = cx - (n - 1 - i) * pitch;
-        L->b[i] = (moy_ui_frame_button_t){
+        L->b[lead + i] = (moy_ui_frame_button_t){
             {(int16_t)(c - b / 2), (int16_t)by, (int16_t)b, (int16_t)b}, ids[i], 1};
     }
     tfont_t f = role_font(MOY_UI_FONT_TITLE);
-    int x0 = depth_title_x(w, th);
-    int limit = L->b[0].box.x - depth_px(th, 8);
+    int x0 = depth_title_x(w, th, btns);
+    int limit = L->b[lead].box.x - depth_px(th, 8);
     L->maxc = limit - x0 > 0 ? moy_ui_fdiv(limit - x0, f.w * fs) : 0;
     L->tn = t_fit(&f, title, limit - x0, fs);
     L->tw = t_w(&f, title.p, (size_t)L->tn, fs);
@@ -1469,9 +1489,9 @@ static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int 
 }
 
 static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_ui_span_t title,
-                         int has_min, int fs, frame_lay_t *L) {
+                         int btns, int fs, frame_lay_t *L) {
     if (moy_ui_depth()->frames) {
-        frame_layout_depth(w, th, title, has_min, fs, L);
+        frame_layout_depth(w, th, title, btns, fs, L);
         return;
     }
     int style = sh != NULL && sh->frame[0] ? sh->frame[0] - 1 : MOY_THEME_FRAME_CLASSIC;
@@ -1488,14 +1508,18 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
                                                    : 2;
     int by = style == MOY_THEME_FRAME_WIN9X ? w.y + 2 + moy_ui_fdiv(th - 2 - bh, 2)
                                             : w.y + 1 + moy_ui_fdiv(th - bh, 2);
-    // the letters each side of the title
-    uint8_t left[3], right[3];
+    // the letters each side of the title, the back chevron first of all
+    uint8_t left[MOY_UI_FRAME_BUTTONS], right[3];
     int nl = 0, nr = 0, side = 0;
+    int back = (btns & MOY_UI_FRAME_BACK) != 0;
+    if (back) {
+        left[nl++] = 'B';
+    }
     for (int i = 0; i < 4; i++) {
         uint8_t c = (uint8_t)order[i];
         if (c == 'T') {
             side = 1;
-        } else if (c != 'M' || has_min) {
+        } else if (c != 'M' || (btns & MOY_UI_FRAME_MIN)) {
             if (side) {
                 right[nr++] = c;
             } else {
@@ -1507,7 +1531,8 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
     int rw = nr ? nr * bw + (nr - 1) * gap : 0;
     tfont_t f = role_font(MOY_UI_FONT_TITLE);
     int cell = f.w * fs;
-    int x0 = (nl ? w.x + margin + lw : w.x + stripe_w(style, fs)) + 4 * fs;
+    int lx = w.x + margin + (back ? stripe_w(style, fs) : 0);    // the left group, past the stripe
+    int x0 = (nl ? lx + lw : w.x + stripe_w(style, fs)) + 4 * fs;
     int rx;                          // the right group's left edge
     if (style == MOY_THEME_FRAME_TAB) {
         int room = w.x + w.w - margin - (nr ? rw + 4 * fs : 0) - x0;
@@ -1537,7 +1562,7 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
     }
     L->ty = w.y + 1 + moy_ui_fdiv(th - f.line * fs, 2);
     L->n = 0;
-    int x = w.x + margin;
+    int x = lx;
     for (int i = 0; i < nl; i++, x += bw + gap) {
         L->b[L->n++] = (moy_ui_frame_button_t){
             {(int16_t)x, (int16_t)by, (int16_t)bw, (int16_t)bh}, (uint8_t)fb_id(left[i]), 0};
@@ -1549,17 +1574,17 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
     }
 }
 
-int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int has_min, int fs,
-                         moy_ui_frame_button_t out[3]) {
+int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int btns, int fs,
+                         moy_ui_frame_button_t out[MOY_UI_FRAME_BUTTONS]) {
     frame_lay_t L;
-    frame_layout(moy_ui_shape(), win, title_h, title, has_min, fs, &L);
+    frame_layout(moy_ui_shape(), win, title_h, title, btns, fs, &L);
     for (int i = 0; i < L.n; i++) {
         out[i] = L.b[i];
     }
     return L.n;
 }
 
-static const char *const k_fb_glyph[3] = {"close", "app", "minus"};
+static const char *const k_fb_glyph[4] = {"close", "app", "minus", "arr_l"};
 
 static int fb_glyph(int id) {
     return moy_ui_glyph_id(k_fb_glyph[id], strlen(k_fb_glyph[id]));
@@ -1582,11 +1607,11 @@ static moy_ui_surface_t surf_of(int edge, int fill, int a, int b, int border) {
 }
 
 int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t title, int active,
-                 int has_min, int fs) {
+                 int btns, int fs) {
     draw_t d;
     open_draw(s, &d);
     frame_lay_t L;
-    frame_layout(d.sh, w, th, title, has_min, fs, &L);
+    frame_layout(d.sh, w, th, title, btns, fs, &L);
     int st = active ? MOY_THEME_S_ACTIVE : MOY_THEME_S_INACTIVE;
     int look = d.look;
     int edge = L.style == MOY_THEME_FRAME_CLASSIC
@@ -1680,7 +1705,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
         moy_ui_box_t b = L.b[i].box;
         int id = L.b[i].id;
         int ink = fg;
-        if (sprite(&d, b, moy_theme_sheet_cell(MOY_THEME_P_WINDOW_BUTTON, st, id), fs)) {
+        // the role sheet's title buttons are close, maximise and minimise
+        if (id != MOY_UI_FB_BACK
+            && sprite(&d, b, moy_theme_sheet_cell(MOY_THEME_P_WINDOW_BUTTON, st, id), fs)) {
             continue;
         }
         if (depth) {
@@ -1705,6 +1732,8 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             } else if (id == MOY_UI_FB_MIN) {
                 fill(&d, b.x + m, b.y + m + fs, b.w - 2 * m, fs, edge);
                 fill(&d, b.x + m, b.y + b.h - m - 2 * fs, b.w - 2 * m, fs, edge);
+            } else if (id == MOY_UI_FB_BACK) {
+                glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, edge, d.tfs);
             }
             continue;
         } else {

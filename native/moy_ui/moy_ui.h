@@ -331,8 +331,9 @@ void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int acti
 // focused `fill` header, the chrome ink, the dim chrome ink behind.
 int moy_ui_depth_title_ink(int active);
 // The slot the window's line icon takes left of its title (win.icon), a
-// square `th` * 20 / 44 on a side; 0 where the frame draws no icon.
-int moy_ui_frame_icon(moy_ui_box_t w, int th, moy_ui_box_t *slot);
+// square `th` * 20 / 44 on a side, past the back chevron where `btns` has
+// one; 0 where the frame draws no icon.
+int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot);
 // What a window leaves to the layer under it: its shadow at `mode`'s size and
 // its outline's partly covered pixels, blended over what that layer just
 // painted (runtime/wm_desk.py draws it, clipped to what it repainted).
@@ -538,18 +539,23 @@ int moy_ui_part(const char *name, size_t n);
 // the ring's top row and the strip, and a title button's sprite its surface
 // and glyph (docs/theming_2026-09.md §4.6). States are MOY_THEME_S_ACTIVE /
 // _INACTIVE.
-enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2 };
+enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK = 3 };
+// A frame's optional buttons (`btns`): a minimise, and the back chevron at
+// the head of the strip, before the icon and the title, that a window whose
+// app has opened a page of it shows (docs/look_2026-10.md step 27a).
+#define MOY_UI_FRAME_MIN 1
+#define MOY_UI_FRAME_BACK 2
+#define MOY_UI_FRAME_BUTTONS 4
 typedef struct {
     moy_ui_box_t box;
     uint8_t id;                     // MOY_UI_FB_*
     uint8_t right;                  // 1: in the group right of the title
 } moy_ui_frame_button_t;
-// The strip's buttons as the frame draws them, left to right; the count. A
-// window without a minimise (`has_min` 0) has two.
-int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int has_min, int fs,
-                         moy_ui_frame_button_t out[3]);
+// The strip's buttons as the frame draws them, left to right; the count.
+int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int btns, int fs,
+                         moy_ui_frame_button_t out[MOY_UI_FRAME_BUTTONS]);
 int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_span_t title,
-                 int active, int has_min, int fs);
+                 int active, int btns, int fs);
 // The bar's band in the frame's style (`bar`'s surface where the theme names
 // one): `light` is a window's light toolbar; `side` the band's edge line, on
 // the side that faces the content (a top bar's bottom row, a left bar's
