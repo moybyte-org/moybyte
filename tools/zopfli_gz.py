@@ -49,6 +49,7 @@ def main(paths):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit("usage: zopfli_gz.py FILE...")
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print("usage: zopfli_gz.py FILE...   (writes FILE.gz beside each)")
+        sys.exit(0 if len(sys.argv) > 1 else 2)
     main(sys.argv[1:])
