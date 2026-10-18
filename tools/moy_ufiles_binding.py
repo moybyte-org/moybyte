@@ -3,11 +3,11 @@ ctypes, as the module `moy_ufiles` the boards' modmoy_ufiles.c registers. The
 runtime package registers it under that name (runtime/__init__.py), so
 `moy_carts`' user-files names are the C every image runs.
 
-The library is built the first time a name is used, not at import: it needs
-the MicroPython tree's inflater (lib/uzlib, `make unix-micropython`), and a
-tool that never touches a user file never builds it.
-tools/moy_app_binding.py hands this same library's verb table (`ops()`) to the
-files and wallpaper rows, so one process has one publish marker and one prune
+Its C is in the host's one library (runtime/host_native.py) where the
+MicroPython tree has the inflater (lib/uzlib, `make unix-micropython`); the
+library is loaded the first time a name is used, not at import.
+tools/moy_app_binding.py hands this layer's verb table (`ops()`) to the files
+and wallpaper rows, so one process has one publish marker and one prune
 counter.
 
 Each call is moy_ufiles.h's ABI and nothing more; what this adds is what
@@ -28,7 +28,6 @@ STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = os.path.join(ROOT, "native", "moy_spine")
 PNG = os.path.join(ROOT, "native", "moy_png")
 UZLIB = os.path.join(ROOT, ".build", "unix_micropython", "micropython", "lib", "uzlib")
-CACHE = os.path.join(ROOT, ".build", "host_ufiles")
 
 NONE, BAD = -1, -2
 NAME_MAX = 255
@@ -98,6 +97,19 @@ _SIGS = (
     ("moy_fs_root", [_P], c.c_int),
 )
 
+
+
+def part():
+    """This layer's share of the host's one library (runtime/host_native.py)."""
+    import sys
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from runtime import native_build
+    return native_build.Part("ufiles", _NAMES, (STORE, SPINE, PNG, UZLIB),
+                             shim=os.path.join(STORE, "moy_store_host.c"),
+                             compile_names=_COMPILE)
+
+
 _LIB = [None]
 
 
@@ -106,13 +118,11 @@ def library():
     is missing."""
     if _LIB[0] is not None:
         return _LIB[0]
-    from runtime import native_build
+    from runtime import host_native
     if not os.path.isdir(UZLIB):
         raise ImportError("moy_ufiles: no MicroPython tree for its inflater "
                           "(make unix-micropython)")
-    path = native_build.build(
-        "moy_ufiles", os.path.join(STORE, "moy_store_host.c"), _NAMES, CACHE,
-        compile_names=_COMPILE, libmoy_dir=(STORE, SPINE, PNG, UZLIB))
+    path = host_native.build()
     if path is None:
         raise ImportError("moy_ufiles: no C compiler for the host build")
     lib = c.CDLL(path)

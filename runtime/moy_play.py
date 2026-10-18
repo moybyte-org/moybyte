@@ -38,8 +38,9 @@ import ctypes
 import os
 
 try:                                    # the host's runtime package
-    from . import native_build
+    from . import host_native, native_build
 except ImportError:                     # loaded flat, runtime/ on sys.path
+    import host_native
     import native_build
 
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
@@ -48,7 +49,7 @@ _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _APP = os.path.join(native_build.ROOT, "native", "moy_app")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SHIM = os.path.join(_PLAY, "moy_play_host.c")
-_CACHE = os.path.join(native_build.ROOT, ".build", "host_play")
+_CACHE = os.path.join(native_build.ROOT, ".build", "host_play")    # the parity builds'
 _SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
             "moy_tick.h", "moy_tick.c",
             "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_json.h",
@@ -61,6 +62,19 @@ _SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
             "moy_route.h", "moy_route.c", "moy_ledger.h", "moy_ledger.c",
             "moy_input.h", "moy_ufiles.h")
 _LIB = [None]
+
+# This module's shares of the host's one library (runtime/host_native.py): the
+# Player's host half, a cart's written files, and -- where the desktop
+# MicroPython's tree has the inflater -- the C image decoder.
+PART = native_build.Part("play", _SOURCES, (_PLAY, _SPINE, _STORE, _APP, _INPUT), shim=_SHIM)
+FILES_PART = native_build.Part("files", ("moy_files.h", "moy_files.c", "moy_vol.h", "moy_vol.c"),
+                               (_STORE,), shim=os.path.join(_STORE, "moy_store_host.c"))
+_MPY_UZLIB = os.path.join(native_build.ROOT, ".build", "unix_micropython", "micropython",
+                          "lib", "uzlib")
+IMG_PART = native_build.Part(
+    "img", ("moy_img.h", "moy_img.c", "moy_json.h", "moy_json.c", "uzlib.h",
+            "uzlib_conf.h", "tinflate.c", "header.c", "adler32.c", "crc32.c"),
+    (_STORE, _SPINE, _MPY_UZLIB), shim=os.path.join(_STORE, "moy_img_host.c"))
 
 MAX_CATCHUP = 4
 MAX_DIV = 4
@@ -103,11 +117,12 @@ def _tick_type(real):
 def build(verbose=False, real="float"):
     """The host library; `real` "double" is the parity build, whose tick
     model runs in double precision to be held to a double reference."""
-    flags = None if real == "float" else native_build.BASE_CFLAGS + ["-DMOY_TICK_REAL=" + real]
-    return native_build.build("moy_play" if real == "float" else "moy_play_" + real,
-                              _SHIM, _SOURCES, _CACHE, cflags=flags,
-                              libmoy_dir=(_PLAY, _SPINE, _STORE, _APP, _INPUT),
-                              verbose=verbose)
+    if real == "float":
+        return host_native.build(verbose)
+    # A library of its own: it exists to differ from the console's.
+    return native_build.build_parts("moy_play_" + real, [PART], _CACHE,
+                                    cflags=native_build.BASE_CFLAGS + ["-DMOY_TICK_REAL=" + real],
+                                    verbose=verbose)
 
 
 def _lib(real="float"):
@@ -124,6 +139,7 @@ def _lib(real="float"):
         P = ctypes.POINTER(d.tick_type)
         for name, args, res in (
                 ("moy_play_host_runtimes", [ctypes.c_int, ctypes.c_int], None),
+                ("hl_play_rows", [ctypes.c_int], None),
                 ("moy_play_census", [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t],
                  ctypes.c_int),
                 ("moy_play_tick_size", [], ctypes.c_size_t),
@@ -190,14 +206,17 @@ def census(path, lua=True, wasm=True):
     d = _lib()
     d.moy_play_host_runtimes(int(lua), int(wasm))
     out = ctypes.create_string_buffer(96)
-    if d.moy_play_census(os.path.abspath(path).encode(), out, len(out)) != 0:
-        return None
+    try:
+        if d.moy_play_census(os.path.abspath(path).encode(), out, len(out)) != 0:
+            return None
+    finally:
+        # The rows the question named are put back as the image's own: the
+        # Player that runs carts is in this same library (lua_binding).
+        d.hl_play_rows(1 if hasattr(d, "hw_runtime") else 0)
     rt, verdict, why = out.value.decode().split(" ", 2)
     return rt, verdict == "free", why
 
 
-_MPY_UZLIB = os.path.join(native_build.ROOT, ".build", "unix_micropython", "micropython",
-                          "lib", "uzlib")
 _IMG = [None]
 
 
@@ -206,11 +225,7 @@ def _img_lib():
         if not os.path.isdir(_MPY_UZLIB):
             raise ImportError("moy_img: no MicroPython tree for its inflater "
                               "(make unix-micropython)")
-        path = native_build.build(
-            "moy_img", os.path.join(_STORE, "moy_img_host.c"),
-            ("moy_img.h", "moy_img.c", "moy_json.h", "moy_json.c", "uzlib.h",
-             "uzlib_conf.h", "tinflate.c", "header.c", "adler32.c", "crc32.c"),
-            _CACHE, libmoy_dir=(_STORE, _SPINE, _MPY_UZLIB))
+        path = host_native.build()
         if path is None:
             raise ImportError("moy_img: no C compiler for the host build")
         d = ctypes.CDLL(path)
@@ -240,10 +255,7 @@ _FILES = [None]
 
 def _files_lib():
     if _FILES[0] is None:
-        path = native_build.build(
-            "moy_files", os.path.join(_STORE, "moy_store_host.c"),
-            ("moy_files.h", "moy_files.c", "moy_vol.h", "moy_vol.c"),
-            _CACHE, libmoy_dir=(_STORE,))
+        path = host_native.build()
         if path is None:
             raise ImportError("moy_files: no C compiler for the host build")
         d = ctypes.CDLL(path)
@@ -343,13 +355,14 @@ class Files:
 
 
 def files_live():
-    """The bytes the C store holds now: 0 once every session closed."""
+    """The bytes the host's C store holds now, for every store user in the one
+    library: a closed session gives back what it took."""
     return _files_lib().moy_store_host_live()
 
 
 # -- the Player (native/moy_play/moy_play.h), name for name with modmoy_play.c --
 #
-# In the host's Lua library (runtime/lua_binding.py), beside moycore_lua.c, as
+# In the host's one library (runtime/host_native.py), beside moycore_lua.c, as
 # on a board: a run's frame is the Lua run's. The handle is an int; a bad one
 # is RuntimeError("moy_play: ..."), as the module raises.
 

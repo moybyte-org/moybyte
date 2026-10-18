@@ -40,15 +40,15 @@ import ctypes
 import os
 
 try:                                    # the host's runtime package
-    from . import native_build
+    from . import host_native, native_build
     from .ticks import _ticks_ms
 except ImportError:                     # loaded flat, runtime/ on sys.path
+    import host_native
     import native_build
     from ticks import _ticks_ms
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
-_CACHE = os.path.join(native_build.ROOT, ".build", "host_input")
 _SHIM = os.path.join(_INPUT, "moy_input.c")
 
 # libmoy's moy_button enum (lua_ext.MOY_BUTTONS, pinned against the vendored
@@ -154,12 +154,14 @@ _SIGS = (
 _LIB = [None]
 
 
+# This module's share of the host's one library (runtime/host_native.py).
+PART = native_build.Part("input", ("moy_input.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
+                                   "moy_hid.h", "moy_touch.c", "moy_kbd.c", "moy_touchdev.c",
+                                   "moy_hid.c"), (_INPUT, _SPINE), shim=_SHIM)
+
+
 def build(verbose=False):
-    return native_build.build("moy_input", _SHIM,
-                              ("moy_input.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
-                               "moy_hid.h", "moy_touch.c", "moy_kbd.c", "moy_touchdev.c",
-                               "moy_hid.c"),
-                              _CACHE, libmoy_dir=(_INPUT, _SPINE), verbose=verbose)
+    return host_native.build(verbose)
 
 
 def _lib():

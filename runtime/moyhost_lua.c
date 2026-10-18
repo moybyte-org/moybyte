@@ -14,18 +14,16 @@
  * only how the host talks to it: plain C signatures ctypes can call, buffers
  * the caller owns, and these seams:
  *
- *   - the kernel's stateful modules are the host's OTHER ctypes libraries
- *     (runtime/moy_loop.py's upcall counters, runtime/moy_input.py's input
- *     tables, runtime/audio_binding.py's sessions), so the Player's calls
- *     forward to the function pointers hl_kernel hands over: one copy of each
- *     state, the one the rest of the host reads. Unset, a counter counts
- *     nothing and a session is STALE (silence);
- *   - the glass has no shared state here: moy_glass_ready answers 0, and a
- *     run's pixels are plain allocations, as on a board with no owner;
- *   - a paint image decodes through the Python codec (runtime/moyimg.py,
- *     the reference moy_img.c is pinned to), handed over as hl_img_decoder:
- *     the C inflater's sources live in the desktop MicroPython's tree, which a
- *     plain host has not got;
+ *   - the audio sessions are runtime/audio_binding.py's library, a library of
+ *     its own (compiled double-widened for the parity harness), so the
+ *     Player's moy_aud_* calls forward to the function pointers hl_kernel
+ *     hands over. Unset, a session is STALE (silence). Every other module the
+ *     Player calls -- the loop's upcall books, the input tables, the glass --
+ *     is in this same library (runtime/host_native.py), as on a board;
+ *   - a paint image decodes through moy_img.c where the build has the
+ *     desktop MicroPython's inflater (MOYHOST_IMG_C), else through the Python
+ *     codec (runtime/moyimg.py, the reference moy_img.c is pinned to), handed
+ *     over as hl_img_decoder;
  *   - register()'s verbs call back into Python through one dispatch, and each
  *     call is counted APP, as modmoycore.c's trampoline counts it.
  *
@@ -56,75 +54,15 @@
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
 #endif
 
-/* -- the kernel's modules, forwarded ------------------------------------------ */
+/* -- the audio sessions, forwarded ------------------------------------------- */
 
-enum {
-    HK_COUNT = 0, HK_UPCALLS, HK_MASKS, HK_PLAYERS, HK_LAST_KEY, HK_TICK_EDGES,
-    HK_SFX, HK_BEEP, HK_MUSIC, HK_MUSIC_STOP, HK_STOP, HK_LEVEL, HK_N,
-};
+enum { HK_SFX = 0, HK_BEEP, HK_MUSIC, HK_MUSIC_STOP, HK_STOP, HK_LEVEL, HK_N };
 static void *K[HK_N];
 
-/* Hand over one of the host libraries' functions (NULL: unset). */
+/* Hand over one of the audio library's functions (NULL: unset). */
 void hl_kernel(int which, void *fn)
 {
     if (which >= 0 && which < HK_N) K[which] = fn;
-}
-
-void moy_loop_count(int cls)
-{
-    if (K[HK_COUNT]) ((void (*)(int))K[HK_COUNT])(cls);
-}
-
-void moy_loop_upcalls(uint32_t frame[MOY_UPC_CLASSES], uint32_t total[MOY_UPC_CLASSES])
-{
-    if (K[HK_UPCALLS]) {
-        ((void (*)(uint32_t *, uint32_t *))K[HK_UPCALLS])(frame, total);
-        return;
-    }
-    memset(frame, 0, MOY_UPC_CLASSES * sizeof(uint32_t));
-    memset(total, 0, MOY_UPC_CLASSES * sizeof(uint32_t));
-}
-
-void *moy_loop_alloc(size_t n)
-{
-    return calloc(1, n);
-}
-
-void moy_input_masks(const moy_input_t *t, uint8_t player, uint32_t *held, uint32_t *pressed)
-{
-    *held = *pressed = 0;
-    if (K[HK_MASKS])
-        ((void (*)(const moy_input_t *, uint8_t, uint32_t *, uint32_t *))K[HK_MASKS])(
-            t, player, held, pressed);
-}
-
-uint8_t moy_input_players(const moy_input_t *t, uint8_t *out)
-{
-    return K[HK_PLAYERS] ? ((uint8_t (*)(const moy_input_t *, uint8_t *))K[HK_PLAYERS])(t, out)
-                         : 1;
-}
-
-int32_t moy_input_last_key(const moy_input_t *t)
-{
-    return K[HK_LAST_KEY] ? ((int32_t (*)(const moy_input_t *))K[HK_LAST_KEY])(t) : 0;
-}
-
-void moy_input_tick_edges(moy_input_t *t)
-{
-    if (K[HK_TICK_EDGES]) ((void (*)(moy_input_t *))K[HK_TICK_EDGES])(t);
-}
-
-// The two a run in the kernel's front reads. The host's Player has no front
-// (no compositor gives one), so nothing calls them here.
-void moy_input_keep_edges(moy_input_t *t)
-{
-    (void)t;
-}
-
-void moy_input_sample(const moy_input_t *t, moy_input_sample_t *out)
-{
-    (void)t;
-    memset(out, 0, sizeof(*out));
 }
 
 #define AUD(i, T, ...) (K[i] ? ((T)K[i])(__VA_ARGS__) : MOY_AUD_STALE)
@@ -141,22 +79,16 @@ int moy_aud_stop(uint32_t s, int chan)
 int moy_aud_level(uint32_t s, int level)
 { return AUD(HK_LEVEL, int (*)(uint32_t, int), s, level); }
 
-/* The glass: none shared on the host (the header says why). */
-int moy_glass_ready(void) { return 0; }
-int moy_owner_new(uint32_t *h, const char *tag, uint8_t cls)
-{ (void)tag; (void)cls; *h = 0; return MOY_GLASS_STALE; }
-int moy_owner_end(uint32_t h) { (void)h; return MOY_GLASS_STALE; }
-int moy_buf_new(uint32_t *h, size_t n, uint8_t role, uint32_t owner)
-{ (void)n; (void)role; (void)owner; *h = 0; return MOY_GLASS_STALE; }
-int moy_buf_get(uint32_t h, moy_buf_row_t **row) { (void)h; *row = NULL; return MOY_GLASS_STALE; }
-int moy_buf_release(uint32_t h) { (void)h; return MOY_GLASS_STALE; }
-
-/* -- the paint images' codec, Python's ------------------------------------------ */
+/* -- the paint images' codec, Python's where moy_img.c is not built ----------- */
 
 /* decode(text, n, pix, cap, &w, &h): 0 with the size (and, when `pix` is not
  * NULL, the indices), -1 for no picture, -2 for a buffer too small. */
 typedef int (*hl_img_fn)(const char *text, size_t n, uint8_t *pix, size_t cap,
                          uint32_t *w, uint32_t *h);
+
+#if MOYHOST_IMG_C
+void hl_img_decoder(hl_img_fn fn) { (void)fn; }     /* moy_img.c decodes */
+#else
 static hl_img_fn IMG;
 
 void hl_img_decoder(hl_img_fn fn) { IMG = fn; }
@@ -176,6 +108,7 @@ int moy_img_decode(const char *text, size_t n, uint8_t *pix, size_t cap,
     int rc = IMG(text, n, pix, cap, w, h);
     return rc == 0 ? MOY_IMG_OK : rc == -2 ? MOY_IMG_ROOM : MOY_IMG_NOT;
 }
+#endif
 
 /* -- the binding's half of moycore (modmoycore.c's, on a board) --------------- */
 

@@ -56,8 +56,7 @@ TOOLCHAIN_GLOBS = ("firmware/*/.build/esp-idf", "firmware/*/.build/emsdk")
 # (native_build's content hash, the WAMR pin, jet_cart's key) and taken under
 # a lock, so a worktree with other sources adds entries instead of
 # overwriting the main checkout's.
-SHARED_CACHES = ("host_audio", "host_gfx", "host_lua", "host_wasm",
-                 "host_wamr", "jet", "jet_cart")
+SHARED_CACHES = ("host", "host_audio", "host_wamr", "jet", "jet_cart")
 # Every board image bakes the browser console from the tree's own bundle.
 WEB_BUILD = "firmware/web_runner/build.sh"
 MPY_GLOBS = ("firmware/*/.build/micropython", ".build/unix_micropython/micropython")

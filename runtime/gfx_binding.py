@@ -37,23 +37,15 @@ from __future__ import annotations
 import ctypes
 import os
 
-from . import native_build
+from . import host_native, native_build
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SHIM = os.path.join(_HERE, "moyhost_gfx.c")
-_CACHE = os.path.join(native_build.ROOT, ".build", "host_gfx")
 
 # The native module's own directory, searched alongside the vendored libmoy one:
 # the compositor kernel is moy_gfx's, not libmoy's, and it lives with the
 # usermod that also compiles it.
 _MOY_GFX = os.path.dirname(native_build.LIBMOY)
-
-# RGB565, matching the boards. This define is the whole difference between this
-# library and the indexed one next door: it makes a libmoy pixel two bytes
-# instead of one, changing sizeof(moy_pixel) and the layout of every struct.
-# Compiling the sprite verbs without it would produce a library that links and
-# then draws garbage.
-_CFLAGS = native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"]
 
 # The sources compiled beside the shim. The first three are vendored libmoy --
 # blit_batch, blit_map and the shape verbs are not pure compositing, they draw
@@ -71,6 +63,10 @@ _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
 # compiler.py does) must search the same directories or it fails on a source it
 # cannot find and reports it as a toolchain problem.
 _SRC_DIRS = (native_build.LIBMOY, _MOY_GFX)
+
+# This module's share of the host's one library (runtime/host_native.py),
+# whose flags make a libmoy pixel the boards' RGB565.
+PART = native_build.Part("gfx", _LIBMOY, _SRC_DIRS, shim=_SHIM)
 
 _LIB = [None]
 
@@ -144,9 +140,7 @@ _SIGS = (
 
 
 def build(verbose=False):
-    return native_build.build("moyhost_gfx", _SHIM, _LIBMOY, _CACHE,
-                              cflags=_CFLAGS, libmoy_dir=_SRC_DIRS,
-                              verbose=verbose)
+    return host_native.build(verbose)
 
 
 def _lib():

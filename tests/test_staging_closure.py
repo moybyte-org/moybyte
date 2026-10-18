@@ -183,18 +183,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "moycore",
                        "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
-                       "native_build", "simulate_desktop", "wasm_host",
+                       "native_build", "host_native", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_native",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "moycore", "input",
                    "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
-                   "native_build", "simulate_desktop", "wasm_host",
+                   "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
                    "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
-                   "native_build", "simulate_desktop", "wasm_host",
+                   "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
     # Zero ALLOWLISTS `runtime/` and could not stage one of these by omission:
@@ -203,14 +203,14 @@ HOST_ONLY = {
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "moycore", "input",
              "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
-             "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
+             "native_build", "host_native", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
     # half of the very module device_canvas imports.
     "web": {"host_app", "moycore", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_native", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 

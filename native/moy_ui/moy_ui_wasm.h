@@ -39,15 +39,6 @@
 // while no compiled run is open.
 void *moycore_ui_target(void);
 
-// The live theme's token row and its name, copied when the generation differs
-// from `have`: native/moy_app/moy_app_wasm.c's moy_app_wasm_theme. Answers
-// the generation, 0 while no run is bound.
-typedef uint32_t (*moy_ui_theme_fn)(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
-                                    uint32_t cap);
-// Where the run's theme is read when the app ABI lives in another library
-// (the host's); an image links moy_app_wasm_theme itself.
-void moy_ui_wasm_theme_from(moy_ui_theme_fn fn);
-
 // The run's snapshot (native/moycore/moycore_run.h: SNAP_LEN words, NULL
 // with no run), the tick it is of and the run's serial: moycore_run.c's.
 const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial);

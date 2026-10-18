@@ -1,10 +1,11 @@
 # Map (grep -n a name to jump there):
-#   binding          the module: moy_ui's names over the glass's host library
+#   binding          the module: moy_ui's names over the host's one library
 """The toolkit's C (native/moy_ui) on the CPython host, by ctypes: the module
 `moy_ui` as the boards and the browser import it, name for name. Its C is
-compiled into the glass's host library (runtime/glass_binding.py), because
-its primitives draw into the canvas rows that library holds; runtime/__init__
-registers this as `moy_ui`, so the host's toolkit is the C every image runs.
+in the host's one library (runtime/host_native.py) with the glass whose canvas
+rows its primitives draw into and the Lua and compiled runs whose `ui` reads
+the same state; runtime/__init__ registers this as `moy_ui`, so the host's
+toolkit is the C every image runs.
 """
 
 import ctypes

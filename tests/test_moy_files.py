@@ -111,13 +111,14 @@ def test_a_session_writes_reads_and_lists_as_the_reference(tmp_path):
     py_root, c_root = tmp_path / "py", tmp_path / "c"
     py_cart, c_cart = _store(py_root), _store(c_root)
     py = cart_files.CartFiles(py_cart)
+    held = moy_play.files_live()
     c = moy_play.Files(c_cart)
     assert _script(py) == _script(c)
     for p in (b"save", b"Save", b"levels/1", b"empty", b"\x00\xff"):
         assert _where(py, p, py_root) == _where(c, p, c_root), p
     c.close()
     assert _snapshot(py_root) == _snapshot(c_root)
-    assert moy_play.files_live() == 0, "a closed session left memory held"
+    assert moy_play.files_live() == held, "a closed session left memory held"
 
 
 def test_a_read_of_the_cart_s_own_folder_streams_through_one_held_file(tmp_path):
@@ -129,6 +130,7 @@ def test_a_read_of_the_cart_s_own_folder_streams_through_one_held_file(tmp_path)
     blob = bytes(range(256)) * 40
     with open(os.path.join(cart, "data.bin"), "wb") as f:
         f.write(blob)
+    held = moy_play.files_live()
     c = moy_play.Files(cart)
     assert c.shipped("data.bin", 0, 0) == len(blob)
     assert c.shipped("data.bin", 100, 0) == len(blob) - 100
@@ -141,7 +143,7 @@ def test_a_read_of_the_cart_s_own_folder_streams_through_one_held_file(tmp_path)
     assert c.shipped("missing", 0, 16) == b"" and c.shipped("missing", 0, 0) == 0
     assert c.shipped("levels", 0, 16) == b""          # a folder reads nothing
     c.close()
-    assert moy_play.files_live() == 0, "the held file outlived its session"
+    assert moy_play.files_live() == held, "the held file outlived its session"
 
 
 def test_opening_finishes_what_a_power_loss_left(tmp_path):
@@ -159,6 +161,7 @@ def test_opening_finishes_what_a_power_loss_left(tmp_path):
         roots.append((root, cart))
     (py_root, py_cart), (c_root, c_cart) = roots
     py = cart_files.CartFiles(py_cart)
+    held = moy_play.files_live()
     c = moy_play.Files(c_cart)
     assert _snapshot(py_root) == _snapshot(c_root)
     assert (py_root / "written" / "game" / "save").read_bytes() == b"new"
@@ -166,4 +169,4 @@ def test_opening_finishes_what_a_power_loss_left(tmp_path):
     for p in (b"save", b"other", b"half"):
         assert _where(py, p, py_root) == _where(c, p, c_root), p
     c.close()
-    assert moy_play.files_live() == 0
+    assert moy_play.files_live() == held

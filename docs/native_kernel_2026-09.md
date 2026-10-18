@@ -367,12 +367,12 @@ console needs while no Python app runs is OS.
 | `runtime/moybuf.py` | spine | 2 | the Python view over `moy_alloc` entries; the registry becomes a handle table of kind BUF (`docs/kernel_spine_2026-10.md` §1), and the stop inventory (§4.4) clears its rows or moves them to kernel ownership |
 | `moyhost_audio.c` | host-only | — | deleted 2026-10-07: `runtime/audio_binding.py` compiles `native/moy_audio` itself |
 | `runtime/moyhost_console.h` | host-only | — | the console the Lua and wasm host shims share |
-| `runtime/moyhost_gfx.c` | host-only | — | the C shim `runtime/gfx_binding.py` compiles |
-| `runtime/moyhost_lua.c` | host-only | — | the C shim `runtime/lua_binding.py` compiles |
-| `runtime/moyhost_wasm.c` | host-only | — | the C shim `runtime/wasm_binding.py` compiles |
+| `runtime/moyhost_gfx.c` | host-only | — | the C shim `runtime/gfx_binding.py` contributes to the host's one library (`runtime/host_native.py`) |
+| `runtime/moyhost_lua.c` | host-only | — | the C shim `runtime/lua_binding.py` contributes to the host's one library |
+| `runtime/moyhost_wasm.c` | host-only | — | the C shim the host's one library carries where WAMR builds |
 | `runtime/moyimg.py` | store | 1b | the moyimg codec and the content stamp the store's sidecars are keyed on, split from `runtime/moy_image.py`; the Zero takes it |
 | `runtime/music_editor_ui.py` | app | — | the Editor's Music tab |
-| `runtime/native_build.py` | host-only | — | builds the host's ctypes bindings; the kernel's host binding (§4.2) builds through it from the first crossing |
+| `runtime/native_build.py` | host-only | — | builds the host's one library (`runtime/host_native.py`) and the builds that differ from it on purpose |
 | `netplay.py` | cart path | 4 | deleted by sprint 4 step 2: lockstep (inputs, never state) is `native/moy_play/moy_match.c` |
 | `runtime/op_history.py` | app | — | the in-RAM undo core every editor and Desk Lab app shares |
 | `runtime/paint_layer.py` | app | — | the sprite and icon paint editor, and EDIT ICONS |

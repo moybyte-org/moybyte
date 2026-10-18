@@ -31,9 +31,12 @@ module's: the kernel's floor draws them on an image with no toolkit.
 
 Which edits are data and which need C is the design doc's §2.2.
 
-On the host the C is compiled into the glass's library
-(`runtime/glass_binding.py`), because its primitives draw into the canvas
-rows that library holds; `tools/moy_ui_binding.py` is the module over ctypes.
+On the host the C is compiled once, into the host's one library
+(`runtime/host_native.py`) with the glass whose canvas rows its primitives
+draw into, the Lua run and the compiled-cart run, as on an image: the theme,
+depth, fonts and cart-text boundary the shell sets are the ones a Lua or
+compiled page's `ui` reads (`tests/test_host_one_library.py`).
+`tools/moy_ui_binding.py` is the module over ctypes.
 A console takes the module in its `board.toml`; the Zero, which runs no apps,
 denies it.
 

@@ -151,6 +151,13 @@ The compile-and-cache helper the bindings above share: subprocess to a C
 compiler. There is no compiler in a wasm sandbox."""
 
 [[modules.shared.deny]]
+file = "host_native.py"
+kind = "host-only"
+why  = """
+The host's one native library: every binding's C compiled together by
+native_build and ctypes-loaded once. A board links its modules into the image."""
+
+[[modules.shared.deny]]
 file = "host_canvas.py"
 kind = "host-only"
 why  = """

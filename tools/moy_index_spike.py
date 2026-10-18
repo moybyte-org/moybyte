@@ -152,12 +152,11 @@ INDEX = Component(
     ["tests/test_moy_index.py", "tests/test_moy_index_twins.py",
      "tests/test_store_roots.py"],
     "index or store", "", "c")
-# The spine's host library carries native/moy_app too: the app ABI's state
-# reads the spine's tables and settings rows, so its ctypes binding
-# (tools/moy_app_binding.py) loads this same library. The user-files layer its
-# files rows reach is native/moy_store's, a library of its own the console
-# hands moy_app by its verb table (tools/moy_ufiles_binding.py): only its
-# headers are read here.
+# The spine's part carries native/moy_app too: the app ABI's state reads the
+# spine's tables and settings rows. The user-files layer its files rows reach
+# is native/moy_store's, which the console hands moy_app by its verb table
+# (tools/moy_ufiles_binding.py) and the host's one library compiles as its own
+# part: only its headers are read here.
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
     "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE], "moy_spine_host.c",
@@ -218,20 +217,25 @@ def build_env(impl, bench=False, comp=INDEX):
 
 
 def host_library(impl="c", sanitize=False, comp=INDEX):
-    """The host shared library for the C twin, built once per content (cached
-    under .build/host_<component>; native_build serialises concurrent builds of
-    one); None where there is no C compiler."""
-    from runtime import native_build
+    """The host shared library for the C twin: the host's one library
+    (runtime/host_native.py), which carries every component; a sanitizer
+    build is the component's alone, cached under .build/host_<component>.
+    None where there is no C compiler."""
+    from runtime import host_native, native_build
     if impl != "c":
         raise ValueError("a host library is the C twin's, not %r" % impl)
-    if sanitize:
-        cflags = ["-std=c99", "-O1", "-g", "-fPIC", "-shared"] + SANITIZE
-    else:
-        cflags = list(native_build.BASE_CFLAGS)
-    return native_build.build(
-        "%s_%s%s" % (comp.lib, impl, "_san" if sanitize else ""),
-        os.path.join(comp.dirs[0], comp.shim), comp.names, comp.cache,
-        cflags=cflags, libmoy_dir=comp.dirs)
+    if not sanitize:
+        return host_native.build()
+    return native_build.build_parts(
+        "%s_%s_san" % (comp.lib, impl), [part(comp)], comp.cache,
+        cflags=["-std=c99", "-O1", "-g", "-fPIC", "-shared"] + SANITIZE)
+
+
+def part(comp):
+    """`comp`'s share of a host library (runtime/native_build.Part)."""
+    from runtime import native_build
+    return native_build.Part(comp.lib, comp.names, comp.dirs,
+                             shim=os.path.join(comp.dirs[0], comp.shim))
 
 
 _SIGS = (

@@ -6,8 +6,11 @@ table over the vendored Lua 5.4 with `LUA_32BITS`, the small-object pool, the
 layers, paint images and scenes in C -- and its frames are the kernel's Player
 (native/moy_play/moy_play.c). `runtime/moyhost_lua.c` is the binding's half
 (modmoycore.c's, on a board) and says what differs: plain C signatures, the
-kernel's stateful modules forwarded to the host's other ctypes libraries
-(`kernel` wires them), and a paint image decoded by the Python codec.
+audio sessions forwarded to runtime/audio_binding.py's library (`kernel`
+wires them), and a paint image decoded by the Python codec where the C
+inflater is not in the build. Everything else -- the loop, the input tables,
+the glass, the shell's moy_ui -- is the host's one library
+(runtime/host_native.py), which this module loads as every binding does.
 
 ONE RUN AT A TIME, as on a board: a new HostLuaRun closes the one before it,
 and a closed run answers nothing. `runtime/moycore.py` is the module surface the
@@ -44,20 +47,13 @@ _AUDIO = os.path.join(_NATIVE, "moy_audio")
 _GLASS = os.path.join(_NATIVE, "moy_glass")
 _LUA = os.path.join(_NATIVE, "moy_lua", "lua")       # the vendored VM
 _SHIM = os.path.join(_HERE, "moyhost_lua.c")
-_CACHE = os.path.join(_ROOT, ".build", "host_lua")
-
-# MOY_WITH_LUA compiles libmoy's binding at all; MOY_PIXEL_RGB565 is the boards'
-# pixel, above. The Lua sources carry their own LUA_32BITS in luaconf.h, which
-# is the point of using them rather than a system Lua: the host then wraps its
-# integers where the boards wrap theirs.
-_CFLAGS = native_build.BASE_CFLAGS + [
-    "-DMOY_WITH_LUA=1", "-DMOY_PIXEL_RGB565=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1",
-    "-Wno-double-promotion", "-Wno-float-conversion",
-]
 
 # The sandbox's source set, matching the boards': the unused stdlibs -- and
 # linit.c, whose luaL_openlibs references all of them -- stay out entirely, so
-# there is no reachable implementation to be re-exposed by accident.
+# there is no reachable implementation to be re-exposed by accident. The Lua
+# sources carry their own LUA_32BITS in luaconf.h, which is the point of using
+# them rather than a system Lua: the host then wraps its integers where the
+# boards wrap theirs.
 _LUA_SKIP = ("linit.c", "liolib.c", "loslib.c", "loadlib.c", "ldblib.c",
              "lutf8lib.c", "lua.c", "luac.c", "onelua.c")
 
@@ -75,65 +71,52 @@ def _lua_names():
     re-vendored VM (or a changed luaconf.h, which is where LUA_32BITS lives)
     kept serving the .so built from the previous drop.
     """
-    if not os.path.isdir(_LUA):
-        return []
     return sorted(n for n in os.listdir(_LUA)
                   if (n.endswith(".c") and n not in _LUA_SKIP)
                   or n.endswith(".h"))
 
 
-def build(verbose=False, wasm=None):
-    """Compile (or reuse) the cached .so; None when the pieces are absent.
+# This module's share of the host's one library (runtime/host_native.py): the
+# Lua run, the kernel's Player and the public UI API's Lua and RUN faces
+# (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_wasm.h).
+PART = native_build.Part("lua", list(_RASTER) + [
+    "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
+    "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
+    "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+    "moy_shape.h", "moy_shape.c",
+    "moy_json.h", "moy_json.c", "moy_htab.h", "moy_htab.c",
+    "moy_play.h", "moy_play.c", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
+    "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
+    "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
+    "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
+    "moycore_ui.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+    "moy_ui_parts.c", "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api.c",
+    "moy_ui_wasm.h", "moy_ui_wasm.c",
+    "moy_theme.h", "moy_theme.c",
+    "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
+    "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
+    "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
+    "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
+] + _lua_names(), (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
+                   _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI), shim=_SHIM)
 
-    Where WAMR builds for the host (runtime/wasm_binding.wamr), the library
-    carries the compiled-cart run too (runtime/moyhost_wasm.c), so a compiled
-    cart's frames are the same Player's; `wasm` False leaves it out."""
-    lua = _lua_names()
-    if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
-        return None
-    names = (list(_RASTER) + [
-        "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
-        "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
-        "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
-        "moy_shape.h", "moy_shape.c",
-        "moy_json.h", "moy_json.c", "moy_htab.h", "moy_htab.c",
-        "moy_play.h", "moy_play.c", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
-        "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
-        "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
-        "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
-        # the public UI API's Lua face (native/moycore/moycore_ui.h) and the
-        # RUN face it shares with a compiled app (native/moy_ui/moy_ui_wasm.h)
-        "moycore_ui.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
-        "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api.c", "moy_ui_wasm.h", "moy_ui_wasm.c",
-        "moy_theme.h", "moy_theme.c",
-        "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
-        "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
-        "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
-        "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
-    ] + lua)
-    cflags = list(_CFLAGS)
-    link = ["-lm"]
-    dirs = (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
-            _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI)
-    got = None
-    if wasm is not False:
-        from . import wasm_binding
-        got = wasm_binding.wamr(verbose)
-    compile_names = None
-    name = "moyhost_lua"
-    if got is not None:
-        inc, lib = got
-        names += ["moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c",
-                  "moy_audio.h", "moy_files.h", "moy_files.c", "moyhost_wasm.c"]
-        cflags += ["-DMOY_WASM=1", "-isystem", inc,
-                   "-DMOYHOST_WAMR_PIN=%s" % wasm_binding.pin()]
-        link = [lib, "-lm", "-lpthread", "-ldl"]
-        dirs += (wasm_binding._ENGINE_DIR, wasm_binding._AUDIO_DIR)
-        compile_names = [os.path.basename(_SHIM)] + [n for n in names if n.endswith(".c")]
-        name = "moyhost_play"
-    return native_build.build(
-        name, _SHIM, names, _CACHE, cflags=cflags, compile_names=compile_names,
-        libmoy_dir=dirs, link_flags=link, verbose=verbose)
+# ...and the compiled-cart run's, where WAMR builds for the host
+# (runtime/wasm_binding.wamr): runtime/moyhost_wasm.c over libmoy's wasm
+# binding, the cart's `snd` stream (libmoy's synth at the boards' float) and
+# its written files.
+WASM_PART = native_build.Part("wasm", (
+    "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
+    "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
+    "moy_ui_wasm.h", "moy.h", "moy_pixel.h"),
+    (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI,
+     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_AUDIO, "libmoy")))
+
+
+def build(verbose=False):
+    """The host's one library (runtime/host_native.py); None with no C
+    compiler. It carries the compiled-cart run where WAMR builds."""
+    from . import host_native
+    return host_native.build(verbose)
 
 
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
@@ -181,9 +164,8 @@ _SIGS = (
     ("hl_play_info_size", [], ctypes.c_size_t),
 )
 
-# hl_kernel's slots: which host library function each forwarder calls.
-(HK_COUNT, HK_UPCALLS, HK_MASKS, HK_PLAYERS, HK_LAST_KEY, HK_TICK_EDGES,
- HK_SFX, HK_BEEP, HK_MUSIC, HK_MUSIC_STOP, HK_STOP, HK_LEVEL) = range(12)
+# hl_kernel's slots: which audio library function each forwarder calls.
+(HK_SFX, HK_BEEP, HK_MUSIC, HK_MUSIC_STOP, HK_STOP, HK_LEVEL) = range(6)
 
 # A paint image's decode, by the Python codec (moyhost_lua.c says why).
 _IMG_FN = ctypes.CFUNCTYPE(_I, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p,
@@ -214,26 +196,11 @@ def _fn(lib, name):
 
 
 def kernel(d):
-    """Wire the Player's forwarders to the host's own libraries: the loop's
-    upcall counters, the input tables, the audio sessions. A library the host
-    cannot build stays unwired: a counter that counts nothing, a session that
-    is silent."""
-    try:
-        from . import moy_loop
-        lp = moy_loop._lib()
-        d.hl_kernel(HK_COUNT, _fn(lp, "moy_loop_count"))
-        d.hl_kernel(HK_UPCALLS, _fn(lp, "moy_loop_upcalls"))
-    except Exception:  # noqa: BLE001 -- no loop library: no books
-        pass
-    try:
-        from . import moy_input
-        ip = moy_input._lib()
-        for slot, name in ((HK_MASKS, "moy_input_masks"), (HK_PLAYERS, "moy_input_players"),
-                           (HK_LAST_KEY, "moy_input_last_key"),
-                           (HK_TICK_EDGES, "moy_input_tick_edges")):
-            d.hl_kernel(slot, _fn(ip, name))
-    except Exception:  # noqa: BLE001
-        pass
+    """Wire the Player's audio forwarders to the host's audio library
+    (runtime/audio_binding.py, a library of its own: it is compiled
+    double-widened for the parity harness). Everything else the Player calls
+    -- the loop's upcall counters, the input tables, the glass -- is in this
+    same library. No audio library: a session is STALE, which is silence."""
     try:
         from . import audio_binding
         ap = audio_binding._lib()
@@ -243,24 +210,6 @@ def kernel(d):
             d.hl_kernel(slot, _fn(ap, name))
     except Exception:  # noqa: BLE001 -- no audio library: silence
         pass
-
-
-def _ui_theme(d):
-    """The public UI API's RUN face (native/moy_ui/moy_ui_wasm.h) lives in this
-    library and the live theme in the spine's: hand it the spine's reader."""
-    try:
-        import moy_app
-    except ImportError:
-        try:
-            from runtime import moy_app
-        except ImportError:
-            return
-    lib = getattr(moy_app, "_lib", None)
-    if lib is None:
-        return
-    d.moy_ui_wasm_theme_from.argtypes = [_P]
-    d.moy_ui_wasm_theme_from.restype = None
-    d.moy_ui_wasm_theme_from(ctypes.cast(lib.moy_app_wasm_theme, _P))
 
 
 def _lib():
@@ -285,7 +234,6 @@ def _lib():
             d.hl_img_decoder(ctypes.cast(_IMG_CB, _P))
             d.hl_play_rows(1 if hasattr(d, "hw_runtime") else 0)
             kernel(d)
-            _ui_theme(d)
             _LIB[0] = d
     return _LIB[0] or None
 

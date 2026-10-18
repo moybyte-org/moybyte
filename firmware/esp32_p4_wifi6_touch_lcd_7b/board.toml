@@ -169,6 +169,13 @@ The compile-and-cache helper the three bindings above share: subprocess to a C
 compiler, hash-keyed .so cache. No compiler on a board."""
 
 [[modules.shared.deny]]
+file = "host_native.py"
+kind = "host-only"
+why  = """
+The host's one native library: every binding's C compiled together by
+native_build and ctypes-loaded once. A board links its modules into the image."""
+
+[[modules.shared.deny]]
 file = "moycore.py"
 kind = "host-only"
 why  = """

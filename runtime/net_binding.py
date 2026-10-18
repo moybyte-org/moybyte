@@ -31,14 +31,13 @@ import json
 import os
 import sys
 
-from . import native_build
+from . import host_native, native_build
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _WEB = os.path.join(native_build.ROOT, "native", "moy_web")
 _SHIM = os.path.join(_NET, "moy_net_host.c")
-_CACHE = os.path.join(native_build.ROOT, ".build", "host_net")
 _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_apply.c",
             "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
@@ -186,10 +185,12 @@ _SIGS = (
 )
 
 
+# This module's share of the host's one library (runtime/host_native.py).
+PART = native_build.Part("net", _SOURCES, (_NET, _SPINE, _STORE, _WEB), shim=_SHIM)
+
+
 def build(verbose=False):
-    return native_build.build("moy_net", _SHIM, _SOURCES, _CACHE,
-                              libmoy_dir=(_NET, _SPINE, _STORE, _WEB),
-                              verbose=verbose)
+    return host_native.build(verbose)
 
 
 def _lib():

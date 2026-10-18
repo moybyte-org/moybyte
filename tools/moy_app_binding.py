@@ -4,8 +4,9 @@
 #   binding          the module: App, kernel, the role types, the policy
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
-native/moy_app builds, as Python loads it by ctypes from the spine's host
-library (tools/moy_index_spike.py's SPINE, which carries native/moy_app). The
+native/moy_app builds, as Python loads it by ctypes from the host's one
+library (runtime/host_native.py; tools/moy_index_spike.py's SPINE part
+carries native/moy_app). The
 runtime package registers it as `moy_app` (runtime/__init__.py), so the host's
 roles are the C rows every image runs.
 
@@ -238,7 +239,7 @@ def _str(o):
 
 
 def binding(sanitize=False):
-    """The moy_app module over the spine's host library, or None with no C
+    """The moy_app module over the host's one library, or None with no C
     compiler. The library is the one tools/moy_spine_binding.py loads, so a
     Settings it made is a pointer this one writes."""
     path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)

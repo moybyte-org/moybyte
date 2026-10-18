@@ -15,7 +15,8 @@ import sys as _sys
 
 def _native_spine():
     """The kernel's spine is C on every tier (docs/kernel_spine_2026-10.md):
-    on the CPython host it is native/moy_spine's host library over ctypes
+    on the CPython host it is native/moy_spine in the host's one library
+    (runtime/host_native.py) over ctypes
     (`tools/moy_spine_binding.py`), registered as `moy_spine` and
     `runtime.moy_spine` before anything imports either name. Its Python twin
     is the suites' oracle (tests/spine_twin.py), never the host's."""
@@ -36,8 +37,8 @@ moy_spine = _native_spine()
 
 
 def _native_app():
-    """The app ABI's C rows (native/moy_app) over the same host library as
-    the spine, registered as `moy_app` like it."""
+    """The app ABI's C rows (native/moy_app) over the host's one library,
+    registered as `moy_app` like the spine."""
     if "moy_app" in _sys.modules:
         return _sys.modules["moy_app"]
     from tools import moy_app_binding
@@ -67,7 +68,7 @@ def _native_ufiles():
 moy_ufiles = _native_ufiles()
 
 def _native_ui():
-    """The toolkit's C (native/moy_ui) over the glass's host library,
+    """The toolkit's C (native/moy_ui) over the host's one library,
     registered as `moy_ui` like the boards' module (tools/moy_ui_binding.py)."""
     if "moy_ui" in _sys.modules:
         return _sys.modules["moy_ui"]

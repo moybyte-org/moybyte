@@ -389,9 +389,8 @@ static int32_t w_clipboard_seq(void *e) {
 #endif
 
 // The toolkit's rows are native/moy_ui's (moy_ui_wasm.h), linked where the
-// image carries the toolkit: weak here, so a library without it (the host's
-// spine library, which runtime/moyhost_wasm.c fills from its own) answers
-// NULL for them.
+// image carries the toolkit: weak here, so an image without it answers NULL
+// for them.
 #define UI_WEAK __attribute__((weak))
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                          uint8_t *, uint32_t) UI_WEAK;

@@ -193,6 +193,13 @@ a C compiler, a hash-keyed .so cache under .build/. There is no compiler on a
 board, and nothing to compile if there were."""
 
 [[modules.shared.deny]]
+file = "host_native.py"
+kind = "host-only"
+why  = """
+The host's one native library: every binding's C compiled together by
+native_build and ctypes-loaded once. A board links its modules into the image."""
+
+[[modules.shared.deny]]
 file = "moycore.py"
 kind = "host-only"
 why  = """

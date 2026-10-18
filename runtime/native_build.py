@@ -1,12 +1,10 @@
-"""Compile a C shim against vendored sources, cached by content hash.
+"""Compile host libraries against vendored sources, cached by content hash.
 
-The host bindings need exactly this -- the RGB565 compositor (`moyhost_gfx.c`),
-Lua (`moyhost_lua.c`) and the glass -- and two of them had grown their own copy
-of it. That is the same duplication this module exists to
-help retire from the canvases, so it is not repeated a third time: the
-differences between the three are a source list, a shim, some flags and a cache
-directory, which are arguments. (A fourth, `moyhost_raster.c`, was libmoy built
-INDEXED for the deleted host raster; it went with `runtime/canvas.py`.)
+The host's one library (runtime/host_native.py) is every native module's
+`Part` compiled together; the builds that differ from it on purpose -- a
+sanitizer build, the tick model at double precision, a test's edited style --
+are a part or a shim with other flags. Either way the differences are a
+source list, a shim, some flags and a cache directory, which are arguments.
 
 The cache key is the CONTENT of every source plus the flags plus the compiler's
 version string, not a timestamp. That matters because the vendored libmoy
@@ -43,6 +41,7 @@ under a name only its builder uses and renamed into place whole.
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import hashlib
 import os
@@ -137,9 +136,9 @@ def explain_no_cc(detail=None):
 def warn_no_cc(detail=None, once=True):
     """Print `explain_no_cc` to stderr, at most once per process by default.
 
-    Once, because the three host bindings (gfx, audio, lua) each reach this
-    independently and three copies of the same paragraph reads like three
-    different problems. Stderr, because the callers that route past this are
+    Once, because the host's libraries (the one library, the audio) each
+    reach this independently and two copies of the same paragraph read like
+    two different problems. Stderr, because the callers that route past this are
     guarded and their output is a console the user is trying to look at.
     """
     if once and _WARNED[0]:
@@ -163,18 +162,7 @@ def read_sources(shim, libmoy_names, libmoy_dir=None):
     """
     if libmoy_dir is None:
         libmoy_dir = LIBMOY
-    dirs = [libmoy_dir] if isinstance(libmoy_dir, str) else list(libmoy_dir)
-    out = {}
-    for name in libmoy_names:
-        found = [os.path.join(d, name) for d in dirs
-                 if os.path.isfile(os.path.join(d, name))]
-        if not found:
-            raise FileNotFoundError(name)
-        if len(found) > 1:
-            raise RuntimeError("%s is in %d source dirs: %s"
-                               % (name, len(found), ", ".join(found)))
-        with open(found[0]) as fh:
-            out[name] = fh.read()
+    out = read_sources_only(libmoy_names, libmoy_dir)
     with open(shim) as fh:
         out[os.path.basename(shim)] = fh.read()
     return out
@@ -210,14 +198,83 @@ def build_lock(path):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+class Part:
+    """One native module's share of a host library: the files it reads (its
+    headers too, for the cache key and the include directory), the
+    directories they are found in (its own first), its shim and, when not
+    every .c it names is a translation unit, the ones that are."""
+
+    def __init__(self, name, names, dirs, shim=None, compile_names=None):
+        self.name = name
+        self.names = tuple(names)
+        self.dirs = (dirs,) if isinstance(dirs, str) else tuple(dirs)
+        self.shim = shim
+        self.compile_names = None if compile_names is None else tuple(compile_names)
+
+    def sources(self):
+        """{filename: text}: what read_sources reads for this part."""
+        if self.shim is None:
+            return read_sources_only(self.names, self.dirs)
+        return read_sources(self.shim, self.names, self.dirs)
+
+    def units(self):
+        """The translation units this part hands the compiler."""
+        if self.compile_names is not None:
+            return list(self.compile_names)
+        out = [os.path.basename(self.shim)] if self.shim else []
+        return out + [n for n in self.names if n.endswith(".c")]
+
+
+def read_sources_only(names, dirs):
+    """{filename: text} of `names`, each found in exactly one of `dirs` (one
+    directory or several)."""
+    dirs = [dirs] if isinstance(dirs, str) else list(dirs)
+    out = {}
+    for name in names:
+        found = [os.path.join(d, name) for d in dirs
+                 if os.path.isfile(os.path.join(d, name))]
+        if not found:
+            raise FileNotFoundError(name)
+        if len(found) > 1:
+            raise RuntimeError("%s is in %d source dirs: %s"
+                               % (name, len(found), ", ".join(found)))
+        with open(found[0]) as fh:
+            out[name] = fh.read()
+    return out
+
+
+def build_parts(name, parts, cache_dir, cflags=None, link_flags=None, verbose=False):
+    """Compile (or reuse) ONE library from several parts, each resolved in its
+    own directories: the host's one library (runtime/host_native.py) is every
+    native module's part. A file two parts read is one file -- the same name
+    with other text in two parts is an error, never a silent pick -- and a
+    translation unit two parts name is compiled once."""
+    compiler = cc()
+    if compiler is None:
+        warn_no_cc()
+        return None
+    sources, units, owner = {}, [], {}
+    for part in parts:
+        for fname, text in part.sources().items():
+            if fname in sources and sources[fname] != text:
+                raise RuntimeError("%s differs between parts %s and %s"
+                                   % (fname, owner[fname], part.name))
+            sources[fname] = text
+            owner.setdefault(fname, part.name)
+        units += [u for u in part.units() if u not in units]
+    return _compile(compiler, name, sources, units, cache_dir,
+                    list(cflags if cflags is not None else BASE_CFLAGS),
+                    list(link_flags or ()), verbose)
+
+
 def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
           libmoy_dir=None, link_flags=None, verbose=False):
     """Compile (or reuse) `name`'s cached .so. None when there is no compiler.
 
     `compile_names` are the translation units handed to the compiler; it
-    defaults to the shim plus every .c in `libmoy_names`, which is what all
-    three callers want (the .h files are read for the cache key and for the
-    include directory, but are not compiled).
+    defaults to the shim plus every .c in `libmoy_names` (the .h files are
+    read for the cache key and for the include directory, but are not
+    compiled).
 
     `link_flags` go AFTER the sources, which is where a `-l` has to be: with
     --as-needed (the default on most distros) a library named before the
@@ -227,9 +284,19 @@ def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
     if compiler is None:
         warn_no_cc()
         return None
-    cflags = list(cflags if cflags is not None else BASE_CFLAGS)
-    link_flags = list(link_flags or ())
     sources = read_sources(shim, libmoy_names, libmoy_dir)
+    if compile_names is None:
+        compile_names = [os.path.basename(shim)] + [n for n in libmoy_names
+                                                    if n.endswith(".c")]
+    return _compile(compiler, name, sources, list(compile_names), cache_dir,
+                    list(cflags if cflags is not None else BASE_CFLAGS),
+                    list(link_flags or ()), verbose)
+
+
+def _compile(compiler, name, sources, units, cache_dir, cflags, link_flags, verbose):
+    """The cached library for `sources`: each unit compiled to an object on
+    its own thread, then one link. A library of a hundred units (the host's
+    one library) builds in the time of its slowest few, not their sum."""
     so_path = os.path.join(
         cache_dir,
         "%s-%s.so" % (name, cache_key(compiler, sources, cflags + link_flags)))
@@ -244,24 +311,37 @@ def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
         for fname, text in sources.items():
             with open(os.path.join(src_dir, fname), "w") as fh:
                 fh.write(text)
-        if compile_names is None:
-            compile_names = [os.path.basename(shim)] + [n for n in libmoy_names
-                                                        if n.endswith(".c")]
         tmp = "%s.%d.tmp" % (so_path, os.getpid())
-        cmd = ([compiler] + cflags + ["-I", src_dir]
-               + [os.path.join(src_dir, n) for n in compile_names]
-               + ["-o", tmp] + link_flags)
+        obj_dir = tmp + ".obj"
+        os.makedirs(obj_dir, exist_ok=True)
+        unit_flags = [f for f in cflags if f != "-shared"]
+
+        def one(unit):
+            obj = os.path.join(obj_dir, unit[:-2] + ".o")
+            return obj, subprocess.run(
+                [compiler] + unit_flags + ["-c", "-I", src_dir,
+                                           os.path.join(src_dir, unit), "-o", obj],
+                capture_output=True, text=True)
+
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=max(1, min(len(units), os.cpu_count() or 1))) as pool:
+                done = list(pool.map(one, units))
+            bad = [p.stderr for _o, p in done if p.returncode != 0]
+            if bad:
+                raise RuntimeError("%s build failed:\n%s" % (name, "".join(bad)))
+            proc = subprocess.run([compiler] + cflags + [o for o, _p in done]
+                                  + ["-o", tmp] + link_flags,
+                                  capture_output=True, text=True)
         except OSError as exc:
             # The compiler could not be RUN -- a `CC` pointing at a path that is
             # not there, or one that is not executable. That is an absent
             # toolchain, not a broken tree, so it takes the `None` lane and the
-            # same explanation a missing one gets. It used to escape as a bare
-            # FileNotFoundError from subprocess, naming the shim it was trying
-            # to build and not the setting that sent it nowhere.
+            # same explanation a missing one gets.
             warn_no_cc("%s: %s" % (compiler, exc))
             return None
+        finally:
+            shutil.rmtree(obj_dir, ignore_errors=True)
         if proc.returncode != 0:
             raise RuntimeError("%s build failed:\n%s" % (name, proc.stderr))
         os.replace(tmp, so_path)        # whole, or not there at all

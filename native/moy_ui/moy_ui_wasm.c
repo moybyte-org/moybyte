@@ -17,12 +17,6 @@ _Static_assert(sizeof(moy_pixel) == sizeof(uint16_t), "the RUN sink lends an RGB
 // by one console from its own start, so a later console (or run) can reach the
 // same number on another theme: the look is rebuilt for each run.
 static uint32_t s_gen, s_gen_serial;
-static moy_ui_theme_fn s_theme;
-
-void moy_ui_wasm_theme_from(moy_ui_theme_fn fn) {
-    s_theme = fn;
-    s_gen = 0;
-}
 
 // A compiled run's draw target: the module that drives a compiled run's (a
 // library with no compiled run answers none).
@@ -32,12 +26,14 @@ static void *wasm_target(void) {
     return moycore_ui_target != NULL ? moycore_ui_target() : NULL;
 }
 
+// The live theme's token row and its name, copied when the generation differs
+// from `have`: native/moy_app/moy_app_wasm.c's. Answers the generation, 0
+// while no run is bound; weak, so an image without the app ABI draws no rows.
 uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
                             uint32_t cap) __attribute__((weak));
 
-// The shape a library of its own (the host's) installs to draw as the shell
-// does; on an image the shell's is already this theme's, and nothing is
-// written.
+// The shape installed when the live theme names another than the one the
+// shell installed; while the shell's is this theme's, nothing is written.
 static moy_ui_shape_t s_shape;
 
 // What every drawing row opens with: the RUN sink over the run's target, lent
@@ -50,8 +46,7 @@ typedef struct {
 } run_t;
 
 static int open_run(run_t *r, moy_canvas *c) {
-    moy_ui_theme_fn theme = s_theme != NULL ? s_theme : moy_app_wasm_theme;
-    if (c == NULL || theme == NULL) {
+    if (c == NULL || moy_app_wasm_theme == NULL) {
         return -MOY_UI_STALE;
     }
     uint32_t tick = 0, serial = 0;
@@ -62,7 +57,7 @@ static int open_run(run_t *r, moy_canvas *c) {
     }
     int32_t tok[MOY_UI_TOKENS];
     char name[MOY_UI_SHAPE_NAME];
-    uint32_t gen = theme(tok, s_gen, name, sizeof(name));
+    uint32_t gen = moy_app_wasm_theme(tok, s_gen, name, sizeof(name));
     if (gen == 0u) {
         return -MOY_UI_STALE;
     }

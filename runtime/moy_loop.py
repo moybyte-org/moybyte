@@ -20,12 +20,12 @@ import sys
 import traceback
 
 try:                                    # the host's runtime package
-    from . import native_build
+    from . import host_native, native_build
 except ImportError:                     # loaded flat, runtime/ on sys.path
+    import host_native
     import native_build
 
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
-_CACHE = os.path.join(native_build.ROOT, ".build", "host_loop")
 _SHIM = os.path.join(_KERNEL, "moy_loop.c")
 
 OK, QUIT, INTERRUPT, STOPPED, EXIT, STOP = 0, 1, 2, 3, 4, 5
@@ -127,12 +127,14 @@ _SIGS = (
 _LIB = [None]
 
 
+# This module's share of the host's one library (runtime/host_native.py).
+PART = native_build.Part("loop", ("moy_loop.h", "moy_idle.h", "moy_idle.c", "moy_perf.h",
+                                  "moy_perf.c", "moy_devch.h", "moy_devch.c",
+                                  "moy_loop_host.h", "moy_loop_host.c"), _KERNEL, shim=_SHIM)
+
+
 def build(verbose=False):
-    return native_build.build("moy_loop", _SHIM,
-                              ("moy_loop.h", "moy_idle.h", "moy_idle.c", "moy_perf.h",
-                               "moy_perf.c", "moy_devch.h", "moy_devch.c",
-                               "moy_loop_host.h", "moy_loop_host.c"),
-                              _CACHE, libmoy_dir=_KERNEL, verbose=verbose)
+    return host_native.build(verbose)
 
 
 def _lib():

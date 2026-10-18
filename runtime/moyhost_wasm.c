@@ -3,7 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 /* The host's WASM shim (docs/wasm_tier_plan_2026-09.md, phase 3), built into
- * the host's Lua library (runtime/lua_binding.py) wherever WAMR builds.
+ * the host's one library (runtime/host_native.py) wherever WAMR builds.
  *
  * A "runtime": "wasm" cart on the host runs through the SAME C the boards run:
  * libmoy's wasm binding (native/moycore/libmoy/moy_wasm.c, the import table as
@@ -191,26 +191,22 @@ void hw_interp_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
     moy_wasm_interp_footprint(memory, module_len, total, block);
 }
 
-/* The app ABI's import adapter (native/moy_app/moy_app_wasm.h), which the
- * host's spine library carries: its rows for module "moybyte.app", the run's
- * grant and the load's grant check, handed over by runtime/wasm_host.py.
- * Registered with WAMR once, beside the "moy" table. */
-static const NativeSymbol *g_app_rows;
-static uint32_t g_app_n;
+/* The app ABI's import adapter (native/moy_app/moy_app_wasm.h), in this same
+ * library as on a board's image: its rows for module "moybyte.app" (the
+ * toolkit's among them, native/moy_ui's), the run's grant and the load's
+ * grant check, registered with WAMR once, beside the "moy" table, as
+ * modmoycore.c registers them. */
+const NativeSymbol *moy_app_wasm_natives(uint32_t *count);
+uint32_t moy_app_wasm_grant(void);
+int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen);
 static NativeSymbol *g_app_store;
-static uint32_t (*g_app_grant)(void);
-static int (*g_app_admit)(const uint8_t *head, size_t n, char *err, size_t errlen);
+static uint32_t g_app_n;
 
 static int app_register(void)
 {
-    if (!g_app_rows || g_app_store) return 1;
+    const NativeSymbol *rows = moy_app_wasm_natives(&g_app_n);
     if (!(g_app_store = (NativeSymbol *)malloc(g_app_n * sizeof *g_app_store))) return 0;
-    memcpy(g_app_store, g_app_rows, g_app_n * sizeof *g_app_store);
-    /* The toolkit's rows are native/moy_ui's, compiled into this library;
-     * the spine's library that hands the table over has none of its own. */
-    for (uint32_t i = 0; i < g_app_n; i++)
-        if (!g_app_store[i].func_ptr)
-            g_app_store[i].func_ptr = moy_ui_wasm_native(g_app_store[i].symbol);
+    memcpy(g_app_store, rows, g_app_n * sizeof *g_app_store);
     return wasm_runtime_register_natives("moybyte.app", g_app_store, g_app_n) ? 1 : 0;
 }
 
@@ -232,17 +228,6 @@ void *moycore_ui_target(void)
     return w->target;
 }
 
-void hw_app_ext(const NativeSymbol *rows, uint32_t n, uint32_t (*grant)(void),
-                int (*admit)(const uint8_t *, size_t, char *, size_t))
-{
-    if (g_app_rows) return;
-    g_app_rows = rows;
-    g_app_n = n;
-    g_app_grant = grant;
-    g_app_admit = admit;
-    if (g_runtime) app_register();
-}
-
 /* 1 when WAMR is up with the import table registered -- once per process. */
 int hw_runtime(void)
 {
@@ -257,8 +242,11 @@ int hw_runtime(void)
             wasm_runtime_destroy();
             return 0;
         }
+        if (!app_register()) {
+            wasm_runtime_destroy();
+            return 0;
+        }
         g_runtime = 1;
-        app_register();
     }
     return 1;
 }
@@ -408,10 +396,10 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         return 1;
     }
     moy_wasm_ext x = { "moybyte.app", g_app_store, g_app_n };
-    uint32_t nx = g_app_store && g_app_grant && g_app_grant() ? 1u : 0u;
+    uint32_t nx = moy_app_wasm_grant() ? 1u : 0u;
     if (moy_wasm_check_ext(r->module, copy, (size_t)n, (uint32_t)pages, &x, nx,
                            msg, sizeof msg)
-        || (nx && g_app_admit && g_app_admit(copy, (size_t)n, msg, sizeof msg))) {
+        || (nx && moy_app_wasm_admit(copy, (size_t)n, msg, sizeof msg))) {
         free(copy);
         put_err(err, errlen, "refused", msg);
         return 1;

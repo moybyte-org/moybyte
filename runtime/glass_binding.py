@@ -23,7 +23,7 @@ from __future__ import annotations
 import ctypes
 import os
 
-from . import native_build
+from . import host_native, native_build
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _GLASS = os.path.join(native_build.ROOT, "native", "moy_glass")
@@ -33,7 +33,7 @@ _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 _UI = os.path.join(native_build.ROOT, "native", "moy_ui")
 _GFX = os.path.join(native_build.ROOT, "native", "moy_gfx")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
-_CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")
+_CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")   # an edited style's
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
             "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
@@ -120,14 +120,25 @@ _FROM_MEMORY.restype = ctypes.py_object
 _PyBUF_WRITE = 0x200
 
 
+def _part(ui_dir=None):
+    return native_build.Part("glass", _SOURCES, (_GLASS, _SPINE, ui_dir or _UI, _GFX,
+                                                  native_build.LIBMOY), shim=_SHIM)
+
+
+# This module's share of the host's one library (runtime/host_native.py).
+PART = _part()
+
+
 def build(verbose=False, ui_dir=None, cache=None):
-    """The library's path. `ui_dir` builds it over another copy of
-    native/moy_ui (tests/test_ui_tables.py's edited style), into `cache`."""
-    return native_build.build("moy_glass", _SHIM, _SOURCES, cache or _CACHE,
-                              libmoy_dir=(_GLASS, _SPINE, ui_dir or _UI, _GFX,
-                                          native_build.LIBMOY),
-                              cflags=native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"],
-                              verbose=verbose)
+    """The library's path: the host's one (runtime/host_native.py). `ui_dir`
+    builds the glass ALONE over another copy of native/moy_ui
+    (tests/test_ui_tables.py's edited style), into `cache`: a library of the
+    test's own, which the console never loads."""
+    if ui_dir is None:
+        return host_native.build(verbose)
+    return native_build.build_parts("moy_glass", [_part(ui_dir)], cache or _CACHE,
+                                    cflags=native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"],
+                                    verbose=verbose)
 
 
 def _lib():

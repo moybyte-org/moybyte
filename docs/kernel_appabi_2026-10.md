@@ -232,9 +232,9 @@ one assertion that no role hands out the console and no app module names it.
 
 **What it becomes.** `native/moy_app/modmoy_app.c` on the boards and in the
 browser, and a ctypes binding on the host (`tools/moy_app_binding.py`, the
-`tools/moy_spine_binding.py` pattern, over the spine's host library, which
-carries native/moy_app so a Settings the spine made is a pointer moy_app
-writes; the `runtime` package registers it as `moy_app`): role types whose methods are the table's
+`tools/moy_spine_binding.py` pattern, over the host's one library
+(`runtime/host_native.py`), which carries the spine and native/moy_app so a
+Settings the spine made is a pointer moy_app writes; the `runtime` package registers it as `moy_app`): role types whose methods are the table's
 C rows over a grant handle, with the shell and Python-only rows bound to the
 Workstation's registered servers. `runtime/app_context.py` keeps `ROLES`,
 `NO_STORE` and `AppContext`; every role class is deleted.
@@ -553,11 +553,11 @@ against that bug before it goes green.
 - Step 7 (2026-10-10): the user-files layer is `native/moy_store/moy_ufiles.c`,
   built with native/moy_app (so the Zero, which denies it, carries none) with
   its module `moy_ufiles`, whose names `moy_carts` resolves at their use; the
-  host loads it as a library of its own (`tools/moy_ufiles_binding.py`), built
-  at first use from the MicroPython tree's uzlib. moy_app reaches it through a
-  verb table the console binds with the store (`moy_app_store_bind`: the table,
-  the root, readable, writable), pushed at the wiring rather than read per call,
-  so the spine's host library links no store. A text or blob answer is a
+  host's one library carries it where the MicroPython tree has the uzlib it
+  needs (`tools/moy_ufiles_binding.py`). moy_app reaches it through a verb
+  table the console binds with the store (`moy_app_store_bind`: the table, the
+  root, readable, writable), pushed at the wiring rather than read per call, so
+  moy_app's C calls no store function by name. A text or blob answer is a
   buffer the layer allocated (`moy_app_buf_free`), a name 256 bytes at most, a
   list NUL-separated names. History ops cross as JSON text and the layer
   writes each record as CPython's json.dumps does (`moy_json_canon`), so every

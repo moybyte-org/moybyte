@@ -6,8 +6,8 @@ run's console (`native/moycore/moycore_run.c`), framed by the kernel's Player
 like a Lua run, and WAMR -- the fork the boards vendor, at the commit
 `native/moy_wasm/wamr_pin.h` names, built for Linux. There is no wasmtime tier
 and no second engine: the shim (`runtime/moyhost_wasm.c`) is compiled into
-`lua_binding.py`'s library wherever WAMR builds, and this module is its
-compiled-cart half.
+the host's one library (`runtime/host_native.py`) wherever WAMR builds, and
+this module is its compiled-cart half.
 
 WAMR IS FETCHED, NOT VENDORED, for the host: the boards compile an AOT-only
 ESP-IDF subset of it (`native/moy_wasm/wamr/`), and a Linux build needs the
@@ -42,10 +42,8 @@ from .lua_ext import cfg_blob
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
-_LIBMOY = native_build.LIBMOY                           # the raster + moy.h
 _BINDING_DIR = os.path.join(_ROOT, "native", "moycore", "libmoy")   # moy_wasm.c/.h
 _ENGINE_DIR = os.path.join(_ROOT, "native", "moy_wasm")   # moy_wasm_footprint.h
-_AUDIO_DIR = os.path.join(_ROOT, "native", "moy_audio", "libmoy")   # moy_stream
 _PIN_H = os.path.join(_ENGINE_DIR, "wamr_pin.h")
 WAMR_DIR = os.path.join(_ROOT, ".build", "host_wamr")
 WAMR_REPO = "https://github.com/moybyte-org/wasm-micro-runtime.git"
@@ -61,7 +59,6 @@ WAMR_CMAKE = (
     "-DWAMR_DISABLE_HW_BOUND_CHECK=1", "-DWAMR_DISABLE_WRITE_GS_BASE=1",
 )
 
-_RASTER = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
 
 _LIB = [None]
 _WHY = [None]                 # why the last build attempt came back empty
@@ -182,17 +179,23 @@ def wamr(verbose=False):
     return inc, lib
 
 
+def vendored():
+    """Whether the tree has libmoy's wasm binding to compile."""
+    return os.path.isfile(os.path.join(_BINDING_DIR, "moy_wasm.c"))
+
+
 def build(verbose=False):
-    """The host library a compiled cart runs in: runtime/lua_binding's, built
-    with WAMR (moyhost_wasm.c beside the Lua run and the kernel's Player).
-    Its path, or None with the reason in why_unavailable()."""
-    if not os.path.isfile(os.path.join(_BINDING_DIR, "moy_wasm.c")):
+    """The host library a compiled cart runs in: the host's one library
+    (runtime/host_native.py), which carries moyhost_wasm.c beside the Lua run
+    and the kernel's Player wherever WAMR builds. Its path, or None with the
+    reason in why_unavailable()."""
+    if not vendored():
         _WHY[0] = "no vendored moy_wasm.c"
         return None
     if wamr(verbose) is None:
         return None
-    from . import lua_binding
-    path = lua_binding.build(verbose)
+    from . import host_native
+    path = host_native.build(verbose)
     if path is None:
         _WHY[0] = "no C compiler"
     return path
@@ -264,33 +267,8 @@ def _lib():
                 _WHY[0] = "WAMR did not initialise"
                 _LIB[0] = False
             else:
-                _app_ext(d)
                 _LIB[0] = d
     return _LIB[0] or None
-
-
-def _app_ext(d):
-    """Hand the host's WAMR the app ABI's import adapter (native/moy_app/
-    moy_app_wasm.h), from the spine library that carries it: its rows for
-    module "moybyte.app", the run's grant and the load's grant check (the
-    live theme's reader the ui rows need is lua_binding's, `_ui_theme`)."""
-    try:
-        import moy_app
-    except ImportError:
-        try:
-            from runtime import moy_app
-        except ImportError:
-            return
-    lib = getattr(moy_app, "_lib", None)
-    if lib is None:
-        return
-    n = ctypes.c_uint32(0)
-    rows = lib.moy_app_wasm_natives(ctypes.byref(n))
-    d.hw_app_ext.argtypes = [_P, ctypes.c_uint32, _P, _P]
-    d.hw_app_ext.restype = None
-    d.hw_app_ext(rows, n.value,
-                 ctypes.cast(lib.moy_app_wasm_grant, _P),
-                 ctypes.cast(lib.moy_app_wasm_admit, _P))
 
 
 def footprint(memory, module_len):
