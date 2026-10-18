@@ -649,3 +649,16 @@ def test_b_and_cancel_back_out_of_name(tmp_path):
     _name(ws, app)
     _press(ws, app, "down", "a")                 # the field, then its first button
     assert not app.naming and not ws.input.text_mode
+
+
+def test_a_single_mode_theme_offers_no_mode(tmp_path):
+    """Blocks' dark copies its light: its card names one mode and its page
+    shows no Mode row; Moy and Contrast keep both."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    app = _open(ws)
+    assert app._modes("blocks") == ("Light",)
+    assert app._modes("moy") == ("Day", "Night")
+    assert app._modes("contrast") == ("Light", "Dark")
+    assert "Mode" not in app._kinds and "Accent" in app._kinds
+    assert app._status(app.choices()).startswith("Blocks Light")

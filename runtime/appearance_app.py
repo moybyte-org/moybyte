@@ -11,7 +11,8 @@ UI API's verbs (docs/ui_api_2026-10.md) and nothing under them.
 
 The themes are a grid of cards (`ui.grid`, `ui.card`), each picture the
 theme's own ground, bar, surface and accent, the theme in use wearing the
-current mark; under them the rows: MODE (a seg), ACCENT (eight swatches:
+current mark; under them the rows: MODE (a seg, where the theme has two
+modes), ACCENT (eight swatches:
 the theme's own and `OFFERED`), TINT, WALLPAPER (a link to the
 wallpapers' page), WINDOW STYLE (where windows are), FONT, CODE FONT
 (where the image draws more than one), CHROME SIZE (where the panel takes
@@ -86,6 +87,8 @@ NAME_WHY = {"grammar": "a-z 0-9 _ - only, a letter or digit first",
             "none": "Only custom is named"}
 NAME_HINT = "a-z 0-9 _ -, up to 24"
 NAME_MAX = 24
+# The roles a theme's second mode changes (`_single_mode`).
+_MODE_ROLES = ("desktop", "surface", "panel", "ink", "bar", "accent")
 # The hints by the focused stop's kind.
 _STEP = ("left right", "Change")
 _OPEN = ("enter", "Open")
@@ -277,8 +280,19 @@ class AppearanceAppLayer:
         return "theme " + name
 
     def _modes(self, name):
-        """A theme's two modes, light first, as its Mode row names them."""
+        """A theme's modes, light first, as its Mode row names them: one for
+        a single-mode theme (`_single_mode`), which shows no Mode row."""
+        if self._single_mode(name):
+            return ("Light",) if theme_colors(name, "light")["surface_light"] else ("Dark",)
         return ("Day", "Night") if name == "moy" else ("Light", "Dark")
+
+    @staticmethod
+    def _single_mode(name):
+        """True for a theme whose dark copies its light: the two resolved
+        rows agree on the ground, the surfaces, the ink and the accent,
+        which any second mode changes."""
+        a, b = theme_colors(name, "light"), theme_colors(name, "dark")
+        return all(a[r] == b[r] for r in _MODE_ROLES)
 
     def _status(self, ch):
         """The desk's foot: the theme, its mode and where it comes from."""
@@ -288,7 +302,8 @@ class AppearanceAppLayer:
         name = ch["theme"]
         if name == "custom":
             return "Custom" + dot + "saved as you go"
-        mode = self._modes(name)[0 if ch["variant"] == "light" else 1]
+        modes = self._modes(name)
+        mode = modes[0 if ch["variant"] == "light" else len(modes) - 1]
         return _title(name) + " " + mode + dot + ("store" if ch["store"] else "built in")
 
     def _walls(self, tab):
@@ -508,14 +523,15 @@ class AppearanceAppLayer:
         self._theme_cards(cv, ch)
         name = ch["theme"]
         kinds = self._kinds
-        # MODE
+        # MODE: where the theme has two
         modes = self._modes(name if name != "custom" else (ch["from"] or name))
-        cur = 0 if ch["variant"] == "light" else 1
-        kinds["Mode"] = "step"
-        got = ui.seg("Mode", modes, cur)
-        if got != cur:
-            self._theme.set_variant("light" if got == 0 else "dark")
-            self._acted()
+        if len(modes) > 1:
+            cur = 0 if ch["variant"] == "light" else 1
+            kinds["Mode"] = "step"
+            got = ui.seg("Mode", modes, cur)
+            if got != cur:
+                self._theme.set_variant("light" if got == 0 else "dark")
+                self._acted()
         # ACCENT: the theme's own, then the offered seven in this mode
         own = th["accent"] if ch["accent"] is None else None
         colours = [_rgb(own if own is not None else self._own_accent(ch))]
