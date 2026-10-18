@@ -246,3 +246,18 @@ def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
         name, r.stdout[-4000:], r.stderr[-500:])
     js = [json.loads(j) for j in re.findall(r"js -> (.*)$", r.stdout, re.M)]
     return r.stdout, js
+
+
+def get_carts_layout():
+    """Get Carts' layout on the 320x240 handheld tier, as the browser draws it:
+    a tap lands where the console drew, and the browser draws in the theme's
+    fonts, whose line the layout reads (`print_line`). A host workstation
+    installs the same default look's fonts into this process first."""
+    import tempfile
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from runtime import host_app
+    from runtime.getcarts_app import GetCartsLayout
+    with tempfile.TemporaryDirectory() as d:
+        host_app.build_workstation(d)
+    return GetCartsLayout(320, 240, 1, False, 1)

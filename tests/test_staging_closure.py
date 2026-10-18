@@ -234,7 +234,9 @@ GENERATED = {
     "zero": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
     # needs CPython colorsys) -- which is exactly the fix the boards lack below.
-    "web": {"palette"},
+    # And the font set, the module every console board generates too
+    # (tools/make_font.py module, the board's `font_tier`).
+    "web": {"palette", "fonts_data"},
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.

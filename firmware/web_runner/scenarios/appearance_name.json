@@ -5,7 +5,7 @@
   {"click": [443, 208]}, {"wait": 1500},
   {"note": "ACCENT's orange swatch: the look is custom, NAME... appears; a tap on it opens the field"},
   {"click": [860, 194]}, {"wait": 1200},
-  {"click": [524, 314]}, {"wait": 1000},
+  {"click": [524, 334]}, {"wait": 1000},
   {"shot": "name_open"},
   {"note": "a phone's keyboard: the typed text arrives as #kbin's input event, ENTER as its keydown"},
   {"js": "(function(){var k=document.getElementById('kbin');k.focus();k.value=' nikola';k.dispatchEvent(new Event('input'));return k.value;})()"},

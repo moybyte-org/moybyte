@@ -205,8 +205,8 @@ def test_code_font_sets_the_code_tabs_face_and_font_keeps_it(tmp_path):
 
 
 def test_code_font_shows_only_where_the_image_draws_a_choice(tmp_path, monkeypatch):
-    """The browser carries no font set: PetMe128 is its one code font, and
-    the row is not shown."""
+    """An image whose `code_fonts` answers PetMe128 alone has one code font,
+    and the row is not shown."""
     ws = _ws(tmp_path)
     monkeypatch.setattr(ws.look, "code_fonts", lambda: ("petme128",))
     app = _open(ws)

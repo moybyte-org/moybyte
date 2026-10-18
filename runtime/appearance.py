@@ -1054,8 +1054,9 @@ class Appearance:
             if data is None:
                 if n.endswith(".txt") or _fontset.face(n):
                     # a font with no licence beside it; a face of the font
-                    # set where this image carries none (the browser): its
-                    # role draws petme128 here, the face wherever it loads
+                    # set that this image does not carry (the browser has
+                    # the handheld's, not the desk's): its role draws
+                    # petme128 here, the face wherever it loads
                     continue
                 return None
             fetched[n] = data

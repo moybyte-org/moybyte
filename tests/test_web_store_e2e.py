@@ -123,9 +123,7 @@ def _console(tmp_path, index_url):
 def _layout():
     """Where the app draws on the 320x240 handheld tier -- its own layout
     class, so a tap lands where the console drew."""
-    sys.path.insert(0, str(ROOT))
-    from runtime.getcarts_app import GetCartsLayout
-    lay = GetCartsLayout(320, 240, 1, False, 1)
+    lay = web_e2e.get_carts_layout()
 
     def centre(r):
         return [r[0] + r[2] // 2, r[1] + r[3] // 2]

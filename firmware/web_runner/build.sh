@@ -314,6 +314,14 @@ out.append(inspect.getsource(p.rgb888_table))
 open(sys.argv[1], "w").write("\n".join(out))
 PYEOF
 
+# fonts_data.py: the font set the console's themes draw in (tools/make_font.py,
+# native/moy_ui/fonts/), the module every console board freezes too. The
+# board.toml's `font_tier` picks the faces (the handheld's: the browser lays out
+# on the handheld's metrics in both arrangements). It freezes into the wasm the
+# way a board's freezes into its image, so the font bytes ride the baked,
+# compressed micropython.wasm and no page fetch carries them.
+"${PY}" "${REPO_ROOT}/tools/make_font.py" module "${SCRIPT_DIR}" "${STAGE_DIR}/modules/fonts_data.py"
+
 # ---------------------------------------------------------------------------
 # 3. The cart bundle: the runner's shelf roster packed as one JSON
 #    {"<cart>.moy/<relpath>": text}, and {"b": base64} for a cart's cover.png

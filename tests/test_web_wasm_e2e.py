@@ -287,11 +287,10 @@ _APP_UI_RECTS = ((0, 40, 320, 120),)
 
 def _app_ui_host_words(tmp_path, monkeypatch):
     """The fixture's frame on the host's WAMR (tests/test_ui_public.py's
-    run), as canonical RGB565 words, the host carrying no font set or icon
-    sets, as the browser carries none (runtime/fontset.py): the default
-    look's faces are petme128 there."""
+    run), as canonical RGB565 words, the host carrying no icon sets, as the
+    browser carries none (runtime/fontset.py): the font set is the same, the
+    browser's handheld faces being the ones the host's handheld class loads."""
     from runtime import fontset, host_app, wasm_host
-    monkeypatch.setattr(fontset, "file", lambda name: None)
     monkeypatch.setattr(fontset, "icon_file", lambda name: None)
     from tools import wasm_cart
     from ws_helpers import make_drv, open_cart, quiesce
@@ -442,8 +441,7 @@ def test_get_carts_installs_a_compiled_cart_without_its_modules_and_it_plays(tmp
     server, base = web_e2e.serve(site, web_e2e.free_port())
     profile = tmp_path / "chrome"
     sys.path.insert(0, str(ROOT))
-    from runtime.getcarts_app import GetCartsLayout
-    lay = GetCartsLayout(320, 240, 1, False, 1)
+    lay = web_e2e.get_carts_layout()
     row = lay.row_rect(0)
     one = lay.buttons(1)[0]
     try:
