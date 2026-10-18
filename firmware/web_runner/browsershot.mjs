@@ -22,7 +22,7 @@
 // they are mapped through the canvas's on-screen rect for you.
 //
 // It serves dist/ itself and launches headless Chrome, so it is one command.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -307,6 +307,19 @@ for (const step of scenario.steps || []) {
     }
 }
 if (logs.length) { console.log("-- page console --"); for (const l of logs.slice(-25)) console.log("  " + l); }
+// The default profile is this run's own and goes with it; a pinned one
+// (MOY_PROFILE) is the caller's to keep.
+const chromeGone = new Promise((r) => chrome.once("exit", r));
 chrome.kill();
+await Promise.race([chromeGone, new Promise((r) => setTimeout(r, 5000))]);
 server.close();
-process.exit(failed ? 1 : 0);
+// Chrome's helpers can still be writing into it for a moment after the main
+// process exits; a profile that will not go is left, never a failed run.
+if (!process.env.MOY_PROFILE) {
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    catch (e) { console.log("profile left behind:", profile, e && e.code); }
+}
+// Exit only once stdout has drained: process.exit() with a large write still
+// pending on a pipe drops its tail, and a `js ->` line holding a framebuffer
+// then reaches the reader cut off mid-string.
+process.stdout.write("", () => process.exit(failed ? 1 : 0));

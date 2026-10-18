@@ -97,6 +97,11 @@ def _header(face):
     return (d[8], d[6], d[7])       # the cell, the line, the ascent
 
 
+# The wasm half runs where the browser suites run (MOYBYTE_WEB_E2E: the Web
+# console E2E job and preflight's browser step, both after build.sh); the
+# plain suite has no dist/, or a stale one.
+@pytest.mark.skipif(not os.environ.get("MOYBYTE_WEB_E2E"),
+                    reason="MOYBYTE_WEB_E2E not set (boots the built wasm console)")
 @pytest.mark.parametrize("windowed,size", [(True, [1024, 600]), (False, [320, 240])])
 def test_the_browser_console_draws_a_themes_roles_in_its_faces(tmp_path, windowed, size):
     from web_e2e import require
