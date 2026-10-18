@@ -319,7 +319,7 @@ class WindowChrome:
         the keys stay the app's own)."""
         if not self.ws.app_has_page(win.kind):
             return False
-        app = self.ws._apps_by_id.get(win.kind)
+        app = self.ws.page_app(win.kind)
         if win.ctx is not None:
             self._install(win.ctx, win)
         try:

@@ -2384,11 +2384,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             commit()
         return bool(self.bar_layer.handle_bar_tap("app", px, py))
 
+    def page_app(self, kind):
+        """The app behind process `kind` whose pages its back steps through:
+        a registered app, or Settings; None for any other kind."""
+        app = self._apps_by_id.get(kind)
+        if app is None and kind == "settings":
+            app = self.settings_layer
+        return app
+
     def app_has_page(self, kind):
-        """Whether registered app `kind` has a page of it open (its
+        """Whether app `kind` (`page_app`) has a page of it open (its
         `has_page`), which its back steps out of: a desk window shows the
         back chevron in its title strip then. False for any other kind."""
-        app = self._apps_by_id.get(kind)
+        app = self.page_app(kind)
         has = getattr(app, "has_page", None) if app is not None else None
         return bool(has is not None and has())
 

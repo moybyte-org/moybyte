@@ -1365,10 +1365,16 @@ class SettingsLayer:
         self._input_host().keys(i)
         return True
 
+    def has_page(self):
+        """Whether a page is open over Settings' rows (Wi-Fi, Bluetooth, a
+        confirmation, a crash report), which `back` steps out of: a desk
+        window shows the back chevron in its title strip then."""
+        return self._page_of() is not None
+
     def back(self):
         """Back one level -- B, Esc and the bar's chevron: a page open over
         Settings closes, else Settings does (resuming the cart it was opened
-        from)."""
+        from). True: Settings took it either way."""
         view = self._page_of()
         if view == "bt":
             self.close_bluetooth()
@@ -1383,6 +1389,7 @@ class SettingsLayer:
                 self._wifi_back()
         else:
             self.ws._exit_settings()
+        return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

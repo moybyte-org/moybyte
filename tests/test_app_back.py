@@ -12,6 +12,7 @@ import pytest
 
 from runtime.moy_input import InputTable
 from runtime import ui_draw as _ui_draw
+from runtime.settings_layer import TOGGLE_CONFIRMS
 from ws_helpers import build_desktop_ws, build_ws, make_drv, use_theme
 
 DT = 1 / 30
@@ -220,6 +221,31 @@ def test_esc_and_b_in_a_focused_window_are_its_back(tmp_path, key):
     _press(ws, "stop")
     _frames(drv)
     assert "files" in ws.wm._wins, "with no page open Esc leaves the window be"
+
+
+def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
+    """Settings answers `has_page` like the apps: its window's strip heads
+    with the chevron while a page is open over its rows, and the chevron
+    closes the page, never the window."""
+    ws = build_desktop_ws(tmp_path)
+    drv = make_drv(ws)
+    ws.open_desk()
+    ws.open_settings()
+    _frames(drv)
+    sl, win = ws.settings_layer, ws.wm._wins["settings"]
+    assert not ws.app_has_page("settings")
+    assert "back" not in _strip(ws, win)
+    sl.open_confirm(next(iter(TOGGLE_CONFIRMS)))
+    _frames(drv)
+    assert ws.app_has_page("settings")
+    btns = ws.wm._frame_buttons(win)
+    assert btns[0][0] == "back"
+    bx, by, bw, bh = btns[0][1]
+    drv.click(bx + bw // 2, by + bh // 2)
+    _frames(drv)
+    assert sl.confirm_key is None, "the chevron closes the page"
+    assert "settings" in ws.wm._wins, "and never the window"
+    assert "back" not in _strip(ws, win)
 
 
 def test_the_hosts_esc_steps_a_desk_windows_page(tmp_path):
