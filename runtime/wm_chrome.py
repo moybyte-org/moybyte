@@ -467,6 +467,10 @@ class WindowChrome:
         elif self._chip_streak >= self._retained_n():
             return
         self._chip_streak += 1
+        # The chips blend (their labels' and plates' edges) over the bar's
+        # band, which the bar painted once: its ground goes down again first
+        # in the root's bar, so a chip repaint is a full repaint's pixels.
+        self.ws.bar_layer.repaint_cell("desk", "chips")
         line_h = self._root_ctx.layout.line_h
         if _ui_draw.depth()[0]:
             self._draw_look_chips(sc, th, fs, line_h)

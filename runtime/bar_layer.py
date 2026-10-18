@@ -1007,29 +1007,23 @@ class BarLayer:
         cv.backdrop(rec, ws.theme_colors["desktop"], surface=(x, y, sc.w, sc.h))
         return True
 
-    def redraw_clock(self, where):
-        """Repaint JUST the clock cell of an already-drawn bar (#155).
-
-        Lets the desk backdrop cache survive a clock tick. The desk render is
-        wallpaper cover-crop + icon column + this bar, ~77ms on the P4, and the
-        clock is the only part of it that changes while nothing else does -- so
-        without this, ticking the minute invalidated the whole cached desk once a
-        second. The cell is the clock's own (no other widget's cell overlaps
-        it, the taskbar chips stop short of it), so repainting it cannot erase
-        them. A layout with no clock has nothing to repaint."""
-        ws = self.ws
+    def repaint_cell(self, where, name):
+        """Paint the ground of cell `name` of an already-drawn bar again: the
+        band the strip itself draws (the light-theme in-window band is a
+        different token), minus its edge line so the repaint can never eat
+        it. What draws in the cell next lands on fresh pixels -- the clock
+        over its old digits, the taskbar chips' labels and corners, which
+        blend. (canvas, bar, cell rect on the canvas, whether the look drew
+        the band), or None where no bar places the cell."""
         cv = self._bar_canvas(where)
         if cv is None:
-            return
-        got = self.cell(where, "clock")
+            return None
+        got = self.cell(where, name)
         if got is None:
-            return
+            return None
         bar, (x, y, w, h) = got
-        edge, (bx, by, bw, bh), dy, _cells = bar
-        th = ws.theme_colors
-        # Same background the strip itself uses (the light-theme in-window band
-        # is a different token), minus the band's edge line so the repaint can
-        # never eat it.
+        edge, (bx, by, bw, bh), _dy, _cells = bar
+        th = self.ws.theme_colors
         x += bx
         y += by
         cx, cy, cw, ch = x, y, w, h
@@ -1050,6 +1044,25 @@ class BarLayer:
             _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
                                 _BAND_SIDE[edge])
         cv.clip()
+        return cv, bar, (x, y, w, h), looked
+
+    def redraw_clock(self, where):
+        """Repaint JUST the clock cell of an already-drawn bar (#155).
+
+        Lets the desk backdrop cache survive a clock tick. The desk render is
+        wallpaper cover-crop + icon column + this bar, ~77ms on the P4, and the
+        clock is the only part of it that changes while nothing else does -- so
+        without this, ticking the minute invalidated the whole cached desk once a
+        second. The cell is the clock's own (no other widget's cell overlaps
+        it, the taskbar chips stop short of it), so repainting it cannot erase
+        them. A layout with no clock has nothing to repaint."""
+        ws = self.ws
+        got = self.repaint_cell(where, "clock")
+        if got is None:
+            return
+        cv, bar, (x, y, w, h), looked = got
+        edge, (bx, by, bw, bh), dy, _cells = bar
+        th = ws.theme_colors
         text = self._clock_text()
         across = edge in ("left", "right")
         if looked:
