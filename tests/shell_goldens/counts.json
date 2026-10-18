@@ -248,7 +248,7 @@
     "desk_window_calc": [0, 5],
     "popover_battery": [14, 9],
     "popover_clock": [64, 44],
-    "popover_menu": [1, 13],
+    "popover_menu": [1, 11],
     "popover_wifi": [69, 16]
   },
   "p4_1024x600_cs2_fs1_twobars": {
@@ -326,13 +326,13 @@
     "web_console_address": [176, 6]
   },
   "p4_1024x600_fs2_windowed": {
-    "app_appearance": [0, 11],
+    "app_appearance": [0, 10],
     "app_artwork": [0, 9],
-    "app_calc": [0, 17],
-    "app_files": [0, 15],
-    "app_getcarts": [0, 19],
-    "app_notes": [1, 34],
-    "app_storybook": [0, 13],
+    "app_calc": [0, 16],
+    "app_files": [0, 14],
+    "app_getcarts": [0, 18],
+    "app_notes": [1, 33],
+    "app_storybook": [0, 12],
     "desk": [0, 1],
     "desk_window_calc": [0, 5],
     "desk_window_projects": [0, 5],
