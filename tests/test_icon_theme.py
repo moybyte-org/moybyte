@@ -510,8 +510,9 @@ def test_a_bad_swap_is_no_swap():
 
 
 def test_icons_names_a_set_and_a_theme_without_it_keeps_its_sheet():
-    assert iconsets.spec(chrome.live_colors("moy", "light").look) == ("smooth", "default", None)
-    for name in ("night", "platinum", "win95", "contrast"):
+    for name in ("moy", "contrast"):
+        assert iconsets.spec(chrome.live_colors(name, "light").look) == ("smooth", "default", None)
+    for name in ("night", "platinum", "win95"):
         assert iconsets.spec(chrome.live_colors(name, "dark").look) is None, name
 
 

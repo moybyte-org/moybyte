@@ -86,8 +86,10 @@ def test_the_set_is_every_themes_roles_and_the_mono():
 def test_every_family_a_seed_names_carries_its_type_roles():
     """A seed's look `fam` (docs/look_2026-10.md step 26a) draws each role of
     `fontset.ROLES`, at the weight steps the look moves (`w_med`, `w_semi`,
-    `w_bold`; step 26b), in a face its class's tier carries, with the full
-    character set (a Calc subset would draw a name's letters as spaces)."""
+    `w_bold`; step 26b) and the sizes it sets a role on a class
+    (`sizes.hh`, `sizes.dk`; step 26c), in a face its class's tier carries,
+    with the full character set (a Calc subset would draw a name's letters
+    as spaces)."""
     from runtime import fontset
     faces, tiers = make_font.faces()
     named = set()
@@ -102,20 +104,25 @@ def test_every_family_a_seed_names_carries_its_type_roles():
                 if "fam" in part:
                     steps = {w: part[k] for w, k in
                              ((500, "w_med"), (600, "w_semi"), (700, "w_bold")) if k in part}
-                    named.add((part["fam"], tuple(sorted(steps.items()))))
-    assert {fam for fam, _s in named} >= {"inter", "atkinson"}
-    for fam, steps in named:
+                    sizes = tuple((cls, tuple(sorted(v.items())))
+                                  for cls, v in sorted(part.get("sizes", {}).items()))
+                    named.add((part["fam"], tuple(sorted(steps.items())), sizes))
+    assert {fam for fam, _s, _z in named} >= {"inter", "atkinson"}
+    assert any(z for _f, _s, z in named), "a seed sizes a role (Contrast's titles)"
+    for fam, steps, sizes in named:
+        sizes = {cls: dict(v) for cls, v in sizes}
         for desk, tier in ((False, "handheld"), (True, "desktop")):
+            sized = sizes.get("dk" if desk else "hh")
             for role in fontset.ROLES:
-                face = fontset.role_face(fam, role, desk, dict(steps))
+                face = fontset.role_face(fam, role, desk, dict(steps), sized)
                 if face is None:
                     continue
                 assert face[:-4] in tiers[tier], (fam, steps, role, tier)
                 assert not faces[face[:-4]][4], (face, "a Calc subset")
             for role in fontset.CALC_ROLES:
-                face = fontset.role_face(fam, role, desk, dict(steps))
+                face = fontset.role_face(fam, role, desk, dict(steps), sized)
                 assert face[:-4] in tiers[tier], (fam, steps, role, tier)
-            n = len({fontset.role_face(fam, r, desk, dict(steps))
+            n = len({fontset.role_face(fam, r, desk, dict(steps), sized)
                      for r in tuple(fontset.ROLES) + tuple(fontset.CALC_ROLES)} - {None})
             assert n + 1 <= 16, "a theme's faces and the mono fit MOY_FONT_SLOTS"
 

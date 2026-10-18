@@ -1508,9 +1508,9 @@ port), never here.
      held by `tests/test_moy_sync.py`, `tests/test_moy_webhost.py` and
      `tests/test_web_store.py`. The high-contrast seed `contrast` joins
      `native/moy_ui/themes/` here, an accessibility theme listed with the
-     seeds: black panels and white ink in both variants, a yellow accent,
-     `radius` 0, no dither or pinstripe fill, `border` on every part, Tiny5
-     — firmware under a reserved name (§7). Scenario: `switch from store`
+     seeds, firmware under a reserved name (§7); its look is
+     `docs/look_2026-10.md` step 26c's: black on white or white on black,
+     2 px outlines, a yellow focus, Atkinson heavier and its titles larger. Scenario: `switch from store`
      (the switch's frame, and the boot delta of a store package over a
      seed). Gate: a package from a LAN index (`indexes.json`) installs and
      renders on the T-Deck and the P4 and is listed in Appearance; a fixture
@@ -1543,8 +1543,8 @@ port), never here.
      (`chrome.theme_names`, which an app imports as it imports the seeds'
      list); a package whose bytes a re-scan moved is re-installed, and one
      removed falls back to the default seed, persisted. `contrast` keeps
-     `ink_dim` and `chrome_ink_dim` light grey (6), so a disabled part still
-     reads as disabled. Files renames no theme row, as it renames no
+     `ink_dim` and `chrome_ink_dim` a step off its ink (#e6e6e6 on black,
+     #333333 on white), so a disabled part still reads as disabled. Files renames no theme row, as it renames no
      project row: a theme's name is NAME…'s (step 8).
 
   3. **The Appearance design** (owner, 2026-10-14). Before a row is built:

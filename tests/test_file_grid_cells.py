@@ -25,9 +25,10 @@ from runtime import ui_draw
 import ui_twin as twin
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 
-# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s and
-# `blocks`' RGB roles are tests/test_theme_rgb.py's and their goldens'.
-THEME_NAMES = tuple(n for n in THEME_NAMES if n not in ("moy", "blocks"))
+# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s,
+# `blocks`' and `contrast`'s RGB roles are tests/test_theme_rgb.py's and their
+# goldens'.
+THEME_NAMES = tuple(n for n in THEME_NAMES if n not in ("moy", "blocks", "contrast"))
 from runtime.file_widgets import FileGridView
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 

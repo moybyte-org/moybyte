@@ -1171,7 +1171,11 @@
         ["icons.kind", "enum", ["smooth", "pixel"], null], ["icons.set", "text"],
         ["icons.swap", "text"],
         ["fam", "text"], ["w_med", "int", 100, 900], ["w_semi", "int", 100, 900],
-        ["w_bold", "int", 100, 900]
+        ["w_bold", "int", 100, 900],
+        ["sizes.hh.title", "int", 8, 64], ["sizes.hh.key", "int", 8, 64],
+        ["sizes.hh.op", "int", 8, 64], ["sizes.hh.result", "int", 8, 64],
+        ["sizes.dk.title", "int", 8, 64], ["sizes.dk.key", "int", 8, 64],
+        ["sizes.dk.op", "int", 8, 64], ["sizes.dk.result", "int", 8, 64]
       ],
       "button": [
         ["fill", "paint"], ["ink", "colour"], ["border", "line"],

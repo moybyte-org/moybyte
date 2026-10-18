@@ -613,8 +613,8 @@ def _contrast(a, b):
 
 def test_the_readability_check_holds_accent_on_the_current_plate():
     """Where a theme's current mark is a plate, its focus colour clears 3:1 on
-    the plate: Moy's (Day 5.9, Night 5.2 in DESIGN.md) and Contrast's read,
-    and a theme whose accent sinks into its plate is reported (the bit past
+    the plate: Moy's (Day 5.9, Night 5.2 in DESIGN.md) and Contrast's read
+    (its light mode's by the focus outline), and a theme whose accent sinks into its plate is reported (the bit past
     the pairs)."""
     import moy_ui
     from runtime import ui_draw
@@ -631,6 +631,17 @@ def test_the_readability_check_holds_accent_on_the_current_plate():
                        "current": {"style": "plate", "color": "ink", "alpha": 0.1}}})
     try:
         assert moy_ui.theme("pl", True)[1] >> pairs & 1
+    finally:
+        _uninstall()
+        ui_draw.look_moved()
+    # Contrast's light yellow is 1.3:1 on white: its focus mark meets the
+    # plate with its black outline, the colour held; without the outline
+    # the yellow is.
+    _install({"format": 2, "name": "pl", "inherits": "contrast",
+              "look": {"light": {"focus": {"outline": [0, "#000000"]}}}})
+    try:
+        assert moy_ui.theme("pl", True)[1] >> pairs & 1
+        assert not moy_ui.theme("pl", False)[1] >> pairs & 1
     finally:
         _uninstall()
         ui_draw.look_moved()

@@ -1016,48 +1016,73 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "{\012"
     "  \"format\": 2,\012"
     "  \"name\": \"contrast\",\012"
-    "  \"frame\": { \"style\": \"classic\" },\012"
-    "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
-    "  \"colors\": {\012"
-    "    \"dark\": {\012"
-    "      \"panel\": 0, \"edge\": 7, \"title\": 0, \"title_ink\": 7, \"title_inactive\": 0,\012"
-    "      \"accent\": 10, \"hilite\": 10, \"dim\": 7, \"desktop\": 0, \"desktop_pattern\": 0,\012"
-    "      \"surface\": 0, \"surface_alt\": 0, \"ink\": 7, \"ink_dim\": 6, \"border\": 7,\012"
-    "      \"selection\": 10, \"selection_ink\": 0, \"focus\": 10, \"bar\": 0, \"bar_edge\": 7,\012"
-    "      \"chrome_ink\": 7, \"chrome_ink_dim\": 6, \"shade_hi\": 7, \"shade_lo\": 0,\012"
-    "      \"shade_dark\": 7, \"ink_accent\": 10, \"ink_note\": 10, \"value\": 7\012"
-    "    },\012"
-    "    \"light\": {\012"
-    "      \"panel\": 0, \"edge\": 7, \"title\": 0, \"title_ink\": 7, \"title_inactive\": 0,\012"
-    "      \"accent\": 10, \"hilite\": 10, \"dim\": 7, \"desktop\": 0, \"desktop_pattern\": 0,\012"
-    "      \"surface\": 0, \"surface_alt\": 0, \"ink\": 7, \"ink_dim\": 6, \"border\": 7,\012"
-    "      \"selection\": 10, \"selection_ink\": 0, \"focus\": 10, \"bar\": 0, \"bar_edge\": 7,\012"
-    "      \"chrome_ink\": 7, \"chrome_ink_dim\": 6, \"shade_hi\": 7, \"shade_lo\": 0,\012"
-    "      \"shade_dark\": 7, \"ink_accent\": 10, \"ink_note\": 10, \"value\": 7,\012"
-    "      \"surface_light\": false, \"bar_light\": false, \"band_light\": false,\012"
-    "      \"code_text\": 7, \"code_keyword\": 12, \"code_string\": 11, \"code_number\": 9,\012"
-    "      \"code_comment\": 22, \"code_builtin\": 14\012"
-    "    }\012"
+    "  \"fonts\": { \"mono\": \"jbmono-11-400-2.fnt\" },\012"
+    "  \"colors\": { \"dark\": {\012"
+    "    \"panel\": \"#000000\", \"edge\": \"#ffffff\", \"title\": \"#ffffff\", \"title_ink\": \"#000000\",\012"
+    "    \"accent\": \"#ffe600\", \"hilite\": \"#ffe600\", \"dim\": \"#1a1a1a\", \"desktop\": \"#000000\",\012"
+    "    \"desktop_pattern\": \"#1a1a1a\", \"surface\": \"#000000\", \"surface_alt\": \"#000000\",\012"
+    "    \"ink\": \"#ffffff\", \"ink_dim\": \"#e6e6e6\", \"border\": \"#ffffff\", \"selection\": \"#ffe600\",\012"
+    "    \"selection_ink\": \"#000000\", \"focus\": \"#ffe600\", \"bar\": \"#000000\", \"bar_edge\": \"#ffffff\",\012"
+    "    \"chrome_ink\": \"#ffffff\", \"chrome_ink_dim\": \"#e6e6e6\", \"title_active\": \"#ffffff\",\012"
+    "    \"title_inactive\": \"#000000\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#000000\",\012"
+    "    \"shade_dark\": \"#ffffff\", \"ink_accent\": \"#ffe600\", \"ink_note\": \"#ffe600\",\012"
+    "    \"value\": \"#ffffff\", \"value_ink\": \"#000000\", \"danger\": \"#e5484d\",\012"
+    "    \"sunk\": \"#1a1a1a\", \"lcd\": \"#000000\", \"lcd_ink\": \"#ffffff\",\012"
+    "    \"code_text\": \"#ffffff\", \"code_keyword\": \"#ffe600\", \"code_string\": \"#7dff9a\",\012"
+    "    \"code_number\": \"#ffb070\", \"code_comment\": \"#c8c8c8\", \"code_builtin\": \"#7fd0ff\"\012"
+    "  }, \"light\": {\012"
+    "    \"panel\": \"#ffffff\", \"edge\": \"#000000\", \"title\": \"#000000\", \"title_ink\": \"#ffffff\",\012"
+    "    \"accent\": \"#ffe600\", \"hilite\": \"#ffe600\", \"dim\": \"#e6e6e6\", \"desktop\": \"#ffffff\",\012"
+    "    \"desktop_pattern\": \"#e6e6e6\", \"surface\": \"#ffffff\", \"surface_alt\": \"#ffffff\",\012"
+    "    \"ink\": \"#000000\", \"ink_dim\": \"#333333\", \"border\": \"#000000\", \"selection\": \"#ffe600\",\012"
+    "    \"selection_ink\": \"#000000\", \"focus\": \"#ffe600\", \"bar\": \"#ffffff\", \"bar_edge\": \"#000000\",\012"
+    "    \"chrome_ink\": \"#000000\", \"chrome_ink_dim\": \"#333333\", \"title_active\": \"#000000\",\012"
+    "    \"title_inactive\": \"#ffffff\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#e6e6e6\",\012"
+    "    \"shade_dark\": \"#000000\", \"ink_accent\": \"#000000\", \"ink_note\": \"#000000\",\012"
+    "    \"value\": \"#000000\", \"value_ink\": \"#ffffff\", \"danger\": \"#b3261e\",\012"
+    "    \"sunk\": \"#e6e6e6\", \"lcd\": \"#ffffff\", \"lcd_ink\": \"#000000\",\012"
+    "    \"surface_light\": true, \"bar_light\": true, \"band_light\": true,\012"
+    "    \"code_text\": \"#000000\", \"code_keyword\": \"#4b1fb8\", \"code_string\": \"#1a6b2e\",\012"
+    "    \"code_number\": \"#8a4300\", \"code_comment\": \"#4d4d4d\", \"code_builtin\": \"#0b5394\"\012"
+    "  } },\012"
+    "  \"layout\": {\012"
+    "    \"bars\": [{ \"edge\": \"top\", \"size\": 18, \"left\": [\"menu\", \"chips\", \"zone\"],\012"
+    "      \"right\": [\"close\", \"wifi\", \"battery\", \"clock\"] }]\012"
     "  },\012"
     "  \"look\": {\012"
+    "    \"fam\": \"atkinson\", \"w_med\": 600, \"w_semi\": 700, \"w_bold\": 800,\012"
+    "    \"sizes\": { \"hh\": { \"title\": 15, \"key\": 18, \"op\": 19, \"result\": 30 },\012"
+    "      \"dk\": { \"title\": 17, \"key\": 26, \"op\": 28, \"result\": 50 } },\012"
     "    \"focus\": { \"style\": \"invert\", \"card\": \"ring\", \"small\": \"invert\", \"ring\": { \"w\": 3, \"gap\": 2 } },\012"
     "    \"current\": { \"style\": \"plate\" },\012"
-    "    \"dark\": { \"current\": { \"alpha\": 0.40 } },\012"
-    "    \"light\": { \"current\": { \"alpha\": 0.42 }, \"focus\": { \"outline\": [2, 0] } }\012"
-    "  },\012"
-    "  \"surfaces\": {\012"
-    "    \"button\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
-    "    \"button_primary\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
-    "    \"button_tonal\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
-    "    \"button_danger\": { \"rest\": \"border\", \"pressed\": \"border\" },\012"
-    "    \"chip\": { \"rest\": \"border\" },\012"
-    "    \"tab\": { \"rest\": \"border\" },\012"
-    "    \"toggle\": { \"rest\": \"border\" },\012"
-    "    \"panel\": { \"rest\": \"border\" },\012"
-    "    \"toolbar\": { \"rest\": \"border\" },\012"
-    "    \"bar.item\": { \"rest\": \"border\" },\012"
-    "    \"desk.icon\": { \"rest\": \"fill panel, border\" },\012"
-    "    \"desk\": { \"rest\": \"fill bar\" }\012"
+    "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
+    "    \"app_buttons\": { \"calc\": { \"normal\": { \"font\": \"key\" }, \"tonal\": { \"font\": \"op\" },\012"
+    "      \"primary\": { \"font\": \"op\" } } },\012"
+    "    \"win_r\": 4, \"card_r\": 4, \"key_r\": 4,\012"
+    "    \"win\": { \"header\": \"fill\", \"rule\": 2 },\012"
+    "    \"dark\": {\012"
+    "      \"current\": { \"alpha\": 0.40 },\012"
+    "      \"win\": { \"frame\": [2, \"#ffffff\"], \"frame_back\": [2, \"#ffffff\"] },\012"
+    "      \"bar\": { \"fill\": \"#000000\", \"line\": [2, \"#ffffff\"], \"chip_cur\": \"#1a1a1a\" },\012"
+    "      \"buttons\": {\012"
+    "        \"normal\": { \"fill\": \"#000000\", \"border\": [2, \"#ffffff\"] },\012"
+    "        \"tonal\": { \"fill\": \"#262626\", \"ink\": \"#ffffff\", \"border\": [2, \"#ffffff\"] },\012"
+    "        \"danger\": { \"ink\": \"#ff8f8f\", \"border\": [2, \"#ffffff\"] } },\012"
+    "      \"lcd_border\": [2, \"#ffffff\"],\012"
+    "      \"keycap\": { \"border\": [1.25, \"#ffffff\"] }\012"
+    "    },\012"
+    "    \"light\": {\012"
+    "      \"current\": { \"alpha\": 0.42 },\012"
+    "      \"focus\": { \"outline\": [2, \"#000000\"] },\012"
+    "      \"win\": { \"frame\": [2, \"#000000\"], \"frame_back\": [2, \"#000000\"] },\012"
+    "      \"bar\": { \"fill\": \"#ffffff\", \"line\": [2, \"#000000\"], \"chip_cur\": \"#e6e6e6\" },\012"
+    "      \"buttons\": {\012"
+    "        \"normal\": { \"fill\": \"#ffffff\", \"border\": [2, \"#000000\"] },\012"
+    "        \"tonal\": { \"fill\": \"#e6e6e6\", \"ink\": \"#000000\", \"border\": [2, \"#000000\"] },\012"
+    "        \"danger\": { \"ink\": \"#b3261e\", \"border\": [2, \"#000000\"] } },\012"
+    "      \"lcd_border\": [2, \"#000000\"],\012"
+    "      \"keycap\": { \"border\": [1.25, \"#000000\"] }\012"
+    "    }\012"
     "  }\012"
     "}\012",
     // themes/moy.json
@@ -1211,7 +1236,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3994, 4062};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 4038, 3994, 4062};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1597,6 +1622,14 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_med
     {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_semi
     {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_bold
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.hh.title
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.hh.key
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.hh.op
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.hh.result
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.dk.title
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.dk.key
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.dk.op
+    {MOY_THEME_LK_INT, 8, 64, INT32_MIN},  // sizes.dk.result
 };
 
 const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
@@ -1782,6 +1815,14 @@ const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
     "w_med",
     "w_semi",
     "w_bold",
+    "sizes.hh.title",
+    "sizes.hh.key",
+    "sizes.hh.op",
+    "sizes.hh.result",
+    "sizes.dk.title",
+    "sizes.dk.key",
+    "sizes.dk.op",
+    "sizes.dk.result",
 };
 
 const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2] = {
@@ -1939,6 +1980,14 @@ const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
     {"w_med", MOY_THEME_FT_INT, 1, 179},
     {"w_semi", MOY_THEME_FT_INT, 1, 180},
     {"w_bold", MOY_THEME_FT_INT, 1, 181},
+    {"sizes.hh.title", MOY_THEME_FT_INT, 1, 182},
+    {"sizes.hh.key", MOY_THEME_FT_INT, 1, 183},
+    {"sizes.hh.op", MOY_THEME_FT_INT, 1, 184},
+    {"sizes.hh.result", MOY_THEME_FT_INT, 1, 185},
+    {"sizes.dk.title", MOY_THEME_FT_INT, 1, 186},
+    {"sizes.dk.key", MOY_THEME_FT_INT, 1, 187},
+    {"sizes.dk.op", MOY_THEME_FT_INT, 1, 188},
+    {"sizes.dk.result", MOY_THEME_FT_INT, 1, 189},
 };
 
 const moy_theme_field_t moy_theme_btn_fields[7] = {
@@ -1977,6 +2026,9 @@ const char *const moy_theme_look_groups[MOY_THEME_LOOK_GROUPS] = {
     "buttons.toggle",
     "keycap",
     "icons",
+    "sizes",
+    "sizes.hh",
+    "sizes.dk",
 };
 
 const char *const moy_theme_enum_names[MOY_THEME_ENUM_NAMES] = {

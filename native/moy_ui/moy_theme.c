@@ -2764,10 +2764,14 @@ static int look_leaf(const char *name) {
 // The current plate's pair (docs/media/look_2026-10/DESIGN.md, Colour): where
 // a theme's current mark is a plate, its focus colour clears
 // MOY_THEME_CONTRAST on the plate (current.color at current.alpha over
-// `surface`). 1 where it does or the current is no plate.
+// `surface`); where the focus mark has an outline (`focus.outline`, Contrast's
+// light mode, whose yellow is 1.3:1 on white) the outline is its edge on the
+// plate, so the outline's colour is held instead. 1 where it does or the
+// current is no plate.
 static int plate_reads(const char *name, size_t n, int variant, const int32_t *row) {
     int ls = look_leaf("current.style"), lc = look_leaf("current.color");
     int la = look_leaf("current.alpha"), lf = look_leaf("focus.color");
+    int low = look_leaf("focus.outline.w"), loc = look_leaf("focus.outline.c");
     moy_theme_look_t *lk = THEME_ALLOC(sizeof(moy_theme_look_t));
     if (lk == NULL || ls < 0 || lc < 0 || la < 0 || lf < 0) {
         free(lk);
@@ -2790,7 +2794,12 @@ static int plate_reads(const char *name, size_t n, int variant, const int32_t *r
             int cr5 = c >> 11, cg = (c >> 5) & 63, cb = c & 31;
             uint16_t p = (uint16_t)(((gr + (cr5 - gr) * k / 100) << 11)
                                     | ((gg + (cg - gg) * k / 100) << 5) | (gb + (cb - gb) * k / 100));
-            int32_t lp = lum565(p), la2 = moy_theme_lum_of(row[fr]);
+            int32_t edge = row[fr];
+            if (low >= 0 && loc >= 0 && lk->v[low] > 0
+                && lk->v[loc] >= 0) {
+                edge = lk->v[loc];
+            }
+            int32_t lp = lum565(p), la2 = moy_theme_lum_of(edge);
             int32_t hi = lp > la2 ? lp : la2, lo = lp > la2 ? la2 : lp;
             ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
         }

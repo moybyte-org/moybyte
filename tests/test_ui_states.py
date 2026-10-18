@@ -23,9 +23,10 @@ from runtime import ui
 from runtime import ui_draw
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 
-# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s and
-# `blocks`' RGB roles are tests/test_theme_rgb.py's and its goldens'.
-THEME_NAMES = tuple(n for n in THEME_NAMES if n not in ("moy", "blocks"))
+# The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s,
+# `blocks`' and `contrast`'s RGB roles are tests/test_theme_rgb.py's and its
+# goldens'.
+THEME_NAMES = tuple(n for n in THEME_NAMES if n not in ("moy", "blocks", "contrast"))
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.host_canvas import indices_of
 
@@ -168,14 +169,6 @@ SHIPPED_WIDGET_HASHES = (
     "outline/light 480x320@1 2cf2c3b4e981f9e4",
     "outline/light 1024x600@2 45ddee661dd9f978",
     "outline/light 320x240@3 a8ea861852569676",
-    "contrast/dark 320x240@1 84124fc412e47af3",
-    "contrast/dark 480x320@1 911aa409329decf5",
-    "contrast/dark 1024x600@2 36978144566e9002",
-    "contrast/dark 320x240@3 1d4727d6f947e754",
-    "contrast/light 320x240@1 84124fc412e47af3",
-    "contrast/light 480x320@1 911aa409329decf5",
-    "contrast/light 1024x600@2 36978144566e9002",
-    "contrast/light 320x240@3 1d4727d6f947e754",
 )
 
 _SIZES = ((320, 240, 1), (480, 320, 1), (1024, 600, 2), (320, 240, 3))
@@ -906,8 +899,6 @@ WIDGET_MATRIX_HASHES = (
     "win95/light 489a464d634664b9",
     "outline/dark 959c775cbbaf86da",
     "outline/light 0221118a3188188a",
-    "contrast/dark 142ae2069d655301",
-    "contrast/light 142ae2069d655301",
 )
 
 

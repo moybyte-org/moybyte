@@ -267,6 +267,27 @@ def test_blocks_draws_atkinson_at_its_own_weights(tmp_path, kw, faces, variant):
     assert _faces() == dict(faces, mono="jbmono-11-400-2.fnt")
 
 
+@pytest.mark.parametrize("kw, faces, calc", [
+    ({}, {"ui": "atkinson-12-600-2.fnt", "title": "atkinson-15-700-4.fnt",
+          "caption": "atkinson-11-700-2.fnt", "hero": "atkinson-19-800-4.fnt"},
+     ("atkinson-18-600-4.fnt", "atkinson-19-600-4.fnt", "atkinson-30-700-4.fnt")),
+    (DESK, {"ui": "atkinson-15-600-4.fnt", "title": "atkinson-17-700-4.fnt",
+            "caption": "atkinson-12-700-4.fnt", "hero": "atkinson-17-700-4.fnt"},
+     ("atkinson-26-600-4.fnt", "atkinson-28-600-4.fnt", "atkinson-50-700-4.fnt"))])
+@pytest.mark.parametrize("variant", ["light", "dark"])
+def test_contrast_draws_atkinson_larger_and_heavier(tmp_path, kw, faces, calc, variant):
+    """Contrast's look moves every weight step a step up (docs/look_2026-10.md
+    step 26c: `w_med` 600, `w_semi` 700, `w_bold` 800) and sizes its titles
+    and Calc's faces (`sizes.hh`, `sizes.dk`), in either mode."""
+    from runtime import appearance
+    ws = _ws(tmp_path, **kw)
+    ws.look.set_theme("contrast", persist=False, variant=variant)
+    _frame(ws)
+    assert _faces() == dict(faces, mono="jbmono-11-400-2.fnt")
+    files = {fid: f for (_pkg, f), fid in appearance._FONTS.items()}
+    assert tuple(files.get(ui_draw.font(r)[0]) for r in ("key", "op", "result")) == calc
+
+
 def test_a_font_preset_on_moy_night_overrides_its_family(tmp_path):
     """A custom made from Moy Night keeps its family; FONT on it names the
     package's own `ui`, so the family yields every type role to the chain."""

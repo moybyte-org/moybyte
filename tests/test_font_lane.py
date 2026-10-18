@@ -314,12 +314,13 @@ NIGHT_FONTS = (("ui", "tiny5.fnt"), ("title", "tiny5.fnt"))
 
 def test_every_seed_draws_in_tiny5():
     """`night` names Tiny5 for `ui` and `title`, and every other seed
-    inherits it; `mono` stays petme128 (phase 4 step 3) but in `moy` and
-    `blocks`, whose Code tab is JetBrains Mono (docs/look_2026-10.md steps
-    23 and 26b), a face of the font set and not embedded in the tables."""
+    inherits it; `mono` stays petme128 (phase 4 step 3) but in `moy`,
+    `blocks` and `contrast`, whose Code tab is JetBrains Mono
+    (docs/look_2026-10.md steps 23, 26b and 26c), a face of the font set and
+    not embedded in the tables."""
     for name in moy_ui.themes():
         want = NIGHT_FONTS + ((("mono", "jbmono-11-400-2.fnt"),)
-                              if name in ("moy", "blocks") else ())
+                              if name in ("moy", "blocks", "contrast") else ())
         assert moy_ui.theme_fonts(name) == want, name
     assert moy_ui.font_file("jbmono-11-400-2.fnt") is None
 

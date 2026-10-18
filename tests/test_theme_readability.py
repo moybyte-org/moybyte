@@ -190,11 +190,19 @@ def _install(name, surfaces, colors=None):
     ui_draw.use_shape(name)
 
 
+def _black_and_white():
+    """The palette Contrast had before its look (docs/look_2026-10.md step
+    26c): black panels, white ink and edges, yellow accent."""
+    th = dict(theme_colors("night"))
+    th.update(panel=0, edge=7, chrome_ink=7, accent=10, shade_dark=7, ink=7)
+    return th
+
+
 def test_a_chrome_part_without_a_fill_paints_its_own_colours():
-    """The Contrast seed's `bar.item: border` painted nothing, so the focused
-    window's chip was black ink on the black bar; its `desk.icon` bare
-    border was no line at all."""
-    th = theme_colors("contrast")
+    """Contrast's palette seed had `bar.item: border`, which painted nothing,
+    so the focused window's chip was black ink on the black bar; its
+    `desk.icon` bare border was no line at all."""
+    th = _black_and_white()
     try:
         _install("parts", {"bar.item": {"rest": "border"},
                            "desk.icon": {"rest": "fill panel, border"}})
@@ -215,10 +223,11 @@ def test_a_chrome_part_without_a_fill_paints_its_own_colours():
 
 
 def test_a_bare_button_border_is_the_shade_dark_role():
-    """Contrast's `button: border` drew a black edge on its black keys."""
-    th = theme_colors("contrast")
+    """Contrast's palette seed's `button: border` drew a black edge on its
+    black keys."""
+    th = _black_and_white()
     try:
-        ui_draw.use_shape("contrast")
+        _install("keys", {"button": {"rest": "border", "pressed": "border"}})
         cv = SystemCanvas(60, 40)
         cv.cls(th["panel"])
         ui_draw.button(cv, th, (5, 5, 40, 24), "7")

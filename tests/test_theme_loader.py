@@ -456,13 +456,13 @@ def test_the_home_rides_the_layout_carousel_by_default():
 
 
 def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
-    """...but Moy and Blocks, whose looks carry the 2026-10 bar
-    (docs/look_2026-10.md steps 14 and 26b): the Moy button first, the
-    status at the right."""
+    """...but Moy, Blocks and Contrast, whose looks carry the 2026-10 bar
+    (docs/look_2026-10.md steps 14, 26b and 26c): the Moy button first,
+    the status at the right."""
     for name in TH["seeds"]:
-        if name not in ("moy", "blocks"):
+        if name not in ("moy", "blocks", "contrast"):
             assert moy_ui.theme_layout(name) == (False, (TODAY,)), name
-    for name in ("moy", "blocks"):
+    for name in ("moy", "blocks", "contrast"):
         assert moy_ui.theme_layout(name) == (False, (
             ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"),
              ()),)), name

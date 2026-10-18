@@ -43,6 +43,9 @@ _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
 # ...and the slot of an icon set (runtime/iconsets.py) each draws.
 _ICON_SLOTS = {"menu": "code", "projects": "projects", "settings": "settings",
                "update": "getcarts", "desktop": "run"}
+# `win.header`'s `fill` (style.json's theme.look enum: plain, fill, bar, grad),
+# whose focused header is the `value` colour and its title and icon `value_ink`.
+_HEAD_FILL = 1
 # A look chip's room beside its label: the 12-pixel margin, the 18-pixel icon
 # and 8 to the label, 24 after it (the 2026-10 look's desk bar).
 _CHIP_PAD = 18 + 8 + 24
@@ -113,7 +116,11 @@ class WindowChrome:
         ws = self.ws
         sc = self._root_canvas
         x, y, w, h = slot
-        ink = ws.theme_colors["chrome_ink" if focused else "chrome_ink_dim"]
+        role = "chrome_ink" if focused else "chrome_ink_dim"
+        if focused and _ui_draw.depth()[13] \
+                and ws.look.live.look[0].get("win.header") == _HEAD_FILL:
+            role = "value_ink"            # on the `value` header (moy_ui_depth_title_ink)
+        ink = ws.theme_colors[role]
         if ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
             return
         img = self._win_icon_img(win)

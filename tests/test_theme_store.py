@@ -24,6 +24,8 @@ from ws_helpers import build_ws, build_desktop_ws
 import moy_ui
 from runtime import appearance, chrome
 
+RGB = 0x1000000         # an RGB role's tag (tests/test_theme_rgb.py)
+
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
 NAME = "dusk"
 
@@ -190,7 +192,9 @@ def test_contrast_is_a_seed_that_reads_in_both_variants():
         for variant in chrome.THEME_VARIANTS:
             th = chrome.theme_colors("contrast", variant)
             assert ui_draw.pattern_unreadable(th) == []
-            assert (th["panel"], th["ink"], th["accent"]) == (0, 7, 10)
+            light = variant == "light"
+            assert (th["panel"], th["ink"], th["accent"]) == (
+                RGB | (0xffffff if light else 0), RGB | (0 if light else 0xffffff), RGB | 0xffe600)
     finally:
         ui_draw.use_shape(None)
 

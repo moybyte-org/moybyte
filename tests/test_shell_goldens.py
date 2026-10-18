@@ -72,10 +72,11 @@ keeps the matrix a clean product instead of a pile of special cases.
                            3 step 3). One axis (theme) from the as-shipped row
                            in the light variant.
   p4_1024x600_cs2_fs1_contrast_light  the same, under the high-contrast seed
-                           `contrast` (phase 6 step 2): black panels and white
-                           ink in both variants, a yellow accent, a border on
-                           every part. One axis (theme) from the as-shipped
-                           row in the light variant.
+                           `contrast` (docs/look_2026-10.md step 26c): black
+                           on white in the light variant, 2 px outlines, a
+                           yellow focus outlined in black, Atkinson. One axis
+                           (theme) from the as-shipped row in the light
+                           variant.
   tdeck_320x240_fs1_moy_day, tdeck_320x240_fs1_moy_night,
   p4_1024x600_cs2_fs1_moy_day, p4_1024x600_cs2_fs1_moy_night
                            the `moy` seed (docs/look_2026-10.md step 5) in
