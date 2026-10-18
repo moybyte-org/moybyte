@@ -191,6 +191,11 @@
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
+  "p4_1024x600_cs2_fs1_moy_menus": {
+    "pause": [6, 14],
+    "pause_options": [14, 7],
+    "sysmenu": [1, 8]
+  },
   "p4_1024x600_cs2_fs1_moy_night": {
     "app_appearance": [0, 11],
     "app_artwork": [0, 9],
@@ -515,6 +520,11 @@
     "settings": [42, 19],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
+  },
+  "tdeck_320x240_fs1_moy_menus": {
+    "pause": [6, 14],
+    "pause_options": [14, 7],
+    "sysmenu": [1, 9]
   },
   "tdeck_320x240_fs1_moy_night": {
     "app_appearance": [41, 19],

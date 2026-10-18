@@ -191,6 +191,11 @@
     "web_console": "5cfb03bbfe81037085537674c0898434cdd7c124ba8c08b1bfeefc4eaa28883e",
     "web_console_address": "fd0cc58b4de86a3b190c648fbf30afd1da93ca259346ace81e07027486a78b27"
   },
+  "p4_1024x600_cs2_fs1_moy_menus": {
+    "pause": "c9c831d466f70d91335fc9b82545ec2171eecd93add76e8df3a84b7deac2d812",
+    "pause_options": "d4da99f4abc09887f9ed44cc994cbbbb1b7b55e97bd77ac018e9fbb1a09bdf40",
+    "sysmenu": "fee59a7172a0652666eee1f55c7848cbc461027eb4e1b46dc627ad9d4db29016"
+  },
   "p4_1024x600_cs2_fs1_moy_night": {
     "app_appearance": "bd04f6e0d28031ed26747dc1835c6c497a9bbf2b5cdb2a87a3a5475d0927aea9",
     "app_artwork": "d8029df6f3c3b740f3c186ce88d2c1ee2a0b9b495fdbdf743a54203a00e9f925",
@@ -515,6 +520,11 @@
     "settings": "0e8b2838948700db9f76512be8060a273b81c0febf356b7a21065c39a8bb8fc0",
     "web_console": "4d5023f558730df1a06a217698a9be1183a08bb805e8b7b7c282748347692ddc",
     "web_console_address": "0f3fdd1370cf8f8c549469534a56f92a5775f4595d82cb22fb8d262e0e1f8f60"
+  },
+  "tdeck_320x240_fs1_moy_menus": {
+    "pause": "4b02ae4c9e65b91572a35c2545947f1ff294ff14ff7901e4d261f0a2def9b6a9",
+    "pause_options": "d0ec2ba33becd5702f55cf111177be55e6ec5c88cabcd7f1a0a21dd71892db0a",
+    "sysmenu": "124f3abbd71c424c46d92131a4b5b4272e5c716d6013320e0665b1db59f049ee"
   },
   "tdeck_320x240_fs1_moy_night": {
     "app_appearance": "6fd3a9359896945cb0ede33ae6cefc0841af0381e96e54baba65e548e3c49da1",
