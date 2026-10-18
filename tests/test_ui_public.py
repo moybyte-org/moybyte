@@ -482,11 +482,11 @@ def test_apps_draw_focus_through_the_marks():
     assert hits == []
 
 
-def _first_page(root, title, theme):
+def _first_page(root, title, theme, variant=None):
     """The page's first settled frame in a fresh workstation under `theme`."""
     ws = host_app.build_workstation(root)
     ws.pointer.visible = False
-    ws.look.set_theme(theme, persist=False)
+    ws.look.set_theme(theme, persist=False, variant=variant)
     open_cart(ws, title)
     drv = make_drv(ws)
     drv.frame(_DT)
@@ -511,3 +511,22 @@ def test_a_later_workstation_never_draws_the_look_of_an_earlier_one(tmp_path):
         py = _first_page(root, "UI Page Py", theme)
         lua = _first_page(root, "UI Page Lua", theme)
         assert lua == py, "the Lua page under %s drew other pixels than python" % theme
+
+
+def test_a_python_pages_ground_is_a_colour_the_cart_canvas_has(tmp_path):
+    """Under Moy Day the page's ground is the shell's block colour 64, which a
+    cart canvas does not hold: it drew as index 0, a black page. Inside the
+    cart boundary a block colour is its nearest MOY64, as the Lua page's is."""
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("page_py.moy", "page_lua.moy"):
+        shutil.copytree(os.path.join(PAGES, d), os.path.join(root, d))
+
+    def ground(px):
+        words = [px[i:i + 2] for i in range(0, len(px), 2)]
+        return max(set(words), key=words.count)
+
+    py = ground(_first_page(root, "UI Page Py", "moy", "light"))
+    lua = ground(_first_page(root, "UI Page Lua", "moy", "light"))
+    assert py != b"\x00\x00", "the page's ground is black"
+    assert py == lua

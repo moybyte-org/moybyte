@@ -126,13 +126,13 @@ static void use_part(draw_t *d, int kind, int state, int fs) {
 }
 
 static void fill(draw_t *d, int x, int y, int w, int h, int ci) {
-    moy_target_fill(&d->t, x, y, w, h, d->row->pal[ci & moy_ui_cmask()]);
+    moy_target_fill(&d->t, x, y, w, h, d->row->pal[moy_ui_pidx(ci)]);
     d->row->st[MOY_ST_N_FILL]++;
 }
 
 // The canvas's rectb: four clipped fills, one op.
 static void rectb(draw_t *d, int x, int y, int w, int h, int ci) {
-    uint16_t c = d->row->pal[ci & moy_ui_cmask()];
+    uint16_t c = d->row->pal[moy_ui_pidx(ci)];
     moy_target_fill(&d->t, x, y, w, 1, c);
     moy_target_fill(&d->t, x, y + h - 1, w, 1, c);
     moy_target_fill(&d->t, x, y, 1, h, c);
@@ -161,7 +161,7 @@ static void text_col(draw_t *d, int table, const uint8_t *s, size_t n, int x, in
 
 static void text_paint(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci,
                        const moy_text_paint_t *p) {
-    text_col(d, 0, s, n, x, y, d->row->pal[ci & moy_ui_cmask()], p);
+    text_col(d, 0, s, n, x, y, d->row->pal[moy_ui_pidx(ci)], p);
 }
 
 int moy_ui_text_in(const moy_ui_sink_t *s, uint32_t font, int table, moy_ui_span_t t, int x,
@@ -206,7 +206,7 @@ static void text_over(draw_t *d, const uint8_t *s, size_t n, int x, int y, int c
         text(d, s, n, x, y, ci);
         return;
     }
-    moy_text_paint_t p = {d->row->pal[field & moy_ui_cmask()], box.x, box.y, box.w, box.h,
+    moy_text_paint_t p = {d->row->pal[moy_ui_pidx(field)], box.x, box.y, box.w, box.h,
                           MOY_TEXT_NO_SHADOW, 0, 0, 0};
     text_paint(d, s, n, x + d->pdx, y + d->pdy, ci, &p);
 }
@@ -223,7 +223,7 @@ static moy_ui_box_t span_box(int x0, int x1, moy_ui_box_t b, int edge) {
 
 static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scale) {
     d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, g, x + d->pdx, y + d->pdy, w, h,
-                                                   d->row->pal[ci & moy_ui_cmask()], scale);
+                                                   d->row->pal[moy_ui_pidx(ci)], scale);
 }
 
 // -- sprites (docs/theming_2026-09.md §4.6) ---------------------------------------
@@ -311,7 +311,7 @@ static int sprite(draw_t *d, moy_ui_box_t b, int cell, int scale) {
                     x2++;
                 }
                 if (ci >= 0) {
-                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y, d->row->pal[ci & moy_ui_cmask()]);
+                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y, d->row->pal[moy_ui_pidx(ci)]);
                 }
                 x = x2;
                 ci = next;
@@ -603,10 +603,10 @@ int moy_ui_label_paint(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, 
         int y = b.y + moy_ui_fdiv(b.h - d.f.line * d.tfs, 2);
         moy_text_paint_t p = {MOY_TEXT_BG_READ, b.x, b.y, b.w, b.h, MOY_TEXT_NO_SHADOW, 0, 0, 0};
         if (lp != NULL && lp->bg >= 0) {
-            p.bg = d.row->pal[lp->bg & moy_ui_cmask()];
+            p.bg = d.row->pal[moy_ui_pidx(lp->bg)];
         }
         if (lp != NULL && lp->shadow >= 0 && lp->shadow_a > 0) {
-            p.shadow = d.row->pal[lp->shadow & moy_ui_cmask()];
+            p.shadow = d.row->pal[moy_ui_pidx(lp->shadow)];
             p.shadow_a = lp->shadow_a;
             p.shadow_dx = lp->dx;
             p.shadow_dy = lp->dy;
@@ -841,17 +841,17 @@ static void button_body(draw_t *d, moy_ui_box_t b, const moy_ui_btn_style_t *bs,
     sr.stepped = (uint8_t)moy_ui_depth()->stepped;
     if (bg >= 0) {
         fillp.n = 1;
-        fillp.c[0] = d->row->pal[bg & moy_ui_cmask()];
+        fillp.c[0] = d->row->pal[moy_ui_pidx(bg)];
         sr.fill = &fillp;
         *on = bg;
     }
     if (bevel) {
         sr.line = (uint8_t)(n > 0 ? n : 1);
-        sr.line_hi = d->row->pal[moy_ui_token(d->look, MOY_UI_T_SHADE_HI) & moy_ui_cmask()];
-        sr.line_lo = d->row->pal[moy_ui_token(d->look, MOY_UI_T_SHADE_LO) & moy_ui_cmask()];
+        sr.line_hi = d->row->pal[moy_ui_pidx(moy_ui_token(d->look, MOY_UI_T_SHADE_HI))];
+        sr.line_lo = d->row->pal[moy_ui_pidx(moy_ui_token(d->look, MOY_UI_T_SHADE_LO))];
     } else if (n > 0 && edge >= 0) {
         sr.line = (uint8_t)n;
-        sr.line_hi = d->row->pal[edge & moy_ui_cmask()];
+        sr.line_hi = d->row->pal[moy_ui_pidx(edge)];
         sr.line_lo = -1;
     }
     *ring = sr.line;
@@ -1679,7 +1679,7 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             continue;
         }
         if (depth) {
-            if (!moy_ui_icon_button(&d.t, id, b, d.row->pal[ink & moy_ui_cmask()])) {
+            if (!moy_ui_icon_button(&d.t, id, b, d.row->pal[moy_ui_pidx(ink)])) {
                 glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
             }
             continue;

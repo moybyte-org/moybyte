@@ -166,6 +166,10 @@ uint32_t moy_ui_font(int role, moy_font_info_t *out);
 int moy_ui_cart_text(int on);
 // What a colour index is masked with now: 127, or 63 inside the boundary.
 int moy_ui_cmask(void);
+// The index a palette row is read at for a colour `ci`: 127-masked, and inside
+// the boundary a block colour (64..127, the theme's own) is its nearest MOY64,
+// where the mask alone read it as index 0..63 (black for the page's ground).
+int moy_ui_pidx(int ci);
 // The shell's print font (moy_text_print_font_use), the one put aside while a
 // cart's code runs: the font it replaced, or -1 for one not loaded.
 int64_t moy_ui_print_font(uint32_t font);

@@ -64,7 +64,7 @@ static int tok(const pd_t *d, int token, int alt) {
 }
 
 static uint16_t pal(const pd_t *d, int ci) {
-    return d->row->pal[ci & moy_ui_cmask()];
+    return d->row->pal[moy_ui_pidx(ci)];
 }
 
 // A look colour (an index, or RGB) in the buffer's order.

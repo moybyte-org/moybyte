@@ -30,7 +30,7 @@ int moy_ui_sink_mask(const moy_ui_sink_t *s, uint32_t font, int code, int x, int
         (int)st[MOY_ST_CX0], (int)st[MOY_ST_CY0], (int)st[MOY_ST_CX1], (int)st[MOY_ST_CY1],
     };
     uint8_t b = (uint8_t)code;
-    int w = moy_text(&t, font, MOY_TEXT_DATA, &b, 1, x, y, row->pal[ci & moy_ui_cmask()], 1,
+    int w = moy_text(&t, font, MOY_TEXT_DATA, &b, 1, x, y, row->pal[moy_ui_pidx(ci)], 1,
                      MOY_TEXT_LEFT, -1);
     row->st[MOY_ST_N_TEXT]++;
     return w < 0 ? MOY_UI_BAD : MOY_UI_OK;

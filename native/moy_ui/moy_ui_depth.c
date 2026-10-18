@@ -353,14 +353,14 @@ static void open_dd(const moy_ui_sink_t *s, dd_t *d, int crossing) {
 }
 
 static uint16_t tok(const dd_t *d, int token) {
-    return d->row->pal[moy_ui_token(d->look, token) & moy_ui_cmask()];
+    return d->row->pal[moy_ui_pidx(moy_ui_token(d->look, token))];
 }
 
 // A look's colour value in the buffer's order: an index through the row's
 // table, RGB through RGB565.
 static uint16_t val(const dd_t *d, int32_t v) {
     if (v >= 0 && v < 128) {
-        return d->row->pal[v & moy_ui_cmask()];
+        return d->row->pal[moy_ui_pidx(v)];
     }
     return moy_shape_wire(moy_theme_rgb565(v));
 }
@@ -598,7 +598,7 @@ static uint16_t mix565(uint16_t a, uint16_t b, int k) {      // k/255 of b over 
 // The ink a part filled in colour index `ci` takes: black or white, the one
 // that clears it (a light accent, Contrast's yellow, takes black).
 static int ink_over(const dd_t *d, int ci) {
-    uint16_t c = moy_shape_wire(d->row->pal[ci & moy_ui_cmask()]);
+    uint16_t c = moy_shape_wire(d->row->pal[moy_ui_pidx(ci)]);
     int r = (c >> 11) * 255 / 31, g = ((c >> 5) & 63) * 255 / 63, b = (c & 31) * 255 / 31;
     return 2126 * r + 7152 * g + 722 * b > 1400000 ? 0 : 7;
 }
@@ -682,7 +682,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
     cls = moy_ui_mark_class(b, cls, fs);
     int st = m->style[cls];
     int ci = moy_ui_token(d.look, m->color);
-    uint16_t c = d.row->pal[ci & moy_ui_cmask()];
+    uint16_t c = d.row->pal[moy_ui_pidx(ci)];
     if (flags & MOY_UI_MARK_RING) {
         if (!after) {
             focus_ring_of(&d, m, x, y, w, h, r, c);

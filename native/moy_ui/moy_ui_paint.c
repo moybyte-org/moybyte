@@ -46,7 +46,7 @@ static void solid(paint_t *p, int x, int y, int w, int h, int ci) {
     if (ci < 0 || w <= 0 || h <= 0) {
         return;
     }
-    moy_target_fill(p->t, x, y, w, h, p->pal[ci & moy_ui_cmask()]);
+    moy_target_fill(p->t, x, y, w, h, p->pal[moy_ui_pidx(ci)]);
     p->fills++;
 }
 
@@ -72,7 +72,7 @@ static void pattern(paint_t *p, int x, int y, int w, int h, unsigned pat, int a,
     if (x1 <= x0) {
         return;
     }
-    uint16_t on = p->pal[a & moy_ui_cmask()], off = p->pal[b & moy_ui_cmask()];
+    uint16_t on = p->pal[moy_ui_pidx(a)], off = p->pal[moy_ui_pidx(b)];
     for (int row = y0; row < y1; row++) {
         unsigned bits = (pat >> (12 - ((row & 3) << 2))) & 15u;
         moy_pat_span(t->px + (size_t)row * (size_t)stride + (size_t)x0, x0, bits, on, off,

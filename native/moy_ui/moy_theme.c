@@ -2820,7 +2820,8 @@ int32_t moy_theme_nearest(int32_t v) {
         rgb = (uint32_t)v & 0xffffffu;
     } else {
         uint16_t w = s_live[v - MOY_THEME_SLOT0];
-        rgb = ((uint32_t)(w >> 11) << 19) | ((uint32_t)((w >> 5) & 63) << 10) | ((uint32_t)(w & 31) << 3);
+        uint32_t r5 = w >> 11, g6 = (w >> 5) & 63, b5 = w & 31;       // bits replicated: 31 is 255
+        rgb = (((r5 << 3) | (r5 >> 2)) << 16) | (((g6 << 2) | (g6 >> 4)) << 8) | ((b5 << 3) | (b5 >> 2));
     }
     int32_t best = 0;
     int64_t bd = -1;

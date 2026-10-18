@@ -484,6 +484,17 @@ int moy_ui_cmask(void) {
     return s_cart ? 63 : 127;
 }
 
+int moy_ui_pidx(int ci) {
+    if (!s_cart) {
+        return ci & 127;
+    }
+    // The theme's colours are the shell's block at 64..127, which a cart's
+    // canvas does not have: inside the boundary one is its nearest MOY64. A
+    // negative index (none) keeps the cart's modulo.
+    return ci >= MOY_THEME_SLOT0 && ci < MOY_THEME_SLOT0 + MOY_THEME_BLOCK
+               ? (int)moy_theme_nearest(ci) : ci & 63;
+}
+
 int64_t moy_ui_print_font(uint32_t font) {
     if (!s_cart) {
         return moy_text_print_font_use(font);
