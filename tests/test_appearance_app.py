@@ -250,21 +250,26 @@ def test_moy_night_draws_inter_and_day_keeps_its_faces(tmp_path, kw, faces):
     assert got["caption"] is None and got["mono"] == "jbmono-11-400-2.fnt"
 
 
-@pytest.mark.parametrize("kw, faces", [
+@pytest.mark.parametrize("kw, faces, calc", [
     ({}, {"ui": "atkinson-12-500-2.fnt", "title": "atkinson-14-700-4.fnt",
-          "caption": "atkinson-11-700-2.fnt", "hero": "atkinson-19-800-4.fnt"}),
+          "caption": "atkinson-11-700-2.fnt", "hero": "atkinson-19-800-4.fnt"},
+     ("atkinson-16-500-4.fnt", "atkinson-17-500-4.fnt", "atkinson-28-700-4.fnt")),
     (DESK, {"ui": "atkinson-15-500-4.fnt", "title": "atkinson-15-700-4.fnt",
-            "caption": "atkinson-12-700-4.fnt", "hero": "atkinson-15-700-4.fnt"})])
+            "caption": "atkinson-12-700-4.fnt", "hero": "atkinson-15-700-4.fnt"},
+     ("atkinson-22-500-4.fnt", "atkinson-24-500-4.fnt", "atkinson-44-700-4.fnt"))])
 @pytest.mark.parametrize("variant", ["light", "dark"])
-def test_blocks_draws_atkinson_at_its_own_weights(tmp_path, kw, faces, variant):
+def test_blocks_draws_atkinson_at_its_own_weights(tmp_path, kw, faces, calc, variant):
     """Blocks' look sets `fam` and moves the weight steps (docs/look_2026-10.md
     step 26b: `w_semi` 700, `w_bold` 800), so its semibold roles take
     Atkinson Bold and the hero ExtraBold, in its one mode whichever the
-    Mode row holds."""
+    Mode row holds; Calc's keys and result take its Calc faces."""
+    from runtime import appearance
     ws = _ws(tmp_path, **kw)
     ws.look.set_theme("blocks", persist=False, variant=variant)
     _frame(ws)
     assert _faces() == dict(faces, mono="jbmono-11-400-2.fnt")
+    files = {fid: f for (_pkg, f), fid in appearance._FONTS.items()}
+    assert tuple(files.get(ui_draw.font(r)[0]) for r in ("key", "op", "result")) == calc
 
 
 @pytest.mark.parametrize("kw, faces, calc", [

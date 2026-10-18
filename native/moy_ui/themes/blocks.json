@@ -39,6 +39,8 @@
     "fam": "atkinson", "w_semi": 700, "w_bold": 800,
     "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3 } },
     "icons": { "kind": "smooth", "set": "default" },
+    "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+                               "primary": { "font": "op" } } },
     "win_r": 16, "card_r": 14, "key_r": 12,
     "home_bg": "#ffd23f",
     "win": { "header": "fill", "frame": [2, "#1a1530"], "frame_back": [2, "#5b5167"], "rule": 2 },
