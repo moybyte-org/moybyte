@@ -3263,3 +3263,21 @@ def test_a_new_window_keeps_clear_of_the_wallpapers_subject(tmp_path):
     ws.frame(1 / 30)
     win = wm._wins["calc"]
     assert (win.x, win.y) == plain[:2]
+
+
+@pytest.mark.parametrize("key", ["menu", "files", "calc", "appearance"])
+def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
+    """A new window opens in the work area right of the launchers (macOS and
+    GNOME place one in the free area), never over their labels."""
+    ws = _moy_desk(tmp_path)
+    if key == "menu":
+        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    elif key == "appearance":
+        ws.open_app(ws.appearance_app)
+    else:
+        ws.open_app(ws._apps_by_id[key])
+    ws.frame(1 / 30)
+    win = ws.wm._wins[key]
+    right = max(max(b[0] + b[2], l[0] + l[2])
+                for _k, b, l, _t, _c in ws.wm._backdrop_layer._icon_rects())
+    assert win.x >= right, (key, win.x, right)
