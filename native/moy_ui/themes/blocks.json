@@ -37,7 +37,8 @@
   },
   "look": {
     "fam": "atkinson", "w_semi": 700, "w_bold": 800,
-    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3 } },
+    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3 },
+               "outline": [1, "#ffffff"] },
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
                                "primary": { "font": "op" } } },

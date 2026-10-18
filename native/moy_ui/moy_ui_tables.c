@@ -916,7 +916,8 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  },\012"
     "  \"look\": {\012"
     "    \"fam\": \"atkinson\", \"w_semi\": 700, \"w_bold\": 800,\012"
-    "    \"focus\": { \"style\": \"invert\", \"card\": \"ring\", \"small\": \"invert\", \"ring\": { \"w\": 3 } },\012"
+    "    \"focus\": { \"style\": \"invert\", \"card\": \"ring\", \"small\": \"invert\", \"ring\": { \"w\": 3 },\012"
+    "               \"outline\": [1, \"#ffffff\"] },\012"
     "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
     "    \"app_buttons\": { \"calc\": { \"normal\": { \"font\": \"key\" }, \"tonal\": { \"font\": \"op\" },\012"
     "                               \"primary\": { \"font\": \"op\" } } },\012"
@@ -1031,7 +1032,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4791, 4204, 4029};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4791, 4246, 4029};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
