@@ -1057,6 +1057,9 @@ class Carousel(Launcher):
         self.wall_ink = None          # (white, black) over a wallpaper (_wall_ink)
         self._quiet_for = None        # the geometry `quiet` was computed for
         self._quiet_q = ()
+        self._vis_g = None            # the geometry and key `_vis` was laid out for
+        self._vis_key = None
+        self._vis = None
         Launcher.__init__(self, items, layout, names, blit_glyph)
 
     # -- geometry ------------------------------------------------------------
@@ -1387,14 +1390,13 @@ class Carousel(Launcher):
 
     # -- cards -----------------------------------------------------------------
 
-    def _side(self, d, moving):
-        """A card's side at distance `d` px from the centre."""
-        g = self._geom()
+    def _side(self, d, moving, g, big):
+        """A card's side at distance `d` px from the centre, under geometry
+        `g` with the hero's side `big` (`_big`)."""
         card, pitch = g[2], g[3]
         if (d >= pitch or self.motion == "one"
                 or (moving and self.motion == "rest")):
             return card
-        big = self._big()
         return card + (big - card) * (pitch - d) // pitch
 
     def _big(self):
@@ -1403,18 +1405,21 @@ class Carousel(Launcher):
         return int(g[2] * min(self.scale, HOME_SCALE_HH) + 0.5)
 
     def _rect_at(self, i, moving):
-        g = self._geom()
+        return self._rect_of(i, moving, self._geom(), self.scroll, self._big())
+
+    def _rect_of(self, i, moving, g, s, big):
+        """Card `i`'s rect at offset `s` under geometry `g` (`_side`'s)."""
         bx, _by, bw, _bh = g[1]
         if g[9] is not None:
-            return (bx + g[9][4] + i * g[3] - self.scroll, g[9][3], g[2], g[2])
+            return (bx + g[9][4] + i * g[3] - s, g[9][3], g[2], g[2])
         mid = bx + bw // 2
-        d = i * g[3] - self.scroll
-        t = self._side(abs(d), moving)
+        d = i * g[3] - s
+        t = self._side(abs(d), moving, g, big)
         if g[8] is not None:
             # The handheld's cards keep their gap beside the hero: each is
             # pushed out by half what the centre card grew, in proportion
             # to its distance up to one pitch.
-            grow = self._side(0, moving) - g[2]
+            grow = self._side(0, moving, g, big) - g[2]
             ad = min(abs(d), g[3])
             push = grow * ad // (2 * g[3])
             d += push if d > 0 else -push
@@ -1423,14 +1428,22 @@ class Carousel(Launcher):
 
     def _visible(self):
         """(index, rect) for every card in the band, smallest first -- the
-        order they paint in, so the centre card lands on top."""
+        order they paint in, so the centre card lands on top. Kept for the
+        offset, motion and selection it was laid out at, so a frame's
+        restore and its paint lay the row out once; callers read it and
+        never change it."""
         n = len(self.items)
         if not n:
             return []
         g = self._geom()
+        s = self.scroll
+        moving = self.moving
+        c = self.nearest()
+        key = (s, moving, c, n, self.motion, self.scale)
+        if self._vis_g is g and self._vis_key == key:
+            return self._vis
         bx, _by, bw, _bh = g[1]
         pitch = g[3]
-        s = self.scroll
         if g[9] is not None:
             i0 = max(0, s // pitch - 1)
             i1 = min(n - 1, (s + bw) // pitch + 1)
@@ -1438,14 +1451,14 @@ class Carousel(Launcher):
             reach = bw // 2 + 2 * g[2]
             i0 = max(0, (s - reach) // pitch)
             i1 = min(n - 1, (s + reach) // pitch + 1)
-        moving = self.moving
-        c = self.nearest()
         out = []
+        big = self._big()
         for i in range(i0, i1 + 1):
-            r = self._rect_at(i, moving)
+            r = self._rect_of(i, moving, g, s, big)
             if r[0] + r[2] > bx and r[0] < bx + bw:
                 out.append((i, r))
         out.sort(key=lambda e: (e[1][2], e[0] == c))
+        self._vis_g, self._vis_key, self._vis = g, key, out
         return out
 
     def tile_rect(self, i):
@@ -1570,9 +1583,9 @@ class Carousel(Launcher):
 
     def _paint(self, cv, sheet_for, r):
         """The band, clipped to rect `r`: the handheld's (`_paint_hh`), or the
-        desk's shelf -- its caption, at rest every card's shadow (the
-        theme's depth, `ui.cast`), the cards, the selected one last and at
-        rest under the theme's focus mark."""
+        desk's shelf -- its caption, every card's shadow (the theme's depth,
+        `ui.cast`; a moving card keeps its own), the cards, the selected one
+        last and at rest under the theme's focus mark."""
         if self.handheld():
             return self._paint_hh(cv, sheet_for, r)
         g = self._geom()
@@ -1590,9 +1603,8 @@ class Carousel(Launcher):
         # at rest a card the scroll left across the margin is not shown
         vis = [e for e in self._visible()
                if ((e[1][0] + e[1][2] > left) if moving else (e[1][0] >= left))]
-        if self.items and not moving:
-            for _i, t in vis:
-                _ui_draw.cast(cv, self.theme, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
+        for _i, t in vis:
+            _ui_draw.cast(cv, self.theme, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
         for i, t in vis:
             self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
         if clip is not None:
@@ -1625,7 +1637,7 @@ class Carousel(Launcher):
         cv.print_scaled(count, x + sc + sep, y, dim, sc)
 
     def _paint_details(self, cv):
-        """The desk home's hero (a full paint's): its shadow at rest, the
+        """The desk home's hero (a full paint's): its shadow, the
         selected card's picture at the hero's size and its favourite star.
         The details beside it are the home layer's (`_draw_details`)."""
         hero = self.hero_rect()
@@ -1643,24 +1655,24 @@ class Carousel(Launcher):
             self._card_frame(cv, hero, False)
 
     def _paint_hh(self, cv, sheet_for, r):
-        """The handheld home's band (docs/look_2026-10.md step 17): the cards,
-        smallest first, the hero last and at rest lifted by the theme's focus
-        mark, every card's shadow at rest, then the title and the metadata
-        of the card nearest the centre."""
+        """The handheld home's band (docs/look_2026-10.md step 17): every
+        card's shadow, the hero's (the card nearest the centre) at the
+        theme's size and the others' smaller, in motion as at rest; the
+        cards, smallest first, the hero last and at rest lifted by the
+        theme's focus mark; then the title and the metadata of the hero."""
         clip = getattr(cv, "clip", None)
         if clip is not None:
             self._card_clip = r
             clip(*r)
         c = self.nearest()
-        moving = self.moving
         th = self.theme
-        if self.items and not moving:
-            for i, t in self._visible():
-                if i == c:
-                    _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD)
-                else:
-                    _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
-        for i, t in self._visible():
+        vis = self._visible()
+        for i, t in vis:
+            if i == c:
+                _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD)
+            else:
+                _ui_draw.cast(cv, th, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
+        for i, t in vis:
             self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
         if self.items:
             self._draw_caption(cv, self.items[c])

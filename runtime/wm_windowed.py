@@ -394,9 +394,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # the kid has since resized is never re-sized under them.
         self._play_intent = "play"
         self._drag = None             # (kind, grab_dx, grab_dy) while dragging
-        # The shadow a window being dragged or resized casts (ui.UNDER_*): the
-        # theme's own, a smaller one, or none. tools/p4_bench.py measures each.
-        self.drag_shadow = 1
         self._restored = False        # what the last cache restore covered: a
                                       # rect, None (all of it) or False (nothing)
         self._foot_gen = None         # the look the windows' feet were sized under

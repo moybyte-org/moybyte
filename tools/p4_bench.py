@@ -87,10 +87,10 @@ card's shadow and the canvas's `rrect` and `shadow` bare.
 
 `--shadows` is step 8's shadow run: on a windowed tier Calc dragged over
 Files under the live theme and under Moy's Day and Night, the dragged
-window's shadow at the theme's size, smaller and none (`ws.wm.drag_shadow`),
-each with the idle desk after it; on every tier the carousel under the same
-themes (home idle, the key glide, idle after it, a fling), where the hero
-casts its shadow only at rest. The live theme is put back.
+window casting the theme's shadow, with the idle desk after it; on every
+tier the carousel under the same themes (home idle, the key glide, idle
+after it, a fling), its cards casting their shadows in motion as at rest.
+The live theme is put back.
 
 `--icons` benches the icon home (phase 6 step 11) beside the grid
 arrangement it is drawn from, on the same image and store: each set on the
@@ -704,15 +704,14 @@ def _set_moy(b, variant):
 def bench_shadows(b, out_path):
     """Step 8's shadow scenarios (docs/look_2026-10.md): on a windowed tier
     a window dragged over the desk beside a still one, under the live theme
-    and under Moy's Day and Night with the dragged window's shadow at the
-    theme's size, smaller and none (`ws.wm.drag_shadow`), each with the desk
-    idle after, which paints zero; on every tier the home's carousel under
-    the same themes: idle, the key glide (the hero casts no shadow while the
-    row moves), idle after it and a fling. The live theme is put back."""
+    and under Moy's Day and Night, with the desk idle after, which paints
+    zero; on every tier the home's carousel under the same themes: idle, the
+    key glide (every frame casts the cards' shadows), idle after it and a
+    fling. The live theme is put back."""
     bench = Bench(b)
     pyexec(b, HOME_KEY)
     was = pyval(b, "(ws.look.theme_name, ws.look.theme_variant)")
-    windowed = bool(pyval(b, "hasattr(ws.wm, 'drag_shadow')"))
+    windowed = bool(pyval(b, "hasattr(ws.wm, '_draw_unders')"))
     themes = [("live", None), ("moy day", "light"), ("moy night", "dark")]
     for tag, variant in themes:
         if variant is not None:
@@ -722,15 +721,11 @@ def bench_shadows(b, out_path):
             for app in ("files", "calc"):
                 pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % app)
                 b.drain(2.5)
-            for knob, size in ((0, "full"), (1, "small"), (2, "none")):
-                pyexec(b, "ws.wm.drag_shadow = %d" % knob)
-                bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
-                b.drain(1.0)
-                bench.stop("window drag (calc over files), %s, drag shadow %s"
-                           % (tag, size))
-                bench.start(); b.drain(2.0)
-                bench.stop("desk idle after it, %s" % tag)
-            pyexec(b, "ws.wm.drag_shadow = 1")
+            bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
+            b.drain(1.0)
+            bench.stop("window drag (calc over files), %s" % tag)
+            bench.start(); b.drain(2.0)
+            bench.stop("desk idle after it, %s" % tag)
         pyexec(b, "ws.open_library()"); b.drain(6.0)
         bench.start(); b.drain(2.0); bench.stop("home idle, %s" % tag)
         pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")

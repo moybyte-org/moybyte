@@ -178,12 +178,10 @@ class WindowChrome:
         `clip`, the rect a cache restore covered -- and never over the bar,
         which the windows stay off too. Nothing else draws them, so each lands
         once on freshly painted pixels. A window being dragged or resized casts
-        `drag_shadow`'s size."""
+        the same shadow as a still one: a moving thing keeps its shadow."""
         if not _ui_draw.depth()[13]:
             return
         rc = self._root_canvas
-        g = self._drag if self._drag is not None else self._resize
-        moving = self._wins.get(g[0]) if g is not None else None
         th = self.ws.theme_colors
         x0, y0, w, h = self._desk_rect()
         x1, y1 = x0 + w, y0 + h
@@ -198,9 +196,8 @@ class WindowChrome:
                 win = self._wins.get(key)
                 if win is None or win.minimized:
                     continue
-                mode = self.drag_shadow if win is moving else _ui_draw.UNDER_FULL
                 _ui_draw.frame_under(rc, th, (win.x, win.y, win.w, win.h), win.title_h,
-                                key == self._focus, mode)
+                                key == self._focus)
         finally:
             rc.clip()
 

@@ -152,18 +152,20 @@ def test_a_released_window_settles_to_its_full_shadow(tmp_path):
     assert _below_bar(ws) == settled
 
 
-def test_a_dragged_window_casts_the_drag_shadow_and_a_still_desk_none(
+def test_a_dragged_window_keeps_its_full_shadow_and_a_still_desk_casts_none(
         tmp_path, monkeypatch):
+    """A moving window casts the shadow it casts at rest, so nothing pops
+    when it is let go."""
     ws, drv = _desk(tmp_path)
     calls = _spy(monkeypatch, wm_chrome, "frame_under")
     win, (hx, hy) = _drag(ws, drv)
-    for knob in (ui_draw.UNDER_SMALL, ui_draw.UNDER_NONE):
-        ws.wm.drag_shadow = knob
+    for k in (1, 2):
         del calls[:]
-        drv.touch_drag(hx + knob, hy)
+        drv.touch_drag(hx + k, hy)
         drv.frame(0.0)
-        mine = [c[5] for c in calls if c[2] == (win.x, win.y, win.w, win.h)]
-        assert mine == [knob]
+        mine = [c[5] if len(c) > 5 else ui_draw.UNDER_FULL
+                for c in calls if c[2] == (win.x, win.y, win.w, win.h)]
+        assert mine == [ui_draw.UNDER_FULL]
     drv.touch_up()
     for _ in range(4):
         drv.frame(0.0)
@@ -207,26 +209,35 @@ def _settle(drv, n=120):
     raise AssertionError("the carousel never came to rest")
 
 
-def test_the_hero_casts_at_rest_and_never_on_a_moving_frame(tmp_path, monkeypatch):
+def test_the_hero_keeps_its_shadow_on_a_moving_frame(tmp_path, monkeypatch):
+    """Every frame of a glide casts the card nearest the centre at the
+    theme's size and its neighbours smaller, as the settled row does, so no
+    shadow pops when the row stops."""
     ws = build_ws_with_shelf(tmp_path, 8)
     ws.look.set_theme("moy", persist=False, variant="light")
     drv = host_app.ConsoleDriver(ws)
     _settle(drv)
     calls = _spy(monkeypatch, launcher_layer, "cast")
+
+    def heroes():
+        """The cards cast at the theme's size since the spy last emptied."""
+        return [c[2] for c in calls if len(c) < 5 or c[4] == ui_draw.UNDER_FULL]
+
     drv.press("right")
     drv.frame(1 / 30)
     moving = 0
     for _ in range(60):
         if not ws.launcher.moving:
             break
-        n = len(calls)
+        del calls[:]
         drv.frame(1 / 30)
         moving += 1
         if ws.launcher.moving:
-            assert len(calls) == n, "a moving frame cast the hero's shadow"
+            assert heroes() == [ws.launcher.tile_rect(ws.launcher.nearest())], \
+                "a moving frame dropped the hero's shadow"
+            assert len(calls) > 1, "a moving frame dropped the neighbours' shadows"
     assert moving >= 3
     _settle(drv)
-    assert calls, "the settled row casts the hero's shadow"
     n = len(calls)
     for _ in range(5):
         drv.frame(1 / 30)
