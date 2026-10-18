@@ -307,18 +307,93 @@ def test_brightness_and_name_are_stored(tmp_path):
     assert ws.system.get("brightness") == 4
     sl.step_row("brightness", 9)
     assert ws.system.get("brightness") == 5
-    _focus_row(ws, drv, "name")
-    assert sl._focused == "Name" and ws.input.text_mode
-    for ch in "Kit":
-        drv.type_char(ord(ch))
-        drv.frame(1 / 30)
-        drv.frame(1 / 30)
-    assert ws.system.get("name") == "Kit"
+    _type_name(ws, drv, "Kit")
     _focus_row(ws, drv, "volume")
     assert not ws.input.text_mode
     again = host_app.build_workstation(str(tmp_path / "carts"))
     assert again.system.get("brightness") == 5
     assert again.system.get("name") == "Kit"
+
+
+def _type_name(ws, drv, text):
+    """Focus the Name row and type `text` into it, a frame pair a key."""
+    _focus_row(ws, drv, "name")
+    assert ws.settings_layer._focused == "Name" and ws.input.text_mode
+    for ch in text:
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+
+
+def _stored_name(tmp_path):
+    from runtime import moy_carts
+    return moy_carts.load_system(str(tmp_path / "carts")).get("name")
+
+
+def test_the_name_is_stored_on_enter_not_a_keystroke_at_a_time(tmp_path):
+    """Typing the Name writes nothing (each key was an SD write on the
+    T-Deck); Enter stores it, once."""
+    ws, drv = _settings_page(tmp_path)
+    writes = []
+    real = ws.system.set
+    ws.system.set = lambda k, v: (writes.append(k), real(k, v))
+    _type_name(ws, drv, "Kit")
+    assert "name" not in writes and _stored_name(tmp_path) is None
+    drv.type_char(13)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert writes.count("name") == 1
+    assert _stored_name(tmp_path) == "Kit"
+    assert ws.settings_layer._focused == "Name", "Enter keeps focus in the field"
+
+
+def test_focus_leaving_the_name_field_stores_it(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Rae")
+    assert _stored_name(tmp_path) is None
+    drv.press("up")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.settings_layer._focused != "Name"
+    assert _stored_name(tmp_path) == "Rae"
+    assert not ws.input.text_mode
+
+
+def test_back_stores_a_name_being_typed(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Sam")
+    settings_back(ws, drv)
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"
+    assert _stored_name(tmp_path) == "Sam"
+    assert not ws.input.text_mode
+
+
+def test_an_app_switch_stores_a_name_being_typed(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Kit")
+    assert ws.open_app(ws._apps_by_id["appearance"])
+    assert _stored_name(tmp_path) == "Kit"
+    drv.frame(1 / 30)
+    assert not ws.input.text_mode
+
+
+def test_going_home_stores_a_name_being_typed(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Kit")
+    ws.go_home()
+    assert _stored_name(tmp_path) == "Kit"
+
+
+def test_a_reboot_stores_a_name_being_typed_first(tmp_path):
+    """The system menu's Reboot resets the board through its hook: the Name
+    being typed is in system.json before it runs."""
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Kit")
+    seen = []
+    ws.reboot_hook = lambda: seen.append(_stored_name(tmp_path))
+    ws.menu_ui._menu_reboot()
+    assert seen == ["Kit"]
 
 
 # -- the pre-2026-07 bottom dock is gone -----------------------------------

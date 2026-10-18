@@ -1160,6 +1160,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
+        # The process the keyboard reaches (`wm.input_holder`), as the frame
+        # last saw it.
+        self._holder = None
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and
@@ -1710,6 +1713,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
         # open (a running game, the Make window) stays. Desktop mode only:
         # console-mode Settings is fullscreen and takes the resume-or-home rules.
+        self.settings_layer.commit_name()     # a Name still being typed is kept
         if self.settings_layer.wifi_view:
             self.settings_layer.close_wifi()   # its radio lease ends with the visit
         _ck = getattr(self.wm, "close_window_kind", None)
@@ -2951,6 +2955,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if self._editing_icons:
             self.look.save_icons()     # the theme editor has no bar of its own
         self.look.commit()             # a change to the theme still settling
+        self.settings_layer.commit_name()  # and a Name still being typed
         if self.settings_layer.wifi_view:
             self.settings_layer.close_wifi()   # its radio lease ends with the visit
         # The parked Editor's workspace (console mode): its window comes back
@@ -4009,6 +4014,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The look's change, applied once a frame, and `custom`'s autosave
         # debounce (theming phase 6 step 5): one attribute read when idle.
         self.look.tick(dt)
+        # Input focus moved (a screen left): Settings stores a Name still
+        # being typed.
+        h = self.wm.input_holder()
+        if h != self._holder:
+            was = self._holder
+            self._holder = h
+            if was == "settings":
+                self.settings_layer.leave()
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an _animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.

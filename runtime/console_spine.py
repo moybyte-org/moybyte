@@ -393,6 +393,7 @@ class SpineVerbs:
         h = self.apps.find(app.id)
         text = self.apps.text_mode(h) if h else False
         self.look.commit()             # an app switch is an exit: `custom` is written
+        self.settings_layer.commit_name()  # ... and a Name still being typed
         self._note_app_caller()        # a jump OUT of an app comes back to it
         self.cart = cart
         self.input.text_mode = False

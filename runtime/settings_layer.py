@@ -364,10 +364,12 @@ class SettingsLayer:
         # page in place of the rows, on a board whose kernel keeps one.
         self.crash_view = False
         self._typing = False          # the Name field holds focus: text mode
+        self._name = None             # the Name being typed, until it is stored
 
     def reset(self):
         """A fresh visit (ws.open_settings): focus on the first row, the page
         at its top, every panel closed, About read again."""
+        self.commit_name()
         self._host.reset()
         self._sub.reset()
         self._view = None
@@ -1079,6 +1081,22 @@ class SettingsLayer:
         if kind == "level":                     # VOLUME / BRIGHTNESS
             self.set_level(key, self.level(key)[0] + d)
 
+    def commit_name(self):
+        """Store the Name being typed, if it changed: Enter, focus leaving the
+        field and every way out of Settings call this, so the store is written
+        once an edit, never a keystroke."""
+        got = self._name
+        if got is None:
+            return
+        self._name = None
+        if got != str(self.ws.system.get("name", "") or ""):
+            self.ws.system.set("name", got)
+
+    def leave(self):
+        """Settings stopped holding the keyboard (the console's frame saw input
+        focus move): the Name being typed is stored."""
+        self.commit_name()
+
     def level(self, key):
         """A level row's (value, lowest, highest): the stored value, else the
         row's default, held in its range."""
@@ -1273,10 +1291,14 @@ class SettingsLayer:
                 self.set_level(key, got)
         elif kind == "name":
             self._kinds[s] = "field"
-            cur = str(ws.system.get(key, "") or "")
-            got, _done = _ui.field(s, cur, NAME_MAX)
+            cur = self._name
+            if cur is None:
+                cur = str(ws.system.get(key, "") or "")
+            got, done = _ui.field(s, cur, NAME_MAX)
             if got != cur:
-                ws.system.set(key, got)
+                self._name = got
+            if done:
+                self.commit_name()
 
     def _rows_page(self):
         _ui.page("")
@@ -1403,11 +1425,15 @@ class SettingsLayer:
                 ws.request_frame()    # ... and the next scrolls to it
             self._rows_page()
             self._focused = _ui.focus()
-            typing = self._kinds.get(self._focused) == "field"
-            if typing != self._typing:
-                self._typing = typing     # typed letters are the field's,
-                ws._set_text_mode(typing)  # never a button's alias
+            field = self._kinds.get(self._focused) == "field"
+            if not field:
+                self.commit_name()        # focus left the field
+            typing = field                # typed letters are the field's,
+            if typing != self._typing:    # never a button's alias
+                self._typing = typing
+                ws._set_text_mode(typing)
         else:
+            self.commit_name()
             if view == "wifi":
                 self.wifi_page()
             elif view == "bt":

@@ -193,6 +193,7 @@ class SystemMenuUI:
         # Device: the injected reboot hook (machine.reset). Host / no hook: a safe
         # fallback to the home launcher (a hard reset would kill the sim window).
         self.ws._dirty = True
+        self.ws.settings_layer.commit_name()   # a Name still being typed is kept
         hook = self.ws.reboot_hook
         if hook is not None:
             try:

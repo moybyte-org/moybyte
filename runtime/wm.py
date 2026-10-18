@@ -144,6 +144,10 @@ class FullscreenStackWM:
         question to the stack (the source of truth) rather than the projection string."""
         return self.stack.top() == kind
 
+    def input_holder(self):
+        """The process the keyboard reaches: the stack top."""
+        return self.stack.top()
+
     def top_is_player(self):
         """True iff a cart Player is on top (screen "desktop") -- the running-cart test
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""

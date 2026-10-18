@@ -918,6 +918,40 @@ def test_game_keeps_running_under_settings_window(tmp_path):
     assert ticks[0] >= 3, "the game paused under the Settings window"
 
 
+def _game_and_settings(tmp_path):
+    """A desk with a running game's window and Settings' beside it, Settings
+    focused on its Name field with one letter typed."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()
+    drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    sl = ws.settings_layer
+    sl.set_msel = sl.row_index("name")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.wm._focus == "settings" and sl._focused == "Name"
+    assert ws.input.text_mode
+    drv.type_char(ord("K"))
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def _stored_name(tmp_path):
+    from runtime import moy_carts
+    return moy_carts.load_system(str(tmp_path / "carts")).get("name")
+
+
+def test_closing_the_settings_window_stores_a_name_being_typed(tmp_path):
+    """The strip's X is a way out like any other: the Name typed is stored."""
+    ws, drv = _game_and_settings(tmp_path)
+    ws.wm.close_window_kind("settings")
+    assert _stored_name(tmp_path) == "K"
+
+
 def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
     """The Settings WIFI panel drives the injected wifi service -- scan, pick a
     locked network, type the password, ENTER connects -- while a cart keeps
