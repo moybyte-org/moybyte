@@ -39,7 +39,7 @@
     "sizes": { "hh": { "title": 15, "key": 18, "op": 19, "result": 30 },
       "dk": { "title": 17, "key": 26, "op": 28, "result": 50 } },
     "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3, "gap": 2 } },
-    "current": { "style": "plate" },
+    "current": { "style": "plate", "row": "outline" },
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
       "primary": { "font": "op" } } },

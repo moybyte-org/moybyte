@@ -440,13 +440,13 @@ extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 // The look (docs/look_2026-10.md step 5): the theme model's fields, each
 // one or more leaves; a leaf's kind, its range (an enum's first name and
 // count), its default (MOY_THEME_NONE: silent, the renderer derives it).
-#define MOY_THEME_LEAVES 191
-#define MOY_THEME_LOOK_FIELDS 158
+#define MOY_THEME_LEAVES 192
+#define MOY_THEME_LOOK_FIELDS 159
 #define MOY_THEME_LOOK_GROUPS 28
-#define MOY_THEME_ENUM_NAMES 120
+#define MOY_THEME_ENUM_NAMES 122
 #define MOY_THEME_BTN_KINDS 5
 #define MOY_THEME_BTN_LEAVES 8
-#define MOY_THEME_BTN_LEAF0 124  // buttons.normal's first leaf
+#define MOY_THEME_BTN_LEAF0 125  // buttons.normal's first leaf
 #define MOY_THEME_PAINT_STOPS 6
 #define MOY_THEME_PAINTS_CAP 12
 #define MOY_THEME_ENTRIES_CAP 160

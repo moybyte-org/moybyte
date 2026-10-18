@@ -382,10 +382,14 @@ enum {
     MOY_UI_FOCUS_UNDERLINE = 4, MOY_UI_FOCUS_INVERT = 5,
 };
 enum { MOY_UI_CUR_BAR = 0, MOY_UI_CUR_PLATE = 1, MOY_UI_CUR_FILL = 2 };
+// current.row's: how a row's current mark draws under the plate style -- the
+// plate, or the row's outline, which leaves the row's ground (and every code
+// colour on it) as it is
+enum { MOY_UI_CUR_ROW_PLATE = 0, MOY_UI_CUR_ROW_OUTLINE = 1 };
 typedef struct {
     uint8_t on, active, dark, ink_accent;
     uint8_t style[3];               // per class: PART, CARD, SMALL
-    uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w;
+    uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w, cur_row;
     int16_t color, cur_color;       // tokens
     int16_t ring_w, ring_gap, grow, rise, edge_w, underline_w;
     int32_t outline_c, rim_c, sel_back;     // look colours

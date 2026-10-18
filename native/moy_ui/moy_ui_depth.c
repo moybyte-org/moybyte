@@ -124,6 +124,7 @@ static void marks_of(moy_ui_marks_t *m, const moy_theme_look_t *lk, int light) {
     m->cur_style = (uint8_t)num(leaf(lk, "current.style"), MOY_UI_CUR_BAR);
     m->cur_color = num(leaf(lk, "current.color"), MOY_UI_T_VALUE);
     m->cur_alpha = alpha_of(lk, "current.alpha", light ? 14 : 24);
+    m->cur_row = (uint8_t)num(leaf(lk, "current.row"), MOY_UI_CUR_ROW_PLATE);
     m->sel_back = leaf(lk, "sel_back");
     if (m->color < 0 || m->color >= MOY_UI_TOKENS) {
         m->color = MOY_UI_T_ACCENT;
@@ -883,6 +884,10 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
     fs = fs < 1 ? 1 : fs;
     switch (m->cur_style) {
         case MOY_UI_CUR_PLATE:
+            if ((flags & MOY_UI_MARK_SIDE) && m->cur_row == MOY_UI_CUR_ROW_OUTLINE) {
+                ring_a(&d, b.x, b.y, b.w, b.h, r, fs, tok(&d, m->cur_color), back ? 153 : 255);
+                break;
+            }
             tint(&d, b.x, b.y, b.w, b.h, r, tok(&d, m->cur_color),
                  back ? m->cur_alpha * 6 / 10 : m->cur_alpha, NULL);
             break;

@@ -189,6 +189,43 @@ def test_a_seeds_disabled_ink_is_quiet_and_seen(seed, variant):
     assert ui_draw.disabled_ink(th) == th["ink_dim"]
 
 
+def _rgb(v):
+    """A colour index's (r, g, b) as the glass shows it (RGB565, widened)."""
+    c = ui_draw._C.theme_rgb(v)[0]
+    return ((c >> 11) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
+
+
+def _wcag(a, b):
+    def lum(c):
+        lin = [x / 255 / 12.92 if x / 255 <= 0.03928 else ((x / 255 + 0.055) / 1.055) ** 2.4
+               for x in c]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    la, lb = lum(a), lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed", TH["seeds"])
+def test_the_code_roles_read_on_the_current_line(seed, variant):
+    """The code editor marks its current line with the current mark: where
+    that is a plate behind the line (`current.style` plate, `current.row`
+    plate), every code role holds text's 4.5:1 on the plate as well as on
+    the code surface (theme.code). Contrast outlines the row instead, so its
+    line keeps the surface the code roles are held to."""
+    live = live_colors(seed, variant)
+    ui_draw._C.theme_block(live.block, live.used)
+    lk = live.look[0]
+    if lk["current.style"] != 1 or lk["current.row"] != 0:
+        return
+    tokens = STYLE["tokens"]
+    s, val = _rgb(live.tokens[TH["code"]["bg"]]), _rgb(live.tokens[tokens[lk["current.color"]]])
+    k = lk["current.alpha"] / 100
+    plate = tuple(round(s[i] + (val[i] - s[i]) * k) for i in range(3))
+    low = {r: round(_wcag(_rgb(live.content[r]), plate), 2) for r in TH["code"]["roles"]
+           if _wcag(_rgb(live.content[r]), plate) < 4.5}
+    assert not low, (plate, low)
+
+
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
     real frame: a titled frame against the same frame untitled."""

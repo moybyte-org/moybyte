@@ -15,7 +15,7 @@
       "shade_dark": "#2b2f57", "ink_accent": "#b6a8f7",
       "value_ink": "#15123a", "sunk": "#0b0d1e", "lcd": "#0b0d1e", "lcd_ink": "#b6a8f7",
       "code_text": "#eef0fb", "code_keyword": "#c9a2ff", "code_string": "#9be3a5",
-      "code_number": "#ffb070", "code_comment": "#9aa0cc", "code_builtin": "#7fd0ff"
+      "code_number": "#ffb070", "code_comment": "#abb0da", "code_builtin": "#7fd0ff"
     },
     "light": {
       "panel": "#eceef3", "edge": "#e2e5ec", "title": "#ffffff", "title_ink": "#15161d",
@@ -27,8 +27,8 @@
       "title_inactive": "#f4f5f8", "shade_hi": "#ffffff", "shade_lo": "#e3e6ed",
       "shade_dark": "#e2e5ec", "ink_accent": "#4c3fd6",
       "value_ink": "#ffffff", "sunk": "#e3e6ed", "lcd": "#f1f2f6", "lcd_ink": "#4c3fd6",
-      "code_text": "#15161d", "code_keyword": "#6a35c4", "code_string": "#1f7a3a",
-      "code_number": "#a8510a", "code_comment": "#5f6478", "code_builtin": "#1662a8"
+      "code_text": "#15161d", "code_keyword": "#6a35c4", "code_string": "#1b6e34",
+      "code_number": "#9a4a09", "code_comment": "#5f6478", "code_builtin": "#1662a8"
     }
   },
   "layout": {
