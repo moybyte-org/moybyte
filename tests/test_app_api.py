@@ -245,7 +245,7 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
     real = calc_app.ui.button
 
     def button(label, kind="normal", o=None):
-        drawn[label] = kind
+        drawn[label or (o or {}).get("id")] = kind
         return real(label, kind, o)
 
     monkeypatch.setattr(calc_app.ui, "button", button)
@@ -256,6 +256,32 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
     assert {drawn[k] for k in "+-*/%"} == {"tonal"}
     assert {drawn[k] for k in "0123456789.<"} == {"normal"}
     assert [k for k, v in drawn.items() if v == "primary"] == ["="]
+
+
+@pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+def test_calc_backspace_is_the_icon_sets_key_in_every_theme(tmp_path, monkeypatch, theme):
+    """The backspace key is the icon set's `backspace` (the target's) with no
+    label, never an arrow or "<" that reads as less-than."""
+    from runtime import calc_app
+    ws, calc = _calc(tmp_path)
+    ws.look.set_theme(theme, persist=False, variant="light")
+    seen = []
+    real_icon, real_button = calc_app.ui.icon, calc_app.ui.button
+
+    def icon(name, o=None):
+        seen.append(name)
+        return real_icon(name, o)
+
+    def button(label, kind="normal", o=None):
+        if seen and seen[-1] == "backspace":
+            seen.append((label, (o or {}).get("id")))
+        return real_button(label, kind, o)
+
+    monkeypatch.setattr(calc_app.ui, "icon", icon)
+    monkeypatch.setattr(calc_app.ui, "button", button)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert ("", "<") in seen, seen
 
 
 @pytest.mark.parametrize("variant", ["dark", "light"])

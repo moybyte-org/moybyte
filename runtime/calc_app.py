@@ -42,7 +42,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # operation: digits, the operators, "C", "<" (backspace), "." and "=".
 KEYS = (("C", "<", "%", "/"), ("7", "8", "9", "*"), ("4", "5", "6", "-"),
         ("1", "2", "3", "+"), ("0", None, ".", "="))
-# What a key shows in a face that has the signs, and in one that has not.
+# What a key shows in a face that has the signs, and in one that has not;
+# backspace is the icon set's `backspace` (⌫) wherever the set draws one.
 SIGNS = {"/": "÷", "*": "×", "-": "−", "<": "←"}
 TAPE_KEEP = 8           # the sums the tape holds
 
@@ -196,6 +197,8 @@ class CalcAppLayer:
             ui.at(*keys[n])
             text = signs.get(key, key) if signs else key
             o = _DOT if key == "." else None
+            if key == "<" and ui.icon("backspace"):
+                text, o = "", _BACK          # the icon alone, the set's ⌫
             if ui.button(text, kind_of(key), o):
                 pressed = key
         ui.at(*lay.display)
@@ -208,8 +211,11 @@ class CalcAppLayer:
         lay = self.layout
         fs = lay.fs
         dim, ink, rule, value = th["ink_dim"], th["ink"], th["border"], th["lcd_ink"]
-        right = x + w - (14 if lay.desk else 10 * fs)
-        room = right - x - (14 if lay.desk else 10 * fs)
+        # One inset on every side of the display: the text never meets its
+        # frame, and the result sits as far from the bottom as from the right.
+        pad = 14 if lay.desk else 10 * fs
+        right = x + w - pad
+        room = right - x - pad
         line = ui.text_size("0")[1]
         # The result: in the theme's result face where it has one that draws
         # it, else the largest scale up to the display's that fits.
@@ -224,13 +230,16 @@ class CalcAppLayer:
             while big > 1 and ui.text_size(text, big)[0] > room:
                 big -= 1
         text = _fit(text, room, big)
-        rh = ui.text_size(text, big)[1]
-        ry = y + h - rh - (6 if lay.desk else 6 * fs)
-        tw = ui.text_size(text, big)[0]
+        tw, rh = ui.text_size(text, big)
+        # The bottom inset is the digits' (a line's last fifth is the
+        # descent under them, which hangs into it).
+        ry = y + h - pad - rh + rh // 5
         cv.print_scaled(text, right - tw, ry, value, big)
         ui.face()
         expr = self._expr(signs)
-        ey = ry - line - (10 if lay.desk else 8 * fs)
+        # The sum line over the result, never closer to the frame than the
+        # inset at the top either.
+        ey = max(y + pad - line // 4, ry - line - (10 if lay.desk else 8 * fs))
         if expr:
             expr = _fit(expr, room, 1)
             cv.print(expr, right - ui.text_size(expr)[0], ey, dim)
@@ -334,6 +343,8 @@ class CalcAppLayer:
 
 # Calc counts in whole numbers, so its point key is there and never activates.
 _DOT = {"disabled": True}
+# The backspace key drawn as its icon: no label, so it names its stop.
+_BACK = {"id": "<"}
 
 
 def _sign(op, signs):
