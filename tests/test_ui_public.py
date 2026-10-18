@@ -23,7 +23,7 @@ import pytest
 from runtime import host_app, ui, ui_draw
 from runtime.host_canvas import make_system_canvas
 from runtime.chrome import THEME_NAMES
-from ws_helpers import build_ws, make_drv, open_cart, quiesce, use_theme
+from ws_helpers import MOY_VARIANTS, build_ws, make_drv, open_cart, quiesce, use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = os.path.join(ROOT, "tests", "fixtures", "ui_page")
@@ -44,8 +44,8 @@ def _wasm_or_skip():
     return False
 
 
-@pytest.fixture(scope="module")
-def page_runs(tmp_path_factory):
+@pytest.fixture(scope="module", params=MOY_VARIANTS)
+def page_runs(request, tmp_path_factory):
     """Each runtime's page after the same script: (pixels, pmem) by name."""
     root = str(tmp_path_factory.mktemp("ui_page") / "carts")
     host_app.moy_carts.ensure_dirs(root)
@@ -59,7 +59,7 @@ def page_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
-        use_theme(ws, "night", "dark")            # the lookless fixture
+        ws.look.set_theme("moy", persist=False, variant=request.param)
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)

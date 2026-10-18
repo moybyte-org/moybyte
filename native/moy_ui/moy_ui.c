@@ -336,7 +336,7 @@ int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style
     out->edge_w = out->shape = out->r = out->font = out->bevel = -1;
     ui_t *u = ui();
     int bk = moy_ui_button_of(kind);
-    if (rc != MOY_UI_OK || u == NULL || bk < 0 || app == MOY_UI_NO_THEME) {
+    if (rc != MOY_UI_OK || u == NULL || bk < 0) {
         return rc;
     }
     int own = state == MOY_UI_REST || state == MOY_UI_HOVER || state == MOY_UI_HOT;

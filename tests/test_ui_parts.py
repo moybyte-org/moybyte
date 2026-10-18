@@ -40,7 +40,7 @@ import pytest
 from runtime import host_app, ui, ui_draw
 from runtime.host_canvas import make_system_canvas
 from runtime.chrome import THEME_NAMES
-from ws_helpers import build_ws, make_drv, open_cart, quiesce, use_theme
+from ws_helpers import MOY_VARIANTS, build_ws, make_drv, open_cart, quiesce, use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARTS = os.path.join(ROOT, "tests", "fixtures", "ui_parts")
@@ -1004,8 +1004,8 @@ def _files_script(ws):
     return shots
 
 
-@pytest.fixture(scope="module")
-def files_runs(tmp_path_factory):
+@pytest.fixture(scope="module", params=MOY_VARIANTS)
+def files_runs(request, tmp_path_factory):
     root = str(tmp_path_factory.mktemp("ui_files") / "carts")
     host_app.moy_carts.ensure_dirs(root)
     for d in ("files_py.moy", "files_lua.moy"):
@@ -1018,7 +1018,7 @@ def files_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
-        use_theme(ws, "night", "dark")
+        ws.look.set_theme("moy", persist=False, variant=request.param)
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
@@ -1462,8 +1462,8 @@ Q_FRAMES, Q_OPEN, Q_SIZE, Q_CLOSES, _Q4, Q_FOCUS, Q_FAIL, Q_UNDER = range(8)
 POP_SCRIPT = ("a", "right", "down", "a", "down", "a")
 
 
-@pytest.fixture(scope="module")
-def pop_runs(tmp_path_factory):
+@pytest.fixture(scope="module", params=MOY_VARIANTS)
+def pop_runs(request, tmp_path_factory):
     root = str(tmp_path_factory.mktemp("ui_pop") / "carts")
     host_app.moy_carts.ensure_dirs(root)
     for d in ("pop_py.moy", "pop_lua.moy"):
@@ -1476,7 +1476,7 @@ def pop_runs(tmp_path_factory):
     out = {}
     for name, title in titles.items():
         ws = host_app.build_workstation(root)
-        use_theme(ws, "night", "dark")
+        ws.look.set_theme("moy", persist=False, variant=request.param)
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)

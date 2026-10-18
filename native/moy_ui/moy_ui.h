@@ -65,12 +65,10 @@ int moy_ui_buttons_set(const char *app, size_t n, int bkind,
 int moy_ui_buttons_app(const char *name, size_t n);
 // The button kind (an index of moy_ui_button_kinds) style kind `kind` is, or -1.
 int moy_ui_button_of(int kind);
-// A button's resolved style in `state` for app row `app` (-1 none,
-// MOY_UI_NO_THEME the style alone: a compiled run, whose colours are MOY64): its
+// A button's resolved style in `state` for app row `app` (-1 none): its
 // (field, ink, edge), -1 for nothing; the ring width in pixels, the shape (an
 // index of the field's enum), the radius, the font (key, op) and the bevel,
 // -1 where silent (the style's).
-#define MOY_UI_NO_THEME (-2)
 typedef struct {
     int16_t c[3];
     int8_t edge_w, shape, r, font, bevel;

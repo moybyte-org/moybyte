@@ -879,10 +879,15 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     int fs = k->fs, x = b.x, y = b.y, w = b.w, h = b.h;
     int state = moy_ui_state_of(mark_flags(flags & ~MOY_UI_F_HOT), interact);
     moy_ui_btn_style_t bs;
-    moy_ui_button_style(d.look, kind, state, d.run ? MOY_UI_NO_THEME : k->app, &bs);
+    moy_ui_button_style(d.look, kind, state, k->app, &bs);
     for (int i = 0; i < 3; i++) {
         if (k->colors[i] != MOY_UI_FROM_STYLE) {
             bs.c[i] = k->colors[i];
+        } else if (d.run && bs.c[i] >= MOY_THEME_SLOT0) {
+            // A run's canvas has MOY64 only: a theme leaf placed in the
+            // shell's block is its nearest, as a Python cart's inside the
+            // boundary (moy_ui_pidx).
+            bs.c[i] = (int16_t)moy_theme_nearest(bs.c[i]);
         }
     }
     int bg = bs.c[0], ink = bs.c[1], edge = bs.c[2];

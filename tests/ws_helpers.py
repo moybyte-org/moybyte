@@ -49,6 +49,11 @@ def fixture_colors(name, variant="dark"):
         chrome.forget_themes()
 
 
+# The default look's two variants, Moy Day and Moy Night: a page the three
+# runtimes draw alike is checked under both.
+MOY_VARIANTS = ("light", "dark")
+
+
 def use_theme(ws, name, variant=None, store=False):
     """`ws` on fixture package `name`, in `variant` (None keeps the current
     one): in the install slot, or with `store` copied into its store as a
