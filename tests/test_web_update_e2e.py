@@ -64,6 +64,7 @@ def _twin(tmp_path, mode, close_after=None, pin=None):
     # the page), and there would then be no page chrome to drive.
     for cart in ("moybyte.star_catcher.moy", "moybyte.sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
+    web_e2e.warm_host_library()
     port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist",
             "--carts", str(store), "--update", mode]

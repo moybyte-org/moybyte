@@ -119,6 +119,28 @@ def require(*features):
     pytest.skip("browser e2e prerequisites missing (see the warning above)")
 
 
+_WARM = [False]
+
+
+def warm_host_library():
+    """Compile the host's one native library now, in the test process.
+
+    `serve.py --carts` runs the real `moy_webhost`, whose transport loads the
+    library `runtime/host_native.py` compiles (`.build/host/moyhost-<hash>.so`).
+    A cold cache -- a CI checkout, or any source edit -- costs seconds of C
+    compiling, and under xdist several servers start together: the first
+    compiles while the rest wait on its lock, which is longer than the 5 s a
+    twin is given to answer. The build is content-addressed and locked, so
+    asking here once makes every server start on a warm cache."""
+    if _WARM[0]:
+        return
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from runtime import host_native
+    host_native.build()
+    _WARM[0] = True
+
+
 def free_port():
     """A port nothing is listening on, for the serve.py each suite starts.
 

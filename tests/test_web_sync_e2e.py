@@ -64,6 +64,7 @@ def _twin(store, pin=None):
     The health check is GET /sync and not /carts.json, because under `--pin`
     the latter is a 403 -- which is the feature, and would read here as a twin
     that never came up."""
+    web_e2e.warm_host_library()
     port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist", "--carts", str(store)]
     if pin:

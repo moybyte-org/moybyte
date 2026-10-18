@@ -40,6 +40,8 @@ pytestmark = pytest.mark.skipif(
 
 def _serve(port, extra=()):
     """serve.py on `port`, waited until it answers."""
+    if "--carts" in extra:
+        web_e2e.warm_host_library()
     p = subprocess.Popen(
         [sys.executable, "serve.py", str(port), "dist", *extra],
         cwd=RUNNER, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
