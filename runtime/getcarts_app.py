@@ -15,7 +15,8 @@ The screens, in the order a kid meets them:
              beside the carts folder names others (runtime/cart_index.py) --
              then the covers they name that this session has not drawn yet.
   LIST       a big row per cart: its cover when its index names one, its
-             name, licence and size here, and where it stands -- GET, ON
+             name, its genre where the index names one (SPEC.md 3.7) ahead of
+             its licence and size here, and where it stands -- GET, ON
              CONSOLE, UPDATE, NAME TAKEN when a different cart already has its
              folder, TOO BIG or CAN'T PLAY. A row's cover is the reduction of
              the 128 x 128 cover.png (SPEC.md 3.6) whose side is nearest the
@@ -30,6 +31,8 @@ The screens, in the order a kid meets them:
              will not fit in the store, that the engine would refuse to load
              (the Player's check, asked of the index before the download), or
              that this console cannot play says why and offers no GET.
+             Its genre and description, where the index has them, follow in
+             what room is left.
   LICENCE    a file the cart needs that is not in its release (Doom's WAD)
              shows its licence before it is fetched. NO has the focus;
              I AGREE is the only way on.
@@ -75,11 +78,13 @@ except ImportError:  # pragma: no cover - direct host import
 
 try:
     import cart_index as _ci
+    import cart_listing as _cl
     from moy_fs import _exists, _read
     from ticks import _ticks_ms, _ticks_diff
     from player import fit_notice as _fit_notice
 except ImportError:  # pragma: no cover - direct host import
     from runtime import cart_index as _ci
+    from runtime import cart_listing as _cl
     from runtime.moy_fs import _exists, _read
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.player import fit_notice as _fit_notice
@@ -1106,6 +1111,9 @@ class GetCartsAppLayer(ListShellApp):
             ink = _ui_draw.state_colors(th, "row", _ui_draw.ON if on else _ui_draw.REST)[1]
             info = "%s  %s" % (row["cart"]["licence"].get("spdx") or "",
                                _mb(row["plan"]["store_bytes"]))
+            word = _cl.genre_word(row["cart"].get("genre"))
+            if word:                      # SPEC.md 3.7: the genre leads the line
+                info = word + "  " + info
             cv.print(lay.cut(info, rect[2] - 12 * fs),
                      rect[0] + 6 * fs, rect[1] + lay.info_dy, ink, 1)
         self._rows_bar(cv, th, len(self.rows))
@@ -1154,6 +1162,15 @@ class GetCartsAppLayer(ListShellApp):
             for ln in _ui_draw.wrap_px("Tap REMOVE again. Its saves and the files it "
                                      "wrote go too.", lay.text_px, fs):
                 y = self._line(cv, ln, y, th["danger"])
+        # What the index says the cart is (SPEC.md 3.7), in what room is left.
+        room = lay.text_rows - (y - lay.text_y) // lay.line_h
+        word = _cl.genre_word(c.get("genre"))
+        if word and room > 0:
+            y = self._line(cv, "Genre: " + word, y, th["ink"])
+            room -= 1
+        if c.get("description") and room > 0:
+            for ln in _ui_draw.wrap_px(c["description"], lay.text_px, fs)[:room]:
+                y = self._line(cv, ln, y, th["ink_dim"])
 
     def _draw_licence(self, cv, th):
         lay = self.layout

@@ -56,9 +56,11 @@ on the selected card.
 try:
     import ui as _ui
     import ui_draw as _ui_draw
+    import cart_listing as _cl
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
+    from runtime import cart_listing as _cl
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -1643,12 +1645,13 @@ class Carousel(Launcher):
         return 0 if f is None else f()
 
     def _meta(self, it):
-        """The metadata of the selected card, its items: the cart's kind,
+        """The metadata of the selected card, its items: the cart's genre
+        where its manifest names one (SPEC.md 3.7) and its kind where not,
         where it came from (built in, the kid's own, installed) and, where
         its play record has a day, when it was last played."""
         if it.get("type") in PSEUDO_TILE_TYPES:
             return ("A new game",)
-        kind = _KIND_NAME.get(it.get("type"), "App")
+        kind = _cl.genre_word(it.get("genre")) or _KIND_NAME.get(it.get("type"), "App")
         cid = it.get("id") or ""
         if self.own_for is not None and self.own_for(it):
             src = "Yours"
@@ -2678,6 +2681,20 @@ class LauncherHomeLayer:
         if it.get("type") not in PSEUDO_TILE_TYPES:
             vy = by - 16 // u - lh * vs
             ky = vy - 6 // u - lh * ks
+            # the manifest's description (SPEC.md 3.7) in the room between
+            # the metadata and the facts, as many lines as fit
+            gap = 10 // u
+            room = (ky - gap - (my + lh * ms + gap)) // (lh * ms)
+            text = it.get("description")
+            if text and room > 0:
+                lines = list(_ui_draw.wrap_px(text, dw, ms))
+                if len(lines) > room:
+                    lines = lines[:room]
+                    lines[-1] = _ui_draw.print_fit(lines[-1], dw - _ui_draw.print_width("...", ms), ms) + "..."
+                dy = my + lh * ms + gap
+                for line in lines:
+                    cv.print_scaled(line, dx, dy, dim, ms)
+                    dy += lh * ms
             col = 150 // u
             for k, (key, val) in enumerate(self._facts(it)):
                 fx = dx + k * col
