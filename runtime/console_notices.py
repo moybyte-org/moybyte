@@ -27,6 +27,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
     from runtime import layout_base as _lb
     from runtime import shell_layout as _shell_layout
+try:
+    from moy_store_base import builtin_name as _builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name as _builtin_name
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
@@ -381,10 +385,19 @@ class SystemMenuUI:
         """The rows for this open of the ≡ menu (see class note for the tuple form).
         The cart group is OMITTED entirely (not greyed) when no cart is open."""
         rows = []
-        if self.ws.cart is not None:
-            rows.append(_row("header", "menu.cart"))
+        cart = self.ws.cart
+        if cart is not None:
+            # headed by the cart's own title; Delete (to the Trash, never
+            # asked) last, and only for a cart the store can delete: a
+            # built-in is the console's, so it offers none
+            title = cart.get("title") or ""
+            head = _row("header", "menu.cart")
+            if title:
+                head = ("header", title.upper(), None, "", title)
+            rows.append(head)
             rows.append(_row("item", "menu.restart_cart", self._menu_restart_cart))
-            rows.append(_row("item", "menu.delete_cart", self._menu_delete_cart))
+            if self._deletable(cart):
+                rows.append(_row("item", "menu.delete_cart", self._menu_delete_cart))
             rows.append(("sep",))
         rows.append(_row("header", "menu.system"))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
@@ -398,6 +411,13 @@ class SystemMenuUI:
         rows.append(_row("item", "menu.about", self._menu_about))
         rows.append(_row("item", "menu.reboot", self._menu_reboot))
         return rows
+
+    def _deletable(self, cart):
+        """Whether the open cart is the store's to delete: a store that
+        writes, and a cart of its own, not a built-in it seeds."""
+        path = cart.get("path")
+        return bool(path) and bool(getattr(self.ws, "can_manage", True)) \
+            and _builtin_name(path) is None
 
     def _menu_restart_cart(self):
         # Re-run the open cart from its current config (TIC-80 restart), landing back

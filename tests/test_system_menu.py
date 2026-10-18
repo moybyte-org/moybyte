@@ -1,7 +1,8 @@
 """Tests for the top-bar dropdown system menu (#52): a ≡ (hamburger) toggle at the
 LEFT of the unified 18px bar opens a left-anchored dropdown built on a reusable Popup
-primitive. Always a SYSTEM group (Settings/About/Reboot); a CART group (Restart/Delete)
-is prepended only when a cart is open.
+primitive. Always a SYSTEM group (Settings/About/Reboot); a group headed by the open
+cart's title (Restart, then Delete for a cart the store can delete -- never a
+built-in) is prepended only when a cart is open.
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball, Enter == run / A),
@@ -77,6 +78,22 @@ def _open_cart(ws):
     # Stage 5 retired the #71 pause frame: the in-cart ≡/bar is CRASH chrome now (while
     # a cart PLAYS the game owns the full canvas), so these ≡-dropdown tests drive the
     # crashed state, where the bar (with the cart group in its ≡ menu) is drawn.
+    ws.cart_error = "boom"
+    ws._dirty = True
+
+
+def _open_own_cart(ws, tmp_path):
+    """Open a cart of the kid's own (not a built-in), crashed as `_open_cart`
+    leaves one, with a second real cart beside it."""
+    from runtime import moy_carts
+    moy_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
+                     type="app")
+    ws.carts.apply(shelf(str(tmp_path / "carts")))   # refresh both grids + carts.all
+    ws.set_home_tab("mine")                           # a cart of the kid's own
+    titles = [it.get("title") for it in ws.launcher.items]
+    ws.launcher.sel = titles.index("Extra")
+    ws.open()
+    assert ws.screen == "desktop" and ws.cart.get("title") == "Extra"
     ws.cart_error = "boom"
     ws._dirty = True
 
@@ -191,8 +208,22 @@ def test_hamburger_tap_opens_menu_with_cart_and_system_groups(tmp_path):
     _open_cart(ws)
     _tap(drv, *_center(C._SYSMENU_BTN))
     assert ws.sysmenu.open
-    assert _labels(ws) == ["CART", "RESTART CART", "DELETE CART",
+    title = ws.cart.get("title").upper()
+    # a built-in: the console's own, so no Delete
+    assert _labels(ws) == [title, "RESTART CART",
                            "SYSTEM", "SETTINGS", "ABOUT", "REBOOT"]
+
+
+def test_an_own_cart_offers_delete_last_in_its_group(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_own_cart(ws, tmp_path)
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    assert _labels(ws) == ["EXTRA", "RESTART CART", "DELETE CART",
+                           "SYSTEM", "SETTINGS", "ABOUT", "REBOOT"]
+    head = ws.sysmenu.items[0]
+    assert head[0] == "header" and head[4] == "Extra"     # the look's caption
 
 
 def test_menu_omits_cart_group_when_no_cart(tmp_path):
@@ -261,7 +292,7 @@ def test_hamburger_toggles_closed(tmp_path):
 def test_keyboard_nav_skips_headers(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    _open_cart(ws)
+    _open_own_cart(ws, tmp_path)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     assert ws.sysmenu.items[ws.sysmenu.sel][1] == "RESTART CART"
@@ -311,19 +342,15 @@ def test_restart_cart_action_reruns_via_apply(tmp_path):
 
 
 def test_delete_cart_action_deletes_then_goes_home(tmp_path):
-    from runtime import moy_carts
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    # Need >1 cart so carts.delete() isn't blocked by the keep-at-least-one guard.
-    moy_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
-                     type="app")
-    ws.carts.apply(shelf(str(tmp_path / "carts")))   # refresh both grids + carts.all
-    n0 = len(ws.launcher.items)
-    _open_cart(ws)
+    _open_own_cart(ws, tmp_path)
+    n0 = len(ws.carts.all)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     _tap(drv, *_row_center(ws, "DELETE CART"))
-    assert len(ws.launcher.items) == n0 - 1
+    assert len(ws.carts.all) == n0 - 1
+    assert "Extra" not in [c.get("title") for c in ws.carts.all]
     assert ws.screen == "launcher" and not ws.sysmenu.open
 
 
