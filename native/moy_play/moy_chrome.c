@@ -26,7 +26,7 @@ void moy_chrome_set_inks(const int16_t inks[MOY_INKS], bool bar_light, int dialo
 }
 
 static uint8_t ink(int i) {
-    return (uint8_t)(g_ink[i] & 63);
+    return (uint8_t)(g_ink[i] & 127);
 }
 
 // -- the list --------------------------------------------------------------------
@@ -45,7 +45,7 @@ static moy_chrome_op_t *put(moy_chrome_list_t *l, uint8_t op, int c, int x, int 
     }
     moy_chrome_op_t *o = &l->op[l->n++];
     o->op = op;
-    o->c = (uint8_t)(c & 63);
+    o->c = (uint8_t)(c & 127);
     o->scale = 0;
     o->src = 0;
     o->x = (int16_t)x;

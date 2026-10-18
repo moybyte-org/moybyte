@@ -90,3 +90,25 @@ def test_a_minimal_bars_title_is_in_the_chrome_ink(ws):
     ops = mp.chrome_strip_cell("title", (40, 0, 160, 18), 1, 0, "Appearance", False)
     inks = {c for op, c, sc, x, y, w, h, t in ops if op == 3}
     assert inks == {11}
+
+
+def test_the_strip_draws_in_the_inks_the_theme_names(ws):
+    """A role may be an index of the shell's block (64-127: a theme's RGB
+    colour), and the strip's cells draw in exactly the role they name -- the
+    title the bar's ink, the clock its dim ink, the menu glyph its ink -- for
+    every theme and mode. (The inks were masked to 6 bits, so Moy's,
+    Blocks' and Contrast's Calc bar on a handheld drew another colour.)"""
+    placed = 0
+    for name in ws.look.theme_names():
+        for variant in ("dark", "light"):
+            ws.look.set_theme(name, persist=False, variant=variant)
+            th = ws.theme_colors
+            mp = ui.chrome_inks(th, NAMES)
+            for kind, s, role in (("title", "Calc", "chrome_ink"),
+                                  ("clock", "14:32", "chrome_ink_dim")):
+                ops = mp.chrome_strip_cell(kind, (30, 0, 120, 18), 1, 0, s, False)
+                assert ops and {op[1] for op in ops} == {th[role]}, (name, variant, kind)
+            ops = mp.chrome_strip_cell("menu", (0, 0, 28, 18), 1, 0, None, False)
+            assert {op[1] for op in ops} == {th["chrome_ink"]}, (name, variant, "menu")
+            placed += th["chrome_ink_dim"] >= 64
+    assert placed, "no theme here places its ink in the shell's block"

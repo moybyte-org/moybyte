@@ -42,7 +42,8 @@ enum { MOY_CH_RECT = 1, MOY_CH_RECTB = 2, MOY_CH_TEXT = 3, MOY_CH_GLYPH = 4, MOY
 
 typedef struct {
     uint8_t op;
-    uint8_t c;                  // palette index (TEXT, RECT, RECTB, GLYPH)
+    uint8_t c;                  // palette index 0-127 (TEXT, RECT, RECTB, GLYPH); the raster has
+                                // a cart's 64 and takes the low 6 bits
     uint8_t scale;              // TEXT: its scale; GLYPH/ICON: 0 is the canvas's own
     uint8_t src;                // TEXT: its source (moy_text.h); a LIT is never drawn
     int16_t x, y, w, h;         // GLYPH: its rect; ICON: x, y
