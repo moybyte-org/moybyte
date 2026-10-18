@@ -932,6 +932,9 @@ HOME_SCALE_HH = 2.0
 # of a neighbour 7/10 of the hero's.
 _HH_CARD = _COVER_SIDE // 2
 _HH_GAP = 14
+# The least the handheld home leaves over and under the hero's caption
+# (title over metadata), at the font scale, when a face needs their room.
+_HH_SQUEEZE = (2, 4)
 
 
 def _clean_side(limit):
@@ -1099,12 +1102,23 @@ class Carousel(Launcher):
         # targets'); a pixel face's line is its ink, so 12, 3 and 4.
         above, between, below = ((6 * fs, 0, 10 * fs) if _ui_draw.font_v2(tf[0])
                                  else (12 * fs, 3 * fs, 4 * fs))
-        foot = above + title_h + between + meta_h + below
         ring = max(2 * fs + 2, reach)
         space = hints[1] - cy
+        # The gaps give before the card does: a face taller than the targets'
+        # (Day's against Night's) takes its pixels from over and under the
+        # caption, down to `_HH_SQUEEZE`, so every mode of a theme keeps one
+        # hero side; only what the gaps cannot hold steps the card down.
+        text = title_h + between + meta_h
+        lo = (_HH_SQUEEZE[0] * fs, _HH_SQUEEZE[1] * fs)
         card = _clean_side(_HH_CARD * fs)
-        while card > _COVER_SIDE // 8 and ring + 2 * card + foot > space:
+        while card > _COVER_SIDE // 8 and ring + 2 * card + text + lo[0] + lo[1] > space:
             card = _clean_side(card - 1)
+        short = ring + 2 * card + text + above + below - space
+        if short > 0:
+            give = min(short, above + below - lo[0] - lo[1])
+            cut = give * (above - lo[0]) // max(1, above + below - lo[0] - lo[1])
+            above, below = above - cut, below - (give - cut)
+        foot = above + text + below
         gap = _HH_GAP * fs
         top = cy + max(ring, (space - 2 * card - foot) // 2)
         title_y = top + 2 * card + above
