@@ -324,6 +324,59 @@ def test_the_tool_in_use_wears_the_current_mark(tmp_path):
     assert _px(ws, x + 3, y + 3) != on
 
 
+@pytest.mark.parametrize("theme,variant", [("moy", "light"), ("moy", "dark"),
+                                           ("blocks", "light"), ("contrast", "dark")])
+def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, variant):
+    """The grid starts under the caption's ink and the preview under the
+    Size line's, the Size line is centred on its column, and the two tool
+    rows are one toolbar: one pitch, each row centred on its span."""
+    from runtime import paint_layer as P
+    from runtime import ui_draw
+    ws, _drv, _c = _look_tab(tmp_path, theme, variant)
+    lay = ws.paint_layer.layout
+    fs = lay.fs
+    asc = ui_draw.font("ui")[3] * fs
+    assert lay.pg_y0 >= lay.title_xy[1] + asc + 3 * fs
+    assert lay.prev_rect[1] >= lay.size_xy[1] + asc + 4 * fs
+    assert lay.size_xy[0] == lay.close_btn[0] + lay.close_btn[2] // 2
+    assert lay.pg_span == 144
+    n1 = len(P._TOOL_ROW1)
+    row1, row2 = lay.tool_btns[:n1], lay.tool_btns[n1:]
+    pitches = {b[0] - a[0] for row in (row1, row2) for a, b in zip(row, row[1:])}
+    assert len(pitches) == 1
+    pitch = pitches.pop()
+    # On the handheld the actions span the content less its pad each side.
+    end = lay.cx + lay.cw - (lay.pg_x0 - lay.cx)
+    left = row2[0][0] - lay.pg_x0
+    right = end - (row2[-1][0] + pitch)
+    assert abs(left - right) <= 1
+
+
+def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
+    """The colour in use is ringed in `focus` with `surface` inside the ring,
+    and the cursor's ring is edged in `surface`, so neither vanishes on a
+    swatch or a cell of the focus colour's own."""
+    from runtime import paint_layer as P
+    ws, drv, chrome = _look_tab(tmp_path)
+    lay = ws.paint_layer.layout
+    pe = ws.paint
+    th = ws.theme_colors
+    pe.color = 11
+    ws.paint_layer._cur[:] = [3, 3]
+    _frames(drv, 2)
+    x = lay.sw_x0 + (pe.color % lay.sw_cols) * lay.sw
+    y = lay.sw_y0 + (pe.color // lay.sw_cols) * lay.sw
+    t = 2 * lay.fs
+    focus, surface = chrome.rgb565_of(th["focus"]), chrome.rgb565_of(th["surface"])
+    assert _px(ws, x, y + lay.sw // 2) == focus
+    assert _px(ws, x + lay.sw - 1, y + lay.sw // 2) == focus
+    assert _px(ws, x + t, y + lay.sw // 2) == surface
+    cx, cy, cell = _cell(lay, pe, 3, 3)
+    gap, ring = P._ring_reach(ws.look.live.look[0])
+    for o in (gap, gap + ring + 1):
+        assert _px(ws, cx - 1 - o, cy + cell // 2) == surface, o
+
+
 def test_the_size_opens_the_pickers_and_a_tile_of_the_sheet_becomes_the_sprite(tmp_path):
     ws, drv, _c = _look_tab(tmp_path)
     pl = ws.paint_layer

@@ -124,12 +124,13 @@ _TOOL_GLYPH = {
     "clear": "clear",
 }
 # The 2026-10 look's icon for each tool: the icon set's slot where the sets
-# have one, else the glyph table's (`ui.icon`'s order).
+# have one, else the glyph table's (`ui.icon`'s order). The four shifts are
+# the glyph table's arrows, one family (the sets have no up), and so not the
+# chevrons the column's previous and next sprite wear.
 _TOOL_ICON = {
     "pen": "pencil", "fill": "bucket", "rect": "rect", "line": "line",
     "oval": "oval", "select": "select", "copy": "dup", "fliph": "flip",
-    "rot": "rotate", "sleft": "back", "sright": "forward", "sdown": "down",
-    "clear": "del",
+    "rot": "rotate", "clear": "del",
 }
 # The pickers' sizes, PaintEditor.SIZES's order.
 _SIZE_NAMES = ("1x1", "2x2", "3x3")
@@ -138,6 +139,18 @@ _TOOL_MODE = {
     "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "rect": PaintEditor.RECT,
     "line": PaintEditor.LINE, "oval": PaintEditor.OVAL, "select": PaintEditor.SELECT,
 }
+def _ring_reach(look):
+    """(gap, width) of the theme's focus ring, read from its look's leaves
+    as native/moy_ui/moy_ui_depth.c reads them (hundredths, rounded; 3
+    where the theme names none): the ring stands `gap` off a box and is
+    `width` thick."""
+    out = []
+    for key in ("focus.ring.gap", "focus.ring.w"):
+        v = look.get(key)
+        out.append(3 if v is None or v < 0 else (v + 50) // 100)
+    return out[0], out[1]
+
+
 def _tool_row(x0, y0, cw, h, n):
     """A row of n button rects (x, y, w, h), cw apart with a 1px gutter."""
     return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
@@ -252,13 +265,18 @@ class PaintLayout(LayoutBase):
         trow = 40 if desk else 22 * fs
         bh = 40 if desk else 18 * fs
         line = 8 * fs                             # a line of the pixel face
+        # The caption and the Size line print in the `ui` face; the grid and
+        # the preview clear their ascent, which holds a caption's ink (it
+        # has no descenders).
+        asc = _ui_draw.font("ui")[3] * fs
         cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
         self.body_fill = self.panel = (cx, cy, cw, ch)
-        self.title_xy = (cx + pad, cy + pad)
+        top = cy + (pad if desk else 3 * fs)
+        self.title_xy = (cx + pad, top)
         self.trow = trow
         self.icon = 24 if desk else 16 * fs
         gx = cx + pad
-        gy = cy + pad + line + (10 if desk else 3 * fs)
+        gy = top + asc + (10 if desk else 3 * fs)
         tgap = 14 if desk else 3 * fs
         bottom = cy + ch - (pad // 2 if desk else 2 * fs)
         col = 300 if desk else 120 * fs           # the column's least width
@@ -267,7 +285,7 @@ class PaintLayout(LayoutBase):
         span = max(48, 48 * (min(hroom, wroom) // 48))
         self.pg_x0, self.pg_y0, self.pg_span = gx, gy, span
         self.pg_area = (gx, gy, span, span)
-        self.caption = (gx, cy + pad - 2 * fs, span, line + 4 * fs)
+        self.caption = (gx, top - 2 * fs, span, asc + 4 * fs)
         sw = max(6 * fs, span * 11 // 144)
         self.sw, self.sw_cols = sw, _SW_COLS
         self.sw_x0, self.sw_y0 = gx + span + gap, gy
@@ -277,14 +295,14 @@ class PaintLayout(LayoutBase):
         half = (rw - (8 if desk else 4 * fs)) // 2
         self.spr_prev = (rx, gy, half, bh)
         self.spr_next = (rx + rw - half, gy, half, bh)
-        y = gy + bh + (12 if desk else 5 * fs)
-        self.size_btn = (rx, y - 3 * fs, rw, line + 6 * fs)
+        y = gy + bh + (12 if desk else 2 * fs)
+        self.size_btn = (rx, y - 3 * fs, rw, asc + 6 * fs)
         self.size_xy = (rx + rw // 2, y)
-        y += line + (14 if desk else 6 * fs)
+        y += asc + (14 if desk else 5 * fs)
         ph = 96 if desk else 34 * fs
         self.prev_rect = (rx, y, rw, ph)
         self.prev_xy, self.prev_box = (rx, y), ph
-        y += ph + (14 if desk else 6 * fs)
+        y += ph + (14 if desk else 5 * fs)
         step = bh + (8 if desk else 3 * fs)
         self.get_btn = (rx, y, rw, bh)
         self.put_btn = (rx, y + step, rw, bh)
@@ -297,11 +315,12 @@ class PaintLayout(LayoutBase):
         self.status_xy = (rx, col_end + 2 * fs)
         self.status_w = rw
         span2 = (cx + cw - pad - gx) if beside else (self.sw_x0 + 2 * sw - gx)
-        cw1 = span // len(_TOOL_ROW1)
-        cw2 = span2 // len(_TOOL_ROW2)
+        # The two rows are one toolbar: one pitch, each row centred on its span.
+        n1, n2 = len(_TOOL_ROW1), len(_TOOL_ROW2)
+        pitch = min(span // n1, span2 // n2)
         self.tool_btns = (
-            _tool_row(gx, row1_y, cw1, trow, len(_TOOL_ROW1))
-            + _tool_row(gx, row2_y, cw2, trow, len(_TOOL_ROW2)))
+            _tool_row(gx + (span - pitch * n1) // 2, row1_y, pitch, trow, n1)
+            + _tool_row(gx + (span2 - pitch * n2) // 2, row2_y, pitch, trow, n2))
 
 
 class PaintLayer:
@@ -975,13 +994,19 @@ class PaintLayer:
                 cv.rect(gx0 + t * tpx - 1, gy0, 1, span, th["ink_dim"])
                 cv.rect(gx0, gy0 + t * tpx - 1, span, 1, th["ink_dim"])
         self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
-        # The cursor: the theme's ring around a black keyline.
+        # The cursor: the theme's ring around a black keyline, the ring
+        # edged inside and out in `surface`, so it reads on a cell of its
+        # own colour.
         x, y = self._cursor_xy(pe, gx0, gy0, cell)
         box = (x - 1, y - 1, cell + 1, cell + 1)
         cv.rectb(box[0], box[1], box[2], box[3], keyline)
+        gap, ring = _ring_reach(ws.look.live.look[0])
+        for o in (gap, gap + ring + 1):
+            cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o, th["surface"])
         _ui_draw.focus(cv, th, box, "part", ring=True)
         # The palette: colour 0 the checker under a white stroke, the
-        # colour in use ringed white over a `value` bar.
+        # colour in use ringed 2px inside in the focus colour, edged in
+        # `surface` within, so the ring reads on a swatch of its colour.
         sw = lay.sw
         for idx in range(16):
             x = lay.sw_x0 + (idx % lay.sw_cols) * sw
@@ -993,16 +1018,18 @@ class PaintLayer:
                 cv.line(x + sw - 1, y, x, y + sw - 1, white)
         x = lay.sw_x0 + (pe.color % lay.sw_cols) * sw
         y = lay.sw_y0 + (pe.color // lay.sw_cols) * sw
-        for r in range(2 if lay.desk else fs):
-            cv.rectb(x + r, y + r, sw - 2 * r, sw - 2 * r, white)
-        cv.rect(x, y + sw - 3 * fs, sw, 3 * fs, th["value"])
+        t = 2 * fs
+        for r in range(t):
+            cv.rectb(x + r, y + r, sw - 2 * r, sw - 2 * r, th["focus"])
+        cv.rectb(x + t, y + t, sw - 2 * t, sw - 2 * t, th["surface"])
         # The column: the sprite before and after, its size (a tap opens the
         # pickers, as on the preview and the caption), the preview on the
         # checker, then Get, Put and File.
         _ui_draw.button(cv, th, lay.spr_prev, "<", "normal")
         _ui_draw.button(cv, th, lay.spr_next, ">", "normal")
         text = "Size %dx%d" % (pe.size, pe.size)
-        cv.print(text, lay.size_xy[0] - len(text) * 4 * fs, lay.size_xy[1], th["ink"], 1)
+        cv.print(text, lay.size_xy[0] - _ui_draw.print_width(text, fs) // 2, lay.size_xy[1],
+                 th["ink"], 1)
         px, py, pw, ph = lay.prev_rect
         self._checker(cv, px, py, pw, ph, 6 if lay.desk else 3 * fs, greys)
         ps = max(1, (ph * 3 // 4) // dim)
