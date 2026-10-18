@@ -571,7 +571,9 @@ class SystemMenuUI:
         return (x0, y0, x1 - x0, y1 - y0)
 
     def _menu_cell(self):
-        """The system button's cell on the system canvas, the card's anchor."""
+        """The system button's cell on the system canvas, the card's anchor,
+        its left at least the popover's gap from the glass's edge (4 pixels
+        at the font scale, 8 on the desk), as far as it hangs below the bar."""
         ws = self.ws
         bars = ws.layout.bars
         got = _shell_layout.cell_of(bars, "menu")
@@ -579,7 +581,11 @@ class SystemMenuUI:
             return (0, 0, 0, 0)
         i, (bx, by, bw, bh) = got
         rx, ry = bars[i][1][0], bars[i][1][1]
-        return (rx + bx, ry + by, bw, bh)
+        x = rx + bx
+        edge = 4 * ws.layout.fs * _lb.unit()
+        if x < edge:
+            bw, x = bw - (edge - x), edge
+        return (x, ry + by, bw, bh)
 
     def _draw_look(self):
         """The rows as a popover of the public UI API's hung under the system
