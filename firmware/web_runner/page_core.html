@@ -288,7 +288,12 @@ var rh=Math.max(64,ih-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
 // stamp -- so size by width alone then; a phone is width-limited anyway.
 var ae=document.activeElement;if(ae&&ae.id==="kbin")rh=1e9;
 var s=Math.min(rw/W,rh/H);
-cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";}
+cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";
+// Below one device pixel a canvas pixel, nearest-neighbour sampling DROPS
+// whole columns and rows: a glyph loses its strokes ("Storybook" read
+// "Storybool", owner report 2026-10-18). Shrunk, the canvas is filtered;
+// shown at its size or larger, it stays pixelated.
+cv.style.imageRendering=s*(window.devicePixelRatio||1)<1?"auto":"";}
 window.addEventListener("resize",fit);
 // The visual viewport is what actually changes when the soft keyboard opens/
 // closes -- listen permanently (kbScroll's focus-scoped listener is separate).
