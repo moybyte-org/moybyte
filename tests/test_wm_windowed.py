@@ -19,6 +19,8 @@ presentation's contracts:
 """
 
 import os
+
+import pytest
 import sys
 from pathlib import Path
 
@@ -675,11 +677,17 @@ def test_click_moves_focus_without_popping_the_playtest(tmp_path):
     drv.type_char(ord("q"))
     drv.frame(1 / 30)
     assert ws.editor.text() == "q"
-    # Refocusing the playtest restores its pointer.
-    drv.touch(player.x + 40, player.y + 4)
+    # The click raised the editor over the playtest, which it now covers;
+    # refocusing the playtest from its chip raises it back and restores its
+    # pointer.
+    assert ws.wm._order[-1] == "menu"
+    assert ws.wm._win_at(player.x + 40, player.y + 4) == "menu"
+    x, y, w, h = next(r for k, r, _ in ws.wm._chip_rects() if k == "desktop")
+    drv.touch(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "desktop"
     assert ws.wm._focus == "desktop" and ws.wm.player_has_pointer()
 
 
@@ -802,6 +810,151 @@ def test_resize_grip_reflows_content(tmp_path):
     drv.frame(1 / 30)
     assert (win.w, win.h) == (w0 + 80, h0 + 50)
     assert win.ctx.layout.w == win.buf.w == win.w - 2
+
+
+# -- the z-order: a window behind comes to the front -----------------------------
+
+def _two_apps(tmp_path):
+    """Files, then Calc opened above it and lying over its right half."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["files"])
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
+    ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
+    _quiesce(ws)
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert ws.wm._order == ["files", "calc"]
+    return ws, drv, files, calc
+
+
+def _open_point(ws, win, key, strip=False):
+    """A point of `win` (of its title strip, with `strip`) no window covers."""
+    ys = [win.y + 3] if strip else range(win.y + 2, win.y + win.h - 2, 6)
+    return next((x, y) for y in ys for x in range(win.x + 2, win.x + win.w - 2, 6)
+                if ws.wm._win_at(x, y) == key)
+
+
+def _shows_content(ws, win, rect):
+    """Whether the glass shows `win`'s content buffer 1:1 over `rect`."""
+    root = ws.sys_canvas
+    rb, wb = bytes(root._buf), bytes(win.buf._buf)
+    cx, cy, cw, _ch = win.content_rect()
+    x, y, w, h = rect
+    for Y in range(y, y + h):
+        a = (Y * root.w + x) * 2
+        b = ((Y - cy) * cw + x - cx) * 2
+        if rb[a:a + 2 * w] != wb[b:b + 2 * w]:
+            return False
+    return True
+
+
+def test_a_click_on_a_window_behind_brings_it_to_the_front(tmp_path):
+    """Clicking a window behind another focuses it AND raises it, as on
+    every desktop: it paints over the window that covered it, and nothing
+    closes."""
+    ws, drv, files, calc = _two_apps(tmp_path)
+    cx, cy, cw, ch = files.content_rect()
+    band = (calc.x + 8, cy + 80, cx + cw - calc.x - 16, 60)   # Files' content, under Calc
+    assert ws.wm._win_at(band[0], band[1]) == "calc"
+    assert not _shows_content(ws, files, band)
+    kinds = ws.wm.stack.kinds()
+    x, y = _open_point(ws, files, "files")
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["calc", "files"] and ws.wm._focus == "files"
+    assert ws.wm.stack.kinds() == kinds                # nothing closed
+    assert ws.wm._win_at(band[0], band[1]) == "files"
+    assert _shows_content(ws, files, band)             # painted on top
+    x, y = _open_point(ws, calc, "calc")               # and back again
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["files", "calc"] and ws.wm._focus == "calc"
+    assert ws.wm._win_at(band[0], band[1]) == "calc"
+
+
+def test_a_drag_of_a_window_behind_raises_it_and_moves_it(tmp_path):
+    ws, drv, files, calc = _two_apps(tmp_path)
+    x0, y0 = files.x, files.y
+    x, y = _open_point(ws, files, "files", strip=True)
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "files"
+    drv.touch_drag(x + 60, y + 30)
+    drv.frame(1 / 30)
+    drv.touch_drag(x + 61, y + 31)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert (files.x, files.y) == (x0 + 61, y0 + 31)
+    assert ws.wm._order == ["calc", "files"] and ws.wm._focus == "files"
+
+
+def test_the_chips_keep_the_order_the_windows_opened(tmp_path):
+    ws, drv, files, calc = _two_apps(tmp_path)
+    ws.wm._chip_tap("files")                           # a chip raises too
+    drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "files"
+    assert [k for k, _r, _l in ws.wm._chip_rects()] == ["files", "calc"]
+
+
+def test_opening_an_open_app_brings_its_window_forward_as_it_was(tmp_path):
+    """The desk's launcher opens an app that has a window by bringing that
+    window forward: the windows above it stay open (a goto would have
+    returned to it, closing them) and the app keeps what it showed."""
+    ws, drv, files, calc = _two_apps(tmp_path)
+    app = ws._apps_by_id["calc"]
+    app = getattr(app, "_inst", app)
+    for k in "12+3":
+        app._key(k)
+    entry = app.entry
+    ws.wm._chip_tap("files")
+    drv.frame(1 / 30)
+    kinds = ws.wm.stack.kinds()
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == kinds
+    assert ws.wm._order == ["files", "calc"] and ws.wm._focus == "calc"
+    assert app.entry == entry
+    calc.minimized = True                              # a minimized one is shown
+    ws.wm._move_focus("files")
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    assert not calc.minimized and ws.wm._order[-1] == "calc"
+
+
+def test_a_window_over_the_game_takes_the_game_off_the_quiet_stack(tmp_path):
+    """The quiet stack repaints the game window alone; a window over it (its
+    shadow included) would be painted over, so while one is, every frame is
+    a full paint."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()
+    drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    _quiesce(ws)
+    wm = ws.wm
+    game, st = wm._wins["desktop"], wm._wins["settings"]
+    ring = _Ring(ws, 1)
+    wm._move_window(st, game.x + 40, game.y + 40)
+    ws._dirty = True
+    assert "quiet" not in ring.settle(drv, 6)
+    wm._move_window(st, game.x + game.w + 60, st.y)
+    ws._dirty = True
+    if wm._covers_player():
+        pytest.skip("no room on this desk beside the game window")
+    assert ring.settle(drv, 6)[-1] == "quiet"
 
 
 def test_minimize_hides_window_and_chip_restores(tmp_path):
@@ -2070,13 +2223,14 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 
 # The desk with Calc and Files open as windows of two sizes, each frame hashed
 # the way tests/test_shell_goldens.py hashes a surface, once with Files on top
-# and once after Calc is reopened above it. Each app lays itself out and draws
+# and once after Calc is reopened: its window comes forward, Files open
+# behind it. Each app lays itself out and draws
 # from its OWN grant's surface row (native/moy_app), which the WM writes as it
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
     "7c7048e10d81302f31e77b6ffcdeb18276e0119a0a8d46dfca7a38b26d6e7cb3",
-    "0c4cac6d22b0e7b2c151f912a7b1b1394e7790e76b39c6278f64010356921921",
+    "e5ed302cb394bd79ef687d896300df1388ad98fe5b103c65a9ad385da6596c91",
 )
 
 

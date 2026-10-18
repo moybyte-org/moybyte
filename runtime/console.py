@@ -1707,6 +1707,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return self._online_ok
 
     def open_settings(self):
+        if self.wm.bring_forward("settings"):
+            return                     # the desk's Settings window, as it was
         if not self.wm.top_is("settings"):        # Stage 6d: ask the stack top
             self._settings_return = self.wm.top_kind()  # resume here on exit (cart vs home)
         self._dirty = True             # screen change repaints (#44)
@@ -2733,7 +2735,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         else:
             self.set_home_tab("make", g)
         self.projects_layer._tab_focus = False
-        self.wm.goto("projects")
+        self.wm.activate("projects")
 
     def new_cart_and_edit(self, grid=None):
         """The "+ New" card: create a fresh GAME cart (`carts.new()` does the

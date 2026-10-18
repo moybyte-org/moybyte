@@ -356,7 +356,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._root_ctx = _LayoutCtx.capture(ws)
         self._win_layer = _WindowStackLayer(self)
         self._wins = {}               # slot key -> _Win
-        self._order = []              # window slots, bottom -> top (stack-shaped)
+        # Two orders of the same slots: `_kinds` is the back-stack's above the
+        # desk (the order the windows opened in, which the chips keep), and
+        # `_order` is the Z-ORDER, bottom -> top, which the focus raises
+        # through: every draw and hit-test walks `_order`.
+        self._kinds = []
+        self._order = []
+        self._front = None            # the kind a goto() asked to bring forward
+        self._player_under = False    # a window above the game window overlaps it
         # Surface model v1 (docs/surface_model_v1.md): the registry and the
         # one monotonic gen mint are the kernel's surface table (§15, the
         # glass). Window records mirror _wins ("win:<slot key>" -- REGISTRY
@@ -526,6 +533,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             for win in self._parked.wins.values():
                 self._drop_win(win)
         self._drop_wins()
+        self._kinds = []
         self._order = []
         self._focus = None
         self.content_gen += 1
@@ -645,6 +653,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._parked = _Parked(st[at + 1:] if at >= 0 else [], self._order,
                                self._wins, self._focus)
         self._wins = {}
+        self._kinds = []
         self._order = []
         self._focus = None
         self._drag = self._drag_armed = self._resize = None
@@ -678,12 +687,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             kinds.remove("menu")
             win = p.wins.pop("menu", None)
             if win is not None:
-                p.order.remove("menu")
+                if "menu" in p.order:
+                    p.order.remove("menu")
                 self._drop_win(win)
                 if p.focus == "menu":
                     p.focus = p.order[-1] if p.order else None
         self.stack.restore(["desk"] + kinds)
         self._wins = p.wins
+        self._kinds = kinds
         self._order = p.order
         self._focus = p.focus
         self.mode = "desktop"
@@ -768,7 +779,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         was popped, create records (buffer + layout context + cascade
         position) for newly-pushed ones."""
         keys = self._slots()
-        if keys != self._order:
+        front, self._front = self._front, None
+        if keys != self._kinds:
             alive = set(keys)
             old = self._focus
             if not self._text_left and (old is None or old in alive):
@@ -777,19 +789,38 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if g not in alive:
                     self._drop_win(self._wins.pop(g))
                     self._text_wish.pop(g, None)
-            new = keys[-1] if keys else None
-            revealed = new in self._wins
+            pushed = keys[-1] if keys and keys[-1] not in self._wins else None
+            had = set(self._wins)
             for depth, g in enumerate(keys):
                 if g not in self._wins:
                     self._wins[g] = self._make_window(g, g, depth)
-            self._order = keys
-            # A stack change (spawn/pop) moves focus to the newest top window --
-            # the one navigation just revealed/opened. Click moves it after that.
-            # A window opened set its own text mode; one a pop revealed gets
-            # back the mode it had.
+            # The z-order keeps its windows where they were; a new one opens
+            # on top.
+            order = [g for g in self._order if g in alive]
+            for g in keys:
+                if g not in order:
+                    order.append(g)
+            self._kinds = keys
+            self._order = order
+            # The focus after a stack change: the kind a navigation brought
+            # forward (a spawn, or a return to a window below), else a window
+            # just opened; a close leaves it where it was, or on the window
+            # now in front. Click moves it after that. A window opened set its
+            # own text mode; one a pop revealed gets back the mode it had.
+            if front in alive:
+                new = front
+            elif pushed is not None:
+                new = pushed
+            elif old in alive:
+                new = old
+            else:
+                new = order[-1] if order else None
             self._focus = new
-            if revealed and new != old:
+            self._raise(new)
+            if new in had and new != old:
                 self._apply_text(new)
+        elif front is not None and front in self._wins and self.mode == "desktop":
+            self._bring_forward(front)
         self._text_left = False
         # Surface model: window records mirror the slot set. A dropped slot's
         # surface goes with it; a re-opened one is REBORN with fresh gens from
@@ -993,14 +1024,57 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return self._focus
 
     def _move_focus(self, key):
-        """Focus moves to window `key` (None: the desk) with no stack change:
-        the window it leaves keeps its text mode, and `key` gets back its own."""
+        """Focus moves to window `key` (None: the desk) with no stack change,
+        and the window comes to the front, as on every desktop: the window it
+        leaves keeps its text mode, and `key` gets back its own."""
         old = self._focus
         if key == old:
+            self._raise(key)
             return
         self._text_wish[old] = bool(self.ws.input.text_mode)
         self._focus = key
+        self._raise(key)
         self._apply_text(key)
+
+    def _raise(self, key):
+        """Window `key` to the top of the z-order (None, or one on top: no-op)."""
+        order = self._order
+        if key is None or not order or order[-1] == key or key not in order:
+            return
+        order.remove(key)
+        order.append(key)
+        self.ws._dirty = True
+
+    def _bring_forward(self, key):
+        """Window `key` shown, focused and in front: what opening a process
+        that already has a window does on the desk."""
+        win = self._wins.get(key)
+        if win is None:
+            return
+        if win.minimized:
+            win.minimized = False
+            self.ws._dirty = True
+        self._move_focus(key)
+
+    def goto(self, kind):
+        """The back-stack's goto, and on the desk the window it names comes
+        forward: a spawn opens on top, a return to a window below raises it,
+        and a goto to the process already on the stack's top raises its
+        window over any the focus had put in front of it."""
+        FullscreenStackWM.goto(self, kind)
+        if self.mode == "desktop":
+            self._front = kind
+
+    def bring_forward(self, kind):
+        """On the desk, a process that already has a window is opened by
+        bringing that window forward (shown, focused, raised), every other
+        window left open, as a desktop's launcher does."""
+        if (self.mode != "desktop" or kind not in self._wins
+                or self._slots() != self._kinds):
+            return False
+        self._bring_forward(kind)
+        self.ws._dirty = True
+        return True
 
     def _apply_text(self, key):
         """Put the keyboard in the text mode window `key` had (button mode
@@ -1016,7 +1090,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         about to take focus, so the focused one keeps `prev`, its own."""
         if self.mode == "console" or self._text_left:
             return
-        if self._slots() != self._order:
+        if self._slots() != self._kinds:
             self._text_wish[self._focus] = bool(prev)
             self._text_left = True
 
@@ -1338,7 +1412,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                  and self._drag is None and self._drag_armed is None
                  and self._resize is None
                  and not getattr(ws.pointer, "visible", False))
-        quiet = still and "desktop" in self._wins
+        # A window over the game's casts its shadow on it and must stay over
+        # it: the quiet stack repaints the game window alone, so not then.
+        quiet = still and "desktop" in self._wins and not self._player_under
         if quiet and self._full_debt <= 0:
             if pop:
                 return self._quiet_pop_stack
@@ -1763,6 +1839,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         sig = self._shape_sig()
         if sig != self._win_sig:
             self._win_sig = sig
+            self._player_under = self._covers_player()
             for k in self._order:
                 self._wins[k]._stamp_streak = 0
             self._sig_stable = False
@@ -1779,6 +1856,23 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     or getattr(win, "_stamp_streak", 0) < horizon):
                 return i
         return n                          # every window is settled: draw none
+
+    def _covers_player(self):
+        """Whether a shown window above the game window reaches it, its
+        shadow included (read once a shape change, by draw_stack's quiet
+        path)."""
+        order = self._order
+        if "desktop" not in order:
+            return False
+        win = self._wins["desktop"]
+        if win.minimized:
+            return False
+        for k in order[order.index("desktop") + 1:]:
+            up = self._wins[k]
+            if not up.minimized and _overlap(self._pad_extent(up, up.x, up.y, up.w, up.h),
+                                             (win.x, win.y, win.w, win.h)):
+                return True
+        return False
 
     def _frame_is_quiet(self, dt):
         """True when nothing GLOBAL invalidated the retained ping-pong pixels

@@ -386,9 +386,12 @@ class WindowChrome:
         in a left slot, its end in a right one, and centred on the bar in the
         centre slot (today's taskbar); down a side bar a square chip each
         with the label's first letter. They stop short of the cell's end.
-        Returns [(kind, rect, label)] in stack order, on the root canvas;
-        deterministic, so draw + hit-test share it without stored state."""
-        if not self._order:
+        Returns [(kind, rect, label)] in the order the windows opened (the
+        back-stack's, never the z-order, so a chip never moves when the focus
+        does), on the root canvas; deterministic, so draw + hit-test share it
+        without stored state."""
+        kinds = [k for k in self._kinds if k in self._wins]
+        if not kinds:
             return []
         got = self._chips_cell()
         if got is None:
@@ -402,14 +405,14 @@ class WindowChrome:
             x = bx + (bw - side) // 2
             y = by + cy
             end = by + cy + ch - 4 * fs
-            for k in self._order:
+            for k in kinds:
                 if y + side > end:
                     break                              # out of bar space -- stop
                 out.append((k, (x, y, side, side), self._win_title(self._wins[k])[:1]))
                 y += side + 2 * fs
             return out
         looked = bool(_ui_draw.depth()[0])
-        titles = [self._chip_title(self._wins[k], looked) for k in self._order]
+        titles = [self._chip_title(self._wins[k], looked) for k in kinds]
         pad = _CHIP_PAD if looked else 2 * 4 * fs   # the look's: icon slot and margins
         gap = 6 if looked else 2 * fs
         room = cw - 4 * fs - (len(titles) - 1) * gap
@@ -434,7 +437,7 @@ class WindowChrome:
             h = min(bh * 28 // 40, bh - 8)
             y = by + (bh - h) // 2
         end = bx + cx + cw - 4 * fs
-        for i, k in enumerate(self._order):
+        for i, k in enumerate(kinds):
             if x + widths[i] > end:
                 break                                  # out of bar space -- stop
             out.append((k, (x, y, widths[i], h), labels[i]))

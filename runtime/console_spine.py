@@ -386,9 +386,14 @@ class SpineVerbs:
         tap above and by app-to-app jumps (e.g. Files' OPEN -> Paint). A
         TYPING app (register_app text_mode=True) gets the clean ASCII
         keyboard after it opens; the rest are set to button mode BOTH ways, so
-        a jump out of a typing app restores the raw keyboard. Returns False
+        a jump out of a typing app restores the raw keyboard. On the desk an
+        app whose window is open and no cart named comes forward as it was
+        (`wm.bring_forward`); one opened on a cart opens it in that window,
+        the windows above left open (`wm.activate`). Returns False
         when no cart carries the app's identity."""
         if cart is None:
+            if self.wm.bring_forward(app.id):
+                return True            # its window, as it was, in front
             for c in self.carts.all:
                 if app.is_app(c):
                     cart = c
@@ -404,7 +409,7 @@ class SpineVerbs:
         self.input.text_mode = False
         self.search_typing = False     # #105: an app jump ends any in-progress search typing
         app.open()
-        self.wm.goto(app.id)
+        self.wm.activate(app.id)
         self._set_text_mode(bool(text))
         self.ach.note("open", cart.get("path") or cart.get("title"))
         return True

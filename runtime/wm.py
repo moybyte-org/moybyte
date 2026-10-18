@@ -252,6 +252,18 @@ class FullscreenStackWM:
         if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
             self._on_nav()
 
+    def bring_forward(self, kind):
+        """Show the window process `kind` already has, in front, with no
+        navigation: True when this WM did (a desk's window), False when it
+        has none to show (every fullscreen tier)."""
+        return False
+
+    def activate(self, kind):
+        """Open process `kind` the way a launcher does: its window brought
+        forward where it has one, else `goto`."""
+        if not self.bring_forward(kind):
+            self.goto(kind)
+
     def _on_nav(self):
         """A real top-of-stack change happened: bump the content generation so the
         memoized layer stack (Stage 6c) rebuilds on the next access."""

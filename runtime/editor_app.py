@@ -211,7 +211,7 @@ class EditorApp:
         break is reported and where the file that caused it is offered."""
         self.project = project
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         # Another cart may ladder differently (a compiled cart without `src/`
         # has no Code tab), so the lent zone repaints whatever tab it lands on.
         self.zone_gen += 1
@@ -220,14 +220,14 @@ class EditorApp:
 
     def open_paint(self):
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws._editing_icons = False        # a CART sheet, not the system theme
         ws.paint_status = None
         ws.set_menu_view("paint")
 
     def open_map(self):
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.save_status = None
         ws.map_ui.on_open()          # fresh gesture/zoom state (#37)
         ws.set_menu_view("map")
@@ -239,7 +239,7 @@ class EditorApp:
 
     def open_blocks(self):
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         # NB: don't pre-clear blk_status here -- set_menu_view("blocks") sets the
         # "CODE LOCKED" notice when it builds the editor in protected mode, and
         # clearing it after would hide the data-loss guard's message.
@@ -250,7 +250,7 @@ class EditorApp:
         actor view over the cart's default scene. Mirrors open_map -- reset
         gesture/zoom state, then build via set_menu_view("scene")."""
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.save_status = None
         ws.scene_ui.on_open()        # fresh gesture/zoom/props state
         ws.set_menu_view("scene")
@@ -265,7 +265,7 @@ class EditorApp:
         cart's AudioBank. Mirrors open_map -- reset preview state, then build the
         editor via set_menu_view("music")."""
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.save_status = None
         ws.music_ui._stop_music_preview()
         ws.set_menu_view("music")
