@@ -489,6 +489,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     }
 
     // The pointer: a press, a drag that scrolls its page, a release that taps.
+    // A drag's direction is decided once, when it first passes the slop: a
+    // mostly-vertical one scrolls the page from any row, a slider's and a
+    // stepper's included; a mostly-horizontal one on a slider drags its knob.
     int p = in[MOY_UI_IN_PTR];
     int live = p & MOY_UI_P_LIVE, held = live && (p & MOY_UI_P_HELD);
     int x = in[MOY_UI_IN_X], y = in[MOY_UI_IN_Y];
@@ -507,11 +510,14 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     } else if (held && was_held && c->gesture) {
         if (c->gesture == 1) {
             int h = c->press ? find(v, n, c->press) : -1;
-            int slider = h >= 0 && (v[h].flags & STOP_KEEP_LR);
-            int dy = y - c->press_y;
-            if (slider) {
+            int keep_lr = h >= 0 && (v[h].flags & STOP_KEEP_LR);
+            int dx = x - c->press_x, dy = y - c->press_y;
+            dx = dx < 0 ? -dx : dx;
+            dy = dy < 0 ? -dy : dy;
+            if (keep_lr && dx > slop && dx > dy) {
+                c->gesture = 3;         // a slider's knob follows it; a stepper's release taps
                 settled = 0;
-            } else if (dy > slop || dy < -slop) {
+            } else if (dy > slop) {
                 int pg = page_at(v, n, c->press_x, c->press_y);
                 c->drag_page = pg >= 0 ? v[pg].id : 0;
                 c->press = 0;
@@ -530,7 +536,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             settled = 0;
         }
     } else if (!held && c->gesture) {
-        if (c->gesture == 1 && c->press && live) {
+        if (c->gesture != 2 && c->press && live) {
             int h = stop_at(v, n, x, y);
             if (h >= 0 && v[h].id == c->press) {
                 c->act = c->press;
@@ -1010,9 +1016,11 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     r.hi = hi;
     r.steps = o->steps == 1;
     int p = c->in[MOY_UI_IN_PTR];
-    if (o->disabled != 1 && c->press == id && c->gesture == 1 && (p & MOY_UI_P_LIVE)
+    if (o->disabled != 1 && c->press == id && c->gesture == 3 && (p & MOY_UI_P_LIVE)
         && (p & MOY_UI_P_HELD) && b.w > 0) {
         v = moy_ui_vrow_at(s, b, MOY_UI_V_SLIDER, &r, c->in[MOY_UI_IN_X]);
+    } else if ((st & MOY_UI_ST_ACTIVATED) && c->tap_x != INT16_MIN && b.w > 0) {
+        v = moy_ui_vrow_at(s, b, MOY_UI_V_SLIDER, &r, c->tap_x);
     }
     if (v < lo) {
         v = lo;

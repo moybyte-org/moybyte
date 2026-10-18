@@ -276,10 +276,66 @@ def test_slider_maps_the_pointer_over_its_track_and_steps_by_arrow():
     right = 320 - 4                       # the row's pad off the group
     r.frame(ptr=(right - 84, 10, 1 | 2 | 4))
     r.frame(ptr=(right - 84, 10, 1 | 2))
-    assert st["v"] == 0, "the track's left end is lo"
+    assert st["v"] == 6, "a press that has not moved is no drag yet"
+    r.frame(ptr=(right - 84, 10, 1))
+    assert st["v"] == 0, "a tap on the track's left end is lo"
+    r.frame(ptr=(right - 84, 10, 1 | 2 | 4))
     r.frame(ptr=(right, 10, 1 | 2))
-    assert st["v"] == 10, "its right end is hi"
+    assert st["v"] == 10, "dragged sideways to its right end: hi"
     r.frame(ptr=(right, 10, 1))
+    assert st["v"] == 10
+
+
+def _long_page():
+    """A slider and a seg among enough links that the page scrolls."""
+    st = {"v": 5, "mode": 0}
+
+    def draw():
+        ui.page("")
+        ui.link("Top", "")
+        st["v"] = ui.slider("Level", st["v"], 0, 10)
+        st["mode"] = ui.seg("Mode", ["One", "Two", "Three"], st["mode"])
+        for i in range(16):
+            ui.link("Row %d" % i, "")
+        return st
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    return r, st
+
+
+def _drag(r, x0, y0, x1, y1, steps=4):
+    r.frame(ptr=(x0, y0, 1 | 2 | 4))
+    for i in range(1, steps + 1):
+        r.frame(ptr=(x0 + (x1 - x0) * i // steps, y0 + (y1 - y0) * i // steps, 1 | 2))
+    r.frame(ptr=(x1, y1, 1))
+
+
+def test_a_vertical_drag_from_a_slider_or_a_seg_scrolls_the_page():
+    """As on a phone: the drag's direction is decided at the slop, and a
+    mostly-vertical one scrolls the page from a slider's row (its track
+    included) and a seg's, changing neither value."""
+    r, st = _long_page()
+    x, y, w, h = _box(r, "Level")[:4]
+    _drag(r, x + w - 40, y + h // 2, x + w - 34, y + h // 2 - 30)
+    assert _box(r, "Level")[1] == y - 30, "the page scrolled with the drag"
+    assert st["v"] == 5, "the slider kept its value"
+    x, y, w, h = _box(r, "Mode")[:4]
+    _drag(r, x + w - 10, y + h // 2, x + w - 13, y + h // 2 - 20)
+    assert _box(r, "Mode")[1] == y - 20, "a seg's row scrolls the page too"
+    assert st["mode"] == 0, "and is no tap"
+
+
+def test_a_sideways_drag_moves_a_slider_and_does_not_scroll():
+    r, st = _long_page()
+    x, y, w, h = _box(r, "Level")[:4]
+    right = x + w
+    _drag(r, right - 60, y + h // 2, right, y + h // 2 - 8)
+    assert st["v"] == 10, "the knob followed the pointer to the track's end"
+    assert _box(r, "Level")[1] == y, "the page did not scroll"
+    x, y, w, h = _box(r, "Mode")[:4]
+    r.tap(x + w - 10, y + h // 2)
+    assert st["mode"] == 2, "a tap on a seg still takes the option tapped"
 
 
 def _level_page(v, o):
