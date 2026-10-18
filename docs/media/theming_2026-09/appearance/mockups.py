@@ -99,7 +99,7 @@ TINTS = [("NONE", None), ("GREY", [55, 54, 51, 50, 49, 6, 48]),
          ("EARTH", [33, 57, 30, 28, 35, 31, 15])]
 TINT = dict(TINTS)
 
-ACCENT_FILLS = ("accent", "title", "title_active", "selection")
+ACCENT_FILLS = ("accent", "title", "title_active", "selection", "value")
 TIED = ("edge", "border", "hilite", "shade_hi", "bar_edge", "desktop_pattern")
 BACKGROUNDS = ("panel", "surface", "surface_alt", "desktop", "desktop_pattern",
                "title_inactive", "bar", "dim", "hilite", "shade_hi", "shade_lo",

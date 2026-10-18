@@ -4188,6 +4188,14 @@ int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
         return rc;
     }
     moy_theme_derive((const int32_t(*)[MOY_THEME_ROLES])base, accent, tint, rows);
+    // A lifted card's rim the source tied to its accent follows the pick, as
+    // the roles it tied do (a rim of any other colour stays).
+    int lr = look_leaf("focus.lift.rim.c");
+    for (int v = 0; v < 2 && lr >= 0; v++) {
+        if (looks[v].v[lr] == base[v][MOY_UI_T_ACCENT]) {
+            looks[v].v[lr] = rows[v][MOY_UI_T_ACCENT];
+        }
+    }
     wr_t w = {out, cap, 0};
     put_custom(&w, flat, (const int32_t(*)[MOY_THEME_ROLES])rows, keep, looks, src, n);
     if (w.n > MOY_THEME_BYTES) {

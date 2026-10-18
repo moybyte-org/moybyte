@@ -166,7 +166,7 @@ def test_every_combination_is_the_reference_and_reads(name):
 # 2026-10-18. Each is the owner's call; none is changed here. A fix takes
 # its entry off; a new failure is a regression.
 PLATE_UNDER = {("orange", "Day"), ("pink", "Day"), ("blue", "Day"), ("mint", "Day"),
-               ("green", "Day"), ("red", "Night"), ("violet", "Night")}
+               ("green", "Day"), ("violet", "Night")}
 
 
 def test_moys_appearance_accents_read_in_day_and_night():
@@ -188,6 +188,25 @@ def test_moys_appearance_accents_read_in_day_and_night():
                 under.add((name, mode))
     assert (None, "Day") not in under and (None, "Night") not in under, "Moy's own accent"
     assert under == PLATE_UNDER
+
+
+def test_a_picked_accent_sets_value_and_the_rim_tied_to_the_accent():
+    """`value` (a slider's fill, a switch) is an accent fill, and Moy Night's
+    lifted-card rim is its accent: both follow the pick. Day's white rim is no
+    accent and stays; with no pick the source's own stand."""
+    own = json.loads(_custom("moy"))["look"]["dark"]["focus"]["lift"]["rim"][0]
+    assert _val(own) == _val(json.loads(_custom("moy"))["colors"]["dark"]["accent"])
+    day = json.loads(_custom("moy"))["look"]["light"]["focus"]["lift"]["rim"][0]
+    for _n, a, _d in TH["accents"]:
+        b = _custom("moy", a)
+        pkg = json.loads(b)
+        lift = lambda v: pkg["look"][v]["focus"]["lift"]["rim"][0]    # noqa: E731
+        assert _val(lift("dark")) == _val(pkg["colors"]["dark"]["accent"]) == _val(a)
+        assert lift("light") == day
+        resolved = moy_ui.theme_resolve(b)
+        for v in (3, 4):
+            row = dict(zip(ROLES, resolved[v][0]))
+            assert row["value"] == row["accent"] == _val(a)
 
 
 REPAIRED = {r: bgs for r, _f, bgs in TH["recolour"]["dim_ink"]}

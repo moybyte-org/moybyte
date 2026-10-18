@@ -932,7 +932,8 @@ Per variant, with B the source's row and R the result, R starting as B:
    readable and the flags `surface_light`, `bar_light` and `band_light`
    true.
 2. **Accent** (none when the source's own is kept). `accent`, `title`,
-   `title_active` and `selection` take A. Each of `edge`, `border`,
+   `title_active`, `selection` and `value` take A, and so does a lifted
+   card's rim (`look.focus.lift.rim`) where the source's is its `accent`. Each of `edge`, `border`,
    `hilite`, `shade_hi`, `bar_edge` and `desktop_pattern` whose B value is
    B's `title` or B's `accent` — a role the source tied to its identity
    colour — takes A. `focus` and `ink_accent` take the first of A, deep and

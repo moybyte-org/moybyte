@@ -1266,7 +1266,7 @@
                      "title_inactive", "bar", "dim", "hilite", "shade_hi", "shade_lo",
                      "sunk", "lcd"],
       "line": ["edge", "border", "bar_edge", "shade_dark"],
-      "accent": ["accent", "title", "title_active", "selection"],
+      "accent": ["accent", "title", "title_active", "selection", "value"],
       "tied": ["edge", "border", "hilite", "shade_hi", "bar_edge", "desktop_pattern"],
       "accent_ink": ["focus", "ink_accent"],
       "dim_ink": [["ink_dim", "ink", ["surface"]], ["chrome_ink_dim", "chrome_ink", ["panel", "bar", "title_inactive"]]],
