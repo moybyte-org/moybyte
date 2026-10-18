@@ -144,22 +144,32 @@ def test_the_editor_bar_has_no_projects_button(tmp_path):
     assert "projects" not in glyphs
 
 
-def test_the_open_tab_is_named_on_the_narrow_bar(tmp_path):
-    """The freed room on the T-Deck's bar goes to the open tab's name: its chip
-    is labeled while the whole ladder still fits the zone."""
+def test_the_narrow_bar_names_the_open_tab_only_at_the_full_gap(tmp_path):
+    """The narrow bar's one rule: its icons never abut, and the open tab's
+    name goes before the icons squeeze. Every icon fits the zone, evenly
+    gapped; the open tab is named exactly where the whole ladder holds it
+    at the full gap, as a wider zone does."""
+    from runtime import editor_app as EA
     ws = _ws(tmp_path)
     ws.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)
     ws.launch_selected()
     ea = ws.editor_app
     rect = ws.layout.zone_left
+    full = EA._LADDER_GAP * ea._zone_scale()
     for tab, name in (("cards", "Config"), ("paint", "Sprites"), ("code", "Code")):
         ws.set_menu_view(tab)
-        assert ea._open_label(rect) == name
-        rects = ea._ladder_rects(rect)
-        assert len(rects) == len(ea._ladder())       # nothing dropped for it
-        end = rects[-1][2][0] + rects[-1][2][2]
-        assert end <= rect[0] + rect[2]
+        for zone in (rect, (rect[0], rect[1], rect[2] + 80, rect[3])):
+            rects, gap = ea._ladder_layout(zone)
+            assert len(rects) == len(ea._ladder())       # nothing dropped
+            assert rects[-1][2][0] + rects[-1][2][2] <= zone[0] + zone[2]
+            gaps = {b[2][0] - a[2][0] - a[2][2] for a, b in zip(rects, rects[1:])}
+            assert gaps == {gap} and gap > 0
+            label = ea._open_label(zone)
+            assert label in ("", name)
+            if label:
+                assert gap == full
+        assert ea._open_label((rect[0], rect[1], rect[2] + 80, rect[3])) == name
 
 
 def test_the_editor_x_returns_to_the_tab_it_came_from(tmp_path):

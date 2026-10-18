@@ -78,8 +78,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # that paints the destination pays, and every hard exit pays the debt first. See
 # set_tab/leave below and the exit-path call sites in console.py/wm_windowed.py.
 #
-# Fits 320px: 10 icons * 16px = 160px inside the ~202px lent zone; _ZONE_STRIDE keeps
-# the 0-gap stride (icons flush) that #88 settled on for the (then 12-icon) ladder.
+# The narrow bar's rule, one for every theme and mode: the icons share the
+# lent zone's spare width out as gaps of up to _LADDER_GAP each, so they never
+# abut, and the open tab carries its name only where the whole ladder holds it
+# at the full gap -- the name goes before the icons squeeze. On the T-Deck's
+# 320px (10 icons, the open one widened by the tab's pad, in a ~195px zone)
+# that is icon-only with 3px gaps.
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
 _ZONE_TABS = (
@@ -94,7 +98,7 @@ _ZONE_TABS = (
     (_ZONE_REDO, "redo"),   # -> ws.history.redo() (#88), dimmed with nothing to redo
     (None, "run"),          # PLAY
 )
-_ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
+_LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at fs 1
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
@@ -492,20 +496,21 @@ class EditorApp:
                            glyph_draw=ws._glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
-        # one in the tab's ON field with its name where the bar has the room,
-        # then UNDO, REDO and PLAY.
+        # one on the bar's current mark with its name where the bar has the
+        # room, then UNDO, REDO and PLAY.
         label = self._open_label(rect)
-        sets = ws.icon_spec() is not None
         for tab, glyph, r in self._ladder_rects(rect):
             x, y0, w, ic = r
+            ink = None
             if tab is not None and tab == self.tab:
+                ink = self._open_mark(cv, r)
                 if label:
-                    band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-                    _ui_draw.tab(cv, th, r, True, label, True, band_ink,
-                            ws._icon_image_keyed(glyph),
-                            icon_draw=self._set_icon(cv) if sets else None, kind=glyph)
+                    _ui_draw.tab(cv, th, r, False, label, True,
+                                 th["chrome_ink"] if ink is None else ink,
+                                 ws._icon_image_keyed(glyph),
+                                 icon_draw=self._set_icon(cv, ink) if sets else None,
+                                 kind=glyph)
                     continue
-                _ui_draw.tab(cv, th, r, True)
                 x += (w - ic) // 2
             if tab == _ZONE_UNDO:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
@@ -515,13 +520,26 @@ class EditorApp:
                 # Play: the set's bare glyph in `value` (DESIGN.md, Play)
                 ws.draw_icon("play", (x, y0, ic, ic), th["value"], cv)
             else:
-                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y0, cv)
+                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y0, cv,
+                         ink=ink)
 
-    def _set_icon(self, cv):
+    def _open_mark(self, cv, r):
+        """The open tab's mark on the narrow bar, the home's bar tabs' own: the
+        theme's current mark as a pill (a theme without marks: the tab's ON
+        field). The ink its icon and name take, None for the chrome ink."""
+        th = self.ws.theme_colors
+        if _ui_draw.marks_on():
+            fs = self._zone_scale()
+            return _ui_draw.current(cv, th, r, r=5 * fs, fs=fs)
+        _ui_draw.tab(cv, th, r, True)
+        return th["selection_ink"]
+
+    def _set_icon(self, cv, ink=None):
         """A tab's icon_draw: the theme's icon set's slot for a ladder kind,
-        in the chrome ink."""
+        in `ink` (default the chrome ink)."""
         ws = self.ws
-        ink = ws.theme_colors["chrome_ink"]
+        if ink is None:
+            ink = ws.theme_colors["chrome_ink"]
 
         def draw(kind, r):
             return ws.draw_icon(_SET_KIND.get(kind, kind), r, ink, cv)
@@ -549,7 +567,7 @@ class EditorApp:
 
     def _open_label(self, rect):
         """The open tab's name for the narrow bar, or "" when the whole ladder
-        with that tab labeled does not fit `rect`."""
+        with that tab labeled does not fit `rect` at the full gap."""
         label = ""
         for tid, name, _ic in self._chips():
             if tid == self.tab:
@@ -562,32 +580,44 @@ class EditorApp:
                                  self._zone_scale())
         if not chip or not chip[0][2]:
             return ""
-        if (len(self._ladder()) - 1) * ic + chip[0][1][2] > w:
+        n = len(self._ladder())
+        if (n - 1) * (ic + _LADDER_GAP * self._zone_scale()) + chip[0][1][2] > w:
             return ""
         return label
 
     def _ladder_rects(self, rect):
-        """The narrow bar's icons, (tab, glyph, rect), as many as `rect` holds:
-        square and flush, as tall as the lent band, the open tab's widened by
-        the tab's pad each side -- or, where the ladder has the room, to a
-        labeled chip with the tab's name (`_open_label`)."""
+        """The narrow bar's icons, [(tab, glyph, rect)] (`_ladder_layout`)."""
+        return self._ladder_layout(rect)[0]
+
+    def _ladder_layout(self, rect):
+        """The narrow bar's icons, ([(tab, glyph, rect)], gap), as many as
+        `rect` holds: square, as tall as the lent band, `gap` apart -- the
+        zone's spare width shared out up to _LADDER_GAP each, the full gap
+        where the open tab is labeled. The open tab's is widened by the tab's
+        pad each side, or to a labeled chip with its name (`_open_label`)."""
         x, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON
-        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * self._zone_scale()
+        fs = self._zone_scale()
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
         label = self._open_label(rect)
+        ladder = self._ladder()
+        n = len(ladder)
+        full = _LADDER_GAP * fs
         if label:
-            wide = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
-                                     self._zone_scale())[0][1][2]
+            wide = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)], fs)[0][1][2]
+            gap = full
         else:
             wide = ic + 2 * pad
+            spare = w - (n - 1) * ic - (wide if self.tab in [t for t, _g in ladder] else ic)
+            gap = max(0, min(full, spare // (n - 1))) if n > 1 else 0
         out = []
-        for tab, glyph in self._ladder():
+        for tab, glyph in ladder:
             cw = wide if tab is not None and tab == self.tab else ic
             if x + cw > rect[0] + w:
                 break
             out.append((tab, glyph, (x, y0, cw, ic)))
-            x += cw
-        return out
+            x += cw + gap
+        return out, gap
 
     def _has_code(self):
         """Whether the open cart has a Code tab: every cart whose main is text
@@ -662,8 +692,10 @@ class EditorApp:
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False
-        for tab, _glyph, r in self._ladder_rects(rect):
-            if _in(px, py, r):
+        rects, gap = self._ladder_layout(rect)
+        for tab, _glyph, r in rects:
+            # A tap in a gap belongs to the icon either side of it.
+            if _in(px, py, (r[0] - gap // 2, r[1], r[2] + gap, r[3])):
                 return self._activate_zone_tab(tab)
         return False
 

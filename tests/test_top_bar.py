@@ -1249,4 +1249,12 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     assert "settings" in kinds and "sprite" in kinds and "code" in kinds
     assert "edit" not in kinds and "paint" not in kinds
     assert ("play", ws.theme_colors["value"]) in drew
-    assert ws.editor_app._open_label(ws.layout.zone_left) == "Code"
+    # Day and Night take one rule: on the T-Deck's zone the ladder has no
+    # room for the open tab's name at the full gap in either mode.
+    zone = ws.layout.zone_left
+    day = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    zone = ws.layout.zone_left
+    night = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
+    assert day[0] == night[0] == ""
+    assert day[1] > 0 and night[1] > 0

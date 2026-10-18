@@ -669,8 +669,10 @@ deleted on every tier: the Make tab is the list, and COPY and DEL, which
 were the picker's, are Make's verbs. The Editor's bar carries no way to
 another project; its X is the back-stack's pop, so it lands on the home on
 the tab and card the Editor was opened from (CHANGE works from any tab). On
-the T-Deck's narrow bar the room the button left goes to the open tab's
-name, on its chip, where the whole ladder still fits the zone.
+the narrow bar the open tab's name goes on its chip only where the whole
+ladder still fits the zone with its icons the full gap apart
+(`EditorApp._ladder_layout`): the name goes before the icons squeeze, so
+the T-Deck's bar, beside the Moy tile and the back chevron, is icon-only.
 
 **The home in a window.** The desk's PROJECTS opens the same component in a
 desktop-mode window (`HomeWindowLayer`, kind `projects`): on its Make tab
