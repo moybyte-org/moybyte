@@ -193,13 +193,78 @@ def _draw_new_icon(cv, names, img, x, y, sc):
     cv.pal()
 
 
-def _draw_star_badge(cv, names, blit_glyph, rect, on):
-    """The favorite star's corner badge (#105), lit when `on`."""
-    fx, fy, fw, fh = rect
-    ink = names["yellow"] if on else names["light_grey"]
-    cv.rect(fx, fy, fw, fh, names["black"])
-    cv.rectb(fx, fy, fw, fh, ink)
-    blit_glyph(cv, "star", rect, ink)
+_STAR = {}           # chip side -> (edge runs, inside runs) of its star
+
+
+def _star_runs(side):
+    """The star of a `side`-square chip as runs (dx, dy, w) from the chip's
+    top left: (its edge, its inside). A five-pointed star, point up, sampled
+    at pixel centres about the chip's centre pixel, so its halves mirror
+    each other; its edge the pixels with a side out of it. Made once a
+    side."""
+    got = _STAR.get(side)
+    if got is not None:
+        return got
+    import math
+    ro = side * 0.44
+    ri = ro * 0.42
+    c = side // 2
+    pts = []
+    for k in range(10):
+        a = math.pi * (k / 5.0 - 0.5)
+        r = ro if k % 2 == 0 else ri
+        pts.append((r * math.cos(a), r * math.sin(a) + side * 0.04))
+
+    def inside(px, py):
+        hit = False
+        j = 9
+        for i in range(10):
+            xi, yi = pts[i]
+            xj, yj = pts[j]
+            if (yi > py) != (yj > py) and px < (xj - xi) * (py - yi) / (yj - yi) + xi:
+                hit = not hit
+            j = i
+        return hit
+
+    on = [[inside(x - c, y - c) for x in range(side)] for y in range(side)]
+
+    def edge(x, y):
+        return any(not (0 <= x + dx < side and 0 <= y + dy < side and on[y + dy][x + dx])
+                   for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+
+    runs = ([], [])
+    for y in range(side):
+        for want in (0, 1):
+            x = 0
+            while x < side:
+                if on[y][x] and (edge(x, y) == (want == 0)):
+                    x0 = x
+                    while x < side and on[y][x] and (edge(x, y) == (want == 0)):
+                        x += 1
+                    runs[want].append((x0, y, x - x0))
+                else:
+                    x += 1
+    got = _STAR[side] = (tuple(runs[0]), tuple(runs[1]))
+    return got
+
+
+def _draw_star_badge(cv, names, th, rect, on):
+    """The favourite star's corner badge (#105): a round chip on the
+    theme's surface holding a five-pointed star, gold inside an orange edge
+    when `on`, its edge alone in the dim ink when not."""
+    x, y, side, _h = rect
+    cv.rrect(x, y, side, side, side // 2, th.get("surface", names["white"]),
+             ring=th.get("border", names["light_grey"]))
+    edge, inner = _star_runs(side)
+    if on:
+        gold = names["yellow"]
+        for dx, dy, w in inner:
+            cv.rect(x + dx, y + dy, w, 1, gold)
+        ink = names["orange"]
+    else:
+        ink = th.get("ink_dim", names["light_grey"])
+    for dx, dy, w in edge:
+        cv.rect(x + dx, y + dy, w, 1, ink)
 
 
 class Launcher:
@@ -642,8 +707,9 @@ class Launcher:
         never desync."""
         x, y, w, _h = rect
         fs = self.layout.fs
-        sz = max(9 * fs, 12)
-        pad = max(fs, 2)
+        sz = max(14 * fs, 16, 12 * _lb.unit()) | 1      # odd: the star centres on a pixel
+        d = _ui_draw.depth()
+        pad = max(2 * fs, (d[2] // 2 + 2) if d[0] else 0)
         return (x + w - sz - pad, y + pad, sz, sz)
 
     def favorite_rect(self, i):
@@ -796,7 +862,7 @@ class Launcher:
         # (LauncherHomeLayer.handle_pointer hit-tests the identical geometry via
         # favorite_rect, so draw and tap can't desync).
         if selected and self.favorite_for is not None:
-            _draw_star_badge(cv, NAMES, self._blit_glyph,
+            _draw_star_badge(cv, NAMES, self.theme or {},
                              self._favorite_badge_geom(rect),
                              bool(self.favorite_for(it)))
         self._card_frame(cv, rect, selected)
@@ -1662,7 +1728,7 @@ class Carousel(Launcher):
         self._draw_picture(cv, it, hero, True)
         if (self.favorite_for is not None and it.get("path")
                 and it.get("type") not in PSEUDO_TILE_TYPES):
-            _draw_star_badge(cv, self._NAMES, self._blit_glyph,
+            _draw_star_badge(cv, self._NAMES, self.theme or {},
                              self._favorite_badge_geom(hero),
                              bool(self.favorite_for(it)))
         if not self._corner_r(hero[2]):
@@ -1876,7 +1942,7 @@ class Carousel(Launcher):
         if centre and self.favorite_for is not None and not self.moving \
                 and not self.desk() \
                 and it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES:
-            _draw_star_badge(cv, NAMES, self._blit_glyph,
+            _draw_star_badge(cv, NAMES, self.theme or {},
                              self._favorite_badge_geom(rect),
                              bool(self.favorite_for(it)))
         ring = th.get("author", 0) if it.get("type") in PSEUDO_TILE_TYPES \
@@ -2033,7 +2099,7 @@ class IconHome(Launcher):
                 cv.rectb(x - d, y - d, t + 2 * d, t + 2 * d, th["focus"])
         if self.favorite_for is not None and it.get("path") \
                 and it.get("type") not in PSEUDO_TILE_TYPES:
-            _draw_star_badge(cv, self._NAMES, self._blit_glyph,
+            _draw_star_badge(cv, self._NAMES, self.theme or {},
                              self._favorite_badge_geom(rect),
                              bool(self.favorite_for(it)))
         name = "NEW" if it.get("type") in PSEUDO_TILE_TYPES else it.get("title", "")
