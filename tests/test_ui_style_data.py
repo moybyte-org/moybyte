@@ -292,7 +292,11 @@ def test_each_kind_resolves_from_the_base_roles():
                 assert tonal[:2] == (field, th["value"])
             else:
                 assert tonal[:2] == (field, th["ink"])
-            if ui_draw._C.theme_reads(field, th["danger"]):
+            own_ink = {k: v[1] for a, k, v in _live(name, variant).buttons
+                       if a is None and v[1] != -2 ** 31}
+            if "danger" in own_ink:                     # moy's buttons.danger.ink
+                assert danger[:2] == (field, own_ink["danger"])
+            elif ui_draw._C.theme_reads(field, th["danger"]):
                 assert danger[:2] == (field, th["danger"])
             else:
                 assert danger[0] == th["danger"]

@@ -137,6 +137,28 @@ def test_every_seed_reads_every_button_kind(seed, variant):
     assert not bad
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed", TH["seeds"])
+def test_a_seeds_danger_button_reads_as_text(seed, variant):
+    """A danger button's label (Calc's C) is text on its field at rest: held
+    to 4.5:1, text's floor, not the 3:1 a part's colour is. A seed whose
+    `danger` cannot be both that and a fill white reads on draws its danger
+    buttons in its ink (`buttons.danger.ink`: Moy, as its target does, and
+    Blocks)."""
+    live = live_colors(seed, variant)
+    ui_draw._C.theme_block(live.block, live.used)
+    ui_draw.use_buttons(live)
+    try:
+        look = ui_draw._look(live.tokens)
+        kid = ui_draw._kind_id(ui_draw._button_kind("danger"))
+        field, ink = ui_draw._C.button_style(look, kid, ui_draw._REST_ID, -1)[:2]
+    finally:
+        ui_draw.use_buttons(None)
+    la, lb = _lum(field), _lum(ink)
+    hi, lo = max(la, lb), min(la, lb)
+    assert (hi + 500) * 10 >= 45 * (lo + 500), (field, ink)
+
+
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
     real frame: a titled frame against the same frame untitled."""
