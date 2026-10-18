@@ -88,6 +88,27 @@ static uint16_t mix(uint16_t a, uint16_t b, int k) {         // k/255 of b over 
                                      | (ab + (bb - ab) * k / 255)));
 }
 
+// Whether two colours (wire order) have a luminance ratio of num/den or more,
+// on squares for the sRGB curve.
+static int ratio_ge(uint16_t a, uint16_t b, int num, int den) {
+    int64_t l[2];
+    uint16_t c[2] = {moy_shape_wire(a), moy_shape_wire(b)};
+    for (int i = 0; i < 2; i++) {
+        int r = (c[i] >> 11) * 255 / 31, g = ((c[i] >> 5) & 63) * 255 / 63;
+        int bl = (c[i] & 31) * 255 / 31;
+        l[i] = 2126LL * r * r + 7152LL * g * g + 722LL * bl * bl + 32512500LL;
+    }
+    int64_t hi = l[0] > l[1] ? l[0] : l[1], lo = l[0] > l[1] ? l[1] : l[0];
+    return den * hi >= num * lo;
+}
+
+// Whether two colours tell apart (1.5:1). A part whose two states would paint
+// in one colour draws one of them as an outline instead (Contrast's toggles
+// and tracks, where `value` and `border` are both the ink).
+static int apart(uint16_t a, uint16_t b) {
+    return ratio_ge(a, b, 3, 2);
+}
+
 // Whether the look is a dark one: the marks say, else the panel's luminance.
 static int dark(const pd_t *d) {
     const moy_ui_marks_t *m = moy_ui_marks();
@@ -560,10 +581,17 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             int sw = pm(&d, MOY_UI_M_VALUE_ROW_SWITCH_W, 0), sh = pm(&d, MOY_UI_M_VALUE_ROW_SWITCH_H, 0);
             int x = right - sw, y = b.y + (b.h - sh) / 2, kn = sh - 2 * d.fs;
             int dk = dark(&d);
-            uint16_t track = r->cur ? pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT))
-                                    : pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+            uint16_t on_c = pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT));
+            uint16_t off_c = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+            uint16_t track = r->cur ? on_c : off_c;
             uint16_t knob = r->cur ? pal(&d, tok(&d, MOY_UI_T_VALUE_INK, MOY_UI_T_SURFACE))
                                    : dk ? cink : moy_shape_wire(0xffff);
+            // Off in the On track's colour reads as On: then Off is the
+            // track's outline and an ink knob
+            int hollow = !r->cur && !apart(on_c, off_c);
+            if (hollow) {
+                knob = cink;
+            }
             if (r->cur && rowfill >= 0) {           // on a row filled in the value colour
                 track = cink;
                 knob = pal(&d, rowfill);
@@ -571,7 +599,11 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             if (flags & MOY_UI_F_DISABLED) {
                 track = mix(track, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), 128);
             }
-            rrect(&d, x, y, sw, sh, sh / 2, 1, track, 0, 0);
+            if (hollow) {
+                rrect(&d, x, y, sw, sh, sh / 2, 0, 0, d.fs, track);
+            } else {
+                rrect(&d, x, y, sw, sh, sh / 2, 1, track, 0, 0);
+            }
             rrect(&d, r->cur ? x + sw - d.fs - kn : x + d.fs, y + d.fs, kn, kn, kn / 2, 1, knob,
                   0, 0);
             const uint8_t *word = (const uint8_t *)moy_str(r->cur ? MOY_S_UI_ON : MOY_S_UI_OFF);
@@ -589,20 +621,33 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             uint16_t base = dk ? line : mix(line, pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)),
                                             90);
             uint16_t val_c = rowfill >= 0 ? cink : pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT));
+            // the rest of the track in the value's colour reads as filled:
+            // then it is the track's outline
+            int hollow = !apart(base, val_c);
             int span = r->hi > r->lo ? r->hi - r->lo : 1;
             if (kind == MOY_UI_V_SLIDER && r->steps) {
                 int pitch, x0 = step_geo(&d, &g, r, &pitch);
                 int sw = pitch - 2 * d.fs, sh = 8 * d.fs, sy = b.y + (b.h - sh) / 2;
                 uint16_t on = (flags & MOY_UI_F_DISABLED) ? cdim : val_c;
+                sw = sw > 1 ? sw : 1;
                 for (int i = 0; i < span; i++) {
-                    fill(&d, x0 + i * pitch, sy, sw > 1 ? sw : 1, sh,
-                         i < r->v - r->lo ? on : base);
+                    if (i < r->v - r->lo) {
+                        fill(&d, x0 + i * pitch, sy, sw, sh, on);
+                    } else if (hollow) {
+                        rrect(&d, x0 + i * pitch, sy, sw, sh, 0, 0, 0, d.fs, base);
+                    } else {
+                        fill(&d, x0 + i * pitch, sy, sw, sh, base);
+                    }
                 }
                 right = x0;
                 break;
             }
             int fw = (int)((int64_t)t.w * (r->v - r->lo) / span);
-            rrect(&d, t.x, t.y, t.w, t.h, d.fs, 1, base, 0, 0);
+            if (hollow) {
+                rrect(&d, t.x, t.y, t.w, t.h, d.fs, 0, 0, d.fs, base);
+            } else {
+                rrect(&d, t.x, t.y, t.w, t.h, d.fs, 1, base, 0, 0);
+            }
             rrect(&d, t.x, t.y, fw, t.h, d.fs, 1, (flags & MOY_UI_F_DISABLED) ? cdim : val_c, 0,
                   0);
             int kw = 7 * d.fs, kh = 9 * d.fs;
@@ -895,7 +940,15 @@ int moy_ui_group_r(int fs) {
 // The card's ring: a theme without a depth, or a dark one, rings its cards.
 static int card_line(const pd_t *d) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    return !dp->on || dark(d) ? d->fs : 0;
+    if (!dp->on || dark(d)) {
+        return d->fs;
+    }
+    // a light card in its page's ground's colour (Contrast Light's white on
+    // white) is its line alone
+    uint16_t g;
+    return ground(d, &g) && !ratio_ge(pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), g, 21, 20)
+               ? d->fs
+               : 0;
 }
 
 // The card's shape from its top to `bottom` (exclusive), drawn where the clip lets it.
