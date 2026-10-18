@@ -388,7 +388,8 @@ void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y,
             max = 2;
         }
         for (int i = 0; i < lines; i++) {
-            print(l, MOY_TEXT_PY, t + 3 * i, max, x, ty + i * (h / 2), ink(MOY_INK_CHROME_DIM), 1);
+            print(l, MOY_TEXT_PY, t + 3 * i, max, x, ty + i * (h / 2),
+                  ink(title ? MOY_INK_CHROME : MOY_INK_CHROME_DIM), 1);
         }
     } else if (strcmp(kind, "separator") == 0) {
         if (across) {

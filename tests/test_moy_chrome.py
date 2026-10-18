@@ -78,3 +78,15 @@ def test_a_piece_is_cut_rather_than_overrun():
     rows = [(0, "ROW %d" % i) for i in range(16)]
     ops = moy_play.chrome_menu(rows, 3, 0, 18, 120, 200, 1, 1)
     assert 0 < len(ops) <= 128
+
+
+def test_a_minimal_bars_title_is_in_the_chrome_ink(ws):
+    """The title the tool/app bar prints reads in `chrome_ink`, the role the
+    other bars' titles use: the dim ink is pale under an RGB theme's light
+    bar, where it all but vanished."""
+    th = dict(ws.theme_colors)
+    th["chrome_ink"], th["chrome_ink_dim"] = 11, 22
+    mp = ui.chrome_inks(th, NAMES)
+    ops = mp.chrome_strip_cell("title", (40, 0, 160, 18), 1, 0, "Appearance", False)
+    inks = {c for op, c, sc, x, y, w, h, t in ops if op == 3}
+    assert inks == {11}
