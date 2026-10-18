@@ -365,8 +365,28 @@ class PauseMenu:
             _ui.menu("", self.ITEMS, self.ICONS)
             _ui.hints(("enter", "Choose", "Esc", "Resume"))
         _ui.popover()
+        if not self._mark(cv, desk):
+            settled = False
         if not settled:
             ws.request_frame()
+
+    def _mark(self, cv, desk):
+        """Moy in the title row's icon slot, which the engine keeps for it
+        but cannot fill: Moy is pixel art, not one of a set's masks
+        (runtime/iconsets.py). The slot is the row's, under the card's inset
+        (`look_card`'s rows): the card's left plus the inset across, centred
+        on the first row. False until the engine has placed the card."""
+        card = self._host.box("Pause")
+        if card is None:
+            return False
+        fs = self.ws.layout.fs
+        d = 1 if desk else 0
+        pad = _ui_draw.metrics("value_row")[28 + d] * fs
+        rh = _ui_draw.metrics("row")[5 + d] * fs
+        side = 16 * fs
+        self.ws.draw_icon("moy", (card[0] + pad, card[1] + pad + (rh - side) // 2,
+                                  side, side), 0, cv)
+        return True
 
 
 class SystemMenuUI:

@@ -360,3 +360,35 @@ def test_a_theme_without_a_depth_keeps_the_kernels_menu(tmp_path):
     _frames(drv)
     if not ui_draw.depth()[0]:
         assert not ws.menu_ui.looked() and ws.menu_ui._host is None
+
+
+@pytest.mark.parametrize("desk", [False, True])
+def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
+    """The engine keeps the title row an icon slot it cannot fill (Moy is
+    pixel art, not a mask); the card draws Moy there, in the column of the
+    rows' icons, over its first row."""
+    if desk:
+        ws = build_desktop_ws(tmp_path)
+        ws.open_library()
+        ws._open_workspace(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
+        ws.run(ws.project, ws.launcher_layer)
+        drv = make_drv(ws)
+        _frames(drv, 3)
+    else:
+        ws, drv = _game(tmp_path)
+    _moy(ws)
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, cv=None: (drawn.append((kind, rect)),
+                                                     real(kind, rect, ink, cv))[1]
+    drv.system_key()
+    _frames(drv, 3)
+    assert ws.pause.open
+    card = ws.pause._host.box("Pause")
+    first = ws.pause._host.box("Resume")
+    moys = [r for k, r in drawn if k == "moy"]
+    assert moys, "no Moy in the title row"
+    x, y, w, h = moys[-1]
+    assert card[0] < x and x + w <= first[0] + first[2]
+    assert card[1] < y and y + h <= first[1], "over the first row"
+    assert 0 <= x - first[0] < w, "in the rows' icon column"
