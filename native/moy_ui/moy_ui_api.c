@@ -319,6 +319,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->page = surface;
     c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
     c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : 0);
+    c->app = (uint8_t)((flags >> MOY_UI_APP_SHIFT) & 0xff);
     c->fs = (uint8_t)(fs > 0 ? fs : 1);
     c->y = 0;
     c->scroll = 0;
@@ -957,7 +958,7 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         bt.glyph = -1;
         bt.fs = c->fs;
         colours(s, o, bt.colors);
-        bt.app = -1;
+        bt.app = (int16_t)(c->app - 1);
         bt.icon = -1;
         int fl = mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0);
         if (c->row_slot >= 0 || c->row_glyph >= 0) {
@@ -1796,7 +1797,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         bt.glyph = -1;
         bt.fs = fs;
         bt.colors[0] = bt.colors[1] = bt.colors[2] = MOY_UI_FROM_STYLE;
-        bt.app = -1;
+        bt.app = (int16_t)(c->app - 1);
         bt.icon = -1;
         moy_ui_button(s, bb, moy_ui_button_kind(kn, strlen(kn)), mark_flags(st, &none),
                       interact(st), &bt, MOY_UI_PHASE_ALL);

@@ -60,6 +60,7 @@ _SIGS = (
     ("moy_theme_reads", [c.c_int32, c.c_int32], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
     ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
+    ("moy_text_covers", [c.c_uint32, _P, _Z], _I),
     ("moy_font_load", [_P, _Z, c.POINTER(c.c_uint32)], _I),
     ("moy_font_free", [c.c_uint32], _I),
     ("moy_font_info", [c.c_uint32, c.c_void_p], _I),
@@ -396,6 +397,10 @@ def binding():
     def text_width(text, scale=1, font=0):
         b = _b(text)
         return lib.moy_text_width(int(font) & 0xFFFFFFFF, b, len(b), int(scale))
+
+    def text_covers(text, font=0):
+        b = _b(text)
+        return bool(lib.moy_text_covers(int(font) & 0xFFFFFFFF, b, len(b)))
 
     def wrap(text, cols, font=None):
         b = _b(text)
@@ -1091,6 +1096,7 @@ def binding():
     m.str_set = str_set
     m.str_reset = lambda: lib.moy_str_reset()
     m.text_width = text_width
+    m.text_covers = text_covers
     m.wrap = wrap
     m.tokens = lambda: tokens
     m.states = lambda: states

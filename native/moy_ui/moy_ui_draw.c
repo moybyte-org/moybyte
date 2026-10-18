@@ -799,9 +799,8 @@ int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs) {
 
 // A button's body: the field and its rings in the kind's shape (moy_ui_button_style): square with no radius
 // and no bevel as fills, else a rounded rect (native/moy_gfx/moy_shape.h),
-// a circle the shorter side across, a bevel the shade_hi/shade_lo ring. The
-// font leaf resolves and does not draw: no type role is a key's or an
-// operator's yet. *on gets the field under the text, *ring the rings.
+// a circle the shorter side across, a bevel the shade_hi/shade_lo ring.
+// *on gets the field under the text, *ring the rings.
 enum { BTN_ROUND = 0, BTN_CIRCLE = 1, BTN_SQUARE = 2 };
 
 static void button_body(draw_t *d, moy_ui_box_t b, const moy_ui_btn_style_t *bs, int *on,
@@ -860,6 +859,19 @@ static void button_body(draw_t *d, moy_ui_box_t b, const moy_ui_btn_style_t *bs,
     d->row->st[MOY_ST_N_FILL]++;
 }
 
+// The face a button's label draws in: the `key` or `op` role's where the
+// kind's font leaf names one (moy_ui_button_style), a font is installed for
+// it and it draws every character of the label; else the ui role's.
+static void label_font(draw_t *d, const moy_ui_btn_style_t *bs, moy_ui_span_t label) {
+    if (d->run || bs->font < 0) {
+        return;
+    }
+    tfont_t f = role_font(bs->font == 0 ? MOY_UI_FONT_KEY : MOY_UI_FONT_OP);
+    if (f.id != MOY_FONT_PETME128 && moy_text_covers(f.id, label.p, label.n)) {
+        d->f = f;
+    }
+}
+
 int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
                   const moy_ui_button_t *k, int phase) {
     draw_t d;
@@ -886,6 +898,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
         return MOY_UI_OK;
     }
     use_part(&d, kind, state, fs);
+    label_font(&d, &bs, k->label);
     int iw = button_iw(flags, fs);
     int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
     int ln = t_fit(&d.f, k->label, w - 2 * pad - iw, fs);

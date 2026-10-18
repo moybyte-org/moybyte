@@ -554,6 +554,28 @@ int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale) {
     return w * scale;
 }
 
+int moy_text_covers(uint32_t font, const uint8_t *s, size_t n) {
+    const row_t *r = font_row(font);
+    if (r == NULL) {
+        return 0;
+    }
+    size_t i = 0;
+    while (i < n) {
+        if (r->version == 2) {
+            int b = next_byte(s, n, &i);
+            if (b != ' ' && r->f2.index[b] == 0) {
+                return 0;
+            }
+        } else {
+            uint8_t b = s[i++];
+            if (b < 0x20 || b > 0x7E) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 size_t moy_text_fit_px(uint32_t font, const uint8_t *s, size_t n, int maxw, int scale) {
     const row_t *r = font_row(font);
     if (r == NULL || maxw < 0) {

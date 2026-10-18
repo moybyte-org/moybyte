@@ -5,6 +5,8 @@ built only on the public seams (ui toolkit + Hits + the registry)."""
 
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -247,6 +249,38 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
     assert [k for k, v in drawn.items() if v == "primary"] == ["="]
 
 
+@pytest.mark.parametrize("variant", ["dark", "light"])
+def test_calc_draws_in_the_faces_its_theme_names(tmp_path, monkeypatch, variant):
+    """Calc's keys take its theme's `app_buttons.calc` (its host passes its
+    id), and its result is the theme's `result` face where one is installed
+    (Moy's Night: Inter), else the ui face at the largest whole scale that
+    fits (Day's pixel face)."""
+    from runtime import calc_app, ui_draw
+    ws, calc = _calc(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant=variant)
+    assert calc._ui.app == "calc" and ui_draw._app_row("calc") >= 0
+    faces = []
+    real = calc_app.ui.face
+
+    def face(name=None, text=None):
+        got = real(name, text)
+        if name is not None:
+            faces.append((name, text, got))
+        return got
+
+    monkeypatch.setattr(calc_app.ui, "face", face)
+    for ch in "12*7=":
+        calc.handle_input(_Key(typed=ord(ch)))
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert faces[-1] == ("result", "84", variant == "dark")
+    assert ui_draw.print_font() == ui_draw.font("ui")[0], "the ui face is put back"
+    calc.entry = "OOPS"
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert faces[-1] == ("result", "OOPS", False), "the result face has digits alone"
+
+
 def test_calc_layout_reflows_and_declares_minimum(tmp_path):
     from runtime.calc_app import CalcLayout
     assert CalcLayout.MIN_W > 0 and CalcLayout.MIN_H > 0
@@ -285,8 +319,6 @@ def test_calc_is_app_rejects_lookalikes(tmp_path):
 # the hidden game canvas there and left the app's bar band empty).
 
 import hashlib
-
-import pytest
 
 _DT = 1.0 / 30.0
 _MAX_FRAMES = 6

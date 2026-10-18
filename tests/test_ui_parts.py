@@ -66,8 +66,9 @@ def _theme(name, variant):
 class _Run:
     """A page of verbs on a system canvas under a theme, frame by frame."""
 
-    def __init__(self, draw, theme=("moy", "light")):
+    def __init__(self, draw, theme=("moy", "light"), app=None):
         self.th = _theme(*theme)
+        self.app = app
         self.cv = make_system_canvas(320, 240)
         self.ctx = ui_draw.ui_context()
         self.inp = array("i", [0] * 6)
@@ -82,7 +83,7 @@ class _Run:
         i[0] = i[1]
         i[2], i[3], i[4] = ptr if ptr is not None else (0, 0, 0)
         i[5] = ord(typed) if isinstance(typed, str) else typed
-        ui_draw.ui_frame(self.ctx, self.cv, self.th, None, i)
+        ui_draw.ui_frame(self.ctx, self.cv, self.th, None, i, app=self.app)
         self.out = self.draw()
         return self.out
 
@@ -709,6 +710,46 @@ def test_a_table_in_a_narrow_rect_keeps_its_last_column_inside():
     gaps = [(b - a, b) for a, b in zip(ink, ink[1:])]
     widest, kind_x = max(gaps)
     assert widest > 4 and ink[-1] - kind_x < kind, "the name is cut short of the Kind"
+
+
+def _key_page(label, kind="normal", app=None, theme=("moy", "dark")):
+    def draw():
+        ui.page("")
+        ui.at(10, 40, 60, 40)
+        return ui.button(label, kind)
+    return _Run(draw, theme, app)
+
+
+def _ink_rows(r, x0, x1, y0, y1):
+    """The rows of a button's label: those holding a pixel other than its
+    field's, inside its corners and above its focus mark."""
+    field = r.px(x0 + 6, (y0 + y1) // 2)
+    return [y for y in range(y0 + 4, y1 - 6)
+            if any(r.px(x, y) != field for x in range(x0 + 8, x1 - 8))]
+
+
+def test_a_buttons_font_leaf_draws_its_label_in_the_key_face():
+    """Moy's Night names `key` for Calc's normal keys and `op` for its
+    operators (app_buttons.calc): a shell app's host passes its id, and its
+    labels draw in those faces; any other page keeps the ui face, as does a
+    label the face does not cover and a theme that installs no face."""
+    pages = {}
+    for name, label, kind, app, theme in (
+            ("ui", "7", "normal", None, ("moy", "dark")),
+            ("key", "7", "normal", "calc", ("moy", "dark")),
+            ("op", "7", "tonal", "calc", ("moy", "dark")),
+            ("arrow", "\u2190", "normal", "calc", ("moy", "dark")),
+            ("arrow_ui", "\u2190", "normal", None, ("moy", "dark")),
+            ("day", "7", "normal", "calc", ("moy", "light")),
+            ("day_ui", "7", "normal", None, ("moy", "light"))):
+        r = pages[name] = _key_page(label, kind, app, theme)
+        r.frame()
+        r.frame()
+    tall = {n: len(_ink_rows(pages[n], 10, 70, 40, 80)) for n in ("ui", "key", "op")}
+    assert tall["ui"] < tall["key"] <= tall["op"], tall
+    assert bytes(pages["key"].cv._buf) != bytes(pages["op"].cv._buf)
+    assert bytes(pages["arrow"].cv._buf) == bytes(pages["arrow_ui"].cv._buf)
+    assert bytes(pages["day"].cv._buf) == bytes(pages["day_ui"].cv._buf)
 
 
 def _field_page(text, mx=8):

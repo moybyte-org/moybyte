@@ -15,8 +15,8 @@ with neither (the browser) carries none.
                            the host set.json; the image's are its tier's
   role_face(fam, role, desk, steps=None) -> str | None   the face NAME.fnt
                            a type role draws in under a theme's `fam`
-                           (ROLES) and its weight steps, None for a role
-                           ROLES does not size on that class
+                           (ROLES, CALC_ROLES) and its weight steps, None
+                           for a role neither sizes on that class
 """
 
 # The face each type role takes under a theme's look `fam` (a family of the
@@ -33,6 +33,14 @@ ROLES = {"ui": ((12, 500, 2), (15, 500, 4)),
          "title": ((14, 600, 4), (15, 600, 4)),
          "caption": ((11, 600, 2), (12, 600, 4)),
          "hero": ((19, 700, 4), None)}
+# The display's roles, the same way: `key` and `op` the faces a button
+# kind's `font` leaf names (a theme's `buttons[kind].font`: Calc's keys and
+# operators) and `result` a display's figure (Calc's). Each is a Calc
+# subset (tools/make_font.py's CALC), and a label one does not cover draws
+# in `ui`.
+CALC_ROLES = {"key": ((16, 500, 4), (22, 500, 4)),
+              "op": ((17, 500, 4), (24, 500, 4)),
+              "result": ((28, 600, 4), (44, 600, 4))}
 
 try:
     import fonts_data as _data
@@ -124,7 +132,7 @@ def icon_file(name):
 
 
 def role_face(fam, role, desk, steps=None):
-    sized = ROLES.get(role)
+    sized = ROLES.get(role) or CALC_ROLES.get(role)
     sized = sized[1 if desk else 0] if sized is not None else None
     if sized is None or type(fam) is not str or not fam.isalpha():
         return None

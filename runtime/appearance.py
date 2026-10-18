@@ -145,7 +145,7 @@ def _ui_text_w(t):
     return _ui_draw.text_width(t, 1, "ui")
 
 
-_FONT_ROLES = ("ui", "title", "mono", "caption")
+_FONT_ROLES = ("ui", "title", "mono", "caption", "key", "op", "result")
 # The type scale's weight steps a look moves to its family's own
 # (THEMES.md's type group; fontset.ROLES names the steps).
 _WEIGHT_STEPS = ((500, "w_med"), (600, "w_semi"), (700, "w_bold"))
@@ -171,8 +171,9 @@ _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
 # The note of a saved theme.json one of whose pairs misses the contrast floor.
 UNREADABLE = "SOME COLOURS ARE HARD TO READ"
 # The theme fonts loaded, (package, file) -> id, the package None for a
-# seed's file: one table for the process, as the loader's four slots are.
+# seed's file: one table for the process, as the loader's slots are.
 _FONTS = {}
+_FULL = [False]         # a load found the slots full and reset them
 
 
 class Appearance:
@@ -1661,11 +1662,13 @@ class Appearance:
         take the text-size floor the `ui` font asks of this board's glass
         (`chrome.text_scale_floor`; docs/theming_2026-09.md §4.7). Where
         the theme's look in the live variant sets a family (`fam`), each
-        role of `fontset.ROLES` takes that family's face for the metric
-        class over the fonts its chain names, unless the installed package
-        names its own `ui` (custom's Font row). A font that will not load (a
-        face the image does not carry) leaves its role on petme128. True
-        when a role's font or the floor changed."""
+        role of `fontset.ROLES` and `fontset.CALC_ROLES` takes that family's
+        face for the metric class over the fonts its chain names, unless the
+        installed package names its own `ui` (custom's Font row). A font no
+        role keeps is freed before the new ones load, so the slots hold one
+        theme's faces at a time. A font that will not load (a face the image
+        does not carry) leaves its role on petme128. True when a role's font
+        or the floor changed."""
         files = {}
         for role, f in _ui_draw.theme_fonts(name):
             files[role] = (None, f)
@@ -1678,20 +1681,32 @@ class Appearance:
         fam, steps = self._fam(name)
         if fam is not None and "ui" not in dict(own):
             desk = getattr(self.ws, "metric_class", None) == _layout_base.DESK
-            for role in _fontset.ROLES:
+            for role in tuple(_fontset.ROLES) + tuple(_fontset.CALC_ROLES):
                 face = _fontset.role_face(fam, role, desk, steps)
                 if face is not None:
                     files[role] = (None, face)
-        ids = {}
-        for role in _FONT_ROLES + ("hero",):
-            f = files.get(role)
-            ids[role] = self._font_id(f) if f else 0
+        was = {role: _ui_draw.font(role)[0] for role in _FONT_ROLES + ("hero",)}
+        want = set(files.values())
+        for key in list(_FONTS):
+            if key not in want:
+                _ui_draw.font_free(_FONTS.pop(key))
+        for _ in range(2):
+            # A load that found every slot full reset them all, the ones
+            # this pass loaded before it too: the pass runs again on the
+            # empty slots.
+            _FULL[0] = False
+            ids = {}
+            for role in _FONT_ROLES + ("hero",):
+                f = files.get(role)
+                ids[role] = self._font_id(f) if f else 0
+            if not _FULL[0]:
+                break
         changed = False
         for role in _FONT_ROLES:
-            if _ui_draw.font(role)[0] != ids[role]:
+            if was[role] != ids[role]:
                 changed = True
             _ui_draw.use_font(role, ids[role])
-        if _ui_draw.font("hero")[0] != (ids["hero"] or ids["title"]):
+        if was["hero"] != (ids["hero"] or ids["title"]):
             changed = True
         _ui_draw.use_hero(ids["hero"])
         _ui_draw.print_font(ids["ui"])
@@ -1775,6 +1790,7 @@ class Appearance:
             # the VM (a host, a test), the theme's are all they keep.
             _ui_draw.font_reset()
             _FONTS.clear()
+            _FULL[0] = True
             rc, fid = _ui_draw.font_load(src)
         if fid is None:
             return 0

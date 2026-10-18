@@ -38,6 +38,8 @@
     "focus": { "style": "edge", "card": "lift", "small": "underline" },
     "current": { "style": "plate" },
     "icons": { "kind": "smooth", "set": "default" },
+    "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+                               "primary": { "font": "op" } } },
     "dark": {
       "fam": "inter",
       "focus": { "lift": { "rim": ["#b6a8f7", 0.6] } },

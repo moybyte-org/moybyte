@@ -211,16 +211,24 @@ class CalcAppLayer:
         right = x + w - (14 if lay.desk else 10 * fs)
         room = right - x - (14 if lay.desk else 10 * fs)
         line = ui.text_size("0")[1]
-        # The result: the largest scale up to the display's that fits.
-        big = 5 if lay.desk else 3 * fs
+        # The result: in the theme's result face where it has one that draws
+        # it, else the largest scale up to the display's that fits.
         text = self.entry
-        while big > 1 and ui.text_size(text, big)[0] > room:
-            big -= 1
+        if signs:
+            text = text.replace("-", signs["-"])
+        if ui.face("result", text):
+            big = fs
+        else:
+            text = self.entry
+            big = 5 if lay.desk else 3 * fs
+            while big > 1 and ui.text_size(text, big)[0] > room:
+                big -= 1
         text = _fit(text, room, big)
         rh = ui.text_size(text, big)[1]
         ry = y + h - rh - (6 if lay.desk else 6 * fs)
         tw = ui.text_size(text, big)[0]
         cv.print_scaled(text, right - tw, ry, value, big)
+        ui.face()
         expr = self._expr(signs)
         ey = ry - line - (10 if lay.desk else 8 * fs)
         if expr:

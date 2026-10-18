@@ -36,7 +36,7 @@ from on_glass import (FONT_FIXTURE, FONT_FIXTURES_V2, FONT_PROBE, font_answer,  
 from unix_mp import require_unix_mp  # noqa: E402
 
 OK, BIG, SHORT, MAGIC, NEWER, BAD, FULL = 0, 1, 2, 3, 4, 5, 6
-SLOTS = 10
+SLOTS = 16
 
 
 class _Target(ctypes.Structure):
@@ -624,7 +624,7 @@ def test_the_mono_face_has_the_code_tabs_7px_cell():
         moy_ui.font_free(fid)
 
 
-def test_ten_roles_of_faces_load_at_once():
+def test_every_slot_takes_a_face_at_once():
     moy_ui.font_reset()
     meta = _set()
     faces = meta["tiers"]["desktop"][:SLOTS]

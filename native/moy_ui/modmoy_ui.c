@@ -971,6 +971,16 @@ static mp_obj_t ui_text_width(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_width_obj, 1, 3, ui_text_width);
 
+// text_covers(s, font=0): whether `font` draws every character of `s` with
+// a glyph of its own (moy_text_covers).
+static mp_obj_t ui_text_covers(size_t n_args, const mp_obj_t *args) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(args[0], &n);
+    uint32_t font = n_args > 1 ? (uint32_t)mp_obj_get_int_truncated(args[1]) : MOY_FONT_PETME128;
+    return mp_obj_new_bool(moy_text_covers(font, (const uint8_t *)s, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_covers_obj, 1, 2, ui_text_covers);
+
 // wrap(s, cols) -> [line, ...]: the toolkit's word wrap (moy_text_wrap's
 // words mode), each line its words joined by single spaces. wrap(s, px,
 // font): lines of at most `px` pixels of `font`'s advances.
@@ -2432,6 +2442,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_reads), MP_ROM_PTR(&ui_theme_reads_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_width), MP_ROM_PTR(&ui_text_width_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_covers), MP_ROM_PTR(&ui_text_covers_obj) },
     { MP_ROM_QSTR(MP_QSTR_wrap), MP_ROM_PTR(&ui_wrap_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_names), MP_ROM_PTR(&ui_glyph_names_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },

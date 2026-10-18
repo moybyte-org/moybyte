@@ -212,8 +212,8 @@ step 4; format 2, RGB colours and `look`, 2026-10-15 by
   (close), `M` (minimise), `Z` (maximise) and `T` (the title) once, a `|`
   between them allowed. What a theme leaves out is its style's own (§4.5); a
   value the key does not take is dropped.
-- **`fonts`**: role → a font file in the package, the roles `ui`, `title`
-  and `mono` (style.json's `theme.font_roles`); a file name is 1 to 24 of
+- **`fonts`**: role → a font file in the package, a role of
+  style.json's `theme.font_roles`; a file name is 1 to 24 of
   `a-z`, `0-9`, `_`, `-`, `.`, not starting with `.`, so it never names a
   path. Each role comes from the nearest package that names one; an unknown
   role is ignored and an ill-formed name dropped. The file is §4.7's format.
@@ -603,7 +603,9 @@ shadow's reach).
 
 ### 4.7 Fonts
 
-Up to four roles: `ui`, `title`, `mono`, `caption`. A theme font is a bitmap font file.
+Seven roles: `ui`, `title`, `mono`, `caption`, and the display's `key`,
+`op` and `result` (a button kind's `font` leaf names `key` or `op`;
+docs/look_2026-10.md step 22). A theme font is a bitmap font file.
 The default ships Tiny5 (D1). Petme128 stays the carts' font, and the cart
 `print` path is byte-identical, including the Lua C API that shares
 `mg_text_raw`. The one text path for every app runtime is sprint 6's

@@ -58,7 +58,7 @@ enum { MOY_TEXT_LEFT = 0, MOY_TEXT_CENTER = 1, MOY_TEXT_RIGHT = 2 };
 #define MOY_FONT_RECORD 8       // version 2: offset (3), w, h, x, y, advance
 #define MOY_FONT_PAIR 3         // version 2: left byte, right byte, dx
 #define MOY_FONT_BYTES 65536    // the largest file the reader takes
-#define MOY_FONT_SLOTS 10       // loaded fonts at once, beside petme128
+#define MOY_FONT_SLOTS 16       // loaded fonts at once, beside petme128
 
 // The byte map: the codepoints a version 2 font draws at bytes 0x80 up, in
 // order (tools/make_font.py reads this line).
@@ -180,6 +180,13 @@ int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
 // The width `s` draws at `scale`, in pixels (0 for an unknown font): the sum
 // of its glyphs' advances and, in a version 2 font, its kerning pairs'.
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);
+
+// 1 when `font` draws every codepoint of `s` with a glyph of its own (a
+// stand-in the font maps counts), 0 where one falls to the font's first
+// record or `font` is unknown. Petme128 and a version 1 font draw printable
+// ASCII; a version 2 font each byte its index gives a record past the
+// first, and the space.
+int moy_text_covers(uint32_t font, const uint8_t *s, size_t n);
 
 // The longest prefix of `s` that is at most `cells` bytes and ends on a
 // codepoint boundary.

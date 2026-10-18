@@ -265,7 +265,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_CODE_BG 9
 #define MOY_THEME_CODE_CONTRAST 45
 #define MOY_THEME_RESERVED 4
-#define MOY_THEME_FONT_ROLES 4
+#define MOY_THEME_FONT_ROLES 7
 // The sheets a package may name (docs/theming_2026-09.md §4.6), the
 // cart sheet's hex format: a line a row of up to MOY_THEME_SHEET_W nibbles,
 // at most each sheet's rows. The role sheet's cells, in pixels, reach

@@ -76,7 +76,7 @@ def test_the_set_is_every_themes_roles_and_the_mono():
         for fam in ("daysans", "inter", "atkinson"):
             assert any(n.startswith(fam + "-") for n in names)
         # A theme draws in at most MOY_FONT_SLOTS faces at once.
-        assert len([n for n in names if n.startswith("inter-")]) + 1 <= 10
+        assert len([n for n in names if n.startswith("inter-")]) + 1 <= 16
     assert faces["inter-44-600-4"][4] and not faces["inter-15-400-4"][4]   # Calc's subset
     with open(os.path.join(ROOT, "native", "moy_ui", "fonts", "set.json")) as f:
         meta = json.load(f)
@@ -112,6 +112,12 @@ def test_every_family_a_seed_names_carries_its_type_roles():
                     continue
                 assert face[:-4] in tiers[tier], (fam, steps, role, tier)
                 assert not faces[face[:-4]][4], (face, "a Calc subset")
+            for role in fontset.CALC_ROLES:
+                face = fontset.role_face(fam, role, desk, dict(steps))
+                assert face[:-4] in tiers[tier], (fam, steps, role, tier)
+            n = len({fontset.role_face(fam, r, desk, dict(steps))
+                     for r in tuple(fontset.ROLES) + tuple(fontset.CALC_ROLES)} - {None})
+            assert n + 1 <= 16, "a theme's faces and the mono fit MOY_FONT_SLOTS"
 
 
 def test_a_board_module_carries_its_tier():

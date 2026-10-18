@@ -1690,6 +1690,7 @@ def marks(active=None, reset=False):
 UI_TARGET = [None, None, 0]
 _DESK = 1                               # moy_ui.h's MOY_UI_DESK
 _WINDOW = 2                             # ... and MOY_UI_WINDOW
+_APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
 
 
@@ -1698,16 +1699,17 @@ def ui_context():
     return bytearray(UI_SIZE)
 
 
-def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False):
+def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=None):
     """Begin context `ctx`'s frame on canvas `cv` under theme `th`: a page
     fills `rect` (the canvas when None), `inp` is the frame's input in the
     run snapshot's shape (an array('i') of buttons held, buttons pressed --
     bit i of each is left, right, up, down, a, b, run -- the pointer's x, y
     and flags, and the key typed; None for none), `desk` picks the desk's
     rows and `window` says the page lies in a window's body, whose colour
-    its ground then is. Answers whether the frame is settled: its input
-    moved nothing, so a page drawn again draws the same pixels. A duplicate
-    id the last frame drew is logged, once."""
+    its ground then is; `app` is the shell app's id, whose
+    `app_buttons[app]` its buttons take. Answers whether the frame is
+    settled: its input moved nothing, so a page drawn again draws the same
+    pixels. A duplicate id the last frame drew is logged, once."""
     t = UI_TARGET
     t[0] = ctx
     t[1] = cv
@@ -1717,8 +1719,10 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False):
         print("ui: two stops share the id %r; the later is no stop" % dup)
     if rect is None:
         rect = (0, 0, cv.w, cv.h)
-    return _C.api_begin(ctx, inp, rect, (_DESK if desk else 0) | (_WINDOW if window else 0),
-                        _fs(cv))
+    flags = (_DESK if desk else 0) | (_WINDOW if window else 0)
+    if app is not None:
+        flags |= (_app_row(app) + 1) << _APP_SHIFT
+    return _C.api_begin(ctx, inp, rect, flags, _fs(cv))
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
@@ -1735,9 +1739,11 @@ class AppHost:
     every sample also drags (the press held while it moves, released where
     it comes up), which a page scrolls by. A frame that was not settled
     owes one more, so the rest state a press or a move leaves is painted,
-    then nothing."""
+    then nothing. `app` is the app's id (its buttons take the theme's
+    `app_buttons[app]`)."""
 
-    def __init__(self):
+    def __init__(self, app=None):
+        self.app = app
         self.ctx = ui_context()
         self.inp = array("i", [0] * 6)
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
@@ -1810,7 +1816,7 @@ class AppHost:
         a = self.inp
         t = self.tap
         a[4] = 7 if t == 1 else 3 if t == 3 else 1 if t == 2 else 0
-        settled = ui_frame(self.ctx, cv, th, rect, a, desk, window)
+        settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app)
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         a[0] = a[1] = a[5] = 0
         self.owed = not settled

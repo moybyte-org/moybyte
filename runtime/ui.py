@@ -28,7 +28,8 @@ each id's state from frame to frame. `o`, the override table, is a dict of
 
 The verbs draw into the frame the host began (`ui_draw.ui_frame`). The rect
 algebra is pure tuple math, every rect `(x, y, w, h)`; `text_size` and
-`has_symbols` measure what an app prints into a part. What lies under the
+`has_symbols` measure what an app prints into a part, and `face` names the
+theme's face it prints in. What lies under the
 verbs -- the rect-taking widgets, the marks, `Hits`, `ScrollRegion` -- is
 `runtime/ui_draw.py`, the chrome's.
 """
@@ -96,6 +97,31 @@ def text_size(text, scale=1):
     f = _C.print_font()
     info = _C.font_info(f)
     return _C.text_width(str(text), scale, f), (info[2] if info else 8) * scale
+
+
+_FACE = [None]                          # the print font `face` put aside
+
+
+def face(name=None, text=None):
+    """`face(name)`: a canvas's `print` (and `text_size`) draw in the
+    theme's `name` face -- a type role: "ui", "title", "caption", or a
+    display's "key", "op" and "result" -- until `face()` puts the one it
+    replaced back. True where the theme installs a face for `name` that
+    draws every character of `text` (when given); False, changing nothing,
+    where it does not (a pixel theme, and a cart's run, draw in their print
+    font)."""
+    if name is None:
+        if _FACE[0] is not None:
+            _C.print_font(_FACE[0])
+            _FACE[0] = None
+        return True
+    f = _C.font(name)[0]
+    if f == 0 or (text is not None and not _C.text_covers(str(text), f)):
+        return False
+    was = _C.print_font(f)
+    if was is not None and _FACE[0] is None:
+        _FACE[0] = was
+    return was is not None
 
 
 def has_symbols():

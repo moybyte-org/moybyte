@@ -682,6 +682,9 @@ const char *const moy_theme_font_roles[MOY_THEME_FONT_ROLES] = {
     "title",
     "mono",
     "caption",
+    "key",
+    "op",
+    "result",
 };
 
 const char *const moy_theme_bar_edges[MOY_THEME_BARS] = {
@@ -1098,6 +1101,8 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"focus\": { \"style\": \"edge\", \"card\": \"lift\", \"small\": \"underline\" },\012"
     "    \"current\": { \"style\": \"plate\" },\012"
     "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
+    "    \"app_buttons\": { \"calc\": { \"normal\": { \"font\": \"key\" }, \"tonal\": { \"font\": \"op\" },\012"
+    "                               \"primary\": { \"font\": \"op\" } } },\012"
     "    \"dark\": {\012"
     "      \"fam\": \"inter\",\012"
     "      \"focus\": { \"lift\": { \"rim\": [\"#b6a8f7\", 0.6] } },\012"
@@ -1206,7 +1211,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3843, 4062};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3994, 4062};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
