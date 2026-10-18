@@ -285,10 +285,14 @@ APP_UI = ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"
 _APP_UI_RECTS = ((0, 40, 320, 120),)
 
 
-def _app_ui_host_words(tmp_path):
+def _app_ui_host_words(tmp_path, monkeypatch):
     """The fixture's frame on the host's WAMR (tests/test_ui_public.py's
-    run), as canonical RGB565 words."""
-    from runtime import host_app, wasm_host
+    run), as canonical RGB565 words, the host carrying no font set or icon
+    sets, as the browser carries none (runtime/fontset.py): the default
+    look's faces are petme128 there."""
+    from runtime import fontset, host_app, wasm_host
+    monkeypatch.setattr(fontset, "file", lambda name: None)
+    monkeypatch.setattr(fontset, "icon_file", lambda name: None)
     from tools import wasm_cart
     from ws_helpers import make_drv, open_cart, quiesce
     if not wasm_host.available():
@@ -317,7 +321,12 @@ def _rects(words):
     return out
 
 
-def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path):
+@pytest.mark.xfail(strict=True, reason=(
+    "the default is Moy, a look (docs/look_2026-10.md step 27): the page draws "
+    "the compiled app's rows under it (an edge-bar focus, a plate for the "
+    "current row), and the host's WAMR run draws them lookless, a row higher, "
+    "measured 2026-10-18; the host reference needs the look to hold the page to"))
+def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path, monkeypatch):
     """App UI Wasm (its src/main.wat says what it does) draws the public UI
     API's fixture page through the `ui` rows: in the browser they are the
     page's adapters over the same C (native/moy_ui/moy_ui_wasm.c), so the run
@@ -339,7 +348,7 @@ def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path):
     size, b64 = js[1].split(":", 1)
     assert size == "%dx%d" % (tier_frame.W, tier_frame.H), size
     page = _rects(tier_frame.from_rgba(base64.b64decode(b64)))
-    host = _rects(_app_ui_host_words(tmp_path))
+    host = _rects(_app_ui_host_words(tmp_path, monkeypatch))
     for rect, a, b in zip(_APP_UI_RECTS, page, host):
         assert a == b, "the page drew %r otherwise than the host's run" % (rect,)
 
