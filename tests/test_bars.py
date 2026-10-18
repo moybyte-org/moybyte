@@ -378,3 +378,36 @@ def test_the_focused_windows_chip_is_raised_under_the_current_mark(tmp_path):
     for key, (x, y, w, h), _label in chips:
         inside = _px(cv, x + w - 4, y + h // 2)
         assert (inside != bar) == (key == ws.wm._focus)
+
+
+# -- the status cluster's gaps -------------------------------------------------
+
+@pytest.mark.parametrize("config,lo,hi", [("tdeck_320x240_fs1_dark", 4, 6),
+                                          ("p4_1024x600_cs2_fs1_windowed", 10, 13)])
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_status_clusters_ink_is_one_gap_apart(tmp_path, config, lo, hi, mode):
+    """Wi-Fi, the battery and the clock stand one gap apart by their ink,
+    whatever room each icon's art leaves in its cell (review B-35)."""
+    import test_shell_goldens as g
+    moy_ui.theme_uninstall()
+    try:
+        ws = g._build(dict(g.CONFIGS[config], variant=mode, theme="moy"),
+                      str(tmp_path / "carts"))
+        ws.go_home()
+        ws.frame(1 / 30)
+        bl = ws.bar_layer
+        for _edge, _rect, _dy, cells in ws.layout.bars:
+            run = [c for c in cells if c[0] in ("wifi", "battery", "clock")]
+            if len(run) < 3:
+                continue
+            dx = bl._status_dx(cells) or {}
+            inks = [bl._ink(n, r) for n, r, _t, _s in run]
+            inks = [(a + dx.get(n, 0), b + dx.get(n, 0))
+                    for (a, b), (n, _r, _t, _s) in zip(inks, run)]
+            gaps = [inks[i + 1][0] - inks[i][1] - 1 for i in range(len(inks) - 1)]
+            assert max(gaps) - min(gaps) <= 1, gaps
+            assert lo <= min(gaps) and max(gaps) <= hi, gaps
+            return
+        raise AssertionError("no status cluster on %s" % config)
+    finally:
+        moy_ui.theme_uninstall()

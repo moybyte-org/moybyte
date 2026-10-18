@@ -154,17 +154,34 @@ def _along(name, horiz, cs, fs, clock_w, text, sys_len=0):
     return (cell[0] if horiz else cell[1]) * cs
 
 
-def _run(items, start, gap):
+# The status widgets: two side by side are a status cluster, a status gap
+# apart (`pack`'s `sg`), which the bar evens out by their ink.
+STATUS = ("wifi", "battery", "clock")
+
+
+def _gap(a, b, gap, sg):
+    return sg if a[0] in STATUS and b[0] in STATUS else gap
+
+
+def _run(items, start, gap, sg):
+    prev = None
     for it in items:
+        if prev is not None:
+            start += _gap(prev, it, gap, sg)
         it[3] = start
-        start += it[1] + gap
+        start += it[1]
+        prev = it
 
 
-def _ends(items, gap):
+def _ends(items, gap, sg):
     n = 0
+    prev = None
     for it in items:
+        if prev is not None:
+            n += _gap(prev, it, gap, sg)
         n += it[1]
-    return n + gap * (len(items) - 1) if items else 0
+        prev = it
+    return n
 
 
 def _grow(items, slack):
@@ -189,7 +206,8 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
     center and right.
 
     Along a bar, `left` packs from its start and `right` from its end, a
-    `2 * cs` margin at each end and gap between cells; `center` centres on
+    `2 * cs` margin at each end and gap between cells (two status widgets,
+    `STATUS`, at least `4 * fs` apart); `center` centres on
     the middle. The flex widgets (`FLEX`) share the slack of the run they
     face: up to the centre's cells when the centre holds a fixed one, else
     the whole gap between the two ends. A centre of flex widgets alone
@@ -203,6 +221,7 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
         of = _bars()
     rects = bar_rects_of(w, h, rows, of)
     m = g = 2 * cs
+    sg = max(g, 4 * fs)
     ic = 16 * cs
     out = []
     for bar, rect in zip(of, rects):
@@ -227,19 +246,19 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
         left, center, right = slots
         floats = bool(center) and all(it[2] for it in center)
         if center and not floats:
-            cstart = (length - _ends(center, g)) // 2
+            cstart = (length - _ends(center, g, sg)) // 2
             if left:
-                _grow(left, cstart - g - (m + _ends(left, g)))
+                _grow(left, cstart - g - (m + _ends(left, g, sg)))
             if right:
-                cend = cstart + _ends(center, g)
-                _grow(right, (length - m - _ends(right, g)) - g - cend)
+                cend = cstart + _ends(center, g, sg)
+                _grow(right, (length - m - _ends(right, g, sg)) - g - cend)
         else:
-            a = m + _ends(left, g) + (g if left and right else 0)
-            slack = length - m - _ends(right, g) - a
+            a = m + _ends(left, g, sg) + (g if left and right else 0)
+            slack = length - m - _ends(right, g, sg) - a
             both = left + right
             _grow(both, slack)
-        _run(left, m, g)
-        _run(right, length - m - _ends(right, g), g)
+        _run(left, m, g, sg)
+        _run(right, length - m - _ends(right, g, sg), g, sg)
         rstart = right[0][3] if right else length - m
         if floats:
             q = length // 4
@@ -247,7 +266,7 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
                 it[1] = max(0, rstart - q)
                 it[3] = q
         else:
-            _run(center, (length - _ends(center, g)) // 2, g)
+            _run(center, (length - _ends(center, g, sg)) // 2, g, sg)
         dy = (thick - BAR_ROWS * fs) // 2
         iy = 1 + (thick - BAR_ROWS * cs) // 2 if horiz else (thick - ic) // 2
         cells = []

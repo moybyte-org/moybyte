@@ -95,7 +95,8 @@ _STATUS_H = BAR_ROWS    # the bar's rows (16px icons + 1px top/bottom margin)
 # them). A SEPARATE cluster from _SYSMENU_BTN/_HOME_BTN/.../_BAR_WIFI/_BAR_CLOCK
 # -- the crash bar's own fixed rects.
 _ZONE_BATT = _BAR_BATT                                          # same rightmost slot
-_ZONE_WIFI = _BAR_WIFI                                           # same slot
+# Wi-Fi a status gap from the battery (shell_layout.pack's at font scale 1).
+_ZONE_WIFI = (_ZONE_BATT[0] - _BAR_ICON - 4, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _ZONE_GEAR = (_ZONE_WIFI[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 # The context X (tap to exit the active app).
 _ZONE_CONTEXT_X = (_ZONE_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
@@ -120,9 +121,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     import ui_draw as _ui_draw
     import layout_base as _layout_base
+    import iconsets as _iconsets
+    from shell_layout import STATUS as _STATUS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
+    from runtime import iconsets as _iconsets
+    from runtime.shell_layout import STATUS as _STATUS
 
 
 def _bar_text_w(s):
@@ -281,6 +286,7 @@ class BarLayer:
         # and the clock text redraw_clock last painted there.
         self._strip_cv = None
         self._clock_drawn = None
+        self._ink_dx = None           # {status widget: dx} the strip last laid out
         # The game canvas's packing (_packed) and what it was packed from;
         # each packing's per-bar key fields (_key_fields).
         self._game_of = None
@@ -747,6 +753,7 @@ class BarLayer:
             cs = 0 if game else ws.layout.cs
             across = edge in ("left", "right")
             show_x = self._show_x(where)
+            self._ink_dx = self._status_dx(cells) if looked and not across else None
             for name, r, text, _slot in cells:
                 if name == "zone":
                     zone = r
@@ -930,6 +937,8 @@ class BarLayer:
             if name == "wifi" and ws._wifi_icon_kind() != "wifi":
                 ink = th["chrome_ink_dim"]
                 kind = "wifi_off"
+            dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
+            x += dx                                    # its ink evened out (_status_dx)
             side = 16 * u                              # the theme's icon set, centred
             gx = x + (w - side) // 2 if not across else (thick - side) // 2
             gy = (thick - side) // 2 if not across else y + (h - side) // 2
@@ -959,6 +968,67 @@ class BarLayer:
         if name == "title":
             s = s[:max(0, w // max(1, L.font_w))]
         cv.print(s, x, (thick - L.line_h) // 2, ink, 1)
+
+    def _ink(self, name, r):
+        """(first, last) column of status widget `name`'s ink in its cell `r`
+        of a horizontal bar, as `_paint_look_cell` draws it: an icon's from
+        its set's mask (the wider of Wi-Fi's two states), the fallback
+        battery's from its outline, the clock's its cell."""
+        x, _y, w, _h = r
+        if name == "clock":
+            return (x, x + w - 1)
+        u = _layout_base.unit()
+        side = 16 * u
+        gx = x + (w - side) // 2
+        sp = self.ws.icon_spec()
+        kinds = ("wifi", "wifi_off") if name == "wifi" else (name,)
+        a = b = None
+        for k in kinds:
+            got = _iconsets.ink_span(k, side, side, sp)
+            if got is not None:
+                a = got[0] if a is None else min(a, got[0])
+                b = got[1] if b is None else max(b, got[1])
+        if a is not None:
+            return (gx + a, gx + b)
+        side = 12 * u
+        gx = x + (w - side) // 2
+        if name == "battery":
+            bx = gx + (side - 12 * u) // 2
+            return (bx, bx + 12 * u - 1)
+        return (gx, gx + side - 1)
+
+    def _status_dx(self, cells):
+        """{name: dx} for the status widgets (`shell_layout.STATUS`) of a
+        horizontal bar's runs: where two or more sit side by side, the
+        middle ones move so the ink of each is as far from the next as the
+        last gap is from the first -- one gap between Wi-Fi, the battery and
+        the clock whatever room each icon's art leaves in its cell. The ends
+        stay and a clock never moves (a run with one inside is left as
+        packed), so the clock's own repaint (`redraw_clock`) lands where the
+        strip drew it."""
+        out = None
+        run = []
+        for c in cells + (("", (0, 0, 0, 0), None, -1),):
+            if c[0] in _STATUS and (not run or run[-1][3] == c[3]):
+                run.append(c)
+                continue
+            if len(run) > 2 and all(n != "clock" for n, _r, _t, _s in run[1:-1]):
+                inks = [self._ink(n, r) for n, r, _t, _s in run]
+                inner = 0
+                for a, b in inks[1:-1]:
+                    inner += b - a + 1
+                free = inks[-1][0] - inks[0][1] - 1 - inner
+                at = inks[0][1] + 1
+                for i in range(1, len(run) - 1):
+                    gap = free // (len(run) - i)
+                    free -= gap
+                    at += gap
+                    if out is None:
+                        out = {}
+                    out[run[i][0]] = at - inks[i][0]
+                    at += inks[i][1] - inks[i][0] + 1
+            run = [c] if c[0] in _STATUS else []
+        return out
 
     def sys_tile(self, r, bar, across):
         """The system button's tile in its cell `r` of bar rect `bar`: 36x34 on

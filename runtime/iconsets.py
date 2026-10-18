@@ -20,6 +20,7 @@ IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has.
 
   spec(look) -> (kind, set, swap) | None      the live look's icon set
   draw(cv, kind, rect, ink, spec) -> bool     False: the set cannot draw it
+  ink_span(kind, w, h, spec) -> (a, b) | None the columns its ink covers
   pixel_image(kind, swap) -> image | None     a pixel set tile, keyed clear
 """
 
@@ -233,6 +234,39 @@ def draw(cv, kind, rect, ink, spec_, fill_index=None):
         return True
     return set_name != DEFAULT_SET and _mask_draw(cv, DEFAULT_SET, slot, x, y, w, h, box,
                                                   ink, fill_index)
+
+
+_SPANS = {}                   # (set, size, slot) -> (first column, width) of its ink
+
+
+def ink_span(kind, w, h, spec_):
+    """(first, last) column of icon `kind`'s ink, counted from the left of
+    the `w` x `h` rect `draw` centres it in, from its mask's glyph record;
+    None where the set draws it as pixel art or cannot draw it."""
+    slot = slot_of(kind)
+    if slot is None or spec_ is None:
+        return None
+    kind_, set_name, _swap = spec_
+    if kind_ == "pixel" or SLOTS[slot] == "moy":
+        return None
+    box = min(w, h)
+    for name in (set_name, DEFAULT_SET):
+        fid, size, _ffid = _pick(name, box)
+        if not fid or not _drawn(fid, slot):
+            continue
+        key = (name, size, slot)
+        got = _SPANS.get(key)
+        if got is None:
+            src = _fontset.icon_file("%s-%d.fnt" % (name, size))
+            got = (0, size)
+            if src is not None and len(src) >= 16 + 256:
+                rec = 16 + 256 + 8 * src[16 + FIRST + slot]
+                if len(src) >= rec + 8 and src[rec + 3]:
+                    got = (src[rec + 5], src[rec + 3])
+            _SPANS[key] = got
+        ox = (w - size) // 2 + got[0]
+        return (ox, ox + got[1] - 1)
+    return None
 
 
 def _mask_draw(cv, name, slot, x, y, w, h, box, ink, fill_index):
