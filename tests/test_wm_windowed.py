@@ -1432,7 +1432,9 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
     ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
-    win, cw, ch = _engage_resize(ws, drv)
+    # Shrunk, so the rubber rect stays on the glass: the window opens in
+    # the work area right of the icon column, near the desk's right edge.
+    win, cw, ch = _engage_resize(ws, drv, dx=-60)
     sc = ws.sys_canvas
     # The accent outline is drawn at the rubber rect...
     accent = ws.theme_colors["accent"]

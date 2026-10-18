@@ -593,6 +593,18 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         lay = self._root_ctx.layout
         return (lay.cx, lay.cy, lay.cw, lay.ch)
 
+    def _work_rect(self, fs):
+        """The desk rect right of its icon column, 8 pixels clear at the font
+        scale: where a new window opens, as macOS and GNOME open one in the
+        free work area, never over the launchers."""
+        dx, dy, dw, dh = self._desk_rect()
+        right = dx
+        for _key, box, band, _label, _cart in self._backdrop_layer._icon_rects():
+            right = max(right, box[0] + box[2], band[0] + band[2])
+        if right > dx:
+            right = min(dx + dw, right + 8 * fs)
+        return (right, dy, dx + dw - right, dh)
+
     def desk_open(self):
         return self.mode == "desktop"
 
@@ -881,11 +893,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             x = max(dx, dx + dw - w - 8 * fs)
             y = max(dy, dy + dh - h - 8 * fs)
         else:
-            # Cascade: centered, each deeper window stepping down-right, clamped so
-            # the title strip always stays reachable on the desk.
-            x = dx + (dw - w) // 2 + depth * 12 * fs
+            # Cascade: centred in the work area right of the icon column (a
+            # window wider than it as far right as the desk allows), each
+            # deeper window stepping down-right, clamped so the title strip
+            # always stays reachable on the desk.
+            wx, _wy, ww, _wh = self._work_rect(fs)
+            if w > ww:
+                wx, ww = max(dx, dx + dw - w), w
+            x = wx + (ww - w) // 2 + depth * 12 * fs
             y = dy + (dh - h) * 2 // 5 + depth * 10 * fs
-            x = max(dx, min(x, dx + dw - w // 2))
+            x = max(wx, min(x, dx + dw - w // 2))
             y = max(dy, min(y, dy + dh - 24 * fs))
         x, y = self._clear_of_subject(x, y, w, h, fs)
         win = _Win(kind, x, y, w, h, title_h)

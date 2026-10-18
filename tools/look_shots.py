@@ -382,7 +382,13 @@ SPRITE_CUR, SPRITE_COLOUR = (3, 2), 11
 
 
 def _sprites(g, ws):
+    desk = getattr(ws.wm, "mode", None) == "desktop"
+    if desk:
+        ws.open_desk()
     _editor(g, ws, "paint")
+    if desk:
+        _settle(g, ws, 2)
+        _place(ws, "menu", 112, 54, 900, 534)       # the target's window, as _code's
     ws.paint_layer._cur[:] = SPRITE_CUR
     if ws.paint is not None:
         ws.paint.color = SPRITE_COLOUR
