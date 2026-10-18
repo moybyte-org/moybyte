@@ -500,6 +500,18 @@ class StorybookAppLayer(ListShellApp):
 
     # -- input -------------------------------------------------------------------------
 
+    def back(self):
+        """Back one level (B, Esc, the bar's chevron): a page back to its
+        story's pages, the pages back to the shelf. False on the shelf: the
+        host leaves the app."""
+        if self.mode == "page":
+            self._back_to_pages()
+        elif self.mode == "pages":
+            self._back_to_shelf()
+        else:
+            return False
+        return True
+
     def handle_input(self, inp):
         if self.mode == "page":
             self._typed_keys(inp)

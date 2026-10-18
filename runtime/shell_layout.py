@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import BAR_ROWS, DEFAULT_BARS, bar_rects_of, bar_rows, bars as _bars
 
 EDGES = ("top", "bottom", "left", "right")
-REQUIRED = ("menu", "zone", "close")
+REQUIRED = ("menu", "zone")
 
 # The catalogue (§4): each widget's minimum cell in logical pixels, (w, h),
 # in a horizontal bar and in a vertical one; None where the widget is not

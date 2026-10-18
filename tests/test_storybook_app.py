@@ -162,28 +162,29 @@ def test_story_full_and_page_caps(tmp_path):
     assert app.status == "STORY FULL"
 
 
-def test_bar_x_exit_commits_the_open_story(tmp_path):
+def test_bar_back_commits_the_open_story(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_storybook(ws)
     app._tap_row(0)
     app._tap_row(1)
     _type(app, ws.input, "\nSaved by the X.")   # a fresh line (the 34-char line cap)
-    xb = ws.layout.context_x_btn
-    ws.pointer.place(xb[0] + 2, xb[1] + 2)
-    ws.pointer.click = True
-    ws.handle_pointer()                   # the ROUTER owns the app bar contract
-    ws.pointer.click = False
+    path = Path(app.cart["path"])
+    xb = ws.bar_layer.back_rect("app")
+    for _ in range(3):                    # the page, the pages, the shelf: out
+        ws.pointer.place(xb[0] + 2, xb[1] + 2)
+        ws.pointer.click = True
+        ws.handle_pointer()               # the ROUTER owns the app bar contract
+        ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
     assert ws.input.text_mode is False
-    deck = json.loads((Path(app.cart["path"]) / "deck.json").read_text())
+    deck = json.loads((path / "deck.json").read_text())
     assert "Saved by the X." in " ".join(deck["pages"][0]["text"])
-    src = (Path(app.cart["path"]) / "main.py").read_text()
+    src = (path / "main.py").read_text()
     assert "Saved by the X." in src
     # A plain deck-driven save must never graduate the story on its own -- only
     # a hand-edit past the deck's vocabulary does (#78, see the graduation
     # tests below).
-    assert not app.cart.get("graduated")
-    assert moy_carts.load(app.cart["path"])["graduated"] is False
+    assert moy_carts.load(str(path))["graduated"] is False
 
 
 def test_layout_reflows():

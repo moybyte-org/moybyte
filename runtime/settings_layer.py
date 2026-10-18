@@ -279,10 +279,10 @@ class SettingsLayer:
     page of a panel it opened, drawn with the public UI API's verbs. Reads
     ws config/system state and dispatches every mutation to ws setters.
 
-    The bar's lent zone is the back chevron and the title under a theme with
-    a depth (runtime/bar_layer.py draws it from `back_title`): a tap on the
-    chevron leaves Settings, one on the title knocks on the secret door
-    (#21)."""
+    The bar's lent zone is the back chevron and the title where the bar
+    places no X (runtime/bar_layer.py draws it from `back_title`): a tap on
+    the chevron is `back`, as Esc and B are, one on the title knocks on the
+    secret door (#21)."""
 
     id = "settings"
     domain = "system"
@@ -857,19 +857,15 @@ class SettingsLayer:
     # -- the lent left zone (#46 zoned bar) -------------------------------------
 
     def draw_zone(self, cv, rect):
-        """Without a depth the zone stays empty; with one, the bar draws
+        """Where the bar places an X the zone stays empty; else the bar draws
         `back_title` there itself (runtime/bar_layer.py)."""
 
     def zone_tap(self, px, py, rect=None):
-        """The chevron (the zone's first square, where the bar draws it)
-        leaves Settings; the rest of the zone, the title, knocks on the
-        secret door (#21)."""
+        """The zone past the chevron (the bar takes the chevron's tap,
+        `back`), the title, knocks on the secret door (#21)."""
         if rect is None or not _ui.rect_in(px, py, rect):
             return False
-        if px < rect[0] + rect[3] and self.ws.bar_layer.draws_back("settings"):
-            self.ws._exit_settings()
-        else:
-            self.ws.ach_ui._tap_secret_door()
+        self.ws.ach_ui._tap_secret_door()
         return True
 
     # -- rows / actions -----------------------------------------------------------
@@ -1358,23 +1354,35 @@ class SettingsLayer:
         view = self._page_of()
         if view == "wifi":
             return self.wifi_input(i, self._sub)
-        if i.pressed("home") or i.pressed("stop"):
+        if i.pressed("home"):
             if view == "confirm":
                 self.close_confirm()
             ws.home_key()
             return True
-        if i.pressed("b"):
-            if view == "bt":
-                self.close_bluetooth()
-            elif view == "confirm":
-                self.close_confirm()
-            elif view == "crash":
-                self.close_crash()
-            else:
-                ws._exit_settings()      # back -> resume the cart if opened from one
+        if i.pressed("b") or i.pressed("stop"):
+            self.back()
             return True
         self._input_host().keys(i)
         return True
+
+    def back(self):
+        """Back one level -- B, Esc and the bar's chevron: a page open over
+        Settings closes, else Settings does (resuming the cart it was opened
+        from)."""
+        view = self._page_of()
+        if view == "bt":
+            self.close_bluetooth()
+        elif view == "confirm":
+            self.close_confirm()
+        elif view == "crash":
+            self.close_crash()
+        elif view == "wifi":
+            if self.wifi_pick is not None:
+                self._wifi_cancel()
+            else:
+                self._wifi_back()
+        else:
+            self.ws._exit_settings()
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

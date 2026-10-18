@@ -181,14 +181,15 @@ playtest running in a window is ended first, as closing its window ends it
 (owner, 2026-10-13: the simplest to build): the cart slot is one and console
 mode's games need it. Steam's Big Picture on a PC is the shape, from memory.
 
-**The way back: the `close` widget** (§4), the X the exit model already
-draws wherever something is beneath the surface (owner, 2026-10-13: the
-existing X). In console mode on a P4 the home's depth is above the mode's
-floor — the desk and its parked windows are beneath — so the X shows on the
-home and `wm.leave_console()` is its verb; on the T-Deck the home is the
-floor and the X is absent, as today. Hold-BACKSPACE and B do the same from a
-keyboard. No DESKTOP row joins the system menu: the X is the one way out of
-anything (L0).
+**The way back** goes one level, wherever something is beneath the surface
+(owner, 2026-10-13; its shape 2026-10-18, `docs/look_2026-10.md` step 27a):
+the back chevron at the head of the bar's `zone`, or the `close` widget's X
+where a layout places one (§4). In console mode on a P4 the home's depth is
+above the mode's floor — the desk and its parked windows are beneath — so
+the home's bar shows the way back and `wm.leave_console()` is its verb; on
+the T-Deck the home is the floor and it is absent. Esc and B do the same
+from a keyboard. No DESKTOP row joins the system menu: the bar's back is the
+one way out of anything (L0).
 
 **Memory.** Parked stamps are caches: when the Player's fit check for a
 cart's canvas against the largest free block fails (fragmentation is the
@@ -201,7 +202,7 @@ P4's off-heap PSRAM is unmeasured: `tools/mem_census.py p4 offheap` runs
 before step 1 commits and its numbers go to #58.
 
 **No boot setting** (owner, 2026-10-13: not for now). A P4 boots to the
-desk; PLAY is the only way into console mode and the X the way out (§15).
+desk; PLAY is the only way into console mode and the bar's back the way out (§15).
 
 **Console mode is the same everywhere.** On a P4 in console mode the Apps
 tab opens an app fullscreen and the Make tab the Editor fullscreen, as on
@@ -249,8 +250,8 @@ thing in both modes; what differs is only the container a component opens in
 | widget | draws | value | tap | min cell, horizontal / vertical |
 |---|---|---|---|---|
 | `menu` | the ≡ glyph; under a theme's look the pixel Moy on its tile (`docs/look_2026-10.md` step 14), its cell the tile's | — | the system menu (the popup it is today, in both modes) | 16×16 / 16×16 |
-| `close` | the context-X | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
-| `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status) | the surface's zone generation | the surface's `zone_tap` | 64×16, flexes / horizontal only |
+| `close` | the X, for a layout that wants it; the shipped themes place none | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
+| `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status), headed by the back chevron where the bar has a way back and no `close` | the surface's zone generation | the chevron: the way back; the rest the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
 | `clock` | `HH:MM` | the minute | the calendar component | 40×8 / 16×16 (two lines) |
 | `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8): the Settings panel as a popover in desktop mode, the Settings page scrolled to it in console mode | 16×16 / 16×16 |
@@ -261,9 +262,9 @@ thing in both modes; what differs is only the container a component opens in
 | `separator` | a 1px line | — | — | 4×16 / 16×4 |
 
 `menu`, `zone`, `close`, `title`, `clock`, `wifi` and `battery` are today's
-bar as widgets — the X becomes its own widget so that a layout can place it
-and the safety rule can require it (§9), instead of riding inside the right
-zone; `chips`, `text`, `spacer` and `separator` are new
+bar as widgets — the X became its own widget so that a layout can place it,
+instead of riding inside the right zone, and a layout without it has the
+zone's back chevron (§9); `chips`, `text`, `spacer` and `separator` are new
 cells. Every widget is compact (L13): the tallest cell any of them needs is
 16 logical pixels, the clock's two lines on a side bar and an icon across a
 top bar, which is why §5 caps a bar at 32. There is no `home` widget: the HOME key is the way home (L11, L12). There is no `settings` widget: Settings is a row of the system menu
@@ -507,14 +508,15 @@ every board today (no board measures one), drawn as `--`.
 
 ## 9. The safety rule, and what the loader checks
 
-**The rule.** A layout places `menu`, `zone` and `close` somewhere
+**The rule.** A layout places `menu` and `zone` somewhere
 **after every drop of §10** — a `zone` in a vertical bar is dropped, and a
-layout that then has no `zone` or no `close` has lost its verbs or its exit
+layout that then has no `zone` has lost its verbs and its exit
 — or it is replaced by the tier default and the replacement is noted in the
 theme's report (`docs/theming_2026-09.md` §7). The rule therefore runs
 twice: in the loader on the data, and in the composer on the resolved bars.
-`close` is the way out of anything (and of console mode on a P4), with
-hold-BACKSPACE and B as its keyboard twins (`docs/shell_ux_v1.md` §9);
+The way out of anything (and of console mode on a P4) is the back chevron
+at the head of the `zone`, or the `close` widget where a layout places one
+(§3), with Esc and B as its keyboard twins (`docs/shell_ux_v1.md` §9);
 `menu` the system menu; the way to the mode's root is the HOME key (L11),
 which no widget doubles. No menu row duplicates any of them (L0).
 
@@ -855,7 +857,7 @@ and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
   2026-10-13): not for now; PLAY is the only way into console mode on a P4.
 - **A `mode` key, a DESKTOP row in the system menu, a `settings` widget, a
   HOME row, a calendar app or desk icon**: each is a second way to a thing
-  that has one — PLAY and the X, the menu's Settings row, the HOME key, the
+  that has one — PLAY and the bar's back, the menu's Settings row, the HOME key, the
   calendar component (L0). A second home is declined too; a second
   ARRANGEMENT of the one home is the `home` key (L14).
 - **An on-screen home button, and touch buttons for what a key does**
@@ -959,7 +961,7 @@ where it landed; a finding both made is marked.
 | A, P | per-widget cell repaint: the strip is re-rendered whole today and `redraw_clock` paints the backdrop | accepted: whole-strip re-render stays, cell repaint declined | L8, §14, §15 |
 | A, P | overlays disable the quiet stack and damage | accepted: the popover rides the quiet stack with its rect as damage; the menu takes the same path | §8, §13 step 6 |
 | A, P | `--repaint home` does not exist; `library drag-scroll` changes meaning; gates need deltas plus absolutes and the missing scenarios | accepted | §13 |
-| A | the X must be its own widget in the required set; the rule must re-run after drops | accepted: `close`; the rule runs twice | §4, §9 |
+| A | the X must be its own widget in the required set; the rule must re-run after drops | accepted: `close`; the rule runs twice. The required set lost `close` on 2026-10-18 (look step 27a): the zone it requires carries the way back where no `close` is placed | §4, §9 |
 | A | the desktop `home` widget needs a show-desktop verb; `goto("desk")` truncates | accepted: `show_desk()`; the owner then dropped the widget and gave the verb to the HOME key (2026-10-13) | L11, L12, §15 |
 | A | wifi exists twice; the lease must release on an outside tap; the battery rows are Settings' | accepted; the owner ruled the Settings panel the one implementation | §8, §13 step 6, §17 |
 | A | `content_rect` reaches fixed geometry the doc missed; scope is a product choice | accepted: the owner ruled bars global; step 3b moves the fixed geometry | §7, §13, §17 |

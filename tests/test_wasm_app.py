@@ -87,7 +87,7 @@ def test_a_compiled_app_reaches_prefs_and_theme_with_no_upcall(tmp_path):
     token = moy_app.Theme(ws.app_abi, g).token(0)
     ws.app_abi.end(g)
     cv = ws.sys_canvas
-    i = 2 * (20 * cv.w + 160)
+    i = 2 * (34 * cv.w + 300)          # the band under the app bar, past the toast
     assert cv._buf[i] | cv._buf[i + 1] << 8 == cv._wire[token & 63]
     ws.exit()
     assert _runs(ws) == 1

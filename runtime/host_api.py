@@ -302,16 +302,28 @@ class ConsoleDriver:
         """The pause menu or the system menu shows: Esc is theirs."""
         return self.ws.pause.open or self.ws.sysmenu.open
 
+    def takes_escape(self):
+        """Esc is the console's: a menu shows, or Settings or a registered
+        app is the fullscreen surface (its Esc is the bar's back)."""
+        ws = self.ws
+        return (self.menu_open() or ws.screen == "settings"
+                or (not ws.windowed_chrome and ws.screen in ws._apps_by_id))
+
     def escape(self):
         """Esc: the pause menu steps back (Options to its menu, the menu to
-        the game), the system menu closes; else an open Editor panel goes
-        back to the desktop."""
+        the game), the system menu closes; Settings and a registered app go
+        back one level, as the bar's chevron and B do; else an open Editor
+        panel goes back to the desktop."""
         ws = self.ws
         if ws.pause.open:
             ws.pause.back()
         elif ws.sysmenu.open:
             ws.sysmenu.close()
             ws.popover_touch()
+        elif ws.screen == "settings":
+            ws.settings_layer.back()
+        elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
+            ws.app_back()
         elif ws.screen == "menu":
             ws._leave_menu()
 

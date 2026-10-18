@@ -286,14 +286,15 @@ def _names_of(packed):
 @pytest.mark.parametrize("desk", [False, True])
 def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
     """Moy's layout: the Moy button first, its tile's cell, then the chips
-    (desk) and the zone; the X, Wi-Fi, battery and the clock at the right;
+    (desk) and the zone; Wi-Fi, battery and the clock at the right, no X
+    (docs/look_2026-10.md step 27a);
     the handheld bar 28 rows (`hhbar.h`), the desk's 40, and back to 18 on a
     theme with no look."""
     ws = _looked_ws(tmp_path, desk=desk)
     L = ws.layout
     assert L.status_h == (40 if desk else 28)
     names = _names_of(L.bars)[0]
-    assert names[0] == "menu" and names[-4:] == ["close", "wifi", "battery", "clock"]
+    assert names[0] == "menu" and names[-4:] == ["zone", "wifi", "battery", "clock"]
     assert ("chips" in names) == desk
     menu = L.bars[0][3][0][1]
     assert menu[0] == 2 * L.cs and menu[2] == layout_base.sys_tile(L.status_h)[2]

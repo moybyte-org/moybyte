@@ -296,5 +296,5 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     amp/pins unverified), backlight PWM dimming (owner call), and a
     **touch-only exit gesture for fullscreen games** -- this board has no
     BACKSPACE to hold, so a running game currently has no on-glass exit path
-    (tools/apps keep the bar's context-X; games hide the bar). #202 carries
+    (tools/apps keep the bar's back; games hide the bar). #202 carries
     it.

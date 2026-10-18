@@ -33,7 +33,7 @@
   },
   "layout": {
     "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
-               "right": ["close", "wifi", "battery", "clock"] }]
+               "right": ["wifi", "battery", "clock"] }]
   },
   "look": {
     "focus": { "style": "edge", "card": "lift", "small": "underline" },

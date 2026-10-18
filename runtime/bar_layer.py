@@ -206,7 +206,7 @@ class BarLayer:
     bodies: `"desktop"` stays the running-cart CRASH chrome (Stage 5 retired the
     #71 pause frame -- for a GAME the bar shows only on a crash, never during play);
     `"tool"` (Part 4) is the minimal bar a running TOOL/APP shows so it's exitable
-    (title + status + context-X, NO tab ladder). BOTH the `"desktop"` and `"tool"`
+    (back + title + status, NO tab ladder). BOTH the `"desktop"` and `"tool"`
     branches return before any `owner.draw_zone` call, so `draw_zone` stays
     structurally unreachable while a Player is top-of-stack (the perf guardrail); the
     home/settings/menu three route through the SAME generalized cache (below) into
@@ -374,8 +374,13 @@ class BarLayer:
         had no context-X under the finger."""
         ws = self.ws
         if where == "app":
-            return ws.sys_canvas is ws.canvas
-        return where == "tool" and not getattr(ws, "app_full_canvas", False)
+            return ws.sys_canvas is ws.canvas and not _ui_draw.depth()[0]
+        if where != "tool" or getattr(ws, "app_full_canvas", False):
+            return False
+        # Under a theme's look a tool's strip on a canvas that IS the system
+        # one is the look's bar, the one every app shows (docs/look_2026-10.md
+        # step 27a).
+        return not (ws.sys_canvas is ws.canvas and _ui_draw.depth()[0])
 
     def _bar_canvas(self, where, game=None):
         """`where`'s canvas; `game` is `_zone_is_game(where)` where the caller
@@ -756,7 +761,11 @@ class BarLayer:
                     zone = c[1]
         if zone is None:
             return
+        back = self.draws_back(where)
         if tool:
+            if back:
+                self._paint_back_title(cv, zone, self._title(where), bar, game)
+                return
             if looked:
                 self._paint_look_cell(cv, where, "title", zone, None, bar, False)
                 return
@@ -765,37 +774,107 @@ class BarLayer:
             return
         owner = self._zone_owner(where)
         if owner is not None:
-            title = getattr(owner, "back_title", None) if looked else None
+            title = getattr(owner, "back_title", None) if back else None
             if title:
-                self._paint_back_title(cv, zone, title, bar)
+                self._paint_back_title(cv, zone, title, bar, game)
                 return
+            if back:
+                self._paint_back_title(cv, zone, None, bar, game)
+                zone = self.past_back(zone, game)
             owner.draw_zone(cv, zone)
 
-    def draws_back(self, where):
-        """Whether `where`'s bar draws its owner's back chevron and title
-        (`back_title`): under a theme's depth, outside a window."""
-        return bool(_ui_draw.depth()[0]) and not self._in_window(where)
+    # -- the way back (docs/look_2026-10.md step 27a) --------------------------
+    #
+    # Back goes one level; a window's X closes it. A bar shows the way back
+    # wherever there is somewhere to go (`_way_back`): as the back chevron at
+    # the head of its zone, or as the `close` widget's X where its layout
+    # places one (the themes without a look). The chevron, Esc and B do the
+    # same thing.
 
-    def _paint_back_title(self, cv, r, title, bar):
-        """A page's place in the bar under the theme's look (DESIGN.md, Bar):
-        the back chevron in the zone's first square, its tap the owner's,
-        then the page's title in the `title` face, in the chrome ink."""
+    def _way_back(self, where):
+        """Whether `where` has somewhere to go back to. The desk is desktop
+        mode's floor and never has; the home has where the back-stack is
+        deeper than its mode's floor -- console mode on a P4, whose desk waits
+        beneath it -- and not where it is the floor."""
+        if where == "desk":
+            return False
+        if where == "home":
+            wm = self.ws.wm
+            return wm.stack.depth() > wm.floor()
+        return True
+
+    def draws_back(self, where):
+        """Whether `where`'s bar draws the back chevron at the head of its
+        zone: where it has a way back and its bar places no `close`, outside
+        a window (whose title strip carries close)."""
+        return (not self._in_window(where) and self._way_back(where)
+                and self.cell(where, "close") is None)
+
+    def _back_w(self, game):
+        """The width the chevron takes at the head of a zone: its square and
+        the bar's 2-pixel pitch, what the X it replaces took."""
+        u = 1 if game else _layout_base.unit()
+        return 18 * u
+
+    def past_back(self, zone, game=False):
+        """`zone` less the chevron at its head: the rect its owner draws and
+        hit-tests in when the bar draws the way back."""
+        bw = self._back_w(game)
+        return (zone[0] + bw, zone[1], max(0, zone[2] - bw), zone[3])
+
+    def back_rect(self, where):
+        """The chevron's tap target on `where`'s canvas, (x, y, w, h): the head
+        of its zone; None where the bar draws no chevron."""
+        if not self.draws_back(where):
+            return None
+        got = self.cell(where, "zone")
+        if got is None:
+            return None
+        bar, (x, y, w, h) = got
+        return (bar[1][0] + x, bar[1][1] + y,
+                min(w, self._back_w(self._zone_is_game(where))), h)
+
+    def go_back(self, where):
+        """The chevron's tap: back one level from `where` -- what Esc and B
+        do there."""
+        ws = self.ws
+        if where == "home":
+            ws.open_desk()
+        elif where == "app":
+            ws.app_back()
+        elif where == "tool":
+            ws._exit_to_caller()
+        elif where == "settings":
+            ws.settings_layer.back()
+        else:
+            ws.exit()
+        ws._dirty = True
+
+    def _paint_back_title(self, cv, r, title, bar, game=False):
+        """A page's place in the bar (DESIGN.md, Bar): the back chevron in
+        the zone's first square, then the page's title (None: none) in the
+        `title` face, in the chrome ink."""
         ws = self.ws
         ink = ws.theme_colors["chrome_ink"]
         x, _y, w, _h = r
         thick = bar[3]
-        u = _layout_base.unit()
+        u = 1 if game else _layout_base.unit()
         side = 16 * u
         gy = (thick - side) // 2
         if not ws.draw_icon("back", (x, gy, side, side), ink, cv):
             ws._glyph("arr_l", (x, gy, side, side), ink, cv, u)
+        if not title:
+            return
         tf = _ui_draw.font("title")
-        fs = ws.layout.fs
-        sc = max(fs, (16 * fs) // max(1, tf[2]))     # a heading, 16 rows at the scale
+        fs = 1 if game else ws.layout.fs
+        sc = 1 if game else max(fs, (16 * fs) // max(1, tf[2]))   # a heading, 16 rows
         was = _ui_draw.print_font(tf[0])
         tx = x + side + 6 * u
-        cv.print_scaled(_ui_draw.print_cut(title, max(0, x + w - tx), sc), tx,
-                        (thick - tf[2] * sc) // 2, ink, sc)
+        s = _ui_draw.print_cut(title, max(0, x + w - tx), sc)
+        if game:                       # the fixed 320x240 strip: the face's own size
+            cv.print(s, tx, (thick - tf[2]) // 2, ink, 1)
+        else:
+            cv.print_scaled(s, tx, (thick - tf[2] * sc) // 2, ink, sc)
         if was is not None:
             _ui_draw.print_font(was)
 
@@ -903,18 +982,9 @@ class BarLayer:
         return _TITLES.get(where, "")
 
     def _show_x(self, where):
-        """The context X: wherever something is beneath the surface. The desk
-        is desktop mode's floor and never has one; the home has one when the
-        back-stack is deeper than its mode's floor -- console mode on a P4,
-        whose desk waits beneath it -- and none where it is the floor."""
-        if where == "desk":
-            return False
-        if where == "settings" and self.draws_back(where):
-            return False              # its back chevron leads out instead
-        if where == "home":
-            wm = self.ws.wm
-            return wm.stack.depth() > wm.floor()
-        return True
+        """The `close` widget's X, where a layout places one: wherever there
+        is a way back (`_way_back`)."""
+        return self._way_back(where)
 
     def _home_ground(self, cv, where, x, y):
         """Paint the handheld home's backdrop under its bar where the look
@@ -994,7 +1064,7 @@ class BarLayer:
                              ws.layout.cs, dy, True, False)
             cv.camera(0, 0)
         else:
-            cv.print(text, x, by + 3 + dy, th["chrome_ink_dim"], 1)
+            cv.print(text, x, by + 3 + dy, th["chrome_ink"], 1)
         if text != self._clock_drawn:
             self._clock_drawn = text
             self._strip_moved(cv, x, y, w, h)
@@ -1028,7 +1098,7 @@ class BarLayer:
     def handle_bar_tap(self, where, px, py):
         """The zoned bars' tap slice (Stage 4), shared by every screen they draw
         on: the clock Easter egg, the ≡ system menu, the wifi status icon, and
-        the context X are OS-owned, IDENTICAL wherever a bar shows them (same as
+        the X (where a layout places one) are OS-owned, IDENTICAL wherever a bar shows them (same as
         the draw), checked first so a tap on any never falls through to the lent
         zone. Anything else on a bar routes to the active app's zone_tap over its
         lent zone. Returns True iff a bar (or the app's zone) consumed the tap.
@@ -1079,7 +1149,7 @@ class BarLayer:
         if name in ("clock", "menu", "wifi", "battery"):
             ws.widget_tap(name)
             return True
-        # Context X (Stage 5, spec Section 9): tap to EXIT the active surface back toward
+        # The X, where a layout places `close` (spec Section 9): tap to EXIT the active surface toward
         # its mode's root. On the home it leaves console mode for the desk beneath
         # (docs/shell_layout_2026-10.md §3); where the home is the floor it draws no X
         # and is not tested. A running TOOL (Part 4) pops to its RUN caller (spec
@@ -1095,6 +1165,13 @@ class BarLayer:
                 ws.exit()
             return True
         owner = self._zone_owner(where)
+        if zone is not None and self.draws_back(where):
+            game = self._zone_is_game(where)
+            if zone[0] <= px < zone[0] + self._back_w(game):
+                self.go_back(where)
+                return True
+            if owner is not None and not getattr(owner, "back_title", None):
+                zone = self.past_back(zone, game)
         # Pass the SAME lent rect the draw used, in the bar coordinates (px, py) are
         # in now, so an app's zone_tap hit-tests its icons at the exact positions
         # draw_zone drew them wherever the bar sits.

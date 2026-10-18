@@ -197,7 +197,7 @@ an imported PICO-8 cart always carries its own 30 or 60.
   (~700ms)** — a quick tap reaches your cart as a plain key; a sustained hold shows a
   small progress toast and returns to whoever launched the cart (the launcher, or
   the editor's PLAY). A `"tool"`/`"app"` cart runs WITH a minimal console bar
-  (title + status + ✕) instead, and exits via that ✕.
+  (the back chevron, its title and the status) instead, and exits via that back.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
   `q e`); text mode delivers EVERY letter to `key()`/`keyp()`.
@@ -208,8 +208,8 @@ an imported PICO-8 cart always carries its own 30 or 60.
   (see [State & utility](#state--utility)) to a spare key or a small on-screen
   affordance you draw. Letter Blitz models this with a tap-anytime ✕ in the top-right
   corner (above its HUD, clear of the play area) — a touch exit never depends on the
-  keyboard. (A `"tool"`/`"app"` cart already runs with the console's own context-✕
-  bar, so it's exitable without this; but `quit()` works for any cart.)
+  keyboard. (A `"tool"`/`"app"` cart already runs with the console's own bar and its
+  back, so it's exitable without this; but `quit()` works for any cart.)
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.
@@ -864,7 +864,7 @@ shows a **RUN** button beside it, and the console wraps it in a manifest on the
 spot and runs it like any other cart.
 
 Its screen is the **text console**: a scrollback, a prompt line and the same
-symbol palette the Code tab has, with the top bar's X to leave.
+symbol palette the Code tab has, with the top bar's back to leave.
 
 ```python
 # hello.py, in NOTES

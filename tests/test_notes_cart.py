@@ -242,14 +242,14 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_shelf(tmp_path):
     assert ws.player.ns["ed"] is None
 
 
-def test_the_bar_x_exits_and_writes_the_open_note(tmp_path):
+def test_the_bar_back_exits_and_writes_the_open_note(tmp_path):
     ws = build_ws(tmp_path)
     ns = _open_notes(ws)
     _new(ws, ns)
     name = ns["ed"].name()
     for ch in "not lost":
         ns["ed"].key(ord(ch))
-    xb = ws.layout.context_x_btn                # the OS bar's context-X
+    xb = ws.bar_layer.back_rect("tool")         # the OS bar's back
     ws.pointer.place(xb[0] + 2, xb[1] + 2)
     ws.pointer.click = True
     ws.handle_pointer()                         # the ROUTER owns the bar contract

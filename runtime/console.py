@@ -2197,7 +2197,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
-        WITH a minimal bar (title + status + context-X) so it's EXITABLE (Part 4), unlike a
+        WITH a minimal bar (back + title + status) so it's EXITABLE (Part 4), unlike a
         GAME which owns the full 320x240 with NO chrome and exits via hold-BACKSPACE. This
         is the bar-visibility-by-type rule: game -> hide the bar; tool/app -> show it. The
         Player reads it to decide whether to draw/route the tool bar and to suppress its
@@ -2222,7 +2222,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _tool_bar_tap(self, px, py):
         """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
-        context-X exits the tool, the wifi icon opens the Settings WIFI panel, the ≡ opens
+        bar's back exits the tool, the wifi icon opens the Settings WIFI panel, the ≡ opens
         the system menu, the clock its calendar. Returns True iff the bar consumed the tap
         (so the tool underneath doesn't also act on it). Reuses handle_bar_tap("tool") --
         owner is None for "tool", so a non-button tap falls through to the tool."""
@@ -2345,7 +2345,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #
     # On the fullscreen tiers a registered app shows the minimal exitable bar
-    # (title + status + the context-X, spec shell_ux_v1.md Section 9), the "app"
+    # (Moy, back, title and status, spec shell_ux_v1.md Section 9), the "app"
     # strip: the "tool" strip's drawing, on the SYSTEM canvas the app draws on
     # (bar_layer._zone_is_game). An app that drew or routed its own bar and
     # forgot either half became UNEXITABLE, silently, on device only.
@@ -2356,14 +2356,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # including one that never heard of the bar -- pinned BEHAVIOURALLY (not by a
     # call-site count) in tests/test_app_api.py: a stub app that draws no strip
     # and routes no bar tap must still show the strip's pixels and still exit on
-    # its context-X, and so must all seven shipped apps, parametrized.
+    # its back, and so must all seven shipped apps, parametrized.
     #
     # SCOPE, deliberately narrow: this owns the "app" strip for REGISTERED APPS
     # ONLY. The other strip kinds -- "menu" (the Editor surfaces), "settings",
     # "home"/"projects" (launcher_layer), "desk" (wm_windowed), "tool" (a running
     # TOOL CART's bar, _draw_tool_bar above) and "desktop" (the running cart's
     # crash chrome) -- stay with their surfaces. Collapsing the kinds would pick one and
-    # silently break the context-X on the rest.
+    # silently break the way back on the rest.
     def _app_bar_route(self, app, px, py):
         """Route a click at (px, py) against registered `app`'s bar band.
 
@@ -2375,13 +2375,32 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         the app's layout."""
         if not self.bar_layer.bar_at("app", px, py):
             return None
-        # The context-X in that band is an EXIT path, so hard-commit first: an
+        # The back in that band is an EXIT path, so hard-commit first: an
         # app that persists on an idle debounce (#111) would otherwise lose the
         # last edit. Optional -- forgetting it costs an autosave, never the exit.
         commit = getattr(app, "commit", None)
         if commit is not None:
             commit()
         return bool(self.bar_layer.handle_bar_tap("app", px, py))
+
+    def app_back(self, app=None):
+        """Back one level on registered `app` (None: the one on top) -- the
+        bar's chevron, Esc and B (docs/look_2026-10.md step 27a): the app's
+        own `back()` steps back a page of it and answers True; on its first
+        page (False, or an app with no pages) the app is left for whoever
+        opened it, committed first as the bar's exit always was."""
+        if app is None:
+            app = self._apps_by_id.get(self.wm.top_kind())
+            if app is None:
+                return
+        self._dirty = True
+        back = getattr(app, "back", None)
+        if back is not None and back():
+            return
+        commit = getattr(app, "commit", None)
+        if commit is not None:
+            commit()
+        self._exit_to_caller()
 
     def open(self, cart=None):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
@@ -3404,7 +3423,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
+        # B and Esc on a registered app's fullscreen surface are the bar's
+        # back chevron (`app_back`): a page of the app, else out of it.
+        _apps = (self._apps_by_id if pressed and not self.windowed_chrome
+                 and (i.pressed("b") or i.pressed("stop")) else None)
         for layer in self.wm.visible_stack_rev():
+            if _apps is not None and layer.id in _apps:
+                self.app_back(layer)
+                return
             if layer.handle_input(i):
                 return
 

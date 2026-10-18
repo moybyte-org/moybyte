@@ -98,7 +98,8 @@ def test_a_minimal_bars_title_is_in_the_chrome_ink(ws):
 def test_the_strip_draws_in_the_inks_the_theme_names(ws):
     """A role may be an index of the shell's block (64-127: a theme's RGB
     colour), and the strip's cells draw in exactly the role they name -- the
-    title the bar's ink, the clock its dim ink, the menu glyph its ink -- for
+    title, the clock and the menu glyph the bar's bright ink (the clock's
+    since docs/look_2026-10.md step 27a, the title's beside it) -- for
     every theme and mode. (The inks were masked to 6 bits, so Moy's,
     Blocks' and Contrast's Calc bar on a handheld drew another colour.)"""
     placed = 0
@@ -108,7 +109,7 @@ def test_the_strip_draws_in_the_inks_the_theme_names(ws):
             th = ws.theme_colors
             mp = ui.chrome_inks(th, NAMES)
             for kind, s, role in (("title", "Calc", "chrome_ink"),
-                                  ("clock", "14:32", "chrome_ink_dim")):
+                                  ("clock", "14:32", "chrome_ink")):
                 ops = mp.chrome_strip_cell(kind, (30, 0, 120, 18), 1, 0, s, False)
                 assert ops and {op[1] for op in ops} == {th[role]}, (name, variant, kind)
             ops = mp.chrome_strip_cell("menu", (0, 0, 28, 18), 1, 0, None, False)

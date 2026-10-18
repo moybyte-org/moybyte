@@ -33,7 +33,7 @@
   },
   "layout": {
     "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
-               "right": ["close", "wifi", "battery", "clock"] }]
+               "right": ["wifi", "battery", "clock"] }]
   },
   "look": {
     "fam": "atkinson", "w_semi": 700, "w_bold": 800,

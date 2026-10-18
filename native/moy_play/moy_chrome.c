@@ -343,7 +343,7 @@ void moy_chrome_strip_crash(moy_chrome_list_t *l, int cw, int edit, const char *
     icon(l, "map", 2 + 4 * BAR_STRIDE, BAR_Y, 0);
     icon(l, "blocks", 2 + 5 * BAR_STRIDE, BAR_Y, 0);
     icon(l, "music", 2 + 6 * BAR_STRIDE, BAR_Y, 0);
-    print(l, MOY_TEXT_PY, clock, -1, BAR_CLOCK_X, 3, ink(MOY_INK_CHROME_DIM), 1);
+    print(l, MOY_TEXT_PY, clock, -1, BAR_CLOCK_X, 3, ink(MOY_INK_CHROME), 1);
     icon(l, wifi, BAR_WIFI_X, BAR_Y, 0);
     icon(l, "batt", BAR_BATT_X, BAR_Y, 0);
 }
@@ -371,7 +371,8 @@ void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y,
     } else if (strcmp(kind, "clock") == 0 || strcmp(kind, "title") == 0
                || strcmp(kind, "text") == 0) {
         // One line on its bar's text row; a title cut to the cell's 8px
-        // columns; on a side bar the clock's hours over its minutes.
+        // columns; on a side bar the clock's hours over its minutes. The
+        // title and the clock are the bar's bright ink, a text the dim.
         const char *t = s != NULL ? s : "";
         bool title = strcmp(kind, "title") == 0, clock = strcmp(kind, "clock") == 0;
         int lines = 1, max = -1, ty = across ? y : 3 + dy;
@@ -389,7 +390,7 @@ void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y,
         }
         for (int i = 0; i < lines; i++) {
             print(l, MOY_TEXT_PY, t + 3 * i, max, x, ty + i * (h / 2),
-                  ink(title ? MOY_INK_CHROME : MOY_INK_CHROME_DIM), 1);
+                  ink(title || clock ? MOY_INK_CHROME : MOY_INK_CHROME_DIM), 1);
         }
     } else if (strcmp(kind, "separator") == 0) {
         if (across) {

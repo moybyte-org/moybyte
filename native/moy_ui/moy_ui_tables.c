@@ -827,7 +827,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  },\012"
     "  \"layout\": {\012"
     "    \"bars\": [{ \"edge\": \"top\", \"size\": 18, \"left\": [\"menu\", \"chips\", \"zone\"],\012"
-    "               \"right\": [\"close\", \"wifi\", \"battery\", \"clock\"] }]\012"
+    "               \"right\": [\"wifi\", \"battery\", \"clock\"] }]\012"
     "  },\012"
     "  \"look\": {\012"
     "    \"focus\": { \"style\": \"edge\", \"card\": \"lift\", \"small\": \"underline\" },\012"
@@ -912,7 +912,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  },\012"
     "  \"layout\": {\012"
     "    \"bars\": [{ \"edge\": \"top\", \"size\": 18, \"left\": [\"menu\", \"chips\", \"zone\"],\012"
-    "               \"right\": [\"close\", \"wifi\", \"battery\", \"clock\"] }]\012"
+    "               \"right\": [\"wifi\", \"battery\", \"clock\"] }]\012"
     "  },\012"
     "  \"look\": {\012"
     "    \"fam\": \"atkinson\", \"w_semi\": 700, \"w_bold\": 800,\012"
@@ -983,7 +983,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "  } },\012"
     "  \"layout\": {\012"
     "    \"bars\": [{ \"edge\": \"top\", \"size\": 18, \"left\": [\"menu\", \"chips\", \"zone\"],\012"
-    "      \"right\": [\"close\", \"wifi\", \"battery\", \"clock\"] }]\012"
+    "      \"right\": [\"wifi\", \"battery\", \"clock\"] }]\012"
     "  },\012"
     "  \"look\": {\012"
     "    \"fam\": \"atkinson\", \"w_med\": 600, \"w_semi\": 700, \"w_bold\": 800,\012"
@@ -1031,7 +1031,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4800, 4213, 4038};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4791, 4204, 4029};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {

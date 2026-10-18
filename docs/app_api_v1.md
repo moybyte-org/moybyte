@@ -65,10 +65,12 @@ Everything else follows from the registration — **apps never edit console.py**
   `.layout` generically, so the app reflows per window);
 - the resize minimum (the ui.py min-size convention);
 - keyboard text mode after open (for typing apps);
-- the exitable bar itself — the strip draw and its context-X tap are the
+- the exitable bar itself — the strip draw and its back chevron's tap are the
   router's, not the app's (see "The bar contract" below);
-- exit via the tool bar's context-X / `ws.exit()` — return-to-caller is the
-  WM's, not the app's.
+- exit via the bar's back, Esc or B (`ws.app_back`) / `ws.exit()` —
+  return-to-caller is the WM's, not the app's. An app with pages of its own
+  implements `back(self)`: it steps back one page and answers True, or
+  answers False on its first page, and the host leaves the app.
 
 ## What an app is HANDED: the AppContext (2026-08-19)
 
@@ -142,7 +144,7 @@ store write for an app nobody edited — a write is a floor plus the payload
 (#154), and the floor alone is more than a frame.
 
 `commit()` (see "The bar contract" below) is its forced twin for an explicit
-exit GESTURE: the bar's context-X, or the WM strip's X on the windowed tier.
+exit GESTURE: the bar's back, or the WM strip's X on the windowed tier.
 
 This replaced a ladder in `go_home()` that named four apps and four different
 verbs. An app persisting on a debounce that nobody added to that list lost the
@@ -173,8 +175,8 @@ the app's Python.
 ## The bar contract is the HOST's, not yours (2026-08-19)
 
 An app draws **no bar at all**. On the fullscreen tiers the router paints the
-minimal exitable strip (title + status + the context-X, spec `shell_ux_v1.md`
-§9) *after* your `draw()` — chrome over content — and routes a tap in that band
+exitable strip (the Moy button, the back chevron, your title and the status,
+spec `shell_ux_v1.md` §9) *after* your `draw()` — chrome over content — and routes a tap in that band
 *before* your `handle_pointer()`; in the windowed desk world it suppresses the
 strip, because the WM's title strip carries the close there. You get all of
 that from `register_app` alone, including in an app that has never heard of the
@@ -185,7 +187,7 @@ the right order, and an app that forgot either became **unexitable** — silentl
 on device only. Seven apps carried the same two lines. `runtime/console.py`'s
 `_app_bar_route` owns them now, pinned behaviourally by
 `tests/test_app_api.py` (a stub app that draws no strip and routes no bar tap
-must still show the strip and still exit on its X, and so must all seven
+must still show the strip and still exit on its back, and so must all seven
 shipped apps, through the same assertion).
 
 Two things follow for an app author:
@@ -199,7 +201,7 @@ Two things follow for an app author:
   heads the same way, from `layout_base.content_of`, the function the bar
   itself is placed by.
 - **Optional `commit(self)`** — the host calls it just before routing a bar
-  tap, because the X there is an exit path. An app that persists on an idle
+  tap, because the back there is an exit path. An app that persists on an idle
   debounce (#111) implements it (`storybook_app` does); forgetting it costs an
   autosave, never the exit.
 

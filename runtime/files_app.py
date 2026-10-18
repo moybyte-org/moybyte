@@ -597,18 +597,24 @@ class FilesAppLayer(ListShellApp):
             self._act("DEL")
         self._key = k
         if inp.pressed("b"):
-            self._back()
+            self.back()
         if self._ui.keys(inp):
             self._damage.all()
         return True
 
-    def _back(self):
+    def back(self):
+        """Back one level (B, Esc, the bar's chevron): a dialog closes, a
+        one-column list goes back to the places. False on the places: the
+        host leaves the app."""
         if self.dialog is not None:
             self._close_dialog()
         elif not self.layout.two and self.level == "files":
             self.level = "places"
             self._focus = "Places"
+        else:
+            return False
         self._damage.all()
+        return True
 
     def handle_pointer(self, px, py, click):
         if self._ui.point(px, py, click, bool(getattr(self._surf.pointer(), "down", False))):

@@ -686,12 +686,19 @@ class PaintAppLayer:
         self.display = None
         self._damage.all()
 
+    def back(self):
+        """Back one level (B, Esc, the bar's chevron): a mode over the
+        canvas goes back to painting. False while painting: the host leaves
+        the app."""
+        if self.mode == "paint":
+            return False
+        self.mode = "paint"
+        self._damage.all()
+        return True
+
     def handle_input(self, inp):
-        if inp.pressed("b"):
-            if self.mode != "paint":
-                self.mode = "paint"
-            else:
-                self._action(7)
+        if inp.pressed("b") and not self.back():
+            self._action(7)
             self._damage.all()
         return True
 

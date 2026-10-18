@@ -234,13 +234,12 @@ buttons and became an OS shell with an app-populated region.
 - **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
   opening its component (the WIFI panel, the calendar, the power rows) as a popover
   in desktop mode and fullscreen in console mode (`docs/shell_layout_2026-10.md`
-  §8) — **plus a context X** that exits the
-  current app (§9). Apps cannot draw here; the right zone is how the OS stays present
+  §8). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
   320×240 and every input but Super, which pauses it (§9). The bar is authoring/system chrome; play is sacred.
-  (A running *tool/app* cart is the exception: it keeps a minimal bar — title +
-  status + the context X — so it is always exitable by tap, §9.)
+  (A running *tool/app* cart is the exception: it keeps a minimal bar — the
+  back chevron, its title and the status — so it is always exitable by tap, §9.)
 
 This is exactly the macOS menu-bar deal: one bar, always in the same place, whose left
 half belongs to whoever is frontmost and whose right half is the system's — except
@@ -290,13 +289,14 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 - **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen; exit
   returns to the Editor **on the tab you were on**. Test-play is a round trip, not a
   context switch.
-- **The X** backs out one level (owner, 2026-10-14): to wherever the Editor
-  was opened from, the home's tab and card included. Another project is the
+- **The back chevron** at the head of the zone backs out one level (owner,
+  2026-10-14): to wherever the Editor was opened from, the home's tab and
+  card included. Another project is the
   home's Make tab (§4); the bar has no way there of its own.
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
-stood for. Every hard exit (PLAY, a window/context-X close, a workspace
+stood for. Every hard exit (PLAY, a window close or the bar's back, a workspace
 swap, going home) hard-commits whichever tab was showing, on top of the idle
 debounce -- exactly what SAVE used to do, just automatic. Switching tabs OWES the
 commit rather than taking it inside the tap (#154): the frame that paints the
@@ -370,18 +370,27 @@ either restricts the code editor or corrupts kid code — both worse.
 
 ## 9. The exit model — taskbar-context-dependent
 
-The rule in one line: **taskbar shown → the X on its bar exits (a tap);
-fullscreen game → hold-BACKSPACE exits.** The X is the `close` widget of a
-theme's layout, which every layout places (`docs/shell_layout_2026-10.md` §9).
+The rule in one line: **back goes one level, a window's X closes it
+(owner, 2026-10-18); taskbar shown → the back on its bar exits (a tap);
+fullscreen game → the pause menu's Quit, or hold-BACKSPACE.** On a console
+bar (one screen stack, no windows) the way back is the **back chevron** at
+the head of the bar's zone, after the Moy button: the bar draws it wherever
+there is somewhere to go back to and its layout places no `close` widget
+(`BarLayer.draws_back`; the shipped themes place none, a theme without a
+look keeps the X, `docs/shell_layout_2026-10.md` §9). The chevron, Esc and B
+do the same thing, and on an app's first page they leave it
+(`Workstation.app_back`; docs/look_2026-10.md step 27a). On the desk the X
+lives only in a window's title strip and closes the window.
 
 | App | Presentation | Exit affordance | BACKSPACE is… |
 |---|---|---|---|
-| Launcher (back-stack root) | taskbar | **no X** where it is its mode's floor (nothing beneath it); on the windowed tier's console mode, X → back to the desk beneath | a plain key |
-| Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **no X** — the PLAY icon enters console mode | a plain key |
-| Editor | taskbar | X → pop back, to where it was opened from | a plain key |
-| Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
-| Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2); Super → the pause menu's Quit | a game key on a quick tap |
-| Running tool/app cart | minimal bar (title + status + X) | X → return to caller | a plain key — delete in text fields |
+| Launcher (back-stack root) | taskbar | **no back** where it is its mode's floor (nothing beneath it); on the windowed tier's console mode, back → the desk beneath | a plain key |
+| Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **none** — the PLAY icon enters console mode; a window's X closes it | a plain key |
+| Editor | taskbar | back → pop back, to where it was opened from | a plain key |
+| Settings (incl. wifi setup) | taskbar | back, Esc or B → a page of it, else out of it | a plain key — **delete in the password field just works** |
+| Running game | fullscreen | Super → the pause menu's Quit; **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |
+| Registered app (Calc, Files, …) | the bar: Moy, back, title, status | back, Esc or B → a page of it, else return to caller | a plain key — delete in text fields |
+| Running tool/app cart | minimal bar (back + title + status) | back → return to caller | a plain key — delete in text fields |
 
 Why this kills the keyboard special cases: because taskbar apps exit via a **tap**,
 BACKSPACE is never reserved in them — it stays an ordinary key everywhere a taskbar
@@ -404,7 +413,7 @@ the console's hold gesture can never fire there — such a cart provides its **o
 exit by calling **`quit()`** (the one post-freeze addition to `docs/moy_cart_api.md`),
 bound to a spare key or an on-screen affordance; Letter Blitz models it with a
 tap-anytime ✕. (The plan's firmware-independent triple-tap alias was dropped after
-on-device testing — tools/apps keep their bar X, so no cart is ever
+on-device testing — tools/apps keep their bar's back, so no cart is ever
 strandable-but-for-reboot.)
 
 **The system key (Super)** is the console's from every surface, whatever holds
@@ -432,7 +441,7 @@ privileged verbs: wifi, brightness, time, OTA — the `make_system_api` surface 
 `shell_architecture_v1.md` §2.2.
 
 Wifi setup lives inside it, and here the exit model (§9) pays off directly: Settings
-is a taskbar app, so it exits via the X, so its password field's BACKSPACE=delete
+is a taskbar app, so it exits via the bar's back, so its password field's BACKSPACE=delete
 works with no carve-out. The wifi keyboard problem is not solved by Settings — it is
 *dissolved* by Settings being an ordinary taskbar app under §9's rule.
 

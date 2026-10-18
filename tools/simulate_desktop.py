@@ -221,8 +221,8 @@ def run_live(driver, dt, scale):
             elif ev.type == pygame.KEYDOWN and ev.key in super_keys:
                 driver.system_key()
             elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE \
-                    and driver.menu_open():
-                driver.escape()           # a menu's Esc closes it and steps back
+                    and driver.takes_escape():
+                driver.escape()           # a menu closes, Settings or an app steps back
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mouse_down = True
                 driver.touch(ev.pos[0] // scale, ev.pos[1] // scale)   # tap

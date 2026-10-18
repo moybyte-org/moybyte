@@ -2475,7 +2475,7 @@ class Player:
             self._draw_error_panel()
             ws._draw_cart_bar()                 # unified top bar (crash tool switcher)
         elif self._is_tool:                     # #75: cached at start(); error is None here
-            # Part 4: a TOOL/APP runs WITH a minimal bar (title + status + context-X) so
+            # Part 4: a TOOL/APP runs WITH a minimal bar (back + title + status) so
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
             # type rule keys on the running cart's manifest type (ws._running_cart_shows_bar).
             ws._draw_tool_bar()

@@ -424,7 +424,7 @@ def test_the_chain_is_capped_and_a_cycle_is_refused(tmp_path):
 
 LAY = TH["layout"]
 # The default seed's (Moy's) bar.
-TODAY = ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"), ())
+TODAY = ("top", 18, ("menu", "chips", "zone"), (), ("wifi", "battery", "clock"), ())
 
 
 def _bar(edge="top", **kw):
@@ -465,7 +465,7 @@ def test_the_default_seed_sets_todays_bar_and_every_seed_inherits_it():
             assert moy_ui.theme_layout(name) == (False, (TODAY,)), name
     for name in ("moy", "blocks", "contrast"):
         assert moy_ui.theme_layout(name) == (False, (
-            ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"),
+            ("top", 18, ("menu", "chips", "zone"), (), ("wifi", "battery", "clock"),
              ()),)), name
     assert "layout" not in TH["reserved"]
     assert set(LAY["required"]) <= set(LAY["widgets"])

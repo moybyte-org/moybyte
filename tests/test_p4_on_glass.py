@@ -367,10 +367,10 @@ def test_projects_opens(board):
     assert "projects" in st.get("order", ())
 
 
-def test_play_parks_the_windows_and_the_x_brings_them_back(board):
+def test_play_parks_the_windows_and_the_back_brings_them_back(board):
     """Console mode on glass (docs/shell_layout_2026-10.md §3): the desk's
     PLAY parks the open windows and truncates the route to the home; the
-    home's X, tapped where the bar draws it, puts every window back; the
+    home's back, tapped where the bar draws it, puts every window back; the
     HOME key shows the desktop and brings the windows back."""
     before = board.state().get("order")
     assert before, "no window open to park"
@@ -378,7 +378,8 @@ def test_play_parks_the_windows_and_the_x_brings_them_back(board):
     st = board._settle(lambda s: s.get("desk") is False, 0.5)
     assert st.get("stack") == ["launcher"], st.get("stack")
     assert not st.get("order") and st.get("parked") == before, st
-    x, y, w, h = board.pyval("ws.layout.context_x_btn", strict=True)
+    x, y, w, h = board.pyval("ws.bar_layer.back_rect('home') or ws.layout.context_x_btn",
+                             strict=True)
     board.tap(x + w // 2, y + h // 2)
     st = board._settle(lambda s: s.get("desk") is True, 0.5)
     assert st.get("order") == before and not st.get("parked"), st

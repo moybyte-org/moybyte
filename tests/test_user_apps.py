@@ -504,11 +504,12 @@ def test_a_responsive_run_gives_the_bar_back_the_responsive_geometry(tmp_path):
     _frames(ws)
     assert ws.bar_layer._zone_is_game("tool") is False
     assert ws.app_bar_h() == ws.layout.status_h
-    # The X is where the RESPONSIVE layout puts it (right-aligned on an 800px
-    # canvas), not where the frozen 320-wide cluster would have left it.
-    assert ws.layout.context_x_btn[0] > _bar._ZONE_CONTEXT_X[0]
-    _tap_bar(ws, ws.layout.context_x_btn)
-    assert not ws.wm.top_is_player(), "the responsive strip's X did not exit"
+    # The back is where the RESPONSIVE layout puts it (the head of its zone,
+    # past the Moy tile), in the responsive bar's rows.
+    back = ws.bar_layer.back_rect("tool")
+    assert back is not None and back[3] > _bar._STATUS_H - 2
+    _tap_bar(ws, back)
+    assert not ws.wm.top_is_player(), "the responsive strip's back did not exit"
 
 
 def test_the_run_canvas_is_given_back_on_exit(tmp_path):

@@ -868,7 +868,10 @@ class GetCartsAppLayer(ListShellApp):
         self.status = ("REMOVED " + row["cart"]["name"]).upper()
         self._go("list")
 
-    def _back(self):
+    def back(self):
+        """Back one level (B, Esc, the bar's chevron, the page's own back):
+        a licence declined, a fetch or a pick cancelled, a cart's page back
+        to the list. False on the list: the host leaves the app."""
         ph = self.phase
         if ph == "licence":
             self._press("NO")
@@ -877,6 +880,9 @@ class GetCartsAppLayer(ListShellApp):
         elif ph in ("cart", "done", "failed"):
             self.status = ""
             self._go("list")
+        else:
+            return False
+        return True
 
     # -- input -----------------------------------------------------------------
 
@@ -921,7 +927,7 @@ class GetCartsAppLayer(ListShellApp):
             if ph != "cart" or self._enabled(verb):
                 self._press(verb)
         elif i.pressed("b"):
-            self._back()
+            self.back()
         return True
 
     def _scroll_licence(self, d):
@@ -999,7 +1005,7 @@ class GetCartsAppLayer(ListShellApp):
         if verb == "check":
             self._check()
         elif verb == "back":
-            self._back()
+            self.back()
         elif verb == "btn" and (self.phase != "cart" or self._enabled(arg)):
             self._press(arg)
         return True

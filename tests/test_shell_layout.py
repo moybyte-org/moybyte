@@ -28,8 +28,8 @@ TODAY = FALLBACK[0]
 # Today's bar in console mode: the taskbar's chips have no value there.
 TODAY_C = TODAY[:3] + ((),) + TODAY[4:]
 # The default seed's (Moy's) bar, and in console mode.
-MOY = ("top", 18, ("menu", "chips", "zone"), (), ("close", "wifi", "battery", "clock"), ())
-MOY_C = ("top", 18, ("menu", "zone"), (), ("close", "wifi", "battery", "clock"), ())
+MOY = ("top", 18, ("menu", "chips", "zone"), (), ("wifi", "battery", "clock"), ())
+MOY_C = ("top", 18, ("menu", "zone"), (), ("wifi", "battery", "clock"), ())
 ALL = shell_layout.WIDGETS
 DESKTOP = WindowedWM.LAYOUT_CATALOGUE["desktop"]
 CONSOLE = FullscreenStackWM.LAYOUT_CATALOGUE["console"]

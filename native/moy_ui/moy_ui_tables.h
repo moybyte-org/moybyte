@@ -316,7 +316,7 @@ extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_BAR_SIZE 18
 #define MOY_THEME_TEXT_MAX 24
 #define MOY_THEME_HOMES 3  // the home's arrangements, the first the default
-#define MOY_THEME_W_REQUIRED 0x7u  // a bit per widget
+#define MOY_THEME_W_REQUIRED 0x5u  // a bit per widget
 #define MOY_THEME_W_REPEATABLE 0x700u
 enum {
     MOY_THEME_W_MENU = 0,

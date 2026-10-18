@@ -402,18 +402,24 @@ class AppearanceAppLayer:
         self._refresh()
         k = getattr(inp, "last_key", 0) or 0
         if inp.pressed("b") or (self.naming and k == 27):    # Esc typed in text mode
-            self._back()
+            self.back()
         if self._ui.keys(inp):
             self._damage.all()
         return True
 
-    def _back(self):
+    def back(self):
+        """Back one level (B, Esc, the bar's chevron): the name field
+        closes, the wallpapers go back to the rows. False on the rows: the
+        host leaves the app."""
         if self.naming:
             self._close_name()
         elif self.view == "walls":
             self.view = "rows"
             self._focus = "Wallpaper"
+        else:
+            return False
         self._damage.all()
+        return True
 
     def handle_pointer(self, px, py, click):
         if self._ui.point(px, py, click, bool(getattr(self._surf.pointer(), "down", False))):

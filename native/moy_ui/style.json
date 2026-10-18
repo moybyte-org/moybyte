@@ -1083,7 +1083,7 @@
       "slots": ["left", "center", "right"],
       "widgets": ["menu", "close", "zone", "title", "clock", "wifi", "battery",
                   "chips", "text", "spacer", "separator"],
-      "required": ["menu", "zone", "close"],
+      "required": ["menu", "zone"],
       "repeatable": ["text", "spacer", "separator"],
       "slot_cap": 6,
       "widget_cap": 12,

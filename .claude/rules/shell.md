@@ -82,20 +82,23 @@ to whoever called it.
   `chrome.MIN_TAP_MM` (which boards do is pinned in `tests/test_board_toml.py`)
   — and 40px on a desk (a declared glass of 5" or more, the P4s), whose `cs` is
   its unit of 2 at chrome size 1 (docs/look_2026-10.md step 9). RIGHT
-  zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
-  the launcher root draws one only above its mode's floor -- console mode over a
-  P4's parked desk). LEFT zone = LENT to the active app (`draw_zone`):
+  zone = OS status (clock/wifi/batt). The LEFT zone opens with the **back
+  chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
+  gets its X instead): one level back, as Esc and B (`ws.app_back` for a
+  registered app, whose `back()` steps its own pages); the launcher root draws
+  one only above its mode's floor -- console mode over a P4's parked desk.
+  LEFT zone = LENT to the active app (`draw_zone`):
   the home shows the active tab's verbs on the selected card, the Editor its PROJECTS/tab-ladder/
   UNDO/REDO/PLAY icons. Icons are the theme's icon set where its look names
   one (`runtime/iconsets.py`: a smooth set's masks or the 56-slot pixel
   set), else 16×16 sprites from the editable `IconSheet` (Settings → EDIT
   ICONS). **The bar hides entirely while a GAME plays** (the cart
-  owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
+  owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
 - **Exit model (#71's BACKSPACE pause machinery is retired):** a fullscreen GAME exits on a
   sustained **hold-BACKSPACE (~700ms)** — raw-matrix mode streams the held key, a
   transient progress toast fills, the pop returns to the caller; a quick tap is a
-  plain cart key. Taskbar tools/apps exit via the context-X, so BACKSPACE stays an
+  plain cart key. Taskbar tools/apps exit via the bar's back, so BACKSPACE stays an
   ordinary key there (the wifi password field's delete works with zero
   special-casing). A `textmode(True)` game provides its OWN exit via the additive
   cart verb **`quit()`** (in text mode BACKSPACE arrives as a typed delete and the
