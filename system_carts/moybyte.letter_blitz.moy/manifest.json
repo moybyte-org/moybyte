@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 20,
+  "version": 21,
   "title": "Letter Blitz",
   "id": "moybyte.letter_blitz",
   "fps": "free",
@@ -11,6 +11,8 @@
     "keyboard",
     "touch"
   ],
+  "description": "Pop the tank showing the letter you are asked to find. No lives and no game over, just letters.",
+  "genre": "toy",
   "moybyte": {
     "type": "game",
     "system": true,

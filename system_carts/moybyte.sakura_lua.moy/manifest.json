@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 14,
+  "version": 15,
   "title": "Sakura Lua",
   "id": "moybyte.sakura_lua",
   "runtime": "lua",
@@ -10,6 +10,8 @@
     "moybyte.images",
     "moybyte.scenes"
   ],
+  "description": "Cherry blossoms drifting down a hillside, written in Lua. The twin of the Sakura wallpaper.",
+  "genre": "toy",
   "moybyte": {
     "type": "game",
     "system": true,

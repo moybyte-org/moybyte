@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 19,
+  "version": 20,
   "title": "Brick Siege",
   "id": "moybyte.brick_siege",
   "fps": "free",
@@ -10,6 +10,8 @@
   "input": [
     "buttons"
   ],
+  "description": "A top-down tank battle. Blast the enemy tanks through crumbling brick walls before they wreck your base.",
+  "genre": "action",
   "moybyte": {
     "type": "game",
     "system": true,

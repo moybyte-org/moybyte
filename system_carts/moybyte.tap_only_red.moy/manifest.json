@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Tap Only Red",
   "id": "moybyte.tap_only_red",
   "fps": "free",
@@ -10,6 +10,8 @@
   "input": [
     "touch"
   ],
+  "description": "Bubbles float up the screen. Tap only the red ones: reds in a row build a combo, any other tap is a miss.",
+  "genre": "arcade",
   "moybyte": {
     "type": "game",
     "system": true,

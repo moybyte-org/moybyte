@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 9,
+  "version": 10,
   "title": "Bullet Storm",
   "id": "moybyte.bullet_storm",
   "runtime": "lua",
   "main": "main.lua",
   "fps": "free",
   "canvas": "320x240",
+  "description": "Dodge the storm core's bullet patterns for as long as you can. Hundreds of bullets, all at once.",
+  "genre": "shooter",
   "moybyte": {
     "type": "game",
     "system": true,

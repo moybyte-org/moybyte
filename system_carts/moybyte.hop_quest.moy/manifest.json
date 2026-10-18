@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 16,
+  "version": 17,
   "title": "Hop Quest",
   "id": "moybyte.hop_quest",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
   "fps": 60,
+  "description": "Run and jump to collect every coin, then reach the flag. Fall off the bottom and you start again.",
+  "genre": "platformer",
   "moybyte": {
     "type": "game",
     "system": true,

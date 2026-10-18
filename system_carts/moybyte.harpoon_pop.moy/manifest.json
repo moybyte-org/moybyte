@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Harpoon Pop",
   "id": "moybyte.harpoon_pop",
   "fps": "free",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "Bubbles bounce around the arena. Fire a harpoon straight up: a hit bubble splits in two, the smallest pop.",
+  "genre": "arcade",
   "moybyte": {
     "type": "game",
     "system": true,

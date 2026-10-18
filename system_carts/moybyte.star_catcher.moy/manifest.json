@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 13,
+  "version": 14,
   "title": "Star Catcher",
   "id": "moybyte.star_catcher",
   "fps": "free",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "Catch the falling stars before they hit the floor. Catches build a combo; lose three hearts and it starts over.",
+  "genre": "arcade",
   "moybyte": {
     "type": "game",
     "system": true,

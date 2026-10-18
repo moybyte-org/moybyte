@@ -1,11 +1,13 @@
 {
   "format": "moy-1",
-  "version": 10,
+  "version": 11,
   "title": "Tap Game",
   "id": "moybyte.tap_game",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "Tap the coin before the time runs out. Every tap scores a point and the coin jumps somewhere new.",
+  "genre": "arcade",
   "moybyte": {
     "type": "game",
     "system": true,

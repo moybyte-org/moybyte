@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 11,
+  "version": 12,
   "title": "Brick Siege Lua",
   "id": "moybyte.brick_siege_lua",
   "fps": "free",
@@ -10,6 +10,8 @@
   "input": [
     "buttons"
   ],
+  "description": "The same tank battle as Brick Siege, written in Lua.",
+  "genre": "action",
   "moybyte": {
     "type": "game",
     "system": true,

@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 13,
+  "version": 14,
   "title": "Bench Lua",
   "id": "moybyte.bench_lua",
   "fps": "free",
   "runtime": "lua",
   "main": "main.lua",
   "canvas": "320x240",
+  "description": "The same speed test as Bench, written in Lua, so the two languages can be compared.",
+  "genre": "toy",
   "moybyte": {
     "type": "game",
     "system": true,

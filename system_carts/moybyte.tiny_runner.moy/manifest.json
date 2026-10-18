@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Tiny Runner",
   "id": "moybyte.tiny_runner",
   "fps": "free",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "An endless runner. The hero runs by itself and you only jump over the cacti. It speeds up, and your best is kept.",
+  "genre": "arcade",
   "moybyte": {
     "type": "game",
     "system": true,

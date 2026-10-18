@@ -1,11 +1,13 @@
 {
   "format": "moy-1",
-  "version": 5,
+  "version": 6,
   "title": "Pin Light",
   "id": "moybyte.pin_light",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "Tap the button and the board's LED changes. Where a console has no pins, it says so.",
+  "genre": "toy",
   "moybyte": {
     "type": "game",
     "system": true,

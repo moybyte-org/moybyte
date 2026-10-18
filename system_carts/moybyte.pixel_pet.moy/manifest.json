@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 14,
+  "version": 15,
   "title": "Pixel Pet",
   "id": "moybyte.pixel_pet",
   "fps": "free",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "A virtual pet. Feed it and play with it to keep it fed and happy.",
+  "genre": "toy",
   "moybyte": {
     "type": "game",
     "system": true,

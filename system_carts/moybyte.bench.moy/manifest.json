@@ -1,12 +1,14 @@
 {
   "format": "moy-1",
-  "version": 19,
+  "version": 20,
   "title": "Bench",
   "id": "moybyte.bench",
   "fps": "free",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "The console's own speed test. It runs by itself and leaves its measurements on the screen.",
+  "genre": "toy",
   "moybyte": {
     "type": "game",
     "system": true,

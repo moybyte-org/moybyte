@@ -1,11 +1,13 @@
 {
   "format": "moy-1",
-  "version": 5,
+  "version": 6,
   "title": "Coin Quest",
   "id": "moybyte.coin_quest",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
+  "description": "Walk around and collect every coin. Made with blocks, so you can open it and change it.",
+  "genre": "arcade",
   "moybyte": {
     "type": "game",
     "system": true,
