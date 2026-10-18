@@ -105,7 +105,15 @@ EXFAT_SRAM = 568
 # split, which replaced the binding's own), 8 bytes of internal heap by the
 # heap's total against dev 502be7fd, fresh boots, 2026-10-08.
 KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260 + 8
-WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM, 81920)
+# And less LOOK_SRAM, the 2026-10 look's statics in the UI and text kernels
+# (native/moy_gfx/moy_text.c's sixteen font slots, native/moy_ui's depth
+# paints and marks, the theme's block-nearest tables, the RUN face's shape,
+# native/moy_app's theme row): 1272 bytes of .dram0 by the heap's start on the
+# Guition S3 against dev 64572552, 2026-10-18, whose objects this board's link
+# map holds at the same sizes. The look's corner and shadow caches and the UI
+# API's run context are PSRAM.
+LOOK_SRAM = 1272
+WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM - LOOK_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 

@@ -98,7 +98,17 @@ KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 
 # left out, fresh boots at the launcher (91747 free with it, 93551 without,
 # twice each).
 CARD_SRAM = 1804
-WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM - CARD_SRAM, 55296)
+# And less LOOK_SRAM, the 2026-10 look's statics in the UI and text kernels
+# (native/moy_gfx/moy_text.c's sixteen font slots, native/moy_ui's depth
+# paints and marks, the theme's block-nearest tables, the RUN face's shape,
+# native/moy_app's theme row): 1272 bytes of .dram0 by the heap's start
+# against dev 64572552, 2026-10-18, which the idle heap's total and free both
+# fell by on a fresh boot (91727 free before, 90455 after), and the largest
+# block with them, by one of the heap's steps (51200 before, 49152 after).
+# The look's corner and shadow caches and the UI API's run context are PSRAM.
+LOOK_SRAM = (1272, 2048)
+WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM - CARD_SRAM - LOOK_SRAM[0],
+                      55296 - LOOK_SRAM[1])
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc3248w535"
 
 
