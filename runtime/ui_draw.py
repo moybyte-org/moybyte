@@ -155,12 +155,36 @@ def text_width(s, scale=1, role=None):
     return _C.text_width(s, scale, _C.font(role)[0])
 
 
+_HERO = [0]
+
+
 def font(role="ui"):
     """(font, w, line, ascent): the font the toolkit's `role` text draws in
-    (docs/theming_2026-09.md §4.7; roles `ui`, `title`, `mono`), its glyph
-    box's width, its line advance and its baseline, unscaled. Petme128's,
-    (0, 8, 8, 7), until a font is installed for the role."""
+    (docs/theming_2026-09.md §4.7; roles `ui`, `title`, `mono`, `caption`),
+    its glyph box's width, its line advance and its baseline, unscaled.
+    Petme128's, (0, 8, 8, 7), until a font is installed for the role.
+    `hero` is the handheld home's title face where one is installed
+    (`use_hero`), else the `title` role's."""
+    if role == "hero":
+        info = _C.font_info(_HERO[0]) if _HERO[0] else None
+        if info is None:
+            return _C.font("title")
+        return (_HERO[0], info[0], info[2], info[3])
     return _C.font(role)
+
+
+def font_v2(fid):
+    """Whether loaded font `fid` is a version 2 face (native/moy_gfx/moy_text.h:
+    anti-aliased, its line holding its leading); petme128 (0) and a version
+    1 font are not."""
+    info = _C.font_info(fid) if fid else None
+    return info is not None and info[4] == 0
+
+
+def use_hero(fid):
+    """Draw the handheld home's title in font `fid` (a `font_load` id; 0:
+    the `title` role's), a face of the look's type (`fontset.ROLES`)."""
+    _HERO[0] = fid
 
 
 def use_font(role, fid):

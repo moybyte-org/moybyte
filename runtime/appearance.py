@@ -1656,18 +1656,31 @@ class Appearance:
         """Load theme `name`'s font files, install each for its role and the
         `ui` role's as the print font, free every font no role keeps, and
         take the text-size floor the `ui` font asks of this board's glass
-        (`chrome.text_scale_floor`; docs/theming_2026-09.md §4.7). A font
-        that will not load leaves its role on petme128. True when a role's
-        font or the floor changed."""
+        (`chrome.text_scale_floor`; docs/theming_2026-09.md §4.7). Where
+        the theme's look in the live variant sets a family (`fam`), each
+        role of `fontset.ROLES` takes that family's face for the metric
+        class over the fonts its chain names, unless the installed package
+        names its own `ui` (custom's Font row). A font that will not load (a
+        face the image does not carry) leaves its role on petme128. True
+        when a role's font or the floor changed."""
         files = {}
         for role, f in _ui_draw.theme_fonts(name):
             files[role] = (None, f)
+        own = ()
         if self._slot_src is not None and name == _ui_draw.theme_installed():
             got = package(name)
-            for role, f in (got[5] if got is not None and got[0] == 0 else ()):
+            own = got[5] if got is not None and got[0] == 0 else ()
+            for role, f in own:
                 files[role] = (name, f)
+        fam = self._fam(name)
+        if fam is not None and "ui" not in dict(own):
+            desk = getattr(self.ws, "metric_class", None) == _layout_base.DESK
+            for role in _fontset.ROLES:
+                face = _fontset.role_face(fam, role, desk)
+                if face is not None:
+                    files[role] = (None, face)
         ids = {}
-        for role in _FONT_ROLES:
+        for role in _FONT_ROLES + ("hero",):
             f = files.get(role)
             ids[role] = self._font_id(f) if f else 0
         changed = False
@@ -1675,6 +1688,9 @@ class Appearance:
             if _ui_draw.font(role)[0] != ids[role]:
                 changed = True
             _ui_draw.use_font(role, ids[role])
+        if _ui_draw.font("hero")[0] != (ids["hero"] or ids["title"]):
+            changed = True
+        _ui_draw.use_hero(ids["hero"])
         _ui_draw.print_font(ids["ui"])
         keep = set(ids.values())
         for key in list(_FONTS):
@@ -1716,6 +1732,14 @@ class Appearance:
         if self.icon_sheet is not None and self._user_icons is None \
                 and (was is not None or self._theme_icons is not None):
             self.set_icon_sheet(self._theme_icons or _default_icon_sheet())
+
+    def _fam(self, name):
+        """The family theme `name`'s look sets in the live variant (`fam`),
+        or None."""
+        look = live_colors(name, self.theme_variant).look
+        texts = look[4] if len(look) > 4 else ()
+        i = look[0].get("fam", 0)
+        return texts[i - 1] if type(i) is int and 0 < i <= len(texts) else None
 
     def _font_id(self, key):
         """The loaded id of font `key`, (package, file): a store package's

@@ -199,7 +199,12 @@ class CardsLayout(LayoutBase):
         self.gap = 2 * fs
         # Per-display card heights (#15): sprite/bg picker cells, icon choices,
         # gauge/count meters -- all scale with the font so the pictures stay tappable.
-        self.h_cells, self.h_icons, self.h_meter = 44 * fs, 36 * fs, 32 * fs
+        # `lead` is what the `ui` face's line takes past the 8-row cell the
+        # pictures sit under (0 for a pixel face): they move down by it.
+        self.lead = max(0, _ui_draw.font()[2] * fs - 8 * fs)
+        lead = self.lead
+        self.h_cells, self.h_icons, self.h_meter = (44 * fs + lead, 36 * fs + lead,
+                                                    32 * fs + lead)
 
 
 class CardsLayer:
@@ -608,7 +613,7 @@ class CardsLayer:
             cw = ch = 22 * fs
         gap = 4 * fs
         x0 = row["x"] + 4 * fs
-        top = row["y"] + 12 * fs
+        top = row["y"] + 12 * fs + self.layout.lead
         cells = []
         for k in range(n):
             cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
@@ -789,7 +794,7 @@ class CardsLayer:
             frac = 0.0
         frac = max(0.0, min(1.0, frac))
         ends = f.get("gauge", {}) if isinstance(f.get("gauge"), dict) else {}
-        ty = y + 18 * fs
+        ty = y + 18 * fs + self.layout.lead
         tx0 = x + 18 * fs
         tx1 = x + w - 18 * fs
         tw = tx1 - tx0
@@ -824,7 +829,7 @@ class CardsLayer:
         shown = max(0, min(n, cap, per_row))    # clamp to a single row
         for k in range(shown):
             gx = x + 2 * fs + k * step
-            ws._glyph(glyph, (gx, y + 14 * fs, 14 * fs, 14 * fs),
+            ws._glyph(glyph, (gx, y + 14 * fs + self.layout.lead, 14 * fs, 14 * fs),
                       self._t["accent"], ws.sys_canvas)
 
     def _draw_choice_icons(self, row):

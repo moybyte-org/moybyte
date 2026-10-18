@@ -1098,6 +1098,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"current\": { \"style\": \"plate\" },\012"
     "    \"icons\": { \"kind\": \"smooth\", \"set\": \"default\" },\012"
     "    \"dark\": {\012"
+    "      \"fam\": \"inter\",\012"
     "      \"focus\": { \"lift\": { \"rim\": [\"#b6a8f7\", 0.6] } },\012"
     "      \"shadow\": [\"soft\", \"#000000\", 0.55, 14, 6], \"dim_neighbours\": 0.3,\012"
     "      \"win\": { \"header\": \"bar\", \"frame\": [1, \"#2b2f57\"], \"frame_back\": [1, \"#2b2f57\"] },\012"
@@ -1134,7 +1135,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3821};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {1507, 364, 360, 397, 390, 779, 1366, 1296, 862, 2152, 3843};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1516,6 +1517,7 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_ENUM, 118, 2, INT32_MIN},  // icons.kind
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.set
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.swap
+    {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // fam
 };
 
 const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
@@ -1697,6 +1699,7 @@ const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
     "icons.kind",
     "icons.set",
     "icons.swap",
+    "fam",
 };
 
 const int32_t moy_theme_dark_defs[MOY_THEME_DARK_DEFS][2] = {
@@ -1850,6 +1853,7 @@ const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
     {"icons.kind", MOY_THEME_FT_ENUM, 1, 175},
     {"icons.set", MOY_THEME_FT_TEXT, 1, 176},
     {"icons.swap", MOY_THEME_FT_TEXT, 1, 177},
+    {"fam", MOY_THEME_FT_TEXT, 1, 178},
 };
 
 const moy_theme_field_t moy_theme_btn_fields[7] = {

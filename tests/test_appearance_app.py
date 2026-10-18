@@ -220,6 +220,55 @@ def test_the_moy_seed_names_jetbrains_mono_for_the_code_tab(tmp_path):
     assert ui_draw.font_info(ui_draw.font("mono")[0])[:2] == (7, 14)
 
 
+def _faces():
+    """{role: the font file it draws in, None for petme128}, `hero` too."""
+    from runtime import appearance
+    files = {fid: f for (_pkg, f), fid in appearance._FONTS.items()}
+    return {r: files.get(ui_draw.font(r)[0])
+            for r in ("ui", "title", "caption", "mono", "hero")}
+
+
+@pytest.mark.parametrize("kw, faces", [
+    ({}, {"ui": "inter-12-500-2.fnt", "title": "inter-14-600-4.fnt",
+          "caption": "inter-11-600-2.fnt", "hero": "inter-19-700-4.fnt"}),
+    (DESK, {"ui": "inter-15-500-4.fnt", "title": "inter-15-600-4.fnt",
+            "caption": "inter-12-600-4.fnt", "hero": "inter-15-600-4.fnt"})])
+def test_moy_night_draws_inter_and_day_keeps_its_faces(tmp_path, kw, faces):
+    """Moy Night's look sets `fam` (docs/look_2026-10.md step 26a): its type
+    roles take Inter at the metric class's sizes (fontset.ROLES; the desk
+    home's title is the `title` face), mono stays JetBrains Mono, and Day,
+    which sets no family, keeps the faces its chain names."""
+    ws = _ws(tmp_path, **kw)
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    _frame(ws)
+    assert _faces() == dict(faces, mono="jbmono-11-400-2.fnt")
+    assert ws.layout.line_h == ui_draw.font()[2] > 8
+    ws.look.set_theme_variant("light", persist=False)
+    _frame(ws)
+    got = _faces()
+    assert got["ui"] == got["title"] == got["hero"] == "tiny5.fnt"
+    assert got["caption"] is None and got["mono"] == "jbmono-11-400-2.fnt"
+
+
+def test_a_font_preset_on_moy_night_overrides_its_family(tmp_path):
+    """A custom made from Moy Night keeps its family; FONT on it names the
+    package's own `ui`, so the family yields every type role to the chain."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    app = _open(ws)
+    assert app.choices()["font"] is None                   # the theme's own: Inter
+    _focus(ws, app, "Accent")
+    _press(ws, app, "right")
+    ws.look.commit()
+    _frame(ws)
+    assert ws.look.theme_name == "custom" and _faces()["ui"] == "inter-12-500-2.fnt"
+    _focus(ws, app, "Font")
+    _press(ws, app, "right")
+    assert app.choices()["font"] in ("tiny5", "petme128")
+    got = _faces()
+    assert not any(f and f.startswith("inter-") for f in got.values()), got
+
+
 def test_the_wallpapers_page_is_tabs_over_cards_and_b_comes_back(tmp_path):
     ws = _ws(tmp_path)
     app = _open(ws)

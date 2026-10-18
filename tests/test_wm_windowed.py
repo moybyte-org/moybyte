@@ -2806,7 +2806,9 @@ def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
     assert ws.wm._win_title(wins["desktop"]) == "Play - " + cart
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
     assert labels["menu"].startswith("Editor - ")
-    ws.look.set_theme("moy", persist=False)
+    # Day: on this undeclared glass (the handheld class at font scale 2) three
+    # chips of Night's Inter cut their names; the chip's label is what is pinned
+    ws.look.set_theme("moy", persist=False, variant="light")
     drv.frame(1 / 30)
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
     assert (labels["menu"], labels["desktop"]) == ("Editor", "Play")

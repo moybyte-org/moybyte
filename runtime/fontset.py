@@ -13,7 +13,23 @@ with neither (the browser) carries none.
   icon_file(name) -> bytes | None   an icon set's file (tools/make_icons.py):
                            SET[.fill]-SIZE.fnt, system_icons.moygfx, and on
                            the host set.json; the image's are its tier's
+  role_face(fam, role, desk) -> str | None   the face NAME.fnt a type role
+                           draws in under a theme's `fam` (ROLES), None for
+                           a role ROLES does not size on that class
 """
+
+# The face each type role takes under a theme's look `fam` (a family of the
+# set; docs/look_2026-10.md step 26a), as (size, weight, bpp) on the
+# handheld's metrics and on the desk's, DESIGN.md's Type: `ui` the status,
+# hint and row face, `title` a bar's page title on the handheld and a
+# window's on the desk, `caption` the keycap legend and the column head, and
+# `hero` the handheld home's title (`ui_draw.font("hero")`; None on the desk,
+# whose home draws its title in `title`). tests/test_make_font.py holds each
+# to its tier's set.
+ROLES = {"ui": ((12, 500, 2), (15, 500, 4)),
+         "title": ((14, 600, 4), (15, 600, 4)),
+         "caption": ((11, 600, 2), (12, 600, 4)),
+         "hero": ((19, 700, 4), None)}
 
 try:
     import fonts_data as _data
@@ -102,3 +118,11 @@ def icon_file(name):
             return f.read()
     except OSError:
         return None
+
+
+def role_face(fam, role, desk):
+    sized = ROLES.get(role)
+    sized = sized[1 if desk else 0] if sized is not None else None
+    if sized is None or type(fam) is not str or not fam.isalpha():
+        return None
+    return "%s-%d-%d-%d.fnt" % ((fam,) + sized)

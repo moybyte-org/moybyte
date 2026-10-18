@@ -59,6 +59,13 @@ except ImportError:  # host fallback when not yet aliased
     from runtime.chrome import _print_scaled
 
 
+
+def _sub_y(py, fs):
+    """The subtitle's top in a panel at `py`: under the heading, the `ui`
+    face at 2x from 4 rows down, and 4 rows of air; 24 rows at the font
+    scale at the least (a pixel face's place)."""
+    return py + max(24 * fs, 8 * fs + 2 * _ui_draw.font()[2])
+
 class WebConsoleUI:
 
     def __init__(self, ws, names):
@@ -98,10 +105,10 @@ class WebConsoleUI:
         addr = (px + inset, floor - addr_h, pw - 2 * inset, addr_h)
         if addr_h:
             floor = addr[1] - gap
-        # Below the display-type heading (16*fs) and the subtitle line (8*fs),
-        # with room to breathe -- anything less and the QR's white quiet zone
-        # runs into the subtitle.
-        qr_top = py + 34 * fs
+        # Below the display-type heading and the subtitle line, with room to
+        # breathe -- anything less and the QR's white quiet zone runs into the
+        # subtitle.
+        qr_top = _sub_y(py, fs) + _ui_draw.font()[2] * fs + 2 * fs
         qr = (px + inset, qr_top, pw - 2 * inset, max(0, floor - qr_top))
         bw = (pw - 2 * inset - 2 * gap) // 2
         return (qr, addr,
@@ -163,7 +170,7 @@ class WebConsoleUI:
         ws._glyph("wifi", (px + 6 * fs, py + 2 * fs, 16 * fs, 16 * fs),
                   th["accent"], cv)
         _print_scaled(cv, "WEB CONSOLE", px + 26 * fs, py + 4 * fs, th["ink"], 2)
-        cv.print("SCAN THIS WITH A PHONE", px + 10 * fs, py + 24 * fs,
+        cv.print("SCAN THIS WITH A PHONE", px + 10 * fs, _sub_y(py, fs),
                  th["ink_dim"], 1)
         qr_rect, addr, show, off = self.rects()
         url = ws.web.url()

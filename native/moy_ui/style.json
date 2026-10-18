@@ -1169,7 +1169,8 @@
         ["keycap.grad", "paint"], ["keycap.ink", "colour"], ["keycap.r", "int", 0, 99, 4],
         ["keycap.bevel", "bool", false],
         ["icons.kind", "enum", ["smooth", "pixel"], null], ["icons.set", "text"],
-        ["icons.swap", "text"]
+        ["icons.swap", "text"],
+        ["fam", "text"]
       ],
       "button": [
         ["fill", "paint"], ["ink", "colour"], ["border", "line"],

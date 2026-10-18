@@ -389,7 +389,9 @@ class Layout(LayoutBase):
         # widget (None where none does): batt hard right, then wifi, the ≡,
         # the context X and the clock in today's bar; its lent left zone runs
         # from the left edge to just before the clock.
-        self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
+        # "HH:MM": five cells, or a version 2 face's measure of it
+        self.clock_w = (_ui_draw.print_width("00:00", fs)
+                        if _ui_draw.font_v2(_ui_draw.font()[0]) else 5 * self.font_w)
         sys_len = _sys_tile(self.status_h)[2] if _ui_draw.depth()[0] else 0
         self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
                                        self.clock_w, _bar_text_w, sys_len=sys_len)

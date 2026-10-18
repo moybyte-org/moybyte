@@ -83,6 +83,32 @@ def test_the_set_is_every_themes_roles_and_the_mono():
     assert meta["tiers"] == tiers and set(meta["faces"]) == set(faces)
 
 
+def test_every_family_a_seed_names_carries_its_type_roles():
+    """A seed's look `fam` (docs/look_2026-10.md step 26a) draws each role of
+    `fontset.ROLES` in a face its class's tier carries, with the full
+    character set (a Calc subset would draw a name's letters as spaces)."""
+    from runtime import fontset
+    faces, tiers = make_font.faces()
+    named = set()
+    themes = os.path.join(ROOT, "native", "moy_ui", "themes")
+    for f in os.listdir(themes):
+        if f.endswith(".json"):
+            with open(os.path.join(themes, f)) as fh:
+                look = json.load(fh).get("look", {})
+            for part in (look, look.get("dark", {}), look.get("light", {})):
+                if "fam" in part:
+                    named.add(part["fam"])
+    assert "inter" in named
+    for fam in named:
+        for desk, tier in ((False, "handheld"), (True, "desktop")):
+            for role in fontset.ROLES:
+                face = fontset.role_face(fam, role, desk)
+                if face is None:
+                    continue
+                assert face[:-4] in tiers[tier], (fam, role, tier)
+                assert not faces[face[:-4]][4], (face, "a Calc subset")
+
+
 def test_a_board_module_carries_its_tier():
     src = make_font.render_module("handheld")
     ns = {}

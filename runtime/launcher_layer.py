@@ -1083,11 +1083,16 @@ class Carousel(Launcher):
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         hint_h = 20 * fs
         hints = (cx, cy + ch - hint_h, cw, hint_h)
-        tf = _ui_draw.font("title")
+        tf = _ui_draw.font("hero")
         tsc = max(fs, (16 * fs) // max(1, tf[2]))
         title_h = tf[2] * tsc
         meta_h = lay.line_h
-        foot = 12 * fs + title_h + 3 * fs + meta_h + 4 * fs
+        # A version 2 face's line holds its leading: the title sits 6 under
+        # the hero, the metadata right under it, 10 over the hints (the
+        # targets'); a pixel face's line is its ink, so 12, 3 and 4.
+        above, between, below = ((6 * fs, 0, 10 * fs) if _ui_draw.font_v2(tf[0])
+                                 else (12 * fs, 3 * fs, 4 * fs))
+        foot = above + title_h + between + meta_h + below
         ring = max(2 * fs + 2, reach)
         space = hints[1] - cy
         card = _clean_side(_HH_CARD * fs)
@@ -1095,8 +1100,8 @@ class Carousel(Launcher):
             card = _clean_side(card - 1)
         gap = _HH_GAP * fs
         top = cy + max(ring, (space - 2 * card - foot) // 2)
-        title_y = top + 2 * card + 12 * fs
-        meta_y = title_y + title_h + 3 * fs
+        title_y = top + 2 * card + above
+        meta_y = title_y + title_h + between
         band = (cx, cy, cw, hints[1] - cy)
         return (None, band, card, card + gap, ring, gap, 0, top + card,
                 (title_y, title_h, tsc, meta_y, meta_h, hints), None)
@@ -1679,7 +1684,7 @@ class Carousel(Launcher):
         ty, tht, tsc, my, mh, _hints = self._geom()[8]
         bx, _by, bw, _bh = self.band_rect()
         sep = 12 * fs
-        fid = _ui_draw.font("title")[0]
+        fid = _ui_draw.font("hero")[0]
         cap = self._cap
         rec = self.played(it)
         if (cap is None or cap[0] is not it or cap[1] is not self._g

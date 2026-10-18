@@ -771,10 +771,14 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     (#135's work); a byte the font does not cover draws glyph 0, the space,
     as petme128's row does.
   - **`night` names Tiny5 for `ui` and `title`**, as D1's pictures draw it,
-    and every seed inherits it; `mono` stays petme128 but in `moy`,
-    which names the font set's JetBrains Mono for the Code tab
-    (`docs/look_2026-10.md` step 23). A face of the font set
+    and every seed inherits it but where a look sets a family; `mono` stays
+    petme128 but in `moy`, which names the font set's JetBrains Mono for the
+    Code tab (`docs/look_2026-10.md` step 23). A face of the font set
     (`runtime/fontset.py`) is the image's, not embedded in the tables.
+  - **A look's `fam` names the type**: a family of the font set whose
+    faces, sized per metric class (`fontset.ROLES`), win over the faces
+    the chain's `fonts` give; `docs/look_2026-10.md` step 26a has the
+    roles, the sizes and the custom's FONT row.
   - **The print font.** A canvas's `print` draws in one process-wide font
     (`moy_text_print_font`; `ui.print_font`), the `ui` role's, through the
     print gate and the `text` op; `ui.print_width`, `ui.print_fit` and
