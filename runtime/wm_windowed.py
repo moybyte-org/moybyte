@@ -186,6 +186,7 @@ class _Win:
         self.buf = buf                # SystemCanvas (apps) | None (player)
         self.ctx = ctx                # _LayoutCtx (apps) | None (player)
         self.minimized = False        # hidden; lives on as a taskbar chip
+        self.held = False             # its run held by the minimise (a game's)
         self.saved = None             # pre-maximize rect (x, y, w, h) | None
         self._buf_stale = True        # buf is behind the content's truth (fresh
                                       # buffer, or a gesture's _direct_render
@@ -732,7 +733,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """The HOME key in desktop mode (owner, 2026-10-13), Win+D's shape:
         minimise every window to its chip, kept with its stamp; when every
         window already is, restore them and the focus they had. A running
-        game's window never minimises (the chips' rule)."""
+        game's window stays up: the desk is shown beside the game, never by
+        holding it."""
         wins = [self._wins[g] for g in self._order
                 if self._wins[g].kind != "desktop"]
         if not wins:
@@ -1070,9 +1072,30 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win is None:
             return
         if win.minimized:
-            win.minimized = False
+            self._minimize(win, False)
             self.ws._dirty = True
         self._move_focus(key)
+
+    def _minimize(self, win, on):
+        """Hide `win` to its chip (`on`) or show it again. A running game's
+        window holds its run while hidden, as the pause menu does
+        (`Player.pause`), and gives it back on restore -- unless the run was
+        already held (the pause menu open), which stays its holder's."""
+        if win.minimized == bool(on):
+            return
+        win.minimized = bool(on)
+        if win.kind != "desktop":
+            return
+        player = getattr(self.ws, "player", None)
+        if player is None:
+            return
+        if on:
+            win.held = not player.paused
+            if win.held:
+                player.pause()
+        elif getattr(win, "held", False):
+            win.held = False
+            player.resume()
 
     def goto(self, kind):
         """The back-stack's goto, and on the desk the window it names comes
@@ -2604,8 +2627,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     self._win_back(win)
                 elif name == "max":
                     self._toggle_max(win)
-                elif name == "min" and win.kind != "desktop":
-                    win.minimized = True
+                elif name == "min":
+                    self._minimize(win, True)
                     if focused:
                         self._move_focus(None)
                 return True

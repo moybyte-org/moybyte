@@ -751,8 +751,8 @@ def test_window_bars_suppress_os_chrome(tmp_path):
 
 
 def test_title_strip_buttons_min_max_close(tmp_path):
-    """Every app window carries minimize + maximize + close; the player window
-    has no minimize (hiding a running game would silently pause it)."""
+    """Every window carries minimize + maximize + close, the player window's
+    too (one control set on every frame, as every desktop has it)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_settings()
@@ -764,7 +764,30 @@ def test_title_strip_buttons_min_max_close(tmp_path):
     ws.open()                                   # run a cart
     drv.frame(1 / 30)
     names = [n for n, _r in ws.wm._strip_buttons(ws.wm._wins["desktop"])]
-    assert names == ["close", "max"]
+    assert names == ["close", "max", "min"]
+
+
+def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
+    """Minimising the player window holds the run (no tick while hidden, as
+    the pause menu holds it); its chip restores the window and the run."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.open()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["desktop"]
+    mn = dict(ws.wm._strip_buttons(win))["min"]
+    drv.touch(mn[0] + 2, mn[1] + 2)
+    drv.frame(1 / 30)
+    assert win.minimized and ws.player.paused
+    ws.wm._minimize(win, False)
+    assert not win.minimized and not ws.player.paused
+    # A run the pause menu holds stays held through a minimise and restore.
+    ws.player.pause()
+    ws.wm._minimize(win, True)
+    ws.wm._minimize(win, False)
+    assert ws.player.paused
+    ws.player.resume()
 
 
 def test_maximize_toggle_fills_desktop_and_restores(tmp_path):

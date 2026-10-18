@@ -295,12 +295,13 @@ class WindowChrome:
 
     def _win_btns(self, win):
         """The frame's optional strip buttons for `win` (ui_draw.FRAME_*):
-        minimize for an app window (a running game can't minimize: hiding it
-        would mean silently pausing it), and the back chevron while its app
-        has a page of it open (docs/look_2026-10.md step 27a), which the
-        chrome's freeze signature carries."""
+        minimize on every window, a running game's too (`_minimize` holds
+        its run while it is hidden), so every frame has one control set; and
+        the back chevron while its app has a page of it open
+        (docs/look_2026-10.md step 27a), which the chrome's freeze signature
+        carries."""
         if win.kind == "desktop":
-            return 0
+            return _ui_draw.FRAME_MIN
         if self.ws.app_has_page(win.kind):
             return _ui_draw.FRAME_MIN | _ui_draw.FRAME_BACK
         return _ui_draw.FRAME_MIN
@@ -574,11 +575,10 @@ class WindowChrome:
             return
         ws._dirty = True
         if win.minimized:
-            win.minimized = False
+            self._minimize(win, False)
             self._move_focus(key)
         elif key == self._focus:
-            if win.kind != "desktop":              # a running game never minimizes
-                win.minimized = True
-                self._move_focus(None)
+            self._minimize(win, True)
+            self._move_focus(None)
         else:
             self._move_focus(key)
