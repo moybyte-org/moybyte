@@ -2085,7 +2085,13 @@ class Player:
             # A Lua run binds none, which leaves the console's state the
             # one its `ui` reads the theme from (moy_app_wasm.h).
             self._wasm_bind(ws.cart)
-            lua = make(ns, src)
+            # The cart's code loads and inits inside the app-cart boundary, as
+            # a Python cart's exec and _init do (docs/theming_2026-09.md §4.7).
+            _was = _cart_text(True)
+            try:
+                lua = make(ns, src)
+            finally:
+                _cart_text(_was)
             if runtime == "wasm" and getattr(lua, "interp", False):
                 # Not an error and not a panel: the cart plays, on the
                 # interpreter rather than the module this console wanted.
@@ -2100,7 +2106,11 @@ class Player:
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:
-                lua.init()
+                _was = _cart_text(True)
+                try:
+                    lua.init()
+                finally:
+                    _cart_text(_was)
             t_init = _ticks_diff(_ticks_ms(), t6)
         except Exception as exc:  # noqa: BLE001 -- load/_init error -> the panel
             if lua is not None:
