@@ -190,6 +190,7 @@ _DRAW_SIGS = (
     ("moy_ui_sink_glyph", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_sink_mask", [c.POINTER(_Sink), c.c_uint32, _I, _I, _I, _I], _I),
     ("moy_ui_icons_use", [c.c_uint32, c.c_uint32, c.POINTER(c.c_uint8 * 3)], None),
+    ("moy_ui_moy_use", [c.c_void_p, _I], None),
     ("moy_ui_calls", [], c.c_uint32),
     ("moy_ui_row", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Row), _I], _I),
     ("moy_ui_cell", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Cell), _I,
@@ -296,6 +297,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
+    ("moy_ui_api_menu_danger", [c.c_void_p, c.c_uint32], None),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),
     ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
      None),
@@ -481,6 +483,16 @@ def binding():
     def icons_use(f16, f24, close, maximize, minimize):
         codes = (c.c_uint8 * 3)(int(close), int(maximize), int(minimize))
         lib.moy_ui_icons_use(int(f16), int(f24), c.byref(codes))
+
+    def moy_use(px, clear):
+        if px is None:
+            lib.moy_ui_moy_use(None, 0)
+            return
+        b = bytes(px)
+        if len(b) < 256:
+            raise ValueError("moy_use: 256 pixels")
+        buf = (c.c_uint8 * 256).from_buffer_copy(b[:256])
+        lib.moy_ui_moy_use(c.byref(buf), int(clear))
 
     def icon_mask(cv, font, code, x, y, ci):
         s = sink(cv, None)
@@ -731,6 +743,9 @@ def binding():
         return (bool(on), bool(act), lib.moy_ui_marks_drawn(1 if reset else 0),
                 lib.moy_ui_mark_reach(1))
 
+    def mark_reach(cls):
+        return lib.moy_ui_mark_reach(int(cls))
+
     def inset(rect, dx, dy):
         out = _R4()
         lib.moy_ui_inset32(r4(rect), int(dx), int(dy), out)
@@ -763,7 +778,7 @@ def binding():
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus_ring, focus, current,
-              marks, inset, cut,
+              marks, mark_reach, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
     m.list = list_
@@ -1010,6 +1025,10 @@ def binding():
         b, ib = bytes(items), bytes(icons)
         return int(lib.moy_ui_api_menu(p, c.byref(s), t, b, len(b), ib, len(ib), ov))
 
+    def api_menu_danger(ctx, rows):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_menu_danger(p, int(rows) & 0xFFFFFFFF)
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -1072,7 +1091,7 @@ def binding():
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_icon, api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_grid,
-              api_card, api_part, api_popover, api_menu,
+              api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value
@@ -1081,6 +1100,7 @@ def binding():
     m.glyph_id = glyph_id
     m.icon_mask = icon_mask
     m.icons_use = icons_use
+    m.moy_use = moy_use
     m.glyph = glyph
 
     def s(name):

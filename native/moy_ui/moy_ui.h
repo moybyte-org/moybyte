@@ -236,6 +236,13 @@ int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h,
 // set off when both are) and the glyph codes of close, maximize and
 // minimize, by MOY_UI_FB_*. runtime/iconsets.py installs it at a look change.
 void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
+// Moy's tile (slot 0, MOY_UI_ICON_MOY), which is pixel art in every theme: 16x16
+// palette indices, `clear` the one that draws nothing; NULL takes it away.
+// runtime/iconsets.py installs the pixel set's with the set. moy_ui_moy answers
+// it (NULL: none) and its clear index.
+#define MOY_UI_ICON_MOY 0
+void moy_ui_moy_use(const uint8_t px[256], int clear);
+const uint8_t *moy_ui_moy(int *clear);
 // Title button `id`'s icon, the set's largest mask that box `b` holds,
 // centred, in RGB565 `col`: 1 when drawn, 0 where no set is installed or
 // its font is gone (the caller draws its glyph).
@@ -691,7 +698,10 @@ typedef struct {
     int16_t fs, desk, card;         // card: on a group's card
     int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
     int16_t steps;                  // slider: a segment per step, no number
+    int16_t kind;                   // MOY_UI_VROW_*: a danger row inks its label and icon
+                                    // in the danger buttons' ink
 } moy_ui_vrow_t;
+enum { MOY_UI_VROW_PLAIN = 0, MOY_UI_VROW_DANGER = 1 };
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r);
 // What x on row box b picks: a seg's, a swatch picker's or a tab row's option (-1 none),

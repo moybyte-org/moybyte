@@ -1267,6 +1267,23 @@ static mp_obj_t ui_icons_use(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_icons_use_obj, 5, 5, ui_icons_use);
 
+// moy_use(px, clear): Moy's 16x16 tile of palette indices (256 bytes), its
+// clear index; px None takes it away (moy_ui_moy_use).
+static mp_obj_t ui_moy_use(mp_obj_t px, mp_obj_t clear) {
+    if (px == mp_const_none) {
+        moy_ui_moy_use(NULL, 0);
+        return mp_const_none;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(px, &b, MP_BUFFER_READ);
+    if (b.len < 256) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_use: 256 pixels"));
+    }
+    moy_ui_moy_use((const uint8_t *)b.buf, mp_obj_get_int(clear));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_moy_use_obj, ui_moy_use);
+
 // -- rows, cells and lists ---------------------------------------------------------------
 
 // row(cv, look, rect, kind, flags, interact, label, value, glyph, glyph_size,
@@ -1829,6 +1846,13 @@ static mp_obj_t ui_marks(mp_obj_t active, mp_obj_t reset) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_marks_obj, ui_marks);
 
+// mark_reach(cls) -> how far class `cls`'s focus mark reaches past its box
+// (moy_ui_mark_reach): the ring's gap, width and outline as the look sets them.
+static mp_obj_t ui_mark_reach(mp_obj_t cls) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(mp_obj_get_int(cls)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_mark_reach_obj, ui_mark_reach);
+
 // -- rect algebra ---------------------------------------------------------------------------
 
 // inset(rect, dx, dy)
@@ -2365,6 +2389,13 @@ static mp_obj_t ui_api_menu(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_menu_obj, 7, 7, ui_api_menu);
 
+// api_menu_danger(ctx, rows): the next api_menu's danger rows, bit i row i.
+static mp_obj_t ui_api_menu_danger(mp_obj_t ctx, mp_obj_t rows) {
+    moy_ui_api_menu_danger(ctx_of(ctx), (uint32_t)mp_obj_get_int_truncated(rows));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_menu_danger_obj, ui_api_menu_danger);
+
 // api_owes(ctx) -> whether the frame drawn last owes the next
 static mp_obj_t ui_api_owes(mp_obj_t ctx) {
     return mp_obj_new_bool(moy_ui_api_owes(ctx_of(ctx)));
@@ -2498,6 +2529,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_icon_mask), MP_ROM_PTR(&ui_icon_mask_obj) },
     { MP_ROM_QSTR(MP_QSTR_icons_use), MP_ROM_PTR(&ui_icons_use_obj) },
+    { MP_ROM_QSTR(MP_QSTR_moy_use), MP_ROM_PTR(&ui_moy_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_rows), MP_ROM_PTR(&ui_wasm_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_size), MP_ROM_PTR(&ui_api_size_obj) },
@@ -2525,6 +2557,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },
@@ -2577,6 +2610,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_focus), MP_ROM_PTR(&ui_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&ui_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_marks), MP_ROM_PTR(&ui_marks_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mark_reach), MP_ROM_PTR(&ui_mark_reach_obj) },
     { MP_ROM_QSTR(MP_QSTR_inset), MP_ROM_PTR(&ui_inset_obj) },
     { MP_ROM_QSTR(MP_QSTR_cut), MP_ROM_PTR(&ui_cut_obj) },
     { MP_ROM_QSTR(MP_QSTR_split), MP_ROM_PTR(&ui_split_obj) },

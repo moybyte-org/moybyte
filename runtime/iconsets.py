@@ -285,7 +285,9 @@ def _mask_draw(cv, name, slot, x, y, w, h, box, ink, fill_index):
 def use_parts(spec_):
     """Install `spec_`'s masks for the parts the C draws (a depth frame's
     title buttons, `moy_ui.icons_use`): a smooth set's 16 and 24 px files,
-    or none (a pixel set's or no set: the C draws its glyphs)."""
+    or none (a pixel set's or no set: the C draws its glyphs); and Moy's
+    pixel tile, in every set (`moy_ui.moy_use`), so the engine's icons draw
+    Moy where a part names it (the pause card's title)."""
     f16 = f24 = 0
     name = spec_[1] if spec_ is not None and spec_[0] == "smooth" else None
     if name is not None:
@@ -295,6 +297,12 @@ def use_parts(spec_):
             f24 = f24 or (got[0] if got[1] == 24 else 0)
     _ui_draw._C.icons_use(f16, f24, FIRST + SLOT["close"], FIRST + SLOT["maximize"],
                           FIRST + SLOT["minimize"])
+    # Moy, pixel art in every set: its tile, so `ui.icon("moy")` draws it
+    img = pixel_image("moy", spec_[2] if spec_ is not None and spec_[0] == "pixel" else None)
+    if img is None:
+        _ui_draw._C.moy_use(None, 0)
+    else:
+        _ui_draw._C.moy_use(bytes(p & 255 for p in img.pix), img.transparent & 255)
 
 
 def reset():

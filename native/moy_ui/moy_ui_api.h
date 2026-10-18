@@ -135,6 +135,8 @@ typedef struct {
     // ui.icon's: the next row's icon, then the row's being drawn (an icon
     // set's slot and the glyph table's glyph, -1 none).
     int16_t icon_slot, icon_glyph, row_slot, row_glyph;
+    // ui.menu's danger rows for the next menu: bit i, its row i (moy_ui_api_menu_danger)
+    uint32_t menu_danger;
     // ui.scroll's and ui.dialog's open pages, innermost last.
     moy_ui_nest_t nest[MOY_UI_API_NEST];
     uint8_t n_nest;
@@ -270,10 +272,13 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
 // (NUL-separated, `ilen` bytes; an empty name, or none, no icon) before its
 // label. An item's id is its text. Stacked on the page, or from ui.at's
 // rect's top left across its width. Answers the item activated this frame
-// (from 0), -1 none.
+// (from 0), -1 none. The rows moy_ui_api_menu_danger named last are danger
+// rows: their label and icon in the danger buttons' ink.
 int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                         const uint8_t *items, size_t len, const uint8_t *icons, size_t ilen,
                         const moy_ui_over_t *o);
+// The next ui.menu's danger rows (a verb that destroys: Delete): bit i its row i.
+void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows);
 // A card grid (§1): `id` begins one whose cards' pictures are w x h, as
 // many columns as the row holds, the grid's rows stacking on the page (or
 // from ui.at's rect's top left, across its width); an id of length 0 ends it.

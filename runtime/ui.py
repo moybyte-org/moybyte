@@ -358,13 +358,21 @@ def popover(id=None, w=0, o=None):
     return bool(_C.api_popover(t[0], t[1], t[2], id, w, _over(o)))
 
 
-def menu(label, items, icons=(), o=None):
+def menu(label, items, icons=(), o=None, kinds=()):
     """A menu: its caption `label` ("" none, and then a rule where rows sit
     above it), then a row per item, each a stop with the icon named at its
     place in `icons` ("" none) before it. Stacked on the page (in a popover,
-    its card), or from `at`'s rect's top left. The item activated this frame
+    its card), or from `at`'s rect's top left. `kinds` names a row's kind at
+    its place ("" plain): a "danger" row, a verb that destroys, draws its
+    label and icon in the danger buttons' ink. The item activated this frame
     (from 0), -1 none; an item's id is its text."""
     t = _T
+    danger = 0
+    for i in range(min(len(kinds), 32)):
+        if kinds[i] == "danger":
+            danger |= 1 << i
+    if danger:
+        _C.api_menu_danger(t[0], danger)
     return _C.api_menu(t[0], t[1], t[2], label, _opts(items), _opts(icons), _over(o))
 
 

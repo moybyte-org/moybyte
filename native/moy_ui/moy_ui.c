@@ -636,6 +636,24 @@ void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
     memcpy(s_icon_code, codes, sizeof(s_icon_code));
 }
 
+// Moy, slot 0: pixel art in every theme, not a mask (runtime/iconsets.py).
+static uint8_t s_moy[256];
+static int16_t s_moy_clear = -1;        // -1: no tile installed
+
+void moy_ui_moy_use(const uint8_t px[256], int clear) {
+    if (px == NULL) {
+        s_moy_clear = -1;
+        return;
+    }
+    memcpy(s_moy, px, sizeof(s_moy));
+    s_moy_clear = (int16_t)(clear & 255);
+}
+
+const uint8_t *moy_ui_moy(int *clear) {
+    *clear = s_moy_clear;
+    return s_moy_clear < 0 ? NULL : s_moy;
+}
+
 // The slots, tools/make_icons.py's order (runtime/iconsets.py SLOTS;
 // tests/test_ui_icon_progress.py holds the two equal).
 static const char *const s_icon_slots[] = {

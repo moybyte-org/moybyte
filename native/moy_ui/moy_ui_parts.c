@@ -297,6 +297,21 @@ static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int r
 
 static int icon_d(pd_t *d, int slot, int glyph, moy_ui_box_t b, int ci) {
     int box = b.w < b.h ? b.w : b.h;
+    int clear;
+    const uint8_t *moy = slot == MOY_UI_ICON_MOY ? moy_ui_moy(&clear) : NULL;
+    if (moy != NULL) {
+        // Moy is pixel art: its tile at the largest whole scale the box holds
+        int sc = box >= 16 ? box / 16 : 1, x0 = b.x + moy_ui_fdiv(b.w - 16 * sc, 2);
+        int y0 = b.y + moy_ui_fdiv(b.h - 16 * sc, 2);
+        for (int i = 0; i < 256; i++) {
+            if (moy[i] != clear) {
+                moy_target_fill(&d->t, x0 + (i & 15) * sc, y0 + (i >> 4) * sc, sc, sc,
+                                pal(d, moy[i]));
+            }
+        }
+        d->row->st[MOY_ST_N_FILL]++;
+        return 1;
+    }
     uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
     uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
     if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {   // a cart's: the glyph
@@ -488,6 +503,16 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     int dim = on_card ? tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM)
                       : tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
     int lab = ink, rowfill = -1;
+    if (r->kind == MOY_UI_VROW_DANGER) {
+        // a verb that destroys: in the danger buttons' ink, which every
+        // theme holds to text's contrast (a theme may make it its ink)
+        moy_ui_btn_style_t bs;
+        if (moy_ui_button_style(d.look, MOY_UI_K_BUTTON_DANGER, MOY_UI_REST, -1, &bs)
+                == MOY_UI_OK
+            && bs.c[1] >= 0) {
+            lab = ink = bs.c[1];
+        }
+    }
     if (flags & MOY_UI_F_DISABLED) {
         lab = ink = dim = moy_ui_disabled() >= 0 ? moy_ui_disabled() : dim;
     } else if (flags & MOY_UI_F_FOCUS) {

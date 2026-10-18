@@ -1734,6 +1734,14 @@ def marks(active=None, reset=False):
     return _C.marks(active, reset)
 
 
+def mark_reach(size="part"):
+    """How far a focus mark of size class `size` ("part", "card", "small")
+    reaches past its box: the ring's gap, width and outline as the live look
+    rounds and defaults them (0 for a mark inside its box). What a part that
+    keeps room for its ring lays out by."""
+    return _C.mark_reach(_MARK_CLASS[size])
+
+
 # -- the public UI API's host side (docs/ui_api_2026-10.md) ----------------------
 #
 # runtime/ui.py's verbs draw into UI_TARGET: the running app's context (its

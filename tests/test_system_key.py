@@ -364,9 +364,9 @@ def test_a_theme_without_a_depth_keeps_the_kernels_menu(tmp_path):
 
 @pytest.mark.parametrize("desk", [False, True])
 def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
-    """The engine keeps the title row an icon slot it cannot fill (Moy is
-    pixel art, not a mask); the card draws Moy there, in the column of the
-    rows' icons, over its first row."""
+    """The title row names Moy as its icon (`ui.icon("moy")`), and the engine
+    draws Moy's pixel tile there (iconsets.use_parts installs it): in the
+    column of the rows' icons, over the first row."""
     if desk:
         ws = build_desktop_ws(tmp_path)
         ws.open_library()
@@ -377,18 +377,30 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     else:
         ws, drv = _game(tmp_path)
     _moy(ws)
-    drawn = []
-    real = ws.draw_icon
-    ws.draw_icon = lambda kind, rect, ink, cv=None: (drawn.append((kind, rect)),
-                                                     real(kind, rect, ink, cv))[1]
     drv.system_key()
     _frames(drv, 3)
     assert ws.pause.open
     card = ws.pause._host.box("Pause")
     first = ws.pause._host.box("Resume")
-    moys = [r for k, r in drawn if k == "moy"]
-    assert moys, "no Moy in the title row"
-    x, y, w, h = moys[-1]
-    assert card[0] < x and x + w <= first[0] + first[2]
-    assert card[1] < y and y + h <= first[1], "over the first row"
-    assert 0 <= x - first[0] < w, "in the rows' icon column"
+    cv = ws.sys_canvas
+    side = 16 * ws.layout.fs
+
+    def slot():
+        """The title row's icon column: the card's left to the rows' icon
+        width past the first row's left, from the card's top to the row's."""
+        b = cv._buf
+        out = []
+        for y in range(card[1] + 1, first[1]):
+            o = 2 * (y * cv.w + first[0])
+            out.append(bytes(b[o:o + 2 * (side + 8)]))
+        return out
+    with_moy = slot()
+    from runtime import ui_draw
+    ui_draw._C.moy_use(None, 0)
+    try:
+        ws._dirty = True
+        _frames(drv, 2)
+        assert slot() != with_moy, "Moy draws in the title row's icon slot"
+    finally:
+        ws.look.look_gen += 1          # the next icon_spec puts the tile back
+        ws.icon_spec()
