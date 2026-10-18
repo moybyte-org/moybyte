@@ -927,6 +927,13 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     }
     if (ln) {
         int lw = t_w(&d.f, k->label.p, (size_t)ln, fs);
+        int i0, i1;
+        if (!iw && metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ALIGN) == MOY_TEXT_CENTER
+            && moy_text_ink(d.f.id, k->label.p, (size_t)ln, fs, &i0, &i1)) {
+            // a centred label centres by its ink, not its advance: a symbol
+            // key's `(` or `;` sits on the key's middle
+            tx += moy_ui_fdiv(lw - i0 - i1, 2);
+        }
         text_over(&d, k->label.p, (size_t)ln, tx + iw, y + moy_ui_fdiv(h - d.f.line * fs, 2), ink,
                   on, span_box(tx + iw, tx + iw + lw, b, ring));
     }
@@ -1049,8 +1056,12 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
         fill(&d, r.x, r.y, r.w, r.h, c[0]);
     }
     if (marked) {
-        int on = -1;
-        part_marks(s, r, MOY_UI_F_ON, fs, phase & MOY_UI_PHASE_FRAME, 0, 0, 1, &ink_i, &on);
+        // the current tab's mark is a pill, as the home's and the bar's tabs
+        // wear it (their plate's radius, 5 at the scale)
+        int mi = -1, how = (phase & MOY_UI_PHASE_FRAME) ? 0 : MOY_UI_MARK_INK;
+        moy_ui_current_in(s, r, 5 * fs, how | (moy_ui_marks()->active ? 0 : MOY_UI_MARK_BACK),
+                          fs, &mi, 0);
+        ink_i = mi >= 0 ? mi : ink_i;
     }
     if ((phase & MOY_UI_PHASE_CONTENT) && labels_on) {
         use_part(&d, MOY_UI_K_TAB, state, fs);

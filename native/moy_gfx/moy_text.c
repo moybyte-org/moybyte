@@ -554,6 +554,35 @@ int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale) {
     return w * scale;
 }
 
+int moy_text_ink(uint32_t font, const uint8_t *s, size_t n, int scale, int *x0, int *x1) {
+    int w = moy_text_width(font, s, n, scale);
+    *x0 = 0;
+    *x1 = w;
+    const row_t *r = font_row(font);
+    if (r == NULL || r->version != 2) {
+        return r != NULL && w > 0;
+    }
+    scale = scale < 1 ? 1 : scale;
+    walk_t k;
+    int at, b, lo = 0, hi = 0, any = 0;
+    walk_start(&k, &r->f2, s, n);
+    while ((b = walk_next(&k, &at)) >= 0) {
+        const uint8_t *g = rec_of(&r->f2, b);
+        if (g[3] == 0) {
+            continue;
+        }
+        int a = at + (int8_t)g[5], e = a + g[3];
+        lo = any && lo < a ? lo : a;
+        hi = any && hi > e ? hi : e;
+        any = 1;
+    }
+    if (any) {
+        *x0 = lo * scale;
+        *x1 = hi * scale;
+    }
+    return any;
+}
+
 int moy_text_covers(uint32_t font, const uint8_t *s, size_t n) {
     const row_t *r = font_row(font);
     if (r == NULL) {

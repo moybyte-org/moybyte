@@ -181,6 +181,12 @@ int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
 // of its glyphs' advances and, in a version 2 font, its kerning pairs'.
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);
 
+// The columns `s`'s ink covers at `scale`, from its pen's start, in *x0 up to
+// *x1 (exclusive): a version 2 font's glyph boxes; petme128's and a version
+// 1 font's, their cells (the advance). Answers 0, and the advance, where `s`
+// draws no ink or `font` is unknown. A part centres a label by its ink.
+int moy_text_ink(uint32_t font, const uint8_t *s, size_t n, int scale, int *x0, int *x1);
+
 // 1 when `font` draws every codepoint of `s` with a glyph of its own (a
 // stand-in the font maps counts), 0 where one falls to the font's first
 // record or `font` is unknown. Petme128 and a version 1 font draw printable
