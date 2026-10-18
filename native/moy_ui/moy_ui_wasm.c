@@ -13,8 +13,10 @@
 _Static_assert(sizeof(moy_pixel) == sizeof(uint16_t), "the RUN sink lends an RGB565 canvas");
 
 // The generation the run's look was built under (0: none yet, which no live
-// theme has).
-static uint32_t s_gen;
+// theme has), and the run's serial it was built for. A generation is counted
+// by one console from its own start, so a later console (or run) can reach the
+// same number on another theme: the look is rebuilt for each run.
+static uint32_t s_gen, s_gen_serial;
 static moy_ui_theme_fn s_theme;
 
 void moy_ui_wasm_theme_from(moy_ui_theme_fn fn) {
@@ -51,6 +53,12 @@ static int open_run(run_t *r, moy_canvas *c) {
     moy_ui_theme_fn theme = s_theme != NULL ? s_theme : moy_app_wasm_theme;
     if (c == NULL || theme == NULL) {
         return -MOY_UI_STALE;
+    }
+    uint32_t tick = 0, serial = 0;
+    (void)moycore_ui_snap(&tick, &serial);
+    if (serial != s_gen_serial) {
+        s_gen = 0;
+        s_gen_serial = serial;
     }
     int32_t tok[MOY_UI_TOKENS];
     char name[MOY_UI_SHAPE_NAME];

@@ -480,3 +480,34 @@ def test_apps_draw_focus_through_the_marks():
                 if "focus_ring(" in f.read():
                     hits.append(name)
     assert hits == []
+
+
+def _first_page(root, title, theme):
+    """The page's first settled frame in a fresh workstation under `theme`."""
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    ws.look.set_theme(theme, persist=False)
+    open_cart(ws, title)
+    drv = make_drv(ws)
+    drv.frame(_DT)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    for _ in range(3):
+        _frame(drv)
+    px = _pixels(ws)
+    ws.exit()
+    return px
+
+
+def test_a_later_workstation_never_draws_the_look_of_an_earlier_one(tmp_path):
+    """A compiled or Lua run keeps its look keyed on the theme generation,
+    which each workstation counts from its own start: the second workstation
+    of a process, on another theme at the same generation, drew the first's
+    colours."""
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("page_py.moy", "page_lua.moy"):
+        shutil.copytree(os.path.join(PAGES, d), os.path.join(root, d))
+    for theme in ("platinum", "slate", "night"):
+        py = _first_page(root, "UI Page Py", theme)
+        lua = _first_page(root, "UI Page Lua", theme)
+        assert lua == py, "the Lua page under %s drew other pixels than python" % theme
