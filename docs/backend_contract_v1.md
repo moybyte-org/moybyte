@@ -39,9 +39,9 @@ console boards ship three different shapes between them):
 |---|---|---|
 | Waveshare P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct objects** |
 | Guition P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct**, over a `RotatedCompositor` |
-| T-Deck `run_desktop` | `DeviceCanvas` | *the same object* |
+| T-Deck `run_desktop` | `SystemCanvas` | *the same object* |
 | Guition S3 `run_desktop` | `DeviceCanvas` 320×240 | `SystemCanvas` 480×320 — **distinct** |
-| host sim 320×240 | `DeviceCanvas` (via `host_canvas`) | *the same object* |
+| host sim 320×240 | `HostSystemCanvas` | *the same object* |
 | host sim windowed | `DeviceCanvas` | `HostSystemCanvas` |
 | wasm handheld tier | `WebSystemCanvas` | *the same object* |
 | wasm desktop tier | `WebSystemCanvas` 320×240 | `WebSystemCanvas` — **distinct** |

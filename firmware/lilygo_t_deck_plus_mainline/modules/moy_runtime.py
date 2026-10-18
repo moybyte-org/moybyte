@@ -33,7 +33,7 @@ from desktop_spine import build_desktop
 from carts_data import CARTS_Z as CARTS
 from device_util import _ticks_ms, _ticks_diff, _diag_log
 from tdeck_input import TDeckInput
-from device_canvas import DeviceCanvas
+from device_canvas import SystemCanvas
 from device_diag import (_diag_flush, _diag_drawbrk, _diag_draw2, _diag_i2cstat,
                          _diag_webhost, _diag_pump)
 
@@ -200,7 +200,7 @@ def run_desktop(fps_cap=60):
     import moy_input
 
     # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
-    # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
+    # The canvas latches `_async_ok` in __init__, so this has to precede the
     # construction below or it reaches nothing. It is an assignment rather than
     # an edit because `device_canvas.py` is staged from the shared `device/`
     # tree and is not this board's to change; LAYER_COPY_ASYNC above says why
@@ -211,7 +211,14 @@ def run_desktop(fps_cap=60):
     # The kernel's banded compositor over moy_lcd's transport.
     comp = moy_glass.BandedCompositor(moy_lcd, nfbs=2, async_flush=ASYNC_FLUSH)
     set_backlight = comp.set_backlight
-    canvas = DeviceCanvas(comp)
+    # One surface is the game raster AND the glass here, and the shell draws
+    # on it: it is a SystemCanvas, the class every other tier's shell surface
+    # is and the host's 320x240 twin builds (host_app.build_workstation). At
+    # font scale 1 it draws byte for byte what a plain DeviceCanvas draws; what
+    # it adds is the system-surface verbs (`print_scaled`, `blit_cover`,
+    # `set_font_scale`), and a shell change that calls one is green on the
+    # host and on this glass alike.
+    canvas = SystemCanvas(comp)
     _census("panel")
     try:
         import moybyte_diag as diag

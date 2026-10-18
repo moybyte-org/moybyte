@@ -450,7 +450,8 @@ def test_the_mainline_tdeck_arms_the_async_layer_copy_before_its_canvas():
     board's to edit, so the flag is declared in the board's runtime beside
     ASYNC_FLUSH and `run_desktop` assigns it across.
 
-    The thing worth pinning is the ORDER. `DeviceCanvas.__init__` latches
+    The thing worth pinning is the ORDER. `DeviceCanvas.__init__` (the base of
+    the board's SystemCanvas) latches
     `_async_ok` from the module global, so an assignment that drifts BELOW the
     construction reaches nothing at all: the lever would be off, the flag would
     read True, and no diag line would contradict either.
@@ -468,8 +469,8 @@ def test_the_mainline_tdeck_arms_the_async_layer_copy_before_its_canvas():
     assert "import device_canvas" in runtime
 
     # THE ORDER. Both live in run_desktop, and the assignment must precede the
-    # first DeviceCanvas.
-    build = "canvas = DeviceCanvas(comp)"
+    # first canvas (a SystemCanvas, whose base __init__ does the latching).
+    build = "canvas = SystemCanvas(comp)"
     assert build in runtime
     assert runtime.index("def run_desktop") < runtime.index(assign) < runtime.index(build)
 

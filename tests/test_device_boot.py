@@ -610,6 +610,36 @@ def test_every_board_takes_the_one_boot_body(board):
         "%s: run_desktop drives boot steps beside the shared spine" % board)
 
 
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_hands_the_spine_a_system_canvas(board):
+    """The surface the shell draws on is a `SystemCanvas` on every board,
+    the class the host's twin of each tier builds (`host_app` makes a
+    HostSystemCanvas even where one canvas is game and glass at once). A
+    board that handed the spine a bare DeviceCanvas lacked the system verbs
+    the host has: the T-Deck's home called `print_scaled` on its first frame
+    and raised on every frame after it, the splash left up, while every host
+    test of the same code was green. Routing, read from the function that
+    calls `build_desktop`: its fourth argument is assigned from a
+    `*SystemCanvas(...)` construction there."""
+    for path, fname in wiring_chain(BOARDS[board]):
+        fn = _fn(path, fname)
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == "build_desktop"]
+        if not calls:
+            continue
+        arg = calls[0].args[3]
+        assert isinstance(arg, ast.Name), (board, path.name)
+        made = [n.value.func.id for n in ast.walk(fn)
+                if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == arg.id for t in n.targets)
+                and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)]
+        assert made and all(m.endswith("SystemCanvas") for m in made), (
+            "%s: %s() hands build_desktop %r made by %s"
+            % (board, fname, arg.id, made))
+        return
+    raise AssertionError("%s never calls build_desktop" % board)
+
+
 def test_the_boot_steps_run_in_ONE_order():
     """...and the order itself, pinned where it lives. When this fails, read
     the diff before changing the test -- either a board grew a real reason to
