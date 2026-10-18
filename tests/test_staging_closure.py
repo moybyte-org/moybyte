@@ -89,9 +89,10 @@ MICROPYTHON_BUILTINS = {
 # Native usermods compiled into a given target (USER_C_MODULES / ext_mod).
 NATIVE = {
     # moy_index, the store's native index, and moy_spine, the kernel's spine
-    # (the handle table moy_index shares), stage on every target: the index
-    # compiles everywhere unless MOY_INDEX_IMPL=py (tools/moy_index_spike.py),
-    # the spine everywhere. moy_kernel, the
+    # (the handle table moy_index shares), stage on every target but the
+    # Zero, which denies the index (its board.toml says why): the index
+    # compiles unless MOY_INDEX_IMPL=py (tools/moy_index_spike.py), the spine
+    # everywhere. moy_kernel, the
     # kernel's entry, crash record and recovery floor, is TAKEN by every
     # board, the Zero's floor serial only (each board.toml says why). moy_glass,
     # moy_input and moy_net, sprint 3's kernel modules, stage on every console
@@ -143,7 +144,7 @@ NATIVE = {
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web", "moy_index", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
+    "zero": {"moy_web", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
             "moy_input", "moy_net", "moy_kernel", "moy_play", "moy_app", "moy_ui"},

@@ -460,6 +460,17 @@ the files as they are, so a decoder here would be flash in both OTA slots for a
 picture nothing shows."""
 
 [[native.shared.deny]]
+module = "moy_index"
+why = """
+The store's native index (moy_index.h): the slot table a console's shelf, the
+launcher and the Settings lists query by title and kind. This board draws no
+shelf and answers no query -- its store is read by the browser console, which
+keeps its own index, and served as files -- and nothing it freezes imports the
+module (`moy_carts` reaches the store through `moy_store`, which this board
+takes). The handle table the index shares is `moy_spine`'s and stays, because
+the kernel's route tables and string table are built on it."""
+
+[[native.shared.deny]]
 module = "moy_serial"
 why = """
 The console's stdin read from C in blocks, and its UART rate: the dev channel's

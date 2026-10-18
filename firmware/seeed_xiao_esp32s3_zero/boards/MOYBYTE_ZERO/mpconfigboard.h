@@ -61,6 +61,15 @@
 // are two halves of one decision.
 #define MICROPY_PY_BLUETOOTH                (0)
 
+// NO ESP-NOW and NO I2S: there is no second console to pair with (the link
+// the console boards bring up through native/moy_net) and no codec or
+// microphone on this board, and the audio module is denied in board.toml.
+// Both default to 1 on every esp32 target; the kernel's own ESP-NOW calls
+// (native/moy_kernel) are already behind MICROPY_PY_ESPNOW. ~25 KB of the
+// image with the IDF drivers they pull in (libespnow, esp_driver_i2s).
+#define MICROPY_PY_ESPNOW                   (0)
+#define MICROPY_PY_MACHINE_I2S              (0)
+
 // UART0 REPL stays ON (the generic S3 board's default): D6/D7 are GPIO43/44,
 // they are broken out on this board's header, and MOY_NET_GPIO_PINS holds them
 // back from the GPIO allowlist precisely BECAUSE they are the recovery console

@@ -124,3 +124,19 @@ CONFIG_PM_ENABLE=
 # HTTPS, native/moy_net/moy_ota.c); what stays internal is the hardware
 # AES/SHA's DMA bounce.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- Code this headless board never runs ------------------------------------
+# Every line is flash spent TWICE, once per OTA slot, on the one board whose
+# slot is 3 MB because the browser console it serves rides the image (the
+# 2026-10 look grew that bundle by 71 KB and took the headroom floor with it).
+# Each is a driver or a protocol half with no caller here; the sizes are the
+# archives' contributions in the linked ELF.
+#
+# Wired and SPI Ethernet (~43 KB, libesp_eth): the board's only link is its
+# WiFi radio, and no pad carries a PHY or a MAC. Off, MicroPython's
+# `MICROPY_PY_NETWORK_LAN` defaults to 0 for an S3 and `network.LAN` is gone.
+CONFIG_ETH_USE_SPI_ETHERNET=
+# WPA2/3-Enterprise (EAP-TLS/PEAP/TTLS) in the supplicant: the board joins the
+# home network a kid's browser is on, by passphrase, and raises its own setup
+# access point.
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=
