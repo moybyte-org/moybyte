@@ -472,10 +472,10 @@ class WindowChrome:
         ws._dirty = True
         if win.minimized:
             win.minimized = False
-            self._focus = key
+            self._move_focus(key)
         elif key == self._focus:
             if win.kind != "desktop":              # a running game never minimizes
                 win.minimized = True
-                self._focus = None
+                self._move_focus(None)
         else:
-            self._focus = key
+            self._move_focus(key)

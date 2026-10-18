@@ -940,16 +940,79 @@ def _game_and_settings(tmp_path):
     return ws, drv
 
 
+def _click_window(ws, drv, key):
+    """Click a point of window `key`'s title strip that no other window covers."""
+    win = ws.wm._wins[key]
+    for x in range(win.x + 2, win.x + win.w - 2, 4):
+        y = win.y + 3
+        if ws.wm._win_at(x, y) == key:
+            drv.touch(x, y)
+            drv.frame(1 / 30)
+            drv.touch_up()
+            drv.frame(1 / 30)
+            return
+    raise AssertionError("no uncovered point on %s's strip" % key)
+
+
 def _stored_name(tmp_path):
     from runtime import moy_carts
     return moy_carts.load_system(str(tmp_path / "carts")).get("name")
 
 
+def test_text_mode_follows_the_focused_window(tmp_path):
+    """The keyboard is in text mode only while the focused window's focused
+    stop is a text field: Settings' Name field keeps it only while Settings'
+    window has focus. Focus moving to the game's window puts the keyboard
+    back in button mode (and stores the Name typed); focus coming back to
+    Settings, still on the field, puts it in text mode again."""
+    ws, drv = _game_and_settings(tmp_path)
+    ws.wm._move_window(ws.wm._wins["settings"], 300, 200)
+    drv.frame(1 / 30)
+    _click_window(ws, drv, "desktop")
+    assert ws.wm._focus == "desktop"
+    assert not ws.input.text_mode, "the game's window has focus: button mode"
+    assert _stored_name(tmp_path) == "K", "focus leaving Settings stores the Name"
+    assert ws.wm.stack.top() == "settings", "a click pops nothing"
+    _click_window(ws, drv, "settings")
+    assert ws.wm._focus == "settings"
+    assert ws.settings_layer._focused == "Name"
+    assert ws.input.text_mode, "Settings' field has focus again: text mode"
+    ws.wm._chip_tap("desktop")                 # a chip moves focus the same way
+    assert ws.wm._focus == "desktop" and not ws.input.text_mode
+    ws.wm._chip_tap("settings")
+    assert ws.wm._focus == "settings" and ws.input.text_mode
+
+
+def test_a_cart_keeps_its_own_text_mode_across_focus(tmp_path):
+    """A running cart's own textmode(True) is its window's: focus going to
+    Settings (no field focused) is button mode, and back to the cart is its
+    text mode again."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()
+    drv.frame(1 / 30)
+    ws.input.text_mode = True                  # what the cart's textmode(True) writes
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert not ws.input.text_mode
+    ws.wm._move_window(ws.wm._wins["settings"], 300, 200)
+    drv.frame(1 / 30)
+    _click_window(ws, drv, "desktop")
+    assert ws.input.text_mode
+    _click_window(ws, drv, "settings")
+    assert not ws.input.text_mode
+
+
 def test_closing_the_settings_window_stores_a_name_being_typed(tmp_path):
-    """The strip's X is a way out like any other: the Name typed is stored."""
+    """The strip's X is a way out like any other: the Name typed is stored,
+    and the window it reveals gets its own button mode back."""
     ws, drv = _game_and_settings(tmp_path)
     ws.wm.close_window_kind("settings")
     assert _stored_name(tmp_path) == "K"
+    drv.frame(1 / 30)
+    assert ws.wm._focus == "desktop"
+    assert not ws.input.text_mode
 
 
 def test_settings_wifi_panel_connects_while_game_runs(tmp_path):

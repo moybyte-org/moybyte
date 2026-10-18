@@ -51,6 +51,9 @@ to whoever called it.
     moves keyboard focus WITHOUT popping, so a playtest keeps ticking while the
     Editor beside it is typed in — its pointer feed click-stripped so the
     background cart never eats editor taps. Only an explicit exit ends a run.
+    The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
+    window gets back the mode it had, so a field in one never leaves a game
+    beside it in text mode.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
   (`docs/shell_layout_2026-10.md` §12) has four tabs, and a tap on Games, Mine or
   Apps **always RUNS the cart** (an app's opens the app) — no mode, no type

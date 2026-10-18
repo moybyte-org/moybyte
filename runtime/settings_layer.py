@@ -1094,8 +1094,16 @@ class SettingsLayer:
 
     def leave(self):
         """Settings stopped holding the keyboard (the console's frame saw input
-        focus move): the Name being typed is stored."""
+        focus move): the Name being typed is stored, and a text mode Settings
+        set is handed back. On the desk the window manager has already put
+        the focused window's own in place; elsewhere it goes to button mode
+        unless another surface set it since."""
         self.commit_name()
+        if self._typing:
+            self._typing = False
+            ws = self.ws
+            if not ws.wm.desk_open() and ws._text_by == "settings":
+                ws._set_text_mode(False)
 
     def level(self, key):
         """A level row's (value, lowest, highest): the stored value, else the
@@ -1428,8 +1436,10 @@ class SettingsLayer:
             field = self._kinds.get(self._focused) == "field"
             if not field:
                 self.commit_name()        # focus left the field
-            typing = field                # typed letters are the field's,
-            if typing != self._typing:    # never a button's alias
+            # typed letters are the field's, never a button's alias -- while
+            # Settings holds the keyboard (on the desk, its window has focus)
+            typing = field and ws.wm.input_holder() == "settings"
+            if typing != self._typing:
                 self._typing = typing
                 ws._set_text_mode(typing)
         else:

@@ -369,6 +369,24 @@ def test_back_stores_a_name_being_typed(tmp_path):
     assert not ws.input.text_mode
 
 
+def test_back_into_a_cart_stores_the_name_and_hands_back_button_mode(tmp_path):
+    """Settings opened over a running cart returns to it: the Name typed is
+    stored and the keyboard is back in button mode for the game."""
+    ws, drv = _settings_page(tmp_path)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    ws.open()
+    drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    _type_name(ws, drv, "Kit")
+    ws._exit_settings()
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"
+    assert _stored_name(tmp_path) == "Kit"
+    assert not ws.input.text_mode
+
+
 def test_an_app_switch_stores_a_name_being_typed(tmp_path):
     ws, drv = _settings_page(tmp_path)
     _type_name(ws, drv, "Kit")

@@ -1161,8 +1161,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
         # The process the keyboard reaches (`wm.input_holder`), as the frame
-        # last saw it.
+        # last saw it, and the one that last set the keyboard's text mode.
         self._holder = None
+        self._text_by = None
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and
@@ -2761,6 +2762,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # nothing calls it per frame (a cart's own `textmode()` writes the flag
         # directly, cart_api.py). Do not add a per-frame caller: it would seed
         # away the keystroke it was called during.
+        #
+        # Text mode follows INPUT FOCUS: on the desk the windowed WM restores
+        # each window's own mode as focus moves (`note_text_mode` tells it a
+        # mode set for a window still being opened); `_text_by` is the process
+        # that set it last, which Settings asks before handing it back.
+        wm = getattr(self, "wm", None)
+        if wm is not None:
+            note = getattr(wm, "note_text_mode", None)
+            if note is not None:
+                note(self.input.text_mode)
+            self._text_by = wm.input_holder()
         if on:
             k = getattr(self.input, "last_key", 0) or 0
             self._ekey_prev = k
@@ -4014,8 +4026,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The look's change, applied once a frame, and `custom`'s autosave
         # debounce (theming phase 6 step 5): one attribute read when idle.
         self.look.tick(dt)
-        # Input focus moved (a screen left): Settings stores a Name still
-        # being typed.
+        # Input focus moved (a window clicked, a screen left): Settings stores
+        # a Name still being typed and hands back the keyboard's text mode.
         h = self.wm.input_holder()
         if h != self._holder:
             was = self._holder

@@ -45,7 +45,10 @@ Picotron-style (owner direction, 2026-07-08):
     click-stripped so the background cart never eats the editor's taps. Only an
     explicit exit ends a run: the strip X, hold-BACKSPACE while focused, or an
     app verb. Chips: click to focus, click the focused chip to minimize, click
-    a minimized chip to restore.
+    a minimized chip to restore. The keyboard's TEXT MODE follows focus: a
+    window keeps the mode it had when focus left it and gets it back when
+    focus returns (or a pop reveals it), so typing in one window never leaves
+    another -- a game's -- in text mode.
 
   ONE cart still runs at a time -- true multi-cart execution (N games ticking
   concurrently) stays out of scope per #73 (per-cart VM state / canvases / audio
@@ -375,6 +378,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # beside it is being typed in; only its X / hold-BACKSPACE (when focused)
         # / an exit verb ends it. None = the desktop root has focus.
         self._focus = None
+        # TEXT MODE follows _focus: the keyboard is in text mode only while
+        # the focused window wants it. `_text_wish` keeps, per window key (None
+        # the desk), the mode the window had when focus left it, and focus
+        # coming back restores it; `_text_left` is set once a pending stack
+        # change has recorded the window it takes focus from.
+        self._text_wish = {}
+        self._text_left = False
         # PLAY INTENT (#178): the same run() verb serves two jobs on a desktop --
         # playing a game (open it as big as fits) and PLAYTESTING the cart you are
         # editing (open it small, so the editor beside it stays readable). The
@@ -630,6 +640,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self.stack.has("desktop"):
             ws._exit_to_caller()
         self._sync_windows()
+        self._text_wish[self._focus] = bool(ws.input.text_mode)
         st = self.stack.kinds()
         at = self.stack.index("desk")
         self._parked = _Parked(st[at + 1:] if at >= 0 else [], self._order,
@@ -679,6 +690,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self.mode = "desktop"
         self._on_nav()
         self._sync_windows()
+        self._apply_text(self._focus)
         for g in self._order:
             win = self._wins[g]
             win._stamp_streak = 0
@@ -706,13 +718,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             for w in wins:
                 w.minimized = False
             focus = self._shown_focus
-            self._focus = focus if focus in self._wins else self._order[-1]
+            self._move_focus(focus if focus in self._wins else self._order[-1])
             return
         self._shown_focus = self._focus
         for w in wins:
             w.minimized = True
         if self._focus is not None and self._wins[self._focus].minimized:
-            self._focus = "desktop" if "desktop" in self._wins else None
+            self._move_focus("desktop" if "desktop" in self._wins else None)
 
     def release_cache(self):
         """The fit check's release: the parked stamps oldest-first, one per
@@ -759,16 +771,27 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         keys = self._slots()
         if keys != self._order:
             alive = set(keys)
+            old = self._focus
+            if not self._text_left and (old is None or old in alive):
+                self._text_wish[old] = bool(self.ws.input.text_mode)
             for g in list(self._wins):
                 if g not in alive:
                     self._drop_win(self._wins.pop(g))
+                    self._text_wish.pop(g, None)
+            new = keys[-1] if keys else None
+            revealed = new in self._wins
             for depth, g in enumerate(keys):
                 if g not in self._wins:
                     self._wins[g] = self._make_window(g, g, depth)
             self._order = keys
             # A stack change (spawn/pop) moves focus to the newest top window --
             # the one navigation just revealed/opened. Click moves it after that.
-            self._focus = keys[-1] if keys else None
+            # A window opened set its own text mode; one a pop revealed gets
+            # back the mode it had.
+            self._focus = new
+            if revealed and new != old:
+                self._apply_text(new)
+        self._text_left = False
         # Surface model: window records mirror the slot set. A dropped slot's
         # surface goes with it; a re-opened one is REBORN with fresh gens from
         # the monotonic mint, so no client cache can alias it (§2).
@@ -936,6 +959,41 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _focus_win(self):
         """The window holding INPUT focus, or None (the desktop root)."""
         return self._wins.get(self._focus) if self._focus else None
+
+    def input_holder(self):
+        """The process the keyboard reaches: the focused window's key on the
+        desk (None: the desk itself), the stack top in console mode."""
+        if self.mode == "console":
+            return self.stack.top()
+        return self._focus
+
+    def _move_focus(self, key):
+        """Focus moves to window `key` (None: the desk) with no stack change:
+        the window it leaves keeps its text mode, and `key` gets back its own."""
+        old = self._focus
+        if key == old:
+            return
+        self._text_wish[old] = bool(self.ws.input.text_mode)
+        self._focus = key
+        self._apply_text(key)
+
+    def _apply_text(self, key):
+        """Put the keyboard in the text mode window `key` had (button mode
+        for one that never set it)."""
+        ws = self.ws
+        on = self._text_wish.get(key, False)
+        if on != bool(ws.input.text_mode):
+            ws._set_text_mode(on)
+
+    def note_text_mode(self, prev):
+        """Console hook, before `ws._set_text_mode` applies a mode: while a
+        stack change is not yet mirrored into windows the mode is the window
+        about to take focus, so the focused one keeps `prev`, its own."""
+        if self.mode == "console" or self._text_left:
+            return
+        if self._slots() != self._order:
+            self._text_wish[self._focus] = bool(prev)
+            self._text_left = True
 
     def player_has_pointer(self):
         """Console hook: whether the game-space pointer publication should carry
@@ -2377,7 +2435,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # present underneath.
             if (click and self._focus is not None
                     and not ws.bar_layer.bar_at("desk", px, py)):
-                self._focus = None
+                self._move_focus(None)
                 ws._dirty = True
             return bool(self._backdrop_layer.handle_pointer(px, py, click))
         win = self._wins[key]
@@ -2386,7 +2444,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # Closing is explicit: the strip X, hold-BACKSPACE in a focused game, or
         # an app's own exit verb.
         if click and key != self._focus:
-            self._focus = key
+            self._move_focus(key)
             ws._dirty = True
         focused = (key == self._focus)
         if click:
@@ -2400,7 +2458,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 elif name == "min" and win.kind != "desktop":
                     win.minimized = True
                     if focused:
-                        self._focus = None
+                        self._move_focus(None)
                 return True
             if _in(px, py, self._grip_hit_rect(win)):
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
@@ -2450,7 +2508,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._sync_windows()
         if (ws.returns.caller() == EDITOR
                 and "menu" in self._order):
-            self._focus = "menu"
+            self._move_focus("menu")
         ws._dirty = True
 
     def close_window_kind(self, kind):

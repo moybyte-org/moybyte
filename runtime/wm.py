@@ -145,7 +145,8 @@ class FullscreenStackWM:
         return self.stack.top() == kind
 
     def input_holder(self):
-        """The process the keyboard reaches: the stack top."""
+        """The process the keyboard reaches: here the stack top. The windowed
+        WM answers the focused window on its desk (None: the desk itself)."""
         return self.stack.top()
 
     def top_is_player(self):
