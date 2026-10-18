@@ -172,6 +172,53 @@ _CHANGES = ("accent", "tint", "wallpaper", "frame", "font", "code_font")
 _THEME_WHY = ("big", "syntax", "newer", "name", "taken", "chain", "nomem")
 # The note of a saved theme.json one of whose pairs misses the contrast floor.
 UNREADABLE = "SOME COLOURS ARE HARD TO READ"
+
+
+def _fam(name, variant, desk=False):
+    """(family, weight steps, role sizes) theme `name`'s look sets in
+    `variant`: `fam`, or None, {500: w_med, 600: w_semi, 700: w_bold} for
+    the steps it moves, and {role: px} for the roles it sizes on the metric
+    class (`sizes.dk.*` on the desk, else `sizes.hh.*`)."""
+    look = live_colors(name, variant).look
+    texts = look[4] if len(look) > 4 else ()
+    i = look[0].get("fam", 0)
+    fam = texts[i - 1] if type(i) is int and 0 < i <= len(texts) else None
+    steps = {}
+    for w, leaf in _WEIGHT_STEPS:
+        v = look[0].get(leaf)
+        if type(v) is int and 100 <= v <= 900:
+            steps[w] = v
+    sizes = {}
+    cls = "sizes.dk." if desk else "sizes.hh."
+    for role in _SIZED_ROLES:
+        v = look[0].get(cls + role)
+        if type(v) is int and v > 0:
+            sizes[role] = v
+    return fam, steps, sizes
+
+
+def role_fonts(name, variant, desk=False, own=()):
+    """{role: (package, file)}: the font each role of theme `name` takes in
+    `variant` on the metric class (`desk`), package None for a face the image
+    carries. The files the theme's chain names; then `own`, the installed
+    package's own (role, file) pairs; then, where the look sets a family
+    (`fam`) and `own` names no `ui`, that family's face for each role of
+    `fontset.ROLES` and `fontset.CALC_ROLES`. A role it leaves out draws in
+    petme128."""
+    files = {}
+    for role, f in _ui_draw.theme_fonts(name):
+        files[role] = (None, f)
+    for role, f in own:
+        files[role] = (name, f)
+    fam, steps, sizes = _fam(name, variant, desk)
+    if fam is not None and "ui" not in dict(own):
+        for role in tuple(_fontset.ROLES) + tuple(_fontset.CALC_ROLES):
+            face = _fontset.role_face(fam, role, desk, steps, sizes)
+            if face is not None:
+                files[role] = (None, face)
+    return files
+
+
 # The theme fonts loaded, (package, file) -> id, the package None for a
 # seed's file: one table for the process, as the loader's slots are.
 _FONTS = {}
@@ -1677,22 +1724,12 @@ class Appearance:
         theme's faces at a time. A font that will not load (a face the image
         does not carry) leaves its role on petme128. True when a role's font
         or the floor changed."""
-        files = {}
-        for role, f in _ui_draw.theme_fonts(name):
-            files[role] = (None, f)
         own = ()
         if self._slot_src is not None and name == _ui_draw.theme_installed():
             got = package(name)
             own = got[5] if got is not None and got[0] == 0 else ()
-            for role, f in own:
-                files[role] = (name, f)
         desk = getattr(self.ws, "metric_class", None) == _layout_base.DESK
-        fam, steps, sizes = self._fam(name, desk)
-        if fam is not None and "ui" not in dict(own):
-            for role in tuple(_fontset.ROLES) + tuple(_fontset.CALC_ROLES):
-                face = _fontset.role_face(fam, role, desk, steps, sizes)
-                if face is not None:
-                    files[role] = (None, face)
+        files = role_fonts(name, self.theme_variant, desk, own)
         was = {role: _ui_draw.font(role)[0] for role in _FONT_ROLES + ("hero",)}
         want = set(files.values())
         for key in list(_FONTS):
@@ -1758,29 +1795,6 @@ class Appearance:
         if self.icon_sheet is not None and self._user_icons is None \
                 and (was is not None or self._theme_icons is not None):
             self.set_icon_sheet(self._theme_icons or _default_icon_sheet())
-
-    def _fam(self, name, desk=False):
-        """(family, weight steps, role sizes) theme `name`'s look sets in
-        the live variant: `fam`, or None, {500: w_med, 600: w_semi, 700:
-        w_bold} for the steps it moves, and {role: px} for the roles it
-        sizes on the metric class (`sizes.dk.*` on the desk, else
-        `sizes.hh.*`)."""
-        look = live_colors(name, self.theme_variant).look
-        texts = look[4] if len(look) > 4 else ()
-        i = look[0].get("fam", 0)
-        fam = texts[i - 1] if type(i) is int and 0 < i <= len(texts) else None
-        steps = {}
-        for w, leaf in _WEIGHT_STEPS:
-            v = look[0].get(leaf)
-            if type(v) is int and 100 <= v <= 900:
-                steps[w] = v
-        sizes = {}
-        cls = "sizes.dk." if desk else "sizes.hh."
-        for role in _SIZED_ROLES:
-            v = look[0].get(cls + role)
-            if type(v) is int and v > 0:
-                sizes[role] = v
-        return fam, steps, sizes
 
     def _font_id(self, key):
         """The loaded id of font `key`, (package, file): a store package's

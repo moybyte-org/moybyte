@@ -536,7 +536,7 @@ def test_draw_gates_are_installed(board):
 
 
 def test_draw_gates_take_the_traffic(board):
-    on_glass.draw_gates_take_the_traffic(board)
+    on_glass.draw_gates_take_the_traffic(board, windowed=True)
 
 
 def test_the_cart_store_is_the_card_when_one_mounted(board):

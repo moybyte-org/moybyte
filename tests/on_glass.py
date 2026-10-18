@@ -389,7 +389,7 @@ _SPRITE_THEME = b'{"format":2,"name":"spr","colors":{"dark":{"accent":12,"title"
 
 def sprite_host_frames():
     """The host's index frame of each SPRITE_SCENES scene, drawn from the
-    fixture sheet under a theme that names no font or surface."""
+    fixture sheet under a theme that names no font, surface or depth."""
     import runtime  # noqa: F401  (registers the host's moy_ui)
     import moy_ui
     from runtime import ui
@@ -402,6 +402,7 @@ def sprite_host_frames():
     try:
         assert moy_ui.theme_install(_SPRITE_THEME)[0] == 0
         ui_draw.use_shape("spr")
+        ui_draw.use_depth("spr", False)
         assert ui_draw.sheet_load(sheet) == 0
         th = theme_colors("spr")
         for what, args, fs in SPRITE_SCENES:
@@ -415,6 +416,7 @@ def sprite_host_frames():
     finally:
         ui_draw.sheet_clear()
         ui_draw.use_shape(None)
+        ui_draw.use_depth(None, False)
         moy_ui.theme_uninstall()
     return out
 
@@ -431,6 +433,7 @@ def _sprite_scene(src, what, args, fs):
     try:
         assert moy_ui.theme_install(src)[0] == 0
         ui_draw.use_shape('spr')
+        ui_draw.use_depth('spr', False)
         assert ui_draw.sheet_load(sheet) == 0
         _scale(cv, fs)
         th = chrome.theme_colors('spr')
@@ -454,8 +457,9 @@ def sprites_match_host(board):
     """Every sprite scene, drawn by this board's moy_ui from the fixture
     sheet into a scratch layer and read back as palette indices, is the
     host's frame byte for byte: the sheet reader, the slot table and the
-    blit are one C body on every tier. The live theme, its shape and its
-    sheet are put back after each scene."""
+    blit are one C body on every tier. Each scene draws in the fixture
+    theme's shape and depth (none), whatever the live theme's are; the live
+    theme, its shape, depth and sheet are put back after each scene."""
     want = sprite_host_frames()
     with open(SPRITE_FIXTURE, "rb") as f:
         sheet = f.read()
@@ -832,23 +836,26 @@ def theme_custom_matches_host(board):
 
 
 def the_theme_font_is_installed(board):
-    """The default theme's Tiny5 (docs/theming_2026-09.md §4.7) is what this
-    board's shell draws in: the seed font file byte for byte the host's,
-    loaded once, installed for `ui`, `title` and the print font, with `mono`
-    on petme128."""
-    import binascii
+    """The live theme's faces (docs/theming_2026-09.md §4.7) are what this
+    board's shell draws in: each role holds the face `appearance.role_fonts`
+    names on the host for the same theme, variant and metric class, loaded
+    once, and the print font is `ui`'s. The bytes and metrics of each face
+    are `the_font_set_is_the_tiers`'."""
     import runtime  # noqa: F401  (registers the host's moy_ui)
-    import moy_ui
-    host = binascii.hexlify(moy_ui.font_file("tiny5.fnt")).decode()
-    got = board.pyval("__import__('binascii').hexlify(__import__('moy_ui').font_file("
-                      "'tiny5.fnt')).decode()", strict=True)
-    assert got == host
-    ui_id, title_id, mono_id, pf = board.pyval(
-        "[__import__('moy_ui').font(r)[0] for r in ('ui', 'title', 'mono')]"
-        " + [__import__('moy_ui').print_font()]", strict=True)
-    assert ui_id != 0 and title_id == ui_id and mono_id == 0 and pf == ui_id
-    info = board.pyval("__import__('moy_ui').font_info(%d)" % ui_id, strict=True)
-    assert tuple(info) == (6, 7, 8, 6, 0x20, 95)
+    from runtime import appearance
+    roles = ("ui", "title", "mono")
+    name, variant, desk, ids, pf, loaded = board.pyval(
+        "(lambda a, u: (ws.look.theme_name, ws.look.theme_variant,"
+        " ws.metric_class == __import__('layout_base').DESK,"
+        " [u.font(r)[0] for r in %r], u.print_font(),"
+        " sorted((v, k[0], k[1]) for k, v in a._FONTS.items())))"
+        "(__import__('appearance'), __import__('moy_ui'))" % (roles,), strict=True)
+    want = appearance.role_fonts(name, variant, desk)
+    on = {fid: (pkg, f) for fid, pkg, f in loaded}
+    assert len(on) == len(loaded), loaded
+    got = {r: on.get(fid) for r, fid in zip(roles, ids) if fid}
+    assert got == {r: want[r] for r in roles if r in want}, (name, variant, desk)
+    assert ids[0] != 0 and pf == ids[0], (ids, pf)
 
 
 def the_font_set_is_the_tiers(board, tier):
@@ -1016,7 +1023,7 @@ def draw_gates_are_installed(board, windowed=False):
         assert ungated == [], ungated
 
 
-def draw_gates_take_the_traffic(board):
+def draw_gates_take_the_traffic(board, windowed=False):
     """The gates must actually be drawing -- a fallback that quietly swallowed
     every call would look installed and measure fast.
 
@@ -1026,13 +1033,20 @@ def draw_gates_take_the_traffic(board):
     there legitimately moves no gated verb at all. The first draft asked on the
     home screen, which is a desk board's shape, and read (0, 0) on the Guition
     S3 -- a green light on the P4s for a check that could not fail on the S3s.
-    Settings draws real chrome on every tier. Restored before the assert, so a
-    failure does not leave the next test on the wrong screen."""
+    Settings draws real chrome on every tier. On the windowed tier its page
+    draws into its window's buffer, whose gates are its own, while a theme
+    with depth draws the window's frame in C: the root alone may read no
+    fill there, so the count is the root's and every window buffer's.
+    Restored before the assert, so a failure does not leave the next test on
+    the wrong screen."""
+    bufs = "[ws.sys_canvas]" + (
+        " + [w.buf for w in ws.wm._wins.values()]" if windowed else "")
     board.open("settings")
     board.drain(1.0)
-    board.pyexec("ws.sys_canvas.gate_counts_reset()\nws.mark_dirty()")
+    board.pyexec("for _c in %s: _c.gate_counts_reset()\nws.mark_dirty()" % bufs)
     board.drain(1.5)
-    fills, texts, _fu, _tu = board.pyval("ws.sys_canvas.gate_counts()")
+    fills, texts = board.pyval(
+        "[sum(c.gate_counts()[i] for c in %s) for i in (0, 1)]" % bufs)
     board.cmd("py ws.exit()", wait_for="PY")
     board.drain(0.5)
     assert fills > 0 and texts > 0, (fills, texts)
