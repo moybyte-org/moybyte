@@ -307,6 +307,9 @@ def _overlapping(tmp_path, variant):
     ws.open_app(ws._apps_by_id["calc"])
     drv.frame(0.0)
     files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
+    # Files centred on the glass (the geometry these tests drag in), Calc
+    # over its right half.
+    ws.wm._move_window(files, (ws.sys_canvas.w - files.w) // 2, files.y)
     ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
     _quiet(ws)
     for _ in range(3):

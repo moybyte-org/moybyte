@@ -904,7 +904,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 wx, ww = max(dx, dx + dw - w), w
             x = wx + (ww - w) // 2 + depth * 12 * fs
             y = dy + (dh - h) * 2 // 5 + depth * 10 * fs
-            x = max(wx, min(x, dx + dw - w // 2))
+            x = max(wx, min(x, dx + dw - (w if w <= dw - (wx - dx) else w // 2)))
             y = max(dy, min(y, dy + dh - 24 * fs))
         x, y = self._clear_of_subject(x, y, w, h, fs)
         win = _Win(kind, x, y, w, h, title_h)
@@ -921,7 +921,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         (`Wallpaper.subject`, docs/theming_2026-09.md §4.9): where the
         window at (x, y) would cover it, the nearest place beside, above or
         under it, 8 pixels clear at the font scale, that holds the whole
-        window on the desk; where none does, (x, y) as it was."""
+        window in the work area (`_work_rect`, clear of the icon column);
+        where none does, (x, y) as it was."""
         s = getattr(getattr(self.ws, "wallpaper", None), "subject", None)
         if s is None:
             return x, y
@@ -931,6 +932,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 or y >= sy + sh + m:
             return x, y
         dx, dy, dw, dh = self._desk_rect()
+        dw -= self._work_rect(fs)[0] - dx
+        dx = self._work_rect(fs)[0]
         best = None
         for cx, cy in ((sx - m - w, y), (sx + sw + m, y),
                        (x, sy - m - h), (x, sy + sh + m)):
