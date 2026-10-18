@@ -8,7 +8,7 @@
 ;; tools/wasm_cart.py and never committed. Into pmem: 0 frames, 1 the link's
 ;; activations, 2 the size (from 0), 3 the mode, 4 the accent, 5 the focused
 ;; id's length, 6 the last row answer that failed, negated (0: none), 7 the
-;; content's top.
+;; content's top, 8 the name's length, 9 the times Enter was pressed in it.
 (module
   (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_page" (func $ui_page
@@ -27,6 +27,8 @@
   (import "moybyte.app" "ui_icon" (func $ui_icon (param i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_progress" (func $ui_progress
     (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_field" (func $ui_field
+    (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
@@ -46,12 +48,17 @@
   (data (i32.const 1176) "\00\00\ff\00\00\c0\00\00\ff\00\00\00")
   (data (i32.const 1192) "wifi")
   (data (i32.const 1200) "Update")
+  (data (i32.const 1208) "Name")
+  (data (i32.const 2144) "pic")
 
-  ;; 2048: the page's rect (16 bytes); 2096: the focused id (32).
+  ;; 2048: the page's rect (16 bytes); 2096: the focused id (32); 2144: the
+  ;; name (8).
   (global $opens (mut i32) (i32.const 0))
   (global $size (mut i32) (i32.const 1))
   (global $mode (mut i32) (i32.const 0))
   (global $accent (mut i32) (i32.const 0))
+  (global $len (mut i32) (i32.const 3))
+  (global $dones (mut i32) (i32.const 0))
   (global $frames (mut i32) (i32.const 0))
 
   ;; A row's answer: below 0 is a failure, kept in pmem 6.
@@ -66,6 +73,7 @@
 
   (func (export "_draw")
     (local $f i32)
+    (local $r i32)
     (call $ok (call $ui_page (i32.const 1024) (i32.const 5) (i32.const 0) (i32.const 0)
                              (i32.const 2048) (i32.const 16)))
     (call $ok (call $ui_hints (i32.const 1040) (i32.const 28) (i32.const 0) (i32.const 0)))
@@ -88,6 +96,12 @@
     (global.set $accent (call $ui_swatches (i32.const 1168) (i32.const 6) (i32.const 1176)
                                            (i32.const 12) (global.get $accent) (i32.const 0)
                                            (i32.const 0)))
+    (local.set $r (call $ui_field (i32.const 1208) (i32.const 4) (i32.const 2144) (i32.const 8)
+                                  (global.get $len) (i32.const 0) (i32.const 0)))
+    (call $ok (local.get $r))
+    (global.set $len (i32.and (local.get $r) (i32.const 0xffff)))
+    (if (i32.and (local.get $r) (i32.const 0x10000))
+      (then (global.set $dones (i32.add (global.get $dones) (i32.const 1)))))
     (call $ok (call $ui_group (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)))
     (local.set $f (call $ui_focus (i32.const 0) (i32.const 0) (i32.const 2096) (i32.const 32)))
     (global.set $frames (i32.add (global.get $frames) (i32.const 1)))
@@ -97,4 +111,6 @@
     (drop (call $pmem (i32.const 3) (global.get $mode) (i32.const 1)))
     (drop (call $pmem (i32.const 4) (global.get $accent) (i32.const 1)))
     (drop (call $pmem (i32.const 5) (local.get $f) (i32.const 1)))
-    (drop (call $pmem (i32.const 7) (i32.load (i32.const 2052)) (i32.const 1)))))
+    (drop (call $pmem (i32.const 7) (i32.load (i32.const 2052)) (i32.const 1)))
+    (drop (call $pmem (i32.const 8) (global.get $len) (i32.const 1)))
+    (drop (call $pmem (i32.const 9) (global.get $dones) (i32.const 1)))))

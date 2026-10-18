@@ -1296,21 +1296,30 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 // -- a text field ------------------------------------------------------------------------
 
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text_,
-                 int flags, int fs, int desk) {
+                 int flags, int fs, int desk, int card) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_marks_t *m = moy_ui_marks();
     int sc = tscale(s);
-    int pad = (desk ? gm(MOY_UI_M_GROUP_PAD, fs) : metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * d.fs);
+    int pad = (card || desk ? gm(MOY_UI_M_GROUP_PAD, fs)
+                            : metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * d.fs);
     int gap = pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
     int inset = pm(&d, MOY_UI_M_VALUE_ROW_FIELD, 1);
     pf_t fl = font_of(&d, MOY_UI_FONT_UI);
-    uint16_t ink = pal(&d, tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
-    int x = b.x + pad;
+    int on_card = card && !desk;
+    uint16_t ink = pal(&d, on_card ? tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK)
+                                   : tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
+    int x = b.x + pad, right = b.x + b.w - pad;
     if (label.n) {
         x += text(&d, &fl, label.p, label.n, x, b.y, b.h, ink, sc) + gap;
     }
-    moy_ui_box_t f = {(int16_t)x, (int16_t)(b.y + inset), (int16_t)(b.x + b.w - pad - x),
+    if (card) {
+        // in a group the field is the row's value: as wide as a slider's
+        // track, at the row's right, the label keeping the room left of it
+        int col = right - pm(&d, MOY_UI_M_VALUE_ROW_TRACK, 1);
+        x = col > x ? col : x;
+    }
+    moy_ui_box_t f = {(int16_t)x, (int16_t)(b.y + inset), (int16_t)(right - x),
                       (int16_t)(b.h - 2 * inset)};
     if (f.w <= 0 || f.h <= 0) {
         return MOY_UI_OK;

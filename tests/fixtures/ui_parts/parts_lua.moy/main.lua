@@ -3,12 +3,14 @@
 -- with the same calls, and tests/test_ui_parts.py holds the three to the
 -- same pixels. Into pmem: 0 frames, 1 the link's activations, 2 the size
 -- (from 0), 3 the mode, 4 the accent, 5 the focused id's length, 7 the
--- content's top.
+-- content's top, 8 the name's length, 9 the times Enter was pressed in it.
 
 opens = 0
 size = 2
 mode = 1
 accent = 1
+name = "pic"
+dones = 0
 frames = 0
 
 function _draw()
@@ -23,6 +25,9 @@ function _draw()
   ui.group("Look")
   mode = ui.seg("Mode", {"Day", "Night"}, mode)
   accent = ui.swatches("Accent", {0xff0000, 0x00c000, 0x0000ff}, accent)
+  local d
+  name, d = ui.field("Name", name, 8)
+  if d then dones = dones + 1 end
   ui.group()
   local f = ui.focus()
   frames = frames + 1
@@ -33,4 +38,6 @@ function _draw()
   pmem(4, accent - 1)
   pmem(5, f and #f or 0)
   pmem(7, y)
+  pmem(8, #name)
+  pmem(9, dones)
 end

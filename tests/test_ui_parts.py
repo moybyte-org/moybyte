@@ -45,7 +45,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARTS = os.path.join(ROOT, "tests", "fixtures", "ui_parts")
 WASM = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_parts.moy")
 _DT = 1.0 / 30.0
-P_FRAMES, P_OPENS, P_SIZE, P_MODE, P_ACCENT, P_FOCUS, P_FAIL, P_TOP = range(8)
+P_FRAMES, P_OPENS, P_SIZE, P_MODE, P_ACCENT, P_FOCUS, P_FAIL, P_TOP, P_NAME, P_DONES = range(10)
+N_PMEM = 10
 BITS = {"left": 1, "right": 2, "up": 4, "down": 8, "a": 16, "b": 32, "run": 64}
 
 _THEMES = {}
@@ -318,14 +319,14 @@ def _pixels(ws):
 def _pmem(ws):
     lua = getattr(ws.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
-        return list(lua._run.pmem()[1])[:8]
+        return list(lua._run.pmem()[1])[:N_PMEM]
     if lua is not None:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        return list(img)[:8]
+        return list(img)[:N_PMEM]
     pm = ws.player.ns["pmem"]
-    return [pm(i) for i in range(8)]
+    return [pm(i) for i in range(N_PMEM)]
 
 
 def _frame(drv):
@@ -336,7 +337,8 @@ def _frame(drv):
 
 def _script(ws):
     """Settle; open the link; step the cycle; move to the seg and step it;
-    then tap the swatch picker's last dot."""
+    then tap the swatch picker's last dot; move down to the field, type in
+    it and press Enter."""
     drv = make_drv(ws)
     shots = []
     for _ in range(3):
@@ -355,6 +357,14 @@ def _script(ws):
     _frame(drv)
     _frame(drv)
     shots.append((_pixels(ws), _pmem(ws)))
+    for step in ("down", ord("x"), 13):
+        if isinstance(step, int):
+            drv.type_char(step)
+        else:
+            drv.press(step)
+        _frame(drv)
+        _frame(drv)
+        shots.append((_pixels(ws), _pmem(ws)))
     return shots
 
 
@@ -387,8 +397,9 @@ def test_the_parts_page_is_one_page_in_every_runtime(parts_runs):
     for name, got in parts_runs.items():
         assert len(got) == len(ref)
         for i, ((px, pm), (rpx, rpm)) in enumerate(zip(got, ref)):
-            assert pm[:P_FAIL] == rpm[:P_FAIL], "%s step %d answered %r, python %r" % (
-                name, i, pm, rpm)
+            assert (pm[:P_FAIL] == rpm[:P_FAIL]
+                    and pm[P_FAIL + 1:] == rpm[P_FAIL + 1:]), \
+                "%s step %d answered %r, python %r" % (name, i, pm, rpm)
             assert pm[P_FAIL] == 0, "%s: a row failed (%d)" % (name, pm[P_FAIL])
             assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
 
@@ -403,6 +414,9 @@ def test_the_parts_page_answers_its_script(parts_runs):
     assert s[7][P_FOCUS] == len("Accent")
     assert s[8][P_ACCENT] == 0, "left at the first dot stays"
     assert s[9][P_ACCENT] == 2, "the tap picked the last dot"
+    assert s[10][P_FOCUS] == len("Name"), "down from the swatches is the field"
+    assert s[11][P_NAME] == len("picx"), "the field took the typed key"
+    assert s[12][P_DONES] == 1, "Enter in the field"
 
 
 # -- an icon on a row, and a progress bar (docs/look_2026-10.md step 19) --------------
@@ -679,6 +693,43 @@ def test_an_unfocused_field_takes_no_keys():
     r.frame(("down",))
     assert ui.focus() == "After"
     assert r.frame(typed="c")["text"] == "ab"
+
+
+TRACK = 84      # style.json's value_row `track` at fs 1: a slider's, and a grouped field's
+
+
+def test_a_field_in_a_group_lays_out_like_the_other_rows():
+    """On a group's card a field's label is where a link's is, and its box
+    is the row's value: a slider's track wide at the row's right, the room
+    between the two the card's."""
+    st = {}
+
+    def draw():
+        st["rect"] = ui.page("")
+        ui.group("You")
+        ui.link("Top", "")                      # holds focus, away from both rows
+        ui.link("Name", "v", {"id": "link"})
+        st["text"], _d = ui.field("Name", "Kit", 16)
+        ui.link("Foot", "")                     # the card's rounded foot, below both
+        ui.group()
+        return st
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    top = r.out["rect"][1] + CAPTION
+    link_y, field_y = top + ROW, top + 2 * ROW
+    right = 320 - INSET - PAD
+    label = _ink_cols(r, link_y + 2, link_y + ROW - 2, INSET + 2, 60)
+    assert label and label[0] >= INSET + PAD - 1, "the link's label sits at the group's pad"
+    assert _ink_cols(r, field_y + 2, field_y + ROW - 2, INSET + 2, 60) == label, \
+        "the field's label is drawn where the link's is"
+    card = r.px(right - TRACK - 20, field_y + ROW // 2)
+    mid = field_y + ROW // 2
+    box = [x for x in range(INSET + PAD + 40, 320 - INSET) if r.px(x, mid) != card]
+    assert box and box[0] == right - TRACK, "the box starts a track's width from the right"
+    assert box[-1] < right + 1, "and ends at the row's pad"
+    assert all(r.px(x, mid) == card for x in range(label[-1] + 2, right - TRACK)), \
+        "the card shows between the label and the box"
 
 
 def _dialog_page(shown, body_field=False):

@@ -700,9 +700,12 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
 int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t content, int flags,
                     uint16_t gnd, int fs, int desk);
 // A text field row (ui.field): its label, then the field to the row's right
-// showing the text's tail and, focused (F_FOCUS), the caret.
+// showing the text's tail and, focused (F_FOCUS), the caret. On a group's
+// card (`card`) the label sits where a value row's does and the field is the
+// row's value, a slider's track wide at its right; elsewhere the field takes
+// the row from the label to its right.
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
-                 int flags, int fs, int desk);
+                 int flags, int fs, int desk, int card);
 // A modal card (ui.dialog) in box b: its shadow under a depth, the card and
 // its title in the `title_h` rows under the card's padding; the padding.
 int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,

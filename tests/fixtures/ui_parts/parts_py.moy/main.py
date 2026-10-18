@@ -2,17 +2,20 @@
 # app. parts_lua.moy and tests/fixtures/wasm/app_parts.moy draw the same page
 # with the same calls, and tests/test_ui_parts.py holds the three to the same
 # pixels. Into pmem: 0 frames, 1 the link's activations, 2 the size (from 0),
-# 3 the mode, 4 the accent, 5 the focused id's length, 7 the content's top.
+# 3 the mode, 4 the accent, 5 the focused id's length, 7 the content's top,
+# 8 the name's length, 9 the times Enter was pressed in it.
 
 opens = 0
 size = 1
 mode = 0
 accent = 0
+name = "pic"
+dones = 0
 frames = 0
 
 
 def _draw():
-    global opens, size, mode, accent, frames
+    global opens, size, mode, accent, name, dones, frames
     x, y, w, h = ui.page("Parts")
     ui.hints(["enter", "Open", "left right", "Change"])
     ui.group("General")
@@ -25,6 +28,9 @@ def _draw():
     ui.group("Look")
     mode = ui.seg("Mode", ["Day", "Night"], mode)
     accent = ui.swatches("Accent", [0xff0000, 0x00c000, 0x0000ff], accent)
+    name, d = ui.field("Name", name, 8)
+    if d:
+        dones += 1
     ui.group()
     f = ui.focus()
     frames += 1
@@ -35,3 +41,5 @@ def _draw():
     pmem(4, accent)
     pmem(5, len(f) if f else 0)
     pmem(7, y)
+    pmem(8, len(name))
+    pmem(9, dones)
