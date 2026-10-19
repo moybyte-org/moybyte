@@ -1651,6 +1651,7 @@ SERVED(nav, NAV, edit_file)
 SERVED(nav, NAV, play)
 SERVED(nav, NAV, run_script)
 SERVED(nav, NAV, text_mode)
+SERVED(nav, NAV, cover)
 
 static const mp_rom_map_elem_t nav_locals_table[] = {
     ROW(nav, open_app)
@@ -1663,6 +1664,7 @@ static const mp_rom_map_elem_t nav_locals_table[] = {
     ROW(nav, play)
     ROW(nav, run_script)
     ROW(nav, text_mode)
+    ROW(nav, cover)
 };
 SERVED_ROLE(nav, Nav)
 

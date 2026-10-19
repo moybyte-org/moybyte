@@ -1695,6 +1695,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         c->reveal = 1;
         c->reveal_box = (moy_ui_box_t){b.x, (int16_t)(view.y + cur * rh), b.w, (int16_t)rh};
     }
+    c->tbl_y0 = (int16_t)(view.y - offset);
+    c->tbl_rh = (int16_t)rh;
+    c->tbl_view = view;
+    c->tbl_px = c->tbl_pw = 0;
     clip_t k;
     if (clip_row(&k, s, b, stacked, c->page)) {
         band(c, s, b, stacked, 0);
@@ -1703,6 +1707,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         }
         moy_ui_tgeo_t g;
         moy_ui_table_geo(s, b, cols, cols_n, cells, cells_n, c->fs, c->cls, &g);
+        if (g.pic) {
+            c->tbl_px = g.x[0];
+            c->tbl_pw = g.w[0];
+        }
         if (head_h) {
             moy_ui_table_head(s, (moy_ui_box_t){b.x, (int16_t)(b.y + cap_h), b.w, (int16_t)head_h},
                               &g, cols, cols_n, c->fs, c->cls);
@@ -2261,6 +2269,18 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     out[2] = content.w;
     out[3] = content.h;
     out[4] = st;
+}
+
+int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]) {
+    out[0] = c->tbl_y0;
+    out[1] = c->tbl_rh;
+    out[2] = c->tbl_view.x;
+    out[3] = c->tbl_view.y;
+    out[4] = c->tbl_view.w;
+    out[5] = c->tbl_view.h;
+    out[6] = c->tbl_px;
+    out[7] = c->tbl_pw;
+    return c->tbl_pw > 0;
 }
 
 void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {

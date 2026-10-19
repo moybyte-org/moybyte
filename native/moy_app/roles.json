@@ -79,6 +79,7 @@
     {"role": "nav", "verb": "play", "server": "shell", "grant": "launch", "wasm": null},
     {"role": "nav", "verb": "run_script", "server": "shell", "grant": "launch", "wasm": null},
     {"role": "nav", "verb": "text_mode", "server": "shell", "grant": "launch", "wasm": null},
+    {"role": "nav", "verb": "cover", "server": "shell", "grant": "launch", "wasm": null},
     {"role": "prefs", "verb": "get", "server": "c", "grant": "prefs", "wasm": "(*~*~)i"},
     {"role": "prefs", "verb": "set", "server": "c", "grant": "prefs", "wasm": "(*~*~)i"},
     {"role": "prefs", "verb": "clear", "server": "c", "grant": "prefs", "wasm": "(*~)i"},

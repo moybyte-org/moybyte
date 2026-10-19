@@ -342,6 +342,22 @@ def table(label, columns, rows, cur, o=None):
                         -1 if cur is None else cur, _over(o))
 
 
+def initial(rect, title, r=0):
+    """A generated cover over `rect` (corners `r`) for a cart that has none:
+    `title`'s initial on the colour block that stays the cart's, as the
+    home's cards draw it (`ui_draw.initial_cover`)."""
+    _D.initial_cover(_T[1], rect, r, title)
+
+
+def table_rows():
+    """Where the table drawn last put its rows, for an app that draws a
+    row's own picture over its picture column's cell (Files' covers):
+    `(row0_y, row_h, view, pic_x, pic_side)` -- row i's cell is at
+    (pic_x, row0_y + i * row_h + (row_h - pic_side) // 2), shown where it
+    lies in `view` -- or None where it had no picture column."""
+    return _C.api_table_rows(_T[0])
+
+
 def scroll(id=None, o=None):
     """`scroll(id)` begins a scroll region in `at`'s rect (else the page's
     room below its rows): the rows stacked after it scroll in it, by the keys

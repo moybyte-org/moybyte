@@ -182,6 +182,10 @@ typedef struct {
     uint8_t fin_on, fin_flags;
     uint16_t fin_ground;
     moy_ui_box_t fin_pic, fin_content;
+    // The table drawn last: row 0's top (scrolled) and the rows' height, the
+    // view they show in, and its picture column's x and side (0: none).
+    int16_t tbl_y0, tbl_rh, tbl_px, tbl_pw;
+    moy_ui_box_t tbl_view;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -309,6 +313,11 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // draws into it before its next ui call -- and the state bits (§5).
 void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      moy_ui_span_t sub, const moy_ui_over_t *o, int32_t out[5]);
+// The table drawn last this frame (ui.table): out row 0's top (scrolled),
+// the rows' height, the view's x, y, w and h, the picture column's x and
+// side, where an app draws a row's own picture over its cell; 0 where that
+// table has no picture column or none was drawn.
+int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one.

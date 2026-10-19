@@ -49,6 +49,8 @@ try:
 except ImportError:  # pragma: no cover - host package lane
     from runtime.app_context import NO_STORE
 
+_COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
+
 
 # -- theme ---------------------------------------------------------------------
 
@@ -330,6 +332,19 @@ class NavServer:
         """Flip the keyboard between typing and game mode, for an app that
         changes mode mid-session (Storybook's page editor)."""
         self.__ws._set_text_mode(bool(on))
+
+    def cover(self, g, cart):
+        """`cart`'s cover decoded at its half (64x64), what a list row draws
+        scaled to its picture (Files' projects): None for a cart with no
+        cover, False while its decode is in flight (the shell's cover cache,
+        runtime/cover_cache.py, lands it over frames: ask again)."""
+        covers = getattr(self.__ws, "covers", None)
+        if covers is None:
+            return None
+        img = covers.cover_for(cart, _COVER_HALF)
+        if img is None and not covers.none_for(cart):
+            return False
+        return img
 
 
 # -- notifications ---------------------------------------------------------------

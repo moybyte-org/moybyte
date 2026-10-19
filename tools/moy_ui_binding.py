@@ -300,6 +300,7 @@ _DRAW_SIGS = (
      c.c_int32),
     ("moy_ui_api_owes", [c.c_void_p], _I),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
+    ("moy_ui_api_table_rows", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -1058,6 +1059,13 @@ def binding():
         p, _k = _ctx(ctx)
         lib.moy_ui_api_end(p, c.byref(sink(cv, look)))
 
+    def api_table_rows(ctx):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 8)()
+        if not lib.moy_ui_api_table_rows(p, v):
+            return None
+        return (v[0], v[1], (v[2], v[3], v[4], v[5]), v[6], v[7])
+
     def api_grid(ctx, cv, look, id_, w, h, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -1117,6 +1125,7 @@ def binding():
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_end,
+              api_table_rows,
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_focus, api_keys_taken, api_at, api_dup):

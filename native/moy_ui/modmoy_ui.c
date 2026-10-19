@@ -2273,6 +2273,21 @@ static mp_obj_t ui_api_hints(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_obj, 5, 5, ui_api_hints);
 
+// api_table_rows(ctx) -> (row0_y, row_h, view, pic_x, pic_side) of the table
+// drawn last, or None where it had no picture column
+static mp_obj_t ui_api_table_rows(mp_obj_t ctx) {
+    int32_t v[8];
+    if (!moy_ui_api_table_rows(ctx_of(ctx), v)) {
+        return mp_const_none;
+    }
+    mp_obj_t view[4] = {mp_obj_new_int(v[2]), mp_obj_new_int(v[3]), mp_obj_new_int(v[4]),
+                        mp_obj_new_int(v[5])};
+    mp_obj_t t[5] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1]), mp_obj_new_tuple(4, view),
+                     mp_obj_new_int(v[6]), mp_obj_new_int(v[7])};
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_rows_obj, ui_api_table_rows);
+
 // api_end(ctx, cv, look): the page's end, after its rows
 static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     moy_ui_sink_t s;
@@ -2608,6 +2623,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },

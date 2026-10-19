@@ -529,3 +529,50 @@ def test_the_desks_list_holds_whole_rows_above_the_verbs(tmp_path):
             top = files_app.HEAD[1] + (0 if lay.two else files_app.CAPTION[1])
             assert (lay.list[3] - top) % lay.row_h == 0, (w, h)
             assert lay.row_h == row["stack_desk"]
+
+
+# -- the projects' rows and the foot (design review D-11, m02, m10) ---------------------
+
+def test_a_projects_row_is_the_carts_title_with_its_cover(tmp_path):
+    """A project's row names the cart by its title, as the home does, and its
+    picture is its cover (`nav.cover`: False while the decode lands, None
+    for a cart with none, which draws its generated one); the row opens the
+    cart it names."""
+    from runtime import cover_cache, shell_servers
+    assert shell_servers._COVER_HALF == cover_cache.HALF
+    ws = _ws(tmp_path)
+    app, drv = _files(ws)
+    _press(drv, "a")
+    assert (app.place, app.level) == (files_app.PROJECTS, "files")
+    titles = {c.get("title") for c in app._nav.projects()}
+    assert set(app.names_shown()) == titles
+    assert all(r[3] == "" for r in app.rows), "the picture is the cover, not a kind's icon"
+    i = app.names_shown().index("Harpoon Pop")
+    assert app.door("Harpoon Pop", kind=files_app.PROJECTS) == ("editor", app.rows[i][4])
+    got = None
+    for _ in range(40):                       # the covers land over frames
+        _frames(drv)
+        got = app._nav.cover(app.rows[i][4])
+        if got:
+            break
+    assert got and got.w == 64, "Harpoon Pop's cover at its half"
+    coverless = [r[4] for r in app.rows if r[0] == "Coin Quest"]
+    for _ in range(40):
+        if app._nav.cover(coverless[0]) is not False:
+            break
+        _frames(drv)
+    assert app._nav.cover(coverless[0]) is None
+
+
+def test_the_foot_is_a_bar_with_the_primary_verb_at_its_right(tmp_path):
+    """The current row's verbs sit at the foot's right, the one Enter does
+    (Open) last, and no mouse button wears a key's sign."""
+    ws = _ws(tmp_path)
+    app, drv = _files(ws)
+    _press(drv, "a")
+    play, opn = app._ui.box("verb PLAY"), app._ui.box("verb OPEN")
+    assert play is not None and opn is not None
+    assert play[0] < opn[0], "Open, the primary, is right of Play"
+    fx, _fy, fw, _fh = app.layout.foot
+    assert opn[0] + opn[2] >= fx + fw - app.layout.pad - 1, "the verbs end at the foot's right"
+    assert files_app.VERB["OPEN"][1] != "enter"

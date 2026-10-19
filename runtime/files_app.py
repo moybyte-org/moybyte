@@ -11,12 +11,14 @@ API's verbs (docs/ui_api_2026-10.md) and nothing under them.
 
 Places down the side (Projects, Notes, Art, Music, Themes once there are
 any, and the Trash), and the place's files in columns: each file's picture
-(an icon by what it is), its Name and its Kind (docs/media/look_2026-10/
-DESIGN.md, Files). No paths and no extensions. The handheld shows the
-places, then a place's files, one page at a time; the desk shows both. A
-file's verbs ride the foot of the list: OPEN in the owning app (Enter, or a
-second tap on the current row, does the same), RENAME in a dialog (Paint's
-open picture follows it, `artwork.follow`), COPY, WALL / GAME / USE for a
+(an icon by what it is; a project's cover, else its generated one), its
+Name (a project's title) and its Kind (docs/media/look_2026-10/DESIGN.md,
+Files). No paths and no extensions. The handheld shows the places, then a
+place's files, one page at a time; the desk shows both. A file's verbs
+ride a foot bar under the list, at its right, the one Enter does last: OPEN
+in the owning app (Enter, or a second tap on the current row, does the
+same), RENAME in a dialog (Paint's open picture follows it,
+`artwork.follow`), COPY (Duplicate), WALL / GAME / USE for a
 drawing (`picture_copies.PictureCopies`), and DELETE, which moves it to the
 restorable Trash and never destroys -- the Trash restores, and emptying it
 is the one verb that asks first.
@@ -93,9 +95,12 @@ CART_KIND = {
     "theme": ("Theme", "wallpaper"),
 }
 
-# A verb's label at the foot, and its icon.
+# A verb's label at the foot, and its icon (a mouse's button names no key, so
+# Open is the open folder, never Enter's sign). The verb the current row's
+# Enter does, where its list has one, is the foot's primary, at its right.
+PRIMARY = ("OPEN", "RUN", "RESTORE")
 VERB = {
-    "OPEN": ("Open", "enter"),
+    "OPEN": ("Open", "folder_open"),
     "RUN": ("Run", "run"),
     "PLAY": ("Play", "play"),
     "NAME": ("Rename", "pencil"),
@@ -301,9 +306,12 @@ class FilesAppLayer(ListShellApp):
         out = []
         if key == PROJECTS:
             for cart in self._nav.projects():
-                label, icon = CART_KIND.get(cart.get("type") or "game",
-                                            (_cap(cart.get("type") or "cart"), "game"))
-                out.append((shown_name(_folder_of(cart)), PROJECTS, label, icon, cart))
+                label, _icon = CART_KIND.get(cart.get("type") or "game",
+                                             (_cap(cart.get("type") or "cart"), "game"))
+                # its title, as the home names it; its picture is its cover,
+                # which the list draws itself (`_covers`)
+                name = cart.get("title") or shown_name(_folder_of(cart))
+                out.append((name, PROJECTS, label, "", cart))
         elif key == THEMES:
             for folder in self._themes():
                 out.append((shown_name(folder), THEMES, "Theme", "wallpaper", folder))
@@ -455,7 +463,7 @@ class FilesAppLayer(ListShellApp):
         shows it), against the live roster rather than a stale dict."""
         for cart in self._nav.projects():
             folder = _folder_of(cart)
-            if name in (folder, shown_name(folder)):
+            if name in (folder, shown_name(folder), cart.get("title")):
                 return cart
         return None
 
@@ -683,11 +691,11 @@ class FilesAppLayer(ListShellApp):
             ui.scroll()
             x, y, w, h = lay.side
             cv.rect(x + w, y, lay.fs, h, th["border"])
-            self._files()
+            self._files(cv, th)
         elif self.level == "places":
             self._places()
         else:
-            self._files()
+            self._files(cv, th)
         self._dialog()
         self._focused = ui.focus()
         if (self.place, self.level, self.dialog, self.cur, len(self.rows)) != was:
@@ -716,7 +724,7 @@ class FilesAppLayer(ListShellApp):
             self.level = "files"
             self._focus = "files"
 
-    def _files(self):
+    def _files(self, cv, th):
         lay = self.layout
         label = ""
         if not lay.two:
@@ -728,20 +736,56 @@ class FilesAppLayer(ListShellApp):
         rows = [(r[3], r[0], r[2]) for r in self.rows]
         cur, opened = ui.table(label, cols, rows, self.cur, {"id": "files"})
         self.cur = cur
+        if self.place == PROJECTS:
+            self._covers(cv)
         if not self.rows:
             x, y, w, h = lay.list
             ui.at(x, y + 2 * lay.row_h, w, lay.row_h)
             ui.label("The Trash is empty" if self.place == TRASH else "Nothing here yet")
         if opened:
             self._open_row(cur)
-        self._foot()
+        self._foot(cv, th)
 
-    def _foot(self):
-        """The current row's verbs as buttons, and the status line after them."""
+    def _covers(self, cv):
+        """Each project row's picture over its cell: the cart's cover, else
+        its generated one (its initial on its colour block), as its card on
+        the home shows it."""
+        got = ui.table_rows()
+        if got is None:
+            return
+        y0, rh, view, px, side = got
+        vx, vy, vw, vh = view
+        r = side // 4
+        due = False
+        cv.clip(vx, vy, vw, vh)                # a row half out of the view: cut
+        for i in range(len(self.rows)):
+            y = y0 + i * rh + (rh - side) // 2
+            if y + side <= vy or y >= vy + vh:
+                continue
+            cart = self.rows[i][4]
+            cover = self._nav.cover(cart)
+            if cover:
+                cv.cover(cover.pix, cover.w, 0, 0, cover.w, cover.h, px, y, side, side, r,
+                         False)
+            else:
+                due = due or cover is False    # its decode lands over the next frames
+                ui.initial((px, y, side, side), cart.get("title") or self.rows[i][0], r)
+        cv.clip()
+        if due:
+            self._damage.all()
+
+    def _foot(self, cv, th):
+        """The foot bar under the list, a rule over it: the status at its
+        left, the current row's verbs as buttons at its right, the primary
+        (the verb Enter does) last."""
         lay = self.layout
         fs = lay.fs
+        fx, fy, fw, _fh = lay.foot
+        cv.rect(fx, fy, fw, fs, th["border"])
         x, y, w, h = ui.inset(lay.foot, lay.pad, lay.pad)
         verbs = self._action_labels()
+        if verbs and verbs[0] in PRIMARY:
+            verbs = verbs[1:] + verbs[:1]
         none = self._row() is None
         gap = 6 if lay.desk else 3 * fs
         side = 16 * fs
@@ -750,21 +794,22 @@ class FilesAppLayer(ListShellApp):
         labelled = sum(widths) + gap * (len(verbs) - 1) <= w
         if not labelled:
             widths = [side + 2 * pad for _v in verbs]
-        bx = x
+        bx = x + w - (sum(widths) + gap * (len(verbs) - 1))
+        if self.status and bx - gap > x:
+            ui.at(x, y, bx - gap - x, h)
+            ui.label(self.status)
         for i, v in enumerate(verbs):
             label, icon = VERB[v]
             o = {"id": "verb " + v}
             if none and v != "EMPTY" or (v == "EMPTY" and not self.trash):
                 o["disabled"] = True
+            kind = "danger" if v in ("DEL", "EMPTY") else \
+                "primary" if v in PRIMARY else "normal"
             ui.at(bx, y, widths[i], h)
             ui.icon(icon)
-            if ui.button(label if labelled else "", "danger" if v in ("DEL", "EMPTY") else "normal",
-                         o):
+            if ui.button(label if labelled else "", kind, o):
                 self._act(v)
             bx += widths[i] + gap
-        if self.status and bx + gap < x + w:
-            ui.at(bx + gap, y, x + w - bx - gap, h)
-            ui.label(self.status)
 
     def _dialog(self):
         d = self.dialog
