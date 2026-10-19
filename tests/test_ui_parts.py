@@ -270,6 +270,38 @@ def test_the_current_swatch_wears_an_ink_ring_off_a_ground_gap():
     assert abs(lum(ring) - lum(ground)) > 40, (hex(ring), hex(ground))
 
 
+def test_the_current_swatchs_ring_stands_clear_of_its_neighbours():
+    """3 px of the row's ground between the current dot's ring and the dots
+    either side (the handheld's ring ran a pixel from the next dot)."""
+    cols = [0xff0000, 0x00c000, 0x0000ff]
+    r, _st = _choice_page("swatches", cols, 1)
+    r.frame()
+    r.frame()
+    y = CAPTION + 10
+    green = next(x for x in range(319, 0, -1) if _rgb(r.px(x, y))[1] > 150
+                 and _rgb(r.px(x, y))[0] < 80)
+    x = green
+    while r.px(x - 1, y) == r.px(green, y):
+        x -= 1
+    mid = (x + green) // 2
+    ground = r.px(200, y)                          # the card between the label and the dots
+    for step in (1, -1):
+        xx = mid
+        while r.px(xx, y) == r.px(mid, y):          # the dot
+            xx += step
+        while r.px(xx, y) != ground:                # its antialiased edge
+            xx += step
+        while r.px(xx, y) == ground:                # the ground inside the ring
+            xx += step
+        while r.px(xx, y) != ground:                # the ring
+            xx += step
+        clear = 0
+        while r.px(xx, y) == ground:
+            xx += step
+            clear += 1
+        assert clear >= 3, (step, clear)
+
+
 def test_toggle_draws_its_word_and_flips():
     st = {"on": False}
 

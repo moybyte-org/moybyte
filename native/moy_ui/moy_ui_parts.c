@@ -401,6 +401,8 @@ typedef struct {
     int right;                      // the value column's right edge
     int gap;                        // the seg's space between options
     int dot, step;                  // the swatches'
+    int ring, apart;                // the current swatch's ring (its reach past the dot)
+                                    // and the room its neighbours stand off by
     moy_ui_box_t track;
 } vgeo_t;
 
@@ -409,6 +411,10 @@ static void geo(const pd_t *d, moy_ui_box_t b, const moy_ui_vrow_t *r, vgeo_t *g
     g->gap = pm(d, MOY_UI_M_VALUE_ROW_SEG, 1);
     g->dot = pm(d, MOY_UI_M_VALUE_ROW_DOT, 1);
     g->step = pm(d, MOY_UI_M_VALUE_ROW_DOT_STEP, 1);
+    // the ring's outer pixel stands 3 px clear of a neighbouring dot
+    g->ring = 3 * d->fs;
+    g->apart = g->ring + 4 * d->fs - (g->step - g->dot);
+    g->apart = g->apart > 0 ? g->apart : 0;
     int tw_ = pm(d, MOY_UI_M_VALUE_ROW_TRACK, 1);
     g->track = (moy_ui_box_t){(int16_t)(g->right - tw_), (int16_t)(b.y + b.h / 2 - d->fs),
                               (int16_t)tw_, (int16_t)(3 * d->fs)};
@@ -461,6 +467,9 @@ static int step_geo(const pd_t *d, const vgeo_t *g, const moy_ui_vrow_t *r, int 
 
 static moy_ui_box_t dot_box(moy_ui_box_t b, const moy_ui_vrow_t *r, const vgeo_t *g, int i) {
     int x = g->right - g->dot - (r->n - 1 - i) * g->step;
+    if (r->cur >= 0 && r->cur < r->n && i <= r->cur) {
+        x -= (i < r->cur ? 2 : 1) * g->apart;   // the current dot's pitch opens for its ring
+    }
     return (moy_ui_box_t){(int16_t)x, (int16_t)(b.y + (b.h - g->dot) / 2), (int16_t)g->dot,
                           (int16_t)g->dot};
 }
@@ -618,7 +627,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 if (i == r->cur) {
                     // the current colour: a ring in the row's ink, the
                     // row's ground showing between it and the dot
-                    int h = 3 * d.fs;
+                    int h = g.ring;
                     moy_ui_box_t c = {(int16_t)(o.x - h), (int16_t)(o.y - h),
                                       (int16_t)(o.w + 2 * h), (int16_t)(o.h + 2 * h)};
                     rrect(&d, c.x, c.y, c.w, c.h, c.w / 2, 0, 0, d.fs, cink);
