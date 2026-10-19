@@ -101,7 +101,9 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     """Every chrome button on the code tab is a `ui_draw.chip`, and every symbol-
     palette key is a `ui_draw.cell`. Counted with the tool palette AND the find bar
     open -- the states no golden enters."""
+    from runtime import ui_draw
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
+    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
     cl = ws.code_layer
     counter = _Counter(monkeypatch)
 

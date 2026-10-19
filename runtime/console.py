@@ -770,7 +770,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # does for the desktop. Rebuilt by _relayout on a size/font change.
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
                                       self.look.effective_font_scale(),
-                                      self.look.effective_chrome_scale())
+                                      self.look.effective_chrome_scale(),
+                                      symbols=_ui_draw.input_kind() == "touch")
         # The block editor's UI (issue #29 Part 2, extracted from this class -- see
         # block_editor_ui.py): one instance, built at its first use (`block_ui`)
         # and delegated to from handle_input/handle_pointer/frame's menu_view ==
@@ -1620,7 +1621,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         prev = getattr(self, "code_layout", None)
         lay = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
                          self.look.effective_font_scale(),
-                         self.look.effective_chrome_scale())
+                         self.look.effective_chrome_scale(),
+                         symbols=_ui_draw.input_kind() == "touch")
         self.code_layout = lay
         ed = self.editor
         if ed is not None and (prev is None

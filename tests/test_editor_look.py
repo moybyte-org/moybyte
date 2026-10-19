@@ -114,12 +114,14 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, config, theme, mode):
     strip start on one column at least 8 px in from the content's left
     edge, and the current line's mark stands inside that inset, clear of
     the frame (design review R3-10)."""
+    from runtime import ui_draw
     ws = _ws(tmp_path, config, theme, mode)
+    ui_draw.input_kind("touch")              # the symbol keys show after touch (D-17)
     lay, ox, oy = _editor(ws, config, "code")
     ed = ws.editor
     fs = lay.fs
     x0 = lay.x0
-    assert x0 - lay.cx >= 8 * fs
+    assert lay.symbols and x0 - lay.cx >= 8 * fs
     px = _px(ws)
     # An unindented line that is not the current one: its line number
     # ends a cell before the code, which starts on the text column, each

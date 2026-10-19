@@ -928,11 +928,15 @@ class CodeLayer:
     # -- #89 geometry (derived from CodeLayout; kept off the frozen constants) -
 
     def _tls_btn(self, lay):
-        # The always-visible tools toggle, top-right of the code body (overlays only
-        # the far-right of line 0, which is usually blank). Off the frozen constants,
-        # so the baseline code_area()/sym_area geometry is untouched.
+        # The always-visible tools toggle (the pencil): at the status line's
+        # right end, on the inset (the owner's D-17, 2026-10-19), never over the
+        # code; the code body's top right where a layout has no status band.
         w = self._TLS_COLS * lay.cell
-        return (lay.cx + lay.cw - w, lay.y0, w, lay.lh)
+        band = lay.status_band
+        if band is None:
+            return (lay.cx + lay.cw - w, lay.y0, w, lay.lh)
+        h = min(band[3], lay.lh)
+        return (lay.cx + lay.cw - (lay.x0 - lay.cx) - w, band[1] + (band[3] - h) // 2, w, h)
 
     # -- the cart's FILE (SPEC.md 4, #89) ------------------------------------
     #
@@ -949,13 +953,14 @@ class CodeLayer:
     _FILE_COLS = 6                # cells wide for the file chip (TLS is 3)
 
     def _file_btn(self, lay):
-        """The file chip's rect, LEFT of the tools toggle on the same row -- or
-        None when the cart is one file, which is when there is nothing to
+        """The file chip's rect, LEFT of the tools toggle on the status line --
+        or None when the cart is one file, which is when there is nothing to
         switch between."""
         if len(self.ws.code_sources()) < 2:
             return None
         w = self._FILE_COLS * lay.cell
-        return (lay.cx + lay.cw - w - self._TLS_COLS * lay.cell, lay.y0, w, lay.lh)
+        t = self._tls_btn(lay)
+        return (t[0] - w, t[1], w, t[3])
 
     def _file_label(self):
         """The open file as the chip shows it: its bare name, upper-cased into
@@ -1129,6 +1134,10 @@ class CodeLayer:
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
+        if ws.code_layout.symbols != (_ui_draw.input_kind() == "touch"):
+            # The last input moved between touch and keys: the symbol keys
+            # come or go, and the code takes their rows (D-17).
+            ws._relayout_code()
         lay = ws.code_layout
         fs = lay.fs
         cell = lay.cell                          # on-screen char-cell width
@@ -1478,6 +1487,8 @@ class CodeLayer:
         # the SYSTEM canvas; cell + text scale with the layout/font (#39 step 2).
         cv = self.ws.sys_canvas
         lay = self.ws.code_layout
+        if not lay.symbols:
+            return                       # a keyboard types them (D-17)
         fs = lay.fs
         sc = lay.sym_cell
         sy = lay.sym_y

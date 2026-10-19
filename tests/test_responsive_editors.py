@@ -232,12 +232,15 @@ def test_code_editor_symbol_palette_tap(tmp_path):
     scaled cells at native size)."""
     from runtime import host_app
     from runtime import console as C
+    from runtime import ui_draw
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     _enter(ws, "code")
+    ui_draw.input_kind("touch")              # the keys show after touch (D-17)
     ws.editor.set_text("")
     drv.frame(1 / 30)
     lay = ws.code_layout
+    assert lay.symbols
     # Tap the first symbol cell ('=').
     drv.touch(lay.sym_area[0] + 1, lay.sym_y + 1)
     drv.frame(1 / 30)
@@ -306,7 +309,7 @@ def _scrolled_code_ws(tmp_path, **kw):
     ed = ws.editor
     ed.set_text(_LONG_SRC)
     ed.row, ed.col = 20, 3
-    ed.scroll(40, 0)                        # the drag-scroll verb: view only
+    ed.scroll(60, 0)                        # the drag-scroll verb: view only
     assert ed.top >= ed.row + ed.ROWS, "the caret must be off-screen for this test"
     return ws, ed
 

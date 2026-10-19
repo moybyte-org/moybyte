@@ -808,6 +808,9 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.set_menu_view("code")
+    from runtime import ui_draw
+    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
+    drv.frame(1 / 30)
     ed = ws.editor
     ed.set_text("")
     ed.row = ed.col = 0

@@ -1,6 +1,6 @@
 # Map (grep -n a name to jump there):
 #   -- paint geometry  the paint tab's constants (console.py imports them back)
-#   -- tool palette    the tool row
+#   -- the tool row    PICO-8's tools, the more menu's operations, their keys
 #   PaintLayout        responsive paint-editor geometry
 #   PaintLayer         the paint editor content layer: draw, strokes, keys
 #   ThemeLayer         the icon-theme editor (EDIT ICONS)

@@ -542,10 +542,14 @@ class CodeLayout(LayoutBase):
     `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
     the right span."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, chrome_scale=None):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, chrome_scale=None,
+                 symbols=True):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
+        # The symbol keys show where the last input was touch, and a keyboard
+        # hides them (the owner's D-17, 2026-10-19): their rows go to the code.
+        self.symbols = bool(symbols)
         fid, fw, line, _asc = _ui_draw.font("mono")
         self.cell = fw * fs
         # A row: petme128's 8-pixel line and the code lead; a version 2
@@ -577,12 +581,16 @@ class CodeLayout(LayoutBase):
         m = _SYM_MARGIN * fs
         span = self.cw - 2 * (ins - fs)
         self.sym_cell = max(_SYM_MIN * fs, span // n)
-        self.sym_h = _SYM_H * cs
+        self.sym_h = _SYM_H * cs if self.symbols else 0
         self.sym_text_dx = max(0, (self.sym_cell - _SYM_CELL * fs) // 2)
         self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
-        self.sym_y = self.cy + self.ch - self.sym_h - (m - fs)
-        self.sym_area = (self.cx + ins - fs, self.sym_y, max(span, self.sym_cell * n),
-                         self.sym_h)
+        if self.symbols:
+            self.sym_y = self.cy + self.ch - self.sym_h - (m - fs)
+            self.sym_area = (self.cx + ins - fs, self.sym_y,
+                             max(span, self.sym_cell * n), self.sym_h)
+        else:
+            self.sym_y = self.cy + self.ch
+            self.sym_area = (self.cx + ins - fs, self.sym_y, 0, 0)
         # -- code area origin (the content rect's top) --------------------------
         # The zoned bar carries the editor's controls, so CodeLayout has no
         # chrome of its own: the body is text + the symbol palette, filling the

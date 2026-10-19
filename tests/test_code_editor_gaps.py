@@ -973,3 +973,25 @@ def test_a_labelled_chips_icon_ink_starts_at_its_pad(tmp_path):
         r = got[kind]
         a = iconsets.ink_span(kind, r[2], r[3], spec)[0]
         assert r[0] + a == chips[tid][0] + pad, (tid, r, a, chips[tid])
+
+
+def test_the_symbol_keys_follow_the_last_input(tmp_path):
+    """D-17 (2026-10-19): a keyboard hides the symbol keys and the code takes
+    their rows; touch brings them back. The tools toggle stands on the status
+    line, never over the code."""
+    from runtime import ui_draw
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ui_draw.input_kind("keys")
+    drv.frame(DT)
+    lay = ws.code_layout
+    assert not lay.symbols and lay.sym_h == 0
+    keys_rows = lay.rows
+    t = ws.code_layer._tls_btn(lay)
+    assert t[1] >= lay.status_band[1] and t[1] + t[3] <= lay.status_band[1] + lay.status_band[3]
+    ui_draw.input_kind("touch")
+    drv.frame(DT)
+    lay = ws.code_layout
+    assert lay.symbols and lay.sym_h > 0 and lay.rows < keys_rows
+    assert ws.editor.ROWS == lay.rows
+    ui_draw.input_kind("keys")
