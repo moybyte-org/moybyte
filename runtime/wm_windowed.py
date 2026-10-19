@@ -1139,8 +1139,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _minimize(self, win, on):
         """Hide `win` to its chip (`on`) or show it again. A running game's
         window holds its run while hidden, as the pause menu does
-        (`Player.pause`), and gives it back on restore -- unless the run was
-        already held (the pause menu open), which stays its holder's."""
+        (`Player.pause`), and a restore lands on the pause menu, which gives
+        the run back on Resume (the owner's D-25, 2026-10-19) -- unless the
+        run was already held (the pause menu open), which stays its
+        holder's."""
         if win.minimized == bool(on):
             return
         win.minimized = bool(on)
@@ -1155,7 +1157,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 player.pause()
         elif getattr(win, "held", False):
             win.held = False
-            player.resume()
+            pause = getattr(self.ws, "pause", None)
+            if pause is not None:
+                pause.show()
+            else:
+                player.resume()
 
     def goto(self, kind):
         """The back-stack's goto, and on the desk the window it names comes

@@ -474,6 +474,26 @@ def _sprites_more(g, ws):
     _settle(g, ws, 3)
 
 
+def _playtest_minimised(g, ws):
+    """The playtest minimised to its chip: the run held, the chip's pause
+    badge (D-25)."""
+    _playtest(g, ws)
+    _settle(g, ws, 2)
+    win = ws.wm._wins.get("desktop")
+    if win is not None:
+        ws.wm._minimize(win, True)
+        ws.wm._move_focus("menu")
+    _settle(g, ws, 3)
+
+
+def _playtest_restored(g, ws):
+    """The minimised playtest restored from its chip: the pause menu over it
+    (D-25)."""
+    _playtest_minimised(g, ws)
+    ws.wm._chip_tap("desktop")
+    _settle(g, ws, 3)
+
+
 def _calc(g, ws):
     ws.open_app(ws._apps_by_id["calc"])
     _settle(g, ws, 2)
@@ -831,6 +851,10 @@ def _kit_table():
         "handheld_sprite-editor_palette": (
             HANDHELD, _sprites, "Sprites, colour %d current beside the focus hue"
             % SPRITE_COLOUR),
+        "desktop_playtest_minimised": (DESK, _playtest_minimised,
+                                       "the playtest minimised: its chip's pause badge"),
+        "desktop_playtest_restored": (DESK, _playtest_restored,
+                                      "the minimised playtest restored: the pause menu"),
         "handheld_sysmenu": (HANDHELD, _sysmenu_home,
                              "the system menu over the focused home: one focus mark"),
         "handheld_pause": (HANDHELD, _pause,

@@ -809,7 +809,8 @@ def test_title_strip_buttons_min_max_close(tmp_path):
 
 def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
     """Minimising the player window holds the run (no tick while hidden, as
-    the pause menu holds it); its chip restores the window and the run."""
+    the pause menu holds it); a restore lands on the pause menu (D-25), whose
+    Resume gives the run back, and the held chip wears its pause badge."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_desk()
@@ -819,9 +820,11 @@ def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
     mn = dict(ws.wm._strip_buttons(win))["min"]
     drv.touch(mn[0] + 2, mn[1] + 2)
     drv.frame(1 / 30)
-    assert win.minimized and ws.player.paused
+    assert win.minimized and ws.player.paused and win.held
     ws.wm._minimize(win, False)
-    assert not win.minimized and not ws.player.paused
+    assert not win.minimized and ws.player.paused and ws.pause.open
+    ws.pause.close()
+    assert not ws.player.paused
     # A run the pause menu holds stays held through a minimise and restore.
     ws.player.pause()
     ws.wm._minimize(win, True)

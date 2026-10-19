@@ -523,7 +523,8 @@ class WindowChrome:
         sc = self._root_canvas
         fs = self._fs()
         th = self.ws.theme_colors
-        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized)
+        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized,
+                     getattr(self._wins[k], "held", False))
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
@@ -552,26 +553,29 @@ class WindowChrome:
             if focused:
                 fg = _ui_draw.state_colors(th, "chip", _ui_draw.ON)[1]
             else:
-                fg = th["edge"] if win.minimized else th["chrome_ink"]
-            state = _ui_draw.ON if focused else (_ui_draw.DISABLED if win.minimized else _ui_draw.REST)
+                fg = th["chrome_ink"]       # a minimized chip is not dimmed (D-25)
+            state = _ui_draw.ON if focused else _ui_draw.REST
             if not _ui_draw.paint(sc, th, (x, y, w, h), "bar.item", state):
                 sc.rect(x, y, w, h, bg)
-                sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
+                sc.rectb(x, y, w, h, th["chrome_ink"])
             tx = x + (w - _ui_draw.text_width(label, fs, "ui")) // 2
             sc.print(label, tx, y + (h - line_h) // 2, fg, 1)
 
     def _draw_look_chips(self, sc, th, fs, line_h):
         """The taskbar chips as the look's tabs (docs/look_2026-10.md step 14):
         the window's icon (in `_win_icon`'s order) then its title, the
-        focused window's chip raised under the current mark, a minimized
-        one's in the dim ink. The focused chip's content takes the ink the
-        look gives current content (Moy's accent), the plate's second cue."""
+        focused window's chip raised under the current mark, another open
+        window's in the dim ink. The focused chip's content takes the ink the
+        look gives current content (Moy's accent), the plate's second cue. A
+        minimized window's chip keeps the chrome's ink, and a held game's
+        wears a pause badge on its icon (D-25)."""
         current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
             focused = key == self._focus and not win.minimized
             _ui_draw.bar_part(sc, th, _ui_draw.BAR_CHIP, (x, y, w, h), focused)
-            ink = current if focused else th["chrome_ink_dim"]
+            ink = (current if focused else
+                   th["chrome_ink"] if win.minimized else th["chrome_ink_dim"])
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
             if not self.ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
                 img = self._win_icon_img(win)
@@ -581,7 +585,20 @@ class WindowChrome:
                     sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
                 else:
                     self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+            if win.minimized and getattr(win, "held", False):
+                self._pause_badge(sc, th, slot)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
+
+    @staticmethod
+    def _pause_badge(sc, th, slot):
+        """A held game's badge: a plate in `value` at the icon's bottom
+        right, two bars of `surface` on it."""
+        x, y, w, h = slot
+        b = 12
+        bx, by = x + w - b + 3, y + h - b + 3
+        sc.rect(bx, by, b, b, th["value"])
+        sc.rect(bx + 3, by + 3, 2, b - 6, th["surface"])
+        sc.rect(bx + b - 5, by + 3, 2, b - 6, th["surface"])
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a
