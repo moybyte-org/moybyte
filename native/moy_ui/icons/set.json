@@ -23,6 +23,7 @@
    "mute": "#c9d3e6",
    "notes": "#ffffff",
    "paint": "#e2582e",
+   "palette": "#f2c38a",
    "play": "#46b843",
    "projects": "#f5c542",
    "run": "#46b843",
@@ -39,84 +40,84 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 3257,
+   "bytes": 3304,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 8369,
+   "bytes": 8505,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 11796,
+   "bytes": 12004,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 3453,
+   "bytes": 3510,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 8675,
+   "bytes": 8811,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 11845,
+   "bytes": 12053,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 3366,
+   "bytes": 3410,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 8579,
+   "bytes": 8715,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 11824,
+   "bytes": 12032,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1758,
+   "bytes": 1802,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 4062,
+   "bytes": 4168,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 5506,
+   "bytes": 5676,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -212,7 +213,8 @@
   "power",
   "sleep",
   "sliders",
-  "copy"
+  "copy",
+  "palette"
  ],
  "tiers": {
   "desktop": [

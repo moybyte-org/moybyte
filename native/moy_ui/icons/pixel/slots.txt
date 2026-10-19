@@ -70,3 +70,4 @@
 69 sleep
 70 sliders
 71 copy
+72 palette

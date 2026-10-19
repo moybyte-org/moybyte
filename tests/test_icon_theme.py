@@ -612,3 +612,14 @@ def test_a_depth_frames_title_buttons_take_the_set(tmp_path):
     assert frame() == glyphs
     iconsets.reset()
     use_theme(ws, "night", "dark")     # the depth is global
+
+
+def test_one_icon_one_meaning_for_the_round_4_pairs():
+    """The gear means Settings alone and `dup` Duplicate alone (D-22):
+    Appearance wears the palette and the sprite tab's Copy the clipboard
+    (design review R4-15, R4-16)."""
+    from runtime import paint_layer
+    assert iconsets.slot_of("appearance") == iconsets.SLOT["palette"]
+    assert iconsets.slot_of("appearance") != iconsets.slot_of("settings")
+    copy = [slot for oid, _label, slot in paint_layer._OPS if oid == "copy"]
+    assert copy == ["copy"]
