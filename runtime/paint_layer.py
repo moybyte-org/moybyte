@@ -1005,8 +1005,9 @@ class PaintLayer:
             cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o, th["surface"])
         _ui_draw.focus(cv, th, box, "part", ring=True)
         # The palette: colour 0 the checker under a white stroke, the
-        # colour in use ringed 2px inside in the focus colour, edged in
-        # `surface` within, so the ring reads on a swatch of its colour.
+        # colour in use two-toned at its edge -- a line of `ink`, then one of
+        # `surface` within -- never a palette colour, so one tone reads
+        # against any swatch beside or under it, and the swatch shows.
         sw = lay.sw
         for idx in range(16):
             x = lay.sw_x0 + (idx % lay.sw_cols) * sw
@@ -1018,10 +1019,9 @@ class PaintLayer:
                 cv.line(x + sw - 1, y, x, y + sw - 1, white)
         x = lay.sw_x0 + (pe.color % lay.sw_cols) * sw
         y = lay.sw_y0 + (pe.color // lay.sw_cols) * sw
-        t = 2 * fs
-        for r in range(t):
-            cv.rectb(x + r, y + r, sw - 2 * r, sw - 2 * r, th["focus"])
-        cv.rectb(x + t, y + t, sw - 2 * t, sw - 2 * t, th["surface"])
+        for r in range(2 * fs):
+            cv.rectb(x + r, y + r, sw - 2 * r, sw - 2 * r,
+                     th["ink"] if r < fs else th["surface"])
         # The column: the sprite before and after, its size (a tap opens the
         # pickers, as on the preview and the caption), the preview on the
         # checker, then Get, Put and File. Previous and next are the icon

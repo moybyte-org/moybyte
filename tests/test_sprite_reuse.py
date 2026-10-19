@@ -406,9 +406,10 @@ def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, va
 
 
 def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
-    """The colour in use is ringed in `focus` with `surface` inside the ring,
-    and the cursor's ring is edged in `surface`, so neither vanishes on a
-    swatch or a cell of the focus colour's own."""
+    """The colour in use is two-toned at its swatch's edge -- `ink`, then
+    `surface` within, never a palette colour -- and the swatch shows inside
+    (design review R2-03); the cursor's ring is edged in `surface`, so
+    neither vanishes on a swatch or a cell of its own colour."""
     from runtime import ui_draw
     ws, drv, chrome = _look_tab(tmp_path)
     lay = ws.paint_layer.layout
@@ -419,11 +420,15 @@ def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
     _frames(drv, 2)
     x = lay.sw_x0 + (pe.color % lay.sw_cols) * lay.sw
     y = lay.sw_y0 + (pe.color // lay.sw_cols) * lay.sw
-    t = 2 * lay.fs
-    focus, surface = chrome.rgb565_of(th["focus"]), chrome.rgb565_of(th["surface"])
-    assert _px(ws, x, y + lay.sw // 2) == focus
-    assert _px(ws, x + lay.sw - 1, y + lay.sw // 2) == focus
-    assert _px(ws, x + t, y + lay.sw // 2) == surface
+    fs, sw = lay.fs, lay.sw
+    ink, surface = chrome.rgb565_of(th["ink"]), chrome.rgb565_of(th["surface"])
+    assert _px(ws, x, y + sw // 2) == ink
+    assert _px(ws, x + sw - 1, y + sw // 2) == ink
+    assert _px(ws, x + fs, y + sw // 2) == surface
+    swatch = chrome.rgb565_of(pe.color)
+    inside = {_px(ws, i, j) for i in range(x + 2 * fs, x + sw - 2 * fs)
+              for j in range(y + 2 * fs, y + sw - 2 * fs)}
+    assert inside == {swatch} and sw - 4 * fs >= sw // 2
     cx, cy, cell = _cell(lay, pe, 3, 3)
     reach = ui_draw.mark_reach("part")
     for o in (1, reach + 1):
