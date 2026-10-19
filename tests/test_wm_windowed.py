@@ -553,16 +553,12 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     win = ws.wm._wins["menu"]
     # The Editor's lent zone at shelf density: the labeled CODE tab chip (visual
     # identity v1 Phase 3) -- resolve its rect through the SAME geometry the
-    # draw/tap path uses (editor_app._zone_parts + ui.tab_row_rects), so this
+    # draw/tap path uses (editor_app._zone_parts + _shelf_rects), so this
     # test tracks the layout instead of a hardcoded stride. The app's bar row
     # sits below the WM title strip.
-    from runtime import ui_draw as _ui_draw
-    from runtime import editor_app as _ea
     zone = win.ctx.layout.zone_left
     tabs_area, _play = ws.editor_app._zone_parts(zone)
-    slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
-    rects = dict((tid, r) for tid, r, _l in
-                 _ui_draw.tab_row_rects(tabs_area, slim, max(1, zone[3] // 16)))
+    rects = dict((tid, r) for tid, r, _l in ws.editor_app._shelf_rects(tabs_area))
     cx, cy = rects["code"][0] + 2, rects["code"][1] + 2
     drv.touch(win.x + 1 + cx, win.y + 1 + win.title_h + cy)
     drv.frame(1 / 30)

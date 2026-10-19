@@ -918,3 +918,22 @@ def test_the_open_tabs_icon_takes_the_current_marks_ink(tmp_path):
         ws.draw_icon = real
     assert seen["code"] == cur, seen
     assert seen["blocks"] == th["chrome_ink"], seen
+
+
+def test_the_labelled_ladder_keeps_8px_from_a_pill_to_the_next_icon(tmp_path):
+    """Each labelled chip ends at least 8px (at the zone's scale) before the
+    next chip's icon, so the open tab's pill never crowds its neighbour; the
+    draw and the tap share the rects (design review R2-08)."""
+    from runtime import ui_draw
+    ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
+    app = ws.editor_app
+    rect = (0, 0, 700, 20)                       # a desk window's lent zone
+    tabs_area, _play = app._zone_parts(rect)
+    rects = app._shelf_rects(tabs_area)
+    fs = app._zone_scale()
+    pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * fs
+    assert len(rects) == len(app._chips()) and rects[0][2], "the whole ladder, labelled"
+    for (_a, r, _on), (_b, nxt, _on2) in zip(rects, rects[1:]):
+        assert nxt[0] + pad - (r[0] + r[2]) >= 8 * fs, (r, nxt)
+    for tid, r, _on in rects:
+        assert app.zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, rect) is not False, tid

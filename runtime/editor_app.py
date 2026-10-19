@@ -99,6 +99,7 @@ _ZONE_TABS = (
     (None, "run"),          # PLAY
 )
 _LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at fs 1
+_PILL_CLEAR = 8                 # the labelled ladder: open pill to the next tab's icon, at fs 1
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
@@ -494,9 +495,12 @@ class EditorApp:
                 open_kind = next((k for t, _l, k in chips if t == self.tab), None)
                 draw = self._set_icon(cv, open_kind=open_kind,
                                       open_ink=_ui_draw.current_ink(cv, th))
-            _ui_draw.tab_row(cv, th, tabs_area, chips, self.tab,
-                        icon_for=getattr(ws, "_icon_image_keyed", None),
-                        ink=band_ink, icon_draw=draw)
+            icon_for = getattr(ws, "_icon_image_keyed", None)
+            rects = self._shelf_rects(tabs_area)
+            for (tid, label, kind), (_t, r, labels_on) in zip(chips, rects):
+                _ui_draw.tab(cv, th, r, tid == self.tab, label, labels_on, band_ink,
+                             icon_for(kind) if icon_for is not None else None,
+                             icon_draw=draw, kind=kind)
             if sets:
                 self._bare_play(cv, play_r)
             else:
@@ -572,8 +576,17 @@ class EditorApp:
     def _compact(self, rect):
         """Whether the zone takes the narrow bar: the labeled row drops a tab."""
         tabs_area, _play = self._zone_parts(rect)
+        return len(self._shelf_rects(tabs_area)) < len(self._chips())
+
+    def _shelf_rects(self, tabs_area):
+        """The labelled ladder's chips, `ui_draw.tab_row_rects` over `_chips`,
+        spaced so the open tab's pill ends _PILL_CLEAR before the next tab's
+        icon, the chip gap and that tab's pad together (the draw and the hit
+        test share it)."""
+        fs = self._zone_scale()
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD]
         slim = [(tid, label) for tid, label, _ic in self._chips()]
-        return len(_ui_draw.tab_row_rects(tabs_area, slim, self._zone_scale())) < len(slim)
+        return _ui_draw.tab_row_rects(tabs_area, slim, fs, max(0, _PILL_CLEAR - pad) * fs)
 
     def _open_label(self, rect):
         """The open tab's name for the narrow bar, or "" when the whole ladder
@@ -699,9 +712,7 @@ class EditorApp:
             tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            slim = [(tid, label) for tid, label, _ic in self._chips()]
-            for tid, r, _labels_on in _ui_draw.tab_row_rects(tabs_area, slim,
-                                                        self._zone_scale()):
+            for tid, r, _labels_on in self._shelf_rects(tabs_area):
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False
