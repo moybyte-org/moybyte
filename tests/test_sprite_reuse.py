@@ -324,6 +324,25 @@ def test_the_tool_in_use_wears_the_current_mark(tmp_path):
     assert _px(ws, x + 3, y + 3) != on
 
 
+@pytest.mark.parametrize("theme,variant", [("moy", "dark"), ("blocks", "light"),
+                                           ("contrast", "light")])
+def test_clear_wears_the_danger_buttons_ink_and_idle_copy_the_disabled(tmp_path, theme,
+                                                                      variant):
+    from runtime import paint_layer as P, ui_draw
+    ws, drv, chrome = _look_tab(tmp_path, theme, variant)
+    lay = ws.paint_layer.layout
+    th = ws.theme_colors
+    ws.paint.sel = None
+    _frames(drv)
+
+    def inks(tid):
+        x, y, w, h = lay.tool_btns[P._TOOLS.index(tid)]
+        return {_px(ws, i, j) for i in range(x, x + w) for j in range(y, y + h)}
+
+    assert chrome.rgb565_of(ui_draw.button_ink(th, "danger")) in inks("clear")
+    assert chrome.rgb565_of(ui_draw.disabled_ink(th)) in inks("copy")
+
+
 @pytest.mark.parametrize("theme,variant", [("moy", "light"), ("moy", "dark"),
                                            ("blocks", "light"), ("contrast", "dark")])
 def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, variant):
@@ -356,7 +375,7 @@ def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
     """The colour in use is ringed in `focus` with `surface` inside the ring,
     and the cursor's ring is edged in `surface`, so neither vanishes on a
     swatch or a cell of the focus colour's own."""
-    from runtime import paint_layer as P
+    from runtime import ui_draw
     ws, drv, chrome = _look_tab(tmp_path)
     lay = ws.paint_layer.layout
     pe = ws.paint
@@ -372,8 +391,8 @@ def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
     assert _px(ws, x + lay.sw - 1, y + lay.sw // 2) == focus
     assert _px(ws, x + t, y + lay.sw // 2) == surface
     cx, cy, cell = _cell(lay, pe, 3, 3)
-    gap, ring = P._ring_reach(ws.look.live.look[0])
-    for o in (gap, gap + ring + 1):
+    reach = ui_draw.mark_reach("part")
+    for o in (1, reach + 1):
         assert _px(ws, cx - 1 - o, cy + cell // 2) == surface, o
 
 

@@ -139,18 +139,6 @@ _TOOL_MODE = {
     "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "rect": PaintEditor.RECT,
     "line": PaintEditor.LINE, "oval": PaintEditor.OVAL, "select": PaintEditor.SELECT,
 }
-def _ring_reach(look):
-    """(gap, width) of the theme's focus ring, read from its look's leaves
-    as native/moy_ui/moy_ui_depth.c reads them (hundredths, rounded; 3
-    where the theme names none): the ring stands `gap` off a box and is
-    `width` thick."""
-    out = []
-    for key in ("focus.ring.gap", "focus.ring.w"):
-        v = look.get(key)
-        out.append(3 if v is None or v < 0 else (v + 50) // 100)
-    return out[0], out[1]
-
-
 def _tool_row(x0, y0, cw, h, n):
     """A row of n button rects (x, y, w, h), cw apart with a 1px gutter."""
     return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
@@ -994,14 +982,13 @@ class PaintLayer:
                 cv.rect(gx0 + t * tpx - 1, gy0, 1, span, th["ink_dim"])
                 cv.rect(gx0, gy0 + t * tpx - 1, span, 1, th["ink_dim"])
         self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
-        # The cursor: the theme's ring around a black keyline, the ring
-        # edged inside and out in `surface`, so it reads on a cell of its
-        # own colour.
+        # The cursor: the theme's ring around a black keyline, on a mat of
+        # `surface` from the keyline to a pixel past the ring's reach, so it
+        # reads on a cell of its own colour.
         x, y = self._cursor_xy(pe, gx0, gy0, cell)
         box = (x - 1, y - 1, cell + 1, cell + 1)
         cv.rectb(box[0], box[1], box[2], box[3], keyline)
-        gap, ring = _ring_reach(ws.look.live.look[0])
-        for o in (gap, gap + ring + 1):
+        for o in range(1, _ui_draw.mark_reach("part") + 2):
             cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o, th["surface"])
         _ui_draw.focus(cv, th, box, "part", ring=True)
         # The palette: colour 0 the checker under a white stroke, the
@@ -1060,8 +1047,8 @@ class PaintLayer:
     def _draw_tools_look(self):
         """The tools and the actions as icons in the dim ink: the tool in use
         and an armed toggle (erase, mirror) on the current mark, copy and
-        paste fainter while there is nothing to copy or paste, clear in the
-        danger colour."""
+        paste in the disabled ink while there is nothing to copy or paste,
+        clear in the danger button's ink."""
         ws = self.ws
         cv = ws.sys_canvas
         pe = ws.paint
@@ -1082,9 +1069,9 @@ class PaintLayer:
                 ink = th["ink"] if got is None else got
             elif tid in ("copy", "paste") and not (
                     (pe.sel is not None) if tid == "copy" else pe.has_clip):
-                ink = th["border"]
+                ink = _ui_draw.disabled_ink(th)
             elif tid == "clear":
-                ink = th["danger"]
+                ink = _ui_draw.button_ink(th, "danger")
             box = min(lay.icon, w, plate[3])
             rect = (x + (w - box) // 2, y + (plate[3] - box) // 2, box, box)
             self._icon_draw((_TOOL_ICON.get(tid), _TOOL_GLYPH[tid]), rect, ink, cv)

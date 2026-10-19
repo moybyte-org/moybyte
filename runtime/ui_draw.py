@@ -975,6 +975,19 @@ def disabled_ink(th):
     return v if v is not None else th["ink_dim"]
 
 
+def button_ink(th, kind="normal"):
+    """The colour index a `kind` button's label draws in at rest under theme
+    `th` and the installed button leaves, for an icon that stands for that
+    kind's action off a button (a trash icon is the danger button's ink).
+    Where that ink does not read on `th`'s surface (a filled button's light
+    ink on a light page), the kind's colour role (`danger`) or the ink."""
+    look = _LOOK if th is _TH else _look(th)
+    ink = _C.button_style(look, _kind_id(_button_kind(kind)), _REST_ID, -1)[1]
+    if ink is not None and _C.theme_reads(th["surface"], ink):
+        return ink
+    return th.get(kind, th["ink"])
+
+
 def button_unreadable(th, apps=()):
     """The button kinds whose ink misses the contrast floor on their field at
     rest under theme `th` and the installed button leaves, as (app, kind)
