@@ -340,6 +340,30 @@ def test_the_wallpapers_page_is_tabs_over_cards_and_b_comes_back(tmp_path):
 
 
 @pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
+def test_back_is_hinted_where_it_goes_back(tmp_path, monkeypatch, kw):
+    """The navigation rule (owner, 2026-10-18): a window's root hints no
+    back, its title strip's X closes it; a page in it hints Back. The
+    handheld's root hints Back, the bar's chevron that goes home."""
+    ws = _ws(tmp_path, **kw)
+    app = _open(ws)
+    hinted = []
+    real = page.ui.hints
+    monkeypatch.setattr(page.ui, "hints",
+                        lambda items, o=None: (hinted.append(tuple(items)),
+                                               real(items, o))[1])
+    _frame(ws)
+    root = hinted[-1]
+    if kw:
+        assert "back" not in root and "Close" not in root
+    else:
+        assert root[-2:] == ("back", "Back")
+    _focus(ws, app, "Wallpaper")
+    _press(ws, app, "a")
+    assert app.view == "walls"
+    assert hinted[-1][-2:] == ("back", "Back")
+
+
+@pytest.mark.parametrize("kw", [{}, DESK], ids=["320x240", "desk"])
 def test_every_row_answers_a_tap(tmp_path, kw):
     ws = _ws(tmp_path, **kw)
     use_theme(ws, "night", "dark", store=True)

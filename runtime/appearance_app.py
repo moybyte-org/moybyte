@@ -509,13 +509,17 @@ class AppearanceAppLayer:
 
     def _foot(self, cv, th, ch):
         """The hints for the focused stop; on the desk under a rule, after
-        the theme's status."""
+        the theme's status. Back is hinted where it goes back a level: on a
+        page, and on the root where the bar's chevron leaves the app; a
+        window's root has none, its title strip's X closes it."""
         lay = self.layout
         kind = self._kinds.get(self._focused, "step")
         if self.naming:
             items = ("confirm", "Keep", "back", "Cancel")
+        elif self.has_page() or not lay.windowed:
+            items = _HINTS.get(kind, _STEP) + ("back", "Back")
         else:
-            items = _HINTS.get(kind, _STEP) + ("back", "Close" if lay.desk else "Back")
+            items = _HINTS.get(kind, _STEP)
         if not lay.desk:
             ui.at(*lay.foot)
             ui.hints(items)
