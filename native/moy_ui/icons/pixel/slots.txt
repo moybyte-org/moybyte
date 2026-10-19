@@ -58,3 +58,5 @@
 57 arrow_right
 58 arrow_up
 59 arrow_down
+60 star
+61 star_on

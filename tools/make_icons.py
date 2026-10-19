@@ -57,7 +57,7 @@ FILLS = {
     "luna": {"files": "#f5c542", "folder": "#f5c542", "notes": "#ffffff", "doc": "#ffffff",
              "art": "#ffffff", "wallpaper": "#9fd0ff", "play": "#46b843", "run": "#46b843",
              "game": "#c9d3e6", "settings": "#b8c0cc", "trash": "#c9d3e6", "del": "#c9d3e6",
-             "moy": "#c9b8ff", "home": "#f2a65a", "projects": "#f5c542",
+             "moy": "#c9b8ff", "home": "#f2a65a", "projects": "#f5c542", "star_on": "#f5c542",
              "paint": "#e2582e", "storybook": "#e2582e", "music": "#46b843",
              "battery": "#46b843", "calc": "#c9d3e6", "getcarts": "#46b843",
              "save": "#7da7ea", "sprite": "#9be36b", "map": "#9fd0ff", "mute": "#c9d3e6"},

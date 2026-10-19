@@ -311,3 +311,20 @@ def test_the_desk_says_when_last_played_once(tmp_path, monkeypatch):
         ws.frame(g._DT)
     assert "Last" in said and "Today" in said
     assert not any(s.startswith("Played ") for s in said), said
+
+
+def test_the_star_rows_wear_the_icon_sets_star(tmp_path):
+    """The card group's favourite row wears the icon sets' star, hollow to
+    add and filled to remove, never New's plus or Delete's trash (R3-13);
+    every icon a card row names is a slot every set draws."""
+    from runtime import iconsets
+    ws = _ws(tmp_path)
+    it = _select(ws, "games", "cart")
+    for icon in ("star", "star_on"):
+        ws.toggle_sysmenu()
+        rows = [r for r in ws.sysmenu.items if r[0] == "item"]
+        assert rows[0][3] == icon, "the star row wears %r" % rows[0][3]
+        for r in rows:
+            assert r[3] in iconsets.SLOT, "%s's icon %r is no slot" % (r[4], r[3])
+        ws.sysmenu.close()
+        ws.carts.toggle_favorite(it)

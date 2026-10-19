@@ -42,7 +42,7 @@ _LOOK_TEXT = {"menu.cart": "Cart", "menu.restart_cart": "Restart cart",
               "menu.clear_search": "Clear search", "menu.search": "Search",
               "menu.settings": "Settings", "menu.about": "About", "menu.reboot": "Restart"}
 _LOOK_ICON = {"menu.restart_cart": "rotate", "menu.delete_cart": "trash",
-              "menu.favourite_add": "new", "menu.favourite_remove": "del",
+              "menu.favourite_add": "star", "menu.favourite_remove": "star_on",
               "menu.clear_search": "search", "menu.search": "search",
               "menu.settings": "settings", "menu.about": "doc", "menu.reboot": "rotate"}
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
