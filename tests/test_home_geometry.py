@@ -67,8 +67,8 @@ def test_the_hero_mark_lies_under_the_bar(tmp_path, monkeypatch, theme, mode):
     marks = []
     real = launcher_layer._ui_draw.focus
 
-    def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
-        got = real(cv, th, rect, size, r, after, fs, ring)
+    def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False):
+        got = real(cv, th, rect, size, r, after, fs, ring, selected)
         if size == "card" and not after:
             marks.append((tuple(rect), tuple(got[1])))
         return got
@@ -268,3 +268,124 @@ def test_the_star_badges_rim_is_the_dim_ink():
     launcher_layer._draw_star_badge(cv, {"white": 7, "light_grey": 6, "yellow": 10,
                                          "orange": 9}, th, (0, 0, 15, 15), False)
     assert cv.rings == [9], "the chip's rim must hold on a cover as dark as the chip"
+
+
+def _cover_rects(ws, monkeypatch):
+    """The covers one frame blits, (x, y, w, h)."""
+    covers = []
+    for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
+        real = kind.cover
+
+        def cover(cv, pix, w, sx, sy, sw, sh, dx, dy, dw, dh, *rest, _real=real):
+            covers.append((dx, dy, dw, dh))
+            return _real(cv, pix, w, sx, sy, sw, sh, dx, dy, dw, dh, *rest)
+
+        monkeypatch.setattr(kind, "cover", cover)
+    _frame(ws, 1)
+    monkeypatch.undo()
+    return covers
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "dark"), ("moy", "light")])
+def test_the_desk_shelf_lifts_its_selected_card_under_every_input(tmp_path, monkeypatch,
+                                                                 theme, mode):
+    """The selected shelf card is the one the details pane describes: it
+    keeps its lift under touch and while the pane's buttons hold the focus,
+    as under the keys (design review R4-09); only the keys' focus counts as
+    a focus mark."""
+    ws = _ws(tmp_path, CONSOLE, theme, mode)
+    _home(ws)
+    _frame(ws, 2)
+    home = ws.launcher_layer
+
+    def lift():
+        """(x of the raised card, how far it rises) on the shelf (the shelf
+        itself moves with the hint strip, which touch hides)."""
+        shelf = [r for r in _cover_rects(ws, monkeypatch) if r[2] < 200]
+        rest = max(r[1] for r in shelf)
+        up = [r for r in shelf if r[1] < rest]
+        assert len(up) == 1, "one card stands raised over the shelf: %s" % shelf
+        return up[0][0], rest - up[0][1]
+    keys = lift()
+    ws.use_inputs([("local", "touch")])
+    _frame(ws, 2)
+    assert lift() == keys, "touch flattens the selected card"
+    ws.use_inputs([("local", "pad")])
+    home._button_focus = 0
+    _frame(ws, 2)
+    assert lift() == keys, "the buttons' focus flattens the selected card"
+
+
+@pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
+def test_the_new_tile_takes_a_covers_corners(tmp_path, monkeypatch, config):
+    """The Make tab's + New tile is rounded as a cover of its size is, not
+    square among rounded neighbours (design review R4-21)."""
+    ws = _ws(tmp_path, config, "moy", "dark")
+    _home(ws)
+    ws.set_home_tab("make")
+    _frame(ws, 2)
+    calls = []
+    for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
+        real = kind.rrect
+
+        def rrect(cv, x, y, w, h, r, fill, *a, _real=real, **kw):
+            calls.append((w, r, fill))
+            return _real(cv, x, y, w, h, r, fill, *a, **kw)
+        monkeypatch.setattr(kind, "rrect", rrect)
+    _frame(ws, 1)
+    focus = ws.theme_colors["focus"]
+    tiles = [c for c in calls if c[2] == focus and c[0] >= 32]
+    assert tiles and all(r > 0 for _w, r, _f in tiles), calls
+
+
+def test_the_star_stands_clear_of_its_chip():
+    """The favourite star is about 10 pixels in a 16-pixel chip, its box
+    centred, so the chip's rim stands clear of every point (R4-30)."""
+    for side in (15, 17, 25):
+        edge, inner = launcher_layer._star_runs(side)
+        xs = [dx for dx, _dy, _w in edge + inner] + [dx + w - 1 for dx, _dy, w in edge + inner]
+        ys = [dy for _dx, dy, _w in edge + inner]
+        assert min(xs) >= 3 and max(xs) <= side - 4, (side, min(xs), max(xs))
+        assert min(ys) >= 3 and max(ys) <= side - 4, (side, min(ys), max(ys))
+        assert abs(min(xs) - (side - 1 - max(xs))) <= 1
+        assert abs(min(ys) - (side - 1 - max(ys))) <= 1
+
+
+def test_the_desk_facts_stand_on_the_buttons_columns(tmp_path, monkeypatch):
+    """The details pane's facts, Played, Last and By, start on the left
+    edges of the buttons under them (design review R4-31)."""
+    ws = _ws(tmp_path, CONSOLE, "moy", "dark")
+    _home(ws)
+    y, m, d = g._DATE
+    sel = ws.launcher.selected()
+    ws.system.set("plays", {sel["path"]: [12, y * 10000 + m * 100 + d]})
+    _frame(ws, 2)
+    printed = {}
+    for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
+        real = kind.print_scaled
+
+        def print_scaled(cv, text, x, *a, _real=real, **kw):
+            printed.setdefault(str(text), x)
+            return _real(cv, text, x, *a, **kw)
+        monkeypatch.setattr(kind, "print_scaled", print_scaled)
+    _frame(ws, 1)
+    xs = [r[0] for _v, r, _k in ws.launcher_layer._desk_buttons()]
+    facts = [printed.get(k) for k in ("Played", "Last", "By")]
+    assert facts == xs[:3], (facts, xs)
+
+
+def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
+    """The handheld Editor's bar: Play's icon ends 6 pixels before its zone
+    does, so with the bar's gap its ink stands 10 clear of Wi-Fi's (design
+    review R4-26)."""
+    ws = _ws(tmp_path, HANDHELD, "moy", "dark")
+    ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
+    ws.set_menu_view("code")
+    _frame(ws, 2)
+    app = ws.editor_app
+    zone = ws.bar_layer._zone_rect("menu")
+    assert app._compact(zone)
+    rects = app._ladder_rects(zone)
+    play = rects[-1][2]
+    assert rects[-1][0] is None, "Play ends the ladder"
+    assert zone[0] + zone[2] - (play[0] + play[2]) >= 6 * ws.layout.fs

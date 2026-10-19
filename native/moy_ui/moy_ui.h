@@ -391,11 +391,14 @@ enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI
 // card's first or last row, and a mark that fills it rounds those corners as
 // the card's, by the radius given. KEEP: the current content keeps its own
 // colours (a code line's), so an opaque current plate beside a row is the
-// row's outline instead.
+// row's outline instead. SELECTED: the card the screen describes while focus
+// is elsewhere or does not draw (touch): its card mark draws whatever the
+// shell says of focus, as a current mark -- no rim, and no focus mark counted.
 enum {
     MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
     MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
     MOY_UI_MARK_TOP = 128, MOY_UI_MARK_FOOT = 256, MOY_UI_MARK_KEEP = 512,
+    MOY_UI_MARK_SELECTED = 1024,
 };
 // focus.style's and current.style's values, in style.json's order
 enum {

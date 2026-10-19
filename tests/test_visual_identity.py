@@ -222,6 +222,11 @@ def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
         ws.set_home_tab("make")
         assert home.zone_verbs() == ("new",)      # "+ New" first
         ws.launcher.sel = 1
+        assert home.zone_verbs() == ("new", "change", "copy")     # a built-in
+        ws.carts.dup(ws.launcher.selected())      # a project of the kid's own
+        ws.set_home_tab("make")
+        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                               if (it.get("title") or "").endswith(" copy"))
         assert home.zone_verbs() == ("new", "change", "copy", "delete")
         chips = home._zone_action_rects(ws.layout.zone_left)
         # ...and the selected cart's favourite star where the strip has room

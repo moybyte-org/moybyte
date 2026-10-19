@@ -2567,6 +2567,24 @@ class SystemCanvas(DeviceCanvas):
            self._cam_x, self._cam_y,
            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
+    def glyph_ink(self, ch):
+        """(c0, c1, r0, r1): the columns and rows petme128's `ch` lights in
+        its 8x8 cell, what a letter centred on its own ink is placed by (a
+        generated cover's initial); the cell's own (0, 7, 0, 7) for a blank
+        or where the font is not staged."""
+        n = ord(ch) - _FONT8_FIRST
+        if _FONT8 is None or not 0 <= n < len(_FONT8) // 8:
+            return (0, 7, 0, 7)
+        cols = _FONT8[n * 8:n * 8 + 8]
+        lit = [i for i in range(8) if cols[i]]
+        if not lit:
+            return (0, 7, 0, 7)
+        rows = 0
+        for b in cols:
+            rows |= b
+        ys = [j for j in range(8) if rows >> j & 1]
+        return (lit[0], lit[-1], ys[0], ys[-1])
+
     def print_scaled(self, s, x, y, c, scale):
         """The display type: `s` at `scale` (a whole number, NOT the font
         scale), one op through the one UI text path -- what

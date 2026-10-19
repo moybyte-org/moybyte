@@ -774,13 +774,14 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
         }
         return MOY_UI_OK;
     }
-    if (!m->on && m->active && !after && !(flags & MOY_UI_MARK_RING)) {
+    int sel = (flags & MOY_UI_MARK_SELECTED) != 0;
+    if (!m->on && m->active && !after && !sel && !(flags & MOY_UI_MARK_RING)) {
         s_marks.drawn++;
         return moy_ui_focus_ring(s, b, fs);     // a theme with no marks: its ring
     }
     dd_t d;
     open_dd(s, &d, crossing);
-    if (!m->active || !m->on) {
+    if (!m->on || !(m->active || sel)) {
         return MOY_UI_OK;
     }
     int x = b.x, y = b.y, w = b.w, h = b.h;
@@ -798,7 +799,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
         return MOY_UI_OK;
     }
     if (!after) {
-        if (!(flags & MOY_UI_MARK_AGAIN)) {
+        if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
             s_marks.drawn++;
         }
         if (m->ink_accent) {
@@ -853,7 +854,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
                 }
             }
             if (after || !card) {
-                if (set(m->rim_c)) {
+                if (set(m->rim_c) && !sel) {
                     ring_a(&d, bx - 1, by - 1, bw + 2, bh + 2, r ? r + 2 : 0, 1,
                            val(&d, m->rim_c), m->rim_alpha);
                 }

@@ -44,14 +44,18 @@ def _frames(drv, n=2):
 
 
 def _select(ws, tab, which):
-    """Select on `tab` the "+ New" card (`which` "new") or a real cart (on
-    Mine, a copy of a game: a fresh store holds none of its own)."""
-    if tab == "mine":
+    """Select on `tab` the "+ New" card (`which` "new"), a real cart, or a
+    cart of the kid's own ("own"; on Mine always: a copy of a game, as a
+    fresh store holds none of its own)."""
+    from runtime.moy_store_base import builtin_name
+    if tab == "mine" or which == "own":
         _select(ws, "games", "cart")
         ws.carts.dup(ws.launcher.selected())
     ws.set_home_tab(tab)
     items = ws.launcher.items
     for i, it in enumerate(items):
+        if which == "own" and not (it.get("path") and builtin_name(it["path"]) is None):
+            continue
         if (it.get("type") == "new") == (which == "new") and (which == "new" or it.get("path")):
             ws.launcher.sel = i
             return it
@@ -145,7 +149,7 @@ def _reached(ws, drv, kind, monkeypatch):
 @pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
 @pytest.mark.parametrize("kind", ui_draw.INPUTS)
 @pytest.mark.parametrize("tab,which", [("games", "cart"), ("mine", "cart"), ("apps", "cart"),
-                                       ("make", "cart"), ("make", "new")])
+                                       ("make", "cart"), ("make", "own"), ("make", "new")])
 def test_every_card_verb_is_reachable_under_every_input(tmp_path, monkeypatch, config, kind,
                                                         tab, which):
     ws = _ws(tmp_path, config)
@@ -156,7 +160,7 @@ def test_every_card_verb_is_reachable_under_every_input(tmp_path, monkeypatch, c
     home = ws.launcher_layer
     want = set("delete" if v == "sure" else v for v in home.zone_verbs())
     want |= set(home.card_verbs())
-    if which == "cart":
+    if which in ("cart", "own"):
         want.discard("new")                   # the "+ New" card's tap (make/new)
     got = _reached(ws, drv, kind, monkeypatch)
     assert want <= got, "%s %s/%s under %s: no route to %s" % (
@@ -168,7 +172,7 @@ def test_a_long_press_opens_the_cards_verbs_and_its_release_is_no_tap(tmp_path, 
     ws = _ws(tmp_path, config)
     drv = make_drv(ws)
     _frames(drv)
-    it = _select(ws, "make", "cart")
+    it = _select(ws, "make", "own")
     ui_draw.input_kind("touch")
     _frames(drv)
     _long_press(ws, drv)
@@ -374,3 +378,51 @@ def test_up_from_the_desk_shelf_reaches_its_buttons(tmp_path):
     home._do_verb = done.append
     home.handle_input(_Pad("a"))
     assert done == ["change"]
+
+@pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
+@pytest.mark.parametrize("kind", ui_draw.INPUTS)
+def test_make_offers_no_delete_on_a_built_in(tmp_path, monkeypatch, config, kind):
+    """A built-in is copied, never deleted: Make's verbs on a `moybyte.*`
+    card hold no Delete under any input, the open-cart menu's own test
+    (`builtin_name`), and a card of the kid's own keeps it (R4-14)."""
+    from runtime.moy_store_base import builtin_name
+    ws = _ws(tmp_path, config)
+    drv = make_drv(ws)
+    _frames(drv)
+    ws.set_home_tab("make")
+    home = ws.launcher_layer
+    built = [i for i, it in enumerate(ws.launcher.items)
+             if it.get("path") and builtin_name(it["path"]) is not None]
+    assert built, "no built-in on Make"
+    ws.launcher.sel = built[0]
+    _frames(drv)
+    assert "delete" not in home.zone_verbs() and "delete" not in home.card_verbs()
+    assert "copy" in home.zone_verbs()
+    assert "delete" not in _reached(ws, drv, kind, monkeypatch)
+    ws.carts.dup(ws.launcher.items[built[0]])
+    ws.set_home_tab("make")
+    own = next(i for i, it in enumerate(ws.launcher.items)
+               if it.get("path") and builtin_name(it["path"]) is None)
+    ws.launcher.sel = own
+    assert "delete" in home.zone_verbs()
+
+
+@pytest.mark.parametrize("kind", ["keys", "tdeck", "pad"])
+def test_the_make_strip_keeps_its_tab_keys(tmp_path, kind):
+    """On a project of the kid's own every verb wants the strip: where it
+    runs short Duplicate goes (X and the card's menu keep it), never the
+    tab keys (R4-22)."""
+    from runtime.moy_store_base import builtin_name
+    ws = _ws(tmp_path)
+    drv = make_drv(ws)
+    _frames(drv)
+    ws.set_home_tab("games")
+    ws.carts.dup(next(it for it in ws.launcher.items if it.get("path")))
+    ws.set_home_tab("make")
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and builtin_name(it["path"]) is None)
+    ui_draw.input_kind(kind)
+    spans, _rect = ws.launcher_layer._hint_spans(ws.sys_canvas)
+    got = [v for v, _a, _b in spans]
+    assert got[-1] == "tabs", got
+    assert "change" in got or kind == "pad", got

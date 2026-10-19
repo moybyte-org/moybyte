@@ -210,13 +210,23 @@ def _verb_tap(ws, layer, verb):
     return layer.zone_tap(x + w // 2, y + h // 2)
 
 
+def _extra(ws, title="Extra"):
+    """A project of the kid's own on the shelf (a built-in is copied, never
+    deleted)."""
+    from runtime import moy_carts
+    moy_carts.create(title, str(ws.carts_root), src="def _draw():\n    cls(1)\n",
+                     type="game")
+    ws.carts.apply(shelf(str(ws.carts_root)))
+
+
 def test_make_carries_copy_and_delete(tmp_path):
     ws = _ws(tmp_path, sys_size=(800, 480))
+    _extra(ws)
     layer = ws.launcher_layer
     ws.set_home_tab("make")
     ws.launcher.sel = 0
     assert layer.zone_verbs() == ("new",)            # the "+ New" card
-    ws.launcher.sel = _first_real(ws.launcher)
+    _make_with(ws, "Extra")
     assert layer.zone_verbs() == ("new", "change", "copy", "delete")
 
 
@@ -250,12 +260,13 @@ def test_delete_is_two_tap_guarded(tmp_path):
 
 def test_delete_disarms_when_the_selection_moves(tmp_path):
     ws = _ws(tmp_path, sys_size=(800, 480))
+    _extra(ws)
+    _extra(ws, "Extra Two")
     layer = ws.launcher_layer
-    ws.set_home_tab("make")
-    ws.launcher.sel = _first_real(ws.launcher)
+    _make_with(ws, "Extra")
     _verb_tap(ws, layer, "delete")
     assert layer.zone_verbs()[-1] == "sure"
-    ws.launcher.sel = ws.launcher.sel + 1
+    _make_with(ws, "Extra Two")
     assert layer.zone_verbs()[-1] == "delete"
 
 

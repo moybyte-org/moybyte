@@ -1725,10 +1725,10 @@ def focus_ring(cv, th, rect, fs=None):
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
 _MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING = 1, 2, 4, 8, 32
-_MARK_KEEP = 512
+_MARK_KEEP, _MARK_SELECTED = 512, 1024
 
 
-def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
+def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False):
     """The focus mark on `rect`, the theme's by its size class
     (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
     "part", or None to class it by its size. Drawn after the part's own fill
@@ -1738,9 +1738,13 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
     grown and raised). A part drawn by `row`, `cell`, `chip` or `button`
     takes `focus=True` instead. In a window behind it draws nothing. `ring`
     draws the theme's ring whatever its focus style, and is no focus mark (a
-    cursor's: the sprite editor's)."""
+    cursor's: the sprite editor's). `selected` marks the card a screen
+    describes while focus is elsewhere or does not draw (touch): the card's
+    mark as a current mark, drawn whatever the shell says of focus, with no
+    rim and no focus mark counted (the desk shelf's selected card)."""
     return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
-                    (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0), fs)
+                    (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0)
+                    | (_MARK_SELECTED if selected else 0), fs)
 
 
 def current(cv, th, rect, r=0, back=False, side=False, fs=None, keep=False):
@@ -1948,7 +1952,7 @@ def initial_cover(cv, rect, r, title, stepped=False):
     first letter on a colour block that stays the cart's (`initial_block`),
     a pixel letter (petme128, crisp at any whole scale, as a cover's pixel
     art is) at the largest scale that stands it no taller than half the
-    block."""
+    block, centred on the letter's own ink, not on its cell."""
     x, y, w, h = rect
     block, ink = initial_block(title)
     cv.rrect(x, y, w, h, r, block, stepped=stepped)
@@ -1957,9 +1961,10 @@ def initial_cover(cv, rect, r, title, stepped=False):
         return
     letter = s[0].upper()
     sc = max(1, (h // 2) // 7)            # petme128's capitals are 7 rows
+    c0, c1, r0, r1 = cv.glyph_ink(letter)
     was = print_font(0)
-    # its 8-column cell holds 7 of ink: centred on the ink, not the cell
-    cv.print_scaled(letter, x + (w - 7 * sc) // 2, y + (h - 7 * sc) // 2, ink, sc)
+    cv.print_scaled(letter, x + (w - (c1 - c0 + 1) * sc) // 2 - c0 * sc,
+                    y + (h - (r1 - r0 + 1) * sc) // 2 - r0 * sc, ink, sc)
     if was is not None:
         print_font(was)
 

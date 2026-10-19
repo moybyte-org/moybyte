@@ -19,6 +19,7 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 
 
 from runtime.moy_input import InputTable as DeviceInputState  # noqa: E402
+from runtime.moy_store_base import builtin_name as _builtin_name  # noqa: E402
 from ws_helpers import build_ws as _ws
 
 
@@ -448,7 +449,9 @@ def test_the_desk_menus_open_on_a_safe_row(tmp_path, sleep):
             continue
         g.sel = i
         if ws.menu_ui.open_card(ws.projects_layer, (200, 200)):
-            assert any(_danger(r) for r in ws.sysmenu.items)
+            # a built-in is copied, never deleted
+            own = _builtin_name(it["path"]) is None
+            assert any(_danger(r) for r in ws.sysmenu.items) == own
             _assert_opens_safe(ws, "projects card %d" % i)
             ws.sysmenu.close()
 

@@ -29,3 +29,22 @@ def test_the_cover_is_the_block_with_the_letter_on_it():
     ui_draw.initial_cover(cv, (0, 0, 128, 128), 0, "")  # no title: the block alone
     assert {px(x, y) for x in range(0, 128, 8) for y in range(0, 128, 8)} == {
         cv._col(ui_draw.initial_block("")[0])}
+
+
+def test_the_letter_centres_on_its_own_ink():
+    """The initial stands in the middle of its block by the pixels it
+    lights, not by its 8-column cell (design review R4-20): on the hero's
+    128 and a neighbour's 64 its ink is as far from either side, to a pixel."""
+    for side in (128, 64):
+        for title in ("Pin Light", "Moy", "Ivy"):
+            cv = make_system_canvas(side, side)
+            ui_draw.initial_cover(cv, (0, 0, side, side), 0, title)
+            ink = cv._col(ui_draw.initial_block(title)[1])
+
+            def px(x, y):
+                i = (y * cv._stride + x) * 2
+                return cv._buf[i] | (cv._buf[i + 1] << 8)
+            xs = [x for x in range(side) for y in range(side) if px(x, y) == ink]
+            ys = [y for x in range(side) for y in range(side) if px(x, y) == ink]
+            assert abs(min(xs) - (side - 1 - max(xs))) <= 1, (side, title)
+            assert abs(min(ys) - (side - 1 - max(ys))) <= 1, (side, title)

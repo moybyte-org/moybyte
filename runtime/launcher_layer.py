@@ -84,6 +84,10 @@ try:
     from widgets import ConfirmTap
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import ConfirmTap
+try:
+    from moy_store_base import builtin_name as _builtin_name
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import builtin_name as _builtin_name
 
 
 # The "+ New" card (Make's first, an empty Mine's only) is a
@@ -210,7 +214,9 @@ _STAR = {}           # chip side -> (edge runs, inside runs) of its star
 
 def _star_runs(side):
     """The star of a `side`-square chip as runs (dx, dy, w) from the chip's
-    top left: (its edge, its inside). A five-pointed star, point up, sampled
+    top left: (its edge, its inside). A five-pointed star, point up, about
+    10 pixels across in a 16-pixel chip so the chip's rim stands clear of
+    its points (design review R4-30), its box centred on the chip, sampled
     at pixel centres about the chip's centre pixel, so its halves mirror
     each other; its edge the pixels with a side out of it. Made once a
     side."""
@@ -218,14 +224,15 @@ def _star_runs(side):
     if got is not None:
         return got
     import math
-    ro = side * 0.44
+    ro = side * 0.31
     ri = ro * 0.42
     c = side // 2
     pts = []
     for k in range(10):
         a = math.pi * (k / 5.0 - 0.5)
         r = ro if k % 2 == 0 else ri
-        pts.append((r * math.cos(a), r * math.sin(a) + side * 0.04))
+        # its points reach ro up and 0.81 ro down: lowered by half the odds
+        pts.append((r * math.cos(a), r * math.sin(a) + ro * 0.095))
 
     def inside(px, py):
         hit = False
@@ -1944,12 +1951,18 @@ class Carousel(Launcher):
 
     def _draw_picture(self, cv, it, rect, centre, sheet_for=None):
         """A card's picture over its whole rect: the "+ New" card's icon on
-        the focus colour, else its cover (`_draw_hh_cover`)."""
+        the focus colour, in the corners a cover of its size takes, else its
+        cover (`_draw_hh_cover`)."""
         th = self.theme or {}
         NAMES = self._NAMES
         x, y, w, h = rect
         if it.get("type") in PSEUDO_TILE_TYPES:
-            cv.rect(x, y, w, h, th.get("focus", 0))
+            r = self._corner_r(w)
+            if r:
+                cv.rrect(x, y, w, h, r, th.get("focus", 0),
+                         stepped=bool(_ui_draw.depth()[5]))
+            else:
+                cv.rect(x, y, w, h, th.get("focus", 0))
             img = self.icon_for("new") if self.icon_for is not None else None
             sc = max(1, (w * 5 // 8) // 16)
             if img is not None:
@@ -1961,17 +1974,18 @@ class Carousel(Launcher):
         else:
             self._draw_hh_cover(cv, it, rect, centre)
 
-    def _mark_rect(self, cv, at):
+    def _mark_rect(self, cv, at, selected=False):
         """The rect a card at `at` hands its focus mark: `at` shrunk by as
         much as the theme's mark grows a card (a lift's `grow`, read off the
         canvas's edge, where it draws nothing), so the mark's box is the
         card's own side, raised where it lifts. The cover keeps its clean
         scale (owner call 2026-10-17) and the lift's rim hugs it, with no
         plate between (design review R3-05): a picture card lifts by its
-        rise and its shadow alone."""
+        rise and its shadow alone. `selected`: the mark is the selected
+        card's current lift (`ui_draw.focus`)."""
         w, h = at[2], at[3]
         _ink, box = _ui_draw.focus(cv, self.theme, (-4 * w - 64, -4 * h - 64, w, h),
-                                   size="card", after=True)
+                                   size="card", after=True, selected=selected)
         g = (box[2] - w) // 2
         if g <= 0:
             return at
@@ -1983,12 +1997,19 @@ class Carousel(Launcher):
         # The centre card at rest takes the theme's focus mark (ui.focus; a
         # lifted card draws raised, `_mark_rect`); a theme without marks rings it.
         marks = _ui_draw.marks_on()
-        mark = centre and not self.moving and marks and not self.tab_focus
+        rest = centre and not self.moving and marks
+        mark = rest and not self.tab_focus
+        # On the desk the selected card is the one the details pane
+        # describes: under touch, and while the tabs or the pane's buttons
+        # hold the focus, it keeps its lift as a current mark (design review
+        # R4-09); the theme's focus mark is the shelf's own focus.
+        sel = rest and self.desk() and (self.tab_focus or _ui_draw.input_kind() == "touch"
+                                        or not _ui_draw.marks()[1])
         at = rect
-        if mark:
-            at = self._mark_rect(cv, rect)
+        if mark or sel:
+            at = self._mark_rect(cv, rect, sel)
             _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card",
-                                        r=self._corner_r(rect[2]))
+                                        r=self._corner_r(rect[2]), selected=sel)
         self._draw_picture(cv, it, rect, centre, sheet_for)
         if centre and self.favorite_for is not None and not self.moving \
                 and not self.desk() \
@@ -2000,9 +2021,9 @@ class Carousel(Launcher):
             else None
         if not self._corner_r(rect[2]):
             self._card_frame(cv, rect, centre and not marks, ring=ring)
-        if mark:
+        if mark or sel:
             _ui_draw.focus(cv, self.theme, at, size="card", r=self._corner_r(rect[2]),
-                           after=True)
+                           after=True, selected=sel)
 
 
 class _IconCells:
@@ -3021,11 +3042,18 @@ class LauncherHomeLayer:
                 for line in lines:
                     cv.print_scaled(line, dx, dy, dim, ms)
                     dy += lh * ms
+            # the facts' columns stand on the buttons' left edges under them
+            # (design review R4-31); a fact past the last button a column on
             col = 150 // u
-            for k, (key, val) in enumerate(self._facts(it)):
-                fx = dx + k * col
+            facts = self._facts(it)
+            xs = [r[0] for _v, r, _k in buttons][:len(facts)]
+            while len(xs) < len(facts):
+                xs.append(xs[-1] + col if xs else dx)
+            for k, (key, val) in enumerate(facts):
+                fx = xs[k]
+                w = (xs[k + 1] - fx if k + 1 < len(xs) else col) - 10 // u
                 cv.print_scaled(key, fx, ky, dim, ks)
-                cv.print_scaled(_ui_draw.print_fit(val, col - 10 // u, vs), fx, vy, ink, vs)
+                cv.print_scaled(_ui_draw.print_fit(val, w, vs), fx, vy, ink, vs)
         on = self._button_focus
         for k, (v, r, kind) in enumerate(buttons):
             _ui_draw.button(cv, th, r, _VERB_HINT[v][1], kind=kind, app="home",
@@ -3113,27 +3141,43 @@ class LauncherHomeLayer:
     def _hint_spans(self, cv):
         """[(verb or "tabs", x0, x1)] across the hint strip, and the strip's
         rect: what `_draw_hints` draws and a tap hits."""
+        out, rect, _items = self._hint_fit(cv)
+        return out, rect
+
+    def _hint_fit(self, cv):
+        """(spans, rect, items) of the hint strip: the spans `_hint_spans`
+        answers and the verbs' keycap items they hold. Where the verbs run
+        into the tab keys the star goes first, then Duplicate (it stays on
+        X and in the card's menu); the tab keys go last (design review R4-22)."""
         th = self.ws.theme_colors
         rect = self.grid.foot()[5]
         desk = self.grid.desk()
         items, verbs = self._hint_groups()
-        out = []
+        items, verbs = list(items), list(verbs)
         if self.searchable and (getattr(self.ws, "search_query", "")
                                 or getattr(self.ws, "search_typing", False)):
-            items = ()
+            items, verbs = [], []
         inner = self._hint_inner(rect)
-        if items:
-            for v, (x0, x1) in zip(verbs, _ui_draw.hints(cv, th, inner, items, desk,
-                                                          draw=False)):
-                out.append((v, x0, x1))
         sp = _ui_draw.hints(cv, th, inner, _TAB_KEYS, desk, draw=False)
-        if sp:
-            dx = rect[0] + rect[2] - self._hint_pad() - sp[0][1]
-            if out and out[-1][0] == "favourite" and sp[0][0] + dx <= out[-1][2]:
-                out.pop()                # no room for the star beside the tabs
-            if not out or sp[0][0] + dx > out[-1][2]:
-                out.append(("tabs", sp[0][0] + dx, sp[0][1] + dx))
-        return out, rect
+        dx = rect[0] + rect[2] - self._hint_pad() - sp[0][1] if sp else 0
+        while True:
+            out = []
+            if items:
+                for v, (x0, x1) in zip(verbs, _ui_draw.hints(cv, th, inner, items, desk,
+                                                              draw=False)):
+                    out.append((v, x0, x1))
+            if not sp or not out or sp[0][0] + dx > out[-1][2]:
+                break
+            drop = "favourite" if verbs[-1] == "favourite" else \
+                "copy" if "copy" in verbs else None
+            if drop is None:
+                break
+            k = verbs.index(drop)
+            del verbs[k]
+            del items[2 * k:2 * k + 2]
+        if sp and (not out or sp[0][0] + dx > out[-1][2]):
+            out.append(("tabs", sp[0][0] + dx, sp[0][1] + dx))
+        return out, rect, items
 
     def _draw_hints(self, cv):
         """The home's hint strip (steps 17 and 18): keycaps naming the
@@ -3149,8 +3193,7 @@ class LauncherHomeLayer:
             rect = self.grid.foot()[5]
             _ui_draw.hints(cv, th, self._hint_inner(rect), _MENU_KEYS, self.grid.desk())
             return
-        spans, rect = self._hint_spans(cv)
-        items, verbs = self._hint_groups()
+        spans, rect, items = self._hint_fit(cv)
         n = sum(1 for v, _a, _b in spans if v != "tabs")
         query = getattr(self.ws, "search_query", "")
         typing = getattr(self.ws, "search_typing", False)
@@ -3527,8 +3570,10 @@ class LauncherHomeLayer:
         """The active tab's verbs on the selected card (§12's table): Games
         PLAY, CHANGE, SEARCH; Mine PLAY, CHANGE; Apps OPEN; Make NEW, CHANGE,
         COPY, DEL. CHANGE, COPY and DEL need a real cart and a store that
-        manages projects; the "+ New" card's verb is NEW. DEL reads SURE?
-        once armed. SEARCH is the fullscreen home's alone."""
+        manages projects, and DEL one the kid's (a built-in is copied, never
+        deleted: `builtin_name`, the open-cart menu's own test); the "+ New"
+        card's verb is NEW. DEL reads SURE? once armed. SEARCH is the
+        fullscreen home's alone."""
         ws = self.ws
         grid = self.grid
         tab = grid.tab
@@ -3543,6 +3588,8 @@ class LauncherHomeLayer:
                 return ()                        # a read-only store makes nothing
             if not change:
                 return ("new",)
+            if _builtin_name(sel["path"]) is not None:
+                return ("new", "change", "copy")
             return ("new", "change", "copy",
                     "sure" if self._armed() else "delete")
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
