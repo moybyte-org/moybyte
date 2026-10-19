@@ -326,12 +326,16 @@ class PaintLayout(LayoutBase):
         self.sw_area = (self.sw_x0, gy, 2 * sw, 8 * sw)
         rx = self.sw_x0 + 2 * sw + gap
         rw = cx + cw - pad - rx
-        # ‹ › as square-ish icon buttons, the Size caption beside them (a
-        # tap on it opens the pickers)
+        # ‹ n › (D-10's "‹ value ›"): square-ish icon buttons with the
+        # sprite's number between them, in a slot that holds the sheet's
+        # last, then the Size caption on its own (a tap on it opens the
+        # pickers)
         sq = bh + (8 if desk else 4 * fs)
         self.spr_prev = (rx, gy, sq, bh)
-        self.spr_next = (rx + sq + g2, gy, sq, bh)
-        sx = rx + 2 * sq + g2 + (12 if desk else 5 * fs)
+        nw = _ui_draw.print_width("000", fs) + 2 * g2
+        self.num_rect = (rx + sq, gy, nw, bh)
+        self.spr_next = (rx + sq + nw, gy, sq, bh)
+        sx = rx + 2 * sq + nw + (12 if desk else 5 * fs)
         self.size_xy = (sx, gy + (bh - line) // 2)
         self.size_btn = (sx - 2 * fs, gy, max(0, rx + rw - sx + 2 * fs), bh)
         y = gy + bh + sep
@@ -1144,7 +1148,12 @@ class PaintLayer:
         # the grid), the sprite map, then load, save and to-Files.
         self._stepper(cv, th, lay.spr_prev, ("back", "arr_l"))
         self._stepper(cv, th, lay.spr_next, ("forward", "arr_r"))
-        cv.print("Size %dx%d" % (pe.size, pe.size), lay.size_xy[0], lay.size_xy[1],
+        num = str(n)
+        nx, ny, nw, nh = lay.num_rect
+        cv.print(num, nx + (nw - _ui_draw.print_width(num, fs)) // 2, lay.size_xy[1],
+                 th["ink"], 1)
+        times = "\u00d7" if _ui.has_symbols() else "x"
+        cv.print("Size %d%s%d" % (pe.size, times, pe.size), lay.size_xy[0], lay.size_xy[1],
                  th["ink_dim"], 1)
         self._draw_map(cv, lay, pe, sheet, th, greys)
         draw = self._icon_draw

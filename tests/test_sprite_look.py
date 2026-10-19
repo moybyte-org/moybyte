@@ -113,3 +113,20 @@ def test_a_tool_row_under_the_grid_stands_on_the_file_buttons_line(tmp_path, con
     if lay.tool_btns[0][1] < lay.pg_y0 + lay.pg_span:
         pytest.skip("the tool row stands at the column's head here")
     assert {b[1] for b in lay.tool_btns} == {lay.get_btn[1]}
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_sprite_number_sits_between_its_steppers(tmp_path, config, theme, mode):
+    """‹ n › (D-10's "‹ value ›", design review R4-18): the sprite's number
+    in the ink between the steppers, the Size caption on its own after
+    them."""
+    ws, lay, ox, oy = _open(tmp_path, config, theme, mode)
+    px_, py_, pw, _ph = lay.spr_prev
+    nx, ny, nw, nh = lay.num_rect
+    assert nx == px_ + pw and lay.spr_next[0] == nx + nw
+    assert lay.size_xy[0] > lay.spr_next[0] + lay.spr_next[2]
+    px = el._px(ws)
+    ink = el._rgb(ws.glass_canvas, ws.theme_colors["ink"])
+    seen = {px[oy + y][ox + x] for y in range(ny, ny + nh) for x in range(nx, nx + nw)}
+    assert ink in seen
