@@ -348,6 +348,18 @@ class PauseMenu:
         if not _in_box(px, py, host.box("Pause")):
             self.close()                  # a press outside the card resumes
 
+    def surface(self):
+        """The rect the card centres on: the paused game's window content on
+        the windowed desk, else the glass."""
+        ws = self.ws
+        wm = ws.wm
+        if getattr(wm, "mode", None) == "desktop":
+            win = getattr(wm, "_wins", {}).get("desktop")
+            if win is not None and not win.minimized:
+                return win.content_rect()
+        cv = ws.sys_canvas
+        return (0, 0, cv.w, cv.h)
+
     def draw(self):
         # The card is the shell's, not the held cart's: the shell's fonts and
         # icons, whatever the run left the app-cart boundary at.
@@ -378,7 +390,7 @@ class PauseMenu:
                 _ui_draw.scrim(cv, ws.theme_colors, (0, 0, cv.w, cv.h))
         if not self.page:
             host.focus(self.ITEMS[self.sel])
-        settled = host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
+        settled = host.begin(cv, ws.theme_colors, self.surface(), desk)
         _ui.popover("Pause", self._width(desk))
         cart = ws.cart
         _ui.icon("moy")
@@ -597,8 +609,28 @@ class SystemMenuUI:
         m = ws.sysmenu
         if m.open and m.comp is not None and not ws._about:
             return
+        if ws._about:
+            lay = ws.layout
+            rect = (lay.cx, lay.cy, lay.cw, lay.ch)
+        else:
+            rect = self.surface()
+        _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect)
+
+    def surface(self):
+        """The glass the menu's card takes and its scrim dims, (x, y, w, h):
+        the content under the bars, less the home's hint strip when the
+        home is under it -- the strip names the menu's keys, so it stays
+        uncovered and unwashed, as the bars do (D-01)."""
+        ws = self.ws
         lay = ws.layout
-        _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
+        x, y, w, h = lay.cx, lay.cy, lay.cw, lay.ch
+        if ws.screen == "launcher":
+            foot = ws.launcher_layer.grid.foot()
+            if foot is not None:
+                top = foot[5][1]
+                if y < top < y + h:
+                    h = top - y
+        return (x, y, w, h)
 
     def looked(self):
         """The menu's rows show as the look's card: a theme with a depth."""
@@ -639,16 +671,21 @@ class SystemMenuUI:
                 first = False
                 n += 1
         body += n * (rh + gap)
-        w = min(self._look_w(desk), cv.w - 2 * pad)
-        bh = min(body, cv.h - 4 * pad) if 2 * pad + body > cv.h - 2 * pad else body
-        h = 2 * pad + bh
+        sx, sy, sw, sh = self.surface()
+        e = 4 * fs                       # the card's gap from every edge
+        x0, x1, y0, y1 = sx + e, sx + sw - e, sy + e, sy + sh - e
+        w = min(self._look_w(desk), sw - 2 * pad, x1 - x0)
         ax, ay, aw, ah = self._menu_cell()
-        x = max(0, min(ax, cv.w - w))
-        y = ay + ah + 4 * fs
-        if y + h > cv.h:
-            y = ay - 4 * fs - h
-            if y < 0:
-                y = max(0, cv.h - h)
+        x = max(x0, min(ax, x1 - w))
+        top, foot = max(ay + ah + e, y0), min(ay - e, y1)
+        below, above = y1 - top, foot - y0
+        bh = body
+        dn = 2 * pad + bh <= below or (2 * pad + bh > above and below >= above)
+        room = below if dn else above
+        if 2 * pad + bh > room:
+            bh = max(rh, room - 2 * pad)
+        h = 2 * pad + bh
+        y = top if dn else foot - h
         return (x, y, w, h)
 
     def panel_rect(self):
@@ -704,7 +741,7 @@ class SystemMenuUI:
         if 0 <= m.sel < len(m.items) and m.items[m.sel][0] == "item":
             host.focus(m.items[m.sel][4])
         desk = _desk_class()
-        settled = host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
+        settled = host.begin(cv, ws.theme_colors, self.surface(), desk)
         _ui.at(*self._menu_cell())
         _ui.popover("System", self._look_w(desk))
         cap, texts, icons, kinds = "", [], [], []

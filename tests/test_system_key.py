@@ -320,6 +320,75 @@ def test_the_look_cards_rect_is_the_one_the_engine_draws(tmp_path, desk, cart):
     assert y + h >= drawn[1] + drawn[3], "the painted rect holds the card and its shadow"
 
 
+class _Ladder:
+    """An idle ladder that only offers Sleep (the boards' spine sets one)."""
+
+    def sleep(self):
+        pass
+
+
+def _meets(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+@pytest.mark.parametrize("desk", [False, True])
+def test_the_look_card_keeps_clear_of_the_bar_the_strip_and_its_anchor(tmp_path, desk):
+    """The card hangs 4 pixels at the scale under the bar and keeps as far
+    above the home's hint strip, whose Close it leaves showing; over Make
+    with Sleep offered its body is cut to that room, and the rows it cut
+    are reached by focus (design review R4-04)."""
+    ws = build_desktop_ws(tmp_path) if desk else build_ws(tmp_path)
+    _moy(ws)
+    drv = make_drv(ws)
+    ws.idle_ladder = _Ladder()
+    if desk:
+        ws.open_desk()
+    else:
+        ws.set_home_tab("make")
+        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    _frames(drv)
+    ws._golden_popover = True
+    ws.toggle_sysmenu()
+    _frames(drv, 3)
+    card = ws.menu_ui._host.box("System")
+    assert tuple(card) == ws.menu_ui.look_card()
+    x, y, w, h = card
+    fs = ws.sys_canvas.font_scale
+    lay = ws.layout
+    assert y >= lay.cy + 4 * fs, "the card hangs under the bar"
+    foot = ws.launcher_layer.grid.foot()
+    bottom = foot[5][1] if (foot is not None and not desk) else lay.cy + lay.ch
+    assert y + h <= bottom - 4 * fs, "the card keeps off the strip"
+    assert not _meets(card, ws.menu_ui._menu_cell()), "the card covers its anchor"
+    if not desk:
+        last = ws.menu_ui._host.box("Restart Moybyte")
+        assert last is None or last[1] + last[3] > y + h, "the body is cut"
+        m = ws.sysmenu
+        for _ in range(len(m.items)):
+            _key(drv, "down")
+        assert m.sel == len(m.items) - 1
+        _frames(drv, 3)
+        last = ws.menu_ui._host.box("Restart Moybyte")
+        assert last[1] >= y and last[1] + last[3] <= y + h, "focus scrolls the last row in"
+    ws.sysmenu.close()
+
+
+def test_the_card_menu_never_covers_the_point_it_opened_at(tmp_path):
+    ws = build_ws(tmp_path)
+    _moy(ws)
+    drv = make_drv(ws)
+    ws.set_home_tab("make")
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    _frames(drv)
+    for at in ((160, 40), (160, 120), (160, 200), (20, 100), (300, 100)):
+        assert ws.menu_ui.open_card(ws.launcher_layer, at)
+        _frames(drv, 3)
+        x, y, w, h = ws.menu_ui._host.box("System")
+        assert not (y < at[1] < y + h), (at, (x, y, w, h))
+        ws.sysmenu.close()
+        _frames(drv)
+
+
 def test_the_look_card_takes_taps_on_its_rows_and_closes_outside(tmp_path):
     ws = build_ws(tmp_path)
     _moy(ws)

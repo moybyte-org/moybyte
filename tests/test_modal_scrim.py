@@ -7,6 +7,8 @@ bars stay as they were, and closing it gives the glass back as it was."""
 import os
 import sys
 
+import pytest
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
@@ -66,7 +68,8 @@ def _check_menu(ws, frames):
     again = _frames(ws, frames) + _frames(ws, frames, dirty=False)
     for got in again:
         assert got == first, "the scrim darkens once, whatever repaints"
-    x, y = lay.cx + lay.cw - 8, lay.cy + lay.ch - 8      # content, clear of the card
+    sx, sy, sw, sh = ws.menu_ui.surface()                # the content less the home's strip
+    x, y = sx + sw - 8, sy + sh - 8                      # clear of the card
     a, b = _px(before, cv.w, x, y), _px(first, cv.w, x, y)
     assert _lum(b) < _lum(a), "the content under the menu dims"
     bx = lay.cx + lay.cw - 2
@@ -111,3 +114,50 @@ def test_the_paused_game_dims_once_and_comes_back_whole(tmp_path):
     assert _lum(_px(shown[0], cv.w, x, y)) < _lum(_px(frozen, cv.w, x, y)), "the game dims"
     ws.pause.close()
     assert bytes(cv._buf) == frozen, "the resumed game finds its frame whole"
+
+
+def _rgb(v):
+    return ((v >> 11) & 31) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31
+
+
+def _contrast(a, b):
+    def lum(v):
+        out = 0.0
+        for c, k in zip(_rgb(v), (0.2126, 0.7152, 0.0722)):
+            c /= 255
+            out += k * (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        return out
+    la, lb = sorted((lum(a), lum(b)))
+    return (lb + 0.05) / (la + 0.05)
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                                        ("contrast", "light"), ("contrast", "dark")])
+@pytest.mark.parametrize("menu", ["system", "card"])
+def test_the_home_strip_stays_unwashed_under_its_menus(tmp_path, theme, mode, menu):
+    """The hint strip names the open menu's keys, so the scrim stops at its
+    top as it does at the bars (design review R4-05): its ink holds 4.5:1
+    on its ground under the system menu and under a card's menu."""
+    cfg = dict(g.CONFIGS[HANDHELD], variant=mode)
+    cfg["theme"] = theme
+    ws = g._build(cfg, tmp_path / "carts")
+    ws.go_home()
+    _frames(ws, 2)
+    ws._golden_popover = True
+    if menu == "system":
+        ws.system_key()
+    else:
+        assert ws.menu_ui.open_card(ws.launcher_layer, (ws.layout.cw // 2, ws.layout.cy + 20))
+    assert ws.sysmenu.open and ws.menu_ui.looked()
+    shown = _frames(ws, 3)[-1]
+    cv = ws.glass_canvas
+    x0, y0, w, h = ws.launcher_layer.grid.foot()[5]
+    hist = {}
+    for y in range(y0, y0 + h):
+        for x in range(x0, x0 + w):
+            v = _px(shown, cv.w, x, y)
+            hist[v] = hist.get(v, 0) + 1
+    ground = max(hist, key=hist.get)
+    best = max(_contrast(v, ground) for v in hist)
+    assert best >= 4.5, "%s %s: the strip's ink %.2f:1" % (theme, mode, best)
+    _close_menu(ws)

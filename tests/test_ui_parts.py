@@ -1234,6 +1234,44 @@ def test_a_tables_picture_column_draws_the_named_icon():
     assert pic and _ink_cols(b, y0 + 2, y0 + ROW - 2, INSET, 40) != pic
 
 
+def _band(r, y0, y1):
+    return [r.px(x, y) for y in range(y0, y1) for x in range(r.cv.w)]
+
+
+def test_a_tables_rows_fade_where_they_run_on_past_its_rect():
+    """A placed table whose rows run on below its rect fades its foot, as a
+    page's end does (design review R4-10); one whose rows all show draws
+    none, and its top rows are the same either way."""
+    top = 40
+    at = (0, top, 320, CAPTION + HEAD + 3 * ROW)
+    fits = _table_page(_rows(3), at=at, after=False)
+    runs = _table_page(_rows(9), at=at, after=False)
+    for r in (fits, runs):
+        r.frame()
+        r.frame()
+    foot = top + CAPTION + HEAD + 3 * ROW
+    head = top + CAPTION + HEAD
+    assert _band(fits, foot - 8, foot) != _band(runs, foot - 8, foot), "no fade at its foot"
+    assert _band(fits, head, head + ROW) == _band(runs, head, head + ROW)
+
+
+def test_a_scrolled_table_fades_its_head():
+    top = 40
+    at = (0, top, 320, CAPTION + HEAD + 3 * ROW)
+    still = _table_page(_rows(9), at=at, after=False)
+    moved = _table_page(_rows(9), at=at, after=False)
+    for r in (still, moved):
+        r.frame()
+        r.frame()
+    for _ in range(4):
+        moved.frame(("down",))
+    moved.frame()
+    head = top + CAPTION + HEAD
+    # the current row at the foot scrolls row 2 to the head: the fade over
+    # it differs from row 2 drawn unfaded two rows lower
+    assert _band(moved, head, head + 10) != _band(still, head + 2 * ROW, head + 2 * ROW + 10)
+
+
 def test_a_table_in_a_narrow_rect_keeps_its_last_column_inside():
     """The columns after the first text column keep their widest cell's
     width, right-aligned to the rect's inset; the first takes what is left
@@ -1458,11 +1496,13 @@ def test_a_focused_fields_ring_is_the_focus_colour_and_reads_on_its_row(theme):
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
 @pytest.mark.parametrize("desk", [False, True], ids=["handheld", "desk"])
 def test_a_fields_text_and_caret_keep_inside_its_ring(theme, desk):
-    """The field is as tall as its letters' ink and 3 pixels above and
-    below it, inside its ring (its row grows to hold it): a descender keeps
-    3 pixels off the ring, and the caret stays inside the box. Before, the
-    box was the row less 3 pixels a side, which put a handheld's descender
-    on the ring and the caret over it."""
+    """In a group the field fits its row, as tall as its siblings (design
+    review R4-29): its rest ring a pixel clear of the rules over and under
+    it, and its letters' ink as far inside the ring as that leaves -- 2
+    pixels on a handheld's 20 pixel row, the full 3 on the desk's -- so a
+    descender stays off the ring and the caret inside the box. A box of
+    the row less 3 pixels a side once put a handheld's descender on the
+    ring and the caret over it."""
     def render(text):
         def draw():
             ui.page("")
@@ -1492,8 +1532,13 @@ def test_a_fields_text_and_caret_keep_inside_its_ring(theme, desk):
     caret = max(x for x, _y in diff)
     was = {x for x in range(x0 + w // 2, cx) if empty(x, mid) == full(caret, mid) != ground}
     ink = sorted({y for x, y in diff if x < caret - 1 and x not in was})   # the empty one's caret
-    assert ink[0] - inner0 >= 3, "the letters %d px under the ring" % (ink[0] - inner0)
-    assert inner1 - ink[-1] >= 3, "the descender %d px over the ring" % (inner1 - ink[-1])
+    # the face's ink centred: on the handheld a smooth face's antialiased
+    # foot row may take one of the 2 pixels under its descender
+    pad = 3 if desk else 2
+    assert ink[0] - inner0 >= pad, "the letters %d px under the ring" % (ink[0] - inner0)
+    assert inner1 - ink[-1] >= pad - (0 if desk else 1), \
+        "the descender %d px over the ring" % (inner1 - ink[-1])
+    assert h == ui_draw.metrics("row")[6 if desk else 5], "the row is its siblings' height"
     rows = [y for x, y in diff if x == caret]
     assert inner0 <= min(rows) and max(rows) <= inner1, "the caret pokes out of the box"
 
@@ -2237,6 +2282,58 @@ def test_a_menu_draws_each_items_icon_before_its_label():
     assert b == _box(bare, "Quit"), "an icon moves no row"
     y = b[1] + b[3] // 2
     assert any(r.px(x, y) != bare.px(x, y) for x in range(b[0], b[0] + 2 * b[3]))
+
+
+def _rows_popover(n, at, tall=False):
+    def draw():
+        ui.page("")
+        ui.at(*at)
+        ui.popover("pick", 160)
+        for i in range(n):
+            ui.link("Row %d" % i, "")
+        ui.popover()
+    r = _Run(draw)
+    if tall:
+        r.cv = make_system_canvas(320, 480)
+    for _ in range(3):
+        r.frame()
+    return r
+
+
+def _meets(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+@pytest.mark.parametrize("y", [0, 20, 60, 110, 160, 200, 220])
+@pytest.mark.parametrize("n", [2, 6, 30])
+def test_a_popover_keeps_off_the_edges_and_its_anchor(y, n):
+    """Wherever its anchor stands and however long its body, the card keeps
+    4 pixels at the scale off every edge of the surface and never covers
+    the rect it hangs from: below it, else above it, else on the side with
+    more room, its body cut to that room (design review R4-04)."""
+    at = (300, y, 20, 20)
+    r = _rows_popover(n, at)
+    x0, y0, w, h = _box(r, "pick")
+    assert x0 >= 4 and y0 >= 4 and x0 + w <= 320 - 4 and y0 + h <= 240 - 4, (x0, y0, w, h)
+    assert not _meets((x0, y0, w, h), at), "the card covers its anchor"
+
+
+def test_a_cut_popover_fades_its_body_where_its_rows_run_on():
+    """A body cut to the card's room fades toward the card over its last
+    rows; the same rows on a glass tall enough to hold them all do not."""
+    at = (40, 20, 80, 20)
+    cut, whole = _rows_popover(12, at), _rows_popover(12, at, tall=True)
+    x0, y0, w, h = _box(cut, "pick")
+    assert h < _box(whole, "pick")[3], "the body is cut"
+    first = _box(cut, "Row 0")
+    assert first == _box(whole, "Row 0")
+    foot = y0 + h - (first[1] - y0)                  # the body's foot: the card's pad above it
+    xs = range(x0 + 2, x0 + w - 2)
+
+    def band(r, a, b):
+        return [r.px(x, y) for y in range(a, b) for x in xs]
+    assert band(cut, foot - 8, foot) != band(whole, foot - 8, foot), "no fade at the cut"
+    assert band(cut, first[1], first[1] + 4) == band(whole, first[1], first[1] + 4)
 
 
 def test_a_popover_with_nothing_to_hang_from_is_centred():

@@ -59,7 +59,7 @@ def test_a_spelled_out_key_names_no_action(th, action, spelled):
 # Every key an input does an action with (moy_ui_parts.c's ACT_KEYS), and the
 # spellings the hints took before they named actions.
 _ACTION_KEYS = {"enter", "Esc", "esc", "left right", "Q E", "K", "Super", "Mic",
-                "A", "B", "L R", "Start"}
+                "A", "B", "L R", "Start", "/", "Sym G"}
 
 
 def _py_callers():
@@ -107,6 +107,14 @@ def test_each_input_draws_its_own_keys_for_an_action(th):
     assert keys["keys"][1][0][1] > keys["tdeck"][1][0][1] == keys["pad"][1][0][1]
     # spelled-out keys draw the same on every input
     assert len({_strip(th, ("C", "Change"), k)[0] for k in ("keys", "tdeck", "pad")}) == 1
+
+
+def test_search_is_the_slash_a_keyboard_types(th):
+    """The home's search is `/` on a keyboard and the Sym+G chord that types
+    it on the T-Deck, never one `/` cap for a chord (design review R4-23)."""
+    assert _strip(th, ("search", "Search"), "keys") == _strip(th, ("/", "Search"), "keys")
+    assert _strip(th, ("search", "Search"), "tdeck") == _strip(th, ("Sym G", "Search"), "tdeck")
+    assert _strip(th, ("search", "Search"), "tdeck") != _strip(th, ("/", "Search"), "tdeck")
 
 
 def test_one_glyph_caps_are_square(th):

@@ -1094,6 +1094,8 @@ int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, 
     uint16_t g;
     if (ci == MOY_UI_FADE_WELL) {
         g = pal(&d, tok(&d, MOY_UI_T_LCD, MOY_UI_T_SUNK));
+    } else if (ci == MOY_UI_FADE_CARD) {
+        g = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
     } else if (ci != MOY_UI_DEFAULT) {
         g = pal(&d, ci);
     } else if (!ground(&d, &g)) {
@@ -1366,7 +1368,7 @@ int moy_ui_input(void) {
 // Each action's name.
 static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", "tabs", "menu",
                                                    "cancel", "flip", "rotate", "shift", "clear",
-                                                   "copy", "more"};
+                                                   "copy", "more", "search"};
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
@@ -1377,13 +1379,15 @@ static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", 
 // cancels there (owner call, 2026-10-18). The sprite tab's operations are
 // letters on a keyboard (PICO-8's), its shift the arrows where the keyboard
 // has them -- the T-Deck's trackball moves the grid's cursor -- and a
-// gamepad reaches them through its more menu, on Y (2026-10-19).
+// gamepad reaches them through its more menu, on Y (2026-10-19). Search is
+// the slash a keyboard types: on the T-Deck the Sym+G chord (moy_kbd.c's
+// symbol layer).
 static const char *const ACT_KEYS[MOY_UI_INPUTS][MOY_UI_ACTS] = {
     {"enter", "Esc", "left right", "Q E", "Super", "Esc", "F V", "R", "left right up down",
-     "Del", "Ctrl C", "M"},
-    {"enter", "K", "ball_lr", "Q E", "Mic", "Mic", "F V", "R", "", "Del", "", "M"},
-    {"A", "B", "dpad_lr", "L R", "Start", "B", "", "", "", "", "", "Y"},
-    {"", "", "", "", "", "", "", "", "", "", "", ""},
+     "Del", "Ctrl C", "M", "/"},
+    {"enter", "K", "ball_lr", "Q E", "Mic", "Mic", "F V", "R", "", "Del", "", "M", "Sym G"},
+    {"A", "B", "dpad_lr", "L R", "Start", "B", "", "", "", "", "", "Y", ""},
+    {"", "", "", "", "", "", "", "", "", "", "", "", ""},
 };
 
 static int span_is(moy_ui_span_t k, const char *s) {
@@ -1825,7 +1829,20 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     // the box centred in the row, the label on the text's line
     int line_dy = 0;
     int fh = field_box_h(&d, &fl, sc, &line_dy);
-    int fy = b.y + moy_ui_fdiv(b.h - fh, 2), ty = fy + line_dy;
+    int fy = b.y + moy_ui_fdiv(b.h - fh, 2);
+    if (card) {
+        // in a group the field fits the row as a value does: between the
+        // rule over the row and the next one's, a pixel at the scale clear
+        // of each, its letters centred in what is left (a handheld's 20
+        // pixel row holds the box with its letters 2 pixels inside its ring)
+        int room = b.h - d.fs, most = room - 2 * d.fs;
+        if (fh > most && most > 0) {
+            line_dy -= moy_ui_fdiv(fh - most, 2);
+            fh = most;
+        }
+        fy = b.y + d.fs + moy_ui_fdiv(room - fh, 2);
+    }
+    int ty = fy + line_dy;
     int x = b.x + pad, right = b.x + b.w - pad;
     if (label.n) {
         x += moy_ui_text_in(s, fl.id, 0, label, x, ty, mi >= 0 ? pal(&d, mi) : ink) + gap;

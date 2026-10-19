@@ -1040,7 +1040,7 @@ _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpa
 # Duplicate is Y on a keyboard, and a gamepad's Y names nothing on the home: its X
 # opens the card's verbs ("options"), the star among them.
 _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
-              "change": ("C", "Change"), "search": ("/", "Search"),
+              "change": ("C", "Change"), "search": ("search", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Duplicate"),
               "delete": ("X", "Delete"), "sure": ("X", "Sure?"),
               "favourite": ("F", "Add favourite"), "options": ("X", "Options")}

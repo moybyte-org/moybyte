@@ -411,10 +411,6 @@ def _ink_box(px, rect, ground):
     return min(xs), min(ys), max(xs) + 1, max(ys) + 1
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "the engine draws a button's icon in a button.icon-sized box (16 px), "
-    "style.json's and moy_ui_draw.c's: the desk's backspace needs the box at "
-    "the key face's cap height (design review R3-09, Batch A)"))
 @pytest.mark.parametrize("theme,mode", THEMES)
 def test_the_desk_calcs_backspace_stands_as_tall_as_its_digits(tmp_path, theme, mode):
     """The desk Calc's ⌫ is as tall as the digits beside it, less a pixel

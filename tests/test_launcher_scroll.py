@@ -525,7 +525,7 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
                                       ["play", "options"])
         else:
             assert verbs == ["play", "change", "search", "favourite"]
-            assert items[::2] == ["confirm", "C", "/", "F"]
+            assert items[::2] == ["confirm", "C", "search", "F"]   # `/`, Sym G
         ws.set_home_tab("make")
         assert home._hint_groups()[1] == ["new"], "the + New card"
         # a project selected

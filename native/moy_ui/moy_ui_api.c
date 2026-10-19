@@ -12,7 +12,9 @@
 #define DIALOG_SALT 0xc2b2ae35u
 #define POPOVER_SALT 0x27d4eb2fu
 #define NO_PAGE 0xffu
-#define FADE_H 8                     // a scrolled page's foot fade, rows at the scale
+// A fade's rows at the scale: its first two barely tint, so ten read as
+// D-09's eight (docs/look_2026-10.md).
+#define FADE_H 10
 
 // A stop's flags.
 enum {
@@ -756,7 +758,12 @@ static void band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int st
     int fills = m->on && m->active && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
     int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && fills;
     int own = (marks & MOY_UI_F_FOCUS) && fills;
-    moy_ui_group_band(s, card_of(c), b, c->grp_first || after_mark || own, c->fs, c->cls);
+    // a row the page's foot cuts inside its fade draws no rule: the fade
+    // says the rows run on, and a rule there reads as a second foot line
+    int foot = c->page.y + c->page.h;
+    int cut = b.y + b.h > foot && b.y >= foot - FADE_H * c->fs;
+    moy_ui_group_band(s, card_of(c), b, c->grp_first || after_mark || own || cut, c->fs,
+                      c->cls);
 }
 
 // The open group ends: its card's foot under its last row, and the gap the
@@ -1545,19 +1552,31 @@ static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, in
     open_page(c, id, b, flags | (kind >= 2 || in_dialog(c) ? STOP_MODAL : 0));
 }
 
+// A list's edges in view `v`: where rows `rows` high scrolled by `scroll`
+// run on below it, a fade over its last `h` pixels toward colour `ci`;
+// with `head`, where rows are scrolled off above it, one over its first.
+static void edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
+                       int scroll, int ci, int head, int h) {
+    if (h > v.h) {
+        h = v.h;
+    }
+    if (rows > scroll + v.h) {
+        moy_ui_box_t b = {v.x, (int16_t)(v.y + v.h - h), v.w, (int16_t)h};
+        moy_ui_fade(s, b, ci, 0, c->fs, ground_of(c));
+    }
+    if (head && scroll > 0) {
+        moy_ui_box_t b = {v.x, v.y, v.w, (int16_t)h};
+        moy_ui_fade(s, b, ci, 1, c->fs, ground_of(c));
+    }
+}
+
 // The page's (or a scroll region's) foot, its groups closed: where its rows
 // run on below what shows, a fade over its last FADE_H rows of the scale.
 static void foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_ui_keep_t *k = page_keep(c);
-    if (k == NULL || k->b <= c->scroll + c->page.h) {
-        return;
+    if (k != NULL) {
+        edge_fades(c, s, c->page, k->b, c->scroll, MOY_UI_DEFAULT, 0, FADE_H * c->fs);
     }
-    int h = FADE_H * c->fs;
-    if (h > c->page.h) {
-        h = c->page.h;
-    }
-    moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->page.h - h), c->page.w, (int16_t)h};
-    moy_ui_fade(s, b, MOY_UI_DEFAULT, 0, c->fs, ground_of(c));
 }
 
 // Close the innermost nested page where it is of `kind`: answers the height
@@ -1569,6 +1588,11 @@ static int nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
     group_close(c, s);
     if (kind == 1) {
         foot_fade(c, s);
+    } else if (kind == 3 && page_keep(c) != NULL) {
+        // a popover's body cut to its room: a fade toward the card at each
+        // edge its rows run on past
+        edge_fades(c, s, c->page, page_keep(c)->b, c->scroll, MOY_UI_FADE_CARD, 1,
+                   FADE_H * c->fs);
     }
     int took = c->y;
     moy_ui_nest_t *n = &c->nest[--c->n_nest];
@@ -1740,6 +1764,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             }
             at = e + 1;
         }
+        if (any) {
+            // a table's view holds whole rows where its app snaps it (the
+            // desk's Files): its fade takes the row at the cut edge
+            edge_fades(c, s, view, count * rh, offset, MOY_UI_DEFAULT, 1, rh);
+        }
         clip_out(&kv);
         clip_out(&k);
     }
@@ -1754,7 +1783,9 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         len = cap;
     }
     int stacked;
-    int h = row_h(c), fh = moy_ui_field_h(s, c->fs, c->cls);
+    // in a group the field fits the row (moy_ui_field); elsewhere the row
+    // grows to hold the field and its ring
+    int h = row_h(c), fh = c->grp_open ? h : moy_ui_field_h(s, c->fs, c->cls);
     moy_ui_box_t b = place(c, fh > h ? fh : h, &stacked);
     int disabled = o->disabled == 1;
     int st = disabled ? 0 : stop(c, id_of(o, label), b, STOP_FIELD, name_of(o, label));
@@ -1980,35 +2011,51 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     if (w < 2 * pad + rh) {
         w = 2 * pad + rh;
     }
+    // the card keeps `gap` clear of every edge of the surface and never
+    // covers its anchor: below it, else above it, else on the side with
+    // more room, its body cut to that room (it scrolls to focus, a fade at
+    // the cut edge)
+    int gap = 4 * fs;
+    int x0 = sf.x + gap, x1 = sf.x + sf.w - gap;
+    int y0 = sf.y + gap, y1 = sf.y + sf.h - gap;
+    if (w > x1 - x0) {
+        w = x1 - x0;
+    }
     int bh = body;
-    if (2 * pad + bh > sf.h - 2 * pad) {
-        bh = sf.h - 4 * pad;
+    int x = a.x;
+    if (x + w > x1) {
+        x = x1 - w;
+    }
+    if (x < x0) {
+        x = x0;
+    }
+    int y;
+    if (c->pop_mid) {
+        if (2 * pad + bh > y1 - y0) {
+            bh = y1 - y0 - 2 * pad;
+        }
         if (bh < rh) {
             bh = rh;
         }
-    }
-    int h = 2 * pad + bh;
-    int gap = 4 * fs;
-    int x = a.x;
-    if (x + w > sf.x + sf.w) {
-        x = sf.x + sf.w - w;
-    }
-    if (x < sf.x) {
-        x = sf.x;
-    }
-    int y = a.y + a.h + gap;
-    if (c->pop_mid) {
         x = sf.x + moy_ui_fdiv(sf.w - w, 2);
-        y = sf.y + moy_ui_fdiv(sf.h - h, 2);
-    } else if (y + h > sf.y + sf.h) {
-        y = a.y - gap - h;          // no room below: above it
-        if (y < sf.y) {
-            y = sf.y + sf.h - h;    // nor above: as low as it fits
-            if (y < sf.y) {
-                y = sf.y;
+        y = sf.y + moy_ui_fdiv(sf.h - (2 * pad + bh), 2);
+    } else {
+        // the room each side of the anchor, inside the surface's gap (an
+        // anchor in a bar beside the surface hangs the card at its edge)
+        int top = a.y + a.h + gap > y0 ? a.y + a.h + gap : y0;
+        int foot = a.y - gap < y1 ? a.y - gap : y1;
+        int below = y1 - top, above = foot - y0;
+        int dn = 2 * pad + bh <= below || (2 * pad + bh > above && below >= above);
+        int room = dn ? below : above;
+        if (2 * pad + bh > room) {
+            bh = room - 2 * pad;
+            if (bh < rh) {
+                bh = rh;
             }
         }
+        y = dn ? top : foot - (2 * pad + bh);
     }
+    int h = 2 * pad + bh;
     moy_ui_box_t card = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
     static const uint8_t none[1] = {0};
     moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);

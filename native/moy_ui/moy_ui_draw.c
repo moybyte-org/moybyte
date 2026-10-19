@@ -958,6 +958,13 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     }
     if ((flags & MOY_UI_F_ICON) && (k->icon >= 0 || k->glyph >= 0)) {
         int side = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_ICON) * fs;
+        if (!ln && !d.run && bs.font >= 0) {
+            // an icon alone on a key whose kind names a face (a calculator's
+            // ⌫ among its digits) stands as tall as that face's line
+            tfont_t kf = role_font(bs.font == 0 ? MOY_UI_FONT_KEY : MOY_UI_FONT_OP);
+            int fl = kf.id != MOY_FONT_PETME128 ? kf.line * d.tfs : 0;
+            side = fl > side && fl <= h ? fl : side;
+        }
         int ix = ln ? tx : x + moy_ui_fdiv(w - side, 2);
         moy_ui_box_t ib = {(int16_t)ix, (int16_t)(y + moy_ui_fdiv(h - side, 2)), (int16_t)side,
                            (int16_t)side};

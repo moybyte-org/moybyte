@@ -792,9 +792,11 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
 // colour's ring. An empty field shows `hint` (n 0: none) in the disabled ink.
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
                  moy_ui_span_t hint, int flags, int fs, int desk, int card, int first);
-// The height a field row takes (at least the stacked row's): the field's box,
-// its letters' ink with 3 pixels at the scale above and below inside its
-// ring, and room round it for its focus ring.
+// The height a field row takes outside a group (at least the stacked row's):
+// the field's box, its letters' ink with 3 pixels at the scale above and
+// below inside its ring, and room round it for its focus ring. In a group
+// the field fits the stacked row instead, two pixels at the scale clear of
+// the rules over and under it.
 int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk);
 // A modal card (ui.dialog) in box b: its shadow under a depth, the card and
 // its title in the `title_h` rows under the card's padding; the padding.
@@ -826,8 +828,9 @@ int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t tit
 // colour), toward its bottom edge or, with `up`, its top: what says a list
 // goes on past that edge. MOY_UI_DEFAULT is the page's ground
 // (moy_ui_page_ground's colour, `desk` as there), MOY_UI_FADE_WELL a part's
-// well (moy_ui_well's fill).
+// well (moy_ui_well's fill), MOY_UI_FADE_CARD a modal's card (moy_ui_modal's).
 #define MOY_UI_FADE_WELL (-3)
+#define MOY_UI_FADE_CARD (-4)
 int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, int desk);
 // A group's caption in band `b`.
 int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
@@ -844,14 +847,15 @@ void moy_ui_set_input(int input);
 int moy_ui_input(void);
 // The hints' actions, which a pair names in place of its keys: confirm, back,
 // change (left and right), tabs (the previous and the next), menu (the
-// console's key), cancel (a field being edited: its text put back), and the
+// console's key), cancel (a field being edited: its text put back), the
 // sprite tab's operations: flip, rotate, shift, clear, copy and more (its
-// more menu).
+// more menu), and the home's search.
 // Answers the action `k` names, else -1: a key spelled out (`enter`, `Esc`)
 // names none and draws as written.
 enum { MOY_UI_ACT_CONFIRM = 0, MOY_UI_ACT_BACK, MOY_UI_ACT_CHANGE, MOY_UI_ACT_TABS,
        MOY_UI_ACT_MENU, MOY_UI_ACT_CANCEL, MOY_UI_ACT_FLIP, MOY_UI_ACT_ROTATE,
-       MOY_UI_ACT_SHIFT, MOY_UI_ACT_CLEAR, MOY_UI_ACT_COPY, MOY_UI_ACT_MORE, MOY_UI_ACTS };
+       MOY_UI_ACT_SHIFT, MOY_UI_ACT_CLEAR, MOY_UI_ACT_COPY, MOY_UI_ACT_MORE,
+       MOY_UI_ACT_SEARCH, MOY_UI_ACTS };
 int moy_ui_hint_action(moy_ui_span_t k);
 // The keys input `input` does action `act` with (the hints' key spelling), or
 // "" where it has none.

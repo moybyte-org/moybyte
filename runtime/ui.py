@@ -394,7 +394,10 @@ def dialog(title=None, buttons=(), kind="primary", o=None):
 def popover(id=None, w=0, o=None):
     """`popover(id, w)` begins a card hung under `at`'s rect (else under the
     stop that holds focus as it opens), above it where there is no room
-    below, `w` wide (0: the rect's width), its body the rows stacked until
+    below, else on the side with more room, its body cut to fit and faded
+    where it runs on; never over the rect, and 4 pixels at the scale off
+    the surface's edges. `w` wide (0: the rect's width), its body the rows
+    stacked until
     `popover()` ends it; while it is drawn nothing outside it takes input.
     True, or False the frame a press outside the card or Esc dismissed it
     (the app then stops drawing it)."""
