@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   Notices                     the achievements wiring, the notice banner, the toast
+#   PauseMenu                   the card over a held game: Resume, Options, Quit
+#   SystemMenuUI                the system menu's rows and their actions
+#   SystemMenuUI.card_rows      the home's selected card as a menu group
+#   SystemMenuUI.open_card      that group alone, hung at a card (long press, pad X)
+#   SystemMenuUI._draw_look     the rows as the look's popover card
 """What the console SAYS on its own: the achievements wiring (the tracker,
 the unlock's toast deadline + beep), the timed system notice banner and the
 firmware-update verdict that rides it, and the two overlay draws. A mixin of
