@@ -68,3 +68,79 @@ def test_parts_draws_the_settings_scenes_with_the_parts_sheet(tmp_path):
     a = Image.open(tmp_path / "shell" / "moy-light_handheld_settings.render.png")
     b = Image.open(tmp_path / "parts" / "moy-light_handheld_settings.render.png")
     assert a.tobytes() != b.tobytes(), "--parts draws the sheet, not the shell's screen"
+
+
+# -- the kit's own scenes, checks and audit (round 2) -------------------------------
+
+def test_every_kit_scene_has_a_config_and_a_kind():
+    table = L._kit_table()
+    assert table
+    for screen, (config, setup, what, kind) in table.items():
+        assert config in (L.HANDHELD, L.DESK, L.CONSOLE), screen
+        assert callable(setup) and what, screen
+        assert kind in ("theme", "profile"), screen
+    themed = L.kit_scenes(kit=True)
+    assert {(t, m) for _n, _s, t, m, _p in themed} == set(L.KIT_MODES)
+    profiled = L.kit_scenes(kit=False, profiles=True)
+    assert {p for _n, _s, _t, _m, p in profiled} == set(L.PROFILES)
+    names = [s[0] for s in profiled]
+    assert "moy-dark_handheld_wifi-password_input-tdeck" in names
+    assert "moy-dark_handheld_settings_name-typing_input-pad" in names
+
+
+def test_the_kit_renders_its_scenes_with_checks_and_an_audit(tmp_path):
+    failed = []
+    rows = L.run(str(tmp_path), ["contrast-dark_handheld_settings_focus-volume",
+                                 "moy-dark_handheld_home_input-touch",
+                                 "contrast-dark_handheld_sysmenu"],
+                 quiet=True, kit=True, profiles=True, only_kit=True, audit_csv=True,
+                 failed=failed)
+    names = sorted(r[0] for r in rows)
+    assert names == ["contrast-dark_handheld_settings_focus-volume",
+                     "contrast-dark_handheld_sysmenu",
+                     "moy-dark_handheld_home_input-touch"]
+    assert failed == []
+    kit = tmp_path / "kit"
+    index = (kit / "index.txt").read_text()
+    assert "check: one focus mark ok" in index
+    assert "check: hero rim ok" in index and "check: clean cover ok" in index
+    for name in names:
+        assert Image.open(kit / (name + ".png")).size == (320, 240)
+    csv = (kit / "contrast-dark_handheld_settings_focus-volume.audit.csv").read_text()
+    assert csv.startswith("scene,pair,colour,against,ratio,floor,flag")
+    assert "focused row part vs plate" in csv
+
+
+def test_an_input_profile_moves_the_hints(tmp_path):
+    L.run(str(tmp_path / "pad"), ["moy-dark_handheld_home"], quiet=True, inputs="pad")
+    L.run(str(tmp_path / "tdeck"), ["moy-dark_handheld_home"], quiet=True)
+    a = Image.open(tmp_path / "pad" / "moy-dark_handheld_home.render.png")
+    b = Image.open(tmp_path / "tdeck" / "moy-dark_handheld_home.render.png")
+    assert a.tobytes() != b.tobytes(), "--input draws that input's keys"
+    assert a.crop((0, 0, 320, 200)).tobytes() == b.crop((0, 0, 320, 200)).tobytes(), \
+        "only the hint strip moves with the input"
+
+
+def test_the_checks_fail_what_round_2_found():
+    assert L._clean(128) and L._clean(256) and L._clean(64) and L._clean(32)
+    assert not L._clean(138) and not L._clean(96)
+    assert round(L.contrast((255, 255, 255), (0, 0, 0)), 2) == 21.0
+    assert round(L.contrast((255, 255, 255), (255, 230, 0)), 2) == 1.27
+    assert L.bar_parity([("moy", "c", "dark", (35, 1)), ("moy", "c", "light", (32, 1))]) \
+        == [("bar parity", False, "moy on c, modes dark/light")]
+    assert L.bar_parity([("moy", "c", "dark", (35, 1)), ("moy", "c", "light", (35, 1))])[0][1]
+
+
+def test_pads_measures_a_pills_ink():
+    img = Image.new("RGB", (40, 12), (200, 200, 240))
+    for x in range(5, 35):                  # ink from 5 to 34 in a pill 0..39
+        img.putpixel((x, 6), (20, 20, 20))
+    assert L.pads(img, (0, 0, 40, 12)) == (5, 5)
+    for x in range(35, 39):                 # the ink runs on to the pill's end
+        img.putpixel((x, 6), (20, 20, 20))
+    assert L.pads(img, (0, 0, 40, 12)) == (5, 1)
+
+
+def test_a_failed_check_fails_the_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(L, "checks", lambda ws, probe, img: [("clean cover", False, "138")])
+    assert L.main([str(tmp_path), "moy-dark_handheld_home"]) == 1
