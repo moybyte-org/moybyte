@@ -177,6 +177,15 @@ class WindowChrome:
         w = max(lk.get("win.frame.w", 0), lk.get("win.frame_back.w", 0))
         return max(0, (w + 50) // 100 - 1)
 
+    def _win_edge(self, win):
+        """The columns `win`'s content stands in from its frame each side:
+        the frame's edge, and in the player's window its foot too, so the
+        game sits as far from the frame at its sides as above the foot."""
+        e = self._frame_edge()
+        if win.kind == "desktop":
+            return max(e, self._win_foot(win))
+        return e
+
     def _pad_extent(self, win, x, y, w, h):
         """(x, y, w, h) grown by what its draw touches beyond it: the border,
         the classic 3px shadow, or the depth's shadow at its full size."""
@@ -275,7 +284,7 @@ class WindowChrome:
         for key in self._order:
             win = self._wins.get(key)
             if win is not None and (win.foot != self._win_foot(win)
-                                    or win.edge != self._frame_edge()):
+                                    or win.edge != self._win_edge(win)):
                 self._resize_window(win, win.w, win.h)
 
     def _win_title(self, win):
@@ -568,7 +577,7 @@ class WindowChrome:
         window's in the dim ink. The focused chip's content takes the ink the
         look gives current content (Moy's accent), the plate's second cue. A
         minimized window's chip keeps the chrome's ink, and a held game's
-        wears a pause badge on its icon (D-25)."""
+        icon is the pause glyph: the state is the icon (D-25)."""
         current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
@@ -577,7 +586,9 @@ class WindowChrome:
             ink = (current if focused else
                    th["chrome_ink"] if win.minimized else th["chrome_ink_dim"])
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
-            if not self.ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
+            if win.minimized and getattr(win, "held", False):
+                self._pause_glyph(sc, slot, ink)
+            elif not self.ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
                 img = self._win_icon_img(win)
                 if img is not None:
                     iw = getattr(img, "w", 16) or 16
@@ -585,20 +596,18 @@ class WindowChrome:
                     sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
                 else:
                     self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
-            if win.minimized and getattr(win, "held", False):
-                self._pause_badge(sc, th, slot)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
 
     @staticmethod
-    def _pause_badge(sc, th, slot):
-        """A held game's badge: a plate in `value` at the icon's bottom
-        right, two bars of `surface` on it."""
+    def _pause_glyph(sc, slot, ink):
+        """A held game's icon: the pause glyph, two bars in `ink` centred
+        in the icon's slot, as a media player shows a held track."""
         x, y, w, h = slot
-        b = 12
-        bx, by = x + w - b + 3, y + h - b + 3
-        sc.rect(bx, by, b, b, th["value"])
-        sc.rect(bx + 3, by + 3, 2, b - 6, th["surface"])
-        sc.rect(bx + b - 5, by + 3, 2, b - 6, th["surface"])
+        bw, bh, gap = w * 2 // 9, h * 2 // 3, w // 6
+        bx = x + (w - 2 * bw - gap) // 2
+        by = y + (h - bh) // 2
+        sc.rect(bx, by, bw, bh, ink)
+        sc.rect(bx + bw + gap, by, bw, bh, ink)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a

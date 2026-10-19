@@ -810,7 +810,7 @@ def test_title_strip_buttons_min_max_close(tmp_path):
 def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
     """Minimising the player window holds the run (no tick while hidden, as
     the pause menu holds it); a restore lands on the pause menu (D-25), whose
-    Resume gives the run back, and the held chip wears its pause badge."""
+    Resume gives the run back, and the held chip's icon is the pause glyph."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_desk()
@@ -831,6 +831,63 @@ def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
     ws.wm._minimize(win, False)
     assert ws.player.paused
     ws.player.resume()
+
+
+@pytest.mark.parametrize("intent", ["dev", "play"])
+def test_the_game_window_fits_the_game_and_its_pause_card_centres_on_it(tmp_path, intent):
+    """The player window's content is the game, inset from its frame as far
+    at the sides as above the rounded foot (design review R4-25), and the
+    pause card over a restored game centres on it (R4-06)."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.wm.set_play_intent(intent)
+    ws.open()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["desktop"]
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, scale = ws.wm._player_view(win)
+    gw, gh = ws.canvas.w * scale, ws.canvas.h * scale
+    assert (cx, cy, cw, ch) == (ox, oy, gw, gh), "the content rect is the game's"
+    left = cx - win.x
+    right = win.x + win.w - (cx + cw)
+    foot = win.y + win.h - (cy + ch)
+    assert left == right == foot, (left, right, foot)
+    ws.wm._minimize(win, True)
+    ws.wm._minimize(win, False)
+    assert ws.pause.open
+    for _ in range(3):
+        drv.frame(1 / 30)
+    bx, by, bw, bh = ws.pause._host.box("Pause")
+    assert abs((bx + bw / 2) - (ox + gw / 2)) <= 1
+    assert abs((by + bh / 2) - (oy + gh / 2)) <= 1
+    ws.pause.close()
+
+
+def test_a_held_games_chip_icon_is_the_pause_glyph(tmp_path, monkeypatch):
+    """The state is the icon (design review R4-12): a held game's chip
+    draws the pause glyph in its icon's place, and no badge over an icon."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.open()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["desktop"]
+    ws.wm._minimize(win, True)
+    assert win.held
+    glyphs, icons = [], []
+    monkeypatch.setattr(type(ws.wm), "_pause_glyph",
+                        staticmethod(lambda sc, slot, ink: glyphs.append(slot)))
+    draw_icon = ws.draw_icon
+    monkeypatch.setattr(ws, "draw_icon",
+                        lambda kind, *a, **k: icons.append(kind) or draw_icon(kind, *a, **k))
+    ws.wm._draw_look_chips(ws.sys_canvas, ws.theme_colors, ws.layout.fs, 8)
+    assert len(glyphs) == 1
+    assert "run" not in icons, "the held chip also drew the game's icon"
+    ws.wm._minimize(win, False)
+    ws.pause.close()
 
 
 def test_maximize_toggle_fills_desktop_and_restores(tmp_path):

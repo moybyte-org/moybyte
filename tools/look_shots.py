@@ -477,7 +477,7 @@ def _sprites_more(g, ws):
 
 def _playtest_minimised(g, ws):
     """The playtest minimised to its chip: the run held, the chip's pause
-    badge (D-25)."""
+    glyph (D-25)."""
     _playtest(g, ws)
     _settle(g, ws, 2)
     win = ws.wm._wins.get("desktop")
@@ -853,7 +853,7 @@ def _kit_table():
             HANDHELD, _sprites, "Sprites, colour %d current beside the focus hue"
             % SPRITE_COLOUR),
         "desktop_playtest_minimised": (DESK, _playtest_minimised,
-                                       "the playtest minimised: its chip's pause badge"),
+                                       "the playtest minimised: its chip's pause glyph"),
         "desktop_playtest_restored": (DESK, _playtest_restored,
                                       "the minimised playtest restored: the pause menu"),
         "handheld_sysmenu": (HANDHELD, _sysmenu_home,

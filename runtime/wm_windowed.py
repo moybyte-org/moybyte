@@ -893,19 +893,19 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # A dev playtest (#178) opens at 2x where the desk holds it, else
             # at native size (the owner's D-03.4, 2026-10-19): the game is the
             # point of the window. A desk play takes the largest whole scale
-            # that fits. The frame fits the game exactly: its border (and the
-            # edge a wider frame takes), its title strip and the rows its
-            # rounded bottom corners take (the foot), which the content rect
-            # leaves out.
+            # that fits. The frame fits the game exactly: its border, its
+            # title strip, and the rows its rounded bottom corners take (the
+            # foot) under the game and at each side of it (`_win_edge`), which
+            # the content rect leaves out.
             foot = (_ui_draw.frame_geom(full.w, full.h, th)[1]
                     if _ui_draw.depth()[13] else 0)
-            fit = max(1, min((full.w - 24) // self.ws.canvas.w,
-                             (self._desk_rect()[3] - 24 - th - foot)
+            e = max(foot, self._frame_edge())
+            fit = max(1, min((full.w - 24 - 2 * e) // self.ws.canvas.w,
+                             (self._desk_rect()[3] - 24 - th - e)
                              // self.ws.canvas.h))
             s = min(fit, _DEV_SCALE) if self._play_intent == "dev" else fit
-            e = self._frame_edge()
             return (self.ws.canvas.w * s + 2 + 2 * e,
-                    self.ws.canvas.h * s + 2 + th + max(foot, e))
+                    self.ws.canvas.h * s + 2 + th + e)
         if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key in ("artwork", "appearance", "storybook"):
@@ -1035,7 +1035,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         reference, only a live window re-ships) -- and the P4's device system
         canvas (#58) returns an RGB565 layer sharing its native moy_gfx kernel."""
         win.foot = self._win_foot(win)
-        win.edge = self._frame_edge()
+        win.edge = self._win_edge(win)
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
