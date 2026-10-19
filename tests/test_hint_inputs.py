@@ -157,6 +157,41 @@ def test_under_touch_the_rows_take_the_hints_band(tmp_path):
     assert len(foot("touch")) > 1, "under touch a row's value prints in it"
 
 
+@pytest.mark.parametrize("config", ["tdeck_320x240_fs1_dark", "p4_1024x600_cs2_fs1_console"])
+def test_under_touch_the_homes_keep_no_strip_band(tmp_path, config):
+    """Under touch a home has no hint strip and keeps none of its room at
+    its foot (R3-07): the handheld's band reaches the content's foot, and
+    the desk's shelf stands at most the side margin off the glass's foot,
+    its caption taking the strip's room."""
+    import moy_ui
+    import test_shell_goldens as g
+    moy_ui.theme_uninstall()
+    try:
+        ws = g._build(dict(g.CONFIGS[config], variant="dark", theme="moy"),
+                      Path(tmp_path) / "carts")
+        ws.go_home()
+        if getattr(ws.wm, "mode", None) is not None:
+            ws.open_library()
+        grid, lay = ws.launcher, ws.layout
+        foot = lay.cy + lay.ch
+        ui_draw.input_kind("keys")
+        assert grid.foot()[5][3] > 0, "under keys the strip has its band"
+        ui_draw.input_kind("touch")
+        assert grid.foot()[5][3] == 0, "under touch no strip"
+        dk = grid._geom()[9]
+        if dk is None:
+            # the cards and caption centre in the whole content rect
+            # (tests/test_launcher_scroll.py holds their layout)
+            assert grid.band_rect()[1] + grid.band_rect()[3] == foot
+        else:
+            shelf_y, pad, side = dk[3], dk[4], grid.card_side()
+            assert foot - (shelf_y + side) <= pad, \
+                "the desk's shelf stands %d px off the foot, past its %d px margin" % (
+                    foot - (shelf_y + side), pad)
+    finally:
+        moy_ui.theme_uninstall()
+
+
 # -- the input in use: news and the board's declaration ---------------------------------
 
 

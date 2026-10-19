@@ -1232,8 +1232,9 @@ class Carousel(Launcher):
         the hero, so every card shows its whole cover at a clean scale; the pane
         is as tall as the hero, or as its type needs where that is more;
         what height is left goes half above the shelf's caption and half
-        under the shelf. The tuple's band is the shelf's: its caption, its
-        cards, their lift and their shadows."""
+        under the shelf, which under touch (no hint strip, no `keys`) keeps
+        at most the side margin under it. The tuple's band is the shelf's:
+        its caption, its cards, their lift and their shadows."""
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         u = _lb.render_scale()
@@ -1258,6 +1259,10 @@ class Carousel(Launcher):
         spare = max(0, hints[1] - cy - top - block - cap_h - shelf)
         hx, hy = cx + pad, cy + top
         cap_y = hy + block + spare // 2
+        if not keys:
+            # no strip under touch: the shelf stands at most the side margin
+            # off the glass's foot, and the strip's room goes over its caption
+            cap_y = max(cap_y, hints[1] - pad - shelf - cap_h)
         shelf_y = cap_y + cap_h
         d = _ui_draw.depth()
         blur = d[9] if d[0] and d[6] else 0
