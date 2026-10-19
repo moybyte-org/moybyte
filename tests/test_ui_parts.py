@@ -515,6 +515,69 @@ def test_a_focused_stepped_bar_fills_its_steps_in_the_rows_ink(theme):
     assert r.px(x0 + 3 * 8, mid) == on, "an empty step is outlined in the ink"
 
 
+_SURFACES = {}
+
+
+def _surface_theme(desk, name, variant):
+    """The theme colours of a handheld or a desk workstation in `name`, its
+    look and its class's faces installed."""
+    ws = _SURFACES.get(desk)
+    if ws is None:
+        kw = dict(sys_size=(1024, 600), font_scale=1, windowed=True,
+                  panel_diagonal_in=7.0) if desk else {}
+        ws = build_ws(Path(tempfile.mkdtemp()), **kw)
+        _SURFACES[desk] = ws
+    ws.look.set_theme(name, persist=False, variant=variant)
+    return ws.theme_colors
+
+
+def _hint_shape(desk, theme, items):
+    """(cap height, legend ink rows, legend ink columns, word ink rows) of
+    one keycap hint pair drawn on the panel."""
+    th = _surface_theme(desk, *theme)
+    h = 40
+    cv = make_system_canvas(400, h)
+    cv.rect(0, 0, 400, h, th["panel"])
+    ui_draw.input_kind("keys")
+    (x0, x1), = ui_draw.hints(cv, th, (0, 0, 400, h), items, desk)
+    px = lambda x, y: cv._buf[2 * (y * 400 + x)] << 8 | cv._buf[2 * (y * 400 + x) + 1]  # noqa
+    bg = px(0, 0)
+    x = x0
+    while px(x, h // 2) == bg:
+        x += 1
+    cx0 = x
+    while px(x, h // 2) != bg:
+        x += 1
+    cx1 = x
+    col = [y for y in range(h) if px((cx0 + cx1) // 2, y) != bg]
+    cap = col[-1] - col[0] + 1
+    fill = px(cx0 + 3, col[0] + 3)
+    inner = [(xx, y) for xx in range(cx0 + 3, cx1 - 3) for y in range(col[0] + 3, col[-1] - 2)
+             if _ratio(px(xx, y), fill) >= 1.6]
+    word = [y for xx in range(cx1 + 1, x1) for y in range(h) if _ratio(px(xx, y), bg) >= 1.6]
+    rows = lambda v: max(v) - min(v) + 1  # noqa: E731
+    return (cap, rows([y for _x, y in inner]), rows([xx for xx, _y in inner]),
+            rows(word))
+
+
+_FIVE = (("moy", "light"), ("moy", "dark"), ("blocks", "light"), ("contrast", "light"),
+         ("contrast", "dark"))
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("desk", [False, True], ids=["handheld", "desk"])
+def test_a_keycaps_legend_is_no_size_under_its_word(desk, theme):
+    """A cap holds its word's capitals with 3 px over and under, its legend's
+    capitals at most a pixel shorter than the word's (the desk's caption
+    face, three pixels under the rows', drew Esc a size smaller than Close),
+    and an arrow sign at least half the cap across."""
+    cap, legend, _w, word = _hint_shape(desk, theme, ["ESC", "ESC"])
+    assert legend >= word - 1, (legend, word)
+    assert cap >= word + 6, (cap, word)
+    cap, _h, arrow, _word = _hint_shape(desk, theme, ["left", "ESC"])
+    assert 2 * arrow >= cap - 4, (arrow, cap)
+
+
 def test_hints_take_the_pages_foot_and_rows_stop_above_them():
     def draw():
         ui.page("")

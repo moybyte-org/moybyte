@@ -242,7 +242,8 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
   scale behind it.
 - **Keycap hints** name only keys that are not self-evident, and what they
   do to the focused part (a stepper's ←→ Change, a link's Enter Open); on
-  the desk the legends are 13 px on 20 px caps beside 14 px text.
+  the desk the legends are in the text's 15 px face on 20 px caps, where
+  the 12 px caption face would read a size down.
 - **Rows:** link, info, cycle, toggle (with On/Off), slider, segmented,
   swatches; a caption heads every group; only working settings show.
   Settings ends in an About group; CHROME SIZE is Appearance's.

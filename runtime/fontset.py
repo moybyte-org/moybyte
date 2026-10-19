@@ -24,8 +24,9 @@ handheld's metrics) into its wasm, without icon sets.
 # The face each type role takes under a theme's look `fam` (a family of the
 # set; docs/look_2026-10.md step 26a), as (size, weight, bpp) on the
 # handheld's metrics and on the desk's, DESIGN.md's Type: `ui` the status,
-# hint and row face, `title` a bar's page title on the handheld and a
-# window's on the desk, `caption` the keycap legend and the column head, and
+# hint and row face (and the desk's keycap legends), `title` a bar's page
+# title on the handheld and a window's on the desk, `caption` the handheld's
+# keycap legend and the column head, and
 # `hero` the handheld home's title (`ui_draw.font("hero")`; None on the desk,
 # whose home draws its title in `title`). A weight is a step of the type
 # scale, 500 medium, 600 semibold and 700 bold, which a look moves to its

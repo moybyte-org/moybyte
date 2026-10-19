@@ -176,20 +176,22 @@ static void rrect(pd_t *d, int x, int y, int w, int h, int r, int has_fill, uint
 
 typedef struct {
     uint32_t id;
-    int line;
+    int line, ascent;
 } pf_t;
 
 // The font a role's text draws in; the caption role takes the ui role's
 // where a theme installs a font for that and none for it.
 static pf_t font_of(const pd_t *d, int role) {
-    pf_t f = {MOY_FONT_PETME128, MOY_TEXT_CELL};
+    pf_t f = {MOY_FONT_PETME128, MOY_TEXT_CELL, MOY_TEXT_CELL - 1};
     if (!d->run) {
         moy_font_info_t fi;
         f.id = moy_ui_font(role, &fi);
         f.line = fi.line;
+        f.ascent = fi.ascent;
         if (role == MOY_UI_FONT_CAPTION && f.id == MOY_FONT_PETME128) {
             f.id = moy_ui_font(MOY_UI_FONT_UI, &fi);
             f.line = fi.line;
+            f.ascent = fi.ascent;
         }
     }
     return f;
@@ -239,31 +241,45 @@ static void chevron(pd_t *d, int x, int y, int w, int dir, uint16_t c) {
     d->row->st[MOY_ST_N_FILL]++;
 }
 
+// A sign's strokes in a cap box `h` tall: the stroke is the scale's pixel, the
+// arrow `len` strokes long (odd, so it has a middle) with a head of `head`
+// strokes a side, both growing with the box from 7 and 2 in the handheld's 15.
+static void sign_size(const pd_t *d, int h, int *len, int *head) {
+    int n = h / d->fs;
+    *len = (n * 7 / 15) | 1;
+    *head = *len / 3;
+}
+
 // The enter sign in the cap box: a hook, its arrow at the left.
 static void enter_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
-    int k = d->fs, mx = x + w - 6 * k, my = y + h / 2 + k;
-    moy_target_fill(&d->t, mx, y + 4 * k, k, my - y - 4 * k + k, c);
-    moy_target_fill(&d->t, x + 6 * k, my, mx - x - 6 * k, k, c);
-    for (int i = 1; i <= 2; i++) {
-        moy_target_fill(&d->t, x + 5 * k + i * k, my - i * k, k, 2 * i * k + k, c);
+    int k = d->fs, len, head;
+    sign_size(d, h, &len, &head);
+    int e = (h / k) * 6 / 15, t = (h / k) * 4 / 15;
+    int mx = x + w - e * k, my = y + h / 2 + k;
+    moy_target_fill(&d->t, mx, y + t * k, k, my - y - t * k + k, c);
+    moy_target_fill(&d->t, x + e * k, my, mx - x - e * k, k, c);
+    for (int i = 1; i <= head; i++) {
+        moy_target_fill(&d->t, x + (e - 1) * k + i * k, my - i * k, k, 2 * i * k + k, c);
     }
     d->row->st[MOY_ST_N_FILL]++;
 }
 
 // An arrow in the cap box: `dir` 0 left, 1 right, 2 up, 3 down.
 static void arrow_sign(pd_t *d, int x, int y, int w, int h, int dir, uint16_t c) {
-    int k = d->fs, len = 7 * k, cx = x + w / 2, cy = y + h / 2;
+    int k = d->fs, n, head, cx = x + w / 2, cy = y + h / 2;
+    sign_size(d, h, &n, &head);
+    int len = n * k;
     if (dir < 2) {
         int x0 = cx - len / 2;
         moy_target_fill(&d->t, x0, cy, len, k, c);
-        for (int i = 1; i <= 2; i++) {
+        for (int i = 1; i <= head; i++) {
             int ax = dir == 0 ? x0 + i * k : x0 + len - k - i * k;
             moy_target_fill(&d->t, ax, cy - i * k, k, 2 * i * k + k, c);
         }
     } else {
         int y0 = cy - len / 2;
         moy_target_fill(&d->t, cx, y0, k, len, c);
-        for (int i = 1; i <= 2; i++) {
+        for (int i = 1; i <= head; i++) {
             int ay = dir == 2 ? y0 + i * k : y0 + len - k - i * k;
             moy_target_fill(&d->t, cx - i * k, ay, 2 * i * k + k, k, c);
         }
@@ -1178,8 +1194,13 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_keycap_t *kc = moy_ui_keycap();
-    // the caps' legends in the caption face, what they do in the rows' (B-23)
-    pf_t fk = font_of(&d, MOY_UI_FONT_CAPTION), fh = font_of(&d, MOY_UI_FONT_UI);
+    // what they do in the rows' face (B-23); the caps' legends in the caption
+    // face a step under it, or in the word's own where the caption is more
+    // than a pixel smaller (the desk's), so a cap never reads a size down
+    pf_t fh = font_of(&d, MOY_UI_FONT_UI), fk = font_of(&d, MOY_UI_FONT_CAPTION);
+    if (fk.ascent + 1 < fh.ascent) {
+        fk = fh;
+    }
     int sc = tscale(s);
     int kh = pm(&d, MOY_UI_M_VALUE_ROW_KEY, 1), hgap = pm(&d, MOY_UI_M_VALUE_ROW_HINT_GAP, 1);
     int dk = dark(&d);
