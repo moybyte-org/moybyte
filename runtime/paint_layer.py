@@ -123,9 +123,10 @@ _TOOL_GLYPH = {
     "sleft": "arr_l", "sright": "arr_r", "sup": "arr_u", "sdown": "arr_d",
     "clear": "clear",
 }
-# The 2026-10 look's icon for each tool: the icon set's slot where the sets
-# have one, else the glyph table's (`ui.icon`'s order). The four shifts are
-# the sets' line arrows, so not the chevrons the column's previous and next
+# The 2026-10 look's icon for each tool: the icon set's slot named here, else
+# the set's slot of the tool's glyph name (`_TOOL_GLYPH`) where a set draws
+# one, else the glyph table's (`ui.icon`'s order). The four shifts are the
+# sets' line arrows, so not the chevrons the column's previous and next
 # sprite wear.
 _TOOL_ICON = {
     "pen": "pencil", "fill": "bucket", "rect": "rect", "line": "line",
@@ -1059,10 +1060,11 @@ class PaintLayer:
         self._draw_tools_look()
 
     def _draw_tools_look(self):
-        """The tools and the actions as icons in the dim ink: the tool in use
-        and an armed toggle (erase, mirror) on the current mark, copy and
-        paste in the disabled ink while there is nothing to copy or paste,
-        clear in the danger button's ink."""
+        """The tools and the actions as icons in the chrome's ink, one role
+        for every enabled tool, clear's trash included (design review
+        R3-11): the tool in use and an armed toggle (erase, mirror) on the
+        current mark, copy and paste in the disabled ink while there is
+        nothing to copy or paste."""
         ws = self.ws
         cv = ws.sys_canvas
         pe = ws.paint
@@ -1077,18 +1079,17 @@ class PaintLayer:
             plate = (x + fs, y, w - 2 * fs, h - 4 * fs)
             active = (tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]) or (
                 tid == "erase" and pe.erase) or (tid == "mirror" and pe.mirror)
-            ink = th["ink_dim"]
+            ink = th["chrome_ink"]
             if active:
                 got = _ui_draw.current(cv, th, plate, r)
                 ink = th["ink"] if got is None else got
             elif tid in ("copy", "paste") and not (
                     (pe.sel is not None) if tid == "copy" else pe.has_clip):
                 ink = _ui_draw.disabled_ink(th)
-            elif tid == "clear":
-                ink = _ui_draw.button_ink(th, "danger")
             box = min(lay.icon, w, plate[3])
             rect = (x + (w - box) // 2, y + (plate[3] - box) // 2, box, box)
-            self._icon_draw((_TOOL_ICON.get(tid), _TOOL_GLYPH[tid]), rect, ink, cv)
+            glyph = _TOOL_GLYPH[tid]
+            self._icon_draw((_TOOL_ICON.get(tid, glyph), glyph), rect, ink, cv)
 
     def _open_pickers(self):
         if self._host is None:

@@ -326,8 +326,10 @@ def test_the_tool_in_use_wears_the_current_mark(tmp_path):
 
 @pytest.mark.parametrize("theme,variant", [("moy", "dark"), ("blocks", "light"),
                                            ("contrast", "light")])
-def test_clear_wears_the_danger_buttons_ink_and_idle_copy_the_disabled(tmp_path, theme,
-                                                                      variant):
+def test_clear_wears_the_rows_ink_and_idle_copy_the_disabled(tmp_path, theme, variant):
+    """Clear's trash is a tool like its row, in the chrome's ink, never
+    louder than it (design review R3-11); copy with nothing selected takes
+    the disabled ink."""
     from runtime import paint_layer as P, ui_draw
     ws, drv, chrome = _look_tab(tmp_path, theme, variant)
     lay = ws.paint_layer.layout
@@ -339,7 +341,8 @@ def test_clear_wears_the_danger_buttons_ink_and_idle_copy_the_disabled(tmp_path,
         x, y, w, h = lay.tool_btns[P._TOOLS.index(tid)]
         return {_px(ws, i, j) for i in range(x, x + w) for j in range(y, y + h)}
 
-    assert chrome.rgb565_of(ui_draw.button_ink(th, "danger")) in inks("clear")
+    assert chrome.rgb565_of(th["chrome_ink"]) in inks("clear")
+    assert chrome.rgb565_of(th["chrome_ink"]) in inks("rot")
     assert chrome.rgb565_of(ui_draw.disabled_ink(th)) in inks("copy")
 
 

@@ -245,3 +245,49 @@ def test_play_carries_as_much_full_ink_as_a_tab_icon(tmp_path, theme, mode):
     bare = full(lambda r: ws.draw_icon("play", r, ink, cv))
     assert bare < min(tabs), ("the set's 16 px play carries full ink of its own now: "
                               "_draw_play's second pass can go", bare, tabs)
+
+
+def _sprites(ws, config):
+    """The Sprites tab, as the targets show it (tools/look_shots.py's
+    `_sprites`). (its PaintLayout, the glass origin of its content)."""
+    desk = config == DESK
+    if desk:
+        ws.open_desk()
+    ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
+    ws.set_menu_view("paint")
+    if not desk:
+        _frame(ws)
+        return ws.paint_layer.layout, 0, 0
+    _frame(ws, 2)
+    win = _place(ws, "menu", EDITOR_WIN)
+    _frame(ws)
+    cx, cy, _w, _h = win.content_rect()
+    return win.ctx.paint_layout, cx, cy
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, config, theme, mode):
+    """The sprite tools' icons take one ink role, the chrome's: no tool in
+    the dim ink and no trash in the danger ink, louder than its row (design
+    review R3-11). The tool in use wears the current mark; copy and paste,
+    with nothing to copy or paste, the disabled ink."""
+    from runtime import paint_layer, ui_draw
+    ws = _ws(tmp_path, config, theme, mode)
+    lay, ox, oy = _sprites(ws, config)
+    th = ws.theme_colors
+    cv = ws.glass_canvas
+    px = _px(ws)
+    ink = _rgb(cv, th["chrome_ink"])
+    others = {_rgb(cv, th[r]) for r in ("ink_dim", "chrome_ink_dim")}
+    others.add(_rgb(cv, ui_draw.button_ink(th, "danger")))
+    others.discard(ink)
+    pe = ws.paint
+    for tid, (x, y, w, h) in zip(paint_layer._TOOLS, lay.tool_btns):
+        if tid in paint_layer._TOOL_MODE and pe.tool == paint_layer._TOOL_MODE[tid]:
+            continue
+        if tid in ("copy", "paste"):
+            continue
+        seen = {px[oy + yy][ox + xx] for yy in range(y, y + h) for xx in range(x, x + w)}
+        assert ink in seen, tid
+        assert not (seen & others), (tid, seen & others)
