@@ -405,6 +405,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._restored = False        # what the last cache restore covered: a
                                       # rect, None (all of it) or False (nothing)
         self._foot_gen = None         # the look the windows' feet were sized under
+        self._root_marks = None       # ui.marks' active before a window's install
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
         self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
@@ -555,10 +556,17 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _install(self, ctx, win=None):
         # The focus mark draws only in the focused window (ui.marks), and in
         # none while a popover above the windows holds the keys: one a screen.
+        # The root context takes back the marks it had before the windows
+        # drew -- off while the console holds them under a menu -- so what
+        # the root draws after them marks only where it may.
         if win is None:
             ctx.install(self.ws)
-            _ui_draw.marks(True)
+            if self._root_marks is not None:
+                _ui_draw.marks(self._root_marks)
+                self._root_marks = None
         else:
+            if self._root_marks is None:
+                self._root_marks = _ui_draw.marks()[1]
             cx, cy, _cw, _ch = win.content_rect()
             ctx.install(self.ws, (cx, cy))
             win._marked = (self._wins.get(self._focus) is win

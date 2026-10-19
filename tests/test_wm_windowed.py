@@ -3222,6 +3222,28 @@ def test_a_chip_that_minimizes_its_window_takes_the_focus_with_it(tmp_path):
     assert not wm._wins["calc"].minimized and wm._focus == "calc"
 
 
+@pytest.mark.parametrize("held", [True, False], ids=["under-a-menu", "free"])
+def test_the_root_takes_back_its_marks_after_the_windows_draw(tmp_path, held):
+    """The console turns the focus marks off under a menu that holds the
+    keys; a window's install sets them for its own content, and the root's
+    reinstall after the windows gives back what the root had, so desk
+    content drawn after them marks no second focus under the menu."""
+    from runtime import ui_draw
+    ws = _moy_desk(tmp_path)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["calc"]
+    try:
+        ui_draw.marks(not held)
+        wm._install(win.ctx, win)
+        assert ui_draw.marks()[1] == (not wm.popover_takes_keys())
+        wm._install(wm._root_ctx)
+        assert ui_draw.marks()[1] == (not held)
+    finally:
+        ui_draw.marks(True)
+
+
 @pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
 def test_calcs_keys_stand_as_far_from_the_frames_bottom_as_its_sides(tmp_path, theme):
     """A rounded frame's foot is part of the window's bottom inset, not an
