@@ -591,10 +591,36 @@ def test_cut_selection_moves_pixels():
     assert _region(pe)[2 * 8 + 2] == 5
 
 
-def test_copy_with_no_selection_is_a_noop():
+def test_copy_with_no_selection_copies_the_whole_sprite():
     pe = _pe()
-    assert pe.copy_selection() is False
-    assert pe.paste(0, 0) is False       # nothing on the clipboard
+    assert pe.paste(0, 0) is False       # nothing on the clipboard yet
+    pe.paint(1, 2)
+    assert pe.copy_selection() is True
+    w, h, buf = pe.clip
+    assert (w, h) == (pe.dim, pe.dim) and list(buf) == _region(pe)
+
+
+def test_an_operation_acts_on_the_selection_else_the_whole_sprite():
+    """PICO-8's rule: flip, rotate, shift and clear take the selection
+    where there is one, else the whole sprite."""
+    pe = _pe()
+    pe.color = 7
+    pe.paint(0, 0)
+    pe.paint(5, 5)
+    pe.set_selection(4, 4, 7, 7)
+    pe.flip_h()                          # (5, 5) -> (6, 5) inside the box
+    r = _region(pe)
+    assert r[0] == 7 and r[5 * pe.dim + 6] == 7 and r[5 * pe.dim + 5] == 0
+    pe.clear()                           # the box only
+    r = _region(pe)
+    assert r[0] == 7 and r[5 * pe.dim + 6] == 0
+    pe.set_selection(0, 0, 3, 1)
+    assert pe.rotate() is False          # not square: no rotation
+    pe.clear_selection()
+    pe.shift(1, 0)                       # the whole sprite, wrapping
+    assert _region(pe)[1] == 7
+    pe.clear()
+    assert set(_region(pe)) == {0}
 
 
 # -- tool-row UI + keyboard shortcut (through the shared console) -------------
