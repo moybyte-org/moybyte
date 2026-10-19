@@ -957,7 +957,8 @@ def test_a_labelled_chips_icon_ink_starts_at_its_pad(tmp_path):
     rect = (0, 0, 700, 20)
     tabs_area, _play = app._zone_parts(rect)
     chips = dict((tid, r) for tid, r, _on in app._shelf_rects(tabs_area))
-    pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * app._zone_scale()
+    pad = (ui_draw.metrics("tab")[ui_draw.TAB_PAD] * app._zone_scale()
+           + app._shelf_layout(tabs_area)[1])     # the pill's grown pad (D-03.3)
     drawn = []
     real = ws.draw_icon
     ws.draw_icon = lambda kind, r, ink, c=None: (drawn.append((kind, r)),

@@ -110,6 +110,9 @@ _LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at 
 _GROUP_GAP = 8                  # ...the least gap between the tabs and the actions
 _GROUP_MAX = 12                 # ...and the most
 _PILL_CLEAR = 8                 # the labelled ladder: open pill to the next tab's icon, at fs 1
+_PILL_PAD = 9                   # ...the most each pill grows on either side, room given
+_HIST_LEAD = 12                 # ...the last tab to undo
+_HIST_GAP = 8                   # ...undo to redo
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
@@ -510,10 +513,16 @@ class EditorApp:
                                       open_ink=_ui_draw.current_ink(cv, th),
                                       lead=bool(rects) and rects[0][2])
             icon_for = getattr(ws, "_icon_image_keyed", None)
+            extra = self._shelf_layout(tabs_area)[1]
             for (tid, label, kind), (_t, r, labels_on) in zip(chips, rects):
                 _ui_draw.tab(cv, th, r, tid == self.tab, label, labels_on, band_ink,
                              icon_for(kind) if icon_for is not None else None,
-                             icon_draw=draw, kind=kind)
+                             icon_draw=draw, kind=kind, pad=extra)
+            hist = self._history_rects(rects)
+            if hist is not None:
+                (ux, uy, ic, _h), (rx, ry, _w, _h2) = hist
+                self._draw_history_icon(cv, "undo", ux, uy, ic, ws.history.can_undo())
+                self._draw_history_icon(cv, "redo", rx, ry, ic, ws.history.can_redo())
             if sets:
                 self._bare_play(cv, play_r)
             else:
@@ -606,14 +615,15 @@ class EditorApp:
 
     def _bare_play(self, cv, r):
         """The shelf's Play under a theme's icon set: the set's glyph and the
-        word, in `value`, on the band with no plate, centred in `r`."""
+        word, in `value`, on the band with no plate, at the right of `r`
+        (the zone's right end, D-03.3)."""
         ws = self.ws
         ink = ws.theme_colors["value"]
         fs = self._zone_scale()
         box = _BAR_ICON * fs
         gap = 4 * fs
         tw = _ui_draw.print_width("Play", fs)
-        x = r[0] + (r[2] - box - gap - tw) // 2
+        x = r[0] + r[2] - box - gap - tw - 4 * fs
         self._draw_play(cv, (x, r[1] + (r[3] - box) // 2, box, box), ink)
         line = _ui_draw.font("ui")[2] * fs
         cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
@@ -624,14 +634,46 @@ class EditorApp:
         return len(self._shelf_rects(tabs_area)) < len(self._chips())
 
     def _shelf_rects(self, tabs_area):
-        """The labelled ladder's chips, `ui_draw.tab_row_rects` over `_chips`,
-        spaced so the open tab's pill ends _PILL_CLEAR before the next tab's
-        icon, the chip gap and that tab's pad together (the draw and the hit
-        test share it)."""
+        """The labelled ladder's chips, [(tab, rect, labels_on)]
+        (`_shelf_layout`; the draw and the hit test share it)."""
+        return self._shelf_layout(tabs_area)[0]
+
+    def _shelf_layout(self, tabs_area):
+        """The labelled ladder's chips and the pad each pill grew by:
+        `ui_draw.tab_row_rects` over `_chips`, spaced so the open tab's pill
+        ends _PILL_CLEAR before the next tab's icon, then each pill grown
+        alike on both sides by the room the row leaves, up to _PILL_PAD (the
+        mockup's padded tabs, D-03.3), the gaps kept."""
         fs = self._zone_scale()
         pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD]
         slim = [(tid, label) for tid, label, _ic in self._chips()]
-        return _ui_draw.tab_row_rects(tabs_area, slim, fs, max(0, _PILL_CLEAR - pad) * fs)
+        gap = max(0, _PILL_CLEAR - pad) * fs
+        rects = _ui_draw.tab_row_rects(tabs_area, slim, fs, gap)
+        if len(rects) < len(slim) or not rects or not rects[0][2]:
+            return rects, 0
+        last = rects[-1][1]
+        spare = tabs_area[0] + tabs_area[2] - (last[0] + last[2])
+        extra = max(0, min(_PILL_PAD * fs, spare // (2 * len(rects))))
+        if not extra:
+            return rects, 0
+        out = []
+        x = rects[0][1][0]
+        for tid, (_x, y, w, h), on in rects:
+            out.append((tid, (x, y, w + 2 * extra, h), on))
+            x += w + 2 * extra + gap
+        return out, extra
+
+    def _history_rects(self, rects):
+        """Undo's and redo's icon rects on the labelled ladder, after its
+        last tab (the mockup's, D-03.3), or None with no tab."""
+        if not rects:
+            return None
+        fs = self._zone_scale()
+        ic = _BAR_ICON * fs
+        x, y, w, h = rects[-1][1]
+        ux = x + w + _HIST_LEAD * fs
+        uy = y + (h - ic) // 2
+        return (ux, uy, ic, ic), (ux + ic + _HIST_GAP * fs, uy, ic, ic)
 
     def _open_label(self, rect):
         """The open tab's name for the narrow bar, or "" when the whole ladder
@@ -771,7 +813,9 @@ class EditorApp:
         ins = _CODE_INSET * fs
         if rest[0] < ins:
             left = ins - _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
-        tabs_area = (left, rest[1], max(0, rest[0] + rest[2] - gap - left), rest[3])
+        # undo and redo follow the tabs: the row leaves them their room
+        hist = (_HIST_LEAD + _HIST_GAP + 2 * _BAR_ICON) * fs
+        tabs_area = (left, rest[1], max(0, rest[0] + rest[2] - gap - left - hist), rest[3])
         return tabs_area, play_r
 
     def zone_tap(self, px, py, rect):
@@ -784,9 +828,17 @@ class EditorApp:
             tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            for tid, r, _labels_on in self._shelf_rects(tabs_area):
+            rects = self._shelf_rects(tabs_area)
+            for tid, r, _labels_on in rects:
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
+            hist = self._history_rects(rects)
+            if hist is not None:
+                for act, (x, _y, w, _h) in zip((_ZONE_UNDO, _ZONE_REDO), hist):
+                    # the band's full height, a gap's half either side
+                    if x - 4 * self._zone_scale() <= px < x + w + 4 * self._zone_scale() \
+                            and rect[1] <= py < rect[1] + rect[3]:
+                        return self._activate_zone_tab(act)
             return False
         rects, _gap = self._ladder_layout(rect)
         last = len(rects) - 1

@@ -478,7 +478,15 @@ class BarLayer:
         got = self.cell(where, "zone")
         if got is None:
             return (0, 0, 0, 0)
+        if self._in_window(where):
+            return self._window_zone(got[0][1], got[1])
         return got[1]
+
+    @staticmethod
+    def _window_zone(rect, zone):
+        """A window's strip paints none of the OS widgets, so its zone runs on
+        to the strip's end, its own left margin kept at the right."""
+        return (zone[0], zone[1], max(zone[2], rect[2] - 2 * zone[0]), zone[3])
 
     def zone_band_light(self, where):
         """True when `where`'s bar band is LIGHT -- an in-window band under a
@@ -765,7 +773,7 @@ class BarLayer:
         else:
             for c in cells:
                 if c[0] == "zone":
-                    zone = c[1]
+                    zone = self._window_zone(rect, c[1])
         if zone is None:
             return
         back = self.draws_back(where)

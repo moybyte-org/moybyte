@@ -160,7 +160,14 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, config, theme, mode):
         band = ws.wm._wins["menu"].ctx.layout.bars[0][1]
         ty = oy + band[1] + band[3] // 2
         tab = _ink_left(px, ox + band[0] + 1, ox + band[0] + 200, ty - 6, ty + 6)
-        assert x0 <= tab - ox <= x0 + fs, ("tabs", tab - ox, x0)
+        # the first pill's edge on the inset, its content the pill's grown
+        # pad in (the padded tabs, D-03.3)
+        app = ws.editor_app
+        bar = ws.wm._wins["menu"].ctx.layout.bars[0]
+        zone = ws.bar_layer._window_zone(bar[1], next(c[1] for c in bar[3]
+                                                      if c[0] == "zone"))
+        grown = app._shelf_layout(app._zone_parts(zone)[0])[1]
+        assert x0 + grown <= tab - ox <= x0 + grown + fs, ("tabs", tab - ox, x0, grown)
 
 
 def _files(ws, cur=3):

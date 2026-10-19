@@ -1354,17 +1354,24 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None,
 
 
 def tab(cv, th, r, active, label="", labels_on=False, ink=None, img=None,
-        icon_draw=None, kind=None):
+        icon_draw=None, kind=None, pad=0):
     """One tab chip of `tab_row` in rect `r`: its field (the ON look when
     `active`), its icon in the icon slot -- `icon_draw(kind, rect)` where it
     draws one (a theme's icon set), else the 16x16 `img` -- and `label` when
-    `labels_on`."""
+    `labels_on`. `pad` grows the field that much past its content on either
+    side (the content lies in `r` less `pad` each side)."""
     look = _LOOK if th is _TH else _look(th)
+    x, y, w, h = r
+    inner = (x + pad, y, w - 2 * pad, h) if pad else r
     if img is None and icon_draw is None:
-        _C.tab(cv, look, r, active, labels_on, label, ink, _ALL)
+        if not pad:
+            _C.tab(cv, look, r, active, labels_on, label, ink, _ALL)
+            return
+        _C.tab(cv, look, r, active, labels_on, label, ink, _FRAME)
+        _C.tab(cv, look, inner, active, labels_on, label, ink, _CONTENT)
         return
     fs = _fs(cv)
-    x, y, w, h = r
+    x, y, w, h = inner
     box = _METRICS["tab"][TAB_ICON] * fs
     _C.tab(cv, look, r, active, labels_on, label, ink, _FRAME)
     ix = x + (_METRICS["tab"][TAB_PAD] * fs if labels_on else (w - box) // 2)
@@ -1372,7 +1379,7 @@ def tab(cv, th, r, active, label="", labels_on=False, ink=None, img=None,
     if icon_draw is None or not icon_draw(kind, (ix, iy, box, box)):
         if img is not None:
             cv.spr(img, ix, iy, fs)
-    _C.tab(cv, look, r, active, labels_on, label, ink, _CONTENT)
+    _C.tab(cv, look, inner, active, labels_on, label, ink, _CONTENT)
 
 
 def _tab_label(tabs, tid):
