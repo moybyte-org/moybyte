@@ -263,7 +263,7 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 - **Code** — the real Python source. The Blocks tab's output, and eventually the kid's
   own hands. Carries a full small-editor toolset behind an on-screen tool palette
   (#89): text selection with copy/cut/paste (an internal clipboard, identical on
-  device), incremental find, an optional line-number gutter, and block
+  device), incremental find, a line-number gutter (on by default), and block
   indent/outdent — every verb touch-reachable, with host Ctrl+C/X/V/F/Z/Y as
   conveniences on top.
 - **Sprites / Map / Scene / Music** — the asset editors, each with an icon-buttoned
