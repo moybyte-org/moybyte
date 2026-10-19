@@ -134,6 +134,24 @@ def test_a_themes_bar_packs_alike_in_both_modes(tmp_path, config, theme):
         theme, config)
 
 
+@pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+def test_a_themes_caption_sits_on_one_baseline_in_both_modes(tmp_path, theme):
+    """The handheld home's title and metadata draw on the same baselines
+    under the hero in a theme's light and dark modes, whatever leading
+    their faces set (R3-22: Moy's Day set its metadata 2 px lower than
+    Night)."""
+    got = {}
+    for mode in ("dark", "light"):
+        ws = _ws(tmp_path / mode, HANDHELD, theme, mode)
+        _home(ws)
+        ty, _th, tsc, my, _mh, _h = ws.launcher.foot()
+        fs = ws.layout.fs
+        hero = ws.launcher._geom()[7] + ws.launcher.card_side()     # the hero's foot
+        got[mode] = (ty + ui_draw.font("hero")[3] * tsc - hero,
+                     my + ui_draw.font()[3] * fs - hero)
+    assert got["dark"] == got["light"], "%s: title and metadata baselines %s" % (theme, got)
+
+
 @pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
 @pytest.mark.parametrize("theme,mode", THEMES)
 def test_a_focused_cover_fills_its_mark(tmp_path, monkeypatch, config, theme, mode):

@@ -1014,6 +1014,12 @@ _HH_GAP = 14
 # The least the handheld home leaves over and under the hero's caption
 # (title over metadata), at the font scale, when a face needs their room.
 _HH_SQUEEZE = (2, 4)
+# The handheld caption's lines for a version 2 face, at the font scale (the
+# title's at its own scale): the title's line and its baseline, the
+# metadata's baseline under the title's, its line and its baseline. The
+# size class's -- the targets' Night faces' -- so a mode whose faces set
+# more leading draws its caption on the same baselines.
+_HH_CAPTION = (24, 19, 17, 15, 12)
 
 
 def _clean_side(limit):
@@ -1188,13 +1194,20 @@ class Carousel(Launcher):
         hints = (cx, cy + ch - hint_h, cw, hint_h)
         tf = _ui_draw.font("hero")
         tsc = max(fs, (16 * fs) // max(1, tf[2]))
-        title_h = tf[2] * tsc
-        meta_h = lay.line_h
-        # A version 2 face's line holds its leading: the title sits 6 under
-        # the hero, the metadata right under it, 10 over the hints (the
-        # targets'); a pixel face's line is its ink, so 12, 3 and 4.
-        above, between, below = ((6 * fs, 0, 10 * fs) if _ui_draw.font_v2(tf[0])
-                                 else (12 * fs, 3 * fs, 4 * fs))
+        v2 = _ui_draw.font_v2(tf[0])
+        # A version 2 face's line holds its leading: the caption lays out on
+        # the size class's lines (`_HH_CAPTION`), the title 6 under the hero
+        # and 10 over the hints (the targets'), and each line draws on its
+        # baseline there, whatever leading the mode's faces set; a pixel
+        # face's line is its ink, so 12, 3 and 4.
+        if v2:
+            tl, tb, mb, ml, ma = _HH_CAPTION
+            title_h, meta_h = tl * tsc, ml * fs
+            between = tb * tsc + (mb - ma) * fs - title_h
+            above, below = 6 * fs, 10 * fs
+        else:
+            title_h, meta_h = tf[2] * tsc, lay.line_h
+            above, between, below = 12 * fs, 3 * fs, 4 * fs
         ring = max(2 * fs + 2, reach)
         space = hints[1] - cy
         # The gaps give before the card does: a face taller than the targets'
@@ -1216,6 +1229,10 @@ class Carousel(Launcher):
         top = cy + max(ring, (space - 2 * card - foot) // 2)
         title_y = top + 2 * card + above
         meta_y = title_y + title_h + between
+        if v2:
+            # each face on its line's baseline
+            meta_y += (ma - _ui_draw.font()[3]) * fs
+            title_y += (tb - tf[3]) * tsc
         band = (cx, cy, cw, hints[1] - cy)
         return (None, band, card, card + gap, ring, gap, 0, top + card,
                 (title_y, title_h, tsc, meta_y, meta_h, hints), None)
@@ -1880,7 +1897,7 @@ class Carousel(Launcher):
             _ui_draw.print_font(was)
         x0 = x = bx + (bw - mw) // 2
         d = 2 * fs if _ui_draw.font_v2(_ui_draw.font()[0]) else fs
-        dy = _dot_top(my, mh // max(1, _ui_draw.font()[2]), d)
+        dy = _dot_top(my, fs, d)
         for pas in ((1, wall[1]), (0, dim)) if wall is not None else ((0, dim),):
             o, c = pas
             x = x0
