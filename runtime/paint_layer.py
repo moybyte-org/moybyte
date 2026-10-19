@@ -1172,7 +1172,7 @@ class PaintLayer:
         else:
             for rect, word, kind in ((lay.get_btn, "Load", ("folder_open", "get")),
                                      (lay.put_btn, "Save", ("save", "put")),
-                                     (lay.files_btn, "To Files", ("files", "folder"))):
+                                     (lay.files_btn, "To Files", ("export", "folder"))):
                 if words:
                     _ui_draw.button(cv, th, rect, word, "normal", glyph=kind,
                                     glyph_draw=draw)

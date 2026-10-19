@@ -12,6 +12,7 @@
    "copy": "#ffffff",
    "del": "#c9d3e6",
    "doc": "#ffffff",
+   "export": "#f5c542",
    "files": "#f5c542",
    "folder": "#f5c542",
    "game": "#c9d3e6",
@@ -40,84 +41,84 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 3304,
+   "bytes": 3351,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 8505,
+   "bytes": 8632,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 12004,
+   "bytes": 12180,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 3510,
+   "bytes": 3560,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 8811,
+   "bytes": 8945,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 12053,
+   "bytes": 12229,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 3410,
+   "bytes": 3460,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 8715,
+   "bytes": 8849,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 12032,
+   "bytes": 12208,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1802,
+   "bytes": 1838,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 4168,
+   "bytes": 4254,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 5676,
+   "bytes": 5796,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -214,7 +215,8 @@
   "sleep",
   "sliders",
   "copy",
-  "palette"
+  "palette",
+  "export"
  ],
  "tiers": {
   "desktop": [

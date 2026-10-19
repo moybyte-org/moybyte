@@ -623,3 +623,14 @@ def test_one_icon_one_meaning_for_the_round_4_pairs():
     assert iconsets.slot_of("appearance") != iconsets.slot_of("settings")
     copy = [slot for oid, _label, slot in paint_layer._OPS if oid == "copy"]
     assert copy == ["copy"]
+
+
+def test_load_and_to_files_wear_two_folders_that_say_their_direction():
+    """The sprite map's Load and To Files are inverse operations on one
+    object: Load the open folder, To Files the folder with an arrow out of
+    it (m21, 2026-10-19), never the same folder twice."""
+    import inspect
+    from runtime import paint_layer
+    src = inspect.getsource(paint_layer.PaintLayer._draw_look)
+    assert '"To Files", ("export"' in src and '"Load", ("folder_open"' in src
+    assert iconsets.SLOT["export"] != iconsets.SLOT["folder_open"]
