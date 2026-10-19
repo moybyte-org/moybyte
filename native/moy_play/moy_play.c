@@ -1,6 +1,12 @@
 // The Player (moy_play.h has the contract): a run's verdict, its frame and
 // what it reports.
 
+// nanosleep and the pthread watch under the host's -std=c99 (a board's IDF
+// declares them itself).
+#if !defined(ESP_PLATFORM) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <stdio.h>
 #include <string.h>
 

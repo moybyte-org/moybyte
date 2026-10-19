@@ -48,6 +48,9 @@ CACHE = os.path.join(native_build.ROOT, ".build", "host")
 CFLAGS = native_build.BASE_CFLAGS + [
     "-DMOY_PIXEL_RGB565=1", "-DMOY_WITH_LUA=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1",
     "-Wno-double-promotion", "-Wno-float-conversion",
+    # Newer compilers (GCC 14, CI's) refuse an implicit declaration; older
+    # ones only warn, so a missing feature macro passed here and failed there.
+    "-Werror=implicit-function-declaration",
 ]
 
 _PATH = [None]
