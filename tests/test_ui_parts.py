@@ -138,8 +138,10 @@ def test_a_group_is_a_caption_and_a_card_its_corners_rounded_by_the_depth():
     for x, y in ((319 - INSET, top), (INSET, bottom - 1), (319 - INSET, bottom - 1)):
         assert r.px(x, y) == ground, "a card corner at (%d, %d) is cut" % (x, y)
     assert r.px(INSET, top + ROW + 10) != ground, "the card's side is square between its corners"
-    assert r.px(INSET + PAD + 40, top + ROW) != card, "a rule heads the second row"
-    assert r.px(INSET + PAD + 40, top) == card, "no rule over the first"
+    assert r.px(INSET + PAD + 40, top + 2 * ROW) != card, "a rule heads the third row"
+    # the focused first row's plate is the line between it and the second
+    assert r.px(INSET + PAD + 40, top + ROW) == card, "no rule under the focused row"
+    assert r.px(INSET + PAD + 40, top) != card, "the focused row is on its plate"
 
 
 def test_a_theme_without_a_depth_draws_a_square_ringed_card():
@@ -365,7 +367,8 @@ def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
     1.15 to 1.32:1 on its ground), the mark answers it in front and in a
     window behind, and it holds the theme floor's 3:1 on the plate as drawn
     (theme.contrast; the plate's readability bit holds it too). Moy gives
-    it one."""
+    it one. A solid plate (Contrast's) is its outline in a window behind,
+    the content there in its own ink."""
     th = _theme(*theme)
     cv = make_system_canvas(40, 20)
     cv.rect(0, 0, 40, 20, th["surface"])
@@ -374,7 +377,12 @@ def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
         assert theme[0] != "moy", "Moy's current names an ink"
         return
     assert ink != th["ink"]
-    assert ui_draw.current(cv, th, (2, 2, 36, 16), back=True) == ink
+    from runtime.chrome import theme_look
+    solid = theme_look(*theme)["current.alpha"] >= 100
+    behind = ui_draw.current(cv, th, (2, 2, 36, 16), back=True)
+    assert behind == (None if solid else ink)
+    cv.rect(0, 0, 40, 20, th["surface"])
+    ui_draw.current(cv, th, (2, 2, 36, 16))
     assert ui_draw.current_ink(cv, th) == ink
     px = lambda x, y: cv._buf[2 * (y * 40 + x)] << 8 | cv._buf[2 * (y * 40 + x) + 1]  # noqa
     plate = px(20, 10)
@@ -1556,7 +1564,10 @@ def test_a_dialog_draws_a_card_over_the_page():
         for _ in range(3):
             r.frame()
     assert card.px(160, 120) != plain.px(160, 120)
-    assert card.px(2, 236) == plain.px(2, 236), "the card is centred, not the whole page"
+    # the card is centred, the page around it dimmed under the scrim (D-01)
+    corner, under = _rgb(card.px(2, 236)), _rgb(plain.px(2, 236))
+    assert card.px(2, 236) != card.px(160, 120), "the card is centred, not the whole page"
+    assert sum(corner) < sum(under), "the page under a dialog dims"
 
 
 def test_a_scroll_region_keeps_the_focused_row_in_its_rect():

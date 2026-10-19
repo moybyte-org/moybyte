@@ -223,30 +223,23 @@ class PauseMenu:
     def _width(self, desk):
         return 300 if desk else 188 * self.ws.layout.fs
 
-    def _band(self, cv, desk):
-        """The band the card and its shadow can cover: the card's columns
-        and a shadow's reach either side, the canvas's whole height."""
-        m = 48 if desk else 24 * self.ws.layout.fs
-        w = min(cv.w, self._width(desk) + 2 * m)
-        return (cv.w - w) // 2, w
-
     def _keep_under(self, cv, desk):
         """Where the game's frame IS the system canvas (the handheld), the
-        card draws over the frozen frame itself: keep the band it can cover,
-        so a smaller card (Options) and the resumed game find it whole.
-        Where the game is composited, its frame repaints under the card."""
+        card draws over the frozen frame itself: keep the whole frame, which
+        the scrim dims under the card, so each frame starts from it, and a
+        smaller card (Options) and the resumed game find it whole. Where the
+        game is composited, its frame repaints under the card."""
         self._capture = False
         ws = self.ws
         new = getattr(cv, "new_layer", None)
         if ws.canvas is not cv or new is None:
             return
-        x, w = self._band(cv, desk)
         try:
-            lay = new(w, cv.h)
+            lay = new(cv.w, cv.h)
         except Exception:  # noqa: BLE001 -- no room: the card draws without it
             return
-        lay.blit_strip(cv, -x, 0)
-        self._under = (lay, x)
+        lay.blit_strip(cv, 0, 0)
+        self._under = (lay, 0)
 
     def _put_under(self, cv):
         u = self._under
@@ -371,6 +364,10 @@ class PauseMenu:
         else:
             self._put_under(cv)
         ws.icon_spec()                    # the theme's set in the engine, as the bar has it
+        # the paused game dims under the card (D-01): over the frame just
+        # put back, or the composite just made, never over the last scrim
+        if self._under is not None or ws.canvas is not cv:
+            _ui_draw.scrim(cv, ws.theme_colors, (0, 0, cv.w, cv.h))
         if not self.page:
             host.focus(self.ITEMS[self.sel])
         settled = host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
@@ -569,6 +566,27 @@ class SystemMenuUI:
         _ch.replay(mp.chrome_menu(rows, m.sel, x, y, w, h, m.fs, m.cs), ws.sys_canvas, ws)
 
     # -- the 2026-10 look's card (docs/look_2026-10.md step 25a) ----------------
+
+    def scrims(self):
+        """Whether a system modal's scrim is up: this menu or a card's menu,
+        ABOUT, the pause menu. A bar widget's popover (the calendar, Wi-Fi,
+        power) hangs from its widget as an app's picker does, and dims
+        nothing (docs/look_2026-10.md, D-01)."""
+        ws = self.ws
+        m = ws.sysmenu
+        return (m.open and m.comp is None) or ws._about or ws.pause.open
+
+    def scrim(self):
+        """Dim what the system menu, a card's menu or ABOUT covers: the
+        content under the bars, which stay as they are (D-01). Once a full
+        frame, before the modal draws; a frame that paints the popover's
+        rect alone keeps it."""
+        ws = self.ws
+        m = ws.sysmenu
+        if m.open and m.comp is not None and not ws._about:
+            return
+        lay = ws.layout
+        _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
 
     def looked(self):
         """The menu's rows show as the look's card: a theme with a depth."""

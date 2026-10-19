@@ -1657,6 +1657,12 @@ def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
 BAR_BAND, BAR_HH_BAND, BAR_SYS, BAR_HH_SYS, BAR_CHIP, BAR_TILE = 0, 1, 2, 3, 4, 5
 
 
+def scrim(cv, th, rect):
+    """What a modal dims under it (D-01): `rect` washed in the look's
+    `scrim`, drawn once a full frame, before the modal's card."""
+    _C.scrim(cv, _LOOK if th is _TH else _look(th), rect)
+
+
 def bar_part(cv, th, part, rect, on=0, fill=None):
     """A bar part of the live theme's look (docs/look_2026-10.md step 14):
     a desk or handheld bar's band (`on` the band's BAND_* side), the system
@@ -1719,6 +1725,7 @@ def focus_ring(cv, th, rect, fs=None):
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
 _MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING = 1, 2, 4, 8, 32
+_MARK_KEEP = 512
 
 
 def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
@@ -1736,13 +1743,16 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
                     (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0), fs)
 
 
-def current(cv, th, rect, r=0, back=False, side=False, fs=None):
+def current(cv, th, rect, r=0, back=False, side=False, fs=None, keep=False):
     """The current mark under `rect`'s content: the theme's plate, fill or
     bar (`side`: a bar beside a row, not under it; `back`: in a window
-    behind). Returns the ink the content takes, or None for its own. A part
-    drawn by `row`, `cell`, `chip` or `tab` marks its `on` itself."""
+    behind; `keep`: the content keeps its own colours, a code line's, so an
+    opaque plate is the row's outline instead). Returns the ink the content
+    takes, or None for its own. A part drawn by `row`, `cell`, `chip` or
+    `tab` marks its `on` itself."""
     return _C.current(cv, _LOOK if th is _TH else _look(th), rect, r,
-                      (_MARK_BACK if back else 0) | (_MARK_SIDE if side else 0), fs)
+                      (_MARK_BACK if back else 0) | (_MARK_SIDE if side else 0)
+                      | (_MARK_KEEP if keep else 0), fs)
 
 
 def current_ink(cv, th, back=False):

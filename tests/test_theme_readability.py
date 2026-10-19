@@ -210,12 +210,13 @@ def test_the_code_roles_read_on_the_current_line(seed, variant):
     """The code editor marks its current line with the current mark: where
     that is a plate behind the line (`current.style` plate, `current.row`
     plate), every code role holds text's 4.5:1 on the plate as well as on
-    the code surface (theme.code). Contrast outlines the row instead, so its
-    line keeps the surface the code roles are held to."""
+    the code surface (theme.code). An opaque plate (Contrast's) outlines
+    the code's line instead, as `current.row: outline` does, so its line
+    keeps the surface the code roles are held to."""
     live = live_colors(seed, variant)
     ui_draw._C.theme_block(live.block, live.used)
     lk = live.look[0]
-    if lk["current.style"] != 1 or lk["current.row"] != 0:
+    if lk["current.style"] != 1 or lk["current.row"] != 0 or lk["current.alpha"] >= 100:
         return
     tokens = STYLE["tokens"]
     s, val = _rgb(live.tokens[TH["code"]["bg"]]), _rgb(live.tokens[tokens[lk["current.color"]]])

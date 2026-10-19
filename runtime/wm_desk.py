@@ -162,7 +162,7 @@ class _BackdropLayer(Layer):
                 cursor_live = ((ptr is not None and ptr[2])
                                or (last is not None and last[2]))
                 if not (cursor_live and ptr != last) \
-                        and wm._desk_streak >= wm._retained_n():
+                        and wm._desk_streak >= wm._retained_n() and not wm._scrim_up():
                     wm._desk_painted = False   # untouched: windows may skip too
                     wm._damage_rects = []      # the desk changed nowhere
                     self.ws.bar_layer.redraw_clock("desk")

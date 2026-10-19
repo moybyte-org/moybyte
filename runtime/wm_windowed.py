@@ -491,6 +491,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                                           # earlier in the frame than _win_sig)
         self._win_sig = None              # window-shape signature; a change voids
                                           # every retained window stamp
+        self._scrim_was = False           # a modal's scrim was up last frame
         self._sig_stable = False          # ...was it unchanged THIS frame?
         # Chrome freeze (#155): a window strip/border and the taskbar chips are
         # disjoint from every content stamp, so a quiet frame can leave them
@@ -1315,6 +1316,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         a raster root (the recording tier's surfaces replay by layer)."""
         return self.mode == "desktop" and not self._recording
 
+    def _scrim_up(self):
+        """Whether a system modal's scrim is up (D-01): the system menu or a
+        card's menu, ABOUT, the pause menu (`SystemMenuUI.scrims`)."""
+        return self.ws.menu_ui.scrims()
+
     def _pop_n(self):
         """The root's real buffer count: what a popover's rect is owed to."""
         n = getattr(self._root_canvas, "RETAINED_FRAMES", 1)
@@ -1500,6 +1506,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         retained buffer carries the change before partial frames resume."""
         ws = self.ws
         self._ensure_stack()
+        # A system modal's scrim (D-01) dims every retained pixel once: the
+        # frame it comes or goes repaints the desk whole, every window's
+        # stamp and the desk's own streak voided, and while it is up no
+        # window, desk or playtest frame is retained (_frame_is_quiet).
+        up = self._scrim_up()
+        if up != self._scrim_was:
+            self._scrim_was = up
+            self._win_sig = None
+            self._desk_streak = 0
+            ws._dirty = True
         # Surface-model signals run BEFORE any layer draws or skip-decides
         # (recording tier only; a raster tier returns immediately). The dt is
         # nominal -- the one dt-sensitive predicate (wallpaper.is_animating)
@@ -1521,7 +1537,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                  and not getattr(ws.pointer, "visible", False))
         # A window over the game's casts its shadow on it and must stay over
         # it: the quiet stack repaints the game window alone, so not then.
-        quiet = still and "desktop" in self._wins and not self._player_under
+        quiet = still and "desktop" in self._wins and not self._player_under and not up
         if quiet and self._full_debt <= 0:
             if pop:
                 return self._quiet_pop_stack
@@ -1987,7 +2003,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         window is being dragged or resized, nothing is animating, and no cursor
         stamp needs erasing. Shared by the window-skip and the chrome freeze."""
         if (self._desk_painted or self._drag is not None
-                or self._resize is not None or self.ws._animating(dt)):
+                or self._resize is not None or self.ws._animating(dt)
+                or self._scrim_up()):
             return False
         p = self.ws.pointer
         if p is not None and getattr(p, "visible", False):

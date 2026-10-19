@@ -15,7 +15,7 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import ui_draw
-from runtime.chrome import theme_colors
+from runtime.chrome import theme_colors, theme_look
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
 from ws_helpers import fixture_theme, install_theme
@@ -213,18 +213,22 @@ def test_the_title_buttons_are_minimize_maximize_close(looked, light):
 @pytest.mark.parametrize("light", [True, False])
 def test_moys_header_is_the_windows_colour_under_a_value_bar(looked, light):
     """`win.header: bar`: the focused window's header is the window's colour
-    under a 4-pixel value bar across its top; a window behind has no bar."""
+    under a 4-pixel value bar across its top; a window behind has no bar,
+    its header in `win.fill_back` (the desk's ground, D-04)."""
     th, cv = looked("moy", light)
+    back = _word(theme_look("moy", "light" if light else "dark")["win.fill_back"])
+    assert back != _word(th["surface"]), "a window behind's header is not the focused one's"
     x, y, w, h = 20, 20, 300, 160
     for active in (True, False):
         cv.cls(th["desktop"])
         ui_draw.frame(cv, th, (x, y, w, h), 44, "CALC", active, True, 1)
         mid = x + w // 2
-        top = _word(th["value"]) if active else _word(th["surface"])
+        head = _word(th["surface"]) if active else back
+        top = _word(th["value"]) if active else head
         # Night rings its windows in `line`, over the bar's first row
         first = 0 if light else 1
         assert [_px(cv, mid, y + j) for j in range(first, 4)] == [top] * (4 - first)
-        assert _px(cv, mid, y + 4) == _px(cv, mid, y + 30) == _word(th["surface"])
+        assert _px(cv, mid, y + 4) == _px(cv, mid, y + 30) == head
         assert _px(cv, mid, y + 44) == _word(th["edge"])            # the rule
     assert ui_draw.frame_geom(w, h, 44)[0] > 0                      # rounded
 
@@ -245,7 +249,8 @@ def test_a_header_fill_and_close_alone(looked):
         assert _px(cv, 170, 40) == _px(cv, 170, 64) == _word(th["value"])
         cv.cls(th["desktop"])
         ui_draw.frame(cv, th, rect, 44, "T", False, True, 1)
-        assert _px(cv, 170, 40) == _px(cv, 170, 64) == _word(th["surface"])
+        back = _word(theme_look("wp", "light")["win.fill_back"])    # Moy's, inherited
+        assert _px(cv, 170, 40) == _px(cv, 170, 64) == back
     finally:
         _uninstall()
 

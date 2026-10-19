@@ -46,7 +46,9 @@ fields (owner, 2026-10-15: "make it a property, easy to change later").
 **One accent.** `value` is `accent` unless a theme sets its own: Moy sets
 only `accent`, so its focus, current plates and primary fills are one
 colour, the Accent setting's (owner, 2026-10-15). Blocks and Contrast keep
-a `value` of their own, and picking an accent sets both roles.
+a `value` of their own, and picking an accent sets both roles. Contrast
+offers no accent picks (`accents`, owner 2026-10-19): its one yellow focus
+is the promise it keeps.
 
 **Focus** is `focus = {style, card, small, color, ink, ring, plate, lift,
 edge, underline}`. The engine picks the style by the part's size class: a
@@ -60,7 +62,7 @@ buttons, fields), which takes `style`; `card` and `small` absent mean
 | `ring` | an outline outside the part; on a small part, a tinted plate and a 1.5 px ring inside its own box | `ring.w`, `ring.gap`, `ring.alpha`; `outline` |
 | `plate` | the part tinted in `accent` | `plate.alpha` (light, dark) |
 | `lift` | the part grown and raised over a neutral offset shadow, with a 1 px rim; on a card, its chrome grown and its picture raised at its own clean side, on the card's plate (owner call 2026-10-17: never a non-clean scale) | `lift.grow`, `lift.rise`, `lift.rim` (a colour or role, and its alpha) |
-| `edge` | a bar the full height of a row on its leading edge; under a part not three times wider than tall | `edge.w` |
+| `edge` | a bar the full height of a row on its leading edge, over a light `accent` plate across the part; under a part not three times wider than tall | `edge.w`, `plate.alpha` |
 | `underline` | a bar under the glyph, inside the part's box | `underline.w` |
 | `invert` | the part filled in `accent`, its ink flipped | — |
 
@@ -70,19 +72,26 @@ and an inverted part from inside, for an accent that alone would not hold
 3:1 on its ground. Every style but `lift` on a card is drawn after the part's
 fill and before its content.
 
-**Current** is `current = {style, color, alpha}`: a `plate` (`color`, by
-default `value`, at `alpha` for light and dark, 0.6 of it in a window
-behind), a `fill` (`sel` and `sel_ink`, `sel_back` behind) or a `bar` (the
-3 px `value` bar under a tab or beside a row). On an inverted part a current
-bar takes the flipped ink. Focus and current on one part stack, and the
-shapes tell them apart, not the colours: in Moy they are one colour.
+**Current** is `current = {style, color, alpha, row, ink}`: a `plate`
+(`color`, by default `value`, at `alpha` for light and dark, 0.6 of it in a
+window behind; a solid plate, alpha 1, is its outline behind), a `fill`
+(`sel` and `sel_ink`, `sel_back` behind) or a `bar` (the 3 px `value` bar
+under a tab or beside a row). `row` says how a row wears it: the style's
+own, the row's outline, or an underline under its label. On an inverted
+part a current bar takes the flipped ink. Focus and current on one part
+stack, and the shapes tell them apart, not the colours: in Moy they are
+one colour.
+
+**Blocks' rule** (owner, 2026-10-19): a ring is the chosen value in a set
+of swatches, an underline is the current label (a tab, a tool, a theme
+card's name, a Places entry, a file), and a fill is focus.
 
 | theme | focus: card / part / small | current |
 |---|---|---|
-| Moy Day | `lift`, a white rim / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.14 |
-| Moy Night | `lift`, an `accent` rim at 0.6 / `edge` 4 px / `underline` 3 px | `plate`, `value` at 0.24 |
-| Blocks | `ring` 3 px / `invert` / `invert` | `bar` |
-| Contrast | `ring` 3 px, gap 2 / `invert` / `invert`; the light mode's 2 px black `outline` | `plate` at 0.42 (light), 0.40 (dark) |
+| Moy Day | `lift`, an `accent` rim at 0.6 / `edge` 4 px on a 0.12 plate / `underline` 3 px | `plate`, `value` at 0.14 |
+| Moy Night | `lift`, an `accent` rim at 0.6 / `edge` 4 px on a 0.14 plate / `underline` 3 px | `plate`, `value` at 0.24 |
+| Blocks | `ring` 3 px / `invert` / `invert` | `bar`, a row's label underlined |
+| Contrast | `ring` 3 px, gap 2 / `invert` / `invert`; the light mode's 2 px black `outline` | `plate`, solid `value` (the ink) with `value_ink` text |
 | Luna | `ring` 3 px, gap 0 / `invert` / `invert` | `fill` (XP's blue) |
 | Coast | `ring` 3.5 px at 0.6 / `invert` / `ring` | `fill` (macOS's selection) |
 | Pico | `invert` / `invert` / `invert` | `bar` |
@@ -114,8 +123,8 @@ primary), a **value** (current and primary; `accent` where unset) with its
 | `bg` | #eceef3 | #0f1127 | #fff3dc (home #ffd23f) | #000000 |
 | `surface` | #ffffff | #181b38 | #ffffff | #000000 |
 | `raised` | #f4f5f8 | #23274b | #fff8ec | #000000 |
-| `line` | #e2e5ec | #2b2f57 | #eadcc0 | #ffffff |
-| `dim` | #5f6478 | #a1a6cc | #5b5167 | #e6e6e6 |
+| `line` | #cfd3dc | #33385f | #ddcfb8 | #ffffff |
+| `dim` | #5f6478 | #a1a6cc | #5b5167 | #ffffff |
 | `text` | #15161d | #eef0fb | #1a1530 | #ffffff |
 | `accent` | #4c3fd6 indigo | #b6a8f7 lavender | #1a1530 ink | #ffe600 |
 | `value` | `accent` | `accent` | #6a2cff violet | #ffffff |
@@ -123,6 +132,14 @@ primary), a **value** (current and primary; `accent` where unset) with its
 **Contrast:** text 12:1, `dim` 5.1:1, every mark 6.3:1 or better
 (`draw.py` prints every pair); syntax colours are theme roles at 4.5:1.
 Bright colour lives in content. Contrast's light focus has a black outline.
+**The structure ramp** (owner, 2026-10-19): a text field's outline holds
+3:1 or better on its ground (`field.border`), and the rest of the
+structure -- hairlines, an Off toggle's track, a slider's rest, a key's
+plate and its border, a hint's keycap -- about 1.5:1, a part on a focused
+row's plate held to it there too; an empty field shows its placeholder in
+the `disabled` ink. Contrast's hierarchy is weight and size, not a dimmer
+ink: its `dim` is its `text`. A toggle's knob is one colour in a mode (white,
+the ink in a dark one), the state on the track.
 `accent` against the current plate is 3:1 or better wherever a theme's
 current is a `plate` (Day 5.9, Night 5.2).
 
@@ -161,7 +178,7 @@ and Calc larger. JetBrains Mono 11 gives 45 columns on the handheld.
 | Moy Day | 12, 10, 10 | soft, indigo-tinted, 18%, blur 16, offset 8 | none; operators sit on a `sunk` key |
 | Moy Night | 12, 10, 10 | soft, black, 55%, blur 14, offset 6 | 1 px `line` on windows; operators sit on a key one step above `raised` |
 | Blocks | 16, 14, 12 | none | 2 px ink on windows, desk tiles and the display; keys flat |
-| Contrast | 4, 4, 4 | none | 2 px white on every part |
+| Contrast | 4, 4, 4 | none | 2 px white on every part, the desk's tiles and the Moy button framed always |
 
 Shadow ramps are tinted toward the background's hue. Night dims the
 handheld's neighbour cards 30%; light themes never veil art.
@@ -237,6 +254,11 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
   maximise. A window behind keeps its frame, drops its current mark and
   casts a smaller shadow.
 - **System menu:** a popover under Moy: Search, Settings, About, Restart.
+- **Modals dim what they cover** (owner, 2026-10-19): the system menu, a
+  card's menu, About and a dialog wash the content under the bars in the
+  look's `scrim` (about 40%); the pause menu washes the whole frozen game. A
+  popover hung from its control -- an app's picker, a bar widget's calendar,
+  Wi-Fi or power -- does not.
 - **Pause menu:** a card over the veiled, frozen game: Moy, the title and
   "Paused"; Resume, Restart, Options, Quit; the game keeps its integer
   scale behind it.
@@ -247,8 +269,9 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 - **Rows:** link, info, cycle, toggle (with On/Off), slider, segmented,
   swatches; a caption heads every group; only working settings show.
   Settings ends in an About group; CHROME SIZE is Appearance's.
-- **Calc:** a tape on a display inset, the result in `value`, a 4×5 keypad
-  in kinds.
+- **Calc:** a tape on a display inset, the result in the plain ink
+  (owner, 2026-10-19), a 4×5 keypad in kinds; a disabled key's plate fades
+  with its ink.
 - **Files:** Places, each file's picture, Name, Kind and Size; names cut
   with "…", and Kind drops below 11 visible characters.
 - **Editors,** in today's layout: one icon a tab, the current one

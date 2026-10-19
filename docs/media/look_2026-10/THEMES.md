@@ -12,25 +12,32 @@ input to the theme format. Gap numbers are `GAPS.md`'s.
 - **Moy, both modes:** one `accent` and no `value` of its own, so focus,
   current and primary are one colour. The focused window's header stays
   the window's colour under a 4 px `value` bar across its top
-  (`win.header: bar`); `tonal` keys sit one step off `raised`; the lift
-  has a rim (`focus.lift.rim`).
+  (`win.header: bar`), a window behind's on the ground's colour
+  (`win.fill_back`) with a smaller shadow (`shadow_back` 0.3); `tonal`
+  keys sit one step off `raised`; the lift has an `accent` rim at 0.6
+  (`focus.lift.rim`); the focus edge stands on a light accent plate
+  (`focus.plate.alpha`); a field's outline is 3:1 (`field.border`); the
+  Calc display's ink is the plain ink (`lcd_ink`).
 - **Moy, Day:** the desk is two pale discs (`backdrop.desk`), with no
-  gradient. `tonal` keys are `sunk`; the lift's rim is white.
+  gradient. `tonal` keys are `sunk`; keycaps are ringed in `line`.
 - **Moy, Night:** the desk carries a flat crescent one tone above the sky.
-  Windows have a 1 px `line` frame, the bar is 85% `sunk`, `tonal` keys
-  are #2e3360, and the lift's rim is `accent` at 0.6.
+  Windows have a 1 px `line` frame, the bar is 85% `sunk`, and `tonal` keys
+  are #2e3360.
 - **Blocks:** colour lives in blocks, not marks: the home is sunflower
   (`home_bg`), the desk cream with four flat Bauhaus shapes, the home has a
   pale halo behind the hero and mint and coral discs at its edges, each app
   owns a tile colour (Play coral, Paint sunflower, Files sky, Calc
   tangerine), the Calc display is mint and the operators sunflower. Keys
-  have no outline; a focused key inverts to ink.
+  have no outline; a focused key inverts to ink; a current row's label is
+  underlined (`current.row: underline`).
 - **Contrast:** every size of Calc and the window titles two to six pixels
   larger, 2 px white borders on `normal`, `tonal` and `danger`, a #262626
-  `tonal` fill, a black bar ruled in white, keycaps ringed in white, and
-  the current mark a `plate` at 0.40. Its light mode is the mirror (white
-  ground, black text, lines, borders and `value`, a #e6e6e6 `tonal` fill,
-  the plate at 0.42), and its yellow focus takes a 2 px black
+  `tonal` fill, a black bar ruled in white, keycaps ringed in white, the
+  desk's tiles and the Moy button framed in white (`tile_outline`,
+  `bar.sys_line`), its `dim` its ink, no accent picks (`accents`), and the
+  current mark a solid `plate` of the ink under `value_ink` text. Its light
+  mode is the mirror (white ground, black text, lines, borders and
+  `value`, a #e6e6e6 `tonal` fill), and its yellow focus takes a 2 px black
   `focus.outline`.
 
 ## Ricing proof: Luna and Coast
@@ -253,16 +260,19 @@ In the package format (`docs/theming_2026-09.md` §3, style.json's
 | edges | `edges` (`flat`/`bevel`), `hi`, `lo` | flat |
 | type | `fam`; `w_body`, `w_med`, `w_semi`, `w_bold` and a per-role `w_<role>`; `sizes.hh` and `sizes.dk` per role | the size tables in the script (HH, DK) |
 | rendering | `render.text` (`aa`/`crisp`), `render.shapes` (`smooth`/`stepped`), `render.scale` (1/2) | aa, smooth, 1 |
-| focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.outline` (width, colour), `focus.ring.w`, `.gap`, `.alpha`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.rim` (colour or role, alpha), `focus.edge.w`, `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; no outline; 2.5, 3, 1; (0.14, 0.22); 5, 3, no rim; 4; 3 |
+| focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.outline` (width, colour), `focus.ring.w`, `.gap`, `.alpha`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.rim` (colour or role, alpha), `focus.edge.w` (its bar, on a plate at `focus.plate.alpha`), `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; no outline; 2.5, 3, 1; (0.14, 0.22); 5, 3, no rim; 4; 3 |
 | radii | `win_r`, `card_r`, `key_r`, `win_corners` (four flags) | 12, 10, 10, all |
 | card | `card.frame` (width, colour): a group card's frame, which an invert focus mark keeps inside (or covers with an outline as wide) | a dark card's 1 px rule, a light card's where it meets its ground's colour |
 | elevation | `shadow` (`soft`, colour, alpha, blur, dy; or `hard`, colour, dx, dy), `shadow_back` | no shadow |
 | backdrop | `backdrop.home`, `backdrop.desk`: lists of shapes (gap 9); `home_bg` | `bg` |
 | home | `dim_neighbours`; `on_backdrop.ink`, `.dim`, `.shadow` | no veil; `text`, `dim` |
-| window | `win.header` (`plain`/`fill`/`bar`/`grad`), `win.h`, `win.align`, `win.ink`, `win.ink_back`, `win.tshadow`, `win.controls` (`three`/`close`/`lights`/`xp`/`amiga`/`adw`), `win.grad`, `win.grad_back`, `win.fill`, `win.fill_back`, `win.frame`, `win.frame_back`, `win.body`, `win.rule`, `win.icon` | plain, 44, left, three (minimize, maximize, close) |
-| current | `current.style` (`plate`/`fill`/`bar`), `current.color` (a role), `current.alpha` (light, dark), `current.row` (`plate`/`outline`: a row's mark under `plate`, the code editor's current line among them; a plate holds every code role to 4.5:1 on it), `current.ink` (a role: the current content's ink, its second cue beside a soft plate, held to the floor on the plate); `sel`, `sel_ink`, `sel_back` for `fill` | bar, `value`, (0.14, 0.24), plate, the content's own |
-| disabled | `disabled`: the ink every disabled part draws in, about 3:1 on the surface and under the ink and its dim | `ink_dim` |
-| desk bar | `bar.edge`, `bar.h`, `bar.style` (`flat`/`grad`/`glass`), `bar.fill`, `bar.alpha`, `bar.line`, `bar.grad`, `bar.sysbtn` (`tile`/`start`/`glyph`/`workspaces`), `bar.sys`, `bar.chips` (`tab`/`button`/`none`), `bar.chip_cur`, `bar.app_title`, `bar.ink`, `bar.dim`, `bar.tray`, `bar.clock` (`right`/`center`) | top, 40, flat |
+| window | `win.header` (`plain`/`fill`/`bar`/`grad`), `win.h`, `win.align`, `win.ink`, `win.ink_back`, `win.tshadow`, `win.controls` (`three`/`close`/`lights`/`xp`/`amiga`/`adw`), `win.grad`, `win.grad_back`, `win.fill`, `win.fill_back` (a `bar` header's too: a window behind), `win.frame`, `win.frame_back`, `win.body`, `win.rule`, `win.icon`; a window behind draws its controls in `disabled` | plain, 44, left, three (minimize, maximize, close) |
+| current | `current.style` (`plate`/`fill`/`bar`), `current.color` (a role), `current.alpha` (light, dark), `current.row` (`plate`/`outline`/`underline`: a row's mark -- the style's own, the row's outline, or an underline under its label; the code editor's current line is a row whose code keeps its colours, so an opaque plate outlines it, and a translucent plate holds every code role to 4.5:1 on it; an opaque plate in a window behind is its outline), `current.ink` (a role: the current content's ink, its second cue beside a soft plate, held to the floor on the plate); `sel`, `sel_ink`, `sel_back` for `fill` | bar, `value`, (0.14, 0.24), plate, the content's own |
+| disabled | `disabled`: the ink every disabled part draws in, about 3:1 on the surface and under the ink and its dim; an empty field's placeholder too | `ink_dim` |
+| modal | `scrim` (colour, alpha): what dims everything under a system modal and a dialog | black at 0.4 |
+| fields | `field.border`: a text field's outline at rest, 3:1 or better on its ground | `line` |
+| accents | `accents` (bool): whether Appearance offers accent picks | true |
+| desk bar | `bar.edge`, `bar.h`, `bar.style` (`flat`/`grad`/`glass`), `bar.fill`, `bar.alpha`, `bar.line`, `bar.grad`, `bar.sysbtn` (`tile`/`start`/`glyph`/`workspaces`), `bar.sys`, `bar.sys_line` (the system button's frame, both bars), `bar.chips` (`tab`/`button`/`none`), `bar.chip_cur`, `bar.app_title`, `bar.ink`, `bar.dim`, `bar.tray`, `bar.clock` (`right`/`center`) | top, 40, flat |
 | handheld bar | `hhbar.style` (`none`/`flat`/`grad`/`glass`), `hhbar.h`, `hhbar.fill`, `hhbar.line`, `hhbar.ink`, `hhbar.dim`, `hhbar.sys`; `tabs.style` (`bar`/`pill`), `tabs.pill`, `tabs.pill_ink` | none, bar |
 | launcher | `launcher` (`column`/`dock`); `dock.fill`, `dock.alpha`, `dock.frost`, `dock.ring`, `dock.r`; `tiles` (per app), `tile_r`, `tile_fill`, `tile_outline`, `tile_ink`, `tile_grad`; `label.ink`, `label.shadow` | column, `raised` tiles |
 | lists | `sidebar` (paint or `vibrancy`), `places_panel`, `list_bg`, `zebra`, `colhead` | the window body |

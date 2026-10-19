@@ -230,7 +230,7 @@ def test_the_moy_seed_sets_its_marks():
             "edge", "lift", "underline"]
         assert KINDS[LEAF["current.style"]][1][lk[LEAF["current.style"]]] == "plate"
         rim = (lk[LEAF["focus.lift.rim.c"]], lk[LEAF["focus.lift.rim.alpha"]])
-        assert rim == ((RGB | 0xffffff, 100) if light else (RGB | 0xb6a8f7, 60))
+        assert rim == ((RGB | 0x4c3fd6, 60) if light else (RGB | 0xb6a8f7, 60))
         assert KINDS[LEAF["win.header"]][1][lk[LEAF["win.header"]]] == "bar"
 
 

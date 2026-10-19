@@ -3306,8 +3306,9 @@ def test_calcs_keys_stand_as_far_from_the_frames_bottom_as_its_sides(tmp_path, t
 @pytest.mark.parametrize("theme", ["moy", "contrast"])
 def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
     """The focused window's chip is current content: its icon and title take
-    the ink the look gives that (Moy's accent, beside the raised plate), and
-    a look that names none keeps the bar's ink; the others the dim ink."""
+    the ink the look gives that (Moy's accent, beside the raised plate;
+    Contrast's `value_ink`, on its solid ink plate, D-14); the others the
+    dim ink."""
     ws = _moy_desk(tmp_path)
     if theme != "moy":
         ws.look.set_theme(theme, persist=False, variant="light")
@@ -3324,7 +3325,7 @@ def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
         wm._draw_look_chips(sc, th, 1, wm._root_ctx.layout.line_h)
     finally:
         sc.print = real
-    want = th["ink_accent"] if theme == "moy" else th["chrome_ink"]
+    want = th["ink_accent"] if theme == "moy" else th["value_ink"]
     assert inks["Calc"] == want
     assert inks["Files"] == th["chrome_ink_dim"]
 

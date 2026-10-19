@@ -376,6 +376,7 @@ class _SysMenuLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
+        self.ws.menu_ui.scrim()       # a full frame: dim the content first
         paint = getattr(self.ws.wm, "_pop_paint", None)
         if paint is not None:
             paint(False)              # the windowed WM snapshots what it covers
@@ -460,6 +461,7 @@ class _AboutLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
+        self.ws.menu_ui.scrim()
         self.ws.menu_ui._draw_about()
 
     def handle_input(self, i):

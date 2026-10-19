@@ -198,18 +198,20 @@ def test_moys_appearance_accents_read_in_day_and_night():
 
 
 def test_a_picked_accent_sets_value_and_the_rim_tied_to_the_accent():
-    """`value` (a slider's fill, a switch) is an accent fill, and Moy Night's
-    lifted-card rim is its accent: both follow the pick. Day's white rim is no
-    accent and stays; with no pick the source's own stand."""
-    own = json.loads(_custom("moy"))["look"]["dark"]["focus"]["lift"]["rim"][0]
-    assert _val(own) == _val(json.loads(_custom("moy"))["colors"]["dark"]["accent"])
-    day = json.loads(_custom("moy"))["look"]["light"]["focus"]["lift"]["rim"][0]
+    """`value` (a slider's fill, a switch) is an accent fill, and Moy's
+    lifted-card rim is its accent in both modes (D-04, 2026-10-19): both
+    follow the pick; with no pick the source's own stand."""
+    for v in ("dark", "light"):
+        own = json.loads(_custom("moy"))["look"][v]["focus"]["lift"]["rim"][0]
+        assert _val(own) == _val(json.loads(_custom("moy"))["colors"][v]["accent"])
     for _n, a, _d in TH["accents"]:
         b = _custom("moy", a)
         pkg = json.loads(b)
-        lift = lambda v: pkg["look"][v]["focus"]["lift"]["rim"][0]    # noqa: E731
+        # a rim both modes share is written once, in the shared look
+        lift = lambda v: (pkg["look"][v].get("focus", {}).get("lift")    # noqa: E731
+                          or pkg["look"]["focus"]["lift"])["rim"][0]
         assert _val(lift("dark")) == _val(pkg["colors"]["dark"]["accent"]) == _val(a)
-        assert lift("light") == day
+        assert _val(lift("light")) == _val(pkg["colors"]["light"]["accent"])
         resolved = moy_ui.theme_resolve(b)
         for v in (3, 4):
             row = dict(zip(ROLES, resolved[v][0]))

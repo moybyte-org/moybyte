@@ -124,6 +124,18 @@ def test_the_cards_then_the_rows_on_the_handheld_and_the_desk(tmp_path):
     assert "Chrome size" in sim._kinds          # the simulator's desk takes two
 
 
+def test_contrast_offers_no_accent_picks(tmp_path):
+    """Contrast keeps its one yellow focus (owner, 2026-10-19, D-14): its
+    look's `accents` is false, so Appearance draws no Accent row for it."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("contrast", persist=False, variant="dark")
+    app = _open(ws)
+    assert "Accent" not in app._kinds and "Tint" in app._kinds
+    ws.look.set_theme("moy", persist=False, variant="light")
+    _frame(ws)
+    assert "Accent" in app._kinds
+
+
 def test_focus_opens_on_the_theme_in_use(tmp_path):
     ws = _ws(tmp_path)
     app = _open(ws)

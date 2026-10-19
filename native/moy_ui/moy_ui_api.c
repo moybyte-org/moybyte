@@ -66,6 +66,8 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->id.p = NULL;
     o->id.n = 0;
     o->current = o->disabled = o->nav = o->mark = o->steps = -1;
+    o->hint.p = NULL;
+    o->hint.n = 0;
 }
 
 static int32_t word(const uint8_t *w, int i) {
@@ -90,12 +92,27 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
     o->ink = word(w, MOY_UI_O_INK);
     o->border = word(w, MOY_UI_O_BORDER);
     int32_t idn = word(w, MOY_UI_O_ID);
+    size_t at = 4u * MOY_UI_O_WORDS;
     if (idn >= 0) {
-        if ((size_t)idn > n - 4u * MOY_UI_O_WORDS || idn > 0xffff) {
+        if ((size_t)idn > n - at || idn > 0xffff) {
             return MOY_UI_BAD;
         }
-        o->id.p = w + 4u * MOY_UI_O_WORDS;
+        o->id.p = w + at;
         o->id.n = (uint16_t)idn;
+        at += (size_t)idn;
+    }
+    // the block may go on: the hint's length as a word, then its text
+    if (n - at >= 4u) {
+        int32_t hn;
+        memcpy(&hn, w + at, 4);
+        at += 4u;
+        if (hn >= 0) {
+            if ((size_t)hn > n - at || hn > 0xffff) {
+                return MOY_UI_BAD;
+            }
+            o->hint.p = w + at;
+            o->hint.n = (uint16_t)hn;
+        }
     }
     o->current = flag(word(w, MOY_UI_O_CURRENT));
     o->disabled = flag(word(w, MOY_UI_O_DISABLED));
@@ -107,7 +124,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
-                                       -1, -1, -1, -1, -1};
+                                       -1, -1, -1, -1, -1, {NULL, 0}};
     return o != NULL ? o : &none;
 }
 
@@ -730,12 +747,15 @@ static void band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int st
         return;
     }
     c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON));
-    // a row under one its invert focus mark fills draws no rule: the mark's
-    // edge is the line between them
+    // a focus mark that fills its row (invert, or the edge's plate) is the
+    // line between it and its neighbours: neither it nor the row under it
+    // draws a rule
     const moy_ui_marks_t *m = moy_ui_marks();
-    int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && m->on && m->active
-                     && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT;
-    moy_ui_group_band(s, card_of(c), b, c->grp_first || after_mark, c->fs, c->cls);
+    int st = m->style[MOY_UI_MARK_PART];
+    int fills = m->on && m->active && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
+    int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && fills;
+    int own = (marks & MOY_UI_F_FOCUS) && fills;
+    moy_ui_group_band(s, card_of(c), b, c->grp_first || after_mark || own, c->fs, c->cls);
 }
 
 // The open group ends: its card's foot under its last row, and the gap the
@@ -1737,8 +1757,8 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         int f = mark_flags(st, o) & ~MOY_UI_F_ON;
         band(c, s, b, stacked, f);
         moy_ui_span_t t = {buf, (uint16_t)len};
-        moy_ui_field(s, b, label, t, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs, c->cls,
-                     c->grp_open, c->grp_open && c->grp_first);
+        moy_ui_field(s, b, label, t, o->hint, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs,
+                     c->cls, c->grp_open, c->grp_open && c->grp_first);
         clip_out(&k);
     }
     return (int32_t)len | (done ? MOY_UI_FIELD_DONE : 0);
@@ -1793,6 +1813,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     if (card.y < sf.y) {
         card.y = sf.y;
     }
+    moy_ui_scrim(s, sf);                // everything under a dialog dims (D-01)
     moy_ui_modal(s, card, title, fs, c->cls, rh);
     // the buttons at its foot, right-aligned, recorded left to right
     int nb = moy_ui_fields(buttons, len);

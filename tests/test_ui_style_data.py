@@ -545,7 +545,9 @@ def test_on_is_the_current_mark_and_focus_the_focus_mark():
         ui_draw.marks(None, True)
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True))
-        assert _px(cv, 60, 15) == _word(th["surface"]) and ui_draw.marks()[2] == 1
+        # the focus edge stands on a light accent plate across the row (D-04)
+        lit = _px(cv, 60, 15)
+        assert lit not in (_word(th["surface"]), _word(th["accent"])) and ui_draw.marks()[2] == 1
     finally:
         ui_draw.use_depth(None, False)
     for name in ("night", "win95"):
@@ -558,14 +560,16 @@ def test_on_is_the_current_mark_and_focus_the_focus_mark():
 
 def test_a_current_bar_is_beside_a_row_and_under_a_chip():
     """Blocks' current mark is the `bar` (DESIGN.md, the marks): 3 px of
-    `value` beside a row, at its leading edge, and under a chip."""
+    `value` under a chip, and under a row's label (`current.row:
+    underline`, m07), none beside the row."""
     from runtime import ui_draw
     try:
         cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.row(
-            cv, th, (10, 10, 100, 24), "", kind="row_list", on=True))
+            cv, th, (10, 10, 100, 24), "Projects", kind="row_list", on=True))
         value = _word(th["value"])
-        assert _px(cv, 10, 22) == _px(cv, 12, 22) == value
-        assert _px(cv, 60, 31) != value and _px(cv, 13, 22) != value
+        foot = [x for x in range(10, 110) if _px(cv, x, 32) == value]
+        assert foot and foot[0] > 12 and len(foot) > 20, "an underline under the label"
+        assert _px(cv, 10, 22) != value and _px(cv, 105, 32) != value
         cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.chip(
             cv, th, (10, 10, 100, 24), "", on=True))
         assert _px(cv, 60, 31) == value and _px(cv, 10, 22) != value
@@ -574,7 +578,7 @@ def test_a_current_bar_is_beside_a_row_and_under_a_chip():
 
 
 def test_the_focus_style_follows_the_size_class():
-    """Moy lifts a card (grown and raised, its rim white in Day), edge-bars a
+    """Moy lifts a card (grown and raised, its rim the accent in Day), edge-bars a
     part and underlines a small part; Contrast rings a card and inverts a
     part, its ink flipped to black on yellow."""
     from runtime import ui_draw
@@ -585,7 +589,8 @@ def test_the_focus_style_follows_the_size_class():
             cv.rect(*box, 0)
             ui_draw.focus(cv, th, (40, 30, 60, 60), size="card", after=True)
         cv, th = _marked("moy", True, card, (140, 120))
-        assert _px(cv, 34, 50) == 0xffff                      # the white rim
+        rim = _px(cv, 34, 50)                                  # the accent rim
+        assert rim not in (0xffff, _px(cv, 2, 50)) and rim & 0x1f > rim // 2048
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.focus(
             cv, th, (20, 20, 20, 20), size="small"))
         assert _px(cv, 30, 37) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 37)
@@ -651,11 +656,20 @@ def test_the_readability_check_holds_accent_on_the_current_plate():
     finally:
         _uninstall()
         ui_draw.look_moved()
-    # Contrast's light yellow is 1.3:1 on white: its focus mark meets the
-    # plate with its black outline, the colour held; without the outline
-    # the yellow is.
+    # Contrast's light yellow is 1.3:1 on white: an `invert` focus takes the
+    # part's place and lies on no plate, so only a mark drawn on the plate
+    # (an edge here) is held -- with the black outline its colour, without
+    # it the yellow.
     _install({"format": 2, "name": "pl", "inherits": "contrast",
               "look": {"light": {"focus": {"outline": [0, "#000000"]}}}})
+    try:
+        assert not moy_ui.theme("pl", True)[1] >> pairs & 1
+    finally:
+        _uninstall()
+        ui_draw.look_moved()
+    _install({"format": 2, "name": "pl", "inherits": "contrast",
+              "look": {"focus": {"style": "edge"}, "current": {"alpha": 0.42},
+                       "light": {"focus": {"outline": [0, "#000000"]}}}})
     try:
         assert moy_ui.theme("pl", True)[1] >> pairs & 1
         assert not moy_ui.theme("pl", False)[1] >> pairs & 1

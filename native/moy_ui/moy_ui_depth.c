@@ -175,16 +175,23 @@ static void keycap_of(const moy_theme_look_t *lk) {
 }
 
 // The look's display fields (moy_ui.h, the parts), silent until a look sets them.
-static moy_ui_display_t s_display = {MOY_THEME_NONE, 0, MOY_UI_BEVEL_NONE};
+static moy_ui_display_t s_display = {MOY_THEME_NONE, 0, MOY_UI_BEVEL_NONE, MOY_THEME_NONE};
 
 const moy_ui_display_t *moy_ui_display(void) {
     return &s_display;
 }
 
+// The look's scrim (moy_ui_scrim): its colour (a look value) and alpha.
+static int32_t s_scrim_c = MOY_THEME_NONE;
+static uint8_t s_scrim_a = 102;
+
 static void display_of(const moy_theme_look_t *lk) {
     s_display.border_w = whole(lk, "lcd_border.w", 0);
     s_display.border_c = leaf(lk, "lcd_border.c");
     s_display.bevel = num(leaf(lk, "lcd_bevel"), MOY_UI_BEVEL_NONE);
+    s_display.field_c = leaf(lk, "field.border");
+    s_scrim_c = leaf(lk, "scrim.c");
+    s_scrim_a = alpha_of(lk, "scrim.alpha", 40);
 }
 
 int moy_ui_depth_use(const char *name, size_t n, int light) {
@@ -194,6 +201,9 @@ int moy_ui_depth_use(const char *name, size_t n, int light) {
     s_display.border_c = MOY_THEME_NONE;
     s_display.border_w = 0;
     s_display.bevel = MOY_UI_BEVEL_NONE;
+    s_display.field_c = MOY_THEME_NONE;
+    s_scrim_c = MOY_THEME_NONE;
+    s_scrim_a = 102;
     uint8_t active = s_marks.active;
     uint32_t drawn = s_marks.drawn;
     memset(&s_marks, 0, sizeof(s_marks));
@@ -296,6 +306,8 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
     d->tile_fill = paint_leaf(lk, "tile_fill");
     d->tile_line_w = whole(lk, "tile_outline.w", 0);
     d->tile_line_c = leaf(lk, "tile_outline.c");
+    d->sys_line_w = whole(lk, "bar.sys_line.w", 0);
+    d->sys_line_c = leaf(lk, "bar.sys_line.c");
     return 1;
 }
 
@@ -449,10 +461,13 @@ static dd_t rows_of(const dd_t *d, int y0, int y1) {
 // The header's fill by win.header (THEMES.md, the theme model): plain takes
 // win.fill (a window behind win.fill_back, else win.fill), fill the value
 // colour (behind: win.fill_back), grad win.grad and win.grad_back, and bar
-// none: the header is the window's colour, a value bar across a focused one.
+// the window's colour with a value bar across a focused one, a window behind
+// in win.fill_back where the look names one.
 static int header_paint(const dd_t *d, int active, moy_shape_paint_t *p) {
     const moy_ui_depth_t *dp = &s_depth;
     switch (dp->header) {
+        case MOY_UI_HEAD_BAR:
+            return !active && is_set(dp->fill_back) && paint_of(d, dp->fill_back, p);
         case MOY_UI_HEAD_FILL:
             if (active) {
                 *p = solid(tok(d, MOY_UI_T_VALUE));
@@ -850,6 +865,19 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
             if (after) {
                 break;
             }
+            // the part on a light plate of the mark's colour, the edge on it;
+            // on a card's first or last row the plate takes the card's
+            // corners, over the card's surface
+            int cm = (flags & MOY_UI_MARK_TOP ? MOY_SHAPE_TL | MOY_SHAPE_TR : 0)
+                     | (flags & MOY_UI_MARK_FOOT ? MOY_SHAPE_BL | MOY_SHAPE_BR : 0);
+            if (cm) {
+                uint16_t g = moy_shape_wire(tok(&d, MOY_UI_T_SURFACE));
+                moy_shape_paint_t p =
+                    solid(moy_shape_wire(mix565(g, moy_shape_wire(c), m->plate_alpha)));
+                rrect(&d, x, y, w, h, r, cm, s_depth.stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+            } else {
+                tint(&d, x, y, w, h, r, c, m->plate_alpha, NULL);
+            }
             if (w >= 3 * h) {
                 tint(&d, x, y, t, h, t / 2, c, 255, NULL);
             } else {
@@ -902,6 +930,8 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
     if (flags & MOY_UI_MARK_INK) {
         if (m->cur_style == MOY_UI_CUR_FILL && !back) {
             *ink = moy_ui_token(d.look, MOY_UI_T_SELECTION_INK);
+        } else if (m->cur_style == MOY_UI_CUR_PLATE && back && m->cur_alpha >= 255) {
+            *ink = -1;          // a solid plate behind is its outline
         } else {
             *ink = own;
         }
@@ -909,10 +939,24 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
     }
     *ink = own;
     fs = fs < 1 ? 1 : fs;
+    if ((flags & MOY_UI_MARK_SIDE) && !(flags & MOY_UI_MARK_KEEP)
+        && m->cur_row == MOY_UI_CUR_ROW_UNDERLINE) {
+        return MOY_UI_OK;               // the row underlines its label
+    }
     switch (m->cur_style) {
         case MOY_UI_CUR_PLATE:
-            if ((flags & MOY_UI_MARK_SIDE) && m->cur_row == MOY_UI_CUR_ROW_OUTLINE) {
+            if ((flags & MOY_UI_MARK_SIDE)
+                && (m->cur_row == MOY_UI_CUR_ROW_OUTLINE
+                    || ((flags & MOY_UI_MARK_KEEP) && m->cur_alpha >= 255))) {
                 ring_a(&d, b.x, b.y, b.w, b.h, r, fs, tok(&d, m->cur_color), back ? 153 : 255);
+                *ink = (flags & MOY_UI_MARK_KEEP) ? -1 : own;
+                break;
+            }
+            if (back && m->cur_alpha >= 255) {
+                // a solid plate in a window behind: its outline, the content
+                // in its own ink, so the plate reads only where focus is
+                ring_a(&d, b.x, b.y, b.w, b.h, r, fs, tok(&d, m->cur_color), 255);
+                *ink = -1;
                 break;
             }
             tint(&d, b.x, b.y, b.w, b.h, r, tok(&d, m->cur_color),
@@ -944,6 +988,25 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
 
 int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink) {
     return moy_ui_current_in(s, b, r, flags, fs, ink, 1);
+}
+
+int moy_ui_current_rows_under(void) {
+    return s_marks.on && s_marks.cur_row == MOY_UI_CUR_ROW_UNDERLINE;
+}
+
+int moy_ui_current_under(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
+    dd_t d;
+    open_dd(s, &d, 0);
+    const moy_ui_marks_t *m = &s_marks;
+    (void)fs;
+    if (b.w <= 0) {
+        return MOY_UI_OK;
+    }
+    // as a part's current bar: 3 pixels, in the current colour, a window
+    // behind's at 60%
+    tint(&d, b.x, b.y + b.h - 3, b.w, 3, 1, tok(&d, m->cur_color),
+         moy_ui_marks_shown() ? 255 : 153, NULL);
+    return MOY_UI_OK;
 }
 
 // -- the bars' parts (docs/look_2026-10.md step 14) --------------------------------
@@ -1006,7 +1069,9 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
             int r = moy_ui_fdiv(b.h * (part == MOY_UI_BARP_SYS ? 9 : 7) + b.h / 2,
                                 part == MOY_UI_BARP_SYS ? 34 : 20);
             p = solid(is_set(f) ? val(&d, f) : tok(&d, MOY_UI_T_SURFACE_ALT));
-            rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
+            int lw = dp->sys_line_w > 0 && is_set(dp->sys_line_c) ? dp->sys_line_w : 0;
+            rrect(&d, b.x, b.y, b.w, b.h, r, 15, dp->stepped, MOY_SHAPE_ALL, &p, lw,
+                  lw ? val(&d, dp->sys_line_c) : 0, -1, NULL);
             if (on) {
                 moy_ui_current_in(s, b, r, 0, 1, &ink, 0);
             }
@@ -1028,6 +1093,14 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
         default:
             return 0;
     }
+}
+
+int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b) {
+    dd_t d;
+    open_dd(s, &d, 1);
+    uint16_t c = is_set(s_scrim_c) ? val(&d, s_scrim_c) : moy_shape_wire(0);
+    tint(&d, b.x, b.y, b.w, b.h, 0, c, s_scrim_a, NULL);
+    return MOY_UI_OK;
 }
 
 int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill) {

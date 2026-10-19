@@ -226,6 +226,7 @@ _DRAW_SIGS = (
     ("moy_ui_frame_icon", [_Box, _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
+    ("moy_ui_scrim", [c.POINTER(_Sink), _Box], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
@@ -315,7 +316,8 @@ class _Over(c.Structure):
     """moy_ui_over_t (native/moy_ui/moy_ui_api.h)."""
     _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
                 ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
-                ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8)]
+                ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8),
+                ("hint", _Span)]
 
 
 class _Line(c.Structure):
@@ -676,6 +678,9 @@ def binding():
         return bool(lib.moy_ui_bar_part(c.byref(sink(cv, look)), int(part), box_of(rect),
                                         int(on)))
 
+    def scrim(cv, look, rect):
+        _check(lib.moy_ui_scrim(c.byref(sink(cv, look)), box_of(rect)))
+
     def frame_geom(w, h, title_h, active, mode):
         out = (_I * 6)()
         lib.moy_ui_frame_geom(int(w), int(h), int(title_h), 1 if active else 0, int(mode), out)
@@ -780,6 +785,7 @@ def binding():
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
+              scrim,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):

@@ -578,21 +578,25 @@ class AppearanceAppLayer:
             if got != cur:
                 self._theme.set_variant("light" if got == 0 else "dark")
                 self._acted()
-        # ACCENT: the theme's own, then the offered seven in this mode
-        own = th["accent"] if ch["accent"] is None else None
-        colours = [_rgb(own if own is not None else self._own_accent(ch))]
-        side = 3 if ch["variant"] == "light" else 2
-        colours += [_rgb(a[side]) for a in self._accents]
-        cur = 0
-        if ch["accent"] is not None:
-            cur = -1
-            for i, a in enumerate(self._accents):
-                if a[1] == ch["accent"]:
-                    cur = i + 1
-        kinds["Accent"] = "step"
-        got = ui.swatches("Accent", colours, cur)
-        if got != cur and got >= 0:
-            self._change("accent", None if got == 0 else self._accents[got - 1][1])
+        # ACCENT: the theme's own, then the offered seven in this mode; none
+        # where the theme's look offers no accents (Contrast's one accent)
+        if self._accents_offered(ch):
+            own = th["accent"] if ch["accent"] is None else None
+            colours = [_rgb(own if own is not None else self._own_accent(ch))]
+            side = 3 if ch["variant"] == "light" else 2
+            colours += [_rgb(a[side]) for a in self._accents]
+            cur = 0
+            if ch["accent"] is not None:
+                cur = -1
+                for i, a in enumerate(self._accents):
+                    if a[1] == ch["accent"]:
+                        cur = i + 1
+            kinds["Accent"] = "step"
+            got = ui.swatches("Accent", colours, cur)
+            if got != cur and got >= 0:
+                self._change("accent", None if got == 0 else self._accents[got - 1][1])
+        else:
+            kinds.pop("Accent", None)
         # TINT
         tints = [t[0] for t in self._tints]
         words = ["None"] + [_title(t) for t in tints]
@@ -662,6 +666,13 @@ class AppearanceAppLayer:
             if ui.link("Name", "Keep as a theme"):
                 self._open_name()
         ui.group()
+
+    def _accents_offered(self, ch):
+        """Whether the theme in use (a custom one's source) offers accent
+        picks: its look's `accents`, true where it is silent."""
+        name = ch["theme"]
+        src = (ch["from"] or name) if name == "custom" else name
+        return theme_look(src, ch["variant"]).get("accents") != 0
 
     def _own_accent(self, ch):
         """The source's own accent while the theme sets another."""

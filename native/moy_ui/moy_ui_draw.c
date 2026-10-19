@@ -430,7 +430,8 @@ static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs
     int field = *on;
     int mi, how = (draw ? 0 : MOY_UI_MARK_INK) | side;
     if (flags & MOY_UI_F_ON) {
-        moy_ui_current_in(s, b, 0, how | (m->active ? 0 : MOY_UI_MARK_BACK), fs, &mi, 0);
+        moy_ui_current_in(s, b, 0, how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK), fs, &mi,
+                          0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;
     }
@@ -512,6 +513,10 @@ int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int 
         size_t ln = (size_t)t_fit(&d.f, r->label, right - tx, ts);
         if (ln) {
             text_over(&d, r->label.p, ln, tx, ty, ink, on, span_box(tx, right, b, ring));
+            if ((flags & MOY_UI_F_ON) && moy_ui_current_rows_under()) {
+                moy_ui_box_t u = {(int16_t)tx, b.y, (int16_t)t_w(&d.f, r->label.p, ln, ts), b.h};
+                moy_ui_current_under(s, u, fs);
+            }
         }
     }
     return MOY_UI_OK;
@@ -922,6 +927,20 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     int shaped = (bs.shape != BTN_SQUARE && bs.r > 0) || bs.shape == BTN_CIRCLE || bs.bevel > 0;
     if ((phase & MOY_UI_PHASE_FRAME) && (shaped || !surface(&d, b, kind, state, bg, edge))) {
         button_body(&d, b, &bs, &on, &ring);
+        if (state == MOY_UI_DISABLED && on >= 0 && moy_ui_depth()->on) {
+            // a disabled key's plate is faded too, half way to the surface
+            // under it, as its ink is the disabled ink
+            int r = bs.shape == BTN_SQUARE || bs.r < 0 ? 0 : bs.r;
+            moy_shape_shadow_t sh;
+            memset(&sh, 0, sizeof(sh));
+            sh.r = bs.shape == BTN_CIRCLE ? (w < h ? w : h) / 2 : r;
+            sh.col = d.row->pal[moy_ui_pidx(moy_ui_token(d.look, MOY_UI_T_SURFACE))];
+            sh.alpha = 128;
+            sh.stepped = moy_ui_depth()->stepped;
+            moy_shape_hole_t none = {0, 0, 0, 0, 0};
+            moy_shape_shadow(&d.t, x, y, w, h, &sh, &none);
+            on = -1;
+        }
     }
     part_marks(s, b, flags, fs, phase & MOY_UI_PHASE_FRAME, 0, shaped ? bs.r : 0, 0, &ink, &on);
     if (!(phase & MOY_UI_PHASE_CONTENT)) {
@@ -1080,7 +1099,7 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
         // the current tab's mark is a pill, as the home's and the bar's tabs
         // wear it (their plate's radius, 5 at the scale)
         int mi = -1, how = (phase & MOY_UI_PHASE_FRAME) ? 0 : MOY_UI_MARK_INK;
-        moy_ui_current_in(s, r, 5 * fs, how | (moy_ui_marks()->active ? 0 : MOY_UI_MARK_BACK),
+        moy_ui_current_in(s, r, 5 * fs, how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK),
                           fs, &mi, 0);
         ink_i = mi >= 0 ? mi : ink_i;
     }
@@ -1749,6 +1768,9 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             continue;
         }
         if (depth) {
+            if (!active && moy_ui_disabled() >= 0) {
+                ink = moy_ui_disabled();    // a window behind: its controls dimmed
+            }
             if (!moy_ui_icon_button(&d.t, id, b, d.row->pal[moy_ui_pidx(ink)])) {
                 glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
             }

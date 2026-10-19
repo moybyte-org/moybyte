@@ -303,6 +303,10 @@ typedef struct {
     // rule) and look colour.
     int16_t card_line;
     int32_t card_line_c;
+    // The system button's frame (`bar.sys_line`, both bars): width (0: none)
+    // and look colour.
+    int16_t sys_line_w;
+    int32_t sys_line_c;
 } moy_ui_depth_t;
 // win.header's, win.controls' and the bars' styles, in style.json's order
 enum { MOY_UI_HEAD_PLAIN = 0, MOY_UI_HEAD_FILL = 1, MOY_UI_HEAD_BAR = 2, MOY_UI_HEAD_GRAD = 3 };
@@ -383,10 +387,15 @@ enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI
 // draws a focus mark once more under a clip and counts no mark; RING draws
 // the theme's `focus.ring` whatever its focus style, and counts no mark (a
 // cursor: the sprite editor's) unless COUNT says it is the focus mark (a part
-// whose fill would hide the theme's own mark).
+// whose fill would hide the theme's own mark). TOP and FOOT: the box is a
+// card's first or last row, and a mark that fills it rounds those corners as
+// the card's, by the radius given. KEEP: the current content keeps its own
+// colours (a code line's), so an opaque current plate beside a row is the
+// row's outline instead.
 enum {
     MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
     MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
+    MOY_UI_MARK_TOP = 128, MOY_UI_MARK_FOOT = 256, MOY_UI_MARK_KEEP = 512,
 };
 // focus.style's and current.style's values, in style.json's order
 enum {
@@ -394,10 +403,11 @@ enum {
     MOY_UI_FOCUS_UNDERLINE = 4, MOY_UI_FOCUS_INVERT = 5,
 };
 enum { MOY_UI_CUR_BAR = 0, MOY_UI_CUR_PLATE = 1, MOY_UI_CUR_FILL = 2 };
-// current.row's: how a row's current mark draws under the plate style -- the
-// plate, or the row's outline, which leaves the row's ground (and every code
-// colour on it) as it is
-enum { MOY_UI_CUR_ROW_PLATE = 0, MOY_UI_CUR_ROW_OUTLINE = 1 };
+// current.row's: how a row's current mark draws -- the style's own (under the
+// plate style the plate), the row's outline, which leaves the row's ground
+// (and every code colour on it) as it is, or an underline under the row's
+// label (moy_ui_current_under), the mark a theme's parts wear as current
+enum { MOY_UI_CUR_ROW_PLATE = 0, MOY_UI_CUR_ROW_OUTLINE = 1, MOY_UI_CUR_ROW_UNDERLINE = 2 };
 typedef struct {
     uint8_t on, active, dark, ink_accent;
     uint8_t style[3];               // per class: PART, CARD, SMALL
@@ -430,6 +440,11 @@ int moy_ui_focus(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int fla
                  moy_ui_box_t *content, int *ink);
 // The current mark under box `b`'s content; *ink as moy_ui_focus's.
 int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink);
+// Whether a row's current mark is an underline under its label
+// (current.row `underline`): the row draws it with moy_ui_current_under,
+// across the label's columns `b.x`..`b.x + b.w`, at the foot of the row `b`.
+int moy_ui_current_rows_under(void);
+int moy_ui_current_under(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
 // The two as a primitive draws them, inside its own crossing.
 int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
                     moy_ui_box_t *content, int *ink, int crossing);
@@ -603,6 +618,9 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
 // app's colour of the look's `tiles` (step 26b), or with MOY_THEME_NONE the
 // tile's own fill. Answers 0, drawing nothing, where the theme has no depth.
 int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
+// What a modal dims under it (docs/look_2026-10.md, D-01): box `b` washed in
+// the look's `scrim` colour at its alpha (black at 40% where it is silent).
+int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 
@@ -768,9 +786,9 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
 // row's value, a slider's track wide at its right; elsewhere the field takes
 // the row from the label to its right. Focused, the row wears the focus mark
 // a value row does (`first`: the card's first row) and the field the focus
-// colour's ring.
+// colour's ring. An empty field shows `hint` (n 0: none) in the disabled ink.
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
-                 int flags, int fs, int desk, int card, int first);
+                 moy_ui_span_t hint, int flags, int fs, int desk, int card, int first);
 // The height a field row takes (at least the stacked row's): the field's box,
 // its letters' ink with 3 pixels at the scale above and below inside its
 // ring, and room round it for its focus ring.
@@ -856,12 +874,14 @@ typedef struct {
 } moy_ui_keycap_t;
 const moy_ui_keycap_t *moy_ui_keycap(void);
 // The look's display fields (moy_ui_depth_use reads them): `lcd_border`'s
-// width and look colour (MOY_THEME_NONE where silent) and `lcd_bevel`
-// (MOY_UI_BEVEL_*).
+// width and look colour (MOY_THEME_NONE where silent), `lcd_bevel`
+// (MOY_UI_BEVEL_*) and `field.border`, a text field's outline at rest (a look
+// colour; MOY_THEME_NONE: the `border` role's).
 enum { MOY_UI_BEVEL_NONE = 0, MOY_UI_BEVEL_IN = 1, MOY_UI_BEVEL_OUT = 2 };
 typedef struct {
     int32_t border_c;
     int16_t border_w, bevel;
+    int32_t field_c;
 } moy_ui_display_t;
 const moy_ui_display_t *moy_ui_display(void);
 // A part's ground (ui.part): the display inset, the `lcd` role's fill

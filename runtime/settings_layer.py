@@ -245,6 +245,7 @@ _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
 LEVELS = {"volume": (0, 7, 7), "brightness": (0, 5, 3)}
 _STEPPED = {"steps": True}    # Volume's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
+_NAME_HINT = {"hint": "Your name"}   # what the empty Name field shows
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
@@ -1322,7 +1323,7 @@ class SettingsLayer:
             cur = self._name
             if cur is None:
                 cur = str(ws.system.get(key, "") or "")
-            got, done = _ui.field(s, cur, NAME_MAX)
+            got, done = _ui.field(s, cur, NAME_MAX, _NAME_HINT)
             if got != cur:
                 self._name = got
             if done:

@@ -163,10 +163,17 @@ def _over(o):
         return None
     oid = o.get("id")
     idb = b"" if oid is None else str(oid).encode("utf-8")
+    hint = o.get("hint")
+    tail = b"" if hint is None else _hint(str(hint).encode("utf-8"))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
-                 _flag(o, "mark"), _flag(o, "steps")) + idb
+                 _flag(o, "mark"), _flag(o, "steps")) + idb + tail
+
+
+def _hint(b):
+    """A field's placeholder as the block's tail: its length, then its text."""
+    return _pack("<i", len(b)) + b
 
 
 def page(title, o=None):
@@ -330,7 +337,7 @@ def scroll(id=None, o=None):
 def field(label, text, max=32, o=None):
     """A line of text the keyboard types into while it is focused, at most
     `max` bytes: `(text, done)`, `done` True the frame Enter is pressed in
-    it."""
+    it. An empty field shows `o`'s `hint`, dim."""
     t = _T
     raw = str(text).encode("utf-8")[:max]
     b = bytearray(max)

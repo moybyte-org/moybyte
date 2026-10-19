@@ -92,8 +92,8 @@ static int8_t moycore_ui_flag(lua_State *L, int t, const char *key)
     return v;
 }
 
-/* The override table at stack index `i` into *o. An `id` string is left on
- * the stack, so the span stays valid for the call. */
+/* The override table at stack index `i` into *o. An `id` and a `hint` string
+ * are left on the stack, so the spans stay valid for the call. */
 static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *o)
 {
     moy_ui_over_none(o);
@@ -112,6 +112,13 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
         const char *s = lua_tolstring(L, -1, &n);
         o->id.p = (const uint8_t *)s;
         o->id.n = (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n);
+    }
+    lua_getfield(L, i, "hint");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        size_t n = 0;
+        const char *s = lua_tolstring(L, -1, &n);
+        o->hint.p = (const uint8_t *)s;
+        o->hint.n = (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n);
     }
     return o;
 }

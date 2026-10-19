@@ -1235,7 +1235,7 @@ class CodeLayer:
         whole = x0 == left and x1 == right
         if not whole:
             cv.clip(x0, y, x1 - x0, lay.lh)
-        _ui_draw.current(cv, th, (left, y, right - left, lay.lh), side=True)
+        _ui_draw.current(cv, th, (left, y, right - left, lay.lh), side=True, keep=True)
         if not whole:
             cv.clip()
         if x0 == left:

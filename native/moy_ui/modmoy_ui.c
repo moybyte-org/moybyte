@@ -1675,6 +1675,15 @@ static mp_obj_t ui_bar_part(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_part_obj, 5, 6, ui_bar_part);
 
+// scrim(cv, look, rect): what a modal dims under it
+static mp_obj_t ui_scrim(mp_obj_t cv, mp_obj_t look, mp_obj_t rect) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    check(moy_ui_scrim(&s, box_of(rect)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_scrim_obj, ui_scrim);
+
 // frame_band(cv, look, rect, light, side): the bar's band
 static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2627,6 +2636,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frame_buttons), MP_ROM_PTR(&ui_frame_buttons_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_icon), MP_ROM_PTR(&ui_frame_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_part), MP_ROM_PTR(&ui_bar_part_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_band), MP_ROM_PTR(&ui_frame_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },
