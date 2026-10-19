@@ -1850,7 +1850,7 @@ static mp_obj_t ui_marks(mp_obj_t active, mp_obj_t reset) {
         moy_ui_marks_active(mp_obj_is_true(active));
     }
     const moy_ui_marks_t *m = moy_ui_marks();
-    mp_obj_t out[4] = {mp_obj_new_bool(m->on), mp_obj_new_bool(m->active),
+    mp_obj_t out[4] = {mp_obj_new_bool(m->on), mp_obj_new_bool(moy_ui_marks_shown()),
                        mp_obj_new_int_from_uint(moy_ui_marks_drawn(mp_obj_is_true(reset))),
                        MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_MARK_CARD))};
     return mp_obj_new_tuple(4, out);

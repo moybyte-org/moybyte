@@ -75,8 +75,20 @@ const moy_ui_marks_t *moy_ui_marks(void) {
     return &s_marks;
 }
 
+// The shell's word on whether focus draws; under touch it draws in no case.
+static uint8_t s_shown = 1;
+
+void moy_ui_marks_refresh(void) {
+    s_marks.active = (uint8_t)(s_shown && moy_ui_input() != MOY_UI_INPUT_TOUCH);
+}
+
 void moy_ui_marks_active(int active) {
-    s_marks.active = (uint8_t)(active != 0);
+    s_shown = (uint8_t)(active != 0);
+    moy_ui_marks_refresh();
+}
+
+int moy_ui_marks_shown(void) {
+    return s_shown;
 }
 
 uint32_t moy_ui_marks_drawn(int reset) {

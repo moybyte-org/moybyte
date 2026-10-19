@@ -1242,6 +1242,7 @@ static int s_input = MOY_UI_INPUT_KEYS;
 
 void moy_ui_set_input(int input) {
     s_input = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
+    moy_ui_marks_refresh();         // touch shows no focus
 }
 
 int moy_ui_input(void) {

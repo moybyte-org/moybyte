@@ -164,6 +164,36 @@ def test_the_cards_foot_keeps_the_last_rows_focus_mark_and_draws_no_second():
     assert last.px(INSET + 1, top + ROW + 10) != mid, "only the focused row wears it"
 
 
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+def test_touch_draws_no_focus_mark_and_a_key_brings_it_back(theme):
+    """Under touch, as on a phone, nothing wears a focus mark: the focused
+    row draws as it does at rest, and the shell's word on whether focus
+    draws is kept. The first key or pad press brings the mark back."""
+    was = ui_draw.input_kind()
+    try:
+        ui_draw.input_kind("keys")
+        keys = _group_page(n=3, last_focus=True, theme=theme)
+        rest = _group_page(n=3, theme=theme)        # focus on the first row
+        for r in (keys, rest):
+            r.frame()
+            r.frame()
+        ui_draw.input_kind("touch")
+        assert ui_draw.marks()[1], "the shell's word stays: focus draws"
+        touch = _group_page(n=3, last_focus=True, theme=theme)
+        rest_t = _group_page(n=3, theme=theme)
+        for r in (touch, rest_t):
+            r.frame()
+            ui_draw.marks(None, True)
+            r.frame()
+            assert ui_draw.marks()[2] == 0, "no focus mark is drawn under touch"
+        assert bytes(touch.cv._buf) == bytes(rest_t.cv._buf), "the focused row draws as at rest"
+        ui_draw.input_kind("pad")
+        touch.frame()
+        assert bytes(touch.cv._buf) == bytes(keys.cv._buf), "a pad's press brings it back"
+    finally:
+        ui_draw.input_kind(was)
+
+
 def test_info_is_no_stop_and_link_answers_its_activation():
     st = {}
 

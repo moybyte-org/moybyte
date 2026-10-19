@@ -236,6 +236,7 @@ _DRAW_SIGS = (
                       c.POINTER(_I)], _I),
     ("moy_ui_current", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_I)], _I),
     ("moy_ui_marks_active", [_I], None),
+    ("moy_ui_marks_shown", [], _I),
     ("moy_ui_marks_drawn", [_I], c.c_uint32),
     ("moy_ui_marks", [], c.c_void_p),
     ("moy_ui_mark_reach", [_I], _I),
@@ -741,8 +742,8 @@ def binding():
     def marks(active, reset):
         if active is not None:
             lib.moy_ui_marks_active(1 if active else 0)
-        on, act = c.cast(lib.moy_ui_marks(), c.POINTER(c.c_uint8 * 2)).contents
-        return (bool(on), bool(act), lib.moy_ui_marks_drawn(1 if reset else 0),
+        on = c.cast(lib.moy_ui_marks(), c.POINTER(c.c_uint8 * 2)).contents[0]
+        return (bool(on), bool(lib.moy_ui_marks_shown()), lib.moy_ui_marks_drawn(1 if reset else 0),
                 lib.moy_ui_mark_reach(1))
 
     def mark_reach(cls):

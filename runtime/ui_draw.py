@@ -1750,7 +1750,8 @@ def current_ink(cv, th, back=False):
 def marks(active=None, reset=False):
     """(marks on, active, focus marks drawn, reach): whether the theme draws
     the marks, whether focus draws (`active` sets it: the shell clears it
-    while a window behind draws), the count of focus marks drawn (`reset`
+    while a window behind draws; under touch, `input_kind`, no focus draws
+    whatever it says, as on a phone), the count of focus marks drawn (`reset`
     zeroes it after reading), and how far a card's focus mark reaches past
     the card's top edge."""
     return _C.marks(active, reset)

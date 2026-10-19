@@ -408,7 +408,13 @@ typedef struct {
     uint32_t drawn;
 } moy_ui_marks_t;
 const moy_ui_marks_t *moy_ui_marks(void);
+// Whether focus draws: the shell's word (it clears it while a window behind
+// draws, or a menu holds the keys), and never while the input in use is
+// touch, as on a phone -- the marks' `active` is the two together, and
+// moy_ui_marks_shown the shell's word alone. moy_ui_set_input refreshes it.
 void moy_ui_marks_active(int active);
+int moy_ui_marks_shown(void);
+void moy_ui_marks_refresh(void);
 // The focus marks drawn since the last reset.
 uint32_t moy_ui_marks_drawn(int reset);
 // How far class `cls`'s focus mark reaches past its box's top edge (0: inside it).
