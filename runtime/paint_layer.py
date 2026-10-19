@@ -130,7 +130,7 @@ _SHAPE_ICON = {
 # The more menu's operations, in its order: (id, label, icon slot). Clear is
 # a danger row, set apart at the end.
 _OPS = (
-    ("copy", "Copy", "dup"), ("fliph", "Flip across", "flip"),
+    ("copy", "Copy", "copy"), ("fliph", "Flip across", "flip"),
     ("flipv", "Flip over", "flip_v"), ("rot", "Rotate", "rotate"),
     ("sleft", "Shift left", "arrow_left"), ("sright", "Shift right", "arrow_right"),
     ("sup", "Shift up", "arrow_up"), ("sdown", "Shift down", "arrow_down"),
