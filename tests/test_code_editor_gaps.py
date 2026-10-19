@@ -830,8 +830,10 @@ def test_a_faded_current_line_wears_one_outline(tmp_path):
         ring = _w(cv, x, y)                          # the outline's top edge
         assert ring == _w(cv, x, y + lay.lh - 1), variant
         assert ring != cv._col(ws.code_layer._t["bg"]), variant
+        caret = lay.x0 + (ed.col - ed.left) * lay.cell - lay.fs   # 2 * fs wide
         inner = [x for x in _edges(cv, lay, y, ring)
-                 if lay.cx + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs]
+                 if lay.cx + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
+                 and not caret <= x < caret + 2 * lay.fs]
         assert inner == [], (variant, inner)
 
 
@@ -869,3 +871,27 @@ def test_the_status_band_is_one_height_and_starts_on_the_code_column(tmp_path):
         assert lay.x0 == bx + pad, (theme, variant)
         assert by + bh <= lay.sym_y and lay.y0 + lay.rows * lay.lh <= by, (theme, variant)
     assert len(bands) == 1, bands
+
+
+@pytest.mark.parametrize("variant", ("light", "dark"))
+@pytest.mark.parametrize("seed", ("moy", "blocks", "contrast"))
+def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, variant):
+    """The caret and the find outline are the accent as an ink, at least
+    3:1 on the code surface under every seed theme; Contrast Light's own
+    accent is its yellow, 1.27:1 on white (design review R2-02)."""
+    from runtime import ui_draw
+
+    def lum(v):
+        c = ui_draw._C.theme_rgb(v)[0]
+        rgb = ((c >> 11) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
+        lin = [x / 255 / 12.92 if x / 255 <= 0.03928 else ((x / 255 + 0.055) / 1.055) ** 2.4
+               for x in rgb]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    _ws, _drv, _lay, _ed = _look_ws(tmp_path, seed, variant)
+    t = _ws.code_layer._tones()
+    bg = lum(t["bg"])
+    for role in ("caret", "find"):
+        fg = lum(t[role])
+        ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
+        assert ratio >= 3.0, (seed, variant, role, round(ratio, 2))

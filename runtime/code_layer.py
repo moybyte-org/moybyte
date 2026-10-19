@@ -1079,11 +1079,12 @@ class CodeLayer:
         th = self.ws.theme_colors
         if _ui_draw.depth()[0]:
             # The 2026-10 look: the code surface and its chrome in the
-            # theme's roles, the caret and a find match in its accent.
-            return _as_theme({"bg": th["surface"], "caret": th["accent"],
+            # theme's roles, the caret and a find match in its accent as an
+            # ink (`ink_accent`, held at 3:1 on the code surface).
+            return _as_theme({"bg": th["surface"], "caret": th["ink_accent"],
                               "sym_bg": th["surface_alt"], "sym_edge": th["border"],
                               "sym_ink": th["ink"], "hl": self._hl_map(),
-                              "sel": th["hilite"], "find": th["accent"],
+                              "sel": th["hilite"], "find": th["ink_accent"],
                               "gutter": th["ink_dim"], "gutter_cur": th["ink"],
                               "look": True})
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
