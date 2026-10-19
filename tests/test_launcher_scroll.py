@@ -510,8 +510,8 @@ def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
 def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkeypatch):
     """A keyboard types every verb's letter; a gamepad has no C or /, so
     its strip names the verb its confirm does, on that key, and X for the
-    card's other verbs. The selected cart's favourite star follows, on F or
-    the gamepad's Y."""
+    card's other verbs, the star among them. A keyboard's star follows, on
+    F."""
     from runtime import ui_draw
 
     ws = _ws_with_carts(tmp_path, 10)
@@ -521,8 +521,8 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         ui_draw.input_kind(kind)
         items, verbs = home._hint_groups()
         if kind == "pad":
-            assert (items, verbs) == (["confirm", "Play", "X", "Options", "Y", "Favourite"],
-                                      ["play", "options", "favourite"])
+            assert (items, verbs) == (["confirm", "Play", "X", "Options"],
+                                      ["play", "options"])
         else:
             assert verbs == ["play", "change", "search", "favourite"]
             assert items[::2] == ["confirm", "C", "/", "F"]

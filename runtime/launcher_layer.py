@@ -1030,16 +1030,17 @@ def _clean_side(limit):
 
 _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpaper"}
 # The home's hint strip (steps 17 and 18): each verb's key and words. The
-# keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k). A
-# gamepad's X opens the card's verbs ("options").
+# keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k), so
+# Copy is Y on a keyboard, and a gamepad's Y names nothing on the home: its X
+# opens the card's verbs ("options"), the star among them.
 _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("/", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Copy"),
               "delete": ("X", "Delete"), "sure": ("X", "Sure?"),
-              "favourite": ("F", "Favourite"), "options": ("X", "Options")}
+              "favourite": ("F", "Add favourite"), "options": ("X", "Options")}
+_UNFAVOURITE = "Remove favourite"   # the star's words on a card that wears it
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
 _FAVOURITE_KEY = "f"     # the selected card's star, on every tab that draws one
-_FAVOURITE_PAD = "Y"     # ...and a gamepad's button for it
 # The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
 _LETTER_INPUTS = ("keys", "tdeck")
 # A press held this long on a card without travel opens the card's verbs (a
@@ -2954,14 +2955,14 @@ class LauncherHomeLayer:
     def _hint_groups(self):
         """The hint strip's two groups: the active tab's verbs on the
         selected card, then the tab keys; and the verb of each pair. A
-        keyboard types each verb's letter; a gamepad shows the verb its
-        confirm does (`launch_selected`), on that key, and X for the card's
-        other verbs (`card_verbs`)."""
+        keyboard types each verb's letter, the star last, its words
+        following its state; a gamepad shows the verb its confirm does
+        (`launch_selected`), on that key, and X for the card's other verbs
+        (`card_verbs`)."""
         items = []
         verbs = []
         zone = self.zone_verbs()
-        pad = _ui_draw.input_kind() not in _LETTER_INPUTS
-        if pad:
+        if _ui_draw.input_kind() not in _LETTER_INPUTS:
             tap = self._confirm_verb(zone)
             if tap:
                 items.append("confirm")
@@ -2970,15 +2971,16 @@ class LauncherHomeLayer:
             if self.card_verbs():
                 items.extend(_VERB_HINT["options"])
                 verbs.append("options")
-        else:
-            for v in zone:
-                items.extend(_VERB_HINT[v])
-                verbs.append(v)
-        if self.favourable() is not None:
+            return items, verbs
+        for v in zone:
+            items.extend(_VERB_HINT[v])
+            verbs.append(v)
+        it = self.favourable()
+        if it is not None:
             # the star last, where the strip has room for it (`_hint_spans`)
-            k, words = _VERB_HINT["favourite"]
-            items.append(_FAVOURITE_PAD if pad else k)
-            items.append(words)
+            items.append(_VERB_HINT["favourite"][0])
+            items.append(_UNFAVOURITE if self.ws.carts.is_favorite(it)
+                         else _VERB_HINT["favourite"][1])
             verbs.append("favourite")
         return items, verbs
 
@@ -3197,8 +3199,6 @@ class LauncherHomeLayer:
             ws.defer(self._launch)           # the active tab's tap
         if i.pressed("x"):
             self.open_card_menu()            # a gamepad's X: the card's verbs
-        if i.pressed("y"):
-            self.toggle_favourite()          # a gamepad's Y: the star
         if i.pressed("b") and ws.ach_ui._konami_pos == 0:
             self._back()                     # (a B inside the Konami code is the code's)
         elif i.pressed("home"):
@@ -3216,8 +3216,8 @@ class LauncherHomeLayer:
         return it
 
     def toggle_favourite(self):
-        """Star or unstar the selected card (the badge's tap, F, a gamepad's
-        Y, the system menu's row); False where it takes no star."""
+        """Star or unstar the selected card (the badge's tap, F, the card
+        menu's row); False where it takes no star."""
         it = self.favourable()
         if it is None:
             return False

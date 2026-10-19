@@ -237,3 +237,39 @@ def test_the_projects_windows_card_menu_is_its_own_cards(tmp_path):
     ws.projects_layer.handle_input(_Pad("x"))
     assert ws.sysmenu.open
     assert ws.sysmenu.items[0][4] == g.items[real[-1]]["title"]
+
+
+@pytest.mark.parametrize("kind", ["keys", "tdeck"])
+def test_the_star_word_follows_its_state(tmp_path, kind):
+    """A keyboard's strip names what F does to this card (R3-19)."""
+    ws = _ws(tmp_path, CONSOLE)
+    it = _select(ws, "games", "cart")
+    home = ws.launcher_layer
+    ui_draw.input_kind(kind)
+    items, verbs = home._hint_groups()
+    assert items[verbs.index("favourite") * 2 + 1] == "Add favourite"
+    ws.carts.toggle_favorite(it)
+    items, verbs = home._hint_groups()
+    assert items[verbs.index("favourite") * 2 + 1] == "Remove favourite"
+
+
+def test_y_is_copy_and_nothing_else(tmp_path):
+    """Y is Copy on a keyboard, and a gamepad's Y names nothing on the
+    home (R3-19): the pad reaches the star through X's menu. A letter
+    names one verb, and none is a T-Deck game key (moy_kbd.c's w a s d l
+    k)."""
+    ws = _ws(tmp_path)
+    it = _select(ws, "games", "cart")
+    home = ws.launcher_layer
+    ui_draw.input_kind("pad")
+    items, _verbs = home._hint_groups()
+    assert "Y" not in items[::2]
+    home.handle_input(_Pad("y"))
+    assert not ws.carts.is_favorite(it)
+    assert launcher_layer._VERB_KEY["y"] == "copy"
+    caps = {}
+    for v, (k, _w) in launcher_layer._VERB_HINT.items():
+        if k in ("confirm", "X"):
+            continue                          # the tap's; Delete's and a pad's Options
+        assert caps.setdefault(k, v) == v, "%s names %s and %s" % (k, caps[k], v)
+        assert k.lower() not in "wasdlk"
