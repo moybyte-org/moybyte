@@ -404,7 +404,9 @@ try {
   window.__moyPinRestore();
   const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
-  w.postMessage({ t: "init", search: location.search });
+  // A coarse pointer is a finger: the console's hints start on touch.
+  w.postMessage({ t: "init", search: location.search,
+                  coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches) });
   // Leaving the page ends the VM with it. A page the back-forward cache keeps
   // keeps its worker too -- and on iOS that worker's wasm memory, so the next
   // console in the same tab (the desk's "small screen?" link) instantiates

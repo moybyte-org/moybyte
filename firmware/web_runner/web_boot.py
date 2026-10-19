@@ -116,6 +116,8 @@ class _PointerSink:
 
     @down.setter
     def down(self, v):
+        if v and not self._d._down:
+            self._d.ws.input_used("touch")      # a press: the input in use
         self._d._down = bool(v)
 
     @property
@@ -126,6 +128,7 @@ class _PointerSink:
     def click(self, v):
         if v:
             self._d._click = True
+            self._d.ws.input_used("touch")
 
 
 def _make_api(*a, **kw):
@@ -143,13 +146,23 @@ def _make_api(*a, **kw):
     return host_api.make_api(*a, **kw)
 
 
+# The inputs a page declares (Workstation.use_inputs): its keyboard, the
+# driver's "local" source, and on a coarse-pointer page (a phone, a tablet)
+# touch first, in use from boot, since a finger is what such a page is used
+# with; a fine pointer is a mouse, no finger, as on the host.
+WEB_INPUTS = (("local", "keys"),)
+WEB_TOUCH_INPUTS = (("touch", "touch"), ("local", "keys"))
+
+
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
-         windowed=False, font_scale=0, hud=True):
+         windowed=False, font_scale=0, hud=True, coarse=False):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.
 
     `hud=False` suppresses the perf HUD -- see the note at the ws.show_fps
-    assignment below for why a bundle would want that.
+    assignment below for why a bundle would want that. `coarse` is the
+    page's `(pointer: coarse)`: touch is then its input in use until a key
+    is pressed (WEB_TOUCH_INPUTS).
 
     Two presentation TIERS out of one wasm binary (the page picks per tab), and
     both are now the SAME arrangement their hardware twin uses:
@@ -313,6 +326,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     if not hud:
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
+    ws.use_inputs(WEB_TOUCH_INPUTS if coarse else WEB_INPUTS)
     _S["ws"] = ws
     # The pin backend, if the worker's probe found one. Stashed by gpio_enable
     # (which runs BEFORE this, since the probe is answered while the console is

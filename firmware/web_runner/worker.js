@@ -18,7 +18,8 @@
 // JS replayer, the wire protocol and the per-surface delta are gone.
 //
 // Protocol -- main -> worker:
-//   {t:"init", search}   boot the console; `search` is location.search (tier + cart)
+//   {t:"init", search, coarse}  boot the console; `search` is location.search
+//                        (tier + cart), `coarse` the page's (pointer: coarse)
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
 //   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
@@ -852,7 +853,7 @@ function crashMessage(e) {
              s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
 }
 
-async function init(search) {
+async function init(search, coarse) {
     const qs = new URLSearchParams(search || "");
     // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
     // half is gated too, so carts.json is the first request that needs it.
@@ -926,9 +927,10 @@ async function init(search) {
     let dw = 1024, dh = 600;
     const szm = /^(\d+)x(\d+)$/.exec(qs.get("size") || "");
     if (szm) { dw = +szm[1]; dh = +szm[2]; }
-    const bootArgs = desktop
+    const bootArgs = (desktop
         ? ", None, " + dw + ", " + dh + ", True"
-        : (cart ? ", cart=" + JSON.stringify(cart) : "");
+        : (cart ? ", cart=" + JSON.stringify(cart) : ""))
+        + (coarse ? ", coarse=True" : "");
     // #9: does whoever served this page have PINS? ONE probe, here, before the
     // console exists -- so `pin_write`/`pin_read` are decided once and a cart
     // either has the names or has never heard of them. An empty batch is the
@@ -1574,7 +1576,7 @@ self.onmessage = async (ev) => {
     const m = ev.data;
     try {
         if (m.t === "init") {
-            await init(m.search);
+            await init(m.search, !!m.coarse);
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "ahead") {

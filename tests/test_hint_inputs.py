@@ -214,8 +214,36 @@ def _declared(path, name):
     ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py", "INPUT_KINDS"),
     ("device/wire_input.py", "TOUCH_BLE_INPUTS"),
     ("runtime/host_app.py", "HOST_INPUTS"),
+    ("firmware/web_runner/web_boot.py", "WEB_INPUTS"),
+    ("firmware/web_runner/web_boot.py", "WEB_TOUCH_INPUTS"),
 ])
 def test_every_declaration_names_known_kinds(path, name):
     kinds = _declared(path, name)
     assert kinds and all(k in ui_draw.INPUTS for _src, k in kinds)
     assert len({s for s, _k in kinds}) == len(kinds)
+
+
+def test_a_coarse_pointer_page_starts_on_touch_and_a_key_brings_the_keys(tmp_path):
+    """The browser declares its inputs as a board does: a phone's page
+    (`(pointer: coarse)`) is on touch from boot, a key brings the keys back
+    and its pointer's press puts touch back in use."""
+    import sys
+    d = os.path.join(ROOT, "firmware", "web_runner")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    try:
+        import web_boot
+    except Exception as exc:  # noqa: BLE001 -- a wasm-only dep would skip, not fail
+        pytest.skip("web_boot not importable on the host: %s" % exc)
+    ws = build_ws(Path(tmp_path))
+    drv = make_drv(ws)
+    ws.use_inputs(web_boot.WEB_TOUCH_INPUTS)
+    assert ui_draw.input_kind() == "touch"
+    drv.press("down")
+    drv.frame(1 / 30)
+    assert ui_draw.input_kind() == "keys"
+    sink = web_boot._PointerSink(drv)
+    sink.down = True
+    assert ui_draw.input_kind() == "touch", "the page's pointer is a finger"
+    ws.use_inputs(web_boot.WEB_INPUTS)
+    assert ui_draw.input_kind() == "keys", "a fine pointer's page is on its keys"
