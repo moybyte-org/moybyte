@@ -382,6 +382,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The home's arrangements by the layout's `home` value
 # (docs/shell_layout_2026-10.md §12); an unknown one is the carousel.
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
+# The layers that draw a menu holding the keys (`Workstation._modal_layer`):
+# the system menu's own, and a desk popover frame's that paints it alone.
+_PAUSE_LAYERS = ("pause",)
+_SYSMENU_LAYERS = ("sysmenu", "popover_over")
 
 try:
     import ui_draw as _ui_draw
@@ -1784,12 +1788,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # delete path). Selecting any row closes the menu (Popup.activate closes first).
 
     def _modal_layer(self):
-        """The id of the layer that holds the keys over the screen, the
-        pause menu's or the system menu's, or None."""
+        """The ids of the layers that draw the menu holding the keys over
+        the screen, the pause menu's or the system menu's (on the desk a
+        popover frame paints it from its own layer), or None."""
         if self.pause.open:
-            return "pause"
+            return _PAUSE_LAYERS
         if self.sysmenu.open:
-            return "sysmenu"
+            return _SYSMENU_LAYERS
         return None
 
     def system_key(self):
@@ -4363,7 +4368,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._marks_held = _modal is not None
             _ui_draw.marks(_modal is None)
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
-            if _modal is not None and layer.id == _modal:
+            if _modal is not None and layer.id in _modal:
                 _ui_draw.marks(True)
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
