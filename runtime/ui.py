@@ -373,7 +373,8 @@ def menu(label, items, icons=(), o=None, kinds=()):
     its card), or from `at`'s rect's top left. `kinds` names a row's kind at
     its place ("" plain): a "danger" row, a verb that destroys, draws its
     label and icon in the danger buttons' ink. The item activated this frame
-    (from 0), -1 none; an item's id is its text."""
+    (from 0), -1 none; an item's id is its text, and its text after a tab
+    is the key it answers to, drawn at the row's right."""
     t = _T
     danger = 0
     for i in range(min(len(kinds), 32)):

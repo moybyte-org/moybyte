@@ -2057,8 +2057,19 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         if (st & MOY_UI_ST_ACTIVATED) {
             pick = i;
         }
+        // an item's text after a tab is the key it answers to, drawn as
+        // an info row's value
+        moy_ui_span_t key = {t.p, 0};
+        for (uint16_t j = 0; j < t.n; j++) {
+            if (t.p[j] == '\t') {
+                key = (moy_ui_span_t){t.p + j + 1, (uint16_t)(t.n - j - 1)};
+                t.n = j;
+                break;
+            }
+        }
         moy_ui_vrow_t r;
         vrow_init(c, &r, t);
+        r.value = key;
         if (i < 32 && ((c->menu_danger >> i) & 1u)) {
             r.kind = MOY_UI_VROW_DANGER;
         }

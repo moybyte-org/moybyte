@@ -1251,7 +1251,8 @@ int moy_ui_input(void) {
 
 // Each action's name.
 static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", "tabs", "menu",
-                                                   "cancel"};
+                                                   "cancel", "flip", "rotate", "shift", "clear",
+                                                   "copy", "more"};
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
@@ -1259,12 +1260,16 @@ static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", 
 // home's tab keys and Mic is `start`. A gamepad's are its face buttons, its
 // d-pad (`dpad_lr`), its shoulders and Start. Touch has none. Cancel is a
 // field's: in one the T-Deck's K types a letter, so Mic, which never types,
-// cancels there (owner call, 2026-10-18).
+// cancels there (owner call, 2026-10-18). The sprite tab's operations are
+// letters on a keyboard (PICO-8's), its shift the arrows where the keyboard
+// has them -- the T-Deck's trackball moves the grid's cursor -- and a
+// gamepad reaches them through its more menu, on Y (2026-10-19).
 static const char *const ACT_KEYS[MOY_UI_INPUTS][MOY_UI_ACTS] = {
-    {"enter", "Esc", "left right", "Q E", "Super", "Esc"},
-    {"enter", "K", "ball_lr", "Q E", "Mic", "Mic"},
-    {"A", "B", "dpad_lr", "L R", "Start", "B"},
-    {"", "", "", "", "", ""},
+    {"enter", "Esc", "left right", "Q E", "Super", "Esc", "F V", "R", "left right up down",
+     "Del", "Ctrl C", "M"},
+    {"enter", "K", "ball_lr", "Q E", "Mic", "Mic", "F V", "R", "", "Del", "", "M"},
+    {"A", "B", "dpad_lr", "L R", "Start", "B", "", "", "", "", "", "Y"},
+    {"", "", "", "", "", "", "", "", "", "", "", ""},
 };
 
 static int span_is(moy_ui_span_t k, const char *s) {
