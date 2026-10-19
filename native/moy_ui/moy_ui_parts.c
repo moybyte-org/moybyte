@@ -521,7 +521,11 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             moy_ui_focus_in(s, b, MOY_UI_MARK_PART, 0, 0, d.fs, NULL, &mi, 0);
             lab = mi >= 0 ? mi : ink;
             if (mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
-                ink = dim = mi;     // the whole row is on the mark
+                // the whole row is on the mark: its controls too take the
+                // mark's ink, the mark's colour showing through them
+                ink = dim = mi;
+                int fc = moy_ui_token(d.look, m->color);
+                rowfill = fc >= 0 ? fc : -1;
             }
         } else if (m->active) {
             int16_t c[3];
@@ -620,9 +624,10 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             if (hollow) {
                 knob = cink;
             }
-            if (r->cur && rowfill >= 0) {           // on a row filled in the value colour
+            if (rowfill >= 0) {     // on a filled row: On is a track in its ink, Off its outline
+                hollow = !r->cur;
                 track = cink;
-                knob = pal(&d, rowfill);
+                knob = r->cur ? pal(&d, rowfill) : cink;
             }
             if (flags & MOY_UI_F_DISABLED) {
                 track = mix(track, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), 128);
@@ -649,6 +654,9 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             uint16_t base = dk ? line : mix(line, pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)),
                                             90);
             uint16_t val_c = rowfill >= 0 ? cink : pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT));
+            if (rowfill >= 0) {
+                base = cink;        // on a filled row the rest is the track's outline
+            }
             // the rest of the track in the value's colour reads as filled:
             // then it is the track's outline
             int hollow = !apart(base, val_c);

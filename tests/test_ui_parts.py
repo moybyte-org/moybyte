@@ -415,6 +415,106 @@ def test_a_stepped_slider_takes_a_tap_on_a_segment_and_the_arrows():
     assert st["v"] == 1
 
 
+def _rgb(p):
+    return ((p >> 11) * 255 // 31, (p >> 5 & 63) * 255 // 63, (p & 31) * 255 // 31)
+
+
+def _ratio(a, b):
+    """The WCAG contrast of two RGB565 words."""
+    def lum(p):
+        out = []
+        for c in _rgb(p):
+            c /= 255
+            out.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        return 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _blend(p, a, b):
+    """Whether RGB565 `p` lies between `a` and `b` (an antialiased edge)."""
+    pa, pb, pp = _rgb(a), _rgb(b), _rgb(p)
+    d = [pb[k] - pa[k] for k in range(3)]
+    n = sum(v * v for v in d)
+    if n == 0:
+        return False
+    t = sum((pp[k] - pa[k]) * d[k] for k in range(3)) / n
+    return 0 < t < 1 and all(abs(pa[k] + t * d[k] - pp[k]) <= 16 for k in range(3))
+
+
+_VALUE_ROWS = ("On", "Off", "Level", "Steps")
+
+
+def _value_rows_page(theme, focus):
+    """A group of a toggle On, a toggle Off, a slider and a stepped slider,
+    `focus` the focused one."""
+    def draw():
+        st = {"rect": ui.page("")}
+        ui.group("G")
+        ui.toggle("On", True)
+        ui.toggle("Off", False)
+        ui.slider("Level", 5, 0, 10)
+        ui.slider("Steps", 3, 0, 7, {"steps": True})
+        ui.group()
+        ui.focus(focus)
+        return st
+    r = _Run(draw, theme)
+    for _ in range(3):
+        r.frame()
+    return r
+
+
+# The seeds whose part focus mark is a plate in the theme's focus colour
+# (`look.focus` invert): the row's controls lie on it.
+_INVERT_ROWS = (("contrast", "dark"), ("contrast", "light"), ("blocks", "light"))
+
+
+@pytest.mark.parametrize("theme", _INVERT_ROWS, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("row", _VALUE_ROWS)
+def test_a_focused_value_rows_controls_read_on_its_focus_plate(theme, row):
+    """On a row filled by its focus mark, the toggle's track, knob and
+    outline, the slider's track and fill and the stepped bar draw in the
+    mark's ink, each clearing the plate 3:1 (a white track on Contrast
+    Dark's yellow was 1.27:1)."""
+    i = _VALUE_ROWS.index(row)
+    r = _value_rows_page(theme, row)
+    y0 = r.out["rect"][1] + CAPTION + i * ROW
+    plate = r.px(INSET + 3, y0 + ROW // 2)
+    calm = _value_rows_page(theme, _VALUE_ROWS[(i + 1) % len(_VALUE_ROWS)])
+    assert plate != calm.px(INSET + 3, y0 + ROW // 2), "the focus mark is a plate"
+    right = 320 - INSET - PAD
+    counts = {}
+    for y in range(y0 + 2, y0 + ROW - 2):
+        for x in range(right - 90, right):
+            p = r.px(x, y)
+            counts[p] = counts.get(p, 0) + 1
+    inks = [p for p, n in counts.items() if p != plate and n >= 6]
+    clear = [p for p in inks if _ratio(p, plate) >= 3.0]
+    assert clear, "the control draws"
+    for p in inks:
+        if any(_blend(p, plate, c) for c in clear):
+            continue                       # an edge's antialiasing
+        assert _ratio(p, plate) >= 3.0, (
+            "%s: %06x on the plate %06x is %.2f:1" % (row, int("%02x%02x%02x" % _rgb(p), 16),
+                                                      int("%02x%02x%02x" % _rgb(plate), 16),
+                                                      _ratio(p, plate)))
+
+
+@pytest.mark.parametrize("theme", _INVERT_ROWS, ids=lambda t: "-".join(t))
+def test_a_focused_stepped_bar_fills_its_steps_in_the_rows_ink(theme):
+    """The filled steps are the bright part on the plate: the row's ink, the
+    rest the plate inside an outline (Blocks' empty steps were brighter
+    than its filled ones)."""
+    r = _value_rows_page(theme, "Steps")
+    mid = r.out["rect"][1] + CAPTION + 3 * ROW + ROW // 2
+    plate = r.px(INSET + 3, mid)
+    x0 = 320 - INSET - PAD - (7 * 8 - 2)
+    on = r.px(x0 + 2, mid)
+    assert _ratio(on, plate) >= 3.0
+    assert [r.px(x0 + k * 8 + 2, mid) for k in range(7)] == [on] * 3 + [plate] * 4
+    assert r.px(x0 + 3 * 8, mid) == on, "an empty step is outlined in the ink"
+
+
 def test_hints_take_the_pages_foot_and_rows_stop_above_them():
     def draw():
         ui.page("")
