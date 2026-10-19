@@ -16,7 +16,7 @@
     "editor_scene": [116, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [28, 13],
+    "settings": [27, 13],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -37,7 +37,7 @@
     "editor_scene": [116, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [60, 26],
+    "settings": [59, 27],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -61,7 +61,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [40, 31],
+    "settings": [39, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -82,7 +82,7 @@
     "editor_scene": [116, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [51, 22],
+    "settings": [50, 23],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -106,7 +106,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [41, 31],
+    "settings": [41, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -127,7 +127,7 @@
     "editor_scene": [117, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [40, 31],
+    "settings": [39, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -151,7 +151,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [41, 31],
+    "settings": [41, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -175,7 +175,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [43, 33],
+    "settings": [42, 34],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -211,13 +211,13 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [40, 31],
+    "settings": [41, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
   "p4_1024x600_cs2_fs1_moy_menus": {
-    "pause": [7, 13],
-    "pause_options": [15, 6],
+    "pause": [9, 13],
+    "pause_options": [18, 6],
     "sysmenu": [1, 8]
   },
   "p4_1024x600_cs2_fs1_moy_night": {
@@ -240,7 +240,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [40, 31],
+    "settings": [39, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -248,8 +248,8 @@
     "desk_window_calc": [0, 5],
     "popover_battery": [14, 9],
     "popover_clock": [64, 44],
-    "popover_menu": [1, 11],
-    "popover_wifi": [69, 16]
+    "popover_menu": [1, 15],
+    "popover_wifi": [68, 16]
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "app_appearance": [0, 7],
@@ -271,7 +271,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [44, 33],
+    "settings": [43, 34],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -295,7 +295,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [43, 33],
+    "settings": [42, 34],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -321,7 +321,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [40, 31],
+    "settings": [39, 32],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -345,7 +345,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [30, 19],
+    "settings": [29, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -369,7 +369,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [30, 19],
+    "settings": [31, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -393,7 +393,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [30, 19],
+    "settings": [31, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -414,7 +414,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [43, 19],
+    "settings": [43, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -435,7 +435,7 @@
     "editor_scene": [114, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [43, 19],
+    "settings": [42, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -458,7 +458,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [44, 19],
+    "settings": [43, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -475,12 +475,12 @@
     "launcher_mine": [0, 0]
   },
   "tdeck_320x240_fs1_light": {
-    "app_appearance": [33, 20],
-    "app_appearance_name": [30, 22],
-    "app_appearance_walls": [10, 7],
+    "app_appearance": [35, 20],
+    "app_appearance_name": [32, 22],
+    "app_appearance_walls": [12, 7],
     "app_artwork": [314, 13],
-    "app_calc": [24, 23],
-    "app_files": [3, 16],
+    "app_calc": [26, 23],
+    "app_files": [4, 16],
     "app_getcarts": [3, 6],
     "app_notes": [6, 3],
     "app_storybook": [3, 2],
@@ -489,19 +489,19 @@
     "editor_code": [19, 26],
     "editor_map": [76, 14],
     "editor_music": [161, 32],
-    "editor_paint": [2234, 21],
+    "editor_paint": [2242, 21],
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [42, 19],
+    "settings": [43, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
   "tdeck_320x240_fs1_moy_day": {
-    "app_appearance": [33, 20],
+    "app_appearance": [35, 20],
     "app_artwork": [314, 13],
-    "app_calc": [24, 23],
-    "app_files": [3, 16],
+    "app_calc": [26, 23],
+    "app_files": [4, 16],
     "app_getcarts": [3, 6],
     "app_notes": [6, 3],
     "app_storybook": [3, 2],
@@ -510,17 +510,17 @@
     "editor_code": [19, 26],
     "editor_map": [76, 14],
     "editor_music": [161, 32],
-    "editor_paint": [2234, 21],
+    "editor_paint": [2242, 21],
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [42, 19],
+    "settings": [43, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
   "tdeck_320x240_fs1_moy_menus": {
-    "pause": [7, 13],
-    "pause_options": [15, 6],
+    "pause": [9, 13],
+    "pause_options": [18, 6],
     "sysmenu": [1, 16]
   },
   "tdeck_320x240_fs1_moy_night": {
@@ -540,25 +540,25 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [44, 19],
+    "settings": [43, 20],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
   "tdeck_320x240_fs1_parts_day": {
-    "parts_appearance": [45, 19],
+    "parts_appearance": [46, 19],
     "parts_settings": [28, 19]
   },
   "tdeck_320x240_fs1_parts_night": {
-    "parts_appearance": [47, 19],
-    "parts_settings": [30, 19]
+    "parts_appearance": [45, 19],
+    "parts_settings": [28, 19]
   },
   "tdeck_320x240_fs1_ui_page": {
     "ui_page": [10, 11]
   },
   "tdeck_320x240_fs1_widget_pages": {
-    "page_battery": [46, 19],
+    "page_battery": [44, 20],
     "page_clock": [63, 39],
     "page_menu": [1, 16],
-    "page_wifi": [68, 15]
+    "page_wifi": [67, 15]
   }
 }
