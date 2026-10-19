@@ -224,7 +224,8 @@ def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
         ws.launcher.sel = 1
         assert home.zone_verbs() == ("new", "change", "copy", "delete")
         chips = home._zone_action_rects(ws.layout.zone_left)
-        assert set(chips) == {"new", "change", "copy", "delete"}
+        # ...and the selected cart's favourite star where the strip has room
+        assert set(chips) - {"favourite"} == {"new", "change", "copy", "delete"}
 
 
 def test_base_tier_zone_chips_dispatch(tmp_path):
