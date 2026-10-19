@@ -63,3 +63,6 @@
 62 eraser
 63 mirror
 64 flip_v
+65 folder_open
+66 more
+67 stamp

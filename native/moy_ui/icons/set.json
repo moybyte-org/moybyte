@@ -38,84 +38,84 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 2963,
+   "bytes": 3080,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 7582,
+   "bytes": 7865,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 10678,
+   "bytes": 11078,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 3135,
+   "bytes": 3255,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 7874,
+   "bytes": 8164,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 10708,
+   "bytes": 11127,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 3069,
+   "bytes": 3189,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 7778,
+   "bytes": 8068,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 10698,
+   "bytes": 11106,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1676,
+   "bytes": 1722,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 3845,
+   "bytes": 3956,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 5219,
+   "bytes": 5370,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -204,7 +204,10 @@
   "star_on",
   "eraser",
   "mirror",
-  "flip_v"
+  "flip_v",
+  "folder_open",
+  "more",
+  "stamp"
  ],
  "tiers": {
   "desktop": [
