@@ -1184,6 +1184,61 @@ def test_a_field_in_a_group_lays_out_like_the_other_rows():
         "the card shows between the label and the box"
 
 
+def _row_or_field_page(theme, field, focus=True, last=False):
+    """A group of Top, then Name -- a field, else a link -- then Foot (none
+    where `last`, Name then the card's last row), focus on Name (on Top
+    where not `focus`)."""
+    def draw():
+        st = {"rect": ui.page("")}
+        ui.group("You")
+        ui.link("Top", "")
+        if field:
+            ui.field("Name", "", 16)
+        else:
+            ui.link("Name", "")
+        if not last:
+            ui.link("Foot", "")
+        ui.group()
+        ui.focus("Name" if focus else "Top")
+        return st
+    r = _Run(draw, theme)
+    for _ in range(3):
+        r.frame()
+    return r
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("last", [False, True], ids=["mid", "last"])
+def test_a_focused_field_row_wears_the_value_rows_focus_mark(theme, last):
+    """A focused field's row wears the focus mark a focused link's row does,
+    over the whole row (a card's last row included): the row's left margin,
+    outside its label and box, draws alike. Before, the mark showed only
+    where the card's foot redrew it: a sliver in Moy, two squares under
+    Blocks, specks in Contrast."""
+    f = _row_or_field_page(theme, True, last=last)
+    k = _row_or_field_page(theme, False, last=last)
+    y0 = f.out["rect"][1] + CAPTION + ROW
+    for y in range(y0, y0 + ROW):
+        got = [f.px(x, y) for x in range(INSET, INSET + PAD - 2)]
+        want = [k.px(x, y) for x in range(INSET, INSET + PAD - 2)]
+        assert got == want, "row y %d: the field's mark is not the link's" % (y - y0)
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+def test_a_focused_fields_ring_is_the_focus_colour_and_reads_on_its_row(theme):
+    """Focused (being typed in), the field's ring is two pixels where its
+    rest ring is one, in the focus colour (the mark's ink on an invert
+    mark), and clears what lies round it 3:1 -- Contrast's stayed its one
+    pixel of border colour, so only the caret told it was being typed in."""
+    on = _row_or_field_page(theme, True)
+    off = _row_or_field_page(theme, True, focus=False)
+    y = on.out["rect"][1] + CAPTION + ROW + ROW // 2
+    x = 320 - INSET - PAD - TRACK
+    ring = on.px(x, y)
+    assert on.px(x + 1, y) == ring and off.px(x + 1, y) != off.px(x, y), "two pixels, not one"
+    assert _ratio(ring, on.px(x - 1, y)) >= 3.0, "%.2f:1" % _ratio(ring, on.px(x - 1, y))
+
+
 def _dialog_page(shown, body_field=False):
     st = {"pick": None, "under": 0, "text": "n"}
 

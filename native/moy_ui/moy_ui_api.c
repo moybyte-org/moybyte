@@ -1693,7 +1693,7 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         band(c, s, b, stacked, f);
         moy_ui_span_t t = {buf, (uint16_t)len};
         moy_ui_field(s, b, label, t, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs, c->cls,
-                     c->grp_open);
+                     c->grp_open, c->grp_open && c->grp_first);
         clip_out(&k);
     }
     return (int32_t)len | (done ? MOY_UI_FIELD_DONE : 0);

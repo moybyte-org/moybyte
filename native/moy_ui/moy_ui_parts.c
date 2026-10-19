@@ -1556,7 +1556,7 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 // -- a text field ------------------------------------------------------------------------
 
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text_,
-                 int flags, int fs, int desk, int card) {
+                 int flags, int fs, int desk, int card, int first) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_marks_t *m = moy_ui_marks();
@@ -1569,9 +1569,18 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     int on_card = card && !desk;
     uint16_t ink = pal(&d, on_card ? tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK)
                                    : tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
+    int focused = (flags & MOY_UI_F_FOCUS) != 0;
+    // the row's focus mark, as a value row wears it, under the label and
+    // the field; on an invert mark the field's ring takes the mark's ink
+    int mi = -1, invert = 0;
+    if (focused && m->on) {
+        moy_ui_focus_in(s, on_card ? on_card_mark(&d, b, first, 0) : b, MOY_UI_MARK_PART, 0, 0,
+                        d.fs, NULL, &mi, 0);
+        invert = mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT;
+    }
     int x = b.x + pad, right = b.x + b.w - pad;
     if (label.n) {
-        x += text(&d, &fl, label.p, label.n, x, b.y, b.h, ink, sc) + gap;
+        x += text(&d, &fl, label.p, label.n, x, b.y, b.h, mi >= 0 ? pal(&d, mi) : ink, sc) + gap;
     }
     if (card) {
         // in a group the field is the row's value: as wide as a slider's
@@ -1586,14 +1595,19 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     }
     const moy_ui_depth_t *dp = moy_ui_depth();
     int r = dp->on ? (dp->key_r < (desk ? 8 : 6) ? dp->key_r : (desk ? 8 : 6)) * d.fs : 0;
-    int focused = (flags & MOY_UI_F_FOCUS) != 0;
-    uint16_t ring = pal(&d, focused ? tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)
-                                    : tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+    // focused, the field is being typed in: its ring is the focus colour
+    // (the mark's ink on an invert mark), two pixels at the scale, whether
+    // or not focus marks show
+    int fc = m->on ? moy_ui_token(d.look, m->color) : -1;
+    int ring_c = !focused ? tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)
+                 : invert ? mi
+                 : fc >= 0 ? fc
+                           : tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
     rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
-          d.fs, ring);
+          (focused ? 2 : 1) * d.fs, pal(&d, ring_c));
     if (focused && m->on) {
-        int mi = -1;
-        moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &mi, 0);
+        int fi = -1;
+        moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &fi, 0);
     } else if (focused && m->active) {
         moy_ui_focus_ring(s, f, d.fs);
     }
