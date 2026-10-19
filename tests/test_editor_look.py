@@ -384,3 +384,42 @@ def test_under_touch_a_handheld_app_keeps_no_hint_band(tmp_path, app_id, theme, 
     band = {px[y][x] for y in range(lay.cy + lay.ch - 20, lay.cy + lay.ch)
             for x in range(lay.cx, lay.cx + lay.cw)}
     assert len(band) > 1, "no hints under keys"
+
+
+def _ink_box(px, rect, ground):
+    """(x0, y0, x1, y1) of the pixels in `rect` that are not `ground`."""
+    x, y, w, h = rect
+    pts = [(xx, yy) for yy in range(y, y + h) for xx in range(x, x + w)
+           if px[yy][xx] != ground]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return min(xs), min(ys), max(xs) + 1, max(ys) + 1
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "the engine draws a button's icon in a button.icon-sized box (16 px), "
+    "style.json's and moy_ui_draw.c's: the desk's backspace needs the box at "
+    "the key face's cap height (design review R3-09, Batch A)"))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_desk_calcs_backspace_stands_as_tall_as_its_digits(tmp_path, theme, mode):
+    """The desk Calc's ⌫ is as tall as the digits beside it, less a pixel
+    (design review R3-09: a 12 px icon beside 15 px digits)."""
+    ws = _ws(tmp_path, DESK, theme, mode)
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["calc"])
+    _frame(ws)
+    win = ws.wm._wins["calc"]
+    lay = win.ctx.app_layouts["calc"]
+    cx, cy, _cw, _ch = win.content_rect()
+    px = _px(ws)
+
+    def ink(label):
+        x, y, w, h = lay.keys[lay.labels.index(label)]
+        x, y = x + cx, y + cy
+        # inside the key's rounded face, clear of its edge
+        inner = (x + w // 4, y + 4, w // 2, h - 8)
+        return _ink_box(px, inner, px[y + h // 2][x + 6])
+
+    back = ink("<")
+    seven = ink("7")
+    assert back[3] - back[1] >= seven[3] - seven[1] - 1, (back, seven)
