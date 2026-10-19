@@ -2118,6 +2118,7 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         moy_ui_vrow_t r;
         vrow_init(c, &r, t);
         r.value = key;
+        r.keys = 1;
         if (i < 32 && ((c->menu_danger >> i) & 1u)) {
             r.kind = MOY_UI_VROW_DANGER;
         }

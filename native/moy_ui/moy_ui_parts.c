@@ -608,6 +608,10 @@ int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const m
 
 static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int last, int *flags,
                                  int *r);
+// The keys a cap draws as a sign: the arrows, enter, the trackball rolled
+// and the d-pad pressed left or right.
+enum { SIGN_ENTER = 4, SIGN_BALL_LR = 5, SIGN_DPAD_LR = 6, SIGNS = 7 };
+static int key_sign(moy_ui_span_t k);
 
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r) {
@@ -686,11 +690,24 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 chevron(&d, x, cy, chev, 1, cdim);
                 x -= kind == MOY_UI_V_CYCLE ? gap + d.fs : gap;
             }
-            // the value in the label's face and weight, set apart by its ink
-            int vw = tw(&fl, r->value.p, r->value.n, sc);
-            x -= vw;
-            text(&d, &fl, r->value.p, r->value.n, x, b.y, b.h,
-                 kind == MOY_UI_V_CYCLE ? cink : cdim, sc);
+            // the value in the label's face and weight, set apart by its ink;
+            // a key the hints draw as a sign, as the sign (no face's arrows)
+            int sign = kind == MOY_UI_V_INFO && r->keys ? key_sign(r->value) : -1;
+            if (sign >= 0 && sign <= SIGN_ENTER) {
+                int kh = pm(&d, MOY_UI_M_VALUE_ROW_KEY, 1);
+                int sw = sign == SIGN_ENTER ? kh + 3 * d.fs : kh;
+                x -= sw;
+                if (sign == SIGN_ENTER) {
+                    enter_sign(&d, x, b.y + (b.h - kh) / 2, sw, kh, cdim);
+                } else {
+                    arrow_sign(&d, x, b.y + (b.h - kh) / 2, sw, kh, sign, cdim);
+                }
+            } else {
+                int vw = tw(&fl, r->value.p, r->value.n, sc);
+                x -= vw;
+                text(&d, &fl, r->value.p, r->value.n, x, b.y, b.h,
+                     kind == MOY_UI_V_CYCLE ? cink : cdim, sc);
+            }
             if (kind == MOY_UI_V_CYCLE) {
                 x -= gap + d.fs + chev;
                 chevron(&d, x, cy, chev, -1, cdim);
@@ -1388,10 +1405,6 @@ const char *moy_ui_hint_keys(int input, int act) {
     }
     return ACT_KEYS[input][act];
 }
-
-// The keys a cap draws as a sign: the arrows, enter, the trackball rolled
-// and the d-pad pressed left or right.
-enum { SIGN_ENTER = 4, SIGN_BALL_LR = 5, SIGN_DPAD_LR = 6, SIGNS = 7 };
 
 static int key_sign(moy_ui_span_t k) {
     static const char *const names[SIGNS] = {"left", "right", "up", "down", "enter",

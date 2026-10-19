@@ -734,6 +734,9 @@ typedef struct {
     int16_t kind;                   // MOY_UI_VROW_*: a danger row inks its label and icon
                                     // in the danger buttons' ink
     int16_t first;                  // the first row on its card (under the card's top frame)
+    int16_t keys;                   // info: the value is the keys the row answers to, and
+                                    // one the hints draw as a sign (`left`, `right`, `up`,
+                                    // `down`, `enter`) draws as that sign
 } moy_ui_vrow_t;
 enum { MOY_UI_VROW_PLAIN = 0, MOY_UI_VROW_DANGER = 1 };
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,

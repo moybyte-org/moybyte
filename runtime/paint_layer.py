@@ -140,11 +140,13 @@ _OPS = (
 _SHIFT_OPS = ("sleft", "sright", "sup", "sdown")
 # The key each operation answers to, per input (the hints' profiles,
 # native/moy_ui/moy_ui_parts.c's ACT_KEYS): what the more menu shows at a
-# row's right. The T-Deck's trackball moves the grid's cursor, so its shifts
-# have no key; a gamepad and touch reach the operations through the menu.
+# row's right, an arrow named as the hints name it (`ui.menu` draws it as
+# the hint strip's sign, never a face's arrow). The T-Deck's trackball moves
+# the grid's cursor, so its shifts have no key; a gamepad and touch reach the
+# operations through the menu.
 _OP_KEYS = {
     "keys": {"copy": "Ctrl C", "fliph": "F", "flipv": "V", "rot": "R",
-             "sleft": "\u2190", "sright": "\u2192", "sup": "\u2191", "sdown": "\u2193",
+             "sleft": "left", "sright": "right", "sup": "up", "sdown": "down",
              "clear": "Del"},
     "tdeck": {"fliph": "F", "flipv": "V", "rot": "R", "clear": "Del"},
 }
@@ -159,6 +161,8 @@ _KEY_OPS = {
 # menu's last. With a selection, clear takes shift's place.
 _HINTS = ("flip", "Flip", "rotate", "Rotate", "shift", "Shift", "more", "More")
 _HINTS_SEL = ("flip", "Flip", "rotate", "Rotate", "clear", "Clear", "more", "More")
+# While a popover is open its keys alone: what closes it.
+_HINTS_POP = ("back", "Close")
 # The pickers' sizes, PaintEditor.SIZES's order.
 _SIZE_NAMES = ("1x1", "2x2", "3x3")
 # The drawing-mode tools (highlighted when active); shape is any of _SHAPES.
@@ -1252,10 +1256,14 @@ class PaintLayer:
     def _draw_hints(self, cv, lay, pe, th):
         """The hint strip along the content's foot: the operations' keys of
         the input in use, the operations on a selection first while one is
-        held, as many pairs as the strip holds (none under touch)."""
+        held, as many pairs as the strip holds (none under touch); while a
+        popover is open, only the key that closes it."""
         if lay.hints is None:
             return
-        items = _HINTS_SEL if pe.sel is not None else _HINTS
+        if self._pop:
+            items = _HINTS_POP
+        else:
+            items = _HINTS_SEL if pe.sel is not None else _HINTS
         x, y, w, h = lay.hints
         fs = lay.fs
         band = (x + (8 if lay.desk else 2 * fs), y, w - (16 if lay.desk else 4 * fs), h)
@@ -1357,18 +1365,24 @@ class PaintLayer:
         settled = self._host.begin(cv, th, lay.body_fill, lay.desk)
         keys = _OP_KEYS.get(_ui_draw.input_kind(), {})
         rows = self._more_rows(lay.desk)
-        items, icons, kinds = [], [], []
-        for oid, label, slot in rows:
+        # the operations, then the danger rows set apart under a rule
+        parts = ([], [])
+        for i in range(len(rows)):
+            oid, label, slot = rows[i]
             if oid == "mirror" and pe.mirror:
                 label = "Turn off mirror"
             k = keys.get(oid)
-            items.append(label + ("\t" + k if k else ""))
-            icons.append(slot)
-            kinds.append("danger" if oid == "clear" else "")
+            parts[oid == "clear"].append((i, label + ("\t" + k if k else ""), slot))
         _ui.at(*lay.more_btn)
         shown = _ui.popover("Shift" if self._shifts else "More",
                             260 if lay.desk else 150 * fs)
-        pick = _ui.menu("", items, icons, kinds=kinds)
+        pick = -1
+        for part, kind in zip(parts, ("", "danger")):
+            if part:
+                got = _ui.menu("", [p[1] for p in part], [p[2] for p in part],
+                               kinds=[kind] * len(part))
+                if got >= 0:
+                    pick = part[got][0]
         _ui.popover()
         if pick >= 0 and rows[pick][0] == "shifts":
             self._shifts = True

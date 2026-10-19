@@ -976,3 +976,33 @@ def test_the_line_walker_is_integer_only():
     for node in ast.walk(fn):
         assert not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div)
         assert not (isinstance(node, ast.Constant) and isinstance(node.value, float))
+
+
+def test_clear_is_set_apart_and_the_keys_still_reach_it(tmp_path):
+    """Clear, the more menu's danger row, stands under a rule of its own
+    (design review R4-13), and focus walks down into it as into any row."""
+    from runtime import host_app, ui
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    menus = []
+    real = ui.menu
+
+    def spy(label, items, icons=(), o=None, kinds=()):
+        menus.append((label, list(items), list(kinds)))
+        return real(label, items, icons, o, kinds)
+    ui.menu = spy
+    try:
+        pe = ws.paint
+        pe.color = 7
+        pe.paint(0, 0)
+        _pick_more(drv, ws, "clear")
+    finally:
+        ui.menu = real
+    ox, oy = ws.sheet.tile_origin(pe.n)
+    assert ws.sheet.pget(ox, oy) == 0
+    held = [m for m in menus if any(i.startswith("Clear") for i in m[1])]
+    assert held
+    for _label, items, kinds in held:
+        assert [i.split("\t")[0] for i in items] == ["Clear"] and kinds == ["danger"]
+

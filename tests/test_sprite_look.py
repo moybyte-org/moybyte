@@ -150,3 +150,28 @@ def test_the_grid_cursor_is_drawn_for_keys_and_not_for_touch(tmp_path, config):
     ui_draw.input_kind("touch")
     el._frame(ws)
     assert el._px(ws)[y][x] == border
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+def test_while_a_popover_is_open_the_strip_shows_only_its_close(tmp_path, config):
+    """The hint strip shows the operations' keys, and while the more menu
+    is open only the key that closes it (design review R4-13), never keys
+    the menu has taken."""
+    from runtime import paint_layer, ui_draw
+    ws, lay, _ox, _oy = _open(tmp_path, config, "moy", "light")
+    seen = []
+    real = ui_draw.hints
+
+    def spy(cv, th, rect, items, desk=False, draw=True):
+        if draw:
+            seen.append(tuple(items))
+        return real(cv, th, rect, items, desk, draw)
+    paint_layer._ui_draw.hints = spy
+    try:
+        el._frame(ws)
+        assert seen and "Close" not in seen[-1]
+        ws.paint_layer._open_more()
+        el._frame(ws)
+        assert seen[-1] == paint_layer._HINTS_POP
+    finally:
+        paint_layer._ui_draw.hints = real
