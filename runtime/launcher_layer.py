@@ -57,10 +57,12 @@ try:
     import ui as _ui
     import ui_draw as _ui_draw
     import cart_listing as _cl
+    import iconsets as _iconsets
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
     from runtime import cart_listing as _cl
+    from runtime import iconsets as _iconsets
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -179,22 +181,36 @@ def new_tile():
 
 
 # Per-type icon glyph + art-box color for a cart tile on the desktop (the pre-literate
-# cue), used when a cart has no sprite of its own. The "+ New" card gets a
-# distinctive bright box + a clear plus glyph.
+# cue), used when a cart has no sprite of its own. The "+ New" card draws the
+# icon set's plus instead (`draw_new_art`, `iconsets.plus`).
 _TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear",
-               "story": "run", NEW_TILE_TYPE: "plus"}
+               "story": "run"}
 _TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9,
-               "story": 15,     # a kid's Storybook cart (#78): peach, playable
-               NEW_TILE_TYPE: 14}  # index by type
+               "story": 15}     # a kid's Storybook cart (#78): peach, playable
 
 
-def _draw_new_icon(cv, names, img, x, y, sc):
-    """The IconSheet plus at `sc`, pal-remapped so it reads on the yellow
-    "+ New" field (white outline -> black, yellow body -> orange)."""
-    cv.pal(names["white"], names["black"])
-    cv.pal(names["yellow"], names["orange"])
-    cv.spr(img, x, y, sc)
-    cv.pal()
+# The New tile's plus across the tile, in 32nds of its side: about the
+# third a hand-drawn "add" page gives it.
+NEW_PLUS = 11
+
+
+def draw_new_art(cv, th, rect, r, stepped, spec, fs=1):
+    """The "+ New" card's picture over `rect` (corners `r`): a blank page,
+    the theme's `surface`, with icon set `spec`'s plus (`iconsets.plus`) in
+    `ink_accent`, the accent ink the theme holds readable on that surface.
+    No rim, as a cover has none; but where the theme casts no shadow a page
+    on a ground of its own colour would show only its plus, so there it is
+    framed in the theme's `border`, 2 px at font scale `fs`."""
+    x, y, w, h = rect
+    d = _ui_draw.depth()
+    if d[0] and not d[6]:
+        cv.rrect(x, y, w, h, r, th.get("surface", 0), ring=th.get("border", 0),
+                 line=2 * fs, stepped=stepped)
+    else:
+        cv.rrect(x, y, w, h, r, th.get("surface", 0), stepped=stepped)
+    s = min(w, h) * NEW_PLUS // 32
+    _iconsets.plus(cv, (x + (w - s) // 2, y + (h - s) // 2, s, s),
+                   th.get("ink_accent", th.get("ink", 0)), spec, stepped)
 
 
 def _dot_top(y, s, d):
@@ -339,9 +355,8 @@ class Launcher:
         self._blit_glyph = blit_glyph
         self.theme = None             # chrome THEME tokens (look.set_theme pushes them);
                                       # None -> the yellow default accent
-        self.icon_for = None          # optional kind -> 16x16 IconSheet Image (console
-                                      # wires ws._bar_image) -- the shelf's pseudo cards
-                                      # draw the real themeable pencil/plus icon big
+        self.icon_spec = None         # optional () -> the live icon set (console
+                                      # wires ws.icon_spec): the "+ New" card's plus
         self.cover_for = None         # optional (cart, div) -> the cart's decoded
                                       # cover (CoverCache.cover_for, SPEC.md 3.6)
         self.tinted_for = None        # optional (cart, colour, alpha) -> the
@@ -888,27 +903,20 @@ class Launcher:
         self._card_frame(cv, rect, selected)
 
     def _draw_pseudo_card(self, cv, it, rect, selected):
-        """The picker's pinned tall "+ New" card. Focus-yellow field, big plus
-        glyph, a display-type heading and a small caption, and the corner pin."""
+        """The picker's pinned tall "+ New" card. Focus-yellow field, the
+        icon set's plus big, a display-type heading and a small caption, and
+        the corner pin."""
         NAMES = self._NAMES
         th = self.theme or {}
         lay = self.layout
         fs = lay.fs
         x, y, w, h = rect
         cv.rect(x, y, w, h, th.get("focus", NAMES["yellow"]))
-        # Big plus in the card's upper half: the real themeable IconSheet sprite
-        # when the console wired icon_for -- pal-remapped so it reads on the
-        # yellow field (white outline -> black, yellow body -> orange). The
-        # 12x12 glyph stays as the no-sheet fallback.
-        img = self.icon_for("new") if self.icon_for is not None else None
-        if img is not None:
-            sc = max(fs, min((w - 12 * fs) // 16, (h // 2 - 4 * fs) // 16))
-            _draw_new_icon(cv, NAMES, img, x + (w - 16 * sc) // 2,
-                           y + 4 * fs + (h // 2 - 16 * sc) // 2, sc)
-        else:
-            gs = max(fs, min((w - 16 * fs) // 12, (h // 2 - 8 * fs) // 12))
-            self._blit_glyph(cv, _TYPE_GLYPH[it["type"]],
-                             (x, y + 4 * fs, w, h // 2), NAMES["black"], gs)
+        # Big plus in the card's upper half, in the heading's ink.
+        s = max(4 * fs, min(w - 12 * fs, h // 2 - 4 * fs) * 2 // 3)
+        _iconsets.plus(cv, (x + (w - s) // 2, y + 4 * fs + (h // 2 - s) // 2, s, s),
+                       NAMES["black"],
+                       self.icon_spec() if self.icon_spec is not None else None)
         # Corner pushpin (the mockup's "pinned" cue).
         px_, py_ = x + w - 8 * fs, y + 7 * fs
         cv.circ(px_, py_, 2 * fs, NAMES["black"])
@@ -1950,27 +1958,14 @@ class Carousel(Launcher):
             self._draw_title_tile(cv, it, rect, r)
 
     def _draw_picture(self, cv, it, rect, centre, sheet_for=None):
-        """A card's picture over its whole rect: the "+ New" card's icon on
-        the focus colour, in the corners a cover of its size takes, else its
-        cover (`_draw_hh_cover`)."""
-        th = self.theme or {}
-        NAMES = self._NAMES
-        x, y, w, h = rect
+        """A card's picture over its whole rect: the "+ New" card's blank
+        page (`draw_new_art`) in the corners a cover of its size takes, else
+        its cover (`_draw_hh_cover`)."""
         if it.get("type") in PSEUDO_TILE_TYPES:
-            r = self._corner_r(w)
-            if r:
-                cv.rrect(x, y, w, h, r, th.get("focus", 0),
-                         stepped=bool(_ui_draw.depth()[5]))
-            else:
-                cv.rect(x, y, w, h, th.get("focus", 0))
-            img = self.icon_for("new") if self.icon_for is not None else None
-            sc = max(1, (w * 5 // 8) // 16)
-            if img is not None:
-                _draw_new_icon(cv, NAMES, img, x + (w - 16 * sc) // 2,
-                               y + (h - 16 * sc) // 2, sc)
-            else:
-                self._blit_glyph(cv, _TYPE_GLYPH[NEW_TILE_TYPE], (x, y, w, h),
-                                 th.get("ink", 0), max(1, (w * 5 // 8) // 12))
+            draw_new_art(cv, self.theme or {}, rect, self._corner_r(rect[2]),
+                         bool(_ui_draw.depth()[5]),
+                         self.icon_spec() if self.icon_spec is not None else None,
+                         self.layout.fs)
         else:
             self._draw_hh_cover(cv, it, rect, centre)
 
@@ -2140,8 +2135,6 @@ class IconHome(Launcher):
         return out
 
     def _icon_of(self, it, sheet_for):
-        if it.get("type") in PSEUDO_TILE_TYPES:
-            return self.icon_for("new") if self.icon_for is not None else None
         img = None
         if self.cover_for is not None and not it.get("icon"):
             img = self.cover_for(it, _COVER_ICON)
@@ -2159,7 +2152,16 @@ class IconHome(Launcher):
         x, y, w, _h = rect
         t = lay.tile
         box = (x, y, t, t)
-        self._art_tile(cv, th, box, self._icon_of(it, sheet_for), it.get("type"))
+        if it.get("type") in PSEUDO_TILE_TYPES:
+            # the theme's icon tile, the icon set's plus as its icon
+            if th:
+                _ui_draw.icon_tile(cv, th, box)
+            s = (t - 8 * fs) * 2 // 3
+            _iconsets.plus(cv, (x + (t - s) // 2, y + (t - s) // 2, s, s),
+                           th.get("ink_accent", th.get("ink", 0)) if th else 0,
+                           self.icon_spec() if self.icon_spec is not None else None)
+        else:
+            self._art_tile(cv, th, box, self._icon_of(it, sheet_for), it.get("type"))
         if not selected:
             return
         if _ui_draw.marks_on():

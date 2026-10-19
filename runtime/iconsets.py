@@ -22,6 +22,8 @@ IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has.
   draw(cv, kind, rect, ink, spec) -> bool     False: the set cannot draw it
   ink_span(kind, w, h, spec) -> (a, b) | None the columns its ink covers
   pixel_image(kind, swap) -> image | None     a pixel set tile, keyed clear
+  weight(spec) -> float | None                a smooth set's line weight
+  plus(cv, rect, ink, spec, stepped)          the set's `new` at any size
 """
 
 try:
@@ -287,6 +289,78 @@ def _mask_draw(cv, name, slot, x, y, w, h, box, ink, fill_index):
     return True
 
 
+_WEIGHTS = {}                 # set -> its line weight in 24ths, 0 where unmeasured
+PLUS_SPAN = 14                # the `new` plus's arms in every set, in 24ths (5..19)
+PIXEL_WEIGHT = 3              # a pixel set's plus: its 16 px art's 2 px stroke, in 24ths
+
+
+def weight(spec_):
+    """The line weight of smooth icon set `spec_` in its art's 24 units,
+    measured off its largest `new` mask: the coverage across the plus's four
+    arms, half way out, averaged. What draws the set's plus at a size no mask
+    has (`plus`). None for a pixel set, no set, or a set no mask carries."""
+    if spec_ is None or spec_[0] != "smooth":
+        return None
+    name = spec_[1]
+    got = _WEIGHTS.get(name)
+    if got is None:
+        got = _WEIGHTS[name] = _measure(name) or (
+            0 if name == DEFAULT_SET else _measure(DEFAULT_SET)) or 0
+    return got or None
+
+
+def _measure(name):
+    slot = SLOT["new"]
+    for size in SIZES:
+        src = _fontset.icon_file("%s-%d.fnt" % (name, size))
+        if src is None or len(src) < 16 + 256:
+            continue
+        k = src[16 + FIRST + slot]
+        if not k:
+            return None
+        rec = 16 + 256 + 8 * k
+        off = src[rec] | src[rec + 1] << 8 | src[rec + 2] << 16
+        w, h, bpp = src[rec + 3], src[rec + 4], src[5]
+        if w < 4 or h < 4:
+            return None
+        bit0 = (16 + 256 + 8 * src[9] + 3 * (src[10] | src[11] << 8) + off) * 8
+        top = (1 << bpp) - 1
+
+        def level(x, y):
+            bit = bit0 + (y * w + x) * bpp
+            return (src[bit >> 3] >> (8 - bpp - (bit & 7))) & top
+
+        n = 0
+        for x in (w // 4, w - 1 - w // 4):
+            n += sum(level(x, y) for y in range(h))
+        for y in (h // 4, h - 1 - h // 4):
+            n += sum(level(x, y) for x in range(w))
+        return n * 24 / (4 * top * size)
+    return None
+
+
+def plus(cv, rect, ink, spec_, stepped=False):
+    """Icon set `spec_`'s `new` -- a plus in every set -- across `rect`'s
+    shorter side at any size (the masks stop at 24 px): two strokes of the
+    set's line weight (`weight`), their ends round as the set's art draws
+    them; square under a pixel set or none. `stepped`: the theme's stepped
+    corners."""
+    x, y, w, h = rect
+    s = min(w, h)
+    wt = weight(spec_)
+    if wt is None:
+        wt, cap = PIXEL_WEIGHT, False
+    else:
+        cap = True
+    t = max(1, int(s * wt / (PLUS_SPAN + wt) + 0.5))
+    if (s - t) & 1:
+        s -= 1
+    r = t // 2 if cap else 0
+    cx, cy = x + (w - s) // 2, y + (h - s) // 2
+    cv.rrect(cx, cy + (s - t) // 2, s, t, r, ink, stepped=stepped)
+    cv.rrect(cx + (s - t) // 2, cy, t, s, r, ink, stepped=stepped)
+
+
 def use_parts(spec_):
     """Install `spec_`'s masks for the parts the C draws (a depth frame's
     title buttons, `moy_ui.icons_use`): a smooth set's 16 and 24 px files,
@@ -318,6 +392,7 @@ def reset():
         if fid:
             _ui_draw.font_free(fid)
     _FONTS.clear()
+    _WEIGHTS.clear()
     _PICK.clear()
     _INKED.clear()
     _IMAGES.clear()

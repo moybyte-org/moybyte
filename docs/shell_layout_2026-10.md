@@ -771,6 +771,13 @@ no scrim.
 **Counts and empties.** The bar's `title` on the home is the active tab's
 count. An empty Mine or Make shows one "+ New" card.
 
+**The "+ New" card** (design review 2026-10-19) is a blank page, never a
+cover: the theme's `surface` in a cover's corners with the icon set's plus in
+`ink_accent` (`launcher_layer.draw_new_art`, `iconsets.plus`), the same at
+rest and selected. A colour block with a glyph is what a coverless cart's
+generated cover is (`ui_draw.initial_cover`), so New stays off that
+vocabulary; a theme that casts no shadow frames the page in its `border`.
+
 ## 13. Phases, as steps
 
 Each step is one commit under the common gate of `docs/theming_2026-09.md`

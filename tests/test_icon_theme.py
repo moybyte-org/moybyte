@@ -634,3 +634,43 @@ def test_load_and_to_files_wear_two_folders_that_say_their_direction():
     src = inspect.getsource(paint_layer.PaintLayer._draw_look)
     assert '"To Files", ("export"' in src and '"Load", ("folder_open"' in src
     assert iconsets.SLOT["export"] != iconsets.SLOT["folder_open"]
+
+
+@pytest.mark.parametrize("name", sorted(p.name for p in (ICONS / "smooth").iterdir()))
+def test_a_sets_line_weight_is_read_off_its_own_mask(name):
+    """iconsets.weight measures the set's `new` mask (what a board carries),
+    and it agrees with the stroke its source draws: the New card's plus
+    keeps each set's weight at any size."""
+    import re
+    src = (ICONS / "smooth" / name / "new.svg").read_text()
+    stroke = float(re.findall(r'stroke-width="([0-9.]+)"', src)[0])
+    got = iconsets.weight(("smooth", name, None))
+    assert got is not None and abs(got - stroke) <= 0.2, (name, got, stroke)
+    assert iconsets.weight(("pixel", None, None)) is None
+    assert iconsets.weight(None) is None
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("moy", "dark"),
+                                        ("blocks", "light"), ("contrast", "light"),
+                                        ("contrast", "dark")])
+def test_the_new_card_is_a_blank_page_with_the_sets_plus(tmp_path, theme, mode):
+    """The "+ New" card draws the theme's surface and the plus in its accent
+    ink, no IconSheet sprite: its centre is the ink, its corner-in the page."""
+    from runtime.launcher_layer import draw_new_art
+    ws = _ws(tmp_path)
+    ws.look.set_theme(theme, persist=False, variant=mode)
+    th = ws.theme_colors
+    cv = ws.sys_canvas
+    cv.rect(0, 0, 140, 140, th["ink"])
+    draw_new_art(cv, th, (4, 4, 128, 128), 12, False, ws.icon_spec())
+
+    def at(x, y):
+        return _pixels(cv, (x, y, 1, 1))[0]
+
+    def word(ci):
+        cv.rect(0, 136, 1, 1, ci)
+        return at(0, 136)
+
+    assert at(68, 68) == word(th["ink_accent"])
+    assert at(30, 30) == word(th["surface"])
+    assert at(68, 30) == word(th["surface"])      # above the plus's arm

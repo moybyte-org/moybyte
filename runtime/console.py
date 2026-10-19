@@ -3292,9 +3292,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         the icon grid."""
         cls = _HOME_CLASSES.get(arrangement, Carousel)
         g = cls(items, self.layout, NAMES, _ui_draw.glyph)
-        # The "+ New" card draws the real themeable IconSheet plus sprite big --
-        # keyed so the sheet's 0-filled backdrop doesn't plate the card.
-        g.icon_for = self._icon_image_keyed
+        # The "+ New" card draws the live icon set's plus (iconsets.plus).
+        g.icon_spec = self.icon_spec
         g.cover_for = self.covers.cover_for
         g.tinted_for = self.covers.tinted
         # The favorite-star badge on the selected card (#105).
