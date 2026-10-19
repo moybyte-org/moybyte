@@ -404,3 +404,21 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     finally:
         ws.look.look_gen += 1          # the next icon_spec puts the tile back
         ws.icon_spec()
+
+
+def test_the_ux_spec_states_one_console_key_per_input():
+    """docs/shell_ux_v1.md section 9a is the console key's rule (owner call,
+    2026-10-18): one key a device keeps, never a cart's -- the T-Deck's Mic at
+    the matrix bit its decoder reads -- with BACKSPACE a plain key and no
+    exit a textmode game must build. The rules it retired stay out of it."""
+    from pathlib import Path
+    from runtime import moy_input as mi
+    doc = (Path(__file__).resolve().parent.parent / "docs" / "shell_ux_v1.md").read_text(
+        encoding="utf-8")
+    at = doc.index("### 9a.")
+    sec = doc[at:doc.index("\n---", at)]
+    for key in ("GUI key", "**Mic**", "Start", "Moy button"):
+        assert key in sec, key
+    assert "d0 bit 6" in sec and mi.decode_raw(bytes([1 << 6, 0, 0, 0, 0]))[0] == ("start",)
+    for retired in ("own** exit", "has none", "hold gesture can", "chord is an owner"):
+        assert retired not in sec, retired

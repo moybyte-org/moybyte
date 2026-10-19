@@ -407,38 +407,35 @@ launcher or Editor.
 
 ### 9a. The console key (owner call, 2026-10-18)
 
-Every device has a single key the console keeps for itself, whatever the input mode,
-and no cart reads it: the GUI key of a BLE or USB keyboard (the simulator's Super, Cmd
-or Meta), Start on a gamepad, the Moy button on touch, and the **Mic key** on the
-T-Deck. They are all the `start` button (`Workstation.system_key`,
-`docs/look_2026-10.md` step 25a), so a tap pauses a fullscreen game and opens the
-system menu from every other surface. The T-Deck's Mic is d0 bit 6 of the raw matrix,
-and `start` in game mode and at a text surface alike; the C3 sends no byte for a bare
-Mic in its ASCII mode, where the key is Shift+Mic
-(`firmware/lilygo_t_deck_plus_mainline/README.md`).
+Every device has one key the console keeps for itself, in every input mode, and no
+cart ever reads it. It is the `start` button (`Workstation.system_key`,
+`docs/look_2026-10.md` step 25a), and each input spells it once:
 
-The second edge is resolved by an additive cart verb: a **`textmode(True)` game**
-receives BACKSPACE as a typed delete (and the T-Deck keyboard has no autorepeat), so
-the console's hold gesture can never fire there — such a cart provides its **own**
-exit by calling **`quit()`** (the one post-freeze addition to `docs/moy_cart_api.md`),
-bound to a spare key or an on-screen affordance; Letter Blitz models it with a
-tap-anytime ✕. (The plan's firmware-independent triple-tap alias was dropped after
-on-device testing — tools/apps keep their bar's back, so no cart is ever
-strandable-but-for-reboot.)
+| input | the console key |
+|---|---|
+| a BLE or USB keyboard | its GUI key (the simulator's Super, Cmd or Meta) |
+| the T-Deck's keyboard | **Mic**: d0 bit 6 of the raw matrix, and in the C3's ASCII mode (which sends no byte for a bare Mic) Shift+Mic (`firmware/lilygo_t_deck_plus_mainline/README.md`) |
+| a gamepad | Start |
+| the browser page | a Meta tap, the page's ☰, and Esc during play (a page rarely sees Super) |
+| touch | the bar's Moy button, where a bar shows |
 
-**The system key (Super)** is the console's from every surface, whatever holds
-the keys (`Workstation.system_key`, docs/look_2026-10.md step 25a): over a
-fullscreen game it opens the **pause menu**, anywhere else the **system menu**
-(the Moy button's, which takes no focus); pressed again it closes the one it
-opened, and **Esc** closes either and steps back (Options to the pause menu,
-the pause menu to the game). Super is a keyboard's GUI key (the `start` button
-on a board, from a BLE or USB keyboard), the host's Super, and the browser's
-Meta tap; in the browser Esc during play is Super too, since a page rarely
-sees that key. The T-Deck's own keyboard has none, and its chord is an owner
-call. The pause menu holds the run — no tick, no draw, its `time()` and its
-music stopped where they are — and offers Resume, Restart (the same cart from
-the top, the same caller), Options (the console's Volume) and Quit (return to
-caller); Resume gives the cart its next frame as if no time passed.
+A tap over a fullscreen game opens the **pause menu**; anywhere else it opens the
+**system menu** (the Moy button's, which takes no focus). Pressed again it closes
+the one it opened, and **Esc** closes either and steps back (Options to the pause
+menu, the pause menu to the game). The pause menu holds the run — no tick, no draw,
+its `time()` and its music stopped where they are — and offers Resume, Restart (the
+same cart from the top, the same caller), Options (the console's Volume) and Quit
+(return to caller); Resume gives the cart its next frame as if no time passed.
+
+Nothing reads a hold of BACKSPACE, an ordinary key on every device and in every
+mode. A **`textmode(True)` game** reaches its pause menu through the console key
+like any other, so it builds no way out for itself; `quit()` stays a cart verb
+(`docs/moy_cart_api.md`), for a cart that ends itself.
+
+A fullscreen game hides the bar and with it the Moy button, so a board whose only
+input is touch has no console key during play. A touch-only exit gesture was
+DECLINED by the owner (`firmware/guition_jc3248w535/README.md`): the way out there is
+a paired keyboard's GUI key; tools and apps keep the bar's back.
 
 ---
 
