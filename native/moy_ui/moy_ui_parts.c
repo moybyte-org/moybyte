@@ -215,7 +215,7 @@ static int ink_top(const pf_t *f) {
     for (int r = 0; r < f->line; r++) {
         memset(px, 0, sizeof(px));
         moy_text_target_t t = {px, 96, 96, 0, r, 0, 0, 96, 1};
-        moy_text(&t, f->id, MOY_TEXT_PY, probe, sizeof(probe) - 1, 0, 0, 0xFFFF, 1,
+        moy_text(&t, f->id, MOY_TEXT_DATA, probe, sizeof(probe) - 1, 0, 0, 0xFFFF, 1,
                  MOY_TEXT_LEFT, -1);
         int ink = 0;
         for (int i = 0; i < 96 && !ink; i++) {
