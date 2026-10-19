@@ -1035,6 +1035,8 @@ _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "new": ("N", "New"), "copy": ("Y", "Copy"),
               "delete": ("X", "Delete"), "sure": ("X", "Sure?")}
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
+# The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
+_LETTER_INPUTS = ("keys", "tdeck")
 _TAB_KEYS = ("tabs", "Tabs")
 _HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
 _MENU_KEYS = ("confirm", "Choose", "back", "Close")   # the strip under the system menu
@@ -2899,15 +2901,31 @@ class LauncherHomeLayer:
 
     def _hint_groups(self):
         """The hint strip's two groups: the active tab's verbs on the
-        selected card, then the tab keys; and the verb of each pair."""
+        selected card, then the tab keys; and the verb of each pair. A
+        keyboard types each verb's letter; another input shows only the
+        verb its confirm does (`launch_selected`), on that key."""
         items = []
         verbs = []
-        for v in self.zone_verbs():
+        zone = self.zone_verbs()
+        tap = None if _ui_draw.input_kind() in _LETTER_INPUTS else self._confirm_verb(zone)
+        for v in zone:
             k, words = _VERB_HINT[v]
+            if tap is not None:
+                if v != tap:
+                    continue
+                k = "confirm"
             items.append(k)
             items.append(words)
             verbs.append(v)
         return items, verbs
+
+    def _confirm_verb(self, zone):
+        """Which of the verbs `zone` the selected card's confirm does: the
+        "+ New" card's NEW, a Make card's CHANGE (it opens in the Editor),
+        else PLAY or OPEN; "" for none."""
+        if self.grid.tab == "make" and "change" in zone:
+            return "change"
+        return zone[0] if zone[:1] in (("play",), ("open",), ("new",)) else ""
 
     def _hint_spans(self, cv):
         """[(verb or "tabs", x0, x1)] across the hint strip, and the strip's

@@ -504,6 +504,36 @@ def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
     assert ws.search_typing
 
 
+@pytest.mark.parametrize("kind", ["keys", "tdeck", "pad"])
+def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkeypatch):
+    """A keyboard types every verb's letter; a gamepad has no C or /, so
+    its strip names only the verb its confirm does, on that key."""
+    from runtime import ui_draw
+
+    ws = _ws_with_carts(tmp_path, 10)
+    home = ws.launcher_layer
+    ws.set_home_tab("games")
+    try:
+        ui_draw.input_kind(kind)
+        items, verbs = home._hint_groups()
+        if kind == "pad":
+            assert (items, verbs) == (["confirm", "Play"], ["play"])
+        else:
+            assert verbs == ["play", "change", "search"]
+            assert items[::2] == ["confirm", "C", "/"]
+        ws.set_home_tab("make")
+        assert home._hint_groups()[1] == ["new"], "the + New card"
+        # a project selected
+        monkeypatch.setattr(home, "zone_verbs", lambda: ("new", "change", "copy", "delete"))
+        items, verbs = home._hint_groups()
+        if kind == "pad":
+            assert (items, verbs) == (["confirm", "Change"], ["change"])
+        else:
+            assert items[::2] == ["N", "C", "Y", "X"]
+    finally:
+        ui_draw.input_kind("keys")
+
+
 def test_the_hint_keys_switch_tabs_and_change(tmp_path):
     from runtime import host_app
 
