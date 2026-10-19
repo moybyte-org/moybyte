@@ -130,3 +130,23 @@ def test_the_sprite_number_sits_between_its_steppers(tmp_path, config, theme, mo
     ink = el._rgb(ws.glass_canvas, ws.theme_colors["ink"])
     seen = {px[oy + y][ox + x] for y in range(ny, ny + nh) for x in range(nx, nx + nw)}
     assert ink in seen
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+def test_the_grid_cursor_is_drawn_for_keys_and_not_for_touch(tmp_path, config):
+    """The grid's cursor is a key's: under touch it is gone (design review
+    R4-19), and a key's move brings it back."""
+    from runtime import ui_draw
+    ws, lay, ox, oy = _open(tmp_path, config, "moy", "light")
+    cv = ws.glass_canvas
+    keyline = el._rgb(cv, ws.look.live.fixed[2])
+    border = el._rgb(cv, ws.theme_colors["border"])
+    ws.paint_layer._cur[:] = [0, 0]
+    # the cursor cell's left line, the grid's own left edge: where it stands
+    # in either layout (touch has no hint band, and so another grid span)
+    y, x = oy + lay.pg_y0 + 3, ox + lay.pg_x0 - 1
+    el._frame(ws)
+    assert el._px(ws)[y][x] == keyline
+    ui_draw.input_kind("touch")
+    el._frame(ws)
+    assert el._px(ws)[y][x] == border

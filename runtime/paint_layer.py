@@ -1115,15 +1115,18 @@ class PaintLayer:
                 cv.rect(gx0 + t * tpx - 1, gy0, 1, span, th["ink_dim"])
                 cv.rect(gx0, gy0 + t * tpx - 1, span, 1, th["ink_dim"])
         self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
-        # The cursor: the theme's ring around a black keyline, on a mat of
-        # `surface` from the keyline to a pixel past the ring's reach, so it
-        # reads on a cell of its own colour.
-        x, y = self._cursor_xy(pe, gx0, gy0, cell)
-        box = (x - 1, y - 1, cell + 1, cell + 1)
-        cv.rectb(box[0], box[1], box[2], box[3], keyline)
-        for o in range(1, _ui_draw.mark_reach("part") + 2):
-            cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o, th["surface"])
-        _ui_draw.focus(cv, th, box, "part", ring=True)
+        # The cursor, under an input with keys (touch shows no focus, and a
+        # d-pad or trackball move brings it back): the theme's ring around
+        # a black keyline, on a mat of `surface` from the keyline to a pixel
+        # past the ring's reach, so it reads on a cell of its own colour.
+        if self._keys():
+            x, y = self._cursor_xy(pe, gx0, gy0, cell)
+            box = (x - 1, y - 1, cell + 1, cell + 1)
+            cv.rectb(box[0], box[1], box[2], box[3], keyline)
+            for o in range(1, _ui_draw.mark_reach("part") + 2):
+                cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o,
+                         th["surface"])
+            _ui_draw.focus(cv, th, box, "part", ring=True)
         # The palette: colour 0 the checker under a white stroke, the
         # colour in use two-toned at its edge -- a line of `ink`, then one of
         # `surface` within -- never a palette colour, so one tone reads
