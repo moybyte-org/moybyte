@@ -867,7 +867,7 @@ def adopt_packages(names, read):
 def package(name):
     """`moy_ui.theme_resolve`'s answer for store package `name`, read once
     per store change: (rc, notes, name, dark, light, fonts, layout, sheets,
-    looks, backdrops). None
+    looks, backdrops, modes). None
     when `name` is no store package. A package whose `name` is not its
     folder's is refused (rc 4, the loader's NAME)."""
     if name not in _PACKAGES:
@@ -877,11 +877,11 @@ def package(name):
         read = _PKG_READ[0]
         src = read(name) if read is not None else None
         if src is None:
-            got = (_ui_draw._C.theme_resolve(b"")[0], 0) + (None,) * 8
+            got = (_ui_draw._C.theme_resolve(b"")[0], 0) + (None,) * 9
         else:
             got = _ui_draw._C.theme_resolve(src)
             if got[0] == 0 and got[2] != name:
-                got = (4, got[1]) + (None,) * 8
+                got = (4, got[1]) + (None,) * 9
         _PACKAGES[name] = got
     return got
 
@@ -913,6 +913,22 @@ def _row(name, light):
         if got is not None and got[0] == 0:
             return got[4 if light else 3][0]
     return _ui_draw._C.theme(name, light)[0]
+
+
+def theme_modes(name):
+    """The modes theme `name` has, of THEME_VARIANTS: the ones its package
+    declares (`"modes"`, docs/theming_2026-09.md §3), both where it is
+    silent."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    bits = None
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            bits = got[10]
+    if bits is None:
+        bits = _ui_draw._C.theme_modes(name)
+    return tuple(v for v in THEME_VARIANTS if bits & (1 << (v == "light")))
 
 
 def theme_colors(name, variant=DEFAULT_VARIANT):

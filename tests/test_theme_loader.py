@@ -128,6 +128,33 @@ def test_a_recolour_inherits_the_rest():
     assert _row("mine2")[0][ROLES.index("panel")] == moy[ROLES.index("panel")]
 
 
+def test_a_theme_declares_its_modes_and_a_silent_one_has_both(tmp_path):
+    """`modes` names the modes a theme has: Blocks declares light alone, a
+    theme silent on them has both, the nearest declaration in a chain
+    decides, and a mode the loader does not know is noted and skipped.
+    Appearance's Mode row reads it through chrome.theme_modes, a store
+    package's from its bytes."""
+    from runtime import chrome
+    light, both = 2, 3
+    assert [moy_ui.theme_modes(s) for s in ("moy", "blocks", "contrast")] == [both, light, both]
+    assert moy_ui.theme_install(_src("mine"))[0] == OK
+    assert moy_ui.theme_modes("mine") == both
+    assert moy_ui.theme_install(_src("mine", inherits="blocks"))[0] == OK
+    assert moy_ui.theme_modes("mine") == light
+    assert moy_ui.theme_install(_src("mine", inherits="blocks", modes=["dark", "light"]))[0] == OK
+    assert moy_ui.theme_modes("mine") == both
+    assert moy_ui.theme_install(_src("mine", modes=["dark", "dusk"])) == (OK, N_UNKNOWN)
+    assert moy_ui.theme_modes("mine") == 1
+    assert moy_ui.theme_resolve(_src("pkg", modes=["light"]))[10] == light
+    assert chrome.theme_modes("blocks") == ("light",)
+    assert chrome.theme_modes("moy") == ("dark", "light")
+    chrome.adopt_packages(["pkg"], lambda n: _src("pkg", modes=["dark"]))
+    try:
+        assert chrome.theme_modes("pkg") == ("dark",)
+    finally:
+        chrome.adopt_packages([], lambda n: None)
+
+
 @pytest.mark.parametrize("src,rc", [
     (b"", SYNTAX),
     (b"[]", SYNTAX),
@@ -715,7 +742,7 @@ def test_a_package_resolved_from_its_bytes_is_its_row_after_install():
         assert moy_ui.theme_installed() == "kept"
         parsed = moy_ui.theme_install(src)
         if got[0] != OK:
-            assert got[2:] == (None,) * 8
+            assert got[2:] == (None,) * 9
             assert got[0] == parsed[0] or (parsed[0] == OK and got[0] == CHAIN
                                            and b"inherits" in src)
         else:

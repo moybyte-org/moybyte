@@ -174,6 +174,10 @@ step 4; format 2, RGB colours and `look`, 2026-10-15 by
 - **`name`** (required): 1 to 24 of `a-z`, `0-9`, `_`, `-`, starting with a
   letter or a digit (the carts repository's theme ids, so a theme made on a
   console can be published). A seed's name is reserved.
+- **`modes`**: the modes the theme has, of `"dark"` and `"light"`; the
+  nearest package of its chain that names them decides, and a theme silent
+  on them has both. Appearance shows a Mode row only for a theme with two
+  (Blocks declares `["light"]`), and `custom` carries its source's.
 - **`inherits`**: one parent, by name (§5). A theme that names none inherits
   the default. A seed's key: a user package is a standalone copy and carries
   none (owner, 2026-10-14).

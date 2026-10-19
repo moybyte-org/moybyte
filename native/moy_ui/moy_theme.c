@@ -2009,6 +2009,32 @@ static int layout_key(rd_t *r, moy_theme_pkg_t *out) {
     }
 }
 
+// `modes`, after its '[': the modes named ("dark", "light"), a name the
+// loader does not know noted and skipped. An empty list is silent.
+static int modes_key(rd_t *r, moy_theme_pkg_t *out) {
+    if (eat(r, ']')) {
+        return 0;
+    }
+    for (;;) {
+        char m[8];
+        int over;
+        if (str(r, m, sizeof(m), &over) < 0) {
+            return -1;
+        }
+        if (!over && strcmp(m, "dark") == 0) {
+            out->modes |= MOY_THEME_MODE_DARK;
+        } else if (!over && strcmp(m, "light") == 0) {
+            out->modes |= MOY_THEME_MODE_LIGHT;
+        } else {
+            out->notes |= MOY_THEME_N_UNKNOWN;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        return eat(r, ']') ? 0 : -1;
+    }
+}
+
 static int reserved(const char *key) {
     for (int i = 0; i < MOY_THEME_RESERVED; i++) {
         if (strcmp(moy_theme_reserved[i], key) == 0) {
@@ -2087,6 +2113,8 @@ int moy_theme_parse(const uint8_t *src, size_t n, moy_theme_pkg_t *out) {
                 kind = fonts_key(&r, out);
             } else if (strcmp(key, "layout") == 0 && eat(&r, '{')) {
                 kind = layout_key(&r, out);
+            } else if (strcmp(key, "modes") == 0 && eat(&r, '[')) {
+                kind = modes_key(&r, out);
             } else if (sheet_of(key) >= 0) {
                 kind = sheet_key(&r, out, sheet_of(key));
             } else {
@@ -3128,6 +3156,21 @@ int moy_theme_look_frames(const char *name, size_t n) {
     return chain(name, n, apply_frames, &c) == MOY_THEME_OK && c.frames;
 }
 
+static void apply_modes(const moy_theme_pkg_t *pkg, void *ctx) {
+    int *m = ctx;
+    if (*m == 0) {
+        *m = pkg->modes;
+    }
+}
+
+int moy_theme_modes(const char *name, size_t n) {
+    int m = 0;
+    if (chain(name, n, apply_modes, &m) != MOY_THEME_OK || m == 0) {
+        return MOY_THEME_MODES_BOTH;
+    }
+    return m;
+}
+
 // -- accent and tint: every colour role derived (docs/theming_2026-09.md §4.10) ----
 
 int moy_theme_reads(int32_t a, int32_t b) {
@@ -3416,6 +3459,9 @@ static void apply_flat(const moy_theme_pkg_t *pkg, void *ctx) {
     moy_theme_pkg_t *f = c->flat;
     if (c->depth++ > 0 && strcmp(pkg->name, moy_theme_seed_names[0]) == 0) {
         return;
+    }
+    if (f->modes == 0) {
+        f->modes = pkg->modes;
     }
     for (int i = 0; i < MOY_THEME_METRICS; i++) {
         if (f->metric[i] == MOY_THEME_NO_METRIC) {
@@ -4054,6 +4100,10 @@ static void put_custom(wr_t *w, const moy_theme_pkg_t *f, const int32_t rows[2][
     put_int(w, MOY_THEME_FORMAT);
     put_s(w, ",\"name\":");
     put_str(w, MOY_THEME_CUSTOM);
+    if (f->modes != 0 && f->modes != MOY_THEME_MODES_BOTH) {
+        put_s(w, f->modes == MOY_THEME_MODE_LIGHT ? ",\"modes\":[\"light\"]"
+                                                  : ",\"modes\":[\"dark\"]");
+    }
     int colors = 0;
     for (int v = 0; v < 2; v++) {
         int first = 1;

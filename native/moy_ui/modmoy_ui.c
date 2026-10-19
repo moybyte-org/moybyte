@@ -98,6 +98,14 @@ static mp_obj_t ui_theme(mp_obj_t name, mp_obj_t light) {
                        mp_obj_new_int_from_uint(bad), MP_OBJ_NEW_SMALL_INT(rc)};
     return mp_obj_new_tuple(3, out);
 }
+
+// theme_modes(name) -> the MOY_THEME_MODE_* bits theme `name` has
+static mp_obj_t ui_theme_modes(mp_obj_t name) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_theme_modes(s, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_modes_obj, ui_theme_modes);
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_obj, ui_theme);
 
 static mp_obj_t name_obj(const char *s) {
@@ -400,13 +408,14 @@ static mp_obj_t ui_theme_home(mp_obj_t name) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_home_obj, ui_theme_home);
 
 // theme_resolve(src) -> (rc, notes, name, dark, light, fonts, layout, sheets,
-// looks, backdrops): a stored package resolved from its bytes without
+// looks, backdrops, modes): a stored package resolved from its bytes without
 // installing it (moy_theme_probe). dark and light are theme()'s answers, fonts
 // the package's OWN (role, file) pairs (its folder provides them), layout
 // (refused, bars, home) as theme_layout and theme_home answer, sheets the
 // package's OWN (sprites, icons) files, None where it names none, looks
 // theme_look's (dark, light) and backdrops theme_backdrop's ((dark home, dark
-// desk), (light home, light desk)). On a refusal every field after notes is None.
+// desk), (light home, light desk)), modes theme_modes'. On a refusal every
+// field after notes is None.
 // -- the look and RGB (docs/look_2026-10.md step 5) ---------------------------
 
 static mp_obj_t ints(const int32_t *v, int n) {
@@ -583,9 +592,10 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     moy_theme_pkg_t *pkg = m_new(moy_theme_pkg_t, 1);
     uint8_t notes = 0;
     int rc = moy_theme_probe(b.buf, b.len, pkg, &notes);
-    mp_obj_t out[10] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
+    mp_obj_t out[11] = {MP_OBJ_NEW_SMALL_INT(rc), MP_OBJ_NEW_SMALL_INT(notes),
                         mp_const_none, mp_const_none, mp_const_none, mp_const_none,
-                        mp_const_none, mp_const_none, mp_const_none, mp_const_none};
+                        mp_const_none, mp_const_none, mp_const_none, mp_const_none,
+                        mp_const_none};
     if (rc == MOY_THEME_OK) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
@@ -626,6 +636,7 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
                 bd[v] = mp_obj_new_tuple(MOY_THEME_BD_SURFACES, sf);
             }
             out[9] = mp_obj_new_tuple(2, bd);
+            out[10] = ui_theme_modes(name);
             nlr_pop();
         } else {
             moy_theme_probe_end();
@@ -635,7 +646,7 @@ static mp_obj_t ui_theme_resolve(mp_obj_t src) {
     }
     moy_theme_probe_end();
     m_del(moy_theme_pkg_t, pkg, 1);
-    return mp_obj_new_tuple(10, out);
+    return mp_obj_new_tuple(11, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_theme_resolve_obj, ui_theme_resolve);
 
@@ -2478,6 +2489,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_button_kind), MP_ROM_PTR(&ui_button_kind_obj) },
     { MP_ROM_QSTR(MP_QSTR_themes), MP_ROM_PTR(&ui_themes_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme), MP_ROM_PTR(&ui_theme_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_modes), MP_ROM_PTR(&ui_theme_modes_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_roles), MP_ROM_PTR(&ui_theme_roles_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_shape), MP_ROM_PTR(&ui_theme_shape_obj) },
     { MP_ROM_QSTR(MP_QSTR_surface), MP_ROM_PTR(&ui_surface_obj) },

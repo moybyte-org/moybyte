@@ -1,6 +1,7 @@
 {
   "format": 2,
   "name": "blocks",
+  "modes": ["light"],
   "fonts": { "mono": "jbmono-11-400-2.fnt" },
   "colors": {
     "dark": {

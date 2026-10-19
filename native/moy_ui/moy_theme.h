@@ -91,6 +91,10 @@ enum {
 #define MOY_THEME_NO_ROLE 0xff
 
 enum { MOY_THEME_DARK = 0, MOY_THEME_LIGHT = 1 };
+// The modes a theme declares (`"modes": ["dark", "light"]`), a bit a mode;
+// a theme silent on them has both.
+enum { MOY_THEME_MODE_DARK = 1 << MOY_THEME_DARK, MOY_THEME_MODE_LIGHT = 1 << MOY_THEME_LIGHT,
+       MOY_THEME_MODES_BOTH = MOY_THEME_MODE_DARK | MOY_THEME_MODE_LIGHT };
 
 // A layout's state: no `bars` (it inherits), bars, or bars the required-set
 // rule refused (the default's stand in at resolve).
@@ -186,6 +190,7 @@ typedef struct {
     char font[MOY_THEME_FONT_ROLES][MOY_THEME_NAME_MAX + 1];  // a file per role, "" where silent
     char sheet[MOY_THEME_SHEETS][MOY_THEME_NAME_MAX + 1];     // a .moygfx file, "" where silent
     moy_theme_layout_t layout;
+    uint8_t modes;                          // MOY_THEME_MODE_* it declares, 0 where silent
     uint8_t notes;
 } moy_theme_pkg_t;
 
@@ -238,6 +243,11 @@ extern const int moy_theme_look_dims[10];
 // step 6): the nearest package of its chain that carries a `look` or names a
 // frame style carries a look and names none.
 int moy_theme_look_frames(const char *name, size_t n);
+
+// The modes theme `name` has (MOY_THEME_MODE_*): the nearest package of its
+// chain that declares them decides, and a chain silent on them (or a name
+// that does not resolve) has both.
+int moy_theme_modes(const char *name, size_t n);
 
 // -- RGB (docs/look_2026-10.md step 5) ------------------------------------------
 //

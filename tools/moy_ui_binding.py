@@ -33,6 +33,7 @@ _SIGS = (
     ("moy_ui_button_kind", [_P, _Z], _I),
     ("moy_ui_state", [_P, _Z], _I),
     ("moy_theme_resolve", [_P, _Z, _I, c.c_void_p, c.POINTER(c.c_uint32)], _I),
+    ("moy_theme_modes", [_P, _Z], _I),
     ("moy_theme_install", [_P, _Z, c.POINTER(c.c_uint8)], _I),
     ("moy_theme_shape", [_P, _Z, c.c_void_p], _I),
     ("moy_theme_surface", [_P, _Z, c.c_void_p, c.POINTER(c.c_uint8)], _I),
@@ -1229,6 +1230,10 @@ def binding():
         rc = lib.moy_theme_resolve(b, len(b), 1 if light else 0, row, c.byref(bad))
         return tuple(row), bad.value, rc
 
+    def theme_modes(name):
+        b = _b(name)
+        return int(lib.moy_theme_modes(b, len(b)))
+
     def theme_install(src):
         b = bytes(src)
         notes = c.c_uint8()
@@ -1398,7 +1403,7 @@ def binding():
         notes = c.c_uint8()
         rc = lib.moy_theme_probe(b, len(b), buf, c.byref(notes))
         if rc != OK:
-            return (rc, notes.value, None, None, None, None, None, None, None, None)
+            return (rc, notes.value, None, None, None, None, None, None, None, None, None)
         try:
             name = lib.moy_theme_probe_name().decode()
             fonts = tuple((r, lib.moy_theme_probe_font(i).decode())
@@ -1411,7 +1416,8 @@ def binding():
                     fonts, theme_layout(name) + (theme_home(name),), sheets,
                     (theme_look(name, False), theme_look(name, True)),
                     tuple(tuple(theme_backdrop(name, lt, s) for s in bd_surfaces)
-                          for lt in (False, True)))
+                          for lt in (False, True)),
+                    theme_modes(name))
         finally:
             lib.moy_theme_probe_end()
 
@@ -1492,6 +1498,7 @@ def binding():
         return (fid, out[0], out[2], out[3])
 
     m.theme = theme
+    m.theme_modes = theme_modes
     m.theme_install = theme_install
     m.theme_installed = theme_installed
     m.theme_resolve = theme_resolve

@@ -45,11 +45,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import BUILTIN_NS, builtin_name
 
 try:
-    from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look,
+    from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look, theme_modes,
                         theme_names, theme_presets, theme_tints, RGB, PAINT, LOOK_NONE,
                         rgb565_of, nearest_of)
 except ImportError:  # pragma: no cover - direct host import
     from runtime.chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look,
+                                theme_modes,
                                 theme_names, theme_presets, theme_tints, RGB, PAINT,
                                 LOOK_NONE, rgb565_of, nearest_of)
 
@@ -91,8 +92,6 @@ NAME_HINT = "a-z 0-9 _ -, up to 24"
 NAME_MAX = 24
 # The type roles a card's "Aa" tries, largest first (`_aa`).
 _AA_FACES = ("result", "key", "title")
-# The roles a theme's second mode changes (`_single_mode`).
-_MODE_ROLES = ("desktop", "surface", "panel", "ink", "bar", "accent")
 # The hints by the focused stop's kind.
 _STEP = ("change", "Change")
 _OPEN = ("confirm", "Open")
@@ -317,16 +316,13 @@ class AppearanceAppLayer:
         """A theme's modes, light first, as its Mode row names them: one for
         a single-mode theme (`_single_mode`), which shows no Mode row."""
         if self._single_mode(name):
-            return ("Light",) if theme_colors(name, "light")["surface_light"] else ("Dark",)
+            return ("Light",) if theme_modes(name) == ("light",) else ("Dark",)
         return ("Day", "Night") if name == "moy" else ("Light", "Dark")
 
     @staticmethod
     def _single_mode(name):
-        """True for a theme whose dark copies its light: the two resolved
-        rows agree on the ground, the surfaces, the ink and the accent,
-        which any second mode changes."""
-        a, b = theme_colors(name, "light"), theme_colors(name, "dark")
-        return all(a[r] == b[r] for r in _MODE_ROLES)
+        """True for a theme that declares one mode (its `modes`)."""
+        return len(theme_modes(name)) == 1
 
     def _status(self, ch):
         """The desk's foot: the theme, its mode and where it comes from."""

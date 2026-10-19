@@ -795,6 +795,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "{\012"
     "  \"format\": 2,\012"
     "  \"name\": \"moy\",\012"
+    "  \"modes\": [\"dark\", \"light\"],\012"
     "  \"fonts\": { \"mono\": \"jbmono-11-400-2.fnt\" },\012"
     "  \"metrics\": { \"radius\": 0, \"press_dx\": 0, \"press_dy\": 0 },\012"
     "  \"colors\": {\012"
@@ -882,6 +883,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "{\012"
     "  \"format\": 2,\012"
     "  \"name\": \"blocks\",\012"
+    "  \"modes\": [\"light\"],\012"
     "  \"fonts\": { \"mono\": \"jbmono-11-400-2.fnt\" },\012"
     "  \"colors\": {\012"
     "    \"dark\": {\012"
@@ -956,6 +958,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "{\012"
     "  \"format\": 2,\012"
     "  \"name\": \"contrast\",\012"
+    "  \"modes\": [\"dark\", \"light\"],\012"
     "  \"fonts\": { \"mono\": \"jbmono-11-400-2.fnt\" },\012"
     "  \"colors\": { \"dark\": {\012"
     "    \"panel\": \"#000000\", \"edge\": \"#ffffff\", \"title\": \"#ffffff\", \"title_ink\": \"#000000\",\012"
@@ -1035,7 +1038,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4939, 4273, 4093};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {4969, 4295, 4123};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
