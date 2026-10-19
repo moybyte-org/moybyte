@@ -263,10 +263,11 @@ def _star_runs(side):
 def _draw_star_badge(cv, names, th, rect, on):
     """The favourite star's corner badge (#105): a round chip on the
     theme's surface holding a five-pointed star, gold inside an orange edge
-    when `on`, its edge alone in the dim ink when not."""
+    when `on`, its edge alone in the dim ink when not. The chip's rim is the
+    dim ink too, so it holds on a cover as dark as the chip."""
     x, y, side, _h = rect
     cv.rrect(x, y, side, side, side // 2, th.get("surface", names["white"]),
-             ring=th.get("border", names["light_grey"]))
+             ring=th.get("ink_dim", names["light_grey"]))
     edge, inner = _star_runs(side)
     if on:
         gold = names["yellow"]

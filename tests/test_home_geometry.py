@@ -194,3 +194,24 @@ def test_the_desk_homes_play_draws_the_icon_sets_play(tmp_path, monkeypatch, the
     monkeypatch.setattr(ws, "draw_icon", draw_icon)
     _frame(ws, 1)
     assert "play" in kinds, "the details pane's Play drew the pixel triangle"
+
+
+class _Rec:
+    def __init__(self):
+        self.rings = []
+
+    def rrect(self, x, y, w, h, r, fill, ring=None, **kw):
+        self.rings.append(ring)
+
+    def rect(self, *a):
+        pass
+
+
+def test_the_star_badges_rim_is_the_dim_ink():
+    """The favourite badge's chip has a rim that holds on a cover as dark as
+    the chip (R2-23)."""
+    th = {"surface": 3, "border": 3, "ink_dim": 9}
+    cv = _Rec()
+    launcher_layer._draw_star_badge(cv, {"white": 7, "light_grey": 6, "yellow": 10,
+                                         "orange": 9}, th, (0, 0, 15, 15), False)
+    assert cv.rings == [9], "the chip's rim must hold on a cover as dark as the chip"
